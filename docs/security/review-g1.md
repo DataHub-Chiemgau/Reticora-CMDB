@@ -64,9 +64,11 @@ Befunden SR-01 bis SR-11 ist kein High und kein Critical mehr offen; SR-02 ist
 mit WP-332 bis WP-334 behoben. Das Ausstiegskriterium „keine offenen
 High/Critical“ ist erst mit dem Pentest-Nachweis (WP-210, B3) erfüllt.
 
-Für GATE-03 stehen außerdem die Anerkennung der Referenzumgebung des
-Lasttests (E-58, SR-06) und ein grüner `load.yml`-Lauf auf dem
-Release-Kandidaten aus. G1 ist weiter nicht bestanden: Offen sind B3
+Für GATE-03 steht außerdem die Anerkennung der Referenzumgebung des
+Lasttests aus (E-58, SR-06). Den Lasttest belegen der lokale Nachweislauf auf
+Commit `dbbfded` und der grüne `load.yml`-Lauf 38665599979 auf Commit
+`918a832`; nach dem Merge wiederholt der nächtliche Lauf ihn auf dem
+Release-Kandidaten. G1 ist weiter nicht bestanden: Offen sind B3
 (Pentest), B4 (v2-Texte) und B6 (Subprozessorenliste, NFR-09). B5 (E-17) ist
 ebenfalls offen; gemessen ist mit 10.000 Objekten
 (`docs/acceptance/g1-gate.md`).
@@ -95,9 +97,10 @@ Die vollständige Liste steht im Anhang.
 NFR-02, NFR-03 und NFR-10 verfehlte der Erstlauf des Lasttests (WP-206;
 SR-02, SR-05). Der Plan ordnet ihnen und ABN-02 zusätzlich die
 G1-Nachbesserung zu (WP-332 bis WP-335); der Anhang führt sie mit diesen WPs.
-Der Wiederholungslauf auf Commit `dbbfded` belegt sie
+Der Wiederholungslauf auf Commit `dbbfded` belegt sie, der grüne
+`load.yml`-Lauf 38665599979 auf Commit `918a832` bestätigt sie
 (`docs/acceptance/lasttest-g1.md`). Die Anerkennung der Referenzumgebung
-(E-58) und ein grüner `load.yml`-Lauf auf dem Release-Kandidaten stehen aus.
+(E-58) steht aus.
 
 ## Scanergebnisse (SEC-11, E-31)
 
@@ -147,7 +150,7 @@ im CI-Lauf des Release-Kandidaten erneut; dieser Lauf steht aus.
 | SR-09 | Low | offen | `max_cis` (ENT-03) hat mit Spuren zwei kleine Überschreitungsfenster. `AdoptUnlicensed` (Anlage offener `unlicensed_ci`-Einträge, wenn das Limit steigt) nimmt die `max_cis`-Sperre nicht und kann gleichzeitig mit dem Ingest anlegen (vorbestehend). Drain-Spuren nach dem Verringern der Spurzahl können das Limit je um höchstens 100 überschreiten. | Folge-WP: `AdoptUnlicensed` nimmt die `max_cis`-Sperre der Organisation und zählt in der Transaktion neu wie der Ingest (WP-334). Drain-Spuren sind in `docs/betrieb/ingest-spuren.md` beschrieben. |
 | SR-10 | Low | offen | Ein Record mit mehr als 256 Identitätsschlüsseln (Stack oder Chassis mit vielen Port-MACs, Record mit Tausenden MACs) nimmt die Identitätssperre seiner Organisation exklusiv. Für die Dauer seiner Transaktion warten alle sperrenden Ingest-Transaktionen dieser Organisation. Andere Organisationen warten nur, soweit ihre Records im selben Spur-Batch dahinter stehen. Der DeviceRecord-Vertrag begrenzt die Zahl der MACs und Interfaces nicht. Die Lock-Tabelle des Clusters bleibt geschützt (Abschnitt „G1-Nachbesserung“). | Folge-WP: Obergrenze für MACs und Interfaces je Record (Änderung des DeviceRecord-Vertrags, API-01) oder konfigurierbare Sperrgrenze. |
 | SR-11 | Low | offen | Vorbestehend (schon auf `02ebb76`, nicht durch die G1-Nachbesserung), gefunden im Gesamtreview: Der Indexing-Decorator des CI-Repositorys (`ci.NewIndexingRepository`, `backend/internal/ci/indexing_repository.go`) reicht die optionalen Schnittstellen `Restore` und `UniqueConflicts` nicht durch. `main.go` legt ihn in der Produktion immer um das CI-Repository. Folgen: Das Auflösen eines Reviews `resurrected_device` mit `merge` antwortet in der Produktion 501 („this repository cannot reactivate CIs“); „reaktivieren“ aus CI-13 ist damit in der Produktionsverdrahtung nicht nutzbar. `resurrect_test.go` nutzt das Repository ohne Decorator und sieht das nicht. Die Vorabprüfung eindeutiger Attribute (MET-15) entfällt; den Konflikt fängt nur der Unique-Index der Datenbank (DB-04). Mandantentrennung und Eindeutigkeit bleiben gewahrt; das Wiederherstellen per `POST /cis/{id}/restore` (CI-05) ist nicht betroffen. | Folge-WP außerhalb der G1-Nachbesserung: `Restore` (weiterreichen und neu indizieren) und `UniqueConflicts` (weiterreichen) im Decorator ergänzen; ein Test baut die Kette aus `main.go` (PostgreSQL, Such- und KI-Decorator) und prüft jede optionale Schnittstelle, die Aufrufer erwarten (`ciRestorer`, `UniqueChecker`, `BatchCreator`, `NodeReader`, `BatchReader`, `TypeChanger`, `Merger`, `Restorer`). |
-| SR-06 | Info | offen | Der Lasttest lief nicht auf einem dedizierten Referenzhost. Auch der Wiederholungslauf auf Commit `dbbfded` lief auf einem Host mit 4 vCPU und 15 GB RAM, den sich PostgreSQL, NATS, Redis, Server und k6 teilten (Größenklasse des Mindestsizings nach INS-07). | E-58 (offen, Aufgabe A-14): Der Auftraggeber entscheidet mit dem Product Owner, ob dieser Lauf als G1-Nachweis für GATE-03 gilt. Empfohlen ist die Anerkennung mit Auflagen, darunter mindestens ein grüner `load.yml`-Lauf auf dem Commit des Release-Kandidaten (steht aus). Seit `458a96d` läuft jedes Szenario in `load.yml` als eigener Job mit frischem Seed und `ANALYZE`. Der Standard-Runner war im letzten Lauf etwa halb so schnell wie der Nachweishost; ob der Lauf grün wird, ist offen (Wiederholung angestoßen, `docs/acceptance/lasttest-g1.md`). Nächtlicher Lauf `load.yml`; dedizierter Referenzhost vor GA. |
+| SR-06 | Info | offen | Der Lasttest lief nicht auf einem dedizierten Referenzhost. Auch der Wiederholungslauf auf Commit `dbbfded` lief auf einem Host mit 4 vCPU und 15 GB RAM, den sich PostgreSQL, NATS, Redis, Server und k6 teilten (Größenklasse des Mindestsizings nach INS-07). | E-58 (offen, Aufgabe A-14): Der Auftraggeber entscheidet mit dem Product Owner, ob dieser Lauf als G1-Nachweis für GATE-03 gilt. Empfohlen ist die Anerkennung mit Auflagen, darunter mindestens ein grüner `load.yml`-Lauf auf dem Commit des Release-Kandidaten. Diese Auflage ist für Commit `918a832` erfüllt: Seit `458a96d` läuft jedes Szenario in `load.yml` als eigener Job mit frischem Seed und `ANALYZE`, und Run 38665599979 auf dem Standard-Runner `ubuntu-latest` (4 CPUs, 15,61 GB RAM) hält alle Schwellen ein, zweiter Nachweis neben dem lokalen Lauf (`docs/acceptance/lasttest-g1.md`). Bis zur Entscheidung bleibt SR-06 offen. Nächtlicher Lauf `load.yml`, nach dem Merge auf dem Release-Kandidaten; dedizierter Referenzhost vor GA. |
 
 ## G1-Nachbesserung (WP-332 bis WP-335)
 
@@ -222,9 +225,9 @@ nachgetragen:
   ließ eine einzelne abgelehnte Anfrage durch. Behoben in `458a96d`: ein Job
   je Szenario mit frischem Seed und `ANALYZE`, Schwellen
   `http_req_failed{name:ingest}` und `http_req_failed{name:spool}` = 0;
-  `f354c5a` nennt im Spool-Log das Alter der Stichprobe. Offen bleibt, ob der
-  Standard-Runner von GitHub den Lauf trägt (E-58,
-  `docs/acceptance/lasttest-g1.md`).
+  `f354c5a` nennt im Spool-Log das Alter der Stichprobe. Der Standard-Runner
+  von GitHub trägt den Lauf: Run 38665599979 auf Commit `918a832` ist grün
+  (`docs/acceptance/lasttest-g1.md`).
 - **Betriebsdoku:** Der Altconsumer `reticora-ingest` bleibt dauerhaft; die
   beschriebene Entfernung wirkte nicht, weil der Server ihn wieder anlegt.
   Die Lock-Tabelle ist nach einer Formel zu bemessen, die das HPA-Maximum
@@ -280,9 +283,12 @@ nachgetragen:
   Typecheck des Frontends. Die neuen Tests scheitern gegen den Code vor der
   Korrektur (Gegenproben). Kontrollmessung `spool`: 4 Spuren 232–255
   Records/s, 1 Spur mit Sperren 177 Records/s, kein fehlender Record.
+- Lastlauf auf GitHub: `load.yml` auf Commit `918a832` (Run 38665599979)
+  ist grün, alle k6-Schwellen eingehalten; damit ist die Auflage von E-58
+  für diesen Commit erfüllt. Nach dem Merge wiederholt der nächtliche Lauf
+  ihn auf dem Release-Kandidaten.
 - Ausstehend: CI-Lauf auf dem Release-Kandidaten (mit den Scan-Jobs und
-  `TestMigrationsRoundtrip`) und ein grüner `load.yml`-Lauf auf dessen Commit
-  (Auflage von E-58).
+  `TestMigrationsRoundtrip`).
 
 ## Externer Pentest
 

@@ -9,8 +9,9 @@ G1) belegt das. Danach kamen zwei Korrekturen aus dem Gesamtreview hinzu
 (`58863fa`, `dea65b7`) und am 2026-10-15 die Nachträge zu seinen nicht
 blockierenden Befunden (`3f2bfd5`, `458a96d`, `111bdc4`, `f354c5a`,
 `0f165cc`). Kontrollmessungen auf beiden Ständen bestätigen die Werte
-(Abschnitt „Ergebnis NFR-03“). Der Erstlauf steht unten als historischer
-Abschnitt.
+(Abschnitt „Ergebnis NFR-03“). Auf GitHub hält der Workflow `load.yml` auf
+Commit `918a832` alle Schwellen ein (Abschnitt „GitHub-Lauf“). Der Erstlauf
+steht unten als historischer Abschnitt.
 
 Die Szenarien, ihre Schwellen und der Ablauf stehen in
 `tests/load/README.md`. Der Workflow `.github/workflows/load.yml` wiederholt
@@ -47,21 +48,15 @@ legt seine k6-Zusammenfassung als eigenes Artefakt ab (`load-results-api`,
   - NFR-02 auf frischem Seed vor dem Ingest gemessen
   - alle Schwellen eingehalten
   - mindestens ein grüner `load.yml`-Lauf auf dem Commit des
-    Release-Kandidaten (steht aus)
+    Release-Kandidaten (für Commit `918a832` erfüllt, Abschnitt
+    „GitHub-Lauf“; nach dem Merge wiederholt ihn der nächtliche Lauf auf
+    `main`)
   - dedizierter Referenzhost vor GA (SR-06)
 
-  **GitHub-Runner:** Der letzte `load.yml`-Lauf (Run 38514977761 auf Commit
-  `fa76b16`, dem Vorgänger von `02ebb76` mit identischem `backend/` und
-  `tests/load/`) lief auf dem Standard-Runner `ubuntu-latest` mit 4 vCPU. Er
-  maß 38,47 Records/s und eine Verzögerung von 4 min 11 s. Der Nachweishost
-  maß auf demselben Code 74 Records/s und 102 s (Basis, Abschnitt
-  „Budgetkorrekturen der G1-Nachbesserung“). Der Standard-Runner ist damit
-  etwa halb so schnell. Bei demselben Abstand bliebe das Szenario `spool`
-  (lokal 233 Records/s) unter seiner Schwelle von 200 Records/s; ein grüner
-  `load.yml`-Lauf auf dem Release-Kandidaten ist also nicht gesichert. Die
-  Wiederholung auf GitHub auf dem Stand der Nachbesserung ist angestoßen,
-  ihr Ergebnis steht aus. Bleibt sie rot, ist diese Auflage von E-58 neu zu
-  fassen, etwa mit einem größeren Runner oder dem Lauf auf dem Referenzhost.
+  **GitHub-Runner:** Der Workflow `load.yml` lief auf dem Standard-Runner
+  `ubuntu-latest` (4 CPUs) grün; alle k6-Schwellen sind eingehalten
+  (Abschnitt „GitHub-Lauf (Run 38665599979, Commit `918a832`)“). Damit
+  halten zwei unabhängige Umgebungen mit 4 vCPU jede Schwelle ein.
 
 ## Wiederholungslauf (Commit `dbbfded`)
 
@@ -77,9 +72,9 @@ legt seine k6-Zusammenfassung als eigenes Artefakt ab (`load-results-api`,
 | Ergebnis | Mit 4 Spuren alle Schwellen eingehalten. Mit 1 Spur verfehlt nur das Szenario `spool` die Abbau-Rate. |
 
 Die k6-Zusammenfassungen und Serverlogs dieses lokalen Laufs sind nicht
-versioniert; die Werte unten stammen aus ihnen. Als Artefakt archiviert
-werden die Ergebnisse des `load.yml`-Laufs auf dem Release-Kandidaten (steht
-aus, siehe „Bewertung für G1“).
+versioniert; die Werte unten stammen aus ihnen. Als Artefakt archiviert sind
+die k6-Zusammenfassungen des GitHub-Laufs (Abschnitt „GitHub-Lauf“,
+aufbewahrt bis 2027-01-13).
 
 ## Ergebnis NFR-02 (p95, 60 s, 10.000 Objekte)
 
@@ -205,6 +200,63 @@ Organisation.
   Spur allein: Records eines Geräts mit verschiedenen stärksten Schlüsseln
   können in verschiedenen Spuren laufen. Sperrform und Wartegrenze stehen in
   `docs/betrieb/ingest-spuren.md`.
+
+## GitHub-Lauf (Run 38665599979, Commit `918a832`)
+
+Der Workflow `load.yml` lief am 2026-10-15 auf GitHub, manuell gestartet auf
+dem Branch der G1-Nachbesserung.
+
+| Punkt | Wert |
+|---|---|
+| Lauf | GitHub Actions, [Run 38665599979](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38665599979) (`workflow_dispatch`) |
+| Commit | `918a832`: Code-Stand der G1-Nachbesserung mit allen Nachträgen; spätere Commits ändern nur Dokumentation |
+| Eingaben | `objects` = 10000, `duration` = 2m |
+| Runner | `ubuntu-latest`, 4 CPUs, 15,61 GB RAM |
+| Komponenten | PostgreSQL mit TimescaleDB (Image `timescale/timescaledb:2.17.2-pg16`, mit `timescaledb-tune` eingestellt), NATS, Redis, Server und k6 auf demselben Runner |
+| Ablauf | je Szenario ein eigener Job mit frischer Datenbank, Seed (`cmd/seed -objects 10000`) und `ANALYZE`; Server mit 4 Spuren (Standard) und angehobenem Rate-Limit |
+| Ergebnis | alle drei Jobs grün, alle k6-Schwellen eingehalten |
+| Artefakte | k6-Zusammenfassungen in `load-results-api`, `load-results-ingest` und `load-results-ingest-spool`, aufbewahrt bis 2027-01-13 |
+
+| Job | Messgröße | Ergebnis | Budget |
+|---|---|---:|---:|
+| `api` (`api.js`, 2 min, alle Szenarien parallel) | Listen p95 | 311 ms | < 500 ms |
+| | Suche p95 | 246 ms | < 500 ms |
+| | Indizierte Attributfilter p95 | 87 ms | < 500 ms |
+| | CI-Detail p95 | 55 ms | < 300 ms |
+| | Rack-Layout p95 | 72 ms | < 300 ms |
+| | Topologie 2.000 Knoten p95 | 460 ms | < 3 s |
+| | Impact Tiefe 20 (kompakt, Oberfläche) p95 | 852 ms | < 2 s |
+| | Impact Tiefe 20 (Standardform mit Pfaden) p95 | 882 ms | < 2 s |
+| | Bulk 500 IDs p95 | 8,4 s | < 30 s |
+| | Checks | 12.549 von 12.549, 0 fehlgeschlagene Anfragen | – |
+| `ingest` (`ingest.js`, Szenario `load`: 200 Records/s für 60 s) | angenommen / fehlend | 12.000 / 0 | 0 fehlend |
+| | Verzögerung Record → sichtbar (max / p95 der Proben) | 1,84 s / 1,68 s | < 30 s |
+| | `POST /ingest/bulk` p95 | 25,6 ms | – |
+| | Rückstand max. (`/readyz`, 30-s-Stichprobe) | 212 | – |
+| `ingest-spool` (`ingest.js`, Szenario `spool`: 10.000 Records) | Spool-Flush (erstes Senden bis alles sichtbar) | 15,1 s | < 5 min |
+| | Abbau ab Sendeende / inklusive Senden | 798 / 663 Records/s | ≥ 200/s |
+| | fehlende Records | 0 | 0 |
+
+- **Ingest schneller als auf dem Nachweishost:** Mit dem Batch-Schreibpfad
+  ist der Standard-Runner beim Ingest schneller als der lokale Nachweishost
+  (Abbau ab Sendeende 798 statt 233 Records/s, Spool-Flush 15,1 statt
+  35,9 s, Verzögerung höchstens 1,84 statt 3,1 s). Vor der G1-Nachbesserung
+  war es umgekehrt: Der alte Code war von den Commits je Record (fsync)
+  bestimmt, und dabei erreichte der Runner nur etwa die Hälfte des
+  Nachweishosts. Der letzte `load.yml`-Lauf auf diesem Code (Run 38514977761
+  auf Commit `fa76b16`, dem Vorgänger von `02ebb76` mit identischem
+  `backend/` und `tests/load/`) maß 38,47 Records/s und eine Verzögerung von
+  4 min 11 s; der Nachweishost maß auf demselben Code 74 Records/s und 102 s
+  (Basis, Abschnitt „Budgetkorrekturen der G1-Nachbesserung“). Die daraus
+  abgeleitete Sorge, der Standard-Runner trage den Lauf nicht, ist mit
+  diesem Lauf erledigt.
+- **Lesepfade:** Die p95-Werte von `api.js` liegen über denen des lokalen
+  Laufs (der Lauf dauerte 2 min statt 60 s), alle unter ihrem Budget.
+- **Auflage von E-58:** Die Auflage „mindestens ein grüner `load.yml`-Lauf“
+  ist für Commit `918a832` erfüllt. Nach dem Merge auf `main` wiederholt der
+  nächtliche Lauf von `load.yml` den Nachweis auf dem Release-Kandidaten.
+  Offen bleibt die Entscheidung E-58 selbst: Ob die Referenzumgebung als
+  G1-Nachweis gilt, entscheidet der Auftraggeber (Aufgabe A-14).
 
 ## Verbleibende Grenze: Audit-/Outbox-Sperrabschnitt
 
@@ -378,20 +430,19 @@ einmal je Statement (`TestRecordDiscoveredBatchReadsCIsOnce`).
 
 ## Bewertung für G1
 
-- **NFR-02:** erfüllt im Wiederholungslauf, alle Budgets in beiden
-  Impact-Formen. Blocker B2 ist mit WP-335 geschlossen.
-- **NFR-03:** erfüllt mit 4 Spuren. Blocker B1 ist mit WP-332 bis WP-334
-  geschlossen.
+- **NFR-02:** erfüllt im Wiederholungslauf und im GitHub-Lauf, alle Budgets
+  in beiden Impact-Formen. Blocker B2 ist mit WP-335 geschlossen.
+- **NFR-03:** erfüllt mit 4 Spuren, lokal und auf GitHub. Blocker B1 ist mit
+  WP-332 bis WP-334 geschlossen.
 - **NFR-10:** Der Lasttest gegen NFR-01 bis NFR-03 mit 10.000 Objekten ist
   gelaufen und bestanden; das Ergebnis steht in diesem Dokument.
-- **GATE-03 „Lasttest bestanden“:** erfüllt im lokalen
-  Wiederholungslauf. Offen sind:
-  - die Anerkennung der Referenzumgebung (E-58)
-  - ein grüner `load.yml`-Lauf auf dem Release-Kandidaten; `load.yml` läuft
-    auf GitHub nur manuell oder nächtlich auf dem Standardbranch. Auf dem
-    Standard-Runner ist er nicht gesichert (etwa halb so schnell wie der
-    Nachweishost, Abschnitt „Umgebung und Datenbestand“); die Wiederholung
-    ist angestoßen, ihr Ergebnis steht aus.
+- **GATE-03 „Lasttest bestanden“:** erfüllt mit zwei Nachweisen: dem lokalen
+  Wiederholungslauf auf Commit `dbbfded` und dem GitHub-Lauf 38665599979 auf
+  Commit `918a832`. Offen ist nur die Anerkennung der Referenzumgebung
+  (E-58, Entscheidung des Auftraggebers). Die Auflage eines grünen
+  `load.yml`-Laufs ist erfüllt; `load.yml` läuft auf GitHub manuell oder
+  nächtlich auf dem Standardbranch und wiederholt den Lauf nach dem Merge auf
+  dem Release-Kandidaten.
 - **G1 insgesamt:** weiter nicht bestanden. Offen sind B3 (Pentest, E-28,
   A-07), B4 (v2-Texte, E-02, A-02) und B6 (NFR-09, Subprozessorenliste, E-35,
   A-11, Betreiber) sowie E-58. B5 (E-17) ist unverändert offen. Stand und

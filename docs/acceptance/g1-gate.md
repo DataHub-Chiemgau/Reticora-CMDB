@@ -25,8 +25,10 @@ danach kamen zwei Korrekturen aus dem Gesamtreview hinzu (`58863fa`,
 `dea65b7`) und am 2026-10-15 die Nachträge zu seinen nicht blockierenden
 Befunden (`3f2bfd5`, `458a96d`, `111bdc4`, `f354c5a`, `0f165cc`; Bewertung in
 `docs/security/review-g1.md`). Sie ändern die Werte des Nachweislaufs nicht
-(Kontrollmessungen in `docs/acceptance/lasttest-g1.md`). Der CI-Lauf und der
-Workflow `load.yml` auf dem Release-Kandidaten stehen aus.
+(Kontrollmessungen in `docs/acceptance/lasttest-g1.md`). Der Workflow
+`load.yml` ist auf Commit `918a832`, dem Code-Stand mit allen Nachträgen,
+grün (Run 38665599979); nach dem Merge wiederholt ihn der nächtliche Lauf auf
+dem Release-Kandidaten. Der CI-Lauf auf dem Release-Kandidaten steht aus.
 
 ## Ergebnis
 
@@ -65,12 +67,13 @@ Bedingungen der geschlossenen Blocker:
   dieser Lauf als G1-Nachweis für GATE-03 gilt, entscheidet der Auftraggeber
   mit dem Product Owner. Empfohlen ist die Anerkennung mit Auflagen; eine
   davon ist mindestens ein grüner `load.yml`-Lauf auf dem Commit des
-  Release-Kandidaten. Dieser Lauf steht aus. Seit `458a96d` führt `load.yml`
-  jedes Szenario als eigenen Job mit frischem Seed und `ANALYZE` aus, wie es
-  das Nachweisprotokoll verlangt. Der Standard-Runner von GitHub war im
-  letzten Lauf etwa halb so schnell wie der Nachweishost; ein grüner Lauf ist
-  deshalb nicht gesichert. Die Wiederholung ist angestoßen, ihr Ergebnis
-  steht aus (`docs/acceptance/lasttest-g1.md`).
+  Release-Kandidaten. Diese Auflage ist für Commit `918a832` erfüllt: Seit
+  `458a96d` führt `load.yml` jedes Szenario als eigenen Job mit frischem Seed
+  und `ANALYZE` aus, wie es das Nachweisprotokoll verlangt, und Run
+  38665599979 auf dem Standard-Runner `ubuntu-latest` (4 CPUs) hält alle
+  Schwellen ein (`docs/acceptance/lasttest-g1.md`, Abschnitt „GitHub-Lauf“).
+  Nach dem Merge wiederholt der nächtliche Lauf ihn auf dem
+  Release-Kandidaten. Offen ist nur die Entscheidung selbst.
 - **E-56 (offen, Aufgabe A-12):** Umgesetzt ist die Empfehlung: parallele
   Spuren mit Identitätssperre (Standard 4 Spuren). Mit
   `RETICORA_INGEST_LANES=1` (serielle Verarbeitung, Option 3) erreicht der
@@ -126,20 +129,22 @@ G1:
 | ID | Status | Begründung |
 |---|---|---|
 | NFR-09 | offen | Die Datenresidenz ist belegt (`docs/betrieb/referenzmodell.md`, WP-105). „Subprozessoren dokumentiert und AVV-fähig“ ist erst mit der gefüllten Liste erfüllt (`docs/legal/subprozessoren.md`, `docs/betrieb/referenzmodell.md`). Die Liste liefert der Betreiber (E-35, Aufgabe A-11); sie ist leer. Die Erstfassung dieser Checkliste führte NFR-09 fälschlich als PASS. Blocker B6. |
-| GATE-03 | offen | Pentest ausstehend (B3). Der Lasttest ist im lokalen Nachweislauf bestanden; offen sind die Anerkennung der Referenzumgebung (E-58) und ein grüner `load.yml`-Lauf auf dem Release-Kandidaten. Isolationstest und Install-Smoke sind belegt (siehe GATE-03). |
+| GATE-03 | offen | Pentest ausstehend (B3). Der Lasttest ist bestanden, im lokalen Nachweislauf auf `dbbfded` und im GitHub-Lauf 38665599979 auf `918a832`; offen ist nur die Anerkennung der Referenzumgebung (E-58). Isolationstest und Install-Smoke sind belegt (siehe GATE-03). |
 | GATE-02 | offen | Folgt aus den Zeilen oben und den N/P-Zeilen (B3, B4, B6). Keine ID steht mehr auf FAIL. |
 | ABN-01 | PASS für (d) und (e) | Die Teile (a) und (b) sind N/P nach E-02 (B4); (c) ist [P2]. Siehe `docs/acceptance/abn-01.md`. |
 
 ### PASS mit der G1-Nachbesserung
 
 Die Erstfassung führte diese IDs als FAIL (B1, B2). Nachweis ist der Lastlauf
-auf Commit `dbbfded` mit 10.000 Objekten (`docs/acceptance/lasttest-g1.md`).
+auf Commit `dbbfded` mit 10.000 Objekten (`docs/acceptance/lasttest-g1.md`);
+der GitHub-Lauf 38665599979 auf Commit `918a832` bestätigt ihn mit allen
+Schwellen.
 
 | ID | Status | Begründung |
 |---|---|---|
 | NFR-02 | PASS | Alle Budgets erfüllt (`api.js`, 60 s, alle Szenarien parallel, frischer Seed). Impact Tiefe 20 p95 477 ms in der kompakten Form der Oberfläche und 546 ms in der Standardform mit Pfaden (Erstlauf 2,39 s). 7.038 von 7.038 Checks. WP-335, B2 geschlossen. |
 | NFR-03 | PASS | Mit 4 Spuren (Standard): Abbau ab Sendeende 233 Records/s (Erstlauf 58), Verzögerung Record → sichtbar höchstens 3,1 s bei 200 Records/s Angebot, Spool-Flush von 10.000 Records in 35,9 s, kein fehlender Record. Mit einer Spur 182 Records/s (E-56 offen). WP-332 bis WP-334, B1 geschlossen. |
-| NFR-10 | PASS | Lasttest mit 10.000 Objekten bestanden: Alle Schwellen von `api.js` und `ingest.js` (4 Spuren) sind erfüllt. Die Anerkennung der Referenzumgebung (E-58) und ein grüner `load.yml`-Lauf auf dem Release-Kandidaten stehen aus. |
+| NFR-10 | PASS | Lasttest mit 10.000 Objekten bestanden: Alle Schwellen von `api.js` und `ingest.js` (4 Spuren) sind erfüllt, im lokalen Nachweislauf auf `dbbfded` und im GitHub-Lauf 38665599979 auf `918a832` (Workflow `load.yml`). Die Anerkennung der Referenzumgebung (E-58) steht aus. |
 
 API-01 bleibt PASS: WP-335 erweitert die Antwort von `GET /impact/{ci_id}` und
 `GET /impact` nur additiv (`via`, `relay`). `path` bleibt in der
@@ -171,7 +176,7 @@ verschoben (`docs/security/review-g1.md`).
 
 | Bedingung | Status | Nachweis |
 |---|---|---|
-| Lasttest (NFR-10) bestanden | PASS im lokalen Nachweislauf | `docs/acceptance/lasttest-g1.md` (Commit `dbbfded`, B1 und B2 geschlossen); Anerkennung der Referenzumgebung offen (E-58), grüner `load.yml`-Lauf auf dem Release-Kandidaten ausstehend |
+| Lasttest (NFR-10) bestanden | PASS | `docs/acceptance/lasttest-g1.md`: lokaler Nachweislauf auf Commit `dbbfded` (B1 und B2 geschlossen) und GitHub-Lauf 38665599979 auf Commit `918a832` (`load.yml`, alle Schwellen eingehalten; nach dem Merge nächtlich auf dem Release-Kandidaten wiederholt). Anerkennung der Referenzumgebung offen (E-58) |
 | Pentest ohne offene High/Critical | offen | `docs/security/pentest-g1.md` (B3) |
 | Isolationstest (TEN-09) vollständig | PASS | `backend/internal/tenant/rls/channel_matrix_integration_test.go` (WP-208) |
 | Install-Smoke auf beiden Plattformen | PASS | `docs/acceptance/g1-installation.md` (WP-211) |
@@ -248,7 +253,7 @@ wiederholt den Lasttest (NFR-10).
 
 ## Anhang: Status je [B]/[Q]-ID
 
-Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den genannten Tests bzw. Dokumenten, und die CI ist auf dem Release-Kandidaten grün. Die Abweichungen sind oben begründet. Für NFR-02, NFR-03 und NFR-10 ist der Nachweis der lokale Lastlauf auf Commit `dbbfded`; der CI-Lauf und der grüne `load.yml`-Lauf auf dem Release-Kandidaten stehen aus (E-58).
+Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den genannten Tests bzw. Dokumenten, und die CI ist auf dem Release-Kandidaten grün. Die Abweichungen sind oben begründet. Für NFR-02, NFR-03 und NFR-10 sind die Nachweise der lokale Lastlauf auf Commit `dbbfded` und der grüne `load.yml`-Lauf 38665599979 auf Commit `918a832`; der CI-Lauf auf dem Release-Kandidaten und die Anerkennung der Referenzumgebung (E-58) stehen aus.
 
 | ID | Tag | Status | Nachweis | WP |
 |---|---|---|---|---|
