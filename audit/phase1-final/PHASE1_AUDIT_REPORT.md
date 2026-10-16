@@ -25,8 +25,16 @@ Ersatz für den blockierten Installer: Der reale Stack wurde aus denselben Artef
 mit `/api`-Proxy, Keycloak 24.0 mit `deploy/keycloak/realm-reticora-dev.json`, interner NATS mit
 `deploy/docker-compose/nats.conf`, NATS-Edge mit `deploy/docker-compose/nats-edge.conf` und vom Server erzeugter PKI).
 
-## Laufende Arbeiten
+## Prüfstand (Zwischenstand 2026-10-16)
 
-- Workflow „phase1-wp-audit“: 27 WP-Batches (alle 213 WPs), je Auditor + unabhängiger adversarialer Verifizierer.
-- Lokaler Lastlauf (Nachbau von `.github/workflows/load.yml`, k6 0.54.0, Seed 10.000 Objekte).
-- Danach: Ergänzung fehlender Tests (Integration/API/Real-Stack-E2E) und Retest.
+- **Erledigt:** Einzelprüfung aller 213 WPs in 27 Batches, jeweils Auditor + unabhängiger adversarialer Verifizierer
+  (213/213 verifiziert). Zwischenergebnis: BESTANDEN 72, TEILWEISE BESTANDEN 100, FEHLGESCHLAGEN 39, NICHT TESTBAR 2
+  (`PHASE1_WP_AUDIT_MATRIX.md`, Rohdaten `data/verified-verdicts.json`).
+- **Erledigt:** Real-Stack-E2E-Suite `frontend/e2e-real/` (6 Prozessketten, 79 Tests: 56 bestanden, 23 fehlgeschlagen;
+  25 Produktbefunde, davon 23 adversarial bestätigt, 2 „Spezifikation unklar“).
+- **Erledigt:** Lastlauf (k6 0.54.0, Seed 10.000): Lauf 1 unter Fremdlast – `list`/`search` über Budget; Lauf 2 auf
+  ruhiger Umgebung – alle 10 API-Budgets eingehalten; Ingest und Spool in beiden Läufen eingehalten (`evidence/load/`).
+- **In Arbeit:** Defekt- und Regressionstests je WP-Gruppe (T1–T7) mit unabhängigem Review; danach Abschlusssynthese
+  (Statusabgleich mit E2E- und Testevidenz, eindeutige Defekt-IDs) und Quality-Gate-Entscheidung.
+- Prüfumgebung: Nach einem Neustart mit weniger freiem Speicher wurde JetStream lokal mit `max_file_store: 60G`
+  (Scratch-Kopie von `deploy/docker-compose/nats.conf`) betrieben; keine Repository-Änderung.
