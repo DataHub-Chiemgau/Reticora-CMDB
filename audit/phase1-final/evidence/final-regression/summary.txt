@@ -1,0 +1,5 @@
+
+DONE 2021 tests in 951.257s
+gotestsum exit=0
+collector: exit=0; edgecore: exit=0
+Commit: db988d4; private TimescaleDB 2.17.2-pg16 container (single database, like CI), NATS JetStream, Redis; migrate up/down-all/up: migrate exit=0
