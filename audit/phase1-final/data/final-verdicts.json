@@ -1596,7 +1596,7 @@
    "abhaengigkeiten": "WP-029, WP-064, WP-040, WP-032, WP-037, WP-038, WP-055, WP-035; WP-208 (Kanalmatrix).",
    "ebenen": "UX: N/A. API: N/A (Kanalmatrix ist WP-208). Daten: OK – echte Policies mit echter App-Rolle je Kommando (Seeding mit session_replication_role=replica). E2E: N/A. Robustheit: OK – Cross-Org, Out-of-Scope, Move-out, NULL-/Global-Claiming; LÜCKE – NULL-Lesesemantik im Repo-Test nur 'maybe', vererbte Tabellen für gescopte Principals übersprungen.",
    "defekte": [
-    "L-T1-34"
+    "F-354"
    ],
    "status_aenderung": "BESTANDEN -> TEILWEISE BESTANDEN: AK1 ist für die vererbten Tabellen document, maintenance_window und training_assignment nicht belegt, weil die Matrix gescopte Principals überspringt. Die Ersatztests decken UPDATE/DELETE geteilter oder unverlinkter Zeilen nicht ab, wie die bestätigten Defekte L-T1-04/L-T1-06 zeigen (DB-Probe als App-Rolle: UPDATE 1/DELETE 1 durch Client 1). Neuer Defekt L-T1-34 (P2).",
    "offene_nachweise": "Keine für BESTANDEN. Härtung: NULL-Lesesemantik im Repo-Test pinnen; gescopte Principals auf vererbten Tabellen mit aktiven Triggern; Katalogregel für fehlende Scope-Spalten an Tabellen mit Standort-/CI-Bezug.",

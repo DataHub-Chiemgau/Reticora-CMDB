@@ -10,9 +10,9 @@ Defekttests laufen nur gezielt und schlagen fehl, bis der Befund behoben ist: Go
 |---|---:|
 | P0 | 16 |
 | P1 | 30 |
-| P2 | 133 |
+| P2 | 134 |
 | P3 | 174 |
-| **Summe** | **353** |
+| **Summe** | **354** |
 
 ## Übersicht
 
@@ -371,6 +371,7 @@ Defekttests laufen nur gezielt und schlagen fehl, bis der Befund behoben ist: Go
 | [F-351](#f-351) | P3 | Kein In-App-Einstieg zu Self-Signup bzw. Onboarding | WP-199 | belegt | keiner |
 | [F-352](#f-352) | P3 | INS-04-Fehlerbild 'Localhost-Redirect' wird in der Onboarding-Suite nicht diskriminiert | WP-200 | belegt | keiner |
 | [F-353](#f-353) | P3 | Onboarding-Schritt 'Export laden' prüft den synchronen CSV-Endpunkt statt der Datei des Exportjobs | WP-200 | belegt | keiner |
+| [F-354](#f-354) | P2 | RLS-Matrix (TestRLSMatrix) überspringt client-, site- und team-gescopte Principals auf den vererbten Tabellen… | WP-065 | belegt | keiner (Testlücke; Rollback-Probe SP/review-t1/probe_doc_shared_delet… |
 
 ## Einzelbefunde
 
@@ -5009,4 +5010,18 @@ Defekttests laufen nur gezielt und schlagen fehl, bis der Befund behoben ist: Go
 - **Empfehlung:** download_url laden bzw. 'Herunterladen' auf /export klicken und ≥ 30 Zeilen prüfen.
 - **Retest (verbindlich):** Spec lädt die Jobdatei und prüft ≥ 30 Zeilen; eine gebrochene Blob-Signatur macht die Suite rot.
 - **Kodierender Test:** keiner
+
+<a id="f-354"></a>
+### F-354 (P2) – RLS-Matrix (TestRLSMatrix) überspringt client-, site- und team-gescopte Principals auf den vererbten Tabellen document, maintenance_window und training_assignment und verdeckt damit F-004/F-048
+
+- **Betroffene WPs:** WP-065 · **Komponente:** backend/internal/tenant/rls/matrix_integration_test.go:255 ('if tbl.inherited && p.scoped() { continue }'); fixtures_test.go:47-51, :107 (inherited-Flag) · **Quelle:** adversariale Prüfung der Abschlusssynthese T1 (Verifier-test_gap WP-065 'Scoped principals on inherited-scope tables')
+- **Reproduktion:** Code-Inspektion; TestRLSMatrix ist grün (124× pass), während dieselben Tabellen den DB-Defekt zulassen. Rollback-Probe probe_doc_shared_delete.sql (audit_db_08) als reticora_app mit app.client_scope=c1: 'UPDATE 1', 'DELETE 1', 'after client1 delete: client2 asset links|0'.
+- **Soll:** WP-065 AK1 – Matrix über alle Mandantentabellen × Org/Client/Site/Team/Mehrfach × SELECT/INSERT/UPDATE/DELETE × NULL; jede Policy-Lücke lässt die Matrix scheitern.
+- **Ist:** Für 3 von 123 Tabellen werden nur org-weite und Org-B-Principals geprüft. Die Ersatztests TestModuleTablesInheritObjectScope und TestTeamRoomAndPersonScope prüfen Lesen und Link-Inserts, nicht UPDATE/DELETE/INSERT geteilter oder unverlinkter Zeilen durch gescopte Principals.
+- **Nutzerwirkung:** Die Matrix meldet vollständige Erzwingung, obwohl Cross-Client-Schreib- und Löschpfade auf document/maintenance_window bestehen (F-004); Regressionen bleiben unentdeckt; der GATE-03-Nachweis ist überzeichnet.
+- **Ursache (belegt):** Bewusstes Überspringen gescopter Principals für Tabellen mit Sub-Select-Policies (Seeding mit session_replication_role=replica ohne Trigger), matrix_integration_test.go:255.
+- **Empfehlung:** Vererbte Tabellen mit aktiven Triggern und gescopten Principals in die Matrix aufnehmen (geteilte, einseitig verlinkte und unverlinkte Zeilen × UPDATE/DELETE/INSERT).
+- **Retest (verbindlich):** cd backend && TEST_DATABASE_URL=... go test -count=1 -run '^TestRLSMatrix$' ./internal/tenant/rls/ ohne den Skip: rot, bis F-004/F-048 behoben sind, danach grün.
+- **Kodierender Test:** keiner (Testlücke; Rollback-Probe SP/review-t1/probe_doc_shared_delete.out)
+- **Prüfvermerk:** Nachgetragen am 2026-10-18: Die adversariale Prüfung der Synthese T1 hatte diesen Defekt neu angelegt und WP-065 zugeordnet; das Auswerteskript übernahm neue Defekte aus Prüfkorrekturen nicht, sodass er in der ursprünglichen Fassung der Befundliste fehlte (WP-065 verwies auf die interne ID L-T1-34). Die ID F-354 folgt der bestehenden Nummerierung, damit keine bestehende Referenz verschoben wird.
 

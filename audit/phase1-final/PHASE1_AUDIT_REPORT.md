@@ -5,7 +5,7 @@
 | Prüfgegenstand | Reticora CMDB, Phase 1, Work Packages WP-001 bis WP-213 (`docs/plan/implementierungsplan.md`) |
 | Geprüfter Produktstand | Commit `3a9669a` (G1-Nachbesserung, PR #64); der Audit-Branch `claude/ultracode-phase1-acceptance-jtfhsq` fügt **ausschließlich** Tests, Testkonfiguration und Audit-Artefakte hinzu (keine bestehende Datei geändert oder gelöscht, kein Produktionscode) |
 | Prüfzeitraum | 2026-10-15 bis 2026-10-18 |
-| Artefakte | dieser Bericht · `PHASE1_WP_AUDIT_MATRIX.md` (213 Einzelprüfungen) · `PHASE1_FINDINGS.md` (353 Defekte) · `evidence/` · `data/` |
+| Artefakte | dieser Bericht · `PHASE1_WP_AUDIT_MATRIX.md` (213 Einzelprüfungen) · `PHASE1_FINDINGS.md` (354 Defekte) · `evidence/` · `data/` |
 | **Ergebnis** | **NICHT ABNAHMEFÄHIG – NO-GO für Phase 2** |
 
 ## 1. Management Summary
@@ -77,9 +77,9 @@ Kein WP ist NICHT TESTBAR eingestuft: Wo ein Teil technisch blockiert war (z. B.
 |---|---:|---|
 | P0 | 16 | Sicherheitsrisiko, schwerer Datenverlust oder zentraler Prozess blockiert |
 | P1 | 30 | wesentliche Funktion fehlt, ist falsch oder unzuverlässig |
-| P2 | 133 | relevante funktionale, Validierungs- oder UX-Einschränkung |
+| P2 | 134 | relevante funktionale, Validierungs- oder UX-Einschränkung |
 | P3 | 174 | geringfügiger Qualitätsmangel |
-| **Summe** | **353** | eindeutige Defekte nach Deduplizierung über alle Prüfquellen; 334 mit belegter Ursache, 19 als Hypothese gekennzeichnet |
+| **Summe** | **354** | eindeutige Defekte nach Deduplizierung über alle Prüfquellen; 335 mit belegter Ursache, 19 als Hypothese gekennzeichnet. Nachtrag vom 2026-10-18: F-354 (P2, WP-065) war in der adversarialen Prüfung angelegt, fehlte aber in der ersten Fassung der Befundliste, weil das Auswerteskript neue Defekte aus Prüfkorrekturen nicht übernahm; ID am Ende angefügt, keine bestehende ID verschoben. Status und Priorität von WP-065 sind unverändert. |
 
 ### 4.1 P0-Defekte (abnahmeverhindernd)
 
@@ -262,6 +262,7 @@ Statusverlauf: Gegenüber der verifizierten Einzelprüfung änderten sich 17 Sta
 | Einzelprüfungen WP-001 – WP-213 | 213/213 in der Matrix, jede mit Status, Soll/Ist, Tests, Evidenz, Abweichung, Priorität, Abhängigkeiten, Prüfebenen und Retest |
 | Adversariale Verifikation | 27/27 Batches; Synthese-Prüfung 6/7 Gruppen als eigener Lauf, T3 durch die Auditleitung (Abschnitt 8) |
 | Ungeprüft als BESTANDEN markierte WPs | keine (automatische Prüfung: kein BESTANDEN mit zugerechnetem P0–P2-Defekt) |
-| Defekte | 353 mit eindeutiger ID, Priorität, betroffenen WPs, Reproduktion, Soll/Ist, Nutzerwirkung, Ursache, Empfehlung, Retest |
+| Defekte | 354 mit eindeutiger ID, Priorität, betroffenen WPs, Reproduktion, Soll/Ist, Nutzerwirkung, Ursache, Empfehlung, Retest |
+| Querverweise | jede Defekt-ID der Matrix (Übersicht und Einzelprüfung) existiert in der Befundliste; maschinell geprüft (Nachtrag F-354, siehe Abschnitt 4) |
 | Kritische Testfälle | Mandantentrennung, Rollen/Authz, CI-Lebenszyklus, Standorte/Racks, Discovery/Override, Bulk/Jobs/Export real ausgeführt; alle P0/P1 durch Tests kodiert oder mit Retest-Befehl belegt |
 | Produktionscode | unverändert (nur Ergänzungen von Tests, Testkonfiguration, Audit-Artefakten) |

@@ -7635,5 +7635,29 @@
   "quelle": "Audit + Verifikation (B25)",
   "_group": "T7-ui",
   "id": "F-353"
+ },
+ {
+  "lid": "L-T1-34",
+  "titel": "RLS-Matrix (TestRLSMatrix) überspringt client-, site- und team-gescopte Principals auf den vererbten Tabellen document, maintenance_window und training_assignment und verdeckt damit F-004/F-048",
+  "prioritaet": "P2",
+  "wps": [
+   "WP-065"
+  ],
+  "komponente": "backend/internal/tenant/rls/matrix_integration_test.go:255 ('if tbl.inherited && p.scoped() { continue }'); fixtures_test.go:47-51, :107 (inherited-Flag)",
+  "reproduktion": "Code-Inspektion; TestRLSMatrix ist grün (124× pass), während dieselben Tabellen den DB-Defekt zulassen. Rollback-Probe probe_doc_shared_delete.sql (audit_db_08) als reticora_app mit app.client_scope=c1: 'UPDATE 1', 'DELETE 1', 'after client1 delete: client2 asset links|0'.",
+  "soll": "WP-065 AK1 – Matrix über alle Mandantentabellen × Org/Client/Site/Team/Mehrfach × SELECT/INSERT/UPDATE/DELETE × NULL; jede Policy-Lücke lässt die Matrix scheitern.",
+  "ist": "Für 3 von 123 Tabellen werden nur org-weite und Org-B-Principals geprüft. Die Ersatztests TestModuleTablesInheritObjectScope und TestTeamRoomAndPersonScope prüfen Lesen und Link-Inserts, nicht UPDATE/DELETE/INSERT geteilter oder unverlinkter Zeilen durch gescopte Principals.",
+  "nutzerwirkung": "Die Matrix meldet vollständige Erzwingung, obwohl Cross-Client-Schreib- und Löschpfade auf document/maintenance_window bestehen (F-004); Regressionen bleiben unentdeckt; der GATE-03-Nachweis ist überzeichnet.",
+  "ursache": "Bewusstes Überspringen gescopter Principals für Tabellen mit Sub-Select-Policies (Seeding mit session_replication_role=replica ohne Trigger), matrix_integration_test.go:255.",
+  "ursache_belegt": true,
+  "empfehlung": "Vererbte Tabellen mit aktiven Triggern und gescopten Principals in die Matrix aufnehmen (geteilte, einseitig verlinkte und unverlinkte Zeilen × UPDATE/DELETE/INSERT).",
+  "retest": "cd backend && TEST_DATABASE_URL=... go test -count=1 -run '^TestRLSMatrix$' ./internal/tenant/rls/ ohne den Skip: rot, bis F-004/F-048 behoben sind, danach grün.",
+  "tests": "keiner (Testlücke; Rollback-Probe SP/review-t1/probe_doc_shared_delete.out)",
+  "quelle": "adversariale Prüfung der Abschlusssynthese T1 (Verifier-test_gap WP-065 'Scoped principals on inherited-scope tables')",
+  "_group": "T1-tenancy",
+  "id": "F-354",
+  "_notes": [
+   "Nachgetragen am 2026-10-18: Die adversariale Prüfung der Synthese T1 hatte diesen Defekt neu angelegt und WP-065 zugeordnet; das Auswerteskript übernahm neue Defekte aus Prüfkorrekturen nicht, sodass er in der ursprünglichen Fassung der Befundliste fehlte (WP-065 verwies auf die interne ID L-T1-34). Die ID F-354 folgt der bestehenden Nummerierung, damit keine bestehende Referenz verschoben wird."
+  ]
  }
 ]
