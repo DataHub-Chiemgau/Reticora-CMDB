@@ -15,6 +15,10 @@ import (
 type Repository interface {
 	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Document, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Document, error)
+	// GetWritable returns the document only when the caller may change it
+	// (WP-341: all links visible, or an org-wide principal); otherwise it
+	// fails like GetByID for a missing document.
+	GetWritable(ctx context.Context, orgID, id string) (*Document, error)
 	Create(ctx context.Context, d *Document) error
 	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Document, error)
 	// SetStorage stores the blob location, size and MIME type after an
@@ -156,6 +160,11 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 	}
 	d.UpdatedAt = time.Now().UTC()
 	return d, nil
+}
+
+// GetWritable equals GetByID: the memory repository has no tenant scope.
+func (r *MemoryRepository) GetWritable(ctx context.Context, orgID, id string) (*Document, error) {
+	return r.GetByID(ctx, orgID, id)
 }
 
 func (r *MemoryRepository) SetStorage(_ context.Context, orgID, id, storageKey, mimeType string, size int64) (*Document, error) {

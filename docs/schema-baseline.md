@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000138_contact_roles
+Stand: Migration 000139_document_window_write_scope
 
 ## Prüfung
 
@@ -224,7 +224,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `discovery_result` | ja | ja | discovery_result_isolation (ALL), discovery_result_scoped_delete (DELETE), discovery_result_scoped_update (UPDATE) |
 | `discovery_scope` | ja | ja | discovery_scope_isolation (ALL), discovery_scope_scoped_delete (DELETE), discovery_scope_scoped_update (UPDATE) |
 | `disposal_record` | ja | ja | disposal_record_isolation (ALL) |
-| `document` | ja | ja | document_scoped_delete (DELETE), document_scoped_update (UPDATE), document_tenant_isolation (ALL) |
+| `document` | ja | ja | document_scoped_delete (DELETE), document_scoped_insert (INSERT), document_scoped_update (UPDATE), document_tenant_isolation (ALL) |
 | `document_link` | ja | ja | document_link_scoped_delete (DELETE), document_link_scoped_update (UPDATE), document_link_tenant_isolation (ALL) |
 | `endpoint_agent` | ja | ja | endpoint_agent_isolation (ALL), endpoint_agent_scoped_delete (DELETE), endpoint_agent_scoped_update (UPDATE) |
 | `entitlement` | ja | ja | entitlement_isolation (ALL) |
@@ -255,7 +255,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `location_node_retired` | ja | ja | location_node_retired_isolation (ALL), location_node_retired_scoped_delete (DELETE), location_node_retired_scoped_update (UPDATE) |
 | `location_ref_migration` | ja | ja | location_ref_migration_isolation (ALL) |
 | `maintenance_notification` | ja | ja | maintenance_notification_isolation (ALL), maintenance_notification_scoped_delete (DELETE), maintenance_notification_scoped_update (UPDATE) |
-| `maintenance_window` | ja | ja | maintenance_window_isolation (ALL), maintenance_window_scoped_delete (DELETE), maintenance_window_scoped_update (UPDATE) |
+| `maintenance_window` | ja | ja | maintenance_window_isolation (ALL), maintenance_window_scoped_delete (DELETE), maintenance_window_scoped_insert (INSERT), maintenance_window_scoped_update (UPDATE) |
 | `maintenance_window_ci` | ja | ja | maintenance_window_ci_isolation (ALL), maintenance_window_ci_scoped_delete (DELETE), maintenance_window_ci_scoped_update (UPDATE) |
 | `metric_sample` | nein | nein | – |
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |

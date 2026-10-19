@@ -79,6 +79,14 @@ const (
 	ELSE true END`
 	documentVisible = "(NOT EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id)" +
 		" OR EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id AND " + linkVisible + "))"
+	// documentWritable admits a document for UPDATE and DELETE (WP-341,
+	// migration 000139): an org-wide principal writes every document; a
+	// principal restricted in the client or site scope only a linked one whose
+	// links it sees completely, so neither a document shared with another
+	// client nor an unlinked (org-wide) one is writable (E-09).
+	documentWritable = "(" + database.OrgWideScopeSQL +
+		" OR (document.link_count > 0 AND document.link_count = (SELECT count(*) FROM document_link" +
+		" WHERE document_link.document_id = document.id AND " + linkVisible + ")))"
 )
 
 // requireVisible fails with "not found" when the written row of table does not
@@ -196,6 +204,29 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Document
 	return doc, nil
 }
 
+// GetWritable retrieves a document the caller may change (documentWritable);
+// a document it only reads, shared with another client or org-wide, is "not
+// found" like a missing one.
+func (r *PGRepository) GetWritable(ctx context.Context, orgID, id string) (*Document, error) {
+	var doc *Document
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		query := fmt.Sprintf("SELECT %s FROM document WHERE "+documentWritable+" AND id = $1 AND organization_id = $2", documentSelectColumns)
+		var err error
+		doc, err = scanDocument(tx.QueryRow(ctx, query, id, orgID))
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("not found")
+		}
+		if err != nil {
+			return fmt.Errorf("get writable document: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
 // Create inserts a new document. It has no stored content yet: the storage
 // key stays empty until SetStorage, whatever d.StorageKey holds.
 func (r *PGRepository) Create(ctx context.Context, d *Document) error {
@@ -266,7 +297,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		}
 
 		if len(setClauses) == 0 {
-			query := fmt.Sprintf("SELECT %s FROM document WHERE "+documentVisible+" AND id = $1 AND organization_id = $2", documentSelectColumns)
+			query := fmt.Sprintf("SELECT %s FROM document WHERE "+documentWritable+" AND id = $1 AND organization_id = $2", documentSelectColumns)
 			var err error
 			doc, err = scanDocument(tx.QueryRow(ctx, query, id, orgID))
 			if err != nil {
@@ -280,7 +311,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 
 		setClauses = append(setClauses, "updated_at = NOW()")
 		// Redundant with row-level security, kept as defense in depth.
-		query := fmt.Sprintf("UPDATE document SET %s WHERE "+documentVisible+" AND id = $1 AND organization_id = $%d RETURNING %s", strings.Join(setClauses, ", "), argPos, documentSelectColumns)
+		query := fmt.Sprintf("UPDATE document SET %s WHERE "+documentWritable+" AND id = $1 AND organization_id = $%d RETURNING %s", strings.Join(setClauses, ", "), argPos, documentSelectColumns)
 		args = append(args, orgID)
 		var err error
 		doc, err = scanDocument(tx.QueryRow(ctx, query, args...))
@@ -297,7 +328,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 }
 
 // SetStorage stores the blob location after an upload and returns the
-// updated document. The storage key is always server-generated
+// updated document; like Update it changes only a writable document
+// (documentWritable). The storage key is always server-generated
 // (org/<org>/documents/<id>/<version>) so a client can never point a document
 // at another tenant's object; keys outside the organization's prefix are
 // rejected here and by the CHECK constraint of migration 000066.
@@ -310,7 +342,7 @@ func (r *PGRepository) SetStorage(ctx context.Context, orgID, id, storageKey, mi
 		row := tx.QueryRow(ctx, `
 			UPDATE document
 			SET storage_key = $2, mime_type = $3, file_size = $4, updated_at = NOW()
-			WHERE id = $1 AND organization_id = $5
+			WHERE `+documentWritable+` AND id = $1 AND organization_id = $5
 			RETURNING `+documentSelectColumns, id, storageKey, mimeType, size, orgID)
 		var err error
 		doc, err = scanDocument(row)
@@ -325,7 +357,7 @@ func (r *PGRepository) SetStorage(ctx context.Context, orgID, id, storageKey, mi
 // Delete deletes a document. The document table has no deleted_at column, so this is a hard delete.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmdTag, err := tx.Exec(ctx, "DELETE FROM document WHERE "+documentVisible+" AND id = $1 AND organization_id = $2", id, orgID)
+		cmdTag, err := tx.Exec(ctx, "DELETE FROM document WHERE "+documentWritable+" AND id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete document: %w", err)
 		}

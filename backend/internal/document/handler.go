@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -145,6 +146,14 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A new document has no link and is therefore org-wide; the request
+	// cannot carry links, so a principal restricted in the client or site
+	// scope may not create one (E-09, transition rule of E-61).
+	if scope, ok := database.TenantScopeFromContext(r.Context()); ok && (!scope.Clients.IsAll() || !scope.Sites.IsAll()) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "the operation is not permitted")
+		return
+	}
+
 	var req CreateRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -245,8 +254,11 @@ func (h *Handler) UploadContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The object key is fixed per document version, so only a principal that
+	// may change the document may write it (WP-341): a document shared with
+	// another client or an org-wide one answers 404 before anything is stored.
 	id := chi.URLParam(r, "id")
-	doc, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
+	doc, err := h.repo.GetWritable(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
 		return

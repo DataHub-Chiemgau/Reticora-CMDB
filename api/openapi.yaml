@@ -2438,6 +2438,7 @@ paths:
       operationId: createDocument
       tags: [Documents]
       summary: Create a document metadata record
+      description: A new document has no link and is org-wide; a principal restricted to some clients or sites gets 403 (E-09, transition rule of E-61).
       requestBody:
         required: true
         content:
@@ -2455,6 +2456,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -2481,6 +2484,7 @@ paths:
       operationId: updateDocument
       tags: [Documents]
       summary: Update a document
+      description: A principal restricted to some clients or sites changes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
       requestBody:
         required: true
         content:
@@ -2504,6 +2508,7 @@ paths:
       operationId: deleteDocument
       tags: [Documents]
       summary: Delete a document
+      description: A principal restricted to some clients or sites deletes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
       responses:
         '204':
           description: Document deleted
@@ -2728,6 +2733,7 @@ paths:
       operationId: createMaintenanceWindow
       tags: [Maintenance]
       summary: Create a maintenance window
+      description: A window without ci_ids is org-wide; a principal restricted to some clients or sites gets 403 for it (E-09).
       requestBody:
         required: true
         content:
@@ -2745,6 +2751,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/maintenance-windows/{id}:
     x-phase: P3
@@ -2769,6 +2777,7 @@ paths:
       operationId: updateMaintenanceWindow
       tags: [Maintenance]
       summary: Update a maintenance window (incl. status transitions)
+      description: A principal restricted to some clients or sites changes only windows whose CIs it sees completely; a window that also covers another client's CI or has no CI (org-wide) answers 404 (TEN-05, E-09).
       requestBody:
         required: true
         content:
@@ -2792,6 +2801,7 @@ paths:
       operationId: deleteMaintenanceWindow
       tags: [Maintenance]
       summary: Delete a maintenance window
+      description: A principal restricted to some clients or sites deletes only windows whose CIs it sees completely; other windows answer 404 (TEN-05, E-09).
       responses:
         '204':
           description: Maintenance window deleted
@@ -7889,7 +7899,10 @@ paths:
       description: >
         Stores the request body as the document's object in blob storage.
         The Content-Type header is validated against a whitelist of common
-        office and image formats; the body is limited to 25 MiB.
+        office and image formats; the body is limited to 25 MiB. A principal
+        restricted to some clients or sites uploads only to documents whose
+        links it sees completely; other documents answer 404 before anything
+        is stored (TEN-05, E-09).
       requestBody:
         required: true
         content:
@@ -7980,6 +7993,7 @@ paths:
       operationId: linkDocument
       tags: [Documents]
       summary: Link a document to another entity
+      description: A principal restricted to some clients or sites may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09).
       requestBody:
         required: true
         content:
@@ -7997,6 +8011,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':

@@ -1316,7 +1316,10 @@ export interface paths {
     /** List documents */
     get: operations['listDocuments'];
     put?: never;
-    /** Create a document metadata record */
+    /**
+     * Create a document metadata record
+     * @description A new document has no link and is org-wide; a principal restricted to some clients or sites gets 403 (E-09, transition rule of E-61).
+     */
     post: operations['createDocument'];
     delete?: never;
     options?: never;
@@ -1338,11 +1341,17 @@ export interface paths {
     get: operations['getDocument'];
     put?: never;
     post?: never;
-    /** Delete a document */
+    /**
+     * Delete a document
+     * @description A principal restricted to some clients or sites deletes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
+     */
     delete: operations['deleteDocument'];
     options?: never;
     head?: never;
-    /** Update a document */
+    /**
+     * Update a document
+     * @description A principal restricted to some clients or sites changes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
+     */
     patch: operations['updateDocument'];
     trace?: never;
   };
@@ -1476,7 +1485,10 @@ export interface paths {
     /** List maintenance windows */
     get: operations['listMaintenanceWindows'];
     put?: never;
-    /** Create a maintenance window */
+    /**
+     * Create a maintenance window
+     * @description A window without ci_ids is org-wide; a principal restricted to some clients or sites gets 403 for it (E-09).
+     */
     post: operations['createMaintenanceWindow'];
     delete?: never;
     options?: never;
@@ -1498,11 +1510,17 @@ export interface paths {
     get: operations['getMaintenanceWindow'];
     put?: never;
     post?: never;
-    /** Delete a maintenance window */
+    /**
+     * Delete a maintenance window
+     * @description A principal restricted to some clients or sites deletes only windows whose CIs it sees completely; other windows answer 404 (TEN-05, E-09).
+     */
     delete: operations['deleteMaintenanceWindow'];
     options?: never;
     head?: never;
-    /** Update a maintenance window (incl. status transitions) */
+    /**
+     * Update a maintenance window (incl. status transitions)
+     * @description A principal restricted to some clients or sites changes only windows whose CIs it sees completely; a window that also covers another client's CI or has no CI (org-wide) answers 404 (TEN-05, E-09).
+     */
     patch: operations['updateMaintenanceWindow'];
     trace?: never;
   };
@@ -4076,7 +4094,7 @@ export interface paths {
     get: operations['downloadDocumentContent'];
     /**
      * Upload the binary content of a document
-     * @description Stores the request body as the document's object in blob storage. The Content-Type header is validated against a whitelist of common office and image formats; the body is limited to 25 MiB.
+     * @description Stores the request body as the document's object in blob storage. The Content-Type header is validated against a whitelist of common office and image formats; the body is limited to 25 MiB. A principal restricted to some clients or sites uploads only to documents whose links it sees completely; other documents answer 404 before anything is stored (TEN-05, E-09).
      */
     put: operations['uploadDocumentContent'];
     post?: never;
@@ -4099,7 +4117,10 @@ export interface paths {
     /** List entities linked to a document */
     get: operations['getDocumentLinks'];
     put?: never;
-    /** Link a document to another entity */
+    /**
+     * Link a document to another entity
+     * @description A principal restricted to some clients or sites may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09).
+     */
     post: operations['linkDocument'];
     delete?: never;
     options?: never;
@@ -13450,6 +13471,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13843,6 +13865,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
     };
   };
   getMaintenanceWindow: {
@@ -20495,6 +20518,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
     };

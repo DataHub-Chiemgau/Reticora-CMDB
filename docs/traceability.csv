@@ -479,3 +479,6 @@ TST-04;[Q];C;frontend/e2e-real/stack-smoke.spec.ts;WP-338
 TEN-06;[B];B;backend/internal/tenant/rls/compliance_channel_integration_test.go;WP-339
 TEN-06;[B];B;backend/internal/rack/rack_scope_integration_test.go;WP-340
 TEN-09;[Q];B;backend/internal/tenant/rls/rack_channel_scope_integration_test.go;WP-340
+MGT-01;[P2];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-341
+MGT-04;[P3];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-341
+TEN-06;[B];B;backend/internal/tenant/rls/module_object_writes_integration_test.go;WP-341

@@ -41,6 +41,14 @@ const (
 	windowCIVisible = "EXISTS (SELECT 1 FROM ci WHERE ci.id = maintenance_window_ci.ci_id)"
 	windowVisible   = "(NOT EXISTS (SELECT 1 FROM maintenance_window_ci WHERE maintenance_window_ci.maintenance_window_id = maintenance_window.id)" +
 		" OR EXISTS (SELECT 1 FROM maintenance_window_ci WHERE maintenance_window_ci.maintenance_window_id = maintenance_window.id AND " + windowCIVisible + "))"
+	// windowWritable admits a window for UPDATE and DELETE (WP-341, migration
+	// 000139): an org-wide principal writes every window; a principal
+	// restricted in the client or site scope only a window with CIs that it
+	// sees completely, so neither a window that also covers another client's
+	// CI nor one without CIs (org-wide) is writable (E-09).
+	windowWritable = "(" + database.OrgWideScopeSQL +
+		" OR (maintenance_window.ci_count > 0 AND maintenance_window.ci_count = (SELECT count(*) FROM maintenance_window_ci" +
+		" WHERE maintenance_window_ci.maintenance_window_id = maintenance_window.id AND " + windowCIVisible + ")))"
 )
 
 func (r *PGRepository) ciIDsTx(ctx context.Context, tx pgx.Tx, orgID, windowID string) ([]string, error) {
@@ -178,10 +186,10 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateW
 		}
 		var err error
 		if len(sets) == 0 {
-			w, err = scanWindow(tx.QueryRow(ctx, "SELECT "+windowCols+" FROM maintenance_window WHERE "+windowVisible+" AND organization_id = $1 AND id = $2", orgID, id))
+			w, err = scanWindow(tx.QueryRow(ctx, "SELECT "+windowCols+" FROM maintenance_window WHERE "+windowWritable+" AND organization_id = $1 AND id = $2", orgID, id))
 		} else {
 			sets = append(sets, "updated_at = now()")
-			w, err = scanWindow(tx.QueryRow(ctx, "UPDATE maintenance_window SET "+strings.Join(sets, ", ")+" WHERE "+windowVisible+" AND organization_id = $1 AND id = $2 RETURNING "+windowCols, args...))
+			w, err = scanWindow(tx.QueryRow(ctx, "UPDATE maintenance_window SET "+strings.Join(sets, ", ")+" WHERE "+windowWritable+" AND organization_id = $1 AND id = $2 RETURNING "+windowCols, args...))
 		}
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("maintenance window not found")
@@ -197,7 +205,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateW
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "DELETE FROM maintenance_window WHERE "+windowVisible+" AND organization_id = $1 AND id = $2", orgID, id)
+		tag, err := tx.Exec(ctx, "DELETE FROM maintenance_window WHERE "+windowWritable+" AND organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
 			return err
 		}
