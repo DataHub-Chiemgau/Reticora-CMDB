@@ -1,47 +1,48 @@
 # Entscheidungen – Korrekturplan G1
 
-Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../entscheidungen.md) (E-01 bis E-36, E-56 bis E-58) und [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md) (E-37 bis E-55). Jede Entscheidung nennt Status, Frage, Optionen, Empfehlung, Übergangsregel sowie betroffene IDs und WPs. Alle Entscheidungen sind offen; ihre Empfehlung gilt als Übergangsregel, damit die WPs starten können. Widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst.
+Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../entscheidungen.md) (E-01 bis E-36, E-56 bis E-58) und [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md) (E-37 bis E-55). Jede Entscheidung nennt Status, Frage, Optionen, Empfehlung, Übergangsregel sowie betroffene IDs und WPs. Alle Entscheidungen sind offen; ihre Empfehlung gilt als Übergangsregel, damit die WPs starten können. Widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst.
 
 ## Übersicht
 
 | Nr. | Thema | Status | Betroffene WPs |
 |---|---|---|---|
-| [E-59](#e-59) | Einordnung des Korrekturplans vor Phase 2 und Freigabe des Phase-2-Starts | offen (Empfehlung als Übergangsregel) | WP-595, WP-596, WP-597, WP-598, WP-599 |
-| [E-60](#e-60) | Zurückgestellte P3-Befunde und Risikoakzeptanz für G1 | offen (Empfehlung als Übergangsregel) | WP-599 |
+| [E-59](#e-59) | Einordnung des Korrekturplans vor Phase 2 und Freigabe des Phase-2-Starts | offen (Empfehlung als Übergangsregel) | WP-596, WP-597, WP-598, WP-599, WP-600 |
+| [E-60](#e-60) | Zurückgestellte P3-Befunde und Risikoakzeptanz für G1 | offen (Empfehlung als Übergangsregel) | WP-600 |
 | [E-61](#e-61) | Anlage von Dokumenten durch client- oder site-gescopte Principals | offen (Empfehlung als Übergangsregel) | WP-341 |
 | [E-62](#e-62) | Beziehungen zwischen eigenem CI und org-weitem CI | offen (Empfehlung als Übergangsregel) | WP-345 |
-| [E-63](#e-63) | Client-/Site-Scope für Metriken (WP-025 AK1 gegenüber ADR 0001 Punkt 4) | offen (Empfehlung als Übergangsregel) | WP-351 |
-| [E-64](#e-64) | Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03) | offen (Empfehlung als Übergangsregel) | WP-352 |
-| [E-65](#e-65) | Widerruf von Service-Account-Keys bei Deaktivierung des anlegenden Benutzers | offen (Empfehlung als Übergangsregel) | WP-366 |
-| [E-66](#e-66) | Credentials eines Discovery-Scopes ohne credential_ids | offen (Empfehlung als Übergangsregel) | WP-380, WP-381, WP-497, WP-545 |
-| [E-67](#e-67) | Credential-Art für das NAS-Plugin (Synology DSM) | offen (Empfehlung als Übergangsregel) | WP-383 |
-| [E-68](#e-68) | TEC-15: Installationsquelle für die Signaturprüfung vor der Installation | offen (Empfehlung als Übergangsregel) | WP-390, WP-391, WP-456 |
-| [E-69](#e-69) | LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten | offen (Empfehlung als Übergangsregel) | WP-404 |
-| [E-70](#e-70) | API-07/API-08: Bulk-Statusänderung bei erzwungenem If-Match | offen (Empfehlung als Übergangsregel) | WP-405 |
-| [E-71](#e-71) | Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) | offen (Empfehlung als Übergangsregel) | WP-420, WP-561 |
-| [E-72](#e-72) | Indizierte Attributfilter unter Row-Level-Security | offen (Empfehlung als Übergangsregel) | WP-428 |
-| [E-73](#e-73) | OPS-04 in Kubernetes: Datenbankseite der WAL-Archivierung | offen (Empfehlung als Übergangsregel) | WP-438, WP-455 |
-| [E-74](#e-74) | OPS-05: Alarmierung des Betriebs über NTF-Kanäle | offen (Empfehlung als Übergangsregel) | WP-443 |
-| [E-75](#e-75) | GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis | offen (Empfehlung als Übergangsregel) | WP-446, WP-447, WP-449, WP-450, WP-451, WP-453, WP-456 |
-| [E-76](#e-76) | NFR-06 „Logs 30 Tage“ in den Auslieferungen | offen (Empfehlung als Übergangsregel) | WP-457 |
-| [E-77](#e-77) | CI-06: Berechtigung der einheitlichen CI-Historie | offen (Empfehlung als Übergangsregel) | WP-475 |
-| [E-78](#e-78) | NFR-04: Verlust von Metrik-Samples und Traps bei Upload-Fehlern | offen (Empfehlung als Übergangsregel) | WP-484 |
-| [E-79](#e-79) | CI-12: Unmerge nach späteren Änderungen am Survivor | offen (Empfehlung als Übergangsregel) | WP-486 |
-| [E-80](#e-80) | DB-05: Verknüpfung eines CI mit einem Asset ohne Standort | offen (Empfehlung als Übergangsregel) | WP-487 |
-| [E-81](#e-81) | AUD-03: Datenmodell der ci_change-Zeilen | offen (Empfehlung als Übergangsregel) | WP-488, WP-489, WP-490 |
-| [E-82](#e-82) | IMP-02: Traversierung per Ebenen-BFS statt rekursivem CTE | offen (Empfehlung als Übergangsregel) | WP-491 |
-| [E-83](#e-83) | DIS-10: Poll-Intervalle je Scope und Zeitzone von Cron-Zeitplänen | offen (Empfehlung als Übergangsregel) | WP-496, WP-497 |
-| [E-84](#e-84) | IMP-09: ausgeschaltete Outlets in der Redundanzkennung | offen (Empfehlung als Übergangsregel) | WP-499 |
-| [E-85](#e-85) | Bearbeitungs- und Löschrechte org-weit geteilter Sichten (VIE-01) | offen (Empfehlung als Übergangsregel) | WP-520, WP-556 |
-| [E-86](#e-86) | CI-Detail unter gewähltem Client-/Site-Scope (WP-191) | offen (Empfehlung als Übergangsregel) | WP-526 |
-| [E-87](#e-87) | Nachweis der Browser-Vorversionen (UI-18, NFR-07) | offen (Empfehlung als Übergangsregel) | WP-533 |
-| [E-88](#e-88) | Review-Merge bei ambiguous_identity: synchroner Effekt mit gespiegeltem Job (JOB-04, Folge zu E-25) | offen (Empfehlung als Übergangsregel) | WP-555 |
-| [E-89](#e-89) | REC-07: Entfernen manuell gepflegter IPs und Interfaces | offen (Empfehlung als Übergangsregel) | WP-581 |
-| [E-90](#e-90) | NTF-03: Ausprägung von Abonnements und Org-Branding in Phase 1 | offen (Empfehlung als Übergangsregel) | WP-588 |
-| [E-91](#e-91) | Instanzattributdefinitionen und DB-03 („attribute_definition einzige Quelle“) | offen (Empfehlung als Übergangsregel) | WP-589 |
-| [E-92](#e-92) | Materialisierung org-globaler Attributdefinitionen (MET-16) | offen (Empfehlung als Übergangsregel) | WP-590 |
-| [E-93](#e-93) | Korrektur der Migration 000110 (Duplikat-Suffixe der Interfaces) | offen (Empfehlung als Übergangsregel) | WP-592 |
-| [E-94](#e-94) | Durchsetzung von allowed_source_types, allowed_target_types und cardinality (REL-01) | offen (Empfehlung als Übergangsregel) | WP-592 |
+| [E-63](#e-63) | Client-/Site-Scope für Metriken (WP-025 AK1 gegenüber ADR 0001 Punkt 4) | offen (Empfehlung als Übergangsregel) | WP-350 |
+| [E-64](#e-64) | Widerruf von Service-Account-Keys bei Deaktivierung des anlegenden Benutzers | offen (Empfehlung als Übergangsregel) | WP-359 |
+| [E-65](#e-65) | MFA-Pflicht im Login-Pfad ohne Keycloak-Admin-Client (AUT-09) | offen (Empfehlung als Übergangsregel) | WP-366 |
+| [E-66](#e-66) | API-07/API-08: Bulk-Statusänderung bei erzwungenem If-Match | offen (Empfehlung als Übergangsregel) | WP-367 |
+| [E-67](#e-67) | Credentials eines Discovery-Scopes ohne credential_ids | offen (Empfehlung als Übergangsregel) | WP-375, WP-376, WP-495, WP-541 |
+| [E-68](#e-68) | Credential-Art für das NAS-Plugin (Synology DSM) | offen (Empfehlung als Übergangsregel) | WP-378 |
+| [E-69](#e-69) | TEC-15: Installationsquelle für die Signaturprüfung vor der Installation | offen (Empfehlung als Übergangsregel) | WP-385, WP-386, WP-595 |
+| [E-70](#e-70) | Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03) | offen (Empfehlung als Übergangsregel) | WP-389 |
+| [E-71](#e-71) | LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten | offen (Empfehlung als Übergangsregel) | WP-409 |
+| [E-72](#e-72) | Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) | offen (Empfehlung als Übergangsregel) | WP-423, WP-560, WP-574 |
+| [E-73](#e-73) | Indizierte Attributfilter unter Row-Level-Security | offen (Empfehlung als Übergangsregel) | WP-431 |
+| [E-74](#e-74) | OPS-04 in Kubernetes: Datenbankseite der WAL-Archivierung | offen (Empfehlung als Übergangsregel) | WP-441, WP-544 |
+| [E-75](#e-75) | OPS-05: Alarmierung des Betriebs über NTF-Kanäle | offen (Empfehlung als Übergangsregel) | WP-445 |
+| [E-76](#e-76) | GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis | offen (Empfehlung als Übergangsregel) | WP-447, WP-448, WP-450, WP-451, WP-452, WP-454, WP-595 |
+| [E-77](#e-77) | NFR-06 „Logs 30 Tage“ in den Auslieferungen | offen (Empfehlung als Übergangsregel) | WP-455 |
+| [E-78](#e-78) | CI-06: Berechtigung der einheitlichen CI-Historie | offen (Empfehlung als Übergangsregel) | WP-473 |
+| [E-79](#e-79) | NFR-04: Verlust von Metrik-Samples und Traps bei Upload-Fehlern | offen (Empfehlung als Übergangsregel) | WP-482 |
+| [E-80](#e-80) | CI-12: Unmerge nach späteren Änderungen am Survivor | offen (Empfehlung als Übergangsregel) | WP-484 |
+| [E-81](#e-81) | DB-05: Verknüpfung eines CI mit einem Asset ohne Standort | offen (Empfehlung als Übergangsregel) | WP-485 |
+| [E-82](#e-82) | AUD-03: Datenmodell der ci_change-Zeilen | offen (Empfehlung als Übergangsregel) | WP-486, WP-487, WP-488 |
+| [E-83](#e-83) | IMP-02: Traversierung per Ebenen-BFS statt rekursivem CTE | offen (Empfehlung als Übergangsregel) | WP-489 |
+| [E-84](#e-84) | DIS-10: Poll-Intervalle je Scope und Zeitzone von Cron-Zeitplänen | offen (Empfehlung als Übergangsregel) | WP-494, WP-495 |
+| [E-85](#e-85) | IMP-09: ausgeschaltete Outlets in der Redundanzkennung | offen (Empfehlung als Übergangsregel) | WP-497 |
+| [E-86](#e-86) | Bearbeitungs- und Löschrechte org-weit geteilter Sichten (VIE-01) | offen (Empfehlung als Übergangsregel) | WP-517, WP-555 |
+| [E-87](#e-87) | CI-Detail unter gewähltem Client-/Site-Scope (WP-191) | offen (Empfehlung als Übergangsregel) | WP-523 |
+| [E-88](#e-88) | Nachweis der Browser-Vorversionen (UI-18, NFR-07) | offen (Empfehlung als Übergangsregel) | WP-530 |
+| [E-89](#e-89) | Review-Merge bei ambiguous_identity: synchroner Effekt mit gespiegeltem Job (JOB-04, Folge zu E-25) | offen (Empfehlung als Übergangsregel) | WP-554 |
+| [E-90](#e-90) | REC-07: Entfernen manuell gepflegter IPs und Interfaces | offen (Empfehlung als Übergangsregel) | WP-580 |
+| [E-91](#e-91) | NTF-03: Ausprägung von Abonnements und Org-Branding in Phase 1 | offen (Empfehlung als Übergangsregel) | WP-588 |
+| [E-92](#e-92) | Instanzattributdefinitionen und DB-03 („attribute_definition einzige Quelle“) | offen (Empfehlung als Übergangsregel) | WP-589 |
+| [E-93](#e-93) | Materialisierung org-globaler Attributdefinitionen (MET-16) | offen (Empfehlung als Übergangsregel) | WP-590 |
+| [E-94](#e-94) | Korrektur der Migration 000110 (Duplikat-Suffixe der Interfaces) | offen (Empfehlung als Übergangsregel) | WP-592 |
+| [E-95](#e-95) | Durchsetzung von allowed_source_types, allowed_target_types und cardinality (REL-01) | offen (Empfehlung als Übergangsregel) | WP-592 |
 
 ## E-59
 
@@ -49,11 +50,11 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Status:** offen (Empfehlung als Übergangsregel)
 
-**Frage:** Darf Phase 2 (WP-243 ff.) beginnen, bevor die Wiederholungsprüfung und die erneute Gate-Entscheidung G1 (WP-599 (`k-gate`)) vorliegen?
+**Frage:** Darf Phase 2 (WP-243 ff.) beginnen, bevor die Wiederholungsprüfung und die erneute Gate-Entscheidung G1 (WP-600 (`k-gate`)) vorliegen?
 
 **Optionen:**
 
-- 1: Phase 2 beginnt erst nach WP-599 (`k-gate`) (GO). Der Phase-2-Plan setzt den vollständigen Phase-1-Zielzustand voraus; GATE-02 verlangt alle [B]-Anforderungen PASS.
+- 1: Phase 2 beginnt erst nach WP-600 (`k-gate`) (GO). Der Phase-2-Plan setzt den vollständigen Phase-1-Zielzustand voraus; GATE-02 verlangt alle [B]-Anforderungen PASS.
 - 2: Phase 2 beginnt nach K0–K3 (alle P0/P1 behoben und ihre WPs wiederholt geprüft) parallel zu K4–K6; P2-Mängel werden in Kauf genommen, Konfliktgefahr in gemeinsam geänderten Dateien.
 - 3: Phase 2 beginnt sofort parallel zum Korrekturplan.
 
@@ -63,7 +64,7 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Betroffene IDs:** GATE-01, GATE-02, SEQ-01
 
-**Betroffene WPs:** WP-595, WP-596, WP-597, WP-598, WP-599
+**Betroffene WPs:** WP-596, WP-597, WP-598, WP-599, WP-600
 
 ## E-60
 
@@ -84,7 +85,7 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Betroffene IDs:** GATE-01
 
-**Betroffene WPs:** WP-599
+**Betroffene WPs:** WP-600
 
 ## E-61
 
@@ -145,35 +146,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: folgt der ADR, ist bei CI-Verschiebungen immer aktuell und vermeidet Schreibkosten auf komprimierten Chunks; Messwerte in der ADR.
 
-**Übergangsregel:** WP-351 (`t1-metric-views`) setzt Option 1 um; bei abweichender Entscheidung folgt ein eigenes WP.
+**Übergangsregel:** WP-350 (`t1-metric-views`) setzt Option 1 um; bei abweichender Entscheidung folgt ein eigenes WP.
 
 **Betroffene IDs:** TEN-02, TEN-05, TEC-06, MON-01
 
-**Betroffene WPs:** WP-351
+**Betroffene WPs:** WP-350
 
 ## E-64
-
-**Thema:** Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03)
-
-**Status:** offen (Empfehlung als Übergangsregel)
-
-**Frage:** RBA-03 nennt „Rechte = Vereinigung aller Rollen“ und „Scopes = Vereinigung der Scope-Mengen je Ebene“. Mit per AND verknüpften RLS-Dimensionen schneidet eine zusätzliche Site-Rolle den Client-Zugriff (Client-Rolle C1 + Site-Rolle S1 → nur C1 ∩ (S1 oder NULL)). Welche Sichtbarkeit gilt? Zu berücksichtigen ist F-014 (T6 WP-393 (`t6-site-grant-scope`)): Ein Site-Grant setzt künftig den Client des Standorts als Client-Dimension, sodass gemischte Grants die Client-Menge erweitern.
-
-**Optionen:**
-
-- 1. Vereinigung je Dimension, Dimensionen per AND (Wortlaut RBA-03, heutiges Verhalten, fail-closed); dokumentiert in API und Rollen-Doku.
-- 2. Vereinigung der (Client × Site)-Rechtecke je Grant; erfordert Scope-Tupel statt der GUC-Mengen aus TEN-04.
-- 3. Gemischte Zuweisungen, deren Site nicht in einem zugewiesenen Client liegt, werden mit 422 abgewiesen.
-
-**Empfehlung:** Option 1 mit Dokumentation; Option 2 nur als Phase-2-Thema, weil sie TEN-04 ändert.
-
-**Übergangsregel:** Option 1 gilt; WP-352 (`t1-team-scope`) fixiert sie per Integrationstest und dokumentiert sie.
-
-**Betroffene IDs:** RBA-03, TEN-04, TEN-05
-
-**Betroffene WPs:** WP-352
-
-## E-65
 
 **Thema:** Widerruf von Service-Account-Keys bei Deaktivierung des anlegenden Benutzers
 
@@ -189,101 +168,35 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 2: entspricht AUT-04/RBA-08 (der Key gehört dem Service-Account), hält Integrationen am Laufen und macht das Restrisiko sichtbar, dass die ausgeschiedene Person das Secret bei der Erstellung gesehen hat.
 
-**Übergangsregel:** Bis zur Entscheidung gilt Option 1 (fail-closed, Ist-Verhalten); WP-366 (`t2-deactivation-tenant`) schreibt sie mit Test und OpenAPI-Beschreibung fest. Wird Option 2 entschieden, ändern sich nur der Filter `service_account_id IS NULL` in `RevokeUserAPIKeys`, der Audit-Eintrag und die Testerwartung (im selben WP, wenn vor dem Merge entschieden, sonst Folgeänderung ≤ 0,5 PT).
+**Übergangsregel:** Bis zur Entscheidung gilt Option 1 (fail-closed, Ist-Verhalten); WP-359 (`t2-deactivation-tenant`) schreibt sie mit Test und OpenAPI-Beschreibung fest. Wird Option 2 entschieden, ändern sich nur der Filter `service_account_id IS NULL` in `RevokeUserAPIKeys`, der Audit-Eintrag und die Testerwartung (im selben WP, wenn vor dem Merge entschieden, sonst Folgeänderung ≤ 0,5 PT).
 
 **Betroffene IDs:** TLC-04, AUT-04, RBA-08
+
+**Betroffene WPs:** WP-359
+
+## E-65
+
+**Thema:** MFA-Pflicht im Login-Pfad ohne Keycloak-Admin-Client (AUT-09)
+
+**Status:** offen (Empfehlung als Übergangsregel)
+
+**Frage:** Der Login-Pfad (WP-366 (`t2-mfa-login-path`)) weist einem org_admin aus IdP-Gruppe oder Default-Rolle `mfa_required` über die Keycloak-Admin-API zu. Ohne `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` ist der Enforcer außerhalb von `development` fail-closed (WP-358 (`t2-mfa-role-sync`)). Das Standard-Compose läuft mit `RETICORA_ENVIRONMENT: production` (`deploy/docker-compose/docker-compose.yml:304`) und ohne Admin-Client (gesetzt nur in `frontend/e2e/fixtures/docker-compose.e2e.yml:21`); der Installer nimmt den Admin in die Gruppe `reticora-admin` auf (`install-cloud.sh:1543-1546`). Ein Aufruf für diese Gruppe beendete jeden Login des Installer-Admins mit 503 und bräche Onboarding- und install-smoke-Suite. Wie verhält sich der Login-Pfad, wenn kein Admin-Client konfiguriert ist?
+
+**Optionen:**
+
+- 1. Der Login-Pfad ruft `RequireMFA` nicht für die Gruppe `reticora-admin` auf, die `mfa_required` über den Realm trägt (WP-357 (`t2-mfa-accounts`)), sondern nur für die IdP-Gruppe `org_admin` und die Default-Rolle; `RETICORA_DEFAULT_PROVISION_ROLE=org_admin` ohne Admin-Client ist außerhalb von `development` ein Startfehler.
+- 2. Installer und Compose konfigurieren den Keycloak-Admin-Client; der Login-Pfad ruft `RequireMFA` für alle Wege zu org_admin auf.
+- 3. Fail-open im Login-Pfad: Ein Fehler des Enforcers wird geloggt und als Metrik gezählt, der Login läuft weiter.
+
+**Empfehlung:** Option 1: Die Gruppe `reticora-admin` ist nach WP-357 (`t2-mfa-accounts`) bereits über den Realm abgesichert (der Installer-Admin trägt zusätzlich die Realm-Rolle org_admin mit dem Komposit `mfa_required`, `install-cloud.sh:1541`); ein Aufruf brächte dort keinen Schutzgewinn, sperrte aber den Admin jeder Standardinstallation aus. Die übrigen Wege bleiben fail-closed. Option 3 lässt im Fehlerfall einen org_admin ohne MFA zu (AUT-09 [B]); Option 2 erweitert Installer und Compose um ein weiteres Admin-Credential.
+
+**Übergangsregel:** WP-366 (`t2-mfa-login-path`) setzt Option 1 um. Bei Option 2 oder 3 wird WP-366 (`t2-mfa-login-path`) vor Beginn angepasst (Option 2: Installer- und Compose-Änderung als eigenes WP vor WP-366 (`t2-mfa-login-path`), Ausnahme für `reticora-admin` und Startfehler entfallen).
+
+**Betroffene IDs:** AUT-09
 
 **Betroffene WPs:** WP-366
 
 ## E-66
-
-**Thema:** Credentials eines Discovery-Scopes ohne credential_ids
-
-**Status:** offen (Empfehlung als Übergangsregel)
-
-**Frage:** Welche Credentials erhält der Collector für einen aktiven Scope mit leerem credential_ids (Scope aus dem UI-Formular ohne Auswahl, angenommener scope_suggested-Vorschlag), und was erhält ein Collector ohne aktive Scopes? DIS-09 nennt credential_ids als Scope-Feld, COL-02 verlangt „nur Scope-relevante Credentials“; den leeren Fall legen beide nicht fest.
-
-**Optionen:**
-
-- A: Scope ohne credential_ids nutzt die Credentials seines Clients und die org-weiten (client_id NULL); ohne aktive Scopes leeres Bundle.
-- B: Scope ohne credential_ids erhält keine Credentials (nur unauthentifizierte Protokolle); Formular und Bestätigungsablauf verlangen eine Auswahl.
-- C: Org-weite Liste von Standard-Credentials in den Discovery-Einstellungen; Scope ohne credential_ids nutzt diese Liste.
-
-**Empfehlung:** Option A: entspricht dem bisherigen Verhalten ohne Scopes, hält das Zero-Config-Onboarding nach INS-06 (Vorschlag bestätigen, Infrastruktur erscheint) funktionsfähig und begrenzt die Geheimnisse auf den Client des Scopes; der Defekttest TestAuditBundleCredentialSelection kodiert sie.
-
-**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-380 (`t4-bundle-select`) und WP-381 (`t4-cred-scope`) setzen sie um. Bei Option B oder C ändert ein Folge-WP nur die Auswahlregel in VerifyBundleTarget/CollectorScopes und den Testfall „Scope ohne credential_ids“.
-
-**Betroffene IDs:** DIS-09, COL-02, INS-06
-
-**Betroffene WPs:** WP-380, WP-381, WP-497, WP-545
-
-## E-67
-
-**Thema:** Credential-Art für das NAS-Plugin (Synology DSM)
-
-**Status:** offen (Empfehlung als Übergangsregel)
-
-**Frage:** Mit welcher Credential-Art meldet sich das NAS-Plugin an, nachdem der Alias nas→ssh entfällt (F-028)? COL-02 verweist auf „Typen wie v2“; die v2-Texte fehlen im Repository (E-02 offen), die Arten in credential.go kennen kein NAS.
-
-**Optionen:**
-
-- A: Neue Art nas (Benutzer/Passwort), Migration der CHECK-Constraint von credential.kind, OpenAPI-Enum.
-- B: NAS nutzt ausschließlich am Scope explizit gebundene Credentials der Art ssh_password (keine Default-Zuordnung).
-- C: NAS ohne Anmeldung (nur unauthentifizierte Daten) bis zur Lieferung der v2-Texte.
-
-**Empfehlung:** Option A: trennt NAS-Konten von SSH-Root-Konten (Least Privilege, COL-02), passt zur Namespace-Regel des Collectors und lässt sich mit den v2-Texten nachträglich abgleichen.
-
-**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-383 (`t4-nas-tls`) setzt sie um. Zwischen dem Merge von WP-381 (`t4-cred-scope`) und WP-383 (`t4-nas-tls`) erhält das NAS-Plugin keine Credentials (fail-closed).
-
-**Betroffene IDs:** COL-02, DIS-04
-
-**Betroffene WPs:** WP-383
-
-## E-68
-
-**Thema:** TEC-15: Installationsquelle für die Signaturprüfung vor der Installation
-
-**Status:** offen (Empfehlung als Übergangsregel)
-
-**Frage:** Welche Artefakte installiert der Installer standardmäßig, damit 'Signaturprüfung vor Installation' greift: die signierten Release-Images und -Binaries oder einen lokalen Quellbuild, der nicht signiert sein kann?
-
-**Optionen:**
-
-- Standard sind die signierten Release-Artefakte (Images per 'cosign verify', Collector-Binary per 'cosign verify-blob', Quelle nur von einem Release-Tag mit Manifestprüfung, fail-closed); der Quellbuild bleibt per ausdrücklichem Schalter --build-from-source mit Warnung 'nicht signaturgeprüft'.
-- Standard bleibt der Quellbuild; geprüft werden ein signierter Quell-Tarball des Releases (cosign verify-blob) und die Go-Toolchain (sha256); die lokal gebauten Images sind nicht signiert.
-- Signaturprüfung nur im Registry-Modus (RETICORA_IMAGE_REGISTRY); der Quellbuild bleibt ungeprüft.
-
-**Empfehlung:** Option 1.
-
-**Übergangsregel:** WP-390 (`t5-install-signature`) setzt die fail-closed-Prüfung im Release-Modus von install-cloud.sh, für den Collector-Release-Download in install-vm.sh und für den Quellbezug von einem Release-Tag in install.sh und install-vm.sh um (in allen Optionen nötig) und lässt den Standard unverändert; der Quellbuild meldet 'nicht signaturgeprüft'. Nach Entscheidung für Option 1 stellt WP-391 (`t5-install-default`) den Standard um; bei Option 2 oder 3 entfällt WP-391 (`t5-install-default`) mit Vermerk.
-
-**Betroffene IDs:** TEC-15, COL-06, INS-01
-
-**Betroffene WPs:** WP-390, WP-391, WP-456
-
-## E-69
-
-**Thema:** LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten
-
-**Status:** offen (Empfehlung als Übergangsregel)
-
-**Frage:** Darf eine Site gelöscht werden, an der VLANs, Subnetze, Collectoren, Discovery-Scopes, Agent-Enrollment-Tokens oder Merge-Tombstones hängen? LOC-11 nennt nur CIs, Assets, Mounts und Kinder; heute kaskadieren bzw. lösen die Fremdschlüssel diese Objekte still (F-024).
-
-**Optionen:**
-
-- 1. 409 mit den Abhängigkeitsarten vlan, subnet, collector, discovery_scope, agent_enrollment_token, ci_merge (FK RESTRICT); die Objekte müssen vorher entfernt oder umgehängt werden. Abgelaufene bzw. widerrufene Tokens und ci_merge-Tombstones nach tombstone_until blockieren nicht und werden in der Lösch-Transaktion entfernt; Folge: eine Site mit einem Merge ist bis zu 12 Monate (tombstone_until, 000131) nicht löschbar, auch ohne CIs.
-- 2. Löschen erlaubt; die Objekte werden org-weit (site_id NULL), VLANs und Tokens werden nicht mehr gelöscht, das Lösen wird je Objekt auditiert.
-- 3. Explizites Lösen per Parameter detach=true, sonst 409.
-
-**Empfehlung:** Option 1: entspricht dem Schutzgedanken von LOC-11 und OVR-01 (kein stiller Verlust); die bis zu 12 Monate lange Sperre durch Tombstones ist hinnehmbar, weil sie mit der 301-Weiterleitung des Victims nach CI-12 (12 Monate) endet; Option 3 kann später als Erweiterung folgen.
-
-**Übergangsregel:** WP-404 (`t3-loc-delete-409`) setzt Option 1 um. Entscheidet der Auftraggeber Option 2 oder 3, betrifft das nur die Abhängigkeitsliste in `locations/dependencies.go` und die FK-Aktionen einer Folgemigration.
-
-**Betroffene IDs:** LOC-11
-
-**Betroffene WPs:** WP-404
-
-## E-70
 
 **Thema:** API-07/API-08: Bulk-Statusänderung bei erzwungenem If-Match
 
@@ -299,13 +212,123 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1 für Phase 1 (API-07: If-Match optional und per Org-Setting erzwingbar für Einzeländerungen; API-08 ohne Versionsliste); Option 2 als spätere Erweiterung.
 
-**Übergangsregel:** WP-405 (`t3-bulk-manual`) setzt Option 1 um.
+**Übergangsregel:** WP-367 (`t3-bulk-manual`) setzt Option 1 um.
 
 **Betroffene IDs:** API-07, API-08, OVR-03
 
-**Betroffene WPs:** WP-405
+**Betroffene WPs:** WP-367
+
+## E-67
+
+**Thema:** Credentials eines Discovery-Scopes ohne credential_ids
+
+**Status:** offen (Empfehlung als Übergangsregel)
+
+**Frage:** Welche Credentials erhält der Collector für einen aktiven Scope mit leerem credential_ids (Scope aus dem UI-Formular ohne Auswahl, angenommener scope_suggested-Vorschlag), und was erhält ein Collector ohne aktive Scopes? DIS-09 nennt credential_ids als Scope-Feld, COL-02 verlangt „nur Scope-relevante Credentials“; den leeren Fall legen beide nicht fest.
+
+**Optionen:**
+
+- A: Scope ohne credential_ids nutzt die Credentials seines Clients und die org-weiten (client_id NULL); ohne aktive Scopes leeres Bundle.
+- B: Scope ohne credential_ids erhält keine Credentials (nur unauthentifizierte Protokolle); Formular und Bestätigungsablauf verlangen eine Auswahl.
+- C: Org-weite Liste von Standard-Credentials in den Discovery-Einstellungen; Scope ohne credential_ids nutzt diese Liste.
+
+**Empfehlung:** Option A: entspricht dem bisherigen Verhalten ohne Scopes, hält das Zero-Config-Onboarding nach INS-06 (Vorschlag bestätigen, Infrastruktur erscheint) funktionsfähig und begrenzt die Geheimnisse auf den Client des Scopes; der Defekttest TestAuditBundleCredentialSelection kodiert sie.
+
+**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-375 (`t4-bundle-select`) und WP-376 (`t4-cred-scope`) setzen sie um. Bei Option B oder C ändert ein Folge-WP nur die Auswahlregel in VerifyBundleTarget/CollectorScopes und den Testfall „Scope ohne credential_ids“.
+
+**Betroffene IDs:** DIS-09, COL-02, INS-06
+
+**Betroffene WPs:** WP-375, WP-376, WP-495, WP-541
+
+## E-68
+
+**Thema:** Credential-Art für das NAS-Plugin (Synology DSM)
+
+**Status:** offen (Empfehlung als Übergangsregel)
+
+**Frage:** Mit welcher Credential-Art meldet sich das NAS-Plugin an, nachdem der Alias nas→ssh entfällt (F-028)? COL-02 verweist auf „Typen wie v2“; die v2-Texte fehlen im Repository (E-02 offen), die Arten in credential.go kennen kein NAS.
+
+**Optionen:**
+
+- A: Neue Art nas (Benutzer/Passwort), Migration der CHECK-Constraint von credential.kind, OpenAPI-Enum.
+- B: NAS nutzt ausschließlich am Scope explizit gebundene Credentials der Art ssh_password (keine Default-Zuordnung).
+- C: NAS ohne Anmeldung (nur unauthentifizierte Daten) bis zur Lieferung der v2-Texte.
+
+**Empfehlung:** Option A: trennt NAS-Konten von SSH-Root-Konten (Least Privilege, COL-02), passt zur Namespace-Regel des Collectors und lässt sich mit den v2-Texten nachträglich abgleichen.
+
+**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-378 (`t4-nas-tls`) setzt sie um. Zwischen dem Merge von WP-376 (`t4-cred-scope`) und WP-378 (`t4-nas-tls`) erhält das NAS-Plugin keine Credentials (fail-closed).
+
+**Betroffene IDs:** COL-02, DIS-04
+
+**Betroffene WPs:** WP-378
+
+## E-69
+
+**Thema:** TEC-15: Installationsquelle für die Signaturprüfung vor der Installation
+
+**Status:** offen (Empfehlung als Übergangsregel)
+
+**Frage:** Welche Artefakte installiert der Installer standardmäßig, damit 'Signaturprüfung vor Installation' greift: die signierten Release-Images und -Binaries oder einen lokalen Quellbuild, der nicht signiert sein kann?
+
+**Optionen:**
+
+- Standard sind die signierten Release-Artefakte (Images per 'cosign verify', Collector-Binary per 'cosign verify-blob', Quelle nur von einem Release-Tag mit Manifestprüfung, fail-closed); der Quellbuild bleibt per ausdrücklichem Schalter --build-from-source mit Warnung 'nicht signaturgeprüft'.
+- Standard bleibt der Quellbuild; geprüft werden ein signierter Quell-Tarball des Releases (cosign verify-blob) und die Go-Toolchain (sha256); die lokal gebauten Images sind nicht signiert.
+- Signaturprüfung nur im Registry-Modus (RETICORA_IMAGE_REGISTRY); der Quellbuild bleibt ungeprüft.
+
+**Empfehlung:** Option 1.
+
+**Übergangsregel:** WP-385 (`t5-install-signature`) setzt die fail-closed-Prüfung im Release-Modus von install-cloud.sh, für den Collector-Release-Download in install-vm.sh und für den Quellbezug von einem Release-Tag in install.sh und install-vm.sh um (in allen Optionen nötig) und lässt den Standard unverändert; der Quellbuild meldet 'nicht signaturgeprüft'. Nach Entscheidung für Option 1 stellt WP-386 (`t5-install-default`) den Standard um; bei Option 2 oder 3 entfällt WP-386 (`t5-install-default`) mit Vermerk.
+
+**Betroffene IDs:** TEC-15, COL-06, INS-01
+
+**Betroffene WPs:** WP-385, WP-386, WP-595
+
+## E-70
+
+**Thema:** Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03)
+
+**Status:** offen (Empfehlung als Übergangsregel)
+
+**Frage:** RBA-03 nennt „Rechte = Vereinigung aller Rollen“ und „Scopes = Vereinigung der Scope-Mengen je Ebene“. Mit per AND verknüpften RLS-Dimensionen schneidet eine zusätzliche Site-Rolle den Client-Zugriff (Client-Rolle C1 + Site-Rolle S1 → nur C1 ∩ (S1 oder NULL)). Welche Sichtbarkeit gilt? Zu berücksichtigen ist F-014 (T6 WP-388 (`t6-site-grant-scope`)): Ein Site-Grant setzt künftig den Client des Standorts als Client-Dimension, sodass gemischte Grants die Client-Menge erweitern.
+
+**Optionen:**
+
+- 1. Vereinigung je Dimension, Dimensionen per AND (Wortlaut RBA-03, heutiges Verhalten, fail-closed); dokumentiert in API und Rollen-Doku.
+- 2. Vereinigung der (Client × Site)-Rechtecke je Grant; erfordert Scope-Tupel statt der GUC-Mengen aus TEN-04.
+- 3. Gemischte Zuweisungen, deren Site nicht in einem zugewiesenen Client liegt, werden mit 422 abgewiesen.
+
+**Empfehlung:** Option 1 mit Dokumentation; Option 2 nur als Phase-2-Thema, weil sie TEN-04 ändert.
+
+**Übergangsregel:** Option 1 gilt; WP-389 (`t1-team-scope`) fixiert sie per Integrationstest und dokumentiert sie.
+
+**Betroffene IDs:** RBA-03, TEN-04, TEN-05
+
+**Betroffene WPs:** WP-389
 
 ## E-71
+
+**Thema:** LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten
+
+**Status:** offen (Empfehlung als Übergangsregel)
+
+**Frage:** Darf eine Site gelöscht werden, an der VLANs, Subnetze, Collectoren, Discovery-Scopes, Agent-Enrollment-Tokens oder Merge-Tombstones hängen? LOC-11 nennt nur CIs, Assets, Mounts und Kinder; heute kaskadieren bzw. lösen die Fremdschlüssel diese Objekte still (F-024).
+
+**Optionen:**
+
+- 1. 409 mit den Abhängigkeitsarten vlan, subnet, collector, discovery_scope, agent_enrollment_token, ci_merge (FK RESTRICT); die Objekte müssen vorher entfernt oder umgehängt werden. Abgelaufene bzw. widerrufene Tokens und ci_merge-Tombstones nach tombstone_until blockieren nicht und werden in der Lösch-Transaktion entfernt; Folge: eine Site mit einem Merge ist bis zu 12 Monate (tombstone_until, 000131) nicht löschbar, auch ohne CIs.
+- 2. Löschen erlaubt; die Objekte werden org-weit (site_id NULL), VLANs und Tokens werden nicht mehr gelöscht, das Lösen wird je Objekt auditiert.
+- 3. Explizites Lösen per Parameter detach=true, sonst 409.
+
+**Empfehlung:** Option 1: entspricht dem Schutzgedanken von LOC-11 und OVR-01 (kein stiller Verlust); die bis zu 12 Monate lange Sperre durch Tombstones ist hinnehmbar, weil sie mit der 301-Weiterleitung des Victims nach CI-12 (12 Monate) endet; Option 3 kann später als Erweiterung folgen.
+
+**Übergangsregel:** WP-409 (`t3-loc-delete-409`) setzt Option 1 um. Entscheidet der Auftraggeber Option 2 oder 3, betrifft das nur die Abhängigkeitsliste in `locations/dependencies.go` und die FK-Aktionen einer Folgemigration.
+
+**Betroffene IDs:** LOC-11
+
+**Betroffene WPs:** WP-409
+
+## E-72
 
 **Thema:** Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up)
 
@@ -324,9 +347,9 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Betroffene IDs:** TEN-03, MGT-01
 
-**Betroffene WPs:** WP-420, WP-561
+**Betroffene WPs:** WP-423, WP-560, WP-574
 
-## E-72
+## E-73
 
 **Thema:** Indizierte Attributfilter unter Row-Level-Security
 
@@ -343,13 +366,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option A, solange Migrationen mit der Installer-Rolle (Superuser) laufen (Compose, VM, K8s mit eigenem PostgreSQL): kleinster Eingriff ohne Mehrkosten im Ingest-Pfad (NFR-03). Option D scheidet trotz fehlender Superuser-Pflicht aus: Attributdefinitionen gelten je Organisation (citype.IndexStatement), jede durchsuchbare Definition legte eine Spalte der gemeinsamen Tabelle ci an (PostgreSQL-Grenze 1.600 Spalten einschließlich gelöschter, bei 500 Organisationen nach NFR-01 absehbar erreicht), und jeder Neuaufbau schreibt ci mit ACCESS-EXCLUSIVE-Sperre um und blockiert den Ingest. Option B nur, wenn für G1 ein Betrieb ohne Superuser (Managed PostgreSQL) zugesagt wird.
 
-**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-428 (`t4-attr-filter-index`) setzt sie um, die Migration bricht ohne Superuser mit Hinweis auf Option B ab.
+**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-431 (`t4-attr-filter-index`) setzt sie um, die Migration bricht ohne Superuser mit Hinweis auf Option B ab.
 
 **Betroffene IDs:** ABN-02, NFR-02, NFR-01
 
-**Betroffene WPs:** WP-428
+**Betroffene WPs:** WP-431
 
-## E-73
+## E-74
 
 **Thema:** OPS-04 in Kubernetes: Datenbankseite der WAL-Archivierung
 
@@ -365,13 +388,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: entspricht E-29 ('Compose und Kubernetes'), nutzt das bereits gebaute und signierte Image und ist per kind-Smoke prüfbar.
 
-**Übergangsregel:** WP-438 (`t5-k8s-wal`) setzt Option 1 als optionale Komponente um, die das prod-Overlay einbindet; eine spätere Entscheidung für Option 2 oder 3 ersetzt nur die Komponente, die Render-Assertion und den kind-Fall.
+**Übergangsregel:** WP-441 (`t5-k8s-wal`) setzt Option 1 als optionale Komponente um, die das prod-Overlay einbindet; eine spätere Entscheidung für Option 2 oder 3 ersetzt nur die Komponente, die Render-Assertion und den kind-Fall.
 
 **Betroffene IDs:** OPS-04, NFR-05, OPS-03
 
-**Betroffene WPs:** WP-438, WP-455
+**Betroffene WPs:** WP-441, WP-544
 
-## E-74
+## E-75
 
 **Thema:** OPS-05: Alarmierung des Betriebs über NTF-Kanäle
 
@@ -387,13 +410,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1.
 
-**Übergangsregel:** WP-443 (`t5-ntf-bridge`) setzt Option 1 um; ohne konfigurierte Betreiber-Organisation antwortet die Brücke 404 und Alertmanager nutzt den E-Mail-Receiver aus WP-441 (`t5-alerting-config`).
+**Übergangsregel:** WP-445 (`t5-ntf-bridge`) setzt Option 1 um; ohne konfigurierte Betreiber-Organisation antwortet die Brücke 404 und Alertmanager nutzt den E-Mail-Receiver aus WP-443 (`t5-alerting-config`).
 
 **Betroffene IDs:** OPS-05
 
-**Betroffene WPs:** WP-443
+**Betroffene WPs:** WP-445
 
-## E-75
+## E-76
 
 **Thema:** GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis
 
@@ -409,13 +432,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1; Option 2 nur, wenn der Auftraggeber G1 vor Eingang der Lieferungen ausdrücklich freigeben will.
 
-**Übergangsregel:** Bis zur Entscheidung führt WP-446 (`t5-trace-evidence`) alle betroffenen IDs (AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01, GATE-03 Pentest-Anteil, GATE-02) in docs/acceptance/g1-ausnahmen.csv mit art=erklaerung, und WP-447 (`t5-gate-consistency`) führt sie in docs/acceptance/g1-gate.md als 'offen' mit Begründung; das ist mit Option 1 und 2 vereinbar. Keine ID steht ohne Nachweis auf PASS, das Gate-Ergebnis lautet 'offen'. Jedes Lieferungs-WP entfernt seine Zeilen; die GATE-02-Zeile entfernt WP-456 (`t5-rc-evidence`), wenn keine andere Ausnahme der Art erklaerung oder luecke besteht.
+**Übergangsregel:** Bis zur Entscheidung führt WP-447 (`t5-trace-evidence`) alle betroffenen IDs (AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01, GATE-03 Pentest-Anteil, GATE-02) in docs/acceptance/g1-ausnahmen.csv mit art=erklaerung, und WP-448 (`t5-gate-consistency`) führt sie in docs/acceptance/g1-gate.md als 'offen' mit Begründung; das ist mit Option 1 und 2 vereinbar. Keine ID steht ohne Nachweis auf PASS, das Gate-Ergebnis lautet 'offen'. Jedes Lieferungs-WP entfernt seine Zeilen; die GATE-02-Zeile entfernt WP-595 (`t5-rc-evidence`), wenn keine andere Ausnahme der Art erklaerung oder luecke besteht.
 
 **Betroffene IDs:** GATE-02, GATE-03, NFR-08, NFR-09, ABN-01, AUT-05, AUT-06, NET-04, GLO-11
 
-**Betroffene WPs:** WP-446, WP-447, WP-449, WP-450, WP-451, WP-453, WP-456
+**Betroffene WPs:** WP-447, WP-448, WP-450, WP-451, WP-452, WP-454, WP-595
 
-## E-76
+## E-77
 
 **Thema:** NFR-06 „Logs 30 Tage“ in den Auslieferungen
 
@@ -431,13 +454,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: zeitbasiert ohne zusätzlichen Dienst. Der Drop-in wirkt allerdings hostweit auf das gesamte Journal (auch Nicht-Reticora-Dienste); der Installer weist beim Anlegen darauf hin, docs/ops/workers.md beschreibt die Wirkung. Option 3 erfüllt die Zeitgrenze nicht, Option 2 erhöht Betriebsaufwand und Ressourcenbedarf des Mindest-Sizings (INS-07).
 
-**Übergangsregel:** WP-457 (`t6-log-retention`) startet mit der für alle Optionen nötigen Logging-Begrenzung jedes Compose-Dienstes und der Dokumentation und setzt Option 1 um; wird Option 2 gewählt, folgt der Log-Store als eigenes WP.
+**Übergangsregel:** WP-455 (`t6-log-retention`) startet mit der für alle Optionen nötigen Logging-Begrenzung jedes Compose-Dienstes und der Dokumentation und setzt Option 1 um; wird Option 2 gewählt, folgt der Log-Store als eigenes WP.
 
 **Betroffene IDs:** NFR-06
 
-**Betroffene WPs:** WP-457
+**Betroffene WPs:** WP-455
 
-## E-77
+## E-78
 
 **Thema:** CI-06: Berechtigung der einheitlichen CI-Historie
 
@@ -453,13 +476,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: erfüllt CI-06 für alle Leserollen, erweitert keine Rolle (E-13) und lässt AUD-05 (audit:read für das Audit-Log) unberührt.
 
-**Übergangsregel:** WP-475 (`t3-history-access`) setzt Option 1 um; bis zur Bestätigung gilt sie vorläufig wie E-13.
+**Übergangsregel:** WP-473 (`t3-history-access`) setzt Option 1 um; bis zur Bestätigung gilt sie vorläufig wie E-13.
 
 **Betroffene IDs:** CI-06, AUD-05, RBA-02
 
-**Betroffene WPs:** WP-475
+**Betroffene WPs:** WP-473
 
-## E-78
+## E-79
 
 **Thema:** NFR-04: Verlust von Metrik-Samples und Traps bei Upload-Fehlern
 
@@ -474,13 +497,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: COL-05 bindet den Spool an die Reconciliation nach observed_at (GLO-12), also an Discovery-Ergebnisse; der Verlust von Samples und Traps wird sichtbar statt still.
 
-**Übergangsregel:** WP-484 (`t3-spool-poison`) setzt Option 1 um; Option 2 als eigenes WP.
+**Übergangsregel:** WP-482 (`t3-spool-poison`) setzt Option 1 um; Option 2 als eigenes WP.
 
 **Betroffene IDs:** NFR-04, COL-05
 
-**Betroffene WPs:** WP-484
+**Betroffene WPs:** WP-482
 
-## E-79
+## E-80
 
 **Thema:** CI-12: Unmerge nach späteren Änderungen am Survivor
 
@@ -496,13 +519,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: kein stiller Verlust, eindeutiger Vertrag, geringe Komplexität; entspricht der Empfehlung des Befunds.
 
-**Übergangsregel:** WP-486 (`t3-unmerge-conflict`) setzt Option 1 um.
+**Übergangsregel:** WP-484 (`t3-unmerge-conflict`) setzt Option 1 um.
 
 **Betroffene IDs:** CI-12
 
-**Betroffene WPs:** WP-486
+**Betroffene WPs:** WP-484
 
-## E-80
+## E-81
 
 **Thema:** DB-05: Verknüpfung eines CI mit einem Asset ohne Standort
 
@@ -518,13 +541,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: kein Datenverlust, das Asset bleibt kanonisch (DB-05), keine zusätzliche Bedienhürde.
 
-**Übergangsregel:** WP-487 (`t3-asset-link-location`) setzt Option 1 um; ein Wechsel auf Option 2 betrifft nur `ci/pg_repository.go`, `ci/service.go` und den zugehörigen Test.
+**Übergangsregel:** WP-485 (`t3-asset-link-location`) setzt Option 1 um; ein Wechsel auf Option 2 betrifft nur `ci/pg_repository.go`, `ci/service.go` und den zugehörigen Test.
 
 **Betroffene IDs:** DB-05, AST-04
 
-**Betroffene WPs:** WP-487
+**Betroffene WPs:** WP-485
 
-## E-81
+## E-82
 
 **Thema:** AUD-03: Datenmodell der ci_change-Zeilen
 
@@ -540,13 +563,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 2: erfüllt AUD-03 in Lesesicht und Ingest (eine Änderung je Record), ohne API-07 und den Merge umzubauen.
 
-**Übergangsregel:** WP-488 (`t3-aud03-schema`), WP-489 (`t3-aud03-history`) und WP-490 (`t3-aud03-ingest`) setzen Option 2 um; die Migration ist additiv, eine spätere Wahl von Option 1 baut darauf auf.
+**Übergangsregel:** WP-486 (`t3-aud03-schema`), WP-487 (`t3-aud03-history`) und WP-488 (`t3-aud03-ingest`) setzen Option 2 um; die Migration ist additiv, eine spätere Wahl von Option 1 baut darauf auf.
 
 **Betroffene IDs:** AUD-03, CI-11, API-07
 
-**Betroffene WPs:** WP-488, WP-489, WP-490
+**Betroffene WPs:** WP-486, WP-487, WP-488
 
-## E-82
+## E-83
 
 **Thema:** IMP-02: Traversierung per Ebenen-BFS statt rekursivem CTE
 
@@ -561,13 +584,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: NFR-02 ist mit der BFS belegt; ein Rückbau gefährdet den Lastnachweis ohne fachlichen Gewinn.
 
-**Übergangsregel:** WP-491 (`t3-impact-heuristic`) lässt die BFS unverändert und validiert nur den depth-Parameter.
+**Übergangsregel:** WP-489 (`t3-impact-heuristic`) lässt die BFS unverändert und validiert nur den depth-Parameter.
 
 **Betroffene IDs:** IMP-02, NFR-02
 
-**Betroffene WPs:** WP-491
+**Betroffene WPs:** WP-489
 
-## E-83
+## E-84
 
 **Thema:** DIS-10: Poll-Intervalle je Scope und Zeitzone von Cron-Zeitplänen
 
@@ -583,13 +606,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option A: deckt sich mit dem Datenmodell aus DIS-09 (ein schedule je Scope) und den Mindestwerten aus DIS-10; Cron in Ortszeit vermeidet die Verschiebung der Scan-Fenster um 1–2 h für deutsche Organisationen.
 
-**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-496 (`t4-scope-schedule`) wertet Cron in der Zeitzone der Org aus, WP-497 (`t4-scope-form-ui`) zeigt den Hinweis. Option B erfordert ein Folge-WP mit Migration.
+**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-494 (`t4-scope-schedule`) wertet Cron in der Zeitzone der Org aus, WP-495 (`t4-scope-form-ui`) zeigt den Hinweis. Option B erfordert ein Folge-WP mit Migration.
 
 **Betroffene IDs:** DIS-10, DIS-09
 
-**Betroffene WPs:** WP-496, WP-497
+**Betroffene WPs:** WP-494, WP-495
 
-## E-84
+## E-85
 
 **Thema:** IMP-09: ausgeschaltete Outlets in der Redundanzkennung
 
@@ -605,13 +628,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option A: die Verkabelung bleibt für Impact und Planung sichtbar, die Redundanzaussage entspricht der tatsächlichen Versorgung.
 
-**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-499 (`t4-power-redundancy`) setzt sie um.
+**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-497 (`t4-power-redundancy`) setzt sie um.
 
 **Betroffene IDs:** IMP-09
 
-**Betroffene WPs:** WP-499
+**Betroffene WPs:** WP-497
 
-## E-85
+## E-86
 
 **Thema:** Bearbeitungs- und Löschrechte org-weit geteilter Sichten (VIE-01)
 
@@ -627,13 +650,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: eine Regel für alle geteilten Sichten, keine stille Änderung fremder Sichten; die Übernahme verwaister Sichten gehört zu VIE-02 [P2].
 
-**Übergangsregel:** WP-520 (`t7-saved-views-api`) setzt Option 1 um; bei Option 2 oder 3 werden nur das Prädikat in `savedview/pg_repository.go`, die OpenAPI-Beschreibung und `TestAuditT7SavedViewEditDeleteRights` angepasst.
+**Übergangsregel:** WP-517 (`t7-saved-views-api`) setzt Option 1 um; bei Option 2 oder 3 werden nur das Prädikat in `savedview/pg_repository.go`, die OpenAPI-Beschreibung und `TestAuditT7SavedViewEditDeleteRights` angepasst.
 
 **Betroffene IDs:** VIE-01
 
-**Betroffene WPs:** WP-520, WP-556
+**Betroffene WPs:** WP-517, WP-555
 
-## E-86
+## E-87
 
 **Thema:** CI-Detail unter gewähltem Client-/Site-Scope (WP-191)
 
@@ -649,13 +672,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: Deep-Links und Suche bleiben nutzbar, der Widerspruch zum gewählten Bereich ist sichtbar, und es entsteht keine Scheinsicherheit, weil die Rechte serverseitig bleiben.
 
-**Übergangsregel:** WP-526 (`t7-ui-scope-detail`) setzt Option 1 um; entscheidet der Auftraggeber anders, werden nur `ScopeBanner`, `CIRelationshipsCard` und ihre Tests angepasst.
+**Übergangsregel:** WP-523 (`t7-ui-scope-detail`) setzt Option 1 um; entscheidet der Auftraggeber anders, werden nur `ScopeBanner`, `CIRelationshipsCard` und ihre Tests angepasst.
 
 **Betroffene IDs:** UI-01, UI-02, UI-03, UI-04, UI-05, UI-07, UI-08, UI-09, UI-10
 
-**Betroffene WPs:** WP-526
+**Betroffene WPs:** WP-523
 
-## E-87
+## E-88
 
 **Thema:** Nachweis der Browser-Vorversionen (UI-18, NFR-07)
 
@@ -671,19 +694,19 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: ohne externen Dienst, reproduzierbar in CI, deckt alle Engines ab; Edge/Safari n-1 bleiben bis GA eine bekannte Einschränkung.
 
-**Übergangsregel:** WP-533 (`t7-browser-matrix`) setzt Option 1 um; bei Option 2 wird nur der Vorversions-Job ersetzt, bei Option 3 durch eine Checkliste in `docs/README.md`.
+**Übergangsregel:** WP-530 (`t7-browser-matrix`) setzt Option 1 um; bei Option 2 wird nur der Vorversions-Job ersetzt, bei Option 3 durch eine Checkliste in `docs/README.md`.
 
 **Betroffene IDs:** UI-18, NFR-07
 
-**Betroffene WPs:** WP-533
+**Betroffene WPs:** WP-530
 
-## E-88
+## E-89
 
 **Thema:** Review-Merge bei ambiguous_identity: synchroner Effekt mit gespiegeltem Job (JOB-04, Folge zu E-25)
 
 **Status:** offen (Empfehlung als Übergangsregel)
 
-**Frage:** Genügt für die Review-Auflösung „merge“ bei ambiguous_identity ein im Request ausgeführter Effekt mit gespiegeltem Jobdatensatz (`review.merge`), oder muss der Merge eingereiht werden (202 mit Job-Location)? Merge bei probable_duplicate läuft nach WP-480 (`t3-review-merge`) über den Job `ci.merge`.
+**Frage:** Genügt für die Review-Auflösung „merge“ bei ambiguous_identity ein im Request ausgeführter Effekt mit gespiegeltem Jobdatensatz (`review.merge`), oder muss der Merge eingereiht werden (202 mit Job-Location)? Merge bei probable_duplicate läuft nach WP-478 (`t3-review-merge`) über den Job `ci.merge`.
 
 **Optionen:**
 
@@ -692,13 +715,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: ein Review-Merge betrifft ein Item und zwei CIs und bleibt im Request-Budget (NFR-02); JOB-04 fordert Jobs für große Operationen; der gespiegelte Job macht den Vorgang nachvollziehbar.
 
-**Übergangsregel:** Option 1 gilt für merge bei ambiguous_identity (review.merge); merge bei probable_duplicate läuft über den ci.merge-Job aus WP-480 (`t3-review-merge`), der review.merge-Spiegel übernimmt dessen Status. WP-555 (`t7-review-merge-job`) dokumentiert das als Nachtrag zu E-25 und korrigiert den Retry-Status. Bei Option 2 folgt ein eigenes WP (Queue-Art review.merge, 202-Vertrag, UI-Polling).
+**Übergangsregel:** Option 1 gilt für merge bei ambiguous_identity (review.merge); merge bei probable_duplicate läuft über den ci.merge-Job aus WP-478 (`t3-review-merge`), der review.merge-Spiegel übernimmt dessen Status. WP-554 (`t7-review-merge-job`) dokumentiert das als Nachtrag zu E-25 und korrigiert den Retry-Status. Bei Option 2 folgt ein eigenes WP (Queue-Art review.merge, 202-Vertrag, UI-Polling).
 
 **Betroffene IDs:** JOB-04, UI-16
 
-**Betroffene WPs:** WP-555
+**Betroffene WPs:** WP-554
 
-## E-89
+## E-90
 
 **Thema:** REC-07: Entfernen manuell gepflegter IPs und Interfaces
 
@@ -713,13 +736,13 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: vereinbar mit REC-03 und OVR-02 (Automation löscht keine manuellen Daten).
 
-**Übergangsregel:** WP-581 (`t3-discovery-p3`) setzt Option 1 um; Interfaces erhalten dafür eine Herkunftsspalte origin: Bestand origin = 'manual', der Discovery-Abgleich setzt 'discovered' für jedes gemeldete Interface; nur origin = 'discovered' zählt Fehlläufe.
+**Übergangsregel:** WP-580 (`t3-discovery-p3`) setzt Option 1 um; Interfaces erhalten dafür eine Herkunftsspalte origin: Bestand origin = 'manual', der Discovery-Abgleich setzt 'discovered' für jedes gemeldete Interface; nur origin = 'discovered' zählt Fehlläufe.
 
 **Betroffene IDs:** REC-07, REC-03, OVR-02
 
-**Betroffene WPs:** WP-581
+**Betroffene WPs:** WP-580
 
-## E-90
+## E-91
 
 **Thema:** NTF-03: Ausprägung von Abonnements und Org-Branding in Phase 1
 
@@ -741,7 +764,7 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Betroffene WPs:** WP-588
 
-## E-91
+## E-92
 
 **Thema:** Instanzattributdefinitionen und DB-03 („attribute_definition einzige Quelle“)
 
@@ -763,7 +786,7 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Betroffene WPs:** WP-589
 
-## E-92
+## E-93
 
 **Thema:** Materialisierung org-globaler Attributdefinitionen (MET-16)
 
@@ -785,7 +808,7 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Betroffene WPs:** WP-590
 
-## E-93
+## E-94
 
 **Thema:** Korrektur der Migration 000110 (Duplikat-Suffixe der Interfaces)
 
@@ -807,7 +830,7 @@ Stand: 2026-10-18. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Betroffene WPs:** WP-592
 
-## E-94
+## E-95
 
 **Thema:** Durchsetzung von allowed_source_types, allowed_target_types und cardinality (REL-01)
 
