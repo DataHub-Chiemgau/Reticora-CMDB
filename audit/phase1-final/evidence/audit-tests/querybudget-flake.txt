@@ -1,0 +1,6 @@
+TestCIQueryBudget (backend/internal/ci, existing test): baseline 2026-10-15 PASS (12.1s, results-backend.tsv).
+After container restarts on 2026-10-18: FAIL on fresh template clone, both at branch HEAD and at 3a9669a + test-only files
+(worktree wf_8bd1a626-4f0-2, no change under internal/ci):
+  querybudget_integration_test.go:165: hostname lookup reads ci with a sequential scan
+  querybudget_integration_test.go:165: attribute lookup reads ci with a sequential scan
+Conclusion: planner-/environment-sensitive assertion, not caused by the audit tests.

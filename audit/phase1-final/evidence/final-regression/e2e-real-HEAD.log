@@ -1,0 +1,1449 @@
+
+Running 82 tests using 1 worker
+
+  ✓   1 e2e-real/bulk-jobs-export.spec.ts:381:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › B01 a bulk status change in the CMDB list is one request, persists after reload and leaves history and audit entries (1.5s)
+  ✓   2 e2e-real/bulk-jobs-export.spec.ts:458:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › B02 a bulk action with one item that became invalid reports that item and applies the others (no silent loss) (790ms)
+  ✓   3 e2e-real/bulk-jobs-export.spec.ts:514:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › B03 bulk limits and validation: 0 and 501 ids, unknown status or action, duplicates, CIs of another tenant (191ms)
+  ✘   4 e2e-real/bulk-jobs-export.spec.ts:582:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › B04 a malformed id in a bulk request is reported with the status the single change answers (400, not 500) (178ms)
+  ✓   5 e2e-real/bulk-jobs-export.spec.ts:603:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › J01 100 ids run as a job that the job center follows to the end; the result reports every id and the change persists (10.9s)
+  ✓   6 e2e-real/bulk-jobs-export.spec.ts:727:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › V01 a saved view created on the saved-views page persists across reload with its filter and stays private to the tenant (1.1s)
+  ✓   7 e2e-real/bulk-jobs-export.spec.ts:819:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › E01 a CSV export started on the export page downloads exactly the API data of the own tenant (1.7s)
+  ✓   8 e2e-real/bulk-jobs-export.spec.ts:922:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › N01 a finished export notifies its initiator in the notification center; read state persists (7.9s)
+  ✘   9 e2e-real/bulk-jobs-export.spec.ts:1021:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › W01 a webhook to a local catcher is refused by the egress protection, not stored, nothing delivered, and the UI explains the refusal (11.0s)
+  ✓  10 e2e-real/bulk-jobs-export.spec.ts:1076:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › W02 the egress protection refuses private, loopback, link-local, metadata, IPv6 ULA and non-http targets with a reason and accepts a public host (136ms)
+  ✘  11 e2e-real/ci-lifecycle.spec.ts:362:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L01 a CI created through the CMDB form is stored with all fields in the own organization and opens on its detail page (677ms)
+  ✓  12 e2e-real/ci-lifecycle.spec.ts:414:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L02 required-field and format errors are shown in the form and nothing is stored (1.2s)
+  ✘  13 e2e-real/ci-lifecycle.spec.ts:503:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L03a a double click on the create button of the CMDB form creates exactly one CI (10.4s)
+  ✓  14 e2e-real/ci-lifecycle.spec.ts:529:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L03b repeated API submits with one Idempotency-Key create exactly one CI, also in parallel (123ms)
+  ✓  15 e2e-real/ci-lifecycle.spec.ts:572:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L04 editing on the detail page sends If-Match, raises the version and survives a reload (964ms)
+  ✘  16 e2e-real/ci-lifecycle.spec.ts:645:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L05 clearing a field in the edit form removes the stored value (merge patch) (10.7s)
+  ✘  17 e2e-real/ci-lifecycle.spec.ts:673:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L05b PATCH is a JSON merge patch: null removes a typed field, absent members stay (300ms)
+  ✓  18 e2e-real/ci-lifecycle.spec.ts:683:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L06 the edit appears in the CI history and the audit trail with the acting user, old and new value (1.1s)
+  ✘  19 e2e-real/ci-lifecycle.spec.ts:746:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L07 the audit viewer shows the CI change with time, actor, action and object; the chain verifies (15.4s)
+  ✘  20 e2e-real/ci-lifecycle.spec.ts:783:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L08 a relationship created on the detail page shows as neighbour and in the impact view along its direction (16.5s)
+  ✓  21 e2e-real/ci-lifecycle.spec.ts:868:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L09 the CI is found through the list filter, the full-text search and the command palette (1.3s)
+  ✓  22 e2e-real/ci-lifecycle.spec.ts:940:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L10 an export job started in the UI completes and its download contains the CI (2.8s)
+  ✘  23 e2e-real/ci-lifecycle.spec.ts:987:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L10b the CSV export button of the CMDB list downloads the CIs of the list (15.2s)
+  ✓  24 e2e-real/ci-lifecycle.spec.ts:1018:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L11 delete decommissions the CI, hides it from traversal and search; restore brings it back with its relations (1.3s)
+  ✓  25 e2e-real/ci-lifecycle.spec.ts:1120:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L12 two sessions edit the same CI: the later save on a stale version is refused and nothing is lost (2.9s)
+  ✘  26 e2e-real/ci-lifecycle.spec.ts:1180:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L12b two sessions edit different fields of the same CI: no change is lost and the edits merge field by field (2.6s)
+  ✓  27 e2e-real/ci-lifecycle.spec.ts:1225:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L13 ETag and If-Match: unknown versions 412, conflicting fields 409, other fields merge, the org setting enforces If-Match (795ms)
+  ✘  28 e2e-real/ci-lifecycle.spec.ts:1298:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L14 names and fields with quotes or backslashes are stored like any other text (API create, edit form) (15.9s)
+  ✓  29 e2e-real/discovery-override.spec.ts:587:3 › Discovery → reconciliation → override protection → review › D01 a collector enrolled with a code from the Discovery UI reports the simulated fleet; the code is single-use (509ms)
+  ✓  30 e2e-real/discovery-override.spec.ts:639:3 › Discovery → reconciliation → override protection → review › D02 every typed field of a discovered CI has provenance with source, rank and time; the tooltip shows it (546ms)
+  ✓  31 e2e-real/discovery-override.spec.ts:706:3 › Discovery → reconciliation → override protection → review › D03 a manual value set in the "Override setzen" dialog is stored with author, time and reason and becomes the effective value (1.7s)
+  ✓  32 e2e-real/discovery-override.spec.ts:780:3 › Discovery → reconciliation → override protection → review › D04 a new discovery run does not overwrite manual values; the deviation is kept and surfaced once per field (9.7s)
+  ✓  33 e2e-real/discovery-override.spec.ts:882:3 › Discovery → reconciliation → override protection → review › D05 the review inbox accepts and dismisses override conflicts; the result persists and holds in the next discovery run (17.2s)
+  ✓  34 e2e-real/discovery-override.spec.ts:992:3 › Discovery → reconciliation → override protection → review › D06 several override conflicts are accepted at once in the review inbox (bulk) (8.8s)
+  ✘  35 e2e-real/discovery-override.spec.ts:1051:3 › Discovery → reconciliation → override protection → review › D07 "Override aufheben" in the CI detail returns the field to the observed value (30.9s)
+  ✓  36 e2e-real/discovery-override.spec.ts:1089:3 › Discovery → reconciliation → override protection → review › D08 a disabled collector can no longer deliver: heartbeats and results are refused, nothing new is persisted (27.9s)
+  ✓  37 e2e-real/locations-racks.spec.ts:248:3 › locations and racks (LOC-*, RCK-*) › L01 the tree UI builds site → building → room → rack with derived client, site and path (1.7s)
+  ✘  38 e2e-real/locations-racks.spec.ts:411:3 › locations and racks (LOC-*, RCK-*) › L02 names are unique per parent level and the rack height is 1–60 (explicit 0 → 422) (940ms)
+  ✓  39 e2e-real/locations-racks.spec.ts:541:3 › locations and racks (LOC-*, RCK-*) › L03 a cycle or a parent-matrix violation is refused with 422 on parent_id and changes nothing (458ms)
+  ✓  40 e2e-real/locations-racks.spec.ts:625:3 › locations and racks (LOC-*, RCK-*) › L04 a non-empty location cannot be deleted in the tree UI (409), an empty leaf can (787ms)
+  ✘  41 e2e-real/locations-racks.spec.ts:672:3 › locations and racks (LOC-*, RCK-*) › L05 deleting a site, building or room with child locations through /sites, /buildings or /rooms is refused (409) (483ms)
+  ✓  42 e2e-real/locations-racks.spec.ts:706:3 › locations and racks (LOC-*, RCK-*) › L06 a CI mounted at a U position shows in the rack layout and room plan after reload; location and scope are derived (1.1s)
+  ✓  43 e2e-real/locations-racks.spec.ts:787:3 › locations and racks (LOC-*, RCK-*) › L07 overlapping, face-colliding, out-of-range and composition-child mounts are refused (582ms)
+  ✘  44 e2e-real/locations-racks.spec.ts:862:3 › locations and racks (LOC-*, RCK-*) › L08 moving a mounted CI is recorded in ci_change, audit and the unified history shown on the CI page (1.1s)
+  ✓  45 e2e-real/locations-racks.spec.ts:1000:3 › locations and racks (LOC-*, RCK-*) › L09 a rack with a mounted CI and its room cannot be deleted (409); empty again, the rack can (785ms)
+  ✓  46 e2e-real/locations-racks.spec.ts:1041:3 › locations and racks (LOC-*, RCK-*) › L10 moving a room re-derives path and site of its subtree, CIs and mounts; location_change and audit record it (787ms)
+  ✓  47 e2e-real/roles-authz.spec.ts:294:1 › 01 admin invites a viewer; the invitee accepts and signs in with exactly the viewer rights (1.9s)
+  ✓  48 e2e-real/roles-authz.spec.ts:362:1 › 02 an invitation is accepted only once: a second acceptance is refused and creates nothing (665ms)
+  ✓  49 e2e-real/roles-authz.spec.ts:391:1 › 03 revoked invitations and the old token of a renewed invitation are refused; conflicts are reported (486ms)
+  ✓  50 e2e-real/roles-authz.spec.ts:455:1 › 04 an expired invitation is refused with 410 and can be renewed for seven more days (498ms)
+  ✘  51 e2e-real/roles-authz.spec.ts:479:1 › 05 an invitation sends the invitee an e-mail (NTF-05 event "Einladung") (1.0m)
+  ✓  52 e2e-real/roles-authz.spec.ts:500:1 › 06 the viewer reads CIs, but every write, delete and administrative call is refused with 403 (1.7s)
+  ✓  53 e2e-real/roles-authz.spec.ts:615:1 › 07 the viewer cannot raise its own rights through role, user, invitation or key endpoints (1.2s)
+  ✓  54 e2e-real/roles-authz.spec.ts:712:1 › 08 viewer UI: CIs are visible; creating or editing a CI is not offered or ends in a visible error (2.5s)
+  ✓  55 e2e-real/roles-authz.spec.ts:770:1 › 09 viewer UI: user, role and invitation management is not offered; refused pages say so (3.0s)
+  ✘  56 e2e-real/roles-authz.spec.ts:798:1 › 09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles (21.5s)
+  ✘  57 e2e-real/roles-authz.spec.ts:816:1 › 09c viewer UI: saving a webhook is refused visibly, not silently (11.6s)
+  ✓  58 e2e-real/roles-authz.spec.ts:872:1 › 10 a Keycloak account of the organization without invitation is refused (403); with an invitation it is admitted (3.2s)
+  ✓  59 e2e-real/roles-authz.spec.ts:912:1 › 10b a Keycloak account without organization attribute is refused and gets no session (1.5s)
+  ✓  60 e2e-real/roles-authz.spec.ts:931:1 › 11 an admin role change (viewer → engineer) takes effect at the next refresh and sign-in (3.1s)
+  ✘  61 e2e-real/roles-authz.spec.ts:982:1 › 12 after the upgrade the user creates a CI through the UI form (UI → API → DB → UI) (1.8s)
+  ✘  62 e2e-real/roles-authz.spec.ts:1019:1 › 13 an admin can revoke the role again and the user loses the rights at the next sign-in (92ms)
+  ✘  63 e2e-real/roles-authz.spec.ts:1058:1 › 14 the SPA renews an expired access token with the refresh cookie instead of signing the user out (1.5s)
+  ✘  64 e2e-real/roles-authz.spec.ts:1091:1 › 14b the SPA renews the session when the access token lifetime has run out instead of sending the user to the login (16.4s)
+  ✓  65 e2e-real/stack-smoke.spec.ts:6:1 › a fresh tenant signs up, signs in and sees its own empty organization (3.5s)
+  ✓  66 e2e-real/tenant-isolation.spec.ts:373:3 › tenant isolation (TEN-06, TEN-09) › T01 A creates a site in the location tree UI; B can neither see, resolve, change nor reference it (903ms)
+  ✓  67 e2e-real/tenant-isolation.spec.ts:467:3 › tenant isolation (TEN-06, TEN-09) › T02 A adds a relationship on the CI detail page; B can neither see nor change it (765ms)
+  ✓  68 e2e-real/tenant-isolation.spec.ts:532:3 › tenant isolation (TEN-06, TEN-09) › T03 B’s lists, search, topology, impact, export, audit and review inbox contain nothing of A (1.3s)
+  ✓  69 e2e-real/tenant-isolation.spec.ts:620:3 › tenant isolation (TEN-06, TEN-09) › T04 B’s GraphQL BFF reveals nothing of A (95ms)
+  ✓  70 e2e-real/tenant-isolation.spec.ts:667:3 › tenant isolation (TEN-06, TEN-09) › T05 B cannot read, change, delete, restore, retype or merge A’s CI by id (session and API key) (384ms)
+  ✓  71 e2e-real/tenant-isolation.spec.ts:730:3 › tenant isolation (TEN-06, TEN-09) › T06 B reads no sub-resource, neighbours, impact or blast radius of A’s CI (114ms)
+  ✓  72 e2e-real/tenant-isolation.spec.ts:757:3 › tenant isolation (TEN-06, TEN-09) › T07 B cannot attach A’s location, client or parent CI to its own data (187ms)
+  ✓  73 e2e-real/tenant-isolation.spec.ts:803:3 › tenant isolation (TEN-06, TEN-09) › T08 B cannot read or resolve A’s review item, export job or job; the download URL cannot be bent to A’s file (995ms)
+  ✓  74 e2e-real/tenant-isolation.spec.ts:862:3 › tenant isolation (TEN-06, TEN-09) › T09 organization headers and query parameters do not switch the tenant (158ms)
+  ✓  75 e2e-real/tenant-isolation.spec.ts:908:3 › tenant isolation (TEN-06, TEN-09) › T10 B’s UI shows nothing of A: CI URL, CMDB list, command palette, locations, topology, audit, reviews (4.7s)
+  ✓  76 e2e-real/tenant-isolation.spec.ts:994:3 › tenant isolation (TEN-06, TEN-09) › T11 B’s relationship form rejects A’s CI id and stores nothing (596ms)
+  ✓  77 e2e-real/tenant-isolation.spec.ts:1030:3 › tenant isolation (TEN-06, TEN-09) › T12 A’s audit trail records none of B’s attempts and its hash chain is intact (70ms)
+  ✓  78 e2e-real/tenant-isolation.spec.ts:1052:3 › tenant isolation (TEN-06, TEN-09) › T13 B can neither read nor change A’s contact and shared saved view (150ms)
+  ✘  79 e2e-real/tenant-isolation.spec.ts:1114:3 › tenant isolation (TEN-06, TEN-09) › T14 B’s relationship to A’s CI is rejected with a client error and nothing is stored (164ms)
+  ✘  80 e2e-real/tenant-isolation.spec.ts:1148:3 › tenant isolation (TEN-06, TEN-09) › T15 the topology rooted at A’s CI answers B with "not found", like neighbours and impact (101ms)
+  ✘  81 e2e-real/tenant-isolation.spec.ts:1158:3 › tenant isolation (TEN-06, TEN-09) › T16 A creates a CI through the CMDB form; it is stored in A’s organization and invisible to B (674ms)
+  ✘  82 e2e-real/tenant-isolation.spec.ts:1185:3 › tenant isolation (TEN-06, TEN-09) › T17 A’s audit viewer shows when and on which object each of A’s entries happened (282ms)
+
+
+  1) e2e-real/bulk-jobs-export.spec.ts:582:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › B04 a malformed id in a bulk request is reported with the status the single change answers (400, not 500) 
+
+    Error: per-id status of a malformed id: {"id":"not-a-uuid","result":"error","code":500,"error":"the CI could not be updated"}
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 400
+    Received: 500
+
+      596 |     // OpenAPI bulkCIs: "every id with ok or its error and the HTTP status the single change
+      597 |     // would have answered" – a malformed id is the caller's error, not an internal one.
+    > 598 |     expect(item?.code, `per-id status of a malformed id: ${JSON.stringify(item)}`).toBe(
+          |                                                                                    ^
+      599 |       single.status,
+      600 |     );
+      601 |   });
+        at /home/user/Reticora-CMDB/frontend/e2e-real/bulk-jobs-export.spec.ts:598:84
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/bulk-jobs-export-Bulk-oper-39205-change-answers-400-not-500-/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/bulk-jobs-export-Bulk-oper-39205-change-answers-400-not-500-/test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/bulk-jobs-export-Bulk-oper-39205-change-answers-400-not-500-/error-context.md
+
+    Error Context: test-results/bulk-jobs-export-Bulk-oper-39205-change-answers-400-not-500-/error-context.md
+
+    attachment #5: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/bulk-jobs-export-Bulk-oper-39205-change-answers-400-not-500-/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/bulk-jobs-export-Bulk-oper-39205-change-answers-400-not-500-/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) e2e-real/bulk-jobs-export.spec.ts:1021:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › W01 a webhook to a local catcher is refused by the egress protection, not stored, nothing delivered, and the UI explains the refusal 
+
+    Error: the refusal is explained on the webhooks page
+
+    expect(locator).toBeVisible() failed
+
+    Locator: getByText(/not allowed|nicht erlaubt|nicht zulässig|blockiert|blocked|egress/i).filter({ visible: true }).first()
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - the refusal is explained on the webhooks page with timeout 5000ms
+      - waiting for getByText(/not allowed|nicht erlaubt|nicht zulässig|blockiert|blocked|egress/i).filter({ visible: true }).first()
+
+
+      1061 |           'the refusal is explained on the webhooks page',
+      1062 |         )
+    > 1063 |         .toBeVisible({ timeout: 5_000 });
+           |          ^
+      1064 |
+      1065 |       // Not stored, and an event of the tenant reaches nothing on the local address.
+      1066 |       const subs = rows(await ok<List<{ name: string; url: string }>>(a, 'GET', '/webhooks'));
+        at /home/user/Reticora-CMDB/frontend/e2e-real/bulk-jobs-export.spec.ts:1063:10
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/bulk-jobs-export-Bulk-oper-c0afa-the-UI-explains-the-refusal/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/bulk-jobs-export-Bulk-oper-c0afa-the-UI-explains-the-refusal/test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/bulk-jobs-export-Bulk-oper-c0afa-the-UI-explains-the-refusal/error-context.md
+
+    Error Context: test-results/bulk-jobs-export-Bulk-oper-c0afa-the-UI-explains-the-refusal/error-context.md
+
+    attachment #5: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/bulk-jobs-export-Bulk-oper-c0afa-the-UI-explains-the-refusal/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/bulk-jobs-export-Bulk-oper-c0afa-the-UI-explains-the-refusal/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) e2e-real/ci-lifecycle.spec.ts:362:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L01 a CI created through the CMDB form is stored with all fields in the own organization and opens on its detail page 
+
+    Error: POST /cis sent by the CMDB form: {"detail":"a field value has an invalid format or is out of range","status":400,"title":"Bad Request","trace_id":"5d752c7f0f72562c09a5d07fc841cdf7","type":"https://reticora.io/problems/400"}
+
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 201
+    Received: 400
+
+      375 |     await dialog.getByRole('button', { name: 'Anlegen' }).click();
+      376 |     const res = await created;
+    > 377 |     expect(res.status(), `POST /cis sent by the CMDB form: ${await res.text()}`).toBe(201);
+          |                                                                                  ^
+      378 |     const ci = (await res.json()) as CI;
+      379 |     await expect(dialog).toBeHidden();
+      380 |
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:377:82
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--4e09d-nd-opens-on-its-detail-page/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--4e09d-nd-opens-on-its-detail-page/error-context.md
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--4e09d-nd-opens-on-its-detail-page/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--4e09d-nd-opens-on-its-detail-page/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/ci-lifecycle-CI-lifecycle--4e09d-nd-opens-on-its-detail-page/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  4) e2e-real/ci-lifecycle.spec.ts:503:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L03a a double click on the create button of the CMDB form creates exactly one CI 
+
+    Error: the form closes after the create
+
+    expect(locator).toBeHidden() failed
+
+    Locator:  getByRole('dialog')
+    Expected: hidden
+    Received: visible
+    Timeout:  10000ms
+
+    Call log:
+      - the form closes after the create with timeout 10000ms
+      - waiting for getByRole('dialog')
+        24 × locator resolved to <div role="dialog" tabindex="-1" id="radix-_r_d_" data-state="open" aria-labelledby="_r_c_" aria-describedby="_r_c_-description" class="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[min(92vw,40rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl outline-none dark:border-gray-800 dark:bg-gray-900">…</div>
+           - unexpected value "visible"
+
+
+      516 |       await dialog.getByLabel('CI-Typ').selectOption({ label: 'Server' });
+      517 |       await dialog.getByRole('button', { name: 'Anlegen' }).dblclick();
+    > 518 |       await expect(dialog, 'the form closes after the create').toBeHidden({ timeout: 10_000 });
+          |                                                                ^
+      519 |       await expect(
+      520 |         page.locator('#main-content').getByRole('link', { name, exact: true }),
+      521 |       ).toHaveCount(1);
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:518:64
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--a02e0-form-creates-exactly-one-CI/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--a02e0-form-creates-exactly-one-CI/error-context.md
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--a02e0-form-creates-exactly-one-CI/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--a02e0-form-creates-exactly-one-CI/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/ci-lifecycle-CI-lifecycle--a02e0-form-creates-exactly-one-CI/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  5) e2e-real/ci-lifecycle.spec.ts:645:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L05 clearing a field in the edit form removes the stored value (merge patch) 
+
+    Error: the cleared value is gone after a reload
+
+    expect(locator).toHaveText(expected) failed
+
+    Locator:  locator('dt').filter({ hasText: /^Firmware$/ }).first().locator('xpath=following-sibling::dd[1]')
+    Expected: "—"
+    Received: "9.9.9"
+    Timeout:  10000ms
+
+    Call log:
+      - the cleared value is gone after a reload with timeout 10000ms
+      - waiting for locator('dt').filter({ hasText: /^Firmware$/ }).first().locator('xpath=following-sibling::dd[1]')
+        24 × locator resolved to <dd class="break-all font-medium text-gray-900 dark:text-gray-100">9.9.9</dd>
+           - unexpected value "9.9.9"
+
+
+      665 |     await expect
+      666 |       .soft(detailValue(page, 'Firmware'), 'the cleared value is gone after a reload')
+    > 667 |       .toHaveText('—', { timeout: 10_000 });
+          |        ^
+      668 |     const stored = await getCI(ci.id);
+      669 |     expect(stored.firmware_version ?? '', 'cleared in the database').toBe('');
+      670 |     expect(stored.manufacturer).toBe('Vendor To Keep');
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:667:8
+
+    Error: cleared in the database
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: ""
+    Received: "9.9.9"
+
+      667 |       .toHaveText('—', { timeout: 10_000 });
+      668 |     const stored = await getCI(ci.id);
+    > 669 |     expect(stored.firmware_version ?? '', 'cleared in the database').toBe('');
+          |                                                                      ^
+      670 |     expect(stored.manufacturer).toBe('Vendor To Keep');
+      671 |   });
+      672 |
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:669:70
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--dc3d5-e-stored-value-merge-patch-/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--dc3d5-e-stored-value-merge-patch-/error-context.md
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--dc3d5-e-stored-value-merge-patch-/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--dc3d5-e-stored-value-merge-patch-/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/ci-lifecycle-CI-lifecycle--dc3d5-e-stored-value-merge-patch-/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  6) e2e-real/ci-lifecycle.spec.ts:673:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L05b PATCH is a JSON merge patch: null removes a typed field, absent members stay 
+
+    Error: null removes the value (RFC 7396)
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: ""
+    Received: "1.2.3"
+
+      677 |     expect(nulled.status).toBe(200);
+      678 |     const after = await getCI(ci2.id);
+    > 679 |     expect(after.firmware_version ?? '', 'null removes the value (RFC 7396)').toBe('');
+          |                                                                               ^
+      680 |     expect(after.model, 'absent members stay').toBe('M1');
+      681 |   });
+      682 |
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:679:79
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--973aa-d-field-absent-members-stay/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--973aa-d-field-absent-members-stay/error-context.md
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--973aa-d-field-absent-members-stay/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--973aa-d-field-absent-members-stay/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/ci-lifecycle-CI-lifecycle--973aa-d-field-absent-members-stay/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  7) e2e-real/ci-lifecycle.spec.ts:746:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L07 the audit viewer shows the CI change with time, actor, action and object; the chain verifies 
+
+    Error: time of the audit entry
+
+    expect(locator).not.toHaveText(expected) failed
+
+    Locator: locator('#main-content table').locator('tbody tr').filter({ hasText: 'ci.updated' }).first().locator('td').first()
+    Expected pattern: not /Invalid Date|^\s*—?\s*$/
+    Received string: "Invalid Date"
+    Timeout: 5000ms
+
+    Call log:
+      - time of the audit entry with timeout 5000ms
+      - waiting for locator('#main-content table').locator('tbody tr').filter({ hasText: 'ci.updated' }).first().locator('td').first()
+        14 × locator resolved to <td class="py-2 pr-4 whitespace-nowrap">Invalid Date</td>
+           - unexpected value "Invalid Date"
+
+
+      764 |     await expect
+      765 |       .soft(cells.nth(0), 'time of the audit entry')
+    > 766 |       .not.toHaveText(/Invalid Date|^\s*—?\s*$/, { timeout: 5_000 });
+          |            ^
+      767 |     // What: the object of the change is the CI.
+      768 |     await expect
+      769 |       .soft(cells.nth(3), 'object of the audit entry')
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:766:12
+
+    Error: object of the audit entry
+
+    expect(locator).toContainText(expected) failed
+
+    Locator: locator('#main-content table').locator('tbody tr').filter({ hasText: 'ci.updated' }).first().locator('td').nth(3)
+    Expected substring: "d18ba612-c5a4-4d14-bbf4-a411aef0fa70"
+    Received string:    "—"
+    Timeout: 5000ms
+
+    Call log:
+      - object of the audit entry with timeout 5000ms
+      - waiting for locator('#main-content table').locator('tbody tr').filter({ hasText: 'ci.updated' }).first().locator('td').nth(3)
+        14 × locator resolved to <td class="py-2 font-mono text-xs">—</td>
+           - unexpected value "—"
+
+
+      768 |     await expect
+      769 |       .soft(cells.nth(3), 'object of the audit entry')
+    > 770 |       .toContainText(ci.id, { timeout: 5_000 });
+          |        ^
+      771 |     await expect
+      772 |       .soft(
+      773 |         table.locator('tbody tr').filter({ hasText: ci.id }).filter({ hasText: 'ci.updated' }),
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:770:8
+
+    Error: audit row of the CI update with the CI as object
+
+    expect(locator).toHaveCount(expected) failed
+
+    Locator:  locator('#main-content table').locator('tbody tr').filter({ hasText: 'd18ba612-c5a4-4d14-bbf4-a411aef0fa70' }).filter({ hasText: 'ci.updated' })
+    Expected: 1
+    Received: 0
+    Timeout:  5000ms
+
+    Call log:
+      - audit row of the CI update with the CI as object with timeout 5000ms
+      - waiting for locator('#main-content table').locator('tbody tr').filter({ hasText: 'd18ba612-c5a4-4d14-bbf4-a411aef0fa70' }).filter({ hasText: 'ci.updated' })
+        14 × locator resolved to 0 elements
+           - unexpected value "0"
+
+
+      774 |         'audit row of the CI update with the CI as object',
+      775 |       )
+    > 776 |       .toHaveCount(1, { timeout: 5_000 });
+          |        ^
+      777 |
+      778 |     // AUD-04: the per-organization hash chain verifies intact.
+      779 |     await page.getByRole('button', { name: 'Kette jetzt verifizieren' }).click();
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:776:8
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--856f1-d-object-the-chain-verifies/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--856f1-d-object-the-chain-verifies/error-context.md
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--856f1-d-object-the-chain-verifies/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--856f1-d-object-the-chain-verifies/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/ci-lifecycle-CI-lifecycle--856f1-d-object-the-chain-verifies/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  8) e2e-real/ci-lifecycle.spec.ts:783:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L08 a relationship created on the detail page shows as neighbour and in the impact view along its direction 
+
+    Error: the dialog closes after the successful create
+
+    expect(locator).toBeHidden() failed
+
+    Locator:  getByRole('dialog')
+    Expected: hidden
+    Received: visible
+    Timeout:  10000ms
+
+    Call log:
+      - the dialog closes after the successful create with timeout 10000ms
+      - waiting for getByRole('dialog')
+        24 × locator resolved to <div role="dialog" tabindex="-1" id="radix-_r_h_" data-state="open" aria-labelledby="_r_g_" class="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[min(92vw,40rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl outline-none dark:border-gray-800 dark:bg-gray-900">…</div>
+           - unexpected value "visible"
+
+
+      832 |     await expect
+      833 |       .soft(dialog, 'the dialog closes after the successful create')
+    > 834 |       .toBeHidden({ timeout: 10_000 });
+          |        ^
+      835 |     await expect
+      836 |       .soft(
+      837 |         page.getByRole('alert').filter({ hasText: /\S/ }),
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:834:8
+
+    Error: no error shown for a successful create
+
+    expect(locator).toHaveCount(expected) failed
+
+    Locator:  getByRole('alert').filter({ hasText: /\S/ })
+    Expected: 0
+    Received: 1
+    Timeout:  5000ms
+
+    Call log:
+      - no error shown for a successful create with timeout 5000ms
+      - waiting for getByRole('alert').filter({ hasText: /\S/ })
+        14 × locator resolved to 1 element
+           - unexpected value "1"
+
+
+      838 |         'no error shown for a successful create',
+      839 |       )
+    > 840 |       .toHaveCount(0, { timeout: 5_000 });
+          |        ^
+      841 |     if (await dialog.isVisible()) await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+      842 |
+      843 |     // UI after reload: the relationship card and the neighbours show db.
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:840:8
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--274ca-ct-view-along-its-direction/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--274ca-ct-view-along-its-direction/error-context.md
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--274ca-ct-view-along-its-direction/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--274ca-ct-view-along-its-direction/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/ci-lifecycle-CI-lifecycle--274ca-ct-view-along-its-direction/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  9) e2e-real/ci-lifecycle.spec.ts:987:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L10b the CSV export button of the CMDB list downloads the CIs of the list 
+
+    Error: the export button answered 401: {"detail":"missing bearer token","status":401,"title":"Unauthorized","trace_id":"ea50da4bc2cd47e6f0589c9d7d6e73a6","type":"https://reticora.io/problems/401"}
+
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 401
+
+      1004 |       const status = res ? res.status() : 0;
+      1005 |       const body = res ? (await res.text().catch(() => '')).slice(0, 300) : '';
+    > 1006 |       expect(status, `the export button answered ${status}: ${body}`).toBe(200);
+           |                                                                       ^
+      1007 |     }
+      1008 |     expect(file, 'the export button downloads a file').toBeTruthy();
+      1009 |     const bytes = await readFile(await file!.path());
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:1006:71
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--61b39-wnloads-the-CIs-of-the-list/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--61b39-wnloads-the-CIs-of-the-list/error-context.md
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--61b39-wnloads-the-CIs-of-the-list/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--61b39-wnloads-the-CIs-of-the-list/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/ci-lifecycle-CI-lifecycle--61b39-wnloads-the-CIs-of-the-list/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  10) e2e-real/ci-lifecycle.spec.ts:1180:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L12b two sessions edit different fields of the same CI: no change is lost and the edits merge field by field 
+
+    Error: stale save of an untouched field answered 409: {"current_version":2,"detail":"fields changed since the If-Match version: model","fields":["model"],"status":409,"title":"Conflict","trace_id":"de316fe941cc12c0d165f31281a98bbc","type":"urn:reticora:problem:conflict"}
+
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 409
+
+      1216 |           `stale save of an untouched field answered ${r1.status()}: ${await r1.text()}`,
+      1217 |         )
+    > 1218 |         .toBe(200);
+           |          ^
+      1219 |       expect.soft(stored.manufacturer, "session 1's manufacturer is saved").toBe('Vendor-session1');
+      1220 |     } finally {
+      1221 |       await s2.ctx.close();
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:1218:10
+
+    Error: session 1's manufacturer is saved
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "Vendor-session1"
+    Received: "Vendor-0"
+
+      1217 |         )
+      1218 |         .toBe(200);
+    > 1219 |       expect.soft(stored.manufacturer, "session 1's manufacturer is saved").toBe('Vendor-session1');
+           |                                                                             ^
+      1220 |     } finally {
+      1221 |       await s2.ctx.close();
+      1222 |     }
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:1219:77
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--10710--edits-merge-field-by-field/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--10710--edits-merge-field-by-field/test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--10710--edits-merge-field-by-field/error-context.md
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--10710--edits-merge-field-by-field/error-context.md
+
+    attachment #5: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--10710--edits-merge-field-by-field/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/ci-lifecycle-CI-lifecycle--10710--edits-merge-field-by-field/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  11) e2e-real/ci-lifecycle.spec.ts:1298:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L14 names and fields with quotes or backslashes are stored like any other text (API create, edit form) 
+
+    Error: create lc-quote-1792350698429332 "Rack 7": {"detail":"a field value has an invalid format or is out of range","status":400,"title":"Bad Request","trace_id":"ada9f8e0e898379982b4f1cd0d099f07","type":"https://reticora.io/problems/400"}
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 201
+    Received: 400
+
+      1306 |     ]) {
+      1307 |       const created = await raw<CI>('POST', '/cis', { name, ci_type_id: w.serverType });
+    > 1308 |       expect.soft(created.status, `create ${name}: ${JSON.stringify(created.body)}`).toBe(201);
+           |                                                                                      ^
+      1309 |       if (created.status === 201) expect((await getCI(created.body.id)).name).toBe(name);
+      1310 |     }
+      1311 |
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:1308:86
+
+    Error: PATCH from the edit form: {"detail":"a field value has an invalid format or is out of range","status":400,"title":"Bad Request","trace_id":"a6eb67c42e50ea17b489b3f2cfb455f8","type":"https://reticora.io/problems/400"}
+
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 400
+
+      1320 |     await dialog.getByRole('button', { name: 'Speichern' }).click();
+      1321 |     const res = await patched;
+    > 1322 |     expect.soft(res.status(), `PATCH from the edit form: ${await res.text()}`).toBe(200);
+           |                                                                                ^
+      1323 |     await expect.soft(dialog, 'the editor closes after saving').toBeHidden({ timeout: 10_000 });
+      1324 |     if (await dialog.isVisible()) await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+      1325 |     await page.reload();
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:1322:80
+
+    Error: the editor closes after saving
+
+    expect(locator).toBeHidden() failed
+
+    Locator:  getByRole('dialog')
+    Expected: hidden
+    Received: visible
+    Timeout:  10000ms
+
+    Call log:
+      - the editor closes after saving with timeout 10000ms
+      - waiting for getByRole('dialog')
+        24 × locator resolved to <div role="dialog" tabindex="-1" id="radix-_r_17_" data-state="open" aria-labelledby="_r_16_" aria-describedby="_r_16_-description" class="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[min(92vw,40rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl outline-none dark:border-gray-800 dark:bg-gray-900">…</div>
+           - unexpected value "visible"
+
+
+      1321 |     const res = await patched;
+      1322 |     expect.soft(res.status(), `PATCH from the edit form: ${await res.text()}`).toBe(200);
+    > 1323 |     await expect.soft(dialog, 'the editor closes after saving').toBeHidden({ timeout: 10_000 });
+           |                                                                 ^
+      1324 |     if (await dialog.isVisible()) await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+      1325 |     await page.reload();
+      1326 |     await expect(page.getByRole('heading', { name: ci.name, exact: true })).toBeVisible();
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:1323:65
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator:  locator('dt').filter({ hasText: /^Modell$/ }).first().locator('xpath=following-sibling::dd[1]')
+    Expected: "R740 \"XL\""
+    Received: "Plain"
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "soft toHaveText" with timeout 5000ms
+      - waiting for locator('dt').filter({ hasText: /^Modell$/ }).first().locator('xpath=following-sibling::dd[1]')
+        14 × locator resolved to <dd class="break-all font-medium text-gray-900 dark:text-gray-100">Plain</dd>
+           - unexpected value "Plain"
+
+
+      1325 |     await page.reload();
+      1326 |     await expect(page.getByRole('heading', { name: ci.name, exact: true })).toBeVisible();
+    > 1327 |     await expect.soft(detailValue(page, 'Modell')).toHaveText('R740 "XL"', { timeout: 5_000 });
+           |                                                    ^
+      1328 |     expect((await getCI(ci.id)).model, 'stored model').toBe('R740 "XL"');
+      1329 |   });
+      1330 | });
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:1327:52
+
+    Error: stored model
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "R740 \"XL\""
+    Received: "Plain"
+
+      1326 |     await expect(page.getByRole('heading', { name: ci.name, exact: true })).toBeVisible();
+      1327 |     await expect.soft(detailValue(page, 'Modell')).toHaveText('R740 "XL"', { timeout: 5_000 });
+    > 1328 |     expect((await getCI(ci.id)).model, 'stored model').toBe('R740 "XL"');
+           |                                                        ^
+      1329 |   });
+      1330 | });
+      1331 |
+        at /home/user/Reticora-CMDB/frontend/e2e-real/ci-lifecycle.spec.ts:1328:56
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--aa018--text-API-create-edit-form-/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--aa018--text-API-create-edit-form-/error-context.md
+
+    Error Context: test-results/ci-lifecycle-CI-lifecycle--aa018--text-API-create-edit-form-/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ci-lifecycle-CI-lifecycle--aa018--text-API-create-edit-form-/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/ci-lifecycle-CI-lifecycle--aa018--text-API-create-edit-form-/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  12) e2e-real/discovery-override.spec.ts:1051:3 › Discovery → reconciliation → override protection → review › D07 "Override aufheben" in the CI detail returns the field to the observed value 
+
+    Error: overview after "Override aufheben" without reload
+
+    expect(locator).toHaveText(expected) failed
+
+    Locator:  locator('dl > div').filter({ has: locator('dt').filter({ hasText: /^Modell$/ }) }).locator('dd').first()
+    Expected: "FortiGate-100F"
+    Received: "Audit-FW-1792350766024325"
+    Timeout:  30000ms
+
+    Call log:
+      - overview after "Override aufheben" without reload with timeout 30000ms
+      - waiting for locator('dl > div').filter({ has: locator('dt').filter({ hasText: /^Modell$/ }) }).locator('dd').first()
+        63 × locator resolved to <dd class="break-all font-medium text-gray-900 dark:text-gray-100">Audit-FW-1792350766024325</dd>
+           - unexpected value "Audit-FW-1792350766024325"
+
+
+      1069 |     await expect
+      1070 |       .soft(detailValue(page, 'Modell'), 'overview after "Override aufheben" without reload')
+    > 1071 |       .toHaveText(SIM.firewallModel);
+           |        ^
+      1072 |
+      1073 |     // WP-060: the effective value is the current observed value again.
+      1074 |     expect((await getCI(ci.id)).model).toBe(SIM.firewallModel);
+        at /home/user/Reticora-CMDB/frontend/e2e-real/discovery-override.spec.ts:1071:8
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/discovery-override-Discove-cd3bc-field-to-the-observed-value/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/discovery-override-Discove-cd3bc-field-to-the-observed-value/error-context.md
+
+    Error Context: test-results/discovery-override-Discove-cd3bc-field-to-the-observed-value/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/discovery-override-Discove-cd3bc-field-to-the-observed-value/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/discovery-override-Discove-cd3bc-field-to-the-observed-value/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  13) e2e-real/locations-racks.spec.ts:411:3 › locations and racks (LOC-*, RCK-*) › L02 names are unique per parent level and the rack height is 1–60 (explicit 0 → 422) 
+
+    Error: POST /locations: the 409 of a duplicate site names the field name
+
+    expect(received).toMatch(expected)
+
+    Expected pattern: /"field"\s*:\s*"name"/
+    Received string:  "{\"detail\":\"a record with the same unique value already exists\",\"status\":409,\"title\":\"Conflict\",\"trace_id\":\"75aa1d807c1e53f699d8e06a17fd167d\",\"type\":\"https://reticora.io/problems/409\"}
+    "
+
+      433 |     expect
+      434 |       .soft(body, 'POST /locations: the 409 of a duplicate site names the field name')
+    > 435 |       .toMatch(/"field"\s*:\s*"name"/);
+          |        ^
+      436 |     const viaSites = await api<Problem>(w.rq, w.t.token, 'POST', '/sites', {
+      437 |       client_id: w.client.id,
+      438 |       name: h.site.name,
+        at /home/user/Reticora-CMDB/frontend/e2e-real/locations-racks.spec.ts:435:8
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/locations-racks-locations--710e1-t-is-1–60-explicit-0-→-422-/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/locations-racks-locations--710e1-t-is-1–60-explicit-0-→-422-/error-context.md
+
+    Error Context: test-results/locations-racks-locations--710e1-t-is-1–60-explicit-0-→-422-/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/locations-racks-locations--710e1-t-is-1–60-explicit-0-→-422-/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/locations-racks-locations--710e1-t-is-1–60-explicit-0-→-422-/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  14) e2e-real/locations-racks.spec.ts:672:3 › locations and racks (LOC-*, RCK-*) › L05 deleting a site, building or room with child locations through /sites, /buildings or /rooms is refused (409) 
+
+    Error: DELETE /rooms/{id} with child locations: null
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 409
+    Received: 204
+
+      687 |           `DELETE /${resource}/{id} with child locations: ${JSON.stringify(res.body)}`,
+      688 |         )
+    > 689 |         .toBe(409);
+          |          ^
+      690 |       if (res.status === 409) {
+      691 |         expect.soft(res.body.dependencies, `/${resource}: dependency kinds`).toContain('location');
+      692 |       }
+        at /home/user/Reticora-CMDB/frontend/e2e-real/locations-racks.spec.ts:689:10
+
+    Error: DELETE /rooms/{id}: the subtree is untouched
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 2
+    + Received  + 0
+
+      Array [
+        "building",
+    -   "rack",
+    -   "room",
+        "site",
+      ]
+
+      700 |           `DELETE /${resource}/{id}: the subtree is untouched`,
+      701 |         )
+    > 702 |         .toEqual(['building', 'rack', 'room', 'site']);
+          |          ^
+      703 |     }
+      704 |   });
+      705 |
+        at /home/user/Reticora-CMDB/frontend/e2e-real/locations-racks.spec.ts:702:10
+
+    Error: DELETE /buildings/{id} with child locations: null
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 409
+    Received: 204
+
+      687 |           `DELETE /${resource}/{id} with child locations: ${JSON.stringify(res.body)}`,
+      688 |         )
+    > 689 |         .toBe(409);
+          |          ^
+      690 |       if (res.status === 409) {
+      691 |         expect.soft(res.body.dependencies, `/${resource}: dependency kinds`).toContain('location');
+      692 |       }
+        at /home/user/Reticora-CMDB/frontend/e2e-real/locations-racks.spec.ts:689:10
+
+    Error: DELETE /buildings/{id}: the subtree is untouched
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 3
+    + Received  + 0
+
+      Array [
+    -   "building",
+    -   "rack",
+    -   "room",
+        "site",
+      ]
+
+      700 |           `DELETE /${resource}/{id}: the subtree is untouched`,
+      701 |         )
+    > 702 |         .toEqual(['building', 'rack', 'room', 'site']);
+          |          ^
+      703 |     }
+      704 |   });
+      705 |
+        at /home/user/Reticora-CMDB/frontend/e2e-real/locations-racks.spec.ts:702:10
+
+    Error: DELETE /sites/{id} with child locations: null
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 409
+    Received: 204
+
+      687 |           `DELETE /${resource}/{id} with child locations: ${JSON.stringify(res.body)}`,
+      688 |         )
+    > 689 |         .toBe(409);
+          |          ^
+      690 |       if (res.status === 409) {
+      691 |         expect.soft(res.body.dependencies, `/${resource}: dependency kinds`).toContain('location');
+      692 |       }
+        at /home/user/Reticora-CMDB/frontend/e2e-real/locations-racks.spec.ts:689:10
+
+    Error: DELETE /sites/{id}: the subtree is untouched
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 6
+    + Received  + 1
+
+    - Array [
+    -   "building",
+    -   "rack",
+    -   "room",
+    -   "site",
+    - ]
+    + Array []
+
+      700 |           `DELETE /${resource}/{id}: the subtree is untouched`,
+      701 |         )
+    > 702 |         .toEqual(['building', 'rack', 'room', 'site']);
+          |          ^
+      703 |     }
+      704 |   });
+      705 |
+        at /home/user/Reticora-CMDB/frontend/e2e-real/locations-racks.spec.ts:702:10
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/locations-racks-locations--7486a-gs-or-rooms-is-refused-409-/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/locations-racks-locations--7486a-gs-or-rooms-is-refused-409-/error-context.md
+
+    Error Context: test-results/locations-racks-locations--7486a-gs-or-rooms-is-refused-409-/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/locations-racks-locations--7486a-gs-or-rooms-is-refused-409-/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/locations-racks-locations--7486a-gs-or-rooms-is-refused-409-/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  15) e2e-real/locations-racks.spec.ts:862:3 › locations and racks (LOC-*, RCK-*) › L08 moving a mounted CI is recorded in ci_change, audit and the unified history shown on the CI page 
+
+    Error: layout of an empty rack: mounts = null
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+      969 |         `layout of an empty rack: mounts = ${JSON.stringify(lay.mounts)}`,
+      970 |       )
+    > 971 |       .toBe(true);
+          |        ^
+      972 |     const unmount = await api(w.rq, w.t.token, 'DELETE', `/racks/${rack2.id}/mounts/${ci.id}`);
+      973 |     expect(unmount.status).toBe(204);
+      974 |     expect(mountRows(rack2.id)).toEqual([]);
+        at /home/user/Reticora-CMDB/frontend/e2e-real/locations-racks.spec.ts:971:8
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/locations-racks-locations--7138b-istory-shown-on-the-CI-page/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/locations-racks-locations--7138b-istory-shown-on-the-CI-page/error-context.md
+
+    Error Context: test-results/locations-racks-locations--7138b-istory-shown-on-the-CI-page/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/locations-racks-locations--7138b-istory-shown-on-the-CI-page/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/locations-racks-locations--7138b-istory-shown-on-the-CI-page/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  16) e2e-real/roles-authz.spec.ts:479:1 › 05 an invitation sends the invitee an e-mail (NTF-05 event "Einladung") 
+
+    Error: invitation e-mail to mailed-1792350856952126@audit-e2e.de in the mail catcher
+
+    expect(received).not.toBeNull()
+
+    Received: null
+
+      493 |   await issue(request, address, 'viewer');
+      494 |   const mail = await mailTo(request, address, 60_000);
+    > 495 |   expect(mail, `invitation e-mail to ${address} in the mail catcher`).not.toBeNull();
+          |                                                                           ^
+      496 |   expect(`${mail!.Subject} ${mail!.Text ?? ''}`).toMatch(/einladung|invit/i);
+      497 |   expect(mail!.Text ?? mail!.HTML ?? '').toContain(state().admin!.org);
+      498 | });
+        at /home/user/Reticora-CMDB/frontend/e2e-real/roles-authz.spec.ts:495:75
+
+    Error Context: test-results/roles-authz-05-an-invitati-2a4ea-ail-NTF-05-event-Einladung-/error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/roles-authz-05-an-invitati-2a4ea-ail-NTF-05-event-Einladung-/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/roles-authz-05-an-invitati-2a4ea-ail-NTF-05-event-Einladung-/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  17) e2e-real/roles-authz.spec.ts:798:1 › 09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles 
+
+    Error: org_admin is a system role
+
+    expect(locator).toContainText(expected) failed
+
+    Locator: locator('#main-content').getByRole('row', { name: /^org_admin\b/ })
+    Expected substring: "System"
+    Received string:    "org_adminOrganization administrator with full access103Custom"
+    Timeout: 5000ms
+
+    Call log:
+      - org_admin is a system role with timeout 5000ms
+      - waiting for locator('#main-content').getByRole('row', { name: /^org_admin\b/ })
+        14 × locator resolved to <tr class="text-sm text-gray-700 dark:text-gray-300">…</tr>
+           - unexpected value "org_adminOrganization administrator with full access103Custom"
+
+
+      809 |     await expect
+      810 |       .soft(main.getByRole('row', { name: new RegExp(`^${role}\\b`) }), `${role} is a system role`)
+    > 811 |       .toContainText('System', { timeout: 5_000 });
+          |        ^
+      812 |   }
+      813 |   await context.close();
+      814 | });
+        at /home/user/Reticora-CMDB/frontend/e2e-real/roles-authz.spec.ts:811:8
+
+    Error: engineer is a system role
+
+    expect(locator).toContainText(expected) failed
+
+    Locator: locator('#main-content').getByRole('row', { name: /^engineer\b/ })
+    Expected substring: "System"
+    Received string:    "engineerTechnical staff: manages CIs, topology, discovery, assets, IPAM, racks and operations81Custom"
+    Timeout: 5000ms
+
+    Call log:
+      - engineer is a system role with timeout 5000ms
+      - waiting for locator('#main-content').getByRole('row', { name: /^engineer\b/ })
+        14 × locator resolved to <tr class="text-sm text-gray-700 dark:text-gray-300">…</tr>
+           - unexpected value "engineerTechnical staff: manages CIs, topology, discovery, assets, IPAM, racks and operations81Custom"
+
+
+      809 |     await expect
+      810 |       .soft(main.getByRole('row', { name: new RegExp(`^${role}\\b`) }), `${role} is a system role`)
+    > 811 |       .toContainText('System', { timeout: 5_000 });
+          |        ^
+      812 |   }
+      813 |   await context.close();
+      814 | });
+        at /home/user/Reticora-CMDB/frontend/e2e-real/roles-authz.spec.ts:811:8
+
+    Error: viewer is a system role
+
+    expect(locator).toContainText(expected) failed
+
+    Locator: locator('#main-content').getByRole('row', { name: /^viewer\b/ })
+    Expected substring: "System"
+    Received string:    "viewerRead-only access across the organization; no credential, audit or administration rights35Custom"
+    Timeout: 5000ms
+
+    Call log:
+      - viewer is a system role with timeout 5000ms
+      - waiting for locator('#main-content').getByRole('row', { name: /^viewer\b/ })
+        14 × locator resolved to <tr class="text-sm text-gray-700 dark:text-gray-300">…</tr>
+           - unexpected value "viewerRead-only access across the organization; no credential, audit or administration rights35Custom"
+
+
+      809 |     await expect
+      810 |       .soft(main.getByRole('row', { name: new RegExp(`^${role}\\b`) }), `${role} is a system role`)
+    > 811 |       .toContainText('System', { timeout: 5_000 });
+          |        ^
+      812 |   }
+      813 |   await context.close();
+      814 | });
+        at /home/user/Reticora-CMDB/frontend/e2e-real/roles-authz.spec.ts:811:8
+
+    Error: client_technician is a system role
+
+    expect(locator).toContainText(expected) failed
+
+    Locator: locator('#main-content').getByRole('row', { name: /^client_technician\b/ })
+    Expected substring: "System"
+    Received string:    "client_technicianClient-scoped technician: reads operational data and works tickets30Custom"
+    Timeout: 5000ms
+
+    Call log:
+      - client_technician is a system role with timeout 5000ms
+      - waiting for locator('#main-content').getByRole('row', { name: /^client_technician\b/ })
+        14 × locator resolved to <tr class="text-sm text-gray-700 dark:text-gray-300">…</tr>
+           - unexpected value "client_technicianClient-scoped technician: reads operational data and works tickets30Custom"
+
+
+      809 |     await expect
+      810 |       .soft(main.getByRole('row', { name: new RegExp(`^${role}\\b`) }), `${role} is a system role`)
+    > 811 |       .toContainText('System', { timeout: 5_000 });
+          |        ^
+      812 |   }
+      813 |   await context.close();
+      814 | });
+        at /home/user/Reticora-CMDB/frontend/e2e-real/roles-authz.spec.ts:811:8
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/roles-authz-09b-the-roles--e0de6-m-roles-not-as-custom-roles/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/roles-authz-09b-the-roles--e0de6-m-roles-not-as-custom-roles/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/roles-authz-09b-the-roles--e0de6-m-roles-not-as-custom-roles/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/roles-authz-09b-the-roles--e0de6-m-roles-not-as-custom-roles/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  18) e2e-real/roles-authz.spec.ts:816:1 › 09c viewer UI: saving a webhook is refused visibly, not silently 
+
+    Error: the refused save is reported to the viewer (no silent failure)
+
+    expect(locator).toBeVisible() failed
+
+    Locator: getByRole('alert').or(getByRole('status').filter({ hasText: /\S/ })).or(locator('#main-content').getByText(/permission|berechtigung|forbidden|verweigert|nicht erlaubt|403/i)).first()
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - the refused save is reported to the viewer (no silent failure) with timeout 10000ms
+      - waiting for getByRole('alert').or(getByRole('status').filter({ hasText: /\S/ })).or(locator('#main-content').getByText(/permission|berechtigung|forbidden|verweigert|nicht erlaubt|403/i)).first()
+
+
+      850 |         feedback.first(),
+      851 |         'the refused save is reported to the viewer (no silent failure)',
+    > 852 |       ).toBeVisible({ timeout: 10_000 });
+          |         ^
+      853 |     }
+      854 |   }
+      855 |   await context.close();
+        at /home/user/Reticora-CMDB/frontend/e2e-real/roles-authz.spec.ts:852:9
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/roles-authz-09c-viewer-UI--bd422-efused-visibly-not-silently/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/roles-authz-09c-viewer-UI--bd422-efused-visibly-not-silently/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/roles-authz-09c-viewer-UI--bd422-efused-visibly-not-silently/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/roles-authz-09c-viewer-UI--bd422-efused-visibly-not-silently/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  19) e2e-real/roles-authz.spec.ts:982:1 › 12 after the upgrade the user creates a CI through the UI form (UI → API → DB → UI) 
+
+    Error: POST /cis from the form ({"name":"engineer-ui-ci-1792350970086294","ci_type_id":"server","status":"active","discovery_source":"manual"}) → {"detail":"a field value has an invalid format or is out of range","status":400,"title":"Bad Request","trace_id":"5aab642c01e252a151bfb2d6b4e3dde4","type":"https://reticora.io/problems/400"}
+
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 201
+    Received: 400
+
+      1008 |     response.status(),
+      1009 |     `POST /cis from the form (${response.request().postData()}) → ${await response.text()}`,
+    > 1010 |   ).toBe(201);
+           |     ^
+      1011 |   await expect(dialog).toBeHidden();
+      1012 |   await page.reload();
+      1013 |   await expect(page.getByRole('link', { name: uiName })).toBeVisible();
+        at /home/user/Reticora-CMDB/frontend/e2e-real/roles-authz.spec.ts:1010:5
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/roles-authz-12-after-the-u-69682-UI-form-UI-→-API-→-DB-→-UI-/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/roles-authz-12-after-the-u-69682-UI-form-UI-→-API-→-DB-→-UI-/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/roles-authz-12-after-the-u-69682-UI-form-UI-→-API-→-DB-→-UI-/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/roles-authz-12-after-the-u-69682-UI-form-UI-→-API-→-DB-→-UI-/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  20) e2e-real/roles-authz.spec.ts:1019:1 › 13 an admin can revoke the role again and the user loses the rights at the next sign-in 
+
+    Error: DELETE /role-assignments/{id} → 404 {"detail":"the requested resource does not exist","status":404,"title":"Not Found","trace_id":"476fffcffe9865b84051ffa05254d794","type":"https://reticora.io/problems/404"}
+
+    expect(received).toContain(expected) // indexOf
+
+    Expected value: 404
+    Received array: [200, 204]
+
+      1041 |     [200, 204],
+      1042 |     `DELETE /role-assignments/{id} → ${removed.status} ${JSON.stringify(removed.body)}`,
+    > 1043 |   ).toContain(removed.status);
+           |     ^
+      1044 |   expect((await assignmentsOf(request, viewer.userId)).map((a) => a.role_id)).toEqual([
+      1045 |     roles.viewer,
+      1046 |   ]);
+        at /home/user/Reticora-CMDB/frontend/e2e-real/roles-authz.spec.ts:1043:5
+
+    Error Context: test-results/roles-authz-13-an-admin-ca-be3cd--rights-at-the-next-sign-in/error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/roles-authz-13-an-admin-ca-be3cd--rights-at-the-next-sign-in/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/roles-authz-13-an-admin-ca-be3cd--rights-at-the-next-sign-in/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  21) e2e-real/roles-authz.spec.ts:1058:1 › 14 the SPA renews an expired access token with the refresh cookie instead of signing the user out 
+
+    Error: SPA refresh (Content-Type: none) → {"detail":"Content-Type must be application/json","instance":"/api/v1/auth/refresh","status":400,"title":"Validation Error","trace_id":"b39868310e9b22121a90988be1a7033e","type":"urn:reticora:problem:validation-error"}
+
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 400
+
+      1083 |     response.status(),
+      1084 |     `SPA refresh (Content-Type: ${response.request().headers()['content-type'] ?? 'none'}) → ${await response.text()}`,
+    > 1085 |   ).toBe(200);
+           |     ^
+      1086 |   await expect(page).toHaveURL(/\/cmdb/);
+      1087 |   await expect(page.getByRole('link', { name: ci.name })).toBeVisible();
+      1088 |   await context.close();
+        at /home/user/Reticora-CMDB/frontend/e2e-real/roles-authz.spec.ts:1085:5
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/roles-authz-14-the-SPA-ren-68aaf-ead-of-signing-the-user-out/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/roles-authz-14-the-SPA-ren-68aaf-ead-of-signing-the-user-out/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/roles-authz-14-the-SPA-ren-68aaf-ead-of-signing-the-user-out/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/roles-authz-14-the-SPA-ren-68aaf-ead-of-signing-the-user-out/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  22) e2e-real/roles-authz.spec.ts:1091:1 › 14b the SPA renews the session when the access token lifetime has run out instead of sending the user to the login 
+
+    Error: the SPA renews the expired session with the refresh cookie (POST /auth/refresh → 200)
+
+    the SPA renews the expired session with the refresh cookie (POST /auth/refresh → 200)
+
+    expect(received).toContain(expected) // indexOf
+
+    Expected value: 200
+    Received array: []
+
+    Call Log:
+    - Timeout 15000ms exceeded while waiting on the predicate
+
+      1121 |       timeout: 15_000,
+      1122 |     })
+    > 1123 |     .toContain(200);
+           |      ^
+      1124 |   await expect(page).not.toHaveURL(/\/login/);
+      1125 |   await expect(page.getByRole('link', { name: ci.name })).toBeVisible();
+      1126 |   await context.close();
+        at /home/user/Reticora-CMDB/frontend/e2e-real/roles-authz.spec.ts:1123:6
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/roles-authz-14b-the-SPA-re-a9f42-nding-the-user-to-the-login/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/roles-authz-14b-the-SPA-re-a9f42-nding-the-user-to-the-login/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/roles-authz-14b-the-SPA-re-a9f42-nding-the-user-to-the-login/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/roles-authz-14b-the-SPA-re-a9f42-nding-the-user-to-the-login/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  23) e2e-real/tenant-isolation.spec.ts:1114:3 › tenant isolation (TEN-06, TEN-09) › T14 B’s relationship to A’s CI is rejected with a client error and nothing is stored 
+
+    Error: status of the rejection
+
+    expect(received).toMatch(expected)
+
+    Expected pattern: /: (400|403|404|422)$/
+    Received string:  "a3087eca-c90f-498c-a46b-3634958dae4c->f677d157-2800-498a-a68a-892d1690eeb9: 500"
+
+      1142 |     // (API-03: RFC 7807 table – 404/422), not an internal error.
+      1143 |     for (const s of statuses) {
+    > 1144 |       expect(s, 'status of the rejection').toMatch(/: (400|403|404|422)$/);
+           |                                            ^
+      1145 |     }
+      1146 |   });
+      1147 |
+        at /home/user/Reticora-CMDB/frontend/e2e-real/tenant-isolation.spec.ts:1144:44
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tenant-isolation-tenant-is-a65ac-error-and-nothing-is-stored/test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tenant-isolation-tenant-is-a65ac-error-and-nothing-is-stored/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tenant-isolation-tenant-is-a65ac-error-and-nothing-is-stored/error-context.md
+
+    Error Context: test-results/tenant-isolation-tenant-is-a65ac-error-and-nothing-is-stored/error-context.md
+
+    attachment #5: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tenant-isolation-tenant-is-a65ac-error-and-nothing-is-stored/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tenant-isolation-tenant-is-a65ac-error-and-nothing-is-stored/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  24) e2e-real/tenant-isolation.spec.ts:1148:3 › tenant isolation (TEN-06, TEN-09) › T15 the topology rooted at A’s CI answers B with "not found", like neighbours and impact 
+
+    Error: GET /topology?root_ci_id={A} as B → 500
+
+    expect(received).toContain(expected) // indexOf
+
+    Expected value: 500
+    Received array: [403, 404]
+
+      1151 |     const rooted = await api(w.rq, w.b.token, 'GET', `/topology?root_ci_id=${w.ci1.id}`);
+      1152 |     expectNoTraceOfA('GET /topology?root_ci_id={A} as B', rooted.body, [w.ci1.id]);
+    > 1153 |     expect(NOT_FOUND, `GET /topology?root_ci_id={A} as B → ${rooted.status}`).toContain(
+           |                                                                               ^
+      1154 |       rooted.status,
+      1155 |     );
+      1156 |   });
+        at /home/user/Reticora-CMDB/frontend/e2e-real/tenant-isolation.spec.ts:1153:79
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tenant-isolation-tenant-is-f1eea--like-neighbours-and-impact/test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tenant-isolation-tenant-is-f1eea--like-neighbours-and-impact/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tenant-isolation-tenant-is-f1eea--like-neighbours-and-impact/error-context.md
+
+    Error Context: test-results/tenant-isolation-tenant-is-f1eea--like-neighbours-and-impact/error-context.md
+
+    attachment #5: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tenant-isolation-tenant-is-f1eea--like-neighbours-and-impact/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tenant-isolation-tenant-is-f1eea--like-neighbours-and-impact/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  25) e2e-real/tenant-isolation.spec.ts:1158:3 › tenant isolation (TEN-06, TEN-09) › T16 A creates a CI through the CMDB form; it is stored in A’s organization and invisible to B 
+
+    Error: POST /cis sent by the CMDB form: {"detail":"a field value has an invalid format or is out of range","status":400,"title":"Bad Request","trace_id":"1e0ca9475571130de71ee33be695664f","type":"https://reticora.io/problems/400"}
+
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 201
+    Received: 400
+
+      1167 |     await dialog.getByRole('button', { name: 'Anlegen' }).click();
+      1168 |     const res = await created;
+    > 1169 |     expect(res.status(), `POST /cis sent by the CMDB form: ${await res.text()}`).toBe(201);
+           |                                                                                  ^
+      1170 |     const ci = (await res.json()) as CI;
+      1171 |     await expect(dialog).toBeHidden();
+      1172 |     await expect(page.locator('#main-content').getByText(name, { exact: true })).toBeVisible();
+        at /home/user/Reticora-CMDB/frontend/e2e-real/tenant-isolation.spec.ts:1169:82
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tenant-isolation-tenant-is-6f490-nization-and-invisible-to-B/test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tenant-isolation-tenant-is-6f490-nization-and-invisible-to-B/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tenant-isolation-tenant-is-6f490-nization-and-invisible-to-B/error-context.md
+
+    Error Context: test-results/tenant-isolation-tenant-is-6f490-nization-and-invisible-to-B/error-context.md
+
+    attachment #5: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tenant-isolation-tenant-is-6f490-nization-and-invisible-to-B/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tenant-isolation-tenant-is-6f490-nization-and-invisible-to-B/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  26) e2e-real/tenant-isolation.spec.ts:1185:3 › tenant isolation (TEN-06, TEN-09) › T17 A’s audit viewer shows when and on which object each of A’s entries happened 
+
+    Error: time of exports.create (API 2026-10-18T19:17:35.104886Z)
+
+    expect(received).not.toMatch(expected)
+
+    Expected pattern: not /invalid/i
+    Received string:      "Invalid Date"
+
+      1204 |       expect(action, `row ${i}`).toBe(entry.action);
+      1205 |       expect(entry.timestamp, `API time of ${entry.action}`).toBeTruthy();
+    > 1206 |       expect(time, `time of ${entry.action} (API ${entry.timestamp})`).not.toMatch(/invalid/i);
+           |                                                                            ^
+      1207 |       expect(time, `time of ${entry.action} (API ${entry.timestamp})`).toMatch(
+      1208 |         /\d{1,2}\.\d{1,2}\.\d{4}/,
+      1209 |       );
+        at /home/user/Reticora-CMDB/frontend/e2e-real/tenant-isolation.spec.ts:1206:76
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tenant-isolation-tenant-is-85489-ach-of-A’s-entries-happened/test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tenant-isolation-tenant-is-85489-ach-of-A’s-entries-happened/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tenant-isolation-tenant-is-85489-ach-of-A’s-entries-happened/error-context.md
+
+    Error Context: test-results/tenant-isolation-tenant-is-85489-ach-of-A’s-entries-happened/error-context.md
+
+    attachment #5: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tenant-isolation-tenant-is-85489-ach-of-A’s-entries-happened/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tenant-isolation-tenant-is-85489-ach-of-A’s-entries-happened/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  26 failed
+    e2e-real/bulk-jobs-export.spec.ts:582:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › B04 a malformed id in a bulk request is reported with the status the single change answers (400, not 500) 
+    e2e-real/bulk-jobs-export.spec.ts:1021:3 › Bulk operations, jobs, notifications, saved views, export, webhook egress › W01 a webhook to a local catcher is refused by the egress protection, not stored, nothing delivered, and the UI explains the refusal 
+    e2e-real/ci-lifecycle.spec.ts:362:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L01 a CI created through the CMDB form is stored with all fields in the own organization and opens on its detail page 
+    e2e-real/ci-lifecycle.spec.ts:503:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L03a a double click on the create button of the CMDB form creates exactly one CI 
+    e2e-real/ci-lifecycle.spec.ts:645:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L05 clearing a field in the edit form removes the stored value (merge patch) 
+    e2e-real/ci-lifecycle.spec.ts:673:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L05b PATCH is a JSON merge patch: null removes a typed field, absent members stay 
+    e2e-real/ci-lifecycle.spec.ts:746:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L07 the audit viewer shows the CI change with time, actor, action and object; the chain verifies 
+    e2e-real/ci-lifecycle.spec.ts:783:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L08 a relationship created on the detail page shows as neighbour and in the impact view along its direction 
+    e2e-real/ci-lifecycle.spec.ts:987:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L10b the CSV export button of the CMDB list downloads the CIs of the list 
+    e2e-real/ci-lifecycle.spec.ts:1180:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L12b two sessions edit different fields of the same CI: no change is lost and the edits merge field by field 
+    e2e-real/ci-lifecycle.spec.ts:1298:3 › CI lifecycle: create, edit, history, audit, relations, search, export, delete › L14 names and fields with quotes or backslashes are stored like any other text (API create, edit form) 
+    e2e-real/discovery-override.spec.ts:1051:3 › Discovery → reconciliation → override protection → review › D07 "Override aufheben" in the CI detail returns the field to the observed value 
+    e2e-real/locations-racks.spec.ts:411:3 › locations and racks (LOC-*, RCK-*) › L02 names are unique per parent level and the rack height is 1–60 (explicit 0 → 422) 
+    e2e-real/locations-racks.spec.ts:672:3 › locations and racks (LOC-*, RCK-*) › L05 deleting a site, building or room with child locations through /sites, /buildings or /rooms is refused (409) 
+    e2e-real/locations-racks.spec.ts:862:3 › locations and racks (LOC-*, RCK-*) › L08 moving a mounted CI is recorded in ci_change, audit and the unified history shown on the CI page 
+    e2e-real/roles-authz.spec.ts:479:1 › 05 an invitation sends the invitee an e-mail (NTF-05 event "Einladung") 
+    e2e-real/roles-authz.spec.ts:798:1 › 09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles 
+    e2e-real/roles-authz.spec.ts:816:1 › 09c viewer UI: saving a webhook is refused visibly, not silently 
+    e2e-real/roles-authz.spec.ts:982:1 › 12 after the upgrade the user creates a CI through the UI form (UI → API → DB → UI) 
+    e2e-real/roles-authz.spec.ts:1019:1 › 13 an admin can revoke the role again and the user loses the rights at the next sign-in 
+    e2e-real/roles-authz.spec.ts:1058:1 › 14 the SPA renews an expired access token with the refresh cookie instead of signing the user out 
+    e2e-real/roles-authz.spec.ts:1091:1 › 14b the SPA renews the session when the access token lifetime has run out instead of sending the user to the login 
+    e2e-real/tenant-isolation.spec.ts:1114:3 › tenant isolation (TEN-06, TEN-09) › T14 B’s relationship to A’s CI is rejected with a client error and nothing is stored 
+    e2e-real/tenant-isolation.spec.ts:1148:3 › tenant isolation (TEN-06, TEN-09) › T15 the topology rooted at A’s CI answers B with "not found", like neighbours and impact 
+    e2e-real/tenant-isolation.spec.ts:1158:3 › tenant isolation (TEN-06, TEN-09) › T16 A creates a CI through the CMDB form; it is stored in A’s organization and invisible to B 
+    e2e-real/tenant-isolation.spec.ts:1185:3 › tenant isolation (TEN-06, TEN-09) › T17 A’s audit viewer shows when and on which object each of A’s entries happened 
+  56 passed (9.3m)

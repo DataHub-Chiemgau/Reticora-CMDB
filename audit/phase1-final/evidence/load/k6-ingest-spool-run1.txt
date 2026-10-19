@@ -1,0 +1,60 @@
+
+running (00m15.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+
+running (00m16.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+
+running (00m17.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+
+running (00m18.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+
+running (00m19.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+
+running (00m20.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+
+running (00m21.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+
+running (00m22.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+
+running (00m23.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+
+running (00m24.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+
+running (00m25.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+
+running (00m26.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+
+running (00m27.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+
+running (00m28.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+time="2026-10-15T07:41:22Z" level=info msg="spool: 10000 of 10000 records visible; sending took 9600 ms, 2164 visible and backlog 0 at its end (sampled 10 s before), all visible 18874 ms later" source=console
+
+     ✓ spool 202
+     ✓ every spooled record visible
+
+   ✓ checks.................................: 100.00%    158 out of 158
+     data_received..........................: 183 kB     6.4 kB/s
+     data_sent..............................: 468 kB     16 kB/s
+     http_req_blocked.......................: avg=13.29µs  min=3.95µs  med=9.26µs   p(90)=17.9µs   p(95)=22.09µs  max=450.78µs count=213
+     http_req_connecting....................: avg=1.3µs    min=0s      med=0s       p(90)=0s       p(95)=0s       max=278.58µs count=213
+     http_req_duration......................: avg=66.9ms   min=1.31ms  med=48.56ms  p(90)=156.66ms p(95)=220.31ms max=405.02ms count=213
+       { expected_response:true }...........: avg=66.9ms   min=1.31ms  med=48.56ms  p(90)=156.66ms p(95)=220.31ms max=405.02ms count=213
+     ✓ { name:spool }.......................: avg=52.91ms  min=11.98ms med=48.38ms  p(90)=74.19ms  p(95)=89.93ms  max=221.7ms  count=157
+     http_req_failed........................: 0.00%      0 out of 213
+     ✓ { name:spool }.......................: 0.00%      0 out of 157
+     http_req_receiving.....................: avg=234.45µs min=53.23µs med=180.23µs p(90)=294.63µs p(95)=391.4µs  max=4.39ms   count=213
+     http_req_sending.......................: avg=178.33µs min=12.54µs med=58.07µs  p(90)=163.92µs p(95)=336.8µs  max=6.82ms   count=213
+     http_req_tls_handshaking...............: avg=0s       min=0s      med=0s       p(90)=0s       p(95)=0s       max=0s       count=213
+     http_req_waiting.......................: avg=66.49ms  min=1.15ms  med=48.39ms  p(90)=156.19ms p(95)=220.02ms max=404.72ms count=213
+     http_reqs..............................: 213        7.451318/s
+     ingest_backlog_peak....................: 0          min=0          max=0         
+     ingest_drain_inclusive_records_per_s...: 351.197584 min=351.197584 max=351.197584
+   ✓ ingest_drain_records_per_s.............: 415.174314 min=415.174314 max=415.174314
+   ✓ ingest_records_missing.................: 0          0/s
+   ✓ ingest_spool_flush.....................: avg=28.47s   min=28.47s  med=28.47s   p(90)=28.47s   p(95)=28.47s   max=28.47s   count=1  
+     iteration_duration.....................: avg=28.58s   min=28.58s  med=28.58s   p(90)=28.58s   p(95)=28.58s   max=28.58s   count=1  
+     iterations.............................: 1          0.034983/s
+     vus....................................: 1          min=1          max=1         
+     vus_max................................: 1          min=1          max=1         
+
+
+running (00m28.6s), 0/1 VUs, 1 complete and 0 interrupted iterations

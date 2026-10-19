@@ -9,6 +9,8 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt den gesamten Umfang der Pha
 
 ## Annahme: Phase 1 ist vollständig entwickelt
 
+**Nachtrag vom 2026-10-19:** Das Phase-1-Abnahmeaudit vom 2026-10-18 (`audit/phase1-final/`) hat Gate G1 nicht bestätigt (NO-GO). Vor diesem Plan liegt deshalb der Korrekturplan [`../g1-korrektur/implementierungsplan.md`](../g1-korrektur/implementierungsplan.md) (WP-336 ff.); Phase 2 beginnt erst nach dessen Gate-WP ([E-59](../g1-korrektur/entscheidungen.md#e-59)). WP-243 (`p2-trace`) liest bei seiner Umsetzung alle drei Pläne, weil WP-336 (`k-trace`) die Prüfung bereits um den Korrekturplan erweitert.
+
 Der Plan setzt voraus, dass Gate G1 bestanden ist: Alle WPs des Phase-1-Plans (WP-001 bis WP-214 sowie WP-240 bis WP-242) sind gemergt, und der dort beschriebene Zielzustand ist die Ausgangslage. Daraus folgt:
 
 - **Fundament vorhanden:** Mandantenkontext `database.WithTenant` mit Client-/Site-/Team-Scopes (WP-008, WP-065), kanonischer Location-Baum (WP-026), Asset-Hoheit nach DB-05 (WP-077 bis WP-080), Metamodell-Basis mit `attribute_definition`, Regel-AST und Komposition Basis + Typkette (WP-116 bis WP-119, WP-142), Review-Modell (WP-088), zentrale Schreibentscheidung (WP-058), Overrides (WP-057), Versionierung/ETag (WP-061), Jobs/Scheduler/Events/Benachrichtigungen (WP-129 bis WP-140), PII-Vault (WP-240 bis WP-242), generische Job-API und Bulk-API (WP-181, WP-182), Filter-AST und Sichten (WP-187, WP-188), Export nach EXP-01 [B] (WP-189), GraphQL-BFF (WP-184, WP-185), Feature-Gates der Spätphasen-Module (WP-214).

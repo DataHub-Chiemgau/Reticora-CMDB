@@ -1,0 +1,5 @@
+ok   no client certificate: refused
+ok   certificate of a foreign CA: refused
+ok   collector certificate: TLS established, server certificate trusted via the collector CA
+
+3 passed, 0 failed

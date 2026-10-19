@@ -1,0 +1,38 @@
+ok   validate_realm_json accepts a valid realm file
+ok   validate_realm_json rejects leftover placeholders
+ok   validate_realm_json rejects invalid JSON
+ok   validate_realm_json rejects a file without the reticora realm
+ok   validate_tls_material accepts a consistent cert/key pair
+ok   validate_tls_material rejects a mismatched key
+ok   validate_tls_material rejects an unparseable cert
+ok   tls: the self-signed placeholder is detected
+ok   tls: a missing certificate counts as placeholder
+ok   tls: a verifying chain is a real certificate
+ok   tls: an incomplete chain is rejected after issuance
+ok   tls: ACME runs certbot with the webroot and reloads nginx
+ok   tls: no new request while a real certificate is served
+ok   tls: the TLS template is mounted only with a domain
+ok   issuer: discovery from the host announces the configured issuer
+ok   issuer: another announced issuer is refused with a hint
+ok   issuer: an unreachable issuer is refused with a hint
+ok   issuer: the backend container checks the issuer itself
+ok   issuer: unreachable from the container is refused with a hint
+ok   issuer: a localhost issuer is refused, the host IP suggested
+ok   issuer: host IP and loopback detection
+ok   issuer: the troubleshooting guide covers the check
+ok   re-run: .env keeps extra settings such as RETICORA_HTTP_BIND
+ok   re-run: a fresh .env has no kept section
+ok   re-run: the password probe connects over TCP
+ok   re-run: CMDB and Keycloak database passwords are both probed
+ok   re-run: a stale Keycloak DB password is reset and re-verified
+ok   production realm contains no user
+ok   no known password in the production path
+ok   realm sets password, lockout and MFA policy
+ok   dev realm differs from production only by the demo user
+ok   dev compose imports the dev realm, production never
+ok   initial password is random and meets the policy
+ok   initial administrator gets a temporary password once
+ok   an existing initial administrator is not recreated
+ok   the demo account is rejected as initial administrator
+
+36 passed, 0 failed
