@@ -1,0 +1,191 @@
+# Defect tests of the Phase-1 acceptance audit that are red today (WP-337).
+# Format: art;ort;test;befund – see tests/audit/README.md. A work package that
+# fixes a finding moves its test into the regular suite and deletes the line.
+# Baseline: main at edccd2d (2026-10-19): 116 go, 34 sh, 11 vitest, 26 e2e-real.
+go;backend/cmd/agent;TestAuditT2AgentRefusesRedirectToPlainHTTP;F-064
+go;backend/cmd/server;TestAuditT5ReadinessCoversSMTP;F-126
+go;backend/cmd/server;TestAuditT5ReadinessObjectStorageURLEndpoint;F-127
+go;backend/internal/agent;TestAuditT3AgentTelemetryFollowsMergedCI;F-083
+go;backend/internal/ci;TestAuditT3BulkStatusIsManualWrite;F-020
+go;backend/internal/ci;TestAuditT3MergePatchNullClearsTypedField;F-080
+go;backend/internal/ci;TestAuditT3OverrideWritesRaiseVersion;F-021
+go;backend/internal/ci;TestAuditT3ParentMustBeVisibleToScopedPrincipal;F-086
+go;backend/internal/ci;TestAuditT3UnmergeKeepsLaterSurvivorEdits;F-097
+go;backend/internal/ci;TestAuditT7BulkJobCancelStopsWork;F-162
+go;backend/internal/ci;TestAuditT7BulkReportMatchesStoredStatus;F-020
+go;backend/internal/ci;TestAuditT7JobAPIHonoursClientScope;F-163
+go;backend/internal/config;TestAuditT5K8sRenderedEnvSatisfiesStartCheck;F-036
+go;backend/internal/database;TestAuditT1StartupRefusesEscalatableLogin;F-057
+go;backend/internal/discovery;TestAuditBadScopeIsolated;F-108
+go;backend/internal/discovery;TestAuditBundleCredentialSelection;F-027
+go;backend/internal/discovery;TestAuditCARolloverKeepsEnrolledCollectorTrust;F-102
+go;backend/internal/discovery;TestAuditCertificateRenewalBoundToCollector;F-012
+go;backend/internal/discovery;TestAuditConcurrentEdgePKIExportConsistent;F-104
+go;backend/internal/discovery;TestAuditDefectDiscoveryTypedValuesValidated;F-143
+go;backend/internal/discovery;TestAuditDisabledCollectorConnectionCut;F-025
+go;backend/internal/discovery;TestAuditDisabledCollectorScopeChannelRefused;F-025
+go;backend/internal/discovery;TestAuditEdgeIngestRefusesDisabledOrUnknownCollector;F-025
+go;backend/internal/discovery;TestAuditIdentitySearchWithMACsUsesIndexes;F-114
+go;backend/internal/discovery;TestAuditPowerRedundancyIndependentOfBatchOrder;F-112
+go;backend/internal/discovery;TestAuditT3PoisonRecordDoesNotTakeValidRecordsDown;F-090
+go;backend/internal/discovery;TestAuditT3ProbableDuplicateMergeIsCIMerge;F-096
+go;backend/internal/discovery;TestAuditT3ResurrectedNewKeepsClientAndIdentity;F-022
+go;backend/internal/discovery;TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices;F-030
+go;backend/internal/discovery;TestAuditZonedScopeTargetRefused;F-108
+go;backend/internal/history;TestAuditT3HistoryIncludesLocationChange;F-093
+go;backend/internal/identity;TestAuditT2APIKeyRotateRevokeOnlyByEntitledCaller;F-006
+go;backend/internal/identity;TestAuditT2KeyBindingNeverBroadensCreatorScope;F-007
+go;backend/internal/identity;TestAuditT2ServiceAccountRolesWithinCallerRights;F-008
+go;backend/internal/iga;TestAuditT1ApprovalNeverLosesTheProvisioningTask;F-056
+go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
+go;backend/internal/ipam;TestAuditT3VLANReferenceMustBeVisible;F-088
+go;backend/internal/ipam;TestAuditT3VRFWritesNeedOrgScope;F-089
+go;backend/internal/locations;TestAuditDefectSiteGrantConfinedToClientAndSite;F-014 F-141
+go;backend/internal/locations;TestAuditT3LocationDeleteRefusesChildren;F-023
+go;backend/internal/locations;TestAuditT3SiteDeleteKeepsNetworkObjects;F-024
+go;backend/internal/middleware;TestAuditT2RefreshPassesOpenAPIValidation;F-018
+go;backend/internal/middleware;TestAuditT2RefusedCredentialTrafficKeepsOrgBudget;F-019
+go;backend/internal/middleware;TestAuditT2SessionBudgetSurvivesTokenRefresh;F-076
+go;backend/internal/middleware;TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget;F-063
+go;backend/internal/middleware;TestAuditT2ValidatorRegistryMatchesOpenAPIRequestBodies;F-018
+go;backend/internal/monitoring;TestAuditT1MetricNamesHonourScope;F-052
+go;backend/internal/monitoring;TestAuditT1MetricViewsHonourScope;F-051
+go;backend/internal/notify;TestAuditDefectSMTPChannelCloudMetadataBlocked;F-153
+go;backend/internal/notify;TestAuditDefectSMTPSecretNotReleasedToNewHost;F-152
+go;backend/internal/rack;TestAuditDefectRackHeightNotBelowMounts;F-140
+go;backend/internal/relationship;TestAuditCleanupCronScopeDeadline;F-111
+go;backend/internal/search;TestAuditT1OpenSearchFollowsRackPlacement;F-054
+go;backend/internal/server;TestAuditDefectDiscoveryJobInGenericJobModel;F-146
+go;backend/internal/server;TestAuditDefectDomainEventsEmitted;F-043
+go;backend/internal/server;TestAuditDefectForeignPrivateCITypeRejected;F-144
+go;backend/internal/server;TestAuditDefectManualEdgeSurvivesInterfaceSync;F-042
+go;backend/internal/server;TestAuditDefectNotificationAdministrationNeedsNotificationManage;F-154
+go;backend/internal/server;TestAuditDefectRouteAuditFailureLeavesNoUnauditedMutation;F-149
+go;backend/internal/server;TestAuditDefectRouteAuditStoresOldAndNewValues;F-148
+go;backend/internal/server;TestAuditScopeSuggestedAuthzAndClientIsolation;F-031
+go;backend/internal/server;TestAuditT2AIAskRequiresOrgOptIn;F-073
+go;backend/internal/server;TestAuditT2AIOptInSettableThroughAPI;F-074
+go;backend/internal/server;TestAuditT2ContractHasNoBareArrayLists;F-075
+go;backend/internal/server;TestAuditT2CookieOnlyRefreshThroughProductionChain;F-018
+go;backend/internal/server;TestAuditT2EntitlementAPIAccessGatesAPIKeys;F-070
+go;backend/internal/server;TestAuditT2EntitlementQuotasEnforced;F-072
+go;backend/internal/server;TestAuditT2EntitlementRackViewGated;F-070
+go;backend/internal/server;TestAuditT2ListsAreCursorPages;F-075
+go;backend/internal/server;TestAuditT2RBA01KeysGateCITypesAndNotificationChannels;F-067
+go;backend/internal/server;TestAuditT2ServiceAccountRoleAssignmentNeedsRoleManage;F-008
+go;backend/internal/server;TestAuditT3HealthRefreshRunsInG1;F-087
+go;backend/internal/server;TestAuditT3OverrideRefusesReservedNames;F-092
+go;backend/internal/server;TestAuditT3ResolvedByIsThePrincipal;F-091
+go;backend/internal/signup;TestAuditT2FirstOrgAdminAccountRequiresMFA;F-005
+go;backend/internal/signup;TestAuditT2RealmAdminGroupRequiresMFA;F-005
+go;backend/internal/tenant/rls;TestAuditT1CIMetricsEndpointScope;F-052
+go;backend/internal/tenant/rls;TestAuditT1ComplianceEvaluationStaysInCallerScope;F-001
+go;backend/internal/tenant/rls;TestAuditT1DocumentWritesOutsideScope;F-004 F-048
+go;backend/internal/tenant/rls;TestAuditT1EdgeScopeFollowsScopedMove;F-050
+go;backend/internal/tenant/rls;TestAuditT1MaintenanceWindowWritesOutsideScope;F-004 F-048
+go;backend/internal/tenant/rls;TestAuditT1RackChannelSiteScope;F-002 F-058 F-180
+go;backend/internal/tenant/rls;TestAuditT1RepositoryErrorsAreSanitized;F-047
+go;backend/internal/tenant/rls;TestAuditT1ReviewItemRowsCarryClientScope;F-003
+go;backend/internal/tenant/rls;TestAuditT1ReviewItemsWithoutCandidatesStayInClientScope;F-003
+go;backend/internal/tenant/rls;TestAuditT1ScopeRefusalsAreNot5xx;F-058 F-161
+go;backend/internal/tenant/rls;TestAuditT1SiteScopeOfLocatedTables;F-053
+go;backend/internal/tenant/rls;TestAuditT1StructuredSearchForReadRoles;F-055
+go;backend/internal/tenant/rls;TestAuditT1TeamScopedAssignment;F-049
+go;backend/internal/tenant/rls;TestAuditT5CIReactivationThroughProductionDecoratorChain;F-037 F-119
+go;backend/internal/topology;TestAuditT3BlastRadiusMarksHeuristicCIs;F-098
+go;backend/internal/traceability;TestAuditT5GateIDsAreNotTracedByTheChecklistItself;F-121
+go;backend/internal/traceability;TestAuditT5ValidateRejectsNonTestEvidence;F-121
+go;backend/internal/user;TestAuditDefectInvitationCreatedEvent;F-041
+go;backend/internal/user;TestAuditDefectInvitationGrantCeiling;F-015
+go;backend/internal/user;TestAuditDefectRoleAssignmentGrantCeiling;F-015
+go;backend/internal/user;TestAuditT2ForeignDeactivationRevokesNothing;F-060
+go;backend/internal/webhook;TestAuditDefectWebhookConsumerKeepsEventsOnTransientErrors;F-151
+go;backend/internal/webhook;TestAuditT2BoundSubscriptionGetsOnlyReadableClientEvents;F-009
+go;collector/collectorcmd;TestAuditClassifiedDeviceNotUploadedAsFallback;F-030
+go;collector/collectorcmd;TestAuditCollectorEnrollsFromEnvironment;F-101
+go;collector/collectorcmd;TestAuditCollectorRenewsCertificateAt60Percent;F-026
+go;collector/collectorcmd;TestAuditCredentialKindRouting;F-028
+go;collector/collectorcmd;TestAuditPerScopeCredentials;F-013
+go;collector/collectorcmd;TestAuditScopeExpansionCompleteOrReported;F-106
+go;collector/collectorcmd;TestAuditScopeScheduleSurvivesRestart;F-109
+go;collector/collectorcmd;TestAuditT7MetricSamplesReachTheServerAuthenticated;F-046
+go;collector/collectorcmd;TestAuditWMIAuthFailureReachesScopeRun;F-029
+go;collector/plugins;TestAuditT2CredentialsArePerProtocol;F-010
+go;collector/plugins/nas;TestAuditNASCredentialTransport;F-011
+go;collector/plugins/snmp;TestAuditSNMPCollectsNeighbors;F-032
+go;collector/plugins/snmp;TestAuditSNMPv3AuthFailureReported;F-105
+go;collector/plugins/wmi;TestAuditWMICredentialTransport;F-010
+go;collector/plugins/wmi;TestAuditWMIFailuresAreErrors;F-029
+go;edgecore/buffer;TestAuditT3CorruptHeadDoesNotBlockSpool;F-085
+go;edgecore/buffer;TestAuditT3SpoolLossSurvivesRestart;F-084
+sh;tests/audit/collector-install-cli.test.sh;INS-06 violated;F-110
+sh;tests/audit/compose-port-policy.test.sh;COL-08 violated;F-103
+sh;tests/audit/demo-realm-users.test.sh;SIM-01 violated;F-113
+sh;tests/audit/g1-gate-evidence.test.sh;abn01_texts;F-138
+sh;tests/audit/g1-gate-evidence.test.sh;install_evidence_current;F-122
+sh;tests/audit/g1-gate-evidence.test.sh;known_defect_SR-11;F-038 F-119
+sh;tests/audit/g1-gate-evidence.test.sh;pass_by_declaration;F-120
+sh;tests/audit/g1-gate-evidence.test.sh;pentest_field;F-039
+sh;tests/audit/g1-gate-evidence.test.sh;pentest_findings;F-039
+sh;tests/audit/g1-gate-evidence.test.sh;pentest_summary;F-039
+sh;tests/audit/g1-gate-evidence.test.sh;rack_site_scope;F-040
+sh;tests/audit/g1-gate-evidence.test.sh;rep01_annex_critical;F-300
+sh;tests/audit/g1-gate-evidence.test.sh;rep01_pt_bold_critical;F-300
+sh;tests/audit/g1-gate-evidence.test.sh;rep01_pt_high;F-300
+sh;tests/audit/g1-gate-evidence.test.sh;rep01_pt_hoch;F-300
+sh;tests/audit/g1-gate-evidence.test.sh;rep01_pt_kritisch;F-300
+sh;tests/audit/g1-gate-evidence.test.sh;rep01_pt_lowercase;F-300
+sh;tests/audit/g1-gate-evidence.test.sh;rep01_sr_bold_critical;F-300
+sh;tests/audit/g1-gate-evidence.test.sh;subprocessors;F-137
+sh;tests/audit/install-cloud-acme.test.sh;acme;F-033 F-034
+sh;tests/audit/install-cloud-issuer-order.test.sh;issuer;F-035
+sh;tests/audit/log-retention.test.sh;NFR-06 logs 30 days;F-150
+sh;tests/audit/ops-config.test.sh;alertmanager_amtool;F-132
+sh;tests/audit/ops-config.test.sh;alertmanager_smtp;F-132
+sh;tests/audit/ops-config.test.sh;image_scan_coverage;F-124
+sh;tests/audit/ops-config.test.sh;install_signature_install-cloud;F-131
+sh;tests/audit/ops-config.test.sh;install_signature_install-vm;F-131
+sh;tests/audit/ops-config.test.sh;k8s_wal_archive;F-128
+sh;tests/audit/ops-config.test.sh;outage_smtp;F-135
+sh;tests/audit/ops-config.test.sh;restore_rpo_window;F-130
+sh;tests/audit/ops-config.test.sh;terraform_replica_missing;F-129
+sh;tests/audit/ops-config.test.sh;terraform_replica_same;F-129
+sh;tests/audit/t2-break-glass-alert.test.sh;no Prometheus rule under deploy/ uses reticora_operator_break_glass_total (rule files;F-068
+sh;tests/audit/t2-break-glass-alert.test.sh;no break-glass alert that fires on any increase (increase(...) > 0) with severity critical;F-068
+vitest;frontend/src/api/deprecatedPaths.auditdefect.ts;frontend API paths (catalogue contract) uses no path whose every operation is deprecated;F-077
+vitest;frontend/src/auth/bootRefresh.auditdefect.tsx;reload after the access token expired (AUT-02) renews the session with the refresh cookie before sending the user to /login;F-066
+vitest;frontend/src/auth/session.auditdefect.ts;refresh at token expiry (AUT-02) three concurrent 401s renew the session once and retry with the new token;F-065
+vitest;frontend/src/pages/AuditPage.auditdefect.tsx;AuditPage renders the API audit entry (audit defect) shows the entry time and the affected resource;F-078
+vitest;frontend/src/pages/CIFormModal.auditdefect.tsx;CIFormModal CI types come from the metamodel API (audit defect) offers the org type created at runtime (MET-04);F-016
+vitest;frontend/src/pages/CIFormModal.auditdefect.tsx;CIFormModal CI types come from the metamodel API (audit defect) uses the API type ids as option values and posts the selected id (CI-03);F-016
+vitest;frontend/src/pages/CITypeAdminPage.auditdefect.tsx;CITypeAdminPage flag update failure (audit defect) shows the 409 reason of a refused unique flag and keeps the dialog open;F-159
+vitest;frontend/src/pages/CITypeLabels.auditdefect.tsx;CI type labels and ids from the metamodel (audit defect WP-201 / WP-194) labels the type options with display_name in the UI language (WP-194 P2);F-016 F-175
+vitest;frontend/src/pages/CITypeLabels.auditdefect.tsx;CI type labels and ids from the metamodel (audit defect WP-201 / WP-194) posts the CI type UUID from GET /ci-types when the user picks "Server" (WP-201 P1);F-016 F-175
+vitest;frontend/src/pages/CITypeLabels.auditdefect.tsx;CI type labels and ids from the metamodel (audit defect WP-201 / WP-194) shows the localized type label on the CI detail page, not the type UUID;F-016 F-175
+vitest;frontend/src/pages/UserManagementPage.auditdefect.tsx;UserManagementPage invitations (audit defect) offers an action to invite a user;F-142
+e2e-real;chromium:frontend/e2e-real/bulk-jobs-export.spec.ts;Bulk operations, jobs, notifications, saved views, export, webhook egress B04 a malformed id in a bulk request is reported with the status the single change answers (400, not 500);F-327
+e2e-real;chromium:frontend/e2e-real/bulk-jobs-export.spec.ts;Bulk operations, jobs, notifications, saved views, export, webhook egress W01 a webhook to a local catcher is refused by the egress protection, not stored, nothing delivered, and the UI explains the refusal;F-062
+e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L01 a CI created through the CMDB form is stored with all fields in the own organization and opens on its detail page;F-016
+e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L03a a double click on the create button of the CMDB form creates exactly one CI;F-016
+e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L05 clearing a field in the edit form removes the stored value (merge patch);F-081
+e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L05b PATCH is a JSON merge patch: null removes a typed field, absent members stay;F-080
+e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L07 the audit viewer shows the CI change with time, actor, action and object, the chain verifies;F-078
+e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L08 a relationship created on the detail page shows as neighbour and in the impact view along its direction;F-314
+e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L10b the CSV export button of the CMDB list downloads the CIs of the list;F-077
+e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L12b two sessions edit different fields of the same CI: no change is lost and the edits merge field by field;F-228
+e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L14 names and fields with quotes or backslashes are stored like any other text (API create, edit form);F-045
+e2e-real;chromium:frontend/e2e-real/discovery-override.spec.ts;Discovery → reconciliation → override protection → review D07 "Override aufheben" in the CI detail returns the field to the observed value;F-100
+e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L02 names are unique per parent level and the rack height is 1–60 (explicit 0 → 422);F-302
+e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L05 deleting a site, building or room with child locations through /sites, /buildings or /rooms is refused (409);F-023
+e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L08 moving a mounted CI is recorded in ci_change, audit and the unified history shown on the CI page;F-253
+e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;05 an invitation sends the invitee an e-mail (NTF-05 event "Einladung");F-041
+e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles;F-201
+e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09c viewer UI: saving a webhook is refused visibly, not silently;F-062
+e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;12 after the upgrade the user creates a CI through the UI form (UI → API → DB → UI);F-016
+e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;13 an admin can revoke the role again and the user loses the rights at the next sign-in;F-017
+e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;14 the SPA renews an expired access token with the refresh cookie instead of signing the user out;F-018
+e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;14b the SPA renews the session when the access token lifetime has run out instead of sending the user to the login;F-066
+e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T14 B’s relationship to A’s CI is rejected with a client error and nothing is stored;F-145
+e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T15 the topology rooted at A’s CI answers B with "not found", like neighbours and impact;F-161
+e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T16 A creates a CI through the CMDB form, it is stored in A’s organization and invisible to B;F-016
+e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T17 A’s audit viewer shows when and on which object each of A’s entries happened;F-078

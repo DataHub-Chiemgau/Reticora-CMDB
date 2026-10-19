@@ -118,7 +118,7 @@ run_go() { # out results
             (cd "$ROOT/$mod" && go test -tags auditdefect -count=1 -p 1 -json \
                 -run "^($(printf '%s\n' "$names" | paste -sd'|'))\$" "$dir" >"$log" 2>"$log.stderr")
             py "$pkg" "$log" "$names" >>"$results" <<'PY'
-import json, sys
+import json, re, sys
 pkg, log, names = sys.argv[1], sys.argv[2], sys.argv[3].split()
 status, output, pkg_out = {}, {}, []
 for line in open(log, encoding="utf-8", errors="replace"):
@@ -138,7 +138,8 @@ for line in open(log, encoding="utf-8", errors="replace"):
         status[t] = e["Action"]
 stderr = open(log + ".stderr", encoding="utf-8", errors="replace").read()
 build_failed = "build failed" in stderr or "setup failed" in "".join(pkg_out) or "[build failed]" in "".join(pkg_out)
-setup_markers = ("panic:", " is required", "[setup failed]")
+# Aborts: a panic, or a missing test service or variable (TEST_..._URL/BIN).
+setup = re.compile(r"panic:|\[setup failed\]|TEST_[A-Z_]+[^\n]*(required|not set)")
 for n in names:
     text = "".join(output.get(n, []))
     st = status.get(n)
@@ -146,9 +147,8 @@ for n in names:
         print(f"go;{pkg};{n};error;Build-Fehler im Paket")
     elif st is None:
         print(f"go;{pkg};{n};error;kein Ergebnis (Abbruch vor dem Test)")
-    elif any(m in text for m in setup_markers) and st != "pass":
-        marker = next(m for m in setup_markers if m in text).strip()
-        print(f"go;{pkg};{n};error;Abbruch ({marker})")
+    elif st != "pass" and setup.search(text):
+        print(f"go;{pkg};{n};error;Abbruch ({setup.search(text).group(0)[:80]})")
     else:
         print(f"go;{pkg};{n};{st};")
 PY
