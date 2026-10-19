@@ -11,7 +11,10 @@
 #      limits) on top of the onboarding overlay and waits for the stack,
 #   3. exports the variables of frontend/e2e-real/README.md that the
 #      onboarding setup does not set: E2E_DATABASE_URL (PostgreSQL of the
-#      installation on 127.0.0.1:5432) and the Keycloak administrator.
+#      installation on 127.0.0.1:5432) and the Keycloak administrator,
+#   4. checks that the host resolves "minio": presigned export URLs name the
+#      endpoint the server uses (minio:9000), which the stack publishes on
+#      127.0.0.1:9000. On GitHub Actions the script adds the /etc/hosts entry.
 #
 # Usage: frontend/e2e-real/fixtures/setup-real-stack.sh <compose-dir> [env-file]
 # Writes the variables to $GITHUB_ENV when set, else prints export lines.
@@ -81,8 +84,22 @@ vars=(
     "E2E_KEYCLOAK_ADMIN=$admin"
     "E2E_KEYCLOAK_ADMIN_PASSWORD=$(env_value KEYCLOAK_ADMIN_PASSWORD)"
 )
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    echo "::add-mask::$(env_value RETICORA_DB_PASSWORD)"
+    echo "::add-mask::$(env_value KEYCLOAK_ADMIN_PASSWORD)"
+fi
 psql "${vars[0]#E2E_DATABASE_URL=}" -X -At -c 'SELECT 1' >/dev/null || { echo "FAIL: psql cannot reach the database of the installation"; exit 1; }
 for v in "${vars[@]}"; do
     if [ -n "${GITHUB_ENV:-}" ]; then echo "$v" >>"$GITHUB_ENV"; else echo "export $v"; fi
 done
+
+if ! getent hosts minio >/dev/null; then
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then
+        echo "127.0.0.1 minio" | sudo tee -a /etc/hosts >/dev/null
+    else
+        echo "FAIL: the host does not resolve minio; add '127.0.0.1 minio' to /etc/hosts (presigned export URLs)"
+        exit 1
+    fi
+fi
+curl -sS -o /dev/null "http://minio:9000/minio/health/live" || { echo "FAIL: http://minio:9000 is not reachable from the host"; exit 1; }
 echo "OK: real-stack fixtures ready"

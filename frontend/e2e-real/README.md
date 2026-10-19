@@ -36,7 +36,9 @@ Set `PW_CHROMIUM_EXECUTABLE` to use a preinstalled Chromium build.
 has just installed. `frontend/e2e/fixtures/setup-onboarding.sh` prepares self-signup, the mail catcher and the
 collector; `fixtures/setup-real-stack.sh` then applies `fixtures/docker-compose.e2e-real.yml` (an nginx.conf that
 passes a client `X-Real-IP` through, so that each tenant of a spec signs up from its own address; raised rate
-limits like the local audit stack) and exports `E2E_DATABASE_URL` and the Keycloak administrator. The Playwright
+limits like the local audit stack) and exports `E2E_DATABASE_URL` and the Keycloak administrator. Presigned export
+URLs name the endpoint the server uses (`minio:9000`), so the host must resolve `minio` to the published port
+`127.0.0.1:9000`; the script adds that `/etc/hosts` entry on GitHub Actions and fails locally without it. The Playwright
 JSON report is compared with the `e2e-real` lines of `tests/audit/expected-failures.txt`
 (`tests/audit/run-auditdefect.sh`, see `tests/audit/README.md`): a listed test that turned green, an unlisted red
 test and a skipped or missing test fail the job. Report, traces and the comparison are uploaded as artifact
