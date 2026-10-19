@@ -53,7 +53,6 @@ go;backend/internal/notify;TestAuditDefectSMTPChannelCloudMetadataBlocked;F-153
 go;backend/internal/notify;TestAuditDefectSMTPSecretNotReleasedToNewHost;F-152
 go;backend/internal/rack;TestAuditDefectRackHeightNotBelowMounts;F-140
 go;backend/internal/relationship;TestAuditCleanupCronScopeDeadline;F-111
-go;backend/internal/search;TestAuditT1OpenSearchFollowsRackPlacement;F-054
 go;backend/internal/server;TestAuditDefectDiscoveryJobInGenericJobModel;F-146
 go;backend/internal/server;TestAuditDefectDomainEventsEmitted;F-043
 go;backend/internal/server;TestAuditDefectForeignPrivateCITypeRejected;F-144
