@@ -486,3 +486,4 @@ TEN-06;[B];B;backend/internal/discovery/discovery_scope_integration_test.go;WP-3
 TEN-02;[B];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
 TEN-05;[B];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
 TEN-09;[Q];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
+TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-343

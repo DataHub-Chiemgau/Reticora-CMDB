@@ -1256,7 +1256,8 @@ paths:
       summary: Configure the tenant data-retention policy
       description: >-
         Creates or updates the retention policy. `retention_days = 0` keeps
-        data forever (no erasure). `mode` selects whether expired records are
+        data forever (no erasure); a value outside 0..2147483647 is a 400
+        field error. `mode` selects whether expired records are
         anonymized (default; rows stay for referential integrity) or deleted.
         Requires user:manage.
       requestBody:
@@ -1266,7 +1267,7 @@ paths:
             schema:
               type: object
               properties:
-                retention_days: { type: integer, minimum: 0 }
+                retention_days: { type: integer, minimum: 0, maximum: 2147483647 }
                 mode: { type: string, enum: [anonymize, delete] }
       responses:
         '200':
@@ -10223,8 +10224,14 @@ paths:
       responses:
         '200':
           description: Execute a lifecycle transition on an asset
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/assets/{id}/movements:
     x-phase: P2
@@ -10263,8 +10270,14 @@ paths:
       responses:
         '200':
           description: Manage global CI field definitions
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/ci-fields/global/{name}:
     delete:
@@ -10439,6 +10452,10 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/ci-types/templates:
     get:
@@ -10536,6 +10553,12 @@ paths:
           description: Clone a CI type into a new version lineage
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/ci-types/{id}/deactivate:
     post:
@@ -10562,8 +10585,14 @@ paths:
       responses:
         '200':
           description: Manage CI type field definitions
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/ci-types/{id}/fields/{name}:
     delete:
@@ -10626,8 +10655,14 @@ paths:
       responses:
         '200':
           description: Manage CI-instance field definitions
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/cis/{id}/field-definitions/{name}:
     delete:
@@ -10722,8 +10757,14 @@ paths:
       responses:
         '200':
           description: Execute a lifecycle transition on a CI
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/cis/{id}/parent:
     get:
@@ -10943,11 +10984,20 @@ paths:
     post:
       operationId: createLifecycleDefinitions
       summary: Manage lifecycle definitions
+      description: >-
+        `applies_to` is asset (default), ci or both; another value is a 422
+        field error. A taken key is 409.
       responses:
         '201':
           description: Manage lifecycle definitions
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/lifecycle-definitions/{id}:
     get:
@@ -11103,9 +11153,14 @@ paths:
     put:
       operationId: putReconciliationSourcePolicy
       summary: Read or update the source-priority policy
+      description: >-
+        `priorities` must not be empty; `name` and the priorities must not
+        contain NUL characters (400 field error).
       responses:
         '200':
           description: Read or update the source-priority policy
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
 

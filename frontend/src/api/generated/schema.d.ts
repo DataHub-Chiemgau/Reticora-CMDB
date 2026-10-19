@@ -665,7 +665,7 @@ export interface paths {
     get: operations['getRetentionPolicy'];
     /**
      * Configure the tenant data-retention policy
-     * @description Creates or updates the retention policy. `retention_days = 0` keeps data forever (no erasure). `mode` selects whether expired records are anonymized (default; rows stay for referential integrity) or deleted. Requires user:manage.
+     * @description Creates or updates the retention policy. `retention_days = 0` keeps data forever (no erasure); a value outside 0..2147483647 is a 400 field error. `mode` selects whether expired records are anonymized (default; rows stay for referential integrity) or deleted. Requires user:manage.
      */
     put: operations['putRetentionPolicy'];
     post?: never;
@@ -6126,7 +6126,10 @@ export interface paths {
     /** Manage lifecycle definitions */
     get: operations['listLifecycleDefinitions'];
     put?: never;
-    /** Manage lifecycle definitions */
+    /**
+     * Manage lifecycle definitions
+     * @description `applies_to` is asset (default), ci or both; another value is a 422 field error. A taken key is 409.
+     */
     post: operations['createLifecycleDefinitions'];
     delete?: never;
     options?: never;
@@ -6249,7 +6252,10 @@ export interface paths {
     };
     /** Read or update the source-priority policy */
     get: operations['listReconciliationSourcePolicy'];
-    /** Read or update the source-priority policy */
+    /**
+     * Read or update the source-priority policy
+     * @description `priorities` must not be empty; `name` and the priorities must not contain NUL characters (400 field error).
+     */
     put: operations['putReconciliationSourcePolicy'];
     post?: never;
     delete?: never;
@@ -24616,6 +24622,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -24623,6 +24630,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listAssetsIdMovements: {
@@ -24716,6 +24725,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -24723,6 +24733,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   deleteCiFieldsGlobalName: {
@@ -24946,6 +24958,8 @@ export interface operations {
         };
         content?: never;
       };
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listCiTypesTemplates: {
@@ -25113,6 +25127,9 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   createCiTypesIdDeactivate: {
@@ -25181,6 +25198,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -25188,6 +25206,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   deleteCiTypesIdFieldsName: {
@@ -25331,6 +25351,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -25338,6 +25359,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   deleteCisIdFieldDefinitionsName: {
@@ -25474,6 +25497,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -25481,6 +25505,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   getCisIdParent: {
@@ -25959,6 +25985,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -25966,6 +25993,8 @@ export interface operations {
         };
         content?: never;
       };
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   getLifecycleDefinitionsId: {
@@ -26239,6 +26268,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {

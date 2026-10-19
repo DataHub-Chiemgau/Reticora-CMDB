@@ -6,7 +6,9 @@ package privacy
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -42,6 +44,14 @@ type Repository interface {
 
 // ErrNoPolicy is returned when the tenant has not configured a policy yet.
 var ErrNoPolicy = fmt.Errorf("privacy: no retention policy configured")
+
+// ErrKeepsForever: the policy keeps data forever (retention_days 0), so the
+// erasure workflow has nothing to do.
+var ErrKeepsForever = errors.New("privacy: retention policy keeps data forever; erasure would be a no-op")
+
+// MaxRetentionDays is the largest retention window the integer column
+// retention_days holds.
+const MaxRetentionDays = math.MaxInt32
 
 // ContactEraser removes or anonymizes expired contact records.
 type ContactEraser interface {
@@ -93,7 +103,8 @@ func (s *Service) GetPolicy(ctx context.Context, orgID string) (*RetentionPolicy
 	return s.repo.GetPolicy(ctx, orgID)
 }
 
-// Configure creates or updates the tenant's retention policy.
+// Configure creates or updates the tenant's retention policy. An invalid
+// field is a 400 *api.FieldError.
 func (s *Service) Configure(ctx context.Context, orgID string, req UpdatePolicyRequest) (*RetentionPolicy, error) {
 	policy, err := s.repo.GetPolicy(ctx, orgID)
 	if err == ErrNoPolicy {
@@ -102,14 +113,14 @@ func (s *Service) Configure(ctx context.Context, orgID string, req UpdatePolicyR
 		return nil, err
 	}
 	if req.RetentionDays != nil {
-		if *req.RetentionDays < 0 {
-			return nil, fmt.Errorf("privacy: retention_days must be >= 0")
+		if *req.RetentionDays < 0 || *req.RetentionDays > MaxRetentionDays {
+			return nil, &api.FieldError{Field: "retention_days", Message: fmt.Sprintf("retention_days must be between 0 and %d", MaxRetentionDays)}
 		}
 		policy.RetentionDays = *req.RetentionDays
 	}
 	if req.Mode != nil {
 		if *req.Mode != "anonymize" && *req.Mode != "delete" {
-			return nil, fmt.Errorf("privacy: mode must be anonymize or delete")
+			return nil, &api.FieldError{Field: "mode", Message: "mode must be anonymize or delete"}
 		}
 		policy.Mode = *req.Mode
 	}
@@ -127,7 +138,7 @@ func (s *Service) RunErasure(ctx context.Context, orgID string) (*ErasureSummary
 		return nil, err
 	}
 	if policy.RetentionDays <= 0 {
-		return nil, fmt.Errorf("privacy: retention policy keeps data forever; erasure would be a no-op")
+		return nil, ErrKeepsForever
 	}
 
 	cutoff := s.now().AddDate(0, 0, -policy.RetentionDays)

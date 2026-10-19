@@ -318,10 +318,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Fields:                   req.Fields,
 	}
 	if err := h.repo.Create(r.Context(), typ); err != nil {
-		if api.WriteDBError(w, err) {
-			return
-		}
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		writeTypeError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_type.created", typ)
@@ -369,10 +366,7 @@ func (h *Handler) Clone(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "ci type not found")
 			return
 		}
-		if api.WriteDBError(w, err) {
-			return
-		}
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		writeTypeError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_type.created", item)
@@ -448,12 +442,13 @@ func (h *Handler) UpsertField(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(req)); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
 	f, err := h.repo.UpsertField(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		if api.WriteDBError(w, err) {
-			return
-		}
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeFieldDefinitionError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", f)
@@ -500,12 +495,13 @@ func (h *Handler) UpsertGlobalField(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Scope = "global"
+	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(req)); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
 	f, err := h.repo.UpsertField(r.Context(), t.OrganizationID, "", req)
 	if err != nil {
-		if api.WriteDBError(w, err) {
-			return
-		}
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeFieldDefinitionError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", f)
@@ -553,12 +549,13 @@ func (h *Handler) UpsertInstanceField(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if err := fieldmeta.ValidateDefinition(instanceFieldFromUpsert(req)); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
 	f, err := h.repo.UpsertInstanceField(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		if api.WriteDBError(w, err) {
-			return
-		}
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeFieldDefinitionError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", f)
@@ -581,4 +578,31 @@ func (h *Handler) DeleteInstanceField(w http.ResponseWriter, r *http.Request) {
 
 func validateField(f Field) error {
 	return fieldmeta.ValidateDefinition(f.Definition())
+}
+
+// writeTypeError reports a failed create or clone of a CI type: a taken key
+// or name is 409 (in memory ErrConflict, in PostgreSQL 23505), every other
+// repository error goes through api.WriteRepoError, so no SQLSTATE,
+// constraint or driver text reaches the client (F-047).
+func writeTypeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrConflict) {
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
+		return
+	}
+	api.WriteRepoError(w, err)
+}
+
+// writeFieldDefinitionError reports a failed field upsert after the handler
+// validated the definition: field errors of the attribute definition with
+// their field, an unknown type or CI 404, everything else through
+// api.WriteRepoError (F-047).
+func writeFieldDefinitionError(w http.ResponseWriter, err error) {
+	if api.WriteFieldError(w, err) {
+		return
+	}
+	if err.Error() == "not found" {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci type or ci not found")
+		return
+	}
+	api.WriteRepoError(w, err)
 }

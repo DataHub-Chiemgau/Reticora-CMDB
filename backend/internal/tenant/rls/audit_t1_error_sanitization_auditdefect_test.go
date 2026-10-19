@@ -9,10 +9,9 @@ package rls_test
 // reach the caller only through the sanitized RFC 7807 contract of
 // api.WriteRepoError (no table, constraint, policy, SQLSTATE or driver text;
 // the status names the client error). Confirmed P2 findings, each one case of
-// the table below:
-//   - WP-010 (CI-01, REL-01): relationship-types duplicate, ci-types NUL byte.
-//   - WP-011 (LCM-01, IMP-04, PRV-01): lifecycle duplicate and invalid
-//     applies_to, reconciliation source-policy NUL, privacy retention_days.
+// the table below (the cases of WP-010 and WP-011 moved to
+// TestRepositoryErrorsAreSanitized in error_sanitization_integration_test.go,
+// WP-343):
 //   - WP-012 (RBA-01..03): team members / role ids that are no UUID,
 //     duplicate team member, role-assignment role id.
 //   - WP-014 (LOC-01, RCK-01): rack mount with an invalid, unknown or
@@ -40,11 +39,6 @@ import (
 	"testing"
 )
 
-// t1LeakMarkers are fragments of PostgreSQL and pgx error texts that must
-// never reach an API caller.
-var t1LeakMarkers = []string{"SQLSTATE", "ERROR:", "violates", "constraint \"", "row-level security", "invalid input syntax",
-	"invalid byte sequence", "can't scan", "failed to encode", "OID "}
-
 func TestAuditT1RepositoryErrorsAreSanitized(t *testing.T) {
 	w := newT1World(t, "d5")
 	f := w.f
@@ -58,11 +52,6 @@ func TestAuditT1RepositoryErrorsAreSanitized(t *testing.T) {
 
 	// Fixtures created through the API: the first request of each duplicate
 	// pair must succeed.
-	w.create(w.orgA, "/api/v1/relationship-types", map[string]any{"key": "t1_dup", "display_name": "T1", "reverse_name": "T1 rev",
-		"directed": true, "category": "logical", "impact_direction": "none", "cardinality": "n:m"})
-	lifecycle := map[string]any{"key": "t1_dup", "name": "T1", "applies_to": "asset",
-		"states": []any{map[string]any{"key": "a", "label": "A", "is_initial": true}}}
-	w.create(w.orgA, "/api/v1/lifecycle-definitions", lifecycle)
 	team := w.create(w.orgA, "/api/v1/teams", map[string]any{"name": "t1-err-team"})
 	if code, body := w.do(w.orgA, http.MethodPost, "/api/v1/teams/"+team+"/members", map[string]any{"user_id": w.userA}); code < 200 || code >= 300 {
 		t.Fatalf("setup: add team member: %d %s", code, trim(body))
@@ -77,15 +66,6 @@ func TestAuditT1RepositoryErrorsAreSanitized(t *testing.T) {
 		body         any
 		want         []int
 	}{
-		{"WP-010", "relationship type duplicate", w.orgA, http.MethodPost, "/api/v1/relationship-types", map[string]any{"key": "t1_dup", "display_name": "T1",
-			"reverse_name": "T1 rev", "directed": true, "category": "logical", "impact_direction": "none", "cardinality": "n:m"}, []int{409}},
-		{"WP-010", "ci type with a NUL byte", w.orgA, http.MethodPost, "/api/v1/ci-types", map[string]any{"key": "t1_nul", "name": nul}, []int{400, 422}},
-		{"WP-011", "lifecycle definition duplicate", w.orgA, http.MethodPost, "/api/v1/lifecycle-definitions", lifecycle, []int{409}},
-		{"WP-011", "lifecycle definition invalid applies_to", w.orgA, http.MethodPost, "/api/v1/lifecycle-definitions", map[string]any{"key": "t1_bad",
-			"name": "T1", "applies_to": "no-such-kind", "states": []any{map[string]any{"key": "a", "label": "A", "is_initial": true}}}, []int{400, 422}},
-		{"WP-011", "source policy with a NUL byte", w.orgA, http.MethodPut, "/api/v1/reconciliation/source-policy", map[string]any{"name": nul,
-			"priorities": []string{"manual"}}, []int{400, 422}},
-		{"WP-011", "privacy retention_days beyond int4", w.orgA, http.MethodPut, "/api/v1/privacy/retention", map[string]any{"retention_days": 3000000000}, []int{400, 422}},
 		{"WP-012", "team members of an invalid team id", w.orgA, http.MethodGet, "/api/v1/teams/not-a-uuid/members", nil, []int{400, 404}},
 		{"WP-012", "duplicate team member", w.orgA, http.MethodPost, "/api/v1/teams/" + team + "/members", map[string]any{"user_id": w.userA}, []int{409}},
 		{"WP-012", "role assignment with an invalid role id", w.orgA, http.MethodPost, "/api/v1/role-assignments", map[string]any{"user_id": w.userA,
