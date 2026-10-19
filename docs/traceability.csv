@@ -493,3 +493,6 @@ TEN-02;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-345
 TEN-05;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-345
 IMP-07;[B];B;backend/internal/tenant/rls/edge_scope_integration_test.go;WP-345
 TEC-12;[P5];B;backend/internal/search/opensearch_placement_integration_test.go;WP-346
+EXP-01;[B], DATEV [P2];B;backend/internal/export/scope_integration_test.go;WP-347
+TEN-06;[B];B;backend/internal/jobs/pg_repository_integration_test.go;WP-347
+TEN-09;[Q];B;backend/internal/tenant/rls/export_job_channel_integration_test.go;WP-347
