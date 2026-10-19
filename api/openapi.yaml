@@ -9350,9 +9350,11 @@ paths:
       operationId: evaluateCompliance
       tags: [Compliance]
       summary: Evaluate active compliance rules against tenant CIs
+      description: The evaluation replaces the results of the whole organization; a principal restricted to some clients, sites or teams gets 403 (TEN-06, E-09).
       responses:
         '200': { description: Evaluation results and score, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceEvaluationResponse' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/results:
     x-phase: P3

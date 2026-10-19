@@ -476,3 +476,4 @@ TST-04;[Q];A;tests/audit/run-auditdefect.test.sh;WP-337
 TST-02;[B];A;tests/audit/run-auditdefect.test.sh;WP-337
 TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/stack-smoke.spec.ts;WP-338
 TST-04;[Q];C;frontend/e2e-real/stack-smoke.spec.ts;WP-338
+TEN-06;[B];B;backend/internal/tenant/rls/compliance_channel_integration_test.go;WP-339

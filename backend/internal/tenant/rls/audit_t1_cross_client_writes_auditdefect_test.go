@@ -8,9 +8,9 @@ package rls_test
 //
 // WP-020 (TEN-06, TKT-01, MGT-04):
 //   - P0 "Compliance evaluation by a client-scoped principal returns and
-//     overwrites other clients' results": compliance/evaluator.go replaces
-//     the request scope with database.OrgWideScope, the POST response lists
-//     the client-2 CI and the client-2 result row is deleted and re-inserted.
+//     overwrites other clients' results": fixed by WP-339, the test moved to
+//     compliance_channel_integration_test.go
+//     (TestComplianceEvaluationStaysInCallerScope).
 //   - P1 "Client-scoped principal can rename, cancel and delete maintenance
 //     windows that cover another client's CIs" (windowVisible = any CI
 //     visible; FK cascade removes the client-2 maintenance_window_ci rows).
@@ -24,7 +24,7 @@ package rls_test
 // Retest:
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_01?sslmode=disable \
 //     go test -tags auditdefect -count=1 -v \
-//     -run 'TestAuditT1ComplianceEvaluationStaysInCallerScope|TestAuditT1MaintenanceWindowWritesOutsideScope|TestAuditT1DocumentWritesOutsideScope' \
+//     -run 'TestAuditT1MaintenanceWindowWritesOutsideScope|TestAuditT1DocumentWritesOutsideScope' \
 //     ./internal/tenant/rls/
 
 import (
@@ -32,42 +32,6 @@ import (
 	"strings"
 	"testing"
 )
-
-// TestAuditT1ComplianceEvaluationStaysInCallerScope: a client-1 principal
-// triggers POST /api/v1/compliance/evaluations. The response must not name
-// the client-2 CI and the stored client-2 result must stay untouched
-// (either the evaluation is limited to the caller's scope or it is refused).
-func TestAuditT1ComplianceEvaluationStaysInCallerScope(t *testing.T) {
-	w := newT1World(t, "d0")
-	f := w.f
-	own := f.CI(t, f.OrgA, f.Client1, "t1-comp-c1")
-	foreign := f.CI(t, f.OrgA, f.Client2, "t1-comp-c2")
-	client1 := w.as("client1", only(f.Client1), all())
-
-	w.create(w.orgA, "/api/v1/compliance/rules", map[string]any{
-		"name": "t1 has name", "severity": "low", "category": "hygiene",
-		"expression": map[string]any{"field": "name", "op": "not_empty"},
-	})
-	// Positive control: the org-wide evaluation covers both clients.
-	code, body := w.do(w.orgA, http.MethodPost, "/api/v1/compliance/evaluations", nil)
-	if code != http.StatusOK || !strings.Contains(body, own) || !strings.Contains(body, foreign) {
-		t.Fatalf("org-wide evaluation: %d, own=%v foreign=%v; want 200 with both CIs", code,
-			strings.Contains(body, own), strings.Contains(body, foreign))
-	}
-	before := w.scalar(`SELECT id::text || '|' || evaluated_at::text FROM compliance_result WHERE ci_id = $1`, foreign)
-
-	code, body = w.do(client1, http.MethodPost, "/api/v1/compliance/evaluations", nil)
-	if strings.Contains(body, foreign) {
-		t.Errorf("TEN-06/TEN-09: POST /compliance/evaluations as client 1 answered %d and lists the client-2 CI %s", code, foreign)
-	}
-	if after := w.scalar(`SELECT id::text || '|' || evaluated_at::text FROM compliance_result WHERE ci_id = $1`, foreign); after != before {
-		t.Errorf("TEN-06/TEN-09: the client-2 compliance result was rewritten by a client-1 principal (before %s, after %s)", before, after)
-	}
-	// The scoped result list stays correct (regression guard).
-	if code, body = w.do(client1, http.MethodGet, "/api/v1/compliance/results?limit=100", nil); code != http.StatusOK || strings.Contains(body, foreign) {
-		t.Errorf("GET /compliance/results as client 1: %d, contains client-2 CI %v", code, strings.Contains(body, foreign))
-	}
-}
 
 // TestAuditT1MaintenanceWindowWritesOutsideScope: a window that also covers
 // a client-2 CI, and an org-wide window without CIs, must not be changed or

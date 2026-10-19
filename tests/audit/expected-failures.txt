@@ -79,7 +79,6 @@ go;backend/internal/server;TestAuditT3ResolvedByIsThePrincipal;F-091
 go;backend/internal/signup;TestAuditT2FirstOrgAdminAccountRequiresMFA;F-005
 go;backend/internal/signup;TestAuditT2RealmAdminGroupRequiresMFA;F-005
 go;backend/internal/tenant/rls;TestAuditT1CIMetricsEndpointScope;F-052
-go;backend/internal/tenant/rls;TestAuditT1ComplianceEvaluationStaysInCallerScope;F-001
 go;backend/internal/tenant/rls;TestAuditT1DocumentWritesOutsideScope;F-004 F-048
 go;backend/internal/tenant/rls;TestAuditT1EdgeScopeFollowsScopedMove;F-050
 go;backend/internal/tenant/rls;TestAuditT1MaintenanceWindowWritesOutsideScope;F-004 F-048

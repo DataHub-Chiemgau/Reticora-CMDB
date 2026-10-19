@@ -4881,7 +4881,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Evaluate active compliance rules against tenant CIs */
+    /**
+     * Evaluate active compliance rules against tenant CIs
+     * @description The evaluation replaces the results of the whole organization; a principal restricted to some clients, sites or teams gets 403 (TEN-06, E-09).
+     */
     post: operations['evaluateCompliance'];
     delete?: never;
     options?: never;
@@ -22442,6 +22445,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
     };
   };
