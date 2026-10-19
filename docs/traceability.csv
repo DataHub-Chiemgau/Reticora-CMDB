@@ -470,3 +470,5 @@ NFR-10;[Q];G1;tests/load/ingest.js;WP-334
 NFR-02;[B];G1;backend/internal/topology/querybudget_integration_test.go;WP-335
 NFR-02;[B];G1;tests/load/api.js;WP-335
 ABN-02;[Q];G1;backend/internal/topology/querybudget_integration_test.go;WP-335
+GLO-11;[Q];A;backend/internal/traceability/traceability_test.go;WP-336
+DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-336

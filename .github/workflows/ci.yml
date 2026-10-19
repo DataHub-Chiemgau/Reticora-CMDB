@@ -189,8 +189,11 @@ jobs:
         run: make seed
 
   # GLO-11/DOD-01: docs/traceability.csv is checked on every PR (E-30).
-  # Format, known IDs, existing test files and the rows the plan prescribes for
-  # the PR's work packages block; completeness is reported until gate G1.
+  # Format, known IDs, existing test files and the rows the plans prescribe for
+  # the PR's work packages block; completeness is reported until gate G1. The
+  # plans are docs/plan/implementierungsplan.md and the G1 remediation plan
+  # docs/plan/g1-korrektur/implementierungsplan.md (WP-336); WP numbers are
+  # unique across both.
   traceability:
     runs-on: ubuntu-latest
     steps:

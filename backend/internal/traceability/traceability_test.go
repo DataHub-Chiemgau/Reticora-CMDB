@@ -200,6 +200,63 @@ func TestParsePlanReadsEpicAndRowsPerWorkPackage(t *testing.T) {
 	}
 }
 
+const testRemediationPlan = "## K0 Prüfrahmen\n\n" +
+	"### WP-336 – Korrektur\n\n" +
+	"**Schlüssel:** `k` · **Meilenstein:** K0 · **Epic (Traceability):** A · **Aufwand:** 1,0 PT\n\n" +
+	"**Traceability (`docs/traceability.csv`):**\n\n" +
+	"```text\n" +
+	"DOD-01;[Q];A;backend/x_test.go;WP-336\n" +
+	"```\n"
+
+func mergedTestPlans(t *testing.T) map[string]*WorkPackage {
+	t.Helper()
+	second, err := ParsePlan(strings.NewReader(testRemediationPlan))
+	if err != nil {
+		t.Fatalf("parse remediation plan: %v", err)
+	}
+	plan, err := MergePlans(map[string]map[string]*WorkPackage{
+		"docs/plan/implementierungsplan.md":              testPlanPackages(t),
+		"docs/plan/g1-korrektur/implementierungsplan.md": second,
+	})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	return plan
+}
+
+func TestMergePlansCombinesPlansAndRemembersTheFile(t *testing.T) {
+	plan := mergedTestPlans(t)
+	if len(plan) != 3 {
+		t.Fatalf("expected 3 work packages, got %d", len(plan))
+	}
+	if plan["WP-336"].Plan != "docs/plan/g1-korrektur/implementierungsplan.md" || plan["WP-001"].Plan != "docs/plan/implementierungsplan.md" {
+		t.Fatalf("plan files: WP-336 %q, WP-001 %q", plan["WP-336"].Plan, plan["WP-001"].Plan)
+	}
+}
+
+func TestMergePlansRejectsWorkPackageInTwoPlans(t *testing.T) {
+	dup, err := ParsePlan(strings.NewReader(strings.ReplaceAll(testRemediationPlan, "WP-336", "WP-002")))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	_, err = MergePlans(map[string]map[string]*WorkPackage{
+		"docs/plan/implementierungsplan.md":              testPlanPackages(t),
+		"docs/plan/g1-korrektur/implementierungsplan.md": dup,
+	})
+	if err == nil || !strings.Contains(err.Error(),
+		"WP-002 is defined in docs/plan/g1-korrektur/implementierungsplan.md and in docs/plan/implementierungsplan.md") {
+		t.Fatalf("expected duplicate error naming both plans, got %v", err)
+	}
+}
+
+func TestCheckWorkPackagesRequiresRowsOfRemediationPlan(t *testing.T) {
+	errs := CheckWorkPackages(nil, mergedTestPlans(t), []string{"WP-336", "WP-601"})
+	assertErrors(t, errs, []string{
+		"WP-336: missing traceability row DOD-01;[Q];A;backend/x_test.go;WP-336",
+		"WP-601 is not a work package of docs/plan/implementierungsplan.md or docs/plan/g1-korrektur/implementierungsplan.md",
+	})
+}
+
 func TestParsePlanRejectsBlockWithoutEpic(t *testing.T) {
 	_, err := ParsePlan(strings.NewReader("### WP-001 – Ohne Epic\n\nText\n"))
 	if err == nil || !strings.Contains(err.Error(), "WP-001 has no") {
@@ -275,12 +332,18 @@ func TestTraceabilityFile(t *testing.T) {
 	}
 	readInto(t, filepath.Join(repoRoot, "docs", "plan", "abdeckung.csv"), catalog.AddCoverage)
 
-	var plan map[string]*WorkPackage
-	readInto(t, filepath.Join(repoRoot, "docs", "plan", "implementierungsplan.md"), func(r io.Reader) error {
-		var err error
-		plan, err = ParsePlan(r)
-		return err
-	})
+	plans := map[string]map[string]*WorkPackage{}
+	for _, name := range PlanFiles {
+		readInto(t, filepath.Join(repoRoot, filepath.FromSlash(name)), func(r io.Reader) error {
+			p, perr := ParsePlan(r)
+			plans[name] = p
+			return perr
+		})
+	}
+	plan, err := MergePlans(plans)
+	if err != nil {
+		t.Fatalf("plans: %v", err)
+	}
 
 	errs = append(errs, Validate(entries, catalog, plan, func(p string) bool {
 		_, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(p)))
