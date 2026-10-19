@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000139_document_window_write_scope
+Stand: Migration 000140_review_item_scope
 
 ## Prüfung
 
@@ -276,7 +276,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `relationship_suppression` | ja | ja | relationship_suppression_scoped_delete (DELETE), relationship_suppression_scoped_update (UPDATE), suppression_isolation (ALL) |
 | `relationship_type` | ja | ja | relationship_type_isolation_delete (DELETE), relationship_type_isolation_insert (INSERT), relationship_type_isolation_select (SELECT), relationship_type_isolation_update (UPDATE) |
 | `reservation` | ja | ja | reservation_isolation (ALL) |
-| `review_item` | ja | ja | review_item_isolation (ALL) |
+| `review_item` | ja | ja | review_item_isolation (ALL), review_item_scoped_delete (DELETE), review_item_scoped_select (SELECT), review_item_scoped_update (UPDATE) |
 | `role` | ja | ja | role_isolation (ALL) |
 | `role_assignment` | ja | ja | role_assignment_isolation (ALL) |
 | `role_permission` | ja | ja | role_permission_tenant_isolation (ALL) |

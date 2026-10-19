@@ -81,8 +81,6 @@ go;backend/internal/signup;TestAuditT2RealmAdminGroupRequiresMFA;F-005
 go;backend/internal/tenant/rls;TestAuditT1CIMetricsEndpointScope;F-052
 go;backend/internal/tenant/rls;TestAuditT1EdgeScopeFollowsScopedMove;F-050
 go;backend/internal/tenant/rls;TestAuditT1RepositoryErrorsAreSanitized;F-047
-go;backend/internal/tenant/rls;TestAuditT1ReviewItemRowsCarryClientScope;F-003
-go;backend/internal/tenant/rls;TestAuditT1ReviewItemsWithoutCandidatesStayInClientScope;F-003
 go;backend/internal/tenant/rls;TestAuditT1ScopeRefusalsAreNot5xx;F-058 F-161
 go;backend/internal/tenant/rls;TestAuditT1SiteScopeOfLocatedTables;F-053
 go;backend/internal/tenant/rls;TestAuditT1StructuredSearchForReadRoles;F-055

@@ -24,11 +24,20 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// visible: review items carry no client column; an item is visible when all
-// its candidate CIs are visible under the transaction's tenant scope.
-const visible = `NOT EXISTS (
+// visible: an item with candidate CIs is visible when all of them are
+// visible under the transaction's tenant scope. An item without candidates
+// is visible only when its client and site match a scope restricted in that
+// dimension (fail-closed, E-08): one without a client (or site) is for
+// org-wide principals only. The policies of migration 000140 enforce the
+// same.
+const visible = `(CASE WHEN cardinality(COALESCE(review_item.candidate_ci_ids, '{}'::uuid[])) = 0 THEN
+	(NULLIF(current_setting('` + database.ClientScopeGUC + `', true), '') IS NULL
+	 OR review_item.client_id = ANY (string_to_array(current_setting('` + database.ClientScopeGUC + `', true), ',')::uuid[]))
+	AND (NULLIF(current_setting('` + database.SiteScopeGUC + `', true), '') IS NULL
+	 OR review_item.site_id = ANY (string_to_array(current_setting('` + database.SiteScopeGUC + `', true), ',')::uuid[]))
+ELSE NOT EXISTS (
 	SELECT 1 FROM unnest(review_item.candidate_ci_ids) AS candidate(id)
-	WHERE NOT EXISTS (SELECT 1 FROM ci WHERE ci.id = candidate.id))`
+	WHERE NOT EXISTS (SELECT 1 FROM ci WHERE ci.id = candidate.id)) END)`
 
 const selectColumns = `
 	id::text,
@@ -44,7 +53,9 @@ const selectColumns = `
 	COALESCE(resolution, ''),
 	status = 'open' AND created_at < now() - make_interval(secs => $1::double precision),
 	created_at,
-	updated_at
+	updated_at,
+	COALESCE(client_id::text, ''),
+	COALESCE(site_id::text, '')
 `
 
 var escalationSeconds = EscalationAge.Seconds()
@@ -111,11 +122,11 @@ func (r *PGRepository) CreateReviewItem(ctx context.Context, item *Item) error {
 		}
 		var id string
 		err := tx.QueryRow(ctx, `
-			INSERT INTO review_item (organization_id, kind, status, payload, candidate_ci_ids, object_key)
-			VALUES ($1, $2, $3, $4::jsonb, $5::uuid[], NULLIF($6, ''))
+			INSERT INTO review_item (organization_id, kind, status, payload, candidate_ci_ids, object_key, client_id, site_id)
+			VALUES ($1, $2, $3, $4::jsonb, $5::uuid[], NULLIF($6, ''), NULLIF($7, '')::uuid, NULLIF($8, '')::uuid)
 			ON CONFLICT (organization_id, kind, object_key) WHERE status = 'open' AND object_key IS NOT NULL DO NOTHING
 			RETURNING id::text`,
-			item.OrganizationID, item.Kind, status, item.Payload, candidates, item.ObjectKey).Scan(&id)
+			item.OrganizationID, item.Kind, status, item.Payload, candidates, item.ObjectKey, scopeID(item.ClientID), scopeID(item.SiteID)).Scan(&id)
 		deduplicated := false
 		if errors.Is(err, pgx.ErrNoRows) {
 			deduplicated = true
@@ -192,6 +203,15 @@ func (r *PGRepository) ResolveReviewItem(ctx context.Context, orgID, id string, 
 	return item, nil
 }
 
+// scopeID passes a client or site id to the derivation trigger; anything but
+// a UUID is no scope (the trigger keeps only ids of the organization).
+func scopeID(id string) string {
+	if audit.IsUUID(id) {
+		return id
+	}
+	return ""
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -203,7 +223,7 @@ func scan(s scanner) (*Item, error) {
 	var createdAt, updatedAt time.Time
 	if err := s.Scan(&item.ID, &item.OrganizationID, &item.Kind, &item.Status, &item.Payload, &candidates,
 		&item.ObjectKey, &item.Action, &item.ResolvedBy, &resolvedAt, &item.Resolution, &item.Escalated,
-		&createdAt, &updatedAt); err != nil {
+		&createdAt, &updatedAt, &item.ClientID, &item.SiteID); err != nil {
 		return nil, err
 	}
 	if item.Payload == nil {

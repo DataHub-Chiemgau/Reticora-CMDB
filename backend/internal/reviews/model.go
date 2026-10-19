@@ -117,6 +117,12 @@ type Item struct {
 	// Deduplicated is set by CreateReviewItem when an open item of the same
 	// object and type already existed; Item then describes that item.
 	Deduplicated bool `json:"-"`
+	// ClientID and SiteID scope an item without candidate CIs: the producer
+	// sets the client and site of the device, collector or subnet it is
+	// about. With candidates the database derives both from the candidate
+	// CIs (migration 000140). Not part of the API.
+	ClientID string `json:"-"`
+	SiteID   string `json:"-"`
 }
 
 // markEscalated sets Escalated from the creation time.

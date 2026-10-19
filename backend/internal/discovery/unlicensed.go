@@ -220,10 +220,13 @@ func (h *Handler) admitNewCI(ctx context.Context, orgID string, current int64, i
 	if err != nil {
 		return false, err
 	}
+	clientID, siteID := h.deviceReviewScope(ctx, orgID, item)
 	review := &ReviewItem{
 		OrganizationID: orgID,
 		Kind:           ReviewKindUnlicensedCI,
 		Status:         ReviewStatusOpen,
+		ClientID:       clientID,
+		SiteID:         siteID,
 		Payload: map[string]any{
 			"device_key":   key,
 			"device":       device,

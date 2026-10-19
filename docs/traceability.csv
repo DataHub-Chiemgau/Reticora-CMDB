@@ -482,3 +482,7 @@ TEN-09;[Q];B;backend/internal/tenant/rls/rack_channel_scope_integration_test.go;
 MGT-01;[P2];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-341
 MGT-04;[P3];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-341
 TEN-06;[B];B;backend/internal/tenant/rls/module_object_writes_integration_test.go;WP-341
+TEN-06;[B];B;backend/internal/discovery/discovery_scope_integration_test.go;WP-342
+TEN-02;[B];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
+TEN-05;[B];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
+TEN-09;[Q];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
