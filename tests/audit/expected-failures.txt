@@ -82,7 +82,6 @@ go;backend/internal/tenant/rls;TestAuditT1CIMetricsEndpointScope;F-052
 go;backend/internal/tenant/rls;TestAuditT1DocumentWritesOutsideScope;F-004 F-048
 go;backend/internal/tenant/rls;TestAuditT1EdgeScopeFollowsScopedMove;F-050
 go;backend/internal/tenant/rls;TestAuditT1MaintenanceWindowWritesOutsideScope;F-004 F-048
-go;backend/internal/tenant/rls;TestAuditT1RackChannelSiteScope;F-002 F-058 F-180
 go;backend/internal/tenant/rls;TestAuditT1RepositoryErrorsAreSanitized;F-047
 go;backend/internal/tenant/rls;TestAuditT1ReviewItemRowsCarryClientScope;F-003
 go;backend/internal/tenant/rls;TestAuditT1ReviewItemsWithoutCandidatesStayInClientScope;F-003

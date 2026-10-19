@@ -15,6 +15,9 @@ import (
 // principal's tenant scope (TEN-06, WP-014): a principal restricted to client
 // 1 neither sees nor changes a rack on a client-2 site or its mounts, cannot
 // mount a client-2 CI, and the occupancy check still sees every mount.
+// Principals restricted to the client-1 site, alone or together with one or
+// two clients, see only the client-1 rack as well (WP-340, F-002); the mounts
+// of an invisible rack answer ErrRackNotFound (F-180).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestRackRepositoryClientScope(t *testing.T) {
@@ -67,6 +70,53 @@ func TestRackRepositoryClientScope(t *testing.T) {
 	if err = repo.CreateRack(ctx, &rack.Rack{OrganizationID: f.OrgA, RoomID: foreignRoom, Name: "intruder", HeightUnits: 42}); err == nil {
 		t.Fatal("client-1 principal created a rack on a client-2 site")
 	}
+	if _, _, err = repo.ListMounts(ctx, f.OrgA, foreignRack.ID, page); !errors.Is(err, rack.ErrRackNotFound) {
+		t.Fatalf("client-1 mounts of the client-2 rack: got %v, want ErrRackNotFound", err)
+	}
+
+	// Site-scoped principals: the building of the client-2 site is invisible
+	// to them, which must not make its rack visible (WP-340, F-002).
+	siteOf := func(roomID string) string {
+		t.Helper()
+		var siteID string
+		if qerr := f.Admin.QueryRow(bg, `SELECT b.site_id::text FROM room r JOIN building b ON b.id = r.building_id WHERE r.id = $1`, roomID).Scan(&siteID); qerr != nil {
+			t.Fatalf("site of room %s: %v", roomID, qerr)
+		}
+		return siteID
+	}
+	ownSite := siteOf(ownRoom)
+	scoped := func(clients, sites database.ScopeSet) context.Context {
+		scope := database.OrgWideScope(f.OrgA, f.User)
+		scope.Clients, scope.Sites = clients, sites
+		return database.ContextWithTenantScope(bg, &scope)
+	}
+	for name, sctx := range map[string]context.Context{
+		"site(s1)":              scoped(database.AllScopes(), database.ScopeIDs(ownSite)),
+		"client+site(c1,s1)":    scoped(database.ScopeIDs(f.Client1), database.ScopeIDs(ownSite)),
+		"client+site(c1+c2,s1)": scoped(database.ScopeIDs(f.Client1, f.Client2), database.ScopeIDs(ownSite)),
+	} {
+		var scopedRacks []rack.Rack
+		var total int
+		scopedRacks, total, err = repo.ListRacks(sctx, f.OrgA, "", page)
+		if err != nil || total != 1 || len(scopedRacks) != 1 || scopedRacks[0].ID != ownRack.ID {
+			t.Fatalf("%s racks: total=%d %+v err=%v, want only the site-1 rack", name, total, scopedRacks, err)
+		}
+		if _, err = repo.GetRack(sctx, f.OrgA, ownRack.ID); err != nil {
+			t.Fatalf("%s read of the site-1 rack: %v", name, err)
+		}
+		if _, err = repo.GetRack(sctx, f.OrgA, foreignRack.ID); !errors.Is(err, rack.ErrNotFound) {
+			t.Fatalf("%s read of the site-2 rack: got %v, want ErrNotFound", name, err)
+		}
+		if _, _, err = repo.ListMounts(sctx, f.OrgA, ownRack.ID, page); err != nil {
+			t.Fatalf("%s mounts of the site-1 rack: %v", name, err)
+		}
+		if _, _, err = repo.ListMounts(sctx, f.OrgA, foreignRack.ID, page); !errors.Is(err, rack.ErrRackNotFound) {
+			t.Fatalf("%s mounts of the site-2 rack: got %v, want ErrRackNotFound", name, err)
+		}
+		if err = repo.DeleteRack(sctx, f.OrgA, foreignRack.ID); !errors.Is(err, rack.ErrNotFound) {
+			t.Fatalf("%s delete of the site-2 rack: got %v, want ErrNotFound", name, err)
+		}
+	}
 
 	mounts, total, err := repo.ListMounts(ctx, f.OrgA, ownRack.ID, page)
 	if err != nil || total != 0 || len(mounts) != 0 {
@@ -94,6 +144,25 @@ func TestRackRepositoryClientScope(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatal("client-2 rack or mount was deleted")
+	}
+	// The refused deletes keep the location row; the org-wide delete removes
+	// rack and location row together.
+	rows := func(id string) string {
+		t.Helper()
+		var got string
+		if qerr := f.Admin.QueryRow(bg, `SELECT (SELECT count(*) FROM rack WHERE id = $1)::text || '/' || (SELECT count(*) FROM location WHERE id = $1)::text`, id).Scan(&got); qerr != nil {
+			t.Fatalf("count rack/location rows: %v", qerr)
+		}
+		return got
+	}
+	if got := rows(foreignRack.ID); got != "1/1" {
+		t.Fatalf("client-2 rack after the refused deletes: rack/location rows %s, want 1/1", got)
+	}
+	if err = repo.DeleteRack(orgCtx, f.OrgA, foreignRack.ID); err != nil {
+		t.Fatalf("org-wide delete of the client-2 rack: %v", err)
+	}
+	if got := rows(foreignRack.ID); got != "0/0" {
+		t.Fatalf("client-2 rack after the org-wide delete: rack/location rows %s, want 0/0", got)
 	}
 	if _, _, err = repo.ListRacks(bg, f.OrgA, "", page); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)

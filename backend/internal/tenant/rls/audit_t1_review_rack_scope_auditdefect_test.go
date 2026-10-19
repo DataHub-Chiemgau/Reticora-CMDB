@@ -12,25 +12,17 @@ package rls_test
 // resolves the unclassified_device / scope_suggested items that discovery
 // opened for devices and subnets of client 2.
 //
-// WP-208 (TEN-09, TST-02) P1 "Site scope bypass in the rack channel":
-// rack/pg_repository.go rackVisible LEFT JOINs building; building RLS hides
-// the building of a foreign site, building.site_id becomes NULL and the
-// NULL branch admits the rack. A site-restricted principal lists, reads
-// (REST, layout, mounts, GraphQL rackLayout) and deletes racks of other
-// sites; the delete leaves an orphaned location row. Found while writing
-// this test: GET /api/v1/racks/{id}/mounts of a rack outside the client
-// scope answers 200 (empty list) instead of 404, because
-// rack.PGRepository.ListMounts checks only that the rack exists in the
-// organization (existence oracle; the mount rows themselves are filtered).
+// The rack channel defect (WP-208, F-002, F-180) is fixed (WP-340); its test
+// runs in the regular suite as TestRackChannelSiteScope
+// (rack_channel_scope_integration_test.go).
 //
 // Retest:
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_01?sslmode=disable \
 //     go test -tags auditdefect -count=1 -v \
-//     -run 'TestAuditT1ReviewItemsWithoutCandidatesStayInClientScope|TestAuditT1RackChannelSiteScope' ./internal/tenant/rls/
+//     -run '^TestAuditT1ReviewItemsWithoutCandidatesStayInClientScope$' ./internal/tenant/rls/
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -38,7 +30,6 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 )
@@ -121,96 +112,5 @@ func TestAuditT1ReviewItemsWithoutCandidatesStayInClientScope(t *testing.T) {
 	if _, gql := w.do(client1, http.MethodPost, "/bff/graphql", map[string]any{"query": "{ reviewInbox(first: 100) { id } }"}); strings.Contains(gql, items["unclassified_device"]) ||
 		strings.Contains(gql, items["scope_suggested"]) {
 		t.Errorf("TEN-09: GraphQL reviewInbox as client 1 lists review items of client 2")
-	}
-}
-
-// TestAuditT1RackChannelSiteScope runs the rack channel for every scope
-// kind: a rack is visible and writable exactly when its client and site are
-// in the principal's scope (TEN-05, CH25), on every path.
-func TestAuditT1RackChannelSiteScope(t *testing.T) {
-	w := newT1World(t, "d4")
-	f := w.f
-	room1, room2 := f.Room(t, f.Client1, "t1-rack-s1"), f.Room(t, f.Client2, "t1-rack-s2")
-	site1, site2 := w.siteOfRoom(room1), w.siteOfRoom(room2)
-	type rackInfo struct{ id, name, client, site string }
-	racks := []rackInfo{
-		{w.create(w.orgA, "/api/v1/racks", map[string]any{"name": "t1-rack-one", "room_id": room1}), "t1-rack-one", f.Client1, site1},
-		{w.create(w.orgA, "/api/v1/racks", map[string]any{"name": "t1-rack-two", "room_id": room2}), "t1-rack-two", f.Client2, site2},
-	}
-	principals := []*channelPrincipal{
-		w.orgA,
-		w.as("client1", only(f.Client1), all()),
-		w.as("site2", all(), only(site2)),
-		w.as("multi(c1+c2,s1)", only(f.Client1, f.Client2), only(site1)),
-		w.orgB,
-	}
-	inSet := func(s identity.ScopeSet, v string) bool {
-		if s.All {
-			return true
-		}
-		for _, id := range s.IDs {
-			if id == v {
-				return true
-			}
-		}
-		return false
-	}
-	visible := func(p *channelPrincipal, r rackInfo) bool {
-		return p.org == f.OrgA && inSet(p.scope.Clients, r.client) && inSet(p.scope.Sites, r.site)
-	}
-	wantCode := func(v bool) int {
-		if v {
-			return http.StatusOK
-		}
-		return http.StatusNotFound
-	}
-
-	// Reads.
-	for _, p := range principals {
-		_, list := w.do(p, http.MethodGet, "/api/v1/racks?limit=200", nil)
-		for _, r := range racks {
-			v := visible(p, r)
-			if got := strings.Contains(list, r.id); got != v {
-				t.Errorf("GET /racks as %s: rack %s listed %v, want %v", p.kind, r.name, got, v)
-			}
-			for _, path := range []string{"/api/v1/racks/" + r.id, "/api/v1/racks/" + r.id + "/layout", "/api/v1/racks/" + r.id + "/mounts"} {
-				if code, _ := w.do(p, http.MethodGet, path, nil); code != wantCode(v) {
-					t.Errorf("GET %s (%s) as %s: %d, want %d", path, r.name, p.kind, code, wantCode(v))
-				}
-			}
-			_, gql := w.do(p, http.MethodPost, "/bff/graphql", map[string]any{"query": fmt.Sprintf(`{ rackLayout(rackId: %q) { rack { id name } } }`, r.id)})
-			if got := strings.Contains(gql, r.name); got != v {
-				t.Errorf("GraphQL rackLayout(%s) as %s: rack disclosed %v, want %v", r.name, p.kind, got, v)
-			}
-		}
-	}
-	// Writes outside the scope are refused and leave rack and location rows.
-	for _, p := range principals {
-		for _, r := range racks {
-			if visible(p, r) {
-				continue
-			}
-			if code, body := w.do(p, http.MethodPatch, "/api/v1/racks/"+r.id, map[string]any{"name": "t1-renamed-by-" + p.kind}); !refused(code) {
-				t.Errorf("PATCH rack %s as %s: %d %s, want 404/403", r.name, p.kind, code, trim(body))
-			}
-			if code, body := w.do(p, http.MethodDelete, "/api/v1/racks/"+r.id, nil); code != http.StatusNotFound {
-				t.Errorf("DELETE rack %s as %s: %d %s, want 404", r.name, p.kind, code, trim(body))
-			}
-			if got := w.scalar(`SELECT (SELECT count(*) FROM rack WHERE id = $1)::text || '/' || (SELECT count(*) FROM location WHERE id = $1)::text`, r.id); got != "1/1" {
-				t.Errorf("rack %s after DELETE by %s: rack/location rows %s, want 1/1", r.name, p.kind, got)
-				return // the rack is gone; later principals cannot be checked against it
-			}
-		}
-	}
-	// Positive control: in scope the same writes succeed, and a permitted
-	// delete removes the location row as well.
-	if code, body := w.do(principals[1], http.MethodPatch, "/api/v1/racks/"+racks[0].id, map[string]any{"name": "t1-rack-one-b"}); code != http.StatusOK {
-		t.Errorf("PATCH own rack as client1: %d %s, want 200", code, trim(body))
-	}
-	if code, body := w.do(w.orgA, http.MethodDelete, "/api/v1/racks/"+racks[1].id, nil); code != http.StatusNoContent {
-		t.Errorf("DELETE rack two as org: %d %s, want 204", code, trim(body))
-	}
-	if got := w.scalar(`SELECT count(*)::text FROM location WHERE id = $1`, racks[1].id); got != "0" {
-		t.Errorf("location rows after the permitted delete: %s, want 0", got)
 	}
 }
