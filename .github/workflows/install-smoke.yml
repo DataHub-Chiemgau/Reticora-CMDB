@@ -143,8 +143,11 @@ jobs:
           sudo chown "$(id -u):$(id -g)" deploy/docker-compose/.env
 
       # Strict: compose/JSON errors, missing or exited containers and every
-      # health state other than "healthy" fail the job.
-      - name: Verify all expected services are running and healthy
+      # health state other than "healthy" fail the job. WP-348 (TEN-03): the
+      # script also asserts via psql (pg_stat_activity, application_name
+      # reticora-server) that the server logs in only as reticora_runtime with
+      # rolsuper = false and rolbypassrls = false.
+      - name: Verify all expected services are running and healthy, server without superuser login
         run: |
           sleep 5
           ./tests/install-smoke-health.sh deploy/docker-compose .env

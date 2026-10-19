@@ -46,7 +46,9 @@ The installer asks for:
 
 - **Passwords/secrets** — database, MinIO/S3, Keycloak admin, Keycloak DB,
   OIDC client secret, master key for credential encryption. Secure random
-  defaults are generated automatically and reused on re-runs.
+  defaults are generated automatically and reused on re-runs. The password of
+  the server's runtime database login (`RETICORA_DB_APP_PASSWORD`) is always
+  generated and never asked for.
 - **Public URLs** — web UI base URL, OIDC issuer, OIDC redirect URL. The
   **OIDC issuer URL is handed to the browser** as the Keycloak sign-in
   endpoint, so it must be reachable from your users' machines. Do **not**
@@ -86,7 +88,8 @@ It then:
 6. starts the infrastructure and applies the SQL migrations from
    `backend/migrations/` (via `golang-migrate` when installed, otherwise via
    `psql` inside the postgres container; applied versions are tracked in the
-   `reticora_schema_migrations` table so re-runs are no-ops),
+   `reticora_schema_migrations` table so re-runs are no-ops), then creates
+   or repairs the runtime login `reticora_runtime` (see below),
 7. starts Keycloak, removes the demo administrator of earlier releases and
    creates the individual initial administrator (`RETICORA_INITIAL_ADMIN_EMAIL`)
    with a random temporary password, then starts the API server and the
@@ -105,6 +108,24 @@ again.
 
 Non-interactive (CI) usage: `./install-cloud.sh --non-interactive` uses the
 existing `.env` values, generated defaults and never prompts.
+
+### Database logins (TEN-03)
+
+The stack uses two PostgreSQL logins:
+
+| Login | Password (`.env`) | Used by | Rights |
+|---|---|---|---|
+| `reticora` | `RETICORA_DB_PASSWORD` | migrations, seed, `backup` service | bootstrap superuser of the postgres image |
+| `reticora_runtime` | `RETICORA_DB_APP_PASSWORD` | the server (`RETICORA_DATABASE_URL`) | `LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`, member of `reticora_app` only |
+
+The server switches every pooled connection into `reticora_app` (`SET ROLE`);
+because the login itself has no SUPERUSER or BYPASSRLS, a `RESET ROLE` does not
+lift row level security. After the migrations the installer creates
+`reticora_runtime`, or resets an existing one to exactly these attributes and
+memberships, and sets its password from `.env`. Re-running the installer on an
+installation from before this login switches the server over without touching
+any data; changing `RETICORA_DB_APP_PASSWORD` in `.env` and re-running rotates
+the password.
 
 ### HTTPS with Let's Encrypt (nginx + Certbot)
 
@@ -240,15 +261,41 @@ collector is running.
 
 `deploy/k8s/` contains the server deployment (`base`) and the `staging` and
 `prod` overlays. The manifests do not create secrets; create them in the target
-namespace before the first rollout:
+namespace before the first rollout.
+
+The database needs two logins with separate secrets (TEN-03):
+
+- **Migration login** (secret `reticora-db-migrate`, key `database-url`): the
+  owner/superuser that runs `golang-migrate` on `backend/migrations/` before a
+  rollout. No manifest references it; keep it out of the server's namespace if
+  migrations run elsewhere.
+- **Runtime login** (secret `reticora-db-runtime`, key `database-url`): the
+  only DSN the server pod receives. It must name a login **without SUPERUSER
+  and BYPASSRLS** that is a member of `reticora_app` and of no other role.
+  Create it with the migration login after the first migration run
+  (`reticora_app` comes from migration `000056`):
+
+  ```sql
+  CREATE ROLE reticora_runtime LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB
+    NOCREATEROLE NOREPLICATION PASSWORD '…';
+  GRANT reticora_app TO reticora_runtime;
+  ```
 
 ```bash
+kubectl -n reticora create secret generic reticora-db-migrate \
+  --from-literal=database-url='postgres://reticora:…@db:5432/reticora?sslmode=require'
+kubectl -n reticora create secret generic reticora-db-runtime \
+  --from-literal=database-url='postgres://reticora_runtime:…@db:5432/reticora?sslmode=require&application_name=reticora-server'
 kubectl -n reticora create secret generic reticora-secrets \
-  --from-literal=database-url='postgres://…' \
   --from-literal=master-key="$(openssl rand -base64 32)"
 kubectl -n reticora create secret generic reticora-session-key \
   --from-file=private.pem=session-private.pem
 ```
+
+An existing deployment that still has `reticora-secrets/database-url` keeps
+the old pods running but cannot roll out new ones until
+`reticora-db-runtime` exists (`CreateContainerConfigError`); create the
+runtime login and its secret first.
 
 `RETICORA_MASTER_KEY` (envelope encryption of credentials, OPS-03) is
 mandatory: the deployment references `reticora-secrets/master-key` without

@@ -22,11 +22,18 @@ spec:
           env:
             - name: RETICORA_PORT
               value: "8080"
+            # Runtime login only (TEN-03): the DSN names a dedicated login
+            # with LOGIN NOSUPERUSER NOBYPASSRLS that is a member of
+            # reticora_app and of no other role (deploy/README.md). The
+            # migration login (owner/superuser) lives in the separate secret
+            # reticora-db-migrate and never reaches this pod, so a RESET ROLE
+            # on a pooled connection gains nothing (F-057).
             - name: RETICORA_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: reticora-secrets
+                  name: reticora-db-runtime
                   key: database-url
+                  optional: false
             - name: RETICORA_NATS_URL
               value: "nats://nats:4222"
             - name: RETICORA_REDIS_URL

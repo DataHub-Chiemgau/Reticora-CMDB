@@ -338,7 +338,8 @@ set_env_values() {
         RETICORA_FRONTEND_PORT RETICORA_GC_KEEP_IMAGES RETICORA_IMAGE_REGISTRY RETICORA_IMAGE_TAG \
         RETICORA_INITIAL_ADMIN_EMAIL RETICORA_KEYCLOAK_PORT RETICORA_MASTER_KEY RETICORA_OIDC_CLIENT_ID \
         RETICORA_OIDC_CLIENT_SECRET RETICORA_OIDC_ISSUER_URL RETICORA_OIDC_REDIRECT_URL RETICORA_PUBLIC_BASE_URL \
-        RETICORA_S3_ACCESS_KEY RETICORA_S3_SECRET_KEY RETICORA_SERVER_PORT RETICORA_BACKUP_CIPHER_PASS; do
+        RETICORA_S3_ACCESS_KEY RETICORA_S3_SECRET_KEY RETICORA_SERVER_PORT RETICORA_BACKUP_CIPHER_PASS \
+        RETICORA_DB_APP_PASSWORD; do
         printf -v "$v" '%s' "new-$v"
     done
     RETICORA_TLS_DOMAIN=""
@@ -418,6 +419,204 @@ run_test   "re-run: a fresh .env has no kept section"                       test
 run_test   "re-run: the password probe connects over TCP"                   test_password_probe_uses_tcp
 run_test   "re-run: CMDB and Keycloak database passwords are both probed"   test_password_sync_covers_both_databases
 run_test   "re-run: a stale Keycloak DB password is reset and re-verified"  test_password_sync_resets_keycloak_db
+
+# ─── runtime database login without SUPERUSER/BYPASSRLS (WP-348, TEN-03) ────
+
+APP_PW="0123456789abcdef0123456789abcdef"
+
+# The role script creates the login only when it is missing, then forces the
+# attributes, strips every membership except reticora_app and sets the
+# password through a psql variable.
+test_runtime_login_sql() {
+    local sql
+    sql="$(runtime_login_sql "$APP_PW")"
+    printf '%s\n' "$sql" > "$TMP_ROOT/runtime-login.sql"
+    [ "$(printf '%s\n' "$sql" | head -n 1)" = "\\set pw '$APP_PW'" ] || return 1
+    grep -qxF "SELECT 'CREATE ROLE reticora_runtime' WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'reticora_runtime') \\gexec" "$TMP_ROOT/runtime-login.sql" || return 1
+    grep -qxF "ALTER ROLE reticora_runtime WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION INHERIT PASSWORD :'pw';" "$TMP_ROOT/runtime-login.sql" || return 1
+    grep -qF "SELECT format('REVOKE %I FROM reticora_runtime GRANTED BY %I', r.rolname, pg_get_userbyid(m.grantor))" "$TMP_ROOT/runtime-login.sql" || return 1
+    grep -qF "WHERE m.member = 'reticora_runtime'::regrole AND r.rolname <> 'reticora_app' \\gexec" "$TMP_ROOT/runtime-login.sql" || return 1
+    grep -qxF "GRANT reticora_app TO reticora_runtime;" "$TMP_ROOT/runtime-login.sql" || return 1
+    # Idempotent: no unconditional CREATE, nothing dropped, no other grant,
+    # and the password appears only in the \set line.
+    if grep -qiE '^[[:space:]]*CREATE ROLE|DROP |WITH ADMIN|WITH GRANT' "$TMP_ROOT/runtime-login.sql"; then return 1; fi
+    [ "$(grep -c '^GRANT' "$TMP_ROOT/runtime-login.sql")" -eq 1 ] || return 1
+    [ "$(grep -c "$APP_PW" "$TMP_ROOT/runtime-login.sql")" -eq 1 ] || return 1
+    # Same input, same script: a re-run repeats exactly the same repair.
+    [ "$sql" = "$(runtime_login_sql "$APP_PW")" ] || return 1
+}
+
+# ensure_runtime_login feeds the script on stdin to psql as the bootstrap
+# superuser in one transaction, never with the password on a command line,
+# then proves the password over TCP via sync_role_password.
+# shellcheck disable=SC2317 # the stubs are called by the installer functions
+test_runtime_login_ensure() {
+    local calls="$TMP_ROOT/runtime-calls" stdin="$TMP_ROOT/runtime-stdin"
+    : > "$calls"; : > "$stdin"
+    RETICORA_DB_APP_PASSWORD="$APP_PW"
+    compose_cmd() { printf 'compose %s\n' "$*" >> "$calls"; cat >> "$stdin"; }
+    sync_role_password() { printf 'sync %s\n' "$*" >> "$calls"; }
+    ensure_runtime_login
+    ensure_runtime_login
+    [ "$(grep -c '^compose exec -T postgres psql -U reticora -d reticora -v ON_ERROR_STOP=1 -q --single-transaction$' "$calls")" -eq 2 ] || return 1
+    [ "$(grep -c "^sync postgres reticora_runtime reticora $APP_PW pgdata$" "$calls")" -eq 2 ] || return 1
+    ! grep -q "^compose.*$APP_PW" "$calls" || return 1
+    [ "$(grep -c "^\\\\set pw '$APP_PW'$" "$stdin")" -eq 2 ] || return 1
+    ! grep -qE 'down|volume|rm ' "$calls"
+}
+
+# shellcheck disable=SC2317 # the stubs are called by the installer functions
+test_runtime_login_failure_aborts() {
+    RETICORA_DB_APP_PASSWORD="$APP_PW"
+    compose_cmd() { cat > /dev/null; return 3; }
+    sync_role_password() { return 0; }
+    ensure_runtime_login
+}
+
+# The login is created after the migrations (they create reticora_app) and
+# before the server starts; the bootstrap superuser keeps the migrations.
+# shellcheck disable=SC2317 # the stubs are called by the installer functions
+test_runtime_login_order() {
+    local calls="$TMP_ROOT/order-calls"
+    : > "$calls"
+    compose_cmd() { printf 'compose %s\n' "$*" >> "$calls"; }
+    wait_for_service() { return 0; }
+    sync_db_password() { printf 'sync_db_password\n' >> "$calls"; }
+    run_migrations() { printf 'run_migrations\n' >> "$calls"; }
+    seed_default_organization() { printf 'seed\n' >> "$calls"; }
+    ensure_runtime_login() { printf 'ensure_runtime_login\n' >> "$calls"; }
+    validate_keycloak_bootstrap() { :; }
+    create_initial_admin() { :; }
+    RETICORA_TLS_DOMAIN=""
+    start_stack
+    local mig login server
+    mig="$(grep -n '^run_migrations$' "$calls" | cut -d: -f1)"
+    login="$(grep -n '^ensure_runtime_login$' "$calls" | cut -d: -f1)"
+    server="$(grep -n '^compose up -d server frontend$' "$calls" | cut -d: -f1)"
+    [ -n "$mig" ] && [ -n "$login" ] && [ -n "$server" ] && [ "$mig" -lt "$login" ] && [ "$login" -lt "$server" ] || return 1
+    # shellcheck disable=SC2016 # literal compose/shell variable reference
+    grep -q 'postgres://reticora:${RETICORA_DB_PASSWORD}@localhost:5432/reticora' "$REPO_ROOT/install-cloud.sh"
+}
+
+# .env of an installation from before the runtime login (all settings of the
+# previous write_env, no RETICORA_DB_APP_PASSWORD).
+write_legacy_env() {
+    ENV_FILE="$TMP_ROOT/$1.env"
+    cat > "$ENV_FILE" <<'ENV'
+RETICORA_DB_PASSWORD=legacy-db-password
+RETICORA_S3_ACCESS_KEY=reticora
+RETICORA_S3_SECRET_KEY=legacy-s3-secret
+KEYCLOAK_ADMIN=admin
+KEYCLOAK_ADMIN_PASSWORD=legacy-kc-password
+KEYCLOAK_DB_PASSWORD=legacy-kc-db-password
+RETICORA_INITIAL_ADMIN_EMAIL=ops@acme.example
+RETICORA_OIDC_CLIENT_SECRET=legacy-client-secret
+RETICORA_MASTER_KEY=bGVnYWN5LW1hc3Rlci1rZXktMzItYnl0ZXMtbG9uZyE=
+RETICORA_BACKUP_CIPHER_PASS=legacy-cipher
+RETICORA_PUBLIC_BASE_URL=http://192.0.2.10:3000
+RETICORA_OIDC_ISSUER_URL=http://192.0.2.10:8180/realms/reticora
+RETICORA_OIDC_CLIENT_ID=reticora-app
+RETICORA_OIDC_REDIRECT_URL=http://192.0.2.10:3000/auth/callback
+RETICORA_TLS_DOMAIN=
+RETICORA_FRONTEND_PORT=3000
+RETICORA_SERVER_PORT=8080
+RETICORA_KEYCLOAK_PORT=8180
+RETICORA_IMAGE_REGISTRY=
+RETICORA_IMAGE_TAG=latest
+RETICORA_HTTP_BIND=127.0.0.1
+ENV
+}
+
+# Upgrade: a re-run on a legacy .env generates the runtime password once,
+# keeps every other value (in particular the superuser password and thus the
+# existing data volume) and keeps the generated password on later runs.
+test_runtime_login_upgrade() {
+    write_legacy_env upgrade
+    collect_config >/dev/null
+    write_env
+    local pw
+    pw="$(env_get RETICORA_DB_APP_PASSWORD)"
+    [[ "$pw" =~ ^[0-9a-f]{48}$ ]] || return 1
+    [ "$(grep -c '^RETICORA_DB_APP_PASSWORD=' "$ENV_FILE")" -eq 1 ] || return 1
+    grep -qx 'RETICORA_DB_PASSWORD=legacy-db-password' "$ENV_FILE" &&
+        grep -qx 'RETICORA_BACKUP_CIPHER_PASS=legacy-cipher' "$ENV_FILE" &&
+        grep -qx 'RETICORA_MASTER_KEY=bGVnYWN5LW1hc3Rlci1rZXktMzItYnl0ZXMtbG9uZyE=' "$ENV_FILE" &&
+        grep -qx 'RETICORA_HTTP_BIND=127.0.0.1' "$ENV_FILE" || return 1
+    collect_config >/dev/null
+    write_env
+    [ "$(env_get RETICORA_DB_APP_PASSWORD)" = "$pw" ] || return 1
+    [ "$RETICORA_DB_PASSWORD" = "legacy-db-password" ] || return 1
+    runtime_login_sql "$RETICORA_DB_APP_PASSWORD" | grep -qxF "\\set pw '$pw'"
+}
+
+# Rotation: a changed value in .env is applied by the next run.
+# shellcheck disable=SC2317 # the stubs are called by the installer functions
+test_runtime_login_rotation() {
+    write_legacy_env rotation
+    printf 'RETICORA_DB_APP_PASSWORD=%s\n' "$APP_PW" >> "$ENV_FILE"
+    collect_config >/dev/null
+    [ "$RETICORA_DB_APP_PASSWORD" = "$APP_PW" ] || return 1
+    sed -i "s/^RETICORA_DB_APP_PASSWORD=.*/RETICORA_DB_APP_PASSWORD=rotated-${APP_PW}/" "$ENV_FILE"
+    collect_config >/dev/null
+    [ "$RETICORA_DB_APP_PASSWORD" = "rotated-$APP_PW" ] || return 1
+    local calls="$TMP_ROOT/rotation-calls" stdin="$TMP_ROOT/rotation-stdin"
+    compose_cmd() { cat > "$stdin"; }
+    sync_role_password() { printf '%s\n' "$*" > "$calls"; }
+    ensure_runtime_login
+    grep -qxF "\\set pw 'rotated-$APP_PW'" "$stdin" && grep -qx "postgres reticora_runtime reticora rotated-$APP_PW pgdata" "$calls"
+}
+
+# The password is part of the database URL: characters that would break it
+# or the psql literal are refused instead of being written to the server.
+test_runtime_login_rejects_unsafe_password() {
+    write_legacy_env unsafe
+    printf "RETICORA_DB_APP_PASSWORD=abc'def@ghi/jklmnop\n" >> "$ENV_FILE"
+    collect_config >/dev/null
+}
+
+test_runtime_password_validation() {
+    valid_app_password "$APP_PW" && valid_app_password "Ab-._~0123456789" &&
+        ! valid_app_password "short" && ! valid_app_password "0123456789abcdef'" &&
+        ! valid_app_password "0123456789abcdef@x" && ! valid_app_password "0123456789 abcdef"
+}
+
+# Compose: the server logs in as reticora_runtime with its own password and
+# an application_name for pg_stat_activity; the superuser serves only the
+# database itself and the backups.
+test_runtime_login_compose() {
+    local compose="$REPO_ROOT/deploy/docker-compose/docker-compose.yml" url
+    url="$(grep -E '^[[:space:]]+RETICORA_DATABASE_URL:' "$compose")"
+    [ "$(printf '%s\n' "$url" | wc -l)" -eq 1 ] || return 1
+    # shellcheck disable=SC2016 # literal compose/shell variable reference
+    printf '%s' "$url" | grep -qF '"postgres://reticora_runtime:${RETICORA_DB_APP_PASSWORD:?' || return 1
+    printf '%s' "$url" | grep -qF '@postgres:5432/reticora?sslmode=disable&application_name=reticora-server"' || return 1
+    ! printf '%s' "$url" | grep -q 'RETICORA_DB_PASSWORD' || return 1
+    grep -qx '      POSTGRES_USER: reticora' "$compose" && grep -qx '      PGUSER: reticora' "$compose"
+}
+
+# Kubernetes: base and staging (which replaces the env list) take the
+# server's DSN from the runtime-login secret, never from the migration one.
+test_runtime_login_k8s() {
+    local f ref
+    for f in deploy/k8s/base/deployment.yaml deploy/k8s/overlays/staging/kustomization.yaml; do
+        ref="$(grep -A5 -- '- name: RETICORA_DATABASE_URL' "$REPO_ROOT/$f")"
+        printf '%s' "$ref" | grep -q 'name: reticora-db-runtime' && printf '%s' "$ref" | grep -q 'key: database-url' || return 1
+    done
+    if grep -rhE '^[^#]*name: reticora-db-migrate' "$REPO_ROOT/deploy/k8s"; then return 1; fi
+    grep -q 'reticora-db-runtime' "$REPO_ROOT/deploy/README.md" && grep -q 'reticora-db-migrate' "$REPO_ROOT/deploy/README.md" &&
+        grep -q 'NOSUPERUSER NOBYPASSRLS' "$REPO_ROOT/deploy/README.md"
+}
+
+run_test    "runtime login: SQL creates once, forces attributes and memberships" test_runtime_login_sql
+run_test    "runtime login: applied as superuser via stdin, verified over TCP"   test_runtime_login_ensure
+expect_fail "runtime login: a failing role script aborts the installation"      test_runtime_login_failure_aborts
+run_test    "runtime login: created after the migrations, before the server"     test_runtime_login_order
+run_test    "runtime login: upgrade generates the password, keeps all data"      test_runtime_login_upgrade
+run_test    "runtime login: a changed password in .env is rotated"               test_runtime_login_rotation
+expect_fail "runtime login: an unsafe password in .env is refused"               test_runtime_login_rejects_unsafe_password
+run_test    "runtime login: password validation"                                 test_runtime_password_validation
+run_test    "runtime login: the compose server uses reticora_runtime"            test_runtime_login_compose
+run_test    "runtime login: k8s server DSN comes from the runtime secret"        test_runtime_login_k8s
 
 # ─── realm files and initial administrator (WP-044, AUT-09) ───────────────────
 

@@ -44,6 +44,7 @@ ENV_FILE="$WORK/pitr.env"
 OVERRIDE="$WORK/override.yml"
 cat > "$ENV_FILE" <<ENV
 RETICORA_DB_PASSWORD=$(openssl rand -hex 12)
+RETICORA_DB_APP_PASSWORD=unused
 RETICORA_BACKUP_CIPHER_PASS=$(openssl rand -hex 24)
 RETICORA_S3_ACCESS_KEY=unused
 RETICORA_S3_SECRET_KEY=unused
