@@ -23,6 +23,18 @@ on:
       - 'frontend/e2e/onboarding.spec.ts'
       - 'frontend/e2e/fixtures/**'
       - '.github/workflows/install-smoke.yml'
+      # WP-338: the real-stack suite runs against the installation, so every
+      # change it can observe starts the workflow.
+      - 'backend/**'
+      - 'frontend/src/**'
+      - 'frontend/e2e-real/**'
+      - 'frontend/e2e/support/**'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+      - 'deploy/**'
+      - 'collector/**'
+      - 'edgecore/**'
+      - 'tests/audit/**'
   pull_request:
     branches: [main]
     paths:
@@ -37,6 +49,18 @@ on:
       - 'frontend/e2e/onboarding.spec.ts'
       - 'frontend/e2e/fixtures/**'
       - '.github/workflows/install-smoke.yml'
+      # WP-338: the real-stack suite runs against the installation, so every
+      # change it can observe starts the workflow.
+      - 'backend/**'
+      - 'frontend/src/**'
+      - 'frontend/e2e-real/**'
+      - 'frontend/e2e/support/**'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+      - 'deploy/**'
+      - 'collector/**'
+      - 'edgecore/**'
+      - 'tests/audit/**'
   # Manual runs (e.g. the G1 evidence for GATE-03) are not path filtered.
   workflow_dispatch:
 
@@ -190,6 +214,37 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
           npx playwright test -c e2e/fixtures/playwright.install.config.ts
+
+      # WP-338 (TST-03, TST-04): the real-stack suite frontend/e2e-real/ against
+      # the same installation, compared with the e2e-real lines of
+      # tests/audit/expected-failures.txt: a listed test that turned green, an
+      # unlisted red test, a skipped or missing test fail the job.
+      - name: Prepare the real-stack suite (X-Real-IP passthrough, database, Keycloak admin)
+        if: matrix.platform == 'ubuntu-24.04'
+        run: |
+          command -v psql >/dev/null || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+          ./frontend/e2e-real/fixtures/setup-real-stack.sh deploy/docker-compose .env
+
+      - name: Run the real-stack E2E suite against the expected-failure list
+        if: matrix.platform == 'ubuntu-24.04'
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-real.json
+        run: |
+          npx playwright test -c e2e-real/playwright.real.config.ts --reporter=list,json || true
+          ../tests/audit/run-auditdefect.sh playwright --report "$RUNNER_TEMP/e2e-real.json" --results "$RUNNER_TEMP/e2e-real-results.txt"
+          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --results "$RUNNER_TEMP/e2e-real-results.txt"
+
+      - name: Upload the real-stack report
+        if: always() && matrix.platform == 'ubuntu-24.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-real
+          path: |
+            frontend/test-results/
+            ${{ runner.temp }}/e2e-real.json
+            ${{ runner.temp }}/e2e-real-results.txt
+          retention-days: 14
 
       - name: Upload the onboarding report
         if: failure() && matrix.platform == 'ubuntu-24.04'

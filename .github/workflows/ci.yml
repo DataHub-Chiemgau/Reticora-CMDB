@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# Pinned nats-server for the tests that start their own server
+# (TEST_NATS_SERVER_BIN); 2.10.x like the image nats:2.10-alpine.
+env:
+  NATS_SERVER_VERSION: "2.10.29"
+  NATS_SERVER_SHA256: e314da74a83a1d3876db8814c27eb990fe729640fd6452025b441bcede8390da
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -189,8 +195,11 @@ jobs:
         run: make seed
 
   # GLO-11/DOD-01: docs/traceability.csv is checked on every PR (E-30).
-  # Format, known IDs, existing test files and the rows the plan prescribes for
-  # the PR's work packages block; completeness is reported until gate G1.
+  # Format, known IDs, existing test files and the rows the plans prescribe for
+  # the PR's work packages block; completeness is reported until gate G1. The
+  # plans are docs/plan/implementierungsplan.md and the G1 remediation plan
+  # docs/plan/g1-korrektur/implementierungsplan.md (WP-336); WP numbers are
+  # unique across both.
   traceability:
     runs-on: ubuntu-latest
     steps:
@@ -216,6 +225,106 @@ jobs:
       - name: Check docs/traceability.csv
         working-directory: backend
         run: go test -count=1 -v -run 'TestTraceabilityFile' ./internal/traceability/
+
+  # TST-04 (WP-337): the defect tests of the Phase-1 acceptance audit run
+  # against tests/audit/expected-failures.txt. A listed test that turned green
+  # must be moved into the regular suite, an unlisted red test is a regression,
+  # an aborted test (build failure, panic, missing setup) always fails. See
+  # tests/audit/README.md.
+  auditdefect:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: timescale/timescaledb:2.17.2-pg16
+        env:
+          POSTGRES_USER: reticora
+          POSTGRES_PASSWORD: reticora
+          POSTGRES_DB: reticora_auditdefect
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U reticora"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora_auditdefect?sslmode=disable
+      TEST_DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora_auditdefect?sslmode=disable
+      TEST_REDIS_URL: redis://localhost:6379/0
+      TEST_NATS_URL: nats://localhost:4222
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ratchet self-test
+        run: ./tests/audit/run-auditdefect.test.sh
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.9"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Install migrate, kustomize, nats-server, amtool and PyYAML
+        run: |
+          set -euo pipefail
+          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+          go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL -o "$RUNNER_TEMP/nats.tgz" \
+            "https://github.com/nats-io/nats-server/releases/download/v${NATS_SERVER_VERSION}/nats-server-v${NATS_SERVER_VERSION}-linux-amd64.tar.gz"
+          echo "${NATS_SERVER_SHA256}  $RUNNER_TEMP/nats.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/nats.tgz" -C "$RUNNER_TEMP" --strip-components=1 "nats-server-v${NATS_SERVER_VERSION}-linux-amd64/nats-server"
+          mv "$RUNNER_TEMP/nats-server" "$RUNNER_TEMP/bin/nats-server"
+          echo "TEST_NATS_SERVER_BIN=$RUNNER_TEMP/bin/nats-server" >> "$GITHUB_ENV"
+          curl -sSfL -o "$RUNNER_TEMP/am.tgz" \
+            https://github.com/prometheus/alertmanager/releases/download/v0.27.0/alertmanager-0.27.0.linux-amd64.tar.gz
+          echo "23c3f5a3c73de91dbaec419f3c492bef636deb02680808e5d842e6553aa16074  $RUNNER_TEMP/am.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/am.tgz" -C "$RUNNER_TEMP/bin" --strip-components=1 alertmanager-0.27.0.linux-amd64/amtool
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          echo "KUSTOMIZE=$(go env GOPATH)/bin/kustomize" >> "$GITHUB_ENV"
+          python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Apply all migrations
+        run: migrate -path backend/migrations -database "$DATABASE_URL" up
+
+      - name: Start NATS with JetStream
+        run: |
+          docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
+          for i in $(seq 1 30); do nc -z localhost 4222 && exit 0; sleep 1; done
+          docker logs nats; exit 1
+
+      - name: Defect tests against the expected-failure list
+        run: ./tests/audit/run-auditdefect.sh --kinds go,sh,vitest --out "$RUNNER_TEMP/auditdefect"
+
+      - name: Upload the comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auditdefect
+          path: ${{ runner.temp }}/auditdefect/
+          retention-days: 14
 
   # Gate G1 (WP-213): REP-01 structure, gate checklist, open Critical findings,
   # frozen acceptance artefacts and workflow syntax.

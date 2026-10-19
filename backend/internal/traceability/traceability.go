@@ -250,11 +250,54 @@ func (c Catalog) RequiredForGate() []string {
 	return ids
 }
 
+// PlanFiles are the plans whose WP blocks the check reads, relative to the
+// repository root: the Phase-1 plan and the G1 remediation plan (WP-336). WP
+// numbers are unique across all of them.
+var PlanFiles = []string{
+	"docs/plan/implementierungsplan.md",
+	"docs/plan/g1-korrektur/implementierungsplan.md",
+}
+
+// planNames names the plans in error messages.
+func planNames() string {
+	return strings.Join(PlanFiles, " or ")
+}
+
 // WorkPackage is the traceability part of one WP block of the plan.
 type WorkPackage struct {
 	ID   string
 	Epic string
 	Rows []Entry
+	// Plan is the plan file the block was read from (set by MergePlans).
+	Plan string
+}
+
+// MergePlans combines the work packages of several plans, keyed by plan
+// file. A WP number that occurs in more than one plan is an error naming both
+// files.
+func MergePlans(plans map[string]map[string]*WorkPackage) (map[string]*WorkPackage, error) {
+	names := make([]string, 0, len(plans))
+	for name := range plans {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	merged := map[string]*WorkPackage{}
+	var errs []error
+	for _, name := range names {
+		for id, wp := range plans[name] {
+			if prev, dup := merged[id]; dup {
+				errs = append(errs, fmt.Errorf("%s is defined in %s and in %s", id, prev.Plan, name))
+				continue
+			}
+			wp.Plan = name
+			merged[id] = wp
+		}
+	}
+	if len(errs) > 0 {
+		sort.Slice(errs, func(i, j int) bool { return errs[i].Error() < errs[j].Error() })
+		return nil, errors.Join(errs...)
+	}
+	return merged, nil
 }
 
 var (
@@ -262,7 +305,7 @@ var (
 	epicField = regexp.MustCompile(`\*\*Epic \(Traceability\):\*\* ([^·]+?)\s*(?:·|$)`)
 )
 
-// ParsePlan reads docs/plan/implementierungsplan.md and returns, per WP, the
+// ParsePlan reads one plan (see PlanFiles) and returns, per WP, the
 // epic of its block and the rows listed under "Traceability".
 func ParsePlan(r io.Reader) (map[string]*WorkPackage, error) {
 	plan := map[string]*WorkPackage{}
@@ -351,7 +394,7 @@ func Validate(entries []Entry, catalog Catalog, plan map[string]*WorkPackage, ex
 		wp, inPlan := plan[e.WP]
 		switch {
 		case !inPlan:
-			errs = append(errs, fmt.Errorf("line %d: %s is not a work package of docs/plan/implementierungsplan.md", e.Line, e.WP))
+			errs = append(errs, fmt.Errorf("line %d: %s is not a work package of %s", e.Line, e.WP, planNames()))
 		case wp.Epic != e.Epic:
 			errs = append(errs, fmt.Errorf("line %d: epic of %s must be %q, got %q", e.Line, e.WP, wp.Epic, e.Epic))
 		}
@@ -378,7 +421,7 @@ func CheckWorkPackages(entries []Entry, plan map[string]*WorkPackage, wps []stri
 	for _, id := range wps {
 		wp, ok := plan[id]
 		if !ok {
-			errs = append(errs, fmt.Errorf("%s is not a work package of docs/plan/implementierungsplan.md", id))
+			errs = append(errs, fmt.Errorf("%s is not a work package of %s", id, planNames()))
 			continue
 		}
 		for _, row := range wp.Rows {
