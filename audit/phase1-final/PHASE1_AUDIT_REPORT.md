@@ -255,6 +255,10 @@ Statusverlauf: Gegenüber der verifizierten Einzelprüfung änderten sich 17 Sta
 5. P2-Defekte behoben oder je Defekt mit dokumentierter Risikoakzeptanz des verantwortlichen Entscheiders.
 6. Wiederholungsprüfung aller 149 nicht bestandenen WPs gegen ihre „Offenen Nachweise“ (Matrix); erst danach erneute Gate-Entscheidung.
 
+### 9.4 Korrekturplan
+
+Die Behebung aller nicht bestandenen WPs und aller Befunde ist im Korrekturplan [`docs/plan/g1-korrektur/implementierungsplan.md`](../../docs/plan/g1-korrektur/implementierungsplan.md) (Nachtrag vom 2026-10-19) in Arbeitspakete zerlegt; die Zuordnung je Befund und je WP steht in `abdeckung-befunde.csv` und `abdeckung-wps.csv` daneben. Die Retest-Kriterien aus Abschnitt 9.3 sind dort die Ausstiegskriterien der Wiederholungsprüfung und des Gate-WP.
+
 ## 10. Vollständigkeitscheck
 
 | Prüfpunkt | Ergebnis |

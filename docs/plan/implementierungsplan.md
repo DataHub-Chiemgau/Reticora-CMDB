@@ -6,6 +6,7 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt alle offenen Punkte der Pha
 
 - [`entscheidungen.md`](entscheidungen.md): Entscheidungsbedarf (E-Nummern). Anforderungen werden nicht erfunden oder umgedeutet; Unklarheiten stehen dort.
 - [`abdeckung.csv`](abdeckung.csv): Zuordnung jeder ID im Umfang zu den WPs, die sie bearbeiten oder schließen.
+- [`g1-korrektur/implementierungsplan.md`](g1-korrektur/implementierungsplan.md) (Nachtrag vom 2026-10-19): Korrekturplan zum Phase-1-Abnahmeaudit vom 2026-10-18 (`audit/phase1-final/`, Ergebnis NO-GO) mit den WPs ab WP-336 und den Entscheidungen ab E-59. Gate G1 wird nach diesem Plan erneut entschieden.
 
 ## Umfang und Abgrenzung
 
