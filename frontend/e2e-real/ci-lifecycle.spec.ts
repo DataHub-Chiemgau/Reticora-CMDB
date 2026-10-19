@@ -806,8 +806,14 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     page.on('request', onRequest);
     page.on('response', onResponse);
     try {
-      // A double click must not create the edge twice.
-      await dialog.getByRole('button', { name: 'Anlegen' }).dblclick();
+      // A double click must not create the edge twice. Both clicks land in one
+      // task, before the pending state disables the button: the worst case of
+      // a real double click (Playwright's dblclick only sometimes beats the
+      // re-render, which made F-314 intermittent).
+      await dialog.getByRole('button', { name: 'Anlegen' }).evaluate((b: HTMLButtonElement) => {
+        b.click();
+        b.click();
+      });
       await expect
         .poll(() => sent > 0 && statuses.length === sent, { message: 'answers to every POST' })
         .toBe(true);
