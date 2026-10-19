@@ -20,7 +20,7 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 - **Im Umfang:** alle 149 TEILWEISE BESTANDENEN und FEHLGESCHLAGENEN WPs, alle 16 P0-, 30 P1- und 134 P2-Befunde (Pflicht) sowie die Triage aller 174 P3-Befunde: 170 werden in einem WP mitbehoben, 4 sind begründet zurückgestellt ([E-60](entscheidungen.md#e-60), Abschnitt [Zurückgestellte Befunde](#zurückgestellte-befunde)).
 - **Mitbehandelt:** Befunde, die bestandene WPs berühren, ohne deren Akzeptanzkriterien zu verletzen (in der Matrix „verknüpft“), und die Abnahme der im Audit nicht geprüften G1-Pflicht-WPs WP-214, WP-240 bis WP-242 und WP-332 bis WP-335.
 - **Nicht Bestandteil:** Phase-2-Umfang ([P2]-Funktionen, Phase-2-Plan) und die nach E-03 verschobenen Funktionen. Ein abgeschaltetes Spätphasen-Modul wird nur korrigiert, wenn ein Phase-1-Akzeptanzkriterium (z. B. Mandantentrennung) verletzt ist.
-- **265 Arbeitspakete** WP-336 bis WP-600 mit zusammen **362,0 PT**.
+- **265 Arbeitspakete** WP-336 bis WP-600 mit zusammen **362,5 PT**.
 - **Reihenfolge:** K0 vorab; danach K1 bis K3 nach Schwere mit Vorrang, K4 bis K6 sobald ihre Voraussetzungen gemergt sind; K7 zum Schluss. Innerhalb einer Klasse laufen WPs parallel, sobald ihre Voraussetzungen gemergt sind.
 
 ## Überblick
@@ -30,23 +30,23 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | Meilenstein | WPs | Anzahl | PT | Ausstiegskriterium |
 |---|---|---:|---:|---|
 | [K0 Prüfrahmen](#k0-prüfrahmen) | WP-336 – WP-338 | 3 | 4,5 | Traceability liest den Korrekturplan; Defekttests laufen als Ratchet in CI; Real-Stack-E2E läuft in CI gegen die installierte Instanz. |
-| [K1 Sicherheit und Mandantentrennung](#k1-sicherheit-und-mandantentrennung) | WP-339 – WP-407 | 69 | 95,2 | Alle P0 und die P1/P2 mit Sicherheits- oder Isolationswirkung behoben; ihre Defekttests grün und überführt. |
-| [K2 Datenintegrität und Kernprozesse](#k2-datenintegrität-und-kernprozesse) | WP-408 – WP-422 | 15 | 24,5 | Alle übrigen P1 behoben: keine stillen Datenverluste, Kernprozesse (CI-Anlage, Sitzung, Discovery, Reconciliation) im Real-Stack grün. |
-| [K3 Installation, Betrieb und Gate-Nachweise](#k3-installation-betrieb-und-gate-nachweise) | WP-423 – WP-456 | 34 | 50,0 | Installer-, Zertifikats-, K8s-, Backup- und Monitoring-Befunde behoben; Gate- und Abnahmedokumente führen jeden betroffenen Punkt mit Zwischenstand (offen mit Korrektur-WP oder belegt PASS); den Endstand stellt K7 her. |
-| [K4 Funktions-, Validierungs- und Bedienmängel](#k4-funktions--validierungs--und-bedienmängel) | WP-457 – WP-530 | 74 | 101,2 | Alle übrigen P2 behoben. |
-| [K5 Nachweislücken](#k5-nachweislücken) | WP-531 – WP-558 | 28 | 34,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
+| [K1 Sicherheit und Mandantentrennung](#k1-sicherheit-und-mandantentrennung) | WP-339 – WP-409 | 71 | 99,0 | Alle P0 und die P1/P2 mit Sicherheits- oder Isolationswirkung behoben; ihre Defekttests grün und überführt. |
+| [K2 Datenintegrität und Kernprozesse](#k2-datenintegrität-und-kernprozesse) | WP-410 – WP-426 | 17 | 27,0 | Alle übrigen P1 behoben: keine stillen Datenverluste, Kernprozesse (CI-Anlage, Sitzung, Discovery, Reconciliation) im Real-Stack grün. |
+| [K3 Installation, Betrieb und Gate-Nachweise](#k3-installation-betrieb-und-gate-nachweise) | WP-427 – WP-459 | 33 | 48,5 | Installer-, Zertifikats-, K8s-, Backup- und Monitoring-Befunde behoben; Gate- und Abnahmedokumente führen jeden betroffenen Punkt mit Zwischenstand (offen mit Korrektur-WP oder belegt PASS); den Endstand stellt K7 her. |
+| [K4 Funktions-, Validierungs- und Bedienmängel](#k4-funktions--validierungs--und-bedienmängel) | WP-460 – WP-531 | 72 | 99,0 | Alle übrigen P2 behoben. |
+| [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **265** | **362,0** | |
+| **Summe** | | **265** | **362,5** | |
 
 ```mermaid
 flowchart LR
     K0["K0 Prüfrahmen<br/>3 WPs · 4,5 PT"]
-    K1["K1 Sicherheit und Mandantentrennung<br/>69 WPs · 95,2 PT"]
-    K2["K2 Datenintegrität und Kernprozesse<br/>15 WPs · 24,5 PT"]
-    K3["K3 Installation, Betrieb und Gate-Nachweise<br/>34 WPs · 50,0 PT"]
-    K4["K4 Funktions-, Validierungs- und Bedienmängel<br/>74 WPs · 101,2 PT"]
-    K5["K5 Nachweislücken<br/>28 WPs · 34,5 PT"]
+    K1["K1 Sicherheit und Mandantentrennung<br/>71 WPs · 99,0 PT"]
+    K2["K2 Datenintegrität und Kernprozesse<br/>17 WPs · 27,0 PT"]
+    K3["K3 Installation, Betrieb und Gate-Nachweise<br/>33 WPs · 48,5 PT"]
+    K4["K4 Funktions-, Validierungs- und Bedienmängel<br/>72 WPs · 99,0 PT"]
+    K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
@@ -61,9 +61,9 @@ flowchart LR
     K6 --> K7
 ```
 
-Die Kanten zeigen die Priorität, keine harte Sperre: Ein WP darf beginnen, sobald seine eigenen Voraussetzungen gemergt sind. Harte Sperren sind nur K0 (vor allen anderen WPs) und K7 (nach allen anderen WPs).
+Die Kanten zeigen die Priorität, keine harte Sperre: Ein WP darf beginnen, sobald seine eigenen Voraussetzungen gemergt sind. Harte Sperren sind nur WP-336 und WP-337 (vor allen anderen WPs, Konvention 11) und WP-600 (nach allen anderen WPs). WP-338 sperrt nur die WPs, die es als Voraussetzung nennen. WP-595 (`t5-rc-evidence`) wartet nicht auf die Lieferungs-WPs WP-457, WP-453, WP-454, WP-455 (externe Lieferungen A-02, A-07, A-11); die Wiederholungsprüfung WP-598 und das Gate WP-600 dagegen schon.
 
-**Kritischer Pfad** (längste Kette über Voraussetzungen, 29,0 PT): WP-336 (`k-trace`) → WP-337 (`k-ratchet`) → WP-339 (`t1-compliance-scope`) → WP-341 (`t1-doc-window-writes`) → WP-342 (`t1-review-scope`) → WP-389 (`t1-team-scope`) → WP-392 (`t6-invite-ceiling`) → WP-417 (`t6-invite-event`) → WP-418 (`t5-k8s-required-env`) → WP-444 (`t5-worker-metrics`) → WP-502 (`t6-jobqueue-kinds`) → WP-513 (`t7-job-cancel`) → WP-514 (`t7-export-cancel`) → WP-519 (`t7-bulk-ui`) → WP-520 (`t7-jobcenter-ui`) → WP-595 (`t5-rc-evidence`) → WP-596 (`k-reaudit-1`) → WP-600 (`k-gate`). Bei paralleler Umsetzung bestimmt er die Mindestdauer; die Gesamtdauer hängt von der Zahl paralleler Sessions ab.
+**Kritischer Pfad** (längste Kette über Voraussetzungen, 29,0 PT): WP-336 (`k-trace`) → WP-337 (`k-ratchet`) → WP-339 (`t1-compliance-scope`) → WP-341 (`t1-doc-window-writes`) → WP-342 (`t1-review-scope`) → WP-391 (`t1-team-scope`) → WP-394 (`t6-invite-ceiling`) → WP-421 (`t6-invite-event`) → WP-422 (`t5-k8s-required-env`) → WP-447 (`t5-worker-metrics`) → WP-503 (`t6-jobqueue-kinds`) → WP-514 (`t7-job-cancel`) → WP-517 (`t7-bulk-validation`) → WP-520 (`t7-bulk-ui`) → WP-521 (`t7-jobcenter-ui`) → WP-595 (`t5-rc-evidence`) → WP-596 (`k-reaudit-1`) → WP-600 (`k-gate`). Bei paralleler Umsetzung bestimmt er die Mindestdauer; die Gesamtdauer hängt von der Zahl paralleler Sessions ab.
 
 ### Schwere Befunde (P0/P1) und ihre Korrektur
 
@@ -73,52 +73,52 @@ Die Kanten zeigen die Priorität, keine harte Sperre: Ein WP darf beginnen, soba
 | [F-002](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-002) | P0 | Site-Scope-Bypass im Rack-Kanal: site-fremde Racks lesbar und löschbar | [WP-340](#wp-340--rack-sichtbarkeit-über-den-location-scope-kein-site-bypass-kein-mounts-existenzorakel) |
 | [F-003](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-003) | P0 | Review-Items ohne Kandidaten-CIs leaken über Clients; review_item ohne DB-seitigen Client/Site-Scope | [WP-342](#wp-342--review_item-mit-abgeleitetem-client-site-scope-kandidatenlose-items-fail-closed) |
 | [F-004](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-004) | P0 | Geteilte Dokumente und Wartungsfenster: teilgescopter Principal ändert/löscht sie, FK-Kaskade entfernt Links anderer Clients | [WP-341](#wp-341--dokumente-und-wartungsfenster-schreiben-nur-bei-vollständig-sichtbaren-links-exakte-zähler) |
-| [F-005](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-005) | P0 | MFA für org_admins aus Signup, Einladung, Operator-Pfad und Gruppe reticora-admin nicht erzwungen | [WP-358](#wp-358--mfa-pflicht-bei-jeder-org_admin-vergabe-rollenzuweisung-einladungsannahme-erstlogin-und-bestandsabgleich-setzen-mfa_required-in-keycloak) (Teil: [WP-357](#wp-357--mfa-pflicht-für-org_admin-signup--und-operator-konten-realm-gruppe-reticora-admin-e2e-login-helfer-mit-otp), [WP-366](#wp-366--mfa-pflicht-im-login-pfad-org_admin-aus-idp-gruppe-oder-default-rolle-setzt-mfa_required-in-keycloak)) |
+| [F-005](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-005) | P0 | MFA für org_admins aus Signup, Einladung, Operator-Pfad und Gruppe reticora-admin nicht erzwungen | [WP-367](#wp-367--mfa-pflicht-im-login-pfad-org_admin-aus-idp-gruppe-oder-default-rolle-setzt-mfa_required-in-keycloak) (Teil: [WP-357](#wp-357--mfa-pflicht-für-org_admin-signup--und-operator-konten-realm-gruppe-reticora-admin-e2e-login-helfer-mit-otp), [WP-358](#wp-358--mfa-pflicht-bei-jeder-org_admin-vergabe-rollenzuweisung-einladungsannahme-erstlogin-und-bestandsabgleich-setzen-mfa_required-in-keycloak)) |
 | [F-006](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-006) | P0 | API-Key-Rotation/-Widerruf durch Nicht-Owner: Rechteausweitung und Übernahme fremder Keys | [WP-354](#wp-354--api-keys-rotation-und-widerruf-nur-durch-owner-oder-rechteinhaber-bindung-an-einen-service-account-nie-breiter-als-der-ersteller) |
 | [F-007](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-007) | P0 | API-Key-Bindung an Service-Account ohne Scope-Prüfung: client-gebundener Ersteller erhält org-weiten Key | [WP-354](#wp-354--api-keys-rotation-und-widerruf-nur-durch-owner-oder-rechteinhaber-bindung-an-einen-service-account-nie-breiter-als-der-ersteller) |
 | [F-008](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-008) | P0 | Service-Account-Rollenzuweisung ohne Rechte-/Scope-Prüfung; Route verlangt nur user:manage | [WP-355](#wp-355--service-account-rollen-nur-mit-rolemanage-und-innerhalb-der-eigenen-rechte) |
 | [F-009](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-009) | P0 | Webhook-Filter liefert merge-/relationship-Events anderer Clients an client-gebundene Service-Accounts | [WP-356](#wp-356--gebundene-webhook-subscriptions-erhalten-nur-ereignisse-lesbarer-objekte-scope-serverseitig-leserechte-wie-rls-fail-closed-bei-unbekanntem-scope) |
-| [F-010](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-010) | P0 | WMI-Plugin sendet Credentials im Klartext (HTTP Basic über http://ziel:5985; HTTPS-Modus mit InsecureSkipVerify) | [WP-377](#wp-377--wmi-zugangsdaten-nur-über-geprüftes-tls-winrm-5986-capin-je-netz) (Teil: [WP-376](#wp-376--collector-credentials-je-scope-und-je-art-keine-protokoll-aliasse)) |
-| [F-011](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-011) | P0 | NAS-Plugin sendet Synology-Konto und Passwort in der URL über http://ziel:5000 und an ungeprüftes HTTPS (5001) | [WP-378](#wp-378--nas-synology-anmeldung-per-post-über-geprüftes-tls-eigene-credential-art) |
-| [F-012](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-012) | P0 | Erneuerungsendpunkt ist nicht an den Collector gebunden: ein Principal mit discovery:ingest stellt sich ein Collector-Zertifikat für den eigenen Schlüssel aus | [WP-374](#wp-374--zertifikatserneuerung-nur-über-die-mtls-identität-des-collectors-http-erneuerung-entfernen) |
-| [F-013](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-013) | P0 | Collector ignoriert credential_ids je Scope: das erste Credential je Protokoll gilt für alle Scopes (auch über Client-Grenzen) | [WP-376](#wp-376--collector-credentials-je-scope-und-je-art-keine-protokoll-aliasse) |
-| [F-014](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-014) | P0 | Site-Grant setzt Client-Scope auf NULL: Site-Nutzer lesen Kontakte, Credentials, Assets und unplatzierte CIs fremder Clients | [WP-390](#wp-390--site-scope-für-assets-und-mengenartikel-ten-02-und-real-stack-nachweis-der-hierarchie) (Teil: [WP-388](#wp-388--site-grant-auf-den-client-des-standorts-begrenzen-rba-03-ten-09-auch-für-service-accounts)) |
-| [F-015](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-015) | P0 | Keine Grant-Obergrenze: client-gescopter user:manage-Inhaber erzeugt org-weite org_admin-Einladungen und -Rollenzuweisungen | [WP-392](#wp-392--grant-obergrenze-für-einladungen-und-rollenzuweisungen-rollescope-abgleich) |
-| [F-016](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-016) | P0 | CI-Dialog 'CI erstellen' nutzt hart kodierte Typ-Keys: sendet 'server' als ci_type_id (400) und bietet keine Laufzeit-/Org-Typen | [WP-395](#wp-395--ci-dialog-lädt-typen-aus-get-ci-types-und-erfasst-typattribute-ci-03-met-04) (Teil: [WP-394](#wp-394--ci-typreferenz-nur-auf-system--oder-eigenen-org-typ-422-ci_type_id)) |
-| [F-017](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-017) | P1 | Rollenzuweisung nicht entziehbar: kein DELETE /role-assignments/{id} | [WP-393](#wp-393--rollenzuweisung-entziehen-delete-role-assignmentsid-für-standard--und-custom-rollen-mit-grant-obergrenze-audit-und-wirkung-beim-nächsten-refresh) |
-| [F-018](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-018) | P1 | OpenAPI-Validator weist jeden SPA-Refresh (POST /auth/refresh ohne Body/Content-Type) mit 400 ab; gleiche Abweichung bei weiteren bodylosen POSTs | [WP-364](#wp-364--validierungsstufe-aus-openapi-ableiten-cookie-only-refresh-und-bodylose-posts-erreichen-den-handler-test-der-maingo-kette) (Teil: [WP-459](#wp-459--spa-session-single-flight-refresh-refresh-beim-start-statt-login-redirect-429-ohne-abmeldung)) |
-| [F-019](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-019) | P1 | Abgewiesene Requests einer Credential leeren das Org-Budget (eine Integration sperrt die ganze Org) | [WP-408](#wp-408--ratelimits-credential-budget-vor-org-budget-session-bucket-über-refresh-hinweg-sid) |
-| [F-020](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-020) | P1 | Manuelle Massen-Statusänderung (POST /cis/bulk set_status) ist kein manueller Schreibvorgang: kein Override, keine Versionserhöhung, unter Status-Override still verworfen und als ok gemeldet | [WP-367](#wp-367--bulk-statusänderung-als-manueller-schreibvorgang-override-version-ehrlicher-ergebnisbericht) |
-| [F-021](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-021) | P1 | Override setzen/aufheben erhöht ci.version nicht: veralteter If-Match-PATCH überschreibt den neueren geschützten Override | [WP-410](#wp-410--override-setzenaufheben-erhöht-die-ci-version-clearoverride-bildet-fehler-korrekt-ab) (Teil: [WP-474](#wp-474--ci-detail-nach-override-setzenaufheben-aktuell-override-gegen-offenen-editor-im-real-stack)) |
-| [F-022](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-022) | P1 | Auflösung „new“ bei resurrected_device erzeugt org-weites CI ohne Identität: fremde Client-Sichtbarkeit und endlose Review-Schleife | [WP-368](#wp-368--resurrected_device-neues-ci-client-identität-und-scope-übernehmen) |
-| [F-023](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-023) | P1 | DELETE /sites\|/buildings\|/rooms/{id} löscht Standorte mit Kindern (204, Kaskade) statt 409 (LOC-11) | [WP-409](#wp-409--standortlöschung-409-statt-kaskade-auf-allen-löschpfaden-netzobjekte-der-site-und-location_change-bleiben-erhalten) |
-| [F-024](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-024) | P1 | Site-Löschung kaskadiert VLANs/Enrollment-Tokens und entzieht Subnetzen, Collectoren, Discovery-Scopes, ci_merge still die Site | [WP-409](#wp-409--standortlöschung-409-statt-kaskade-auf-allen-löschpfaden-netzobjekte-der-site-und-location_change-bleiben-erhalten) |
-| [F-025](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-025) | P1 | Deaktivierter Collector liefert weiter: offene NATS-Verbindung bleibt bestehen, EdgeIngest, scopes.result und subnets.report ohne Statusprüfung | [WP-380](#wp-380--deaktivierter-collector-bestehende-edge-verbindung-binnen-sekunden-trennen) (Teil: [WP-379](#wp-379--deaktivierter-oder-unbekannter-collector-edge-daten-abweisen-patch-auf-fremden-collector-404)) |
-| [F-026](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-026) | P1 | Keine automatische Zertifikatserneuerung; Collector verlieren 90 Tage nach dem Enrollment die Konnektivität | [WP-411](#wp-411--collector-erneuert-sein-zertifikat-ab-60--über-den-mtls-kanal-ehrliche-verbindungsmeldung) |
-| [F-027](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-027) | P1 | Falsche Credential-Auswahl im Bundle: ohne aktive Scopes alle Client- und Org-Credentials, ein Scope ohne credential_ids leert das Bundle | [WP-375](#wp-375--credential-bundle-nur-scope-relevante-credentials-scope-ohne-credentials-nutzt-client-org-credentials) (Teil: [WP-541](#wp-541--nachweis-real-stack-vorschlag-bestätigen-scope-und-bundle-mit-credentials-scan-mit-bundle-credential)) |
-| [F-028](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-028) | P1 | Credentials der Art 'wmi' erreichen das WMI-Plugin nie; SSH-Credentials gehen an WMI- und NAS-Ziele | [WP-376](#wp-376--collector-credentials-je-scope-und-je-art-keine-protokoll-aliasse) |
-| [F-029](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-029) | P1 | WMI Collect meldet Erfolg mit leeren Feldern bei 401, Transportfehler oder protokollkonformer WinRM-Antwort; der Scope-Lauf zeigt ok | [WP-412](#wp-412--wmi-fehler-und-401-mit-ursache-melden-enumeratepull-nach-dsp0226) |
-| [F-030](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-030) | P1 | Jedes gesweepte Gerät erhält ein (wiederkehrendes) falsches unclassified_device-Review, auch wenn SNMP, SSH oder Redfish es klassifiziert haben | [WP-414](#wp-414--unclassified_device-nur-für-wirklich-unklassifizierte-geräte-verworfenes-review-bleibt-verworfen) |
-| [F-031](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-031) | P1 | scope_suggested umgeht discovery:manage und ist über Client-Grenzen sichtbar und verwerfbar | [WP-381](#wp-381--scope_suggested-annehmen-und-verwerfen-nur-mit-discoverymanage-sichtbarkeit-je-client) |
-| [F-032](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-032) | P1 | Ausgelieferter Collector liefert keine LLDP-/CDP-/FDB-Nachbarn (TOP-01-Eingang fehlt in Produktion) | [WP-413](#wp-413--snmp-plugin-liefert-lldp--und-fdb-nachbarn) |
-| [F-033](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-033) | P1 | certbot certonly kann das Let's-Encrypt-Zertifikat nicht ablegen, weil der Bootstrap-Platzhalter letsencrypt/live/<domain>/ belegt | [WP-416](#wp-416--acme-ausstellung-ohne-lineage-konflikt-und-nginx-lesbares-schlüsselmaterial) (Teil: [WP-436](#wp-436--pebble-integrationstest-des-tls-domain-pfads-ausstellung-wiederholung-lesbarkeit-issuer-prüfung)) |
-| [F-034](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-034) | P1 | Von certbot ausgestellter Schlüssel und Kette sind für den unprivilegierten nginx-Nutzer (uid 101) des Frontends unlesbar | [WP-416](#wp-416--acme-ausstellung-ohne-lineage-konflikt-und-nginx-lesbares-schlüsselmaterial) (Teil: [WP-436](#wp-436--pebble-integrationstest-des-tls-domain-pfads-ausstellung-wiederholung-lesbarkeit-issuer-prüfung)) |
-| [F-035](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-035) | P1 | OIDC-Issuer-Prüfung läuft vor dem Start des Frontends (Issuer-Proxy), daher brechen Domain-/TLS-Installationen ab | [WP-383](#wp-383--installer-strikte-issuer-prüfung-erst-nach-dem-start-von-server-und-frontend) (Teil: [WP-436](#wp-436--pebble-integrationstest-des-tls-domain-pfads-ausstellung-wiederholung-lesbarkeit-issuer-prüfung)) |
-| [F-036](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-036) | P1 | K8s-Manifeste liefern das durch WP-097 verpflichtende RETICORA_OIDC_ISSUER_URL nicht; Server beendet sich in base, staging und prod beim Start | [WP-418](#wp-418--kubernetes-vollständige-pflichtkonfiguration-oidc-in-allen-overlays-veröffentlichte-release-images) |
-| [F-037](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-037) | P1 | CI-13-Reaktivierung über die Produktions-Decorator-Kette aus main.go liefert 501; gelöschtes, wiedergesehenes Gerät bleibt gelöscht (SR-11) | [WP-415](#wp-415--ci-reaktivierung-über-die-produktions-decorator-kette-sr-11-und-ki-indexer-hinter-dem-modul-gate) |
-| [F-038](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-038) | P1 | Gate-Checkliste führt CI-13 [B] als PASS trotz offenem und reproduziertem Defekt SR-11 | [WP-448](#wp-448--gate-checkliste-ehrlich-und-maschinell-geprüft-konsistenzprüfung---final-modus-ausnahmeliste-gate-010203) |
-| [F-039](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-039) | P1 | Kein Pentest-Bericht und keine Befundliste im Repository (Lieferung A-07 fehlt) | [WP-450](#wp-450--pentest-nachweis-g1-ablegen-lieferung-a-07) |
-| [F-040](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-040) | P1 | Review und Gate führen TEN-09-Isolation als vollständig und 'kein offenes Critical', obwohl ein Site-Scope-Bypass im Rack-Kanal reproduziert ist | [WP-449](#wp-449--sicherheitsreview-g1-korrigieren-sr-11-high-neue-befunde-sr-12sr-13-p0-befunde-des-audits-kanal--scope-dev-advisories) (Teil: [WP-448](#wp-448--gate-checkliste-ehrlich-und-maschinell-geprüft-konsistenzprüfung---final-modus-ausnahmeliste-gate-010203)) |
-| [F-041](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-041) | P1 | Einladungen versenden keine E-Mail: invitation.created (NTF-05 'Einladung') wird nie erzeugt | [WP-417](#wp-417--einladung-erzeugt-invitationcreated-mit-annahmelink-ntf-05) |
-| [F-042](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-042) | P1 | Manuelle verifizierte Port-Kanten werden bei Discovery-Interface-Entfernung per ON DELETE CASCADE still gelöscht | [WP-420](#wp-420--manuelle-port-kanten-überleben-den-interface-abgleich-rel-05-fehlerabbildung-der-interface-routen) |
-| [F-043](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-043) | P1 | EVT-02-Typen relationship.created, relationship.removed (API), collector.enrolled, review.resolved werden nie erzeugt | [WP-398](#wp-398--produzenten-für-relationshipcreatedremoved-collectorenrolled-und-reviewresolved-in-der-mutations-transaktion) |
-| [F-044](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-044) | P1 | Entitlement-Warnung/-Ablauf und Zertifikatsablauf: JOB-02-Läufe nicht eingeplant, Events entitlement.warning/expired und certificate.expiring nie erzeugt | [WP-421](#wp-421--job-02-läufe-entitlement-warnung-ablauf-und-zertifikatsablauf-mit-events) |
-| [F-045](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-045) | P1 | Werte mit Anführungszeichen oder Steuerzeichen (Zeilenumbruch, Tab) brechen jeden auditierten Write mit Wert-Snapshot (CI-Create/-Update/-Delete/-Restore, Metamodell) mit 400 ab: audit_entry_hash castet den JSON-Text nach bytea | [WP-419](#wp-419--audit_entry_hash-hasht-das-kanonische-json-als-utf-8-aud-04-abweichende-bestandsketten-neu-verkettet) |
-| [F-046](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-046) | P1 | Collector-Metrik-Uploads (Sweep, UPS, SNMP-Poll) werden ohne Credential gesendet, mit 401 abgewiesen und erreichen den Server nie | [WP-422](#wp-422--collector-metriken-über-den-mtls-edge-metrics-statt-unauthentisiertem-http) |
+| [F-010](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-010) | P0 | WMI-Plugin sendet Credentials im Klartext (HTTP Basic über http://ziel:5985; HTTPS-Modus mit InsecureSkipVerify) | [WP-378](#wp-378--collector-credentials-je-scope-und-je-art-keine-protokoll-aliasse) (Teil: [WP-377](#wp-377--wmi-zugangsdaten-nur-über-geprüftes-tls-winrm-5986-capin-je-netz)) |
+| [F-011](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-011) | P0 | NAS-Plugin sendet Synology-Konto und Passwort in der URL über http://ziel:5000 und an ungeprüftes HTTPS (5001) | [WP-379](#wp-379--nas-synology-anmeldung-per-post-über-geprüftes-tls-eigene-credential-art) |
+| [F-012](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-012) | P0 | Erneuerungsendpunkt ist nicht an den Collector gebunden: ein Principal mit discovery:ingest stellt sich ein Collector-Zertifikat für den eigenen Schlüssel aus | [WP-375](#wp-375--zertifikatserneuerung-nur-über-die-mtls-identität-des-collectors-http-erneuerung-entfernen) |
+| [F-013](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-013) | P0 | Collector ignoriert credential_ids je Scope: das erste Credential je Protokoll gilt für alle Scopes (auch über Client-Grenzen) | [WP-378](#wp-378--collector-credentials-je-scope-und-je-art-keine-protokoll-aliasse) |
+| [F-014](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-014) | P0 | Site-Grant setzt Client-Scope auf NULL: Site-Nutzer lesen Kontakte, Credentials, Assets und unplatzierte CIs fremder Clients | [WP-392](#wp-392--site-scope-für-assets-und-mengenartikel-ten-02-und-real-stack-nachweis-der-hierarchie) (Teil: [WP-390](#wp-390--site-grant-auf-den-client-des-standorts-begrenzen-rba-03-ten-09-auch-für-service-accounts)) |
+| [F-015](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-015) | P0 | Keine Grant-Obergrenze: client-gescopter user:manage-Inhaber erzeugt org-weite org_admin-Einladungen und -Rollenzuweisungen | [WP-394](#wp-394--grant-obergrenze-für-einladungen-und-rollenzuweisungen-rollescope-abgleich) |
+| [F-016](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-016) | P0 | CI-Dialog 'CI erstellen' nutzt hart kodierte Typ-Keys: sendet 'server' als ci_type_id (400) und bietet keine Laufzeit-/Org-Typen | [WP-397](#wp-397--ci-dialog-lädt-typen-aus-get-ci-types-und-erfasst-typattribute-ci-03-met-04) (Teil: [WP-396](#wp-396--ci-typreferenz-nur-auf-system--oder-eigenen-org-typ-422-ci_type_id)) |
+| [F-017](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-017) | P1 | Rollenzuweisung nicht entziehbar: kein DELETE /role-assignments/{id} | [WP-395](#wp-395--rollenzuweisung-entziehen-delete-role-assignmentsid-für-standard--und-custom-rollen-mit-grant-obergrenze-audit-und-wirkung-beim-nächsten-refresh) |
+| [F-018](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-018) | P1 | OpenAPI-Validator weist jeden SPA-Refresh (POST /auth/refresh ohne Body/Content-Type) mit 400 ab; gleiche Abweichung bei weiteren bodylosen POSTs | [WP-366](#wp-366--spa-session-single-flight-refresh-refresh-beim-start-statt-login-redirect-429-ohne-abmeldung) (Teil: [WP-364](#wp-364--validierungsstufe-aus-openapi-ableiten-cookie-only-refresh-und-bodylose-posts-erreichen-den-handler-test-der-maingo-kette)) |
+| [F-019](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-019) | P1 | Abgewiesene Requests einer Credential leeren das Org-Budget (eine Integration sperrt die ganze Org) | [WP-410](#wp-410--ratelimits-credential-budget-vor-org-budget-session-bucket-über-refresh-hinweg-sid) |
+| [F-020](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-020) | P1 | Manuelle Massen-Statusänderung (POST /cis/bulk set_status) ist kein manueller Schreibvorgang: kein Override, keine Versionserhöhung, unter Status-Override still verworfen und als ok gemeldet | [WP-368](#wp-368--bulk-statusänderung-als-manueller-schreibvorgang-override-version-ehrlicher-ergebnisbericht) |
+| [F-021](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-021) | P1 | Override setzen/aufheben erhöht ci.version nicht: veralteter If-Match-PATCH überschreibt den neueren geschützten Override | [WP-413](#wp-413--ci-detail-nach-override-setzenaufheben-aktuell-override-gegen-offenen-editor-im-real-stack) (Teil: [WP-412](#wp-412--override-setzenaufheben-erhöht-die-ci-version-clearoverride-bildet-fehler-korrekt-ab)) |
+| [F-022](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-022) | P1 | Auflösung „new“ bei resurrected_device erzeugt org-weites CI ohne Identität: fremde Client-Sichtbarkeit und endlose Review-Schleife | [WP-369](#wp-369--resurrected_device-neues-ci-client-identität-und-scope-übernehmen) |
+| [F-023](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-023) | P1 | DELETE /sites\|/buildings\|/rooms/{id} löscht Standorte mit Kindern (204, Kaskade) statt 409 (LOC-11) | [WP-411](#wp-411--standortlöschung-409-statt-kaskade-auf-allen-löschpfaden-netzobjekte-der-site-und-location_change-bleiben-erhalten) |
+| [F-024](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-024) | P1 | Site-Löschung kaskadiert VLANs/Enrollment-Tokens und entzieht Subnetzen, Collectoren, Discovery-Scopes, ci_merge still die Site | [WP-411](#wp-411--standortlöschung-409-statt-kaskade-auf-allen-löschpfaden-netzobjekte-der-site-und-location_change-bleiben-erhalten) |
+| [F-025](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-025) | P1 | Deaktivierter Collector liefert weiter: offene NATS-Verbindung bleibt bestehen, EdgeIngest, scopes.result und subnets.report ohne Statusprüfung | [WP-381](#wp-381--deaktivierter-collector-bestehende-edge-verbindung-binnen-sekunden-trennen) (Teil: [WP-380](#wp-380--deaktivierter-oder-unbekannter-collector-edge-daten-abweisen-patch-auf-fremden-collector-404)) |
+| [F-026](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-026) | P1 | Keine automatische Zertifikatserneuerung; Collector verlieren 90 Tage nach dem Enrollment die Konnektivität | [WP-414](#wp-414--collector-erneuert-sein-zertifikat-ab-60--über-den-mtls-kanal-ehrliche-verbindungsmeldung) |
+| [F-027](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-027) | P1 | Falsche Credential-Auswahl im Bundle: ohne aktive Scopes alle Client- und Org-Credentials, ein Scope ohne credential_ids leert das Bundle | [WP-384](#wp-384--nachweis-real-stack-vorschlag-bestätigen-scope-und-bundle-mit-credentials-scan-mit-bundle-credential) (Teil: [WP-376](#wp-376--credential-bundle-nur-scope-relevante-credentials-scope-ohne-credentials-nutzt-client-org-credentials)) |
+| [F-028](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-028) | P1 | Credentials der Art 'wmi' erreichen das WMI-Plugin nie; SSH-Credentials gehen an WMI- und NAS-Ziele | [WP-378](#wp-378--collector-credentials-je-scope-und-je-art-keine-protokoll-aliasse) |
+| [F-029](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-029) | P1 | WMI Collect meldet Erfolg mit leeren Feldern bei 401, Transportfehler oder protokollkonformer WinRM-Antwort; der Scope-Lauf zeigt ok | [WP-415](#wp-415--wmi-fehler-und-401-mit-ursache-melden-enumeratepull-nach-dsp0226) |
+| [F-030](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-030) | P1 | Jedes gesweepte Gerät erhält ein (wiederkehrendes) falsches unclassified_device-Review, auch wenn SNMP, SSH oder Redfish es klassifiziert haben | [WP-417](#wp-417--unclassified_device-nur-für-wirklich-unklassifizierte-geräte-verworfenes-review-bleibt-verworfen) |
+| [F-031](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-031) | P1 | scope_suggested umgeht discovery:manage und ist über Client-Grenzen sichtbar und verwerfbar | [WP-382](#wp-382--scope_suggested-annehmen-und-verwerfen-nur-mit-discoverymanage-sichtbarkeit-je-client) |
+| [F-032](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-032) | P1 | Ausgelieferter Collector liefert keine LLDP-/CDP-/FDB-Nachbarn (TOP-01-Eingang fehlt in Produktion) | [WP-416](#wp-416--snmp-plugin-liefert-lldp--und-fdb-nachbarn) |
+| [F-033](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-033) | P1 | certbot certonly kann das Let's-Encrypt-Zertifikat nicht ablegen, weil der Bootstrap-Platzhalter letsencrypt/live/<domain>/ belegt | [WP-420](#wp-420--pebble-integrationstest-des-tls-domain-pfads-ausstellung-wiederholung-lesbarkeit-issuer-prüfung) (Teil: [WP-419](#wp-419--acme-ausstellung-ohne-lineage-konflikt-und-nginx-lesbares-schlüsselmaterial)) |
+| [F-034](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-034) | P1 | Von certbot ausgestellter Schlüssel und Kette sind für den unprivilegierten nginx-Nutzer (uid 101) des Frontends unlesbar | [WP-420](#wp-420--pebble-integrationstest-des-tls-domain-pfads-ausstellung-wiederholung-lesbarkeit-issuer-prüfung) (Teil: [WP-419](#wp-419--acme-ausstellung-ohne-lineage-konflikt-und-nginx-lesbares-schlüsselmaterial)) |
+| [F-035](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-035) | P1 | OIDC-Issuer-Prüfung läuft vor dem Start des Frontends (Issuer-Proxy), daher brechen Domain-/TLS-Installationen ab | [WP-420](#wp-420--pebble-integrationstest-des-tls-domain-pfads-ausstellung-wiederholung-lesbarkeit-issuer-prüfung) (Teil: [WP-385](#wp-385--installer-strikte-issuer-prüfung-erst-nach-dem-start-von-server-und-frontend)) |
+| [F-036](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-036) | P1 | K8s-Manifeste liefern das durch WP-097 verpflichtende RETICORA_OIDC_ISSUER_URL nicht; Server beendet sich in base, staging und prod beim Start | [WP-422](#wp-422--kubernetes-vollständige-pflichtkonfiguration-oidc-in-allen-overlays-veröffentlichte-release-images) |
+| [F-037](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-037) | P1 | CI-13-Reaktivierung über die Produktions-Decorator-Kette aus main.go liefert 501; gelöschtes, wiedergesehenes Gerät bleibt gelöscht (SR-11) | [WP-418](#wp-418--ci-reaktivierung-über-die-produktions-decorator-kette-sr-11-und-ki-indexer-hinter-dem-modul-gate) |
+| [F-038](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-038) | P1 | Gate-Checkliste führt CI-13 [B] als PASS trotz offenem und reproduziertem Defekt SR-11 | [WP-451](#wp-451--gate-checkliste-ehrlich-und-maschinell-geprüft-konsistenzprüfung---final-modus-ausnahmeliste-gate-010203) |
+| [F-039](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-039) | P1 | Kein Pentest-Bericht und keine Befundliste im Repository (Lieferung A-07 fehlt) | [WP-453](#wp-453--pentest-nachweis-g1-ablegen-lieferung-a-07) |
+| [F-040](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-040) | P1 | Review und Gate führen TEN-09-Isolation als vollständig und 'kein offenes Critical', obwohl ein Site-Scope-Bypass im Rack-Kanal reproduziert ist | [WP-452](#wp-452--sicherheitsreview-g1-korrigieren-sr-11-high-neue-befunde-sr-12sr-13-p0-befunde-des-audits-kanal--scope-dev-advisories) (Teil: [WP-451](#wp-451--gate-checkliste-ehrlich-und-maschinell-geprüft-konsistenzprüfung---final-modus-ausnahmeliste-gate-010203)) |
+| [F-041](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-041) | P1 | Einladungen versenden keine E-Mail: invitation.created (NTF-05 'Einladung') wird nie erzeugt | [WP-421](#wp-421--einladung-erzeugt-invitationcreated-mit-annahmelink-ntf-05) |
+| [F-042](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-042) | P1 | Manuelle verifizierte Port-Kanten werden bei Discovery-Interface-Entfernung per ON DELETE CASCADE still gelöscht | [WP-424](#wp-424--manuelle-port-kanten-überleben-den-interface-abgleich-rel-05-fehlerabbildung-der-interface-routen) |
+| [F-043](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-043) | P1 | EVT-02-Typen relationship.created, relationship.removed (API), collector.enrolled, review.resolved werden nie erzeugt | [WP-400](#wp-400--produzenten-für-relationshipcreatedremoved-collectorenrolled-und-reviewresolved-in-der-mutations-transaktion) |
+| [F-044](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-044) | P1 | Entitlement-Warnung/-Ablauf und Zertifikatsablauf: JOB-02-Läufe nicht eingeplant, Events entitlement.warning/expired und certificate.expiring nie erzeugt | [WP-425](#wp-425--job-02-läufe-entitlement-warnung-ablauf-und-zertifikatsablauf-mit-events) |
+| [F-045](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-045) | P1 | Werte mit Anführungszeichen oder Steuerzeichen (Zeilenumbruch, Tab) brechen jeden auditierten Write mit Wert-Snapshot (CI-Create/-Update/-Delete/-Restore, Metamodell) mit 400 ab: audit_entry_hash castet den JSON-Text nach bytea | [WP-423](#wp-423--audit_entry_hash-hasht-das-kanonische-json-als-utf-8-aud-04-abweichende-bestandsketten-neu-verkettet) |
+| [F-046](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-046) | P1 | Collector-Metrik-Uploads (Sweep, UPS, SNMP-Poll) werden ohne Credential gesendet, mit 401 abgewiesen und erreichen den Server nie | [WP-426](#wp-426--collector-metriken-über-den-mtls-edge-metrics-statt-unauthentisiertem-http) |
 
 ### Stand der Entscheidungen
 
-Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-59) bis [E-95](entscheidungen.md#e-95)). Alle tragen eine Empfehlung als Übergangsregel, sodass kein WP gesperrt ist; widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst. Die WP-Blöcke nennen die Entscheidung im Feld „Entscheidungsbedarf“.
+Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-59) bis [E-95](entscheidungen.md#e-95)). Alle tragen eine Empfehlung als Übergangsregel, sodass kein WP gesperrt ist; widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst. Die WP-Blöcke nennen die Entscheidung im Feld „Entscheidungsbedarf“. Ausnahme: WP-388 (`t5-install-default`) beginnt erst, wenn E-69 mit Option 1 entschieden ist; bei Option 2 oder 3 entfällt es mit Vermerk. Unabhängig von Entscheidungen warten WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-455 (`t5-v2-ids`) auf die externen Lieferungen A-02, A-07 und A-11.
 
 ### Alle Arbeitspakete
 
@@ -146,249 +146,249 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-355](#wp-355--service-account-rollen-nur-mit-rolemanage-und-innerhalb-der-eigenen-rechte) | `t2-sa-role-ceiling` | Service-Account-Rollen nur mit role:manage und innerhalb der eigenen Rechte | K1 | 1,0 | F-008 | WP-354 |
 | [WP-356](#wp-356--gebundene-webhook-subscriptions-erhalten-nur-ereignisse-lesbarer-objekte-scope-serverseitig-leserechte-wie-rls-fail-closed-bei-unbekanntem-scope) | `t2-webhook-bound-scope` | Gebundene Webhook-Subscriptions erhalten nur Ereignisse lesbarer Objekte: Scope serverseitig, Leserechte wie RLS, fail-closed bei unbekanntem Scope | K1 | 1,5 | F-009 | – |
 | [WP-357](#wp-357--mfa-pflicht-für-org_admin-signup--und-operator-konten-realm-gruppe-reticora-admin-e2e-login-helfer-mit-otp) | `t2-mfa-accounts` | MFA-Pflicht für org_admin: Signup- und Operator-Konten, Realm-Gruppe reticora-admin, E2E-Login-Helfer mit OTP | K1 | 1,5 | – | WP-338 |
-| [WP-358](#wp-358--mfa-pflicht-bei-jeder-org_admin-vergabe-rollenzuweisung-einladungsannahme-erstlogin-und-bestandsabgleich-setzen-mfa_required-in-keycloak) | `t2-mfa-role-sync` | MFA-Pflicht bei jeder org_admin-Vergabe: Rollenzuweisung, Einladungsannahme, Erstlogin und Bestandsabgleich setzen mfa_required in Keycloak | K1 | 2,0 | F-005 | WP-338, WP-357 |
+| [WP-358](#wp-358--mfa-pflicht-bei-jeder-org_admin-vergabe-rollenzuweisung-einladungsannahme-erstlogin-und-bestandsabgleich-setzen-mfa_required-in-keycloak) | `t2-mfa-role-sync` | MFA-Pflicht bei jeder org_admin-Vergabe: Rollenzuweisung, Einladungsannahme, Erstlogin und Bestandsabgleich setzen mfa_required in Keycloak | K1 | 2,0 | – | WP-338, WP-357 |
 | [WP-359](#wp-359--deaktivierung-und-anonymisierung-session-widerruf-erst-nach-org-gebundener-änderung-in-derselben-transaktion-service-account-keys-nach-entscheidung) | `t2-deactivation-tenant` | Deaktivierung und Anonymisierung: Session-Widerruf erst nach org-gebundener Änderung in derselben Transaktion; Service-Account-Keys nach Entscheidung | K1 | 1,5 | F-060 | – |
 | [WP-360](#wp-360--ki-ask-nur-mit-org-opt-in-und-ai-entitlement-air-gap--und-wiring-tests-versioniert) | `t2-ai-ask-consent` | KI-Ask nur mit Org-Opt-in und ai-Entitlement; Air-Gap- und Wiring-Tests versioniert | K1 | 1,0 | F-073 | – |
 | [WP-361](#wp-361--personalisierte-operator-anmeldung-realm-gruppe-operators-acrloa-für-mfa-real-stack-test-mit-otp) | `t2-operator-oidc` | Personalisierte Operator-Anmeldung: Realm-Gruppe operators, acr/LoA für MFA, Real-Stack-Test mit OTP | K1 | 2,0 | F-069 | WP-338, WP-357 |
 | [WP-362](#wp-362--break-glass-nutzung-alarmiert-prometheus-regel-promtool-test-und-shelltest-in-der-ci) | `t2-break-glass-alert` | Break-Glass-Nutzung alarmiert: Prometheus-Regel, promtool-Test und Shelltest in der CI | K1 | 0,5 | F-068 | – |
 | [WP-363](#wp-363--authz-nutzt-die-rba-01-schlüssel-citypemanage-und-notificationmanage-tote-schlüssel-bereinigt-guard-test-je-schlüssel) | `t2-rba01-keys` | Authz nutzt die RBA-01-Schlüssel citype:manage und notification:manage; tote Schlüssel bereinigt, Guard-Test je Schlüssel | K1 | 1,0 | F-067 | WP-355 |
-| [WP-364](#wp-364--validierungsstufe-aus-openapi-ableiten-cookie-only-refresh-und-bodylose-posts-erreichen-den-handler-test-der-maingo-kette) | `t2-refresh-chain` | Validierungsstufe aus OpenAPI ableiten: cookie-only Refresh und bodylose POSTs erreichen den Handler; Test der main.go-Kette | K1 | 1,5 | F-018 | WP-338 |
+| [WP-364](#wp-364--validierungsstufe-aus-openapi-ableiten-cookie-only-refresh-und-bodylose-posts-erreichen-den-handler-test-der-maingo-kette) | `t2-refresh-chain` | Validierungsstufe aus OpenAPI ableiten: cookie-only Refresh und bodylose POSTs erreichen den Handler; Test der main.go-Kette | K1 | 1,5 | – | WP-338 |
 | [WP-365](#wp-365--agent-keine-redirects-auf-klartext-agent-credential-über-die-echte-auth-kette-belegt-binary-aus-dem-repository-entfernt) | `t2-agent-redirect` | Agent: keine Redirects auf Klartext, Agent-Credential über die echte Auth-Kette belegt, Binary aus dem Repository entfernt | K1 | 1,0 | F-064 | WP-364 |
-| [WP-366](#wp-366--mfa-pflicht-im-login-pfad-org_admin-aus-idp-gruppe-oder-default-rolle-setzt-mfa_required-in-keycloak) | `t2-mfa-login-path` | MFA-Pflicht im Login-Pfad: org_admin aus IdP-Gruppe oder Default-Rolle setzt mfa_required in Keycloak | K1 | 1,0 | – | WP-358 |
-| [WP-367](#wp-367--bulk-statusänderung-als-manueller-schreibvorgang-override-version-ehrlicher-ergebnisbericht) | `t3-bulk-manual` | Bulk-Statusänderung als manueller Schreibvorgang: Override, Version, ehrlicher Ergebnisbericht | K1 | 1,0 | F-020 | – |
-| [WP-368](#wp-368--resurrected_device-neues-ci-client-identität-und-scope-übernehmen) | `t3-resurrect-new` | resurrected_device „neues CI“: Client, Identität und Scope übernehmen | K1 | 1,0 | F-022 | WP-342 |
-| [WP-369](#wp-369--parent_ci_id-nur-auf-sichtbare-cis-desselben-clients-oder-org-weite-cis) | `t3-parent-scope` | parent_ci_id nur auf sichtbare CIs desselben Clients oder org-weite CIs | K1 | 0,5 | F-086 | – |
-| [WP-370](#wp-370--vlan-bezüge-von-subnetz-und-interface-nur-auf-sichtbare-vlans-des-clients) | `t3-vlan-ref-scope` | VLAN-Bezüge von Subnetz und Interface nur auf sichtbare VLANs des Clients | K1 | 1,0 | F-088 | – |
-| [WP-371](#wp-371--vrf-schreibvorgänge-nur-für-org-weit-berechtigte-principals-restrictive-policies) | `t3-vrf-write-scope` | VRF-Schreibvorgänge nur für org-weit berechtigte Principals (RESTRICTIVE-Policies) | K1 | 1,0 | F-089 | WP-370 |
-| [WP-372](#wp-372--review-auflösung-resolved_by-und-audit-akteur-immer-der-principal) | `t3-review-actor` | Review-Auflösung: resolved_by und Audit-Akteur immer der Principal | K1 | 1,0 | F-091 | WP-342 |
-| [WP-373](#wp-373--nats-server-in-der-ci-edge-integrationstests-ohne-stilles-überspringen-cross-org-fall) | `t4-natsedge-ci` | nats-server in der CI: Edge-Integrationstests ohne stilles Überspringen, Cross-Org-Fall | K1 | 0,5 | – | – |
-| [WP-374](#wp-374--zertifikatserneuerung-nur-über-die-mtls-identität-des-collectors-http-erneuerung-entfernen) | `t4-pki-renew-server` | Zertifikatserneuerung nur über die mTLS-Identität des Collectors; HTTP-Erneuerung entfernen | K1 | 2,0 | F-012 | WP-373 |
-| [WP-375](#wp-375--credential-bundle-nur-scope-relevante-credentials-scope-ohne-credentials-nutzt-client-org-credentials) | `t4-bundle-select` | Credential-Bundle: nur Scope-relevante Credentials; Scope ohne Credentials nutzt Client-/Org-Credentials | K1 | 1,5 | F-027 | WP-373 |
-| [WP-376](#wp-376--collector-credentials-je-scope-und-je-art-keine-protokoll-aliasse) | `t4-cred-scope` | Collector: Credentials je Scope und je Art, keine Protokoll-Aliasse | K1 | 2,0 | F-013, F-028 | WP-375 |
-| [WP-377](#wp-377--wmi-zugangsdaten-nur-über-geprüftes-tls-winrm-5986-capin-je-netz) | `t4-wmi-tls` | WMI: Zugangsdaten nur über geprüftes TLS (WinRM 5986, CA/Pin je Netz) | K1 | 1,5 | F-010 | – |
-| [WP-378](#wp-378--nas-synology-anmeldung-per-post-über-geprüftes-tls-eigene-credential-art) | `t4-nas-tls` | NAS (Synology): Anmeldung per POST über geprüftes TLS, eigene Credential-Art | K1 | 2,0 | F-011 | WP-376, WP-377 |
-| [WP-379](#wp-379--deaktivierter-oder-unbekannter-collector-edge-daten-abweisen-patch-auf-fremden-collector-404) | `t4-collector-disable-data` | Deaktivierter oder unbekannter Collector: Edge-Daten abweisen; PATCH auf fremden Collector 404 | K1 | 1,0 | – | WP-342, WP-375 |
-| [WP-380](#wp-380--deaktivierter-collector-bestehende-edge-verbindung-binnen-sekunden-trennen) | `t4-collector-disable-kick` | Deaktivierter Collector: bestehende Edge-Verbindung binnen Sekunden trennen | K1 | 1,5 | F-025 | WP-338, WP-373, WP-379 |
-| [WP-381](#wp-381--scope_suggested-annehmen-und-verwerfen-nur-mit-discoverymanage-sichtbarkeit-je-client) | `t4-scope-suggested-authz` | scope_suggested: Annehmen und Verwerfen nur mit discovery:manage, Sichtbarkeit je Client | K1 | 1,0 | F-031 | WP-342, WP-379 |
-| [WP-382](#wp-382--scope-ziele-ohne-ipv6-zone-offline-detektor-kanten-cleanup-und-collector-status-fehlerisoliert-je-org) | `t4-scope-zone-isolation` | Scope-Ziele ohne IPv6-Zone; Offline-Detektor, Kanten-Cleanup und Collector-Status fehlerisoliert je Org | K1 | 1,5 | F-108 | – |
-| [WP-383](#wp-383--installer-strikte-issuer-prüfung-erst-nach-dem-start-von-server-und-frontend) | `t5-issuer-order` | Installer: strikte Issuer-Prüfung erst nach dem Start von Server und Frontend | K1 | 1,0 | F-035 | – |
-| [WP-384](#wp-384--installer-wiederholung-wendet-rotierte-keycloak-zugangsdaten-und-realm-einstellungen-an) | `t5-kc-rotation` | Installer-Wiederholung wendet rotierte Keycloak-Zugangsdaten und Realm-Einstellungen an | K1 | 2,0 | F-125 | WP-383 |
-| [WP-385](#wp-385--signaturprüfung-vor-der-installation-release-modus-collector-download-quellbezug-und-toolchain-tec-15) | `t5-install-signature` | Signaturprüfung vor der Installation: Release-Modus, Collector-Download, Quellbezug und Toolchain (TEC-15) | K1 | 2,0 | F-131 | WP-384 |
-| [WP-386](#wp-386--installer-standard-auf-signierte-release-artefakte-umstellen-quellbuild-nur-per-schalter) | `t5-install-default` | Installer-Standard auf signierte Release-Artefakte umstellen, Quellbuild nur per Schalter | K1 | 1,0 | – | WP-385 |
-| [WP-387](#wp-387--scan-abdeckung-aller-release-images-sla-prüfung-der-scan-ausnahmen-reproduzierbares-db-image) | `t5-image-scan` | Scan-Abdeckung aller Release-Images, SLA-Prüfung der Scan-Ausnahmen, reproduzierbares DB-Image | K1 | 1,5 | F-124 | – |
-| [WP-388](#wp-388--site-grant-auf-den-client-des-standorts-begrenzen-rba-03-ten-09-auch-für-service-accounts) | `t6-site-grant-scope` | Site-Grant auf den Client des Standorts begrenzen (RBA-03, TEN-09), auch für Service-Accounts | K1 | 2,0 | – | – |
-| [WP-389](#wp-389--team-scope-zuweisbar-role_assignment-mit-team-dimension-grantteams-befüllt) | `t1-team-scope` | Team-Scope zuweisbar: role_assignment mit Team-Dimension, Grant.Teams befüllt | K1 | 2,0 | F-049 | WP-342, WP-349, WP-388 |
-| [WP-390](#wp-390--site-scope-für-assets-und-mengenartikel-ten-02-und-real-stack-nachweis-der-hierarchie) | `t6-asset-site-scope` | Site-Scope für Assets und Mengenartikel (TEN-02) und Real-Stack-Nachweis der Hierarchie | K1 | 1,5 | F-141, F-014 | WP-338, WP-388 |
-| [WP-391](#wp-391--site_id-für-räume-und-racks-asset-site-in-der-suche-katalogregel-für-tabellen-mit-standortbezug) | `t1-located-site-scope` | site_id für Räume und Racks, Asset-Site in der Suche; Katalogregel für Tabellen mit Standortbezug | K1 | 1,5 | F-053 | WP-340, WP-345, WP-390 |
-| [WP-392](#wp-392--grant-obergrenze-für-einladungen-und-rollenzuweisungen-rollescope-abgleich) | `t6-invite-ceiling` | Grant-Obergrenze für Einladungen und Rollenzuweisungen; Rolle/Scope-Abgleich | K1 | 1,5 | F-015, F-305 | WP-354, WP-358, WP-389 |
-| [WP-393](#wp-393--rollenzuweisung-entziehen-delete-role-assignmentsid-für-standard--und-custom-rollen-mit-grant-obergrenze-audit-und-wirkung-beim-nächsten-refresh) | `t2-role-assignment-revoke` | Rollenzuweisung entziehen: DELETE /role-assignments/{id} für Standard- und Custom-Rollen mit Grant-Obergrenze, Audit und Wirkung beim nächsten Refresh | K1 | 1,5 | F-017 | WP-338, WP-354, WP-358, WP-389, WP-392 |
-| [WP-394](#wp-394--ci-typreferenz-nur-auf-system--oder-eigenen-org-typ-422-ci_type_id) | `t6-ci-type-ref` | CI-Typreferenz nur auf System- oder eigenen Org-Typ (422 ci_type_id) | K1 | 1,0 | F-144 | – |
-| [WP-395](#wp-395--ci-dialog-lädt-typen-aus-get-ci-types-und-erfasst-typattribute-ci-03-met-04) | `t6-ci-form-types` | CI-Dialog lädt Typen aus GET /ci-types und erfasst Typattribute (CI-03, MET-04) | K1 | 2,0 | F-016 | WP-338, WP-394 |
-| [WP-396](#wp-396--benachrichtigungs-administration-unter-notificationmanage-webhook-url-und-zustellinhalte-redigiert) | `t6-ntf-authz` | Benachrichtigungs-Administration unter notification:manage; Webhook-URL und Zustellinhalte redigiert | K1 | 1,0 | F-154 | – |
-| [WP-397](#wp-397--smtp-kanäle-secret-nicht-an-neues-ziel-egress-policy-für-mandanteneigenes-smtp-sec-08) | `t6-ntf-secrets` | SMTP-Kanäle: Secret nicht an neues Ziel, Egress-Policy für mandanteneigenes SMTP (SEC-08) | K1 | 1,5 | F-152, F-153 | WP-396 |
-| [WP-398](#wp-398--produzenten-für-relationshipcreatedremoved-collectorenrolled-und-reviewresolved-in-der-mutations-transaktion) | `t6-domain-events` | Produzenten für relationship.created/removed, collector.enrolled und review.resolved in der Mutations-Transaktion | K1 | 1,5 | F-043 | WP-372 |
-| [WP-399](#wp-399--post-relationships-mit-fremdem-oder-unbekanntem-ci--422-statt-500-doppelklick-im-beziehungsdialog) | `t6-rel-errors` | POST /relationships mit fremdem oder unbekanntem CI → 422 statt 500; Doppelklick im Beziehungsdialog | K1 | 1,5 | F-145 | WP-338, WP-398 |
-| [WP-400](#wp-400--ci-metriken-scope-nachweis-der-route-f-167-und-fehlerzustand-der-provenienz) | `t7-ci-metrics-scope` | CI-Metriken: Scope-Nachweis der Route (F-167) und Fehlerzustand der Provenienz | K1 | 0,8 | F-167 | WP-343, WP-344 |
-| [WP-401](#wp-401--topologie-mit-unbekannter-oder-fremder-root-404-statt-500-grenz--und-isolationstests) | `t7-topology-root` | Topologie mit unbekannter oder fremder Root: 404 statt 500; Grenz- und Isolationstests | K1 | 1,5 | F-161 | WP-338, WP-399 |
-| [WP-402](#wp-402--job-api-und-jobdaten-im-client-site-scope-des-erzeugers) | `t7-job-scope` | Job-API und Jobdaten im Client-/Site-Scope des Erzeugers | K1 | 2,0 | F-163 | WP-347, WP-367 |
-| [WP-403](#wp-403--filter-ast-abgesicherte-casts-wertvalidierung-je-feldart-kein-sql-fehlertext) | `t7-filter-ast-values` | Filter-AST: abgesicherte Casts, Wertvalidierung je Feldart, kein SQL-Fehlertext | K1 | 1,0 | F-165, F-179 | – |
-| [WP-404](#wp-404--fehlervertrag-api-03-ii-identität-rollen-racks-suche-sichten-monitoring) | `t1-err-ident-loc` | Fehlervertrag API-03 II: Identität, Rollen, Racks, Suche, Sichten, Monitoring | K1 | 1,5 | – | WP-340, WP-343, WP-344, WP-389, WP-392, WP-403 |
-| [WP-405](#wp-405--fehlervertrag-api-03-iii-asset--lager--und-modul-handler) | `t1-err-modules` | Fehlervertrag API-03 III: Asset-, Lager- und Modul-Handler | K1 | 2,0 | – | WP-339, WP-343, WP-404 |
-| [WP-406](#wp-406--architekturregel-gegen-rohe-repository-fehler-in-handlern-api-03) | `t1-err-guard` | Architekturregel gegen rohe Repository-Fehler in Handlern (API-03) | K1 | 1,5 | F-047 | WP-405 |
-| [WP-407](#wp-407--kanalmatrix-vollständig-tabellengetrieben-alle-kanäle--scopes-exakte-negativstatus) | `t1-channel-matrix` | Kanalmatrix vollständig: tabellengetrieben, alle Kanäle × Scopes, exakte Negativstatus | K1 | 2,0 | F-058 | WP-340, WP-342, WP-344, WP-347, WP-389, WP-391, WP-399, WP-401, WP-402, WP-405 |
-| [WP-408](#wp-408--ratelimits-credential-budget-vor-org-budget-session-bucket-über-refresh-hinweg-sid) | `t2-ratelimit-budgets` | Ratelimits: Credential-Budget vor Org-Budget, Session-Bucket über Refresh hinweg (sid) | K2 | 1,5 | F-019, F-076 | WP-364 |
-| [WP-409](#wp-409--standortlöschung-409-statt-kaskade-auf-allen-löschpfaden-netzobjekte-der-site-und-location_change-bleiben-erhalten) | `t3-loc-delete-409` | Standortlöschung: 409 statt Kaskade auf allen Löschpfaden; Netzobjekte der Site und location_change bleiben erhalten | K2 | 1,5 | F-023, F-024 | WP-338 |
-| [WP-410](#wp-410--override-setzenaufheben-erhöht-die-ci-version-clearoverride-bildet-fehler-korrekt-ab) | `t3-override-version` | Override setzen/aufheben erhöht die CI-Version; ClearOverride bildet Fehler korrekt ab | K2 | 1,5 | F-021 | WP-367 |
-| [WP-411](#wp-411--collector-erneuert-sein-zertifikat-ab-60--über-den-mtls-kanal-ehrliche-verbindungsmeldung) | `t4-pki-renew-collector` | Collector erneuert sein Zertifikat ab 60 % über den mTLS-Kanal; ehrliche Verbindungsmeldung | K2 | 1,5 | F-026 | WP-338, WP-373, WP-374, WP-380 |
-| [WP-412](#wp-412--wmi-fehler-und-401-mit-ursache-melden-enumeratepull-nach-dsp0226) | `t4-wmi-errors` | WMI: Fehler und 401 mit Ursache melden, Enumerate/Pull nach DSP0226 | K2 | 1,5 | F-029 | WP-376, WP-377 |
-| [WP-413](#wp-413--snmp-plugin-liefert-lldp--und-fdb-nachbarn) | `t4-snmp-neighbors` | SNMP-Plugin liefert LLDP- und FDB-Nachbarn | K2 | 1,5 | F-032 | – |
-| [WP-414](#wp-414--unclassified_device-nur-für-wirklich-unklassifizierte-geräte-verworfenes-review-bleibt-verworfen) | `t4-classify-review` | unclassified_device nur für wirklich unklassifizierte Geräte; verworfenes Review bleibt verworfen | K2 | 2,0 | F-030 | WP-342, WP-376, WP-379 |
-| [WP-415](#wp-415--ci-reaktivierung-über-die-produktions-decorator-kette-sr-11-und-ki-indexer-hinter-dem-modul-gate) | `t5-sr11-decorator` | CI-Reaktivierung über die Produktions-Decorator-Kette (SR-11) und KI-Indexer hinter dem Modul-Gate | K2 | 1,5 | F-037 | WP-346, WP-360 |
-| [WP-416](#wp-416--acme-ausstellung-ohne-lineage-konflikt-und-nginx-lesbares-schlüsselmaterial) | `t5-acme-lineage` | ACME-Ausstellung ohne Lineage-Konflikt und nginx-lesbares Schlüsselmaterial | K2 | 1,5 | F-033, F-034 | WP-383 |
-| [WP-417](#wp-417--einladung-erzeugt-invitationcreated-mit-annahmelink-ntf-05) | `t6-invite-event` | Einladung erzeugt invitation.created mit Annahmelink (NTF-05) | K2 | 2,0 | F-041 | WP-338, WP-392, WP-396 |
-| [WP-418](#wp-418--kubernetes-vollständige-pflichtkonfiguration-oidc-in-allen-overlays-veröffentlichte-release-images) | `t5-k8s-required-env` | Kubernetes: vollständige Pflichtkonfiguration (OIDC) in allen Overlays, veröffentlichte Release-Images | K2 | 1,5 | F-036 | WP-417 |
-| [WP-419](#wp-419--audit_entry_hash-hasht-das-kanonische-json-als-utf-8-aud-04-abweichende-bestandsketten-neu-verkettet) | `t6-audit-hash-utf8` | audit_entry_hash hasht das kanonische JSON als UTF-8 (AUD-04); abweichende Bestandsketten neu verkettet | K2 | 1,5 | F-045 | WP-338 |
-| [WP-420](#wp-420--manuelle-port-kanten-überleben-den-interface-abgleich-rel-05-fehlerabbildung-der-interface-routen) | `t6-manual-edge-keep` | Manuelle Port-Kanten überleben den Interface-Abgleich (REL-05); Fehlerabbildung der Interface-Routen | K2 | 1,5 | F-042 | – |
-| [WP-421](#wp-421--job-02-läufe-entitlement-warnung-ablauf-und-zertifikatsablauf-mit-events) | `t6-job02-notices` | JOB-02-Läufe Entitlement-Warnung/-Ablauf und Zertifikatsablauf mit Events | K2 | 2,0 | F-044 | – |
-| [WP-422](#wp-422--collector-metriken-über-den-mtls-edge-metrics-statt-unauthentisiertem-http) | `t7-metrics-edge` | Collector-Metriken über den mTLS-Edge (`.metrics`) statt unauthentisiertem HTTP | K2 | 2,0 | F-046 | WP-338, WP-379, WP-400 |
-| [WP-423](#wp-423--rollback-in-geteilten-clustern-000056-down-ohne-clusterweiten-drop-role-roundtrip-in-eigener-datenbank) | `t1-mig56-down` | Rollback in geteilten Clustern: 000056-Down ohne clusterweiten DROP ROLE; Roundtrip in eigener Datenbank | K3 | 1,0 | F-193 | – |
-| [WP-424](#wp-424--keycloak-realm-bei-upgrade-policies-mfa-gruppen-und-operator-einstellungen-idempotent-anwenden-installer-admin-gegen-echten-keycloak-24-rollenmodell-dokumentiert) | `t2-kc-upgrade` | Keycloak-Realm bei Upgrade: Policies, MFA-Gruppen und Operator-Einstellungen idempotent anwenden; Installer-Admin gegen echten Keycloak 24; Rollenmodell dokumentiert | K3 | 2,0 | F-061 | WP-338, WP-357, WP-361, WP-383 |
-| [WP-425](#wp-425--edge-pki-export-konsistent-bei-mehreren-repliken-schlüssel-nicht-weltlesbar) | `t4-edge-pki-export` | Edge-PKI-Export: konsistent bei mehreren Repliken, Schlüssel nicht weltlesbar | K3 | 1,0 | F-104 | WP-373 |
-| [WP-426](#wp-426--edge-pki-ca-roll-over-mit-zwei-trust-ankern-ohne-ausfall-und-ohne-neustart) | `t4-pki-rollover-export` | Edge-PKI: CA-Roll-over mit zwei Trust-Ankern ohne Ausfall und ohne Neustart | K3 | 1,5 | F-102 | WP-373, WP-374, WP-380, WP-411, WP-425 |
-| [WP-427](#wp-427--compose-nur-804434222-öffentlich-firewall-matrix-an-deployment-und-kanäle-angleichen) | `t4-compose-ports` | Compose: nur 80/443/4222 öffentlich; Firewall-Matrix an Deployment und Kanäle angleichen | K3 | 1,0 | F-103 | WP-338, WP-380, WP-411 |
-| [WP-428](#wp-428--collector-installation-einheitlicher-binary-name-und-identitätspfad-cosign-für-auto-updates) | `t4-col-install` | Collector-Installation: einheitlicher Binary-Name und Identitätspfad, cosign für Auto-Updates | K3 | 1,5 | F-110 | WP-338 |
-| [WP-429](#wp-429--sim-01-demo-nutzbar-demo-nutzer-im-dev-realm-standort-und-suchindex-der-seed-cis) | `t4-seed-demo` | SIM-01-Demo nutzbar: Demo-Nutzer im Dev-Realm, Standort und Suchindex der Seed-CIs | K3 | 1,5 | F-113 | WP-338 |
-| [WP-430](#wp-430--identitätssuche-mit-macs-indexbasiert-unter-rls-seitentabelle) | `t4-identity-mac-index` | Identitätssuche mit MACs indexbasiert unter RLS (Seitentabelle) | K3 | 2,0 | – | – |
-| [WP-431](#wp-431--indizierte-attributfilter-unter-rls-indexfähig) | `t4-attr-filter-index` | Indizierte Attributfilter unter RLS indexfähig | K3 | 1,5 | F-114 | WP-430 |
-| [WP-432](#wp-432--explain-prüfung-nach-abn-02-auf-produkt-sql-mit-indexnamen-deterministisch) | `t4-explain-budget` | EXPLAIN-Prüfung nach ABN-02 auf Produkt-SQL mit Indexnamen, deterministisch | K3 | 1,0 | F-115 | WP-430, WP-431 |
-| [WP-433](#wp-433--lastszenarien-globale-suche-attributfilter-beziehungssuche-wiederentdeckung-integritätsprüfung-nach-dem-lauf) | `t4-load-scenarios` | Lastszenarien: globale Suche, Attributfilter, Beziehungssuche, Wiederentdeckung; Integritätsprüfung nach dem Lauf | K3 | 2,0 | F-116, F-118 | WP-429, WP-430 |
-| [WP-434](#wp-434--get-cis-unter-mischlast-ursache-belegen-p95--500-ms-für-liste-und-suche) | `t4-cilist-perf` | GET /cis unter Mischlast: Ursache belegen, p95 < 500 ms für Liste und Suche | K3 | 2,0 | F-117 | WP-431, WP-433 |
-| [WP-435](#wp-435--lastbericht-drei-archivierte-läufe-1000-recordss-und-nfr-01-volumina-folge-wps-mit-kennung) | `t4-load-report` | Lastbericht: drei archivierte Läufe, 1.000 Records/s und NFR-01-Volumina, Folge-WPs mit Kennung | K3 | 1,5 | F-279 | WP-432, WP-433, WP-434 |
-| [WP-436](#wp-436--pebble-integrationstest-des-tls-domain-pfads-ausstellung-wiederholung-lesbarkeit-issuer-prüfung) | `t5-acme-pebble` | Pebble-Integrationstest des TLS-Domain-Pfads (Ausstellung, Wiederholung, Lesbarkeit, Issuer-Prüfung) | K3 | 1,5 | – | WP-416 |
-| [WP-437](#wp-437--erneuerte-zertifikate-ohne-frontend-neustart-ausliefern-health-prüfung-aller-replikate) | `t5-acme-renewal` | Erneuerte Zertifikate ohne Frontend-Neustart ausliefern; Health-Prüfung aller Replikate | K3 | 1,5 | F-139 | WP-436 |
-| [WP-438](#wp-438--kubernetes-smoke-in-kind-pod-ready-mit-master-key-negativfälle) | `t5-k8s-kind-smoke` | Kubernetes-Smoke in kind: Pod Ready mit Master-Key, Negativfälle | K3 | 1,5 | – | WP-418 |
-| [WP-439](#wp-439--readiness-smtp-prüfung-und-normalisierte-objektspeicher-adresse) | `t5-readiness` | Readiness: SMTP-Prüfung und normalisierte Objektspeicher-Adresse | K3 | 1,0 | F-126, F-127 | WP-415 |
-| [WP-440](#wp-440--backup-bucket-replikation-in-terraform-erzwungen-versionierung-zur-laufzeit-geprüft-scheduler-validiert) | `t5-backup-enforce` | Backup-Bucket: Replikation in Terraform erzwungen, Versionierung zur Laufzeit geprüft, Scheduler validiert | K3 | 2,0 | F-129 | WP-387 |
-| [WP-441](#wp-441--kubernetes-wal-archivierung-der-datenbankseite-mit-pgbackrest) | `t5-k8s-wal` | Kubernetes: WAL-Archivierung der Datenbankseite mit pgBackRest | K3 | 2,0 | F-128 | WP-438, WP-440 |
-| [WP-442](#wp-442--restore-nachweis-diskriminierende-rpo-prüfung-und-messwerte-aus-dem-standardlauf) | `t5-restore-rpo` | Restore-Nachweis: diskriminierende RPO-Prüfung und Messwerte aus dem Standardlauf | K3 | 1,0 | F-130 | – |
-| [WP-443](#wp-443--ladbare-alertmanager-konfiguration-promtool-regeltests-nosuccess-für-nie-erfolgreiche-worker) | `t5-alerting-config` | Ladbare Alertmanager-Konfiguration, promtool-Regeltests, NoSuccess für nie erfolgreiche Worker | K3 | 1,0 | F-132 | – |
-| [WP-444](#wp-444--metrikvertrag-für-alle-registrierten-worker-offline-detector-unter-der-schalterkonvention) | `t5-worker-metrics` | Metrikvertrag für alle registrierten Worker; Offline-Detector unter der Schalterkonvention | K3 | 2,0 | F-133 | WP-418, WP-421, WP-439, WP-443 |
-| [WP-445](#wp-445--betriebsalarme-über-ntf-kanäle-alertmanager-webhook-brücke) | `t5-ntf-bridge` | Betriebsalarme über NTF-Kanäle: Alertmanager-Webhook-Brücke | K3 | 2,0 | F-134 | WP-444 |
-| [WP-446](#wp-446--ausfallsuite-smtp-szenario-und-lastbasierter-nachweis-kein-stiller-datenverlust) | `t5-outage-smtp-load` | Ausfallsuite: SMTP-Szenario und lastbasierter Nachweis 'kein stiller Datenverlust' | K3 | 2,0 | F-135, F-136 | WP-439 |
-| [WP-447](#wp-447--traceability-nur-testdateien-als-nachweis-ausnahmeliste-statt-selbstverweisen) | `t5-trace-evidence` | Traceability: nur Testdateien als Nachweis, Ausnahmeliste statt Selbstverweisen | K3 | 1,5 | F-121 | – |
-| [WP-448](#wp-448--gate-checkliste-ehrlich-und-maschinell-geprüft-konsistenzprüfung---final-modus-ausnahmeliste-gate-010203) | `t5-gate-consistency` | Gate-Checkliste ehrlich und maschinell geprüft: Konsistenzprüfung, --final-Modus, Ausnahmeliste (GATE-01/02/03) | K3 | 2,0 | F-038, F-120 | WP-447 |
-| [WP-449](#wp-449--sicherheitsreview-g1-korrigieren-sr-11-high-neue-befunde-sr-12sr-13-p0-befunde-des-audits-kanal--scope-dev-advisories) | `t5-review-g1` | Sicherheitsreview G1 korrigieren: SR-11 High, neue Befunde SR-12/SR-13, P0-Befunde des Audits, Kanal × Scope, Dev-Advisories | K3 | 1,0 | F-119, F-040 | WP-415, WP-448 |
-| [WP-450](#wp-450--pentest-nachweis-g1-ablegen-lieferung-a-07) | `t5-pentest-evidence` | Pentest-Nachweis G1 ablegen (Lieferung A-07) | K3 | 0,5 | F-039 | WP-447, WP-448 |
-| [WP-451](#wp-451--subprozessorenliste-ablegen-lieferung-a-11-nfr-09) | `t5-subprocessors` | Subprozessorenliste ablegen (Lieferung A-11, NFR-09) | K3 | 0,5 | F-137 | WP-447, WP-448 |
-| [WP-452](#wp-452--v2-texte-zu-aut-05-aut-06-net-04-übernehmen-und-abgleichen-lieferung-a-02) | `t5-v2-ids` | v2-Texte zu AUT-05, AUT-06, NET-04 übernehmen und abgleichen (Lieferung A-02) | K3 | 1,0 | – | WP-447, WP-448 |
-| [WP-453](#wp-453--abn-01-de-impact-inhaltlich-prüfen-konfliktprotokoll-auf-eine-eingefrorene-real-stack-spec-stützen) | `t5-abn01-de` | ABN-01 (d)/(e): Impact inhaltlich prüfen, Konfliktprotokoll auf eine eingefrorene Real-Stack-Spec stützen | K3 | 1,0 | F-298, F-299 | WP-338, WP-448 |
-| [WP-454](#wp-454--abn-01-ab-v2-szenariotexte-einfrieren-und-schritt-für-schritt-protokollieren-lieferung-a-02) | `t5-abn01-ab` | ABN-01 (a)/(b): v2-Szenariotexte einfrieren und Schritt für Schritt protokollieren (Lieferung A-02) | K3 | 2,0 | F-138 | WP-447, WP-453 |
-| [WP-455](#wp-455--log-aufbewahrung-30-tage-in-den-auslieferungen-nfr-06) | `t6-log-retention` | Log-Aufbewahrung 30 Tage in den Auslieferungen (NFR-06) | K3 | 1,5 | F-150 | – |
-| [WP-456](#wp-456--abgeleitete-secrets-unabhängig-vom-master-key-rotation-ohne-nats-edge-neustart-sec-06) | `t6-rotation-derived` | Abgeleitete Secrets unabhängig vom Master-Key: Rotation ohne nats-edge-Neustart (SEC-06) | K3 | 2,0 | F-158 | – |
-| [WP-457](#wp-457--strukturierte-suche-mit-leserecht-post-searchquery-auf-searchread) | `t1-structured-search-read` | Strukturierte Suche mit Leserecht: POST /search/query auf search:read | K4 | 1,0 | F-055 | WP-338 |
-| [WP-458](#wp-458--iga-genehmigung-und-provisioning-task-atomar-keine-verschluckten-schreibfehler) | `t1-iga-approve-atomic` | IGA: Genehmigung und Provisioning-Task atomar; keine verschluckten Schreibfehler | K4 | 1,0 | F-056 | WP-405 |
-| [WP-459](#wp-459--spa-session-single-flight-refresh-refresh-beim-start-statt-login-redirect-429-ohne-abmeldung) | `t2-spa-session` | SPA-Session: Single-Flight-Refresh, Refresh beim Start statt Login-Redirect, 429 ohne Abmeldung | K4 | 1,5 | F-065, F-066 | WP-338, WP-364 |
-| [WP-460](#wp-460--pre-auth-limit-erfolgreiche-refreshes-zählen-nicht-atomare-zulassung-header-auch-auf-401429-vor-dem-limiter) | `t2-preauth-budget` | Pre-Auth-Limit: erfolgreiche Refreshes zählen nicht, atomare Zulassung, Header auch auf 401/429 vor dem Limiter | K4 | 1,0 | F-063 | WP-408 |
-| [WP-461](#wp-461--org-ki-opt-in-über-patch-org-setzbar-nur-org-weit-berechtigt-auditiert) | `t2-ai-optin-api` | Org-KI-Opt-in über PATCH /org setzbar, nur org-weit berechtigt, auditiert | K4 | 1,0 | F-074 | WP-360 |
-| [WP-462](#wp-462--ent-07-dashboard-banner-für-ablaufwarnungen-1471-tage-und-real-stack-nachweis) | `t2-ent-expiry-warning` | ENT-07: Dashboard-Banner für Ablaufwarnungen 14/7/1 Tage und Real-Stack-Nachweis | K4 | 1,0 | F-071 | WP-338, WP-421 |
-| [WP-463](#wp-463--webhook-seite-zeigt-ablehnungen-egress-validierung-403-und-bietet-aktionen-nur-mit-webhookmanage-an) | `t2-webhook-ui-errors` | Webhook-Seite zeigt Ablehnungen (Egress, Validierung, 403) und bietet Aktionen nur mit webhook:manage an | K4 | 1,0 | F-062 | WP-338 |
-| [WP-464](#wp-464--cursor-pagination-der-b-listen-credentials-permissions-rollen--und-team-unterlisten-data-nie-null-pg-keyset-test) | `t2-pagination-core` | Cursor-Pagination der [B]-Listen credentials, permissions, Rollen- und Team-Unterlisten; data nie null; PG-Keyset-Test | K4 | 1,5 | F-214 | WP-393 |
-| [WP-465](#wp-465--cursor-pagination-der-modul-listen-monitoring-documentslinks-und-aiconversations-vertrag-ohne-nackte-arrays) | `t2-pagination-modules` | Cursor-Pagination der Modul-Listen monitoring, documents/links und ai/conversations; Vertrag ohne nackte Arrays | K4 | 1,0 | F-075 | WP-360, WP-464 |
-| [WP-466](#wp-466--ci-listen-export-über-exports-job-statt-deprecated-link-exportcis) | `t2-ci-export` | CI-Listen-Export über /exports-Job statt deprecated Link /export/cis | K4 | 1,0 | F-077 | WP-338 |
-| [WP-467](#wp-467--audit-viewer-liest-die-felder-des-api-vertrags-timestamp-resource_type-resource_id) | `t2-audit-viewer` | Audit-Viewer liest die Felder des API-Vertrags (timestamp, resource_type, resource_id) | K4 | 0,5 | F-078 | WP-338 |
-| [WP-468](#wp-468--fehlende-planfeatures-bei-organisationen-mit-teilzeilen-nachprovisionieren) | `t2-ent-provisioning` | Fehlende Planfeatures bei Organisationen mit Teilzeilen nachprovisionieren | K4 | 0,5 | F-210 | – |
-| [WP-469](#wp-469--entitlement-gates-rack_view-api_access-und-notifications_email-in-rest-graphql-und-zustellung) | `t2-ent-gates` | Entitlement-Gates rack_view, api_access und notifications_email in REST, GraphQL und Zustellung | K4 | 1,5 | F-070 | WP-468 |
-| [WP-470](#wp-470--quoten-max_users-max_api_keys-und-max_collectors-in-allen-rest-schreibpfaden-einschließlich-enrollment-und-erstlogin-benachrichtigung-bei-unlicensed_ci-belegt) | `t2-ent-quotas` | Quoten max_users, max_api_keys und max_collectors in allen REST-Schreibpfaden einschließlich Enrollment und Erstlogin; Benachrichtigung bei unlicensed_ci belegt | K4 | 1,5 | F-072 | WP-354, WP-358, WP-398, WP-469 |
-| [WP-471](#wp-471--einheitliche-historie-location_change-vereint-standorthistorie-über-den-typ-location) | `t3-history-location` | Einheitliche Historie: location_change vereint; Standorthistorie über den Typ location | K4 | 1,0 | F-093 | WP-409 |
-| [WP-472](#wp-472--standortbaum-ui-umbenennen-und-verschieben-löschbestätigung-409-mit-abhängigkeitsarten) | `t3-loc-tree-ui` | Standortbaum-UI: Umbenennen und Verschieben, Löschbestätigung, 409 mit Abhängigkeitsarten | K4 | 2,0 | F-079 | WP-338, WP-409 |
-| [WP-473](#wp-473--ci-historie-für-alle-leserollen-änderungen-mit-objekt-leserecht-audit-einträge-mit-auditread) | `t3-history-access` | CI-Historie für alle Leserollen: Änderungen mit Objekt-Leserecht, Audit-Einträge mit audit:read | K4 | 1,5 | F-094 | WP-338, WP-471, WP-472 |
-| [WP-474](#wp-474--ci-detail-nach-override-setzenaufheben-aktuell-override-gegen-offenen-editor-im-real-stack) | `t3-override-clear-ui` | CI-Detail nach Override setzen/aufheben aktuell; Override gegen offenen Editor im Real-Stack | K4 | 1,0 | F-100 | WP-338, WP-410 |
-| [WP-475](#wp-475--patch-cisid-null-löscht-typisierte-felder-rfc-7396-interne-fehler-nicht-als-404) | `t3-ci-mergepatch-null` | PATCH /cis/{id}: null löscht typisierte Felder (RFC 7396); interne Fehler nicht als 404 | K4 | 1,5 | F-080 | WP-338, WP-369, WP-410 |
-| [WP-476](#wp-476--ci-bearbeitung-im-ui-nur-geänderte-felder-leeren-speichert-null-if-match-auch-für-instanzattribute) | `t3-ci-edit-ui` | CI-Bearbeitung im UI: nur geänderte Felder, Leeren speichert null, If-Match auch für Instanzattribute | K4 | 1,5 | F-081, F-082 | WP-338, WP-395, WP-475 |
-| [WP-477](#wp-477--override-endpunkt-weist-reservierte-namensräume-ab-source-policy-aus-der-rangtabelle) | `t3-override-reserved` | Override-Endpunkt weist reservierte Namensräume ab; source-policy aus der Rangtabelle | K4 | 1,5 | F-092 | WP-372, WP-410 |
-| [WP-478](#wp-478--review-auflösung-merge-bei-probable_duplicate-über-den-ci-12-merge) | `t3-review-merge` | Review-Auflösung merge bei probable_duplicate über den CI-12-Merge | K4 | 1,0 | F-096 | WP-368 |
-| [WP-479](#wp-479--cihealth-in-g1-eigener-health-worker-unabhängig-vom-modul-alerting) | `t3-health-worker` | ci.health in G1: eigener Health-Worker unabhängig vom Modul alerting | K4 | 1,0 | F-087 | WP-444 |
-| [WP-480](#wp-480--ingest-fehler-je-record-isolieren-queue-und-http) | `t3-ingest-poison` | Ingest: Fehler je Record isolieren (Queue und HTTP) | K4 | 1,5 | F-090 | WP-338 |
-| [WP-481](#wp-481--spool-verlustzähler-restart-fest-atomares-schreiben-quarantäne-korrupter-einträge) | `t3-spool-durable` | Spool: Verlustzähler restart-fest, atomares Schreiben, Quarantäne korrupter Einträge | K4 | 1,0 | F-084 | – |
-| [WP-482](#wp-482--collector-zustellung-poison-batches-quarantänisieren-jeden-verlust-zählen-server-macht-verluste-sichtbar) | `t3-spool-poison` | Collector-Zustellung: Poison-Batches quarantänisieren, jeden Verlust zählen, Server macht Verluste sichtbar | K4 | 2,0 | F-085 | WP-480, WP-481 |
-| [WP-483](#wp-483--agent-telemetrie-folgt-dem-merge-endpoint_agent-umhängen-merged_into-folgen-transiente-fehler-zurückgeben) | `t3-agent-merge` | Agent-Telemetrie folgt dem Merge: endpoint_agent umhängen, merged_into folgen, transiente Fehler zurückgeben | K4 | 1,0 | F-083 | WP-475 |
-| [WP-484](#wp-484--unmerge-409-bei-späteren-survivor-änderungen-force-zur-bewussten-wiederherstellung) | `t3-unmerge-conflict` | Unmerge: 409 bei späteren Survivor-Änderungen, force zur bewussten Wiederherstellung | K4 | 1,0 | F-097 | WP-369, WP-483 |
-| [WP-485](#wp-485--asset-verknüpfung-ohne-standortverlust-committeter-http-422-nachweis-der-asset-eigenen-felder) | `t3-asset-link-location` | Asset-Verknüpfung ohne Standortverlust; committeter HTTP-422-Nachweis der asset-eigenen Felder | K4 | 1,0 | F-239 | WP-475 |
-| [WP-486](#wp-486--aud-03-ci_change-mit-change_kind-korrelation-und-änderungsgruppen-im-schreibpfad-vokabular-type_changed) | `t3-aud03-schema` | AUD-03: ci_change mit change_kind, Korrelation und Änderungsgruppen im Schreibpfad; Vokabular type_changed | K4 | 1,5 | – | WP-473, WP-475, WP-485 |
-| [WP-487](#wp-487--aud-03-lesesicht-historie-je-änderungsgruppe-mit-field_changes-und-filter-change_kind) | `t3-aud03-history` | AUD-03-Lesesicht: Historie je Änderungsgruppe mit field_changes und Filter change_kind | K4 | 1,0 | – | WP-338, WP-473, WP-486 |
-| [WP-488](#wp-488--aud-03-im-ingest-eine-änderung-und-ein-event-je-record-reklassifizierung-in-derselben-transaktion) | `t3-aud03-ingest` | AUD-03 im Ingest: eine Änderung und ein Event je Record; Reklassifizierung in derselben Transaktion | K4 | 1,5 | F-095 | WP-480, WP-486 |
-| [WP-489](#wp-489--blast-radius-kennzeichnet-heuristik-treffer-dependencies-folgt-impact_direction-depth-wird-validiert) | `t3-impact-heuristic` | Blast Radius kennzeichnet Heuristik-Treffer; /dependencies folgt impact_direction; depth wird validiert | K4 | 1,5 | F-099 | – |
-| [WP-490](#wp-490--impact-im-ui-heuristik-marker-im-blast-radius-ausfallsimulation-nach-impact_direction) | `t3-impact-ui` | Impact im UI: Heuristik-Marker im Blast Radius; Ausfallsimulation nach impact_direction | K4 | 1,0 | F-098, F-254 | WP-338, WP-473, WP-489 |
-| [WP-491](#wp-491--snmpv3-usmstats-reports-als-auth_failed-melden) | `t4-snmpv3-auth` | SNMPv3: usmStats-Reports als auth_failed melden | K4 | 1,0 | F-105 | WP-412, WP-413 |
-| [WP-492](#wp-492--collector-bootstrap-über-reticora_enroll_token-und-reticora_cloud_url) | `t4-col-env-enroll` | Collector-Bootstrap über RETICORA_ENROLL_TOKEN und RETICORA_CLOUD_URL | K4 | 1,0 | F-101 | WP-411 |
-| [WP-493](#wp-493--scope-expansion-vollständig-oder-gemeldet-sweep-ressourcen-begrenzt-keine-container-netze-als-vorschlag) | `t4-scope-expansion` | Scope-Expansion vollständig oder gemeldet; Sweep-Ressourcen begrenzt; keine Container-Netze als Vorschlag | K4 | 1,5 | F-106 | WP-376, WP-414 |
-| [WP-494](#wp-494--scope-zeitpläne-überstehen-start-und-neustart-cron-in-der-zeitzone-der-org) | `t4-scope-schedule` | Scope-Zeitpläne überstehen Start und Neustart; Cron in der Zeitzone der Org | K4 | 1,5 | F-109 | WP-375, WP-412, WP-493 |
-| [WP-495](#wp-495--scope-formular-mit-name-site-vrf-plugins-und-credentials-fehlerrückmeldung-löschbestätigung-discovery-metriken-dokumentiert) | `t4-scope-form-ui` | Scope-Formular mit Name, Site, VRF, Plugins und Credentials; Fehlerrückmeldung, Löschbestätigung, Discovery-Metriken dokumentiert | K4 | 1,5 | F-107, F-267 | WP-338, WP-375, WP-494 |
-| [WP-496](#wp-496--kanten-cleanup-frist-für-cron-scopes-aus-dem-tatsächlichen-laufabstand) | `t4-cleanup-cron` | Kanten-Cleanup: Frist für Cron-Scopes aus dem tatsächlichen Laufabstand | K4 | 1,0 | F-111 | WP-382 |
-| [WP-497](#wp-497--versorgungskette-redundanzkennung-unabhängig-von-batch-und-lane-hersteller-tabellen-fail-closed-belegt) | `t4-power-redundancy` | Versorgungskette: Redundanzkennung unabhängig von Batch und Lane, Hersteller-Tabellen, fail-closed belegt | K4 | 2,0 | F-112 | WP-338 |
-| [WP-498](#wp-498--lint-altlast-sichtbar-und-gedeckelt-toolchain-vertragstest-strikte-skip-prüfung-im-db-job) | `t5-lint-baseline` | Lint-Altlast sichtbar und gedeckelt, Toolchain-Vertragstest, strikte Skip-Prüfung im DB-Job | K4 | 1,5 | F-123 | WP-373 |
-| [WP-499](#wp-499--409-mit-feldbezug-für-standort-duplikate-und-rackhöhe-unter-belegten-he) | `t6-location-conflicts` | 409 mit Feldbezug für Standort-Duplikate und Rackhöhe unter belegten HE | K4 | 1,5 | F-140, F-302 | WP-338 |
-| [WP-500](#wp-500--discovery-validiert-typisierte-ci-spalten-wie-manuelle-writes-ungültige-werte-verwerfen-statt-batch-abbrechen) | `t6-ci-ingest-typed` | Discovery validiert typisierte CI-Spalten wie manuelle Writes; ungültige Werte verwerfen statt Batch abbrechen | K4 | 1,5 | F-143 | – |
-| [WP-501](#wp-501--discovery-jobs-im-generischen-jobmodell-adapter-verdrahten-status-spiegeln) | `t6-discovery-job-tracking` | Discovery-Jobs im generischen Jobmodell (Adapter verdrahten, Status spiegeln) | K4 | 1,0 | F-146 | WP-398 |
-| [WP-502](#wp-502--bulk--und-snapshot-jobs-über-die-nats-work-queue-timeout-reaper) | `t6-jobqueue-kinds` | Bulk- und Snapshot-Jobs über die NATS-Work-Queue; Timeout-Reaper | K4 | 2,0 | F-147 | WP-421, WP-444 |
-| [WP-503](#wp-503--route-audit-lückenlos-audit-intent-vor-der-mutation-nachtrag-per-scheduler) | `t6-route-audit-gapless` | Route-Audit lückenlos: Audit-Intent vor der Mutation, Nachtrag per Scheduler | K4 | 2,0 | F-149 | WP-421 |
-| [WP-504](#wp-504--route-audit-speichert-alt--und-neuwerte-aud-07-personenbezogene-werte-als-surrogat) | `t6-route-audit-values` | Route-Audit speichert Alt- und Neuwerte (AUD-07), personenbezogene Werte als Surrogat | K4 | 1,5 | F-148 | WP-419, WP-503 |
-| [WP-505](#wp-505--webhook-consumer-at-least-once-fehler-propagieren-idempotente-zustellung-je-event-und-abo) | `t6-webhook-consumer` | Webhook-Consumer at-least-once: Fehler propagieren, idempotente Zustellung je Event und Abo | K4 | 1,5 | F-151 | – |
-| [WP-506](#wp-506--client-kontakte-als-empfängerquelle-ntf-03-und-site-scope-nachweis) | `t6-ntf-client-contacts` | Client-Kontakte als Empfängerquelle (NTF-03) und Site-Scope-Nachweis | K4 | 1,0 | F-155 | WP-388 |
-| [WP-507](#wp-507--ntf-04-digest-nicht-kritische-kategorien-gebündelt-zustellen) | `t6-ntf-digest` | NTF-04-Digest: nicht kritische Kategorien gebündelt zustellen | K4 | 2,0 | F-156 | WP-397, WP-421 |
-| [WP-508](#wp-508--standardkanäle-für-neue-und-bestehende-organisationen-in-app-zentrales-smtp) | `t6-ntf-default-channel` | Standardkanäle für neue und bestehende Organisationen (In-App, zentrales SMTP) | K4 | 1,0 | F-157 | WP-338 |
-| [WP-509](#wp-509--einladungen-in-der-nutzerverwaltung-und-öffentliche-annahmeseite) | `t6-invite-ui` | Einladungen in der Nutzerverwaltung und öffentliche Annahmeseite | K4 | 2,0 | F-142 | WP-338, WP-417 |
-| [WP-510](#wp-510--ci-typ-admin-fehler-beim-setzen-von-searchableunique-sichtbar-flags-bestehender-attribute-änderbar) | `t6-attr-flags-ui` | CI-Typ-Admin: Fehler beim Setzen von searchable/unique sichtbar, Flags bestehender Attribute änderbar | K4 | 1,5 | F-159, F-325 | WP-338 |
-| [WP-511](#wp-511--pdu-messwerte-und-interface-zähler-aller-schnittstellen) | `t7-power-metrics` | PDU-Messwerte und Interface-Zähler aller Schnittstellen | K4 | 1,5 | F-168 | WP-422, WP-497 |
-| [WP-512](#wp-512--redundanz-postfilter-versorger-jenseits-der-analysetiefe-berücksichtigen) | `t7-impact-redundancy` | Redundanz-Postfilter: Versorger jenseits der Analysetiefe berücksichtigen | K4 | 1,5 | F-160 | WP-489 |
-| [WP-513](#wp-513--job-cancel-stoppt-laufende-arbeit-cibulk-snapshot-im-queue--und-in-process-pfad-oder-wird-mit-409-abgelehnt) | `t7-job-cancel` | Job-Cancel stoppt laufende Arbeit (ci.bulk, Snapshot) im Queue- und In-Process-Pfad oder wird mit 409 abgelehnt | K4 | 1,5 | – | WP-402, WP-502 |
-| [WP-514](#wp-514--export-abbruch-über-die-job-api-ergebnis-des-gespiegelten-exportjobs) | `t7-export-cancel` | Export-Abbruch über die Job-API, Ergebnis des gespiegelten Exportjobs | K4 | 1,0 | F-162 | WP-513 |
-| [WP-515](#wp-515--state-snapshot-replayt-die-reale-änderungsspur-404-für-unbekannte-entitäten) | `t7-snapshot-replay` | State-Snapshot replayt die reale Änderungsspur; 404 für unbekannte Entitäten | K4 | 1,5 | F-164 | WP-486, WP-502 |
-| [WP-516](#wp-516--bulk-id-validierung-im-bericht-api-grenz--und-isolationstests) | `t7-bulk-validation` | Bulk: ID-Validierung im Bericht, API-Grenz- und Isolationstests | K4 | 0,8 | F-327 | WP-338, WP-367, WP-513 |
-| [WP-517](#wp-517--gespeicherte-sichten-teil-patch-erhält-die-freigabe-bearbeitungsrechte-rollenprüfung) | `t7-saved-views-api` | Gespeicherte Sichten: Teil-PATCH erhält die Freigabe, Bearbeitungsrechte, Rollenprüfung | K4 | 1,5 | F-166, F-335, F-337 | WP-403, WP-457 |
-| [WP-518](#wp-518--tastaturbedienung-tabellenmuster-für-die-ci-liste-fokusrückgabe-der-palette-tests-je-baustein) | `t7-ui-keyboard` | Tastaturbedienung: Tabellenmuster für die CI-Liste, Fokusrückgabe der Palette, Tests je Baustein | K4 | 1,5 | F-170, F-171 | – |
-| [WP-519](#wp-519--bulk-aus-der-ci-liste-über-25-zeilen-jobbericht-in-der-ui-real-stack-nachweise) | `t7-bulk-ui` | Bulk aus der CI-Liste über 25 Zeilen, Jobbericht in der UI, Real-Stack-Nachweise | K4 | 1,5 | F-328 | WP-338, WP-367, WP-514, WP-516, WP-518 |
-| [WP-520](#wp-520--jobcenter-und-benachrichtigungen-cancel-nur-wo-möglich-ergebnis-nur-wo-vorhanden-fehlerzustände) | `t7-jobcenter-ui` | Jobcenter und Benachrichtigungen: Cancel nur wo möglich, Ergebnis nur wo vorhanden, Fehlerzustände | K4 | 1,5 | F-347, F-348 | WP-338, WP-513, WP-514, WP-519 |
-| [WP-521](#wp-521--wcag-aa-kontrast-und-axe-prüfung-aller-routen-mit-daten-hell-und-dunkel) | `t7-a11y-contrast` | WCAG-AA-Kontrast und axe-Prüfung aller Routen mit Daten, hell und dunkel | K4 | 1,5 | F-172 | – |
-| [WP-522](#wp-522--lokalisierte-typbezeichnung-im-ci-detail-übersetzte-formularmeldungen-real-stack-sprachwechsel) | `t7-i18n-labels` | Lokalisierte Typbezeichnung im CI-Detail, übersetzte Formularmeldungen, Real-Stack-Sprachwechsel | K4 | 1,5 | F-175 | WP-338, WP-395 |
-| [WP-523](#wp-523--ci-detail-berücksichtigt-den-gewählten-scope-hinweis-gescopte-beziehungen) | `t7-ui-scope-detail` | CI-Detail berücksichtigt den gewählten Scope (Hinweis, gescopte Beziehungen) | K4 | 1,5 | F-169 | WP-338, WP-522 |
-| [WP-524](#wp-524--statuswerte-über-den-katalog-teil-1-inventar--ticket--auftrags--und-raumplanseiten-source-scan) | `t7-i18n-status-a` | Statuswerte über den Katalog (Teil 1): Inventar-, Ticket-, Auftrags- und Raumplanseiten, Source-Scan | K4 | 1,5 | – | WP-521 |
-| [WP-525](#wp-525--raumplan-bereichs--und-ci-prüfung-der-koordinaten-tastaturverschiebung-ohne-verlorene-schritte-if-match) | `t7-room-layout` | Raumplan: Bereichs- und CI-Prüfung der Koordinaten, Tastaturverschiebung ohne verlorene Schritte, If-Match | K4 | 2,0 | F-341, F-342 | WP-338, WP-524 |
-| [WP-526](#wp-526--statuswerte-über-den-katalog-teil-2-übrige-seiten-und-lint-regel-für-srcpages) | `t7-i18n-status-b` | Statuswerte über den Katalog (Teil 2): übrige Seiten und Lint-Regel für src/pages/** | K4 | 1,5 | F-174 | WP-522, WP-524 |
-| [WP-527](#wp-527--review-neu-anlegen-für-unclassified_device-typ-auflösen-oder-abfragen-klare-422) | `t7-review-new` | Review „Neu anlegen“ für unclassified_device: Typ auflösen oder abfragen, klare 422 | K4 | 2,0 | F-176 | WP-342, WP-368 |
-| [WP-528](#wp-528--onboarding-suite-scope-bestätigung-als-pflichtschritt-jobdatei-download-signup-einstieg) | `t7-onboarding-suite` | Onboarding-Suite: Scope-Bestätigung als Pflichtschritt, Jobdatei-Download, Signup-Einstieg | K4 | 2,0 | F-177, F-353, F-351 | WP-338, WP-466 |
-| [WP-529](#wp-529--e2e-mock-backend-strikt-und-gegen-die-openapi-validiert) | `t7-e2e-strict-mocks` | E2E-Mock-Backend strikt und gegen die OpenAPI validiert | K4 | 2,0 | F-178 | WP-395, WP-466, WP-518 |
-| [WP-530](#wp-530--browsermatrix-evidenz-aller-sechs-projekte-in-ci-und-vorversions-job) | `t7-browser-matrix` | Browsermatrix: Evidenz aller sechs Projekte in CI und Vorversions-Job | K4 | 1,5 | F-173 | WP-518, WP-521, WP-522, WP-525, WP-526, WP-529 |
-| [WP-531](#wp-531--real-stack-e2e-in-allen-browserprojekten) | `k-e2e-real-browsers` | Real-Stack-E2E in allen Browserprojekten | K5 | 1,0 | – | WP-338 |
-| [WP-532](#wp-532--nachweis-ableitung-der-ci-kindtabellen-discovery_result-relationship_suppression-rack_mount-backfill-000061) | `t1-ev-child-derivation` | Nachweis Ableitung der CI-Kindtabellen: discovery_result, relationship_suppression, rack_mount; Backfill 000061 | K5 | 1,0 | – | – |
-| [WP-533](#wp-533--nachweis-opensearch-scope-gegen-einen-echten-opensearch-dienst-in-ci) | `t1-ev-opensearch-real` | Nachweis OpenSearch-Scope gegen einen echten OpenSearch-Dienst in CI | K5 | 1,0 | – | WP-346, WP-349 |
-| [WP-534](#wp-534--real-stack-nachweis-mit-client-gescoptem-nutzer-login-listen-beziehungsformular-export) | `t1-ev-client-real-stack` | Real-Stack-Nachweis mit client-gescoptem Nutzer: Login, Listen, Beziehungsformular, Export | K5 | 1,5 | – | WP-338, WP-340, WP-347, WP-399 |
-| [WP-535](#wp-535--isolationsnachweise-cmdb-kern-und-identität-callback-history-credentials-api-keys-collector-saved-view-audit) | `t1-ev-core-isolation` | Isolationsnachweise CMDB-Kern und Identität: Callback, History, Credentials, API-Keys, Collector, Saved View, Audit | K5 | 1,5 | – | WP-343 |
-| [WP-536](#wp-536--isolationsnachweise-asset-und-lager-fremd-updates-für-zuweisung-komposition-bestellung-verbrauch-bestand-inventur) | `t1-ev-asset-isolation` | Isolationsnachweise Asset und Lager: Fremd-Updates für Zuweisung, Komposition, Bestellung, Verbrauch, Bestand, Inventur | K5 | 1,0 | – | – |
-| [WP-537](#wp-537--isolationsnachweise-module-fehlerpfade-deskschlüsselschulungdokument-wartungsbenachrichtigung-ai-schreibseite) | `t1-ev-module-isolation` | Isolationsnachweise Module: Fehlerpfade Desk/Schlüssel/Schulung/Dokument, Wartungsbenachrichtigung, AI-Schreibseite | K5 | 1,5 | – | WP-340, WP-341 |
-| [WP-538](#wp-538--nachweis-collector-lauf-gegen-tls-redfish-mit-scope-capin-und-protokollgetrennten-credentials) | `t2-redfish-tls-evidence` | Nachweis: Collector-Lauf gegen TLS-Redfish mit Scope-CA/Pin und protokollgetrennten Credentials | K5 | 0,5 | – | – |
-| [WP-539](#wp-539--wartungsbenachrichtigung-idempotent-ui-ordnet-cis-zu-und-zeigt-den-gespeicherten-status) | `t3-maint-notify` | Wartungsbenachrichtigung idempotent; UI ordnet CIs zu und zeigt den gespeicherten Status | K5 | 1,5 | F-235, F-236 | – |
-| [WP-540](#wp-540--real-stack-nachweis-wartungsankündigung-ui--api--db-mit-status-pending) | `t3-maint-e2e` | Real-Stack-Nachweis Wartungsankündigung: UI → API → DB mit Status pending | K5 | 1,0 | – | WP-338, WP-539 |
-| [WP-541](#wp-541--nachweis-real-stack-vorschlag-bestätigen-scope-und-bundle-mit-credentials-scan-mit-bundle-credential) | `t4-e2e-onboarding-bundle` | Nachweis Real-Stack: Vorschlag bestätigen, Scope und Bundle mit Credentials, Scan mit Bundle-Credential | K5 | 2,0 | – | WP-338, WP-376, WP-381 |
-| [WP-542](#wp-542--nachweis-dis-08-fehlerzustand-aus-realem-lauf-in-der-ui-metrics-exposition) | `t4-dis08-nachweis` | Nachweis DIS-08: Fehlerzustand aus realem Lauf in der UI, /metrics-Exposition | K5 | 1,5 | – | WP-338, WP-491, WP-495, WP-541 |
+| [WP-366](#wp-366--spa-session-single-flight-refresh-refresh-beim-start-statt-login-redirect-429-ohne-abmeldung) | `t2-spa-session` | SPA-Session: Single-Flight-Refresh, Refresh beim Start statt Login-Redirect, 429 ohne Abmeldung | K1 | 1,5 | F-065, F-066, F-018 | WP-338, WP-364 |
+| [WP-367](#wp-367--mfa-pflicht-im-login-pfad-org_admin-aus-idp-gruppe-oder-default-rolle-setzt-mfa_required-in-keycloak) | `t2-mfa-login-path` | MFA-Pflicht im Login-Pfad: org_admin aus IdP-Gruppe oder Default-Rolle setzt mfa_required in Keycloak | K1 | 1,0 | F-005 | WP-358 |
+| [WP-368](#wp-368--bulk-statusänderung-als-manueller-schreibvorgang-override-version-ehrlicher-ergebnisbericht) | `t3-bulk-manual` | Bulk-Statusänderung als manueller Schreibvorgang: Override, Version, ehrlicher Ergebnisbericht | K1 | 1,0 | F-020 | – |
+| [WP-369](#wp-369--resurrected_device-neues-ci-client-identität-und-scope-übernehmen) | `t3-resurrect-new` | resurrected_device „neues CI“: Client, Identität und Scope übernehmen | K1 | 1,0 | F-022 | WP-342 |
+| [WP-370](#wp-370--parent_ci_id-nur-auf-sichtbare-cis-desselben-clients-oder-org-weite-cis) | `t3-parent-scope` | parent_ci_id nur auf sichtbare CIs desselben Clients oder org-weite CIs | K1 | 0,5 | F-086 | – |
+| [WP-371](#wp-371--vlan-bezüge-von-subnetz-und-interface-nur-auf-sichtbare-vlans-des-clients) | `t3-vlan-ref-scope` | VLAN-Bezüge von Subnetz und Interface nur auf sichtbare VLANs des Clients | K1 | 1,0 | F-088 | – |
+| [WP-372](#wp-372--vrf-schreibvorgänge-nur-für-org-weit-berechtigte-principals-restrictive-policies) | `t3-vrf-write-scope` | VRF-Schreibvorgänge nur für org-weit berechtigte Principals (RESTRICTIVE-Policies) | K1 | 1,0 | F-089 | WP-371 |
+| [WP-373](#wp-373--review-auflösung-resolved_by-und-audit-akteur-immer-der-principal) | `t3-review-actor` | Review-Auflösung: resolved_by und Audit-Akteur immer der Principal | K1 | 1,0 | F-091 | WP-342 |
+| [WP-374](#wp-374--nats-server-in-der-ci-edge-integrationstests-ohne-stilles-überspringen-cross-org-fall) | `t4-natsedge-ci` | nats-server in der CI: Edge-Integrationstests ohne stilles Überspringen, Cross-Org-Fall | K1 | 0,5 | – | – |
+| [WP-375](#wp-375--zertifikatserneuerung-nur-über-die-mtls-identität-des-collectors-http-erneuerung-entfernen) | `t4-pki-renew-server` | Zertifikatserneuerung nur über die mTLS-Identität des Collectors; HTTP-Erneuerung entfernen | K1 | 2,0 | F-012 | WP-374 |
+| [WP-376](#wp-376--credential-bundle-nur-scope-relevante-credentials-scope-ohne-credentials-nutzt-client-org-credentials) | `t4-bundle-select` | Credential-Bundle: nur Scope-relevante Credentials; Scope ohne Credentials nutzt Client-/Org-Credentials | K1 | 1,5 | – | WP-374 |
+| [WP-377](#wp-377--wmi-zugangsdaten-nur-über-geprüftes-tls-winrm-5986-capin-je-netz) | `t4-wmi-tls` | WMI: Zugangsdaten nur über geprüftes TLS (WinRM 5986, CA/Pin je Netz) | K1 | 1,5 | – | – |
+| [WP-378](#wp-378--collector-credentials-je-scope-und-je-art-keine-protokoll-aliasse) | `t4-cred-scope` | Collector: Credentials je Scope und je Art, keine Protokoll-Aliasse | K1 | 2,0 | F-013, F-028, F-010 | WP-376, WP-377 |
+| [WP-379](#wp-379--nas-synology-anmeldung-per-post-über-geprüftes-tls-eigene-credential-art) | `t4-nas-tls` | NAS (Synology): Anmeldung per POST über geprüftes TLS, eigene Credential-Art | K1 | 2,0 | F-011 | WP-377, WP-378 |
+| [WP-380](#wp-380--deaktivierter-oder-unbekannter-collector-edge-daten-abweisen-patch-auf-fremden-collector-404) | `t4-collector-disable-data` | Deaktivierter oder unbekannter Collector: Edge-Daten abweisen; PATCH auf fremden Collector 404 | K1 | 1,0 | – | WP-342, WP-376 |
+| [WP-381](#wp-381--deaktivierter-collector-bestehende-edge-verbindung-binnen-sekunden-trennen) | `t4-collector-disable-kick` | Deaktivierter Collector: bestehende Edge-Verbindung binnen Sekunden trennen | K1 | 1,5 | F-025 | WP-338, WP-374, WP-380 |
+| [WP-382](#wp-382--scope_suggested-annehmen-und-verwerfen-nur-mit-discoverymanage-sichtbarkeit-je-client) | `t4-scope-suggested-authz` | scope_suggested: Annehmen und Verwerfen nur mit discovery:manage, Sichtbarkeit je Client | K1 | 1,0 | F-031 | WP-342, WP-380 |
+| [WP-383](#wp-383--scope-ziele-ohne-ipv6-zone-offline-detektor-kanten-cleanup-und-collector-status-fehlerisoliert-je-org) | `t4-scope-zone-isolation` | Scope-Ziele ohne IPv6-Zone; Offline-Detektor, Kanten-Cleanup und Collector-Status fehlerisoliert je Org | K1 | 1,5 | F-108 | – |
+| [WP-384](#wp-384--nachweis-real-stack-vorschlag-bestätigen-scope-und-bundle-mit-credentials-scan-mit-bundle-credential) | `t4-e2e-onboarding-bundle` | Nachweis Real-Stack: Vorschlag bestätigen, Scope und Bundle mit Credentials, Scan mit Bundle-Credential | K1 | 2,0 | F-027 | WP-338, WP-378, WP-382 |
+| [WP-385](#wp-385--installer-strikte-issuer-prüfung-erst-nach-dem-start-von-server-und-frontend) | `t5-issuer-order` | Installer: strikte Issuer-Prüfung erst nach dem Start von Server und Frontend | K1 | 1,0 | – | – |
+| [WP-386](#wp-386--installer-wiederholung-wendet-rotierte-keycloak-zugangsdaten-und-realm-einstellungen-an) | `t5-kc-rotation` | Installer-Wiederholung wendet rotierte Keycloak-Zugangsdaten und Realm-Einstellungen an | K1 | 2,0 | F-125 | WP-385 |
+| [WP-387](#wp-387--signaturprüfung-vor-der-installation-release-modus-collector-download-quellbezug-und-toolchain-tec-15) | `t5-install-signature` | Signaturprüfung vor der Installation: Release-Modus, Collector-Download, Quellbezug und Toolchain (TEC-15) | K1 | 2,0 | F-131 | WP-386 |
+| [WP-388](#wp-388--installer-standard-auf-signierte-release-artefakte-umstellen-quellbuild-nur-per-schalter) | `t5-install-default` | Installer-Standard auf signierte Release-Artefakte umstellen, Quellbuild nur per Schalter | K1 | 1,0 | – | WP-387 |
+| [WP-389](#wp-389--scan-abdeckung-aller-release-images-sla-prüfung-der-scan-ausnahmen-reproduzierbares-db-image) | `t5-image-scan` | Scan-Abdeckung aller Release-Images, SLA-Prüfung der Scan-Ausnahmen, reproduzierbares DB-Image | K1 | 1,5 | F-124 | – |
+| [WP-390](#wp-390--site-grant-auf-den-client-des-standorts-begrenzen-rba-03-ten-09-auch-für-service-accounts) | `t6-site-grant-scope` | Site-Grant auf den Client des Standorts begrenzen (RBA-03, TEN-09), auch für Service-Accounts | K1 | 2,0 | – | – |
+| [WP-391](#wp-391--team-scope-zuweisbar-role_assignment-mit-team-dimension-grantteams-befüllt) | `t1-team-scope` | Team-Scope zuweisbar: role_assignment mit Team-Dimension, Grant.Teams befüllt | K1 | 2,0 | F-049 | WP-342, WP-349, WP-390 |
+| [WP-392](#wp-392--site-scope-für-assets-und-mengenartikel-ten-02-und-real-stack-nachweis-der-hierarchie) | `t6-asset-site-scope` | Site-Scope für Assets und Mengenartikel (TEN-02) und Real-Stack-Nachweis der Hierarchie | K1 | 1,5 | F-141, F-014 | WP-338, WP-390 |
+| [WP-393](#wp-393--site_id-für-räume-und-racks-asset-site-in-der-suche-katalogregel-für-tabellen-mit-standortbezug) | `t1-located-site-scope` | site_id für Räume und Racks, Asset-Site in der Suche; Katalogregel für Tabellen mit Standortbezug | K1 | 1,5 | F-053 | WP-340, WP-345, WP-392 |
+| [WP-394](#wp-394--grant-obergrenze-für-einladungen-und-rollenzuweisungen-rollescope-abgleich) | `t6-invite-ceiling` | Grant-Obergrenze für Einladungen und Rollenzuweisungen; Rolle/Scope-Abgleich | K1 | 1,5 | F-015, F-305 | WP-354, WP-358, WP-391 |
+| [WP-395](#wp-395--rollenzuweisung-entziehen-delete-role-assignmentsid-für-standard--und-custom-rollen-mit-grant-obergrenze-audit-und-wirkung-beim-nächsten-refresh) | `t2-role-assignment-revoke` | Rollenzuweisung entziehen: DELETE /role-assignments/{id} für Standard- und Custom-Rollen mit Grant-Obergrenze, Audit und Wirkung beim nächsten Refresh | K1 | 1,5 | F-017 | WP-338, WP-354, WP-358, WP-391, WP-394 |
+| [WP-396](#wp-396--ci-typreferenz-nur-auf-system--oder-eigenen-org-typ-422-ci_type_id) | `t6-ci-type-ref` | CI-Typreferenz nur auf System- oder eigenen Org-Typ (422 ci_type_id) | K1 | 1,0 | F-144 | – |
+| [WP-397](#wp-397--ci-dialog-lädt-typen-aus-get-ci-types-und-erfasst-typattribute-ci-03-met-04) | `t6-ci-form-types` | CI-Dialog lädt Typen aus GET /ci-types und erfasst Typattribute (CI-03, MET-04) | K1 | 2,0 | F-016 | WP-338, WP-396 |
+| [WP-398](#wp-398--benachrichtigungs-administration-unter-notificationmanage-webhook-url-und-zustellinhalte-redigiert) | `t6-ntf-authz` | Benachrichtigungs-Administration unter notification:manage; Webhook-URL und Zustellinhalte redigiert | K1 | 1,0 | F-154 | – |
+| [WP-399](#wp-399--smtp-kanäle-secret-nicht-an-neues-ziel-egress-policy-für-mandanteneigenes-smtp-sec-08) | `t6-ntf-secrets` | SMTP-Kanäle: Secret nicht an neues Ziel, Egress-Policy für mandanteneigenes SMTP (SEC-08) | K1 | 1,5 | F-152, F-153 | WP-398 |
+| [WP-400](#wp-400--produzenten-für-relationshipcreatedremoved-collectorenrolled-und-reviewresolved-in-der-mutations-transaktion) | `t6-domain-events` | Produzenten für relationship.created/removed, collector.enrolled und review.resolved in der Mutations-Transaktion | K1 | 1,5 | F-043 | WP-373 |
+| [WP-401](#wp-401--post-relationships-mit-fremdem-oder-unbekanntem-ci--422-statt-500-doppelklick-im-beziehungsdialog) | `t6-rel-errors` | POST /relationships mit fremdem oder unbekanntem CI → 422 statt 500; Doppelklick im Beziehungsdialog | K1 | 1,5 | F-145 | WP-338, WP-400 |
+| [WP-402](#wp-402--ci-metriken-scope-nachweis-der-route-f-167-und-fehlerzustand-der-provenienz) | `t7-ci-metrics-scope` | CI-Metriken: Scope-Nachweis der Route (F-167) und Fehlerzustand der Provenienz | K1 | 1,0 | F-167 | WP-343, WP-344 |
+| [WP-403](#wp-403--topologie-mit-unbekannter-oder-fremder-root-404-statt-500-grenz--und-isolationstests) | `t7-topology-root` | Topologie mit unbekannter oder fremder Root: 404 statt 500; Grenz- und Isolationstests | K1 | 1,5 | F-161 | WP-338, WP-401 |
+| [WP-404](#wp-404--job-api-und-jobdaten-im-client-site-scope-des-erzeugers) | `t7-job-scope` | Job-API und Jobdaten im Client-/Site-Scope des Erzeugers | K1 | 2,0 | F-163 | WP-347, WP-368 |
+| [WP-405](#wp-405--filter-ast-abgesicherte-casts-wertvalidierung-je-feldart-kein-sql-fehlertext) | `t7-filter-ast-values` | Filter-AST: abgesicherte Casts, Wertvalidierung je Feldart, kein SQL-Fehlertext | K1 | 1,0 | F-165, F-179 | – |
+| [WP-406](#wp-406--fehlervertrag-api-03-ii-identität-rollen-racks-suche-sichten-monitoring) | `t1-err-ident-loc` | Fehlervertrag API-03 II: Identität, Rollen, Racks, Suche, Sichten, Monitoring | K1 | 1,5 | – | WP-340, WP-343, WP-344, WP-391, WP-394, WP-405 |
+| [WP-407](#wp-407--fehlervertrag-api-03-iii-asset--lager--und-modul-handler) | `t1-err-modules` | Fehlervertrag API-03 III: Asset-, Lager- und Modul-Handler | K1 | 2,0 | – | WP-339, WP-343, WP-406 |
+| [WP-408](#wp-408--architekturregel-gegen-rohe-repository-fehler-in-handlern-api-03) | `t1-err-guard` | Architekturregel gegen rohe Repository-Fehler in Handlern (API-03) | K1 | 1,5 | F-047 | WP-407 |
+| [WP-409](#wp-409--kanalmatrix-vollständig-tabellengetrieben-alle-kanäle--scopes-exakte-negativstatus) | `t1-channel-matrix` | Kanalmatrix vollständig: tabellengetrieben, alle Kanäle × Scopes, exakte Negativstatus | K1 | 2,0 | F-058 | WP-340, WP-342, WP-344, WP-347, WP-391, WP-393, WP-401, WP-403, WP-404, WP-407 |
+| [WP-410](#wp-410--ratelimits-credential-budget-vor-org-budget-session-bucket-über-refresh-hinweg-sid) | `t2-ratelimit-budgets` | Ratelimits: Credential-Budget vor Org-Budget, Session-Bucket über Refresh hinweg (sid) | K2 | 1,5 | F-019, F-076 | WP-364 |
+| [WP-411](#wp-411--standortlöschung-409-statt-kaskade-auf-allen-löschpfaden-netzobjekte-der-site-und-location_change-bleiben-erhalten) | `t3-loc-delete-409` | Standortlöschung: 409 statt Kaskade auf allen Löschpfaden; Netzobjekte der Site und location_change bleiben erhalten | K2 | 1,5 | F-023, F-024 | WP-338 |
+| [WP-412](#wp-412--override-setzenaufheben-erhöht-die-ci-version-clearoverride-bildet-fehler-korrekt-ab) | `t3-override-version` | Override setzen/aufheben erhöht die CI-Version; ClearOverride bildet Fehler korrekt ab | K2 | 1,5 | – | WP-368 |
+| [WP-413](#wp-413--ci-detail-nach-override-setzenaufheben-aktuell-override-gegen-offenen-editor-im-real-stack) | `t3-override-clear-ui` | CI-Detail nach Override setzen/aufheben aktuell; Override gegen offenen Editor im Real-Stack | K2 | 1,0 | F-100, F-021 | WP-338, WP-412 |
+| [WP-414](#wp-414--collector-erneuert-sein-zertifikat-ab-60--über-den-mtls-kanal-ehrliche-verbindungsmeldung) | `t4-pki-renew-collector` | Collector erneuert sein Zertifikat ab 60 % über den mTLS-Kanal; ehrliche Verbindungsmeldung | K2 | 1,5 | F-026 | WP-338, WP-374, WP-375, WP-381 |
+| [WP-415](#wp-415--wmi-fehler-und-401-mit-ursache-melden-enumeratepull-nach-dsp0226) | `t4-wmi-errors` | WMI: Fehler und 401 mit Ursache melden, Enumerate/Pull nach DSP0226 | K2 | 1,5 | F-029 | WP-377, WP-378 |
+| [WP-416](#wp-416--snmp-plugin-liefert-lldp--und-fdb-nachbarn) | `t4-snmp-neighbors` | SNMP-Plugin liefert LLDP- und FDB-Nachbarn | K2 | 1,5 | F-032 | – |
+| [WP-417](#wp-417--unclassified_device-nur-für-wirklich-unklassifizierte-geräte-verworfenes-review-bleibt-verworfen) | `t4-classify-review` | unclassified_device nur für wirklich unklassifizierte Geräte; verworfenes Review bleibt verworfen | K2 | 2,0 | F-030 | WP-342, WP-378, WP-380 |
+| [WP-418](#wp-418--ci-reaktivierung-über-die-produktions-decorator-kette-sr-11-und-ki-indexer-hinter-dem-modul-gate) | `t5-sr11-decorator` | CI-Reaktivierung über die Produktions-Decorator-Kette (SR-11) und KI-Indexer hinter dem Modul-Gate | K2 | 1,5 | F-037 | WP-346, WP-360 |
+| [WP-419](#wp-419--acme-ausstellung-ohne-lineage-konflikt-und-nginx-lesbares-schlüsselmaterial) | `t5-acme-lineage` | ACME-Ausstellung ohne Lineage-Konflikt und nginx-lesbares Schlüsselmaterial | K2 | 1,5 | – | WP-385 |
+| [WP-420](#wp-420--pebble-integrationstest-des-tls-domain-pfads-ausstellung-wiederholung-lesbarkeit-issuer-prüfung) | `t5-acme-pebble` | Pebble-Integrationstest des TLS-Domain-Pfads (Ausstellung, Wiederholung, Lesbarkeit, Issuer-Prüfung) | K2 | 1,5 | F-033, F-034, F-035 | WP-419 |
+| [WP-421](#wp-421--einladung-erzeugt-invitationcreated-mit-annahmelink-ntf-05) | `t6-invite-event` | Einladung erzeugt invitation.created mit Annahmelink (NTF-05) | K2 | 2,0 | F-041 | WP-338, WP-394, WP-398 |
+| [WP-422](#wp-422--kubernetes-vollständige-pflichtkonfiguration-oidc-in-allen-overlays-veröffentlichte-release-images) | `t5-k8s-required-env` | Kubernetes: vollständige Pflichtkonfiguration (OIDC) in allen Overlays, veröffentlichte Release-Images | K2 | 1,5 | F-036 | WP-421 |
+| [WP-423](#wp-423--audit_entry_hash-hasht-das-kanonische-json-als-utf-8-aud-04-abweichende-bestandsketten-neu-verkettet) | `t6-audit-hash-utf8` | audit_entry_hash hasht das kanonische JSON als UTF-8 (AUD-04); abweichende Bestandsketten neu verkettet | K2 | 1,5 | F-045 | WP-338 |
+| [WP-424](#wp-424--manuelle-port-kanten-überleben-den-interface-abgleich-rel-05-fehlerabbildung-der-interface-routen) | `t6-manual-edge-keep` | Manuelle Port-Kanten überleben den Interface-Abgleich (REL-05); Fehlerabbildung der Interface-Routen | K2 | 1,5 | F-042 | – |
+| [WP-425](#wp-425--job-02-läufe-entitlement-warnung-ablauf-und-zertifikatsablauf-mit-events) | `t6-job02-notices` | JOB-02-Läufe Entitlement-Warnung/-Ablauf und Zertifikatsablauf mit Events | K2 | 2,0 | F-044 | – |
+| [WP-426](#wp-426--collector-metriken-über-den-mtls-edge-metrics-statt-unauthentisiertem-http) | `t7-metrics-edge` | Collector-Metriken über den mTLS-Edge (`.metrics`) statt unauthentisiertem HTTP | K2 | 2,0 | F-046 | WP-338, WP-380, WP-402 |
+| [WP-427](#wp-427--rollback-in-geteilten-clustern-000056-down-ohne-clusterweiten-drop-role-roundtrip-in-eigener-datenbank) | `t1-mig56-down` | Rollback in geteilten Clustern: 000056-Down ohne clusterweiten DROP ROLE; Roundtrip in eigener Datenbank | K3 | 1,0 | F-193 | – |
+| [WP-428](#wp-428--keycloak-realm-bei-upgrade-policies-mfa-gruppen-und-operator-einstellungen-idempotent-anwenden-installer-admin-gegen-echten-keycloak-24-rollenmodell-dokumentiert) | `t2-kc-upgrade` | Keycloak-Realm bei Upgrade: Policies, MFA-Gruppen und Operator-Einstellungen idempotent anwenden; Installer-Admin gegen echten Keycloak 24; Rollenmodell dokumentiert | K3 | 2,0 | F-061 | WP-338, WP-357, WP-361, WP-385 |
+| [WP-429](#wp-429--edge-pki-export-konsistent-bei-mehreren-repliken-schlüssel-nicht-weltlesbar) | `t4-edge-pki-export` | Edge-PKI-Export: konsistent bei mehreren Repliken, Schlüssel nicht weltlesbar | K3 | 1,0 | F-104 | WP-374 |
+| [WP-430](#wp-430--edge-pki-ca-roll-over-mit-zwei-trust-ankern-ohne-ausfall-und-ohne-neustart) | `t4-pki-rollover-export` | Edge-PKI: CA-Roll-over mit zwei Trust-Ankern ohne Ausfall und ohne Neustart | K3 | 1,5 | F-102 | WP-374, WP-375, WP-381, WP-414, WP-429 |
+| [WP-431](#wp-431--compose-nur-804434222-öffentlich-firewall-matrix-an-deployment-und-kanäle-angleichen) | `t4-compose-ports` | Compose: nur 80/443/4222 öffentlich; Firewall-Matrix an Deployment und Kanäle angleichen | K3 | 1,0 | F-103 | WP-338, WP-381, WP-414 |
+| [WP-432](#wp-432--collector-installation-einheitlicher-binary-name-und-identitätspfad-cosign-für-auto-updates) | `t4-col-install` | Collector-Installation: einheitlicher Binary-Name und Identitätspfad, cosign für Auto-Updates | K3 | 1,5 | F-110 | WP-338 |
+| [WP-433](#wp-433--sim-01-demo-nutzbar-demo-nutzer-im-dev-realm-standort-und-suchindex-der-seed-cis) | `t4-seed-demo` | SIM-01-Demo nutzbar: Demo-Nutzer im Dev-Realm, Standort und Suchindex der Seed-CIs | K3 | 1,5 | F-113 | WP-338 |
+| [WP-434](#wp-434--identitätssuche-mit-macs-indexbasiert-unter-rls-seitentabelle) | `t4-identity-mac-index` | Identitätssuche mit MACs indexbasiert unter RLS (Seitentabelle) | K3 | 2,0 | – | – |
+| [WP-435](#wp-435--indizierte-attributfilter-unter-rls-indexfähig) | `t4-attr-filter-index` | Indizierte Attributfilter unter RLS indexfähig | K3 | 1,5 | F-114 | WP-434 |
+| [WP-436](#wp-436--explain-prüfung-nach-abn-02-auf-produkt-sql-mit-indexnamen-deterministisch) | `t4-explain-budget` | EXPLAIN-Prüfung nach ABN-02 auf Produkt-SQL mit Indexnamen, deterministisch | K3 | 1,0 | F-115 | WP-434, WP-435 |
+| [WP-437](#wp-437--lastszenarien-globale-suche-attributfilter-beziehungssuche-wiederentdeckung-integritätsprüfung-nach-dem-lauf) | `t4-load-scenarios` | Lastszenarien: globale Suche, Attributfilter, Beziehungssuche, Wiederentdeckung; Integritätsprüfung nach dem Lauf | K3 | 2,0 | F-116, F-118 | WP-433, WP-434 |
+| [WP-438](#wp-438--get-cis-unter-mischlast-ursache-belegen-p95--500-ms-für-liste-und-suche) | `t4-cilist-perf` | GET /cis unter Mischlast: Ursache belegen, p95 < 500 ms für Liste und Suche | K3 | 2,0 | F-117 | WP-435, WP-437 |
+| [WP-439](#wp-439--lastbericht-drei-archivierte-läufe-1000-recordss-und-nfr-01-volumina-folge-wps-mit-kennung) | `t4-load-report` | Lastbericht: drei archivierte Läufe, 1.000 Records/s und NFR-01-Volumina, Folge-WPs mit Kennung | K3 | 1,5 | F-279 | WP-436, WP-437, WP-438 |
+| [WP-440](#wp-440--erneuerte-zertifikate-ohne-frontend-neustart-ausliefern-health-prüfung-aller-replikate) | `t5-acme-renewal` | Erneuerte Zertifikate ohne Frontend-Neustart ausliefern; Health-Prüfung aller Replikate | K3 | 1,5 | F-139 | WP-420 |
+| [WP-441](#wp-441--kubernetes-smoke-in-kind-pod-ready-mit-master-key-negativfälle) | `t5-k8s-kind-smoke` | Kubernetes-Smoke in kind: Pod Ready mit Master-Key, Negativfälle | K3 | 1,5 | – | WP-422 |
+| [WP-442](#wp-442--readiness-smtp-prüfung-und-normalisierte-objektspeicher-adresse) | `t5-readiness` | Readiness: SMTP-Prüfung und normalisierte Objektspeicher-Adresse | K3 | 1,0 | F-126, F-127 | WP-418 |
+| [WP-443](#wp-443--backup-bucket-replikation-in-terraform-erzwungen-versionierung-zur-laufzeit-geprüft-scheduler-validiert) | `t5-backup-enforce` | Backup-Bucket: Replikation in Terraform erzwungen, Versionierung zur Laufzeit geprüft, Scheduler validiert | K3 | 2,0 | F-129 | WP-389 |
+| [WP-444](#wp-444--kubernetes-wal-archivierung-der-datenbankseite-mit-pgbackrest) | `t5-k8s-wal` | Kubernetes: WAL-Archivierung der Datenbankseite mit pgBackRest | K3 | 2,0 | F-128 | WP-441, WP-443 |
+| [WP-445](#wp-445--restore-nachweis-diskriminierende-rpo-prüfung-und-messwerte-aus-dem-standardlauf) | `t5-restore-rpo` | Restore-Nachweis: diskriminierende RPO-Prüfung und Messwerte aus dem Standardlauf | K3 | 1,0 | F-130 | – |
+| [WP-446](#wp-446--ladbare-alertmanager-konfiguration-promtool-regeltests-nosuccess-für-nie-erfolgreiche-worker) | `t5-alerting-config` | Ladbare Alertmanager-Konfiguration, promtool-Regeltests, NoSuccess für nie erfolgreiche Worker | K3 | 1,0 | F-132 | – |
+| [WP-447](#wp-447--metrikvertrag-für-alle-registrierten-worker-offline-detector-unter-der-schalterkonvention) | `t5-worker-metrics` | Metrikvertrag für alle registrierten Worker; Offline-Detector unter der Schalterkonvention | K3 | 2,0 | F-133 | WP-422, WP-425, WP-442, WP-446 |
+| [WP-448](#wp-448--betriebsalarme-über-ntf-kanäle-alertmanager-webhook-brücke) | `t5-ntf-bridge` | Betriebsalarme über NTF-Kanäle: Alertmanager-Webhook-Brücke | K3 | 2,0 | F-134 | WP-447 |
+| [WP-449](#wp-449--ausfallsuite-smtp-szenario-und-lastbasierter-nachweis-kein-stiller-datenverlust) | `t5-outage-smtp-load` | Ausfallsuite: SMTP-Szenario und lastbasierter Nachweis 'kein stiller Datenverlust' | K3 | 2,0 | F-135, F-136 | WP-442 |
+| [WP-450](#wp-450--traceability-nur-testdateien-als-nachweis-ausnahmeliste-statt-selbstverweisen) | `t5-trace-evidence` | Traceability: nur Testdateien als Nachweis, Ausnahmeliste statt Selbstverweisen | K3 | 1,5 | F-121 | – |
+| [WP-451](#wp-451--gate-checkliste-ehrlich-und-maschinell-geprüft-konsistenzprüfung---final-modus-ausnahmeliste-gate-010203) | `t5-gate-consistency` | Gate-Checkliste ehrlich und maschinell geprüft: Konsistenzprüfung, --final-Modus, Ausnahmeliste (GATE-01/02/03) | K3 | 2,0 | F-038 | WP-450 |
+| [WP-452](#wp-452--sicherheitsreview-g1-korrigieren-sr-11-high-neue-befunde-sr-12sr-13-p0-befunde-des-audits-kanal--scope-dev-advisories) | `t5-review-g1` | Sicherheitsreview G1 korrigieren: SR-11 High, neue Befunde SR-12/SR-13, P0-Befunde des Audits, Kanal × Scope, Dev-Advisories | K3 | 1,0 | F-119, F-040 | WP-340, WP-418, WP-451 |
+| [WP-453](#wp-453--pentest-nachweis-g1-ablegen-lieferung-a-07) | `t5-pentest-evidence` | Pentest-Nachweis G1 ablegen (Lieferung A-07) | K3 | 0,5 | F-039 | WP-450, WP-451 |
+| [WP-454](#wp-454--subprozessorenliste-ablegen-lieferung-a-11-nfr-09) | `t5-subprocessors` | Subprozessorenliste ablegen (Lieferung A-11, NFR-09) | K3 | 0,5 | F-137 | WP-450, WP-451 |
+| [WP-455](#wp-455--v2-texte-zu-aut-05-aut-06-net-04-übernehmen-und-abgleichen-lieferung-a-02) | `t5-v2-ids` | v2-Texte zu AUT-05, AUT-06, NET-04 übernehmen und abgleichen (Lieferung A-02) | K3 | 1,0 | F-120 | WP-450, WP-451 |
+| [WP-456](#wp-456--abn-01-de-impact-inhaltlich-prüfen-konfliktprotokoll-auf-eine-eingefrorene-real-stack-spec-stützen) | `t5-abn01-de` | ABN-01 (d)/(e): Impact inhaltlich prüfen, Konfliktprotokoll auf eine eingefrorene Real-Stack-Spec stützen | K3 | 1,0 | F-298, F-299 | WP-338, WP-451 |
+| [WP-457](#wp-457--abn-01-ab-v2-szenariotexte-einfrieren-und-schritt-für-schritt-protokollieren-lieferung-a-02) | `t5-abn01-ab` | ABN-01 (a)/(b): v2-Szenariotexte einfrieren und Schritt für Schritt protokollieren (Lieferung A-02) | K3 | 2,0 | F-138 | WP-450, WP-456 |
+| [WP-458](#wp-458--log-aufbewahrung-30-tage-in-den-auslieferungen-nfr-06) | `t6-log-retention` | Log-Aufbewahrung 30 Tage in den Auslieferungen (NFR-06) | K3 | 1,5 | F-150 | – |
+| [WP-459](#wp-459--abgeleitete-secrets-unabhängig-vom-master-key-rotation-ohne-nats-edge-neustart-sec-06) | `t6-rotation-derived` | Abgeleitete Secrets unabhängig vom Master-Key: Rotation ohne nats-edge-Neustart (SEC-06) | K3 | 2,0 | F-158 | – |
+| [WP-460](#wp-460--strukturierte-suche-mit-leserecht-post-searchquery-auf-searchread) | `t1-structured-search-read` | Strukturierte Suche mit Leserecht: POST /search/query auf search:read | K4 | 1,0 | F-055 | WP-338 |
+| [WP-461](#wp-461--iga-genehmigung-und-provisioning-task-atomar-keine-verschluckten-schreibfehler) | `t1-iga-approve-atomic` | IGA: Genehmigung und Provisioning-Task atomar; keine verschluckten Schreibfehler | K4 | 1,0 | F-056 | WP-407 |
+| [WP-462](#wp-462--pre-auth-limit-erfolgreiche-refreshes-zählen-nicht-atomare-zulassung-header-auch-auf-401429-vor-dem-limiter) | `t2-preauth-budget` | Pre-Auth-Limit: erfolgreiche Refreshes zählen nicht, atomare Zulassung, Header auch auf 401/429 vor dem Limiter | K4 | 1,0 | F-063 | WP-366, WP-410 |
+| [WP-463](#wp-463--org-ki-opt-in-über-patch-org-setzbar-nur-org-weit-berechtigt-auditiert) | `t2-ai-optin-api` | Org-KI-Opt-in über PATCH /org setzbar, nur org-weit berechtigt, auditiert | K4 | 1,0 | F-074 | WP-360 |
+| [WP-464](#wp-464--ent-07-dashboard-banner-für-ablaufwarnungen-1471-tage-und-real-stack-nachweis) | `t2-ent-expiry-warning` | ENT-07: Dashboard-Banner für Ablaufwarnungen 14/7/1 Tage und Real-Stack-Nachweis | K4 | 1,0 | F-071 | WP-338, WP-425 |
+| [WP-465](#wp-465--webhook-seite-zeigt-ablehnungen-egress-validierung-403-und-bietet-aktionen-nur-mit-webhookmanage-an) | `t2-webhook-ui-errors` | Webhook-Seite zeigt Ablehnungen (Egress, Validierung, 403) und bietet Aktionen nur mit webhook:manage an | K4 | 1,0 | F-062 | WP-338 |
+| [WP-466](#wp-466--cursor-pagination-der-b-listen-credentials-permissions-rollen--und-team-unterlisten-data-nie-null-pg-keyset-test) | `t2-pagination-core` | Cursor-Pagination der [B]-Listen credentials, permissions, Rollen- und Team-Unterlisten; data nie null; PG-Keyset-Test | K4 | 1,5 | F-214 | WP-395 |
+| [WP-467](#wp-467--cursor-pagination-der-modul-listen-monitoring-documentslinks-und-aiconversations-vertrag-ohne-nackte-arrays) | `t2-pagination-modules` | Cursor-Pagination der Modul-Listen monitoring, documents/links und ai/conversations; Vertrag ohne nackte Arrays | K4 | 1,0 | F-075 | WP-360, WP-466 |
+| [WP-468](#wp-468--ci-listen-export-über-exports-job-statt-deprecated-link-exportcis) | `t2-ci-export` | CI-Listen-Export über /exports-Job statt deprecated Link /export/cis | K4 | 1,0 | F-077 | WP-338 |
+| [WP-469](#wp-469--audit-viewer-liest-die-felder-des-api-vertrags-timestamp-resource_type-resource_id) | `t2-audit-viewer` | Audit-Viewer liest die Felder des API-Vertrags (timestamp, resource_type, resource_id) | K4 | 0,5 | F-078 | WP-338 |
+| [WP-470](#wp-470--fehlende-planfeatures-bei-organisationen-mit-teilzeilen-nachprovisionieren) | `t2-ent-provisioning` | Fehlende Planfeatures bei Organisationen mit Teilzeilen nachprovisionieren | K4 | 0,5 | F-210 | – |
+| [WP-471](#wp-471--entitlement-gates-rack_view-api_access-und-notifications_email-in-rest-graphql-und-zustellung) | `t2-ent-gates` | Entitlement-Gates rack_view, api_access und notifications_email in REST, GraphQL und Zustellung | K4 | 1,5 | F-070 | WP-470 |
+| [WP-472](#wp-472--quoten-max_users-max_api_keys-und-max_collectors-in-allen-rest-schreibpfaden-einschließlich-enrollment-und-erstlogin-benachrichtigung-bei-unlicensed_ci-belegt) | `t2-ent-quotas` | Quoten max_users, max_api_keys und max_collectors in allen REST-Schreibpfaden einschließlich Enrollment und Erstlogin; Benachrichtigung bei unlicensed_ci belegt | K4 | 1,5 | F-072 | WP-354, WP-358, WP-400, WP-471 |
+| [WP-473](#wp-473--einheitliche-historie-location_change-vereint-standorthistorie-über-den-typ-location) | `t3-history-location` | Einheitliche Historie: location_change vereint; Standorthistorie über den Typ location | K4 | 1,0 | F-093 | WP-411 |
+| [WP-474](#wp-474--standortbaum-ui-umbenennen-und-verschieben-löschbestätigung-409-mit-abhängigkeitsarten) | `t3-loc-tree-ui` | Standortbaum-UI: Umbenennen und Verschieben, Löschbestätigung, 409 mit Abhängigkeitsarten | K4 | 2,0 | F-079 | WP-338, WP-411 |
+| [WP-475](#wp-475--ci-historie-für-alle-leserollen-änderungen-mit-objekt-leserecht-audit-einträge-mit-auditread) | `t3-history-access` | CI-Historie für alle Leserollen: Änderungen mit Objekt-Leserecht, Audit-Einträge mit audit:read | K4 | 1,5 | F-094 | WP-338, WP-473, WP-474 |
+| [WP-476](#wp-476--patch-cisid-null-löscht-typisierte-felder-rfc-7396-interne-fehler-nicht-als-404) | `t3-ci-mergepatch-null` | PATCH /cis/{id}: null löscht typisierte Felder (RFC 7396); interne Fehler nicht als 404 | K4 | 1,5 | F-080 | WP-338, WP-370, WP-412 |
+| [WP-477](#wp-477--ci-bearbeitung-im-ui-nur-geänderte-felder-leeren-speichert-null-if-match-auch-für-instanzattribute) | `t3-ci-edit-ui` | CI-Bearbeitung im UI: nur geänderte Felder, Leeren speichert null, If-Match auch für Instanzattribute | K4 | 1,5 | F-081, F-082 | WP-338, WP-397, WP-476 |
+| [WP-478](#wp-478--override-endpunkt-weist-reservierte-namensräume-ab-source-policy-aus-der-rangtabelle) | `t3-override-reserved` | Override-Endpunkt weist reservierte Namensräume ab; source-policy aus der Rangtabelle | K4 | 1,5 | F-092 | WP-373, WP-412 |
+| [WP-479](#wp-479--review-auflösung-merge-bei-probable_duplicate-über-den-ci-12-merge) | `t3-review-merge` | Review-Auflösung merge bei probable_duplicate über den CI-12-Merge | K4 | 1,0 | F-096 | WP-369 |
+| [WP-480](#wp-480--cihealth-in-g1-eigener-health-worker-unabhängig-vom-modul-alerting) | `t3-health-worker` | ci.health in G1: eigener Health-Worker unabhängig vom Modul alerting | K4 | 1,0 | F-087 | WP-447 |
+| [WP-481](#wp-481--ingest-fehler-je-record-isolieren-queue-und-http) | `t3-ingest-poison` | Ingest: Fehler je Record isolieren (Queue und HTTP) | K4 | 1,5 | F-090 | WP-338 |
+| [WP-482](#wp-482--spool-verlustzähler-restart-fest-atomares-schreiben-quarantäne-korrupter-einträge) | `t3-spool-durable` | Spool: Verlustzähler restart-fest, atomares Schreiben, Quarantäne korrupter Einträge | K4 | 1,0 | F-084 | – |
+| [WP-483](#wp-483--collector-zustellung-poison-batches-quarantänisieren-jeden-verlust-zählen-server-macht-verluste-sichtbar) | `t3-spool-poison` | Collector-Zustellung: Poison-Batches quarantänisieren, jeden Verlust zählen, Server macht Verluste sichtbar | K4 | 2,0 | F-085 | WP-481, WP-482 |
+| [WP-484](#wp-484--agent-telemetrie-folgt-dem-merge-endpoint_agent-umhängen-merged_into-folgen-transiente-fehler-zurückgeben) | `t3-agent-merge` | Agent-Telemetrie folgt dem Merge: endpoint_agent umhängen, merged_into folgen, transiente Fehler zurückgeben | K4 | 1,0 | F-083 | WP-476 |
+| [WP-485](#wp-485--unmerge-409-bei-späteren-survivor-änderungen-force-zur-bewussten-wiederherstellung) | `t3-unmerge-conflict` | Unmerge: 409 bei späteren Survivor-Änderungen, force zur bewussten Wiederherstellung | K4 | 1,0 | F-097 | WP-370, WP-484 |
+| [WP-486](#wp-486--asset-verknüpfung-ohne-standortverlust-committeter-http-422-nachweis-der-asset-eigenen-felder) | `t3-asset-link-location` | Asset-Verknüpfung ohne Standortverlust; committeter HTTP-422-Nachweis der asset-eigenen Felder | K4 | 1,0 | F-239 | WP-476 |
+| [WP-487](#wp-487--aud-03-ci_change-mit-change_kind-korrelation-und-änderungsgruppen-im-schreibpfad-vokabular-type_changed) | `t3-aud03-schema` | AUD-03: ci_change mit change_kind, Korrelation und Änderungsgruppen im Schreibpfad; Vokabular type_changed | K4 | 1,5 | – | WP-475, WP-476, WP-486 |
+| [WP-488](#wp-488--aud-03-lesesicht-historie-je-änderungsgruppe-mit-field_changes-und-filter-change_kind) | `t3-aud03-history` | AUD-03-Lesesicht: Historie je Änderungsgruppe mit field_changes und Filter change_kind | K4 | 1,0 | – | WP-338, WP-475, WP-487 |
+| [WP-489](#wp-489--aud-03-im-ingest-eine-änderung-und-ein-event-je-record-reklassifizierung-in-derselben-transaktion) | `t3-aud03-ingest` | AUD-03 im Ingest: eine Änderung und ein Event je Record; Reklassifizierung in derselben Transaktion | K4 | 1,5 | F-095 | WP-481, WP-487, WP-488 |
+| [WP-490](#wp-490--blast-radius-kennzeichnet-heuristik-treffer-dependencies-folgt-impact_direction-depth-wird-validiert) | `t3-impact-heuristic` | Blast Radius kennzeichnet Heuristik-Treffer; /dependencies folgt impact_direction; depth wird validiert | K4 | 1,5 | F-099 | – |
+| [WP-491](#wp-491--impact-im-ui-heuristik-marker-im-blast-radius-ausfallsimulation-nach-impact_direction) | `t3-impact-ui` | Impact im UI: Heuristik-Marker im Blast Radius; Ausfallsimulation nach impact_direction | K4 | 1,0 | F-098, F-254 | WP-338, WP-475, WP-490 |
+| [WP-492](#wp-492--snmpv3-usmstats-reports-als-auth_failed-melden) | `t4-snmpv3-auth` | SNMPv3: usmStats-Reports als auth_failed melden | K4 | 1,0 | F-105 | WP-415, WP-416 |
+| [WP-493](#wp-493--collector-bootstrap-über-reticora_enroll_token-und-reticora_cloud_url) | `t4-col-env-enroll` | Collector-Bootstrap über RETICORA_ENROLL_TOKEN und RETICORA_CLOUD_URL | K4 | 1,0 | F-101 | WP-414 |
+| [WP-494](#wp-494--scope-expansion-vollständig-oder-gemeldet-sweep-ressourcen-begrenzt-keine-container-netze-als-vorschlag) | `t4-scope-expansion` | Scope-Expansion vollständig oder gemeldet; Sweep-Ressourcen begrenzt; keine Container-Netze als Vorschlag | K4 | 1,5 | F-106 | WP-378, WP-417 |
+| [WP-495](#wp-495--scope-zeitpläne-überstehen-start-und-neustart-cron-in-der-zeitzone-der-org) | `t4-scope-schedule` | Scope-Zeitpläne überstehen Start und Neustart; Cron in der Zeitzone der Org | K4 | 1,5 | F-109 | WP-376, WP-415, WP-494 |
+| [WP-496](#wp-496--scope-formular-mit-name-site-vrf-plugins-und-credentials-fehlerrückmeldung-löschbestätigung-discovery-metriken-dokumentiert) | `t4-scope-form-ui` | Scope-Formular mit Name, Site, VRF, Plugins und Credentials; Fehlerrückmeldung, Löschbestätigung, Discovery-Metriken dokumentiert | K4 | 1,5 | F-107, F-267 | WP-338, WP-376, WP-495 |
+| [WP-497](#wp-497--kanten-cleanup-frist-für-cron-scopes-aus-dem-tatsächlichen-laufabstand) | `t4-cleanup-cron` | Kanten-Cleanup: Frist für Cron-Scopes aus dem tatsächlichen Laufabstand | K4 | 1,0 | F-111 | WP-383 |
+| [WP-498](#wp-498--versorgungskette-redundanzkennung-unabhängig-von-batch-und-lane-hersteller-tabellen-fail-closed-belegt) | `t4-power-redundancy` | Versorgungskette: Redundanzkennung unabhängig von Batch und Lane, Hersteller-Tabellen, fail-closed belegt | K4 | 2,0 | F-112 | WP-338 |
+| [WP-499](#wp-499--lint-altlast-sichtbar-und-gedeckelt-toolchain-vertragstest-strikte-skip-prüfung-im-db-job) | `t5-lint-baseline` | Lint-Altlast sichtbar und gedeckelt, Toolchain-Vertragstest, strikte Skip-Prüfung im DB-Job | K4 | 1,5 | F-123 | WP-374 |
+| [WP-500](#wp-500--409-mit-feldbezug-für-standort-duplikate-und-rackhöhe-unter-belegten-he) | `t6-location-conflicts` | 409 mit Feldbezug für Standort-Duplikate und Rackhöhe unter belegten HE | K4 | 1,5 | F-140, F-302 | WP-338 |
+| [WP-501](#wp-501--discovery-validiert-typisierte-ci-spalten-wie-manuelle-writes-ungültige-werte-verwerfen-statt-batch-abbrechen) | `t6-ci-ingest-typed` | Discovery validiert typisierte CI-Spalten wie manuelle Writes; ungültige Werte verwerfen statt Batch abbrechen | K4 | 1,5 | F-143 | – |
+| [WP-502](#wp-502--discovery-jobs-im-generischen-jobmodell-adapter-verdrahten-status-spiegeln) | `t6-discovery-job-tracking` | Discovery-Jobs im generischen Jobmodell (Adapter verdrahten, Status spiegeln) | K4 | 1,0 | F-146 | WP-400 |
+| [WP-503](#wp-503--bulk--und-snapshot-jobs-über-die-nats-work-queue-timeout-reaper) | `t6-jobqueue-kinds` | Bulk- und Snapshot-Jobs über die NATS-Work-Queue; Timeout-Reaper | K4 | 2,0 | F-147 | WP-425, WP-447 |
+| [WP-504](#wp-504--route-audit-lückenlos-audit-intent-vor-der-mutation-nachtrag-per-scheduler) | `t6-route-audit-gapless` | Route-Audit lückenlos: Audit-Intent vor der Mutation, Nachtrag per Scheduler | K4 | 2,0 | F-149 | WP-425 |
+| [WP-505](#wp-505--route-audit-speichert-alt--und-neuwerte-aud-07-personenbezogene-werte-als-surrogat) | `t6-route-audit-values` | Route-Audit speichert Alt- und Neuwerte (AUD-07), personenbezogene Werte als Surrogat | K4 | 1,5 | F-148 | WP-423, WP-504 |
+| [WP-506](#wp-506--webhook-consumer-at-least-once-fehler-propagieren-idempotente-zustellung-je-event-und-abo) | `t6-webhook-consumer` | Webhook-Consumer at-least-once: Fehler propagieren, idempotente Zustellung je Event und Abo | K4 | 1,5 | F-151 | – |
+| [WP-507](#wp-507--client-kontakte-als-empfängerquelle-ntf-03-und-site-scope-nachweis) | `t6-ntf-client-contacts` | Client-Kontakte als Empfängerquelle (NTF-03) und Site-Scope-Nachweis | K4 | 1,0 | F-155 | WP-390 |
+| [WP-508](#wp-508--ntf-04-digest-nicht-kritische-kategorien-gebündelt-zustellen) | `t6-ntf-digest` | NTF-04-Digest: nicht kritische Kategorien gebündelt zustellen | K4 | 2,0 | F-156 | WP-399, WP-425 |
+| [WP-509](#wp-509--standardkanäle-für-neue-und-bestehende-organisationen-in-app-zentrales-smtp) | `t6-ntf-default-channel` | Standardkanäle für neue und bestehende Organisationen (In-App, zentrales SMTP) | K4 | 1,0 | F-157 | WP-338 |
+| [WP-510](#wp-510--einladungen-in-der-nutzerverwaltung-und-öffentliche-annahmeseite) | `t6-invite-ui` | Einladungen in der Nutzerverwaltung und öffentliche Annahmeseite | K4 | 2,0 | F-142 | WP-338, WP-421 |
+| [WP-511](#wp-511--ci-typ-admin-fehler-beim-setzen-von-searchableunique-sichtbar-flags-bestehender-attribute-änderbar) | `t6-attr-flags-ui` | CI-Typ-Admin: Fehler beim Setzen von searchable/unique sichtbar, Flags bestehender Attribute änderbar | K4 | 1,5 | F-159, F-325 | WP-338 |
+| [WP-512](#wp-512--pdu-messwerte-und-interface-zähler-aller-schnittstellen) | `t7-power-metrics` | PDU-Messwerte und Interface-Zähler aller Schnittstellen | K4 | 1,5 | F-168 | WP-426, WP-498 |
+| [WP-513](#wp-513--redundanz-postfilter-versorger-jenseits-der-analysetiefe-berücksichtigen) | `t7-impact-redundancy` | Redundanz-Postfilter: Versorger jenseits der Analysetiefe berücksichtigen | K4 | 1,5 | F-160 | WP-490 |
+| [WP-514](#wp-514--job-cancel-stoppt-laufende-arbeit-cibulk-snapshot-im-queue--und-in-process-pfad-oder-wird-mit-409-abgelehnt) | `t7-job-cancel` | Job-Cancel stoppt laufende Arbeit (ci.bulk, Snapshot) im Queue- und In-Process-Pfad oder wird mit 409 abgelehnt | K4 | 1,5 | – | WP-404, WP-503 |
+| [WP-515](#wp-515--export-abbruch-über-die-job-api-ergebnis-des-gespiegelten-exportjobs) | `t7-export-cancel` | Export-Abbruch über die Job-API, Ergebnis des gespiegelten Exportjobs | K4 | 1,0 | – | WP-514 |
+| [WP-516](#wp-516--state-snapshot-replayt-die-reale-änderungsspur-404-für-unbekannte-entitäten) | `t7-snapshot-replay` | State-Snapshot replayt die reale Änderungsspur; 404 für unbekannte Entitäten | K4 | 1,5 | F-164 | WP-487, WP-503 |
+| [WP-517](#wp-517--bulk-id-validierung-im-bericht-api-grenz--und-isolationstests) | `t7-bulk-validation` | Bulk: ID-Validierung im Bericht, API-Grenz- und Isolationstests | K4 | 1,0 | F-327 | WP-338, WP-368, WP-514 |
+| [WP-518](#wp-518--gespeicherte-sichten-teil-patch-erhält-die-freigabe-bearbeitungsrechte-rollenprüfung) | `t7-saved-views-api` | Gespeicherte Sichten: Teil-PATCH erhält die Freigabe, Bearbeitungsrechte, Rollenprüfung | K4 | 1,5 | F-166, F-335, F-337 | WP-405, WP-460 |
+| [WP-519](#wp-519--tastaturbedienung-tabellenmuster-für-die-ci-liste-fokusrückgabe-der-palette-tests-je-baustein) | `t7-ui-keyboard` | Tastaturbedienung: Tabellenmuster für die CI-Liste, Fokusrückgabe der Palette, Tests je Baustein | K4 | 1,5 | F-170, F-171 | – |
+| [WP-520](#wp-520--bulk-aus-der-ci-liste-über-25-zeilen-jobbericht-in-der-ui-real-stack-nachweise) | `t7-bulk-ui` | Bulk aus der CI-Liste über 25 Zeilen, Jobbericht in der UI, Real-Stack-Nachweise | K4 | 1,5 | F-328 | WP-338, WP-368, WP-515, WP-517, WP-519 |
+| [WP-521](#wp-521--jobcenter-und-benachrichtigungen-cancel-nur-wo-möglich-ergebnis-nur-wo-vorhanden-fehlerzustände) | `t7-jobcenter-ui` | Jobcenter und Benachrichtigungen: Cancel nur wo möglich, Ergebnis nur wo vorhanden, Fehlerzustände | K4 | 1,5 | F-162, F-347, F-348 | WP-338, WP-514, WP-515, WP-520 |
+| [WP-522](#wp-522--wcag-aa-kontrast-und-axe-prüfung-aller-routen-mit-daten-hell-und-dunkel) | `t7-a11y-contrast` | WCAG-AA-Kontrast und axe-Prüfung aller Routen mit Daten, hell und dunkel | K4 | 1,5 | F-172 | – |
+| [WP-523](#wp-523--lokalisierte-typbezeichnung-im-ci-detail-übersetzte-formularmeldungen-real-stack-sprachwechsel) | `t7-i18n-labels` | Lokalisierte Typbezeichnung im CI-Detail, übersetzte Formularmeldungen, Real-Stack-Sprachwechsel | K4 | 1,5 | F-175 | WP-338, WP-397 |
+| [WP-524](#wp-524--ci-detail-berücksichtigt-den-gewählten-scope-hinweis-gescopte-beziehungen) | `t7-ui-scope-detail` | CI-Detail berücksichtigt den gewählten Scope (Hinweis, gescopte Beziehungen) | K4 | 1,5 | F-169 | WP-338, WP-523 |
+| [WP-525](#wp-525--statuswerte-über-den-katalog-teil-1-inventar--ticket--auftrags--und-raumplanseiten-source-scan) | `t7-i18n-status-a` | Statuswerte über den Katalog (Teil 1): Inventar-, Ticket-, Auftrags- und Raumplanseiten, Source-Scan | K4 | 1,5 | – | WP-522 |
+| [WP-526](#wp-526--raumplan-bereichs--und-ci-prüfung-der-koordinaten-tastaturverschiebung-ohne-verlorene-schritte-if-match) | `t7-room-layout` | Raumplan: Bereichs- und CI-Prüfung der Koordinaten, Tastaturverschiebung ohne verlorene Schritte, If-Match | K4 | 2,0 | F-341, F-342 | WP-338, WP-525 |
+| [WP-527](#wp-527--statuswerte-über-den-katalog-teil-2-übrige-seiten-und-lint-regel-für-srcpages) | `t7-i18n-status-b` | Statuswerte über den Katalog (Teil 2): übrige Seiten und Lint-Regel für src/pages/** | K4 | 1,5 | F-174 | WP-523, WP-525 |
+| [WP-528](#wp-528--review-neu-anlegen-für-unclassified_device-typ-auflösen-oder-abfragen-klare-422) | `t7-review-new` | Review „Neu anlegen“ für unclassified_device: Typ auflösen oder abfragen, klare 422 | K4 | 2,0 | F-176 | WP-342, WP-369 |
+| [WP-529](#wp-529--onboarding-suite-scope-bestätigung-als-pflichtschritt-jobdatei-download-signup-einstieg) | `t7-onboarding-suite` | Onboarding-Suite: Scope-Bestätigung als Pflichtschritt, Jobdatei-Download, Signup-Einstieg | K4 | 2,0 | F-177, F-353, F-351 | WP-338, WP-468 |
+| [WP-530](#wp-530--e2e-mock-backend-strikt-und-gegen-die-openapi-validiert) | `t7-e2e-strict-mocks` | E2E-Mock-Backend strikt und gegen die OpenAPI validiert | K4 | 2,0 | F-178 | WP-397, WP-468, WP-519 |
+| [WP-531](#wp-531--browsermatrix-evidenz-aller-sechs-projekte-in-ci-und-vorversions-job) | `t7-browser-matrix` | Browsermatrix: Evidenz aller sechs Projekte in CI und Vorversions-Job | K4 | 1,5 | F-173 | WP-519, WP-522, WP-523, WP-526, WP-527, WP-530 |
+| [WP-532](#wp-532--real-stack-e2e-in-allen-browserprojekten) | `k-e2e-real-browsers` | Real-Stack-E2E in allen Browserprojekten | K5 | 1,0 | – | WP-338 |
+| [WP-533](#wp-533--nachweis-ableitung-der-ci-kindtabellen-discovery_result-relationship_suppression-rack_mount-backfill-000061) | `t1-ev-child-derivation` | Nachweis Ableitung der CI-Kindtabellen: discovery_result, relationship_suppression, rack_mount; Backfill 000061 | K5 | 1,0 | – | – |
+| [WP-534](#wp-534--nachweis-opensearch-scope-gegen-einen-echten-opensearch-dienst-in-ci) | `t1-ev-opensearch-real` | Nachweis OpenSearch-Scope gegen einen echten OpenSearch-Dienst in CI | K5 | 1,0 | – | WP-346, WP-349 |
+| [WP-535](#wp-535--real-stack-nachweis-mit-client-gescoptem-nutzer-login-listen-beziehungsformular-export) | `t1-ev-client-real-stack` | Real-Stack-Nachweis mit client-gescoptem Nutzer: Login, Listen, Beziehungsformular, Export | K5 | 1,5 | – | WP-338, WP-340, WP-347, WP-401 |
+| [WP-536](#wp-536--isolationsnachweise-cmdb-kern-und-identität-callback-history-credentials-api-keys-collector-saved-view-audit) | `t1-ev-core-isolation` | Isolationsnachweise CMDB-Kern und Identität: Callback, History, Credentials, API-Keys, Collector, Saved View, Audit | K5 | 1,5 | – | WP-343 |
+| [WP-537](#wp-537--isolationsnachweise-asset-und-lager-fremd-updates-für-zuweisung-komposition-bestellung-verbrauch-bestand-inventur) | `t1-ev-asset-isolation` | Isolationsnachweise Asset und Lager: Fremd-Updates für Zuweisung, Komposition, Bestellung, Verbrauch, Bestand, Inventur | K5 | 1,0 | – | – |
+| [WP-538](#wp-538--isolationsnachweise-module-fehlerpfade-deskschlüsselschulungdokument-wartungsbenachrichtigung-ai-schreibseite) | `t1-ev-module-isolation` | Isolationsnachweise Module: Fehlerpfade Desk/Schlüssel/Schulung/Dokument, Wartungsbenachrichtigung, AI-Schreibseite | K5 | 1,5 | – | WP-340, WP-341 |
+| [WP-539](#wp-539--nachweis-collector-lauf-gegen-tls-redfish-mit-scope-capin-und-protokollgetrennten-credentials) | `t2-redfish-tls-evidence` | Nachweis: Collector-Lauf gegen TLS-Redfish mit Scope-CA/Pin und protokollgetrennten Credentials | K5 | 0,5 | – | – |
+| [WP-540](#wp-540--wartungsbenachrichtigung-idempotent-ui-ordnet-cis-zu-und-zeigt-den-gespeicherten-status) | `t3-maint-notify` | Wartungsbenachrichtigung idempotent; UI ordnet CIs zu und zeigt den gespeicherten Status | K5 | 1,5 | F-235, F-236 | – |
+| [WP-541](#wp-541--real-stack-nachweis-wartungsankündigung-ui--api--db-mit-status-pending) | `t3-maint-e2e` | Real-Stack-Nachweis Wartungsankündigung: UI → API → DB mit Status pending | K5 | 1,0 | – | WP-338, WP-540 |
+| [WP-542](#wp-542--nachweis-dis-08-fehlerzustand-aus-realem-lauf-in-der-ui-metrics-exposition) | `t4-dis08-nachweis` | Nachweis DIS-08: Fehlerzustand aus realem Lauf in der UI, /metrics-Exposition | K5 | 1,5 | – | WP-338, WP-384, WP-492, WP-496 |
 | [WP-543](#wp-543--nachweis-real-stack-discovery-kante-entfernen-und-unterdrücken-kein-neuanlegen) | `t4-rel-suppress-nachweis` | Nachweis Real-Stack: Discovery-Kante entfernen und unterdrücken, kein Neuanlegen | K5 | 0,5 | – | WP-338 |
-| [WP-544](#wp-544--nachweis-der-compose-backup-kette-und-der-objektspeicher-versionierung-mit-minio) | `t5-backup-chain-evidence` | Nachweis der Compose-Backup-Kette und der Objektspeicher-Versionierung mit MinIO | K5 | 1,0 | – | WP-440, WP-498 |
-| [WP-545](#wp-545--echte-cosign-prüfung-im-release-workflow-und-prüfanleitung-für-betreiber) | `t5-release-evidence` | Echte cosign-Prüfung im Release-Workflow und Prüfanleitung für Betreiber | K5 | 1,0 | – | WP-387 |
-| [WP-546](#wp-546--nachweis-auto-update-selbstupdate-mit-zwei-versionen-newupdatechecker-echte-cosign-prüfung) | `t4-col-update-nachweis` | Nachweis Auto-Update: Selbstupdate mit zwei Versionen, newUpdateChecker, echte cosign-Prüfung | K5 | 1,5 | – | WP-338, WP-428, WP-545 |
-| [WP-547](#wp-547--nachweise-schlüsselrotation-real-stack-rotation-ca-rewrap-atomizität-rotateorgdek) | `t6-rotation-evidence` | Nachweise Schlüsselrotation: Real-Stack-Rotation, CA-Rewrap, Atomizität RotateOrgDEK | K5 | 1,0 | – | WP-338, WP-456 |
-| [WP-548](#wp-548--retention-metrik-rollups-400-tage-outbox-anker-ohne-daten-konfigurierbare-stream-retention) | `t6-retention-data` | Retention: Metrik-Rollups 400 Tage, Outbox-Anker ohne Daten, konfigurierbare Stream-Retention | K5 | 1,5 | F-317, F-318, F-321 | WP-417 |
-| [WP-549](#wp-549--reviewcreated-in-der-mutations-transaktion-mit-clientsite-merge-konflikt-reviews-benachrichtigen) | `t6-review-events` | review.created in der Mutations-Transaktion mit Client/Site; Merge-Konflikt-Reviews benachrichtigen | K5 | 1,5 | F-323, F-324 | WP-342, WP-398 |
-| [WP-550](#wp-550--exportcompleted-jobfailed-und-webhookdead-in-der-mutations-transaktion-outboxappend) | `t6-emit-in-tx` | export.completed, job.failed und webhook.dead in der Mutations-Transaktion (Outbox.Append) | K5 | 1,5 | F-319 | WP-505 |
-| [WP-551](#wp-551--nachweis-genau-ein-produzent-je-ereignistyp-evt-02-und-ntf-05-in-der-mutations-transaktion) | `t6-evt02-producers` | Nachweis: genau ein Produzent je Ereignistyp (EVT-02 und NTF-05) in der Mutations-Transaktion | K5 | 1,0 | – | WP-398, WP-417, WP-421, WP-505, WP-548, WP-549, WP-550 |
-| [WP-552](#wp-552--topologie-ui-fehlerzustand-statt-client-fallback-typlabels-real-stack-nachweis) | `t7-topology-ui-e2e` | Topologie-UI: Fehlerzustand statt Client-Fallback, Typlabels, Real-Stack-Nachweis | K5 | 1,5 | – | WP-338, WP-401, WP-490, WP-512 |
-| [WP-553](#wp-553--revert-am-job-vermerken-revert--und-metrik-nachweise-auf-postgresql) | `t7-job-revert-state` | Revert am Job vermerken; Revert- und Metrik-Nachweise auf PostgreSQL | K5 | 1,0 | F-329 | WP-513, WP-514 |
-| [WP-554](#wp-554--review-merge-job-retry-status-router-nachweis-entscheidung-synchron--mirror) | `t7-review-merge-job` | Review-Merge-Job: Retry-Status, Router-Nachweis, Entscheidung synchron + Mirror | K5 | 1,5 | F-330, F-331 | WP-478, WP-513, WP-515 |
-| [WP-555](#wp-555--gespeicherte-sichten-sortcolumns-wirksam-freigabe-in-der-ui-real-stack-rollenfreigabe) | `t7-saved-views-ui` | Gespeicherte Sichten: sort/columns wirksam, Freigabe in der UI, Real-Stack-Rollenfreigabe | K5 | 1,5 | F-336 | WP-338, WP-517 |
-| [WP-556](#wp-556--scope-umschalter-gespeicherte-auswahl-jenseits-200-listenparität-real-stack-nachweis) | `t7-ui-scope-lists` | Scope-Umschalter: gespeicherte Auswahl jenseits 200, Listenparität, Real-Stack-Nachweis | K5 | 1,0 | – | WP-523 |
-| [WP-557](#wp-557--review-inbox-paging-kandidatennamen-real-stack-nachweis-für-merge-und-new) | `t7-review-inbox-e2e` | Review-Inbox: Paging, Kandidatennamen, Real-Stack-Nachweis für merge und new | K5 | 1,5 | F-345, F-346 | WP-338, WP-527 |
-| [WP-558](#wp-558--ins-04-localhost-redirect-über-einen-tls-origin-ohne-localhost-prüfen) | `t7-onboarding-tls-origin` | INS-04 „Localhost-Redirect“ über einen TLS-Origin ohne localhost prüfen | K5 | 1,0 | F-352 | WP-436, WP-528 |
-| [WP-559](#wp-559--tst-02-zuordnung-zertifikatserneuerung-auf-testcollectorpki-ci-prüft-zieltests-auf-pass) | `t1-tst02-mapping` | TST-02-Zuordnung: Zertifikatserneuerung auf TestCollectorPKI, CI prüft Zieltests auf pass | K6 | 0,5 | F-194 | WP-498, WP-533 |
-| [WP-560](#wp-560--dokument-blobs-altdatenbericht-je-dokument-ui-ohne-storage-key-toter-agent-client) | `t1-doc-blob-cleanup` | Dokument-Blobs: Altdatenbericht je Dokument, UI ohne Storage-Key, toter Agent-Client | K6 | 1,5 | F-187, F-188 | WP-341, WP-423, WP-457, WP-537 |
+| [WP-544](#wp-544--nachweis-der-compose-backup-kette-und-der-objektspeicher-versionierung-mit-minio) | `t5-backup-chain-evidence` | Nachweis der Compose-Backup-Kette und der Objektspeicher-Versionierung mit MinIO | K5 | 1,0 | – | WP-443, WP-499 |
+| [WP-545](#wp-545--echte-cosign-prüfung-im-release-workflow-und-prüfanleitung-für-betreiber) | `t5-release-evidence` | Echte cosign-Prüfung im Release-Workflow und Prüfanleitung für Betreiber | K5 | 1,0 | – | WP-389 |
+| [WP-546](#wp-546--nachweis-auto-update-selbstupdate-mit-zwei-versionen-newupdatechecker-echte-cosign-prüfung) | `t4-col-update-nachweis` | Nachweis Auto-Update: Selbstupdate mit zwei Versionen, newUpdateChecker, echte cosign-Prüfung | K5 | 1,5 | – | WP-338, WP-432, WP-545 |
+| [WP-547](#wp-547--nachweise-schlüsselrotation-real-stack-rotation-ca-rewrap-atomizität-rotateorgdek) | `t6-rotation-evidence` | Nachweise Schlüsselrotation: Real-Stack-Rotation, CA-Rewrap, Atomizität RotateOrgDEK | K5 | 1,0 | – | WP-338, WP-459 |
+| [WP-548](#wp-548--retention-metrik-rollups-400-tage-outbox-anker-ohne-daten-konfigurierbare-stream-retention) | `t6-retention-data` | Retention: Metrik-Rollups 400 Tage, Outbox-Anker ohne Daten, konfigurierbare Stream-Retention | K5 | 1,5 | F-317, F-318, F-321 | WP-421 |
+| [WP-549](#wp-549--reviewcreated-in-der-mutations-transaktion-mit-clientsite-merge-konflikt-reviews-benachrichtigen) | `t6-review-events` | review.created in der Mutations-Transaktion mit Client/Site; Merge-Konflikt-Reviews benachrichtigen | K5 | 1,5 | F-323, F-324 | WP-342, WP-400 |
+| [WP-550](#wp-550--exportcompleted-jobfailed-und-webhookdead-in-der-mutations-transaktion-outboxappend) | `t6-emit-in-tx` | export.completed, job.failed und webhook.dead in der Mutations-Transaktion (Outbox.Append) | K5 | 1,5 | F-319 | WP-506 |
+| [WP-551](#wp-551--nachweis-genau-ein-produzent-je-ereignistyp-evt-02-und-ntf-05-in-der-mutations-transaktion) | `t6-evt02-producers` | Nachweis: genau ein Produzent je Ereignistyp (EVT-02 und NTF-05) in der Mutations-Transaktion | K5 | 1,0 | – | WP-400, WP-421, WP-425, WP-506, WP-548, WP-549, WP-550 |
+| [WP-552](#wp-552--topologie-ui-fehlerzustand-statt-client-fallback-typlabels-real-stack-nachweis) | `t7-topology-ui-e2e` | Topologie-UI: Fehlerzustand statt Client-Fallback, Typlabels, Real-Stack-Nachweis | K5 | 1,5 | – | WP-338, WP-403, WP-491, WP-513 |
+| [WP-553](#wp-553--revert-am-job-vermerken-revert--und-metrik-nachweise-auf-postgresql) | `t7-job-revert-state` | Revert am Job vermerken; Revert- und Metrik-Nachweise auf PostgreSQL | K5 | 1,0 | F-329 | WP-514, WP-515 |
+| [WP-554](#wp-554--review-merge-job-retry-status-router-nachweis-entscheidung-synchron--mirror) | `t7-review-merge-job` | Review-Merge-Job: Retry-Status, Router-Nachweis, Entscheidung synchron + Mirror | K5 | 1,5 | F-330, F-331 | WP-479, WP-514, WP-516 |
+| [WP-555](#wp-555--gespeicherte-sichten-sortcolumns-wirksam-freigabe-in-der-ui-real-stack-rollenfreigabe) | `t7-saved-views-ui` | Gespeicherte Sichten: sort/columns wirksam, Freigabe in der UI, Real-Stack-Rollenfreigabe | K5 | 1,5 | F-336 | WP-338, WP-518 |
+| [WP-556](#wp-556--scope-umschalter-gespeicherte-auswahl-jenseits-200-listenparität-real-stack-nachweis) | `t7-ui-scope-lists` | Scope-Umschalter: gespeicherte Auswahl jenseits 200, Listenparität, Real-Stack-Nachweis | K5 | 1,0 | – | WP-524 |
+| [WP-557](#wp-557--review-inbox-paging-kandidatennamen-real-stack-nachweis-für-merge-und-new) | `t7-review-inbox-e2e` | Review-Inbox: Paging, Kandidatennamen, Real-Stack-Nachweis für merge und new | K5 | 1,5 | F-345, F-346 | WP-338, WP-528 |
+| [WP-558](#wp-558--ins-04-localhost-redirect-über-einen-tls-origin-ohne-localhost-prüfen) | `t7-onboarding-tls-origin` | INS-04 „Localhost-Redirect“ über einen TLS-Origin ohne localhost prüfen | K5 | 1,0 | F-352 | WP-420, WP-529 |
+| [WP-559](#wp-559--tst-02-zuordnung-zertifikatserneuerung-auf-testcollectorpki-ci-prüft-zieltests-auf-pass) | `t1-tst02-mapping` | TST-02-Zuordnung: Zertifikatserneuerung auf TestCollectorPKI, CI prüft Zieltests auf pass | K6 | 0,5 | F-194 | WP-499, WP-534 |
+| [WP-560](#wp-560--dokument-blobs-altdatenbericht-je-dokument-ui-ohne-storage-key-toter-agent-client) | `t1-doc-blob-cleanup` | Dokument-Blobs: Altdatenbericht je Dokument, UI ohne Storage-Key, toter Agent-Client | K6 | 1,5 | F-187, F-188 | WP-341, WP-427, WP-460, WP-538 |
 | [WP-561](#wp-561--tenant-guard-typbasiert-kommentierte-freigabeliste-für-withsystem) | `t1-tenant-guard` | Tenant-Guard typbasiert; kommentierte Freigabeliste für WithSystem | K6 | 1,5 | F-190, F-191 | WP-352 |
 | [WP-562](#wp-562--webhooks-rotatesecret-im-request-scope-retry-claim-fehlertolerant-und-fair) | `t1-webhook-scope` | Webhooks: RotateSecret im Request-Scope; Retry-Claim fehlertolerant und fair | K6 | 1,0 | F-183, F-184 | – |
-| [WP-563](#wp-563--ssrf-prüfung-beim-speichern-für-iga-update-und-benachrichtigungs-webhook-ipv6-übergangspräfixe-gesperrt) | `t2-egress-save` | SSRF-Prüfung beim Speichern für IGA-Update und Benachrichtigungs-Webhook; IPv6-Übergangspräfixe gesperrt | K6 | 1,0 | F-203, F-204, F-205 | WP-338, WP-397 |
-| [WP-564](#wp-564--operator-entitlement-schreiben-audit-atomar-mit-der-änderung-nur-ent-02-schlüssel) | `t2-operator-entitlement-write` | Operator-Entitlement-Schreiben: Audit atomar mit der Änderung, nur ENT-02-Schlüssel | K6 | 1,0 | F-208, F-209 | WP-468 |
-| [WP-565](#wp-565--completelist-endpunkte-api-keys-einladungen-service-accounts-attributdefinitionen-operator-orgs-auf-höchstens-200-begrenzen-und-paginieren) | `t2-complete-lists` | CompleteList-Endpunkte (API-Keys, Einladungen, Service-Accounts, Attributdefinitionen, Operator-Orgs) auf höchstens 200 begrenzen und paginieren | K6 | 1,0 | F-215 | WP-464, WP-470 |
-| [WP-566](#wp-566--attributfilter-searchable-und-datentyp-je-ci-typ-statt-org-weit-je-key) | `t2-filter-searchable` | Attributfilter: searchable und Datentyp je CI-Typ statt org-weit je Key | K6 | 1,0 | F-216 | WP-338, WP-431 |
+| [WP-563](#wp-563--ssrf-prüfung-beim-speichern-für-iga-update-und-benachrichtigungs-webhook-ipv6-übergangspräfixe-gesperrt) | `t2-egress-save` | SSRF-Prüfung beim Speichern für IGA-Update und Benachrichtigungs-Webhook; IPv6-Übergangspräfixe gesperrt | K6 | 1,0 | F-203, F-204, F-205 | WP-338, WP-399 |
+| [WP-564](#wp-564--operator-entitlement-schreiben-audit-atomar-mit-der-änderung-nur-ent-02-schlüssel) | `t2-operator-entitlement-write` | Operator-Entitlement-Schreiben: Audit atomar mit der Änderung, nur ENT-02-Schlüssel | K6 | 1,0 | F-208, F-209 | WP-470 |
+| [WP-565](#wp-565--completelist-endpunkte-api-keys-einladungen-service-accounts-attributdefinitionen-operator-orgs-auf-höchstens-200-begrenzen-und-paginieren) | `t2-complete-lists` | CompleteList-Endpunkte (API-Keys, Einladungen, Service-Accounts, Attributdefinitionen, Operator-Orgs) auf höchstens 200 begrenzen und paginieren | K6 | 1,0 | F-215 | WP-466, WP-472 |
+| [WP-566](#wp-566--attributfilter-searchable-und-datentyp-je-ci-typ-statt-org-weit-je-key) | `t2-filter-searchable` | Attributfilter: searchable und Datentyp je CI-Typ statt org-weit je Key | K6 | 1,0 | F-216 | WP-338, WP-435 |
 | [WP-567](#wp-567--ci-restore-innerhalb-der-konfigurierten-retention-409-im-vertrag-include-signalisiert-kappung) | `t2-ci-restore` | CI-Restore innerhalb der konfigurierten Retention, 409 im Vertrag, include signalisiert Kappung | K6 | 1,0 | F-221, F-222, F-223 | WP-338 |
-| [WP-568](#wp-568--api-lebenszyklus-robust-spec-pflicht-in-produktion-expandierter-successor-link-header-auch-auf-401403-problemjson-im-vertrag) | `t2-lifecycle-headers` | API-Lebenszyklus robust: Spec-Pflicht in Produktion, expandierter Successor-Link, Header auch auf 401/403; problem+json im Vertrag | K6 | 1,0 | F-218, F-219, F-220, F-213 | WP-364, WP-460 |
+| [WP-568](#wp-568--api-lebenszyklus-robust-spec-pflicht-in-produktion-expandierter-successor-link-header-auch-auf-401403-problemjson-im-vertrag) | `t2-lifecycle-headers` | API-Lebenszyklus robust: Spec-Pflicht in Produktion, expandierter Successor-Link, Header auch auf 401/403; problem+json im Vertrag | K6 | 1,0 | F-218, F-219, F-220, F-213 | WP-364, WP-462 |
 | [WP-569](#wp-569--sammel-wp-log-redaktion-für-maps-structs-und-keyvalue-webhook-url-nur-für-webhookmanage-idempotenz-speichert-keine-5xx) | `t2-hardening-misc` | Sammel-WP: Log-Redaktion für Maps, Structs und key=value; Webhook-URL nur für webhook:manage; Idempotenz speichert keine 5xx | K6 | 1,0 | F-202, F-206 | – |
 | [WP-570](#wp-570--erstlogin-bootstrap-zulassung-serialisiert-lokalisierte-ablehnung-org-attribut-durch-benutzer-nicht-änderbar) | `t2-first-login` | Erstlogin: Bootstrap-Zulassung serialisiert, lokalisierte Ablehnung, Org-Attribut durch Benutzer nicht änderbar | K6 | 1,0 | F-198, F-197 | WP-338, WP-364 |
-| [WP-571](#wp-571--benutzerverwaltung-deaktivieren-reaktivieren-und-löschen-in-der-ui-systemrollen-als-system-gekennzeichnet) | `t2-user-admin-ui` | Benutzerverwaltung: Deaktivieren, Reaktivieren und Löschen in der UI; Systemrollen als System gekennzeichnet | K6 | 1,5 | F-196, F-201 | WP-338, WP-359, WP-509, WP-570 |
-| [WP-572](#wp-572--ci-merge-als-job-nachweisen-ci_mergejob_id-retention-für-snapshots-und-tombstones) | `t3-merge-job-retention` | CI-Merge als Job nachweisen: ci_merge.job_id; Retention für Snapshots und Tombstones | K6 | 1,0 | F-251 | WP-478, WP-484 |
-| [WP-573](#wp-573--strukturbeziehungen-nur-speicherbare-typen-im-formular-saved-view-filter-sehen-projektionen) | `t3-struct-p3` | Strukturbeziehungen: nur speicherbare Typen im Formular; Saved-View-Filter sehen Projektionen | K6 | 1,0 | F-242, F-244 | WP-403 |
+| [WP-571](#wp-571--benutzerverwaltung-deaktivieren-reaktivieren-und-löschen-in-der-ui-systemrollen-als-system-gekennzeichnet) | `t2-user-admin-ui` | Benutzerverwaltung: Deaktivieren, Reaktivieren und Löschen in der UI; Systemrollen als System gekennzeichnet | K6 | 1,5 | F-196, F-201 | WP-338, WP-359, WP-510, WP-570 |
+| [WP-572](#wp-572--ci-merge-als-job-nachweisen-ci_mergejob_id-retention-für-snapshots-und-tombstones) | `t3-merge-job-retention` | CI-Merge als Job nachweisen: ci_merge.job_id; Retention für Snapshots und Tombstones | K6 | 1,0 | F-251 | WP-479, WP-485 |
+| [WP-573](#wp-573--strukturbeziehungen-nur-speicherbare-typen-im-formular-saved-view-filter-sehen-projektionen) | `t3-struct-p3` | Strukturbeziehungen: nur speicherbare Typen im Formular; Saved-View-Filter sehen Projektionen | K6 | 1,0 | F-242, F-244 | WP-405 |
 | [WP-574](#wp-574--migrationssicherheit-000056-down-auf-altinstallationen-reparatur-zyklischer-parent_ci_id) | `t3-migration-guards` | Migrationssicherheit: 000056-down auf Altinstallationen, Reparatur zyklischer parent_ci_id | K6 | 1,0 | F-243, F-224 | – |
-| [WP-575](#wp-575--dashboard-eskalation-offener-reviews-älter-als-14-tage-rec-08) | `t3-review-escalation-widget` | Dashboard: Eskalation offener Reviews älter als 14 Tage (REC-08) | K6 | 1,0 | F-247 | WP-338, WP-474 |
-| [WP-576](#wp-576--override_conflict-für-workflow-und-agent-unterdrückung-endet-mit-dem-nächsten-wertwechsel) | `t3-conflict-sources` | override_conflict für Workflow und Agent; Unterdrückung endet mit dem nächsten Wertwechsel | K6 | 1,5 | F-231, F-248 | WP-338, WP-483 |
-| [WP-577](#wp-577--ci-detail-standort-site-und-raum-mit-namen-formatierte-zeiten-vollständige-read-only-asset-karte) | `t3-ci-detail-readable` | CI-Detail: Standort, Site und Raum mit Namen, formatierte Zeiten, vollständige read-only Asset-Karte | K6 | 1,5 | F-237, F-238 | WP-338, WP-473, WP-476, WP-522 |
+| [WP-575](#wp-575--dashboard-eskalation-offener-reviews-älter-als-14-tage-rec-08) | `t3-review-escalation-widget` | Dashboard: Eskalation offener Reviews älter als 14 Tage (REC-08) | K6 | 1,0 | F-247 | WP-338, WP-413 |
+| [WP-576](#wp-576--override_conflict-für-workflow-und-agent-unterdrückung-endet-mit-dem-nächsten-wertwechsel) | `t3-conflict-sources` | override_conflict für Workflow und Agent; Unterdrückung endet mit dem nächsten Wertwechsel | K6 | 1,5 | F-231, F-248 | WP-338, WP-484 |
+| [WP-577](#wp-577--ci-detail-standort-site-und-raum-mit-namen-formatierte-zeiten-vollständige-read-only-asset-karte) | `t3-ci-detail-readable` | CI-Detail: Standort, Site und Raum mit Namen, formatierte Zeiten, vollständige read-only Asset-Karte | K6 | 1,5 | F-237, F-238 | WP-338, WP-475, WP-477, WP-523 |
 | [WP-578](#wp-578--rack-platzierung-historie-audit-und-version-für-alle-cis-eines-gemeinsamen-assets) | `t3-rack-placement-history` | Rack-Platzierung: Historie, Audit und Version für alle CIs eines gemeinsamen Assets | K6 | 1,0 | F-240, F-241 | WP-338 |
 | [WP-579](#wp-579--rack-layout-leere-liste-statt-null-anzeigefelder-im-layout-kein-1n-im-frontend) | `t3-rack-layout` | Rack-Layout: leere Liste statt null, Anzeigefelder im Layout, kein 1+N im Frontend | K6 | 1,5 | F-253, F-252 | WP-338 |
-| [WP-580](#wp-580--discovery-restmängel-last_seen_at-aus-observed_at-seriennummer-case-insensitiv-manuelle-ips-und-interfaces-bleiben) | `t3-discovery-p3` | Discovery-Restmängel: last_seen_at aus observed_at, Seriennummer case-insensitiv, manuelle IPs und Interfaces bleiben | K6 | 2,0 | F-245, F-246, F-249 | WP-370, WP-430, WP-488 |
-| [WP-581](#wp-581--profilfeld-systemtemplate-auf-den-template-katalog-abbilden) | `t4-profile-template` | Profilfeld systemTemplate auf den Template-Katalog abbilden | K6 | 0,5 | F-263 | WP-414 |
-| [WP-582](#wp-582--topologie-confidence-reihenfolgeunabhängig-unknown_relationship-review-lebenszyklus-belegt) | `t4-topo-confidence` | Topologie-Confidence reihenfolgeunabhängig; unknown_relationship-Review-Lebenszyklus belegt | K6 | 1,0 | F-269 | WP-497 |
-| [WP-583](#wp-583--beziehungen-provenienz-geschützt-systemquellen-reserviert-fehlerabbildung-beim-löschen) | `t4-rel-provenance` | Beziehungen: Provenienz geschützt, Systemquellen reserviert, Fehlerabbildung beim Löschen | K6 | 1,0 | F-270, F-271, F-272, F-274 | WP-399, WP-497 |
+| [WP-580](#wp-580--discovery-restmängel-last_seen_at-aus-observed_at-seriennummer-case-insensitiv-manuelle-ips-und-interfaces-bleiben) | `t3-discovery-p3` | Discovery-Restmängel: last_seen_at aus observed_at, Seriennummer case-insensitiv, manuelle IPs und Interfaces bleiben | K6 | 2,0 | F-245, F-246, F-249 | WP-371, WP-434, WP-489 |
+| [WP-581](#wp-581--profilfeld-systemtemplate-auf-den-template-katalog-abbilden) | `t4-profile-template` | Profilfeld systemTemplate auf den Template-Katalog abbilden | K6 | 0,5 | F-263 | WP-417 |
+| [WP-582](#wp-582--topologie-confidence-reihenfolgeunabhängig-unknown_relationship-review-lebenszyklus-belegt) | `t4-topo-confidence` | Topologie-Confidence reihenfolgeunabhängig; unknown_relationship-Review-Lebenszyklus belegt | K6 | 1,0 | F-269 | WP-498 |
+| [WP-583](#wp-583--beziehungen-provenienz-geschützt-systemquellen-reserviert-fehlerabbildung-beim-löschen) | `t4-rel-provenance` | Beziehungen: Provenienz geschützt, Systemquellen reserviert, Fehlerabbildung beim Löschen | K6 | 1,0 | F-270, F-271, F-272, F-274 | WP-401, WP-498 |
 | [WP-584](#wp-584--suppression-mit-bestätigung-grund-und-akteur-auflisten-und-aufheben) | `t4-suppression-lifecycle` | Suppression mit Bestätigung, Grund und Akteur; auflisten und aufheben | K6 | 1,5 | F-273 | WP-338, WP-543, WP-583 |
-| [WP-585](#wp-585--cionline-bei-rückkehr-einer-ci-registrierung-des-offline-detektors-testbar) | `t4-offline-online` | ci.online bei Rückkehr einer CI; Registrierung des Offline-Detektors testbar | K6 | 1,0 | F-268 | WP-421, WP-444 |
+| [WP-585](#wp-585--cionline-bei-rückkehr-einer-ci-registrierung-des-offline-detektors-testbar) | `t4-offline-online` | ci.online bei Rückkehr einer CI; Registrierung des Offline-Detektors testbar | K6 | 1,0 | F-268 | WP-425, WP-447 |
 | [WP-586](#wp-586--fail-closed-konfiguration-simulation-nur-in-entwicklungtest-produktion-nur-mit-nats-queue) | `t4-p3-fail-closed` | Fail-closed-Konfiguration: Simulation nur in Entwicklung/Test, Produktion nur mit NATS-Queue | K6 | 0,5 | F-276, F-282 | WP-338 |
-| [WP-587](#wp-587--ausfallsuite-compose-basiertes-szenario-server-für-den-collector-unerreichbar) | `t5-outage-collector` | Ausfallsuite: Compose-basiertes Szenario 'Server für den Collector unerreichbar' | K6 | 1,0 | F-296 | WP-446 |
-| [WP-588](#wp-588--abonnements-empfänger-i18n-und-org-branding-der-benachrichtigungen-ntf-03) | `t6-ntf-templates` | Abonnements, Empfänger-i18n und Org-Branding der Benachrichtigungen (NTF-03) | K6 | 2,0 | F-322 | WP-506, WP-507 |
-| [WP-589](#wp-589--attribute_definitionvalidation-als-met-45-regel-ast-instanzdefinitionen-nach-entscheidung) | `t6-attrdef-ast` | attribute_definition.validation als MET-45-Regel-AST; Instanzdefinitionen nach Entscheidung | K6 | 1,5 | F-307, F-306 | WP-510 |
+| [WP-587](#wp-587--ausfallsuite-compose-basiertes-szenario-server-für-den-collector-unerreichbar) | `t5-outage-collector` | Ausfallsuite: Compose-basiertes Szenario 'Server für den Collector unerreichbar' | K6 | 1,0 | F-296 | WP-449 |
+| [WP-588](#wp-588--abonnements-empfänger-i18n-und-org-branding-der-benachrichtigungen-ntf-03) | `t6-ntf-templates` | Abonnements, Empfänger-i18n und Org-Branding der Benachrichtigungen (NTF-03) | K6 | 2,0 | F-322 | WP-507, WP-508 |
+| [WP-589](#wp-589--attribute_definitionvalidation-als-met-45-regel-ast-instanzdefinitionen-nach-entscheidung) | `t6-attrdef-ast` | attribute_definition.validation als MET-45-Regel-AST; Instanzdefinitionen nach Entscheidung | K6 | 1,5 | F-307, F-306 | WP-511 |
 | [WP-590](#wp-590--schema_version-bei-typed-column-writes-org-globale-definitionen-nach-entscheidung) | `t6-schema-version` | schema_version bei Typed-Column-Writes; org-globale Definitionen nach Entscheidung | K6 | 1,0 | F-309, F-308 | – |
-| [WP-591](#wp-591--signup-slug-erschöpfung-ohne-500-gleitendes-ip-fenster) | `t6-signup-minor` | Signup: Slug-Erschöpfung ohne 500, gleitendes IP-Fenster | K6 | 1,0 | F-303, F-304 | WP-508 |
-| [WP-592](#wp-592--sammel-wp-migration-000110-beziehungstyp-einschränkungen-lease-des-export-workers) | `t6-p3-sammel` | Sammel-WP: Migration 000110, Beziehungstyp-Einschränkungen, Lease des Export-Workers | K6 | 1,5 | F-310, F-313, F-315 | WP-399, WP-550 |
+| [WP-591](#wp-591--signup-slug-erschöpfung-ohne-500-gleitendes-ip-fenster) | `t6-signup-minor` | Signup: Slug-Erschöpfung ohne 500, gleitendes IP-Fenster | K6 | 1,0 | F-303, F-304 | WP-509 |
+| [WP-592](#wp-592--sammel-wp-migration-000110-beziehungstyp-einschränkungen-lease-des-export-workers) | `t6-p3-sammel` | Sammel-WP: Migration 000110, Beziehungstyp-Einschränkungen, Lease des Export-Workers | K6 | 1,5 | F-310, F-313, F-315 | WP-401, WP-550 |
 | [WP-593](#wp-593--sammel-wp-backend-bff-topologiekomplexität-bff-als-api-only-dokumentiert-csv-formelschutz) | `t7-p3-backend` | Sammel-WP Backend: BFF-Topologiekomplexität, BFF als API-only dokumentiert, CSV-Formelschutz | K6 | 1,0 | F-333, F-332, F-338 | – |
-| [WP-594](#wp-594--such-treffer-für-locations-und-kontakte-führen-zur-entität) | `t7-search-deeplinks` | Such-Treffer für Locations und Kontakte führen zur Entität | K6 | 1,0 | F-334 | WP-338, WP-518 |
-| [WP-595](#wp-595--nachweisläufe-auf-dem-g1-release-kandidaten-endgültige-statuspflege-und-finaler-gate-check) | `t5-rc-evidence` | Nachweisläufe auf dem G1-Release-Kandidaten, endgültige Statuspflege und finaler Gate-Check | K7 | 1,5 | F-122 | 257 WPs (siehe Block) |
+| [WP-594](#wp-594--such-treffer-für-locations-und-kontakte-führen-zur-entität) | `t7-search-deeplinks` | Such-Treffer für Locations und Kontakte führen zur Entität | K6 | 1,0 | F-334 | WP-338, WP-519 |
+| [WP-595](#wp-595--nachweisläufe-auf-dem-g1-release-kandidaten-endgültige-statuspflege-und-finaler-gate-check) | `t5-rc-evidence` | Nachweisläufe auf dem G1-Release-Kandidaten, endgültige Statuspflege und finaler Gate-Check | K7 | 1,5 | F-122 | 253 WPs (siehe Block) |
 | [WP-596](#wp-596--wiederholungsprüfung-mandantentrennung-authentisierung-und-autorisierung) | `k-reaudit-1` | Wiederholungsprüfung Mandantentrennung, Authentisierung und Autorisierung | K7 | 2,0 | – | 80 WPs (siehe Block) |
 | [WP-597](#wp-597--wiederholungsprüfung-datenmodell-ingest-collector-und-last) | `k-reaudit-2` | Wiederholungsprüfung Datenmodell, Ingest, Collector und Last | K7 | 2,0 | – | 86 WPs (siehe Block) |
 | [WP-598](#wp-598--wiederholungsprüfung-installation-betrieb-fundament-epic-b-und-oberfläche) | `k-reaudit-3` | Wiederholungsprüfung Installation, Betrieb, Fundament (Epic B) und Oberfläche | K7 | 2,0 | – | 112 WPs (siehe Block) |
 | [WP-599](#wp-599--abnahmeprüfung-der-nicht-auditierten-g1-pflicht-wps-wp-214-wp-240--wp-242-wp-332--wp-335) | `k-audit-ext` | Abnahmeprüfung der nicht auditierten G1-Pflicht-WPs (WP-214, WP-240 – WP-242, WP-332 – WP-335) | K7 | 2,0 | – | WP-338, WP-595 |
-| [WP-600](#wp-600--gate-g1-nach-der-korrektur-checkliste-sicherheitsreview-und-freigabeentscheidung) | `k-gate` | Gate G1 nach der Korrektur: Checkliste, Sicherheitsreview und Freigabeentscheidung | K7 | 1,5 | – | WP-531, WP-595, WP-596, WP-597, WP-598, WP-599 |
+| [WP-600](#wp-600--gate-g1-nach-der-korrektur-checkliste-sicherheitsreview-und-freigabeentscheidung) | `k-gate` | Gate G1 nach der Korrektur: Checkliste, Sicherheitsreview und Freigabeentscheidung | K7 | 1,5 | – | WP-532, WP-595, WP-596, WP-597, WP-598, WP-599 |
 
 ## Konventionen für alle WPs
 
@@ -396,7 +396,7 @@ Die Konventionen 1 bis 10 des Phase-1-Plans ([`../implementierungsplan.md`](../i
 
 11. **Prüfrahmen zuerst:** Jedes WP ab K1 setzt WP-336 (`k-trace`) und WP-337 (`k-ratchet`) voraus, ohne dass der Block sie nennt. Bis WP-336 gemergt ist, werden PRs dieses Plans mit „Arbeitspakete: keine“ und WP-Nummer im Titel eingebracht.
 12. **Befund vor Beginn lesen:** Reproduktion, Soll, Ist, Ursache, Empfehlung und Retest jedes Befunds aus `PHASE1_FINDINGS.md`. Ist die Ursache dort als Hypothese markiert, bestätigt das WP sie zuerst durch einen Test, der vor dem Fix rot ist.
-13. **Defekttests überführen (Ratchet):** Jedes WP, das einen Befund behebt, macht dessen kodierenden Test grün, überführt ihn in die reguläre Suite (Go: Testfunktion in eine reguläre `_test.go` oder Build-Tag entfernen, wenn die Datei keine roten Tests mehr enthält; Frontend: `.auditdefect.tsx` → `.test.tsx`; Shell: Aufnahme in den regulären CI-Job; Real-Stack-E2E bleibt in `frontend/e2e-real/`) und löscht seine Zeile in `tests/audit/expected-failures.txt`. Tests, die das Fehlverhalten als erwartet kodieren, werden umgeschrieben. Ein Befund ohne kodierenden Test erhält einen regulären Test, der vor dem Fix rot ist.
+13. **Defekttests überführen (Ratchet):** Jedes WP, das einen Befund behebt, macht dessen kodierenden Test grün, überführt ihn in die reguläre Suite (Go: Testfunktion in eine reguläre `_test.go` oder Build-Tag entfernen, wenn die Datei keine roten Tests mehr enthält; Frontend: `.auditdefect.tsx` → `.test.tsx` bzw. `.auditdefect.ts` → `.test.ts`; Shell: Aufnahme in den regulären CI-Job; Real-Stack-E2E bleibt in `frontend/e2e-real/`) und löscht seine Zeile in `tests/audit/expected-failures.txt`. Tests, die das Fehlverhalten als erwartet kodieren, werden umgeschrieben. Ein Befund ohne kodierenden Test erhält einen regulären Test, der vor dem Fix rot ist.
 14. **Retest im PR:** Der PR nennt die Befund-IDs (F-nnn) in der Zusammenfassung und belegt den verbindlichen Retest des Befunds mit Befehl und Ergebnis; die Real-Stack-Nachweise verweisen auf den CI-Lauf von `install-smoke.yml`.
 15. **Keine Lockerung:** Assertions der Defekttests und Real-Stack-Specs werden nicht an beobachtetes Verhalten angepasst. Erweist sich eine Assertion als fachlich falsch, entscheidet der Auftraggeber (neue Entscheidung), bevor sie geändert wird.
 16. **Statusänderungen** der Phase-1-WPs entstehen nur durch die Wiederholungsprüfung (K7), nicht im Korrektur-PR. Neue Befunde während der Umsetzung erhalten IDs ab F-355 und ein eigenes WP (Konvention 10).
@@ -419,6 +419,10 @@ Wie im Phase-1-Plan; zusätzlich die Tabelle **Befunde** (ID mit Link auf `PHASE
 |---|---|---|---|---|---|---|
 | GLO-11 | [Q] | TEILWEISE BESTANDEN | Teil | [WP-005](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-005) | `docs/audit/08-frontend-monitoring-nfr-tests.md:31` | `docs/spec/katalog-v3/00-grundlagen.md:101` |
 | DOD-01 | [Q] | TEILWEISE BESTANDEN | Teil | [WP-005](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-005) | `docs/audit/08-frontend-monitoring-nfr-tests.md:70` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:73` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
+
+**Beitrag zu Audit-WPs:** Prüfrahmen bzw. Voraussetzung für 20 Audit-WPs (Zuordnung in `abdeckung-wps.csv`).
 
 **Problem:** `ParsePlan` (`backend/internal/traceability/traceability.go:265`) und `TestTraceabilityFile` (`traceability_test.go:279`) lesen nur `docs/plan/implementierungsplan.md`. Die WP-Nummern dieses Plans (ab WP-336) wären für die CI „not a work package“; jeder Korrektur-PR würde am Job `traceability` scheitern oder müsste ohne WP-Nummer laufen. Der Phase-2-Plan sieht dieselbe Erweiterung erst in WP-243 (`p2-trace`) vor, der nach diesem Plan liegt.
 
@@ -454,7 +458,7 @@ DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-336
 
 **Entscheidungsbedarf:** [E-30](../entscheidungen.md#e-30)
 
-**Nicht Bestandteil:** Phase-2-Plan (WP-243); Abdeckungsdateien (`abdeckung.csv` dieses Plans ist befundbasiert und wird nicht von der Prüfung gelesen).
+**Nicht Bestandteil:** Phase-2-Plan (WP-243); Abdeckungsdateien (`abdeckung-befunde.csv` und `abdeckung-wps.csv` dieses Plans sind befund- bzw. WP-basiert und werden nicht von der Prüfung gelesen).
 
 ### WP-337 – Defekttests in CI: Erwartungsliste und Ratchet
 
@@ -467,6 +471,10 @@ DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-336
 | TST-04 | [Q] | TEILWEISE BESTANDEN | Teil | [WP-001](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-001) | `docs/audit/08-frontend-monitoring-nfr-tests.md:69` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
 | TST-02 | [B] | BESTANDEN | Teil | [WP-003](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-003) | `docs/audit/08-frontend-monitoring-nfr-tests.md:67` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:65` |
 
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
+
+**Beitrag zu Audit-WPs:** Prüfrahmen bzw. Voraussetzung für 65 Audit-WPs (Zuordnung in `abdeckung-wps.csv`).
+
 **Problem:** Das Abnahmeaudit hat 116 Go-Defekttests (Build-Tag `auditdefect`), 9 Shell-Defekttests (`tests/audit/*.test.sh`) und 11 Frontend-Defekttests (`*.auditdefect.tsx`, `frontend/vitest.auditdefect.config.ts`) versioniert. Sie laufen nur manuell; der Fortschritt der Korrektur ist nicht messbar, eine Behebung ohne Überführung des Tests bleibt unbemerkt, und ein Rückfall eines behobenen Defekts fällt nicht auf.
 
 **Akzeptanzkriterien:**
@@ -474,12 +482,12 @@ DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-336
 - [ ] `tests/audit/expected-failures.txt` (neu) listet jeden heute roten Defekttest als Zeile `art;ort;test;befund` (art `go`, `sh`, `vitest`, `e2e-real`); Ausgangsbestand = Stand des Audits (`audit/phase1-final/evidence/audit-tests/`), jede Zeile mit Befund-ID aus `PHASE1_FINDINGS.md`.
 - [ ] `tests/audit/run-auditdefect.sh` (neu) führt die Go-Defekttests je Modul (`backend`, `collector`, `edgecore`) mit `-tags auditdefect -json`, die Shell-Defekttests und `npx vitest run -c vitest.auditdefect.config.ts --reporter=json` aus und vergleicht mit der Liste: gelistet und grün → Fehler „überführen“ (Test in die reguläre Suite verschieben, Zeile löschen); nicht gelistet und rot → Fehler „Rückfall“; Abbruch vor der ersten Assertion (Build-Fehler, Panic, Setup) → Fehler; gelistet und rot → zulässig.
 - [ ] CI-Job `auditdefect` in `.github/workflows/ci.yml` mit denselben Diensten wie der Job `migrations` (TimescaleDB, NATS JetStream, Redis; frische Datenbank je Lauf) ruft das Skript blockierend auf und lädt den Vergleich als Artefakt hoch.
-- [ ] Selbsttest `tests/audit/run-auditdefect.test.sh` (neu) mit Fixture-Ergebnissen: grün+gelistet → rc ≠ 0, rot+ungelistet → rc ≠ 0, konsistent → rc 0; läuft im Job `installer-script-tests` bzw. einem bestehenden Shell-Test-Job.
+- [ ] Selbsttest `tests/audit/run-auditdefect.test.sh` (neu) mit Fixture-Ergebnissen: grün+gelistet → rc ≠ 0, rot+ungelistet → rc ≠ 0, konsistent → rc 0; läuft im Job `auditdefect` von `ci.yml` (siehe unten).
 - [ ] `tests/audit/README.md` (neu) beschreibt die Überführung je Testart (Go: Funktion in reguläre `_test.go` verschieben oder Build-Tag entfernen, wenn die Datei keine roten Tests mehr enthält; Frontend: `.auditdefect.tsx` → `.test.tsx`; Shell: Aufnahme in den regulären Job; Zeile in der Erwartungsliste löschen).
 - [ ] Erster CI-Lauf grün mit vollständiger Erwartungsliste (Nachweis: Lauf-ID im PR).
-- [ ] Format je Testart, festgelegt im Kopf von `tests/audit/expected-failures.txt` und in `tests/audit/README.md`: `go` → ort = Modul/Paketpfad (z. B. `backend/internal/discovery`), test = Testname (Subtests mit `/`); `sh` → ort = Skriptpfad, test = Fall-ID (Text vor dem ersten `:` einer Zeile `ok …` bzw. `FAIL …`; mehrere Zeilen derselben Fall-ID bilden einen Fall, der rot ist, sobald eine Zeile FAIL ist; eine FAIL-Zeile ohne Fall-ID ist ein Setup-Fehler); `vitest` → ort = Datei, test = vollständiger Testname; `e2e-real` → ort = `<projekt>:<spec-datei>` (bis WP-531 (`k-e2e-real-browsers`) nur `chromium`), test = vollständiger Titel. Selbsttest in `tests/audit/run-auditdefect.test.sh`: Fixture eines Shell-Defekttests mit zwei Fällen, davon einer rot → genau dieser Fall wird als rot gewertet; FAIL-Zeile ohne Fall-ID → rc ≠ 0.
+- [ ] Format je Testart, festgelegt im Kopf von `tests/audit/expected-failures.txt` und in `tests/audit/README.md`: `go` → ort = Modul/Paketpfad (z. B. `backend/internal/discovery`), test = Testname (Subtests mit `/`); `sh` → ort = Skriptpfad, test = Fall-ID (Text vor dem ersten `:` einer Zeile `ok …` bzw. `FAIL …`; mehrere Zeilen derselben Fall-ID bilden einen Fall, der rot ist, sobald eine Zeile FAIL ist; eine FAIL-Zeile ohne Fall-ID ist ein Setup-Fehler); `vitest` → ort = Datei, test = vollständiger Testname; `e2e-real` → ort = `<projekt>:<spec-datei>` (bis WP-532 (`k-e2e-real-browsers`) nur `chromium`), test = vollständiger Titel. Selbsttest in `tests/audit/run-auditdefect.test.sh`: Fixture eines Shell-Defekttests mit zwei Fällen, davon einer rot → genau dieser Fall wird als rot gewertet; FAIL-Zeile ohne Fall-ID → rc ≠ 0.
 - [ ] Der Vergleich prüft auch die Gegenrichtung: Eine Zeile, deren Test im Lauf ihrer Art nicht vorkommt (Datei gelöscht, Test verschoben oder umbenannt, Build-Tag entfernt), ist der Fehler „verwaist – Zeile löschen“. Ein gelisteter Test, der übersprungen wird (skip), ist der Fehler „nicht ausgeführt“. Jeder Lauf vergleicht nur die Zeilen der Arten, die er ausführt: Job `auditdefect` go, sh und vitest, `install-smoke.yml` e2e-real. Go-Defekttests sind genau die Testfunktionen aus Dateien mit `//go:build auditdefect`. Selbsttest-Fälle: verwaiste Zeile → rc ≠ 0; gelisteter Test mit skip → rc ≠ 0; e2e-real-Zeile im Job `auditdefect` → ignoriert, rc 0.
-- [ ] Der Job `auditdefect` stellt die Laufzeitvoraussetzungen der Defekttests bereit, damit kein Test aus Setup-Gründen rot und damit fälschlich „erwartet rot“ ist: `migrate up` vor den Tests und `-p 1` wie im Job `migrations`; `TEST_DATABASE_URL`, `TEST_NATS_URL` und `TEST_REDIS_URL`; nats-server über die workflowweiten Variablen `NATS_SERVER_VERSION` (2.10.x wie das Image `nats:2.10-alpine`) und `NATS_SERVER_SHA256` in `ci.yml` und einen einheitlichen Installationsschritt (Download, Prüfsummenprüfung, `TEST_NATS_SERVER_BIN` gesetzt), den WP-373 (`t4-natsedge-ci`) für die Jobs `migrations` und `go-modules` (collector) unverändert übernimmt, denn `backend/internal/discovery/collector_pki_auditdefect_test.go:258` und `collector/collectorcmd/lifecycle_auditdefect_test.go:214` brechen sonst per `t.Fatal` ab; kustomize v5.8.1 (`KUSTOMIZE`), terraform (`TERRAFORM`), amtool (`AMTOOL`), shellcheck, PyYAML, jq und `docker compose` für `tests/audit/*.test.sh` (`ops-config.test.sh` meldet sonst „kustomize available (set KUSTOMIZE)“ bzw. „terraform available“ als FAIL). Nachweis im ersten CI-Lauf (Lauf-ID im PR): keine FAIL-Zeile der Form „… available (set …)“ bzw. „… are required“ und kein Go-Test mit der Meldung „TEST_… is required“.
+- [ ] Der Job `auditdefect` stellt die Laufzeitvoraussetzungen der Defekttests bereit, damit kein Test aus Setup-Gründen rot und damit fälschlich „erwartet rot“ ist: `migrate up` vor den Tests und `-p 1` wie im Job `migrations`; `TEST_DATABASE_URL`, `TEST_NATS_URL` und `TEST_REDIS_URL`; nats-server über die workflowweiten Variablen `NATS_SERVER_VERSION` (2.10.x wie das Image `nats:2.10-alpine`) und `NATS_SERVER_SHA256` in `ci.yml` und einen einheitlichen Installationsschritt (Download, Prüfsummenprüfung, `TEST_NATS_SERVER_BIN` gesetzt), den WP-374 (`t4-natsedge-ci`) für die Jobs `migrations` und `go-modules` (collector) unverändert übernimmt, denn `backend/internal/discovery/collector_pki_auditdefect_test.go:258` und `collector/collectorcmd/lifecycle_auditdefect_test.go:214` brechen sonst per `t.Fatal` ab; kustomize v5.8.1 (`KUSTOMIZE`), terraform (`TERRAFORM`), amtool (`AMTOOL`), shellcheck, PyYAML, jq und `docker compose` für `tests/audit/*.test.sh` (`ops-config.test.sh` meldet sonst „kustomize available (set KUSTOMIZE)“ bzw. „terraform available“ als FAIL). Nachweis im ersten CI-Lauf (Lauf-ID im PR): keine FAIL-Zeile der Form „… available (set …)“ bzw. „… are required“ und kein Go-Test mit der Meldung „TEST_… is required“.
 - [ ] `tests/audit/run-auditdefect.test.sh` läuft im Job `auditdefect` von `ci.yml` ohne Pfadfilter, nicht im pfadgefilterten Job `installer-script-tests` von `install-smoke.yml`, dessen Filter `tests/audit/**` erst mit WP-338 (`k-e2e-real-ci`) enthält. Nachweis: Ein PR, der nur `tests/audit/run-auditdefect.sh` ändert, führt den Selbsttest aus (Lauf-ID im PR). `tests/audit/README.md` nennt für das Frontend beide Überführungen: `.auditdefect.tsx` → `.test.tsx` und `.auditdefect.ts` → `.test.ts` (z. B. `src/auth/session.auditdefect.ts`, `src/api/deprecatedPaths.auditdefect.ts`).
 
 **Dateien (7 Einträge, Migration = 2):**
@@ -520,6 +528,10 @@ TST-02;[B];A;tests/audit/run-auditdefect.test.sh;WP-337
 |---|---|---|---|---|---|---|
 | TST-03 | [B]; Teilumfang [P2] | TEILWEISE BESTANDEN | Teil | [WP-200](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-200) | `docs/audit/08-frontend-monitoring-nfr-tests.md:68` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:67` |
 | TST-04 | [Q] | TEILWEISE BESTANDEN | Teil | [WP-001](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-001) | `docs/audit/08-frontend-monitoring-nfr-tests.md:69` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
+
+**Beitrag zu Audit-WPs:** Prüfrahmen bzw. Voraussetzung für 65 Audit-WPs (Zuordnung in `abdeckung-wps.csv`).
 
 **Problem:** Die Real-Stack-Suite `frontend/e2e-real/` (7 Specs, 82 Tests, davon 26 rot mit bestätigtem Defekt) läuft nur lokal gegen einen von Hand aufgebauten Stack (`frontend/e2e-real/README.md`). Der CI-Job `e2e` prüft gegen ein gemocktes Backend, dessen Mocks die Fehlannahmen des Frontends übernehmen (Audit-Bericht 5.3); `install-smoke.yml` führt nur `e2e/onboarding.spec.ts` aus. Ohne CI-Lauf können die Korrektur-WPs ihre UI → API → DB-Nachweise nicht belegen.
 
@@ -564,7 +576,7 @@ TST-04;[Q];C;frontend/e2e-real/stack-smoke.spec.ts;WP-338
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Neue Specs (entstehen in den Korrektur-WPs); Browser außer Chromium (WP-531 (`k-e2e-real-browsers`)).
+**Nicht Bestandteil:** Neue Specs (entstehen in den Korrektur-WPs); Browser außer Chromium (WP-532 (`k-e2e-real-browsers`)).
 
 ## K1 Sicherheit und Mandantentrennung
 
@@ -610,7 +622,7 @@ TST-04;[Q];C;frontend/e2e-real/stack-smoke.spec.ts;WP-338
 - backend/internal/tenant/rls/audit_t1_cross_client_writes_auditdefect_test.go
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** keine Migration.
@@ -628,7 +640,7 @@ TEN-06;[B];B;backend/internal/tenant/rls/compliance_channel_integration_test.go;
 
 **Entscheidungsbedarf:** [E-08](../entscheidungen.md#e-08); [E-09](../entscheidungen.md#e-09)
 
-**Nicht Bestandteil:** Übrige Fehlerpfade von `compliance/handler.go` (Zeilen 54, 91, 144, 156, 176; WP-405 (`t1-err-modules`)); Kappung 100 Regeln × 100 CIs des Evaluators (Robustheit, kein Befund).
+**Nicht Bestandteil:** Übrige Fehlerpfade von `compliance/handler.go` (Zeilen 54, 91, 144, 156, 176; WP-407 (`t1-err-modules`)); Kappung 100 Regeln × 100 CIs des Evaluators (Robustheit, kein Befund).
 
 ### WP-340 – Rack-Sichtbarkeit über den Location-Scope; kein Site-Bypass, kein Mounts-Existenzorakel
 
@@ -648,7 +660,7 @@ TEN-06;[B];B;backend/internal/tenant/rls/compliance_channel_integration_test.go;
 | [F-002](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-002) | P0 | Site-Scope-Bypass im Rack-Kanal: site-fremde Racks lesbar und löschbar | schließt | WP-014, WP-208, WP-209, WP-213 |
 | [F-180](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-180) | P3 | GET /api/v1/racks/{id}/mounts eines Racks außerhalb des Scopes antwortet 200 (leer) statt 404 (Existenzorakel) | mit | WP-014, WP-208 |
 
-**Schließt Audit-WPs:** [WP-014](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-014) (FEHLGESCHLAGEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil)
+**Schließt Audit-WPs:** [WP-014](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-014) (FEHLGESCHLAGEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil), [WP-209](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-209) (TEILWEISE BESTANDEN, Teil), [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** `rackVisible` (`rack/pg_repository.go:58-60`) verbindet room und building per LEFT JOIN und lässt `building.site_id IS NULL` zu: Ist das building für einen site-gescopten Principal unsichtbar, liefert der JOIN NULL und das Rack wird sichtbar. Site-fremde Racks (auch anderer Clients) sind über Liste, Detail, Layout und GraphQL `rackLayout` lesbar und per DELETE löschbar; der location-Eintrag verwaist (F-002, P0). `ListMounts` (`:247-252`) prüft die Existenz nur über `organization_id` und antwortet für fremde Racks 200 statt 404 (F-180). `deskVisible` (`desk/pg_repository.go:62`) verwendet dasselbe Muster.
 
@@ -671,10 +683,10 @@ TEN-06;[B];B;backend/internal/tenant/rls/compliance_channel_integration_test.go;
 - backend/internal/desk/desk_scope_integration_test.go
 - backend/internal/tenant/rls/rack_channel_scope_integration_test.go (neu)
 - backend/internal/tenant/rls/audit_t1_review_rack_scope_auditdefect_test.go
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
-**Migration/RLS:** keine Migration (DB-seitige site_id für rack/room in WP-391 (`t1-located-site-scope`)).
+**Migration/RLS:** keine Migration (DB-seitige site_id für rack/room in WP-393 (`t1-located-site-scope`)).
 
 **Tests:**
 
@@ -690,7 +702,7 @@ TEN-09;[Q];B;backend/internal/tenant/rls/rack_channel_scope_integration_test.go;
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Fehlertexte von `mountWriteError` (WP-404 (`t1-err-ident-loc`)); denormalisierte `site_id` an room/rack (WP-391 (`t1-located-site-scope`)) und asset (T6 WP-390 (`t6-asset-site-scope`), F-141); Kabel (cableVisible unverändert).
+**Nicht Bestandteil:** Fehlertexte von `mountWriteError` (WP-406 (`t1-err-ident-loc`)); denormalisierte `site_id` an room/rack (WP-393 (`t1-located-site-scope`)) und asset (WP-392 (`t6-asset-site-scope`), F-141); Kabel (cableVisible unverändert).
 
 ### WP-341 – Dokumente und Wartungsfenster: Schreiben nur bei vollständig sichtbaren Links; exakte Zähler
 
@@ -741,7 +753,7 @@ TEN-09;[Q];B;backend/internal/tenant/rls/rack_channel_scope_integration_test.go;
 - backend/internal/tenant/rls/audit_t1_cross_client_writes_auditdefect_test.go (gelöscht)
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** Restriktive UPDATE/DELETE-Policies (alle Links sichtbar) und E-09-Anlageregel für document und maintenance_window, aufgeschobener Constraint-Trigger, angepasster `require_visible_parent`, Zählerfunktionen mit `app_scope_widen()`/`app_scope_restore()`, Schutz-Trigger für die Zählerspalten (`pg_trigger_depth() > 1`); ENABLE + FORCE bleibt; up/down mit Roundtrip.
@@ -811,7 +823,7 @@ TEN-06;[B];B;backend/internal/tenant/rls/module_object_writes_integration_test.g
 - backend/internal/tenant/rls/audit_t1_review_rack_scope_auditdefect_test.go (gelöscht)
 - backend/internal/tenant/rls/audit_t1_team_scope_auditdefect_test.go
 - docs/schema-baseline.md
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** Neue Spalten `client_id`/`site_id` an review_item, Ableitungstrigger, Nachführungstrigger auf ci (`propagate_review_item_scope`, mit `app_scope_widen()`/`app_scope_restore()`), Backfill, Policies nach TEN-05 mit E-09-Schreibregel und restriktiver Kandidaten-Policy; ENABLE + FORCE bleibt; up/down mit Roundtrip.
@@ -832,7 +844,7 @@ TEN-09;[Q];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;W
 
 **Entscheidungsbedarf:** [E-09](../entscheidungen.md#e-09); [E-08](../entscheidungen.md#e-08)
 
-**Nicht Bestandteil:** Review-Kanal in der Kanalmatrix (WP-407 (`t1-channel-matrix`)); Konflikt- und Merge-Logik der Reviews (Gruppe T3). Gruppenübergreifend: `discovery:manage` für scope_suggested (F-031, T4 WP-381 (`t4-scope-suggested-authz`), setzt dieses WP voraus; die Collector-Bindung des Vorschlags in `discovery/scope_handler.go` liefert dieses WP, T4 streicht sein gleichlautendes AK); resolved_by aus dem Principal (F-091, T3 WP-372 (`t3-review-actor`), gleiche Dateien `reviews/model.go` und `reviews/pg_repository.go`; die Merge-Reihenfolge legt die Integration fest).
+**Nicht Bestandteil:** Review-Kanal in der Kanalmatrix (WP-409 (`t1-channel-matrix`)); Konflikt- und Merge-Logik der Reviews (WP-479 (`t3-review-merge`), WP-576 (`t3-conflict-sources`)); `discovery:manage` für scope_suggested (F-031, WP-382 (`t4-scope-suggested-authz`), setzt dieses WP voraus; die Collector-Bindung des Vorschlags in `discovery/scope_handler.go` liefert dieses WP); resolved_by aus dem Principal (F-091, WP-373 (`t3-review-actor`), gleiche Dateien `reviews/model.go` und `reviews/pg_repository.go`, setzt dieses WP voraus).
 
 ### WP-343 – Fehlervertrag API-03 I: Klassifizierung, UUID-/NUL-Validierung, CMDB-Kern-Handler
 
@@ -850,7 +862,7 @@ TEN-09;[Q];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;W
 |---|---|---|---|---|
 | [F-047](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-047) | P2 | Handler geben rohe pgx/PostgreSQL-Fehlertexte (SQLSTATE, Constraint-, Tabellen-, RLS-Policy-Namen) und falsche Statuscodes zurück | Teil | WP-010, WP-011, WP-012, WP-014, WP-015, WP-016, WP-017, WP-018, WP-020, WP-021, WP-208 |
 
-**Schließt Audit-WPs:** [WP-010](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-010) (FEHLGESCHLAGEN, Teil), [WP-011](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-011) (FEHLGESCHLAGEN, Teil), [WP-013](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-013) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-010](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-010) (FEHLGESCHLAGEN, Teil), [WP-011](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-011) (FEHLGESCHLAGEN, Teil), [WP-012](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-012) (FEHLGESCHLAGEN, Teil), [WP-013](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-013) (TEILWEISE BESTANDEN, Teil), [WP-014](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-014) (FEHLGESCHLAGEN, Teil), [WP-015](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-015) (FEHLGESCHLAGEN, Teil), [WP-016](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-016) (FEHLGESCHLAGEN, Teil), [WP-017](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-017) (FEHLGESCHLAGEN, Teil), [WP-018](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-018) (FEHLGESCHLAGEN, Teil), [WP-020](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-020) (FEHLGESCHLAGEN, Teil), [WP-021](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-021) (FEHLGESCHLAGEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** Handler schreiben `err.Error()` per `api.WriteError` statt `api.WriteRepoError`; `api.ClassifyDBError` (`api/dberrors.go:44`) kennt SQLSTATE 22021 (ungültige Bytefolge/NUL) nicht, und pgx-Kodierfehler (z. B. int4-Überlauf) sind keine `PgError`. Betroffen in diesem Schnitt: `relationshiptype/handler.go` (writeError-Default 409), `citype/handler.go:320-324`, `lifecycle/handler.go` (Create 409, `:165-167` 422 mit Rohtext), `override/handler.go:176-178`, `privacy/handler.go:68-71`, `:87-90` – SQLSTATE-, Constraint- und Treibertexte an Clients (F-047, Subtests WP-010/WP-011 von `TestAuditT1RepositoryErrorsAreSanitized`).
 
@@ -858,7 +870,7 @@ TEN-09;[Q];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;W
 
 - [ ] `api.ClassifyDBError` bildet 22021 auf 400 („a field value has an invalid format or is out of range“) ab; neue Helfer `api.ParseUUIDParam`/`api.RequireUUID` (400 bzw. 404 für Pfadparameter, 422 Feldfehler für Body-Felder) und `api.RejectNUL` für Textfelder; Unit-Tests in `api/dberrors_test.go` und `api/params_test.go`.
 - [ ] relationshiptype, citype, lifecycle, override und privacy melden Repository-Fehler nur noch über bekannte Sentinels mit festen Texten oder `api.WriteRepoError`; Duplikat 409 ohne Constraint-Namen, `applies_to` unbekannt 422 Feldfehler, `retention_days` außerhalb 1..2147483647 400/422 Feldfehler, NUL 400.
-- [ ] Neue reguläre Datei `tenant/rls/error_sanitization_integration_test.go` mit `TestRepositoryErrorsAreSanitized` (Leck-Marker wie `t1LeakMarkers`); die 6 Fälle WP-010/WP-011 sind aus der Tabelle von `audit_t1_error_sanitization_auditdefect_test.go` dorthin verschoben und grün (erwartete Status wie im Defekttest). Die Zeile von `TestAuditT1RepositoryErrorsAreSanitized` bleibt in `tests/audit/expected-failures.txt`, bis WP-405 (`t1-err-modules`) den letzten Fall überführt. `t1LeakMarkers` wird aus der Defektdatei (`audit_t1_error_sanitization_auditdefect_test.go:45`) in `tenant/rls/error_sanitization_integration_test.go` verschoben (eine Deklaration, vom Defekttest weiter genutzt); `go vet ./internal/tenant/rls/` und `go vet -tags auditdefect ./internal/tenant/rls/` kompilieren.
+- [ ] Neue reguläre Datei `tenant/rls/error_sanitization_integration_test.go` mit `TestRepositoryErrorsAreSanitized` (Leck-Marker wie `t1LeakMarkers`); die 6 Fälle WP-010/WP-011 sind aus der Tabelle von `audit_t1_error_sanitization_auditdefect_test.go` dorthin verschoben und grün (erwartete Status wie im Defekttest). Die Zeile von `TestAuditT1RepositoryErrorsAreSanitized` bleibt in `tests/audit/expected-failures.txt`, bis WP-407 (`t1-err-modules`) den letzten Fall überführt. `t1LeakMarkers` wird aus der Defektdatei (`audit_t1_error_sanitization_auditdefect_test.go:45`) in `tenant/rls/error_sanitization_integration_test.go` verschoben (eine Deklaration, vom Defekttest weiter genutzt); `go vet ./internal/tenant/rls/` und `go vet -tags auditdefect ./internal/tenant/rls/` kompilieren.
 - [ ] Retest (Teil F-047): `cd backend && TEST_DATABASE_URL=… go test -count=1 -run '^TestRepositoryErrorsAreSanitized$' ./internal/tenant/rls/` grün für WP-010_relationship_type_duplicate, WP-010_ci_type_with_a_NUL_byte, WP-011_lifecycle_definition_duplicate, _invalid_applies_to, _source_policy_with_a_NUL_byte, _privacy_retention_days_beyond_int4; Router-Probe `SP/work/verify-B02/router-probe.log`-Fälle ohne `SQLSTATE`/`ERROR:`.
 - [ ] Offener Nachweis WP-013: Ein Fall „discovery-scope mit NUL im Namen“ im selben Test liefert 400 statt generischem 500 (22021-Abbildung).
 - [ ] Regression: bestehende Unit- und Integrationstests der geänderten Pakete (`go test` mit `TEST_DATABASE_URL`) grün; `go vet` und `golangci-lint` ohne neue Meldungen.
@@ -893,7 +905,7 @@ TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Fehlerpfade der Pakete user, permission, rack, savedview, search, monitoring (WP-404 (`t1-err-ident-loc`)) und der Asset-/Modulpakete (WP-405 (`t1-err-modules`)); POST /relationships 500 (F-145, Gruppe T6).
+**Nicht Bestandteil:** Fehlerpfade der Pakete user, permission, rack, savedview, search, monitoring (WP-406 (`t1-err-ident-loc`)) und der Asset-/Modulpakete (WP-407 (`t1-err-modules`)); POST /relationships 500 (F-145, WP-401 (`t6-rel-errors`)).
 
 ### WP-344 – Metrik-Serien nur für sichtbare CIs: MetricNames-Prädikat und 404 in CIMetrics
 
@@ -912,7 +924,7 @@ TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;
 |---|---|---|---|---|
 | [F-052](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-052) | P2 | Metrik-Serienamen eines fremden Client-CI über GET /api/v1/cis/{id}/metrics sichtbar | schließt | WP-016, WP-040 |
 
-**Schließt Audit-WPs:** [WP-016](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-016) (FEHLGESCHLAGEN, Teil), [WP-040](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-040) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-016](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-016) (FEHLGESCHLAGEN, Teil), [WP-040](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-040) (TEILWEISE BESTANDEN, Teil), [WP-190](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-190) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** `MetricNames` (`monitoring/pg_store.go:230-236`, eingeführt mit WP-190) fehlt das Prädikat `ci_id IN (SELECT id FROM ci)` aus `metricWhere` (`:187-191`), und `CIMetrics` (`monitoring/monitoring.go:836-872`) prüft die CI-Sichtbarkeit nicht. `GET /api/v1/cis/{id}/metrics` liefert einem Client-1-Principal 200 mit den Serienamen eines Client-2-CI (F-052).
 
@@ -934,7 +946,7 @@ TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;
 - backend/internal/tenant/rls/audit_t1_scope_derivation_auditdefect_test.go
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** keine Migration (DB-seitiger Scope der Views in WP-350 (`t1-metric-views`)).
@@ -953,7 +965,7 @@ TEN-06;[B];B;backend/internal/tenant/rls/ci_metrics_channel_integration_test.go;
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Fehlertexte von CreateAlert (WP-404 (`t1-err-ident-loc`)); Views (WP-350 (`t1-metric-views`)); Metrics-Kanal der Kanalmatrix (WP-407 (`t1-channel-matrix`)).
+**Nicht Bestandteil:** Fehlertexte von CreateAlert (WP-406 (`t1-err-ident-loc`)); Views (WP-350 (`t1-metric-views`)); Metrics-Kanal der Kanalmatrix (WP-409 (`t1-channel-matrix`)).
 
 ### WP-345 – Kanten-Scope folgt CI-Verschiebungen gescopter Principals; Kanten zu org-weiten CIs nach Entscheidung
 
@@ -976,7 +988,7 @@ TEN-06;[B];B;backend/internal/tenant/rls/ci_metrics_channel_integration_test.go;
 
 **Schließt Audit-WPs:** [WP-025](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-025) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** Die Propagationstrigger (`propagate_ci_scope`, 000061:131-148, SECURITY INVOKER) und `derive_edge_scope` laufen unter der RLS des Verschiebenden: Verschiebt ein client- oder site-gescopter Principal ein CI, bleiben Kanten zu Endpunkten außerhalb seines Scopes unsichtbar und werden übersprungen; ihr `source_/target_`-Scope veraltet, und Beobachter sehen Kanten mit IDs unsichtbarer CIs (F-050). Die strikte Zwei-Endpunkt-WITH-CHECK (000061:239-241, 000063:84-86) verhindert Kanten vom eigenen CI zu sichtbarer org-weiter Infrastruktur (F-182, Entscheidung offen). Die offenen WP-025-Nachweise zur Ableitungstabelle und zum Backfill liefert WP-532 (`t1-ev-child-derivation`).
+**Problem:** Die Propagationstrigger (`propagate_ci_scope`, 000061:131-148, SECURITY INVOKER) und `derive_edge_scope` laufen unter der RLS des Verschiebenden: Verschiebt ein client- oder site-gescopter Principal ein CI, bleiben Kanten zu Endpunkten außerhalb seines Scopes unsichtbar und werden übersprungen; ihr `source_/target_`-Scope veraltet, und Beobachter sehen Kanten mit IDs unsichtbarer CIs (F-050). Die strikte Zwei-Endpunkt-WITH-CHECK (000061:239-241, 000063:84-86) verhindert Kanten vom eigenen CI zu sichtbarer org-weiter Infrastruktur (F-182, Entscheidung offen). Die offenen WP-025-Nachweise zur Ableitungstabelle und zum Backfill liefert WP-533 (`t1-ev-child-derivation`).
 
 **Akzeptanzkriterien:**
 
@@ -995,7 +1007,7 @@ TEN-06;[B];B;backend/internal/tenant/rls/ci_metrics_channel_integration_test.go;
 - backend/internal/tenant/rls/edge_scope_integration_test.go (neu)
 - backend/internal/tenant/rls/audit_t1_scope_derivation_auditdefect_test.go
 - docs/schema-baseline.md
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** Propagations- und Ableitungsfunktionen mit org-weitem Scope-Fenster (Hilfsfunktionen aus WP-341 (`t1-doc-window-writes`)); WITH CHECK der Kantentabellen nur bei Freigabe von Option 2 der Entscheidung E-62 vor dem Merge; up/down mit Roundtrip.
@@ -1015,7 +1027,7 @@ IMP-07;[B];B;backend/internal/tenant/rls/edge_scope_integration_test.go;WP-345
 
 **Entscheidungsbedarf:** [E-62](entscheidungen.md#e-62) Beziehungen zwischen eigenem CI und org-weitem CI (offen, Empfehlung als Übergangsregel); [E-09](../entscheidungen.md#e-09)
 
-**Nicht Bestandteil:** POST /relationships 500 bei fremdem CI (F-145, Gruppe T6); `has_relationship`-Filter in `savedview/filter.go` (durch die Kanten-Policy abgedeckt). Ableitungs-Regressionstabelle und Backfill-Test 000061 (WP-532 (`t1-ev-child-derivation`)); Option 2 von E-62 ohne Freigabe (Folge-WP).
+**Nicht Bestandteil:** POST /relationships 500 bei fremdem CI (F-145, WP-401 (`t6-rel-errors`)); `has_relationship`-Filter in `savedview/filter.go` (durch die Kanten-Policy abgedeckt). Ableitungs-Regressionstabelle und Backfill-Test 000061 (WP-533 (`t1-ev-child-derivation`)); Option 2 von E-62 ohne Freigabe (Folge-WP).
 
 ### WP-346 – OpenSearch: Reindex nach Rack-Platzierung und PG-Gegenprüfung der Treffer
 
@@ -1054,7 +1066,7 @@ IMP-07;[B];B;backend/internal/tenant/rls/edge_scope_integration_test.go;WP-345
 - backend/internal/search/hybrid_integration_test.go
 - backend/internal/search/opensearch_placement_integration_test.go (neu)
 - backend/internal/search/audit_t1_opensearch_scope_auditdefect_test.go (gelöscht)
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** keine Migration.
@@ -1072,7 +1084,7 @@ TEC-12;[P5];B;backend/internal/search/opensearch_placement_integration_test.go;W
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
-**Nicht Bestandteil:** Test gegen echtes OpenSearch (WP-533 (`t1-ev-opensearch-real`)); RAG-Chunks (unverändert); Feldrechte RBA-07.
+**Nicht Bestandteil:** Test gegen echtes OpenSearch (WP-534 (`t1-ev-opensearch-real`)); RAG-Chunks (unverändert); Feldrechte RBA-07.
 
 ### WP-347 – Generische Job-API: gespiegelte Export-Jobs nur für den Ersteller
 
@@ -1129,7 +1141,7 @@ TEN-09;[Q];B;backend/internal/tenant/rls/export_job_channel_integration_test.go;
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Real-Stack-Export eines client-gescopten Nutzers (WP-534 (`t1-ev-client-real-stack`)); Admin-Sicht auf fremde Exporte (in EXP-01 nicht vorgesehen; Erweiterung nur per Folgeentscheidung).
+**Nicht Bestandteil:** Real-Stack-Export eines client-gescopten Nutzers (WP-535 (`t1-ev-client-real-stack`)); Admin-Sicht auf fremde Exporte (in EXP-01 nicht vorgesehen; Erweiterung nur per Folgeentscheidung).
 
 ### WP-348 – Installer: dedizierter Laufzeit-Login ohne SUPERUSER/BYPASSRLS
 
@@ -1271,7 +1283,7 @@ TEN-03;[B];B;backend/internal/database/scopetest/scopetest_integration_test.go;W
 |---|---|---|---|---|
 | [F-051](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-051) | P2 | Metrik-Views nur org-begrenzt: metric_sample ohne Client-/Site-Scope auf DB-Ebene | schließt | WP-025, WP-039, WP-040 |
 
-**Schließt Audit-WPs:** [WP-039](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-039) (TEILWEISE BESTANDEN, schließt), [WP-040](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-040) (TEILWEISE BESTANDEN, Teil), [WP-025](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-025) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-025](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-025) (TEILWEISE BESTANDEN, Teil), [WP-039](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-039) (TEILWEISE BESTANDEN, schließt), [WP-040](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-040) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** `metric_sample_v` und `metric_sample_1h_v` (Migration 000071) filtern nur `organization_id = app.org_id`; ADR `docs/decisions/0001-timescale-rls.md` Punkt 4 (Z. 98-99) stellt Client/Site zurück. Ein Client-1- bzw. Site-1-Principal liest per WithTenant die Samples von Client-2-CIs direkt aus beiden Views (F-051). Der Scope hängt allein an Prädikaten der Store-Abfragen; eine fehlende (F-052) führt direkt zum Leck. WP-039 AK1 verlangt eine org- und scope-begrenzte Variante, WP-025 AK1 den Scope für metric_sample.
 
@@ -1294,7 +1306,7 @@ TEN-03;[B];B;backend/internal/database/scopetest/scopetest_integration_test.go;W
 - backend/internal/monitoring/audit_t1_metric_scope_integration_test.go
 - backend/internal/monitoring/audit_t1_metric_scope_auditdefect_test.go (gelöscht)
 - docs/schema-baseline.md
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** Views `metric_sample_v`/`metric_sample_1h_v` neu mit Client-/Site-Prädikat über die Scope-GUCs; Hypertable und Aggregat bleiben ohne RLS (ADR); down stellt die Org-only-Views wieder her; Roundtrip.
@@ -1418,7 +1430,7 @@ TEN-03;[B];B;backend/internal/database/tenantguard_test.go;WP-351
 - backend/migrations/<nächste Nr.>_tenant_truncate_guard.down.sql (neu)
 - docs/schema-baseline.md
 - docs/README.md
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** TRUNCATE-Guard-Trigger auf allen Mandantentabellen, Schutz gegen Entfernen durch den Owner; up/down mit Roundtrip.
@@ -1437,7 +1449,7 @@ DB-04;nicht geliefert;B;backend/internal/database/role_check_integration_test.go
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Installer (WP-348 (`t1-runtime-login`)); Testfixtures (WP-349 (`t1-runtime-login-tests`)); Werkzeuge und Lasttest (WP-351 (`t1-runtime-login-tools`)); Down-Migration 000056 (WP-423 (`t1-mig56-down`)).
+**Nicht Bestandteil:** Installer (WP-348 (`t1-runtime-login`)); Testfixtures (WP-349 (`t1-runtime-login-tests`)); Werkzeuge und Lasttest (WP-351 (`t1-runtime-login-tools`)); Down-Migration 000056 (WP-427 (`t1-mig56-down`)).
 
 ### WP-353 – RLS-Matrix für vererbte Tabellen mit gescopten Principals; disposal_record DB-gescopt
 
@@ -1458,7 +1470,7 @@ DB-04;nicht geliefert;B;backend/internal/database/role_check_integration_test.go
 | [F-354](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-354) | P2 | RLS-Matrix (TestRLSMatrix) überspringt client-, site- und team-gescopte Principals auf den vererbten Tabellen document, maintenance_window und training_assignment und verdeckt damit F-004/F-048 | schließt | WP-065 |
 | [F-186](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-186) | P3 | Traceability meldet MGT-02 (Disposal) durch WP-028 geschlossen, disposal_record behält aber eine reine Org-Policy | mit | WP-028 |
 
-**Schließt Audit-WPs:** [WP-065](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-065) (TEILWEISE BESTANDEN, Teil), [WP-028](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-028) (FEHLGESCHLAGEN, Teil)
+**Schließt Audit-WPs:** [WP-028](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-028) (FEHLGESCHLAGEN, Teil), [WP-065](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-065) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** `TestRLSMatrix` überspringt für die vererbten Tabellen document, maintenance_window und training_assignment alle gescopten Principals (`matrix_integration_test.go:255`, `if tbl.inherited && p.scoped() { continue }`); genau dort bestand der Cross-Client-Schreibdefekt F-004/F-048 unentdeckt (F-354, P2; WP-065 AK1). Die NULL-Lesesemantik ist im Repo-Test nur „maybe“. disposal_record behält eine reine Org-Policy, die Traceability meldet MGT-02 dennoch durch WP-028 geschlossen (`traceability.csv:124`, `abdeckung.csv:163`; F-186). Offen (WP-028): Site-Scope- und Propagationstests für Modultabellen. key_assignment.site_id ist nicht ableitbar (key_item ohne Standort, `location TEXT` in 000050) und wird in `docs/schema-baseline.md` begründet; document und maintenance_window bleiben Mehrobjektzeilen ohne eigene client_id, ihr Scope ergibt sich über die Links (WP-341 (`t1-doc-window-writes`)).
 
@@ -1502,7 +1514,7 @@ TST-02;[B];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-353
 
 **Entscheidungsbedarf:** [E-09](../entscheidungen.md#e-09)
 
-**Nicht Bestandteil:** Katalogregel für fehlende Scope-Spalten (WP-391 (`t1-located-site-scope`)); Kanalmatrix (WP-407 (`t1-channel-matrix`)).
+**Nicht Bestandteil:** Katalogregel für fehlende Scope-Spalten (WP-393 (`t1-located-site-scope`)); Kanalmatrix (WP-409 (`t1-channel-matrix`)).
 
 ### WP-354 – API-Keys: Rotation und Widerruf nur durch Owner oder Rechteinhaber; Bindung an einen Service-Account nie breiter als der Ersteller
 
@@ -1571,7 +1583,7 @@ RBA-08;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-354
 
 **Entscheidungsbedarf:** [E-13](../entscheidungen.md#e-13)
 
-**Nicht Bestandteil:** Rollenzuweisung an Service-Accounts (WP-355 (`t2-sa-role-ceiling`)); Grant-Obergrenze für Einladungen und Benutzer-Rollenzuweisungen (Befund F-015, Gruppe T6; kann `identity.GrantCeiling` nutzen); Quote `max_api_keys` (WP-470 (`t2-ent-quotas`)).
+**Nicht Bestandteil:** Rollenzuweisung an Service-Accounts (WP-355 (`t2-sa-role-ceiling`)); Grant-Obergrenze für Einladungen und Benutzer-Rollenzuweisungen (Befund F-015, WP-394 (`t6-invite-ceiling`); kann `identity.GrantCeiling` nutzen); Quote `max_api_keys` (WP-472 (`t2-ent-quotas`)).
 
 ### WP-355 – Service-Account-Rollen nur mit role:manage und innerhalb der eigenen Rechte
 
@@ -1637,7 +1649,7 @@ API-05;[B];B;backend/internal/user/service_account_integration_test.go;WP-355
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** Webhook-Filter gebundener Subscriptions (WP-356 (`t2-webhook-bound-scope`)); Grant-Obergrenze von Benutzer-Rollenzuweisung und Einladungen (F-015, Gruppe T6).
+**Nicht Bestandteil:** Webhook-Filter gebundener Subscriptions (WP-356 (`t2-webhook-bound-scope`)); Grant-Obergrenze von Benutzer-Rollenzuweisung und Einladungen (F-015, WP-394 (`t6-invite-ceiling`)).
 
 ### WP-356 – Gebundene Webhook-Subscriptions erhalten nur Ereignisse lesbarer Objekte: Scope serverseitig, Leserechte wie RLS, fail-closed bei unbekanntem Scope
 
@@ -1763,7 +1775,7 @@ AUT-09;[B];B;backend/internal/signup/mfa_test.go;WP-357
 
 **Entscheidungsbedarf:** [E-14](../entscheidungen.md#e-14)
 
-**Nicht Bestandteil:** MFA bei späterer org_admin-Vergabe, für eingeladene org_admins und für Bestands-Admins (WP-358 (`t2-mfa-role-sync`)); Übernahme in bestehende Realms und Dokumentation des Rollenmodells (F-200, WP-424 (`t2-kc-upgrade`)); Demo-Admin des Dev-Realms (F-113, Gruppe T4, gleiche Datei `realm-reticora-dev.json`).
+**Nicht Bestandteil:** MFA bei späterer org_admin-Vergabe, für eingeladene org_admins und für Bestands-Admins (WP-358 (`t2-mfa-role-sync`)); Übernahme in bestehende Realms und Dokumentation des Rollenmodells (F-200, WP-428 (`t2-kc-upgrade`)); Demo-Admin des Dev-Realms (F-113, WP-433 (`t4-seed-demo`), gleiche Datei `realm-reticora-dev.json`).
 
 ### WP-358 – MFA-Pflicht bei jeder org_admin-Vergabe: Rollenzuweisung, Einladungsannahme, Erstlogin und Bestandsabgleich setzen mfa_required in Keycloak
 
@@ -1779,7 +1791,7 @@ AUT-09;[B];B;backend/internal/signup/mfa_test.go;WP-357
 
 | Befund | Prio | Titel | Beitrag | Betroffene WPs |
 |---|---|---|---|---|
-| [F-005](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-005) | P0 | MFA für org_admins aus Signup, Einladung, Operator-Pfad und Gruppe reticora-admin nicht erzwungen | schließt | WP-044 |
+| [F-005](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-005) | P0 | MFA für org_admins aus Signup, Einladung, Operator-Pfad und Gruppe reticora-admin nicht erzwungen | Teil | WP-044 |
 
 **Schließt Audit-WPs:** [WP-044](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-044) (FEHLGESCHLAGEN, Teil)
 
@@ -1830,7 +1842,7 @@ AUT-09;[B];B;frontend/e2e-real/mfa-admin.spec.ts;WP-358
 
 **Entscheidungsbedarf:** [E-14](../entscheidungen.md#e-14)
 
-**Nicht Bestandteil:** Grant-Obergrenze von AssignRole und Einladungen (F-015, Gruppe T6; gleiche Funktionen, Merge-Reihenfolge durch die Integration); Quotenprüfung und Bootstrap-Serialisierung in `resolveLogin` (WP-470 (`t2-ent-quotas`), WP-570 (`t2-first-login`); gleiche Funktion, Merge-Reihenfolge durch die Integration); Entzug von `mfa_required` beim Rollenentzug (bewusst nicht, MFA bleibt bestehen); MFA per Org-Policy für weitere Rollen (AUT-09 zweiter Teil, kein Befund); MFA für org_admin aus IdP-Gruppe oder Default-Rolle im Login-Pfad (WP-366 (`t2-mfa-login-path`)); AMR-Prüfung im Backend (Teil 3 der Ursache von F-005: das Backend prüft AMR nur für Operatoren, `identity/oidc.go:54-57`) bleibt unverändert, weil der Realm weder acr noch amr ausgibt (F-069); die MFA-Pflicht wird über die Keycloak-Rolle `mfa_required` durchgesetzt.
+**Nicht Bestandteil:** Grant-Obergrenze von AssignRole und Einladungen (F-015, WP-394 (`t6-invite-ceiling`); gleiche Funktionen, setzt dieses WP voraus); Quotenprüfung und Bootstrap-Serialisierung in `resolveLogin` (WP-472 (`t2-ent-quotas`), WP-570 (`t2-first-login`); gleiche Funktion; WP-472 (`t2-ent-quotas`) setzt dieses WP voraus, mit WP-570 (`t2-first-login`) besteht keine Abhängigkeit, das später gemergte WP gleicht `resolveLogin` an); Entzug von `mfa_required` beim Rollenentzug (bewusst nicht, MFA bleibt bestehen); MFA per Org-Policy für weitere Rollen (AUT-09 zweiter Teil, kein Befund); MFA für org_admin aus IdP-Gruppe oder Default-Rolle im Login-Pfad (WP-367 (`t2-mfa-login-path`)); AMR-Prüfung im Backend (Teil 3 der Ursache von F-005: das Backend prüft AMR nur für Operatoren, `identity/oidc.go:54-57`) bleibt unverändert, weil der Realm weder acr noch amr ausgibt (F-069); die MFA-Pflicht wird über die Keycloak-Rolle `mfa_required` durchgesetzt.
 
 ### WP-359 – Deaktivierung und Anonymisierung: Session-Widerruf erst nach org-gebundener Änderung in derselben Transaktion; Service-Account-Keys nach Entscheidung
 
@@ -1893,7 +1905,7 @@ AUT-02;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-359
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01); [E-64](entscheidungen.md#e-64) Widerruf von Service-Account-Keys bei Deaktivierung des anlegenden Benutzers (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** UI für Deaktivieren/Reaktivieren/Löschen (WP-571 (`t2-user-admin-ui`)); Anonymisierung im Aufbewahrungslauf (`privacy`, Signatur unverändert); rohe pgx-Fehlertexte der Handler (F-047, Gruppe T1).
+**Nicht Bestandteil:** UI für Deaktivieren/Reaktivieren/Löschen (WP-571 (`t2-user-admin-ui`)); Anonymisierung im Aufbewahrungslauf (`privacy`, Signatur unverändert); rohe pgx-Fehlertexte der Handler (F-047, WP-343 (`t1-err-core`), WP-406 (`t1-err-ident-loc`), WP-407 (`t1-err-modules`), WP-408 (`t1-err-guard`)).
 
 ### WP-360 – KI-Ask nur mit Org-Opt-in und ai-Entitlement; Air-Gap- und Wiring-Tests versioniert
 
@@ -1954,7 +1966,7 @@ AI-02;[A];B;backend/internal/server/t2_ai_optin_test.go;WP-360
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
-**Nicht Bestandteil:** Setzen des Opt-in (WP-461 (`t2-ai-optin-api`)); KI-Oberfläche (Modul im G1-Release nach E-03 abgeschaltet).
+**Nicht Bestandteil:** Setzen des Opt-in (WP-463 (`t2-ai-optin-api`)); KI-Oberfläche (Modul im G1-Release nach E-03 abgeschaltet).
 
 ### WP-361 – Personalisierte Operator-Anmeldung: Realm-Gruppe operators, acr/LoA für MFA, Real-Stack-Test mit OTP
 
@@ -2010,7 +2022,7 @@ SEC-07;[B];B;frontend/e2e-real/operator-login.spec.ts;WP-361
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** Übernahme in bestehende Realms (WP-424 (`t2-kc-upgrade`)); Break-Glass-Alarm (WP-362 (`t2-break-glass-alert`)); Audit-Atomarität (WP-564 (`t2-operator-entitlement-write`)); Operator-Oberfläche.
+**Nicht Bestandteil:** Übernahme in bestehende Realms (WP-428 (`t2-kc-upgrade`)); Break-Glass-Alarm (WP-362 (`t2-break-glass-alert`)); Audit-Atomarität (WP-564 (`t2-operator-entitlement-write`)); Operator-Oberfläche.
 
 ### WP-362 – Break-Glass-Nutzung alarmiert: Prometheus-Regel, promtool-Test und Shelltest in der CI
 
@@ -2030,13 +2042,13 @@ SEC-07;[B];B;frontend/e2e-real/operator-login.spec.ts;WP-361
 
 **Schließt Audit-WPs:** [WP-070](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-070) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** Der Zähler `reticora_operator_break_glass_total` (`backend/internal/operator/auth.go:84-100`) wird von keiner Regel unter `deploy/monitoring/` ausgewertet (`grep operator_break_glass deploy/` leer); SEC-07 verlangt, dass jede Nutzung des Break-Glass-Tokens alarmiert (F-068, `tests/audit/WP-362 (`t2-break-glass-alert`).test.sh` FAILS). Ohne Alarm bleibt ein Missbrauch des geteilten Operator-Tokens, das organisationsübergreifend Entitlements schreibt, unbemerkt; deshalb K1 (Sicherheitskontrolle nach SEC-07), obwohl das Ergebnis eine Monitoring-Regel ist.
+**Problem:** Der Zähler `reticora_operator_break_glass_total` (`backend/internal/operator/auth.go:84-100`) wird von keiner Regel unter `deploy/monitoring/` ausgewertet (`grep operator_break_glass deploy/` leer); SEC-07 verlangt, dass jede Nutzung des Break-Glass-Tokens alarmiert (F-068, `tests/audit/t2-break-glass-alert.test.sh` FAILS). Ohne Alarm bleibt ein Missbrauch des geteilten Operator-Tokens, das organisationsübergreifend Entitlements schreibt, unbemerkt; deshalb K1 (Sicherheitskontrolle nach SEC-07), obwohl das Ergebnis eine Monitoring-Regel ist.
 
 **Akzeptanzkriterien:**
 
 - [ ] `deploy/monitoring/operator-rules.yaml` (neu, PrometheusRule wie `slo-rules.yaml`): Alert `ReticoraOperatorBreakGlassUsed` mit `increase(reticora_operator_break_glass_total[5m]) > 0`, `severity: critical`, Annotation mit Runbook-Verweis; `alertmanager.yaml` leitet critical an den On-Call-Empfänger (Route geprüft, bei Bedarf ergänzt).
 - [ ] promtool-Unit-Test `deploy/monitoring/tests/operator-rules.test.yaml` (neu): eine Nutzung → Alert feuert innerhalb von 5 min; keine Nutzung → kein Alert; `promtool test rules` läuft im CI-Job `gate` (Regelgruppen aus der PrometheusRule extrahiert).
-- [ ] `./tests/audit/WP-362 (`t2-break-glass-alert`).test.sh` → PASS (Retest aus F-068) und im regulären CI-Job `gate` aufgerufen; Zeile aus `tests/audit/expected-failures.txt` entfernt.
+- [ ] `./tests/audit/t2-break-glass-alert.test.sh` → PASS (Retest aus F-068) und im regulären CI-Job `gate` aufgerufen; Zeile aus `tests/audit/expected-failures.txt` entfernt.
 - [ ] `docs/ops/workers.md` (Abschnitt Alarme) nennt den Alert und das Vorgehen nach einer Break-Glass-Nutzung.
 
 **Dateien (8 Einträge, Migration = 2):**
@@ -2055,7 +2067,7 @@ SEC-07;[B];B;frontend/e2e-real/operator-login.spec.ts;WP-361
 **Tests:**
 
 - promtool-Regeltest `deploy/monitoring/tests/operator-rules.test.yaml`.
-- `tests/audit/WP-362 (`t2-break-glass-alert`).test.sh` im CI-Job `gate`.
+- `tests/audit/t2-break-glass-alert.test.sh` im CI-Job `gate`.
 
 **Traceability (`docs/traceability.csv`):**
 
@@ -2130,7 +2142,7 @@ RBA-01;[B];B;backend/internal/server/authz_catalog_test.go;WP-363
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** Redaktion von Kanal-URL-Tokens und Zustellinhalten (F-154, Gruppe T6); das Routen-Mapping von F-154 ist hier mit umgesetzt.
+**Nicht Bestandteil:** Redaktion von Kanal-URL-Tokens und Zustellinhalten (F-154, WP-398 (`t6-ntf-authz`)); das Routen-Mapping von F-154 ist hier mit umgesetzt.
 
 ### WP-364 – Validierungsstufe aus OpenAPI ableiten: cookie-only Refresh und bodylose POSTs erreichen den Handler; Test der main.go-Kette
 
@@ -2138,7 +2150,7 @@ RBA-01;[B];B;backend/internal/server/authz_catalog_test.go;WP-363
 
 **Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`)
 
-**Vorgezogen:** nach Schwere K2 Datenintegrität und Kernprozesse; als Voraussetzung von WP-365 (`t2-agent-redirect`) in K1 eingeordnet.
+**Vorgezogen:** nach Schwere K2 Datenintegrität und Kernprozesse; als Voraussetzung von WP-365 (`t2-agent-redirect`), WP-366 (`t2-spa-session`) in K1 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -2149,9 +2161,9 @@ RBA-01;[B];B;backend/internal/server/authz_catalog_test.go;WP-363
 
 | Befund | Prio | Titel | Beitrag | Betroffene WPs |
 |---|---|---|---|---|
-| [F-018](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-018) | P1 | OpenAPI-Validator weist jeden SPA-Refresh (POST /auth/refresh ohne Body/Content-Type) mit 400 ab; gleiche Abweichung bei weiteren bodylosen POSTs | schließt | WP-009, WP-050, WP-066 |
+| [F-018](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-018) | P1 | OpenAPI-Validator weist jeden SPA-Refresh (POST /auth/refresh ohne Body/Content-Type) mit 400 ab; gleiche Abweichung bei weiteren bodylosen POSTs | Teil | WP-009, WP-050, WP-066 |
 
-**Schließt Audit-WPs:** [WP-050](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-050) (TEILWEISE BESTANDEN, Teil), [WP-066](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-066) (FEHLGESCHLAGEN, Teil)
+**Schließt Audit-WPs:** [WP-009](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-009) (TEILWEISE BESTANDEN, Teil), [WP-050](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-050) (TEILWEISE BESTANDEN, Teil), [WP-066](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-066) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** `registerKnownRoutes` (`backend/internal/middleware/openapi.go:233,301`) führt `POST /api/v1/auth/refresh` als `bodyJSON`, obwohl die Operation `refreshSession` keinen requestBody hat; jede registrierte POST-Route verlangt `Content-Type: application/json` (`openapi.go:93-100`). Der Cookie-only-Refresh der SPA (`frontend/src/auth/session.ts:22-25`) erhält 400 vor dem Handler, die SPA löscht die Session (refresh-curl.log, roles-authz 14 FAIL); dasselbe gilt für `/audit/verify` und `/webhooks/{id}/test` (F-018). Die Kette aus `cmd/server/main.go:658-677` ist nur über Testkopien geprüft; `TestT2AuditLogoutThroughProductionChain` sendet den Refresh nach dem Logout nur wegen des Defekts mit Body.
 
@@ -2159,9 +2171,9 @@ RBA-01;[B];B;backend/internal/server/authz_catalog_test.go;WP-363
 
 - [ ] Die Validierungsregeln (Pflicht-Body, erlaubte Content-Types, Pflicht-Query-Parameter) werden beim Laden aus `requestBody` und `parameters` der OpenAPI-Datei abgeleitet; die handgepflegte Registry ist nur Fallback ohne Spec und nie strenger als der Vertrag. Content-Type wird nur geprüft, wenn ein Body gesendet wird oder die Operation einen Pflicht-Body hat.
 - [ ] Defekttests grün und überführt: `TestAuditT2RefreshPassesOpenAPIValidation` und `TestAuditT2ValidatorRegistryMatchesOpenAPIRequestBodies` (`./internal/middleware/`) sowie `TestAuditT2CookieOnlyRefreshThroughProductionChain` (`./internal/server/`) PASS (Retest aus F-018); verschoben nach `middleware/openapi_test.go` bzw. `server/t2_auth_chain_test.go`; Zeilen aus `tests/audit/expected-failures.txt` entfernt. In `TestT2AuditLogoutThroughProductionChain` wird der Refresh nach dem Logout cookie-only gesendet (ohne Body und Content-Type), erwartet 401; der Kommentar zum Validator entfällt.
-- [ ] Gemeinsame Defektdatei `server/t2_auth_chain_auditdefect_test.go`: das WP verschiebt seinen Test samt der benötigten Hilfsfunktionen (verschoben, nicht kopiert) in die reguläre Datei `server/t2_auth_chain_test.go`. Das WP, das den letzten Test der Datei überführt (WP-364 (`t2-refresh-chain`), WP-363 (`t2-rba01-keys`) oder WP-355 (`t2-sa-role-ceiling`)), löscht sie. `middleware/t2_auth_ratelimit_auditdefect_test.go` behält die Tests von WP-408 (`t2-ratelimit-budgets`) und WP-460 (`t2-preauth-budget`).
+- [ ] Gemeinsame Defektdatei `server/t2_auth_chain_auditdefect_test.go`: das WP verschiebt seinen Test samt der benötigten Hilfsfunktionen (verschoben, nicht kopiert) in die reguläre Datei `server/t2_auth_chain_test.go`. Das WP, das den letzten Test der Datei überführt (WP-364 (`t2-refresh-chain`), WP-363 (`t2-rba01-keys`) oder WP-355 (`t2-sa-role-ceiling`)), löscht sie. `middleware/t2_auth_ratelimit_auditdefect_test.go` behält die Tests von WP-410 (`t2-ratelimit-budgets`) und WP-462 (`t2-preauth-budget`).
 - [ ] Die Middleware-Kette wird in `cmd/server/main.go` von einer Funktion `newHTTPHandler(…)` gebaut, die der Server verwendet. Test in `cmd/server/main_test.go`: Reihenfolge Pre-Auth → Auth → Tenant → Entitlement → Rate-Limit → Authz → Validierung → Idempotenz → Handler über Marker-Handler; cookie-only `POST /auth/refresh` → 200 mit rotiertem Cookie; Logout → 204 und Widerruf; `POST /cis` ohne Body → 400 (Positivkontrolle der Validierung).
-- [ ] Real-Stack-Nachweis auf API-Ebene: neuer Test `14a` in `frontend/e2e-real/roles-authz.spec.ts` sendet mit dem Refresh-Cookie einer echten Anmeldung `POST /api/v1/auth/refresh` ohne Body und ohne Content-Type → 200 mit neuem Token und rotiertem `Set-Cookie` (vor dem Fix 400). Der vollständige SPA-Test 14 (Retest-Teil aus F-018) wird mit WP-459 (`t2-spa-session`) grün, weil er zusätzlich den Single-Flight-Refresh braucht.
+- [ ] Real-Stack-Nachweis auf API-Ebene: neuer Test `14a` in `frontend/e2e-real/roles-authz.spec.ts` sendet mit dem Refresh-Cookie einer echten Anmeldung `POST /api/v1/auth/refresh` ohne Body und ohne Content-Type → 200 mit neuem Token und rotiertem `Set-Cookie` (vor dem Fix 400). Der vollständige SPA-Test 14 (Retest-Teil aus F-018) wird mit WP-366 (`t2-spa-session`) grün, weil er zusätzlich den Single-Flight-Refresh braucht.
 - [ ] Regression: `TestT2AuditLogoutThroughProductionChain` (cookie-only), `TestRouteMiddlewareRunsAfterAuthorization`, `TestPreAuthLimitCountsFailedAuthentication` und die Tests von `./internal/middleware/`, `./internal/server/`, `./cmd/server/` grün.
 
 **Dateien (10 Einträge, Migration = 2):**
@@ -2195,7 +2207,7 @@ API-04;[B];B;backend/cmd/server/main_test.go;WP-364
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** Single-Flight und Start-Refresh der SPA sowie Real-Stack-Test 14 (WP-459 (`t2-spa-session`)); Ratelimit-Budgets (WP-408 (`t2-ratelimit-budgets`), WP-460 (`t2-preauth-budget`)); Deprecation-Header (WP-568 (`t2-lifecycle-headers`)).
+**Nicht Bestandteil:** Single-Flight und Start-Refresh der SPA sowie Real-Stack-Test 14 (WP-366 (`t2-spa-session`)); Ratelimit-Budgets (WP-410 (`t2-ratelimit-budgets`), WP-462 (`t2-preauth-budget`)); Deprecation-Header (WP-568 (`t2-lifecycle-headers`)).
 
 ### WP-365 – Agent: keine Redirects auf Klartext, Agent-Credential über die echte Auth-Kette belegt, Binary aus dem Repository entfernt
 
@@ -2254,7 +2266,74 @@ AGT-03;[P4];B;backend/cmd/agent/t2_transport_test.go;WP-365
 
 **Nicht Bestandteil:** Signierte Pakete und Self-Update (AGT-04, [P4]); Relay über den Collector (unverändert).
 
-### WP-366 – MFA-Pflicht im Login-Pfad: org_admin aus IdP-Gruppe oder Default-Rolle setzt mfa_required in Keycloak
+### WP-366 – SPA-Session: Single-Flight-Refresh, Refresh beim Start statt Login-Redirect, 429 ohne Abmeldung
+
+**Schlüssel:** `t2-spa-session` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-364 (`t2-refresh-chain`)
+
+| ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| AUT-02 | [B] | FEHLGESCHLAGEN | Teil | [WP-066](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-066) | `docs/audit/02-mandanten-auth-entitlements.md:45` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:33` |
+| AUT-10 | [B] | TEILWEISE BESTANDEN | Teil | [WP-050](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-050) | `docs/audit/02-mandanten-auth-entitlements.md:53` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:47` |
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Betroffene WPs |
+|---|---|---|---|---|
+| [F-018](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-018) | P1 | OpenAPI-Validator weist jeden SPA-Refresh (POST /auth/refresh ohne Body/Content-Type) mit 400 ab; gleiche Abweichung bei weiteren bodylosen POSTs | schließt | WP-009, WP-050, WP-066 |
+| [F-063](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-063) | P2 | Erfolgreiche Refreshes verbrauchen das Pre-Auth-Budget je IP; SPA meldet bei 429 ab | Teil | WP-050 |
+| [F-065](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-065) | P2 | Parallele 401 lösen parallele Refreshes aus, Reuse-Erkennung widerruft die Familie | schließt | WP-066 |
+| [F-066](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-066) | P2 | Abgelaufene gespeicherte Session führt ohne Refresh-Versuch zu /login | schließt | WP-066 |
+
+**Schließt Audit-WPs:** [WP-009](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-009) (TEILWEISE BESTANDEN, Teil), [WP-050](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-050) (TEILWEISE BESTANDEN, Teil), [WP-066](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-066) (FEHLGESCHLAGEN, Teil)
+
+**Problem:** `fetchURL` (`frontend/src/api/client.ts:392-410`) startet bei jedem 401 einen eigenen Refresh; parallele Refreshes mit dem alten Cookie lösen die Reuse-Erkennung aus und widerrufen die Familie (F-065, session.auditdefect.ts „expected 3 to be 1“). `RequireAuth` (`frontend/src/App.tsx:385`) entscheidet nur anhand des gespeicherten `expiresAt` (`auth/authStore.ts:29-71`) und leitet ohne Refresh-Versuch auf /login (F-066, roles-authz 14b). `refreshSession` (`auth/session.ts:28-31`) löscht die Session auch bei 429 (F-063, SPA-Anteil).
+
+**Akzeptanzkriterien:**
+
+- [ ] `refreshSession` ist Single-Flight: gleichzeitige Aufrufe teilen ein In-flight-Promise; drei parallele 401 → genau ein `POST /auth/refresh`, danach drei Wiederholungen mit dem neuen Token.
+- [ ] Start und Navigation: ist das gespeicherte Token abgelaufen und ein Benutzer gespeichert, ruft `RequireAuth` vor dem Redirect `refreshSession()`; Erfolg → Zielseite, 401 → /login. Der Store plant zusätzlich einen Refresh etwa 60 s vor `expiresAt`.
+- [ ] 429 auf `/auth/refresh` löscht die Session nicht; die SPA wartet `Retry-After` (höchstens 60 s) und versucht es einmal erneut; nur 401/403 beenden die Session.
+- [ ] Defekttests grün und überführt: `src/auth/session.auditdefect.ts` → `src/auth/session.test.ts`, `src/auth/bootRefresh.auditdefect.tsx` → `src/auth/bootRefresh.test.tsx` (Retest: `cd frontend && npx vitest run src/auth/session.test.ts src/auth/bootRefresh.test.tsx` → PASS); zusätzliche Fälle für 429 in `session.test.ts`; Zeilen aus `tests/audit/expected-failures.txt` entfernt.
+- [ ] Real-Stack: `npx playwright test -c e2e-real/playwright.real.config.ts roles-authz -g '14'` (Tests 14 und 14b) → PASS (Retests aus F-018 und F-066); Zeilen aus `tests/audit/expected-failures.txt` entfernt.
+- [ ] Regression: `npm run lint`, `npm run typecheck`, `npx vitest run` grün.
+- [ ] Abschluss F-018: Der verbindliche Retest aus PHASE1_FINDINGS.md ist vollständig grün, einschließlich der drei in WP-364 (`t2-refresh-chain`) überführten Go-Defekttests; die e2e-real-Zeilen roles-authz 14 und 14b sind aus `tests/audit/expected-failures.txt` gelöscht (Lauf-ID im PR).
+
+**Dateien (11 Einträge, Migration = 2):**
+
+- frontend/src/auth/session.ts
+- frontend/src/api/client.ts
+- frontend/src/auth/authStore.ts
+- frontend/src/App.tsx
+- frontend/src/auth/session.auditdefect.ts (entfernt)
+- frontend/src/auth/session.test.ts (neu)
+- frontend/src/auth/bootRefresh.auditdefect.tsx (entfernt)
+- frontend/src/auth/bootRefresh.test.tsx (neu)
+- frontend/src/api/client.test.ts
+- tests/audit/expected-failures.txt (angelegt in WP-337)
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `src/auth/session.test.ts`: Single-Flight, 429-Backoff.
+- `src/auth/bootRefresh.test.tsx`: Refresh beim Start.
+- Real-Stack `roles-authz.spec.ts` Tests 14 und 14b.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+AUT-02;[B];B;frontend/src/auth/bootRefresh.test.tsx;WP-366
+AUT-10;[B];B;frontend/src/auth/session.test.ts;WP-366
+```
+
+**Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
+
+**Nicht Bestandteil:** Serverseitiges Grace-Window der Reuse-Erkennung; Zählung im Pre-Auth-Limiter (WP-462 (`t2-preauth-budget`)).
+
+### WP-367 – MFA-Pflicht im Login-Pfad: org_admin aus IdP-Gruppe oder Default-Rolle setzt mfa_required in Keycloak
 
 **Schlüssel:** `t2-mfa-login-path` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
@@ -2268,7 +2347,7 @@ AGT-03;[P4];B;backend/cmd/agent/t2_transport_test.go;WP-365
 
 | Befund | Prio | Titel | Beitrag | Betroffene WPs |
 |---|---|---|---|---|
-| [F-005](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-005) | P0 | MFA für org_admins aus Signup, Einladung, Operator-Pfad und Gruppe reticora-admin nicht erzwungen | Teil | WP-044 |
+| [F-005](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-005) | P0 | MFA für org_admins aus Signup, Einladung, Operator-Pfad und Gruppe reticora-admin nicht erzwungen | schließt | WP-044 |
 
 **Schließt Audit-WPs:** [WP-044](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-044) (FEHLGESCHLAGEN, Teil)
 
@@ -2280,6 +2359,7 @@ AGT-03;[P4];B;backend/cmd/agent/t2_transport_test.go;WP-365
 - [ ] Subject des Aufrufs ist das OIDC-Subject des ID-Tokens (`idToken.Subject`), das nur beim Login vorliegt; `claims.Subject` ist nach der Provisionierung die app_user-ID (`identity/handler.go:415-435`). Die Schnittstelle im Paket identity verlangt nur `RequireMFA(ctx, oidcSubject) error`, sodass der Enforcer aus WP-358 (`t2-mfa-role-sync`) (`signup.KeycloakAccounts`, Verdrahtung über `server.Options`) sie erfüllt; `server/router.go` übergibt ihn an den Identity-Handler, ohne Enforcer (Handler- und Server-Tests) ruft der Handler nichts auf.
 - [ ] Ohne Admin-Client nach Option 1 der Entscheidung E-65 (Übergangsregel): Die Gruppe `reticora-admin`, die `mfa_required` nach WP-357 (`t2-mfa-accounts`) über den Realm trägt, löst im Login-Pfad keinen Aufruf aus. `config.Validate` (`config/config.go:413`) meldet außerhalb von `development` `RETICORA_DEFAULT_PROVISION_ROLE=org_admin` ohne `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` als Startfehler. Tests: `identity/handler_test.go` mit fail-closed-Enforcer – Login eines Mitglieds von `/reticora-admin` → 200 mit Sitzung und kein Aufruf (Positivfall), Login mit der Gruppe `/org_admin` → 503 ohne Sitzung (Negativfall); `config/config_test.go` – production mit Default-Rolle org_admin ohne Admin-Client → Fehler, der beide Schlüssel nennt; mit Admin-Client, mit Default-Rolle viewer bzw. in development → fehlerfrei. Der Lauf der Onboarding-Suite (`install-smoke.yml`; Installer-Admin in `reticora-admin`, Standard-Compose ohne Admin-Client) bleibt grün (Lauf-ID im PR).
 - [ ] Regression: `go test ./internal/identity/ ./internal/server/ ./internal/config/` grün; `go vet` und `golangci-lint` ohne neue Meldungen; `docs/traceability.csv` enthält die Zeile dieses WPs.
+- [ ] Abschluss F-005: Der verbindliche Retest aus PHASE1_FINDINGS.md ist vollständig grün, einschließlich der in WP-357 (`t2-mfa-accounts`) und WP-358 (`t2-mfa-role-sync`) überführten Teile (MFA-Defekttests in `backend/internal/signup/`, Real-Stack `frontend/e2e-real/mfa-admin.spec.ts`); Lauf-IDs im PR.
 
 **Dateien (6 Einträge, Migration = 2):**
 
@@ -2302,20 +2382,20 @@ AGT-03;[P4];B;backend/cmd/agent/t2_transport_test.go;WP-365
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUT-09;[B];B;backend/internal/identity/handler_test.go;WP-366
+AUT-09;[B];B;backend/internal/identity/handler_test.go;WP-367
 ```
 
 **Entscheidungsbedarf:** [E-14](../entscheidungen.md#e-14); [E-65](entscheidungen.md#e-65) MFA-Pflicht im Login-Pfad ohne Keycloak-Admin-Client (AUT-09) (offen, Empfehlung als Übergangsregel)
 
 **Nicht Bestandteil:** Rollenzuweisung, Einladungsannahme, Erstlogin mit offener Einladung, Bestandsabgleich und Enforcer-Implementierung (WP-358 (`t2-mfa-role-sync`)); Realm-Rolle der Gruppe `reticora-admin` (WP-357 (`t2-mfa-accounts`)); Konfiguration des Admin-Clients durch Installer und Compose (Option 2 der Entscheidung E-65); AMR-Prüfung im Backend (unverändert, siehe WP-358 (`t2-mfa-role-sync`), F-069).
 
-### WP-367 – Bulk-Statusänderung als manueller Schreibvorgang: Override, Version, ehrlicher Ergebnisbericht
+### WP-368 – Bulk-Statusänderung als manueller Schreibvorgang: Override, Version, ehrlicher Ergebnisbericht
 
 **Schlüssel:** `t3-bulk-manual` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
 **Voraussetzungen (gemergt):** keine (außer den Prüfrahmen-WPs, Konvention 11)
 
-**Vorgezogen:** nach Schwere K2 Datenintegrität und Kernprozesse; als Voraussetzung von WP-402 (`t7-job-scope`) in K1 eingeordnet.
+**Vorgezogen:** nach Schwere K2 Datenintegrität und Kernprozesse; als Voraussetzung von WP-404 (`t7-job-scope`) in K1 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -2329,7 +2409,7 @@ AUT-09;[B];B;backend/internal/identity/handler_test.go;WP-366
 |---|---|---|---|---|
 | [F-020](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-020) | P1 | Manuelle Massen-Statusänderung (POST /cis/bulk set_status) ist kein manueller Schreibvorgang: kein Override, keine Versionserhöhung, unter Status-Override still verworfen und als ok gemeldet | schließt | WP-057, WP-061, WP-181 |
 
-**Schließt Audit-WPs:** [WP-057](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-057) (FEHLGESCHLAGEN, Teil), [WP-061](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-061) (FEHLGESCHLAGEN, Teil)
+**Schließt Audit-WPs:** [WP-057](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-057) (FEHLGESCHLAGEN, Teil), [WP-061](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-061) (FEHLGESCHLAGEN, Teil), [WP-181](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-181) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** `ci/bulk.go:152` ruft `s.Update(ctx, orgID, id, UpdateRequest{Status: &status})` ohne `Manual`. Unter einem Status-Override entfernt `dropOverriddenFields` (`ci/pg_repository.go:783-788`) den Status, das leere SET gilt als Erfolg (:847-850), das Item wird als ok gemeldet (PROBE3b). Ohne Override wird der Status ohne Override und ohne Versionserhöhung (:852-856) geschrieben; ein veralteter PATCH mit If-Match auf Version 1 überschreibt ihn (bulk_probe 'version 1->1', PROBE2).
 
@@ -2364,16 +2444,16 @@ AUT-09;[B];B;backend/internal/identity/handler_test.go;WP-366
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-CI-04;[B];D;backend/internal/ci/bulk_integration_test.go;WP-367
-OVR-01;[B];D;backend/internal/ci/bulk_integration_test.go;WP-367
-API-07;[B];D;backend/internal/ci/bulk_integration_test.go;WP-367
+CI-04;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
+OVR-01;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
+API-07;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
 ```
 
 **Entscheidungsbedarf:** [E-66](entscheidungen.md#e-66) API-07/API-08: Bulk-Statusänderung bei erzwungenem If-Match (offen, Empfehlung als Übergangsregel); [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Job-Abbruch, Job-Scope und weitere Bulk-Befunde (F-162, F-327 Gruppe T7; F-147 Gruppe T6) in `bulk.go` – Reihenfolge abstimmen; die T7-Tests in `audit_t7_bulk_jobs_auditdefect_test.go` nutzen danach `audit_t7_bulk_harness_test.go`.
+**Nicht Bestandteil:** Job-Abbruch, Job-Scope und weitere Bulk-Befunde (F-162: WP-514 (`t7-job-cancel`), WP-515 (`t7-export-cancel`), WP-521 (`t7-jobcenter-ui`); F-327: WP-517 (`t7-bulk-validation`); F-147: WP-503 (`t6-jobqueue-kinds`)) in `bulk.go` – Reihenfolge abstimmen; die T7-Tests in `audit_t7_bulk_jobs_auditdefect_test.go` nutzen danach `audit_t7_bulk_harness_test.go`.
 
-### WP-368 – resurrected_device „neues CI“: Client, Identität und Scope übernehmen
+### WP-369 – resurrected_device „neues CI“: Client, Identität und Scope übernehmen
 
 **Schlüssel:** `t3-resurrect-new` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
@@ -2399,7 +2479,7 @@ API-07;[B];D;backend/internal/ci/bulk_integration_test.go;WP-367
 - [ ] Nachweis: `TestAuditT3ResurrectedNewKeepsClientAndIdentity` (verschoben nach `discovery/resurrect_test.go`) PASS: neues CI mit client_id = Client1 und primary_mac; ein Client2-Principal erhält 404; die nächste Sichtung aktualisiert dieses CI, kein neues Review.
 - [ ] Client-Isolation der Auflösung: ein client-gescopter Principal von Client2 kann das Review von Client1 nicht auflösen (404). Payload mit client_id = '' (org-weite Sichtung) → org-weites CI (Positivfall). Payload ohne Schlüssel client_id (Altbestand): Client aus den Kandidaten-CIs, wenn alle denselben Client haben; sonst 422 mit Hinweis ‚Review verwerfen, nächste Sichtung abwarten‘. Gleiches gilt für unclassified_device (Test: Sichtung von Client1 mit unbekanntem Typ → new → CI mit client_id = Client1).
 - [ ] Maßgebliche Quelle für Client und Site des neuen CIs in ActionNew sind die Spalten `review_item.client_id`/`site_id` (aus WP-342 (`t1-review-scope`), intern in `reviews.Item`); die Payload-Felder client_id/site_id gelten nur für Altbestand, dessen Spalten nicht gesetzt sind (Regeln aus dem vorigen Kriterium). Test in `discovery/resurrect_test.go`: Item mit Spalte client_id = Client1 und abweichendem Payload-Wert (Client2) → neues CI mit client_id = Client1; Item ohne Spaltenwert mit Payload client_id = Client1 → CI mit client_id = Client1.
-- [ ] Überführung: Testfunktion aus `audit_t3_review_resolution_auditdefect_test.go` entfernt (der zweite Test bleibt bis WP-478 (`t3-review-merge`) getaggt), Zeile aus `tests/audit/expected-failures.txt` gelöscht; TestDeletedDeviceSeenAgainIsReviewed und TestResurrectedDeviceIsReactivatedOrNew grün.
+- [ ] Überführung: Testfunktion aus `audit_t3_review_resolution_auditdefect_test.go` entfernt (der zweite Test bleibt bis WP-479 (`t3-review-merge`) getaggt), Zeile aus `tests/audit/expected-failures.txt` gelöscht; TestDeletedDeviceSeenAgainIsReviewed und TestResurrectedDeviceIsReactivatedOrNew grün.
 
 **Dateien (7 Einträge, Migration = 2):**
 
@@ -2421,14 +2501,14 @@ API-07;[B];D;backend/internal/ci/bulk_integration_test.go;WP-367
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-368
+CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-369
 ```
 
 **Entscheidungsbedarf:** [E-09](../entscheidungen.md#e-09); [E-20](../entscheidungen.md#e-20)
 
-**Nicht Bestandteil:** Reaktivierung über die Produktions-Decorator-Kette (F-037, Gruppe T5; gleiche Funktion `resolveCIReview` – Reihenfolge abstimmen); merge bei probable_duplicate (WP-478 (`t3-review-merge`)); Spalten review_item.client_id/site_id selbst (F-003, WP-342 (`t1-review-scope`), Voraussetzung); weitere Änderungen in `discovery/discovery.go` (WP-480 (`t3-ingest-poison`), WP-488 (`t3-aud03-ingest`), WP-478 (`t3-review-merge`), WP-482 (`t3-spool-poison`), WP-580 (`t3-discovery-p3`)) – Reihenfolge abstimmen.
+**Nicht Bestandteil:** Reaktivierung über die Produktions-Decorator-Kette (F-037, WP-418 (`t5-sr11-decorator`); gleiche Funktion `resolveCIReview` – Reihenfolge abstimmen); merge bei probable_duplicate (WP-479 (`t3-review-merge`)); Spalten review_item.client_id/site_id selbst (F-003, WP-342 (`t1-review-scope`), Voraussetzung); weitere Änderungen in `discovery/discovery.go` (WP-481 (`t3-ingest-poison`), WP-489 (`t3-aud03-ingest`), WP-479 (`t3-review-merge`), WP-483 (`t3-spool-poison`), WP-580 (`t3-discovery-p3`)) – Reihenfolge abstimmen.
 
-### WP-369 – parent_ci_id nur auf sichtbare CIs desselben Clients oder org-weite CIs
+### WP-370 – parent_ci_id nur auf sichtbare CIs desselben Clients oder org-weite CIs
 
 **Schlüssel:** `t3-parent-scope` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
 
@@ -2453,7 +2533,7 @@ CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-368
 
 - [ ] Create und Update lesen den Parent in derselben Transaktion unter RLS; nicht sichtbar → ValidationError parent_ci_id (422 über den bestehenden `writeValidationError`); sichtbar, aber anderer Client als das CI und nicht org-weit → 422 parent_ci_id; org-weiter Parent oder gleicher Client → Erfolg. Ebenso CreateMany (Batch-Anlage, `insertCIs` in `ci/pg_repository.go:558-650`, von Discovery genutzt), oder dort wird parent_ci_id nachweislich nie gesetzt (Test).
 - [ ] Nachweis: `TestAuditT3ParentMustBeVisibleToScopedPrincipal` (verschoben nach `ci/ci_scope_integration_test.go`) PASS mit Kontrollfall org-weiter Parent; zusätzlicher Fall Create mit fremdem Parent → 422, nichts gespeichert.
-- [ ] Überführung: Testfunktion aus `audit_t3_integrity_auditdefect_test.go` entfernt (zweiter Test bleibt bis WP-484 (`t3-unmerge-conflict`) getaggt), Zeile aus `tests/audit/expected-failures.txt` gelöscht; TestStructureIsProjected und die Tests von `internal/ci` grün.
+- [ ] Überführung: Testfunktion aus `audit_t3_integrity_auditdefect_test.go` entfernt (zweiter Test bleibt bis WP-485 (`t3-unmerge-conflict`) getaggt), Zeile aus `tests/audit/expected-failures.txt` gelöscht; TestStructureIsProjected und die Tests von `internal/ci` grün.
 
 **Dateien (5 Einträge, Migration = 2):**
 
@@ -2472,15 +2552,15 @@ CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-368
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/ci_scope_integration_test.go;WP-369
-AST-05;[P2];B;backend/internal/ci/ci_scope_integration_test.go;WP-369
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/ci_scope_integration_test.go;WP-370
+AST-05;[P2];B;backend/internal/ci/ci_scope_integration_test.go;WP-370
 ```
 
 **Entscheidungsbedarf:** [E-09](../entscheidungen.md#e-09)
 
 **Nicht Bestandteil:** Zyklen aus Altdaten (WP-574 (`t3-migration-guards`)); Formular und Saved Views (WP-573 (`t3-struct-p3`)).
 
-### WP-370 – VLAN-Bezüge von Subnetz und Interface nur auf sichtbare VLANs des Clients
+### WP-371 – VLAN-Bezüge von Subnetz und Interface nur auf sichtbare VLANs des Clients
 
 **Schlüssel:** `t3-vlan-ref-scope` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
@@ -2508,7 +2588,7 @@ AST-05;[P2];B;backend/internal/ci/ci_scope_integration_test.go;WP-369
 - [ ] Vor dem Schreiben von vlan_id wird das VLAN in derselben Transaktion unter RLS gelesen: nicht sichtbar → 422 vlan_id; Client des VLAN weicht vom Client des Subnetzes bzw. CI ab und das VLAN ist nicht org-weit → 422 vlan_id.
 - [ ] Nachweis: `TestAuditT3VLANReferenceMustBeVisible` (verschoben nach `ipam/vlan_integration_test.go`) PASS; RLS-Schreibpfadtest: org-weiter Principal und gleicher Client → Erfolg, fremder Client → 422, kein Datensatz geschrieben.
 - [ ] PG-HTTP-Test `server/vlan_routes_integration_test.go` (neu): POST/GET/PATCH/DELETE /api/v1/vlans als Client1 → 201/200/200/204; VLAN von Client2 → 404; Subnetz und Interface mit fremdem vlan_id → 422 mit Feldbezug.
-- [ ] Überführung: Testfunktion aus `audit_t3_client_scope_auditdefect_test.go` entfernt (VRF-Test bleibt bis WP-371 (`t3-vrf-write-scope`) getaggt); auditT3Site/auditT3Str (`ipam/audit_t3_client_scope_auditdefect_test.go:36-53`) nach `ipam/audit_t3_scope_harness_test.go` (neu, ungetaggt) verschoben, nicht kopiert; Zeile aus `tests/audit/expected-failures.txt` gelöscht; TestVLANCatalog, TestMigration91ConvertsVLANNumbers, TestVLANResourceCRUD grün.
+- [ ] Überführung: Testfunktion aus `audit_t3_client_scope_auditdefect_test.go` entfernt (VRF-Test bleibt bis WP-372 (`t3-vrf-write-scope`) getaggt); auditT3Site/auditT3Str (`ipam/audit_t3_client_scope_auditdefect_test.go:36-53`) nach `ipam/audit_t3_scope_harness_test.go` (neu, ungetaggt) verschoben, nicht kopiert; Zeile aus `tests/audit/expected-failures.txt` gelöscht; TestVLANCatalog, TestMigration91ConvertsVLANNumbers, TestVLANResourceCRUD grün.
 - [ ] `go vet ./internal/ipam/` und `go vet -tags auditdefect ./internal/ipam/` fehlerfrei; der verbleibende getaggte VRF-Test ist weiter rot laut `tests/audit/expected-failures.txt`.
 
 **Dateien (8 Einträge, Migration = 2):**
@@ -2532,21 +2612,21 @@ AST-05;[P2];B;backend/internal/ci/ci_scope_integration_test.go;WP-369
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NET-08;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-370
-NET-01;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-370
-NET-02;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-370
-DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/server/vlan_routes_integration_test.go;WP-370
+NET-08;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-371
+NET-01;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-371
+NET-02;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-371
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/server/vlan_routes_integration_test.go;WP-371
 ```
 
 **Entscheidungsbedarf:** [E-24](../entscheidungen.md#e-24); [E-09](../entscheidungen.md#e-09)
 
-**Nicht Bestandteil:** VRF-Schreibrechte (WP-371 (`t3-vrf-write-scope`)); IP-Entfernung durch Discovery (WP-580 (`t3-discovery-p3`)); weitere Befunde in `ipam/pg_repository.go` (F-042 Gruppe T6, F-214 Gruppe T2) – Reihenfolge abstimmen.
+**Nicht Bestandteil:** VRF-Schreibrechte (WP-372 (`t3-vrf-write-scope`)); IP-Entfernung durch Discovery (WP-580 (`t3-discovery-p3`)); weitere Befunde in `ipam/pg_repository.go` (F-042 WP-424 (`t6-manual-edge-keep`), F-214 WP-466 (`t2-pagination-core`)) – Reihenfolge abstimmen.
 
-### WP-371 – VRF-Schreibvorgänge nur für org-weit berechtigte Principals (RESTRICTIVE-Policies)
+### WP-372 – VRF-Schreibvorgänge nur für org-weit berechtigte Principals (RESTRICTIVE-Policies)
 
 **Schlüssel:** `t3-vrf-write-scope` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-370 (`t3-vlan-ref-scope`)
+**Voraussetzungen (gemergt):** WP-371 (`t3-vlan-ref-scope`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -2591,16 +2671,16 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/server/vlan_routes_integra
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-10;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-371
-NET-02;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-371
-NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-371
+TEN-10;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
+NET-02;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
+NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
 ```
 
 **Entscheidungsbedarf:** [E-08](../entscheidungen.md#e-08); [E-09](../entscheidungen.md#e-09)
 
-**Nicht Bestandteil:** VLAN-Bezüge (WP-370 (`t3-vlan-ref-scope`)); Berechtigung vrf:manage (erfüllt).
+**Nicht Bestandteil:** VLAN-Bezüge (WP-371 (`t3-vlan-ref-scope`)); Berechtigung vrf:manage (erfüllt).
 
-### WP-372 – Review-Auflösung: resolved_by und Audit-Akteur immer der Principal
+### WP-373 – Review-Auflösung: resolved_by und Audit-Akteur immer der Principal
 
 **Schlüssel:** `t3-review-actor` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
@@ -2625,7 +2705,7 @@ NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-371
 
 - [ ] resolved_by und der Audit-Akteur aller Review-Typen (einschließlich unlicensed_ci) stammen immer aus dem Principal (Benutzer bzw. Service-Account); resolved_by ist nicht mehr Teil des Request-Schemas `ReviewItemResolveRequest`; ein Body mit resolved_by → 400 (eigener Request-Typ ohne resolved_by, `api.ReadJSON` mit DisallowUnknownFields), auf /review-items/{id}/resolve und auf der veralteten Route /discovery/review-items/{id}/resolve.
 - [ ] Nachweis: `TestAuditT3ResolvedByIsThePrincipal` (verschoben nach `server/audit_t3_review_routes_integration_test.go`) PASS: gespeichert und auditiert ist U1; Positivfall ohne resolved_by → 200 mit resolved_by = U1; TestAuditT3ReviewResolveRequiresPermission bleibt grün.
-- [ ] OpenAPI ohne resolved_by im Request, `npm run generate:api`, Frontend-Typecheck grün; Testfunktion aus `audit_t3_router_auditdefect_test.go` entfernt (zweiter Test bleibt bis WP-477 (`t3-override-reserved`) getaggt), Zeile aus `tests/audit/expected-failures.txt` gelöscht; TestReviewModel, TestReviewRepositoryOnPostgreSQL, TestTST01ReviewResolution grün.
+- [ ] OpenAPI ohne resolved_by im Request, `npm run generate:api`, Frontend-Typecheck grün; Testfunktion aus `audit_t3_router_auditdefect_test.go` entfernt (zweiter Test bleibt bis WP-478 (`t3-override-reserved`) getaggt), Zeile aus `tests/audit/expected-failures.txt` gelöscht; TestReviewModel, TestReviewRepositoryOnPostgreSQL, TestTST01ReviewResolution grün.
 
 **Dateien (9 Einträge, Migration = 2):**
 
@@ -2648,35 +2728,37 @@ NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-371
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-REC-08;[B];D;backend/internal/server/audit_t3_review_routes_integration_test.go;WP-372
-API-05;[B];D;backend/internal/server/audit_t3_review_routes_integration_test.go;WP-372
+REC-08;[B];D;backend/internal/server/audit_t3_review_routes_integration_test.go;WP-373
+API-05;[B];D;backend/internal/server/audit_t3_review_routes_integration_test.go;WP-373
 ```
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Review-RLS (F-003, Gruppe T1) und Scope der Auflösung (F-031, Gruppe T4) in denselben Dateien – Reihenfolge abstimmen; Dashboard-Eskalation (WP-575 (`t3-review-escalation-widget`)).
+**Nicht Bestandteil:** Review-RLS (F-003, WP-342 (`t1-review-scope`), Voraussetzung) und Scope der Auflösung (F-031, WP-382 (`t4-scope-suggested-authz`)) in denselben Dateien – Reihenfolge abstimmen; Dashboard-Eskalation (WP-575 (`t3-review-escalation-widget`)).
 
-### WP-373 – nats-server in der CI: Edge-Integrationstests ohne stilles Überspringen, Cross-Org-Fall
+### WP-374 – nats-server in der CI: Edge-Integrationstests ohne stilles Überspringen, Cross-Org-Fall
 
 **Schlüssel:** `t4-natsedge-ci` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
 
 **Voraussetzungen (gemergt):** keine (außer den Prüfrahmen-WPs, Konvention 11)
 
-**Vorgezogen:** nach Schwere K5 Nachweislücken; als Voraussetzung von WP-375 (`t4-bundle-select`), WP-380 (`t4-collector-disable-kick`), WP-374 (`t4-pki-renew-server`) in K1 eingeordnet.
+**Vorgezogen:** nach Schwere K5 Nachweislücken; als Voraussetzung von WP-376 (`t4-bundle-select`), WP-381 (`t4-collector-disable-kick`), WP-375 (`t4-pki-renew-server`) in K1 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | COL-08 | [B] | TEILWEISE BESTANDEN | Teil | [WP-146](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-146) | `docs/audit/05-collector-discovery-reconciliation.md:41` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:18` |
 | PRI-07 | Grundsatz (ohne Tag) | TEILWEISE BESTANDEN | Teil | [WP-146](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-146) | `docs/audit/05-collector-discovery-reconciliation.md:32` | `docs/spec/katalog-v3/00-grundlagen.md:80` |
 
-**Schließt Audit-WPs:** [WP-146](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-146) (TEILWEISE BESTANDEN, Teil)
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
-**Problem:** Der echte Server-Teil von `TestCollectorNATSEndpointAuthorization` (`natsedge_integration_test.go:216-218`) wird ohne `TEST_NATS_SERVER_BIN` per `t.Log` übersprungen; die CI stellt kein nats-server-Binary bereit, ein Cross-Org-Fall fehlt (offener Nachweis WP-146). Die überführten Edge-Tests aus WP-374 (`t4-pki-renew-server`), WP-380 (`t4-collector-disable-kick`), WP-411 (`t4-pki-renew-collector`), WP-425 (`t4-edge-pki-export`) und WP-426 (`t4-pki-rollover-export`) brauchen das Binary im Backend- und im Collector-Modul sowie die gemeinsamen Hilfen der Defekttest-Datei `collector_pki_auditdefect_test.go` ohne Build-Tag; dieses WP stellt beides vorab bereit, damit die Edge-WPs unabhängig voneinander starten.
+**Schließt Audit-WPs:** [WP-145](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-145) (FEHLGESCHLAGEN, Teil), [WP-146](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-146) (TEILWEISE BESTANDEN, Teil)
+
+**Problem:** Der echte Server-Teil von `TestCollectorNATSEndpointAuthorization` (`natsedge_integration_test.go:216-218`) wird ohne `TEST_NATS_SERVER_BIN` per `t.Log` übersprungen; die CI stellt kein nats-server-Binary bereit, ein Cross-Org-Fall fehlt (offener Nachweis WP-146). Die überführten Edge-Tests aus WP-375 (`t4-pki-renew-server`), WP-381 (`t4-collector-disable-kick`), WP-414 (`t4-pki-renew-collector`), WP-429 (`t4-edge-pki-export`) und WP-430 (`t4-pki-rollover-export`) brauchen das Binary im Backend- und im Collector-Modul sowie die gemeinsamen Hilfen der Defekttest-Datei `collector_pki_auditdefect_test.go` ohne Build-Tag; dieses WP stellt beides vorab bereit, damit die Edge-WPs unabhängig voneinander starten.
 
 **Akzeptanzkriterien:**
 
 - [ ] `.github/workflows/ci.yml`: Der Job mit PostgreSQL (`migrations`) und der Go-Job des Moduls `collector` (Matrix `go-modules`) nutzen den einheitlichen Installationsschritt für nats-server aus WP-337 (`k-ratchet`) mit den workflowweiten Variablen `NATS_SERVER_VERSION` und `NATS_SERVER_SHA256`; dieses WP pinnt keine eigene Version oder Prüfsumme; `TEST_NATS_SERVER_BIN` ist gesetzt.
-- [ ] `natsedge_integration_test.go`: ohne Binary `t.Skip` statt `t.Log`; mit `CI=true` ohne Binary `t.Fatal`; der Job prüft in der JSON-Ausgabe, dass kein natsedge-Test übersprungen wurde (Übergang: WP-498 (`t5-lint-baseline`) ersetzt diesen Schritt durch die allgemeine Skip-Regel von `scripts/ci/db-test-summary.sh` und entfernt ihn).
+- [ ] `natsedge_integration_test.go`: ohne Binary `t.Skip` statt `t.Log`; mit `CI=true` ohne Binary `t.Fatal`; der Job prüft in der JSON-Ausgabe, dass kein natsedge-Test übersprungen wurde (Übergang: WP-499 (`t5-lint-baseline`) ersetzt diesen Schritt durch die allgemeine Skip-Regel von `scripts/ci/db-test-summary.sh` und entfernt ihn).
 - [ ] Neuer Fall: der Collector von Org A kann auf `collector.<orgB>.<id>.>` weder publizieren noch abonnieren (Permissions Violation); Kontrolle: der eigene Subject-Baum funktioniert.
 - [ ] Die gemeinsamen Hilfen von `collector_pki_auditdefect_test.go` (`auditEdge`, `auditEnroll`, `auditFreePort`) liegen ohne Tag in `edge_helpers_integration_test.go` (neu); die fünf Defekttests der Datei kompilieren weiter mit `-tags auditdefect` und bleiben rot (Ratchet-Erwartungsliste unverändert, `go vet -tags auditdefect ./internal/discovery/` grün).
 - [ ] Nachweis: CI-Lauf mit ausgeführtem `TestCollectorNATSEndpointAuthorization` inklusive Cross-Org-Fall (Lauf-ID im PR); `tests/nats-mtls.test.sh` bleibt 3/3 grün.
@@ -2698,19 +2780,19 @@ API-05;[B];D;backend/internal/server/audit_t3_review_routes_integration_test.go;
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-COL-08;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-373
-PRI-07;Grundsatz (ohne Tag);D;backend/internal/discovery/natsedge_integration_test.go;WP-373
+COL-08;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-374
+PRI-07;Grundsatz (ohne Tag);D;backend/internal/discovery/natsedge_integration_test.go;WP-374
 ```
 
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Inhaltliche Änderungen am Edge-Endpunkt; Überführung der Defekttests (jeweiliges Edge-WP).
 
-### WP-374 – Zertifikatserneuerung nur über die mTLS-Identität des Collectors; HTTP-Erneuerung entfernen
+### WP-375 – Zertifikatserneuerung nur über die mTLS-Identität des Collectors; HTTP-Erneuerung entfernen
 
 **Schlüssel:** `t4-pki-renew-server` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-373 (`t4-natsedge-ci`)
+**Voraussetzungen (gemergt):** WP-374 (`t4-natsedge-ci`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -2732,8 +2814,8 @@ PRI-07;Grundsatz (ohne Tag);D;backend/internal/discovery/natsedge_integration_te
 - [ ] Die Route `POST /api/v1/collectors/{id}/certificate` ist aus `discovery.go`, `authz.go` (Routentabelle und `collectorRoutes`), `api/openapi.yaml` und `frontend/src/api/generated/schema.d.ts` entfernt; `TestRoutesAndSpecificationAreInParity` grün. Negativfall: Session- und API-Key-Principal mit `[discovery:ingest]` → 404/405, keine neue Zeile in `collector_certificate`, kein Audit `collector.certificate_issued` (der Retest-Wortlaut „→ 403“ wird wegen der entfernten Route als „404/405 ohne Ausstellung“ geprüft).
 - [ ] Neuer NATS-Dienst `renew_edge.go` auf `collector.<org>.<id>.certificate.renew`, in `cmd/server/main.go` neben `ServeBundles` verdrahtet. Die Anfrage enthält CSR, aktuelles Zertifikat, Zeitstempel und eine Signatur über (CSR, Zeitstempel, NATS-Subject) mit dem aktuellen privaten Schlüssel. Der Server prüft das Zertifikat über `EdgeAuthorizer.Authorize` (Kette zur Collector-CA, nicht gesperrt, Collector nicht disabled), die Signatur gegen dessen öffentlichen Schlüssel, das Zeitfenster ±5 min sowie CN = `<id>` und O = `<org>` von Zertifikat-Subject und CSR. Vor 60 % der Laufzeit lehnt er mit `renewal_not_due` ab. Er signiert 90 Tage, antwortet mit `certificate_pem` und `ca_bundle_pem` (aktive und vorherige CA) und auditiert `collector.certificate_issued` (Seriennummer, Vorgänger).
 - [ ] Vorgänger: verbindet sich der Collector erstmals mit dem neuen Zertifikat (der Callout `EdgeAuthorizer.Authorize` in `natsedge.go` sieht die neue Seriennummer), werden ältere, nicht gesperrte Zertifikate desselben Collectors gesperrt (CRL); spätestens 7 Tage nach Ausstellung des Nachfolgers sperrt der Edge-Lauf (`RunEdge`) sie. Test in `renew_edge_integration_test.go`: nach der ersten Verbindung mit dem Nachfolger ist der Vorgänger gesperrt, vorher nicht.
-- [ ] `TestAuditCertificateRenewalBoundToCollector` wird nach `renew_edge_integration_test.go` (ohne Build-Tag, echter nats-server über `TEST_NATS_SERVER_BIN` aus WP-373 (`t4-natsedge-ci`)) überführt und um NATS-Fälle erweitert: (a) HTTP-Erneuerung für einen nie enrollten und einen enrollten Collector → ≥ 400 ohne Ausstellung; (b) Anfrage auf dem Subject von Collector X mit dem Zertifikat von Collector Y → abgewiesen; (c) Positivfall: X erneuert bei 61 % mit eigenem Zertifikat und eigener Signatur → neues Zertifikat CN = X mit dem CSR-Schlüssel, Antwort enthält `ca_bundle_pem`; (d) öffentliches Zertifikat von X mit einer Signatur durch einen fremden Schlüssel → abgewiesen, keine Zeile in `collector_certificate`; (e) Anfrage bei 50 % → `renewal_not_due`; (f) Zeitstempel älter als 5 min → abgewiesen. Kontrolle: das legitime Zertifikat von X ist nach (a), (b) und (d) nicht gesperrt. Retest F-012: der Test besteht mit `TEST_DATABASE_URL` und `TEST_NATS_SERVER_BIN`.
-- [ ] Der überführte Test nutzt die gemeinsamen Hilfen aus `edge_helpers_integration_test.go` (WP-373 (`t4-natsedge-ci`)); die verbleibenden Defekttests von `collector_pki_auditdefect_test.go` kompilieren weiter mit `-tags auditdefect`.
+- [ ] `TestAuditCertificateRenewalBoundToCollector` wird nach `renew_edge_integration_test.go` (ohne Build-Tag, echter nats-server über `TEST_NATS_SERVER_BIN` aus WP-374 (`t4-natsedge-ci`)) überführt und um NATS-Fälle erweitert: (a) HTTP-Erneuerung für einen nie enrollten und einen enrollten Collector → ≥ 400 ohne Ausstellung; (b) Anfrage auf dem Subject von Collector X mit dem Zertifikat von Collector Y → abgewiesen; (c) Positivfall: X erneuert bei 61 % mit eigenem Zertifikat und eigener Signatur → neues Zertifikat CN = X mit dem CSR-Schlüssel, Antwort enthält `ca_bundle_pem`; (d) öffentliches Zertifikat von X mit einer Signatur durch einen fremden Schlüssel → abgewiesen, keine Zeile in `collector_certificate`; (e) Anfrage bei 50 % → `renewal_not_due`; (f) Zeitstempel älter als 5 min → abgewiesen. Kontrolle: das legitime Zertifikat von X ist nach (a), (b) und (d) nicht gesperrt. Retest F-012: der Test besteht mit `TEST_DATABASE_URL` und `TEST_NATS_SERVER_BIN`.
+- [ ] Der überführte Test nutzt die gemeinsamen Hilfen aus `edge_helpers_integration_test.go` (WP-374 (`t4-natsedge-ci`)); die verbleibenden Defekttests von `collector_pki_auditdefect_test.go` kompilieren weiter mit `-tags auditdefect`.
 - [ ] Upgrade-Hinweis in `docs/betrieb/collector-ca.md` (neu; Abschnitt „Upgrade: vor dem Fix über HTTP ausgestellte Collector-Zertifikate“): Vor dem Fix erneuerte kein Collector selbst (F-026), jede Ausstellung nach der Registrierung lief über `POST /api/v1/collectors/{id}/certificate`. Der Hinweis beschreibt die Erkennung über (a) die Audit-Einträge der Route (`audit_log.action = 'collectors.certificate'`, `changes->>'route'`, Akteur, Zeitpunkt, Collector-ID) und (b) die Ausstellungsdaten in `collector_certificate`: jede vor dem Upgrade angelegte Zeile eines Collectors außer der bei der Registrierung ausgestellten (gleiche Transaktion wie die `collector`-Zeile, `pg_repository.go:648-686`), auch für Collectors ohne Registrierung. Sperre: betroffenen Collector deaktivieren (sperrt alle seine Zertifikate, `pg_repository.go:214`, CRL) und neu registrieren; die Credentials der Scopes dieses Collectors rotieren (Nutzerwirkung F-012). Nachweis: die Erkennungsabfrage des Hinweises läuft als Fall in `renew_edge_integration_test.go` – eine vor dem Stichtag per Repository angelegte Zweitausstellung wird gefunden, das Registrierungszertifikat nicht.
 - [ ] `TestCollectorPKI` (`ca_test.go:138`) prüft die Erneuerung über den NATS-Dienst statt über HTTP (Test, der das Fehlverhalten kodiert, umgeschrieben); Zeile aus `tests/audit/expected-failures.txt` entfernt; `go test ./internal/discovery/ ./internal/server/` (mit `TEST_DATABASE_URL`) grün.
 
@@ -2766,19 +2848,19 @@ PRI-07;Grundsatz (ohne Tag);D;backend/internal/discovery/natsedge_integration_te
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-COL-04;[B];D;backend/internal/discovery/renew_edge_integration_test.go;WP-374
-COL-02;[B];D;backend/internal/discovery/renew_edge_integration_test.go;WP-374
+COL-04;[B];D;backend/internal/discovery/renew_edge_integration_test.go;WP-375
+COL-02;[B];D;backend/internal/discovery/renew_edge_integration_test.go;WP-375
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Erneuerungslogik im Collector (WP-411 (`t4-pki-renew-collector`)); CA-Roll-over (WP-426 (`t4-pki-rollover-export`)) und PKI-Export (WP-425 (`t4-edge-pki-export`)); Trennung bestehender Verbindungen bei disabled (WP-380 (`t4-collector-disable-kick`)); Authentifizierung des Kern-NATS (Besitznachweis im Dienst genügt für F-012).
+**Nicht Bestandteil:** Erneuerungslogik im Collector (WP-414 (`t4-pki-renew-collector`)); CA-Roll-over (WP-430 (`t4-pki-rollover-export`)) und PKI-Export (WP-429 (`t4-edge-pki-export`)); Trennung bestehender Verbindungen bei disabled (WP-381 (`t4-collector-disable-kick`)); Authentifizierung des Kern-NATS (Besitznachweis im Dienst genügt für F-012).
 
-### WP-375 – Credential-Bundle: nur Scope-relevante Credentials; Scope ohne Credentials nutzt Client-/Org-Credentials
+### WP-376 – Credential-Bundle: nur Scope-relevante Credentials; Scope ohne Credentials nutzt Client-/Org-Credentials
 
 **Schlüssel:** `t4-bundle-select` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-373 (`t4-natsedge-ci`)
+**Voraussetzungen (gemergt):** WP-374 (`t4-natsedge-ci`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -2790,7 +2872,7 @@ COL-02;[B];D;backend/internal/discovery/renew_edge_integration_test.go;WP-374
 
 | Befund | Prio | Titel | Beitrag | Betroffene WPs |
 |---|---|---|---|---|
-| [F-027](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-027) | P1 | Falsche Credential-Auswahl im Bundle: ohne aktive Scopes alle Client- und Org-Credentials, ein Scope ohne credential_ids leert das Bundle | schließt | WP-147, WP-153, WP-156 |
+| [F-027](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-027) | P1 | Falsche Credential-Auswahl im Bundle: ohne aktive Scopes alle Client- und Org-Credentials, ein Scope ohne credential_ids leert das Bundle | Teil | WP-147, WP-153, WP-156 |
 | [F-264](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-264) | P3 | Scope-Credentials werden nur auf die Org geprüft: ein Credential von Client 2 lässt sich an einen Scope von Client 1 binden | mit | WP-153 |
 
 **Schließt Audit-WPs:** [WP-147](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-147) (TEILWEISE BESTANDEN, Teil), [WP-153](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-153) (FEHLGESCHLAGEN, Teil), [WP-156](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-156) (TEILWEISE BESTANDEN, Teil)
@@ -2800,9 +2882,9 @@ COL-02;[B];D;backend/internal/discovery/renew_edge_integration_test.go;WP-374
 **Akzeptanzkriterien:**
 
 - [ ] Auswahlregel nach E-67 (Übergangsregel Option A): `VerifyBundleTarget` (`natsedge.go:446-458`) setzt `CredentialIDs` immer (nie nil) als Vereinigung der effektiven Listen der aktiven Scopes: Scope mit `credential_ids` → genau diese, ebenfalls gefiltert auf `client_id IS NULL OR = scope.client_id` (Altbestände vor dem F-264-Fix); Scope ohne `credential_ids` → Credentials mit `client_id IS NULL` oder `= scope.client_id`. Ohne aktiven Scope bleibt die Liste leer. Der nil-Zweig in `BundleTarget.relevant()` (`credential/bundle.go:161-171`) entfällt; `credential/bundle_test.go` prüft leere Liste und explizite IDs.
-- [ ] `CollectorScopes` (`scope_handler.go:342`) sendet je Scope die effektive Liste `credential_ids` nach dieser Regel, damit der Collector je Scope auflöst (WP-376 (`t4-cred-scope`)); Test in `bundle_selection_integration_test.go`.
+- [ ] `CollectorScopes` (`scope_handler.go:342`) sendet je Scope die effektive Liste `credential_ids` nach dieser Regel, damit der Collector je Scope auflöst (WP-378 (`t4-cred-scope`)); Test in `bundle_selection_integration_test.go`.
 - [ ] `checkCredentials` verlangt `credential.client_id IS NULL OR = scope.client_id`; PG-Test in `scope_integration_test.go`: Org-Principal bindet das SSH-Credential von Client 2 an einen Scope des Collectors von Client 1 → 422 mit Feld `credential_ids`; org-weites Credential → 201 (Retest F-264).
-- [ ] `TestAuditBundleCredentialSelection` wird nach `bundle_selection_integration_test.go` (ohne Tag, Hilfen aus `edge_helpers_integration_test.go` von WP-373 (`t4-natsedge-ci`)) überführt und besteht in allen vier Fällen (kein Scope → [], nur deaktivierter Scope → [], Scope ohne IDs → Org-Credential, Scope mit IDs → genau diese); zusätzliche Fälle: Scope ohne IDs mit Client 1 erhält kein Credential von Client 2; Scope von Client 1 mit explizitem Credential von Client 2 (direkt in der DB angelegt) → nicht im Bundle. Retest F-027 (Teil e2e-real in WP-541 (`t4-e2e-onboarding-bundle`)). Das WP entfernt nur seine eigene Testfunktion aus `collector_pki_auditdefect_test.go`.
+- [ ] `TestAuditBundleCredentialSelection` wird nach `bundle_selection_integration_test.go` (ohne Tag, Hilfen aus `edge_helpers_integration_test.go` von WP-374 (`t4-natsedge-ci`)) überführt und besteht in allen vier Fällen (kein Scope → [], nur deaktivierter Scope → [], Scope ohne IDs → Org-Credential, Scope mit IDs → genau diese); zusätzliche Fälle: Scope ohne IDs mit Client 1 erhält kein Credential von Client 2; Scope von Client 1 mit explizitem Credential von Client 2 (direkt in der DB angelegt) → nicht im Bundle. Retest F-027 (Teil e2e-real in WP-384 (`t4-e2e-onboarding-bundle`)). Das WP entfernt nur seine eigene Testfunktion aus `collector_pki_auditdefect_test.go`.
 - [ ] Das Audit `credential.bundle_delivered` nennt die gelieferten IDs (leere Liste bei leerem Bundle).
 - [ ] Zeile aus `tests/audit/expected-failures.txt` entfernt; `TestSealBundle`, `TestBundleSelectsScopeCredentials` (Erwartung „nil = alle“ angepasst) und `TestDiscoveryScopes` grün.
 
@@ -2830,85 +2912,14 @@ COL-02;[B];D;backend/internal/discovery/renew_edge_integration_test.go;WP-374
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-COL-02;[B];D;backend/internal/discovery/bundle_selection_integration_test.go;WP-375
-DIS-09;[B];D;backend/internal/discovery/scope_integration_test.go;WP-375
-INS-06;[B];D;backend/internal/discovery/bundle_selection_integration_test.go;WP-375
+COL-02;[B];D;backend/internal/discovery/bundle_selection_integration_test.go;WP-376
+DIS-09;[B];D;backend/internal/discovery/scope_integration_test.go;WP-376
+INS-06;[B];D;backend/internal/discovery/bundle_selection_integration_test.go;WP-376
 ```
 
 **Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Auflösung je Scope im Collector (WP-376 (`t4-cred-scope`)); Credential-Auswahl im UI (WP-495 (`t4-scope-form-ui`)); Real-Stack-Nachweis (WP-541 (`t4-e2e-onboarding-bundle`)).
-
-### WP-376 – Collector: Credentials je Scope und je Art, keine Protokoll-Aliasse
-
-**Schlüssel:** `t4-cred-scope` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 2,0 PT
-
-**Voraussetzungen (gemergt):** WP-375 (`t4-bundle-select`)
-
-| ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
-|---|---|---|---|---|---|---|
-| DIS-04 | [B] | FEHLGESCHLAGEN | Teil | [WP-152](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-152) | `docs/audit/05-collector-discovery-reconciliation.md:45` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:28` |
-| DIS-09 | [B] | FEHLGESCHLAGEN | Teil | [WP-153](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-153) | `docs/audit/05-collector-discovery-reconciliation.md:50` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:38` |
-| COL-02 | [B] | TEILWEISE BESTANDEN | Teil | [WP-147](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-147) | `docs/audit/05-collector-discovery-reconciliation.md:35` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:6` |
-
-**Befunde:**
-
-| Befund | Prio | Titel | Beitrag | Betroffene WPs |
-|---|---|---|---|---|
-| [F-010](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-010) | P0 | WMI-Plugin sendet Credentials im Klartext (HTTP Basic über http://ziel:5985; HTTPS-Modus mit InsecureSkipVerify) | Teil | WP-048, WP-152 |
-| [F-013](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-013) | P0 | Collector ignoriert credential_ids je Scope: das erste Credential je Protokoll gilt für alle Scopes (auch über Client-Grenzen) | schließt | WP-147, WP-153 |
-| [F-028](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-028) | P1 | Credentials der Art 'wmi' erreichen das WMI-Plugin nie; SSH-Credentials gehen an WMI- und NAS-Ziele | schließt | WP-152 |
-
-**Schließt Audit-WPs:** [WP-147](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-147) (TEILWEISE BESTANDEN, Teil), [WP-152](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-152) (FEHLGESCHLAGEN, Teil), [WP-153](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-153) (FEHLGESCHLAGEN, Teil)
-
-**Problem:** `bundleContent.namespaced` (`collectorcmd/bundle.go:105-130`) flacht das Bundle auf Protokollschlüssel ab, das erste Credential je Protokoll gewinnt; `runDueDiscovery` (`collectorcmd.go:449`) übergibt allen Pässen dieselbe Menge, `collectorScope.CredentialIDs` (`scopes.go:38`) wird nie gelesen: Ziele des Scopes von Client 2 werden mit dem Geheimnis von Client 1 abgefragt (F-013, P0; org-weite Collector mit Scopes mehrerer Clients sind zulässig, Migration 000129:75-77). Die Aliasse `wmi→ssh` und `nas→ssh` (`plugins/plugin.go:74-78`) widersprechen dem Namespace `wmi` (`bundle.go:105-108`): WMI-Credentials erreichen das Plugin nie, das SSH-Konto geht an WMI- und NAS-Ziele (F-028). Dieselbe Ursache kodiert der T2-Defekttest `TestAuditT2CredentialsArePerProtocol` (zu F-010).
-
-**Akzeptanzkriterien:**
-
-- [ ] Der Bundle-Cache hält die Credentials nach ID (Art, Geheimnis); je Pass werden nur die IDs aus `scope.CredentialIDs` (effektive Liste vom Server, WP-375 (`t4-bundle-select`)) aufgelöst und je Art auf den Plugin-Namespace abgebildet; lokal konfigurierte `RETICORA_*`-Credentials gelten nur für den Fallback-Pass ohne Server-Scopes.
-- [ ] `credentialAliases` enthält nur noch `power → snmp`; `CredentialsFor("wmi")` ohne `wmi.*` liefert eine leere Menge, nie das SSH-Konto; das NAS-Plugin erhält bis WP-378 (`t4-nas-tls`) keine Credentials (fail-closed).
-- [ ] `TestAuditPerScopeCredentials` und `TestAuditCredentialKindRouting` werden nach `collectorcmd/discovery_credentials_test.go` (ohne Tag) überführt und bestehen (Ziel des Scopes von Client 2 erhält nur `c2-secret`; WMI erhält `wmi-secret`; kein Plugin außer ssh erhält das SSH-Konto); `TestAuditT2CredentialsArePerProtocol` wird nach `collector/plugins/plugin_test.go` überführt und besteht. Retests F-013 und F-028. `t2_credentials_auditdefect_test.go` gelöscht (einziger Test überführt).
-- [ ] Vertragstest: `collector/collectorcmd/testdata/credential-kinds.json` (neu) listet jede Backend-Art mit Plugin-Namespace; ein `collectorcmd`-Test prüft, dass jede Art auf genau einen Namespace abgebildet wird, `backend/internal/credential/credential_test.go` prüft, dass die Datei genau `validKinds` enthält (Abweichung in einem Modul → rot).
-- [ ] Nachweis „Klartext nur im Speicher“ (COL-02, WP-147): Test in `bundle_test.go` öffnet ein Bundle, führt einen Discovery-Lauf mit Spool aus und prüft, dass kein Geheimnis in Dateien unter dem Datenverzeichnis des Collectors (Spool, Keystore, Temp) und in den mitgeschnittenen Logs vorkommt.
-- [ ] Die gemeinsamen Hilfen von `discovery_auditdefect_test.go` (`auditSpy`, `auditUsePlugins`, `auditInstallBundle`, `auditCaptureScopeRuns`, `auditUploadSink`, `auditLoopback`) liegen ohne Tag in `discovery_helpers_test.go`; Zeilen aus `expected-failures.txt` entfernt; `go test ./collectorcmd/ ./plugins/...` und `go test ./internal/credential/` grün.
-- [ ] Alle Verbraucher der Credential-Menge sind umgestellt, nicht nur `collectorcmd.go:449`. Die Power-Abfrage im Pass (`pollPowerValues`, `collectorcmd.go:466`) nutzt die SNMP-Credentials des Passes statt `plugins.CredentialsFor("snmp", credentialsFor(cfg))`. Metrik-Poller (`collectorcmd.go:1036`) und Trap-Empfänger (`collectorcmd.go:1009`) nutzen nur lokal konfigurierte Credentials oder die Credentials des Server-Scopes, zu dem das Ziel gehört, nie ein beliebiges Bundle-Credential. `credentialsFor` (`bundle.go:145-153`) liefert keine abgeflachte Bundle-Menge mehr. Test in `collectorcmd/discovery_credentials_test.go`: Ein Power-Ziel im Scope von Client 2 wird nur mit der Community von Client 2 abgefragt (Negativfall: keine Abfrage mit `c1-community`). Der Metrik-Poller für ein lokal konfiguriertes Netz erhält kein Credential eines Server-Scopes (Negativ), wohl aber die lokale Community (Positiv).
-
-**Dateien (13 Einträge, Migration = 2):**
-
-- collector/collectorcmd/bundle.go
-- collector/plugins/plugin.go
-- collector/collectorcmd/collectorcmd.go
-- collector/collectorcmd/bundle_test.go
-- collector/collectorcmd/discovery_helpers_test.go (neu)
-- collector/collectorcmd/discovery_credentials_test.go (neu)
-- collector/collectorcmd/discovery_auditdefect_test.go
-- collector/plugins/plugin_test.go (neu)
-- collector/plugins/t2_credentials_auditdefect_test.go (gelöscht)
-- collector/collectorcmd/testdata/credential-kinds.json (neu)
-- backend/internal/credential/credential_test.go
-- tests/audit/expected-failures.txt (angelegt in WP-337)
-- docs/traceability.csv
-
-**Migration/RLS:** keine Migration.
-
-**Tests:**
-
-- `collectorcmd/discovery_credentials_test.go`: TestAuditPerScopeCredentials, TestAuditCredentialKindRouting (überführt).
-- `plugins/plugin_test.go`: TestAuditT2CredentialsArePerProtocol (überführt).
-- Vertragstest Credential-Art → Plugin (collector und backend).
-- `collectorcmd/bundle_test.go`: Klartext weder auf Disk noch im Log.
-
-**Traceability (`docs/traceability.csv`):**
-
-```text
-DIS-04;[B];D;collector/collectorcmd/discovery_credentials_test.go;WP-376
-DIS-09;[B];D;collector/collectorcmd/discovery_credentials_test.go;WP-376
-COL-02;[B];D;collector/collectorcmd/bundle_test.go;WP-376
-```
-
-**Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (offen, Empfehlung als Übergangsregel)
-
-**Nicht Bestandteil:** Transportsicherheit von WMI und NAS (WP-377 (`t4-wmi-tls`), WP-378 (`t4-nas-tls`)); neue Credential-Art für NAS (WP-378 (`t4-nas-tls`)).
+**Nicht Bestandteil:** Auflösung je Scope im Collector (WP-378 (`t4-cred-scope`)); Credential-Auswahl im UI (WP-496 (`t4-scope-form-ui`)); Real-Stack-Nachweis (WP-384 (`t4-e2e-onboarding-bundle`)).
 
 ### WP-377 – WMI: Zugangsdaten nur über geprüftes TLS (WinRM 5986, CA/Pin je Netz)
 
@@ -2924,11 +2935,11 @@ COL-02;[B];D;collector/collectorcmd/bundle_test.go;WP-376
 
 | Befund | Prio | Titel | Beitrag | Betroffene WPs |
 |---|---|---|---|---|
-| [F-010](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-010) | P0 | WMI-Plugin sendet Credentials im Klartext (HTTP Basic über http://ziel:5985; HTTPS-Modus mit InsecureSkipVerify) | schließt | WP-048, WP-152 |
+| [F-010](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-010) | P0 | WMI-Plugin sendet Credentials im Klartext (HTTP Basic über http://ziel:5985; HTTPS-Modus mit InsecureSkipVerify) | Teil | WP-048, WP-152 |
 
-**Schließt Audit-WPs:** [WP-152](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-152) (FEHLGESCHLAGEN, Teil)
+**Schließt Audit-WPs:** [WP-048](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-048) (FEHLGESCHLAGEN, Teil), [WP-152](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-152) (FEHLGESCHLAGEN, Teil)
 
-**Problem:** `wmi.New` (`plugins/wmi/wmi.go:42`, `:47`) setzt `UseHTTPS=false` und `InsecureSkipVerify=true`; `:155-162` bauen `http://ziel:5985`, `:209` sendet HTTP Basic: jeder Host im gescannten Bereich und jeder Mitschneider erhält das privilegierte Windows-Konto im Klartext, Port 5986 akzeptiert selbstsignierte Zertifikate (F-010, P0; zusammengeführt mit L-T2-13, betrifft auch WP-048). Redfish löst das Problem bereits mit `TLSScope` (CA-Bundle oder SPKI-Pin je Netz, `redfish.go:44-124`). Das WP ist unabhängig von WP-376 (`t4-cred-scope`) (nur der Parser in `collectorcmd.go` wird von beiden berührt) und startet sofort.
+**Problem:** `wmi.New` (`plugins/wmi/wmi.go:42`, `:47`) setzt `UseHTTPS=false` und `InsecureSkipVerify=true`; `:155-162` bauen `http://ziel:5985`, `:209` sendet HTTP Basic: jeder Host im gescannten Bereich und jeder Mitschneider erhält das privilegierte Windows-Konto im Klartext, Port 5986 akzeptiert selbstsignierte Zertifikate (F-010, P0; zusammengeführt mit L-T2-13, betrifft auch WP-048). Redfish löst das Problem bereits mit `TLSScope` (CA-Bundle oder SPKI-Pin je Netz, `redfish.go:44-124`). Das WP ist unabhängig von WP-378 (`t4-cred-scope`) (nur der Parser in `collectorcmd.go` wird von beiden berührt) und startet sofort.
 
 **Akzeptanzkriterien:**
 
@@ -2969,13 +2980,85 @@ DIS-04;[B];D;collector/plugins/wmi/wmi_test.go;WP-377
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Fehlerbehandlung und Enumerate/Pull (WP-412 (`t4-wmi-errors`)); NTLM/Kerberos mit Nachrichtenverschlüsselung über 5985 (WMI ist nach DIS-04 Best Effort).
+**Nicht Bestandteil:** Fehlerbehandlung und Enumerate/Pull (WP-415 (`t4-wmi-errors`)); NTLM/Kerberos mit Nachrichtenverschlüsselung über 5985 (WMI ist nach DIS-04 Best Effort).
 
-### WP-378 – NAS (Synology): Anmeldung per POST über geprüftes TLS, eigene Credential-Art
+### WP-378 – Collector: Credentials je Scope und je Art, keine Protokoll-Aliasse
+
+**Schlüssel:** `t4-cred-scope` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 2,0 PT
+
+**Voraussetzungen (gemergt):** WP-376 (`t4-bundle-select`), WP-377 (`t4-wmi-tls`)
+
+| ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| DIS-04 | [B] | FEHLGESCHLAGEN | Teil | [WP-152](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-152) | `docs/audit/05-collector-discovery-reconciliation.md:45` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:28` |
+| DIS-09 | [B] | FEHLGESCHLAGEN | Teil | [WP-153](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-153) | `docs/audit/05-collector-discovery-reconciliation.md:50` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:38` |
+| COL-02 | [B] | TEILWEISE BESTANDEN | Teil | [WP-147](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-147) | `docs/audit/05-collector-discovery-reconciliation.md:35` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:6` |
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Betroffene WPs |
+|---|---|---|---|---|
+| [F-010](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-010) | P0 | WMI-Plugin sendet Credentials im Klartext (HTTP Basic über http://ziel:5985; HTTPS-Modus mit InsecureSkipVerify) | schließt | WP-048, WP-152 |
+| [F-013](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-013) | P0 | Collector ignoriert credential_ids je Scope: das erste Credential je Protokoll gilt für alle Scopes (auch über Client-Grenzen) | schließt | WP-147, WP-153 |
+| [F-028](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-028) | P1 | Credentials der Art 'wmi' erreichen das WMI-Plugin nie; SSH-Credentials gehen an WMI- und NAS-Ziele | schließt | WP-152 |
+
+**Schließt Audit-WPs:** [WP-048](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-048) (FEHLGESCHLAGEN, Teil), [WP-147](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-147) (TEILWEISE BESTANDEN, Teil), [WP-152](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-152) (FEHLGESCHLAGEN, Teil), [WP-153](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-153) (FEHLGESCHLAGEN, Teil)
+
+**Problem:** `bundleContent.namespaced` (`collectorcmd/bundle.go:105-130`) flacht das Bundle auf Protokollschlüssel ab, das erste Credential je Protokoll gewinnt; `runDueDiscovery` (`collectorcmd.go:449`) übergibt allen Pässen dieselbe Menge, `collectorScope.CredentialIDs` (`scopes.go:38`) wird nie gelesen: Ziele des Scopes von Client 2 werden mit dem Geheimnis von Client 1 abgefragt (F-013, P0; org-weite Collector mit Scopes mehrerer Clients sind zulässig, Migration 000129:75-77). Die Aliasse `wmi→ssh` und `nas→ssh` (`plugins/plugin.go:74-78`) widersprechen dem Namespace `wmi` (`bundle.go:105-108`): WMI-Credentials erreichen das Plugin nie, das SSH-Konto geht an WMI- und NAS-Ziele (F-028). Dieselbe Ursache kodiert der T2-Defekttest `TestAuditT2CredentialsArePerProtocol` (zu F-010).
+
+**Akzeptanzkriterien:**
+
+- [ ] Der Bundle-Cache hält die Credentials nach ID (Art, Geheimnis); je Pass werden nur die IDs aus `scope.CredentialIDs` (effektive Liste vom Server, WP-376 (`t4-bundle-select`)) aufgelöst und je Art auf den Plugin-Namespace abgebildet; lokal konfigurierte `RETICORA_*`-Credentials gelten nur für den Fallback-Pass ohne Server-Scopes.
+- [ ] `credentialAliases` enthält nur noch `power → snmp`; `CredentialsFor("wmi")` ohne `wmi.*` liefert eine leere Menge, nie das SSH-Konto; das NAS-Plugin erhält bis WP-379 (`t4-nas-tls`) keine Credentials (fail-closed).
+- [ ] `TestAuditPerScopeCredentials` und `TestAuditCredentialKindRouting` werden nach `collectorcmd/discovery_credentials_test.go` (ohne Tag) überführt und bestehen (Ziel des Scopes von Client 2 erhält nur `c2-secret`; WMI erhält `wmi-secret`; kein Plugin außer ssh erhält das SSH-Konto); `TestAuditT2CredentialsArePerProtocol` wird nach `collector/plugins/plugin_test.go` überführt und besteht. Retests F-013 und F-028. `t2_credentials_auditdefect_test.go` gelöscht (einziger Test überführt).
+- [ ] Vertragstest: `collector/collectorcmd/testdata/credential-kinds.json` (neu) listet jede Backend-Art mit Plugin-Namespace; ein `collectorcmd`-Test prüft, dass jede Art auf genau einen Namespace abgebildet wird, `backend/internal/credential/credential_test.go` prüft, dass die Datei genau `validKinds` enthält (Abweichung in einem Modul → rot).
+- [ ] Nachweis „Klartext nur im Speicher“ (COL-02, WP-147): Test in `bundle_test.go` öffnet ein Bundle, führt einen Discovery-Lauf mit Spool aus und prüft, dass kein Geheimnis in Dateien unter dem Datenverzeichnis des Collectors (Spool, Keystore, Temp) und in den mitgeschnittenen Logs vorkommt.
+- [ ] Die gemeinsamen Hilfen von `discovery_auditdefect_test.go` (`auditSpy`, `auditUsePlugins`, `auditInstallBundle`, `auditCaptureScopeRuns`, `auditUploadSink`, `auditLoopback`) liegen ohne Tag in `discovery_helpers_test.go`; Zeilen aus `expected-failures.txt` entfernt; `go test ./collectorcmd/ ./plugins/...` und `go test ./internal/credential/` grün.
+- [ ] Alle Verbraucher der Credential-Menge sind umgestellt, nicht nur `collectorcmd.go:449`. Die Power-Abfrage im Pass (`pollPowerValues`, `collectorcmd.go:466`) nutzt die SNMP-Credentials des Passes statt `plugins.CredentialsFor("snmp", credentialsFor(cfg))`. Metrik-Poller (`collectorcmd.go:1036`) und Trap-Empfänger (`collectorcmd.go:1009`) nutzen nur lokal konfigurierte Credentials oder die Credentials des Server-Scopes, zu dem das Ziel gehört, nie ein beliebiges Bundle-Credential. `credentialsFor` (`bundle.go:145-153`) liefert keine abgeflachte Bundle-Menge mehr. Test in `collectorcmd/discovery_credentials_test.go`: Ein Power-Ziel im Scope von Client 2 wird nur mit der Community von Client 2 abgefragt (Negativfall: keine Abfrage mit `c1-community`). Der Metrik-Poller für ein lokal konfiguriertes Netz erhält kein Credential eines Server-Scopes (Negativ), wohl aber die lokale Community (Positiv).
+- [ ] Abschluss F-010: Der verbindliche Retest aus PHASE1_FINDINGS.md ist vollständig grün: `TestAuditWMICredentialTransport` (überführt in WP-377 (`t4-wmi-tls`)) und `TestAuditT2CredentialsArePerProtocol` (überführt in diesem WP); beide Zeilen fehlen in `tests/audit/expected-failures.txt`.
+
+**Dateien (13 Einträge, Migration = 2):**
+
+- collector/collectorcmd/bundle.go
+- collector/plugins/plugin.go
+- collector/collectorcmd/collectorcmd.go
+- collector/collectorcmd/bundle_test.go
+- collector/collectorcmd/discovery_helpers_test.go (neu)
+- collector/collectorcmd/discovery_credentials_test.go (neu)
+- collector/collectorcmd/discovery_auditdefect_test.go
+- collector/plugins/plugin_test.go (neu)
+- collector/plugins/t2_credentials_auditdefect_test.go (gelöscht)
+- collector/collectorcmd/testdata/credential-kinds.json (neu)
+- backend/internal/credential/credential_test.go
+- tests/audit/expected-failures.txt (angelegt in WP-337)
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `collectorcmd/discovery_credentials_test.go`: TestAuditPerScopeCredentials, TestAuditCredentialKindRouting (überführt).
+- `plugins/plugin_test.go`: TestAuditT2CredentialsArePerProtocol (überführt).
+- Vertragstest Credential-Art → Plugin (collector und backend).
+- `collectorcmd/bundle_test.go`: Klartext weder auf Disk noch im Log.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+DIS-04;[B];D;collector/collectorcmd/discovery_credentials_test.go;WP-378
+DIS-09;[B];D;collector/collectorcmd/discovery_credentials_test.go;WP-378
+COL-02;[B];D;collector/collectorcmd/bundle_test.go;WP-378
+```
+
+**Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (offen, Empfehlung als Übergangsregel)
+
+**Nicht Bestandteil:** Transportsicherheit von WMI und NAS (WP-377 (`t4-wmi-tls`), WP-379 (`t4-nas-tls`)); neue Credential-Art für NAS (WP-379 (`t4-nas-tls`)).
+
+### WP-379 – NAS (Synology): Anmeldung per POST über geprüftes TLS, eigene Credential-Art
 
 **Schlüssel:** `t4-nas-tls` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-376 (`t4-cred-scope`), WP-377 (`t4-wmi-tls`)
+**Voraussetzungen (gemergt):** WP-377 (`t4-wmi-tls`), WP-378 (`t4-cred-scope`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -2989,12 +3072,12 @@ DIS-04;[B];D;collector/plugins/wmi/wmi_test.go;WP-377
 
 **Schließt Audit-WPs:** [WP-152](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-152) (FEHLGESCHLAGEN, Teil)
 
-**Problem:** `nas.go:47-60` nutzt `http://ziel:5000` bzw. HTTPS 5001 mit `InsecureSkipVerify`; `:214-217` und `:257` setzen Konto und Passwort in den Query-String von `auth.cgi`: Zugangsdaten gehen mitlesbar übers Netz und landen in Access-Logs von Geräten und Proxys (F-011, P0). Nach dem Entfernen des Alias `nas→ssh` (WP-376 (`t4-cred-scope`)) fehlt dem NAS-Plugin eine eigene Credential-Art; COL-02 „Typen wie v2“ ist ohne v2-Text offen (E-02), daher Entscheidung E-68.
+**Problem:** `nas.go:47-60` nutzt `http://ziel:5000` bzw. HTTPS 5001 mit `InsecureSkipVerify`; `:214-217` und `:257` setzen Konto und Passwort in den Query-String von `auth.cgi`: Zugangsdaten gehen mitlesbar übers Netz und landen in Access-Logs von Geräten und Proxys (F-011, P0). Nach dem Entfernen des Alias `nas→ssh` (WP-378 (`t4-cred-scope`)) fehlt dem NAS-Plugin eine eigene Credential-Art; COL-02 „Typen wie v2“ ist ohne v2-Text offen (E-02), daher Entscheidung E-68.
 
 **Akzeptanzkriterien:**
 
 - [ ] Login über `POST /webapi/auth.cgi` (Konto und Passwort nur im Body) ausschließlich über HTTPS 5001 mit Zertifikatsprüfung über `plugins.TLSScope` (`RETICORA_NAS_TLS_SCOPES`); kein Request mit Credentials auf Port 5000; Session-ID und Passwort erscheinen in keinem Log.
-- [ ] Credential-Art `nas` (Benutzer/Passwort) nach E-68 (Übergangsregel Option A): Migration erweitert die CHECK-Constraint von `credential.kind`; `validKinds` (`credential.go`), OpenAPI-Enum (`openapi.yaml:18123`, `:18145`) und `schema.d.ts` ergänzt; der Collector bildet `nas` auf den Namespace `nas` ab; `testdata/credential-kinds.json` ergänzt, Vertragstest aus WP-376 (`t4-cred-scope`) grün.
+- [ ] Credential-Art `nas` (Benutzer/Passwort) nach E-68 (Übergangsregel Option A): Migration erweitert die CHECK-Constraint von `credential.kind`; `validKinds` (`credential.go`), OpenAPI-Enum (`openapi.yaml:18123`, `:18145`) und `schema.d.ts` ergänzt; der Collector bildet `nas` auf den Namespace `nas` ab; `testdata/credential-kinds.json` ergänzt, Vertragstest aus WP-378 (`t4-cred-scope`) grün.
 - [ ] `TestAuditNASCredentialTransport` wird nach `nas_test.go` überführt und besteht (kein Passwort in der URL, nichts auf 5000; ungeprüftes Zertifikat abgewiesen; mit Pin Login per POST); `TestCollectSynologyEndToEnd` bleibt grün (Fixture auf POST und TLS umgestellt). Retest F-011.
 - [ ] Migration-Roundtrip grün; Credential-Anlage mit `kind: nas` → 201, unbekannte Art → 422 (`credential/handler_test.go`).
 - [ ] Zeile aus `expected-failures.txt` entfernt; `go test ./plugins/nas/ ./collectorcmd/` und `go test ./internal/credential/` grün. `nas_auditdefect_test.go` gelöscht (Hilfe `auditNASListen` in `nas_test.go` übernommen).
@@ -3006,7 +3089,7 @@ DIS-04;[B];D;collector/plugins/wmi/wmi_test.go;WP-377
 - collector/plugins/nas/nas_auditdefect_test.go (gelöscht)
 - collector/collectorcmd/bundle.go
 - collector/collectorcmd/collectorcmd.go
-- collector/collectorcmd/testdata/credential-kinds.json (angelegt in WP-376)
+- collector/collectorcmd/testdata/credential-kinds.json (angelegt in WP-378)
 - backend/internal/credential/credential.go
 - backend/internal/credential/handler_test.go
 - backend/migrations/<nächste Nr.>_credential_kind_nas.up.sql (neu)
@@ -3027,18 +3110,18 @@ DIS-04;[B];D;collector/plugins/wmi/wmi_test.go;WP-377
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DIS-04;[B];D;collector/plugins/nas/nas_test.go;WP-378
+DIS-04;[B];D;collector/plugins/nas/nas_test.go;WP-379
 ```
 
 **Entscheidungsbedarf:** [E-68](entscheidungen.md#e-68) Credential-Art für das NAS-Plugin (Synology DSM) (offen, Empfehlung als Übergangsregel); [E-02](../entscheidungen.md#e-02)
 
 **Nicht Bestandteil:** Credential-Verwaltungsseite im Frontend; weitere Arten aus den v2-Texten (E-02).
 
-### WP-379 – Deaktivierter oder unbekannter Collector: Edge-Daten abweisen; PATCH auf fremden Collector 404
+### WP-380 – Deaktivierter oder unbekannter Collector: Edge-Daten abweisen; PATCH auf fremden Collector 404
 
 **Schlüssel:** `t4-collector-disable-data` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-342 (`t1-review-scope`), WP-375 (`t4-bundle-select`)
+**Voraussetzungen (gemergt):** WP-342 (`t1-review-scope`), WP-376 (`t4-bundle-select`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -3054,7 +3137,7 @@ DIS-04;[B];D;collector/plugins/nas/nas_test.go;WP-378
 
 **Schließt Audit-WPs:** [WP-145](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-145) (FEHLGESCHLAGEN, Teil), [WP-153](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-153) (FEHLGESCHLAGEN, Teil)
 
-**Problem:** `EdgeIngest` (`edge_ingest.go:74-101`), `EdgeHeartbeat`, `RecordCollectorScopeRun` und `SuggestScopes` (`scope_handler.go:193-233`, `:369-391`) prüfen den Collector-Status nicht; unbekannte und deaktivierte Collector werden angenommen und ihre Daten persistiert (F-025, P1, Datenteil). `UpdateCollector` liefert bei unbekannter oder fremder ID `fmt.Errorf("not found")` → 500 (`pg_repository.go:190`, F-257). Die Trennung bestehender Verbindungen ist unabhängig davon und folgt in WP-380 (`t4-collector-disable-kick`).
+**Problem:** `EdgeIngest` (`edge_ingest.go:74-101`), `EdgeHeartbeat`, `RecordCollectorScopeRun` und `SuggestScopes` (`scope_handler.go:193-233`, `:369-391`) prüfen den Collector-Status nicht; unbekannte und deaktivierte Collector werden angenommen und ihre Daten persistiert (F-025, P1, Datenteil). `UpdateCollector` liefert bei unbekannter oder fremder ID `fmt.Errorf("not found")` → 500 (`pg_repository.go:190`, F-257). Die Trennung bestehender Verbindungen ist unabhängig davon und folgt in WP-381 (`t4-collector-disable-kick`).
 
 **Akzeptanzkriterien:**
 
@@ -3062,7 +3145,7 @@ DIS-04;[B];D;collector/plugins/nas/nas_test.go;WP-378
 - [ ] `TestAuditEdgeIngestRefusesDisabledOrUnknownCollector` (aus `ingest_auditdefect_test.go`) und `TestAuditDisabledCollectorScopeChannelRefused` werden nach `edge_status_integration_test.go` (ohne Tag) überführt und bestehen. Retest F-025 (Datenteil) mit `TEST_DATABASE_URL`.
 - [ ] F-257: `UpdateCollector` liefert `api.ErrNotFound`; PATCH auf eine Zufalls-UUID und auf einen Collector einer fremden Org → 404, DB unverändert; eigener Collector → 200 (Test in `edge_status_integration_test.go`).
 - [ ] `disabled_collector_channel_auditdefect_test.go` gelöscht; Zeilen aus `expected-failures.txt` entfernt; `go test ./internal/discovery/` grün (`TestDiscoveryScopes`, `TestAuditScopeChannelOverNATS` unverändert grün).
-- [ ] Die Statusprüfung (unbekannt oder disabled → Abweisung, nichts persistiert) liegt im Dispatcher von `ServeCollectorEdge` (edge_ingest.go) und `ServeCollectorScopes` (scope_handler.go) vor dem Aufruf des Handlers. So gilt sie für jedes registrierte Suffix, auch für später hinzukommende wie `.metrics` aus WP-422 (`t7-metrics-edge`). Nachweis: tabellengetriebener Fall in `edge_status_integration_test.go` über alle registrierten Suffixe (.ingest, .heartbeat, .scopes.result, .subnets.report) mit deaktiviertem und unbekanntem Collector → Fehlerantwort und keine neue Zeile. Aktiver Collector → unveränderte Antwort (Positivkontrolle).
+- [ ] Die Statusprüfung (unbekannt oder disabled → Abweisung, nichts persistiert) liegt im Dispatcher von `ServeCollectorEdge` (edge_ingest.go) und `ServeCollectorScopes` (scope_handler.go) vor dem Aufruf des Handlers. So gilt sie für jedes registrierte Suffix, auch für später hinzukommende wie `.metrics` aus WP-426 (`t7-metrics-edge`). Nachweis: tabellengetriebener Fall in `edge_status_integration_test.go` über alle registrierten Suffixe (.ingest, .heartbeat, .scopes.result, .subnets.report) mit deaktiviertem und unbekanntem Collector → Fehlerantwort und keine neue Zeile. Aktiver Collector → unveränderte Antwort (Positivkontrolle).
 
 **Dateien (9 Einträge, Migration = 2):**
 
@@ -3085,19 +3168,19 @@ DIS-04;[B];D;collector/plugins/nas/nas_test.go;WP-378
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DIS-09;[B];D;backend/internal/discovery/edge_status_integration_test.go;WP-379
-COL-01;[B];D;backend/internal/discovery/edge_status_integration_test.go;WP-379
+DIS-09;[B];D;backend/internal/discovery/edge_status_integration_test.go;WP-380
+COL-01;[B];D;backend/internal/discovery/edge_status_integration_test.go;WP-380
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Trennung bestehender Verbindungen (WP-380 (`t4-collector-disable-kick`)); Log-Meldung des Collectors bei Abweisung (F-258, WP-411 (`t4-pki-renew-collector`)).
+**Nicht Bestandteil:** Trennung bestehender Verbindungen (WP-381 (`t4-collector-disable-kick`)); Log-Meldung des Collectors bei Abweisung (F-258, WP-414 (`t4-pki-renew-collector`)).
 
-### WP-380 – Deaktivierter Collector: bestehende Edge-Verbindung binnen Sekunden trennen
+### WP-381 – Deaktivierter Collector: bestehende Edge-Verbindung binnen Sekunden trennen
 
 **Schlüssel:** `t4-collector-disable-kick` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-373 (`t4-natsedge-ci`), WP-379 (`t4-collector-disable-data`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-374 (`t4-natsedge-ci`), WP-380 (`t4-collector-disable-data`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -3118,7 +3201,7 @@ COL-01;[B];D;backend/internal/discovery/edge_status_integration_test.go;WP-379
 - [ ] Statuswechsel auf `disabled` (PATCH `/collectors/{id}`) trennt bestehende Edge-Verbindungen des Collectors innerhalb von 5 s: `edgeConf` generiert einen Nutzer im Konto `SYS` (Passwort aus `EdgeSecrets` abgeleitet), der in `auth_callout.auth_users` steht; der Edge-Worker (`RunEdge`) verbindet sich als dieser Nutzer mit dem internen Client-Zertifikat (`IssueInternalClient`, wie `serveEdgeAuth`), empfängt den Statuswechsel über ein internes NATS-Ereignis (auch von anderen Repliken), ermittelt die Verbindung über `$SYS.REQ.SERVER.PING.CONNZ` (Konto `COLLECTORS`, Nutzer = Collector-ID) und trennt sie über `$SYS.REQ.SERVER.<id>.KICK`; ein Fehlschlag wird als `discovery.collector.kick_failed` geloggt und wiederholt.
 - [ ] Fallback: die Gültigkeit der vom Callout ausgestellten Nutzer-JWTs sinkt von 24 h auf ≤ 15 min (`natsedge.go:147`); nach Ablauf verbindet sich der Collector neu und durchläuft den Callout, der deaktivierte Collector wird dabei abgewiesen. Positivkontrolle: ein aktiver Collector bleibt über einen Ablauf hinweg ohne Datenverlust verbunden (Neuverbindung, Spool).
 - [ ] Upgrade-Pfad: ein erneuter Lauf von `install-cloud.sh` auf einer bestehenden Installation erzeugt nats-edge nach dem Start des Servers neu (`up -d --force-recreate nats-edge`), damit die neu geschriebene `edge.conf` gilt; `tests/install-cloud-helpers.test.sh` prüft den Aufruf.
-- [ ] `TestAuditDisabledCollectorConnectionCut` wird nach `natsedge_integration_test.go` (echter nats-server, Hilfen aus WP-373 (`t4-natsedge-ci`)) überführt und besteht. Zusätzlicher Fall: `edge.conf` ohne SYS-Nutzer → `discovery.collector.kick_failed` wird geloggt, und mit per Test-Option auf 2 s verkürzter JWT-Gültigkeit ist die Verbindung nach dem Ablauf beendet und die Neuverbindung abgewiesen. Retest F-025 (Verbindungsteil) mit `TEST_DATABASE_URL` und `TEST_NATS_SERVER_BIN`.
+- [ ] `TestAuditDisabledCollectorConnectionCut` wird nach `natsedge_integration_test.go` (echter nats-server, Hilfen aus WP-374 (`t4-natsedge-ci`)) überführt und besteht. Zusätzlicher Fall: `edge.conf` ohne SYS-Nutzer → `discovery.collector.kick_failed` wird geloggt, und mit per Test-Option auf 2 s verkürzter JWT-Gültigkeit ist die Verbindung nach dem Ablauf beendet und die Neuverbindung abgewiesen. Retest F-025 (Verbindungsteil) mit `TEST_DATABASE_URL` und `TEST_NATS_SERVER_BIN`.
 - [ ] Real-Stack-Variante von D08 ohne Neustart in `frontend/e2e-real/discovery-override.spec.ts`: ein laufender simulierter Collector wird in der UI deaktiviert; innerhalb von 10 s kein weiterer persistierter Ingest (`last_seen_at` und CI-Anzahl über zwei Simulationszyklen unverändert); Kontrolle: vor dem Deaktivieren steigt `last_seen_at`.
 - [ ] Zeile aus `expected-failures.txt` entfernt; `go test ./internal/discovery/` grün; `TestCollectorNATSEndpointAuthorization` und `tests/nats-mtls.test.sh` grün.
 
@@ -3146,18 +3229,18 @@ COL-01;[B];D;backend/internal/discovery/edge_status_integration_test.go;WP-379
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-COL-04;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-380
+COL-04;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-381
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Statusprüfung der Edge-Handler (WP-379 (`t4-collector-disable-data`)); Firewall-Matrix (WP-427 (`t4-compose-ports`)); Neustart von nats-edge bei K8s-Upgrades (der JWT-Ablauf von ≤ 15 min begrenzt die Wirkung).
+**Nicht Bestandteil:** Statusprüfung der Edge-Handler (WP-380 (`t4-collector-disable-data`)); Firewall-Matrix (WP-431 (`t4-compose-ports`)); Neustart von nats-edge bei K8s-Upgrades (der JWT-Ablauf von ≤ 15 min begrenzt die Wirkung).
 
-### WP-381 – scope_suggested: Annehmen und Verwerfen nur mit discovery:manage, Sichtbarkeit je Client
+### WP-382 – scope_suggested: Annehmen und Verwerfen nur mit discovery:manage, Sichtbarkeit je Client
 
 **Schlüssel:** `t4-scope-suggested-authz` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-342 (`t1-review-scope`), WP-379 (`t4-collector-disable-data`)
+**Voraussetzungen (gemergt):** WP-342 (`t1-review-scope`), WP-380 (`t4-collector-disable-data`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -3173,11 +3256,11 @@ COL-04;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-380
 
 **Schließt Audit-WPs:** [WP-153](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-153) (FEHLGESCHLAGEN, Teil), [WP-156](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-156) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** `POST /api/v1/review-items/{id}/resolve` verlangt nur `review:resolve` (`reviews/handler.go:89-110`); die Wirkung `resolveScopeSuggested` (`scope_handler.go:252`) legt ohne `discovery:manage` einen Scope an und löst damit Netzscans aus. `review_item`-RLS gilt nur je Org, und `SuggestScopes` (`scope_handler.go:193-233`) bindet den Vorschlag nicht an den Client des Collectors: ein Client-1-Principal listet Vorschläge von Client 2 und verwirft sie dauerhaft (F-031, P1). Die Spalten `client_id`/`site_id` an `review_item` mit Client-Policies und die Bindung von scope_suggested an den Collector führt WP-342 (`t1-review-scope`) (F-003) ein (gruppenfremdes WP der Gruppe T1, muss vor diesem WP gemergt sein; die Reihenfolge trägt die Integration ein).
+**Problem:** `POST /api/v1/review-items/{id}/resolve` verlangt nur `review:resolve` (`reviews/handler.go:89-110`); die Wirkung `resolveScopeSuggested` (`scope_handler.go:252`) legt ohne `discovery:manage` einen Scope an und löst damit Netzscans aus. `review_item`-RLS gilt nur je Org, und `SuggestScopes` (`scope_handler.go:193-233`) bindet den Vorschlag nicht an den Client des Collectors: ein Client-1-Principal listet Vorschläge von Client 2 und verwirft sie dauerhaft (F-031, P1). Die Spalten `client_id`/`site_id` an `review_item` mit Client-Policies und die Bindung von scope_suggested an den Collector führt WP-342 (`t1-review-scope`) (F-003) ein (Voraussetzung dieses WP).
 
 **Akzeptanzkriterien:**
 
-- [ ] Das gruppenfremde WP-342 (`t1-review-scope`) ist gemergt (`client_id`/`site_id` an `review_item`, Policies nach E-09, scope_suggested wird an den Collector gebunden). Dieses WP ändert `SuggestScopes` nicht. Der Integrationstest belegt die Bindung: ein Vorschlag eines Client-2-Collectors trägt `client_id` von Client 2; ein org-weiter Collector erzeugt einen Vorschlag mit `client_id` NULL, den nur org-weite Principals sehen.
+- [ ] Die Voraussetzung WP-342 (`t1-review-scope`) ist gemergt (`client_id`/`site_id` an `review_item`, Policies nach E-09, scope_suggested wird an den Collector gebunden). Dieses WP ändert `SuggestScopes` nicht. Der Integrationstest belegt die Bindung: ein Vorschlag eines Client-2-Collectors trägt `client_id` von Client 2; ein org-weiter Collector erzeugt einen Vorschlag mit `client_id` NULL, den nur org-weite Principals sehen.
 - [ ] `resolveScopeSuggested` verlangt für `accept` und `dismiss` `discovery:manage` (`identity.PermissionsFromContext`/`HasPermission`); ohne → 403 Problem, das Review bleibt offen, kein Scope entsteht.
 - [ ] `TestAuditScopeSuggestedAuthzAndClientIsolation` wird nach `backend/internal/server/scope_suggested_authz_integration_test.go` (ohne Tag) überführt und besteht: client_technician accept/dismiss → 403; Client-1-Principal sieht den Vorschlag von Client 2 nicht in der Liste, resolve → 404; org_admin accept → 200 mit angelegtem Scope (Kontrolle). Retest F-031.
 - [ ] Onboarding für org_admin unverändert (Vitest `OnboardingPage`, `DiscoveryPage` grün); Zeile aus `expected-failures.txt` entfernt; `go test ./internal/server/ ./internal/discovery/ ./internal/reviews/` grün. `scope_suggested_authz_auditdefect_test.go` gelöscht.
@@ -3199,16 +3282,16 @@ COL-04;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-380
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DIS-09;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-381
-API-05;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-381
-INS-06;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-381
+DIS-09;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
+API-05;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
+INS-06;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
 ```
 
 **Entscheidungsbedarf:** [E-09](../entscheidungen.md#e-09)
 
-**Nicht Bestandteil:** Client-/Site-Scope für andere Review-Arten (T1, F-003); Real-Stack-Nachweis der Bestätigung (WP-541 (`t4-e2e-onboarding-bundle`)).
+**Nicht Bestandteil:** Client-/Site-Scope für andere Review-Arten (T1, F-003); Real-Stack-Nachweis der Bestätigung (WP-384 (`t4-e2e-onboarding-bundle`)).
 
-### WP-382 – Scope-Ziele ohne IPv6-Zone; Offline-Detektor, Kanten-Cleanup und Collector-Status fehlerisoliert je Org
+### WP-383 – Scope-Ziele ohne IPv6-Zone; Offline-Detektor, Kanten-Cleanup und Collector-Status fehlerisoliert je Org
 
 **Schlüssel:** `t4-scope-zone-isolation` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
@@ -3269,25 +3352,84 @@ INS-06;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;W
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DIS-09;[B];D;backend/internal/discovery/zone_isolation_integration_test.go;WP-382
-API-05;[B];D;backend/internal/discovery/zone_isolation_integration_test.go;WP-382
-REC-09;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-382
-LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-382
-TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-382
-COL-01;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-382
+DIS-09;[B];D;backend/internal/discovery/zone_isolation_integration_test.go;WP-383
+API-05;[B];D;backend/internal/discovery/zone_isolation_integration_test.go;WP-383
+REC-09;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-383
+LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-383
+TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-383
+COL-01;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-383
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Cleanup-Frist für Cron-Scopes (WP-496 (`t4-cleanup-cron`)); ci.online (WP-585 (`t4-offline-online`)).
+**Nicht Bestandteil:** Cleanup-Frist für Cron-Scopes (WP-497 (`t4-cleanup-cron`)); ci.online (WP-585 (`t4-offline-online`)).
 
-### WP-383 – Installer: strikte Issuer-Prüfung erst nach dem Start von Server und Frontend
+### WP-384 – Nachweis Real-Stack: Vorschlag bestätigen, Scope und Bundle mit Credentials, Scan mit Bundle-Credential
+
+**Schlüssel:** `t4-e2e-onboarding-bundle` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** D · **Aufwand:** 2,0 PT
+
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-378 (`t4-cred-scope`), WP-382 (`t4-scope-suggested-authz`)
+
+| ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| COL-02 | [B] | TEILWEISE BESTANDEN | Teil | [WP-147](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-147) | `docs/audit/05-collector-discovery-reconciliation.md:35` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:6` |
+| DIS-09 | [B] | FEHLGESCHLAGEN | Teil | [WP-153](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-153) | `docs/audit/05-collector-discovery-reconciliation.md:50` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:38` |
+| INS-06 | [B] | TEILWEISE BESTANDEN | Teil | [WP-156](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-156) | `docs/audit/01-installation-stack.md:76` | `docs/spec/katalog-v3/01-installation-stack.md:39` |
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Betroffene WPs |
+|---|---|---|---|---|
+| [F-027](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-027) | P1 | Falsche Credential-Auswahl im Bundle: ohne aktive Scopes alle Client- und Org-Credentials, ein Scope ohne credential_ids leert das Bundle | schließt | WP-147, WP-153, WP-156 |
+
+**Schließt Audit-WPs:** [WP-147](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-147) (TEILWEISE BESTANDEN, Teil), [WP-153](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-153) (FEHLGESCHLAGEN, Teil), [WP-156](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-156) (TEILWEISE BESTANDEN, Teil)
+
+**Problem:** Die reale Bestätigung eines Scope-Vorschlags ist nur per Mock belegt; nie lief ein nicht-leeres Credential-Bundle end-to-end bis zu einem Scan; der Real-Stack-Collector läuft nur im simulate-Modus (offene Nachweise WP-147, WP-153, WP-156; e2e-Retest von F-027).
+
+**Akzeptanzkriterien:**
+
+- [ ] Spec `frontend/e2e-real/onboarding-bundle.spec.ts` mit nicht simuliertem Collector (`E2E_COLLECTOR_BIN`, `RETICORA_SIMULATE` leer): (a) Enrollment mit dem Code aus der UI, der Vorschlag erscheint, Bestätigen in der UI → `GET /discovery-scopes?collector_id=…` liefert den Scope, das Review `scope_suggested` ist resolved/accept; (b) mit einem org-weiten `snmp_v2c`-Credential enthält das nächste Bundle dieses Credential (Audit `credential.bundle_delivered` mit dessen ID) – Retest F-027 „Bundle enthält weiter die Credentials“.
+- [ ] (c) Host-Scope mit explizitem `snmp_v2c`-Credential auf den SNMP-Fake `collector/internal/fakesnmp` (neu, Go, mit kleinem `collector/cmd/fakesnmp`; antwortet nur mit der richtigen Community auf sysDescr/sysObjectID/sysName; PDU-Verarbeitung nach dem Vorbild des Testagenten in `collector/plugins/snmp/v3_agent_test.go`; von `support/stack.ts` gebaut und gestartet, nicht im Release-Build; in der CI UDP 161 über `net.ipv4.ip_unprivileged_port_start=0`): nach dem Lauf existiert die CI mit Quelle snmp; der Fake hat genau die Community des Credentials gesehen und kein anderes Geheimnis. `fakesnmp_test.go`: richtige Community → Antwort, falsche → keine Antwort.
+- [ ] Negativfall: ein Scope mit dem Credential eines anderen Clients wird mit 422 abgelehnt (WP-376 (`t4-bundle-select`)).
+- [ ] Nachweis: Lauf-ID des Real-Stack-Jobs im PR; `frontend/e2e-real/README.md` beschreibt Fixture und CI-Voraussetzung.
+- [ ] Abschluss F-027: Der verbindliche Retest aus PHASE1_FINDINGS.md ist vollständig grün: `TestAuditBundleCredentialSelection` (überführt in WP-376 (`t4-bundle-select`)) und der Real-Stack-Fall „Vorschlag bestätigen → Bundle enthält weiter die Credentials“; Lauf-IDs im PR.
+
+**Dateien (7 Einträge, Migration = 2):**
+
+- frontend/e2e-real/onboarding-bundle.spec.ts (neu)
+- collector/internal/fakesnmp/fakesnmp.go (neu)
+- collector/internal/fakesnmp/fakesnmp_test.go (neu)
+- collector/cmd/fakesnmp/main.go (neu)
+- frontend/e2e-real/support/stack.ts
+- frontend/e2e-real/README.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `frontend/e2e-real/onboarding-bundle.spec.ts`: Bestätigung, Bundle-Audit, Scan mit Bundle-Credential, fremdes Credential 422.
+- `collector/internal/fakesnmp/fakesnmp_test.go`: Community-Prüfung des Fakes.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+COL-02;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
+DIS-09;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
+INS-06;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
+```
+
+**Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (offen, Empfehlung als Übergangsregel)
+
+**Nicht Bestandteil:** Produktivcode (der SNMP-Fake ist Testinfrastruktur, nicht im Release-Build `./cmd/collector`); Onboarding-Abnahmesuite `frontend/e2e/onboarding.spec.ts` (T7, F-177).
+
+### WP-385 – Installer: strikte Issuer-Prüfung erst nach dem Start von Server und Frontend
 
 **Schlüssel:** `t5-issuer-order` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
 
 **Voraussetzungen (gemergt):** keine (außer den Prüfrahmen-WPs, Konvention 11)
 
-**Vorgezogen:** nach Schwere K2 Datenintegrität und Kernprozesse; als Voraussetzung von WP-384 (`t5-kc-rotation`) in K1 eingeordnet.
+**Vorgezogen:** nach Schwere K2 Datenintegrität und Kernprozesse; als Voraussetzung von WP-386 (`t5-kc-rotation`) in K1 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -3297,7 +3439,7 @@ COL-01;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-
 
 | Befund | Prio | Titel | Beitrag | Betroffene WPs |
 |---|---|---|---|---|
-| [F-035](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-035) | P1 | OIDC-Issuer-Prüfung läuft vor dem Start des Frontends (Issuer-Proxy), daher brechen Domain-/TLS-Installationen ab | schließt | WP-095 |
+| [F-035](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-035) | P1 | OIDC-Issuer-Prüfung läuft vor dem Start des Frontends (Issuer-Proxy), daher brechen Domain-/TLS-Installationen ab | Teil | WP-095 |
 
 **Schließt Audit-WPs:** [WP-095](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-095) (FEHLGESCHLAGEN, Teil)
 
@@ -3333,18 +3475,18 @@ COL-01;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-INS-02;[B];A;tests/install-cloud-issuer-order.test.sh;WP-383
+INS-02;[B];A;tests/install-cloud-issuer-order.test.sh;WP-385
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Real-Stack-Nachweis im TLS-Domain-Pfad (WP-436 (`t5-acme-pebble`)); Rotation in create_initial_admin (WP-384 (`t5-kc-rotation`)); Änderungen an Keycloak-Realm oder nginx-Proxy.
+**Nicht Bestandteil:** Real-Stack-Nachweis im TLS-Domain-Pfad (WP-420 (`t5-acme-pebble`)); Rotation in create_initial_admin (WP-386 (`t5-kc-rotation`)); Änderungen an Keycloak-Realm oder nginx-Proxy.
 
-### WP-384 – Installer-Wiederholung wendet rotierte Keycloak-Zugangsdaten und Realm-Einstellungen an
+### WP-386 – Installer-Wiederholung wendet rotierte Keycloak-Zugangsdaten und Realm-Einstellungen an
 
 **Schlüssel:** `t5-kc-rotation` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** A · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-383 (`t5-issuer-order`)
+**Voraussetzungen (gemergt):** WP-385 (`t5-issuer-order`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -3358,14 +3500,14 @@ INS-02;[B];A;tests/install-cloud-issuer-order.test.sh;WP-383
 
 **Schließt Audit-WPs:** [WP-096](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-096) (TEILWEISE BESTANDEN, schließt)
 
-**Problem:** KEYCLOAK_ADMIN/KEYCLOAK_ADMIN_PASSWORD initialisieren den Master-Admin nur beim ersten Start; 'start --import-realm' (docker-compose.yml:217) überspringt bestehende Realms. Nach einer Rotation in der .env bricht create_initial_admin (install-cloud.sh:1510-1516) mit 'Could not log in to the Keycloak admin API' ab, das alte Admin-Passwort bleibt gültig (Sicherheitswirkung); ein rotiertes RETICORA_OIDC_CLIENT_SECRET und neue Redirect-URLs erreichen Keycloak nie (Login defekt). docs/troubleshooting-installation.md:152 verspricht dennoch 're-run the installer'. Ein vollständiger zweiter Installerlauf ist in CI nicht belegt. Fachlich hängt das WP nur an create_initial_admin bzw. start_stack (WP-383 (`t5-issuer-order`)), nicht an der ACME-Kette.
+**Problem:** KEYCLOAK_ADMIN/KEYCLOAK_ADMIN_PASSWORD initialisieren den Master-Admin nur beim ersten Start; 'start --import-realm' (docker-compose.yml:217) überspringt bestehende Realms. Nach einer Rotation in der .env bricht create_initial_admin (install-cloud.sh:1510-1516) mit 'Could not log in to the Keycloak admin API' ab, das alte Admin-Passwort bleibt gültig (Sicherheitswirkung); ein rotiertes RETICORA_OIDC_CLIENT_SECRET und neue Redirect-URLs erreichen Keycloak nie (Login defekt). docs/troubleshooting-installation.md:152 verspricht dennoch 're-run the installer'. Ein vollständiger zweiter Installerlauf ist in CI nicht belegt. Fachlich hängt das WP nur an create_initial_admin bzw. start_stack (WP-385 (`t5-issuer-order`)), nicht an der ACME-Kette.
 
 **Akzeptanzkriterien:**
 
 - [ ] Der Installer sichert die bisherige .env vor dem Merge als .env.previous (Modus 0600) und erkennt rotierte Werte von KEYCLOAK_ADMIN_PASSWORD, RETICORA_OIDC_CLIENT_SECRET und RETICORA_OIDC_REDIRECT_URL bzw. Web-Origins.
 - [ ] Rotation per kcadm: Anmeldung mit dem bisherigen Admin-Passwort (aus .env.previous, danach Versuch mit dem neuen), Setzen des neuen Passworts; 'kcadm update clients/<id> -r reticora' setzt secret, redirectUris und webOrigins aus dem gerenderten Realm; jede Rotation wird ohne Geheimwert protokolliert; Fehlschlag bricht mit Hinweis ab.
 - [ ] Retest F-125: Keycloak-24-Integrationstest tests/install-reinstall.test.sh (Docker): Keycloak-Schritte des Installers mit Werten A; Admin-Passwort, Client-Secret und Redirect-URL in der .env rotieren; erneuter Lauf → kcadm-Login mit neuem Passwort rc 0, mit altem rc != 0; Client-Secret = .env; redirectUris enthalten die neue URL; client_credentials-Token mit neuem Secret 200, mit altem 401; dritter Lauf ohne Änderung erzeugt keinen kcadm-Schreibaufruf.
-- [ ] Neuer Job reinstall in .github/workflows/install-smoke.yml (bestehende Jobs bleiben unverändert): Installation, dann DB-Passwörter beider Rollen und Keycloak-Werte rotieren und RETICORA_HTTP_BIND ergänzen; zweiter Lauf → tests/install-smoke-health.sh grün, OIDC-Login über den Token-Endpunkt und /readyz 200, RETICORA_HTTP_BIND erhalten; dritter Lauf rc 0 ohne protokollierte Rotation; Lauf im PR grün. Überschneidungen mit WP-416 (`t5-acme-lineage`), WP-436 (`t5-acme-pebble`) und WP-437 (`t5-acme-renewal`) in install-cloud.sh, install-smoke.yml und docs/troubleshooting-installation.md werden per Rebase gelöst.
+- [ ] Neuer Job reinstall in .github/workflows/install-smoke.yml (bestehende Jobs bleiben unverändert): Installation, dann DB-Passwörter beider Rollen und Keycloak-Werte rotieren und RETICORA_HTTP_BIND ergänzen; zweiter Lauf → tests/install-smoke-health.sh grün, OIDC-Login über den Token-Endpunkt und /readyz 200, RETICORA_HTTP_BIND erhalten; dritter Lauf rc 0 ohne protokollierte Rotation; Lauf im PR grün. Überschneidungen mit WP-419 (`t5-acme-lineage`), WP-420 (`t5-acme-pebble`) und WP-440 (`t5-acme-renewal`) in install-cloud.sh, install-smoke.yml und docs/troubleshooting-installation.md werden per Rebase gelöst.
 - [ ] tests/install-cloud-helpers.test.sh: 're-run:' 5/5 bleiben grün; neue Fälle mit gestubbtem kcadm: rotierte Werte → genau ein Update je Wert, unveränderte → keines.
 - [ ] docs/troubleshooting-installation.md (Abschnitt 6 und :152) beschreibt Umfang und Grenzen der Rotation korrekt.
 
@@ -3389,18 +3531,18 @@ INS-02;[B];A;tests/install-cloud-issuer-order.test.sh;WP-383
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-INS-05;[B];A;tests/install-reinstall.test.sh;WP-384
+INS-05;[B];A;tests/install-reinstall.test.sh;WP-386
 ```
 
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Rotation von RETICORA_MASTER_KEY und Session-Schlüsseln (E-15); Änderungen am Realm-Inhalt außer Secret, Redirect-URIs und Web-Origins.
 
-### WP-385 – Signaturprüfung vor der Installation: Release-Modus, Collector-Download, Quellbezug und Toolchain (TEC-15)
+### WP-387 – Signaturprüfung vor der Installation: Release-Modus, Collector-Download, Quellbezug und Toolchain (TEC-15)
 
 **Schlüssel:** `t5-install-signature` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** A · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-384 (`t5-kc-rotation`)
+**Voraussetzungen (gemergt):** WP-386 (`t5-kc-rotation`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -3415,14 +3557,14 @@ INS-05;[B];A;tests/install-reinstall.test.sh;WP-384
 
 **Schließt Audit-WPs:** [WP-102](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-102) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** WP-102 setzte nur die Updater-Seite von TEC-15 um. install-cloud.sh zieht im Registry-Modus Images ohne cosign verify (:1185) und baut postgres immer lokal; install-vm.sh lädt Quell-Tarball bzw. git clone (:480-505) und Go-Toolchain (:550-556) ungeprüft und baut den Collector lokal (:575); der Selbst-Bootstrap von install.sh (:187-210, git clone bzw. Tarball) prüft die Quelle ebenfalls nicht. Die signierten Release-Artefakte werden bei keiner Installation geprüft. Klasse K1: Lieferkettenkontrolle mit Sicherheitswirkung (P2), einheitlich mit WP-387 (`t5-image-scan`).
+**Problem:** WP-102 setzte nur die Updater-Seite von TEC-15 um. install-cloud.sh zieht im Registry-Modus Images ohne cosign verify (:1185) und baut postgres immer lokal; install-vm.sh lädt Quell-Tarball bzw. git clone (:480-505) und Go-Toolchain (:550-556) ungeprüft und baut den Collector lokal (:575); der Selbst-Bootstrap von install.sh (:187-210, git clone bzw. Tarball) prüft die Quelle ebenfalls nicht. Die signierten Release-Artefakte werden bei keiner Installation geprüft. Klasse K1: Lieferkettenkontrolle mit Sicherheitswirkung (P2), einheitlich mit WP-389 (`t5-image-scan`).
 
 **Akzeptanzkriterien:**
 
 - [ ] install-cloud.sh: Im Release-Modus (RETICORA_IMAGE_REGISTRY gesetzt) werden reticora-server, reticora-frontend und reticora-postgres vor dem Start per 'cosign verify' gegen die Identität des Release-Workflows (certificate-identity-regexp wie edgecore/update CosignVerifier, OIDC-Issuer token.actions.githubusercontent.com) geprüft und per Digest in die .env übernommen; Fehlschlag oder fehlendes cosign bricht vor 'compose up' ab (fail-closed); docker-compose.yml nutzt im Release-Modus das signierte postgres-Image (RETICORA_POSTGRES_IMAGE).
 - [ ] install-vm.sh: Collector aus dem Release (Binary plus <file>.sigstore.json) wird vor dem Kopieren per 'cosign verify-blob' und sha256-Abgleich gegen das Release-Manifest geprüft; im Quellbuild-Pfad wird die Go-Toolchain gegen die sha256-Prüfsumme von go.dev geprüft.
-- [ ] Quellbezug in install.sh und install-vm.sh: Ist REPO_REF ein Release-Tag v*, prüft der Installer das signierte Manifest (SHA256SUMS mit .sigstore.json per 'cosign verify-blob' gegen die Release-Identität) und vergleicht den Commit des ausgecheckten Tags (git rev-parse HEAD gegen SOURCE_COMMIT) bzw. die sha256 des Quell-Tarballs reticora-source-<tag>.tar.gz mit dem Manifest; eine Abweichung bricht vor dem Build ab. release.yml legt SOURCE_COMMIT und den per 'git archive' erzeugten Quell-Tarball in dist/ ab, nimmt beide in SHA256SUMS auf und signiert SHA256SUMS (ergänzender Schritt; Überschneidungen mit WP-387 (`t5-image-scan`) und WP-545 (`t5-release-evidence`) per Rebase). Ein Nicht-Tag-Ref bleibt bis zur Entscheidung E-69 zulässig und meldet 'Quelle nicht signaturgeprüft (kein Release-Tag)'.
-- [ ] Der Standard (Release-Artefakte oder Quellbuild) folgt E-69; bis zur Entscheidung bleibt der Quellbuild Standard und meldet beim Start ausdrücklich 'nicht signaturgeprüft' (Übergangsregel); der Wechsel des Standards ist WP-386 (`t5-install-default`).
+- [ ] Quellbezug in install.sh und install-vm.sh: Ist REPO_REF ein Release-Tag v*, prüft der Installer das signierte Manifest (SHA256SUMS mit .sigstore.json per 'cosign verify-blob' gegen die Release-Identität) und vergleicht den Commit des ausgecheckten Tags (git rev-parse HEAD gegen SOURCE_COMMIT) bzw. die sha256 des Quell-Tarballs reticora-source-<tag>.tar.gz mit dem Manifest; eine Abweichung bricht vor dem Build ab. release.yml legt SOURCE_COMMIT und den per 'git archive' erzeugten Quell-Tarball in dist/ ab, nimmt beide in SHA256SUMS auf und signiert SHA256SUMS (ergänzender Schritt; Überschneidungen mit WP-389 (`t5-image-scan`) und WP-545 (`t5-release-evidence`) per Rebase). Ein Nicht-Tag-Ref bleibt bis zur Entscheidung E-69 zulässig und meldet 'Quelle nicht signaturgeprüft (kein Release-Tag)'.
+- [ ] Der Standard (Release-Artefakte oder Quellbuild) folgt E-69; bis zur Entscheidung bleibt der Quellbuild Standard und meldet beim Start ausdrücklich 'nicht signaturgeprüft' (Übergangsregel); der Wechsel des Standards ist WP-388 (`t5-install-default`).
 - [ ] Retest F-131: Fälle install_signature_install-vm und install_signature_install-cloud (aus tests/audit/ops-config.test.sh nach tests/install-signature.test.sh übernommen) grün; neue Fälle mit gestubbtem cosign und git: gültige Signatur → Installation läuft weiter (Positivfall); verify bzw. verify-blob rc 1, manipulierte Prüfsumme, falsche Identität oder fehlendes cosign → Abbruch vor der Installation mit Meldung; manipulierter Quell-Tarball oder abweichender Commit des Tags → Abbruch vor dem Build (Negativfälle), jeweils für install.sh, install-vm.sh und den Release-Modus von install-cloud.sh.
 - [ ] Ratchet: Fälle aus tests/audit/ops-config.test.sh entfernt (Kopfkommentar bleibt bis zum Löschen der Datei; ist es der letzte Fall, wird die Datei gelöscht), Einträge aus tests/audit/expected-failures.txt entfernt; tests/install-signature.test.sh läuft im Job installer-script-tests.
 - [ ] docs/troubleshooting-installation.md beschreibt Release-Modus, Quellprüfung, Prüfbefehle und Fehlerbilder; Regression: tests/install-cloud-helpers.test.sh und install-smoke-Matrix (Quellbuild) grün.
@@ -3452,32 +3594,34 @@ INS-05;[B];A;tests/install-reinstall.test.sh;WP-384
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEC-15;[B];A;tests/install-signature.test.sh;WP-385
-COL-06;[B], Air-Gapped [O];A;tests/install-signature.test.sh;WP-385
+TEC-15;[B];A;tests/install-signature.test.sh;WP-387
+COL-06;[B], Air-Gapped [O];A;tests/install-signature.test.sh;WP-387
 ```
 
 **Entscheidungsbedarf:** [E-31](../entscheidungen.md#e-31); [E-69](entscheidungen.md#e-69) TEC-15: Installationsquelle für die Signaturprüfung vor der Installation (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Wechsel des Standards auf signierte Release-Artefakte (WP-386 (`t5-install-default`)); Echt-cosign-Nachweis gegen ein veröffentlichtes Release (WP-545 (`t5-release-evidence`)); Offline-Bundle für Air-Gapped ([O], INS-08).
+**Nicht Bestandteil:** Wechsel des Standards auf signierte Release-Artefakte (WP-388 (`t5-install-default`)); Echt-cosign-Nachweis gegen ein veröffentlichtes Release (WP-545 (`t5-release-evidence`)); Offline-Bundle für Air-Gapped ([O], INS-08).
 
-### WP-386 – Installer-Standard auf signierte Release-Artefakte umstellen, Quellbuild nur per Schalter
+### WP-388 – Installer-Standard auf signierte Release-Artefakte umstellen, Quellbuild nur per Schalter
 
 **Schlüssel:** `t5-install-default` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-385 (`t5-install-signature`)
+**Voraussetzungen (gemergt):** WP-387 (`t5-install-signature`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | TEC-15 | [B] | TEILWEISE BESTANDEN | schließt | [WP-102](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-102) | `docs/audit/01-installation-stack.md:64` | `docs/spec/katalog-v3/01-installation-stack.md:16` |
 | COL-06 | [B], Air-Gapped [O] | TEILWEISE BESTANDEN | Teil | [WP-102](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-102) | `docs/audit/05-collector-discovery-reconciliation.md:39` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:14` |
 
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
+
 **Schließt Audit-WPs:** [WP-102](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-102) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** Nach WP-385 (`t5-install-signature`) prüfen die Installer signierte Artefakte nur im Release-Modus bzw. bei einem Release-Tag; der Standardpfad bleibt ein nicht signaturgeprüfter Quellbuild (Übergangsregel E-69). TEC-15 'Signaturprüfung vor Installation' ist im Standardpfad damit nicht erfüllt.
+**Problem:** Nach WP-387 (`t5-install-signature`) prüfen die Installer signierte Artefakte nur im Release-Modus bzw. bei einem Release-Tag; der Standardpfad bleibt ein nicht signaturgeprüfter Quellbuild (Übergangsregel E-69). TEC-15 'Signaturprüfung vor Installation' ist im Standardpfad damit nicht erfüllt.
 
 **Akzeptanzkriterien:**
 
-- [ ] Startbedingung: E-69 ist mit Option 1 entschieden. Bei Option 2 oder 3 entfällt das WP mit Vermerk in docs/plan/entscheidungen.md; der Abschluss von WP-102 stützt sich dann auf WP-385 (`t5-install-signature`), WP-545 (`t5-release-evidence`) und WP-595 (`t5-rc-evidence`).
+- [ ] Startbedingung: E-69 ist mit Option 1 entschieden. Bei Option 2 oder 3 entfällt das WP mit Vermerk in docs/plan/entscheidungen.md; der Abschluss von WP-102 stützt sich dann auf WP-387 (`t5-install-signature`), WP-545 (`t5-release-evidence`) und WP-595 (`t5-rc-evidence`).
 - [ ] install.sh, install-cloud.sh und install-vm.sh installieren standardmäßig die signierten Release-Artefakte der angegebenen bzw. neuesten Release-Version (Images per 'cosign verify' mit Digest, Collector per 'cosign verify-blob', Quelle nur von einem Release-Tag mit Manifestprüfung; fail-closed). --build-from-source (bzw. RETICORA_BUILD_FROM_SOURCE=1) baut lokal und meldet 'nicht signaturgeprüft'; ein Nicht-Tag-Ref ohne diesen Schalter bricht mit Hinweis ab.
 - [ ] tests/install-signature.test.sh: Standard ohne Schalter → cosign verify wird aufgerufen, kein lokaler Image-Build (Positivfall); verify rc 1 → Abbruch vor 'compose up'; --build-from-source → Warnung und lokaler Build; --ref main ohne Schalter → Abbruch mit Hinweis (Negativfälle).
 - [ ] .github/workflows/install-smoke.yml: PR- und main-Läufe installieren mit --build-from-source (der Stand ist nicht veröffentlicht); auf Tags v* installiert ein zusätzlicher Job release-mode den Standardpfad gegen die soeben veröffentlichten Artefakte und führt tests/install-smoke-health.sh aus; der Nachweis auf dem RC-Tag erfolgt in WP-595 (`t5-rc-evidence`).
@@ -3488,7 +3632,7 @@ COL-06;[B], Air-Gapped [O];A;tests/install-signature.test.sh;WP-385
 - install.sh
 - install-cloud.sh
 - install-vm.sh
-- tests/install-signature.test.sh (angelegt in WP-385)
+- tests/install-signature.test.sh (angelegt in WP-387)
 - tests/install-cloud-helpers.test.sh
 - .github/workflows/install-smoke.yml
 - docs/troubleshooting-installation.md
@@ -3506,14 +3650,14 @@ COL-06;[B], Air-Gapped [O];A;tests/install-signature.test.sh;WP-385
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEC-15;[B];A;tests/install-signature.test.sh;WP-386
+TEC-15;[B];A;tests/install-signature.test.sh;WP-388
 ```
 
 **Entscheidungsbedarf:** [E-69](entscheidungen.md#e-69) TEC-15: Installationsquelle für die Signaturprüfung vor der Installation (offen, Empfehlung als Übergangsregel); [E-31](../entscheidungen.md#e-31)
 
 **Nicht Bestandteil:** Offline-Bundle für Air-Gapped ([O], INS-08); Lauf des Jobs release-mode auf dem RC-Tag (WP-595 (`t5-rc-evidence`)).
 
-### WP-387 – Scan-Abdeckung aller Release-Images, SLA-Prüfung der Scan-Ausnahmen, reproduzierbares DB-Image
+### WP-389 – Scan-Abdeckung aller Release-Images, SLA-Prüfung der Scan-Ausnahmen, reproduzierbares DB-Image
 
 **Schlüssel:** `t5-image-scan` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** A · **Aufwand:** 1,5 PT
 
@@ -3535,7 +3679,7 @@ TEC-15;[B];A;tests/install-signature.test.sh;WP-386
 
 **Schließt Audit-WPs:** [WP-004](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-004) (TEILWEISE BESTANDEN, Teil), [WP-100](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-100) (TEILWEISE BESTANDEN, Teil), [WP-102](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-102) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** Die image-scan-Matrix (ci.yml:455-470) scannt backend, collector und frontend; reticora-postgres wird in release.yml:117-129 gebaut, signiert und veröffentlicht, aber nie gescannt; es gibt keinen Strukturtest Release-Matrix ⊆ Scan-Matrix. Der Filter für security/scan-exceptions.txt (ci.yml:393-405) prüft nur exp >= heute, nicht den SEC-11-Deckel von 7 bzw. 30 Tagen; Einträge ohne exp: unterdrückt Trivy dauerhaft (F-284). deploy/docker-compose/postgres/Dockerfile nutzt timescale/timescaledb:latest-pg16 und lädt den pgBackRest-Tarball ohne Prüfsumme (F-291). docs/README.md:932 nennt drei statt vier Images (F-294). Klasse K1: Lieferkettenkontrolle mit Sicherheitswirkung (P2), einheitlich mit WP-385 (`t5-install-signature`).
+**Problem:** Die image-scan-Matrix (ci.yml:455-470) scannt backend, collector und frontend; reticora-postgres wird in release.yml:117-129 gebaut, signiert und veröffentlicht, aber nie gescannt; es gibt keinen Strukturtest Release-Matrix ⊆ Scan-Matrix. Der Filter für security/scan-exceptions.txt (ci.yml:393-405) prüft nur exp >= heute, nicht den SEC-11-Deckel von 7 bzw. 30 Tagen; Einträge ohne exp: unterdrückt Trivy dauerhaft (F-284). deploy/docker-compose/postgres/Dockerfile nutzt timescale/timescaledb:latest-pg16 und lädt den pgBackRest-Tarball ohne Prüfsumme (F-291). docs/README.md:932 nennt drei statt vier Images (F-294). Klasse K1: Lieferkettenkontrolle mit Sicherheitswirkung (P2), einheitlich mit WP-387 (`t5-install-signature`).
 
 **Akzeptanzkriterien:**
 
@@ -3570,15 +3714,15 @@ TEC-15;[B];A;tests/install-signature.test.sh;WP-386
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SEC-11;[Q];A;tests/ci-config.test.sh;WP-387
-TST-04;[Q];A;tests/ci-config.test.sh;WP-387
+SEC-11;[Q];A;tests/ci-config.test.sh;WP-389
+TST-04;[Q];A;tests/ci-config.test.sh;WP-389
 ```
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01); [E-31](../entscheidungen.md#e-31)
 
-**Nicht Bestandteil:** Scan-Läufe auf dem Release-Kandidaten (WP-595 (`t5-rc-evidence`)); Bewertung der Dev-Advisories im Review (WP-449 (`t5-review-g1`)).
+**Nicht Bestandteil:** Scan-Läufe auf dem Release-Kandidaten (WP-595 (`t5-rc-evidence`)); Bewertung der Dev-Advisories im Review (WP-452 (`t5-review-g1`)).
 
-### WP-388 – Site-Grant auf den Client des Standorts begrenzen (RBA-03, TEN-09), auch für Service-Accounts
+### WP-390 – Site-Grant auf den Client des Standorts begrenzen (RBA-03, TEN-09), auch für Service-Accounts
 
 **Schlüssel:** `t6-site-grant-scope` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
@@ -3604,7 +3748,7 @@ TST-04;[Q];A;tests/ci-config.test.sh;WP-387
 
 - [ ] permission.AccessGrants leitet für jede Site-Zuweisung (role_assignment.scope_site_id, user_custom_role scope_type site) den Client des Standorts (site.client_id) ab und setzt Grant.Clients; eine Site ohne Client oder aus fremder Org gewährt nichts (fail-closed, E-08). Dieselbe Ableitung (scope_site_id → site.client_id) gilt in user.PGServiceAccounts.ServiceAccountGrants und im Memory-Repository (permission/repository.go). Zusätzlich behandelt identity.unionDimension/aggregateScope eine Grant mit Sites, aber ohne Clients, in der Client-Dimension als leer (fail-closed, E-08). Nur org-weite Grants setzen eine Dimension auf All (RBA-03); der Doku-Kommentar von ResolveAccess ist angepasst.
 - [ ] Integrationstest TestServiceAccountSiteGrantConfinedToClient (user/service_account_integration_test.go): Der API-Key eines Service-Accounts mit Site-1-Rolle sieht den Kontakt von Client 2 nicht (Negativ), den Kontakt von Client 1 schon (Positiv).
-- [ ] Defekttest TestAuditDefectSiteGrantConfinedToClientAndSite: alle Fälle außer 'site1: asset of client 1 at site 1b invisible (P2 TEN-02)' sind grün – Negativfall: Kontakt, Credential, Asset an Site 2 und unplatziertes CI von Client 2 für den Site-1-Principal unsichtbar; Positivfall: Kontakt/Credential/Asset/CI von Client 1 an Site 1 und org-weiter Kontakt sichtbar; site1+site2 sieht beide Clients. Diese Fälle werden als TestSiteGrantConfinedToClient in backend/internal/locations/sitescope_integration_test.go (ohne Build-Tag) überführt; der Restfall asset1b bleibt bis WP-390 (`t6-asset-site-scope`) im Defekttest, sein Eintrag in tests/audit/expected-failures.txt bleibt bestehen. Der Real-Stack-Teil des Retests (e2e-real Site-Session) liegt in WP-390 (`t6-asset-site-scope`) (T18).
+- [ ] Defekttest TestAuditDefectSiteGrantConfinedToClientAndSite: alle Fälle außer 'site1: asset of client 1 at site 1b invisible (P2 TEN-02)' sind grün – Negativfall: Kontakt, Credential, Asset an Site 2 und unplatziertes CI von Client 2 für den Site-1-Principal unsichtbar; Positivfall: Kontakt/Credential/Asset/CI von Client 1 an Site 1 und org-weiter Kontakt sichtbar; site1+site2 sieht beide Clients. Diese Fälle werden als TestSiteGrantConfinedToClient in backend/internal/locations/sitescope_integration_test.go (ohne Build-Tag) überführt; der Restfall asset1b bleibt bis WP-392 (`t6-asset-site-scope`) im Defekttest, sein Eintrag in tests/audit/expected-failures.txt bleibt bestehen. Der Real-Stack-Teil des Retests (e2e-real Site-Session) liegt in WP-392 (`t6-asset-site-scope`) (T18).
 - [ ] TestHierarchyScopeOnPostgreSQL erwartet für 'site 1' asset2: false (kodiertes Fehlverhalten korrigiert, hierarchy_integration_test.go:105-106).
 - [ ] Unit-Test identity (principal_scope_test.go): ResolveAccess mit Site-Grant {Clients:[c1], Sites:[s1]} ergibt Scope Clients={c1}, Sites={s1}, PermissionScopes je Permission ebenso; ein org-weiter Grant ergibt weiterhin All; ein Grant mit Sites ohne Clients ergibt eine leere Client-Dimension.
 - [ ] Retest: cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestSiteGrantConfinedToClient|TestHierarchyScopeOnPostgreSQL' ./internal/locations/ und -run 'TestServiceAccountSiteGrantConfinedToClient' ./internal/user/ → PASS; go test -tags auditdefect -run 'TestAuditDefectSiteGrant' ./internal/locations/ zeigt nur noch den Fall asset1b rot.
@@ -3623,7 +3767,7 @@ TST-04;[Q];A;tests/ci-config.test.sh;WP-387
 - backend/internal/locations/sitescope_integration_test.go (neu)
 - backend/internal/locations/hierarchy_integration_test.go
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** keine Migration; RLS-Policies unverändert, die Wirkung entsteht über korrekte Scope-GUCs (app.client_scope wird für Site-Principals und site-gescopte API-Keys gesetzt).
 
@@ -3638,20 +3782,20 @@ TST-04;[Q];A;tests/ci-config.test.sh;WP-387
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-01;[B], Reseller [P4];B;backend/internal/locations/sitescope_integration_test.go;WP-388
-RBA-03;[B];B;backend/internal/identity/principal_scope_test.go;WP-388
-TEN-09;[Q];B;backend/internal/locations/sitescope_integration_test.go;WP-388
+TEN-01;[B], Reseller [P4];B;backend/internal/locations/sitescope_integration_test.go;WP-390
+RBA-03;[B];B;backend/internal/identity/principal_scope_test.go;WP-390
+TEN-09;[Q];B;backend/internal/locations/sitescope_integration_test.go;WP-390
 ```
 
 **Entscheidungsbedarf:** [E-08](../entscheidungen.md#e-08); [E-11](../entscheidungen.md#e-11)
 
-**Nicht Bestandteil:** site_id an asset/quantity_item und Real-Stack-Nachweis (WP-390 (`t6-asset-site-scope`)); Semantik gemischter Client- und Site-Grants über Dimensionen hinweg (unverändert); UI-Scope-Bedienung; Service-Account-Rechteeskalation (Gruppe T2, gleiche Datei service_account.go; die Reihenfolge stimmt die Integration ab).
+**Nicht Bestandteil:** site_id an asset/quantity_item und Real-Stack-Nachweis (WP-392 (`t6-asset-site-scope`)); Semantik gemischter Client- und Site-Grants über Dimensionen hinweg (unverändert); UI-Scope-Bedienung; Service-Account-Rechteeskalation (F-008, WP-355 (`t2-sa-role-ceiling`), gleiche Datei service_account.go; keine Abhängigkeit, das später gemergte WP gleicht die Datei an).
 
-### WP-389 – Team-Scope zuweisbar: role_assignment mit Team-Dimension, Grant.Teams befüllt
+### WP-391 – Team-Scope zuweisbar: role_assignment mit Team-Dimension, Grant.Teams befüllt
 
 **Schlüssel:** `t1-team-scope` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-342 (`t1-review-scope`), WP-349 (`t1-runtime-login-tests`), WP-388 (`t6-site-grant-scope`)
+**Voraussetzungen (gemergt):** WP-342 (`t1-review-scope`), WP-349 (`t1-runtime-login-tests`), WP-390 (`t6-site-grant-scope`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -3672,7 +3816,7 @@ TEN-09;[Q];B;backend/internal/locations/sitescope_integration_test.go;WP-388
 **Akzeptanzkriterien:**
 
 - [ ] Migration: role_assignment erhält `scope_team_id` (FK auf team mit Org-Bezug), höchstens eine Scope-Spalte gesetzt (CHECK), Eindeutigkeit über alle Scope-Spalten (NULLS NOT DISTINCT); `user_custom_role.scope_type` erlaubt `team`. Die Migration dedupliziert vorhandene doppelte Zuweisungen vor dem Constraint (älteste Zeile bleibt, Anzahl als NOTICE); `assignStandardRole` (`user/pg_repository.go:833-850`, heute `ON CONFLICT (user_id, role_id, scope_client_id, scope_site_id)`, das bei NULL-Scopes nie greift) nutzt den neuen Constraint als ON-CONFLICT-Ziel. Testfall in `permission/scope_integration_test.go`: ein zweites `POST /api/v1/role-assignments` derselben org-weiten Zuweisung legt keine zweite Zeile an.
-- [ ] Gruppenübergreifende Voraussetzung: T6 WP-388 (`t6-site-grant-scope`) (F-014; ein Site-Grant setzt `Grant.Clients` = Client des Standorts) ist gemergt; es ändert dieselben Dateien (`permission/pg_repository.go`, `identity/principal.go`, `identity/principal_scope_test.go`, `permission/scope_integration_test.go`), die Team-Dimension setzt auf dessen Grant-Semantik auf (Abhängigkeit trägt die Integration ein).
+- [ ] Voraussetzung: WP-390 (`t6-site-grant-scope`) (F-014; ein Site-Grant setzt `Grant.Clients` = Client des Standorts) ist gemergt; es ändert dieselben Dateien (`permission/pg_repository.go`, `identity/principal.go`, `identity/principal_scope_test.go`, `permission/scope_integration_test.go`), die Team-Dimension setzt auf dessen Grant-Semantik auf.
 - [ ] `POST /api/v1/role-assignments` mit `scope_type: team` und sichtbarem Team derselben Org legt die Zuweisung an (201); fremdes/unbekanntes Team 404/422. `AccessGrants` liefert für Team-Zuweisungen `Grant.Teams = [team]`; `ResolveAccess` vereinigt Teams je Dimension (RBA-03); Semantik der Team-Wirkung nach E-11 (Schnittmenge, Zeilen ohne Team sichtbar, nicht schreibbar).
 - [ ] Gemischte Grants nach Entscheidung E-70: Integrationstest in `permission/scope_integration_test.go` mit Client-Rolle C1 und Site-Rolle S1 assertet die vereinbarte Sichtbarkeit von CIs in C1/S1, C1/S2 und C2/S1; `TestResolveAccessUnitesScopesPerDimension` und die API-Beschreibung von `scope_type` dokumentieren sie.
 - [ ] Retest F-049: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run '^TestTeamScopedAssignment$' ./internal/tenant/rls/` grün – 201, aufgelöster Team-Scope = {T1}; Ticket-Sicht nur T1 plus team-lose Zeilen (read-only).
@@ -3694,7 +3838,7 @@ TEN-09;[Q];B;backend/internal/locations/sitescope_integration_test.go;WP-388
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts
 - docs/schema-baseline.md
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** Spalte `scope_team_id` an role_assignment mit CHECK und neuer Eindeutigkeit, erweiterter CHECK an user_custom_role; Tabellen-RLS unverändert; up/down mit Roundtrip.
@@ -3708,19 +3852,19 @@ TEN-09;[Q];B;backend/internal/locations/sitescope_integration_test.go;WP-388
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-RBA-03;[B];B;backend/internal/permission/scope_integration_test.go;WP-389
-TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-389
+RBA-03;[B];B;backend/internal/permission/scope_integration_test.go;WP-391
+TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-391
 ```
 
 **Entscheidungsbedarf:** [E-11](../entscheidungen.md#e-11); [E-70](entscheidungen.md#e-70) Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03) (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Team-Scope für Service-Accounts und Einladungen; Rollen-UI; Grant-Obergrenze und Rolle/Scope-Abgleich für scope_type team (T6 WP-392 (`t6-invite-ceiling`), übernimmt team nach diesem WP); Rollenentzug (D3, T2 WP-393 (`t2-role-assignment-revoke`)); beide ändern ebenfalls `user/pg_repository.go`, die Merge-Reihenfolge legt die Integration fest.
+**Nicht Bestandteil:** Team-Scope für Service-Accounts und Einladungen; Rollen-UI; Grant-Obergrenze und Rolle/Scope-Abgleich für scope_type team (WP-394 (`t6-invite-ceiling`), übernimmt team nach diesem WP); Rollenentzug (D3, WP-395 (`t2-role-assignment-revoke`)); beide ändern ebenfalls `user/pg_repository.go` und setzen dieses WP voraus.
 
-### WP-390 – Site-Scope für Assets und Mengenartikel (TEN-02) und Real-Stack-Nachweis der Hierarchie
+### WP-392 – Site-Scope für Assets und Mengenartikel (TEN-02) und Real-Stack-Nachweis der Hierarchie
 
 **Schlüssel:** `t6-asset-site-scope` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-388 (`t6-site-grant-scope`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-390 (`t6-site-grant-scope`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -3734,7 +3878,7 @@ TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-389
 | [F-014](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-014) | P0 | Site-Grant setzt Client-Scope auf NULL: Site-Nutzer lesen Kontakte, Credentials, Assets und unplatzierte CIs fremder Clients | schließt | WP-109 |
 | [F-141](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-141) | P2 | asset/quantity_item ohne denormalisierte site_id: Site-Scope greift nicht für platzierte Assets | schließt | WP-109 |
 
-**Schließt Audit-WPs:** [WP-109](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-109) (FEHLGESCHLAGEN, schließt)
+**Schließt Audit-WPs:** [WP-025](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-025) (TEILWEISE BESTANDEN, Teil), [WP-109](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-109) (FEHLGESCHLAGEN, schließt)
 
 **Problem:** asset und quantity_item tragen location_id und client_id, aber keine abgeleitete site_id; die Asset-Policies prüfen nur app.client_scope. Ein Site-Principal sieht Assets aller Sites seines Clients (TEN-02), auch nach dem Fix von F-014. Der Real-Stack-Nachweis einer Site-Session ohne Fremddaten (Retest F-014 und WP-109) fehlt.
 
@@ -3752,12 +3896,12 @@ TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-389
 - backend/migrations/<nächste Nr.>_asset_site_scope.up.sql (neu)
 - backend/migrations/<nächste Nr.>_asset_site_scope.down.sql (neu)
 - backend/internal/locations/sitescope_auditdefect_test.go (gelöscht)
-- backend/internal/locations/sitescope_integration_test.go (aus t6-site-grant-scope)
+- backend/internal/locations/sitescope_integration_test.go (aus WP-390 (`t6-site-grant-scope`))
 - backend/internal/tenant/rls/site_policies_integration_test.go
 - docs/schema-baseline.md
 - frontend/e2e-real/tenant-isolation.spec.ts
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** Neue Spalte site_id an asset und quantity_item mit Trigger und Backfill; Policies mit Site-Klausel in USING und WITH CHECK, ENABLE + FORCE RLS bleiben; up/down, Roundtrip grün.
 
@@ -3770,19 +3914,19 @@ TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-389
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-01;[B], Reseller [P4];B;backend/internal/locations/sitescope_integration_test.go;WP-390
-TEN-02;[B];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-390
+TEN-01;[B], Reseller [P4];B;backend/internal/locations/sitescope_integration_test.go;WP-392
+TEN-02;[B];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-392
 ```
 
 **Entscheidungsbedarf:** [E-09](../entscheidungen.md#e-09); [E-03](../entscheidungen.md#e-03)
 
 **Nicht Bestandteil:** Fachliche Asset-Funktionen der Phase 2 (Modul bleibt nach E-03 abgeschaltet, nur die Mandantentrennung wird korrigiert); Asset-Liste im Real-Stack (Modul abgeschaltet); weitere Tabellen mit Location-Bezug außerhalb asset/quantity_item.
 
-### WP-391 – site_id für Räume und Racks, Asset-Site in der Suche; Katalogregel für Tabellen mit Standortbezug
+### WP-393 – site_id für Räume und Racks, Asset-Site in der Suche; Katalogregel für Tabellen mit Standortbezug
 
 **Schlüssel:** `t1-located-site-scope` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-340 (`t1-rack-site-scope`), WP-345 (`t1-edge-scope`), WP-390 (`t6-asset-site-scope`)
+**Voraussetzungen (gemergt):** WP-340 (`t1-rack-site-scope`), WP-345 (`t1-edge-scope`), WP-392 (`t6-asset-site-scope`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -3796,16 +3940,16 @@ TEN-02;[B];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-39
 |---|---|---|---|---|
 | [F-053](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-053) | P2 | Assets, Rooms und Racks haben einen Standortbezug, aber keine site_id; site-gescopte Principals sehen sie in allen Sites | schließt | WP-027 |
 
-**Schließt Audit-WPs:** [WP-065](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-065) (TEILWEISE BESTANDEN, Teil), [WP-025](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-025) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-025](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-025) (TEILWEISE BESTANDEN, Teil), [WP-065](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-065) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** TEN-02 verlangt denormalisierte `site_id` für Tabellen mit Standortbezug; asset (location_id), room und rack tragen keine. Ein Site-1-Principal listet Assets der Site 2 (`GET /assets`, Detail 200) und selektiert room/rack/asset der Site 2 direkt (F-053; Rooms/Racks nur durch Go-Prädikate geschützt, vgl. F-002). Kein WP des Plans war Eigentümer. `search/scope_integration_test.go:96-104` kodiert die fehlende Site-Begrenzung als erwartet. Eine Katalogregel, die fehlende Scope-Spalten an Tabellen mit Standort-/CI-Bezug meldet, fehlt (WP-065, Härtung). Der Asset-Teil hat dieselbe Ursache wie F-141 (Gruppe T6) und wird dort behoben (WP-390 (`t6-asset-site-scope`)); dieses WP liefert room/rack, die Such-Ableitung der Asset-Site und die Katalogregel.
+**Problem:** TEN-02 verlangt denormalisierte `site_id` für Tabellen mit Standortbezug; asset (location_id), room und rack tragen keine. Ein Site-1-Principal listet Assets der Site 2 (`GET /assets`, Detail 200) und selektiert room/rack/asset der Site 2 direkt (F-053; Rooms/Racks nur durch Go-Prädikate geschützt, vgl. F-002). Kein WP des Plans war Eigentümer. `search/scope_integration_test.go:96-104` kodiert die fehlende Site-Begrenzung als erwartet. Eine Katalogregel, die fehlende Scope-Spalten an Tabellen mit Standort-/CI-Bezug meldet, fehlt (WP-065, Härtung). Der Asset-Teil hat dieselbe Ursache wie F-141 und wird dort behoben (WP-392 (`t6-asset-site-scope`)); dieses WP liefert room/rack, die Such-Ableitung der Asset-Site und die Katalogregel.
 
 **Akzeptanzkriterien:**
 
-- [ ] Migration: room und rack erhalten `client_id`/`site_id` aus ihrer 1:1-Location-Zeile (Trigger, nicht vom Client setzbar; Backfill; Nachführung bei Verschiebung im Location-Baum); Policies mit Site-Prädikat nach TEN-05 (USING und WITH CHECK), E-09 für NULL. `asset.site_id` liefert T6 WP-390 (`t6-asset-site-scope`) (F-141, gleiche Ursache); gruppenübergreifende Voraussetzung: dieses WP wird nach WP-390 (`t6-asset-site-scope`) gemergt (Abhängigkeit trägt die Integration ein), es legt keine Spalte an asset an.
-- [ ] Die Such-Ableitung `derive_search_document_scope` (000067) übernimmt für asset und reservation zusätzlich `asset.site_id` (Spalte aus WP-390 (`t6-asset-site-scope`)); `search/scope_integration_test.go:96-104` erwartet für den Site-1-Principal keine Assets der Site 2 mehr (Erwartung umgeschrieben).
+- [ ] Migration: room und rack erhalten `client_id`/`site_id` aus ihrer 1:1-Location-Zeile (Trigger, nicht vom Client setzbar; Backfill; Nachführung bei Verschiebung im Location-Baum); Policies mit Site-Prädikat nach TEN-05 (USING und WITH CHECK), E-09 für NULL. `asset.site_id` liefert WP-392 (`t6-asset-site-scope`) (F-141, gleiche Ursache, Voraussetzung dieses WP); dieses WP legt keine Spalte an asset an.
+- [ ] Die Such-Ableitung `derive_search_document_scope` (000067) übernimmt für asset und reservation zusätzlich `asset.site_id` (Spalte aus WP-392 (`t6-asset-site-scope`)); `search/scope_integration_test.go:96-104` erwartet für den Site-1-Principal keine Assets der Site 2 mehr (Erwartung umgeschrieben).
 - [ ] Katalogregel in `TestRLSCatalog`: Jede Mandantentabelle mit `location_id`, `room_id`, `rack_id` oder `ci_id` trägt `site_id` bzw. `client_id` oder steht in der neuen, typisierten Liste `DerivedScopeTables` (`known_gaps.go`, neben `ViewProtectedTables`: Tabelle → Ableitungspfad, Begründung, prüfender Test; z. B. cable über die Interfaces, desk über den Raum); ein Eintrag ohne prüfenden Test oder für eine Tabelle, die die Regel nicht meldet, lässt den Test scheitern; `KnownGaps` bleibt leer, `TestKnownGapsDocumented` grün (WP-065 AK2).
-- [ ] Retest F-053: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run '^TestSiteScopeOfLocatedTables$' ./internal/tenant/rls/` grün – `GET /assets` als Site 1 ohne Site-2-Asset, Detail 404, Direkt-SELECT room/rack/asset 0 Zeilen; Positivkontrolle Site-2-Principal sieht sie; `probe_site_scope_nosite_tables.sql` liefert 0/0/0. Der Asset-Teil des Tests wird mit WP-390 (`t6-asset-site-scope`) grün, room/rack und Suche mit diesem WP.
+- [ ] Retest F-053: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run '^TestSiteScopeOfLocatedTables$' ./internal/tenant/rls/` grün – `GET /assets` als Site 1 ohne Site-2-Asset, Detail 404, Direkt-SELECT room/rack/asset 0 Zeilen; Positivkontrolle Site-2-Principal sieht sie; `probe_site_scope_nosite_tables.sql` liefert 0/0/0. Der Asset-Teil des Tests wird mit WP-392 (`t6-asset-site-scope`) grün, room/rack und Suche mit diesem WP.
 - [ ] Ratchet: `TestAuditT1SiteScopeOfLocatedTables` als `TestSiteScopeOfLocatedTables` nach `tenant/rls/located_site_scope_integration_test.go` (neu) überführt; `audit_t1_scope_derivation_auditdefect_test.go` gelöscht; Zeile in `tests/audit/expected-failures.txt` gelöscht.
 - [ ] `TestRackChannelSiteScope`, `TestAuditT1LocationChannelBelowSites`, `TestAssetRepositoryClientScope` und der T6-Test `TestSiteGrantConfinedToClient` bleiben grün; Migration up/down und Roundtrip grün; `docs/schema-baseline.md` nachgeführt.
 - [ ] Regression: bestehende Unit- und Integrationstests der geänderten Pakete (`go test` mit `TEST_DATABASE_URL`) grün; `go vet` und `golangci-lint` ohne neue Meldungen.
@@ -3820,7 +3964,7 @@ TEN-02;[B];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-39
 - backend/internal/tenant/rls/located_site_scope_integration_test.go (neu)
 - backend/internal/tenant/rls/audit_t1_scope_derivation_auditdefect_test.go (gelöscht)
 - docs/schema-baseline.md
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** Spalten `client_id`/`site_id` an room und rack; Ableitungs- und Nachführungstrigger, Backfill, Site-Policies nach TEN-05 (ENABLE + FORCE bleibt); Such-Ableitung übernimmt `asset.site_id` aus T6; up/down mit Roundtrip.
@@ -3834,20 +3978,20 @@ TEN-02;[B];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-39
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-02;[B];B;backend/internal/tenant/rls/located_site_scope_integration_test.go;WP-391
-TEN-05;[B];B;backend/internal/tenant/rls/located_site_scope_integration_test.go;WP-391
-TEN-09;[Q];B;backend/internal/tenant/rls/catalog_integration_test.go;WP-391
+TEN-02;[B];B;backend/internal/tenant/rls/located_site_scope_integration_test.go;WP-393
+TEN-05;[B];B;backend/internal/tenant/rls/located_site_scope_integration_test.go;WP-393
+TEN-09;[Q];B;backend/internal/tenant/rls/catalog_integration_test.go;WP-393
 ```
 
 **Entscheidungsbedarf:** [E-09](../entscheidungen.md#e-09)
 
-**Nicht Bestandteil:** `asset.site_id`, Asset-Policies und Real-Stack-Nachweis (T6 WP-390 (`t6-asset-site-scope`), F-141); Kabel und Desks (Scope über Interfaces bzw. Raum, in `DerivedScopeTables` begründet); Vereinfachung von `rackVisible` (bleibt als Defense-in-Depth).
+**Nicht Bestandteil:** `asset.site_id`, Asset-Policies und Real-Stack-Nachweis (WP-392 (`t6-asset-site-scope`), F-141); Kabel und Desks (Scope über Interfaces bzw. Raum, in `DerivedScopeTables` begründet); Vereinfachung von `rackVisible` (bleibt als Defense-in-Depth).
 
-### WP-392 – Grant-Obergrenze für Einladungen und Rollenzuweisungen; Rolle/Scope-Abgleich
+### WP-394 – Grant-Obergrenze für Einladungen und Rollenzuweisungen; Rolle/Scope-Abgleich
 
 **Schlüssel:** `t6-invite-ceiling` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-354 (`t2-apikey-authz`), WP-358 (`t2-mfa-role-sync`), WP-389 (`t1-team-scope`)
+**Voraussetzungen (gemergt):** WP-354 (`t2-apikey-authz`), WP-358 (`t2-mfa-role-sync`), WP-391 (`t1-team-scope`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -3872,10 +4016,10 @@ TEN-09;[Q];B;backend/internal/tenant/rls/catalog_integration_test.go;WP-391
 - [ ] Renew prüft die Obergrenze gegen den erneuernden Principal (nicht gegen den ursprünglichen Aussteller): client-1-Delegate erneuert eine org-weite Einladung → 403.
 - [ ] Rolle/Scope-Abgleich (F-305): role.scope client verlangt scope_type client, role.scope site verlangt scope_type site. Org-Rollen (role.scope org) sind mit jedem scope_type zulässig: org bzw. organization, client oder site. Andernfalls 422 field scope_type und keine Zeile. Integrationstest TestInvitationRoleScopeMismatch – Negativ: client_technician mit org → 422. Positiv: client_technician/client1 und viewer/site1 → 201. Derselbe Fall gilt für POST /role-assignments.
 - [ ] Pre-Auth-Regressionstest (server/preauth_invitation_test.go): POST /api/v1/invitations/accept läuft durch das Pre-Auth-Limit; Überschreitung von einer IP → 429 mit Retry-After, eine andere IP bleibt unbeeinflusst (404/400 für ungültige Token).
-- [ ] Beide Ceiling-Testfunktionen werden aus invitation_auditdefect_test.go nach invitation_integration_test.go verschoben (Namen unverändert), ihre Einträge aus tests/audit/expected-failures.txt entfernt; TestAuditDefectInvitationCreatedEvent bleibt bis WP-417 (`t6-invite-event`) im Defekttest.
+- [ ] Beide Ceiling-Testfunktionen werden aus invitation_auditdefect_test.go nach invitation_integration_test.go verschoben (Namen unverändert), ihre Einträge aus tests/audit/expected-failures.txt entfernt; TestAuditDefectInvitationCreatedEvent bleibt bis WP-421 (`t6-invite-event`) im Defekttest.
 - [ ] OpenAPI dokumentiert 403 an POST /invitations, /invitations/{id}/renew, /role-assignments und /roles/assign; TestRoutesAndSpecificationAreInParity und npm run generate:api:check grün.
 - [ ] Retest: cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditDefect(Invitation|RoleAssignment)GrantCeiling|TestRolesAssignSunsetPathGrantCeiling|TestInvitationRoleScopeMismatch' ./internal/user/ → PASS; Regression go test ./internal/user/ ./internal/server/ grün; e2e-real roles-authz 01–04, 06, 07, 10 lokal gegen den Real-Stack nach frontend/e2e-real/README.md ausgeführt, nach WP-338 (`k-e2e-real-ci`) im CI-Job.
-- [ ] Obergrenze für scope_type team (nach WP-389 (`t1-team-scope`)): checkGrantCeiling behandelt team als Zielscope. Ein client-1-Delegate (role:manage mit scope_client_id=client1) erhält für POST /role-assignments bzw. /roles/assign einer org_admin-Rolle mit scope_type team → 403 (RFC 7807), keine Zeile, kein Erfolgs-Audit. Ein org-weiter org_admin → 201. Rolle/Scope-Abgleich (F-305): Client- oder Site-Rolle mit scope_type team → 422 field scope_type. Nachweis: TestRoleAssignmentGrantCeilingTeamScope (user/grant_ceiling_test.go bzw. Integrationstest) grün.
+- [ ] Obergrenze für scope_type team (nach WP-391 (`t1-team-scope`)): checkGrantCeiling behandelt team als Zielscope. Ein client-1-Delegate (role:manage mit scope_client_id=client1) erhält für POST /role-assignments bzw. /roles/assign einer org_admin-Rolle mit scope_type team → 403 (RFC 7807), keine Zeile, kein Erfolgs-Audit. Ein org-weiter org_admin → 201. Rolle/Scope-Abgleich (F-305): Client- oder Site-Rolle mit scope_type team → 422 field scope_type. Nachweis: TestRoleAssignmentGrantCeilingTeamScope (user/grant_ceiling_test.go bzw. Integrationstest) grün.
 - [ ] Die Obergrenzenprüfung läuft in AssignRole vor dem Repository-Aufruf und vor der Keycloak-Synchronisation aus WP-358 (`t2-mfa-role-sync`). Bei 403 (org_admin-Zuweisung durch einen client-1-Delegate) verzeichnet der Fake-Keycloak keinen Rollenaufruf, also keine mfa_required-Rolle. Bei 201 durch einen org-weiten org_admin verzeichnet er genau einen. Testfall in user/role_assignment_mfa_test.go grün.
 - [ ] Eine einzige Obergrenzen-Implementierung: `user.checkGrantCeiling` delegiert die Abdeckungsprüfung an `identity.GrantCeiling` (aus WP-354 (`t2-apikey-authz`)) und ergänzt nur die Auflösung Site → Client über `site.client_id`. Es gibt keine zweite Implementierung der Regel „Permission ⊆ Aufruferrechte im Zielscope“. `identity/ceiling_test.go` (`TestGrantCeiling`) und `user/grant_ceiling_test.go` sind grün.
 - [ ] Rollendefinitionen als Grant-Pfad (F-015, „niemand vergibt Rechte über die eigenen hinaus“): `PATCH /api/v1/roles/{id}` mit `permissions` (`user/handler.go:673`, `UpdateRole`) und `PUT /api/v1/roles/{id}/permissions` (`permission/handler.go:85`, `ReplaceRole`; ändert heute ohne Prüfung auch Standardrollen wie viewer für alle ihre org-weiten Zuweisungen) sind nur zulässig, wenn der Aufrufer jede hinzugefügte Permission org-weit hält. Sonst antwortet die API mit 403 (RFC 7807), `role_permission` bleibt unverändert, und es entsteht kein Erfolgs-Audit. Test (PG) in `permission/permission_scope_integration_test.go`: Ein client-1-Delegate (org_admin mit scope_client_id=client1) erweitert die Standardrolle viewer bzw. eine Custom-Rolle um `role:manage` → 403, Permissions unverändert. Ein org-weiter org_admin → 200. OpenAPI dokumentiert 403 an beiden Routen.
@@ -3894,7 +4038,7 @@ TEN-09;[Q];B;backend/internal/tenant/rls/catalog_integration_test.go;WP-391
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - backend/internal/permission/handler.go
 - backend/internal/permission/permission_scope_integration_test.go
 
@@ -3909,19 +4053,19 @@ TEN-09;[Q];B;backend/internal/tenant/rls/catalog_integration_test.go;WP-391
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-392
-API-05;[B];B;backend/internal/user/grant_ceiling_test.go;WP-392
+TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-394
+API-05;[B];B;backend/internal/user/grant_ceiling_test.go;WP-394
 ```
 
 **Entscheidungsbedarf:** [E-13](../entscheidungen.md#e-13); [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Einladungs-Event und Mail (WP-417 (`t6-invite-event`)), Einladungs-UI (WP-509 (`t6-invite-ui`)); Änderungen an der Rollenmatrix; Scope von List/Revoke der Einladungen für client-gescopte user:manage-Inhaber (ListInvitations ohne Client-Filter) und nachträgliche Erweiterung von Custom-Rollen über PATCH /roles/{id} – beides wird als neuer Befund an die Integration gemeldet.
+**Nicht Bestandteil:** Einladungs-Event und Mail (WP-421 (`t6-invite-event`)), Einladungs-UI (WP-510 (`t6-invite-ui`)); Änderungen an der Rollenmatrix; Scope von List/Revoke der Einladungen für client-gescopte user:manage-Inhaber (ListInvitations ohne Client-Filter) und nachträgliche Erweiterung von Custom-Rollen über PATCH /roles/{id} – beides erhält als neuer Befund eine ID ab F-355 und ein eigenes WP (Konvention 16).
 
-### WP-393 – Rollenzuweisung entziehen: DELETE /role-assignments/{id} für Standard- und Custom-Rollen mit Grant-Obergrenze, Audit und Wirkung beim nächsten Refresh
+### WP-395 – Rollenzuweisung entziehen: DELETE /role-assignments/{id} für Standard- und Custom-Rollen mit Grant-Obergrenze, Audit und Wirkung beim nächsten Refresh
 
 **Schlüssel:** `t2-role-assignment-revoke` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-354 (`t2-apikey-authz`), WP-358 (`t2-mfa-role-sync`), WP-389 (`t1-team-scope`), WP-392 (`t6-invite-ceiling`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-354 (`t2-apikey-authz`), WP-358 (`t2-mfa-role-sync`), WP-391 (`t1-team-scope`), WP-394 (`t6-invite-ceiling`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -3934,7 +4078,7 @@ API-05;[B];B;backend/internal/user/grant_ceiling_test.go;WP-392
 |---|---|---|---|---|
 | [F-017](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-017) | P1 | Rollenzuweisung nicht entziehbar: kein DELETE /role-assignments/{id} | schließt | WP-009, WP-046, WP-066, WP-168 |
 
-**Schließt Audit-WPs:** [WP-066](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-066) (FEHLGESCHLAGEN, Teil), [WP-168](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-168) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-009](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-009) (TEILWEISE BESTANDEN, Teil), [WP-066](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-066) (FEHLGESCHLAGEN, Teil), [WP-168](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-168) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** Die Ressource `role-assignments` (API-05) hat nur GET und POST (`backend/internal/user/handler.go:88-120`, `user/model.go:97-101`); `DELETE /api/v1/role-assignments/{id}` antwortet 404. Gewährte Rollen, auch org_admin, sind nur durch Deaktivierung des Benutzers rücknehmbar (roles-authz 13 FAIL). Zuweisungen liegen in zwei Tabellen: `role_assignment` (Standardrollen) und `user_custom_role` (Custom-Rollen, `user/pg_repository.go:790-830`); `ListUserRoles` liefert beide per UNION ALL (`:886`). AUT-02 verlangt, dass Rollenänderungen spätestens beim nächsten Refresh wirken (F-017).
 
@@ -3946,7 +4090,7 @@ API-05;[B];B;backend/internal/user/grant_ceiling_test.go;WP-392
 - [ ] Integrationstest `user/role_assignment_integration_test.go` (neu, PG): engineer-Zuweisung entziehen → 204, `GET /role-assignments?user_id=` ohne engineer, nächster Refresh ohne `ci:write`, `POST /cis` → 403; Entzug einer Custom-Rollen-Zuweisung → 204, deren Rechte fehlen beim nächsten Refresh; fremde Organisation → 404; Aufrufer ohne role:manage → 403; client-gebundener Admin entzieht eine org-weite Zuweisung → 403.
 - [ ] Real-Stack: `npx playwright test -c e2e-real/playwright.real.config.ts roles-authz -g '13 an admin can revoke'` → PASS (Retest aus F-017); Zeile aus `tests/audit/expected-failures.txt` entfernt.
 - [ ] Regression: Tests von `./internal/user/` und `./internal/server/` grün.
-- [ ] Positivfall und Symmetrie der Grant-Obergrenze. Der Entzug nutzt dieselbe Prüfung wie POST /role-assignments (aus WP-392 (`t6-invite-ceiling`), keine zweite Regel). Integrationstest `user/role_assignment_integration_test.go`: Ein client-1-Delegate (org_admin mit scope_client_id=client1) entzieht eine client1-Zuweisung, die er auch zuweisen dürfte → 204, die Zeile ist entfernt und der Audit-Eintrag `role_assignment.revoked` liegt vor. Derselbe Delegate entzieht eine org-weite Zuweisung → 403, die Zeile bleibt.
+- [ ] Positivfall und Symmetrie der Grant-Obergrenze. Der Entzug nutzt dieselbe Prüfung wie POST /role-assignments (aus WP-394 (`t6-invite-ceiling`), keine zweite Regel). Integrationstest `user/role_assignment_integration_test.go`: Ein client-1-Delegate (org_admin mit scope_client_id=client1) entzieht eine client1-Zuweisung, die er auch zuweisen dürfte → 204, die Zeile ist entfernt und der Audit-Eintrag `role_assignment.revoked` liegt vor. Derselbe Delegate entzieht eine org-weite Zuweisung → 403, die Zeile bleibt.
 
 **Dateien (10 Einträge, Migration = 2):**
 
@@ -3971,15 +4115,15 @@ API-05;[B];B;backend/internal/user/grant_ceiling_test.go;WP-392
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUT-02;[B];B;backend/internal/user/role_assignment_integration_test.go;WP-393
-API-05;[B];B;backend/internal/user/role_assignment_integration_test.go;WP-393
+AUT-02;[B];B;backend/internal/user/role_assignment_integration_test.go;WP-395
+API-05;[B];B;backend/internal/user/role_assignment_integration_test.go;WP-395
 ```
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Rollen aus IdP-Gruppen (`reticora-admin` usw.) werden in Keycloak entzogen, nicht über diese Ressource; UI-Aktion zum Entziehen; Aussperrschutz für den letzten org_admin (keine Anforderung, kein Befund); Grant-Obergrenze der Zuweisung (F-015, Gruppe T6).
+**Nicht Bestandteil:** Rollen aus IdP-Gruppen (`reticora-admin` usw.) werden in Keycloak entzogen, nicht über diese Ressource; UI-Aktion zum Entziehen; Aussperrschutz für den letzten org_admin (keine Anforderung, kein Befund); Grant-Obergrenze der Zuweisung (F-015, WP-394 (`t6-invite-ceiling`)).
 
-### WP-394 – CI-Typreferenz nur auf System- oder eigenen Org-Typ (422 ci_type_id)
+### WP-396 – CI-Typreferenz nur auf System- oder eigenen Org-Typ (422 ci_type_id)
 
 **Schlüssel:** `t6-ci-type-ref` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
@@ -3997,7 +4141,7 @@ API-05;[B];B;backend/internal/user/role_assignment_integration_test.go;WP-393
 | [F-016](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-016) | P0 | CI-Dialog 'CI erstellen' nutzt hart kodierte Typ-Keys: sendet 'server' als ci_type_id (400) und bietet keine Laufzeit-/Org-Typen | Teil | WP-046, WP-117, WP-119, WP-120, WP-191, WP-194, WP-201, WP-239 |
 | [F-144](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-144) | P2 | POST /cis akzeptiert privaten CI-Typ einer fremden Organisation | schließt | WP-120 |
 
-**Schließt Audit-WPs:** [WP-120](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-120) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-117](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-117) (FEHLGESCHLAGEN, Teil), [WP-119](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-119) (TEILWEISE BESTANDEN, Teil), [WP-120](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-120) (TEILWEISE BESTANDEN, Teil), [WP-191](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-191) (TEILWEISE BESTANDEN, Teil), [WP-194](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-194) (FEHLGESCHLAGEN, Teil), [WP-201](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-201) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** ci_ci_type_id_fkey ist einspaltig; FKs umgehen RLS. POST /cis von Org B mit dem privaten Typ von Org A antwortet 201, die Zeile referenziert den fremden Typ (Typregeln umgehbar, Existenzorakel 201 vs. 422). Ein Nicht-UUID-Wert ('server') liefert 400 statt eines feldbezogenen 422 (Backend-Teil von F-016).
 
@@ -4021,7 +4165,7 @@ API-05;[B];B;backend/internal/user/role_assignment_integration_test.go;WP-393
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** Constraint-Trigger auf ci (organisationsgleicher oder System-Typ) mit Bestandsprüfung; keine neue Tabelle; up/down, Roundtrip grün.
 
@@ -4033,19 +4177,19 @@ API-05;[B];B;backend/internal/user/role_assignment_integration_test.go;WP-393
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/server/ci_type_ref_integration_test.go;WP-394
-TEN-09;[Q];B;backend/internal/server/ci_type_ref_integration_test.go;WP-394
+CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/server/ci_type_ref_integration_test.go;WP-396
+TEN-09;[Q];B;backend/internal/server/ci_type_ref_integration_test.go;WP-396
 ```
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** CI-Dialog im Frontend (WP-395 (`t6-ci-form-types`)); Validierung typisierter Spalten im Discovery-Pfad (WP-500 (`t6-ci-ingest-typed`)).
+**Nicht Bestandteil:** CI-Dialog im Frontend (WP-397 (`t6-ci-form-types`)); Validierung typisierter Spalten im Discovery-Pfad (WP-501 (`t6-ci-ingest-typed`)).
 
-### WP-395 – CI-Dialog lädt Typen aus GET /ci-types und erfasst Typattribute (CI-03, MET-04)
+### WP-397 – CI-Dialog lädt Typen aus GET /ci-types und erfasst Typattribute (CI-03, MET-04)
 
 **Schlüssel:** `t6-ci-form-types` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-394 (`t6-ci-type-ref`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-396 (`t6-ci-type-ref`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -4060,7 +4204,7 @@ TEN-09;[Q];B;backend/internal/server/ci_type_ref_integration_test.go;WP-394
 |---|---|---|---|---|
 | [F-016](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-016) | P0 | CI-Dialog 'CI erstellen' nutzt hart kodierte Typ-Keys: sendet 'server' als ci_type_id (400) und bietet keine Laufzeit-/Org-Typen | schließt | WP-046, WP-117, WP-119, WP-120, WP-191, WP-194, WP-201, WP-239 |
 
-**Schließt Audit-WPs:** [WP-117](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-117) (FEHLGESCHLAGEN, Teil), [WP-119](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-119) (TEILWEISE BESTANDEN, Teil), [WP-120](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-120) (TEILWEISE BESTANDEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil)
+**Schließt Audit-WPs:** [WP-117](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-117) (FEHLGESCHLAGEN, Teil), [WP-119](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-119) (TEILWEISE BESTANDEN, Teil), [WP-120](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-120) (TEILWEISE BESTANDEN, Teil), [WP-191](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-191) (TEILWEISE BESTANDEN, Teil), [WP-194](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-194) (FEHLGESCHLAGEN, Teil), [WP-201](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-201) (TEILWEISE BESTANDEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** CIFormModal.tsx:30 kodiert acht Typ-Keys (ciTypeValues), baut daraus die Optionen (:66-75) und sendet den Key als ci_type_id (:146); das Backend erwartet eine UUID (22P02 → 400). Jede manuelle CI-Anlage über die UI scheitert, Laufzeit- und Org-Typen (MET-04) sowie die logischen MET-03-Typen sind nicht wählbar, Typattribute nicht erfassbar; gemockte e2e verdecken den Fehler.
 
@@ -4068,9 +4212,9 @@ TEN-09;[Q];B;backend/internal/server/ci_type_ref_integration_test.go;WP-394
 
 - [ ] CIFormModal lädt die aktiven Typen über useCITypes (System- und eigene Org-Typen, GET /api/v1/ci-types); Option value = type.id, Label = display_name in der UI-Sprache (Fallback key); ciTypeValues entfällt; im Bearbeiten-Modus ist der gespeicherte Typ vorausgewählt.
 - [ ] Nach der Typwahl rendert der Dialog die Attribute des effektiven Typschemas (GET /api/v1/ci-types/{id}, DynamicForm) und sendet sie in attributes; 422-violations der API werden feldgenau angezeigt (auch ci_type_id).
-- [ ] Vitest: die Fälle aus CIFormModal.auditdefect.tsx ('offers the org type created at runtime (MET-04)', 'uses the API type ids as option values and posts the selected id (CI-03)') und CITypeLabels.auditdefect.tsx:113 und :140 sind grün und nach CIFormModal.test.tsx überführt; CIFormModal.auditdefect.tsx gelöscht; der Fall :153 (F-175, Gruppe T7) bleibt in CITypeLabels.auditdefect.tsx; die vier Einträge sind aus tests/audit/expected-failures.txt entfernt. Negativfall: ohne Typwahl kein POST, Pflichtfehler am Feld.
+- [ ] Vitest: die Fälle aus CIFormModal.auditdefect.tsx ('offers the org type created at runtime (MET-04)', 'uses the API type ids as option values and posts the selected id (CI-03)') und CITypeLabels.auditdefect.tsx:113 und :140 sind grün und nach CIFormModal.test.tsx überführt; CIFormModal.auditdefect.tsx gelöscht; der Fall :153 (F-175, WP-523 (`t7-i18n-labels`)) bleibt in CITypeLabels.auditdefect.tsx; die vier Einträge sind aus tests/audit/expected-failures.txt entfernt. Negativfall: ohne Typwahl kein POST, Pflichtfehler am Feld.
 - [ ] Die gemockte e2e/ci.spec.ts und e2e/support/backend.ts liefern UUID-Typ-IDs aus GET /ci-types; der Mock lehnt Nicht-UUID-ci_type_id mit 422 ab.
-- [ ] Real-Stack grün: ci-lifecycle L01, L03a, tenant-isolation T16, roles-authz 12. Neuer Test ci-lifecycle 'L01b': Org-Typ per API zur Laufzeit anlegen → ohne Reload/Release im Dialog wählbar → POST /cis 201 mit dieser ci_type_id in der eigenen Org; Org B bietet den Typ nicht an (Negativ).
+- [ ] Real-Stack grün: ci-lifecycle L01, L03a, tenant-isolation T16, roles-authz 12; die e2e-real-Zeilen dieser vier Tests (F-016) sind aus tests/audit/expected-failures.txt entfernt, und der Vergleich aus WP-338 (`k-e2e-real-ci`) läuft im PR ohne Fehler. Neuer Test ci-lifecycle 'L01b': Org-Typ per API zur Laufzeit anlegen → ohne Reload/Release im Dialog wählbar → POST /cis 201 mit dieser ci_type_id in der eigenen Org; Org B bietet den Typ nicht an (Negativ).
 - [ ] Retest: cd frontend && npx vitest run src/pages/CIFormModal.test.tsx → PASS; npx playwright test -c e2e-real/playwright.real.config.ts ci-lifecycle -g 'L01|L03a', tenant-isolation -g 'T16', roles-authz -g '12' → pass.
 - [ ] i18n de-DE/en-US für neue Texte; npm run lint, npm run typecheck und die bestehende Vitest-Suite grün.
 
@@ -4087,7 +4231,7 @@ TEN-09;[Q];B;backend/internal/server/ci_type_ref_integration_test.go;WP-394
 - frontend/e2e/support/backend.ts
 - frontend/e2e-real/ci-lifecycle.spec.ts
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** keine Migration.
 
@@ -4100,17 +4244,17 @@ TEN-09;[Q];B;backend/internal/server/ci_type_ref_integration_test.go;WP-394
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-CI-03;[B];B;frontend/src/pages/CIFormModal.test.tsx;WP-395
-MET-04;B/G1;B;frontend/e2e-real/ci-lifecycle.spec.ts;WP-395
-CI-01;[B], Teilfelder [P2]/[P3];B;frontend/src/pages/CIFormModal.test.tsx;WP-395
-TST-03;[B], Teilumfang [P2];B;frontend/e2e-real/ci-lifecycle.spec.ts;WP-395
+CI-03;[B];B;frontend/src/pages/CIFormModal.test.tsx;WP-397
+MET-04;B/G1;B;frontend/e2e-real/ci-lifecycle.spec.ts;WP-397
+CI-01;[B], Teilfelder [P2]/[P3];B;frontend/src/pages/CIFormModal.test.tsx;WP-397
+TST-03;[B], Teilumfang [P2];B;frontend/e2e-real/ci-lifecycle.spec.ts;WP-397
 ```
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
-**Nicht Bestandteil:** Backend-422 für Nicht-UUID und fremde Typen (WP-394 (`t6-ci-type-ref`)); Leeren optionaler Felder im Bearbeiten-Dialog (F-081, Gruppe T3) und Typlabel der Detailseite (F-175, Gruppe T7); Werte mit Anführungszeichen (WP-419 (`t6-audit-hash-utf8`)).
+**Nicht Bestandteil:** Backend-422 für Nicht-UUID und fremde Typen (WP-396 (`t6-ci-type-ref`)); Leeren optionaler Felder im Bearbeiten-Dialog (F-081, WP-477 (`t3-ci-edit-ui`)) und Typlabel der Detailseite (F-175, WP-523 (`t7-i18n-labels`)); Werte mit Anführungszeichen (WP-423 (`t6-audit-hash-utf8`)).
 
-### WP-396 – Benachrichtigungs-Administration unter notification:manage; Webhook-URL und Zustellinhalte redigiert
+### WP-398 – Benachrichtigungs-Administration unter notification:manage; Webhook-URL und Zustellinhalte redigiert
 
 **Schlüssel:** `t6-ntf-authz` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
@@ -4151,7 +4295,7 @@ TST-03;[B], Teilumfang [P2];B;frontend/e2e-real/ci-lifecycle.spec.ts;WP-395
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** keine Migration.
 
@@ -4163,21 +4307,21 @@ TST-03;[B], Teilumfang [P2];B;frontend/e2e-real/ci-lifecycle.spec.ts;WP-395
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NTF-01;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-396
-NTF-04;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-396
-API-05;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-396
-RBA-02;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-396
+NTF-01;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+NTF-04;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+API-05;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+RBA-02;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
 ```
 
 **Entscheidungsbedarf:** [E-13](../entscheidungen.md#e-13)
 
-**Nicht Bestandteil:** SMTP-Secret-Weitergabe und Egress (WP-397 (`t6-ntf-secrets`)); Kanal-Admin-UI.
+**Nicht Bestandteil:** SMTP-Secret-Weitergabe und Egress (WP-399 (`t6-ntf-secrets`)); Kanal-Admin-UI.
 
-### WP-397 – SMTP-Kanäle: Secret nicht an neues Ziel, Egress-Policy für mandanteneigenes SMTP (SEC-08)
+### WP-399 – SMTP-Kanäle: Secret nicht an neues Ziel, Egress-Policy für mandanteneigenes SMTP (SEC-08)
 
 **Schlüssel:** `t6-ntf-secrets` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-396 (`t6-ntf-authz`)
+**Voraussetzungen (gemergt):** WP-398 (`t6-ntf-authz`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -4219,7 +4363,7 @@ RBA-02;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-3
 - backend/cmd/server/main.go
 - docs/ops/workers.md
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** keine Migration.
 
@@ -4233,23 +4377,23 @@ RBA-02;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-3
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NTF-01;[B];B;backend/internal/notify/channel_secret_test.go;WP-397
-TEC-13;[B];B;backend/internal/notify/channel_secret_test.go;WP-397
-REP-01;[B];B;backend/internal/notify/channel_test.go;WP-397
-SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-397
+NTF-01;[B];B;backend/internal/notify/channel_secret_test.go;WP-399
+TEC-13;[B];B;backend/internal/notify/channel_secret_test.go;WP-399
+REP-01;[B];B;backend/internal/notify/channel_test.go;WP-399
+SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-399
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Berechtigungen der Kanal-Routen (WP-396 (`t6-ntf-authz`)); Egress der Webhook-Zustellung (bereits WP-049).
+**Nicht Bestandteil:** Berechtigungen der Kanal-Routen (WP-398 (`t6-ntf-authz`)); Egress der Webhook-Zustellung (bereits WP-049).
 
-### WP-398 – Produzenten für relationship.created/removed, collector.enrolled und review.resolved in der Mutations-Transaktion
+### WP-400 – Produzenten für relationship.created/removed, collector.enrolled und review.resolved in der Mutations-Transaktion
 
 **Schlüssel:** `t6-domain-events` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-372 (`t3-review-actor`)
+**Voraussetzungen (gemergt):** WP-373 (`t3-review-actor`)
 
-**Vorgezogen:** nach Schwere K2 Datenintegrität und Kernprozesse; als Voraussetzung von WP-399 (`t6-rel-errors`) in K1 eingeordnet.
+**Vorgezogen:** nach Schwere K2 Datenintegrität und Kernprozesse; als Voraussetzung von WP-401 (`t6-rel-errors`) in K1 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -4284,7 +4428,7 @@ SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-397
 - backend/internal/server/domain_events_integration_test.go (neu)
 - backend/internal/relationship/pg_repository_integration_test.go
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** keine Migration.
 
@@ -4296,21 +4440,21 @@ SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-397
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-EVT-02;[B];B;backend/internal/server/domain_events_integration_test.go;WP-398
-EVT-01;[B];B;backend/internal/server/domain_events_integration_test.go;WP-398
+EVT-02;[B];B;backend/internal/server/domain_events_integration_test.go;WP-400
+EVT-01;[B];B;backend/internal/server/domain_events_integration_test.go;WP-400
 ```
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** review.created in der Mutations-Transaktion (WP-549 (`t6-review-events`)); export.completed, job.failed, webhook.dead (WP-550 (`t6-emit-in-tx`)); Fehlerabbildung von POST /relationships (WP-399 (`t6-rel-errors`)).
+**Nicht Bestandteil:** review.created in der Mutations-Transaktion (WP-549 (`t6-review-events`)); export.completed, job.failed, webhook.dead (WP-550 (`t6-emit-in-tx`)); Fehlerabbildung von POST /relationships (WP-401 (`t6-rel-errors`)).
 
-### WP-399 – POST /relationships mit fremdem oder unbekanntem CI → 422 statt 500; Doppelklick im Beziehungsdialog
+### WP-401 – POST /relationships mit fremdem oder unbekanntem CI → 422 statt 500; Doppelklick im Beziehungsdialog
 
 **Schlüssel:** `t6-rel-errors` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-398 (`t6-domain-events`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-400 (`t6-domain-events`)
 
-**Vorgezogen:** nach Schwere K4 Funktions-, Validierungs- und Bedienmängel; als Voraussetzung von WP-407 (`t1-channel-matrix`), WP-401 (`t7-topology-root`) in K1 eingeordnet.
+**Vorgezogen:** nach Schwere K4 Funktions-, Validierungs- und Bedienmängel; als Voraussetzung von WP-409 (`t1-channel-matrix`), WP-403 (`t7-topology-root`) in K1 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -4324,7 +4468,7 @@ EVT-01;[B];B;backend/internal/server/domain_events_integration_test.go;WP-398
 | [F-145](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-145) | P2 | POST /relationships mit CI einer anderen Organisation oder unbekannter CI-ID antwortet 500 statt 404/422 | schließt | WP-010, WP-025, WP-128, WP-160, WP-163, WP-208 |
 | [F-314](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-314) | P3 | Beziehungsdialog bleibt nach Doppelklick trotz erfolgreicher Anlage mit Konfliktfehler offen (intermittierend) | mit | WP-128, WP-201 |
 
-**Schließt Audit-WPs:** [WP-128](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-128) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-010](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-010) (FEHLGESCHLAGEN, Teil), [WP-025](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-025) (TEILWEISE BESTANDEN, Teil), [WP-128](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-128) (TEILWEISE BESTANDEN, Teil), [WP-160](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-160) (TEILWEISE BESTANDEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** INSERT … WHERE EXISTS trifft bei fremdem (RLS) oder unbekanntem CI keine Zeile; ErrNoRows wird zu fmt.Errorf('not found') (relationship/pg_repository.go:222), api.WriteRepoError mappt das auf 500 (tenant-isolation T14). Der Beziehungsdialog zeigt eine generische englische Meldung. Zusätzlich bleibt der Dialog nach Doppelklick intermittierend mit Konfliktfehler offen (F-314, Hypothese: mutate je Submit ohne Sperre).
 
@@ -4362,17 +4506,17 @@ EVT-01;[B];B;backend/internal/server/domain_events_integration_test.go;WP-398
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-REL-02;[B];B;backend/internal/relationship/relationship_scope_integration_test.go;WP-399
-REL-04;[B];B;backend/internal/relationship/relationship_scope_integration_test.go;WP-399
+REL-02;[B];B;backend/internal/relationship/relationship_scope_integration_test.go;WP-401
+REL-04;[B];B;backend/internal/relationship/relationship_scope_integration_test.go;WP-401
 ```
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** Durchsetzung von allowed_source_types/allowed_target_types (WP-592 (`t6-p3-sammel`)); Beziehungstypen mounted_in/located_in im Formular (F-242, Gruppe T3).
+**Nicht Bestandteil:** Durchsetzung von allowed_source_types/allowed_target_types (WP-592 (`t6-p3-sammel`)); Beziehungstypen mounted_in/located_in im Formular (F-242, WP-573 (`t3-struct-p3`)).
 
-### WP-400 – CI-Metriken: Scope-Nachweis der Route (F-167) und Fehlerzustand der Provenienz
+### WP-402 – CI-Metriken: Scope-Nachweis der Route (F-167) und Fehlerzustand der Provenienz
 
-**Schlüssel:** `t7-ci-metrics-scope` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** C · **Aufwand:** 0,8 PT
+**Schlüssel:** `t7-ci-metrics-scope` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
 **Voraussetzungen (gemergt):** WP-343 (`t1-err-core`), WP-344 (`t1-metric-names`)
 
@@ -4418,20 +4562,20 @@ REL-04;[B];B;backend/internal/relationship/relationship_scope_integration_test.g
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-MON-02;[B];C;backend/internal/monitoring/ci_metrics_integration_test.go;WP-400
+MON-02;[B];C;backend/internal/monitoring/ci_metrics_integration_test.go;WP-402
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Prädikat in `MetricNames`, 404 in `CIMetrics`, OpenAPI-404 und Überführung der T1-Defekttests `TestAuditT1MetricNamesHonourScope`/`TestAuditT1CIMetricsEndpointScope` (WP-344 (`t1-metric-names`), F-052, Voraussetzung); View-Ebene `metric_sample_v`/`metric_sample_1h` (WP-350 (`t1-metric-views`)); Collector-Upload (WP-422 (`t7-metrics-edge`)). Gruppenübergreifende Voraussetzungen (trägt die Integration ein): WP-344 (`t1-metric-names`) (T1), WP-343 (`t1-err-core`) (T1).
+**Nicht Bestandteil:** Prädikat in `MetricNames`, 404 in `CIMetrics`, OpenAPI-404 und Überführung der T1-Defekttests `TestAuditT1MetricNamesHonourScope`/`TestAuditT1CIMetricsEndpointScope` (WP-344 (`t1-metric-names`), F-052, Voraussetzung); View-Ebene `metric_sample_v`/`metric_sample_1h` (WP-350 (`t1-metric-views`)); Collector-Upload (WP-426 (`t7-metrics-edge`)). Voraussetzungen: WP-344 (`t1-metric-names`), WP-343 (`t1-err-core`).
 
-### WP-401 – Topologie mit unbekannter oder fremder Root: 404 statt 500; Grenz- und Isolationstests
+### WP-403 – Topologie mit unbekannter oder fremder Root: 404 statt 500; Grenz- und Isolationstests
 
 **Schlüssel:** `t7-topology-root` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-399 (`t6-rel-errors`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-401 (`t6-rel-errors`)
 
-**Vorgezogen:** nach Schwere K4 Funktions-, Validierungs- und Bedienmängel; als Voraussetzung von WP-407 (`t1-channel-matrix`) in K1 eingeordnet.
+**Vorgezogen:** nach Schwere K4 Funktions-, Validierungs- und Bedienmängel; als Voraussetzung von WP-409 (`t1-channel-matrix`) in K1 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -4445,7 +4589,7 @@ MON-02;[B];C;backend/internal/monitoring/ci_metrics_integration_test.go;WP-400
 |---|---|---|---|---|
 | [F-161](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-161) | P2 | GET /topology mit unbekannter oder fremder root_ci_id antwortet 500 statt 404 | schließt | WP-010, WP-031, WP-180, WP-195, WP-208 |
 
-**Schließt Audit-WPs:** [WP-180](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-180) (TEILWEISE BESTANDEN, Teil), [WP-195](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-195) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-010](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-010) (FEHLGESCHLAGEN, Teil), [WP-180](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-180) (TEILWEISE BESTANDEN, Teil), [WP-195](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-195) (TEILWEISE BESTANDEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** `GET /api/v1/topology?root_ci_id=<unbekannt|fremde Org|fremder Client>` antwortet 500 statt 404 (F-161, zusammengeführt mit L-T1-17): `buildFromRootViaTraversal` und `buildFromRootIterative` geben den rohen `ciRepo.GetByID`-Fehler zurück (`backend/internal/topology/topology.go:273-276`, `:308-311`), `GetTopology` (:136-141) mappt nur `FieldError`, `api.WriteRepoError` fällt auf 500. Real-Stack T15 (`frontend/e2e-real/tenant-isolation.spec.ts:1148`) ist rot; die UI zeigt für veraltete Deep-Links einen generischen Ladefehler. Die Grenz- und Filterprüfung (2.000/2.001 Knoten) und die ci_ids-Grenze (100/101) sind nur als Verifier-Probes belegt.
 
@@ -4455,7 +4599,7 @@ MON-02;[B];C;backend/internal/monitoring/ci_metrics_integration_test.go;WP-400
 - [ ] Integrationstest `TestTopologyRootAndLimitAgainstPostgres` (`backend/internal/topology/limit_integration_test.go`): unbekannte UUID, CI fremder Org und CI fremden Clients als `root_ci_id` → 404; eigenes CI → 200; 2.000 CIs ohne Root → 200 mit 2.000 Knoten, 2.001 → 422 mit Hinweis auf root_ci_id/site_id/client_id/ci_type, Root bei 2.001 CIs → 200, `site_id`/`client_id`/`ci_type`-Filter → nur passende Knoten, ungültige Filter → 400 (Probe TestProbeV25TopologyLimit als Repo-Test).
 - [ ] `TestMultiImpactAgainstPostgres` erweitert: 100 IDs → 200, 101 → 422; `ci_ids` mit einem CI fremder Org bzw. fremden Clients → 404; nur eigene → 200.
 - [ ] Real-Stack T15 grün, Zeile in `tests/audit/expected-failures.txt` gelöscht; verbindlicher Retest: `cd frontend && npx playwright test -c e2e-real/playwright.real.config.ts tenant -g 'T15'` → PASS.
-- [ ] Nach WP-399 (`t6-rel-errors`) sind alle Subtests von `TestAuditT1ScopeRefusalsAreNot5xx` grün (Topologie hier, Relationship aus F-145); dieses WP verschiebt den Test als `TestScopeRefusalsAreNot5xx` in die reguläre Datei `backend/internal/tenant/rls/scope_refusal_status_integration_test.go` (die Defektdatei enthält nur diesen Test, Build-Tag entfernt) und löscht seine Zeile in `tests/audit/expected-failures.txt`.
+- [ ] Nach WP-401 (`t6-rel-errors`) sind alle Subtests von `TestAuditT1ScopeRefusalsAreNot5xx` grün (Topologie hier, Relationship aus F-145); dieses WP verschiebt den Test als `TestScopeRefusalsAreNot5xx` in die reguläre Datei `backend/internal/tenant/rls/scope_refusal_status_integration_test.go` (die Defektdatei enthält nur diesen Test, Build-Tag entfernt) und löscht seine Zeile in `tests/audit/expected-failures.txt`.
 - [ ] UI: `TopologyPage.tsx` zeigt bei 404 für `?root=` den Hinweis „CI nicht gefunden oder nicht sichtbar“ mit Rücksprung zur Gesamtansicht statt des generischen Ladefehlers; Vitest in `TopologyPage.test.tsx` (404-Stub → Hinweis, 500-Stub → Fehler).
 - [ ] OpenAPI dokumentiert 404 für `GET /topology`; Paritätstest grün; `npm run generate:api`.
 - [ ] Regression: bestehende Tests der berührten Pakete grün, `go vet`/golangci-lint bzw. `npm run lint` und `npm run typecheck` ohne neue Befunde.
@@ -4490,20 +4634,20 @@ MON-02;[B];C;backend/internal/monitoring/ci_metrics_integration_test.go;WP-400
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-IMP-06;[B];C;backend/internal/topology/limit_integration_test.go;WP-401
-IMP-05;[B];C;backend/internal/topology/multi_integration_test.go;WP-401
-UI-06;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-401
+IMP-06;[B];C;backend/internal/topology/limit_integration_test.go;WP-403
+IMP-05;[B];C;backend/internal/topology/multi_integration_test.go;WP-403
+UI-06;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-403
 ```
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** parseDepth/depth-Validierung (WP-489 (`t3-impact-heuristic`), ebenfalls `topology.go`/`topology_test.go`); 500 bei `POST /relationships` mit fremdem Endpunkt (F-145, WP-399 (`t6-rel-errors`), Voraussetzung); tabellengetriebene Kanalmatrix (F-058, WP-407 (`t1-channel-matrix`)). Gruppenübergreifende Voraussetzung (trägt die Integration ein): WP-399 (`t6-rel-errors`) (T6).
+**Nicht Bestandteil:** parseDepth/depth-Validierung (WP-490 (`t3-impact-heuristic`), ebenfalls `topology.go`/`topology_test.go`); 500 bei `POST /relationships` mit fremdem Endpunkt (F-145, WP-401 (`t6-rel-errors`), Voraussetzung); tabellengetriebene Kanalmatrix (F-058, WP-409 (`t1-channel-matrix`)).
 
-### WP-402 – Job-API und Jobdaten im Client-/Site-Scope des Erzeugers
+### WP-404 – Job-API und Jobdaten im Client-/Site-Scope des Erzeugers
 
 **Schlüssel:** `t7-job-scope` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** C · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-347 (`t1-export-job-visibility`), WP-367 (`t3-bulk-manual`)
+**Voraussetzungen (gemergt):** WP-347 (`t1-export-job-visibility`), WP-368 (`t3-bulk-manual`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -4524,9 +4668,9 @@ UI-06;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-401
 
 - [ ] Migration (nächste freie Nummer, up/down, Roundtrip grün): `job` erhält `scope_recorded`, `scope_clients`, `scope_sites`, `scope_teams` (UUID[], NULL = org-weit in dieser Dimension; Muster `000068_export_job_scope`); `job_isolation` (FOR ALL, USING und WITH CHECK) prüft zusätzlich zum Org-Prädikat über `app.client_scope`/`app.site_scope`/`app.team_scope`, dass der Aufrufer org-weit ist oder der Scope-Snapshot vollständig in seinem Scope liegt; Jobs ohne Snapshot (System, Altbestand) sehen nur org-weite Principals (E-09); ENABLE + FORCE bleiben, `job_system_select` unverändert.
 - [ ] `Enqueue`/`Track` speichern den Scope des Erzeugers aus dem Request-Kontext; gespiegelte Jobs übernehmen den Scope ihres Quelldatensatzes (Export: Snapshot des `export_job`); Lesepfade (`List`, `Get`, `Result`, BFF `jobs`) laufen über `database.WithRequestTenant`; Worker, Reaper und Metrik-Collector bleiben org-weit bzw. System. Die Erstellerregel für Exportjobs aus WP-347 (`t1-export-job-visibility`) (`ref_table='export_job'` nur für den Ersteller) bleibt zusätzlich zum Scope-Snapshot wirksam.
-- [ ] Defekttest `TestAuditT7JobAPIHonoursClientScope` grün (Client 2: GET /jobs ohne den Job, GET /jobs/{id}, /result, DELETE, /revert → 404; org-weiter Admin sieht ihn) und nach `backend/internal/ci/bulk_jobs_integration_test.go` (neu, regulär) verschoben; die gemeinsamen Helfer (`newAuditT7BulkEnv` u. a.) liegen genau einmal in einer ungetaggten `_test.go` (von WP-367 (`t3-bulk-manual`) übernommen, nicht dupliziert); `go vet ./internal/ci/` und `go vet -tags auditdefect ./internal/ci/` grün; Zeile in `tests/audit/expected-failures.txt` gelöscht. Verbindlicher Retest: `cd backend && TEST_DATABASE_URL=… go test -count=1 -v -run '^TestAuditT7JobAPIHonoursClientScope$' ./internal/ci/` → PASS.
+- [ ] Defekttest `TestAuditT7JobAPIHonoursClientScope` grün (Client 2: GET /jobs ohne den Job, GET /jobs/{id}, /result, DELETE, /revert → 404; org-weiter Admin sieht ihn) und nach `backend/internal/ci/bulk_jobs_integration_test.go` (neu, regulär) verschoben; die gemeinsamen Helfer (`newAuditT7BulkEnv` u. a.) liegen genau einmal in einer ungetaggten `_test.go` (von WP-368 (`t3-bulk-manual`) übernommen, nicht dupliziert); `go vet ./internal/ci/` und `go vet -tags auditdefect ./internal/ci/` grün; Zeile in `tests/audit/expected-failures.txt` gelöscht. Verbindlicher Retest: `cd backend && TEST_DATABASE_URL=… go test -count=1 -v -run '^TestAuditT7JobAPIHonoursClientScope$' ./internal/ci/` → PASS.
 - [ ] PG-Test `TestJobScopeAgainstPostgres` (`jobs/scope_integration_test.go`): Site-1-Principal sieht keinen Site-2-Job; Exportjob von Client 1 für Client 2 unsichtbar; ein Systemjob nur für org-weite Principals; WITH CHECK verhindert das Anlegen eines Jobs mit fremdem Scope.
-- [ ] Kanal job: `TestChannelMatrix` (`tenant/rls/channel_matrix_integration_test.go`) erhält eine Inhaltszeile (ci.bulk-Job von Client 1 fehlt in `GET /api/v1/jobs` für Client 2); dieses WP wird vor WP-407 (`t1-channel-matrix`) gemergt, das die Zeile in `rls.Channels` übernimmt (die Integration ergänzt WP-402 (`t7-job-scope`) als Voraussetzung von WP-407 (`t1-channel-matrix`)). `TestJobChannelHonoursScope` (`tenant/rls/job_channel_integration_test.go`) prüft REST und BFF (`POST /bff/graphql '{ jobs { id } }'`) als Client-2- und als org-weite Session (Probe f5).
+- [ ] Kanal job: `TestChannelMatrix` (`tenant/rls/channel_matrix_integration_test.go`) erhält eine Inhaltszeile (ci.bulk-Job von Client 1 fehlt in `GET /api/v1/jobs` für Client 2); dieses WP wird vor WP-409 (`t1-channel-matrix`) gemergt, das die Zeile in `rls.Channels` übernimmt (dieses WP ist Voraussetzung von WP-409 (`t1-channel-matrix`)). `TestJobChannelHonoursScope` (`tenant/rls/job_channel_integration_test.go`) prüft REST und BFF (`POST /bff/graphql '{ jobs { id } }'`) als Client-2- und als org-weite Session (Probe f5).
 - [ ] `mayControl` prüft zuerst die Sichtbarkeit (404 vor 403/409).
 - [ ] Regression: bestehende Tests der berührten Pakete grün, `go vet`/golangci-lint bzw. `npm run lint` und `npm run typecheck` ohne neue Befunde.
 
@@ -4557,15 +4701,15 @@ UI-06;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-401
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-API-09;[B];C;backend/internal/jobs/scope_integration_test.go;WP-402
-JOB-03;[B];C;backend/internal/jobs/scope_integration_test.go;WP-402
+API-09;[B];C;backend/internal/jobs/scope_integration_test.go;WP-404
+JOB-03;[B];C;backend/internal/jobs/scope_integration_test.go;WP-404
 ```
 
 **Entscheidungsbedarf:** [E-09](../entscheidungen.md#e-09); [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Cancel-Semantik (WP-513 (`t7-job-cancel`), WP-514 (`t7-export-cancel`)); Revert-Status (WP-553 (`t7-job-revert-state`)); Erstellerregel der Exportjobs (WP-347 (`t1-export-job-visibility`), Voraussetzung); tabellengetriebener Umbau der Kanalmatrix (F-058, WP-407 (`t1-channel-matrix`)). Gruppenübergreifende Voraussetzungen (trägt die Integration ein): WP-367 (`t3-bulk-manual`) (T3), WP-347 (`t1-export-job-visibility`) (T1).
+**Nicht Bestandteil:** Cancel-Semantik (WP-514 (`t7-job-cancel`), WP-515 (`t7-export-cancel`)); Revert-Status (WP-553 (`t7-job-revert-state`)); Erstellerregel der Exportjobs (WP-347 (`t1-export-job-visibility`), Voraussetzung); tabellengetriebener Umbau der Kanalmatrix (F-058, WP-409 (`t1-channel-matrix`)). Voraussetzungen: WP-368 (`t3-bulk-manual`), WP-347 (`t1-export-job-visibility`).
 
-### WP-403 – Filter-AST: abgesicherte Casts, Wertvalidierung je Feldart, kein SQL-Fehlertext
+### WP-405 – Filter-AST: abgesicherte Casts, Wertvalidierung je Feldart, kein SQL-Fehlertext
 
 **Schlüssel:** `t7-filter-ast-values` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
@@ -4584,7 +4728,7 @@ JOB-03;[B];C;backend/internal/jobs/scope_integration_test.go;WP-402
 
 **Schließt Audit-WPs:** [WP-187](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-187) (TEILWEISE BESTANDEN, schließt)
 
-**Problem:** Ein numerischer Vergleich auf einem dynamischen Attribut bricht die ganze Abfrage ab, sobald ein sichtbares CI unter dem Schlüssel einen nicht-numerischen Wert hat (F-165): `fieldKind` (`backend/internal/savedview/filter.go:342-351`) wählt die Art nach dem JSON-Typ des Vergleichswerts, `comparison` (:459-487) castet `(attributes->>key)::numeric` für jede Zeile. Werte werden nicht je Feldart validiert, `in`-Elemente gar nicht; `handler.go:224` gibt jeden Engine-Fehler als 400 mit PostgreSQL-Text und SQLSTATE zurück (F-179). Die Offenlegung interner Fehlertexte (F-179) hat Sicherheitswirkung und ist wie F-047 (WP-404 (`t1-err-ident-loc`)) K1; die Saved-View-Stellen von F-047 (`handler.go:222-225`, `filter.go:123-150`) sind dieselben Zeilen und werden hier behoben.
+**Problem:** Ein numerischer Vergleich auf einem dynamischen Attribut bricht die ganze Abfrage ab, sobald ein sichtbares CI unter dem Schlüssel einen nicht-numerischen Wert hat (F-165): `fieldKind` (`backend/internal/savedview/filter.go:342-351`) wählt die Art nach dem JSON-Typ des Vergleichswerts, `comparison` (:459-487) castet `(attributes->>key)::numeric` für jede Zeile. Werte werden nicht je Feldart validiert, `in`-Elemente gar nicht; `handler.go:224` gibt jeden Engine-Fehler als 400 mit PostgreSQL-Text und SQLSTATE zurück (F-179). Die Offenlegung interner Fehlertexte (F-179) hat Sicherheitswirkung und ist wie F-047 (WP-406 (`t1-err-ident-loc`)) K1; die Saved-View-Stellen von F-047 (`handler.go:222-225`, `filter.go:123-150`) sind dieselben Zeilen und werden hier behoben.
 
 **Akzeptanzkriterien:**
 
@@ -4595,7 +4739,7 @@ JOB-03;[B];C;backend/internal/jobs/scope_integration_test.go;WP-402
 - [ ] Committeter AST-Client-Scope-Test `TestFilterASTClientScopeAgainstPostgres`: Client-1-Principal mit OR-AST über Client-1- und Client-2-CIs → nur Client-1-Treffer (total 1); org-weit → beide.
 - [ ] `filter_test.go` um Wertfälle je Feldart ergänzt; Retest: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestFilterAST|TestSearchQueryRejectsInvalidValues' ./internal/savedview/` → PASS.
 - [ ] Regression: bestehende Tests der berührten Pakete grün, `go vet`/golangci-lint bzw. `npm run lint` und `npm run typecheck` ohne neue Befunde.
-- [ ] Ratchet (Teil F-047): Der Subtest „WP-015 structured search with an invalid upstream_of“ von `TestAuditT1RepositoryErrorsAreSanitized` (`tenant/rls/audit_t1_error_sanitization_auditdefect_test.go:104-105`) ist nach diesem WP grün; seine Zeile wird aus `tests/audit/expected-failures.txt` gelöscht. Die Überführung des Falls nach `TestRepositoryErrorsAreSanitized` erfolgt in WP-404 (`t1-err-ident-loc`).
+- [ ] Ratchet (Teil F-047): Der Subtest „WP-015 structured search with an invalid upstream_of“ von `TestAuditT1RepositoryErrorsAreSanitized` (`tenant/rls/audit_t1_error_sanitization_auditdefect_test.go:104-105`) ist nach diesem WP grün; seine Zeile wird aus `tests/audit/expected-failures.txt` gelöscht. Die Überführung des Falls nach `TestRepositoryErrorsAreSanitized` erfolgt in WP-406 (`t1-err-ident-loc`).
 
 **Dateien (6 Einträge, Migration = 2):**
 
@@ -4616,18 +4760,18 @@ JOB-03;[B];C;backend/internal/jobs/scope_integration_test.go;WP-402
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/ast_integration_test.go;WP-403
+SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/ast_integration_test.go;WP-405
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Übrige Stellen von F-047 (WP-343 (`t1-err-core`), WP-404 (`t1-err-ident-loc`), WP-405 (`t1-err-modules`)); Klick-Builder (WP-236, [P2]); Text-Syntax ([O]).
+**Nicht Bestandteil:** Übrige Stellen von F-047 (WP-343 (`t1-err-core`), WP-406 (`t1-err-ident-loc`), WP-407 (`t1-err-modules`)); Klick-Builder (WP-236, [P2]); Text-Syntax ([O]).
 
-### WP-404 – Fehlervertrag API-03 II: Identität, Rollen, Racks, Suche, Sichten, Monitoring
+### WP-406 – Fehlervertrag API-03 II: Identität, Rollen, Racks, Suche, Sichten, Monitoring
 
 **Schlüssel:** `t1-err-ident-loc` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-340 (`t1-rack-site-scope`), WP-343 (`t1-err-core`), WP-344 (`t1-metric-names`), WP-389 (`t1-team-scope`), WP-392 (`t6-invite-ceiling`), WP-403 (`t7-filter-ast-values`)
+**Voraussetzungen (gemergt):** WP-340 (`t1-rack-site-scope`), WP-343 (`t1-err-core`), WP-344 (`t1-metric-names`), WP-391 (`t1-team-scope`), WP-394 (`t6-invite-ceiling`), WP-405 (`t7-filter-ast-values`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -4639,7 +4783,7 @@ SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/ast_integration_test.go
 |---|---|---|---|---|
 | [F-047](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-047) | P2 | Handler geben rohe pgx/PostgreSQL-Fehlertexte (SQLSTATE, Constraint-, Tabellen-, RLS-Policy-Namen) und falsche Statuscodes zurück | Teil | WP-010, WP-011, WP-012, WP-014, WP-015, WP-016, WP-017, WP-018, WP-020, WP-021, WP-208 |
 
-**Schließt Audit-WPs:** [WP-012](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-012) (FEHLGESCHLAGEN, Teil), [WP-014](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-014) (FEHLGESCHLAGEN, Teil), [WP-015](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-015) (FEHLGESCHLAGEN, Teil), [WP-016](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-016) (FEHLGESCHLAGEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil)
+**Schließt Audit-WPs:** [WP-010](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-010) (FEHLGESCHLAGEN, Teil), [WP-011](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-011) (FEHLGESCHLAGEN, Teil), [WP-012](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-012) (FEHLGESCHLAGEN, Teil), [WP-014](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-014) (FEHLGESCHLAGEN, Teil), [WP-015](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-015) (FEHLGESCHLAGEN, Teil), [WP-016](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-016) (FEHLGESCHLAGEN, Teil), [WP-017](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-017) (FEHLGESCHLAGEN, Teil), [WP-018](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-018) (FEHLGESCHLAGEN, Teil), [WP-020](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-020) (FEHLGESCHLAGEN, Teil), [WP-021](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-021) (FEHLGESCHLAGEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** Rohe pgx-/PostgreSQL-Texte und falsche Status in `user/handler.go:532-533` (und weiteren Team-/Rollen-Handlern, u. a. :570, :588, :689, :705, :749), `permission/handler.go:95-98`, `rack/pg_repository.go:557-567` (mountWriteError) mit `rack/handler.go:65-77`, `savedview/handler.go:136-137`, `search/handler.go:37-41`, `monitoring/monitoring.go:585-588`: u. a. RLS-Policy-Text beim Rack-Mount eines fremden CI und beim Team-Mitglied-Schreiben durch einen Team-Principal (404 mit `team_member`-Policy), Duplikat-Team-Mitglied als 404, `22P02` bei ungültigen UUIDs, pgx-Scan-Text beim Alarm (F-047, Subtests WP-012/014/015/016; WP-208).
 
@@ -4649,7 +4793,7 @@ SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/ast_integration_test.go
 - [ ] Rack-Mount: `ci_id` ungültig 422 Feldfehler, unbekannt/fremd 404 bzw. 422 ohne Policy-/FK-Text; `rack/handler.go` gibt für `ErrValidation`/`ErrConflict` nur feste Domänentexte aus.
 - [ ] Saved Views: Duplikat 409 generisch; Update meldet Konflikte als 409 statt 404. Volltextsuche: `q` mit NUL 400.
 - [ ] Monitoring-Alarm: Name mit NUL 400, `duration` außerhalb des zulässigen Bereichs 422 Feldfehler; kein pgx-Text.
-- [ ] Die 14 Fälle WP-012 (6), WP-014 (3), WP-015 (3), WP-016 (2) sowie der Fall „Team-Mitglied eines fremden Teams durch Team-Principal“ stehen in `TestRepositoryErrorsAreSanitized` (`tenant/rls/error_sanitization_integration_test.go`) und sind aus der Defekttabelle entfernt. Retest (Teil F-047): `cd backend && TEST_DATABASE_URL=… go test -count=1 -run '^TestRepositoryErrorsAreSanitized$' ./internal/tenant/rls/` grün; Domänenmeldungen (z. B. Rack-Belegung) bleiben. Der Fall „structured search with an invalid upstream_of“ (WP-015) wird durch die Voraussetzung WP-403 (`t7-filter-ast-values`) grün und läuft im Retest mit.
+- [ ] Die 14 Fälle WP-012 (6), WP-014 (3), WP-015 (3), WP-016 (2) sowie der Fall „Team-Mitglied eines fremden Teams durch Team-Principal“ stehen in `TestRepositoryErrorsAreSanitized` (`tenant/rls/error_sanitization_integration_test.go`) und sind aus der Defekttabelle entfernt. Retest (Teil F-047): `cd backend && TEST_DATABASE_URL=… go test -count=1 -run '^TestRepositoryErrorsAreSanitized$' ./internal/tenant/rls/` grün; Domänenmeldungen (z. B. Rack-Belegung) bleiben. Der Fall „structured search with an invalid upstream_of“ (WP-015) wird durch die Voraussetzung WP-405 (`t7-filter-ast-values`) grün und läuft im Retest mit.
 - [ ] Regression: bestehende Unit- und Integrationstests der geänderten Pakete (`go test` mit `TEST_DATABASE_URL`) grün; `go vet` und `golangci-lint` ohne neue Meldungen.
 - [ ] Offener Nachweis WP-015 (Saved-View-Update maskiert Konflikte als 404; heute bildet `savedview/handler.go` Update jeden Repository-Fehler auf 404 „saved view not found“ ab): Neuer Fall „WP-015 saved view renamed to an existing name“ in `TestRepositoryErrorsAreSanitized` (`tenant/rls/error_sanitization_integration_test.go`). `PATCH /api/v1/saved-views/{id}` mit dem Namen einer zweiten eigenen Sicht ergibt 409 ohne Constraint-Namen und ohne `SQLSTATE`, die Sicht bleibt unverändert (Name per Direkt-SELECT geprüft). `PATCH` mit unbekannter UUID ergibt 404, `PATCH` mit freiem Namen 200. Vor dem Fix rot (404), danach grün.
 
@@ -4663,7 +4807,7 @@ SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/ast_integration_test.go
 - backend/internal/savedview/handler.go
 - backend/internal/search/handler.go
 - backend/internal/monitoring/monitoring.go
-- backend/internal/tenant/rls/error_sanitization_integration_test.go (aus t1-err-core)
+- backend/internal/tenant/rls/error_sanitization_integration_test.go (aus WP-343 (`t1-err-core`))
 - backend/internal/tenant/rls/audit_t1_error_sanitization_auditdefect_test.go
 - docs/traceability.csv
 
@@ -4677,18 +4821,18 @@ SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/ast_integration_test.go
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-404
+TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-406
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Doppelte Rollenzuweisung 201/201 (DB-Eindeutigkeit über alle Scope-Spalten in WP-389 (`t1-team-scope`)); Asset-/Modul-Handler (WP-405 (`t1-err-modules`)); Saved-View-Stellen von F-047 zu Engine-Fehlern und `upstream_of`/`downstream_of` (`savedview/handler.go:222-225`, `savedview/filter.go:123-150`; WP-403 (`t7-filter-ast-values`)).
+**Nicht Bestandteil:** Doppelte Rollenzuweisung 201/201 (DB-Eindeutigkeit über alle Scope-Spalten in WP-391 (`t1-team-scope`)); Asset-/Modul-Handler (WP-407 (`t1-err-modules`)); Saved-View-Stellen von F-047 zu Engine-Fehlern und `upstream_of`/`downstream_of` (`savedview/handler.go:222-225`, `savedview/filter.go:123-150`; WP-405 (`t7-filter-ast-values`)).
 
-### WP-405 – Fehlervertrag API-03 III: Asset-, Lager- und Modul-Handler
+### WP-407 – Fehlervertrag API-03 III: Asset-, Lager- und Modul-Handler
 
 **Schlüssel:** `t1-err-modules` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-339 (`t1-compliance-scope`), WP-343 (`t1-err-core`), WP-404 (`t1-err-ident-loc`)
+**Voraussetzungen (gemergt):** WP-339 (`t1-compliance-scope`), WP-343 (`t1-err-core`), WP-406 (`t1-err-ident-loc`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -4702,7 +4846,7 @@ TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;
 |---|---|---|---|---|
 | [F-047](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-047) | P2 | Handler geben rohe pgx/PostgreSQL-Fehlertexte (SQLSTATE, Constraint-, Tabellen-, RLS-Policy-Namen) und falsche Statuscodes zurück | Teil | WP-010, WP-011, WP-012, WP-014, WP-015, WP-016, WP-017, WP-018, WP-020, WP-021, WP-208 |
 
-**Schließt Audit-WPs:** [WP-017](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-017) (FEHLGESCHLAGEN, Teil), [WP-018](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-018) (FEHLGESCHLAGEN, Teil), [WP-020](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-020) (FEHLGESCHLAGEN, Teil), [WP-021](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-021) (FEHLGESCHLAGEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil)
+**Schließt Audit-WPs:** [WP-010](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-010) (FEHLGESCHLAGEN, Teil), [WP-011](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-011) (FEHLGESCHLAGEN, Teil), [WP-012](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-012) (FEHLGESCHLAGEN, Teil), [WP-014](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-014) (FEHLGESCHLAGEN, Teil), [WP-015](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-015) (FEHLGESCHLAGEN, Teil), [WP-016](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-016) (FEHLGESCHLAGEN, Teil), [WP-017](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-017) (FEHLGESCHLAGEN, Teil), [WP-018](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-018) (FEHLGESCHLAGEN, Teil), [WP-020](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-020) (FEHLGESCHLAGEN, Teil), [WP-021](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-021) (FEHLGESCHLAGEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** Letzter Schnitt von F-047: `reservation/handler.go:161-163`, `:176-179` (Release einer unsichtbaren Reservation 409 statt 404), `asset/handler.go:257-259` (ParentOf mit ungültiger id), `movement/handler.go:150-152`, `:221-223`, `compliance/handler.go:54,91,144,156,176`, `ticket/handler.go:250-252`, `sla/handler.go:143-146`, `form/handler.go:45,85,127,141,195`, `workflow/handler.go:44,81,150`, `iga/handler.go:142,270,287,322,371,460` geben Tabellen-, Constraint-, RLS-Policy- und Syntaxtexte zurück (u. a. 500 mit `form_def`-Policy für einen client-gescopten Nutzer). Die Handler enthalten rund 67 `WriteError(…err.Error())`-Stellen (iga 19, workflow 9, form 9, compliance 8, movement 6, ticket 5, sla 4, asset 4, reservation 3), von denen nur die Repository-Pfade umgestellt werden; Validierungsfehler aus `api.ReadJSON` bleiben.
 
@@ -4710,7 +4854,7 @@ TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;
 
 - [ ] Die genannten Handler validieren UUID-Parameter/-Felder vor dem SQL und melden Repository-Fehler über Sentinels oder `api.WriteRepoError`: RLS-Verstoß 403/404 generisch, FK 422, Duplikat 409, ungültige id 400/404; Release einer fremden Reservation 404; Domänenmeldungen (z. B. „asset already has an active reservation“) bleiben 409.
 - [ ] Die 12 Fälle WP-017 (4), WP-018 (2), WP-020 (3), WP-021 (3) stehen in `TestRepositoryErrorsAreSanitized`; `audit_t1_error_sanitization_auditdefect_test.go` ist gelöscht, die Zeile von `TestAuditT1RepositoryErrorsAreSanitized` in `tests/audit/expected-failures.txt` gelöscht.
-- [ ] Retest F-047 (alle Fälle): `cd backend && TEST_DATABASE_URL=… go test -count=1 -run '^TestRepositoryErrorsAreSanitized$' ./internal/tenant/rls/` grün mit allen 35 Fällen (32 aus der Defekttabelle, Team-Mitglied, Saved-View-Update aus WP-404 (`t1-err-ident-loc`) und Fremd-Bewegung aus diesem WP; erwarteter Status, Bodies ohne `SQLSTATE`, `ERROR:`, Constraint-, Policy- und Tabellennamen); Router-Probes `SP/work/verify-B02/router-probe.log`, `SP/work/verify-B03/probes-all.log` ohne Leck; die Architekturregel und der abschließende Retest folgen in WP-406 (`t1-err-guard`).
+- [ ] Retest F-047 (alle Fälle): `cd backend && TEST_DATABASE_URL=… go test -count=1 -run '^TestRepositoryErrorsAreSanitized$' ./internal/tenant/rls/` grün mit allen 35 Fällen (32 aus der Defekttabelle, Team-Mitglied, Saved-View-Update aus WP-406 (`t1-err-ident-loc`) und Fremd-Bewegung aus diesem WP; erwarteter Status, Bodies ohne `SQLSTATE`, `ERROR:`, Constraint-, Policy- und Tabellennamen); Router-Probes `SP/work/verify-B02/router-probe.log`, `SP/work/verify-B03/probes-all.log` ohne Leck; die Architekturregel und der abschließende Retest folgen in WP-408 (`t1-err-guard`).
 - [ ] Regression: bestehende Unit- und Integrationstests der geänderten Pakete (`go test` mit `TEST_DATABASE_URL`) grün; `go vet` und `golangci-lint` ohne neue Meldungen.
 - [ ] Offener Nachweis WP-018 („Fremd-Bewegung 404“; Evidenz C1-RECORD-C2 heute 400 „not found“): Neuer Fall „WP-018 stock movement of a client-2 asset by client 1“ in `TestRepositoryErrorsAreSanitized`. `POST /api/v1/stock-movements` als Client-1-Principal mit `asset_id` eines Client-2-Assets ergibt 404 mit generischer Meldung (kein 400, kein Tabellen- oder Constraint-Name), in `asset_movement` entsteht keine neue Zeile. Positivkontrolle: Bewegung eines Client-1-Assets ergibt 201.
 
@@ -4725,9 +4869,9 @@ TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;
 - backend/internal/form/handler.go
 - backend/internal/workflow/handler.go
 - backend/internal/iga/handler.go
-- backend/internal/tenant/rls/error_sanitization_integration_test.go (aus t1-err-core)
+- backend/internal/tenant/rls/error_sanitization_integration_test.go (aus WP-343 (`t1-err-core`))
 - backend/internal/tenant/rls/audit_t1_error_sanitization_auditdefect_test.go (gelöscht)
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** keine Migration.
@@ -4739,20 +4883,20 @@ TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-405
-TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-405
-WFL-01;[P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-405
+TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-407
+TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-407
+WFL-01;[P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-407
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Architekturregel gegen Rohfehler (WP-406 (`t1-err-guard`)); übrige Evaluate-Fehler `compliance/handler.go:131` (WP-339 (`t1-compliance-scope`)); verschluckte IGA-Schreibfehler (WP-458 (`t1-iga-approve-atomic`), baut auf diesem WP auf); fachliche Änderungen der Module.
+**Nicht Bestandteil:** Architekturregel gegen Rohfehler (WP-408 (`t1-err-guard`)); übrige Evaluate-Fehler `compliance/handler.go:131` (WP-339 (`t1-compliance-scope`)); verschluckte IGA-Schreibfehler (WP-461 (`t1-iga-approve-atomic`), baut auf diesem WP auf); fachliche Änderungen der Module.
 
-### WP-406 – Architekturregel gegen rohe Repository-Fehler in Handlern (API-03)
+### WP-408 – Architekturregel gegen rohe Repository-Fehler in Handlern (API-03)
 
 **Schlüssel:** `t1-err-guard` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-405 (`t1-err-modules`)
+**Voraussetzungen (gemergt):** WP-407 (`t1-err-modules`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -4764,7 +4908,7 @@ WFL-01;[P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go
 |---|---|---|---|---|
 | [F-047](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-047) | P2 | Handler geben rohe pgx/PostgreSQL-Fehlertexte (SQLSTATE, Constraint-, Tabellen-, RLS-Policy-Namen) und falsche Statuscodes zurück | schließt | WP-010, WP-011, WP-012, WP-014, WP-015, WP-016, WP-017, WP-018, WP-020, WP-021, WP-208 |
 
-**Schließt Audit-WPs:** [WP-021](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-021) (FEHLGESCHLAGEN, Teil)
+**Schließt Audit-WPs:** [WP-010](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-010) (FEHLGESCHLAGEN, Teil), [WP-011](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-011) (FEHLGESCHLAGEN, Teil), [WP-012](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-012) (FEHLGESCHLAGEN, Teil), [WP-014](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-014) (FEHLGESCHLAGEN, Teil), [WP-015](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-015) (FEHLGESCHLAGEN, Teil), [WP-016](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-016) (FEHLGESCHLAGEN, Teil), [WP-017](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-017) (FEHLGESCHLAGEN, Teil), [WP-018](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-018) (FEHLGESCHLAGEN, Teil), [WP-020](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-020) (FEHLGESCHLAGEN, Teil), [WP-021](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-021) (FEHLGESCHLAGEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** F-047 empfiehlt neben der Umstellung der Handler eine Lint-/Testregel gegen `err.Error()` in Repository-Fehlerpfaden. Repo-weit stehen rund 310 `api.WriteError(…err.Error())`-Aufrufe in 64 Dateien; ein Teil davon gibt Validierungsfehler aus `api.ReadJSON` oder Domänenvalidierungen zurück (zulässig), der Rest Repository-Fehler. Ohne prüfbare Regel können neue oder nicht umgestellte Handler das Muster wiederholen.
 
@@ -4773,7 +4917,7 @@ WFL-01;[P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go
 - [ ] `server/handler_errors_test.go` (neu, `TestHandlersDoNotEchoRepositoryErrors`, AST-Scan über `backend/internal/` ohne `_test.go`): Gemeldet wird jeder Aufruf `api.WriteError(…, X.Error())`, sofern X nicht im selben Block aus `api.ReadJSON` oder einer mit `// validation:` kommentierten Funktion zugewiesen wurde.
 - [ ] Allowlist im Test: Jeder Eintrag nennt Datei und Funktion sowie entweder eine Befund-ID (Rohfehler, noch offen) oder die Begründung `validation` (Fehlertext stammt aus einer Domänenvalidierung); eine neue Fundstelle, ein veralteter Eintrag oder ein Eintrag ohne Befund-ID bzw. Begründung lässt den Test scheitern. Fundstellen außerhalb von F-047 erhalten neue Befund-IDs (nächste freie nach F-354) und je ein eigenes Korrektur-WP (Konvention 8); bis dahin stehen sie mit dieser ID in der Allowlist.
 - [ ] Fixture-Selbsttest `TestHandlerErrorRuleFixtures` über `server/testdata/handler_errors/`: ein Repository-Fehler mit `err.Error()` und ein Alias (`e := err`) im selben Block werden gemeldet; ein `api.ReadJSON`-Fehler und eine `// validation:`-Funktion nicht.
-- [ ] Retest F-047 (abschließend): `cd backend && go test -count=1 -run '^(TestHandlersDoNotEchoRepositoryErrors|TestHandlerErrorRuleFixtures)$' ./internal/server/` grün, und `TestRepositoryErrorsAreSanitized` (alle 35 Fälle: 32 aus der Defekttabelle, Team-Mitglied, Saved-View-Update und Fremd-Bewegung, aus WP-343 (`t1-err-core`), WP-404 (`t1-err-ident-loc`), WP-405 (`t1-err-modules`)) bleibt grün; Gegenprobe im PR: auf dem Stand vor WP-405 (`t1-err-modules`) meldet die Regel die Repository-Pfade der neun Handler.
+- [ ] Retest F-047 (abschließend): `cd backend && go test -count=1 -run '^(TestHandlersDoNotEchoRepositoryErrors|TestHandlerErrorRuleFixtures)$' ./internal/server/` grün, und `TestRepositoryErrorsAreSanitized` (alle 35 Fälle: 32 aus der Defekttabelle, Team-Mitglied, Saved-View-Update und Fremd-Bewegung, aus WP-343 (`t1-err-core`), WP-406 (`t1-err-ident-loc`), WP-407 (`t1-err-modules`)) bleibt grün; Gegenprobe im PR: auf dem Stand vor WP-407 (`t1-err-modules`) meldet die Regel die Repository-Pfade der neun Handler.
 - [ ] Regression: bestehende Unit-Tests des Pakets `server` grün; `go vet` und `golangci-lint` ohne neue Meldungen.
 
 **Dateien (4 Einträge, Migration = 2):**
@@ -4792,18 +4936,18 @@ WFL-01;[P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-06;[B];B;backend/internal/server/handler_errors_test.go;WP-406
+TEN-06;[B];B;backend/internal/server/handler_errors_test.go;WP-408
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Umstellung der Handler selbst (WP-343 (`t1-err-core`), WP-404 (`t1-err-ident-loc`), WP-405 (`t1-err-modules`)); Behebung neu gefundener Stellen (eigene WPs mit neuer Befund-ID).
+**Nicht Bestandteil:** Umstellung der Handler selbst (WP-343 (`t1-err-core`), WP-406 (`t1-err-ident-loc`), WP-407 (`t1-err-modules`)); Behebung neu gefundener Stellen (eigene WPs mit neuer Befund-ID).
 
-### WP-407 – Kanalmatrix vollständig: tabellengetrieben, alle Kanäle × Scopes, exakte Negativstatus
+### WP-409 – Kanalmatrix vollständig: tabellengetrieben, alle Kanäle × Scopes, exakte Negativstatus
 
 **Schlüssel:** `t1-channel-matrix` · **Meilenstein:** K1 Sicherheit und Mandantentrennung · **Epic (Traceability):** SR · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-340 (`t1-rack-site-scope`), WP-342 (`t1-review-scope`), WP-344 (`t1-metric-names`), WP-347 (`t1-export-job-visibility`), WP-389 (`t1-team-scope`), WP-391 (`t1-located-site-scope`), WP-399 (`t6-rel-errors`), WP-401 (`t7-topology-root`), WP-402 (`t7-job-scope`), WP-405 (`t1-err-modules`)
+**Voraussetzungen (gemergt):** WP-340 (`t1-rack-site-scope`), WP-342 (`t1-review-scope`), WP-344 (`t1-metric-names`), WP-347 (`t1-export-job-visibility`), WP-391 (`t1-team-scope`), WP-393 (`t1-located-site-scope`), WP-401 (`t6-rel-errors`), WP-403 (`t7-topology-root`), WP-404 (`t7-job-scope`), WP-407 (`t1-err-modules`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -4816,7 +4960,7 @@ TEN-06;[B];B;backend/internal/server/handler_errors_test.go;WP-406
 |---|---|---|---|---|
 | [F-058](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-058) | P2 | Kanalmatrix deckt Locations unterhalb von Sites, org-weite Schreibpfade, GraphQL-Felder außer cis und exakte Negativstatus nicht ab | schließt | WP-208 |
 
-**Schließt Audit-WPs:** [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil), [WP-010](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-010) (FEHLGESCHLAGEN, Teil), [WP-040](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-040) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-010](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-010) (FEHLGESCHLAGEN, Teil), [WP-040](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-040) (TEILWEISE BESTANDEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** `TestChannelMatrix` (`channel_matrix_integration_test.go`) deckt Locations nur über `/sites` ab, prüft Review/Webhook/Job/Notification nur per GET (Jobs ohne Daten), GraphQL nur `cis`, überspringt unsichtbare Wurzeln per `continue` und akzeptiert bei Fremdverweisen jeden Nicht-2xx-Code inklusive 500; die Fixture-Tabelle `rls.Channels` (`matrix_fixtures.go:16`) ist ungenutzt. Die Matrix war grün, obwohl F-002 und F-161 bestanden (F-058; GATE-03 „Isolationstest vollständig“ unbelegt).
 
@@ -4824,7 +4968,7 @@ TEN-06;[B];B;backend/internal/server/handler_errors_test.go;WP-406
 
 - [ ] `TestChannelMatrix` läuft tabellengetrieben über `rls.Channels` × `rls.ScopeKinds` (Org, Client, Site, Team, Mehrfach, Org B) × Lesen/Schreiben; `rls.Channels` ist um Buildings, Rooms, Racks, Mounts, `rackLayout`, Metriken (`/cis/{id}/metrics`), Jobs mit Daten (gespiegelter Export-Job), Review-Items mit und ohne Kandidaten, Notifications und Webhooks mit Schreibpfaden erweitert; alle GraphQL-Query-Felder sind enthalten (Abgleich gegen das Schema, ein neues Feld ohne Matrixzeile lässt den Test scheitern).
 - [ ] Jede Zeile nennt den exakten Status (200/201/204 bzw. 403/404/422); unsichtbare Wurzeln und Fremdverweise werden geprüft, nicht übersprungen; 5xx ist immer ein Fehler. Die vier Wellen-Regressionstests (`TestAuditT1OrgWideChannelWrites`, `TestAuditT1GraphQLFieldsHonourScope`, `TestAuditT1LocationChannelBelowSites`, `TestAuditT1TopologyChannelInvisibleRoots`) sind in die Matrix aufgegangen oder bleiben grün.
-- [ ] Topologie-Wurzel und Fremdkante werden mit exaktem Status (404 bzw. 422) geprüft, nicht übersprungen. Gruppenübergreifende Voraussetzung: Merge nach den Korrektur-WPs von F-145 (T6 WP-399 (`t6-rel-errors`)) und F-161 (T7 WP-401 (`t7-topology-root`)); die Abhängigkeiten trägt die Integration ein.
+- [ ] Topologie-Wurzel und Fremdkante werden mit exaktem Status (404 bzw. 422) geprüft, nicht übersprungen. Voraussetzung: Merge nach den Korrektur-WPs von F-145 (WP-401 (`t6-rel-errors`)) und F-161 (WP-403 (`t7-topology-root`)).
 - [ ] Retest F-058: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run '^TestChannelMatrix$' ./internal/tenant/rls/` grün; Gegenprobe im PR: auf dem Stand vor WP-340 (`t1-rack-site-scope`) ist die Rack-Zeile rot.
 - [ ] Regression: bestehende Unit- und Integrationstests der geänderten Pakete (`go test` mit `TEST_DATABASE_URL`) grün; `go vet` und `golangci-lint` ohne neue Meldungen.
 
@@ -4845,19 +4989,19 @@ TEN-06;[B];B;backend/internal/server/handler_errors_test.go;WP-406
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-09;[Q];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-407
-TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-407
+TEN-09;[Q];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-409
+TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-409
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Behebung der Kanaldefekte selbst (eigene WPs); TST-02-Zuordnung und Zieltest-Prüfung (WP-559 (`t1-tst02-mapping`)); Real-Stack-Isolation (WP-338 (`k-e2e-real-ci`), WP-534 (`t1-ev-client-real-stack`)).
+**Nicht Bestandteil:** Behebung der Kanaldefekte selbst (eigene WPs); TST-02-Zuordnung und Zieltest-Prüfung (WP-559 (`t1-tst02-mapping`)); Real-Stack-Isolation (WP-338 (`k-e2e-real-ci`), WP-535 (`t1-ev-client-real-stack`)).
 
 ## K2 Datenintegrität und Kernprozesse
 
 **Ausstieg:** Alle übrigen P1 behoben: keine stillen Datenverluste, Kernprozesse (CI-Anlage, Sitzung, Discovery, Reconciliation) im Real-Stack grün.
 
-### WP-408 – Ratelimits: Credential-Budget vor Org-Budget, Session-Bucket über Refresh hinweg (sid)
+### WP-410 – Ratelimits: Credential-Budget vor Org-Budget, Session-Bucket über Refresh hinweg (sid)
 
 **Schlüssel:** `t2-ratelimit-budgets` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
@@ -4882,7 +5026,7 @@ TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-
 
 - [ ] `take` zählt zuerst das Credential-Budget; nur ein dort zugelassener Request zählt gegen das Org-Budget; ein vom Credential-Budget abgewiesener Request verbraucht kein Org-Budget. Je Budget atomar (Increment und Vergleich auf dem Rückgabewert), für Memory- und Redis-Store.
 - [ ] Session-Tokens tragen den Claim `sid` (Refresh-Familie, beim Login vergeben, beim Refresh übernommen); `principal.Credential = "session:" + sid`; Tokens ohne `sid` (Altbestand bis zum Ablauf, höchstens 15 min) fallen auf die Token-ID zurück. `TestSessionTokenFollowsAUT02` prüft `sid`.
-- [ ] Defekttests grün und überführt: `TestAuditT2RefusedCredentialTrafficKeepsOrgBudget` und `TestAuditT2SessionBudgetSurvivesTokenRefresh` PASS mit Memory-Store und mit Redis (Retest: `TEST_REDIS_URL=redis://localhost:56379/0 go test -count=1 -v -run '^TestAuditT2RefusedCredentialTrafficKeepsOrgBudget$|^TestAuditT2SessionBudgetSurvivesTokenRefresh$' ./internal/middleware/`); verschoben nach `middleware/ratelimit_test.go` (Memory) und `middleware/ratelimit_redis_integration_test.go` (neu, Redis) samt der Hilfsfunktionen `awaitFreshWindow`, `auditSessionIssuer` und `auditRedisStore` (verschoben, nicht kopiert; `awaitFreshWindow` nutzt danach auch der bis WP-460 (`t2-preauth-budget`) in der Defektdatei verbleibende Test). `auditRedisStore` überspringt ohne `TEST_REDIS_URL` mit `t.Skip` statt `t.Fatal`; im Job `migrations` (`TEST_REDIS_URL` gesetzt) laufen die Redis-Fälle ohne Skip (Joblog im PR); Zeilen aus `tests/audit/expected-failures.txt` entfernt.
+- [ ] Defekttests grün und überführt: `TestAuditT2RefusedCredentialTrafficKeepsOrgBudget` und `TestAuditT2SessionBudgetSurvivesTokenRefresh` PASS mit Memory-Store und mit Redis (Retest: `TEST_REDIS_URL=redis://localhost:56379/0 go test -count=1 -v -run '^TestAuditT2RefusedCredentialTrafficKeepsOrgBudget$|^TestAuditT2SessionBudgetSurvivesTokenRefresh$' ./internal/middleware/`); verschoben nach `middleware/ratelimit_test.go` (Memory) und `middleware/ratelimit_redis_integration_test.go` (neu, Redis) samt der Hilfsfunktionen `awaitFreshWindow`, `auditSessionIssuer` und `auditRedisStore` (verschoben, nicht kopiert; `awaitFreshWindow` nutzt danach auch der bis WP-462 (`t2-preauth-budget`) in der Defektdatei verbleibende Test). `auditRedisStore` überspringt ohne `TEST_REDIS_URL` mit `t.Skip` statt `t.Fatal`; im Job `migrations` (`TEST_REDIS_URL` gesetzt) laufen die Redis-Fälle ohne Skip (Joblog im PR); Zeilen aus `tests/audit/expected-failures.txt` entfernt.
 - [ ] Grenzwerttests in `ratelimit_test.go`: Credential A mit 700 Requests/min → ab Nr. 601 429 mit Scope `credential`, Credential B derselben Organisation weiter 204; Request Nr. 6.001 der Organisation → 429 mit Scope `organization`; X-RateLimit-* nennen das engere Budget.
 - [ ] Regression: `TestRateLimitPerCredential`, `TestRateLimitPerOrganization`, `TestRateLimitHeadersAndDefaults`, `TestRateLimitFailsClosed`, Tests von `./internal/identity/` grün.
 
@@ -4909,14 +5053,14 @@ TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-API-04;[B];C;backend/internal/middleware/ratelimit_test.go;WP-408
+API-04;[B];C;backend/internal/middleware/ratelimit_test.go;WP-410
 ```
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** Pre-Auth-Budget und Header vor dem Limiter (WP-460 (`t2-preauth-budget`)).
+**Nicht Bestandteil:** Pre-Auth-Budget und Header vor dem Limiter (WP-462 (`t2-preauth-budget`)).
 
-### WP-409 – Standortlöschung: 409 statt Kaskade auf allen Löschpfaden; Netzobjekte der Site und location_change bleiben erhalten
+### WP-411 – Standortlöschung: 409 statt Kaskade auf allen Löschpfaden; Netzobjekte der Site und location_change bleiben erhalten
 
 **Schlüssel:** `t3-loc-delete-409` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
@@ -4934,7 +5078,7 @@ API-04;[B];C;backend/internal/middleware/ratelimit_test.go;WP-408
 | [F-024](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-024) | P1 | Site-Löschung kaskadiert VLANs/Enrollment-Tokens und entzieht Subnetzen, Collectoren, Discovery-Scopes, ci_merge still die Site | schließt | WP-055 |
 | [F-227](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-227) | P3 | location_change-Historie wird mit dem Standort gelöscht (ON DELETE CASCADE) | mit | WP-055 |
 
-**Schließt Audit-WPs:** [WP-055](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-055) (FEHLGESCHLAGEN, schließt)
+**Schließt Audit-WPs:** [WP-053](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-053) (TEILWEISE BESTANDEN, Teil), [WP-055](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-055) (FEHLGESCHLAGEN, schließt)
 
 **Problem:** `tenantapi/pg_repository.go:298` ruft `locations.CheckDeletable(…, subtree=true)` auf; `dependencyQuery` (`locations/dependencies.go:46-63`) zählt Kindstandorte nur bei `NOT $2`. DELETE /sites|/buildings|/rooms/{id} mit Kindern liefert deshalb 204, der Teilbaum verschwindet über `location.parent_id` (000062, ON DELETE CASCADE) bzw. `building.site_id`/`room.building_id`/`rack.room_id` (000001, CASCADE) ohne Audit (Real-Stack L05 zweimal rot; `move_integration_test.go:202-204` kodiert die Kaskade). Die Site-Löschung kaskadiert außerdem VLANs (000091) und Agent-Enrollment-Tokens (000070) und setzt `site_id` von Subnetz (000015), Collector (000127), Discovery-Scope (000129) und ci_merge (000131) still auf NULL. `location_change.location_id` hat ON DELETE CASCADE (000075:31): die Umzugshistorie geht mit dem Standort verloren.
 
@@ -4973,18 +5117,18 @@ API-04;[B];C;backend/internal/middleware/ratelimit_test.go;WP-408
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-409
+LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-411
 ```
 
 **Entscheidungsbedarf:** [E-71](entscheidungen.md#e-71) LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten (offen, Empfehlung als Übergangsregel); [E-19](../entscheidungen.md#e-19)
 
-**Nicht Bestandteil:** Anzeige der Abhängigkeitsarten im Standortbaum (WP-472 (`t3-loc-tree-ui`)); location_change in der Historie (WP-471 (`t3-history-location`)); Rack-Löschregeln (erfüllt).
+**Nicht Bestandteil:** Anzeige der Abhängigkeitsarten im Standortbaum (WP-474 (`t3-loc-tree-ui`)); location_change in der Historie (WP-473 (`t3-history-location`)); Rack-Löschregeln (erfüllt).
 
-### WP-410 – Override setzen/aufheben erhöht die CI-Version; ClearOverride bildet Fehler korrekt ab
+### WP-412 – Override setzen/aufheben erhöht die CI-Version; ClearOverride bildet Fehler korrekt ab
 
 **Schlüssel:** `t3-override-version` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-367 (`t3-bulk-manual`)
+**Voraussetzungen (gemergt):** WP-368 (`t3-bulk-manual`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -4996,7 +5140,7 @@ LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-409
 
 | Befund | Prio | Titel | Beitrag | Betroffene WPs |
 |---|---|---|---|---|
-| [F-021](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-021) | P1 | Override setzen/aufheben erhöht ci.version nicht: veralteter If-Match-PATCH überschreibt den neueren geschützten Override | schließt | WP-061 |
+| [F-021](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-021) | P1 | Override setzen/aufheben erhöht ci.version nicht: veralteter If-Match-PATCH überschreibt den neueren geschützten Override | Teil | WP-061 |
 | [F-232](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-232) | P3 | DELETE /cis/{id}/fields/{name}/override bildet jeden Fehler auf 404 ab | mit | WP-060 |
 
 **Schließt Audit-WPs:** [WP-060](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-060) (TEILWEISE BESTANDEN, Teil), [WP-061](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-061) (FEHLGESCHLAGEN, Teil)
@@ -5008,7 +5152,7 @@ LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-409
 - [ ] SetOverride und ClearOverride erhöhen in derselben Transaktion ci.version um 1, schreiben eine ci_change-Zeile (change_type override, field_name, ci_version = neue Version) und Audit; PUT und DELETE /cis/{id}/fields/{name}/override liefern das neue ETag.
 - [ ] PG-Test (Retest F-021): GET (ETag Version 1) → PUT Override auf model → ETag Version 2; PATCH model mit If-Match Version 1 → 409 fields=[model], Override-Wert unverändert; PATCH eines anderen Felds mit If-Match Version 1 → 200 (feldgranular). Nachweis: `TestAuditT3OverrideWritesRaiseVersion` (verschoben nach `ci/concurrency_integration_test.go`) PASS; GET nach Clear liefert den beobachteten Wert und das neue ETag (`effective_view_integration_test.go`).
 - [ ] ClearOverride: unbekanntes CI oder Feld → 404 über Sentinel, Repository-Fehler → 500 über `api.WriteRepoError`; Handler-Test mit fehlerhaftem Repository → 500 (Retest F-232, vor dem Fix rot).
-- [ ] Überführung: Defekttestfunktion aus `audit_t3_manual_writes_auditdefect_test.go` entfernt (Hilfsfunktionen liegen seit WP-367 (`t3-bulk-manual`) in `audit_t3_ci_harness_test.go`); Zeile des Go-Tests aus `tests/audit/expected-failures.txt` gelöscht; Tests von `internal/override` und `internal/ci` (TestEffectiveViewAndOverrideClear, TestOverrideRepositoryClientScope, TestOptimisticConcurrency) grün.
+- [ ] Überführung: Defekttestfunktion aus `audit_t3_manual_writes_auditdefect_test.go` entfernt (Hilfsfunktionen liegen seit WP-368 (`t3-bulk-manual`) in `audit_t3_ci_harness_test.go`); Zeile des Go-Tests aus `tests/audit/expected-failures.txt` gelöscht; Tests von `internal/override` und `internal/ci` (TestEffectiveViewAndOverrideClear, TestOverrideRepositoryClientScope, TestOptimisticConcurrency) grün.
 
 **Dateien (10 Einträge, Migration = 2):**
 
@@ -5034,20 +5178,76 @@ LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-409
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-OVR-01;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-410
-CI-10;[B];D;backend/internal/ci/effective_view_integration_test.go;WP-410
-API-07;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-410
+OVR-01;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-412
+CI-10;[B];D;backend/internal/ci/effective_view_integration_test.go;WP-412
+API-07;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-412
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Cache-Invalidierung im Frontend und Real-Stack D07/D09 (WP-474 (`t3-override-clear-ui`)); reservierte Namensräume am Override-Endpunkt (WP-477 (`t3-override-reserved`)); If-Match der Instanzattribute (WP-476 (`t3-ci-edit-ui`)).
+**Nicht Bestandteil:** Cache-Invalidierung im Frontend und Real-Stack D07/D09 (WP-413 (`t3-override-clear-ui`)); reservierte Namensräume am Override-Endpunkt (WP-478 (`t3-override-reserved`)); If-Match der Instanzattribute (WP-477 (`t3-ci-edit-ui`)).
 
-### WP-411 – Collector erneuert sein Zertifikat ab 60 % über den mTLS-Kanal; ehrliche Verbindungsmeldung
+### WP-413 – CI-Detail nach Override setzen/aufheben aktuell; Override gegen offenen Editor im Real-Stack
+
+**Schlüssel:** `t3-override-clear-ui` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-412 (`t3-override-version`)
+
+| ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| CI-10 | [B] | TEILWEISE BESTANDEN | Teil | [WP-060](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-060) | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:39` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:32` |
+| API-07 | [B] | FEHLGESCHLAGEN | Teil | [WP-061](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-061) | `docs/audit/07-api-suche-jobs-lebenszyklus.md:32` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:16` |
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Betroffene WPs |
+|---|---|---|---|---|
+| [F-021](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-021) | P1 | Override setzen/aufheben erhöht ci.version nicht: veralteter If-Match-PATCH überschreibt den neueren geschützten Override | schließt | WP-061 |
+| [F-100](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-100) | P2 | CI-Detail zeigt nach „Override aufheben“ bis zum Reload weiter den entfernten Override-Wert | schließt | WP-060 |
+
+**Schließt Audit-WPs:** [WP-060](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-060) (TEILWEISE BESTANDEN, schließt), [WP-061](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-061) (FEHLGESCHLAGEN, Teil)
+
+**Problem:** `useClearOverride` (`frontend/src/api/cmdbHooks.ts:296-301`) invalidiert nur ['ci-fields', ciId]; das CI-Detail zeigt nach „Override aufheben“ bis zum Reload den entfernten Wert (Real-Stack D07 rot). Der von WP-061 verlangte Real-Stack-Nachweis „Override gegen offenen Editor“ fehlt.
+
+**Akzeptanzkriterien:**
+
+- [ ] `useSetOverride` und `useClearOverride` invalidieren ['ci', ciId], ['cis'] und ['ci-fields', ciId]; Vitest `cmdbHooks.test.tsx` (neu, vor dem Fix rot) prüft die Invalidierung beider Hooks.
+- [ ] Real-Stack D07 (`discovery-override.spec.ts`) vollständig grün: nach „Override aufheben“ zeigt das CI-Detail ohne Reload den beobachteten Wert; die Zeile e2e-real D07 aus `tests/audit/expected-failures.txt` gelöscht.
+- [ ] e2e-real `discovery-override.spec.ts` neuer Test D09: Bearbeiten-Dialog offen, in einer zweiten Sitzung Override auf model gesetzt, Speichern im Dialog mit geändertem model → 409 mit sichtbarem Konflikthinweis; der Override bleibt.
+- [ ] Regression: Vitest-Suite, `npm run lint`, `npm run typecheck` grün; e2e-real D02, D03, D04 bleiben grün.
+- [ ] Abschluss F-021: Der verbindliche Retest aus PHASE1_FINDINGS.md ist vollständig grün: `TestAuditT3OverrideWritesRaiseVersion` (überführt in WP-412 (`t3-override-version`)) und Real-Stack D09 „Override gegen offenen Editor → 409“; Lauf-IDs im PR.
+
+**Dateien (5 Einträge, Migration = 2):**
+
+- frontend/src/api/cmdbHooks.ts
+- frontend/src/api/cmdbHooks.test.tsx (neu)
+- frontend/e2e-real/discovery-override.spec.ts
+- tests/audit/expected-failures.txt (angelegt in WP-337)
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- Vitest `cmdbHooks.test.tsx`: Invalidierung nach Set und Clear.
+- e2e-real `discovery-override.spec.ts` D07 (bestehend) und D09 (neu).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+CI-10;[B];D;frontend/src/api/cmdbHooks.test.tsx;WP-413
+API-07;[B];D;frontend/e2e-real/discovery-override.spec.ts;WP-413
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Backend-Versionierung und ClearOverride-Fehlerabbildung (WP-412 (`t3-override-version`)); Konfliktanzeige der Instanzattribute (WP-477 (`t3-ci-edit-ui`)); D10 in derselben Spec (WP-575 (`t3-review-escalation-widget`)).
+
+### WP-414 – Collector erneuert sein Zertifikat ab 60 % über den mTLS-Kanal; ehrliche Verbindungsmeldung
 
 **Schlüssel:** `t4-pki-renew-collector` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-373 (`t4-natsedge-ci`), WP-374 (`t4-pki-renew-server`), WP-380 (`t4-collector-disable-kick`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-374 (`t4-natsedge-ci`), WP-375 (`t4-pki-renew-server`), WP-381 (`t4-collector-disable-kick`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -5067,7 +5267,7 @@ API-07;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-410
 
 **Akzeptanzkriterien:**
 
-- [ ] Der Collector prüft beim Start und danach alle 24 h `NeedsRenewal` (60 %); fällig → neuer Schlüssel, CSR (CN = Collector-ID), Anfrage über `collector.<org>.<id>.certificate.renew` mit aktuellem Zertifikat, Zeitstempel und Signatur über (CSR, Zeitstempel, NATS-Subject) mit dem aktuellen Schlüssel (WP-374 (`t4-pki-renew-server`)); Zertifikat und CA-Bundle (`certificate_pem`, `ca_bundle_pem` der Antwort) werden atomar im Keystore gespeichert (Modus 0600), danach Neuverbindung mit dem neuen Paar; Fehler → Warnung mit Ursache und Wiederholung nach 1 h, das alte Zertifikat bleibt.
+- [ ] Der Collector prüft beim Start und danach alle 24 h `NeedsRenewal` (60 %); fällig → neuer Schlüssel, CSR (CN = Collector-ID), Anfrage über `collector.<org>.<id>.certificate.renew` mit aktuellem Zertifikat, Zeitstempel und Signatur über (CSR, Zeitstempel, NATS-Subject) mit dem aktuellen Schlüssel (WP-375 (`t4-pki-renew-server`)); Zertifikat und CA-Bundle (`certificate_pem`, `ca_bundle_pem` der Antwort) werden atomar im Keystore gespeichert (Modus 0600), danach Neuverbindung mit dem neuen Paar; Fehler → Warnung mit Ursache und Wiederholung nach 1 h, das alte Zertifikat bleibt.
 - [ ] `CollectorClient.Renew` nutzt eine Request-Funktion statt HTTP mit Bearer; Feld `Token` und der HTTP-Pfad entfallen; `TestCollectorEnrollAndRenew` (`enrollment_test.go:93`) prüft die Erneuerung über die Request-Funktion (Test, der den HTTP-Pfad kodiert, umgeschrieben).
 - [ ] Unit-Test mit Fake-Uhr (`renew_test.go`): Tag 53 von 90 → keine Anfrage; Tag 55 → neues Zertifikat gespeichert, Modus 0600; abgelehnte Anfrage → altes Zertifikat bleibt. Retest F-026.
 - [ ] `TestAuditCollectorRenewsCertificateAt60Percent` wird nach `collectorcmd/lifecycle_test.go` (ohne Tag, echter nats-server über `TEST_NATS_SERVER_BIN`) überführt und besteht; `TestAuditHelperCollectorMain`, `auditPKI`/`newAuditPKI`, `auditKeyPEM`, `auditCSRSink`, `auditStartCollector`, `auditTail` und `auditFreeTCPPort` liegen ohne Tag in `lifecycle_helpers_test.go` (der Unterprozess-Start über `TestAuditHelperCollectorMain` funktioniert ohne Tag).
@@ -5103,19 +5303,19 @@ API-07;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-410
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-COL-04;[B];D;collector/collectorcmd/lifecycle_test.go;WP-411
-DIS-08;[Q];D;collector/collectorcmd/natsconn_test.go;WP-411
+COL-04;[B];D;collector/collectorcmd/lifecycle_test.go;WP-414
+DIS-08;[Q];D;collector/collectorcmd/natsconn_test.go;WP-414
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Env-Bootstrap (WP-492 (`t4-col-env-enroll`)); CA-Roll-over (WP-426 (`t4-pki-rollover-export`)).
+**Nicht Bestandteil:** Env-Bootstrap (WP-493 (`t4-col-env-enroll`)); CA-Roll-over (WP-430 (`t4-pki-rollover-export`)).
 
-### WP-412 – WMI: Fehler und 401 mit Ursache melden, Enumerate/Pull nach DSP0226
+### WP-415 – WMI: Fehler und 401 mit Ursache melden, Enumerate/Pull nach DSP0226
 
 **Schlüssel:** `t4-wmi-errors` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-376 (`t4-cred-scope`), WP-377 (`t4-wmi-tls`)
+**Voraussetzungen (gemergt):** WP-377 (`t4-wmi-tls`), WP-378 (`t4-cred-scope`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -5162,15 +5362,15 @@ DIS-08;[Q];D;collector/collectorcmd/natsconn_test.go;WP-411
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DIS-04;[B];D;collector/plugins/wmi/wmi_test.go;WP-412
-DIS-08;[Q];D;collector/collectorcmd/discovery_errors_test.go;WP-412
+DIS-04;[B];D;collector/plugins/wmi/wmi_test.go;WP-415
+DIS-08;[Q];D;collector/collectorcmd/discovery_errors_test.go;WP-415
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Weitere WMI-Klassen über die DeviceRecord-Felder hinaus; SNMPv3-Fehler (WP-491 (`t4-snmpv3-auth`)).
+**Nicht Bestandteil:** Weitere WMI-Klassen über die DeviceRecord-Felder hinaus; SNMPv3-Fehler (WP-492 (`t4-snmpv3-auth`)).
 
-### WP-413 – SNMP-Plugin liefert LLDP- und FDB-Nachbarn
+### WP-416 – SNMP-Plugin liefert LLDP- und FDB-Nachbarn
 
 **Schlüssel:** `t4-snmp-neighbors` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
@@ -5218,18 +5418,18 @@ DIS-08;[Q];D;collector/collectorcmd/discovery_errors_test.go;WP-412
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TOP-01;[B];D;collector/plugins/snmp/neighbors_test.go;WP-413
+TOP-01;[B];D;collector/plugins/snmp/neighbors_test.go;WP-416
 ```
 
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Confidence-Ableitung im Backend (WP-582 (`t4-topo-confidence`)); CDP-Cache (DIS-06, [P3]), die vorhandene Backend-Unterstützung für die Quelle cdp bleibt; mDNS/SSDP/Spanning Tree (DIS-06, [P3]).
 
-### WP-414 – unclassified_device nur für wirklich unklassifizierte Geräte; verworfenes Review bleibt verworfen
+### WP-417 – unclassified_device nur für wirklich unklassifizierte Geräte; verworfenes Review bleibt verworfen
 
 **Schlüssel:** `t4-classify-review` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** D · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-342 (`t1-review-scope`), WP-376 (`t4-cred-scope`), WP-379 (`t4-collector-disable-data`)
+**Voraussetzungen (gemergt):** WP-342 (`t1-review-scope`), WP-378 (`t4-cred-scope`), WP-380 (`t4-collector-disable-data`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -5243,7 +5443,7 @@ TOP-01;[B];D;collector/plugins/snmp/neighbors_test.go;WP-413
 
 **Schließt Audit-WPs:** [WP-151](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-151) (FEHLGESCHLAGEN, Teil)
 
-**Problem:** Sweep-Records ohne Evidenz (`sweep.go:249-262`) durchlaufen die Klassifikationskette und werden als `generic_device`/`fallback` hochgeladen (`classify.go:218-283`), zusätzlich zum SNMP-, SSH- oder Redfish-Record desselben Ziels. Der Server öffnet das Review vor der Identitätsauflösung und ohne Prüfung des CI-Typs (`discovery.go:1238-1256`, `review.go:103-105`) und mit `Open` statt `OpenUnlessDismissed`: jedes gesweepte Gerät erhält bei jedem Sweep ein falsches, wiederkehrendes unclassified_device-Review (F-030, P1). WP-342 (`t1-review-scope`) (F-003) setzt an derselben Stelle (`discovery.go:1236-1253`) client_id/site_id des Reviews; die Verschiebung hinter die Identitätsauflösung baut darauf auf (gruppenfremdes WP der Gruppe T1, muss vor diesem WP gemergt sein; die Reihenfolge trägt die Integration ein).
+**Problem:** Sweep-Records ohne Evidenz (`sweep.go:249-262`) durchlaufen die Klassifikationskette und werden als `generic_device`/`fallback` hochgeladen (`classify.go:218-283`), zusätzlich zum SNMP-, SSH- oder Redfish-Record desselben Ziels. Der Server öffnet das Review vor der Identitätsauflösung und ohne Prüfung des CI-Typs (`discovery.go:1238-1256`, `review.go:103-105`) und mit `Open` statt `OpenUnlessDismissed`: jedes gesweepte Gerät erhält bei jedem Sweep ein falsches, wiederkehrendes unclassified_device-Review (F-030, P1). WP-342 (`t1-review-scope`) (F-003) setzt an derselben Stelle (`discovery.go:1236-1253`) client_id/site_id des Reviews; die Verschiebung hinter die Identitätsauflösung baut darauf auf (Voraussetzung dieses WP).
 
 **Akzeptanzkriterien:**
 
@@ -5251,7 +5451,7 @@ TOP-01;[B];D;collector/plugins/snmp/neighbors_test.go;WP-413
 - [ ] Server: das Review entsteht erst nach der Identitätsauflösung und nur, wenn die aufgelöste CI danach `generic_device` ist; Öffnen über `OpenUnlessDismissed` (Deduplizierung je Objekt und Typ, REC-08). client_id/site_id des Reviews nach WP-342 (`t1-review-scope`) bleiben gesetzt, abgeleitet aus der aufgelösten CI; der Test prüft das für einen Client-2-Record.
 - [ ] Auto-Resolve: wird eine CI mit offenem unclassified_device-Review später per SNMP, Redfish oder SSH höher klassifiziert, wird das Review mit Grund `reclassified` geschlossen; Test in `ingest_review_integration_test.go`.
 - [ ] `TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices` wird nach `ingest_review_integration_test.go` (ohne Tag) überführt und besteht (kein Review für eine als switch klassifizierte CI; ein verworfenes Review bleibt beim nächsten Sweep verworfen). Positivkontrolle: Gerät ohne Profiltreffer → genau ein offenes Review mit `reason=no_profile_match`. Retest F-030: `TestClassificationChain` und `TestTST01Reconciliation` grün.
-- [ ] `ingest_auditdefect_test.go` gelöscht (der zweite Test ist in WP-379 (`t4-collector-disable-data`) überführt); Zeilen aus `expected-failures.txt` entfernt; `go test ./internal/discovery/` sowie `go test ./profiles/ ./plugins/sweep/ ./collectorcmd/` grün.
+- [ ] `ingest_auditdefect_test.go` gelöscht (der zweite Test ist in WP-380 (`t4-collector-disable-data`) überführt); Zeilen aus `expected-failures.txt` entfernt; `go test ./internal/discovery/` sowie `go test ./profiles/ ./plugins/sweep/ ./collectorcmd/` grün.
 
 **Dateien (13 Einträge, Migration = 2):**
 
@@ -5280,14 +5480,14 @@ TOP-01;[B];D;collector/plugins/snmp/neighbors_test.go;WP-413
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DIS-02;[B], Profilliste (V);D;backend/internal/discovery/ingest_review_integration_test.go;WP-414
+DIS-02;[B], Profilliste (V);D;backend/internal/discovery/ingest_review_integration_test.go;WP-417
 ```
 
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Abbildung von systemTemplate (WP-581 (`t4-profile-template`)); Änderung der Profilliste (E-21).
 
-### WP-415 – CI-Reaktivierung über die Produktions-Decorator-Kette (SR-11) und KI-Indexer hinter dem Modul-Gate
+### WP-418 – CI-Reaktivierung über die Produktions-Decorator-Kette (SR-11) und KI-Indexer hinter dem Modul-Gate
 
 **Schlüssel:** `t5-sr11-decorator` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
@@ -5305,7 +5505,7 @@ DIS-02;[B], Profilliste (V);D;backend/internal/discovery/ingest_review_integrati
 | [F-037](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-037) | P1 | CI-13-Reaktivierung über die Produktions-Decorator-Kette aus main.go liefert 501; gelöschtes, wiedergesehenes Gerät bleibt gelöscht (SR-11) | schließt | WP-087, WP-213 |
 | [F-301](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-301) | P3 | KI-Chunk-Indexer (Add-on 'ai') ist in der G1-Voreinstellung aktiv | mit | WP-213 |
 
-**Schließt Audit-WPs:** [WP-209](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-209) (TEILWEISE BESTANDEN, Teil), [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) (FEHLGESCHLAGEN, Teil)
+**Schließt Audit-WPs:** [WP-087](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-087) (FEHLGESCHLAGEN, Teil), [WP-209](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-209) (TEILWEISE BESTANDEN, Teil), [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** In der Produktionsverdrahtung umhüllt ci.NewIndexingRepository das PG-CI-Repository zweimal (backend/cmd/server/main.go:327 Suchindex, :355 KI-Chunks). Der Decorator (backend/internal/ci/indexing_repository.go) implementiert RestoreDeleted, aber weder Restore(ctx, org, id) noch UniqueConflicts. discovery/review.go:134 prüft per Type-Assertion auf ciRestorer und antwortet beim Auflösen eines resurrected_device-Reviews mit merge 501; das CI bleibt gelöscht, das Review offen (SR-11, CI-13 [B]). Ohne UniqueConflicts entfällt in der Produktion auch die MET-15-Vorabprüfung (service.go:200, :309); nur der DB-Unique-Index fängt den Konflikt. resurrect_test.go testet nur das nackte Repository. Zusätzlich verdrahtet main.go:354-356 den KI-Chunk-Decorator unabhängig vom Modul-Gate (ParseModules erst :404), sodass in der G1-Voreinstellung ai_chunk-Zeilen entstehen (E-03, F-301).
 
@@ -5318,7 +5518,7 @@ DIS-02;[B], Profilliste (V);D;backend/internal/discovery/ingest_review_integrati
 - [ ] Retest F-037: cd backend && TEST_DATABASE_URL=… go test -count=1 -v -run 'TestAuditT5CIReactivationThroughProductionDecoratorChain' ./internal/tenant/rls/ → PASS für die Variante main.go, die jetzt bootstrap.NewCIRepository statt einer Nachbildung nutzt: merge → 200, deleted_at IS NULL, Review resolved, Audit ci.restored, GET /api/v1/cis/{id} 200; Negativfall ci_id ohne Kandidatenstatus → 400; Kontrolle bare-pg weiterhin PASS.
 - [ ] MET-15-Vorabprüfung in der Produktionskette: Integrationsfall in ci_decorator_chain_integration_test.go über bootstrap.NewCIRepository und den Router: ein zweites CI mit gleichem Wert eines eindeutigen Attributs → 409 mit Feldname aus ci.UniqueError im Body (Negativfall), ein anderer Wert → 201 (Positivfall).
 - [ ] Ratchet: Defekttest ohne Build-Tag als backend/internal/tenant/rls/ci_decorator_chain_integration_test.go in die reguläre Suite überführt, Eintrag aus tests/audit/expected-failures.txt entfernt.
-- [ ] Regression: go test ./internal/ci/... ./internal/discovery/... ./internal/tenant/rls/... ./internal/bootstrap/... ./cmd/server/... mit TEST_DATABASE_URL grün, TestUniqueAttributes und TestG1DefaultSwitchesLateModulesOff grün. Die Gruppe T3 (Owner WP-087) ist im PR verlinkt und nimmt WP-415 (`t5-sr11-decorator`) in wp_abschluss[WP-087].korrektur_keys auf (Abstimmung bei der Integration).
+- [ ] Regression: go test ./internal/ci/... ./internal/discovery/... ./internal/tenant/rls/... ./internal/bootstrap/... ./cmd/server/... mit TEST_DATABASE_URL grün, TestUniqueAttributes und TestG1DefaultSwitchesLateModulesOff grün.
 - [ ] bootstrap.NewCIRepository verwendet die gemeinsame Consent-Verdrahtung aus WP-360 (`t2-ai-ask-consent`); weder main.go noch bootstrap enthält eine zweite Kopie von ai.OrgConsent. server/t2_ai_optin_test.go baut den Router über dieselbe Funktion. Grün sind TestNewCIRepositoryWiresAIOnlyWithModule, die Tests aus WP-360 (`t2-ai-ask-consent`) und opensearch_placement_integration_test.go (Rack-Indexing aus WP-346 (`t1-opensearch-placement`) bleibt verdrahtet).
 
 **Dateien (8 Einträge, Migration = 2):**
@@ -5344,19 +5544,19 @@ DIS-02;[B], Profilliste (V);D;backend/internal/discovery/ingest_review_integrati
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-CI-13;[B];D;backend/internal/tenant/rls/ci_decorator_chain_integration_test.go;WP-415
-GATE-02;[Q];D;backend/internal/tenant/rls/ci_decorator_chain_integration_test.go;WP-415
+CI-13;[B];D;backend/internal/tenant/rls/ci_decorator_chain_integration_test.go;WP-418
+GATE-02;[Q];D;backend/internal/tenant/rls/ci_decorator_chain_integration_test.go;WP-418
 ```
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
-**Nicht Bestandteil:** Weitere CI-13-Befunde der Gruppe T3 (WP-087, F-022 in WP-368 (`t3-resurrect-new`)); Statuspflege von SR-11 in docs/security/review-g1.md (WP-449 (`t5-review-g1`)) und von CI-13 in docs/acceptance/g1-gate.md (WP-448 (`t5-gate-consistency`), endgültig WP-595 (`t5-rc-evidence`)).
+**Nicht Bestandteil:** Weitere CI-13-Befunde (WP-087, F-022 in WP-369 (`t3-resurrect-new`)); Statuspflege von SR-11 in docs/security/review-g1.md (WP-452 (`t5-review-g1`)) und von CI-13 in docs/acceptance/g1-gate.md (WP-451 (`t5-gate-consistency`), endgültig WP-595 (`t5-rc-evidence`)).
 
-### WP-416 – ACME-Ausstellung ohne Lineage-Konflikt und nginx-lesbares Schlüsselmaterial
+### WP-419 – ACME-Ausstellung ohne Lineage-Konflikt und nginx-lesbares Schlüsselmaterial
 
 **Schlüssel:** `t5-acme-lineage` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** A · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-383 (`t5-issuer-order`)
+**Voraussetzungen (gemergt):** WP-385 (`t5-issuer-order`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -5367,8 +5567,8 @@ GATE-02;[Q];D;backend/internal/tenant/rls/ci_decorator_chain_integration_test.go
 
 | Befund | Prio | Titel | Beitrag | Betroffene WPs |
 |---|---|---|---|---|
-| [F-033](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-033) | P1 | certbot certonly kann das Let's-Encrypt-Zertifikat nicht ablegen, weil der Bootstrap-Platzhalter letsencrypt/live/<domain>/ belegt | schließt | WP-094 |
-| [F-034](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-034) | P1 | Von certbot ausgestellter Schlüssel und Kette sind für den unprivilegierten nginx-Nutzer (uid 101) des Frontends unlesbar | schließt | WP-094 |
+| [F-033](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-033) | P1 | certbot certonly kann das Let's-Encrypt-Zertifikat nicht ablegen, weil der Bootstrap-Platzhalter letsencrypt/live/<domain>/ belegt | Teil | WP-094 |
+| [F-034](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-034) | P1 | Von certbot ausgestellter Schlüssel und Kette sind für den unprivilegierten nginx-Nutzer (uid 101) des Frontends unlesbar | Teil | WP-094 |
 
 **Schließt Audit-WPs:** [WP-094](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-094) (FEHLGESCHLAGEN, Teil)
 
@@ -5408,19 +5608,82 @@ GATE-02;[Q];D;backend/internal/tenant/rls/ci_decorator_chain_integration_test.go
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-INS-03;[B];A;tests/install-cloud-acme.test.sh;WP-416
-TEC-09;[B];A;tests/install-cloud-acme.test.sh;WP-416
+INS-03;[B];A;tests/install-cloud-acme.test.sh;WP-419
+TEC-09;[B];A;tests/install-cloud-acme.test.sh;WP-419
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Pebble-Integrationstest und Job tls-domain-pebble (WP-436 (`t5-acme-pebble`)); Nachladen erneuerter Zertifikate durch nginx und Health-Auswertung skalierter Dienste (WP-437 (`t5-acme-renewal`)).
+**Nicht Bestandteil:** Pebble-Integrationstest und Job tls-domain-pebble (WP-420 (`t5-acme-pebble`)); Nachladen erneuerter Zertifikate durch nginx und Health-Auswertung skalierter Dienste (WP-440 (`t5-acme-renewal`)).
 
-### WP-417 – Einladung erzeugt invitation.created mit Annahmelink (NTF-05)
+### WP-420 – Pebble-Integrationstest des TLS-Domain-Pfads (Ausstellung, Wiederholung, Lesbarkeit, Issuer-Prüfung)
+
+**Schlüssel:** `t5-acme-pebble` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** A · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-419 (`t5-acme-lineage`)
+
+| ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| INS-02 | [B] | FEHLGESCHLAGEN | schließt | [WP-095](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-095) | `docs/audit/01-installation-stack.md:72` | `docs/spec/katalog-v3/01-installation-stack.md:31` |
+| TEC-09 | [B] | FEHLGESCHLAGEN | Teil | [WP-094](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-094) | `docs/audit/01-installation-stack.md:60` | `docs/spec/katalog-v3/01-installation-stack.md:8` |
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Betroffene WPs |
+|---|---|---|---|---|
+| [F-033](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-033) | P1 | certbot certonly kann das Let's-Encrypt-Zertifikat nicht ablegen, weil der Bootstrap-Platzhalter letsencrypt/live/<domain>/ belegt | schließt | WP-094 |
+| [F-034](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-034) | P1 | Von certbot ausgestellter Schlüssel und Kette sind für den unprivilegierten nginx-Nutzer (uid 101) des Frontends unlesbar | schließt | WP-094 |
+| [F-035](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-035) | P1 | OIDC-Issuer-Prüfung läuft vor dem Start des Frontends (Issuer-Proxy), daher brechen Domain-/TLS-Installationen ab | schließt | WP-095 |
+
+**Schließt Audit-WPs:** [WP-092](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-092) (TEILWEISE BESTANDEN, Teil), [WP-094](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-094) (FEHLGESCHLAGEN, Teil), [WP-095](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-095) (FEHLGESCHLAGEN, schließt)
+
+**Problem:** Ausstellung, Wiederholung, Lesbarkeit für nginx und die Issuer-Prüfungen im TLS-Domain-Pfad sind nur mit gestubbtem certbot bzw. curl belegt (tests/install-cloud-acme.test.sh, tests/install-cloud-issuer-order.test.sh); kein Lauf gegen einen echten ACME-Server (offene Nachweise WP-094, WP-095). Der ACME-Endpunkt ist im Installer nicht konfigurierbar; der certbot-Container vertraut nur öffentlichen CAs, RETICORA_TLS_CA_BUNDLE (install-cloud.sh:783-788) wirkt nur auf die openssl-Prüfungen.
+
+**Akzeptanzkriterien:**
+
+- [ ] install-cloud.sh liest RETICORA_ACME_SERVER (Standard: Let's-Encrypt-Produktion) und übergibt ihn als --server an certonly und an die Renew-Schleife; RETICORA_ACME_CA_BUNDLE wird in den certbot-Container gemountet und dort als REQUESTS_CA_BUNDLE gesetzt (Vertrauensanker für die ACME-TLS-Verbindung); RETICORA_TLS_CA_BUNDLE bleibt für die openssl-Prüfungen. Ohne die Variablen ist der Aufruf unverändert (Fall in tests/install-cloud-helpers.test.sh).
+- [ ] Pebble-Integrationstest tests/install-acme-pebble.test.sh (Pebble mit challtestsrv aus tests/fixtures/pebble/, certbot/certbot:v2.11.0, Installer mit RETICORA_TLS_DOMAIN, RETICORA_ACME_SERVER, RETICORA_ACME_CA_BUNDLE und RETICORA_TLS_CA_BUNDLE): (a) Erstinstallation mit vorhandenem Bootstrap: live/<domain>/fullchain.pem verkettet zur Pebble-Root, validate_tls_material <domain> 1 besteht; (b) zweiter Installerlauf: Pebble-Order-Zähler unverändert, kein <domain>-0001, rc 0; (c) nach Ausstellung und nach 'certbot renew --force-renewal': 'docker compose exec frontend cat /etc/letsencrypt/live/<domain>/privkey.pem' (bzw. der Pfad aus der Variante von WP-419 (`t5-acme-lineage`)) gelingt, 'nginx -t' als uid 101 besteht, 'docker compose restart frontend' wird healthy und liefert die Pebble-Kette; (d) das Installer-Log enthält beide erfolgreichen Issuer-Prüfungen inkl. 'OIDC issuer is reachable from the backend container' (Nachweis F-035 im TLS-Domain-Pfad). Negativfall: Challenge scheitert (kein DNS-Eintrag in challtestsrv) → Platzhalter bleibt, Installer rc 0 mit Warnung.
+- [ ] .github/workflows/install-smoke.yml: neuer Job tls-domain-pebble (ubuntu-24.04) führt tests/install-acme-pebble.test.sh aus und lädt das Protokoll als Artefakt hoch; Pfadfilter für push und pull_request um tests/fixtures/pebble/** ergänzt; Lauf im PR grün, Run-ID im PR.
+- [ ] docs/troubleshooting-installation.md beschreibt RETICORA_ACME_SERVER und RETICORA_ACME_CA_BUNDLE (Staging- und Test-CAs).
+- [ ] Regression: tests/install-cloud-acme.test.sh, tests/install-cloud-issuer-order.test.sh, tests/install-cloud-helpers.test.sh und install-smoke-Matrix grün.
+- [ ] Abschluss F-033, F-034 und F-035: Die verbindlichen Retests aus PHASE1_FINDINGS.md sind vollständig grün, einschließlich der in WP-419 (`t5-acme-lineage`) und WP-385 (`t5-issuer-order`) überführten Shell-Tests (`tests/install-cloud-acme.test.sh`, `tests/install-cloud-issuer-order.test.sh`) und des Pebble-Laufs dieses WP; Lauf-IDs im PR.
+
+**Dateien (9 Einträge, Migration = 2):**
+
+- install-cloud.sh
+- deploy/docker-compose/docker-compose.yml
+- tests/install-cloud-helpers.test.sh
+- tests/install-acme-pebble.test.sh (neu)
+- tests/fixtures/pebble/pebble-config.json (neu)
+- tests/fixtures/pebble/docker-compose.pebble.yml (neu)
+- .github/workflows/install-smoke.yml
+- docs/troubleshooting-installation.md
+- docs/traceability.csv
+
+**Migration/RLS:** Keine Migration.
+
+**Tests:**
+
+- tests/install-acme-pebble.test.sh (Erstinstallation, Wiederholung, uid 101 nach Ausstellung und Erneuerung, Issuer-Log, Challenge-Fehler)
+- tests/install-cloud-helpers.test.sh (ACME-Server und CA-Bundle optional)
+- install-smoke.yml Job tls-domain-pebble
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+INS-02;[B];A;tests/install-acme-pebble.test.sh;WP-420
+TEC-09;[B];A;tests/install-acme-pebble.test.sh;WP-420
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Nachladen erneuerter Zertifikate (WP-440 (`t5-acme-renewal`) ergänzt den Pebble-Test um den Erneuerungsfall); Matrixläufe auf dem Release-Kandidaten (WP-595 (`t5-rc-evidence`)).
+
+### WP-421 – Einladung erzeugt invitation.created mit Annahmelink (NTF-05)
 
 **Schlüssel:** `t6-invite-event` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-392 (`t6-invite-ceiling`), WP-396 (`t6-ntf-authz`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-394 (`t6-invite-ceiling`), WP-398 (`t6-ntf-authz`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -5440,8 +5703,8 @@ TEC-09;[B];A;tests/install-cloud-acme.test.sh;WP-416
 **Akzeptanzkriterien:**
 
 - [ ] IssueInvitation und RenewInvitation hängen in ihrer Transaktion genau ein invitation.created an (events.Outbox.Append) mit email, organization_name, expires_at und link = RETICORA_INVITATION_ACCEPT_URL + '?token=' + Token; abgelehnte Ausgaben (409 Duplikat, 403 Obergrenze, 422) und Rollbacks erzeugen kein Event.
-- [ ] Konfiguration RETICORA_INVITATION_ACCEPT_URL (config.go, absolute URL, in production https); fehlt sie, antworten POST /invitations und /invitations/{id}/renew wie der Signup ohne Verify-URL mit 503 (Problem 'invitations not configured'); Dev/Test-Default http://localhost:5173/invitations/accept. Compose (deploy/docker-compose/docker-compose.yml) leitet die URL im Server-Env aus RETICORA_TLS_DOMAIN ab (https://${RETICORA_TLS_DOMAIN}/invitations/accept); docker compose config ist gültig. Die gemockte e2e-Fixture und die Real-Stack-Konfiguration (frontend/e2e-real/README.md, Stack des WP-338 (`k-e2e-real-ci`)-Jobs) setzen die Variable. OpenAPI dokumentiert 503; roles-authz 01–04 bleiben 201.
-- [ ] Webhook-Zustellungen von invitation.created enthalten weder link noch Token (Redaktion des Ereignisses in webhook.go; Test in whk01_test.go), damit Webhook-Empfänger Einladungen nicht annehmen können. link/token von invitation.created erscheinen in keiner API-Antwort (Zustellliste ohne Body nach WP-396 (`t6-ntf-authz`), Webhook-Zustellungen, Events) und werden nach KeepPublished mit den Outbox-Daten entfernt (Anker ohne Daten; Nachweis in WP-548 (`t6-retention-data`)).
+- [ ] Konfiguration RETICORA_INVITATION_ACCEPT_URL (config.go, absolute URL, in production https); fehlt sie, antworten POST /invitations und /invitations/{id}/renew wie der Signup ohne Verify-URL mit 503 (Problem 'invitations not configured'); Dev/Test-Default http://localhost:5173/invitations/accept. Compose (deploy/docker-compose/docker-compose.yml) leitet die URL im Server-Env aus RETICORA_TLS_DOMAIN ab (https://${RETICORA_TLS_DOMAIN}/invitations/accept); docker compose config ist gültig. Die gemockte e2e-Fixture und die Real-Stack-Konfiguration (frontend/e2e-real/README.md, Stack des k-e2e-real-ci-Jobs) setzen die Variable. OpenAPI dokumentiert 503; roles-authz 01–04 bleiben 201.
+- [ ] Webhook-Zustellungen von invitation.created enthalten weder link noch Token (Redaktion des Ereignisses in webhook.go; Test in whk01_test.go), damit Webhook-Empfänger Einladungen nicht annehmen können. link/token von invitation.created erscheinen in keiner API-Antwort (Zustellliste ohne Body nach WP-398 (`t6-ntf-authz`), Webhook-Zustellungen, Events) und werden nach KeepPublished mit den Outbox-Daten entfernt (Anker ohne Daten; Nachweis in WP-548 (`t6-retention-data`)).
 - [ ] Defekttest TestAuditDefectInvitationCreatedEvent grün (Issue: genau ein Event mit email, organization_name, expires_at, link mit Token; 409-Duplikat: kein Event; Renew: neues Event mit neuem Token; Org B: 0 Events) und nach invitation_integration_test.go überführt; invitation_auditdefect_test.go gelöscht, Eintrag entfernt.
 - [ ] Real-Stack roles-authz 05 grün: Mailpit erhält binnen 60 s die Mail mit Link und Ablaufdatum; notification_delivery-Status sent.
 - [ ] Retest: cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditDefectInvitationCreatedEvent' ./internal/user/ → PASS; cd frontend && npx playwright test -c e2e-real/playwright.real.config.ts roles-authz -g '0[1-5]' → pass; Regression go test ./internal/user/ ./internal/notify/ ./internal/webhook/ ./internal/config/ grün, TestRoutesAndSpecificationAreInParity und npm run generate:api:check grün.
@@ -5463,9 +5726,9 @@ TEC-09;[B];A;tests/install-cloud-acme.test.sh;WP-416
 - frontend/src/api/generated/schema.d.ts
 - deploy/docker-compose/docker-compose.yml
 - frontend/e2e/fixtures/docker-compose.e2e.yml
-- frontend/e2e-real/README.md (Stack-Variable; Real-Stack-Konfiguration aus k-e2e-real-ci)
+- frontend/e2e-real/README.md (Stack-Variable; Real-Stack-Konfiguration aus WP-338 (`k-e2e-real-ci`))
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** keine Migration.
 
@@ -5479,19 +5742,19 @@ TEC-09;[B];A;tests/install-cloud-acme.test.sh;WP-416
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/user/invitation_integration_test.go;WP-417
-TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-417
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/user/invitation_integration_test.go;WP-421
+TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-421
 ```
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Annahmeseite und Einladungs-UI (WP-509 (`t6-invite-ui`)); Standard-Mailkanal neuer Organisationen (WP-508 (`t6-ntf-default-channel`)); Entfernen der Outbox-Nutzdaten nach KeepPublished (WP-548 (`t6-retention-data`)).
+**Nicht Bestandteil:** Annahmeseite und Einladungs-UI (WP-510 (`t6-invite-ui`)); Standard-Mailkanal neuer Organisationen (WP-509 (`t6-ntf-default-channel`)); Entfernen der Outbox-Nutzdaten nach KeepPublished (WP-548 (`t6-retention-data`)).
 
-### WP-418 – Kubernetes: vollständige Pflichtkonfiguration (OIDC) in allen Overlays, veröffentlichte Release-Images
+### WP-422 – Kubernetes: vollständige Pflichtkonfiguration (OIDC) in allen Overlays, veröffentlichte Release-Images
 
 **Schlüssel:** `t5-k8s-required-env` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** A · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-417 (`t6-invite-event`)
+**Voraussetzungen (gemergt):** WP-421 (`t6-invite-event`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -5512,7 +5775,7 @@ TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-417
 **Akzeptanzkriterien:**
 
 - [ ] base liefert RETICORA_OIDC_ISSUER_URL, RETICORA_OIDC_CLIENT_ID, RETICORA_OIDC_CLIENT_SECRET und RETICORA_OIDC_REDIRECT_URL über ConfigMap reticora-config bzw. Secret reticora-secrets (configMapKeyRef/secretKeyRef optional: false). staging ersetzt die env-Liste nicht mehr, sondern setzt nur abweichende Werte per Strategic-Merge-Patch (name-basiert); die Basisschlüssel (inkl. RETICORA_MASTER_KEY und OIDC) werden geerbt. reticora-config ist eine vom Betreiber bereitgestellte ConfigMap (Kommentar in base/kustomization.yaml und deploy/README.md) oder wird per configMapGenerator mit Platzhaltern erzeugt; die Wahl ist im PR begründet.
-- [ ] base liefert zusätzlich RETICORA_INVITATION_ACCEPT_URL (absolute URL `https://<Host>/invitations/accept`) über die ConfigMap reticora-config; staging und prod erben bzw. setzen den Wert. Ohne die Variable antworten POST /invitations und /invitations/{id}/renew mit 503 (F-041, WP-417 (`t6-invite-event`)). `k8s_required_env_test.go` prüft den Schlüssel für base, staging und prod zusätzlich zu requiredOutsideDevelopment; das Fixture-Overlay ohne den Schlüssel meldet ihn als fehlend (Negativfall); deploy/README.md nennt ihn.
+- [ ] base liefert zusätzlich RETICORA_INVITATION_ACCEPT_URL (absolute URL `https://<Host>/invitations/accept`) über die ConfigMap reticora-config; staging und prod erben bzw. setzen den Wert. Ohne die Variable antworten POST /invitations und /invitations/{id}/renew mit 503 (F-041, WP-421 (`t6-invite-event`)). `k8s_required_env_test.go` prüft den Schlüssel für base, staging und prod zusätzlich zu requiredOutsideDevelopment; das Fixture-Overlay ohne den Schlüssel meldet ihn als fehlend (Negativfall); deploy/README.md nennt ihn.
 - [ ] Retest F-036: cd backend && KUSTOMIZE=$(go env GOPATH)/bin/kustomize go test -count=1 -v -run 'TestAuditT5K8sRenderedEnvSatisfiesStartCheck' ./internal/config/ → PASS 3/3 (base, staging, prod: jeder Schlüssel aus requiredOutsideDevelopment geliefert, Load() plus Validate(false) mit der gerenderten Env fehlerfrei); neuer Negativ-Subtest mit Fixture-Overlay ohne Issuer meldet den fehlenden Schlüssel.
 - [ ] Ratchet: Test ohne Build-Tag als backend/internal/config/k8s_required_env_test.go überführt; ohne KUSTOMIZE Skip nur außerhalb von CI, mit CI=true Fehlschlag; Eintrag aus tests/audit/expected-failures.txt entfernt; der Job k8s-manifests führt den Test mit kustomize v5.8.1 aus.
 - [ ] F-293: overlays/prod setzt images newName ghcr.io/datahub-chiemgau/reticora-server und ghcr.io/datahub-chiemgau/reticora-postgres mit newTag v1.0.0 (Tag-Schema aus release.yml); Assertion im Job k8s-manifests: jedes Image im prod-Build stammt aus ghcr.io/datahub-chiemgau/ mit Tag v*; Negativfall: Fixture mit reticora-cmdb/server → Assertion scheitert.
@@ -5541,15 +5804,15 @@ TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-417
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-OPS-03;[B], [P5];A;backend/internal/config/k8s_required_env_test.go;WP-418
-OPS-01;[B];A;backend/internal/config/k8s_required_env_test.go;WP-418
+OPS-03;[B], [P5];A;backend/internal/config/k8s_required_env_test.go;WP-422
+OPS-01;[B];A;backend/internal/config/k8s_required_env_test.go;WP-422
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Laufzeitnachweis im Cluster (WP-438 (`t5-k8s-kind-smoke`)); WAL-Archivierung (WP-441 (`t5-k8s-wal`)); Single-Runner (WP-131).
+**Nicht Bestandteil:** Laufzeitnachweis im Cluster (WP-441 (`t5-k8s-kind-smoke`)); WAL-Archivierung (WP-444 (`t5-k8s-wal`)); Single-Runner (WP-131).
 
-### WP-419 – audit_entry_hash hasht das kanonische JSON als UTF-8 (AUD-04); abweichende Bestandsketten neu verkettet
+### WP-423 – audit_entry_hash hasht das kanonische JSON als UTF-8 (AUD-04); abweichende Bestandsketten neu verkettet
 
 **Schlüssel:** `t6-audit-hash-utf8` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
@@ -5567,7 +5830,7 @@ OPS-01;[B];A;backend/internal/config/k8s_required_env_test.go;WP-418
 |---|---|---|---|---|
 | [F-045](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-045) | P1 | Werte mit Anführungszeichen oder Steuerzeichen (Zeilenumbruch, Tab) brechen jeden auditierten Write mit Wert-Snapshot (CI-Create/-Update/-Delete/-Restore, Metamodell) mit 400 ab: audit_entry_hash castet den JSON-Text nach bytea | schließt | WP-117, WP-120, WP-132, WP-133 |
 
-**Schließt Audit-WPs:** [WP-132](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-132) (TEILWEISE BESTANDEN, schließt), [WP-117](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-117) (FEHLGESCHLAGEN, Teil), [WP-120](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-120) (TEILWEISE BESTANDEN, Teil), [WP-133](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-133) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-117](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-117) (FEHLGESCHLAGEN, Teil), [WP-120](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-120) (TEILWEISE BESTANDEN, Teil), [WP-132](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-132) (TEILWEISE BESTANDEN, schließt), [WP-133](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-133) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** audit_entry_hash (000039:41, 000117:55, 000118:53) castet das kanonische JSON per ::bytea. Der Text→bytea-Cast deutet Backslash-Sequenzen als Escape: die JSON-Escapes für Anführungszeichen, LF, TAB und Unicode werfen 22P02 (→ 400, die fachliche Transaktion rollt zurück), ein doppelter Backslash wird zu einem Byte (Hash ≠ SHA-256(kanonisches JSON), ≠ audit.ComputeHash). CIs mit Anführungszeichen oder Zeilenumbrüchen sind weder anleg- noch änderbar; bestehende solche CIs sind nicht mehr änder-, lösch- oder wiederherstellbar (verify-L12-bytea.log, ci-lifecycle L14).
 
@@ -5609,16 +5872,16 @@ OPS-01;[B];A;backend/internal/config/k8s_required_env_test.go;WP-418
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUD-04;[B];B;backend/internal/audit/pg_roundtrip_integration_test.go;WP-419
-CI-03;[B];B;backend/internal/ci/special_chars_integration_test.go;WP-419
-MET-11;B/G1, Teil P2/G2;B;backend/internal/ci/special_chars_integration_test.go;WP-419
+AUD-04;[B];B;backend/internal/audit/pg_roundtrip_integration_test.go;WP-423
+CI-03;[B];B;backend/internal/ci/special_chars_integration_test.go;WP-423
+MET-11;B/G1, Teil P2/G2;B;backend/internal/ci/special_chars_integration_test.go;WP-423
 ```
 
 **Entscheidungsbedarf:** [E-56](../entscheidungen.md#e-56)
 
-**Nicht Bestandteil:** Umstellung der Kette auf asynchrone Outbox mit Single-Runner (F-316, zurückgestellt); Route-Audit-Inhalte (t6-route-audit-*).
+**Nicht Bestandteil:** Umstellung der Kette auf asynchrone Outbox mit Single-Runner (F-316, zurückgestellt); Route-Audit-Inhalte (WP-504 (`t6-route-audit-gapless`), WP-505 (`t6-route-audit-values`)).
 
-### WP-420 – Manuelle Port-Kanten überleben den Interface-Abgleich (REL-05); Fehlerabbildung der Interface-Routen
+### WP-424 – Manuelle Port-Kanten überleben den Interface-Abgleich (REL-05); Fehlerabbildung der Interface-Routen
 
 **Schlüssel:** `t6-manual-edge-keep` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
@@ -5663,7 +5926,7 @@ MET-11;B/G1, Teil P2/G2;B;backend/internal/ci/special_chars_integration_test.go;
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** FK-Umstellung CASCADE → NO ACTION an ci_relationship (Prüfung am Statementende, CI-Hard-Delete bleibt möglich); keine neue Tabelle; up/down, Roundtrip grün.
 
@@ -5676,16 +5939,16 @@ MET-11;B/G1, Teil P2/G2;B;backend/internal/ci/special_chars_integration_test.go;
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-REL-02;[B];B;backend/internal/server/manual_edge_integration_test.go;WP-420
-REL-05;[B];B;backend/internal/server/manual_edge_integration_test.go;WP-420
-NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-420
+REL-02;[B];B;backend/internal/server/manual_edge_integration_test.go;WP-424
+REL-05;[B];B;backend/internal/server/manual_edge_integration_test.go;WP-424
+NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-424
 ```
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** Fehlerabbildung von POST /relationships (WP-399 (`t6-rel-errors`)); Migration 000110 (WP-592 (`t6-p3-sammel`)).
+**Nicht Bestandteil:** Fehlerabbildung von POST /relationships (WP-401 (`t6-rel-errors`)); Migration 000110 (WP-592 (`t6-p3-sammel`)).
 
-### WP-421 – JOB-02-Läufe Entitlement-Warnung/-Ablauf und Zertifikatsablauf mit Events
+### WP-425 – JOB-02-Läufe Entitlement-Warnung/-Ablauf und Zertifikatsablauf mit Events
 
 **Schlüssel:** `t6-job02-notices` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
@@ -5707,19 +5970,19 @@ NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-420
 | [F-044](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-044) | P1 | Entitlement-Warnung/-Ablauf und Zertifikatsablauf: JOB-02-Läufe nicht eingeplant, Events entitlement.warning/expired und certificate.expiring nie erzeugt | schließt | WP-131, WP-136, WP-140 |
 | [F-071](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-071) | P2 | ENT-07-Ablaufwarnungen fehlen (Banner, 14/7/1-Tage-Benachrichtigung) | Teil | WP-072 |
 
-**Schließt Audit-WPs:** [WP-131](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-131) (TEILWEISE BESTANDEN, schließt), [WP-136](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-136) (TEILWEISE BESTANDEN, Teil), [WP-140](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-140) (TEILWEISE BESTANDEN, Teil), [WP-072](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-072) (FEHLGESCHLAGEN, Teil)
+**Schließt Audit-WPs:** [WP-072](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-072) (FEHLGESCHLAGEN, Teil), [WP-131](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-131) (TEILWEISE BESTANDEN, schließt), [WP-136](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-136) (TEILWEISE BESTANDEN, Teil), [WP-140](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-140) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** cmd/server/main.go:476-515 registriert keinen Lauf für Entitlement-Warnungen und Zertifikatserneuerung (JOB-02); entitlement.warning, entitlement.expired und certificate.expiring werden nirgends erzeugt (nur Deklarationen in envelope.go, notify/subscriptions.go, webhook.go). Keine Warnung vor Lizenzablauf oder ablaufenden Collector-Zertifikaten; Discovery kann unangekündigt stoppen. event_outbox hat keinen Idempotenzschlüssel (000120) und der Cleanup löscht veröffentlichte Events nach 30 Tagen (publisher.go:224-227); eine Deduplizierung über die Outbox trägt nicht.
 
 **Akzeptanzkriterien:**
 
-- [ ] Scheduler-Kind entitlement.notices (täglich, Single-Runner je Kind): je Entitlement mit valid_until entsteht entitlement.warning 14, 7 und 1 Tag vor Ablauf (ENT-07) genau einmal je Schwelle, nach Ablauf genau ein entitlement.expired; Dedup über notice_sent (dedup_key Entitlement-ID + valid_until + Schwelle bzw. Entitlement + expired); Event und notice_sent-Zeile entstehen in derselben Transaktion des Laufs (Outbox). Dieser Lauf ist der einzige Erzeuger von entitlement.warning; Banner und Real-Stack-Nachweis liefert WP-462 (`t2-ent-expiry-warning`).
+- [ ] Scheduler-Kind entitlement.notices (täglich, Single-Runner je Kind): je Entitlement mit valid_until entsteht entitlement.warning 14, 7 und 1 Tag vor Ablauf (ENT-07) genau einmal je Schwelle, nach Ablauf genau ein entitlement.expired; Dedup über notice_sent (dedup_key Entitlement-ID + valid_until + Schwelle bzw. Entitlement + expired); Event und notice_sent-Zeile entstehen in derselben Transaktion des Laufs (Outbox). Dieser Lauf ist der einzige Erzeuger von entitlement.warning; Banner und Real-Stack-Nachweis liefert WP-464 (`t2-ent-expiry-warning`).
 - [ ] Scheduler-Kind certificate.notices: Collector-Zertifikate (collector.cert_not_after), die 60 % ihrer Laufzeit ohne Erneuerung überschritten haben (COL-04), und die aktive Collector-CA vor Ablauf erzeugen genau ein certificate.expiring je Zertifikat (notice_sent, dedup_key Fingerprint) mit client_id/site_id des Collectors.
 - [ ] Beide Kinds sind in main.go registriert; die Registrierung der Systemjobs ist in eine testbare Funktion ausgelagert. Wiring-Test (cmd/server/main_test.go): registrierte Kinds ⊇ JOB-02-[B]-Liste (Offline-Detector, Kanten-Cleanup, Hard-Delete/Retention, Index-DDL, Zertifikatserneuerung, Entitlement-Warnungen); der Audit-Runner ist ausgenommen, weil die Kette synchron schreibt (E-56, F-316 zurückgestellt).
 - [ ] PG-Tests TestEntitlementNotices und TestCertificateNotices (jobs/notices_integration_test.go): valid_until = now+7d → genau eine entitlement.warning je Org, zweiter Lauf 0 (idempotent); abgelaufen → entitlement.expired; Zertifikat nach Erneuerungspunkt → certificate.expiring, erneuertes Zertifikat → keins; Lauf nach Outbox-Cleanup (Fake-Uhr +31 Tage) → kein zweites entitlement.expired und kein zweites certificate.expiring; Org B unberührt; über EventConsumer erreicht die Warnung die user:manage-Inhaber der Org (Inbox-Eintrag).
 - [ ] docs/ops/workers.md listet die neuen Läufe mit Zeitplan.
 - [ ] Retest: cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestEntitlementNotices|TestCertificateNotices' ./internal/jobs/ → PASS; go test -run 'TestSystemJobsCoverJOB02' ./cmd/server/ → PASS; Regression go test ./internal/jobs/ ./internal/notify/ ./cmd/server/ ./internal/tenant/rls/ (TestRLSMatrix, Katalogtest) und Migrations-Roundtrip grün.
-- [ ] Übernommen aus WP-462 (`t2-ent-expiry-warning`) (F-071, Teil): Der Dedup-Schlüssel der Warnung ist Entitlement-ID + valid_until + Schwelle. Ein verlängertes valid_until löst die Schwellen 14/7/1 Tage für das neue Datum erneut aus; nach verpassten Läufen wird nur die jüngste fällige Schwelle nachgeholt (JOB-02, begrenztes Nachholen). TestEntitlementNotices (jobs/notices_integration_test.go) prüft: bei +14 d, +7 d und +1 d je genau eine Warnung; zweiter Lauf am selben Tag ohne Warnung; nach einer Verlängerung neue Warnung bei +14 d; erster Lauf erst bei +6 d → genau eine Warnung (Schwelle 7), keine für 14; Lauf nach 10 Tagen Pause genau eine Warnung (jüngste Schwelle); Org B ohne Ablauf ohne Warnung. Der Test ist Teil des Retests F-071.
+- [ ] Übernommen aus WP-464 (`t2-ent-expiry-warning`) (F-071, Teil): Der Dedup-Schlüssel der Warnung ist Entitlement-ID + valid_until + Schwelle. Ein verlängertes valid_until löst die Schwellen 14/7/1 Tage für das neue Datum erneut aus; nach verpassten Läufen wird nur die jüngste fällige Schwelle nachgeholt (JOB-02, begrenztes Nachholen). TestEntitlementNotices (jobs/notices_integration_test.go) prüft: bei +14 d, +7 d und +1 d je genau eine Warnung; zweiter Lauf am selben Tag ohne Warnung; nach einer Verlängerung neue Warnung bei +14 d; erster Lauf erst bei +6 d → genau eine Warnung (Schwelle 7), keine für 14; Lauf nach 10 Tagen Pause genau eine Warnung (jüngste Schwelle); Org B ohne Ablauf ohne Warnung. Der Test ist Teil des Retests F-071.
 - [ ] Die Darstellung in backend/internal/notify/subscriptions.go passt zu den neuen Payloads. entitlement.warning rendert eine Ablaufwarnung mit feature, valid_until und days_left (de, en). entitlement.expired nutzt feature und expired_at, certificate.expiring nutzt name und expires_at. Die Läufe liefern genau diese Felder. Test in notify/notifier_test.go: Betreff und Text für die Payloads aus TestEntitlementNotices und TestCertificateNotices enthalten Feature, Datum bzw. Zertifikatsname und weder „<nil>“ noch „%!“ (Negativfall: Payload ohne valid_until → Testfehler).
 
 **Dateien (11 Einträge, Migration = 2):**
@@ -5746,23 +6009,23 @@ NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-420
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-JOB-02;[B], Zusätze [P2], [P3];B;backend/cmd/server/main_test.go;WP-421
-OPS-03;[B], [P5];B;backend/cmd/server/main_test.go;WP-421
-NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/jobs/notices_integration_test.go;WP-421
-EVT-02;[B];B;backend/internal/jobs/notices_integration_test.go;WP-421
-ENT-07;[B];B;backend/internal/jobs/notices_integration_test.go;WP-421
-COL-04;[B];B;backend/internal/jobs/notices_integration_test.go;WP-421
+JOB-02;[B], Zusätze [P2], [P3];B;backend/cmd/server/main_test.go;WP-425
+OPS-03;[B], [P5];B;backend/cmd/server/main_test.go;WP-425
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/jobs/notices_integration_test.go;WP-425
+EVT-02;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
+ENT-07;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
+COL-04;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
 ```
 
 **Entscheidungsbedarf:** [E-56](../entscheidungen.md#e-56)
 
-**Nicht Bestandteil:** Collector-seitige Zertifikatserneuerung (besteht, discovery/ca.go:443); Dashboard-Banner und Real-Stack-Nachweis (ENT-07, UI; WP-462 (`t2-ent-expiry-warning`)); Audit-Runner nach AUD-04 (F-316).
+**Nicht Bestandteil:** Collector-seitige Zertifikatserneuerung (besteht, discovery/ca.go:443); Dashboard-Banner und Real-Stack-Nachweis (ENT-07, UI; WP-464 (`t2-ent-expiry-warning`)); Audit-Runner nach AUD-04 (F-316).
 
-### WP-422 – Collector-Metriken über den mTLS-Edge (`.metrics`) statt unauthentisiertem HTTP
+### WP-426 – Collector-Metriken über den mTLS-Edge (`.metrics`) statt unauthentisiertem HTTP
 
 **Schlüssel:** `t7-metrics-edge` · **Meilenstein:** K2 Datenintegrität und Kernprozesse · **Epic (Traceability):** C · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-379 (`t4-collector-disable-data`), WP-400 (`t7-ci-metrics-scope`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-380 (`t4-collector-disable-data`), WP-402 (`t7-ci-metrics-scope`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -5816,18 +6079,18 @@ COL-04;[B];B;backend/internal/jobs/notices_integration_test.go;WP-421
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-MON-02;[B];C;backend/internal/discovery/edge_metrics_integration_test.go;WP-422
+MON-02;[B];C;backend/internal/discovery/edge_metrics_integration_test.go;WP-426
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Ingest-Credential für HTTP-Uploads (nicht nötig, da Edge); PDU-Werte und Interface-Walk (WP-511 (`t7-power-metrics`)); Spool auf Platte (edgecore/buffer, T3).
+**Nicht Bestandteil:** Ingest-Credential für HTTP-Uploads (nicht nötig, da Edge); PDU-Werte und Interface-Walk (WP-512 (`t7-power-metrics`)); Spool auf Platte (edgecore/buffer, T3).
 
 ## K3 Installation, Betrieb und Gate-Nachweise
 
 **Ausstieg:** Installer-, Zertifikats-, K8s-, Backup- und Monitoring-Befunde behoben; Gate- und Abnahmedokumente führen jeden betroffenen Punkt mit Zwischenstand (offen mit Korrektur-WP oder belegt PASS); den Endstand stellt K7 her.
 
-### WP-423 – Rollback in geteilten Clustern: 000056-Down ohne clusterweiten DROP ROLE; Roundtrip in eigener Datenbank
+### WP-427 – Rollback in geteilten Clustern: 000056-Down ohne clusterweiten DROP ROLE; Roundtrip in eigener Datenbank
 
 **Schlüssel:** `t1-mig56-down` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
@@ -5872,18 +6135,18 @@ MON-02;[B];C;backend/internal/discovery/edge_metrics_integration_test.go;WP-422
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-03;[B];B;backend/internal/database/migrations_roundtrip_integration_test.go;WP-423
+TEN-03;[B];B;backend/internal/database/migrations_roundtrip_integration_test.go;WP-427
 ```
 
 **Entscheidungsbedarf:** [E-72](entscheidungen.md#e-72) Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) (offen, Empfehlung als Übergangsregel); [E-26](../entscheidungen.md#e-26)
 
 **Nicht Bestandteil:** Migration 000066 (WP-560 (`t1-doc-blob-cleanup`)); übrige Down-Migrationen.
 
-### WP-424 – Keycloak-Realm bei Upgrade: Policies, MFA-Gruppen und Operator-Einstellungen idempotent anwenden; Installer-Admin gegen echten Keycloak 24; Rollenmodell dokumentiert
+### WP-428 – Keycloak-Realm bei Upgrade: Policies, MFA-Gruppen und Operator-Einstellungen idempotent anwenden; Installer-Admin gegen echten Keycloak 24; Rollenmodell dokumentiert
 
 **Schlüssel:** `t2-kc-upgrade` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-357 (`t2-mfa-accounts`), WP-361 (`t2-operator-oidc`), WP-383 (`t5-issuer-order`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-357 (`t2-mfa-accounts`), WP-361 (`t2-operator-oidc`), WP-385 (`t5-issuer-order`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -5933,18 +6196,18 @@ TEN-03;[B];B;backend/internal/database/migrations_roundtrip_integration_test.go;
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUT-09;[B];B;tests/keycloak-realm-upgrade.test.sh;WP-424
+AUT-09;[B];B;tests/keycloak-realm-upgrade.test.sh;WP-428
 ```
 
 **Entscheidungsbedarf:** [E-14](../entscheidungen.md#e-14)
 
-**Nicht Bestandteil:** Issuer-Prüfung und Startreihenfolge des Installers (F-035, Gruppe T5; gleiche Datei `install-cloud.sh`, Merge-Reihenfolge durch die Integration); Kubernetes-Installationspfad; Realm-Rollen-Mapper (README-Korrektur statt neuer Quelle für App-Rechte).
+**Nicht Bestandteil:** Issuer-Prüfung und Startreihenfolge des Installers (F-035, WP-385 (`t5-issuer-order`), Voraussetzung; gleiche Datei `install-cloud.sh`); Kubernetes-Installationspfad; Realm-Rollen-Mapper (README-Korrektur statt neuer Quelle für App-Rechte).
 
-### WP-425 – Edge-PKI-Export: konsistent bei mehreren Repliken, Schlüssel nicht weltlesbar
+### WP-429 – Edge-PKI-Export: konsistent bei mehreren Repliken, Schlüssel nicht weltlesbar
 
 **Schlüssel:** `t4-edge-pki-export` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-373 (`t4-natsedge-ci`)
+**Voraussetzungen (gemergt):** WP-374 (`t4-natsedge-ci`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -5958,12 +6221,12 @@ AUT-09;[B];B;tests/keycloak-realm-upgrade.test.sh;WP-424
 
 **Schließt Audit-WPs:** [WP-146](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-146) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** Paralleler Export mehrerer Repliken (k8s prod: 3 Repliken, RWX-PVC) nutzt feste `.tmp`-Namen (`writeFileAtomic`, `natsedge.go:336-345`) und schreibt Schlüssel und Zertifikat getrennt ohne Sperre und Konsistenzprüfung (`ExportEdgePKI`, `natsedge.go:303-333`): 56–58 von 60 Läufen scheitern, Paare passen nicht, `server-key.pem` hat Modus 0644 (F-104). Die Ursache ist unabhängig vom CA-Roll-over (WP-426 (`t4-pki-rollover-export`)).
+**Problem:** Paralleler Export mehrerer Repliken (k8s prod: 3 Repliken, RWX-PVC) nutzt feste `.tmp`-Namen (`writeFileAtomic`, `natsedge.go:336-345`) und schreibt Schlüssel und Zertifikat getrennt ohne Sperre und Konsistenzprüfung (`ExportEdgePKI`, `natsedge.go:303-333`): 56–58 von 60 Läufen scheitern, Paare passen nicht, `server-key.pem` hat Modus 0644 (F-104). Die Ursache ist unabhängig vom CA-Roll-over (WP-430 (`t4-pki-rollover-export`)).
 
 **Akzeptanzkriterien:**
 
 - [ ] Export: `pg_advisory_lock` um den Export; eindeutige Temp-Namen im Zielverzeichnis; Schlüssel und Zertifikat werden mit `tls.X509KeyPair` geprüft und erst dann umbenannt; ein vorhandenes Paar wird nur weiterverwendet, wenn es zusammenpasst und von der CA stammt, die das Edge-Serverzertifikat ausstellt; `server-key.pem` Modus 0640 (Gruppe des Endpunkts, K8s `fsGroup` in `nats-edge.yaml`).
-- [ ] `TestAuditConcurrentEdgePKIExportConsistent` wird nach `natsedge_integration_test.go` (ohne Tag, Hilfen aus WP-373 (`t4-natsedge-ci`)) überführt und besteht (0 Fehler, 0 Mismatches, Modus ≤ 0640). Retest F-104.
+- [ ] `TestAuditConcurrentEdgePKIExportConsistent` wird nach `natsedge_integration_test.go` (ohne Tag, Hilfen aus WP-374 (`t4-natsedge-ci`)) überführt und besteht (0 Fehler, 0 Mismatches, Modus ≤ 0640). Retest F-104.
 - [ ] Negativfall: ein vorhandenes, nicht zusammenpassendes Paar (Schlüssel einer anderen Ausstellung) wird ersetzt, nicht weiterverwendet; Positivfall: ein passendes, nicht fälliges Paar bleibt unverändert (Test in `natsedge_integration_test.go`).
 - [ ] Zeile aus `expected-failures.txt` entfernt; `go test ./internal/discovery/` grün; `TestCollectorNATSEndpointAuthorization` und `tests/nats-mtls.test.sh` 3/3 grün.
 
@@ -5985,18 +6248,18 @@ AUT-09;[B];B;tests/keycloak-realm-upgrade.test.sh;WP-424
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-COL-08;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-425
+COL-08;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-429
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** CA-Roll-over und Nachladen des Endpunkts (WP-426 (`t4-pki-rollover-export`)).
+**Nicht Bestandteil:** CA-Roll-over und Nachladen des Endpunkts (WP-430 (`t4-pki-rollover-export`)).
 
-### WP-426 – Edge-PKI: CA-Roll-over mit zwei Trust-Ankern ohne Ausfall und ohne Neustart
+### WP-430 – Edge-PKI: CA-Roll-over mit zwei Trust-Ankern ohne Ausfall und ohne Neustart
 
 **Schlüssel:** `t4-pki-rollover-export` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-373 (`t4-natsedge-ci`), WP-374 (`t4-pki-renew-server`), WP-380 (`t4-collector-disable-kick`), WP-411 (`t4-pki-renew-collector`), WP-425 (`t4-edge-pki-export`)
+**Voraussetzungen (gemergt):** WP-374 (`t4-natsedge-ci`), WP-375 (`t4-pki-renew-server`), WP-381 (`t4-collector-disable-kick`), WP-414 (`t4-pki-renew-collector`), WP-429 (`t4-edge-pki-export`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -6015,9 +6278,9 @@ COL-08;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-425
 **Akzeptanzkriterien:**
 
 - [ ] Während der Übergangsphase (vorherige CA vorhanden) stellt `ExportEdgePKI` das Edge-Serverzertifikat weiter aus der vorherigen CA aus, erst nach `RetirePrevious` aus der neuen; Collector-Zertifikate werden ab dem Roll-over aus der neuen CA signiert; `ca.pem` enthält beide Anker.
-- [ ] `RetirePrevious` verweigert mit Fehler und Anzahl, solange aktive Collector ein Zertifikat der vorherigen CA haben (sie erhalten das neue Bundle mit der Erneuerung aus WP-411 (`t4-pki-renew-collector`)); `--force` übergeht das mit Audit-Eintrag.
+- [ ] `RetirePrevious` verweigert mit Fehler und Anzahl, solange aktive Collector ein Zertifikat der vorherigen CA haben (sie erhalten das neue Bundle mit der Erneuerung aus WP-414 (`t4-pki-renew-collector`)); `--force` übergeht das mit Audit-Eintrag.
 - [ ] Bedienpfad `server collector-ca status|rollover|retire [--force]` (`backend/cmd/server/collectorca.go`) mit Audit (`collector_ca.rolled_over`, `collector_ca.retired`); Runbook `docs/betrieb/collector-ca.md`; Test `collectorca_test.go`.
-- [ ] Rollover und Retire lösen auf allen Repliken ein Neuladen des CA-Zustands aus (internes NATS-Ereignis; Fallback: Versionsprüfung von `collector_ca` vor Signatur und Callout). Vor der ersten Signatur mit der neuen CA ist `ca.pem` mit beiden Ankern exportiert und vom Endpunkt geladen (Reload über `$SYS.REQ.SERVER.<id>.RELOAD` mit dem SYS-Nutzer aus WP-380 (`t4-collector-disable-kick`), sonst dokumentierter Neustart im Runbook `docs/betrieb/collector-ca.md`). Nach `retire` wird das Serverzertifikat ebenso exportiert und nachgeladen.
+- [ ] Rollover und Retire lösen auf allen Repliken ein Neuladen des CA-Zustands aus (internes NATS-Ereignis; Fallback: Versionsprüfung von `collector_ca` vor Signatur und Callout). Vor der ersten Signatur mit der neuen CA ist `ca.pem` mit beiden Ankern exportiert und vom Endpunkt geladen (Reload über `$SYS.REQ.SERVER.<id>.RELOAD` mit dem SYS-Nutzer aus WP-381 (`t4-collector-disable-kick`), sonst dokumentierter Neustart im Runbook `docs/betrieb/collector-ca.md`). Nach `retire` wird das Serverzertifikat ebenso exportiert und nachgeladen.
 - [ ] `TestAuditCARolloverKeepsEnrolledCollectorTrust` wird nach `natsedge_integration_test.go` (ohne Tag) überführt und besteht. Integrationstest mit zwei Server-Instanzen (je eigene `CA` und Edge-Worker auf derselben Datenbank) und echtem nats-server, Roll-over per CLI in einem dritten Prozess, kein Neustart: ein danach erneuerter und ein alter (vor dem Roll-over enrollter) Collector verbinden sich; beide Instanzen signieren nach dem Ereignis aus der neuen CA; nach Erneuerung und `retire` verbindet sich der erneuerte Collector weiter. Retest F-102.
 - [ ] `collector_pki_auditdefect_test.go` gelöscht (alle Defekttests überführt); Zeile aus `expected-failures.txt` entfernt; `go test ./internal/discovery/ ./cmd/server/` grün.
 
@@ -6032,7 +6295,7 @@ COL-08;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-425
 - backend/cmd/server/main.go
 - backend/internal/discovery/natsedge_integration_test.go
 - backend/internal/discovery/collector_pki_auditdefect_test.go (gelöscht)
-- docs/betrieb/collector-ca.md (aus `t4-pki-renew-server`)
+- docs/betrieb/collector-ca.md (aus WP-375 (`t4-pki-renew-server`))
 - tests/audit/expected-failures.txt (angelegt in WP-337)
 - docs/traceability.csv
 
@@ -6047,18 +6310,18 @@ COL-08;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-425
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-COL-04;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-426
+COL-04;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-430
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Konsistenter PKI-Export (WP-425 (`t4-edge-pki-export`)); stabile Ableitung der Edge-Secrets bei Master-Key-Rotation (T6, F-158); automatischer, zeitgesteuerter Roll-over.
+**Nicht Bestandteil:** Konsistenter PKI-Export (WP-429 (`t4-edge-pki-export`)); stabile Ableitung der Edge-Secrets bei Master-Key-Rotation (T6, F-158); automatischer, zeitgesteuerter Roll-over.
 
-### WP-427 – Compose: nur 80/443/4222 öffentlich; Firewall-Matrix an Deployment und Kanäle angleichen
+### WP-431 – Compose: nur 80/443/4222 öffentlich; Firewall-Matrix an Deployment und Kanäle angleichen
 
 **Schlüssel:** `t4-compose-ports` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-380 (`t4-collector-disable-kick`), WP-411 (`t4-pki-renew-collector`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-381 (`t4-collector-disable-kick`), WP-414 (`t4-pki-renew-collector`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -6104,15 +6367,15 @@ COL-04;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-426
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-COL-08;[B];D;tests/audit/compose-port-policy.test.sh;WP-427
-PRI-07;Grundsatz (ohne Tag);D;tests/audit/compose-port-policy.test.sh;WP-427
+COL-08;[B];D;tests/audit/compose-port-policy.test.sh;WP-431
+PRI-07;Grundsatz (ohne Tag);D;tests/audit/compose-port-policy.test.sh;WP-431
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** K8s-Ingress und NetworkPolicies; TLS-/ACME-Mängel des Installers (T5).
+**Nicht Bestandteil:** K8s-Ingress und NetworkPolicies; TLS-/ACME-Mängel des Installers (WP-385 (`t5-issuer-order`), WP-419 (`t5-acme-lineage`), WP-420 (`t5-acme-pebble`), WP-440 (`t5-acme-renewal`)).
 
-### WP-428 – Collector-Installation: einheitlicher Binary-Name und Identitätspfad, cosign für Auto-Updates
+### WP-432 – Collector-Installation: einheitlicher Binary-Name und Identitätspfad, cosign für Auto-Updates
 
 **Schlüssel:** `t4-col-install` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
@@ -6131,7 +6394,7 @@ PRI-07;Grundsatz (ohne Tag);D;tests/audit/compose-port-policy.test.sh;WP-427
 | [F-260](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-260) | P3 | Auto-Update braucht cosign auf dem Host, den der VM-Installer nicht bereitstellt | mit | WP-148 |
 | [F-261](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-261) | P3 | Widersprüchliche Capability-Doku (icmp.go vs. Dockerfile) | mit | WP-149 |
 
-**Schließt Audit-WPs:** [WP-156](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-156) (TEILWEISE BESTANDEN, Teil), [WP-148](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-148) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-148](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-148) (TEILWEISE BESTANDEN, Teil), [WP-156](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-156) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** `install-vm.sh:456` setzt `RETICORA_CREDENTIALS_PATH=$INSTALL_DIR/credentials.json` (/opt/…), das Enrollment schreibt nach `/var/lib/reticora-collector/credentials.json` (`edgecore/enrollment/enrollment.go:18`); die Unit startet `$INSTALL_DIR/collector` (`:607`), `reticora-collector` liegt nicht im PATH; das Image liefert `/usr/local/bin/collector` (`collector/Dockerfile:19`, `:31`): der UI-Befehl `reticora-collector enroll …` scheitert oder die Identität landet, wo der Dienst sie nicht liest (F-110). Der VM-Installer stellt cosign nicht bereit, jedes Update scheitert mit „executable file not found“ (F-260). `icmp.go:19-20` spricht von einer File-Capability, das Dockerfile setzt keine (F-261).
 
@@ -6169,21 +6432,21 @@ PRI-07;Grundsatz (ohne Tag);D;tests/audit/compose-port-policy.test.sh;WP-427
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-INS-06;[B];D;tests/audit/collector-install-cli.test.sh;WP-428
-COL-06;[B], Air-Gapped [O];D;tests/install-vm-cosign.test.sh;WP-428
+INS-06;[B];D;tests/audit/collector-install-cli.test.sh;WP-432
+COL-06;[B], Air-Gapped [O];D;tests/install-vm-cosign.test.sh;WP-432
 ```
 
 **Entscheidungsbedarf:** [E-31](../entscheidungen.md#e-31)
 
 **Nicht Bestandteil:** OVA, Windows-Installer und Air-Gap-Bundle (COL-06 [O], E-03); Selbstupdate-Nachweis (WP-546 (`t4-col-update-nachweis`)).
 
-### WP-429 – SIM-01-Demo nutzbar: Demo-Nutzer im Dev-Realm, Standort und Suchindex der Seed-CIs
+### WP-433 – SIM-01-Demo nutzbar: Demo-Nutzer im Dev-Realm, Standort und Suchindex der Seed-CIs
 
 **Schlüssel:** `t4-seed-demo` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** LT · **Aufwand:** 1,5 PT
 
 **Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`)
 
-**Vorgezogen:** nach Schwere K4 Funktions-, Validierungs- und Bedienmängel; als Voraussetzung von WP-433 (`t4-load-scenarios`) in K3 eingeordnet.
+**Vorgezogen:** nach Schwere K4 Funktions-, Validierungs- und Bedienmängel; als Voraussetzung von WP-437 (`t4-load-scenarios`) in K3 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -6235,21 +6498,21 @@ COL-06;[B], Air-Gapped [O];D;tests/install-vm-cosign.test.sh;WP-428
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SIM-01;[B], Teilumfang [P2];LT;backend/cmd/seed/seed_integration_test.go;WP-429
-NFR-10;[Q];LT;backend/cmd/seed/seed_integration_test.go;WP-429
+SIM-01;[B], Teilumfang [P2];LT;backend/cmd/seed/seed_integration_test.go;WP-433
+NFR-10;[Q];LT;backend/cmd/seed/seed_integration_test.go;WP-433
 ```
 
 **Entscheidungsbedarf:** [E-34](../entscheidungen.md#e-34); [E-17](../entscheidungen.md#e-17)
 
-**Nicht Bestandteil:** Webhook- und Review-Payload-Inhalte des Seeds: SIM-01 verlangt 3 Reviews und einen Echo-Webhook (vorhanden), keine Payload-Inhalte; kein Defekt zugeordnet. [P2]-Teile von SIM-01; NFR-01-Volumen-Optionen (WP-435 (`t4-load-report`)).
+**Nicht Bestandteil:** Webhook- und Review-Payload-Inhalte des Seeds: SIM-01 verlangt 3 Reviews und einen Echo-Webhook (vorhanden), keine Payload-Inhalte; kein Defekt zugeordnet. [P2]-Teile von SIM-01; NFR-01-Volumen-Optionen (WP-439 (`t4-load-report`)).
 
-### WP-430 – Identitätssuche mit MACs indexbasiert unter RLS (Seitentabelle)
+### WP-434 – Identitätssuche mit MACs indexbasiert unter RLS (Seitentabelle)
 
 **Schlüssel:** `t4-identity-mac-index` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** LT · **Aufwand:** 2,0 PT
 
 **Voraussetzungen (gemergt):** keine (außer den Prüfrahmen-WPs, Konvention 11)
 
-**Vorgezogen:** nach Schwere K4 Funktions-, Validierungs- und Bedienmängel; als Voraussetzung von WP-431 (`t4-attr-filter-index`), WP-432 (`t4-explain-budget`), WP-433 (`t4-load-scenarios`) in K3 eingeordnet.
+**Vorgezogen:** nach Schwere K4 Funktions-, Validierungs- und Bedienmängel; als Voraussetzung von WP-435 (`t4-attr-filter-index`), WP-436 (`t4-explain-budget`), WP-437 (`t4-load-scenarios`) in K3 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -6261,7 +6524,7 @@ NFR-10;[Q];LT;backend/cmd/seed/seed_integration_test.go;WP-429
 |---|---|---|---|---|
 | [F-114](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-114) | P2 | JSONB-Prädikate unter RLS nicht indexfähig: Attribut-Ausdrucksindex ungenutzt, Identitätssuche mit MACs als org-weiter Seq Scan | Teil | WP-204, WP-205 |
 
-**Schließt Audit-WPs:** [WP-205](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-205) (TEILWEISE BESTANDEN, Teil), [WP-204](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-204) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-204](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-204) (TEILWEISE BESTANDEN, Teil), [WP-205](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-205) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** `identityFilter` (`discovery/pg_repository.go:903-946`) sucht Fingerprint-MACs per `attributes @> ANY($n::jsonb[])`; `jsonb_contains` ist nicht leakproof und wird unter der RLS-Barriere nicht zur Index-Bedingung, ein einziger solcher Term kippt das ganze OR: Identitäts-Lookup mit MAC → „Seq Scan on ci“ bei 10.000 CIs, auf dem Queue-Pfad je wiederentdecktem Gerät (F-114, Identitätsteil; SR-04-Klasse).
 
@@ -6298,20 +6561,20 @@ NFR-10;[Q];LT;backend/cmd/seed/seed_integration_test.go;WP-429
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NFR-01;[B], Teilumfang [P5];LT;backend/internal/discovery/scale_integration_test.go;WP-430
+NFR-01;[B], Teilumfang [P5];LT;backend/internal/discovery/scale_integration_test.go;WP-434
 ```
 
 **Entscheidungsbedarf:** [E-08](../entscheidungen.md#e-08); [E-09](../entscheidungen.md#e-09)
 
-**Nicht Bestandteil:** Attributfilter (WP-431 (`t4-attr-filter-index`)); Lastszenario rediscover (WP-433 (`t4-load-scenarios`)).
+**Nicht Bestandteil:** Attributfilter (WP-435 (`t4-attr-filter-index`)); Lastszenario rediscover (WP-437 (`t4-load-scenarios`)).
 
-### WP-431 – Indizierte Attributfilter unter RLS indexfähig
+### WP-435 – Indizierte Attributfilter unter RLS indexfähig
 
 **Schlüssel:** `t4-attr-filter-index` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** LT · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-430 (`t4-identity-mac-index`)
+**Voraussetzungen (gemergt):** WP-434 (`t4-identity-mac-index`)
 
-**Vorgezogen:** nach Schwere K4 Funktions-, Validierungs- und Bedienmängel; als Voraussetzung von WP-434 (`t4-cilist-perf`), WP-432 (`t4-explain-budget`) in K3 eingeordnet.
+**Vorgezogen:** nach Schwere K4 Funktions-, Validierungs- und Bedienmängel; als Voraussetzung von WP-438 (`t4-cilist-perf`), WP-436 (`t4-explain-budget`) in K3 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -6356,18 +6619,18 @@ NFR-01;[B], Teilumfang [P5];LT;backend/internal/discovery/scale_integration_test
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-ABN-02;[Q];LT;backend/internal/ci/attr_filter_plan_integration_test.go;WP-431
+ABN-02;[Q];LT;backend/internal/ci/attr_filter_plan_integration_test.go;WP-435
 ```
 
 **Entscheidungsbedarf:** [E-73](entscheidungen.md#e-73) Indizierte Attributfilter unter Row-Level-Security (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Globale Volltextsuche unter RLS; MAC-Identität (WP-430 (`t4-identity-mac-index`)).
+**Nicht Bestandteil:** Globale Volltextsuche unter RLS; MAC-Identität (WP-434 (`t4-identity-mac-index`)).
 
-### WP-432 – EXPLAIN-Prüfung nach ABN-02 auf Produkt-SQL mit Indexnamen, deterministisch
+### WP-436 – EXPLAIN-Prüfung nach ABN-02 auf Produkt-SQL mit Indexnamen, deterministisch
 
 **Schlüssel:** `t4-explain-budget` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** LT · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-430 (`t4-identity-mac-index`), WP-431 (`t4-attr-filter-index`)
+**Voraussetzungen (gemergt):** WP-434 (`t4-identity-mac-index`), WP-435 (`t4-attr-filter-index`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -6408,18 +6671,18 @@ ABN-02;[Q];LT;backend/internal/ci/attr_filter_plan_integration_test.go;WP-431
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-ABN-02;[Q];LT;backend/internal/ci/querybudget_integration_test.go;WP-432
+ABN-02;[Q];LT;backend/internal/ci/querybudget_integration_test.go;WP-436
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Indexänderungen (WP-430 (`t4-identity-mac-index`), WP-431 (`t4-attr-filter-index`)); k6-Szenarien (WP-433 (`t4-load-scenarios`)).
+**Nicht Bestandteil:** Indexänderungen (WP-434 (`t4-identity-mac-index`), WP-435 (`t4-attr-filter-index`)); k6-Szenarien (WP-437 (`t4-load-scenarios`)).
 
-### WP-433 – Lastszenarien: globale Suche, Attributfilter, Beziehungssuche, Wiederentdeckung; Integritätsprüfung nach dem Lauf
+### WP-437 – Lastszenarien: globale Suche, Attributfilter, Beziehungssuche, Wiederentdeckung; Integritätsprüfung nach dem Lauf
 
 **Schlüssel:** `t4-load-scenarios` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** LT · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-429 (`t4-seed-demo`), WP-430 (`t4-identity-mac-index`)
+**Voraussetzungen (gemergt):** WP-433 (`t4-seed-demo`), WP-434 (`t4-identity-mac-index`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -6443,13 +6706,13 @@ ABN-02;[Q];LT;backend/internal/ci/querybudget_integration_test.go;WP-432
 
 **Akzeptanzkriterien:**
 
-- [ ] Ursachenbestätigung F-118 (Hypothese) zuerst: `ingest.js SCENARIO=rediscover` läuft per workflow_dispatch gegen den Commit vor WP-430 (`t4-identity-mac-index`) und gegen HEAD; Plankosten je Record, Durchsatz und Verzögerung im PR; Hypothese bestätigt oder widerlegt.
+- [ ] Ursachenbestätigung F-118 (Hypothese) zuerst: `ingest.js SCENARIO=rediscover` läuft per workflow_dispatch gegen den Commit vor WP-434 (`t4-identity-mac-index`) und gegen HEAD; Plankosten je Record, Durchsatz und Verzögerung im PR; Hypothese bestätigt oder widerlegt.
 - [ ] `api.js`: Szenarien `global_search` (`GET /api/v1/search?q=` gegen den nach dem Seed reindizierten Korpus), `attr_filter` (Filter auf ein durchsuchbares JSONB-Attribut; der Seed legt Definition und Werte an) und `relationships` (Beziehungssuche je CI) mit Schwelle p95 < 500 ms; das bisherige `search` heißt `list_name_filter`.
 - [ ] `ingest.js` mit `SCENARIO=rediscover`: SNMP-artige Records (primäre MAC, Interface-MACs, LLDP-Nachbarn) für die geseedeten Geräte bei 200 rec/s; Schwellen: Verzögerung < 30 s, 0 neue CIs, 0 fehlende Records.
 - [ ] `load.yml`: nach dem Seed `POST /api/v1/search/reindex` und `ANALYZE`; je Szenario ein Job mit frischer DB (wie bisher in `load.yml`); nach jedem Lauf `tests/integrity-check.sql` mit 0 Verletzungen als eigener Schritt.
 - [ ] `integrity-check.sql` ergänzt um IP-/Hostname-Duplikate schwacher Identitäten und CI→location/site/room/type sowie rack→room über Org-Grenzen; Selbsttest `ci/integrity_check_integration_test.go` injiziert je Verletzungsklasse eine Zeile (als Owner) → count > 0, sauberer Seed → 0 (Retest F-281).
 - [ ] Retest F-116 und F-118: die neuen Szenarien bestehen in zwei aufeinanderfolgenden `load.yml`-Läufen auf der E-58-Umgebung (Lauf-IDs im PR); `seed_integration_test.go` prüft Attribute und Beziehungen des Last-Seeds.
-- [ ] Ausführbarkeit der Ursachenbestätigung F-118 (AK1): `.github/workflows/load.yml` erhält den workflow_dispatch-Input `server_ref` (Standard: der Lauf-Commit). Server und Seed werden aus `server_ref` gebaut. `tests/load/*.js` und `tests/integrity-check.sql` stammen immer aus dem Lauf-Commit. Vergleich: ein Lauf mit `server_ref` = Elterncommit des Merges von WP-430 (`t4-identity-mac-index`) und ein Lauf mit HEAD, beide mit `ingest.js SCENARIO=rediscover`. Lauf-IDs, Plankosten je Record, Durchsatz und Verzögerung stehen im PR. Negativfall: ein ungültiger `server_ref` bricht vor dem Seed mit einer Fehlermeldung ab.
+- [ ] Ausführbarkeit der Ursachenbestätigung F-118 (AK1): `.github/workflows/load.yml` erhält den workflow_dispatch-Input `server_ref` (Standard: der Lauf-Commit). Server und Seed werden aus `server_ref` gebaut. `tests/load/*.js` und `tests/integrity-check.sql` stammen immer aus dem Lauf-Commit. Vergleich: ein Lauf mit `server_ref` = Elterncommit des Merges von WP-434 (`t4-identity-mac-index`) und ein Lauf mit HEAD, beide mit `ingest.js SCENARIO=rediscover`. Lauf-IDs, Plankosten je Record, Durchsatz und Verzögerung stehen im PR. Negativfall: ein ungültiger `server_ref` bricht vor dem Seed mit einer Fehlermeldung ab.
 
 **Dateien (10 Einträge, Migration = 2):**
 
@@ -6475,24 +6738,24 @@ ABN-02;[Q];LT;backend/internal/ci/querybudget_integration_test.go;WP-432
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NFR-10;[Q];LT;tests/load/api.js;WP-433
-ABN-02;[Q];LT;tests/load/api.js;WP-433
-NFR-02;[B];LT;tests/load/api.js;WP-433
-NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-433
-ABN-03;[Q], jeweilige Phase;LT;backend/internal/ci/integrity_check_integration_test.go;WP-433
+NFR-10;[Q];LT;tests/load/api.js;WP-437
+ABN-02;[Q];LT;tests/load/api.js;WP-437
+NFR-02;[B];LT;tests/load/api.js;WP-437
+NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-437
+ABN-03;[Q], jeweilige Phase;LT;backend/internal/ci/integrity_check_integration_test.go;WP-437
 ```
 
 **Entscheidungsbedarf:** [E-17](../entscheidungen.md#e-17); [E-31](../entscheidungen.md#e-31); [E-58](../entscheidungen.md#e-58)
 
-**Nicht Bestandteil:** Behebung von Budgetverfehlungen (WP-434 (`t4-cilist-perf`)); Bericht und Archivierung (WP-435 (`t4-load-report`)).
+**Nicht Bestandteil:** Behebung von Budgetverfehlungen (WP-438 (`t4-cilist-perf`)); Bericht und Archivierung (WP-439 (`t4-load-report`)).
 
-### WP-434 – GET /cis unter Mischlast: Ursache belegen, p95 < 500 ms für Liste und Suche
+### WP-438 – GET /cis unter Mischlast: Ursache belegen, p95 < 500 ms für Liste und Suche
 
 **Schlüssel:** `t4-cilist-perf` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** LT · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-431 (`t4-attr-filter-index`), WP-433 (`t4-load-scenarios`)
+**Voraussetzungen (gemergt):** WP-435 (`t4-attr-filter-index`), WP-437 (`t4-load-scenarios`)
 
-**Vorgezogen:** nach Schwere K4 Funktions-, Validierungs- und Bedienmängel; als Voraussetzung von WP-435 (`t4-load-report`) in K3 eingeordnet.
+**Vorgezogen:** nach Schwere K4 Funktions-, Validierungs- und Bedienmängel; als Voraussetzung von WP-439 (`t4-load-report`) in K3 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -6513,7 +6776,7 @@ ABN-03;[Q], jeweilige Phase;LT;backend/internal/ci/integrity_check_integration_t
 - [ ] Verbindliche Ursachenbestätigung zuerst: `api.js`-Lauf mit `pg_stat_statements`, `auto_explain` (log_min_duration 100 ms) und CPU-Profil des Servers (pprof) auf der E-58-Umgebung; Anteile von COUNT, Sortierung, RLS-Prädikaten und Serialisierung je Request im PR dokumentiert; Hypothese bestätigt oder widerlegt.
 - [ ] Behebung der belegten Ursache in `ci/pg_repository.go`/`ci/handler.go` (z. B. Zählung begrenzt oder nur auf Anforderung, Index für die Standardsortierung per Migration) ohne API-Bruch; eine geänderte Semantik von `total` nur spec-first in `openapi.yaml` mit `schema.d.ts`.
 - [ ] Statement-Budget-Test `ci/list_budget_integration_test.go`: GET /cis bei 10.000 CIs → feste Anzahl Statements, als `reticora_app` kein org-weiter Sort ohne Index.
-- [ ] Retest F-117: drei aufeinanderfolgende `load.yml`-Läufe mit dem Szenario-Mix von Lauf 1 → exit 0, `list` und `global_search` p95 < 500 ms; k6-Zusammenfassungen als Artefakte (Archivierung in WP-435 (`t4-load-report`)).
+- [ ] Retest F-117: drei aufeinanderfolgende `load.yml`-Läufe mit dem Szenario-Mix von Lauf 1 → exit 0, `list` und `global_search` p95 < 500 ms; k6-Zusammenfassungen als Artefakte (Archivierung in WP-439 (`t4-load-report`)).
 - [ ] Bestehende CI-Listen- und Filtertests sowie `TestCIQueryBudget` grün.
 
 **Dateien (8 Einträge, Migration = 2):**
@@ -6537,18 +6800,18 @@ ABN-03;[Q], jeweilige Phase;LT;backend/internal/ci/integrity_check_integration_t
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-434
+NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-438
 ```
 
 **Entscheidungsbedarf:** [E-17](../entscheidungen.md#e-17); [E-58](../entscheidungen.md#e-58)
 
 **Nicht Bestandteil:** Listen und Suche über 25.000 Objekten (E-17, Folge-WP vor GA); dedizierter Referenzhost (SR-06).
 
-### WP-435 – Lastbericht: drei archivierte Läufe, 1.000 Records/s und NFR-01-Volumina, Folge-WPs mit Kennung
+### WP-439 – Lastbericht: drei archivierte Läufe, 1.000 Records/s und NFR-01-Volumina, Folge-WPs mit Kennung
 
 **Schlüssel:** `t4-load-report` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** LT · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-432 (`t4-explain-budget`), WP-433 (`t4-load-scenarios`), WP-434 (`t4-cilist-perf`)
+**Voraussetzungen (gemergt):** WP-436 (`t4-explain-budget`), WP-437 (`t4-load-scenarios`), WP-438 (`t4-cilist-perf`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -6564,7 +6827,7 @@ NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-434
 |---|---|---|---|---|
 | [F-279](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-279) | P3 | Der Lastbericht lässt 1.000 Records/s und die Volumina aus NFR-01 aus | schließt | WP-206 |
 
-**Schließt Audit-WPs:** [WP-206](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-206) (TEILWEISE BESTANDEN, schließt), [WP-204](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-204) (TEILWEISE BESTANDEN, schließt)
+**Schließt Audit-WPs:** [WP-204](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-204) (TEILWEISE BESTANDEN, schließt), [WP-206](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-206) (TEILWEISE BESTANDEN, schließt)
 
 **Problem:** `docs/acceptance/lasttest-g1.md` berichtet nur 200 rec/s und 10.000 Objekte; 1.000 rec/s (NFR-03, Phase 5) ist weder berichtet noch ausdrücklich verschoben, die NFR-01-Volumina (50.000 Interfaces, 200.000 IPs, 100.000 Beziehungen je Org, 500 Orgs) fehlen; der Seed erzeugt 1 Interface/IP je CI und 2 Orgs (F-279). NFR-10 verlangt den Lasttest gegen NFR-01 bis NFR-03 vor G1 mit Ergebnissen im Repo; die k6-Zusammenfassungen sind nicht versioniert, die offenen Punkte nennen keine Folge-WP-Kennung (offene Nachweise WP-204, WP-206).
 
@@ -6597,86 +6860,22 @@ NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-434
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NFR-10;[Q];LT;tests/load/api.js;WP-435
-NFR-01;[B], Teilumfang [P5];LT;backend/cmd/seed/seed_integration_test.go;WP-435
-NFR-02;[B];LT;tests/load/api.js;WP-435
-NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-435
-ABN-02;[Q];LT;tests/load/api.js;WP-435
+NFR-10;[Q];LT;tests/load/api.js;WP-439
+NFR-01;[B], Teilumfang [P5];LT;backend/cmd/seed/seed_integration_test.go;WP-439
+NFR-02;[B];LT;tests/load/api.js;WP-439
+NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-439
+ABN-02;[Q];LT;tests/load/api.js;WP-439
 ```
 
 **Entscheidungsbedarf:** [E-17](../entscheidungen.md#e-17); [E-58](../entscheidungen.md#e-58)
 
 **Nicht Bestandteil:** Dedizierter Referenzhost (SR-06, vor GA); Messung von 1.000 rec/s als Budget (Phase 5).
 
-### WP-436 – Pebble-Integrationstest des TLS-Domain-Pfads (Ausstellung, Wiederholung, Lesbarkeit, Issuer-Prüfung)
-
-**Schlüssel:** `t5-acme-pebble` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 1,5 PT
-
-**Voraussetzungen (gemergt):** WP-416 (`t5-acme-lineage`)
-
-**Vorgezogen:** nach Schwere K5 Nachweislücken; als Voraussetzung von WP-437 (`t5-acme-renewal`) in K3 eingeordnet.
-
-| ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
-|---|---|---|---|---|---|---|
-| INS-02 | [B] | FEHLGESCHLAGEN | schließt | [WP-095](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-095) | `docs/audit/01-installation-stack.md:72` | `docs/spec/katalog-v3/01-installation-stack.md:31` |
-| TEC-09 | [B] | FEHLGESCHLAGEN | Teil | [WP-094](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-094) | `docs/audit/01-installation-stack.md:60` | `docs/spec/katalog-v3/01-installation-stack.md:8` |
-
-**Befunde:**
-
-| Befund | Prio | Titel | Beitrag | Betroffene WPs |
-|---|---|---|---|---|
-| [F-033](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-033) | P1 | certbot certonly kann das Let's-Encrypt-Zertifikat nicht ablegen, weil der Bootstrap-Platzhalter letsencrypt/live/<domain>/ belegt | Teil | WP-094 |
-| [F-034](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-034) | P1 | Von certbot ausgestellter Schlüssel und Kette sind für den unprivilegierten nginx-Nutzer (uid 101) des Frontends unlesbar | Teil | WP-094 |
-| [F-035](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-035) | P1 | OIDC-Issuer-Prüfung läuft vor dem Start des Frontends (Issuer-Proxy), daher brechen Domain-/TLS-Installationen ab | Teil | WP-095 |
-
-**Schließt Audit-WPs:** [WP-095](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-095) (FEHLGESCHLAGEN, schließt), [WP-094](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-094) (FEHLGESCHLAGEN, Teil), [WP-092](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-092) (TEILWEISE BESTANDEN, Teil)
-
-**Problem:** Ausstellung, Wiederholung, Lesbarkeit für nginx und die Issuer-Prüfungen im TLS-Domain-Pfad sind nur mit gestubbtem certbot bzw. curl belegt (tests/install-cloud-acme.test.sh, tests/install-cloud-issuer-order.test.sh); kein Lauf gegen einen echten ACME-Server (offene Nachweise WP-094, WP-095). Der ACME-Endpunkt ist im Installer nicht konfigurierbar; der certbot-Container vertraut nur öffentlichen CAs, RETICORA_TLS_CA_BUNDLE (install-cloud.sh:783-788) wirkt nur auf die openssl-Prüfungen.
-
-**Akzeptanzkriterien:**
-
-- [ ] install-cloud.sh liest RETICORA_ACME_SERVER (Standard: Let's-Encrypt-Produktion) und übergibt ihn als --server an certonly und an die Renew-Schleife; RETICORA_ACME_CA_BUNDLE wird in den certbot-Container gemountet und dort als REQUESTS_CA_BUNDLE gesetzt (Vertrauensanker für die ACME-TLS-Verbindung); RETICORA_TLS_CA_BUNDLE bleibt für die openssl-Prüfungen. Ohne die Variablen ist der Aufruf unverändert (Fall in tests/install-cloud-helpers.test.sh).
-- [ ] Pebble-Integrationstest tests/install-acme-pebble.test.sh (Pebble mit challtestsrv aus tests/fixtures/pebble/, certbot/certbot:v2.11.0, Installer mit RETICORA_TLS_DOMAIN, RETICORA_ACME_SERVER, RETICORA_ACME_CA_BUNDLE und RETICORA_TLS_CA_BUNDLE): (a) Erstinstallation mit vorhandenem Bootstrap: live/<domain>/fullchain.pem verkettet zur Pebble-Root, validate_tls_material <domain> 1 besteht; (b) zweiter Installerlauf: Pebble-Order-Zähler unverändert, kein <domain>-0001, rc 0; (c) nach Ausstellung und nach 'certbot renew --force-renewal': 'docker compose exec frontend cat /etc/letsencrypt/live/<domain>/privkey.pem' (bzw. der Pfad aus der Variante von WP-416 (`t5-acme-lineage`)) gelingt, 'nginx -t' als uid 101 besteht, 'docker compose restart frontend' wird healthy und liefert die Pebble-Kette; (d) das Installer-Log enthält beide erfolgreichen Issuer-Prüfungen inkl. 'OIDC issuer is reachable from the backend container' (Nachweis F-035 im TLS-Domain-Pfad). Negativfall: Challenge scheitert (kein DNS-Eintrag in challtestsrv) → Platzhalter bleibt, Installer rc 0 mit Warnung.
-- [ ] .github/workflows/install-smoke.yml: neuer Job tls-domain-pebble (ubuntu-24.04) führt tests/install-acme-pebble.test.sh aus und lädt das Protokoll als Artefakt hoch; Pfadfilter für push und pull_request um tests/fixtures/pebble/** ergänzt; Lauf im PR grün, Run-ID im PR.
-- [ ] docs/troubleshooting-installation.md beschreibt RETICORA_ACME_SERVER und RETICORA_ACME_CA_BUNDLE (Staging- und Test-CAs).
-- [ ] Regression: tests/install-cloud-acme.test.sh, tests/install-cloud-issuer-order.test.sh, tests/install-cloud-helpers.test.sh und install-smoke-Matrix grün.
-
-**Dateien (9 Einträge, Migration = 2):**
-
-- install-cloud.sh
-- deploy/docker-compose/docker-compose.yml
-- tests/install-cloud-helpers.test.sh
-- tests/install-acme-pebble.test.sh (neu)
-- tests/fixtures/pebble/pebble-config.json (neu)
-- tests/fixtures/pebble/docker-compose.pebble.yml (neu)
-- .github/workflows/install-smoke.yml
-- docs/troubleshooting-installation.md
-- docs/traceability.csv
-
-**Migration/RLS:** Keine Migration.
-
-**Tests:**
-
-- tests/install-acme-pebble.test.sh (Erstinstallation, Wiederholung, uid 101 nach Ausstellung und Erneuerung, Issuer-Log, Challenge-Fehler)
-- tests/install-cloud-helpers.test.sh (ACME-Server und CA-Bundle optional)
-- install-smoke.yml Job tls-domain-pebble
-
-**Traceability (`docs/traceability.csv`):**
-
-```text
-INS-02;[B];A;tests/install-acme-pebble.test.sh;WP-436
-TEC-09;[B];A;tests/install-acme-pebble.test.sh;WP-436
-```
-
-**Entscheidungsbedarf:** keiner
-
-**Nicht Bestandteil:** Nachladen erneuerter Zertifikate (WP-437 (`t5-acme-renewal`) ergänzt den Pebble-Test um den Erneuerungsfall); Matrixläufe auf dem Release-Kandidaten (WP-595 (`t5-rc-evidence`)).
-
-### WP-437 – Erneuerte Zertifikate ohne Frontend-Neustart ausliefern; Health-Prüfung aller Replikate
+### WP-440 – Erneuerte Zertifikate ohne Frontend-Neustart ausliefern; Health-Prüfung aller Replikate
 
 **Schlüssel:** `t5-acme-renewal` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-436 (`t5-acme-pebble`)
+**Voraussetzungen (gemergt):** WP-420 (`t5-acme-pebble`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -6690,7 +6889,7 @@ TEC-09;[B];A;tests/install-acme-pebble.test.sh;WP-436
 | [F-139](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-139) | P2 | Erneuerte Zertifikate werden nie geladen: kein nginx-Reload nach 'certbot renew' | schließt | WP-094 |
 | [F-288](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-288) | P3 | Health-Prüfung wertet nur den ersten Container je Dienst aus; beendetes Replikat eines skalierten Dienstes besteht | mit | WP-092 |
 
-**Schließt Audit-WPs:** [WP-094](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-094) (FEHLGESCHLAGEN, Teil), [WP-092](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-092) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-092](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-092) (TEILWEISE BESTANDEN, Teil), [WP-094](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-094) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** Die certbot-Schleife (deploy/docker-compose/docker-compose.yml:423, alle 12 h 'certbot renew') erneuert im certbot-Container; nginx lädt das Zertifikat nur beim Start oder per Reload während der Installation (install-cloud.sh:950). Hypothese (ursache_belegt=false): Ein erneuertes Zertifikat wird bis zum Ablauf nicht ausgeliefert, weil kein Hook und kein periodischer Reload Erneuerung und nginx verbinden. tests/install-smoke-health.sh:67 wertet je Dienst nur den ersten Container aus; ein beendetes Replikat eines skalierten Dienstes besteht (F-288). Die Pfadfilter von install-smoke.yml (:13-41) erfassen frontend/docker-entrypoint.d/** und die nginx-Konfiguration nicht.
 
@@ -6708,7 +6907,7 @@ TEC-09;[B];A;tests/install-acme-pebble.test.sh;WP-436
 - frontend/docker-entrypoint.d/30-reticora-cert-reload.sh (neu)
 - frontend/Dockerfile
 - deploy/docker-compose/docker-compose.yml
-- tests/install-acme-pebble.test.sh (angelegt in WP-436)
+- tests/install-acme-pebble.test.sh (angelegt in WP-420)
 - tests/install-smoke-health.sh
 - tests/install-smoke-health.test.sh
 - .github/workflows/install-smoke.yml
@@ -6726,25 +6925,27 @@ TEC-09;[B];A;tests/install-acme-pebble.test.sh;WP-436
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-INS-03;[B];A;tests/install-acme-pebble.test.sh;WP-437
-INS-01;[Q];A;tests/install-smoke-health.test.sh;WP-437
+INS-03;[B];A;tests/install-acme-pebble.test.sh;WP-440
+INS-01;[Q];A;tests/install-smoke-health.test.sh;WP-440
 ```
 
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Zertifikatsverwaltung in Kubernetes (Ingress/cert-manager); Matrixläufe auf dem Release-Kandidaten (WP-595 (`t5-rc-evidence`)).
 
-### WP-438 – Kubernetes-Smoke in kind: Pod Ready mit Master-Key, Negativfälle
+### WP-441 – Kubernetes-Smoke in kind: Pod Ready mit Master-Key, Negativfälle
 
 **Schlüssel:** `t5-k8s-kind-smoke` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-418 (`t5-k8s-required-env`)
+**Voraussetzungen (gemergt):** WP-422 (`t5-k8s-required-env`)
 
-**Vorgezogen:** nach Schwere K5 Nachweislücken; als Voraussetzung von WP-441 (`t5-k8s-wal`) in K3 eingeordnet.
+**Vorgezogen:** nach Schwere K5 Nachweislücken; als Voraussetzung von WP-444 (`t5-k8s-wal`) in K3 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | OPS-03 | [B]; [P5] | TEILWEISE BESTANDEN | Teil | [WP-099](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-099) | `docs/audit/01-installation-stack.md:81` | `docs/spec/katalog-v3/01-installation-stack.md:51` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-099](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-099) (TEILWEISE BESTANDEN, schließt)
 
@@ -6775,18 +6976,18 @@ INS-01;[Q];A;tests/install-smoke-health.test.sh;WP-437
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-OPS-03;[B], [P5];A;tests/k8s/kind-smoke.sh;WP-438
+OPS-03;[B], [P5];A;tests/k8s/kind-smoke.sh;WP-441
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** WAL-Fall (ergänzt WP-441 (`t5-k8s-wal`)); HPA- und Lastverhalten; Postgres-HA ([P5]).
+**Nicht Bestandteil:** WAL-Fall (ergänzt WP-444 (`t5-k8s-wal`)); HPA- und Lastverhalten; Postgres-HA ([P5]).
 
-### WP-439 – Readiness: SMTP-Prüfung und normalisierte Objektspeicher-Adresse
+### WP-442 – Readiness: SMTP-Prüfung und normalisierte Objektspeicher-Adresse
 
 **Schlüssel:** `t5-readiness` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-415 (`t5-sr11-decorator`)
+**Voraussetzungen (gemergt):** WP-418 (`t5-sr11-decorator`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -6838,18 +7039,18 @@ OPS-03;[B], [P5];A;tests/k8s/kind-smoke.sh;WP-438
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-OPS-01;[B];A;backend/cmd/server/startup_readiness_integration_test.go;WP-439
+OPS-01;[B];A;backend/cmd/server/startup_readiness_integration_test.go;WP-442
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Ausfallszenarien mit Last (WP-446 (`t5-outage-smtp-load`)); Kubernetes-Pflichtkonfiguration (WP-418 (`t5-k8s-required-env`)); Änderungen am Installer.
+**Nicht Bestandteil:** Ausfallszenarien mit Last (WP-449 (`t5-outage-smtp-load`)); Kubernetes-Pflichtkonfiguration (WP-422 (`t5-k8s-required-env`)); Änderungen am Installer.
 
-### WP-440 – Backup-Bucket: Replikation in Terraform erzwungen, Versionierung zur Laufzeit geprüft, Scheduler validiert
+### WP-443 – Backup-Bucket: Replikation in Terraform erzwungen, Versionierung zur Laufzeit geprüft, Scheduler validiert
 
 **Schlüssel:** `t5-backup-enforce` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-387 (`t5-image-scan`)
+**Voraussetzungen (gemergt):** WP-389 (`t5-image-scan`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -6904,20 +7105,20 @@ OPS-01;[B];A;backend/cmd/server/startup_readiness_integration_test.go;WP-439
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NFR-05;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-440
-OPS-04;[B], [P5];A;tests/backup-config.test.sh;WP-440
-NFR-09;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-440
+NFR-05;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-443
+OPS-04;[B], [P5];A;tests/backup-config.test.sh;WP-443
+NFR-09;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-443
 ```
 
 **Entscheidungsbedarf:** [E-29](../entscheidungen.md#e-29)
 
-**Nicht Bestandteil:** Provider-Ressourcen für Buckets (Terraform [P5] nach OPS-03); Restore-Nachweis (WP-442 (`t5-restore-rpo`)); Compose-Kettennachweis (WP-544 (`t5-backup-chain-evidence`)).
+**Nicht Bestandteil:** Provider-Ressourcen für Buckets (Terraform [P5] nach OPS-03); Restore-Nachweis (WP-445 (`t5-restore-rpo`)); Compose-Kettennachweis (WP-544 (`t5-backup-chain-evidence`)).
 
-### WP-441 – Kubernetes: WAL-Archivierung der Datenbankseite mit pgBackRest
+### WP-444 – Kubernetes: WAL-Archivierung der Datenbankseite mit pgBackRest
 
 **Schlüssel:** `t5-k8s-wal` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-438 (`t5-k8s-kind-smoke`), WP-440 (`t5-backup-enforce`)
+**Voraussetzungen (gemergt):** WP-441 (`t5-k8s-kind-smoke`), WP-443 (`t5-backup-enforce`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -6952,7 +7153,7 @@ NFR-09;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-440
 - deploy/k8s/overlays/prod/kustomization.yaml
 - tests/k8s/fixtures/overlay-wal/kustomization.yaml (neu)
 - .github/workflows/ci.yml
-- tests/k8s/kind-smoke.sh (angelegt in WP-438)
+- tests/k8s/kind-smoke.sh (angelegt in WP-441)
 - tests/audit/ops-config.test.sh
 - tests/audit/expected-failures.txt (angelegt in WP-337)
 - docs/backup-dr.md
@@ -6969,15 +7170,15 @@ NFR-09;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-440
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-OPS-04;[B], [P5];A;tests/k8s/kind-smoke.sh;WP-441
-NFR-05;[B];A;tests/k8s/kind-smoke.sh;WP-441
+OPS-04;[B], [P5];A;tests/k8s/kind-smoke.sh;WP-444
+NFR-05;[B];A;tests/k8s/kind-smoke.sh;WP-444
 ```
 
 **Entscheidungsbedarf:** [E-29](../entscheidungen.md#e-29); [E-74](entscheidungen.md#e-74) OPS-04 in Kubernetes: Datenbankseite der WAL-Archivierung (offen, Empfehlung als Übergangsregel)
 
 **Nicht Bestandteil:** Postgres-HA, Read-Replicas, nächtlicher PITR-Test in Kubernetes ([P5]).
 
-### WP-442 – Restore-Nachweis: diskriminierende RPO-Prüfung und Messwerte aus dem Standardlauf
+### WP-445 – Restore-Nachweis: diskriminierende RPO-Prüfung und Messwerte aus dem Standardlauf
 
 **Schlüssel:** `t5-restore-rpo` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
 
@@ -7028,15 +7229,15 @@ NFR-05;[B];A;tests/k8s/kind-smoke.sh;WP-441
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NFR-05;[B];A;tests/restore-pitr-config.test.sh;WP-442
-OPS-04;[B], [P5];A;tests/restore-pitr.sh;WP-442
+NFR-05;[B];A;tests/restore-pitr-config.test.sh;WP-445
+OPS-04;[B], [P5];A;tests/restore-pitr.sh;WP-445
 ```
 
 **Entscheidungsbedarf:** [E-29](../entscheidungen.md#e-29)
 
 **Nicht Bestandteil:** Nächtlicher PITR-Restore-Test in Kubernetes und Read-Replicas ([P5]).
 
-### WP-443 – Ladbare Alertmanager-Konfiguration, promtool-Regeltests, NoSuccess für nie erfolgreiche Worker
+### WP-446 – Ladbare Alertmanager-Konfiguration, promtool-Regeltests, NoSuccess für nie erfolgreiche Worker
 
 **Schlüssel:** `t5-alerting-config` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
 
@@ -7089,18 +7290,18 @@ OPS-04;[B], [P5];A;tests/restore-pitr.sh;WP-442
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-OPS-05;[B];A;tests/monitoring-config.test.sh;WP-443
+OPS-05;[B];A;tests/monitoring-config.test.sh;WP-446
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Metriken der nicht instrumentierten Worker (WP-444 (`t5-worker-metrics`)); NTF-Anbindung (WP-445 (`t5-ntf-bridge`)).
+**Nicht Bestandteil:** Metriken der nicht instrumentierten Worker (WP-447 (`t5-worker-metrics`)); NTF-Anbindung (WP-448 (`t5-ntf-bridge`)).
 
-### WP-444 – Metrikvertrag für alle registrierten Worker; Offline-Detector unter der Schalterkonvention
+### WP-447 – Metrikvertrag für alle registrierten Worker; Offline-Detector unter der Schalterkonvention
 
 **Schlüssel:** `t5-worker-metrics` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-418 (`t5-k8s-required-env`), WP-421 (`t6-job02-notices`), WP-439 (`t5-readiness`), WP-443 (`t5-alerting-config`)
+**Voraussetzungen (gemergt):** WP-422 (`t5-k8s-required-env`), WP-425 (`t6-job02-notices`), WP-442 (`t5-readiness`), WP-446 (`t5-alerting-config`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -7114,7 +7315,7 @@ OPS-05;[B];A;tests/monitoring-config.test.sh;WP-443
 | [F-133](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-133) | P2 | Vier registrierte Worker exportieren keine Lauf-/Fehler-/Last-Success-Metriken; Worker-Backlog nur für 3 von 11 | schließt | WP-103 |
 | [F-289](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-289) | P3 | Offline-Detector-Schalter umgeht die Worker-Konvention; dokumentierter Konventionsname wird stillschweigend ignoriert, Schalter in Compose/K8s nicht setzbar | mit | WP-098 |
 
-**Schließt Audit-WPs:** [WP-103](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-103) (FEHLGESCHLAGEN, Teil)
+**Schließt Audit-WPs:** [WP-103](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-103) (FEHLGESCHLAGEN, Teil), [WP-157](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-157) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** nats_edge (backend/internal/discovery/natsedge.go), credential_bundles (backend/internal/credential/bundle.go) und discovery_scopes (backend/internal/discovery/scope_handler.go) rufen ObserveWorkerRun nie auf; main.go:582-593 loggt ihre Fehler nur. Der jobs-Worker (Queue.Run, backend/internal/jobs/queue.go:271, registriert in main.go:600) exportiert nur reticora_job_failures_total und reticora_job_backlog, die keine Regel nutzt; Backlog gibt es für 3 von 11 Workern. Kein registry-weiter Test erzwingt den Vertrag aus docs/ops/workers.md:80. Der Offline-Detector-Schalter heißt RETICORA_OFFLINE_DETECTOR_ENABLED (config.go:178-180), steht nicht in config.WorkerNames, ist in Compose und K8s nicht setzbar; der Konventionsname wird ohne Warnung ignoriert (F-289).
 
@@ -7125,7 +7326,7 @@ OPS-05;[B];A;tests/monitoring-config.test.sh;WP-443
 - [ ] F-289: offline_detector ist in config.WorkerNames registriert (RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED; der Scheduler-Job ci.offline_detector wird nur bei cfg.WorkerEnabled registriert); RETICORA_OFFLINE_DETECTOR_ENABLED bleibt Alias mit Deprecation-Log; ein unbekanntes RETICORA_WORKER_*_ENABLED erzeugt eine Warnung. Fälle in config_test.go: Konventionsname=false → Job nicht registriert; Alias=false → nicht registriert; unbekannter Schalter → Warnung.
 - [ ] Statischer Fall in workers_metrics_test.go: jeder Schalter aus WorkerNames ist in deploy/docker-compose/docker-compose.yml (aus .env setzbar) und deploy/k8s/base/deployment.yaml vorhanden.
 - [ ] docs/ops/workers.md listet alle Worker mit Metriken und Schaltern; Regression: TestEveryRegisteredWorkerHasASwitch, TestDisabledWorkerDoesNotStart, TestWorkerMetricsAreRegisteredAndRecorded und die Tests von ./internal/jobs grün.
-- [ ] Die Systemjob-Funktion aus WP-421 (`t6-job02-notices`) (systemJobs) liegt nach diesem WP neben buildWorkers in backend/cmd/server/workers.go. ci.offline_detector wird darin nur bei cfg.WorkerEnabled(offline_detector) registriert. TestSystemJobsCoverJOB02 (./cmd/server/) bleibt grün.
+- [ ] Die Systemjob-Funktion aus WP-425 (`t6-job02-notices`) (systemJobs) liegt nach diesem WP neben buildWorkers in backend/cmd/server/workers.go. ci.offline_detector wird darin nur bei cfg.WorkerEnabled(offline_detector) registriert. TestSystemJobsCoverJOB02 (./cmd/server/) bleibt grün.
 
 **Dateien (14 Einträge, Migration = 2):**
 
@@ -7155,19 +7356,19 @@ OPS-05;[B];A;tests/monitoring-config.test.sh;WP-443
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-OPS-05;[B];A;backend/cmd/server/workers_metrics_test.go;WP-444
-OPS-02;[B], [P3], [A];A;backend/internal/config/config_test.go;WP-444
+OPS-05;[B];A;backend/cmd/server/workers_metrics_test.go;WP-447
+OPS-02;[B], [P3], [A];A;backend/internal/config/config_test.go;WP-447
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** NTF-Anbindung (WP-445 (`t5-ntf-bridge`)); neue Grafana-Dashboards; Health-Worker `config.WorkerHealth` (WP-479 (`t3-health-worker`) registriert ihn in `buildWorkers`, ohne eigene Auslagerung der Worker-Liste).
+**Nicht Bestandteil:** NTF-Anbindung (WP-448 (`t5-ntf-bridge`)); neue Grafana-Dashboards; Health-Worker `config.WorkerHealth` (WP-480 (`t3-health-worker`) registriert ihn in `buildWorkers`, ohne eigene Auslagerung der Worker-Liste).
 
-### WP-445 – Betriebsalarme über NTF-Kanäle: Alertmanager-Webhook-Brücke
+### WP-448 – Betriebsalarme über NTF-Kanäle: Alertmanager-Webhook-Brücke
 
 **Schlüssel:** `t5-ntf-bridge` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-444 (`t5-worker-metrics`)
+**Voraussetzungen (gemergt):** WP-447 (`t5-worker-metrics`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -7218,18 +7419,18 @@ OPS-02;[B], [P3], [A];A;backend/internal/config/config_test.go;WP-444
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-OPS-05;[B];A;backend/internal/operator/alerts_integration_test.go;WP-445
+OPS-05;[B];A;backend/internal/operator/alerts_integration_test.go;WP-448
 ```
 
 **Entscheidungsbedarf:** [E-75](entscheidungen.md#e-75) OPS-05: Alarmierung des Betriebs über NTF-Kanäle (offen, Empfehlung als Übergangsregel)
 
 **Nicht Bestandteil:** Oberfläche für Betreiberalarme; neue NTF-Kanaltypen.
 
-### WP-446 – Ausfallsuite: SMTP-Szenario und lastbasierter Nachweis 'kein stiller Datenverlust'
+### WP-449 – Ausfallsuite: SMTP-Szenario und lastbasierter Nachweis 'kein stiller Datenverlust'
 
 **Schlüssel:** `t5-outage-smtp-load` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-439 (`t5-readiness`)
+**Voraussetzungen (gemergt):** WP-442 (`t5-readiness`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -7279,14 +7480,14 @@ OPS-05;[B];A;backend/internal/operator/alerts_integration_test.go;WP-445
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-OPS-06;[Q];A;tests/outage/run.sh;WP-446
+OPS-06;[Q];A;tests/outage/run.sh;WP-449
 ```
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
 **Nicht Bestandteil:** Compose-basiertes Collector-Offline-Szenario (WP-587 (`t5-outage-collector`)).
 
-### WP-447 – Traceability: nur Testdateien als Nachweis, Ausnahmeliste statt Selbstverweisen
+### WP-450 – Traceability: nur Testdateien als Nachweis, Ausnahmeliste statt Selbstverweisen
 
 **Schlüssel:** `t5-trace-evidence` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 1,5 PT
 
@@ -7319,7 +7520,7 @@ OPS-06;[Q];A;tests/outage/run.sh;WP-446
 - [ ] F-286: WorkPackagesIn expandiert 'WP-332 – WP-335' zu 4 und 'WP-010 bis WP-012' zu 3 WPs (TestWorkPackagesIn mit Bereichsfällen); der CI-Schritt übergibt PR-Titel und Arbeitspakete-Zeile per Umgebungsvariable an das Go-Programm statt grep.
 - [ ] F-285: README.md:352 beschreibt die implementierte Regel ([B]/[Q] blockierend seit G1, [Pn]/[A] berichtet mit Anzahl ohne Zeile, Ausnahmen in docs/acceptance/g1-ausnahmen.csv).
 - [ ] Regression: alle bisherigen Tests in ./internal/traceability grün; TRACEABILITY_WPS-Prüfung für WP-001..WP-007 grün.
-- [ ] Regression des Korrekturplans: `TRACEABILITY_WPS=WP-336` und eine Bereichsangabe aus dem Korrekturplan (z. B. „WP-595 – WP-597“) werden gegen `docs/plan/g1-korrektur/implementierungsplan.md` aufgelöst und geprüft (Mehrplan-Lesen aus WP-336 (`k-trace`) bleibt erhalten). Die Traceability-Zeilen der Rahmen-WPs bestehen die verschärfte Testdatei-Regel (k-reaudit-*: GATE-02 → `tests/audit/run-auditdefect.test.sh`; WP-600 (`k-gate`) → `tests/rep01-structure.test.sh`). `TestTraceabilityFile` mit beiden Plänen und `TestWorkPackagesIn` mit einem Bereich ab WP-336 sind grün.
+- [ ] Regression des Korrekturplans: `TRACEABILITY_WPS=WP-336` und eine Bereichsangabe aus dem Korrekturplan (z. B. „WP-595 – WP-597“) werden gegen `docs/plan/g1-korrektur/implementierungsplan.md` aufgelöst und geprüft (Mehrplan-Lesen aus WP-336 (`k-trace`) bleibt erhalten). Die Traceability-Zeilen der Rahmen-WPs bestehen die verschärfte Testdatei-Regel (WP-596 (`k-reaudit-1`), WP-597 (`k-reaudit-2`), WP-598 (`k-reaudit-3`) und WP-599 (`k-audit-ext`): GATE-02 → `tests/audit/run-auditdefect.test.sh`; WP-600 (`k-gate`) → `tests/rep01-structure.test.sh`). `TestTraceabilityFile` mit beiden Plänen und `TestWorkPackagesIn` mit einem Bereich ab WP-336 sind grün.
 
 **Dateien (8 Einträge, Migration = 2):**
 
@@ -7341,19 +7542,19 @@ OPS-06;[Q];A;tests/outage/run.sh;WP-446
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-GLO-11;[Q];A;backend/internal/traceability/traceability_test.go;WP-447
-DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-447
+GLO-11;[Q];A;backend/internal/traceability/traceability_test.go;WP-450
+DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-450
 ```
 
 **Entscheidungsbedarf:** [E-30](../entscheidungen.md#e-30); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Status der Ausnahme-IDs in der Gate-Checkliste und Abgleich durch den Gate-Checker (WP-448 (`t5-gate-consistency`)); Entfernen der Ausnahmezeilen nach Lieferung (WP-450 (`t5-pentest-evidence`), WP-451 (`t5-subprocessors`), WP-454 (`t5-abn01-ab`), WP-452 (`t5-v2-ids`); GATE-02 in WP-595 (`t5-rc-evidence`)).
+**Nicht Bestandteil:** Status der Ausnahme-IDs in der Gate-Checkliste und Abgleich durch den Gate-Checker (WP-451 (`t5-gate-consistency`)); Entfernen der Ausnahmezeilen nach Lieferung (WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-457 (`t5-abn01-ab`), WP-455 (`t5-v2-ids`); GATE-02 in WP-595 (`t5-rc-evidence`)).
 
-### WP-448 – Gate-Checkliste ehrlich und maschinell geprüft: Konsistenzprüfung, --final-Modus, Ausnahmeliste (GATE-01/02/03)
+### WP-451 – Gate-Checkliste ehrlich und maschinell geprüft: Konsistenzprüfung, --final-Modus, Ausnahmeliste (GATE-01/02/03)
 
 **Schlüssel:** `t5-gate-consistency` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** G1 · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-447 (`t5-trace-evidence`)
+**Voraussetzungen (gemergt):** WP-450 (`t5-trace-evidence`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -7367,21 +7568,21 @@ DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-447
 |---|---|---|---|---|
 | [F-038](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-038) | P1 | Gate-Checkliste führt CI-13 [B] als PASS trotz offenem und reproduziertem Defekt SR-11 | schließt | WP-213 |
 | [F-040](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-040) | P1 | Review und Gate führen TEN-09-Isolation als vollständig und 'kein offenes Critical', obwohl ein Site-Scope-Bypass im Rack-Kanal reproduziert ist | Teil | WP-209, WP-213 |
-| [F-120](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-120) | P2 | Gate-Checkliste und Abnahmeprotokoll führen Anforderungen allein per Erklärung des Auftraggebers als PASS | schließt | WP-105, WP-210, WP-212, WP-213 |
+| [F-120](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-120) | P2 | Gate-Checkliste und Abnahmeprotokoll führen Anforderungen allein per Erklärung des Auftraggebers als PASS | Teil | WP-105, WP-210, WP-212, WP-213 |
 | [F-300](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-300) | P3 | rep01-GATE-01-Prüfung erkennt Formatvarianten, Anhangzeilen und offene High-Befunde nicht | mit | WP-210, WP-213 |
 
-**Schließt Audit-WPs:** [WP-209](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-209) (TEILWEISE BESTANDEN, Teil), [WP-210](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-210) (FEHLGESCHLAGEN, Teil), [WP-212](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-212) (TEILWEISE BESTANDEN, Teil), [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) (FEHLGESCHLAGEN, Teil), [WP-105](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-105) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-105](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-105) (TEILWEISE BESTANDEN, Teil), [WP-209](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-209) (TEILWEISE BESTANDEN, Teil), [WP-210](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-210) (FEHLGESCHLAGEN, Teil), [WP-212](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-212) (TEILWEISE BESTANDEN, Teil), [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) (FEHLGESCHLAGEN, Teil)
 
 **Problem:** docs/acceptance/g1-gate.md erklärt G1 für bestanden: CI-13 [B] steht trotz SR-11 auf PASS (:333), TEN-09 'vollständig' (:217, :489) und 'kein offenes Critical' (:55) trotz reproduziertem Rack-Site-Scope-Bypass, 8 [B]/[Q]-IDs stehen allein per Erklärung des Auftraggebers auf PASS (:154-170). tests/rep01-structure.test.sh:57-62 erkennt nur das wörtliche 'Critical' in SR-/PT-Zeilen (F-300), gleicht offene Befunde nicht mit dem Gate-Status ab und scheitert im regulären CI an jeder offenen Critical-Zeile; ein offener Befund lässt sich deshalb nicht ehrlich eintragen, ohne den Job gate für alle PRs rot zu machen.
 
 **Akzeptanzkriterien:**
 
-- [ ] Keine Startbedingung: tests/rep01-structure.test.sh prüft im Normalmodus die Konsistenz (offene Critical-Zeile in Review oder Pentest → GATE-01 und Gate-Ergebnis nicht PASS bzw. nicht 'bestanden'; offene High/Critical-PT-Zeile → GATE-03 nicht PASS; offener SR-/PT-Befund mit genannter Katalog-ID → diese ID nicht PASS); erst der neue Modus --final verlangt kein offenes Critical in Review und Pentest, kein offenes High/Critical im Pentest, jede GATE-Zeile PASS und keine Ausnahme der Art erklaerung oder luecke. Offene Befunde (SR-11, SR-12 aus F-002, SR-13 aus F-003) können damit sofort eingetragen werden (WP-449 (`t5-review-g1`)), ohne den Job gate zu brechen; eine Voraussetzung auf WP-340 (`t1-rack-site-scope`) entfällt.
+- [ ] Keine Startbedingung: tests/rep01-structure.test.sh prüft im Normalmodus die Konsistenz (offene Critical-Zeile in Review oder Pentest → GATE-01 und Gate-Ergebnis nicht PASS bzw. nicht 'bestanden'; offene High/Critical-PT-Zeile → GATE-03 nicht PASS; offener SR-/PT-Befund mit genannter Katalog-ID → diese ID nicht PASS); erst der neue Modus --final verlangt kein offenes Critical in Review und Pentest, kein offenes High/Critical im Pentest, jede GATE-Zeile PASS und keine Ausnahme der Art erklaerung oder luecke. Offene Befunde (SR-11, SR-12 aus F-002, SR-13 aus F-003) können damit sofort eingetragen werden (WP-452 (`t5-review-g1`)), ohne den Job gate zu brechen; eine Voraussetzung auf WP-340 (`t1-rack-site-scope`) entfällt.
 - [ ] rep01 (F-300): Severity normalisiert (Fettdruck, Groß-/Kleinschreibung, Kritisch/Hoch); alle Befundtabellen inkl. Anhang; IDs aus docs/acceptance/g1-ausnahmen.csv dürfen nicht PASS sein; kein Status 'Erklärung' in der Statusspalte des Anhangs; je Lieferung eine bedingte Invariante (PASS von GATE-03/NFR-08 verlangt die vollständige Pentest-Zusammenfassung, PASS von NFR-09 die gefüllte Subprozessorenliste, PASS von ABN-01 die eingefrorenen Texte (a)/(b), PASS von AUT-05/AUT-06/NET-04 die v2-Texte unter docs/spec/v2/ mit Abgleich), die die Lieferungs-WPs einzeln auf unbedingt umstellen.
 - [ ] g1-gate.md nach E-76 (Übergangsregel): keine [B]/[Q]-ID steht allein per Erklärung auf PASS; AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01 (a)/(b), GATE-03 (Pentest-Anteil) und GATE-02 stehen auf 'offen' mit Begründung 'Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend' und Verweis auf A-02, A-07 bzw. A-11; GATE-01 steht auf 'offen', solange ein P0-Befund des Phase-1-Audits offen ist (Verweis auf docs/plan/g1-korrektur/implementierungsplan.md); das Ergebnis lautet 'offen' mit Liste der ausstehenden Nachweise; pentest-g1.md und abn-01.md tragen denselben Status; die Nachträge zu E-02, E-28 und E-35 in docs/plan/entscheidungen.md sind korrigiert.
-- [ ] CI-13 und TEN-09: CI-13 steht erst auf PASS, wenn alle Korrektur-WPs zu WP-087 gemergt sind (WP-415 (`t5-sr11-decorator`), WP-368 (`t3-resurrect-new`)); TEN-09 und die GATE-03-Zeile 'Isolationstest (TEN-09) vollständig' erst, wenn alle Korrektur-WPs zu WP-208 gemergt sind (WP-340 (`t1-rack-site-scope`), WP-342 (`t1-review-scope`), WP-407 (`t1-channel-matrix`), WP-347 (`t1-export-job-visibility`), WP-404 (`t1-err-ident-loc`), WP-405 (`t1-err-modules`)). Bis dahin stehen beide auf 'offen' mit der Liste der offenen Korrektur-WPs; die endgültige Statuspflege übernimmt WP-595 (`t5-rc-evidence`).
+- [ ] CI-13 und TEN-09: CI-13 steht erst auf PASS, wenn alle Korrektur-WPs zu WP-087 gemergt sind (WP-418 (`t5-sr11-decorator`), WP-369 (`t3-resurrect-new`)); TEN-09 und die GATE-03-Zeile 'Isolationstest (TEN-09) vollständig' erst, wenn alle Korrektur-WPs zu WP-208 gemergt sind (WP-340 (`t1-rack-site-scope`), WP-342 (`t1-review-scope`), WP-409 (`t1-channel-matrix`), WP-347 (`t1-export-job-visibility`), WP-406 (`t1-err-ident-loc`), WP-407 (`t1-err-modules`)). Bis dahin stehen beide auf 'offen' mit der Liste der offenen Korrektur-WPs; die endgültige Statuspflege übernimmt WP-595 (`t5-rc-evidence`).
 - [ ] Retest F-038/F-040 (Gate-Anteil)/F-120/F-300: ./tests/audit/g1-gate-evidence.test.sh: known_defect_SR-11 Assertion 1 (CI-13 nicht PASS, solange SR-11 offen), rack_site_scope (TEN-09 nicht PASS) und pass_by_declaration ok; die rep01_*-Fälle in der übernommenen Form: Fixture mit GATE-01 bzw. GATE-03 auf PASS und eingefügter offener Zeile (Critical, **Critical**, Kritisch, critical, High, Hoch, SR fett, Anhang) → Gate-Checker FAIL im Normalmodus; dieselben Zeilen bei GATE-01 'offen' → Normalmodus PASS, --final FAIL; behoben, geschlossen → PASS in beiden Modi; rep01_control (unverändertes Repository) im Normalmodus PASS.
-- [ ] Ratchet: rep01_*, rack_site_scope, pass_by_declaration und die verallgemeinerte Konsistenzprüfung aus known_defect (Assertion 1) sind als reguläre Prüfungen bzw. Fixture-Selbsttests (tests/fixtures/rep01/) in tests/rep01-structure.test.sh übernommen und aus tests/audit/g1-gate-evidence.test.sh entfernt (Kopfkommentar bleibt bis zum Löschen der Datei); known_defect_SR-11 Assertion 2 (Severity) bleibt bis WP-449 (`t5-review-g1`); die zugehörigen Einträge in tests/audit/expected-failures.txt sind entfernt.
+- [ ] Ratchet: rep01_*, rack_site_scope, pass_by_declaration und die verallgemeinerte Konsistenzprüfung aus known_defect (Assertion 1) sind als reguläre Prüfungen bzw. Fixture-Selbsttests (tests/fixtures/rep01/) in tests/rep01-structure.test.sh übernommen und aus tests/audit/g1-gate-evidence.test.sh entfernt (Kopfkommentar bleibt bis zum Löschen der Datei); known_defect_SR-11 Assertion 2 (Severity) bleibt bis WP-452 (`t5-review-g1`); die zugehörigen Einträge in tests/audit/expected-failures.txt sind entfernt.
 - [ ] Regression: CI-Jobs gate und traceability grün; sha256sum -c docs/acceptance/artefakte/SHA256SUMS OK.
 
 **Dateien (9 Einträge, Migration = 2):**
@@ -7406,20 +7607,20 @@ DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-447
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-GATE-01;[Q];G1;tests/rep01-structure.test.sh;WP-448
-GATE-02;[Q];G1;tests/rep01-structure.test.sh;WP-448
-GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-448
+GATE-01;[Q];G1;tests/rep01-structure.test.sh;WP-451
+GATE-02;[Q];G1;tests/rep01-structure.test.sh;WP-451
+GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-451
 ```
 
 **Entscheidungsbedarf:** [E-02](../entscheidungen.md#e-02); [E-27](../entscheidungen.md#e-27); [E-28](../entscheidungen.md#e-28); [E-30](../entscheidungen.md#e-30); [E-35](../entscheidungen.md#e-35); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Einträge in docs/security/review-g1.md (WP-449 (`t5-review-g1`)); Lieferungen A-02, A-07, A-11 (WP-454 (`t5-abn01-ab`), WP-452 (`t5-v2-ids`), WP-450 (`t5-pentest-evidence`), WP-451 (`t5-subprocessors`)); Läufe auf dem Release-Kandidaten und endgültige Statuspflege (WP-595 (`t5-rc-evidence`)); Produktfixes F-002 und F-003 (Gruppe T1) sowie F-022 (Gruppe T3).
+**Nicht Bestandteil:** Einträge in docs/security/review-g1.md (WP-452 (`t5-review-g1`)); Lieferungen A-02, A-07, A-11 (WP-457 (`t5-abn01-ab`), WP-455 (`t5-v2-ids`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`)); Läufe auf dem Release-Kandidaten und endgültige Statuspflege (WP-595 (`t5-rc-evidence`)); Produktfixes F-002 (WP-340 (`t1-rack-site-scope`)), F-003 (WP-342 (`t1-review-scope`)) und F-022 (WP-369 (`t3-resurrect-new`)).
 
-### WP-449 – Sicherheitsreview G1 korrigieren: SR-11 High, neue Befunde SR-12/SR-13, P0-Befunde des Audits, Kanal × Scope, Dev-Advisories
+### WP-452 – Sicherheitsreview G1 korrigieren: SR-11 High, neue Befunde SR-12/SR-13, P0-Befunde des Audits, Kanal × Scope, Dev-Advisories
 
 **Schlüssel:** `t5-review-g1` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** SR · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-415 (`t5-sr11-decorator`), WP-448 (`t5-gate-consistency`)
+**Voraussetzungen (gemergt):** WP-340 (`t1-rack-site-scope`), WP-418 (`t5-sr11-decorator`), WP-451 (`t5-gate-consistency`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -7440,11 +7641,11 @@ GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-448
 
 **Akzeptanzkriterien:**
 
-- [ ] SR-11 mit Severity High nach docs/audit/README.md:14, Status behoben, Verweis auf TestAuditT5CIReactivationThroughProductionDecoratorChain (backend/internal/tenant/rls/ci_decorator_chain_integration_test.go); Hinweis, dass CI-13 erst nach WP-368 (`t3-resurrect-new`) (F-022) abgenommen ist.
+- [ ] SR-11 mit Severity High nach docs/audit/README.md:14, Status behoben, Verweis auf TestAuditT5CIReactivationThroughProductionDecoratorChain (backend/internal/tenant/rls/ci_decorator_chain_integration_test.go); Hinweis, dass CI-13 erst nach WP-369 (`t3-resurrect-new`) (F-022) abgenommen ist.
 - [ ] Neue Befunde SR-12 'Site-Scope-Bypass im Rack-Kanal' (F-002) und SR-13 'Review-Items ohne Kandidaten leaken über Clients' (F-003), je Severity Critical nach docs/audit/README.md:14 und Status nach dem Stand von WP-340 (`t1-rack-site-scope`) bzw. WP-342 (`t1-review-scope`) (offen mit Korrektur-WP oder behoben mit Testverweis). Ein Abschnitt 'Befunde des Phase-1-Abnahmeaudits' führt die übrigen P0-Befunde mit Sicherheits- oder Isolationswirkung (F-001, F-004 bis F-015 aus audit/phase1-final/PHASE1_FINDINGS.md) als SR-Zeilen mit Severity Critical, Status und Korrektur-WP-Schlüssel.
-- [ ] V4 und SR-03 nennen die tatsächlich geprüften Kombinationen Kanal × Scope-Art nach dem Stand von backend/internal/tenant/rls/channel_matrix_integration_test.go und führen fehlende Kombinationen (u. a. Racks unter Site-Scope) mit Verweis auf WP-407 (`t1-channel-matrix`); die endgültige Formulierung nach WP-407 (`t1-channel-matrix`) übernimmt WP-595 (`t5-rc-evidence`).
+- [ ] V4 und SR-03 nennen die tatsächlich geprüften Kombinationen Kanal × Scope-Art nach dem Stand von backend/internal/tenant/rls/channel_matrix_integration_test.go und führen fehlende Kombinationen (u. a. Racks unter Site-Scope) mit Verweis auf WP-409 (`t1-channel-matrix`); die endgültige Formulierung nach WP-409 (`t1-channel-matrix`) übernimmt WP-595 (`t5-rc-evidence`).
 - [ ] F-297: Der Abschnitt Scanergebnisse bewertet die Critical/High-Advisories der Dev-Abhängigkeiten (tinypool, vitest) als Lieferkettenrisiko T19 mit Maßnahme (Aktualisierung oder Ausnahme mit Ablaufdatum nach SEC-11) und Frist; npm audit über alle Abhängigkeiten zeigt kein unbewertetes Critical.
-- [ ] Retest F-119/F-040: ./tests/audit/g1-gate-evidence.test.sh known_defect_SR-11 (beide Assertionen) ok; die aus WP-448 (`t5-gate-consistency`) übernommene Prüfung rack_site_scope findet den Review-Befund SR-12; tests/rep01-structure.test.sh im Normalmodus grün (offene Critical-Zeilen bei GATE-01 'offen' konsistent), --final meldet die offenen Critical-Zeilen.
+- [ ] Retest F-119/F-040: ./tests/audit/g1-gate-evidence.test.sh known_defect_SR-11 (beide Assertionen) ok; die aus WP-451 (`t5-gate-consistency`) übernommene Prüfung rack_site_scope findet den Review-Befund SR-12; tests/rep01-structure.test.sh im Normalmodus grün (offene Critical-Zeilen bei GATE-01 'offen' konsistent), --final meldet die offenen Critical-Zeilen.
 - [ ] Ratchet: known_defect_SR-11 Assertion 2 als reguläre Prüfung in tests/rep01-structure.test.sh übernommen (SR-11 mindestens High; Fixture mit SR-11 Low → FAIL), known_defect aus tests/audit/g1-gate-evidence.test.sh entfernt (ist es der letzte Fall, wird die Datei gelöscht), Eintrag aus tests/audit/expected-failures.txt entfernt.
 - [ ] Regression: CI-Job gate grün.
 
@@ -7466,19 +7667,19 @@ GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-448
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-449
-SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-449
+GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-452
+SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-452
 ```
 
 **Entscheidungsbedarf:** [E-27](../entscheidungen.md#e-27)
 
-**Nicht Bestandteil:** Produktfixes F-002, F-003 und der übrigen P0-Befunde (Gruppen T1, T2, T4, T6); Statuspflege nach deren Merge (WP-595 (`t5-rc-evidence`)); Gate-Checkliste und Prüfer (WP-448 (`t5-gate-consistency`)).
+**Nicht Bestandteil:** Produktfixes F-002, F-003 und der übrigen P0-Befunde (Korrektur-WPs laut Tabelle „Schwere Befunde (P0/P1) und ihre Korrektur“); Statuspflege nach deren Merge (WP-595 (`t5-rc-evidence`)); Gate-Checkliste und Prüfer (WP-451 (`t5-gate-consistency`)).
 
-### WP-450 – Pentest-Nachweis G1 ablegen (Lieferung A-07)
+### WP-453 – Pentest-Nachweis G1 ablegen (Lieferung A-07)
 
 **Schlüssel:** `t5-pentest-evidence` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** SR · **Aufwand:** 0,5 PT
 
-**Voraussetzungen (gemergt):** WP-447 (`t5-trace-evidence`), WP-448 (`t5-gate-consistency`)
+**Voraussetzungen (gemergt):** WP-450 (`t5-trace-evidence`), WP-451 (`t5-gate-consistency`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -7507,7 +7708,7 @@ SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-449
 
 - docs/security/pentest-g1.md
 - docs/acceptance/g1-gate.md
-- docs/acceptance/g1-ausnahmen.csv (angelegt in WP-447)
+- docs/acceptance/g1-ausnahmen.csv (angelegt in WP-450)
 - docs/plan/entscheidungen.md
 - tests/rep01-structure.test.sh
 - tests/audit/g1-gate-evidence.test.sh
@@ -7524,18 +7725,18 @@ SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-449
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-450
+GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-453
 ```
 
 **Entscheidungsbedarf:** [E-28](../entscheidungen.md#e-28); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel)
 
 **Nicht Bestandteil:** Durchführung des Pentests und Behebung seiner Befunde (je Befund eigenes WP); Aufwand des Dienstleisters.
 
-### WP-451 – Subprozessorenliste ablegen (Lieferung A-11, NFR-09)
+### WP-454 – Subprozessorenliste ablegen (Lieferung A-11, NFR-09)
 
 **Schlüssel:** `t5-subprocessors` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 0,5 PT
 
-**Voraussetzungen (gemergt):** WP-447 (`t5-trace-evidence`), WP-448 (`t5-gate-consistency`)
+**Voraussetzungen (gemergt):** WP-450 (`t5-trace-evidence`), WP-451 (`t5-gate-consistency`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -7564,7 +7765,7 @@ GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-450
 - docs/legal/subprozessoren.md
 - docs/betrieb/referenzmodell.md
 - docs/acceptance/g1-gate.md
-- docs/acceptance/g1-ausnahmen.csv (angelegt in WP-447)
+- docs/acceptance/g1-ausnahmen.csv (angelegt in WP-450)
 - docs/plan/entscheidungen.md
 - tests/rep01-structure.test.sh
 - tests/audit/g1-gate-evidence.test.sh
@@ -7581,18 +7782,18 @@ GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-450
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NFR-09;[B];A;tests/rep01-structure.test.sh;WP-451
+NFR-09;[B];A;tests/rep01-structure.test.sh;WP-454
 ```
 
 **Entscheidungsbedarf:** [E-35](../entscheidungen.md#e-35); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel)
 
 **Nicht Bestandteil:** Abschluss der AV-Verträge selbst (Betreiber).
 
-### WP-452 – v2-Texte zu AUT-05, AUT-06, NET-04 übernehmen und abgleichen (Lieferung A-02)
+### WP-455 – v2-Texte zu AUT-05, AUT-06, NET-04 übernehmen und abgleichen (Lieferung A-02)
 
 **Schlüssel:** `t5-v2-ids` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** G1 · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-447 (`t5-trace-evidence`), WP-448 (`t5-gate-consistency`)
+**Voraussetzungen (gemergt):** WP-450 (`t5-trace-evidence`), WP-451 (`t5-gate-consistency`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -7605,11 +7806,11 @@ NFR-09;[B];A;tests/rep01-structure.test.sh;WP-451
 
 | Befund | Prio | Titel | Beitrag | Betroffene WPs |
 |---|---|---|---|---|
-| [F-120](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-120) | P2 | Gate-Checkliste und Abnahmeprotokoll führen Anforderungen allein per Erklärung des Auftraggebers als PASS | mit | WP-105, WP-210, WP-212, WP-213 |
+| [F-120](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-120) | P2 | Gate-Checkliste und Abnahmeprotokoll führen Anforderungen allein per Erklärung des Auftraggebers als PASS | schließt | WP-105, WP-210, WP-212, WP-213 |
 
-**Schließt Audit-WPs:** [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) (FEHLGESCHLAGEN, Teil)
+**Schließt Audit-WPs:** [WP-105](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-105) (TEILWEISE BESTANDEN, Teil), [WP-210](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-210) (FEHLGESCHLAGEN, Teil), [WP-212](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-212) (TEILWEISE BESTANDEN, Teil), [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) (FEHLGESCHLAGEN, Teil)
 
-**Problem:** AUT-05, AUT-06 (docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:39) und NET-04 (04-ci-netz-rack-beziehungen-impact.md:62) lauten nur '[B] unverändert' bzw. 'cable(...) unverändert'; kein Phase-1-WP führt sie (docs/plan/implementierungsplan.md:11556: Entscheidung E-02). Sie standen nur per Erklärung des Auftraggebers auf PASS, ihre einzige Traceability-Zeile verwies auf docs/acceptance/g1-gate.md (docs/traceability.csv:460-462). Nach WP-447 (`t5-trace-evidence`) und WP-448 (`t5-gate-consistency`) stehen sie als Ausnahme (art=erklaerung) bzw. 'offen'; GATE-02 kann ohne sie nicht PASS werden.
+**Problem:** AUT-05, AUT-06 (docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:39) und NET-04 (04-ci-netz-rack-beziehungen-impact.md:62) lauten nur '[B] unverändert' bzw. 'cable(...) unverändert'; kein Phase-1-WP führt sie (docs/plan/implementierungsplan.md:11556: Entscheidung E-02). Sie standen nur per Erklärung des Auftraggebers auf PASS, ihre einzige Traceability-Zeile verwies auf docs/acceptance/g1-gate.md (docs/traceability.csv:460-462). Nach WP-450 (`t5-trace-evidence`) und WP-451 (`t5-gate-consistency`) stehen sie als Ausnahme (art=erklaerung) bzw. 'offen'; GATE-02 kann ohne sie nicht PASS werden.
 
 **Akzeptanzkriterien:**
 
@@ -7623,7 +7824,7 @@ NFR-09;[B];A;tests/rep01-structure.test.sh;WP-451
 **Dateien (6 Einträge, Migration = 2):**
 
 - docs/spec/v2/aut-05-aut-06-net-04.md (neu)
-- docs/acceptance/g1-ausnahmen.csv (angelegt in WP-447)
+- docs/acceptance/g1-ausnahmen.csv (angelegt in WP-450)
 - docs/acceptance/g1-gate.md
 - docs/plan/entscheidungen.md
 - tests/rep01-structure.test.sh
@@ -7640,22 +7841,22 @@ NFR-09;[B];A;tests/rep01-structure.test.sh;WP-451
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUT-05;[B];G1;tests/rep01-structure.test.sh;WP-452
-AUT-06;[B];G1;tests/rep01-structure.test.sh;WP-452
-NET-04;[B];G1;tests/rep01-structure.test.sh;WP-452
+AUT-05;[B];G1;tests/rep01-structure.test.sh;WP-455
+AUT-06;[B];G1;tests/rep01-structure.test.sh;WP-455
+NET-04;[B];G1;tests/rep01-structure.test.sh;WP-455
 ```
 
 **Entscheidungsbedarf:** [E-02](../entscheidungen.md#e-02); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** ABN-01 (a)/(b) (WP-454 (`t5-abn01-ab`)); weitere v2-Texte nach E-02 (UI-01 bis UI-10, DIS-04, IGA, WFL-04, REP-01); Schließen festgestellter Lücken (Folge-WPs).
+**Nicht Bestandteil:** ABN-01 (a)/(b) (WP-457 (`t5-abn01-ab`)); weitere v2-Texte nach E-02 (UI-01 bis UI-10, DIS-04, IGA, WFL-04, REP-01); Schließen festgestellter Lücken (Folge-WPs).
 
-### WP-453 – ABN-01 (d)/(e): Impact inhaltlich prüfen, Konfliktprotokoll auf eine eingefrorene Real-Stack-Spec stützen
+### WP-456 – ABN-01 (d)/(e): Impact inhaltlich prüfen, Konfliktprotokoll auf eine eingefrorene Real-Stack-Spec stützen
 
 **Schlüssel:** `t5-abn01-de` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** G1 · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-448 (`t5-gate-consistency`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-451 (`t5-gate-consistency`)
 
-**Vorgezogen:** nach Schwere K5 Nachweislücken; als Voraussetzung von WP-454 (`t5-abn01-ab`) in K3 eingeordnet.
+**Vorgezogen:** nach Schwere K5 Nachweislücken; als Voraussetzung von WP-457 (`t5-abn01-ab`) in K3 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -7670,12 +7871,12 @@ NET-04;[B];G1;tests/rep01-structure.test.sh;WP-452
 
 **Schließt Audit-WPs:** [WP-212](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-212) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** Protokoll (e) in docs/acceptance/abn-01.md:69-102 stützt sich auf den gemockten Lauf frontend/e2e/conflict.spec.ts (mockBackend :80); der Real-Stack-Nachweis frontend/e2e-real/discovery-override.spec.ts (D03–D05) ist nicht referenziert. Diese Spec ändern mehrere T3/T4-Korrektur-WPs (D07–D10, u. a. WP-410 (`t3-override-version`), WP-575 (`t3-review-escalation-widget`), t4-collector-disable) und sie ist nicht eingefroren; ein Einfrieren in docs/acceptance/artefakte/SHA256SUMS würde jede dieser Änderungen am Job gate scheitern lassen. Schritt 7 in frontend/e2e/onboarding.spec.ts:292-297 besteht auch mit leerer Impact-Liste, weil die simulierte Flotte keine Beziehungen garantiert.
+**Problem:** Protokoll (e) in docs/acceptance/abn-01.md:69-102 stützt sich auf den gemockten Lauf frontend/e2e/conflict.spec.ts (mockBackend :80); der Real-Stack-Nachweis frontend/e2e-real/discovery-override.spec.ts (D03–D05) ist nicht referenziert. Diese Spec ändern mehrere Korrektur-WPs (D07–D10, u. a. WP-413 (`t3-override-clear-ui`), WP-575 (`t3-review-escalation-widget`), WP-381 (`t4-collector-disable-kick`), WP-414 (`t4-pki-renew-collector`)) und sie ist nicht eingefroren; ein Einfrieren in docs/acceptance/artefakte/SHA256SUMS würde jede dieser Änderungen am Job gate scheitern lassen. Schritt 7 in frontend/e2e/onboarding.spec.ts:292-297 besteht auch mit leerer Impact-Liste, weil die simulierte Flotte keine Beziehungen garantiert.
 
 **Akzeptanzkriterien:**
 
 - [ ] onboarding.spec.ts legt vor dem Impact-Schritt eine Beziehung zwischen zwei simulierten CIs an und assertiert impacted.length >= 1 inklusive der erwarteten CI-ID; Negativfall: Impact eines CI ohne Beziehung → leere Liste mit UI-Hinweis; Onboarding-E2E im install-smoke-Lauf des PR grün (Run-ID).
-- [ ] Neue Real-Stack-Spec frontend/e2e-real/abn-01-konflikt.spec.ts bildet Szenario (e) mit den Artefaktdaten srv-abn-01/srv-abn-02 aus docs/acceptance/artefakte/abn-01-e-konflikt.json ab: Override setzen, abweichende Discovery, override_conflict sichtbar, accept (Override entfernt, gemeldeter Wert übernommen) und dismiss (Override bleibt) über UI, API und DB; grün im Job von WP-338 (`k-e2e-real-ci`). frontend/e2e-real/discovery-override.spec.ts bleibt unverändert; damit entsteht kein Dateikonflikt mit den T3/T4-WPs.
+- [ ] Neue Real-Stack-Spec frontend/e2e-real/abn-01-konflikt.spec.ts bildet Szenario (e) mit den Artefaktdaten srv-abn-01/srv-abn-02 aus docs/acceptance/artefakte/abn-01-e-konflikt.json ab: Override setzen, abweichende Discovery, override_conflict sichtbar, accept (Override entfernt, gemeldeter Wert übernommen) und dismiss (Override bleibt) über UI, API und DB; grün im Job von WP-338 (`k-e2e-real-ci`). frontend/e2e-real/discovery-override.spec.ts bleibt unverändert; damit entsteht kein Dateikonflikt mit den Korrektur-WPs, die diese Spec ändern (siehe Problem).
 - [ ] Einfrieren: abn-01-konflikt.spec.ts, die geänderte onboarding.spec.ts und das aus dem Real-Lauf neu erzeugte abn-01-e-konflikt.json stehen in docs/acceptance/artefakte/SHA256SUMS; 'sha256sum -c docs/acceptance/artefakte/SHA256SUMS' OK; artefakte/README.md nennt die Spec im Erzeugungsbefehl; spätere Änderungen nur mit neuer Prüfsumme und Fortschreibung von abn-01.md.
 - [ ] Retest F-298/F-299: abn-01.md (e) verweist auf den grünen Real-Stack-Lauf (Spec abn-01-konflikt.spec.ts, Job, Run-ID), (d) Schritt 7 auf die verschärfte Assertion; ABN-01-Prüfung in tests/rep01-structure.test.sh grün.
 - [ ] Regression: conflict.spec.ts (gemockt) in chromium und mobile-chrome grün; discovery-override.spec.ts im Job von WP-338 (`k-e2e-real-ci`) unverändert.
@@ -7701,18 +7902,18 @@ NET-04;[B];G1;tests/rep01-structure.test.sh;WP-452
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-ABN-01;[Q];G1;frontend/e2e-real/abn-01-konflikt.spec.ts;WP-453
+ABN-01;[Q];G1;frontend/e2e-real/abn-01-konflikt.spec.ts;WP-456
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Szenarien (a)/(b) (WP-454 (`t5-abn01-ab`)); Änderungen an frontend/e2e-real/discovery-override.spec.ts (D07–D10, Gruppen T3/T4).
+**Nicht Bestandteil:** Szenarien (a)/(b) (WP-457 (`t5-abn01-ab`)); Änderungen an frontend/e2e-real/discovery-override.spec.ts (D07–D10; WP-413 (`t3-override-clear-ui`), WP-575 (`t3-review-escalation-widget`), WP-381 (`t4-collector-disable-kick`), WP-414 (`t4-pki-renew-collector`)).
 
-### WP-454 – ABN-01 (a)/(b): v2-Szenariotexte einfrieren und Schritt für Schritt protokollieren (Lieferung A-02)
+### WP-457 – ABN-01 (a)/(b): v2-Szenariotexte einfrieren und Schritt für Schritt protokollieren (Lieferung A-02)
 
 **Schlüssel:** `t5-abn01-ab` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** G1 · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-447 (`t5-trace-evidence`), WP-453 (`t5-abn01-de`)
+**Voraussetzungen (gemergt):** WP-450 (`t5-trace-evidence`), WP-456 (`t5-abn01-de`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -7744,7 +7945,7 @@ ABN-01;[Q];G1;frontend/e2e-real/abn-01-konflikt.spec.ts;WP-453
 - docs/acceptance/artefakte/SHA256SUMS
 - docs/acceptance/abn-01.md
 - docs/acceptance/g1-gate.md
-- docs/acceptance/g1-ausnahmen.csv (angelegt in WP-447)
+- docs/acceptance/g1-ausnahmen.csv (angelegt in WP-450)
 - docs/plan/entscheidungen.md
 - tests/rep01-structure.test.sh
 - tests/audit/g1-gate-evidence.test.sh
@@ -7762,14 +7963,14 @@ ABN-01;[Q];G1;frontend/e2e-real/abn-01-konflikt.spec.ts;WP-453
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-ABN-01;[Q];G1;tests/rep01-structure.test.sh;WP-454
+ABN-01;[Q];G1;tests/rep01-structure.test.sh;WP-457
 ```
 
 **Entscheidungsbedarf:** [E-02](../entscheidungen.md#e-02); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Abgleich von AUT-05, AUT-06 und NET-04 mit den v2-Texten (WP-452 (`t5-v2-ids`)); Schließen festgestellter Lücken (Folge-WPs).
+**Nicht Bestandteil:** Abgleich von AUT-05, AUT-06 und NET-04 mit den v2-Texten (WP-455 (`t5-v2-ids`)); Schließen festgestellter Lücken (Folge-WPs).
 
-### WP-455 – Log-Aufbewahrung 30 Tage in den Auslieferungen (NFR-06)
+### WP-458 – Log-Aufbewahrung 30 Tage in den Auslieferungen (NFR-06)
 
 **Schlüssel:** `t6-log-retention` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
@@ -7808,7 +8009,7 @@ ABN-01;[Q];G1;tests/rep01-structure.test.sh;WP-454
 - tests/audit/log-retention.test.sh
 - tests/install-log-retention.test.sh (neu)
 - .github/workflows/ci.yml
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** keine Migration.
@@ -7821,14 +8022,14 @@ ABN-01;[Q];G1;tests/rep01-structure.test.sh;WP-454
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NFR-06;[B];B;tests/audit/log-retention.test.sh;WP-455
+NFR-06;[B];B;tests/audit/log-retention.test.sh;WP-458
 ```
 
 **Entscheidungsbedarf:** [E-77](entscheidungen.md#e-77) NFR-06 „Logs 30 Tage“ in den Auslieferungen (offen, Empfehlung als Übergangsregel)
 
 **Nicht Bestandteil:** Datenbank-Retention (WP-548 (`t6-retention-data`)); Betrieb eines Log-Stores (nur bei Option 2 der Entscheidung, dann Folge-WP).
 
-### WP-456 – Abgeleitete Secrets unabhängig vom Master-Key: Rotation ohne nats-edge-Neustart (SEC-06)
+### WP-459 – Abgeleitete Secrets unabhängig vom Master-Key: Rotation ohne nats-edge-Neustart (SEC-06)
 
 **Schlüssel:** `t6-rotation-derived` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
@@ -7884,7 +8085,7 @@ NFR-06;[B];B;tests/audit/log-retention.test.sh;WP-455
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-456
+SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-459
 ```
 
 **Entscheidungsbedarf:** [E-15](../entscheidungen.md#e-15)
@@ -7895,7 +8096,7 @@ SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-456
 
 **Ausstieg:** Alle übrigen P2 behoben.
 
-### WP-457 – Strukturierte Suche mit Leserecht: POST /search/query auf search:read
+### WP-460 – Strukturierte Suche mit Leserecht: POST /search/query auf search:read
 
 **Schlüssel:** `t1-structured-search-read` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
@@ -7939,7 +8140,7 @@ SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-456
 - backend/internal/tenant/rls/search_query_roles_integration_test.go (neu)
 - backend/internal/tenant/rls/audit_t1_search_query_roles_auditdefect_test.go (gelöscht)
 - frontend/e2e-real/saved-views-viewer.spec.ts (neu)
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** keine Migration.
@@ -7954,18 +8155,18 @@ SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-456
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SRC-03;[P2], Textsyntax [O];B;backend/internal/savedview/scope_integration_test.go;WP-457
+SRC-03;[P2], Textsyntax [O];B;backend/internal/savedview/scope_integration_test.go;WP-460
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Klick-Builder und AND/OR/NOT-AST (WP-187); Fehlertexte der Saved-View-Handler (WP-404 (`t1-err-ident-loc`)).
+**Nicht Bestandteil:** Klick-Builder und AND/OR/NOT-AST (WP-187); Fehlertexte der Saved-View-Handler (WP-406 (`t1-err-ident-loc`)).
 
-### WP-458 – IGA: Genehmigung und Provisioning-Task atomar; keine verschluckten Schreibfehler
+### WP-461 – IGA: Genehmigung und Provisioning-Task atomar; keine verschluckten Schreibfehler
 
 **Schlüssel:** `t1-iga-approve-atomic` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-405 (`t1-err-modules`)
+**Voraussetzungen (gemergt):** WP-407 (`t1-err-modules`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -7996,7 +8197,7 @@ SRC-03;[P2], Textsyntax [O];B;backend/internal/savedview/scope_integration_test.
 - backend/internal/iga/repository.go
 - backend/internal/iga/approve_task_integration_test.go (neu)
 - backend/internal/iga/audit_t1_approve_task_auditdefect_test.go (gelöscht)
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 - docs/traceability.csv
 
 **Migration/RLS:** keine Migration.
@@ -8008,84 +8209,18 @@ SRC-03;[P2], Textsyntax [O];B;backend/internal/savedview/scope_integration_test.
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-06;[B];B;backend/internal/iga/approve_task_integration_test.go;WP-458
+TEN-06;[B];B;backend/internal/iga/approve_task_integration_test.go;WP-461
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Fehlertexte der IGA-Handler (WP-405 (`t1-err-modules`), Voraussetzung wegen `iga/handler.go`); Connector-Protokolle.
+**Nicht Bestandteil:** Fehlertexte der IGA-Handler (WP-407 (`t1-err-modules`), Voraussetzung wegen `iga/handler.go`); Connector-Protokolle.
 
-### WP-459 – SPA-Session: Single-Flight-Refresh, Refresh beim Start statt Login-Redirect, 429 ohne Abmeldung
-
-**Schlüssel:** `t2-spa-session` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
-
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-364 (`t2-refresh-chain`)
-
-| ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
-|---|---|---|---|---|---|---|
-| AUT-02 | [B] | FEHLGESCHLAGEN | Teil | [WP-066](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-066) | `docs/audit/02-mandanten-auth-entitlements.md:45` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:33` |
-| AUT-10 | [B] | TEILWEISE BESTANDEN | Teil | [WP-050](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-050) | `docs/audit/02-mandanten-auth-entitlements.md:53` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:47` |
-
-**Befunde:**
-
-| Befund | Prio | Titel | Beitrag | Betroffene WPs |
-|---|---|---|---|---|
-| [F-018](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-018) | P1 | OpenAPI-Validator weist jeden SPA-Refresh (POST /auth/refresh ohne Body/Content-Type) mit 400 ab; gleiche Abweichung bei weiteren bodylosen POSTs | Teil | WP-009, WP-050, WP-066 |
-| [F-063](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-063) | P2 | Erfolgreiche Refreshes verbrauchen das Pre-Auth-Budget je IP; SPA meldet bei 429 ab | Teil | WP-050 |
-| [F-065](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-065) | P2 | Parallele 401 lösen parallele Refreshes aus, Reuse-Erkennung widerruft die Familie | schließt | WP-066 |
-| [F-066](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-066) | P2 | Abgelaufene gespeicherte Session führt ohne Refresh-Versuch zu /login | schließt | WP-066 |
-
-**Schließt Audit-WPs:** [WP-066](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-066) (FEHLGESCHLAGEN, Teil), [WP-050](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-050) (TEILWEISE BESTANDEN, Teil)
-
-**Problem:** `fetchURL` (`frontend/src/api/client.ts:392-410`) startet bei jedem 401 einen eigenen Refresh; parallele Refreshes mit dem alten Cookie lösen die Reuse-Erkennung aus und widerrufen die Familie (F-065, session.auditdefect.ts „expected 3 to be 1“). `RequireAuth` (`frontend/src/App.tsx:385`) entscheidet nur anhand des gespeicherten `expiresAt` (`auth/authStore.ts:29-71`) und leitet ohne Refresh-Versuch auf /login (F-066, roles-authz 14b). `refreshSession` (`auth/session.ts:28-31`) löscht die Session auch bei 429 (F-063, SPA-Anteil).
-
-**Akzeptanzkriterien:**
-
-- [ ] `refreshSession` ist Single-Flight: gleichzeitige Aufrufe teilen ein In-flight-Promise; drei parallele 401 → genau ein `POST /auth/refresh`, danach drei Wiederholungen mit dem neuen Token.
-- [ ] Start und Navigation: ist das gespeicherte Token abgelaufen und ein Benutzer gespeichert, ruft `RequireAuth` vor dem Redirect `refreshSession()`; Erfolg → Zielseite, 401 → /login. Der Store plant zusätzlich einen Refresh etwa 60 s vor `expiresAt`.
-- [ ] 429 auf `/auth/refresh` löscht die Session nicht; die SPA wartet `Retry-After` (höchstens 60 s) und versucht es einmal erneut; nur 401/403 beenden die Session.
-- [ ] Defekttests grün und überführt: `src/auth/session.auditdefect.ts` → `src/auth/session.test.ts`, `src/auth/bootRefresh.auditdefect.tsx` → `src/auth/bootRefresh.test.tsx` (Retest: `cd frontend && npx vitest run src/auth/session.test.ts src/auth/bootRefresh.test.tsx` → PASS); zusätzliche Fälle für 429 in `session.test.ts`; Zeilen aus `tests/audit/expected-failures.txt` entfernt.
-- [ ] Real-Stack: `npx playwright test -c e2e-real/playwright.real.config.ts roles-authz -g '14'` (Tests 14 und 14b) → PASS (Retests aus F-018 und F-066); Zeilen aus `tests/audit/expected-failures.txt` entfernt.
-- [ ] Regression: `npm run lint`, `npm run typecheck`, `npx vitest run` grün.
-
-**Dateien (11 Einträge, Migration = 2):**
-
-- frontend/src/auth/session.ts
-- frontend/src/api/client.ts
-- frontend/src/auth/authStore.ts
-- frontend/src/App.tsx
-- frontend/src/auth/session.auditdefect.ts (entfernt)
-- frontend/src/auth/session.test.ts (neu)
-- frontend/src/auth/bootRefresh.auditdefect.tsx (entfernt)
-- frontend/src/auth/bootRefresh.test.tsx (neu)
-- frontend/src/api/client.test.ts
-- tests/audit/expected-failures.txt (angelegt in WP-337)
-- docs/traceability.csv
-
-**Migration/RLS:** keine Migration.
-
-**Tests:**
-
-- `src/auth/session.test.ts`: Single-Flight, 429-Backoff.
-- `src/auth/bootRefresh.test.tsx`: Refresh beim Start.
-- Real-Stack `roles-authz.spec.ts` Tests 14 und 14b.
-
-**Traceability (`docs/traceability.csv`):**
-
-```text
-AUT-02;[B];B;frontend/src/auth/bootRefresh.test.tsx;WP-459
-AUT-10;[B];B;frontend/src/auth/session.test.ts;WP-459
-```
-
-**Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
-
-**Nicht Bestandteil:** Serverseitiges Grace-Window der Reuse-Erkennung; Zählung im Pre-Auth-Limiter (WP-460 (`t2-preauth-budget`)).
-
-### WP-460 – Pre-Auth-Limit: erfolgreiche Refreshes zählen nicht, atomare Zulassung, Header auch auf 401/429 vor dem Limiter
+### WP-462 – Pre-Auth-Limit: erfolgreiche Refreshes zählen nicht, atomare Zulassung, Header auch auf 401/429 vor dem Limiter
 
 **Schlüssel:** `t2-preauth-budget` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-408 (`t2-ratelimit-budgets`)
+**Voraussetzungen (gemergt):** WP-366 (`t2-spa-session`), WP-410 (`t2-ratelimit-budgets`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -8109,7 +8244,7 @@ AUT-10;[B];B;frontend/src/auth/session.test.ts;WP-459
 - [ ] Atomare Zulassung: Increment vor dem Handler, Vergleich mit dem Limit auf dem zurückgegebenen Wert; ein erfolgreicher Refresh gibt seine Zählung frei (`cache.Store.Decrement`, neu, Memory und Redis). Paralleltest: 50 gleichzeitige fehlerhafte Refreshes einer IP → genau 20 erreichen den Handler.
 - [ ] Pre-Auth-Antworten setzen X-RateLimit-Limit/-Remaining/-Reset des IP-Budgets, 429 zusätzlich `Retry-After`; der Credential-Limiter überschreibt die Header für authentifizierte Antworten. Kettentest in `cmd/server/main_test.go` (Kette aus WP-364 (`t2-refresh-chain`)): 401 bei ungültigem Bearer, 403 aus Authz und Pre-Auth-429 tragen die dokumentierten Header; die OpenAPI-Antwortkomponenten für 401 und 429 nennen sie.
 - [ ] `TestPreAuthLimitCountsFailedAuthentication` (`middleware/middleware_test.go`) umgeschrieben: 5 fehlgeschlagene Refreshes (Handler 401) → 6. Pre-Auth-Request 429; 5 erfolgreiche Refreshes (200) → 6. Request 200; fehlgeschlagene API-Key-Prüfungen zählen weiter.
-- [ ] Defekttest `TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget` PASS (Retest: `cd backend && go test -count=1 -v -run '^TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget$' ./internal/middleware/`), nach `middleware/ratelimit_test.go` verschoben (nutzt das mit WP-408 (`t2-ratelimit-budgets`) verschobene `awaitFreshWindow`); `middleware/t2_auth_ratelimit_auditdefect_test.go` danach ohne Tests und gelöscht; Zeile aus `tests/audit/expected-failures.txt` entfernt.
+- [ ] Defekttest `TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget` PASS (Retest: `cd backend && go test -count=1 -v -run '^TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget$' ./internal/middleware/`), nach `middleware/ratelimit_test.go` verschoben (nutzt das mit WP-410 (`t2-ratelimit-budgets`) verschobene `awaitFreshWindow`); `middleware/t2_auth_ratelimit_auditdefect_test.go` danach ohne Tests und gelöscht; Zeile aus `tests/audit/expected-failures.txt` entfernt.
 - [ ] Regression: `TestPreAuthLimitCountsFailedAuthentication` (umgeschrieben), `TestClientIPTrustsOnlyConfiguredProxies`, Tests von `./internal/middleware/` und `./internal/cache/` grün.
 
 **Dateien (13 Einträge, Migration = 2):**
@@ -8139,15 +8274,15 @@ AUT-10;[B];B;frontend/src/auth/session.test.ts;WP-459
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUT-10;[B];B;backend/internal/middleware/ratelimit_test.go;WP-460
-API-04;[B];B;backend/cmd/server/main_test.go;WP-460
+AUT-10;[B];B;backend/internal/middleware/ratelimit_test.go;WP-462
+API-04;[B];B;backend/cmd/server/main_test.go;WP-462
 ```
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** SPA-Verhalten bei 429 (WP-459 (`t2-spa-session`)); Lockout-Signal aus Keycloak (AUT-10 zweiter Teil, kein Befund).
+**Nicht Bestandteil:** SPA-Verhalten bei 429 (WP-366 (`t2-spa-session`)); Lockout-Signal aus Keycloak (AUT-10 zweiter Teil, kein Befund).
 
-### WP-461 – Org-KI-Opt-in über PATCH /org setzbar, nur org-weit berechtigt, auditiert
+### WP-463 – Org-KI-Opt-in über PATCH /org setzbar, nur org-weit berechtigt, auditiert
 
 **Schlüssel:** `t2-ai-optin-api` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
@@ -8200,18 +8335,18 @@ API-04;[B];B;backend/cmd/server/main_test.go;WP-460
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AI-02;[A];B;backend/internal/tenantapi/tenantapi_scope_integration_test.go;WP-461
+AI-02;[A];B;backend/internal/tenantapi/tenantapi_scope_integration_test.go;WP-463
 ```
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
 **Nicht Bestandteil:** UI-Schalter (KI-Modul im G1-Release nach E-03 abgeschaltet; folgt mit dem Modul-WP); Operatorpfad für das Opt-in.
 
-### WP-462 – ENT-07: Dashboard-Banner für Ablaufwarnungen 14/7/1 Tage und Real-Stack-Nachweis
+### WP-464 – ENT-07: Dashboard-Banner für Ablaufwarnungen 14/7/1 Tage und Real-Stack-Nachweis
 
 **Schlüssel:** `t2-ent-expiry-warning` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-421 (`t6-job02-notices`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-425 (`t6-job02-notices`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -8225,14 +8360,14 @@ AI-02;[A];B;backend/internal/tenantapi/tenantapi_scope_integration_test.go;WP-46
 
 **Schließt Audit-WPs:** [WP-072](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-072) (FEHLGESCHLAGEN, Teil)
 
-**Problem:** `events.EntitlementWarning` (`backend/internal/events/envelope.go:59`) hat keinen Erzeuger; die Systemjobs (`cmd/server/main.go:476-515`) enthalten keinen Entitlement-Lauf, das Frontend keinen Banner. ENT-07 verlangt Dashboard-Banner und Benachrichtigung 14, 7 und 1 Tag vor `valid_until` (F-071). Den täglichen Lauf, der `entitlement.warning` erzeugt (Dedup über `notice_sent`, Registrierung in den Systemjobs), liefert WP-421 (`t6-job02-notices`); dieses WP ergänzt Banner und Real-Stack-Nachweis.
+**Problem:** `events.EntitlementWarning` (`backend/internal/events/envelope.go:59`) hat keinen Erzeuger; die Systemjobs (`cmd/server/main.go:476-515`) enthalten keinen Entitlement-Lauf, das Frontend keinen Banner. ENT-07 verlangt Dashboard-Banner und Benachrichtigung 14, 7 und 1 Tag vor `valid_until` (F-071). Den täglichen Lauf, der `entitlement.warning` erzeugt (Dedup über `notice_sent`, Registrierung in den Systemjobs), liefert WP-425 (`t6-job02-notices`); dieses WP ergänzt Banner und Real-Stack-Nachweis.
 
 **Akzeptanzkriterien:**
 
-- [ ] Benachrichtigung: `entitlement.warning` 14, 7 und 1 Tag vor `valid_until` erzeugt allein der Lauf `entitlement.notices` aus WP-421 (`t6-job02-notices`) (Dedup über `notice_sent` mit `valid_until` im Schlüssel, Verlängerung, Nachholen der jüngsten Schwelle, Zustellung an die user:manage-Inhaber der Organisation als Inbox-Eintrag); Nachweis ist `TestEntitlementNotices` (`jobs/notices_integration_test.go`) aus WP-421 (`t6-job02-notices`). Dieses WP legt keinen eigenen Lauf, keine Dedup-Tabelle und keine Registrierung in `cmd/server/main.go` an.
+- [ ] Benachrichtigung: `entitlement.warning` 14, 7 und 1 Tag vor `valid_until` erzeugt allein der Lauf `entitlement.notices` aus WP-425 (`t6-job02-notices`) (Dedup über `notice_sent` mit `valid_until` im Schlüssel, Verlängerung, Nachholen der jüngsten Schwelle, Zustellung an die user:manage-Inhaber der Organisation als Inbox-Eintrag); Nachweis ist `TestEntitlementNotices` (`jobs/notices_integration_test.go`) aus WP-425 (`t6-job02-notices`). Dieses WP legt keinen eigenen Lauf, keine Dedup-Tabelle und keine Registrierung in `cmd/server/main.go` an.
 - [ ] Frontend: `EntitlementExpiryBanner` (neu) im Layout zeigt für jedes Feature mit `valid_until` in höchstens 14 Tagen einen lokalisierten Hinweis (de, en) mit Datum und Feature; Vitest `EntitlementExpiryBanner.test.tsx` mit 15, 14 und 1 Tag sowie ohne Ablauf.
 - [ ] Real-Stack-Test `frontend/e2e-real/entitlement-expiry.spec.ts` (neu): der Operator setzt `valid_until` der Organisation auf jetzt + 7 d (`/admin/orgs/{id}/entitlements`, Break-Glass-Token der Testumgebung) → Banner nach Reload sichtbar; zurückgesetzt → kein Banner.
-- [ ] Retest F-071: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run '^TestEntitlementNotices$' ./internal/jobs/` (aus WP-421 (`t6-job02-notices`)) PASS; `npx vitest run src/components/EntitlementExpiryBanner.test.tsx` PASS; Real-Stack `frontend/e2e-real/entitlement-expiry.spec.ts` im Job von WP-338 (`k-e2e-real-ci`) PASS.
+- [ ] Retest F-071: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run '^TestEntitlementNotices$' ./internal/jobs/` (aus WP-425 (`t6-job02-notices`)) PASS; `npx vitest run src/components/EntitlementExpiryBanner.test.tsx` PASS; Real-Stack `frontend/e2e-real/entitlement-expiry.spec.ts` im Job von WP-338 (`k-e2e-real-ci`) PASS.
 - [ ] Regression: bestehende Vitest-Tests grün; `npm run lint` und `npm run typecheck` ohne neue Befunde.
 
 **Dateien (7 Einträge, Migration = 2):**
@@ -8245,24 +8380,24 @@ AI-02;[A];B;backend/internal/tenantapi/tenantapi_scope_integration_test.go;WP-46
 - frontend/e2e-real/entitlement-expiry.spec.ts (neu)
 - docs/traceability.csv
 
-**Migration/RLS:** keine Migration (Dedup-Tabelle `notice_sent` aus WP-421 (`t6-job02-notices`)).
+**Migration/RLS:** keine Migration (Dedup-Tabelle `notice_sent` aus WP-425 (`t6-job02-notices`)).
 
 **Tests:**
 
 - `EntitlementExpiryBanner.test.tsx`: 15, 14 und 1 Tag sowie ohne Ablauf; Real-Stack `entitlement-expiry.spec.ts`.
-- `jobs/notices_integration_test.go` `TestEntitlementNotices` (aus WP-421 (`t6-job02-notices`)) als Teil des Retests F-071.
+- `jobs/notices_integration_test.go` `TestEntitlementNotices` (aus WP-425 (`t6-job02-notices`)) als Teil des Retests F-071.
 
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-ENT-07;[B];B;frontend/src/components/EntitlementExpiryBanner.test.tsx;WP-462
+ENT-07;[B];B;frontend/src/components/EntitlementExpiryBanner.test.tsx;WP-464
 ```
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** Erzeugung von `entitlement.warning` und `entitlement.expired`, Dedup über `notice_sent` und Registrierung in `systemJobs` (WP-421 (`t6-job02-notices`)); Zertifikatsablauf (F-044, WP-421 (`t6-job02-notices`)); Collector-Pause nach Ablauf (unverändert).
+**Nicht Bestandteil:** Erzeugung von `entitlement.warning` und `entitlement.expired`, Dedup über `notice_sent` und Registrierung in `systemJobs` (WP-425 (`t6-job02-notices`)); Zertifikatsablauf (F-044, WP-425 (`t6-job02-notices`)); Collector-Pause nach Ablauf (unverändert).
 
-### WP-463 – Webhook-Seite zeigt Ablehnungen (Egress, Validierung, 403) und bietet Aktionen nur mit webhook:manage an
+### WP-465 – Webhook-Seite zeigt Ablehnungen (Egress, Validierung, 403) und bietet Aktionen nur mit webhook:manage an
 
 **Schlüssel:** `t2-webhook-ui-errors` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
@@ -8278,7 +8413,7 @@ ENT-07;[B];B;frontend/src/components/EntitlementExpiryBanner.test.tsx;WP-462
 |---|---|---|---|---|
 | [F-062](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-062) | P2 | Webhook-Seite verschluckt Serverablehnungen (400 Egress/Validierung, 403): keine Meldung | schließt | WP-045, WP-046, WP-049, WP-191, WP-192 |
 
-**Schließt Audit-WPs:** [WP-049](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-049) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-049](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-049) (TEILWEISE BESTANDEN, Teil), [WP-191](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-191) (TEILWEISE BESTANDEN, Teil), [WP-192](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-192) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** `WebhooksPage.submit` (`frontend/src/pages/WebhooksPage.tsx:51-82`) ruft `createWebhook.mutate` ohne `onError`; `useCreateWebhook`/`useDeleteWebhook` (`api/hooks.ts:738-744`) rendern Fehler nirgends, ein globaler Handler fehlt (`main.tsx:9-16`). 400 „egress: destination is not allowed“ und 403 bleiben unsichtbar; ein Sicherheitsblock ist für Nutzer nicht von einem Fehler zu unterscheiden (W01 FAIL in drei Läufen, 09c FAIL; F-062).
 
@@ -8310,18 +8445,18 @@ ENT-07;[B];B;frontend/src/components/EntitlementExpiryBanner.test.tsx;WP-462
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SEC-08;[B];B;frontend/src/pages/WebhooksPage.test.tsx;WP-463
+SEC-08;[B];B;frontend/src/pages/WebhooksPage.test.tsx;WP-465
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Globale Fehlerbehandlung aller Mutationen (UI-WPs der Gruppe T7); Speicherprüfung im Backend (WP-563 (`t2-egress-save`)).
+**Nicht Bestandteil:** Globale Fehlerbehandlung aller Mutationen (kein Befund, nicht Teil dieses Plans); Speicherprüfung im Backend (WP-563 (`t2-egress-save`)).
 
-### WP-464 – Cursor-Pagination der [B]-Listen credentials, permissions, Rollen- und Team-Unterlisten; data nie null; PG-Keyset-Test
+### WP-466 – Cursor-Pagination der [B]-Listen credentials, permissions, Rollen- und Team-Unterlisten; data nie null; PG-Keyset-Test
 
 **Schlüssel:** `t2-pagination-core` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-393 (`t2-role-assignment-revoke`)
+**Voraussetzungen (gemergt):** WP-395 (`t2-role-assignment-revoke`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -8342,7 +8477,7 @@ SEC-08;[B];B;frontend/src/pages/WebhooksPage.test.tsx;WP-463
 
 - [ ] Die fünf Listen antworten `{data, next_cursor}` über `api.ParsePagination` (Default 50, Maximum 200, signierter Cursor); OpenAPI mit `…ListResponse`-Schemas; die Clientfunktionen in `client.ts`/`hooks.ts` lesen `data`, die Seiten bleiben unverändert. Clientfunktionen, die vollständige Mengen brauchen (Permission-Katalog, Rollenrechte, Team-Mitglieder), folgen `next_cursor` mit `limit=200` bis zum Ende; Vitest in `client.test.ts`: zwei Seiten mit zusammen 103 Einträgen → 103 Einträge zurück.
 - [ ] `api.ListResponse` serialisiert `data` zentral nie als null (nil → []); Runtime-Test in `server/pagination_test.go`: leere Organisation → `GET /ips?limit=1`, `/ip-addresses?limit=1`, `/credentials` liefern `data: []` (Retest aus F-214).
-- [ ] `TestEveryListIsCursorPaginated` erkennt nackte Array-Antworten; bis WP-465 (`t2-pagination-modules`) stehen nur `/monitoring/metrics`, `/monitoring/alerts`, `/documents/{id}/links` und `/ai/conversations` mit Verweis auf jenes WP in einer Übergangsliste.
+- [ ] `TestEveryListIsCursorPaginated` erkennt nackte Array-Antworten; bis WP-467 (`t2-pagination-modules`) stehen nur `/monitoring/metrics`, `/monitoring/alerts`, `/documents/{id}/links` und `/ai/conversations` mit Verweis auf jenes WP in einer Übergangsliste.
 - [ ] Defekttest `TestAuditT2ListsAreCursorPages` PASS (Retest: `cd backend && go test -count=1 -v -run '^TestAuditT2ListsAreCursorPages$' ./internal/server/`), nach `server/pagination_test.go` verschoben; Zeile aus `tests/audit/expected-failures.txt` entfernt.
 - [ ] PG-Keyset-Test `ci/keyset_integration_test.go` (neu): 250 CIs, Seiten zu 50 über `next_cursor` → 250 eindeutige IDs in Sortierreihenfolge; Einfügen während der Iteration erzeugt keine Dublette; manipulierter Cursor → 400.
 - [ ] Regression: `TestCursorIsSigned`, `TestCursorRoundTrip`, `TestForgedCursorIsRejectedOnEveryRoute`, `npm run typecheck`, `npx vitest run` grün.
@@ -8375,18 +8510,18 @@ SEC-08;[B];B;frontend/src/pages/WebhooksPage.test.tsx;WP-463
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-API-02;[B];C;backend/internal/server/pagination_test.go;WP-464
+API-02;[B];C;backend/internal/server/pagination_test.go;WP-466
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Modul-Listen (WP-465 (`t2-pagination-modules`)); CompleteList-Endpunkte (WP-565 (`t2-complete-lists`)).
+**Nicht Bestandteil:** Modul-Listen (WP-467 (`t2-pagination-modules`)); CompleteList-Endpunkte (WP-565 (`t2-complete-lists`)).
 
-### WP-465 – Cursor-Pagination der Modul-Listen monitoring, documents/links und ai/conversations; Vertrag ohne nackte Arrays
+### WP-467 – Cursor-Pagination der Modul-Listen monitoring, documents/links und ai/conversations; Vertrag ohne nackte Arrays
 
 **Schlüssel:** `t2-pagination-modules` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-360 (`t2-ai-ask-consent`), WP-464 (`t2-pagination-core`)
+**Voraussetzungen (gemergt):** WP-360 (`t2-ai-ask-consent`), WP-466 (`t2-pagination-core`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -8400,12 +8535,12 @@ API-02;[B];C;backend/internal/server/pagination_test.go;WP-464
 
 **Schließt Audit-WPs:** [WP-164](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-164) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** Nach WP-464 (`t2-pagination-core`) antworten noch `GET /monitoring/metrics`, `/monitoring/alerts` (`backend/internal/monitoring/monitoring.go:477,480`), `/documents/{id}/links` (`document/handler.go:75`) und `/ai/conversations` (`ai/handler.go:23`) mit nackten Arrays; `TestAuditT2ContractHasNoBareArrayLists` meldet sie (F-075). Die Module sind nach E-03 im G1-Release abgeschaltet, der Listenvertrag von API-02 (WP-164: „alle Listenendpunkte“) gilt trotzdem.
+**Problem:** Nach WP-466 (`t2-pagination-core`) antworten noch `GET /monitoring/metrics`, `/monitoring/alerts` (`backend/internal/monitoring/monitoring.go:477,480`), `/documents/{id}/links` (`document/handler.go:75`) und `/ai/conversations` (`ai/handler.go:23`) mit nackten Arrays; `TestAuditT2ContractHasNoBareArrayLists` meldet sie (F-075). Die Module sind nach E-03 im G1-Release abgeschaltet, der Listenvertrag von API-02 (WP-164: „alle Listenendpunkte“) gilt trotzdem.
 
 **Akzeptanzkriterien:**
 
 - [ ] Die vier Listen antworten `{data, next_cursor}` über `ParsePagination`; OpenAPI angepasst; die Clientfunktionen lesen `data`, die Seiten bleiben unverändert.
-- [ ] Defekttest `TestAuditT2ContractHasNoBareArrayLists` PASS (Retest: `cd backend && go test -count=1 -v -run '^TestAuditT2ContractHasNoBareArrayLists$' ./internal/server/`), nach `server/pagination_test.go` verschoben; `server/t2_pagination_auditdefect_test.go` gelöscht; Übergangsliste aus WP-464 (`t2-pagination-core`) entfernt; Zeile aus `tests/audit/expected-failures.txt` entfernt.
+- [ ] Defekttest `TestAuditT2ContractHasNoBareArrayLists` PASS (Retest: `cd backend && go test -count=1 -v -run '^TestAuditT2ContractHasNoBareArrayLists$' ./internal/server/`), nach `server/pagination_test.go` verschoben; `server/t2_pagination_auditdefect_test.go` gelöscht; Übergangsliste aus WP-466 (`t2-pagination-core`) entfernt; Zeile aus `tests/audit/expected-failures.txt` entfernt.
 - [ ] Handlertests: `monitoring_test.go` (`?limit=1` bei drei Alerts → ein Eintrag und next_cursor), `document/cursor_test.go` und `ai/handler_test.go` analog.
 - [ ] Regression: Tests von `./internal/monitoring/`, `./internal/document/`, `./internal/ai/`, `MonitoringPage.test.tsx`, `AssistantPage.test.tsx` grün.
 
@@ -8435,14 +8570,14 @@ API-02;[B];C;backend/internal/server/pagination_test.go;WP-464
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-API-02;[B];C;backend/internal/server/pagination_test.go;WP-465
+API-02;[B];C;backend/internal/server/pagination_test.go;WP-467
 ```
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
-**Nicht Bestandteil:** Funktionsumfang der Module (nach E-03 abgeschaltet); Scope-Befunde im Monitoring (Gruppe T1, gleiche Datei `monitoring.go`).
+**Nicht Bestandteil:** Funktionsumfang der Module (nach E-03 abgeschaltet); Scope-Befunde im Monitoring (WP-344 (`t1-metric-names`), gleiche Datei `monitoring.go`).
 
-### WP-466 – CI-Listen-Export über /exports-Job statt deprecated Link /export/cis
+### WP-468 – CI-Listen-Export über /exports-Job statt deprecated Link /export/cis
 
 **Schlüssel:** `t2-ci-export` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
@@ -8458,7 +8593,7 @@ API-02;[B];C;backend/internal/server/pagination_test.go;WP-465
 |---|---|---|---|---|
 | [F-077](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-077) | P2 | CI-Listen-Export nutzt deprecated /api/v1/export/cis als Link → 401 im Browser | schließt | WP-168, WP-191, WP-192, WP-201 |
 
-**Schließt Audit-WPs:** [WP-168](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-168) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-168](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-168) (TEILWEISE BESTANDEN, Teil), [WP-191](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-191) (TEILWEISE BESTANDEN, Teil), [WP-192](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-192) (TEILWEISE BESTANDEN, Teil), [WP-200](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-200) (TEILWEISE BESTANDEN, Teil), [WP-201](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-201) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** Die Buttons „CSV/JSON exportieren“ der CI-Liste (`frontend/src/pages/CIListPage.tsx:118-123`) sind `<a href>` auf `ciApi.exportCIs` (`api/client.ts:529-531`, `/api/v1/export/cis`, deprecated, Sunset 2027-10-15); der Browser sendet keinen Bearer-Token, die Antwort ist 401 und die Seite zeigt Roh-JSON (L10b FAIL). `frontend/e2e/onboarding.spec.ts:323` nutzt denselben Pfad (F-077).
 
@@ -8498,14 +8633,14 @@ API-02;[B];C;backend/internal/server/pagination_test.go;WP-465
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-API-05;[B];C;frontend/src/api/deprecatedPaths.test.ts;WP-466
+API-05;[B];C;frontend/src/api/deprecatedPaths.test.ts;WP-468
 ```
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Tabellen- und Bulk-Bedienung der CI-Liste (F-170, F-328, Gruppe T7); OTP-Schritt im `keycloakLogin` der Onboarding-Suite (WP-357 (`t2-mfa-accounts`), gleiche Datei, Merge-Reihenfolge durch die Integration).
+**Nicht Bestandteil:** Tabellen- und Bulk-Bedienung der CI-Liste (F-170 WP-519 (`t7-ui-keyboard`), F-328 WP-520 (`t7-bulk-ui`)); OTP-Schritt im `keycloakLogin` der Onboarding-Suite (WP-357 (`t2-mfa-accounts`), gleiche Datei; keine Abhängigkeit, das später gemergte WP gleicht die Datei an).
 
-### WP-467 – Audit-Viewer liest die Felder des API-Vertrags (timestamp, resource_type, resource_id)
+### WP-469 – Audit-Viewer liest die Felder des API-Vertrags (timestamp, resource_type, resource_id)
 
 **Schlüssel:** `t2-audit-viewer` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 0,5 PT
 
@@ -8522,7 +8657,7 @@ API-05;[B];C;frontend/src/api/deprecatedPaths.test.ts;WP-466
 |---|---|---|---|---|
 | [F-078](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-078) | P2 | Audit-Seite liest Felder, die die API nicht liefert ('Invalid Date', Objekt '—') | schließt | WP-133, WP-168, WP-171, WP-191, WP-192 |
 
-**Schließt Audit-WPs:** [WP-168](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-168) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-133](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-133) (TEILWEISE BESTANDEN, Teil), [WP-168](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-168) (TEILWEISE BESTANDEN, Teil), [WP-171](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-171) (TEILWEISE BESTANDEN, Teil), [WP-191](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-191) (TEILWEISE BESTANDEN, Teil), [WP-192](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-192) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** `frontend/src/pages/AuditPage.tsx:113,118` liest `created_at`, `entity_type` und `entity_id` aus dem handgeschriebenen Typ `AuditEntry` (`api/client.ts:2085-2101`); die API (`backend/internal/audit/audit.go:31-49`) liefert `timestamp`, `resource_type`, `resource_id`. Jede Zeile zeigt „Invalid Date“ und „—“ (T17, L07 FAIL); der Vitest-Fixture verwendet dieselben falschen Namen (F-078).
 
@@ -8552,21 +8687,21 @@ API-05;[B];C;frontend/src/api/deprecatedPaths.test.ts;WP-466
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUD-05;[B];C;frontend/src/pages/AuditPage.test.tsx;WP-467
-API-05;[B];C;frontend/src/pages/AuditPage.test.tsx;WP-467
+AUD-05;[B];C;frontend/src/pages/AuditPage.test.tsx;WP-469
+API-05;[B];C;frontend/src/pages/AuditPage.test.tsx;WP-469
 ```
 
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Audit-Erfassung im Backend (unverändert).
 
-### WP-468 – Fehlende Planfeatures bei Organisationen mit Teilzeilen nachprovisionieren
+### WP-470 – Fehlende Planfeatures bei Organisationen mit Teilzeilen nachprovisionieren
 
 **Schlüssel:** `t2-ent-provisioning` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
 
 **Voraussetzungen (gemergt):** keine (außer den Prüfrahmen-WPs, Konvention 11)
 
-**Vorgezogen:** nach Schwere K6 Geringfügige Mängel; als Voraussetzung von WP-469 (`t2-ent-gates`) in K4 eingeordnet.
+**Vorgezogen:** nach Schwere K6 Geringfügige Mängel; als Voraussetzung von WP-471 (`t2-ent-gates`) in K4 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -8580,7 +8715,7 @@ API-05;[B];C;frontend/src/pages/AuditPage.test.tsx;WP-467
 
 **Schließt Audit-WPs:** [WP-072](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-072) (FEHLGESCHLAGEN, Teil)
 
-**Problem:** `Service.Provision` (`backend/internal/entitlement/entitlement.go:368-385`) schreibt Planfeatures nur für Organisationen ohne jede Entitlement-Zeile. Seit dem Wegfall des DefaultPlan-Fallbacks bleibt eine Organisation mit nur `cmdb_core` (Bestand vor WP-072) ohne topology, export und ingest (probe-v09-ent E1: provisioned=0, 403; F-210). Das WP ist Voraussetzung für WP-469 (`t2-ent-gates`), damit Bestandsorganisationen mit dessen Merge nicht zusätzlich Racks, API-Keys und E-Mail verlieren.
+**Problem:** `Service.Provision` (`backend/internal/entitlement/entitlement.go:368-385`) schreibt Planfeatures nur für Organisationen ohne jede Entitlement-Zeile. Seit dem Wegfall des DefaultPlan-Fallbacks bleibt eine Organisation mit nur `cmdb_core` (Bestand vor WP-072) ohne topology, export und ingest (probe-v09-ent E1: provisioned=0, 403; F-210). Das WP ist Voraussetzung für WP-471 (`t2-ent-gates`), damit Bestandsorganisationen mit dessen Merge nicht zusätzlich Racks, API-Keys und E-Mail verlieren.
 
 **Akzeptanzkriterien:**
 
@@ -8604,18 +8739,18 @@ API-05;[B];C;frontend/src/pages/AuditPage.test.tsx;WP-467
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-468
+ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-470
 ```
 
 **Entscheidungsbedarf:** [E-34](../entscheidungen.md#e-34)
 
-**Nicht Bestandteil:** Bereinigung implizit provisionierter Add-on-Zeilen (F-212, zurückgestellt); Gates für rack_view, api_access und notifications_email (WP-469 (`t2-ent-gates`), folgt auf dieses WP).
+**Nicht Bestandteil:** Bereinigung implizit provisionierter Add-on-Zeilen (F-212, zurückgestellt); Gates für rack_view, api_access und notifications_email (WP-471 (`t2-ent-gates`), folgt auf dieses WP).
 
-### WP-469 – Entitlement-Gates rack_view, api_access und notifications_email in REST, GraphQL und Zustellung
+### WP-471 – Entitlement-Gates rack_view, api_access und notifications_email in REST, GraphQL und Zustellung
 
 **Schlüssel:** `t2-ent-gates` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-468 (`t2-ent-provisioning`)
+**Voraussetzungen (gemergt):** WP-470 (`t2-ent-provisioning`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -8630,7 +8765,7 @@ ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-468
 
 **Schließt Audit-WPs:** [WP-072](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-072) (FEHLGESCHLAGEN, Teil)
 
-**Problem:** `gatedRoutes` (`backend/internal/entitlement/middleware.go:17-58`) enthält weder `/racks`, `/mounts`, `/rack-mounts` noch `/api-keys`; `rackLayout` prüft nur `cmdb_core` (`graphqlbff/resolver.go:275`); API-Key-Requests und E-Mail-Benachrichtigungen prüfen `api_access` bzw. `notifications_email` nicht. Ohne die Features bleiben Racks, Rack-Layout, API-Keys und E-Mail nutzbar; UI und API widersprechen sich (F-070, probe-v09-ent E2). Organisationen mit Teilzeilen (nur `cmdb_core`, F-210) verlören mit den Gates zusätzlich Racks, API-Keys und E-Mail; deshalb setzt das WP die Nachprovisionierung (WP-468 (`t2-ent-provisioning`)) voraus.
+**Problem:** `gatedRoutes` (`backend/internal/entitlement/middleware.go:17-58`) enthält weder `/racks`, `/mounts`, `/rack-mounts` noch `/api-keys`; `rackLayout` prüft nur `cmdb_core` (`graphqlbff/resolver.go:275`); API-Key-Requests und E-Mail-Benachrichtigungen prüfen `api_access` bzw. `notifications_email` nicht. Ohne die Features bleiben Racks, Rack-Layout, API-Keys und E-Mail nutzbar; UI und API widersprechen sich (F-070, probe-v09-ent E2). Organisationen mit Teilzeilen (nur `cmdb_core`, F-210) verlören mit den Gates zusätzlich Racks, API-Keys und E-Mail; deshalb setzt das WP die Nachprovisionierung (WP-470 (`t2-ent-provisioning`)) voraus.
 
 **Akzeptanzkriterien:**
 
@@ -8668,19 +8803,19 @@ ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-468
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-469
-API-04;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-469
+ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-471
+API-04;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-471
 ```
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** Quoten (WP-470 (`t2-ent-quotas`)); Ablaufwarnungen (WP-462 (`t2-ent-expiry-warning`)); Nachprovisionierung fehlender Planfeatures (WP-468 (`t2-ent-provisioning`), Voraussetzung).
+**Nicht Bestandteil:** Quoten (WP-472 (`t2-ent-quotas`)); Ablaufwarnungen (WP-464 (`t2-ent-expiry-warning`)); Nachprovisionierung fehlender Planfeatures (WP-470 (`t2-ent-provisioning`), Voraussetzung).
 
-### WP-470 – Quoten max_users, max_api_keys und max_collectors in allen REST-Schreibpfaden einschließlich Enrollment und Erstlogin; Benachrichtigung bei unlicensed_ci belegt
+### WP-472 – Quoten max_users, max_api_keys und max_collectors in allen REST-Schreibpfaden einschließlich Enrollment und Erstlogin; Benachrichtigung bei unlicensed_ci belegt
 
 **Schlüssel:** `t2-ent-quotas` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-354 (`t2-apikey-authz`), WP-358 (`t2-mfa-role-sync`), WP-398 (`t6-domain-events`), WP-469 (`t2-ent-gates`)
+**Voraussetzungen (gemergt):** WP-354 (`t2-apikey-authz`), WP-358 (`t2-mfa-role-sync`), WP-400 (`t6-domain-events`), WP-471 (`t2-ent-gates`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -8735,19 +8870,19 @@ API-04;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-469
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-470
-ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-470
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-472
+ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-472
 ```
 
 **Entscheidungsbedarf:** [E-22](../entscheidungen.md#e-22)
 
 **Nicht Bestandteil:** Serialisierung von Zählung und Anlage bei parallelen Anlagen (bekannte Race, kein Befund); Pfad `max_cis` (unverändert); Bootstrap-Serialisierung in `resolveLogin` (WP-570 (`t2-first-login`)).
 
-### WP-471 – Einheitliche Historie: location_change vereint; Standorthistorie über den Typ location
+### WP-473 – Einheitliche Historie: location_change vereint; Standorthistorie über den Typ location
 
 **Schlüssel:** `t3-history-location` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-409 (`t3-loc-delete-409`)
+**Voraussetzungen (gemergt):** WP-411 (`t3-loc-delete-409`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -8762,14 +8897,14 @@ ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-470
 | [F-093](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-093) | P2 | Einheitliche CI-Historie enthält keine location_change-Einträge | schließt | WP-171 |
 | [F-226](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-226) | P3 | History-Endpunkt akzeptiert entfernten Typ location_node und weist location ab | mit | WP-053 |
 
-**Schließt Audit-WPs:** [WP-171](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-171) (TEILWEISE BESTANDEN, Teil), [WP-053](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-053) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-053](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-053) (TEILWEISE BESTANDEN, Teil), [WP-171](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-171) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** `history/pg_repository.go:63-148` vereint nur ci_change, entity_change und Audit; location_change fehlt in der UNION, die Nicht-CI-Liste liest nur entity_change. Ein durch Raum- oder Rack-Umhängen verursachter Umzug ist in CI- und Standorthistorie unsichtbar (probe-history.log '0 → 0'). `validEntityType` (`history/handler.go:176-182`) lässt den entfernten Typ `location_node` zu und weist `location` mit 400 ab (probe-hist.log).
 
 **Akzeptanzkriterien:**
 
 - [ ] Die CI-Historie enthält für jeden location_change des Standorts des CI und seiner Vorfahren (ltree-Pfad) einen Eintrag mit Zeit, Akteur, altem/neuem Elternknoten und Pfad, chronologisch mit den übrigen Quellen. Nachweis: `TestAuditT3HistoryIncludesLocationChange` (verschoben nach `history/history_integration_test.go`) PASS; `TestAuditT3HistoryIncludesOverrides` und `TestUnifiedCIHistory` bleiben grün.
-- [ ] GET /api/v1/history/location/{id} → 200 mit dem Umzug, auch nach Löschung des Standorts (location_change ohne FK mit location_name aus WP-409 (`t3-loc-delete-409`), Suche über location_id); GET /history/location_node/{id} → 400 (Retest F-226, neuer Test, vor dem Fix rot). Negativfall: Standort eines anderen Clients → 404 (`history_scope_integration_test.go`).
+- [ ] GET /api/v1/history/location/{id} → 200 mit dem Umzug, auch nach Löschung des Standorts (location_change ohne FK mit location_name aus WP-411 (`t3-loc-delete-409`), Suche über location_id); GET /history/location_node/{id} → 400 (Retest F-226, neuer Test, vor dem Fix rot). Negativfall: Standort eines anderen Clients → 404 (`history_scope_integration_test.go`).
 - [ ] OpenAPI: Pfadparameter entityType erhält enum [ci, asset, relationship, location, reservation, composition] (wie validEntityType), Antworten 400 und 404 dokumentiert; `npm run generate:api`; `TestRoutesAndSpecificationAreInParity` grün.
 - [ ] Retest: `go test -count=1 -run 'TestAuditT3HistoryIncludesLocationChange' ./internal/history/` PASS ohne Build-Tag; Zeile aus `tests/audit/expected-failures.txt` entfernt; bestehende Tests von `internal/history` grün.
 
@@ -8795,20 +8930,20 @@ ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-470
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-CI-06;[B];C;backend/internal/history/history_integration_test.go;WP-471
-LOC-10;B/G1;C;backend/internal/history/history_integration_test.go;WP-471
-LOC-11;B/G1;C;backend/internal/history/history_integration_test.go;WP-471
+CI-06;[B];C;backend/internal/history/history_integration_test.go;WP-473
+LOC-10;B/G1;C;backend/internal/history/history_integration_test.go;WP-473
+LOC-11;B/G1;C;backend/internal/history/history_integration_test.go;WP-473
 ```
 
 **Entscheidungsbedarf:** [E-19](../entscheidungen.md#e-19)
 
-**Nicht Bestandteil:** Berechtigung der Historie (WP-473 (`t3-history-access`)); AUD-03-Schema (WP-486 (`t3-aud03-schema`)); Darstellung im CI-Detail (WP-577 (`t3-ci-detail-readable`)).
+**Nicht Bestandteil:** Berechtigung der Historie (WP-475 (`t3-history-access`)); AUD-03-Schema (WP-487 (`t3-aud03-schema`)); Darstellung im CI-Detail (WP-577 (`t3-ci-detail-readable`)).
 
-### WP-472 – Standortbaum-UI: Umbenennen und Verschieben, Löschbestätigung, 409 mit Abhängigkeitsarten
+### WP-474 – Standortbaum-UI: Umbenennen und Verschieben, Löschbestätigung, 409 mit Abhängigkeitsarten
 
 **Schlüssel:** `t3-loc-tree-ui` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-409 (`t3-loc-delete-409`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-411 (`t3-loc-delete-409`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -8829,7 +8964,7 @@ LOC-11;B/G1;C;backend/internal/history/history_integration_test.go;WP-471
 **Akzeptanzkriterien:**
 
 - [ ] Bearbeiten-Dialog je Knoten: Name ändern und Elternknoten wählen; die Auswahl bietet nur nach der Elternmatrix (LOC-10) zulässige Eltern und weder den Knoten selbst noch Nachfahren; Speichern sendet PATCH /locations/{id} über `useUpdateLocation` (invalidiert Baum und Detail); 422 mit Feldbezug erscheint am Feld. Vitest `LocationTreePage.test.tsx` (vor dem Fix rot): Umbenennen sendet {name}, Verschieben {parent_id}, unzulässige Eltern fehlen, 422 am Feld.
-- [ ] Löschen fragt in einem Bestätigungsdialog nach; Abbrechen sendet keinen Request. Ein 409 zeigt die Abhängigkeitsarten als übersetzte Labels (de-DE/en-US, alle Arten von `DependencyProblem` einschließlich der aus WP-409 (`t3-loc-delete-409`)); `ApiError` führt `dependencies` (Test in `apiError.test.ts`). Retest F-225: Vitest Dialog, Abbrechen ohne Request, 409-Labels.
+- [ ] Löschen fragt in einem Bestätigungsdialog nach; Abbrechen sendet keinen Request. Ein 409 zeigt die Abhängigkeitsarten als übersetzte Labels (de-DE/en-US, alle Arten von `DependencyProblem` einschließlich der aus WP-411 (`t3-loc-delete-409`)); `ApiError` führt `dependencies` (Test in `apiError.test.ts`). Retest F-225: Vitest Dialog, Abbrechen ohne Request, 409-Labels.
 - [ ] e2e-real `locations-racks.spec.ts` neuer Test L11: Raum im UI umbenennen und in ein anderes Gebäude verschieben, Reload; Baum, Pfad und Site des Teilbaums stimmen, in der DB genau eine neue location_change-Zeile und ein Audit-Eintrag (Retest F-079).
 - [ ] e2e-real `roles-authz.spec.ts` Test 06 erweitert: viewer → 403 auf POST /api/v1/locations, PATCH und DELETE /api/v1/locations/{id}, nichts gespeichert; Positivfall engineer → 201/200/204. Der viewer erhält im Baum keine stillen Fehlschläge (Aktionen ausgeblendet oder 403 sichtbar).
 - [ ] Regression: Vitest-Suite, `npm run lint`, `npm run typecheck`, `i18n.test.ts` grün; e2e-real L01, L03, L04 bleiben grün.
@@ -8858,19 +8993,19 @@ LOC-11;B/G1;C;backend/internal/history/history_integration_test.go;WP-471
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-LOC-07;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-472
-LOC-11;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-472
+LOC-07;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-474
+LOC-11;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-474
 ```
 
 **Entscheidungsbedarf:** [E-19](../entscheidungen.md#e-19); [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Backend-Löschregeln (WP-409 (`t3-loc-delete-409`)); Standorthistorie (WP-471 (`t3-history-location`)); Drag-and-drop im Baum; `frontend/src/api/client.ts` auch in WP-539 (`t3-maint-notify`) und WP-579 (`t3-rack-layout`) – Reihenfolge abstimmen.
+**Nicht Bestandteil:** Backend-Löschregeln (WP-411 (`t3-loc-delete-409`)); Standorthistorie (WP-473 (`t3-history-location`)); Drag-and-drop im Baum; `frontend/src/api/client.ts` auch in WP-540 (`t3-maint-notify`) und WP-579 (`t3-rack-layout`) – Reihenfolge abstimmen.
 
-### WP-473 – CI-Historie für alle Leserollen: Änderungen mit Objekt-Leserecht, Audit-Einträge mit audit:read
+### WP-475 – CI-Historie für alle Leserollen: Änderungen mit Objekt-Leserecht, Audit-Einträge mit audit:read
 
 **Schlüssel:** `t3-history-access` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-471 (`t3-history-location`), WP-472 (`t3-loc-tree-ui`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-473 (`t3-history-location`), WP-474 (`t3-loc-tree-ui`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -8921,73 +9056,18 @@ LOC-11;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-472
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-CI-06;[B];C;backend/internal/history/history_scope_integration_test.go;WP-473
+CI-06;[B];C;backend/internal/history/history_scope_integration_test.go;WP-475
 ```
 
 **Entscheidungsbedarf:** [E-78](entscheidungen.md#e-78) CI-06: Berechtigung der einheitlichen CI-Historie (offen, Empfehlung als Übergangsregel); [E-13](../entscheidungen.md#e-13)
 
-**Nicht Bestandteil:** Audit-Viewer /audit (F-078, Gruppe T2); RBA-02-Matrix; lesbare Standortnamen in der Historie (WP-577 (`t3-ci-detail-readable`)).
+**Nicht Bestandteil:** Audit-Viewer /audit (F-078, WP-469 (`t2-audit-viewer`)); RBA-02-Matrix; lesbare Standortnamen in der Historie (WP-577 (`t3-ci-detail-readable`)).
 
-### WP-474 – CI-Detail nach Override setzen/aufheben aktuell; Override gegen offenen Editor im Real-Stack
-
-**Schlüssel:** `t3-override-clear-ui` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
-
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-410 (`t3-override-version`)
-
-| ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
-|---|---|---|---|---|---|---|
-| CI-10 | [B] | TEILWEISE BESTANDEN | Teil | [WP-060](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-060) | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:39` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:32` |
-| API-07 | [B] | FEHLGESCHLAGEN | Teil | [WP-061](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-061) | `docs/audit/07-api-suche-jobs-lebenszyklus.md:32` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:16` |
-
-**Befunde:**
-
-| Befund | Prio | Titel | Beitrag | Betroffene WPs |
-|---|---|---|---|---|
-| [F-021](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-021) | P1 | Override setzen/aufheben erhöht ci.version nicht: veralteter If-Match-PATCH überschreibt den neueren geschützten Override | Teil | WP-061 |
-| [F-100](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-100) | P2 | CI-Detail zeigt nach „Override aufheben“ bis zum Reload weiter den entfernten Override-Wert | schließt | WP-060 |
-
-**Schließt Audit-WPs:** [WP-060](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-060) (TEILWEISE BESTANDEN, schließt), [WP-061](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-061) (FEHLGESCHLAGEN, Teil)
-
-**Problem:** `useClearOverride` (`frontend/src/api/cmdbHooks.ts:296-301`) invalidiert nur ['ci-fields', ciId]; das CI-Detail zeigt nach „Override aufheben“ bis zum Reload den entfernten Wert (Real-Stack D07 rot). Der von WP-061 verlangte Real-Stack-Nachweis „Override gegen offenen Editor“ fehlt.
-
-**Akzeptanzkriterien:**
-
-- [ ] `useSetOverride` und `useClearOverride` invalidieren ['ci', ciId], ['cis'] und ['ci-fields', ciId]; Vitest `cmdbHooks.test.tsx` (neu, vor dem Fix rot) prüft die Invalidierung beider Hooks.
-- [ ] Real-Stack D07 (`discovery-override.spec.ts`) vollständig grün: nach „Override aufheben“ zeigt das CI-Detail ohne Reload den beobachteten Wert; die Zeile e2e-real D07 aus `tests/audit/expected-failures.txt` gelöscht.
-- [ ] e2e-real `discovery-override.spec.ts` neuer Test D09: Bearbeiten-Dialog offen, in einer zweiten Sitzung Override auf model gesetzt, Speichern im Dialog mit geändertem model → 409 mit sichtbarem Konflikthinweis; der Override bleibt.
-- [ ] Regression: Vitest-Suite, `npm run lint`, `npm run typecheck` grün; e2e-real D02, D03, D04 bleiben grün.
-
-**Dateien (5 Einträge, Migration = 2):**
-
-- frontend/src/api/cmdbHooks.ts
-- frontend/src/api/cmdbHooks.test.tsx (neu)
-- frontend/e2e-real/discovery-override.spec.ts
-- tests/audit/expected-failures.txt (angelegt in WP-337)
-- docs/traceability.csv
-
-**Migration/RLS:** keine Migration.
-
-**Tests:**
-
-- Vitest `cmdbHooks.test.tsx`: Invalidierung nach Set und Clear.
-- e2e-real `discovery-override.spec.ts` D07 (bestehend) und D09 (neu).
-
-**Traceability (`docs/traceability.csv`):**
-
-```text
-CI-10;[B];D;frontend/src/api/cmdbHooks.test.tsx;WP-474
-API-07;[B];D;frontend/e2e-real/discovery-override.spec.ts;WP-474
-```
-
-**Entscheidungsbedarf:** keiner
-
-**Nicht Bestandteil:** Backend-Versionierung und ClearOverride-Fehlerabbildung (WP-410 (`t3-override-version`)); Konfliktanzeige der Instanzattribute (WP-476 (`t3-ci-edit-ui`)); D10 in derselben Spec (WP-575 (`t3-review-escalation-widget`)).
-
-### WP-475 – PATCH /cis/{id}: null löscht typisierte Felder (RFC 7396); interne Fehler nicht als 404
+### WP-476 – PATCH /cis/{id}: null löscht typisierte Felder (RFC 7396); interne Fehler nicht als 404
 
 **Schlüssel:** `t3-ci-mergepatch-null` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-369 (`t3-parent-scope`), WP-410 (`t3-override-version`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-370 (`t3-parent-scope`), WP-412 (`t3-override-version`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9037,18 +9117,18 @@ API-07;[B];D;frontend/e2e-real/discovery-override.spec.ts;WP-474
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-CI-04;[B];D;backend/internal/ci/manual_override_integration_test.go;WP-475
+CI-04;[B];D;backend/internal/ci/manual_override_integration_test.go;WP-476
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Formular-Payload im UI (WP-476 (`t3-ci-edit-ui`)).
+**Nicht Bestandteil:** Formular-Payload im UI (WP-477 (`t3-ci-edit-ui`)).
 
-### WP-476 – CI-Bearbeitung im UI: nur geänderte Felder, Leeren speichert null, If-Match auch für Instanzattribute
+### WP-477 – CI-Bearbeitung im UI: nur geänderte Felder, Leeren speichert null, If-Match auch für Instanzattribute
 
 **Schlüssel:** `t3-ci-edit-ui` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-395 (`t6-ci-form-types`), WP-475 (`t3-ci-mergepatch-null`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-397 (`t6-ci-form-types`), WP-476 (`t3-ci-mergepatch-null`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9064,7 +9144,7 @@ CI-04;[B];D;backend/internal/ci/manual_override_integration_test.go;WP-475
 | [F-082](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-082) | P2 | Instanzattribut-Bearbeitung im CI-Detail sendet kein If-Match | schließt | WP-061 |
 | [F-228](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-228) | P3 | Bearbeiten-Dialog sendet alle Felder: veralteter Editor erhält 409 trotz Änderung nur eines unberührten Felds | mit | WP-057, WP-061 |
 
-**Schließt Audit-WPs:** [WP-057](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-057) (FEHLGESCHLAGEN, schließt), [WP-061](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-061) (FEHLGESCHLAGEN, schließt)
+**Schließt Audit-WPs:** [WP-057](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-057) (FEHLGESCHLAGEN, schließt), [WP-061](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-061) (FEHLGESCHLAGEN, schließt), [WP-201](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-201) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** `optionalValue('')` (`CIFormModal.tsx:46-49`) macht aus einem geleerten Feld undefined; das Feld fehlt im PATCH-Body, das Speichern meldet Erfolg, der Wert bleibt (Real-Stack L05: Firmware 9.9.9 nach Reload). Der Dialog sendet alle Formularwerte (`CIFormModal.tsx:156-164`) statt eines Diffs, ein veralteter Editor erhält 409 für ein Feld, das er nicht geändert hat (L12b). `InstanceFieldsSection` (`CIDetailPage.tsx:231`) ruft `updateCI.mutate` ohne version, der Client sendet kein If-Match (`client.ts:506`); bei require_if_match scheitert jedes Speichern mit 412.
 
@@ -9098,20 +9178,20 @@ CI-04;[B];D;backend/internal/ci/manual_override_integration_test.go;WP-475
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-CI-04;[B];D;frontend/src/pages/CIFormModal.test.tsx;WP-476
-API-07;[B];D;frontend/src/pages/CIDetailPage.instance-fields.test.tsx;WP-476
-API-03;[B];D;frontend/src/pages/CIDetailPage.instance-fields.test.tsx;WP-476
+CI-04;[B];D;frontend/src/pages/CIFormModal.test.tsx;WP-477
+API-07;[B];D;frontend/src/pages/CIDetailPage.instance-fields.test.tsx;WP-477
+API-03;[B];D;frontend/src/pages/CIDetailPage.instance-fields.test.tsx;WP-477
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Typauswahl im CIFormModal (F-016, Gruppe T6) – Reihenfolge in `CIFormModal.tsx` abstimmen; asset-eigene Felder im Formular (WP-577 (`t3-ci-detail-readable`)).
+**Nicht Bestandteil:** Typauswahl im CIFormModal (F-016, WP-397 (`t6-ci-form-types`)) – Reihenfolge in `CIFormModal.tsx` abstimmen; asset-eigene Felder im Formular (WP-577 (`t3-ci-detail-readable`)).
 
-### WP-477 – Override-Endpunkt weist reservierte Namensräume ab; source-policy aus der Rangtabelle
+### WP-478 – Override-Endpunkt weist reservierte Namensräume ab; source-policy aus der Rangtabelle
 
 **Schlüssel:** `t3-override-reserved` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-372 (`t3-review-actor`), WP-410 (`t3-override-version`)
+**Voraussetzungen (gemergt):** WP-373 (`t3-review-actor`), WP-412 (`t3-override-version`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9136,7 +9216,7 @@ API-03;[B];D;frontend/src/pages/CIDetailPage.instance-fields.test.tsx;WP-476
 - [ ] Migration: CHECK auf ci_field_value.field_name schließt die vier Namen aus; Bestandszeilen mit reserviertem Namen werden vorher nach migration_quarantine verschoben (Migrationstest zählt sie). OpenAPI: Pfadparameter name mit Pattern, das die vier Namen ausschließt; `npm run generate:api`.
 - [ ] Repo-Datentest zu 000099 in `ci/namespace_integration_test.go`: Altdaten mit Instanzattributen auf oberster Ebene liegen nach der Migration unter _instance, die Lesesicht entspricht CI-10.
 - [ ] `DefaultPriorities` wird aus `SourceRanks` absteigend abgeleitet; GET /reconciliation/source-policy liefert die REC-03-Reihenfolge; Unit-Test in `override/decide_test.go` (Retest F-230, vor dem Fix rot).
-- [ ] Überführung: `audit_t3_router_auditdefect_test.go` enthält nach WP-372 (`t3-review-actor`) und diesem WP keinen roten Test und wird entfernt; Zeile aus `tests/audit/expected-failures.txt` gelöscht; Roundtrip und Tests von `internal/override`, `internal/ci` (TestReservedNamespaces, TestAttributeNamespacesOnPostgreSQL), `internal/server` grün.
+- [ ] Überführung: `audit_t3_router_auditdefect_test.go` enthält nach WP-373 (`t3-review-actor`) und diesem WP keinen roten Test und wird entfernt; Zeile aus `tests/audit/expected-failures.txt` gelöscht; Roundtrip und Tests von `internal/override`, `internal/ci` (TestReservedNamespaces, TestAttributeNamespacesOnPostgreSQL), `internal/server` grün.
 
 **Dateien (13 Einträge, Migration = 2):**
 
@@ -9166,20 +9246,20 @@ API-03;[B];D;frontend/src/pages/CIDetailPage.instance-fields.test.tsx;WP-476
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-GLO-13;[B];D;backend/internal/server/override_routes_integration_test.go;WP-477
-CI-10;[B];D;backend/internal/ci/namespace_integration_test.go;WP-477
-REC-03;[B];D;backend/internal/override/decide_test.go;WP-477
+GLO-13;[B];D;backend/internal/server/override_routes_integration_test.go;WP-478
+CI-10;[B];D;backend/internal/ci/namespace_integration_test.go;WP-478
+REC-03;[B];D;backend/internal/override/decide_test.go;WP-478
 ```
 
 **Entscheidungsbedarf:** [E-23](../entscheidungen.md#e-23)
 
-**Nicht Bestandteil:** Versionierung der Override-Schreibvorgänge (WP-410 (`t3-override-version`)).
+**Nicht Bestandteil:** Versionierung der Override-Schreibvorgänge (WP-412 (`t3-override-version`)).
 
-### WP-478 – Review-Auflösung merge bei probable_duplicate über den CI-12-Merge
+### WP-479 – Review-Auflösung merge bei probable_duplicate über den CI-12-Merge
 
 **Schlüssel:** `t3-review-merge` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-368 (`t3-resurrect-new`)
+**Voraussetzungen (gemergt):** WP-369 (`t3-resurrect-new`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9191,7 +9271,7 @@ REC-03;[B];D;backend/internal/override/decide_test.go;WP-477
 |---|---|---|---|---|
 | [F-096](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-096) | P2 | Review-Auflösung merge bei probable_duplicate löscht weich statt CI-12-Merge | schließt | WP-173 |
 
-**Schließt Audit-WPs:** [WP-173](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-173) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-173](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-173) (TEILWEISE BESTANDEN, Teil), [WP-183](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-183) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** `resolveCIReview` (`discovery/review.go:118-146`) setzt merge bei probable_duplicate als `ciRepo.Delete` des Duplikats um: kein merged_into, keine ci_merge-Zeile; Beziehungen, Interfaces und Overrides bleiben am gelöschten Duplikat, kein Unmerge (probe-review.log 'merged_into="" ci_merge rows=0'). Das ist der einzige Merge-Pfad der UI.
 
@@ -9221,18 +9301,18 @@ REC-03;[B];D;backend/internal/override/decide_test.go;WP-477
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-CI-12;[B];C;backend/internal/discovery/review_resolution_integration_test.go;WP-478
+CI-12;[B];C;backend/internal/discovery/review_resolution_integration_test.go;WP-479
 ```
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** ci_merge.job_id und Retention (WP-572 (`t3-merge-job-retention`)); Review-Inbox-UI (F-176, Gruppe T7); weitere Änderungen in `discovery/discovery.go` (WP-480 (`t3-ingest-poison`), WP-488 (`t3-aud03-ingest`), WP-368 (`t3-resurrect-new`), WP-482 (`t3-spool-poison`), WP-580 (`t3-discovery-p3`)) – Reihenfolge abstimmen.
+**Nicht Bestandteil:** ci_merge.job_id und Retention (WP-572 (`t3-merge-job-retention`)); Review-Inbox-UI (F-176, WP-528 (`t7-review-new`)); weitere Änderungen in `discovery/discovery.go` (WP-481 (`t3-ingest-poison`), WP-489 (`t3-aud03-ingest`), WP-369 (`t3-resurrect-new`), WP-483 (`t3-spool-poison`), WP-580 (`t3-discovery-p3`)) – Reihenfolge abstimmen.
 
-### WP-479 – ci.health in G1: eigener Health-Worker unabhängig vom Modul alerting
+### WP-480 – ci.health in G1: eigener Health-Worker unabhängig vom Modul alerting
 
 **Schlüssel:** `t3-health-worker` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-444 (`t5-worker-metrics`)
+**Voraussetzungen (gemergt):** WP-447 (`t5-worker-metrics`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9250,12 +9330,12 @@ CI-12;[B];C;backend/internal/discovery/review_resolution_integration_test.go;WP-
 
 **Akzeptanzkriterien:**
 
-- [ ] Neuer Worker `config.WorkerHealth` (in `WorkerNames`, nicht in LateModules) ruft `RefreshHealth` minütlich auf; er wird unabhängig vom Alert-Evaluator in `buildWorkers` (aus WP-444 (`t5-worker-metrics`)) registriert, der Evaluator ruft den Refresh nicht mehr doppelt auf; `docs/ops/workers.md` beschreibt den Worker.
+- [ ] Neuer Worker `config.WorkerHealth` (in `WorkerNames`, nicht in LateModules) ruft `RefreshHealth` minütlich auf; er wird unabhängig vom Alert-Evaluator in `buildWorkers` (aus WP-447 (`t5-worker-metrics`)) registriert, der Evaluator ruft den Refresh nicht mehr doppelt auf; `docs/ops/workers.md` beschreibt den Worker.
 - [ ] Nachweis: `TestAuditT3HealthRefreshRunsInG1` (verschoben nach `server/workers_test.go`) PASS; Verdrahtungstest in `cmd/server/main_test.go`: unter ParseModules("") enthält die Worker-Liste aus `buildWorkers` health; mit RETICORA_MODULES=alerting läuft der Refresh genau einmal je Takt.
 - [ ] PG-Test `ci/health_integration_test.go`: frisches Monitoring-Sample → nach RefreshHealth health = 'ok', veraltetes Sample → 'unknown'; HTTP: PATCH lifecycle_state auf einem Typ ohne Lifecycle-Modell → 422 mit Feldbezug, mit Lifecycle-Modell → 200.
 - [ ] Vitest `CIDetailPage.health.test.tsx` (neu): Badge zeigt ok, degraded und unknown mit Übersetzung.
 - [ ] Überführung: Defekttest-Datei entfernt, Zeile aus `tests/audit/expected-failures.txt` gelöscht; TestG1DefaultSwitchesLateModulesOff und die Tests von `internal/server`, `internal/monitoring` grün.
-- [ ] Der Health-Worker wird in buildWorkers registriert (backend/cmd/server/workers.go aus WP-444 (`t5-worker-metrics`)); in main.go entsteht keine zweite ausgelagerte Worker-Liste. Der Registry-Test aus WP-444 (`t5-worker-metrics`) (workers_metrics_test.go) ist um config.WorkerHealth erweitert (Worker vorhanden, ObserveWorkerRun je Zyklus) und grün. Der Verdrahtungsfall „Refresh genau einmal je Takt mit RETICORA_MODULES=alerting“ bleibt grün.
+- [ ] Der Health-Worker wird in buildWorkers registriert (backend/cmd/server/workers.go aus WP-447 (`t5-worker-metrics`)); in main.go entsteht keine zweite ausgelagerte Worker-Liste. Der Registry-Test aus WP-447 (`t5-worker-metrics`) (workers_metrics_test.go) ist um config.WorkerHealth erweitert (Worker vorhanden, ObserveWorkerRun je Zyklus) und grün. Der Verdrahtungsfall „Refresh genau einmal je Takt mit RETICORA_MODULES=alerting“ bleibt grün.
 
 **Dateien (13 Einträge, Migration = 2):**
 
@@ -9270,8 +9350,8 @@ CI-12;[B];C;backend/internal/discovery/review_resolution_integration_test.go;WP-
 - docs/ops/workers.md
 - tests/audit/expected-failures.txt (angelegt in WP-337)
 - docs/traceability.csv
-- backend/cmd/server/workers.go (angelegt in WP-444)
-- backend/cmd/server/workers_metrics_test.go (angelegt in WP-444)
+- backend/cmd/server/workers.go (angelegt in WP-447)
+- backend/cmd/server/workers_metrics_test.go (angelegt in WP-447)
 
 **Migration/RLS:** keine Migration; `ci_refresh_health` (000090) läuft je Organisation unter RLS wie bisher.
 
@@ -9284,14 +9364,14 @@ CI-12;[B];C;backend/internal/discovery/review_resolution_integration_test.go;WP-
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/health_integration_test.go;WP-479
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/health_integration_test.go;WP-480
 ```
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03); [E-36](../entscheidungen.md#e-36)
 
 **Nicht Bestandteil:** Alert-Regeln (MON-04, Modul alerting); Health-Findings (nicht G1 nach E-36).
 
-### WP-480 – Ingest: Fehler je Record isolieren (Queue und HTTP)
+### WP-481 – Ingest: Fehler je Record isolieren (Queue und HTTP)
 
 **Schlüssel:** `t3-ingest-poison` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
@@ -9343,15 +9423,15 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/health_integration_test
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-REC-01;[B];D;backend/internal/discovery/consumer_integration_test.go;WP-480
-NFR-03;[B], Teilumfang [P5];D;backend/internal/discovery/consumer_test.go;WP-480
+REC-01;[B];D;backend/internal/discovery/consumer_integration_test.go;WP-481
+NFR-03;[B], Teilumfang [P5];D;backend/internal/discovery/consumer_test.go;WP-481
 ```
 
 **Entscheidungsbedarf:** [E-56](../entscheidungen.md#e-56)
 
-**Nicht Bestandteil:** Auswertung der rejected-Zähler im Collector (WP-482 (`t3-spool-poison`)); Lane-Metriken (F-282, Gruppe T4) in `consumer.go`; weitere Änderungen in `discovery/discovery.go` (WP-368 (`t3-resurrect-new`), WP-478 (`t3-review-merge`), WP-482 (`t3-spool-poison`)) – Reihenfolge abstimmen.
+**Nicht Bestandteil:** Auswertung der rejected-Zähler im Collector (WP-483 (`t3-spool-poison`)); Lane-Metriken (F-282, WP-586 (`t4-p3-fail-closed`)) in `consumer.go`; weitere Änderungen in `discovery/discovery.go` (WP-369 (`t3-resurrect-new`), WP-479 (`t3-review-merge`), WP-483 (`t3-spool-poison`)) – Reihenfolge abstimmen.
 
-### WP-481 – Spool: Verlustzähler restart-fest, atomares Schreiben, Quarantäne korrupter Einträge
+### WP-482 – Spool: Verlustzähler restart-fest, atomares Schreiben, Quarantäne korrupter Einträge
 
 **Schlüssel:** `t3-spool-durable` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
@@ -9398,20 +9478,20 @@ NFR-03;[B], Teilumfang [P5];D;backend/internal/discovery/consumer_test.go;WP-480
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-COL-05;[B];D;edgecore/buffer/buffer_test.go;WP-481
-OPS-06;[Q];D;edgecore/buffer/buffer_test.go;WP-481
-NFR-04;[B], Teilumfang [P5];D;edgecore/buffer/buffer_test.go;WP-481
+COL-05;[B];D;edgecore/buffer/buffer_test.go;WP-482
+OPS-06;[Q];D;edgecore/buffer/buffer_test.go;WP-482
+NFR-04;[B], Teilumfang [P5];D;edgecore/buffer/buffer_test.go;WP-482
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Poison-Behandlung im Collector und serverseitige Sichtbarkeit (WP-482 (`t3-spool-poison`)).
+**Nicht Bestandteil:** Poison-Behandlung im Collector und serverseitige Sichtbarkeit (WP-483 (`t3-spool-poison`)).
 
-### WP-482 – Collector-Zustellung: Poison-Batches quarantänisieren, jeden Verlust zählen, Server macht Verluste sichtbar
+### WP-483 – Collector-Zustellung: Poison-Batches quarantänisieren, jeden Verlust zählen, Server macht Verluste sichtbar
 
 **Schlüssel:** `t3-spool-poison` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-480 (`t3-ingest-poison`), WP-481 (`t3-spool-durable`)
+**Voraussetzungen (gemergt):** WP-481 (`t3-ingest-poison`), WP-482 (`t3-spool-durable`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9433,7 +9513,7 @@ NFR-04;[B], Teilumfang [P5];D;edgecore/buffer/buffer_test.go;WP-481
 
 **Akzeptanzkriterien:**
 
-- [ ] Upload-Ergebnisse werden klassifiziert: 2xx → Ack (bei 202 mit rejected je Record aus WP-480 (`t3-ingest-poison`) werden die abgewiesenen Records als Verlust gezählt); 4xx außer 408/429 → Poison: Batch in Quarantäne, als Verlust gezählt, die Zustellung läuft mit dem nächsten Batch weiter; 5xx, 408, 429 und Netzfehler → transient, Batch bleibt, Backoff. Collector-Test (vor dem Fix rot): Batch 1 → 400, Batch 2 → 202 zugestellt; 503 → beide bleiben im Spool, kein Verlust.
+- [ ] Upload-Ergebnisse werden klassifiziert: 2xx → Ack (bei 202 mit rejected je Record aus WP-481 (`t3-ingest-poison`) werden die abgewiesenen Records als Verlust gezählt); 4xx außer 408/429 → Poison: Batch in Quarantäne, als Verlust gezählt, die Zustellung läuft mit dem nächsten Batch weiter; 5xx, 408, 429 und Netzfehler → transient, Batch bleibt, Backoff. Collector-Test (vor dem Fix rot): Batch 1 → 400, Batch 2 → 202 zugestellt; 503 → beide bleiben im Spool, kein Verlust.
 - [ ] Gespoolte Agent-Telemetrie mit 4xx oder unlesbarem Inhalt ruft vor dem Ack `recordLoss` auf (Test: 403 → dropped_messages=1, Retest F-233); nach Entscheidung E-79 (Option 1) erhöhen bei Upload-Fehler verworfene Metrik-Samples und Traps einen eigenen Zähler dropped_samples, der im Heartbeat gemeldet wird.
 - [ ] Der Collector setzt den persistierten Verlustzähler erst nach 204 des Heartbeats zurück (AckLoss); Repo-Test Backpressure-Pause in `collectorcmd_test.go`: bei saturiertem Spool pausiert die Erfassung und setzt nach Abbau fort.
 - [ ] Server: gemeldete Verluste und Backpressure erhöhen die Metriken reticora_collector_spool_dropped_total (nach Art) und reticora_collector_spool_backpressure für HTTP- und NATS-Heartbeat, zusätzlich zum Log; `CollectorSpoolReport` in OpenAPI um dropped_samples ergänzt, `npm run generate:api`. Test in `edge_ingest_test.go`: Heartbeat mit dropped_messages=3 → Metrik +3 (Retest F-234).
@@ -9462,20 +9542,20 @@ NFR-04;[B], Teilumfang [P5];D;edgecore/buffer/buffer_test.go;WP-481
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-COL-05;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-482
-OPS-06;[Q];D;collector/collectorcmd/collectorcmd_test.go;WP-482
-NFR-04;[B], Teilumfang [P5];D;collector/collectorcmd/collectorcmd_test.go;WP-482
+COL-05;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-483
+OPS-06;[Q];D;collector/collectorcmd/collectorcmd_test.go;WP-483
+NFR-04;[B], Teilumfang [P5];D;collector/collectorcmd/collectorcmd_test.go;WP-483
 ```
 
 **Entscheidungsbedarf:** [E-79](entscheidungen.md#e-79) NFR-04: Verlust von Metrik-Samples und Traps bei Upload-Fehlern (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Weitere Befunde in `collectorcmd.go` (F-013, F-106, F-109, F-276 Gruppe T4; F-046, F-168, F-339 Gruppe T7) – Reihenfolge abstimmen; Spooling von Metrik-Samples und Traps (Option 2 von E-79, eigenes WP); weitere Änderungen in `discovery/discovery.go` (WP-368 (`t3-resurrect-new`), WP-478 (`t3-review-merge`), WP-580 (`t3-discovery-p3`)) – Reihenfolge abstimmen.
+**Nicht Bestandteil:** Weitere Befunde in `collectorcmd.go` (F-013 WP-378 (`t4-cred-scope`), F-106 WP-494 (`t4-scope-expansion`), F-109 WP-495 (`t4-scope-schedule`), F-276 WP-586 (`t4-p3-fail-closed`); F-046 WP-426 (`t7-metrics-edge`), F-168 und F-339 WP-512 (`t7-power-metrics`)) – Reihenfolge abstimmen; Spooling von Metrik-Samples und Traps (Option 2 von E-79, eigenes WP); weitere Änderungen in `discovery/discovery.go` (WP-369 (`t3-resurrect-new`), WP-479 (`t3-review-merge`), WP-580 (`t3-discovery-p3`)) – Reihenfolge abstimmen.
 
-### WP-483 – Agent-Telemetrie folgt dem Merge: endpoint_agent umhängen, merged_into folgen, transiente Fehler zurückgeben
+### WP-484 – Agent-Telemetrie folgt dem Merge: endpoint_agent umhängen, merged_into folgen, transiente Fehler zurückgeben
 
 **Schlüssel:** `t3-agent-merge` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-475 (`t3-ci-mergepatch-null`)
+**Voraussetzungen (gemergt):** WP-476 (`t3-ci-mergepatch-null`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9519,19 +9599,19 @@ NFR-04;[B], Teilumfang [P5];D;collector/collectorcmd/collectorcmd_test.go;WP-482
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-OVR-02;[B];D;backend/internal/agent/agent_merge_integration_test.go;WP-483
-AGT-05;[P4];D;backend/internal/agent/agent_merge_integration_test.go;WP-483
+OVR-02;[B];D;backend/internal/agent/agent_merge_integration_test.go;WP-484
+AGT-05;[P4];D;backend/internal/agent/agent_merge_integration_test.go;WP-484
 ```
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03); [E-20](../entscheidungen.md#e-20)
 
 **Nicht Bestandteil:** Konflikt-Reviews aus Agent und Workflow (WP-576 (`t3-conflict-sources`)).
 
-### WP-484 – Unmerge: 409 bei späteren Survivor-Änderungen, force zur bewussten Wiederherstellung
+### WP-485 – Unmerge: 409 bei späteren Survivor-Änderungen, force zur bewussten Wiederherstellung
 
 **Schlüssel:** `t3-unmerge-conflict` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-369 (`t3-parent-scope`), WP-483 (`t3-agent-merge`)
+**Voraussetzungen (gemergt):** WP-370 (`t3-parent-scope`), WP-484 (`t3-agent-merge`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9578,20 +9658,20 @@ AGT-05;[P4];D;backend/internal/agent/agent_merge_integration_test.go;WP-483
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-484
+CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-485
 ```
 
 **Entscheidungsbedarf:** [E-80](entscheidungen.md#e-80) CI-12: Unmerge nach späteren Änderungen am Survivor (offen, Empfehlung als Übergangsregel); [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Job-Verweis und Retention (WP-572 (`t3-merge-job-retention`)); Merge-Events (F-324, Gruppe T6) in `merge.go`.
+**Nicht Bestandteil:** Job-Verweis und Retention (WP-572 (`t3-merge-job-retention`)); Merge-Events (F-324, WP-549 (`t6-review-events`)) in `merge.go`.
 
-### WP-485 – Asset-Verknüpfung ohne Standortverlust; committeter HTTP-422-Nachweis der asset-eigenen Felder
+### WP-486 – Asset-Verknüpfung ohne Standortverlust; committeter HTTP-422-Nachweis der asset-eigenen Felder
 
 **Schlüssel:** `t3-asset-link-location` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-475 (`t3-ci-mergepatch-null`)
+**Voraussetzungen (gemergt):** WP-476 (`t3-ci-mergepatch-null`)
 
-**Vorgezogen:** nach Schwere K6 Geringfügige Mängel; als Voraussetzung von WP-486 (`t3-aud03-schema`) in K4 eingeordnet.
+**Vorgezogen:** nach Schwere K6 Geringfügige Mängel; als Voraussetzung von WP-487 (`t3-aud03-schema`) in K4 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9632,19 +9712,19 @@ CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-484
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/asset_canonical_integration_test.go;WP-485
-AST-04;[P2];B;backend/internal/server/ci_asset_routes_integration_test.go;WP-485
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/asset_canonical_integration_test.go;WP-486
+AST-04;[P2];B;backend/internal/server/ci_asset_routes_integration_test.go;WP-486
 ```
 
 **Entscheidungsbedarf:** [E-81](entscheidungen.md#e-81) DB-05: Verknüpfung eines CI mit einem Asset ohne Standort (offen, Empfehlung als Übergangsregel); [E-36](../entscheidungen.md#e-36)
 
 **Nicht Bestandteil:** Darstellung der Asset-Karte und des Formulars (WP-577 (`t3-ci-detail-readable`)).
 
-### WP-486 – AUD-03: ci_change mit change_kind, Korrelation und Änderungsgruppen im Schreibpfad; Vokabular type_changed
+### WP-487 – AUD-03: ci_change mit change_kind, Korrelation und Änderungsgruppen im Schreibpfad; Vokabular type_changed
 
 **Schlüssel:** `t3-aud03-schema` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-473 (`t3-history-access`), WP-475 (`t3-ci-mergepatch-null`), WP-485 (`t3-asset-link-location`)
+**Voraussetzungen (gemergt):** WP-475 (`t3-history-access`), WP-476 (`t3-ci-mergepatch-null`), WP-486 (`t3-asset-link-location`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9687,19 +9767,19 @@ AST-04;[P2];B;backend/internal/server/ci_asset_routes_integration_test.go;WP-485
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUD-03;[B];C;backend/internal/ci/change_record_integration_test.go;WP-486
-CI-11;[B];C;backend/internal/ci/change_record_integration_test.go;WP-486
+AUD-03;[B];C;backend/internal/ci/change_record_integration_test.go;WP-487
+CI-11;[B];C;backend/internal/ci/change_record_integration_test.go;WP-487
 ```
 
 **Entscheidungsbedarf:** [E-82](entscheidungen.md#e-82) AUD-03: Datenmodell der ci_change-Zeilen (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Lesesicht der Historie je change_set mit field_changes und Filter (WP-487 (`t3-aud03-history`)); Ingest-Pfad (eine Änderung und ein Event je Record, WP-488 (`t3-aud03-ingest`)); weitergehende UI-Darstellung von field_changes.
+**Nicht Bestandteil:** Lesesicht der Historie je change_set mit field_changes und Filter (WP-488 (`t3-aud03-history`)); Ingest-Pfad (eine Änderung und ein Event je Record, WP-489 (`t3-aud03-ingest`)); weitergehende UI-Darstellung von field_changes.
 
-### WP-487 – AUD-03-Lesesicht: Historie je Änderungsgruppe mit field_changes und Filter change_kind
+### WP-488 – AUD-03-Lesesicht: Historie je Änderungsgruppe mit field_changes und Filter change_kind
 
 **Schlüssel:** `t3-aud03-history` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-473 (`t3-history-access`), WP-486 (`t3-aud03-schema`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-475 (`t3-history-access`), WP-487 (`t3-aud03-schema`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9711,17 +9791,17 @@ CI-11;[B];C;backend/internal/ci/change_record_integration_test.go;WP-486
 |---|---|---|---|---|
 | [F-095](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-095) | P2 | AUD-03-ci_change-Schema und -Vokabular nicht umgesetzt (change_kind, field_changes, Quellen-/Request-Korrelation, eine ci_change je Record; 'type_change' statt 'type_changed') | Teil | WP-171, WP-172 |
 
-**Schließt Audit-WPs:** [WP-171](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-171) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-171](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-171) (TEILWEISE BESTANDEN, Teil), [WP-172](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-172) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** Die vereinte Historie (`history/pg_repository.go:63-148`) liefert ci_change feldweise ohne change_kind, Quelle, Collector, request_id und observed_at; AUD-03 verlangt je Änderung einen Eintrag mit field_changes [{field, old, new}], einen Filter auf change_kind gibt es nicht. Die Spalten dafür legt WP-486 (`t3-aud03-schema`) an.
+**Problem:** Die vereinte Historie (`history/pg_repository.go:63-148`) liefert ci_change feldweise ohne change_kind, Quelle, Collector, request_id und observed_at; AUD-03 verlangt je Änderung einen Eintrag mit field_changes [{field, old, new}], einen Filter auf change_kind gibt es nicht. Die Spalten dafür legt WP-487 (`t3-aud03-schema`) an.
 
 **Akzeptanzkriterien:**
 
 - [ ] GET /api/v1/history/ci/{id} liefert je change_set einen Eintrag mit change_kind und field_changes [{field, old, new}] sowie source, collector_id, request_id und observed_at; Bestandszeilen ohne change_set_id erscheinen einzeln; die bisherigen Felder des Eintrags bleiben erhalten. Nachweis in `history/history_integration_test.go` (vor dem Fix rot): PATCH mit drei Feldern → genau ein Eintrag mit drei field_changes.
 - [ ] Filter change_kind: change_kind=type_changed findet den Typwechsel und sonst nichts; ein unbekannter Wert → 400 mit Feldbezug.
 - [ ] OpenAPI: Eintragsfelder und Query-Parameter change_kind ergänzt, `npm run generate:api`; `TestRoutesAndSpecificationAreInParity`, Frontend-Typecheck und Vitest-Suite grün.
-- [ ] Regression: TestUnifiedCIHistory, TestAuditT3HistoryIncludesOverrides, `TestAuditT3HistoryIncludesLocationChange` (aus WP-471 (`t3-history-location`)) und die übrigen Tests von `internal/history` grün.
-- [ ] Regression der Historienanzeige (CI-06): `EntityChange` in `frontend/src/api/cmdb.ts` führt `change_kind` und `field_changes`. `CIDetailSections.tsx` zeigt einen gruppierten Eintrag mit jedem Feld aus `field_changes` (Feldname, alter und neuer Wert); ein Bestandseintrag ohne change_set_id erscheint wie bisher. Vitest `CIDetailSections.history.test.tsx` (aus WP-473 (`t3-history-access`)) ist um den Fall „ein Eintrag mit drei field_changes → drei Feldzeilen“ erweitert (vor dem Fix rot). e2e-real `ci-lifecycle.spec.ts` L06 erweitert: Name und Modell in einem Speichern ändern, Reload. Die Historie im UI zeigt einen Eintrag mit beiden Feldern. `GET /api/v1/history/ci/{id}` liefert genau einen Eintrag mit zwei field_changes und der request_id des PATCH. `ci-lifecycle.spec.ts` L06 und L11 sowie `locations-racks.spec.ts` L08 und L10 sind grün (Retest WP-171 aus abdeckung-wps.csv).
+- [ ] Regression: TestUnifiedCIHistory, TestAuditT3HistoryIncludesOverrides, `TestAuditT3HistoryIncludesLocationChange` (aus WP-473 (`t3-history-location`)) und die übrigen Tests von `internal/history` grün.
+- [ ] Regression der Historienanzeige (CI-06): `EntityChange` in `frontend/src/api/cmdb.ts` führt `change_kind` und `field_changes`. `CIDetailSections.tsx` zeigt einen gruppierten Eintrag mit jedem Feld aus `field_changes` (Feldname, alter und neuer Wert); ein Bestandseintrag ohne change_set_id erscheint wie bisher. Vitest `CIDetailSections.history.test.tsx` (aus WP-475 (`t3-history-access`)) ist um den Fall „ein Eintrag mit drei field_changes → drei Feldzeilen“ erweitert (vor dem Fix rot). e2e-real `ci-lifecycle.spec.ts` L06 erweitert: Name und Modell in einem Speichern ändern, Reload. Die Historie im UI zeigt einen Eintrag mit beiden Feldern. `GET /api/v1/history/ci/{id}` liefert genau einen Eintrag mit zwei field_changes und der request_id des PATCH. `ci-lifecycle.spec.ts` L06 und L11 sowie `locations-racks.spec.ts` L08 und L10 sind grün (Retest WP-171 aus abdeckung-wps.csv).
 
 **Dateien (11 Einträge, Migration = 2):**
 
@@ -9734,10 +9814,10 @@ CI-11;[B];C;backend/internal/ci/change_record_integration_test.go;WP-486
 - docs/traceability.csv
 - frontend/src/components/cmdb/CIDetailSections.tsx
 - frontend/src/api/cmdb.ts
-- frontend/src/components/cmdb/CIDetailSections.history.test.tsx (angelegt in WP-473)
+- frontend/src/components/cmdb/CIDetailSections.history.test.tsx (angelegt in WP-475)
 - frontend/e2e-real/ci-lifecycle.spec.ts
 
-**Migration/RLS:** keine Migration (Spalten aus WP-486 (`t3-aud03-schema`)); Lesen unter RLS (`database.WithTenant`).
+**Migration/RLS:** keine Migration (Spalten aus WP-487 (`t3-aud03-schema`)); Lesen unter RLS (`database.WithTenant`).
 
 **Tests:**
 
@@ -9746,18 +9826,18 @@ CI-11;[B];C;backend/internal/ci/change_record_integration_test.go;WP-486
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUD-03;[B];C;backend/internal/history/history_integration_test.go;WP-487
+AUD-03;[B];C;backend/internal/history/history_integration_test.go;WP-488
 ```
 
 **Entscheidungsbedarf:** [E-82](entscheidungen.md#e-82) AUD-03: Datenmodell der ci_change-Zeilen (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Schreibpfad und Migration (WP-486 (`t3-aud03-schema`)); Ingest (WP-488 (`t3-aud03-ingest`)).
+**Nicht Bestandteil:** Schreibpfad und Migration (WP-487 (`t3-aud03-schema`)); Ingest (WP-489 (`t3-aud03-ingest`)).
 
-### WP-488 – AUD-03 im Ingest: eine Änderung und ein Event je Record; Reklassifizierung in derselben Transaktion
+### WP-489 – AUD-03 im Ingest: eine Änderung und ein Event je Record; Reklassifizierung in derselben Transaktion
 
 **Schlüssel:** `t3-aud03-ingest` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-480 (`t3-ingest-poison`), WP-486 (`t3-aud03-schema`)
+**Voraussetzungen (gemergt):** WP-481 (`t3-ingest-poison`), WP-487 (`t3-aud03-schema`), WP-488 (`t3-aud03-history`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9780,7 +9860,7 @@ AUD-03;[B];C;backend/internal/history/history_integration_test.go;WP-487
 - [ ] Alle Änderungen aus einem Ingest-Record (Felder, Status unknown → active, Reklassifizierung generic_device → spezifisch) laufen in einer Transaktion über eine Transaktionsvariante des ci-Repositorys und ergeben genau eine change_set_id mit change_kind (updated bzw. type_changed), collector_id, source, observed_at des Records und correlation_id = record_id. Die Transaktionsvariante wird von `indexingRepository` weitergereicht und indexiert nach dem Commit.
 - [ ] Genau ein Event ci.changed je Record (EVT-02); bei Reklassifizierung enthält changed_fields ci_type_id; die Audit-Aktion ci.type_changed bleibt. Ein Fehler nach dem Feld-Update rollt auch den Typwechsel zurück (Test mit Fehlerinjektion).
 - [ ] PG-Test `discovery/ingest_change_integration_test.go` (neu, vor dem Fix rot): Record mit Typwechsel → 1 change_set, genau 1 Event ci.changed, spezifischer Typ, Audit ci.type_changed; Record ohne Änderung (nur last_seen_at) → keine ci_change (AUD-03 „nicht historisiert“); Negativfall: ein spezifischer Typ wird nie zurückgestuft und nie zwischen spezifischen Typen gewechselt. Der Test verdrahtet das ci-Repository wie main.go (PGRepository → `ci.NewIndexingRepository`).
-- [ ] Retest F-095/F-250: Migrationstest aus WP-486 (`t3-aud03-schema`) grün, „genau eine ci_change je Record“ und „genau ein Event“ grün, Typwechsel liefert 'type_changed'; bestehende Tests von `internal/discovery` und `internal/ci` (TestDiscoveryMayReclassify, TestTypeChangeAgainstPostgres, TestChangeTypeHandler) grün.
+- [ ] Retest F-095/F-250: Migrationstest aus WP-487 (`t3-aud03-schema`) grün, „genau eine ci_change je Record“ und „genau ein Event“ grün, Typwechsel liefert 'type_changed'; bestehende Tests von `internal/discovery` und `internal/ci` (TestDiscoveryMayReclassify, TestTypeChangeAgainstPostgres, TestChangeTypeHandler) grün.
 
 **Dateien (7 Einträge, Migration = 2):**
 
@@ -9792,7 +9872,7 @@ AUD-03;[B];C;backend/internal/history/history_integration_test.go;WP-487
 - backend/internal/discovery/ingest_change_integration_test.go (neu)
 - docs/traceability.csv
 
-**Migration/RLS:** keine Migration (Schema aus WP-486 (`t3-aud03-schema`)); Schreibzugriffe weiter in `database.WithTenant`.
+**Migration/RLS:** keine Migration (Schema aus WP-487 (`t3-aud03-schema`)); Schreibzugriffe weiter in `database.WithTenant`.
 
 **Tests:**
 
@@ -9801,15 +9881,15 @@ AUD-03;[B];C;backend/internal/history/history_integration_test.go;WP-487
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUD-03;[B];C;backend/internal/discovery/ingest_change_integration_test.go;WP-488
-CI-11;[B];C;backend/internal/discovery/ingest_change_integration_test.go;WP-488
+AUD-03;[B];C;backend/internal/discovery/ingest_change_integration_test.go;WP-489
+CI-11;[B];C;backend/internal/discovery/ingest_change_integration_test.go;WP-489
 ```
 
 **Entscheidungsbedarf:** [E-82](entscheidungen.md#e-82) AUD-03: Datenmodell der ci_change-Zeilen (offen, Empfehlung als Übergangsregel); [E-56](../entscheidungen.md#e-56)
 
-**Nicht Bestandteil:** last_seen_at aus observed_at (WP-580 (`t3-discovery-p3`)); Fehlerisolation je Record (WP-480 (`t3-ingest-poison`)); weitere Änderungen in `discovery/discovery.go` (WP-478 (`t3-review-merge`), WP-482 (`t3-spool-poison`), WP-368 (`t3-resurrect-new`), WP-580 (`t3-discovery-p3`)) – Reihenfolge abstimmen.
+**Nicht Bestandteil:** last_seen_at aus observed_at (WP-580 (`t3-discovery-p3`)); Fehlerisolation je Record (WP-481 (`t3-ingest-poison`)); weitere Änderungen in `discovery/discovery.go` (WP-479 (`t3-review-merge`), WP-483 (`t3-spool-poison`), WP-369 (`t3-resurrect-new`), WP-580 (`t3-discovery-p3`)) – Reihenfolge abstimmen.
 
-### WP-489 – Blast Radius kennzeichnet Heuristik-Treffer; /dependencies folgt impact_direction; depth wird validiert
+### WP-490 – Blast Radius kennzeichnet Heuristik-Treffer; /dependencies folgt impact_direction; depth wird validiert
 
 **Schlüssel:** `t3-impact-heuristic` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
@@ -9865,21 +9945,21 @@ CI-11;[B];C;backend/internal/discovery/ingest_change_integration_test.go;WP-488
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-IMP-01;[B];C;backend/internal/topology/impact_test.go;WP-489
-IMP-03;[B];C;backend/internal/topology/impact_integration_test.go;WP-489
-IMP-07;[B];C;backend/internal/topology/impact_integration_test.go;WP-489
-IMP-02;[B];C;backend/internal/topology/topology_test.go;WP-489
+IMP-01;[B];C;backend/internal/topology/impact_test.go;WP-490
+IMP-03;[B];C;backend/internal/topology/impact_integration_test.go;WP-490
+IMP-07;[B];C;backend/internal/topology/impact_integration_test.go;WP-490
+IMP-02;[B];C;backend/internal/topology/topology_test.go;WP-490
 ```
 
 **Entscheidungsbedarf:** [E-18](../entscheidungen.md#e-18); [E-57](../entscheidungen.md#e-57); [E-83](entscheidungen.md#e-83) IMP-02: Traversierung per Ebenen-BFS statt rekursivem CTE (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** UI-Darstellung (WP-490 (`t3-impact-ui`)); Redundanzanalyse (F-160, Gruppe T7) in `impact.go` – Reihenfolge abstimmen.
+**Nicht Bestandteil:** UI-Darstellung (WP-491 (`t3-impact-ui`)); Redundanzanalyse (F-160, WP-513 (`t7-impact-redundancy`)) in `impact.go` – Reihenfolge abstimmen.
 
-### WP-490 – Impact im UI: Heuristik-Marker im Blast Radius; Ausfallsimulation nach impact_direction
+### WP-491 – Impact im UI: Heuristik-Marker im Blast Radius; Ausfallsimulation nach impact_direction
 
 **Schlüssel:** `t3-impact-ui` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-473 (`t3-history-access`), WP-489 (`t3-impact-heuristic`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-475 (`t3-history-access`), WP-490 (`t3-impact-heuristic`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9901,7 +9981,7 @@ IMP-02;[B];C;backend/internal/topology/topology_test.go;WP-489
 
 - [ ] ImpactSection zeigt betroffene CIs und Heuristik-Treffer getrennt mit Marker „Netzheuristik“ (connected_to); Vitest `CIDetailSections.impact.test.tsx` (neu, vor dem Fix rot).
 - [ ] Die Client-Ausfallsimulation nutzt die impact_direction der Beziehungstypen oder entfällt zugunsten von /impact mit Ladezustand; Vitest (Retest F-254): pdu-Ausfall ergibt {server, vm}, vm-Ausfall {}; der alte Test `TopologyPage.test.tsx:70-95` ist umgeschrieben.
-- [ ] Texte de-DE/en-US; Vitest-Suite, Lint und Typecheck grün; Real-Stack ci-lifecycle L08 wird nicht verschlechtert; die Zeile bleibt bis WP-399 (`t6-rel-errors`) (F-314) in `tests/audit/expected-failures.txt`, dieses WP entfernt sie nicht.
+- [ ] Texte de-DE/en-US; Vitest-Suite, Lint und Typecheck grün; Real-Stack ci-lifecycle L08 wird nicht verschlechtert; die Zeile bleibt bis WP-401 (`t6-rel-errors`) (F-314) in `tests/audit/expected-failures.txt`, dieses WP entfernt sie nicht.
 
 **Dateien (7 Einträge, Migration = 2):**
 
@@ -9922,19 +10002,19 @@ IMP-02;[B];C;backend/internal/topology/topology_test.go;WP-489
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-IMP-03;[B];C;frontend/src/components/cmdb/CIDetailSections.impact.test.tsx;WP-490
-IMP-01;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-490
+IMP-03;[B];C;frontend/src/components/cmdb/CIDetailSections.impact.test.tsx;WP-491
+IMP-01;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-491
 ```
 
 **Entscheidungsbedarf:** [E-18](../entscheidungen.md#e-18)
 
-**Nicht Bestandteil:** Weitere TopologyPage-Befunde (F-326, F-344, Gruppe T7) – Reihenfolge abstimmen; `CIDetailSections.tsx` auch in WP-577 (`t3-ci-detail-readable`) – Reihenfolge abstimmen.
+**Nicht Bestandteil:** Weitere TopologyPage-Befunde (F-326, F-344, WP-552 (`t7-topology-ui-e2e`)) – Reihenfolge abstimmen; `CIDetailSections.tsx` auch in WP-577 (`t3-ci-detail-readable`) – Reihenfolge abstimmen.
 
-### WP-491 – SNMPv3: usmStats-Reports als auth_failed melden
+### WP-492 – SNMPv3: usmStats-Reports als auth_failed melden
 
 **Schlüssel:** `t4-snmpv3-auth` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-412 (`t4-wmi-errors`), WP-413 (`t4-snmp-neighbors`)
+**Voraussetzungen (gemergt):** WP-415 (`t4-wmi-errors`), WP-416 (`t4-snmp-neighbors`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9965,7 +10045,7 @@ IMP-01;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-490
 - collector/plugins/snmp/snmp_test.go
 - collector/plugins/snmp/v3_agent_test.go
 - collector/plugins/snmp/v3_auth_failure_auditdefect_test.go (gelöscht)
-- collector/collectorcmd/discovery_errors_test.go (angelegt in WP-412)
+- collector/collectorcmd/discovery_errors_test.go (angelegt in WP-415)
 - backend/internal/discovery/errors_test.go
 - tests/audit/expected-failures.txt (angelegt in WP-337)
 - docs/traceability.csv
@@ -9982,19 +10062,19 @@ IMP-01;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-490
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DIS-04;[B];D;collector/plugins/snmp/v3_agent_test.go;WP-491
-DIS-08;[Q];D;backend/internal/discovery/errors_test.go;WP-491
+DIS-04;[B];D;collector/plugins/snmp/v3_agent_test.go;WP-492
+DIS-08;[Q];D;backend/internal/discovery/errors_test.go;WP-492
 ```
 
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Real-Stack-Nachweis des Fehlerzustands (WP-542 (`t4-dis08-nachweis`)).
 
-### WP-492 – Collector-Bootstrap über RETICORA_ENROLL_TOKEN und RETICORA_CLOUD_URL
+### WP-493 – Collector-Bootstrap über RETICORA_ENROLL_TOKEN und RETICORA_CLOUD_URL
 
 **Schlüssel:** `t4-col-env-enroll` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-411 (`t4-pki-renew-collector`)
+**Voraussetzungen (gemergt):** WP-414 (`t4-pki-renew-collector`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -10022,7 +10102,7 @@ DIS-08;[Q];D;backend/internal/discovery/errors_test.go;WP-491
 - collector/collectorcmd/collectorcmd.go
 - collector/collectorcmd/cli.go
 - collector/collectorcmd/collectorcmd_test.go
-- collector/collectorcmd/lifecycle_test.go (angelegt in WP-411)
+- collector/collectorcmd/lifecycle_test.go (angelegt in WP-414)
 - collector/collectorcmd/lifecycle_auditdefect_test.go (gelöscht)
 - deploy/README.md
 - docs/README.md
@@ -10039,18 +10119,18 @@ DIS-08;[Q];D;backend/internal/discovery/errors_test.go;WP-491
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-COL-04;[B];D;collector/collectorcmd/lifecycle_test.go;WP-492
+COL-04;[B];D;collector/collectorcmd/lifecycle_test.go;WP-493
 ```
 
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Änderungen am Enrollment-Endpunkt des Servers.
 
-### WP-493 – Scope-Expansion vollständig oder gemeldet; Sweep-Ressourcen begrenzt; keine Container-Netze als Vorschlag
+### WP-494 – Scope-Expansion vollständig oder gemeldet; Sweep-Ressourcen begrenzt; keine Container-Netze als Vorschlag
 
 **Schlüssel:** `t4-scope-expansion` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-376 (`t4-cred-scope`), WP-414 (`t4-classify-review`)
+**Voraussetzungen (gemergt):** WP-378 (`t4-cred-scope`), WP-417 (`t4-classify-review`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -10071,7 +10151,7 @@ COL-04;[B];D;collector/collectorcmd/lifecycle_test.go;WP-492
 
 **Akzeptanzkriterien:**
 
-- [ ] Die Collector-Konstante `maxScopeAddresses` = 65.536 entspricht `discovery.MaxScopeAddresses` (`scope.go:39`); Vertragstest über `collector/collectorcmd/testdata/scope-limits.json` (neu): `collectorcmd_test.go` prüft die Konstante, `backend/internal/discovery/scope_handler_test.go` prüft `MaxScopeAddresses` gegen die Datei (Abweichung in einem Modul → rot). Expansion für cidr und range vollständig; eine Überschreitung ergibt keinen stillen Abbruch, sondern einen runError `cause=scope_truncated` mit Ziel.
+- [ ] Die Collector-Grenze `maxSubnetExpansionTargets` (`collectorcmd.go:502`, heute 4.096; genutzt in `collectorcmd.go:519` und `scopes.go:182`) wird als `maxScopeAddresses` = 65.536 geführt und entspricht `discovery.MaxScopeAddresses` (`scope.go:39`); Vertragstest über `collector/collectorcmd/testdata/scope-limits.json` (neu): `collectorcmd_test.go` prüft die Konstante, `backend/internal/discovery/scope_handler_test.go` prüft `MaxScopeAddresses` gegen die Datei (Abweichung in einem Modul → rot). Expansion für cidr und range vollständig; eine Überschreitung ergibt keinen stillen Abbruch, sondern einen runError `cause=scope_truncated` mit Ziel.
 - [ ] `TestAuditScopeExpansionCompleteOrReported` wird nach `collectorcmd/discovery_scope_test.go` überführt und besteht (/16 → 65.534 Ziele; Bereich 10.0.0.0-10.0.255.255 → 65.536). Retest F-106.
 - [ ] Sweep: Semaphore vor `go` bzw. fester Worker-Pool; Unit-Test in `sweep_test.go`: 65.536 Ziele → Goroutinen-Spitze ≤ MaxConcurrency + 50 (Retest F-262); ≤ 256 parallele Probes nach DIS-01 unverändert.
 - [ ] `localSubnets` liest Interfaces mit Namen und lässt `docker*`, `br-*`, `veth*`, `cni*`, `flannel*`, `cali*` aus; `TestLocalSubnetsForScopeSuggestions` mit docker0/br-x → nicht gemeldet, eth0 → gemeldet (Retest F-265).
@@ -10103,19 +10183,19 @@ COL-04;[B];D;collector/collectorcmd/lifecycle_test.go;WP-492
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DIS-09;[B];D;collector/collectorcmd/discovery_scope_test.go;WP-493
-INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-493
+DIS-09;[B];D;collector/collectorcmd/discovery_scope_test.go;WP-494
+INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-494
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Zeitpläne (WP-494 (`t4-scope-schedule`)); Grenzwerte im Backend.
+**Nicht Bestandteil:** Zeitpläne (WP-495 (`t4-scope-schedule`)); Grenzwerte im Backend.
 
-### WP-494 – Scope-Zeitpläne überstehen Start und Neustart; Cron in der Zeitzone der Org
+### WP-495 – Scope-Zeitpläne überstehen Start und Neustart; Cron in der Zeitzone der Org
 
 **Schlüssel:** `t4-scope-schedule` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-375 (`t4-bundle-select`), WP-412 (`t4-wmi-errors`), WP-493 (`t4-scope-expansion`)
+**Voraussetzungen (gemergt):** WP-376 (`t4-bundle-select`), WP-415 (`t4-wmi-errors`), WP-494 (`t4-scope-expansion`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -10138,7 +10218,7 @@ INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-493
 - [ ] Cron wird in der Zeitzone der Org ausgewertet (E-84, Übergangsregel Option A); Poll-Intervalle bleiben je Org und Protokoll mit Mindestwert 5 min.
 - [ ] `TestAuditScopeScheduleSurvivesRestart` wird nach `collectorcmd/discovery_scope_test.go` überführt und besteht (Cron-Scope um 10:07 nicht fällig; 24-h-Scope, der vor 1 h lief, nach Neustart nicht fällig; Kontrolle nie gelaufen → fällig). Retest F-109.
 - [ ] `schedule_test.go`: '0 2 * * *' mit `Europe/Berlin` fällig um 02:00 Ortszeit in Sommer- und Winterzeit; `scope_handler_test.go`: der Scope-Kanal liefert `next_run_at`, `last_run_at`, `timezone` (Retest F-266 nach Entscheidung).
-- [ ] Regression: `TestAuditScopeChannelOverNATS`, `TestIntervalsHaveDefaultsAndMinimums`, `TestCronSchedule`, `TestSchedulerRunsSweepAndPollsSeparately` grün; Zeile aus `expected-failures.txt` entfernt. `discovery_auditdefect_test.go` gelöscht (alle Tests überführt: WP-376 (`t4-cred-scope`), WP-414 (`t4-classify-review`), WP-493 (`t4-scope-expansion`), WP-412 (`t4-wmi-errors`) und dieses WP).
+- [ ] Regression: `TestAuditScopeChannelOverNATS`, `TestIntervalsHaveDefaultsAndMinimums`, `TestCronSchedule`, `TestSchedulerRunsSweepAndPollsSeparately` grün; Zeile aus `expected-failures.txt` entfernt. `discovery_auditdefect_test.go` gelöscht (alle Tests überführt: WP-378 (`t4-cred-scope`), WP-417 (`t4-classify-review`), WP-494 (`t4-scope-expansion`), WP-415 (`t4-wmi-errors`) und dieses WP).
 
 **Dateien (10 Einträge, Migration = 2):**
 
@@ -10148,7 +10228,7 @@ INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-493
 - collector/collectorcmd/schedule_test.go
 - collector/collectorcmd/scopes.go
 - collector/collectorcmd/collectorcmd.go
-- collector/collectorcmd/discovery_scope_test.go (angelegt in WP-493)
+- collector/collectorcmd/discovery_scope_test.go (angelegt in WP-494)
 - collector/collectorcmd/discovery_auditdefect_test.go (gelöscht)
 - tests/audit/expected-failures.txt (angelegt in WP-337)
 - docs/traceability.csv
@@ -10164,18 +10244,18 @@ INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-493
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DIS-10;[B];D;collector/collectorcmd/schedule_test.go;WP-494
+DIS-10;[B];D;collector/collectorcmd/schedule_test.go;WP-495
 ```
 
 **Entscheidungsbedarf:** [E-84](entscheidungen.md#e-84) DIS-10: Poll-Intervalle je Scope und Zeitzone von Cron-Zeitplänen (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Poll-Intervalle je Scope (nur bei Option B der Entscheidung, dann Folge-WP); Hinweis im Formular (WP-495 (`t4-scope-form-ui`)).
+**Nicht Bestandteil:** Poll-Intervalle je Scope (nur bei Option B der Entscheidung, dann Folge-WP); Hinweis im Formular (WP-496 (`t4-scope-form-ui`)).
 
-### WP-495 – Scope-Formular mit Name, Site, VRF, Plugins und Credentials; Fehlerrückmeldung, Löschbestätigung, Discovery-Metriken dokumentiert
+### WP-496 – Scope-Formular mit Name, Site, VRF, Plugins und Credentials; Fehlerrückmeldung, Löschbestätigung, Discovery-Metriken dokumentiert
 
 **Schlüssel:** `t4-scope-form-ui` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-375 (`t4-bundle-select`), WP-494 (`t4-scope-schedule`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-376 (`t4-bundle-select`), WP-495 (`t4-scope-schedule`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -10226,19 +10306,19 @@ DIS-10;[B];D;collector/collectorcmd/schedule_test.go;WP-494
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DIS-09;[B];D;frontend/e2e-real/discovery-scopes.spec.ts;WP-495
-DIS-08;[Q];D;frontend/src/pages/DiscoveryPage.test.tsx;WP-495
+DIS-09;[B];D;frontend/e2e-real/discovery-scopes.spec.ts;WP-496
+DIS-08;[Q];D;frontend/src/pages/DiscoveryPage.test.tsx;WP-496
 ```
 
 **Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (offen, Empfehlung als Übergangsregel); [E-84](entscheidungen.md#e-84) DIS-10: Poll-Intervalle je Scope und Zeitzone von Cron-Zeitplänen (offen, Empfehlung als Übergangsregel)
 
 **Nicht Bestandteil:** Credential-Verwaltungsseite; Real-Stack-Nachweis eines realen Fehlerlaufs (WP-542 (`t4-dis08-nachweis`)).
 
-### WP-496 – Kanten-Cleanup: Frist für Cron-Scopes aus dem tatsächlichen Laufabstand
+### WP-497 – Kanten-Cleanup: Frist für Cron-Scopes aus dem tatsächlichen Laufabstand
 
 **Schlüssel:** `t4-cleanup-cron` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-382 (`t4-scope-zone-isolation`)
+**Voraussetzungen (gemergt):** WP-383 (`t4-scope-zone-isolation`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -10283,14 +10363,14 @@ DIS-08;[Q];D;frontend/src/pages/DiscoveryPage.test.tsx;WP-495
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-496
+TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-497
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Zeitzone der Cron-Auswertung im Collector (WP-494 (`t4-scope-schedule`)).
+**Nicht Bestandteil:** Zeitzone der Cron-Auswertung im Collector (WP-495 (`t4-scope-schedule`)).
 
-### WP-497 – Versorgungskette: Redundanzkennung unabhängig von Batch und Lane, Hersteller-Tabellen, fail-closed belegt
+### WP-498 – Versorgungskette: Redundanzkennung unabhängig von Batch und Lane, Hersteller-Tabellen, fail-closed belegt
 
 **Schlüssel:** `t4-power-redundancy` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** D · **Aufwand:** 2,0 PT
 
@@ -10308,7 +10388,7 @@ TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-496
 | [F-112](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-112) | P2 | Redundanzflag von powered_by hängt von Batch- und Lane-Reihenfolge ab und wird nie korrigiert (im Real-Stack falsch) | schließt | WP-161 |
 | [F-275](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-275) | P3 | Ausgeschaltete Outlets zählen als Stromeinspeisung (Redundanz) | mit | WP-161 |
 
-**Schließt Audit-WPs:** [WP-161](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-161) (FEHLGESCHLAGEN, schließt), [WP-160](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-160) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-160](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-160) (TEILWEISE BESTANDEN, Teil), [WP-161](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-161) (FEHLGESCHLAGEN, schließt)
 
 **Problem:** `PowerEdges` (`power.go:112-150`) berechnet `redundant` nur aus den Feeds des aktuellen Batches; `upsertRelationship` (`topology.go:313-323`) bestätigt nur und aktualisiert keine Attribute; parallele Lanes (`lanes.go`) trennen die PDU-Records: im Real-Stack sind 0 bis 16 von 32 Kanten korrekt, im Onboarding-Org 0 von 32 (F-112). Ausgeschaltete Outlets zählen als Einspeisung (`power.go:90-104`, F-275; Festlegung über E-85). Der fail-closed-Pfad von `derivePowerChain` (`power.go:170-174`) ist ungetestet, nur die APC-rPDU2-Tabelle ist getestet (offene Nachweise WP-160, WP-161).
 
@@ -10348,19 +10428,19 @@ TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-496
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-IMP-09;[B];D;backend/internal/discovery/power_chain_integration_test.go;WP-497
-REL-03;[B];D;backend/internal/discovery/power_test.go;WP-497
+IMP-09;[B];D;backend/internal/discovery/power_chain_integration_test.go;WP-498
+REL-03;[B];D;backend/internal/discovery/power_test.go;WP-498
 ```
 
 **Entscheidungsbedarf:** [E-85](entscheidungen.md#e-85) IMP-09: ausgeschaltete Outlets in der Redundanzkennung (offen, Empfehlung als Übergangsregel)
 
 **Nicht Bestandteil:** PDU-Messwerte (T7, F-168); Impact-Typregel IMP-04.
 
-### WP-498 – Lint-Altlast sichtbar und gedeckelt, Toolchain-Vertragstest, strikte Skip-Prüfung im DB-Job
+### WP-499 – Lint-Altlast sichtbar und gedeckelt, Toolchain-Vertragstest, strikte Skip-Prüfung im DB-Job
 
 **Schlüssel:** `t5-lint-baseline` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** A · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-373 (`t4-natsedge-ci`)
+**Voraussetzungen (gemergt):** WP-374 (`t4-natsedge-ci`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -10382,7 +10462,7 @@ REL-03;[B];D;backend/internal/discovery/power_test.go;WP-497
 - [ ] Folge-WPs zum Abbau der Altlast nach Linter-Kategorie (errcheck, ineffassign, gofmt/goimports, unused, govet, gocritic; je höchstens 15 Dateien; das letzte entfernt new-from-rev) stehen in docs/plan/phase2/implementierungsplan.md, wie WP-001 AK4 es verlangt; backend/.golangci.yml verweist darauf.
 - [ ] scripts/ci/lint-debt.sh zählt je Modul die Befunde ohne new-from-rev und vergleicht mit tests/lint-debt-baseline.txt (Stand bei Umsetzung, zuletzt backend 429, collector 37, edgecore 6); der Job lint schreibt die Zahlen ins Job-Summary und scheitert, wenn eine Zahl steigt; 'make lint-debt' reproduziert lokal; Fälle im Test: Zahl über Baseline → exit 1, gleich oder kleiner → exit 0.
 - [ ] tests/lint-toolchain.test.sh prüft: v2-Schema in backend/.golangci.yml; die Linter-Menge ist Obermenge der v1-Linter aus cd23a05^; golangci-lint-Version in ci.yml und Makefile identisch; jedes Modul aus go.work steht in der Lint-Matrix; Negativfälle mit Fixtures (abweichender Pin, fehlendes Modul, entfernter Linter) → FAIL; läuft im Job lint.
-- [ ] F-283: scripts/ci/db-test-summary.sh ersetzt den Inline-Schritt und ist die einzige Auswertung von test-db.json im Job migrations: skipped > 0 lässt den Job scheitern, außer der Test steht in der Allow-List des Skripts. Die allgemeine Regel ersetzt die natsedge-spezifische Skip-Prüfung aus WP-373 (`t4-natsedge-ci`); dieser Schritt wird aus ci.yml entfernt. Die derzeit im Job migrations übersprungenen Tests (aus test-db.json eines main-Laufs, Liste im PR) werden durch Dienste bzw. Variablen ausgeführt oder begründet in die Allow-List aufgenommen (z. B. Login-Rollen-Guard isolation_integration_test.go:168). tests/ci-db-summary.test.sh mit synthetischem test2json-Ausgang: NATS-Skip → exit != 0, übersprungener Test aus discovery/natsedge_integration_test.go → exit != 0, 'TEST_DATABASE_URL not set' → exit != 0, keine Skips → 0, Allow-List-Skip → 0; der Test läuft im CI-Job gate.
+- [ ] F-283: scripts/ci/db-test-summary.sh ersetzt den Inline-Schritt und ist die einzige Auswertung von test-db.json im Job migrations: skipped > 0 lässt den Job scheitern, außer der Test steht in der Allow-List des Skripts. Die allgemeine Regel ersetzt die natsedge-spezifische Skip-Prüfung aus WP-374 (`t4-natsedge-ci`); dieser Schritt wird aus ci.yml entfernt. Die derzeit im Job migrations übersprungenen Tests (aus test-db.json eines main-Laufs, Liste im PR) werden durch Dienste bzw. Variablen ausgeführt oder begründet in die Allow-List aufgenommen (z. B. Login-Rollen-Guard isolation_integration_test.go:168). tests/ci-db-summary.test.sh mit synthetischem test2json-Ausgang: NATS-Skip → exit != 0, übersprungener Test aus discovery/natsedge_integration_test.go → exit != 0, 'TEST_DATABASE_URL not set' → exit != 0, keine Skips → 0, Allow-List-Skip → 0; der Test läuft im CI-Job gate.
 - [ ] Retest F-123: Folge-WPs im Plan vorhanden und CI berichtet die Altlastzahl je Modul; Regression: golangci-lint v2.14.0 mit Repo-Konfiguration 0 issues für alle drei Module; DB-Job grün mit mindestens gleicher Testanzahl.
 
 **Dateien (10 Einträge, Migration = 2):**
@@ -10409,14 +10489,14 @@ REL-03;[B];D;backend/internal/discovery/power_test.go;WP-497
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-498
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-499
 ```
 
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Abbau der Altlast selbst (Folge-WPs im Phase-2-Plan); Roundtrip-Test auf geteilten Clustern (F-287, zurückgestellt); Pflichtliste der TST-02-Zieltests (Option `--require-pass`, WP-559 (`t1-tst02-mapping`)).
 
-### WP-499 – 409 mit Feldbezug für Standort-Duplikate und Rackhöhe unter belegten HE
+### WP-500 – 409 mit Feldbezug für Standort-Duplikate und Rackhöhe unter belegten HE
 
 **Schlüssel:** `t6-location-conflicts` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
@@ -10463,7 +10543,7 @@ TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-498
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** keine Migration (Prüfung im Repository unter Zeilensperre).
 
@@ -10476,19 +10556,19 @@ TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-498
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-LOC-03;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-499
-API-05;[B];B;backend/internal/locations/unique_conflict_integration_test.go;WP-499
-LOC-04;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-499
-LOC-05;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-499
-LOC-06;B/G1;B;backend/internal/rack/height_integration_test.go;WP-499
-RCK-01;[B];B;backend/internal/rack/height_integration_test.go;WP-499
+LOC-03;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-500
+API-05;[B];B;backend/internal/locations/unique_conflict_integration_test.go;WP-500
+LOC-04;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-500
+LOC-05;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-500
+LOC-06;B/G1;B;backend/internal/rack/height_integration_test.go;WP-500
+RCK-01;[B];B;backend/internal/rack/height_integration_test.go;WP-500
 ```
 
 **Entscheidungsbedarf:** [E-19](../entscheidungen.md#e-19)
 
 **Nicht Bestandteil:** UI-Dialoge für Org-/Client-Felder; Bereichsprüfung geo_lat/geo_lon (kein Befund); Platzierungsprotokoll (rack/placement.go, unverändert).
 
-### WP-500 – Discovery validiert typisierte CI-Spalten wie manuelle Writes; ungültige Werte verwerfen statt Batch abbrechen
+### WP-501 – Discovery validiert typisierte CI-Spalten wie manuelle Writes; ungültige Werte verwerfen statt Batch abbrechen
 
 **Schlüssel:** `t6-ci-ingest-typed` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
@@ -10532,7 +10612,7 @@ RCK-01;[B];B;backend/internal/rack/height_integration_test.go;WP-499
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** keine Migration.
 
@@ -10545,19 +10625,19 @@ RCK-01;[B];B;backend/internal/rack/height_integration_test.go;WP-499
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-MET-11;B/G1, Teil P2/G2;B;backend/internal/discovery/typedvalues_integration_test.go;WP-500
-CI-03;[B];B;backend/internal/discovery/typedvalues_integration_test.go;WP-500
+MET-11;B/G1, Teil P2/G2;B;backend/internal/discovery/typedvalues_integration_test.go;WP-501
+CI-03;[B];B;backend/internal/discovery/typedvalues_integration_test.go;WP-501
 ```
 
 **Entscheidungsbedarf:** [E-56](../entscheidungen.md#e-56)
 
-**Nicht Bestandteil:** CI-Dialog (WP-395 (`t6-ci-form-types`)); Audit-Hash bei Steuerzeichen (WP-419 (`t6-audit-hash-utf8`)).
+**Nicht Bestandteil:** CI-Dialog (WP-397 (`t6-ci-form-types`)); Audit-Hash bei Steuerzeichen (WP-423 (`t6-audit-hash-utf8`)).
 
-### WP-501 – Discovery-Jobs im generischen Jobmodell (Adapter verdrahten, Status spiegeln)
+### WP-502 – Discovery-Jobs im generischen Jobmodell (Adapter verdrahten, Status spiegeln)
 
 **Schlüssel:** `t6-discovery-job-tracking` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-398 (`t6-domain-events`)
+**Voraussetzungen (gemergt):** WP-400 (`t6-domain-events`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -10591,7 +10671,7 @@ CI-03;[B];B;backend/internal/discovery/typedvalues_integration_test.go;WP-500
 - backend/internal/server/audit_t6_router_auditdefect_test.go (Testfunktion TestAuditDefectDiscoveryJobInGenericJobModel entfernt; ohne verbleibende Testfunktion gelöscht)
 - backend/internal/server/discovery_job_tracking_integration_test.go (neu)
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** keine Migration.
 
@@ -10603,19 +10683,19 @@ CI-03;[B];B;backend/internal/discovery/typedvalues_integration_test.go;WP-500
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-JOB-01;[B];B;backend/internal/server/discovery_job_tracking_integration_test.go;WP-501
-REP-01;[B];B;backend/internal/server/discovery_job_tracking_integration_test.go;WP-501
+JOB-01;[B];B;backend/internal/server/discovery_job_tracking_integration_test.go;WP-502
+REP-01;[B];B;backend/internal/server/discovery_job_tracking_integration_test.go;WP-502
 ```
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
 **Nicht Bestandteil:** Ausführung ad-hoc erstellter Discovery-Jobs durch Collectors (eigenständige Funktion, ggf. neuer Befund); Transaktionsbindung von Tracker.Mirror (jobs/service.go unverändert); Job-Center-UI.
 
-### WP-502 – Bulk- und Snapshot-Jobs über die NATS-Work-Queue; Timeout-Reaper
+### WP-503 – Bulk- und Snapshot-Jobs über die NATS-Work-Queue; Timeout-Reaper
 
 **Schlüssel:** `t6-jobqueue-kinds` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-421 (`t6-job02-notices`), WP-444 (`t5-worker-metrics`)
+**Voraussetzungen (gemergt):** WP-425 (`t6-job02-notices`), WP-447 (`t5-worker-metrics`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -10667,19 +10747,19 @@ REP-01;[B];B;backend/internal/server/discovery_job_tracking_integration_test.go;
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEC-14;[B];B;backend/internal/jobs/queue_integration_test.go;WP-502
-JOB-01;[B];B;backend/internal/server/jobkinds_test.go;WP-502
+TEC-14;[B];B;backend/internal/jobs/queue_integration_test.go;WP-503
+JOB-01;[B];B;backend/internal/server/jobkinds_test.go;WP-503
 ```
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
 **Nicht Bestandteil:** Lease-Erneuerung des Export-Workers (F-315, WP-592 (`t6-p3-sammel`)); Umstellung des Exports auf die NATS-Queue; idempotente Wiederholung von Bulk-Jobs (Item-Fortschritt).
 
-### WP-503 – Route-Audit lückenlos: Audit-Intent vor der Mutation, Nachtrag per Scheduler
+### WP-504 – Route-Audit lückenlos: Audit-Intent vor der Mutation, Nachtrag per Scheduler
 
 **Schlüssel:** `t6-route-audit-gapless` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-421 (`t6-job02-notices`)
+**Voraussetzungen (gemergt):** WP-425 (`t6-job02-notices`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -10701,7 +10781,7 @@ JOB-01;[B];B;backend/internal/server/jobkinds_test.go;WP-502
 - [ ] AuditRoute schreibt vor dem Handler einen Audit-Intent (neue Mandantentabelle audit_route_intent mit request_id, Route, Akteur, Feldern) in eigener, committeter Transaktion; schlägt das fehl, antwortet die Route 503 ohne Ausführung der Mutation.
 - [ ] Intent nur für Routen ohne Domain-Recorder (Liste aus audit_coverage_test.go); Routen mit Domain-Recorder (z. B. CI-Writes) erhalten keine zusätzlichen Transaktionen (NFR-10, E-17).
 - [ ] Nach erfolgreicher Response schreibt der Route-Auditor den audit_log-Eintrag und löscht den Intent in einer Transaktion; schlägt das fehl, bleibt der Intent erhalten. Antwortet der Handler mit Fehler (≥ 300), wird der Intent ohne Audit-Eintrag gelöscht.
-- [ ] Scheduler-Kind audit.route_intents (minütlich, Single-Runner, Registrierung über die Systemjob-Funktion aus WP-421 (`t6-job02-notices`)) überführt Intents älter als 2 Minuten in audit_log-Einträge mit outcome unknown und Retry; Metrik reticora_audit_route_intents_pending.
+- [ ] Scheduler-Kind audit.route_intents (minütlich, Single-Runner, Registrierung über die Systemjob-Funktion aus WP-425 (`t6-job02-notices`)) überführt Intents älter als 2 Minuten in audit_log-Einträge mit outcome unknown und Retry; Metrik reticora_audit_route_intents_pending.
 - [ ] Abschluss und Nachtrag entfernen den Intent per DELETE … RETURNING; wer ihn nicht mehr findet, schreibt keinen Eintrag (Test: später regulärer Abschluss und Nachtrag nebenläufig → genau ein audit_log-Eintrag).
 - [ ] Defekttest TestAuditDefectRouteAuditFailureLeavesNoUnauditedMutation grün, an die neue RouteAuditor-Schnittstelle angepasst: Store-Ausfall vor der Mutation → 503 und 0 VRF-Zeilen; Ausfall nach der Mutation → nach dem Nachtrag genau ein Audit-Eintrag. Testfunktion aus audit_t6_router_auditdefect_test.go mit dem Typ t6FailingAuditor nach backend/internal/server/route_audit_integration_test.go verschoben, Name unverändert. Enthält die Datei danach keine Testfunktion mehr, wird sie gelöscht. go vet -tags auditdefect ./internal/server/ läuft fehlerfrei; Eintrag aus tests/audit/expected-failures.txt entfernt.
 - [ ] route_audit_integration_test.go liest den Eintrag über GET /api/v1/audit-log?resource_type=… mit audit:read (AUD-05).
@@ -10722,7 +10802,7 @@ JOB-01;[B];B;backend/internal/server/jobkinds_test.go;WP-502
 - backend/internal/server/route_audit_integration_test.go (neu)
 - backend/internal/server/audit_coverage_test.go
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** Neue Mandantentabelle audit_route_intent mit ENABLE + FORCE RLS, USING und WITH CHECK über die Org-GUC; up/down, Roundtrip grün.
 
@@ -10735,19 +10815,19 @@ JOB-01;[B];B;backend/internal/server/jobkinds_test.go;WP-502
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUD-05;[B];B;backend/internal/server/route_audit_integration_test.go;WP-503
-AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-503
+AUD-05;[B];B;backend/internal/server/route_audit_integration_test.go;WP-504
+AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-504
 ```
 
 **Entscheidungsbedarf:** [E-08](../entscheidungen.md#e-08); [E-17](../entscheidungen.md#e-17)
 
-**Nicht Bestandteil:** Alt-/Neuwerte im Route-Audit (WP-504 (`t6-route-audit-values`)); Audit-Viewer der UI (F-078, Gruppe T2).
+**Nicht Bestandteil:** Alt-/Neuwerte im Route-Audit (WP-505 (`t6-route-audit-values`)); Audit-Viewer der UI (F-078, WP-469 (`t2-audit-viewer`)).
 
-### WP-504 – Route-Audit speichert Alt- und Neuwerte (AUD-07), personenbezogene Werte als Surrogat
+### WP-505 – Route-Audit speichert Alt- und Neuwerte (AUD-07), personenbezogene Werte als Surrogat
 
 **Schlüssel:** `t6-route-audit-values` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-419 (`t6-audit-hash-utf8`), WP-503 (`t6-route-audit-gapless`)
+**Voraussetzungen (gemergt):** WP-423 (`t6-audit-hash-utf8`), WP-504 (`t6-route-audit-gapless`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -10782,9 +10862,9 @@ AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-503
 - backend/internal/server/router.go
 - backend/internal/server/audit_coverage_test.go
 - backend/internal/server/audit_t6_router_auditdefect_test.go (Testfunktion TestAuditDefectRouteAuditStoresOldAndNewValues entfernt; ohne verbleibende Testfunktion gelöscht)
-- backend/internal/server/route_audit_integration_test.go (aus t6-route-audit-gapless)
+- backend/internal/server/route_audit_integration_test.go (aus WP-504 (`t6-route-audit-gapless`))
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** keine Migration; Snapshot-Lesen im Scope des Principals (database.WithTenant).
 
@@ -10797,15 +10877,15 @@ AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-503
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUD-05;[B];B;backend/internal/server/route_audit_integration_test.go;WP-504
-AUD-07;[B];B;backend/internal/audit/route_snapshot_test.go;WP-504
+AUD-05;[B];B;backend/internal/server/route_audit_integration_test.go;WP-505
+AUD-07;[B];B;backend/internal/audit/route_snapshot_test.go;WP-505
 ```
 
 **Entscheidungsbedarf:** [E-15](../entscheidungen.md#e-15)
 
-**Nicht Bestandteil:** Domain-Historie (ci_change, relationship_change) für weitere Ressourcen; Audit-Viewer (F-078, Gruppe T2).
+**Nicht Bestandteil:** Domain-Historie (ci_change, relationship_change) für weitere Ressourcen; Audit-Viewer (F-078, WP-469 (`t2-audit-viewer`)).
 
-### WP-505 – Webhook-Consumer at-least-once: Fehler propagieren, idempotente Zustellung je Event und Abo
+### WP-506 – Webhook-Consumer at-least-once: Fehler propagieren, idempotente Zustellung je Event und Abo
 
 **Schlüssel:** `t6-webhook-consumer` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
@@ -10846,7 +10926,7 @@ AUD-07;[B];B;backend/internal/audit/route_snapshot_test.go;WP-504
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** Spalte event_id und Unique-Index (event_id, subscription_id) an webhook_delivery; RLS unverändert; up/down, Roundtrip grün.
 
@@ -10858,18 +10938,18 @@ AUD-07;[B];B;backend/internal/audit/route_snapshot_test.go;WP-504
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-EVT-01;[B];B;backend/internal/webhook/consume_integration_test.go;WP-505
+EVT-01;[B];B;backend/internal/webhook/consume_integration_test.go;WP-506
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** webhook.dead in der Mutations-Transaktion (WP-550 (`t6-emit-in-tx`)); Redaktion von invitation.created (WP-417 (`t6-invite-event`)).
+**Nicht Bestandteil:** webhook.dead in der Mutations-Transaktion (WP-550 (`t6-emit-in-tx`)); Redaktion von invitation.created (WP-421 (`t6-invite-event`)).
 
-### WP-506 – Client-Kontakte als Empfängerquelle (NTF-03) und Site-Scope-Nachweis
+### WP-507 – Client-Kontakte als Empfängerquelle (NTF-03) und Site-Scope-Nachweis
 
 **Schlüssel:** `t6-ntf-client-contacts` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-388 (`t6-site-grant-scope`)
+**Voraussetzungen (gemergt):** WP-390 (`t6-site-grant-scope`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -10906,18 +10986,18 @@ EVT-01;[B];B;backend/internal/webhook/consume_integration_test.go;WP-505
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NTF-03;[B];B;backend/internal/notify/recipients_integration_test.go;WP-506
+NTF-03;[B];B;backend/internal/notify/recipients_integration_test.go;WP-507
 ```
 
 **Entscheidungsbedarf:** [E-15](../entscheidungen.md#e-15)
 
 **Nicht Bestandteil:** Standardadressierung von Client-Kontakten durch Ereignis-Subscriptions (weder NTF-03 noch WP-138 legen sie fest; nur bei konfiguriertem Abonnement nach Entscheidung E-91); Abonnements, Empfänger-i18n und Branding (WP-588 (`t6-ntf-templates`)).
 
-### WP-507 – NTF-04-Digest: nicht kritische Kategorien gebündelt zustellen
+### WP-508 – NTF-04-Digest: nicht kritische Kategorien gebündelt zustellen
 
 **Schlüssel:** `t6-ntf-digest` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-397 (`t6-ntf-secrets`), WP-421 (`t6-job02-notices`)
+**Voraussetzungen (gemergt):** WP-399 (`t6-ntf-secrets`), WP-425 (`t6-job02-notices`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -10936,7 +11016,7 @@ NTF-03;[B];B;backend/internal/notify/recipients_integration_test.go;WP-506
 **Akzeptanzkriterien:**
 
 - [ ] Preference wird um digest erweitert (Kategorie → Fenster hourly|daily); Default: Kategorie review stündlich für E-Mail; kritische Kategorien werden nie gebündelt; die In-App-Inbox bleibt je Event.
-- [ ] Für Digest-Kategorien legt der Notifier Digest-Einträge (neue Mandantentabelle notification_digest_item, RLS) statt Einzelzustellungen an; Scheduler-Kind notify.digest (Single-Runner, Registrierung über die Systemjob-Funktion aus WP-421 (`t6-job02-notices`)) erzeugt je (Nutzer, Kanal, Kategorie, Fenster) genau eine Zustellung mit allen Einträgen; Dedup, Retry, Ruhezeiten und Opt-out gelten wie bisher.
+- [ ] Für Digest-Kategorien legt der Notifier Digest-Einträge (neue Mandantentabelle notification_digest_item, RLS) statt Einzelzustellungen an; Scheduler-Kind notify.digest (Single-Runner, Registrierung über die Systemjob-Funktion aus WP-425 (`t6-job02-notices`)) erzeugt je (Nutzer, Kanal, Kategorie, Fenster) genau eine Zustellung mit allen Einträgen; Dedup, Retry, Ruhezeiten und Opt-out gelten wie bisher.
 - [ ] PG-Test TestDigestBundlesReviews (notify/digest_integration_test.go): 5 review.created innerhalb einer Stunde → 1 Digest-Mail mit 5 Einträgen; collector.offline (kritisch) → sofort; Nutzer mit Opt-out der Kategorie → nichts; Org B unberührt; erneuter Lauf → keine Doppelzustellung.
 - [ ] GET/PUT /notifications/preferences liefert und validiert digest (400 bei unbekannter Kategorie oder unbekanntem Fenster); OpenAPI und generierte Typen aktualisiert, Parität grün.
 - [ ] Retest: cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestDigestBundlesReviews' ./internal/notify/ → PASS; Regression go test ./internal/notify/ und Migrations-Roundtrip grün.
@@ -10966,14 +11046,14 @@ NTF-03;[B];B;backend/internal/notify/recipients_integration_test.go;WP-506
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NTF-04;[B];B;backend/internal/notify/digest_integration_test.go;WP-507
+NTF-04;[B];B;backend/internal/notify/digest_integration_test.go;WP-508
 ```
 
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Präferenz-UI; Empfänger-i18n der Digest-Mail (WP-588 (`t6-ntf-templates`)).
 
-### WP-508 – Standardkanäle für neue und bestehende Organisationen (In-App, zentrales SMTP)
+### WP-509 – Standardkanäle für neue und bestehende Organisationen (In-App, zentrales SMTP)
 
 **Schlüssel:** `t6-ntf-default-channel` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
@@ -11025,20 +11105,20 @@ NTF-04;[B];B;backend/internal/notify/digest_integration_test.go;WP-507
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NTF-01;[B];B;backend/internal/notify/defaults_integration_test.go;WP-508
-NTF-04;[B];B;backend/internal/notify/defaults_integration_test.go;WP-508
-UI-16;[B];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-508
+NTF-01;[B];B;backend/internal/notify/defaults_integration_test.go;WP-509
+NTF-04;[B];B;backend/internal/notify/defaults_integration_test.go;WP-509
+UI-16;[B];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-509
 ```
 
 **Entscheidungsbedarf:** [E-33](../entscheidungen.md#e-33)
 
 **Nicht Bestandteil:** Kanal-Admin-UI (kein Phase-1-Kriterium); Signup-Slug und IP-Fenster (WP-591 (`t6-signup-minor`)).
 
-### WP-509 – Einladungen in der Nutzerverwaltung und öffentliche Annahmeseite
+### WP-510 – Einladungen in der Nutzerverwaltung und öffentliche Annahmeseite
 
 **Schlüssel:** `t6-invite-ui` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-417 (`t6-invite-event`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-421 (`t6-invite-event`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -11078,7 +11158,7 @@ UI-16;[B];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-508
 - frontend/src/pages/InvitationAcceptPage.test.tsx (neu)
 - frontend/e2e-real/roles-authz.spec.ts
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** keine Migration.
 
@@ -11091,15 +11171,15 @@ UI-16;[B];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-508
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TLC-03;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-509
-API-05;[B];B;frontend/src/pages/UserManagementPage.test.tsx;WP-509
+TLC-03;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-510
+API-05;[B];B;frontend/src/pages/UserManagementPage.test.tsx;WP-510
 ```
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Backend-Logik der Einladungen (WP-392 (`t6-invite-ceiling`), WP-417 (`t6-invite-event`)); Rollenverwaltung in der UI.
+**Nicht Bestandteil:** Backend-Logik der Einladungen (WP-394 (`t6-invite-ceiling`), WP-421 (`t6-invite-event`)); Rollenverwaltung in der UI.
 
-### WP-510 – CI-Typ-Admin: Fehler beim Setzen von searchable/unique sichtbar, Flags bestehender Attribute änderbar
+### WP-511 – CI-Typ-Admin: Fehler beim Setzen von searchable/unique sichtbar, Flags bestehender Attribute änderbar
 
 **Schlüssel:** `t6-attr-flags-ui` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
@@ -11141,7 +11221,7 @@ API-05;[B];B;frontend/src/pages/UserManagementPage.test.tsx;WP-509
 - backend/internal/citype/attrdef_integration_test.go
 - frontend/e2e-real/metamodel-flags.spec.ts (neu)
 - docs/traceability.csv
-- tests/audit/expected-failures.txt (aus k-ratchet)
+- tests/audit/expected-failures.txt (aus WP-337 (`k-ratchet`))
 
 **Migration/RLS:** keine Migration.
 
@@ -11154,19 +11234,19 @@ API-05;[B];B;frontend/src/pages/UserManagementPage.test.tsx;WP-509
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-MET-15;B/G1;B;frontend/src/pages/CITypeAdminPage.flags.test.tsx;WP-510
-DB-04;nicht geliefert;B;backend/internal/citype/attrdef_integration_test.go;WP-510
+MET-15;B/G1;B;frontend/src/pages/CITypeAdminPage.flags.test.tsx;WP-511
+DB-04;nicht geliefert;B;backend/internal/citype/attrdef_integration_test.go;WP-511
 ```
 
 **Entscheidungsbedarf:** [E-04](../entscheidungen.md#e-04)
 
 **Nicht Bestandteil:** DDL-Job und serverseitige Eindeutigkeit (bereits belegt); Validierungs-AST (WP-589 (`t6-attrdef-ast`)).
 
-### WP-511 – PDU-Messwerte und Interface-Zähler aller Schnittstellen
+### WP-512 – PDU-Messwerte und Interface-Zähler aller Schnittstellen
 
 **Schlüssel:** `t7-power-metrics` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-422 (`t7-metrics-edge`), WP-497 (`t4-power-redundancy`)
+**Voraussetzungen (gemergt):** WP-426 (`t7-metrics-edge`), WP-498 (`t4-power-redundancy`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -11186,7 +11266,7 @@ DB-04;nicht geliefert;B;backend/internal/citype/attrdef_integration_test.go;WP-5
 **Akzeptanzkriterien:**
 
 - [ ] Der Power-Treffer trägt Gerätetyp (UPS/PDU) und Herstellerfamilie aus der Outlet-Erkennung (`collector/plugins/power/outlets.go:30-35`: APC rPDU2, APC rPDU, Raritan PX2/PX3); `pollPowerValues` wählt den OID-Satz danach: UPS wie bisher (UPS-MIB), PDU Laststrom bzw. Wirkleistung je Phase/Inlet aus der Herstellertabelle; Samples mit `kind=power`, Labels `target`, `device=pdu|ups`, `phase` bzw. `inlet`.
-- [ ] Unittest `TestPDUPowerValues` (`collector/collectorcmd/power_metrics_test.go`, Fake-SNMP-Agent): je ein Fake-Agent für APC rPDU2, APC rPDU und Raritan PX (Walk-Fixtures aus `collector/plugins/power/outlets_test.go` aus WP-497 (`t4-power-redundancy`), soweit vorhanden; fehlende Tabellen als Fixture im neuen Test) → Samples `kind=power` mit `device=pdu`, Label `target` und Phasen- bzw. Inlet-Werten; UPS-Agent → die vier UPS-Werte (Laufzeit in Sekunden) mit `device=ups`; Agent ohne bekannte Tabelle → keine Samples, kein Fehler. Verbindlicher Retest F-168: `cd collector && go test -count=1 -run 'TestPDUPowerValues' ./collectorcmd/` → PASS.
+- [ ] Unittest `TestPDUPowerValues` (`collector/collectorcmd/power_metrics_test.go`, Fake-SNMP-Agent): je ein Fake-Agent für APC rPDU2, APC rPDU und Raritan PX (Walk-Fixtures aus `collector/plugins/power/outlets_test.go` aus WP-498 (`t4-power-redundancy`), soweit vorhanden; fehlende Tabellen als Fixture im neuen Test) → Samples `kind=power` mit `device=pdu`, Label `target` und Phasen- bzw. Inlet-Werten; UPS-Agent → die vier UPS-Werte (Laufzeit in Sekunden) mit `device=ups`; Agent ohne bekannte Tabelle → keine Samples, kein Fehler. Verbindlicher Retest F-168: `cd collector && go test -count=1 -run 'TestPDUPowerValues' ./collectorcmd/` → PASS.
 - [ ] Interface-Zähler: der Standard-Poll walkt `ifTable`/`ifXTable` (ifHCInOctets, ifHCOutOctets, ifOperStatus) für alle Schnittstellen (höchstens 256 je Gerät) mit Label `ifIndex` (und `ifName`, falls vorhanden); er ist standardmäßig aktiv (Intervall 300 s), `RETICORA_METRICS_INTERVAL=0` schaltet ihn ab, `RETICORA_SNMP_POLL_METRICS` bleibt Überschreibung; Unittest `TestInterfaceCountersWalkAllInterfaces`: Fake-Agent mit 3 Interfaces → 3×2 Zähler- und 3 Status-Samples mit `ifIndex` (Retest F-339).
 - [ ] `docs/README.md` beschreibt Basis-Metriken, Standardintervall, Variablen und die zusätzliche SNMP-Last des Interface-Polls (Requests je Gerät und Intervall bei bis zu 256 Interfaces).
 - [ ] Regression: bestehende Tests der berührten Pakete grün, `go vet`/golangci-lint bzw. `npm run lint` und `npm run typecheck` ohne neue Befunde.
@@ -11213,18 +11293,18 @@ DB-04;nicht geliefert;B;backend/internal/citype/attrdef_integration_test.go;WP-5
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-MON-02;[B];C;collector/collectorcmd/power_metrics_test.go;WP-511
+MON-02;[B];C;collector/collectorcmd/power_metrics_test.go;WP-512
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Konfigurierbares Polling mit Schwellwerten (MON-03 [P3]); Outlet-Erkennung weiterer Hersteller und Redundanz der Versorgung (WP-497 (`t4-power-redundancy`), Voraussetzung); PDU-Hersteller ohne Outlet-Erkennung. Gruppenübergreifende Voraussetzung (trägt die Integration ein): WP-497 (`t4-power-redundancy`) (T4).
+**Nicht Bestandteil:** Konfigurierbares Polling mit Schwellwerten (MON-03 [P3]); Outlet-Erkennung weiterer Hersteller und Redundanz der Versorgung (WP-498 (`t4-power-redundancy`), Voraussetzung); PDU-Hersteller ohne Outlet-Erkennung.
 
-### WP-512 – Redundanz-Postfilter: Versorger jenseits der Analysetiefe berücksichtigen
+### WP-513 – Redundanz-Postfilter: Versorger jenseits der Analysetiefe berücksichtigen
 
 **Schlüssel:** `t7-impact-redundancy` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-489 (`t3-impact-heuristic`)
+**Voraussetzungen (gemergt):** WP-490 (`t3-impact-heuristic`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -11273,19 +11353,19 @@ MON-02;[B];C;collector/collectorcmd/power_metrics_test.go;WP-511
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-IMP-04;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-512
-IMP-05;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-512
+IMP-04;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-513
+IMP-05;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-513
 ```
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** Heuristik-Kennzeichnung von connected_to im Blast-Radius und `/dependencies` (WP-489 (`t3-impact-heuristic`), Voraussetzung, ebenfalls `impact.go`); Pfadberechnung (WP-177). Gruppenübergreifende Voraussetzung (trägt die Integration ein): WP-489 (`t3-impact-heuristic`) (T3).
+**Nicht Bestandteil:** Heuristik-Kennzeichnung von connected_to im Blast-Radius und `/dependencies` (WP-490 (`t3-impact-heuristic`), Voraussetzung, ebenfalls `impact.go`); Pfadberechnung (WP-177).
 
-### WP-513 – Job-Cancel stoppt laufende Arbeit (ci.bulk, Snapshot) im Queue- und In-Process-Pfad oder wird mit 409 abgelehnt
+### WP-514 – Job-Cancel stoppt laufende Arbeit (ci.bulk, Snapshot) im Queue- und In-Process-Pfad oder wird mit 409 abgelehnt
 
 **Schlüssel:** `t7-job-cancel` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-402 (`t7-job-scope`), WP-502 (`t6-jobqueue-kinds`)
+**Voraussetzungen (gemergt):** WP-404 (`t7-job-scope`), WP-503 (`t6-jobqueue-kinds`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -11301,14 +11381,14 @@ IMP-05;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-5
 
 **Schließt Audit-WPs:** [WP-181](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-181) (FEHLGESCHLAGEN, Teil), [WP-182](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-182) (FEHLGESCHLAGEN, Teil), [WP-197](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-197) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** `DELETE /api/v1/jobs/{id}` auf einem laufenden Job meldet 200 „cancelled“, die Arbeit läuft vollständig weiter, der Bericht je ID geht verloren (F-162): `jobs.Service.Cancel` (`backend/internal/jobs/service.go:200-209`) ist eine reine Statustransition; `runBulkJob`/`runBulk` (`ci/bulk.go:124-169`) und `RunDetached` (`service.go:328-353`) prüfen weder Jobstatus noch einen Cancel-Kontext; das spätere `Succeed` scheitert still. Mit WP-502 (`t6-jobqueue-kinds`) laufen `ci.bulk` und `history.snapshot` bei gesetztem `NATS_URL` als Queue-Handler (`jobQueue.Handle`), sonst in-process; beide Pfade brauchen den Abbruch. Der Export-Teil von F-162 folgt in WP-514 (`t7-export-cancel`).
+**Problem:** `DELETE /api/v1/jobs/{id}` auf einem laufenden Job meldet 200 „cancelled“, die Arbeit läuft vollständig weiter, der Bericht je ID geht verloren (F-162): `jobs.Service.Cancel` (`backend/internal/jobs/service.go:200-209`) ist eine reine Statustransition; `runBulkJob`/`runBulk` (`ci/bulk.go:124-169`) und `RunDetached` (`service.go:328-353`) prüfen weder Jobstatus noch einen Cancel-Kontext; das spätere `Succeed` scheitert still. Mit WP-503 (`t6-jobqueue-kinds`) laufen `ci.bulk` und `history.snapshot` bei gesetztem `NATS_URL` als Queue-Handler (`jobQueue.Handle`), sonst in-process; beide Pfade brauchen den Abbruch. Der Export-Teil von F-162 folgt in WP-515 (`t7-export-cancel`).
 
 **Akzeptanzkriterien:**
 
-- [ ] Job-Arten deklarieren ihre Abbrechbarkeit bei der Registrierung (`jobs.Kind`, `server/jobkinds.go` aus WP-502 (`t6-jobqueue-kinds`)): `ci.bulk`, `history.snapshot` und `export` (Umsetzung im Worker: WP-514 (`t7-export-cancel`)) sind im Lauf abbrechbar; für andere laufende Arten (u. a. `review.merge`, Discovery-Spiegel) antwortet `DELETE /jobs/{id}` 409 „the job kind … cannot be cancelled while running“; wartende Jobs jeder Art bleiben abbrechbar; die Job-Antwort enthält `cancellable` (OpenAPI, generiertes Schema).
+- [ ] Job-Arten deklarieren ihre Abbrechbarkeit bei der Registrierung (`jobs.Kind`, `server/jobkinds.go` aus WP-503 (`t6-jobqueue-kinds`)): `ci.bulk`, `history.snapshot` und `export` (Umsetzung im Worker: WP-515 (`t7-export-cancel`)) sind im Lauf abbrechbar; für andere laufende Arten (u. a. `review.merge`, Discovery-Spiegel) antwortet `DELETE /jobs/{id}` 409 „the job kind … cannot be cancelled while running“; wartende Jobs jeder Art bleiben abbrechbar; die Job-Antwort enthält `cancellable` (OpenAPI, generiertes Schema).
 - [ ] `ci.bulk`: `runBulk` prüft zwischen den Items den Jobstatus (`jobs.Service.IsCancelled`, höchstens eine Abfrage je 25 Items) und stoppt; die Prüfung wirkt im Queue-Handler und im In-Process-Pfad; der Teilbericht (bearbeitete IDs mit Ergebnis, nicht bearbeitete mit `result: skipped`) wird mit Status `cancelled` gespeichert und ist über `GET /jobs/{id}/result` lesbar (200); der Queue-Handler eines abgebrochenen Jobs bestätigt die Nachricht ohne erneute Zustellung und ohne Statusänderung.
 - [ ] `RunDetached` (In-Process) übergibt einen Kontext, der beim Cancel endet; der Queue-Handler von `history.snapshot` prüft `IsCancelled` vor dem Speichern des Ergebnisses; ein nach dem Cancel eintreffendes Ergebnis überschreibt den Status nicht (Unittest in `jobs/service_test.go` bzw. `jobs/handler_test.go`).
-- [ ] Defekttest `TestAuditT7BulkJobCancelStopsWork` grün (< 500 CIs geändert, Job `cancelled` mit Teilbericht), mit und ohne `NATS_URL`, und nach `ci/bulk_jobs_integration_test.go` überführt; danach enthält `audit_t7_bulk_jobs_auditdefect_test.go` keinen Test mehr und wird gelöscht (die Helfer liegen bereits ungetaggt, WP-367 (`t3-bulk-manual`)/WP-402 (`t7-job-scope`)); Zeile gelöscht. Verbindlicher Retest: `cd backend && TEST_DATABASE_URL=… go test -count=1 -v -run '^TestAuditT7BulkJobCancelStopsWork$' ./internal/ci/` → PASS, ebenso mit `NATS_URL=…`.
+- [ ] Defekttest `TestAuditT7BulkJobCancelStopsWork` grün (< 500 CIs geändert, Job `cancelled` mit Teilbericht), mit und ohne `NATS_URL`, und nach `ci/bulk_jobs_integration_test.go` überführt; danach enthält `audit_t7_bulk_jobs_auditdefect_test.go` keinen Test mehr und wird gelöscht (die Helfer liegen bereits ungetaggt, t3-bulk-manual/t7-job-scope); Zeile gelöscht. Verbindlicher Retest: `cd backend && TEST_DATABASE_URL=… go test -count=1 -v -run '^TestAuditT7BulkJobCancelStopsWork$' ./internal/ci/` → PASS, ebenso mit `NATS_URL=…`.
 - [ ] `jobs/handler_test.go`: laufender nicht abbrechbarer Job → 409, laufender `ci.bulk` → 200, wartender Job jeder Art → 200, `cancellable` in der Antwort je Art und Status korrekt.
 - [ ] Regression: bestehende Tests der berührten Pakete grün, `go vet`/golangci-lint bzw. `npm run lint` und `npm run typecheck` ohne neue Befunde.
 
@@ -11321,9 +11401,9 @@ IMP-05;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-5
 - backend/internal/jobs/service_test.go
 - backend/internal/jobs/queue.go
 - backend/internal/ci/bulk.go
-- backend/internal/ci/bulk_jobs_integration_test.go (angelegt in WP-402)
+- backend/internal/ci/bulk_jobs_integration_test.go (angelegt in WP-404)
 - backend/internal/ci/audit_t7_bulk_jobs_auditdefect_test.go (entfernt)
-- backend/internal/server/jobkinds.go (aus t6-jobqueue-kinds)
+- backend/internal/server/jobkinds.go (aus WP-503 (`t6-jobqueue-kinds`))
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts
 - tests/audit/expected-failures.txt (angelegt in WP-337)
@@ -11339,20 +11419,20 @@ IMP-05;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-5
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-JOB-03;[B];C;backend/internal/ci/bulk_jobs_integration_test.go;WP-513
-API-08;[B];C;backend/internal/ci/bulk_jobs_integration_test.go;WP-513
-UI-16;[B];C;backend/internal/jobs/handler_test.go;WP-513
+JOB-03;[B];C;backend/internal/ci/bulk_jobs_integration_test.go;WP-514
+API-08;[B];C;backend/internal/ci/bulk_jobs_integration_test.go;WP-514
+UI-16;[B];C;backend/internal/jobs/handler_test.go;WP-514
 ```
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Export-Abbruch und Ergebnis gespiegelter Jobs (WP-514 (`t7-export-cancel`)); Queue-Umstellung selbst (WP-502 (`t6-jobqueue-kinds`), Voraussetzung); manueller Schreibvorgang der Bulk-Statusänderung (F-020, WP-367 (`t3-bulk-manual`)); Jobcenter-UI (WP-520 (`t7-jobcenter-ui`)). Gruppenübergreifende Voraussetzung (trägt die Integration ein): WP-502 (`t6-jobqueue-kinds`) (T6).
+**Nicht Bestandteil:** Export-Abbruch und Ergebnis gespiegelter Jobs (WP-515 (`t7-export-cancel`)); Queue-Umstellung selbst (WP-503 (`t6-jobqueue-kinds`), Voraussetzung); manueller Schreibvorgang der Bulk-Statusänderung (F-020, WP-368 (`t3-bulk-manual`)); Jobcenter-UI (WP-521 (`t7-jobcenter-ui`)).
 
-### WP-514 – Export-Abbruch über die Job-API, Ergebnis des gespiegelten Exportjobs
+### WP-515 – Export-Abbruch über die Job-API, Ergebnis des gespiegelten Exportjobs
 
 **Schlüssel:** `t7-export-cancel` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-513 (`t7-job-cancel`)
+**Voraussetzungen (gemergt):** WP-514 (`t7-job-cancel`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -11362,19 +11442,19 @@ UI-16;[B];C;backend/internal/jobs/handler_test.go;WP-513
 
 | Befund | Prio | Titel | Beitrag | Betroffene WPs |
 |---|---|---|---|---|
-| [F-162](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-162) | P2 | Job-Cancel stoppt laufende Arbeit nicht (ci.bulk, Export): Status 'cancelled', aber alle Änderungen werden ausgeführt bzw. der Export fertiggestellt, Teilbericht geht verloren | schließt | WP-181, WP-182, WP-197 |
+| [F-162](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-162) | P2 | Job-Cancel stoppt laufende Arbeit nicht (ci.bulk, Export): Status 'cancelled', aber alle Änderungen werden ausgeführt bzw. der Export fertiggestellt, Teilbericht geht verloren | Teil | WP-181, WP-182, WP-197 |
 | [F-347](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-347) | P3 | Jobcenter bietet 'Ergebnis' für jeden erfolgreichen Job an, gespiegelte Jobs haben aber nie ein Ergebnis (409) | Teil | WP-197 |
 
-**Schließt Audit-WPs:** [WP-182](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-182) (FEHLGESCHLAGEN, Teil), [WP-197](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-197) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-181](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-181) (FEHLGESCHLAGEN, Teil), [WP-182](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-182) (FEHLGESCHLAGEN, Teil), [WP-197](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-197) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** Ein `DELETE /api/v1/jobs/{id}` auf einen gespiegelten Exportjob setzt nur den generischen Job auf `cancelled`; der Export-Worker (`backend/internal/export/worker.go:134-176`) prüft den Status nicht, rendert weiter, schreibt den Blob, setzt `export_job` auf `completed` und sendet `export.completed`; `Mirror` scheitert danach still, generischer Job und `export_job` divergieren (F-162, Export-Teil). Gespiegelte Jobs erhalten nie ein Ergebnis (`Mirror`, `jobs/service.go:273-317`), `GET /jobs/{id}/result` antwortet 409 (F-347, Backend-Teil).
 
 **Akzeptanzkriterien:**
 
-- [ ] Der Export-Worker prüft den generischen Jobstatus vor dem Rendern und vor `CompleteJob` (optionale Tracker-Schnittstelle mit `IsCancelled` aus WP-513 (`t7-job-cancel`)); bei `cancelled` endet `export_job` mit `failed` und `error_message` „cancelled by user“, ein bereits geschriebener Blob wird gelöscht, kein `export.completed`.
+- [ ] Der Export-Worker prüft den generischen Jobstatus vor dem Rendern und vor `CompleteJob` (optionale Tracker-Schnittstelle mit `IsCancelled` aus WP-514 (`t7-job-cancel`)); bei `cancelled` endet `export_job` mit `failed` und `error_message` „cancelled by user“, ein bereits geschriebener Blob wird gelöscht, kein `export.completed`.
 - [ ] Bei Erfolg erhält der Spiegeljob ein Ergebnis `{export_id, row_count}` (optionale Tracker-Methode `MirrorResult`, bestehende Tracker-Fakes bleiben unverändert); `GET /jobs/{id}/result` → 200 statt 409; `jobs/service_test.go`: `MirrorResult` setzt das Ergebnis nur für den gespiegelten Job der Referenz (F-347, Backend-Teil).
-- [ ] PG-Integrationstest `TestExportCancelViaJobAPI` (`backend/internal/export/cancel_integration_test.go`, vor dem Fix rot): `DELETE /jobs/{id}` vor `ProcessOne` → `export_job` nicht `completed`, kein Blob, kein Event; ohne Cancel → Spiegeljob `succeeded` mit Ergebnis; DELETE ohne Recht → 403; durch einen Nutzer eines fremden Clients → 404 (Erstellerregel aus WP-347 (`t1-export-job-visibility`), Scope aus WP-402 (`t7-job-scope`)).
-- [ ] Verbindlicher Retest (Export-Teil F-162): `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestExportCancelViaJobAPI' ./internal/export/` → PASS; zusammen mit dem Retest aus WP-513 (`t7-job-cancel`) ist F-162 im Backend geschlossen (UI-Cancel: WP-520 (`t7-jobcenter-ui`)).
+- [ ] PG-Integrationstest `TestExportCancelViaJobAPI` (`backend/internal/export/cancel_integration_test.go`, vor dem Fix rot): `DELETE /jobs/{id}` vor `ProcessOne` → `export_job` nicht `completed`, kein Blob, kein Event; ohne Cancel → Spiegeljob `succeeded` mit Ergebnis; DELETE ohne Recht → 403; durch einen Nutzer eines fremden Clients → 404 (Erstellerregel aus WP-347 (`t1-export-job-visibility`), Scope aus WP-404 (`t7-job-scope`)).
+- [ ] Verbindlicher Retest (Export-Teil F-162): `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestExportCancelViaJobAPI' ./internal/export/` → PASS; zusammen mit dem Retest aus WP-514 (`t7-job-cancel`) ist F-162 im Backend geschlossen (UI-Cancel: WP-521 (`t7-jobcenter-ui`)).
 - [ ] Regression: bestehende Tests von `internal/export` (u. a. `TestExportJobRunsWithCreatorScope`) und `internal/jobs` grün, `go vet`/golangci-lint ohne neue Befunde.
 
 **Dateien (5 Einträge, Migration = 2):**
@@ -11395,18 +11475,18 @@ UI-16;[B];C;backend/internal/jobs/handler_test.go;WP-513
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-JOB-03;[B];C;backend/internal/export/cancel_integration_test.go;WP-514
+JOB-03;[B];C;backend/internal/export/cancel_integration_test.go;WP-515
 ```
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Umstellung des Exports auf die NATS-Queue und Lease-Erneuerung des Export-Workers (WP-502 (`t6-jobqueue-kinds`), F-315 WP-592 (`t6-p3-sammel`)); Jobcenter-UI (WP-520 (`t7-jobcenter-ui`)).
+**Nicht Bestandteil:** Umstellung des Exports auf die NATS-Queue und Lease-Erneuerung des Export-Workers (WP-503 (`t6-jobqueue-kinds`), F-315 WP-592 (`t6-p3-sammel`)); Jobcenter-UI (WP-521 (`t7-jobcenter-ui`)).
 
-### WP-515 – State-Snapshot replayt die reale Änderungsspur; 404 für unbekannte Entitäten
+### WP-516 – State-Snapshot replayt die reale Änderungsspur; 404 für unbekannte Entitäten
 
 **Schlüssel:** `t7-snapshot-replay` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-486 (`t3-aud03-schema`), WP-502 (`t6-jobqueue-kinds`)
+**Voraussetzungen (gemergt):** WP-487 (`t3-aud03-schema`), WP-503 (`t6-jobqueue-kinds`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -11420,12 +11500,12 @@ JOB-03;[B];C;backend/internal/export/cancel_integration_test.go;WP-514
 
 **Schließt Audit-WPs:** [WP-183](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-183) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** Der State-Snapshot-Job (und `GET /cis/{id}/state`) liefert immer `fields={}` und `succeeded`, auch für unbekannte oder fremde IDs (F-164): `TrailUpTo` (`backend/internal/history/pg_repository.go:150-171`) liest nur `entity_change`; CI-Änderungen stehen in `ci_change` (nur für `List` vereinheitlicht, :64-117); `history.Record` (:37-60) hat keinen produktiven Aufrufer, das Asset-Repository schreibt keine Spur. `TestLongOperationsRunAsJobsAgainstPostgres` prüft nur `result.entity_id` (`reviews/merge_job_integration_test.go:121-123`) und verdeckt das leere Ergebnis. `history/pg_repository.go`, `handler.go` und `model.go` ändern auch WP-471 (`t3-history-location`), WP-473 (`t3-history-access`) und WP-486 (`t3-aud03-schema`) (change_set/field_changes in der Historie) sowie WP-502 (`t6-jobqueue-kinds`) (`history/handler.go`, Snapshot über die Queue); das Replay baut auf deren Stand auf.
+**Problem:** Der State-Snapshot-Job (und `GET /cis/{id}/state`) liefert immer `fields={}` und `succeeded`, auch für unbekannte oder fremde IDs (F-164): `TrailUpTo` (`backend/internal/history/pg_repository.go:150-171`) liest nur `entity_change`; CI-Änderungen stehen in `ci_change` (nur für `List` vereinheitlicht, :64-117); `history.Record` (:37-60) hat keinen produktiven Aufrufer, das Asset-Repository schreibt keine Spur. `TestLongOperationsRunAsJobsAgainstPostgres` prüft nur `result.entity_id` (`reviews/merge_job_integration_test.go:121-123`) und verdeckt das leere Ergebnis. `history/pg_repository.go`, `handler.go` und `model.go` ändern auch WP-473 (`t3-history-location`), WP-475 (`t3-history-access`) und WP-487 (`t3-aud03-schema`) (change_set/field_changes in der Historie) sowie WP-503 (`t6-jobqueue-kinds`) (`history/handler.go`, Snapshot über die Queue); das Replay baut auf deren Stand auf.
 
 **Akzeptanzkriterien:**
 
-- [ ] `TrailUpTo` liefert für `ci` die Spur auf Basis der change_set/field_changes aus WP-486 (`t3-aud03-schema`) (`ci_change` inkl. Anlagezeile) und `entity_change` bis `at`, älteste zuerst, mit denselben entsiegelten Werten wie `GET /history/ci/{id}`; für `asset` die `entity_change`-Zeilen, die `asset/pg_repository.go` ab jetzt bei Create, Update und Delete in derselben Transaktion schreibt (Feldänderungen mit alt/neu).
-- [ ] `CreateSnapshot` (`history/handler.go:55-108`, nach WP-502 (`t6-jobqueue-kinds`) über `Queue.Submit` bzw. in-process) prüft die Sichtbarkeit vor dem Einreihen: unbekannte oder unsichtbare Entität (fremde Org/fremder Client) → 404, kein Job; ist bis `at` keine Spur vorhanden (vor der Anlage bzw. vor der ersten Aufzeichnung), endet der Job `failed` mit „no recorded state before <at>“ statt `succeeded` mit leerem Zustand; `GET /cis/{id}/state` und `/assets/{id}/state` antworten in diesen Fällen 404.
+- [ ] `TrailUpTo` liefert für `ci` die Spur auf Basis der change_set/field_changes aus WP-487 (`t3-aud03-schema`) (`ci_change` inkl. Anlagezeile) und `entity_change` bis `at`, älteste zuerst, mit denselben entsiegelten Werten wie `GET /history/ci/{id}`; für `asset` die `entity_change`-Zeilen, die `asset/pg_repository.go` ab jetzt bei Create, Update und Delete in derselben Transaktion schreibt (Feldänderungen mit alt/neu).
+- [ ] `CreateSnapshot` (`history/handler.go:55-108`, nach WP-503 (`t6-jobqueue-kinds`) über `Queue.Submit` bzw. in-process) prüft die Sichtbarkeit vor dem Einreihen: unbekannte oder unsichtbare Entität (fremde Org/fremder Client) → 404, kein Job; ist bis `at` keine Spur vorhanden (vor der Anlage bzw. vor der ersten Aufzeichnung), endet der Job `failed` mit „no recorded state before <at>“ statt `succeeded` mit leerem Zustand; `GET /cis/{id}/state` und `/assets/{id}/state` antworten in diesen Fällen 404.
 - [ ] PG-Integrationstest `TestStateSnapshotContentAgainstPostgres` (`history/snapshot_integration_test.go`): CI per PATCH umbenennen → Snapshot „jetzt“ enthält den neuen Namen, Zeitpunkt zwischen Anlage und Umbenennung den alten; Asset analog (Anlage und Update nach dem Fix); unbekannte ID → 404; Client-2-Principal auf Client-1-CI → 404; Zeitpunkt vor der Anlage → Job `failed` (verbindlicher Retest F-164).
 - [ ] Testkorrektur (Ratchet d): `TestLongOperationsRunAsJobsAgainstPostgres` prüft im Snapshot-Teil die Feldinhalte statt nur `entity_id`.
 - [ ] OpenAPI dokumentiert 404 für `POST /history/snapshots`, `GET /cis/{id}/state` und `GET /assets/{id}/state`; Paritätstest grün; `npm run generate:api`.
@@ -11453,20 +11533,20 @@ JOB-03;[B];C;backend/internal/export/cancel_integration_test.go;WP-514
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-JOB-04;[B];C;backend/internal/history/snapshot_integration_test.go;WP-515
+JOB-04;[B];C;backend/internal/history/snapshot_integration_test.go;WP-516
 ```
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Replay von Beziehungen, Overrides und Standortwechseln (AUD-08 [P2]; location_change in der Historie: WP-471 (`t3-history-location`)); AUD-03-Schema von `ci_change` (WP-486 (`t3-aud03-schema`), Voraussetzung); audit_log als Replay-Quelle. Gruppenübergreifende Voraussetzungen (trägt die Integration ein): WP-486 (`t3-aud03-schema`) (T3), WP-502 (`t6-jobqueue-kinds`) (T6).
+**Nicht Bestandteil:** Replay von Beziehungen, Overrides und Standortwechseln (AUD-08 [P2]; location_change in der Historie: WP-473 (`t3-history-location`)); AUD-03-Schema von `ci_change` (WP-487 (`t3-aud03-schema`), Voraussetzung); audit_log als Replay-Quelle. Voraussetzungen: WP-487 (`t3-aud03-schema`), WP-503 (`t6-jobqueue-kinds`).
 
-### WP-516 – Bulk: ID-Validierung im Bericht, API-Grenz- und Isolationstests
+### WP-517 – Bulk: ID-Validierung im Bericht, API-Grenz- und Isolationstests
 
-**Schlüssel:** `t7-bulk-validation` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 0,8 PT
+**Schlüssel:** `t7-bulk-validation` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-367 (`t3-bulk-manual`), WP-513 (`t7-job-cancel`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-368 (`t3-bulk-manual`), WP-514 (`t7-job-cancel`)
 
-**Vorgezogen:** nach Schwere K5 Nachweislücken; als Voraussetzung von WP-519 (`t7-bulk-ui`) in K4 eingeordnet.
+**Vorgezogen:** nach Schwere K5 Nachweislücken; als Voraussetzung von WP-520 (`t7-bulk-ui`) in K4 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -11510,19 +11590,19 @@ JOB-04;[B];C;backend/internal/history/snapshot_integration_test.go;WP-515
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-API-08;[B];C;backend/internal/ci/bulk_integration_test.go;WP-516
-BLK-01;[B];C;backend/internal/ci/bulk_integration_test.go;WP-516
+API-08;[B];C;backend/internal/ci/bulk_integration_test.go;WP-517
+BLK-01;[B];C;backend/internal/ci/bulk_integration_test.go;WP-517
 ```
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Bulk-Auswahl und Jobbericht in der UI (WP-519 (`t7-bulk-ui`)); manueller Schreibvorgang der Statusänderung (F-020, WP-367 (`t3-bulk-manual`), Voraussetzung, gleiche Datei `bulk_integration_test.go`). Gruppenübergreifende Voraussetzung (trägt die Integration ein): WP-367 (`t3-bulk-manual`) (T3).
+**Nicht Bestandteil:** Bulk-Auswahl und Jobbericht in der UI (WP-520 (`t7-bulk-ui`)); manueller Schreibvorgang der Statusänderung (F-020, WP-368 (`t3-bulk-manual`), Voraussetzung, gleiche Datei `bulk_integration_test.go`).
 
-### WP-517 – Gespeicherte Sichten: Teil-PATCH erhält die Freigabe, Bearbeitungsrechte, Rollenprüfung
+### WP-518 – Gespeicherte Sichten: Teil-PATCH erhält die Freigabe, Bearbeitungsrechte, Rollenprüfung
 
 **Schlüssel:** `t7-saved-views-api` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-403 (`t7-filter-ast-values`), WP-457 (`t1-structured-search-read`)
+**Voraussetzungen (gemergt):** WP-405 (`t7-filter-ast-values`), WP-460 (`t1-structured-search-read`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -11575,14 +11655,14 @@ BLK-01;[B];C;backend/internal/ci/bulk_integration_test.go;WP-516
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-VIE-01;[B];C;backend/internal/savedview/savedview_integration_test.go;WP-517
+VIE-01;[B];C;backend/internal/savedview/savedview_integration_test.go;WP-518
 ```
 
 **Entscheidungsbedarf:** [E-86](entscheidungen.md#e-86) Bearbeitungs- und Löschrechte org-weit geteilter Sichten (VIE-01) (offen, Empfehlung als Übergangsregel)
 
 **Nicht Bestandteil:** Anwendung von sort/columns und Freigabe-UI (WP-555 (`t7-saved-views-ui`)); vordefinierte Views (VIE-02 [P2]).
 
-### WP-518 – Tastaturbedienung: Tabellenmuster für die CI-Liste, Fokusrückgabe der Palette, Tests je Baustein
+### WP-519 – Tastaturbedienung: Tabellenmuster für die CI-Liste, Fokusrückgabe der Palette, Tests je Baustein
 
 **Schlüssel:** `t7-ui-keyboard` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
@@ -11643,28 +11723,28 @@ VIE-01;[B];C;backend/internal/savedview/savedview_integration_test.go;WP-517
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-UI-01;[B];C;frontend/e2e/keyboard.spec.ts;WP-518
-UI-02;[B];C;frontend/e2e/keyboard.spec.ts;WP-518
-UI-03;[B];C;frontend/e2e/keyboard.spec.ts;WP-518
-UI-04;[B];C;frontend/e2e/keyboard.spec.ts;WP-518
-UI-05;[B];C;frontend/e2e/keyboard.spec.ts;WP-518
-UI-07;[B];C;frontend/e2e/keyboard.spec.ts;WP-518
-UI-08;[B];C;frontend/e2e/keyboard.spec.ts;WP-518
-UI-09;[B];C;frontend/e2e/keyboard.spec.ts;WP-518
-UI-10;[B];C;frontend/e2e/keyboard.spec.ts;WP-518
+UI-01;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-02;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-03;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-04;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-05;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-07;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-08;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-09;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-10;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
 ```
 
 **Entscheidungsbedarf:** [E-02](../entscheidungen.md#e-02)
 
-**Nicht Bestandteil:** Pfeiltasten in weiteren Tabellen der UI-01..10-Seiten (`AuditPage.tsx`, `ExportPage.tsx`, `WebhooksPage.tsx`): WP-192 verlangt den tastaturbedienbaren Tabellenbaustein mit Test je Baustein, nicht dessen Einbau in jede Tabelle, und E-02 nennt keine Einzelverträge je Tabelle; die Übernahme ist ein Folge-WP nach G1, Tab und Enter bleiben dort bedienbar. Tastaturmuster weiterer Listen außerhalb UI-01..10 (Module nach E-03); Ausführung in allen Projekten in CI (WP-530 (`t7-browser-matrix`)).
+**Nicht Bestandteil:** Pfeiltasten in weiteren Tabellen der UI-01..10-Seiten (`AuditPage.tsx`, `ExportPage.tsx`, `WebhooksPage.tsx`): WP-192 verlangt den tastaturbedienbaren Tabellenbaustein mit Test je Baustein, nicht dessen Einbau in jede Tabelle, und E-02 nennt keine Einzelverträge je Tabelle; die Übernahme ist ein Folge-WP nach G1, Tab und Enter bleiben dort bedienbar. Tastaturmuster weiterer Listen außerhalb UI-01..10 (Module nach E-03); Ausführung in allen Projekten in CI (WP-531 (`t7-browser-matrix`)).
 
-### WP-519 – Bulk aus der CI-Liste über 25 Zeilen, Jobbericht in der UI, Real-Stack-Nachweise
+### WP-520 – Bulk aus der CI-Liste über 25 Zeilen, Jobbericht in der UI, Real-Stack-Nachweise
 
 **Schlüssel:** `t7-bulk-ui` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-367 (`t3-bulk-manual`), WP-514 (`t7-export-cancel`), WP-516 (`t7-bulk-validation`), WP-518 (`t7-ui-keyboard`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-368 (`t3-bulk-manual`), WP-515 (`t7-export-cancel`), WP-517 (`t7-bulk-validation`), WP-519 (`t7-ui-keyboard`)
 
-**Vorgezogen:** nach Schwere K5 Nachweislücken; als Voraussetzung von WP-520 (`t7-jobcenter-ui`) in K4 eingeordnet.
+**Vorgezogen:** nach Schwere K5 Nachweislücken; als Voraussetzung von WP-521 (`t7-jobcenter-ui`) in K4 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -11685,7 +11765,7 @@ UI-10;[B];C;frontend/e2e/keyboard.spec.ts;WP-518
 
 - [ ] Ursachenbestätigung F-328: Vitest in `CIListPage.test.tsx` belegt vor dem Fix, dass eine Auswahl jenseits der sichtbaren Seite verworfen wird; Ausgabe im PR.
 - [ ] CI-Liste bietet „Alle Treffer des Filters auswählen“ (bis 500 IDs, über die gefilterte Liste seitenweise gesammelt); ab 100 IDs zeigt die UI den Job mit Fortschritt und danach seinen Bericht je ID mit Einzelfehlern; Vitest: 150 Treffer → `POST /cis/bulk` mit 150 IDs → 202 → Jobbericht mit 2 Fehlern gerendert (Retest F-328).
-- [ ] Real-Stack: B01 um ein vorher manuell bearbeitetes CI (Status-Override) erweitert – erwartet wird die Anwendung mit neuem Override (Verhalten nach WP-367 (`t3-bulk-manual`)), nie „ok“ ohne Wirkung; der erweiterte Fall ist grün. Neuer Fall B05: 150 CIs aus der UI auswählen → Job → Bericht in der UI, Persistenz per API; ein Client-2-Nutzer sieht im Bericht keine Client-1-CIs.
+- [ ] Real-Stack: B01 um ein vorher manuell bearbeitetes CI (Status-Override) erweitert – erwartet wird die Anwendung mit neuem Override (Verhalten nach WP-368 (`t3-bulk-manual`)), nie „ok“ ohne Wirkung; der erweiterte Fall ist grün. Neuer Fall B05: 150 CIs aus der UI auswählen → Job → Bericht in der UI, Persistenz per API; ein Client-2-Nutzer sieht im Bericht keine Client-1-CIs.
 - [ ] Retest: `cd frontend && npx vitest run src/pages/CIListPage.test.tsx` und `npx playwright test -c e2e-real/playwright.real.config.ts bulk-jobs-export -g 'B01|B04|B05'` → PASS.
 - [ ] Regression: bestehende Tests der berührten Pakete grün, `go vet`/golangci-lint bzw. `npm run lint` und `npm run typecheck` ohne neue Befunde.
 
@@ -11710,19 +11790,19 @@ UI-10;[B];C;frontend/e2e/keyboard.spec.ts;WP-518
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-API-08;[B];C;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-519
-BLK-01;[B];C;frontend/src/pages/CIListPage.test.tsx;WP-519
+API-08;[B];C;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-520
+BLK-01;[B];C;frontend/src/pages/CIListPage.test.tsx;WP-520
 ```
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** ID-Validierung und API-Grenzen (WP-516 (`t7-bulk-validation`)); Export-Buttons der CI-Liste (F-077, WP-466 (`t2-ci-export`)); Bulk für weitere Felder (BLK-02 [P2]). WP-514 (`t7-export-cancel`) ist Voraussetzung, weil dieses WP WP-181 schließt und F-162 dort im Backend endet. Gruppenübergreifende Voraussetzung (trägt die Integration ein): WP-367 (`t3-bulk-manual`) (T3).
+**Nicht Bestandteil:** ID-Validierung und API-Grenzen (WP-517 (`t7-bulk-validation`)); Export-Buttons der CI-Liste (F-077, WP-468 (`t2-ci-export`)); Bulk für weitere Felder (BLK-02 [P2]). WP-515 (`t7-export-cancel`) ist Voraussetzung, weil dieses WP WP-181 schließt und F-162 dort im Backend endet. Voraussetzung: WP-368 (`t3-bulk-manual`).
 
-### WP-520 – Jobcenter und Benachrichtigungen: Cancel nur wo möglich, Ergebnis nur wo vorhanden, Fehlerzustände
+### WP-521 – Jobcenter und Benachrichtigungen: Cancel nur wo möglich, Ergebnis nur wo vorhanden, Fehlerzustände
 
 **Schlüssel:** `t7-jobcenter-ui` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-513 (`t7-job-cancel`), WP-514 (`t7-export-cancel`), WP-519 (`t7-bulk-ui`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-514 (`t7-job-cancel`), WP-515 (`t7-export-cancel`), WP-520 (`t7-bulk-ui`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -11732,11 +11812,11 @@ BLK-01;[B];C;frontend/src/pages/CIListPage.test.tsx;WP-519
 
 | Befund | Prio | Titel | Beitrag | Betroffene WPs |
 |---|---|---|---|---|
-| [F-162](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-162) | P2 | Job-Cancel stoppt laufende Arbeit nicht (ci.bulk, Export): Status 'cancelled', aber alle Änderungen werden ausgeführt bzw. der Export fertiggestellt, Teilbericht geht verloren | Teil | WP-181, WP-182, WP-197 |
+| [F-162](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-162) | P2 | Job-Cancel stoppt laufende Arbeit nicht (ci.bulk, Export): Status 'cancelled', aber alle Änderungen werden ausgeführt bzw. der Export fertiggestellt, Teilbericht geht verloren | schließt | WP-181, WP-182, WP-197 |
 | [F-347](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-347) | P3 | Jobcenter bietet 'Ergebnis' für jeden erfolgreichen Job an, gespiegelte Jobs haben aber nie ein Ergebnis (409) | schließt | WP-197 |
 | [F-348](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-348) | P3 | Benachrichtigungspanel verbirgt Ladefehler als 'keine Benachrichtigungen' | schließt | WP-197 |
 
-**Schließt Audit-WPs:** [WP-197](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-197) (TEILWEISE BESTANDEN, schließt)
+**Schließt Audit-WPs:** [WP-181](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-181) (FEHLGESCHLAGEN, Teil), [WP-182](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-182) (FEHLGESCHLAGEN, Teil), [WP-197](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-197) (TEILWEISE BESTANDEN, schließt)
 
 **Problem:** Das Jobcenter bietet „Abbrechen“ für jeden laufenden Job und „Ergebnis“ für jeden erfolgreichen Job (`JobCenterPage.tsx:119-133`), gespiegelte Jobs haben aber kein Ergebnis (409, F-347); der UI-Cancel ist real nicht belegt (F-162, UI-Teil). Das Benachrichtigungspanel zeigt Ladefehler als „Keine Benachrichtigungen“ (F-348, `NotificationCenter.tsx:22-23`, `:72-76`).
 
@@ -11772,14 +11852,14 @@ BLK-01;[B];C;frontend/src/pages/CIListPage.test.tsx;WP-519
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-UI-16;[B];C;frontend/e2e-real/job-center.spec.ts;WP-520
+UI-16;[B];C;frontend/e2e-real/job-center.spec.ts;WP-521
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Backend-Cancel (WP-513 (`t7-job-cancel`), WP-514 (`t7-export-cancel`)); Beschriftung der Job-Arten; Benachrichtigungsadministration (T6).
+**Nicht Bestandteil:** Backend-Cancel (WP-514 (`t7-job-cancel`), WP-515 (`t7-export-cancel`)); Beschriftung der Job-Arten; Benachrichtigungsadministration (WP-398 (`t6-ntf-authz`)).
 
-### WP-521 – WCAG-AA-Kontrast und axe-Prüfung aller Routen mit Daten, hell und dunkel
+### WP-522 – WCAG-AA-Kontrast und axe-Prüfung aller Routen mit Daten, hell und dunkel
 
 **Schlüssel:** `t7-a11y-contrast` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
@@ -11804,7 +11884,7 @@ UI-16;[B];C;frontend/e2e-real/job-center.spec.ts;WP-520
 
 - [ ] Leerzustandszellen nutzen `text-gray-600 dark:text-gray-300`; `src/index.css` definiert für `.dark` eine Primärfarbe mit ≥ 4,5:1 auf dem Dark-Hintergrund.
 - [ ] `a11y.spec.ts` prüft jede Route aus `App.tsx` (Abgleich mit der Router-Konfiguration: eine neue Route ohne Eintrag lässt den Spec fehlschlagen) inkl. `/cmdb/:id` und `/topology` mit Startdialog (422-Stub), mit Daten (Fixtures `e2e/support/a11y-fixtures.ts`, je Liste mindestens eine Zeile) und je einmal hell und dunkel.
-- [ ] Verbindlicher Retest F-172: `cd frontend && npx playwright test e2e/a11y.spec.ts --project=chromium --project=mobile-chrome` → 0 Verstöße außer den nach dem folgenden Kriterium markierten Befunden; Lauf in allen sechs Projekten über WP-530 (`t7-browser-matrix`) (CI-Artefakt).
+- [ ] Verbindlicher Retest F-172: `cd frontend && npx playwright test e2e/a11y.spec.ts --project=chromium --project=mobile-chrome` → 0 Verstöße außer den nach dem folgenden Kriterium markierten Befunden; Lauf in allen sechs Projekten über WP-531 (`t7-browser-matrix`) (CI-Artefakt).
 - [ ] Weitere Verstöße außerhalb der Dateigrenze werden als neuer Befund (ID) erfasst und je Route mit `test.fail(true, '<Befund-ID>')` markiert, bis das Folge-WP sie behebt; ein markierter Fall, der grün wird, schlägt fehl (Playwright-Semantik). Für die fünf Leerzustandsseiten, `/cmdb/:id`, `/topology` und den Dark-Mode-Zurücklink ist keine Markierung zulässig.
 - [ ] Regression: bestehende Tests der berührten Pakete grün, `go vet`/golangci-lint bzw. `npm run lint` und `npm run typecheck` ohne neue Befunde.
 
@@ -11829,19 +11909,19 @@ UI-16;[B];C;frontend/e2e-real/job-center.spec.ts;WP-520
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-521
-NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-521
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-522
+NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-522
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Browser-Vorversionen (WP-530 (`t7-browser-matrix`)); Raumplan-Validierung (WP-525 (`t7-room-layout`)).
+**Nicht Bestandteil:** Browser-Vorversionen (WP-531 (`t7-browser-matrix`)); Raumplan-Validierung (WP-526 (`t7-room-layout`)).
 
-### WP-522 – Lokalisierte Typbezeichnung im CI-Detail, übersetzte Formularmeldungen, Real-Stack-Sprachwechsel
+### WP-523 – Lokalisierte Typbezeichnung im CI-Detail, übersetzte Formularmeldungen, Real-Stack-Sprachwechsel
 
 **Schlüssel:** `t7-i18n-labels` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-395 (`t6-ci-form-types`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-397 (`t6-ci-form-types`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -11862,7 +11942,7 @@ NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-521
 **Akzeptanzkriterien:**
 
 - [ ] `CIDetailPage` löst den Typ über `useCITypes` auf und rendert `localizedText(display_name) || name` im Badge und in der Detailzeile; die UUID nur, wenn der Typ unbekannt ist.
-- [ ] Defekttest „shows the localized type label on the CI detail page, not the type UUID“ grün (`cd frontend && npx vitest run -c vitest.auditdefect.config.ts src/pages/CITypeLabels.auditdefect.tsx -t 'shows the localized type label on the CI detail page'` → PASS), danach nach `CIDetailPage.test.tsx` überführt; da WP-395 (`t6-ci-form-types`) die Fälle :113/:140 bereits überführt hat, ist `CITypeLabels.auditdefect.tsx` danach leer und wird gelöscht; Zeile in `tests/audit/expected-failures.txt` gelöscht.
+- [ ] Defekttest „shows the localized type label on the CI detail page, not the type UUID“ grün (`cd frontend && npx vitest run -c vitest.auditdefect.config.ts src/pages/CITypeLabels.auditdefect.tsx -t 'shows the localized type label on the CI detail page'` → PASS), danach nach `CIDetailPage.test.tsx` überführt; da WP-397 (`t6-ci-form-types`) die Fälle :113/:140 bereits überführt hat, ist `CITypeLabels.auditdefect.tsx` danach leer und wird gelöscht; Zeile in `tests/audit/expected-failures.txt` gelöscht.
 - [ ] `validateValue` liefert Meldungsschlüssel und Parameter; `components/form/DynamicForm.tsx` übersetzt sie; Vitest `DynamicForm.test.tsx`: Pflichtfeld leer in de → „<Label> ist erforderlich“, in en → „<Label> is required“ (Retest F-343).
 - [ ] Real-Stack `frontend/e2e-real/i18n.spec.ts` (neu): gegen reale Daten (CI-Typ mit `display_name` de/en, CI mit Status) zeigt das CI-Detail in de das de-Label, nach Sprachwechsel das en-Label; Statuswerte übersetzt; keine Typ-UUID sichtbar.
 - [ ] `catalog.test.ts` (Schlüsselparität) grün.
@@ -11893,19 +11973,19 @@ NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-521
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-GLO-10;[B];C;frontend/src/pages/CIDetailPage.test.tsx;WP-522
-UI-18;[B];C;frontend/e2e-real/i18n.spec.ts;WP-522
+GLO-10;[B];C;frontend/src/pages/CIDetailPage.test.tsx;WP-523
+UI-18;[B];C;frontend/e2e-real/i18n.spec.ts;WP-523
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** CI-Formular mit Typliste aus der API (F-016, WP-395 (`t6-ci-form-types`), Voraussetzung); rohe Statuswerte in Listen (WP-524 (`t7-i18n-status-a`)/-b). Gruppenübergreifende Voraussetzung (trägt die Integration ein): WP-395 (`t6-ci-form-types`) (T6).
+**Nicht Bestandteil:** CI-Formular mit Typliste aus der API (F-016, WP-397 (`t6-ci-form-types`), Voraussetzung); rohe Statuswerte in Listen (WP-525 (`t7-i18n-status-a`), WP-527 (`t7-i18n-status-b`)).
 
-### WP-523 – CI-Detail berücksichtigt den gewählten Scope (Hinweis, gescopte Beziehungen)
+### WP-524 – CI-Detail berücksichtigt den gewählten Scope (Hinweis, gescopte Beziehungen)
 
 **Schlüssel:** `t7-ui-scope-detail` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-522 (`t7-i18n-labels`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-523 (`t7-i18n-labels`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -11964,26 +12044,26 @@ UI-18;[B];C;frontend/e2e-real/i18n.spec.ts;WP-522
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-UI-01;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-523
-UI-02;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-523
-UI-03;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-523
-UI-04;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-523
-UI-05;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-523
-UI-07;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-523
-UI-08;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-523
-UI-09;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-523
-UI-10;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-523
+UI-01;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-02;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-03;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-04;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-05;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-07;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-08;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-09;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-10;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
 ```
 
 **Entscheidungsbedarf:** [E-87](entscheidungen.md#e-87) CI-Detail unter gewähltem Client-/Site-Scope (WP-191) (offen, Empfehlung als Übergangsregel); [E-02](../entscheidungen.md#e-02)
 
 **Nicht Bestandteil:** Listen-Scope und Umschalter-Grenze (WP-556 (`t7-ui-scope-lists`)); Audit-, Webhook- und Export-Seite (F-078, F-062, F-077 anderer Gruppen).
 
-### WP-524 – Statuswerte über den Katalog (Teil 1): Inventar-, Ticket-, Auftrags- und Raumplanseiten, Source-Scan
+### WP-525 – Statuswerte über den Katalog (Teil 1): Inventar-, Ticket-, Auftrags- und Raumplanseiten, Source-Scan
 
 **Schlüssel:** `t7-i18n-status-a` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-521 (`t7-a11y-contrast`)
+**Voraussetzungen (gemergt):** WP-522 (`t7-a11y-contrast`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -12002,7 +12082,7 @@ UI-10;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-523
 
 **Akzeptanzkriterien:**
 
-- [ ] Source-Scan `frontend/src/i18n/rawEnum.test.ts` (neu): findet in `src/pages/**` und `src/components/**` JSX-Kindausdrücke `{x.status}`, `{x.severity}`, `{x.category}`, `{x.state}` ohne Übersetzung; eine Negativfixture schlägt an; Allowlist nur für die in WP-526 (`t7-i18n-status-b`) genannten Seiten und `CITypeAdminPage.tsx` `category`.
+- [ ] Source-Scan `frontend/src/i18n/rawEnum.test.ts` (neu): findet in `src/pages/**` und `src/components/**` JSX-Kindausdrücke `{x.status}`, `{x.severity}`, `{x.category}`, `{x.state}` ohne Übersetzung; eine Negativfixture schlägt an; Allowlist nur für die in WP-527 (`t7-i18n-status-b`) genannten Seiten und `CITypeAdminPage.tsx` `category`.
 - [ ] Anzeige über `t('<domain>.statuses.<wert>', wert)` bzw. `t('<domain>.categories.<wert>', wert)` in `AssetListPage.tsx` (:253 Kategorie, :255 Status), `AssignmentListPage.tsx` (:100), `DocumentListPage.tsx` (:104), `TicketListPage.tsx` (:151 Status, :156 Kategorie), `OrderListPage.tsx` (:87), `KeyListPage.tsx` (:102), `RoomPlanPage.tsx` (:273), `WorkflowPage.tsx` (:81, :86) und `UserManagementPage.tsx` (:83).
 - [ ] `catalog.test.ts` prüft für jedes dieser Enums die Werte aus `api/openapi.yaml` (enum) bzw., wo die Spezifikation nur `string` nennt, aus den Konstanten des Backend-Moduls (Werteliste im Test mit Quellenangabe) gegen vollständige de-/en-Schlüssel.
 - [ ] Retest: `cd frontend && npx vitest run src/i18n/catalog.test.ts src/i18n/rawEnum.test.ts` → PASS; die Assets-Liste in de zeigt „Auf Lager“ statt `in_stock`.
@@ -12035,21 +12115,21 @@ UI-10;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-523
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-GLO-10;[B];C;frontend/src/i18n/rawEnum.test.ts;WP-524
-UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-524
+GLO-10;[B];C;frontend/src/i18n/rawEnum.test.ts;WP-525
+UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-525
 ```
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
-**Nicht Bestandteil:** Übrige Seiten und Lint-Regel (WP-526 (`t7-i18n-status-b`)); persistierte Enums (bereits englisch, psql-Prüfung).
+**Nicht Bestandteil:** Übrige Seiten und Lint-Regel (WP-527 (`t7-i18n-status-b`)); persistierte Enums (bereits englisch, psql-Prüfung).
 
-### WP-525 – Raumplan: Bereichs- und CI-Prüfung der Koordinaten, Tastaturverschiebung ohne verlorene Schritte, If-Match
+### WP-526 – Raumplan: Bereichs- und CI-Prüfung der Koordinaten, Tastaturverschiebung ohne verlorene Schritte, If-Match
 
 **Schlüssel:** `t7-room-layout` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-524 (`t7-i18n-status-a`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-525 (`t7-i18n-status-a`)
 
-**Vorgezogen:** nach Schwere K5 Nachweislücken; als Voraussetzung von WP-530 (`t7-browser-matrix`) in K4 eingeordnet.
+**Vorgezogen:** nach Schwere K5 Nachweislücken; als Voraussetzung von WP-531 (`t7-browser-matrix`) in K4 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -12103,19 +12183,19 @@ UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-524
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-UI-18;[B];C;frontend/e2e-real/locations-racks.spec.ts;WP-525
-NFR-07;[B];C;frontend/src/pages/RoomPlanPage.test.tsx;WP-525
+UI-18;[B];C;frontend/e2e-real/locations-racks.spec.ts;WP-526
+NFR-07;[B];C;frontend/src/pages/RoomPlanPage.test.tsx;WP-526
 ```
 
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Raumpläne/Heatmaps (UI-13 [P4]); Objekt-PATCH je CI.
 
-### WP-526 – Statuswerte über den Katalog (Teil 2): übrige Seiten und Lint-Regel für src/pages/**
+### WP-527 – Statuswerte über den Katalog (Teil 2): übrige Seiten und Lint-Regel für src/pages/**
 
 **Schlüssel:** `t7-i18n-status-b` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-522 (`t7-i18n-labels`), WP-524 (`t7-i18n-status-a`)
+**Voraussetzungen (gemergt):** WP-523 (`t7-i18n-labels`), WP-525 (`t7-i18n-status-a`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -12151,7 +12231,7 @@ NFR-07;[B];C;frontend/src/pages/RoomPlanPage.test.tsx;WP-525
 - frontend/src/pages/CITypeAdminPage.tsx
 - frontend/src/i18n/de-DE.json
 - frontend/src/i18n/en-US.json
-- frontend/src/i18n/rawEnum.test.ts (angelegt in WP-524)
+- frontend/src/i18n/rawEnum.test.ts (angelegt in WP-525)
 - frontend/src/i18n/catalog.test.ts
 - frontend/eslint.config.js
 - docs/traceability.csv
@@ -12167,19 +12247,19 @@ NFR-07;[B];C;frontend/src/pages/RoomPlanPage.test.tsx;WP-525
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-GLO-10;[B];C;frontend/src/i18n/rawEnum.test.ts;WP-526
-UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-526
+GLO-10;[B];C;frontend/src/i18n/rawEnum.test.ts;WP-527
+UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-527
 ```
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
 **Nicht Bestandteil:** Funktionale Korrekturen der nach E-03 abgeschalteten Module.
 
-### WP-527 – Review „Neu anlegen“ für unclassified_device: Typ auflösen oder abfragen, klare 422
+### WP-528 – Review „Neu anlegen“ für unclassified_device: Typ auflösen oder abfragen, klare 422
 
 **Schlüssel:** `t7-review-new` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-342 (`t1-review-scope`), WP-368 (`t3-resurrect-new`)
+**Voraussetzungen (gemergt):** WP-342 (`t1-review-scope`), WP-369 (`t3-resurrect-new`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -12197,7 +12277,7 @@ UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-526
 
 **Akzeptanzkriterien:**
 
-- [ ] ActionNew löst `ci_type_name` wie der Ingest auf (`lookupTypes`/`resolveCITypeIDs`, `discovery.go:1157-1166`); die Auflösung nimmt optional `ci_type_id` an (Feld der Resolution, OpenAPI), das Vorrang hat; ohne auflösbaren Typ → 422 mit Feld `ci_type_id` „choose a CI type for the new CI“; Item bleibt offen. ActionNew für unclassified_device legt das CI über den Anlagepfad aus WP-368 (`t3-resurrect-new`) an (Normalisierung, Provenienz), mit client_id/site_id des Review-Items (Spalten aus WP-342 (`t1-review-scope`)) bzw. des Collectors.
+- [ ] ActionNew löst `ci_type_name` wie der Ingest auf (`lookupTypes`/`resolveCITypeIDs`, `discovery.go:1157-1166`); die Auflösung nimmt optional `ci_type_id` an (Feld der Resolution, OpenAPI), das Vorrang hat; ohne auflösbaren Typ → 422 mit Feld `ci_type_id` „choose a CI type for the new CI“; Item bleibt offen. ActionNew für unclassified_device legt das CI über den Anlagepfad aus WP-369 (`t3-resurrect-new`) an (Normalisierung, Provenienz), mit client_id/site_id des Review-Items (Spalten aus WP-342 (`t1-review-scope`)) bzw. des Collectors.
 - [ ] PG-Integrationstest `TestReviewNewUnclassifiedDeviceAgainstPostgres` (`discovery/review_new_integration_test.go`) über `POST /api/v1/review-items/{id}/resolve` mit `discovery.NewHandler` und PG-Repositories: auflösbarer Typname → 200, CI mit Typ-UUID existiert; mit `ci_type_id` → 200; ohne auflösbaren Typ → 422 mit Feld; Positivfall: ein Client-1-Principal löst ein Client-1-Item auf → 200, das CI trägt client_id = Client 1; Negativfall: ein Client-2-Principal → 404, das Item bleibt offen (verbindlicher Retest F-176).
 - [ ] Testkorrektur (Ratchet d): `TestResolveReviewItemCreate` prüft, dass `CITypeID` eine UUID ist.
 - [ ] Inbox: für `unclassified_device` mit reason `unknown_ci_type` fragt „Neu anlegen“ den Typ ab (Auswahl aus `/ci-types`, Wert = UUID) und sendet `ci_type_id`; für `no_profile_match` wird „Neu anlegen“ nicht angeboten, die Inbox zeigt den nächsten Schritt; 4xx-Meldungen des Servers werden angezeigt; Vitest.
@@ -12231,18 +12311,18 @@ UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-526
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-UI-16;[B];C;frontend/src/pages/ReviewInboxPage.test.tsx;WP-527
+UI-16;[B];C;frontend/src/pages/ReviewInboxPage.test.tsx;WP-528
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Client und Identität des neuen CIs bei resurrected_device/ambiguous_identity (WP-368 (`t3-resurrect-new`), Voraussetzung); Scope der Review-Items (WP-342 (`t1-review-scope`), Voraussetzung); Merge-Semantik probable_duplicate (WP-478 (`t3-review-merge`)). Gruppenübergreifende Voraussetzungen (trägt die Integration ein): WP-342 (`t1-review-scope`) (T1), WP-368 (`t3-resurrect-new`) (T3).
+**Nicht Bestandteil:** Client und Identität des neuen CIs bei resurrected_device/ambiguous_identity (WP-369 (`t3-resurrect-new`), Voraussetzung); Scope der Review-Items (WP-342 (`t1-review-scope`), Voraussetzung); Merge-Semantik probable_duplicate (WP-479 (`t3-review-merge`)).
 
-### WP-528 – Onboarding-Suite: Scope-Bestätigung als Pflichtschritt, Jobdatei-Download, Signup-Einstieg
+### WP-529 – Onboarding-Suite: Scope-Bestätigung als Pflichtschritt, Jobdatei-Download, Signup-Einstieg
 
 **Schlüssel:** `t7-onboarding-suite` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-466 (`t2-ci-export`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-468 (`t2-ci-export`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -12261,14 +12341,14 @@ UI-16;[B];C;frontend/src/pages/ReviewInboxPage.test.tsx;WP-527
 
 **Schließt Audit-WPs:** [WP-199](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-199) (TEILWEISE BESTANDEN, schließt), [WP-200](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-200) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** Der ABN-01(d)-Schritt „Scope bestätigen“ ist in `frontend/e2e/onboarding.spec.ts:243-255` nur bedingt geklickt und ohne Assertion; eine defekte Bestätigung ließe die Suite bestehen (F-177). `ScopesStep` (`OnboardingPage.tsx:249-261`) hat nur `onSettled` und zeigt einen fehlgeschlagenen Resolve nicht an. „Export laden“ prüft keine Jobdatei (F-353, :302-328); den Download über den Job stellt WP-466 (`t2-ci-export`) (F-077) in derselben Datei um. Es gibt keinen In-App-Einstieg zu Signup/Onboarding (F-351). Der Onboarding-Report wird in `install-smoke.yml` nur bei Fehlern hochgeladen; ein CI-Nachweis gegen die paketierte Installation fehlt (offene Nachweise WP-199/WP-200).
+**Problem:** Der ABN-01(d)-Schritt „Scope bestätigen“ ist in `frontend/e2e/onboarding.spec.ts:243-255` nur bedingt geklickt und ohne Assertion; eine defekte Bestätigung ließe die Suite bestehen (F-177). `ScopesStep` (`OnboardingPage.tsx:249-261`) hat nur `onSettled` und zeigt einen fehlgeschlagenen Resolve nicht an. „Export laden“ prüft keine Jobdatei (F-353, :302-328); den Download über den Job stellt WP-468 (`t2-ci-export`) (F-077) in derselben Datei um. Es gibt keinen In-App-Einstieg zu Signup/Onboarding (F-351). Der Onboarding-Report wird in `install-smoke.yml` nur bei Fehlern hochgeladen; ein CI-Nachweis gegen die paketierte Installation fehlt (offene Nachweise WP-199/WP-200).
 
 **Akzeptanzkriterien:**
 
 - [ ] Der Spec wartet auf mindestens einen Scope-Vorschlag (Polling `GET /review-items?kind=scope_suggested&status=open`), klickt „Bestätigen“ unbedingt und prüft: `GET /discovery-scopes?collector_id=…` enthält den bestätigten Bereich, das Item ist resolved/accept, der Fortschritt geht 3 → 4 → 5 (`aria-valuenow`).
 - [ ] `ScopesStep` zeigt bei einem fehlgeschlagenen Resolve die Servermeldung (`role=alert`, i18n de/en) und behält den Vorschlag; Vitest `OnboardingPage.test.tsx` mit 500-Stub (vor dem Fix rot).
 - [ ] Negativfall im Spec: mit per `page.route` gebrochenem Resolve-Endpunkt (500) bleibt der Fortschritt bei 3 und die UI zeigt die Fehlermeldung (Nachweis, dass ein Defekt den Lauf rot macht).
-- [ ] „Export laden“ zählt auf dem Download-Pfad aus WP-466 (`t2-ci-export`) (`download_url` des abgeschlossenen Exportjobs) ≥ 30 Datenzeilen; Negativfall: eine per `page.route` manipulierte `download_url`-Signatur → 403 und der Schritt schlägt fehl (Retest F-353).
+- [ ] „Export laden“ zählt auf dem Download-Pfad aus WP-468 (`t2-ci-export`) (`download_url` des abgeschlossenen Exportjobs) ≥ 30 Datenzeilen; Negativfall: eine per `page.route` manipulierte `download_url`-Signatur → 403 und der Schritt schlägt fehl (Retest F-353).
 - [ ] LoginPage zeigt immer „Konto anlegen“ mit Link nach `/onboarding` (Self-Signup hat keinen Abschalter, `config/config.go:232-237`); das Dashboard zeigt bis zum Abschluss (kein Collector oder keine CIs) „Einrichtung fortsetzen“; Vitest `LoginPage.test.tsx`, `DashboardPage.test.tsx`; der Spec startet die Registrierung über den Link (Retest F-351).
 - [ ] `install-smoke.yml` lädt den Onboarding-Report immer hoch; `retries: 0` bleibt; Nachweis: grüner Lauf gegen die frisch paketierte Installation (Lauf-ID im PR).
 - [ ] Verbindlicher Retest F-177: `npx playwright test -c e2e/fixtures/playwright.install.config.ts` → PASS inkl. Scope-Schritt; ein gebrochener Resolve-Endpunkt macht den Positivfall rot.
@@ -12302,21 +12382,21 @@ UI-16;[B];C;frontend/src/pages/ReviewInboxPage.test.tsx;WP-527
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-UI-17;[B];C;frontend/e2e/onboarding.spec.ts;WP-528
-ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-528
-TST-03;[B], Teilumfang [P2];C;frontend/e2e/onboarding.spec.ts;WP-528
-INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-528
+UI-17;[B];C;frontend/e2e/onboarding.spec.ts;WP-529
+ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-529
+TST-03;[B], Teilumfang [P2];C;frontend/e2e/onboarding.spec.ts;WP-529
+INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-529
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Umstellung von „Export laden“ auf den Job-Download (F-077, WP-466 (`t2-ci-export`), Voraussetzung); Nicht-localhost-Origin (WP-558 (`t7-onboarding-tls-origin`)); Real-Stack-Suite in install-smoke (WP-338 (`k-e2e-real-ci`)). Gruppenübergreifende Voraussetzung (trägt die Integration ein): WP-466 (`t2-ci-export`) (T2).
+**Nicht Bestandteil:** Umstellung von „Export laden“ auf den Job-Download (F-077, WP-468 (`t2-ci-export`), Voraussetzung); Nicht-localhost-Origin (WP-558 (`t7-onboarding-tls-origin`)); Real-Stack-Suite in install-smoke (WP-338 (`k-e2e-real-ci`)).
 
-### WP-529 – E2E-Mock-Backend strikt und gegen die OpenAPI validiert
+### WP-530 – E2E-Mock-Backend strikt und gegen die OpenAPI validiert
 
 **Schlüssel:** `t7-e2e-strict-mocks` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-395 (`t6-ci-form-types`), WP-466 (`t2-ci-export`), WP-518 (`t7-ui-keyboard`)
+**Voraussetzungen (gemergt):** WP-397 (`t6-ci-form-types`), WP-468 (`t2-ci-export`), WP-519 (`t7-ui-keyboard`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -12330,15 +12410,15 @@ INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-528
 
 **Schließt Audit-WPs:** [WP-201](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-201) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** Das Mock-Backend der Playwright-Suite beantwortet jede unbekannte `/api/v1`-Route mit 200 (`frontend/e2e/support/backend.ts:72-79`); Requests und Responses werden nicht gegen `api/openapi.yaml` geprüft; `ci.spec.ts:70` prüft im POST-Body nur name und discovery_source. Folge: `ci.spec.ts` ist grün, während die CI-Anlage real 400 liefert (F-016) und die Export-Buttons real 401 liefern (F-077) – falsche Sicherheit (F-178; TST-04 „Mocks allein sind kein Nachweis“). WP-395 (`t6-ci-form-types`) ändert dieselben Dateien `ci.spec.ts` und `support/backend.ts` (UUID-Typ-IDs im Mock).
+**Problem:** Das Mock-Backend der Playwright-Suite beantwortet jede unbekannte `/api/v1`-Route mit 200 (`frontend/e2e/support/backend.ts:72-79`); Requests und Responses werden nicht gegen `api/openapi.yaml` geprüft; `ci.spec.ts:70` prüft im POST-Body nur name und discovery_source. Folge: `ci.spec.ts` ist grün, während die CI-Anlage real 400 liefert (F-016) und die Export-Buttons real 401 liefern (F-077) – falsche Sicherheit (F-178; TST-04 „Mocks allein sind kein Nachweis“). WP-397 (`t6-ci-form-types`) ändert dieselben Dateien `ci.spec.ts` und `support/backend.ts` (UUID-Typ-IDs im Mock).
 
 **Akzeptanzkriterien:**
 
 - [ ] `backend.ts`: eine nicht behandelte `/api/v1`-Route beantwortet der Mock mit 501 und der Test schlägt im `afterEach` mit Methode und Pfad fehl; bewusst ungenutzte Aufrufe stehen in einer expliziten Allowlist je Spec in `e2e/support/backend.ts`.
-- [ ] Vertragsprüfung `frontend/e2e/support/contract.ts` (neu): jeder Request-Body und jede Mock-Response wird gegen `api/openapi.yaml` (Pfad, Methode, Schema inkl. `format: uuid`) validiert; ein Verstoß ist ein Testfehler mit Pfad und Schemafehler. Die 422-Ablehnung einer Nicht-UUID-`ci_type_id` aus WP-395 (`t6-ci-form-types`) geht in diese Vertragsprüfung auf (keine zweite Sonderregel im Mock).
+- [ ] Vertragsprüfung `frontend/e2e/support/contract.ts` (neu): jeder Request-Body und jede Mock-Response wird gegen `api/openapi.yaml` (Pfad, Methode, Schema inkl. `format: uuid`) validiert; ein Verstoß ist ein Testfehler mit Pfad und Schemafehler. Die 422-Ablehnung einer Nicht-UUID-`ci_type_id` aus WP-397 (`t6-ci-form-types`) geht in diese Vertragsprüfung auf (keine zweite Sonderregel im Mock).
 - [ ] Selbsttest `frontend/e2e/contract.spec.ts` (neu): ein POST `/cis` mit `ci_type_id: 'server'` wird als Vertragsbruch erkannt; ein Aufruf einer nicht spezifizierten Route wird erkannt (verbindlicher Retest F-178).
 - [ ] `ci.spec.ts` prüft `ci_type_id` = UUID eines gemockten `/ci-types`-Eintrags; `review.spec.ts` deckt merge in einen gewählten Kandidaten ab; `rack-drag.spec.ts` prüft PATCH-Body und Undo; `topology.spec.ts` eine 2-CI-Simulation; `export.spec.ts` Jobexport mit Download und Listenexport; alle übrigen Specs (`palette`, `conflict`, `keyboard`, `smoke`, `login`, `login-roundtrip`) laufen mit Vertragsprüfung grün.
-- [ ] Retest: `cd frontend && npx playwright test --project=chromium --project=mobile-chrome` → PASS; alle sechs Projekte über WP-530 (`t7-browser-matrix`).
+- [ ] Retest: `cd frontend && npx playwright test --project=chromium --project=mobile-chrome` → PASS; alle sechs Projekte über WP-531 (`t7-browser-matrix`).
 - [ ] Regression: bestehende Tests der berührten Pakete grün, `go vet`/golangci-lint bzw. `npm run lint` und `npm run typecheck` ohne neue Befunde.
 - [ ] Eingefrorenes ABN-01-Artefakt: frontend/e2e/conflict.spec.ts steht mit neuer Prüfsumme in docs/acceptance/artefakte/SHA256SUMS, docs/acceptance/abn-01.md vermerkt die Änderung. Grün sind „sha256sum --quiet -c docs/acceptance/artefakte/SHA256SUMS“ und ./tests/rep01-structure.test.sh.
 - [ ] Eingefrorene ABN-01-Artefakte (WP-212): Wird frontend/e2e/conflict.spec.ts für Allowlist oder Vertragsprüfung geändert, steht die neue Prüfsumme in docs/acceptance/artefakte/SHA256SUMS. docs/acceptance/abn-01.md (e) nennt die Änderung, und conflict.spec.ts bleibt mit Vertragsprüfung in chromium und mobile-chrome grün. 'sha256sum -c docs/acceptance/artefakte/SHA256SUMS' meldet OK, und ./tests/rep01-structure.test.sh ist im CI-Job gate grün.
@@ -12371,18 +12451,18 @@ INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-528
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-529
+TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-530
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Behebung von F-016 (WP-395 (`t6-ci-form-types`), Voraussetzung), F-077 (T2), F-081 (T3); `a11y.spec.ts` (eigener Mock, WP-521 (`t7-a11y-contrast`)). Gruppenübergreifende Voraussetzung (trägt die Integration ein): WP-395 (`t6-ci-form-types`) (T6).
+**Nicht Bestandteil:** Behebung von F-016 (WP-397 (`t6-ci-form-types`), Voraussetzung), F-077 (WP-468 (`t2-ci-export`)), F-081 (WP-477 (`t3-ci-edit-ui`)); `a11y.spec.ts` (eigener Mock, WP-522 (`t7-a11y-contrast`)).
 
-### WP-530 – Browsermatrix: Evidenz aller sechs Projekte in CI und Vorversions-Job
+### WP-531 – Browsermatrix: Evidenz aller sechs Projekte in CI und Vorversions-Job
 
 **Schlüssel:** `t7-browser-matrix` · **Meilenstein:** K4 Funktions-, Validierungs- und Bedienmängel · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-518 (`t7-ui-keyboard`), WP-521 (`t7-a11y-contrast`), WP-522 (`t7-i18n-labels`), WP-525 (`t7-room-layout`), WP-526 (`t7-i18n-status-b`), WP-529 (`t7-e2e-strict-mocks`)
+**Voraussetzungen (gemergt):** WP-519 (`t7-ui-keyboard`), WP-522 (`t7-a11y-contrast`), WP-523 (`t7-i18n-labels`), WP-526 (`t7-room-layout`), WP-527 (`t7-i18n-status-b`), WP-530 (`t7-e2e-strict-mocks`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -12396,9 +12476,9 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-529
 |---|---|---|---|---|
 | [F-173](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-173) | P2 | Browsermatrix deckt keine Vorversionen ab; Nicht-Chromium-Engines unbelegt | schließt | WP-193 |
 
-**Schließt Audit-WPs:** [WP-193](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-193) (FEHLGESCHLAGEN, schließt), [WP-192](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-192) (TEILWEISE BESTANDEN, schließt), [WP-201](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-201) (TEILWEISE BESTANDEN, schließt)
+**Schließt Audit-WPs:** [WP-192](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-192) (TEILWEISE BESTANDEN, schließt), [WP-193](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-193) (FEHLGESCHLAGEN, schließt), [WP-201](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-201) (TEILWEISE BESTANDEN, schließt)
 
-**Problem:** UI-18/NFR-07 verlangen aktuelle und Vorversion von Chrome, Edge, Firefox und Safari sowie Mobile Safari/Chrome. Playwright bündelt je Engine genau einen Build (`frontend/playwright.config.ts:23-25`), einen Vorversions-Job gibt es nicht; Evidenz liegt nur für die Chromium-Projekte vor, der CI-Job `e2e` (`.github/workflows/ci.yml:315-363`) lädt Berichte nur bei Fehlern hoch (F-173). WP-192 und WP-201 verlangen dieselbe Evidenz für ihre Specs. WP-193 (a11y, Raumpositionierung) und WP-194 (i18n) tragen je nur einen Teil zu UI-18 bei; dieses WP schließt UI-18, NFR-07 und WP-193 als letztes der beitragenden WPs: WP-521 (`t7-a11y-contrast`), WP-525 (`t7-room-layout`), WP-522 (`t7-i18n-labels`) und WP-526 (`t7-i18n-status-b`) sind Voraussetzungen.
+**Problem:** UI-18/NFR-07 verlangen aktuelle und Vorversion von Chrome, Edge, Firefox und Safari sowie Mobile Safari/Chrome. Playwright bündelt je Engine genau einen Build (`frontend/playwright.config.ts:23-25`), einen Vorversions-Job gibt es nicht; Evidenz liegt nur für die Chromium-Projekte vor, der CI-Job `e2e` (`.github/workflows/ci.yml:315-363`) lädt Berichte nur bei Fehlern hoch (F-173). WP-192 und WP-201 verlangen dieselbe Evidenz für ihre Specs. WP-193 (a11y, Raumpositionierung) und WP-194 (i18n) tragen je nur einen Teil zu UI-18 bei; dieses WP schließt UI-18, NFR-07 und WP-193 als letztes der beitragenden WPs: WP-522 (`t7-a11y-contrast`), WP-526 (`t7-room-layout`), WP-523 (`t7-i18n-labels`) und WP-527 (`t7-i18n-status-b`) sind Voraussetzungen.
 
 **Akzeptanzkriterien:**
 
@@ -12408,7 +12488,7 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-529
 - [ ] Browserbedingte Fehler aus dem vollen Lauf sind behoben oder als neuer Befund erfasst; kein Test wird browserabhängig übersprungen.
 - [ ] `playwright.config.ts` (Kommentar) und `docs/README.md` (Abschnitt Browser-Unterstützung) nennen Abdeckung und Einschränkung (Edge/Safari n-1 über die Engines).
 - [ ] Verbindlicher Retest F-173: CI-Artefakte `playwright-report-{chromium,edge,firefox,webkit,mobile-chrome,mobile-safari}` grün und ein grüner Lauf von `e2e-prev`.
-- [ ] Abschlussnachweis für WP-192, WP-193 und WP-201: Im CI-Lauf aller sechs Projekte und im Job e2e-prev ist kein Test per test.fail markiert und keiner browserabhängig übersprungen. frontend/e2e/a11y.spec.ts meldet auf allen Routen 0 AA-Verstöße, mit Daten, hell und dunkel; Prüfung: grep -c 'test.fail' frontend/e2e/a11y.spec.ts ergibt 0. Hat WP-521 (`t7-a11y-contrast`) (Kriterium 4) oder der volle Browserlauf (Kriterium 4 dieses WPs) neue Befunde erfasst, wird je Befund ein Korrektur-WP im Plan nachgetragen. Diese WPs sind vor diesem WP gemergt und als Voraussetzung eingetragen. Verbindlicher Retest F-172/F-173: die Artefakte playwright-report-{chromium,edge,firefox,webkit,mobile-chrome,mobile-safari} und der Lauf e2e-prev sind grün ohne Markierung. Negativfall: eine verbleibende test.fail-Markierung lässt das WP nicht abschließen.
+- [ ] Abschlussnachweis für WP-192, WP-193 und WP-201: Im CI-Lauf aller sechs Projekte und im Job e2e-prev ist kein Test per test.fail markiert und keiner browserabhängig übersprungen. frontend/e2e/a11y.spec.ts meldet auf allen Routen 0 AA-Verstöße, mit Daten, hell und dunkel; Prüfung: grep -c 'test.fail' frontend/e2e/a11y.spec.ts ergibt 0. Hat WP-522 (`t7-a11y-contrast`) (Kriterium 4) oder der volle Browserlauf (Kriterium 4 dieses WPs) neue Befunde erfasst, wird je Befund ein Korrektur-WP im Plan nachgetragen. Diese WPs sind vor diesem WP gemergt und als Voraussetzung eingetragen. Verbindlicher Retest F-172/F-173: die Artefakte playwright-report-{chromium,edge,firefox,webkit,mobile-chrome,mobile-safari} und der Lauf e2e-prev sind grün ohne Markierung. Negativfall: eine verbleibende test.fail-Markierung lässt das WP nicht abschließen.
 
 **Dateien (9 Einträge, Migration = 2):**
 
@@ -12432,20 +12512,20 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-529
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-530
-UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-530
-TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-530
+NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-531
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-531
+TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-531
 ```
 
 **Entscheidungsbedarf:** [E-88](entscheidungen.md#e-88) Nachweis der Browser-Vorversionen (UI-18, NFR-07) (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Real-Stack-Suite in allen Browsern (WP-531 (`k-e2e-real-browsers`)); externer Browser-Grid.
+**Nicht Bestandteil:** Real-Stack-Suite in allen Browsern (WP-532 (`k-e2e-real-browsers`)); externer Browser-Grid.
 
 ## K5 Nachweislücken
 
 **Ausstieg:** Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen.
 
-### WP-531 – Real-Stack-E2E in allen Browserprojekten
+### WP-532 – Real-Stack-E2E in allen Browserprojekten
 
 **Schlüssel:** `k-e2e-real-browsers` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
@@ -12454,6 +12534,8 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-530
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | TST-03 | [B]; Teilumfang [P2] | TEILWEISE BESTANDEN | Teil | [WP-200](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-200) | `docs/audit/08-frontend-monitoring-nfr-tests.md:68` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:67` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Problem:** Der Audit-Bericht (Abschnitt 9.2) verlangt die Browser-Matrix aller sechs Playwright-Projekte (chromium, edge, firefox, webkit, mobile-chrome, mobile-safari) auch für die Real-Stack-Suite; lokal war nur Chromium ausführbar, und WP-338 (`k-e2e-real-ci`) führt nur Chromium aus.
 
@@ -12484,14 +12566,14 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-530
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/stack-smoke.spec.ts;WP-531
+TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/stack-smoke.spec.ts;WP-532
 ```
 
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Inhaltliche Korrekturen der Specs.
 
-### WP-532 – Nachweis Ableitung der CI-Kindtabellen: discovery_result, relationship_suppression, rack_mount; Backfill 000061
+### WP-533 – Nachweis Ableitung der CI-Kindtabellen: discovery_result, relationship_suppression, rack_mount; Backfill 000061
 
 **Schlüssel:** `t1-ev-child-derivation` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
@@ -12500,6 +12582,8 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/stack-smoke.spec.ts;WP-531
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | TEN-02 | [B] | TEILWEISE BESTANDEN | Teil | [WP-025](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-025) | `docs/audit/02-mandanten-auth-entitlements.md:35` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:6` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-025](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-025) (TEILWEISE BESTANDEN, Teil)
 
@@ -12528,14 +12612,14 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/stack-smoke.spec.ts;WP-531
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_test.go;WP-532
+TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_test.go;WP-533
 ```
 
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Produktivcode; Propagation bei Verschiebung durch gescopte Principals (WP-345 (`t1-edge-scope`)).
 
-### WP-533 – Nachweis OpenSearch-Scope gegen einen echten OpenSearch-Dienst in CI
+### WP-534 – Nachweis OpenSearch-Scope gegen einen echten OpenSearch-Dienst in CI
 
 **Schlüssel:** `t1-ev-opensearch-real` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
@@ -12544,6 +12628,8 @@ TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_t
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | TEC-12 | [P5] | TEILWEISE BESTANDEN | schließt | [WP-033](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-033) | `docs/audit/01-installation-stack.md:61` | `docs/spec/katalog-v3/01-installation-stack.md:10` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-033](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-033) (TEILWEISE BESTANDEN, schließt)
 
@@ -12570,24 +12656,26 @@ TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_t
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEC-12;[P5];B;backend/internal/search/opensearch_real_integration_test.go;WP-533
+TEC-12;[P5];B;backend/internal/search/opensearch_real_integration_test.go;WP-534
 ```
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
 **Nicht Bestandteil:** Umschaltmessung NFR-02 und VictoriaMetrics (P5).
 
-### WP-534 – Real-Stack-Nachweis mit client-gescoptem Nutzer: Login, Listen, Beziehungsformular, Export
+### WP-535 – Real-Stack-Nachweis mit client-gescoptem Nutzer: Login, Listen, Beziehungsformular, Export
 
 **Schlüssel:** `t1-ev-client-real-stack` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-340 (`t1-rack-site-scope`), WP-347 (`t1-export-job-visibility`), WP-399 (`t6-rel-errors`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-340 (`t1-rack-site-scope`), WP-347 (`t1-export-job-visibility`), WP-401 (`t6-rel-errors`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | TEN-04 | [B] | TEILWEISE BESTANDEN | Teil | [WP-009](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-009) | `docs/audit/02-mandanten-auth-entitlements.md:37` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:10` |
 | TEN-06 | [B] | FEHLGESCHLAGEN | Teil | [WP-010](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-010) | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 | EXP-01 | [B]; DATEV [P2] | TEILWEISE BESTANDEN | Teil | [WP-035](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-035) | `docs/audit/07-api-suche-jobs-lebenszyklus.md:47` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:50` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-009](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-009) (TEILWEISE BESTANDEN, Teil), [WP-010](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-010) (FEHLGESCHLAGEN, Teil), [WP-035](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-035) (TEILWEISE BESTANDEN, Teil), [WP-208](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-208) (FEHLGESCHLAGEN, Teil)
 
@@ -12600,7 +12688,7 @@ TEC-12;[P5];B;backend/internal/search/opensearch_real_integration_test.go;WP-533
 - [ ] CS02 Beziehungsformular mit C2-CI-ID: Client-Fehler (4xx) in der UI, keine Kante gespeichert.
 - [ ] CS03 Export als client-gescopter Nutzer über die UI: Datei enthält nur C1-Zeilen; der Export-Job ist im Jobcenter eines zweiten Nutzers (C2) nicht sichtbar.
 - [ ] Nachweis: Lauf im Job aus WP-338 (`k-e2e-real-ci`) mit CS01, CS02 und CS03 grün (Lauf-ID im PR); kein Test der Spec steht in `tests/audit/expected-failures.txt`.
-- [ ] CS02 läuft ohne Eintrag in tests/audit/expected-failures.txt. Nach WP-399 (`t6-rel-errors`) zeigt das Beziehungsformular mit einer C2-CI-ID den 422-Feldfehler in UI-Sprache, per psql-Helfer ist keine Kante gespeichert. Die Spec ist im Job aus WP-338 (`k-e2e-real-ci`) grün.
+- [ ] CS02 läuft ohne Eintrag in tests/audit/expected-failures.txt. Nach WP-401 (`t6-rel-errors`) zeigt das Beziehungsformular mit einer C2-CI-ID den 422-Feldfehler in UI-Sprache, per psql-Helfer ist keine Kante gespeichert. Die Spec ist im Job aus WP-338 (`k-e2e-real-ci`) grün.
 - [ ] CS04 (E2E-Nachweis für WP-014 und WP-208, TEN-09): Setup über die API mit zwei Sites S1 und S2 derselben Organisation, je ein Rack im Location-Baum (Site → Gebäude → Raum → Rack), und einem Keycloak-Nutzer mit Rollenzuweisung `scope_type: site` auf S1. Nach dem Login zeigen Standortbaum `/locations` und Rack-Seite `/racks` nur das S1-Rack. `GET /api/v1/racks/{S2-Rack}` und das Layout des S2-Racks mit der Session des Nutzers ergeben 404. DB-Abgleich per psql-Helfer: rack- und location-Zeile des S2-Racks bleiben (1/1). Positivkontrolle: Der org-weite Admin sieht beide Racks. Neue Traceability-Zeile TEN-09 ([Q]) auf `frontend/e2e-real/client-scope.spec.ts`. Der Test läuft im Job aus WP-338 (`k-e2e-real-ci`) grün (Lauf-ID im PR).
 
 **Dateien (4 Einträge, Migration = 2):**
@@ -12619,16 +12707,16 @@ TEC-12;[P5];B;backend/internal/search/opensearch_real_integration_test.go;WP-533
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-04;[B];B;frontend/e2e-real/client-scope.spec.ts;WP-534
-TEN-06;[B];B;frontend/e2e-real/client-scope.spec.ts;WP-534
-EXP-01;[B], DATEV [P2];B;frontend/e2e-real/client-scope.spec.ts;WP-534
+TEN-04;[B];B;frontend/e2e-real/client-scope.spec.ts;WP-535
+TEN-06;[B];B;frontend/e2e-real/client-scope.spec.ts;WP-535
+EXP-01;[B], DATEV [P2];B;frontend/e2e-real/client-scope.spec.ts;WP-535
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** CI-Anlage über das Formular (F-016, Gruppe T6); Rollenentzug (Gruppe T2).
+**Nicht Bestandteil:** CI-Anlage über das Formular (F-016, WP-397 (`t6-ci-form-types`)); Rollenentzug (WP-395 (`t2-role-assignment-revoke`)).
 
-### WP-535 – Isolationsnachweise CMDB-Kern und Identität: Callback, History, Credentials, API-Keys, Collector, Saved View, Audit
+### WP-536 – Isolationsnachweise CMDB-Kern und Identität: Callback, History, Credentials, API-Keys, Collector, Saved View, Audit
 
 **Schlüssel:** `t1-ev-core-isolation` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
@@ -12639,6 +12727,8 @@ EXP-01;[B], DATEV [P2];B;frontend/e2e-real/client-scope.spec.ts;WP-534
 | TEN-04 | [B] | TEILWEISE BESTANDEN | Teil | [WP-009](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-009) | `docs/audit/02-mandanten-auth-entitlements.md:37` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:10` |
 | TEN-06 | [B] | FEHLGESCHLAGEN | Teil | [WP-011](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-011) | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 | AUT-04 | [B] | FEHLGESCHLAGEN | Teil | [WP-012](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-012) | `docs/audit/02-mandanten-auth-entitlements.md:47` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:37` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-009](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-009) (TEILWEISE BESTANDEN, Teil), [WP-011](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-011) (FEHLGESCHLAGEN, Teil), [WP-012](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-012) (FEHLGESCHLAGEN, Teil), [WP-013](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-013) (TEILWEISE BESTANDEN, Teil), [WP-015](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-015) (FEHLGESCHLAGEN, Teil), [WP-016](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-016) (FEHLGESCHLAGEN, Teil)
 
@@ -12670,16 +12760,16 @@ EXP-01;[B], DATEV [P2];B;frontend/e2e-real/client-scope.spec.ts;WP-534
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-04;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-535
-TEN-06;[B];B;backend/internal/tenant/rls/core_channels_integration_test.go;WP-535
-AUT-04;[B];B;backend/internal/identity/apikey_scope_integration_test.go;WP-535
+TEN-04;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-536
+TEN-06;[B];B;backend/internal/tenant/rls/core_channels_integration_test.go;WP-536
+AUT-04;[B];B;backend/internal/identity/apikey_scope_integration_test.go;WP-536
 ```
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Produktivcode; API-Key-Rotation/Revoke-Berechtigung (Gruppe T2).
+**Nicht Bestandteil:** Produktivcode; API-Key-Rotation/Revoke-Berechtigung (WP-354 (`t2-apikey-authz`)).
 
-### WP-536 – Isolationsnachweise Asset und Lager: Fremd-Updates für Zuweisung, Komposition, Bestellung, Verbrauch, Bestand, Inventur
+### WP-537 – Isolationsnachweise Asset und Lager: Fremd-Updates für Zuweisung, Komposition, Bestellung, Verbrauch, Bestand, Inventur
 
 **Schlüssel:** `t1-ev-asset-isolation` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
@@ -12689,6 +12779,8 @@ AUT-04;[B];B;backend/internal/identity/apikey_scope_integration_test.go;WP-535
 |---|---|---|---|---|---|---|
 | TEN-06 | [B] | FEHLGESCHLAGEN | Teil | [WP-018](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-018) | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 | AST-01 | [P2] | FEHLGESCHLAGEN | Teil | [WP-017](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-017) | `docs/audit/09-module-phase2plus.md:29` | `docs/spec/katalog-v3/09-module-phase2plus.md:4` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-017](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-017) (FEHLGESCHLAGEN, Teil), [WP-018](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-018) (FEHLGESCHLAGEN, Teil)
 
@@ -12719,15 +12811,15 @@ AUT-04;[B];B;backend/internal/identity/apikey_scope_integration_test.go;WP-535
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-06;[B];B;backend/internal/movement/movement_scope_integration_test.go;WP-536
-AST-01;[P2];B;backend/internal/assignment/assignment_scope_integration_test.go;WP-536
+TEN-06;[B];B;backend/internal/movement/movement_scope_integration_test.go;WP-537
+AST-01;[P2];B;backend/internal/assignment/assignment_scope_integration_test.go;WP-537
 ```
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
-**Nicht Bestandteil:** Produktivcode; Fehlertexte (WP-405 (`t1-err-modules`)).
+**Nicht Bestandteil:** Produktivcode; Fehlertexte (WP-407 (`t1-err-modules`)).
 
-### WP-537 – Isolationsnachweise Module: Fehlerpfade Desk/Schlüssel/Schulung/Dokument, Wartungsbenachrichtigung, AI-Schreibseite
+### WP-538 – Isolationsnachweise Module: Fehlerpfade Desk/Schlüssel/Schulung/Dokument, Wartungsbenachrichtigung, AI-Schreibseite
 
 **Schlüssel:** `t1-ev-module-isolation` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
@@ -12738,6 +12830,8 @@ AST-01;[P2];B;backend/internal/assignment/assignment_scope_integration_test.go;W
 | TEN-06 | [B] | FEHLGESCHLAGEN | Teil | [WP-021](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-021) | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 | MGT-03 | [P4] | TEILWEISE BESTANDEN | Teil | [WP-019](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-019) | `docs/audit/09-module-phase2plus.md:46` | `docs/spec/katalog-v3/09-module-phase2plus.md:44` |
 | MGT-04 | [P3] | FEHLGESCHLAGEN | Teil | [WP-020](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-020) | `docs/audit/09-module-phase2plus.md:47` | `docs/spec/katalog-v3/09-module-phase2plus.md:46` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-019](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-019) (TEILWEISE BESTANDEN, Teil), [WP-020](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-020) (FEHLGESCHLAGEN, Teil), [WP-021](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-021) (FEHLGESCHLAGEN, Teil)
 
@@ -12770,16 +12864,16 @@ AST-01;[P2];B;backend/internal/assignment/assignment_scope_integration_test.go;W
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-TEN-06;[B];B;backend/internal/ai/ai_scope_integration_test.go;WP-537
-MGT-03;[P4];B;backend/internal/keymgmt/keymgmt_scope_integration_test.go;WP-537
-MGT-04;[P3];B;backend/internal/maintenance/maintenance_scope_integration_test.go;WP-537
+TEN-06;[B];B;backend/internal/ai/ai_scope_integration_test.go;WP-538
+MGT-03;[P4];B;backend/internal/keymgmt/keymgmt_scope_integration_test.go;WP-538
+MGT-04;[P3];B;backend/internal/maintenance/maintenance_scope_integration_test.go;WP-538
 ```
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
 **Nicht Bestandteil:** Produktivcode.
 
-### WP-538 – Nachweis: Collector-Lauf gegen TLS-Redfish mit Scope-CA/Pin und protokollgetrennten Credentials
+### WP-539 – Nachweis: Collector-Lauf gegen TLS-Redfish mit Scope-CA/Pin und protokollgetrennten Credentials
 
 **Schlüssel:** `t2-redfish-tls-evidence` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
 
@@ -12789,15 +12883,17 @@ MGT-04;[P3];B;backend/internal/maintenance/maintenance_scope_integration_test.go
 |---|---|---|---|---|---|---|
 | COL-02 | [B] | FEHLGESCHLAGEN | Teil | [WP-048](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-048) | `docs/audit/05-collector-discovery-reconciliation.md:35` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:6` |
 
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
+
 **Schließt Audit-WPs:** [WP-048](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-048) (FEHLGESCHLAGEN, Teil)
 
-**Problem:** Zertifikatsprüfung und Pinning sind nur als Plugin-Unittests belegt (`TestCollectRejectsUntrustedCertificateByDefault`, `TestCollectAcceptsScopedCAAndPin` in `collector/plugins/redfish/redfish_test.go`); ein Lauf über Bundle, Scope-Konfiguration und Plugin gegen ein TLS-Redfish-Ziel fehlt (WP-048, offener Nachweis „Integrationslauf Redfish-TLS-Scope“). Die Klartextübertragung des WMI-Plugins einschließlich des Alias wmi→ssh (F-010) behebt Gruppe T4. `collector` ist ein eigenes Go-Modul (`collector/go.mod`).
+**Problem:** Zertifikatsprüfung und Pinning sind nur als Plugin-Unittests belegt (`TestCollectRejectsUntrustedCertificateByDefault`, `TestCollectAcceptsScopedCAAndPin` in `collector/plugins/redfish/redfish_test.go`); ein Lauf über Bundle, Scope-Konfiguration und Plugin gegen ein TLS-Redfish-Ziel fehlt (WP-048, offener Nachweis „Integrationslauf Redfish-TLS-Scope“). Die Klartextübertragung des WMI-Plugins einschließlich des Alias wmi→ssh (F-010) beheben WP-377 (`t4-wmi-tls`) und WP-378 (`t4-cred-scope`). `collector` ist ein eigenes Go-Modul (`collector/go.mod`).
 
 **Akzeptanzkriterien:**
 
 - [ ] Neuer Test `TestRedfishTLSScopeIntegration` in `collector/collectorcmd/redfish_tls_integration_test.go`: Redfish-Emulator als `httptest.NewTLSServer` mit selbstsigniertem Zertifikat; Bundle mit Redfish- und SSH-Credential; (a) Scope ohne CA/Pin → kein Request mit Authorization erreicht das Ziel, Ergebnis nennt den Zertifikatsfehler; (b) Scope mit CA → DeviceRecord erzeugt, Basic-Auth enthält nur das Redfish-Credential; (c) Scope mit falschem Pin → abgewiesen; das SSH-Credential erscheint in keinem Request.
 - [ ] `cd collector && go test -count=1 -v -run '^TestRedfishTLSScopeIntegration$' ./collectorcmd/` → PASS ohne Netzwerkzugriff; Ergebnis im PR.
-- [ ] Der WP-048-Retest gilt erst zusammen mit dem Fix von F-010 (Gruppe T4: `TestAuditT2CredentialsArePerProtocol`, `TestAuditWMICredentialTransport` PASS) als vollständig.
+- [ ] Der WP-048-Retest gilt erst zusammen mit dem Fix von F-010 (WP-377 (`t4-wmi-tls`), WP-378 (`t4-cred-scope`): `TestAuditT2CredentialsArePerProtocol`, `TestAuditWMICredentialTransport` PASS) als vollständig.
 
 **Dateien (3 Einträge, Migration = 2):**
 
@@ -12814,20 +12910,20 @@ MGT-04;[P3];B;backend/internal/maintenance/maintenance_scope_integration_test.go
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-COL-02;[B];B;collector/collectorcmd/redfish_tls_integration_test.go;WP-538
+COL-02;[B];B;collector/collectorcmd/redfish_tls_integration_test.go;WP-539
 ```
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** WMI-Transport und Credential-Alias (F-010, Gruppe T4).
+**Nicht Bestandteil:** WMI-Transport und Credential-Alias (F-010, WP-377 (`t4-wmi-tls`), WP-378 (`t4-cred-scope`)).
 
-### WP-539 – Wartungsbenachrichtigung idempotent; UI ordnet CIs zu und zeigt den gespeicherten Status
+### WP-540 – Wartungsbenachrichtigung idempotent; UI ordnet CIs zu und zeigt den gespeicherten Status
 
 **Schlüssel:** `t3-maint-notify` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
 **Voraussetzungen (gemergt):** keine (außer den Prüfrahmen-WPs, Konvention 11)
 
-**Vorgezogen:** nach Schwere K6 Geringfügige Mängel; als Voraussetzung von WP-540 (`t3-maint-e2e`) in K5 eingeordnet.
+**Vorgezogen:** nach Schwere K6 Geringfügige Mängel; als Voraussetzung von WP-541 (`t3-maint-e2e`) in K5 eingeordnet.
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -12866,7 +12962,7 @@ COL-02;[B];B;collector/collectorcmd/redfish_tls_integration_test.go;WP-538
 - frontend/src/i18n/en-US.json
 - docs/traceability.csv
 
-**Migration/RLS:** Neue Migration `<nächste Nr.>_maintenance_notification_unique` (up/down): Bereinigung der Duplikate und UNIQUE-Index; down entfernt den Index. RLS von maintenance_notification unverändert (Policies gehören zu F-004/F-048, Gruppe T1).
+**Migration/RLS:** Neue Migration `<nächste Nr.>_maintenance_notification_unique` (up/down): Bereinigung der Duplikate und UNIQUE-Index; down entfernt den Index. RLS von maintenance_notification unverändert (Policies gehören zu F-004/F-048, WP-341 (`t1-doc-window-writes`)).
 
 **Tests:**
 
@@ -12876,26 +12972,28 @@ COL-02;[B];B;collector/collectorcmd/redfish_tls_integration_test.go;WP-538
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NFR-04;[B], Teilumfang [P5];D;backend/internal/maintenance/status_test.go;WP-539
-MGT-04;[P3];D;backend/internal/maintenance/status_test.go;WP-539
-NTF-05;[B], Zusätze [P2], [P3];D;frontend/src/pages/MaintenancePage.test.tsx;WP-539
+NFR-04;[B], Teilumfang [P5];D;backend/internal/maintenance/status_test.go;WP-540
+MGT-04;[P3];D;backend/internal/maintenance/status_test.go;WP-540
+NTF-05;[B], Zusätze [P2], [P3];D;frontend/src/pages/MaintenancePage.test.tsx;WP-540
 ```
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
-**Nicht Bestandteil:** RLS-Policies von maintenance_window (F-004, F-048, F-185, Gruppe T1) – Reihenfolge in `maintenance/pg_repository.go` abstimmen; Zustellung über die Benachrichtigungskette (Epic B); Real-Stack-Nachweis (WP-540 (`t3-maint-e2e`)); `frontend/src/api/client.ts` auch in WP-472 (`t3-loc-tree-ui`) und WP-579 (`t3-rack-layout`) – Reihenfolge abstimmen.
+**Nicht Bestandteil:** RLS-Policies von maintenance_window (F-004, F-048, F-185, WP-341 (`t1-doc-window-writes`)) – Reihenfolge in `maintenance/pg_repository.go` abstimmen; Zustellung über die Benachrichtigungskette (Epic B); Real-Stack-Nachweis (WP-541 (`t3-maint-e2e`)); `frontend/src/api/client.ts` auch in WP-474 (`t3-loc-tree-ui`) und WP-579 (`t3-rack-layout`) – Reihenfolge abstimmen.
 
-### WP-540 – Real-Stack-Nachweis Wartungsankündigung: UI → API → DB mit Status pending
+### WP-541 – Real-Stack-Nachweis Wartungsankündigung: UI → API → DB mit Status pending
 
 **Schlüssel:** `t3-maint-e2e` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-539 (`t3-maint-notify`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-540 (`t3-maint-notify`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | NFR-04 | [B]; Teilumfang [P5] | TEILWEISE BESTANDEN | Teil | [WP-063](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-063) | `docs/audit/08-frontend-monitoring-nfr-tests.md:57` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:40` |
 | MGT-04 | [P3] | TEILWEISE BESTANDEN | Teil | [WP-063](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-063) | `docs/audit/09-module-phase2plus.md:47` | `docs/spec/katalog-v3/09-module-phase2plus.md:46` |
 | NTF-05 | [B]; Zusätze [P2], [P3] | TEILWEISE BESTANDEN | Teil | [WP-063](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-063) | `docs/audit/07-api-suche-jobs-lebenszyklus.md:60` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:80` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-063](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-063) (TEILWEISE BESTANDEN, schließt)
 
@@ -12926,82 +13024,26 @@ NTF-05;[B], Zusätze [P2], [P3];D;frontend/src/pages/MaintenancePage.test.tsx;WP
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NFR-04;[B], Teilumfang [P5];D;frontend/e2e-real/maintenance.spec.ts;WP-540
-MGT-04;[P3];D;frontend/e2e-real/maintenance.spec.ts;WP-540
-NTF-05;[B], Zusätze [P2], [P3];D;frontend/e2e-real/maintenance.spec.ts;WP-540
+NFR-04;[B], Teilumfang [P5];D;frontend/e2e-real/maintenance.spec.ts;WP-541
+MGT-04;[P3];D;frontend/e2e-real/maintenance.spec.ts;WP-541
+NTF-05;[B], Zusätze [P2], [P3];D;frontend/e2e-real/maintenance.spec.ts;WP-541
 ```
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
 **Nicht Bestandteil:** Produktivcode; G1-Standard der übrigen Specs.
 
-### WP-541 – Nachweis Real-Stack: Vorschlag bestätigen, Scope und Bundle mit Credentials, Scan mit Bundle-Credential
-
-**Schlüssel:** `t4-e2e-onboarding-bundle` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** D · **Aufwand:** 2,0 PT
-
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-376 (`t4-cred-scope`), WP-381 (`t4-scope-suggested-authz`)
-
-| ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
-|---|---|---|---|---|---|---|
-| COL-02 | [B] | TEILWEISE BESTANDEN | Teil | [WP-147](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-147) | `docs/audit/05-collector-discovery-reconciliation.md:35` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:6` |
-| DIS-09 | [B] | FEHLGESCHLAGEN | Teil | [WP-153](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-153) | `docs/audit/05-collector-discovery-reconciliation.md:50` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:38` |
-| INS-06 | [B] | TEILWEISE BESTANDEN | Teil | [WP-156](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-156) | `docs/audit/01-installation-stack.md:76` | `docs/spec/katalog-v3/01-installation-stack.md:39` |
-
-**Befunde:**
-
-| Befund | Prio | Titel | Beitrag | Betroffene WPs |
-|---|---|---|---|---|
-| [F-027](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-027) | P1 | Falsche Credential-Auswahl im Bundle: ohne aktive Scopes alle Client- und Org-Credentials, ein Scope ohne credential_ids leert das Bundle | Teil | WP-147, WP-153, WP-156 |
-
-**Schließt Audit-WPs:** [WP-147](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-147) (TEILWEISE BESTANDEN, Teil), [WP-153](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-153) (FEHLGESCHLAGEN, Teil), [WP-156](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-156) (TEILWEISE BESTANDEN, Teil)
-
-**Problem:** Die reale Bestätigung eines Scope-Vorschlags ist nur per Mock belegt; nie lief ein nicht-leeres Credential-Bundle end-to-end bis zu einem Scan; der Real-Stack-Collector läuft nur im simulate-Modus (offene Nachweise WP-147, WP-153, WP-156; e2e-Retest von F-027).
-
-**Akzeptanzkriterien:**
-
-- [ ] Spec `frontend/e2e-real/onboarding-bundle.spec.ts` mit nicht simuliertem Collector (`E2E_COLLECTOR_BIN`, `RETICORA_SIMULATE` leer): (a) Enrollment mit dem Code aus der UI, der Vorschlag erscheint, Bestätigen in der UI → `GET /discovery-scopes?collector_id=…` liefert den Scope, das Review `scope_suggested` ist resolved/accept; (b) mit einem org-weiten `snmp_v2c`-Credential enthält das nächste Bundle dieses Credential (Audit `credential.bundle_delivered` mit dessen ID) – Retest F-027 „Bundle enthält weiter die Credentials“.
-- [ ] (c) Host-Scope mit explizitem `snmp_v2c`-Credential auf den SNMP-Fake `collector/internal/fakesnmp` (neu, Go, mit kleinem `collector/cmd/fakesnmp`; antwortet nur mit der richtigen Community auf sysDescr/sysObjectID/sysName; PDU-Verarbeitung nach dem Vorbild des Testagenten in `collector/plugins/snmp/v3_agent_test.go`; von `support/stack.ts` gebaut und gestartet, nicht im Release-Build; in der CI UDP 161 über `net.ipv4.ip_unprivileged_port_start=0`): nach dem Lauf existiert die CI mit Quelle snmp; der Fake hat genau die Community des Credentials gesehen und kein anderes Geheimnis. `fakesnmp_test.go`: richtige Community → Antwort, falsche → keine Antwort.
-- [ ] Negativfall: ein Scope mit dem Credential eines anderen Clients wird mit 422 abgelehnt (WP-375 (`t4-bundle-select`)).
-- [ ] Nachweis: Lauf-ID des Real-Stack-Jobs im PR; `frontend/e2e-real/README.md` beschreibt Fixture und CI-Voraussetzung.
-
-**Dateien (7 Einträge, Migration = 2):**
-
-- frontend/e2e-real/onboarding-bundle.spec.ts (neu)
-- collector/internal/fakesnmp/fakesnmp.go (neu)
-- collector/internal/fakesnmp/fakesnmp_test.go (neu)
-- collector/cmd/fakesnmp/main.go (neu)
-- frontend/e2e-real/support/stack.ts
-- frontend/e2e-real/README.md
-- docs/traceability.csv
-
-**Migration/RLS:** keine Migration.
-
-**Tests:**
-
-- `frontend/e2e-real/onboarding-bundle.spec.ts`: Bestätigung, Bundle-Audit, Scan mit Bundle-Credential, fremdes Credential 422.
-- `collector/internal/fakesnmp/fakesnmp_test.go`: Community-Prüfung des Fakes.
-
-**Traceability (`docs/traceability.csv`):**
-
-```text
-COL-02;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-541
-DIS-09;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-541
-INS-06;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-541
-```
-
-**Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (offen, Empfehlung als Übergangsregel)
-
-**Nicht Bestandteil:** Produktivcode (der SNMP-Fake ist Testinfrastruktur, nicht im Release-Build `./cmd/collector`); Onboarding-Abnahmesuite `frontend/e2e/onboarding.spec.ts` (T7, F-177).
-
 ### WP-542 – Nachweis DIS-08: Fehlerzustand aus realem Lauf in der UI, /metrics-Exposition
 
 **Schlüssel:** `t4-dis08-nachweis` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-491 (`t4-snmpv3-auth`), WP-495 (`t4-scope-form-ui`), WP-541 (`t4-e2e-onboarding-bundle`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-384 (`t4-e2e-onboarding-bundle`), WP-492 (`t4-snmpv3-auth`), WP-496 (`t4-scope-form-ui`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | DIS-08 | [Q] | TEILWEISE BESTANDEN | Teil | [WP-155](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-155) | `docs/audit/05-collector-discovery-reconciliation.md:49` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:36` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-155](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-155) (TEILWEISE BESTANDEN, Teil)
 
@@ -13009,15 +13051,15 @@ INS-06;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-541
 
 **Akzeptanzkriterien:**
 
-- [ ] Real-Stack-Spec `frontend/e2e-real/discovery-errors.spec.ts`: nicht simulierter Collector, ein Host-Scope auf den SNMP-Fake aus WP-541 (`t4-e2e-onboarding-bundle`) (`collector/internal/fakesnmp`, erweitert um einen SNMPv3-Modus: Engine-Discovery und Report `usmStatsWrongDigests` bei falschem Schlüssel nach dem Agenten `startRFC3414Agent` in `v3_agent_test.go`, WP-491 (`t4-snmpv3-auth`)) mit falschem SNMPv3-Credential und ein Host-Scope auf eine nicht erreichbare Adresse (192.0.2.x); nach dem Lauf zeigt die Discovery-Seite je Scope das Fehler-Badge mit Ursache `auth_failed` bzw. `unreachable`, Protokoll und Ziel; `GET /discovery-scopes/{id}` liefert dieselbe Ursache in `last_result`. `fakesnmp_test.go`: falscher v3-Schlüssel → Report usmStatsWrongDigests, richtiger → Antwort.
+- [ ] Real-Stack-Spec `frontend/e2e-real/discovery-errors.spec.ts`: nicht simulierter Collector, ein Host-Scope auf den SNMP-Fake aus WP-384 (`t4-e2e-onboarding-bundle`) (`collector/internal/fakesnmp`, erweitert um einen SNMPv3-Modus: Engine-Discovery und Report `usmStatsWrongDigests` bei falschem Schlüssel nach dem Agenten `startRFC3414Agent` in `v3_agent_test.go`, WP-492 (`t4-snmpv3-auth`)) mit falschem SNMPv3-Credential und ein Host-Scope auf eine nicht erreichbare Adresse (192.0.2.x); nach dem Lauf zeigt die Discovery-Seite je Scope das Fehler-Badge mit Ursache `auth_failed` bzw. `unreachable`, Protokoll und Ziel; `GET /discovery-scopes/{id}` liefert dieselbe Ursache in `last_result`. `fakesnmp_test.go`: falscher v3-Schlüssel → Report usmStatsWrongDigests, richtiger → Antwort.
 - [ ] `backend/internal/server/metrics_exposition_test.go`: nach einem gemeldeten Lauf mit Fehler enthält `GET /metrics` `reticora_discovery_scope_runs_total` mit Ergebnis error und `reticora_discovery_errors_total` mit `cause="auth_failed"` und `protocol="snmp"`; ohne Lauf keine Fehlerserie (Negativfall).
 - [ ] Nachweis: Lauf-ID des Real-Stack-Jobs im PR.
 
 **Dateien (6 Einträge, Migration = 2):**
 
 - frontend/e2e-real/discovery-errors.spec.ts (neu)
-- collector/internal/fakesnmp/fakesnmp.go (angelegt in WP-541)
-- collector/internal/fakesnmp/fakesnmp_test.go (angelegt in WP-541)
+- collector/internal/fakesnmp/fakesnmp.go (angelegt in WP-384)
+- collector/internal/fakesnmp/fakesnmp_test.go (angelegt in WP-384)
 - frontend/e2e-real/support/stack.ts
 - backend/internal/server/metrics_exposition_test.go (neu)
 - docs/traceability.csv
@@ -13050,6 +13092,8 @@ DIS-08;[Q];D;frontend/e2e-real/discovery-errors.spec.ts;WP-542
 |---|---|---|---|---|---|---|
 | REL-03 | [B] | TEILWEISE BESTANDEN | Teil | [WP-160](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-160) | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:63` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:88` |
 | REL-04 | [B] | TEILWEISE BESTANDEN | Teil | [WP-160](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-160) | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:64` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:90` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-160](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-160) (TEILWEISE BESTANDEN, Teil)
 
@@ -13087,12 +13131,14 @@ REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-543
 
 **Schlüssel:** `t5-backup-chain-evidence` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-440 (`t5-backup-enforce`), WP-498 (`t5-lint-baseline`)
+**Voraussetzungen (gemergt):** WP-443 (`t5-backup-enforce`), WP-499 (`t5-lint-baseline`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | OPS-04 | [B]; [P5] | TEILWEISE BESTANDEN | Teil | [WP-100](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-100) | `docs/audit/01-installation-stack.md:82` | `docs/spec/katalog-v3/01-installation-stack.md:53` |
 | NFR-05 | [B] | TEILWEISE BESTANDEN | Teil | [WP-100](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-100) | `docs/audit/08-frontend-monitoring-nfr-tests.md:58` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:42` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-100](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-100) (TEILWEISE BESTANDEN, schließt)
 
@@ -13100,9 +13146,9 @@ REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-543
 
 **Akzeptanzkriterien:**
 
-- [ ] install-smoke, Schritt 'Verify the backup chain': der Schritt löst zuerst ein Full-Backup aus ('docker compose exec backup pgbackrest --stanza=reticora --type=full backup'); danach steigt pg_stat_archiver.archived_count nach SELECT pg_switch_wal() innerhalb von 120 s, 'pgbackrest info' zeigt mindestens ein Full-Backup, reticora-backup.sh health und verify-repo (aus WP-440 (`t5-backup-enforce`)) liefern rc 0; Negativfall: 'pgbackrest info' mit falschem PGBACKREST_REPO1_CIPHER_PASS → rc != 0.
+- [ ] install-smoke, Schritt 'Verify the backup chain': der Schritt löst zuerst ein Full-Backup aus ('docker compose exec backup pgbackrest --stanza=reticora --type=full backup'); danach steigt pg_stat_archiver.archived_count nach SELECT pg_switch_wal() innerhalb von 120 s, 'pgbackrest info' zeigt mindestens ein Full-Backup, reticora-backup.sh health und verify-repo (aus WP-443 (`t5-backup-enforce`)) liefern rc 0; Negativfall: 'pgbackrest info' mit falschem PGBACKREST_REPO1_CIPHER_PASS → rc != 0.
 - [ ] Integrationstest backend/cmd/server/objectstorage_integration_test.go (TEST_S3_ENDPOINT gegen MinIO): setupObjectStorage legt die Buckets an und schaltet Versionierung ein (GetBucketVersioning = Enabled); zweimaliges Schreiben desselben Schlüssels → 2 Versionen, Löschen → Delete-Marker; ohne TEST_S3_ENDPOINT Skip nur außerhalb von CI.
-- [ ] Der DB-Job in .github/workflows/ci.yml erhält einen MinIO-Service und TEST_S3_ENDPOINT; die Skip-Prüfung aus WP-498 (`t5-lint-baseline`) meldet keinen Skip dieses Tests.
+- [ ] Der DB-Job in .github/workflows/ci.yml erhält einen MinIO-Service und TEST_S3_ENDPOINT; die Skip-Prüfung aus WP-499 (`t5-lint-baseline`) meldet keinen Skip dieses Tests.
 - [ ] Läufe des PR (install-smoke-Matrix, DB-Job) grün, Run-IDs im PR.
 
 **Dateien (4 Einträge, Migration = 2):**
@@ -13128,18 +13174,20 @@ NFR-05;[B];A;backend/cmd/server/objectstorage_integration_test.go;WP-544
 
 **Entscheidungsbedarf:** [E-29](../entscheidungen.md#e-29)
 
-**Nicht Bestandteil:** Kubernetes-Backup-Kette (WP-441 (`t5-k8s-wal`)); Restore-Messung (WP-442 (`t5-restore-rpo`)); Änderungen am Backup-Skript (WP-440 (`t5-backup-enforce`)).
+**Nicht Bestandteil:** Kubernetes-Backup-Kette (WP-444 (`t5-k8s-wal`)); Restore-Messung (WP-445 (`t5-restore-rpo`)); Änderungen am Backup-Skript (WP-443 (`t5-backup-enforce`)).
 
 ### WP-545 – Echte cosign-Prüfung im Release-Workflow und Prüfanleitung für Betreiber
 
 **Schlüssel:** `t5-release-evidence` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-387 (`t5-image-scan`)
+**Voraussetzungen (gemergt):** WP-389 (`t5-image-scan`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | TEC-15 | [B] | TEILWEISE BESTANDEN | Teil | [WP-102](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-102) | `docs/audit/01-installation-stack.md:64` | `docs/spec/katalog-v3/01-installation-stack.md:16` |
 | COL-06 | [B], Air-Gapped [O] | TEILWEISE BESTANDEN | Teil | [WP-102](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-102) | `docs/audit/05-collector-discovery-reconciliation.md:39` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:14` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-102](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-102) (TEILWEISE BESTANDEN, Teil)
 
@@ -13176,17 +13224,19 @@ COL-06;[B], Air-Gapped [O];A;edgecore/update/cosign_real_test.go;WP-545
 
 **Entscheidungsbedarf:** [E-31](../entscheidungen.md#e-31)
 
-**Nicht Bestandteil:** Signaturprüfung im Installer (WP-385 (`t5-install-signature`), WP-386 (`t5-install-default`)); Pre-Release-Lauf selbst (WP-595 (`t5-rc-evidence`)); CI-Job `cosign-verify` mit keyless signiertem Test-Artefakt (WP-546 (`t4-col-update-nachweis`)).
+**Nicht Bestandteil:** Signaturprüfung im Installer (WP-387 (`t5-install-signature`), WP-388 (`t5-install-default`)); Pre-Release-Lauf selbst (WP-595 (`t5-rc-evidence`)); CI-Job `cosign-verify` mit keyless signiertem Test-Artefakt (WP-546 (`t4-col-update-nachweis`)).
 
 ### WP-546 – Nachweis Auto-Update: Selbstupdate mit zwei Versionen, newUpdateChecker, echte cosign-Prüfung
 
 **Schlüssel:** `t4-col-update-nachweis` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-428 (`t4-col-install`), WP-545 (`t5-release-evidence`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-432 (`t4-col-install`), WP-545 (`t5-release-evidence`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | COL-06 | [B], Air-Gapped [O] | TEILWEISE BESTANDEN | Teil | [WP-148](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-148) | `docs/audit/05-collector-discovery-reconciliation.md:39` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:14` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-148](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-148) (TEILWEISE BESTANDEN, schließt)
 
@@ -13204,7 +13254,7 @@ COL-06;[B], Air-Gapped [O];A;edgecore/update/cosign_real_test.go;WP-545
 
 - tests/collector-selfupdate.test.sh (neu)
 - collector/collectorcmd/update_test.go (neu)
-- edgecore/update/cosign_real_test.go (aus `t5-release-evidence`)
+- edgecore/update/cosign_real_test.go (aus WP-545 (`t5-release-evidence`))
 - .github/workflows/install-smoke.yml
 - .github/workflows/ci.yml
 - docs/betrieb/collector-updates.md
@@ -13232,11 +13282,13 @@ COL-06;[B], Air-Gapped [O];D;tests/collector-selfupdate.test.sh;WP-546
 
 **Schlüssel:** `t6-rotation-evidence` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-456 (`t6-rotation-derived`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-459 (`t6-rotation-derived`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | SEC-06 | [B] | TEILWEISE BESTANDEN | schließt | [WP-141](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-141) | `docs/audit/06-audit-sicherheit-events.md:28` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:34` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-141](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-141) (TEILWEISE BESTANDEN, schließt)
 
@@ -13244,7 +13296,7 @@ COL-06;[B], Air-Gapped [O];D;tests/collector-selfupdate.test.sh;WP-546
 
 **Akzeptanzkriterien:**
 
-- [ ] Real-Stack-Spec frontend/e2e-real/key-rotation.spec.ts (neu) mit Helfer restartServer in support/stack.ts (Compose des WP-338 (`k-e2e-real-ci`)-Stacks): bei laufendem Collector neuen Master-Key setzen (alter als vorheriger), nur den Server neu starten, Rewrap-Job ausführen → Collector bleibt online, neuer Ingest-Datensatz wird sichtbar, nats-edge wurde nicht neu gestartet; ein vor der Rotation ausgegebener Paging-Cursor bleibt gültig; nach Entfernen des alten Keys startet der Server fehlerfrei (Positiv). Negativ: Start mit falschem Master-Key scheitert mit klarer Meldung.
+- [ ] Real-Stack-Spec frontend/e2e-real/key-rotation.spec.ts (neu) mit Helfer restartServer in support/stack.ts (Compose des k-e2e-real-ci-Stacks): bei laufendem Collector neuen Master-Key setzen (alter als vorheriger), nur den Server neu starten, Rewrap-Job ausführen → Collector bleibt online, neuer Ingest-Datensatz wird sichtbar, nats-edge wurde nicht neu gestartet; ein vor der Rotation ausgegebener Paging-Cursor bleibt gültig; nach Entfernen des alten Keys startet der Server fehlerfrei (Positiv). Negativ: Start mit falschem Master-Key scheitert mit klarer Meldung.
 - [ ] Repository-Test TestCollectorCARewrap (discovery/ca_rotation_integration_test.go, neu): nach Rotation ist der collector_ca-Schlüssel mit dem neuen Master-Key entschlüsselbar, neu signierte Collector-Zertifikate sind gültig, der alte Key wird nicht mehr benötigt.
 - [ ] Repository-Test TestRotateOrgDEKIsAtomic (jobs/rotation_integration_test.go): Fehler mitten im Rewrap (Fault-Injection nach n Zeilen) → Transaktion zurückgerollt, alle Ciphertexte mit dem alten DEK lesbar; erfolgreicher Lauf → alle Ciphertexte mit neuem DEK, alter DEK stillgelegt; Org B unberührt.
 - [ ] Retest: cd frontend && npx playwright test -c e2e-real/playwright.real.config.ts key-rotation → pass; cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestCollectorCARewrap|TestRotateOrgDEKIsAtomic' ./internal/discovery/ ./internal/jobs/ → PASS.
@@ -13279,7 +13331,7 @@ SEC-06;[B];B;backend/internal/jobs/rotation_integration_test.go;WP-547
 
 **Schlüssel:** `t6-retention-data` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-417 (`t6-invite-event`)
+**Voraussetzungen (gemergt):** WP-421 (`t6-invite-event`)
 
 **Vorgezogen:** nach Schwere K6 Geringfügige Mängel; als Voraussetzung von WP-551 (`t6-evt02-producers`) in K5 eingeordnet.
 
@@ -13342,13 +13394,13 @@ EVT-01;[B];B;backend/internal/config/config_test.go;WP-548
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Log-Retention der Auslieferungen (WP-455 (`t6-log-retention`)).
+**Nicht Bestandteil:** Log-Retention der Auslieferungen (WP-458 (`t6-log-retention`)).
 
 ### WP-549 – review.created in der Mutations-Transaktion mit Client/Site; Merge-Konflikt-Reviews benachrichtigen
 
 **Schlüssel:** `t6-review-events` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-342 (`t1-review-scope`), WP-398 (`t6-domain-events`)
+**Voraussetzungen (gemergt):** WP-342 (`t1-review-scope`), WP-400 (`t6-domain-events`)
 
 **Vorgezogen:** nach Schwere K6 Geringfügige Mängel; als Voraussetzung von WP-551 (`t6-evt02-producers`) in K5 eingeordnet.
 
@@ -13364,7 +13416,7 @@ EVT-01;[B];B;backend/internal/config/config_test.go;WP-548
 | [F-323](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-323) | P3 | review.created erreicht client-gescopte Reviewer nicht | schließt | WP-140 |
 | [F-324](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-324) | P3 | Review-Items außerhalb reviews.Service (Merge-Konflikte) benachrichtigen nicht | schließt | WP-140 |
 
-**Schließt Audit-WPs:** [WP-140](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-140) (TEILWEISE BESTANDEN, Teil), [WP-136](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-136) (TEILWEISE BESTANDEN, Teil)
+**Schließt Audit-WPs:** [WP-136](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-136) (TEILWEISE BESTANDEN, Teil), [WP-140](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-140) (TEILWEISE BESTANDEN, Teil)
 
 **Problem:** review.created entsteht nach dem Commit über reviewEvents (server/router.go:672-680, PGEmitter.Emit in eigener Transaktion) und trägt weder client_id noch site_id, sodass client-gescopte Reviewer nicht benachrichtigt werden (F-323, Hypothese). Review-Items aus ci/merge.go (openMergeConflict, override_conflict) umgehen reviews.Service und benachrichtigen nicht (F-324, Hypothese).
 
@@ -13401,13 +13453,13 @@ EVT-01;[B];B;backend/internal/notify/events_integration_test.go;WP-549
 
 **Entscheidungsbedarf:** [E-56](../entscheidungen.md#e-56)
 
-**Nicht Bestandteil:** export.completed, job.failed und webhook.dead in der Mutations-Transaktion (WP-550 (`t6-emit-in-tx`)); Produzenten der Typen aus F-043 (WP-398 (`t6-domain-events`)).
+**Nicht Bestandteil:** export.completed, job.failed und webhook.dead in der Mutations-Transaktion (WP-550 (`t6-emit-in-tx`)); Produzenten der Typen aus F-043 (WP-400 (`t6-domain-events`)).
 
 ### WP-550 – export.completed, job.failed und webhook.dead in der Mutations-Transaktion (Outbox.Append)
 
 **Schlüssel:** `t6-emit-in-tx` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-505 (`t6-webhook-consumer`)
+**Voraussetzungen (gemergt):** WP-506 (`t6-webhook-consumer`)
 
 **Vorgezogen:** nach Schwere K6 Geringfügige Mängel; als Voraussetzung von WP-551 (`t6-evt02-producers`) in K5 eingeordnet.
 
@@ -13464,13 +13516,15 @@ EVT-01;[B];B;backend/internal/events/emit_tx_integration_test.go;WP-550
 
 **Schlüssel:** `t6-evt02-producers` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-398 (`t6-domain-events`), WP-417 (`t6-invite-event`), WP-421 (`t6-job02-notices`), WP-505 (`t6-webhook-consumer`), WP-548 (`t6-retention-data`), WP-549 (`t6-review-events`), WP-550 (`t6-emit-in-tx`)
+**Voraussetzungen (gemergt):** WP-400 (`t6-domain-events`), WP-421 (`t6-invite-event`), WP-425 (`t6-job02-notices`), WP-506 (`t6-webhook-consumer`), WP-548 (`t6-retention-data`), WP-549 (`t6-review-events`), WP-550 (`t6-emit-in-tx`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | EVT-02 | [B] | TEILWEISE BESTANDEN | schließt | [WP-136](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-136) | `docs/audit/06-audit-sicherheit-events.md:33 (gemeinsamer Originalprüfblock EVT-01 / EVT-02; keine unabhängige Einzelprüfung)` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:50` |
 | EVT-01 | [B] | TEILWEISE BESTANDEN | schließt | [WP-136](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-136) | `docs/audit/06-audit-sicherheit-events.md:33 (gemeinsamer Originalprüfblock EVT-01 / EVT-02; keine unabhängige Einzelprüfung)` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:48` |
 | NTF-05 | [B]; Zusätze [P2], [P3] | TEILWEISE BESTANDEN | Teil | [WP-140](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-140) | `docs/audit/07-api-suche-jobs-lebenszyklus.md:60` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:80` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Schließt Audit-WPs:** [WP-136](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-136) (TEILWEISE BESTANDEN, schließt), [WP-140](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-140) (TEILWEISE BESTANDEN, schließt)
 
@@ -13510,7 +13564,7 @@ NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/server/evt02_producers_integr
 
 **Schlüssel:** `t7-topology-ui-e2e` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-401 (`t7-topology-root`), WP-490 (`t3-impact-ui`), WP-512 (`t7-impact-redundancy`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-403 (`t7-topology-root`), WP-491 (`t3-impact-ui`), WP-513 (`t7-impact-redundancy`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -13527,12 +13581,12 @@ NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/server/evt02_producers_integr
 
 **Schließt Audit-WPs:** [WP-180](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-180) (TEILWEISE BESTANDEN, schließt), [WP-195](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-195) (TEILWEISE BESTANDEN, schließt)
 
-**Problem:** Startdialog über 2.000 Knoten, Typfilter per CI-Typ-ID und Mehrfachsimulation sind nur gegen Mocks belegt (WP-180, WP-195). Die Simulation fällt bei einem `/impact`-Fehler still auf die Client-Berechnung `computeOutageImpact` zurück (F-326, Hypothese, `TopologyPage.tsx:145-153`); WP-490 (`t3-impact-ui`) (F-254) macht diese Berechnung richtungsbewusst oder entfernt sie, die Fehlerbehandlung bei `/impact`-Fehlern bleibt hier. Die Knotenliste zeigt die Typ-UUID (F-344, `TopologyPage.tsx:341`). Beide P3-Befunde liegen in der Datei, die der Nachweis prüft.
+**Problem:** Startdialog über 2.000 Knoten, Typfilter per CI-Typ-ID und Mehrfachsimulation sind nur gegen Mocks belegt (WP-180, WP-195). Die Simulation fällt bei einem `/impact`-Fehler still auf die Client-Berechnung `computeOutageImpact` zurück (F-326, Hypothese, `TopologyPage.tsx:145-153`); WP-491 (`t3-impact-ui`) (F-254) macht diese Berechnung richtungsbewusst oder entfernt sie, die Fehlerbehandlung bei `/impact`-Fehlern bleibt hier. Die Knotenliste zeigt die Typ-UUID (F-344, `TopologyPage.tsx:341`). Beide P3-Befunde liegen in der Datei, die der Nachweis prüft.
 
 **Akzeptanzkriterien:**
 
-- [ ] Ursachenbestätigung F-326 auf dem Stand nach WP-490 (`t3-impact-ui`): Vitest „shows an error instead of a client-side impact when /impact fails“ mit 422- und 500-Stub, Ausgabe im PR. Ist er rot (Badges aus der Client-Berechnung sichtbar), behebt dieses WP die Ursache; ist er bereits grün, weil WP-490 (`t3-impact-ui`) die Berechnung entfernt hat, dokumentiert der PR das und der Test bleibt als Regressionstest.
-- [ ] Bei einem `/impact`-Fehler (422/500) rendert `TopologyPage` den Fehlerzustand von `useImpactMany` (422: „höchstens 100 CIs je Analyse“) und keine Impact-Badges aus einer Client-Berechnung, auch nicht aus der Variante von WP-490 (`t3-impact-ui`); während des Ladens höchstens eine als „Vorschau“ gekennzeichnete Anzeige; der von WP-490 (`t3-impact-ui`) umgeschriebene Test (`TopologyPage.test.tsx:70-95`) bleibt grün.
+- [ ] Ursachenbestätigung F-326 auf dem Stand nach WP-491 (`t3-impact-ui`): Vitest „shows an error instead of a client-side impact when /impact fails“ mit 422- und 500-Stub, Ausgabe im PR. Ist er rot (Badges aus der Client-Berechnung sichtbar), behebt dieses WP die Ursache; ist er bereits grün, weil WP-491 (`t3-impact-ui`) die Berechnung entfernt hat, dokumentiert der PR das und der Test bleibt als Regressionstest.
+- [ ] Bei einem `/impact`-Fehler (422/500) rendert `TopologyPage` den Fehlerzustand von `useImpactMany` (422: „höchstens 100 CIs je Analyse“) und keine Impact-Badges aus einer Client-Berechnung, auch nicht aus der Variante von WP-491 (`t3-impact-ui`); während des Ladens höchstens eine als „Vorschau“ gekennzeichnete Anzeige; der von WP-491 (`t3-impact-ui`) umgeschriebene Test (`TopologyPage.test.tsx:70-95`) bleibt grün.
 - [ ] Knoten-Badge rendert das lokalisierte Typlabel aus `typeOptions` (id → Label), Fallback ID; Vitest „renders the type label of a node“ (Retest F-344).
 - [ ] Real-Stack `frontend/e2e-real/topology.spec.ts` (neu), Seed über die API (≥ 2.001 CIs, zwei Standorte, zwei Typen, redundante Versorgung): (a) `/topology` ohne Root zeigt den Startdialog; Standortpfad sendet `site_id`, Typpfad sendet `ci_type=<Typ-UUID>` (kein Typschlüssel), Knotenzahl = API-Antwort; (b) `?simulate=a,b` zeigt genau die IDs aus `GET /api/v1/impact?ci_ids=a,b`, ein redundant versorgter Server nur bei Ausfall beider PDUs; (c) 101 IDs → sichtbare Fehlermeldung; (d) ein Client-2-Nutzer sieht im Startdialog keine Client-1-Standorte.
 - [ ] Retest: `cd frontend && npx vitest run src/pages/TopologyPage.test.tsx` und `npx playwright test -c e2e-real/playwright.real.config.ts topology` → PASS.
@@ -13566,13 +13620,13 @@ IMP-06;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
 
 **Entscheidungsbedarf:** [E-02](../entscheidungen.md#e-02)
 
-**Nicht Bestandteil:** Richtungslogik der Client-Simulation (F-254, WP-490 (`t3-impact-ui`), Voraussetzung); axe-Prüfung des Startdialogs (WP-521 (`t7-a11y-contrast`)); Graph-Komponente `components/graph/`. Gruppenübergreifende Voraussetzung (trägt die Integration ein): WP-490 (`t3-impact-ui`) (T3).
+**Nicht Bestandteil:** Richtungslogik der Client-Simulation (F-254, WP-491 (`t3-impact-ui`), Voraussetzung); axe-Prüfung des Startdialogs (WP-522 (`t7-a11y-contrast`)); Graph-Komponente `components/graph/`.
 
 ### WP-553 – Revert am Job vermerken; Revert- und Metrik-Nachweise auf PostgreSQL
 
 **Schlüssel:** `t7-job-revert-state` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-513 (`t7-job-cancel`), WP-514 (`t7-export-cancel`)
+**Voraussetzungen (gemergt):** WP-514 (`t7-job-cancel`), WP-515 (`t7-export-cancel`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -13610,7 +13664,7 @@ IMP-06;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
 - frontend/src/api/generated/schema.d.ts
 - docs/traceability.csv
 
-**Migration/RLS:** Zwei Spalten auf `job`; Policies aus WP-402 (`t7-job-scope`) unverändert; up/down mit Roundtrip.
+**Migration/RLS:** Zwei Spalten auf `job`; Policies aus WP-404 (`t7-job-scope`) unverändert; up/down mit Roundtrip.
 
 **Tests:**
 
@@ -13626,13 +13680,13 @@ JOB-03;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Revert weiterer Job-Arten (BLK-02 [P2]). WP-514 (`t7-export-cancel`) ist Voraussetzung, weil dieses WP WP-182 schließt und F-162 dort im Backend endet.
+**Nicht Bestandteil:** Revert weiterer Job-Arten (BLK-02 [P2]). WP-515 (`t7-export-cancel`) ist Voraussetzung, weil dieses WP WP-182 schließt und F-162 dort im Backend endet.
 
 ### WP-554 – Review-Merge-Job: Retry-Status, Router-Nachweis, Entscheidung synchron + Mirror
 
 **Schlüssel:** `t7-review-merge-job` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-478 (`t3-review-merge`), WP-513 (`t7-job-cancel`), WP-515 (`t7-snapshot-replay`)
+**Voraussetzungen (gemergt):** WP-479 (`t3-review-merge`), WP-514 (`t7-job-cancel`), WP-516 (`t7-snapshot-replay`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -13651,7 +13705,7 @@ JOB-03;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
 
 **Akzeptanzkriterien:**
 
-- [ ] Entscheidung E-89 (Übergangsregel Option 1: synchroner Effekt mit gespiegeltem Job für merge bei ambiguous_identity; merge bei probable_duplicate über den `ci.merge`-Job aus WP-478 (`t3-review-merge`), dessen Status der `review.merge`-Spiegel übernimmt) als Nachtrag zu E-25 in `docs/plan/entscheidungen.md` dokumentiert (F-331).
+- [ ] Entscheidung E-89 (Übergangsregel Option 1: synchroner Effekt mit gespiegeltem Job für merge bei ambiguous_identity; merge bei probable_duplicate über den `ci.merge`-Job aus WP-479 (`t3-review-merge`), dessen Status der `review.merge`-Spiegel übernimmt) als Nachtrag zu E-25 in `docs/plan/entscheidungen.md` dokumentiert (F-331).
 - [ ] Ein erneuter Merge-Versuch eines Items, dessen Job `failed` ist, setzt den Job auf `running` mit `attempts+1`; Erfolg → `succeeded`, Fehlertext geleert; die Transition failed → running ist nur für gespiegelte Jobs mit Referenz zulässig.
 - [ ] PG-Test `TestReviewMergeRetryJobStatus` (`reviews/merge_job_integration_test.go`): Effekt schlägt fehl → Job `failed`; Retry mit Erfolg → Item resolved, Job `succeeded`, `attempts=2`; ein Job je Item und Art; probable_duplicate: der `review.merge`-Spiegel übernimmt den Status des `ci.merge`-Jobs (`failed` → `failed`, nach Retry beide `succeeded`), kein zweiter widersprüchlicher Job (verbindlicher Retest F-330).
 - [ ] Router-Test `TestReviewMergeJobThroughRouter` (`backend/internal/server/review_merge_job_integration_test.go`): `POST /api/v1/review-items/{id}/resolve {action:'merge', ci_id}` über den echten Router mit Discovery-Effekt und PG-Repositories → 200, Kandidat aktualisiert (Management-IP), `GET /api/v1/jobs?kind=review.merge` zeigt den Job `succeeded`; fremder Client → 404; Principal ohne Auflösungsrecht → 403.
@@ -13683,13 +13737,13 @@ JOB-04;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-554
 
 **Entscheidungsbedarf:** [E-89](entscheidungen.md#e-89) Review-Merge bei ambiguous_identity: synchroner Effekt mit gespiegeltem Job (JOB-04, Folge zu E-25) (offen, Empfehlung als Übergangsregel); [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Asynchroner Merge über die Queue (nur bei Option 2, eigenes WP); CI-12-Merge-Semantik von probable_duplicate (WP-478 (`t3-review-merge`), Voraussetzung). Gruppenübergreifende Voraussetzung (trägt die Integration ein): WP-478 (`t3-review-merge`) (T3).
+**Nicht Bestandteil:** Asynchroner Merge über die Queue (nur bei Option 2, eigenes WP); CI-12-Merge-Semantik von probable_duplicate (WP-479 (`t3-review-merge`), Voraussetzung).
 
 ### WP-555 – Gespeicherte Sichten: sort/columns wirksam, Freigabe in der UI, Real-Stack-Rollenfreigabe
 
 **Schlüssel:** `t7-saved-views-ui` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-517 (`t7-saved-views-api`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-518 (`t7-saved-views-api`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -13748,7 +13802,7 @@ VIE-01;[B];C;frontend/e2e-real/saved-views.spec.ts;WP-555
 
 **Schlüssel:** `t7-ui-scope-lists` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-523 (`t7-ui-scope-detail`)
+**Voraussetzungen (gemergt):** WP-524 (`t7-ui-scope-detail`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -13788,7 +13842,7 @@ VIE-01;[B];C;frontend/e2e-real/saved-views.spec.ts;WP-555
 - frontend/src/api/client.ts
 - frontend/src/api/client.test.ts
 - frontend/src/api/cmdb.ts
-- frontend/e2e-real/scope-switcher.spec.ts (angelegt in WP-523)
+- frontend/e2e-real/scope-switcher.spec.ts (angelegt in WP-524)
 - docs/traceability.csv
 
 **Migration/RLS:** keine Migration.
@@ -13820,7 +13874,7 @@ UI-10;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
 
 **Schlüssel:** `t7-review-inbox-e2e` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-527 (`t7-review-new`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-528 (`t7-review-new`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -13870,13 +13924,13 @@ UI-16;[B];C;frontend/e2e-real/review-inbox.spec.ts;WP-557
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Review-Modell und Effekte anderer Arten (T3).
+**Nicht Bestandteil:** Review-Modell und Effekte anderer Arten (WP-369 (`t3-resurrect-new`), WP-479 (`t3-review-merge`), WP-576 (`t3-conflict-sources`)).
 
 ### WP-558 – INS-04 „Localhost-Redirect“ über einen TLS-Origin ohne localhost prüfen
 
 **Schlüssel:** `t7-onboarding-tls-origin` · **Meilenstein:** K5 Nachweislücken · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-436 (`t5-acme-pebble`), WP-528 (`t7-onboarding-suite`)
+**Voraussetzungen (gemergt):** WP-420 (`t5-acme-pebble`), WP-529 (`t7-onboarding-suite`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -13895,7 +13949,7 @@ UI-16;[B];C;frontend/e2e-real/review-inbox.spec.ts;WP-557
 
 **Akzeptanzkriterien:**
 
-- [ ] Die INS-04-Tests der Onboarding-Suite laufen im Job `tls-domain-pebble` aus WP-436 (`t5-acme-pebble`) (Schritt nach `tests/install-acme-pebble.test.sh`, der Stack bleibt dafür stehen) über `https://<Domain des Jobs, z. B. reticora.test>` mit dem Pebble-Zertifikat; `setup-onboarding.sh` setzt `BASE_URL`/`E2E_ISSUER_URL`; `playwright.install.config.ts` vertraut der Pebble-Root (NSS-Datenbank des Runners, `NODE_EXTRA_CA_CERTS` für Request-Kontexte) statt `ignoreHTTPSErrors`.
+- [ ] Die INS-04-Tests der Onboarding-Suite laufen im Job `tls-domain-pebble` aus WP-420 (`t5-acme-pebble`) (Schritt nach `tests/install-acme-pebble.test.sh`, der Stack bleibt dafür stehen) über `https://<Domain des Jobs, z. B. reticora.test>` mit dem Pebble-Zertifikat; `setup-onboarding.sh` setzt `BASE_URL`/`E2E_ISSUER_URL`; `playwright.install.config.ts` vertraut der Pebble-Root (NSS-Datenbank des Runners, `NODE_EXTRA_CA_CERTS` für Request-Kontexte) statt `ignoreHTTPSErrors`.
 - [ ] `onboarding.spec.ts`: Authorize-URL, `redirect_uri` und Issuer enthalten nicht „localhost“ und entsprechen dem Origin von `BASE_URL`, sofern dieser nicht localhost ist; ohne `E2E_ISSUER_URL` schlägt der Test fehl statt zu überspringen.
 - [ ] Negativnachweis: ein Spec-Selbsttest schreibt die Authorize-Weiterleitung per `page.route` auf `redirect_uri=http://localhost…` um und erwartet das Fehlschlagen der Prüfung.
 - [ ] Verbindlicher Retest F-352: Lauf im Job `tls-domain-pebble` über den TLS-Origin grün; die injizierte localhost-redirect_uri wird erkannt.
@@ -13905,7 +13959,7 @@ UI-16;[B];C;frontend/e2e-real/review-inbox.spec.ts;WP-557
 **Dateien (8 Einträge, Migration = 2):**
 
 - .github/workflows/install-smoke.yml
-- tests/install-acme-pebble.test.sh (aus `t5-acme-pebble`)
+- tests/install-acme-pebble.test.sh (aus WP-420 (`t5-acme-pebble`))
 - frontend/e2e/fixtures/setup-onboarding.sh
 - frontend/e2e/fixtures/playwright.install.config.ts
 - frontend/e2e/onboarding.spec.ts
@@ -13928,7 +13982,7 @@ ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-558
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** ACME-Ausstellung (WP-416 (`t5-acme-lineage`)) sowie Pebble-Job `tls-domain-pebble` und `tests/install-acme-pebble.test.sh` selbst (WP-436 (`t5-acme-pebble`), Voraussetzung); Installer-Änderungen.
+**Nicht Bestandteil:** ACME-Ausstellung (WP-419 (`t5-acme-lineage`)) sowie Pebble-Job `tls-domain-pebble` und `tests/install-acme-pebble.test.sh` selbst (WP-420 (`t5-acme-pebble`), Voraussetzung); Installer-Änderungen.
 
 ## K6 Geringfügige Mängel
 
@@ -13938,7 +13992,7 @@ ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-558
 
 **Schlüssel:** `t1-tst02-mapping` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** SR · **Aufwand:** 0,5 PT
 
-**Voraussetzungen (gemergt):** WP-498 (`t5-lint-baseline`), WP-533 (`t1-ev-opensearch-real`)
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`), WP-534 (`t1-ev-opensearch-real`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -13957,16 +14011,16 @@ ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-558
 **Akzeptanzkriterien:**
 
 - [ ] `TestTST02ScenarioCoverage` ordnet „certificate renewal“ `discovery/ca_test.go` `TestCollectorPKI` zu; `cd backend && go test -count=1 -run '^TestTST02ScenarioCoverage$' ./internal/server/` grün.
-- [ ] `scripts/ci/db-test-summary.sh` (aus WP-498 (`t5-lint-baseline`)) erhält die Option `--require-pass <datei>`; der DB-Job von `.github/workflows/ci.yml` ruft es mit `--require-pass tests/tst02-targets.txt` (neu) auf. Die Datei listet die Zieltests der TST-02-Zuordnung; ein fehlender oder nicht mit `pass` gelaufener Zieltest (z. B. `skip`) → Exit ≠ 0 mit Testnamen und bricht den Job. Kein eigenes Auswerteskript für `test-db.json`.
-- [ ] Selbsttest-Fälle in `tests/ci-db-summary.test.sh` (aus WP-498 (`t5-lint-baseline`), Job gate) mit gotestsum-JSON-Fixtures: alle Zieltests `pass` → Exit 0; ein Zieltest `skip` bzw. fehlend → Exit ≠ 0 mit Testnamen; Nachweis: CI-Lauf-ID im PR.
+- [ ] `scripts/ci/db-test-summary.sh` (aus WP-499 (`t5-lint-baseline`)) erhält die Option `--require-pass <datei>`; der DB-Job von `.github/workflows/ci.yml` ruft es mit `--require-pass tests/tst02-targets.txt` (neu) auf. Die Datei listet die Zieltests der TST-02-Zuordnung; ein fehlender oder nicht mit `pass` gelaufener Zieltest (z. B. `skip`) → Exit ≠ 0 mit Testnamen und bricht den Job. Kein eigenes Auswerteskript für `test-db.json`.
+- [ ] Selbsttest-Fälle in `tests/ci-db-summary.test.sh` (aus WP-499 (`t5-lint-baseline`), Job gate) mit gotestsum-JSON-Fixtures: alle Zieltests `pass` → Exit 0; ein Zieltest `skip` bzw. fehlend → Exit ≠ 0 mit Testnamen; Nachweis: CI-Lauf-ID im PR.
 - [ ] Regression: `go test ./internal/server/` grün; `shellcheck` ohne neue Meldungen.
 
 **Dateien (6 Einträge, Migration = 2):**
 
 - backend/internal/server/e2e_scenarios_integration_test.go
-- scripts/ci/db-test-summary.sh (angelegt in WP-498)
+- scripts/ci/db-test-summary.sh (angelegt in WP-499)
 - tests/tst02-targets.txt (neu)
-- tests/ci-db-summary.test.sh (angelegt in WP-498)
+- tests/ci-db-summary.test.sh (angelegt in WP-499)
 - .github/workflows/ci.yml
 - docs/traceability.csv
 
@@ -13985,13 +14039,13 @@ TST-02;[B];SR;backend/internal/server/e2e_scenarios_integration_test.go;WP-559
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Kanalmatrix (WP-407 (`t1-channel-matrix`)); neue TST-02-Szenarien.
+**Nicht Bestandteil:** Kanalmatrix (WP-409 (`t1-channel-matrix`)); neue TST-02-Szenarien.
 
 ### WP-560 – Dokument-Blobs: Altdatenbericht je Dokument, UI ohne Storage-Key, toter Agent-Client
 
 **Schlüssel:** `t1-doc-blob-cleanup` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-341 (`t1-doc-window-writes`), WP-423 (`t1-mig56-down`), WP-457 (`t1-structured-search-read`), WP-537 (`t1-ev-module-isolation`)
+**Voraussetzungen (gemergt):** WP-341 (`t1-doc-window-writes`), WP-427 (`t1-mig56-down`), WP-460 (`t1-structured-search-read`), WP-538 (`t1-ev-module-isolation`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -14031,7 +14085,7 @@ TST-02;[B];SR;backend/internal/server/e2e_scenarios_integration_test.go;WP-559
 - frontend/src/api/client.test.ts
 - frontend/src/i18n/de-DE.json
 - frontend/src/i18n/en-US.json
-- docs/betrieb/upgrade-hinweise.md (aus t1-mig56-down)
+- docs/betrieb/upgrade-hinweise.md (aus WP-427 (`t1-mig56-down`))
 - docs/traceability.csv
 
 **Migration/RLS:** Änderung der ausgelieferten Migration 000066 gemäß Entscheidung E-72 (Bericht in `migration_quarantine` vor dem Leeren); keine Policy-Änderung; Roundtrip grün.
@@ -14166,13 +14220,13 @@ OPS-05;[B];B;backend/internal/webhook/delivery_claim_integration_test.go;WP-562
 
 **Entscheidungsbedarf:** [E-08](../entscheidungen.md#e-08)
 
-**Nicht Bestandteil:** Filter- und Consume-Befunde der Gruppe T2 im Webhook-Paket.
+**Nicht Bestandteil:** Filter- und Consume-Befunde im Webhook-Paket (WP-356 (`t2-webhook-bound-scope`), WP-506 (`t6-webhook-consumer`)).
 
 ### WP-563 – SSRF-Prüfung beim Speichern für IGA-Update und Benachrichtigungs-Webhook; IPv6-Übergangspräfixe gesperrt
 
 **Schlüssel:** `t2-egress-save` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-397 (`t6-ntf-secrets`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-399 (`t6-ntf-secrets`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -14227,13 +14281,13 @@ SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-563
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** SMTP-Kanal und Ports (F-153, Gruppe T6; gleiche Datei `notify/channel.go`, Merge-Reihenfolge durch die Integration); Fehleranzeige der Webhook-Seite (WP-463 (`t2-webhook-ui-errors`)).
+**Nicht Bestandteil:** SMTP-Kanal und Ports (F-153, WP-399 (`t6-ntf-secrets`), Voraussetzung; gleiche Datei `notify/channel.go`); Fehleranzeige der Webhook-Seite (WP-465 (`t2-webhook-ui-errors`)).
 
 ### WP-564 – Operator-Entitlement-Schreiben: Audit atomar mit der Änderung, nur ENT-02-Schlüssel
 
 **Schlüssel:** `t2-operator-entitlement-write` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-468 (`t2-ent-provisioning`)
+**Voraussetzungen (gemergt):** WP-470 (`t2-ent-provisioning`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -14295,7 +14349,7 @@ ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-564
 
 **Schlüssel:** `t2-complete-lists` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-464 (`t2-pagination-core`), WP-470 (`t2-ent-quotas`)
+**Voraussetzungen (gemergt):** WP-466 (`t2-pagination-core`), WP-472 (`t2-ent-quotas`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -14349,13 +14403,13 @@ API-02;[B];C;backend/internal/identity/apikey_integration_test.go;WP-565
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Übrige Listen (WP-464 (`t2-pagination-core`), WP-465 (`t2-pagination-modules`)).
+**Nicht Bestandteil:** Übrige Listen (WP-466 (`t2-pagination-core`), WP-467 (`t2-pagination-modules`)).
 
 ### WP-566 – Attributfilter: searchable und Datentyp je CI-Typ statt org-weit je Key
 
 **Schlüssel:** `t2-filter-searchable` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-431 (`t4-attr-filter-index`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-435 (`t4-attr-filter-index`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -14377,7 +14431,7 @@ API-02;[B];C;backend/internal/identity/apikey_integration_test.go;WP-565
 - [ ] PG-Kollisionstest in `ci/listquery_integration_test.go` (vor dem Fix rot): Key in Typ A searchable, in Typ B nicht → exact und like liefern nur A-CIs; Key integer in A und string in B → ohne Typ 400, mit `ci_type_id=A` liefert `gte` 200 mit korrektem Ergebnis; überall nicht searchable → 400 (unverändert).
 - [ ] Erweiterter PG-Filtertest: `in`, `lte`, `like` auf typisierten Attributen je Typ; Organisation B mit gleichem Key beeinflusst Organisation A nicht.
 - [ ] Regression: `TestListFiltersAgainstPostgres`, `TestParseListQuery`, `TestParseListQueryErrors`, `TestFilterSQLAndMatch`; Real-Stack L09 weiter PASS (CI-Job aus WP-338 (`k-e2e-real-ci`), Lauf-ID im PR).
-- [ ] Das typbezogene Prädikat nutzt für den Attributwert den Ausdruck reticora_attr_text(attributes, key) aus WP-431 (`t4-attr-filter-index`). Grün sind sowohl attr_filter_plan_integration_test.go (Index Scan als reticora_app) als auch der neue Kollisionstest in ci/listquery_integration_test.go.
+- [ ] Das typbezogene Prädikat nutzt für den Attributwert den Ausdruck reticora_attr_text(attributes, key) aus WP-435 (`t4-attr-filter-index`). Grün sind sowohl attr_filter_plan_integration_test.go (Index Scan als reticora_app) als auch der neue Kollisionstest in ci/listquery_integration_test.go.
 
 **Dateien (4 Einträge, Migration = 2):**
 
@@ -14467,7 +14521,7 @@ API-05;[B];C;backend/internal/server/t2_ci_include_integration_test.go;WP-567
 
 **Schlüssel:** `t2-lifecycle-headers` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-364 (`t2-refresh-chain`), WP-460 (`t2-preauth-budget`)
+**Voraussetzungen (gemergt):** WP-364 (`t2-refresh-chain`), WP-462 (`t2-preauth-budget`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -14586,7 +14640,7 @@ API-03;[B];B;backend/internal/middleware/idempotency_integration_test.go;WP-569
 
 **Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01)
 
-**Nicht Bestandteil:** Redaktion von Benachrichtigungskanälen (F-154, Gruppe T6).
+**Nicht Bestandteil:** Redaktion von Benachrichtigungskanälen (F-154, WP-398 (`t6-ntf-authz`)).
 
 ### WP-570 – Erstlogin: Bootstrap-Zulassung serialisiert, lokalisierte Ablehnung, Org-Attribut durch Benutzer nicht änderbar
 
@@ -14645,13 +14699,13 @@ AUT-09;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-570
 
 **Entscheidungsbedarf:** [E-14](../entscheidungen.md#e-14)
 
-**Nicht Bestandteil:** Identity-Brokering je Organisation (AUT-07, [P4]); MFA- und Quotenprüfung in `resolveLogin` (WP-358 (`t2-mfa-role-sync`), WP-470 (`t2-ent-quotas`); gleiche Funktion, Merge-Reihenfolge durch die Integration).
+**Nicht Bestandteil:** Identity-Brokering je Organisation (AUT-07, [P4]); MFA- und Quotenprüfung in `resolveLogin` (WP-358 (`t2-mfa-role-sync`), WP-472 (`t2-ent-quotas`); gleiche Funktion; keine Abhängigkeit, das später gemergte WP gleicht `resolveLogin` an).
 
 ### WP-571 – Benutzerverwaltung: Deaktivieren, Reaktivieren und Löschen in der UI; Systemrollen als System gekennzeichnet
 
 **Schlüssel:** `t2-user-admin-ui` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-359 (`t2-deactivation-tenant`), WP-509 (`t6-invite-ui`), WP-570 (`t2-first-login`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-359 (`t2-deactivation-tenant`), WP-510 (`t6-invite-ui`), WP-570 (`t2-first-login`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -14707,13 +14761,13 @@ RBA-02;[B];B;frontend/src/pages/UserManagementPage.lifecycle.test.tsx;WP-571
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Einladungs-UI (F-142, Gruppe T6; gleiche Datei `UserManagementPage.tsx`, Merge-Reihenfolge durch die Integration); Abbildung der 403-Problemtypen im Login (WP-570 (`t2-first-login`)).
+**Nicht Bestandteil:** Einladungs-UI (F-142, WP-510 (`t6-invite-ui`), Voraussetzung; gleiche Datei `UserManagementPage.tsx`); Abbildung der 403-Problemtypen im Login (WP-570 (`t2-first-login`)).
 
 ### WP-572 – CI-Merge als Job nachweisen: ci_merge.job_id; Retention für Snapshots und Tombstones
 
 **Schlüssel:** `t3-merge-job-retention` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-478 (`t3-review-merge`), WP-484 (`t3-unmerge-conflict`)
+**Voraussetzungen (gemergt):** WP-479 (`t3-review-merge`), WP-485 (`t3-unmerge-conflict`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -14760,13 +14814,13 @@ CI-12;[B];C;backend/internal/ci/merge_integration_test.go;WP-572
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Unmerge-Vertrag (WP-484 (`t3-unmerge-conflict`)).
+**Nicht Bestandteil:** Unmerge-Vertrag (WP-485 (`t3-unmerge-conflict`)).
 
 ### WP-573 – Strukturbeziehungen: nur speicherbare Typen im Formular; Saved-View-Filter sehen Projektionen
 
 **Schlüssel:** `t3-struct-p3` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-403 (`t7-filter-ast-values`)
+**Voraussetzungen (gemergt):** WP-405 (`t7-filter-ast-values`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -14815,7 +14869,7 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/savedview/savedview_integr
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Endpunktprüfung des Filters (F-050, Gruppe T1) und weitere Saved-View-Befunde (F-165, F-179, Gruppe T7) in `filter.go`; Typkatalog im Formular (F-273, Gruppe T4; F-314, Gruppe T6) in `CIRelationshipsCard.tsx` – Reihenfolge abstimmen.
+**Nicht Bestandteil:** Endpunktprüfung des Filters (F-050, WP-345 (`t1-edge-scope`)) und weitere Saved-View-Befunde (F-165, F-179, WP-405 (`t7-filter-ast-values`)) in `filter.go`; Typkatalog im Formular (F-273, WP-584 (`t4-suppression-lifecycle`); F-314, WP-401 (`t6-rel-errors`)) in `CIRelationshipsCard.tsx` – Reihenfolge abstimmen.
 
 ### WP-574 – Migrationssicherheit: 000056-down auf Altinstallationen, Reparatur zyklischer parent_ci_id
 
@@ -14847,7 +14901,7 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/savedview/savedview_integr
 
 **Dateien (7 Einträge, Migration = 2):**
 
-- backend/migrations/000056_rls_enforcement.down.sql (nur nach Option 1 von `t1-shipped-migrations`)
+- backend/migrations/000056_rls_enforcement.down.sql (nur nach Option 1 von E-72)
 - backend/migrations/<nächste Nr.>_ci_parent_cycle_repair.up.sql (neu)
 - backend/migrations/<nächste Nr.>_ci_parent_cycle_repair.down.sql (neu)
 - backend/internal/relationship/projection_integration_test.go
@@ -14872,13 +14926,13 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/relationship/projection_in
 
 **Entscheidungsbedarf:** [E-26](../entscheidungen.md#e-26); [E-72](entscheidungen.md#e-72) Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Zyklusschutz bei nebenläufigen Schreibvorgängen (bestehender Trigger); Sichtbarkeit des Parents (WP-369 (`t3-parent-scope`)); DROP ROLE im down-Pfad derselben Datei `000056_rls_enforcement.down.sql` (WP-423 (`t1-mig56-down`), Entscheidung E-72; anderer Abschnitt, Reihenfolge durch die Integration).
+**Nicht Bestandteil:** Zyklusschutz bei nebenläufigen Schreibvorgängen (bestehender Trigger); Sichtbarkeit des Parents (WP-370 (`t3-parent-scope`)); DROP ROLE im down-Pfad derselben Datei `000056_rls_enforcement.down.sql` (WP-427 (`t1-mig56-down`), Entscheidung E-72; anderer Abschnitt; keine Abhängigkeit, das später gemergte WP gleicht die Datei an).
 
 ### WP-575 – Dashboard: Eskalation offener Reviews älter als 14 Tage (REC-08)
 
 **Schlüssel:** `t3-review-escalation-widget` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-474 (`t3-override-clear-ui`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-413 (`t3-override-clear-ui`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -14928,13 +14982,13 @@ REC-08;[B];D;frontend/src/pages/DashboardPage.test.tsx;WP-575
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Inbox-Aktionen (F-176, Gruppe T7) in `ReviewInboxPage.tsx` – Reihenfolge abstimmen.
+**Nicht Bestandteil:** Inbox-Aktionen (F-176, WP-528 (`t7-review-new`)) in `ReviewInboxPage.tsx` – Reihenfolge abstimmen.
 
 ### WP-576 – override_conflict für Workflow und Agent; Unterdrückung endet mit dem nächsten Wertwechsel
 
 **Schlüssel:** `t3-conflict-sources` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-483 (`t3-agent-merge`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-484 (`t3-agent-merge`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -14949,7 +15003,7 @@ REC-08;[B];D;frontend/src/pages/DashboardPage.test.tsx;WP-575
 | [F-231](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-231) | P3 | Override-Konflikte aus Workflow und Agent erzeugen kein override_conflict-Review (REC-12) | schließt | WP-059, WP-089 |
 | [F-248](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-248) | P3 | Verworfener override_conflict-Wert bleibt nach Wertwechsel unterdrückt | schließt | WP-089 |
 
-**Schließt Audit-WPs:** [WP-089](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-089) (TEILWEISE BESTANDEN, schließt), [WP-059](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-059) (TEILWEISE BESTANDEN, schließt)
+**Schließt Audit-WPs:** [WP-059](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-059) (TEILWEISE BESTANDEN, schließt), [WP-089](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-089) (TEILWEISE BESTANDEN, schließt)
 
 **Problem:** Der Konfliktzweig mit override_conflict-Review ist nur in Discovery umgesetzt; Workflow (`workflow/executor.go:333-337`) und Agent (`agent/handler.go:512-514`) aktualisieren bei Konflikt nur _observed (PG-Probes: reason=override_conflict, review_item 0), obwohl REC-12 dies für jede Quelle verlangt. `OpenUnlessDismissed` (`reviews/service.go:85-101`) vergleicht nur mit dem neuesten verworfenen Item: nach zwischenzeitlichem Wertwechsel bleibt der verworfene Wert dauerhaft unterdrückt (reviews.log S1/S2). Der Workflow-Pfad set_ci_field ist nur mit Memory-Tests belegt.
 
@@ -14990,13 +15044,13 @@ AGT-05;[P4];D;backend/internal/agent/audit_t3_agent_rank_integration_test.go;WP-
 
 **Entscheidungsbedarf:** [E-03](../entscheidungen.md#e-03)
 
-**Nicht Bestandteil:** Review-Jobs (F-330, F-331, Gruppe T7) in `reviews/service.go` – Reihenfolge abstimmen.
+**Nicht Bestandteil:** Review-Jobs (F-330, F-331, WP-554 (`t7-review-merge-job`)) in `reviews/service.go` – Reihenfolge abstimmen.
 
 ### WP-577 – CI-Detail: Standort, Site und Raum mit Namen, formatierte Zeiten, vollständige read-only Asset-Karte
 
 **Schlüssel:** `t3-ci-detail-readable` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-473 (`t3-history-access`), WP-476 (`t3-ci-edit-ui`), WP-522 (`t7-i18n-labels`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-475 (`t3-history-access`), WP-477 (`t3-ci-edit-ui`), WP-523 (`t7-i18n-labels`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -15052,7 +15106,7 @@ AST-04;[P2];B;frontend/src/pages/CIFormModal.test.tsx;WP-577
 
 **Entscheidungsbedarf:** [E-36](../entscheidungen.md#e-36)
 
-**Nicht Bestandteil:** Scope-Header und weitere Befunde der Detailseite (F-169, F-175, Gruppe T7); Typauswahl im CIFormModal (F-016, Gruppe T6) – Reihenfolge abstimmen.
+**Nicht Bestandteil:** Scope-Header und weitere Befunde der Detailseite (F-169 WP-524 (`t7-ui-scope-detail`), F-175 WP-523 (`t7-i18n-labels`)); Typauswahl im CIFormModal (F-016, WP-397 (`t6-ci-form-types`)) – Reihenfolge abstimmen.
 
 ### WP-578 – Rack-Platzierung: Historie, Audit und Version für alle CIs eines gemeinsamen Assets
 
@@ -15103,7 +15157,7 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/rack/mount_location_integr
 
 **Entscheidungsbedarf:** [E-36](../entscheidungen.md#e-36)
 
-**Nicht Bestandteil:** Suchindex nach Platzierung (F-054, Gruppe T1, `placement.go:59`) – Reihenfolge abstimmen.
+**Nicht Bestandteil:** Suchindex nach Platzierung (F-054, WP-346 (`t1-opensearch-placement`), `placement.go:59`) – Reihenfolge abstimmen.
 
 ### WP-579 – Rack-Layout: leere Liste statt null, Anzeigefelder im Layout, kein 1+N im Frontend
 
@@ -15165,13 +15219,13 @@ RCK-02;[B];C;backend/internal/rack/layout_integration_test.go;WP-579
 
 **Entscheidungsbedarf:** [E-25](../entscheidungen.md#e-25)
 
-**Nicht Bestandteil:** Rack-Sichtbarkeit und ListMounts-Scope (F-002, F-180, Gruppe T1), UpdateRack (F-140, Gruppe T6) in `rack/pg_repository.go` – Reihenfolge abstimmen; Mount-UI; `frontend/src/api/client.ts` auch in WP-472 (`t3-loc-tree-ui`) und WP-539 (`t3-maint-notify`) – Reihenfolge abstimmen.
+**Nicht Bestandteil:** Rack-Sichtbarkeit und ListMounts-Scope (F-002, F-180, WP-340 (`t1-rack-site-scope`)), UpdateRack (F-140, WP-500 (`t6-location-conflicts`)) in `rack/pg_repository.go` – Reihenfolge abstimmen; Mount-UI; `frontend/src/api/client.ts` auch in WP-474 (`t3-loc-tree-ui`) und WP-540 (`t3-maint-notify`) – Reihenfolge abstimmen.
 
 ### WP-580 – Discovery-Restmängel: last_seen_at aus observed_at, Seriennummer case-insensitiv, manuelle IPs und Interfaces bleiben
 
 **Schlüssel:** `t3-discovery-p3` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** D · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-370 (`t3-vlan-ref-scope`), WP-430 (`t4-identity-mac-index`), WP-488 (`t3-aud03-ingest`)
+**Voraussetzungen (gemergt):** WP-371 (`t3-vlan-ref-scope`), WP-434 (`t4-identity-mac-index`), WP-489 (`t3-aud03-ingest`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -15227,13 +15281,13 @@ REC-07;[B];D;backend/internal/ipam/interface_integration_test.go;WP-580
 
 **Entscheidungsbedarf:** [E-90](entscheidungen.md#e-90) REC-07: Entfernen manuell gepflegter IPs und Interfaces (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Relationship-Befund F-042 (Gruppe T6) in `ipam/pg_repository.go:630-686` – Reihenfolge abstimmen; weitere Änderungen in `discovery/discovery.go` (WP-368 (`t3-resurrect-new`), WP-478 (`t3-review-merge`), WP-482 (`t3-spool-poison`)) – Reihenfolge abstimmen.
+**Nicht Bestandteil:** Relationship-Befund F-042 (WP-424 (`t6-manual-edge-keep`)) in `ipam/pg_repository.go:630-686` – Reihenfolge abstimmen; weitere Änderungen in `discovery/discovery.go` (WP-369 (`t3-resurrect-new`), WP-479 (`t3-review-merge`), WP-483 (`t3-spool-poison`)) – Reihenfolge abstimmen.
 
 ### WP-581 – Profilfeld systemTemplate auf den Template-Katalog abbilden
 
 **Schlüssel:** `t4-profile-template` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
 
-**Voraussetzungen (gemergt):** WP-414 (`t4-classify-review`)
+**Voraussetzungen (gemergt):** WP-417 (`t4-classify-review`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -15283,7 +15337,7 @@ DIS-02;[B], Profilliste (V);D;backend/internal/discovery/system_template_test.go
 
 **Schlüssel:** `t4-topo-confidence` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-497 (`t4-power-redundancy`)
+**Voraussetzungen (gemergt):** WP-498 (`t4-power-redundancy`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -15329,13 +15383,13 @@ TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-582
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Anzeige der Confidence in der UI; Nachbarabfrage im Collector (WP-413 (`t4-snmp-neighbors`)).
+**Nicht Bestandteil:** Anzeige der Confidence in der UI; Nachbarabfrage im Collector (WP-416 (`t4-snmp-neighbors`)).
 
 ### WP-583 – Beziehungen: Provenienz geschützt, Systemquellen reserviert, Fehlerabbildung beim Löschen
 
 **Schlüssel:** `t4-rel-provenance` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-399 (`t6-rel-errors`), WP-497 (`t4-power-redundancy`)
+**Voraussetzungen (gemergt):** WP-401 (`t6-rel-errors`), WP-498 (`t4-power-redundancy`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -15353,16 +15407,16 @@ TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-582
 
 **Schließt Audit-WPs:** [WP-159](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-159) (FEHLGESCHLAGEN, Teil), [WP-160](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-160) (TEILWEISE BESTANDEN, Teil)
 
-**Problem:** PATCH `/relationships/{id}` merged `attributes` per `||` ohne reservierten Schlüssel (`relationship/pg_repository.go:242-245`): Akteur und Zeit der Provenienz sind fälschbar (F-270). `CanonicalSource` akzeptiert alle sieben Quellen von jedem Aufrufer (`relationship.go:551-556`): Nutzer legen Kanten mit `source=discovery` an, die nur mit force löschbar sind und nach 7 d vom Cleanup verschwinden (F-271). DELETE bildet jeden Fehler außer `ErrForceRequired` auf 404 ab (`relationship.go:687-690`; nur per Code-Review festgestellt, F-272). Das AK von WP-160 („manuelle Kanten nur mit force“) widerspricht REL-04 (F-274). WP-399 (`t6-rel-errors`) (F-145) ändert dieselben Stellen (Create-Pfad `relationship.go:521-608` mit `CanonicalSource`, `pg_repository.go:191-222`, 422 an POST in `openapi.yaml`) und muss vor diesem WP gemergt sein (gruppenfremdes WP der Gruppe T6; die Reihenfolge trägt die Integration ein). Das WP trägt den Pflichtnachweis von WP-159 (API-Test zum Provenienzschutz); die Umsetzung sollte nicht bis zum Ende von K6 warten.
+**Problem:** PATCH `/relationships/{id}` merged `attributes` per `||` ohne reservierten Schlüssel (`relationship/pg_repository.go:242-245`): Akteur und Zeit der Provenienz sind fälschbar (F-270). `CanonicalSource` akzeptiert alle sieben Quellen von jedem Aufrufer (`relationship.go:551-556`): Nutzer legen Kanten mit `source=discovery` an, die nur mit force löschbar sind und nach 7 d vom Cleanup verschwinden (F-271). DELETE bildet jeden Fehler außer `ErrForceRequired` auf 404 ab (`relationship.go:687-690`; nur per Code-Review festgestellt, F-272). Das AK von WP-160 („manuelle Kanten nur mit force“) widerspricht REL-04 (F-274). WP-401 (`t6-rel-errors`) (F-145) ändert dieselben Stellen (Create-Pfad `relationship.go:521-608` mit `CanonicalSource`, `pg_repository.go:191-222`, 422 an POST in `openapi.yaml`) und muss vor diesem WP gemergt sein (Voraussetzung). Das WP trägt den Pflichtnachweis von WP-159 (API-Test zum Provenienzschutz); die Umsetzung sollte nicht bis zum Ende von K6 warten.
 
 **Akzeptanzkriterien:**
 
 - [ ] Ursachenbestätigung F-272 (Hypothese): PG-Test reproduziert DELETE einer Discovery-Kante mit `force=true`, deren `relationship_type`-Zeile fehlt → heute 404; Ergebnis im PR.
 - [ ] DELETE: nicht gefunden → 404; abgelehnte Suppression (fehlender Typ) → 422 mit Feldbezug; übrige Fehler über `api.WriteRepoError`.
 - [ ] PATCH mit `attributes.provenance` → 422 (reservierter Schlüssel); die gespeicherte Provenienz bleibt unverändert.
-- [ ] POST mit `source` `discovery` oder `agent` → 422 (Systemquellen nur über Discovery- und Agent-Pfad); `manual`, `api`, `import`, `integration`, `workflow` weiter 201. Setzt auf dem Sentinel-Fehlerpfad von WP-399 (`t6-rel-errors`) auf. `TestHandler_UpdateVerifiesAndEdits` (`relationship_test.go:176`), der einen Nutzer-POST mit `source=discovery` als gültig kodiert, legt die Discovery-Kante über das Repository an (Test, der das Fehlverhalten kodiert, umgeschrieben).
+- [ ] POST mit `source` `discovery` oder `agent` → 422 (Systemquellen nur über Discovery- und Agent-Pfad); `manual`, `api`, `import`, `integration`, `workflow` weiter 201. Setzt auf dem Sentinel-Fehlerpfad von WP-401 (`t6-rel-errors`) auf. `TestHandler_UpdateVerifiesAndEdits` (`relationship_test.go:176`), der einen Nutzer-POST mit `source=discovery` als gültig kodiert, legt die Discovery-Kante über das Repository an (Test, der das Fehlverhalten kodiert, umgeschrieben).
 - [ ] `provenance_integration_test.go`: PATCH mit provenance → 422 und DB unverändert; Nutzer-POST source=discovery → 422; POST manual → 201 (Kontrolle); DELETE-Fälle; Handler-Tests in `relationship_test.go`. Retests F-270, F-271, F-272.
-- [ ] `api/openapi.yaml` ergänzt die 422 an PATCH und DELETE `/relationships/{id}` (die 422 an POST liefert WP-399 (`t6-rel-errors`); hier nur die Beschreibung der reservierten Quellen), `schema.d.ts` neu generiert, `TestRoutesAndSpecificationAreInParity` grün; F-274: Block WP-160 in `docs/plan/implementierungsplan.md` an REL-04 angepasst („Discovery-Kanten nur mit force, danach Suppression“, nach E-01), Retest Doku-Review.
+- [ ] `api/openapi.yaml` ergänzt die 422 an PATCH und DELETE `/relationships/{id}` (die 422 an POST liefert WP-401 (`t6-rel-errors`); hier nur die Beschreibung der reservierten Quellen), `schema.d.ts` neu generiert, `TestRoutesAndSpecificationAreInParity` grün; F-274: Block WP-160 in `docs/plan/implementierungsplan.md` an REL-04 angepasst („Discovery-Kanten nur mit force, danach Suppression“, nach E-01), Retest Doku-Review.
 
 **Dateien (8 Einträge, Migration = 2):**
 
@@ -15463,7 +15517,7 @@ REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-584
 
 **Schlüssel:** `t4-offline-online` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-421 (`t6-job02-notices`), WP-444 (`t5-worker-metrics`)
+**Voraussetzungen (gemergt):** WP-425 (`t6-job02-notices`), WP-447 (`t5-worker-metrics`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -15478,13 +15532,13 @@ REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-584
 
 **Schließt Audit-WPs:** [WP-157](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-157) (FEHLGESCHLAGEN, Teil)
 
-**Problem:** Der Ingest setzt `unknown → active` ohne Outbox-Eintrag (`discovery.go:1413-1419`); `ci.online` ist in EVT-02 und `docs/README.md:890` vorgesehen, wird aber praktisch nie gesendet (F-268). Eine Entscheidung ist nicht nötig, EVT-02 nennt das Event. Ob `main.go:494-499` den Offline-Detektor bei ausgeschaltetem Schalter nicht registriert, ist ohne Produktionsänderung nicht testbar (offener Nachweis WP-157). WP-444 (`t5-worker-metrics`) (F-289) lagert die Worker-Liste nach `backend/cmd/server/workers.go` (`buildWorkers`) aus und registriert `ci.offline_detector` nur bei `cfg.WorkerEnabled` (gruppenfremdes WP der Gruppe T5, muss vor diesem WP gemergt sein; die Reihenfolge trägt die Integration ein); dieses WP ergänzt dort die testbare Job-Liste. Das WP trägt den Pflichtnachweis von WP-157 (Registrierungstest des Offline-Detektors); die Umsetzung sollte nicht bis zum Ende von K6 warten.
+**Problem:** Der Ingest setzt `unknown → active` ohne Outbox-Eintrag (`discovery.go:1413-1419`); `ci.online` ist in EVT-02 und `docs/README.md:890` vorgesehen, wird aber praktisch nie gesendet (F-268). Eine Entscheidung ist nicht nötig, EVT-02 nennt das Event. Ob `main.go:494-499` den Offline-Detektor bei ausgeschaltetem Schalter nicht registriert, ist ohne Produktionsänderung nicht testbar (offener Nachweis WP-157). WP-447 (`t5-worker-metrics`) (F-289) lagert die Worker-Liste nach `backend/cmd/server/workers.go` (`buildWorkers`) aus und registriert `ci.offline_detector` nur bei `cfg.WorkerEnabled` (Voraussetzung dieses WP); dieses WP ergänzt dort die testbare Job-Liste. Das WP trägt den Pflichtnachweis von WP-157 (Registrierungstest des Offline-Detektors); die Umsetzung sollte nicht bis zum Ende von K6 warten.
 
 **Akzeptanzkriterien:**
 
 - [ ] Der Ingest hängt bei `unknown → active` in derselben Transaktion `ci.online` an (Envelope wie `ci.offline`, `events/envelope.go:50`); bereits aktive CIs erzeugen kein Event.
 - [ ] PG-Test `ci_online_integration_test.go`: CI per Detektor `unknown` (Outbox `ci.offline`), erneute Sichtung → Status `active` und genau eine Outbox-Zeile `ci.online`; zweite Sichtung → keine weitere. Retest F-268.
-- [ ] Die Scheduler-Jobs liefert nach WP-444 (`t5-worker-metrics`) eine testbare Funktion (`systemJobs` neben `buildWorkers` in `workers.go`). `main_test.go` prüft: `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED=true` → `ci.offline_detector` mit '@every 5m' enthalten; `=false` → nicht enthalten. Liefert WP-444 (`t5-worker-metrics`) diesen Test bereits, verweist das WP auf ihn und ergänzt nur den Fall Schalter an. `TestAuditOfflineDetectorSwitchAndSchedules` bleibt grün.
+- [ ] Die Scheduler-Jobs liefert nach WP-447 (`t5-worker-metrics`) eine testbare Funktion (`systemJobs` neben `buildWorkers` in `workers.go`). `main_test.go` prüft: `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED=true` → `ci.offline_detector` mit '@every 5m' enthalten; `=false` → nicht enthalten. Liefert WP-447 (`t5-worker-metrics`) diesen Test bereits, verweist das WP auf ihn und ergänzt nur den Fall Schalter an. `TestAuditOfflineDetectorSwitchAndSchedules` bleibt grün.
 - [ ] `TestOfflineDetector` grün.
 
 **Dateien (6 Einträge, Migration = 2):**
@@ -15492,7 +15546,7 @@ REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-584
 - backend/internal/discovery/discovery.go
 - backend/internal/discovery/ci_online_integration_test.go (neu)
 - backend/cmd/server/main.go
-- backend/cmd/server/workers.go (angelegt in WP-444)
+- backend/cmd/server/workers.go (angelegt in WP-447)
 - backend/cmd/server/main_test.go
 - docs/traceability.csv
 
@@ -15512,7 +15566,7 @@ LCY-05;[B];D;backend/cmd/server/main_test.go;WP-585
 
 **Entscheidungsbedarf:** keiner
 
-**Nicht Bestandteil:** Umstellung des Schalters auf die Worker-Konvention (WP-444 (`t5-worker-metrics`), F-289); Abonnement von ci.offline in der UI.
+**Nicht Bestandteil:** Umstellung des Schalters auf die Worker-Konvention (WP-447 (`t5-worker-metrics`), F-289); Abonnement von ci.offline in der UI.
 
 ### WP-586 – Fail-closed-Konfiguration: Simulation nur in Entwicklung/Test, Produktion nur mit NATS-Queue
 
@@ -15574,7 +15628,7 @@ ABN-03;[Q], jeweilige Phase;D;backend/internal/config/config_test.go;WP-586
 
 **Schlüssel:** `t5-outage-collector` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-446 (`t5-outage-smtp-load`)
+**Voraussetzungen (gemergt):** WP-449 (`t5-outage-smtp-load`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -15626,7 +15680,7 @@ OPS-06;[Q];A;tests/outage/collector.sh;WP-587
 
 **Schlüssel:** `t6-ntf-templates` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-506 (`t6-ntf-client-contacts`), WP-507 (`t6-ntf-digest`)
+**Voraussetzungen (gemergt):** WP-507 (`t6-ntf-client-contacts`), WP-508 (`t6-ntf-digest`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -15683,7 +15737,7 @@ NTF-03;[B];B;backend/internal/notify/templates_test.go;WP-588
 
 **Schlüssel:** `t6-attrdef-ast` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-510 (`t6-attr-flags-ui`)
+**Voraussetzungen (gemergt):** WP-511 (`t6-attr-flags-ui`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -15796,13 +15850,13 @@ MET-16;B/G1, Teil P2/G2;B;backend/internal/ci/schema_version_integration_test.go
 
 **Entscheidungsbedarf:** [E-93](entscheidungen.md#e-93) Materialisierung org-globaler Attributdefinitionen (MET-16) (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** CI-Dialog und MET-04 (WP-395 (`t6-ci-form-types`)); Attribute Sets und Templates [P2].
+**Nicht Bestandteil:** CI-Dialog und MET-04 (WP-397 (`t6-ci-form-types`)); Attribute Sets und Templates [P2].
 
 ### WP-591 – Signup: Slug-Erschöpfung ohne 500, gleitendes IP-Fenster
 
 **Schlüssel:** `t6-signup-minor` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-508 (`t6-ntf-default-channel`)
+**Voraussetzungen (gemergt):** WP-509 (`t6-ntf-default-channel`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -15853,7 +15907,7 @@ TLC-01;[B];B;backend/internal/signup/signup_integration_test.go;WP-591
 
 **Schlüssel:** `t6-p3-sammel` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-399 (`t6-rel-errors`), WP-550 (`t6-emit-in-tx`)
+**Voraussetzungen (gemergt):** WP-401 (`t6-rel-errors`), WP-550 (`t6-emit-in-tx`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -15882,7 +15936,7 @@ TLC-01;[B];B;backend/internal/signup/signup_integration_test.go;WP-591
 
 **Dateien (12 Einträge, Migration = 2):**
 
-- backend/migrations/000110_interface_net01.up.sql (nach Entscheidung t6-mig110)
+- backend/migrations/000110_interface_net01.up.sql (nach Entscheidung E-94)
 - backend/internal/ipam/net01_migration_integration_test.go (neu)
 - backend/internal/relationship/relationship.go
 - backend/internal/relationshiptype/handler.go
@@ -15977,7 +16031,7 @@ EXP-01;[B], DATEV [P2];C;backend/internal/export/export_test.go;WP-593
 
 **Schlüssel:** `t7-search-deeplinks` · **Meilenstein:** K6 Geringfügige Mängel · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
 
-**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-518 (`t7-ui-keyboard`)
+**Voraussetzungen (gemergt):** WP-338 (`k-e2e-real-ci`), WP-519 (`t7-ui-keyboard`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -16039,7 +16093,7 @@ SRC-01;[B];C;frontend/e2e-real/search-palette.spec.ts;WP-594
 
 **Schlüssel:** `t5-rc-evidence` · **Meilenstein:** K7 Wiederholungsprüfung und Gate G1 · **Epic (Traceability):** G1 · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** 257 WPs: WP-338 – WP-594
+**Voraussetzungen (gemergt):** 253 WPs: WP-338 – WP-452, WP-456, WP-458 – WP-594
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -16058,14 +16112,15 @@ SRC-01;[B];C;frontend/e2e-real/search-palette.spec.ts;WP-594
 
 **Akzeptanzkriterien:**
 
-- [ ] Ausführung nach dem Merge aller Korrektur-WPs aller Gruppen, unmittelbar vor den Wiederholungsprüfungen (WP-596 (`k-reaudit-1`) bis WP-598 (`k-reaudit-3`), WP-599 (`k-audit-ext`)); Release-Kandidat ist der dann aktuelle Stand von main mit Tag v1.0.0-rc.<n>. Die Lieferungs-WP-450 (`t5-pentest-evidence`), WP-451 (`t5-subprocessors`), WP-454 (`t5-abn01-ab`) und WP-452 (`t5-v2-ids`) sind keine Voraussetzung (externe Lieferungen A-02, A-07, A-11); sind sie bis dahin nicht gemergt, führt das Ergebnis ihre IDs als offen. WP-386 (`t5-install-default`) entfällt bei Option 2 oder 3 von E-69; die Voraussetzung gilt dann mit Vermerk als erfüllt.
+- [ ] Ausführung nach dem Merge aller Korrektur-WPs aller Gruppen, unmittelbar vor den Wiederholungsprüfungen (WP-596 (`k-reaudit-1`) bis WP-598 (`k-reaudit-3`), WP-599 (`k-audit-ext`)); Release-Kandidat ist der dann aktuelle Stand von main mit Tag v1.0.0-rc.<n>. Die Lieferungs-WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-457 (`t5-abn01-ab`) und WP-455 (`t5-v2-ids`) sind keine Voraussetzung (externe Lieferungen A-02, A-07, A-11); sind sie bis dahin nicht gemergt, führt das Ergebnis ihre IDs als offen. WP-388 (`t5-install-default`) entfällt bei Option 2 oder 3 von E-69; die Voraussetzung gilt dann mit Vermerk als erfüllt.
 - [ ] install-smoke.yml läuft bei push auf main ohne Pfadfilter sowie weiterhin auf Tags v* und per workflow_dispatch; der PR-Pfadfilter bleibt unverändert.
-- [ ] Neuer Workflow .github/workflows/gate-final.yml (workflow_dispatch, Tags v*) führt 'tests/rep01-structure.test.sh --final' (aus WP-448 (`t5-gate-consistency`), ergänzt um install_evidence_current) und TestTraceabilityFile aus. gate-final.yml läuft auf dem RC-Tag; das Ergebnis (grün oder Liste der offenen Lieferungen und IDs) steht mit Run-ID in g1-gate.md. Ein grünes gate-final ist Eingangsbedingung von WP-600 (`k-gate`), nicht dieses WP.
-- [ ] Endgültige Statuspflege nach dem Stand auf dem RC-Commit: CI-13, TEN-09 (inkl. GATE-03-Zeile 'Isolationstest vollständig'), GATE-01 und GATE-03 in g1-gate.md sowie SR-11, SR-12, SR-13 und die P0-Zeilen in review-g1.md (behoben mit Testverweis oder offen mit Korrektur-WP); V4 und SR-03 nach dem Ergebnis von WP-407 (`t1-channel-matrix`); die GATE-02-Zeile in docs/acceptance/g1-ausnahmen.csv wird entfernt, wenn keine weitere Ausnahme der Art erklaerung oder luecke besteht. Dieser Stand ist der Endstand der Statuspflege in `docs/acceptance/g1-gate.md`, `docs/security/review-g1.md` und `docs/acceptance/g1-installation.md`: WP-600 (`k-gate`) ergänzt in g1-gate.md und review-g1.md nur Verweise auf `audit/g1-reaudit/` und die Gate-Entscheidung und ändert einen Status nur, wenn die Wiederholungsprüfung ihn widerlegt; bei `v1.0.0-rc.<n+1>` trägt WP-600 (`k-gate`) Commit und Lauf-IDs nach.
-- [ ] Auf dem RC-Tag ausgeführt und mit Run-ID dokumentiert: install-smoke (ubuntu-22.04, ubuntu-24.04, debian-12, Onboarding-E2E, tls-domain-pebble, reinstall, release-mode nach WP-386 (`t5-install-default`)) in g1-installation.md; ci (govulncheck ×3, npm-audit, image-scan ×4, traceability, gate) und release (Pre-Release mit SBOMs, Bundles, Image-Signaturen, Attestierungen, cosign_real-Test) in review-g1.md und docs/README.md; outage, restore-test, k8s-smoke und der nächtliche load-Lauf in g1-gate.md; jeder Vermerk 'steht aus' ist entfernt; ein roter Lauf wird mit Ursache und Folge-WP vermerkt. Die RC-Läufe führt nur dieses WP aus; WP-600 (`k-gate`) übernimmt ihre Lauf-IDs und wiederholt Läufe nur bei Commits nach dem RC-Tag.
+- [ ] Neuer Workflow .github/workflows/gate-final.yml (workflow_dispatch, Tags v*) führt 'tests/rep01-structure.test.sh --final' (aus WP-451 (`t5-gate-consistency`), ergänzt um install_evidence_current) und TestTraceabilityFile aus. gate-final.yml läuft auf dem RC-Tag; das Ergebnis (grün oder Liste der offenen Lieferungen und IDs) steht mit Run-ID in g1-gate.md. Ein grünes gate-final ist Eingangsbedingung von WP-600 (`k-gate`), nicht dieses WP.
+- [ ] Endgültige Statuspflege nach dem Stand auf dem RC-Commit: CI-13, TEN-09 (inkl. GATE-03-Zeile 'Isolationstest vollständig'), GATE-01 und GATE-03 in g1-gate.md sowie SR-11, SR-12, SR-13 und die P0-Zeilen in review-g1.md (behoben mit Testverweis oder offen mit Korrektur-WP); V4 und SR-03 nach dem Ergebnis von WP-409 (`t1-channel-matrix`); die GATE-02-Zeile in docs/acceptance/g1-ausnahmen.csv wird entfernt, wenn keine weitere Ausnahme der Art erklaerung oder luecke besteht. Dieser Stand ist der Endstand der Statuspflege in `docs/acceptance/g1-gate.md`, `docs/security/review-g1.md` und `docs/acceptance/g1-installation.md`: WP-600 (`k-gate`) ergänzt in g1-gate.md und review-g1.md nur Verweise auf `audit/g1-reaudit/` und die Gate-Entscheidung und ändert einen Status nur, wenn die Wiederholungsprüfung ihn widerlegt; bei `v1.0.0-rc.<n+1>` trägt WP-600 (`k-gate`) Commit und Lauf-IDs nach.
+- [ ] Auf dem RC-Tag ausgeführt und mit Run-ID dokumentiert: install-smoke (ubuntu-22.04, ubuntu-24.04, debian-12, Onboarding-E2E, tls-domain-pebble, reinstall, release-mode nach WP-388 (`t5-install-default`)) in g1-installation.md; ci (govulncheck ×3, npm-audit, image-scan ×4, traceability, gate) und release (Pre-Release mit SBOMs, Bundles, Image-Signaturen, Attestierungen, cosign_real-Test) in review-g1.md und docs/README.md; outage, restore-test, k8s-smoke und der nächtliche load-Lauf in g1-gate.md; jeder Vermerk 'steht aus' ist entfernt; ein roter Lauf wird mit Ursache und Folge-WP vermerkt. Die RC-Läufe führt nur dieses WP aus; WP-600 (`k-gate`) übernimmt ihre Lauf-IDs und wiederholt Läufe nur bei Commits nach dem RC-Tag.
 - [ ] Retest F-122: ./tests/audit/g1-gate-evidence.test.sh Fall install_evidence_current ok; der Fall ist in den --final-Modus von tests/rep01-structure.test.sh übernommen und aus der Audit-Datei entfernt, Eintrag aus tests/audit/expected-failures.txt entfernt; ist es der letzte Fall, wird tests/audit/g1-gate-evidence.test.sh gelöscht.
 - [ ] Regression: alle CI-Jobs auf dem RC-Commit grün (ci, install-smoke).
-- [ ] Der install-smoke-Lauf auf dem RC-Tag enthält die Real-Stack-Suite in allen sechs Browserprojekten (Matrix aus WP-531 (`k-e2e-real-browsers`)) und den Modul-Lauf von `maintenance.spec.ts` (WP-540 (`t3-maint-e2e`)). Der Ratchet-Vergleich lässt nur Zeilen der nach E-60 zurückgestellten Befunde zu. Lauf-ID in `docs/acceptance/g1-gate.md`.
+- [ ] Der install-smoke-Lauf auf dem RC-Tag enthält die Real-Stack-Suite in allen sechs Browserprojekten (Matrix aus WP-532 (`k-e2e-real-browsers`)) und den Modul-Lauf von `maintenance.spec.ts` (WP-541 (`t3-maint-e2e`)). Der Ratchet-Vergleich lässt nur Zeilen der nach E-60 zurückgestellten Befunde zu. Lauf-ID in `docs/acceptance/g1-gate.md`.
+- [ ] Bekannte Einschränkungen nach E-60: `docs/acceptance/g1-gate.md` (Abschnitt „Ergebnis“) führt einen Eintrag **E-60** mit den zurückgestellten Befunden F-212, F-287, F-316 und F-349, je mit Begründung und Ziel aus dem Abschnitt „Zurückgestellte Befunde“ des Korrekturplans; F-212 steht zusätzlich als Release-Hinweis im Abschnitt „Release-Kandidat“ von `docs/acceptance/g1-installation.md` (implizit provisionierte Add-on-Zeilen aus 000086 nur auf Zwischenbuild-Installationen). Widerspricht der Auftraggeber E-60, entfällt der Eintrag zugunsten der K6-WPs aus der Übergangsregel. Nachweis: Diff im PR; `bash tests/rep01-structure.test.sh` grün.
 
 **Dateien (11 Einträge, Migration = 2):**
 
@@ -16077,7 +16132,7 @@ SRC-01;[B];C;frontend/e2e-real/search-palette.spec.ts;WP-594
 - docs/acceptance/g1-installation.md
 - docs/security/review-g1.md
 - docs/acceptance/g1-gate.md
-- docs/acceptance/g1-ausnahmen.csv (angelegt in WP-447)
+- docs/acceptance/g1-ausnahmen.csv (angelegt in WP-450)
 - docs/README.md
 - docs/traceability.csv
 
@@ -16095,30 +16150,32 @@ GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-595
 INS-01;[Q];G1;tests/rep01-structure.test.sh;WP-595
 ```
 
-**Entscheidungsbedarf:** [E-27](../entscheidungen.md#e-27); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-27](../entscheidungen.md#e-27); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel); [E-69](entscheidungen.md#e-69) TEC-15: Installationsquelle für die Signaturprüfung vor der Installation (offen, Empfehlung als Übergangsregel)
 
-**Nicht Bestandteil:** Lieferungen A-02, A-07, A-11 (WP-452 (`t5-v2-ids`), WP-454 (`t5-abn01-ab`), WP-450 (`t5-pentest-evidence`), WP-451 (`t5-subprocessors`)); grünes gate-final auf dem geprüften Commit, Verweise auf `audit/g1-reaudit/` und Gate-Entscheidung G1 (WP-600 (`k-gate`)); Wiederholung aller Retests (WP-596 (`k-reaudit-1`) bis WP-598 (`k-reaudit-3`), WP-599 (`k-audit-ext`)).
+**Nicht Bestandteil:** Lieferungen A-02, A-07, A-11 (WP-455 (`t5-v2-ids`), WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`)); grünes gate-final auf dem geprüften Commit, Verweise auf `audit/g1-reaudit/` und Gate-Entscheidung G1 (WP-600 (`k-gate`)); Wiederholung aller Retests (WP-596 (`k-reaudit-1`) bis WP-598 (`k-reaudit-3`), WP-599 (`k-audit-ext`)).
 
 ### WP-596 – Wiederholungsprüfung Mandantentrennung, Authentisierung und Autorisierung
 
 **Schlüssel:** `k-reaudit-1` · **Meilenstein:** K7 Wiederholungsprüfung und Gate G1 · **Epic (Traceability):** G1 · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** 80 WPs: WP-338 – WP-366, WP-376 – WP-377, WP-389, WP-391, WP-393, WP-395, WP-399, WP-401, WP-404 – WP-408, WP-421, WP-423 – WP-424, WP-457 – WP-470, WP-532 – WP-538, WP-559 – WP-571, WP-595
+**Voraussetzungen (gemergt):** 80 WPs: WP-338 – WP-367, WP-377 – WP-378, WP-391, WP-393, WP-395, WP-397, WP-401, WP-403, WP-406 – WP-410, WP-425, WP-427 – WP-428, WP-460 – WP-472, WP-533 – WP-539, WP-559 – WP-571, WP-595
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | GATE-02 | [Q] | FEHLGESCHLAGEN | Teil | [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) | `docs/audit/08-frontend-monitoring-nfr-tests.md:73` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:87` |
 
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
+
 **Schließt Audit-WPs:** 45 WPs (Liste im ersten Akzeptanzkriterium; Zuordnung in `abdeckung-wps.csv`).
 
-**Problem:** 45 WPs der Auditgruppen T1-tenancy, T2-auth-authz sind TEILWEISE BESTANDEN oder FEHLGESCHLAGEN (../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md). Ihr Status ändert sich erst durch eine Wiederholungsprüfung nach denselben Statusregeln; Code-Review allein genügt nicht.
+**Problem:** 45 WPs der Bereiche Mandantentrennung, Authentisierung und Autorisierung (Zuordnung in `abdeckung-wps.csv`) sind TEILWEISE BESTANDEN oder FEHLGESCHLAGEN (../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md). Ihr Status ändert sich erst durch eine Wiederholungsprüfung nach denselben Statusregeln; Code-Review allein genügt nicht.
 
 **Akzeptanzkriterien:**
 
 - [ ] Für jeden der 45 WPs (WP-009, WP-010, WP-011, WP-012, WP-013, WP-014, WP-015, WP-016, WP-017, WP-018, WP-019, WP-020, WP-021, WP-025, WP-028, WP-030, WP-033, WP-034, WP-035, WP-039, WP-040, WP-041, WP-064, WP-065, WP-208, WP-042, WP-043, WP-044, WP-048, WP-049, WP-050, WP-051, WP-066, WP-067, WP-068, WP-069, WP-070, WP-072, WP-073, WP-076, WP-164, WP-165, WP-166, WP-168, WP-169) ist der Retest aus `abdeckung-wps.csv` ausgeführt; jedes Akzeptanzkriterium des ursprünglichen WP-Blocks ist durch ausgeführte Evidenz belegt (Statusregeln der Auditmatrix).
 - [ ] Die zugeordneten Befunde sind behoben: ihre kodierenden Tests sind grün und überführt (keine Zeile dieser Befunde mehr in `tests/audit/expected-failures.txt`); zurückgestellte P3-Befunde sind mit Verweis auf E-60 aufgeführt.
 - [ ] Die Real-Stack-Suite `frontend/e2e-real/` ist für die Specs dieser Gruppen vollständig grün (CI-Lauf-ID).
-- [ ] Ergebnis je WP (Status, Evidenz, Lauf-IDs) in `audit/g1-reaudit/WP_MATRIX_1.md` (neu, eigene Datei je Wiederholungs-WP) im Format der Auditmatrix, Rohdaten unter `audit/g1-reaudit/evidence/WP-596 (`k-reaudit-1`)/`; neue Befunde erhalten IDs ab F-355 und ein Korrektur-WP, bevor WP-600 (`k-gate`) beginnt.
+- [ ] Ergebnis je WP (Status, Evidenz, Lauf-IDs) in `audit/g1-reaudit/WP_MATRIX_1.md` (neu, eigene Datei je Wiederholungs-WP) im Format der Auditmatrix, Rohdaten unter `audit/g1-reaudit/evidence/k-reaudit-1/`; neue Befunde erhalten IDs ab F-355 und ein Korrektur-WP, bevor WP-600 (`k-gate`) beginnt.
 - [ ] Prüfung durch eine vom Umsetzer unabhängige Person bzw. Agentensitzung mit adversarialer Gegenprüfung jedes BESTANDEN.
 - [ ] Neue Befunde erhalten fortlaufende IDs ab F-355 (F-354 ist vergeben, `PHASE1_FINDINGS.md:5014`) in der gemeinsamen Datei `audit/g1-reaudit/FINDINGS.md` (Format von `PHASE1_FINDINGS.md`). Jeder neue Befund erhält einen kodierenden Defekttest und eine Zeile in `tests/audit/expected-failures.txt`, damit der Ratchet ihn nicht als Rückfall meldet. Nachweis: Job `auditdefect` grün mit den neuen Zeilen.
 
@@ -16150,22 +16207,24 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-596
 
 **Schlüssel:** `k-reaudit-2` · **Meilenstein:** K7 Wiederholungsprüfung und Gate G1 · **Epic (Traceability):** G1 · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** 86 WPs: WP-338, WP-367 – WP-382, WP-399, WP-409 – WP-415, WP-425 – WP-435, WP-467, WP-471 – WP-497, WP-539 – WP-543, WP-546, WP-572 – WP-586, WP-595
+**Voraussetzungen (gemergt):** 86 WPs: WP-338, WP-368 – WP-384, WP-401, WP-411 – WP-418, WP-429 – WP-439, WP-469, WP-473 – WP-498, WP-540 – WP-543, WP-546, WP-572 – WP-586, WP-595
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | GATE-02 | [Q] | FEHLGESCHLAGEN | Teil | [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) | `docs/audit/08-frontend-monitoring-nfr-tests.md:73` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:87` |
 
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
+
 **Schließt Audit-WPs:** 44 WPs (Liste im ersten Akzeptanzkriterium; Zuordnung in `abdeckung-wps.csv`).
 
-**Problem:** 44 WPs der Auditgruppen T3-data-ingest, T4-collector-load sind TEILWEISE BESTANDEN oder FEHLGESCHLAGEN (../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md). Ihr Status ändert sich erst durch eine Wiederholungsprüfung nach denselben Statusregeln; Code-Review allein genügt nicht.
+**Problem:** 44 WPs der Bereiche Datenmodell, Ingest, Collector und Last (Zuordnung in `abdeckung-wps.csv`) sind TEILWEISE BESTANDEN oder FEHLGESCHLAGEN (../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md). Ihr Status ändert sich erst durch eine Wiederholungsprüfung nach denselben Statusregeln; Code-Review allein genügt nicht.
 
 **Akzeptanzkriterien:**
 
 - [ ] Für jeden der 44 WPs (WP-053, WP-055, WP-057, WP-059, WP-060, WP-061, WP-062, WP-063, WP-077, WP-078, WP-079, WP-080, WP-081, WP-082, WP-085, WP-087, WP-088, WP-089, WP-091, WP-171, WP-172, WP-173, WP-174, WP-175, WP-176, WP-145, WP-146, WP-147, WP-148, WP-151, WP-152, WP-153, WP-154, WP-155, WP-156, WP-157, WP-158, WP-159, WP-160, WP-161, WP-203, WP-204, WP-205, WP-206) ist der Retest aus `abdeckung-wps.csv` ausgeführt; jedes Akzeptanzkriterium des ursprünglichen WP-Blocks ist durch ausgeführte Evidenz belegt (Statusregeln der Auditmatrix).
 - [ ] Die zugeordneten Befunde sind behoben: ihre kodierenden Tests sind grün und überführt (keine Zeile dieser Befunde mehr in `tests/audit/expected-failures.txt`); zurückgestellte P3-Befunde sind mit Verweis auf E-60 aufgeführt.
 - [ ] Die Real-Stack-Suite `frontend/e2e-real/` ist für die Specs dieser Gruppen vollständig grün (CI-Lauf-ID).
-- [ ] Ergebnis je WP (Status, Evidenz, Lauf-IDs) in `audit/g1-reaudit/WP_MATRIX_2.md` (neu, eigene Datei je Wiederholungs-WP) im Format der Auditmatrix, Rohdaten unter `audit/g1-reaudit/evidence/WP-597 (`k-reaudit-2`)/`; neue Befunde erhalten IDs ab F-355 und ein Korrektur-WP, bevor WP-600 (`k-gate`) beginnt.
+- [ ] Ergebnis je WP (Status, Evidenz, Lauf-IDs) in `audit/g1-reaudit/WP_MATRIX_2.md` (neu, eigene Datei je Wiederholungs-WP) im Format der Auditmatrix, Rohdaten unter `audit/g1-reaudit/evidence/k-reaudit-2/`; neue Befunde erhalten IDs ab F-355 und ein Korrektur-WP, bevor WP-600 (`k-gate`) beginnt.
 - [ ] Prüfung durch eine vom Umsetzer unabhängige Person bzw. Agentensitzung mit adversarialer Gegenprüfung jedes BESTANDEN.
 - [ ] Neue Befunde erhalten fortlaufende IDs ab F-355 (F-354 ist vergeben, `PHASE1_FINDINGS.md:5014`) in der gemeinsamen Datei `audit/g1-reaudit/FINDINGS.md` (Format von `PHASE1_FINDINGS.md`). Jeder neue Befund erhält einen kodierenden Defekttest und eine Zeile in `tests/audit/expected-failures.txt`, damit der Ratchet ihn nicht als Rückfall meldet. Nachweis: Job `auditdefect` grün mit den neuen Zeilen.
 
@@ -16197,22 +16256,24 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-597
 
 **Schlüssel:** `k-reaudit-3` · **Meilenstein:** K7 Wiederholungsprüfung und Gate G1 · **Epic (Traceability):** G1 · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** 112 WPs: WP-338, WP-340, WP-344, WP-367, WP-383 – WP-388, WP-390, WP-392, WP-394 – WP-403, WP-415 – WP-422, WP-436 – WP-456, WP-463, WP-466 – WP-467, WP-476, WP-478, WP-498 – WP-530, WP-544 – WP-545, WP-547 – WP-558, WP-587 – WP-595
+**Voraussetzungen (gemergt):** 112 WPs: WP-338, WP-340, WP-344, WP-368, WP-385 – WP-390, WP-392, WP-394, WP-396 – WP-405, WP-418 – WP-426, WP-440 – WP-459, WP-465, WP-468 – WP-469, WP-477, WP-479, WP-499 – WP-531, WP-544 – WP-545, WP-547 – WP-558, WP-587 – WP-595
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | GATE-02 | [Q] | FEHLGESCHLAGEN | Teil | [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) | `docs/audit/08-frontend-monitoring-nfr-tests.md:73` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:87` |
 
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
+
 **Schließt Audit-WPs:** 60 WPs (Liste im ersten Akzeptanzkriterium; Zuordnung in `abdeckung-wps.csv`).
 
-**Problem:** 60 WPs der Auditgruppen T5-install-ops-gate, T6-epic-b, T7-ui sind TEILWEISE BESTANDEN oder FEHLGESCHLAGEN (../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md). Ihr Status ändert sich erst durch eine Wiederholungsprüfung nach denselben Statusregeln; Code-Review allein genügt nicht.
+**Problem:** 60 WPs der Bereiche Installation, Betrieb und Gate, Fundament (Epic B) und Oberfläche (Zuordnung in `abdeckung-wps.csv`) sind TEILWEISE BESTANDEN oder FEHLGESCHLAGEN (../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md). Ihr Status ändert sich erst durch eine Wiederholungsprüfung nach denselben Statusregeln; Code-Review allein genügt nicht.
 
 **Akzeptanzkriterien:**
 
 - [ ] Für jeden der 60 WPs (WP-001, WP-004, WP-005, WP-092, WP-094, WP-095, WP-096, WP-097, WP-099, WP-100, WP-101, WP-102, WP-103, WP-104, WP-105, WP-209, WP-210, WP-211, WP-212, WP-213, WP-107, WP-108, WP-109, WP-114, WP-116, WP-117, WP-119, WP-120, WP-128, WP-129, WP-130, WP-131, WP-132, WP-133, WP-135, WP-136, WP-137, WP-138, WP-139, WP-140, WP-141, WP-142, WP-179, WP-180, WP-181, WP-182, WP-183, WP-187, WP-188, WP-190, WP-191, WP-192, WP-193, WP-194, WP-195, WP-196, WP-197, WP-199, WP-200, WP-201) ist der Retest aus `abdeckung-wps.csv` ausgeführt; jedes Akzeptanzkriterium des ursprünglichen WP-Blocks ist durch ausgeführte Evidenz belegt (Statusregeln der Auditmatrix).
 - [ ] Die zugeordneten Befunde sind behoben: ihre kodierenden Tests sind grün und überführt (keine Zeile dieser Befunde mehr in `tests/audit/expected-failures.txt`); zurückgestellte P3-Befunde sind mit Verweis auf E-60 aufgeführt.
 - [ ] Die Real-Stack-Suite `frontend/e2e-real/` ist für die Specs dieser Gruppen vollständig grün (CI-Lauf-ID).
-- [ ] Ergebnis je WP (Status, Evidenz, Lauf-IDs) in `audit/g1-reaudit/WP_MATRIX_3.md` (neu, eigene Datei je Wiederholungs-WP) im Format der Auditmatrix, Rohdaten unter `audit/g1-reaudit/evidence/WP-598 (`k-reaudit-3`)/`; neue Befunde erhalten IDs ab F-355 und ein Korrektur-WP, bevor WP-600 (`k-gate`) beginnt.
+- [ ] Ergebnis je WP (Status, Evidenz, Lauf-IDs) in `audit/g1-reaudit/WP_MATRIX_3.md` (neu, eigene Datei je Wiederholungs-WP) im Format der Auditmatrix, Rohdaten unter `audit/g1-reaudit/evidence/k-reaudit-3/`; neue Befunde erhalten IDs ab F-355 und ein Korrektur-WP, bevor WP-600 (`k-gate`) beginnt.
 - [ ] Prüfung durch eine vom Umsetzer unabhängige Person bzw. Agentensitzung mit adversarialer Gegenprüfung jedes BESTANDEN.
 - [ ] Neue Befunde erhalten fortlaufende IDs ab F-355 (F-354 ist vergeben, `PHASE1_FINDINGS.md:5014`) in der gemeinsamen Datei `audit/g1-reaudit/FINDINGS.md` (Format von `PHASE1_FINDINGS.md`). Jeder neue Befund erhält einen kodierenden Defekttest und eine Zeile in `tests/audit/expected-failures.txt`, damit der Ratchet ihn nicht als Rückfall meldet. Nachweis: Job `auditdefect` grün mit den neuen Zeilen.
 
@@ -16250,6 +16311,8 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-598
 |---|---|---|---|---|---|---|
 | GATE-02 | [Q] | FEHLGESCHLAGEN | Teil | [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) | `docs/audit/08-frontend-monitoring-nfr-tests.md:73` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:87` |
 
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
+
 **Problem:** Das Phase-1-Abnahmeaudit umfasste genau WP-001 bis WP-213 (../../../audit/phase1-final/PHASE1_AUDIT_REPORT.md, Abschnitt 8). Die weiteren G1-Pflicht-WPs – WP-214 (Feature-Gates), WP-240 bis WP-242 (PII-Vault) und WP-332 bis WP-335 (G1-Nachbesserung NFR-02/NFR-03) – sind nicht nach den Statusregeln abgenommen.
 
 **Akzeptanzkriterien:**
@@ -16258,7 +16321,7 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-598
 - [ ] Gefundene Defekte erhalten IDs ab F-355, einen kodierenden Test (Ratchet-Zeile in `tests/audit/expected-failures.txt`) und ein Korrektur-WP.
 - [ ] NFR-02/NFR-03-Nachweise (WP-334, WP-335) mit `load.yml`-Lauf auf dem aktuellen Stand (Lauf-ID).
 - [ ] Adversariale Gegenprüfung jedes BESTANDEN.
-- [ ] Neue Befunde erhalten fortlaufende IDs ab F-355 (F-354 ist vergeben, `PHASE1_FINDINGS.md:5014`) in der mit WP-596 (`k-reaudit-1`)..3 gemeinsamen Datei `audit/g1-reaudit/FINDINGS.md`. Die Prüfung läuft auf dem RC-Commit aus WP-595 (`t5-rc-evidence`) (Commit-ID in `EXT_MATRIX.md`).
+- [ ] Neue Befunde erhalten fortlaufende IDs ab F-355 (F-354 ist vergeben, `PHASE1_FINDINGS.md:5014`) in der mit WP-596 (`k-reaudit-1`), WP-597 (`k-reaudit-2`) und WP-598 (`k-reaudit-3`) gemeinsamen Datei `audit/g1-reaudit/FINDINGS.md`. Die Prüfung läuft auf dem RC-Commit aus WP-595 (`t5-rc-evidence`) (Commit-ID in `EXT_MATRIX.md`).
 
 **Dateien (4 Einträge, Migration = 2):**
 
@@ -16287,7 +16350,7 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-599
 
 **Schlüssel:** `k-gate` · **Meilenstein:** K7 Wiederholungsprüfung und Gate G1 · **Epic (Traceability):** G1 · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-531 (`k-e2e-real-browsers`), WP-595 (`t5-rc-evidence`), WP-596 (`k-reaudit-1`), WP-597 (`k-reaudit-2`), WP-598 (`k-reaudit-3`), WP-599 (`k-audit-ext`)
+**Voraussetzungen (gemergt):** WP-532 (`k-e2e-real-browsers`), WP-595 (`t5-rc-evidence`), WP-596 (`k-reaudit-1`), WP-597 (`k-reaudit-2`), WP-598 (`k-reaudit-3`), WP-599 (`k-audit-ext`)
 
 | ID | Tag | Abnahme (Quell-WP) | Beitrag | Quell-WP | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -16295,6 +16358,8 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-599
 | GATE-02 | [Q] | FEHLGESCHLAGEN | Teil | [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) | `docs/audit/08-frontend-monitoring-nfr-tests.md:73` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:87` |
 | GATE-05 | [Q] | FEHLGESCHLAGEN | Teil | [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) | `docs/audit/08-frontend-monitoring-nfr-tests.md:76` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:93` |
 | SEQ-01 | [Q] | FEHLGESCHLAGEN | Teil | [WP-213](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-213) | `docs/audit/08-frontend-monitoring-nfr-tests.md:71` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:75` |
+
+**Befunde:** keine (Rahmen- bzw. Nachweis-WP)
 
 **Problem:** Das Abnahmeaudit endete mit NO-GO; Phase 2 darf erst nach einer erneuten Gate-Entscheidung beginnen (E-59). Die Gate-Checkliste `docs/acceptance/g1-gate.md` und das Sicherheitsreview `docs/security/review-g1.md` enthalten PASS-Einträge, denen das Audit widerspricht.
 
@@ -16305,7 +16370,7 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-599
 - [ ] Pentest-Bericht mit Befundliste im Repository, kein offenes Critical/High (Befunde zu WP-210/WP-213).
 - [ ] `docs/acceptance/g1-gate.md` und `docs/security/review-g1.md`: Die Statuswerte pflegt WP-595 (`t5-rc-evidence`) auf dem RC-Stand. Dieses WP ergänzt nur die Verweise auf die Ergebnisse unter `audit/g1-reaudit/` (`WP_MATRIX_1.md` bis `WP_MATRIX_3.md`, `EXT_MATRIX.md`, `FINDINGS.md`, `PASSED_REGRESSION.md`, `GATE_DECISION.md`) und die Gate-Entscheidung. Einen Statuswert ändert es nur, wenn die Wiederholungsprüfung einen RC-Status widerlegt; die Änderung nennt die neue Befund-ID (ab F-355) und die Evidenz. Jeder PASS-Eintrag verweist auf ausgeführte Evidenz; `bash tests/rep01-structure.test.sh` grün.
 - [ ] Gate-Entscheidung G1 mit Datum und Entscheider in `audit/g1-reaudit/GATE_DECISION.md` (neu); bei GO ist der Start der Phase 2 (WP-243) freigegeben.
-- [ ] Auf dem geprüften Commit läuft `.github/workflows/gate-final.yml` (aus WP-595 (`t5-rc-evidence`)) grün. Damit gilt: `bash tests/rep01-structure.test.sh --final` besteht (kein offenes Critical in Review und Pentest, kein offenes High/Critical im Pentest, jede GATE-Zeile PASS), `TestTraceabilityFile` ist grün, und `docs/acceptance/g1-ausnahmen.csv` enthält keine Zeile der Art `erklaerung` oder `luecke`. Der Normalmodus von `tests/rep01-structure.test.sh` genügt nicht, weil er offene Critical-Zeilen bei GATE-01 'offen' als konsistent akzeptiert (WP-448 (`t5-gate-consistency`)). Lauf-ID in `audit/g1-reaudit/GATE_DECISION.md`.
+- [ ] Auf dem geprüften Commit läuft `.github/workflows/gate-final.yml` (aus WP-595 (`t5-rc-evidence`)) grün. Damit gilt: `bash tests/rep01-structure.test.sh --final` besteht (kein offenes Critical in Review und Pentest, kein offenes High/Critical im Pentest, jede GATE-Zeile PASS), `TestTraceabilityFile` ist grün, und `docs/acceptance/g1-ausnahmen.csv` enthält keine Zeile der Art `erklaerung` oder `luecke`. Der Normalmodus von `tests/rep01-structure.test.sh` genügt nicht, weil er offene Critical-Zeilen bei GATE-01 'offen' als konsistent akzeptiert (WP-451 (`t5-gate-consistency`)). Lauf-ID in `audit/g1-reaudit/GATE_DECISION.md`.
 - [ ] Die Lauf-IDs auf dem RC-Tag aus WP-595 (`t5-rc-evidence`) (install-smoke auf allen Plattformen einschließlich Real-Stack-Matrix, ci, release, outage, restore-test, k8s-smoke, load, gate-final) werden übernommen und nicht doppelt ausgeführt. Liegt nach dem RC-Tag ein weiterer Code-Commit auf main (z. B. Korrektur neuer Befunde aus WP-596 (`k-reaudit-1`) bis WP-598 (`k-reaudit-3`) oder WP-599 (`k-audit-ext`)), wird `v1.0.0-rc.<n+1>` gesetzt und `gate-final.yml`, `ci.yml`, `install-smoke.yml` und `load.yml` laufen darauf erneut; dieses WP trägt dann Commit und Lauf-IDs im Abschnitt „Release-Kandidat“ von `docs/acceptance/g1-installation.md` sowie in `docs/acceptance/g1-gate.md` und `docs/security/review-g1.md` nach (Statuswerte nur nach AK 4), sonst scheitert `install_evidence_current` im `--final`-Modus. Ändert ein Commit nach dem RC-Tag nur von `--final` geprüfte Dokumente (z. B. Lieferungen A-02, A-07, A-11), läuft nur `gate-final.yml` erneut. `GATE_DECISION.md` nennt den geprüften Commit und die Lauf-IDs.
 - [ ] Die 64 im Audit BESTANDENEN WPs sind auf dem geprüften Commit nicht zurückgefallen, denn kein WP der Wiederholungsprüfung deckt sie ab: Die in `PHASE1_WP_AUDIT_MATRIX.md` genannten Evidenztests jedes dieser WPs sind im Lauf grün (Liste je WP mit Testname und Lauf-ID in `audit/g1-reaudit/PASSED_REGRESSION.md`). Ein Rückfall ist ein neuer Befund (ID ab F-355) mit Korrektur-WP und verhindert GO.
 
@@ -16345,12 +16410,14 @@ P3-Befunde, die dieser Plan nach [E-60](entscheidungen.md#e-60) nicht behebt. Ih
 | Befund | Titel | Betroffene WPs | Begründung | Ziel |
 |---|---|---|---|---|
 | [F-212](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-212) | Datenkorrektur 000086 behält implizit provisionierte Add-on-Zeilen | WP-075 | Betrifft ausschließlich die Add-on-Features `iga` und `ai` ([A], CH14), deren Module im G1-Release nach E-03 durch WP-214 abgeschaltet sind; implizit provisionierte Add-on-Zeilen sind im G1-Release wirkungslos (reine Phase-2+-Funktion). Eine Bereinigung muss zudem implizite von echten Operator-Grants unterscheiden (Abgleich mit `operator_audit`) und gehört deshalb zur Aktivierung der Add-on-Module. | Aktivierungs-WP der Add-on-Module IGA und KI (Phase-2-Plan, Modulfreigabe nach E-03); bis dahin Hinweis in den G1-Release-Notes. |
-| [F-287](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-287) | Roundtrip-Test scheitert auf geteilten PostgreSQL-Clustern (clusterweite Rolle reticora_app wird gelöscht) | WP-006 | Auf einem Cluster mit weiteren migrierten Datenbanken bricht 000056_rls_enforcement.down.sql:70 (DROP ROLE reticora_app) mit SQLSTATE 2BP01 ('role reticora_app cannot be dropped because some objects depend on it') ab; der Roundtrip scheitert und lässt die Test-DB auf Version 55 zurück. Der verlangte Retest (PASS auf einem Cluster mit zwei migrierten Datenbanken, zweite DB weiter mit SET ROLE reticora_app) ist nur mit einer Änderung der ausgelieferten Migration 000056 möglich, und die verbietet die Planregel 'bestehende Migrationen nicht ändern'; eine Ausnahme bräuchte eine Entscheidung wie E-26. Alternativ bräuchte es eine eigene Cluster-Testinfrastruktur. Eine AK-Wirkung gibt es nicht: WP-006 ist BESTANDEN, CI nutzt einen dedizierten PostgreSQL-Service, und die Einschränkung ist in docs/plan/implementierungsplan.md:10137 dokumentiert. Bewusst akzeptierte Einschränkung eines Entwicklerwerkzeugs. | Phase-2-Werkzeug-WP (Testinfrastruktur mit temporärem dediziertem Cluster für den Roundtrip, vorab eine pg_shdepend-Prüfung mit klarer Fehlermeldung und Hinweis im Makefile, gegebenenfalls Rollenverwaltung außerhalb der Datenbankmigrationen nach einer Entscheidung wie E-26). |
-| [F-316](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-316) | Audit-Kette synchron unter Org-Lock bis COMMIT statt asynchroner Outbox mit Single-Runner (AUD-04) | WP-132 | Bewusst akzeptierte Abweichung ohne AK-Wirkung: Die synchrone Audit-Kette unter Org-Lock statt asynchroner Outbox mit Single-Runner (AUD-04-Architekturtext) hat der Auftraggeber in E-56 (entschieden 2026-10-15, Abschnitt „Audit-Kette und Outbox“) als verbleibende Grenze mit Folge-WP „Outbox-Nummerierung“ anerkannt. Die WP-132-Kriterien (Kette je Org, lückenlose Sequenz, audit-verify meldet die Bruchstelle, keine Gabelung bei Nebenläufigkeit) sind erfüllt und durch TestAuditChainPerOrganizationPG belegt; es gibt keinen Funktionsverlust, nur eine dokumentierte Durchsatzgrenze je Org. Der JOB-02-Wiring-Test (t6-job02-notices) nimmt den Audit-Runner ausdrücklich aus. | Folge-WP Outbox-Nummerierung nach E-56 vor GA (Asynchroner Audit-Runner nach AUD-04/JOB-02); Regressionsschutz bis dahin TestAuditChainPerOrganizationPG. |
-| [F-349](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-349) | Override-Autor wird im Provenienz-Tooltip als rohe User-ID gezeigt | WP-198 | Bewusst akzeptierte kosmetische Abweichung ohne AK-Wirkung: das REC-10-Kriterium von WP-198 (Quelle, Zeit, Rang/Override-Grund) ist erfüllt, WP-198 BESTANDEN; die User-ID ist korrekt und eindeutig. Die Auflösung von Surrogat-IDs zu Anzeigenamen für die UI ist kein Phase-1-AK. | Phase 2: Anzeigenamen in Provenienz und Historie (WP-235 `m-ui-p2`) |
+| [F-287](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-287) | Roundtrip-Test scheitert auf geteilten PostgreSQL-Clustern (clusterweite Rolle reticora_app wird gelöscht) | WP-006 | Auf einem Cluster mit weiteren migrierten Datenbanken bricht 000056_rls_enforcement.down.sql:70 (DROP ROLE reticora_app) mit SQLSTATE 2BP01 ('role reticora_app cannot be dropped because some objects depend on it') ab; der Roundtrip scheitert und lässt die Test-DB auf Version 55 zurück. Der verlangte Retest (PASS auf einem Cluster mit zwei migrierten Datenbanken, zweite DB weiter mit SET ROLE reticora_app) ist nur mit einer Änderung der ausgelieferten Migration 000056 möglich, und die verbietet die Planregel 'bestehende Migrationen nicht ändern'; eine Ausnahme bräuchte eine Entscheidung wie E-26. Alternativ bräuchte es eine eigene Cluster-Testinfrastruktur. Eine AK-Wirkung gibt es nicht: WP-006 ist BESTANDEN, CI nutzt einen dedizierten PostgreSQL-Service, und die Einschränkung ist in docs/plan/implementierungsplan.md, Abschnitt „Umsetzungsstand (2026-10-14)“, Absatz „Prüfungen auf Commit `dbbfded`“ dokumentiert. Bewusst akzeptierte Einschränkung eines Entwicklerwerkzeugs. | Phase-2-Werkzeug-WP (Testinfrastruktur mit temporärem dediziertem Cluster für den Roundtrip, vorab eine pg_shdepend-Prüfung mit klarer Fehlermeldung und Hinweis im Makefile, gegebenenfalls Rollenverwaltung außerhalb der Datenbankmigrationen nach einer Entscheidung wie E-26). |
+| [F-316](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-316) | Audit-Kette synchron unter Org-Lock bis COMMIT statt asynchroner Outbox mit Single-Runner (AUD-04) | WP-132 | Bewusst akzeptierte Abweichung ohne AK-Wirkung: Die synchrone Audit-Kette unter Org-Lock statt asynchroner Outbox mit Single-Runner (AUD-04-Architekturtext) hat der Auftraggeber in E-56 (entschieden 2026-10-15, Abschnitt „Audit-Kette und Outbox“) als verbleibende Grenze mit Folge-WP „Outbox-Nummerierung“ anerkannt. F-316 verletzt keines der WP-132-Kriterien (Kette je Org mit Sequenz, audit-verify meldet die Bruchstelle, keine Gabelung bei Nebenläufigkeit; Regressionsschutz TestAuditChainPerOrganizationPG); WP-132 ist allein wegen F-045 TEILWEISE BESTANDEN, das WP-423 (`t6-audit-hash-utf8`) behebt. Es gibt keinen Funktionsverlust, nur eine dokumentierte Durchsatzgrenze je Org. Der JOB-02-Wiring-Test (WP-425 (`t6-job02-notices`)) nimmt den Audit-Runner ausdrücklich aus. | Folge-WP Outbox-Nummerierung nach E-56 vor GA (Asynchroner Audit-Runner nach AUD-04/JOB-02); Regressionsschutz bis dahin TestAuditChainPerOrganizationPG. |
+| [F-349](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-349) | Override-Autor wird im Provenienz-Tooltip als rohe User-ID gezeigt | WP-198 | Bewusst akzeptierte kosmetische Abweichung ohne AK-Wirkung: das REC-10-Kriterium von WP-198 (Quelle, Zeit, Rang/Override-Grund) ist erfüllt, WP-198 BESTANDEN; die User-ID ist korrekt und eindeutig. Die Auflösung von Surrogat-IDs zu Anzeigenamen für die UI ist kein Phase-1-AK. | Folge-WP im Phase-2-Plan (Anzeigename des Override-Autors in Provenienz-Tooltip und Historie, z. B. `override_author_name` serverseitig nach der Empfehlung des Befunds); bis dahin bekannte Einschränkung in `docs/acceptance/g1-gate.md` (E-60). |
+
+Bedingte Zurückstellung: Entscheidet der Auftraggeber E-72 mit Option 2, stellen WP-427 (`t1-mig56-down`) und WP-560 (`t1-doc-blob-cleanup`) zusätzlich F-193 bzw. F-187 zurück; beide sind dann hier und in `abdeckung-befunde.csv` nachzutragen.
 
 ## Abdeckung
 
-- **Befunde:** 180 P0–P2-Befunde haben je genau ein schließendes WP; 170 P3-Befunde werden mitbehoben, 4 zurückgestellt. Zuordnung: [`abdeckung-befunde.csv`](abdeckung-befunde.csv).
+- **Befunde:** 180 P0–P2-Befunde haben je genau ein schließendes WP; 170 P3-Befunde werden mitbehoben, 4 zurückgestellt. Zuordnung: [`abdeckung-befunde.csv`](abdeckung-befunde.csv) (`schliessendes_wp` behebt die Ursache und liefert den verbindlichen Retest; `abschluss_wp` ist das letzte beteiligte WP – sind alle beteiligten WPs gemergt, gilt der Befund als behoben).
 - **Audit-WPs:** alle 149 nicht bestandenen WPs haben Korrektur-WPs und ein WP der Wiederholungsprüfung. Zuordnung mit Retest: [`abdeckung-wps.csv`](abdeckung-wps.csv).
 - **Prüfung:** Die Zuordnung ist maschinell geprüft (jeder Befund, jeder nicht bestandene WP, Schlüssel, Voraussetzungen, Aufwand, Dateizahl) und adversarial je Gruppe gegengeprüft.
