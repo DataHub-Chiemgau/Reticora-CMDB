@@ -4601,7 +4601,8 @@ paths:
       description: >-
         Returns the series of one CI for the detail view: the named metric or,
         without name, every metric the CI reported since from (default the last
-        24 hours). Requires the monitoring feature.
+        24 hours). Requires the monitoring feature. A CI outside the caller's
+        client/site scope, unknown or with a malformed id answers 404.
       parameters:
         - name: id
           in: path
@@ -4640,6 +4641,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/monitoring/alerts:
     x-phase: P3

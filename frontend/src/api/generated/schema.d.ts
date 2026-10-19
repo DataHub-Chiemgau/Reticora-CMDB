@@ -2524,7 +2524,7 @@ export interface paths {
     };
     /**
      * Metric series of one CI (MON-02)
-     * @description Returns the series of one CI for the detail view: the named metric or, without name, every metric the CI reported since from (default the last 24 hours). Requires the monitoring feature.
+     * @description Returns the series of one CI for the detail view: the named metric or, without name, every metric the CI reported since from (default the last 24 hours). Requires the monitoring feature. A CI outside the caller's client/site scope, unknown or with a malformed id answers 404.
      */
     get: operations['getCIMetrics'];
     put?: never;
@@ -16363,6 +16363,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
     };
   };
   listAlerts: {

@@ -5,10 +5,6 @@ package rls_test
 // Phase-1 acceptance audit, group T1-tenancy: DEFECT tests (they fail until
 // the product is fixed).
 //
-// WP-040 (MON-01; TEN-06) P2 "Metric series names of a foreign-client CI are
-// visible via GET /api/v1/cis/{id}/metrics": CIMetrics does not check the
-// CI's visibility and MetricNames has no scope predicate.
-//
 // WP-025 (TEN-02, TEN-05, IMP-07; AC2/AC3) P2 "Derived edge scope goes stale
 // when a client- or site-scoped principal moves a CI": propagate_ci_scope
 // (000061) runs as SECURITY INVOKER under the mover's RLS and skips the edge
@@ -23,48 +19,17 @@ package rls_test
 // Retest:
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_01?sslmode=disable \
 //     go test -tags auditdefect -count=1 -v \
-//     -run 'TestAuditT1CIMetricsEndpointScope|TestAuditT1EdgeScopeFollowsScopedMove|TestAuditT1SiteScopeOfLocatedTables' ./internal/tenant/rls/
+//     -run 'TestAuditT1EdgeScopeFollowsScopedMove|TestAuditT1SiteScopeOfLocatedTables' ./internal/tenant/rls/
 
 import (
 	"context"
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/jackc/pgx/v5"
 )
-
-func TestAuditT1CIMetricsEndpointScope(t *testing.T) {
-	w := newT1World(t, "db")
-	f := w.f
-	bg := context.Background()
-	t.Cleanup(func() {
-		// metric_sample has no foreign key to the organization.
-		_, _ = f.Admin.Exec(bg, `DELETE FROM metric_sample WHERE organization_id = ANY($1::uuid[])`, []string{f.OrgA, f.OrgB})
-	})
-	foreign := f.CI(t, f.OrgA, f.Client2, "t1-metrics-c2")
-	if err := monitoring.NewPGMetricStore(f.App).Ingest(f.OrgCtx(f.OrgA), []monitoring.Metric{
-		{OrgID: f.OrgA, CIID: foreign, Name: "t1_secret_metric", Value: 7, Timestamp: time.Now().UTC().Add(-time.Hour)},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	// Positive control: the org-wide principal sees the series.
-	if code, body := w.do(w.orgA, http.MethodGet, "/api/v1/cis/"+foreign+"/metrics", nil); code != http.StatusOK || !strings.Contains(body, "t1_secret_metric") {
-		t.Fatalf("org-wide GET /cis/{id}/metrics: %d %s, want 200 with the series", code, trim(body))
-	}
-	for _, p := range []*channelPrincipal{w.as("client1", only(f.Client1), all()), w.orgB} {
-		if code, _ := w.do(p, http.MethodGet, "/api/v1/cis/"+foreign, nil); code != http.StatusNotFound {
-			t.Fatalf("setup: GET /cis/{client-2 CI} as %s: %d, want 404", p.kind, code)
-		}
-		code, body := w.do(p, http.MethodGet, "/api/v1/cis/"+foreign+"/metrics", nil)
-		if strings.Contains(body, "t1_secret_metric") {
-			t.Errorf("TEN-06: GET /cis/{client-2 CI}/metrics as %s: %d and discloses the series name: %s", p.kind, code, trim(body))
-		}
-	}
-}
 
 func TestAuditT1EdgeScopeFollowsScopedMove(t *testing.T) {
 	w := newT1World(t, "dc")

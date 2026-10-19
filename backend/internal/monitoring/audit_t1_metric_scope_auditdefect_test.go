@@ -21,36 +21,15 @@ package monitoring_test
 //
 // Retest:
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_01?sslmode=disable \
-//     go test -tags auditdefect -count=1 -v -run 'TestAuditT1MetricNamesHonourScope|TestAuditT1MetricViewsHonourScope' ./internal/monitoring/
+//     go test -tags auditdefect -count=1 -v -run 'TestAuditT1MetricViewsHonourScope' ./internal/monitoring/
 
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 )
-
-func TestAuditT1MetricNamesHonourScope(t *testing.T) {
-	m := seedT1Metrics(t, "d9")
-	since := m.from.Add(-time.Hour)
-	for kind, ctx := range m.scopes() {
-		names, err := m.store.MetricNames(ctx, m.f.OrgA, m.foreign, since)
-		if err != nil {
-			t.Fatalf("%s MetricNames: %v", kind, err)
-		}
-		if kind == "org" {
-			if len(names) != 2 {
-				t.Errorf("org MetricNames(foreign CI) = %v, want t1_cpu and t1_secret_series", names)
-			}
-			continue
-		}
-		if len(names) != 0 {
-			t.Errorf("TEN-06: %s MetricNames(client-2 CI) = %v, want none", kind, names)
-		}
-	}
-}
 
 func TestAuditT1MetricViewsHonourScope(t *testing.T) {
 	m := seedT1Metrics(t, "da")

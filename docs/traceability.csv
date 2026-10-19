@@ -487,3 +487,5 @@ TEN-02;[B];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;W
 TEN-05;[B];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
 TEN-09;[Q];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
 TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-343
+MON-01;[B];B;backend/internal/monitoring/audit_t1_metric_scope_integration_test.go;WP-344
+TEN-06;[B];B;backend/internal/tenant/rls/ci_metrics_channel_integration_test.go;WP-344

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -230,8 +231,11 @@ const maxCIMetricNames = 50
 func (s *PGMetricStore) MetricNames(ctx context.Context, orgID, ciID string, since time.Time) ([]string, error) {
 	var names []string
 	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// The ci policy filters the subquery as in metricWhere, so a CI
+		// outside the caller's scope lists no series (TEN-06).
 		rows, err := tx.Query(ctx, `SELECT DISTINCT metric_name FROM metric_sample_v
-			WHERE organization_id = $1 AND ci_id = $2::uuid AND time >= $3 ORDER BY metric_name LIMIT $4`,
+			WHERE organization_id = $1 AND ci_id = $2::uuid AND ci_id IN (SELECT id FROM ci)
+			  AND time >= $3 ORDER BY metric_name LIMIT $4`,
 			orgID, ciID, since, maxCIMetricNames)
 		if err != nil {
 			return fmt.Errorf("list metric names: %w", err)
@@ -247,4 +251,17 @@ func (s *PGMetricStore) MetricNames(ctx context.Context, orgID, ciID string, sin
 		return rows.Err()
 	})
 	return names, err
+}
+
+// CIVisible implements CIVisibility: the ci policy decides under the
+// caller's scope. A malformed id names no CI and never reaches SQL.
+func (s *PGMetricStore) CIVisible(ctx context.Context, orgID, ciID string) (bool, error) {
+	if !api.IsUUID(ciID) {
+		return false, nil
+	}
+	var visible bool
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid)`, ciID).Scan(&visible)
+	})
+	return visible, err
 }
