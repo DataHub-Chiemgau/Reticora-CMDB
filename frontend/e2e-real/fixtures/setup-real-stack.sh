@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+#
+# setup-real-stack.sh — prepares an installed stack for the real-stack suite
+# frontend/e2e-real/ (WP-338). Runs after frontend/e2e/fixtures/
+# setup-onboarding.sh (self-signup, mail catcher, collector), which stays
+# unchanged as a frozen ABN-01 artefact:
+#   1. writes a test variant of frontend/nginx.conf that passes a client
+#      X-Real-IP header through (fallback $remote_addr); the specs give each
+#      tenant its own address for the signup budget (E-33),
+#   2. applies docker-compose.e2e-real.yml (that nginx.conf, raised rate
+#      limits) on top of the onboarding overlay and waits for the stack,
+#   3. exports the variables of frontend/e2e-real/README.md that the
+#      onboarding setup does not set: E2E_DATABASE_URL (PostgreSQL of the
+#      installation on 127.0.0.1:5432) and the Keycloak administrator.
+#
+# Usage: frontend/e2e-real/fixtures/setup-real-stack.sh <compose-dir> [env-file]
+# Writes the variables to $GITHUB_ENV when set, else prints export lines.
+set -euo pipefail
+
+compose_dir="$(cd "${1:?usage: setup-real-stack.sh <compose-dir> [env-file]}" && pwd)"
+env_file="${2:-.env}"
+here="$(cd "$(dirname "$0")" && pwd)"
+repo="$(cd "$here/../../.." && pwd)"
+
+env_value() { sed -n "s/^$1=//p" "$compose_dir/$env_file" | tail -n 1 | tr -d "\"'"; }
+
+files=(-f docker-compose.yml)
+[ -f "$compose_dir/docker-compose.override.yml" ] && files+=(-f docker-compose.override.yml)
+files+=(-f "$repo/frontend/e2e/fixtures/docker-compose.e2e.yml" -f "$here/docker-compose.e2e-real.yml")
+
+# The onboarding overlay needs its signup secrets again when the server is
+# recreated; they live only in the running server container.
+server_id=$(cd "$compose_dir" && docker compose --env-file "$env_file" ps -q server)
+container_env() { docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$server_id" | sed -n "s/^$1=//p"; }
+E2E_CAPTCHA_KEY="$(container_env RETICORA_SIGNUP_CAPTCHA_KEY)"
+E2E_KC_CLIENT_ID="$(container_env RETICORA_KEYCLOAK_ADMIN_CLIENT_ID)"
+E2E_KC_CLIENT_SECRET="$(container_env RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET)"
+[ -n "$E2E_CAPTCHA_KEY" ] && [ -n "$E2E_KC_CLIENT_SECRET" ] || {
+    echo "FAIL: run frontend/e2e/fixtures/setup-onboarding.sh first (no signup configuration on the server)"
+    exit 1
+}
+export E2E_CAPTCHA_KEY E2E_KC_CLIENT_ID E2E_KC_CLIENT_SECRET
+
+echo "== nginx.conf with X-Real-IP passthrough"
+E2E_NGINX_CONF="${RUNNER_TEMP:-/tmp}/nginx-e2e-real.conf"
+awk '
+    /^http \{/ { print; print "    # Test variant (frontend/e2e-real/fixtures/setup-real-stack.sh): keep a client X-Real-IP."; print "    map $http_x_real_ip $e2e_client_ip { \"\" $remote_addr; default $http_x_real_ip; }"; next }
+    { gsub(/proxy_set_header X-Real-IP \$remote_addr;/, "proxy_set_header X-Real-IP $e2e_client_ip;"); print }
+' "$repo/frontend/nginx.conf" >"$E2E_NGINX_CONF"
+grep -q 'X-Real-IP $e2e_client_ip' "$E2E_NGINX_CONF" || { echo "FAIL: no X-Real-IP line rewritten in frontend/nginx.conf"; exit 1; }
+chmod 644 "$E2E_NGINX_CONF"
+export E2E_NGINX_CONF
+
+echo "== Real-stack overlay"
+(cd "$compose_dir" && docker compose --env-file "$env_file" "${files[@]}" up -d server)
+server_port="$(env_value RETICORA_SERVER_PORT)"; server_port="${server_port:-8080}"
+for _ in $(seq 1 60); do
+    curl -fsS "http://localhost:${server_port}/api/v1/signup/challenge" >/dev/null 2>&1 && break
+    sleep 2
+done
+# The frontend resolves the server at its start: recreate it after the server.
+(cd "$compose_dir" && docker compose --env-file "$env_file" "${files[@]}" up -d --force-recreate frontend)
+frontend_port="$(env_value RETICORA_FRONTEND_PORT)"; frontend_port="${frontend_port:-3000}"
+for _ in $(seq 1 60); do
+    curl -fsS "http://localhost:${frontend_port}/api/v1/auth/config" >/dev/null 2>&1 && break
+    sleep 2
+done
+curl -fsS "http://localhost:${frontend_port}/api/v1/auth/config" >/dev/null || {
+    echo "FAIL: the frontend does not reach the server after the real-stack overlay"
+    (cd "$compose_dir" && docker compose --env-file "$env_file" "${files[@]}" logs --tail 60 frontend server)
+    exit 1
+}
+# The passthrough must reach the server: a signup challenge with two
+# different X-Real-IP values must not share one budget (checked by the specs).
+
+kc_port="$(env_value RETICORA_KEYCLOAK_PORT)"; kc_port="${kc_port:-8180}"
+admin="$(env_value KEYCLOAK_ADMIN)"; admin="${admin:-admin}"
+vars=(
+    "E2E_DATABASE_URL=postgres://reticora:$(env_value RETICORA_DB_PASSWORD)@127.0.0.1:5432/reticora?sslmode=disable"
+    "E2E_KEYCLOAK_URL=http://localhost:${kc_port}"
+    "E2E_KEYCLOAK_ADMIN=$admin"
+    "E2E_KEYCLOAK_ADMIN_PASSWORD=$(env_value KEYCLOAK_ADMIN_PASSWORD)"
+)
+psql "${vars[0]#E2E_DATABASE_URL=}" -X -At -c 'SELECT 1' >/dev/null || { echo "FAIL: psql cannot reach the database of the installation"; exit 1; }
+for v in "${vars[@]}"; do
+    if [ -n "${GITHUB_ENV:-}" ]; then echo "$v" >>"$GITHUB_ENV"; else echo "export $v"; fi
+done
+echo "OK: real-stack fixtures ready"
