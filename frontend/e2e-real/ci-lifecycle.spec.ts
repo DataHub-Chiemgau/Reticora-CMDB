@@ -6,6 +6,7 @@ import {
   type BrowserContext,
   type Page,
   type Response,
+  type Route,
 } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { api, signupTenant, stamp, uiLogin, BASE, type Account } from './support/stack';
@@ -791,8 +792,22 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     const onRequest = (r: { url(): string; method(): string }) => {
       if (isCreate(r)) sent++;
     };
+    // The server answers the creates in the order they arrive: the second
+    // POST is passed on only after the first one has been answered, so the
+    // repeat is always the one refused with 409 (otherwise the server could
+    // answer the second click first and the double click would pass by chance).
+    let firstAnswered = () => {};
+    const firstDone = new Promise<void>((resolve) => (firstAnswered = resolve));
+    let routed = 0;
+    const holdRepeat = async (route: Route) => {
+      if (route.request().method() === 'POST' && ++routed > 1) await firstDone;
+      await route.continue();
+    };
     const onResponse = (r: Response) => {
-      if (isCreate(r.request())) statuses.push(r.status());
+      if (isCreate(r.request())) {
+        statuses.push(r.status());
+        firstAnswered();
+      }
     };
 
     await page.goto(`/cmdb/${app.id}`);
@@ -805,6 +820,7 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     await dialog.getByLabel('CI-ID der Gegenstelle').fill(db.id);
     page.on('request', onRequest);
     page.on('response', onResponse);
+    await page.route('**/api/v1/relationships', holdRepeat);
     try {
       // A double click must not create the edge twice. Both clicks land in one
       // task, before the pending state disables the button: the worst case of
@@ -818,6 +834,7 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
         .poll(() => sent > 0 && statuses.length === sent, { message: 'answers to every POST' })
         .toBe(true);
     } finally {
+      await page.unroute('**/api/v1/relationships', holdRepeat);
       page.off('request', onRequest);
       page.off('response', onResponse);
     }
