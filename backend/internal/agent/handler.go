@@ -323,6 +323,14 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The subject of an agent credential (agent:<id>) is no user id: the CI
+	// history records the change without actor (system, source of the
+	// route), the agent stays visible in the CI attributes.
+	if strings.HasPrefix(t.UserID, agentSubjectPrefix) {
+		t.UserID = ""
+		r = r.WithContext(tenant.WithTenant(r.Context(), t))
+	}
+
 	// Resolve the registered agent and its linked CI.
 	ag, err := h.repo.GetByAgentID(r.Context(), t.OrganizationID, payload.AgentID)
 	if err != nil {
@@ -423,8 +431,9 @@ func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payl
 			return "", nil
 		}
 	}
-	// No match: create the endpoint CI. The ci_type key resolves to the UUID
-	// via the tenant-aware type lookup (global system types included).
+	// No match: create the endpoint CI in the agent's client (the scope of
+	// its credential). The ci_type key resolves to the UUID via the
+	// tenant-aware type lookup (global system types included).
 	typeID := ""
 	if h.typeResolve != nil {
 		id, err := h.typeResolve.LookupCITypeID(ctx, orgID, endpointCITypeKey(payload.OS))
@@ -435,6 +444,7 @@ func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payl
 	now := time.Now().UTC()
 	item := &ci.Item{
 		OrganizationID:  orgID,
+		ClientID:        ag.ClientID,
 		CITypeID:        typeID,
 		Name:            ag.Hostname,
 		Hostname:        ag.Hostname,

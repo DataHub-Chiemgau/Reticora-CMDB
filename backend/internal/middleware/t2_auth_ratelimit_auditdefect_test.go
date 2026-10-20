@@ -5,12 +5,6 @@
 // requirement the product currently violates and fails on an assertion until
 // the finding is fixed.
 //
-//   - WP-050 / WP-066 (AUT-02, API-04), finding P1 "Validation stage rejects
-//     every SPA session refresh": the validator registry lists
-//     POST /api/v1/auth/refresh as a JSON-body route although the OpenAPI
-//     operation refreshSession has no requestBody; the cookie-only refresh of
-//     frontend/src/auth/session.ts gets 400 before the handler.
-//     Gap (critical): "Validator registry consistent with OpenAPI".
 //   - WP-050 (AUT-10), finding P2 "Successful session refreshes consume the
 //     per-IP pre-auth budget".
 //   - WP-166 (API-04), finding P1 "Refused requests of one credential consume
@@ -35,137 +29,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"slices"
-	"sort"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
-	"gopkg.in/yaml.v3"
 )
-
-// TestAuditT2RefreshPassesOpenAPIValidation: the SPA renews the access token
-// with a POST that carries only the HttpOnly refresh cookie, no body and no
-// Content-Type (frontend/src/auth/session.ts:22-25, api/openapi.yaml
-// operation refreshSession without requestBody). The validation stage must
-// hand it to the refresh handler (AUT-02).
-func TestAuditT2RefreshPassesOpenAPIValidation(t *testing.T) {
-	for _, tc := range []struct {
-		name, contentType, body string
-	}{
-		{name: "SPA refresh: cookie only, no Content-Type, no body"},
-		{name: "cookie only, Content-Type application/json, empty body", contentType: "application/json"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			reached := false
-			h := OpenAPIValidation(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				reached = true
-				w.WriteHeader(http.StatusOK)
-			}))
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(tc.body))
-			if tc.contentType != "" {
-				req.Header.Set("Content-Type", tc.contentType)
-			}
-			req.AddCookie(&http.Cookie{Name: identity.RefreshCookieName, Value: "opaque-refresh-token"})
-			w := httptest.NewRecorder()
-			h.ServeHTTP(w, req)
-			if !reached || w.Code != http.StatusOK {
-				t.Errorf("POST /api/v1/auth/refresh (%s): status %d, handler reached %v, body %s; want the request to reach the refresh handler",
-					tc.name, w.Code, reached, strings.TrimSpace(w.Body.String()))
-			}
-		})
-	}
-}
-
-// specOperation is the part of an OpenAPI operation the registry check needs.
-type specOperation struct {
-	RequestBody *struct {
-		Required bool `yaml:"required"`
-	} `yaml:"requestBody"`
-}
-
-// TestAuditT2ValidatorRegistryMatchesOpenAPIRequestBodies: the lightweight
-// validator must not demand more than the API contract (API-04 validation
-// against the OpenAPI document). For every registered write route that the
-// OpenAPI document describes:
-//   - RequiresBody only where the operation declares a required requestBody;
-//   - a Content-Type check only where the operation has a requestBody.
-//
-// A positive control shows the validator still refuses a bodiless
-// POST /api/v1/cis (documented required body).
-func TestAuditT2ValidatorRegistryMatchesOpenAPIRequestBodies(t *testing.T) {
-	v := NewOpenAPIValidator()
-	if len(v.specBytes) == 0 {
-		t.Fatalf("OpenAPI document not found (spec path %q)", v.specPath)
-	}
-	var doc struct {
-		Paths map[string]map[string]yaml.Node `yaml:"paths"`
-	}
-	if err := yaml.Unmarshal(v.specBytes, &doc); err != nil {
-		t.Fatalf("parse OpenAPI document: %v", err)
-	}
-	// The registry and the document may name path parameters differently
-	// ({id} vs {teamId}); compare with anonymous parameters.
-	normalize := func(path string) string {
-		parts := strings.Split(path, "/")
-		for i, p := range parts {
-			if strings.HasPrefix(p, "{") && strings.HasSuffix(p, "}") {
-				parts[i] = "{}"
-			}
-		}
-		return strings.Join(parts, "/")
-	}
-	ops := map[string]specOperation{}
-	for path, items := range doc.Paths {
-		for method, node := range items {
-			if !slices.Contains([]string{"post", "put", "patch"}, method) {
-				continue
-			}
-			var op specOperation
-			if err := node.Decode(&op); err != nil {
-				t.Fatalf("decode %s %s: %v", method, path, err)
-			}
-			ops[strings.ToUpper(method)+" "+normalize(path)] = op
-		}
-	}
-
-	var mismatches []string
-	for key, spec := range v.routes {
-		parts := strings.SplitN(key, " ", 2)
-		if !shouldValidateContentType(parts[0]) {
-			continue
-		}
-		op, documented := ops[parts[0]+" "+normalize(parts[1])]
-		if !documented {
-			continue
-		}
-		hasBody := op.RequestBody != nil
-		if spec.RequiresBody && (!hasBody || !op.RequestBody.Required) {
-			mismatches = append(mismatches, key+": validator requires a JSON body, OpenAPI declares no required requestBody")
-		}
-		if !hasBody {
-			mismatches = append(mismatches, key+": validator requires a JSON Content-Type, OpenAPI declares no requestBody")
-		}
-	}
-	sort.Strings(mismatches)
-	if len(mismatches) > 0 {
-		t.Errorf("validator registry demands more than the OpenAPI contract (%d routes):\n  %s", len(mismatches), strings.Join(mismatches, "\n  "))
-	}
-
-	// Positive control: a documented required body is still enforced.
-	reached := false
-	h := v.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/cis", nil)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	if reached || w.Code != http.StatusBadRequest {
-		t.Errorf("control: POST /api/v1/cis without body -> %d (handler reached %v), want 400", w.Code, reached)
-	}
-}
 
 // TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget: AUT-10 limits
 // login, signup, invitation acceptance and API-key checks per IP (20/min).

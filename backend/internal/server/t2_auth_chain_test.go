@@ -8,8 +8,9 @@
 //   - WP-066 (AUT-02, SEC-06), gap (critical) "No API test of refresh/logout
 //     through the production middleware chain": logout through the chain
 //     blacklists the access token and revokes the refresh family.
-//     (The cookie-only refresh itself is a defect: see
-//     t2_auth_chain_auditdefect_test.go.)
+//   - WP-364 (AUT-02, API-04), finding F-018: the cookie-only refresh
+//     (no body, no Content-Type) passes the validation stage and rotates
+//     the cookie; after the logout it gets 401.
 //   - WP-067 (AUT-04, API-05), gap (high) "API key endpoints through the
 //     production router (authz, validator, entitlement)": create shows the
 //     key once, list hides key and hash, rotate without body uses the 24 h
@@ -21,7 +22,7 @@
 //
 // Retest:
 //
-//	cd backend && go test -count=1 -v -run 'TestT2Audit|TestAuditT2ServiceAccountRoleAssignmentNeedsRoleManage' ./internal/server/
+//	cd backend && go test -count=1 -v -run 'TestT2Audit|TestAuditT2ServiceAccountRoleAssignmentNeedsRoleManage|TestAuditT2CookieOnlyRefreshThroughProductionChain' ./internal/server/
 package server_test
 
 import (
@@ -209,14 +210,51 @@ func TestT2AuditLogoutThroughProductionChain(t *testing.T) {
 	if w := s.do(t2Request{method: http.MethodGet, path: "/api/v1/cis", bearer: token}); w.Code != http.StatusUnauthorized {
 		t.Errorf("GET /api/v1/cis with the logged-out token: %d, want 401", w.Code)
 	}
-	// The body {} only satisfies the request validator (see the defect test
-	// of the cookie-only refresh); the refresh family must be revoked.
-	if w := s.do(t2Request{method: http.MethodPost, path: "/api/v1/auth/refresh", cookie: cookie, body: "{}", contentType: "application/json"}); w.Code != http.StatusUnauthorized {
+	// The SPA's cookie-only refresh: the refresh family must be revoked.
+	if w := s.do(t2Request{method: http.MethodPost, path: "/api/v1/auth/refresh", cookie: cookie}); w.Code != http.StatusUnauthorized {
 		t.Errorf("refresh with the logged-out cookie: %d %s, want 401", w.Code, w.Body.String())
 	}
 	if w := s.do(t2Request{method: http.MethodGet, path: "/api/v1/me", bearer: other}); w.Code != http.StatusOK {
 		t.Errorf("another session of the user after the logout: %d, want 200", w.Code)
 	}
+}
+
+// TestAuditT2CookieOnlyRefreshThroughProductionChain covers WP-364 (AUT-02,
+// F-018): the SPA renews the 15-minute access token with a POST that carries only the HttpOnly refresh
+// cookie (frontend/src/auth/session.ts:22-25; OpenAPI refreshSession has no
+// requestBody). Through the production chain it must get 200 with a new
+// token and a rotated cookie; a missing cookie and a reused cookie get 401.
+func TestAuditT2CookieOnlyRefreshThroughProductionChain(t *testing.T) {
+	s := newT2Stack(t)
+	_, cookie := s.login(t, identity.PermPermissionRead)
+
+	t.Run("cookie only refresh rotates", func(t *testing.T) {
+		w := s.do(t2Request{method: http.MethodPost, path: "/api/v1/auth/refresh", cookie: cookie})
+		if w.Code != http.StatusOK {
+			t.Fatalf("POST /api/v1/auth/refresh with only the refresh cookie: %d %s, want 200", w.Code, strings.TrimSpace(w.Body.String()))
+		}
+		var body struct {
+			Token string `json:"token"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body.Token == "" {
+			t.Errorf("refresh body %s: no token", w.Body.String())
+		}
+		c := t2RefreshCookie(w)
+		if c == nil || c.Value == "" || c.Value == cookie || !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteStrictMode || c.Path != "/api/v1/auth" {
+			t.Errorf("rotated refresh cookie %+v, want a new HttpOnly, Secure, SameSite=Strict cookie for /api/v1/auth", c)
+		}
+		if w := s.do(t2Request{method: http.MethodGet, path: "/api/v1/me", bearer: body.Token}); w.Code != http.StatusOK {
+			t.Errorf("GET /api/v1/me with the refreshed token: %d", w.Code)
+		}
+		if w := s.do(t2Request{method: http.MethodPost, path: "/api/v1/auth/refresh", cookie: cookie}); w.Code != http.StatusUnauthorized {
+			t.Errorf("second use of the consumed cookie: %d %s, want 401", w.Code, strings.TrimSpace(w.Body.String()))
+		}
+	})
+	t.Run("refresh without cookie", func(t *testing.T) {
+		if w := s.do(t2Request{method: http.MethodPost, path: "/api/v1/auth/refresh"}); w.Code != http.StatusUnauthorized {
+			t.Errorf("POST /api/v1/auth/refresh without cookie: %d %s, want 401", w.Code, strings.TrimSpace(w.Body.String()))
+		}
+	})
 }
 
 // TestT2AuditAPIKeysThroughProductionChain: the api-keys resource (AUT-04,

@@ -431,7 +431,31 @@ func main() {
 	}
 	// Every grant of org_admin binds the IdP account to MFA (WP-358).
 	mfa := mfaEnforcer(cfg)
-	mux, httpMetrics, err := server.NewRouter(repos, server.Options{
+	// Session tokens are always verified cryptographically unless the operator
+	// explicitly opted into the insecure development mode. API keys are
+	// verified against the database when available, which gives service
+	// tokens the same authenticated principal as interactive users.
+	// A key acts with the intersection of its permissions and its owner's
+	// current role assignments (AUT-04).
+	apiKeys := identity.NewAPIKeyServiceWithStore(repos.APIKeys).WithOwnerAccess(repos.Permission).
+		WithServiceAccountAccess(user.ServiceAccountAccess{Repo: repos.ServiceAccounts})
+	// A nil *SessionIssuer must reach the middleware as a nil interface:
+	// only then does the development login (AUT-03, development only) apply.
+	var sessionVerifier middleware.SessionVerifier
+	if sessionIssuer != nil {
+		sessionVerifier = sessionIssuer
+	}
+	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionVerifier, apiKeys)
+	if sessionIssuer == nil {
+		slog.Warn("INSECURE DEVELOPMENT MODE: bearer tokens are accepted without signature verification")
+	}
+
+	if err = middleware.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		slog.Error("invalid RETICORA_TRUSTED_PROXIES", "error", err)
+		os.Exit(1)
+	}
+
+	handler, err := newHTTPHandler(repos, server.Options{
 		Version:            version,
 		Modules:            modules,
 		MetricsTenantLabel: cfg.MetricsTenantLabel,
@@ -455,20 +479,24 @@ func main() {
 		AIProvider:           aiProvider,
 		Blobs:                blobStore,
 		Egress:               egressPolicy,
-		RouteMiddleware: []func(http.Handler) http.Handler{
-			middleware.OpenAPIValidation,
-			middleware.IdempotencyWithStore(cacheStore),
-		},
-		Readiness:        readiness,
-		IngestQueue:      ingestQueue,
-		Signup:           signupService(cfg, auditPool, smtpSender),
-		Notifications:    notifications,
-		Events:           emitterOf(auditPool),
-		SignupProtection: signupProtection(cfg, cacheStore),
+		Readiness:            readiness,
+		IngestQueue:          ingestQueue,
+		Signup:               signupService(cfg, auditPool, smtpSender),
+		Notifications:        notifications,
+		Events:               emitterOf(auditPool),
+		SignupProtection:     signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
 		InvitationAccounts: invitationAccounts(cfg),
 		MFA:                mfa,
 		CollectorCA:        collectorPKI,
+	}, httpStages{
+		preAuth:     middleware.PreAuthRateLimiter(cfg.PreAuthRateLimitRPM, cacheStore),
+		auth:        authMiddleware,
+		tenant:      middleware.TenantMiddleware,
+		entitlement: entitlementSvc.Middleware,
+		rateLimit:   middleware.RateLimiterWithLimits(middleware.RateLimits{PerCredential: cfg.RateLimitRPM, PerOrganization: cfg.RateLimitOrgRPM}, cacheStore),
+		validation:  middleware.OpenAPIValidation,
+		idempotency: middleware.IdempotencyWithStore(cacheStore),
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -650,51 +678,6 @@ func main() {
 		}
 	}()
 
-	// Session tokens are always verified cryptographically unless the operator
-	// explicitly opted into the insecure development mode. API keys are
-	// verified against the database when available, which gives service
-	// tokens the same authenticated principal as interactive users.
-	// A key acts with the intersection of its permissions and its owner's
-	// current role assignments (AUT-04).
-	apiKeys := identity.NewAPIKeyServiceWithStore(repos.APIKeys).WithOwnerAccess(repos.Permission).
-		WithServiceAccountAccess(user.ServiceAccountAccess{Repo: repos.ServiceAccounts})
-	// A nil *SessionIssuer must reach the middleware as a nil interface:
-	// only then does the development login (AUT-03, development only) apply.
-	var sessionVerifier middleware.SessionVerifier
-	if sessionIssuer != nil {
-		sessionVerifier = sessionIssuer
-	}
-	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionVerifier, apiKeys)
-	if sessionIssuer == nil {
-		slog.Warn("INSECURE DEVELOPMENT MODE: bearer tokens are accepted without signature verification")
-	}
-
-	if err := middleware.SetTrustedProxies(cfg.TrustedProxies); err != nil {
-		slog.Error("invalid RETICORA_TRUSTED_PROXIES", "error", err)
-		os.Exit(1)
-	}
-
-	// Middleware chain per API-04:
-	// RequestID/Tracing -> Recovery -> Security-Headers -> Pre-Auth-Limit
-	// (per IP, AUT-10) -> Auth -> Tenant -> Entitlement -> Rate-Limit ->
-	// [per route: Authz -> Validation -> Idempotency] -> Handler.
-	// Validation and idempotency are route middleware (server.Options), so
-	// they run after the route's authorization. The HTTP metrics middleware
-	// sits just inside the tenant middleware so the organization_id label is
-	// populated from the request context.
-	handler := middleware.Chain(
-		middleware.RequestID,
-		middleware.Recovery,
-		middleware.Logger,
-		middleware.SecurityHeaders,
-		middleware.PreAuthRateLimiter(cfg.PreAuthRateLimitRPM, cacheStore),
-		authMiddleware,
-		middleware.TenantMiddleware,
-		httpMetrics,
-		entitlementSvc.Middleware,
-		middleware.RateLimiterWithLimits(middleware.RateLimits{PerCredential: cfg.RateLimitRPM, PerOrganization: cfg.RateLimitOrgRPM}, cacheStore),
-	)(mux)
-
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
 		Handler:      handler,
@@ -721,6 +704,42 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("server shutdown error", "error", err)
 	}
+}
+
+// httpStages are the configured stages of the API-04 request chain.
+type httpStages struct {
+	preAuth, auth, tenant, entitlement, rateLimit func(http.Handler) http.Handler
+	// validation and idempotency run per route after its authorization.
+	validation, idempotency func(http.Handler) http.Handler
+}
+
+// newHTTPHandler builds the API router and the middleware chain the server
+// serves (API-04):
+// RequestID/Tracing -> Recovery -> Security-Headers -> Pre-Auth-Limit
+// (per IP, AUT-10) -> Auth -> Tenant -> Entitlement -> Rate-Limit ->
+// [per route: Authz -> Validation -> Idempotency] -> Handler.
+// Validation and idempotency are route middleware (server.Options), so
+// they run after the route's authorization. The HTTP metrics middleware
+// sits just inside the tenant middleware so the organization_id label is
+// populated from the request context.
+func newHTTPHandler(repos server.Repositories, opts server.Options, stages httpStages) (http.Handler, error) {
+	opts.RouteMiddleware = []func(http.Handler) http.Handler{stages.validation, stages.idempotency}
+	mux, httpMetrics, err := server.NewRouter(repos, opts)
+	if err != nil {
+		return nil, err
+	}
+	return middleware.Chain(
+		middleware.RequestID,
+		middleware.Recovery,
+		middleware.Logger,
+		middleware.SecurityHeaders,
+		stages.preAuth,
+		stages.auth,
+		stages.tenant,
+		httpMetrics,
+		stages.entitlement,
+		stages.rateLimit,
+	)(mux), nil
 }
 
 // provisionEntitlements stores the plan's entitlement rows for every
