@@ -10,7 +10,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-60](#e-60) | Zurückgestellte P3-Befunde und Risikoakzeptanz für G1 | offen (Empfehlung als Übergangsregel) | WP-600 |
 | [E-61](#e-61) | Anlage von Dokumenten durch client- oder site-gescopte Principals | offen (Empfehlung als Übergangsregel) | WP-341 |
 | [E-62](#e-62) | Beziehungen zwischen eigenem CI und org-weitem CI | entschieden: Option 2 (Auftraggeber, 2026-10-20) | WP-345 |
-| [E-63](#e-63) | Client-/Site-Scope für Metriken (WP-025 AK1 gegenüber ADR 0001 Punkt 4) | offen (Empfehlung als Übergangsregel) | WP-350 |
+| [E-63](#e-63) | Client-/Site-Scope für Metriken (WP-025 AK1 gegenüber ADR 0001 Punkt 4) | entschieden: Option 1 (Auftraggeber, 2026-10-20) | WP-350 |
 | [E-64](#e-64) | Widerruf von Service-Account-Keys bei Deaktivierung des anlegenden Benutzers | offen (Empfehlung als Übergangsregel) | WP-359 |
 | [E-65](#e-65) | MFA-Pflicht im Login-Pfad ohne Keycloak-Admin-Client (AUT-09) | offen (Empfehlung als Übergangsregel) | WP-367 |
 | [E-66](#e-66) | API-07/API-08: Bulk-Statusänderung bei erzwungenem If-Match | offen (Empfehlung als Übergangsregel) | WP-368 |
@@ -136,7 +136,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** Client-/Site-Scope für Metriken (WP-025 AK1 gegenüber ADR 0001 Punkt 4)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-20)
 
 **Frage:** WP-025 AK1 verlangt abgeleitete client_id/site_id an metric_sample; ADR 0001 Punkt 4 sieht Client-/Site-Prädikate als Sub-Select in den Security-Barrier-Views vor. metric_sample ist eine komprimierte Hypertable ohne RLS. Welche Variante gilt?
 
@@ -148,7 +148,9 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: folgt der ADR, ist bei CI-Verschiebungen immer aktuell und vermeidet Schreibkosten auf komprimierten Chunks; Messwerte in der ADR.
 
-**Übergangsregel:** WP-350 (`t1-metric-views`) setzt Option 1 um; bei abweichender Entscheidung folgt ein eigenes WP.
+**Übergangsregel (bis 2026-10-20):** WP-350 (`t1-metric-views`) setzt Option 1 um; bei abweichender Entscheidung folgt ein eigenes WP.
+
+**Umsetzung:** WP-350 (Migration 000143): beide Metrik-Views prüfen Client und Site über das CI der Probe; Messwerte in ADR 0001 Punkt 4. Abfragen ohne CI-Filter sind messbar langsamer; Option 2 bleibt der Ausweg, falls sie zeitkritisch werden.
 
 **Betroffene IDs:** TEN-02, TEN-05, TEC-06, MON-01
 

@@ -1324,7 +1324,7 @@ MON-01;[B];B;backend/internal/monitoring/timescale_rls_spike_integration_test.go
 TEN-02;[B];B;backend/internal/monitoring/audit_t1_metric_scope_integration_test.go;WP-350
 ```
 
-**Entscheidungsbedarf:** [E-63](entscheidungen.md#e-63) Client-/Site-Scope für Metriken (WP-025 AK1 gegenüber ADR 0001 Punkt 4) (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-63](entscheidungen.md#e-63) Client-/Site-Scope für Metriken (WP-025 AK1 gegenüber ADR 0001 Punkt 4) (entschieden: Option 1, Auftraggeber 2026-10-20)
 
 **Nicht Bestandteil:** Denormalisierte client_id/site_id in metric_sample (nur bei abweichender Entscheidung, eigenes WP); Kompressions- und Retention-Parameter.
 
