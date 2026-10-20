@@ -13,7 +13,8 @@ import (
 
 // TestDisposalRepositoryClientScope runs the disposal register with the
 // principal's tenant scope (TEN-06, WP-018): a principal restricted to client
-// 1 neither sees nor records the disposal of a client-2 asset.
+// 1 neither sees nor records the disposal of a client-2 asset. The records
+// carry the client of their asset (migration 000145, WP-353, MGT-02).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestDisposalRepositoryClientScope(t *testing.T) {
@@ -42,6 +43,13 @@ func TestDisposalRepositoryClientScope(t *testing.T) {
 	}
 	if _, err = repo.GetByID(ctx, f.OrgA, foreignRec.ID); err == nil {
 		t.Fatal("client-1 principal read the disposal of a client-2 asset")
+	}
+	ownRec := list[0]
+	for id, want := range map[string]string{ownRec.ID: f.Client1, foreignRec.ID: f.Client2} {
+		var client string
+		if err = f.Admin.QueryRow(context.Background(), `SELECT COALESCE(client_id::text, '') FROM disposal_record WHERE id = $1`, id).Scan(&client); err != nil || client != want {
+			t.Errorf("client of disposal record %s: %q (err %v), want %q", id, client, err, want)
+		}
 	}
 	var count int
 	if err = f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM disposal_record WHERE asset_id = $1`, foreign).Scan(&count); err != nil || count != 1 {

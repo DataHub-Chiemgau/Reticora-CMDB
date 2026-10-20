@@ -504,3 +504,6 @@ TEN-02;[B];B;backend/internal/monitoring/audit_t1_metric_scope_integration_test.
 TEN-03;[B];B;backend/internal/database/tenantguard_test.go;WP-351
 TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-352
 DB-04;nicht geliefert;B;backend/internal/database/role_check_integration_test.go;WP-352
+MGT-02;[P2];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-353
+TEN-09;[Q];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-353
+TST-02;[B];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-353

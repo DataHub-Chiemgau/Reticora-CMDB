@@ -44,11 +44,13 @@ const (
 	// windowWritable admits a window for UPDATE and DELETE (WP-341, migration
 	// 000139): an org-wide principal writes every window; a principal
 	// restricted in the client or site scope only a window with CIs that it
-	// sees completely, so neither a window that also covers another client's
-	// CI nor one without CIs (org-wide) is writable (E-09).
+	// sees completely and may write (client and site in its scope, migration
+	// 000146), so neither a window that also covers another client's CI or an
+	// org-wide CI nor one without CIs (org-wide) is writable (E-09).
 	windowWritable = "(" + database.OrgWideScopeSQL +
 		" OR (maintenance_window.ci_count > 0 AND maintenance_window.ci_count = (SELECT count(*) FROM maintenance_window_ci" +
-		" WHERE maintenance_window_ci.maintenance_window_id = maintenance_window.id AND " + windowCIVisible + ")))"
+		" WHERE maintenance_window_ci.maintenance_window_id = maintenance_window.id AND " + windowCIVisible +
+		" AND " + database.ScopedWriteSQL + ")))"
 )
 
 func (r *PGRepository) ciIDsTx(ctx context.Context, tx pgx.Tx, orgID, windowID string) ([]string, error) {

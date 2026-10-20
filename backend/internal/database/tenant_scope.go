@@ -32,6 +32,17 @@ const (
 const OrgWideScopeSQL = "(NULLIF(current_setting('" + ClientScopeGUC + "', true), '') IS NULL" +
 	" AND NULLIF(current_setting('" + SiteScopeGUC + "', true), '') IS NULL)"
 
+// ScopedWriteSQL is the SQL condition "client_id and site_id of the row are
+// in the transaction's write scope" (unqualified columns, resolved in the
+// innermost FROM): an org-wide principal writes every row, a scoped principal
+// only rows of its clients and sites and no org-wide one (NULL, E-09), like
+// the WITH CHECK of the link tables of migration 000064. Repositories count
+// the writable links with it (migration 000146).
+const ScopedWriteSQL = "((NULLIF(current_setting('" + ClientScopeGUC + "', true), '') IS NULL" +
+	" OR client_id = ANY (string_to_array(current_setting('" + ClientScopeGUC + "', true), ',')::uuid[]))" +
+	" AND (NULLIF(current_setting('" + SiteScopeGUC + "', true), '') IS NULL" +
+	" OR site_id = ANY (string_to_array(current_setting('" + SiteScopeGUC + "', true), ',')::uuid[])))"
+
 // noAccessScope is the GUC value of an empty scope set. The policies treat an
 // unset or empty scope GUC as "all" (TEN-04: NULL = all clients of the org),
 // so an empty set is encoded as the nil UUID, which matches no row: the
