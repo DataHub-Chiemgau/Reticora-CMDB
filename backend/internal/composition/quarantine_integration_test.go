@@ -87,8 +87,11 @@ func TestMigration56QuarantinesInconsistentRows(t *testing.T) {
 
 	// Schema state just before the tenant-reference section of 000056.
 	// ci_asset_id_fkey (000088), ci_parent_ci_fkey (000089) and
-	// ci_merged_into_fkey (000108) depend on the keys 000056 adds.
+	// ci_merged_into_fkey (000108) depend on the keys 000056 adds; the edge
+	// scope trigger (000061, since 000142 refusing endpoints of another
+	// organization) did not exist yet.
 	exec("undo 000056 references", `
+		ALTER TABLE ci_relationship DISABLE TRIGGER ci_relationship_scope;
 		ALTER TABLE ci DROP CONSTRAINT ci_asset_id_fkey;
 		ALTER TABLE ci DROP CONSTRAINT ci_parent_ci_fkey;
 		ALTER TABLE ci DROP CONSTRAINT ci_merged_into_fkey;
