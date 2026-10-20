@@ -480,6 +480,15 @@ func (c *Config) Validate(noDB bool) error {
 		if noDB {
 			errs = append(errs, fmt.Errorf("--no-db is only allowed with RETICORA_ENVIRONMENT=%s", EnvDevelopment))
 		}
+		// A default role org_admin makes first logins org_admins whose
+		// account the server binds to MFA through the Keycloak admin client
+		// (AUT-09, E-65 option 1, WP-367); without it each of these logins
+		// would fail.
+		if c.DefaultProvisionRole == "org_admin" && (c.KeycloakAdminClientID == "" || c.KeycloakAdminClientSecret == "") {
+			errs = append(errs, fmt.Errorf("RETICORA_DEFAULT_PROVISION_ROLE=org_admin requires the Keycloak admin client "+
+				"(RETICORA_KEYCLOAK_ADMIN_CLIENT_ID, RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET) outside %s: "+
+				"the second factor of a new org_admin could not be enforced (AUT-09)", EnvDevelopment))
+		}
 		var missing []string
 		for _, key := range requiredOutsideDevelopment {
 			if !c.explicit[key] {

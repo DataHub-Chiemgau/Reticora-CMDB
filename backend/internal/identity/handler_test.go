@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -469,7 +470,9 @@ func (p statusProvisioner) EnsureUser(_ context.Context, _, oidcSubject, _, _ st
 	return oidcSubject, nil
 }
 
-func (p statusProvisioner) EnsureRole(context.Context, string, string, string) error { return nil }
+func (p statusProvisioner) EnsureRole(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
 
 func (p statusProvisioner) UserActive(_ context.Context, _, userID string) (bool, error) {
 	return !p.deactivated[userID], nil
@@ -536,6 +539,184 @@ func TestCallbackFailsWhenMFACannotBeEnforced(t *testing.T) {
 	}
 	if len(w.Result().Cookies()) != 0 {
 		t.Errorf("refresh cookie set: %v", w.Result().Cookies())
+	}
+}
+
+// fakeMFA records the OIDC subjects RequireMFA is called with; err fails
+// every binding (an admin API that refuses, or no admin client like
+// user.UnavailableMFA).
+type fakeMFA struct {
+	subjects []string
+	err      error
+}
+
+func (m *fakeMFA) RequireMFA(_ context.Context, subject string) error {
+	m.subjects = append(m.subjects, subject)
+	return m.err
+}
+
+// loginProvisioner provisions every login as the app_user app-user-1, so
+// the session subject differs from the OIDC subject; holds reports the
+// default role as held after EnsureRole, roleErr fails EnsureRole.
+type loginProvisioner struct {
+	holds   bool
+	roleErr error
+}
+
+func (loginProvisioner) EnsureUser(context.Context, string, string, string, string) (string, error) {
+	return "app-user-1", nil
+}
+
+func (p loginProvisioner) EnsureRole(context.Context, string, string, string) (bool, error) {
+	return p.holds, p.roleErr
+}
+
+// mfaLogin runs the login callback of the OIDC subject user-123 with the
+// IdP groups through a handler with the enforcer (nil: none), the
+// provisioner (nil: none) and the default role.
+func mfaLogin(t *testing.T, groups []string, mfa *fakeMFA, provisioner UserProvisioner, defaultRole string) *httptest.ResponseRecorder {
+	t.Helper()
+	fake := newFakeOIDCServer(t)
+	fake.mutateClaims = func(claims map[string]any) { claims["groups"] = groups }
+	handler := NewHandler(NewOIDCProvider(OIDCConfig{
+		IssuerURL:    fake.issuer(),
+		ClientID:     "reticora-app",
+		ClientSecret: "top-secret",
+		RedirectURL:  "https://app.example.com/callback",
+	}), testSessionIssuer(t)).WithAccessResolver(standardRoleResolver{"org_admin": allPermissions(), "viewer": {PermCIRead}})
+	if provisioner != nil {
+		handler.WithProvisioning(provisioner, defaultRole)
+	}
+	if mfa != nil {
+		handler.WithMFA(mfa)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/callback",
+		strings.NewReader(`{"code":"auth-code","state":"nonce","code_verifier":"verifier-123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.Callback(w, req)
+	return w
+}
+
+// hasSession reports whether a login response issued a session: an access
+// token and the refresh cookie.
+func hasSession(w *httptest.ResponseRecorder) bool {
+	for _, c := range w.Result().Cookies() {
+		if c.Name == RefreshCookieName && c.Value != "" {
+			return strings.Contains(w.Body.String(), `"token"`)
+		}
+	}
+	return false
+}
+
+// TestLoginBindsOrgAdminOfGroupAndDefaultRoleToMFA covers WP-367 (AUT-09,
+// CH26, E-14, finding F-005): a login that grants org_admin through the IdP
+// group org_admin (no database assignment needed) or through the default
+// role org_admin binds the account of the ID token's subject (not the
+// app_user id) exactly once before the session is issued. Other groups, a
+// default role the user does not hold and other default roles bind
+// nothing; a failing binding answers 503 without session; a handler
+// without enforcer binds nothing; refresh never binds.
+func TestLoginBindsOrgAdminOfGroupAndDefaultRoleToMFA(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		groups      []string
+		provisioner UserProvisioner
+		defaultRole string
+		want        int
+	}{
+		{"IdP group /org_admin without provisioning or database assignment", []string{"/org_admin"}, nil, "", 1},
+		{"IdP group org_admin (name without path)", []string{"org_admin"}, nil, "", 1},
+		{"IdP group /org_admin of a provisioned user", []string{"/org_admin"}, loginProvisioner{}, "viewer", 1},
+		{"IdP group /reticora-viewer", []string{"/reticora-viewer"}, loginProvisioner{}, "viewer", 0},
+		{"default role org_admin at the first login", []string{"/reticora-viewer"}, loginProvisioner{holds: true}, "org_admin", 1},
+		{"default role org_admin and IdP group /org_admin", []string{"/org_admin"}, loginProvisioner{holds: true}, "org_admin", 1},
+		{"default role org_admin not held (another role assigned before)", []string{"/reticora-viewer"}, loginProvisioner{}, "org_admin", 0},
+		{"default role org_admin, assignment check failed", []string{"/reticora-viewer"}, loginProvisioner{roleErr: errors.New("check role assignments: timeout")}, "org_admin", 1},
+		{"default role viewer", nil, loginProvisioner{holds: true}, "viewer", 0},
+	} {
+		mfa := &fakeMFA{}
+		w := mfaLogin(t, c.groups, mfa, c.provisioner, c.defaultRole)
+		if w.Code != http.StatusOK || !hasSession(w) {
+			t.Errorf("%s: status %d, session %v; want 200 with session", c.name, w.Code, hasSession(w))
+			continue
+		}
+		if len(mfa.subjects) != c.want || (c.want == 1 && mfa.subjects[0] != "user-123") {
+			t.Errorf("%s: bound %v, want %d binding(s) of the OIDC subject user-123", c.name, mfa.subjects, c.want)
+		}
+	}
+
+	mfa := &fakeMFA{err: fmt.Errorf("%w: keycloak: role mapping: status 403", ErrMFAUnavailable)}
+	w := mfaLogin(t, []string{"/org_admin"}, mfa, loginProvisioner{}, "viewer")
+	if w.Code != http.StatusServiceUnavailable || hasSession(w) || len(w.Result().Cookies()) != 0 {
+		t.Errorf("failing binding: status %d, session %v, %d cookies; want 503 without session", w.Code, hasSession(w), len(w.Result().Cookies()))
+	}
+	if strings.Contains(w.Body.String(), "keycloak") {
+		t.Errorf("failing binding names the cause: %s", w.Body.String())
+	}
+	mfa = &fakeMFA{err: errors.New("keycloak: status 500")}
+	if w = mfaLogin(t, []string{"/reticora-viewer"}, mfa, loginProvisioner{holds: true}, "org_admin"); w.Code != http.StatusServiceUnavailable || hasSession(w) {
+		t.Errorf("failing binding of the default role: status %d, session %v; want 503 without session", w.Code, hasSession(w))
+	}
+
+	if w = mfaLogin(t, []string{"/org_admin"}, nil, loginProvisioner{holds: true}, "org_admin"); w.Code != http.StatusOK || !hasSession(w) {
+		t.Errorf("handler without enforcer: status %d, session %v; want 200 with session", w.Code, hasSession(w))
+	}
+
+	// Refresh has no ID token: an org_admin of the group /org_admin keeps
+	// its rights without a binding.
+	sessionIssuer := testSessionIssuer(t)
+	mfa = &fakeMFA{}
+	handler := NewHandler(nil, sessionIssuer).
+		WithAccessResolver(standardRoleResolver{"org_admin": allPermissions()}).
+		WithProvisioning(loginProvisioner{holds: true}, "org_admin").
+		WithMFA(mfa)
+	token, err := sessionIssuer.Issue(SessionClaims{
+		Subject:        "app-user-1",
+		OrganizationID: "123e4567-e89b-12d3-a456-426614174000",
+		Groups:         []string{"/org_admin"},
+		IssuedAt:       time.Now().UTC(),
+		ExpiresAt:      time.Now().UTC().Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = httptest.NewRecorder()
+	handler.Refresh(w, refreshRequest(t, handler, token))
+	if w.Code != http.StatusOK || len(mfa.subjects) != 0 {
+		t.Errorf("refresh of an org_admin of /org_admin: status %d, bound %v; want 200 without binding", w.Code, mfa.subjects)
+	}
+}
+
+// TestLoginWithoutAdminClientAdmitsRealmAdminGroup covers WP-367 with
+// E-65 option 1 (AUT-09): without Keycloak admin client the enforcer fails
+// closed (user.UnavailableMFA). A member of the realm group reticora-admin,
+// which carries mfa_required in the realm (WP-357), as the installer
+// administrator of a standard installation, signs in with a session and
+// without binding; a login through the IdP group org_admin answers 503
+// without session. Only the exact realm group name is exempt.
+func TestLoginWithoutAdminClientAdmitsRealmAdminGroup(t *testing.T) {
+	noAdminClient := errors.New("no Keycloak admin client configured (RETICORA_KEYCLOAK_ADMIN_CLIENT_ID)")
+	for _, groups := range [][]string{{"/reticora-admin"}, {"reticora-admin", "/reticora-viewer"}} {
+		mfa := &fakeMFA{err: noAdminClient}
+		w := mfaLogin(t, groups, mfa, loginProvisioner{}, "viewer")
+		if w.Code != http.StatusOK || !hasSession(w) || len(mfa.subjects) != 0 {
+			t.Errorf("member of %v: status %d, session %v, bound %v; want 200 with session and no binding",
+				groups, w.Code, hasSession(w), mfa.subjects)
+		}
+	}
+	for _, groups := range [][]string{{"/org_admin"}, {"/reticora-admin", "/org_admin"}, {"/Reticora-Admin"}} {
+		mfa := &fakeMFA{err: noAdminClient}
+		w := mfaLogin(t, groups, mfa, loginProvisioner{}, "viewer")
+		if w.Code != http.StatusServiceUnavailable || hasSession(w) || len(w.Result().Cookies()) != 0 {
+			t.Errorf("member of %v: status %d, session %v, %d cookies; want 503 without session", groups, w.Code, hasSession(w), len(w.Result().Cookies()))
+		}
+		if strings.Contains(w.Body.String(), "admin client") {
+			t.Errorf("member of %v: the answer names the cause: %s", groups, w.Body.String())
+		}
+		if len(mfa.subjects) != 1 {
+			t.Errorf("member of %v: bound %v, want one attempt", groups, mfa.subjects)
+		}
 	}
 }
 
@@ -618,7 +799,9 @@ func (p recordingProvisioner) EnsureUser(_ context.Context, _, subject, email, _
 	return subject, nil
 }
 
-func (p recordingProvisioner) EnsureRole(context.Context, string, string, string) error { return nil }
+func (p recordingProvisioner) EnsureRole(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
 
 // TestCallbackTakesOrganizationFromAttribute covers WP-043 (AUT-01, AUT-09):
 // a token without organization attribute is rejected even when a group is

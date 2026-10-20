@@ -223,8 +223,10 @@ type Options struct {
 	InvitationAccounts user.InvitationAccounts
 	// MFA binds the IdP account of every new org_admin to the second factor
 	// (WP-358): role assignment and first login of the PostgreSQL user
-	// repository. nil binds nothing (tests, development without Keycloak
-	// admin client); user.UnavailableMFA fails every org_admin grant.
+	// repository, and the login callback for org_admin from the IdP group
+	// org_admin or the default role (WP-367). nil binds nothing (tests,
+	// development without Keycloak admin client); user.UnavailableMFA fails
+	// every org_admin grant.
 	MFA user.MFAEnforcer
 	// CollectorCA signs the collector certificates (COL-04); nil answers
 	// certificate requests with 503.
@@ -340,6 +342,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		WithAccessResolver(repos.Permission)
 	if opts.RefreshSessions != nil {
 		identityHandler.WithRefreshSessions(opts.RefreshSessions)
+	}
+	if opts.MFA != nil {
+		// org_admin from the IdP group org_admin or the default role
+		// (WP-367).
+		identityHandler.WithMFA(opts.MFA)
 	}
 	// New discovered CIs respect max_cis; over the limit they are held as
 	// unlicensed_ci and adopted once the limit is raised (ENT-03, CH21).
