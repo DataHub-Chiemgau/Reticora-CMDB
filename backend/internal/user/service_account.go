@@ -15,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -114,10 +115,13 @@ type ServiceAccountRepository interface {
 	ServiceAccountGrants(ctx context.Context, orgID, id string) ([]identity.Grant, error)
 }
 
-// CanReadEvent reports whether the service account may read an object with
-// the given permission in the client and site the object belongs to (empty:
-// org-wide object). It is the filter of webhook deliveries (RBA-08).
-func CanReadEvent(ctx context.Context, repo ServiceAccountRepository, orgID, serviceAccountID, permission, clientID, siteID string) (bool, error) {
+// CanReadEvent reports whether the service account may read every object of
+// an event with the given permission; it is the filter of webhook deliveries
+// (RBA-08). objects holds the client and site of each object: "" is NULL,
+// a shared row that client- and site-scoped readers read as well (RLS).
+// Without objects the scope of the event is unknown (webhook/scope.go):
+// only an account that holds the permission org-wide may read it.
+func CanReadEvent(ctx context.Context, repo ServiceAccountRepository, orgID, serviceAccountID, permission string, objects []webhook.ObjectScope) (bool, error) {
 	grants, err := repo.ServiceAccountGrants(ctx, orgID, serviceAccountID)
 	if err != nil {
 		return false, err
@@ -128,10 +132,18 @@ func CanReadEvent(ctx context.Context, repo ServiceAccountRepository, orgID, ser
 	if !ok {
 		return false, nil
 	}
-	inScope := func(set identity.ScopeSet, id string) bool {
-		return id == "" || set.All || slices.Contains(set.IDs, id)
+	if len(objects) == 0 {
+		return scope.OrgWide(), nil
 	}
-	return inScope(scope.Clients, clientID) && inScope(scope.Sites, siteID), nil
+	inScope := func(set identity.ScopeSet, id string) bool {
+		return id == "" || set.All || slices.ContainsFunc(set.IDs, func(s string) bool { return strings.EqualFold(s, id) })
+	}
+	for _, o := range objects {
+		if !inScope(scope.Clients, o.ClientID) || !inScope(scope.Sites, o.SiteID) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // ServiceAccountAccess adapts a repository to the webhook dispatcher and the
@@ -139,8 +151,8 @@ func CanReadEvent(ctx context.Context, repo ServiceAccountRepository, orgID, ser
 type ServiceAccountAccess struct{ Repo ServiceAccountRepository }
 
 // CanReadEvent implements webhook.SubscriberAccess.
-func (a ServiceAccountAccess) CanReadEvent(ctx context.Context, orgID, serviceAccountID, permission, clientID, siteID string) (bool, error) {
-	return CanReadEvent(ctx, a.Repo, orgID, serviceAccountID, permission, clientID, siteID)
+func (a ServiceAccountAccess) CanReadEvent(ctx context.Context, orgID, serviceAccountID, permission string, objects []webhook.ObjectScope) (bool, error) {
+	return CanReadEvent(ctx, a.Repo, orgID, serviceAccountID, permission, objects)
 }
 
 // ServiceAccountGrants implements identity.ServiceAccountAccessResolver.

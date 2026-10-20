@@ -7728,7 +7728,7 @@ export interface components {
        * @description Until when the previous secret still signs after a rotation (SEC-06).
        */
       previous_secret_expires_at?: string;
-      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose object the account may read. */
+      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose objects the account may read; every CI or asset an event references must be readable, objects without client or site count as readable like under RLS. An event whose scope cannot be determined reaches the subscription only when the account reads org-wide. */
       service_account_id?: string;
       /** Format: date-time */
       created_at: string;
@@ -7744,7 +7744,7 @@ export interface components {
       headers?: {
         [key: string]: string;
       };
-      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose object the account may read. */
+      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose objects the account may read; every CI or asset an event references must be readable, objects without client or site count as readable like under RLS. An event whose scope cannot be determined reaches the subscription only when the account reads org-wide. */
       service_account_id?: string;
     };
     WebhookDelivery: {

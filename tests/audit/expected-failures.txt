@@ -84,7 +84,6 @@ go;backend/internal/user;TestAuditDefectInvitationGrantCeiling;F-015
 go;backend/internal/user;TestAuditDefectRoleAssignmentGrantCeiling;F-015
 go;backend/internal/user;TestAuditT2ForeignDeactivationRevokesNothing;F-060
 go;backend/internal/webhook;TestAuditDefectWebhookConsumerKeepsEventsOnTransientErrors;F-151
-go;backend/internal/webhook;TestAuditT2BoundSubscriptionGetsOnlyReadableClientEvents;F-009
 go;collector/collectorcmd;TestAuditClassifiedDeviceNotUploadedAsFallback;F-030
 go;collector/collectorcmd;TestAuditCollectorEnrollsFromEnvironment;F-101
 go;collector/collectorcmd;TestAuditCollectorRenewsCertificateAt60Percent;F-026

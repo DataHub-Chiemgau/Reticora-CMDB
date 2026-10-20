@@ -15,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -80,19 +81,26 @@ func TestServiceAccounts(t *testing.T) {
 		t.Errorf("get: %d %s (roles must be unchanged after the failed replacement)", w.Code, w.Body.String())
 	}
 
-	// Webhook filter: objects of client 1 and org-wide objects, not client 2.
+	// Webhook filter: objects of client 1 and objects without client, not
+	// client 2; every object of an event must be readable, and an event of
+	// unknown scope (no objects) is not readable for a client-1 account.
 	access := user.ServiceAccountAccess{Repo: repo}
 	for _, tc := range []struct {
-		permission, client string
-		want               bool
+		name, permission string
+		objects          []webhook.ObjectScope
+		want             bool
 	}{
-		{"ci:read", f.Client1, true},
-		{"ci:read", "", true},
-		{"ci:read", f.Client2, false},
-		{"asset:read", f.Client1, false},
+		{"client 1", "ci:read", []webhook.ObjectScope{{ClientID: f.Client1}}, true},
+		{"client 1, upper case", "ci:read", []webhook.ObjectScope{{ClientID: strings.ToUpper(f.Client1)}}, true},
+		{"no client", "ci:read", []webhook.ObjectScope{{}}, true},
+		{"client 2", "ci:read", []webhook.ObjectScope{{ClientID: f.Client2}}, false},
+		{"client 1 and client 2", "ci:read", []webhook.ObjectScope{{ClientID: f.Client1}, {ClientID: f.Client2}}, false},
+		{"client 1 and no client", "ci:read", []webhook.ObjectScope{{ClientID: f.Client1}, {}}, true},
+		{"unknown scope", "ci:read", nil, false},
+		{"other permission", "asset:read", []webhook.ObjectScope{{ClientID: f.Client1}}, false},
 	} {
-		if ok, err := access.CanReadEvent(bg, f.OrgA, sa.ID, tc.permission, tc.client, ""); err != nil || ok != tc.want {
-			t.Errorf("CanReadEvent(%s, %q) = %v, %v; want %v", tc.permission, tc.client, ok, err, tc.want)
+		if ok, err := access.CanReadEvent(bg, f.OrgA, sa.ID, tc.permission, tc.objects); err != nil || ok != tc.want {
+			t.Errorf("CanReadEvent(%s: %s, %v) = %v, %v; want %v", tc.name, tc.permission, tc.objects, ok, err, tc.want)
 		}
 	}
 
@@ -126,7 +134,7 @@ func TestServiceAccounts(t *testing.T) {
 	if info, err = service.Validate(bg, key.Key); err != nil || len(info.Scopes) != 0 {
 		t.Errorf("key of a deactivated account: %+v, %v; want no permissions", info, err)
 	}
-	if ok, _ := access.CanReadEvent(bg, f.OrgA, sa.ID, "ci:read", f.Client1, ""); ok {
+	if ok, _ := access.CanReadEvent(bg, f.OrgA, sa.ID, "ci:read", []webhook.ObjectScope{{ClientID: f.Client1}}); ok {
 		t.Error("deactivated account still reads events")
 	}
 

@@ -13583,7 +13583,11 @@ components:
           type: string
           description: >-
             Binds the subscription to a service account (RBA-08): it then
-            receives only events whose object the account may read.
+            receives only events whose objects the account may read; every
+            CI or asset an event references must be readable, objects without
+            client or site count as readable like under RLS. An event whose
+            scope cannot be determined reaches the subscription only when the
+            account reads org-wide.
         created_at:
           type: string
           format: date-time
@@ -13615,7 +13619,11 @@ components:
           type: string
           description: >-
             Binds the subscription to a service account (RBA-08): it then
-            receives only events whose object the account may read.
+            receives only events whose objects the account may read; every
+            CI or asset an event references must be readable, objects without
+            client or site count as readable like under RLS. An event whose
+            scope cannot be determined reaches the subscription only when the
+            account reads org-wide.
 
     WebhookDelivery:
       type: object
