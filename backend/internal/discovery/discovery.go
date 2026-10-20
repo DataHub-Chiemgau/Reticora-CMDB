@@ -157,7 +157,9 @@ type Repository interface {
 	Heartbeat(ctx context.Context, orgID, collectorID string) (status string, err error)
 	// UpdateCollector changes name, site or status (disable, enable); an
 	// unknown collector or one of another organization fails with
-	// api.ErrNotFound.
+	// api.ErrNotFound. A disable revokes the collector's certificates and,
+	// once committed, is announced to the edge workers; one of them cuts its
+	// open NATS connections (PGRepository.WithDisableAnnouncer, COL-04).
 	UpdateCollector(ctx context.Context, orgID, collectorID string, patch *CollectorPatch) (*Collector, error)
 	// CollectorStatus returns the status of a collector of the
 	// organization; an unknown collector fails with api.ErrNotFound.

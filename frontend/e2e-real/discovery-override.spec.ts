@@ -20,6 +20,7 @@ import {
 } from '@playwright/test';
 import {
   api,
+  sessionToken,
   signupTenant,
   stamp,
   uiLogin,
@@ -71,9 +72,12 @@ import {
  *      reported, persisted ............................................. WP-196 (UI-16), WP-088 (REC-08), WP-089 (REC-12)
  *  D07 "Override aufheben" in the CI detail returns the field to the observed value, the
  *      page shows it, the clear is audited ............................. WP-060 (OVR-01, CI-10)
- *  D08 a disabled collector can no longer deliver: status shown in the UI, heartbeats and
- *      discovery results refused, nothing new persisted (positive control first)
- *      ................................................................. WP-145 (COL-04), WP-143 (COL-01), WP-085 (REC-01)
+ *  D08 a disabled collector can no longer deliver: status shown in the UI; without a
+ *      restart the running collector is cut off within 10 s (no request over the NATS edge
+ *      answered, last_seen_at and CI count unchanged over two discovery cycles); after a
+ *      restart heartbeats and discovery results are refused, nothing new persisted
+ *      (positive control first: last_seen_at rises) ...................... WP-145 (COL-04), WP-143 (COL-01), WP-085 (REC-01),
+ *      WP-381 (COL-04, F-025)
  *
  * The Discovery UI has no control to disable a collector (CollectorCard shows only the
  * status); D08 therefore disables it through PATCH /collectors/{id} (collector:manage, the
@@ -230,8 +234,11 @@ function enroll(code: string, name: string, credentials: string) {
   );
 }
 
-/** startCollector runs the enrolled collector with the simulated fleet. */
-function startCollector(dir: string): number {
+/**
+ * startCollector runs the enrolled collector with the simulated fleet; env adds settings
+ * (e.g. RETICORA_DISCOVERY_INTERVAL for further discovery cycles of the same process).
+ */
+function startCollector(dir: string, extra: NodeJS.ProcessEnv = {}): number {
   const env: NodeJS.ProcessEnv = { ...process.env };
   // The collector talks to localhost only.
   for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY']) {
@@ -247,6 +254,7 @@ function startCollector(dir: string): number {
       RETICORA_SPOOL_DIR: join(dir, 'spool'),
       RETICORA_HEARTBEAT_INTERVAL: '10s',
       RETICORA_SPOOL_FLUSH_INTERVAL: '5s',
+      ...extra,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -272,10 +280,20 @@ async function stopCollector() {
  * restartCollector = "run discovery again"; returns the start time. The start waits for a
  * fresh second, so a sighting in that second (last_seen_at has whole seconds) is this run's.
  */
-async function restartCollector(): Promise<number> {
+async function restartCollector(extra: NodeJS.ProcessEnv = {}): Promise<number> {
   await stopCollector();
   await new Promise((resolve) => setTimeout(resolve, 2_000 - (Date.now() % 1000)));
-  return startCollector(w.workDir);
+  return startCollector(w.workDir, extra);
+}
+
+/**
+ * renewToken takes the access token the signed-in page holds now: the SPA renews it before
+ * it expires (AUT-02, 15 min), a test that runs longer uses the renewed one.
+ */
+async function renewToken() {
+  await w.page.goto('/discovery');
+  await expect(collectorBadge(w.page, w.collectorName)).toBeVisible();
+  w.token = await sessionToken(w.page);
 }
 
 async function ok<T>(
@@ -1086,28 +1104,92 @@ test.describe('Discovery → reconciliation → override protection → review',
     expect(audit.actor_id, 'audit actor of the clear').toBe(w.me);
   });
 
-  test('D08 a disabled collector can no longer deliver: heartbeats and results are refused, nothing new is persisted', async () => {
+  test('D08 a disabled collector can no longer deliver: cut off within 10 s without a restart, refused after a restart, nothing new is persisted', async () => {
+    // Two further discovery cycles of the running collector (RETICORA_DISCOVERY_INTERVAL,
+    // at least 5 min, checked every minute) after the disable.
+    const cycle = 5 * 60_000;
+    test.setTimeout(4 * cycle);
     const { page } = w;
-    // Positive control: with the collector enabled a restart delivers.
-    const control = await restartCollector();
+    await renewToken();
+    // Positive control: with the collector enabled a restart delivers, last_seen_at rises
+    // and the heartbeats go over its NATS channel.
+    const seenBeforeControl = await maxLastSeen();
+    const controlOffset = collectorLogSize();
+    const control = await restartCollector({ RETICORA_DISCOVERY_INTERVAL: '5m' });
     const ids = [...(await fleet()).values()].map((ci) => ci.id);
     await waitSeen(ids, control, 'the enabled collector delivers the whole fleet');
+    expect(
+      await maxLastSeen(),
+      'last_seen_at rises while the collector is enabled',
+    ).toBeGreaterThan(seenBeforeControl);
     await expect
       .poll(async () => Date.parse((await getCollector()).last_heartbeat_at ?? ''), {
         message: 'heartbeat of the enabled collector',
         timeout: 60_000,
       })
       .toBeGreaterThan(control);
+    await expect
+      .poll(() => collectorLog(controlOffset), {
+        message: 'heartbeat of the enabled collector over the NATS edge',
+        timeout: 60_000,
+        intervals: [2_000],
+      })
+      .toMatch(/"msg":"heartbeat completed","status":20\d,"transport":"edge"/);
 
-    // An administrator disables the collector (PATCH /collectors/{id}, collector:manage).
+    // An administrator disables the running collector (PATCH /collectors/{id},
+    // collector:manage).
     const disabled = await ok<Collector>('PATCH', `/collectors/${w.collectorId}`, {
       status: 'disabled',
     });
+    const disabledAt = Date.now();
     expect(disabled.status).toBe('disabled');
     await page.goto('/discovery');
     await expect(collectorBadge(page, w.collectorName)).toHaveText('Deaktiviert');
 
-    // Baseline after the running process got the chance to finish in-flight work.
+    // Without a restart (WP-381, F-025): 10 s after the disable the server has cut the
+    // collector's NATS connection; over two further discovery cycles of the same process
+    // nothing is answered over the edge and nothing is persisted.
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.max(0, disabledAt + 10_000 - Date.now())),
+    );
+    const cutOffset = collectorLogSize();
+    const seenAtCut = await maxLastSeen();
+    const countAtCut = (await ok<List<CI>>('GET', '/cis?limit=1')).total;
+    const heartbeatAtCut = (await getCollector()).last_heartbeat_at;
+    await expect
+      .poll(() => (collectorLog(cutOffset).match(/"msg":"discovery started"/g) ?? []).length, {
+        message: 'two discovery cycles of the running, disabled collector',
+        timeout: 3 * cycle,
+        intervals: [5_000],
+      })
+      .toBeGreaterThanOrEqual(2);
+    // The spool flush (every 5 s) tried to deliver the second cycle's results.
+    await new Promise((resolve) => setTimeout(resolve, 20_000));
+    expect(collector?.exitCode ?? null, 'the collector process kept running').toBeNull();
+    const running = collectorLog(cutOffset);
+    softExpect(running, 'no request over the NATS edge answered after the cut').not.toContain(
+      '"transport":"edge"',
+    );
+    softExpect(running, 'no spooled result delivered').not.toContain(
+      'spooled discovery results delivered',
+    );
+    softExpect(running, 'no heartbeat accepted').not.toMatch(
+      /"msg":"heartbeat completed","status":(20\d|"ok"|"active")/,
+    );
+    await renewToken();
+    softExpect(await maxLastSeen(), 'last_seen_at unchanged over two discovery cycles').toBe(
+      seenAtCut,
+    );
+    softExpect(
+      (await ok<List<CI>>('GET', '/cis?limit=1')).total,
+      'CI count unchanged over two discovery cycles',
+    ).toBe(countAtCut);
+    softExpect((await getCollector()).last_heartbeat_at, 'no heartbeat recorded').toBe(
+      heartbeatAtCut,
+    );
+
+    // After a restart: baseline after the running process got the chance to finish
+    // in-flight work.
     await stopCollector();
     const seenBefore = await maxLastSeen();
     const heartbeatBefore = (await getCollector()).last_heartbeat_at;

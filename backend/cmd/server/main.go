@@ -282,6 +282,12 @@ func main() {
 		}
 		defer nc.Close()
 		coreNATS = nc
+		// A disable (PATCH /collectors/{id}) is announced on the internal
+		// NATS; the edge worker of one replica cuts the collector's open
+		// connections (COL-04, F-025).
+		if discoveryRepo, ok := repos.Discovery.(*discovery.PGRepository); ok {
+			discoveryRepo.WithDisableAnnouncer(nc)
+		}
 		js, natsErr := jetstream.New(nc)
 		if natsErr != nil {
 			slog.Error("failed to open JetStream for the job queue", "error", natsErr)
@@ -616,8 +622,11 @@ func main() {
 			slog.Error("failed to derive the collector NATS endpoint keys", "error", edgeErr)
 			os.Exit(1)
 		}
+		// Over the internal NATS the worker learns of the disables of
+		// collectors, also from other replicas, and cuts their open
+		// connections at the endpoint (COL-04, F-025).
 		edge := &discovery.EdgeConfig{Pool: auditPool, CA: collectorPKI, Secrets: edgeSecrets, PKIDir: cfg.PKIDir,
-			Hosts: splitList(cfg.NATSEdgeHosts), URL: cfg.NATSEdgeURL}
+			Hosts: splitList(cfg.NATSEdgeHosts), URL: cfg.NATSEdgeURL, Bus: coreNATS}
 		workers = append(workers, server.Worker{Name: config.WorkerNATSEdge, Run: func(ctx context.Context) { discovery.RunEdge(ctx, edge) }})
 	}
 	// Credential bundles for the collectors over their NATS channel,

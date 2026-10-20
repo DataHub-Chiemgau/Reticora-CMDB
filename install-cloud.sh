@@ -1410,9 +1410,12 @@ start_stack() {
         die "Frontend did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs frontend"
     }
     # The collector NATS endpoint (mTLS, port 4222) starts once the server
-    # has written the collector PKI into the shared volume.
+    # has written the collector PKI into the shared volume. It reads the
+    # generated pki/edge.conf only at start, so it is recreated on every run:
+    # on an existing installation the edge.conf the updated server just wrote
+    # (e.g. the system login that cuts disabled collectors, COL-04) applies.
     info "Starting the collector NATS endpoint …"
-    compose_cmd up -d nats-edge
+    compose_cmd up -d --force-recreate nats-edge
     wait_for_service nats-edge || {
         show_service_logs nats-edge
         die "Collector NATS endpoint did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs nats-edge"

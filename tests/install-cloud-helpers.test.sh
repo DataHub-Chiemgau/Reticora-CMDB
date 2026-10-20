@@ -618,6 +618,35 @@ run_test    "runtime login: password validation"                                
 run_test    "runtime login: the compose server uses reticora_runtime"            test_runtime_login_compose
 run_test    "runtime login: k8s server DSN comes from the runtime secret"        test_runtime_login_k8s
 
+# ─── collector NATS endpoint on a re-run (WP-381) ─────────────────────────────
+
+# nats-edge reads pki/edge.conf only at start: every run recreates it after
+# the server is up (and has written the current edge.conf), so a re-run on an
+# existing installation applies the new configuration (WP-381, COL-04).
+# shellcheck disable=SC2317 # the stubs are called by the installer functions
+test_nats_edge_recreated_after_server() {
+    local calls="$TMP_ROOT/edge-calls"
+    : > "$calls"
+    compose_cmd() { printf 'compose %s\n' "$*" >> "$calls"; }
+    wait_for_service() { printf 'wait %s\n' "$1" >> "$calls"; }
+    sync_db_password() { :; }
+    run_migrations() { :; }
+    seed_default_organization() { :; }
+    ensure_runtime_login() { :; }
+    validate_keycloak_bootstrap() { :; }
+    create_initial_admin() { :; }
+    RETICORA_TLS_DOMAIN=""
+    start_stack
+    local server edge
+    server="$(grep -n '^wait server$' "$calls" | cut -d: -f1)"
+    edge="$(grep -n '^compose up -d --force-recreate nats-edge$' "$calls" | cut -d: -f1)"
+    [ -n "$server" ] && [ -n "$edge" ] && [ "$server" -lt "$edge" ] || return 1
+    [ "$(grep -c 'nats-edge' "$calls")" -eq 2 ] || return 1
+    grep -qx 'wait nats-edge' "$calls"
+}
+
+run_test    "re-run: nats-edge is recreated after the server (new edge.conf)"  test_nats_edge_recreated_after_server
+
 # ─── realm files and initial administrator (WP-044, AUT-09) ───────────────────
 
 realm_py() {

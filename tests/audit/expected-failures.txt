@@ -15,7 +15,6 @@ go;backend/internal/discovery;TestAuditBadScopeIsolated;F-108
 go;backend/internal/discovery;TestAuditCARolloverKeepsEnrolledCollectorTrust;F-102
 go;backend/internal/discovery;TestAuditConcurrentEdgePKIExportConsistent;F-104
 go;backend/internal/discovery;TestAuditDefectDiscoveryTypedValuesValidated;F-143
-go;backend/internal/discovery;TestAuditDisabledCollectorConnectionCut;F-025
 go;backend/internal/discovery;TestAuditIdentitySearchWithMACsUsesIndexes;F-114
 go;backend/internal/discovery;TestAuditPowerRedundancyIndependentOfBatchOrder;F-112
 go;backend/internal/discovery;TestAuditT3PoisonRecordDoesNotTakeValidRecordsDown;F-090

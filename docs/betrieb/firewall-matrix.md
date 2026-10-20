@@ -49,9 +49,17 @@ Alle übrigen Dienste (PostgreSQL, Redis, interne NATS mit Leaf-Node-Port
   mTLS-Kanal mit Signatur des aktuellen Schlüssels
   (`docs/betrieb/collector-ca.md`).
 - Deaktivieren eines Collectors widerruft seine Zertifikate (CRL unter
-  `GET /api/v1/collectors/pki`); der Callout lässt ihn nicht mehr zu, bestehende
-  Verbindungen enden spätestens mit dem Ablauf der NATS-Berechtigung (24 h)
-  bzw. beim Neustart des Endpunkts.
+  `GET /api/v1/collectors/pki`); der Callout lässt ihn nicht mehr zu. Bestehende
+  Verbindungen trennt der Worker `nats_edge` binnen Sekunden: Er meldet sich im
+  Systemkonto `SYS` des Endpunkts an (Nutzer `reticora-edge-sys`, Passwort aus
+  dem Master-Key abgeleitet, internes Client-Zertifikat), sucht die
+  Verbindungen des Collectors (`CONNZ`) und schließt sie (`KICK`); ein
+  Fehlschlag wird als `discovery.collector.kick_failed` protokolliert und
+  wiederholt. Spätestens enden sie mit dem Ablauf der NATS-Berechtigung
+  (15 min); danach durchläuft jede Verbindung den Callout erneut.
+- Der Endpunkt liest `edge.conf` nur beim Start: `install-cloud.sh` erzeugt
+  `nats-edge` bei jedem Lauf nach dem Server neu
+  (`up -d --force-recreate nats-edge`).
 
 ## Prüfung
 

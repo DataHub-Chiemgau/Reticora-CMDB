@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go"
 )
 
 const collectorSelectColumns = `
@@ -45,11 +47,21 @@ type PGRepository struct {
 	pool *pgxpool.Pool
 	// lockTimeout replaces ingestLockTimeout when set (tests).
 	lockTimeout time.Duration
+	// bus announces disables (WithDisableAnnouncer).
+	bus *nats.Conn
 }
 
 // NewPGRepository creates a new PostgreSQL-backed discovery repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{PGRepository: reviews.NewPGRepository(pool), pool: pool}
+}
+
+// WithDisableAnnouncer makes UpdateCollector announce every disable on the
+// internal NATS once committed (AnnounceDisabled): the edge worker of one
+// replica, whichever, cuts the collector's open connections (COL-04, F-025).
+func (r *PGRepository) WithDisableAnnouncer(nc *nats.Conn) *PGRepository {
+	r.bus = nc
+	return r
 }
 
 // Discovery jobs, review items and suppressions carry no client column yet
@@ -239,6 +251,14 @@ func (r *PGRepository) UpdateCollector(ctx context.Context, orgID, collectorID s
 		}
 		return nil
 	})
+	// Open connections outlive the revocation: the edge workers cut them.
+	// A repeated disable is announced again (another cut).
+	if err == nil && r.bus != nil && patch.Status != nil && out.Status == CollectorDisabled {
+		if aerr := AnnounceDisabled(r.bus, orgID, collectorID); aerr != nil {
+			slog.Error("announce the disable of a collector", "event", "discovery.collector.kick_failed",
+				"organization_id", orgID, "collector_id", collectorID, "error", aerr)
+		}
+	}
 	return out, err
 }
 
