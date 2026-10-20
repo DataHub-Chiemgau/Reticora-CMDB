@@ -175,6 +175,9 @@ type ScopeRepository interface {
 	ScopeCollector(ctx context.Context, orgID, collectorID string) (*Collector, error)
 	// DiscoveryIntervals returns the organization's intervals (DIS-10).
 	DiscoveryIntervals(ctx context.Context, orgID string) (DiscoveryIntervals, error)
+	// ScopeCredentialIDs returns the effective credentials of the
+	// collector's enabled scopes by scope id (E-67).
+	ScopeCredentialIDs(ctx context.Context, orgID, collectorID string) (map[string][]string, error)
 }
 
 func fieldError(field, msg string) error {
@@ -414,27 +417,62 @@ func scopeError(err error) error {
 	return err
 }
 
-// checkCredentials verifies that the credentials belong to the organization.
-func checkCredentials(ctx context.Context, tx pgx.Tx, orgID string, ids []string) error {
-	if len(ids) == 0 {
+// checkCredentials verifies that the credentials of a stored scope belong to
+// the organization and are organization-wide or of the scope's client
+// (F-264). It runs after the insert or update, when the trigger has decided
+// the client; an error rolls the write back.
+func checkCredentials(ctx context.Context, tx pgx.Tx, s *Scope) error {
+	if len(s.CredentialIDs) == 0 {
 		return nil
 	}
-	var n int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM credential WHERE organization_id = $1 AND id = ANY($2::uuid[])`, orgID, ids).Scan(&n); err != nil {
+	var known, usable int
+	if err := tx.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE client_id IS NULL OR client_id = $3::uuid)
+		FROM credential WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
+		s.OrganizationID, s.CredentialIDs, nilIfEmpty(s.ClientID)).Scan(&known, &usable); err != nil {
 		return err
 	}
-	if n != len(ids) {
+	if known != len(s.CredentialIDs) {
 		return fieldError("credential_ids", "unknown credential")
 	}
+	if usable != known {
+		return fieldError("credential_ids", "the credential belongs to another client")
+	}
 	return nil
+}
+
+// scopeCredentials returns the effective credentials of the collector's
+// enabled scopes by scope id (E-67, transition rule option A): a scope with
+// credential_ids uses those, a scope without them the organization-wide
+// credentials and those of its client; either way only credentials that are
+// organization-wide or of the scope's client, which also drops the foreign
+// ones of scopes bound before F-264. The credential bundle holds their union.
+func scopeCredentials(ctx context.Context, tx pgx.Tx, orgID, collectorID string) (map[string][]string, error) {
+	rows, err := tx.Query(ctx, `SELECT s.id::text, COALESCE(array_agg(c.id::text ORDER BY c.id) FILTER (WHERE c.id IS NOT NULL), '{}')
+		FROM discovery_scope s
+		LEFT JOIN credential c ON c.organization_id = s.organization_id
+			AND (c.client_id IS NULL OR c.client_id = s.client_id)
+			AND (cardinality(s.credential_ids) = 0 OR c.id = ANY (s.credential_ids))
+		WHERE s.organization_id = $1 AND s.collector_id = $2 AND s.enabled
+		GROUP BY s.id`, orgID, collectorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]string{}
+	for rows.Next() {
+		var id string
+		ids := []string{}
+		if serr := rows.Scan(&id, &ids); serr != nil {
+			return nil, serr
+		}
+		out[id] = ids
+	}
+	return out, rows.Err()
 }
 
 // CreateScope implements ScopeRepository.
 func (r *PGRepository) CreateScope(ctx context.Context, s *Scope) error {
 	return database.WithRequestTenant(ctx, r.pool, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := checkCredentials(ctx, tx, s.OrganizationID, s.CredentialIDs); err != nil {
-			return err
-		}
 		out, err := scanScope(tx.QueryRow(ctx, `INSERT INTO discovery_scope (organization_id, client_id, site_id, collector_id,
 				name, kind, target, vrf_id, schedule, credential_ids, plugins, enabled, next_run_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid[], $11, $12, now())
@@ -443,6 +481,9 @@ func (r *PGRepository) CreateScope(ctx context.Context, s *Scope) error {
 			nilIfEmpty(s.VRFID), s.Schedule, s.CredentialIDs, s.Plugins, s.Enabled))
 		if err != nil {
 			return scopeError(err)
+		}
+		if cerr := checkCredentials(ctx, tx, out); cerr != nil {
+			return cerr
 		}
 		*s = *out
 		return nil
@@ -514,17 +555,20 @@ func (r *PGRepository) UpdateScope(ctx context.Context, orgID, id string, patch 
 		if verr := current.Validate(); verr != nil {
 			return verr
 		}
-		if cerr := checkCredentials(ctx, tx, orgID, current.CredentialIDs); cerr != nil {
-			return cerr
-		}
 		out, err = scanScope(tx.QueryRow(ctx, `UPDATE discovery_scope SET name = $3, kind = $4, target = $5, site_id = $6,
 				vrf_id = $7, schedule = $8, credential_ids = $9::uuid[], plugins = $10, enabled = $11
 			WHERE id = $1 AND organization_id = $2 RETURNING `+scopeColumns,
 			id, orgID, current.Name, current.Kind, current.Target, nilIfEmpty(current.SiteID), nilIfEmpty(current.VRFID),
 			current.Schedule, current.CredentialIDs, current.Plugins, current.Enabled))
-		return scopeError(err)
+		if err != nil {
+			return scopeError(err)
+		}
+		return checkCredentials(ctx, tx, out)
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // DeleteScope implements ScopeRepository.
@@ -591,6 +635,20 @@ func (r *PGRepository) DiscoveryIntervals(ctx context.Context, orgID string) (Di
 		return DiscoveryIntervals{}, err
 	}
 	return IntervalsFromSettings(settings), nil
+}
+
+// ScopeCredentialIDs implements ScopeRepository.
+func (r *PGRepository) ScopeCredentialIDs(ctx context.Context, orgID, collectorID string) (map[string][]string, error) {
+	if !audit.IsUUID(collectorID) {
+		return nil, fmt.Errorf("not found")
+	}
+	var out map[string][]string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var qerr error
+		out, qerr = scopeCredentials(ctx, tx, orgID, collectorID)
+		return qerr
+	})
+	return out, err
 }
 
 // --- memory --------------------------------------------------------------
@@ -753,4 +811,10 @@ func (r *MemoryRepository) DiscoveryIntervals(_ context.Context, orgID string) (
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return IntervalsFromSettings(r.orgSettings[orgID]), nil
+}
+
+// ScopeCredentialIDs implements ScopeRepository. The memory repository holds
+// no credentials, so no scope resolves to any.
+func (r *MemoryRepository) ScopeCredentialIDs(_ context.Context, _, _ string) (map[string][]string, error) {
+	return map[string][]string{}, nil
 }

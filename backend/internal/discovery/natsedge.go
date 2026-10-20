@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -526,19 +527,24 @@ func (g *BundleGate) VerifyBundleTarget(ctx context.Context, orgID, collectorID,
 	}
 	scope := database.OrgWideScope(orgID, "")
 	target := &credential.BundleTarget{OrganizationID: orgID, CollectorID: collectorID, ClientID: id.ClientID, PublicKey: pub}
-	// With discovery scopes the bundle holds exactly the credentials of the
-	// collector's enabled scopes (DIS-09); without scopes those of its client.
+	// The bundle holds the union of the effective credentials of the
+	// collector's enabled scopes (DIS-09, COL-02, E-67); without an enabled
+	// scope it is empty.
 	err = database.WithTenant(ctx, g.authorizer.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-		var scopes int
-		var ids []string
-		if qerr := tx.QueryRow(ctx, `SELECT count(*), COALESCE((array_agg(DISTINCT c) FILTER (WHERE c IS NOT NULL))::text[], '{}')
-			FROM discovery_scope LEFT JOIN LATERAL unnest(credential_ids) AS c ON true
-			WHERE organization_id = $1 AND collector_id = $2 AND enabled`, orgID, collectorID).Scan(&scopes, &ids); qerr != nil {
+		perScope, qerr := scopeCredentials(ctx, tx, orgID, collectorID)
+		if qerr != nil {
 			return qerr
 		}
-		if scopes > 0 {
-			target.CredentialIDs = ids
+		ids := []string{}
+		for _, scoped := range perScope {
+			for _, cid := range scoped {
+				if !slices.Contains(ids, cid) {
+					ids = append(ids, cid)
+				}
+			}
 		}
+		slices.Sort(ids)
+		target.CredentialIDs = ids
 		return nil
 	})
 	if err != nil {

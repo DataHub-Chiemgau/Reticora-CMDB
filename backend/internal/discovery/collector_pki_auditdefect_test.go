@@ -1,10 +1,10 @@
 //go:build auditdefect
 
 // Phase-1 acceptance audit, group T4-collector-load – DEFECT tests of the
-// collector PKI, the edge and the credential bundle on PostgreSQL (must fail
-// until the defects are fixed).
+// collector PKI and the edge on PostgreSQL (must fail until the defects are
+// fixed).
 //
-// WP-145 (COL-04), WP-146 (COL-08), WP-147 (COL-02), WP-153 (DIS-09).
+// WP-145 (COL-04), WP-146 (COL-08).
 //
 // Findings encoded here:
 //   - TestAuditDisabledCollectorConnectionCut – WP-145 P1 "Disabled collector
@@ -18,21 +18,18 @@
 //     edge-PKI export by several server replicas leaves a mismatched or
 //     missing server key/certificate" (k8s prod overlay: 3 replicas, shared
 //     PVC).
-//   - TestAuditBundleCredentialSelection – WP-153 P1 "A scope without
-//     credential_ids empties the collector's credential bundle" and WP-147
-//     P2 "Collectors without enabled scopes receive all client and org-wide
-//     credentials" (bundle = only scope-relevant credentials).
 //
 // The shared helpers (auditEdge, auditEnroll, auditFreePort) are in
 // edge_helpers_integration_test.go without a build tag (WP-374).
 // TestAuditCertificateRenewalBoundToCollector (F-012) is fixed and lives in
-// renew_edge_integration_test.go (WP-375).
+// renew_edge_integration_test.go (WP-375), TestAuditBundleCredentialSelection
+// (F-027) in bundle_selection_integration_test.go (WP-376).
 //
 // Retest:
 //
 //	cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/<db>?sslmode=disable \
 //	  TEST_NATS_SERVER_BIN=<path to nats-server 2.10+> go test -tags auditdefect -count=1 -v -p 1 \
-//	  -run 'TestAuditDisabledCollectorConnectionCut|TestAuditCARolloverKeepsEnrolledCollectorTrust|TestAuditConcurrentEdgePKIExportConsistent|TestAuditBundleCredentialSelection' ./internal/discovery/
+//	  -run 'TestAuditDisabledCollectorConnectionCut|TestAuditCARolloverKeepsEnrolledCollectorTrust|TestAuditConcurrentEdgePKIExportConsistent' ./internal/discovery/
 package discovery_test
 
 import (
@@ -43,7 +40,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -51,7 +47,6 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 )
 
@@ -239,70 +234,5 @@ func TestAuditDisabledCollectorConnectionCut(t *testing.T) {
 	}
 	if nerr == nil && msg != nil {
 		t.Errorf("COL-04 violated: 5 s after disable the collector is still connected (status %v) and its publish on %s was delivered", nc.Status(), own)
-	}
-}
-
-func TestAuditBundleCredentialSelection(t *testing.T) {
-	e, enc := auditEdge(t, "d4")
-	f := e.f
-	bg := context.Background()
-	org := f.OrgCtx(f.OrgA)
-	gate := discovery.NewBundleGate(f.App, e.ca)
-	csvc := credential.NewService(credential.NewPGRepository(f.App), enc)
-	orgCred, err := csvc.Create(org, credential.CreateRequest{OrganizationID: f.OrgA, Name: "audit-org-snmp", Kind: credential.KindSNMPv2c,
-		Secret: map[string]any{"community": "org-secret"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	scopeCred, err := csvc.Create(org, credential.CreateRequest{OrganizationID: f.OrgA, Name: "audit-scope-ssh", Kind: credential.KindSSHPassword,
-		Secret: map[string]any{"username": "scope", "password": "scope-secret"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	off := false
-	cases := []struct {
-		name   string
-		scopes []discovery.ScopeInput
-		want   []string
-		reason string
-	}{
-		{name: "no scopes", want: []string{},
-			reason: "WP-147: a collector without enabled scopes gets no credentials"},
-		{name: "only a disabled scope", scopes: []discovery.ScopeInput{{Kind: "cidr", Target: "10.231.1.0/24", CredentialIDs: []string{scopeCred.ID}, Enabled: &off}}, want: []string{},
-			reason: "WP-147: a collector without enabled scopes gets no credentials"},
-		{name: "one enabled scope without credential_ids (UI form / accepted suggestion)", scopes: []discovery.ScopeInput{{Kind: "cidr", Target: "10.231.2.0/24"}}, want: []string{orgCred.ID},
-			reason: "WP-153: a credential-less scope keeps the collector's client/org credentials"},
-		{name: "one enabled scope with explicit credential_ids (control)", scopes: []discovery.ScopeInput{{Kind: "cidr", Target: "10.231.3.0/24", CredentialIDs: []string{scopeCred.ID}}}, want: []string{scopeCred.ID},
-			reason: "DIS-09: explicit credential_ids select exactly those"},
-	}
-	for i, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			colID, colCert := e.enroll(t, fmt.Sprintf("audit-bundle-%d", i))
-			certPEM := string(pemOf(colCert.Certificate[0]))
-			for _, in := range tc.scopes {
-				in.CollectorID = colID
-				if cerr := e.repo.CreateScope(org, discovery.NewScope(f.OrgA, &in)); cerr != nil {
-					t.Fatalf("create scope: %v", cerr)
-				}
-			}
-			tctx, target, verr := gate.VerifyBundleTarget(bg, f.OrgA, colID, certPEM)
-			if verr != nil {
-				t.Fatalf("bundle target: %v", verr)
-			}
-			_, ids, berr := csvc.Bundle(tctx, target)
-			if berr != nil {
-				t.Fatalf("bundle: %v", berr)
-			}
-			got := slices.Clone(ids)
-			if got == nil {
-				got = []string{}
-			}
-			slices.Sort(got)
-			want := slices.Clone(tc.want)
-			slices.Sort(want)
-			if !slices.Equal(got, want) {
-				t.Errorf("%s: bundle delivered %v, want %v (org credential %s, scope credential %s)", tc.reason, got, want, orgCred.ID, scopeCred.ID)
-			}
-		})
 	}
 }

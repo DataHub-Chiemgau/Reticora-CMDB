@@ -10450,6 +10450,7 @@ export interface components {
       vrf_id?: string;
       /** @description Interval (e.g. 24h, at least 5m) or five-field cron expression. */
       schedule: string;
+      /** @description The bound credentials. Empty: the collector uses the organization-wide credentials and those of the scope's client for this scope (E-67). */
       credential_ids: string[];
       plugins: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
       enabled: boolean;
@@ -10500,6 +10501,7 @@ export interface components {
       vrf_id?: string;
       /** @description Defaults to 24h. */
       schedule?: string;
+      /** @description Credentials of the organization that are organization-wide or of the scope's client (decided by the site or the collector), else 422 on credential_ids. Empty: the scope uses the organization-wide credentials and those of its client (E-67). */
       credential_ids?: string[];
       /** @description Defaults to sweep and snmp. */
       plugins?: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
@@ -10513,6 +10515,7 @@ export interface components {
       site_id?: string;
       vrf_id?: string;
       schedule?: string;
+      /** @description Replaces the list; organization-wide credentials or those of the scope's client, else 422 on credential_ids. */
       credential_ids?: string[];
       plugins?: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
       enabled?: boolean;

@@ -288,7 +288,8 @@ const (
 	SubnetsReportSuffix = ".subnets.report"
 )
 
-// CollectorScope is a scope as the collector receives it.
+// CollectorScope is a scope as the collector receives it; CredentialIDs are
+// its effective credentials (E-67), not the stored list.
 type CollectorScope struct {
 	ID            string   `json:"id"`
 	Kind          string   `json:"kind"`
@@ -358,11 +359,22 @@ func (h *Handler) CollectorScopes(ctx context.Context, orgID, collectorID string
 	if err != nil {
 		return nil, err
 	}
+	// Each scope carries its effective credentials, the ones of the bundle
+	// the collector resolves for it (E-67); a scope created after the
+	// lookup gets none until the next request.
+	creds, err := repo.ScopeCredentialIDs(ctx, orgID, collectorID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]CollectorScope, 0, len(scopes))
 	for i := range scopes {
 		s := &scopes[i]
+		ids := creds[s.ID]
+		if ids == nil {
+			ids = []string{}
+		}
 		out = append(out, CollectorScope{ID: s.ID, Kind: s.Kind, Target: s.Target, ClientID: s.ClientID, SiteID: s.SiteID,
-			VRFID: s.VRFID, Schedule: s.Schedule, CredentialIDs: s.CredentialIDs, Plugins: s.Plugins})
+			VRFID: s.VRFID, Schedule: s.Schedule, CredentialIDs: ids, Plugins: s.Plugins})
 	}
 	return out, nil
 }

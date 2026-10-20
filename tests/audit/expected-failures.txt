@@ -12,7 +12,6 @@ go;backend/internal/ci;TestAuditT7BulkJobCancelStopsWork;F-162
 go;backend/internal/ci;TestAuditT7JobAPIHonoursClientScope;F-163
 go;backend/internal/config;TestAuditT5K8sRenderedEnvSatisfiesStartCheck;F-036
 go;backend/internal/discovery;TestAuditBadScopeIsolated;F-108
-go;backend/internal/discovery;TestAuditBundleCredentialSelection;F-027
 go;backend/internal/discovery;TestAuditCARolloverKeepsEnrolledCollectorTrust;F-102
 go;backend/internal/discovery;TestAuditConcurrentEdgePKIExportConsistent;F-104
 go;backend/internal/discovery;TestAuditDefectDiscoveryTypedValuesValidated;F-143

@@ -85,10 +85,12 @@ func TestCollectorNATSEndpointAuthorization(t *testing.T) {
 	if err != nil || target.CollectorID != colID || target.PublicKey == nil {
 		t.Fatalf("bundle target = %+v, %v", target, err)
 	}
-	if target.CredentialIDs != nil {
-		t.Fatalf("without scopes the bundle selects by client, got %v", target.CredentialIDs)
+	if target.CredentialIDs == nil || len(target.CredentialIDs) != 0 {
+		t.Fatalf("without scopes the bundle is empty (E-67), got %#v", target.CredentialIDs)
 	}
-	// With discovery scopes the bundle holds exactly their credentials (DIS-09).
+	// With discovery scopes the bundle holds their effective credentials
+	// (DIS-09): those of the scope with credential_ids and the
+	// organization-wide one for the scope without (the same one here).
 	scopeCred := f.ID()
 	if _, err = f.Admin.Exec(bg, `INSERT INTO credential (id, organization_id, name, kind, ciphertext) VALUES ($1, $2, 'scope-cred', 'snmp_v3', '\x00')`, scopeCred, f.OrgA); err != nil {
 		t.Fatal(err)
