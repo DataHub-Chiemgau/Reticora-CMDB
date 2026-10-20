@@ -4038,7 +4038,7 @@ export interface paths {
     put?: never;
     /**
      * Create an encrypted credential
-     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored.
+     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored. A missing or unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the account of the NAS plugin (Synology DSM: username and password).
      */
     post: operations['createCredential'];
     delete?: never;
@@ -10539,7 +10539,8 @@ export interface components {
         | 'ipmi'
         | 'wmi'
         | 'api_token'
-        | 'nut';
+        | 'nut'
+        | 'nas';
       scope?: string;
       key_version: number;
       /** Format: date-time */
@@ -10560,7 +10561,8 @@ export interface components {
         | 'ipmi'
         | 'wmi'
         | 'api_token'
-        | 'nut';
+        | 'nut'
+        | 'nas';
       scope?: string;
       /** @description Plaintext secret data, encrypted at rest before storage. */
       secret: {
@@ -20306,6 +20308,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

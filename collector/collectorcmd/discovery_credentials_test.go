@@ -22,8 +22,8 @@ import (
 )
 
 // TestAuditCredentialKindRouting: every vault credential kind reaches the
-// plugin of its protocol, SSH secrets reach no other protocol, and NAS gets
-// none until it has a kind of its own (COL-02, DIS-04).
+// plugin of its protocol, SSH secrets reach no other protocol; NAS gets only
+// the credential of its own kind nas (COL-02, DIS-04; WP-379, E-68).
 func TestAuditCredentialKindRouting(t *testing.T) {
 	names := []string{"ssh", "wmi", "nas", "redfish", "ipmi", "snmp"}
 	spies := map[string]*auditSpy{}
@@ -39,13 +39,14 @@ func TestAuditCredentialKindRouting(t *testing.T) {
 		bundleCredential{ID: "cred-bmc", Kind: "redfish", Secret: map[string]any{"username": "bmc", "password": "redfish-secret"}},
 		bundleCredential{ID: "cred-ipmi", Kind: "ipmi", Secret: map[string]any{"username": "ipmi", "password": "ipmi-secret"}},
 		bundleCredential{ID: "cred-snmp", Kind: "snmp_v2c", Secret: map[string]any{"community": "snmp-secret"}},
+		bundleCredential{ID: "cred-nas", Kind: "nas", Secret: map[string]any{"username": "dsm-admin", "password": "nas-secret"}},
 	)
 	const target = "192.0.2.10"
 	collectorScopes.set([]collectorScope{{ID: "6f0b6f0e-0000-4000-8000-0000000000a1", Kind: "host", Target: target, Schedule: "24h",
-		CredentialIDs: []string{"cred-wmi", "cred-ssh", "cred-bmc", "cred-ipmi", "cred-snmp"}, Plugins: names}}, nil)
+		CredentialIDs: []string{"cred-wmi", "cred-ssh", "cred-bmc", "cred-ipmi", "cred-snmp", "cred-nas"}, Plugins: names}}, nil)
 	runDueDiscovery(context.Background(), &collectorConfig{}, nil, newScheduler(), &hostCache{}, time.Now())
 
-	want := map[string]string{"ssh": "ssh-secret", "wmi": "wmi-secret", "redfish": "redfish-secret", "ipmi": "ipmi-secret"}
+	want := map[string]string{"ssh": "ssh-secret", "wmi": "wmi-secret", "redfish": "redfish-secret", "ipmi": "ipmi-secret", "nas": "nas-secret"}
 	for _, n := range names {
 		seen := spies[n].seen(target)
 		if len(seen) == 0 {
@@ -66,12 +67,16 @@ func TestAuditCredentialKindRouting(t *testing.T) {
 				}
 			}
 		}
-	}
-	// NAS has no credential kind of its own until WP-379 (E-68): fail closed.
-	for _, creds := range spies["nas"].seen(target) {
-		if len(creds) != 0 {
-			t.Errorf("nas plugin received credentials %v, want none", creds)
+		if n != "nas" {
+			for k, v := range creds {
+				if v == "nas-secret" || v == "dsm-admin" {
+					t.Errorf("COL-02 violated: the NAS credential reached the %s plugin (%s=%q)", n, k, v)
+				}
+			}
 		}
+	}
+	if creds := spies["nas"].seen(target); len(creds) > 0 && (creds[0]["username"] != "dsm-admin" || len(creds[0]) != 2) {
+		t.Errorf("nas plugin received %v, want exactly the nas credential", creds[0])
 	}
 }
 

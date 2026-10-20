@@ -72,7 +72,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 	cred, err := h.svc.Create(r.Context(), req)
 	if err == ErrInvalidKind {
-		writeError(w, http.StatusBadRequest, "invalid credential kind")
+		api.WriteFieldError(w, &api.FieldError{Field: "kind", Message: "unknown credential kind", Status: http.StatusUnprocessableEntity})
 		return
 	}
 	if err != nil {

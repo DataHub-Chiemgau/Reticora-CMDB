@@ -314,20 +314,38 @@ func TestParseTLSScopes(t *testing.T) {
 }
 
 // TestTLSScopesFromEnv: RETICORA_WMI_TLS_SCOPES configures the exceptions of
-// the WMI plugin only, RETICORA_REDFISH_TLS_SCOPES those of Redfish; an
-// invalid value configures no exception (fail closed).
+// the WMI plugin only, RETICORA_REDFISH_TLS_SCOPES those of Redfish,
+// RETICORA_NAS_TLS_SCOPES those of NAS; an invalid value configures no
+// exception (fail closed).
 func TestTLSScopesFromEnv(t *testing.T) {
 	pin := strings.Repeat("ef", 32)
 	t.Setenv("RETICORA_WMI_TLS_SCOPES", "10.0.40.0/24=pin:"+pin)
 	t.Setenv("RETICORA_REDFISH_TLS_SCOPES", "")
+	t.Setenv("RETICORA_NAS_TLS_SCOPES", "")
 	cfg := loadCollectorConfig()
 	if len(cfg.WMITLSScopes) != 1 || cfg.WMITLSScopes[0].Network.String() != "10.0.40.0/24" ||
 		len(cfg.WMITLSScopes[0].PinsSHA256) != 1 || hex.EncodeToString(cfg.WMITLSScopes[0].PinsSHA256[0]) != pin {
 		t.Fatalf("WMI TLS scopes = %+v", cfg.WMITLSScopes)
 	}
-	if len(cfg.RedfishTLSScopes) != 0 {
-		t.Fatalf("the WMI exception must not apply to Redfish: %+v", cfg.RedfishTLSScopes)
+	if len(cfg.RedfishTLSScopes) != 0 || len(cfg.NASTLSScopes) != 0 {
+		t.Fatalf("the WMI exception must not apply to Redfish or NAS: %+v, %+v", cfg.RedfishTLSScopes, cfg.NASTLSScopes)
 	}
+	// WP-379: RETICORA_NAS_TLS_SCOPES configures only the NAS plugin.
+	t.Setenv("RETICORA_WMI_TLS_SCOPES", "")
+	t.Setenv("RETICORA_NAS_TLS_SCOPES", "10.0.60.5/32=pin:"+pin)
+	cfg = loadCollectorConfig()
+	if len(cfg.NASTLSScopes) != 1 || cfg.NASTLSScopes[0].Network.String() != "10.0.60.5/32" ||
+		len(cfg.NASTLSScopes[0].PinsSHA256) != 1 || hex.EncodeToString(cfg.NASTLSScopes[0].PinsSHA256[0]) != pin {
+		t.Fatalf("NAS TLS scopes = %+v", cfg.NASTLSScopes)
+	}
+	if len(cfg.RedfishTLSScopes) != 0 || len(cfg.WMITLSScopes) != 0 {
+		t.Fatalf("the NAS exception must not apply to Redfish or WMI: %+v, %+v", cfg.RedfishTLSScopes, cfg.WMITLSScopes)
+	}
+	t.Setenv("RETICORA_NAS_TLS_SCOPES", "10.0.60.0/24=insecure:true")
+	if cfg = loadCollectorConfig(); cfg.NASTLSScopes != nil {
+		t.Fatalf("an invalid RETICORA_NAS_TLS_SCOPES must configure no exception: %+v", cfg.NASTLSScopes)
+	}
+	t.Setenv("RETICORA_NAS_TLS_SCOPES", "")
 	t.Setenv("RETICORA_WMI_TLS_SCOPES", "10.0.40.0/24=insecure:true")
 	t.Setenv("RETICORA_REDFISH_TLS_SCOPES", "10.0.50.0/24=pin:"+pin)
 	cfg = loadCollectorConfig()

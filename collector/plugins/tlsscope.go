@@ -74,10 +74,13 @@ func UntrustedCertificate(err error) bool {
 }
 
 // NewTLSClient returns an HTTP client that verifies server certificates with
-// cfg (SystemTLSConfig or TLSScope.TLSConfig).
+// cfg (SystemTLSConfig or TLSScope.TLSConfig). It follows no redirects and
+// returns the redirect response instead: net/http would repeat Authorization
+// (and a 307/308 also the body) to plain HTTP on the same host (COL-02).
 func NewTLSClient(timeout time.Duration, cfg *tls.Config) *http.Client {
 	return &http.Client{
-		Timeout: timeout,
+		Timeout:       timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		Transport: &http.Transport{
 			TLSClientConfig:     cfg,
 			MaxIdleConnsPerHost: 4,

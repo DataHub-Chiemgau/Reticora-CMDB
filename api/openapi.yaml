@@ -7837,7 +7837,9 @@ paths:
       description: >-
         Stores a credential whose secret is envelope-encrypted at rest. The
         owning organization is derived from the authenticated tenant; any
-        `organization_id` in the request body is ignored.
+        `organization_id` in the request body is ignored. A missing or
+        unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the
+        account of the NAS plugin (Synology DSM: username and password).
       requestBody:
         required: true
         content:
@@ -7855,6 +7857,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -18352,7 +18356,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut]
+          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut, nas]
         scope:
           type: string
         key_version:
@@ -18374,7 +18378,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut]
+          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut, nas]
         scope:
           type: string
         secret:

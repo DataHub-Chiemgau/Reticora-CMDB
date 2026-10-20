@@ -19,6 +19,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -121,6 +123,36 @@ func TestTLSScopeVerification(t *testing.T) {
 	_ = ln.Close()
 	if err := get("https://"+addr+"/", SystemTLSConfig()); err == nil || UntrustedCertificate(err) {
 		t.Errorf("refused connection classified as untrusted certificate: %v", err)
+	}
+}
+
+// TestTLSClientFollowsNoRedirect (COL-02, WP-379): the client of the
+// Redfish, WMI and NAS plugins returns a redirect instead of following it,
+// so neither Authorization (copied by net/http to the same host whatever the
+// scheme) nor a POST body (repeated on 307/308) reaches plain HTTP.
+func TestTLSClientFollowsNoRedirect(t *testing.T) {
+	var plainRequests atomic.Int32
+	plain := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { plainRequests.Add(1) }))
+	t.Cleanup(plain.Close)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(srv.Close)
+	pin := sha256.Sum256(srv.Certificate().RawSubjectPublicKeyInfo)
+	client := NewTLSClient(5*time.Second, TLSScope{PinsSHA256: [][]byte{pin[:]}}.TLSConfig())
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/login", strings.NewReader("passwd=secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.SetBasicAuth("admin", "secret")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusTemporaryRedirect || plainRequests.Load() != 0 {
+		t.Errorf("status %d, %d request(s) at the plain-HTTP target; want the 307 and none", resp.StatusCode, plainRequests.Load())
 	}
 }
 

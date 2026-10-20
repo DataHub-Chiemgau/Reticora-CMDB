@@ -2,7 +2,8 @@
 // COL-02). TestAuditT2CredentialsArePerProtocol (F-010, the cause of F-028)
 // moved here from t2_credentials_auditdefect_test.go (WP-378): the aliases
 // wmi->ssh and nas->ssh are gone, so the SSH account no longer reaches
-// WinRM or NAS targets and the stored WMI credential is used.
+// WinRM or NAS targets and the stored WMI credential is used; NAS has its
+// own kind and namespace nas (WP-379, E-68).
 package plugins
 
 import (
@@ -20,6 +21,7 @@ func TestAuditT2CredentialsArePerProtocol(t *testing.T) {
 		"wmi.username": "win-svc", "wmi.password": "win-pw",
 		"ipmi.username": "bmc", "ipmi.password": "ipmi-pw",
 		"redfish.username": "rf", "redfish.password": "rf-pw",
+		"nas.username": "dsm-admin", "nas.password": "nas-pw",
 		"snmp.community": "c0mmunity",
 	}
 	for _, c := range []struct {
@@ -32,8 +34,8 @@ func TestAuditT2CredentialsArePerProtocol(t *testing.T) {
 		{"ssh", map[string]string{"username": "root", "password": "ssh-pw"}},
 		{"snmp", map[string]string{"community": "c0mmunity"}},
 		{"power", map[string]string{"community": "c0mmunity"}},
-		// NAS has no credential kind until WP-379 (E-68): fail closed.
-		{"nas", map[string]string{}},
+		// NAS has its own kind nas (WP-379, E-68).
+		{"nas", map[string]string{"username": "dsm-admin", "password": "nas-pw"}},
 		{"sweep", map[string]string{}},
 	} {
 		got := CredentialsFor(c.protocol, all)

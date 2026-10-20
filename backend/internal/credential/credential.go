@@ -26,6 +26,7 @@ const (
 	KindWMI         = "wmi"
 	KindAPIToken    = "api_token"
 	KindNUT         = "nut"
+	KindNAS         = "nas" // NAS plugin account (Synology DSM: username, password; E-68)
 )
 
 var (
@@ -46,6 +47,7 @@ var validKinds = map[string]bool{
 	KindWMI:         true,
 	KindAPIToken:    true,
 	KindNUT:         true,
+	KindNAS:         true,
 }
 
 // Credential is the domain model for an encrypted credential.

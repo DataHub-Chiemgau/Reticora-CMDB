@@ -73,7 +73,6 @@ go;collector/collectorcmd;TestAuditScopeExpansionCompleteOrReported;F-106
 go;collector/collectorcmd;TestAuditScopeScheduleSurvivesRestart;F-109
 go;collector/collectorcmd;TestAuditT7MetricSamplesReachTheServerAuthenticated;F-046
 go;collector/collectorcmd;TestAuditWMIAuthFailureReachesScopeRun;F-029
-go;collector/plugins/nas;TestAuditNASCredentialTransport;F-011
 go;collector/plugins/snmp;TestAuditSNMPCollectsNeighbors;F-032
 go;collector/plugins/snmp;TestAuditSNMPv3AuthFailureReported;F-105
 go;collector/plugins/wmi;TestAuditWMIFailuresAreErrors;F-029

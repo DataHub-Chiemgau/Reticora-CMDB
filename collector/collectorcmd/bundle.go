@@ -106,6 +106,7 @@ func openBundle(b *sealedBundle, keyPEM string) (*bundleContent, error) {
 var credentialNamespace = map[string]string{
 	"snmp_v2c": "snmp", "snmp_v3": "snmp", "ssh_password": "ssh", "ssh_key": "ssh",
 	"redfish": "redfish", "ipmi": "ipmi", "wmi": "wmi", "api_token": "api", "nut": "nut",
+	"nas": "nas",
 }
 
 // bundleCache holds the credentials of the last bundle in memory, by ID.

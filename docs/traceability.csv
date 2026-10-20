@@ -553,3 +553,4 @@ DIS-04;[B];D;collector/plugins/wmi/wmi_test.go;WP-377
 DIS-04;[B];D;collector/collectorcmd/discovery_credentials_test.go;WP-378
 DIS-09;[B];D;collector/collectorcmd/discovery_credentials_test.go;WP-378
 COL-02;[B];D;collector/collectorcmd/bundle_test.go;WP-378
+DIS-04;[B];D;collector/plugins/nas/nas_test.go;WP-379

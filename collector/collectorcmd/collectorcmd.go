@@ -73,12 +73,14 @@ type collectorConfig struct {
 	// (fallback pass, metric polling, traps), never to a server scope: a
 	// scope uses the bundle credentials of its credential_ids.
 	Credentials map[string]string
-	// RedfishTLSScopes and WMITLSScopes are the per-network TLS exceptions
-	// of the Redfish and WMI plugins (RETICORA_REDFISH_TLS_SCOPES,
-	// RETICORA_WMI_TLS_SCOPES); outside them certificates are verified
+	// RedfishTLSScopes, WMITLSScopes and NASTLSScopes are the per-network
+	// TLS exceptions of the Redfish, WMI and NAS plugins
+	// (RETICORA_REDFISH_TLS_SCOPES, RETICORA_WMI_TLS_SCOPES,
+	// RETICORA_NAS_TLS_SCOPES); outside them certificates are verified
 	// against the system roots.
 	RedfishTLSScopes []plugins.TLSScope
 	WMITLSScopes     []plugins.TLSScope
+	NASTLSScopes     []plugins.TLSScope
 	// SpoolDir is the disk buffer location for discovery results collected
 	// while the backend is unreachable (offline operation per spec §5.2).
 	SpoolDir string
@@ -149,6 +151,7 @@ func Main() {
 	collectorCfg := loadCollectorConfig()
 	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
 	pluginRegistry["wmi"] = wmi.New(wmi.WithTLSScopes(collectorCfg.WMITLSScopes...))
+	pluginRegistry["nas"] = nas.New(nas.WithTLSScopes(collectorCfg.NASTLSScopes...))
 	pluginRegistry["sweep"] = newSweep(&collectorCfg)
 	loadProfileDir(os.Getenv("RETICORA_PROFILES_DIR"))
 
@@ -1313,6 +1316,7 @@ func loadCollectorConfig() collectorConfig {
 		Credentials:        creds,
 		RedfishTLSScopes:   tlsScopesFromEnv("RETICORA_REDFISH_TLS_SCOPES"),
 		WMITLSScopes:       tlsScopesFromEnv("RETICORA_WMI_TLS_SCOPES"),
+		NASTLSScopes:       tlsScopesFromEnv("RETICORA_NAS_TLS_SCOPES"),
 		SpoolDir:           envOrDefault("RETICORA_SPOOL_DIR", "/var/lib/reticora-collector/spool"),
 		SpoolMaxBytes:      int64EnvOrDefault("RETICORA_SPOOL_MAX_BYTES", 1<<30), // 1 GiB default cap
 		SpoolMaxAge:        durationEnvOrDefault("RETICORA_SPOOL_MAX_AGE", 72*time.Hour),
@@ -1446,8 +1450,9 @@ func tlsScopesFromEnv(name string) []plugins.TLSScope {
 	return scopes
 }
 
-// parseTLSScopes parses RETICORA_REDFISH_TLS_SCOPES and
-// RETICORA_WMI_TLS_SCOPES: entries separated by ";" in the form
+// parseTLSScopes parses RETICORA_REDFISH_TLS_SCOPES,
+// RETICORA_WMI_TLS_SCOPES and RETICORA_NAS_TLS_SCOPES: entries separated by
+// ";" in the form
 // "<cidr>=<rule>[,<rule>...]" with the rules "ca:<path to PEM bundle>" and
 // "pin:<hex SHA-256 of the leaf certificate's SubjectPublicKeyInfo>", e.g.
 // "10.0.10.0/24=ca:/etc/reticora/bmc-ca.pem;10.0.20.5/32=pin:9f86d0…".
