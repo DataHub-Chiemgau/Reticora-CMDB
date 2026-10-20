@@ -1,0 +1,27 @@
+# Alert rules for operator access (WP-362, SEC-07). The server exports
+# reticora_operator_break_glass_total (backend/internal/operator/auth.go), the
+# number of requests authenticated with RETICORA_OPERATOR_TOKEN since start.
+# SEC-07: every use of the break-glass token alarms. Critical alerts reach the
+# on-call receiver through deploy/monitoring/alertmanager.yaml; the procedure
+# after a use is in docs/ops/workers.md ("Break-glass alert (SEC-07)").
+# Unit test: deploy/monitoring/tests/operator-rules.test.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: reticora-operator
+  labels:
+    app.kubernetes.io/name: reticora-cmdb
+spec:
+  groups:
+    - name: reticora.operator
+      rules:
+        - alert: ReticoraOperatorBreakGlassUsed
+          # Any use alarms at once (no `for`); increase() also counts across
+          # a counter reset by a restart.
+          expr: increase(reticora_operator_break_glass_total[5m]) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "Operator break-glass token used on {{ $labels.instance }}"
+            description: "A request to /admin/* was authenticated with RETICORA_OPERATOR_TOKEN (X-Operator-Token) in the last 5 minutes. Every use must be justified; otherwise treat the token as compromised and rotate it."
+            runbook_url: "docs/ops/workers.md#break-glass-alert-sec-07"
