@@ -17,8 +17,15 @@ spec:
       rules:
         - alert: ReticoraOperatorBreakGlassUsed
           # Any use alarms at once (no `for`); increase() also counts across
-          # a counter reset by a restart.
-          expr: increase(reticora_operator_break_glass_total[5m]) > 0
+          # a counter reset by a restart. increase() needs two samples: a
+          # series whose first sample is already above 0 (use between process
+          # start and first scrape, or after a gap of more than 5 minutes)
+          # alarms through the second operand until it has a sample 5
+          # minutes back.
+          expr: |
+            increase(reticora_operator_break_glass_total[5m]) > 0
+              or
+            (reticora_operator_break_glass_total > 0 unless reticora_operator_break_glass_total offset 5m)
           labels:
             severity: critical
           annotations:

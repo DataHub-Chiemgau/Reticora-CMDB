@@ -102,7 +102,7 @@ Every worker exports these series, labelled `worker`:
 
 ### Break-glass alert (SEC-07)
 
-`deploy/monitoring/operator-rules.yaml` defines `ReticoraOperatorBreakGlassUsed` (severity `critical`): it fires as soon as `reticora_operator_break_glass_total` of an instance increases, that is with the first evaluation after a request to `/api/v1/admin/*` was authenticated with `RETICORA_OPERATOR_TOKEN` (header `X-Operator-Token`), and stays active for up to 5 minutes. It goes to the on-call receiver like every critical alert. The promtool unit test is `deploy/monitoring/tests/operator-rules.test.yaml`; the CI job `gate` runs it through `tests/audit/t2-break-glass-alert.test.sh`.
+`deploy/monitoring/operator-rules.yaml` defines `ReticoraOperatorBreakGlassUsed` (severity `critical`): it fires as soon as `reticora_operator_break_glass_total` of an instance increases, that is with the first evaluation after a request to `/api/v1/admin/*` was authenticated with `RETICORA_OPERATOR_TOKEN` (header `X-Operator-Token`), and stays active for up to 5 minutes. A series whose first sample is already above 0 (use between process start and first scrape) also fires, for 5 minutes. It goes to the on-call receiver like every critical alert. The promtool unit test is `deploy/monitoring/tests/operator-rules.test.yaml`; the CI job `gate` runs it through `tests/audit/t2-break-glass-alert.test.sh`.
 
 After the alert:
 
