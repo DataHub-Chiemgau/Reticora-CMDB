@@ -279,6 +279,11 @@ func (s *PGAPIKeyStore) MarkUsed(ctx context.Context, orgID, id string) error {
 // caller's transaction, so a deactivation and the revocation of the user's
 // service tokens commit together (TLC-04). It returns the number of keys
 // revoked.
+//
+// The keys the user created for a service account are revoked as well: this
+// is the transition rule of the open decision E-64 (option 1, fail closed).
+// Option 2 would add `AND service_account_id IS NULL` here and list the kept
+// keys in the deactivation audit entry for rotation.
 func RevokeUserAPIKeys(ctx context.Context, tx pgx.Tx, orgID, userID string) (int64, error) {
 	tag, err := tx.Exec(ctx, `
 		UPDATE api_key SET revoked_at = now(), updated_at = now()

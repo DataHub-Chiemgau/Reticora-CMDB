@@ -2518,7 +2518,10 @@ export interface paths {
     delete: operations['deleteUser'];
     options?: never;
     head?: never;
-    /** Update a user */
+    /**
+     * Update a user
+     * @description A non-active status deactivates the user (TLC-04): in the same transaction the user's sessions and refresh cookies are revoked and every active API key the user created is revoked, including keys the user created for service accounts (transition rule of decision E-64). The sessions are revoked only after the user was found in the caller's organization; an unknown user or a user of another organization answers 404 without any effect. If the sessions cannot be revoked, nothing is changed and the answer is 503.
+     */
     patch: operations['updateUser'];
     trace?: never;
   };
@@ -4516,7 +4519,7 @@ export interface paths {
     put?: never;
     /**
      * Anonymize a user (GDPR Art. 17, right to erasure)
-     * @description Replaces all personal data (e-mail, display name, avatar, external ID) with non-identifying surrogate values and disables the account. The row itself and audit history are kept so referential integrity and the audit chain survive. Requires user:manage.
+     * @description Replaces all personal data (e-mail, display name, avatar, external ID) with non-identifying surrogate values and disables the account. The row itself and audit history are kept so referential integrity and the audit chain survive. Requires user:manage. Like a deactivation (TLC-04), it revokes the user's sessions and refresh cookies and every active API key the user created, including keys the user created for service accounts (transition rule of decision E-64), in the same transaction and only for a user of the caller's organization; an unknown user or a user of another organization answers 404 without any effect. If the sessions cannot be revoked, nothing is changed and the answer is 503. The caller cannot anonymize their own account (400).
      */
     post: operations['anonymizeUser'];
     delete?: never;
@@ -21430,8 +21433,10 @@ export interface operations {
           'application/json': components['schemas']['User'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listUserRolesLegacy: {

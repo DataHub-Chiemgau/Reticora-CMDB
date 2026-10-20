@@ -232,3 +232,83 @@ func newIssuer(t *testing.T) *identity.SessionIssuer {
 	}
 	return issuer
 }
+
+// TestDeactivationRevokesServiceAccountKeysOfCreator covers decision E-64
+// (TLC-04, AUT-04, RBA-08; finding F-195): user A creates an API key for
+// themself and one bound to a service account. Under the transition rule of
+// E-64 (option 1, fail closed) deactivating A revokes both, and the audit
+// entry counts both; keys another user created, including one for the same
+// service account, stay valid.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestDeactivationRevokesServiceAccountKeysOfCreator(t *testing.T) {
+	f := scopetest.Seed(t, "f6")
+	bg := context.Background()
+	users := user.NewPGRepository(f.App)
+	creator := f.AppUser(t, f.OrgA, "e64-creator")
+	admin := f.AppUser(t, f.OrgA, "e64-admin")
+	serviceAccount := f.ID()
+	if _, err := f.Admin.Exec(bg, `INSERT INTO service_account (id, organization_id, name, created_by) VALUES ($1, $2, 'e64-integration', $3)`,
+		serviceAccount, f.OrgA, creator); err != nil {
+		t.Fatalf("seed service account: %v", err)
+	}
+
+	asUser := func(ctx context.Context, userID string) context.Context {
+		scope := database.OrgWideScope(f.OrgA, userID)
+		return database.ContextWithTenantScope(tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: userID}), &scope)
+	}
+	keys := identity.NewPGAPIKeyStore(f.App)
+	createKey := func(owner string, account *string) (id, prefix string) {
+		t.Helper()
+		generated, err := identity.GenerateAPIKey("live")
+		if err != nil {
+			t.Fatal(err)
+		}
+		created, err := keys.Create(asUser(bg, owner), &identity.StoredAPIKey{OrganizationID: f.OrgA, Name: "e64-" + generated.KeyPrefix,
+			KeyHash: generated.KeyHash, KeyPrefix: generated.KeyPrefix, Environment: "live", Permissions: []identity.Permission{identity.PermCIRead},
+			CreatedBy: owner, ServiceAccountID: account})
+		if err != nil {
+			t.Fatalf("create API key: %v", err)
+		}
+		return created.ID, generated.KeyPrefix
+	}
+	userKey, userPrefix := createKey(creator, nil)
+	saKey, saPrefix := createKey(creator, &serviceAccount)
+	otherKey, otherPrefix := createKey(admin, nil)
+	otherSAKey, otherSAPrefix := createKey(admin, &serviceAccount)
+
+	mux := chi.NewRouter()
+	user.NewHandler(users).WithSessionRevoker(identity.NewSessionRevocations(cache.NewMemoryStore())).RegisterRoutes(mux)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+creator, strings.NewReader(`{"status":"inactive"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req.WithContext(asUser(req.Context(), admin)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("deactivate the creator: status %d: %s", w.Code, w.Body.String())
+	}
+
+	for _, c := range []struct {
+		name, id, prefix string
+		revoked          bool
+	}{
+		{"user key of the creator", userKey, userPrefix, true},
+		{"service-account key of the creator (E-64 option 1)", saKey, saPrefix, true},
+		{"user key of another user", otherKey, otherPrefix, false},
+		{"service-account key of another user", otherSAKey, otherSAPrefix, false},
+	} {
+		var revoked bool
+		if err := f.Admin.QueryRow(bg, `SELECT revoked_at IS NOT NULL FROM api_key WHERE id = $1`, c.id).Scan(&revoked); err != nil || revoked != c.revoked {
+			t.Errorf("%s after the deactivation: revoked=%v, %v; want revoked=%v", c.name, revoked, err, c.revoked)
+		}
+		found, err := keys.LookupByPrefix(bg, c.prefix)
+		if err != nil || (found != nil) == c.revoked {
+			t.Errorf("lookup of the %s: found=%v, %v; want found=%v", c.name, found != nil, err, !c.revoked)
+		}
+	}
+
+	var counted int64
+	if err := f.Admin.QueryRow(bg, `SELECT (changes->>'api_keys_revoked')::bigint FROM audit_log WHERE organization_id = $1 AND action = 'user.deactivated' AND resource_id = $2`,
+		f.OrgA, creator).Scan(&counted); err != nil || counted != 2 {
+		t.Errorf("api_keys_revoked in the deactivation audit entry: %d, %v; want 2", counted, err)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/jackc/pgx/v5"
 )
 
 // ErrUserOwnsOpenObjects rejects deleting a user that still owns open
@@ -19,6 +20,14 @@ var ErrUserOwnsOpenObjects = errors.New("user owns open objects; hand them over 
 // reference; deactivate or anonymize the user instead (TLC-04).
 var ErrUserReferenced = errors.New("user is referenced by existing records; deactivate or anonymize instead")
 
+// DeactivationHook runs inside the transaction of a deactivation or
+// anonymization, after the user was found and locked in the organization and
+// before the commit; an error rolls the change back. The handler revokes the
+// sessions here, so a request for an unknown user or a user of another
+// organization never touches the blacklist (TLC-04, TEN-04). The memory
+// repository passes a nil transaction.
+type DeactivationHook func(ctx context.Context, tx pgx.Tx) error
+
 // Repository defines persistence operations for users, teams, and roles.
 type Repository interface {
 	// Users
@@ -26,11 +35,17 @@ type Repository interface {
 	GetUser(ctx context.Context, orgID, id string) (*User, error)
 	CreateUser(ctx context.Context, u *User) error
 	UpdateUser(ctx context.Context, orgID, id string, req UpdateUserRequest) (*User, error)
+	// UpdateUserTx is UpdateUser that calls onDeactivate (may be nil) when
+	// the request sets a non-active status on a user of the organization.
+	UpdateUserTx(ctx context.Context, orgID, id string, req UpdateUserRequest, onDeactivate DeactivationHook) (*User, error)
 	DeleteUser(ctx context.Context, orgID, id string) error
 	// AnonymizeUser replaces all personal data with surrogate values and
 	// deactivates the account, keeping the row for referential integrity and
 	// the audit chain (GDPR right to erasure).
 	AnonymizeUser(ctx context.Context, orgID, id string) (*User, error)
+	// AnonymizeUserTx is AnonymizeUser that calls onDeactivate (may be nil)
+	// once the user of the organization is locked.
+	AnonymizeUserTx(ctx context.Context, orgID, id string, onDeactivate DeactivationHook) (*User, error)
 
 	// Teams
 	ListTeams(ctx context.Context, orgID, search string, page api.PaginationParams) ([]Team, int, error)
@@ -142,13 +157,22 @@ func (r *MemoryRepository) CreateUser(_ context.Context, u *User) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateUser(_ context.Context, orgID, id string, req UpdateUserRequest) (*User, error) {
+func (r *MemoryRepository) UpdateUser(ctx context.Context, orgID, id string, req UpdateUserRequest) (*User, error) {
+	return r.UpdateUserTx(ctx, orgID, id, req, nil)
+}
+
+func (r *MemoryRepository) UpdateUserTx(ctx context.Context, orgID, id string, req UpdateUserRequest, onDeactivate DeactivationHook) (*User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	u, ok := r.users[id]
 	if !ok || u.OrganizationID != orgID {
 		return nil, fmt.Errorf("user not found")
+	}
+	if req.Status != nil && !statusIsActive(*req.Status) && onDeactivate != nil {
+		if err := onDeactivate(ctx, nil); err != nil {
+			return nil, err
+		}
 	}
 	if req.DisplayName != nil {
 		u.DisplayName = *req.DisplayName
@@ -175,13 +199,22 @@ func (r *MemoryRepository) DeleteUser(_ context.Context, orgID, id string) error
 	return nil
 }
 
-func (r *MemoryRepository) AnonymizeUser(_ context.Context, orgID, id string) (*User, error) {
+func (r *MemoryRepository) AnonymizeUser(ctx context.Context, orgID, id string) (*User, error) {
+	return r.AnonymizeUserTx(ctx, orgID, id, nil)
+}
+
+func (r *MemoryRepository) AnonymizeUserTx(ctx context.Context, orgID, id string, onDeactivate DeactivationHook) (*User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	u, ok := r.users[id]
 	if !ok || u.OrganizationID != orgID {
 		return nil, fmt.Errorf("user not found")
+	}
+	if onDeactivate != nil {
+		if err := onDeactivate(ctx, nil); err != nil {
+			return nil, err
+		}
 	}
 	u.Email = SurrogateEmail(id)
 	u.DisplayName = SurrogateDisplayName(id)
