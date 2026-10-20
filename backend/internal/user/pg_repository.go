@@ -12,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -269,20 +270,39 @@ func (r *PGRepository) UpdateUserTx(ctx context.Context, orgID, id string, req U
 
 // deactivateInTx revokes the API keys of a user that was just deactivated and
 // records the deactivation, in the transaction of the status change (TLC-04).
-// Following the transition rule of E-64 (option 1) these include the keys the
-// user created for service accounts. Sessions and refresh tokens end through
-// the session blacklist the handler writes in the DeactivationHook and the
-// status check of every refresh.
+// The keys the user created for service accounts stay valid (decision E-64,
+// option 2): the audit entry lists them, and an apikey.creator_deactivated
+// event in the same transaction asks the org_admins to rotate them. Sessions
+// and refresh tokens end through the session blacklist the handler writes in
+// the DeactivationHook and the status check of every refresh.
 func deactivateInTx(ctx context.Context, tx pgx.Tx, orgID, id, action string) error {
 	revoked, err := identity.RevokeUserAPIKeys(ctx, tx, orgID, id)
 	if err != nil {
 		return err
 	}
-	return recordUserAudit(ctx, tx, orgID, id, action, map[string]interface{}{
-		"is_active":        false,
-		"api_keys_revoked": revoked,
-		"sessions_revoked": true,
-	})
+	kept, err := identity.KeptServiceAccountKeys(ctx, tx, orgID, id)
+	if err != nil {
+		return err
+	}
+	if kept == nil {
+		kept = []identity.KeptServiceAccountKey{}
+	}
+	if err := recordUserAudit(ctx, tx, orgID, id, action, map[string]interface{}{
+		"is_active":                 false,
+		"api_keys_revoked":          revoked,
+		"service_account_keys_kept": kept,
+		"sessions_revoked":          true,
+	}); err != nil {
+		return err
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	if _, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.APIKeyCreatorDeactivated, EntityID: id,
+		Data: map[string]any{"user_id": id, "action": action, "keys": kept}}); err != nil {
+		return fmt.Errorf("record rotation notice: %w", err)
+	}
+	return nil
 }
 
 // recordUserAudit appends an audit entry for a change of the user account,

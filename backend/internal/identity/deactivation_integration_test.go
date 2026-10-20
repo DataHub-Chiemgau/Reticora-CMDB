@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,11 +18,15 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // TestDeactivationEndsAccess covers WP-042 (TLC-04, AUT-02, AUT-01): a login
@@ -233,68 +238,185 @@ func newIssuer(t *testing.T) *identity.SessionIssuer {
 	return issuer
 }
 
-// TestDeactivationRevokesServiceAccountKeysOfCreator covers decision E-64
-// (TLC-04, AUT-04, RBA-08; finding F-195): user A creates an API key for
-// themself and one bound to a service account. Under the transition rule of
-// E-64 (option 1, fail closed) deactivating A revokes both, and the audit
-// entry counts both; keys another user created, including one for the same
-// service account, stay valid.
+// TestDeactivationRevokesServiceAccountKeysOfCreator covers decision E-64,
+// option 2 (TLC-04, AUT-04, RBA-08; finding F-195): user A creates an API key
+// for themself and one bound to a service account. Deactivating A revokes
+// only A's own key; the service-account key belongs to the account and stays
+// valid. The audit entry counts the revoked key and lists the kept one
+// (id, prefix, name, service account, no secret), and the org_admins of A's
+// organization receive exactly one notification naming it through the
+// outbox and the notification center (NTF-05). Keys another user created stay
+// valid and are not listed; other users' notifications are unaffected; the
+// org_admins of another organization are not notified, and an administrator
+// of that organization deactivates nothing (404). The deactivation of a
+// creator in the other organization notifies only its own org_admins.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestDeactivationRevokesServiceAccountKeysOfCreator(t *testing.T) {
 	f := scopetest.Seed(t, "f6")
 	bg := context.Background()
 	users := user.NewPGRepository(f.App)
-	creator := f.AppUser(t, f.OrgA, "e64-creator")
-	admin := f.AppUser(t, f.OrgA, "e64-admin")
-	serviceAccount := f.ID()
-	if _, err := f.Admin.Exec(bg, `INSERT INTO service_account (id, organization_id, name, created_by) VALUES ($1, $2, 'e64-integration', $3)`,
-		serviceAccount, f.OrgA, creator); err != nil {
-		t.Fatalf("seed service account: %v", err)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
 	}
+	// orgAdmin creates a user holding the seeded standard role org_admin.
+	orgAdmin := func(orgID, name string) string {
+		t.Helper()
+		id := f.AppUser(t, orgID, name)
+		exec(`INSERT INTO role_assignment (organization_id, user_id, role_id)
+			SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = 'org_admin'`, orgID, id)
+		return id
+	}
+	creator := f.AppUser(t, f.OrgA, "e64-creator")
+	admin := orgAdmin(f.OrgA, "e64-admin")
+	secondAdmin := orgAdmin(f.OrgA, "e64-admin2")
+	engineer := f.AppUser(t, f.OrgA, "e64-engineer")
+	exec(`INSERT INTO role_assignment (organization_id, user_id, role_id)
+		SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = 'engineer'`, f.OrgA, engineer)
+	foreignAdmin := orgAdmin(f.OrgB, "e64-foreign-admin")
+	foreignCreator := f.AppUser(t, f.OrgB, "e64-foreign-creator")
+	serviceAccount, foreignAccount := f.ID(), f.ID()
+	exec(`INSERT INTO service_account (id, organization_id, name, created_by) VALUES ($1, $2, 'e64-integration', $3)`,
+		serviceAccount, f.OrgA, creator)
+	exec(`INSERT INTO service_account (id, organization_id, name, created_by) VALUES ($1, $2, 'e64-foreign-integration', $3)`,
+		foreignAccount, f.OrgB, foreignCreator)
 
-	asUser := func(ctx context.Context, userID string) context.Context {
-		scope := database.OrgWideScope(f.OrgA, userID)
-		return database.ContextWithTenantScope(tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: userID}), &scope)
+	asUser := func(ctx context.Context, orgID, userID string) context.Context {
+		scope := database.OrgWideScope(orgID, userID)
+		return database.ContextWithTenantScope(tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: orgID, UserID: userID}), &scope)
 	}
 	keys := identity.NewPGAPIKeyStore(f.App)
-	createKey := func(owner string, account *string) (id, prefix string) {
+	createKey := func(orgID, owner string, account *string) (id, prefix, name string) {
 		t.Helper()
 		generated, err := identity.GenerateAPIKey("live")
 		if err != nil {
 			t.Fatal(err)
 		}
-		created, err := keys.Create(asUser(bg, owner), &identity.StoredAPIKey{OrganizationID: f.OrgA, Name: "e64-" + generated.KeyPrefix,
+		created, err := keys.Create(asUser(bg, orgID, owner), &identity.StoredAPIKey{OrganizationID: orgID, Name: "e64-" + generated.KeyPrefix,
 			KeyHash: generated.KeyHash, KeyPrefix: generated.KeyPrefix, Environment: "live", Permissions: []identity.Permission{identity.PermCIRead},
 			CreatedBy: owner, ServiceAccountID: account})
 		if err != nil {
 			t.Fatalf("create API key: %v", err)
 		}
-		return created.ID, generated.KeyPrefix
+		return created.ID, generated.KeyPrefix, created.Name
 	}
-	userKey, userPrefix := createKey(creator, nil)
-	saKey, saPrefix := createKey(creator, &serviceAccount)
-	otherKey, otherPrefix := createKey(admin, nil)
-	otherSAKey, otherSAPrefix := createKey(admin, &serviceAccount)
+	userKey, userPrefix, _ := createKey(f.OrgA, creator, nil)
+	saKey, saPrefix, saName := createKey(f.OrgA, creator, &serviceAccount)
+	otherKey, otherPrefix, _ := createKey(f.OrgA, admin, nil)
+	otherSAKey, otherSAPrefix, _ := createKey(f.OrgA, admin, &serviceAccount)
+	foreignSAKey, foreignSAPrefix, _ := createKey(f.OrgB, foreignCreator, &foreignAccount)
+
+	// The notification center of both organizations: an in-app channel each
+	// (NTF-05); the events of the outbox reach it through the consumer.
+	key, _ := crypto.GenerateMasterKey()
+	enc, _ := crypto.NewEnvelopeEncryptor(key)
+	center := &notify.Center{Channels: notify.NewPGRepository(f.App, notify.NewSealer(enc)), Inbox: notify.NewPGInbox(f.App),
+		Preferences: notify.NewPGPreferences(f.App), Deliveries: notify.NewPGDeliveryStore(f.App)}
+	for _, org := range []string{f.OrgA, f.OrgB} {
+		if err := center.Channels.Create(bg, &notify.Channel{OrganizationID: org, Name: "center", Provider: notify.ProviderInApp, Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	notifier := notify.NewNotifier(center.Channels, center.Deliveries, center.Preferences,
+		notify.NewSender(map[string]notify.Provider{notify.ProviderInApp: notify.NewInAppProvider(center.Inbox)}))
+	consumer := notify.NewEventConsumer(notify.NewPGResolver(f.App, permission.NewPGRepository(f.App)), notifier)
+	// deliverEvents hands the pending events of the two fixture
+	// organizations to the consumer as the publisher does, without touching
+	// the outbox of other packages' fixtures, and works off the deliveries.
+	deliverEvents := func() {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT id::text, type, organization_id::text, occurred_at, sequence, COALESCE(entity_id, ''),
+			COALESCE(entity_seq, 0), data FROM event_outbox WHERE organization_id IN ($1, $2) AND published_at IS NULL ORDER BY organization_id, sequence`,
+			f.OrgA, f.OrgB)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pending, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (events.Envelope, error) {
+			var e events.Envelope
+			scanErr := row.Scan(&e.ID, &e.Type, &e.OrgID, &e.OccurredAt, &e.Sequence, &e.EntityID, &e.EntitySeq, &e.Data)
+			return e, scanErr
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range pending {
+			if err = consumer.Consume(bg, &pending[i]); err != nil {
+				t.Fatalf("consume %s: %v", pending[i].Type, err)
+			}
+			exec(`UPDATE event_outbox SET published_at = now() WHERE id = $1`, pending[i].ID)
+		}
+		if _, err = notifier.ProcessDue(bg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inbox := func(orgID, userID string) []notify.InAppNotification {
+		t.Helper()
+		items, _, err := center.Inbox.List(bg, orgID, userID, false, 50, 0)
+		if err != nil {
+			t.Fatalf("inbox of %s: %v", userID, err)
+		}
+		return items
+	}
+	// rotationNotices are the notifications of userID naming a kept key.
+	rotationNotices := func(orgID, userID string) []notify.InAppNotification {
+		t.Helper()
+		var out []notify.InAppNotification
+		for _, n := range inbox(orgID, userID) {
+			if n.Data["event_type"] == "apikey.creator_deactivated" {
+				out = append(out, n)
+			}
+		}
+		return out
+	}
+	// An earlier notification of another user must stay as it is.
+	if err := center.Inbox.Add(bg, []notify.InAppNotification{{OrganizationID: f.OrgA, UserID: engineer, Category: "export",
+		Subject: "e64 earlier notice", Body: "earlier", CreatedAt: time.Now().UTC()}}); err != nil {
+		t.Fatal(err)
+	}
 
 	mux := chi.NewRouter()
 	user.NewHandler(users).WithSessionRevoker(identity.NewSessionRevocations(cache.NewMemoryStore())).RegisterRoutes(mux)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+creator, strings.NewReader(`{"status":"inactive"}`))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req.WithContext(asUser(req.Context(), admin)))
-	if w.Code != http.StatusOK {
-		t.Fatalf("deactivate the creator: status %d: %s", w.Code, w.Body.String())
+	patch := func(orgID, actor, target string) int {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+target, strings.NewReader(`{"status":"inactive"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req.WithContext(asUser(req.Context(), orgID, actor)))
+		return w.Code
+	}
+	outboxEvents := func(orgID, entityID string) int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM event_outbox WHERE organization_id = $1 AND type = 'apikey.creator_deactivated' AND entity_id = $2`,
+			orgID, entityID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
 	}
 
+	// An administrator of the other organization deactivates nothing.
+	if code := patch(f.OrgB, foreignAdmin, creator); code != http.StatusNotFound {
+		t.Fatalf("deactivation of the creator by an administrator of another organization: status %d, want 404", code)
+	}
+	if n := outboxEvents(f.OrgA, creator) + outboxEvents(f.OrgB, creator); n != 0 {
+		t.Errorf("rotation events after the foreign request: %d, want 0", n)
+	}
+
+	if code := patch(f.OrgA, admin, creator); code != http.StatusOK {
+		t.Fatalf("deactivate the creator: status %d", code)
+	}
 	for _, c := range []struct {
 		name, id, prefix string
 		revoked          bool
 	}{
 		{"user key of the creator", userKey, userPrefix, true},
-		{"service-account key of the creator (E-64 option 1)", saKey, saPrefix, true},
+		{"service-account key of the creator (E-64 option 2)", saKey, saPrefix, false},
 		{"user key of another user", otherKey, otherPrefix, false},
 		{"service-account key of another user", otherSAKey, otherSAPrefix, false},
+		{"service-account key in another organization", foreignSAKey, foreignSAPrefix, false},
 	} {
 		var revoked bool
 		if err := f.Admin.QueryRow(bg, `SELECT revoked_at IS NOT NULL FROM api_key WHERE id = $1`, c.id).Scan(&revoked); err != nil || revoked != c.revoked {
@@ -306,9 +428,81 @@ func TestDeactivationRevokesServiceAccountKeysOfCreator(t *testing.T) {
 		}
 	}
 
+	// The audit entry counts the revoked key and lists the kept one.
 	var counted int64
-	if err := f.Admin.QueryRow(bg, `SELECT (changes->>'api_keys_revoked')::bigint FROM audit_log WHERE organization_id = $1 AND action = 'user.deactivated' AND resource_id = $2`,
-		f.OrgA, creator).Scan(&counted); err != nil || counted != 2 {
-		t.Errorf("api_keys_revoked in the deactivation audit entry: %d, %v; want 2", counted, err)
+	var keptRaw []byte
+	if err := f.Admin.QueryRow(bg, `SELECT (changes->>'api_keys_revoked')::bigint, COALESCE(changes->'service_account_keys_kept', 'null')
+		FROM audit_log WHERE organization_id = $1 AND action = 'user.deactivated' AND resource_id = $2`,
+		f.OrgA, creator).Scan(&counted, &keptRaw); err != nil || counted != 1 {
+		t.Errorf("api_keys_revoked in the deactivation audit entry: %d, %v; want 1", counted, err)
+	}
+	var kept []map[string]any
+	want := map[string]any{"id": saKey, "key_prefix": saPrefix, "name": saName, "service_account_id": serviceAccount,
+		"service_account_name": "e64-integration"}
+	if err := json.Unmarshal(keptRaw, &kept); err != nil || len(kept) != 1 {
+		t.Errorf("service_account_keys_kept in the deactivation audit entry: %s, %v; want the one kept key", keptRaw, err)
+	} else if !reflect.DeepEqual(kept[0], want) {
+		t.Errorf("kept key in the audit entry: %v, want %v (no secret, no hash)", kept[0], want)
+	}
+
+	// Exactly one rotation notice for each org_admin of the organization,
+	// naming the kept key; nobody else is notified.
+	deliverEvents()
+	for _, a := range []string{admin, secondAdmin} {
+		notices := rotationNotices(f.OrgA, a)
+		if len(notices) != 1 {
+			t.Errorf("rotation notices of org_admin %s: %d, want 1", a, len(notices))
+			continue
+		}
+		n := notices[0]
+		if !strings.Contains(n.Body, saPrefix) || !strings.Contains(n.Body, "e64-integration") || strings.Contains(n.Body, otherSAPrefix) ||
+			strings.Contains(n.Body, userPrefix) {
+			t.Errorf("rotation notice of %s does not name exactly the kept key %s: %q", a, saPrefix, n.Body)
+		}
+		if n.Category != "apikey" || n.Data["user_id"] != creator {
+			t.Errorf("rotation notice of %s: category %q, data %v", a, n.Category, n.Data)
+		}
+	}
+	if items := inbox(f.OrgA, engineer); len(items) != 1 || items[0].Subject != "e64 earlier notice" {
+		t.Errorf("notifications of a user without org_admin: %+v, want only the earlier one", items)
+	}
+	if items := inbox(f.OrgA, creator); len(items) != 0 {
+		t.Errorf("notifications of the deactivated creator: %+v, want none", items)
+	}
+	// Cross-organization: the org_admin of the other organization gets
+	// nothing, and no delivery is queued there.
+	if items := inbox(f.OrgB, foreignAdmin); len(items) != 0 {
+		t.Errorf("notifications of the org_admin of another organization: %+v, want none", items)
+	}
+	var foreignDeliveries int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM notification_delivery WHERE organization_id = $1`, f.OrgB).Scan(&foreignDeliveries); err != nil ||
+		foreignDeliveries != 0 {
+		t.Errorf("deliveries in the other organization: %d, %v; want 0", foreignDeliveries, err)
+	}
+	// A repeated delivery of the event notifies nobody twice.
+	exec(`UPDATE event_outbox SET published_at = NULL WHERE organization_id = $1 AND type = 'apikey.creator_deactivated'`, f.OrgA)
+	deliverEvents()
+	if n := len(rotationNotices(f.OrgA, admin)); n != 1 {
+		t.Errorf("rotation notices of the org_admin after a repeated event: %d, want 1", n)
+	}
+
+	// The deactivation of a creator in the other organization notifies only
+	// its own org_admin.
+	if code := patch(f.OrgB, foreignAdmin, foreignCreator); code != http.StatusOK {
+		t.Fatalf("deactivate the creator of the other organization: status %d", code)
+	}
+	deliverEvents()
+	if notices := rotationNotices(f.OrgB, foreignAdmin); len(notices) != 1 || !strings.Contains(notices[0].Body, foreignSAPrefix) {
+		t.Errorf("rotation notices of the org_admin of the other organization: %+v, want one naming %s", notices, foreignSAPrefix)
+	}
+	for _, a := range []string{admin, secondAdmin} {
+		for _, n := range rotationNotices(f.OrgA, a) {
+			if strings.Contains(n.Body, foreignSAPrefix) {
+				t.Errorf("org_admin %s was notified of a key of another organization: %q", a, n.Body)
+			}
+		}
+		if n := len(rotationNotices(f.OrgA, a)); n != 1 {
+			t.Errorf("rotation notices of org_admin %s after the deactivation in another organization: %d, want 1", a, n)
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -147,6 +148,35 @@ var Subscriptions = map[string]Subscription{
 					"Certificate "+str(d, "name")+" expires on "+str(d, "expires_at")+".")
 		},
 	},
+	events.APIKeyCreatorDeactivated: {
+		// The service-account keys of a deactivated user stay valid (E-64,
+		// option 2), but the user saw their secrets when creating them: the
+		// org_admins who may manage API keys are asked to rotate them.
+		Category: "apikey", Critical: true,
+		Audience: func(map[string]any) *Audience {
+			return &Audience{Permission: identity.PermAPIKeyManage, Roles: []string{"org_admin"}}
+		},
+		Render: func(d map[string]any) (string, string) {
+			keys := keptKeys(d)
+			return "Service-Account-Keys rotieren: Ersteller deaktiviert",
+				text("Der Benutzer "+str(d, "user_id")+", der die folgenden API-Keys für Service-Accounts angelegt hat, wurde deaktiviert. Die Keys bleiben gültig; bitte rotieren:\n"+keys,
+					"User "+str(d, "user_id")+", who created the following service-account API keys, was deactivated. The keys stay valid; please rotate them:\n"+keys)
+		},
+	},
+}
+
+// keptKeys lists the kept service-account keys of an
+// apikey.creator_deactivated event, one per line: prefix, name, service
+// account.
+func keptKeys(d map[string]any) string {
+	list, _ := d["keys"].([]any)
+	lines := make([]string, 0, len(list))
+	for _, item := range list {
+		k, _ := item.(map[string]any)
+		lines = append(lines, "- "+str(k, "key_prefix")+" ("+str(k, "name")+"), Service-Account/service account "+
+			str(k, "service_account_name")+" ["+str(k, "service_account_id")+"]")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // EventConsumer notifies of the subscribed events of the outbox

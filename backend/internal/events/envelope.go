@@ -62,6 +62,10 @@ const (
 	InvitationCreated   = "invitation.created"
 	WebhookDead         = "webhook.dead"
 	CertificateExpiring = "certificate.expiring"
+	// APIKeyCreatorDeactivated: the user who created service-account keys
+	// was deactivated or anonymized; the keys stay valid and the org_admins
+	// are asked to rotate them (TLC-04, decision E-64 option 2).
+	APIKeyCreatorDeactivated = "apikey.creator_deactivated"
 )
 
 // Types lists the event types.
@@ -70,6 +74,7 @@ var Types = []string{
 	RelationshipCreated, RelationshipRemoved, CollectorEnrolled, CollectorOffline,
 	ReviewCreated, ReviewResolved, ExportCompleted, JobFailed, EntitlementWarning,
 	EntitlementExpired, InvitationCreated, WebhookDead, CertificateExpiring,
+	APIKeyCreatorDeactivated,
 }
 
 // IsType reports whether t is an event type of EVT-02.

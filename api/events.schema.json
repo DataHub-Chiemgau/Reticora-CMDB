@@ -34,7 +34,8 @@
         "entitlement.expired",
         "invitation.created",
         "webhook.dead",
-        "certificate.expiring"
+        "certificate.expiring",
+        "apikey.creator_deactivated"
       ]
     },
     "org_id": {
