@@ -1,10 +1,8 @@
 package power
 
 import (
-	"context"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gosnmp/gosnmp"
 
@@ -39,13 +37,7 @@ var outletTables = []outletTable{
 
 // walkOutlets reads the outlet names of the first vendor table the device
 // answers; outlets without a name are left out. pdu reports a PDU table.
-func (p *Plugin) walkOutlets(ctx context.Context, target, community string, timeout time.Duration) (outlets []plugins.DeviceOutlet, pdu bool) {
-	g := &gosnmp.GoSNMP{Context: ctx, Target: target, Port: uint16(p.port()), Transport: "udp", Community: community,
-		Version: gosnmp.Version2c, Timeout: timeout, Retries: 0, MaxOids: gosnmp.MaxOids}
-	if err := g.Connect(); err != nil {
-		return nil, false
-	}
-	defer g.Conn.Close()
+func walkOutlets(g *gosnmp.GoSNMP) (outlets []plugins.DeviceOutlet, pdu bool) {
 	for _, table := range outletTables {
 		names := walkColumn(g, table.nameOID)
 		if len(names) == 0 {

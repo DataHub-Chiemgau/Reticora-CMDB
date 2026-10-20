@@ -73,22 +73,6 @@ func TestIsPrintable(t *testing.T) {
 	}
 }
 
-func TestOctetText(t *testing.T) {
-	for in, want := range map[string]string{
-		"core-sw-1":           "core-sw-1",
-		"FOC1234X0YZ\x00\x00": "FOC1234X0YZ", // NUL padding
-		" DC1 R1 \x00 ":       "DC1 R1",
-		"Cisco IOS Software\r\nTechnical Support": "Cisco IOS Software\r\nTechnical Support",
-		"Büro 2":           "Büro 2",
-		"\x00\x11\x00\x22": "", // binary
-		"":                 "",
-	} {
-		if got := octetText([]byte(in)); got != want {
-			t.Errorf("octetText(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 // startSNMPFake binds UDP 161 and answers every SNMP GET with a scripted
 // OctetString value.
 func startSNMPFake(t *testing.T, value string) {

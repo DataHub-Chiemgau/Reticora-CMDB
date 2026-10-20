@@ -5,8 +5,8 @@
 // secret the collector sent (COL-02). The PDU handling follows the test
 // agent of collector/plugins/snmp/v3_agent_test.go. It is test
 // infrastructure: only collector/cmd/fakesnmp and tests (plugins/snmp
-// TestCollectFromSNMPFake) use it, the release build (./cmd/collector) does
-// not.
+// TestCollectFromSNMPFake, plugins/power) use it, the release build
+// (./cmd/collector) does not.
 package fakesnmp
 
 import (
@@ -64,8 +64,10 @@ type Agent struct {
 	seen []Request
 }
 
-// Listen binds the agent to addr (host:port, UDP); Serve answers.
-func Listen(addr string, cfg Config) (*Agent, error) {
+// Listen binds the agent to addr (host:port, UDP); Serve answers. extra
+// are further variables the agent serves (names with a leading dot), e.g.
+// the UPS-MIB identity of a power device.
+func Listen(addr string, cfg Config, extra ...gosnmp.SnmpPDU) (*Agent, error) {
 	if cfg.Community == "" {
 		return nil, errors.New("fakesnmp: a community is required")
 	}
@@ -77,11 +79,11 @@ func Listen(addr string, cfg Config) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	mib := []gosnmp.SnmpPDU{
+	mib := append([]gosnmp.SnmpPDU{
 		{Name: OIDSysDescr, Type: gosnmp.OctetString, Value: []byte(cfg.SysDescr)},
 		{Name: OIDSysObjectID, Type: gosnmp.ObjectIdentifier, Value: cfg.SysObjectID},
 		{Name: OIDSysName, Type: gosnmp.OctetString, Value: []byte(cfg.SysName)},
-	}
+	}, extra...)
 	slices.SortFunc(mib, func(a, b gosnmp.SnmpPDU) int { return compareOID(a.Name, b.Name) })
 	return &Agent{cfg: cfg, conn: conn, mib: mib}, nil
 }

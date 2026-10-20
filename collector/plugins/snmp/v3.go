@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/gosnmp/gosnmp"
 
@@ -154,7 +153,7 @@ func (p *Plugin) collectSession(g *gosnmp.GoSNMP, target, version string) (*plug
 		switch v.Type {
 		case gosnmp.OctetString:
 			if b, ok := v.Value.([]byte); ok {
-				values[oid] = octetText(b)
+				values[oid] = plugins.OctetText(b)
 			}
 		case gosnmp.ObjectIdentifier:
 			if s, ok := v.Value.(string); ok {
@@ -191,17 +190,6 @@ func (p *Plugin) collectSession(g *gosnmp.GoSNMP, target, version string) (*plug
 	}
 	p.applyProfile(result, values[oidSysObjectID])
 	return result, nil
-}
-
-// octetText renders an OctetString value as text: NUL padding and
-// surrounding space are dropped; a value that still holds a NUL byte is
-// binary and stays empty (PostgreSQL refuses NUL in text and JSON).
-func octetText(b []byte) string {
-	s := strings.TrimFunc(string(b), func(r rune) bool { return r == 0 || unicode.IsSpace(r) })
-	if strings.IndexByte(s, 0) >= 0 {
-		return ""
-	}
-	return s
 }
 
 // walkInterfaces reads the IF-MIB interface table; a device without it

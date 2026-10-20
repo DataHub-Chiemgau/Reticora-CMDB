@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Result represents a single discovered or collected item.
@@ -95,4 +96,15 @@ func CredentialsFor(protocol string, all map[string]string) map[string]string {
 		}
 	}
 	return out
+}
+
+// OctetText renders an SNMP OctetString value as text: NUL padding and
+// surrounding space are dropped; a value that still holds a NUL byte is
+// binary and stays empty (PostgreSQL refuses NUL in text and JSON).
+func OctetText(b []byte) string {
+	s := strings.TrimFunc(string(b), func(r rune) bool { return r == 0 || unicode.IsSpace(r) })
+	if strings.IndexByte(s, 0) >= 0 {
+		return ""
+	}
+	return s
 }

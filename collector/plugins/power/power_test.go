@@ -1,67 +1,19 @@
 package power
 
 import (
-	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
-	"net"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gosnmp/gosnmp"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/internal/fakesnmp"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 )
-
-func TestEncodeOID(t *testing.T) {
-	cases := []struct {
-		oid  string
-		want []byte
-	}{
-		{"1.3.6.1.2.1.33.1.1.2.0", []byte{0x06, 0x0A, 43, 6, 1, 2, 1, 33, 1, 1, 2, 0}},
-		// Enterprise OID with multi-byte component 318 -> 0x82 0x3E
-		{"1.3.6.1.4.1.318", []byte{0x06, 0x07, 43, 6, 1, 4, 1, 0x82, 0x3E}},
-		{"", []byte{0x06, 0x01, 0x00}},
-	}
-	for _, c := range cases {
-		if got := encodeOID(c.oid); !bytes.Equal(got, c.want) {
-			t.Errorf("encodeOID(%q) = %x, want %x", c.oid, got, c.want)
-		}
-	}
-}
-
-func TestBuildSNMPGet(t *testing.T) {
-	pkt := buildSNMPGet("public", oidUPSIdentModel)
-	if pkt[0] != 0x30 {
-		t.Errorf("first byte = %#x, want 0x30 (SEQUENCE)", pkt[0])
-	}
-	if int(pkt[1]) != len(pkt)-2 {
-		t.Errorf("declared length %d does not match actual %d", pkt[1], len(pkt)-2)
-	}
-	if !bytes.Contains(pkt, []byte("public")) {
-		t.Error("packet does not contain community string")
-	}
-	if !bytes.Contains(pkt, []byte{0xA0}) {
-		t.Error("packet does not contain GetRequest-PDU tag 0xA0")
-	}
-}
-
-func TestExtractStringValue(t *testing.T) {
-	cases := []struct {
-		name string
-		data []byte
-		want string
-	}{
-		{"octet string", []byte{0x30, 0x10, 0x04, 0x03, 'A', 'P', 'C'}, "APC"},
-		{"empty", nil, ""},
-		{"non printable", []byte{0x04, 0x02, 0x00, 0x01}, ""},
-		{"truncated", []byte{0x04, 0x09, 'x'}, ""},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := extractStringValue(c.data); got != c.want {
-				t.Errorf("extractStringValue() = %q, want %q", got, c.want)
-			}
-		})
-	}
-}
 
 func TestClassifyPowerDevice(t *testing.T) {
 	cases := []struct {
@@ -81,175 +33,139 @@ func TestClassifyPowerDevice(t *testing.T) {
 	}
 }
 
-// scriptedConn returns queued responses for each Read call.
-type scriptedConn struct {
-	net.Conn
-	responses [][]byte
-	writes    int
-}
-
-func (c *scriptedConn) Write(b []byte) (int, error) {
-	c.writes++
-	return len(b), nil
-}
-
-func (c *scriptedConn) Read(b []byte) (int, error) {
-	if len(c.responses) == 0 {
-		return 0, fmt.Errorf("no more scripted responses")
-	}
-	resp := c.responses[0]
-	c.responses = c.responses[1:]
-	n := copy(b, resp)
-	return n, nil
-}
-
-func (c *scriptedConn) SetDeadline(time.Time) error      { return nil }
-func (c *scriptedConn) SetReadDeadline(time.Time) error  { return nil }
-func (c *scriptedConn) SetWriteDeadline(time.Time) error { return nil }
-
-func snmpResponseWithValue(value string) []byte {
-	resp := make([]byte, 0, 32)
-	resp = append(resp, 0x30, 0x20, 0x02, 0x01, 0x01)
-	resp = append(resp, make([]byte, 10)...) // ensure n >= 10 threshold
-	resp = append(resp, 0x04, byte(len(value)))
-	resp = append(resp, value...)
-	return resp
-}
-
-func TestSNMPGetStringReadsValue(t *testing.T) {
-	conn := &scriptedConn{responses: [][]byte{snmpResponseWithValue("Smart-UPS 1500")}}
-	got := snmpGetString(conn, "public", oidUPSIdentModel, time.Second)
-	if got != "Smart-UPS 1500" {
-		t.Errorf("snmpGetString = %q, want %q", got, "Smart-UPS 1500")
-	}
-	if conn.writes != 1 {
-		t.Errorf("expected exactly 1 packet written, got %d", conn.writes)
-	}
-}
-
-func TestSNMPGetStringEmptyOnTimeout(t *testing.T) {
-	conn := &scriptedConn{} // no responses -> Read errors
-	if got := snmpGetString(conn, "public", oidUPSIdentModel, time.Second); got != "" {
-		t.Errorf("snmpGetString = %q, want empty on read error", got)
-	}
-}
-
-func TestIsPowerDevice(t *testing.T) {
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: snmpPort})
-	if err != nil {
-		t.Skipf("cannot bind udp 127.0.0.1:161: %v", err)
-	}
-	t.Cleanup(func() { conn.Close() })
-
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, addr, err := conn.ReadFromUDP(buf)
-			if err != nil {
-				return
-			}
-			if n < 5 || buf[0] != 0x30 {
-				continue
-			}
-			resp := snmpResponseWithValue("Smart-UPS 1500")
-			conn.WriteToUDP(resp, addr)
-		}
-	}()
-
-	if !isPowerDevice("127.0.0.1", "public", time.Second) {
-		t.Error("isPowerDevice = false, want true for UPS-MIB responding target")
-	}
-}
-
 func TestIsPowerDeviceSilent(t *testing.T) {
-	if isPowerDevice("192.0.2.1", "public", 150*time.Millisecond) {
+	if (&Plugin{}).isPowerDevice(context.Background(), "192.0.2.1", "public", 150*time.Millisecond) {
 		t.Error("isPowerDevice = true, want false for silent target")
 	}
 }
 
-func TestCollectFromSNMPFake(t *testing.T) {
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: snmpPort})
-	if err != nil {
-		t.Skipf("cannot bind udp 127.0.0.1:161: %v", err)
-	}
-	t.Cleanup(func() { conn.Close() })
+// Probe and collection against the SNMP fake (internal/fakesnmp, ephemeral
+// port, answers its community only). The values come from the decoded
+// varbinds: the plugin's former v2c parser (extractStringValue) returned
+// the first printable OctetString of the response, the echoed community,
+// so every device that answered the community was a power device with the
+// community as name, model, serial, manufacturer and firmware.
 
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, addr, err := conn.ReadFromUDP(buf)
-			if err != nil {
-				return
-			}
-			if n < 5 || buf[0] != 0x30 {
-				continue
-			}
-			resp := snmpResponseWithValue("Smart-UPS 1500")
-			conn.WriteToUDP(resp, addr)
-		}
-	}()
+const fakeCommunity = "fake-community-4711"
 
-	p := &Plugin{Timeout: time.Second}
-	res, err := p.collect(context.Background(), "127.0.0.1", nil)
+func startFake(t *testing.T, extra []gosnmp.SnmpPDU) *fakesnmp.Agent {
+	t.Helper()
+	agent, err := fakesnmp.Listen("127.0.0.1:0", fakesnmp.Config{Community: fakeCommunity, SysName: "fake-sw-01",
+		SysDescr: "Reticora SNMP fake", SysObjectID: ".1.3.6.1.4.1.8072.3.2.10"}, extra...)
 	if err != nil {
-		t.Fatalf("Collect: %v", err)
+		t.Fatal(err)
 	}
-	if res.CIType != "power-device" {
-		t.Errorf("CIType = %q, want power-device", res.CIType)
-	}
-	if res.Model != "Smart-UPS 1500" {
-		t.Errorf("Model = %q, want Smart-UPS 1500", res.Model)
-	}
-	if res.Name != "Smart-UPS 1500" {
-		t.Errorf("Name = %q, want model name", res.Name)
-	}
-	if res.Attributes["deviceType"] != "ups" {
-		t.Errorf("deviceType = %v, want ups", res.Attributes["deviceType"])
-	}
-	if len(res.Metrics) != 4 {
-		t.Errorf("expected 4 UPS metric placeholders, got %d", len(res.Metrics))
-	}
-	for _, m := range res.Metrics {
-		if m.Labels["target"] != "127.0.0.1" {
-			t.Errorf("metric %q missing target label", m.Name)
-		}
-	}
+	done := make(chan error, 1)
+	go func() { done <- agent.Serve() }()
+	t.Cleanup(func() {
+		_ = agent.Close()
+		<-done
+	})
+	return agent
 }
 
-func TestDiscoverFindsPowerDevice(t *testing.T) {
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: snmpPort})
-	if err != nil {
-		t.Skipf("cannot bind udp 127.0.0.1:161: %v", err)
-	}
-	t.Cleanup(func() { conn.Close() })
+func octets(oid, value string) gosnmp.SnmpPDU {
+	return gosnmp.SnmpPDU{Name: "." + oid, Type: gosnmp.OctetString, Value: []byte(value)}
+}
 
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, addr, err := conn.ReadFromUDP(buf)
+func TestProbeAndCollectAgainstSNMPFake(t *testing.T) {
+	cases := []struct {
+		name  string
+		extra []gosnmp.SnmpPDU
+		// power: the probe finds a power device; want: the collected
+		// identity.
+		power bool
+		want  plugins.Result
+	}{
+		{
+			// An SNMP device without UPS identity (system group only).
+			name: "switch", want: plugins.Result{Name: "127.0.0.1"},
+		},
+		{
+			// UPS-MIB identity first; the APC OIDs are only the fallback.
+			name: "UPS-MIB", power: true,
+			extra: []gosnmp.SnmpPDU{
+				octets(oidUPSIdentManufacturer, "APC"), octets(oidUPSIdentModel, "Smart-UPS 1500"),
+				octets(oidUPSIdentSerial, "AS1234567890\x00\x00"), octets(oidUPSIdentFirmware, "UPS 09.3 / ID18"),
+				octets(oidAPCModel, "SMT1500RMI2U"), octets(oidAPCSerial, "AS0000000000"), octets(oidAPCFirmware, "UPS 10.0"),
+			},
+			want: plugins.Result{Name: "Smart-UPS 1500", Manufacturer: "APC", Model: "Smart-UPS 1500", Serial: "AS1234567890", Firmware: "UPS 09.3 / ID18"},
+		},
+		{
+			name: "APC PowerNet-MIB only", power: true,
+			extra: []gosnmp.SnmpPDU{
+				octets(oidAPCModel, "Smart-UPS X 3000"), octets(oidAPCSerial, "AS1111111111"), octets(oidAPCFirmware, "UPS 15.5 / ID20"),
+			},
+			want: plugins.Result{Name: "Smart-UPS X 3000", Model: "Smart-UPS X 3000", Serial: "AS1111111111", Firmware: "UPS 15.5 / ID20"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := startFake(t, tc.extra)
+			p := &Plugin{Timeout: time.Second, Concurrency: 1, Port: agent.Addr().Port}
+			creds := map[string]string{"community": fakeCommunity}
+
+			hits, err := p.Probe(context.Background(), []string{"127.0.0.1"}, creds)
 			if err != nil {
-				return
+				t.Fatalf("Probe: %v", err)
 			}
-			if n < 5 || buf[0] != 0x30 {
-				continue
+			switch {
+			case !tc.power && len(hits) != 0:
+				t.Errorf("Probe = %+v, want no power device", hits)
+			case tc.power && len(hits) != 1:
+				t.Errorf("Probe = %d hits, want 1", len(hits))
+			case tc.power && (hits[0].CIType != "power-device" || hits[0].Name != "127.0.0.1" || hits[0].Attributes["upsCapable"] != true):
+				t.Errorf("hit = %+v, want a power-device named by its address", hits[0])
 			}
-			conn.WriteToUDP(snmpResponseWithValue("Smart-UPS 1500"), addr)
-		}
-	}()
 
-	p := &Plugin{Timeout: time.Second, Concurrency: 4}
-	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, nil)
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if results[0].CIType != "power-device" {
-		t.Errorf("CIType = %q, want power-device", results[0].CIType)
-	}
-	if results[0].Attributes["upsCapable"] != true {
-		t.Errorf("upsCapable = %v, want true", results[0].Attributes["upsCapable"])
+			res, err := p.collect(context.Background(), "127.0.0.1", creds)
+			if err != nil {
+				t.Fatalf("collect: %v", err)
+			}
+			got := plugins.Result{Name: res.Name, Manufacturer: res.Manufacturer, Model: res.Model, Serial: res.Serial, Firmware: res.Firmware}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("collected identity = %+v, want %+v", got, tc.want)
+			}
+			if tc.power {
+				if res.Attributes["deviceType"] != "ups" {
+					t.Errorf("deviceType = %v, want ups", res.Attributes["deviceType"])
+				}
+				if len(res.Metrics) != 4 {
+					t.Errorf("expected 4 UPS metric placeholders, got %d", len(res.Metrics))
+				}
+				for _, m := range res.Metrics {
+					if m.Labels["target"] != "127.0.0.1" {
+						t.Errorf("metric %q missing target label", m.Name)
+					}
+				}
+			}
+			rec, err := p.Collect(context.Background(), "127.0.0.1", creds)
+			if err != nil {
+				t.Fatalf("Collect: %v", err)
+			}
+
+			// The community is in no field or attribute of any result.
+			for what, v := range map[string]any{"probe hits": hits, "result": res, "record": rec} {
+				raw, err := json.Marshal(v)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(string(raw), fakeCommunity) {
+					t.Errorf("the community is part of the %s: %s", what, raw)
+				}
+			}
+			// The device answered: the fake saw only answered v2c
+			// requests with the community.
+			seen := agent.Requests()
+			if len(seen) == 0 {
+				t.Fatal("the fake received no request")
+			}
+			for _, r := range seen {
+				if r.Version != "2c" || r.Community != fakeCommunity || !r.Answered {
+					t.Errorf("request %+v: want an answered v2c request with the community", r)
+				}
+			}
+		})
 	}
 }
 
