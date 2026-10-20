@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 )
 
 const (
@@ -36,7 +37,7 @@ const (
 
 var errSpikeRollback = errors.New("rollback")
 
-func spikeAdmin(t *testing.T) (context.Context, string, *pgxpool.Pool) {
+func spikeAdmin(t *testing.T) (context.Context, *pgxpool.Pool) {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
@@ -62,7 +63,7 @@ func spikeAdmin(t *testing.T) (context.Context, string, *pgxpool.Pool) {
 			metric_name TEXT NOT NULL, value DOUBLE PRECISION NOT NULL)`,
 		`SELECT create_hypertable('`+spikeSchema+`.m', 'time', chunk_time_interval => INTERVAL '1 day')`,
 	)
-	return ctx, dsn, admin
+	return ctx, admin
 }
 
 func mustExec(ctx context.Context, t *testing.T, pool *pgxpool.Pool, statements ...string) {
@@ -83,7 +84,7 @@ func expectError(ctx context.Context, t *testing.T, pool *pgxpool.Pool, sql, con
 }
 
 func TestTimescaleRefusesRLSWithCompression(t *testing.T) {
-	ctx, _, admin := spikeAdmin(t)
+	ctx, admin := spikeAdmin(t)
 	m := spikeSchema + ".m"
 
 	// RLS first: compression and continuous aggregates are refused.
@@ -111,7 +112,7 @@ func TestTimescaleRefusesRLSWithCompression(t *testing.T) {
 }
 
 func TestSecurityBarrierViewsIsolateMetrics(t *testing.T) {
-	ctx, dsn, admin := spikeAdmin(t)
+	ctx, admin := spikeAdmin(t)
 	m := spikeSchema + ".m"
 	mustExec(ctx, t, admin,
 		`ALTER TABLE `+m+` SET (timescaledb.compress, timescaledb.compress_segmentby = 'organization_id, ci_id, metric_name')`,
@@ -151,7 +152,7 @@ func TestSecurityBarrierViewsIsolateMetrics(t *testing.T) {
 		t.Fatalf("spike needs compressed chunks, got %d (%v)", compressed, err)
 	}
 
-	pool, err := database.NewPool(ctx, dsn)
+	pool, err := database.NewPool(ctx, scopetest.AppDSN(t))
 	if err != nil {
 		t.Fatalf("application pool: %v", err)
 	}

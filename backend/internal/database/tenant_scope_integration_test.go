@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -63,7 +64,7 @@ func seedScopeFixture(t *testing.T) (context.Context, *pgxpool.Pool) {
 		}
 	}
 
-	pool, err := database.NewPool(ctx, dsn)
+	pool, err := database.NewPool(ctx, scopetest.AppDSN(t))
 	if err != nil {
 		t.Fatalf("application pool: %v", err)
 	}
@@ -607,12 +608,12 @@ func TestWithTenantQuotesHostileUserID(t *testing.T) {
 	// doubled backslash would leave \' to escape the doubled quote, the next
 	// quote would end the literal and the dollar-quoted rest of the user id
 	// would set another organization.
-	dsn := testDatabaseURL(t)
+	appDSN := scopetest.AppDSN(t)
 	sep := "?"
-	if strings.Contains(dsn, "?") {
+	if strings.Contains(appDSN, "?") {
 		sep = "&"
 	}
-	sjis, err := database.NewPool(ctx, dsn+sep+"client_encoding=SJIS&backslash_quote=on&standard_conforming_strings=off")
+	sjis, err := database.NewPool(ctx, appDSN+sep+"client_encoding=SJIS&backslash_quote=on&standard_conforming_strings=off")
 	if err != nil {
 		t.Fatal(err)
 	}
