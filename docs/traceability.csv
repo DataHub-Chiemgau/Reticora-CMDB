@@ -524,3 +524,5 @@ RBA-01;[B];B;backend/internal/server/authz_catalog_test.go;WP-363
 AUT-02;[B];B;backend/internal/server/t2_auth_chain_test.go;WP-364
 API-04;[B];B;backend/cmd/server/main_test.go;WP-364
 AGT-03;[P4];B;backend/cmd/agent/t2_transport_test.go;WP-365
+AUT-02;[B];B;frontend/src/auth/bootRefresh.test.tsx;WP-366
+AUT-10;[B];B;frontend/src/auth/session.test.ts;WP-366

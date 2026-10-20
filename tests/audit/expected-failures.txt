@@ -125,8 +125,6 @@ sh;tests/audit/ops-config.test.sh;restore_rpo_window;F-130
 sh;tests/audit/ops-config.test.sh;terraform_replica_missing;F-129
 sh;tests/audit/ops-config.test.sh;terraform_replica_same;F-129
 vitest;frontend/src/api/deprecatedPaths.auditdefect.ts;frontend API paths (catalogue contract) uses no path whose every operation is deprecated;F-077
-vitest;frontend/src/auth/bootRefresh.auditdefect.tsx;reload after the access token expired (AUT-02) renews the session with the refresh cookie before sending the user to /login;F-066
-vitest;frontend/src/auth/session.auditdefect.ts;refresh at token expiry (AUT-02) three concurrent 401s renew the session once and retry with the new token;F-065
 vitest;frontend/src/pages/AuditPage.auditdefect.tsx;AuditPage renders the API audit entry (audit defect) shows the entry time and the affected resource;F-078
 vitest;frontend/src/pages/CIFormModal.auditdefect.tsx;CIFormModal CI types come from the metamodel API (audit defect) offers the org type created at runtime (MET-04);F-016
 vitest;frontend/src/pages/CIFormModal.auditdefect.tsx;CIFormModal CI types come from the metamodel API (audit defect) uses the API type ids as option values and posts the selected id (CI-03);F-016
@@ -155,8 +153,6 @@ e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presen
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09c viewer UI: saving a webhook is refused visibly, not silently;F-062
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;12 after the upgrade the user creates a CI through the UI form (UI → API → DB → UI);F-016
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;13 an admin can revoke the role again and the user loses the rights at the next sign-in;F-017
-e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;14 the SPA renews an expired access token with the refresh cookie instead of signing the user out;F-018
-e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;14b the SPA renews the session when the access token lifetime has run out instead of sending the user to the login;F-066
 e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T14 B’s relationship to A’s CI is rejected with a client error and nothing is stored;F-145
 e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T15 the topology rooted at A’s CI answers B with "not found", like neighbours and impact;F-161
 e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T16 A creates a CI through the CMDB form, it is stored in A’s organization and invisible to B;F-016

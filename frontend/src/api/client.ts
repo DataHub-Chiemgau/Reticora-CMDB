@@ -238,13 +238,12 @@ export interface ListParams {
   search?: string;
 }
 
-function mergeHeaders(options?: RequestInit) {
+function mergeHeaders(options: RequestInit | undefined, token: string | null) {
   const headers = new Headers(options?.headers);
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const token = getSessionToken();
   if (token) {
     headers.set('Authorization', ['Bearer', token].join(' '));
   }
@@ -390,28 +389,32 @@ export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<
 }
 
 async function fetchURL<T>(url: string, options?: RequestInit): Promise<T> {
-  const request = () =>
+  const request = (token: string | null) =>
     fetch(url, {
       ...options,
-      headers: mergeHeaders(options),
+      headers: mergeHeaders(options, token),
     });
 
-  let res = await request();
+  const token = getSessionToken();
+  let res = await request(token);
 
   if (res.status === 401) {
-    const refreshed = await refreshSession();
-    if (refreshed) {
-      res = await request();
-    } else {
-      clearSession();
+    // One refresh per expiry (F-065): a request whose token another request
+    // has renewed meanwhile retries with the new one; the others share the
+    // single in-flight refresh. A failed refresh has already ended the
+    // session if the server refused the cookie (401/403); after a 429 or a
+    // network error the session stays and the 401 is reported.
+    const current = getSessionToken();
+    const renewed = (current !== null && current !== token) || (await refreshSession());
+    if (renewed) {
+      res = await request(getSessionToken());
+      if (res.status === 401) {
+        clearSession();
+      }
     }
   }
 
   if (!res.ok) {
-    if (res.status === 401) {
-      clearSession();
-    }
-
     const body: unknown = await res.json().catch(() => null);
     throw ApiError.fromProblem(res.status, res.statusText, body);
   }
