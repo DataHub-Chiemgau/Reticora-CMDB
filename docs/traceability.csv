@@ -542,3 +542,5 @@ NET-02;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
 NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
 REC-08;[B];D;backend/internal/server/audit_t3_review_routes_integration_test.go;WP-373
 API-05;[B];D;backend/internal/server/audit_t3_review_routes_integration_test.go;WP-373
+COL-08;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-374
+PRI-07;Grundsatz (ohne Tag);D;backend/internal/discovery/natsedge_integration_test.go;WP-374
