@@ -10,7 +10,9 @@ permissions:
   contents: read
 
 # Pinned nats-server for the tests that start their own server
-# (TEST_NATS_SERVER_BIN); 2.10.x like the image nats:2.10-alpine.
+# (TEST_NATS_SERVER_BIN); 2.10.x like the image nats:2.10-alpine. The step
+# "Install nats-server" is the same in the jobs go-modules (collector),
+# migrations and auditdefect (WP-337, WP-374).
 env:
   NATS_SERVER_VERSION: "2.10.29"
   NATS_SERVER_SHA256: e314da74a83a1d3876db8814c27eb990fe729640fd6452025b441bcede8390da
@@ -73,6 +75,19 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+      # The collector's mTLS NATS channel is tested against a real nats-server.
+      - name: Install nats-server
+        if: matrix.module == 'collector'
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL -o "$RUNNER_TEMP/nats.tgz" \
+            "https://github.com/nats-io/nats-server/releases/download/v${NATS_SERVER_VERSION}/nats-server-v${NATS_SERVER_VERSION}-linux-amd64.tar.gz"
+          echo "${NATS_SERVER_SHA256}  $RUNNER_TEMP/nats.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/nats.tgz" -C "$RUNNER_TEMP" --strip-components=1 "nats-server-v${NATS_SERVER_VERSION}-linux-amd64/nats-server"
+          mv "$RUNNER_TEMP/nats-server" "$RUNNER_TEMP/bin/nats-server"
+          echo "TEST_NATS_SERVER_BIN=$RUNNER_TEMP/bin/nats-server" >> "$GITHUB_ENV"
 
       - name: Test
         run: go test -race ./...
@@ -143,6 +158,19 @@ jobs:
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@v1.13.0
 
+      # COL-08/PRI-07 (WP-374): the collector edge tests run
+      # deploy/docker-compose/nats-edge.conf with a real nats-server.
+      - name: Install nats-server
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL -o "$RUNNER_TEMP/nats.tgz" \
+            "https://github.com/nats-io/nats-server/releases/download/v${NATS_SERVER_VERSION}/nats-server-v${NATS_SERVER_VERSION}-linux-amd64.tar.gz"
+          echo "${NATS_SERVER_SHA256}  $RUNNER_TEMP/nats.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/nats.tgz" -C "$RUNNER_TEMP" --strip-components=1 "nats-server-v${NATS_SERVER_VERSION}-linux-amd64/nats-server"
+          mv "$RUNNER_TEMP/nats-server" "$RUNNER_TEMP/bin/nats-server"
+          echo "TEST_NATS_SERVER_BIN=$RUNNER_TEMP/bin/nats-server" >> "$GITHUB_ENV"
+
       # The ingest.> pipeline is tested against a real JetStream
       # (REC-01, internal/discovery/consumer_integration_test.go). Service
       # containers cannot pass arguments, so NATS is started here.
@@ -181,6 +209,31 @@ jobs:
           echo "Tests in $(echo "$pkgs" | jq length) PostgreSQL-backed packages: passed=$(grep -c '^pass' db-tests.txt || true) failed=$(grep -c '^fail' db-tests.txt || true) skipped=$(grep -c '^skip' db-tests.txt || true)"
           if grep -q 'TEST_DATABASE_URL not set' test-db.json; then
             echo "::error::PostgreSQL integration tests were skipped although TEST_DATABASE_URL is set"
+            exit 1
+          fi
+
+      # COL-08/PRI-07 (WP-374): every test of natsedge_integration_test.go
+      # (and its subtests) ran against the nats-server, none was skipped.
+      # Transitional: WP-499 replaces this step by the general skip rule of
+      # scripts/ci/db-test-summary.sh.
+      - name: Assert no edge integration test was skipped
+        if: always()
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          test -s test-db.json || { echo "::error::no test output recorded"; exit 1; }
+          names=$(sed -nE 's/^func (Test[A-Za-z0-9_]+)\(t \*testing\.T\).*/\1/p' internal/discovery/natsedge_integration_test.go | jq -R . | jq -sc .)
+          [ "$(jq length <<<"$names")" -gt 0 ] || { echo "::error::no tests found in natsedge_integration_test.go"; exit 1; }
+          jq -r --arg pkg "$(go list ./internal/discovery)" --argjson names "$names" '
+            select(.Package == $pkg and .Test != null)
+            | select(.Action == "pass" or .Action == "fail" or .Action == "skip")
+            | select((.Test | split("/")[0]) as $top | $names | index($top))
+            | "\(.Action)\t\(.Test)"' test-db.json | sort -k2 > natsedge-tests.txt
+          cat natsedge-tests.txt
+          skipped=$(awk -F'\t' '$1 == "skip" { print $2 }' natsedge-tests.txt)
+          missing=$(jq -r '.[]' <<<"$names" | while read -r n; do awk -F'\t' -v n="$n" '$2 == n { f = 1 } END { exit !f }' natsedge-tests.txt || echo "$n"; done)
+          if [ -n "$skipped" ] || [ -n "$missing" ]; then
+            echo "::error::natsedge tests skipped: $(tr '\n' ' ' <<<"$skipped"); not run: $(tr '\n' ' ' <<<"$missing")"
             exit 1
           fi
 
@@ -294,11 +347,9 @@ jobs:
           terraform_version: "1.9.8"
           terraform_wrapper: false
 
-      - name: Install migrate, kustomize, nats-server, amtool and PyYAML
+      - name: Install nats-server
         run: |
           set -euo pipefail
-          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
-          go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
           mkdir -p "$RUNNER_TEMP/bin"
           curl -sSfL -o "$RUNNER_TEMP/nats.tgz" \
             "https://github.com/nats-io/nats-server/releases/download/v${NATS_SERVER_VERSION}/nats-server-v${NATS_SERVER_VERSION}-linux-amd64.tar.gz"
@@ -306,6 +357,13 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nats.tgz" -C "$RUNNER_TEMP" --strip-components=1 "nats-server-v${NATS_SERVER_VERSION}-linux-amd64/nats-server"
           mv "$RUNNER_TEMP/nats-server" "$RUNNER_TEMP/bin/nats-server"
           echo "TEST_NATS_SERVER_BIN=$RUNNER_TEMP/bin/nats-server" >> "$GITHUB_ENV"
+
+      - name: Install migrate, kustomize, amtool and PyYAML
+        run: |
+          set -euo pipefail
+          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+          go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+          mkdir -p "$RUNNER_TEMP/bin"
           curl -sSfL -o "$RUNNER_TEMP/am.tgz" \
             https://github.com/prometheus/alertmanager/releases/download/v0.27.0/alertmanager-0.27.0.linux-amd64.tar.gz
           echo "23c3f5a3c73de91dbaec419f3c492bef636deb02680808e5d842e6553aa16074  $RUNNER_TEMP/am.tgz" | sha256sum -c -

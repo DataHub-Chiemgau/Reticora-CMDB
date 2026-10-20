@@ -25,7 +25,6 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 )
 
 type edgeFixture struct {
@@ -35,28 +34,18 @@ type edgeFixture struct {
 	codes int
 }
 
-// enroll registers a collector with a certificate and returns its id and
-// TLS client identity.
+// enroll registers a collector of organization A with a certificate and
+// returns its id and TLS client identity.
 func (e *edgeFixture) enroll(t *testing.T, name string) (string, tls.Certificate) {
 	t.Helper()
-	e.codes++
-	raw := fmt.Sprintf("scopetest-a6-%s-%d", name, e.codes)
-	code := &discovery.EnrollmentCode{OrganizationID: e.f.OrgA, Label: raw, ExpiresAt: time.Now().Add(time.Hour)}
-	code.SetRawCode(raw)
-	if err := e.repo.CreateEnrollmentCode(e.f.OrgCtx(e.f.OrgA), code); err != nil {
-		t.Fatal(err)
-	}
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	csr := csrFor(t, "", key)
-	c := &discovery.Collector{Name: name}
-	cert, err := e.repo.EnrollCollector(context.Background(), raw, c,
-		func(ctx context.Context, org, id string) (*discovery.IssuedCert, error) {
-			return e.ca.Sign(ctx, csr, org, id)
-		})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return c.ID, tls.Certificate{Certificate: [][]byte{parseCert(t, cert.CertificatePEM).Raw}, PrivateKey: key}
+	id, key, issued := auditEnroll(t, e, name)
+	return id, clientIdentity(t, key, issued)
+}
+
+// clientIdentity is the TLS client identity of an enrolled collector.
+func clientIdentity(t *testing.T, key *ecdsa.PrivateKey, issued *discovery.IssuedCert) tls.Certificate {
+	t.Helper()
+	return tls.Certificate{Certificate: [][]byte{parseCert(t, issued.CertificatePEM).Raw}, PrivateKey: key}
 }
 
 // TestCollectorNATSEndpointAuthorization covers WP-146 (COL-08, PRI-07)
@@ -67,16 +56,13 @@ func (e *edgeFixture) enroll(t *testing.T, name string) (string, tls.Certificate
 // files are written and its server certificate kept until renewal is due.
 // With TEST_NATS_SERVER_BIN it runs deploy/docker-compose/nats-edge.conf
 // end to end: no client certificate, no access; a collector reaches only
-// its own subjects.
+// its own subjects, neither another collector's nor, publishing or
+// subscribing, the subject tree of a collector of another organization
+// (WP-374). Without the binary the test is skipped, in the CI it fails.
 func TestCollectorNATSEndpointAuthorization(t *testing.T) {
-	f := scopetest.Seed(t, "a6")
+	e, enc := auditEdge(t, "a6")
+	f := e.f
 	bg := context.Background()
-	clean := func() { _, _ = f.Admin.Exec(bg, `DELETE FROM collector_ca`) }
-	clean()
-	t.Cleanup(clean)
-	key, _ := crypto.GenerateMasterKey()
-	enc, _ := crypto.NewEnvelopeEncryptor(key)
-	e := &edgeFixture{f: f, ca: discovery.NewCA(f.App, enc), repo: discovery.NewPGRepository(f.App)}
 	authz := discovery.NewEdgeAuthorizer(f.App, e.ca)
 
 	colID, colCert := e.enroll(t, "edge-a")
@@ -213,18 +199,13 @@ func TestCollectorNATSEndpointAuthorization(t *testing.T) {
 		t.Fatal("a disabled collector was admitted")
 	}
 
-	bin := os.Getenv("TEST_NATS_SERVER_BIN")
-	if bin == "" {
-		t.Log("TEST_NATS_SERVER_BIN not set; skipping the end-to-end run of nats-edge.conf")
-		return
-	}
-	runEdgeServer(t, bin, confDir, secrets, f, e, colID, colCert, disabledCert)
+	runEdgeServer(t, edgeNATSServerBin(t), confDir, secrets, f, e, colID, colCert, disabledCert)
 }
 
 func runEdgeServer(t *testing.T, bin, confDir string, secrets *discovery.EdgeSecrets, f *scopetest.Fixture, e *edgeFixture,
 	colID string, colCert, disabledCert tls.Certificate) {
 	t.Helper()
-	const port = 14229
+	port := auditFreePort(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// The deployed configuration, run like the container: from its
@@ -290,18 +271,87 @@ func runEdgeServer(t *testing.T, bin, confDir string, secrets *discovery.EdgeSec
 	if _, err = sub.NextMsg(3 * time.Second); err != nil {
 		t.Fatalf("own subject: %v", err)
 	}
-	violation := make(chan error, 4)
+	violation := make(chan error, 8)
 	nc.SetErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) { violation <- err })
-	_ = nc.Publish(discovery.CollectorSubject(f.OrgA, "00000000-0000-4000-8000-000000000000")+".heartbeat", []byte("x"))
-	_ = nc.Flush()
-	select {
-	case verr := <-violation:
-		if !strings.Contains(strings.ToLower(verr.Error()), "permissions violation") {
-			t.Fatalf("foreign subject: %v", verr)
+	// refused waits for the server's permissions violation of op
+	// ("publish" or "subscription") on subject.
+	refused := func(op, subject string) {
+		t.Helper()
+		want := fmt.Sprintf("permissions violation for %s to %q", op, subject)
+		select {
+		case verr := <-violation:
+			if !strings.Contains(strings.ToLower(verr.Error()), want) {
+				t.Fatalf("%s on %s: %v", op, subject, verr)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("%s on %s was not refused", op, subject)
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("publishing to another collector's subject was not refused")
 	}
+	foreign := discovery.CollectorSubject(f.OrgA, "00000000-0000-4000-8000-000000000000") + ".heartbeat"
+	_ = nc.Publish(foreign, []byte("x"))
+	_ = nc.Flush()
+	refused("publish", foreign)
+
+	// Another organization (PRI-07): collector B of organization B on the
+	// same endpoint. A can neither publish nor subscribe on B's tree, nor on
+	// its own id under organization B; B's own tree works.
+	otherID, otherKey, otherIssued := auditEnrollIn(t, e, f.OrgB, "edge-org-b")
+	otherCert := clientIdentity(t, otherKey, otherIssued)
+	nb, err := connect(&otherCert, discovery.CollectorInbox(otherID))
+	if err != nil {
+		t.Fatalf("collector of organization B: %v", err)
+	}
+	defer nb.Close()
+	otherTree := discovery.CollectorSubject(f.OrgB, otherID)
+	otherSub, err := nb.SubscribeSync(otherTree + ".>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	receives := func(s *nats.Subscription, want string) {
+		t.Helper()
+		if msg, nerr := s.NextMsg(3 * time.Second); nerr != nil || string(msg.Data) != want {
+			t.Fatalf("control: %q on %s not received: %v", want, s.Subject, nerr)
+		}
+	}
+	receivesNothing := func(s *nats.Subscription) {
+		t.Helper()
+		if msg, nerr := s.NextMsg(time.Second); nerr == nil {
+			t.Fatalf("%q on %s crossed the organizations (subscription %s)", msg.Data, msg.Subject, s.Subject)
+		}
+	}
+	if err = nb.Publish(otherTree+".heartbeat", []byte("b-own")); err != nil {
+		t.Fatal(err)
+	}
+	receives(otherSub, "b-own")
+	crossOrg := []string{otherTree, discovery.CollectorSubject(f.OrgB, colID)}
+	for _, tree := range crossOrg {
+		_ = nc.Publish(tree+".heartbeat", []byte("from-org-a"))
+		_ = nc.Flush()
+		refused("publish", tree+".heartbeat")
+	}
+	receivesNothing(otherSub)
+	crossSubs := make([]*nats.Subscription, 0, len(crossOrg))
+	for _, tree := range crossOrg {
+		cs, serr := nc.SubscribeSync(tree + ".>")
+		if serr != nil {
+			t.Fatal(serr)
+		}
+		_ = nc.Flush()
+		refused("subscription", tree+".>")
+		crossSubs = append(crossSubs, cs)
+	}
+	if err = nb.Publish(otherTree+".heartbeat", []byte("b-after")); err != nil {
+		t.Fatal(err)
+	}
+	receives(otherSub, "b-after")
+	for _, cs := range crossSubs {
+		receivesNothing(cs)
+	}
+	// Control: A's own tree still works after the refusals.
+	if err = nc.Publish(own, []byte("a-after")); err != nil {
+		t.Fatal(err)
+	}
+	receives(sub, "a-after")
 
 	if conn, cerr := connect(nil, ""); cerr == nil {
 		conn.Close()

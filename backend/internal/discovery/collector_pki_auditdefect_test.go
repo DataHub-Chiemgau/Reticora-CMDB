@@ -27,6 +27,9 @@
 //     P2 "Collectors without enabled scopes receive all client and org-wide
 //     credentials" (bundle = only scope-relevant credentials).
 //
+// The shared helpers (auditEdge, auditEnroll, auditFreePort) are in
+// edge_helpers_integration_test.go without a build tag (WP-374).
+//
 // Retest:
 //
 //	cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/<db>?sslmode=disable \
@@ -43,7 +46,6 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -59,52 +61,9 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
-
-// auditEdge seeds the fixture and a collector CA (a private CA per test).
-func auditEdge(t *testing.T, tag string) (*edgeFixture, *crypto.EnvelopeEncryptor) {
-	t.Helper()
-	f := scopetest.Seed(t, tag)
-	bg := context.Background()
-	clean := func() { _, _ = f.Admin.Exec(bg, `DELETE FROM collector_ca`) }
-	clean()
-	t.Cleanup(clean)
-	key, err := crypto.GenerateMasterKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	enc, err := crypto.NewEnvelopeEncryptor(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &edgeFixture{f: f, ca: discovery.NewCA(f.App, enc), repo: discovery.NewPGRepository(f.App)}, enc
-}
-
-// auditEnroll enrolls a collector and returns its id, key and issued
-// certificate (as the collector stores them).
-func auditEnroll(t *testing.T, e *edgeFixture, name string) (string, *ecdsa.PrivateKey, *discovery.IssuedCert) {
-	t.Helper()
-	e.codes++
-	raw := fmt.Sprintf("scopetest-audit-%s-%d", name, e.codes)
-	code := &discovery.EnrollmentCode{OrganizationID: e.f.OrgA, Label: raw, ExpiresAt: time.Now().Add(time.Hour)}
-	code.SetRawCode(raw)
-	if err := e.repo.CreateEnrollmentCode(e.f.OrgCtx(e.f.OrgA), code); err != nil {
-		t.Fatal(err)
-	}
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	c := &discovery.Collector{Name: name}
-	issued, err := e.repo.EnrollCollector(context.Background(), raw, c, func(ctx context.Context, org, id string) (*discovery.IssuedCert, error) {
-		return e.ca.Sign(ctx, csrFor(t, "", key), org, id)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return c.ID, key, issued
-}
 
 func TestAuditCertificateRenewalBoundToCollector(t *testing.T) {
 	e, _ := auditEdge(t, "d0")
@@ -342,16 +301,6 @@ func TestAuditDisabledCollectorConnectionCut(t *testing.T) {
 	if nerr == nil && msg != nil {
 		t.Errorf("COL-04 violated: 5 s after disable the collector is still connected (status %v) and its publish on %s was delivered", nc.Status(), own)
 	}
-}
-
-func auditFreePort(t *testing.T) int {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port
 }
 
 func TestAuditBundleCredentialSelection(t *testing.T) {
