@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { keycloakOtp } from '../../e2e/support/totp';
 
@@ -198,4 +199,106 @@ export async function keycloakAdminToken(request: APIRequestContext): Promise<st
   });
   expect(res.ok(), `Keycloak admin token: ${res.status()}`).toBe(true);
   return ((await res.json()) as { access_token: string }).access_token;
+}
+
+/**
+ * OPERATOR_ACR is the acr value the operator login requests (acr_values):
+ * level of authentication 2 of the realm flow browser-mfa, reached only with
+ * an OTP. The server issues an operator session only for an ID token with
+ * this acr (RETICORA_OPERATOR_MFA_ACR) and the group operators (SEC-07,
+ * WP-361, deploy/keycloak/README.md).
+ */
+export const OPERATOR_ACR = '2';
+
+export interface OperatorAuthorization {
+  /** Authorization URL of the operator login (PKCE, acr_values=2). */
+  url: string;
+  state: string;
+  codeVerifier: string;
+  /** The redirect URI the server exchanges the code with. */
+  redirectUri: string;
+}
+
+/**
+ * operatorAuthorization builds the authorization URL of the operator login
+ * from the server's OIDC configuration (GET /api/v1/auth/config): the
+ * reticora-app client, the configured redirect URI, PKCE (S256) and
+ * acr_values=2, which makes Keycloak ask for the OTP.
+ */
+export async function operatorAuthorization(
+  request: APIRequestContext,
+): Promise<OperatorAuthorization> {
+  const res = await request.get(`${BASE}/api/v1/auth/config`);
+  expect(res.ok(), `GET /api/v1/auth/config: ${res.status()}`).toBe(true);
+  const config = (await res.json()) as {
+    client_id: string;
+    redirect_uri?: string;
+    scopes: string[];
+    authorization_endpoint: string;
+  };
+  expect(config.redirect_uri, 'configured OIDC redirect URI').toBeTruthy();
+  const codeVerifier = randomBytes(48).toString('base64url');
+  const state = randomBytes(16).toString('hex');
+  const url = new URL(config.authorization_endpoint);
+  url.search = new URLSearchParams({
+    client_id: config.client_id,
+    response_type: 'code',
+    redirect_uri: config.redirect_uri!,
+    scope: config.scopes.join(' '),
+    state,
+    code_challenge: createHash('sha256').update(codeVerifier).digest('base64url'),
+    code_challenge_method: 'S256',
+    acr_values: OPERATOR_ACR,
+  }).toString();
+  return { url: url.toString(), state, codeVerifier, redirectUri: config.redirect_uri! };
+}
+
+export interface OperatorSession {
+  token: string;
+  expires_at: string;
+  operator: { id: string; name?: string; email?: string; kind: string };
+}
+
+/**
+ * operatorLogin signs in through Keycloak with the operator authorization
+ * URL (password and OTP, keycloakLogin), catches the redirect with the code
+ * before the SPA could redeem it as a tenant login, and posts the code to
+ * POST /api/v1/admin/auth/callback. It returns the server's answer without
+ * asserting the status.
+ */
+export async function operatorLogin(
+  page: Page,
+  request: APIRequestContext,
+  account: Pick<Account, 'email' | 'password'>,
+): Promise<ApiResult<OperatorSession>> {
+  const auth = await operatorAuthorization(request);
+  const redirect = new URL(auth.redirectUri);
+  let code = '';
+  let state = '';
+  await page.route(
+    (url) => url.origin === redirect.origin && url.pathname === redirect.pathname,
+    async (route) => {
+      const url = new URL(route.request().url());
+      code = url.searchParams.get('code') ?? '';
+      state = url.searchParams.get('state') ?? '';
+      await route.fulfill({ status: 200, contentType: 'text/html', body: '<p>operator login</p>' });
+    },
+  );
+  await page.goto(auth.url);
+  const landing = new RegExp(`^${auth.redirectUri.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?`);
+  await keycloakLogin(page, account, landing);
+  expect(code, 'authorization code at the redirect URI').toBeTruthy();
+  expect(state, 'state of the operator authorization').toBe(auth.state);
+  const res = await request.post(`${BASE}/api/v1/admin/auth/callback`, {
+    data: { code, state, code_verifier: auth.codeVerifier },
+    failOnStatusCode: false,
+  });
+  const text = await res.text();
+  let body: unknown = text;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    // keep the raw text
+  }
+  return { status: res.status(), body: body as OperatorSession };
 }

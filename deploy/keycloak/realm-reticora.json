@@ -17,6 +17,9 @@
   "otpPolicyPeriod": 30,
   "otpPolicyLookAheadWindow": 1,
   "browserFlow": "browser-mfa",
+  "attributes": {
+    "acr.loa.map": "{\"1\":1,\"2\":2}"
+  },
   "defaultRoles": [
     "default-roles-reticora",
     "offline_access"
@@ -113,7 +116,8 @@
       ],
       "defaultClientScopes": [
         "profile",
-        "email"
+        "email",
+        "acr"
       ],
       "protocolMappers": [
         {
@@ -155,13 +159,20 @@
       "realmRoles": [
         "mfa_required"
       ]
+    },
+    {
+      "name": "operators",
+      "path": "/operators",
+      "realmRoles": [
+        "operator"
+      ]
     }
   ],
   "users": [],
   "authenticationFlows": [
     {
       "alias": "browser-mfa",
-      "description": "Browser login; a second factor (OTP) is mandatory for users holding mfa_required (AUT-09, CH26)",
+      "description": "Browser login; a second factor (OTP) is mandatory for users holding mfa_required (AUT-09, CH26) and for every login that requests acr 2 (SEC-07)",
       "providerId": "basic-flow",
       "topLevel": true,
       "builtIn": false,
@@ -191,16 +202,16 @@
     },
     {
       "alias": "browser-mfa forms",
-      "description": "Username and password, then OTP when required",
+      "description": "Username and password (level of authentication 1), OTP when required, level 2 (acr 2) only after an OTP",
       "providerId": "basic-flow",
       "topLevel": false,
       "builtIn": false,
       "authenticationExecutions": [
         {
-          "authenticator": "auth-username-password-form",
-          "authenticatorFlow": false,
-          "requirement": "REQUIRED",
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
           "priority": 10,
+          "flowAlias": "browser-mfa password",
           "userSetupAllowed": false
         },
         {
@@ -208,6 +219,37 @@
           "requirement": "CONDITIONAL",
           "priority": 20,
           "flowAlias": "browser-mfa otp",
+          "userSetupAllowed": false
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 30,
+          "flowAlias": "browser-mfa level 2",
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "browser-mfa password",
+      "description": "Level of authentication 1: username and password",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorConfig": "loa-1",
+          "authenticator": "conditional-level-of-authentication",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "auth-username-password-form",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
           "userSetupAllowed": false
         }
       ]
@@ -235,6 +277,61 @@
           "userSetupAllowed": false
         }
       ]
+    },
+    {
+      "alias": "browser-mfa level 2",
+      "description": "Level of authentication 2 (acr 2), requested with acr_values=2: OTP for users without mfa_required; holders of mfa_required have just entered theirs in browser-mfa otp",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorConfig": "loa-2",
+          "authenticator": "conditional-level-of-authentication",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 20,
+          "flowAlias": "browser-mfa level 2 otp",
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "allow-access-authenticator",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 30,
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "browser-mfa level 2 otp",
+      "description": "OTP of level 2 for users without mfa_required",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorConfig": "no-mfa-required-role",
+          "authenticator": "conditional-user-role",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "auth-otp-form",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "userSetupAllowed": false
+        }
+      ]
     }
   ],
   "authenticatorConfig": [
@@ -243,6 +340,27 @@
       "config": {
         "condUserRole": "mfa_required",
         "negate": "false"
+      }
+    },
+    {
+      "alias": "no-mfa-required-role",
+      "config": {
+        "condUserRole": "mfa_required",
+        "negate": "true"
+      }
+    },
+    {
+      "alias": "loa-1",
+      "config": {
+        "loa-condition-level": "1",
+        "loa-max-age": "36000"
+      }
+    },
+    {
+      "alias": "loa-2",
+      "config": {
+        "loa-condition-level": "2",
+        "loa-max-age": "0"
       }
     }
   ],
