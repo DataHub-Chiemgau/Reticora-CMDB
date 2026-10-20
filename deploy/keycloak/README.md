@@ -45,6 +45,25 @@ administrator alone.
   mandatory for them. Assign `mfa_required` to further users or groups to
   extend the requirement per organization policy.
 
+  These accounts hold `mfa_required` and set up OTP (required action
+  *configure OTP*) at their first login:
+
+  - the initial administrator of `install-cloud.sh` (see above);
+  - the first org_admin of a self-signup (`POST /api/v1/signup/verify`) and
+    the first org_admin the operator path creates (`POST /api/v1/admin/orgs`,
+    invitation e-mail): the server maps `mfa_required` to the new account
+    with its Keycloak admin client and deletes the account again when the
+    mapping fails, so no org_admin is created without MFA. The client needs
+    nothing beyond `realm-management/manage-users`;
+  - every member of the group `reticora-admin`, which the app maps to
+    org_admin: the group carries the realm role `mfa_required` (deliberately
+    not `org_admin`: app rights come from the database, the realm only marks
+    MFA). In the development realm this includes the demo user
+    `admin@reticora.local`.
+
+  Accounts of accepted invitations get no realm role from the server; their
+  MFA requirement follows the invited role (WP-358).
+
 ## Notes on the bundled realm
 
 - The organization of a user is the user attribute `organization_id` (the

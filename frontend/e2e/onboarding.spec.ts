@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { keycloakOtp } from './support/totp';
 
 // WP-200 — onboarding against a freshly installed stack (INS-04, TST-03,
 // ABN-01 d). Nothing is mocked: the install-smoke workflow installs
@@ -82,15 +83,18 @@ async function verificationLink(request: APIRequestContext): Promise<string> {
 }
 
 /**
- * keycloakLogin signs in on the Keycloak form and completes a required
- * profile step should the realm ask for one; it fails with the page Keycloak
- * stopped at instead of a bare timeout.
+ * keycloakLogin signs in on the Keycloak form, completes the second factor
+ * the signup administrator holds (OTP setup at the first login, the code at
+ * later ones; support/totp.ts, WP-357) and a required profile step should
+ * the realm ask for one; it fails with the page Keycloak stopped at instead
+ * of a bare timeout.
  */
 async function keycloakLogin(page: Page, landing: RegExp) {
   await page.waitForURL(/\/protocol\/openid-connect\/auth/);
   await page.locator('#username').fill(email);
   await page.locator('#password').fill(password);
   await page.locator('#kc-login').click();
+  await keycloakOtp(page, email, landing);
   const lastName = page.locator('#lastName');
   await Promise.race([
     page.waitForURL(landing, { timeout: 60_000 }),

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -46,9 +47,27 @@ func fakeKeycloak(t *testing.T, createStatus int, created *keycloakUser, deleted
 		*deleted = r.PathValue("id")
 		w.WriteHeader(http.StatusNoContent)
 	})
+	fakeRealmRoles(mux)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// fakeRole is a realm role as the Keycloak admin API lists it.
+type fakeRole struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// fakeRealmRoles serves the realm roles available to a user and accepts
+// their mapping (the MFA binding of the first org_admin, WP-357).
+func fakeRealmRoles(mux *http.ServeMux) {
+	mux.HandleFunc("GET /admin/realms/reticora/users/{id}/role-mappings/realm/available", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]fakeRole{{ID: "role-mfa", Name: "mfa_required"}})
+	})
+	mux.HandleFunc("POST /admin/realms/reticora/users/{id}/role-mappings/realm", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 }
 
 func TestKeycloakCreateAccount(t *testing.T) {
@@ -136,6 +155,7 @@ func TestKeycloakInviteAccount(t *testing.T) {
 		deleted = r.PathValue("id")
 		w.WriteHeader(http.StatusNoContent)
 	})
+	fakeRealmRoles(mux)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	kc, _ := NewKeycloakAccounts(srv.URL+"/realms/reticora", "signup", "s3cret", srv.Client())
@@ -149,6 +169,9 @@ func TestKeycloakInviteAccount(t *testing.T) {
 	}
 	if len(actions) != 2 || actions[0] != "UPDATE_PASSWORD" || actions[1] != "VERIFY_EMAIL" {
 		t.Errorf("actions = %v", actions)
+	}
+	if !slices.Equal(user.RequiredActions, []string{"UPDATE_PASSWORD", "VERIFY_EMAIL", "CONFIGURE_TOTP"}) {
+		t.Errorf("required actions = %v", user.RequiredActions)
 	}
 
 	// A failing invitation mail removes the account again.
@@ -188,5 +211,125 @@ func TestKeycloakAccountNames(t *testing.T) {
 	}
 	if user.FirstName != "Ada" || user.LastName != "Lovelace" {
 		t.Errorf("names = %q %q", user.FirstName, user.LastName)
+	}
+}
+
+// TestKeycloakMFARoleFailureDeletesAccount (WP-357, AUT-09): when the realm
+// role mfa_required cannot be mapped to the first org_admin (mapping refused,
+// role missing from the realm, lookup failing), the account is deleted again
+// and the error reaches the caller: no org_admin without MFA. The invitation
+// mail of the operator path is not sent.
+func TestKeycloakMFARoleFailureDeletesAccount(t *testing.T) {
+	for _, c := range []struct {
+		name                     string
+		availableStatus, mapping int
+		available                []fakeRole
+		mapAttempts              int
+	}{
+		{"mapping refused", http.StatusOK, http.StatusForbidden, []fakeRole{{ID: "role-mfa", Name: "mfa_required"}}, 1},
+		{"role missing in the realm", http.StatusOK, http.StatusNoContent, []fakeRole{{ID: "role-viewer", Name: "viewer"}}, 0},
+		{"role lookup refused", http.StatusForbidden, http.StatusNoContent, nil, 0},
+	} {
+		for _, path := range []string{"signup", "operator"} {
+			t.Run(c.name+"/"+path, func(t *testing.T) {
+				var deleted, mailed []string
+				mapped := 0
+				mux := http.NewServeMux()
+				mux.HandleFunc("POST /realms/reticora/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+					_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "admin-token"})
+				})
+				mux.HandleFunc("POST /admin/realms/reticora/users", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Location", "http://"+r.Host+"/admin/realms/reticora/users/adm-1")
+					w.WriteHeader(http.StatusCreated)
+				})
+				mux.HandleFunc("GET /admin/realms/reticora/users/{id}/role-mappings/realm/available", func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(c.availableStatus)
+					_ = json.NewEncoder(w).Encode(c.available)
+				})
+				mux.HandleFunc("POST /admin/realms/reticora/users/{id}/role-mappings/realm", func(w http.ResponseWriter, _ *http.Request) {
+					mapped++
+					w.WriteHeader(c.mapping)
+				})
+				mux.HandleFunc("PUT /admin/realms/reticora/users/{id}/execute-actions-email", func(w http.ResponseWriter, r *http.Request) {
+					mailed = append(mailed, r.PathValue("id"))
+					w.WriteHeader(http.StatusNoContent)
+				})
+				mux.HandleFunc("DELETE /admin/realms/reticora/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+					deleted = append(deleted, r.PathValue("id"))
+					w.WriteHeader(http.StatusNoContent)
+				})
+				srv := httptest.NewServer(mux)
+				defer srv.Close()
+				kc, _ := NewKeycloakAccounts(srv.URL+"/realms/reticora", "signup", "s3cret", srv.Client())
+				a := Account{Email: "admin@acme.example", DisplayName: "Ada Admin", OrganizationID: "org-1"}
+				var (
+					id  string
+					err error
+				)
+				if path == "signup" {
+					a.Password = "correct horse battery"
+					id, err = kc.CreateAccount(context.Background(), a)
+				} else {
+					id, err = kc.InviteAccount(context.Background(), a)
+				}
+				if err == nil || id != "" {
+					t.Fatalf("account without MFA role accepted: id %q, err %v", id, err)
+				}
+				if !slices.Equal(deleted, []string{"adm-1"}) {
+					t.Errorf("deleted = %v, want the created account adm-1", deleted)
+				}
+				if len(mailed) != 0 {
+					t.Errorf("invitation mail sent for an account without MFA: %v", mailed)
+				}
+				if mapped != c.mapAttempts {
+					t.Errorf("role mapping requested %d times, want %d", mapped, c.mapAttempts)
+				}
+			})
+		}
+	}
+}
+
+// TestKeycloakInvitedAccountWithoutMFARole (WP-357): the account of an
+// accepted invitation (CreateInvitedAccount) gets no realm role and no
+// CONFIGURE_TOTP; whether it needs MFA follows from the invited role
+// (WP-358).
+func TestKeycloakInvitedAccountWithoutMFARole(t *testing.T) {
+	var (
+		user    keycloakUser
+		lookups int
+		mapped  int
+	)
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /realms/reticora/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "admin-token"})
+	})
+	mux.HandleFunc("POST /admin/realms/reticora/users", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&user)
+		w.Header().Set("Location", "http://"+r.Host+"/admin/realms/reticora/users/inv-2")
+		w.WriteHeader(http.StatusCreated)
+	})
+	mux.HandleFunc("GET /admin/realms/reticora/users/{id}/role-mappings/realm/available", func(w http.ResponseWriter, _ *http.Request) {
+		lookups++
+		_ = json.NewEncoder(w).Encode([]fakeRole{{ID: "role-mfa", Name: "mfa_required"}})
+	})
+	mux.HandleFunc("POST /admin/realms/reticora/users/{id}/role-mappings/realm", func(w http.ResponseWriter, _ *http.Request) {
+		mapped++
+		w.WriteHeader(http.StatusNoContent)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	kc, _ := NewKeycloakAccounts(srv.URL+"/realms/reticora", "signup", "s3cret", srv.Client())
+	id, err := kc.CreateInvitedAccount(context.Background(), "viewer@acme.example", "Vera Viewer", "correct horse battery", "org-1")
+	if err != nil || id != "inv-2" {
+		t.Fatalf("CreateInvitedAccount = %q, %v", id, err)
+	}
+	if lookups != 0 || mapped != 0 {
+		t.Errorf("invited account: %d role lookups, %d role mappings; want none", lookups, mapped)
+	}
+	if len(user.RequiredActions) != 0 {
+		t.Errorf("invited account required actions = %v, want none", user.RequiredActions)
+	}
+	if len(user.Credentials) != 1 || user.Credentials[0].Value != "correct horse battery" || !user.EmailVerified {
+		t.Errorf("invited user = %+v", user)
 	}
 }
