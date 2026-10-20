@@ -66,6 +66,11 @@ func writeInvitationError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
 	case errors.Is(err, ErrInvitationUserExists):
 		api.WriteFieldError(w, &api.ConflictError{Field: "email", Message: err.Error()})
+	case errors.Is(err, ErrMFAUnavailable):
+		// An org_admin account without MFA was deleted again (WP-358); the
+		// cause names the admin API and goes to the log only.
+		slog.ErrorContext(r.Context(), "invitation: org_admin account without enforceable MFA", "error", err)
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrMFAUnavailable.Error())
 	case api.WriteFieldError(w, err):
 	default:
 		slog.ErrorContext(r.Context(), "invitation failed", "error", err)
@@ -157,7 +162,9 @@ func (h *InvitationHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 
 // Accept consumes an invitation once and creates the user with the invited
 // role and scope. With the IdP admin client the password creates the IdP
-// account in the same step; it is never stored by Reticora.
+// account in the same step; it is never stored by Reticora. An org_admin
+// account is bound to MFA; when that fails, the acceptance answers 503 and
+// the invitation stays open.
 func (h *InvitationHandler) Accept(w http.ResponseWriter, r *http.Request) {
 	if h.unavailable(w) {
 		return
@@ -181,7 +188,7 @@ func (h *InvitationHandler) Accept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var (
-		createAccount func(ctx context.Context, inv *Invitation) error
+		createAccount func(ctx context.Context, inv *Invitation, role string) error
 		accountID     string
 	)
 	if h.accounts != nil {
@@ -190,12 +197,12 @@ func (h *InvitationHandler) Accept(w http.ResponseWriter, r *http.Request) {
 				Message: fmt.Sprintf("password must have at least %d characters", minInvitedPasswordLength)})
 			return
 		}
-		createAccount = func(ctx context.Context, inv *Invitation) error {
+		createAccount = func(ctx context.Context, inv *Invitation, role string) error {
 			display := req.DisplayName
 			if display == "" {
 				display = inv.Email
 			}
-			id, err := h.accounts.CreateInvitedAccount(ctx, inv.Email, display, req.Password, orgID)
+			id, err := h.accounts.CreateInvitedAccount(ctx, inv.Email, display, req.Password, orgID, role)
 			if err != nil {
 				return err
 			}

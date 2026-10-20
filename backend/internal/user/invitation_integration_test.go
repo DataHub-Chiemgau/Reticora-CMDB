@@ -25,7 +25,7 @@ type stubInvitationAccounts struct {
 	err     error
 }
 
-func (a *stubInvitationAccounts) CreateInvitedAccount(_ context.Context, email, _, _, _ string) (string, error) {
+func (a *stubInvitationAccounts) CreateInvitedAccount(_ context.Context, email, _, _, _, _ string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.err != nil {

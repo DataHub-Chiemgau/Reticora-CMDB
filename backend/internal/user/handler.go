@@ -746,6 +746,13 @@ func (h *Handler) AssignRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.AssignRole(r.Context(), t.OrganizationID, assignment); err != nil {
+		if errors.Is(err, ErrMFAUnavailable) {
+			// No org_admin without MFA (WP-358); the cause names the
+			// admin API and goes to the log only.
+			slog.ErrorContext(r.Context(), "org_admin assignment without enforceable MFA", "user_id", req.UserID, "error", err)
+			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrMFAUnavailable.Error())
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 		return
 	}

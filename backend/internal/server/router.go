@@ -221,6 +221,11 @@ type Options struct {
 	Notifications *notify.Center
 	// InvitationAccounts creates the IdP account of an accepted invitation.
 	InvitationAccounts user.InvitationAccounts
+	// MFA binds the IdP account of every new org_admin to the second factor
+	// (WP-358): role assignment and first login of the PostgreSQL user
+	// repository. nil binds nothing (tests, development without Keycloak
+	// admin client); user.UnavailableMFA fails every org_admin grant.
+	MFA user.MFAEnforcer
 	// CollectorCA signs the collector certificates (COL-04); nil answers
 	// certificate requests with 503.
 	CollectorCA *discovery.CA
@@ -306,6 +311,9 @@ func userHandler(repos *Repositories, sessions *identity.SessionIssuer) *user.Ha
 func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) http.Handler, error) {
 	if err := validate(repos, opts); err != nil {
 		return nil, nil, err
+	}
+	if pg, ok := repos.User.(*user.PGRepository); ok && opts.MFA != nil {
+		pg.WithMFA(opts.MFA)
 	}
 
 	mux := chi.NewRouter()

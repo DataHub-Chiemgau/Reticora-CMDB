@@ -80,9 +80,12 @@ type AcceptedInvitation struct {
 }
 
 // InvitationAccounts creates the IdP account of an accepting user (the
-// Keycloak admin client, see internal/signup).
+// Keycloak admin client, see internal/signup). role is the name of the
+// invited standard role: an org_admin account is bound to MFA (WP-358); when
+// that fails, the account is deleted again and the error wraps
+// ErrMFAUnavailable.
 type InvitationAccounts interface {
-	CreateInvitedAccount(ctx context.Context, email, displayName, password, orgID string) (string, error)
+	CreateInvitedAccount(ctx context.Context, email, displayName, password, orgID, role string) (string, error)
 	DeleteAccount(ctx context.Context, id string) error
 }
 
@@ -94,9 +97,10 @@ type InvitationRepository interface {
 	RevokeInvitation(ctx context.Context, orgID, id string) error
 	// AcceptInvitation consumes the invitation of tokenHash atomically and
 	// once, creates the user with the invited role and scope, and runs
-	// createAccount inside the transaction.
+	// createAccount with the name of the invited role inside the
+	// transaction.
 	AcceptInvitation(ctx context.Context, orgID, tokenHash, displayName string,
-		createAccount func(ctx context.Context, inv *Invitation) error) (*AcceptedInvitation, error)
+		createAccount func(ctx context.Context, inv *Invitation, role string) error) (*AcceptedInvitation, error)
 }
 
 // NewInvitationToken returns a token for orgID and its stored hash. The
@@ -346,7 +350,7 @@ func (r *PGInvitations) RevokeInvitation(ctx context.Context, orgID, id string) 
 // concurrent second acceptance waits for the row lock and then finds it
 // accepted.
 func (r *PGInvitations) AcceptInvitation(ctx context.Context, orgID, tokenHash, displayName string,
-	createAccount func(ctx context.Context, inv *Invitation) error) (*AcceptedInvitation, error) {
+	createAccount func(ctx context.Context, inv *Invitation, role string) error) (*AcceptedInvitation, error) {
 	var accepted *AcceptedInvitation
 	err := database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		inv, err := scanInvitation(tx.QueryRow(ctx, `UPDATE user_invitation SET accepted_at = now()
@@ -395,7 +399,12 @@ func (r *PGInvitations) AcceptInvitation(ctx context.Context, orgID, tokenHash, 
 			return fmt.Errorf("assign invited role: %w", err)
 		}
 		if createAccount != nil {
-			if aerr := createAccount(ctx, inv); aerr != nil {
+			var role string
+			if err = tx.QueryRow(ctx, `SELECT name FROM role WHERE id::text = $1 AND organization_id = $2`,
+				inv.RoleID, orgID).Scan(&role); err != nil {
+				return fmt.Errorf("read invited role: %w", err)
+			}
+			if aerr := createAccount(ctx, inv, role); aerr != nil {
 				return aerr
 			}
 		}

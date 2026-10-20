@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 )
 
 // KeycloakAccounts creates and deletes realm users through the Keycloak
@@ -99,6 +100,9 @@ const (
 	configureTOTP = "CONFIGURE_TOTP"
 )
 
+// orgAdminRole is the app role whose accounts are bound to MFA (AUT-09).
+const orgAdminRole = "org_admin"
+
 // CreateAccount creates the account of the first org_admin of a self-signup:
 // verified address, the organization_id attribute the login reads, the
 // password as permanent credential, and the MFA binding of AUT-09 (realm
@@ -110,10 +114,12 @@ func (k *KeycloakAccounts) CreateAccount(ctx context.Context, a Account) (string
 
 // CreateInvitedAccount creates the account of an accepted invitation
 // (user.InvitationAccounts, TLC-03): like a signup, with the password the
-// invited person chose; an existing account is a conflict on email. It
-// carries no MFA binding: the invited role decides (WP-358).
-func (k *KeycloakAccounts) CreateInvitedAccount(ctx context.Context, email, displayName, password, orgID string) (string, error) {
-	id, err := k.createAccount(ctx, Account{Email: email, DisplayName: displayName, Password: password, OrganizationID: orgID}, false)
+// invited person chose; an existing account is a conflict on email. The
+// invited role decides the MFA binding (WP-358): an org_admin account gets
+// mfa_required and CONFIGURE_TOTP like a signup account and is deleted again
+// when the role cannot be mapped; other roles get neither.
+func (k *KeycloakAccounts) CreateInvitedAccount(ctx context.Context, email, displayName, password, orgID, role string) (string, error) {
+	id, err := k.createAccount(ctx, Account{Email: email, DisplayName: displayName, Password: password, OrganizationID: orgID}, role == orgAdminRole)
 	if errors.Is(err, ErrAccountExists) {
 		return "", &api.ConflictError{Field: "email", Message: err.Error()}
 	}
@@ -174,10 +180,94 @@ func (k *KeycloakAccounts) rollback(ctx context.Context, id string, err error) e
 	return err
 }
 
-// requireMFA maps the realm role mfa_required to the user. The role is
-// looked up among the roles available to the user, which manage-users may
-// read (GET /roles/{name} needs view-realm); the mapping needs its id.
+// RequireMFA binds an existing account to the second factor
+// (user.MFAEnforcer, WP-358): it maps mfa_required unless the account holds
+// it already, directly, through a composite role or through a group
+// (reticora-admin). It is idempotent. Errors wrap identity.ErrMFAUnavailable.
+func (k *KeycloakAccounts) RequireMFA(ctx context.Context, id string) error {
+	held, err := k.holdsMFA(ctx, id)
+	if err != nil {
+		return err
+	}
+	if held {
+		return nil
+	}
+	return k.requireMFA(ctx, id)
+}
+
+// holdsMFA reports whether the user's effective realm roles contain
+// mfa_required.
+func (k *KeycloakAccounts) holdsMFA(ctx context.Context, id string) (bool, error) {
+	var roles []keycloakRole
+	if err := k.getJSON(ctx, "/users/"+url.PathEscape(id)+"/role-mappings/realm/composite", &roles); err != nil {
+		return false, fmt.Errorf("%w: keycloak: effective realm roles: %w", identity.ErrMFAUnavailable, err)
+	}
+	return slices.ContainsFunc(roles, func(r keycloakRole) bool { return r.Name == mfaRole }), nil
+}
+
+// AccountByEmail returns the id of the account whose e-mail address is
+// exactly email, "" when there is none (user.MFAEnforcer). More than one
+// account of the address is an error: the binding must not guess.
+func (k *KeycloakAccounts) AccountByEmail(ctx context.Context, email string) (string, error) {
+	var users []struct {
+		ID    string `json:"id"`
+		Email string `json:"email"`
+	}
+	q := url.Values{"email": {email}, "exact": {"true"}, "briefRepresentation": {"true"}}
+	if err := k.getJSON(ctx, "/users?"+q.Encode(), &users); err != nil {
+		return "", fmt.Errorf("%w: keycloak: find user by e-mail: %w", identity.ErrMFAUnavailable, err)
+	}
+	var ids []string
+	for _, u := range users {
+		if u.ID != "" && strings.EqualFold(u.Email, email) {
+			ids = append(ids, u.ID)
+		}
+	}
+	switch len(ids) {
+	case 0:
+		return "", nil
+	case 1:
+		return ids[0], nil
+	default:
+		return "", fmt.Errorf("%w: keycloak: %d accounts with the e-mail address", identity.ErrMFAUnavailable, len(ids))
+	}
+}
+
+// getJSON reads an admin API resource below the realm into v.
+func (k *KeycloakAccounts) getJSON(ctx context.Context, resource string, v any) error {
+	token, err := k.token(ctx)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, k.adminRealm+resource, http.NoBody)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := k.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(v)
+}
+
+// requireMFA maps the realm role mfa_required to the user; its errors wrap
+// identity.ErrMFAUnavailable.
 func (k *KeycloakAccounts) requireMFA(ctx context.Context, id string) error {
+	if err := k.mapMFARole(ctx, id); err != nil {
+		return fmt.Errorf("%w: %w", identity.ErrMFAUnavailable, err)
+	}
+	return nil
+}
+
+// mapMFARole maps mfa_required. The role is looked up among the roles
+// available to the user, which manage-users may read (GET /roles/{name}
+// needs view-realm); the mapping needs its id.
+func (k *KeycloakAccounts) mapMFARole(ctx context.Context, id string) error {
 	token, err := k.token(ctx)
 	if err != nil {
 		return err

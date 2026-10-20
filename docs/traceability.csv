@@ -514,3 +514,4 @@ RBA-08;[B];B;backend/internal/user/service_account_integration_test.go;WP-355
 API-05;[B];B;backend/internal/user/service_account_integration_test.go;WP-355
 RBA-08;[B];B;backend/internal/webhook/dispatcher_integration_test.go;WP-356
 AUT-09;[B];B;backend/internal/signup/mfa_test.go;WP-357
+AUT-09;[B];B;frontend/e2e-real/mfa-admin.spec.ts;WP-358

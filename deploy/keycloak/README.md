@@ -61,8 +61,36 @@ administrator alone.
     MFA). In the development realm this includes the demo user
     `admin@reticora.local`.
 
-  Accounts of accepted invitations get no realm role from the server; their
-  MFA requirement follows the invited role (WP-358).
+  Every later grant of the app role org_admin binds the account the same way
+  before it is stored (WP-358):
+
+  - `POST /api/v1/role-assignments` (and `/roles/assign`) with the standard
+    role org_admin: the account of the user's OIDC subject, or, for a user
+    created through `POST /api/v1/users` that never signed in, the account
+    of its exact e-mail address (`users?email=…&exact=true`); without such
+    an account the first login binds the account it links;
+  - the acceptance of an org_admin invitation (`POST
+    /api/v1/invitations/accept`): the new account gets `mfa_required` and
+    *configure OTP*; accounts of other invited roles get neither;
+  - the first login that accepts a pending org_admin invitation;
+  - at every server start (scheduler worker) the reconciliation binds every
+    active org_admin with an OIDC subject of every organization, including
+    org_admins created before this binding existed. Failures are logged per
+    user; the run is repeated up to five times.
+
+  The mapping is idempotent and checks the effective roles first
+  (`role-mappings/realm/composite`), so group members are not mapped twice.
+  When it fails, the grant does not happen and the API answers 503 (role
+  assignment, invitation acceptance, login callback). Revoking org_admin
+  leaves `mfa_required` in place.
+
+  **Prerequisite:** the Keycloak admin client
+  (`RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` / `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET`,
+  service account with `realm-management/manage-users`). Without it, every
+  grant of org_admin answers 503 outside `RETICORA_ENVIRONMENT=development`
+  (fail closed); in development nothing is bound. The group `reticora-admin`
+  and the installer administrator are covered by the realm and need no
+  admin client.
 
 ## Notes on the bundled realm
 
