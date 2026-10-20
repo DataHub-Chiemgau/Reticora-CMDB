@@ -1065,8 +1065,9 @@ validate_realm_json() {
 
 # validate_keycloak_bootstrap — post-start checks that go beyond the container
 # healthcheck: the realm must actually be imported and serve its OIDC
-# discovery document at the configured issuer URL, otherwise sign-in fails
-# later in the browser with a hard-to-diagnose error.
+# discovery document, otherwise sign-in fails later in the browser with a
+# hard-to-diagnose error. The configured issuer itself is checked by
+# start_stack once the frontend runs (check_issuer_from_host/_container).
 validate_keycloak_bootstrap() {
     info "Validating the Keycloak bootstrap …"
 
@@ -1112,9 +1113,6 @@ validate_keycloak_bootstrap() {
         die "Keycloak answered the discovery document without an 'issuer' field — the realm import is incomplete."
     fi
     success "Keycloak realm 'reticora' is imported and serving OIDC discovery"
-
-    check_issuer_from_host
-    check_issuer_from_container
 }
 
 # host_primary_ip — the host's primary IPv4 address (the source address of
@@ -1147,6 +1145,17 @@ discovery_issuer() {
 
 ISSUER_TROUBLESHOOTING="see docs/troubleshooting-installation.md, 'OIDC issuer check failed'"
 
+# issuer_check_failed <message> — aborts after a failed issuer check. The
+# checks run after create_initial_admin, so the run that has just created the
+# administrator shows its temporary password here; a re-run does not show it
+# again.
+issuer_check_failed() {
+    if [ -n "$INITIAL_ADMIN_PASSWORD" ]; then
+        printf '%s\n' "$(initial_login_line)" >&2
+    fi
+    die "$*"
+}
+
 # check_issuer_from_host — the configured issuer serves its discovery
 # document to this host and announces exactly itself (INS-02). A
 # self-signed certificate of the installation is trusted explicitly.
@@ -1162,11 +1171,11 @@ check_issuer_from_host() {
         sleep "${RETICORA_ISSUER_RETRY_DELAY:-3}"
     done
     if [ -z "$doc" ]; then
-        die "The OIDC issuer $issuer is not reachable from this host (no discovery document at $issuer/.well-known/openid-configuration). Check DNS, firewall and RETICORA_OIDC_ISSUER_URL ($ISSUER_TROUBLESHOOTING)."
+        issuer_check_failed "The OIDC issuer $issuer is not reachable from this host (no discovery document at $issuer/.well-known/openid-configuration). Check DNS, firewall and RETICORA_OIDC_ISSUER_URL ($ISSUER_TROUBLESHOOTING)."
     fi
     announced="$(printf '%s' "$doc" | discovery_issuer)"
     if [ "${announced%/}" != "$issuer" ]; then
-        die "The OIDC issuer $issuer announces itself as '${announced:-<none>}' — tokens would not match the configured issuer. Align RETICORA_OIDC_ISSUER_URL with the address Keycloak is published under ($ISSUER_TROUBLESHOOTING)."
+        issuer_check_failed "The OIDC issuer $issuer announces itself as '${announced:-<none>}' — tokens would not match the configured issuer. Align RETICORA_OIDC_ISSUER_URL with the address Keycloak is published under ($ISSUER_TROUBLESHOOTING)."
     fi
     success "OIDC issuer $issuer is reachable from this host"
 }
@@ -1178,7 +1187,7 @@ check_issuer_from_container() {
     local out
     if ! out="$(compose_cmd run --rm --no-deps --entrypoint server server -check-oidc-issuer 2>&1)"; then
         printf '%s\n' "$out" | tail -n 5 >&2
-        die "The backend container cannot reach the OIDC issuer $RETICORA_OIDC_ISSUER_URL — sign-in would fail. The issuer must resolve to Keycloak from inside the containers as well ($ISSUER_TROUBLESHOOTING)."
+        issuer_check_failed "The backend container cannot reach the OIDC issuer $RETICORA_OIDC_ISSUER_URL — sign-in would fail. The issuer must resolve to Keycloak from inside the containers as well ($ISSUER_TROUBLESHOOTING)."
     fi
     success "OIDC issuer is reachable from the backend container"
 }
@@ -1409,6 +1418,8 @@ start_stack() {
         show_service_logs frontend
         die "Frontend did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs frontend"
     }
+    # Serve a regenerated bootstrap certificate before the issuer checks below.
+    reload_frontend_after_bootstrap
     # The collector NATS endpoint (mTLS, port 4222) starts once the server
     # has written the collector PKI into the shared volume. It reads the
     # generated pki/edge.conf only at start, so it is recreated on every run:
@@ -1426,6 +1437,12 @@ start_stack() {
         compose_cmd up -d certbot
     fi
     success "All services are up"
+
+    # The strict issuer checks (INS-02) run only now: the default issuer
+    # https://<domain>/realms/reticora is served by the frontend's /realms/
+    # proxy, which cannot answer before the frontend runs (F-035).
+    check_issuer_from_host
+    check_issuer_from_container
 }
 
 run_migrations() {
@@ -1712,7 +1729,6 @@ EOF
     bootstrap_tls_cert
     provide_images
     start_stack
-    reload_frontend_after_bootstrap
     issue_tls_certificate
     verify_stack
     gc_images

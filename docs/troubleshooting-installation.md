@@ -109,7 +109,8 @@ re-run the installer.
 
 ### OIDC issuer check failed
 
-**Symptom:** The installer stops after the Keycloak start with one of
+**Symptom:** The installer stops with exit code 1 after the server and the
+frontend started (`✔ All services are up`) and before the summary, with one of
 
 - `The OIDC issuer … is not reachable from this host`
 - `The OIDC issuer … announces itself as '…'`
@@ -121,6 +122,21 @@ it, the backend verifies them against the issuer they name. The installer
 fetches `<issuer>/.well-known/openid-configuration` from the host and — via
 `server -check-oidc-issuer` — from inside the backend container, and requires
 the document to announce exactly the configured issuer.
+
+**Order of the checks:**
+
+1. After the Keycloak start: a localhost issuer is refused, and the realm must
+   serve its discovery document on Keycloak's own port
+   (`validate_keycloak_bootstrap`, see above). The initial administrator is
+   created through the Keycloak admin API; neither step needs the configured
+   issuer to answer.
+2. Server and frontend start and must become healthy. Behind a domain the
+   issuer `https://<domain>/realms/reticora` is served by the frontend's
+   `/realms/` proxy, so it can only answer from now on.
+3. The issuer from this host, then from inside the backend container. A
+   failure stops the installer here. If this run has just created the initial
+   administrator, its temporary password is printed with the error, because a
+   re-run does not show it again.
 
 **Fix:**
 
@@ -230,7 +246,7 @@ The installer is safe to re-run and reuses existing `.env` values as defaults:
 | `.env` | Existing values are defaults; secrets are regenerated only when absent. Settings the installer does not write itself (e.g. `RETICORA_HTTP_BIND`) are kept in a section at the end. |
 | Session key | Reused; a Docker-created directory or zero-byte file is removed and regenerated. |
 | Database passwords | `RETICORA_DB_PASSWORD` (CMDB) and `KEYCLOAK_DB_PASSWORD` (Keycloak) are probed over TCP — the images trust the local socket and 127.0.0.1 regardless of the password — and on mismatch the stored role password is resynced automatically. |
-| TLS bootstrap cert | Reused; regenerated when SAN-less or expiring within a day. |
+| TLS bootstrap cert | Reused; regenerated when SAN-less or expiring within a day (a running frontend reloads it before the issuer checks). |
 | Let's Encrypt cert | Not re-issued when a real certificate is present. |
 | Realm file | Re-rendered and validated on every run. |
 | Migrations | Tracked in `reticora_schema_migrations`; already-applied versions are skipped. |

@@ -77,6 +77,11 @@ jobs:
       - name: install-cloud.sh helpers
         run: ./tests/install-cloud-helpers.test.sh
 
+      # INS-02 (WP-385, F-035): strict issuer checks only after the server
+      # and the frontend (/realms/ proxy of a domain issuer) are up.
+      - name: install-cloud.sh issuer checks after the frontend start
+        run: ./tests/install-cloud-issuer-order.test.sh
+
       - name: install-smoke-health.sh
         run: ./tests/install-smoke-health.test.sh
 

@@ -330,6 +330,141 @@ run_test   "issuer: a localhost issuer is refused, the host IP suggested"    tes
 run_test   "issuer: host IP and loopback detection"                          test_host_primary_ip
 run_test   "issuer: the troubleshooting guide covers the check"              test_issuer_troubleshooting_documented
 
+# ─── issuer checks after the frontend start (WP-385, INS-02, F-035) ──────────
+
+# stub_issuer_stack <case> [after-frontend|never] — start_stack without side
+# effects. The issuer https://<domain>/realms/reticora is served by the
+# frontend's /realms/ proxy: the curl stub answers it, and the backend
+# container reaches it, only after `up -d server frontend` (never with
+# "never"); Keycloak's host port answers always.
+# shellcheck disable=SC2317,SC2034 # stubs and variables used by the installer
+stub_issuer_stack() {
+    STACK_CALLS="$TMP_ROOT/$1-calls"
+    FRONTEND_UP="$TMP_ROOT/$1-frontend-up"
+    ISSUER_SERVED="${2:-after-frontend}"
+    : > "$STACK_CALLS"
+    rm -f "$FRONTEND_UP"
+    RETICORA_KEYCLOAK_PORT=8180
+    RETICORA_ISSUER_RETRY_DELAY=0
+    RETICORA_TLS_DOMAIN="cmdb.example.test"
+    RETICORA_OIDC_ISSUER_URL="https://cmdb.example.test/realms/reticora"
+    tls_live_dir() { printf '%s/no-tls-live' "$TMP_ROOT"; }
+    issuer_served() { [ "$ISSUER_SERVED" = "after-frontend" ] && [ -e "$FRONTEND_UP" ]; }
+    compose_cmd() {
+        printf 'compose %s\n' "$*" >> "$STACK_CALLS"
+        case "$*" in
+            "up -d server frontend") touch "$FRONTEND_UP" ;;
+            "run --rm --no-deps --entrypoint server server -check-oidc-issuer")
+                issuer_served || { echo "OIDC issuer check failed: dial tcp: connection refused"; return 1; } ;;
+        esac
+        return 0
+    }
+    curl() {
+        local url="${*: -1}" issuer="${RETICORA_OIDC_ISSUER_URL%/}"
+        case "$url" in
+            "http://localhost:8180/"*) ;;
+            "$issuer"/*) issuer_served || return 7 ;;
+            *) return 7 ;;
+        esac
+        printf 'curl %s\n' "$url" >> "$STACK_CALLS"
+        printf '{"issuer": "%s"}\n' "$issuer"
+    }
+    wait_for_service() { printf 'wait %s\n' "$1" >> "$STACK_CALLS"; }
+    sync_db_password() { :; }
+    run_migrations() { :; }
+    seed_default_organization() { :; }
+    ensure_runtime_login() { :; }
+    create_initial_admin() { printf 'create_initial_admin\n' >> "$STACK_CALLS"; }
+    show_service_logs() { :; }
+}
+
+# line_in_calls <fixed line> — number of its first occurrence, empty if none.
+line_in_calls() { grep -n -x -F -- "$1" "$STACK_CALLS" | head -n 1 | cut -d: -f1; }
+
+# A domain issuer that only the started frontend serves: start_stack
+# completes, both checks pass after the frontend became healthy.
+test_issuer_domain_served_by_frontend() {
+    stub_issuer_stack frontend-issuer
+    start_stack
+    local frontend host container
+    frontend="$(line_in_calls 'wait frontend')"
+    host="$(line_in_calls "curl $RETICORA_OIDC_ISSUER_URL/.well-known/openid-configuration")"
+    container="$(line_in_calls 'compose run --rm --no-deps --entrypoint server server -check-oidc-issuer')"
+    [ -n "$frontend" ] && [ -n "$host" ] && [ -n "$container" ] || return 1
+    [ "$frontend" -lt "$host" ] && [ "$host" -lt "$container" ]
+}
+
+# Order of the whole run (main): Keycloak health and realm before
+# create_initial_admin, which stays before the server start; the strict
+# checks after `up -d server frontend` and both health waits (after a reload
+# of a regenerated bootstrap certificate) and before print_summary. The realm
+# validation itself never asks the configured issuer.
+# shellcheck disable=SC2317,SC2034 # stubs and variables used by main
+test_issuer_checks_order() {
+    stub_issuer_stack order
+    RETICORA_PUBLIC_BASE_URL="https://cmdb.example.test"
+    RETICORA_OIDC_REDIRECT_URL="https://cmdb.example.test/auth/callback"
+    RETICORA_FRONTEND_PORT=80
+    RETICORA_SERVER_PORT=8080
+    RETICORA_IMAGE_REGISTRY=""
+    RETICORA_IMAGE_TAG="latest"
+    preflight() { :; }
+    collect_config() { :; }
+    write_env() { :; }
+    ensure_session_key() { :; }
+    configure_realm() { :; }
+    bootstrap_tls_cert() { TLS_BOOTSTRAP_REGENERATED=1; }
+    provide_images() { :; }
+    issue_tls_certificate() { :; }
+    verify_stack() { :; }
+    gc_images() { :; }
+    print_summary() { printf 'print_summary\n' >> "$STACK_CALLS"; }
+    main
+    local issuer_probe="curl $RETICORA_OIDC_ISSUER_URL/.well-known/openid-configuration"
+    local container_probe="compose run --rm --no-deps --entrypoint server server -check-oidc-issuer"
+    local keycloak realm admin up server frontend reload host container summary
+    keycloak="$(line_in_calls 'wait keycloak')"
+    realm="$(line_in_calls 'curl http://localhost:8180/realms/reticora/.well-known/openid-configuration')"
+    admin="$(line_in_calls 'create_initial_admin')"
+    up="$(line_in_calls 'compose up -d server frontend')"
+    server="$(line_in_calls 'wait server')"
+    frontend="$(line_in_calls 'wait frontend')"
+    reload="$(line_in_calls 'compose exec -T frontend nginx -s reload')"
+    host="$(line_in_calls "$issuer_probe")"
+    container="$(line_in_calls "$container_probe")"
+    summary="$(line_in_calls 'print_summary')"
+    local n prev=0
+    for n in "$keycloak" "$realm" "$admin" "$up" "$server" "$frontend" "$reload" "$host" "$container" "$summary"; do
+        if [ -z "$n" ] || [ "$n" -le "$prev" ]; then sed 's/^/  /' "$STACK_CALLS"; return 1; fi
+        prev="$n"
+    done
+    [ "$(grep -c -x -F -- "$issuer_probe" "$STACK_CALLS")" -eq 1 ] &&
+        [ "$(grep -c -x -F -- "$container_probe" "$STACK_CALLS")" -eq 1 ]
+}
+
+# The checks run after create_initial_admin: a failure in the run that just
+# created the administrator shows its temporary password with the error (a
+# re-run would not show it again), otherwise no password.
+# shellcheck disable=SC2317 # the stubs are called by the installer functions
+test_issuer_failure_keeps_initial_login() {
+    stub_issuer_stack failed-check never
+    RETICORA_INITIAL_ADMIN_EMAIL="ops@example.test"
+    create_initial_admin() { INITIAL_ADMIN_PASSWORD="Tmp-only-shown-once-1Aa-"; }
+    local out rc
+    out="$( (start_stack) 2>&1)"; rc=$?
+    [ "$rc" -eq 1 ] || return 1
+    printf '%s' "$out" | grep -q "not reachable from this host" &&
+        printf '%s' "$out" | grep -q "docs/troubleshooting-installation.md" &&
+        printf '%s' "$out" | grep -q -F "Initial login:     ops@example.test / Tmp-only-shown-once-1Aa-" || return 1
+    create_initial_admin() { INITIAL_ADMIN_PASSWORD=""; }
+    out="$( (start_stack) 2>&1)"; rc=$?
+    [ "$rc" -eq 1 ] && ! printf '%s' "$out" | grep -q "Initial login:"
+}
+
+run_test   "issuer: a domain issuer served by the frontend is checked after its start" test_issuer_domain_served_by_frontend
+run_test   "issuer: strict checks after server and frontend, before the summary"       test_issuer_checks_order
+run_test   "issuer: a failed check shows the temporary password of this run"           test_issuer_failure_keeps_initial_login
+
 # ─── re-run: .env merge and password probes (WP-096, INS-05) ─────────────────
 
 set_env_values() {
@@ -487,6 +622,8 @@ test_runtime_login_order() {
     ensure_runtime_login() { printf 'ensure_runtime_login\n' >> "$calls"; }
     validate_keycloak_bootstrap() { :; }
     create_initial_admin() { :; }
+    check_issuer_from_host() { :; }
+    check_issuer_from_container() { :; }
     RETICORA_TLS_DOMAIN=""
     start_stack
     local mig login server
@@ -635,6 +772,8 @@ test_nats_edge_recreated_after_server() {
     ensure_runtime_login() { :; }
     validate_keycloak_bootstrap() { :; }
     create_initial_admin() { :; }
+    check_issuer_from_host() { :; }
+    check_issuer_from_container() { :; }
     RETICORA_TLS_DOMAIN=""
     start_stack
     local server edge
