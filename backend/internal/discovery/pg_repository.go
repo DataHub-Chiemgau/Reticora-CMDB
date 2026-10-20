@@ -181,14 +181,34 @@ func (r *PGRepository) Heartbeat(ctx context.Context, orgID, collectorID string)
 	return status, err
 }
 
+// CollectorStatus implements Repository.
+func (r *PGRepository) CollectorStatus(ctx context.Context, orgID, collectorID string) (string, error) {
+	if !audit.IsUUID(collectorID) {
+		return "", api.ErrNotFound
+	}
+	var status string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT status FROM collector WHERE id = $1 AND organization_id = $2`, collectorID, orgID).Scan(&status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		return err
+	})
+	return status, err
+}
+
 // UpdateCollector implements Repository.
 func (r *PGRepository) UpdateCollector(ctx context.Context, orgID, collectorID string, patch *CollectorPatch) (*Collector, error) {
+	// A malformed id names no collector either (404, F-257).
+	if !audit.IsUUID(collectorID) {
+		return nil, api.ErrNotFound
+	}
 	var out *Collector
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		current, err := scanCollector(tx.QueryRow(ctx, `SELECT `+collectorSelectColumns+
 			` FROM collector WHERE id = $1 AND organization_id = $2 FOR UPDATE`, collectorID, orgID))
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("not found")
+			return api.ErrNotFound
 		}
 		if err != nil {
 			return err

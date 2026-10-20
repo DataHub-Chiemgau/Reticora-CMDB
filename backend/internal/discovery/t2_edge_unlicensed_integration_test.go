@@ -33,8 +33,14 @@ func TestT2EdgeIngestUnlicensed(t *testing.T) {
 	orgCtx := f.OrgCtx(f.OrgA)
 	ciRepo := ci.NewPGRepository(f.App)
 	svc := entitlement.NewService(entitlement.NewPGRepository(f.App), entitlement.Options{Enforce: true})
-	h := NewHandler(NewPGRepository(f.App), ciRepo).WithLimits(svc)
+	repo := NewPGRepository(f.App)
+	h := NewHandler(repo, ciRepo).WithLimits(svc)
 	svc.WithUnlicensed(h)
+	// The edge refuses the records of an unknown collector (COL-04).
+	col := &Collector{OrganizationID: f.OrgA, Name: "t2-edge-collector", Status: CollectorActive, Config: map[string]any{}}
+	if err := repo.RegisterCollector(orgCtx, col); err != nil {
+		t.Fatal(err)
+	}
 
 	countCIs := func() int {
 		t.Helper()
@@ -59,7 +65,7 @@ func TestT2EdgeIngestUnlicensed(t *testing.T) {
 		}
 		// The NATS endpoint calls the handler with the organization's
 		// system context (ServeCollectorEdge).
-		return h.EdgeIngest(systemContext(bg, f.OrgA), f.OrgA, "t2-edge-collector", body)
+		return h.EdgeIngest(systemContext(bg, f.OrgA), f.OrgA, col.ID, body)
 	}
 	device := func(serial, model string) DeviceRecord {
 		return plugins.RecordFromResult("snmp", &plugins.Result{CIType: "server", Name: "t2-edge-" + serial, IP: "192.0.2.77",

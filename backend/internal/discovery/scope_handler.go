@@ -189,7 +189,8 @@ func suggestableSubnet(cidr string) (string, bool) {
 
 // SuggestScopes opens a scope_suggested review for every reported subnet
 // that no scope of the collector covers; a dismissed suggestion stays
-// dismissed. It returns the number of new suggestions.
+// dismissed. It returns the number of new suggestions; a disabled collector
+// is refused.
 func (h *Handler) SuggestScopes(ctx context.Context, orgID, collectorID string, subnets []string) (int, error) {
 	repo, ok := h.repo.(ScopeRepository)
 	if !ok {
@@ -198,6 +199,9 @@ func (h *Handler) SuggestScopes(ctx context.Context, orgID, collectorID string, 
 	col, err := repo.ScopeCollector(ctx, orgID, collectorID)
 	if err != nil {
 		return 0, err
+	}
+	if col.Status == CollectorDisabled {
+		return 0, ErrCollectorDisabled
 	}
 	existing, _, err := repo.ListScopes(ctx, orgID, ScopeFilter{CollectorID: collectorID}, api.PaginationParams{Limit: 10000})
 	if err != nil {
@@ -380,11 +384,14 @@ func (h *Handler) CollectorScopes(ctx context.Context, orgID, collectorID string
 }
 
 // RecordCollectorScopeRun stores a run result of one of the collector's
-// scopes.
+// scopes; an unknown or disabled collector is refused.
 func (h *Handler) RecordCollectorScopeRun(ctx context.Context, orgID, collectorID string, rep *ScopeResultReport) error {
 	repo, ok := h.repo.(ScopeRepository)
 	if !ok {
 		return errors.New("discovery scopes are not available")
+	}
+	if err := h.checkCollector(ctx, orgID, collectorID); err != nil {
+		return err
 	}
 	s, err := repo.GetScope(ctx, orgID, rep.ScopeID)
 	if err != nil {
@@ -405,10 +412,10 @@ func (h *Handler) RecordCollectorScopeRun(ctx context.Context, orgID, collectorI
 	return repo.RecordScopeRun(ctx, orgID, rep.ScopeID, &ScopeRun{At: at, Result: result, NextRun: rep.NextRun})
 }
 
-// ServeCollectorScopes answers the scope requests, run results and subnet
-// reports of the collectors on nc until ctx ends (DIS-09).
-func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error {
-	handlers := map[string]func(ctx context.Context, orgID, collectorID string, data []byte) any{
+// scopeHandlers are the handlers of the scope channel subjects by suffix;
+// they run only for a collector the dispatcher checked.
+func (h *Handler) scopeHandlers() map[string]func(ctx context.Context, orgID, collectorID string, data []byte) any {
+	return map[string]func(ctx context.Context, orgID, collectorID string, data []byte) any{
 		ScopesRequestSuffix: func(ctx context.Context, orgID, collectorID string, _ []byte) any {
 			scopes, err := h.CollectorScopes(ctx, orgID, collectorID)
 			if err != nil {
@@ -447,13 +454,27 @@ func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error
 			return map[string]int{"suggested": n}
 		},
 	}
+}
+
+// ServeCollectorScopes answers the scope requests, run results and subnet
+// reports of the collectors on nc until ctx ends (DIS-09). A request of an
+// unknown or disabled collector is refused before its handler runs,
+// whatever the suffix, so nothing of it is persisted (COL-04).
+func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error {
 	var subs []*nats.Subscription
-	for suffix, handle := range handlers {
+	for suffix, handle := range h.scopeHandlers() {
 		sub, err := nc.Subscribe("collector.*.*"+suffix, func(msg *nats.Msg) {
 			orgID, collectorID, ok := subjectCollector(msg.Subject, suffix)
 			var resp any = map[string]string{"error": "invalid subject"}
 			if ok {
-				resp = handle(systemContext(ctx, orgID), orgID, collectorID, msg.Data)
+				sctx := systemContext(ctx, orgID)
+				if cerr := h.checkCollector(sctx, orgID, collectorID); cerr != nil {
+					slog.Warn("collector scope request refused", "organization_id", orgID, "collector_id", collectorID,
+						"suffix", suffix, "error", cerr)
+					resp = map[string]string{"error": "not available"}
+				} else {
+					resp = handle(sctx, orgID, collectorID, msg.Data)
+				}
 			}
 			raw, _ := json.Marshal(resp)
 			if msg.Reply != "" {

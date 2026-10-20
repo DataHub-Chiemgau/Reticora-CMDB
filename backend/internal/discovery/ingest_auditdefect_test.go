@@ -1,17 +1,11 @@
 //go:build auditdefect
 
-// Phase-1 acceptance audit, group T4-collector-load – DEFECT tests of the
-// server-side ingest (must fail until the defects are fixed).
+// Phase-1 acceptance audit, group T4-collector-load – DEFECT test of the
+// server-side ingest (must fail until the defect is fixed).
 //
-// WP-145 (COL-04), WP-151 (DIS-02).
+// WP-151 (DIS-02).
 //
-// Findings encoded here:
-//   - TestAuditEdgeIngestRefusesDisabledOrUnknownCollector – WP-145 P1
-//     "Disabled collector keeps its open NATS connection and can keep
-//     ingesting (no disconnect, EdgeIngest unchecked)": EdgeIngest
-//     (edge_ingest.go) checks only the license, so records of a disabled or
-//     unknown collector are processed. COL-04: after disable further data is
-//     refused.
+// Finding encoded here:
 //   - TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices – WP-151 P1
 //     "Every swept device gets a (recurring) false unclassified_device
 //     review, even when SNMP/SSH/Redfish classified it": the server opens the
@@ -23,15 +17,16 @@
 // The records are classified exactly as the collector does
 // (collector/profiles.Default().ClassifyRecord) and go through the server's
 // ingest pipeline (processItems) with the memory repositories.
+// TestAuditEdgeIngestRefusesDisabledOrUnknownCollector (F-025, data part) is
+// fixed and lives in edge_status_integration_test.go (WP-380).
 //
 // Retest:
 //
-//	cd backend && go test -tags auditdefect -count=1 -v -run 'TestAuditEdgeIngestRefusesDisabledOrUnknownCollector|TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices' ./internal/discovery/
+//	cd backend && go test -tags auditdefect -count=1 -v -run 'TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices' ./internal/discovery/
 package discovery
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -42,67 +37,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/profiles"
 )
-
-func TestAuditEdgeIngestRefusesDisabledOrUnknownCollector(t *testing.T) {
-	ctx := context.Background()
-	cases := []struct {
-		name        string
-		setup       func(t *testing.T, repo *MemoryRepository) string
-		wantRefused bool
-	}{
-		{name: "active collector (control)", setup: func(t *testing.T, repo *MemoryRepository) string {
-			c := &Collector{OrganizationID: "org-1", Name: "edge-active"}
-			if err := repo.RegisterCollector(ctx, c); err != nil {
-				t.Fatal(err)
-			}
-			return c.ID
-		}},
-		{name: "disabled collector", wantRefused: true, setup: func(t *testing.T, repo *MemoryRepository) string {
-			c := &Collector{OrganizationID: "org-1", Name: "edge-disabled"}
-			if err := repo.RegisterCollector(ctx, c); err != nil {
-				t.Fatal(err)
-			}
-			disabled := CollectorDisabled
-			if _, err := repo.UpdateCollector(ctx, "org-1", c.ID, &CollectorPatch{Status: &disabled}); err != nil {
-				t.Fatal(err)
-			}
-			return c.ID
-		}},
-		{name: "unknown collector", wantRefused: true, setup: func(*testing.T, *MemoryRepository) string {
-			return "00000000-0000-4000-8000-00000000dead"
-		}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			repo := NewMemoryRepository()
-			repo.SeedCIType("server", "server")
-			cis := ci.NewMemoryRepository()
-			h := NewHandler(repo, cis)
-			colID := tc.setup(t, repo)
-			body, err := json.Marshal(ingestBody{Records: []DeviceRecord{consumerRecord("audit-m1", time.Now().UTC().Add(-time.Minute))}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			reply := h.EdgeIngest(ctx, "org-1", colID, body)
-			items, _, err := cis.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !tc.wantRefused {
-				if reply.Status != http.StatusAccepted || len(items) != 1 {
-					t.Fatalf("control: active collector ingest = %+v, CIs=%d", reply, len(items))
-				}
-				return
-			}
-			if reply.Status != http.StatusForbidden && reply.Status != http.StatusNotFound {
-				t.Errorf("COL-04 violated: edge ingest for the %s answered %d (want 403/404)", tc.name, reply.Status)
-			}
-			if len(items) != 0 {
-				t.Errorf("COL-04 violated: the records of the %s created %d CI(s)", tc.name, len(items))
-			}
-		})
-	}
-}
 
 func TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices(t *testing.T) {
 	cls := profiles.Default()

@@ -155,8 +155,13 @@ type Repository interface {
 	// pending or offline collector becomes active, a paused one stays
 	// paused, a disabled one is refused (ErrCollectorDisabled).
 	Heartbeat(ctx context.Context, orgID, collectorID string) (status string, err error)
-	// UpdateCollector changes name, site or status (disable, enable).
+	// UpdateCollector changes name, site or status (disable, enable); an
+	// unknown collector or one of another organization fails with
+	// api.ErrNotFound.
 	UpdateCollector(ctx context.Context, orgID, collectorID string, patch *CollectorPatch) (*Collector, error)
+	// CollectorStatus returns the status of a collector of the
+	// organization; an unknown collector fails with api.ErrNotFound.
+	CollectorStatus(ctx context.Context, orgID, collectorID string) (string, error)
 
 	// Enrollment codes (zero-config onboarding).
 	CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error
@@ -275,7 +280,7 @@ func (r *MemoryRepository) UpdateCollector(_ context.Context, orgID, collectorID
 	defer r.mu.Unlock()
 	c, ok := r.collectors[collectorID]
 	if !ok || c.OrganizationID != orgID {
-		return nil, fmt.Errorf("not found")
+		return nil, api.ErrNotFound
 	}
 	if patch.Name != nil {
 		c.Name = *patch.Name
@@ -289,6 +294,17 @@ func (r *MemoryRepository) UpdateCollector(_ context.Context, orgID, collectorID
 	c.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	cp := *c
 	return &cp, nil
+}
+
+// CollectorStatus implements Repository.
+func (r *MemoryRepository) CollectorStatus(_ context.Context, orgID, collectorID string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	c, ok := r.collectors[collectorID]
+	if !ok || c.OrganizationID != orgID {
+		return "", api.ErrNotFound
+	}
+	return c.Status, nil
 }
 
 func (r *MemoryRepository) CreateEnrollmentCode(_ context.Context, code *EnrollmentCode) error {

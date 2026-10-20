@@ -16,8 +16,6 @@ go;backend/internal/discovery;TestAuditCARolloverKeepsEnrolledCollectorTrust;F-1
 go;backend/internal/discovery;TestAuditConcurrentEdgePKIExportConsistent;F-104
 go;backend/internal/discovery;TestAuditDefectDiscoveryTypedValuesValidated;F-143
 go;backend/internal/discovery;TestAuditDisabledCollectorConnectionCut;F-025
-go;backend/internal/discovery;TestAuditDisabledCollectorScopeChannelRefused;F-025
-go;backend/internal/discovery;TestAuditEdgeIngestRefusesDisabledOrUnknownCollector;F-025
 go;backend/internal/discovery;TestAuditIdentitySearchWithMACsUsesIndexes;F-114
 go;backend/internal/discovery;TestAuditPowerRedundancyIndependentOfBatchOrder;F-112
 go;backend/internal/discovery;TestAuditT3PoisonRecordDoesNotTakeValidRecordsDown;F-090

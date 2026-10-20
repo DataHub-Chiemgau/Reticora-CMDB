@@ -11,6 +11,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -69,9 +70,45 @@ func (h *Handler) edgeLicense(ctx context.Context, orgID string) (state, problem
 	return h.license.DiscoveryLicense(ctx, orgID)
 }
 
+// checkCollector fails for a collector that may not deliver over the edge:
+// api.ErrNotFound for an unknown collector, ErrCollectorDisabled for a
+// disabled one (COL-04). The edge grants the subject tree when the
+// collector connects; a collector disabled later still holds it.
+func (h *Handler) checkCollector(ctx context.Context, orgID, collectorID string) error {
+	status, err := h.repo.CollectorStatus(ctx, orgID, collectorID)
+	if err != nil {
+		return err
+	}
+	if status == CollectorDisabled {
+		return ErrCollectorDisabled
+	}
+	return nil
+}
+
+// edgeRefusal answers a request of a collector checkCollector refused:
+// 403 for a disabled, 404 for an unknown collector.
+func edgeRefusal(err error) EdgeReply {
+	switch {
+	case errors.Is(err, ErrCollectorDisabled):
+		return EdgeReply{Status: http.StatusForbidden, Error: err.Error()}
+	case errors.Is(err, api.ErrNotFound):
+		return EdgeReply{Status: http.StatusNotFound, Error: "collector not found"}
+	}
+	return EdgeReply{Status: http.StatusInternalServerError, Error: "collector lookup failed"}
+}
+
 // EdgeIngest processes the records a collector sent over the edge like
-// POST /api/v1/discovery/ingest.
+// POST /api/v1/discovery/ingest; the records of an unknown or disabled
+// collector are refused.
 func (h *Handler) EdgeIngest(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply {
+	if err := h.checkCollector(ctx, orgID, collectorID); err != nil {
+		return edgeRefusal(err)
+	}
+	return h.edgeIngest(ctx, orgID, collectorID, data)
+}
+
+// edgeIngest is EdgeIngest for a collector the caller checked.
+func (h *Handler) edgeIngest(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply {
 	state, problem, err := h.edgeLicense(ctx, orgID)
 	if err != nil {
 		return EdgeReply{Status: http.StatusInternalServerError, Error: "entitlement lookup failed"}
@@ -102,7 +139,8 @@ func (h *Handler) EdgeIngest(ctx context.Context, orgID, collectorID string, dat
 }
 
 // EdgeHeartbeat records a collector heartbeat sent over the edge like
-// POST /api/v1/collectors/{id}/heartbeat.
+// POST /api/v1/collectors/{id}/heartbeat; the repository refuses an unknown
+// or disabled collector.
 func (h *Handler) EdgeHeartbeat(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply {
 	var req CollectorHeartbeatRequest
 	if len(data) > 0 {
@@ -130,19 +168,34 @@ func (h *Handler) EdgeHeartbeat(ctx context.Context, orgID, collectorID string, 
 	return reply
 }
 
-// ServeCollectorEdge answers the ingest and heartbeat requests of the
-// collectors on nc until ctx ends.
-func (h *Handler) ServeCollectorEdge(ctx context.Context, nc *nats.Conn) error {
-	handlers := map[string]func(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply{
-		IngestSuffix:    h.EdgeIngest,
+// edgeHandlers are the handlers of the edge data subjects by suffix; they
+// run only for a collector the dispatcher checked.
+func (h *Handler) edgeHandlers() map[string]func(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply {
+	return map[string]func(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply{
+		IngestSuffix:    h.edgeIngest,
 		HeartbeatSuffix: h.EdgeHeartbeat,
 	}
+}
+
+// ServeCollectorEdge answers the ingest and heartbeat requests of the
+// collectors on nc until ctx ends. A request of an unknown or disabled
+// collector is refused before its handler runs, whatever the suffix, so
+// nothing of it is persisted (COL-04).
+func (h *Handler) ServeCollectorEdge(ctx context.Context, nc *nats.Conn) error {
+	handlers := h.edgeHandlers()
 	subs := make([]*nats.Subscription, 0, len(handlers))
 	for suffix, handle := range handlers {
 		sub, err := nc.QueueSubscribe("collector.*.*"+suffix, edgeDataQueue, func(msg *nats.Msg) {
 			reply := EdgeReply{Status: http.StatusBadRequest, Error: "invalid subject"}
 			if orgID, collectorID, ok := subjectCollector(msg.Subject, suffix); ok {
-				reply = handle(systemContext(ctx, orgID), orgID, collectorID, msg.Data)
+				sctx := systemContext(ctx, orgID)
+				if cerr := h.checkCollector(sctx, orgID, collectorID); cerr != nil {
+					slog.Warn("collector edge request refused", "organization_id", orgID, "collector_id", collectorID,
+						"suffix", suffix, "error", cerr)
+					reply = edgeRefusal(cerr)
+				} else {
+					reply = handle(sctx, orgID, collectorID, msg.Data)
+				}
 			}
 			raw, _ := json.Marshal(reply)
 			if msg.Reply != "" {
