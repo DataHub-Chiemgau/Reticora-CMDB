@@ -1,15 +1,31 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
 
 func testSessionKeyPath(t *testing.T) string {
@@ -100,5 +116,208 @@ func TestLoadSessionIssuerRejectsInvalidKey(t *testing.T) {
 	cfg := &config.Config{SessionKeyPath: path, AllowInsecureDevAuth: true}
 	if _, err := loadSessionIssuer(cfg); err == nil {
 		t.Fatal("expected an error for a corrupt session key")
+	}
+}
+
+const (
+	chainOrg  = "7a2a0000-0000-4000-8000-000000000364"
+	chainUser = "7a2a0000-0000-4000-8000-0000000003f1"
+)
+
+// chainStack is the handler of newHTTPHandler over the in-memory
+// repositories with the production stages, each wrapped in a marker that
+// records the stages a request passes.
+type chainStack struct {
+	handler http.Handler
+	issuer  *identity.SessionIssuer
+	refresh *identity.RefreshSessions
+	trace   []string
+	logins  int
+}
+
+func newChainStack(t *testing.T) *chainStack {
+	t.Helper()
+	cs := &chainStack{}
+	repos := server.MemoryRepositories()
+	store := cache.NewMemoryStore()
+	issuer, err := loadSessionIssuer(&config.Config{SessionKeyPath: testSessionKeyPath(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer = issuer.WithRevocations(identity.NewSessionRevocations(store))
+	cs.issuer = issuer
+	cs.refresh = identity.NewRefreshSessions(store, issuer.Revocations())
+	entitlements := entitlement.NewService(repos.Entitlement, entitlement.Options{})
+	masterKey, err := crypto.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := crypto.NewEnvelopeEncryptor(masterKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// mark records name when a request enters the stage; the last stage
+	// also records the handler it hands the request to.
+	mark := func(name string, stage func(http.Handler) http.Handler, last bool) func(http.Handler) http.Handler {
+		return func(next http.Handler) http.Handler {
+			if last {
+				handler := next
+				next = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					cs.trace = append(cs.trace, "handler")
+					handler.ServeHTTP(w, r)
+				})
+			}
+			inner := stage(next)
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				cs.trace = append(cs.trace, name)
+				inner.ServeHTTP(w, r)
+			})
+		}
+	}
+	handler, err := newHTTPHandler(repos, server.Options{
+		Version: "wp-364", Entitlements: entitlements, CIService: ci.NewServiceWithLimits(repos.CI, entitlements),
+		Dispatcher:  webhook.NewDispatcher(repos.Webhook, nil, webhook.DispatcherOptions{Deliveries: repos.WebhookDeliveries}),
+		Credentials: credential.NewService(repos.Credential, encryptor),
+		OIDC:        identity.NewOIDCProvider(identity.OIDCConfig{}),
+		Sessions:    issuer, RefreshSessions: cs.refresh,
+	}, httpStages{
+		preAuth:     mark("pre-auth", middleware.PreAuthRateLimiter(middleware.DefaultPreAuthPerMinute, store), false),
+		auth:        mark("auth", middleware.AuthMiddlewareWithAPIKeys(issuer, identity.NewAPIKeyServiceWithStore(repos.APIKeys)), false),
+		tenant:      mark("tenant", middleware.TenantMiddleware, false),
+		entitlement: mark("entitlement", entitlements.Middleware, false),
+		rateLimit:   mark("rate-limit", middleware.RateLimiterWithLimits(middleware.RateLimits{}, store), false),
+		validation:  mark("validation", middleware.OpenAPIValidation, false),
+		idempotency: mark("idempotency", middleware.IdempotencyWithStore(store), true),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs.handler = handler
+	return cs
+}
+
+// login starts a session as the login callback does: an access token and a
+// refresh cookie of a new refresh family.
+func (cs *chainStack) login(t *testing.T, perms ...identity.Permission) (token, cookie string) {
+	t.Helper()
+	cs.logins++
+	claims := identity.SessionClaims{
+		Subject: chainUser, OrganizationID: chainOrg, Permissions: perms,
+		Scope: &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},
+	}
+	cookie, err := cs.refresh.Issue(context.Background(), &identity.RefreshGrant{Claims: claims})
+	if err != nil {
+		t.Fatalf("start refresh family: %v", err)
+	}
+	now := time.Now().UTC()
+	claims.ID, claims.IssuedAt, claims.ExpiresAt = "wp364-jti-"+strconv.Itoa(cs.logins), now, now.Add(15*time.Minute)
+	if token, err = cs.issuer.Issue(claims); err != nil {
+		t.Fatalf("issue access token: %v", err)
+	}
+	return token, cookie
+}
+
+// do serves one request; body and Content-Type are set only when given.
+func (cs *chainStack) do(method, path, bearer, cookie, contentType, body string) *httptest.ResponseRecorder {
+	cs.trace = nil
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	if cookie != "" {
+		req.AddCookie(&http.Cookie{Name: identity.RefreshCookieName, Value: cookie})
+	}
+	req.RemoteAddr = "203.0.113.64:41000"
+	w := httptest.NewRecorder()
+	cs.handler.ServeHTTP(w, req)
+	return w
+}
+
+func refreshCookieOf(w *httptest.ResponseRecorder) *http.Cookie {
+	for _, c := range w.Result().Cookies() {
+		if c.Name == identity.RefreshCookieName {
+			return c
+		}
+	}
+	return nil
+}
+
+// TestHTTPHandlerRunsTheStagesInAPI04Order covers WP-364 (API-04): the
+// handler the server serves runs Pre-Auth -> Auth -> Tenant -> Entitlement
+// -> Rate-Limit -> Authz -> Validation -> Idempotency -> Handler. A request
+// without credentials stops at the auth stage, a forbidden one at the
+// route authorization before validation.
+func TestHTTPHandlerRunsTheStagesInAPI04Order(t *testing.T) {
+	cs := newChainStack(t)
+	token, _ := cs.login(t, identity.PermPermissionRead)
+
+	for _, tc := range []struct {
+		name, method, path, bearer string
+		code                       int
+		trace                      string
+	}{
+		{"permitted", http.MethodGet, "/api/v1/me", token, http.StatusOK,
+			"pre-auth,auth,tenant,entitlement,rate-limit,validation,idempotency,handler"},
+		{"forbidden by the route authorization", http.MethodGet, "/api/v1/cis", token, http.StatusForbidden,
+			"pre-auth,auth,tenant,entitlement,rate-limit"},
+		{"unauthenticated", http.MethodGet, "/api/v1/me", "", http.StatusUnauthorized,
+			"pre-auth,auth"},
+	} {
+		w := cs.do(tc.method, tc.path, tc.bearer, "", "", "")
+		if w.Code != tc.code || strings.Join(cs.trace, ",") != tc.trace {
+			t.Errorf("%s: %s %s -> %d, stages %v; want %d after %s", tc.name, tc.method, tc.path, w.Code, cs.trace, tc.code, tc.trace)
+		}
+	}
+}
+
+// TestHTTPHandlerServesCookieOnlyRefreshAndLogout covers WP-364 (AUT-02,
+// API-04, F-018) through the handler the server serves: the SPA's refresh
+// with only the refresh cookie (no body, no Content-Type) reaches the
+// handler and rotates the cookie; logout answers 204 and revokes token and
+// refresh family. POST /cis without body still gets 400 from the
+// validation stage.
+func TestHTTPHandlerServesCookieOnlyRefreshAndLogout(t *testing.T) {
+	cs := newChainStack(t)
+	writer, cookie := cs.login(t, identity.PermPermissionRead, identity.PermCIWrite)
+
+	w := cs.do(http.MethodPost, "/api/v1/auth/refresh", "", cookie, "", "")
+	if w.Code != http.StatusOK || !strings.Contains(strings.Join(cs.trace, ","), "validation,idempotency,handler") {
+		t.Fatalf("cookie-only POST /api/v1/auth/refresh: %d %s, stages %v; want 200 from the handler", w.Code, strings.TrimSpace(w.Body.String()), cs.trace)
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body.Token == "" {
+		t.Fatalf("refresh body %s: no token", w.Body.String())
+	}
+	rotated := refreshCookieOf(w)
+	if rotated == nil || rotated.Value == "" || rotated.Value == cookie || !rotated.HttpOnly {
+		t.Fatalf("rotated refresh cookie %+v, want a new HttpOnly cookie", rotated)
+	}
+	token := body.Token
+	if me := cs.do(http.MethodGet, "/api/v1/me", token, "", "", ""); me.Code != http.StatusOK {
+		t.Errorf("GET /api/v1/me with the refreshed token: %d", me.Code)
+	}
+
+	// Positive control of the validation stage: a required body is enforced.
+	// (The refreshed token carries the roles read again, here none; the
+	// login token still has ci:write.)
+	w = cs.do(http.MethodPost, "/api/v1/cis", writer, "", "application/json", "")
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "request body is required") || strings.Contains(strings.Join(cs.trace, ","), "handler") {
+		t.Errorf("POST /api/v1/cis without body: %d %s, stages %v; want 400 from the validation stage", w.Code, strings.TrimSpace(w.Body.String()), cs.trace)
+	}
+
+	w = cs.do(http.MethodPost, "/api/v1/auth/logout", token, rotated.Value, "", "")
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("POST /api/v1/auth/logout: %d %s", w.Code, w.Body.String())
+	}
+	if me := cs.do(http.MethodGet, "/api/v1/me", token, "", "", ""); me.Code != http.StatusUnauthorized {
+		t.Errorf("GET /api/v1/me with the logged-out token: %d, want 401", me.Code)
+	}
+	if again := cs.do(http.MethodPost, "/api/v1/auth/refresh", "", rotated.Value, "", ""); again.Code != http.StatusUnauthorized {
+		t.Errorf("cookie-only refresh after the logout: %d %s, want 401", again.Code, strings.TrimSpace(again.Body.String()))
 	}
 }

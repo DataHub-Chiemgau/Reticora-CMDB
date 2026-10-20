@@ -42,6 +42,7 @@ import {
  *  12 upgraded user creates a CI in the UI .... RBA-02, CI-01 (UI-04)        → WP-046, WP-120, WP-191
  *  13 role revocation effective ............... AUT-02, RBA-03, API-05       → WP-066, WP-009, WP-046
  *  14 SPA renews the session by cookie ........ AUT-02                       → WP-066, WP-009
+ *  14a cookie-only refresh on the API ......... AUT-02, API-04               → WP-364 (F-018)
  *  14b SPA renews when the 15 minutes ran out .. AUT-02                       → WP-066
  *
  * The assertions encode the requirement texts (docs/spec/katalog-v3) and the
@@ -1085,6 +1086,38 @@ test('14 the SPA renews an expired access token with the refresh cookie instead 
   ).toBe(200);
   await expect(page).toHaveURL(/\/cmdb/);
   await expect(page.getByRole('link', { name: ci.name })).toBeVisible();
+  await context.close();
+});
+
+test('14a the cookie-only refresh (no body, no Content-Type) renews the session and rotates the cookie', async ({
+  browser,
+  request,
+}) => {
+  const viewer = await ensureViewer(request);
+  const { context, page } = await signIn(browser, viewer);
+  const before = (await context.cookies()).find((c) => c.name === 'reticora_refresh');
+  expect(before?.value, 'the sign-in sets the HttpOnly refresh cookie').toBeTruthy();
+
+  // Exactly what the SPA sends (src/auth/session.ts): only the cookie.
+  const res = await page.request.post(`${BASE}/api/v1/auth/refresh`);
+  expect(res.headers()['content-type'] ?? '', 'response type').toContain('application/json');
+  expect(
+    res.status(),
+    `cookie-only POST /auth/refresh (WP-364, before the fix 400 from the validator) → ${await res.text()}`,
+  ).toBe(200);
+  const body = (await res.json()) as { token: string };
+  expect(body.token, 'a new access token').toBeTruthy();
+  const setCookie = res
+    .headersArray()
+    .filter((h) => h.name.toLowerCase() === 'set-cookie')
+    .map((h) => h.value)
+    .find((v) => v.startsWith('reticora_refresh='));
+  expect(setCookie, 'Set-Cookie with the rotated refresh cookie').toBeTruthy();
+  expect(setCookie).toMatch(/HttpOnly/i);
+  const rotated = setCookie!.split(';')[0]!.slice('reticora_refresh='.length);
+  expect(rotated, 'the refresh cookie is rotated').not.toBe(before!.value);
+  const me = await api(request, body.token, 'GET', '/me');
+  expect(me.status, 'GET /me with the renewed token').toBe(200);
   await context.close();
 });
 

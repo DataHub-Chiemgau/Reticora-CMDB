@@ -521,3 +521,5 @@ AI-02;[A];B;backend/internal/server/t2_ai_optin_test.go;WP-360
 SEC-07;[B];B;frontend/e2e-real/operator-login.spec.ts;WP-361
 SEC-07;[B];B;tests/audit/t2-break-glass-alert.test.sh;WP-362
 RBA-01;[B];B;backend/internal/server/authz_catalog_test.go;WP-363
+AUT-02;[B];B;backend/internal/server/t2_auth_chain_test.go;WP-364
+API-04;[B];B;backend/cmd/server/main_test.go;WP-364
