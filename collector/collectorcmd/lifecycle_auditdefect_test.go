@@ -27,7 +27,8 @@
 // HTTP to the server URL or over its NATS channel.
 //
 // The renewal test runs the collector's mTLS NATS channel against a real
-// nats-server (TEST_NATS_SERVER_BIN, v2.10+ for handshake_first).
+// nats-server (TEST_NATS_SERVER_BIN, v2.10+ for handshake_first). The
+// shared PKI helpers are in natsserver_helpers_test.go.
 //
 // Retest:
 //
@@ -48,8 +49,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
-	"math/big"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -75,53 +74,6 @@ func TestAuditHelperCollectorMain(t *testing.T) {
 	}
 	os.Args = os.Args[:1]
 	Main()
-}
-
-// auditPKI is a private CA for one test.
-type auditPKI struct {
-	key  *ecdsa.PrivateKey
-	cert *x509.Certificate
-	pem  string
-}
-
-func newAuditPKI(t *testing.T) *auditPKI {
-	t.Helper()
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "audit collector CA"}, IsCA: true,
-		BasicConstraintsValid: true, NotBefore: time.Now().Add(-100 * 24 * time.Hour), NotAfter: time.Now().Add(365 * 24 * time.Hour),
-		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cert, _ := x509.ParseCertificate(der)
-	return &auditPKI{key: key, cert: cert, pem: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}
-}
-
-// issue signs pub; it returns the certificate PEM.
-func (p *auditPKI) issue(t *testing.T, pub any, subject pkix.Name, notBefore, notAfter time.Time, server bool) string {
-	t.Helper()
-	serial, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
-	tmpl := &x509.Certificate{SerialNumber: serial, Subject: subject, NotBefore: notBefore, NotAfter: notAfter,
-		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
-	if server {
-		tmpl.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
-		tmpl.IPAddresses = []net.IP{net.ParseIP("127.0.0.1")}
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, p.cert, pub, p.key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
-}
-
-func auditKeyPEM(t *testing.T, key *ecdsa.PrivateKey) string {
-	t.Helper()
-	der, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
 }
 
 // auditCSRSink records the requests that carry a certificate signing
@@ -198,16 +150,6 @@ func auditTail(s string, lines int) string {
 		parts = parts[len(parts)-lines:]
 	}
 	return strings.Join(parts, "\n")
-}
-
-func auditFreeTCPPort(t *testing.T) int {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port
 }
 
 func TestAuditCollectorRenewsCertificateAt60Percent(t *testing.T) {

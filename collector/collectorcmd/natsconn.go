@@ -81,6 +81,12 @@ func natsOptions(creds *keystore.Credentials) ([]nats.Option, error) {
 		nats.MaxReconnects(-1),
 		nats.ReconnectWait(5 * time.Second),
 		nats.RetryOnFailedConnect(true),
+		// The user JWTs of the auth callout expire after 15 min (WP-381), so
+		// the collector authenticates anew every 15 min. On the same
+		// authentication error twice (callout briefly unreachable) nats.go
+		// would close the connection for good; a disabled collector is just
+		// refused by the callout every ReconnectWait, which is cheap.
+		nats.IgnoreAuthErrorAbort(),
 	}, nil
 }
 
