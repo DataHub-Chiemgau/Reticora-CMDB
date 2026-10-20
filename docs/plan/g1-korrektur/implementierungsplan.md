@@ -1025,7 +1025,7 @@ TEN-05;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-345
 IMP-07;[B];B;backend/internal/tenant/rls/edge_scope_integration_test.go;WP-345
 ```
 
-**Entscheidungsbedarf:** [E-62](entscheidungen.md#e-62) Beziehungen zwischen eigenem CI und org-weitem CI (offen, Empfehlung als Übergangsregel); [E-09](../entscheidungen.md#e-09)
+**Entscheidungsbedarf:** [E-62](entscheidungen.md#e-62) Beziehungen zwischen eigenem CI und org-weitem CI (entschieden: Option 2, Auftraggeber 2026-10-20); [E-09](../entscheidungen.md#e-09)
 
 **Nicht Bestandteil:** POST /relationships 500 bei fremdem CI (F-145, WP-401 (`t6-rel-errors`)); `has_relationship`-Filter in `savedview/filter.go` (durch die Kanten-Policy abgedeckt). Ableitungs-Regressionstabelle und Backfill-Test 000061 (WP-533 (`t1-ev-child-derivation`)); Option 2 von E-62 ohne Freigabe (Folge-WP).
 
