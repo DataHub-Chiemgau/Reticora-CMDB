@@ -4,8 +4,9 @@
 // the community of every request it receives, so the test can prove which
 // secret the collector sent (COL-02). The PDU handling follows the test
 // agent of collector/plugins/snmp/v3_agent_test.go. It is test
-// infrastructure: only collector/cmd/fakesnmp uses it, the release build
-// (./cmd/collector) does not.
+// infrastructure: only collector/cmd/fakesnmp and tests (plugins/snmp
+// TestCollectFromSNMPFake) use it, the release build (./cmd/collector) does
+// not.
 package fakesnmp
 
 import (

@@ -54,8 +54,9 @@ import {
  *     nothing is stored; the own client's credential is accepted ..... COL-02, DIS-09 (WP-376, F-264)
  *  O4 host scope with an explicit snmp_v2c credential (client A) on the SNMP fake: the next
  *     bundle holds exactly that credential, after the run the CI exists with source snmp (API
- *     and CI detail), the fake saw the community of that credential and no other secret (not
- *     the organization-wide one, not client B's, not the plugin default "public")
+ *     and CI detail), named with the fake's sysName and without the community in its JSON,
+ *     the fake saw the community of that credential and no other secret (not the
+ *     organization-wide one, not client B's, not the plugin default "public")
  *     ........................................ COL-02, DIS-09 (WP-147, WP-153), E-67
  *
  * The suggested scope covers a real subnet of the runner. So that the collector does not
@@ -690,9 +691,14 @@ test.describe('Onboarding with a real collector: scope suggestion, credential bu
         0,
       );
     }
-    test.info().annotations.push({
-      type: 'observation',
-      description: `CI ${ci!.id} of the SNMP fake: name ${JSON.stringify(ci!.name)}, sysName of the fake ${JSON.stringify(sysName)}`,
-    });
+    // The CI carries what the device answered, not the secret it was asked with: a v2c
+    // response echoes the community in its header (finding during WP-384, the collector
+    // stored it as name, serial, sysDescr, …).
+    const stored = await ok<CI>('GET', `/cis/${ci!.id}`);
+    softExpect(stored.name, 'CI name = sysName of the fake').toBe(sysName);
+    expect(
+      JSON.stringify(stored),
+      `GET /cis/${ci!.id} holds no community of client A`,
+    ).not.toContain(w.ownCred.community);
   });
 });
