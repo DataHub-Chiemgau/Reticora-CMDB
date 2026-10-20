@@ -23,6 +23,14 @@ var matrixHiddenGlobalRows = map[string]string{
 	"job": "system jobs of the scheduler, readable only with app.system (JOB-02)",
 }
 
+// matrixOrgWideWrites lists the tables without client and site column whose
+// rows only principals without client and site restriction write (E-09): a
+// scoped principal reads them, its INSERT is refused and its UPDATE and
+// DELETE find no row.
+var matrixOrgWideWrites = map[string]string{
+	"vrf": "routing domains of the whole organization (TEN-10, WP-372, F-089)",
+}
+
 // matrixPrincipal is one tenant context of the matrix: organization plus
 // client, site and team scope (nil = all of the organization, TEN-04).
 type matrixPrincipal struct {
@@ -67,6 +75,9 @@ func (p *matrixPrincipal) write(tbl *matrixTable, r scopeRow) bool {
 	if r.org != p.org {
 		return false
 	}
+	if _, orgWide := matrixOrgWideWrites[tbl.name]; orgWide && (p.scope["client"] != nil || p.scope["site"] != nil) {
+		return false
+	}
 	for _, dim := range scopeDimensions {
 		if len(tbl.scope[dim]) > 0 && !dimWrite(p.scope[dim], r.dims[dim]) {
 			return false
@@ -97,7 +108,8 @@ func scopeDenied(err error) bool {
 // team and combined scopes. UPDATE also tries to move a row out of the
 // principal's scope and to claim an org-wide row. Reads are pinned exactly
 // (TEN-05): org-wide rows are visible to scoped principals, global rows to
-// everyone except in matrixHiddenGlobalRows.
+// everyone except in matrixHiddenGlobalRows. The tables of
+// matrixOrgWideWrites are written by org-wide principals only (E-09).
 //
 // Inherited tables (document, maintenance_window, review_item,
 // training_assignment) run with every principal too (WP-353, F-354): their

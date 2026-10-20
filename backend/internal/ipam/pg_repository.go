@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -77,6 +78,60 @@ func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) e
 	return nil
 }
 
+// vlanOfAnotherClient is the violation of a VLAN outside the client of the
+// subnet or interface.
+const vlanOfAnotherClient = "the VLAN belongs to another client"
+
+// checkVLAN keeps the VLAN of a subnet or interface within its client
+// (NET-08, TEN-05; F-088). The composite foreign key of vlan_id checks only
+// the organization and bypasses row level security, so the VLAN is read
+// here, in the writing transaction under the principal's row level security
+// and before vlan_id is written: a VLAN the principal cannot see is "VLAN
+// not found"; a VLAN of another client than clientID (empty: the subnet or
+// interface is org-wide) is refused; a VLAN of that client or an org-wide
+// VLAN (E-09) is accepted. Without a VLAN it costs no statement.
+func checkVLAN(ctx context.Context, tx pgx.Tx, orgID, vlanID, clientID string) error {
+	if strings.TrimSpace(vlanID) == "" {
+		return nil
+	}
+	var visible, sameClient bool
+	if err := tx.QueryRow(ctx, `SELECT count(*) > 0, COALESCE(bool_and(client_id IS NULL OR client_id = $3::uuid), false)
+		FROM vlan WHERE organization_id = $1 AND id = $2::uuid`, orgID, vlanID, nilIfEmpty(clientID)).Scan(&visible, &sameClient); err != nil {
+		return fmt.Errorf("read vlan: %w", err)
+	}
+	switch {
+	case !visible:
+		return &api.FieldError{Field: "vlan_id", Message: "VLAN not found", Status: http.StatusUnprocessableEntity}
+	case !sameClient:
+		return &api.FieldError{Field: "vlan_id", Message: vlanOfAnotherClient, Status: http.StatusUnprocessableEntity}
+	}
+	return nil
+}
+
+// checkSubnetVLAN applies checkVLAN to an update of subnet id: to a new VLAN
+// and to the VLAN of a subnet that moves to another client, against the
+// client the subnet has after the update.
+func checkSubnetVLAN(ctx context.Context, tx pgx.Tx, orgID, id string, req *UpdateSubnetRequest) error {
+	if req.ClientID == nil && (req.VLANID == nil || strings.TrimSpace(*req.VLANID) == "") {
+		return nil
+	}
+	var clientID, vlanID string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, ''), COALESCE(vlan_id::text, '') FROM subnet
+		WHERE organization_id = $1 AND id = $2`, orgID, id).Scan(&clientID, &vlanID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("read subnet: %w", err)
+	}
+	if req.ClientID != nil {
+		clientID = *req.ClientID
+	}
+	if req.VLANID != nil {
+		vlanID = *req.VLANID
+	}
+	return checkVLAN(ctx, tx, orgID, vlanID, clientID)
+}
+
 func (r *PGRepository) ListSubnets(ctx context.Context, orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error) {
 	var out []Subnet
 	var total int
@@ -131,6 +186,9 @@ func (r *PGRepository) GetSubnet(ctx context.Context, orgID, id string) (*Subnet
 
 func (r *PGRepository) CreateSubnet(ctx context.Context, s *Subnet) error {
 	return database.WithRequestTenant(ctx, r.pool, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := checkVLAN(ctx, tx, s.OrganizationID, s.VLANID, s.ClientID); err != nil {
+			return err
+		}
 		return tx.QueryRow(ctx,
 			`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management, vrf_id)
 			 VALUES ($1,$2,$3,$4::cidr,$5,$6,$7::inet,$8::inet[],$9,$10,$11) RETURNING id::text, vrf_id::text, created_at, updated_at`,
@@ -144,6 +202,9 @@ func (r *PGRepository) CreateSubnet(ctx context.Context, s *Subnet) error {
 func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req UpdateSubnetRequest) (*Subnet, error) {
 	var sn *Subnet
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := checkSubnetVLAN(ctx, tx, orgID, id, &req); err != nil {
+			return err
+		}
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -423,6 +484,19 @@ func (r *PGRepository) GetInterface(ctx context.Context, orgID, id string) (*Net
 
 func (r *PGRepository) CreateInterface(ctx context.Context, ni *NetworkInterface) error {
 	return database.WithRequestTenant(ctx, r.pool, ni.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if strings.TrimSpace(ni.VLANID) != "" {
+			// The interface takes the client of its CI (migration 000061).
+			// A CI the principal cannot see counts as org-wide here; the
+			// insert refuses it anyway.
+			var clientID string
+			if err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, '') FROM ci WHERE organization_id = $1 AND id = $2`,
+				ni.OrganizationID, ni.CIID).Scan(&clientID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("read ci: %w", err)
+			}
+			if err := checkVLAN(ctx, tx, ni.OrganizationID, ni.VLANID, clientID); err != nil {
+				return err
+			}
+		}
 		if err := tx.QueryRow(ctx,
 			`INSERT INTO network_interface (organization_id, ci_id, name, if_index, mac, if_type, speed_mbps, mtu,
 				is_management, is_uplink, admin_status, oper_status, description, vlan_id)
@@ -439,6 +513,20 @@ func (r *PGRepository) CreateInterface(ctx context.Context, ni *NetworkInterface
 func (r *PGRepository) UpdateInterface(ctx context.Context, orgID, id string, req UpdateInterfaceRequest) (*NetworkInterface, error) {
 	var ni *NetworkInterface
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if req.VLANID != nil && strings.TrimSpace(*req.VLANID) != "" {
+			// The client of the interface is the client of its CI.
+			var clientID string
+			if err := tx.QueryRow(ctx, "SELECT COALESCE(client_id::text, '') FROM network_interface WHERE organization_id = $1 AND id = $2 AND "+nicVisible,
+				orgID, id).Scan(&clientID); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return ErrNotFound
+				}
+				return fmt.Errorf("read interface: %w", err)
+			}
+			if err := checkVLAN(ctx, tx, orgID, *req.VLANID, clientID); err != nil {
+				return err
+			}
+		}
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3

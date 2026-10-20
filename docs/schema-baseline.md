@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000147_rba01_key_cleanup
+Stand: Migration 000148_vrf_scoped_writes
 
 ## Prüfung
 
@@ -154,7 +154,13 @@ Zeilen aber weder anlegen noch ändern, löschen oder durch Setzen ihres Scopes
 übernehmen (TEN-05). Dafür ergänzt Migration 000079 je Tabelle, deren
 `ALL`-Policy mehr zeigt als sie schreiben lässt, restriktive Policies
 `<tabelle>_scoped_update` und `<tabelle>_scoped_delete` mit dem
-WITH-CHECK-Ausdruck als USING. Die Testzeilen werden mit
+WITH-CHECK-Ausdruck als USING. Tabellen ohne Client- und Site-Spalte, deren
+Zeilen die ganze Organisation betreffen, schreiben nur Prinzipale ohne
+Client- und Site-Einschränkung (E-09, `matrixOrgWideWrites`); gescopte
+Prinzipale lesen sie. Heute ist das `vrf` (Migration 000148, WP-372, F-089):
+die restriktiven Policies `vrf_scoped_insert`, `vrf_scoped_update` und
+`vrf_scoped_delete` verlangen leeres `app.client_scope` und `app.site_scope`.
+Die Testzeilen werden mit
 `session_replication_role = replica` synthetisiert (ohne Fremdschlüssel und
 Trigger, RLS bleibt aktiv). Tabellen, deren Policy den Scope über eine
 Unterabfrage erbt (`document`, `maintenance_window`, `review_item`,
@@ -348,7 +354,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `user_custom_role` | ja | ja | user_custom_role_isolation (ALL) |
 | `user_invitation` | ja | ja | org_isolation (ALL) |
 | `vlan` | ja | ja | vlan_isolation (ALL), vlan_scoped_delete (DELETE), vlan_scoped_update (UPDATE) |
-| `vrf` | ja | ja | vrf_isolation (ALL) |
+| `vrf` | ja | ja | vrf_isolation (ALL), vrf_scoped_delete (DELETE), vrf_scoped_insert (INSERT), vrf_scoped_update (UPDATE) |
 | `webhook_dead_letter` | ja | ja | webhook_dead_letter_isolation (ALL), webhook_dead_letter_system_select (SELECT) |
 | `webhook_delivery` | ja | ja | webhook_delivery_isolation (ALL), webhook_delivery_system_select (SELECT) |
 | `webhook_subscription` | ja | ja | webhook_sub_isolation (ALL) |

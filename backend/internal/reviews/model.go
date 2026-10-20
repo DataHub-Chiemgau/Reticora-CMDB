@@ -141,11 +141,24 @@ type Filter struct {
 	Escalated bool
 }
 
-// Resolution is the request body for resolving an item.
+// ResolveRequest is the request body for resolving an item
+// (ReviewItemResolveRequest). It names no resolver: a body with resolved_by
+// is refused as an unknown field (400).
+type ResolveRequest struct {
+	Action string `json:"action"`
+	CIID   string `json:"ci_id,omitempty"`
+	Note   string `json:"resolution,omitempty"`
+}
+
+// Resolution is the resolution of an item as the service carries it out.
 type Resolution struct {
-	Action     string `json:"action"`
-	CIID       string `json:"ci_id,omitempty"`
-	ResolvedBy string `json:"resolved_by,omitempty"`
+	Action string `json:"action"`
+	CIID   string `json:"ci_id,omitempty"`
+	// ResolvedBy is the principal (user or service account) that resolves
+	// the item: the handler takes it from the request, never from the body
+	// (F-091). It is stored as resolved_by and is the audit actor; empty
+	// for the system (adoption after max_cis was raised).
+	ResolvedBy string `json:"-"`
 	Note       string `json:"resolution,omitempty"`
 	// Status is the terminal status to persist; derived from Action.
 	Status string `json:"-"`

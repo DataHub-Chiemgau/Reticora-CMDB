@@ -4,8 +4,8 @@ package server_test
 // its own). It runs the complete server.NewRouter with authorization and the
 // OpenAPI validation middleware, as cmd/server/main.go wires it, against
 // PostgreSQL. Used by audit_t3_review_routes_integration_test.go (WP-088
-// regression) and audit_t3_router_auditdefect_test.go (WP-088, WP-091
-// defects).
+// regression, WP-373), audit_t3_router_auditdefect_test.go (WP-091 defect)
+// and vlan_routes_integration_test.go (WP-371).
 //
 // Retest (regression part):
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_03?sslmode=disable \
@@ -71,9 +71,16 @@ func newAuditT3Router(t *testing.T, tag string) *auditT3Router {
 // call sends one request as an org-wide user principal with perms.
 func (r *auditT3Router) call(perms []identity.Permission, method, path, body string) *httptest.ResponseRecorder {
 	r.t.Helper()
+	return r.callAs(r.user, identity.PrincipalTypeUser, perms, method, path, body)
+}
+
+// callAs sends one request as the org-wide principal subject of type typ
+// (an API key acts as its owner, a user or a service account).
+func (r *auditT3Router) callAs(subject string, typ identity.PrincipalType, perms []identity.Permission, method, path, body string) *httptest.ResponseRecorder {
+	r.t.Helper()
 	req := httptest.NewRequest(method, path, bytes.NewReader([]byte(body)))
 	req.Header.Set("Content-Type", "application/json")
-	principal := identity.Principal{Subject: r.user, OrganizationID: r.f.OrgA, Type: identity.PrincipalTypeUser,
+	principal := identity.Principal{Subject: subject, OrganizationID: r.f.OrgA, Type: typ,
 		Scope:       &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},
 		Permissions: perms, Credential: "audit-t3"}
 	ctx := identity.WithPermissions(identity.WithPrincipal(req.Context(), principal), principal.Permissions)

@@ -497,7 +497,7 @@ export interface paths {
     put?: never;
     /**
      * Bulk status change of up to 500 CIs (API-08, BLK-01)
-     * @description Sets the status of every CI in ids. Below 100 ids the answer is the partial failure report (200): every id with ok or its error and the HTTP status the single change would have answered. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}). More than 500 ids is 422. Requires ci:write.
+     * @description Sets the status of every CI in ids. Below 100 ids the answer is the partial failure report (200): every id with ok or its error and the HTTP status the single change would have answered. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}). More than 500 ids is 422. Requires ci:write. Every change is a manual change like a PATCH of status (CI-04, OVR-01): the status is set also over an existing override and gets a protected override with the requesting user (for a job its creator) as author; the CI version rises (API-07), so a later PATCH of status with an older If-Match is 409. The bulk change names no version per id and overwrites deliberately, like If-Match "*", also where the organization requires If-Match (E-66). An id is ok only when the CI stores the requested status afterwards, otherwise it is an error.
      */
     post: operations['bulkCIs'];
     delete?: never;
@@ -2656,7 +2656,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge removes the new CI); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge removes the new CI); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -2700,7 +2700,7 @@ export interface paths {
     /**
      * Resolve a reconciliation review item (deprecated, use /api/v1/review-items/{id}/resolve)
      * @deprecated
-     * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited.
+     * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
      */
     post: operations['resolveDiscoveryReviewItem'];
     delete?: never;
@@ -3478,7 +3478,10 @@ export interface paths {
     /** List the VRFs of the organization, the default first */
     get: operations['listVRFs'];
     put?: never;
-    /** Create a VRF (vrf:manage) */
+    /**
+     * Create a VRF (vrf:manage)
+     * @description A VRF is org-wide; a principal restricted to some clients or sites gets 403 (TEN-05, E-09).
+     */
     post: operations['createVRF'];
     delete?: never;
     options?: never;
@@ -3502,12 +3505,15 @@ export interface paths {
     post?: never;
     /**
      * Delete a VRF (vrf:manage)
-     * @description The default VRF and VRFs with subnets or addresses cannot be deleted (422).
+     * @description The default VRF and VRFs with subnets or addresses cannot be deleted (422). A VRF is org-wide; for a principal restricted to some clients or sites it answers 404 (TEN-05, E-09).
      */
     delete: operations['deleteVRF'];
     options?: never;
     head?: never;
-    /** Rename a VRF or change its description (vrf:manage) */
+    /**
+     * Rename a VRF or change its description (vrf:manage)
+     * @description A VRF is org-wide; for a principal restricted to some clients or sites it answers 404 (TEN-05, E-09).
+     */
     patch: operations['updateVRF'];
     trace?: never;
   };
@@ -7381,7 +7387,7 @@ export interface components {
       /** @description Asset the CI is linked to (DB-05, AST-04). The asset is canonical for serial number, location, physical lifecycle and inventory data; they appear read-only under asset. */
       asset_id?: string;
       asset?: components['schemas']['CIAssetFacts'];
-      /** @description CI this one is physically part of (chassis → blade, AST-05); the relationship contains is projected from it. Cycles are rejected (422). */
+      /** @description CI this one is physically part of (chassis → blade, AST-05); the relationship contains is projected from it. Cycles are rejected (422). The parent is a CI of the same client or an org-wide CI (TEN-05). */
       parent_ci_id?: string;
       /** @description Software lifecycle; only CI types with a lifecycle model have one, and it changes through lifecycle transitions (DB-05). */
       readonly lifecycle_state?: string;
@@ -7464,7 +7470,7 @@ export interface components {
       location_id?: string;
       /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
       asset_id?: string;
-      /** @description Containing CI (empty string clears it on update); cycles are rejected (422). */
+      /** @description Containing CI: a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422). */
       parent_ci_id?: string;
       name: string;
       status?: components['schemas']['CIStatus'];
@@ -7493,12 +7499,13 @@ export interface components {
       change_reason?: string;
       name?: string;
       status?: components['schemas']['CIStatus'];
+      /** @description A CI that moves to a client cannot contain CIs of another client or org-wide CIs (422 on client_id, TEN-05); an org-wide CI (empty string) can. */
       client_id?: string;
       /** @description Node of the location tree; site and room of the CI follow from it. */
       location_id?: string;
       /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
       asset_id?: string;
-      /** @description Containing CI (empty string clears it on update); cycles are rejected (422). */
+      /** @description Containing CI (empty string clears it): a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422); the parent is checked again when client_id changes. */
       parent_ci_id?: string;
       manufacturer?: string;
       model?: string;
@@ -9744,6 +9751,7 @@ export interface components {
         [key: string]: unknown;
       };
       candidate_ci_ids?: string[];
+      /** @description The principal (user or service account) that resolved the item; absent when the system adopted an unlicensed_ci item after max_cis was raised. */
       resolved_by?: string;
       /** Format: date-time */
       resolved_at?: string;
@@ -9762,6 +9770,7 @@ export interface components {
     ReviewItemListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ReviewItem'][];
     };
+    /** @description The resolver is always the authenticated principal (user or service account) and is stored as resolved_by; a body naming resolved_by, or any other unknown field, is refused with 400. */
     ReviewItemResolveRequest: {
       /**
        * @description merge folds the observation into a candidate CI (requires ci_id); new creates a CI from the observation; accept applies what the item proposes; dismiss closes the item with no change. create is the deprecated name of new.
@@ -9770,7 +9779,6 @@ export interface components {
       action: 'merge' | 'new' | 'dismiss' | 'accept' | 'create';
       /** @description Target candidate CI id, required when action is merge. */
       ci_id?: string;
-      resolved_by?: string;
       /** @description Optional human-readable resolution note. */
       resolution?: string;
     };
@@ -10182,7 +10190,7 @@ export interface components {
       /** @description VRF of the subnet (CH10); the CIDR is unique per VRF. */
       vrf_id?: string;
       name?: string;
-      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. The VLAN is one the caller can see, of the subnet's client or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
@@ -10200,7 +10208,7 @@ export interface components {
       /** @description VRF of the subnet; the organization's default VRF when omitted. */
       vrf_id?: string;
       name?: string;
-      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. The VLAN is one the caller can see, of the subnet's client or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
@@ -10213,14 +10221,14 @@ export interface components {
       name?: string;
       /** @description Moves the subnet and its addresses to another VRF (empty string = default VRF). */
       vrf_id?: string;
-      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. The VLAN is one the caller can see, of the subnet's client or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
       description?: string;
       is_management?: boolean;
     };
-    /** @description VRF of the organization (TEN-10, CH10). Every organization has exactly one default VRF "global", created with the organization; it cannot be deleted. */
+    /** @description VRF of the organization (TEN-10, CH10). Every organization has exactly one default VRF "global", created with the organization; it cannot be deleted. Every principal of the organization reads the VRFs; only principals without client or site restriction create, change or delete them (E-09). */
     VRF: {
       id: string;
       organization_id: string;
@@ -10329,7 +10337,7 @@ export interface components {
       if_type: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
       mtu?: number;
-      /** @description VLAN of the VLAN catalog (NET-01). */
+      /** @description VLAN of the VLAN catalog (NET-01). The VLAN is one the caller can see, of the client of the CI or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       is_management: boolean;
       is_uplink: boolean;
@@ -10352,7 +10360,7 @@ export interface components {
       if_type?: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
       mtu?: number;
-      /** @description VLAN of the VLAN catalog (NET-01). */
+      /** @description VLAN of the VLAN catalog (NET-01). The VLAN is one the caller can see, of the client of the CI or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       is_management?: boolean;
       is_uplink?: boolean;
@@ -10369,7 +10377,7 @@ export interface components {
       if_type?: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
       mtu?: number;
-      /** @description VLAN of the VLAN catalog (NET-01). */
+      /** @description VLAN of the VLAN catalog (NET-01). The VLAN is one the caller can see, of the client of the CI or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       is_management?: boolean;
       is_uplink?: boolean;
@@ -16626,7 +16634,7 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      /** @description The action does not resolve items of this type */
+      /** @description The action does not resolve items of this type, or new cannot tell the client of the device */
       422: {
         headers: {
           [name: string]: unknown;
@@ -18868,6 +18876,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
     };
   };
@@ -19169,6 +19178,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -19248,6 +19258,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listSubnetAddresses: {
@@ -19648,6 +19659,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -19728,6 +19740,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   returnAssignment: {

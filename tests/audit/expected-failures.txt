@@ -5,13 +5,10 @@
 go;backend/cmd/server;TestAuditT5ReadinessCoversSMTP;F-126
 go;backend/cmd/server;TestAuditT5ReadinessObjectStorageURLEndpoint;F-127
 go;backend/internal/agent;TestAuditT3AgentTelemetryFollowsMergedCI;F-083
-go;backend/internal/ci;TestAuditT3BulkStatusIsManualWrite;F-020
 go;backend/internal/ci;TestAuditT3MergePatchNullClearsTypedField;F-080
 go;backend/internal/ci;TestAuditT3OverrideWritesRaiseVersion;F-021
-go;backend/internal/ci;TestAuditT3ParentMustBeVisibleToScopedPrincipal;F-086
 go;backend/internal/ci;TestAuditT3UnmergeKeepsLaterSurvivorEdits;F-097
 go;backend/internal/ci;TestAuditT7BulkJobCancelStopsWork;F-162
-go;backend/internal/ci;TestAuditT7BulkReportMatchesStoredStatus;F-020
 go;backend/internal/ci;TestAuditT7JobAPIHonoursClientScope;F-163
 go;backend/internal/config;TestAuditT5K8sRenderedEnvSatisfiesStartCheck;F-036
 go;backend/internal/discovery;TestAuditBadScopeIsolated;F-108
@@ -27,14 +24,11 @@ go;backend/internal/discovery;TestAuditIdentitySearchWithMACsUsesIndexes;F-114
 go;backend/internal/discovery;TestAuditPowerRedundancyIndependentOfBatchOrder;F-112
 go;backend/internal/discovery;TestAuditT3PoisonRecordDoesNotTakeValidRecordsDown;F-090
 go;backend/internal/discovery;TestAuditT3ProbableDuplicateMergeIsCIMerge;F-096
-go;backend/internal/discovery;TestAuditT3ResurrectedNewKeepsClientAndIdentity;F-022
 go;backend/internal/discovery;TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices;F-030
 go;backend/internal/discovery;TestAuditZonedScopeTargetRefused;F-108
 go;backend/internal/history;TestAuditT3HistoryIncludesLocationChange;F-093
 go;backend/internal/iga;TestAuditT1ApprovalNeverLosesTheProvisioningTask;F-056
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
-go;backend/internal/ipam;TestAuditT3VLANReferenceMustBeVisible;F-088
-go;backend/internal/ipam;TestAuditT3VRFWritesNeedOrgScope;F-089
 go;backend/internal/locations;TestAuditDefectSiteGrantConfinedToClientAndSite;F-014 F-141
 go;backend/internal/locations;TestAuditT3LocationDeleteRefusesChildren;F-023
 go;backend/internal/locations;TestAuditT3SiteDeleteKeepsNetworkObjects;F-024
@@ -61,7 +55,6 @@ go;backend/internal/server;TestAuditT2EntitlementRackViewGated;F-070
 go;backend/internal/server;TestAuditT2ListsAreCursorPages;F-075
 go;backend/internal/server;TestAuditT3HealthRefreshRunsInG1;F-087
 go;backend/internal/server;TestAuditT3OverrideRefusesReservedNames;F-092
-go;backend/internal/server;TestAuditT3ResolvedByIsThePrincipal;F-091
 go;backend/internal/tenant/rls;TestAuditT1RepositoryErrorsAreSanitized;F-047
 go;backend/internal/tenant/rls;TestAuditT1ScopeRefusalsAreNot5xx;F-058 F-161
 go;backend/internal/tenant/rls;TestAuditT1SiteScopeOfLocatedTables;F-053

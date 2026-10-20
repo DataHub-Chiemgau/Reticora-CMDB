@@ -93,15 +93,14 @@ func (h *Handler) Resolve(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	var body Resolution
+	var body ResolveRequest
 	if err := api.ReadJSON(r, &body); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if body.ResolvedBy == "" {
-		body.ResolvedBy = t.UserID
-	}
-	item, err := h.svc.Resolve(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), &body)
+	// The resolver is always the principal of the request (F-091).
+	res := Resolution{Action: body.Action, CIID: body.CIID, Note: body.Note, ResolvedBy: t.UserID}
+	item, err := h.svc.Resolve(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), &res)
 	if err != nil {
 		writeError(w, err)
 		return

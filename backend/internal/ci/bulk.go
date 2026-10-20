@@ -18,6 +18,13 @@ import (
 // from 100 ids on the operation runs as a job (JOB-04) and the request
 // answers 202 with the job; the result reports every id on its own, so one
 // failing CI does not fail the others (partial failure report).
+//
+// A bulk status change is a manual change like a PATCH (CI-04, OVR-01): it
+// sets the status over an existing override, gives it a new protected
+// override with the initiating user as author and raises the version
+// (API-07). It names no version per id, so it is a deliberate overwrite
+// with If-Match "*" and needs none where the organization requires one
+// (E-66 option 1, transition rule of WP-368).
 
 // Bulk limits of API-08.
 const (
@@ -27,6 +34,9 @@ const (
 	BulkSetStatus   = "set_status"
 	bulkResultOK    = "ok"
 	bulkResultError = "error"
+	// bulkStatusReason is the reason of the overrides a bulk status
+	// change creates.
+	bulkStatusReason = "bulk set_status"
 )
 
 // BulkRequest is the body of POST /cis/bulk.
@@ -107,7 +117,7 @@ func (s *Service) Bulk(ctx context.Context, orgID string, req *BulkRequest) (*Bu
 		return nil, nil, err
 	}
 	if len(req.IDs) < BulkJobFromIDs || s.bulkJobs == nil {
-		result := s.runBulk(ctx, orgID, req)
+		result := s.runBulk(ctx, orgID, tenant.FromContext(ctx).UserID, req)
 		return result, nil, nil
 	}
 	job, _, err := s.bulkJobs.Enqueue(ctx, orgID, BulkJobKind, req, jobs.EnqueueOptions{CreatedBy: tenant.FromContext(ctx).UserID})
@@ -121,13 +131,14 @@ func (s *Service) Bulk(ctx context.Context, orgID string, req *BulkRequest) (*Bu
 }
 
 // runBulkJob claims the job, runs the operation and records the report.
+// The creator of the job is the author of its changes.
 func (s *Service) runBulkJob(ctx context.Context, orgID, jobID string, req *BulkRequest) {
 	claimed, err := s.bulkJobs.ClaimJob(ctx, orgID, jobID)
 	if err != nil || claimed == nil {
 		slog.ErrorContext(ctx, "claim bulk job", "job", jobID, "error", err)
 		return
 	}
-	result := s.runBulk(ctx, orgID, req)
+	result := s.runBulk(ctx, orgID, claimed.CreatedBy, req)
 	if _, err = s.bulkJobs.Succeed(ctx, orgID, jobID, result); err != nil {
 		slog.ErrorContext(ctx, "record bulk job", "job", jobID, "error", err)
 	}
@@ -137,9 +148,10 @@ func (s *Service) runBulkJob(ctx context.Context, orgID, jobID string, req *Bulk
 // transaction, so a few run side by side (NFR-02: 500 ids < 30 s).
 const bulkWorkers = 8
 
-// runBulk applies the operation to every id and reports each, in the order
-// of the ids.
-func (s *Service) runBulk(ctx context.Context, orgID string, req *BulkRequest) *BulkResult {
+// runBulk applies the operation to every id as a manual change of author
+// and reports each, in the order of the ids. An id is ok only when the CI
+// stores the requested status afterwards.
+func (s *Service) runBulk(ctx context.Context, orgID, author string, req *BulkRequest) *BulkResult {
 	result := &BulkResult{Action: req.Action, Total: len(req.IDs), Items: make([]BulkItemResult, len(req.IDs))}
 	status := req.Status
 	var wg sync.WaitGroup
@@ -149,12 +161,20 @@ func (s *Service) runBulk(ctx context.Context, orgID string, req *BulkRequest) *
 		slots <- struct{}{}
 		go func(i int, id string) {
 			defer func() { <-slots; wg.Done() }()
-			if _, err := s.Update(ctx, orgID, id, UpdateRequest{Status: &status}); err != nil {
+			anyVersion := api.IfMatchAny
+			item, err := s.Update(ctx, orgID, id, UpdateRequest{Status: &status, ChangeReason: bulkStatusReason,
+				IfMatch: &anyVersion, Manual: &ManualChange{Author: author}})
+			switch {
+			case err != nil:
 				code, msg := bulkError(err)
 				result.Items[i] = BulkItemResult{ID: id, Result: bulkResultError, Code: code, Error: msg}
-				return
+			case item.Status != status:
+				// A write that left the status is no success (API-08).
+				result.Items[i] = BulkItemResult{ID: id, Result: bulkResultError, Code: http.StatusConflict,
+					Error: fmt.Sprintf("the status was not applied, the CI keeps status %s", item.Status)}
+			default:
+				result.Items[i] = BulkItemResult{ID: id, Result: bulkResultOK, Code: http.StatusOK}
 			}
-			result.Items[i] = BulkItemResult{ID: id, Result: bulkResultOK, Code: http.StatusOK}
 		}(i, id)
 	}
 	wg.Wait()

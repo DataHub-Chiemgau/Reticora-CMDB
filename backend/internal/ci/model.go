@@ -152,7 +152,8 @@ type UpdateRequest struct {
 	Authoritative bool `json:"-"`
 	// Manual marks a change made by a person through the API (not by
 	// discovery or automation): every changed field gets a protected
-	// override in the same transaction (OVR-01). Set by the handler only.
+	// override in the same transaction (OVR-01). Set by the API paths only
+	// (PATCH, bulk status change).
 	Manual *ManualChange `json:"-"`
 }
 
