@@ -549,3 +549,4 @@ COL-02;[B];D;backend/internal/discovery/renew_edge_integration_test.go;WP-375
 COL-02;[B];D;backend/internal/discovery/bundle_selection_integration_test.go;WP-376
 DIS-09;[B];D;backend/internal/discovery/scope_integration_test.go;WP-376
 INS-06;[B];D;backend/internal/discovery/bundle_selection_integration_test.go;WP-376
+DIS-04;[B];D;collector/plugins/wmi/wmi_test.go;WP-377

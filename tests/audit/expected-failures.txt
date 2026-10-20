@@ -79,7 +79,6 @@ go;collector/plugins;TestAuditT2CredentialsArePerProtocol;F-010
 go;collector/plugins/nas;TestAuditNASCredentialTransport;F-011
 go;collector/plugins/snmp;TestAuditSNMPCollectsNeighbors;F-032
 go;collector/plugins/snmp;TestAuditSNMPv3AuthFailureReported;F-105
-go;collector/plugins/wmi;TestAuditWMICredentialTransport;F-010
 go;collector/plugins/wmi;TestAuditWMIFailuresAreErrors;F-029
 go;edgecore/buffer;TestAuditT3CorruptHeadDoesNotBlockSpool;F-085
 go;edgecore/buffer;TestAuditT3SpoolLossSurvivesRestart;F-084

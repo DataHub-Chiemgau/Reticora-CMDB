@@ -2,13 +2,9 @@
 package redfish
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -37,25 +33,13 @@ type Plugin struct {
 	Timeout     time.Duration
 	Concurrency int
 	client      *http.Client
-	scoped      []scopedClient
+	scoped      plugins.TLSClients
 	port        int
 }
 
-// TLSScope is a TLS exception for the targets of one network: certificates
-// are verified against RootCAs instead of the system roots, and/or the
-// SHA-256 hash of the leaf certificate's SubjectPublicKeyInfo must match one
-// of PinsSHA256. With pins only, the chain is not verified (self-signed BMC
-// certificates); the pin is the trust anchor.
-type TLSScope struct {
-	Network    *net.IPNet
-	RootCAs    *x509.CertPool
-	PinsSHA256 [][]byte
-}
-
-type scopedClient struct {
-	network *net.IPNet
-	client  *http.Client
-}
+// TLSScope is a TLS exception for the targets of one network (see
+// plugins.TLSScope).
+type TLSScope = plugins.TLSScope
 
 // Option configures the plugin.
 type Option func(*Plugin)
@@ -64,12 +48,7 @@ type Option func(*Plugin)
 // wins; targets outside every scope use the default verification.
 func WithTLSScopes(scopes ...TLSScope) Option {
 	return func(p *Plugin) {
-		for _, s := range scopes {
-			if s.Network == nil || (s.RootCAs == nil && len(s.PinsSHA256) == 0) {
-				continue
-			}
-			p.scoped = append(p.scoped, scopedClient{network: s.Network, client: p.newClient(scopeTLSConfig(s))})
-		}
+		p.scoped.Add(p.newClient, scopes...)
 	}
 }
 
@@ -82,7 +61,7 @@ func New(opts ...Option) *Plugin {
 		Concurrency: defaultConcurrency,
 		port:        defaultPort,
 	}
-	p.client = p.newClient(&tls.Config{MinVersion: tls.VersionTLS12})
+	p.client = p.newClient(plugins.SystemTLSConfig())
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -90,52 +69,12 @@ func New(opts ...Option) *Plugin {
 }
 
 func (p *Plugin) newClient(cfg *tls.Config) *http.Client {
-	return &http.Client{
-		Timeout: p.Timeout,
-		Transport: &http.Transport{
-			TLSClientConfig:     cfg,
-			MaxIdleConnsPerHost: 4,
-		},
-	}
-}
-
-// scopeTLSConfig builds the verification of one TLS scope.
-func scopeTLSConfig(s TLSScope) *tls.Config {
-	cfg := &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: s.RootCAs}
-	if len(s.PinsSHA256) == 0 {
-		return cfg
-	}
-	pins := s.PinsSHA256
-	if s.RootCAs == nil {
-		// Pinned self-signed certificate: the chain cannot be verified, the
-		// pin check below replaces it.
-		cfg.InsecureSkipVerify = true //nolint:gosec // verified by VerifyConnection (SPKI pin)
-	}
-	cfg.VerifyConnection = func(cs tls.ConnectionState) error {
-		if len(cs.PeerCertificates) == 0 {
-			return errors.New("redfish: no peer certificate")
-		}
-		sum := sha256.Sum256(cs.PeerCertificates[0].RawSubjectPublicKeyInfo)
-		for _, pin := range pins {
-			if bytes.Equal(pin, sum[:]) {
-				return nil
-			}
-		}
-		return errors.New("redfish: certificate does not match a configured pin")
-	}
-	return cfg
+	return plugins.NewTLSClient(p.Timeout, cfg)
 }
 
 // clientFor returns the HTTP client whose TLS verification applies to target.
 func (p *Plugin) clientFor(target string) *http.Client {
-	if ip := net.ParseIP(target); ip != nil {
-		for _, s := range p.scoped {
-			if s.network.Contains(ip) {
-				return s.client
-			}
-		}
-	}
-	return p.client
+	return p.scoped.For(target, p.client)
 }
 
 func (p *Plugin) baseURL(target string) string {

@@ -3,13 +3,9 @@
 // Phase-1 acceptance audit, group T4-collector-load – DEFECT tests (must fail
 // until the defect is fixed).
 //
-// WP-152 (DIS-04), WP-147 / WP-155 (COL-02, DIS-08).
+// WP-152 (DIS-04), WP-155 (DIS-08).
 //
-// Findings encoded here:
-//   - P0 "WMI plugin sends credentials in cleartext (HTTP Basic over
-//     http://target:5985)": New() talks plain HTTP to 5985 with Basic auth;
-//     the HTTPS mode uses InsecureSkipVerify. COL-02: device credentials are
-//     never sent unencrypted or to unverified endpoints.
+// Finding encoded here:
 //   - P1 "WMI Collect reports success with empty fields when WinRM refuses
 //     auth or answers protocol-conformantly": wsmanEnumerate swallows
 //     transport errors and HTTP status codes and never sends a WS-Man Pull,
@@ -17,123 +13,25 @@
 //     EnumerationContext answer all yield a "successful" empty record
 //     (DIS-04 fields, DIS-08 visible failures).
 //
-// The fake WinRM endpoints listen on a random 127.x.y.z loopback address on
-// the fixed WinRM ports so parallel runs do not collide.
+// TestAuditWMICredentialTransport (F-010) moved to wmi_test.go (WP-377); the
+// helpers are in wmi_helpers_test.go. The fake WinRM endpoints speak HTTPS on
+// 5986 (the only WinRM transport of the plugin) with a pinned self-signed
+// certificate.
 //
 // Retest:
 //
-//	cd collector && go test -tags auditdefect -count=1 -v -run 'TestAuditWMI' ./plugins/wmi/
+//	cd collector && go test -tags auditdefect -count=1 -v -run 'TestAuditWMIFailuresAreErrors' ./plugins/wmi/
 package wmi
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io"
-	"math/rand/v2"
-	"net"
 	"net/http"
-	"net/http/httptest"
-	"net/http/httputil"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
-
-const (
-	auditUser     = `CORP\audit-admin`
-	auditPassword = "S3cret!-audit-wmi"
-)
-
-// auditListen binds port on a random 127.x.y.z address.
-func auditListen(t *testing.T, port int) (net.Listener, string) {
-	t.Helper()
-	var lastErr error
-	for range 20 {
-		ip := fmt.Sprintf("127.%d.%d.%d", 1+rand.IntN(250), rand.IntN(250), 1+rand.IntN(250))
-		ln, err := net.Listen("tcp", net.JoinHostPort(ip, fmt.Sprint(port)))
-		if err == nil {
-			return ln, ip
-		}
-		lastErr = err
-	}
-	t.Fatalf("cannot bind a loopback address on port %d: %v", port, lastErr)
-	return nil, ""
-}
-
-// auditRecorder records every request a fake WinRM endpoint receives.
-type auditRecorder struct {
-	mu   sync.Mutex
-	dump []string
-}
-
-func (r *auditRecorder) add(req *http.Request) {
-	raw, _ := httputil.DumpRequest(req, true)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.dump = append(r.dump, string(raw))
-}
-
-// leaked reports the requests that carry the password readable (plain text
-// or as HTTP Basic credentials).
-func (r *auditRecorder) leaked() []string {
-	basic := base64.StdEncoding.EncodeToString([]byte(auditUser + ":" + auditPassword))
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var out []string
-	for _, d := range r.dump {
-		if strings.Contains(d, auditPassword) || strings.Contains(d, basic) {
-			first, _, _ := strings.Cut(d, "\r\n")
-			out = append(out, first)
-		}
-	}
-	return out
-}
-
-// TestAuditWMICredentialTransport encodes COL-02 for the WMI plugin: the
-// account is never readable on the wire, neither over plain HTTP nor to an
-// HTTPS endpoint whose certificate is not trusted.
-func TestAuditWMICredentialTransport(t *testing.T) {
-	cases := []struct {
-		name  string
-		port  int
-		tls   bool
-		https bool
-	}{
-		{name: "production default New(): plain HTTP WinRM on 5985", port: defaultHTTPPort},
-		{name: "HTTPS mode: untrusted self-signed certificate on 5986", port: defaultHTTPSPort, tls: true, https: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ln, ip := auditListen(t, tc.port)
-			rec := &auditRecorder{}
-			srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				rec.add(r)
-				w.Header().Set("Content-Type", "application/soap+xml")
-				_, _ = io.WriteString(w, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body/></s:Envelope>`)
-			}))
-			_ = srv.Listener.Close()
-			srv.Listener = ln
-			if tc.tls {
-				srv.StartTLS()
-			} else {
-				srv.Start()
-			}
-			defer srv.Close()
-
-			p := New()
-			p.Timeout = 2 * time.Second
-			p.UseHTTPS = tc.https
-			_, _ = p.Collect(context.Background(), ip, map[string]string{"username": auditUser, "password": auditPassword})
-
-			if leaked := rec.leaked(); len(leaked) > 0 {
-				t.Errorf("COL-02 violated: the WinRM endpoint %s (tls=%v) received the WMI password readable in %d request(s), e.g. %q",
-					net.JoinHostPort(ip, fmt.Sprint(tc.port)), tc.tls, len(leaked), leaked[0])
-			}
-		})
-	}
-}
 
 // wsmanPullFake is a protocol-faithful WinRM: Enumerate answers only an
 // EnumerationContext (no OptimizeEnumeration), the instances come with Pull.
@@ -183,15 +81,15 @@ func TestAuditWMIFailuresAreErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ln, ip := auditListen(t, defaultHTTPPort)
+			ln, ip := auditListen(t, winRMHTTPSPort)
+			var opts []Option
 			if tc.handler == nil {
 				_ = ln.Close()
 			} else {
-				srv := &http.Server{Handler: tc.handler, ReadHeaderTimeout: 2 * time.Second}
-				go func() { _ = srv.Serve(ln) }()
-				defer srv.Close()
+				srv := serveWinRM(t, ln, tc.handler, true)
+				opts = append(opts, WithTLSScopes(pinScope(t, ip, srv.Certificate())))
 			}
-			p := New()
+			p := New(opts...)
 			p.Timeout = 2 * time.Second
 			p.client.Timeout = 2 * time.Second
 			rec, err := p.Collect(context.Background(), ip, map[string]string{"username": "u", "password": "p"})

@@ -70,10 +70,12 @@ type collectorConfig struct {
 	// "redfish.password", "snmp.community"); plugins receive only their own
 	// namespace through plugins.CredentialsFor (COL-02).
 	Credentials map[string]string
-	// RedfishTLSScopes are the per-network TLS exceptions of the Redfish
-	// plugin (RETICORA_REDFISH_TLS_SCOPES); outside them certificates are
-	// verified against the system roots.
-	RedfishTLSScopes []redfish.TLSScope
+	// RedfishTLSScopes and WMITLSScopes are the per-network TLS exceptions
+	// of the Redfish and WMI plugins (RETICORA_REDFISH_TLS_SCOPES,
+	// RETICORA_WMI_TLS_SCOPES); outside them certificates are verified
+	// against the system roots.
+	RedfishTLSScopes []plugins.TLSScope
+	WMITLSScopes     []plugins.TLSScope
 	// SpoolDir is the disk buffer location for discovery results collected
 	// while the backend is unreachable (offline operation per spec §5.2).
 	SpoolDir string
@@ -143,6 +145,7 @@ func Main() {
 	}
 	collectorCfg := loadCollectorConfig()
 	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
+	pluginRegistry["wmi"] = wmi.New(wmi.WithTLSScopes(collectorCfg.WMITLSScopes...))
 	pluginRegistry["sweep"] = newSweep(&collectorCfg)
 	loadProfileDir(os.Getenv("RETICORA_PROFILES_DIR"))
 
@@ -1271,13 +1274,6 @@ func (u *uploader) spoolAgentTelemetry(ctx context.Context, message []byte) erro
 
 func loadCollectorConfig() collectorConfig {
 	creds := credentialsFromEnv(os.Getenv)
-	tlsScopes, err := parseRedfishTLSScopes(os.Getenv("RETICORA_REDFISH_TLS_SCOPES"), os.ReadFile)
-	if err != nil {
-		// Fail closed: without the exception the default verification
-		// applies and unverifiable BMCs are not contacted.
-		slog.Error("invalid RETICORA_REDFISH_TLS_SCOPES; using default certificate verification", "error", err)
-		tlsScopes = nil
-	}
 	updateURL := strings.TrimSpace(os.Getenv("RETICORA_UPDATE_URL"))
 	channel, channelOK := updateChannelFromEnv(os.Getenv("RETICORA_UPDATE_CHANNEL"))
 	if !channelOK {
@@ -1296,7 +1292,8 @@ func loadCollectorConfig() collectorConfig {
 		SpoolFlushInterval: durationEnvOrDefault("RETICORA_SPOOL_FLUSH_INTERVAL", defaultSpoolFlush),
 		HeartbeatInterval:  durationEnvOrDefault("RETICORA_HEARTBEAT_INTERVAL", time.Minute),
 		Credentials:        creds,
-		RedfishTLSScopes:   tlsScopes,
+		RedfishTLSScopes:   tlsScopesFromEnv("RETICORA_REDFISH_TLS_SCOPES"),
+		WMITLSScopes:       tlsScopesFromEnv("RETICORA_WMI_TLS_SCOPES"),
 		SpoolDir:           envOrDefault("RETICORA_SPOOL_DIR", "/var/lib/reticora-collector/spool"),
 		SpoolMaxBytes:      int64EnvOrDefault("RETICORA_SPOOL_MAX_BYTES", 1<<30), // 1 GiB default cap
 		SpoolMaxAge:        durationEnvOrDefault("RETICORA_SPOOL_MAX_AGE", 72*time.Hour),
@@ -1418,13 +1415,25 @@ func credentialsFromEnv(getenv func(string) string) map[string]string {
 	return creds
 }
 
-// parseRedfishTLSScopes parses RETICORA_REDFISH_TLS_SCOPES: entries separated
-// by ";" in the form "<cidr>=<rule>[,<rule>...]" with the rules
-// "ca:<path to PEM bundle>" and "pin:<hex SHA-256 of the leaf certificate's
-// SubjectPublicKeyInfo>", e.g.
+// tlsScopesFromEnv reads the TLS scopes of a plugin from the variable name.
+func tlsScopesFromEnv(name string) []plugins.TLSScope {
+	scopes, err := parseTLSScopes(os.Getenv(name), os.ReadFile)
+	if err != nil {
+		// Fail closed: without the exception the default verification
+		// applies and unverifiable devices are not contacted.
+		slog.Error("invalid "+name+"; using default certificate verification", "error", err)
+		return nil
+	}
+	return scopes
+}
+
+// parseTLSScopes parses RETICORA_REDFISH_TLS_SCOPES and
+// RETICORA_WMI_TLS_SCOPES: entries separated by ";" in the form
+// "<cidr>=<rule>[,<rule>...]" with the rules "ca:<path to PEM bundle>" and
+// "pin:<hex SHA-256 of the leaf certificate's SubjectPublicKeyInfo>", e.g.
 // "10.0.10.0/24=ca:/etc/reticora/bmc-ca.pem;10.0.20.5/32=pin:9f86d0…".
-func parseRedfishTLSScopes(value string, readFile func(string) ([]byte, error)) ([]redfish.TLSScope, error) {
-	var scopes []redfish.TLSScope
+func parseTLSScopes(value string, readFile func(string) ([]byte, error)) ([]plugins.TLSScope, error) {
+	var scopes []plugins.TLSScope
 	for _, entry := range strings.Split(value, ";") {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
@@ -1438,7 +1447,7 @@ func parseRedfishTLSScopes(value string, readFile func(string) ([]byte, error)) 
 		if err != nil {
 			return nil, fmt.Errorf("scope %q: %w", entry, err)
 		}
-		scope := redfish.TLSScope{Network: network}
+		scope := plugins.TLSScope{Network: network}
 		for _, rule := range strings.Split(rules, ",") {
 			kind, arg, _ := strings.Cut(strings.TrimSpace(rule), ":")
 			switch kind {
