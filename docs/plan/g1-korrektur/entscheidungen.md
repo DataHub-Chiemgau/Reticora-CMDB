@@ -9,7 +9,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-59](#e-59) | Einordnung des Korrekturplans vor Phase 2 und Freigabe des Phase-2-Starts | offen (Empfehlung als Übergangsregel) | WP-596, WP-597, WP-598, WP-599, WP-600 |
 | [E-60](#e-60) | Zurückgestellte P3-Befunde und Risikoakzeptanz für G1 | offen (Empfehlung als Übergangsregel) | WP-600 |
 | [E-61](#e-61) | Anlage von Dokumenten durch client- oder site-gescopte Principals | offen (Empfehlung als Übergangsregel) | WP-341 |
-| [E-62](#e-62) | Beziehungen zwischen eigenem CI und org-weitem CI | offen (Empfehlung als Übergangsregel) | WP-345 |
+| [E-62](#e-62) | Beziehungen zwischen eigenem CI und org-weitem CI | entschieden: Option 2 (Auftraggeber, 2026-10-20) | WP-345 |
 | [E-63](#e-63) | Client-/Site-Scope für Metriken (WP-025 AK1 gegenüber ADR 0001 Punkt 4) | offen (Empfehlung als Übergangsregel) | WP-350 |
 | [E-64](#e-64) | Widerruf von Service-Account-Keys bei Deaktivierung des anlegenden Benutzers | offen (Empfehlung als Übergangsregel) | WP-359 |
 | [E-65](#e-65) | MFA-Pflicht im Login-Pfad ohne Keycloak-Admin-Client (AUT-09) | offen (Empfehlung als Übergangsregel) | WP-367 |
@@ -113,7 +113,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** Beziehungen zwischen eigenem CI und org-weitem CI
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 2 (Auftraggeber, 2026-10-20)
 
 **Frage:** E-09 verbietet gescopten Principals das Schreiben org-weiter Zeilen. Darf ein client-gescopter Principal eine Kante (bzw. ein Interface) von einem eigenen CI zu einem sichtbaren org-weiten CI (client_id NULL) anlegen? Heute verlangt WITH CHECK beide Endpunkt-Clients im Scope.
 
@@ -124,7 +124,9 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 2: MSP-Techniker modellieren Abhängigkeiten zu geteilter Infrastruktur; die Kante trägt den Client des eigenen Endpunkts und ist nur dort sichtbar.
 
-**Übergangsregel:** Option 1 gilt bis zur Freigabe; WP-345 (`t1-edge-scope`) pinnt die Abweisung (42501 bzw. generisches 403/404). Option 2 wird nur umgesetzt, wenn die Freigabe vor dem Merge von WP-345 (`t1-edge-scope`) vorliegt, sonst als Folge-WP.
+**Übergangsregel (bis 2026-10-20):** Option 1 gilt bis zur Freigabe; WP-345 (`t1-edge-scope`) pinnt die Abweisung (42501 bzw. generisches 403/404). Option 2 wird nur umgesetzt, wenn die Freigabe vor dem Merge von WP-345 (`t1-edge-scope`) vorliegt, sonst als Folge-WP.
+
+**Umsetzung:** Folge-Commit zu WP-345 (`t1-edge-scope`), Migration 000142_edge_orgwide_endpoint: WITH CHECK und die restriktiven UPDATE-/DELETE-Policies von ci_relationship und relationship_suppression verlangen je Dimension (Client, Site) `(source NULL oder im Scope) AND (target NULL oder im Scope) AND (source oder target im Scope)`; USING bleibt, die Kante trägt den Client/Site des eigenen Endpunkts und ist nur dort sichtbar. Kanten zwischen zwei org-weiten Endpunkten bleiben org-weiten Principals vorbehalten (E-09). network_interface hat nur ein CI: Ein Interface an einem org-weiten CI ist eine org-weite Zeile und bleibt abgewiesen; Kanten zwischen Interfaces des eigenen und des org-weiten CI sind erlaubt. Test: `TestCIChildEdgeToOrgWideCI`, `TestCIChildEdgeToOrgWideCISite` in `backend/internal/tenant/rls/ci_children_integration_test.go`.
 
 **Betroffene IDs:** TEN-05, IMP-07
 

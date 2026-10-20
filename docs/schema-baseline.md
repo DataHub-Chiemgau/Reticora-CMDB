@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000141_scope_propagation_definer
+Stand: Migration 000142_edge_orgwide_endpoint
 
 ## Prüfung
 

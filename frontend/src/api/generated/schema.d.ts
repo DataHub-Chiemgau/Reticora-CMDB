@@ -707,7 +707,7 @@ export interface paths {
     put?: never;
     /**
      * Create a relationship
-     * @description contains, contained_by, parent_of, child_of, mounted_in and located_in are projected and cannot be stored (422, REL-01, CH27): containment is the CI's parent_ci_id, mounted_in follows from the rack mount, located_in from the CI's location.
+     * @description contains, contained_by, parent_of, child_of, mounted_in and located_in are projected and cannot be stored (422, REL-01, CH27): containment is the CI's parent_ci_id, mounted_in follows from the rack mount, located_in from the CI's location. A principal restricted to some clients or sites may connect its own CI with a visible org-wide CI (client or site NULL); the edge carries the client and site of the own endpoint and is visible only there. An edge between two org-wide CIs is reserved to org-wide principals (403, E-09, E-62).
      */
     post: operations['createRelationship'];
     delete?: never;
