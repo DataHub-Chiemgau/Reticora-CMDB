@@ -429,6 +429,8 @@ func main() {
 	if ingestQueue != nil && workerEnabled(config.WorkerIngest) {
 		readiness = append(readiness, server.ReadinessCheck{Name: "ingest", Detail: ingestQueue.ReadinessDetail})
 	}
+	// Every grant of org_admin binds the IdP account to MFA (WP-358).
+	mfa := mfaEnforcer(cfg)
 	mux, httpMetrics, err := server.NewRouter(repos, server.Options{
 		Version:            version,
 		Modules:            modules,
@@ -465,6 +467,7 @@ func main() {
 		SignupProtection: signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
 		InvitationAccounts: invitationAccounts(cfg),
+		MFA:                mfa,
 		CollectorCA:        collectorPKI,
 	})
 	if err != nil {
@@ -537,9 +540,15 @@ func main() {
 		}),
 	}, {
 		// System jobs on the scheduler (JOB-02): one replica leads through
-		// a PostgreSQL advisory lock and runs the due slots.
+		// a PostgreSQL advisory lock and runs the due slots. At start the
+		// existing org_admins are bound to MFA (WP-358, idempotent).
 		Name: config.WorkerScheduler,
-		Run:  systemScheduler.Run,
+		Run: func(ctx context.Context) {
+			if users, ok := repos.User.(*user.PGRepository); ok && mfa != nil {
+				go reconcileMFA(ctx, users)
+			}
+			systemScheduler.Run(ctx)
+		},
 	}}
 	// Process queued asynchronous export jobs. All replicas share the queue
 	// via FOR UPDATE SKIP LOCKED, so jobs are never run twice.
@@ -944,6 +953,43 @@ func invitationAccounts(cfg *config.Config) user.InvitationAccounts {
 		return kc
 	}
 	return nil
+}
+
+// mfaEnforcer binds the IdP accounts of new org_admins to MFA through the
+// Keycloak admin client (WP-358). Without the client every org_admin grant
+// fails (503) outside development; in development nothing is bound.
+func mfaEnforcer(cfg *config.Config) user.MFAEnforcer {
+	if kc := keycloakAccounts(cfg); kc != nil {
+		return kc
+	}
+	if cfg.IsDevelopment() {
+		slog.Warn("no Keycloak admin client: org_admins are not bound to MFA (development only)")
+		return nil
+	}
+	slog.Warn("no Keycloak admin client (RETICORA_KEYCLOAK_ADMIN_CLIENT_ID): granting org_admin fails until it is configured")
+	return user.UnavailableMFA{}
+}
+
+// reconcileMFA binds the org_admins that exist already to MFA (WP-358). A
+// run with failures (Keycloak still starting, for instance) is repeated a
+// few times; the run is idempotent.
+func reconcileMFA(ctx context.Context, users *user.PGRepository) {
+	for attempt := 1; ; attempt++ {
+		bound, failed, err := users.ReconcileMFA(ctx)
+		if err != nil {
+			slog.ErrorContext(ctx, "mfa reconciliation", "attempt", attempt, "error", err)
+		} else {
+			slog.InfoContext(ctx, "mfa reconciliation finished", "attempt", attempt, "bound", bound, "failed", failed)
+		}
+		if (err == nil && failed == 0) || attempt == 5 {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Minute):
+		}
+	}
 }
 
 // signupProtection builds the captcha, the disposable-domain policy and the

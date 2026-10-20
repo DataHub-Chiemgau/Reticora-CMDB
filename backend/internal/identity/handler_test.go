@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -497,6 +498,44 @@ func TestCallbackRejectsDeactivatedUser(t *testing.T) {
 
 	if w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), `"token"`) {
 		t.Fatalf("login of a deactivated user: status %d body %s, want 403 without token", w.Code, w.Body.String())
+	}
+}
+
+// mfaFailingProvisioner fails every login like a first login of an
+// org_admin whose account cannot be bound to MFA (WP-358).
+type mfaFailingProvisioner struct{ statusProvisioner }
+
+func (mfaFailingProvisioner) EnsureUser(context.Context, string, string, string, string) (string, error) {
+	return "", fmt.Errorf("%w: keycloak: role mapping: status 403", ErrMFAUnavailable)
+}
+
+// TestCallbackFailsWhenMFACannotBeEnforced covers WP-358 (AUT-09): a login
+// that would make an org_admin without MFA answers 503 without session and
+// without naming the admin API.
+func TestCallbackFailsWhenMFACannotBeEnforced(t *testing.T) {
+	orgID := "123e4567-e89b-12d3-a456-426614174000"
+	fake := newFakeOIDCServer(t)
+	fake.mutateClaims = func(claims map[string]any) {
+		claims["groups"] = []string{orgID}
+	}
+	handler := NewHandler(NewOIDCProvider(OIDCConfig{
+		IssuerURL:    fake.issuer(),
+		ClientID:     "reticora-app",
+		ClientSecret: "top-secret",
+		RedirectURL:  "https://app.example.com/callback",
+	}), testSessionIssuer(t)).WithProvisioning(mfaFailingProvisioner{}, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/callback",
+		strings.NewReader(`{"code":"auth-code","state":"nonce","code_verifier":"verifier-123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.Callback(w, req)
+
+	if w.Code != http.StatusServiceUnavailable || strings.Contains(w.Body.String(), `"token"`) || strings.Contains(w.Body.String(), "keycloak") {
+		t.Fatalf("login without enforceable MFA: status %d body %s, want 503 without token and cause", w.Code, w.Body.String())
+	}
+	if len(w.Result().Cookies()) != 0 {
+		t.Errorf("refresh cookie set: %v", w.Result().Cookies())
 	}
 }
 

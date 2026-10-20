@@ -254,6 +254,10 @@ export interface paths {
      * Complete the OIDC callback flow and issue a session token
      * @description Issues a 15-minute access token (AUT-02) and sets the refresh token as
      *     an HttpOnly, Secure, SameSite=Strict cookie for /api/v1/auth.
+     *     A first login that makes the user org_admin (a pending org_admin
+     *     invitation, or an account an administrator made org_admin) binds the
+     *     IdP account to MFA (Keycloak realm role mfa_required, AUT-09); when
+     *     that fails, the login answers 503 and changes nothing.
      */
     post: operations['authCallback'];
     delete?: never;
@@ -4184,7 +4188,7 @@ export interface paths {
     put?: never;
     /**
      * Accept an invitation (TLC-03)
-     * @description The token is the credential; the request passes the pre-auth limit (AUT-10). The invitation is consumed atomically and once: it creates the user with the invited role and scope. With the IdP admin client the password creates the IdP account (never stored by Reticora); otherwise the user signs in with an existing IdP account of the address, which the first login links. 404 for an unknown, revoked or used token, 410 for an expired one, 409 when the organization already has a user with the address.
+     * @description The token is the credential; the request passes the pre-auth limit (AUT-10). The invitation is consumed atomically and once: it creates the user with the invited role and scope. With the IdP admin client the password creates the IdP account (never stored by Reticora); otherwise the user signs in with an existing IdP account of the address, which the first login links. 404 for an unknown, revoked or used token, 410 for an expired one, 409 when the organization already has a user with the address. An org_admin account is bound to MFA (Keycloak realm role mfa_required, AUT-09); when that fails, the account is deleted again, the acceptance answers 503 and the invitation stays open.
      */
     post: operations['acceptInvitation'];
     delete?: never;
@@ -4423,6 +4427,7 @@ export interface paths {
     /**
      * Assign a custom role to a user
      * @deprecated
+     * @description Like POST /api/v1/role-assignments.
      */
     post: operations['assignRoleLegacy'];
     delete?: never;
@@ -4441,7 +4446,10 @@ export interface paths {
     /** List the role assignments of a user (API-05) */
     get: operations['listRoleAssignments'];
     put?: never;
-    /** Assign a role to a user (API-05) */
+    /**
+     * Assign a role to a user (API-05)
+     * @description The user and the role must belong to the organization (404 otherwise). Assigning the standard role org_admin binds the IdP account of the user to MFA (Keycloak realm role mfa_required, AUT-09) before the assignment is stored; a user without IdP account yet is bound at the first login. When the binding fails (no Keycloak admin client, admin API refused or unreachable), nothing is assigned and the answer is 503.
+     */
     post: operations['createRoleAssignment'];
     delete?: never;
     options?: never;
@@ -11320,6 +11328,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   refreshSession: {
@@ -21223,6 +21232,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listRoleAssignments: {
@@ -21279,6 +21289,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   getRole: {

@@ -497,6 +497,10 @@ paths:
       description: |
         Issues a 15-minute access token (AUT-02) and sets the refresh token as
         an HttpOnly, Secure, SameSite=Strict cookie for /api/v1/auth.
+        A first login that makes the user org_admin (a pending org_admin
+        invitation, or an account an administrator made org_admin) binds the
+        IdP account to MFA (Keycloak realm role mfa_required, AUT-09); when
+        that fails, the login answers 503 and changes nothing.
       requestBody:
         required: true
         content:
@@ -521,6 +525,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/auth/refresh:
     post:
@@ -8116,7 +8122,10 @@ paths:
         otherwise the user signs in with an existing IdP account of the
         address, which the first login links. 404 for an unknown, revoked
         or used token, 410 for an expired one, 409 when the organization
-        already has a user with the address.
+        already has a user with the address. An org_admin account is bound
+        to MFA (Keycloak realm role mfa_required, AUT-09); when that fails,
+        the account is deleted again, the acceptance answers 503 and the
+        invitation stays open.
       requestBody:
         required: true
         content:
@@ -8595,6 +8604,7 @@ paths:
       x-successor: '/api/v1/role-assignments'
       tags: [Roles]
       summary: Assign a custom role to a user
+      description: Like POST /api/v1/role-assignments.
       requestBody:
         required: true
         content:
@@ -8614,6 +8624,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/role-assignments:
     get:
@@ -8650,6 +8662,14 @@ paths:
       operationId: createRoleAssignment
       tags: [Roles]
       summary: Assign a role to a user (API-05)
+      description: >-
+        The user and the role must belong to the organization (404
+        otherwise). Assigning the standard role org_admin binds the IdP
+        account of the user to MFA (Keycloak realm role mfa_required,
+        AUT-09) before the assignment is stored; a user without IdP account
+        yet is bound at the first login. When the binding fails (no Keycloak
+        admin client, admin API refused or unreachable), nothing is assigned
+        and the answer is 503.
       requestBody:
         required: true
         content:
@@ -8669,6 +8689,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/roles/{id}:
     parameters:

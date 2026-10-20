@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -58,6 +59,13 @@ var ErrUserInactive = errors.New("identity: user is deactivated")
 // an admission for organization and e-mail: a pending invitation or an
 // account created by an administrator or SCIM (AUT-01).
 var ErrFirstLoginNotPermitted = errors.New("identity: first login requires an invitation for this organization and e-mail")
+
+// ErrMFAUnavailable is returned when a grant of org_admin cannot bind the
+// IdP account to the second factor (realm role mfa_required, AUT-09,
+// WP-358): no Keycloak admin client, or the admin API refused or failed.
+// The grant does not happen; login, role assignment and invitation
+// acceptance answer 503.
+var ErrMFAUnavailable = errors.New("identity: the second factor of the account could not be enforced")
 
 // UserStatusChecker reports whether an app_user may hold a session. A
 // provisioner implementing it makes refresh check the user status; a user
@@ -551,6 +559,10 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		writeContextError(w, err)
 	case errors.Is(err, ErrUserInactive), errors.Is(err, ErrFirstLoginNotPermitted):
 		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
+	case errors.Is(err, ErrMFAUnavailable):
+		// The cause names the admin API; it goes to the log only.
+		slog.Error("login: org_admin without enforceable MFA", "error", err)
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrMFAUnavailable.Error())
 	case strings.Contains(err.Error(), "authorization code is required"),
 		strings.Contains(err.Error(), "PKCE code verifier is required"),
 		strings.Contains(err.Error(), "ID token is required"),
