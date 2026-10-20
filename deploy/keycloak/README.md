@@ -73,6 +73,15 @@ administrator alone.
     /api/v1/invitations/accept`): the new account gets `mfa_required` and
     *configure OTP*; accounts of other invited roles get neither;
   - the first login that accepts a pending org_admin invitation;
+  - every login that grants org_admin through an IdP group other than
+    `reticora-admin` (a group named `org_admin`, which the realm does not
+    bind to MFA) or through `RETICORA_DEFAULT_PROVISION_ROLE=org_admin` (a
+    user who holds that default role; its assignment binds the account
+    before it is stored): the login callback binds the account of the ID
+    token's subject before it issues the session (WP-367). The group
+    `reticora-admin` is not bound by the server (E-65); outside development
+    the server refuses to start with the default role org_admin and without
+    the admin client;
   - at every server start (scheduler worker) the reconciliation binds every
     active org_admin with an OIDC subject of every organization, including
     org_admins created before this binding existed. Failures are logged per

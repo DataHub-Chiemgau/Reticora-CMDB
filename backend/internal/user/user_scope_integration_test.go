@@ -28,7 +28,7 @@ func TestUserRepositoryScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provision org A user: %v", err)
 	}
-	if err = repo.EnsureRole(context.Background(), f.OrgA, idA, "viewer"); err != nil {
+	if _, err = repo.EnsureRole(context.Background(), f.OrgA, idA, "viewer"); err != nil {
 		t.Fatalf("provision org A role: %v", err)
 	}
 	idB, err := repo.EnsureUser(context.Background(), f.OrgB, "scopetest-1a-b", "b@scopetest.invalid", "User B")

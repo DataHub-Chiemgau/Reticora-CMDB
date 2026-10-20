@@ -1312,24 +1312,51 @@ func (r *PGRepository) UserActive(ctx context.Context, orgID, userID string) (bo
 
 // EnsureRole assigns the named standard role to the user when they hold no
 // standard role yet, so first login lands on a sensible least-privilege
-// baseline instead of an empty permission set.
-func (r *PGRepository) EnsureRole(ctx context.Context, orgID, userID, roleName string) error {
-	return database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
+// baseline instead of an empty permission set. It reports whether the user
+// holds the role afterwards, assigned now or before: the login binds a
+// default role org_admin to MFA (WP-367).
+//
+// Assigning org_admin binds the IdP account to MFA before the commit, like
+// every other grant of org_admin (WP-358): a session of the user that
+// refreshes meanwhile never holds org_admin without the binding. When the
+// binding fails, nothing is assigned and the error wraps ErrMFAUnavailable.
+func (r *PGRepository) EnsureRole(ctx context.Context, orgID, userID, roleName string) (bool, error) {
+	var held bool
+	err := database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		var existing int
 		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM role_assignment WHERE organization_id = $1 AND user_id = $2`, orgID, userID).Scan(&existing); err != nil {
 			return fmt.Errorf("check role assignments: %w", err)
 		}
-		if existing > 0 {
-			return nil
+		if existing == 0 {
+			tag, err := tx.Exec(ctx, `
+				INSERT INTO role_assignment (organization_id, user_id, role_id)
+				SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = $3
+				ON CONFLICT DO NOTHING
+			`, orgID, userID, roleName)
+			if err != nil {
+				return fmt.Errorf("assign default role: %w", err)
+			}
+			if tag.RowsAffected() > 0 && roleName == OrgAdminRole {
+				var subject, email string
+				if err = tx.QueryRow(ctx, `SELECT COALESCE(oidc_subject, ''), email FROM app_user WHERE id::text = $1 AND organization_id = $2`,
+					userID, orgID).Scan(&subject, &email); err != nil {
+					return fmt.Errorf("read user of default role: %w", err)
+				}
+				if berr := bindMFA(ctx, r.mfa, subject, email); berr != nil {
+					return berr
+				}
+			}
 		}
-		_, err := tx.Exec(ctx, `
-			INSERT INTO role_assignment (organization_id, user_id, role_id)
-			SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = $3
-			ON CONFLICT DO NOTHING
-		`, orgID, userID, roleName)
+		// Read after the insert: a concurrent first login that assigned the
+		// role is seen as well.
+		err := tx.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM role_assignment ra JOIN role ro ON ro.id = ra.role_id AND ro.organization_id = ra.organization_id
+				WHERE ra.organization_id = $1 AND ra.user_id = $2 AND ro.name = $3)
+		`, orgID, userID, roleName).Scan(&held)
 		if err != nil {
-			return fmt.Errorf("assign default role: %w", err)
+			return fmt.Errorf("read default role assignment: %w", err)
 		}
 		return nil
 	})
+	return held, err
 }

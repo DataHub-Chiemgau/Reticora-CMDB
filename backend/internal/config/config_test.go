@@ -225,6 +225,45 @@ func TestWorkerSwitches(t *testing.T) {
 	}
 }
 
+// TestDefaultOrgAdminRoleRequiresAdminClient covers WP-367 (AUT-09, E-65
+// option 1): outside development the default role org_admin needs the
+// Keycloak admin client that binds a new org_admin to MFA; the start check
+// names both settings. With the client, with another default role and in
+// development the configuration starts.
+func TestDefaultOrgAdminRoleRequiresAdminClient(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("RETICORA_KEYCLOAK_ADMIN_CLIENT_ID", "")
+	t.Setenv("RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET", "")
+	t.Setenv("RETICORA_DEFAULT_PROVISION_ROLE", "org_admin")
+	if err := Load().Validate(false); err != nil {
+		t.Errorf("development with default role org_admin without admin client: %v", err)
+	}
+	for _, env := range []string{EnvStaging, EnvProduction} {
+		setAll(t, productionEnv)
+		t.Setenv("RETICORA_ENVIRONMENT", env)
+		err := Load().Validate(false)
+		if err == nil || !strings.Contains(err.Error(), "RETICORA_DEFAULT_PROVISION_ROLE") || !strings.Contains(err.Error(), "RETICORA_KEYCLOAK_ADMIN_CLIENT_ID") {
+			t.Errorf("%s with default role org_admin without admin client: %v, want an error naming both settings", env, err)
+		}
+	}
+	t.Setenv("RETICORA_KEYCLOAK_ADMIN_CLIENT_ID", "reticora-admin-client")
+	if err := Load().Validate(false); err == nil || !strings.Contains(err.Error(), "RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET") {
+		t.Errorf("admin client without secret: %v, want an error", err)
+	}
+	t.Setenv("RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET", "secret")
+	if err := Load().Validate(false); err != nil {
+		t.Errorf("default role org_admin with admin client: %v", err)
+	}
+	t.Setenv("RETICORA_KEYCLOAK_ADMIN_CLIENT_ID", "")
+	t.Setenv("RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET", "")
+	for _, role := range []string{"viewer", ""} {
+		t.Setenv("RETICORA_DEFAULT_PROVISION_ROLE", role)
+		if err := Load().Validate(false); err != nil {
+			t.Errorf("default role %q without admin client: %v", role, err)
+		}
+	}
+}
+
 // TestDevAuthOnlyInDevelopment covers WP-110 (AUT-03): the start check
 // refuses RETICORA_ALLOW_INSECURE_DEV_AUTH outside development.
 func TestDevAuthOnlyInDevelopment(t *testing.T) {

@@ -19,8 +19,9 @@ import (
 // mfa_required to the IdP account before it commits: role assignment
 // (AssignRole), invitation acceptance (InvitationAccounts with the invited
 // role), the first login with an invitation or of an account an
-// administrator created (EnsureUser), and the reconciliation of the existing
-// org_admins at start (ReconcileMFA). A failing binding fails the grant.
+// administrator created (EnsureUser), the default role org_admin at login
+// (EnsureRole, WP-367), and the reconciliation of the existing org_admins
+// at start (ReconcileMFA). A failing binding fails the grant.
 // The role is not taken away when org_admin is revoked: MFA stays.
 
 // OrgAdminRole is the standard role whose holders must use MFA.

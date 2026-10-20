@@ -38,6 +38,19 @@ type Handler struct {
 	access AccessResolver
 	// refresh stores the rotating refresh tokens.
 	refresh *RefreshSessions
+	// mfa binds the IdP account of a login that grants org_admin through
+	// the IdP group org_admin or the default role to MFA (WP-367). Nil
+	// binds nothing (tests, development without Keycloak admin client).
+	mfa MFAEnforcer
+}
+
+// MFAEnforcer binds an IdP account to the second factor (realm role
+// mfa_required, AUT-09); user.MFAEnforcer (signup.KeycloakAccounts,
+// user.UnavailableMFA) implements it.
+type MFAEnforcer interface {
+	// RequireMFA makes the account of the OIDC subject hold mfa_required;
+	// it is idempotent.
+	RequireMFA(ctx context.Context, oidcSubject string) error
 }
 
 // AccessResolver loads the role grants of a user: every role assignment and
@@ -62,8 +75,8 @@ var ErrFirstLoginNotPermitted = errors.New("identity: first login requires an in
 
 // ErrMFAUnavailable is returned when a grant of org_admin cannot bind the
 // IdP account to the second factor (realm role mfa_required, AUT-09,
-// WP-358): no Keycloak admin client, or the admin API refused or failed.
-// The grant does not happen; login, role assignment and invitation
+// WP-358, WP-367): no Keycloak admin client, or the admin API refused or
+// failed. The grant does not happen; login, role assignment and invitation
 // acceptance answer 503.
 var ErrMFAUnavailable = errors.New("identity: the second factor of the account could not be enforced")
 
@@ -82,8 +95,9 @@ type UserProvisioner interface {
 	// admission and returns ErrFirstLoginNotPermitted otherwise, and
 	// ErrUserInactive for a deactivated user.
 	EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName string) (string, error)
-	// EnsureRole assigns the named standard role when the user has none yet.
-	EnsureRole(ctx context.Context, orgID, userID, roleName string) error
+	// EnsureRole assigns the named standard role when the user has none yet
+	// and reports whether the user holds that role afterwards.
+	EnsureRole(ctx context.Context, orgID, userID, roleName string) (bool, error)
 }
 
 // NewHandler constructs a new identity handler. Refresh tokens live in a
@@ -111,6 +125,14 @@ func (h *Handler) WithProvisioning(p UserProvisioner, defaultRole string) *Handl
 // the database instead of relying on token claims only.
 func (h *Handler) WithAccessResolver(resolver AccessResolver) *Handler {
 	h.access = resolver
+	return h
+}
+
+// WithMFA makes a login that grants org_admin through the IdP group
+// org_admin or the default role bind the IdP account to MFA before the
+// session is issued (WP-367).
+func (h *Handler) WithMFA(m MFAEnforcer) *Handler {
+	h.mfa = m
 	return h
 }
 
@@ -424,6 +446,7 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 	// subject is the app_user id once provisioning ran, keeping token and
 	// database identity aligned.
 	subject := idToken.Subject
+	defaultOrgAdmin := false
 	if h.provisioner != nil {
 		email := ""
 		if idToken.EmailVerified {
@@ -437,8 +460,11 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 			return "", time.Time{}, authResult{}, fmt.Errorf("identity: provision user: %w", provisionErr)
 		}
 		if h.defaultRole != "" {
-			// Best effort: role assignment must not block login.
-			_ = h.provisioner.EnsureRole(ctx, orgID, userID, h.defaultRole)
+			// Best effort: role assignment must not block login. A default
+			// role org_admin the user holds, or may hold when the check
+			// failed, is bound to MFA below.
+			held, roleErr := h.provisioner.EnsureRole(ctx, orgID, userID, h.defaultRole)
+			defaultOrgAdmin = h.defaultRole == orgAdminRole && (held || roleErr != nil)
 		}
 		subject = userID
 	}
@@ -452,6 +478,20 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 	}
 	if err = h.applyAccess(ctx, &claims); err != nil {
 		return "", time.Time{}, authResult{}, fmt.Errorf("identity: resolve role assignments: %w", err)
+	}
+	// A login that grants org_admin through the IdP group org_admin or the
+	// default role binds the account of the ID token's subject to MFA before
+	// the session is issued (AUT-09, WP-367); the realm asks for the second
+	// factor from the next Keycloak login on. The group reticora-admin
+	// carries mfa_required in the realm and needs no binding (E-65 option
+	// 1). Refresh has no ID token and binds nothing.
+	if h.mfa != nil && (defaultOrgAdmin || orgAdminWithoutRealmMFA(idToken.Groups)) {
+		if mfaErr := h.mfa.RequireMFA(ctx, idToken.Subject); mfaErr != nil {
+			if !errors.Is(mfaErr, ErrMFAUnavailable) {
+				mfaErr = fmt.Errorf("%w: %w", ErrMFAUnavailable, mfaErr)
+			}
+			return "", time.Time{}, authResult{}, mfaErr
+		}
 	}
 	if stampErr := stampToken(&claims); stampErr != nil {
 		return "", time.Time{}, authResult{}, stampErr
