@@ -3,17 +3,9 @@
 // Phase-1 acceptance audit, group T4-collector-load – DEFECT tests for the
 // collector's discovery passes (must fail until the defects are fixed).
 //
-// WP-147 (COL-02), WP-151 (DIS-02), WP-152 (DIS-04), WP-153 (DIS-09),
-// WP-154 (DIS-10), WP-155 (DIS-08).
+// WP-151 (DIS-02), WP-153 (DIS-09), WP-154 (DIS-10), WP-155 (DIS-08).
 //
 // Findings encoded here (one test each):
-//   - TestAuditCredentialKindRouting – WP-152 P1 "Vault credentials of kind
-//     'wmi' never reach the WMI plugin; SSH credentials go to WMI and NAS
-//     targets instead" (plugin.go aliases wmi/nas -> ssh, bundle.go
-//     namespaces kind wmi as "wmi").
-//   - TestAuditPerScopeCredentials – WP-153 P1 / WP-147 P2 "Collector ignores
-//     the scope's credential_ids: the first credential per protocol is used
-//     for all scopes (cross-client)".
 //   - TestAuditScopeExpansionCompleteOrReported – WP-153 P2 "Scopes larger
 //     than ~4096 addresses are silently truncated by the collector".
 //   - TestAuditScopeScheduleSurvivesRestart – WP-154 P2 "Scope schedules
@@ -28,306 +20,30 @@
 //     part: the evidence-less sweep record of an SNMP-classified device is
 //     uploaded as classified_by=fallback).
 //
+// TestAuditCredentialKindRouting and TestAuditPerScopeCredentials (F-028,
+// F-013) moved to discovery_credentials_test.go (WP-378); the shared helpers
+// are in discovery_helpers_test.go.
+//
 // The scope run reports travel over NATS like in production; the tests need
 // TEST_NATS_URL (a plain NATS server, e.g. nats://localhost:54222).
 //
 // Retest:
 //
 //	cd collector && TEST_NATS_URL=nats://localhost:54222 go test -tags auditdefect -count=1 -v \
-//	  -run 'TestAuditCredentialKindRouting|TestAuditPerScopeCredentials|TestAuditScopeExpansionCompleteOrReported|TestAuditScopeScheduleSurvivesRestart|TestAuditWMIAuthFailureReachesScopeRun|TestAuditClassifiedDeviceNotUploadedAsFallback' ./collectorcmd/
+//	  -run 'TestAuditScopeExpansionCompleteOrReported|TestAuditScopeScheduleSurvivesRestart|TestAuditWMIAuthFailureReachesScopeRun|TestAuditClassifiedDeviceNotUploadedAsFallback' ./collectorcmd/
 package collectorcmd
 
 import (
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
-	"math/rand/v2"
-	"net"
 	"net/http"
-	"net/http/httptest"
-	"os"
-	"slices"
-	"strings"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/nats-io/nats.go"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/sweep"
 )
-
-// auditSpy is a protocol plugin that records what discovery hands it.
-type auditSpy struct {
-	name string
-	// alive returns the probe hits; nil means nothing answers.
-	alive   func(targets []string) []plugins.Result
-	collect func(ctx context.Context, target string) (*plugins.DeviceRecord, error)
-	// countOnly records only the number of targets per probe.
-	countOnly bool
-
-	mu     sync.Mutex
-	counts []int
-	firsts []string
-	creds  map[string][]map[string]string // target -> credentials seen
-}
-
-func (s *auditSpy) Name() string { return s.name }
-
-func (s *auditSpy) Probe(_ context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
-	s.mu.Lock()
-	s.counts = append(s.counts, len(targets))
-	if len(targets) > 0 {
-		s.firsts = append(s.firsts, targets[0])
-	}
-	if !s.countOnly {
-		if s.creds == nil {
-			s.creds = map[string][]map[string]string{}
-		}
-		for _, t := range targets {
-			s.creds[t] = append(s.creds[t], maps.Clone(creds))
-		}
-	}
-	s.mu.Unlock()
-	if s.alive == nil {
-		return nil, nil
-	}
-	return s.alive(targets), nil
-}
-
-func (s *auditSpy) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
-	s.mu.Lock()
-	if !s.countOnly {
-		if s.creds == nil {
-			s.creds = map[string][]map[string]string{}
-		}
-		s.creds[target] = append(s.creds[target], maps.Clone(creds))
-	}
-	s.mu.Unlock()
-	if s.collect == nil {
-		return nil, nil
-	}
-	return s.collect(ctx, target)
-}
-
-func (s *auditSpy) seen(target string) []map[string]string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.creds[target]
-}
-
-// auditUsePlugins swaps plugins into the registry for one test and resets
-// the scope list, the bundle and the scope channel afterwards.
-func auditUsePlugins(t *testing.T, plugs ...plugins.Plugin) {
-	t.Helper()
-	for _, p := range plugs {
-		previous, had := pluginRegistry[p.Name()]
-		pluginRegistry[p.Name()] = p
-		t.Cleanup(func() {
-			if had {
-				pluginRegistry[p.Name()] = previous
-			} else {
-				delete(pluginRegistry, p.Name())
-			}
-		})
-	}
-	t.Cleanup(func() {
-		collectorScopes = &scopeCache{}
-		collectorBundle.set(nil)
-	})
-}
-
-// auditInstallBundle installs an opened credential bundle the way
-// syncBundle does after fetchBundle.
-func auditInstallBundle(creds ...bundleCredential) {
-	collectorBundle.set((&bundleContent{Credentials: creds}).namespaced())
-}
-
-// auditScopeRun is a scope run report as the server receives it.
-type auditScopeRun struct {
-	ScopeID string `json:"scope_id"`
-	Result  struct {
-		Records    int        `json:"records"`
-		ErrorCount int        `json:"error_count"`
-		Errors     []runError `json:"errors"`
-	} `json:"result"`
-}
-
-// auditCaptureScopeRuns connects the scope channel to TEST_NATS_URL and
-// answers the collector's scopes.result requests like the server.
-func auditCaptureScopeRuns(t *testing.T) func() []auditScopeRun {
-	t.Helper()
-	url := os.Getenv("TEST_NATS_URL")
-	if url == "" {
-		t.Fatal("TEST_NATS_URL is required: the scope run reports travel over NATS")
-	}
-	nc, err := nats.Connect(url, nats.Timeout(5*time.Second))
-	if err != nil {
-		t.Fatalf("connect %s: %v", url, err)
-	}
-	subject := fmt.Sprintf("collector.audit-%d.c%d", time.Now().UnixNano(), rand.IntN(1_000_000))
-	var mu sync.Mutex
-	var runs []auditScopeRun
-	sub, err := nc.Subscribe(subject+".scopes.result", func(m *nats.Msg) {
-		var r auditScopeRun
-		if json.Unmarshal(m.Data, &r) == nil {
-			mu.Lock()
-			runs = append(runs, r)
-			mu.Unlock()
-		}
-		_ = m.Respond([]byte(`{"ok":true}`))
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = nc.Flush(); err != nil {
-		t.Fatal(err)
-	}
-	scopeChannel.Store(&scopeChannelState{nc: nc, subject: subject})
-	t.Cleanup(func() {
-		scopeChannel.Store(nil)
-		_ = sub.Unsubscribe()
-		nc.Close()
-	})
-	return func() []auditScopeRun {
-		mu.Lock()
-		defer mu.Unlock()
-		return slices.Clone(runs)
-	}
-}
-
-// auditUploadSink is an ingest endpoint that keeps the uploaded records.
-func auditUploadSink(t *testing.T) (*uploader, func() []plugins.DeviceRecord) {
-	t.Helper()
-	var mu sync.Mutex
-	var got []plugins.DeviceRecord
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/monitoring/metrics") {
-			w.WriteHeader(http.StatusAccepted)
-			return
-		}
-		gz, err := gzip.NewReader(r.Body)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		var batch plugins.DeviceRecordBatch
-		if err = json.NewDecoder(gz).Decode(&batch); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		mu.Lock()
-		got = append(got, batch.Records...)
-		mu.Unlock()
-		w.WriteHeader(http.StatusAccepted)
-	}))
-	t.Cleanup(srv.Close)
-	up, err := newUploader(context.Background(), testConfig(srv.URL, t.TempDir()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return up, func() []plugins.DeviceRecord {
-		mu.Lock()
-		defer mu.Unlock()
-		return slices.Clone(got)
-	}
-}
-
-// auditLoopback binds port on a random 127.x.y.z address.
-func auditLoopback(t *testing.T, port int) (net.Listener, string) {
-	t.Helper()
-	var lastErr error
-	for range 20 {
-		ip := fmt.Sprintf("127.%d.%d.%d", 1+rand.IntN(250), rand.IntN(250), 1+rand.IntN(250))
-		ln, err := net.Listen("tcp", net.JoinHostPort(ip, fmt.Sprint(port)))
-		if err == nil {
-			return ln, ip
-		}
-		lastErr = err
-	}
-	t.Fatalf("cannot bind a loopback address on port %d: %v", port, lastErr)
-	return nil, ""
-}
-
-// TestAuditCredentialKindRouting: every vault credential kind reaches the
-// plugin of its protocol, and SSH secrets reach no other protocol (COL-02,
-// DIS-04).
-func TestAuditCredentialKindRouting(t *testing.T) {
-	names := []string{"ssh", "wmi", "nas", "redfish", "ipmi", "snmp"}
-	spies := map[string]*auditSpy{}
-	var plugs []plugins.Plugin
-	for _, n := range names {
-		spies[n] = &auditSpy{name: n}
-		plugs = append(plugs, spies[n])
-	}
-	auditUsePlugins(t, plugs...)
-	auditInstallBundle(
-		bundleCredential{ID: "cred-wmi", Kind: "wmi", Secret: map[string]any{"username": "CORP\\win-audit", "password": "wmi-secret"}},
-		bundleCredential{ID: "cred-ssh", Kind: "ssh_password", Secret: map[string]any{"username": "root", "password": "ssh-secret"}},
-		bundleCredential{ID: "cred-bmc", Kind: "redfish", Secret: map[string]any{"username": "bmc", "password": "redfish-secret"}},
-		bundleCredential{ID: "cred-ipmi", Kind: "ipmi", Secret: map[string]any{"username": "ipmi", "password": "ipmi-secret"}},
-		bundleCredential{ID: "cred-snmp", Kind: "snmp_v2c", Secret: map[string]any{"community": "snmp-secret"}},
-	)
-	const target = "192.0.2.10"
-	collectorScopes.set([]collectorScope{{ID: "6f0b6f0e-0000-4000-8000-0000000000a1", Kind: "host", Target: target, Schedule: "24h",
-		CredentialIDs: []string{"cred-wmi", "cred-ssh", "cred-bmc", "cred-ipmi", "cred-snmp"}, Plugins: names}}, nil)
-	runDueDiscovery(context.Background(), &collectorConfig{}, nil, newScheduler(), &hostCache{}, time.Now())
-
-	want := map[string]string{"ssh": "ssh-secret", "wmi": "wmi-secret", "redfish": "redfish-secret", "ipmi": "ipmi-secret"}
-	for _, n := range names {
-		seen := spies[n].seen(target)
-		if len(seen) == 0 {
-			t.Errorf("%s: plugin was not run for %s", n, target)
-			continue
-		}
-		creds := seen[0]
-		if w, ok := want[n]; ok && creds["password"] != w {
-			t.Errorf("%s plugin received password %q, want the %s credential's %q", n, creds["password"], n, w)
-		}
-		if n == "snmp" && creds["community"] != "snmp-secret" {
-			t.Errorf("snmp plugin received community %q", creds["community"])
-		}
-		if n != "ssh" {
-			for k, v := range creds {
-				if v == "ssh-secret" || (k == "username" && v == "root") {
-					t.Errorf("COL-02 violated: the SSH credential reached the %s plugin (%s=%q)", n, k, v)
-				}
-			}
-		}
-	}
-}
-
-// TestAuditPerScopeCredentials: each scope's targets are probed only with
-// that scope's credentials (DIS-09, COL-02).
-func TestAuditPerScopeCredentials(t *testing.T) {
-	spy := &auditSpy{name: "snmp"}
-	auditUsePlugins(t, spy)
-	auditInstallBundle(
-		bundleCredential{ID: "cred-client-1", Kind: "snmp_v2c", Secret: map[string]any{"community": "c1-secret"}},
-		bundleCredential{ID: "cred-client-2", Kind: "snmp_v2c", Secret: map[string]any{"community": "c2-secret"}},
-	)
-	collectorScopes.set([]collectorScope{
-		{ID: "6f0b6f0e-0000-4000-8000-0000000000a2", Kind: "host", Target: "192.0.2.1", ClientID: "client-1", Schedule: "24h", CredentialIDs: []string{"cred-client-1"}, Plugins: []string{"snmp"}},
-		{ID: "6f0b6f0e-0000-4000-8000-0000000000a3", Kind: "host", Target: "198.51.100.1", ClientID: "client-2", Schedule: "24h", CredentialIDs: []string{"cred-client-2"}, Plugins: []string{"snmp"}},
-	}, nil)
-	runDueDiscovery(context.Background(), &collectorConfig{}, nil, newScheduler(), &hostCache{}, time.Now())
-
-	for target, want := range map[string]string{"192.0.2.1": "c1-secret", "198.51.100.1": "c2-secret"} {
-		seen := spy.seen(target)
-		if len(seen) == 0 {
-			t.Errorf("%s was not probed", target)
-			continue
-		}
-		for _, c := range seen {
-			if c["community"] != want {
-				t.Errorf("target %s was probed with community %q, want its scope's %q (other client's secret disclosed)", target, c["community"], want)
-			}
-		}
-	}
-}
 
 // TestAuditScopeExpansionCompleteOrReported: a scope the API accepts
 // (up to 65,536 addresses) is discovered completely, or the run reports
@@ -421,10 +137,12 @@ func TestAuditWMIAuthFailureReachesScopeRun(t *testing.T) {
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Close() })
 	auditUsePlugins(t) // reset state; the shipped wmi plugin stays registered
-	collectorScopes.set([]collectorScope{{ID: "6f0b6f0e-0000-4000-8000-0000000000a9", Kind: "host", Target: ip, Schedule: "24h", Plugins: []string{"wmi"}}}, nil)
-	// Credentials in both namespaces so the alias defect cannot mask the result.
-	cfg := collectorConfig{Credentials: map[string]string{"wmi.username": "u", "wmi.password": "wrong", "ssh.username": "u", "ssh.password": "wrong"}}
-	runDueDiscovery(context.Background(), &cfg, up, newScheduler(), &hostCache{}, time.Now())
+	// The scope's WMI credential comes from the bundle (WP-378: local
+	// credentials do not apply to server scopes).
+	auditInstallBundle(bundleCredential{ID: "cred-wmi", Kind: "wmi", Secret: map[string]any{"username": "u", "password": "wrong"}})
+	collectorScopes.set([]collectorScope{{ID: "6f0b6f0e-0000-4000-8000-0000000000a9", Kind: "host", Target: ip, Schedule: "24h",
+		CredentialIDs: []string{"cred-wmi"}, Plugins: []string{"wmi"}}}, nil)
+	runDueDiscovery(context.Background(), &collectorConfig{}, up, newScheduler(), &hostCache{}, time.Now())
 
 	all := runs()
 	if len(all) != 1 {

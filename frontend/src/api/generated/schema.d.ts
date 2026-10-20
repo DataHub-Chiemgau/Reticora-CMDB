@@ -3891,34 +3891,11 @@ export interface paths {
     };
     /**
      * Trust bundle and revocation list of the collector certificates
-     * @description The trust bundle holds the active CA and, during a CA roll-over, the previous one (COL-04); the revocation list names the revoked certificates (disabled collectors) that have not expired.
+     * @description The trust bundle holds the active CA and, during a CA roll-over, the previous one (COL-04); the revocation list names the revoked certificates (disabled collectors, predecessors of renewed certificates) that have not expired. Collectors renew their certificate over their mTLS NATS channel (collector.<org>.<id>.certificate.renew), not over this API.
      */
     get: operations['getCollectorPKI'];
     put?: never;
     post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/collectors/{id}/certificate': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Renew the collector certificate
-     * @description The collector sends a CSR of a new local key once its certificate reached 60 % of its lifetime (409 before); a disabled collector gets none (403). Requires discovery:ingest.
-     */
-    post: operations['renewCollectorCertificate'];
     delete?: never;
     options?: never;
     head?: never;
@@ -4061,7 +4038,7 @@ export interface paths {
     put?: never;
     /**
      * Create an encrypted credential
-     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored.
+     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored. A missing or unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the account of the NAS plugin (Synology DSM: username and password).
      */
     post: operations['createCredential'];
     delete?: never;
@@ -10473,6 +10450,7 @@ export interface components {
       vrf_id?: string;
       /** @description Interval (e.g. 24h, at least 5m) or five-field cron expression. */
       schedule: string;
+      /** @description The bound credentials. Empty: the collector uses the organization-wide credentials and those of the scope's client for this scope (E-67). */
       credential_ids: string[];
       plugins: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
       enabled: boolean;
@@ -10523,6 +10501,7 @@ export interface components {
       vrf_id?: string;
       /** @description Defaults to 24h. */
       schedule?: string;
+      /** @description Credentials of the organization that are organization-wide or of the scope's client (decided by the site or the collector), else 422 on credential_ids. Empty: the scope uses the organization-wide credentials and those of its client (E-67). */
       credential_ids?: string[];
       /** @description Defaults to sweep and snmp. */
       plugins?: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
@@ -10536,6 +10515,7 @@ export interface components {
       site_id?: string;
       vrf_id?: string;
       schedule?: string;
+      /** @description Replaces the list; organization-wide credentials or those of the scope's client, else 422 on credential_ids. */
       credential_ids?: string[];
       plugins?: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
       enabled?: boolean;
@@ -10559,7 +10539,8 @@ export interface components {
         | 'ipmi'
         | 'wmi'
         | 'api_token'
-        | 'nut';
+        | 'nut'
+        | 'nas';
       scope?: string;
       key_version: number;
       /** Format: date-time */
@@ -10580,7 +10561,8 @@ export interface components {
         | 'ipmi'
         | 'wmi'
         | 'api_token'
-        | 'nut';
+        | 'nut'
+        | 'nas';
       scope?: string;
       /** @description Plaintext secret data, encrypted at rest before storage. */
       secret: {
@@ -20009,41 +19991,6 @@ export interface operations {
       503: components['responses']['ServiceUnavailable'];
     };
   };
-  renewCollectorCertificate: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': {
-          csr: string;
-        };
-      };
-    };
-    responses: {
-      /** @description Certificate issued */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['CollectorCertificate'];
-        };
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      503: components['responses']['ServiceUnavailable'];
-    };
-  };
   collectorHeartbeat: {
     parameters: {
       query?: never;
@@ -20361,6 +20308,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

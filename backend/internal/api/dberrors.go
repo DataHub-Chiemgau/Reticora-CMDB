@@ -76,14 +76,22 @@ func ClassifyDBError(err error) (status int, title, detail string, ok bool) {
 	}
 }
 
-// WriteRepoError reports a repository failure to the client. Recognised
-// PostgreSQL errors become a precise, sanitized RFC 7807 response; anything
-// else becomes a generic 500.
+// ErrNotFound reports an id a repository did not find: unknown, or an object
+// of another tenant, which the caller must not tell apart (404).
+var ErrNotFound = errors.New("not found")
+
+// WriteRepoError reports a repository failure to the client. ErrNotFound
+// becomes 404; recognised PostgreSQL errors become a precise, sanitized
+// RFC 7807 response; anything else becomes a generic 500.
 //
 // It exists so handlers never pass err.Error() to the client: raw pgx errors
 // carry table, column and constraint names, and echoing them discloses the
 // database schema to any caller able to trigger a failed write.
 func WriteRepoError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrNotFound) {
+		WriteError(w, http.StatusNotFound, "Not Found", "the requested resource was not found")
+		return
+	}
 	if WriteDBError(w, err) {
 		return
 	}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -12,12 +13,14 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go"
 )
 
 const collectorSelectColumns = `
@@ -44,11 +47,21 @@ type PGRepository struct {
 	pool *pgxpool.Pool
 	// lockTimeout replaces ingestLockTimeout when set (tests).
 	lockTimeout time.Duration
+	// bus announces disables (WithDisableAnnouncer).
+	bus *nats.Conn
 }
 
 // NewPGRepository creates a new PostgreSQL-backed discovery repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{PGRepository: reviews.NewPGRepository(pool), pool: pool}
+}
+
+// WithDisableAnnouncer makes UpdateCollector announce every disable on the
+// internal NATS once committed (AnnounceDisabled): the edge worker of one
+// replica, whichever, cuts the collector's open connections (COL-04, F-025).
+func (r *PGRepository) WithDisableAnnouncer(nc *nats.Conn) *PGRepository {
+	r.bus = nc
+	return r
 }
 
 // Discovery jobs, review items and suppressions carry no client column yet
@@ -180,14 +193,34 @@ func (r *PGRepository) Heartbeat(ctx context.Context, orgID, collectorID string)
 	return status, err
 }
 
+// CollectorStatus implements Repository.
+func (r *PGRepository) CollectorStatus(ctx context.Context, orgID, collectorID string) (string, error) {
+	if !audit.IsUUID(collectorID) {
+		return "", api.ErrNotFound
+	}
+	var status string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT status FROM collector WHERE id = $1 AND organization_id = $2`, collectorID, orgID).Scan(&status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		return err
+	})
+	return status, err
+}
+
 // UpdateCollector implements Repository.
 func (r *PGRepository) UpdateCollector(ctx context.Context, orgID, collectorID string, patch *CollectorPatch) (*Collector, error) {
+	// A malformed id names no collector either (404, F-257).
+	if !audit.IsUUID(collectorID) {
+		return nil, api.ErrNotFound
+	}
 	var out *Collector
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		current, err := scanCollector(tx.QueryRow(ctx, `SELECT `+collectorSelectColumns+
 			` FROM collector WHERE id = $1 AND organization_id = $2 FOR UPDATE`, collectorID, orgID))
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("not found")
+			return api.ErrNotFound
 		}
 		if err != nil {
 			return err
@@ -218,6 +251,14 @@ func (r *PGRepository) UpdateCollector(ctx context.Context, orgID, collectorID s
 		}
 		return nil
 	})
+	// Open connections outlive the revocation: the edge workers cut them.
+	// A repeated disable is announced again (another cut).
+	if err == nil && r.bus != nil && patch.Status != nil && out.Status == CollectorDisabled {
+		if aerr := AnnounceDisabled(r.bus, orgID, collectorID); aerr != nil {
+			slog.Error("announce the disable of a collector", "event", "discovery.collector.kick_failed",
+				"organization_id", orgID, "collector_id", collectorID, "error", aerr)
+		}
+	}
 	return out, err
 }
 
@@ -702,10 +743,16 @@ func recordCertificateTx(ctx context.Context, tx pgx.Tx, orgID string, c *Collec
 	return nil
 }
 
-// RenewCertificate implements Repository: the collector is locked, its
-// newest valid certificate decides whether renewal is due; the former
-// certificate stays valid until it expires.
-func (r *PGRepository) RenewCertificate(ctx context.Context, orgID, collectorID string, issue CertIssuer) (*IssuedCert, error) {
+// RenewEdgeCertificate issues the successor of the collector's certificate
+// predecessor (serial, hex) for a renewal request whose signature with that
+// certificate's key the caller verified (CertificateRenewal): the
+// collector is locked, it must not be disabled, the predecessor must be its
+// own and not revoked, and a predecessor renewed within the replay window
+// of the request gets no second successor (ErrRenewalNotDue). The successor
+// is recorded and audited (collector.certificate_issued) in the same
+// transaction; the predecessor stays valid until the collector connects
+// with the successor or SupersededGrace passed (RunEdge).
+func (r *PGRepository) RenewEdgeCertificate(ctx context.Context, orgID, collectorID, predecessor string, issue CertIssuer) (*IssuedCert, error) {
 	var cert *IssuedCert
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		c, err := scanCollector(tx.QueryRow(ctx, `SELECT `+collectorSelectColumns+
@@ -719,24 +766,37 @@ func (r *PGRepository) RenewCertificate(ctx context.Context, orgID, collectorID 
 		if c.Status == CollectorDisabled {
 			return ErrCollectorDisabled
 		}
-		var notBefore, notAfter time.Time
-		err = tx.QueryRow(ctx, `SELECT not_before, not_after FROM collector_certificate
-			WHERE collector_id = $1 AND revoked_at IS NULL AND not_after > now() ORDER BY not_after DESC LIMIT 1`,
-			collectorID).Scan(&notBefore, &notAfter)
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-		case err != nil:
+		var current, renewed bool
+		if err = tx.QueryRow(ctx, `SELECT p.revoked_at IS NULL, EXISTS (SELECT 1 FROM collector_certificate n
+				WHERE n.collector_id = p.collector_id AND n.created_at > p.created_at AND n.created_at > now() - make_interval(secs => $3))
+			FROM collector_certificate p WHERE p.collector_id = $1 AND p.serial = $2`,
+			collectorID, predecessor, renewalReplayWindow.Seconds()).Scan(&current, &renewed); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
-		case !NeedsRenewal(notBefore, notAfter, time.Now().UTC()):
-			return ErrRenewalNotDue
+		}
+		switch {
+		case !current:
+			return errCertificateNotCurrent
+		case renewed:
+			return fmt.Errorf("%w: the certificate was renewed within the last %s", ErrRenewalNotDue, renewalReplayWindow)
 		}
 		if cert, err = issue(ctx, orgID, collectorID); err != nil {
 			return err
 		}
-		return recordCertificateTx(ctx, tx, orgID, c, cert)
+		if rerr := recordCertificateTx(ctx, tx, orgID, c, cert); rerr != nil {
+			return rerr
+		}
+		_, err = audit.NewPGRecorder().Record(ctx, tx, audit.Entry{OrganizationID: orgID, ActorType: "system",
+			Action: "collector.certificate_issued", ResourceType: "collector", ResourceID: collectorID, Source: audit.SourceCollector,
+			Changes: map[string]interface{}{"serial": cert.Serial, "predecessor_serial": predecessor, "fingerprint": cert.Fingerprint,
+				"not_after": cert.NotAfter.UTC().Format(time.RFC3339)}})
+		return err
 	})
 	return cert, err
 }
+
+// errCertificateNotCurrent: the certificate of a renewal request is no
+// recorded, unrevoked certificate of the collector.
+var errCertificateNotCurrent = errors.New("the certificate is no current certificate of the collector")
 
 // errEnrollmentCodeInvalid is returned for unknown, expired and used codes
 // alike, so a caller learns nothing about which case applies.

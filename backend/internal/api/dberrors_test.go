@@ -46,6 +46,11 @@ func TestWriteRepoErrorSanitizesPostgresErrors(t *testing.T) {
 			wantStatus: http.StatusUnprocessableEntity,
 		},
 		{
+			name:       "ErrNotFound becomes not found",
+			err:        fmt.Errorf("collector secret_internal_table: %w", ErrNotFound),
+			wantStatus: http.StatusNotFound,
+		},
+		{
 			name:       "unknown error becomes a generic internal error",
 			err:        errors.New(`pq: relation "secret_internal_table" does not exist`),
 			wantStatus: http.StatusInternalServerError,

@@ -26,7 +26,8 @@ import (
 // Credential bundle (COL-02): the collector fetches the credentials of its
 // scopes over its NATS channel, encrypted for its own key (counterpart:
 // backend/internal/credential/bundle.go). The plaintext is kept only in
-// memory; it is never written to disk or logged.
+// memory, by credential ID; it is never written to disk or logged. The pass
+// of a scope uses only the credentials its credential_ids name (DIS-09).
 
 // bundleRefresh is how often the collector fetches its bundle again.
 const bundleRefresh = 15 * time.Minute
@@ -100,20 +101,51 @@ func openBundle(b *sealedBundle, keyPEM string) (*bundleContent, error) {
 }
 
 // credentialNamespace maps a credential kind to the protocol namespace the
-// plugins read (plugins.CredentialsFor).
+// plugins read (plugins.CredentialsFor). testdata/credential-kinds.json is
+// the contract with the kinds of the backend (WP-378).
 var credentialNamespace = map[string]string{
 	"snmp_v2c": "snmp", "snmp_v3": "snmp", "ssh_password": "ssh", "ssh_key": "ssh",
 	"redfish": "redfish", "ipmi": "ipmi", "wmi": "wmi", "api_token": "api", "nut": "nut",
+	"nas": "nas",
 }
 
-// namespaced flattens the bundle into protocol-namespaced entries; the
-// first credential of a protocol wins.
-func (c *bundleContent) namespaced() map[string]string {
+// bundleCache holds the credentials of the last bundle in memory, by ID.
+type bundleCache struct {
+	mu    sync.RWMutex
+	creds map[string]bundleCredential
+}
+
+var collectorBundle = &bundleCache{}
+
+// set replaces the cached credentials by those of content (nil clears them).
+func (c *bundleCache) set(content *bundleContent) {
+	byID := map[string]bundleCredential{}
+	if content != nil {
+		for _, cred := range content.Credentials {
+			byID[cred.ID] = cred
+		}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.creds = byID
+}
+
+// resolve returns the cached credentials with the given IDs as
+// protocol-namespaced entries: each credential under the namespace of its
+// kind, the first of a namespace in ids wins. IDs missing from the bundle
+// and kinds without a namespace are skipped.
+func (c *bundleCache) resolve(ids []string) map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	out := map[string]string{}
 	taken := map[string]bool{}
-	for _, cred := range c.Credentials {
-		ns, ok := credentialNamespace[cred.Kind]
-		if !ok || taken[ns] {
+	for _, id := range ids {
+		cred, ok := c.creds[id]
+		if !ok {
+			continue
+		}
+		ns, known := credentialNamespace[cred.Kind]
+		if !known || taken[ns] {
 			continue
 		}
 		taken[ns] = true
@@ -126,33 +158,20 @@ func (c *bundleContent) namespaced() map[string]string {
 	return out
 }
 
-// bundleCache holds the credentials of the last bundle in memory.
-type bundleCache struct {
-	mu    sync.RWMutex
-	creds map[string]string
-}
-
-var collectorBundle = &bundleCache{}
-
-func (c *bundleCache) set(creds map[string]string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.creds = creds
-}
-
-// credentialsFor merges the bundle with the locally configured credentials;
-// a local setting overrides the bundle.
-func credentialsFor(cfg *collectorConfig) map[string]string {
-	collectorBundle.mu.RLock()
-	defer collectorBundle.mu.RUnlock()
-	out := make(map[string]string, len(collectorBundle.creds)+len(cfg.Credentials))
-	maps.Copy(out, collectorBundle.creds)
-	maps.Copy(out, cfg.Credentials)
-	return out
+// credentialsFor returns the credentials of a discovery pass (COL-02,
+// DIS-09). A server scope gets only the bundle credentials its
+// credential_ids name (the scope's effective list from the server, E-67),
+// never those of another scope; the locally configured credentials apply
+// only to the fallback pass without server scopes (scope nil).
+func credentialsFor(cfg *collectorConfig, scope *collectorScope) map[string]string {
+	if scope == nil {
+		return maps.Clone(cfg.Credentials)
+	}
+	return collectorBundle.resolve(scope.CredentialIDs)
 }
 
 // fetchBundle requests and opens the collector's bundle over nc.
-func fetchBundle(ctx context.Context, nc *nats.Conn, creds *keystore.Credentials) (map[string]string, error) {
+func fetchBundle(ctx context.Context, nc *nats.Conn, creds *keystore.Credentials) (*bundleContent, error) {
 	subject, err := collectorSubject(creds)
 	if err != nil {
 		return nil, err
@@ -180,11 +199,7 @@ func fetchBundle(ctx context.Context, nc *nats.Conn, creds *keystore.Credentials
 	if resp.Bundle.CollectorID != creds.DeviceID {
 		return nil, errors.New("credential bundle for another collector")
 	}
-	content, err := openBundle(resp.Bundle, creds.ClientPrivateKeyPEM)
-	if err != nil {
-		return nil, err
-	}
-	return content.namespaced(), nil
+	return openBundle(resp.Bundle, creds.ClientPrivateKeyPEM)
 }
 
 // syncBundle keeps the in-memory credentials current while ctx lasts.
@@ -196,7 +211,7 @@ func syncBundle(ctx context.Context, nc *nats.Conn, creds *keystore.Credentials)
 			slog.Warn("credential bundle not updated", "error", err)
 		} else {
 			collectorBundle.set(fresh)
-			slog.Info("credential bundle updated", "entries", len(fresh))
+			slog.Info("credential bundle updated", "credentials", len(fresh.Credentials))
 		}
 		select {
 		case <-ctx.Done():

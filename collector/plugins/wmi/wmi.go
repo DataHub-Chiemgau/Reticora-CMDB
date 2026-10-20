@@ -18,43 +18,85 @@ import (
 )
 
 const (
-	defaultHTTPPort    = 5985
-	defaultHTTPSPort   = 5986
+	// winRMHTTPSPort is WinRM over HTTPS. Plain-HTTP WinRM (5985) is never
+	// used: HTTP Basic would carry the account readable (COL-02).
+	winRMHTTPSPort     = 5986
 	defaultTimeout     = 15 * time.Second
 	defaultConcurrency = 16
 )
 
+// wmiClasses are the WMI classes one collection enumerates.
+var wmiClasses = []string{"Win32_OperatingSystem", "Win32_ComputerSystem", "Win32_BIOS", "Win32_ComputerSystemProduct", "Win32_NetworkAdapterConfiguration"}
+
 // Plugin collects Windows inventory and telemetry using WinRM.
+//
+// WinRM is spoken only over HTTPS (5986) with certificate verification
+// (COL-02): by default against the system roots including the target
+// address. Hosts with self-signed or internal certificates are reachable
+// only through an explicit plugins.TLSScope for their network
+// (RETICORA_WMI_TLS_SCOPES), which names a CA bundle or SPKI pins. Without
+// trust the collection fails with plugins.ErrTLSUntrusted before any
+// credential is sent; there is no plain-HTTP opt-in.
 type Plugin struct {
 	Timeout     time.Duration
 	Concurrency int
-	UseHTTPS    bool
 	client      *http.Client
+	scoped      plugins.TLSClients
+}
+
+// Option configures the plugin.
+type Option func(*Plugin)
+
+// WithTLSScopes adds TLS exceptions per network. The first matching scope
+// wins; targets outside every scope use the default verification.
+func WithTLSScopes(scopes ...plugins.TLSScope) Option {
+	return func(p *Plugin) {
+		p.scoped.Add(p.newClient, scopes...)
+	}
 }
 
 var _ plugins.Plugin = (*Plugin)(nil)
 
 // New creates a WMI plugin instance.
-func New() *Plugin {
-	return &Plugin{
+func New(opts ...Option) *Plugin {
+	p := &Plugin{
 		Timeout:     defaultTimeout,
 		Concurrency: defaultConcurrency,
-		UseHTTPS:    false,
-		client: &http.Client{
-			Timeout: defaultTimeout,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true,
-				},
-			},
-		},
 	}
+	p.client = p.newClient(plugins.SystemTLSConfig())
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
+}
+
+// newClient returns a client that verifies with cfg. It follows no
+// redirects: a redirect could send the Basic credentials to plain HTTP.
+func (p *Plugin) newClient(cfg *tls.Config) *http.Client {
+	timeout := p.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+	client := plugins.NewTLSClient(timeout, cfg)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return client
+}
+
+// clientFor returns the HTTP client whose TLS verification applies to target.
+func (p *Plugin) clientFor(target string) *http.Client {
+	fallback := p.client
+	if fallback == nil {
+		// Plugin constructed via struct literal instead of New().
+		fallback = p.newClient(plugins.SystemTLSConfig())
+	}
+	return p.scoped.For(target, fallback)
 }
 
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "wmi" }
 
-// Probe identifies Windows hosts by probing WinRM ports (5985/5986).
+// Probe identifies Windows hosts by probing the WinRM HTTPS port (5986); the
+// plain-HTTP port is not contacted.
 func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	_ = creds
 	concurrency := p.Concurrency
@@ -81,33 +123,11 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			// Try HTTP port first, then HTTPS
-			httpAddr := net.JoinHostPort(t, fmt.Sprintf("%d", defaultHTTPPort))
-			httpsAddr := net.JoinHostPort(t, fmt.Sprintf("%d", defaultHTTPSPort))
-
-			var reachable bool
-			var port int
-			var protocol string
-
-			conn, err := net.DialTimeout("tcp", httpAddr, timeout)
-			if err == nil {
-				conn.Close()
-				reachable = true
-				port = defaultHTTPPort
-				protocol = "http"
-			} else {
-				conn, err = net.DialTimeout("tcp", httpsAddr, timeout)
-				if err == nil {
-					conn.Close()
-					reachable = true
-					port = defaultHTTPSPort
-					protocol = "https"
-				}
-			}
-
-			if !reachable {
+			conn, err := net.DialTimeout("tcp", net.JoinHostPort(t, strconv.Itoa(winRMHTTPSPort)), timeout)
+			if err != nil {
 				return
 			}
+			conn.Close()
 
 			result := plugins.Result{
 				CIType: "windows-server",
@@ -115,8 +135,8 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 				IP:     t,
 				Attributes: map[string]any{
 					"transport":    "winrm",
-					"winrmPort":    port,
-					"winrmScheme":  protocol,
+					"winrmPort":    winRMHTTPSPort,
+					"winrmScheme":  "https",
 					"winrmCapable": true,
 				},
 			}
@@ -142,32 +162,25 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 
 // collect retrieves hardware, OS, and service inventory from a Windows target via WinRM.
 func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
-	timeout := p.Timeout
-	if timeout <= 0 {
-		timeout = defaultTimeout
-	}
-
 	username := creds["username"]
 	password := creds["password"]
 	if username == "" {
 		return nil, fmt.Errorf("wmi: credentials required for WinRM collection")
 	}
 
-	port := defaultHTTPPort
-	scheme := "http"
-	if p.UseHTTPS {
-		port = defaultHTTPSPort
-		scheme = "https"
-	}
-
-	baseURL := fmt.Sprintf("%s://%s/wsman", scheme, net.JoinHostPort(target, fmt.Sprintf("%d", port)))
+	baseURL := fmt.Sprintf("https://%s/wsman", net.JoinHostPort(target, strconv.Itoa(winRMHTTPSPort)))
+	client := p.clientFor(target)
 
 	// Execute WQL queries for system information via WS-Management
-	osInfo := p.wsmanEnumerate(ctx, baseURL, username, password, "Win32_OperatingSystem")
-	csInfo := p.wsmanEnumerate(ctx, baseURL, username, password, "Win32_ComputerSystem")
-	biosInfo := p.wsmanEnumerate(ctx, baseURL, username, password, "Win32_BIOS")
-	productInfo := p.wsmanEnumerate(ctx, baseURL, username, password, "Win32_ComputerSystemProduct")
-	nicInfo := p.wsmanEnumerate(ctx, baseURL, username, password, "Win32_NetworkAdapterConfiguration")
+	info := make([]string, len(wmiClasses))
+	for i, class := range wmiClasses {
+		body, err := p.wsmanEnumerate(ctx, client, baseURL, username, password, class)
+		if err != nil {
+			return nil, err
+		}
+		info[i] = body
+	}
+	osInfo, csInfo, biosInfo, productInfo, nicInfo := info[0], info[1], info[2], info[3], info[4]
 
 	hostname := target
 	if v := extractWMIField(csInfo, "Name"); v != "" {
@@ -198,36 +211,36 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 }
 
 // wsmanEnumerate performs a WS-Management Enumerate request for a WMI class.
-func (p *Plugin) wsmanEnumerate(ctx context.Context, baseURL, username, password, wmiClass string) string {
+// It fails with plugins.ErrTLSUntrusted when the certificate of the endpoint
+// is not trusted; the handshake failed, the credentials were not sent.
+func (p *Plugin) wsmanEnumerate(ctx context.Context, client *http.Client, baseURL, username, password, wmiClass string) (string, error) {
 	// Build WS-Management SOAP Enumerate request
 	soapEnvelope := buildWSManEnumerate(wmiClass)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL, strings.NewReader(soapEnvelope))
 	if err != nil {
-		return ""
+		return "", nil
 	}
 	req.SetBasicAuth(username, password)
 	req.Header.Set("Content-Type", "application/soap+xml;charset=UTF-8")
 
-	client := p.client
-	if client == nil {
-		// Plugin constructed via struct literal instead of New().
-		client = &http.Client{Timeout: p.Timeout}
-		if client.Timeout <= 0 {
-			client.Timeout = defaultTimeout
-		}
-	}
+	// The credentials are sent after the certificate check of the handshake
+	// succeeded (COL-02).
 	resp, err := client.Do(req)
 	if err != nil {
-		return ""
+		if plugins.UntrustedCertificate(err) {
+			return "", fmt.Errorf("wmi: %w: certificate of %s not trusted by the system roots or RETICORA_WMI_TLS_SCOPES, no credentials sent: %v",
+				plugins.ErrTLSUntrusted, req.URL.Host, err)
+		}
+		return "", nil
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 65536))
 	if err != nil {
-		return ""
+		return "", nil
 	}
-	return string(body)
+	return string(body), nil
 }
 
 // buildWSManEnumerate creates a SOAP envelope for WS-Management Enumerate.
@@ -239,7 +252,7 @@ func buildWSManEnumerate(wmiClass string) string {
             xmlns:wsen="http://schemas.xmlsoap.org/ws/2004/09/enumeration"
             xmlns:wsman="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd">
   <s:Header>
-    <wsa:To>http://windows-host:5985/wsman</wsa:To>
+    <wsa:To>https://windows-host:5986/wsman</wsa:To>
     <wsman:ResourceURI>%s</wsman:ResourceURI>
     <wsa:ReplyTo>
       <wsa:Address>http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</wsa:Address>

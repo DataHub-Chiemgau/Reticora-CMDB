@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -269,32 +270,90 @@ func TestCredentialsFromEnvNamespacesPerProtocol(t *testing.T) {
 	}
 }
 
-func TestParseRedfishTLSScopes(t *testing.T) {
+// TestParseTLSScopes covers the format shared by RETICORA_REDFISH_TLS_SCOPES
+// and RETICORA_WMI_TLS_SCOPES (COL-02): CIDR, CA bundle and SPKI pins; every
+// malformed entry rejects the whole value.
+func TestParseTLSScopes(t *testing.T) {
 	pin := strings.Repeat("ab", 32)
-	files := map[string][]byte{}
+	caPEM, _ := selfSignedCert(t, "winrm-ca")
+	files := map[string][]byte{"/etc/reticora/winrm-ca.pem": caPEM, "/etc/reticora/empty.pem": []byte("no certificate")}
 	readFile := func(path string) ([]byte, error) {
 		if data, ok := files[path]; ok {
 			return data, nil
 		}
 		return nil, os.ErrNotExist
 	}
-	scopes, err := parseRedfishTLSScopes("10.0.20.5/32=pin:"+pin+"; ", readFile)
+	scopes, err := parseTLSScopes("10.0.20.5/32=pin:"+pin+"; ", readFile)
 	if err != nil || len(scopes) != 1 || len(scopes[0].PinsSHA256) != 1 || scopes[0].Network.String() != "10.0.20.5/32" {
 		t.Fatalf("scopes = %+v, err = %v", scopes, err)
 	}
-	if scopes, err := parseRedfishTLSScopes("", readFile); err != nil || len(scopes) != 0 {
+	// CA bundle plus a pin written with colons, and a second network.
+	colonPin := strings.TrimSuffix(strings.Repeat("cd:", 32), ":")
+	scopes, err = parseTLSScopes("10.0.10.0/24=ca:/etc/reticora/winrm-ca.pem,pin:"+colonPin+";192.0.2.0/28=pin:"+pin, readFile)
+	if err != nil || len(scopes) != 2 || scopes[0].RootCAs == nil || len(scopes[0].PinsSHA256) != 1 ||
+		hex.EncodeToString(scopes[0].PinsSHA256[0]) != strings.Repeat("cd", 32) || scopes[1].Network.String() != "192.0.2.0/28" || scopes[1].RootCAs != nil {
+		t.Fatalf("scopes = %+v, err = %v", scopes, err)
+	}
+	if scopes, err := parseTLSScopes("", readFile); err != nil || len(scopes) != 0 {
 		t.Fatalf("empty value = %+v, %v", scopes, err)
 	}
 	for _, bad := range []string{
-		"10.0.0.0/24",                 // no rule
-		"10.0.0.0/33=pin:" + pin,      // bad CIDR
-		"10.0.0.0/24=pin:abcd",        // short pin
-		"10.0.0.0/24=ca:/missing.pem", // unreadable CA
-		"10.0.0.0/24=insecure:true",   // unknown rule
+		"10.0.0.0/24",                             // no rule
+		"10.0.0.0/24=",                            // empty rule
+		"10.0.0.0/33=pin:" + pin,                  // bad CIDR
+		"10.0.0.0/24=pin:abcd",                    // short pin
+		"10.0.0.0/24=ca:/missing.pem",             // unreadable CA
+		"10.0.0.0/24=ca:/etc/reticora/empty.pem",  // CA bundle without certificate
+		"10.0.0.0/24=insecure:true",               // unknown rule
+		"10.0.0.0/24=pin:" + pin + ";10.0.1.0/24", // one bad entry rejects all
 	} {
-		if _, err := parseRedfishTLSScopes(bad, readFile); err == nil {
+		if _, err := parseTLSScopes(bad, readFile); err == nil {
 			t.Errorf("%q must be rejected", bad)
 		}
+	}
+}
+
+// TestTLSScopesFromEnv: RETICORA_WMI_TLS_SCOPES configures the exceptions of
+// the WMI plugin only, RETICORA_REDFISH_TLS_SCOPES those of Redfish,
+// RETICORA_NAS_TLS_SCOPES those of NAS; an invalid value configures no
+// exception (fail closed).
+func TestTLSScopesFromEnv(t *testing.T) {
+	pin := strings.Repeat("ef", 32)
+	t.Setenv("RETICORA_WMI_TLS_SCOPES", "10.0.40.0/24=pin:"+pin)
+	t.Setenv("RETICORA_REDFISH_TLS_SCOPES", "")
+	t.Setenv("RETICORA_NAS_TLS_SCOPES", "")
+	cfg := loadCollectorConfig()
+	if len(cfg.WMITLSScopes) != 1 || cfg.WMITLSScopes[0].Network.String() != "10.0.40.0/24" ||
+		len(cfg.WMITLSScopes[0].PinsSHA256) != 1 || hex.EncodeToString(cfg.WMITLSScopes[0].PinsSHA256[0]) != pin {
+		t.Fatalf("WMI TLS scopes = %+v", cfg.WMITLSScopes)
+	}
+	if len(cfg.RedfishTLSScopes) != 0 || len(cfg.NASTLSScopes) != 0 {
+		t.Fatalf("the WMI exception must not apply to Redfish or NAS: %+v, %+v", cfg.RedfishTLSScopes, cfg.NASTLSScopes)
+	}
+	// WP-379: RETICORA_NAS_TLS_SCOPES configures only the NAS plugin.
+	t.Setenv("RETICORA_WMI_TLS_SCOPES", "")
+	t.Setenv("RETICORA_NAS_TLS_SCOPES", "10.0.60.5/32=pin:"+pin)
+	cfg = loadCollectorConfig()
+	if len(cfg.NASTLSScopes) != 1 || cfg.NASTLSScopes[0].Network.String() != "10.0.60.5/32" ||
+		len(cfg.NASTLSScopes[0].PinsSHA256) != 1 || hex.EncodeToString(cfg.NASTLSScopes[0].PinsSHA256[0]) != pin {
+		t.Fatalf("NAS TLS scopes = %+v", cfg.NASTLSScopes)
+	}
+	if len(cfg.RedfishTLSScopes) != 0 || len(cfg.WMITLSScopes) != 0 {
+		t.Fatalf("the NAS exception must not apply to Redfish or WMI: %+v, %+v", cfg.RedfishTLSScopes, cfg.WMITLSScopes)
+	}
+	t.Setenv("RETICORA_NAS_TLS_SCOPES", "10.0.60.0/24=insecure:true")
+	if cfg = loadCollectorConfig(); cfg.NASTLSScopes != nil {
+		t.Fatalf("an invalid RETICORA_NAS_TLS_SCOPES must configure no exception: %+v", cfg.NASTLSScopes)
+	}
+	t.Setenv("RETICORA_NAS_TLS_SCOPES", "")
+	t.Setenv("RETICORA_WMI_TLS_SCOPES", "10.0.40.0/24=insecure:true")
+	t.Setenv("RETICORA_REDFISH_TLS_SCOPES", "10.0.50.0/24=pin:"+pin)
+	cfg = loadCollectorConfig()
+	if cfg.WMITLSScopes != nil {
+		t.Fatalf("an invalid RETICORA_WMI_TLS_SCOPES must configure no exception: %+v", cfg.WMITLSScopes)
+	}
+	if len(cfg.RedfishTLSScopes) != 1 || cfg.RedfishTLSScopes[0].Network.String() != "10.0.50.0/24" {
+		t.Fatalf("Redfish TLS scopes = %+v", cfg.RedfishTLSScopes)
 	}
 }
 

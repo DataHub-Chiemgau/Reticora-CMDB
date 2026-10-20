@@ -162,3 +162,55 @@ func TestCredentialSecretsNeverLeaveTheAPI(t *testing.T) {
 		t.Errorf("server-side decrypt: %v, %v", secret, err)
 	}
 }
+
+// TestHandlerCreateCredentialKinds covers WP-379 (E-68, DIS-04, COL-02): the
+// NAS account is a credential kind of its own (201); an unknown or missing
+// kind is answered with 422 naming the field and stores nothing.
+func TestHandlerCreateCredentialKinds(t *testing.T) {
+	router, repo := testRouter(t)
+	post := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, withTenant(httptest.NewRequest(http.MethodPost, "/api/v1/credentials", bytes.NewBufferString(body)), "org-1"))
+		return rec
+	}
+
+	rec := post(`{"name":"nas-admin","kind":"nas","secret":{"username":"dsm-admin","password":"dsm-s3cret"}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("kind nas: expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var created Credential
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Kind != KindNAS || strings.Contains(rec.Body.String(), "dsm-s3cret") {
+		t.Errorf("created credential = %s, want kind nas without the secret", rec.Body.String())
+	}
+
+	for _, body := range []string{
+		`{"name":"n","kind":"telnet","secret":{"password":"p"}}`,
+		// Protocol names are no kinds: "ssh" is ssh_password or ssh_key.
+		`{"name":"n","kind":"ssh","secret":{"password":"p"}}`,
+		`{"name":"n","kind":"NAS","secret":{"password":"p"}}`,
+		`{"name":"n","secret":{"password":"p"}}`,
+	} {
+		rec := post(body)
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: expected 422, got %d: %s", body, rec.Code, rec.Body.String())
+			continue
+		}
+		var problem struct {
+			Field string `json:"field"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil || problem.Field != "kind" {
+			t.Errorf("%s: problem %s, want field kind", body, rec.Body.String())
+		}
+	}
+
+	stored, err := repo.List(context.Background(), "org-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 1 || stored[0].Kind != KindNAS {
+		t.Errorf("stored credentials = %+v, want only the nas credential", stored)
+	}
+}

@@ -2,12 +2,15 @@ package wmi
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,11 +25,12 @@ func TestNewDefaults(t *testing.T) {
 	if p.Concurrency != defaultConcurrency {
 		t.Errorf("Concurrency = %d, want %d", p.Concurrency, defaultConcurrency)
 	}
-	if p.UseHTTPS {
-		t.Error("UseHTTPS should default to false")
-	}
 	if p.client == nil {
-		t.Error("expected http client to be initialized")
+		t.Fatal("expected http client to be initialized")
+	}
+	// COL-02: the default client verifies certificates (system roots).
+	if tr, ok := p.client.Transport.(*http.Transport); !ok || tr.TLSClientConfig == nil || tr.TLSClientConfig.InsecureSkipVerify {
+		t.Error("the default WinRM client must verify certificates")
 	}
 	if p.Name() != "wmi" {
 		t.Errorf("Name() = %q, want wmi", p.Name())
@@ -87,13 +91,10 @@ func TestExtractWMIField(t *testing.T) {
 	}
 }
 
-// listenOrSkip starts a TCP listener on the given port, closing connections.
-func listenOrSkip(t *testing.T, port int) net.Listener {
+// acceptAndClose accepts connections on ln and closes them; it counts them.
+func acceptAndClose(t *testing.T, ln net.Listener) *atomic.Int32 {
 	t.Helper()
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		t.Skipf("cannot bind 127.0.0.1:%d: %v", port, err)
-	}
+	var n atomic.Int32
 	t.Cleanup(func() { ln.Close() })
 	go func() {
 		for {
@@ -101,17 +102,19 @@ func listenOrSkip(t *testing.T, port int) net.Listener {
 			if err != nil {
 				return
 			}
+			n.Add(1)
 			conn.Close()
 		}
 	}()
-	return ln
+	return &n
 }
 
-func TestDiscoverDetectsWinRMHTTP(t *testing.T) {
-	listenOrSkip(t, defaultHTTPPort)
+func TestDiscoverDetectsWinRMHTTPS(t *testing.T) {
+	ln, ip := auditListen(t, winRMHTTPSPort)
+	acceptAndClose(t, ln)
 
 	p := &Plugin{Timeout: time.Second, Concurrency: 4}
-	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, nil)
+	results, err := p.Probe(context.Background(), []string{ip}, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -122,33 +125,30 @@ func TestDiscoverDetectsWinRMHTTP(t *testing.T) {
 	if r.CIType != "windows-server" {
 		t.Errorf("CIType = %q, want windows-server", r.CIType)
 	}
-	if r.Attributes["winrmScheme"] != "http" {
-		t.Errorf("winrmScheme = %v, want http", r.Attributes["winrmScheme"])
+	if r.Attributes["winrmScheme"] != "https" {
+		t.Errorf("winrmScheme = %v, want https", r.Attributes["winrmScheme"])
 	}
-	if r.Attributes["winrmPort"] != defaultHTTPPort {
-		t.Errorf("winrmPort = %v, want %d", r.Attributes["winrmPort"], defaultHTTPPort)
+	if r.Attributes["winrmPort"] != winRMHTTPSPort {
+		t.Errorf("winrmPort = %v, want %d", r.Attributes["winrmPort"], winRMHTTPSPort)
 	}
 	if r.Attributes["winrmCapable"] != true {
 		t.Errorf("winrmCapable = %v, want true", r.Attributes["winrmCapable"])
 	}
 }
 
-func TestDiscoverFallsBackToHTTPSPort(t *testing.T) {
-	listenOrSkip(t, defaultHTTPSPort)
+// COL-02: a host that offers WinRM only over plain HTTP (5985) is not a WMI
+// target; the probe does not even connect to that port.
+func TestDiscoverIgnoresPlainHTTPWinRM(t *testing.T) {
+	ln, ip := auditListen(t, plainWinRMPort)
+	conns := acceptAndClose(t, ln)
 
 	p := &Plugin{Timeout: time.Second, Concurrency: 4}
-	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, nil)
+	results, err := p.Probe(context.Background(), []string{ip}, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if results[0].Attributes["winrmScheme"] != "https" {
-		t.Errorf("winrmScheme = %v, want https", results[0].Attributes["winrmScheme"])
-	}
-	if results[0].Attributes["winrmPort"] != defaultHTTPSPort {
-		t.Errorf("winrmPort = %v, want %d", results[0].Attributes["winrmPort"], defaultHTTPSPort)
+	if len(results) != 0 || conns.Load() != 0 {
+		t.Fatalf("plain-HTTP WinRM must be ignored: results=%+v, connections to %d = %d", results, plainWinRMPort, conns.Load())
 	}
 }
 
@@ -211,23 +211,15 @@ func TestCollectParsesWSManResponses(t *testing.T) {
 <Domain>corp.example</Domain>
 </s:Body></s:Envelope>`)
 	})
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
+	// WinRM over HTTPS on the fixed port; the self-signed certificate is
+	// trusted through the SPKI pin of the target's TLS scope.
+	ln, ip := auditListen(t, winRMHTTPSPort)
+	srv := serveWinRM(t, ln, handler, true)
 
-	p := New()
+	p := New(WithTLSScopes(pinScope(t, ip, srv.Certificate())))
 	p.Timeout = 2 * time.Second
-	p.client = srv.Client()
 
-	// Serve the same handler on the default WinRM port so Collect's fixed
-	// http://target:5985/wsman URL reaches it without production changes.
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", defaultHTTPPort))
-	if err != nil {
-		t.Skipf("cannot bind 127.0.0.1:%d: %v", defaultHTTPPort, err)
-	}
-	defer ln.Close()
-	go http.Serve(ln, handler)
-
-	res, err := p.collect(context.Background(), "127.0.0.1", map[string]string{
+	res, err := p.collect(context.Background(), ip, map[string]string{
 		"username": "admin", "password": "pw",
 	})
 	if err != nil {
@@ -258,13 +250,13 @@ func TestCollectUnreachableWinRMReturnsEmptyFields(t *testing.T) {
 	p.Timeout = 300 * time.Millisecond
 	p.client.Timeout = 300 * time.Millisecond
 
-	// Bind 5985 to ensure the port is occupied before closing it, then use a
+	// Bind 5986 to ensure the port is occupied before closing it, then use a
 	// port we control to guarantee connection refusal.
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", defaultHTTPPort))
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", winRMHTTPSPort))
 	if err != nil {
-		t.Skipf("cannot bind 127.0.0.1:%d: %v", defaultHTTPPort, err)
+		t.Skipf("cannot bind 127.0.0.1:%d: %v", winRMHTTPSPort, err)
 	}
-	ln.Close() // now 127.0.0.1:5985 refuses connections
+	ln.Close() // now 127.0.0.1:5986 refuses connections
 
 	res, err := p.collect(context.Background(), "127.0.0.1", map[string]string{"username": "u", "password": "p"})
 	if err != nil {
@@ -311,5 +303,108 @@ func TestApplyIdentityFillsDeviceRecordFields(t *testing.T) {
 	}
 	if _, err := parseCIMDateTime("garbage"); err == nil {
 		t.Error("a malformed datetime must be refused")
+	}
+}
+
+// TestAuditWMICredentialTransport encodes COL-02 for the WMI plugin (F-010):
+// the account is never readable on the wire, neither over plain HTTP nor to
+// an HTTPS endpoint whose certificate is not trusted; such a collection
+// fails with tls_untrusted before anything is sent. The SPKI pin of the
+// target's TLS scope makes a self-signed certificate trusted.
+func TestAuditWMICredentialTransport(t *testing.T) {
+	soap := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/soap+xml")
+		_, _ = io.WriteString(w, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body/></s:Envelope>`)
+	})
+	wrongPin := sha256.Sum256([]byte("other key"))
+	cases := []struct {
+		name string
+		// https serves WinRM over TLS (self-signed) on 5986 next to the
+		// plain-HTTP WinRM on 5985 of the same address.
+		https bool
+		// scopes are the TLS scopes of the plugin for the endpoint.
+		scopes   func(t *testing.T, ip string, cert *x509.Certificate) []plugins.TLSScope
+		trusted  bool
+		redirect bool
+	}{
+		{name: "production default New(): plain HTTP WinRM on 5985 only"},
+		{name: "untrusted self-signed certificate on 5986 without TLS scope", https: true},
+		{name: "self-signed certificate on 5986 with a wrong pin", https: true,
+			scopes: func(t *testing.T, ip string, cert *x509.Certificate) []plugins.TLSScope {
+				scope := pinScope(t, ip, cert)
+				scope.PinsSHA256 = [][]byte{wrongPin[:]}
+				return []plugins.TLSScope{scope}
+			}},
+		{name: "matching pin of another network", https: true,
+			scopes: func(t *testing.T, _ string, cert *x509.Certificate) []plugins.TLSScope {
+				scope := pinScope(t, "10.0.0.1", cert)
+				return []plugins.TLSScope{scope}
+			}},
+		{name: "self-signed certificate on 5986 with the matching pin", https: true, trusted: true,
+			scopes: func(t *testing.T, ip string, cert *x509.Certificate) []plugins.TLSScope {
+				return []plugins.TLSScope{pinScope(t, ip, cert)}
+			}},
+		{name: "trusted endpoint redirects to plain HTTP on 5985", https: true, trusted: true, redirect: true,
+			scopes: func(t *testing.T, ip string, cert *x509.Certificate) []plugins.TLSScope {
+				return []plugins.TLSScope{pinScope(t, ip, cert)}
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ln, ip := auditListen(t, plainWinRMPort)
+			plain := &auditRecorder{}
+			serveWinRM(t, ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				plain.add(r)
+				soap(w, r)
+			}), false)
+
+			secure := &auditRecorder{}
+			var opts []Option
+			if tc.https {
+				tlsLn, err := net.Listen("tcp", net.JoinHostPort(ip, fmt.Sprint(winRMHTTPSPort)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				srv := serveWinRM(t, tlsLn, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					secure.add(r)
+					if tc.redirect {
+						http.Redirect(w, r, "http://"+net.JoinHostPort(ip, fmt.Sprint(plainWinRMPort))+"/wsman", http.StatusTemporaryRedirect)
+						return
+					}
+					soap(w, r)
+				}), true)
+				if tc.scopes != nil {
+					opts = append(opts, WithTLSScopes(tc.scopes(t, ip, srv.Certificate())...))
+				}
+			}
+
+			p := New(opts...)
+			p.Timeout = 2 * time.Second
+			_, err := p.Collect(context.Background(), ip, map[string]string{"username": auditUser, "password": auditPassword})
+
+			if leaked := plain.leaked(); len(leaked) > 0 || plain.count() > 0 {
+				t.Errorf("COL-02 violated: the plain-HTTP WinRM endpoint %s received %d request(s), %d with the WMI password readable",
+					net.JoinHostPort(ip, fmt.Sprint(plainWinRMPort)), plain.count(), len(leaked))
+			}
+			switch {
+			case tc.https && !tc.trusted:
+				if leaked := secure.leaked(); len(leaked) > 0 || secure.count() > 0 {
+					t.Errorf("COL-02 violated: the WinRM endpoint %s with an untrusted certificate received %d request(s), %d with the WMI password",
+						net.JoinHostPort(ip, fmt.Sprint(winRMHTTPSPort)), secure.count(), len(leaked))
+				}
+				if !errors.Is(err, plugins.ErrTLSUntrusted) || !strings.Contains(err.Error(), "tls_untrusted") {
+					t.Errorf("Collect error = %v, want tls_untrusted", err)
+				}
+			case tc.redirect:
+				if secure.count() == 0 {
+					t.Error("the trusted endpoint received no request")
+				}
+			case tc.trusted:
+				// The credentials reach the verified endpoint, over TLS only.
+				if err != nil || secure.count() != len(wmiClasses) || len(secure.leaked()) != len(wmiClasses) {
+					t.Errorf("trusted endpoint: err=%v, requests=%d, with credentials=%d (want %d)", err, secure.count(), len(secure.leaked()), len(wmiClasses))
+				}
+			}
+		})
 	}
 }

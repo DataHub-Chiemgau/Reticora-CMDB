@@ -3,6 +3,8 @@ package credential
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
@@ -258,5 +260,40 @@ func TestService_RotateKeysWithoutCredentials(t *testing.T) {
 	}
 	if result.Rotated != 0 {
 		t.Fatalf("expected 0 rotated credentials, got %d", result.Rotated)
+	}
+}
+
+// TestCredentialKindsMatchTheCollector covers WP-378 (COL-02, F-028): the
+// contract file of the collector lists exactly the kinds the server accepts,
+// each once. The collector test TestCredentialKindsContract checks that it
+// files each kind under its namespace and hands it to the listed plugins, so
+// a kind added on one side only fails here or there.
+func TestCredentialKindsMatchTheCollector(t *testing.T) {
+	raw, err := os.ReadFile("../../../collector/collectorcmd/testdata/credential-kinds.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract struct {
+		Kinds []struct {
+			Kind string `json:"kind"`
+		} `json:"kinds"`
+	}
+	if err = json.Unmarshal(raw, &contract); err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]bool{}
+	for _, k := range contract.Kinds {
+		if listed[k.Kind] {
+			t.Errorf("credential-kinds.json lists %q more than once", k.Kind)
+		}
+		listed[k.Kind] = true
+		if !validKinds[k.Kind] {
+			t.Errorf("credential-kinds.json lists %q, which the server does not accept", k.Kind)
+		}
+	}
+	for kind := range validKinds {
+		if !listed[kind] {
+			t.Errorf("credential kind %q is missing in credential-kinds.json: the collector does not route it", kind)
+		}
 	}
 }

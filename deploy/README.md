@@ -257,6 +257,55 @@ Docker/Compose in `--docker` mode), builds the collector binary from source
 compose project in `/opt/reticora-collector/` — and verifies that the
 collector is running.
 
+### Device certificates (Redfish, WMI, NAS)
+
+The Redfish plugin (HTTPS 443), the WMI plugin (WinRM over HTTPS, port
+5986) and the NAS plugin (Synology DSM over HTTPS, port 5001; TrueNAS over
+HTTPS) verify the device certificate before they send any credential
+(COL-02): by default against the system roots, and the certificate must name
+the target address. WMI never uses plain-HTTP WinRM (5985), and there is no
+option to allow it; enable the WinRM HTTPS listener on the Windows hosts
+(for example `winrm quickconfig -transport:https` with a certificate of the
+internal CA, or by group policy). The NAS plugin never contacts the
+plain-HTTP DSM port 5000; it logs in with a POST that carries account and
+password in the body (credential kind `nas`), so enable HTTPS in DSM. No
+plugin sends credentials to a target whose certificate is not trusted, and
+none follows a redirect; for WMI and NAS the scope run reports such a target
+with the error `tls_untrusted`.
+
+Devices with self-signed or internal certificates are trusted per network
+through an exception in `collector.env`:
+
+| Variable | Plugin |
+| --- | --- |
+| `RETICORA_REDFISH_TLS_SCOPES` | Redfish |
+| `RETICORA_WMI_TLS_SCOPES` | WMI |
+| `RETICORA_NAS_TLS_SCOPES` | NAS |
+
+All use the same format: entries separated by `;`, each
+`<cidr>=<rule>[,<rule>…]` with the rules
+
+- `ca:<path>` — PEM bundle of the CA that issued the device certificates;
+  chain and target address are verified against it instead of the system
+  roots;
+- `pin:<hex>` — SHA-256 of the SubjectPublicKeyInfo of the device
+  certificate (colons allowed); for self-signed certificates the pin is the
+  trust anchor. A pin together with `ca:` must match in addition.
+
+```bash
+RETICORA_WMI_TLS_SCOPES=10.0.10.0/24=ca:/etc/reticora/winrm-ca.pem;10.0.20.5/32=pin:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+```
+
+The first entry whose network contains the target applies; targets outside
+every entry use the system roots. A malformed value is ignored as a whole (the
+collector logs an error) and only the system roots apply. The pin of a host is
+printed by
+
+```bash
+openssl s_client -connect 10.0.20.5:5986 </dev/null 2>/dev/null \
+  | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | sha256sum
+```
+
 ## 3. Kubernetes (Kustomize)
 
 `deploy/k8s/` contains the server deployment (`base`) and the `staging` and

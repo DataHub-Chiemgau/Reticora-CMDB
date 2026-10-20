@@ -50,6 +50,13 @@ func auditEnroll(t *testing.T, e *edgeFixture, name string) (string, *ecdsa.Priv
 // auditEnrollIn is auditEnroll for a collector of the given organization.
 func auditEnrollIn(t *testing.T, e *edgeFixture, orgID, name string) (string, *ecdsa.PrivateKey, *discovery.IssuedCert) {
 	t.Helper()
+	return auditEnrollWith(t, e, e.ca, orgID, name)
+}
+
+// auditEnrollWith is auditEnrollIn with the certificate signed by ca (for
+// example an instance of the same CA with an earlier clock).
+func auditEnrollWith(t *testing.T, e *edgeFixture, ca *discovery.CA, orgID, name string) (string, *ecdsa.PrivateKey, *discovery.IssuedCert) {
+	t.Helper()
 	e.codes++
 	raw := fmt.Sprintf("scopetest-audit-%s-%d", name, e.codes)
 	code := &discovery.EnrollmentCode{OrganizationID: orgID, Label: raw, ExpiresAt: time.Now().Add(time.Hour)}
@@ -60,7 +67,7 @@ func auditEnrollIn(t *testing.T, e *edgeFixture, orgID, name string) (string, *e
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	c := &discovery.Collector{Name: name}
 	issued, err := e.repo.EnrollCollector(context.Background(), raw, c, func(ctx context.Context, org, id string) (*discovery.IssuedCert, error) {
-		return e.ca.Sign(ctx, csrFor(t, "", key), org, id)
+		return ca.Sign(ctx, csrFor(t, "", key), org, id)
 	})
 	if err != nil {
 		t.Fatal(err)

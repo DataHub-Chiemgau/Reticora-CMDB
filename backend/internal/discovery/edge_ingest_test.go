@@ -28,12 +28,16 @@ func TestEdgeIngest(t *testing.T) {
 	cis := ci.NewMemoryRepository()
 	h := NewHandler(repo, cis)
 	ctx := context.Background()
+	col := &Collector{OrganizationID: "org-1", Name: "edge"}
+	if err := repo.RegisterCollector(ctx, col); err != nil {
+		t.Fatal(err)
+	}
 	body, err := json.Marshal(ingestBody{Records: []DeviceRecord{consumerRecord("m1", time.Now().UTC().Add(-time.Hour))}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	reply := h.EdgeIngest(ctx, "org-1", "col-1", body)
+	reply := h.EdgeIngest(ctx, "org-1", col.ID, body)
 	if reply.Status != http.StatusAccepted || reply.Result == nil || reply.Result.Created != 1 || reply.LicenseStatus != LicenseActive {
 		t.Fatalf("ingest: %+v", reply)
 	}
@@ -45,20 +49,20 @@ func TestEdgeIngest(t *testing.T) {
 		t.Errorf("records reached another organization: %d", len(other))
 	}
 
-	if reply = h.EdgeIngest(ctx, "org-1", "col-1", []byte(`{"records":[]}`)); reply.Status != http.StatusBadRequest {
+	if reply = h.EdgeIngest(ctx, "org-1", col.ID, []byte(`{"records":[]}`)); reply.Status != http.StatusBadRequest {
 		t.Errorf("empty batch: %+v", reply)
 	}
-	if reply = h.EdgeIngest(ctx, "org-1", "col-1", []byte(`not json`)); reply.Status != http.StatusBadRequest {
+	if reply = h.EdgeIngest(ctx, "org-1", col.ID, []byte(`not json`)); reply.Status != http.StatusBadRequest {
 		t.Errorf("invalid body: %+v", reply)
 	}
 
 	h.WithEdgeLicense(fakeLicense{state: LicenseExpired, problem: api.ProblemLicenseExpired})
-	if reply = h.EdgeIngest(ctx, "org-1", "col-1", body); reply.Status != http.StatusForbidden ||
+	if reply = h.EdgeIngest(ctx, "org-1", col.ID, body); reply.Status != http.StatusForbidden ||
 		reply.Type != api.ProblemLicenseExpired || reply.LicenseStatus != LicenseExpired {
 		t.Errorf("expired license: %+v", reply)
 	}
 	h.WithEdgeLicense(fakeLicense{state: LicenseNotEntitled, problem: api.ProblemFeatureNotEntitled})
-	if reply = h.EdgeIngest(ctx, "org-1", "col-1", body); reply.Status != http.StatusForbidden || reply.Type != api.ProblemFeatureNotEntitled {
+	if reply = h.EdgeIngest(ctx, "org-1", col.ID, body); reply.Status != http.StatusForbidden || reply.Type != api.ProblemFeatureNotEntitled {
 		t.Errorf("not entitled: %+v", reply)
 	}
 }

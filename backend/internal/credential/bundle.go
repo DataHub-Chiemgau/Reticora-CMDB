@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -149,36 +150,28 @@ type BundleTarget struct {
 	CollectorID    string
 	ClientID       string
 	PublicKey      *ecdsa.PublicKey
-	// CredentialIDs restricts the bundle to these credentials (the
-	// credentials of the collector's discovery scopes); nil selects by
-	// client.
+	// CredentialIDs are the credentials of the bundle: the effective
+	// credentials of the collector's enabled discovery scopes (E-67). An
+	// empty list, like nil, selects none.
 	CredentialIDs []string
 }
 
 // relevant reports whether a credential belongs into the target's bundle:
-// the listed ones, otherwise those of the collector's client and the
-// organization-wide ones.
+// only the listed ones.
 func (t *BundleTarget) relevant(c *Credential) bool {
-	if t.CredentialIDs != nil {
-		for _, id := range t.CredentialIDs {
-			if id == c.ID {
-				return true
-			}
-		}
-		return false
-	}
-	return c.ClientID == "" || c.ClientID == t.ClientID
+	return slices.Contains(t.CredentialIDs, c.ID)
 }
 
-// Bundle seals the credentials relevant for the target. ctx carries the
-// organization's tenant scope.
+// Bundle seals the credentials relevant for the target and returns their ids
+// (an empty list for an empty bundle). ctx carries the organization's tenant
+// scope.
 func (s *Service) Bundle(ctx context.Context, t *BundleTarget) (*SealedBundle, []string, error) {
 	all, err := s.repo.List(ctx, t.OrganizationID)
 	if err != nil {
 		return nil, nil, err
 	}
 	content := &BundleContent{Credentials: []BundleCredential{}}
-	var ids []string
+	ids := []string{}
 	for i := range all {
 		c := &all[i]
 		if !t.relevant(c) {

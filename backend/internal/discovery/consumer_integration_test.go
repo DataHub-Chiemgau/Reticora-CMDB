@@ -307,12 +307,17 @@ func TestIngestLanes(t *testing.T) {
 		perLane[strconv.Itoa(lane)]++
 	}
 	post(records...)
+	// The edge takes the records of a known collector only (COL-04).
+	edgeCol := &discovery.Collector{OrganizationID: f.OrgA, Name: "lanes-edge", Status: discovery.CollectorActive, Config: map[string]any{}}
+	if err = discovery.NewPGRepository(f.App).RegisterCollector(ctx, edgeCol); err != nil {
+		t.Fatal(err)
+	}
 	edge, _ := json.Marshal(plugins.DeviceRecordBatch{Records: []plugins.DeviceRecord{device("LANES-EDGE", "m", t0)}})
-	if reply := h4.EdgeIngest(ctx, f.OrgA, "col-edge", edge); reply.Status != http.StatusAccepted || reply.Result.Queued != 1 {
+	if reply := h4.EdgeIngest(ctx, f.OrgA, edgeCol.ID, edge); reply.Status != http.StatusAccepted || reply.Result.Queued != 1 {
 		t.Fatalf("edge ingest: %+v", reply)
 	}
 	edgeLane := discovery.IngestLane(&discovery.IngestItem{SerialNumber: "LANES-EDGE"}, 4)
-	want[discovery.LaneSubject(f.OrgA, edgeLane, "col-edge")]++
+	want[discovery.LaneSubject(f.OrgA, edgeLane, edgeCol.ID)]++
 	perLane[strconv.Itoa(edgeLane)]++
 
 	// Before anything consumes: the subjects and the backlog per lane.

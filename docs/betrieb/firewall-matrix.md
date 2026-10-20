@@ -16,8 +16,8 @@ Redfish …) bleiben im Kundennetz.
 
 | Quelle | Ziel (Hostname) | Port/Protokoll | TLS | Zweck |
 |---|---|---|---|---|
-| Collector, Agent | `<RETICORA_TLS_DOMAIN>` (z. B. `cmdb.example.com`) | 443/TCP (HTTPS) | TLS 1.2+, Serverzertifikat der Plattform (Let's Encrypt) | Enrollment mit Einmal-Code (24 h), Zertifikatserneuerung, Heartbeat, Ingest, Updates |
-| Collector | `<RETICORA_TLS_DOMAIN>` | 4222/TCP (NATS) | **mTLS**, TLS-Handshake zuerst; Serverzertifikat von der Collector-CA (Trust-Bundle aus dem Enrollment), Client-Zertifikat des Collectors (CN = Collector-ID, 90 Tage) | Nachrichtenkanal des Collectors (Credential-Bundles, Steuerung) |
+| Collector, Agent | `<RETICORA_TLS_DOMAIN>` (z. B. `cmdb.example.com`) | 443/TCP (HTTPS) | TLS 1.2+, Serverzertifikat der Plattform (Let's Encrypt) | Enrollment mit Einmal-Code (24 h), Heartbeat, Ingest, Updates |
+| Collector | `<RETICORA_TLS_DOMAIN>` | 4222/TCP (NATS) | **mTLS**, TLS-Handshake zuerst; Serverzertifikat von der Collector-CA (Trust-Bundle aus dem Enrollment), Client-Zertifikat des Collectors (CN = Collector-ID, 90 Tage) | Nachrichtenkanal des Collectors (Credential-Bundles, Zertifikatserneuerung, Steuerung) |
 | Collector | Discovery-Ziele im eigenen Netz | ICMP, ARP, 22, 80, 443, 161/UDP, 623, 5985, 8006 | – | Lokale Discovery (DIS-01); verlässt das Kundennetz nicht |
 
 Nicht benötigt: eingehende Verbindungen in das Kundennetz, VPN, Portweiterleitungen.
@@ -45,11 +45,21 @@ Alle übrigen Dienste (PostgreSQL, Redis, interne NATS mit Leaf-Node-Port
   `collector-pki` (Worker `nats_edge`, täglich; das Serverzertifikat wird ab
   60 % der Laufzeit erneuert, `nats-edge` übernimmt es beim nächsten Neustart).
 - Ein CA-Wechsel hält zwei Vertrauensanker bis zum Stilllegen der alten CA;
-  Collectors erneuern ihr Zertifikat ab 60 % der Laufzeit selbst.
+  Collectors erneuern ihr Zertifikat ab 60 % der Laufzeit selbst, über ihren
+  mTLS-Kanal mit Signatur des aktuellen Schlüssels
+  (`docs/betrieb/collector-ca.md`).
 - Deaktivieren eines Collectors widerruft seine Zertifikate (CRL unter
-  `GET /api/v1/collectors/pki`); der Callout lässt ihn nicht mehr zu, bestehende
-  Verbindungen enden spätestens mit dem Ablauf der NATS-Berechtigung (24 h)
-  bzw. beim Neustart des Endpunkts.
+  `GET /api/v1/collectors/pki`); der Callout lässt ihn nicht mehr zu. Bestehende
+  Verbindungen trennt der Worker `nats_edge` binnen Sekunden: Er meldet sich im
+  Systemkonto `SYS` des Endpunkts an (Nutzer `reticora-edge-sys`, Passwort aus
+  dem Master-Key abgeleitet, internes Client-Zertifikat), sucht die
+  Verbindungen des Collectors (`CONNZ`) und schließt sie (`KICK`); ein
+  Fehlschlag wird als `discovery.collector.kick_failed` protokolliert und
+  wiederholt. Spätestens enden sie mit dem Ablauf der NATS-Berechtigung
+  (15 min); danach durchläuft jede Verbindung den Callout erneut.
+- Der Endpunkt liest `edge.conf` nur beim Start: `install-cloud.sh` erzeugt
+  `nats-edge` bei jedem Lauf nach dem Server neu
+  (`up -d --force-recreate nats-edge`).
 
 ## Prüfung
 

@@ -7521,7 +7521,10 @@ paths:
       description: >-
         The trust bundle holds the active CA and, during a CA roll-over, the
         previous one (COL-04); the revocation list names the revoked
-        certificates (disabled collectors) that have not expired.
+        certificates (disabled collectors, predecessors of renewed
+        certificates) that have not expired. Collectors renew their
+        certificate over their mTLS NATS channel
+        (collector.<org>.<id>.certificate.renew), not over this API.
       responses:
         '200':
           description: Trust bundle and CRL (PEM)
@@ -7535,46 +7538,6 @@ paths:
                   crl_pem: { type: string }
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailable'
-
-  /api/v1/collectors/{id}/certificate:
-    parameters:
-      - $ref: '#/components/parameters/ResourceID'
-    post:
-      operationId: renewCollectorCertificate
-      tags: [Collectors]
-      summary: Renew the collector certificate
-      description: >-
-        The collector sends a CSR of a new local key once its certificate
-        reached 60 % of its lifetime (409 before); a disabled collector gets
-        none (403). Requires discovery:ingest.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [csr]
-              properties:
-                csr: { type: string }
-      responses:
-        '201':
-          description: Certificate issued
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CollectorCertificate'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -7874,7 +7837,9 @@ paths:
       description: >-
         Stores a credential whose secret is envelope-encrypted at rest. The
         owning organization is derived from the authenticated tenant; any
-        `organization_id` in the request body is ignored.
+        `organization_id` in the request body is ignored. A missing or
+        unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the
+        account of the NAS plugin (Synology DSM: username and password).
       requestBody:
         required: true
         content:
@@ -7892,6 +7857,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -18231,6 +18198,10 @@ components:
           description: Interval (e.g. 24h, at least 5m) or five-field cron expression.
         credential_ids:
           type: array
+          description: >-
+            The bound credentials. Empty: the collector uses the
+            organization-wide credentials and those of the scope's client
+            for this scope (E-67).
           items:
             type: string
         plugins:
@@ -18311,6 +18282,11 @@ components:
           description: Defaults to 24h.
         credential_ids:
           type: array
+          description: >-
+            Credentials of the organization that are organization-wide or of
+            the scope's client (decided by the site or the collector), else
+            422 on credential_ids. Empty: the scope uses the
+            organization-wide credentials and those of its client (E-67).
           items:
             type: string
         plugins:
@@ -18341,6 +18317,9 @@ components:
           type: string
         credential_ids:
           type: array
+          description: >-
+            Replaces the list; organization-wide credentials or those of the
+            scope's client, else 422 on credential_ids.
           items:
             type: string
         plugins:
@@ -18377,7 +18356,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut]
+          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut, nas]
         scope:
           type: string
         key_version:
@@ -18399,7 +18378,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut]
+          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut, nas]
         scope:
           type: string
         secret:
