@@ -203,6 +203,7 @@ func (h *Handler) SuggestScopes(ctx context.Context, orgID, collectorID string, 
 	if err != nil {
 		return 0, err
 	}
+	// A suggestion belongs to the client and site of the collector.
 	opened := 0
 	for _, raw := range subnets {
 		cidr, ok := suggestableSubnet(raw)
@@ -213,6 +214,8 @@ func (h *Handler) SuggestScopes(ctx context.Context, orgID, collectorID string, 
 			OrganizationID: orgID,
 			Kind:           ReviewKindScopeSuggested,
 			Status:         ReviewStatusOpen,
+			ClientID:       col.ClientID,
+			SiteID:         col.SiteID,
 			ObjectKey:      "scope:" + collectorID + ":" + cidr,
 			Payload: map[string]any{
 				"collector_id":   collectorID,

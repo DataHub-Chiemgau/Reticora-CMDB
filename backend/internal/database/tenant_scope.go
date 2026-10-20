@@ -25,6 +25,13 @@ const (
 	TeamScopeGUC   = "app.team_scope"
 )
 
+// OrgWideScopeSQL is the SQL condition "the transaction is not restricted in
+// the client or site scope" (both GUCs empty, as WithTenant sets them for
+// AllScopes). Repositories use it where only org-wide principals may write
+// (E-09), in line with the policies of migration 000139.
+const OrgWideScopeSQL = "(NULLIF(current_setting('" + ClientScopeGUC + "', true), '') IS NULL" +
+	" AND NULLIF(current_setting('" + SiteScopeGUC + "', true), '') IS NULL)"
+
 // noAccessScope is the GUC value of an empty scope set. The policies treat an
 // unset or empty scope GUC as "all" (TEN-04: NULL = all clients of the org),
 // so an empty set is encoded as the nil UUID, which matches no row: the

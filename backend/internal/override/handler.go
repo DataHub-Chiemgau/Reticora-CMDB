@@ -98,10 +98,7 @@ func (h *Handler) SetOverride(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
 			return
 		}
-		if api.WriteDBError(w, err) {
-			return
-		}
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "override.changed", fv)
@@ -171,10 +168,23 @@ func (h *Handler) UpsertPolicy(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if len(policy.Priorities) == 0 {
+		api.WriteFieldError(w, &api.FieldError{Field: "priorities", Message: "priorities must not be empty"})
+		return
+	}
+	// PostgreSQL stores no NUL in text or jsonb; reject it before SQL (F-047).
+	if err := api.RejectNUL("name", policy.Name); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	if err := api.RejectNUL("priorities", policy.Priorities...); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	policy.OrganizationID = t.OrganizationID
 	policy.IsDefault = true
 	if err := h.repo.UpsertPolicy(r.Context(), &policy); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "reconciliation.policy_changed", policy)

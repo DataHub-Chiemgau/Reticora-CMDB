@@ -2,6 +2,7 @@ package citype
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,6 +12,10 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 )
+
+// ErrConflict: the in-memory repository refuses a key or name that is taken
+// (409; PostgreSQL reports the unique violation, 23505).
+var ErrConflict = errors.New("a CI type with this key or name already exists")
 
 // Repository defines persistence operations for CI types, field definitions
 // and CI-instance field definitions.
@@ -132,7 +137,7 @@ func (r *MemoryRepository) Create(_ context.Context, typ *Type) error {
 	for _, existing := range r.types {
 		if existing.OrganizationID == typ.OrganizationID &&
 			(existing.Key == typ.Key || existing.Name == typ.Name) && existing.IsActive {
-			return fmt.Errorf("a CI type with this key or name already exists")
+			return ErrConflict
 		}
 	}
 	typ.ID = r.nextID()
@@ -224,7 +229,7 @@ func (r *MemoryRepository) Clone(_ context.Context, orgID, id string, req CloneR
 	}
 	for _, existing := range r.types {
 		if existing.OrganizationID == orgID && (existing.Key == key || existing.Name == name) && existing.IsActive {
-			return nil, fmt.Errorf("a CI type with this key or name already exists")
+			return nil, ErrConflict
 		}
 	}
 	clone := *src

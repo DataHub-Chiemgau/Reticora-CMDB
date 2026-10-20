@@ -665,7 +665,7 @@ export interface paths {
     get: operations['getRetentionPolicy'];
     /**
      * Configure the tenant data-retention policy
-     * @description Creates or updates the retention policy. `retention_days = 0` keeps data forever (no erasure). `mode` selects whether expired records are anonymized (default; rows stay for referential integrity) or deleted. Requires user:manage.
+     * @description Creates or updates the retention policy. `retention_days = 0` keeps data forever (no erasure); a value outside 0..2147483647 is a 400 field error. `mode` selects whether expired records are anonymized (default; rows stay for referential integrity) or deleted. Requires user:manage.
      */
     put: operations['putRetentionPolicy'];
     post?: never;
@@ -707,7 +707,7 @@ export interface paths {
     put?: never;
     /**
      * Create a relationship
-     * @description contains, contained_by, parent_of, child_of, mounted_in and located_in are projected and cannot be stored (422, REL-01, CH27): containment is the CI's parent_ci_id, mounted_in follows from the rack mount, located_in from the CI's location.
+     * @description contains, contained_by, parent_of, child_of, mounted_in and located_in are projected and cannot be stored (422, REL-01, CH27): containment is the CI's parent_ci_id, mounted_in follows from the rack mount, located_in from the CI's location. A principal restricted to some clients or sites may connect its own CI with a visible org-wide CI (client or site NULL); the edge carries the client and site of the own endpoint and is visible only there. An edge between two org-wide CIs is reserved to org-wide principals (403, E-09, E-62).
      */
     post: operations['createRelationship'];
     delete?: never;
@@ -1316,7 +1316,10 @@ export interface paths {
     /** List documents */
     get: operations['listDocuments'];
     put?: never;
-    /** Create a document metadata record */
+    /**
+     * Create a document metadata record
+     * @description A new document has no link and is org-wide; a principal restricted to some clients or sites gets 403 (E-09, transition rule of E-61).
+     */
     post: operations['createDocument'];
     delete?: never;
     options?: never;
@@ -1338,11 +1341,17 @@ export interface paths {
     get: operations['getDocument'];
     put?: never;
     post?: never;
-    /** Delete a document */
+    /**
+     * Delete a document
+     * @description A principal restricted to some clients or sites deletes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
+     */
     delete: operations['deleteDocument'];
     options?: never;
     head?: never;
-    /** Update a document */
+    /**
+     * Update a document
+     * @description A principal restricted to some clients or sites changes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
+     */
     patch: operations['updateDocument'];
     trace?: never;
   };
@@ -1476,7 +1485,10 @@ export interface paths {
     /** List maintenance windows */
     get: operations['listMaintenanceWindows'];
     put?: never;
-    /** Create a maintenance window */
+    /**
+     * Create a maintenance window
+     * @description A window without ci_ids is org-wide; a principal restricted to some clients or sites gets 403 for it (E-09).
+     */
     post: operations['createMaintenanceWindow'];
     delete?: never;
     options?: never;
@@ -1498,11 +1510,17 @@ export interface paths {
     get: operations['getMaintenanceWindow'];
     put?: never;
     post?: never;
-    /** Delete a maintenance window */
+    /**
+     * Delete a maintenance window
+     * @description A principal restricted to some clients or sites deletes only windows whose CIs it sees completely; other windows answer 404 (TEN-05, E-09).
+     */
     delete: operations['deleteMaintenanceWindow'];
     options?: never;
     head?: never;
-    /** Update a maintenance window (incl. status transitions) */
+    /**
+     * Update a maintenance window (incl. status transitions)
+     * @description A principal restricted to some clients or sites changes only windows whose CIs it sees completely; a window that also covers another client's CI or has no CI (org-wide) answers 404 (TEN-05, E-09).
+     */
     patch: operations['updateMaintenanceWindow'];
     trace?: never;
   };
@@ -2506,7 +2524,7 @@ export interface paths {
     };
     /**
      * Metric series of one CI (MON-02)
-     * @description Returns the series of one CI for the detail view: the named metric or, without name, every metric the CI reported since from (default the last 24 hours). Requires the monitoring feature.
+     * @description Returns the series of one CI for the detail view: the named metric or, without name, every metric the CI reported since from (default the last 24 hours). Requires the monitoring feature. A CI outside the caller's client/site scope, unknown or with a malformed id answers 404.
      */
     get: operations['getCIMetrics'];
     put?: never;
@@ -4076,7 +4094,7 @@ export interface paths {
     get: operations['downloadDocumentContent'];
     /**
      * Upload the binary content of a document
-     * @description Stores the request body as the document's object in blob storage. The Content-Type header is validated against a whitelist of common office and image formats; the body is limited to 25 MiB.
+     * @description Stores the request body as the document's object in blob storage. The Content-Type header is validated against a whitelist of common office and image formats; the body is limited to 25 MiB. A principal restricted to some clients or sites uploads only to documents whose links it sees completely; other documents answer 404 before anything is stored (TEN-05, E-09).
      */
     put: operations['uploadDocumentContent'];
     post?: never;
@@ -4099,7 +4117,10 @@ export interface paths {
     /** List entities linked to a document */
     get: operations['getDocumentLinks'];
     put?: never;
-    /** Link a document to another entity */
+    /**
+     * Link a document to another entity
+     * @description A principal restricted to some clients or sites may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09).
+     */
     post: operations['linkDocument'];
     delete?: never;
     options?: never;
@@ -4881,7 +4902,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Evaluate active compliance rules against tenant CIs */
+    /**
+     * Evaluate active compliance rules against tenant CIs
+     * @description The evaluation replaces the results of the whole organization; a principal restricted to some clients, sites or teams gets 403 (TEN-06, E-09).
+     */
     post: operations['evaluateCompliance'];
     delete?: never;
     options?: never;
@@ -6102,7 +6126,10 @@ export interface paths {
     /** Manage lifecycle definitions */
     get: operations['listLifecycleDefinitions'];
     put?: never;
-    /** Manage lifecycle definitions */
+    /**
+     * Manage lifecycle definitions
+     * @description `applies_to` is asset (default), ci or both; another value is a 422 field error. A taken key is 409.
+     */
     post: operations['createLifecycleDefinitions'];
     delete?: never;
     options?: never;
@@ -6225,7 +6252,10 @@ export interface paths {
     };
     /** Read or update the source-priority policy */
     get: operations['listReconciliationSourcePolicy'];
-    /** Read or update the source-priority policy */
+    /**
+     * Read or update the source-priority policy
+     * @description `priorities` must not be empty; `name` and the priorities must not contain NUL characters (400 field error).
+     */
     put: operations['putReconciliationSourcePolicy'];
     post?: never;
     delete?: never;
@@ -13447,6 +13477,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13840,6 +13871,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
     };
   };
   getMaintenanceWindow: {
@@ -16331,6 +16363,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
     };
   };
   listAlerts: {
@@ -20492,6 +20525,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
     };
@@ -22442,6 +22476,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -24588,6 +24623,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -24595,6 +24631,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listAssetsIdMovements: {
@@ -24688,6 +24726,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -24695,6 +24734,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   deleteCiFieldsGlobalName: {
@@ -24918,6 +24959,8 @@ export interface operations {
         };
         content?: never;
       };
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listCiTypesTemplates: {
@@ -25085,6 +25128,9 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   createCiTypesIdDeactivate: {
@@ -25153,6 +25199,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -25160,6 +25207,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   deleteCiTypesIdFieldsName: {
@@ -25303,6 +25352,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -25310,6 +25360,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   deleteCisIdFieldDefinitionsName: {
@@ -25446,6 +25498,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -25453,6 +25506,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   getCisIdParent: {
@@ -25931,6 +25986,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -25938,6 +25994,8 @@ export interface operations {
         };
         content?: never;
       };
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   getLifecycleDefinitionsId: {
@@ -26211,6 +26269,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {

@@ -45,6 +45,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
@@ -325,6 +326,12 @@ func main() {
 	// failing search backend never breaks CI persistence, and the index can
 	// always be rebuilt via POST /api/v1/search/reindex.
 	repos.CI = ci.NewIndexingRepository(repos.CI, search.NewCIIndexer(repos.Search))
+	// A rack placement moves the CI (and the CIs of its asset) in SQL; the
+	// remote index learns of the new client and site only through this
+	// decorator (TEC-12, WP-346). The PostgreSQL index follows by trigger.
+	if hybrid, ok := repos.Search.(*search.HybridBackend); ok {
+		repos.Rack = rack.NewIndexingRepository(repos.Rack, hybrid)
+	}
 	// In the air-gapped profile no external AI call is made at all (AI-02).
 	aiProvider := ai.NewProvider(&ai.ProviderConfig{
 		BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, ChatModel: cfg.LLMChatModel, EmbeddingModel: cfg.LLMEmbeddingModel,

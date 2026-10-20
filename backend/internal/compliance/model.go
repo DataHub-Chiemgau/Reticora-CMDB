@@ -1,7 +1,15 @@
 // Package compliance evaluates tenant CIs against compliance rules.
 package compliance
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+// ErrOrgWideScopeRequired: the evaluation replaces the results of the whole
+// organization, so a principal restricted to some clients, sites or teams
+// may not run it (TEN-06, E-09).
+var ErrOrgWideScopeRequired = errors.New("compliance evaluation requires an org-wide principal")
 
 type JSONMap map[string]any
 

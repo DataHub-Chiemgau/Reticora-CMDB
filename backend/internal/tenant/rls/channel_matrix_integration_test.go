@@ -19,6 +19,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
@@ -45,6 +46,13 @@ type channelEnv struct {
 
 func newChannelEnv(t *testing.T, f *scopetest.Fixture) *channelEnv {
 	t.Helper()
+	return newChannelEnvWithBlobs(t, f, nil)
+}
+
+// newChannelEnvWithBlobs is newChannelEnv with a blob store for document
+// content (nil: content endpoints answer 503).
+func newChannelEnvWithBlobs(t *testing.T, f *scopetest.Fixture, blobs blob.Store) *channelEnv {
+	t.Helper()
 	key, err := crypto.GenerateMasterKey()
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +67,7 @@ func newChannelEnv(t *testing.T, f *scopetest.Fixture) *channelEnv {
 	entitlements := entitlement.NewService(repos.Entitlement, entitlement.Options{Enforce: false})
 	mux, _, err := server.NewRouter(repos, server.Options{
 		Version:      "matrix",
+		Blobs:        blobs,
 		Entitlements: entitlements,
 		Dispatcher:   webhook.NewDispatcher(repos.Webhook, nil, webhook.DispatcherOptions{Deliveries: repos.WebhookDeliveries}),
 		CIService:    ci.NewServiceWithLimits(repos.CI, entitlements),

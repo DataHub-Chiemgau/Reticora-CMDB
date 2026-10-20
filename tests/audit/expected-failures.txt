@@ -48,13 +48,11 @@ go;backend/internal/middleware;TestAuditT2RefusedCredentialTrafficKeepsOrgBudget
 go;backend/internal/middleware;TestAuditT2SessionBudgetSurvivesTokenRefresh;F-076
 go;backend/internal/middleware;TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget;F-063
 go;backend/internal/middleware;TestAuditT2ValidatorRegistryMatchesOpenAPIRequestBodies;F-018
-go;backend/internal/monitoring;TestAuditT1MetricNamesHonourScope;F-052
 go;backend/internal/monitoring;TestAuditT1MetricViewsHonourScope;F-051
 go;backend/internal/notify;TestAuditDefectSMTPChannelCloudMetadataBlocked;F-153
 go;backend/internal/notify;TestAuditDefectSMTPSecretNotReleasedToNewHost;F-152
 go;backend/internal/rack;TestAuditDefectRackHeightNotBelowMounts;F-140
 go;backend/internal/relationship;TestAuditCleanupCronScopeDeadline;F-111
-go;backend/internal/search;TestAuditT1OpenSearchFollowsRackPlacement;F-054
 go;backend/internal/server;TestAuditDefectDiscoveryJobInGenericJobModel;F-146
 go;backend/internal/server;TestAuditDefectDomainEventsEmitted;F-043
 go;backend/internal/server;TestAuditDefectForeignPrivateCITypeRejected;F-144
@@ -78,15 +76,7 @@ go;backend/internal/server;TestAuditT3OverrideRefusesReservedNames;F-092
 go;backend/internal/server;TestAuditT3ResolvedByIsThePrincipal;F-091
 go;backend/internal/signup;TestAuditT2FirstOrgAdminAccountRequiresMFA;F-005
 go;backend/internal/signup;TestAuditT2RealmAdminGroupRequiresMFA;F-005
-go;backend/internal/tenant/rls;TestAuditT1CIMetricsEndpointScope;F-052
-go;backend/internal/tenant/rls;TestAuditT1ComplianceEvaluationStaysInCallerScope;F-001
-go;backend/internal/tenant/rls;TestAuditT1DocumentWritesOutsideScope;F-004 F-048
-go;backend/internal/tenant/rls;TestAuditT1EdgeScopeFollowsScopedMove;F-050
-go;backend/internal/tenant/rls;TestAuditT1MaintenanceWindowWritesOutsideScope;F-004 F-048
-go;backend/internal/tenant/rls;TestAuditT1RackChannelSiteScope;F-002 F-058 F-180
 go;backend/internal/tenant/rls;TestAuditT1RepositoryErrorsAreSanitized;F-047
-go;backend/internal/tenant/rls;TestAuditT1ReviewItemRowsCarryClientScope;F-003
-go;backend/internal/tenant/rls;TestAuditT1ReviewItemsWithoutCandidatesStayInClientScope;F-003
 go;backend/internal/tenant/rls;TestAuditT1ScopeRefusalsAreNot5xx;F-058 F-161
 go;backend/internal/tenant/rls;TestAuditT1SiteScopeOfLocatedTables;F-053
 go;backend/internal/tenant/rls;TestAuditT1StructuredSearchForReadRoles;F-055

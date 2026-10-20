@@ -1,6 +1,7 @@
 package compliance
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -127,8 +128,12 @@ func (h *Handler) Evaluate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := h.evaluator.Evaluate(r.Context(), t.OrganizationID)
+	if errors.Is(err, ErrOrgWideScopeRequired) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "the compliance evaluation covers the whole organization and requires an org-wide principal")
+		return
+	}
 	if err != nil {
-		api.WriteError(w, 500, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, 200, resp)

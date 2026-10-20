@@ -8,6 +8,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // TestModuleTablesInheritObjectScope covers migration 000064 (WP-028,
@@ -15,7 +16,11 @@ import (
 // CIs and key assignments derive client and site from the referenced object,
 // follow it when it moves, and the policies hide and reject rows outside the
 // principal's scope. Documents and maintenance windows are visible without
-// links or through at least one visible link.
+// links or through at least one visible link (migration 000064); a principal
+// restricted in the client or site scope writes them only when it sees all
+// of their links, cannot create or link an unlinked (org-wide) one, and the
+// link counters stay exact and are not writable (migration 000139, WP-341,
+// F-004, F-048, F-185).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestModuleTablesInheritObjectScope(t *testing.T) {
@@ -25,6 +30,7 @@ func TestModuleTablesInheritObjectScope(t *testing.T) {
 	ci1 := f.CI(t, f.OrgA, f.Client1, "mod-c1")
 	ci2 := f.CI(t, f.OrgA, f.Client2, "mod-c2")
 	asset2 := f.Asset(t, f.OrgA, f.Client2, "mod-a2")
+	ci1b := f.CI(t, f.OrgA, f.Client1, "mod-c1b")
 
 	ids := map[string]string{}
 	insert := func(ctx context.Context, tx pgx.Tx, key, sql string, args ...any) error {
@@ -175,6 +181,9 @@ func TestModuleTablesInheritObjectScope(t *testing.T) {
 		{"comment on a ticket of client 2", `INSERT INTO ticket_comment (organization_id, ticket_id, author_id, content) VALUES ($1, $2, $3, 'x')`, []any{f.OrgA, ids["ticket2"], user}},
 		{"link to a CI of client 2", `INSERT INTO document_link (organization_id, document_id, entity_type, entity_id) VALUES ($1, $2, 'ci', $3)`, []any{f.OrgA, ids["doc0"], ci2}},
 		{"link of a hidden document", `INSERT INTO document_link (organization_id, document_id, entity_type, entity_id) VALUES ($1, $2, 'ci', $3)`, []any{f.OrgA, ids["doc2"], ci1}},
+		// E-09: linking an org-wide document would take it from other clients.
+		{"link of an org-wide document", `INSERT INTO document_link (organization_id, document_id, entity_type, entity_id) VALUES ($1, $2, 'ci', $3)`, []any{f.OrgA, ids["doc0"], ci1}},
+		{"CI into an org-wide window", `INSERT INTO maintenance_window_ci (organization_id, maintenance_window_id, ci_id) VALUES ($1, $2, $3)`, []any{f.OrgA, ids["window0"], ci1}},
 		{"CI of client 2 in a window", `INSERT INTO maintenance_window_ci (organization_id, maintenance_window_id, ci_id) VALUES ($1, $2, $3)`, []any{f.OrgA, ids["window1"], ci2}},
 		{"CI into a hidden window", `INSERT INTO maintenance_window_ci (organization_id, maintenance_window_id, ci_id) VALUES ($1, $2, $3)`, []any{f.OrgA, ids["window2"], ci1}},
 		{"key of client 2", `INSERT INTO key_assignment (organization_id, key_item_id, assigned_to) VALUES ($1, $2, $3)`, []any{f.OrgA, ids["key2"], user}},
@@ -196,7 +205,7 @@ func TestModuleTablesInheritObjectScope(t *testing.T) {
 		if _, err := tx.Exec(ctx, `INSERT INTO ticket_comment (organization_id, ticket_id, author_id, content) VALUES ($1, $2, $3, 'ok')`, f.OrgA, ids["ticket1"], user); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO document_link (organization_id, document_id, entity_type, entity_id) VALUES ($1, $2, 'ci', $3)`, f.OrgA, ids["doc0"], ci1)
+		_, err := tx.Exec(ctx, `INSERT INTO document_link (organization_id, document_id, entity_type, entity_id) VALUES ($1, $2, 'ci', $3)`, f.OrgA, ids["doc1"], ci1b)
 		return err
 	}); err != nil {
 		t.Errorf("client 1 writes in scope: %v", err)
@@ -218,8 +227,11 @@ func TestModuleTablesInheritObjectScope(t *testing.T) {
 	// Counters follow inserts and deletes, so a document with links never
 	// looks unlinked.
 	var count int
-	if err := f.Admin.QueryRow(bg, `SELECT link_count FROM document WHERE id = $1`, ids["doc0"]).Scan(&count); err != nil || count != 1 {
-		t.Errorf("doc0 link_count = %d, %v; want 1", count, err)
+	if err := f.Admin.QueryRow(bg, `SELECT link_count FROM document WHERE id = $1`, ids["doc1"]).Scan(&count); err != nil || count != 2 {
+		t.Errorf("doc1 link_count = %d, %v; want 2", count, err)
+	}
+	if err := f.Admin.QueryRow(bg, `SELECT link_count FROM document WHERE id = $1`, ids["doc0"]).Scan(&count); err != nil || count != 0 {
+		t.Errorf("doc0 link_count = %d, %v; want 0", count, err)
 	}
 	if _, err := f.Admin.Exec(bg, `DELETE FROM document_link WHERE id = $1`, ids["link12b"]); err != nil {
 		t.Fatalf("delete link: %v", err)
@@ -230,4 +242,223 @@ func TestModuleTablesInheritObjectScope(t *testing.T) {
 	if _, err := f.Admin.Exec(bg, `DELETE FROM document WHERE id = $1`, ids["doc2"]); err != nil {
 		t.Errorf("delete document with links: %v", err)
 	}
+
+	moduleObjectWrites(t, f, user)
+}
+
+// moduleObjectWrites covers the write rules of migration 000139 (WP-341) as
+// the application role: UPDATE and DELETE of shared and unlinked documents
+// and windows by a client-1 principal (F-004, F-048), creation of unlinked
+// rows by scoped principals (E-09), the counter integrity of
+// probe_doc_link_count.sql (F-185) and a cascaded link delete when a scoped
+// principal deletes a CI.
+func moduleObjectWrites(t *testing.T, f *scopetest.Fixture, user string) {
+	t.Helper()
+	bg := context.Background()
+	ciA := f.CI(t, f.OrgA, f.Client1, "mod-w-c1")
+	ciDel := f.CI(t, f.OrgA, f.Client1, "mod-w-c1-del")
+	ciB := f.CI(t, f.OrgA, f.Client2, "mod-w-c2")
+	assetB := f.Asset(t, f.OrgA, f.Client2, "mod-w-a2")
+	site1 := scalarText(t, f, `SELECT b.site_id::text FROM room r JOIN building b ON b.id = r.building_id WHERE r.id = $1`, f.Room(t, f.Client1, "mod-w-s1"))
+
+	orgWide := database.OrgWideScope(f.OrgA, user)
+	c1 := database.OrgWideScope(f.OrgA, user)
+	c1.Clients = database.ScopeIDs(f.Client1)
+	c2 := database.OrgWideScope(f.OrgA, user)
+	c2.Clients = database.ScopeIDs(f.Client2)
+	s1 := database.OrgWideScope(f.OrgA, user)
+	s1.Sites = database.ScopeIDs(site1)
+	// exec runs one statement in its own transaction (deferred triggers fire
+	// at its commit) and returns the affected rows.
+	exec := func(scope database.TenantScope, sql string, args ...any) (int64, error) {
+		var n int64
+		err := database.WithTenant(bg, f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			tag, err := tx.Exec(ctx, sql, args...)
+			n = tag.RowsAffected()
+			return err
+		})
+		return n, err
+	}
+	insertID := func(scope database.TenantScope, sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := database.WithTenant(bg, f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, sql+` RETURNING id::text`, args...).Scan(&id)
+		}); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return id
+	}
+	newDoc := func(title string, links ...[2]string) string {
+		t.Helper()
+		id := insertID(orgWide, `INSERT INTO document (organization_id, title, file_name, storage_key, uploaded_by) VALUES ($1, $2, 'f', '', $3)`, f.OrgA, title, user)
+		for _, l := range links {
+			insertID(orgWide, `INSERT INTO document_link (organization_id, document_id, entity_type, entity_id) VALUES ($1, $2, $3, $4)`, f.OrgA, id, l[0], l[1])
+		}
+		return id
+	}
+	newWindow := func(title string, cis ...string) string {
+		t.Helper()
+		id := insertID(orgWide, `INSERT INTO maintenance_window (organization_id, title, starts_at, ends_at) VALUES ($1, $2, now(), now() + interval '1 hour')`, f.OrgA, title)
+		for _, c := range cis {
+			insertID(orgWide, `INSERT INTO maintenance_window_ci (organization_id, maintenance_window_id, ci_id) VALUES ($1, $2, $3)`, f.OrgA, id, c)
+		}
+		return id
+	}
+	docShared := newDoc("w-shared", [2]string{"ci", ciA}, [2]string{"asset", assetB})
+	docOrg := newDoc("w-org")
+	docOwn := newDoc("w-own", [2]string{"ci", ciA})
+	docProbe := newDoc("w-probe", [2]string{"ci", ciA}, [2]string{"asset", assetB})
+	winShared := newWindow("w-shared", ciA, ciB)
+	winOrg := newWindow("w-org")
+	winOwn := newWindow("w-own", ciA)
+	winCascade := newWindow("w-cascade", ciDel, ciB)
+	denied := func(err error) bool {
+		var pgErr *pgconn.PgError
+		return errors.As(err, &pgErr) && pgErr.Code == "42501"
+	}
+
+	// Shared and org-wide rows: client 1 changes and deletes nothing.
+	for _, c := range []struct {
+		name, sql, id string
+	}{
+		{"UPDATE shared document", `UPDATE document SET title = 'x' WHERE id = $1`, docShared},
+		{"DELETE shared document", `DELETE FROM document WHERE id = $1`, docShared},
+		{"UPDATE org-wide document", `UPDATE document SET title = 'x' WHERE id = $1`, docOrg},
+		{"DELETE org-wide document", `DELETE FROM document WHERE id = $1`, docOrg},
+		{"UPDATE shared window", `UPDATE maintenance_window SET title = 'x', status = 'cancelled' WHERE id = $1`, winShared},
+		{"DELETE shared window", `DELETE FROM maintenance_window WHERE id = $1`, winShared},
+		{"UPDATE org-wide window", `UPDATE maintenance_window SET title = 'x' WHERE id = $1`, winOrg},
+		{"DELETE org-wide window", `DELETE FROM maintenance_window WHERE id = $1`, winOrg},
+	} {
+		if n, err := exec(c1, c.sql, c.id); err != nil || n != 0 {
+			t.Errorf("client 1: %s: %d rows, %v; want 0 rows", c.name, n, err)
+		}
+	}
+	if got := scalarText(t, f, `SELECT (SELECT string_agg(title, ',' ORDER BY title) FROM document WHERE id IN ($1, $2)) || '|' ||
+		(SELECT count(*) FROM document_link WHERE document_id = $1)::text`, docShared, docOrg); got != "w-org,w-shared|2" {
+		t.Errorf("documents|shared links after the client-1 writes: %s, want w-org,w-shared|2", got)
+	}
+	if got := scalarText(t, f, `SELECT (SELECT string_agg(title || ':' || status, ',' ORDER BY title) FROM maintenance_window WHERE id IN ($1, $2)) || '|' ||
+		(SELECT count(*) FROM maintenance_window_ci WHERE maintenance_window_id = $1)::text`, winShared, winOrg); got != "w-org:scheduled,w-shared:scheduled|2" {
+		t.Errorf("windows|shared CIs after the client-1 writes: %s, want w-org:scheduled,w-shared:scheduled|2", got)
+	}
+
+	// Scoped principals create no unlinked row (E-09) and set no counter.
+	for _, scope := range []struct {
+		name  string
+		scope database.TenantScope
+	}{{"client 1", c1}, {"site 1", s1}} {
+		for _, c := range []struct{ name, sql string }{
+			{"document without link", `INSERT INTO document (organization_id, title, file_name, storage_key, uploaded_by) VALUES ($1, 'w-new', 'f', '', $2)`},
+			{"window without CI", `INSERT INTO maintenance_window (organization_id, title, starts_at, ends_at, created_by) VALUES ($1, 'w-new', now(), now() + interval '1 hour', $2)`},
+		} {
+			if _, err := exec(scope.scope, c.sql, f.OrgA, user); !denied(err) {
+				t.Errorf("%s: %s: %v, want 42501", scope.name, c.name, err)
+			}
+		}
+	}
+	if _, err := exec(orgWide, `INSERT INTO document (organization_id, title, file_name, storage_key, uploaded_by, link_count) VALUES ($1, 'w-forged', 'f', '', $2, 3)`, f.OrgA, user); err == nil {
+		t.Error("document inserted with a forged link_count")
+	}
+	for _, c := range []struct {
+		name  string
+		scope database.TenantScope
+		sql   string
+		id    string
+	}{
+		// probe_doc_link_count.sql part B: the counter is not writable.
+		{"client 1 sets link_count", c1, `UPDATE document SET link_count = 0 WHERE id = $1`, docOwn},
+		{"org-wide principal sets link_count", orgWide, `UPDATE document SET link_count = 0 WHERE id = $1`, docShared},
+		{"client 1 sets ci_count", c1, `UPDATE maintenance_window SET ci_count = 0 WHERE id = $1`, winOwn},
+		{"org-wide principal sets ci_count", orgWide, `UPDATE maintenance_window SET ci_count = 5 WHERE id = $1`, winOrg},
+	} {
+		if _, err := exec(c.scope, c.sql, c.id); !denied(err) {
+			t.Errorf("%s: %v, want 42501", c.name, err)
+		}
+	}
+	if got := scalarText(t, f, `SELECT (SELECT link_count FROM document WHERE id = $1)::text || '|' || (SELECT link_count FROM document WHERE id = $2)::text || '|' ||
+		(SELECT ci_count FROM maintenance_window WHERE id = $3)::text || '|' || (SELECT ci_count FROM maintenance_window WHERE id = $4)::text`,
+		docOwn, docShared, winOwn, winOrg); got != "1|2|1|0" {
+		t.Errorf("counters after the refused writes: %s, want 1|2|1|0", got)
+	}
+
+	// In scope, client 1 writes its own rows and creates linked ones in one
+	// transaction; the org-wide principal writes everything.
+	for _, c := range []struct {
+		name  string
+		scope database.TenantScope
+		sql   string
+		id    string
+	}{
+		{"client 1 renames its document", c1, `UPDATE document SET title = 'w-own-2' WHERE id = $1`, docOwn},
+		{"client 1 cancels its window", c1, `UPDATE maintenance_window SET status = 'cancelled' WHERE id = $1`, winOwn},
+		{"org-wide principal renames the shared document", orgWide, `UPDATE document SET title = 'w-shared-2' WHERE id = $1`, docShared},
+		{"org-wide principal renames the org-wide window", orgWide, `UPDATE maintenance_window SET title = 'w-org-2' WHERE id = $1`, winOrg},
+		{"client 1 deletes its window", c1, `DELETE FROM maintenance_window WHERE id = $1`, winOwn},
+	} {
+		if n, err := exec(c.scope, c.sql, c.id); err != nil || n != 1 {
+			t.Errorf("%s: %d rows, %v; want 1", c.name, n, err)
+		}
+	}
+	var created [2]string
+	if err := database.WithTenant(bg, f.App, &c1, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO maintenance_window (organization_id, title, starts_at, ends_at) VALUES ($1, 'w-c1', now(), now() + interval '1 hour') RETURNING id::text`, f.OrgA).Scan(&created[0]); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO maintenance_window_ci (organization_id, maintenance_window_id, ci_id) VALUES ($1, $2, $3)`, f.OrgA, created[0], ciA); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO document (organization_id, title, file_name, storage_key, uploaded_by) VALUES ($1, 'w-c1', 'f', '', $2) RETURNING id::text`, f.OrgA, user).Scan(&created[1]); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO document_link (organization_id, document_id, entity_type, entity_id) VALUES ($1, $2, 'ci', $3)`, f.OrgA, created[1], ciA)
+		return err
+	}); err != nil {
+		t.Errorf("client 1 creates a window and a document with own links: %v", err)
+	} else if got := scalarText(t, f, `SELECT (SELECT ci_count FROM maintenance_window WHERE id = $1)::text || '|' || (SELECT link_count FROM document WHERE id = $2)::text`, created[0], created[1]); got != "1|1" {
+		t.Errorf("counters of the rows client 1 created: %s, want 1|1", got)
+	}
+
+	// probe_doc_link_count.sql part A: every client removes its own link and
+	// the counter follows, so the document becomes org-wide again.
+	if n, err := exec(c1, `DELETE FROM document_link WHERE document_id = $1 AND entity_id = $2`, docProbe, ciA); err != nil || n != 1 {
+		t.Errorf("client 1 removes its link: %d rows, %v", n, err)
+	}
+	if got := scalarText(t, f, `SELECT (SELECT count(*) FROM document_link WHERE document_id = $1)::text || '|' || link_count::text FROM document WHERE id = $1`, docProbe); got != "1|1" {
+		t.Errorf("A1 links|link_count after client 1 removed its link: %s, want 1|1", got)
+	}
+	if n, err := exec(c2, `DELETE FROM document_link WHERE document_id = $1 AND entity_id = $2`, docProbe, assetB); err != nil || n != 1 {
+		t.Errorf("client 2 removes the last link: %d rows, %v", n, err)
+	}
+	if got := scalarText(t, f, `SELECT (SELECT count(*) FROM document_link WHERE document_id = $1)::text || '|' || link_count::text FROM document WHERE id = $1`, docProbe); got != "0|0" {
+		t.Errorf("A2 links|link_count after client 2 removed the last link: %s, want 0|0", got)
+	}
+	var visible int
+	if err := database.WithTenant(bg, f.App, &orgWide, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM document WHERE id = $1`, docProbe).Scan(&visible)
+	}); err != nil || visible != 1 {
+		t.Errorf("A3 org-wide principal sees the unlinked document: %d, %v; want 1", visible, err)
+	}
+
+	// Deleting a CI cascades to its window entries; the counter of a window
+	// shared with client 2 follows and the delete of the scoped principal is
+	// not aborted.
+	if n, err := exec(c1, `DELETE FROM ci WHERE id = $1`, ciDel); err != nil || n != 1 {
+		t.Errorf("client 1 deletes its CI of a shared window: %d rows, %v", n, err)
+	}
+	if got := scalarText(t, f, `SELECT (SELECT count(*) FROM maintenance_window_ci WHERE maintenance_window_id = $1)::text || '|' || ci_count::text FROM maintenance_window WHERE id = $1`, winCascade); got != "1|1" {
+		t.Errorf("CIs|ci_count of the shared window after the CI delete: %s, want 1|1", got)
+	}
+}
+
+// scalarText runs a query on the maintenance pool (no RLS) and returns the
+// single value as text.
+func scalarText(t *testing.T, f *scopetest.Fixture, query string, args ...any) string {
+	t.Helper()
+	var v string
+	if err := f.Admin.QueryRow(context.Background(), query, args...).Scan(&v); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	return v
 }

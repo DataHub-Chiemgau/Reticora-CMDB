@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -90,6 +91,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if !endsAt.After(startsAt) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "ends_at must be after starts_at")
+		return
+	}
+	// A window without CIs is org-wide; a principal restricted in the client
+	// or site scope may not create one (E-09).
+	if scope, ok := database.TenantScopeFromContext(r.Context()); ok && len(req.CIIDs) == 0 &&
+		(!scope.Clients.IsAll() || !scope.Sites.IsAll()) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "the operation is not permitted")
 		return
 	}
 	win := &Window{

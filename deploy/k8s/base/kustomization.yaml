@@ -2,8 +2,11 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 # Required secrets (not generated here, see deploy/README.md):
-#   reticora-secrets      keys database-url, master-key
+#   reticora-db-runtime   key database-url (runtime login, NOSUPERUSER NOBYPASSRLS)
+#   reticora-secrets      key master-key
 #   reticora-session-key  key private.pem
+# The migration login (secret reticora-db-migrate) is used only by the
+# operator's migration run and is not referenced by any manifest here.
 resources:
   - deployment.yaml
   - service.yaml

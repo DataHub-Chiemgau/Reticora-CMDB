@@ -13,8 +13,9 @@ import (
 
 // TestDiscoveryRepositoryClientScope runs the discovery repository with the
 // principal's tenant scope (TEN-06, WP-013): a principal restricted to client
-// 1 neither sees nor changes a client-2 collector, its jobs or review items
-// about client-2 CIs.
+// 1 neither sees nor changes a client-2 collector, its jobs, review items
+// about client-2 CIs or review items without candidate CIs that a client-2
+// collector opened (scope_suggested, WP-342).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestDiscoveryRepositoryClientScope(t *testing.T) {
@@ -38,6 +39,17 @@ func TestDiscoveryRepositoryClientScope(t *testing.T) {
 	foreignReview := &discovery.ReviewItem{OrganizationID: f.OrgA, Kind: discovery.ReviewKindAmbiguousIdentity, CandidateCIIDs: []string{ownCI, foreignCI}}
 	if err := repo.CreateReviewItem(orgCtx, foreignReview); err != nil {
 		t.Fatalf("org-wide review item: %v", err)
+	}
+	// A review item without candidates of the client-2 collector, opened the
+	// way the subnets report of the collector does.
+	handler := discovery.NewHandler(repo, nil)
+	if n, err := handler.SuggestScopes(orgCtx, f.OrgA, foreignCol.ID, []string{"10.20.9.0/24"}); err != nil || n != 1 {
+		t.Fatalf("suggest a subnet of the client-2 collector: n=%d err=%v", n, err)
+	}
+	var suggestionID string
+	if err := f.Admin.QueryRow(context.Background(), `SELECT id::text FROM review_item WHERE organization_id = $1 AND kind = 'scope_suggested'
+		AND payload ->> 'collector_id' = $2`, f.OrgA, foreignCol.ID).Scan(&suggestionID); err != nil {
+		t.Fatalf("read the scope_suggested item: %v", err)
 	}
 
 	ctx := f.ClientCtx(f.Client1)
@@ -74,13 +86,34 @@ func TestDiscoveryRepositoryClientScope(t *testing.T) {
 	if _, err = repo.ResolveReviewItem(ctx, f.OrgA, foreignReview.ID, &discovery.Resolution{Status: discovery.ReviewStatusResolved}); err == nil {
 		t.Fatal("client-1 principal resolved a review item about a client-2 CI")
 	}
-
-	var status string
-	if err = f.Admin.QueryRow(context.Background(), `SELECT status FROM review_item WHERE id = $1`, foreignReview.ID).Scan(&status); err != nil {
-		t.Fatalf("read review item: %v", err)
+	if _, err = repo.GetReviewItem(ctx, f.OrgA, suggestionID); err == nil {
+		t.Fatal("client-1 principal read the review item of the client-2 collector")
 	}
-	if status != discovery.ReviewStatusOpen {
-		t.Fatalf("review item about a client-2 CI changed to %q", status)
+	if _, err = repo.ResolveReviewItem(ctx, f.OrgA, suggestionID, &discovery.Resolution{Status: discovery.ReviewStatusDismissed, Action: "dismiss"}); err == nil {
+		t.Fatal("client-1 principal resolved the review item of the client-2 collector")
+	}
+
+	for id, what := range map[string]string{foreignReview.ID: "review item about a client-2 CI", suggestionID: "review item of the client-2 collector"} {
+		var status string
+		if err = f.Admin.QueryRow(context.Background(), `SELECT status FROM review_item WHERE id = $1`, id).Scan(&status); err != nil {
+			t.Fatalf("read review item: %v", err)
+		}
+		if status != discovery.ReviewStatusOpen {
+			t.Fatalf("%s changed to %q", what, status)
+		}
+	}
+	// Positive controls: the client-2 principal sees the suggestion of its
+	// collector, the client-1 principal the one of its own collector.
+	if _, err = repo.GetReviewItem(f.ClientCtx(f.Client2), f.OrgA, suggestionID); err != nil {
+		t.Fatalf("client-2 principal reads the review item of its collector: %v", err)
+	}
+	n, err := handler.SuggestScopes(orgCtx, f.OrgA, ownCol.ID, []string{"10.20.1.0/24"})
+	if err != nil || n != 1 {
+		t.Fatalf("suggest a subnet of the client-1 collector: n=%d err=%v", n, err)
+	}
+	if items, total, err = repo.ListReviewItems(ctx, f.OrgA, discovery.ReviewFilter{}, page); err != nil || total != 1 ||
+		len(items) != 1 || items[0].Payload["collector_id"] != ownCol.ID {
+		t.Fatalf("client-1 review items after the own suggestion: total=%d %+v err=%v, want only that one", total, items, err)
 	}
 	if _, _, err = repo.ListCollectors(context.Background(), f.OrgA, page); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,6 +77,28 @@ func TestWriteRepoErrorSanitizesPostgresErrors(t *testing.T) {
 			}
 			if _, ok := problem["title"]; !ok {
 				t.Fatalf("RFC 7807 response must carry a title: %s", body)
+			}
+		})
+	}
+}
+
+// TestClassifyDBErrorInvalidCharacters guards F-047: a NUL byte in a text
+// value (22021) or in jsonb (22P05) is a client error, not a generic 500 or
+// a 409 carrying the driver text.
+func TestClassifyDBErrorInvalidCharacters(t *testing.T) {
+	for _, code := range []string{"22021", "22P05"} {
+		t.Run(code, func(t *testing.T) {
+			err := &pgconn.PgError{Code: code, Message: `invalid byte sequence for encoding "UTF8": 0x00`}
+			status, title, detail, ok := ClassifyDBError(fmt.Errorf("create ci type: %w", err))
+			if !ok || status != http.StatusBadRequest || title != "Bad Request" ||
+				detail != "a field value has an invalid format or is out of range" {
+				t.Fatalf("ClassifyDBError(%s) = %d %q %q %v, want 400 with the fixed detail", code, status, title, detail, ok)
+			}
+			w := httptest.NewRecorder()
+			WriteRepoError(w, err)
+			if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), "invalid byte sequence") ||
+				strings.Contains(w.Body.String(), "UTF8") {
+				t.Fatalf("WriteRepoError: %d %s", w.Code, w.Body.String())
 			}
 		})
 	}

@@ -16,6 +16,8 @@ var (
 	ErrNotFound = errors.New("not found")
 	// ErrInvalid: the type violates the REL-01 contract (400).
 	ErrInvalid = errors.New("invalid relationship type")
+	// ErrConflict: the key is taken in the organization (409).
+	ErrConflict = errors.New("a relationship type with this key already exists")
 )
 
 // Repository defines persistence for relationship types.
@@ -106,7 +108,7 @@ func (r *MemoryRepository) Create(_ context.Context, typ *Type) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.types[mapKey(typ.OrganizationID, typ.Key)]; exists {
-		return fmt.Errorf("a relationship type with this key already exists")
+		return ErrConflict
 	}
 	r.seq++
 	typ.ID = fmt.Sprintf("00000000-0000-4000-8000-%012d", r.seq)

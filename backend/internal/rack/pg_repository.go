@@ -51,13 +51,13 @@ func scanRack(s scanner) (*Rack, error) {
 
 // Racks, mounts and cables carry no client or site scope column yet (WP-025,
 // WP-027). They are visible only when the objects they hang off are visible
-// under the transaction's tenant scope, whose site and ci policies filter the
-// subqueries: a rack through room, building and site, a mount through its
-// rack and CI, a cable through the CIs of both interfaces.
+// under the transaction's tenant scope, whose location and ci policies filter
+// the subqueries: a rack through its 1:1 location row (organization, client
+// and site predicate, migration 000062 section 6), a mount through its rack
+// and CI, a cable through the CIs of both interfaces. A LEFT JOIN over room
+// and building would admit the rack of an invisible building (WP-340, F-002).
 const (
-	rackVisible = `EXISTS (SELECT 1 FROM room LEFT JOIN building ON building.id = room.building_id
-		WHERE room.id = rack.room_id
-		AND (building.site_id IS NULL OR EXISTS (SELECT 1 FROM site WHERE site.id = building.site_id)))`
+	rackVisible  = `EXISTS (SELECT 1 FROM location WHERE location.id = rack.id)`
 	mountVisible = "EXISTS (SELECT 1 FROM rack WHERE rack.id = rack_mount.rack_id AND " + rackVisible + ")" +
 		" AND EXISTS (SELECT 1 FROM ci WHERE ci.id = rack_mount.ci_id)"
 	cableVisible = `(cable.source_interface_id IS NULL OR EXISTS (
@@ -248,8 +248,9 @@ func (r *PGRepository) ListMounts(ctx context.Context, orgID, rackID string, pag
 	var out []RackMount
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// A rack outside the scope answers 404, not an empty list (F-180).
 		var exists bool
-		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM rack WHERE organization_id = $1 AND id = $2)", orgID, rackID).Scan(&exists); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible+")", orgID, rackID).Scan(&exists); err != nil {
 			return err
 		}
 		if !exists {

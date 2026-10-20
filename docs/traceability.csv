@@ -476,3 +476,24 @@ TST-04;[Q];A;tests/audit/run-auditdefect.test.sh;WP-337
 TST-02;[B];A;tests/audit/run-auditdefect.test.sh;WP-337
 TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/stack-smoke.spec.ts;WP-338
 TST-04;[Q];C;frontend/e2e-real/stack-smoke.spec.ts;WP-338
+TEN-06;[B];B;backend/internal/tenant/rls/compliance_channel_integration_test.go;WP-339
+TEN-06;[B];B;backend/internal/rack/rack_scope_integration_test.go;WP-340
+TEN-09;[Q];B;backend/internal/tenant/rls/rack_channel_scope_integration_test.go;WP-340
+MGT-01;[P2];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-341
+MGT-04;[P3];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-341
+TEN-06;[B];B;backend/internal/tenant/rls/module_object_writes_integration_test.go;WP-341
+TEN-06;[B];B;backend/internal/discovery/discovery_scope_integration_test.go;WP-342
+TEN-02;[B];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
+TEN-05;[B];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
+TEN-09;[Q];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
+TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-343
+MON-01;[B];B;backend/internal/monitoring/audit_t1_metric_scope_integration_test.go;WP-344
+TEN-06;[B];B;backend/internal/tenant/rls/ci_metrics_channel_integration_test.go;WP-344
+TEN-02;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-345
+TEN-05;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-345
+IMP-07;[B];B;backend/internal/tenant/rls/edge_scope_integration_test.go;WP-345
+TEC-12;[P5];B;backend/internal/search/opensearch_placement_integration_test.go;WP-346
+EXP-01;[B], DATEV [P2];B;backend/internal/export/scope_integration_test.go;WP-347
+TEN-06;[B];B;backend/internal/jobs/pg_repository_integration_test.go;WP-347
+TEN-09;[Q];B;backend/internal/tenant/rls/export_job_channel_integration_test.go;WP-347
+TEN-03;[B];B;tests/install-cloud-helpers.test.sh;WP-348

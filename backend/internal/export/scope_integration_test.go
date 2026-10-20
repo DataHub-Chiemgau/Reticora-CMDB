@@ -17,12 +17,14 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // TestExportJobRunsWithCreatorScope covers WP-035 (EXP-01, TEN-06): an
 // export job records its creator and the creator's scope, the worker renders
-// it with exactly that scope, only the creator reads the job, and a queued
-// job without a snapshot is failed instead of exported org-wide.
+// it with exactly that scope — client, site (WP-347) and team snapshots —,
+// only the creator reads the job, and a queued job without a snapshot is
+// failed instead of exported org-wide.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestExportJobRunsWithCreatorScope(t *testing.T) {
@@ -130,6 +132,98 @@ func TestExportJobRunsWithCreatorScope(t *testing.T) {
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || w.Code != http.StatusOK || list.Total != 0 {
 		t.Errorf("other user lists %d jobs (status %d), want none", list.Total, w.Code)
+	}
+
+	// Site and team snapshots (WP-347, open since WP-035): the export of a
+	// site- or team-scoped user holds exactly the CIs that scope reads.
+	room := func(name string) string {
+		t.Helper()
+		var site string
+		if err := f.Admin.QueryRow(bg, `SELECT b.site_id::text FROM room r JOIN building b ON b.id = r.building_id WHERE r.id = $1`,
+			f.Room(t, f.Client1, name)).Scan(&site); err != nil {
+			t.Fatalf("site of room %s: %v", name, err)
+		}
+		return site
+	}
+	site1, site2 := room("export-site-1"), room("export-site-2")
+	for name, site := range map[string]string{"export-site-own": site1, "export-site-foreign": site2} {
+		if _, err := f.Admin.Exec(bg, `UPDATE ci SET location_id = $2 WHERE id = $1`, f.CI(t, f.OrgA, f.Client1, name), site); err != nil {
+			t.Fatalf("place CI %s: %v", name, err)
+		}
+	}
+	var team string
+	if err := f.Admin.QueryRow(bg, `INSERT INTO team (organization_id, name) VALUES ($1, 'export team') RETURNING id::text`, f.OrgA).Scan(&team); err != nil {
+		t.Fatalf("seed team: %v", err)
+	}
+	names := []string{"export-scope-own", "export-scope-foreign", "export-site-own", "export-site-foreign"}
+	// readable lists the seeded CIs scope reads under RLS.
+	readable := func(scope *database.TenantScope) map[string]bool {
+		t.Helper()
+		out := map[string]bool{}
+		if err := database.WithTenant(bg, f.App, scope, func(ctx context.Context, tx pgx.Tx) error {
+			rows, err := tx.Query(ctx, `SELECT name FROM ci WHERE name = ANY($1)`, names)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var name string
+				if err := rows.Scan(&name); err != nil {
+					return err
+				}
+				out[name] = true
+			}
+			return rows.Err()
+		}); err != nil {
+			t.Fatalf("read CIs: %v", err)
+		}
+		return out
+	}
+	siteScope := database.OrgWideScope(f.OrgA, f.User)
+	siteScope.Sites = database.ScopeIDs(site1)
+	teamScope := database.OrgWideScope(f.OrgA, f.User)
+	teamScope.Teams = database.ScopeIDs(team)
+	teamClientScope := teamScope
+	teamClientScope.Clients = database.ScopeIDs(f.Client1)
+	for _, c := range []struct {
+		name          string
+		scope         *database.TenantScope
+		sites, teams  string
+		include, omit []string
+	}{
+		{"site 1", &siteScope, "{" + site1 + "}", "", []string{"export-site-own"}, []string{"export-site-foreign"}},
+		{"team", &teamScope, "", "{" + team + "}", nil, nil},
+		{"team and client 1", &teamClientScope, "", "{" + team + "}", []string{"export-scope-own"}, []string{"export-scope-foreign"}},
+	} {
+		jobID := create(c.scope)
+		var sites, teams string
+		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(scope_sites::text, ''), COALESCE(scope_teams::text, '') FROM export_job WHERE id = $1`,
+			jobID).Scan(&sites, &teams); err != nil || sites != c.sites || teams != c.teams {
+			t.Errorf("%s job: snapshot sites %q teams %q (%v), want %q %q", c.name, sites, teams, err, c.sites, c.teams)
+		}
+		for worker.ProcessOne(bg) {
+		}
+		status, out := content(jobID)
+		if status != export.JobStatusCompleted {
+			t.Errorf("%s job: status %s", c.name, status)
+			continue
+		}
+		want := readable(c.scope)
+		for _, name := range c.include {
+			if !want[name] {
+				t.Fatalf("setup: %s does not read %s", c.name, name)
+			}
+		}
+		for _, name := range c.omit {
+			if want[name] {
+				t.Fatalf("setup: %s reads %s", c.name, name)
+			}
+		}
+		for _, name := range names {
+			if strings.Contains(out, `"`+name+`"`) != want[name] {
+				t.Errorf("%s job: CI %s exported %v, readable in the scope %v; content %s", c.name, name, !want[name], want[name], out)
+			}
+		}
 	}
 
 	// Resumption after a restart (TEC-14, WP-130): a replica claimed a job

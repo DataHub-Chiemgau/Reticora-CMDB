@@ -17,6 +17,8 @@ import (
 // PGRepository stores jobs in PostgreSQL. Jobs belong to the organization
 // and carry no client or site, so every operation runs with the
 // organization-wide scope of orgID — from requests and from workers alike.
+// Request paths (a tenant scope in the context) additionally see export
+// jobs only of their own user (ownExport).
 type PGRepository struct {
 	pool *pgxpool.Pool
 }
@@ -29,8 +31,31 @@ const jobColumns = `id::text, COALESCE(organization_id::text, ''), kind, status,
 	run_after, COALESCE(timeout_seconds, 0), COALESCE(ref_table, ''), COALESCE(ref_id::text, ''),
 	created_at, updated_at, started_at, finished_at`
 
+// ownExport restricts request paths to the export jobs of the principal
+// (EXP-01, F-059), the rule of export.ownJob for the mirrored rows: the
+// user id comes from the transaction's tenant scope, so a principal without
+// a user id sees no export job. Other kinds are unaffected.
+const ownExport = `(ref_table IS DISTINCT FROM 'export_job' OR created_by::text = NULLIF(current_setting('app.user_id', true), ''))`
+
+// requestUser returns the user of the request's tenant scope; ok is false
+// on worker and system paths, which carry no scope and see every job of
+// the organization.
+func requestUser(ctx context.Context) (user string, ok bool) {
+	scope, ok := database.TenantScopeFromContext(ctx)
+	return scope.UserID, ok
+}
+
+// visible is the condition ownExport on request paths, otherwise none.
+func visible(ctx context.Context) string {
+	if _, ok := requestUser(ctx); ok {
+		return " AND " + ownExport
+	}
+	return ""
+}
+
 func (r *PGRepository) inOrg(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	scope := database.OrgWideScope(orgID, "")
+	user, _ := requestUser(ctx)
+	scope := database.OrgWideScope(orgID, user)
 	return database.WithTenant(ctx, r.pool, &scope, fn)
 }
 
@@ -100,8 +125,9 @@ func (r *PGRepository) Insert(ctx context.Context, job *Job) (bool, error) {
 
 func (r *PGRepository) getOne(ctx context.Context, orgID, where string, args ...any) (*Job, error) {
 	var out *Job
+	own := visible(ctx)
 	err := r.inOrg(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		j, err := scanJob(tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM job WHERE organization_id = $1 AND `+where,
+		j, err := scanJob(tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM job WHERE organization_id = $1 AND `+where+own,
 			append([]any{orgID}, args...)...))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -132,6 +158,7 @@ func (r *PGRepository) GetByRef(ctx context.Context, orgID, refTable, refID stri
 func (r *PGRepository) List(ctx context.Context, orgID string, filter Filter, page api.PaginationParams) ([]Job, int, error) {
 	out := []Job{}
 	var total int
+	own := visible(ctx)
 	err := r.inOrg(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where, args := []string{"organization_id = $1"}, []any{orgID}
 		if filter.Kind != "" {
@@ -142,7 +169,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter Filter, pa
 			args = append(args, string(filter.Status))
 			where = append(where, fmt.Sprintf("status = $%d", len(args)))
 		}
-		cond := strings.Join(where, " AND ")
+		cond := strings.Join(where, " AND ") + own
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM job WHERE `+cond, args...).Scan(&total); err != nil {
 			return fmt.Errorf("count jobs: %w", err)
 		}
@@ -257,6 +284,7 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []
 		return nil, ErrNotFound
 	}
 	var out *Job
+	own := visible(ctx)
 	err := r.inOrg(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		fromText := make([]string, len(from))
 		for i, s := range from {
@@ -275,13 +303,13 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []
 				started_at = COALESCE($8, started_at),
 				attempts = attempts + CASE WHEN $9 THEN 1 ELSE 0 END,
 				finished_at = $10
-			WHERE organization_id = $1 AND id = $2 AND status = ANY($11)
+			WHERE organization_id = $1 AND id = $2 AND status = ANY($11)`+own+`
 			RETURNING `+jobColumns,
 			orgID, id, string(u.Status), u.Progress, nullJSON(u.Result), u.Error, u.RunAfter, u.StartedAt,
 			u.IncAttempts, finished, fromText))
 		if errors.Is(err, pgx.ErrNoRows) {
 			var current string
-			if gerr := tx.QueryRow(ctx, `SELECT status FROM job WHERE organization_id = $1 AND id = $2`, orgID, id).Scan(&current); gerr != nil {
+			if gerr := tx.QueryRow(ctx, `SELECT status FROM job WHERE organization_id = $1 AND id = $2`+own, orgID, id).Scan(&current); gerr != nil {
 				return ErrNotFound
 			}
 			return fmt.Errorf("%w: %s → %s", ErrTransition, current, u.Status)

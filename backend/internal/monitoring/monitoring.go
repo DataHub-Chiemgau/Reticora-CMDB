@@ -453,6 +453,13 @@ type MetricNamer interface {
 	MetricNames(ctx context.Context, orgID, ciID string, since time.Time) ([]string, error)
 }
 
+// CIVisibility reports whether a CI exists and is visible under the
+// request's scope; stores that know the CIs implement it, and
+// GET /cis/{id}/metrics answers 404 for the others (TEN-06).
+type CIVisibility interface {
+	CIVisible(ctx context.Context, orgID, ciID string) (bool, error)
+}
+
 // WithCIResolver assigns samples without ci_id by their target label.
 func (h *Handler) WithCIResolver(r CIResolver) *Handler {
 	h.cis = r
@@ -832,7 +839,8 @@ const defaultCIMetricsWindow = 24 * time.Hour
 
 // CIMetrics handles GET /api/v1/cis/{id}/metrics?name=&from=&to=&step=
 // (MON-02): the series of one CI, all its metrics or the named one; the
-// detail view draws them as lines.
+// detail view draws them as lines. A CI outside the caller's scope, unknown
+// or malformed answers 404.
 func (h *Handler) CIMetrics(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := requireOrgID(w, r)
 	if !ok {
@@ -844,6 +852,17 @@ func (h *Handler) CIMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query.CIID = chi.URLParam(r, "id")
+	if v, ok := h.store.(CIVisibility); ok {
+		visible, verr := v.CIVisible(r.Context(), orgID, query.CIID)
+		if verr != nil {
+			api.WriteRepoError(w, verr)
+			return
+		}
+		if !visible {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
+			return
+		}
+	}
 	if query.From.IsZero() {
 		query.From = time.Now().UTC().Add(-defaultCIMetricsWindow)
 	}

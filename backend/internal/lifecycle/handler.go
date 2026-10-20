@@ -88,6 +88,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "key, name and at least one state are required")
 		return
 	}
+	if !validAppliesTo[req.AppliesTo] {
+		api.WriteFieldError(w, &api.FieldError{Field: "applies_to", Message: "applies_to must be asset, ci or both",
+			Status: http.StatusUnprocessableEntity})
+		return
+	}
 	def := &Definition{
 		OrganizationID: t.OrganizationID,
 		Key:            req.Key,
@@ -108,7 +113,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if err := h.repo.Create(r.Context(), def); err != nil {
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		// A taken key is 409 (in memory ErrConflict, in PostgreSQL 23505);
+		// no SQLSTATE or constraint text reaches the client (F-047).
+		if errors.Is(err, ErrConflict) {
+			api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
+			return
+		}
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, def)
@@ -152,10 +163,13 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, entityType 
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	entityID := chi.URLParam(r, "id")
+	entityID, ok := api.ParseUUIDParam(w, r, "id", "entity not found")
+	if !ok {
+		return
+	}
 	defKey, err := h.resolver.LifecycleKeyFor(r, t.OrganizationID, entityType, entityID)
 	if errors.Is(err, ErrNoLifecycleModel) {
-		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", ErrNoLifecycleModel.Error())
 		return
 	}
 	if err != nil {
@@ -164,8 +178,28 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, entityType 
 	}
 	result, err := h.service.Transition(r.Context(), t.OrganizationID, entityType, entityID, defKey, req)
 	if err != nil {
-		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		writeTransitionError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, result)
+}
+
+// validAppliesTo are the entity kinds of a lifecycle definition (the CHECK
+// of lifecycle_definition.applies_to); empty means asset.
+var validAppliesTo = map[string]bool{"": true, "asset": true, "ci": true, "both": true}
+
+// writeTransitionError reports a failed transition: the rejection of the
+// definition (422 with the field), a definition that cannot be resolved
+// (422), an entity that vanished (404); state store errors go through
+// api.WriteRepoError (F-047).
+func writeTransitionError(w http.ResponseWriter, err error) {
+	switch {
+	case api.WriteFieldError(w, err):
+	case errors.Is(err, ErrNoLifecycleModel):
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", ErrNoLifecycleModel.Error())
+	case err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", "entity not found")
+	default:
+		api.WriteRepoError(w, err)
+	}
 }

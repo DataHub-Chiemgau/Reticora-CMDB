@@ -124,15 +124,19 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// writeError maps repository errors: an invalid type is 400, a missing or
-// system type 404, a taken key 409.
+// writeError maps repository errors: an invalid type is 400 (the REL-01
+// rule as text), a missing or system type 404, a taken key 409; database
+// errors go through api.WriteRepoError (23505 is 409 without the constraint
+// name, F-047).
 func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrInvalid):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 	case errors.Is(err, ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", "relationship type not found or protected")
+	case errors.Is(err, ErrConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
 	default:
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		api.WriteRepoError(w, err)
 	}
 }

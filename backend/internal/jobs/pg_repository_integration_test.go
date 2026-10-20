@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 )
@@ -135,5 +136,111 @@ func TestJobsAgainstPostgres(t *testing.T) {
 	tracked, _, err := s.List(bg, f.OrgA, jobs.Filter{Kind: "export"}, api.PaginationParams{Limit: 10})
 	if err != nil || len(tracked) != 1 || tracked[0].Status != jobs.StatusSucceeded || tracked[0].RefID != exportID {
 		t.Errorf("tracked export job: %+v %v", tracked, err)
+	}
+}
+
+// TestExportJobsOnlyForTheirCreator covers WP-347 (F-059, EXP-01, TEN-06):
+// the generic job model mirrors export jobs, and request paths see such a
+// job only as its creator — like export.ownJob, without an exception for
+// org-wide administrators. Without a user id in the scope no export job is
+// visible; other kinds and the worker paths (no scope in the context) stay
+// organization-wide.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestExportJobsOnlyForTheirCreator(t *testing.T) {
+	f := scopetest.Seed(t, "aa")
+	bg := context.Background()
+	s := jobs.NewService(jobs.NewPGRepository(f.App))
+	s.Register(jobs.Kind{Name: "wp347.other", MaxAttempts: 1})
+	other := f.ID()
+	as := func(user string, clients ...string) context.Context {
+		scope := database.OrgWideScope(f.OrgA, user)
+		if len(clients) > 0 {
+			scope.Clients = database.ScopeIDs(clients...)
+		}
+		return database.ContextWithTenantScope(bg, &scope)
+	}
+	creator := as(f.User, f.Client1)
+	foreign := as(other, f.Client2)
+	orgAdmin := as(f.ID())
+	anonymous := as("")
+
+	// refJob is the generic job of an export row, read without RLS.
+	refJob := func(exportID string) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `SELECT id::text FROM job WHERE ref_table = 'export_job' AND ref_id = $1`, exportID).Scan(&id); err != nil {
+			t.Fatalf("generic job of export %s: %v", exportID, err)
+		}
+		return id
+	}
+
+	exportID := f.ID()
+	if err := s.Track(creator, f.OrgA, "export", "export_job", exportID, f.User); err != nil {
+		t.Fatal(err)
+	}
+	// The worker mirrors without a scope (export.JobWorker).
+	if err := s.Mirror(bg, f.OrgA, "export_job", exportID, jobs.StatusRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	exported := refJob(exportID)
+	plain, _, err := s.Enqueue(creator, f.OrgA, "wp347.other", nil, jobs.EnqueueOptions{CreatedBy: f.User})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids := func(ctx context.Context, filter jobs.Filter) (map[string]bool, int) {
+		t.Helper()
+		list, total, lerr := s.List(ctx, f.OrgA, filter, api.PaginationParams{Limit: 50})
+		if lerr != nil {
+			t.Fatalf("list: %v", lerr)
+		}
+		out := map[string]bool{}
+		for _, j := range list {
+			out[j.ID] = true
+		}
+		return out, total
+	}
+	for name, ctx := range map[string]context.Context{"creator": creator, "worker": bg} {
+		if got, gerr := s.Get(ctx, f.OrgA, exported); gerr != nil || got.CreatedBy != f.User {
+			t.Errorf("%s reads the export job: %+v %v", name, got, gerr)
+		}
+		if seen, total := ids(ctx, jobs.Filter{}); !seen[exported] || !seen[plain.ID] || total != 2 {
+			t.Errorf("%s lists %d jobs %v, want the export job and the other job", name, total, seen)
+		}
+	}
+	for name, ctx := range map[string]context.Context{"other user": foreign, "org admin": orgAdmin, "no user id": anonymous} {
+		if got, gerr := s.Get(ctx, f.OrgA, exported); !errors.Is(gerr, jobs.ErrNotFound) {
+			t.Errorf("%s reads the export job: %+v %v, want ErrNotFound", name, got, gerr)
+		}
+		if _, cerr := s.Cancel(ctx, f.OrgA, exported); !errors.Is(cerr, jobs.ErrNotFound) {
+			t.Errorf("%s cancels the export job: %v, want ErrNotFound", name, cerr)
+		}
+		seen, total := ids(ctx, jobs.Filter{})
+		if seen[exported] || !seen[plain.ID] || total != 1 {
+			t.Errorf("%s lists %d jobs %v, want only the other job", name, total, seen)
+		}
+		if _, total = ids(ctx, jobs.Filter{Kind: "export"}); total != 0 {
+			t.Errorf("%s counts %d export jobs, want 0", name, total)
+		}
+		// Other kinds stay organization-wide.
+		if got, gerr := s.Get(ctx, f.OrgA, plain.ID); gerr != nil || got.ID != plain.ID {
+			t.Errorf("%s reads the other job: %+v %v", name, got, gerr)
+		}
+	}
+	// The worker still moves the job; the creator cancels a queued one.
+	if err = s.Mirror(bg, f.OrgA, "export_job", exportID, jobs.StatusSucceeded, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, gerr := s.Get(creator, f.OrgA, exported); gerr != nil || got.Status != jobs.StatusSucceeded {
+		t.Errorf("creator after the worker: %+v %v", got, gerr)
+	}
+	queued := f.ID()
+	if err = s.Track(creator, f.OrgA, "export", "export_job", queued, f.User); err != nil {
+		t.Fatal(err)
+	}
+	queuedJob := refJob(queued)
+	if got, cerr := s.Cancel(creator, f.OrgA, queuedJob); cerr != nil || got.Status != jobs.StatusCancelled {
+		t.Errorf("creator cancels the queued export job: %+v %v", got, cerr)
 	}
 }

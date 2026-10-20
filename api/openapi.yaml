@@ -1256,7 +1256,8 @@ paths:
       summary: Configure the tenant data-retention policy
       description: >-
         Creates or updates the retention policy. `retention_days = 0` keeps
-        data forever (no erasure). `mode` selects whether expired records are
+        data forever (no erasure); a value outside 0..2147483647 is a 400
+        field error. `mode` selects whether expired records are
         anonymized (default; rows stay for referential integrity) or deleted.
         Requires user:manage.
       requestBody:
@@ -1266,7 +1267,7 @@ paths:
             schema:
               type: object
               properties:
-                retention_days: { type: integer, minimum: 0 }
+                retention_days: { type: integer, minimum: 0, maximum: 2147483647 }
                 mode: { type: string, enum: [anonymize, delete] }
       responses:
         '200':
@@ -1350,7 +1351,11 @@ paths:
         contains, contained_by, parent_of, child_of, mounted_in and located_in
         are projected and cannot be stored (422, REL-01, CH27): containment is
         the CI's parent_ci_id, mounted_in follows from the rack mount,
-        located_in from the CI's location.
+        located_in from the CI's location. A principal restricted to some
+        clients or sites may connect its own CI with a visible org-wide CI
+        (client or site NULL); the edge carries the client and site of the own
+        endpoint and is visible only there. An edge between two org-wide CIs
+        is reserved to org-wide principals (403, E-09, E-62).
       requestBody:
         required: true
         content:
@@ -2438,6 +2443,7 @@ paths:
       operationId: createDocument
       tags: [Documents]
       summary: Create a document metadata record
+      description: A new document has no link and is org-wide; a principal restricted to some clients or sites gets 403 (E-09, transition rule of E-61).
       requestBody:
         required: true
         content:
@@ -2455,6 +2461,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -2481,6 +2489,7 @@ paths:
       operationId: updateDocument
       tags: [Documents]
       summary: Update a document
+      description: A principal restricted to some clients or sites changes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
       requestBody:
         required: true
         content:
@@ -2504,6 +2513,7 @@ paths:
       operationId: deleteDocument
       tags: [Documents]
       summary: Delete a document
+      description: A principal restricted to some clients or sites deletes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
       responses:
         '204':
           description: Document deleted
@@ -2728,6 +2738,7 @@ paths:
       operationId: createMaintenanceWindow
       tags: [Maintenance]
       summary: Create a maintenance window
+      description: A window without ci_ids is org-wide; a principal restricted to some clients or sites gets 403 for it (E-09).
       requestBody:
         required: true
         content:
@@ -2745,6 +2756,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/maintenance-windows/{id}:
     x-phase: P3
@@ -2769,6 +2782,7 @@ paths:
       operationId: updateMaintenanceWindow
       tags: [Maintenance]
       summary: Update a maintenance window (incl. status transitions)
+      description: A principal restricted to some clients or sites changes only windows whose CIs it sees completely; a window that also covers another client's CI or has no CI (org-wide) answers 404 (TEN-05, E-09).
       requestBody:
         required: true
         content:
@@ -2792,6 +2806,7 @@ paths:
       operationId: deleteMaintenanceWindow
       tags: [Maintenance]
       summary: Delete a maintenance window
+      description: A principal restricted to some clients or sites deletes only windows whose CIs it sees completely; other windows answer 404 (TEN-05, E-09).
       responses:
         '204':
           description: Maintenance window deleted
@@ -4590,7 +4605,8 @@ paths:
       description: >-
         Returns the series of one CI for the detail view: the named metric or,
         without name, every metric the CI reported since from (default the last
-        24 hours). Requires the monitoring feature.
+        24 hours). Requires the monitoring feature. A CI outside the caller's
+        client/site scope, unknown or with a malformed id answers 404.
       parameters:
         - name: id
           in: path
@@ -4629,6 +4645,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/monitoring/alerts:
     x-phase: P3
@@ -7889,7 +7907,10 @@ paths:
       description: >
         Stores the request body as the document's object in blob storage.
         The Content-Type header is validated against a whitelist of common
-        office and image formats; the body is limited to 25 MiB.
+        office and image formats; the body is limited to 25 MiB. A principal
+        restricted to some clients or sites uploads only to documents whose
+        links it sees completely; other documents answer 404 before anything
+        is stored (TEN-05, E-09).
       requestBody:
         required: true
         content:
@@ -7980,6 +8001,7 @@ paths:
       operationId: linkDocument
       tags: [Documents]
       summary: Link a document to another entity
+      description: A principal restricted to some clients or sites may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09).
       requestBody:
         required: true
         content:
@@ -7997,6 +8019,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -9350,9 +9374,11 @@ paths:
       operationId: evaluateCompliance
       tags: [Compliance]
       summary: Evaluate active compliance rules against tenant CIs
+      description: The evaluation replaces the results of the whole organization; a principal restricted to some clients, sites or teams gets 403 (TEN-06, E-09).
       responses:
         '200': { description: Evaluation results and score, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceEvaluationResponse' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/results:
     x-phase: P3
@@ -10205,8 +10231,14 @@ paths:
       responses:
         '200':
           description: Execute a lifecycle transition on an asset
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/assets/{id}/movements:
     x-phase: P2
@@ -10245,8 +10277,14 @@ paths:
       responses:
         '200':
           description: Manage global CI field definitions
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/ci-fields/global/{name}:
     delete:
@@ -10421,6 +10459,10 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/ci-types/templates:
     get:
@@ -10518,6 +10560,12 @@ paths:
           description: Clone a CI type into a new version lineage
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/ci-types/{id}/deactivate:
     post:
@@ -10544,8 +10592,14 @@ paths:
       responses:
         '200':
           description: Manage CI type field definitions
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/ci-types/{id}/fields/{name}:
     delete:
@@ -10608,8 +10662,14 @@ paths:
       responses:
         '200':
           description: Manage CI-instance field definitions
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/cis/{id}/field-definitions/{name}:
     delete:
@@ -10704,8 +10764,14 @@ paths:
       responses:
         '200':
           description: Execute a lifecycle transition on a CI
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/cis/{id}/parent:
     get:
@@ -10925,11 +10991,20 @@ paths:
     post:
       operationId: createLifecycleDefinitions
       summary: Manage lifecycle definitions
+      description: >-
+        `applies_to` is asset (default), ci or both; another value is a 422
+        field error. A taken key is 409.
       responses:
         '201':
           description: Manage lifecycle definitions
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/lifecycle-definitions/{id}:
     get:
@@ -11085,9 +11160,14 @@ paths:
     put:
       operationId: putReconciliationSourcePolicy
       summary: Read or update the source-priority policy
+      description: >-
+        `priorities` must not be empty; `name` and the priorities must not
+        contain NUL characters (400 field error).
       responses:
         '200':
           description: Read or update the source-priority policy
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
 

@@ -1172,10 +1172,13 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 			frame.noProfile[i] = unclassifiedDevice(item)
 			continue
 		}
+		clientID, siteID := h.deviceReviewScope(ctx, orgID, item)
 		opened, openErr := h.openReview(ctx, &ReviewItem{
 			OrganizationID: orgID,
 			Kind:           ReviewKindUnclassifiedDevice,
 			Status:         ReviewStatusOpen,
+			ClientID:       clientID,
+			SiteID:         siteID,
 			Payload: map[string]any{
 				"reason":        "unknown_ci_type",
 				"ci_type_name":  item.CITypeName,
@@ -1221,6 +1224,25 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 	return frame, nil
 }
 
+// deviceReviewScope returns the client and site of a review item about an
+// ingested device without candidate CIs: those of its record or, when the
+// record names neither, those of its collector. Without either the item has
+// no client and only org-wide principals see it (migration 000140).
+func (h *Handler) deviceReviewScope(ctx context.Context, orgID string, item *IngestItem) (clientID, siteID string) {
+	if item.ClientID != "" || item.SiteID != "" || item.CollectorID == "" {
+		return item.ClientID, item.SiteID
+	}
+	repo, ok := h.repo.(ScopeRepository)
+	if !ok {
+		return "", ""
+	}
+	col, err := repo.ScopeCollector(ctx, orgID, item.CollectorID)
+	if err != nil {
+		return "", ""
+	}
+	return col.ClientID, col.SiteID
+}
+
 // processRecord reconciles record i of the frame; with a transaction runner
 // it runs in the record's own transaction. out receives what it changed.
 func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchFrame, i int, out *recordOutcome) error {
@@ -1236,10 +1258,13 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 	// No collector profile matched (DIS-02): the device becomes a
 	// generic_device CI and a reviewer classifies it.
 	if frame.noProfile[i] {
+		clientID, siteID := h.deviceReviewScope(ctx, orgID, &item)
 		opened, openErr := h.openReview(ctx, &ReviewItem{
 			OrganizationID: orgID,
 			Kind:           ReviewKindUnclassifiedDevice,
 			Status:         ReviewStatusOpen,
+			ClientID:       clientID,
+			SiteID:         siteID,
 			Payload: map[string]any{
 				"reason":        ReasonNoProfileMatch,
 				"ci_type_name":  ci.GenericDeviceType,

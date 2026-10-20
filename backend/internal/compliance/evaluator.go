@@ -23,15 +23,19 @@ func NewEvaluator(repo Repository, cis ci.Repository) *Evaluator {
 
 // Evaluate checks every active rule against the organization's CIs and
 // replaces the stored results. The results cover the whole organization, so
-// the evaluation runs org-wide whoever triggers it; listing results stays
-// scoped to the caller (E-08).
+// only an org-wide principal may run it (E-09); a caller restricted in any
+// scope dimension gets ErrOrgWideScopeRequired before anything is read or
+// written (E-08: no implicit org-wide access). System callers without a
+// request scope evaluate the whole organization. Listing results stays
+// scoped to the caller.
 func (e *Evaluator) Evaluate(ctx context.Context, orgID string) (EvaluationResponse, error) {
 	if scope, ok := database.TenantScopeFromContext(ctx); ok {
 		if scope.OrgID != orgID {
 			return EvaluationResponse{}, database.ErrTenantMismatch
 		}
-		orgWide := database.OrgWideScope(orgID, scope.UserID)
-		ctx = database.ContextWithTenantScope(ctx, &orgWide)
+		if !scope.Clients.IsAll() || !scope.Sites.IsAll() || !scope.Teams.IsAll() {
+			return EvaluationResponse{}, ErrOrgWideScopeRequired
+		}
 	}
 	rules, _, err := e.repo.ListRules(ctx, orgID, "", "", true, api.PaginationParams{Limit: 100})
 	if err != nil {
