@@ -510,3 +510,5 @@ TST-02;[B];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-353
 AUT-04;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-354
 API-05;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-354
 RBA-08;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-354
+RBA-08;[B];B;backend/internal/user/service_account_integration_test.go;WP-355
+API-05;[B];B;backend/internal/user/service_account_integration_test.go;WP-355

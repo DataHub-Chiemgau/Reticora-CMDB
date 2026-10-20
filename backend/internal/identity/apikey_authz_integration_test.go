@@ -4,8 +4,9 @@ package identity_test
 // RBA-08; findings F-006, F-007): rotating and revoking a key needs its
 // owner or a caller holding the key's rights in the holder's scope, and a
 // key bound to a service account never grants more than its creator holds.
-// The fixture is also used by the remaining defect test
-// TestAuditT2ServiceAccountRolesWithinCallerRights (WP-355).
+// TestAuditT2ServiceAccountRolesWithinCallerRights (WP-355, RBA-08, F-008)
+// uses the same fixture: a service account's roles are assigned only within
+// the caller's rights.
 //
 // Principals are resolved from their stored role assignments exactly as at
 // login (permission.PGRepository.AccessGrants + identity.ResolveAccess), and
@@ -13,7 +14,7 @@ package identity_test
 //
 // Retest (needs a migrated database):
 //
-//	cd backend && TEST_DATABASE_URL=… go test -count=1 -v -run '^TestAuditT2APIKeyRotateRevokeOnlyByEntitledCaller$|^TestAuditT2KeyBindingNeverBroadensCreatorScope$' ./internal/identity/
+//	cd backend && TEST_DATABASE_URL=… go test -count=1 -v -run '^TestAuditT2APIKeyRotateRevokeOnlyByEntitledCaller$|^TestAuditT2KeyBindingNeverBroadensCreatorScope$|^TestAuditT2ServiceAccountRolesWithinCallerRights$' ./internal/identity/
 
 import (
 	"context"
@@ -496,5 +497,69 @@ func TestAPIKeyHandlerFailClosedWithoutResolvers(t *testing.T) {
 	}
 	if w = call(owner, http.MethodDelete, "/api/v1/api-keys/"+created.ID, ""); w.Code != http.StatusNoContent {
 		t.Errorf("owner revokes without resolver: %d %s, want 204", w.Code, w.Body.String())
+	}
+}
+
+// TestAuditT2ServiceAccountRolesWithinCallerRights: service accounts are on a
+// par with users (RBA-08); whoever assigns their roles may grant only rights
+// they hold, in their own scope (RBA-03). A client-1 scoped caller holding
+// user:manage and role:manage (so the route check passes even after the
+// route fix) must not give a service account an org-wide role with
+// apikey:manage and webhook:manage, nor that role limited to client 1. The
+// org-wide administrator assigning a role within its rights is the control.
+func TestAuditT2ServiceAccountRolesWithinCallerRights(t *testing.T) {
+	k := newT2KeyFixture(t)
+	bg := context.Background()
+	callerID := k.f.AppUser(t, k.f.OrgA, "t2-sa-role-scoped")
+	callerRole, powerful := k.f.ID(), k.f.ID()
+	k.exec(`INSERT INTO role (id, organization_id, name, permissions, scope) VALUES ($1, $2, 't2-sa-role-scoped', '["user:read","user:manage","role:manage"]', 'client')`, callerRole, k.f.OrgA)
+	k.exec(`INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id) VALUES ($1, $2, $3, $4)`, k.f.OrgA, callerID, callerRole, k.f.Client1)
+	k.exec(`INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 't2-sa-powerful', '["ci:read","user:manage","role:manage","apikey:manage","webhook:manage"]')`, powerful, k.f.OrgA)
+	caller := k.resolve(k.f.OrgA, callerID)
+	resetScope := database.OrgWideScope(k.f.OrgA, "")
+	resetCtx := database.ContextWithTenantScope(bg, &resetScope)
+
+	w := k.call(caller, http.MethodPost, "/api/v1/service-accounts", `{"name":"t2-sa-minted-by-scoped"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create service account as the scoped caller: %d %s", w.Code, w.Body.String())
+	}
+	var sa user.ServiceAccount
+	if err := json.Unmarshal(w.Body.Bytes(), &sa); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ name, body string }{
+		{"org-wide powerful role", `{"roles":[{"role_id":"` + powerful + `"}]}`},
+		{"powerful role limited to client 1", `{"roles":[{"role_id":"` + powerful + `","scope_client_id":"` + k.f.Client1 + `"}]}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rw := k.call(caller, http.MethodPut, "/api/v1/service-accounts/"+sa.ID+"/roles", c.body)
+			grants, err := k.saRepo.ServiceAccountGrants(bg, k.f.OrgA, sa.ID)
+			if err != nil {
+				t.Fatalf("service account grants: %v", err)
+			}
+			if rw.Code != http.StatusForbidden || len(grants) != 0 {
+				var granted []string
+				for _, g := range grants {
+					granted = append(granted, permStrings(g.Permissions)...)
+				}
+				t.Errorf("client-1 scoped caller {user:read,user:manage,role:manage} assigns the %s to a service account: %d, account now grants %v; want 403 and no grants (never grant more than the caller holds)",
+					c.name, rw.Code, granted)
+			}
+			// Reset for the next case.
+			if _, err := k.saRepo.SetServiceAccountRoles(resetCtx, k.f.OrgA, sa.ID, &k.orgAdmin, nil); err != nil {
+				t.Fatalf("reset roles: %v", err)
+			}
+		})
+	}
+
+	// Control: the org-wide admin assigns a role within its rights.
+	w = k.call(k.admin, http.MethodPost, "/api/v1/service-accounts", `{"name":"t2-sa-by-admin"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("control: create service account: %d %s", w.Code, w.Body.String())
+	}
+	var adminSA user.ServiceAccount
+	_ = json.Unmarshal(w.Body.Bytes(), &adminSA)
+	if w := k.call(k.admin, http.MethodPut, "/api/v1/service-accounts/"+adminSA.ID+"/roles", `{"roles":[{"role_id":"`+k.saRole+`"}]}`); w.Code != http.StatusOK {
+		t.Errorf("control: org-wide admin assigns {ci:read} to a service account: %d %s, want 200", w.Code, w.Body.String())
 	}
 }

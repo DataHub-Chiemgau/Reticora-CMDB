@@ -4287,7 +4287,21 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Replace the role assignments of a service account */
+    /**
+     * Replace the role assignments of a service account
+     * @description Assigning roles is managing roles and needs `role:manage`, as for
+     *     users (RBA-08); the other service-account operations stay on
+     *     `user:manage`/`user:read`.
+     *
+     *     Grant ceiling: every assignment of the new list (role, optionally
+     *     limited by `scope_client_id`/`scope_site_id`) must lie within the
+     *     caller's rights, each of the role's permissions held by the caller in
+     *     a scope covering the assignment's scope; every existing assignment
+     *     missing from the new list is removed and must lie within the caller's
+     *     rights as well. Otherwise 403 naming the permissions not covered (and
+     *     the assignment, for a removal); the assignments stay unchanged. A
+     *     service account of another organization is 404.
+     */
     put: operations['setServiceAccountRoles'];
     post?: never;
     delete?: never;

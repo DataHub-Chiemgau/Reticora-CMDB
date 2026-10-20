@@ -32,7 +32,6 @@ go;backend/internal/discovery;TestAuditT3ResurrectedNewKeepsClientAndIdentity;F-
 go;backend/internal/discovery;TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices;F-030
 go;backend/internal/discovery;TestAuditZonedScopeTargetRefused;F-108
 go;backend/internal/history;TestAuditT3HistoryIncludesLocationChange;F-093
-go;backend/internal/identity;TestAuditT2ServiceAccountRolesWithinCallerRights;F-008
 go;backend/internal/iga;TestAuditT1ApprovalNeverLosesTheProvisioningTask;F-056
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
 go;backend/internal/ipam;TestAuditT3VLANReferenceMustBeVisible;F-088
@@ -66,7 +65,6 @@ go;backend/internal/server;TestAuditT2EntitlementQuotasEnforced;F-072
 go;backend/internal/server;TestAuditT2EntitlementRackViewGated;F-070
 go;backend/internal/server;TestAuditT2ListsAreCursorPages;F-075
 go;backend/internal/server;TestAuditT2RBA01KeysGateCITypesAndNotificationChannels;F-067
-go;backend/internal/server;TestAuditT2ServiceAccountRoleAssignmentNeedsRoleManage;F-008
 go;backend/internal/server;TestAuditT3HealthRefreshRunsInG1;F-087
 go;backend/internal/server;TestAuditT3OverrideRefusesReservedNames;F-092
 go;backend/internal/server;TestAuditT3ResolvedByIsThePrincipal;F-091

@@ -14,10 +14,14 @@
 //     production router (authz, validator, entitlement)": create shows the
 //     key once, list hides key and hash, rotate without body uses the 24 h
 //     overlap, a viewer gets 403, an API key cannot mint keys.
+//   - WP-355 (RBA-08, API-05), finding F-008: assigning roles to a service
+//     account is managing roles; PUT /service-accounts/{id}/roles needs
+//     role:manage, user:manage alone gets 403 (route table and production
+//     chain).
 //
 // Retest:
 //
-//	cd backend && go test -count=1 -v -run 'TestT2Audit' ./internal/server/
+//	cd backend && go test -count=1 -v -run 'TestT2Audit|TestAuditT2ServiceAccountRoleAssignmentNeedsRoleManage' ./internal/server/
 package server_test
 
 import (
@@ -325,5 +329,60 @@ func TestT2AuditAPIKeysThroughProductionChain(t *testing.T) {
 	}
 	if w := s.do(t2Request{method: http.MethodGet, path: "/api/v1/cis", apiKey: rotated.Key.Key}); w.Code != http.StatusUnauthorized {
 		t.Errorf("revoked key: %d, want 401", w.Code)
+	}
+}
+
+// authorizeAs runs AuthorizeRoute for a principal holding exactly perms.
+func authorizeAs(method, path string, perms ...identity.Permission) int {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	req := httptest.NewRequest(method, path, nil)
+	p := identity.Principal{Subject: "u", OrganizationID: "o", Type: identity.PrincipalTypeUser, Permissions: perms}
+	w := httptest.NewRecorder()
+	server.AuthorizeRoute(method, path)(ok).ServeHTTP(w, req.WithContext(identity.WithPrincipal(req.Context(), p)))
+	return w.Code
+}
+
+// TestAuditT2ServiceAccountRoleAssignmentNeedsRoleManage: service accounts
+// are on a par with users (RBA-08); assigning roles is managing roles
+// (RBA-01 role:manage, as POST /role-assignments). user:manage alone must not
+// assign roles to a service account.
+func TestAuditT2ServiceAccountRoleAssignmentNeedsRoleManage(t *testing.T) {
+	const path = "/api/v1/service-accounts/7a2a0000-0000-4000-8000-000000000201/roles"
+	if got := authorizeAs(http.MethodPut, path, identity.PermUserManage, identity.PermUserRead); got != http.StatusForbidden {
+		t.Errorf("PUT %s with user:manage but without role:manage -> %d, want 403", path, got)
+	}
+	if got := authorizeAs(http.MethodPut, path, identity.PermUserManage, identity.PermUserRead, identity.PermRoleManage); got != http.StatusOK {
+		t.Errorf("control: PUT %s with user:manage and role:manage -> %d, want 200", path, got)
+	}
+	if got := authorizeAs(http.MethodPost, "/api/v1/role-assignments", identity.PermUserManage); got != http.StatusForbidden {
+		t.Errorf("control: POST /api/v1/role-assignments with only user:manage -> %d, want 403", got)
+	}
+}
+
+// TestT2AuditServiceAccountRolesNeedRoleManageThroughProductionChain: the
+// role assignment of a service account through the production chain needs
+// role:manage (RBA-08, F-008); creating the account stays user:manage.
+func TestT2AuditServiceAccountRolesNeedRoleManageThroughProductionChain(t *testing.T) {
+	s := newT2Stack(t)
+	userManager, _ := s.login(t, identity.PermUserManage, identity.PermUserRead)
+	roleManager, _ := s.login(t, identity.PermUserManage, identity.PermUserRead, identity.PermRoleManage)
+
+	w := s.do(t2Request{method: http.MethodPost, path: "/api/v1/service-accounts", bearer: userManager, contentType: "application/json",
+		body: `{"name":"t2-chain-sa"}`})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST /api/v1/service-accounts with user:manage: %d %s", w.Code, w.Body.String())
+	}
+	var sa struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &sa); err != nil || sa.ID == "" {
+		t.Fatalf("created service account %s: %v", w.Body.String(), err)
+	}
+	path := "/api/v1/service-accounts/" + sa.ID + "/roles"
+	if w := s.do(t2Request{method: http.MethodPut, path: path, bearer: userManager, contentType: "application/json", body: `{"roles":[]}`}); w.Code != http.StatusForbidden {
+		t.Errorf("PUT %s with user:manage but without role:manage: %d %s, want 403", path, w.Code, w.Body.String())
+	}
+	if w := s.do(t2Request{method: http.MethodPut, path: path, bearer: roleManager, contentType: "application/json", body: `{"roles":[]}`}); w.Code != http.StatusOK {
+		t.Errorf("control: PUT %s with role:manage: %d %s, want 200", path, w.Code, w.Body.String())
 	}
 }

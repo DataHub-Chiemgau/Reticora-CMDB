@@ -27,6 +27,27 @@ var ErrServiceAccountNotFound = errors.New("service account not found")
 // webhook subscriptions are bound to is deleted.
 var ErrServiceAccountInUse = errors.New("service account is bound to API keys or webhook subscriptions")
 
+// RoleCeilingError is returned when a role assignment change exceeds the
+// caller's rights (RBA-08, RBA-03): Missing are the permissions the caller
+// does not hold in a scope covering the assignment's scope; Removed is set
+// when an existing assignment the new list drops is not covered.
+type RoleCeilingError struct {
+	Missing []identity.Permission
+	Removed *ServiceAccountRole
+}
+
+func (e *RoleCeilingError) Error() string {
+	perms := make([]string, len(e.Missing))
+	for i, p := range e.Missing {
+		perms[i] = string(p)
+	}
+	if e.Removed != nil {
+		return "removing the assignment of role " + e.Removed.RoleID + e.Removed.scopeText() +
+			" requires " + strings.Join(perms, ", ") + " in its scope"
+	}
+	return "the role assignments would grant " + strings.Join(perms, ", ") + " beyond the caller's rights"
+}
+
 // ServiceAccount is a non-human principal of an organization (RBA-08). It
 // holds role assignments like a user; API keys and webhook subscriptions
 // bound to it act with its rights and scopes.
@@ -50,6 +71,25 @@ type ServiceAccountRole struct {
 	ScopeSiteID   *string `json:"scope_site_id,omitempty"`
 }
 
+func (r *ServiceAccountRole) scopeText() string {
+	switch {
+	case r.ScopeSiteID != nil:
+		return " in site " + *r.ScopeSiteID
+	case r.ScopeClientID != nil:
+		return " in client " + *r.ScopeClientID
+	}
+	return " organization-wide"
+}
+
+// sameAssignment reports whether a and b assign the same role in the same
+// scope.
+func sameAssignment(a, b ServiceAccountRole) bool {
+	eq := func(x, y *string) bool {
+		return (x == nil) == (y == nil) && (x == nil || strings.EqualFold(*x, *y))
+	}
+	return strings.EqualFold(a.RoleID, b.RoleID) && eq(a.ScopeClientID, b.ScopeClientID) && eq(a.ScopeSiteID, b.ScopeSiteID)
+}
+
 // ServiceAccountUpdate is a partial update.
 type ServiceAccountUpdate struct {
 	Name        *string `json:"name"`
@@ -65,7 +105,10 @@ type ServiceAccountRepository interface {
 	CreateServiceAccount(ctx context.Context, sa *ServiceAccount) error
 	UpdateServiceAccount(ctx context.Context, orgID, id string, req ServiceAccountUpdate) (*ServiceAccount, error)
 	DeleteServiceAccount(ctx context.Context, orgID, id string) error
-	SetServiceAccountRoles(ctx context.Context, orgID, id string, roles []ServiceAccountRole) (*ServiceAccount, error)
+	// SetServiceAccountRoles replaces the assignments on behalf of caller;
+	// every new and every removed assignment must lie within the caller's
+	// rights (RoleCeilingError).
+	SetServiceAccountRoles(ctx context.Context, orgID, id string, caller *identity.Principal, roles []ServiceAccountRole) (*ServiceAccount, error)
 	// ServiceAccountGrants returns the role grants of an active service
 	// account; an inactive or unknown account has none.
 	ServiceAccountGrants(ctx context.Context, orgID, id string) ([]identity.Grant, error)
@@ -326,13 +369,20 @@ func (r *PGServiceAccounts) DeleteServiceAccount(ctx context.Context, orgID, id 
 	})
 }
 
-// SetServiceAccountRoles replaces the role assignments of an account.
-func (r *PGServiceAccounts) SetServiceAccountRoles(ctx context.Context, orgID, id string, roles []ServiceAccountRole) (*ServiceAccount, error) {
+// SetServiceAccountRoles replaces the role assignments of an account. Like a
+// user's role assignment it never grants more than the caller holds
+// (RBA-08, RBA-03): every assignment of the new list and every existing
+// assignment the list drops must be covered by the caller's rights
+// (identity.GrantCeiling); otherwise nothing changes and nothing is audited.
+func (r *PGServiceAccounts) SetServiceAccountRoles(ctx context.Context, orgID, id string, caller *identity.Principal, roles []ServiceAccountRole) (*ServiceAccount, error) {
 	var sa *ServiceAccount
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		if _, err = getServiceAccountTx(ctx, tx, orgID, id, true); err != nil {
+		current, err := getServiceAccountTx(ctx, tx, orgID, id, true)
+		if err != nil {
 			return err
+		}
+		if ceilingErr := checkRoleCeiling(ctx, tx, orgID, caller, current.Roles, roles); ceilingErr != nil {
+			return ceilingErr
 		}
 		if _, err = tx.Exec(ctx, `DELETE FROM service_account_role WHERE service_account_id = $1`, id); err != nil {
 			return fmt.Errorf("clear service account roles: %w", err)
@@ -353,6 +403,75 @@ func (r *PGServiceAccounts) SetServiceAccountRoles(ctx context.Context, orgID, i
 		return recordServiceAccountAudit(ctx, tx, orgID, id, "service_account.roles_changed", map[string]any{"roles": sa.Roles})
 	})
 	return sa, err
+}
+
+// checkRoleCeiling returns a RoleCeilingError when caller does not cover an
+// assignment of next or an assignment of current missing from next. An
+// assignment of a client- or site-scoped role without that scope grants
+// nothing at use, but is checked as organization-wide (fail-closed).
+func checkRoleCeiling(ctx context.Context, tx pgx.Tx, orgID string, caller *identity.Principal, current, next []ServiceAccountRole) error {
+	var missing []identity.Permission
+	for _, role := range next {
+		grant, err := assignmentGrant(ctx, tx, orgID, role)
+		if err != nil {
+			return err
+		}
+		for _, perm := range identity.GrantCeiling(caller, []identity.Grant{grant}) {
+			if !slices.Contains(missing, perm) {
+				missing = append(missing, perm)
+			}
+		}
+	}
+	if len(missing) > 0 {
+		return &RoleCeilingError{Missing: missing}
+	}
+	for _, old := range current {
+		if slices.ContainsFunc(next, func(r ServiceAccountRole) bool { return sameAssignment(r, old) }) {
+			continue
+		}
+		grant, err := assignmentGrant(ctx, tx, orgID, old)
+		if err != nil {
+			return err
+		}
+		if m := identity.GrantCeiling(caller, []identity.Grant{grant}); len(m) > 0 {
+			return &RoleCeilingError{Missing: m, Removed: &old}
+		}
+	}
+	return nil
+}
+
+// assignmentGrant is the grant of one assignment: the catalog permissions of
+// the role (as ServiceAccountGrants resolves them) in the assignment's scope.
+// An unknown role grants nothing; the assignment itself is then refused.
+func assignmentGrant(ctx context.Context, tx pgx.Tx, orgID string, role ServiceAccountRole) (identity.Grant, error) {
+	grant := identity.Grant{}
+	if role.ScopeClientID != nil {
+		grant.Clients = []string{*role.ScopeClientID}
+	}
+	if role.ScopeSiteID != nil {
+		grant.Sites = []string{*role.ScopeSiteID}
+	}
+	if !isUUID(role.RoleID) {
+		return grant, nil
+	}
+	var keys []string
+	err := tx.QueryRow(ctx, `
+		SELECT ARRAY(SELECT DISTINCT k FROM (
+		           SELECT rp.permission_key AS k FROM role_permission rp
+		            WHERE rp.role_id = ro.id AND rp.organization_id = ro.organization_id
+		           UNION SELECT jsonb_array_elements_text(COALESCE(ro.permissions, '[]'::jsonb))) keys
+		         WHERE k IN (SELECT key FROM permission) ORDER BY k)
+		  FROM role ro WHERE ro.organization_id = $1 AND ro.id = $2`, orgID, role.RoleID).Scan(&keys)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return grant, nil
+	}
+	if err != nil {
+		return grant, fmt.Errorf("read role permissions: %w", err)
+	}
+	for _, k := range keys {
+		grant.Permissions = append(grant.Permissions, identity.Permission(k))
+	}
+	return grant, nil
 }
 
 // ServiceAccountGrants implements ServiceAccountRepository. It runs on behalf
@@ -500,8 +619,10 @@ func (m *MemoryServiceAccounts) DeleteServiceAccount(_ context.Context, orgID, i
 	return ErrServiceAccountNotFound
 }
 
-// SetServiceAccountRoles implements ServiceAccountRepository.
-func (m *MemoryServiceAccounts) SetServiceAccountRoles(_ context.Context, orgID, id string, roles []ServiceAccountRole) (*ServiceAccount, error) {
+// SetServiceAccountRoles implements ServiceAccountRepository. Role
+// permissions are not known here and the assignments grant nothing, so there
+// is no ceiling to check.
+func (m *MemoryServiceAccounts) SetServiceAccountRoles(_ context.Context, orgID, id string, _ *identity.Principal, roles []ServiceAccountRole) (*ServiceAccount, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sa := m.find(orgID, id)

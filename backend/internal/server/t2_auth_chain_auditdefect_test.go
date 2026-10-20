@@ -11,10 +11,8 @@
 //     t2_auth_chain_test.go.
 //   - WP-068 (RBA-01), finding P2 "Authz mapping ignores the RBA-01 keys
 //     citype:manage and notification:manage"; gap (high) "every RBA-01 key
-//     gates a route; no near-duplicate keys".
-//   - WP-069 (RBA-08, API-05), finding P1 "Service-account binding and role
-//     assignment are not authorized against the caller's rights" (route
-//     part: PUT /service-accounts/{id}/roles needs only user:manage).
+//     gates a route; no near-duplicate keys". Uses authorizeAs of
+//     t2_auth_chain_test.go.
 //
 // Retest:
 //
@@ -24,13 +22,11 @@ package server_test
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 )
 
 // TestAuditT2CookieOnlyRefreshThroughProductionChain: the SPA renews the
@@ -69,16 +65,6 @@ func TestAuditT2CookieOnlyRefreshThroughProductionChain(t *testing.T) {
 			t.Errorf("POST /api/v1/auth/refresh without cookie: %d %s, want 401", w.Code, strings.TrimSpace(w.Body.String()))
 		}
 	})
-}
-
-// authorizeAs runs AuthorizeRoute for a principal holding exactly perms.
-func authorizeAs(method, path string, perms ...identity.Permission) int {
-	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	req := httptest.NewRequest(method, path, nil)
-	p := identity.Principal{Subject: "u", OrganizationID: "o", Type: identity.PrincipalTypeUser, Permissions: perms}
-	w := httptest.NewRecorder()
-	server.AuthorizeRoute(method, path)(ok).ServeHTTP(w, req.WithContext(identity.WithPrincipal(req.Context(), p)))
-	return w.Code
 }
 
 // TestAuditT2RBA01KeysGateCITypesAndNotificationChannels: RBA-01 names
@@ -124,22 +110,5 @@ func TestAuditT2RBA01KeysGateCITypesAndNotificationChannels(t *testing.T) {
 		if twin, ok := normalized[strings.ReplaceAll(string(k), "_", "")]; ok {
 			t.Errorf("permission catalogue holds %q next to the RBA-01 key %q", k, twin)
 		}
-	}
-}
-
-// TestAuditT2ServiceAccountRoleAssignmentNeedsRoleManage: service accounts
-// are on a par with users (RBA-08); assigning roles is managing roles
-// (RBA-01 role:manage, as POST /role-assignments). user:manage alone must not
-// assign roles to a service account.
-func TestAuditT2ServiceAccountRoleAssignmentNeedsRoleManage(t *testing.T) {
-	const path = "/api/v1/service-accounts/7a2a0000-0000-4000-8000-000000000201/roles"
-	if got := authorizeAs(http.MethodPut, path, identity.PermUserManage, identity.PermUserRead); got != http.StatusForbidden {
-		t.Errorf("PUT %s with user:manage but without role:manage -> %d, want 403", path, got)
-	}
-	if got := authorizeAs(http.MethodPut, path, identity.PermUserManage, identity.PermUserRead, identity.PermRoleManage); got != http.StatusOK {
-		t.Errorf("control: PUT %s with user:manage and role:manage -> %d, want 200", path, got)
-	}
-	if got := authorizeAs(http.MethodPost, "/api/v1/role-assignments", identity.PermUserManage); got != http.StatusForbidden {
-		t.Errorf("control: POST /api/v1/role-assignments with only user:manage -> %d, want 403", got)
 	}
 }

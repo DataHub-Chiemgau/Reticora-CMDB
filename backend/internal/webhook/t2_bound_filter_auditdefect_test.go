@@ -36,6 +36,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
@@ -58,13 +59,15 @@ func TestAuditT2BoundSubscriptionGetsOnlyReadableClientEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	saRepo := user.NewPGServiceAccounts(f.App)
+	// Assignments within the rights of an organization-wide administrator.
+	admin := identity.Principal{OrganizationID: f.OrgA, Permissions: identity.AllPermissions()}
 	newSA := func(name string, roles []user.ServiceAccountRole) string {
 		t.Helper()
 		sa := &user.ServiceAccount{OrganizationID: f.OrgA, Name: name}
 		if err := saRepo.CreateServiceAccount(orgCtx, sa); err != nil {
 			t.Fatalf("create service account %s: %v", name, err)
 		}
-		if _, err := saRepo.SetServiceAccountRoles(orgCtx, f.OrgA, sa.ID, roles); err != nil {
+		if _, err := saRepo.SetServiceAccountRoles(orgCtx, f.OrgA, sa.ID, &admin, roles); err != nil {
 			t.Fatalf("roles of %s: %v", name, err)
 		}
 		return sa.ID

@@ -269,6 +269,9 @@ var routeRules = []routeRule{
 	{http.MethodGet, "export/jobs/*", identity.PermJobRead},
 	{http.MethodGet, "exports", identity.PermJobRead},
 	{http.MethodGet, "exports/*", identity.PermJobRead},
+	// Assigning roles to a service account is managing roles, as for users
+	// (RBA-08, RBA-01); the account itself stays user:manage.
+	{http.MethodPut, "service-accounts/*/roles", identity.PermRoleManage},
 }
 
 // matchRouteRule returns the permission of the first rule matching the
