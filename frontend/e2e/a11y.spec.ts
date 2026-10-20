@@ -62,6 +62,39 @@ async function signIn(page: Page) {
   });
 }
 
+// pageDiagnostics collects what the browser reports while a page loads:
+// uncaught errors, console errors and failed requests. When the app shell
+// does not appear, the assertion names them, so a failure in CI shows its
+// cause in the job log.
+function pageDiagnostics(page: Page): () => string {
+  const lines: string[] = [];
+  page.on('pageerror', (err) => lines.push(`pageerror: ${err.message}`));
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') lines.push(`console.error: ${msg.text()}`);
+  });
+  page.on('requestfailed', (req) =>
+    lines.push(`requestfailed: ${req.url()} ${req.failure()?.errorText ?? ''}`),
+  );
+  return () =>
+    lines.length ? lines.join('\n') : 'no page errors, console errors or failed requests';
+}
+
+async function expectAppShell(page: Page, diagnostics: () => string) {
+  try {
+    await expect(page.locator('#main-content')).toBeVisible();
+  } catch (err) {
+    const state = await page
+      .evaluate(
+        () =>
+          `${document.readyState}, #root children: ${document.getElementById('root')?.childElementCount ?? 'no #root'}`,
+      )
+      .catch((e: unknown) => `unavailable (${String(e)})`);
+    throw new Error(
+      `${(err as Error).message}\nurl: ${page.url()}\ndocument: ${state}\n${diagnostics()}`,
+    );
+  }
+}
+
 async function expectNoViolations(page: Page) {
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   const summary = results.violations.map(
@@ -80,10 +113,11 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
 
   for (const path of MAIN_PAGES) {
     test(`page ${path}`, async ({ page }) => {
+      const diagnostics = pageDiagnostics(page);
       await mockBackend(page);
       await signIn(page);
       await page.goto(path);
-      await expect(page.locator('#main-content')).toBeVisible();
+      await expectAppShell(page, diagnostics);
       await page.waitForLoadState('networkidle');
       await expectNoViolations(page);
     });
