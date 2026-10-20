@@ -15,9 +15,14 @@ package monitoring_test
 // decides the 404 of GET /cis/{id}/metrics, and Ingest refuses samples for a
 // CI outside the scope or of another organization without writing any.
 //
+// WP-350 (F-051, TEN-02, TEN-05; WP-025 AC1, WP-039 AC1): the views
+// metric_sample_v and metric_sample_1h_v themselves restrict the rows to
+// the CIs visible under the client and site scope (migration 000143), so a
+// read path without the store's CI predicate leaks nothing either.
+//
 // Retest:
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_01?sslmode=disable \
-//     go test -count=1 -v -run 'TestAuditT1MetricReadPathsHonourScope|TestMetricNamesHonourScope|TestIngestRefusesInvisibleCI' ./internal/monitoring/
+//     go test -count=1 -v -run 'TestAuditT1MetricReadPathsHonourScope|TestMetricNamesHonourScope|TestIngestRefusesInvisibleCI|TestMetricViewsHonourScope' ./internal/monitoring/
 
 import (
 	"context"
@@ -27,6 +32,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/jackc/pgx/v5"
 )
 
 // t1MetricFixture seeds three CIs with samples: own (client 1, site 1),
@@ -243,5 +249,50 @@ func TestIngestRefusesInvisibleCI(t *testing.T) {
 	}
 	if n := count(m.own); n != 1 {
 		t.Errorf("own probe samples = %d, want 1", n)
+	}
+}
+
+// TestMetricViewsHonourScope selects both metric views directly, without the
+// CI predicate of the store queries: a client-1 or site-1 principal reads no
+// row of the client-2 CI, but the rows of its own CIs; the org-wide principal
+// reads all of them.
+func TestMetricViewsHonourScope(t *testing.T) {
+	m := seedT1Metrics(t, "6b")
+	// rows[principal][ci]: samples per CI in either view (the aggregate has
+	// one row per CI, series and hour).
+	rows := map[string]map[string]int{
+		"org":     {m.own: 1, m.sibling: 1, m.foreign: 2},
+		"client1": {m.own: 1, m.sibling: 1, m.foreign: 0},
+		"site1":   {m.own: 1, m.sibling: 0, m.foreign: 0},
+	}
+	for kind, ctx := range m.scopes() {
+		scope, _ := database.TenantScopeFromContext(ctx)
+		for _, view := range []string{"metric_sample_v", "metric_sample_1h_v"} {
+			total := 0
+			for _, ciID := range []string{m.own, m.sibling, m.foreign} {
+				var n int
+				if err := database.WithTenant(context.Background(), m.f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+					return tx.QueryRow(ctx, `SELECT count(*) FROM `+view+` WHERE organization_id = $1 AND ci_id = $2`, m.f.OrgA, ciID).Scan(&n)
+				}); err != nil {
+					t.Fatalf("%s %s: %v", kind, view, err)
+				}
+				if want := rows[kind][ciID]; n != want {
+					t.Errorf("TEN-05/TEN-06: %s selects %d rows of CI %s from %s, want %d", kind, n, ciID, view, want)
+				}
+				total += rows[kind][ciID]
+			}
+			// Without the organization predicate, for all fixture CIs at once,
+			// the view returns exactly the visible rows.
+			var n int
+			if err := database.WithTenant(context.Background(), m.f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+				return tx.QueryRow(ctx, `SELECT count(*) FROM `+view+` WHERE ci_id = ANY($1::uuid[])`,
+					[]string{m.own, m.sibling, m.foreign}).Scan(&n)
+			}); err != nil {
+				t.Fatalf("%s %s unfiltered: %v", kind, view, err)
+			}
+			if n != total {
+				t.Errorf("TEN-05: %s selects %d rows of the fixture CIs from %s, want %d", kind, n, view, total)
+			}
+		}
 	}
 }

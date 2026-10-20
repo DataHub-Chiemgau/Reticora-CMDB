@@ -498,3 +498,6 @@ TEN-06;[B];B;backend/internal/jobs/pg_repository_integration_test.go;WP-347
 TEN-09;[Q];B;backend/internal/tenant/rls/export_job_channel_integration_test.go;WP-347
 TEN-03;[B];B;tests/install-cloud-helpers.test.sh;WP-348
 TEN-03;[B];B;backend/internal/database/scopetest/scopetest_integration_test.go;WP-349
+TEC-06;[B], [Q] Spike;B;backend/internal/monitoring/timescale_rls_spike_integration_test.go;WP-350
+MON-01;[B];B;backend/internal/monitoring/timescale_rls_spike_integration_test.go;WP-350
+TEN-02;[B];B;backend/internal/monitoring/audit_t1_metric_scope_integration_test.go;WP-350

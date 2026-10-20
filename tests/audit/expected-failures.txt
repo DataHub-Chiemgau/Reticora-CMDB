@@ -48,7 +48,6 @@ go;backend/internal/middleware;TestAuditT2RefusedCredentialTrafficKeepsOrgBudget
 go;backend/internal/middleware;TestAuditT2SessionBudgetSurvivesTokenRefresh;F-076
 go;backend/internal/middleware;TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget;F-063
 go;backend/internal/middleware;TestAuditT2ValidatorRegistryMatchesOpenAPIRequestBodies;F-018
-go;backend/internal/monitoring;TestAuditT1MetricViewsHonourScope;F-051
 go;backend/internal/notify;TestAuditDefectSMTPChannelCloudMetadataBlocked;F-153
 go;backend/internal/notify;TestAuditDefectSMTPSecretNotReleasedToNewHost;F-152
 go;backend/internal/rack;TestAuditDefectRackHeightNotBelowMounts;F-140
