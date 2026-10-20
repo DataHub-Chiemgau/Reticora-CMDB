@@ -161,3 +161,137 @@ func isPoolType(expr ast.Expr) bool {
 	pkg, ok := sel.X.(*ast.Ident)
 	return ok && pkg.Name == "pgxpool" && sel.Sel.Name == "Pool"
 }
+
+// TestAdminPoolCallersAreListed is the architecture rule of NewAdminPool
+// (TEN-03, WP-351): the pool without the runtime login check is only used by
+// the command-line tools listed in adminPoolCallers. A reference from
+// cmd/server or internal/, from an unlisted file, or a listed file without a
+// reference fails the test.
+func TestAdminPoolCallersAreListed(t *testing.T) {
+	refs := scanAdminPoolRefs(t)
+	if len(refs) == 0 {
+		t.Error("no reference of NewAdminPool found; the scan is broken")
+	}
+	for _, msg := range adminPoolViolations(refs, adminPoolCallers) {
+		t.Error(msg)
+	}
+
+	// The rule itself: a server or internal caller, an unlisted tool and a
+	// stale entry are reported; the listed tools are not.
+	cases := []struct {
+		name  string
+		refs  []poolCall
+		allow map[string]string
+		want  []string
+	}{
+		{"listed tool", []poolCall{{file: "cmd/seed/main.go", pos: "cmd/seed/main.go:1"}},
+			map[string]string{"cmd/seed/main.go": "seed"}, nil},
+		{"server caller", []poolCall{{file: "cmd/server/main.go", pos: "cmd/server/main.go:1"}},
+			map[string]string{"cmd/server/main.go": "server"}, []string{"cmd/server/main.go:1", "adminPoolCallers entry cmd/server/main.go"}},
+		{"internal caller", []poolCall{{file: "internal/jobs/x.go", pos: "internal/jobs/x.go:1"}},
+			map[string]string{"internal/jobs/x.go": "job"}, []string{"internal/jobs/x.go:1", "adminPoolCallers entry internal/jobs/x.go"}},
+		{"database package caller", []poolCall{{file: "internal/database/x.go", pos: "internal/database/x.go:1"}},
+			map[string]string{}, []string{"internal/database/x.go:1"}},
+		{"unlisted tool", []poolCall{{file: "cmd/other/main.go", pos: "cmd/other/main.go:1"}},
+			map[string]string{}, []string{"cmd/other/main.go:1"}},
+		{"stale entry", nil, map[string]string{"cmd/seed/main.go": "seed"}, []string{"cmd/seed/main.go (seed) matches no reference"}},
+	}
+	for _, tc := range cases {
+		got := adminPoolViolations(tc.refs, tc.allow)
+		if len(got) != len(tc.want) {
+			t.Errorf("rule %s: violations = %q, want %d matching %q", tc.name, got, len(tc.want), tc.want)
+			continue
+		}
+		for i, w := range tc.want {
+			if !strings.Contains(got[i], w) {
+				t.Errorf("rule %s: violation %q lacks %q", tc.name, got[i], w)
+			}
+		}
+	}
+}
+
+// adminPoolViolations checks the references of NewAdminPool against allow:
+// every reference must be in a listed file, every entry must be a tool
+// outside cmd/server and must still match a reference.
+func adminPoolViolations(refs []poolCall, allow map[string]string) []string {
+	var out []string
+	hit := map[string]bool{}
+	for _, r := range refs {
+		if _, ok := allow[r.file]; ok && adminPoolCallerAllowed(r.file) {
+			hit[r.file] = true
+			continue
+		}
+		out = append(out, r.pos+": database.NewAdminPool skips the runtime login check (TEN-03); "+
+			"the server and internal packages use database.NewPool, command-line tools are listed in adminPoolCallers")
+	}
+	files := make([]string, 0, len(allow))
+	for file := range allow {
+		files = append(files, file)
+	}
+	sort.Strings(files)
+	for _, file := range files {
+		switch {
+		case !adminPoolCallerAllowed(file):
+			out = append(out, "adminPoolCallers entry "+file+" is no command-line tool; only cmd/ outside cmd/server may use NewAdminPool")
+		case !hit[file]:
+			out = append(out, "adminPoolCallers entry "+file+" ("+allow[file]+") matches no reference of NewAdminPool any more; remove it")
+		}
+	}
+	return out
+}
+
+// adminPoolCallerAllowed reports whether file may be listed at all: a
+// command under cmd/ other than the server.
+func adminPoolCallerAllowed(file string) bool {
+	return strings.HasPrefix(file, "cmd/") && !strings.HasPrefix(file, "cmd/server/")
+}
+
+// scanAdminPoolRefs returns every reference of NewAdminPool in the Go files
+// of the module, test files and this package included; only the declaration
+// in pool.go is skipped.
+func scanAdminPoolRefs(t *testing.T) []poolCall {
+	t.Helper()
+	fset := token.NewFileSet()
+	var refs []poolCall
+	err := filepath.WalkDir(backendRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(backendRoot, path)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			if d.Name() == "vendor" || d.Name() == "testdata" || strings.HasPrefix(d.Name(), ".") && rel != "." {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(rel, ".go") {
+			return nil
+		}
+		file, parseErr := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if parseErr != nil {
+			return parseErr
+		}
+		var decl *ast.Ident
+		for _, d := range file.Decls {
+			if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == "NewAdminPool" && file.Name.Name == "database" {
+				decl = fn.Name
+			}
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok && id.Name == "NewAdminPool" && id != decl {
+				refs = append(refs, poolCall{file: rel, pos: rel + ":" + strconv.Itoa(fset.Position(id.Pos()).Line), call: id.Name})
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan backend: %v", err)
+	}
+	sort.Slice(refs, func(i, j int) bool { return refs[i].pos < refs[j].pos })
+	return refs
+}

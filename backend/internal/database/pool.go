@@ -43,7 +43,54 @@ const PoolMaxConns = 25
 // creation fails instead of silently serving cross-tenant data. Every
 // connection uses the UTF-8 client encoding the quoting of the tenant
 // transaction relies on (pinClientEncoding); another one is refused.
+//
+// On top of that the runtime login is checked: the effective rights must
+// match the role contract (VerifyRoleContract). cmd/server is the caller.
 func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	pool, err := newAppRolePool(ctx, databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	if err := VerifyRLSEnforced(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
+
+	// The effective rights, including inherited ones, must match the role
+	// contract (TEN-03, CH19); any deviation refuses the start.
+	if err := VerifyRoleContract(ctx, pool, DefaultOwnerRole); err != nil {
+		pool.Close()
+		return nil, err
+	}
+
+	return pool, nil
+}
+
+// NewAdminPool creates a pool with the same configuration as NewPool (size,
+// client encoding, SET ROLE into the application role, refusal when that
+// role bypasses row level security) but without the check of the runtime
+// login (VerifyRLSEnforced, VerifyRoleContract). It is only for command-line
+// tools that log in with the migration/admin login (cmd/seed,
+// cmd/audit-verify, cmd/audit-seed, TEN-03, WP-351); their tenant work still
+// runs under RLS as the application role. The server never uses it: every
+// caller is listed with a reason in adminPoolCallers (tenantguard_allowlist.go)
+// and checked by TestAdminPoolCallersAreListed.
+func NewAdminPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	pool, err := newAppRolePool(ctx, databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	if err := verifyCurrentRoleEnforcesRLS(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return pool, nil
+}
+
+// newAppRolePool is the shared part of NewPool and NewAdminPool: a pool whose
+// connections switch into the application role; the callers check the
+// effective rights.
+func newAppRolePool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	if strings.TrimSpace(databaseURL) == "" {
 		return nil, fmt.Errorf("database URL is required")
 	}
@@ -85,19 +132,6 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 		pool.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
-
-	if err := VerifyRLSEnforced(ctx, pool); err != nil {
-		pool.Close()
-		return nil, err
-	}
-
-	// The effective rights, including inherited ones, must match the role
-	// contract (TEN-03, CH19); any deviation refuses the start.
-	if err := VerifyRoleContract(ctx, pool, DefaultOwnerRole); err != nil {
-		pool.Close()
-		return nil, err
-	}
-
 	return pool, nil
 }
 
@@ -131,8 +165,15 @@ func NewMaintenancePool(ctx context.Context, databaseURL string) (*pgxpool.Pool,
 // VerifyRLSEnforced fails when the effective database role can bypass Row Level
 // Security. Tenant isolation in Reticora is enforced by RLS policies keyed on
 // app.org_id; a superuser or BYPASSRLS role turns every policy into a no-op and
-// exposes all tenants to each other.
+// exposes all tenants to each other. It is part of the runtime login check of
+// NewPool; NewAdminPool only runs verifyCurrentRoleEnforcesRLS.
 func VerifyRLSEnforced(ctx context.Context, pool *pgxpool.Pool) error {
+	return verifyCurrentRoleEnforcesRLS(ctx, pool)
+}
+
+// verifyCurrentRoleEnforcesRLS fails when current_user, the role the
+// connections switched into, is a superuser or has BYPASSRLS.
+func verifyCurrentRoleEnforcesRLS(ctx context.Context, pool *pgxpool.Pool) error {
 	var current string
 	var super, bypass bool
 	err := pool.QueryRow(ctx, `

@@ -30,3 +30,23 @@ var tenantGuardAllowlist = map[string]string{
 	// in WithTenant.
 	"internal/citype/ddl_job.go": "index DDL outside a transaction",
 }
+
+// adminPoolCallers lists the files that may call NewAdminPool, the pool
+// without the runtime login check (TEN-03, WP-351). Only command-line tools
+// that log in with the migration/admin login belong here; the server and
+// every package under internal/ use NewPool. TestAdminPoolCallersAreListed
+// fails for every other caller and for entries that match no call any more.
+var adminPoolCallers = map[string]string{
+	// Demo and load-test seed (SIM-01, NFR-10): make seed and the load job run
+	// it with the migration login.
+	"cmd/seed/main.go": "seed with the migration login",
+
+	// Offline audit chain verification (AUD-04): an operator tool, run with
+	// the admin login, also against the restored database of the nightly
+	// restore test.
+	"cmd/audit-verify/main.go": "audit chain verification with the admin login",
+
+	// Restore-test seeding command: creates a tenant with an audit chain in
+	// the empty database of the nightly restore test with the admin login.
+	"cmd/audit-seed/main.go": "restore-test seed with the admin login",
+}

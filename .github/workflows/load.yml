@@ -61,7 +61,11 @@ jobs:
         ports:
           - 6379:6379
     env:
+      # DATABASE_URL is the migration/admin login (migrate, seed via
+      # database.NewAdminPool); the server logs in with RUNTIME_DATABASE_URL,
+      # a login without SUPERUSER/BYPASSRLS (TEN-03, WP-351).
       DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora?sslmode=disable
+      RUNTIME_DATABASE_URL: postgres://reticora_test_runtime:reticora_test_runtime@localhost:5432/reticora?sslmode=disable
       OBJECTS: ${{ inputs.objects || '10000' }}
       DURATION: ${{ inputs.duration || '2m' }}
     steps:
@@ -80,12 +84,23 @@ jobs:
           go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
           migrate -path backend/migrations -database "$DATABASE_URL" up
 
+      # TEN-03/F-057 (WP-351): the server runs with a runtime login without
+      # SUPERUSER/BYPASSRLS, member of reticora_app only (same SQL as the
+      # runtime test login of the CI database job, WP-349).
+      - name: Create the runtime login
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE reticora_test_runtime LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD 'reticora_test_runtime';
+          GRANT reticora_app TO reticora_test_runtime;
+          SQL
+
       - name: Build server and seed
         working-directory: backend
         run: |
           go build -o "$RUNNER_TEMP/server" ./cmd/server
           go build -o "$RUNNER_TEMP/seed" ./cmd/seed
 
+      # The seed is a tool with the migration login (database.NewAdminPool).
       - name: Seed (SIM-01, NFR-10)
         run: |
           "$RUNNER_TEMP/seed" -database-url "$DATABASE_URL" -objects "$OBJECTS" -api-key-file "$RUNNER_TEMP/load.key"
@@ -98,7 +113,7 @@ jobs:
       - name: Start the server
         run: |
           openssl genrsa -out "$RUNNER_TEMP/session.pem" 2048
-          RETICORA_DATABASE_URL="$DATABASE_URL" \
+          RETICORA_DATABASE_URL="$RUNTIME_DATABASE_URL" \
           RETICORA_REDIS_URL=redis://localhost:6379/0 \
           RETICORA_NATS_URL=nats://localhost:4222 \
           RETICORA_SESSION_KEY_PATH="$RUNNER_TEMP/session.pem" \
