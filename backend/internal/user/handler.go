@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // ContactLister gathers every contact record belonging to a person for the
@@ -74,14 +75,28 @@ func (h *Handler) WithSessionRevoker(sessions SessionRevoker) *Handler {
 	return h
 }
 
-// revokeSessions blacklists the sessions of the user. It is called before the
-// deactivation commits, so a failure leaves the user unchanged, and again
-// afterwards to cover tokens refreshed in between.
+// revokeSessions blacklists the sessions of the user.
 func (h *Handler) revokeSessions(ctx context.Context, userID string) error {
 	if h.sessions == nil {
 		return nil
 	}
 	return h.sessions.RevokeUser(ctx, userID, time.Now().UTC())
+}
+
+// sessionRevocation blacklists the sessions of the user as the
+// DeactivationHook, inside the deactivation transaction once the user was
+// found in the organization: a failure rolls the deactivation back, and a
+// request for a user of another organization writes nothing. err keeps the
+// failure so the handler can answer 503 instead of 404.
+type sessionRevocation struct {
+	h      *Handler
+	userID string
+	err    error
+}
+
+func (s *sessionRevocation) hook(ctx context.Context, _ pgx.Tx) error {
+	s.err = s.h.revokeSessions(ctx, s.userID)
+	return s.err
 }
 
 // RegisterRoutes registers user/team/role routes on the given mux.
@@ -218,17 +233,18 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deactivate := req.Status != nil && !statusIsActive(*req.Status)
-	if deactivate {
-		if err := h.revokeSessions(r.Context(), id); err != nil {
-			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "sessions could not be revoked; the user was not deactivated")
-			return
-		}
+	revocation := &sessionRevocation{h: h, userID: id}
+	item, err := h.repo.UpdateUserTx(r.Context(), t.OrganizationID, id, req, revocation.hook)
+	if revocation.err != nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "sessions could not be revoked; the user was not deactivated")
+		return
 	}
-	item, err := h.repo.UpdateUser(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
 		return
 	}
+	// Second revocation after the commit: covers tokens refreshed between
+	// the first one and the commit of the status change.
 	if deactivate {
 		if err := h.revokeSessions(r.Context(), id); err != nil {
 			slog.Warn("second session revocation after deactivation failed", "user_id", id, "error", err)
@@ -351,11 +367,12 @@ func (h *Handler) Anonymize(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "you cannot anonymize your own account")
 		return
 	}
-	if err := h.revokeSessions(r.Context(), id); err != nil {
+	revocation := &sessionRevocation{h: h, userID: id}
+	u, err := h.repo.AnonymizeUserTx(r.Context(), t.OrganizationID, id, revocation.hook)
+	if revocation.err != nil {
 		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "sessions could not be revoked; the user was not anonymized")
 		return
 	}
-	u, err := h.repo.AnonymizeUser(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
 		return

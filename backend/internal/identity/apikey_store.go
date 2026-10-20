@@ -275,19 +275,61 @@ func (s *PGAPIKeyStore) MarkUsed(ctx context.Context, orgID, id string) error {
 	})
 }
 
-// RevokeUserAPIKeys revokes every active API key the user created, inside the
-// caller's transaction, so a deactivation and the revocation of the user's
-// service tokens commit together (TLC-04). It returns the number of keys
-// revoked.
+// RevokeUserAPIKeys revokes every active API key the user created for
+// themself, inside the caller's transaction, so a deactivation and the
+// revocation of the user's service tokens commit together (TLC-04). It
+// returns the number of keys revoked.
+//
+// Keys the user created for a service account stay valid: they belong to the
+// service account (AUT-04, RBA-08; decision E-64, option 2).
+// KeptServiceAccountKeys lists them for the audit entry and the rotation
+// notice of the deactivation.
 func RevokeUserAPIKeys(ctx context.Context, tx pgx.Tx, orgID, userID string) (int64, error) {
 	tag, err := tx.Exec(ctx, `
 		UPDATE api_key SET revoked_at = now(), updated_at = now()
-		WHERE organization_id = $1 AND created_by = $2 AND revoked_at IS NULL
+		WHERE organization_id = $1 AND created_by = $2 AND revoked_at IS NULL AND service_account_id IS NULL
 	`, orgID, userID)
 	if err != nil {
 		return 0, fmt.Errorf("revoke api keys of user: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// KeptServiceAccountKey is a key a deactivated user created for a service
+// account that stays valid (E-64, option 2): what an administrator needs to
+// find and rotate it, never the secret or its hash.
+type KeptServiceAccountKey struct {
+	ID                 string `json:"id"`
+	KeyPrefix          string `json:"key_prefix"`
+	Name               string `json:"name"`
+	ServiceAccountID   string `json:"service_account_id"`
+	ServiceAccountName string `json:"service_account_name"`
+}
+
+// KeptServiceAccountKeys lists the active, unexpired keys the user created
+// for service accounts of the organization, inside the caller's transaction,
+// ordered by service account and key name.
+func KeptServiceAccountKeys(ctx context.Context, tx pgx.Tx, orgID, userID string) ([]KeptServiceAccountKey, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT k.id::text, k.key_prefix, k.name, k.service_account_id::text, sa.name
+		FROM api_key k
+		JOIN service_account sa ON sa.id = k.service_account_id AND sa.organization_id = k.organization_id
+		WHERE k.organization_id = $1 AND k.created_by = $2 AND k.service_account_id IS NOT NULL
+		  AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > now())
+		ORDER BY sa.name, k.name, k.id
+	`, orgID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list service-account keys of user: %w", err)
+	}
+	kept, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (KeptServiceAccountKey, error) {
+		var k KeptServiceAccountKey
+		scanErr := row.Scan(&k.ID, &k.KeyPrefix, &k.Name, &k.ServiceAccountID, &k.ServiceAccountName)
+		return k, scanErr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list service-account keys of user: %w", err)
+	}
+	return kept, nil
 }
 
 // APIKeyRepository is the identification (APIKeyStore) and the management

@@ -13,6 +13,10 @@
 //     refresh cookie 401; another user of the organization 200. After the
 //     reactivation the old token stays 401 and a token issued afterwards is
 //     200.
+//   - WP-359 (TLC-04, TEN-04; finding F-060): a deactivation request of an
+//     organization B admin for the user answers 404 and leaves bearer and
+//     X-API-Key at 200; a user of organization B stays at 200 when the user
+//     is deactivated.
 //
 // Retest (needs a migrated database and Redis):
 //
@@ -61,6 +65,8 @@ func TestT2DeactivationFullChain(t *testing.T) {
 	}
 	other := f.AppUser(t, f.OrgA, "t2-fullchain-other")
 	admin := f.AppUser(t, f.OrgA, "t2-fullchain-admin")
+	foreign := f.AppUser(t, f.OrgB, "t2-fullchain-foreign")
+	foreignAdmin := f.AppUser(t, f.OrgB, "t2-fullchain-foreign-admin")
 	roleID := f.ID()
 	if _, err = f.Admin.Exec(bg, `INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 't2-fullchain-reader', '["ci:read"]')`, roleID, f.OrgA); err != nil {
 		t.Fatal(err)
@@ -86,10 +92,10 @@ func TestT2DeactivationFullChain(t *testing.T) {
 	authHandler := identity.NewHandler(nil, sessions).WithProvisioning(users, "").
 		WithAccessResolver(permission.NewPGRepository(f.App)).WithRefreshSessions(refresh)
 
-	login := func(subject string) (token, cookie string) {
+	loginIn := func(org, subject string) (token, cookie string) {
 		t.Helper()
 		now := time.Now().UTC()
-		claims := identity.SessionClaims{Subject: subject, OrganizationID: f.OrgA, Permissions: []identity.Permission{identity.PermCIRead},
+		claims := identity.SessionClaims{Subject: subject, OrganizationID: org, Permissions: []identity.Permission{identity.PermCIRead},
 			ID: "t2-fullchain-" + subject + "-" + now.Format("150405.000000000"), IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)}
 		if token, err = sessions.Issue(claims); err != nil {
 			t.Fatal(err)
@@ -99,6 +105,7 @@ func TestT2DeactivationFullChain(t *testing.T) {
 		}
 		return token, cookie
 	}
+	login := func(subject string) (token, cookie string) { return loginIn(f.OrgA, subject) }
 	get := func(header, value string) int {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/cis", nil)
 		req.Header.Set(header, value)
@@ -115,16 +122,20 @@ func TestT2DeactivationFullChain(t *testing.T) {
 	}
 	mux := chi.NewRouter()
 	user.NewHandler(users).WithSessionRevoker(revocations).RegisterRoutes(mux)
-	setStatus := func(status string) {
+	patchStatus := func(org, actor, status string) int {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+target, strings.NewReader(`{"status":"`+status+`"}`))
 		req.Header.Set("Content-Type", "application/json")
-		scope := database.OrgWideScope(f.OrgA, admin)
-		ctx := tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: admin})
+		scope := database.OrgWideScope(org, actor)
+		ctx := tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: org, UserID: actor})
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req.WithContext(database.ContextWithTenantScope(ctx, &scope)))
-		if w.Code != http.StatusOK {
-			t.Fatalf("PATCH status %s: %d %s", status, w.Code, w.Body.String())
+		return w.Code
+	}
+	setStatus := func(status string) {
+		t.Helper()
+		if code := patchStatus(f.OrgA, admin, status); code != http.StatusOK {
+			t.Fatalf("PATCH status %s: %d", status, code)
 		}
 	}
 
@@ -132,11 +143,24 @@ func TestT2DeactivationFullChain(t *testing.T) {
 	// this test are issued at least a second away from the status changes.
 	token, cookie := login(target)
 	otherToken, _ := login(other)
+	foreignToken, _ := loginIn(f.OrgB, foreign)
 	if code := get("Authorization", "Bearer "+token); code != http.StatusOK {
 		t.Fatalf("before: bearer of the user: %d, want 200", code)
 	}
 	if code := get("X-API-Key", key.Plaintext); code != http.StatusOK {
 		t.Fatalf("before: API key of the user: %d, want 200", code)
+	}
+
+	// A deactivation request from organization B does not reach the user.
+	time.Sleep(1100 * time.Millisecond)
+	if code := patchStatus(f.OrgB, foreignAdmin, "inactive"); code != http.StatusNotFound {
+		t.Errorf("PATCH status inactive by an organization B admin: %d, want 404", code)
+	}
+	if code := get("Authorization", "Bearer "+token); code != http.StatusOK {
+		t.Errorf("after the foreign request: bearer of the user -> %d, want 200", code)
+	}
+	if code := get("X-API-Key", key.Plaintext); code != http.StatusOK {
+		t.Errorf("after the foreign request: API key of the user -> %d, want 200", code)
 	}
 
 	time.Sleep(1100 * time.Millisecond)
@@ -152,6 +176,9 @@ func TestT2DeactivationFullChain(t *testing.T) {
 	}
 	if code := get("Authorization", "Bearer "+otherToken); code != http.StatusOK {
 		t.Errorf("after deactivation: another user of the organization -> %d, want 200", code)
+	}
+	if code := get("Authorization", "Bearer "+foreignToken); code != http.StatusOK {
+		t.Errorf("after deactivation: a user of another organization -> %d, want 200", code)
 	}
 
 	setStatus("active")

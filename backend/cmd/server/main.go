@@ -358,9 +358,9 @@ func main() {
 	// assistant has tenant-owned content to ground its answers. Chunks are
 	// embedded only for organizations that opted in and hold the ai add-on
 	// (AI-02); otherwise they stay lexical.
-	aiOptIn, _ := repos.AI.(ai.OptInSource)
+	// The router wires the same consent into the Ask path.
 	repos.CI = ci.NewIndexingRepository(repos.CI, ai.NewCIChunkIndexer(repos.AI, aiProvider).
-		WithConsent(ai.OrgConsent{OptIn: aiOptIn, Entitlements: entitlementSvc}))
+		WithConsent(ai.NewOrgConsent(repos.AI, entitlementSvc)))
 
 	// Webhook and connector destinations are user input: every outbound call
 	// goes through the egress client (SEC-08).

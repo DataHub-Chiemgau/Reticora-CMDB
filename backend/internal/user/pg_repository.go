@@ -12,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -189,6 +190,13 @@ func (r *PGRepository) CreateUser(ctx context.Context, u *User) error {
 }
 
 func (r *PGRepository) UpdateUser(ctx context.Context, orgID, id string, req UpdateUserRequest) (*User, error) {
+	return r.UpdateUserTx(ctx, orgID, id, req, nil)
+}
+
+// UpdateUserTx updates the user; a status change locks the row of the
+// organization first, and for a non-active status onDeactivate runs after
+// that lock, in the same transaction (TLC-04).
+func (r *PGRepository) UpdateUserTx(ctx context.Context, orgID, id string, req UpdateUserRequest, onDeactivate DeactivationHook) (*User, error) {
 	var item *User
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		setClauses := make([]string, 0, 4)
@@ -211,6 +219,11 @@ func (r *PGRepository) UpdateUser(ctx context.Context, orgID, id string, req Upd
 					return fmt.Errorf("user not found")
 				}
 				return fmt.Errorf("lock user for update: %w", err)
+			}
+			if !statusIsActive(*req.Status) && onDeactivate != nil {
+				if err := onDeactivate(ctx, tx); err != nil {
+					return err
+				}
 			}
 			setClauses = append(setClauses, fmt.Sprintf("is_active = $%d", argPos))
 			args = append(args, statusIsActive(*req.Status))
@@ -257,18 +270,39 @@ func (r *PGRepository) UpdateUser(ctx context.Context, orgID, id string, req Upd
 
 // deactivateInTx revokes the API keys of a user that was just deactivated and
 // records the deactivation, in the transaction of the status change (TLC-04).
-// Sessions and refresh tokens end through the session blacklist written by the
-// handler and the status check of every refresh.
+// The keys the user created for service accounts stay valid (decision E-64,
+// option 2): the audit entry lists them, and an apikey.creator_deactivated
+// event in the same transaction asks the org_admins to rotate them. Sessions
+// and refresh tokens end through the session blacklist the handler writes in
+// the DeactivationHook and the status check of every refresh.
 func deactivateInTx(ctx context.Context, tx pgx.Tx, orgID, id, action string) error {
 	revoked, err := identity.RevokeUserAPIKeys(ctx, tx, orgID, id)
 	if err != nil {
 		return err
 	}
-	return recordUserAudit(ctx, tx, orgID, id, action, map[string]interface{}{
-		"is_active":        false,
-		"api_keys_revoked": revoked,
-		"sessions_revoked": true,
-	})
+	kept, err := identity.KeptServiceAccountKeys(ctx, tx, orgID, id)
+	if err != nil {
+		return err
+	}
+	if kept == nil {
+		kept = []identity.KeptServiceAccountKey{}
+	}
+	if err := recordUserAudit(ctx, tx, orgID, id, action, map[string]interface{}{
+		"is_active":                 false,
+		"api_keys_revoked":          revoked,
+		"service_account_keys_kept": kept,
+		"sessions_revoked":          true,
+	}); err != nil {
+		return err
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	if _, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.APIKeyCreatorDeactivated, EntityID: id,
+		Data: map[string]any{"user_id": id, "action": action, "keys": kept}}); err != nil {
+		return fmt.Errorf("record rotation notice: %w", err)
+	}
+	return nil
 }
 
 // recordUserAudit appends an audit entry for a change of the user account,
@@ -335,8 +369,26 @@ func (r *PGRepository) DeleteUser(ctx context.Context, orgID, id string) error {
 // foreign keys (tickets, assignments, audit) stay intact — the record simply
 // no longer identifies a person.
 func (r *PGRepository) AnonymizeUser(ctx context.Context, orgID, id string) (*User, error) {
+	return r.AnonymizeUserTx(ctx, orgID, id, nil)
+}
+
+// AnonymizeUserTx anonymizes the user; onDeactivate runs after the row of the
+// organization is locked, in the same transaction (TLC-04).
+func (r *PGRepository) AnonymizeUserTx(ctx context.Context, orgID, id string, onDeactivate DeactivationHook) (*User, error) {
 	var item *User
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var locked string
+		if err := tx.QueryRow(ctx, `SELECT id FROM app_user WHERE id = $1 AND organization_id = $2 FOR UPDATE`, id, orgID).Scan(&locked); err != nil {
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("user not found")
+			}
+			return fmt.Errorf("lock user for anonymization: %w", err)
+		}
+		if onDeactivate != nil {
+			if err := onDeactivate(ctx, tx); err != nil {
+				return err
+			}
+		}
 		row := tx.QueryRow(ctx, `
 			UPDATE app_user
 			SET email = $3,

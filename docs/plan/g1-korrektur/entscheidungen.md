@@ -11,7 +11,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-61](#e-61) | Anlage von Dokumenten durch client- oder site-gescopte Principals | offen (Empfehlung als Übergangsregel) | WP-341 |
 | [E-62](#e-62) | Beziehungen zwischen eigenem CI und org-weitem CI | entschieden: Option 2 (Auftraggeber, 2026-10-20) | WP-345 |
 | [E-63](#e-63) | Client-/Site-Scope für Metriken (WP-025 AK1 gegenüber ADR 0001 Punkt 4) | entschieden: Option 1 (Auftraggeber, 2026-10-20) | WP-350 |
-| [E-64](#e-64) | Widerruf von Service-Account-Keys bei Deaktivierung des anlegenden Benutzers | offen (Empfehlung als Übergangsregel) | WP-359 |
+| [E-64](#e-64) | Widerruf von Service-Account-Keys bei Deaktivierung des anlegenden Benutzers | entschieden: Option 2 (Auftraggeber, 2026-10-20) | WP-359 |
 | [E-65](#e-65) | MFA-Pflicht im Login-Pfad ohne Keycloak-Admin-Client (AUT-09) | offen (Empfehlung als Übergangsregel) | WP-367 |
 | [E-66](#e-66) | API-07/API-08: Bulk-Statusänderung bei erzwungenem If-Match | offen (Empfehlung als Übergangsregel) | WP-368 |
 | [E-67](#e-67) | Credentials eines Discovery-Scopes ohne credential_ids | offen (Empfehlung als Übergangsregel) | WP-376, WP-378, WP-384, WP-496 |
@@ -160,7 +160,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** Widerruf von Service-Account-Keys bei Deaktivierung des anlegenden Benutzers
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 2 (Auftraggeber, 2026-10-20)
 
 **Frage:** Sollen bei der Deaktivierung eines Benutzers auch die API-Keys widerrufen werden, die er für Service-Accounts angelegt hat? TLC-04 verlangt, dass die API-Keys des Nutzers sofort ungültig werden; AUT-04/RBA-08 ordnen einen Key entweder einem Nutzer oder einem Service-Account zu.
 
@@ -172,7 +172,9 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 2: entspricht AUT-04/RBA-08 (der Key gehört dem Service-Account), hält Integrationen am Laufen und macht das Restrisiko sichtbar, dass die ausgeschiedene Person das Secret bei der Erstellung gesehen hat.
 
-**Übergangsregel:** Bis zur Entscheidung gilt Option 1 (fail-closed, Ist-Verhalten); WP-359 (`t2-deactivation-tenant`) schreibt sie mit Test und OpenAPI-Beschreibung fest. Wird Option 2 entschieden, ändern sich nur der Filter `service_account_id IS NULL` in `RevokeUserAPIKeys`, der Audit-Eintrag und die Testerwartung (im selben WP, wenn vor dem Merge entschieden, sonst Folgeänderung ≤ 0,5 PT).
+**Übergangsregel (bis 2026-10-20):** Bis zur Entscheidung gilt Option 1 (fail-closed, Ist-Verhalten); WP-359 (`t2-deactivation-tenant`) schreibt sie mit Test und OpenAPI-Beschreibung fest. Wird Option 2 entschieden, ändern sich nur der Filter `service_account_id IS NULL` in `RevokeUserAPIKeys`, der Audit-Eintrag und die Testerwartung (im selben WP, wenn vor dem Merge entschieden, sonst Folgeänderung ≤ 0,5 PT).
+
+**Umsetzung:** Folge-Commit zu WP-359 (`t2-deactivation-tenant`). `identity.RevokeUserAPIKeys` widerruft nur noch die eigenen Keys des Benutzers (`AND service_account_id IS NULL`); `identity.KeptServiceAccountKeys` liest in derselben Transaktion die aktiven, nicht abgelaufenen Service-Account-Keys, die er angelegt hat. `deactivateInTx` (Deaktivierung per PATCH, Anonymisierung und alle anderen Aufrufer von `UpdateUser`/`AnonymizeUser`) schreibt sie als `service_account_keys_kept` (id, key_prefix, name, service_account_id, service_account_name; nie Secret oder Hash) in den Audit-Eintrag `user.deactivated` bzw. `user.anonymized` und legt, wenn es welche gibt, im selben Transaktionsschritt das Outbox-Ereignis `apikey.creator_deactivated` an. Die NTF-05-Subscription (`notify.Subscriptions`) stellt es als kritische Benachrichtigung der Kategorie `apikey` den aktiven Inhabern der Rolle `org_admin` der Organisation mit `apikey:manage` über die Kanäle der Organisation zu (Notification-Center, E-Mail), Dedup über die Event-ID. Ein Fehler beim Lesen, im Audit oder in der Outbox rollt die Deaktivierung zurück (fail-closed wie WP-359). OpenAPI-Beschreibung von `PATCH /users/{id}` und `POST /users/{id}/anonymize` nachgeführt. Test: `TestDeactivationRevokesServiceAccountKeysOfCreator` in `backend/internal/identity/deactivation_integration_test.go` (Service-Account-Key bleibt gültig, `api_keys_revoked` = 1, Audit listet den Key, je org_admin genau eine Benachrichtigung, keine in der fremden Organisation).
 
 **Betroffene IDs:** TLC-04, AUT-04, RBA-08
 

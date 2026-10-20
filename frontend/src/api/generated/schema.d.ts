@@ -2518,7 +2518,10 @@ export interface paths {
     delete: operations['deleteUser'];
     options?: never;
     head?: never;
-    /** Update a user */
+    /**
+     * Update a user
+     * @description A non-active status deactivates the user (TLC-04): in the same transaction the user's sessions and refresh cookies are revoked and every active API key the user created for themself is revoked. Keys the user created for service accounts belong to the service account and stay valid (decision E-64, option 2): the audit entry of the deactivation lists them (id, prefix, name, service account; never the secret), and the org_admins of the organization receive a notification to rotate them. The sessions are revoked only after the user was found in the caller's organization; an unknown user or a user of another organization answers 404 without any effect. If the sessions cannot be revoked, nothing is changed and the answer is 503.
+     */
     patch: operations['updateUser'];
     trace?: never;
   };
@@ -4516,7 +4519,7 @@ export interface paths {
     put?: never;
     /**
      * Anonymize a user (GDPR Art. 17, right to erasure)
-     * @description Replaces all personal data (e-mail, display name, avatar, external ID) with non-identifying surrogate values and disables the account. The row itself and audit history are kept so referential integrity and the audit chain survive. Requires user:manage.
+     * @description Replaces all personal data (e-mail, display name, avatar, external ID) with non-identifying surrogate values and disables the account. The row itself and audit history are kept so referential integrity and the audit chain survive. Requires user:manage. Like a deactivation (TLC-04), it revokes the user's sessions and refresh cookies and every active API key the user created for themself, in the same transaction and only for a user of the caller's organization. Keys the user created for service accounts stay valid (decision E-64, option 2): the audit entry lists them (id, prefix, name, service account; never the secret), and the org_admins of the organization receive a notification to rotate them; an unknown user or a user of another organization answers 404 without any effect. If the sessions cannot be revoked, nothing is changed and the answer is 503. The caller cannot anonymize their own account (400).
      */
     post: operations['anonymizeUser'];
     delete?: never;
@@ -5513,7 +5516,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Ask the governed RAG assistant */
+    /**
+     * Ask the governed RAG assistant
+     * @description The question and the matching CI context are sent to the external AI provider only for an organization that opted in to external AI processing (organization.ai_opt_in) and holds the ai add-on (AI-02). Otherwise the request is refused with 403 and the problem type ai-opt-in-required before a conversation is created, anything is retrieved or the provider is called.
+     */
     post: operations['askAI'];
     delete?: never;
     options?: never;
@@ -21430,8 +21436,10 @@ export interface operations {
           'application/json': components['schemas']['User'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listUserRolesLegacy: {
@@ -24625,7 +24633,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Missing permission, the ai add-on is not entitled (feature-not-entitled), or the organization has not opted in to external AI processing (https://reticora.io/problems/ai-opt-in-required). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       503: components['responses']['ServiceUnavailable'];
     };
   };
