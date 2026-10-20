@@ -92,6 +92,53 @@ administrator alone.
   and the installer administrator are covered by the realm and need no
   admin client.
 
+## Operators (SEC-07)
+
+The operator path `/api/v1/admin/*` admits personalized operators: members
+of the realm group `operators` whose login used a second factor. The shared
+`RETICORA_OPERATOR_TOKEN` is for bootstrap and break-glass only.
+
+- **Group:** `operators` carries the realm role `operator`, which contains
+  `mfa_required`; every member therefore sets up OTP at the first login
+  (*configure OTP*) and enters a code at every later one. Make an account an
+  operator by adding it to the group (Admin console → Users → Groups, or
+  `kcadm.sh update users/<id>/groups/<group-id> -r reticora -n`). An operator
+  needs no `organization_id`; operator sessions never reach the tenant API.
+- **Server:** `RETICORA_OPERATOR_GROUP` (default `operators`) names the group
+  the `groups` claim must contain (group name without path, as the client
+  mapper emits it). `RETICORA_OPERATOR_MFA_ACR` (default `2`) lists the acr
+  values that prove the second factor; an `amr` claim with a second factor
+  (`otp`, `mfa`, `webauthn`, …) counts as well, the bundled realm emits none.
+- **acr / level of authentication:** the realm attribute `acr.loa.map`
+  (`{"1":1,"2":2}`) maps the acr values to the levels of the flow
+  `browser-mfa`: level 1 is username and password (subflow `browser-mfa
+  password`), level 2 is reached only after an OTP (subflow `browser-mfa level
+  2`: holders of `mfa_required` have entered their OTP in `browser-mfa otp`
+  just before, everyone else enters it there). Level 2 has the maximum age 0:
+  every operator login asks for a fresh OTP, an existing SSO session at level
+  1 is stepped up with the OTP only. The client scope `acr` is a default scope
+  of `reticora-app`, so the ID token carries `acr` (`1` after the password,
+  `2` after the OTP when level 2 was requested, `0` for a pure SSO login).
+- **Login URL:** the operator login is an authorization code flow with PKCE
+  of the client `reticora-app` that requests level 2 with `acr_values=2`:
+
+  ```text
+  <issuer>/protocol/openid-connect/auth?client_id=reticora-app&response_type=code
+    &redirect_uri=<RETICORA_OIDC_REDIRECT_URL>&scope=openid%20profile%20email
+    &state=<random>&code_challenge=<S256 of the verifier>&code_challenge_method=S256
+    &acr_values=2
+  ```
+
+  The code is redeemed with `POST /api/v1/admin/auth/callback`
+  (`{"code", "state", "code_verifier"}`) instead of the SPA callback; the
+  answer is a 15-minute operator session. Without `acr_values=2` the ID
+  token has acr `1` even after an OTP, and the login is refused (403), as is
+  every login without the group. Every attempt is recorded in
+  `operator_audit` (refusals with the failed condition and the acr).
+  `frontend/e2e-real/support/stack.ts` (`operatorAuthorization`) builds this
+  URL; `frontend/e2e-real/operator-login.spec.ts` runs the login against the
+  installed stack.
+
 ## Notes on the bundled realm
 
 - The organization of a user is the user attribute `organization_id` (the

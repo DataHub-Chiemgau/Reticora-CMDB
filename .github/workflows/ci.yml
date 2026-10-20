@@ -339,7 +339,8 @@ jobs:
           retention-days: 14
 
   # Gate G1 (WP-213): REP-01 structure, gate checklist, open Critical findings,
-  # frozen acceptance artefacts and workflow syntax.
+  # frozen acceptance artefacts and workflow syntax; the break-glass alert
+  # (WP-362, SEC-07).
   gate:
     runs-on: ubuntu-latest
     steps:
@@ -350,6 +351,22 @@ jobs:
 
       - name: Gate and structure checks (REP-01, GATE-01/02/05, SEQ-01, DOD-01, GLO-11)
         run: ./tests/rep01-structure.test.sh
+
+      # SEC-07 (WP-362): every break-glass use alarms. promtool pinned to the
+      # Prometheus 3.5 LTS release, checksum from its sha256sums.txt.
+      - name: Install promtool
+        run: |
+          set -euo pipefail
+          curl -sSfL -o "$RUNNER_TEMP/prometheus.tgz" \
+            https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz
+          echo "e811827af26d822afb09a4f28314f61b618b12cff5369835a67f674d8b46f39a  $RUNNER_TEMP/prometheus.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/prometheus.tgz" -C "$RUNNER_TEMP" --strip-components=1 prometheus-3.5.0.linux-amd64/promtool
+          echo "PROMTOOL=$RUNNER_TEMP/promtool" >> "$GITHUB_ENV"
+
+      - name: Break-glass alert rule and promtool unit test (SEC-07)
+        env:
+          REQUIRE_PROMTOOL: "1"
+        run: ./tests/audit/t2-break-glass-alert.test.sh
 
   lint:
     runs-on: ubuntu-latest

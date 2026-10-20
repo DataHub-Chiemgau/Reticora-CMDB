@@ -80,8 +80,8 @@ func (h *Handler) ListRole(w http.ResponseWriter, r *http.Request) {
 }
 
 // ReplaceRole handles PUT /api/v1/roles/{id}/permissions. The route is gated
-// by the permission:write authorization middleware; the handler only needs
-// the tenant context.
+// by the role:manage authorization middleware; the handler only needs the
+// tenant context.
 func (h *Handler) ReplaceRole(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
 	if !ok {

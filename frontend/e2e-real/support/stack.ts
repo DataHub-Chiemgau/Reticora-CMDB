@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { keycloakOtp } from '../../e2e/support/totp';
 
@@ -198,4 +199,143 @@ export async function keycloakAdminToken(request: APIRequestContext): Promise<st
   });
   expect(res.ok(), `Keycloak admin token: ${res.status()}`).toBe(true);
   return ((await res.json()) as { access_token: string }).access_token;
+}
+
+/**
+ * OPERATOR_ACR is the acr value the operator login requests (acr_values):
+ * level of authentication 2 of the realm flow browser-mfa, reached only with
+ * an OTP. The server issues an operator session only for an ID token with
+ * this acr (RETICORA_OPERATOR_MFA_ACR) and the group operators (SEC-07,
+ * WP-361, deploy/keycloak/README.md).
+ */
+export const OPERATOR_ACR = '2';
+
+export interface OperatorAuthorization {
+  /** Authorization URL of the operator login (PKCE, acr_values=2). */
+  url: string;
+  state: string;
+  codeVerifier: string;
+  /** The redirect URI the server exchanges the code with. */
+  redirectUri: string;
+}
+
+/**
+ * operatorAuthorization builds the authorization URL of the operator login
+ * from the server's OIDC configuration (GET /api/v1/auth/config): the
+ * reticora-app client, the configured redirect URI, PKCE (S256) and
+ * acr_values=2, which makes Keycloak ask for the OTP.
+ */
+export async function operatorAuthorization(
+  request: APIRequestContext,
+): Promise<OperatorAuthorization> {
+  const res = await request.get(`${BASE}/api/v1/auth/config`);
+  expect(res.ok(), `GET /api/v1/auth/config: ${res.status()}`).toBe(true);
+  const config = (await res.json()) as {
+    client_id: string;
+    redirect_uri?: string;
+    scopes: string[];
+    authorization_endpoint: string;
+  };
+  expect(config.redirect_uri, 'configured OIDC redirect URI').toBeTruthy();
+  const codeVerifier = randomBytes(48).toString('base64url');
+  const state = randomBytes(16).toString('hex');
+  const url = new URL(config.authorization_endpoint);
+  url.search = new URLSearchParams({
+    client_id: config.client_id,
+    response_type: 'code',
+    redirect_uri: config.redirect_uri!,
+    scope: config.scopes.join(' '),
+    state,
+    code_challenge: createHash('sha256').update(codeVerifier).digest('base64url'),
+    code_challenge_method: 'S256',
+    acr_values: OPERATOR_ACR,
+  }).toString();
+  return { url: url.toString(), state, codeVerifier, redirectUri: config.redirect_uri! };
+}
+
+export interface OperatorSession {
+  token: string;
+  expires_at: string;
+  operator: { id: string; name?: string; email?: string; kind: string };
+}
+
+/**
+ * operatorLogin signs in through Keycloak with the operator authorization
+ * URL (password and OTP, e2e/support/totp.ts) and posts the code to
+ * POST /api/v1/admin/auth/callback. The redirect to the redirect URI is the
+ * SPA callback, which would redeem the code as a tenant login. It is taken
+ * from Keycloak's answer instead: every form post to Keycloak goes through
+ * route.fetch without following redirects, and the answer that redirects to
+ * the redirect URI is replaced by a placeholder page. A redirect target is
+ * not intercepted reliably (Chromium does not hand Playwright the redirect
+ * from the Keycloak host to the loopback SPA of an installed stack). It
+ * returns the server's answer without asserting the status.
+ */
+export async function operatorLogin(
+  page: Page,
+  request: APIRequestContext,
+  account: Pick<Account, 'email' | 'password'>,
+): Promise<ApiResult<OperatorSession>> {
+  const auth = await operatorAuthorization(request);
+  const keycloak = new URL(auth.url).origin;
+  let location = '';
+  await page.route(
+    (url) => url.origin === keycloak && url.pathname.includes('/login-actions/'),
+    async (route) => {
+      if (route.request().method() !== 'POST') {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch({ maxRedirects: 0 });
+      const target = response.headers()['location'] ?? '';
+      if (
+        response.status() >= 300 &&
+        response.status() < 400 &&
+        target.startsWith(auth.redirectUri)
+      ) {
+        location = target;
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/html',
+          body: '<p id="operator-login-done">operator login</p>',
+        });
+        return;
+      }
+      await route.fulfill({ response });
+    },
+  );
+  await page.goto(auth.url);
+  await page.locator('#username').fill(account.email);
+  await page.locator('#password').fill(account.password);
+  await page.locator('#kc-login').click();
+  // acr_values=2 always asks for the OTP (setup at the first login).
+  await keycloakOtp(page, account.email, /#operator-login-done$/);
+  await expect
+    .poll(() => location, {
+      message: `redirect to ${auth.redirectUri}; Keycloak stopped at ${page.url()}`,
+      timeout: 30_000,
+    })
+    .not.toBe('');
+  const redirect = new URL(location);
+  const code = redirect.searchParams.get('code') ?? '';
+  expect(
+    code,
+    `authorization code at the redirect URI, got ${location} (error ${redirect.searchParams.get('error')}: ${redirect.searchParams.get('error_description')})`,
+  ).toBeTruthy();
+  expect(redirect.searchParams.get('state'), 'state of the operator authorization').toBe(
+    auth.state,
+  );
+  const state = auth.state;
+  const res = await request.post(`${BASE}/api/v1/admin/auth/callback`, {
+    data: { code, state, code_verifier: auth.codeVerifier },
+    failOnStatusCode: false,
+  });
+  const text = await res.text();
+  let body: unknown = text;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    // keep the raw text
+  }
+  return { status: res.status(), body: body as OperatorSession };
 }

@@ -6,7 +6,7 @@ DELETE /api/v1/buildings/{id} location:write
 DELETE /api/v1/cables/{id} rack:write
 DELETE /api/v1/ci-contacts/{id} contact:write
 DELETE /api/v1/ci-fields/global/{name} ci_attribute:manage
-DELETE /api/v1/ci-types/{id}/fields/{name} ci_type:manage
+DELETE /api/v1/ci-types/{id}/fields/{name} citype:manage
 DELETE /api/v1/cis/{id} ci:delete
 DELETE /api/v1/cis/{id}/field-definitions/{name} ci_instance_attribute:manage
 DELETE /api/v1/cis/{id}/fields/{name}/override override:write
@@ -33,7 +33,7 @@ DELETE /api/v1/maintenance-windows/{id} maintenance:write
 DELETE /api/v1/monitoring/alerts/{id} monitoring:write
 DELETE /api/v1/mounts/{id} rack:write
 DELETE /api/v1/network-interfaces/{id} ipam:write
-DELETE /api/v1/notification-channels/{id} webhook:manage
+DELETE /api/v1/notification-channels/{id} notification:manage
 DELETE /api/v1/orders/{id} order:write
 DELETE /api/v1/rack-mounts/{id} rack:write
 DELETE /api/v1/racks/{id} rack:write
@@ -193,9 +193,9 @@ GET /api/v1/monitoring/metrics monitoring:read
 GET /api/v1/mounts rack:read
 GET /api/v1/mounts/{id} rack:read
 GET /api/v1/network-interfaces/{id} ipam:read
-GET /api/v1/notification-channels webhook:read
-GET /api/v1/notification-channels/{id} webhook:read
-GET /api/v1/notification-deliveries webhook:read
+GET /api/v1/notification-channels notification:manage
+GET /api/v1/notification-channels/{id} notification:manage
+GET /api/v1/notification-deliveries notification:manage
 GET /api/v1/notifications authenticated
 GET /api/v1/notifications/preferences authenticated
 GET /api/v1/orders order:read
@@ -285,7 +285,7 @@ PATCH /api/v1/assets/{id} asset:write
 PATCH /api/v1/attribute-definitions/{id} ci_attribute:manage
 PATCH /api/v1/buildings/{id} location:write
 PATCH /api/v1/cables/{id} rack:write
-PATCH /api/v1/ci-types/{id} ci_type:manage
+PATCH /api/v1/ci-types/{id} citype:manage
 PATCH /api/v1/cis/{id} ci:write
 PATCH /api/v1/clients/{id} user:manage
 PATCH /api/v1/collectors/{id} collector:manage
@@ -307,7 +307,7 @@ PATCH /api/v1/maintenance-windows/{id} maintenance:write
 PATCH /api/v1/monitoring/alerts/{id} monitoring:write
 PATCH /api/v1/mounts/{id} rack:write
 PATCH /api/v1/network-interfaces/{id} ipam:write
-PATCH /api/v1/notification-channels/{id} webhook:manage
+PATCH /api/v1/notification-channels/{id} notification:manage
 PATCH /api/v1/orders/{id} order:write
 PATCH /api/v1/org user:manage
 PATCH /api/v1/rack-mounts/{id} rack:write
@@ -360,10 +360,10 @@ POST /api/v1/auth/logout public
 POST /api/v1/auth/refresh public
 POST /api/v1/buildings location:write
 POST /api/v1/cables rack:write
-POST /api/v1/ci-types ci_type:manage
-POST /api/v1/ci-types/{id}/activate ci_type:manage
-POST /api/v1/ci-types/{id}/clone ci_type:manage
-POST /api/v1/ci-types/{id}/deactivate ci_type:manage
+POST /api/v1/ci-types citype:manage
+POST /api/v1/ci-types/{id}/activate citype:manage
+POST /api/v1/ci-types/{id}/clone citype:manage
+POST /api/v1/ci-types/{id}/deactivate citype:manage
 POST /api/v1/cis ci:write
 POST /api/v1/cis/bulk ci:write
 POST /api/v1/cis/{id}/contacts contact:write
@@ -434,7 +434,7 @@ POST /api/v1/maintenance-windows/{id}/notify maintenance:write
 POST /api/v1/monitoring/alerts monitoring:write
 POST /api/v1/monitoring/metrics monitoring:write
 POST /api/v1/mounts rack:write
-POST /api/v1/notification-channels webhook:manage
+POST /api/v1/notification-channels notification:manage
 POST /api/v1/notifications/read-all authenticated
 POST /api/v1/notifications/{id}/read authenticated
 POST /api/v1/orders order:write
@@ -491,7 +491,7 @@ POST /bff/graphql authenticated
 POST /scim/v2/Groups iga:write
 POST /scim/v2/Users iga:write
 PUT /api/v1/ci-fields/global ci_attribute:manage
-PUT /api/v1/ci-types/{id}/fields ci_type:manage
+PUT /api/v1/ci-types/{id}/fields citype:manage
 PUT /api/v1/cis/{id}/field-definitions ci_instance_attribute:manage
 PUT /api/v1/cis/{id}/fields/{name}/override override:write
 PUT /api/v1/documents/{id}/content document:write

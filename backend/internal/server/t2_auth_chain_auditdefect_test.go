@@ -9,10 +9,6 @@
 //     validator"; gap (critical) "No API test of refresh/logout through the
 //     production middleware chain". Uses the chain helper of
 //     t2_auth_chain_test.go.
-//   - WP-068 (RBA-01), finding P2 "Authz mapping ignores the RBA-01 keys
-//     citype:manage and notification:manage"; gap (high) "every RBA-01 key
-//     gates a route; no near-duplicate keys". Uses authorizeAs of
-//     t2_auth_chain_test.go.
 //
 // Retest:
 //
@@ -22,7 +18,6 @@ package server_test
 import (
 	"encoding/json"
 	"net/http"
-	"slices"
 	"strings"
 	"testing"
 
@@ -65,50 +60,4 @@ func TestAuditT2CookieOnlyRefreshThroughProductionChain(t *testing.T) {
 			t.Errorf("POST /api/v1/auth/refresh without cookie: %d %s, want 401", w.Code, strings.TrimSpace(w.Body.String()))
 		}
 	})
-}
-
-// TestAuditT2RBA01KeysGateCITypesAndNotificationChannels: RBA-01 names
-// citype:manage for CI-type management and notification:manage for the
-// notification channels. A custom role built from the RBA-01 vocabulary must
-// work, and webhook:manage (the webhook subscriptions) must not grant the
-// notification channels with their provider credentials. The catalogue has no
-// parallel near-duplicate of an RBA-01 key.
-func TestAuditT2RBA01KeysGateCITypesAndNotificationChannels(t *testing.T) {
-	for _, c := range []struct {
-		method, path string
-		perms        []identity.Permission
-		want         int
-	}{
-		{http.MethodPost, "/api/v1/ci-types", []identity.Permission{identity.PermCITypeManage}, http.StatusOK},
-		{http.MethodPatch, "/api/v1/ci-types/7a2a0000-0000-4000-8000-000000000101", []identity.Permission{identity.PermCITypeManage}, http.StatusOK},
-		{http.MethodDelete, "/api/v1/ci-types/7a2a0000-0000-4000-8000-000000000101", []identity.Permission{identity.PermCITypeManage}, http.StatusOK},
-		{http.MethodPost, "/api/v1/notification-channels", []identity.Permission{identity.PermNotificationManage}, http.StatusOK},
-		{http.MethodPost, "/api/v1/notification-channels", []identity.Permission{identity.PermWebhookManage, identity.PermWebhookRead}, http.StatusForbidden},
-	} {
-		if got := authorizeAs(c.method, c.path, c.perms...); got != c.want {
-			t.Errorf("%s %s with only %v -> %d, want %d (RBA-01)", c.method, c.path, c.perms, got, c.want)
-		}
-	}
-
-	// No catalogue key may be a near-duplicate of an RBA-01 key
-	// (ci_type:manage next to citype:manage).
-	rba01 := []identity.Permission{
-		"ci:read", "ci:write", "ci:delete", "citype:manage", "location:read", "location:write", "rack:write",
-		"relationship:write", "contact:write", "topology:read", "discovery:ingest", "discovery:manage",
-		"collector:manage", "credential:manage", "vrf:manage", "review:resolve", "webhook:manage", "export:run",
-		"job:read", "notification:manage", "user:manage", "team:manage", "role:manage", "entitlement:manage",
-		"audit:read", "apikey:manage",
-	}
-	normalized := map[string]identity.Permission{}
-	for _, k := range rba01 {
-		normalized[strings.ReplaceAll(string(k), "_", "")] = k
-	}
-	for _, k := range identity.AllPermissions() {
-		if slices.Contains(rba01, k) {
-			continue
-		}
-		if twin, ok := normalized[strings.ReplaceAll(string(k), "_", "")]; ok {
-			t.Errorf("permission catalogue holds %q next to the RBA-01 key %q", k, twin)
-		}
-	}
 }

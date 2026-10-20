@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -84,17 +85,19 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 	token, expires, err := h.issue(id)
 	if err != nil {
-		status := http.StatusForbidden
+		status, detail := http.StatusForbidden, errNotOperator.Error()
 		if !errors.Is(err, errNotOperator) {
-			status = http.StatusInternalServerError
+			status, detail = http.StatusInternalServerError, "operator session could not be issued"
 		}
+		// The audit names the failed condition and the acr of the login;
+		// the response stays generic.
 		h.record(r.Context(), &AuditEntry{OperatorID: id.Subject, OperatorKind: KindOIDC, Action: "login",
-			Status: status, Details: map[string]any{"reason": err.Error(), "remote": r.RemoteAddr}})
-		api.WriteError(w, status, http.StatusText(status), err.Error())
+			Status: status, Details: map[string]any{"reason": err.Error(), "acr": id.ACR, "remote": r.RemoteAddr}})
+		api.WriteError(w, status, http.StatusText(status), detail)
 		return
 	}
 	h.record(r.Context(), &AuditEntry{OperatorID: id.Subject, OperatorKind: KindOIDC, Action: "login",
-		Status: http.StatusOK, Details: map[string]any{"remote": r.RemoteAddr, "email": id.Email}})
+		Status: http.StatusOK, Details: map[string]any{"remote": r.RemoteAddr, "email": id.Email, "acr": id.ACR}})
 	api.WriteJSON(w, http.StatusOK, map[string]any{
 		"token":      token,
 		"expires_at": expires.Format(time.RFC3339),
@@ -102,10 +105,16 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// issue signs an operator session for a verified operator login.
+// issue signs an operator session for a verified operator login: a member
+// of the operator group (claim groups without full path, realm group
+// operators) whose login used a second factor (amr, or acr 2 of the realm
+// flow browser-mfa, requested with acr_values=2).
 func (h *Handler) issue(id *identity.IDTokenClaims) (string, time.Time, error) {
-	if !slices.Contains(id.Groups, h.cfg.group()) || !h.cfg.MFASatisfied(id.AMR, id.ACR) {
-		return "", time.Time{}, errNotOperator
+	if !slices.Contains(id.Groups, h.cfg.group()) {
+		return "", time.Time{}, fmt.Errorf("%w: not a member of the group %q", errNotOperator, h.cfg.group())
+	}
+	if !h.cfg.MFASatisfied(id.AMR, id.ACR) {
+		return "", time.Time{}, fmt.Errorf("%w: no second factor (acr %q)", errNotOperator, id.ACR)
 	}
 	now := time.Now().UTC()
 	claims := identity.SessionClaims{

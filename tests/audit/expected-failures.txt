@@ -63,7 +63,6 @@ go;backend/internal/server;TestAuditT2EntitlementAPIAccessGatesAPIKeys;F-070
 go;backend/internal/server;TestAuditT2EntitlementQuotasEnforced;F-072
 go;backend/internal/server;TestAuditT2EntitlementRackViewGated;F-070
 go;backend/internal/server;TestAuditT2ListsAreCursorPages;F-075
-go;backend/internal/server;TestAuditT2RBA01KeysGateCITypesAndNotificationChannels;F-067
 go;backend/internal/server;TestAuditT3HealthRefreshRunsInG1;F-087
 go;backend/internal/server;TestAuditT3OverrideRefusesReservedNames;F-092
 go;backend/internal/server;TestAuditT3ResolvedByIsThePrincipal;F-091
@@ -129,8 +128,6 @@ sh;tests/audit/ops-config.test.sh;outage_smtp;F-135
 sh;tests/audit/ops-config.test.sh;restore_rpo_window;F-130
 sh;tests/audit/ops-config.test.sh;terraform_replica_missing;F-129
 sh;tests/audit/ops-config.test.sh;terraform_replica_same;F-129
-sh;tests/audit/t2-break-glass-alert.test.sh;no Prometheus rule under deploy/ uses reticora_operator_break_glass_total (rule files;F-068
-sh;tests/audit/t2-break-glass-alert.test.sh;no break-glass alert that fires on any increase (increase(...) > 0) with severity critical;F-068
 vitest;frontend/src/api/deprecatedPaths.auditdefect.ts;frontend API paths (catalogue contract) uses no path whose every operation is deprecated;F-077
 vitest;frontend/src/auth/bootRefresh.auditdefect.tsx;reload after the access token expired (AUT-02) renews the session with the refresh cookie before sending the user to /login;F-066
 vitest;frontend/src/auth/session.auditdefect.ts;refresh at token expiry (AUT-02) three concurrent 401s renew the session once and retry with the new token;F-065

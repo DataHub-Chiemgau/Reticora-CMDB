@@ -1,8 +1,9 @@
 # Alertmanager routing for the Reticora alerts (WP-103, OPS-05): every alert
-# of slo-rules.yaml and worker-rules.yaml reaches the operators; critical
-# alerts repeat hourly. Replace the receiver endpoints with the operators'
-# addresses. The NTF channel of the product (WP-137) is added as another
-# receiver once it exists.
+# of slo-rules.yaml, worker-rules.yaml and operator-rules.yaml reaches the
+# operators; critical alerts (among them ReticoraOperatorBreakGlassUsed,
+# SEC-07) also page the on-call receiver and repeat hourly. Replace the
+# receiver endpoints with the operators' addresses. The NTF channel of the
+# product (WP-137) is added as another receiver once it exists.
 route:
   receiver: operators
   group_by: [alertname, worker, organization_id]

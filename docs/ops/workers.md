@@ -100,6 +100,17 @@ Every worker exports these series, labelled `worker`:
 
 `deploy/monitoring/alertmanager.yaml` routes all alerts to the operators. Critical alerts also go to the on-call webhook. The product's notification channel (NTF) is added with WP-137. The Grafana dashboard `deploy/grafana/dashboard-overview.json` shows runs, errors, backlog and running instances.
 
+### Break-glass alert (SEC-07)
+
+`deploy/monitoring/operator-rules.yaml` defines `ReticoraOperatorBreakGlassUsed` (severity `critical`): it fires as soon as `reticora_operator_break_glass_total` of an instance increases, that is with the first evaluation after a request to `/api/v1/admin/*` was authenticated with `RETICORA_OPERATOR_TOKEN` (header `X-Operator-Token`), and stays active for up to 5 minutes. A series whose first sample is already above 0 (use between process start and first scrape) also fires, for 5 minutes. It goes to the on-call receiver like every critical alert. The promtool unit test is `deploy/monitoring/tests/operator-rules.test.yaml`; the CI job `gate` runs it through `tests/audit/t2-break-glass-alert.test.sh`.
+
+After the alert:
+
+1. Ask who used the token and why. Only bootstrap and break-glass (operator login via OIDC not possible) justify it; routine work uses a personal operator login.
+2. Read the uses in `operator_audit` (`GET /api/v1/admin/audit`, operator kind `break_glass`) and check the chain with `GET /api/v1/admin/audit/verify`. The server log of the instance named in the alert has a line `SECURITY ALERT: operator break-glass token used` with method, path and remote address per request.
+3. If the use is not justified or cannot be attributed, treat the token as compromised: set a new `RETICORA_OPERATOR_TOKEN` (at least 32 characters) on every server instance and restart them, then review the organizations and entitlements written in the audited requests.
+4. Record the result (justification or incident) with the alert.
+
 ## Planned workers
 
 The OPS-02 workers below do not exist yet as separate runners. The job
