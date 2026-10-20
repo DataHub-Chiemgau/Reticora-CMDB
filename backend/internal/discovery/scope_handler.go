@@ -17,6 +17,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -255,8 +256,13 @@ func coveredByScope(scopes []Scope, cidr string) bool {
 	return false
 }
 
-// resolveScopeSuggested creates the scope of an accepted suggestion.
+// resolveScopeSuggested creates the scope of an accepted suggestion. Accept
+// creates a scope and dismiss suppresses one, so both need discovery:manage
+// besides review:resolve (DIS-09, F-031); without it the item stays open.
 func (h *Handler) resolveScopeSuggested(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
+	if perms, _ := identity.PermissionsFromContext(ctx); !identity.HasPermission(perms, identity.PermDiscoveryManage) {
+		return false, refused(http.StatusForbidden, "missing required permission: "+string(identity.PermDiscoveryManage))
+	}
 	if res.Action != reviews.ActionAccept {
 		return false, nil
 	}

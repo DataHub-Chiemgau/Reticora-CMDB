@@ -4859,7 +4859,7 @@ paths:
         in the payload would, with the client and site of the item (CI-13),
         and 422 when the item records no client and its candidate CIs share
         none (dismiss it and wait for the next sighting); unlicensed_ci new|dismiss (new adopts the device within max_cis,
-        403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope); unknown_relationship accept|dismiss (accept records the neighbor as connected_to);
+        403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to);
         serial_mismatch and duplicate_ip dismiss. Another action is 422.
         resolved_by and the audit actor are the caller; a body with
         resolved_by is 400.
@@ -18271,6 +18271,7 @@ components:
           enum: [cidr, host, range]
         target:
           type: string
+          description: CIDR, IP address or host name, or "first-last" address range. IPv6 addresses carry no zone; a target with one (fe80::1%eth0) is refused with 422 on the field target.
         client_id:
           type: string
         site_id:
@@ -18309,6 +18310,7 @@ components:
           enum: [cidr, host, range]
         target:
           type: string
+          description: CIDR, IP address or host name, or "first-last" address range. IPv6 addresses carry no zone; a target with one (fe80::1%eth0) is refused with 422 on the field target.
         site_id:
           type: string
         vrf_id:

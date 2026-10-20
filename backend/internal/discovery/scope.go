@@ -247,7 +247,9 @@ func (s *Scope) Validate() error {
 }
 
 // NormalizeScopeTarget validates the target of a scope kind and returns
-// its canonical form.
+// its canonical form. Addresses carry no IPv6 zone (fe80::1%eth0): netip
+// accepts one, PostgreSQL inet does not, and the offline detector and the
+// edge cleanup read the target as inet (F-108).
 func NormalizeScopeTarget(kind, target string) (string, error) {
 	target = strings.TrimSpace(target)
 	switch kind {
@@ -263,6 +265,9 @@ func NormalizeScopeTarget(kind, target string) (string, error) {
 		return p.String(), nil
 	case ScopeKindHost:
 		if a, err := netip.ParseAddr(target); err == nil {
+			if a.Zone() != "" {
+				return "", scopeZoneError()
+			}
 			return a.String(), nil
 		}
 		if !hostnamePattern.MatchString(target) {
@@ -273,6 +278,9 @@ func NormalizeScopeTarget(kind, target string) (string, error) {
 		from, to, ok := strings.Cut(target, "-")
 		a, errA := netip.ParseAddr(strings.TrimSpace(from))
 		b, errB := netip.ParseAddr(strings.TrimSpace(to))
+		if errA == nil && errB == nil && (a.Zone() != "" || b.Zone() != "") {
+			return "", scopeZoneError()
+		}
 		if !ok || errA != nil || errB != nil || a.BitLen() != b.BitLen() || b.Less(a) {
 			return "", fieldError("target", "not an address range (first-last)")
 		}
@@ -283,6 +291,10 @@ func NormalizeScopeTarget(kind, target string) (string, error) {
 		return a.String() + "-" + b.String(), nil
 	}
 	return "", fieldError("kind", "must be cidr, host or range")
+}
+
+func scopeZoneError() error {
+	return fieldError("target", "an IPv6 address must not carry a zone (%)")
 }
 
 var hostnamePattern = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)

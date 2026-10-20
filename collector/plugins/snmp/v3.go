@@ -111,7 +111,7 @@ func (p *Plugin) v3Session(ctx context.Context, target string, cfg *v3Config) *g
 	}
 }
 
-// v2cSession builds an SNMPv2c session (used for table walks).
+// v2cSession builds an SNMPv2c session (collection GET and table walks).
 func (p *Plugin) v2cSession(ctx context.Context, target, community string) *gosnmp.GoSNMP {
 	return &gosnmp.GoSNMP{
 		Context: ctx, Target: target, Port: uint16(p.port()), Transport: "udp", Community: community,
@@ -153,7 +153,7 @@ func (p *Plugin) collectSession(g *gosnmp.GoSNMP, target, version string) (*plug
 		switch v.Type {
 		case gosnmp.OctetString:
 			if b, ok := v.Value.([]byte); ok {
-				values[oid] = strings.TrimSpace(string(b))
+				values[oid] = plugins.OctetText(b)
 			}
 		case gosnmp.ObjectIdentifier:
 			if s, ok := v.Value.(string); ok {

@@ -61,3 +61,21 @@ func TestAuditT2CredentialsArePerProtocol(t *testing.T) {
 		t.Errorf("credentialAliases = %v, want %v", credentialAliases, want)
 	}
 }
+
+// TestOctetText: the text of an SNMP OctetString (SNMP and power plugin)
+// without NUL padding; a binary value stays empty.
+func TestOctetText(t *testing.T) {
+	for in, want := range map[string]string{
+		"core-sw-1":           "core-sw-1",
+		"FOC1234X0YZ\x00\x00": "FOC1234X0YZ", // NUL padding
+		" DC1 R1 \x00 ":       "DC1 R1",
+		"Cisco IOS Software\r\nTechnical Support": "Cisco IOS Software\r\nTechnical Support",
+		"Büro 2":           "Büro 2",
+		"\x00\x11\x00\x22": "", // binary
+		"":                 "",
+	} {
+		if got := OctetText([]byte(in)); got != want {
+			t.Errorf("OctetText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

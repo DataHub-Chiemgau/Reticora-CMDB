@@ -152,7 +152,9 @@ type StatusChanges struct {
 	Offline, Paused, Resumed int
 }
 
-// Run checks every organization.
+// Run checks every organization. A failing organization does not stop the
+// others (F-256): Run returns the errors joined at the end, the totals
+// count the organizations that succeeded.
 func (m *StatusMonitor) Run(ctx context.Context) (StatusChanges, error) {
 	var total StatusChanges
 	var orgs []string
@@ -167,16 +169,22 @@ func (m *StatusMonitor) Run(ctx context.Context) (StatusChanges, error) {
 	if err != nil {
 		return total, fmt.Errorf("list organizations: %w", err)
 	}
+	var errs []error
 	for _, org := range orgs {
+		if ctx.Err() != nil {
+			errs = append(errs, ctx.Err())
+			break
+		}
 		c, oerr := m.RunOrg(ctx, org)
 		if oerr != nil {
-			return total, fmt.Errorf("organization %s: %w", org, oerr)
+			errs = append(errs, fmt.Errorf("organization %s: %w", org, oerr))
+			continue
 		}
 		total.Offline += c.Offline
 		total.Paused += c.Paused
 		total.Resumed += c.Resumed
 	}
-	return total, nil
+	return total, errors.Join(errs...)
 }
 
 // RunOrg checks the collectors of one organization.

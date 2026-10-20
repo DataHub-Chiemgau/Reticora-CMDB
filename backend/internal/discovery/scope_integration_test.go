@@ -16,6 +16,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -23,7 +25,8 @@ import (
 // scopes with client/site/VRF/schedule/credentials/plugins and CRUD, the
 // site and collector deciding the client, refused references, the client
 // scope of RLS, the collector's scope list and run results, and the
-// scope_suggested review after enrollment whose acceptance creates the scope.
+// scope_suggested review after enrollment whose acceptance creates the scope
+// (accept and dismiss only with discovery:manage, WP-382).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestDiscoveryScopes(t *testing.T) {
@@ -152,7 +155,24 @@ func TestDiscoveryScopes(t *testing.T) {
 	if n, _ = h.SuggestScopes(ctx, f.OrgA, col.ID, []string{"192.168.50.0/24"}); n != 0 {
 		t.Error("an open suggestion was opened twice")
 	}
-	if _, err = h.ReviewService().Resolve(ctx, f.OrgA, items[0].ID, &discovery.Resolution{Action: "accept"}); err != nil {
+	// Accept and dismiss need discovery:manage (F-031); without it the item
+	// stays open and no scope is created.
+	for _, action := range []string{"accept", "dismiss"} {
+		var refused *reviews.Error
+		_, err = h.ReviewService().Resolve(identity.WithPermissions(ctx, []identity.Permission{identity.PermReviewResolve}), f.OrgA,
+			items[0].ID, &discovery.Resolution{Action: action})
+		if !errors.As(err, &refused) || refused.Status != http.StatusForbidden {
+			t.Fatalf("%s without discovery:manage: %v, want 403", action, err)
+		}
+	}
+	if got, gerr := repo.GetReviewItem(ctx, f.OrgA, items[0].ID); gerr != nil || got.Status != discovery.ReviewStatusOpen {
+		t.Fatalf("suggestion after the refused resolves: %+v %v, want open", got, gerr)
+	}
+	if list, _, _ := repo.ListScopes(ctx, f.OrgA, discovery.ScopeFilter{CollectorID: col.ID}, api.PaginationParams{Limit: 10}); len(list) != 1 {
+		t.Fatalf("scopes after the refused accept: %+v, want only the first one", list)
+	}
+	manage := identity.WithPermissions(ctx, []identity.Permission{identity.PermReviewResolve, identity.PermDiscoveryManage})
+	if _, err = h.ReviewService().Resolve(manage, f.OrgA, items[0].ID, &discovery.Resolution{Action: "accept"}); err != nil {
 		t.Fatal(err)
 	}
 	list, _, err := repo.ListScopes(ctx, f.OrgA, discovery.ScopeFilter{CollectorID: col.ID}, api.PaginationParams{Limit: 10})
@@ -170,7 +190,7 @@ func TestDiscoveryScopes(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("open suggestions: %d", len(items))
 	}
-	if _, err = h.ReviewService().Resolve(ctx, f.OrgA, items[0].ID, &discovery.Resolution{Action: "dismiss"}); err != nil {
+	if _, err = h.ReviewService().Resolve(manage, f.OrgA, items[0].ID, &discovery.Resolution{Action: "dismiss"}); err != nil {
 		t.Fatal(err)
 	}
 	if n, _ = h.SuggestScopes(ctx, f.OrgA, col.ID, []string{"172.16.5.0/24"}); n != 0 {

@@ -3,6 +3,7 @@ package snmp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -12,6 +13,9 @@ import (
 	"time"
 
 	"github.com/gosnmp/gosnmp"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/internal/fakesnmp"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/profiles"
 )
 
 func TestEncodeOID(t *testing.T) {
@@ -57,31 +61,6 @@ func TestBuildSNMPv2cGet(t *testing.T) {
 	}
 }
 
-func TestExtractSNMPValue(t *testing.T) {
-	withValue := []byte{0x30, 0x20, 0x02, 0x01, 0x01, 0x04, 0x06, 'r', 'o', 'u', 't', 'e', 'r'}
-	nonPrintable := []byte{0x30, 0x08, 0x04, 0x03, 0x01, 0x02, 0x03}
-	zeroLen := []byte{0x04, 0x00}
-
-	cases := []struct {
-		name string
-		data []byte
-		want string
-	}{
-		{"octet string value", withValue, "router"},
-		{"empty input", nil, ""},
-		{"non printable skipped", nonPrintable, ""},
-		{"zero length skipped", zeroLen, ""},
-		{"truncated length", []byte{0x04, 0x10, 'a'}, ""},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := extractSNMPValue(c.data); got != c.want {
-				t.Errorf("extractSNMPValue() = %q, want %q", got, c.want)
-			}
-		})
-	}
-}
-
 func TestIsPrintable(t *testing.T) {
 	if !isPrintable("PowerEdge R750 (v2.0)") {
 		t.Error("expected printable ASCII to be accepted")
@@ -91,78 +70,6 @@ func TestIsPrintable(t *testing.T) {
 	}
 	if isPrintable("bad\x80value") {
 		t.Error("expected high byte to be rejected")
-	}
-}
-
-// fakeResponseConn feeds a scripted response to snmpGet and records writes.
-type fakeResponseConn struct {
-	net.Conn
-	resp   []byte
-	writes [][]byte
-}
-
-func (c *fakeResponseConn) Write(b []byte) (int, error) {
-	c.writes = append(c.writes, append([]byte(nil), b...))
-	return len(b), nil
-}
-
-func (c *fakeResponseConn) Read(b []byte) (int, error) {
-	if c.resp == nil {
-		return 0, fmt.Errorf("no more data")
-	}
-	n := copy(b, c.resp)
-	c.resp = nil
-	return n, nil
-}
-
-func (c *fakeResponseConn) SetDeadline(time.Time) error      { return nil }
-func (c *fakeResponseConn) SetReadDeadline(time.Time) error  { return nil }
-func (c *fakeResponseConn) SetWriteDeadline(time.Time) error { return nil }
-
-func TestSNMPGetReturnsValueFromResponse(t *testing.T) {
-	// Response > 20 bytes whose only OctetString is the varbind value.
-	resp := make([]byte, 0, 64)
-	resp = append(resp, 0x30, 0x30, 0x02, 0x01, 0x01)
-	resp = append(resp, make([]byte, 16)...) // padding (no OctetStrings)
-	value := "Cisco IOS Software"
-	resp = append(resp, 0x04, byte(len(value)))
-	resp = append(resp, value...)
-
-	conn := &fakeResponseConn{resp: resp}
-	p := New()
-	got := p.snmpGet(conn, "public", oidSysDescr, time.Second)
-	if got != value {
-		t.Errorf("snmpGet = %q, want %q", got, value)
-	}
-	if len(conn.writes) != 1 {
-		t.Fatalf("expected 1 write, got %d", len(conn.writes))
-	}
-	if !bytes.Contains(conn.writes[0], []byte{0xA0}) {
-		t.Error("sent packet is not a GetRequest PDU")
-	}
-}
-
-func TestSNMPGetReturnsFirstOctetString(t *testing.T) {
-	// The simplified parser scans for the first printable OctetString in the
-	// packet, which in a real SNMP response is the echoed community string.
-	resp := make([]byte, 0, 64)
-	resp = append(resp, 0x30, 0x30, 0x02, 0x01, 0x01)
-	resp = append(resp, 0x04, 0x06, 'p', 'u', 'b', 'l', 'i', 'c')
-	resp = append(resp, make([]byte, 10)...)
-	resp = append(resp, 0x04, 0x06, 'r', 'o', 'u', 't', 'e', 'r')
-
-	conn := &fakeResponseConn{resp: resp}
-	p := New()
-	if got := p.snmpGet(conn, "public", oidSysDescr, time.Second); got != "public" {
-		t.Errorf("snmpGet = %q, want first octet string %q", got, "public")
-	}
-}
-
-func TestSNMPGetShortResponseReturnsEmpty(t *testing.T) {
-	conn := &fakeResponseConn{resp: []byte{0x30, 0x05, 0x02, 0x01, 0x01, 0x04, 0x00}}
-	p := New()
-	if got := p.snmpGet(conn, "public", oidSysDescr, time.Second); got != "" {
-		t.Errorf("snmpGet = %q, want empty for short response", got)
 	}
 }
 
@@ -253,30 +160,70 @@ func TestDiscoverCancelledContext(t *testing.T) {
 	}
 }
 
+// TestCollectFromSNMPFake collects the SNMPv2c fake of the real-stack test
+// (internal/fakesnmp, answers its community only): the record carries the
+// values of the response varbinds, and the community, which every v2c
+// response echoes in its header, appears in no field or attribute (finding
+// during WP-384: a hand-made parser returned the first printable
+// OctetString of the response, the community, for every OID).
 func TestCollectFromSNMPFake(t *testing.T) {
-	// The fake echoes the request first, so the community string "public" is
-	// the first OctetString the simplified parser finds; every OID therefore
-	// resolves to "public". That still exercises the full collect path.
-	startSNMPFake(t, "test-device")
+	const community = "fake-community-4711"
+	agent, err := fakesnmp.Listen("127.0.0.1:0", fakesnmp.Config{Community: community, SysName: "fake-sw-01",
+		SysDescr: "Reticora SNMP fake", SysObjectID: ".1.3.6.1.4.1.8072.3.2.10"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- agent.Serve() }()
+	t.Cleanup(func() {
+		_ = agent.Close()
+		<-done
+	})
+	// The profile of the fake's sysObjectID gives the model.
+	reg := profiles.NewRegistry()
+	if err = reg.Register(profiles.Profile{Name: "fake-agent", Model: "SNMP fake", SysObjectIDs: []string{"1.3.6.1.4.1.8072.3.2.10"}}); err != nil {
+		t.Fatal(err)
+	}
 
-	p := &Plugin{Timeout: time.Second}
-	res, err := p.collect(context.Background(), "127.0.0.1", nil)
+	p := &Plugin{Timeout: time.Second, Port: agent.Addr().Port, Profiles: reg}
+	rec, err := p.Collect(context.Background(), "127.0.0.1", map[string]string{"community": community})
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
-	if res.CIType != "network.device" {
-		t.Errorf("CIType = %q, want network.device", res.CIType)
+	if rec.Classification.CIType != "network.device" || rec.System.Name != "fake-sw-01" || rec.System.Description != "Reticora SNMP fake" ||
+		rec.Classification.SysObjectID != "1.3.6.1.4.1.8072.3.2.10" {
+		t.Errorf("CI type %q, name %q, sysDescr %q, sysObjectID %q; want network.device, the fake's values",
+			rec.Classification.CIType, rec.System.Name, rec.System.Description, rec.Classification.SysObjectID)
 	}
-	if res.Name == "" {
-		t.Error("expected Name to be set from sysName or target fallback")
+	if rec.Classification.Profile != "fake-agent" || rec.Classification.Model != "SNMP fake" {
+		t.Errorf("profile %q, model %q; want fake-agent, SNMP fake", rec.Classification.Profile, rec.Classification.Model)
 	}
-	for _, attr := range []string{"sysDescr", "sysObjectID", "sysLocation", "sysContact"} {
-		if res.Attributes[attr] == "" {
-			t.Errorf("expected attribute %q to be populated", attr)
+	// What the fake does not serve (noSuchObject, no ifTable) stays empty.
+	if rec.Identity.SerialNumber != "" || rec.Classification.Manufacturer != "" || rec.System.FirmwareVersion != "" ||
+		rec.Attributes["sysLocation"] != "" || rec.Attributes["sysContact"] != "" || len(rec.Interfaces) != 0 {
+		t.Errorf("serial %q, manufacturer %q, firmware %q, sysLocation %v, sysContact %v, interfaces %v; want empty",
+			rec.Identity.SerialNumber, rec.Classification.Manufacturer, rec.System.FirmwareVersion,
+			rec.Attributes["sysLocation"], rec.Attributes["sysContact"], rec.Interfaces)
+	}
+	if rec.Attributes["snmpVersion"] != "v2c" || rec.Attributes["protocol"] != "snmp" {
+		t.Errorf("attributes = %v", rec.Attributes)
+	}
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), community) {
+		t.Errorf("the community is part of the record: %s", raw)
+	}
+	// The values came from the fake, asked with the community.
+	seen := agent.Requests()
+	if len(seen) == 0 {
+		t.Fatal("the fake received no request")
+	}
+	for _, r := range seen {
+		if r.Version != "2c" || r.Community != community || !r.Answered {
+			t.Errorf("request %+v: want an answered v2c request with the community", r)
 		}
-	}
-	if res.Attributes["snmpVersion"] != "v2c" {
-		t.Errorf("snmpVersion = %v, want v2c", res.Attributes["snmpVersion"])
 	}
 }
 

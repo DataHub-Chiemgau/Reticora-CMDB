@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
 // TestScopeREST covers the discovery-scopes resource (DIS-09, API-05):
@@ -89,5 +92,85 @@ func TestDiscoveryIntervalsFromSettings(t *testing.T) {
 	repo.SetOrgSettings("org-1", map[string]any{"discovery": map[string]any{"poll_interval": "20m"}})
 	if iv, _ := repo.DiscoveryIntervals(context.Background(), "org-1"); iv.Poll != "20m0s" {
 		t.Errorf("memory intervals = %+v", iv)
+	}
+}
+
+// TestScopeTargetWithoutZone covers WP-383 (DIS-09, API-05; F-108): a host
+// or range target with an IPv6 zone (fe80::1%eth0) is refused with 422 on
+// the field target, on create and on change, because PostgreSQL inet cannot
+// evaluate it; the same addresses without zone are accepted, and CIDR
+// targets behave as before (a prefix with zone was never one).
+func TestScopeTargetWithoutZone(t *testing.T) {
+	for _, tc := range []struct {
+		kind, target, want string
+	}{
+		{ScopeKindHost, "fe80::1%eth0", ""},
+		{ScopeKindHost, " FE80::1%25 ", ""},
+		{ScopeKindRange, "fe80::1%eth0-fe80::5%eth0", ""},
+		{ScopeKindRange, "fe80::1%eth0-fe80::5", ""},
+		{ScopeKindRange, "fe80::1 - fe80::5%eth0", ""},
+		{ScopeKindCIDR, "fe80::%eth0/64", ""},
+		{ScopeKindHost, "FE80::1", "fe80::1"},
+		{ScopeKindHost, "10.0.0.1", "10.0.0.1"},
+		{ScopeKindRange, "fe80::1 - fe80::5", "fe80::1-fe80::5"},
+		{ScopeKindCIDR, "fe80::1/112", "fe80::/112"},
+		{ScopeKindCIDR, "10.0.0.7/24", "10.0.0.0/24"},
+	} {
+		got, err := NormalizeScopeTarget(tc.kind, tc.target)
+		if tc.want != "" {
+			if err != nil || got != tc.want {
+				t.Errorf("NormalizeScopeTarget(%s, %q) = %q, %v; want %q", tc.kind, tc.target, got, err, tc.want)
+			}
+			continue
+		}
+		var fe *api.FieldError
+		if !errors.As(err, &fe) || fe.Field != "target" || fe.Status != http.StatusUnprocessableEntity {
+			t.Errorf("NormalizeScopeTarget(%s, %q) = %q, %v; want a 422 error on target", tc.kind, tc.target, got, err)
+		}
+	}
+	// CIDR keeps its message: a zone never parsed as a prefix.
+	var fe *api.FieldError
+	if _, err := NormalizeScopeTarget(ScopeKindCIDR, "fe80::%eth0/112"); !errors.As(err, &fe) || fe.Message != "not a CIDR" {
+		t.Errorf("cidr with zone: %v, want the unchanged \"not a CIDR\"", err)
+	}
+
+	repo := NewMemoryRepository()
+	col := &Collector{OrganizationID: "org-1", Name: "col", Config: map[string]any{}}
+	if err := repo.RegisterCollector(context.Background(), col); err != nil {
+		t.Fatal(err)
+	}
+	mux := chi.NewRouter()
+	NewHandler(repo, nil).RegisterRoutes(mux)
+	call := func(method, path string, body any) (int, map[string]any) {
+		t.Helper()
+		var buf bytes.Buffer
+		_ = json.NewEncoder(&buf).Encode(body)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, discoveryTenantCtx(httptest.NewRequest(method, path, &buf)))
+		var out map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+	for _, body := range []map[string]any{
+		{"collector_id": col.ID, "kind": "host", "target": "fe80::1%eth0"},
+		{"collector_id": col.ID, "kind": "range", "target": "fe80::1%eth0-fe80::5%eth0"},
+	} {
+		if code, out := call(http.MethodPost, "/api/v1/discovery-scopes", body); code != http.StatusUnprocessableEntity || out["field"] != "target" {
+			t.Errorf("POST %v = %d %v, want 422 on target", body, code, out)
+		}
+	}
+	code, created := call(http.MethodPost, "/api/v1/discovery-scopes", map[string]any{"collector_id": col.ID, "kind": "host", "target": "fe80::1"})
+	if code != http.StatusCreated || created["target"] != "fe80::1" {
+		t.Fatalf("POST host fe80::1 = %d %v", code, created)
+	}
+	id, _ := created["id"].(string)
+	if code, out := call(http.MethodPatch, "/api/v1/discovery-scopes/"+id, map[string]any{"target": "fe80::1%eth0"}); code != http.StatusUnprocessableEntity || out["field"] != "target" {
+		t.Errorf("PATCH target with zone = %d %v, want 422 on target", code, out)
+	}
+	if code, out := call(http.MethodPatch, "/api/v1/discovery-scopes/"+id, map[string]any{"kind": "range", "target": "fe80::1-fe80::5%eth0"}); code != http.StatusUnprocessableEntity || out["field"] != "target" {
+		t.Errorf("PATCH range with zone = %d %v, want 422 on target", code, out)
+	}
+	if s, err := repo.GetScope(context.Background(), "org-1", id); err != nil || s.Kind != ScopeKindHost || s.Target != "fe80::1" {
+		t.Errorf("scope after the refused changes = %+v, %v", s, err)
 	}
 }

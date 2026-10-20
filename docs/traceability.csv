@@ -557,3 +557,15 @@ DIS-04;[B];D;collector/plugins/nas/nas_test.go;WP-379
 DIS-09;[B];D;backend/internal/discovery/edge_status_integration_test.go;WP-380
 COL-01;[B];D;backend/internal/discovery/edge_status_integration_test.go;WP-380
 COL-04;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-381
+DIS-09;[B];D;backend/internal/discovery/zone_isolation_integration_test.go;WP-383
+API-05;[B];D;backend/internal/discovery/zone_isolation_integration_test.go;WP-383
+REC-09;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-383
+LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-383
+TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-383
+COL-01;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-383
+DIS-09;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
+API-05;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
+INS-06;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
+COL-02;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
+DIS-09;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
+INS-06;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384

@@ -1,33 +1,23 @@
-//go:build auditdefect
-
-// Phase-1 acceptance audit, group T4-collector-load – DEFECT tests (must fail
-// until the defects are fixed).
+// Scope targets without IPv6 zone and the per-organization isolation of the
+// offline detector and the edge cleanup (WP-383; F-108).
 //
-// WP-157 (LIF-04 offline detector), WP-159 (TOP-02 edge cleanup), WP-153
-// (DIS-09 scope validation), tenant isolation (TEN).
+//   - TestAuditZonedScopeTargetRefused – WP-153 (DIS-09, API-05; moved from
+//     zone_isolation_auditdefect_test.go): POST /api/v1/discovery-scopes
+//     refuses a host or range target with an IPv6 zone (fe80::1%eth0) with
+//     422; PostgreSQL inet cannot evaluate a zone. A plain CIDR is the
+//     control.
+//   - TestAuditBadScopeIsolated – WP-157 (REC-09, LCY-05), WP-159 (TOP-02;
+//     moved from zone_isolation_auditdefect_test.go): a zoned range scope
+//     inserted directly into the lower-sorted organization (as an old row
+//     or a direct write exists even after the API is fixed) neither fails
+//     that organization's run nor stops Run for the organization sorted
+//     after it: its CI last seen 400 h ago becomes unknown, its discovery
+//     edge last confirmed 30 days ago is removed.
 //
-// Findings encoded here:
-//   - WP-157 P2 "One tenant's zoned IPv6 range scope stops the offline
-//     detector for every org sorted after it".
-//   - WP-159 P2 "One tenant's zoned IPv6 range scope stops the edge cleanup
-//     for every org sorted after it".
-//
-// NormalizeScopeTarget accepts IPv6 zones (fe80::1%eth0), PostgreSQL inet
-// does not; offline.go and cleanup.go cast discovery_scope.target to inet
-// unguarded, and Run() returns on the first failing organization. The
-// requirement: the API refuses targets the server cannot evaluate (422), and
-// each tenant is processed independently, so one organization's bad row
-// affects at most that organization.
-//
-// TestAuditZonedScopeTargetRefused covers the API; TestAuditBadScopeIsolated
-// inserts the malformed row directly (as an old row or a direct write would
-// exist even after the API is fixed) into the lower-sorted organization and
-// checks that the higher organization is still processed.
-//
-// Retest:
+// Retest (F-108):
 //
 //	cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/<db>?sslmode=disable \
-//	  go test -tags auditdefect -count=1 -v -p 1 -run 'TestAuditZonedScopeTargetRefused|TestAuditBadScopeIsolated' ./internal/discovery/
+//	  go test -count=1 -v -p 1 -run 'TestAuditZonedScopeTargetRefused|TestAuditBadScopeIsolated' ./internal/discovery/
 package discovery_test
 
 import (
@@ -36,6 +26,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,7 +40,7 @@ import (
 )
 
 func TestAuditZonedScopeTargetRefused(t *testing.T) {
-	f := scopetest.Seed(t, "d5")
+	f := scopetest.Seed(t, "7d")
 	repo := discovery.NewPGRepository(f.App)
 	col := &discovery.Collector{OrganizationID: f.OrgA, Name: "audit-zone-api", Status: discovery.CollectorActive, Config: map[string]any{}}
 	if err := repo.RegisterCollector(f.OrgCtx(f.OrgA), col); err != nil {
@@ -79,7 +70,7 @@ func TestAuditZonedScopeTargetRefused(t *testing.T) {
 }
 
 func TestAuditBadScopeIsolated(t *testing.T) {
-	f := scopetest.Seed(t, "d6")
+	f := scopetest.Seed(t, "7f")
 	bg := context.Background()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -126,16 +117,27 @@ func TestAuditBadScopeIsolated(t *testing.T) {
 		}
 		return n == 1
 	}
+	// Run may report other organizations of the shared database, never
+	// these two.
+	ours := func(err error) bool {
+		return err != nil && (strings.Contains(err.Error(), first) || strings.Contains(err.Error(), second))
+	}
 
 	t.Run("offline detector (WP-157)", func(t *testing.T) {
 		_, err := lifecycle.NewOfflineDetector(f.App).WithClock(time.Now).Run(bg)
-		if got := status(); got == "active" {
-			t.Errorf("tenant isolation violated: the CI of organization %s last seen 400 h ago is still %q after Run(); "+
+		if got := status(); got != "unknown" {
+			t.Errorf("tenant isolation violated: the CI of organization %s last seen 400 h ago is %q after Run(), want unknown; "+
 				"Run stopped at the malformed scope of organization %s: %v", second, got, first, err)
 			// Control: the CI is overdue; processed alone, the org is checked.
 			if _, cerr := lifecycle.NewOfflineDetector(f.App).WithClock(time.Now).RunOrg(bg, second); cerr != nil || status() == "active" {
 				t.Fatalf("control: RunOrg(%s) alone: status=%s err=%v", second, status(), cerr)
 			}
+		}
+		if ours(err) {
+			t.Errorf("Run() reports one of the fixture organizations: %v", err)
+		}
+		if _, oerr := lifecycle.NewOfflineDetector(f.App).WithClock(time.Now).RunOrg(bg, first); oerr != nil {
+			t.Errorf("the zoned scope still fails the run of organization %s: %v", first, oerr)
 		}
 	})
 	t.Run("edge cleanup (WP-159)", func(t *testing.T) {
@@ -146,6 +148,12 @@ func TestAuditBadScopeIsolated(t *testing.T) {
 			if _, cerr := relationship.NewCleanup(f.App).RunOrg(bg, second); cerr != nil || edgeKept() {
 				t.Fatalf("control: RunOrg(%s) alone: kept=%v err=%v", second, edgeKept(), cerr)
 			}
+		}
+		if ours(err) {
+			t.Errorf("Run() reports one of the fixture organizations: %v", err)
+		}
+		if _, oerr := relationship.NewCleanup(f.App).RunOrg(bg, first); oerr != nil {
+			t.Errorf("the zoned scope still fails the cleanup of organization %s: %v", first, oerr)
 		}
 	})
 }
