@@ -1,4 +1,4 @@
-import { Suspense, lazy, useMemo, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
@@ -11,7 +11,7 @@ import { Skeleton } from './components/ui/Skeleton';
 import { ToastViewport } from './components/ui/Toast';
 import { useAuthStore } from './auth/authStore';
 import { fetchAuthConfig, getStoredAuthConfig } from './auth/oidc';
-import { logout } from './auth/session';
+import { logout, refreshSession } from './auth/session';
 import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
 import { useEntitlements, useModules, navFeatureFor } from './hooks/useEntitlements';
@@ -382,10 +382,39 @@ function App() {
   );
 }
 
+// RequireAuth guards the signed-in pages. An expired access token of a stored
+// user (reload, navigation, new start after 15 minutes) is renewed with the
+// refresh cookie before the user is sent to /login (AUT-02, F-066).
 function RequireAuth() {
   const location = useLocation();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
   const hasSession = useAuthStore((state) => Boolean(state.token));
+  const hasUser = useAuthStore((state) => Boolean(state.user));
+  const [renewalFailed, setRenewalFailed] = useState(false);
+  const renewing = !isAuthenticated && hasUser && !renewalFailed;
+
+  useEffect(() => {
+    if (!renewing) {
+      return;
+    }
+    let active = true;
+    void refreshSession()
+      .catch(() => false)
+      .then((renewed) => {
+        // A renewed token the clock still sees as expired (clock skew) must
+        // not keep the user waiting.
+        if (active && !(renewed && useAuthStore.getState().isAuthenticated())) {
+          setRenewalFailed(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [renewing]);
+
+  if (renewing) {
+    return <PageFallback />;
+  }
 
   if (!isAuthenticated) {
     const from = `${location.pathname}${location.search}${location.hash}`;

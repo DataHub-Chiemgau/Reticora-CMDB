@@ -70,6 +70,34 @@ function hasValidSession(token: string | null, expiresAt: string | null) {
   return Number.isFinite(expires) && expires > Date.now();
 }
 
+// REFRESH_LEAD_MS: the access token is renewed this long before it expires
+// (AUT-02), so a user who keeps working does not run into an expired token.
+const REFRESH_LEAD_MS = 60_000;
+// The longest delay setTimeout supports (about 24.8 days); a longer one fires
+// at once. Access tokens live 15 minutes.
+const MAX_TIMER_MS = 2_147_483_647;
+
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+let refreshHandler: (() => unknown) | null = null;
+
+// scheduleRefresh plans the renewal about a minute before expiresAt and
+// replaces a planned one. An expired token is not planned: RequireAuth or the
+// next 401 renews it (F-066).
+function scheduleRefresh(expiresAt: string | null) {
+  clearTimeout(refreshTimer);
+  refreshTimer = undefined;
+  if (!expiresAt || !refreshHandler) {
+    return;
+  }
+
+  const expires = Date.parse(expiresAt);
+  const delay = expires - REFRESH_LEAD_MS - Date.now();
+  if (!Number.isFinite(expires) || expires <= Date.now() || delay > MAX_TIMER_MS) {
+    return;
+  }
+  refreshTimer = setTimeout(() => void refreshHandler?.(), Math.max(delay, 0));
+}
+
 const initialSession = readStoredSession();
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -79,13 +107,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setSession: (session) => {
     persistSession(session);
     set({ token: session.token, expiresAt: session.expiresAt, user: session.user });
+    scheduleRefresh(session.expiresAt);
   },
   clearSession: () => {
     persistSession(null);
     set({ token: null, expiresAt: null, user: null });
+    scheduleRefresh(null);
   },
   isAuthenticated: () => {
     const { token, expiresAt } = get();
     return hasValidSession(token, expiresAt);
   },
 }));
+
+// setRefreshHandler registers the renewal the store plans before the access
+// token expires (session.ts registers refreshSession; the store cannot import
+// it without an import cycle) and plans it for the current session.
+export function setRefreshHandler(handler: (() => unknown) | null) {
+  refreshHandler = handler;
+  scheduleRefresh(useAuthStore.getState().expiresAt);
+}

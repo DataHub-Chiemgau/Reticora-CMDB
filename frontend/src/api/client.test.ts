@@ -22,6 +22,7 @@ async function importClientWithSession(token = 'old-token') {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   window.sessionStorage.clear();
   vi.restoreAllMocks();
   vi.resetModules();
@@ -59,6 +60,42 @@ describe('fetchAPI authentication', () => {
     const retryHeaders = fetchMock.mock.calls[2]?.[1]?.headers as Headers;
     expect(retryHeaders.get('Authorization')).toBe(['Bearer', 'new-token'].join(' '));
     expect(useAuthStore.getState().token).toBe('new-token');
+  });
+
+  it('reports the 401 but keeps the session when the refresh is rate limited twice (429)', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ detail: 'expired' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'too many' }, 429))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'too many' }, 429));
+    vi.stubGlobal('fetch', fetchMock);
+    const { fetchAPI, useAuthStore } = await importClientWithSession('old-token');
+
+    const result = fetchAPI('/cis').catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(60_000);
+    const error = await result;
+
+    expect(error).toMatchObject({ name: 'ApiError', status: 401 });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/v1/auth/refresh');
+    expect(useAuthStore.getState().token).toBe('old-token');
+    expect(useAuthStore.getState().user?.sub).toBe('user-1');
+  });
+
+  it('ends the session when the server refuses the refresh cookie', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ detail: 'expired' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'refresh token already used' }, 401));
+    vi.stubGlobal('fetch', fetchMock);
+    const { fetchAPI, useAuthStore } = await importClientWithSession('old-token');
+
+    await expect(fetchAPI('/cis')).rejects.toMatchObject({ status: 401 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(useAuthStore.getState().token).toBeNull();
+    expect(useAuthStore.getState().user).toBeNull();
   });
 });
 
