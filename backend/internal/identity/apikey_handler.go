@@ -22,20 +22,46 @@ const (
 type APIKeyManager interface {
 	Create(ctx context.Context, key *StoredAPIKey) (*StoredAPIKey, error)
 	List(ctx context.Context, orgID string) ([]StoredAPIKey, error)
+	Get(ctx context.Context, orgID, id string) (*StoredAPIKey, error)
 	Revoke(ctx context.Context, orgID, id string) error
 	Rotate(ctx context.Context, orgID, id string, overlapUntil time.Time) (*RotatedAPIKey, error)
 }
 
+// ServiceAccountKeyResolver resolves the service account a key is bound to
+// (RBA-08): its grants and whether it exists in the organization and is
+// active.
+type ServiceAccountKeyResolver interface {
+	ServiceAccountAccessResolver
+	ServiceAccountState(ctx context.Context, orgID, id string) (exists, active bool, err error)
+}
+
 // APIKeyHandler serves /api/v1/api-keys (AUT-04, API-05). Every route needs
 // apikey:manage (authz). The plaintext of a key is returned only by create
-// and rotate.
+// and rotate. Rotating and revoking a foreign key and binding a key to a
+// service account need the key's rights in its holder's scope
+// (GrantCeiling); without the resolvers only the owner rotates and revokes
+// and no key is bound (fail-closed).
 type APIKeyHandler struct {
-	keys APIKeyManager
+	keys            APIKeyManager
+	owners          OwnerAccessResolver
+	serviceAccounts ServiceAccountKeyResolver
 }
 
 // NewAPIKeyHandler creates the handler.
 func NewAPIKeyHandler(keys APIKeyManager) *APIKeyHandler {
 	return &APIKeyHandler{keys: keys}
+}
+
+// WithOwnerAccess resolves the current rights of the users owning keys.
+func (h *APIKeyHandler) WithOwnerAccess(owners OwnerAccessResolver) *APIKeyHandler {
+	h.owners = owners
+	return h
+}
+
+// WithServiceAccountAccess resolves the service accounts keys are bound to.
+func (h *APIKeyHandler) WithServiceAccountAccess(r ServiceAccountKeyResolver) *APIKeyHandler {
+	h.serviceAccounts = r
+	return h
 }
 
 // RegisterRoutes registers the api-keys routes.
@@ -145,6 +171,9 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.ServiceAccountID != nil && strings.TrimSpace(*req.ServiceAccountID) == "" {
 		req.ServiceAccountID = nil
 	}
+	if req.ServiceAccountID != nil && !h.authorizeBinding(w, r, &p, *req.ServiceAccountID, req.Permissions) {
+		return
+	}
 	generated, err := GenerateAPIKey(req.Environment)
 	if err != nil {
 		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
@@ -188,7 +217,11 @@ func (h *APIKeyHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "authentication required")
 		return
 	}
-	if err := h.keys.Revoke(r.Context(), p.OrganizationID, chi.URLParam(r, "id")); err != nil {
+	id := chi.URLParam(r, "id")
+	if !h.authorizeKeyChange(w, r, &p, id) {
+		return
+	}
+	if err := h.keys.Revoke(r.Context(), p.OrganizationID, id); err != nil {
 		writeAPIKeyError(w, err)
 		return
 	}
@@ -218,7 +251,11 @@ func (h *APIKeyHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rotated, err := h.keys.Rotate(r.Context(), p.OrganizationID, chi.URLParam(r, "id"), time.Now().UTC().Add(overlap))
+	id := chi.URLParam(r, "id")
+	if !h.authorizeKeyChange(w, r, &p, id) {
+		return
+	}
+	rotated, err := h.keys.Rotate(r.Context(), p.OrganizationID, id, time.Now().UTC().Add(overlap))
 	if err != nil {
 		writeAPIKeyError(w, err)
 		return
@@ -227,6 +264,138 @@ func (h *APIKeyHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		"key":      CreatedAPIKey{APIKeyView: viewOf(rotated.Created), Key: rotated.Plaintext},
 		"previous": viewOf(rotated.Previous),
 	})
+}
+
+// authorizeBinding allows binding a key with perms to a service account only
+// if the account exists in the organization (404 otherwise) and the caller
+// holds what the key would grant, the intersection of perms and the
+// account's grants, in the account's scope (RBA-08, F-007). The rights of an
+// inactive account are unknown until it is reactivated, so perms are then
+// required org-wide.
+func (h *APIKeyHandler) authorizeBinding(w http.ResponseWriter, r *http.Request, p *Principal, serviceAccountID string, perms []Permission) bool {
+	if h.serviceAccounts == nil {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "API keys cannot be bound to service accounts here")
+		return false
+	}
+	exists, active, err := h.serviceAccounts.ServiceAccountState(r.Context(), p.OrganizationID, serviceAccountID)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return false
+	}
+	if !exists {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "service account not found")
+		return false
+	}
+	target := []Grant{OrgWideGrant(perms)}
+	if active {
+		grants, grantErr := h.serviceAccounts.ServiceAccountGrants(r.Context(), p.OrganizationID, serviceAccountID)
+		if grantErr != nil {
+			api.WriteRepoError(w, grantErr)
+			return false
+		}
+		target = restrictGrants(grants, perms)
+	}
+	if missing := GrantCeiling(p, target); len(missing) > 0 {
+		api.WriteError(w, http.StatusForbidden, "Forbidden",
+			"binding the key to the service account would grant "+joinPermissions(missing)+" beyond the caller's scope")
+		return false
+	}
+	return true
+}
+
+// authorizeKeyChange allows rotating or revoking the key id only to its
+// owner (the creating user of a key not bound to a service account) or to a
+// caller holding every key permission in at least the scope in which the
+// key's holder (owner or service account) holds it (AUT-04, F-006). A
+// rotation hands out the successor's plaintext, so anything less would let
+// the caller act with the holder's rights. A foreign or unknown key is 404.
+func (h *APIKeyHandler) authorizeKeyChange(w http.ResponseWriter, r *http.Request, p *Principal, id string) bool {
+	key, err := h.keys.Get(r.Context(), p.OrganizationID, id)
+	if err != nil {
+		writeAPIKeyError(w, err)
+		return false
+	}
+	if key.ServiceAccountID == nil && key.CreatedBy == p.Subject {
+		return true
+	}
+	grants, resolved, err := h.holderGrants(r.Context(), key)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return false
+	}
+	if !resolved {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "only the owner may rotate or revoke this API key")
+		return false
+	}
+	missing := GrantCeiling(p, restrictGrants(grants, key.Permissions))
+	for _, perm := range key.Permissions {
+		// A permission the holder lost may return with its roles; the
+		// caller must hold it as well.
+		if !p.Has(perm) && !containsPermission(missing, perm) {
+			missing = append(missing, perm)
+		}
+	}
+	if len(missing) > 0 {
+		api.WriteError(w, http.StatusForbidden, "Forbidden",
+			"rotating or revoking this API key requires "+joinPermissions(missing)+" in the scope of its holder")
+		return false
+	}
+	return true
+}
+
+// holderGrants returns the grants of the key's holder; resolved is false
+// when the handler has no resolver for it.
+func (h *APIKeyHandler) holderGrants(ctx context.Context, key *StoredAPIKey) (grants []Grant, resolved bool, err error) {
+	if key.ServiceAccountID == nil {
+		if h.owners == nil {
+			return nil, false, nil
+		}
+		grants, err = h.owners.AccessGrants(ctx, key.OrganizationID, key.CreatedBy)
+		return grants, err == nil, err
+	}
+	if h.serviceAccounts == nil {
+		return nil, false, nil
+	}
+	exists, active, err := h.serviceAccounts.ServiceAccountState(ctx, key.OrganizationID, *key.ServiceAccountID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !exists || !active {
+		// Unknown rights: the key's permissions are required org-wide.
+		return []Grant{OrgWideGrant(key.Permissions)}, true, nil
+	}
+	grants, err = h.serviceAccounts.ServiceAccountGrants(ctx, key.OrganizationID, *key.ServiceAccountID)
+	return grants, err == nil, err
+}
+
+// restrictGrants limits every grant to perms: what a key with perms acts
+// with when its holder has the grants.
+func restrictGrants(grants []Grant, perms []Permission) []Grant {
+	out := make([]Grant, 0, len(grants))
+	for _, g := range grants {
+		if held := intersectPermissions(perms, g.Permissions); len(held) > 0 {
+			g.Permissions = held
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+func containsPermission(perms []Permission, p Permission) bool {
+	for _, q := range perms {
+		if q == p {
+			return true
+		}
+	}
+	return false
+}
+
+func joinPermissions(perms []Permission) string {
+	out := make([]string, len(perms))
+	for i, p := range perms {
+		out[i] = string(p)
+	}
+	return strings.Join(out, ", ")
 }
 
 func writeAPIKeyError(w http.ResponseWriter, err error) {

@@ -2407,6 +2407,13 @@ export interface paths {
      *     permissions must be held by the caller; at use the key grants the
      *     intersection of its permissions and its owner's current rights, in
      *     the owner's scope. API keys cannot create keys.
+     *
+     *     A key bound to a service account (`service_account_id`, RBA-08) acts
+     *     with the account's rights. The account must exist in the caller's
+     *     organization (otherwise 404), and what the key would grant through
+     *     it, the requested permissions within the account's grants, must lie
+     *     within the caller's own scope; otherwise 403. A deactivated account's
+     *     permissions are then required organization-wide.
      */
     post: operations['createAPIKey'];
     delete?: never;
@@ -2425,7 +2432,14 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Revoke an API key at once */
+    /**
+     * Revoke an API key at once
+     * @description Allowed to the key's owner (the user who created a key not bound to a
+     *     service account) or to a caller holding every permission of the key
+     *     in at least the scope in which the key's holder (owner or service
+     *     account) holds it; otherwise 403 and the key stays unchanged. A key
+     *     of another organization is 404.
+     */
     delete: operations['revokeAPIKey'];
     options?: never;
     head?: never;
@@ -2446,6 +2460,13 @@ export interface paths {
      * @description Issues a successor with the same name, permissions, owner, environment
      *     and expiry. The previous key stays valid until the end of the overlap
      *     (default 24 hours, at most 7 days) or its own earlier expiry (SEC-06).
+     *
+     *     The successor's plaintext is returned, so only the key's owner (the
+     *     user who created a key not bound to a service account) or a caller
+     *     holding every permission of the key in at least the scope in which
+     *     the key's holder (owner or service account) holds it may rotate;
+     *     otherwise 403 and the key stays unchanged. A key of another
+     *     organization is 404.
      */
     post: operations['rotateAPIKey'];
     delete?: never;
@@ -16051,6 +16072,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
       /** @description Name, permissions, expiry or environment invalid */
       422: {
         headers: {

@@ -105,6 +105,18 @@ func (a ServiceAccountAccess) ServiceAccountGrants(ctx context.Context, orgID, i
 	return a.Repo.ServiceAccountGrants(ctx, orgID, id)
 }
 
+// ServiceAccountState implements identity.ServiceAccountKeyResolver.
+func (a ServiceAccountAccess) ServiceAccountState(ctx context.Context, orgID, id string) (exists, active bool, err error) {
+	sa, err := a.Repo.GetServiceAccount(ctx, orgID, id)
+	if errors.Is(err, ErrServiceAccountNotFound) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	return true, sa.IsActive, nil
+}
+
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 func isUUID(s string) bool { return uuidPattern.MatchString(s) }

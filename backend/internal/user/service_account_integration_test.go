@@ -34,7 +34,9 @@ func TestServiceAccounts(t *testing.T) {
 
 	mux := chi.NewRouter()
 	user.NewServiceAccountHandler(repo).RegisterRoutes(mux)
-	identity.NewAPIKeyHandler(keys).RegisterRoutes(mux)
+	// Wired like the router: binding checks the account against the caller.
+	identity.NewAPIKeyHandler(keys).WithOwnerAccess(permission.NewPGRepository(f.App)).
+		WithServiceAccountAccess(user.ServiceAccountAccess{Repo: repo}).RegisterRoutes(mux)
 	principal := identity.Principal{Subject: admin, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser,
 		Permissions: []identity.Permission{identity.PermUserManage, identity.PermAPIKeyManage, identity.PermCIRead, identity.PermCIWrite}}
 	call := func(method, path, body string) *httptest.ResponseRecorder {
