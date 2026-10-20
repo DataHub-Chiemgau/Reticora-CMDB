@@ -69,20 +69,19 @@ func CollectRecord(protocol string, res *Result, err error, observedAt time.Time
 }
 
 // credentialAliases maps protocols that share the credentials of another
-// protocol: SNMP-based power polling uses the SNMP community, WMI and NAS keep
-// using the SSH account they used before credentials were namespaced.
+// protocol: SNMP-based power polling uses the SNMP community. No other
+// protocol borrows a namespace; in particular WMI and NAS never receive the
+// SSH account (F-028).
 var credentialAliases = map[string]string{
 	"power": "snmp",
-	"nas":   "ssh",
-	"wmi":   "ssh",
 }
 
 // CredentialsFor selects the credentials a protocol plugin may receive (COL-02).
 // Collector credentials are namespaced by protocol ("ssh.username",
-// "redfish.password", "snmp.community"); the plugin gets only the entries of
-// its own namespace with the prefix removed. A protocol never receives the
-// credentials of another protocol unless credentialAliases says so; in
-// particular SSH credentials never reach Redfish targets.
+// "redfish.password", "snmp.community", "wmi.password"); the plugin gets only
+// the entries of its own namespace with the prefix removed. A protocol never
+// receives the credentials of another protocol unless credentialAliases says
+// so; without entries of its namespace it gets none, never a fallback.
 func CredentialsFor(protocol string, all map[string]string) map[string]string {
 	namespace := protocol
 	if alias, ok := credentialAliases[protocol]; ok {

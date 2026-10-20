@@ -550,3 +550,6 @@ COL-02;[B];D;backend/internal/discovery/bundle_selection_integration_test.go;WP-
 DIS-09;[B];D;backend/internal/discovery/scope_integration_test.go;WP-376
 INS-06;[B];D;backend/internal/discovery/bundle_selection_integration_test.go;WP-376
 DIS-04;[B];D;collector/plugins/wmi/wmi_test.go;WP-377
+DIS-04;[B];D;collector/collectorcmd/discovery_credentials_test.go;WP-378
+DIS-09;[B];D;collector/collectorcmd/discovery_credentials_test.go;WP-378
+COL-02;[B];D;collector/collectorcmd/bundle_test.go;WP-378

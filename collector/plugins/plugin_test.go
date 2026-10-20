@@ -1,22 +1,8 @@
-//go:build auditdefect
-
-// Phase-1 acceptance audit, group T2-auth-authz: defect test of the
-// per-protocol credential selection of the collector.
-//
-//   - WP-048 (COL-02), finding P1 "WMI plugin receives the SSH account (alias
-//     wmi->ssh) and sends it as HTTP Basic over plaintext; WMI credentials are
-//     ignored". Gap (critical) "Per-protocol isolation for all plugins incl.
-//     WMI/NAS/IPMI". Acceptance criterion of WP-048: "Credentials werden je
-//     Protokoll ausgewaehlt". The server bundle namespaces a credential of
-//     kind wmi as "wmi.*" (collectorcmd/bundle.go credentialNamespace), but
-//     plugins.CredentialsFor maps wmi to the ssh namespace (plugin.go
-//     credentialAliases), so the SSH account reaches every WinRM target and
-//     the stored WMI credential is never used. The cleartext transport itself
-//     is covered by group T4 (collector/plugins/wmi/wmi_auditdefect_test.go).
-//
-// Retest:
-//
-//	cd collector && go test -tags auditdefect -count=1 -v -run 'TestAuditT2' ./plugins/
+// Per-protocol credential selection of the collector plugins (WP-048,
+// COL-02). TestAuditT2CredentialsArePerProtocol (F-010, the cause of F-028)
+// moved here from t2_credentials_auditdefect_test.go (WP-378): the aliases
+// wmi->ssh and nas->ssh are gone, so the SSH account no longer reaches
+// WinRM or NAS targets and the stored WMI credential is used.
 package plugins
 
 import (
@@ -46,6 +32,9 @@ func TestAuditT2CredentialsArePerProtocol(t *testing.T) {
 		{"ssh", map[string]string{"username": "root", "password": "ssh-pw"}},
 		{"snmp", map[string]string{"community": "c0mmunity"}},
 		{"power", map[string]string{"community": "c0mmunity"}},
+		// NAS has no credential kind until WP-379 (E-68): fail closed.
+		{"nas", map[string]string{}},
+		{"sweep", map[string]string{}},
 	} {
 		got := CredentialsFor(c.protocol, all)
 		if !maps.Equal(got, c.want) {
@@ -57,9 +46,16 @@ func TestAuditT2CredentialsArePerProtocol(t *testing.T) {
 	}
 
 	// Edge: no WMI credential configured -> no credentials at all, never
-	// the SSH account as a fallback.
+	// the SSH account as a fallback; the same for NAS.
 	sshOnly := map[string]string{"ssh.username": "root", "ssh.password": "ssh-pw"}
-	if got := CredentialsFor("wmi", sshOnly); len(got) != 0 {
-		t.Errorf("CredentialsFor(\"wmi\") without wmi.* entries = %v, want an empty map", got)
+	for _, protocol := range []string{"wmi", "nas"} {
+		if got := CredentialsFor(protocol, sshOnly); len(got) != 0 {
+			t.Errorf("CredentialsFor(%q) without %s.* entries = %v, want an empty map", protocol, protocol, got)
+		}
+	}
+
+	// power -> snmp is the only shared namespace.
+	if want := map[string]string{"power": "snmp"}; !maps.Equal(credentialAliases, want) {
+		t.Errorf("credentialAliases = %v, want %v", credentialAliases, want)
 	}
 }

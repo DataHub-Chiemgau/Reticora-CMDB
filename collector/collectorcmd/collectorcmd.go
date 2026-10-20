@@ -66,9 +66,12 @@ type collectorConfig struct {
 	// SpoolFlushInterval is how often the spool is delivered (default 30 s).
 	SpoolFlushInterval time.Duration
 	HeartbeatInterval  time.Duration
-	// Credentials are namespaced by protocol ("ssh.username",
-	// "redfish.password", "snmp.community"); plugins receive only their own
-	// namespace through plugins.CredentialsFor (COL-02).
+	// Credentials are the locally configured credentials (RETICORA_*),
+	// namespaced by protocol ("ssh.username", "redfish.password",
+	// "snmp.community"); plugins receive only their own namespace through
+	// plugins.CredentialsFor (COL-02). They apply to the configured subnets
+	// (fallback pass, metric polling, traps), never to a server scope: a
+	// scope uses the bundle credentials of its credential_ids.
 	Credentials map[string]string
 	// RedfishTLSScopes and WMITLSScopes are the per-network TLS exceptions
 	// of the Redfish and WMI plugins (RETICORA_REDFISH_TLS_SCOPES,
@@ -436,6 +439,9 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 			continue
 		}
 		slog.Info("discovery started", "pass", pass.key, "protocols", due)
+		// Only the credentials of this pass (COL-02, DIS-09); every plugin
+		// receives the namespace of its protocol.
+		passCreds := credentialsFor(cfg, pass.scope)
 		var passRecords []plugins.DeviceRecord
 		var errs []runError
 		for _, protocol := range due {
@@ -449,7 +455,7 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 			}
 			targets := pass.targetsFor(protocol, hosts)
 			slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
-			creds := plugins.CredentialsFor(protocol, credentialsFor(cfg))
+			creds := plugins.CredentialsFor(protocol, passCreds)
 			hits, err := plug.Probe(ctx, targets, creds)
 			if err != nil {
 				slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
@@ -466,7 +472,7 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 			errs = append(errs, failed...)
 			if protocol == "power" {
 				// UPS and PDU readings of the power devices (MON-02).
-				uploadSamples(ctx, up, pollPowerValues(ctx, hits, plugins.CredentialsFor("snmp", credentialsFor(cfg))))
+				uploadSamples(ctx, up, pollPowerValues(ctx, hits, plugins.CredentialsFor("snmp", passCreds)))
 			}
 			slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
 			passRecords = append(passRecords, collected...)
@@ -1007,9 +1013,18 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 // dropped: traps are fire-and-forget events, spooling them like discovery
 // results would delay alerts past the point where they are useful.
 func runTrapReceiver(ctx context.Context, cfg collectorConfig, up *uploader) {
-	rcv := &snmp.TrapReceiver{
+	if err := newTrapReceiver(cfg, up).Run(ctx); err != nil {
+		slog.Error("snmp trap receiver stopped", "error", err)
+	}
+}
+
+// newTrapReceiver builds the trap receiver. Traps arrive from any device,
+// so only the locally configured community applies, never one of a server
+// scope (COL-02).
+func newTrapReceiver(cfg collectorConfig, up *uploader) *snmp.TrapReceiver {
+	return &snmp.TrapReceiver{
 		ListenAddr: cfg.TrapListenAddr,
-		Community:  plugins.CredentialsFor("snmp", credentialsFor(&cfg))["community"],
+		Community:  plugins.CredentialsFor("snmp", cfg.Credentials)["community"],
 		Sink: func(ctx context.Context, ev snmp.TrapEvent) {
 			slog.Info("snmp trap received", "source", ev.SourceIP, "trap_oid", ev.TrapOID)
 			if err := up.uploadTrapEvent(ctx, ev); err != nil {
@@ -1017,26 +1032,30 @@ func runTrapReceiver(ctx context.Context, cfg collectorConfig, up *uploader) {
 			}
 		},
 	}
-	if err := rcv.Run(ctx); err != nil {
-		slog.Error("snmp trap receiver stopped", "error", err)
-	}
+}
+
+// metricPoller polls numeric SNMP metrics of a target (snmp.Plugin).
+type metricPoller interface {
+	Poll(ctx context.Context, target string, creds map[string]string, metrics []snmp.PollMetric) ([]plugins.MetricSample, error)
 }
 
 // runMetricsLoop polls the configured numeric SNMP metrics on every scan
 // target and uploads the samples to the monitoring ingest (Epic E:
 // Collector-Polling). Polling runs independently of discovery so metric
-// intervals can be much shorter than discovery cycles.
+// intervals can be much shorter than discovery cycles. The scan targets are
+// the configured subnets, so only the locally configured credentials apply,
+// never those of a server scope (COL-02).
 func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 	ticker := time.NewTicker(cfg.MetricsInterval)
 	defer ticker.Stop()
 
-	poller, ok := pluginRegistry["snmp"].(*snmp.Plugin)
+	poller, ok := pluginRegistry["snmp"].(metricPoller)
 	if !ok {
 		slog.Error("snmp plugin unavailable; metric polling disabled")
 		return
 	}
 
-	creds := plugins.CredentialsFor("snmp", credentialsFor(&cfg))
+	creds := plugins.CredentialsFor("snmp", cfg.Credentials)
 	for {
 		targets := expandSubnets(cfg.ScanSubnets)
 		samples := make([]plugins.MetricSample, 0, len(targets)*len(cfg.PollMetrics))
@@ -1602,9 +1621,10 @@ var upsPollMetrics = []snmp.PollMetric{
 }
 
 // pollPowerValues reads the UPS-MIB values of the power devices the power
-// plugin found; the runtime is reported in minutes and converted.
+// plugin found with the SNMP credentials of their pass; the runtime is
+// reported in minutes and converted.
 func pollPowerValues(ctx context.Context, hits []plugins.Result, creds map[string]string) []plugins.MetricSample {
-	poller, ok := pluginRegistry["snmp"].(*snmp.Plugin)
+	poller, ok := pluginRegistry["snmp"].(metricPoller)
 	if !ok {
 		return nil
 	}
