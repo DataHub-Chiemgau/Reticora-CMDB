@@ -5,6 +5,7 @@ node_modules/
 dist/
 frontend/dist/
 backend/bin/
+/backend/agent
 
 # Test artifacts
 frontend/test-results/

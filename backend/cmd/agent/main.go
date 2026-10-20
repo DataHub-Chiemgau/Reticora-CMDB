@@ -18,12 +18,14 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/transport"
 )
@@ -49,6 +51,10 @@ type agentConfig struct {
 	// (RETICORA_AGENT_TOKEN or the file RETICORA_AGENT_TOKEN_FILE). Every
 	// report carries it; without it the agent sends nothing (AGT-03).
 	Token string
+	// SpoolDir keeps the reports that could not be sent until the next
+	// successful send (RETICORA_AGENT_SPOOL_DIR, default in the user cache
+	// directory); empty disables the spool.
+	SpoolDir string
 }
 
 func main() {
@@ -89,6 +95,14 @@ func loadAgentConfig() agentConfig {
 		CredentialsPath: os.Getenv("RETICORA_CREDENTIALS_PATH"),
 		TLSServerName:   os.Getenv("RETICORA_TLS_SERVER_NAME"),
 		Token:           strings.TrimSpace(os.Getenv("RETICORA_AGENT_TOKEN")),
+		SpoolDir:        os.Getenv("RETICORA_AGENT_SPOOL_DIR"),
+	}
+	if cfg.SpoolDir == "" {
+		if dir, err := os.UserCacheDir(); err == nil {
+			cfg.SpoolDir = filepath.Join(dir, "reticora-agent", "spool")
+		} else {
+			slog.Warn("no spool directory; unsent telemetry is not kept", "error", err)
+		}
 	}
 	if path := os.Getenv("RETICORA_AGENT_TOKEN_FILE"); cfg.Token == "" && path != "" {
 		if data, err := os.ReadFile(path); err == nil {
@@ -142,8 +156,36 @@ func tlsConfig(cfg agentConfig) (*tls.Config, error) {
 	return conf, nil
 }
 
+// maxRedirects is the number of redirects the direct channel follows.
+const maxRedirects = 3
+
+// checkRedirect is the redirect policy of the direct channel: a redirect to
+// any scheme but https is refused, so the credential never leaves TLS
+// (AGT-03, F-064); at most maxRedirects are followed, and the Authorization
+// header is dropped once a redirect leaves the host of the request.
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("redirect to %s refused: the agent follows https redirects only", req.URL.Redacted())
+	}
+	if len(via) > maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	// Once any hop left the original host the header stays dropped, also
+	// on a redirect back.
+	for _, hop := range via[1:] {
+		if hop.URL.Host != via[0].URL.Host {
+			req.Header.Del("Authorization")
+		}
+	}
+	if req.URL.Host != via[0].URL.Host {
+		req.Header.Del("Authorization")
+	}
+	return nil
+}
+
 // httpClientFor returns the TLS client of the direct channel: mTLS when
-// enrolled material is available, otherwise server-authenticated TLS.
+// enrolled material is available, otherwise server-authenticated TLS. Both
+// follow redirects only under checkRedirect.
 func httpClientFor(cfg agentConfig) (*http.Client, error) {
 	if len(cfg.CertPEM) > 0 && len(cfg.KeyPEM) > 0 {
 		mtlsTransport, err := transport.NewMTLS(transport.Config{
@@ -156,13 +198,16 @@ func httpClientFor(cfg agentConfig) (*http.Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("mTLS setup: %w", err)
 		}
-		return mtlsTransport.HTTPClient(), nil
+		client := mtlsTransport.HTTPClient()
+		client.CheckRedirect = checkRedirect
+		return client, nil
 	}
 	conf, err := tlsConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{TLSClientConfig: conf, Proxy: http.ProxyFromEnvironment}}, nil
+	return &http.Client{Timeout: 15 * time.Second, CheckRedirect: checkRedirect,
+		Transport: &http.Transport{TLSClientConfig: conf, Proxy: http.ProxyFromEnvironment}}, nil
 }
 
 // runTelemetryLoop collects and sends system telemetry at configured intervals.
@@ -197,27 +242,126 @@ func buildTelemetry(cfg agentConfig) agent.TelemetryPayload {
 }
 
 // collectAndSend sends the telemetry through the collector relay (preferred)
-// or directly to the backend; both channels are TLS only.
+// or directly to the backend; both channels are TLS only. A report that
+// cannot be sent is logged and spooled; after a successful send the spool
+// is delivered, oldest report first.
 func collectAndSend(ctx context.Context, cfg agentConfig) {
 	if cfg.Token == "" {
 		slog.Error("no agent credential configured (RETICORA_AGENT_TOKEN or RETICORA_AGENT_TOKEN_FILE); telemetry not sent")
 		return
 	}
 	payload := buildTelemetry(cfg)
+	if err := deliver(ctx, cfg, payload); err != nil {
+		slog.Error("telemetry send failed, report spooled", "error", err)
+		spoolTelemetry(ctx, cfg, payload)
+		return
+	}
+	flushSpool(ctx, cfg)
+}
+
+// deliver sends one report through the relay or, without relay or when
+// the relay fails, directly.
+func deliver(ctx context.Context, cfg agentConfig, payload agent.TelemetryPayload) error {
 	if cfg.CollectorRelay != "" {
 		err := sendViaRelay(ctx, cfg, payload)
-		if err == nil {
-			return
-		}
-		if cfg.ServerURL == "" {
-			slog.Error("telemetry send via relay failed", "error", err)
-			return
+		if err == nil || cfg.ServerURL == "" {
+			return err
 		}
 		slog.Warn("relay send failed, trying direct", "error", err)
 	}
-	if err := sendDirect(ctx, cfg, payload); err != nil {
-		slog.Error("telemetry send failed", "error", err)
+	return sendDirect(ctx, cfg, payload)
+}
+
+// Spool limits: the buffer keeps unsent reports for at least 24 hours
+// (buffer.DefaultMinRetention) and at most a week, within maxSpoolBytes.
+const (
+	maxSpoolBytes = 32 << 20
+	maxSpoolAge   = 7 * 24 * time.Hour
+	spoolTopic    = "agent.telemetry"
+)
+
+// spoolFor returns the spool of the agent, or nil when none is configured.
+func spoolFor(cfg agentConfig) *buffer.DiskBuffer {
+	if cfg.SpoolDir == "" {
+		return nil
 	}
+	return &buffer.DiskBuffer{Dir: cfg.SpoolDir, MaxBytes: maxSpoolBytes, MaxAge: maxSpoolAge,
+		OnDrop: func(l buffer.Loss) {
+			slog.Warn("telemetry spool dropped reports", "messages", l.Messages, "bytes", l.Bytes, "reason", l.Reason)
+		}}
+}
+
+// spoolTelemetry keeps an unsent report for the next successful send.
+func spoolTelemetry(ctx context.Context, cfg agentConfig, payload agent.TelemetryPayload) {
+	spool := spoolFor(cfg)
+	if spool == nil {
+		slog.Warn("no telemetry spool configured; report dropped")
+		return
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		slog.Error("spool telemetry", "error", err)
+		return
+	}
+	if _, err = spool.Enqueue(ctx, buffer.Message{Topic: spoolTopic, Payload: data, CreatedAt: payload.CollectedAt}); err != nil {
+		slog.Error("spool telemetry", "dir", cfg.SpoolDir, "error", err)
+	}
+}
+
+// flushSpool delivers the spooled reports, oldest first, until the spool is
+// empty or a send fails (the rest stays for the next run). A report the
+// backend rejects as invalid is dropped so it cannot block the spool.
+func flushSpool(ctx context.Context, cfg agentConfig) {
+	spool := spoolFor(cfg)
+	if spool == nil {
+		return
+	}
+	for {
+		batch, err := spool.PeekBatch(ctx, 20)
+		if err != nil {
+			slog.Error("read telemetry spool", "dir", cfg.SpoolDir, "error", err)
+			return
+		}
+		if len(batch) == 0 {
+			return
+		}
+		for _, msg := range batch {
+			var payload agent.TelemetryPayload
+			if err = json.Unmarshal(msg.Payload, &payload); err == nil {
+				err = deliver(ctx, cfg, payload)
+			}
+			var rejected *rejectedError
+			switch {
+			case err == nil:
+			case errors.As(err, &rejected) && rejected.permanent():
+				slog.Warn("spooled report rejected, dropped", "id", msg.ID, "error", err)
+			case errors.As(err, new(*json.SyntaxError)), errors.As(err, new(*json.UnmarshalTypeError)):
+				slog.Warn("spooled report unreadable, dropped", "id", msg.ID, "error", err)
+			default:
+				slog.Warn("spooled telemetry not sent, kept", "pending_from", msg.ID, "error", err)
+				return
+			}
+			if err = spool.Ack(ctx, []string{msg.ID}); err != nil {
+				slog.Error("acknowledge spooled telemetry", "id", msg.ID, "error", err)
+				return
+			}
+		}
+	}
+}
+
+// rejectedError is a telemetry report the backend answered with an error
+// status.
+type rejectedError struct{ status int }
+
+func (e *rejectedError) Error() string { return fmt.Sprintf("telemetry rejected: status %d", e.status) }
+
+// permanent reports whether sending the same report again cannot succeed.
+func (e *rejectedError) permanent() bool {
+	switch e.status {
+	case http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity:
+		return true
+	}
+	return false
 }
 
 // sendViaRelay sends one relay message over TLS to the collector relay and
@@ -293,7 +437,7 @@ func sendDirect(ctx context.Context, cfg agentConfig, payload agent.TelemetryPay
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("telemetry rejected: status %d", resp.StatusCode)
+		return &rejectedError{status: resp.StatusCode}
 	}
 	return nil
 }
