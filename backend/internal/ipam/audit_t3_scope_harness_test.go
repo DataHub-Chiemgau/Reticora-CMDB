@@ -3,9 +3,8 @@ package ipam_test
 // Phase-1 acceptance audit, group T3-data-ingest: test harness (no test of
 // its own) of the client-scope tests of ipam against PostgreSQL. Used by
 // TestAuditT3VLANReferenceMustBeVisible and TestVLANReferenceStaysWithinTheClient
-// (vlan_integration_test.go, WP-371) and by the defect test
-// TestAuditT3VRFWritesNeedOrgScope (audit_t3_client_scope_auditdefect_test.go,
-// until WP-372).
+// (vlan_integration_test.go, WP-371) and by TestAuditT3VRFWritesNeedOrgScope
+// (vrf_integration_test.go, WP-372).
 
 import (
 	"context"

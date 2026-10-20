@@ -3478,7 +3478,10 @@ export interface paths {
     /** List the VRFs of the organization, the default first */
     get: operations['listVRFs'];
     put?: never;
-    /** Create a VRF (vrf:manage) */
+    /**
+     * Create a VRF (vrf:manage)
+     * @description A VRF is org-wide; a principal restricted to some clients or sites gets 403 (TEN-05, E-09).
+     */
     post: operations['createVRF'];
     delete?: never;
     options?: never;
@@ -3502,12 +3505,15 @@ export interface paths {
     post?: never;
     /**
      * Delete a VRF (vrf:manage)
-     * @description The default VRF and VRFs with subnets or addresses cannot be deleted (422).
+     * @description The default VRF and VRFs with subnets or addresses cannot be deleted (422). A VRF is org-wide; for a principal restricted to some clients or sites it answers 404 (TEN-05, E-09).
      */
     delete: operations['deleteVRF'];
     options?: never;
     head?: never;
-    /** Rename a VRF or change its description (vrf:manage) */
+    /**
+     * Rename a VRF or change its description (vrf:manage)
+     * @description A VRF is org-wide; for a principal restricted to some clients or sites it answers 404 (TEN-05, E-09).
+     */
     patch: operations['updateVRF'];
     trace?: never;
   };
@@ -10221,7 +10227,7 @@ export interface components {
       description?: string;
       is_management?: boolean;
     };
-    /** @description VRF of the organization (TEN-10, CH10). Every organization has exactly one default VRF "global", created with the organization; it cannot be deleted. */
+    /** @description VRF of the organization (TEN-10, CH10). Every organization has exactly one default VRF "global", created with the organization; it cannot be deleted. Every principal of the organization reads the VRFs; only principals without client or site restriction create, change or delete them (E-09). */
     VRF: {
       id: string;
       organization_id: string;
@@ -18869,6 +18875,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
     };
   };

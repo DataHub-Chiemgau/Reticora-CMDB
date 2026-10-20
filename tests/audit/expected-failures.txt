@@ -29,7 +29,6 @@ go;backend/internal/discovery;TestAuditZonedScopeTargetRefused;F-108
 go;backend/internal/history;TestAuditT3HistoryIncludesLocationChange;F-093
 go;backend/internal/iga;TestAuditT1ApprovalNeverLosesTheProvisioningTask;F-056
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
-go;backend/internal/ipam;TestAuditT3VRFWritesNeedOrgScope;F-089
 go;backend/internal/locations;TestAuditDefectSiteGrantConfinedToClientAndSite;F-014 F-141
 go;backend/internal/locations;TestAuditT3LocationDeleteRefusesChildren;F-023
 go;backend/internal/locations;TestAuditT3SiteDeleteKeepsNetworkObjects;F-024

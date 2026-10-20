@@ -13,7 +13,9 @@ import (
 
 // VRF is a routing domain of the organization (TEN-10, CH10). Every
 // organization has exactly one default VRF "global"; subnets are unique per
-// VRF.
+// VRF. A VRF is org-wide: every principal of the organization reads it, only
+// principals without client or site restriction create, change or delete it
+// (E-09, restrictive policies of migration 000148).
 type VRF struct {
 	ID             string    `json:"id"`
 	OrganizationID string    `json:"organization_id"`
@@ -89,7 +91,9 @@ func (r *PGRepository) GetVRF(ctx context.Context, orgID, id string) (*VRF, erro
 	return v, err
 }
 
-// CreateVRF stores a VRF; only the database creates the default VRF.
+// CreateVRF stores a VRF; only the database creates the default VRF. For a
+// principal restricted in the client or site scope the insert fails with the
+// row level security error 42501 (403 at the API).
 func (r *PGRepository) CreateVRF(ctx context.Context, v *VRF) error {
 	return database.WithRequestTenant(ctx, r.pool, v.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		created, err := scanVRF(tx.QueryRow(ctx, `INSERT INTO vrf (organization_id, name, description)
@@ -102,7 +106,8 @@ func (r *PGRepository) CreateVRF(ctx context.Context, v *VRF) error {
 	})
 }
 
-// UpdateVRF renames a VRF or changes its description.
+// UpdateVRF renames a VRF or changes its description. A principal restricted
+// in the client or site scope updates no row: ErrNotFound.
 func (r *PGRepository) UpdateVRF(ctx context.Context, orgID, id string, req UpdateVRFRequest) (*VRF, error) {
 	var v *VRF
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -118,7 +123,9 @@ func (r *PGRepository) UpdateVRF(ctx context.Context, orgID, id string, req Upda
 	return v, err
 }
 
-// DeleteVRF removes a VRF; the default VRF and VRFs with subnets stay.
+// DeleteVRF removes a VRF; the default VRF and VRFs with subnets stay. A
+// principal restricted in the client or site scope deletes no row:
+// ErrNotFound.
 func (r *PGRepository) DeleteVRF(ctx context.Context, orgID, id string) error {
 	return r.deleteByID(ctx, orgID, "vrf", "true", id)
 }

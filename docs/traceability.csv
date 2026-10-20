@@ -537,3 +537,6 @@ NET-08;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-371
 NET-01;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-371
 NET-02;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-371
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/server/vlan_routes_integration_test.go;WP-371
+TEN-10;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
+NET-02;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
+NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
