@@ -563,3 +563,6 @@ REC-09;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-383
 LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-383
 TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-383
 COL-01;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-383
+DIS-09;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
+API-05;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
+INS-06;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
