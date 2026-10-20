@@ -8,18 +8,62 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
-func bulkMux(t *testing.T, n int) (chi.Router, *MemoryRepository, []string, *jobs.Service) {
+// bulkRepo records the update request of every CI a bulk changes; with
+// keepStatus it stores none of the statuses, like a write that does not
+// take the status.
+type bulkRepo struct {
+	*MemoryRepository
+	keepStatus bool
+	mu         sync.Mutex
+	requests   map[string]UpdateRequest
+}
+
+func (r *bulkRepo) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
+	r.mu.Lock()
+	r.requests[id] = req
+	r.mu.Unlock()
+	if r.keepStatus {
+		req.Status = nil
+	}
+	return r.MemoryRepository.Update(ctx, orgID, id, req)
+}
+
+// checkManual asserts that every id was written as a manual change of
+// author with If-Match "*" (WP-368, E-66 option 1) and has version 2.
+func (r *bulkRepo) checkManual(t *testing.T, author string, ids []string) {
 	t.Helper()
-	repo := NewMemoryRepository()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range ids {
+		req, ok := r.requests[id]
+		switch {
+		case !ok:
+			t.Errorf("%s: not written", id)
+		case req.Manual == nil || req.Manual.Author != author:
+			t.Errorf("%s: manual change %+v, want author %s", id, req.Manual, author)
+		case req.ChangeReason != "bulk set_status" || req.IfMatch == nil || *req.IfMatch != api.IfMatchAny:
+			t.Errorf("%s: reason %q, If-Match %v, want bulk set_status and *", id, req.ChangeReason, req.IfMatch)
+		}
+		if item, _ := r.GetByID(context.Background(), "org-1", id); item.Version != 2 {
+			t.Errorf("%s: version %d, want 2", id, item.Version)
+		}
+	}
+}
+
+func newBulkRepo(t *testing.T, n int) (*bulkRepo, []string) {
+	t.Helper()
+	repo := &bulkRepo{MemoryRepository: NewMemoryRepository(), requests: map[string]UpdateRequest{}}
 	ids := make([]string, n)
 	for i := range ids {
 		item := &Item{OrganizationID: "org-1", Name: fmt.Sprintf("bulk-%03d", i), CITypeID: "t", Status: StatusActive}
@@ -28,6 +72,12 @@ func bulkMux(t *testing.T, n int) (chi.Router, *MemoryRepository, []string, *job
 		}
 		ids[i] = item.ID
 	}
+	return repo, ids
+}
+
+func bulkMux(t *testing.T, n int) (chi.Router, *bulkRepo, []string, *jobs.Service) {
+	t.Helper()
+	repo, ids := newBulkRepo(t, n)
 	jobSvc := jobs.NewService(jobs.NewMemoryRepository())
 	jobSvc.Register(jobs.Kind{Name: BulkJobKind, MaxAttempts: 1})
 	mux := chi.NewRouter()
@@ -67,6 +117,26 @@ func TestBulkStatusReportsEachID(t *testing.T) {
 	}
 	if item, _ := repo.GetByID(context.Background(), "org-1", ids[2]); item.Status != StatusActive {
 		t.Error("a CI outside the request changed")
+	}
+	// WP-368 (CI-04, OVR-01, API-07): each change is a manual one of the
+	// requesting user.
+	repo.checkManual(t, "user-1", ids[:2])
+}
+
+// TestBulkReportsAStatusNotApplied covers WP-368 (API-08, F-020): an id
+// whose CI does not take the status is an error with code and reason in
+// the report, not ok.
+func TestBulkReportsAStatusNotApplied(t *testing.T) {
+	mux, repo, ids, _ := bulkMux(t, 1)
+	repo.keepStatus = true
+	w := postBulk(mux, bulkBody(StatusInactive, ids[0]))
+	var res BulkResult
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("bulk: %d %s", w.Code, w.Body.String())
+	}
+	if item := res.Items[0]; res.Succeeded != 0 || res.Failed != 1 || item.Result != "error" || item.Code != http.StatusConflict ||
+		!strings.Contains(item.Error, "keeps status active") {
+		t.Errorf("report of a status not applied: %+v", res)
 	}
 }
 
@@ -120,4 +190,29 @@ func TestBulkFromHundredIDsIsAJob(t *testing.T) {
 	if item, _ := repo.GetByID(context.Background(), "org-1", ids[99]); item.Status != StatusInactive {
 		t.Errorf("status %s", item.Status)
 	}
+	// WP-368: the job writes manual changes of its creator.
+	if job.CreatedBy != "user-1" {
+		t.Errorf("job created by %q", job.CreatedBy)
+	}
+	repo.checkManual(t, "user-1", ids)
+}
+
+// TestBulkJobWritesAsItsCreator covers WP-368 (OVR-01): the author of the
+// changes of a bulk job is the creator of the job, not the context it runs
+// in.
+func TestBulkJobWritesAsItsCreator(t *testing.T) {
+	repo, ids := newBulkRepo(t, 2)
+	jobSvc := jobs.NewService(jobs.NewMemoryRepository())
+	jobSvc.Register(jobs.Kind{Name: BulkJobKind, MaxAttempts: 1})
+	svc := NewService(repo).WithBulkJobs(jobSvc)
+	req := &BulkRequest{Action: BulkSetStatus, IDs: ids, Status: StatusMaintenance}
+	job, _, err := jobSvc.Enqueue(context.Background(), "org-1", BulkJobKind, req, jobs.EnqueueOptions{CreatedBy: "user-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.runBulkJob(tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: "org-1"}), "org-1", job.ID, req)
+	if job, err = jobSvc.Get(context.Background(), "org-1", job.ID); err != nil || job.Status != jobs.StatusSucceeded {
+		t.Fatalf("job: %+v %v", job, err)
+	}
+	repo.checkManual(t, "user-2", ids)
 }
