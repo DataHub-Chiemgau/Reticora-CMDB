@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000142_edge_orgwide_endpoint
+Stand: Migration 000144_tenant_truncate_guard
 
 ## Prüfung
 
@@ -84,7 +84,8 @@ Start bei jeder Abweichung:
 
 | Rolle | Eigenschaften | Rechte |
 |---|---|---|
-| Login-Rolle (z. B. `reticora`) | führt die Migrationen aus | Mitglied von `reticora_app`; der Pool wechselt per `SET ROLE` |
+| Migrations-/Admin-Login (z. B. `reticora`) | führt die Migrationen aus | darf SUPERUSER sein; nie Login des Servers (`database.NewPool` weist ihn ab), nur Werkzeuge über `database.NewAdminPool` |
+| Laufzeit-Login (z. B. `reticora_runtime`) | LOGIN, NOSUPERUSER, NOBYPASSRLS | nur Mitglied von `reticora_app`; der Pool wechselt per `SET ROLE`; erreicht keine SUPERUSER-/BYPASSRLS-Rolle |
 | `reticora_app` | NOLOGIN, NOSUPERUSER, NOBYPASSRLS | DML/Sequenzen/EXECUTE; `SET ROLE reticora_owner` erlaubt, aber ohne Vererbung (`INHERIT FALSE`); kein eigenes `CREATE` auf `public` |
 | `reticora_owner` | NOLOGIN, NOSUPERUSER, NOBYPASSRLS | Eigentümer aller Tabellen in `public` außer `schema_migrations` und TimescaleDB-Hypertables; `USAGE, CREATE` auf `public` |
 
@@ -99,6 +100,21 @@ Start bei jeder Abweichung:
   Grants oder neue Tabellen bleiben den Migrationen vorbehalten.
 - Der Event-Trigger `reticora_assign_owner` übergibt Tabellen, die spätere
   Migrationen in `public` anlegen, an `reticora_owner`.
+- Login (WP-352, F-057): Weder `session_user` noch `current_user` ist
+  SUPERUSER oder BYPASSRLS, und keine von ihnen erreichbare Rolle (geerbt oder
+  per `SET ROLE`) ist es; sonst gäbe `RESET ROLE` jeder Pool-Verbindung die
+  Rechte zurück. `VerifyRLSEnforced` und `VerifyRoleContract` melden das als
+  `RoleContractError` mit dem Session-User.
+- TRUNCATE-Guard (Migration 000144, F-192): `TRUNCATE` umgeht RLS, und der
+  Eigentümer `reticora_owner` darf es implizit. Jede Mandantentabelle (auch
+  `metric_sample` und die Materialisierungs-Hypertable von
+  `metric_sample_1h`) trägt den Statement-Level-Trigger
+  `reticora_truncate_guard` (`BEFORE TRUNCATE`), der für `reticora_app` und
+  `reticora_owner` mit 42501 abbricht. Entfernen oder Abschalten des Guards ist
+  DDL und für beide Rollen durch `reticora_restrict_app_ddl` gesperrt.
+  `VerifyRoleContract` meldet jede Mandantentabelle ohne aktiven Guard und
+  einen Login mit eigenem `TRUNCATE`-Recht; eine neue Mandantentabelle braucht
+  den Trigger daher in ihrer Migration.
 
 Nachweis: `backend/internal/database/role_check_integration_test.go`.
 

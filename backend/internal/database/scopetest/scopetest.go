@@ -4,22 +4,111 @@
 // neither sees nor changes objects of another client.
 //
 // The package is imported by tests only. It needs a migrated PostgreSQL in
-// TEST_DATABASE_URL; without one, Seed skips the test.
+// TEST_DATABASE_URL; without one, Seed skips the test. TEST_DATABASE_URL is
+// the admin login for seeding and fixtures; application pools log in through
+// AppDSN without SUPERUSER or BYPASSRLS (TEN-03, F-057).
 package scopetest
 
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// AppLogin is the runtime login of the integration tests: LOGIN NOSUPERUSER
+// NOBYPASSRLS NOCREATEDB NOCREATEROLE, member of reticora_app only. The DB
+// job in .github/workflows/ci.yml creates it after the migrations with
+// appLoginPassword and passes its DSN in TEST_APP_DATABASE_URL.
+const AppLogin = "reticora_test_runtime"
+
+// appLoginPassword is the password of AppLogin; the login only exists in
+// test databases.
+const appLoginPassword = "reticora_test_runtime"
+
+// appLoginLockKey serializes the creation of AppLogin between test packages
+// running in parallel against the same database.
+const appLoginLockKey = 0x349
+
+// AppDSN returns the DSN application pools (database.NewPool) of the
+// integration tests open: TEST_APP_DATABASE_URL, or, when that is not set,
+// TEST_DATABASE_URL with AppLogin as user. In that case AppDSN makes sure
+// through the admin login that AppLogin exists with its attributes and is a
+// member of the application role; a new login gets appLoginPassword, an
+// existing one keeps its password. Migrating down drops reticora_app together
+// with its memberships, so the membership is checked on every call. Without
+// TEST_DATABASE_URL the test is skipped.
+func AppDSN(t *testing.T) string {
+	t.Helper()
+	adminDSN := os.Getenv("TEST_DATABASE_URL")
+	if adminDSN == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
+	}
+	if dsn := os.Getenv("TEST_APP_DATABASE_URL"); dsn != "" {
+		return dsn
+	}
+	u, err := url.Parse(adminDSN)
+	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
+		t.Fatalf("scopetest: TEST_DATABASE_URL is no postgres:// URL; set TEST_APP_DATABASE_URL to the runtime login")
+	}
+	u.User = url.UserPassword(AppLogin, appLoginPassword)
+
+	ctx := context.Background()
+	admin, err := pgx.Connect(ctx, adminDSN)
+	if err != nil {
+		t.Fatalf("scopetest: admin connection: %v", err)
+	}
+	defer func() { _ = admin.Close(ctx) }()
+	tx, err := admin.Begin(ctx)
+	if err != nil {
+		t.Fatalf("scopetest: runtime login: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// The lock is taken in its own statement so the lookup below sees a
+	// login another package created while this one waited.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, appLoginLockKey); err != nil {
+		t.Fatalf("scopetest: runtime login: %v", err)
+	}
+	var exists, restricted, member bool
+	if err := tx.QueryRow(ctx, `
+		SELECT r.oid IS NOT NULL,
+		       COALESCE(r.rolcanlogin AND NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication), false),
+		       EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member = r.oid AND m.roleid = to_regrole($2))
+		  FROM (SELECT 1) AS one LEFT JOIN pg_roles r ON r.rolname = $1`,
+		AppLogin, database.DefaultAppRole).Scan(&exists, &restricted, &member); err != nil {
+		t.Fatalf("scopetest: inspect runtime login: %v", err)
+	}
+	login := pgx.Identifier{AppLogin}.Sanitize()
+	var stmts []string
+	switch {
+	case !exists:
+		stmts = append(stmts, `CREATE ROLE `+login+` LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '`+appLoginPassword+`'`)
+	case !restricted:
+		stmts = append(stmts, `ALTER ROLE `+login+` LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`)
+	}
+	if !member {
+		stmts = append(stmts, `GRANT `+pgx.Identifier{database.DefaultAppRole}.Sanitize()+` TO `+login)
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(ctx, stmt); err != nil {
+			t.Fatalf("scopetest: runtime login %s: %v", AppLogin, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("scopetest: runtime login %s: %v", AppLogin, err)
+	}
+	return u.String()
+}
+
 // Fixture holds the seeded ids and two pools: Admin is a maintenance
 // connection that is not subject to RLS (for seeding and checks), App is the
-// production pool whose connections run as the restricted application role.
+// production pool whose connections log in as AppLogin (AppDSN) and run as
+// the restricted application role.
 type Fixture struct {
 	Admin   *pgxpool.Pool
 	App     *pgxpool.Pool
@@ -101,7 +190,7 @@ func Seed(t *testing.T, tag string) *Fixture {
 		}
 	}
 
-	app, err := database.NewPool(ctx, dsn)
+	app, err := database.NewPool(ctx, AppDSN(t))
 	if err != nil {
 		t.Fatalf("application pool: %v", err)
 	}

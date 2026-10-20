@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -24,7 +25,7 @@ func TestOperatorAuditChain(t *testing.T) {
 		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
 	}
 	ctx := context.Background()
-	app, err := database.NewPool(ctx, dsn)
+	app, err := database.NewPool(ctx, scopetest.AppDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}

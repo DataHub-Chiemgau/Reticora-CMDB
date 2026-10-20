@@ -10,6 +10,11 @@ package monitoring
 //   - Security-barrier views with an org predicate isolate raw samples
 //     including compressed chunks and the continuous aggregate, and reject
 //     foreign rows on write (TestSecurityBarrierViewsIsolateMetrics).
+//   - The production views metric_sample_v and metric_sample_1h_v add the
+//     client and site scope as a sub-select over ci (ADR point 4, migration
+//     000143): client- and site-scoped principals read only samples of
+//     visible CIs from both views and cannot insert for another CI
+//     (TestSecurityBarrierViewsIsolateMetrics, "client and site scope").
 //
 // If a TimescaleDB upgrade lifts the restrictions, the first test fails and
 // the ADR has to be revisited.
@@ -26,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 )
 
 const (
@@ -36,7 +42,7 @@ const (
 
 var errSpikeRollback = errors.New("rollback")
 
-func spikeAdmin(t *testing.T) (context.Context, string, *pgxpool.Pool) {
+func spikeAdmin(t *testing.T) (context.Context, *pgxpool.Pool) {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
@@ -62,7 +68,7 @@ func spikeAdmin(t *testing.T) (context.Context, string, *pgxpool.Pool) {
 			metric_name TEXT NOT NULL, value DOUBLE PRECISION NOT NULL)`,
 		`SELECT create_hypertable('`+spikeSchema+`.m', 'time', chunk_time_interval => INTERVAL '1 day')`,
 	)
-	return ctx, dsn, admin
+	return ctx, admin
 }
 
 func mustExec(ctx context.Context, t *testing.T, pool *pgxpool.Pool, statements ...string) {
@@ -83,7 +89,7 @@ func expectError(ctx context.Context, t *testing.T, pool *pgxpool.Pool, sql, con
 }
 
 func TestTimescaleRefusesRLSWithCompression(t *testing.T) {
-	ctx, _, admin := spikeAdmin(t)
+	ctx, admin := spikeAdmin(t)
 	m := spikeSchema + ".m"
 
 	// RLS first: compression and continuous aggregates are refused.
@@ -111,7 +117,7 @@ func TestTimescaleRefusesRLSWithCompression(t *testing.T) {
 }
 
 func TestSecurityBarrierViewsIsolateMetrics(t *testing.T) {
-	ctx, dsn, admin := spikeAdmin(t)
+	ctx, admin := spikeAdmin(t)
 	m := spikeSchema + ".m"
 	mustExec(ctx, t, admin,
 		`ALTER TABLE `+m+` SET (timescaledb.compress, timescaledb.compress_segmentby = 'organization_id, ci_id, metric_name')`,
@@ -151,7 +157,7 @@ func TestSecurityBarrierViewsIsolateMetrics(t *testing.T) {
 		t.Fatalf("spike needs compressed chunks, got %d (%v)", compressed, err)
 	}
 
-	pool, err := database.NewPool(ctx, dsn)
+	pool, err := database.NewPool(ctx, scopetest.AppDSN(t))
 	if err != nil {
 		t.Fatalf("application pool: %v", err)
 	}
@@ -229,4 +235,142 @@ func TestSecurityBarrierViewsIsolateMetrics(t *testing.T) {
 			}
 		}
 	})
+	t.Run("client and site scope", func(t *testing.T) {
+		spikeScopedViews(ctx, t, admin)
+	})
+}
+
+// spikeScopedViews checks ADR point 4 on the production views of migration
+// 000143: CIs of client 1 at site 1 (own), of client 1 at a second site
+// (sibling), of client 2 (foreign) and without client (org), one sample each
+// two days back, the hourly aggregate refreshed for that hour.
+func spikeScopedViews(ctx context.Context, t *testing.T, admin *pgxpool.Pool) {
+	f := scopetest.Seed(t, "6c")
+	t.Cleanup(func() {
+		// metric_sample has no foreign key to the organization.
+		if _, err := admin.Exec(ctx, `DELETE FROM metric_sample WHERE organization_id = ANY($1::uuid[])`, []string{f.OrgA, f.OrgB}); err != nil {
+			t.Errorf("cleanup metric samples: %v", err)
+		}
+	})
+	site := func(client, name string) string {
+		t.Helper()
+		var id string
+		if err := admin.QueryRow(ctx, `SELECT b.site_id::text FROM room r JOIN building b ON b.id = r.building_id WHERE r.id = $1`,
+			f.Room(t, client, name)).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	ci := func(client, siteID, name string) string {
+		t.Helper()
+		id := f.CI(t, f.OrgA, client, name)
+		if siteID != "" {
+			mustExec(ctx, t, admin, `UPDATE ci SET location_id = '`+siteID+`' WHERE id = '`+id+`'`)
+		}
+		return id
+	}
+	site1, site1b, site2 := site(f.Client1, "spike-s1"), site(f.Client1, "spike-s1b"), site(f.Client2, "spike-s2")
+	own, sibling := ci(f.Client1, site1, "spike-own"), ci(f.Client1, site1b, "spike-sibling")
+	foreign, orgCI := ci(f.Client2, site2, "spike-foreign"), ci("", "", "spike-org")
+	at := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Hour)
+	for i, id := range []string{own, sibling, foreign, orgCI} {
+		if _, err := admin.Exec(ctx, `INSERT INTO metric_sample (time, organization_id, ci_id, metric_name, value) VALUES ($1, $2, $3, 'spike_cpu', $4)`,
+			at.Add(time.Duration(i)*time.Minute), f.OrgA, id, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := admin.Exec(ctx, `CALL refresh_continuous_aggregate('metric_sample_1h', $1::timestamptz, $2::timestamptz)`,
+		at.Add(-time.Hour), at.Add(2*time.Hour)); err != nil {
+		t.Fatalf("refresh aggregate: %v", err)
+	}
+	// A cheap function that raises on the foreign CI: the barrier must
+	// evaluate the scope predicate before it.
+	mustExec(ctx, t, admin,
+		`CREATE FUNCTION `+spikeSchema+`.guard_ci(ci uuid) RETURNS boolean
+			LANGUAGE plpgsql COST 0.0000001 AS $$
+			BEGIN
+				IF ci = '`+foreign+`'::uuid THEN RAISE EXCEPTION 'leaked %', ci; END IF;
+				RETURN true;
+			END $$`,
+		`GRANT EXECUTE ON FUNCTION `+spikeSchema+`.guard_ci(uuid) TO reticora_app`)
+
+	clientScope := database.OrgWideScope(f.OrgA, f.User)
+	clientScope.Clients = database.ScopeIDs(f.Client1)
+	siteScope := database.OrgWideScope(f.OrgA, f.User)
+	siteScope.Sites = database.ScopeIDs(site1)
+	orgScope := database.OrgWideScope(f.OrgA, f.User)
+	ids := []string{own, sibling, foreign, orgCI}
+	for _, p := range []struct {
+		name    string
+		scope   *database.TenantScope
+		visible map[string]bool
+	}{
+		{"org", &orgScope, map[string]bool{own: true, sibling: true, foreign: true, orgCI: true}},
+		// TEN-05: a CI without client (or site) is org-wide and visible.
+		{"client1", &clientScope, map[string]bool{own: true, sibling: true, orgCI: true}},
+		{"site1", &siteScope, map[string]bool{own: true, orgCI: true}},
+	} {
+		for _, view := range []string{"metric_sample_v", "metric_sample_1h_v"} {
+			// The org-wide principal sees the foreign CI, so only the scoped
+			// ones call the raising function.
+			guard := "true"
+			if !p.visible[foreign] {
+				guard = spikeSchema + ".guard_ci(ci_id)"
+			}
+			var got []string
+			err := database.WithTenant(ctx, f.App, p.scope, func(ctx context.Context, tx pgx.Tx) error {
+				return tx.QueryRow(ctx, `SELECT COALESCE(array_agg(ci_id::text ORDER BY ci_id), '{}')
+					FROM `+view+` WHERE metric_name = 'spike_cpu' AND `+guard).Scan(&got)
+			})
+			if err != nil {
+				t.Fatalf("%s %s: %v", p.name, view, err)
+			}
+			seen := map[string]bool{}
+			for _, id := range got {
+				seen[id] = true
+			}
+			for _, id := range ids {
+				if seen[id] != p.visible[id] {
+					t.Errorf("TEC-06/TEN-05: %s %s: CI %s visible %v, want %v", p.name, view, id, seen[id], p.visible[id])
+				}
+			}
+		}
+	}
+
+	insert := func(scope *database.TenantScope, ciID string) error {
+		return database.WithTenant(ctx, f.App, scope, func(ctx context.Context, tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `INSERT INTO metric_sample_v (time, organization_id, ci_id, metric_name, value) VALUES (now(), $1, $2, 'spike_cpu', 1)`,
+				f.OrgA, ciID); err != nil {
+				return err
+			}
+			return errSpikeRollback
+		})
+	}
+	for _, c := range []struct {
+		name  string
+		scope *database.TenantScope
+		ci    string
+	}{
+		{"client1 -> client-2 CI", &clientScope, foreign},
+		{"site1 -> sibling-site CI", &siteScope, sibling},
+		{"site1 -> client-2 CI", &siteScope, foreign},
+	} {
+		if err := insert(c.scope, c.ci); err == nil || errors.Is(err, errSpikeRollback) || !strings.Contains(err.Error(), "check option") {
+			t.Errorf("%s: insert through metric_sample_v: %v, want a check option violation", c.name, err)
+		}
+	}
+	for _, c := range []struct {
+		name  string
+		scope *database.TenantScope
+		ci    string
+	}{
+		{"client1 -> own CI", &clientScope, own},
+		{"client1 -> org-wide CI", &clientScope, orgCI},
+		{"site1 -> own CI", &siteScope, own},
+		{"site1 -> org-wide CI", &siteScope, orgCI},
+	} {
+		if err := insert(c.scope, c.ci); !errors.Is(err, errSpikeRollback) {
+			t.Errorf("%s: insert through metric_sample_v: %v, want accepted", c.name, err)
+		}
+	}
 }

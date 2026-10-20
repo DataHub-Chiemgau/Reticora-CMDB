@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -76,7 +77,7 @@ func TestRecordDiscoveredBatchReadsCIsOnce(t *testing.T) {
 		}
 	}
 
-	app, err := database.NewPool(ctx, dsn)
+	app, err := database.NewPool(ctx, scopetest.AppDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}

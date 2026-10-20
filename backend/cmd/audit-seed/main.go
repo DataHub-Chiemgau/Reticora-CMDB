@@ -27,7 +27,7 @@ func main() {
 		os.Exit(2)
 	}
 	ctx := context.Background()
-	pool, err := database.NewPool(ctx, *dsn)
+	pool, err := database.NewAdminPool(ctx, *dsn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "audit-seed: connect: %v\n", err)
 		os.Exit(2)

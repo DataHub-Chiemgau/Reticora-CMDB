@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // The roundtrip test drives the migrations itself, with the semantics of
@@ -156,6 +158,7 @@ func TestMigrationsRoundtrip(t *testing.T) {
 	m := &migrator{t: t, conn: conn, files: files}
 	m.upTo(ctx, latest)
 	truncateAll(ctx, t, conn)
+	restoreAppRoleMembers(ctx, t, conn, dsn)
 	schemaA := schemaDump(ctx, t, conn)
 
 	for m.version(ctx) > 0 {
@@ -189,6 +192,40 @@ func TestMigrationsRoundtrip(t *testing.T) {
 	if diff := diffLines(schemaA, schemaDump(ctx, t, conn)); diff != "" {
 		t.Errorf("schema after down to 0 and up differs from the initial schema (- A, + B):\n%s", diff)
 	}
+}
+
+// restoreAppRoleMembers grants reticora_app again to its current members when
+// the test ends. Role memberships are cluster state outside the schema:
+// 000056 down drops reticora_app together with its memberships, among them
+// the runtime login the later test packages open their application pools
+// with (TEST_APP_DATABASE_URL, WP-349).
+func restoreAppRoleMembers(ctx context.Context, t *testing.T, conn *pgx.Conn, dsn string) {
+	t.Helper()
+	rows, err := conn.Query(ctx, `
+		SELECT format('GRANT %I TO %I WITH ADMIN %s, INHERIT %s, SET %s',
+		              r.rolname, pg_get_userbyid(m.member), m.admin_option::text, m.inherit_option::text, m.set_option::text)
+		  FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
+		 WHERE r.rolname = $1`, database.DefaultAppRole)
+	if err != nil {
+		t.Fatalf("list members of %s: %v", database.DefaultAppRole, err)
+	}
+	grants, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("list members of %s: %v", database.DefaultAppRole, err)
+	}
+	t.Cleanup(func() {
+		restore, err := pgx.Connect(context.Background(), dsn)
+		if err != nil {
+			t.Errorf("restore members of %s: %v", database.DefaultAppRole, err)
+			return
+		}
+		defer func() { _ = restore.Close(context.Background()) }()
+		for _, grant := range grants {
+			if _, err := restore.Exec(context.Background(), grant); err != nil {
+				t.Errorf("restore members of %s: %s: %v", database.DefaultAppRole, grant, err)
+			}
+		}
+	})
 }
 
 // truncateAll removes the rows other tests left behind. Migrating down to 0

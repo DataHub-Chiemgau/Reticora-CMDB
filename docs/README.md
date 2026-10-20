@@ -61,20 +61,19 @@ The hierarchy is: Organization → Client → Site → Building → Room → Rac
 
 > **Deployment requirement — non-privileged database role.** RLS is bypassed for
 > superusers and roles with `BYPASSRLS`. The server must therefore connect with a
-> dedicated role created with `NOSUPERUSER NOBYPASSRLS`, e.g.:
+> dedicated login created with `NOSUPERUSER NOBYPASSRLS` that is a member of the
+> application role `reticora_app` (created by the migrations) and of no other
+> role, e.g.:
 >
 > ```sql
-> CREATE ROLE reticora_app LOGIN PASSWORD '…' NOSUPERUSER NOBYPASSRLS;
-> GRANT CONNECT ON DATABASE reticora TO reticora_app;
-> GRANT USAGE ON SCHEMA public TO reticora_app;
-> GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO reticora_app;
-> GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO reticora_app;
-> ALTER DEFAULT PRIVILEGES IN SCHEMA public
->   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO reticora_app;
+> CREATE ROLE reticora_runtime LOGIN PASSWORD '…' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+> GRANT reticora_app TO reticora_runtime;
 > ```
 >
-> The `docker-compose.yml` development database uses the superuser for
-> convenience; never point a real deployment at a superuser DSN. The
+> The server refuses to start with a superuser or `BYPASSRLS` login, or with a
+> login that reaches such a role (see `RETICORA_DATABASE_URL` below); the
+> superuser of the `docker-compose.yml` development database is for migrations
+> and the seed only. The
 > `metric_sample` hypertable is the documented exception: TimescaleDB does not
 > support RLS on hypertables with columnstore, so metrics isolation is enforced
 > at the repository layer (every query carries `organization_id`).
@@ -863,7 +862,14 @@ empty endpoint the providers stay no-op.
 
 The server is configured via environment variables:
 - `RETICORA_PORT` — HTTP listen port (default 8080).
-- `RETICORA_DATABASE_URL` — PostgreSQL connection string.
+- `RETICORA_DATABASE_URL` — PostgreSQL connection string of the runtime login
+  (the installer creates `reticora_runtime`). The login itself must be
+  `NOSUPERUSER NOBYPASSRLS` and must not reach a `SUPERUSER` or `BYPASSRLS`
+  role, inherited or by `SET ROLE`; make it a member of `reticora_app` only.
+  A `RESET ROLE` would otherwise undo the role switch below, so the server
+  **refuses to start** with a role-contract error naming the session user
+  (TEN-03, F-057). The migration/admin login (for example the bootstrap
+  superuser) is for migrations, seed and backups only.
 - `RETICORA_DB_APP_ROLE` — database role every pooled connection switches into
   (default `reticora_app`, created by migration `000056`). Row Level Security is
   bypassed for superusers, `BYPASSRLS` roles and — without `FORCE ROW LEVEL

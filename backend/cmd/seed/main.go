@@ -40,7 +40,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	pool, err := database.NewPool(ctx, *dsn)
+	pool, err := database.NewAdminPool(ctx, *dsn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "seed: connect: %v\n", err)
 		os.Exit(2)

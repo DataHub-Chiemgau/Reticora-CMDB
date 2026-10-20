@@ -6,7 +6,10 @@ package main
 // WP-097 (OPS-01) test gap high "The fail-closed startup in main.go has no
 // repository test; only audit probes": the real server binary is built and
 // started with a production configuration against the test PostgreSQL and
-// Redis. Every missing or unusable mandatory dependency must stop the start
+// Redis. The server logs in with the runtime login of the tests
+// (scopetest.AppDSN, no SUPERUSER/BYPASSRLS, TEN-03, WP-351), as in the
+// packaged installation; TEST_DATABASE_URL is only the admin login AppDSN
+// derives it from. Every missing or unusable mandatory dependency must stop the start
 // with exit code 1 and a specific message (fail-closed); a complete
 // configuration must become ready (/readyz 200).
 //
@@ -40,7 +43,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 )
 
@@ -128,14 +134,15 @@ func auditFakeS3(t *testing.T) *httptest.Server {
 }
 
 // auditProductionEnv is a complete production configuration against the
-// test database and Redis, without NATS (the shared NATS server is not
+// test database (runtime login, scopetest.AppDSN) and Redis, without NATS (the shared NATS server is not
 // isolated per test) and with every worker disabled.
 func auditProductionEnv(t *testing.T) map[string]string {
 	t.Helper()
-	db, redis := os.Getenv("TEST_DATABASE_URL"), os.Getenv("TEST_REDIS_URL")
-	if db == "" || redis == "" {
+	redis := os.Getenv("TEST_REDIS_URL")
+	if os.Getenv("TEST_DATABASE_URL") == "" || redis == "" {
 		t.Skip("TEST_DATABASE_URL and TEST_REDIS_URL are required for the server startup test")
 	}
+	db := scopetest.AppDSN(t)
 	key, err := crypto.GenerateMasterKey()
 	if err != nil {
 		t.Fatal(err)
@@ -241,6 +248,28 @@ func auditStartServer(t *testing.T, env map[string]string, waitReady bool, timeo
 	return run
 }
 
+// auditRequireRuntimeLogin fails the test when the login of dsn is a
+// superuser or has BYPASSRLS: the start would then not prove that the server
+// runs with the runtime login of the packaged installation.
+func auditRequireRuntimeLogin(t *testing.T, dsn string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("runtime login: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	var login string
+	var super, bypass bool
+	if err := conn.QueryRow(ctx, `SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = session_user`).
+		Scan(&login, &super, &bypass); err != nil {
+		t.Fatalf("runtime login: %v", err)
+	}
+	if super || bypass {
+		t.Fatalf("server login %s is superuser=%t bypassrls=%t; the startup test must use the runtime login (scopetest.AppDSN)", login, super, bypass)
+	}
+}
+
 func auditTail(s string, n int) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	if len(lines) > n {
@@ -298,6 +327,7 @@ func TestAuditT5ServerStartupFailClosed(t *testing.T) {
 
 	t.Run("complete configuration becomes ready", func(t *testing.T) {
 		env := auditProductionEnv(t)
+		auditRequireRuntimeLogin(t, env["RETICORA_DATABASE_URL"])
 		run := auditStartServer(t, env, true, 90*time.Second)
 		if run.readyError != nil {
 			t.Fatalf("%v (exit %d)\n%s", run.readyError, run.exitCode, auditTail(run.output, 8))

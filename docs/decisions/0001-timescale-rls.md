@@ -2,8 +2,10 @@
 
 - Status: angenommen (Spike WP-039, 2026-10-01)
 - Anforderungen: TEC-06 ([B], [Q] Spike), MON-01 ([B])
-- Umsetzung: WP-040 (Migration und Repository-Umstellung)
-- Nachweis: `backend/internal/monitoring/timescale_rls_spike_integration_test.go`
+- Umsetzung: WP-040 (Migration und Repository-Umstellung), WP-350
+  (Client-/Site-Scope in den Views, Punkt 4; Entscheidung E-63)
+- Nachweis: `backend/internal/monitoring/timescale_rls_spike_integration_test.go`,
+  `backend/internal/monitoring/audit_t1_metric_scope_integration_test.go`
 
 ## Kontext
 
@@ -82,6 +84,41 @@ Ein direkter Aufruf von `current_setting()` im View-Prädikat verhindert das
 Segment-Pruning und kostet den Faktor 5–6. Als Sub-Select (InitPlan) wird der Wert
 einmal ausgewertet. Die Laufzeit liegt dann im Bereich der direkten Abfrage.
 
+### Messwerte Client-/Site-Scope (WP-350)
+
+Lokale Messung (TimescaleDB 2.17.2, PostgreSQL 16, 4 Kerne): eine Org mit
+zwei Clients und 10 000 CIs (je 5000), 30 Tage stündliche Samples je CI
+(7,2 Mio. Zeilen), Chunks älter als 7 Tage komprimiert, Aggregat
+aktualisiert. Gemessen wurde `PGMetricStore.Query` über den Laufzeit-Login
+(`scopetest.AppDSN`), je Pfad 100 Abfragen auf wechselnde CIs (ohne CI-Filter
+20) nach drei Aufwärmläufen, zwei Läufe vor und zwei nach Migration 000143.
+Angegeben ist p95 in ms (Bereich der beiden Läufe):
+
+| Abfrage | Principal | vor 000143 | nach 000143 |
+|---|---|---:|---:|
+| roh, 24 h, ein CI | Client 1 | 37–39 | 38–39 |
+| 5 min, 7 Tage, ein CI | Client 1 | 40–41 | 38–39 |
+| 1 h (Aggregat), 30 Tage, ein CI | Client 1 | 38–41 | 43 |
+| roh, 24 h, ein CI | org-weit | 26 | 20–28 |
+| 5 min, 7 Tage, ein CI | org-weit | 26 | 24–26 |
+| 1 h (Aggregat), 30 Tage, ein CI | org-weit | 27 | 27–29 |
+| roh, 2 h, ohne CI-Filter | Client 1 | 41–58 | 103–125 |
+| 1 h (Aggregat), 30 Tage, ohne CI-Filter | Client 1 | 9 850–10 130 | 12 070–12 160 |
+| 1 h (Aggregat), 30 Tage, ohne CI-Filter | org-weit | 10 790–10 900 | 15 550–15 760 |
+
+Die Abfragen der API auf ein CI (`GET /cis/{id}/metrics`) bleiben im
+Messrauschen. Abfragen ohne CI-Filter über alle CIs eines Clients werden
+teurer. Die Rohdaten-Abfrage über zwei Stunden (10 000 Zeilen) braucht etwa
+die doppelte Zeit für den Hash-Lookup in `ci`. Die Aggregat-Abfrage über
+30 Tage liest 7,2 Mio. Zeilen. Ihre Laufzeit wird vom Scan bestimmt. Mit dem
+generischen Plan der vorbereiteten Anweisung (pgx) kostet das zusätzliche
+Prädikat je Zeile 10–40 %. Mit einem Custom-Plan (psql, Literale) war die neue
+View schneller als die alte (5,0–6,5 s gegenüber 10,6–12,0 s). Diese
+Abfrageform bietet die Monitoring-Seite an (`GET /api/v1/monitoring/metrics`
+ohne `ci_id`). Die CI-Ansicht fragt je CI ab. Wird die Abfrage ohne CI-Filter
+produktiv zeitkritisch, bleibt die Denormalisierung (E-63 Option 2) der
+Ausweg.
+
 ## Entscheidung
 
 1. `metric_sample` und `metric_sample_1h` behalten Kompression, Retention und
@@ -95,8 +132,19 @@ einmal ausgewertet. Die Laufzeit liegt dann im Bereich der direkten Abfrage.
    Hypertable, Aggregat und bestehenden Chunks (Grant aus Migration 000056)
    werden entzogen. Retention, Kompression und Refresh
    laufen als TimescaleDB-Jobs des Eigentümers.
-4. Gelten für Metriken später Client- oder Site-Scopes, werden sie als weitere
-   Sub-Select-Prädikate in dieselben Views aufgenommen.
+4. Client- und Site-Scope (TEN-05) sind weitere Barrier-Prädikate derselben
+   Views (Migration 000143, WP-350, Entscheidung E-63 Option 1): eine Zeile
+   mit CI ist nur sichtbar, wenn das CI in der Org existiert und sein Client
+   und Standort im Scope der Transaktion liegen (NULL = org-weit, sichtbar,
+   wie die ci-Policy). Das Prädikat ist ein Sub-Select über `ci` und nennt
+   `app.client_scope`/`app.site_scope` explizit. Es hängt damit nicht davon
+   ab, ob die RLS von `ci` für den View-Eigentümer greift. Die GUCs werden als
+   Sub-Selects (InitPlan) gelesen. Eine org-weite Transaktion überspringt den
+   CI-Lookup. Die `CASCADED CHECK OPTION` der Rohdaten-View weist ein
+   `INSERT` für ein CI außerhalb des Scopes ab. `metric_sample` erhält keine
+   denormalisierten `client_id`/`site_id`: Verschiebt sich ein CI, gilt die
+   neue Sichtbarkeit sofort, und komprimierte Chunks werden nicht
+   umgeschrieben. Damit gilt WP-025 AK1 für `metric_sample` als erfüllt.
 
 ## Folgen
 
