@@ -1,4 +1,9 @@
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { keycloakOtp } from '../../e2e/support/totp';
 
@@ -15,6 +20,11 @@ export const KEYCLOAK = process.env.E2E_KEYCLOAK_URL || 'http://localhost:8180';
 export const KEYCLOAK_ADMIN = process.env.E2E_KEYCLOAK_ADMIN || 'admin';
 export const KEYCLOAK_ADMIN_PASSWORD = process.env.E2E_KEYCLOAK_ADMIN_PASSWORD || 'admin';
 export const COLLECTOR_BIN = process.env.E2E_COLLECTOR_BIN || '';
+/** A build of collector/cmd/fakesnmp; without it startFakeSnmp builds one. */
+export const FAKESNMP_BIN = process.env.E2E_FAKESNMP_BIN || '';
+
+/** The repository root (this file is frontend/e2e-real/support/stack.ts). */
+const REPO = fileURLToPath(new URL('../../../', import.meta.url));
 
 export interface Account {
   email: string;
@@ -338,4 +348,117 @@ export async function operatorLogin(
     // keep the raw text
   }
   return { status: res.status(), body: body as OperatorSession };
+}
+
+/** A request the SNMP fake received (collector/internal/fakesnmp, Request). */
+export interface FakeSnmpRequest {
+  at: string;
+  from: string;
+  /** "1", "2c" or "3"; empty for a packet that is no SNMP message. */
+  version: string;
+  community: string;
+  pdu?: string;
+  oids?: string[];
+  answered: boolean;
+}
+
+export interface FakeSnmpOptions {
+  /** Address the fake listens on; the collector's SNMP plugin queries port 161. */
+  ip: string;
+  /** The only community the fake answers. */
+  community: string;
+  sysName: string;
+  sysDescr: string;
+  sysObjectId: string;
+}
+
+export interface FakeSnmp {
+  ip: string;
+  /** Every request received so far, answered or not, with its community. */
+  requests(): FakeSnmpRequest[];
+  stop(): Promise<void>;
+}
+
+let fakeSnmpBin = FAKESNMP_BIN;
+
+/** fakeSnmpBinary builds collector/cmd/fakesnmp once (Go toolchain on PATH). */
+function fakeSnmpBinary(): string {
+  if (fakeSnmpBin) return fakeSnmpBin;
+  const bin = join(mkdtempSync(join(tmpdir(), 'reticora-fakesnmp-')), 'fakesnmp');
+  const built = spawnSync('go', ['build', '-o', bin, './cmd/fakesnmp'], {
+    cwd: join(REPO, 'collector'),
+    env: { ...process.env, GOWORK: 'off', CGO_ENABLED: '0' },
+    encoding: 'utf8',
+    timeout: 5 * 60_000,
+  });
+  expect(
+    built.status,
+    `go build ./cmd/fakesnmp: ${built.error ?? ''} ${built.stderr} ${built.stdout}`,
+  ).toBe(0);
+  fakeSnmpBin = bin;
+  return bin;
+}
+
+/**
+ * startFakeSnmp builds and starts the SNMPv2c fake of collector/cmd/fakesnmp (WP-384) on
+ * <ip>:161. It answers sysDescr, sysObjectID and sysName only to requests with its
+ * community and records every request it receives with the community it carried, so a
+ * test can prove which secret the collector sent. Port 161 needs
+ * net.ipv4.ip_unprivileged_port_start <= 161 (fixtures/setup-real-stack.sh sets it on
+ * GitHub Actions).
+ */
+export async function startFakeSnmp(opts: FakeSnmpOptions): Promise<FakeSnmp> {
+  const bin = fakeSnmpBinary();
+  const requestsFile = join(
+    mkdtempSync(join(tmpdir(), 'reticora-fakesnmp-run-')),
+    'requests.jsonl',
+  );
+  const proc = spawn(
+    bin,
+    [
+      '-listen',
+      `${opts.ip}:161`,
+      '-community',
+      opts.community,
+      '-sysname',
+      opts.sysName,
+      '-sysdescr',
+      opts.sysDescr,
+      '-sysobjectid',
+      opts.sysObjectId,
+      '-requests',
+      requestsFile,
+    ],
+    { stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  let output = '';
+  proc.stdout?.on('data', (chunk: Buffer) => (output += chunk.toString()));
+  proc.stderr?.on('data', (chunk: Buffer) => (output += chunk.toString()));
+  const exited = new Promise<void>((resolve) => proc.once('exit', () => resolve()));
+  const running = () => proc.exitCode === null && proc.signalCode === null;
+  const deadline = Date.now() + 30_000;
+  while (running() && !output.includes('fakesnmp listening on') && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (running() && !output.includes('fakesnmp listening on')) proc.kill('SIGKILL');
+  expect(output, `SNMP fake on ${opts.ip}:161 (exit code ${proc.exitCode})`).toContain(
+    'fakesnmp listening on',
+  );
+  return {
+    ip: opts.ip,
+    requests: () => {
+      if (!existsSync(requestsFile)) return [];
+      // One JSON line per request; what follows the last newline is still being written.
+      const lines = readFileSync(requestsFile, 'utf8').split('\n');
+      lines.pop();
+      return lines
+        .filter((line) => line.trim() !== '')
+        .map((line) => JSON.parse(line) as FakeSnmpRequest);
+    },
+    stop: async () => {
+      if (!running()) return;
+      proc.kill('SIGTERM');
+      await exited;
+    },
+  };
 }

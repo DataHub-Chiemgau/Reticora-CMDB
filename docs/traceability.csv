@@ -566,3 +566,6 @@ COL-01;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-
 DIS-09;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
 API-05;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
 INS-06;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
+COL-02;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
+DIS-09;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
+INS-06;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384

@@ -14,7 +14,11 @@
 #      installation on 127.0.0.1:5432) and the Keycloak administrator,
 #   4. checks that the host resolves "minio": presigned export URLs name the
 #      endpoint the server uses (minio:9000), which the stack publishes on
-#      127.0.0.1:9000. On GitHub Actions the script adds the /etc/hosts entry.
+#      127.0.0.1:9000. On GitHub Actions the script adds the /etc/hosts entry,
+#   5. checks that an unprivileged process may bind UDP 161: the SNMP fake of
+#      onboarding-bundle.spec.ts (collector/cmd/fakesnmp, WP-384) listens on
+#      127.0.0.161:161, the port the collector's SNMP plugin queries. On
+#      GitHub Actions the script sets net.ipv4.ip_unprivileged_port_start=0.
 #
 # Usage: frontend/e2e-real/fixtures/setup-real-stack.sh <compose-dir> [env-file]
 # Writes the variables to $GITHUB_ENV when set, else prints export lines.
@@ -102,4 +106,13 @@ if ! getent hosts minio >/dev/null; then
     fi
 fi
 curl -sS -o /dev/null "http://minio:9000/minio/health/live" || { echo "FAIL: http://minio:9000 is not reachable from the host"; exit 1; }
+
+if [ "$(id -u)" -ne 0 ] && [ "$(sysctl -n net.ipv4.ip_unprivileged_port_start)" -gt 161 ]; then
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then
+        sudo sysctl -q -w net.ipv4.ip_unprivileged_port_start=0
+    else
+        echo "FAIL: UDP 161 needs net.ipv4.ip_unprivileged_port_start <= 161 (SNMP fake of onboarding-bundle.spec.ts): sudo sysctl -w net.ipv4.ip_unprivileged_port_start=0"
+        exit 1
+    fi
+fi
 echo "OK: real-stack fixtures ready"
