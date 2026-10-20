@@ -261,10 +261,15 @@ export interface OperatorSession {
 
 /**
  * operatorLogin signs in through Keycloak with the operator authorization
- * URL (password and OTP, keycloakLogin), catches the redirect with the code
- * before the SPA could redeem it as a tenant login, and posts the code to
- * POST /api/v1/admin/auth/callback. It returns the server's answer without
- * asserting the status.
+ * URL (password and OTP, e2e/support/totp.ts) and posts the code to
+ * POST /api/v1/admin/auth/callback. The redirect to the redirect URI is the
+ * SPA callback, which would redeem the code as a tenant login. It is taken
+ * from Keycloak's answer instead: every form post to Keycloak goes through
+ * route.fetch without following redirects, and the answer that redirects to
+ * the redirect URI is replaced by a placeholder page. A redirect target is
+ * not intercepted reliably (Chromium does not hand Playwright the redirect
+ * from the Keycloak host to the loopback SPA of an installed stack). It
+ * returns the server's answer without asserting the status.
  */
 export async function operatorLogin(
   page: Page,
@@ -272,23 +277,55 @@ export async function operatorLogin(
   account: Pick<Account, 'email' | 'password'>,
 ): Promise<ApiResult<OperatorSession>> {
   const auth = await operatorAuthorization(request);
-  const redirect = new URL(auth.redirectUri);
-  let code = '';
-  let state = '';
+  const keycloak = new URL(auth.url).origin;
+  let location = '';
   await page.route(
-    (url) => url.origin === redirect.origin && url.pathname === redirect.pathname,
+    (url) => url.origin === keycloak && url.pathname.includes('/login-actions/'),
     async (route) => {
-      const url = new URL(route.request().url());
-      code = url.searchParams.get('code') ?? '';
-      state = url.searchParams.get('state') ?? '';
-      await route.fulfill({ status: 200, contentType: 'text/html', body: '<p>operator login</p>' });
+      if (route.request().method() !== 'POST') {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch({ maxRedirects: 0 });
+      const target = response.headers()['location'] ?? '';
+      if (
+        response.status() >= 300 &&
+        response.status() < 400 &&
+        target.startsWith(auth.redirectUri)
+      ) {
+        location = target;
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/html',
+          body: '<p id="operator-login-done">operator login</p>',
+        });
+        return;
+      }
+      await route.fulfill({ response });
     },
   );
   await page.goto(auth.url);
-  const landing = new RegExp(`^${auth.redirectUri.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?`);
-  await keycloakLogin(page, account, landing);
-  expect(code, 'authorization code at the redirect URI').toBeTruthy();
-  expect(state, 'state of the operator authorization').toBe(auth.state);
+  await page.locator('#username').fill(account.email);
+  await page.locator('#password').fill(account.password);
+  await page.locator('#kc-login').click();
+  // acr_values=2 always asks for the OTP (setup at the first login).
+  await keycloakOtp(page, account.email, /#operator-login-done$/);
+  await expect
+    .poll(() => location, {
+      message: `redirect to ${auth.redirectUri}; Keycloak stopped at ${page.url()}`,
+      timeout: 30_000,
+    })
+    .not.toBe('');
+  const redirect = new URL(location);
+  const code = redirect.searchParams.get('code') ?? '';
+  expect(
+    code,
+    `authorization code at the redirect URI, got ${location} (error ${redirect.searchParams.get('error')}: ${redirect.searchParams.get('error_description')})`,
+  ).toBeTruthy();
+  expect(redirect.searchParams.get('state'), 'state of the operator authorization').toBe(
+    auth.state,
+  );
+  const state = auth.state;
   const res = await request.post(`${BASE}/api/v1/admin/auth/callback`, {
     data: { code, state, code_verifier: auth.codeVerifier },
     failOnStatusCode: false,
