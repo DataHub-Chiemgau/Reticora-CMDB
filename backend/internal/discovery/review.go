@@ -20,7 +20,8 @@ type (
 	ReviewItem = reviews.Item
 	// ReviewFilter narrows a review-item listing.
 	ReviewFilter = reviews.Filter
-	// Resolution is the request body for resolving a review item.
+	// Resolution is the resolution of a review item; its ResolvedBy is the
+	// principal of the request.
 	Resolution = reviews.Resolution
 )
 

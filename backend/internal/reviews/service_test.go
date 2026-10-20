@@ -148,6 +148,13 @@ func TestReviewModel(t *testing.T) {
 	if w = call(http.MethodPost, "/api/v1/review-items/"+young.ID+"/resolve", `{"action":"merge"}`); w.Code != http.StatusUnprocessableEntity {
 		t.Errorf("merge on duplicate_ip: %d", w.Code)
 	}
+	// The resolver is the principal: a body naming one is refused on both
+	// paths and resolves nothing (F-091).
+	for _, path := range []string{"/api/v1/review-items/", "/api/v1/discovery/review-items/"} {
+		if w = call(http.MethodPost, path+young.ID+"/resolve", `{"action":"dismiss","resolved_by":"u9"}`); w.Code != http.StatusBadRequest {
+			t.Errorf("POST %s with resolved_by: %d %s, want 400", path, w.Code, w.Body.String())
+		}
+	}
 	w = call(http.MethodPost, "/api/v1/discovery/review-items/"+young.ID+"/resolve", `{"action":"dismiss"}`)
 	var item Item
 	if w.Code != http.StatusOK || w.Header().Get("Deprecation") == "" || json.Unmarshal(w.Body.Bytes(), &item) != nil ||

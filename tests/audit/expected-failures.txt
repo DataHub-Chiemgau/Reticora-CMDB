@@ -55,7 +55,6 @@ go;backend/internal/server;TestAuditT2EntitlementRackViewGated;F-070
 go;backend/internal/server;TestAuditT2ListsAreCursorPages;F-075
 go;backend/internal/server;TestAuditT3HealthRefreshRunsInG1;F-087
 go;backend/internal/server;TestAuditT3OverrideRefusesReservedNames;F-092
-go;backend/internal/server;TestAuditT3ResolvedByIsThePrincipal;F-091
 go;backend/internal/tenant/rls;TestAuditT1RepositoryErrorsAreSanitized;F-047
 go;backend/internal/tenant/rls;TestAuditT1ScopeRefusalsAreNot5xx;F-058 F-161
 go;backend/internal/tenant/rls;TestAuditT1SiteScopeOfLocatedTables;F-053

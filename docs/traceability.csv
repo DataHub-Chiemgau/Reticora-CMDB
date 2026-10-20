@@ -540,3 +540,5 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/server/vlan_routes_integra
 TEN-10;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
 NET-02;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
 NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
+REC-08;[B];D;backend/internal/server/audit_t3_review_routes_integration_test.go;WP-373
+API-05;[B];D;backend/internal/server/audit_t3_review_routes_integration_test.go;WP-373

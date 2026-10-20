@@ -168,7 +168,9 @@ func (r *PGRepository) GetReviewItem(ctx context.Context, orgID, id string) (*It
 }
 
 // ResolveReviewItem implements Repository. Resolving an unlicensed_ci item
-// is audited (ENT-03).
+// is audited (ENT-03); resolved_by and the audit actor are both
+// resolution.ResolvedBy, the principal of the request (the system when
+// empty).
 func (r *PGRepository) ResolveReviewItem(ctx context.Context, orgID, id string, resolution *Resolution) (*Item, error) {
 	var item *Item
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {

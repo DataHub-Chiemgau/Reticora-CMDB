@@ -4861,6 +4861,8 @@ paths:
         none (dismiss it and wait for the next sighting); unlicensed_ci new|dismiss (new adopts the device within max_cis,
         403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope); unknown_relationship accept|dismiss (accept records the neighbor as connected_to);
         serial_mismatch and duplicate_ip dismiss. Another action is 422.
+        resolved_by and the audit actor are the caller; a body with
+        resolved_by is 400.
       requestBody:
         required: true
         content:
@@ -4942,7 +4944,8 @@ paths:
         An unlicensed_ci item (a discovered device held because max_cis is
         reached, ENT-03) is resolved with create, which adopts the device as a
         CI within max_cis (403 entitlement-limit otherwise), or with dismiss,
-        which discards it; both are audited.
+        which discards it; both are audited. resolved_by and the audit actor
+        are the caller; a body with resolved_by is 400.
       requestBody:
         required: true
         content:
@@ -16837,6 +16840,10 @@ components:
             type: string
         resolved_by:
           type: string
+          description: >-
+            The principal (user or service account) that resolved the item;
+            absent when the system adopted an unlicensed_ci item after max_cis
+            was raised.
         resolved_at:
           type: string
           format: date-time
@@ -16872,6 +16879,11 @@ components:
     ReviewItemResolveRequest:
       type: object
       required: [action]
+      additionalProperties: false
+      description: >-
+        The resolver is always the authenticated principal (user or service
+        account) and is stored as resolved_by; a body naming resolved_by, or
+        any other unknown field, is refused with 400.
       properties:
         action:
           type: string
@@ -16884,8 +16896,6 @@ components:
         ci_id:
           type: string
           description: Target candidate CI id, required when action is merge.
-        resolved_by:
-          type: string
         resolution:
           type: string
           description: Optional human-readable resolution note.

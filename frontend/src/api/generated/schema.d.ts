@@ -2656,7 +2656,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge removes the new CI); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge removes the new CI); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -2700,7 +2700,7 @@ export interface paths {
     /**
      * Resolve a reconciliation review item (deprecated, use /api/v1/review-items/{id}/resolve)
      * @deprecated
-     * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited.
+     * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
      */
     post: operations['resolveDiscoveryReviewItem'];
     delete?: never;
@@ -9751,6 +9751,7 @@ export interface components {
         [key: string]: unknown;
       };
       candidate_ci_ids?: string[];
+      /** @description The principal (user or service account) that resolved the item; absent when the system adopted an unlicensed_ci item after max_cis was raised. */
       resolved_by?: string;
       /** Format: date-time */
       resolved_at?: string;
@@ -9769,6 +9770,7 @@ export interface components {
     ReviewItemListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ReviewItem'][];
     };
+    /** @description The resolver is always the authenticated principal (user or service account) and is stored as resolved_by; a body naming resolved_by, or any other unknown field, is refused with 400. */
     ReviewItemResolveRequest: {
       /**
        * @description merge folds the observation into a candidate CI (requires ci_id); new creates a CI from the observation; accept applies what the item proposes; dismiss closes the item with no change. create is the deprecated name of new.
@@ -9777,7 +9779,6 @@ export interface components {
       action: 'merge' | 'new' | 'dismiss' | 'accept' | 'create';
       /** @description Target candidate CI id, required when action is merge. */
       ci_id?: string;
-      resolved_by?: string;
       /** @description Optional human-readable resolution note. */
       resolution?: string;
     };
