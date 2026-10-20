@@ -91,12 +91,19 @@ type DispatcherOptions struct {
 	// the account may read the event's object (RBA-08). Without it, bound
 	// subscriptions receive nothing (fail-closed).
 	Access SubscriberAccess
+	// Objects reads the client and site of the objects an event references
+	// by ID when its payload carries no client_id/site_id (scope.go).
+	// Without it such events reach only unbound subscriptions and accounts
+	// that read org-wide.
+	Objects ObjectResolver
 }
 
-// SubscriberAccess checks the read right of a service account on an object
-// with the given permission in its client and site (empty: org-wide).
+// SubscriberAccess checks the read right of a service account on the
+// objects of an event with the given permission. objects holds the client
+// and site of every object ("" is NULL); nil means the scope of the event is
+// unknown, which only an account reading org-wide may read.
 type SubscriberAccess interface {
-	CanReadEvent(ctx context.Context, orgID, serviceAccountID, permission, clientID, siteID string) (bool, error)
+	CanReadEvent(ctx context.Context, orgID, serviceAccountID, permission string, objects []ObjectScope) (bool, error)
 }
 
 // EventReadPermission is the permission needed to read the object of an
@@ -115,29 +122,11 @@ func EventReadPermission(event string) string {
 	return ""
 }
 
-// eventObjectScope reads client_id and site_id of the event object, if the
-// payload carries them.
-func eventObjectScope(body []byte) (clientID, siteID string) {
-	var object struct {
-		ClientID *string `json:"client_id"`
-		SiteID   *string `json:"site_id"`
-	}
-	if json.Unmarshal(body, &object) != nil {
-		return "", ""
-	}
-	if object.ClientID != nil {
-		clientID = *object.ClientID
-	}
-	if object.SiteID != nil {
-		siteID = *object.SiteID
-	}
-	return clientID, siteID
-}
-
 // mayDeliver reports whether a subscription receives the event: unbound
 // subscriptions receive every event of the organization, bound ones only
-// events whose object their service account may read.
-func (d *Dispatcher) mayDeliver(ctx context.Context, orgID, event string, body []byte, sub *Subscription) bool {
+// events whose objects their service account may read. objects is the
+// resolved scope of the event (eventObjects; nil: unknown).
+func (d *Dispatcher) mayDeliver(ctx context.Context, orgID, event string, objects []ObjectScope, sub *Subscription) bool {
 	if sub.ServiceAccountID == "" {
 		return true
 	}
@@ -145,8 +134,7 @@ func (d *Dispatcher) mayDeliver(ctx context.Context, orgID, event string, body [
 	if permission == "" || d.opts.Access == nil {
 		return false
 	}
-	clientID, siteID := eventObjectScope(body)
-	ok, err := d.opts.Access.CanReadEvent(ctx, orgID, sub.ServiceAccountID, permission, clientID, siteID)
+	ok, err := d.opts.Access.CanReadEvent(ctx, orgID, sub.ServiceAccountID, permission, objects)
 	if err != nil {
 		slog.Error("check webhook subscriber rights failed", "error", err, "organization_id", orgID, "subscription_id", sub.ID)
 		return false
@@ -301,8 +289,18 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 		return
 	}
 
+	// The scope of the event objects is resolved once, and only when a
+	// bound subscription needs it.
+	var objects []ObjectScope
+	for i := range subs {
+		if subs[i].ServiceAccountID != "" {
+			objects = d.eventObjects(ctx, orgID, event, body)
+			break
+		}
+	}
+
 	for _, sub := range subs {
-		if !d.mayDeliver(ctx, orgID, event, body, &sub) {
+		if !d.mayDeliver(ctx, orgID, event, objects, &sub) {
 			continue
 		}
 		job := deliveryJob{

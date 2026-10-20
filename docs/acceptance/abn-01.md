@@ -51,6 +51,14 @@ Die Werte stehen in `frontend/e2e/onboarding.spec.ts` und
 `frontend/e2e/fixtures/setup-onboarding.sh`. Die Prüfsummen des eingefrorenen
 Stands stehen in `artefakte/SHA256SUMS`.
 
+Änderung nach dem Einfrieren: WP-357 (`t2-mfa-accounts`, AUT-09, F-005).
+Der erste org_admin eines Signups erhält die Realm-Rolle `mfa_required` und
+richtet beim ersten Login OTP ein. `keycloakLogin` in
+`frontend/e2e/onboarding.spec.ts` durchläuft dazu den OTP-Schritt
+(`frontend/e2e/support/totp.ts`: Einrichtung beim ersten Login, Code bei
+jedem weiteren). Eingaben und Schritte des Szenarios bleiben unverändert;
+die Prüfsumme der Datei in `artefakte/SHA256SUMS` ist neu.
+
 | # | Schritt | Erwartung | Ergebnis |
 |---|---|---|---|
 | 1 | Self-Signup | Bestätigungs-Mail, Organisation mit Trial | bestanden |

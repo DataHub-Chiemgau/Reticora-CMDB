@@ -572,7 +572,8 @@ func (h *Handler) DeleteInstanceField(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "instance field definition not found")
 		return
 	}
-	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", map[string]string{"name": chi.URLParam(r, "name")})
+	// The CI scopes the event for bound webhook subscriptions (RBA-08).
+	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", map[string]string{"ci_id": chi.URLParam(r, "id"), "name": chi.URLParam(r, "name")})
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -1,4 +1,5 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
+import { keycloakOtp } from '../../e2e/support/totp';
 
 // Shared helpers of the real-stack specs (Phase-1 acceptance audit). They
 // drive the same paths a user takes: the SPA login through Keycloak (PKCE),
@@ -68,8 +69,10 @@ export async function api<T = unknown>(
 }
 
 /**
- * keycloakLogin fills the Keycloak form and completes a required profile step
- * should the realm ask for one; it fails with the page Keycloak stopped at.
+ * keycloakLogin fills the Keycloak form, completes the second factor of an
+ * account holding mfa_required (OTP setup at the first login, the code at
+ * later ones; e2e/support/totp.ts, WP-357) and a required profile step should
+ * the realm ask for one; it fails with the page Keycloak stopped at.
  */
 export async function keycloakLogin(
   page: Page,
@@ -80,6 +83,7 @@ export async function keycloakLogin(
   await page.locator('#username').fill(account.email);
   await page.locator('#password').fill(account.password);
   await page.locator('#kc-login').click();
+  await keycloakOtp(page, account.email, landing);
   const lastName = page.locator('#lastName');
   await Promise.race([
     page.waitForURL(landing, { timeout: 60_000 }),

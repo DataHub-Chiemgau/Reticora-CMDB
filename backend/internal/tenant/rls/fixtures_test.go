@@ -5,10 +5,12 @@ import (
 	"crypto/rand"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant/rls"
@@ -22,6 +24,13 @@ import (
 // session_replication_role = replica, which skips foreign keys and ordinary
 // triggers but not row level security, so the matrix measures the policies
 // alone and needs no parent rows.
+//
+// Inherited tables take their scope from other rows through a sub-select in
+// a policy (document, maintenance_window, review_item, training_assignment);
+// a synthesized row without parents would measure nothing. They are seeded
+// through real parent rows (organizations, clients, sites, teams, users,
+// CIs) with active triggers and foreign keys (inheritedModels, WP-353,
+// F-354).
 
 // matrixColumn is a NOT NULL column without default that a synthesized row
 // has to fill.
@@ -45,9 +54,7 @@ type matrixTable struct {
 	// privileges of reticora_app per command.
 	privileges map[string]bool
 	// inherited: a policy takes its scope from another table (sub-select);
-	// synthesized rows have no parent, so only the organization dimension
-	// is checked here. Their scope is covered by module_object and
-	// team_scope tests.
+	// the table is seeded and checked through inheritedModels.
 	inherited bool
 	fill      []matrixColumn
 }
@@ -313,4 +320,386 @@ func (tbl *matrixTable) insertSQL(r scopeRow, seq int) (string, []any) {
 	}
 	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING ctid::text",
 		pgx.Identifier{tbl.name}.Sanitize(), strings.Join(cols, ", "), strings.Join(vals, ", ")), args
+}
+
+// matrixIDs are the scope ids of the matrix: organizations A and B, clients
+// c1 and c2 of A and cB of B, sites s1 and s3 of c1, s2 of c2 and sB of cB,
+// teams t1 and t2 of A and tB of B.
+type matrixIDs struct {
+	orgA, orgB             string
+	c1, c2, cB             string
+	s1, s2, s3, sB         string
+	t1, t2, tB             string
+	ciType, userA, userB   string
+	trainingA, trainingB   string
+	trainingA2, trainingB2 string
+}
+
+func newMatrixIDs() matrixIDs {
+	u := matrixUUID
+	return matrixIDs{orgA: u(), orgB: u(), c1: u(), c2: u(), cB: u(), s1: u(), s2: u(), s3: u(), sB: u(), t1: u(), t2: u(), tB: u()}
+}
+
+// matrixParent is a real parent row of an inherited table: a CI (document
+// links, window CIs, review candidates) or a user with team memberships
+// (training assignments).
+type matrixParent struct {
+	id, org string
+	dims    map[string]string // client and site of a CI
+	teams   []string          // teams of a user
+}
+
+// inheritedRow is one seeded row of an inherited table. It takes its scope
+// from parents (keys of matrixWorld.parents); a review item without
+// candidates carries the client and site its writer set (scope).
+type inheritedRow struct {
+	name    string
+	org     string
+	parents []string
+	scope   map[string]string
+}
+
+// inheritedModel seeds an inherited table and states what each principal
+// may do with each row.
+type inheritedModel struct {
+	rows []inheritedRow
+	// insert writes r with its links in q and returns its id; attempt
+	// marks the INSERT checks (as opposed to seeding).
+	insert func(ctx context.Context, q matrixQuerier, w *matrixWorld, r inheritedRow, attempt bool) (string, error)
+	// read and write give the expected outcome of SELECT and of UPDATE
+	// and DELETE; insert of INSERT (nil: write).
+	read, write, insertOK func(w *matrixWorld, p *matrixPrincipal, r inheritedRow) bool
+}
+
+// matrixQuerier is a transaction of the matrix.
+type matrixQuerier interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// matrixWorld holds the parent rows the inherited tables are seeded from.
+type matrixWorld struct {
+	ids     matrixIDs
+	parents map[string]matrixParent
+}
+
+// seedMatrixWorld inserts organizations, clients, sites, teams, users,
+// trainings and CIs for the scope ids with triggers and foreign keys active
+// and commits them, so INSERT attempts can run in transactions of their own
+// (require_visible_parent accepts the parent of the own transaction only at
+// the top level, not in a savepoint). The organizations are deleted with
+// everything below them when the test ends.
+func seedMatrixWorld(ctx context.Context, t *testing.T, pool *pgxpool.Pool, ids matrixIDs) *matrixWorld {
+	t.Helper()
+	w := &matrixWorld{ids: ids, parents: map[string]matrixParent{}}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	tag := matrixUUID()[:8]
+	for _, o := range []string{ids.orgA, ids.orgB} {
+		exec(`INSERT INTO organization (id, name, slug) VALUES ($1, $2, $2)`, o, "matrix-"+tag+"-"+o[:8])
+	}
+	t.Cleanup(func() {
+		// team does not cascade with its organization.
+		for _, sql := range []string{`DELETE FROM team WHERE organization_id IN ($1, $2)`, `DELETE FROM organization WHERE id IN ($1, $2)`} {
+			if _, err := pool.Exec(context.Background(), sql, ids.orgA, ids.orgB); err != nil {
+				t.Errorf("matrix cleanup: %v", err)
+			}
+		}
+	})
+	for _, c := range [][2]string{{ids.c1, ids.orgA}, {ids.c2, ids.orgA}, {ids.cB, ids.orgB}} {
+		exec(`INSERT INTO client (id, organization_id, name, slug) VALUES ($1, $2, $3, $3)`, c[0], c[1], "matrix-"+c[0][:8])
+	}
+	for _, s := range [][3]string{{ids.s1, ids.orgA, ids.c1}, {ids.s3, ids.orgA, ids.c1}, {ids.s2, ids.orgA, ids.c2}, {ids.sB, ids.orgB, ids.cB}} {
+		exec(`INSERT INTO site (id, organization_id, client_id, name) VALUES ($1, $2, $3, $4)`, s[0], s[1], s[2], "matrix-"+s[0][:8])
+	}
+	for _, team := range [][2]string{{ids.t1, ids.orgA}, {ids.t2, ids.orgA}, {ids.tB, ids.orgB}} {
+		exec(`INSERT INTO team (id, organization_id, name) VALUES ($1, $2, $3)`, team[0], team[1], "matrix-"+team[0][:8])
+	}
+	user := func(org string, teams ...string) string {
+		id := matrixUUID()
+		exec(`INSERT INTO app_user (id, organization_id, email, display_name) VALUES ($1, $2, $3, $3)`, id, org, "matrix-"+id[:8]+"@matrix.invalid")
+		for _, team := range teams {
+			exec(`INSERT INTO team_member (team_id, user_id, organization_id) VALUES ($1, $2, $3)`, team, id, org)
+		}
+		return id
+	}
+	w.ids.userA, w.ids.userB = user(ids.orgA), user(ids.orgB)
+	for key, u := range map[string]struct {
+		org   string
+		teams []string
+	}{
+		"user t1": {ids.orgA, []string{ids.t1}}, "user t2": {ids.orgA, []string{ids.t2}},
+		"user t1+t2": {ids.orgA, []string{ids.t1, ids.t2}}, "user without team": {ids.orgA, nil},
+		"user tB": {ids.orgB, []string{ids.tB}},
+	} {
+		w.parents[key] = matrixParent{id: user(u.org, u.teams...), org: u.org, teams: u.teams}
+	}
+	training := func(org string) string {
+		id := matrixUUID()
+		exec(`INSERT INTO training (id, organization_id, title) VALUES ($1, $2, 'matrix')`, id, org)
+		return id
+	}
+	w.ids.trainingA, w.ids.trainingB = training(ids.orgA), training(ids.orgB)
+	w.ids.trainingA2, w.ids.trainingB2 = training(ids.orgA), training(ids.orgB)
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL LIMIT 1`).Scan(&w.ids.ciType); err != nil {
+		t.Fatalf("server ci_type: %v", err)
+	}
+	for key, c := range map[string][3]string{
+		"ci c1/s1": {ids.orgA, ids.c1, ids.s1}, "ci c1/s3": {ids.orgA, ids.c1, ids.s3},
+		"ci c2/s2": {ids.orgA, ids.c2, ids.s2}, "org-wide ci": {ids.orgA, "", ""},
+		"ci cB/sB": {ids.orgB, ids.cB, ids.sB},
+	} {
+		id := matrixUUID()
+		exec(`INSERT INTO ci (id, organization_id, client_id, location_id, ci_type_id, name, status)
+			VALUES ($1, $2, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, $5, $6, 'active')`, id, c[0], c[1], c[2], w.ids.ciType, "matrix-"+id[:8])
+		w.parents[key] = matrixParent{id: id, org: c[0], dims: map[string]string{"client": c[1], "site": c[2]}}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit matrix parents: %v", err)
+	}
+	return w
+}
+
+func (w *matrixWorld) userFor(org string) string {
+	if org == w.ids.orgA {
+		return w.ids.userA
+	}
+	return w.ids.userB
+}
+
+// parentVisible: the principal sees the CI (TEN-05, NULL is visible).
+func (w *matrixWorld) parentVisible(p *matrixPrincipal, key string) bool {
+	for dim, v := range w.parents[key].dims {
+		if !dimRead(p.scope[dim], v) {
+			return false
+		}
+	}
+	return true
+}
+
+// parentWritable: a link to the CI carries a client and site the principal
+// may write (E-09: not NULL for a scoped principal).
+func (w *matrixWorld) parentWritable(p *matrixPrincipal, key string) bool {
+	for dim, v := range w.parents[key].dims {
+		if !dimWrite(p.scope[dim], v) {
+			return false
+		}
+	}
+	return true
+}
+
+// orgWideCS: no client or site restriction (team scopes do not restrict
+// documents, windows and review items).
+func (p *matrixPrincipal) orgWideCS() bool { return p.scope["client"] == nil && p.scope["site"] == nil }
+
+// linkedRows are the rows of document and maintenance_window: one per link
+// combination, unlinked (org-wide), linked only to an org-wide CI, and one of
+// organization B.
+func linkedRows(ids matrixIDs) []inheritedRow {
+	return []inheritedRow{
+		{name: "A/c1s1", org: ids.orgA, parents: []string{"ci c1/s1"}},
+		{name: "A/c1s3", org: ids.orgA, parents: []string{"ci c1/s3"}},
+		{name: "A/c2s2", org: ids.orgA, parents: []string{"ci c2/s2"}},
+		{name: "A/shared c1s1+c2s2", org: ids.orgA, parents: []string{"ci c1/s1", "ci c2/s2"}},
+		{name: "A/shared c1s1+c1s3", org: ids.orgA, parents: []string{"ci c1/s1", "ci c1/s3"}},
+		{name: "A/c1s1+org-wide CI", org: ids.orgA, parents: []string{"ci c1/s1", "org-wide ci"}},
+		{name: "A/org-wide CI", org: ids.orgA, parents: []string{"org-wide ci"}},
+		{name: "A/unlinked", org: ids.orgA},
+		{name: "B/cBsB", org: ids.orgB, parents: []string{"ci cB/sB"}},
+	}
+}
+
+// linkedModel: a row is visible without links or with one visible link; a
+// principal restricted in the client or site scope changes, deletes and
+// creates it only when every link is one it may write, so it never removes
+// links of another client or org-wide links and creates no unlinked row
+// (migrations 000064, 000139; WP-341, E-09).
+func linkedModel(ids matrixIDs, insert func(ctx context.Context, q matrixQuerier, w *matrixWorld, r inheritedRow, attempt bool) (string, error)) *inheritedModel {
+	return &inheritedModel{
+		rows:   linkedRows(ids),
+		insert: insert,
+		read: func(w *matrixWorld, p *matrixPrincipal, r inheritedRow) bool {
+			if r.org != p.org {
+				return false
+			}
+			if p.orgWideCS() || len(r.parents) == 0 {
+				return true
+			}
+			return slices.ContainsFunc(r.parents, func(k string) bool { return w.parentVisible(p, k) })
+		},
+		write: func(w *matrixWorld, p *matrixPrincipal, r inheritedRow) bool {
+			if r.org != p.org {
+				return false
+			}
+			if p.orgWideCS() {
+				return true
+			}
+			return len(r.parents) > 0 && !slices.ContainsFunc(r.parents, func(k string) bool { return !w.parentWritable(p, k) })
+		},
+	}
+}
+
+// inheritedModels lists every table whose policy takes its scope from
+// another table. A new one fails the matrix until it is modelled here.
+func inheritedModels(ids matrixIDs) map[string]*inheritedModel {
+	return map[string]*inheritedModel{
+		"document": linkedModel(ids, func(ctx context.Context, q matrixQuerier, w *matrixWorld, r inheritedRow, attempt bool) (string, error) {
+			var id string
+			if err := q.QueryRow(ctx, `INSERT INTO document (organization_id, title, file_name, storage_key, uploaded_by)
+				VALUES ($1, 'matrix', 'f', '', $2) RETURNING id::text`, r.org, w.userFor(r.org)).Scan(&id); err != nil {
+				return "", err
+			}
+			for _, k := range r.parents {
+				if _, err := q.Exec(ctx, `INSERT INTO document_link (organization_id, document_id, entity_type, entity_id) VALUES ($1, $2, 'ci', $3)`,
+					r.org, id, w.parents[k].id); err != nil {
+					return "", err
+				}
+			}
+			return id, nil
+		}),
+		"maintenance_window": linkedModel(ids, func(ctx context.Context, q matrixQuerier, w *matrixWorld, r inheritedRow, attempt bool) (string, error) {
+			var id string
+			if err := q.QueryRow(ctx, `INSERT INTO maintenance_window (organization_id, title, starts_at, ends_at)
+				VALUES ($1, 'matrix', '2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z') RETURNING id::text`, r.org).Scan(&id); err != nil {
+				return "", err
+			}
+			for _, k := range r.parents {
+				if _, err := q.Exec(ctx, `INSERT INTO maintenance_window_ci (organization_id, maintenance_window_id, ci_id) VALUES ($1, $2, $3)`,
+					r.org, id, w.parents[k].id); err != nil {
+					return "", err
+				}
+			}
+			return id, nil
+		}),
+		"review_item":         reviewItemModel(ids),
+		"training_assignment": trainingAssignmentModel(ids),
+	}
+}
+
+// reviewItemModel: the client and site of a review item follow its
+// candidate CIs (one common value, else NULL) or, without candidates, the
+// writer's choice. A principal restricted in the client or site scope sees
+// an item only when it sees every candidate, and an item without candidates
+// only when it carries the restricted dimension (migration 000140); it
+// writes it only when client and site are in its scope (E-09).
+func reviewItemModel(ids matrixIDs) *inheritedModel {
+	derived := func(w *matrixWorld, r inheritedRow) map[string]string {
+		if len(r.parents) == 0 {
+			return r.scope
+		}
+		out := map[string]string{}
+		for _, dim := range []string{"client", "site"} {
+			v := w.parents[r.parents[0]].dims[dim]
+			for _, k := range r.parents[1:] {
+				if w.parents[k].dims[dim] != v {
+					v = ""
+				}
+			}
+			out[dim] = v
+		}
+		return out
+	}
+	cols := func(w *matrixWorld, p *matrixPrincipal, r inheritedRow, ok func([]string, string) bool) bool {
+		d := derived(w, r)
+		return r.org == p.org && ok(p.scope["client"], d["client"]) && ok(p.scope["site"], d["site"])
+	}
+	read := func(w *matrixWorld, p *matrixPrincipal, r inheritedRow) bool {
+		if !cols(w, p, r, dimRead) {
+			return false
+		}
+		if p.orgWideCS() {
+			return true
+		}
+		if len(r.parents) == 0 {
+			d := derived(w, r)
+			return (p.scope["client"] == nil || d["client"] != "") && (p.scope["site"] == nil || d["site"] != "")
+		}
+		return !slices.ContainsFunc(r.parents, func(k string) bool { return !w.parentVisible(p, k) })
+	}
+	return &inheritedModel{
+		rows: []inheritedRow{
+			{name: "A/candidate c1s1", org: ids.orgA, parents: []string{"ci c1/s1"}},
+			{name: "A/candidate c2s2", org: ids.orgA, parents: []string{"ci c2/s2"}},
+			{name: "A/candidate c1s3", org: ids.orgA, parents: []string{"ci c1/s3"}},
+			{name: "A/candidates c1s1+c2s2", org: ids.orgA, parents: []string{"ci c1/s1", "ci c2/s2"}},
+			{name: "A/candidates c1s1+c1s3", org: ids.orgA, parents: []string{"ci c1/s1", "ci c1/s3"}},
+			{name: "A/candidate org-wide CI", org: ids.orgA, parents: []string{"org-wide ci"}},
+			{name: "A/no candidate c1s1", org: ids.orgA, scope: map[string]string{"client": ids.c1, "site": ids.s1}},
+			{name: "A/no candidate c1", org: ids.orgA, scope: map[string]string{"client": ids.c1, "site": ""}},
+			{name: "A/no candidate NULL", org: ids.orgA, scope: map[string]string{"client": "", "site": ""}},
+			{name: "B/candidate cBsB", org: ids.orgB, parents: []string{"ci cB/sB"}},
+		},
+		insert: func(ctx context.Context, q matrixQuerier, w *matrixWorld, r inheritedRow, attempt bool) (string, error) {
+			var cands []string
+			for _, k := range r.parents {
+				cands = append(cands, w.parents[k].id)
+			}
+			var id string
+			err := q.QueryRow(ctx, `INSERT INTO review_item (organization_id, kind, candidate_ci_ids, client_id, site_id)
+				VALUES ($1, 'scope_suggested', $2::uuid[], NULLIF($3, '')::uuid, NULLIF($4, '')::uuid) RETURNING id::text`,
+				r.org, cands, r.scope["client"], r.scope["site"]).Scan(&id)
+			return id, err
+		},
+		read: read,
+		write: func(w *matrixWorld, p *matrixPrincipal, r inheritedRow) bool {
+			return read(w, p, r) && cols(w, p, r, dimWrite)
+		},
+		// INSERT checks only the derived columns (WITH CHECK).
+		insertOK: func(w *matrixWorld, p *matrixPrincipal, r inheritedRow) bool {
+			return cols(w, p, r, dimWrite)
+		},
+	}
+}
+
+// trainingAssignmentModel: a team-scoped principal sees and writes the
+// assignments of users in one of its teams (migration 000065); a user
+// without team is not in any team scope. Client and site scopes do not
+// restrict trainings.
+func trainingAssignmentModel(ids matrixIDs) *inheritedModel {
+	access := func(w *matrixWorld, p *matrixPrincipal, r inheritedRow) bool {
+		if r.org != p.org {
+			return false
+		}
+		return p.scope["team"] == nil || slices.ContainsFunc(w.parents[r.parents[0]].teams, func(team string) bool {
+			return slices.Contains(p.scope["team"], team)
+		})
+	}
+	return &inheritedModel{
+		rows: []inheritedRow{
+			{name: "A/user t1", org: ids.orgA, parents: []string{"user t1"}},
+			{name: "A/user t2", org: ids.orgA, parents: []string{"user t2"}},
+			{name: "A/user t1+t2", org: ids.orgA, parents: []string{"user t1+t2"}},
+			{name: "A/user without team", org: ids.orgA, parents: []string{"user without team"}},
+			{name: "B/user tB", org: ids.orgB, parents: []string{"user tB"}},
+		},
+		// The seeded rows use the first training of the organization, the
+		// INSERT attempts the second (one assignment per training and user).
+		insert: func(ctx context.Context, q matrixQuerier, w *matrixWorld, r inheritedRow, attempt bool) (string, error) {
+			training := w.ids.trainingA
+			if r.org == w.ids.orgB {
+				training = w.ids.trainingB
+			}
+			if attempt {
+				training = w.ids.trainingA2
+				if r.org == w.ids.orgB {
+					training = w.ids.trainingB2
+				}
+			}
+			var id string
+			err := q.QueryRow(ctx, `INSERT INTO training_assignment (organization_id, training_id, user_id) VALUES ($1, $2, $3) RETURNING id::text`,
+				r.org, training, w.parents[r.parents[0]].id).Scan(&id)
+			return id, err
+		},
+		read:  access,
+		write: access,
+	}
 }

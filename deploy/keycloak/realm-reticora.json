@@ -151,7 +151,10 @@
   "groups": [
     {
       "name": "reticora-admin",
-      "path": "/reticora-admin"
+      "path": "/reticora-admin",
+      "realmRoles": [
+        "mfa_required"
+      ]
     }
   ],
   "users": [],

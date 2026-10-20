@@ -20,7 +20,11 @@ import (
 // restricted in the client or site scope writes them only when it sees all
 // of their links, cannot create or link an unlinked (org-wide) one, and the
 // link counters stay exact and are not writable (migration 000139, WP-341,
-// F-004, F-048, F-185).
+// F-004, F-048, F-185); links to org-wide objects do not count as writable
+// (migration 000146). Disposal records derive client and site from their
+// asset or CI (migration 000145, WP-353, MGT-02, F-186), and the derived
+// columns of every module table follow a site or client move of the
+// referenced object (moduleObjectPropagation, WP-028 open evidence).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestModuleTablesInheritObjectScope(t *testing.T) {
@@ -244,6 +248,8 @@ func TestModuleTablesInheritObjectScope(t *testing.T) {
 	}
 
 	moduleObjectWrites(t, f, user)
+	disposalRecordScope(t, f, user)
+	moduleObjectPropagation(t, f, user)
 }
 
 // moduleObjectWrites covers the write rules of migration 000139 (WP-341) as
@@ -305,7 +311,10 @@ func moduleObjectWrites(t *testing.T, f *scopetest.Fixture, user string) {
 		}
 		return id
 	}
+	ciOrg := f.CI(t, f.OrgA, "", "mod-w-org")
 	docShared := newDoc("w-shared", [2]string{"ci", ciA}, [2]string{"asset", assetB})
+	docOrgLinked := newDoc("w-org-linked", [2]string{"ci", ciA}, [2]string{"ci", ciOrg})
+	winOrgLinked := newWindow("w-org-linked", ciA, ciOrg)
 	docOrg := newDoc("w-org")
 	docOwn := newDoc("w-own", [2]string{"ci", ciA})
 	docProbe := newDoc("w-probe", [2]string{"ci", ciA}, [2]string{"asset", assetB})
@@ -330,6 +339,11 @@ func moduleObjectWrites(t *testing.T, f *scopetest.Fixture, user string) {
 		{"DELETE shared window", `DELETE FROM maintenance_window WHERE id = $1`, winShared},
 		{"UPDATE org-wide window", `UPDATE maintenance_window SET title = 'x' WHERE id = $1`, winOrg},
 		{"DELETE org-wide window", `DELETE FROM maintenance_window WHERE id = $1`, winOrg},
+		// An org-wide link is visible but not writable (E-09, 000146).
+		{"UPDATE document linked to an org-wide CI", `UPDATE document SET title = 'x' WHERE id = $1`, docOrgLinked},
+		{"DELETE document linked to an org-wide CI", `DELETE FROM document WHERE id = $1`, docOrgLinked},
+		{"UPDATE window with an org-wide CI", `UPDATE maintenance_window SET title = 'x' WHERE id = $1`, winOrgLinked},
+		{"DELETE window with an org-wide CI", `DELETE FROM maintenance_window WHERE id = $1`, winOrgLinked},
 	} {
 		if n, err := exec(c1, c.sql, c.id); err != nil || n != 0 {
 			t.Errorf("client 1: %s: %d rows, %v; want 0 rows", c.name, n, err)
@@ -338,6 +352,10 @@ func moduleObjectWrites(t *testing.T, f *scopetest.Fixture, user string) {
 	if got := scalarText(t, f, `SELECT (SELECT string_agg(title, ',' ORDER BY title) FROM document WHERE id IN ($1, $2)) || '|' ||
 		(SELECT count(*) FROM document_link WHERE document_id = $1)::text`, docShared, docOrg); got != "w-org,w-shared|2" {
 		t.Errorf("documents|shared links after the client-1 writes: %s, want w-org,w-shared|2", got)
+	}
+	if got := scalarText(t, f, `SELECT (SELECT string_agg(title || ':' || link_count::text, ',') FROM document WHERE id = $1) || '|' ||
+		(SELECT string_agg(title || ':' || ci_count::text, ',') FROM maintenance_window WHERE id = $2)`, docOrgLinked, winOrgLinked); got != "w-org-linked:2|w-org-linked:2" {
+		t.Errorf("rows linked to an org-wide CI after the client-1 writes: %s, want w-org-linked:2|w-org-linked:2", got)
 	}
 	if got := scalarText(t, f, `SELECT (SELECT string_agg(title || ':' || status, ',' ORDER BY title) FROM maintenance_window WHERE id IN ($1, $2)) || '|' ||
 		(SELECT count(*) FROM maintenance_window_ci WHERE maintenance_window_id = $1)::text`, winShared, winOrg); got != "w-org:scheduled,w-shared:scheduled|2" {
@@ -450,6 +468,276 @@ func moduleObjectWrites(t *testing.T, f *scopetest.Fixture, user string) {
 	if got := scalarText(t, f, `SELECT (SELECT count(*) FROM maintenance_window_ci WHERE maintenance_window_id = $1)::text || '|' || ci_count::text FROM maintenance_window WHERE id = $1`, winCascade); got != "1|1" {
 		t.Errorf("CIs|ci_count of the shared window after the CI delete: %s, want 1|1", got)
 	}
+}
+
+// disposalRecordScope covers migration 000145 (WP-353, MGT-02, F-186) as the
+// application role without the Go predicate of the disposal repository:
+// disposal records derive client and site from the asset (site of its
+// location) or the CI, a client-1 principal neither reads the record of a
+// client-2 asset nor records one (42501), a site principal only writes
+// records at its site, and the records stay append-only.
+func disposalRecordScope(t *testing.T, f *scopetest.Fixture, user string) {
+	t.Helper()
+	bg := context.Background()
+	siteA, siteB := f.ID(), f.ID()
+	for _, s := range []string{siteA, siteB} {
+		if _, err := f.Admin.Exec(bg, `INSERT INTO site (id, organization_id, client_id, name) VALUES ($1, $2, $3, $4)`, s, f.OrgA, f.Client1, "disp "+s); err != nil {
+			t.Fatalf("seed site: %v", err)
+		}
+	}
+	own := f.Asset(t, f.OrgA, f.Client1, "disp-own")
+	other := f.Asset(t, f.OrgA, f.Client1, "disp-site-b")
+	foreign := f.Asset(t, f.OrgA, f.Client2, "disp-foreign")
+	ciForeign := f.CI(t, f.OrgA, f.Client2, "disp-ci-c2")
+	for asset, site := range map[string]string{own: siteA, other: siteB} {
+		if _, err := f.Admin.Exec(bg, `UPDATE asset SET location_id = $2 WHERE id = $1`, asset, site); err != nil {
+			t.Fatalf("place asset: %v", err)
+		}
+	}
+	orgWide := database.OrgWideScope(f.OrgA, user)
+	c1 := database.OrgWideScope(f.OrgA, user)
+	c1.Clients = database.ScopeIDs(f.Client1)
+	sA := database.OrgWideScope(f.OrgA, user)
+	sA.Sites = database.ScopeIDs(siteA)
+	insert := func(scope database.TenantScope, column, ref string) (string, error) {
+		var id string
+		err := database.WithTenant(bg, f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			// The writer's client is ignored.
+			return tx.QueryRow(ctx, `INSERT INTO disposal_record (organization_id, `+column+`, method, performed_at, client_id)
+				VALUES ($1, $2, 'recycling', now(), $3) RETURNING id::text`, f.OrgA, ref, f.Client1).Scan(&id)
+		})
+		return id, err
+	}
+	mustInsert := func(scope database.TenantScope, column, ref string) string {
+		t.Helper()
+		id, err := insert(scope, column, ref)
+		if err != nil {
+			t.Fatalf("disposal record of %s %s: %v", column, ref, err)
+		}
+		return id
+	}
+	recForeign := mustInsert(orgWide, "asset_id", foreign)
+	recCI := mustInsert(orgWide, "ci_id", ciForeign)
+	recOwn := mustInsert(c1, "asset_id", own)
+	recSiteA := mustInsert(sA, "asset_id", own)
+	scope := func(id string) string {
+		return scalarText(t, f, `SELECT COALESCE(client_id::text, '-') || '|' || COALESCE(site_id::text, '-') FROM disposal_record WHERE id = $1`, id)
+	}
+	for _, c := range []struct{ name, id, want string }{
+		{"client-2 asset", recForeign, f.Client2 + "|-"},
+		{"client-2 CI", recCI, f.Client2 + "|-"},
+		{"own asset at site A (client 1)", recOwn, f.Client1 + "|" + siteA},
+		{"own asset at site A (site A)", recSiteA, f.Client1 + "|" + siteA},
+	} {
+		if got := scope(c.id); got != c.want {
+			t.Errorf("disposal record of the %s: client|site %s, want %s", c.name, got, c.want)
+		}
+	}
+
+	visible := func(scope database.TenantScope, id string) int {
+		t.Helper()
+		var n int
+		if err := database.WithTenant(bg, f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*) FROM disposal_record WHERE id = $1`, id).Scan(&n)
+		}); err != nil {
+			t.Fatalf("read disposal record: %v", err)
+		}
+		return n
+	}
+	// F-186 retest: client 1 selects the records of client 2 directly.
+	for _, c := range []struct {
+		name  string
+		scope database.TenantScope
+		id    string
+		want  int
+	}{
+		{"client 1 reads the record of a client-2 asset", c1, recForeign, 0},
+		{"client 1 reads the record of a client-2 CI", c1, recCI, 0},
+		{"client 1 reads its own record", c1, recOwn, 1},
+		{"site A reads the record at site A", sA, recOwn, 1},
+		{"org-wide principal reads the record of a client-2 asset", orgWide, recForeign, 1},
+	} {
+		if got := visible(c.scope, c.id); got != c.want {
+			t.Errorf("%s: %d rows, want %d", c.name, got, c.want)
+		}
+	}
+	var pgErr *pgconn.PgError
+	for _, c := range []struct {
+		name        string
+		scope       database.TenantScope
+		column, ref string
+	}{
+		{"client 1 records a client-2 asset", c1, "asset_id", foreign},
+		{"client 1 records a client-2 CI", c1, "ci_id", ciForeign},
+		{"site A records an asset at site B", sA, "asset_id", other},
+		{"client 1 records a disposal without object (org-wide)", c1, "notes", "x"},
+	} {
+		if _, err := insert(c.scope, c.column, c.ref); !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+			t.Errorf("%s: %v, want 42501", c.name, err)
+		}
+	}
+	// Append-only (000049): the derivation exception covers only nested
+	// re-derivations.
+	if _, err := f.Admin.Exec(bg, `UPDATE disposal_record SET client_id = $2 WHERE id = $1`, recOwn, f.Client2); err == nil {
+		t.Error("disposal record updated directly")
+	}
+	if _, err := f.Admin.Exec(bg, `UPDATE disposal_record SET notes = 'x' WHERE id = $1`, recOwn); err == nil {
+		t.Error("disposal record notes updated")
+	}
+
+	// Propagation: the asset moves to site B, then to client 2; the CI to
+	// client 1. The principals of the old scope see the records no longer.
+	if _, err := f.Admin.Exec(bg, `UPDATE asset SET location_id = $2 WHERE id = $1`, own, siteB); err != nil {
+		t.Fatalf("move asset to site B: %v", err)
+	}
+	if got := scope(recOwn); got != f.Client1+"|"+siteB {
+		t.Errorf("record after the asset moved to site B: %s, want client 1|site B", got)
+	}
+	if got := visible(sA, recOwn); got != 0 {
+		t.Errorf("site A reads the record after the asset moved to site B: %d rows, want 0", got)
+	}
+	if _, err := f.Admin.Exec(bg, `UPDATE asset SET client_id = $2, location_id = NULL WHERE id = $1`, own, f.Client2); err != nil {
+		t.Fatalf("move asset to client 2: %v", err)
+	}
+	if got := scope(recOwn); got != f.Client2+"|-" {
+		t.Errorf("record after the asset moved to client 2: %s, want client 2|-", got)
+	}
+	if got := visible(c1, recOwn); got != 0 {
+		t.Errorf("client 1 reads the record after the asset moved to client 2: %d rows, want 0", got)
+	}
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET client_id = $2 WHERE id = $1`, ciForeign, f.Client1); err != nil {
+		t.Fatalf("move ci to client 1: %v", err)
+	}
+	if got := scope(recCI); got != f.Client1+"|-" {
+		t.Errorf("record after the CI moved to client 1: %s, want client 1|-", got)
+	}
+	if got := visible(c1, recCI); got != 1 {
+		t.Errorf("client 1 reads the record after the CI moved to client 1: %d rows, want 1", got)
+	}
+}
+
+// moduleObjectPropagation covers the open evidence of WP-028 (MGT-01..04,
+// TKT-01): tickets, comments, document links and window CIs take the site
+// and client of their CI, key assignments the client of their key item (key
+// items have no site); when the referenced object moves, the derived columns
+// follow and the principal of the old scope sees 0 rows.
+func moduleObjectPropagation(t *testing.T, f *scopetest.Fixture, user string) {
+	t.Helper()
+	bg := context.Background()
+	siteA, siteB, siteC := f.ID(), f.ID(), f.ID()
+	for site, client := range map[string]string{siteA: f.Client1, siteB: f.Client1, siteC: f.Client2} {
+		if _, err := f.Admin.Exec(bg, `INSERT INTO site (id, organization_id, client_id, name) VALUES ($1, $2, $3, $4)`, site, f.OrgA, client, "prop "+site); err != nil {
+			t.Fatalf("seed site: %v", err)
+		}
+	}
+	ci := f.CI(t, f.OrgA, f.Client1, "prop-ci")
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET location_id = $2 WHERE id = $1`, ci, siteA); err != nil {
+		t.Fatalf("place ci: %v", err)
+	}
+	ids := map[string]string{}
+	seed := func(key, sql string, args ...any) {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, sql+` RETURNING id::text`, args...).Scan(&id); err != nil {
+			t.Fatalf("seed %s: %v", key, err)
+		}
+		ids[key] = id
+	}
+	seed("ticket", `INSERT INTO ticket (organization_id, title, reporter_id, related_ci_id) VALUES ($1, 'prop', $2, $3)`, f.OrgA, user, ci)
+	seed("ticket_comment", `INSERT INTO ticket_comment (organization_id, ticket_id, author_id, content) VALUES ($1, $2, $3, 'c')`, f.OrgA, ids["ticket"], user)
+	seed("document", `INSERT INTO document (organization_id, title, file_name, storage_key, uploaded_by) VALUES ($1, 'prop', 'f', '', $2)`, f.OrgA, user)
+	seed("document_link", `INSERT INTO document_link (organization_id, document_id, entity_type, entity_id) VALUES ($1, $2, 'ci', $3)`, f.OrgA, ids["document"], ci)
+	seed("ticket_link", `INSERT INTO document_link (organization_id, document_id, entity_type, entity_id) VALUES ($1, $2, 'ticket', $3)`, f.OrgA, ids["document"], ids["ticket"])
+	seed("window", `INSERT INTO maintenance_window (organization_id, title, starts_at, ends_at) VALUES ($1, 'prop', now(), now() + interval '1 hour')`, f.OrgA)
+	seed("maintenance_window_ci", `INSERT INTO maintenance_window_ci (organization_id, maintenance_window_id, ci_id) VALUES ($1, $2, $3)`, f.OrgA, ids["window"], ci)
+	seed("key_item", `INSERT INTO key_item (organization_id, client_id, name) VALUES ($1, $2, 'prop')`, f.OrgA, f.Client1)
+	seed("key_assignment", `INSERT INTO key_assignment (organization_id, key_item_id, assigned_to) VALUES ($1, $2, $3)`, f.OrgA, ids["key_item"], user)
+
+	scoped := func(clients, sites []string) database.TenantScope {
+		s := database.OrgWideScope(f.OrgA, user)
+		if clients != nil {
+			s.Clients = database.ScopeIDs(clients...)
+		}
+		if sites != nil {
+			s.Sites = database.ScopeIDs(sites...)
+		}
+		return s
+	}
+	c1, c2 := scoped([]string{f.Client1}, nil), scoped([]string{f.Client2}, nil)
+	sA, sB, sC := scoped(nil, []string{siteA}), scoped(nil, []string{siteB}), scoped(nil, []string{siteC})
+	// table, key, whether the row carries a site.
+	rows := []struct {
+		table, key string
+		site       bool
+	}{
+		{"ticket", "ticket", true},
+		{"ticket_comment", "ticket_comment", true},
+		{"document_link", "document_link", true},
+		{"document_link", "ticket_link", true},
+		{"maintenance_window_ci", "maintenance_window_ci", true},
+		{"key_assignment", "key_assignment", false},
+	}
+	derived := func(table, key string, site bool) string {
+		col := "'-'"
+		if site {
+			col = "COALESCE(site_id::text, '-')"
+		}
+		return scalarText(t, f, `SELECT COALESCE(client_id::text, '-') || '|' || `+col+` FROM `+table+` WHERE id = $1`, ids[key])
+	}
+	visible := func(scope database.TenantScope, table, key string) int {
+		t.Helper()
+		var n int
+		if err := database.WithTenant(bg, f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE id = $1`, ids[key]).Scan(&n)
+		}); err != nil {
+			t.Fatalf("read %s: %v", table, err)
+		}
+		return n
+	}
+	type expect struct {
+		client, site string
+		see          []database.TenantScope
+		blind        []database.TenantScope
+	}
+	check := func(stage string, siteRows, keyRows expect) {
+		t.Helper()
+		for _, r := range rows {
+			e, want := siteRows, siteRows.client+"|"+siteRows.site
+			if !r.site {
+				e, want = keyRows, keyRows.client+"|-"
+			}
+			if got := derived(r.table, r.key, r.site); got != want {
+				t.Errorf("%s: %s %s client|site %s, want %s", stage, r.table, r.key, got, want)
+			}
+			for i, s := range e.see {
+				if n := visible(s, r.table, r.key); n != 1 {
+					t.Errorf("%s: %s %s: principal %d of the scope sees %d rows, want 1", stage, r.table, r.key, i, n)
+				}
+			}
+			for i, s := range e.blind {
+				if n := visible(s, r.table, r.key); n != 0 {
+					t.Errorf("%s: %s %s: principal %d of another scope sees %d rows, want 0", stage, r.table, r.key, i, n)
+				}
+			}
+		}
+	}
+	keyClient1 := expect{client: f.Client1, see: []database.TenantScope{c1}, blind: []database.TenantScope{c2}}
+	check("client 1, site A", expect{client: f.Client1, site: siteA, see: []database.TenantScope{c1, sA}, blind: []database.TenantScope{c2, sB}}, keyClient1)
+
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET location_id = $2 WHERE id = $1`, ci, siteB); err != nil {
+		t.Fatalf("move ci to site B: %v", err)
+	}
+	check("CI moved to site B", expect{client: f.Client1, site: siteB, see: []database.TenantScope{c1, sB}, blind: []database.TenantScope{sA, c2}}, keyClient1)
+
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET client_id = $2, location_id = $3 WHERE id = $1`, ci, f.Client2, siteC); err != nil {
+		t.Fatalf("move ci to client 2: %v", err)
+	}
+	if _, err := f.Admin.Exec(bg, `UPDATE key_item SET client_id = $2 WHERE id = $1`, ids["key_item"], f.Client2); err != nil {
+		t.Fatalf("move key item to client 2: %v", err)
+	}
+	check("CI and key item moved to client 2",
+		expect{client: f.Client2, site: siteC, see: []database.TenantScope{c2, sC}, blind: []database.TenantScope{c1, sB}},
+		expect{client: f.Client2, see: []database.TenantScope{c2}, blind: []database.TenantScope{c1}})
 }
 
 // scalarText runs a query on the maintenance pool (no RLS) and returns the

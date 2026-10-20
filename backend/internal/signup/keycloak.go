@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -65,6 +66,12 @@ type keycloakUser struct {
 	RequiredActions []string             `json:"requiredActions,omitempty"`
 }
 
+// keycloakRole is a realm role as the admin API lists it.
+type keycloakRole struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // splitName splits a display name into first and last name: the realm's
 // user profile requires both, and an account without them is sent to the
 // profile form after its first login instead of into the application. A
@@ -84,50 +91,136 @@ func splitName(display string) (first, last string) {
 // inviteActions are the actions the invited first org_admin completes.
 var inviteActions = []string{"UPDATE_PASSWORD", "VERIFY_EMAIL"}
 
-// CreateAccount creates the user with verified address, the organization_id
-// attribute the login reads, and the password as permanent credential.
+// mfaRole is the realm role whose holders the browser flow browser-mfa asks
+// for a second factor (deploy/keycloak, AUT-09, CH26); configureTOTP makes
+// them set up OTP at their first login.
+const (
+	mfaRole       = "mfa_required"
+	configureTOTP = "CONFIGURE_TOTP"
+)
+
+// CreateAccount creates the account of the first org_admin of a self-signup:
+// verified address, the organization_id attribute the login reads, the
+// password as permanent credential, and the MFA binding of AUT-09 (realm
+// role mfa_required, required action CONFIGURE_TOTP). Without the role the
+// account is deleted again: no org_admin without MFA.
 func (k *KeycloakAccounts) CreateAccount(ctx context.Context, a Account) (string, error) {
-	first, last := splitName(a.DisplayName)
-	return k.createUser(ctx, &keycloakUser{
-		Username: a.Email, Email: a.Email, FirstName: first, LastName: last, Enabled: true, EmailVerified: true,
-		Attributes:  map[string][]string{"organization_id": {a.OrganizationID}},
-		Credentials: []keycloakCredential{{Type: "password", Value: a.Password}},
-	})
+	return k.createAccount(ctx, a, true)
 }
 
 // CreateInvitedAccount creates the account of an accepted invitation
 // (user.InvitationAccounts, TLC-03): like a signup, with the password the
-// invited person chose; an existing account is a conflict on email.
+// invited person chose; an existing account is a conflict on email. It
+// carries no MFA binding: the invited role decides (WP-358).
 func (k *KeycloakAccounts) CreateInvitedAccount(ctx context.Context, email, displayName, password, orgID string) (string, error) {
-	id, err := k.CreateAccount(ctx, Account{Email: email, DisplayName: displayName, Password: password, OrganizationID: orgID})
+	id, err := k.createAccount(ctx, Account{Email: email, DisplayName: displayName, Password: password, OrganizationID: orgID}, false)
 	if errors.Is(err, ErrAccountExists) {
 		return "", &api.ConflictError{Field: "email", Message: err.Error()}
 	}
 	return id, err
 }
 
+func (k *KeycloakAccounts) createAccount(ctx context.Context, a Account, mfa bool) (string, error) {
+	first, last := splitName(a.DisplayName)
+	user := &keycloakUser{
+		Username: a.Email, Email: a.Email, FirstName: first, LastName: last, Enabled: true, EmailVerified: true,
+		Attributes:  map[string][]string{"organization_id": {a.OrganizationID}},
+		Credentials: []keycloakCredential{{Type: "password", Value: a.Password}},
+	}
+	if mfa {
+		user.RequiredActions = []string{configureTOTP}
+	}
+	id, err := k.createUser(ctx, user)
+	if err != nil || !mfa {
+		return id, err
+	}
+	if err = k.requireMFA(ctx, id); err != nil {
+		return "", k.rollback(ctx, id, err)
+	}
+	return id, nil
+}
+
 // InviteAccount creates the user without a password and lets Keycloak mail
 // the link to set one and verify the address (execute-actions-email; the
-// realm's SMTP settings apply). Used by the operator path (TLC-02).
+// realm's SMTP settings apply). Used by the operator path (TLC-02): the
+// account is the first org_admin and bound to MFA like a signup account.
 func (k *KeycloakAccounts) InviteAccount(ctx context.Context, a Account) (string, error) {
 	first, last := splitName(a.DisplayName)
 	id, err := k.createUser(ctx, &keycloakUser{
 		Username: a.Email, Email: a.Email, FirstName: first, LastName: last, Enabled: true,
 		Attributes:      map[string][]string{"organization_id": {a.OrganizationID}},
-		RequiredActions: inviteActions,
+		RequiredActions: append(slices.Clone(inviteActions), configureTOTP),
 	})
 	if err != nil {
 		return "", err
 	}
+	if err = k.requireMFA(ctx, id); err != nil {
+		return "", k.rollback(ctx, id, err)
+	}
 	if err = k.executeActionsEmail(ctx, id); err != nil {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-		defer cancel()
-		if derr := k.DeleteAccount(cleanup, id); derr != nil {
-			err = errors.Join(err, derr)
-		}
-		return "", err
+		return "", k.rollback(ctx, id, err)
 	}
 	return id, nil
+}
+
+// rollback deletes the half-created account and returns err, joined with a
+// failure of the deletion.
+func (k *KeycloakAccounts) rollback(ctx context.Context, id string, err error) error {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	if derr := k.DeleteAccount(cleanup, id); derr != nil {
+		err = errors.Join(err, derr)
+	}
+	return err
+}
+
+// requireMFA maps the realm role mfa_required to the user. The role is
+// looked up among the roles available to the user, which manage-users may
+// read (GET /roles/{name} needs view-realm); the mapping needs its id.
+func (k *KeycloakAccounts) requireMFA(ctx context.Context, id string) error {
+	token, err := k.token(ctx)
+	if err != nil {
+		return err
+	}
+	mappings := k.adminRealm + "/users/" + url.PathEscape(id) + "/role-mappings/realm"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mappings+"/available", http.NoBody)
+	if err != nil {
+		return fmt.Errorf("keycloak: realm roles request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := k.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("keycloak: realm roles: %w", err)
+	}
+	var roles []keycloakRole
+	derr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&roles)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("keycloak: realm roles: status %d", resp.StatusCode)
+	}
+	if derr != nil {
+		return fmt.Errorf("keycloak: realm roles: %w", derr)
+	}
+	i := slices.IndexFunc(roles, func(r keycloakRole) bool { return r.Name == mfaRole })
+	if i < 0 || roles[i].ID == "" {
+		return fmt.Errorf("keycloak: realm role %s not available", mfaRole)
+	}
+	body, _ := json.Marshal(roles[i : i+1])
+	req, err = http.NewRequestWithContext(ctx, http.MethodPost, mappings, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("keycloak: role mapping request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = k.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("keycloak: role mapping: %w", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("keycloak: role mapping: status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func (k *KeycloakAccounts) executeActionsEmail(ctx context.Context, id string) error {

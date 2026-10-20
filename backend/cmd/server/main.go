@@ -387,7 +387,10 @@ func main() {
 	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(egressPolicy), webhook.DispatcherOptions{
 		// Subscriptions bound to a service account receive only events whose
 		// object the account may read (RBA-08).
-		Access:     user.ServiceAccountAccess{Repo: repos.ServiceAccounts},
+		Access: user.ServiceAccountAccess{Repo: repos.ServiceAccounts},
+		// Events without client_id/site_id in the payload are scoped by
+		// the CIs and assets they reference.
+		Objects:    objectResolverOf(auditPool),
 		Deliveries: repos.WebhookDeliveries,
 		// The retry worker runs under its operator switch below (OPS-02).
 		PollInterval: -1,
@@ -986,6 +989,16 @@ func emitterOf(pool *pgxpool.Pool) events.Emitter {
 		return nil
 	}
 	return events.NewPGEmitter(pool)
+}
+
+// objectResolverOf resolves the objects of webhook events in PostgreSQL;
+// without a database (--no-db) bound subscriptions receive only events whose
+// payload carries the scope.
+func objectResolverOf(pool *pgxpool.Pool) webhook.ObjectResolver {
+	if pool == nil {
+		return nil
+	}
+	return webhook.NewPGObjectResolver(pool)
 }
 
 // dekRotator adapts the credential store to the rotation runs.

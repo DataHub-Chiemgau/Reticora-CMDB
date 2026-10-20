@@ -238,11 +238,20 @@ func TestDispatcherDefaultClientBlocksInternalDestinations(t *testing.T) {
 	}
 }
 
-// fakeAccess grants read rights per service account, permission and client.
+// fakeAccess grants read rights per service account, permission and client;
+// the client "*" stands for an event of unknown scope.
 type fakeAccess map[string]bool
 
-func (f fakeAccess) CanReadEvent(_ context.Context, _, serviceAccountID, permission, clientID, _ string) (bool, error) {
-	return f[serviceAccountID+"|"+permission+"|"+clientID], nil
+func (f fakeAccess) CanReadEvent(_ context.Context, _, serviceAccountID, permission string, objects []ObjectScope) (bool, error) {
+	if objects == nil {
+		return f[serviceAccountID+"|"+permission+"|*"], nil
+	}
+	for _, o := range objects {
+		if !f[serviceAccountID+"|"+permission+"|"+o.ClientID] {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // TestDispatcherFiltersBoundSubscriptions covers WP-069 (RBA-08): a

@@ -271,6 +271,18 @@ func operatorHandler(opts *Options) *operator.Handler {
 	return h
 }
 
+// apiKeyHandler builds the api-keys resource with the same owner and
+// service-account resolvers as the API key service in cmd/server, so that
+// rotation, revocation and service-account binding are checked against the
+// key holder's rights (AUT-04, RBA-08).
+func apiKeyHandler(repos *Repositories) *identity.APIKeyHandler {
+	h := identity.NewAPIKeyHandler(repos.APIKeys).WithOwnerAccess(repos.Permission)
+	if repos.ServiceAccounts != nil {
+		h.WithServiceAccountAccess(user.ServiceAccountAccess{Repo: repos.ServiceAccounts})
+	}
+	return h
+}
+
 // invitationHandler builds the invitations (TLC-03); with an IdP admin
 // client the acceptance creates the account.
 func invitationHandler(repos *Repositories, opts *Options) *user.InvitationHandler {
@@ -393,7 +405,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
-		identity.NewAPIKeyHandler(repos.APIKeys),
+		apiKeyHandler(&repos),
 		user.NewServiceAccountHandler(repos.ServiceAccounts),
 		invitationHandler(&repos, &opts),
 		entitlement.NewHandler(opts.Entitlements),

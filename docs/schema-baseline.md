@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000144_tenant_truncate_guard
+Stand: Migration 000146_document_window_orgwide_links
 
 ## Prüfung
 
@@ -146,17 +146,44 @@ Das Verhalten der Policies prüft `TestRLSMatrix`
 Mandantentabelle mit echten Anweisungen der App-Rolle: Prinzipale mit Org-,
 Client-, Site-, Team- und kombiniertem Scope sowie eine fremde Organisation ×
 SELECT/INSERT/UPDATE/DELETE × Zeilen in und außerhalb des Scopes, org-weite
-Zeilen (Scope-Spalte NULL) und globale Katalogzeilen. Org-weite und globale
-Zeilen dürfen sichtbar sein, gescopte Prinzipale dürfen sie aber weder
-anlegen noch ändern, löschen oder durch Setzen ihres Scopes übernehmen
-(TEN-05). Dafür ergänzt Migration 000079 je Tabelle, deren `ALL`-Policy mehr
-zeigt als sie schreiben lässt, restriktive Policies `<tabelle>_scoped_update`
-und `<tabelle>_scoped_delete` mit dem WITH-CHECK-Ausdruck als USING. Die
-Testzeilen werden mit `session_replication_role = replica` synthetisiert
-(ohne Fremdschlüssel und Trigger, RLS bleibt aktiv); Tabellen, deren Policy
-den Scope über eine Unterabfrage erbt, prüft die Matrix nur auf
-Organisationsebene, ihren Scope decken `module_object_integration_test.go`
-und `team_scope_integration_test.go` ab.
+Zeilen (Scope-Spalte NULL) und globale Katalogzeilen. Die Lesesemantik ist
+strikt gepinnt (TEN-05): Org-weite Zeilen sind für gescopte Prinzipale
+sichtbar, globale Zeilen für alle (Ausnahme `job`: Systemjobs nur mit
+`app.system`, `matrixHiddenGlobalRows`). Gescopte Prinzipale dürfen org-weite
+Zeilen aber weder anlegen noch ändern, löschen oder durch Setzen ihres Scopes
+übernehmen (TEN-05). Dafür ergänzt Migration 000079 je Tabelle, deren
+`ALL`-Policy mehr zeigt als sie schreiben lässt, restriktive Policies
+`<tabelle>_scoped_update` und `<tabelle>_scoped_delete` mit dem
+WITH-CHECK-Ausdruck als USING. Die Testzeilen werden mit
+`session_replication_role = replica` synthetisiert (ohne Fremdschlüssel und
+Trigger, RLS bleibt aktiv). Tabellen, deren Policy den Scope über eine
+Unterabfrage erbt (`document`, `maintenance_window`, `review_item`,
+`training_assignment`), prüft die Matrix ebenfalls mit allen Prinzipalen
+(WP-353, F-354): Ihre Zeilen entstehen über echte Elternzeilen (CIs mit
+Client und Standort, Benutzer mit Teammitgliedschaften) bei aktiven Triggern,
+einschließlich geteilter, einseitig verlinkter, unverlinkter und nur mit
+org-weiten CIs verlinkter Zeilen; eine neue Tabelle dieser Art lässt die
+Matrix scheitern, bis sie in `inheritedModels` modelliert ist.
+
+### Abgeleiteter Scope der Modultabellen (WP-028, WP-353)
+
+`ticket`, `ticket_comment`, `document_link`, `maintenance_window_ci`
+(Migration 000064) und `disposal_record` (Migration 000145) leiten
+`client_id` und `site_id` per Trigger aus dem referenzierten Objekt ab
+(Entsorgung: Client des Assets und Standort seiner Location, ohne Asset aus
+dem CI) und folgen dessen Verschiebung; `disposal_record` bleibt
+revisionssicher, der Append-only-Trigger lässt nur diese Neuableitung durch
+die Propagationstrigger zu. Bewusste Abweichungen von WP-028 AK1:
+
+- `key_assignment` hat nur `client_id`: `key_item` trägt keinen Standort
+  (Freitext `location` aus Migration 000050), ein `site_id` ist nicht
+  ableitbar.
+- `document` und `maintenance_window` haben keine eigene `client_id`: Sie
+  sind Mehrobjektzeilen, ihr Scope ergibt sich aus den Links
+  (`document_link`, `maintenance_window_ci`). Gescopte Prinzipale ändern oder
+  löschen sie nur, wenn jeder Link in ihrem Schreib-Scope liegt (Migrationen
+  000139 und 000146; ein Link auf ein org-weites Objekt zählt nicht, E-09),
+  und legen keine unverlinkten an (WP-341).
 
 Globale Kataloge ohne Org-Spalte sind nach E-10 eine dokumentierte Ausnahme,
 keine Lücke: Sie werden nur durch Migrationen gepflegt und sind für die
@@ -239,7 +266,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `discovery_job` | ja | ja | discovery_job_isolation (ALL) |
 | `discovery_result` | ja | ja | discovery_result_isolation (ALL), discovery_result_scoped_delete (DELETE), discovery_result_scoped_update (UPDATE) |
 | `discovery_scope` | ja | ja | discovery_scope_isolation (ALL), discovery_scope_scoped_delete (DELETE), discovery_scope_scoped_update (UPDATE) |
-| `disposal_record` | ja | ja | disposal_record_isolation (ALL) |
+| `disposal_record` | ja | ja | disposal_record_isolation (ALL), disposal_record_scoped_delete (DELETE), disposal_record_scoped_update (UPDATE) |
 | `document` | ja | ja | document_scoped_delete (DELETE), document_scoped_insert (INSERT), document_scoped_update (UPDATE), document_tenant_isolation (ALL) |
 | `document_link` | ja | ja | document_link_scoped_delete (DELETE), document_link_scoped_update (UPDATE), document_link_tenant_isolation (ALL) |
 | `endpoint_agent` | ja | ja | endpoint_agent_isolation (ALL), endpoint_agent_scoped_delete (DELETE), endpoint_agent_scoped_update (UPDATE) |

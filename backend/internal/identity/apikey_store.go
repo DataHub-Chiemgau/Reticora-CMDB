@@ -164,6 +164,26 @@ func (s *PGAPIKeyStore) List(ctx context.Context, orgID string) ([]StoredAPIKey,
 	return keys, err
 }
 
+// Get returns a key of the organization without its hash; an unknown or
+// foreign key is ErrAPIKeyNotFound.
+func (s *PGAPIKeyStore) Get(ctx context.Context, orgID, id string) (*StoredAPIKey, error) {
+	var key *StoredAPIKey
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		found, err := scanAPIKey(tx.QueryRow(ctx, `SELECT `+apiKeyColumns+` FROM api_key
+			WHERE organization_id = $1 AND id = $2`, orgID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAPIKeyNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("read api_key: %w", err)
+		}
+		found.KeyHash = ""
+		key = found
+		return nil
+	})
+	return key, err
+}
+
 func lockAPIKey(ctx context.Context, tx pgx.Tx, orgID, id string) (*StoredAPIKey, error) {
 	key, err := scanAPIKey(tx.QueryRow(ctx, `SELECT `+apiKeyColumns+` FROM api_key
 		WHERE organization_id = $1 AND id = $2 FOR UPDATE`, orgID, id))
@@ -343,6 +363,19 @@ func (m *MemoryAPIKeyStore) find(orgID, id string) *StoredAPIKey {
 		}
 	}
 	return nil
+}
+
+// Get implements APIKeyManager.
+func (m *MemoryAPIKeyStore) Get(_ context.Context, orgID, id string) (*StoredAPIKey, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := m.find(orgID, id)
+	if k == nil {
+		return nil, ErrAPIKeyNotFound
+	}
+	c := cloneAPIKey(k)
+	c.KeyHash = ""
+	return c, nil
 }
 
 // Revoke implements APIKeyManager.

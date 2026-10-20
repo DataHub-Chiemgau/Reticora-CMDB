@@ -32,9 +32,6 @@ go;backend/internal/discovery;TestAuditT3ResurrectedNewKeepsClientAndIdentity;F-
 go;backend/internal/discovery;TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices;F-030
 go;backend/internal/discovery;TestAuditZonedScopeTargetRefused;F-108
 go;backend/internal/history;TestAuditT3HistoryIncludesLocationChange;F-093
-go;backend/internal/identity;TestAuditT2APIKeyRotateRevokeOnlyByEntitledCaller;F-006
-go;backend/internal/identity;TestAuditT2KeyBindingNeverBroadensCreatorScope;F-007
-go;backend/internal/identity;TestAuditT2ServiceAccountRolesWithinCallerRights;F-008
 go;backend/internal/iga;TestAuditT1ApprovalNeverLosesTheProvisioningTask;F-056
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
 go;backend/internal/ipam;TestAuditT3VLANReferenceMustBeVisible;F-088
@@ -68,12 +65,9 @@ go;backend/internal/server;TestAuditT2EntitlementQuotasEnforced;F-072
 go;backend/internal/server;TestAuditT2EntitlementRackViewGated;F-070
 go;backend/internal/server;TestAuditT2ListsAreCursorPages;F-075
 go;backend/internal/server;TestAuditT2RBA01KeysGateCITypesAndNotificationChannels;F-067
-go;backend/internal/server;TestAuditT2ServiceAccountRoleAssignmentNeedsRoleManage;F-008
 go;backend/internal/server;TestAuditT3HealthRefreshRunsInG1;F-087
 go;backend/internal/server;TestAuditT3OverrideRefusesReservedNames;F-092
 go;backend/internal/server;TestAuditT3ResolvedByIsThePrincipal;F-091
-go;backend/internal/signup;TestAuditT2FirstOrgAdminAccountRequiresMFA;F-005
-go;backend/internal/signup;TestAuditT2RealmAdminGroupRequiresMFA;F-005
 go;backend/internal/tenant/rls;TestAuditT1RepositoryErrorsAreSanitized;F-047
 go;backend/internal/tenant/rls;TestAuditT1ScopeRefusalsAreNot5xx;F-058 F-161
 go;backend/internal/tenant/rls;TestAuditT1SiteScopeOfLocatedTables;F-053
@@ -88,7 +82,6 @@ go;backend/internal/user;TestAuditDefectInvitationGrantCeiling;F-015
 go;backend/internal/user;TestAuditDefectRoleAssignmentGrantCeiling;F-015
 go;backend/internal/user;TestAuditT2ForeignDeactivationRevokesNothing;F-060
 go;backend/internal/webhook;TestAuditDefectWebhookConsumerKeepsEventsOnTransientErrors;F-151
-go;backend/internal/webhook;TestAuditT2BoundSubscriptionGetsOnlyReadableClientEvents;F-009
 go;collector/collectorcmd;TestAuditClassifiedDeviceNotUploadedAsFallback;F-030
 go;collector/collectorcmd;TestAuditCollectorEnrollsFromEnvironment;F-101
 go;collector/collectorcmd;TestAuditCollectorRenewsCertificateAt60Percent;F-026

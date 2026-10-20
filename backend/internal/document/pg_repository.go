@@ -82,11 +82,13 @@ const (
 	// documentWritable admits a document for UPDATE and DELETE (WP-341,
 	// migration 000139): an org-wide principal writes every document; a
 	// principal restricted in the client or site scope only a linked one whose
-	// links it sees completely, so neither a document shared with another
-	// client nor an unlinked (org-wide) one is writable (E-09).
+	// links it sees completely and may write (client and site in its scope,
+	// migration 000146), so neither a document shared with another client or
+	// linked to an org-wide object nor an unlinked (org-wide) one is writable
+	// (E-09).
 	documentWritable = "(" + database.OrgWideScopeSQL +
 		" OR (document.link_count > 0 AND document.link_count = (SELECT count(*) FROM document_link" +
-		" WHERE document_link.document_id = document.id AND " + linkVisible + ")))"
+		" WHERE document_link.document_id = document.id AND " + linkVisible + " AND " + database.ScopedWriteSQL + ")))"
 )
 
 // requireVisible fails with "not found" when the written row of table does not

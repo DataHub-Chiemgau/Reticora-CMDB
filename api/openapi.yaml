@@ -4336,6 +4336,13 @@ paths:
         permissions must be held by the caller; at use the key grants the
         intersection of its permissions and its owner's current rights, in
         the owner's scope. API keys cannot create keys.
+
+        A key bound to a service account (`service_account_id`, RBA-08) acts
+        with the account's rights. The account must exist in the caller's
+        organization (otherwise 404), and what the key would grant through
+        it, the requested permissions within the account's grants, must lie
+        within the caller's own scope; otherwise 403. A deactivated account's
+        permissions are then required organization-wide.
       requestBody:
         required: true
         content:
@@ -4355,6 +4362,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '422':
           description: Name, permissions, expiry or environment invalid
           content:
@@ -4368,6 +4377,12 @@ paths:
       operationId: revokeAPIKey
       tags: [API Keys]
       summary: Revoke an API key at once
+      description: |
+        Allowed to the key's owner (the user who created a key not bound to a
+        service account) or to a caller holding every permission of the key
+        in at least the scope in which the key's holder (owner or service
+        account) holds it; otherwise 403 and the key stays unchanged. A key
+        of another organization is 404.
       parameters:
         - $ref: '#/components/parameters/ResourceID'
       responses:
@@ -4391,6 +4406,13 @@ paths:
         Issues a successor with the same name, permissions, owner, environment
         and expiry. The previous key stays valid until the end of the overlap
         (default 24 hours, at most 7 days) or its own earlier expiry (SEC-06).
+
+        The successor's plaintext is returned, so only the key's owner (the
+        user who created a key not bound to a service account) or a caller
+        holding every permission of the key in at least the scope in which
+        the key's holder (owner or service account) holds it may rotate;
+        otherwise 403 and the key stays unchanged. A key of another
+        organization is 404.
       parameters:
         - $ref: '#/components/parameters/ResourceID'
       requestBody:
@@ -8308,6 +8330,19 @@ paths:
       operationId: setServiceAccountRoles
       tags: [Service Accounts]
       summary: Replace the role assignments of a service account
+      description: |
+        Assigning roles is managing roles and needs `role:manage`, as for
+        users (RBA-08); the other service-account operations stay on
+        `user:manage`/`user:read`.
+
+        Grant ceiling: every assignment of the new list (role, optionally
+        limited by `scope_client_id`/`scope_site_id`) must lie within the
+        caller's rights, each of the role's permissions held by the caller in
+        a scope covering the assignment's scope; every existing assignment
+        missing from the new list is removed and must lie within the caller's
+        rights as well. Otherwise 403 naming the permissions not covered (and
+        the assignment, for a removal); the assignments stay unchanged. A
+        service account of another organization is 404.
       parameters:
         - $ref: '#/components/parameters/ResourceID'
       requestBody:
@@ -13548,7 +13583,11 @@ components:
           type: string
           description: >-
             Binds the subscription to a service account (RBA-08): it then
-            receives only events whose object the account may read.
+            receives only events whose objects the account may read; every
+            CI or asset an event references must be readable, objects without
+            client or site count as readable like under RLS. An event whose
+            scope cannot be determined reaches the subscription only when the
+            account reads org-wide.
         created_at:
           type: string
           format: date-time
@@ -13580,7 +13619,11 @@ components:
           type: string
           description: >-
             Binds the subscription to a service account (RBA-08): it then
-            receives only events whose object the account may read.
+            receives only events whose objects the account may read; every
+            CI or asset an event references must be readable, objects without
+            client or site count as readable like under RLS. An event whose
+            scope cannot be determined reaches the subscription only when the
+            account reads org-wide.
 
     WebhookDelivery:
       type: object

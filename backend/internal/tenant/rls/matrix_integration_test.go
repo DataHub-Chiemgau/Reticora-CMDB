@@ -16,19 +16,12 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
-// tri is the expected outcome of a read: rows outside the principal's scope
-// must stay invisible, rows inside must be visible; org-wide rows (scope
-// column NULL) and global catalog rows (organization_id NULL) may be shown
-// read-only, so the matrix accepts both.
-type tri int
-
-const (
-	no tri = iota
-	maybe
-	yes
-)
-
-func and(a, b tri) tri { return min(a, b) }
+// matrixHiddenGlobalRows lists the tables whose global rows (organization_id
+// NULL) no tenant principal reads; every other global row is visible to
+// every principal (read-only).
+var matrixHiddenGlobalRows = map[string]string{
+	"job": "system jobs of the scheduler, readable only with app.system (JOB-02)",
+}
 
 // matrixPrincipal is one tenant context of the matrix: organization plus
 // client, site and team scope (nil = all of the organization, TEN-04).
@@ -38,20 +31,12 @@ type matrixPrincipal struct {
 	scope map[string][]string // client, site, team
 }
 
-func (p *matrixPrincipal) scoped() bool { return len(p.scope) > 0 }
-
 func gucList(ids []string) string { return strings.Join(ids, ",") }
 
-func dimRead(scope []string, v string) tri {
-	switch {
-	case scope == nil:
-		return yes
-	case v == "":
-		return maybe
-	case slices.Contains(scope, v):
-		return yes
-	}
-	return no
+// dimRead pins the read semantics of TEN-05: a scoped principal sees rows of
+// its scope and org-wide rows (NULL), nothing else.
+func dimRead(scope []string, v string) bool {
+	return scope == nil || v == "" || slices.Contains(scope, v)
 }
 
 // dimWrite: a scoped principal may neither create nor change nor delete
@@ -60,32 +45,27 @@ func dimWrite(scope []string, v string) bool {
 	return scope == nil || (v != "" && slices.Contains(scope, v))
 }
 
-func (p *matrixPrincipal) read(tbl *matrixTable, r scopeRow) tri {
-	org := no
+func (p *matrixPrincipal) read(tbl *matrixTable, r scopeRow) bool {
 	switch r.org {
 	case p.org:
-		org = yes
 	case "":
-		org = maybe
+		if _, hidden := matrixHiddenGlobalRows[tbl.name]; hidden {
+			return false
+		}
+	default:
+		return false
 	}
-	if tbl.inherited {
-		return org
-	}
-	res := org
 	for _, dim := range scopeDimensions {
-		if len(tbl.scope[dim]) > 0 {
-			res = and(res, dimRead(p.scope[dim], r.dims[dim]))
+		if len(tbl.scope[dim]) > 0 && !dimRead(p.scope[dim], r.dims[dim]) {
+			return false
 		}
 	}
-	return res
+	return true
 }
 
 func (p *matrixPrincipal) write(tbl *matrixTable, r scopeRow) bool {
 	if r.org != p.org {
 		return false
-	}
-	if tbl.inherited {
-		return true
 	}
 	for _, dim := range scopeDimensions {
 		if len(tbl.scope[dim]) > 0 && !dimWrite(p.scope[dim], r.dims[dim]) {
@@ -101,13 +81,28 @@ func rlsDenied(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "42501" && strings.Contains(pgErr.Message, "row-level security")
 }
 
+// scopeDenied reports whether err is a row level security violation or a
+// rejection by a scope trigger (42501, e.g. require_visible_parent or
+// require_linked_row of migration 000139).
+func scopeDenied(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42501"
+}
+
 // TestRLSMatrix covers WP-065 (TEN-09, TST-02, CH25): for every tenant
 // table it checks SELECT, INSERT, UPDATE and DELETE of the application role
 // against rows of every scope combination (organization A and B, clients,
 // sites and teams in and out of scope, org-wide rows with NULL scope columns,
 // global catalog rows) for principals with organization, client, site,
 // team and combined scopes. UPDATE also tries to move a row out of the
-// principal's scope and to claim an org-wide row.
+// principal's scope and to claim an org-wide row. Reads are pinned exactly
+// (TEN-05): org-wide rows are visible to scoped principals, global rows to
+// everyone except in matrixHiddenGlobalRows.
+//
+// Inherited tables (document, maintenance_window, review_item,
+// training_assignment) run with every principal too (WP-353, F-354): their
+// rows are seeded through real parents with active triggers, shared,
+// one-sided, unlinked and org-wide-linked rows included (inheritedModels).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL).
 func TestRLSMatrix(t *testing.T) {
@@ -117,32 +112,25 @@ func TestRLSMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("maintenance pool: %v", err)
 	}
-	defer admin.Close()
+	t.Cleanup(admin.Close)
 	requireMigrated(ctx, t, admin)
 
-	var (
-		orgA, orgB = matrixUUID(), matrixUUID()
-		c1, c2, cB = matrixUUID(), matrixUUID(), matrixUUID()
-		s1, s2, sB = matrixUUID(), matrixUUID(), matrixUUID()
-		t1, t2, tB = matrixUUID(), matrixUUID(), matrixUUID()
-	)
+	ids := newMatrixIDs()
 	row := func(name, org, client, site, team string) scopeRow {
 		return scopeRow{name: name, org: org, dims: map[string]string{"client": client, "site": site, "team": team}}
 	}
 	seeds := []scopeRow{
-		row("A/c1/s1/t1", orgA, c1, s1, t1),
-		row("A/c2/s2/t2", orgA, c2, s2, t2),
-		row("A/c1/s2/t1", orgA, c1, s2, t1),
-		row("B/cB/sB/tB", orgB, cB, sB, tB),
+		row("A/c1/s1/t1", ids.orgA, ids.c1, ids.s1, ids.t1),
+		row("A/c2/s2/t2", ids.orgA, ids.c2, ids.s2, ids.t2),
+		row("A/c1/s2/t1", ids.orgA, ids.c1, ids.s2, ids.t1),
+		row("B/cB/sB/tB", ids.orgB, ids.cB, ids.sB, ids.tB),
 	}
-	principals := []*matrixPrincipal{
-		{name: "org A", org: orgA},
-		{name: "client c1", org: orgA, scope: map[string][]string{"client": {c1}}},
-		{name: "site s1", org: orgA, scope: map[string][]string{"site": {s1}}},
-		{name: "team t1", org: orgA, scope: map[string][]string{"team": {t1}}},
-		{name: "clients c1,c2 + site s1", org: orgA, scope: map[string][]string{"client": {c1, c2}, "site": {s1}}},
-		{name: "org B", org: orgB},
-	}
+	principals := matrixPrincipals(ids)
+	// The inherited tables use committed parent rows with ids of their own,
+	// apart from the synthesized organization, client and site rows.
+	world := seedMatrixWorld(ctx, t, admin, newMatrixIDs())
+	models := inheritedModels(world.ids)
+	worldPrincipals := matrixPrincipals(world.ids)
 
 	tables := loadMatrixTables(ctx, t, admin)
 	if len(tables) < 50 {
@@ -156,8 +144,29 @@ func TestRLSMatrix(t *testing.T) {
 			}
 			defer conn.Release()
 			m := &matrixRun{t: t, ctx: ctx, conn: conn, tbl: tbl}
-			m.run(seeds, principals)
+			if !tbl.inherited {
+				m.run(seeds, principals)
+				return
+			}
+			model := models[tbl.name]
+			if model == nil {
+				t.Fatalf("%s takes its scope from another table; model it in inheritedModels", tbl.name)
+			}
+			m.runInherited(world, model, worldPrincipals)
 		})
+	}
+}
+
+// matrixPrincipals are the principals of the matrix: organization A,
+// client c1, site s1, team t1, clients c1 and c2 with site s1, organization B.
+func matrixPrincipals(ids matrixIDs) []*matrixPrincipal {
+	return []*matrixPrincipal{
+		{name: "org A", org: ids.orgA},
+		{name: "client c1", org: ids.orgA, scope: map[string][]string{"client": {ids.c1}}},
+		{name: "site s1", org: ids.orgA, scope: map[string][]string{"site": {ids.s1}}},
+		{name: "team t1", org: ids.orgA, scope: map[string][]string{"team": {ids.t1}}},
+		{name: "clients c1,c2 + site s1", org: ids.orgA, scope: map[string][]string{"client": {ids.c1, ids.c2}, "site": {ids.s1}}},
+		{name: "org B", org: ids.orgB},
 	}
 }
 
@@ -252,9 +261,6 @@ func (m *matrixRun) run(seeds []scopeRow, principals []*matrixPrincipal) {
 	all = seeded
 
 	for _, p := range principals {
-		if tbl.inherited && p.scoped() {
-			continue
-		}
 		m.exec("SET LOCAL ROLE " + database.DefaultAppRole)
 		m.exec(`SELECT set_config('app.org_id', $1, true), set_config('app.user_id', '', true),
 			set_config('app.client_scope', $2, true), set_config('app.site_scope', $3, true),
@@ -284,9 +290,9 @@ func (m *matrixRun) checkPrincipal(p *matrixPrincipal, all []scopeRow) {
 		for _, ctid := range m.order {
 			r := m.rows[ctid]
 			switch want, got := p.read(tbl, r), slices.Contains(visible, ctid); {
-			case want == yes && !got:
+			case want && !got:
 				fail("SELECT", r.name, "row in scope is invisible")
-			case want == no && got:
+			case !want && got:
 				fail("SELECT", r.name, "row outside the scope is visible")
 			}
 		}
@@ -376,7 +382,7 @@ func (m *matrixRun) checkUpdate(p *matrixPrincipal, ctid string, r scopeRow, wan
 				fail("UPDATE", r.name, "global row claimed for the organization (err %v)", err)
 			}
 		}
-		if r.org != p.org || tbl.inherited {
+		if r.org != p.org {
 			return
 		}
 		for _, dim := range scopeDimensions {
@@ -394,14 +400,137 @@ func (m *matrixRun) checkUpdate(p *matrixPrincipal, ctid string, r scopeRow, wan
 			fail("UPDATE", r.name, "row moved to another organization (%d rows, err %v)", n, err)
 		}
 	}
-	if tbl.inherited {
-		return
-	}
 	for _, dim := range scopeDimensions {
 		if cols := movable(dim); len(cols) > 0 && p.scope[dim] != nil {
 			if n, err = update(cols, matrixUUID()); !rlsDenied(err) {
 				fail("UPDATE", r.name, "row moved out of the %s scope (%d rows, err %v)", dim, n, err)
 			}
 		}
+	}
+}
+
+// runInherited seeds the rows of an inherited table on the parents of w with
+// active triggers and checks every principal against model. INSERT attempts
+// run in transactions of their own on a second connection and are rolled
+// back after their deferred triggers fired.
+func (m *matrixRun) runInherited(w *matrixWorld, model *inheritedModel, principals []*matrixPrincipal) {
+	t, tbl := m.t, m.tbl
+	var err error
+	if m.tx, err = m.conn.Begin(m.ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = m.tx.Rollback(m.ctx) }()
+	rowIDs := make([]string, len(model.rows))
+	for i, r := range model.rows {
+		if rowIDs[i], err = model.insert(m.ctx, m.tx, w, r, false); err != nil {
+			t.Fatalf("seed %s: %v", r.name, err)
+		}
+	}
+	// Deferred constraint triggers of the seed rows run now, as the
+	// maintenance role.
+	m.exec("SET CONSTRAINTS ALL IMMEDIATE")
+	insertOK := model.insertOK
+	if insertOK == nil {
+		insertOK = model.write
+	}
+	other, err := pgx.ConnectConfig(m.ctx, m.conn.Conn().Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Close(m.ctx) }()
+	ident := pgx.Identifier{tbl.name}.Sanitize()
+	const setScope = `SELECT set_config('app.org_id', $1, true), set_config('app.user_id', '', true),
+		set_config('app.client_scope', $2, true), set_config('app.site_scope', $3, true),
+		set_config('app.team_scope', $4, true)`
+
+	for _, p := range principals {
+		m.exec("SET LOCAL ROLE " + database.DefaultAppRole)
+		m.exec(setScope, p.org, gucList(p.scope["client"]), gucList(p.scope["site"]), gucList(p.scope["team"]))
+		fail := func(cmd, row, format string, args ...any) {
+			t.Helper()
+			t.Errorf("%s as %s on %s: %s", cmd, p.name, row, fmt.Sprintf(format, args...))
+		}
+
+		rows, err := m.tx.Query(m.ctx, `SELECT id::text FROM `+ident+` WHERE id = ANY ($1::uuid[])`, rowIDs)
+		if err != nil {
+			t.Fatalf("SELECT as %s: %v", p.name, err)
+		}
+		visible, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatalf("SELECT as %s: %v", p.name, err)
+		}
+		for i, r := range model.rows {
+			switch want, got := model.read(w, p, r), slices.Contains(visible, rowIDs[i]); {
+			case want && !got:
+				fail("SELECT", r.name, "row in scope is invisible")
+			case !want && got:
+				fail("SELECT", r.name, "row outside the scope is visible")
+			}
+		}
+
+		for _, r := range model.rows {
+			// SET CONSTRAINTS ALL IMMEDIATE fires the deferred triggers
+			// before the rollback (E-09: require_linked_row rejects an
+			// unlinked row at commit).
+			err := pgx.BeginFunc(m.ctx, other, func(tx pgx.Tx) error {
+				if _, e := tx.Exec(m.ctx, "SET LOCAL ROLE "+database.DefaultAppRole); e != nil {
+					return e
+				}
+				if _, e := tx.Exec(m.ctx, setScope, p.org, gucList(p.scope["client"]), gucList(p.scope["site"]), gucList(p.scope["team"])); e != nil {
+					return e
+				}
+				if _, e := model.insert(m.ctx, tx, w, r, true); e != nil {
+					return e
+				}
+				if _, e := tx.Exec(m.ctx, "SET CONSTRAINTS ALL IMMEDIATE"); e != nil {
+					return e
+				}
+				return errRollback
+			})
+			if errors.Is(err, errRollback) {
+				err = nil
+			}
+			switch want := insertOK(w, p, r); {
+			case want && err != nil:
+				fail("INSERT", r.name, "refused: %v", err)
+			case !want && !scopeDenied(err):
+				fail("INSERT", r.name, "not refused by the scope (err %v)", err)
+			}
+		}
+
+		for i, r := range model.rows {
+			want := model.write(w, p, r)
+			n, err := m.attempt(func() (int64, error) {
+				tag, e := m.tx.Exec(m.ctx, `UPDATE `+ident+` SET organization_id = organization_id WHERE id = $1`, rowIDs[i])
+				return tag.RowsAffected(), e
+			})
+			switch {
+			case want && (err != nil || n != 1):
+				fail("UPDATE", r.name, "row in scope not updated (%d rows, err %v)", n, err)
+			case !want && !scopeDenied(err) && (err != nil || n != 0):
+				fail("UPDATE", r.name, "row outside the write scope updated (%d rows, err %v)", n, err)
+			}
+			if want {
+				if n, err = m.attempt(func() (int64, error) {
+					tag, e := m.tx.Exec(m.ctx, `UPDATE `+ident+` SET organization_id = $2 WHERE id = $1`, rowIDs[i], matrixUUID())
+					return tag.RowsAffected(), e
+				}); !rlsDenied(err) {
+					fail("UPDATE", r.name, "row moved to another organization (%d rows, err %v)", n, err)
+				}
+			}
+			n, err = m.attempt(func() (int64, error) {
+				tag, e := m.tx.Exec(m.ctx, `DELETE FROM `+ident+` WHERE id = $1`, rowIDs[i])
+				return tag.RowsAffected(), e
+			})
+			switch {
+			case want && (err != nil || n != 1):
+				fail("DELETE", r.name, "row in scope not deleted (%d rows, err %v)", n, err)
+			case !want && err == nil && n != 0:
+				fail("DELETE", r.name, "row outside the write scope deleted")
+			case !want && err != nil && !scopeDenied(err):
+				fail("DELETE", r.name, "unexpected error %v", err)
+			}
+		}
+		m.exec("RESET ROLE")
 	}
 }

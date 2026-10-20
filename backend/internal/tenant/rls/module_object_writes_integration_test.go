@@ -4,9 +4,10 @@ package rls_test
 // PostgreSQL router (WP-341, F-004, F-048; TEN-05, TEN-06, TEN-09, E-09,
 // E-61). Both span several objects: a principal restricted in the client or
 // site scope changes, deletes or uploads to a row only when it sees all of
-// its links. A row shared with another client and an unlinked (org-wide)
-// row answer 404 and stay unchanged, including the other client's links
-// (no foreign key cascade); creating an unlinked row is refused with 403,
+// its links and may write every one of them. A row shared with another
+// client or with an org-wide object (WP-353, migration 000146) and an
+// unlinked (org-wide) row answer 404 and stay unchanged, including the other
+// client's and the org-wide links (no foreign key cascade); creating an unlinked row is refused with 403,
 // and linking an org-wide document does not take it away from other
 // clients. Org-wide principals are unchanged.
 //
@@ -92,7 +93,9 @@ func TestMaintenanceWindowWritesOutsideScope(t *testing.T) {
 			"title": title, "starts_at": "2030-01-01T00:00:00Z", "ends_at": "2030-01-01T02:00:00Z", "ci_ids": cis,
 		})
 	}
+	ciOrg := f.CI(t, f.OrgA, "", "t1-mw-org")
 	mixed := window(w.orgA, "t1-mw-mixed", ci1, ci2)
+	orgLinked := window(w.orgA, "t1-mw-org-linked", ci1, ciOrg)
 	orgWide := window(w.orgA, "t1-mw-orgwide")
 	ownOnly := window(w.orgA, "t1-mw-own", ci1)
 
@@ -102,6 +105,7 @@ func TestMaintenanceWindowWritesOutsideScope(t *testing.T) {
 	}{
 		{"window covering client-1 and client-2 CIs (WP-020 P1, WP-028 P1)", mixed, "t1-mw-mixed", ci2},
 		{"org-wide window without CIs (WP-028 P2, E-09)", orgWide, "t1-mw-orgwide", ""},
+		{"window covering a client-1 and an org-wide CI (WP-353, E-09)", orgLinked, "t1-mw-org-linked", ciOrg},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			code, body := w.do(client1, http.MethodPatch, "/api/v1/maintenance-windows/"+c.id, map[string]any{"title": "t1-changed-by-c1", "status": "cancelled"})
@@ -188,11 +192,15 @@ func TestDocumentWritesOutsideScope(t *testing.T) {
 	shared := doc("t1-doc-shared")
 	link(shared, "ci", ci1)
 	link(shared, "asset", asset2)
+	ciOrg := f.CI(t, f.OrgA, "", "t1-doc-org")
+	orgLinked := doc("t1-doc-org-linked")
+	link(orgLinked, "ci", ci1)
+	link(orgLinked, "ci", ciOrg)
 	orgWide := doc("t1-doc-orgwide")
 	orgWideCtl := doc("t1-doc-orgwide-ctl")
 	ownOnly := doc("t1-doc-own")
 	link(ownOnly, "ci", ci1)
-	for _, id := range []string{shared, orgWide} {
+	for _, id := range []string{shared, orgWide, orgLinked} {
 		if code, body := upload(w.orgA, id, "original-"+id); code != http.StatusOK {
 			t.Fatalf("setup upload as org admin: %d %s", code, trim(body))
 		}
@@ -235,6 +243,21 @@ func TestDocumentWritesOutsideScope(t *testing.T) {
 		}
 		if code, _ := w.do(client2, http.MethodGet, "/api/v1/documents/"+shared, nil); code != http.StatusOK {
 			t.Errorf("GET the shared document as client 2: %d, want 200", code)
+		}
+	})
+	t.Run("document linked to a client-1 and an org-wide CI (WP-353, E-09)", func(t *testing.T) {
+		if code, body := w.do(client1, http.MethodPatch, "/api/v1/documents/"+orgLinked, map[string]any{"title": "t1-renamed-by-c1"}); !refused(code) {
+			t.Errorf("PATCH as client 1: %d %s, want 403/404", code, trim(body))
+		}
+		uploadRefused(t, orgLinked)
+		if code, body := w.do(client1, http.MethodDelete, "/api/v1/documents/"+orgLinked, nil); !refused(code) {
+			t.Errorf("DELETE as client 1: %d %s, want 403/404", code, trim(body))
+		}
+		if got := w.scalar(`SELECT title || '|' || (SELECT count(*) FROM document_link WHERE document_id = $1 AND entity_id = $2)::text FROM document WHERE id = $1`, orgLinked, ciOrg); got != "t1-doc-org-linked|1" {
+			t.Errorf("title|org-wide links after the client-1 writes: %s, want t1-doc-org-linked|1", got)
+		}
+		if code, body := w.do(w.orgA, http.MethodPatch, "/api/v1/documents/"+orgLinked, map[string]any{"title": "t1-doc-org-linked-2"}); code != http.StatusOK {
+			t.Errorf("PATCH as org admin: %d %s, want 200", code, trim(body))
 		}
 	})
 	t.Run("org-wide unlinked document (WP-028 P2, TEN-05, E-09)", func(t *testing.T) {
