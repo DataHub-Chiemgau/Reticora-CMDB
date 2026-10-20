@@ -1,7 +1,12 @@
 package lifecycle_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"log/slog"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -111,4 +116,186 @@ func TestOfflineDetector(t *testing.T) {
 	if changes, err = d.RunOrg(bg, f.OrgA); err != nil || changes.Offline != 0 {
 		t.Errorf("with a 96 h organization interval: %+v %v", changes, err)
 	}
+}
+
+// TestOfflineDetectorOrgIsolation covers WP-383 (REC-09, LCY-05; F-108)
+// against PostgreSQL with two organizations, the failing one sorted first.
+// A scope whose target PostgreSQL cannot read as inet – an IPv6 zone, which
+// the API accepted before, or another malformed row – is skipped and logged
+// once per run as discovery.scope.invalid_target with its id; the
+// organization's other scopes still apply and its run succeeds. A failing
+// organization (here a last_seen_at that cannot be read) does not stop Run:
+// the CI of the organization sorted after it becomes unknown with
+// ci.offline, Run returns the joined error naming only the failing one, and
+// the totals count the organizations that succeeded.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestOfflineDetectorOrgIsolation(t *testing.T) {
+	f := scopetest.Seed(t, "7a")
+	bg := context.Background()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	first, second := f.OrgA, f.OrgB
+	if second < first {
+		first, second = second, first
+	}
+	var server string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&server); err != nil {
+		t.Fatal(err)
+	}
+	// Run checks every organization of the database: the clock is the real
+	// one, as in production.
+	now := time.Now().UTC()
+	ci := func(org, name, ip string, seen time.Duration) string {
+		t.Helper()
+		id := f.ID()
+		exec(`INSERT INTO ci (id, organization_id, ci_type_id, name, status, discovery_source, management_ip, is_manual, last_seen_at)
+			VALUES ($1, $2, $3, $4, 'active', 'snmp', $5::inet, false, $6)`, id, org, server, "wp383-"+name, ip, now.Add(-seen))
+		return id
+	}
+	status := func(id string) string {
+		t.Helper()
+		var s string
+		if err := f.Admin.QueryRow(bg, `SELECT status FROM ci WHERE id = $1`, id).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+
+	// Organization first: every scope runs hourly (offline after 3 h); the
+	// organization's default sweep of 24 h makes it 72 h.
+	collector := f.ID()
+	exec(`INSERT INTO collector (id, organization_id, name, status) VALUES ($1, $2, 'wp383', 'active')`, collector, first)
+	scopes := map[string]string{}
+	rows, err := f.Admin.Query(bg, `INSERT INTO discovery_scope (organization_id, collector_id, name, kind, target, schedule) VALUES
+		($1, $2, 'zoned-range', 'range', 'fe80::1%eth0-fe80::5%eth0', '1h'),
+		($1, $2, 'zoned-host', 'host', 'fe80::1%eth0', '1h'),
+		($1, $2, 'bad-cidr', 'cidr', '10.70.0.0/33', '1h'),
+		($1, $2, 'bad-range', 'range', '10.70.1.300-10.70.1.310', '1h'),
+		($1, $2, 'net', 'cidr', '10.70.2.0/24', '1h')
+		RETURNING name, id::text`, first, collector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var name, id string
+		if err = rows.Scan(&name, &id); err != nil {
+			t.Fatal(err)
+		}
+		scopes[name] = id
+	}
+	if rows.Close(); rows.Err() != nil || len(scopes) != 5 {
+		t.Fatalf("scopes %v: %v", scopes, rows.Err())
+	}
+	// Applied anyway (the zone dropped, the prefix clamped), the malformed
+	// scopes would set these CIs offline after 3 h; skipped, 72 h apply.
+	inZonedRange := ci(first, "in-zoned-range", "fe80::3", 10*time.Hour)
+	zonedHost := ci(first, "zoned-host", "fe80::1", 10*time.Hour)
+	inBadCIDR := ci(first, "in-bad-cidr", "10.70.0.5", 10*time.Hour)
+	inScope := ci(first, "in-scope", "10.70.2.5", 4*time.Hour)
+
+	logs := captureLogs(t)
+	d := lifecycle.NewOfflineDetector(f.App).WithClock(func() time.Time { return now })
+	changes, err := d.RunOrg(bg, first)
+	if err != nil {
+		t.Fatalf("RunOrg with malformed scope targets: %v", err)
+	}
+	if changes.Offline != 1 || changes.Online != 0 {
+		t.Errorf("changes = %+v, want 1 offline (the valid scope)", changes)
+	}
+	for id, want := range map[string]string{inZonedRange: "active", zonedHost: "active", inBadCIDR: "active", inScope: "unknown"} {
+		if got := status(id); got != want {
+			t.Errorf("CI %s: status %s, want %s", id, got, want)
+		}
+	}
+	checkWarnings := func(run string) {
+		t.Helper()
+		for name, id := range scopes {
+			want := 1
+			if name == "net" {
+				want = 0
+			}
+			if got := logs.invalidTarget(id, first); got != want {
+				t.Errorf("%s: scope %s (%s) logged %d times as discovery.scope.invalid_target, want %d", run, name, id, got, want)
+			}
+		}
+	}
+	checkWarnings("RunOrg")
+
+	// The failing organization: a CI whose last_seen_at cannot be read.
+	unreadable := ci(first, "unreadable", "10.70.2.6", time.Hour)
+	exec(`UPDATE ci SET last_seen_at = 'infinity' WHERE id = $1`, unreadable)
+	if _, err = d.RunOrg(bg, first); err == nil {
+		t.Fatal("control: RunOrg of the organization with the unreadable CI succeeded")
+	}
+	// Organization second: a CI last seen 400 h ago, overdue after 72 h.
+	stale := ci(second, "stale", "10.70.9.9", 400*time.Hour)
+
+	logs.reset()
+	changes, err = d.Run(bg)
+	if err == nil || !strings.Contains(err.Error(), "organization "+first+":") || strings.Contains(err.Error(), "organization "+second+":") {
+		t.Errorf("Run error = %v, want the joined error naming organization %s and not %s", err, first, second)
+	}
+	if got := status(stale); got != "unknown" {
+		t.Errorf("tenant isolation: the CI of organization %s last seen 400 h ago is %s after Run, want unknown", second, got)
+	}
+	var events int
+	if err = f.Admin.QueryRow(bg, `SELECT count(*) FROM event_outbox WHERE organization_id = $1 AND type = 'ci.offline' AND entity_id = $2`,
+		second, stale).Scan(&events); err != nil || events != 1 {
+		t.Errorf("ci.offline events of organization %s: %d (%v), want 1", second, events, err)
+	}
+	if changes.Offline < 1 {
+		t.Errorf("Run totals = %+v, want the CI set offline in organization %s counted", changes, second)
+	}
+	checkWarnings("Run")
+}
+
+// logCapture collects the JSON log records of slog's default logger.
+type logCapture struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (c *logCapture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.Write(p)
+}
+
+func (c *logCapture) reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.buf.Reset()
+}
+
+// invalidTarget counts the discovery.scope.invalid_target records of the
+// offline detector for scopeID of orgID.
+func (c *logCapture) invalidTarget(scopeID, orgID string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, line := range bytes.Split(c.buf.Bytes(), []byte("\n")) {
+		var rec map[string]any
+		if json.Unmarshal(line, &rec) != nil {
+			continue
+		}
+		if rec["event"] == "discovery.scope.invalid_target" && rec["scope_id"] == scopeID && rec["organization_id"] == orgID &&
+			rec["job"] == lifecycle.OfflineDetectorKind && rec["level"] == "WARN" {
+			n++
+		}
+	}
+	return n
+}
+
+func captureLogs(t *testing.T) *logCapture {
+	t.Helper()
+	c := &logCapture{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(c, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return c
 }

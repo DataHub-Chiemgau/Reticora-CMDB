@@ -10495,6 +10495,7 @@ export interface components {
       name?: string;
       /** @enum {string} */
       kind: 'cidr' | 'host' | 'range';
+      /** @description CIDR, IP address or host name, or "first-last" address range. IPv6 addresses carry no zone; a target with one (fe80::1%eth0) is refused with 422 on the field target. */
       target: string;
       client_id?: string;
       site_id?: string;
@@ -10511,6 +10512,7 @@ export interface components {
       name?: string;
       /** @enum {string} */
       kind?: 'cidr' | 'host' | 'range';
+      /** @description CIDR, IP address or host name, or "first-last" address range. IPv6 addresses carry no zone; a target with one (fe80::1%eth0) is refused with 422 on the field target. */
       target?: string;
       site_id?: string;
       vrf_id?: string;

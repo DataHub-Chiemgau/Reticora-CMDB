@@ -3,6 +3,8 @@ package discovery_test
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,5 +135,115 @@ func TestCollectorStatusModel(t *testing.T) {
 	}
 	if _, err = repo.Heartbeat(ctx, f.OrgA, "00000000-0000-4000-8000-000000000000"); err == nil || errors.Is(err, discovery.ErrCollectorDisabled) {
 		t.Fatalf("heartbeat of an unknown collector: %v", err)
+	}
+}
+
+// TestCollectorStatusRunIsolatesOrgs covers F-256 (COL-01, WP-143; WP-383)
+// against PostgreSQL with two organizations: the discovery license of the
+// one sorted first cannot be read. Run goes on, the silent collector of the
+// organization sorted after it becomes offline with collector.offline, Run
+// returns the joined error naming only the failing organization, and the
+// totals count the organizations that succeeded. A cancelled run stops at
+// once instead of failing every remaining organization.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestCollectorStatusRunIsolatesOrgs(t *testing.T) {
+	f := scopetest.Seed(t, "7c")
+	bg := context.Background()
+	repo := discovery.NewPGRepository(f.App)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	status := func(id string) string {
+		t.Helper()
+		var s string
+		if err := f.Admin.QueryRow(bg, `SELECT status FROM collector WHERE id = $1`, id).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	offlineEvents := func(org, id string) int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM event_outbox WHERE organization_id = $1 AND type = 'collector.offline' AND entity_id = $2`,
+			org, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	first, second := f.OrgA, f.OrgB
+	if second < first {
+		first, second = second, first
+	}
+	now := time.Now().UTC()
+	collector := func(org, name string) string {
+		t.Helper()
+		c := &discovery.Collector{OrganizationID: org, Name: name, Status: discovery.CollectorActive, Config: map[string]any{}}
+		if err := repo.RegisterCollector(f.OrgCtx(org), c); err != nil {
+			t.Fatal(err)
+		}
+		// Silent for ten minutes: offline after five.
+		exec(`UPDATE collector SET last_heartbeat_at = $2 WHERE id = $1`, c.ID, now.Add(-10*time.Minute))
+		return c.ID
+	}
+	colFirst, colSecond := collector(first, "wp383-first"), collector(second, "wp383-second")
+
+	// Only the organizations of the fixture are of interest: every other
+	// organization of the database fails its license check as well, so the
+	// run changes nothing of theirs.
+	licenseErr := errors.New("license service unavailable")
+	var asked []string
+	monitor := discovery.NewStatusMonitor(f.App).WithClock(func() time.Time { return now })
+	monitor.Licensed = func(_ context.Context, org string) (bool, error) {
+		asked = append(asked, org)
+		if org == second {
+			return true, nil
+		}
+		return false, licenseErr
+	}
+	changes, err := monitor.Run(bg)
+	if !errors.Is(err, licenseErr) || !strings.Contains(err.Error(), "organization "+first+": discovery license: "+licenseErr.Error()) ||
+		strings.Contains(err.Error(), "organization "+second+":") {
+		t.Errorf("Run error = %v, want the joined error naming the license error of organization %s and not %s", err, first, second)
+	}
+	if i, j := slices.Index(asked, first), slices.Index(asked, second); i < 0 || j < i {
+		t.Fatalf("license checks in the order %v, want %s before %s", asked, first, second)
+	}
+	if changes != (discovery.StatusChanges{Offline: 1}) {
+		t.Errorf("Run totals = %+v, want the collector of organization %s set offline and nothing else", changes, second)
+	}
+	if got := status(colSecond); got != discovery.CollectorOffline || offlineEvents(second, colSecond) != 1 {
+		t.Errorf("tenant isolation: the silent collector of organization %s is %s with %d collector.offline events after Run, want offline with 1",
+			second, got, offlineEvents(second, colSecond))
+	}
+	if got := status(colFirst); got != discovery.CollectorActive || offlineEvents(first, colFirst) != 0 {
+		t.Errorf("the collector of the failing organization %s is %s with %d collector.offline events, want untouched", first, got, offlineEvents(first, colFirst))
+	}
+
+	// Cancelled while the first organization is checked: the second is not
+	// reached, the error carries the cancellation once.
+	exec(`UPDATE collector SET status = 'active', last_heartbeat_at = $2 WHERE id = $1`, colSecond, now.Add(-10*time.Minute))
+	ctx, cancel := context.WithCancel(bg)
+	defer cancel()
+	asked = nil
+	monitor.Licensed = func(_ context.Context, org string) (bool, error) {
+		asked = append(asked, org)
+		if org == first {
+			cancel()
+		}
+		if org == second {
+			return true, nil
+		}
+		return false, licenseErr
+	}
+	changes, err = monitor.Run(ctx)
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, licenseErr) || strings.Count(err.Error(), context.Canceled.Error()) != 1 {
+		t.Errorf("cancelled Run error = %v, want the license error and the cancellation once", err)
+	}
+	if slices.Contains(asked, second) || changes != (discovery.StatusChanges{}) || status(colSecond) != discovery.CollectorActive {
+		t.Errorf("cancelled Run went on: asked %v, totals %+v, collector of %s %s", asked, changes, second, status(colSecond))
 	}
 }

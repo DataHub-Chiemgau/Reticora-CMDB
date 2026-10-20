@@ -2,6 +2,7 @@ package relationship
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -114,7 +115,9 @@ type CleanupResult struct {
 	Stale, Suppressed int
 }
 
-// Run cleans every organization.
+// Run cleans every organization. A failing organization does not stop the
+// others (F-108): Run returns the errors joined at the end, the totals
+// count the organizations that succeeded.
 func (c *Cleanup) Run(ctx context.Context) (CleanupResult, error) {
 	var total CleanupResult
 	var orgs []string
@@ -129,15 +132,21 @@ func (c *Cleanup) Run(ctx context.Context) (CleanupResult, error) {
 	if err != nil {
 		return total, fmt.Errorf("list organizations: %w", err)
 	}
+	var errs []error
 	for _, org := range orgs {
+		if ctx.Err() != nil {
+			errs = append(errs, ctx.Err())
+			break
+		}
 		r, oerr := c.RunOrg(ctx, org)
 		if oerr != nil {
-			return total, fmt.Errorf("organization %s: %w", org, oerr)
+			errs = append(errs, fmt.Errorf("organization %s: %w", org, oerr))
+			continue
 		}
 		total.Stale += r.Stale
 		total.Suppressed += r.Suppressed
 	}
-	return total, nil
+	return total, errors.Join(errs...)
 }
 
 // staleAge is max(7 days, 5 × interval).
@@ -167,6 +176,9 @@ func (c *Cleanup) RunOrg(ctx context.Context, orgID string) (CleanupResult, erro
 		if v, perr := time.ParseDuration(sweep); perr == nil && v >= 5*time.Minute {
 			fallback = v
 		}
+		if err := reportInvalidScopes(ctx, tx, orgID); err != nil {
+			return err
+		}
 		// Only discovery edges that nobody verified are candidates; the
 		// earliest possible deadline (7 days) bounds the query, suppressed
 		// edges are always candidates.
@@ -181,10 +193,11 @@ func (c *Cleanup) RunOrg(ctx context.Context, orgID string) (CleanupResult, erro
 			FROM ci_relationship r
 			JOIN ci src ON src.id = r.source_ci_id
 			LEFT JOIN discovery_scope s ON s.organization_id = r.organization_id AND s.enabled AND (
-				(s.kind = 'cidr' AND src.management_ip <<= s.target::inet)
-				OR (s.kind = 'host' AND (host(src.management_ip) = s.target OR lower(src.hostname) = s.target OR lower(src.fqdn) = s.target))
-				OR (s.kind = 'range' AND family(src.management_ip) = family(split_part(s.target, '-', 1)::inet)
-					AND host(src.management_ip)::inet BETWEEN split_part(s.target, '-', 1)::inet AND split_part(s.target, '-', 2)::inet))
+				(s.kind = 'cidr' AND CASE WHEN `+cidrTargetValid+` THEN src.management_ip <<= s.target::inet ELSE false END)
+				OR (s.kind = 'host' AND strpos(s.target, '%') = 0
+					AND (host(src.management_ip) = s.target OR lower(src.hostname) = s.target OR lower(src.fqdn) = s.target))
+				OR (s.kind = 'range' AND CASE WHEN `+rangeTargetValid+` THEN family(src.management_ip) = family(split_part(s.target, '-', 1)::inet)
+					AND host(src.management_ip)::inet BETWEEN split_part(s.target, '-', 1)::inet AND split_part(s.target, '-', 2)::inet ELSE false END))
 			WHERE r.organization_id = $1 AND r.source = 'discovery' AND r.verification_state <> 'verified'
 			GROUP BY r.id`, orgID)
 		if err != nil {
@@ -230,6 +243,46 @@ func (c *Cleanup) RunOrg(ctx context.Context, orgID string) (CleanupResult, erro
 		return nil
 	})
 	return res, err
+}
+
+// The inet casts of discovery_scope.target sit behind a guard (F-108): a
+// target PostgreSQL cannot read – an IPv6 zone (fe80::1%eth0), which the API
+// accepted before WP-383, or another malformed row – would otherwise fail
+// the query of the whole organization (22P02). Such a scope is skipped and
+// reported once per run. The casts are inside CASE because PostgreSQL does
+// not order the operands of AND. lifecycle.OfflineDetector uses the same
+// guard.
+const (
+	cidrTargetValid  = `strpos(s.target, '%') = 0 AND pg_input_is_valid(s.target, 'inet')`
+	rangeTargetValid = `s.target ~ '^[^-%/]+-[^-%/]+$' AND pg_input_is_valid(split_part(s.target, '-', 1), 'inet')
+		AND pg_input_is_valid(split_part(s.target, '-', 2), 'inet')`
+)
+
+// reportInvalidScopes logs the enabled scopes of the organization whose
+// target the guard skips (discovery.scope.invalid_target).
+func reportInvalidScopes(ctx context.Context, tx pgx.Tx, orgID string) error {
+	rows, err := tx.Query(ctx, `SELECT s.id::text, s.kind FROM discovery_scope s
+		WHERE s.organization_id = $1 AND s.enabled AND NOT CASE s.kind
+			WHEN 'cidr' THEN `+cidrTargetValid+`
+			WHEN 'range' THEN `+rangeTargetValid+`
+			ELSE strpos(s.target, '%') = 0 END
+		ORDER BY s.id`, orgID)
+	if err != nil {
+		return fmt.Errorf("discovery scopes: %w", err)
+	}
+	invalid, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) ([2]string, error) {
+		var v [2]string
+		scanErr := r.Scan(&v[0], &v[1])
+		return v, scanErr
+	})
+	if err != nil {
+		return fmt.Errorf("discovery scopes: %w", err)
+	}
+	for _, v := range invalid {
+		slog.Warn("discovery scope skipped: invalid target", "event", "discovery.scope.invalid_target",
+			"job", CleanupKind, "organization_id", orgID, "scope_id", v[0], "kind", v[1])
+	}
+	return nil
 }
 
 // scopeInterval returns the shortest interval of the schedules (a cron

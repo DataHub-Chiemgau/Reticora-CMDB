@@ -11,7 +11,6 @@ go;backend/internal/ci;TestAuditT3UnmergeKeepsLaterSurvivorEdits;F-097
 go;backend/internal/ci;TestAuditT7BulkJobCancelStopsWork;F-162
 go;backend/internal/ci;TestAuditT7JobAPIHonoursClientScope;F-163
 go;backend/internal/config;TestAuditT5K8sRenderedEnvSatisfiesStartCheck;F-036
-go;backend/internal/discovery;TestAuditBadScopeIsolated;F-108
 go;backend/internal/discovery;TestAuditCARolloverKeepsEnrolledCollectorTrust;F-102
 go;backend/internal/discovery;TestAuditConcurrentEdgePKIExportConsistent;F-104
 go;backend/internal/discovery;TestAuditDefectDiscoveryTypedValuesValidated;F-143
@@ -20,7 +19,6 @@ go;backend/internal/discovery;TestAuditPowerRedundancyIndependentOfBatchOrder;F-
 go;backend/internal/discovery;TestAuditT3PoisonRecordDoesNotTakeValidRecordsDown;F-090
 go;backend/internal/discovery;TestAuditT3ProbableDuplicateMergeIsCIMerge;F-096
 go;backend/internal/discovery;TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices;F-030
-go;backend/internal/discovery;TestAuditZonedScopeTargetRefused;F-108
 go;backend/internal/history;TestAuditT3HistoryIncludesLocationChange;F-093
 go;backend/internal/iga;TestAuditT1ApprovalNeverLosesTheProvisioningTask;F-056
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
