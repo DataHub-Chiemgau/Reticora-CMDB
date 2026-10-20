@@ -7,7 +7,6 @@ go;backend/cmd/server;TestAuditT5ReadinessObjectStorageURLEndpoint;F-127
 go;backend/internal/agent;TestAuditT3AgentTelemetryFollowsMergedCI;F-083
 go;backend/internal/ci;TestAuditT3MergePatchNullClearsTypedField;F-080
 go;backend/internal/ci;TestAuditT3OverrideWritesRaiseVersion;F-021
-go;backend/internal/ci;TestAuditT3ParentMustBeVisibleToScopedPrincipal;F-086
 go;backend/internal/ci;TestAuditT3UnmergeKeepsLaterSurvivorEdits;F-097
 go;backend/internal/ci;TestAuditT7BulkJobCancelStopsWork;F-162
 go;backend/internal/ci;TestAuditT7JobAPIHonoursClientScope;F-163

@@ -7381,7 +7381,7 @@ export interface components {
       /** @description Asset the CI is linked to (DB-05, AST-04). The asset is canonical for serial number, location, physical lifecycle and inventory data; they appear read-only under asset. */
       asset_id?: string;
       asset?: components['schemas']['CIAssetFacts'];
-      /** @description CI this one is physically part of (chassis → blade, AST-05); the relationship contains is projected from it. Cycles are rejected (422). */
+      /** @description CI this one is physically part of (chassis → blade, AST-05); the relationship contains is projected from it. Cycles are rejected (422). The parent is a CI of the same client or an org-wide CI (TEN-05). */
       parent_ci_id?: string;
       /** @description Software lifecycle; only CI types with a lifecycle model have one, and it changes through lifecycle transitions (DB-05). */
       readonly lifecycle_state?: string;
@@ -7464,7 +7464,7 @@ export interface components {
       location_id?: string;
       /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
       asset_id?: string;
-      /** @description Containing CI (empty string clears it on update); cycles are rejected (422). */
+      /** @description Containing CI: a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422). */
       parent_ci_id?: string;
       name: string;
       status?: components['schemas']['CIStatus'];
@@ -7493,12 +7493,13 @@ export interface components {
       change_reason?: string;
       name?: string;
       status?: components['schemas']['CIStatus'];
+      /** @description A CI that moves to a client cannot contain CIs of another client or org-wide CIs (422 on client_id, TEN-05); an org-wide CI (empty string) can. */
       client_id?: string;
       /** @description Node of the location tree; site and room of the CI follow from it. */
       location_id?: string;
       /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
       asset_id?: string;
-      /** @description Containing CI (empty string clears it on update); cycles are rejected (422). */
+      /** @description Containing CI (empty string clears it): a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422); the parent is checked again when client_id changes. */
       parent_ci_id?: string;
       manufacturer?: string;
       model?: string;

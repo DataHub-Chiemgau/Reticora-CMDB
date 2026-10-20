@@ -13048,7 +13048,8 @@ components:
           description: >-
             CI this one is physically part of (chassis → blade, AST-05); the
             relationship contains is projected from it. Cycles are rejected
-            (422).
+            (422). The parent is a CI of the same client or an org-wide CI
+            (TEN-05).
         lifecycle_state:
           type: string
           readOnly: true
@@ -13198,7 +13199,11 @@ components:
             is rejected (422).
         parent_ci_id:
           type: string
-          description: Containing CI (empty string clears it on update); cycles are rejected (422).
+          description: >-
+            Containing CI: a visible CI of the CI's client or an org-wide CI
+            (TEN-05). A CI the principal cannot see, a deleted or unknown CI
+            is rejected (422 "parent CI not found"), so is a CI of another
+            client (422) and a cycle (422).
         name:
           type: string
         status:
@@ -13255,6 +13260,10 @@ components:
           $ref: '#/components/schemas/CIStatus'
         client_id:
           type: string
+          description: >-
+            A CI that moves to a client cannot contain CIs of another client
+            or org-wide CIs (422 on client_id, TEN-05); an org-wide CI (empty
+            string) can.
         location_id:
           type: string
           description: Node of the location tree; site and room of the CI follow from it.
@@ -13266,7 +13275,12 @@ components:
             is rejected (422).
         parent_ci_id:
           type: string
-          description: Containing CI (empty string clears it on update); cycles are rejected (422).
+          description: >-
+            Containing CI (empty string clears it): a visible CI of the CI's
+            client or an org-wide CI (TEN-05). A CI the principal cannot see,
+            a deleted or unknown CI is rejected (422 "parent CI not found"),
+            so is a CI of another client (422) and a cycle (422); the parent
+            is checked again when client_id changes.
         manufacturer:
           type: string
         model:

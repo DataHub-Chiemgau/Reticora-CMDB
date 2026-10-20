@@ -498,6 +498,10 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				COALESCE(location_id::text, ''), health, version, schema_version, created_at, updated_at
 		`
 
+		if err := checkParents(ctx, tx, item.OrganizationID, []*Item{item}); err != nil {
+			return err
+		}
+
 		var createdAt time.Time
 		var updatedAt time.Time
 		if err := tx.QueryRow(ctx, query,
@@ -566,6 +570,9 @@ func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*It
 		}
 	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := checkParents(ctx, tx, orgID, items); err != nil {
+			return err
+		}
 		created, refused, err := insertCIs(ctx, tx, orgID, items)
 		if err != nil {
 			return locationError(fmt.Errorf("create cis: %w", err))
@@ -787,6 +794,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		} else if dropErr := dropOverriddenFields(ctx, tx, id, &req); dropErr != nil {
 			return dropErr
 		}
+		if scopeErr := checkContainmentScope(ctx, tx, orgID, before, &req); scopeErr != nil {
+			return scopeErr
+		}
 
 		setClauses := make([]string, 0, 18)
 		args := []any{id}
@@ -914,6 +924,93 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	})
 
 	return item, r.uniqueField(ctx, orgID, err)
+}
+
+// parentOfAnotherClient is the violation of a parent outside the CI's client.
+const parentOfAnotherClient = "the parent CI belongs to another client"
+
+// checkParents keeps containment within a client (TEN-05, AST-05; F-086).
+// The composite foreign key of parent_ci_id checks only the organization and
+// bypasses row level security, so the parents of the items are read here, in
+// the writing transaction under the principal's row level security, with one
+// statement: a parent the principal cannot see, or a deleted one, is "parent
+// CI not found"; a parent of another client than the CI is refused; a parent
+// of the CI's client or an org-wide parent (E-09, E-62) is accepted. Items
+// without a parent cost no statement.
+func checkParents(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) error {
+	var parents, clients []*string
+	for _, item := range items {
+		if strings.TrimSpace(item.ParentCIID) == "" {
+			continue
+		}
+		parent := item.ParentCIID
+		var client *string
+		if strings.TrimSpace(item.ClientID) != "" {
+			client = &item.ClientID
+		}
+		parents, clients = append(parents, &parent), append(clients, client)
+	}
+	if len(parents) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT c.id IS NOT NULL, COALESCE(c.client_id IS NULL OR c.client_id = l.client_id::uuid, false)
+		FROM unnest($2::text[], $3::text[]) WITH ORDINALITY AS l(parent_ci_id, client_id, ord)
+		LEFT JOIN ci c ON c.id = l.parent_ci_id::uuid AND c.organization_id = $1 AND c.deleted_at IS NULL
+		ORDER BY l.ord`, orgID, parents, clients)
+	if err != nil {
+		return fmt.Errorf("read parent cis: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var visible, sameClient bool
+		if err := rows.Scan(&visible, &sameClient); err != nil {
+			return fmt.Errorf("read parent cis: %w", err)
+		}
+		switch {
+		case !visible:
+			return &ValidationError{Violations: []Violation{{Field: "parent_ci_id", Detail: "parent CI not found"}}}
+		case !sameClient:
+			return &ValidationError{Violations: []Violation{{Field: "parent_ci_id", Detail: parentOfAnotherClient}}}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read parent cis: %w", err)
+	}
+	return nil
+}
+
+// checkContainmentScope applies checkParents to an update: to a new parent
+// and to the parent of a CI that moves to another client. A CI that moves to
+// a client must not contain CIs of another client or org-wide CIs, read the
+// same way; a CI that becomes org-wide may contain CIs of any client.
+func checkContainmentScope(ctx context.Context, tx pgx.Tx, orgID string, before *Item, req *UpdateRequest) error {
+	after := &Item{ClientID: before.ClientID, ParentCIID: before.ParentCIID}
+	if req.ClientID != nil {
+		after.ClientID = strings.TrimSpace(*req.ClientID)
+	}
+	if req.ParentCIID != nil {
+		after.ParentCIID = strings.TrimSpace(*req.ParentCIID)
+	}
+	moved := after.ClientID != before.ClientID
+	if after.ParentCIID != before.ParentCIID || moved {
+		if err := checkParents(ctx, tx, orgID, []*Item{after}); err != nil {
+			return err
+		}
+	}
+	if !moved || after.ClientID == "" {
+		return nil
+	}
+	var foreign bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE organization_id = $1 AND parent_ci_id = $2
+		AND deleted_at IS NULL AND client_id IS DISTINCT FROM $3::uuid)`, orgID, before.ID, after.ClientID).Scan(&foreign); err != nil {
+		return fmt.Errorf("read contained cis: %w", err)
+	}
+	if foreign {
+		return &ValidationError{Violations: []Violation{{Field: "client_id",
+			Detail: "the CI contains CIs of another client or org-wide CIs (their parent_ci_id)"}}}
+	}
+	return nil
 }
 
 // instanceFieldNames lists the names of the instance attributes of a CI.

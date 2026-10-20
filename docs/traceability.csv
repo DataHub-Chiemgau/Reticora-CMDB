@@ -531,3 +531,5 @@ CI-04;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
 OVR-01;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
 API-07;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
 CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-369
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/ci_scope_integration_test.go;WP-370
+AST-05;[P2];B;backend/internal/ci/ci_scope_integration_test.go;WP-370
