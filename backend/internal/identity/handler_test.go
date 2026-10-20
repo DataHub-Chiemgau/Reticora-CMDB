@@ -712,7 +712,7 @@ func TestSessionPermissionsComeFromDatabaseRoles(t *testing.T) {
 	token, err := sessionIssuer.Issue(SessionClaims{
 		Subject:        "user-123",
 		OrganizationID: "123e4567-e89b-12d3-a456-426614174000",
-		Permissions:    []Permission{PermCredentialRead, PermCredentialDecrypt},
+		Permissions:    []Permission{PermCredentialRead, PermCredentialManage},
 		Groups:         []string{"reticora-viewer", "credential-admins"},
 		IssuedAt:       time.Now().UTC(),
 		ExpiresAt:      time.Now().UTC().Add(time.Minute),

@@ -63,7 +63,6 @@ go;backend/internal/server;TestAuditT2EntitlementAPIAccessGatesAPIKeys;F-070
 go;backend/internal/server;TestAuditT2EntitlementQuotasEnforced;F-072
 go;backend/internal/server;TestAuditT2EntitlementRackViewGated;F-070
 go;backend/internal/server;TestAuditT2ListsAreCursorPages;F-075
-go;backend/internal/server;TestAuditT2RBA01KeysGateCITypesAndNotificationChannels;F-067
 go;backend/internal/server;TestAuditT3HealthRefreshRunsInG1;F-087
 go;backend/internal/server;TestAuditT3OverrideRefusesReservedNames;F-092
 go;backend/internal/server;TestAuditT3ResolvedByIsThePrincipal;F-091

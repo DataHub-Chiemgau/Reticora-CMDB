@@ -103,7 +103,7 @@ func TestAPIKeyLifecycle(t *testing.T) {
 	}
 
 	// A key cannot grant more than its creator holds, and keys cannot mint keys.
-	if w = call(user, http.MethodPost, "/api/v1/api-keys", `{"name":"x","permissions":["credential:decrypt"]}`); w.Code != http.StatusForbidden {
+	if w = call(user, http.MethodPost, "/api/v1/api-keys", `{"name":"x","permissions":["credential:manage"]}`); w.Code != http.StatusForbidden {
 		t.Errorf("create with a permission the caller lacks: %d, want 403", w.Code)
 	}
 	keyPrincipal := user

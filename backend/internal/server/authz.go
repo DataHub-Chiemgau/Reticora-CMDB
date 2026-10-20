@@ -75,10 +75,12 @@ var readPermissionFor = map[string]identity.Permission{
 	"jobs":             identity.PermJobRead,
 	"role-assignments": identity.PermRoleRead,
 	"webhooks":         identity.PermWebhookRead,
-	// Notification channels and their deliveries are administered like
-	// webhooks (NTF-01, NTF-04).
-	"notification-channels":   identity.PermWebhookRead,
-	"notification-deliveries": identity.PermWebhookRead,
+	// Notification channels hold provider credentials and their deliveries
+	// name recipients: reading needs notification:manage like writing
+	// (RBA-01, RBA-02: org_admin only; NTF-01). The own inbox below
+	// /notifications is self-service.
+	"notification-channels":   identity.PermNotificationManage,
+	"notification-deliveries": identity.PermNotificationManage,
 	"credentials":             identity.PermCredentialRead,
 	"export":                  identity.PermCIRead,
 	"ip-addresses":            identity.PermIPAMRead,
@@ -135,9 +137,9 @@ var readPermissionFor = map[string]identity.Permission{
 var writePermissionOverrides = map[string]identity.Permission{
 	// VRFs are managed with their own key (TEN-10, RBA-01).
 	"vrfs": identity.PermVRFManage,
-	// Channels hold provider credentials; deliveries are only read.
-	"notification-channels":   identity.PermWebhookManage,
-	"notification-deliveries": identity.PermWebhookManage,
+	// Notification channels have their own key, not webhook:manage (RBA-01).
+	"notification-channels":   identity.PermNotificationManage,
+	"notification-deliveries": identity.PermNotificationManage,
 	// Review items are only written by resolving them (REC-08).
 	"review-items": identity.PermReviewResolve,
 
@@ -161,7 +163,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"clients":        identity.PermUserManage,
 	"org":            identity.PermUserManage,
 	"roles":          identity.PermRoleManage,
-	"permissions":    identity.PermPermissionManage,
+	"permissions":    identity.PermRoleManage,        // no write route: role grants are replaced below /roles
 	"entitlements":   identity.PermEntitlementManage, // no tenant write route: the operator writes (ENT-04)
 	"modules":        identity.PermEntitlementManage, // no write route: RETICORA_MODULES sets them (WP-214)
 	"webhooks":       identity.PermWebhookManage,
@@ -182,7 +184,8 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"iga":      identity.PermIGAWrite,
 	"scim":     identity.PermIGAWrite,
 	"me":       identity.PermPermissionRead,
-	"ci-types": identity.PermCITypeManageNew,
+	// CI types are managed with the RBA-01 key.
+	"ci-types": identity.PermCITypeManage,
 	"api-keys": identity.PermAPIKeyManage,
 	"ingest":   identity.PermDiscoveryIngest,
 	// Enterprise CMDB + asset/inventory extension write side (spec §21).

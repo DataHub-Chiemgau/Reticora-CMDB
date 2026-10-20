@@ -1,7 +1,7 @@
 package permission
 
 // StandardRole is a system role seeded into every organization
-// (seed_standard_roles, migration 000073).
+// (seed_standard_roles, migration 000147).
 type StandardRole struct {
 	Name string
 	// Scope is the assignment scope the role is valid in: "org", or "client"
@@ -14,33 +14,34 @@ type StandardRole struct {
 }
 
 // StandardRoles is the target role matrix (RBA-02, E-13), with the exact
-// RBA-01 keys since migration 000081. The database seed
+// RBA-01 keys since migration 000081 and without the keys migration 000147
+// retired (WP-363: ci_type:manage and the keys that gate no route). The
+// database seed
 // must match it exactly; permission/role_matrix_integration_test.go compares
 // both, and the RBA-02 rows of the catalogue text are checked there too.
 var StandardRoles = []StandardRole{
 	{Name: "org_admin", Scope: "org"},
 	{Name: "engineer", Scope: "org", Permissions: []string{
-		"agent:manage", "agent:read", "ai:read", "asset:assign",
-		"asset:move", "asset:read", "asset:reserve", "asset:write",
-		"assignment:read", "assignment:write", "ci:delete", "ci:read",
-		"ci:write", "ci_instance_attribute:manage", "collector:manage", "compliance:read",
-		"compliance:write", "consumable:read", "consumable:write", "contact:read",
-		"contact:write", "credential:decrypt", "credential:manage", "credential:read",
-		"credential:write", "desk:read", "desk:write", "discovery:ingest",
-		"discovery:manage", "discovery:read", "disposal:read", "disposal:write",
-		"document:read", "document:write", "entitlement:read", "export:run",
-		"form:read", "form:write", "iga:read", "ipam:read",
-		"ipam:write", "job:read", "key:read", "key:write",
-		"lifecycle:transition", "location:read", "location:write", "maintenance:read",
-		"maintenance:write", "monitoring:read", "monitoring:write", "order:read",
-		"order:write", "override:write", "permission:read", "rack:read",
-		"rack:write", "reconciliation:manage", "relationship:read", "relationship:write",
-		"review:resolve", "role:read", "saved_view:read", "saved_view:write",
-		"search:read", "search:write", "security:read", "security:write",
-		"sla:read", "stocktake:read", "stocktake:write", "ticket:read",
-		"ticket:write", "topology:read", "training:read", "training:write",
-		"user:read", "vrf:manage", "webhook:read", "workflow:read",
-		"workflow:write",
+		"agent:manage", "agent:read", "ai:read", "asset:move",
+		"asset:read", "asset:reserve", "asset:write", "assignment:read",
+		"assignment:write", "ci:delete", "ci:read", "ci:write",
+		"ci_instance_attribute:manage", "collector:manage", "compliance:read", "compliance:write",
+		"consumable:read", "consumable:write", "contact:read", "contact:write",
+		"credential:manage", "credential:read", "desk:read", "desk:write",
+		"discovery:ingest", "discovery:manage", "discovery:read", "disposal:read",
+		"disposal:write", "document:read", "document:write", "entitlement:read",
+		"export:run", "form:read", "form:write", "iga:read",
+		"ipam:read", "ipam:write", "job:read", "key:read",
+		"key:write", "lifecycle:transition", "location:read", "location:write",
+		"maintenance:read", "maintenance:write", "monitoring:read", "monitoring:write",
+		"order:read", "order:write", "override:write", "permission:read",
+		"rack:read", "rack:write", "reconciliation:manage", "relationship:read",
+		"relationship:write", "review:resolve", "role:read", "saved_view:read",
+		"saved_view:write", "search:read", "search:write", "security:read",
+		"security:write", "sla:read", "stocktake:read", "stocktake:write",
+		"ticket:read", "ticket:write", "topology:read", "training:read",
+		"training:write", "user:read", "vrf:manage", "webhook:read",
+		"workflow:read", "workflow:write",
 	}},
 	{Name: "viewer", Scope: "org", Permissions: []string{
 		"agent:read", "asset:read", "assignment:read", "ci:read",

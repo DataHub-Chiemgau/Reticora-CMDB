@@ -46,10 +46,8 @@ const (
 	PermRoleRead           Permission = "role:read"
 	PermRoleManage         Permission = "role:manage"
 	PermPermissionRead     Permission = "permission:read"
-	// PermPermissionManage grants permission-grant administration. The value
-	// follows the canonical catalog key ("permission:write"), not the
-	// constant name, for backwards compatibility with stored role grants.
-	PermPermissionManage  Permission = "permission:write"
+	// Role grants are replaced with role:manage; permission:write is retired
+	// (migration 000147, WP-363).
 	PermEntitlementRead   Permission = "entitlement:read"
 	PermEntitlementManage Permission = "entitlement:manage"
 	PermAuditRead         Permission = "audit:read"
@@ -104,11 +102,9 @@ const (
 
 	// Enterprise CMDB + asset/inventory extension (spec §21). These keys are
 	// seeded into the permission catalogue by migration 000055.
-	PermCITypeManageNew           Permission = "ci_type:manage"
 	PermCIAttributeManage         Permission = "ci_attribute:manage"
 	PermCIInstanceAttributeManage Permission = "ci_instance_attribute:manage"
 	PermRelationshipTypeManage    Permission = "relationship_type:manage"
-	PermAssetAssign               Permission = "asset:assign"
 	PermAssetMove                 Permission = "asset:move"
 	PermAssetReserve              Permission = "asset:reserve"
 	PermInventoryManage           Permission = "inventory:manage"
@@ -117,7 +113,6 @@ const (
 	PermSavedViewRead             Permission = "saved_view:read"
 	PermSavedViewWrite            Permission = "saved_view:write"
 	// Special actions with their own permission (RBA-06, WP-045).
-	PermCredentialDecrypt    Permission = "credential:decrypt"
 	PermLifecycleTransition  Permission = "lifecycle:transition"
 	PermReconciliationManage Permission = "reconciliation:manage"
 )
@@ -162,7 +157,6 @@ func allPermissions() []Permission {
 		PermRoleRead,
 		PermRoleManage,
 		PermPermissionRead,
-		PermPermissionManage,
 		PermEntitlementRead,
 		PermEntitlementManage,
 		PermAuditRead,
@@ -214,11 +208,9 @@ func allPermissions() []Permission {
 		PermSearchRead,
 		PermSearchWrite,
 		PermAIRead,
-		PermCITypeManageNew,
 		PermCIAttributeManage,
 		PermCIInstanceAttributeManage,
 		PermRelationshipTypeManage,
-		PermAssetAssign,
 		PermAssetMove,
 		PermAssetReserve,
 		PermInventoryManage,
@@ -226,7 +218,6 @@ func allPermissions() []Permission {
 		PermOverrideWrite,
 		PermSavedViewRead,
 		PermSavedViewWrite,
-		PermCredentialDecrypt,
 		PermLifecycleTransition,
 		PermReconciliationManage,
 	}
