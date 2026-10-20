@@ -14,7 +14,6 @@ go;backend/internal/config;TestAuditT5K8sRenderedEnvSatisfiesStartCheck;F-036
 go;backend/internal/discovery;TestAuditBadScopeIsolated;F-108
 go;backend/internal/discovery;TestAuditBundleCredentialSelection;F-027
 go;backend/internal/discovery;TestAuditCARolloverKeepsEnrolledCollectorTrust;F-102
-go;backend/internal/discovery;TestAuditCertificateRenewalBoundToCollector;F-012
 go;backend/internal/discovery;TestAuditConcurrentEdgePKIExportConsistent;F-104
 go;backend/internal/discovery;TestAuditDefectDiscoveryTypedValuesValidated;F-143
 go;backend/internal/discovery;TestAuditDisabledCollectorConnectionCut;F-025

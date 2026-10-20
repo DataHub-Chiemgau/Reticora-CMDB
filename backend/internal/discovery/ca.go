@@ -21,14 +21,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	platformcrypto "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // Collector PKI (COL-04).
@@ -48,7 +46,7 @@ var (
 	// names another collector or uses a weak key.
 	ErrInvalidCSR = errors.New("invalid certificate signing request")
 	// ErrRenewalNotDue: the current certificate has not reached 60 % of its
-	// lifetime.
+	// lifetime or was renewed just now.
 	ErrRenewalNotDue = errors.New("certificate renewal is not due yet")
 )
 
@@ -436,41 +434,6 @@ func (h *Handler) WithCA(ca *CA) *Handler {
 func (h *Handler) issuer(csrPEM string) CertIssuer {
 	return func(ctx context.Context, orgID, collectorID string) (*IssuedCert, error) {
 		return h.ca.Sign(ctx, csrPEM, orgID, collectorID)
-	}
-}
-
-// RenewCertificate handles POST /api/v1/collectors/{id}/certificate: the
-// collector renews its certificate with a new CSR once 60 % of the lifetime
-// passed (COL-04).
-func (h *Handler) RenewCertificate(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
-		return
-	}
-	if h.ca == nil {
-		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "the collector PKI is not configured")
-		return
-	}
-	var req struct {
-		CSR string `json:"csr"`
-	}
-	if err := api.ReadJSON(r, &req); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-	cert, err := h.repo.RenewCertificate(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), h.issuer(req.CSR))
-	switch {
-	case errors.Is(err, ErrInvalidCSR):
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
-	case errors.Is(err, ErrRenewalNotDue):
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
-	case errors.Is(err, ErrCollectorDisabled):
-		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
-	case err != nil:
-		api.WriteRepoError(w, err)
-	default:
-		api.WriteJSON(w, http.StatusCreated, cert)
 	}
 }
 

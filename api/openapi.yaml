@@ -7521,7 +7521,10 @@ paths:
       description: >-
         The trust bundle holds the active CA and, during a CA roll-over, the
         previous one (COL-04); the revocation list names the revoked
-        certificates (disabled collectors) that have not expired.
+        certificates (disabled collectors, predecessors of renewed
+        certificates) that have not expired. Collectors renew their
+        certificate over their mTLS NATS channel
+        (collector.<org>.<id>.certificate.renew), not over this API.
       responses:
         '200':
           description: Trust bundle and CRL (PEM)
@@ -7535,46 +7538,6 @@ paths:
                   crl_pem: { type: string }
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailable'
-
-  /api/v1/collectors/{id}/certificate:
-    parameters:
-      - $ref: '#/components/parameters/ResourceID'
-    post:
-      operationId: renewCollectorCertificate
-      tags: [Collectors]
-      summary: Renew the collector certificate
-      description: >-
-        The collector sends a CSR of a new local key once its certificate
-        reached 60 % of its lifetime (409 before); a disabled collector gets
-        none (403). Requires discovery:ingest.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [csr]
-              properties:
-                csr: { type: string }
-      responses:
-        '201':
-          description: Certificate issued
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CollectorCertificate'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 

@@ -7,10 +7,6 @@
 // WP-145 (COL-04), WP-146 (COL-08), WP-147 (COL-02), WP-153 (DIS-09).
 //
 // Findings encoded here:
-//   - TestAuditCertificateRenewalBoundToCollector – WP-145 P1 "Renewal
-//     endpoint is not bound to the collector: a discovery:ingest principal
-//     mints a collector certificate for its own key and can open that
-//     collector's credential bundle". Only the collector itself may renew.
 //   - TestAuditDisabledCollectorConnectionCut – WP-145 P1 "Disabled collector
 //     keeps its open NATS connection and can keep ingesting" (real
 //     nats-server with deploy/docker-compose/nats-edge.conf; needs
@@ -29,25 +25,21 @@
 //
 // The shared helpers (auditEdge, auditEnroll, auditFreePort) are in
 // edge_helpers_integration_test.go without a build tag (WP-374).
+// TestAuditCertificateRenewalBoundToCollector (F-012) is fixed and lives in
+// renew_edge_integration_test.go (WP-375).
 //
 // Retest:
 //
 //	cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/<db>?sslmode=disable \
 //	  TEST_NATS_SERVER_BIN=<path to nats-server 2.10+> go test -tags auditdefect -count=1 -v -p 1 \
-//	  -run 'TestAuditCertificateRenewalBoundToCollector|TestAuditDisabledCollectorConnectionCut|TestAuditCARolloverKeepsEnrolledCollectorTrust|TestAuditConcurrentEdgePKIExportConsistent|TestAuditBundleCredentialSelection' ./internal/discovery/
+//	  -run 'TestAuditDisabledCollectorConnectionCut|TestAuditCARolloverKeepsEnrolledCollectorTrust|TestAuditConcurrentEdgePKIExportConsistent|TestAuditBundleCredentialSelection' ./internal/discovery/
 package discovery_test
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,64 +49,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/nats-io/nats.go"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
-
-func TestAuditCertificateRenewalBoundToCollector(t *testing.T) {
-	e, _ := auditEdge(t, "d0")
-	f := e.f
-	bg := context.Background()
-	mux := chi.NewRouter()
-	discovery.NewHandler(e.repo, nil).WithCA(e.ca).RegisterRoutes(mux)
-	// A principal of the organization (session or API key with
-	// discovery:ingest) that is not the collector: it holds its own key.
-	caller := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
-	callerKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-
-	// Y: registered by an administrator, never enrolled, no certificate.
-	y := &discovery.Collector{OrganizationID: f.OrgA, Name: "audit-renew-y"}
-	if err := e.repo.RegisterCollector(f.OrgCtx(f.OrgA), y); err != nil {
-		t.Fatal(err)
-	}
-	// X: enrolled with its own key; certificate aged to 55 of 90 days, so
-	// the 60 % renewal rule is satisfied.
-	xID, _, xCert := auditEnroll(t, e, "audit-renew-x")
-	if _, err := f.Admin.Exec(bg, `UPDATE collector_certificate SET not_before = now() - interval '55 days',
-		not_after = now() + interval '35 days' WHERE collector_id = $1`, xID); err != nil {
-		t.Fatal(err)
-	}
-
-	cases := []struct{ name, collectorID string }{
-		{"collector without any certificate", y.ID},
-		{"enrolled collector past 60 % of its validity", xID},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			body, _ := json.Marshal(map[string]string{"csr": csrFor(t, tc.collectorID, callerKey)})
-			w := httptest.NewRecorder()
-			mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/collectors/"+tc.collectorID+"/certificate",
-				strings.NewReader(string(body))).WithContext(caller))
-			if w.Code < 400 {
-				var minted discovery.IssuedCert
-				_ = json.Unmarshal(w.Body.Bytes(), &minted)
-				cn := ""
-				if minted.CertificatePEM != "" {
-					cn = parseCert(t, minted.CertificatePEM).Subject.CommonName
-				}
-				t.Errorf("COL-04/COL-02 violated: a principal that is not collector %s obtained a certificate for it with its own key: HTTP %d serial=%s CN=%s",
-					tc.collectorID, w.Code, minted.Serial, cn)
-			}
-		})
-	}
-	if revoked, err := e.ca.IsRevoked(bg, xCert.Serial); err != nil || revoked {
-		t.Errorf("control: X's legitimate certificate revoked=%v err=%v", revoked, err)
-	}
-}
 
 func TestAuditCARolloverKeepsEnrolledCollectorTrust(t *testing.T) {
 	e, enc := auditEdge(t, "d1")

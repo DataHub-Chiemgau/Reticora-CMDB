@@ -167,10 +167,9 @@ type Repository interface {
 	// With issue, the collector's first certificate is issued (CN =
 	// collector id) and recorded in the same transaction (COL-04).
 	EnrollCollector(ctx context.Context, rawCode string, c *Collector, issue CertIssuer) (*IssuedCert, error)
-	// RenewCertificate issues a new certificate for the collector once the
-	// current one reached 60 % of its lifetime (ErrRenewalNotDue before);
-	// disabled collectors get none (ErrCollectorDisabled).
-	RenewCertificate(ctx context.Context, orgID, collectorID string, issue CertIssuer) (*IssuedCert, error)
+	// Renewal is no repository call of the API: the collector renews over
+	// its NATS channel with proof of its current key (CertificateRenewal,
+	// PGRepository.RenewEdgeCertificate, F-012).
 
 	// Discovery jobs.
 	ListJobs(ctx context.Context, orgID string, filter JobFilter, page api.PaginationParams) ([]Job, int, error)
@@ -329,31 +328,15 @@ func (r *MemoryRepository) EnrollCollector(ctx context.Context, rawCode string, 
 	if issue == nil {
 		return nil, nil
 	}
-	return r.RenewCertificate(ctx, c.OrganizationID, c.ID, issue)
-}
-
-// RenewCertificate implements Repository.
-func (r *MemoryRepository) RenewCertificate(ctx context.Context, orgID, collectorID string, issue CertIssuer) (*IssuedCert, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.collectors[collectorID]
-	if !ok || c.OrganizationID != orgID {
-		return nil, fmt.Errorf("not found")
-	}
-	if c.Status == CollectorDisabled {
-		return nil, ErrCollectorDisabled
-	}
-	if c.CertNotAfter != "" {
-		notAfter, _ := time.Parse(time.RFC3339Nano, c.CertNotAfter)
-		if !NeedsRenewal(notAfter.Add(-CertValidity), notAfter, time.Now().UTC()) {
-			return nil, ErrRenewalNotDue
-		}
-	}
-	cert, err := issue(ctx, orgID, collectorID)
+	cert, err := issue(ctx, c.OrganizationID, c.ID)
 	if err != nil {
 		return nil, err
 	}
-	c.CertFingerprint, c.CertNotAfter = cert.Fingerprint, cert.NotAfter.Format(time.RFC3339Nano)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if stored, ok := r.collectors[c.ID]; ok {
+		stored.CertFingerprint, stored.CertNotAfter = cert.Fingerprint, cert.NotAfter.Format(time.RFC3339Nano)
+	}
 	return cert, nil
 }
 
@@ -695,7 +678,6 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/collectors", h.RegisterCollector)
 	r.Post("/api/v1/collectors/{id}/heartbeat", h.Heartbeat)
 	r.Patch("/api/v1/collectors/{id}", h.UpdateCollector)
-	r.Post("/api/v1/collectors/{id}/certificate", h.RenewCertificate)
 	r.Get("/api/v1/collectors/pki", h.PKI)
 	// Zero-config onboarding: an operator mints a short-lived enrollment code;
 	// the collector redeems it (unauthenticated, code = the credential) for its

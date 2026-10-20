@@ -66,10 +66,13 @@ type EdgeIdentity struct {
 	CollectorID    string
 	ClientID       string
 	Status         string
+	NotBefore      time.Time
 	NotAfter       time.Time
 	// PublicKey is the collector's key from its certificate.
 	PublicKey any
-	// Fingerprint is the SHA-256 of the certificate (hex).
+	// Serial is the serial number of the certificate (hex), Fingerprint its
+	// SHA-256 (hex).
+	Serial      string
 	Fingerprint string
 }
 
@@ -104,7 +107,8 @@ func (a *EdgeAuthorizer) Authorize(ctx context.Context, certs []string) (*EdgeId
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
 		return nil, fmt.Errorf("client certificate: %w", err)
 	}
-	revoked, err := a.ca.IsRevoked(ctx, leaf.SerialNumber.Text(16))
+	serial := leaf.SerialNumber.Text(16)
+	revoked, err := a.ca.IsRevoked(ctx, serial)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +120,7 @@ func (a *EdgeAuthorizer) Authorize(ctx context.Context, certs []string) (*EdgeId
 	}
 	sum := sha256.Sum256(leaf.Raw)
 	id := &EdgeIdentity{OrganizationID: leaf.Subject.Organization[0], CollectorID: leaf.Subject.CommonName,
-		NotAfter: leaf.NotAfter, PublicKey: leaf.PublicKey, Fingerprint: hex.EncodeToString(sum[:])}
+		NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter, PublicKey: leaf.PublicKey, Serial: serial, Fingerprint: hex.EncodeToString(sum[:])}
 	scope := database.OrgWideScope(id.OrganizationID, "")
 	err = database.WithTenant(ctx, a.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT status, COALESCE(client_id::text, '') FROM collector WHERE id = $1 AND organization_id = $2`,
@@ -132,6 +136,59 @@ func (a *EdgeAuthorizer) Authorize(ctx context.Context, certs []string) (*EdgeId
 		return nil, ErrCollectorDisabled
 	}
 	return id, nil
+}
+
+// revokePredecessors revokes the collector's certificates issued before the
+// one id was authorized with: once the collector connects with a renewed
+// certificate (the TLS handshake proved its key), the former ones are no
+// longer needed (COL-04).
+func (a *EdgeAuthorizer) revokePredecessors(ctx context.Context, id *EdgeIdentity) (int64, error) {
+	var n int64
+	scope := database.OrgWideScope(id.OrganizationID, "")
+	err := database.WithTenant(ctx, a.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE collector_certificate p SET revoked_at = now(), revocation_reason = 'superseded'
+			FROM collector_certificate n
+			WHERE n.serial = $2 AND n.collector_id = $1 AND p.collector_id = $1 AND p.revoked_at IS NULL
+			AND p.created_at < n.created_at`, id.CollectorID, id.Serial)
+		n = tag.RowsAffected()
+		return err
+	})
+	return n, err
+}
+
+// RevokeSupersededCertificates revokes, across organizations, the collector
+// certificates whose successor was issued at least grace ago: a collector
+// that never connects with its renewed certificate keeps the former one no
+// longer (COL-04). It returns the number of revoked certificates.
+func RevokeSupersededCertificates(ctx context.Context, pool *pgxpool.Pool, grace time.Duration) (int64, error) {
+	const superseded = `p.revoked_at IS NULL AND EXISTS (SELECT 1 FROM collector_certificate n
+		WHERE n.collector_id = p.collector_id AND n.created_at > p.created_at AND n.created_at <= now() - make_interval(secs => $1))`
+	var orgs []string
+	err := database.WithSystem(ctx, pool, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT p.organization_id::text FROM collector_certificate p WHERE `+superseded, grace.Seconds())
+		if err != nil {
+			return err
+		}
+		orgs, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("superseded collector certificates: %w", err)
+	}
+	var revoked int64
+	for _, orgID := range orgs {
+		scope := database.OrgWideScope(orgID, "")
+		err = database.WithTenant(ctx, pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			tag, uerr := tx.Exec(ctx, `UPDATE collector_certificate p SET revoked_at = now(), revocation_reason = 'superseded'
+				WHERE organization_id = $2 AND `+superseded, grace.Seconds(), orgID)
+			revoked += tag.RowsAffected()
+			return uerr
+		})
+		if err != nil {
+			return revoked, fmt.Errorf("revoke superseded collector certificates: %w", err)
+		}
+	}
+	return revoked, nil
 }
 
 // UserClaims are the NATS permissions of an authorized collector: its own
@@ -260,6 +317,13 @@ func (s *EdgeAuthService) Respond(ctx context.Context, request []byte) ([]byte, 
 	}
 	id, err := s.authorizer.Authorize(ctx, certs)
 	if err == nil {
+		// The first connection with a renewed certificate revokes its
+		// predecessors; should that fail, RunEdge revokes them later.
+		if n, rerr := s.authorizer.revokePredecessors(ctx, id); rerr != nil {
+			slog.Error("revoke the predecessors of a renewed collector certificate", "collector_id", id.CollectorID, "error", rerr)
+		} else if n > 0 {
+			slog.Info("revoked the predecessors of a renewed collector certificate", "collector_id", id.CollectorID, "serial", id.Serial, "revoked", n)
+		}
 		resp.Jwt, err = id.UserClaims(req.UserNkey, s.now()).Encode(s.issuer)
 	}
 	if err != nil {
@@ -357,8 +421,12 @@ type EdgeConfig struct {
 	URL string
 }
 
-// RunEdge keeps the endpoint's files current (daily) and serves its
-// authorization callout until ctx ends.
+// supersededSweep is how often RunEdge revokes superseded certificates.
+const supersededSweep = time.Hour
+
+// RunEdge keeps the endpoint's files current (daily), serves its
+// authorization callout and revokes the certificates superseded by a
+// renewal at the latest SupersededGrace after it (hourly) until ctx ends.
 func RunEdge(ctx context.Context, c *EdgeConfig) {
 	export := func() {
 		if c.PKIDir == "" {
@@ -368,7 +436,18 @@ func RunEdge(ctx context.Context, c *EdgeConfig) {
 			slog.Error("export collector NATS PKI", "dir", c.PKIDir, "error", err)
 		}
 	}
+	sweep := func() {
+		if c.Pool == nil {
+			return
+		}
+		if n, err := RevokeSupersededCertificates(ctx, c.Pool, SupersededGrace-supersededSweep); err != nil {
+			slog.Error("revoke superseded collector certificates", "error", err)
+		} else if n > 0 {
+			slog.Info("revoked superseded collector certificates", "revoked", n)
+		}
+	}
 	export()
+	sweep()
 	if c.URL != "" {
 		go func() {
 			if err := serveEdgeAuth(ctx, c); err != nil {
@@ -378,12 +457,16 @@ func RunEdge(ctx context.Context, c *EdgeConfig) {
 	}
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
+	sweeps := time.NewTicker(supersededSweep)
+	defer sweeps.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			export()
+		case <-sweeps.C:
+			sweep()
 		}
 	}
 }

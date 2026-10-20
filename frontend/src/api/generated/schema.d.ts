@@ -3891,34 +3891,11 @@ export interface paths {
     };
     /**
      * Trust bundle and revocation list of the collector certificates
-     * @description The trust bundle holds the active CA and, during a CA roll-over, the previous one (COL-04); the revocation list names the revoked certificates (disabled collectors) that have not expired.
+     * @description The trust bundle holds the active CA and, during a CA roll-over, the previous one (COL-04); the revocation list names the revoked certificates (disabled collectors, predecessors of renewed certificates) that have not expired. Collectors renew their certificate over their mTLS NATS channel (collector.<org>.<id>.certificate.renew), not over this API.
      */
     get: operations['getCollectorPKI'];
     put?: never;
     post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/collectors/{id}/certificate': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Renew the collector certificate
-     * @description The collector sends a CSR of a new local key once its certificate reached 60 % of its lifetime (409 before); a disabled collector gets none (403). Requires discovery:ingest.
-     */
-    post: operations['renewCollectorCertificate'];
     delete?: never;
     options?: never;
     head?: never;
@@ -20006,41 +19983,6 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      503: components['responses']['ServiceUnavailable'];
-    };
-  };
-  renewCollectorCertificate: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': {
-          csr: string;
-        };
-      };
-    };
-    responses: {
-      /** @description Certificate issued */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['CollectorCertificate'];
-        };
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
       503: components['responses']['ServiceUnavailable'];
     };
   };

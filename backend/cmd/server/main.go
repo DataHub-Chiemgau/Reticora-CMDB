@@ -621,10 +621,18 @@ func main() {
 		workers = append(workers, server.Worker{Name: config.WorkerNATSEdge, Run: func(ctx context.Context) { discovery.RunEdge(ctx, edge) }})
 	}
 	// Credential bundles for the collectors over their NATS channel,
-	// encrypted for each collector's key (COL-02).
+	// encrypted for each collector's key (COL-02), and the renewal of their
+	// certificates on the same channel with proof of the current key
+	// (COL-04, F-012).
 	if collectorPKI != nil && coreNATS != nil {
 		gate := discovery.NewBundleGate(auditPool, collectorPKI)
+		renewal := discovery.NewCertificateRenewal(auditPool, collectorPKI)
 		workers = append(workers, server.Worker{Name: config.WorkerCredentialBundles, Run: func(ctx context.Context) {
+			go func() {
+				if rerr := renewal.Serve(ctx, coreNATS); rerr != nil {
+					slog.Error("collector certificate renewal", "error", rerr)
+				}
+			}()
 			if serr := credentialService.ServeBundles(ctx, coreNATS, gate, gate); serr != nil {
 				slog.Error("credential bundles", "error", serr)
 			}

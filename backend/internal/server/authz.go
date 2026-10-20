@@ -260,9 +260,9 @@ var routeRules = []routeRule{
 	// Reconciliation settings (RBA-06); reading them stays discovery:read.
 	{http.MethodPut, "reconciliation/source-policy", identity.PermReconciliationManage},
 	// Collectors report with the ingest credential; managing them is
-	// collector:manage (RBA-01).
+	// collector:manage (RBA-01). Certificates are renewed over the
+	// collector's NATS channel, not the API (F-012).
 	{http.MethodPost, "collectors/*/heartbeat", identity.PermDiscoveryIngest},
-	{http.MethodPost, "collectors/*/certificate", identity.PermDiscoveryIngest},
 	{http.MethodPost, "discovery/ingest", identity.PermDiscoveryIngest},
 	// Resolving a review item is its own right (RBA-01, RBA-02).
 	{http.MethodPost, "discovery/review-items/*/resolve", identity.PermReviewResolve},
@@ -527,8 +527,7 @@ var auditExemptions = map[string]string{
 var collectorRoutes = map[string]bool{
 	"POST /api/v1/agents/telemetry": true, "POST /api/v1/agents/{id}/heartbeat": true,
 	"POST /api/v1/collectors/{id}/heartbeat": true, "POST /api/v1/discovery/ingest": true,
-	"POST /api/v1/collectors/{id}/certificate": true,
-	"POST /api/v1/ingest/bulk":                 true,
+	"POST /api/v1/ingest/bulk": true,
 }
 
 // auditedRoutes records, per write route registered through an

@@ -544,3 +544,5 @@ REC-08;[B];D;backend/internal/server/audit_t3_review_routes_integration_test.go;
 API-05;[B];D;backend/internal/server/audit_t3_review_routes_integration_test.go;WP-373
 COL-08;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-374
 PRI-07;Grundsatz (ohne Tag);D;backend/internal/discovery/natsedge_integration_test.go;WP-374
+COL-04;[B];D;backend/internal/discovery/renew_edge_integration_test.go;WP-375
+COL-02;[B];D;backend/internal/discovery/renew_edge_integration_test.go;WP-375

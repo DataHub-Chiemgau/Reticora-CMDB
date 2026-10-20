@@ -70,11 +70,14 @@ func verifies(cert *x509.Certificate, bundle string) bool {
 // TestCollectorPKI covers WP-145 (COL-04) against PostgreSQL: enrollment
 // with a CSR issues a 90-day client certificate from the internal CA with
 // CN = collector id; the private key never reaches the server; a CSR for
-// another collector or with a weak key is refused; renewal is refused before
-// 60 % of the lifetime and works afterwards; disabling the collector revokes
-// its certificates (signed revocation list) and refuses renewal; a CA
-// roll-over keeps both trust anchors until the previous CA is retired; the
-// CA is kept in the database, encrypted under the master key.
+// another collector or with a weak key is refused; renewal over the NATS
+// service (CertificateRenewal, signed with the current key; there is no
+// HTTP renewal, WP-375) is refused before 60 % of the lifetime and works
+// afterwards; disabling the collector revokes its certificates (signed
+// revocation list) and refuses renewal; a CA roll-over keeps both trust
+// anchors (also in the CA bundle of new certificates) until the previous
+// CA is retired; the CA is kept in the database, encrypted under the master
+// key.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestCollectorPKI(t *testing.T) {
@@ -135,7 +138,21 @@ func TestCollectorPKI(t *testing.T) {
 	if pub, ok := cert.PublicKey.(*ecdsa.PublicKey); !ok || !pub.Equal(&collectorKey.PublicKey) {
 		t.Fatal("the certificate is not for the collector's own key")
 	}
-	renewPath := "/api/v1/collectors/" + enrolled.ID + "/certificate"
+	renewal := discovery.NewCertificateRenewal(f.App, ca)
+	subject := discovery.CollectorSubject(f.OrgA, enrolled.ID) + discovery.CertificateRenewSuffix
+	// renew asks the renewal service as the collector at now: a CSR of
+	// newKey, the current certificate certPEM, signed with its key.
+	renew := func(now time.Time, certPEM string, key, newKey *ecdsa.PrivateKey) discovery.RenewalResponse {
+		renewal.WithClock(func() time.Time { return now })
+		return renewal.Renew(bg, subject, renewalRequest(t, subject, subjectCSR(t, enrolled.ID, f.OrgA, newKey), certPEM, now, key))
+	}
+	certificates := func() int {
+		var n int
+		if cerr := f.Admin.QueryRow(bg, `SELECT count(*) FROM collector_certificate WHERE collector_id = $1`, enrolled.ID).Scan(&n); cerr != nil {
+			t.Fatal(cerr)
+		}
+		return n
+	}
 
 	// Refused CSRs: another collector, a weak key.
 	weak, _ := rsa.GenerateKey(rand.Reader, 1024)
@@ -149,21 +166,20 @@ func TestCollectorPKI(t *testing.T) {
 		}
 	}
 
-	// Renewal: not before 60 % of the lifetime.
-	if w = call(ctx, http.MethodPost, renewPath, jsonBody(map[string]any{"csr": csrFor(t, enrolled.ID, collectorKey)})); w.Code != http.StatusConflict {
-		t.Fatalf("early renewal: %d %s", w.Code, w.Body.String())
+	// Renewal over the NATS service: not before 60 % of the lifetime, at
+	// day 55 of 90 a new certificate for the new key.
+	renewedKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if resp := renew(time.Now().UTC(), enrolled.Certificate.CertificatePEM, collectorKey, renewedKey); resp.Error != discovery.RenewalNotDue || resp.IssuedCert != nil {
+		t.Fatalf("early renewal: %+v", resp)
 	}
-	if _, err = f.Admin.Exec(bg, `UPDATE collector_certificate SET not_before = now() - interval '55 days',
-		not_after = now() + interval '35 days' WHERE collector_id = $1`, enrolled.ID); err != nil {
-		t.Fatal(err)
+	resp := renew(time.Now().UTC().Add(55*24*time.Hour), enrolled.Certificate.CertificatePEM, collectorKey, renewedKey)
+	if resp.Error != "" || resp.IssuedCert == nil || resp.Serial == enrolled.Certificate.Serial {
+		t.Fatalf("renewal: %+v", resp)
 	}
-	w = call(ctx, http.MethodPost, renewPath, jsonBody(map[string]any{"csr": csrFor(t, enrolled.ID, collectorKey)}))
-	if w.Code != http.StatusCreated {
-		t.Fatalf("renewal: %d %s", w.Code, w.Body.String())
-	}
-	var renewed discovery.IssuedCert
-	if err = json.Unmarshal(w.Body.Bytes(), &renewed); err != nil || renewed.Serial == enrolled.Certificate.Serial {
-		t.Fatalf("renewed = %+v, %v", renewed, err)
+	renewed := *resp.IssuedCert
+	if rc := parseCert(t, renewed.CertificatePEM); rc.Subject.CommonName != enrolled.ID || !verifies(rc, renewed.CABundlePEM) ||
+		!rc.PublicKey.(*ecdsa.PublicKey).Equal(&renewedKey.PublicKey) {
+		t.Fatalf("renewed certificate CN %s", rc.Subject.CommonName)
 	}
 
 	// CA roll-over: both anchors, then only the new one.
@@ -178,6 +194,9 @@ func TestCollectorPKI(t *testing.T) {
 	fresh, err := ca.Sign(bg, csrFor(t, enrolled.ID, collectorKey), f.OrgA, enrolled.ID)
 	if err != nil || string(parseCert(t, fresh.CertificatePEM).AuthorityKeyId) == string(cert.AuthorityKeyId) {
 		t.Fatalf("certificate after roll-over from the old CA (%v)", err)
+	}
+	if fresh.CABundlePEM != bundle {
+		t.Fatal("the CA bundle of a certificate issued during the roll-over lacks a trust anchor")
 	}
 	// Another replica uses the same CA from the database.
 	if other, berr := discovery.NewCA(f.App, enc).TrustBundle(bg); berr != nil || other != bundle {
@@ -218,8 +237,10 @@ func TestCollectorPKI(t *testing.T) {
 	if !listed[renewed.Serial] || !listed[enrolled.Certificate.Serial] {
 		t.Fatalf("CRL lists %v", listed)
 	}
-	if w = call(ctx, http.MethodPost, renewPath, jsonBody(map[string]any{"csr": csrFor(t, enrolled.ID, collectorKey)})); w.Code != http.StatusForbidden {
-		t.Fatalf("renewal of a disabled collector: %d", w.Code)
+	before := certificates()
+	otherKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if resp = renew(time.Now().UTC().Add(55*24*time.Hour), renewed.CertificatePEM, renewedKey, otherKey); resp.Error != discovery.RenewalNotAuthorized || certificates() != before {
+		t.Fatalf("renewal of a disabled collector: %+v", resp)
 	}
 
 	// The CA key is stored encrypted.
