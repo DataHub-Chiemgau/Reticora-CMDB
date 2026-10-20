@@ -150,7 +150,9 @@ func TestResolveReviewItemCreate(t *testing.T) {
 		Kind:           ReviewKindAmbiguousIdentity,
 		Status:         ReviewStatusOpen,
 		CandidateCIIDs: []string{"ci-a"},
-		Payload:        map[string]any{"name": "brand-new", "ci_type_name": "server"},
+		// An org-wide sighting: the payload keeps the record's client
+		// (WP-369).
+		Payload: map[string]any{"name": "brand-new", "ci_type_name": "server", "client_id": ""},
 	}
 	repo.CreateReviewItem(context.Background(), item)
 

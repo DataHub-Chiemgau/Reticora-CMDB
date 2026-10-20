@@ -530,3 +530,4 @@ AUT-09;[B];B;backend/internal/identity/handler_test.go;WP-367
 CI-04;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
 OVR-01;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
 API-07;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
+CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-369

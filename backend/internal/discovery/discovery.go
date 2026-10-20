@@ -1173,24 +1173,17 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 			continue
 		}
 		clientID, siteID := h.deviceReviewScope(ctx, orgID, item)
+		// The record with its client and identity, for new (CI-13).
+		payload := devicePayload(item)
+		payload["reason"] = "unknown_ci_type"
 		opened, openErr := h.openReview(ctx, &ReviewItem{
 			OrganizationID: orgID,
 			Kind:           ReviewKindUnclassifiedDevice,
 			Status:         ReviewStatusOpen,
 			ClientID:       clientID,
 			SiteID:         siteID,
-			Payload: map[string]any{
-				"reason":        "unknown_ci_type",
-				"ci_type_name":  item.CITypeName,
-				"name":          item.Name,
-				"manufacturer":  item.Manufacturer,
-				"model":         item.Model,
-				"serial_number": item.SerialNumber,
-				"management_ip": item.ManagementIP,
-				"fingerprint":   item.Fingerprint,
-				"raw_data":      item.RawData,
-			},
-			ObjectKey: deviceKey(item),
+			Payload:        payload,
+			ObjectKey:      deviceKey(item),
 		})
 		if openErr != nil {
 			return nil, openErr

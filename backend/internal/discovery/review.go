@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -166,27 +167,18 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 			// The device already exists as generic_device CI.
 			return false, refused(http.StatusConflict, "the device is already recorded as generic_device; set its type on the CI and dismiss the item")
 		}
-		nowTime := time.Now().UTC()
-		newItem := ci.Item{
-			OrganizationID:  orgID,
-			CITypeID:        payloadString(item.Payload, "ci_type_name"),
-			Name:            payloadString(item.Payload, "name"),
-			Status:          "active",
-			Manufacturer:    payloadString(item.Payload, "manufacturer"),
-			Model:           payloadString(item.Payload, "model"),
-			SerialNumber:    payloadString(item.Payload, "serial_number"),
-			ManagementIP:    payloadString(item.Payload, "management_ip"),
-			Hostname:        payloadString(item.Payload, "hostname"),
-			FQDN:            payloadString(item.Payload, "fqdn"),
-			Attributes:      map[string]any{"review_item_id": item.ID},
-			DiscoverySource: ci.SourceSweep,
-			FirstSeenAt:     &nowTime,
-			LastSeenAt:      &nowTime,
-		}
-		if err := h.ciRepo.Create(ctx, &newItem); err != nil {
-			return false, err
-		}
-		res.Note = "created new CI " + newItem.ID
+		// The CI, its provenance and the resolution commit together: a
+		// resolution the principal may not write (E-09) leaves no CI.
+		err := h.inTx(ctx, orgID, func(ctx context.Context) error {
+			ciID, err := h.createReviewedDevice(ctx, item)
+			if err != nil {
+				return err
+			}
+			res.Note = "created new CI " + ciID
+			_, err = h.repo.ResolveReviewItem(ctx, orgID, item.ID, res)
+			return err
+		})
+		return err == nil, err
 	case reviews.ActionAccept:
 		// The observed identity values replace the stored ones.
 		ciID := payloadString(item.Payload, "matched_ci_id")
@@ -211,6 +203,107 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 		res.Note = "accepted the observed values on " + ciID
 	}
 	return false, nil
+}
+
+// createReviewedDevice creates the CI of the device whose record a review
+// item keeps (devicePayload) as the ingest creates a new device (CI-13): the
+// type name resolved, the reported values checked against the field rules,
+// identity values that identify nothing or that another CI holds left out,
+// the provenance of every field recorded. Client and site are those of the
+// item (reviewedDeviceScope), so the next sighting matches the CI.
+func (h *Handler) createReviewedDevice(ctx context.Context, item *ReviewItem) (string, error) {
+	orgID := item.OrganizationID
+	clientID, siteID, err := h.reviewedDeviceScope(ctx, item)
+	if err != nil {
+		return "", err
+	}
+	device := reviewedDevice(item.Payload)
+	device.ClientID = clientID
+	typeID := strings.TrimSpace(device.CITypeName)
+	if typeID != "" && !isUUID(typeID) {
+		// The type of an unknown_ci_type item may exist by now.
+		types, lookupErr := h.lookupTypes(ctx, orgID, []string{typeID})
+		if lookupErr != nil {
+			return "", lookupErr
+		}
+		if id := types[typeID]; id != "" {
+			typeID = id
+		}
+	}
+	candidates, err := h.identityCandidates(ctx, orgID, &device)
+	if err != nil {
+		return "", err
+	}
+	if _, err = h.dropInvalidObserved(ctx, orgID, typeID, "", &device); err != nil {
+		return "", err
+	}
+	withoutBlocklistedIdentity(&device)
+	withoutTakenIdentity(&device, candidates)
+	source := device.Source
+	if source == "" {
+		source = ci.SourceSweep
+	}
+	newItem := discoveredCI(orgID, &device, typeID, source)
+	// The site is the root of its location tree; the database derives
+	// site_id from the location (DB-05).
+	newItem.LocationID = siteID
+	newItem.Attributes["review_item_id"] = item.ID
+	if err := h.ciRepo.Create(ctx, &newItem); err != nil {
+		return "", err
+	}
+	if err := h.recordDiscoveredMany(ctx, orgID, newItem.ID, discoveredFields(&device), source, device.ObservedAt); err != nil {
+		return "", err
+	}
+	return newItem.ID, nil
+}
+
+// reviewedDeviceScope returns the client and site of the CI new creates. The
+// columns of the item decide (WP-342): the database derives them from the
+// candidate CIs or, without candidates, keeps those of the device's record
+// or collector. Without a client column the record in the payload decides
+// (client_id "" for an org-wide sighting). An item from before the payload
+// kept the client takes the client its candidate CIs share; otherwise new
+// is refused, since a guess could hand the device to another client.
+func (h *Handler) reviewedDeviceScope(ctx context.Context, item *ReviewItem) (clientID, siteID string, err error) {
+	if item.ClientID != "" {
+		return item.ClientID, item.SiteID, nil
+	}
+	if recorded, ok := item.Payload["client_id"].(string); ok {
+		siteID = item.SiteID
+		if siteID == "" && recorded != "" {
+			siteID = payloadString(item.Payload, "site_id")
+		}
+		return recorded, siteID, nil
+	}
+	clientID, ok, err := h.candidateClient(ctx, item.OrganizationID, item.CandidateCIIDs)
+	if err != nil {
+		return "", "", err
+	}
+	if !ok {
+		return "", "", refused(http.StatusUnprocessableEntity,
+			"the item does not record the client of the device; dismiss it and wait for the next sighting")
+	}
+	return clientID, item.SiteID, nil
+}
+
+// candidateClient returns the client all candidate CIs share ("" when all
+// are org-wide). ok is false without candidates, when their clients differ
+// or when one cannot be read (soft-deleted or not visible).
+func (h *Handler) candidateClient(ctx context.Context, orgID string, ids []string) (clientID string, ok bool, err error) {
+	for i, id := range ids {
+		candidate, getErr := h.ciRepo.GetByID(ctx, orgID, id)
+		if isNotFound(getErr) {
+			return "", false, nil
+		}
+		if getErr != nil {
+			return "", false, getErr
+		}
+		if i > 0 && candidate.ClientID != clientID {
+			return "", false, nil
+		}
+		clientID = candidate.ClientID
+	}
+	return clientID, len(ids) > 0, nil
 }
 
 func isNotFound(err error) bool {
@@ -334,21 +427,8 @@ func reviewItemFromConflict(orgID string, incoming IngestItem, result ReconcileR
 	if len(result.CandidateCIIDs) == 0 {
 		return nil
 	}
-	payload := map[string]any{
-		"criterion":     result.Criterion,
-		"ci_type_name":  incoming.CITypeName,
-		"name":          incoming.Name,
-		"manufacturer":  incoming.Manufacturer,
-		"model":         incoming.Model,
-		"serial_number": incoming.SerialNumber,
-		"management_ip": incoming.ManagementIP,
-		"hardware_uuid": incoming.HardwareUUID,
-		"primary_mac":   incoming.PrimaryMAC,
-		"hostname":      incoming.Hostname,
-		"fqdn":          incoming.FQDN,
-		"fingerprint":   incoming.Fingerprint,
-		"raw_data":      incoming.RawData,
-	}
+	payload := devicePayload(&incoming)
+	payload["criterion"] = result.Criterion
 	return &ReviewItem{
 		OrganizationID: orgID,
 		Kind:           ReviewKindAmbiguousIdentity,
@@ -356,6 +436,55 @@ func reviewItemFromConflict(orgID string, incoming IngestItem, result ReconcileR
 		Payload:        payload,
 		CandidateCIIDs: result.CandidateCIIDs,
 		ObjectKey:      deviceKey(&incoming),
+	}
+}
+
+// devicePayload keeps the record of a device in the payload of a review
+// item that new may turn into a CI (ambiguous_identity, resurrected_device,
+// unclassified_device of an unknown type): what the ingest would create the
+// CI from, with the client and site of the record ("" for an org-wide
+// sighting, CI-13).
+func devicePayload(item *IngestItem) map[string]any {
+	return map[string]any{
+		"ci_type_name":  item.CITypeName,
+		"name":          item.Name,
+		"manufacturer":  item.Manufacturer,
+		"model":         item.Model,
+		"serial_number": item.SerialNumber,
+		"management_ip": item.ManagementIP,
+		"hardware_uuid": item.HardwareUUID,
+		"primary_mac":   item.PrimaryMAC,
+		"hostname":      item.Hostname,
+		"fqdn":          item.FQDN,
+		"sys_object_id": item.SysObjectID,
+		"fingerprint":   item.Fingerprint,
+		"raw_data":      item.RawData,
+		"source":        item.Source,
+		"client_id":     item.ClientID,
+		"site_id":       item.SiteID,
+	}
+}
+
+// reviewedDevice is the device record devicePayload kept; client and site
+// are left to reviewedDeviceScope.
+func reviewedDevice(payload map[string]any) IngestItem {
+	fingerprint, _ := payload["fingerprint"].(map[string]any)
+	rawData, _ := payload["raw_data"].(map[string]any)
+	return IngestItem{
+		CITypeName:   payloadString(payload, "ci_type_name"),
+		Name:         payloadString(payload, "name"),
+		Manufacturer: payloadString(payload, "manufacturer"),
+		Model:        payloadString(payload, "model"),
+		SerialNumber: payloadString(payload, "serial_number"),
+		ManagementIP: payloadString(payload, "management_ip"),
+		HardwareUUID: payloadString(payload, "hardware_uuid"),
+		PrimaryMAC:   payloadString(payload, "primary_mac"),
+		Hostname:     payloadString(payload, "hostname"),
+		FQDN:         payloadString(payload, "fqdn"),
+		SysObjectID:  payloadString(payload, "sys_object_id"),
+		Fingerprint:  fingerprint,
+		RawData:      rawData,
+		Source:       payloadString(payload, "source"),
 	}
 }
 
