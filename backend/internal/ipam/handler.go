@@ -67,6 +67,10 @@ func org(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 func writeRepoError(w http.ResponseWriter, err error, notFoundMsg string) {
+	// A refused field, e.g. a VLAN of another client (422 vlan_id).
+	if api.WriteFieldError(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", notFoundMsg)
@@ -196,7 +200,9 @@ func (h *Handler) UpdateSubnet(w http.ResponseWriter, r *http.Request) {
 	}
 	s, err := h.repo.UpdateSubnet(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
+		if !api.WriteFieldError(w, err) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
+		}
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, s)

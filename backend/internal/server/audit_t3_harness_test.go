@@ -4,8 +4,8 @@ package server_test
 // its own). It runs the complete server.NewRouter with authorization and the
 // OpenAPI validation middleware, as cmd/server/main.go wires it, against
 // PostgreSQL. Used by audit_t3_review_routes_integration_test.go (WP-088
-// regression) and audit_t3_router_auditdefect_test.go (WP-088, WP-091
-// defects).
+// regression), audit_t3_router_auditdefect_test.go (WP-088, WP-091
+// defects) and vlan_routes_integration_test.go (WP-371).
 //
 // Retest (regression part):
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_03?sslmode=disable \

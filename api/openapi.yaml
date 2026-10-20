@@ -6870,6 +6870,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -6914,6 +6916,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     delete:
       operationId: deleteSubnet
       tags: [IPAM]
@@ -7216,6 +7220,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -7262,6 +7268,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     delete:
       operationId: deleteNetworkInterface
       tags: [IPAM]
@@ -17659,7 +17667,10 @@ components:
           type: string
         vlan_id:
           type: string
-          description: VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update.
+          description: >-
+            VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it
+            on update. The VLAN is one the caller can see, of the subnet's client
+            or org-wide (TEN-05); otherwise 422 with field vlan_id.
         gateway:
           type: string
         dns_servers:
@@ -17694,7 +17705,10 @@ components:
           type: string
         vlan_id:
           type: string
-          description: VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update.
+          description: >-
+            VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it
+            on update. The VLAN is one the caller can see, of the subnet's client
+            or org-wide (TEN-05); otherwise 422 with field vlan_id.
         gateway:
           type: string
         dns_servers:
@@ -17720,7 +17734,10 @@ components:
           description: Moves the subnet and its addresses to another VRF (empty string = default VRF).
         vlan_id:
           type: string
-          description: VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update.
+          description: >-
+            VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it
+            on update. The VLAN is one the caller can see, of the subnet's client
+            or org-wide (TEN-05); otherwise 422 with field vlan_id.
         gateway:
           type: string
         dns_servers:
@@ -17941,7 +17958,10 @@ components:
           type: integer
         vlan_id:
           type: string
-          description: VLAN of the VLAN catalog (NET-01).
+          description: >-
+            VLAN of the VLAN catalog (NET-01). The VLAN is one the caller can
+            see, of the client of the CI or org-wide (TEN-05); otherwise 422
+            with field vlan_id.
         is_management:
           type: boolean
         is_uplink:
@@ -17983,7 +18003,10 @@ components:
           type: integer
         vlan_id:
           type: string
-          description: VLAN of the VLAN catalog (NET-01).
+          description: >-
+            VLAN of the VLAN catalog (NET-01). The VLAN is one the caller can
+            see, of the client of the CI or org-wide (TEN-05); otherwise 422
+            with field vlan_id.
         is_management:
           type: boolean
         is_uplink:
@@ -18014,7 +18037,10 @@ components:
           type: integer
         vlan_id:
           type: string
-          description: VLAN of the VLAN catalog (NET-01).
+          description: >-
+            VLAN of the VLAN catalog (NET-01). The VLAN is one the caller can
+            see, of the client of the CI or org-wide (TEN-05); otherwise 422
+            with field vlan_id.
         is_management:
           type: boolean
         is_uplink:

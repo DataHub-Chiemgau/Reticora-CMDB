@@ -10183,7 +10183,7 @@ export interface components {
       /** @description VRF of the subnet (CH10); the CIDR is unique per VRF. */
       vrf_id?: string;
       name?: string;
-      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. The VLAN is one the caller can see, of the subnet's client or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
@@ -10201,7 +10201,7 @@ export interface components {
       /** @description VRF of the subnet; the organization's default VRF when omitted. */
       vrf_id?: string;
       name?: string;
-      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. The VLAN is one the caller can see, of the subnet's client or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
@@ -10214,7 +10214,7 @@ export interface components {
       name?: string;
       /** @description Moves the subnet and its addresses to another VRF (empty string = default VRF). */
       vrf_id?: string;
-      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. The VLAN is one the caller can see, of the subnet's client or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
@@ -10330,7 +10330,7 @@ export interface components {
       if_type: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
       mtu?: number;
-      /** @description VLAN of the VLAN catalog (NET-01). */
+      /** @description VLAN of the VLAN catalog (NET-01). The VLAN is one the caller can see, of the client of the CI or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       is_management: boolean;
       is_uplink: boolean;
@@ -10353,7 +10353,7 @@ export interface components {
       if_type?: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
       mtu?: number;
-      /** @description VLAN of the VLAN catalog (NET-01). */
+      /** @description VLAN of the VLAN catalog (NET-01). The VLAN is one the caller can see, of the client of the CI or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       is_management?: boolean;
       is_uplink?: boolean;
@@ -10370,7 +10370,7 @@ export interface components {
       if_type?: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
       mtu?: number;
-      /** @description VLAN of the VLAN catalog (NET-01). */
+      /** @description VLAN of the VLAN catalog (NET-01). The VLAN is one the caller can see, of the client of the CI or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       is_management?: boolean;
       is_uplink?: boolean;
@@ -19170,6 +19170,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -19249,6 +19250,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listSubnetAddresses: {
@@ -19649,6 +19651,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -19729,6 +19732,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   returnAssignment: {

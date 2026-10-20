@@ -533,3 +533,7 @@ API-07;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
 CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-369
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/ci_scope_integration_test.go;WP-370
 AST-05;[P2];B;backend/internal/ci/ci_scope_integration_test.go;WP-370
+NET-08;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-371
+NET-01;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-371
+NET-02;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-371
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/server/vlan_routes_integration_test.go;WP-371
