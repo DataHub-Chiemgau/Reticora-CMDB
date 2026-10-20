@@ -5516,7 +5516,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Ask the governed RAG assistant */
+    /**
+     * Ask the governed RAG assistant
+     * @description The question and the matching CI context are sent to the external AI provider only for an organization that opted in to external AI processing (organization.ai_opt_in) and holds the ai add-on (AI-02). Otherwise the request is refused with 403 and the problem type ai-opt-in-required before a conversation is created, anything is retrieved or the provider is called.
+     */
     post: operations['askAI'];
     delete?: never;
     options?: never;
@@ -24630,7 +24633,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Missing permission, the ai add-on is not entitled (feature-not-entitled), or the organization has not opted in to external AI processing (https://reticora.io/problems/ai-opt-in-required). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       503: components['responses']['ServiceUnavailable'];
     };
   };

@@ -410,6 +410,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		exportWorker.Events = opts.Events
 	}
 	topologyHandler := topology.NewHandler(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType)
+	// The Ask path sends the question and the CI context to the provider only
+	// with the organization's opt-in and the ai add-on (AI-02); the same
+	// consent as the CI chunk indexer of cmd/server.
+	var aiEntitlements ai.EntitlementChecker
+	if opts.Entitlements != nil {
+		aiEntitlements = opts.Entitlements
+	}
+	aiConsent := ai.NewOrgConsent(repos.AI, aiEntitlements)
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -473,7 +481,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		historyHandler(repos.History, historyJobs),
 		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission),
 		credential.NewHandler(opts.Credentials),
-		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
+		ai.NewHandler(repos.AI, opts.AIProvider,
+			ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider).WithConsent(aiConsent)).
+			WithConsent(aiConsent),
 		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
 		signup.NewHandler(opts.Signup).WithProtection(opts.SignupProtection),
 		modulesHandler{set: opts.Modules},

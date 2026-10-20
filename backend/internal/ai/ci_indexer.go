@@ -59,6 +59,14 @@ type OrgConsent struct {
 	Entitlements EntitlementChecker
 }
 
+// NewOrgConsent is the consent wiring shared by cmd/server and the router:
+// the opt-in stored by the AI repository and the entitlements. A repository
+// without opt-in denies every organization.
+func NewOrgConsent(repo Repository, entitlements EntitlementChecker) OrgConsent {
+	optIn, _ := repo.(OptInSource)
+	return OrgConsent{OptIn: optIn, Entitlements: entitlements}
+}
+
 // AllowsExternalAI implements Consent.
 func (c OrgConsent) AllowsExternalAI(ctx context.Context, orgID string) bool {
 	if c.OptIn == nil || c.Entitlements == nil || !c.Entitlements.IsEnabled(ctx, orgID, FeatureAI) {

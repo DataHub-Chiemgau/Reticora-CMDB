@@ -14,10 +14,22 @@ type Handler struct {
 	repo      Repository
 	provider  Provider
 	retriever *Retriever
+	consent   Consent
 }
+
+// ProblemAIOptInRequired: the organization has not opted in to external AI
+// processing or does not hold the ai add-on (AI-02).
+const ProblemAIOptInRequired = "https://reticora.io/problems/ai-opt-in-required"
 
 func NewHandler(repo Repository, provider Provider, retriever *Retriever) *Handler {
 	return &Handler{repo: repo, provider: provider, retriever: retriever}
+}
+
+// WithConsent attaches the per-organization consent of Ask (AI-02). Without
+// one, Ask refuses every organization (fail-closed).
+func (h *Handler) WithConsent(consent Consent) *Handler {
+	h.consent = consent
+	return h
 }
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/ai/conversations", h.ListConversations)
@@ -65,6 +77,14 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	// The question and the CI context leave the installation only with the
+	// organization's opt-in and the ai add-on (AI-02): without them no
+	// conversation is created, nothing is retrieved or sent to the provider.
+	if h.consent == nil || !h.consent.AllowsExternalAI(r.Context(), t.OrganizationID) {
+		api.WriteProblem(w, http.StatusForbidden, ProblemAIOptInRequired, "Forbidden",
+			"the organization has not opted in to external AI processing or does not hold the ai add-on")
 		return
 	}
 	var req AskRequest

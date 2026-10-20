@@ -56,7 +56,6 @@ go;backend/internal/server;TestAuditDefectNotificationAdministrationNeedsNotific
 go;backend/internal/server;TestAuditDefectRouteAuditFailureLeavesNoUnauditedMutation;F-149
 go;backend/internal/server;TestAuditDefectRouteAuditStoresOldAndNewValues;F-148
 go;backend/internal/server;TestAuditScopeSuggestedAuthzAndClientIsolation;F-031
-go;backend/internal/server;TestAuditT2AIAskRequiresOrgOptIn;F-073
 go;backend/internal/server;TestAuditT2AIOptInSettableThroughAPI;F-074
 go;backend/internal/server;TestAuditT2ContractHasNoBareArrayLists;F-075
 go;backend/internal/server;TestAuditT2CookieOnlyRefreshThroughProductionChain;F-018
