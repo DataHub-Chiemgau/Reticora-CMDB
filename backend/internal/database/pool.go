@@ -38,14 +38,15 @@ const PoolMaxConns = 25
 // NewPool creates a pgx connection pool suitable for production use.
 //
 // Every connection switches into the restricted application role before it is
-// handed out, so RLS policies apply even when the configured login role is a
-// superuser or the schema owner. If isolation cannot be guaranteed, pool
-// creation fails instead of silently serving cross-tenant data. Every
-// connection uses the UTF-8 client encoding the quoting of the tenant
-// transaction relies on (pinClientEncoding); another one is refused.
+// handed out, so RLS policies apply to every request. If isolation cannot be
+// guaranteed, pool creation fails instead of silently serving cross-tenant
+// data. Every connection uses the UTF-8 client encoding the quoting of the
+// tenant transaction relies on (pinClientEncoding); another one is refused.
 //
-// On top of that the runtime login is checked: the effective rights must
-// match the role contract (VerifyRoleContract). cmd/server is the caller.
+// On top of that the runtime login is checked: a login (session_user) that is
+// SUPERUSER or BYPASSRLS or reaches such a role is refused, because RESET ROLE
+// would undo the switch (VerifyRLSEnforced, F-057), and the effective rights
+// must match the role contract (VerifyRoleContract). cmd/server is the caller.
 func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	pool, err := newAppRolePool(ctx, databaseURL)
 	if err != nil {
@@ -165,10 +166,17 @@ func NewMaintenancePool(ctx context.Context, databaseURL string) (*pgxpool.Pool,
 // VerifyRLSEnforced fails when the effective database role can bypass Row Level
 // Security. Tenant isolation in Reticora is enforced by RLS policies keyed on
 // app.org_id; a superuser or BYPASSRLS role turns every policy into a no-op and
-// exposes all tenants to each other. It is part of the runtime login check of
-// NewPool; NewAdminPool only runs verifyCurrentRoleEnforcesRLS.
+// exposes all tenants to each other. The login (session_user) is checked as
+// well: a login that is SUPERUSER or BYPASSRLS, or reaches such a role
+// inherited or by SET ROLE, gets it back with RESET ROLE on any pooled
+// connection (F-057), so it fails with a *RoleContractError naming the
+// session user. It is part of the runtime login check of NewPool;
+// NewAdminPool only runs verifyCurrentRoleEnforcesRLS.
 func VerifyRLSEnforced(ctx context.Context, pool *pgxpool.Pool) error {
-	return verifyCurrentRoleEnforcesRLS(ctx, pool)
+	if err := verifyCurrentRoleEnforcesRLS(ctx, pool); err != nil {
+		return err
+	}
+	return verifyLoginCannotEscalate(ctx, pool)
 }
 
 // verifyCurrentRoleEnforcesRLS fails when current_user, the role the

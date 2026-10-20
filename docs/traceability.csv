@@ -502,3 +502,5 @@ TEC-06;[B], [Q] Spike;B;backend/internal/monitoring/timescale_rls_spike_integrat
 MON-01;[B];B;backend/internal/monitoring/timescale_rls_spike_integration_test.go;WP-350
 TEN-02;[B];B;backend/internal/monitoring/audit_t1_metric_scope_integration_test.go;WP-350
 TEN-03;[B];B;backend/internal/database/tenantguard_test.go;WP-351
+TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-352
+DB-04;nicht geliefert;B;backend/internal/database/role_check_integration_test.go;WP-352
