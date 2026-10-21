@@ -1,42 +1,35 @@
 #!/usr/bin/env bash
 #
-# install-cloud-issuer-order.test.sh — Phase-1 acceptance audit, group T5,
-# DEFECT test (fails until the installer is fixed; not wired into CI).
+# install-cloud-issuer-order.test.sh — order of the strict OIDC issuer checks
+# in install-cloud.sh (WP-095/WP-385, INS-02, F-035).
 #
-# WP-095 (INS-02): "Installer: Issuer-Prüfung extern und containerseitig".
+# With a public domain the issuer https://<domain>/realms/reticora (the
+# default of install-cloud.sh) is served by the frontend nginx (/realms/ proxy
+# to Keycloak), so it cannot answer before `compose up -d server frontend`.
+# start_stack therefore checks the issuer from the host and from the backend
+# container only once server and frontend are healthy; an unreachable issuer
+# still aborts the installation with the troubleshooting hint. Moved from
+# tests/audit/ (Phase-1 acceptance audit, group T5) by WP-385.
 #
-# Finding encoded here:
-#   P1 "OIDC issuer check runs before the frontend (issuer proxy) is started,
-#       so domain/TLS installations abort": check_issuer_from_host and
-#       check_issuer_from_container are called from validate_keycloak_bootstrap,
-#       which start_stack runs before `compose up -d server frontend`. With a
-#       public domain the issuer https://<domain>/realms/reticora (the default
-#       of install-cloud.sh) is served by the frontend nginx (/realms/ proxy to
-#       Keycloak), so it cannot answer yet: start_stack dies with "The OIDC
-#       issuer … is not reachable from this host", on every re-run as well.
-# Test gap closed: critical "No test of the issuer-check order relative to the
-#   frontend start".
-#
-# Model (as in scratch probe verify-B12/issuer/order.sh): compose_cmd records
-# every call and starts the "frontend" on `up -d server frontend`; the stubbed
-# curl answers https://<domain>/* only once the frontend runs, the Keycloak
-# host port http://localhost:8180/* always; the backend container's
-# `server -check-oidc-issuer` reaches a domain issuer only through the
-# frontend as well. All other side effects are stubbed.
+# Model: compose_cmd records every call and starts the "frontend" on
+# `up -d server frontend`; the stubbed curl answers https://<domain>/* only
+# once the frontend runs, the Keycloak host port http://localhost:8180/*
+# always; the backend container's `server -check-oidc-issuer` reaches a domain
+# issuer only through the frontend as well. All other side effects are
+# stubbed.
 #
 # Cases:
 #   - domain issuer: start_stack completes (rc 0) and both issuer checks run
-#     after the frontend start                                    (fails today)
-#   - domain issuer never reachable: rc 1 with the troubleshooting hint
-#                                                                 (control)
+#     after the frontend start
+#   - domain issuer never reachable: rc 1 with the troubleshooting hint, after
+#     the frontend start
 #   - IP issuer http://<ip>:8180/realms/reticora: still checked from host and
-#     container, rc 0; unreachable IP issuer: rc 1                (control)
+#     container, rc 0; unreachable IP issuer: rc 1
 #
-# Retest:
-#   ./tests/audit/install-cloud-issuer-order.test.sh
+# Usage: ./tests/install-cloud-issuer-order.test.sh
 set -uo pipefail
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/.."
 
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -127,6 +120,7 @@ stub_stack() {
     sync_db_password() { :; }
     run_migrations() { :; }
     seed_default_organization() { :; }
+    ensure_runtime_login() { :; }
     create_initial_admin() { echo "create_initial_admin" >> "$CALLS"; }
     show_service_logs() { :; }
     tls_cert_is_selfsigned() { return 1; }
@@ -134,9 +128,8 @@ stub_stack() {
 
 line_of() { grep -n -F -- "$1" "$CALLS" | head -n 1 | cut -d: -f1; }
 
-# P1: a public-domain installation must complete; the issuer is checked
-# (from the host and from the backend container) once the frontend that
-# serves it runs.
+# A public-domain installation completes; the issuer is checked (from the host
+# and from the backend container) once the frontend that serves it runs.
 test_domain_issuer_checked_after_frontend_start() {
     RETICORA_PUBLIC_BASE_URL=https://cmdb.example.test
     RETICORA_TLS_DOMAIN=cmdb.example.test
@@ -155,20 +148,22 @@ test_domain_issuer_checked_after_frontend_start() {
     [ -n "$cont" ] && [ "$cont" -gt "$up" ] || { echo "container issuer check missing or before the frontend start (up=$up container=${cont:-none})"; return 1; }
 }
 
-# Control: an issuer that never answers still aborts the installation with
-# the troubleshooting hint.
+# An issuer that never answers still aborts the installation (rc 1) with the
+# troubleshooting hint, once the frontend that would serve it runs.
 test_unreachable_domain_issuer_aborts() {
     RETICORA_PUBLIC_BASE_URL=https://cmdb.example.test
     RETICORA_TLS_DOMAIN=cmdb.example.test
     stub_stack unreachable https://cmdb.example.test/realms/reticora never
     local out rc
     out="$( ( start_stack ) 2>&1 )"; rc=$?
-    [ "$rc" -ne 0 ] || { echo "start_stack succeeded with an unreachable issuer"; return 1; }
-    printf '%s' "$out" | grep -q "OIDC issuer check failed" || { echo "troubleshooting hint missing"; return 1; }
+    [ "$rc" -eq 1 ] || { echo "start_stack returned $rc with an unreachable issuer, want 1"; return 1; }
+    printf '%s' "$out" | grep -q "not reachable from this host" || { echo "host check did not fail"; return 1; }
+    printf '%s' "$out" | grep -q "docs/troubleshooting-installation.md, 'OIDC issuer check failed'" || { echo "troubleshooting hint missing"; return 1; }
+    [ -n "$(line_of 'compose up -d server frontend')" ] || { echo "aborted before the frontend start"; return 1; }
 }
 
-# Control: an IP issuer on the Keycloak port is still checked from host and
-# container, and an unreachable one aborts.
+# An IP issuer on the Keycloak port is still checked from host and container,
+# and an unreachable one aborts (rc 1).
 test_ip_issuer_still_checked() {
     RETICORA_PUBLIC_BASE_URL=http://10.20.30.40
     RETICORA_TLS_DOMAIN=""
@@ -177,15 +172,15 @@ test_ip_issuer_still_checked() {
     [ -n "$(line_of 'host-issuer-check ok')" ] || { echo "host issuer check not executed"; return 1; }
     [ -n "$(line_of 'check-oidc-issuer ok')" ] || { echo "container issuer check not executed"; return 1; }
     stub_stack ip-down http://10.20.30.40:8180/realms/reticora never
-    if ( start_stack ) >/dev/null 2>&1; then
-        echo "start_stack succeeded with an unreachable IP issuer"
-        return 1
-    fi
+    local out rc
+    out="$( ( start_stack ) 2>&1 )"; rc=$?
+    [ "$rc" -eq 1 ] || { echo "start_stack returned $rc with an unreachable IP issuer, want 1"; return 1; }
+    printf '%s' "$out" | grep -q "OIDC issuer check failed" || { echo "troubleshooting hint missing"; return 1; }
 }
 
 run_test "issuer: domain issuer is checked after the frontend start (start_stack rc 0)" test_domain_issuer_checked_after_frontend_start
-run_test "issuer: an unreachable domain issuer aborts with the hint (control)"           test_unreachable_domain_issuer_aborts
-run_test "issuer: an IP issuer is still checked; unreachable aborts (control)"           test_ip_issuer_still_checked
+run_test "issuer: an unreachable domain issuer aborts with the hint (rc 1)"              test_unreachable_domain_issuer_aborts
+run_test "issuer: an IP issuer is still checked; unreachable aborts (rc 1)"              test_ip_issuer_still_checked
 
 echo
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"

@@ -92,7 +92,6 @@ sh;tests/audit/g1-gate-evidence.test.sh;rep01_pt_lowercase;F-300
 sh;tests/audit/g1-gate-evidence.test.sh;rep01_sr_bold_critical;F-300
 sh;tests/audit/g1-gate-evidence.test.sh;subprocessors;F-137
 sh;tests/audit/install-cloud-acme.test.sh;acme;F-033 F-034
-sh;tests/audit/install-cloud-issuer-order.test.sh;issuer;F-035
 sh;tests/audit/log-retention.test.sh;NFR-06 logs 30 days;F-150
 sh;tests/audit/ops-config.test.sh;alertmanager_amtool;F-132
 sh;tests/audit/ops-config.test.sh;alertmanager_smtp;F-132

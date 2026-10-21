@@ -390,11 +390,20 @@ valid_optional_email()  { [ -z "$1" ] || valid_email "$1"; }
 
 # ─── .env handling ────────────────────────────────────────────────────────────
 env_get() {
-    # env_get <key> — prints the raw value from the existing .env, if any.
-    local key="$1" line
-    [ -f "$ENV_FILE" ] || return 1
-    line="$(grep -E "^${key}=" "$ENV_FILE" | tail -n 1)" || return 1
+    # env_get <key> [file] — prints the raw value from the existing .env (or
+    # the given file), if any.
+    local key="$1" file="${2:-$ENV_FILE}" line
+    [ -f "$file" ] || return 1
+    line="$(grep -E "^${key}=" "$file" | tail -n 1)" || return 1
     printf '%s' "${line#*=}"
+}
+
+# save_env_previous — copies the current .env to .env.previous (mode 0600,
+# like .env): the values last applied to Keycloak (INS-05, see
+# apply_keycloak_rotation).
+save_env_previous() {
+    rm -f "$ENV_FILE.previous"
+    (umask 077 && cp "$ENV_FILE" "$ENV_FILE.previous") || die "Could not write $ENV_FILE.previous."
 }
 
 write_env() {
@@ -463,6 +472,12 @@ RETICORA_IMAGE_TAG=$RETICORA_IMAGE_TAG
 # Container image garbage collection
 RETICORA_GC_KEEP_IMAGES=$RETICORA_GC_KEEP_IMAGES
 EOF
+    # Before the merge the existing .env is kept as .env.previous — unless the
+    # file of an earlier run is still there: it holds the values Keycloak got
+    # last, e.g. the old admin password when .env was edited for a rotation.
+    if [ -f "$ENV_FILE" ] && [ ! -f "$ENV_FILE.previous" ]; then
+        save_env_previous
+    fi
     merge_env_extras "$tmp"
     mv "$tmp" "$ENV_FILE"
     chmod 600 "$ENV_FILE"
@@ -497,6 +512,8 @@ preflight() {
     # Tools the installer itself needs; missing ones are installed automatically.
     ensure_command curl curl ca-certificates
     ensure_command openssl openssl
+    # Compares the rendered realm with the running Keycloak on a re-run.
+    ensure_command jq jq
 
     detect_container_tooling
     success "Container tooling: ${COMPOSE[*]}"
@@ -1065,8 +1082,9 @@ validate_realm_json() {
 
 # validate_keycloak_bootstrap — post-start checks that go beyond the container
 # healthcheck: the realm must actually be imported and serve its OIDC
-# discovery document at the configured issuer URL, otherwise sign-in fails
-# later in the browser with a hard-to-diagnose error.
+# discovery document, otherwise sign-in fails later in the browser with a
+# hard-to-diagnose error. The configured issuer itself is checked by
+# start_stack once the frontend runs (check_issuer_from_host/_container).
 validate_keycloak_bootstrap() {
     info "Validating the Keycloak bootstrap …"
 
@@ -1112,9 +1130,6 @@ validate_keycloak_bootstrap() {
         die "Keycloak answered the discovery document without an 'issuer' field — the realm import is incomplete."
     fi
     success "Keycloak realm 'reticora' is imported and serving OIDC discovery"
-
-    check_issuer_from_host
-    check_issuer_from_container
 }
 
 # host_primary_ip — the host's primary IPv4 address (the source address of
@@ -1147,6 +1162,17 @@ discovery_issuer() {
 
 ISSUER_TROUBLESHOOTING="see docs/troubleshooting-installation.md, 'OIDC issuer check failed'"
 
+# issuer_check_failed <message> — aborts after a failed issuer check. The
+# checks run after create_initial_admin, so the run that has just created the
+# administrator shows its temporary password here; a re-run does not show it
+# again.
+issuer_check_failed() {
+    if [ -n "$INITIAL_ADMIN_PASSWORD" ]; then
+        printf '%s\n' "$(initial_login_line)" >&2
+    fi
+    die "$*"
+}
+
 # check_issuer_from_host — the configured issuer serves its discovery
 # document to this host and announces exactly itself (INS-02). A
 # self-signed certificate of the installation is trusted explicitly.
@@ -1162,11 +1188,11 @@ check_issuer_from_host() {
         sleep "${RETICORA_ISSUER_RETRY_DELAY:-3}"
     done
     if [ -z "$doc" ]; then
-        die "The OIDC issuer $issuer is not reachable from this host (no discovery document at $issuer/.well-known/openid-configuration). Check DNS, firewall and RETICORA_OIDC_ISSUER_URL ($ISSUER_TROUBLESHOOTING)."
+        issuer_check_failed "The OIDC issuer $issuer is not reachable from this host (no discovery document at $issuer/.well-known/openid-configuration). Check DNS, firewall and RETICORA_OIDC_ISSUER_URL ($ISSUER_TROUBLESHOOTING)."
     fi
     announced="$(printf '%s' "$doc" | discovery_issuer)"
     if [ "${announced%/}" != "$issuer" ]; then
-        die "The OIDC issuer $issuer announces itself as '${announced:-<none>}' — tokens would not match the configured issuer. Align RETICORA_OIDC_ISSUER_URL with the address Keycloak is published under ($ISSUER_TROUBLESHOOTING)."
+        issuer_check_failed "The OIDC issuer $issuer announces itself as '${announced:-<none>}' — tokens would not match the configured issuer. Align RETICORA_OIDC_ISSUER_URL with the address Keycloak is published under ($ISSUER_TROUBLESHOOTING)."
     fi
     success "OIDC issuer $issuer is reachable from this host"
 }
@@ -1178,7 +1204,7 @@ check_issuer_from_container() {
     local out
     if ! out="$(compose_cmd run --rm --no-deps --entrypoint server server -check-oidc-issuer 2>&1)"; then
         printf '%s\n' "$out" | tail -n 5 >&2
-        die "The backend container cannot reach the OIDC issuer $RETICORA_OIDC_ISSUER_URL — sign-in would fail. The issuer must resolve to Keycloak from inside the containers as well ($ISSUER_TROUBLESHOOTING)."
+        issuer_check_failed "The backend container cannot reach the OIDC issuer $RETICORA_OIDC_ISSUER_URL — sign-in would fail. The issuer must resolve to Keycloak from inside the containers as well ($ISSUER_TROUBLESHOOTING)."
     fi
     success "OIDC issuer is reachable from the backend container"
 }
@@ -1409,6 +1435,8 @@ start_stack() {
         show_service_logs frontend
         die "Frontend did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs frontend"
     }
+    # Serve a regenerated bootstrap certificate before the issuer checks below.
+    reload_frontend_after_bootstrap
     # The collector NATS endpoint (mTLS, port 4222) starts once the server
     # has written the collector PKI into the shared volume. It reads the
     # generated pki/edge.conf only at start, so it is recreated on every run:
@@ -1426,6 +1454,12 @@ start_stack() {
         compose_cmd up -d certbot
     fi
     success "All services are up"
+
+    # The strict issuer checks (INS-02) run only now: the default issuer
+    # https://<domain>/realms/reticora is served by the frontend's /realms/
+    # proxy, which cannot answer before the frontend runs (F-035).
+    check_issuer_from_host
+    check_issuer_from_container
 }
 
 run_migrations() {
@@ -1553,22 +1587,127 @@ kcadm() {
     compose_cmd exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"
 }
 
-# kc_user_id <username> — prints the id of the realm user, empty if absent.
+# kc_user_id <username> [realm] — prints the id of the user in the realm
+# (default reticora), empty if absent.
 kc_user_id() {
-    kcadm get users -r reticora -q username="$1" -q exact=true --fields id --format csv --noquotes 2>/dev/null | head -n 1
+    kcadm get users -r "${2:-reticora}" -q username="$1" -q exact=true --fields id --format csv --noquotes 2>/dev/null | head -n 1
 }
 
-# create_initial_admin — removes the demo administrator of earlier releases
-# and creates the individual administrator once: org_admin (MFA required),
-# member of reticora-admin, organization attribute of the default
-# organization, random temporary password and mandatory password change and
-# OTP setup at first login. Re-runs leave an existing administrator alone.
+# ─── Rotation on a re-run (INS-05) ───────────────────────────────────────────
+# Keycloak takes KEYCLOAK_ADMIN_PASSWORD only when it creates the master
+# administrator at its first start, and `start --import-realm` skips an
+# existing realm: neither a rotated admin password nor a rotated
+# RETICORA_OIDC_CLIENT_SECRET or a new redirect URL would reach an existing
+# installation (F-125). apply_keycloak_rotation applies them through the
+# admin CLI. New values travel on kcadm's stdin (-f -), no secret is logged.
+KC_ROTATION_TROUBLESHOOTING="see docs/troubleshooting-installation.md, 'Keycloak admin login or rotation failed'"
+
+# .env settings that reach Keycloak (the redirect URL and the issuer feed the
+# client's redirect URIs and web origins).
+KC_ROTATED_SETTINGS=(KEYCLOAK_ADMIN_PASSWORD RETICORA_OIDC_CLIENT_SECRET RETICORA_OIDC_REDIRECT_URL RETICORA_OIDC_ISSUER_URL)
+
+# report_rotated_settings — names (never values) the settings of
+# KC_ROTATED_SETTINGS whose value differs from the one in .env.previous.
+report_rotated_settings() {
+    local key previous names=()
+    for key in "${KC_ROTATED_SETTINGS[@]}"; do
+        previous="$(env_get "$key" "$ENV_FILE.previous")" || continue
+        [ "$previous" = "${!key}" ] || names+=("$key")
+    done
+    [ "${#names[@]}" -eq 0 ] || info "Changed since the last run: ${names[*]} — applying to Keycloak"
+}
+
+# kc_login <password> — logs the admin CLI in as KEYCLOAK_ADMIN. (kcadm's
+# password prompt on stdin loses its input now and then and hangs.)
+kc_login() {
+    kcadm config credentials --server http://localhost:8080 --realm master \
+        --user "$KEYCLOAK_ADMIN" --password "$1" >/dev/null
+}
+
+# kc_admin_login — logs in with the previous admin password (.env.previous),
+# then with KEYCLOAK_ADMIN_PASSWORD. A login with the previous password sets
+# the configured one, so the old password stops working.
+kc_admin_login() {
+    local previous user_id
+    previous="$(env_get KEYCLOAK_ADMIN_PASSWORD "$ENV_FILE.previous" || true)"
+    if [ -n "$previous" ] && [ "$previous" != "$KEYCLOAK_ADMIN_PASSWORD" ] && kc_login "$previous" 2>/dev/null; then
+        user_id="$(kc_user_id "$KEYCLOAK_ADMIN" master)"
+        [ -n "$user_id" ] || die "The Keycloak administrator $KEYCLOAK_ADMIN is missing in the master realm ($KC_ROTATION_TROUBLESHOOTING)."
+        printf '%s' "$KEYCLOAK_ADMIN_PASSWORD" | jq -Rs '{type: "password", value: ., temporary: false}' \
+            | kcadm update "users/$user_id/reset-password" -r master -f - >/dev/null \
+            || die "Could not set the rotated KEYCLOAK_ADMIN_PASSWORD for $KEYCLOAK_ADMIN ($KC_ROTATION_TROUBLESHOOTING)."
+        kc_login "$KEYCLOAK_ADMIN_PASSWORD" \
+            || die "Keycloak does not accept the rotated KEYCLOAK_ADMIN_PASSWORD for $KEYCLOAK_ADMIN ($KC_ROTATION_TROUBLESHOOTING)."
+        success "Keycloak rotation: password of the administrator $KEYCLOAK_ADMIN set to KEYCLOAK_ADMIN_PASSWORD"
+        return 0
+    fi
+    kc_login "$KEYCLOAK_ADMIN_PASSWORD" \
+        || die "Could not log in to the Keycloak admin API as $KEYCLOAK_ADMIN with KEYCLOAK_ADMIN_PASSWORD${previous:+ or the previous password of $ENV_FILE.previous} ($KC_ROTATION_TROUBLESHOOTING)."
+}
+
+# kc_client_drift <realm file> <clientId> — reads the client of the running
+# realm (JSON) on stdin and prints each of secret, redirectUris and webOrigins
+# whose value differs from the rendered realm; lists compare as sets, the way
+# Keycloak stores them.
+kc_client_drift() {
+    jq -r --arg id "$2" --slurpfile realm "$1" '
+        def norm: if type == "array" then unique else . end;
+        . as $have
+        | ($realm[0].clients[] | select(.clientId == $id)) as $want
+        | ("secret", "redirectUris", "webOrigins")
+        | select(($want[.] | norm) != ($have[.] | norm))'
+}
+
+# sync_realm_client — applies secret, redirectUris and webOrigins of each
+# client of the rendered realm that has a secret to the running realm: one
+# update per differing field; nothing else of the realm is changed.
+sync_realm_client() {
+    local realm_file="$COMPOSE_DIR/.generated/realm-reticora.json" client_id uuid current drift field changed=0
+    [ -f "$realm_file" ] || die "The rendered realm file $realm_file is missing."
+    for client_id in $(jq -r '.clients[] | select(has("secret")) | .clientId' "$realm_file"); do
+        uuid="$(kcadm get clients -r reticora -q clientId="$client_id" --fields id --format csv --noquotes 2>/dev/null | head -n 1)"
+        [ -n "$uuid" ] || die "The Keycloak realm 'reticora' has no client $client_id ($KC_ROTATION_TROUBLESHOOTING)."
+        if ! current="$(kcadm get "clients/$uuid" -r reticora 2>/dev/null)" \
+            || ! drift="$(printf '%s' "$current" | kc_client_drift "$realm_file" "$client_id")"; then
+            die "Could not read the Keycloak client $client_id ($KC_ROTATION_TROUBLESHOOTING)."
+        fi
+        for field in $drift; do
+            jq -c --arg id "$client_id" --arg f "$field" '.clients[] | select(.clientId == $id) | {($f): .[$f]}' "$realm_file" \
+                | kcadm update "clients/$uuid" -r reticora -f - >/dev/null \
+                || die "Could not apply $field of the rendered realm to the Keycloak client $client_id ($KC_ROTATION_TROUBLESHOOTING)."
+            if [ "$field" = secret ]; then
+                success "Keycloak rotation: client $client_id secret set to RETICORA_OIDC_CLIENT_SECRET"
+            else
+                success "Keycloak rotation: client $client_id $field set to $(jq -r --arg id "$client_id" --arg f "$field" \
+                    '.clients[] | select(.clientId == $id) | .[$f] | join(", ")' "$realm_file")"
+            fi
+            changed=1
+        done
+    done
+    [ "$changed" -eq 1 ] || success "Keycloak client secret, redirect URIs and web origins match the configuration"
+}
+
+# apply_keycloak_rotation — logs the admin CLI in (rotating the admin
+# password) and applies the client settings of the rendered realm; afterwards
+# .env is kept as .env.previous, the baseline of the next run.
+apply_keycloak_rotation() {
+    info "Applying the Keycloak administrator password and client settings …"
+    report_rotated_settings
+    kc_admin_login
+    sync_realm_client
+    [ ! -f "$ENV_FILE" ] || save_env_previous
+}
+
+# create_initial_admin — applies a rotation (apply_keycloak_rotation), removes
+# the demo administrator of earlier releases and creates the individual
+# administrator once: org_admin (MFA required), member of reticora-admin,
+# organization attribute of the default organization, random temporary
+# password and mandatory password change and OTP setup at first login.
+# Re-runs leave an existing administrator alone.
 create_initial_admin() {
     INITIAL_ADMIN_PASSWORD=""
+    apply_keycloak_rotation
     info "Ensuring the initial administrator exists …"
-    kcadm config credentials --server http://localhost:8080 --realm master \
-        --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null \
-        || die "Could not log in to the Keycloak admin API as $KEYCLOAK_ADMIN."
 
     local legacy_id
     legacy_id="$(kc_user_id "$LEGACY_DEMO_ADMIN")"
@@ -1712,7 +1851,6 @@ EOF
     bootstrap_tls_cert
     provide_images
     start_stack
-    reload_frontend_after_bootstrap
     issue_tls_certificate
     verify_stack
     gc_images

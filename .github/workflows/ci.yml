@@ -556,7 +556,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ matrix.project }}
-          path: frontend/playwright-report/
+          # The github reporter writes no HTML report in CI; screenshots,
+          # traces and error-context.md are in test-results/.
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
           retention-days: 7
 
   # SEC-11/TST-04 (WP-004): dependency and container scans on every PR.
