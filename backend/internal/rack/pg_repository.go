@@ -49,13 +49,16 @@ func scanRack(s scanner) (*Rack, error) {
 	return rk, nil
 }
 
-// Racks, mounts and cables carry no client or site scope column yet (WP-025,
-// WP-027). They are visible only when the objects they hang off are visible
-// under the transaction's tenant scope, whose location and ci policies filter
-// the subqueries: a rack through its 1:1 location row (organization, client
-// and site predicate, migration 000062 section 6), a mount through its rack
-// and CI, a cable through the CIs of both interfaces. A LEFT JOIN over room
-// and building would admit the rack of an invisible building (WP-340, F-002).
+// Racks carry the client and site of their location row and mounts those of
+// their CI, both with client and site policies (migrations 000152, 000061);
+// cables carry no scope column. The predicates below stay as defense in
+// depth (WP-393): racks, mounts and cables are visible only when the objects
+// they hang off are visible under the transaction's tenant scope, whose
+// location and ci policies filter the subqueries: a rack through its 1:1
+// location row (organization, client and site predicate, migration 000062
+// section 6), a mount through its rack and CI, a cable through the CIs of
+// both interfaces. A LEFT JOIN over room and building would admit the rack of
+// an invisible building (WP-340, F-002).
 const (
 	rackVisible  = `EXISTS (SELECT 1 FROM location WHERE location.id = rack.id)`
 	mountVisible = "EXISTS (SELECT 1 FROM rack WHERE rack.id = rack_mount.rack_id AND " + rackVisible + ")" +
