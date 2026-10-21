@@ -22,7 +22,6 @@ go;backend/internal/discovery;TestAuditUnclassifiedReviewOnlyForUnclassifiedDevi
 go;backend/internal/history;TestAuditT3HistoryIncludesLocationChange;F-093
 go;backend/internal/iga;TestAuditT1ApprovalNeverLosesTheProvisioningTask;F-056
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
-go;backend/internal/locations;TestAuditDefectSiteGrantConfinedToClientAndSite;F-014 F-141
 go;backend/internal/locations;TestAuditT3LocationDeleteRefusesChildren;F-023
 go;backend/internal/locations;TestAuditT3SiteDeleteKeepsNetworkObjects;F-024
 go;backend/internal/middleware;TestAuditT2RefusedCredentialTrafficKeepsOrgBudget;F-019

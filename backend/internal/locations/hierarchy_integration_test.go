@@ -20,7 +20,8 @@ import (
 //     site-scoped principal (a role at the site, resolved from its role
 //     assignment, WP-390) only its site, location nodes and CI and nothing of
 //     the other client; organization B sees none.
-//   - Assets are scoped by client (they carry no site scope column).
+//   - Assets carry the site of their location (WP-392); their site scope
+//     within one client is TestSiteGrantConfinedToClientAndSite.
 //   - Resellers above the organization are [P4] and not modelled.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).

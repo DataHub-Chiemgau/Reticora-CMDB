@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000150_role_assignment_team_scope
+Stand: Migration 000151_asset_site_scope
 
 ## Prüfung
 
@@ -190,6 +190,19 @@ die Propagationstrigger zu. Bewusste Abweichungen von WP-028 AK1:
   löschen sie nur, wenn jeder Link in ihrem Schreib-Scope liegt (Migrationen
   000139 und 000146; ein Link auf ein org-weites Objekt zählt nicht, E-09),
   und legen keine unverlinkten an (WP-341).
+
+### Standort von Assets und Mengenartikeln (WP-392)
+
+`asset` und `quantity_item` tragen `site_id`, den Standort ihrer Location
+(Migration 000151, F-141). Der Trigger `derive_location_site` setzt ihn bei
+jedem INSERT und jeder Änderung von `location_id` oder `site_id` und
+überschreibt geschriebene Werte; er liest die Location mit erweitertem
+Client- und Site-Scope (`app_scope_widen`), eine Location einer anderen
+Organisation gilt als nicht gefunden (23503). Ändert eine Location ihren
+Standort (Verschieben, Umhängen), leitet `location_refresh_asset_site` die
+Zeilen an ihr neu ab. Die Policies prüfen `app.site_scope` wie bei `ci`
+(Migration 000063): Zeilen ohne Standort bleiben lesbar, schreiben dürfen
+sie nur org-weite Prinzipale (E-09).
 
 Globale Kataloge ohne Org-Spalte sind nach E-10 eine dokumentierte Ausnahme,
 keine Lücke: Sie werden nur durch Migrationen gepflegt und sind für die

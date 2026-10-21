@@ -578,3 +578,5 @@ RBA-03;[B];B;backend/internal/identity/principal_scope_test.go;WP-390
 TEN-09;[Q];B;backend/internal/locations/sitescope_integration_test.go;WP-390
 RBA-03;[B];B;backend/internal/permission/scope_integration_test.go;WP-391
 TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-391
+TEN-01;[B], Reseller [P4];B;backend/internal/locations/sitescope_integration_test.go;WP-392
+TEN-02;[B];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-392
