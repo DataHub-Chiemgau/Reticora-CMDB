@@ -165,8 +165,41 @@ Then correct `RETICORA_OIDC_ISSUER_URL` in `.env` and re-run the installer.
 
 **Cause:** The OIDC redirect URL is not whitelisted in the Keycloak client.
 
-**Fix:** Re-run the installer — `configure_realm` substitutes the configured
-`RETICORA_OIDC_REDIRECT_URL` (and its origin for CORS) into the realm file.
+**Fix:** Correct `RETICORA_OIDC_REDIRECT_URL` in `.env` if needed and re-run
+the installer — `configure_realm` renders the redirect URL (and its origin for
+CORS) into the realm file, and the installer applies the client's redirect
+URIs and web origins to the running Keycloak (see section 6; Keycloak imports
+the realm file only once).
+
+### Keycloak admin login or rotation failed
+
+**Symptom:** The installer stops after `Applying the Keycloak administrator
+password and client settings …` with one of
+
+- `Could not log in to the Keycloak admin API as <admin> with KEYCLOAK_ADMIN_PASSWORD or the previous password of …/.env.previous`
+- `Could not set the rotated KEYCLOAK_ADMIN_PASSWORD …` / `Keycloak does not accept the rotated KEYCLOAK_ADMIN_PASSWORD …`
+- `The Keycloak realm 'reticora' has no client …` / `Could not read the Keycloak client …` / `Could not apply <field> of the rendered realm …`
+
+**Cause:** Keycloak takes `KEYCLOAK_ADMIN_PASSWORD` only when it creates the
+master administrator at its first start. A changed password is applied by the
+installer: it logs in with the password of `.env.previous` (the values of the
+last run that reached Keycloak), sets the new one and logs in with it. The
+login fails when Keycloak accepts neither password — typically because the
+password was changed in the Keycloak console, or `.env.previous` was deleted
+after `.env` had been edited.
+
+**Fix:**
+
+- *Login refused:* write the password Keycloak accepts today as
+  `KEYCLOAK_ADMIN_PASSWORD=…` into `deploy/docker-compose/.env.previous`
+  (mode `0600`) and re-run the installer; it then sets the value of `.env`.
+- *Client missing or not writable:* the realm `reticora` must contain the
+  client of the realm file (`reticora-app`). Check the Keycloak log
+  (`docker compose --env-file .env logs keycloak`) and re-run the installer.
+
+No password or secret is printed: the rotation lines (`Keycloak rotation: …`)
+name the setting; only redirect URIs and web origins are shown with their
+values.
 
 ---
 
@@ -244,12 +277,34 @@ The installer is safe to re-run and reuses existing `.env` values as defaults:
 | Resource | Behaviour on re-run |
 |---|---|
 | `.env` | Existing values are defaults; secrets are regenerated only when absent. Settings the installer does not write itself (e.g. `RETICORA_HTTP_BIND`) are kept in a section at the end. |
+| `.env.previous` | The `.env` of the last run that reached Keycloak (mode `0600`, git-ignored): created from the existing `.env` before the merge when missing, kept until the Keycloak values of the new `.env` are applied, then replaced by it. It holds the previous admin password of a rotation. |
 | Session key | Reused; a Docker-created directory or zero-byte file is removed and regenerated. |
-| Database passwords | `RETICORA_DB_PASSWORD` (CMDB) and `KEYCLOAK_DB_PASSWORD` (Keycloak) are probed over TCP — the images trust the local socket and 127.0.0.1 regardless of the password — and on mismatch the stored role password is resynced automatically. |
+| Database passwords | `RETICORA_DB_PASSWORD` (CMDB), `RETICORA_DB_APP_PASSWORD` (runtime login) and `KEYCLOAK_DB_PASSWORD` (Keycloak) are probed over TCP — the images trust the local socket and 127.0.0.1 regardless of the password — and on mismatch the stored role password is resynced automatically. |
+| Keycloak admin password | A changed `KEYCLOAK_ADMIN_PASSWORD` is set through the admin CLI: login with the password of `.env.previous`, then with the new one; afterwards the old password no longer works. |
+| OIDC client `reticora-app` | Secret (`RETICORA_OIDC_CLIENT_SECRET`), redirect URIs and web origins (from `RETICORA_OIDC_REDIRECT_URL` and `RETICORA_OIDC_ISSUER_URL`) of the rendered realm file are compared with the running realm; each differing value is applied with one `kcadm update clients/<id>`. |
 | TLS bootstrap cert | Reused; regenerated when SAN-less or expiring within a day (a running frontend reloads it before the issuer checks). |
 | Let's Encrypt cert | Not re-issued when a real certificate is present. |
-| Realm file | Re-rendered and validated on every run. |
+| Realm file | Re-rendered and validated on every run. Keycloak imports it only while the realm does not exist (`start --import-realm` skips an existing realm). |
 | Migrations | Tracked in `reticora_schema_migrations`; already-applied versions are skipped. |
+
+**Rotating passwords and OIDC settings:** change the value in `.env` (or at
+the installer's prompt) and re-run the installer. Every applied Keycloak
+change is logged once as `Keycloak rotation: …`, passwords and secrets without
+their value; a run without a change writes nothing to Keycloak.
+
+**Limits of the rotation:**
+
+- Of the realm file only the client's secret, redirect URIs and web origins
+  reach an existing realm; these three follow the realm file, so a change made
+  to them in the Keycloak console is reset by the next run. Other realm
+  content — roles, groups, flows, password and MFA policies, mappers, the user
+  profile — is not updated by a re-run; change it in the Keycloak console.
+- The name of the Keycloak administrator (`KEYCLOAK_ADMIN`) is not renamed;
+  only its password is rotated.
+- `RETICORA_MASTER_KEY` and the session signing key are not rotated by the
+  installer (see [ops/workers.md](ops/workers.md), "Key rotation"). Do not
+  change `RETICORA_MASTER_KEY` in `.env`: the server could no longer decrypt
+  the stored credentials.
 
 If a stale volume must be discarded completely (**all CMDB data is lost**):
 

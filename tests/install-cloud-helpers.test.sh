@@ -831,14 +831,54 @@ test_initial_password_random() {
 }
 
 # A fake Keycloak admin CLI: records the calls and knows the users listed in
-# KC_USERS (username=id).
+# KC_USERS (username=id). The state a rotation changes lives in files under
+# KC_STATE (kcadm also runs in pipelines, i.e. subshells): the password of
+# the master administrator and the client reticora-app, initially as in the
+# realm configure_realm rendered. Logins are checked against that password
+# and recorded in KC_STATE/logins (ok/refused); the log masks the --password
+# value. Every write is recorded in KCADM_WRITES with the fields it sets,
+# never with values. KC_FAIL_UPDATE=1 makes client updates fail.
+# shellcheck disable=SC2317 # the stubs are called by the installer functions
 fake_kcadm() {
     KCADM_LOG="$TMP_ROOT/kcadm.log"
+    KC_STATE="$TMP_ROOT/kc-state"
+    KCADM_WRITES="$KC_STATE/writes"
     : > "$KCADM_LOG"
+    rm -rf "$KC_STATE"
+    mkdir -p "$KC_STATE"
+    : > "$KCADM_WRITES"
     compose_cmd() {
         shift 4 # exec -T keycloak /opt/keycloak/bin/kcadm.sh
-        printf '%s\n' "$*" >> "$KCADM_LOG"
-        local a
+        local a pw="" prev="" logged=()
+        for a in "$@"; do
+            if [ "$prev" = --password ]; then pw="$a"; logged+=('***'); else logged+=("$a"); fi
+            prev="$a"
+        done
+        printf '%s\n' "${logged[*]}" >> "$KCADM_LOG"
+        case "$1 $2" in
+            "config credentials")
+                if [ "$pw" = "$(cat "$KC_STATE/admin-password")" ]; then
+                    printf 'ok\n' >> "$KC_STATE/logins"
+                    return 0
+                fi
+                printf 'refused\n' >> "$KC_STATE/logins"
+                return 1 ;;
+            "get clients") printf 'client-uuid\n'; return 0 ;;
+            "get clients/client-uuid") cat "$KC_STATE/client.json"; return 0 ;;
+            "update clients/client-uuid")
+                cat > "$KC_STATE/body"
+                [ -z "${KC_FAIL_UPDATE:-}" ] || return 1
+                printf 'clients %s\n' "$(jq -r 'keys | join(",")' "$KC_STATE/body")" >> "$KCADM_WRITES"
+                jq -s '.[0] * .[1]' "$KC_STATE/client.json" "$KC_STATE/body" > "$KC_STATE/client.new" &&
+                    mv "$KC_STATE/client.new" "$KC_STATE/client.json"
+                return ;;
+            "update users/"*"/reset-password")
+                cat > "$KC_STATE/body"
+                a="${2#users/}"
+                printf 'reset-password %s\n' "${a%/reset-password}" >> "$KCADM_WRITES"
+                jq -r .value "$KC_STATE/body" > "$KC_STATE/admin-password"
+                return ;;
+        esac
         case "$2" in
             users)
                 if [ "$1" = get ]; then
@@ -858,6 +898,26 @@ fake_kcadm() {
     # shellcheck disable=SC2034
     KEYCLOAK_ADMIN_PASSWORD="secret"
     RETICORA_INITIAL_ADMIN_EMAIL="ops@acme.example"
+    # Keycloak as the previous run left it: the configured values applied.
+    # shellcheck disable=SC2034 # read by configure_realm
+    SCRIPT_DIR="$REPO_ROOT"
+    COMPOSE_DIR="$KC_STATE/compose"
+    ENV_FILE="$COMPOSE_DIR/.env"
+    RETICORA_OIDC_ISSUER_URL="http://192.0.2.10:8180/realms/reticora"
+    RETICORA_OIDC_CLIENT_SECRET="client-secret-0"
+    RETICORA_OIDC_REDIRECT_URL="http://192.0.2.10:3000/auth/callback"
+    kc_applied
+}
+
+# kc_applied — the fake Keycloak holds the current admin password and the
+# client of the realm rendered from the current values (in another order:
+# Keycloak stores the lists as sets).
+kc_applied() {
+    configure_realm >/dev/null
+    printf '%s\n' "$KEYCLOAK_ADMIN_PASSWORD" > "$KC_STATE/admin-password"
+    jq '.clients[] | select(.clientId == "reticora-app")
+        | {id: "client-uuid", clientId, secret, redirectUris: (.redirectUris | reverse), webOrigins: (.webOrigins | reverse), serviceAccountsEnabled}' \
+        "$COMPOSE_DIR/.generated/realm-reticora.json" > "$KC_STATE/client.json"
 }
 
 test_initial_admin_created_with_temporary_password() {
@@ -897,6 +957,184 @@ run_test    "initial password is random and meets the policy"             test_i
 run_test    "initial administrator gets a temporary password once"        test_initial_admin_created_with_temporary_password
 run_test    "an existing initial administrator is not recreated"          test_initial_admin_not_recreated
 expect_fail "the demo account is rejected as initial administrator"       test_initial_admin_rejects_demo_account
+
+# ─── rotation of Keycloak values on a re-run (WP-386, INS-05, F-125) ─────────
+
+OLD_ADMIN_PW="old-admin-pw-0123"
+NEW_ADMIN_PW="new-admin-pw-4567"
+OLD_CLIENT_SECRET="old-client-secret-89ab"
+NEW_CLIENT_SECRET="new-client-secret-cdef"
+
+# kc_env <file> — the Keycloak settings of .env as the installer writes them.
+kc_env() {
+    printf 'KEYCLOAK_ADMIN=%s\nKEYCLOAK_ADMIN_PASSWORD=%s\nRETICORA_OIDC_CLIENT_SECRET=%s\nRETICORA_OIDC_ISSUER_URL=%s\nRETICORA_OIDC_REDIRECT_URL=%s\n' \
+        "$KEYCLOAK_ADMIN" "$KEYCLOAK_ADMIN_PASSWORD" "$RETICORA_OIDC_CLIENT_SECRET" "$RETICORA_OIDC_ISSUER_URL" \
+        "$RETICORA_OIDC_REDIRECT_URL" > "$1"
+    chmod 600 "$1"
+}
+
+# kc_rerun <admin password> <client secret> <redirect URL> — an installation
+# whose previous run applied the old values (Keycloak, .env.previous), and a
+# re-run with the given values in .env (rendered like main does). The initial
+# administrator exists already.
+# shellcheck disable=SC2034 # read by the installer functions
+kc_rerun() {
+    fake_kcadm
+    KC_USERS="admin=admin-id ops@acme.example=existing-id"
+    KEYCLOAK_ADMIN_PASSWORD="$OLD_ADMIN_PW"
+    RETICORA_OIDC_CLIENT_SECRET="$OLD_CLIENT_SECRET"
+    RETICORA_OIDC_REDIRECT_URL="http://192.0.2.10:3000/auth/callback"
+    kc_applied
+    kc_env "$ENV_FILE.previous"
+    KEYCLOAK_ADMIN_PASSWORD="$1"
+    RETICORA_OIDC_CLIENT_SECRET="$2"
+    RETICORA_OIDC_REDIRECT_URL="$3"
+    kc_env "$ENV_FILE"
+    configure_realm >/dev/null
+}
+
+# no_secret_in <file> — none of the passwords and secrets appears in it.
+no_secret_in() {
+    ! grep -q -F -e "$OLD_ADMIN_PW" -e "$NEW_ADMIN_PW" -e "$OLD_CLIENT_SECRET" -e "$NEW_CLIENT_SECRET" "$1"
+}
+
+# Admin password, client secret and redirect URL (new origin) rotated in .env:
+# login with the previous password, which sets the new one, then exactly one
+# update per rotated value (secret, redirectUris, webOrigins); every rotation
+# is logged without its value; .env becomes the new .env.previous.
+test_rotation_applies_each_value_once() {
+    kc_rerun "$NEW_ADMIN_PW" "$NEW_CLIENT_SECRET" "https://cmdb-new.example.test/auth/callback"
+    local out="$TMP_ROOT/rotation-out"
+    create_initial_admin > "$out" 2>&1 || { cat "$out"; return 1; }
+    [ "$(sort "$KCADM_WRITES")" = "$(printf 'clients redirectUris\nclients secret\nclients webOrigins\nreset-password admin-id')" ] || { cat "$KCADM_WRITES"; return 1; }
+    [ "$(cat "$KC_STATE/admin-password")" = "$NEW_ADMIN_PW" ] &&
+        [ "$(jq -r .secret "$KC_STATE/client.json")" = "$NEW_CLIENT_SECRET" ] &&
+        jq -e '.redirectUris | index("https://cmdb-new.example.test/auth/callback")' "$KC_STATE/client.json" >/dev/null &&
+        jq -e '.webOrigins | index("https://cmdb-new.example.test")' "$KC_STATE/client.json" >/dev/null &&
+        ! jq -e '.redirectUris | index("http://192.0.2.10:3000/auth/callback")' "$KC_STATE/client.json" >/dev/null &&
+        jq -e '.serviceAccountsEnabled == false' "$KC_STATE/client.json" >/dev/null || return 1
+    # Login with the previous password, the reset, a login with the new one;
+    # all before the client is read and the initial administrator looked up.
+    local login1 reset login2 client admin
+    login1="$(grep -n '^config credentials' "$KCADM_LOG" | sed -n 1p | cut -d: -f1)"
+    reset="$(grep -n '^update users/admin-id/reset-password -r master -f -$' "$KCADM_LOG" | cut -d: -f1)"
+    login2="$(grep -n '^config credentials' "$KCADM_LOG" | sed -n 2p | cut -d: -f1)"
+    client="$(grep -n '^get clients -r reticora -q clientId=reticora-app' "$KCADM_LOG" | cut -d: -f1)"
+    admin="$(grep -n '^get users -r reticora -q username=ops@acme.example' "$KCADM_LOG" | cut -d: -f1)"
+    [ -n "$login1" ] && [ -n "$reset" ] && [ -n "$login2" ] && [ -n "$client" ] && [ -n "$admin" ] &&
+        [ "$login1" -lt "$reset" ] && [ "$reset" -lt "$login2" ] && [ "$login2" -lt "$client" ] && [ "$client" -lt "$admin" ] || return 1
+    [ "$(grep -c '^config credentials --server http://localhost:8080 --realm master --user admin --password \*\*\*$' "$KCADM_LOG")" -eq 2 ] &&
+        [ "$(tr '\n' ' ' < "$KC_STATE/logins")" = "ok ok " ] || return 1
+    # Detected and logged by name, never by value; no secret on a kcadm
+    # command line except the login password.
+    grep -q -F "Changed since the last run: KEYCLOAK_ADMIN_PASSWORD RETICORA_OIDC_CLIENT_SECRET RETICORA_OIDC_REDIRECT_URL — applying to Keycloak" "$out" &&
+        [ "$(grep -c 'Keycloak rotation:' "$out")" -eq 4 ] &&
+        grep -q -F "Keycloak rotation: password of the administrator admin set to KEYCLOAK_ADMIN_PASSWORD" "$out" &&
+        grep -q -F "Keycloak rotation: client reticora-app secret set to RETICORA_OIDC_CLIENT_SECRET" "$out" &&
+        grep -q -F "Keycloak rotation: client reticora-app redirectUris set to https://cmdb-new.example.test/auth/callback, https://cmdb-new.example.test/*" "$out" &&
+        no_secret_in "$out" && no_secret_in "$KCADM_LOG" || return 1
+    # .env.previous now holds the applied values (mode 0600).
+    cmp -s "$ENV_FILE" "$ENV_FILE.previous" && [ "$(stat -c %a "$ENV_FILE.previous")" = "600" ]
+}
+
+# Nothing rotated: one login, no write, no rotation logged.
+test_rotation_unchanged_writes_nothing() {
+    kc_rerun "$OLD_ADMIN_PW" "$OLD_CLIENT_SECRET" "http://192.0.2.10:3000/auth/callback"
+    local out="$TMP_ROOT/unchanged-out"
+    create_initial_admin > "$out" 2>&1 || { cat "$out"; return 1; }
+    [ ! -s "$KCADM_WRITES" ] || { cat "$KCADM_WRITES"; return 1; }
+    [ "$(tr '\n' ' ' < "$KC_STATE/logins")" = "ok " ] &&
+        ! grep -qE '^(update|create|delete|set-password)' "$KCADM_LOG" &&
+        ! grep -q -e 'Keycloak rotation:' -e 'Changed since the last run' "$out" &&
+        grep -q 'client secret, redirect URIs and web origins match the configuration' "$out"
+}
+
+# Only one value rotated: exactly its update. A new callback path on the same
+# origin changes the redirect URIs, not the web origins.
+test_rotation_single_values() {
+    kc_rerun "$OLD_ADMIN_PW" "$NEW_CLIENT_SECRET" "http://192.0.2.10:3000/auth/callback"
+    create_initial_admin >/dev/null 2>&1 || return 1
+    [ "$(cat "$KCADM_WRITES")" = "clients secret" ] || { cat "$KCADM_WRITES"; return 1; }
+    kc_rerun "$OLD_ADMIN_PW" "$OLD_CLIENT_SECRET" "http://192.0.2.10:3000/oidc/callback"
+    create_initial_admin >/dev/null 2>&1 || return 1
+    [ "$(cat "$KCADM_WRITES")" = "clients redirectUris" ] || { cat "$KCADM_WRITES"; return 1; }
+    kc_rerun "$NEW_ADMIN_PW" "$OLD_CLIENT_SECRET" "http://192.0.2.10:3000/auth/callback"
+    create_initial_admin >/dev/null 2>&1 || return 1
+    [ "$(cat "$KCADM_WRITES")" = "reset-password admin-id" ] || { cat "$KCADM_WRITES"; return 1; }
+}
+
+# The previous password no longer works (an interrupted run already set the
+# new one): the login with the configured password succeeds, nothing is reset.
+test_rotation_already_applied() {
+    kc_rerun "$NEW_ADMIN_PW" "$OLD_CLIENT_SECRET" "http://192.0.2.10:3000/auth/callback"
+    printf '%s\n' "$NEW_ADMIN_PW" > "$KC_STATE/admin-password"
+    create_initial_admin >/dev/null 2>&1 || return 1
+    [ ! -s "$KCADM_WRITES" ] && [ "$(tr '\n' ' ' < "$KC_STATE/logins")" = "refused ok " ]
+}
+
+# Neither password is accepted (e.g. changed in the Keycloak console): rc 1
+# with the hint, no secret in the output, .env.previous unchanged.
+test_rotation_login_refused() {
+    kc_rerun "$NEW_ADMIN_PW" "$NEW_CLIENT_SECRET" "http://192.0.2.10:3000/auth/callback"
+    printf 'changed-in-the-console\n' > "$KC_STATE/admin-password"
+    cp "$ENV_FILE.previous" "$TMP_ROOT/previous-before"
+    local out="$TMP_ROOT/refused-out" rc
+    (create_initial_admin) > "$out" 2>&1; rc=$?
+    [ "$rc" -eq 1 ] &&
+        grep -q -F "Could not log in to the Keycloak admin API as admin with KEYCLOAK_ADMIN_PASSWORD or the previous password of $ENV_FILE.previous" "$out" &&
+        grep -q "docs/troubleshooting-installation.md, 'Keycloak admin login or rotation failed'" "$out" &&
+        no_secret_in "$out" && [ ! -s "$KCADM_WRITES" ] && [ "$(tr '\n' ' ' < "$KC_STATE/logins")" = "refused refused " ] &&
+        cmp -s "$ENV_FILE.previous" "$TMP_ROOT/previous-before"
+}
+
+# A failing client update aborts with the hint and keeps .env.previous.
+test_rotation_update_failure_aborts() {
+    kc_rerun "$OLD_ADMIN_PW" "$NEW_CLIENT_SECRET" "http://192.0.2.10:3000/auth/callback"
+    cp "$ENV_FILE.previous" "$TMP_ROOT/previous-before"
+    KC_FAIL_UPDATE=1
+    local out="$TMP_ROOT/update-fail-out" rc
+    (create_initial_admin) > "$out" 2>&1; rc=$?
+    [ "$rc" -eq 1 ] &&
+        grep -q -F "Could not apply secret of the rendered realm to the Keycloak client reticora-app" "$out" &&
+        grep -q "Keycloak admin login or rotation failed" "$out" && no_secret_in "$out" &&
+        cmp -s "$ENV_FILE.previous" "$TMP_ROOT/previous-before"
+}
+
+# write_env keeps the existing .env as .env.previous (0600) before the merge;
+# a .env.previous that is still there (values not applied yet) is kept; a
+# first installation has none.
+test_rotation_env_previous_backup() {
+    ENV_FILE="$TMP_ROOT/previous.env"
+    rm -f "$ENV_FILE" "$ENV_FILE.previous"
+    set_env_values
+    write_env
+    [ ! -e "$ENV_FILE.previous" ] || return 1
+    printf 'KEYCLOAK_ADMIN_PASSWORD=edited-by-hand\nRETICORA_HTTP_BIND=127.0.0.1\n' > "$ENV_FILE"
+    chmod 644 "$ENV_FILE"
+    cp "$ENV_FILE" "$TMP_ROOT/previous-expected"
+    write_env
+    cmp -s "$ENV_FILE.previous" "$TMP_ROOT/previous-expected" && [ "$(stat -c %a "$ENV_FILE.previous")" = "600" ] || return 1
+    write_env
+    cmp -s "$ENV_FILE.previous" "$TMP_ROOT/previous-expected" &&
+        grep -qx 'KEYCLOAK_ADMIN_PASSWORD=new-KEYCLOAK_ADMIN_PASSWORD' "$ENV_FILE" &&
+        grep -qx 'RETICORA_HTTP_BIND=127.0.0.1' "$ENV_FILE" &&
+        ! grep -q 'kept from the previous' "$ENV_FILE.previous" &&
+        git -C "$REPO_ROOT" check-ignore -q deploy/docker-compose/.env.previous
+}
+
+test_rotation_documented() {
+    grep -q "Keycloak admin login or rotation failed" "$REPO_ROOT/docs/troubleshooting-installation.md" &&
+        grep -q '\.env\.previous' "$REPO_ROOT/docs/troubleshooting-installation.md"
+}
+
+run_test    "rotation: rotated admin password, secret and redirect URL, one update each" test_rotation_applies_each_value_once
+run_test    "rotation: unchanged values cause no write"                                  test_rotation_unchanged_writes_nothing
+run_test    "rotation: a single rotated value causes exactly its update"                 test_rotation_single_values
+run_test    "rotation: an already applied admin password is not reset again"             test_rotation_already_applied
+run_test    "rotation: a refused admin login aborts with a hint"                         test_rotation_login_refused
+run_test    "rotation: a failing client update aborts with a hint"                       test_rotation_update_failure_aborts
+run_test    "rotation: .env is kept as .env.previous (0600) until applied"               test_rotation_env_previous_backup
+run_test    "rotation: the troubleshooting guide covers the rotation"                    test_rotation_documented
 
 # ─── summary ──────────────────────────────────────────────────────────────────
 echo

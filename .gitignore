@@ -44,6 +44,7 @@ coverage.out
 
 # Installer-generated secrets and rendered configs
 deploy/docker-compose/.env
+deploy/docker-compose/.env.previous
 deploy/docker-compose/.generated/
 deploy/docker-compose/secrets/
 deploy/docker-compose/letsencrypt/
