@@ -109,8 +109,9 @@ type Config struct {
 	// is opt-in for bounded-tenant deployments.
 	MetricsTenantLabel bool
 
-	// EgressAllowPrivate permits webhook and connector destinations in
-	// private networks (on-premises installations); cloud metadata endpoints
+	// EgressAllowPrivate permits webhook and connector destinations and own
+	// SMTP servers in private networks and on other SMTP ports (dedicated,
+	// on-premises and air-gapped installations); cloud metadata endpoints
 	// stay blocked (SEC-08). Default off.
 	EgressAllowPrivate bool
 

@@ -16,8 +16,11 @@ import (
 
 // TestNotificationAPI covers API-05 and NTF-04 (WP-139): the channel
 // resource never returns secrets and keeps them when the placeholder comes
-// back; the notification center lists, filters and marks the own inbox;
-// preferences are validated; deliveries show their status.
+// back with the same destination; after a change of host, port, tls or
+// username (smtp) or url (webhook) the placeholder is refused with 400 and
+// the secret must be entered again (WP-399, F-152); the notification
+// center lists, filters and marks the own inbox; preferences are
+// validated; deliveries show their status.
 func TestNotificationAPI(t *testing.T) {
 	center := NewMemoryCenter()
 	mux := chi.NewRouter()
@@ -41,13 +44,47 @@ func TestNotificationAPI(t *testing.T) {
 		t.Fatalf("create: %d %s", w.Code, w.Body.String())
 	}
 	id := decode(w)["id"].(string)
+	// A new host with the placeholder would hand the stored password to it.
 	if w = call("u-1", http.MethodPatch, "/api/v1/notification-channels/"+id,
-		`{"name":"own-2","config":{"host":"mail2.example.org","from":"cmdb@example.org","username":"cmdb","password":"********"}}`); w.Code != http.StatusOK {
-		t.Fatalf("update: %d %s", w.Code, w.Body.String())
+		`{"name":"own-2","config":{"host":"mail2.example.org","from":"cmdb@example.org","username":"cmdb","password":"********"}}`); w.Code != http.StatusBadRequest ||
+		decode(w)["field"] != "password" {
+		t.Fatalf("update of the host with the placeholder: %d %s, want 400 field password", w.Code, w.Body.String())
 	}
 	stored, _ := center.Channels.Get(context.Background(), "org-1", id)
-	if stored.Config["password"] != "pw-1" || stored.Config["host"] != "mail2.example.org" || stored.Name != "own-2" {
-		t.Errorf("stored after update: %+v", stored.Config)
+	if stored.Config["password"] != "pw-1" || stored.Config["host"] != "mail.example.org" || stored.Name != "own" {
+		t.Errorf("stored after the refused update: %+v", stored.Config)
+	}
+	if w = call("u-1", http.MethodPatch, "/api/v1/notification-channels/"+id,
+		`{"name":"own-2","config":{"host":"mail.example.org","from":"cmdb@example.org","username":"cmdb","password":"********"}}`); w.Code != http.StatusOK {
+		t.Fatalf("update with the same host: %d %s", w.Code, w.Body.String())
+	}
+	if stored, _ = center.Channels.Get(context.Background(), "org-1", id); stored.Config["password"] != "pw-1" || stored.Name != "own-2" {
+		t.Errorf("stored after the update with the same host: %+v", stored.Config)
+	}
+	if w = call("u-1", http.MethodPatch, "/api/v1/notification-channels/"+id,
+		`{"config":{"host":"mail2.example.org","from":"cmdb@example.org","username":"cmdb","password":"pw-2"}}`); w.Code != http.StatusOK {
+		t.Fatalf("update of the host with a new password: %d %s", w.Code, w.Body.String())
+	}
+	if stored, _ = center.Channels.Get(context.Background(), "org-1", id); stored.Config["password"] != "pw-2" || stored.Config["host"] != "mail2.example.org" {
+		t.Errorf("stored after the update with a new password: %+v", stored.Config)
+	}
+	// The same for the signing secret of a webhook and its url.
+	w = call("u-1", http.MethodPost, "/api/v1/notification-channels", `{"name":"hook","provider":"webhook",
+		"config":{"url":"https://hooks.example.org/T0KEN","secret":"hmac-1"}}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create webhook: %d %s", w.Code, w.Body.String())
+	}
+	hook := decode(w)["id"].(string)
+	if w = call("u-1", http.MethodPatch, "/api/v1/notification-channels/"+hook,
+		`{"config":{"url":"https://attacker.example/x","secret":"********"}}`); w.Code != http.StatusBadRequest || decode(w)["field"] != "secret" {
+		t.Errorf("update of the url with the placeholder: %d %s, want 400 field secret", w.Code, w.Body.String())
+	}
+	if w = call("u-1", http.MethodPatch, "/api/v1/notification-channels/"+hook,
+		`{"config":{"url":"https://hooks.example.org/********","secret":"********"}}`); w.Code != http.StatusOK {
+		t.Errorf("update with the masked url and the placeholder: %d %s", w.Code, w.Body.String())
+	}
+	if c, _ := center.Channels.Get(context.Background(), "org-1", hook); c.Config["url"] != "https://hooks.example.org/T0KEN" || c.Config["secret"] != "hmac-1" {
+		t.Errorf("stored webhook: %+v", c.Config)
 	}
 	for name, tc := range map[string]struct {
 		method, path, body string

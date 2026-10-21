@@ -368,8 +368,9 @@ func main() {
 	repos.CI = ci.NewIndexingRepository(repos.CI, ai.NewCIChunkIndexer(repos.AI, aiProvider).
 		WithConsent(ai.NewOrgConsent(repos.AI, entitlementSvc)))
 
-	// Webhook and connector destinations are user input: every outbound call
-	// goes through the egress client (SEC-08).
+	// Webhook and connector destinations and own SMTP servers are user
+	// input: every outbound call goes through the egress client or dialer
+	// (SEC-08).
 	egressPolicy := egress.Options{AllowPrivate: cfg.EgressAllowPrivate}
 	// Notifications (NTF-01, NTF-04): channels with encrypted provider
 	// settings, the in-app center and the delivery queue of the notifier.
@@ -386,7 +387,7 @@ func main() {
 	notifier := notify.NewNotifier(notifications.Channels, notifications.Deliveries, notifications.Preferences,
 		notify.NewSender(map[string]notify.Provider{
 			notify.ProviderCentralSMTP: notify.NewEmailProvider(smtpSender),
-			notify.ProviderSMTP:        notify.NewEmailProvider(smtpSender),
+			notify.ProviderSMTP:        notify.NewEmailProvider(smtpSender).WithEgress(egressPolicy),
 			notify.ProviderInApp:       notify.NewInAppProvider(notifications.Inbox),
 			notify.ProviderWebhook:     notify.NewWebhookProvider(egress.NewClient(egressPolicy)),
 		}))

@@ -27,8 +27,6 @@ go;backend/internal/locations;TestAuditT3SiteDeleteKeepsNetworkObjects;F-024
 go;backend/internal/middleware;TestAuditT2RefusedCredentialTrafficKeepsOrgBudget;F-019
 go;backend/internal/middleware;TestAuditT2SessionBudgetSurvivesTokenRefresh;F-076
 go;backend/internal/middleware;TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget;F-063
-go;backend/internal/notify;TestAuditDefectSMTPChannelCloudMetadataBlocked;F-153
-go;backend/internal/notify;TestAuditDefectSMTPSecretNotReleasedToNewHost;F-152
 go;backend/internal/rack;TestAuditDefectRackHeightNotBelowMounts;F-140
 go;backend/internal/relationship;TestAuditCleanupCronScopeDeadline;F-111
 go;backend/internal/server;TestAuditDefectDiscoveryJobInGenericJobModel;F-146

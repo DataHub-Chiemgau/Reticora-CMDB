@@ -197,8 +197,9 @@ type Options struct {
 	// Blobs persists asynchronous export results; nil disables export-job
 	// creation (the streaming export endpoint stays available).
 	Blobs blob.Store
-	// Egress is the destination policy of webhook and connector URLs
-	// (SEC-08); the zero value blocks every internal destination.
+	// Egress is the destination policy of webhook and connector URLs and
+	// of own SMTP servers (SEC-08); the zero value blocks every internal
+	// destination.
 	Egress egress.Options
 	// RouteMiddleware runs on every API route after its authorization, in
 	// order (API-04: validation, then idempotency).
@@ -705,7 +706,7 @@ func notifyHandler(opts *Options) *notify.Handler {
 	if opts.Notifications == nil {
 		opts.Notifications = notify.NewMemoryCenter()
 	}
-	return notify.NewHandler(opts.Notifications)
+	return notify.NewHandler(opts.Notifications).WithEgress(opts.Egress)
 }
 
 // reviewEvents reports opened review items as review.created (NTF-05).

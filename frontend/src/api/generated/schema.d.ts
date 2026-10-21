@@ -3421,7 +3421,7 @@ export interface paths {
     put?: never;
     /**
      * Create a notification channel
-     * @description Requires notification:manage. The response is redacted like the list.
+     * @description Requires notification:manage. The response is redacted like the list. The server of an own SMTP channel (provider smtp) is held to the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true an IP literal or name of a private, loopback, link-local or unique-local network and a port other than 25, 465 or 587 are refused with 422 (field host or port, the detail names the setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254) are refused in every mode. The address a name resolves to is checked again on every connection. central_smtp is the operator's server and exempt.
      */
     post: operations['createNotificationChannel'];
     delete?: never;
@@ -3455,7 +3455,7 @@ export interface paths {
     head?: never;
     /**
      * Update name, configuration or enabled flag
-     * @description Requires notification:manage. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. Kind and provider cannot change.
+     * @description Requires notification:manage. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. A secret sent back as `********` while the configuration changes its destination (smtp: host, port, tls or username; webhook: url) is refused with 400 (field password or secret): it must be entered again. A configuration is held to the egress policy like on create (422, field host or port). Kind and provider cannot change.
      */
     patch: operations['updateNotificationChannel'];
     trace?: never;
@@ -6701,7 +6701,7 @@ export interface components {
       kind: 'email' | 'inapp' | 'webhook' | 'sms' | 'pager';
       /** @enum {string} */
       provider: 'central_smtp' | 'smtp' | 'inapp' | 'webhook';
-      /** @description central_smtp: sender_name, reply_to; smtp: host, port, tls (starttls|tls|none), username, password, from; webhook: url, secret. Secrets are returned as `********`, the webhook url as scheme and host with masked path and query. */
+      /** @description central_smtp: sender_name, reply_to; smtp: host, port, tls (starttls|tls|none), username, password, from; webhook: url, secret. Secrets are returned as `********`, the webhook url as scheme and host with masked path and query. The smtp host and port are held to the egress policy (SEC-08). */
       config?: {
         [key: string]: unknown;
       };
@@ -18747,6 +18747,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   getNotificationChannel: {
@@ -18826,6 +18827,7 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listNotificationDeliveries: {

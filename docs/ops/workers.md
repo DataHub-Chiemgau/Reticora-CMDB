@@ -34,6 +34,35 @@ stop a single worker during an incident, without touching the API.
 | `discovery_scopes` | `RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED` | Serves the collectors' discovery scopes over the NATS endpoint (DIS-09): `collector.<org>.<id>.scopes.request` returns the enabled scopes of a collector that is not disabled, `…scopes.result` records a run (`last_run_at`, `last_result`, `next_run_at`), `…subnets.report` turns the local subnets a collector reports after enrollment into `scope_suggested` review items (accepting one creates the scope). A request of an unknown or disabled collector is refused before it is handled and changes nothing (COL-04). Needs `RETICORA_NATS_URL`. |
 | `jobs` | `RETICORA_WORKER_JOBS_ENABLED` | Consumes the `JOBS` work-queue stream on NATS (`jobs.<kind>`, TEC-14): one durable consumer per job kind, the database claim runs each job once, a job whose instance died is taken over after its timeout. Only active with NATS. |
 
+## Destinations of the notifier (SEC-08)
+
+The `notifier` sends over the central SMTP server of the installation
+(`central_smtp`, `RETICORA_SMTP_*`), which is the operator's configuration
+and not restricted. Webhook channels and an organization's own SMTP server
+(provider `smtp`) are user input and pass the egress policy:
+
+- Without `RETICORA_EGRESS_ALLOW_PRIVATE` (default `false`, SaaS) an own SMTP
+  server must be a public host on port 25, 465 or 587. Saving a channel
+  with an IP literal or name of a private, loopback, link-local or
+  unique-local network (`10.0.0.5`, `127.0.0.1`, `fd00::/8`, `localhost`,
+  `*.internal`) or another port answers 422 with the field (`host`, `port`)
+  and names the setting.
+- Every connection resolves the name once, refuses it when one of its
+  addresses is internal and connects to the checked address, so a name
+  that points into the internal network later (DNS rebinding) is not
+  reached; the delivery fails with `egress: destination is not allowed`.
+- Dedicated, on-premises and air-gapped installations whose SMTP relay
+  lives in the internal network set `RETICORA_EGRESS_ALLOW_PRIVATE=true`
+  on the server instances (API and `notifier`): private and loopback
+  destinations and other ports are then accepted. Cloud metadata endpoints
+  (`169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`) stay blocked in
+  every mode. The same setting applies to webhooks and IGA connectors.
+
+A PATCH of a channel that changes host, port, TLS mode or user name of an
+SMTP channel, or the url of a webhook channel, needs the password or secret
+again: the placeholder `********` is refused with 400 (field `password` or
+`secret`).
+
 ## Retention runs (NFR-06, AUD-09)
 
 The scheduler deletes expired data every night, per organization and in the

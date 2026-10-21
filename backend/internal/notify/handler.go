@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -31,10 +32,22 @@ func NewMemoryCenter() *Center {
 
 // Handler serves the notification center of the signed-in user and the
 // channel administration (NTF-04, API-05).
-type Handler struct{ c *Center }
+type Handler struct {
+	c *Center
+	// egress validates the servers of own SMTP channels when they are
+	// stored (SEC-08).
+	egress egress.Options
+}
 
 // NewHandler creates the handler.
 func NewHandler(c *Center) *Handler { return &Handler{c: c} }
+
+// WithEgress sets the destination policy own SMTP servers are validated
+// against; the default blocks every internal destination.
+func (h *Handler) WithEgress(opts egress.Options) *Handler {
+	h.egress = opts
+	return h
+}
 
 // RegisterRoutes registers the routes.
 func (h *Handler) RegisterRoutes(r chi.Router) {
@@ -70,7 +83,10 @@ func org(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
 }
 
 func writeError(w http.ResponseWriter, err error) {
+	var blocked *DestinationError
 	switch {
+	case errors.As(err, &blocked):
+		api.WriteFieldError(w, &api.FieldError{Field: blocked.Field, Message: blocked.Err.Error(), Status: http.StatusUnprocessableEntity})
 	case errors.Is(err, ErrValidation):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 	case errors.Is(err, ErrNotFound):
@@ -266,6 +282,10 @@ func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := ch.CheckEgress(h.egress); err != nil {
+		writeError(w, err)
+		return
+	}
 	if err := h.c.Channels.Create(r.Context(), ch); err != nil {
 		writeError(w, err)
 		return
@@ -290,7 +310,8 @@ func (h *Handler) GetChannel(w http.ResponseWriter, r *http.Request) {
 // UpdateChannel handles PATCH /api/v1/notification-channels/{id}: given
 // fields replace the stored ones; a configuration replaces the stored one,
 // a secret sent back as the placeholder and a webhook url sent back masked
-// keep their value.
+// keep their value. The placeholder is refused when the configuration
+// changes where the secret goes (F-152).
 func (h *Handler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)
 	if !ok {
@@ -317,21 +338,58 @@ func (h *Handler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 		ch.Enabled = *req.Enabled
 	}
 	if req.Config != nil {
-		for _, k := range secretKeys {
-			if req.Config[k] == secretPlaceholder {
-				req.Config[k] = ch.Config[k]
-			}
-		}
 		if stored, _ := ch.Config["url"].(string); stored != "" && ch.Provider == ProviderWebhook && req.Config["url"] == maskURL(stored) {
 			req.Config["url"] = stored
 		}
+		// A caller who never saw the secret must not send it to a
+		// destination of its choice: after a change of the destination it
+		// is entered again.
+		moved := destinationChanged(ch, req.Config)
+		for _, k := range secretKeys {
+			if req.Config[k] != secretPlaceholder {
+				continue
+			}
+			if moved {
+				api.WriteFieldError(w, &api.FieldError{Field: k,
+					Message: "the destination changed (host, port, tls, username or url): enter the " + k + " again"})
+				return
+			}
+			req.Config[k] = ch.Config[k]
+		}
 		ch.Config = req.Config
+		if err = ch.CheckEgress(h.egress); err != nil {
+			writeError(w, err)
+			return
+		}
 	}
 	if err = h.c.Channels.Update(r.Context(), ch); err != nil {
 		writeError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, redact(ch))
+}
+
+// destinationChanged reports whether cfg sends the secret of ch somewhere
+// else than its stored configuration: another host, port, TLS mode or user
+// (smtp), another url (webhook).
+func destinationChanged(ch *Channel, cfg map[string]any) bool {
+	switch ch.Provider {
+	case ProviderSMTP:
+		stored, _ := SMTPConfigFrom(ch.Config)
+		next, err := SMTPConfigFrom(cfg)
+		if err != nil {
+			return true
+		}
+		// Validate fills in the default port and TLS mode on both sides.
+		_ = stored.Validate()
+		_ = next.Validate()
+		return next.Host != stored.Host || next.Port != stored.Port || next.TLS != stored.TLS || next.Username != stored.Username
+	case ProviderWebhook:
+		stored, _ := ch.Config["url"].(string)
+		next, ok := cfg["url"].(string)
+		return !ok || next != stored
+	}
+	return false
 }
 
 // DeleteChannel handles DELETE /api/v1/notification-channels/{id}.
