@@ -23,18 +23,36 @@ needs:
 curl -fsSL https://raw.githubusercontent.com/DataHub-Chiemgau/Reticora-CMDB/main/install.sh | bash -s -- --cloud
 ```
 
+**Signed release by default (TEC-15, E-69 Option 1).** The installers install
+the signed release artifacts of the newest release, or of the one named with
+`--ref v<version>`: the source of the release tag (checked against the signed
+`SOURCE_COMMIT` or source tarball), the images `reticora-server`,
+`reticora-frontend` and `reticora-postgres` (`cosign verify`, pinned by
+digest) and the collector (`cosign verify-blob` of the binary, or the signed
+image in the Docker mode). `--build-from-source` (`RETICORA_BUILD_FROM_SOURCE=1`)
+builds everything locally from the sources instead — **not
+signature-verified**, the installer warns at the start; only then is a ref
+that is no release tag (e.g. `main`) accepted. Without the switch such a ref
+stops with a hint. Every check, its error messages and the commands to verify
+by hand: [troubleshooting-installation.md, section 9](../docs/troubleshooting-installation.md#9-signature-verification).
+
 Options for the bootstrap:
 
 | Option | Environment variable | Default |
 |---|---|---|
 | `--repo <url>` | `RETICORA_REPO_URL` | public repository |
-| `--ref <ref>` | `RETICORA_REPO_REF` | `main` |
+| `--ref <ref>` | `RETICORA_REPO_REF` | the newest release (with `--build-from-source`: `main`) |
+| `--build-from-source` | `RETICORA_BUILD_FROM_SOURCE=1` | off: the signed release artifacts are installed |
 | `--source-dir <dir>` | `RETICORA_SOURCE_DIR` | `/opt/reticora-cmdb` (root) / `~/reticora-cmdb` |
 
 From there on the component installers handle everything else themselves:
 missing dependencies are installed (Docker Engine, Docker Compose, curl,
 openssl, git, tar and — for the collector's source build — the Go toolchain),
 the configuration is generated and the services are started and verified.
+
+A development checkout is installed with the switch:
+`./install.sh --cloud --build-from-source` (CI does the same, see
+`.github/workflows/install-smoke.yml`).
 
 ## 1. Central cloud
 
@@ -68,8 +86,13 @@ The installer asks for:
   HTTPS is enabled — port 80 answers the ACME challenge and redirects to
   HTTPS, the UI itself is then served at `https://<domain>` on port 443),
   API (8080) and Keycloak (8180).
-- **Image source** — build from source (default) or pull prebuilt images from
-  a registry.
+- **Image registry** — the registry of the signed release images (default
+  `ghcr.io/datahub-chiemgau`, or `RETICORA_IMAGE_REGISTRY` for a mirror that
+  keeps the signatures). The release is `--release v<version>`, otherwise the
+  release tag of the checkout, otherwise the newest release; the checkout
+  (compose file, realm, migrations) must be the signed source of that release.
+  `./install-cloud.sh --build-from-source` builds the images from the checkout
+  instead (not signature-verified).
 
 It then:
 
@@ -77,6 +100,9 @@ It then:
    whatever is missing automatically (Docker Engine via get.docker.com, the
    Compose plugin and the remaining tools via the distribution's package
    manager) — it also starts/enables the Docker daemon when it is not running,
+   and, by default, checks that the checkout is the signed source of the
+   selected release (its git commit against `SOURCE_COMMIT`, otherwise every
+   file against the signed source tarball),
 2. writes `deploy/docker-compose/.env` (mode `600`),
 3. generates the RS256 session signing key at
    `deploy/docker-compose/secrets/session-private.pem` (group-readable by the
@@ -84,7 +110,9 @@ It then:
    bind-mounted into the server container),
 4. renders the Keycloak realm with the configured OIDC client secret into
    `deploy/docker-compose/.generated/`,
-5. builds or pulls the server/frontend images,
+5. verifies the signed release images with cosign, pins them by digest in
+   `.env` and pulls them (default), or builds server, frontend and PostgreSQL
+   from the checkout (`--build-from-source`, not signature-verified),
 6. starts the infrastructure and applies the SQL migrations from
    `backend/migrations/` (via `golang-migrate` when installed, otherwise via
    `psql` inside the postgres container; applied versions are tracked in the
@@ -107,7 +135,9 @@ login requires a new password and the setup of a one-time-password app
 again.
 
 Non-interactive (CI) usage: `./install-cloud.sh --non-interactive` uses the
-existing `.env` values, generated defaults and never prompts.
+existing `.env` values, generated defaults and never prompts. CI installs the
+checked-out, unpublished state with `--build-from-source`; the default path
+runs on release tags (job `release-mode` of `install-smoke.yml`).
 
 ### Database logins (TEN-03)
 
@@ -228,8 +258,10 @@ docker compose --env-file deploy/docker-compose/.env -f deploy/docker-compose/do
 ## 2. Collector VM (customer network)
 
 ```bash
-sudo ./install-vm.sh            # systemd mode (default)
-sudo ./install-vm.sh --docker   # Docker mode
+sudo ./install-vm.sh                      # systemd mode (default)
+sudo ./install-vm.sh --docker             # Docker mode
+sudo ./install-vm.sh --release v1.2.3     # a named release (default: the newest)
+sudo ./install-vm.sh --build-from-source  # local build, not signature-verified
 ```
 
 The installer asks for:
@@ -247,15 +279,22 @@ The installer asks for:
 - **mTLS identity** — client certificate/key/CA files, or empty to use the
   enrollment keystore at `/opt/reticora-collector/credentials.json`.
 
-It then writes `/opt/reticora-collector/collector.env` (mode `600`), makes
-sure the build prerequisites exist (downloads the repository sources when the
-script runs outside a checkout, installs the Go toolchain matching `go.work`
-into `/usr/local/go` when the local one is missing or too old, installs
-Docker/Compose in `--docker` mode), builds the collector binary from source
-(or reuses `bin/collector` / an existing installation), installs and starts a
+It then writes `/opt/reticora-collector/collector.env` (mode `600`), installs
+the signed collector of the release — the binary `reticora-collector-linux-<arch>`
+after `cosign verify-blob` and its sha256 in the signed `SHA256SUMS`, or with
+`--docker` the image `reticora-collector` after `cosign verify`, pinned by
+digest (Docker/Compose are installed when missing) — installs and starts a
 `reticora-collector.service` systemd unit — or, with `--docker`, a minimal
 compose project in `/opt/reticora-collector/` — and verifies that the
 collector is running.
+
+With `--build-from-source` (`RETICORA_BUILD_FROM_SOURCE=1`) it builds the
+collector locally instead, not signature-verified: it downloads the repository
+sources when the script runs outside a checkout (`RETICORA_REPO_REF`, default
+`main`; a release tag is checked against the signed release), installs the Go
+toolchain matching `go.work` into `/usr/local/go` when the local one is missing
+or too old (checked against the sha256 of go.dev), and builds the binary (or
+reuses `bin/collector` / an existing installation) or the image.
 
 ### Device certificates (Redfish, WMI, NAS)
 

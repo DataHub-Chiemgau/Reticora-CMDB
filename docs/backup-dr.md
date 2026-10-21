@@ -253,7 +253,8 @@ artifact for 90 days.
 | Webhook target down | `TestDispatcherPersistsAndRetriesFailedDelivery`, `TestDispatcherMarksDeliveryFailedAfterMaxAttempts` | Deliveries are persisted and retried. After the last attempt they go to the dead-letter queue. |
 | SMTP | — | Not applicable while no SMTP delivery exists (TEC-13). It becomes a scenario with the notification channel. |
 
-Run it locally after `./install.sh --cloud --non-interactive`:
+Run it locally after an installation of the checkout
+(`./install.sh --cloud --non-interactive --build-from-source`, as in CI):
 
 ```bash
 ./tests/outage/run.sh            # all scenarios

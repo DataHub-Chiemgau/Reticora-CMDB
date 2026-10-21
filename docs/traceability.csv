@@ -607,3 +607,4 @@ REL-02;[B];B;backend/internal/relationship/relationship_scope_integration_test.g
 REL-04;[B];B;backend/internal/relationship/relationship_scope_integration_test.go;WP-401
 SEC-11;[Q];A;tests/ci-config.test.sh;WP-389
 TST-04;[Q];A;tests/ci-config.test.sh;WP-389
+TEC-15;[B];A;tests/install-signature.test.sh;WP-388

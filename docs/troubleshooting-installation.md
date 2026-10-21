@@ -286,7 +286,7 @@ The installer is safe to re-run and reuses existing `.env` values as defaults:
 | Let's Encrypt cert | Not re-issued when a real certificate is present. |
 | Realm file | Re-rendered and validated on every run. Keycloak imports it only while the realm does not exist (`start --import-realm` skips an existing realm). |
 | Migrations | Tracked in `reticora_schema_migrations`; already-applied versions are skipped. |
-| Image pins (release mode) | `RETICORA_SERVER_IMAGE`, `RETICORA_FRONTEND_IMAGE` and `RETICORA_POSTGRES_IMAGE` are written by the installer: verified again with cosign and re-pinned on every run of the release mode, empty for the local source build. A pin of an earlier run is never reused unverified. |
+| Image pins (release mode) | `RETICORA_SERVER_IMAGE`, `RETICORA_FRONTEND_IMAGE` and `RETICORA_POSTGRES_IMAGE` are written by the installer: verified again with cosign and re-pinned on every run of the release mode (the default), empty for the local source build (`--build-from-source`). A pin of an earlier run is never reused unverified. The mode is not remembered: every run without `--build-from-source` installs the signed release (section 9). |
 
 **Rotating passwords and OIDC settings:** change the value in `.env` (or at
 the installer's prompt) and re-run the installer. Every applied Keycloak
@@ -370,27 +370,36 @@ The installers verify these signatures **before** they install anything;
 every check is fail-closed: a failed or impossible check stops the
 installation with rc 1 and changes nothing that is running.
 
-**What is verified, and what is not (transition rule of E-69):**
+**Default and switch (E-69, Option 1):** by default every installer installs
+the **signed release artifacts** of one release — the one you name
+(`install.sh --ref v<version>`, `install-cloud.sh`/`install-vm.sh --release
+v<version>`, `RETICORA_RELEASE`), otherwise the newest release (GitHub's
+latest release, no pre-release). Only `--build-from-source`
+(`RETICORA_BUILD_FROM_SOURCE=1`) builds locally instead; that installation is
+**not signature-verified**, the installer says so at the start. A ref that is
+no release tag (a branch such as `main`, a commit) is accepted only with the
+switch.
 
 | Installer path | Verification |
 |---|---|
-| `install-cloud.sh` with `RETICORA_IMAGE_REGISTRY` (release mode) | `cosign verify` of `reticora-server`, `reticora-frontend` and `reticora-postgres` (`<registry>/<image>:<RETICORA_IMAGE_TAG>`). The verified digest is pinned in `.env` (`RETICORA_*_IMAGE=<registry>/<image>@sha256:…`), only these images are pulled, nothing is built — also not PostgreSQL. All before `compose up`. |
-| `install-vm.sh --release v<version>` (`RETICORA_COLLECTOR_RELEASE`) | The collector binary `reticora-collector-linux-<arch>` of the release: `cosign verify-blob` with its `.sigstore.json`, and its sha256 against the signed `SHA256SUMS`, before it is copied to `/opt/reticora-collector`. systemd mode only. |
-| `install.sh --ref v<version>`, `install-vm.sh` with `RETICORA_REPO_REF=v<version>` — when they download the sources (run outside a checkout, e.g. piped from curl) | The signed `SHA256SUMS` of the release, then the commit of the checked-out tag against `SOURCE_COMMIT` (git) or the sha256 of `reticora-source-<version>.tar.gz` (without git, checked before it is unpacked). A mismatch stops before anything of the source runs or is built. |
-| `install-vm.sh` source build | The Go toolchain it downloads is checked against the sha256 that go.dev publishes (`https://go.dev/dl/?mode=json&include=all`) before it is unpacked. |
-| Default: local source build (`install-cloud.sh` without registry, `install-vm.sh` without `--release`) | **Not signature-verified.** The installer says so at the start. A ref that is no release tag (e.g. `main`) prints `Source not signature-verified (no release tag)`. Until E-69 is decided the source build stays the default; switching the default to the signed release artifacts is WP-388. |
+| `install.sh` (bootstrap, e.g. piped from curl) | Downloads the source of the release tag (default: the newest release), checks the signed `SHA256SUMS`, then the commit of the checked-out tag against `SOURCE_COMMIT` (git) or the sha256 of `reticora-source-<version>.tar.gz` (without git, checked before it is unpacked), and hands the release to the component installer (`RETICORA_RELEASE`). A mismatch stops before anything of the source runs. `--ref main` without the switch stops before the download. |
+| `install-cloud.sh` (default: release mode) | The release: `--release`, otherwise the release tag the checkout is on, otherwise the newest release. First the checkout itself — compose file, realm and migrations come from it — must be the signed source of that release: a git checkout its commit (`SOURCE_COMMIT`), a directory without git every file of the signed source tarball. Then `cosign verify` of `reticora-server`, `reticora-frontend` and `reticora-postgres` (`<registry>/<image>:<release>`, registry `ghcr.io/datahub-chiemgau` or `RETICORA_IMAGE_REGISTRY`). The verified digest is pinned in `.env` (`RETICORA_*_IMAGE=<registry>/<image>@sha256:…`), only these images are pulled, nothing is built — also not PostgreSQL. All before `compose up`. |
+| `install-vm.sh` (default, systemd mode) | The collector binary `reticora-collector-linux-<arch>` of the release (`--release`, `RETICORA_COLLECTOR_RELEASE`, otherwise the newest): `cosign verify-blob` with its `.sigstore.json`, and its sha256 against the signed `SHA256SUMS`, before it is copied to `/opt/reticora-collector`. No sources, no local binary. |
+| `install-vm.sh --docker` (default) | `cosign verify` of the image `reticora-collector` of the release; the generated compose project runs it pinned by digest (`image: <registry>/reticora-collector@sha256:…`), pulled, not built. |
+| `--build-from-source` (all three) | **Not signature-verified:** `install-cloud.sh` builds server, frontend and PostgreSQL from the checkout, `install-vm.sh` builds the collector (binary or image). Still checked: a release tag as source (`--ref v<version>`, `RETICORA_REPO_REF=v<version>`) against the signed release, and the Go toolchain `install-vm.sh` downloads against the sha256 that go.dev publishes (`https://go.dev/dl/?mode=json&include=all`). Another ref prints `Source not signature-verified (no release tag)`. `--release` and `--build-from-source` exclude each other. |
 
 The signer must be `release.yml` of `DataHub-Chiemgau/Reticora-CMDB` on a
 version tag, issued by `https://token.actions.githubusercontent.com` — the
-identity the collector updater pins as well. With a version tag
-(`RETICORA_IMAGE_TAG=v1.2.3`, `--release v1.2.3`, `--ref v1.2.3`) the
-signature must be from exactly that release, so the signed files of an older
-release do not pass as the requested one. Releases are always fetched from
+identity the collector updater pins as well. The signature must be from
+exactly the selected release, so the signed files of an older release do not
+pass as the requested one. Only the tag of the newest release is taken from
+the GitHub API (`https://api.github.com/repos/DataHub-Chiemgau/Reticora-CMDB/releases/latest`);
+everything installed for it is verified for that tag. Releases are always
+fetched from
 `https://github.com/DataHub-Chiemgau/Reticora-CMDB/releases/download/<tag>/`;
-a git mirror (`--repo`) is accepted when its tag is the signed commit. The
-release mode of `install-cloud.sh` still takes the compose file, the realm
-and the migrations from the checkout it runs in: install it from a verified
-release tag (`./install.sh --cloud --ref v<version>`).
+a git mirror (`--repo`) is accepted when its tag is the signed commit, an
+image mirror (`RETICORA_IMAGE_REGISTRY`) when it keeps the signatures
+(`cosign copy`).
 
 **cosign:** an installed `cosign` (v2) is used. Otherwise the installer
 downloads cosign v2.4.1 for linux/amd64 or linux/arm64 from the sigstore
@@ -398,19 +407,32 @@ release and checks it against its published sha256 before every use (cache:
 `RETICORA_TOOLS_DIR`, default `/var/cache/reticora` as root, otherwise
 `~/.cache/reticora`).
 
-**Release mode of the cloud installer:**
+**Typical calls:**
 
 ```bash
-RETICORA_IMAGE_REGISTRY=ghcr.io/datahub-chiemgau RETICORA_IMAGE_TAG=v1.2.3 \
-  ./install.sh --cloud --ref v1.2.3
-sudo ./install.sh --vm --ref v1.2.3 --release v1.2.3   # collector VM
+# Signed release, the newest or a named one (the default)
+curl -fsSL https://raw.githubusercontent.com/DataHub-Chiemgau/Reticora-CMDB/main/install.sh | bash -s -- --cloud
+./install.sh --cloud --ref v1.2.3            # source, images: release v1.2.3
+sudo ./install.sh --vm --ref v1.2.3          # collector binary of v1.2.3
+git checkout v1.2.3 && ./install-cloud.sh    # the release of the checkout's tag
+# Local build of a checkout (development, CI) — not signature-verified
+./install.sh --cloud --build-from-source
+RETICORA_BUILD_FROM_SOURCE=1 ./install-cloud.sh --non-interactive
+sudo ./install-vm.sh --build-from-source
 ```
+
+Re-runs follow the same rule: an installation made with `--build-from-source`
+switches to the signed release images on a re-run without the switch (the
+checkout must then be the source of that release); pass the switch again to
+keep building locally.
 
 **Check by hand** (the commands the installers run):
 
 ```bash
 identity='^https://github\.com/DataHub-Chiemgau/Reticora-CMDB/\.github/workflows/release\.yml@refs/tags/v1\.2\.3$'
 issuer=https://token.actions.githubusercontent.com
+# The newest release
+curl -fsSL https://api.github.com/repos/DataHub-Chiemgau/Reticora-CMDB/releases/latest | jq -r .tag_name
 # Images: prints the verified digest (critical.image.docker-manifest-digest)
 cosign verify ghcr.io/datahub-chiemgau/reticora-server:v1.2.3 \
   --certificate-identity-regexp "$identity" --certificate-oidc-issuer "$issuer"
@@ -431,13 +453,19 @@ curl -fsSL "$base/SOURCE_COMMIT"; git -C /opt/reticora-cmdb rev-parse HEAD
 
 | Message | Cause | Fix |
 |---|---|---|
+| `Source not signature-verified (no release tag): '<ref>' is not installed by default …` | `--ref` (or `RETICORA_REPO_REF`) names a branch or commit, not a release tag | Install a release (`--ref v<version>`, or no `--ref` for the newest), or add `--build-from-source` to build that ref locally, unverified. |
+| `Could not determine the newest release of …` | No `--ref`/`--release` and the GitHub API was not reachable (network, rate limit) or names no version tag | Name the release (`install.sh --ref v<version>`, `--release v<version>`), or use `--build-from-source`. |
+| `Source check failed: the checkout of <tag> in <dir> is commit …, the signed release names …` | The tag in the repository (or a mirror) points to another commit than the release, an old checkout could not be updated, or `install-cloud.sh` runs in a checkout that is not the release (e.g. `main`, or a tag other than the selected release). Commit `<none>`: git refused to read the checkout (e.g. "dubious ownership" when it belongs to another user than the one running the installer) | Do not build. Check out the release tag (`git checkout v<version>`), install with `./install.sh --cloud --ref v<version>` (downloads the source), name the checkout's release with `--release`, or use `--build-from-source` for a development checkout. |
+| `Source check failed: <dir> is not the source of release <tag> (<file>: FAILED …)` | `install-cloud.sh` runs in a directory without git whose files differ from the signed source tarball of the release (changed, missing, or another version) | As above; `./install.sh --cloud --ref v<version>` restores the release source. |
 | `Signature check failed: <file or image> is not signed by the release workflow …` | cosign rejected the signature: manipulated file or image, a signature of another identity (fork, other workflow) or of another release, a tag without signed images, or no registry access | Do not install. Check the tag and the registry (`docker login` for a private registry) and verify by hand as above; a mirror must keep the signatures (`cosign copy`). |
 | `Signature check failed: the verified signatures of <ref> do not name <image> with one digest` | The tag carries a signed image of another name (e.g. the frontend image under `reticora-server`) | Do not install; the registry content is wrong. |
 | `Checksum mismatch: <file> … is not the file of the signed manifest SHA256SUMS` | The downloaded binary, tarball or `SOURCE_COMMIT` is not the one of the release | Do not install; download again from the release page. |
-| `Source check failed: the checkout of <tag> in <dir> is commit …, the signed release names …` | The tag in the repository (or a mirror) points to another commit than the release, or an old checkout could not be updated | Do not build; remove the checkout or use the official repository. |
 | `cosign is required to verify the signed release artifacts …` | No cosign installed and the download from github.com/sigstore failed (or no build for this CPU) | Install cosign v2 (https://docs.sigstore.dev/cosign/system_config/installation/) and re-run. |
 | `The downloaded cosign v2.4.1 does not match its published sha256 checksum` | The cosign download was manipulated or truncated | Re-run; install cosign yourself if it persists. |
-| `Could not download <file> of release <tag> …` | The release has no such file (tag not released, or released before WP-387 without `SHA256SUMS.sigstore.json`) or no network | Use a release that publishes the signed manifest, or the source build. |
-| `Checksum mismatch: the downloaded go<version>.linux-<arch>.tar.gz is not the file go.dev publishes` | The Go toolchain download was manipulated | Re-run; install Go yourself if it persists. |
-| `… the Go toolchain is not installed unverified` (warning) | go.dev's checksum list was not reachable | The installer falls back to a prebuilt `bin/collector` or the existing binary; otherwise install Go yourself. |
-| `--release installs the signed collector binary in the systemd mode …` | `--release` with `--docker` | The Docker mode builds the collector image from source. |
+| `Could not download <file> of release <tag> …` | The release has no such file (tag not released, or released before WP-387 without `SHA256SUMS.sigstore.json`) or no network | Use a release that publishes the signed manifest, or `--build-from-source`. |
+| `… --build-from-source …; use one of them` | `--release` together with `--build-from-source` | Choose the signed release or the local build. |
+| `No release selected for the signed collector …` / `No registry or release selected for the signed images …` | A function of the installer ran without a selected release (internal call) | Name the release with `--release v<version>`, or use `--build-from-source`. |
+| `RETICORA_BUILD_FROM_SOURCE must be 1 (build from source) or 0 …` | Another value in the variable | Set `RETICORA_BUILD_FROM_SOURCE=1` or leave it unset. |
+| `Checksum mismatch: the downloaded go<version>.linux-<arch>.tar.gz is not the file go.dev publishes` | The Go toolchain download of the source build was manipulated | Re-run; install Go yourself if it persists. |
+| `… the Go toolchain is not installed unverified` (warning) | go.dev's checksum list was not reachable (source build) | The installer falls back to a prebuilt `bin/collector` or the existing binary; otherwise install Go yourself. |
+| `… not signature-verified (--build-from-source)` (warning) | The local build was requested | Expected for development and CI; production installs the signed release (no switch). |

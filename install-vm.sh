@@ -10,25 +10,28 @@
 #   - generates a minimal docker-compose setup that runs the collector image.
 #
 # Everything the collector needs is provisioned automatically: missing packages
-# (curl, git, tar), Docker/Compose in --docker mode, the Go toolchain for the
-# source build and the repository sources themselves when the script is run
-# outside a checkout.
+# (curl, git, tar), Docker/Compose in --docker mode and, for the source build,
+# the Go toolchain and the repository sources.
 #
 # The installer is idempotent: re-running it reuses the existing configuration
 # as defaults and upgrades the installation in place.
 #
-# Signature verification (TEC-15): --release v<version> installs the signed
-# collector binary of that release, checked with cosign verify-blob and against
-# the signed SHA256SUMS before it is copied. The default is still the source
-# build (transition rule of E-69), reported as not signature-verified; its Go
-# toolchain is checked against the sha256 of go.dev, a release tag as source
-# (RETICORA_REPO_REF=v<version>) against the signed release.
+# Signature verification (TEC-15, default per E-69 Option 1): the signed
+# collector of the newest release, or of --release v<version>, is installed —
+# in the systemd mode the binary, checked with cosign verify-blob and against
+# the signed SHA256SUMS before it is copied; in the Docker mode the image
+# reticora-collector, checked with cosign verify and pinned by digest.
+# --build-from-source builds the collector locally instead, reported as not
+# signature-verified; its Go toolchain is checked against the sha256 of go.dev,
+# a release tag as source (RETICORA_REPO_REF=v<version>) against the signed
+# release.
 #
 # Usage:
 #   sudo ./install-vm.sh                      interactive installation (systemd)
 #   sudo ./install-vm.sh --docker             use Docker instead of systemd
 #   sudo ./install-vm.sh --non-interactive    use existing config / defaults
-#   sudo ./install-vm.sh --release v1.2.3     signed release binary (systemd)
+#   sudo ./install-vm.sh --release v1.2.3     signed collector of that release
+#   sudo ./install-vm.sh --build-from-source  local build, not signature-verified
 #
 set -euo pipefail
 
@@ -40,9 +43,18 @@ SYSTEMD_UNIT="/etc/systemd/system/reticora-collector.service"
 MODE="systemd"
 NON_INTERACTIVE=0
 REPO_URL="${RETICORA_REPO_URL:-https://github.com/DataHub-Chiemgau/Reticora-CMDB.git}"
-REPO_REF="${RETICORA_REPO_REF:-main}"
-# Release whose signed collector binary is installed (empty = source build).
-COLLECTOR_RELEASE="${RETICORA_COLLECTOR_RELEASE:-}"
+# Source of the build (--build-from-source; empty: main).
+REPO_REF="${RETICORA_REPO_REF:-}"
+# Release whose signed collector is installed (empty: chosen in
+# select_release — a release tag as RETICORA_REPO_REF, otherwise the newest).
+COLLECTOR_RELEASE="${RETICORA_COLLECTOR_RELEASE:-${RETICORA_RELEASE:-}}"
+# E-69 (Option 1): the signed release artifacts are the default; the local
+# source build only with --build-from-source (RETICORA_BUILD_FROM_SOURCE=1).
+case "${RETICORA_BUILD_FROM_SOURCE:-0}" in
+    1) BUILD_FROM_SOURCE=1 ;;
+    0) BUILD_FROM_SOURCE=0 ;;
+    *) echo "RETICORA_BUILD_FROM_SOURCE must be 1 (build from source) or 0, not '$RETICORA_BUILD_FROM_SOURCE'" >&2; exit 2 ;;
+esac
 # The Go toolchain of the source build is installed to $GO_INSTALL_PARENT/go.
 GO_INSTALL_PARENT="/usr/local"
 
@@ -58,9 +70,8 @@ environment file and either
   - generates a minimal docker-compose setup that runs the collector image.
 
 Everything the collector needs is provisioned automatically: missing packages
-(curl, git, tar), Docker/Compose in --docker mode, the Go toolchain for the
-source build and the repository sources themselves when the script is run
-outside a checkout.
+(curl, git, tar), Docker/Compose in --docker mode and, for the source build,
+the Go toolchain and the repository sources.
 
 The installer is idempotent: re-running it reuses the existing configuration
 as defaults and upgrades the installation in place.
@@ -69,13 +80,18 @@ Usage:
   sudo ./install-vm.sh                      interactive installation (systemd)
   sudo ./install-vm.sh --docker             use Docker instead of systemd
   sudo ./install-vm.sh --non-interactive    use existing config / defaults
-  sudo ./install-vm.sh --release v1.2.3     install the signed collector binary
-                                            of that release (systemd mode;
+  sudo ./install-vm.sh --release v1.2.3     install the signed collector of
+                                            that release (default: the newest;
                                             RETICORA_COLLECTOR_RELEASE)
+  sudo ./install-vm.sh --build-from-source  build the collector from source
+                                            instead — not signature-verified
+                                            (RETICORA_BUILD_FROM_SOURCE=1)
 
-Without --release the collector is built from source and is not
-signature-verified. RETICORA_REPO_REF=v<version> checks a downloaded source
-against the signed release.
+By default the signed collector of a release is installed: the binary (systemd
+mode) after cosign verify-blob and its sha256 in the signed SHA256SUMS, the
+image reticora-collector (--docker) after cosign verify, pinned by digest.
+With --build-from-source, RETICORA_REPO_REF=v<version> checks a downloaded
+source against the signed release; another ref is used unverified.
 EOF
 }
 
@@ -86,6 +102,7 @@ while [ "$#" -gt 0 ]; do
         --non-interactive) NON_INTERACTIVE=1 ;;
         --release) [ "$#" -ge 2 ] || { echo "--release requires a version tag" >&2; exit 2; }; COLLECTOR_RELEASE="$2"; shift ;;
         --release=*) COLLECTOR_RELEASE="${1#*=}" ;;
+        --build-from-source) BUILD_FROM_SOURCE=1 ;;
         -h|--help)
             print_usage
             exit 0
@@ -116,8 +133,12 @@ die()     { printf '%s✘ Error:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 if [ -n "$COLLECTOR_RELEASE" ]; then
     is_release_tag "$COLLECTOR_RELEASE" \
         || die "--release expects a version tag v<version> of a signed release, not '$COLLECTOR_RELEASE'."
-    [ "$MODE" = "systemd" ] \
-        || die "--release installs the signed collector binary in the systemd mode; the Docker mode builds the collector image from source."
+    [ "$BUILD_FROM_SOURCE" != 1 ] \
+        || die "--release installs the signed collector of a release, --build-from-source builds it from source; use one of them."
+fi
+# A source ref that is no release tag only with --build-from-source (E-69).
+if [ -n "$REPO_REF" ] && [ "$BUILD_FROM_SOURCE" != 1 ]; then
+    check_source_ref "$REPO_REF"
 fi
 
 trim() {
@@ -487,28 +508,30 @@ collect_config() {
 }
 
 # ─── Source bootstrap ─────────────────────────────────────────────────────────
-# The collector is built from the repository sources. When the installer is
-# executed on its own (e.g. only install-vm.sh was copied to the VM), the
-# sources are downloaded automatically.
+# With --build-from-source the collector is built from the repository sources.
+# When the installer is executed on its own (e.g. only install-vm.sh was
+# copied to the VM), the sources are downloaded automatically.
 SOURCE_DIR="$SCRIPT_DIR"
 
 # Downloads the sources when they are not next to this script. Failure is not
 # fatal: the systemd mode can still fall back to a prebuilt binary or an
 # existing installation. A release tag (REPO_REF v*) is the exception: its
 # source is checked against the signed release, and a failed download or
-# check stops the installation before the build.
+# check stops the installation before the build. Another ref only with
+# --build-from-source (check_source_ref).
 ensure_sources() {
     [ -f "$SOURCE_DIR/go.work" ] && [ -d "$SOURCE_DIR/collector" ] && return 0
 
+    [ -n "$REPO_REF" ] || REPO_REF="main"
     SOURCE_DIR="${RETICORA_SOURCE_DIR:-/opt/reticora-cmdb}"
     if [ -f "$SOURCE_DIR/go.work" ] && [ -d "$SOURCE_DIR/collector" ] && [ ! -d "$SOURCE_DIR/.git" ] \
         && ! is_release_tag "$REPO_REF"; then
         return 0
     fi
 
+    check_source_ref "$REPO_REF"
     info "Downloading the Reticora sources from $REPO_URL ($REPO_REF) …"
     ensure_command curl curl ca-certificates
-    is_release_tag "$REPO_REF" || warn_unverified_source "$REPO_REF"
     have_cmd git || install_packages git || true
 
     if have_cmd git; then
@@ -632,6 +655,17 @@ ensure_go_toolchain() {
 }
 
 # ─── Collector binary / image provisioning ────────────────────────────────────
+# select_release — E-69 (Option 1): the release whose signed collector is
+# installed: --release (RETICORA_COLLECTOR_RELEASE, RETICORA_RELEASE), a
+# release tag as RETICORA_REPO_REF, otherwise the newest release.
+select_release() {
+    [ "$BUILD_FROM_SOURCE" != 1 ] || return 0
+    if [ -z "$COLLECTOR_RELEASE" ] && is_release_tag "$REPO_REF"; then
+        COLLECTOR_RELEASE="$REPO_REF"
+    fi
+    [ -n "$COLLECTOR_RELEASE" ] || latest_release_tag COLLECTOR_RELEASE
+}
+
 # install_release_collector <file> — the collector binary of release
 # $COLLECTOR_RELEASE: its keyless signature (cosign verify-blob) and its
 # sha256 in the signed manifest SHA256SUMS are checked before it is copied.
@@ -660,7 +694,11 @@ provide_collector_systemd() {
     mkdir -p "$INSTALL_DIR" "$RETICORA_SPOOL_DIR"
 
     local bin_src=""
-    if [ -n "$COLLECTOR_RELEASE" ]; then
+    if [ "$BUILD_FROM_SOURCE" != 1 ]; then
+        # E-69 (Option 1): only the signed collector of the release, never a
+        # local build or binary.
+        [ -n "$COLLECTOR_RELEASE" ] \
+            || die "No release selected for the signed collector; name it with --release v<version>, or build from source with --build-from-source."
         install_release_collector "$INSTALL_DIR/collector.new"
         bin_src="$INSTALL_DIR/collector.new"
     elif [ -f "$SOURCE_DIR/go.work" ] && ensure_go_toolchain; then
@@ -718,18 +756,33 @@ install_docker_setup() {
     info "Installing the Docker-based collector …"
     mkdir -p "$INSTALL_DIR" "$RETICORA_SPOOL_DIR"
 
-    [ -f "$SOURCE_DIR/collector/Dockerfile" ] \
-        || die "Collector sources not found in $SOURCE_DIR — the Docker mode needs them as build context."
+    local pinned_image="" build="" step="build"
+    if [ "$BUILD_FROM_SOURCE" != 1 ]; then
+        # E-69 (Option 1): the signed image reticora-collector of the release,
+        # pinned by the digest cosign verified; nothing is built.
+        # RETICORA_IMAGE_REGISTRY names a mirror that keeps the signatures.
+        [ -n "$COLLECTOR_RELEASE" ] \
+            || die "No release selected for the signed collector image; name it with --release v<version>, or build from source with --build-from-source."
+        ensure_command jq jq
+        info "Verifying the signed collector image of release $COLLECTOR_RELEASE …"
+        verify_release_image "${RETICORA_IMAGE_REGISTRY:-$RELEASE_REGISTRY}" reticora-collector "$COLLECTOR_RELEASE" pinned_image
+        step="pull"
+    else
+        [ -f "$SOURCE_DIR/collector/Dockerfile" ] \
+            || die "Collector sources not found in $SOURCE_DIR — the Docker mode of --build-from-source needs them as build context."
+        pinned_image="reticora-collector:latest"
+        build="    build:
+      context: $SOURCE_DIR
+      dockerfile: collector/Dockerfile
+"
+    fi
 
     cat > "$INSTALL_DIR/docker-compose.yml" <<EOF
 # Reticora Collector — generated by install-vm.sh
 services:
   collector:
-    image: reticora-collector:latest
-    build:
-      context: $SOURCE_DIR
-      dockerfile: collector/Dockerfile
-    env_file:
+    image: $pinned_image
+${build}    env_file:
       - $ENV_FILE
     network_mode: host
     restart: unless-stopped
@@ -739,10 +792,10 @@ services:
 EOF
 
     if docker compose version >/dev/null 2>&1; then
-        (cd "$INSTALL_DIR" && docker compose build && docker compose up -d) \
+        (cd "$INSTALL_DIR" && docker compose "$step" && docker compose up -d) \
             || die "Docker collector startup failed."
     elif have_cmd docker-compose; then
-        (cd "$INSTALL_DIR" && docker-compose build && docker-compose up -d) \
+        (cd "$INSTALL_DIR" && docker-compose "$step" && docker-compose up -d) \
             || die "Docker collector startup failed."
     else
         die "docker compose not found."
@@ -802,6 +855,7 @@ EOF
 main() {
     preflight
     collect_config
+    select_release
     echo
     info "Configuration:"
     cat <<EOF
@@ -813,11 +867,12 @@ main() {
   Interval:          $RETICORA_DISCOVERY_INTERVAL (heartbeat $RETICORA_HEARTBEAT_INTERVAL)
   mTLS cert file:    ${RETICORA_TLS_CLIENT_CERT_FILE:-<enrollment keystore>}
 EOF
-    if [ -n "$COLLECTOR_RELEASE" ]; then
-        info "Collector: signed release $COLLECTOR_RELEASE, verified with cosign verify-blob and the signed SHA256SUMS before the installation."
+    if [ "$BUILD_FROM_SOURCE" = 1 ]; then
+        warn "Collector: built from source (or a local prebuilt binary) — not signature-verified (--build-from-source). Without the switch the signed collector of the newest release, or of --release v<version>, is installed ($SIGNATURE_TROUBLESHOOTING)."
+    elif [ "$MODE" = "docker" ]; then
+        info "Collector: signed release $COLLECTOR_RELEASE, the image reticora-collector verified with cosign verify and pinned by digest before the start."
     else
-        # Transition rule of E-69: the source build stays the default.
-        warn "Collector: built from source (or a local prebuilt binary) — not signature-verified. --release v<version> installs the signed release binary ($SIGNATURE_TROUBLESHOOTING)."
+        info "Collector: signed release $COLLECTOR_RELEASE, verified with cosign verify-blob and the signed SHA256SUMS before the installation."
     fi
     if is_tty; then
         confirm "Start the installation with these settings?" "yes" || die "Aborted by user."
@@ -826,9 +881,9 @@ EOF
     write_env
     success "Environment written to $ENV_FILE"
 
-    # The release binary needs no sources; a release tag as source is checked
-    # (fail-closed) before the build.
-    [ -n "$COLLECTOR_RELEASE" ] || ensure_sources || true
+    # Only the source build needs the sources; a release tag as source is
+    # checked (fail-closed) before the build.
+    [ "$BUILD_FROM_SOURCE" != 1 ] || ensure_sources || true
 
     if [ "$MODE" = "docker" ]; then
         install_docker_setup

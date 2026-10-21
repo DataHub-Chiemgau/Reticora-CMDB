@@ -22,6 +22,14 @@ minimum for the central cloud is 4 vCPU, 8 GB RAM and 100 GB SSD for up to
 [ops/sizing.md](ops/sizing.md). Installation problems:
 [troubleshooting-installation.md](troubleshooting-installation.md).
 
+By default the installers install the signed release artifacts of the newest
+release (or `--ref`/`--release v<version>`), verified with cosign before
+anything runs (TEC-15, E-69 Option 1). A development checkout is installed
+with `./install.sh --cloud --build-from-source` (`RETICORA_BUILD_FROM_SOURCE=1`):
+built locally, not signature-verified; only then is a ref that is no release
+tag accepted. Default, switch and error messages:
+[troubleshooting-installation.md, section 9](troubleshooting-installation.md#9-signature-verification).
+
 ### Monorepo Structure
 
 ```

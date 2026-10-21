@@ -7,9 +7,10 @@
 #   check_docker_engine      Docker Engine >= 24
 #   check_compose_v2         Docker Compose v2 (plugin or v2 binary)
 #   check_sizing <profile>   warns below the minimum sizing (docs/ops/sizing.md)
-#   cosign_verify_blob, verify_source_checkout, fetch_source_tarball, …
+#   cosign_verify_blob, verify_release_image, verify_source_checkout, …
 #                            signature verification before the installation
-#                            (TEC-15, WP-387; shared signature block below)
+#                            (TEC-15, WP-387; default per E-69, WP-388;
+#                            shared signature block below)
 #
 # The functions use info/success/warn/die, have_cmd and ensure_command of the
 # sourcing installer.
@@ -144,8 +145,18 @@ check_sizing() {
 # updater (edgecore/update CosignVerifier) pins as well. The signed manifest
 # SHA256SUMS of a release lists its files, among them SOURCE_COMMIT and the
 # source tarball reticora-source-<tag>.tar.gz. Every check is fail-closed.
+#
+# Default (E-69, Option 1): the signed release artifacts of the named or the
+# newest release are installed. Only --build-from-source (BUILD_FROM_SOURCE=1,
+# set by the installer from the option or RETICORA_BUILD_FROM_SOURCE=1) builds
+# locally — not signature-verified — and accepts a ref that is no release tag.
 RELEASE_REPOSITORY="DataHub-Chiemgau/Reticora-CMDB"
 RELEASE_DOWNLOAD_URL="https://github.com/$RELEASE_REPOSITORY/releases/download"
+# The newest release: GitHub's latest release (no pre-release, no draft).
+RELEASE_LATEST_URL="https://api.github.com/repos/$RELEASE_REPOSITORY/releases/latest"
+# The registry release.yml pushes the signed images to.
+# shellcheck disable=SC2034 # used by install-cloud.sh and install-vm.sh
+RELEASE_REGISTRY="ghcr.io/datahub-chiemgau"
 RELEASE_OIDC_ISSUER="https://token.actions.githubusercontent.com"
 # cosign used when none is installed: the release release.yml signs with,
 # checked against the sha256 of its cosign_checksums.txt.
@@ -170,6 +181,20 @@ release_identity_regexp() {
     fi
     printf '^https://github\\.com/%s/\\.github/workflows/release\\.yml@refs/tags/%s$' \
         "$(printf '%s' "$RELEASE_REPOSITORY" | sed 's/[.]/\\&/g')" "$ref"
+}
+
+# latest_release_tag <variable> — sets <variable> to the tag of the newest
+# release. Only the tag is taken from GitHub; everything installed for it is
+# verified for exactly that tag.
+latest_release_tag() {
+    local latest
+    ensure_command curl curl ca-certificates
+    latest="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$RELEASE_LATEST_URL" 2>/dev/null \
+        | tr -d '\r\n' | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')" || latest=""
+    is_release_tag "$latest" \
+        || die "Could not determine the newest release of $RELEASE_REPOSITORY ($RELEASE_LATEST_URL); name the release with --release v<version> (install.sh: --ref v<version>) or build from source with --build-from-source ($SIGNATURE_TROUBLESHOOTING)."
+    printf -v "$1" '%s' "$latest"
+    info "Newest release: $latest"
 }
 
 # ensure_cosign — sets COSIGN_BIN: the installed cosign, otherwise the pinned
@@ -225,6 +250,32 @@ cosign_verify_blob() {
         printf '%s\n' "$out" | tail -n 3 >&2
         die "Signature check failed: $(basename "$1") is not signed by the release workflow of $RELEASE_REPOSITORY for $3; nothing was installed ($SIGNATURE_TROUBLESHOOTING)."
     fi
+}
+
+# verify_release_image <registry> <image> <tag> <variable> — 'cosign verify'
+# of <registry>/<image>:<tag> against the identity of the release workflow
+# (with a version tag: of exactly that release). The signature must name
+# <image> (no other signed Reticora image under its name); <variable> is set
+# to <registry>/<image>@<digest> of the verified image. Needs jq.
+verify_release_image() {
+    local image="$2" ref out err digest
+    ref="$1/$image:$3"
+    ensure_cosign
+    err="$(mktemp)"
+    if ! out="$("$COSIGN_BIN" verify "$ref" \
+        --certificate-identity-regexp "$(release_identity_regexp "$3")" \
+        --certificate-oidc-issuer "$RELEASE_OIDC_ISSUER" 2>"$err")"; then
+        tail -n 3 "$err" >&2
+        rm -f "$err"
+        die "Signature check failed: $ref is not signed by the release workflow of $RELEASE_REPOSITORY; nothing was started ($SIGNATURE_TROUBLESHOOTING)."
+    fi
+    rm -f "$err"
+    digest="$(jq -r --arg image "$image" '[.[] | select((.critical.identity["docker-reference"] // "") | endswith("/" + $image))
+        | .critical.image["docker-manifest-digest"]] | unique | if length == 1 then .[0] else empty end' <<<"$out" 2>/dev/null)" || digest=""
+    [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] \
+        || die "Signature check failed: the verified signatures of $ref do not name $image with one digest; nothing was started ($SIGNATURE_TROUBLESHOOTING)."
+    printf -v "$4" '%s@%s' "$1/$image" "$digest"
+    success "Signed image verified: $image@$digest"
 }
 
 # fetch_release_file <tag> <name> <dir> — downloads <name> of release <tag>.
@@ -286,9 +337,16 @@ fetch_source_tarball() {
     success "Source verified: $name matches the signed release manifest"
 }
 
-# warn_unverified_source <ref> — transition rule of E-69: a ref that is no
-# release tag is still installed, with this warning.
-warn_unverified_source() {
-    warn "Source not signature-verified (no release tag): '$1' is used as downloaded. RETICORA_REPO_REF=v<version> (install.sh --ref v<version>) checks the source against the signed release ($SIGNATURE_TROUBLESHOOTING)."
+# check_source_ref <ref> — E-69 (Option 1): by default only the source of a
+# release tag is installed, checked against the signed release. Another ref
+# (a branch, a commit) needs --build-from-source and is then used unverified,
+# with a warning.
+check_source_ref() {
+    is_release_tag "$1" && return 0
+    if [ "${BUILD_FROM_SOURCE:-0}" = 1 ]; then
+        warn "Source not signature-verified (no release tag): '$1' is used as downloaded (--build-from-source). A release tag (install.sh --ref v<version>, RETICORA_REPO_REF) is checked against the signed release ($SIGNATURE_TROUBLESHOOTING)."
+        return 0
+    fi
+    die "Source not signature-verified (no release tag): '$1' is not installed by default. Install a signed release (--ref v<version>; without a ref the newest release), or add --build-from-source to build '$1' locally, not signature-verified ($SIGNATURE_TROUBLESHOOTING)."
 }
 # END shared signature block

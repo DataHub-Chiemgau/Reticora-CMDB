@@ -329,6 +329,9 @@ Regeln:
 ## 15. Betrieb, Deployment & Skalierung
 
 - **Installation:** idempotentes `install.sh` mit Keycloak-Bootstrap-Validierung, TLS-Modul (selbstsigniert/ACME) und Passwort-Rotation.
+  - **Standard: signierte Release-Artefakte** (TEC-15, E-69 Option 1). `install.sh`, `install-cloud.sh` und `install-vm.sh` installieren das neueste Release oder das mit `--ref v<version>` bzw. `--release v<version>` genannte: Quelle nur von einem Release-Tag (gegen das signierte `SOURCE_COMMIT` bzw. den Quell-Tarball geprüft), Images per `cosign verify` und Digest-Pin, Collector per `cosign verify-blob`; jede Prüfung fail-closed.
+  - **Schalter `--build-from-source`** (`RETICORA_BUILD_FROM_SOURCE=1`) baut lokal aus den Quellen und meldet „not signature-verified“; nur damit ist ein Ref ohne Release-Tag (z. B. `main`) zulässig, ohne den Schalter bricht er mit Hinweis ab. Entwicklung und CI nutzen den Schalter, der Job `release-mode` prüft den Standardpfad auf Tags `v*`.
+  - **Fehlerbilder** (Signatur, Prüfsumme, Quellstand, kein cosign, kein erreichbares Release) und Prüfbefehle: [`docs/troubleshooting-installation.md`, Abschnitt 9](docs/troubleshooting-installation.md#9-signature-verification); Ablauf der Installer: [`deploy/README.md`](deploy/README.md).
 - **Mindest-Sizing** bis 10.000 Objekte: 4 vCPU, 8 GB RAM, 100 GB SSD.
 - **Kubernetes** mit Kustomize-Overlays und HPA. Ab P5: Terraform, GitOps, Postgres-HA, PITR, Read-Replicas, Partitionierung.
 - **Observability:** Health-/Readiness-Endpunkte für alle Abhängigkeiten, mandantenbewusst mit SLOs.
