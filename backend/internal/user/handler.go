@@ -10,6 +10,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/go-chi/chi/v5"
@@ -133,6 +134,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// users/{id}/roles stay until their sunset (API-01).
 	r.Get("/api/v1/role-assignments", h.ListRoleAssignments)
 	r.Post("/api/v1/role-assignments", h.AssignRole)
+	r.Delete("/api/v1/role-assignments/{id}", h.RevokeRoleAssignment)
 }
 
 // --- User handlers ---
@@ -701,7 +703,17 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := h.repo.UpdateRole(r.Context(), t.OrganizationID, id, req)
+	p, ok := identity.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "changing a role requires an authenticated principal")
+		return
+	}
+	item, err := h.repo.UpdateRole(r.Context(), t.OrganizationID, id, &p, req)
+	var widening *RoleWideningError
+	if errors.As(err, &widening) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", widening.Error())
+		return
+	}
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 		return
@@ -726,10 +738,20 @@ func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// AssignRole handles POST /api/v1/role-assignments and the sunset path POST
+// /api/v1/roles/assign. The caller must hold role:manage and every permission
+// of the role in a scope covering the assignment's scope (grant ceiling, 403);
+// the check runs before anything is stored and before the MFA binding of an
+// org_admin grant.
 func (h *Handler) AssignRole(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	p, ok := identity.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "assigning roles requires an authenticated principal")
 		return
 	}
 
@@ -748,31 +770,70 @@ func (h *Handler) AssignRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scopeType := req.ScopeType
-	if scopeType == "" {
-		scopeType = "organization"
-	}
-
 	assignment := &UserRoleAssignment{
 		UserID:       req.UserID,
 		CustomRoleID: req.CustomRoleID,
 		RoleID:       req.RoleID,
-		ScopeType:    scopeType,
+		ScopeType:    req.ScopeType,
 		ScopeID:      req.ScopeID,
 		GrantedBy:    t.UserID,
 	}
 
-	if err := h.repo.AssignRole(r.Context(), t.OrganizationID, assignment); err != nil {
-		if errors.Is(err, ErrMFAUnavailable) {
-			// No org_admin without MFA (WP-358); the cause names the
-			// admin API and goes to the log only.
-			slog.ErrorContext(r.Context(), "org_admin assignment without enforceable MFA", "user_id", req.UserID, "error", err)
-			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrMFAUnavailable.Error())
-			return
-		}
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+	if err := h.repo.AssignRole(r.Context(), t.OrganizationID, &p, assignment); err != nil {
+		writeAssignmentError(w, r, "user_id", req.UserID, err)
 		return
 	}
 
 	api.WriteJSON(w, http.StatusCreated, assignment)
+}
+
+// RevokeRoleAssignment handles DELETE /api/v1/role-assignments/{id} (API-05,
+// AUT-02, F-017): it removes a standard or custom role assignment of the
+// organization. The caller must hold role:manage and every permission of the
+// role in a scope covering the assignment's scope, as for assigning it (grant
+// ceiling, 403); an unknown id or one of another organization is 404. The
+// user loses the rights at the next refresh.
+func (h *Handler) RevokeRoleAssignment(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	p, ok := identity.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "revoking roles requires an authenticated principal")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := h.repo.RevokeRoleAssignment(r.Context(), t.OrganizationID, &p, id); err != nil {
+		writeAssignmentError(w, r, "assignment_id", id, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeAssignmentError answers a refused role assignment or revocation: 403
+// beyond the grant ceiling, 404 for a role, user, team or assignment outside
+// the organization, 422 for an invalid scope, 503 when an org_admin cannot
+// be bound to MFA. Other failures are sanitized (api.WriteRepoError);
+// repository and database texts go to the log only, with the attribute key
+// and value naming the request's user or assignment.
+func writeAssignmentError(w http.ResponseWriter, r *http.Request, key, value string, err error) {
+	var ceiling *GrantCeilingError
+	switch {
+	case errors.As(err, &ceiling):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ceiling.Error())
+	case errors.Is(err, errRoleNotFound), errors.Is(err, errUserNotFound), errors.Is(err, errTeamNotFound),
+		errors.Is(err, errAssignmentNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+	case errors.Is(err, ErrMFAUnavailable):
+		// No org_admin without MFA (WP-358); the cause names the
+		// admin API and goes to the log only.
+		slog.ErrorContext(r.Context(), "org_admin assignment without enforceable MFA", key, value, "error", err)
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrMFAUnavailable.Error())
+	case api.WriteFieldError(w, err):
+	default:
+		slog.ErrorContext(r.Context(), "role assignment failed", key, value, "error", err)
+		api.WriteRepoError(w, err)
+	}
 }

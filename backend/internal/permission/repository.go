@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,7 +16,10 @@ import (
 type Repository interface {
 	ListPermissions(ctx context.Context) ([]Permission, error)
 	ListRolePermissions(ctx context.Context, orgID, roleID string) ([]RolePermissionGrant, error)
-	ReplaceRolePermissions(ctx context.Context, orgID, roleID, grantedBy string, keys []string) ([]RolePermissionGrant, error)
+	// ReplaceRolePermissions replaces the permissions of a standard role.
+	// Permissions it adds must be held by caller organization-wide
+	// (RoleWideningError); a nil caller holds nothing.
+	ReplaceRolePermissions(ctx context.Context, orgID, roleID, grantedBy string, caller *identity.Principal, keys []string) ([]RolePermissionGrant, error)
 	EffectivePermissions(ctx context.Context, orgID, userID string) ([]string, error)
 	HasPermission(ctx context.Context, orgID, userID, key string) (bool, error)
 	// AccessGrants returns every role and custom role assignment of the user
@@ -29,6 +33,40 @@ type Repository interface {
 }
 
 var _ identity.AccessResolver = Repository(nil)
+
+// RoleWideningError refuses a change of a role's permissions that adds
+// permissions the caller does not hold organization-wide (403, RBA-03,
+// F-015): the role applies to all its assignments, org-wide ones too.
+type RoleWideningError struct {
+	Missing []identity.Permission
+}
+
+func (e *RoleWideningError) Error() string {
+	keys := make([]string, len(e.Missing))
+	for i, p := range e.Missing {
+		keys[i] = string(p)
+	}
+	return "adding " + strings.Join(keys, ", ") + " to the role requires holding them organization-wide"
+}
+
+// checkWidening returns a RoleWideningError unless caller holds every key of
+// next that current lacks organization-wide (identity.GrantCeiling with an
+// org-wide target). Removing permissions is not limited.
+func checkWidening(caller *identity.Principal, current, next []string) error {
+	var added []identity.Permission
+	for _, key := range next {
+		if p := identity.Permission(key); !slices.Contains(current, key) && !slices.Contains(added, p) {
+			added = append(added, p)
+		}
+	}
+	if len(added) == 0 {
+		return nil
+	}
+	if missing := identity.GrantCeiling(caller, []identity.Grant{identity.OrgWideGrant(added)}); len(missing) > 0 {
+		return &RoleWideningError{Missing: missing}
+	}
+	return nil
+}
 
 // MemoryRepository is an in-memory implementation of Repository.
 type MemoryRepository struct {
@@ -81,7 +119,7 @@ func (r *MemoryRepository) ListRolePermissions(_ context.Context, orgID, roleID 
 	return items, nil
 }
 
-func (r *MemoryRepository) ReplaceRolePermissions(_ context.Context, orgID, roleID, grantedBy string, keys []string) ([]RolePermissionGrant, error) {
+func (r *MemoryRepository) ReplaceRolePermissions(_ context.Context, orgID, roleID, grantedBy string, caller *identity.Principal, keys []string) ([]RolePermissionGrant, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	unique := make(map[string]RolePermissionGrant)
@@ -91,6 +129,13 @@ func (r *MemoryRepository) ReplaceRolePermissions(_ context.Context, orgID, role
 			return nil, fmt.Errorf("unknown permission %q", key)
 		}
 		unique[key] = RolePermissionGrant{OrganizationID: orgID, RoleID: roleID, PermissionKey: key, GrantedAt: now, GrantedBy: grantedBy}
+	}
+	current := make([]string, 0, len(r.roleGrants[grantKey(orgID, roleID)]))
+	for key := range r.roleGrants[grantKey(orgID, roleID)] {
+		current = append(current, key)
+	}
+	if err := checkWidening(caller, current, keys); err != nil {
+		return nil, err
 	}
 	r.roleGrants[grantKey(orgID, roleID)] = unique
 	return grantsToSlice(unique), nil

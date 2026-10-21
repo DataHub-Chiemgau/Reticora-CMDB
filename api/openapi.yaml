@@ -8090,8 +8090,15 @@ paths:
       description: >-
         The invitation is valid for seven days. The response carries the
         token once; only its hash is stored. Role and scope must exist in
-        the organization (422 otherwise); a pending invitation for the same
-        address is a conflict (renew it instead). Requires user:manage.
+        the organization (422 otherwise); a client role (scope client) is
+        invited with scope_type client only, a site role with scope_type
+        site only, an organization role with any scope_type (422 field
+        scope_type otherwise, F-305). Grant ceiling (RBA-03, F-015): the
+        issuer must hold user:manage and every permission of the role in a
+        scope covering the invitation's scope (a client covers its sites,
+        site.client_id); otherwise 403, nothing is stored or audited. A
+        pending invitation for the same address is a conflict (renew it
+        instead). Requires user:manage.
       requestBody:
         required: true
         content:
@@ -8175,7 +8182,13 @@ paths:
       operationId: renewInvitation
       tags: [Users]
       summary: Renew a pending or expired invitation (TLC-03)
-      description: A new token and seven more days; the old token stops working. An accepted invitation is 409. Requires user:manage.
+      description: >-
+        A new token and seven more days; the old token stops working. An
+        accepted invitation is 409. The grant ceiling of the issue applies
+        to the renewing principal, not to the original issuer: it must hold
+        user:manage and every permission of the invited role in a scope
+        covering the invitation's scope (403 otherwise, nothing changes).
+        Requires user:manage.
       responses:
         '200':
           description: Invitation renewed, with its new token
@@ -8614,7 +8627,7 @@ paths:
       x-successor: '/api/v1/role-assignments'
       tags: [Roles]
       summary: Assign a custom role to a user
-      description: Like POST /api/v1/role-assignments.
+      description: Like POST /api/v1/role-assignments, with the same grant ceiling (403).
       requestBody:
         required: true
         content:
@@ -8632,8 +8645,12 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -8674,10 +8691,21 @@ paths:
       summary: Assign a role to a user (API-05)
       description: >-
         The user and the role must belong to the organization, and a team
-        scope must name a team of the organization (404 otherwise).
-        Assigning a standard role again in the same scope stores no second
-        assignment and answers with the existing one. Assigning the standard
-        role org_admin binds the IdP
+        scope must name a team of the organization (404 otherwise). A client
+        or site scope must name a client or site of the organization in
+        scope_id, an organization-wide assignment names none (422 field
+        scope_id otherwise; a scope is never widened to the organization). A
+        client role (scope client) is assigned with scope_type client only, a
+        site role with scope_type site only, an organization role or custom
+        role with any scope_type (422 field scope_type otherwise, F-305).
+        Grant ceiling (RBA-03, F-015): the caller must hold role:manage and
+        every permission of the standard or custom role in a scope covering
+        the assignment's scope (a client covers its sites, site.client_id; a
+        team scope needs the clients and sites of the whole organization and
+        that team); otherwise 403 and nothing is stored, before any MFA
+        binding. Assigning a standard role again in the same scope stores no
+        second assignment and answers with the existing one. Assigning the
+        standard role org_admin binds the IdP
         account of the user to MFA (Keycloak realm role mfa_required,
         AUT-09) before the assignment is stored; a user without IdP account
         yet is bound at the first login. When the binding fails (no Keycloak
@@ -8700,10 +8728,45 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/role-assignments/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    delete:
+      operationId: revokeRoleAssignment
+      tags: [Roles]
+      summary: Revoke a role assignment (API-05, AUT-02)
+      description: >-
+        Removes a standard or custom role assignment of the organization (the
+        id of GET /api/v1/role-assignments). Grant ceiling (RBA-03, F-017):
+        the caller must hold role:manage and every permission of the role in
+        a scope covering the assignment's scope, the rule of POST
+        /api/v1/role-assignments; otherwise 403 and the assignment stays. An
+        unknown id or an assignment of another organization is 404. The
+        assignment is removed and the audit entry role_assignment.revoked
+        (caller, table, user, role, scope) is written in one transaction. The
+        user loses the rights at the next token refresh or sign-in (AUT-02);
+        an access token issued before keeps them until it expires. Revoking
+        org_admin leaves the MFA binding of the IdP account (Keycloak realm
+        role mfa_required) in place. Roles from IdP groups are revoked in the
+        IdP, not here.
+      responses:
+        '204':
+          description: Role assignment revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/roles/{id}:
     parameters:
@@ -8727,6 +8790,11 @@ paths:
       operationId: updateRole
       tags: [Roles]
       summary: Update a custom role
+      description: >-
+        The role applies to all its assignments, org-wide ones too:
+        permissions the request adds must be held by the caller
+        organization-wide (RBA-03, F-015); otherwise 403 and the role stays
+        unchanged.
       requestBody:
         required: true
         content:
@@ -8744,6 +8812,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
@@ -8927,6 +8997,11 @@ paths:
       operationId: replaceRolePermissions
       tags: [Permissions]
       summary: Replace permissions granted to a role
+      description: >-
+        The role applies to all its assignments, org-wide ones too:
+        permissions the request adds to the role must be held by the caller
+        organization-wide (RBA-03, F-015); otherwise 403 and the permissions
+        of the role stay unchanged.
       requestBody:
         required: true
         content:
@@ -18612,9 +18687,10 @@ components:
           description: >-
             Scope of the assignment (RBA-03); defaults to "organization" when
             omitted. client, site and team name the client, site or team in
-            scope_id; a team scope needs a team of the organization (404
-            otherwise). A site assignment is confined to the client of its
-            site. The scopes of all assignments of a user are united per
+            scope_id: a client or site scope needs a client or site of the
+            organization (422 otherwise), a team scope a team of the
+            organization (404 otherwise). A site assignment is confined to the
+            client of its site. The scopes of all assignments of a user are united per
             dimension (clients, sites, teams) and the dimensions are
             intersected (E-70 option 1): a site assignment next to a client
             assignment limits the sites of that client as well (client C1
@@ -18624,6 +18700,7 @@ components:
             TEN-05). An org-wide assignment lifts every dimension.
         scope_id:
           type: string
+          description: The client, site or team of a scoped assignment; omitted for organization.
 
     SearchHit:
       type: object

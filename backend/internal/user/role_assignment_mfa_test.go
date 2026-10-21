@@ -16,7 +16,6 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // MFA binding of every org_admin grant (WP-358, AUT-09, CH26, E-14, finding
@@ -149,7 +148,12 @@ func (m *mfaFixture) grant(orgID, userID, roleID string) {
 
 // assign posts a role assignment as an org-wide administrator of OrgA.
 func (m *mfaFixture) assign(path, userID, roleID string) *httptest.ResponseRecorder {
-	ctx := tenant.WithTenant(m.OrgCtx(m.OrgA), tenant.TenantInfo{OrganizationID: m.OrgA, UserID: m.User})
+	all := identity.ScopeSet{All: true}
+	return m.assignAs(withCaller(m.OrgCtx(m.OrgA), m.OrgA, m.User, identity.Scope{Clients: all, Sites: all, Teams: all}), path, userID, roleID)
+}
+
+// assignAs posts an org-wide role assignment in the request context ctx.
+func (m *mfaFixture) assignAs(ctx context.Context, path, userID, roleID string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"user_id":"`+userID+`","role_id":"`+roleID+`"}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
 	m.mux.ServeHTTP(w, req)
@@ -229,7 +233,13 @@ func TestRoleAssignmentOrgAdminRequiresMFA(t *testing.T) {
 	if w.Code != http.StatusServiceUnavailable || !strings.HasPrefix(w.Header().Get("Content-Type"), "application/problem+json") {
 		t.Fatalf("failing binding: %d %q %s, want 503 problem+json", w.Code, w.Header().Get("Content-Type"), w.Body.String())
 	}
-	if strings.Contains(w.Body.String(), "403") || strings.Contains(w.Body.String(), "keycloak") {
+	// The random trace id may contain "403"; every other field must not.
+	var problem map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil {
+		t.Fatalf("503 body: %v", err)
+	}
+	delete(problem, "trace_id")
+	if body, _ := json.Marshal(problem); strings.Contains(string(body), "403") || strings.Contains(strings.ToLower(string(body)), "keycloak") {
 		t.Errorf("503 body names the admin API: %s", w.Body.String())
 	}
 	if n := m.assignments(refused, orgAdmin); n != 0 {
@@ -316,6 +326,48 @@ func TestRoleAssignmentOrgAdminRequiresMFA(t *testing.T) {
 	}
 	if got := m.mfa.bound(); len(got) != 0 {
 		t.Errorf("without enforcer: bound %v", got)
+	}
+}
+
+// TestRoleAssignmentCeilingBeforeMFA (WP-394, F-015, WP-358): the grant
+// ceiling runs in AssignRole before anything is stored and before the
+// Keycloak binding. An org-wide org_admin assignment by a client-1 delegate
+// (org_admin with scope_client_id = client 1) is 403 on both paths and the
+// fake Keycloak records no call, so no mfa_required; the same assignment by
+// an org-wide org_admin is 201 and binds exactly once.
+func TestRoleAssignmentCeilingBeforeMFA(t *testing.T) {
+	m := newMFAFixture(t, "f9")
+	orgAdmin := m.role(m.OrgA, "org_admin")
+	delegate := m.AppUser(t, m.OrgA, "delegate")
+	if _, err := m.Admin.Exec(context.Background(), `INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id) VALUES ($1, $2, $3, $4)`,
+		m.OrgA, delegate, orgAdmin, m.Client1); err != nil {
+		t.Fatal(err)
+	}
+	admin := m.AppUser(t, m.OrgA, "admin")
+	m.grant(m.OrgA, admin, orgAdmin)
+	delegateCtx, adminCtx := auditPrincipalCtx(t, m.Fixture, delegate), auditPrincipalCtx(t, m.Fixture, admin)
+
+	for _, path := range []string{"/api/v1/role-assignments", "/api/v1/roles/assign"} {
+		m.mfa.reset()
+		target := m.AppUser(t, m.OrgA, "target"+strings.ReplaceAll(path, "/", "-"))
+		w := m.assignAs(delegateCtx, path, target, orgAdmin)
+		if w.Code != http.StatusForbidden || !strings.HasPrefix(w.Header().Get("Content-Type"), "application/problem+json") {
+			t.Errorf("%s by the client-1 delegate: %d %s, want 403 problem+json", path, w.Code, w.Body.String())
+		}
+		if got := m.mfa.bound(); len(got) != 0 || len(m.mfa.lookups) != 0 {
+			t.Errorf("%s by the client-1 delegate: Keycloak bound %v, looked up %v; want no call", path, got, m.mfa.lookups)
+		}
+		if n := m.assignments(target, orgAdmin); n != 0 {
+			t.Errorf("%s by the client-1 delegate: %d assignments, want none", path, n)
+		}
+
+		m.mfa.reset()
+		if w = m.assignAs(adminCtx, path, target, orgAdmin); w.Code != http.StatusCreated {
+			t.Fatalf("%s by the org-wide org_admin: %d %s, want 201", path, w.Code, w.Body.String())
+		}
+		if got := m.mfa.bound(); !slices.Equal(got, []string{m.subject(target)}) {
+			t.Errorf("%s by the org-wide org_admin: bound %v, want exactly [%s]", path, got, m.subject(target))
+		}
 	}
 }
 

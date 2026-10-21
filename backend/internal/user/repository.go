@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -61,9 +62,20 @@ type Repository interface {
 	ListRoles(ctx context.Context, orgID string, page api.PaginationParams) ([]CustomRole, int, error)
 	GetRole(ctx context.Context, orgID, id string) (*CustomRole, error)
 	CreateRole(ctx context.Context, r *CustomRole) error
-	UpdateRole(ctx context.Context, orgID, id string, req UpdateRoleRequest) (*CustomRole, error)
+	// UpdateRole changes a custom role; permissions it adds must be held by
+	// caller organization-wide (RoleWideningError).
+	UpdateRole(ctx context.Context, orgID, id string, caller *identity.Principal, req UpdateRoleRequest) (*CustomRole, error)
 	DeleteRole(ctx context.Context, orgID, id string) error
-	AssignRole(ctx context.Context, orgID string, a *UserRoleAssignment) error
+	// AssignRole stores the assignment if the role fits the scope and caller
+	// holds role:manage and the role's permissions in a scope covering it
+	// (grant ceiling, GrantCeilingError).
+	AssignRole(ctx context.Context, orgID string, caller *identity.Principal, a *UserRoleAssignment) error
+	// RevokeRoleAssignment deletes the standard or custom role assignment id
+	// of the organization if caller holds role:manage and the role's
+	// permissions in a scope covering the assignment's scope (the grant
+	// ceiling of AssignRole, GrantCeilingError); an unknown id or one of
+	// another organization is errAssignmentNotFound.
+	RevokeRoleAssignment(ctx context.Context, orgID string, caller *identity.Principal, id string) error
 	ListUserRoles(ctx context.Context, orgID, userID string) ([]UserRoleAssignment, error)
 }
 
@@ -419,7 +431,7 @@ func (r *MemoryRepository) CreateRole(_ context.Context, role *CustomRole) error
 	return nil
 }
 
-func (r *MemoryRepository) UpdateRole(_ context.Context, orgID, id string, req UpdateRoleRequest) (*CustomRole, error) {
+func (r *MemoryRepository) UpdateRole(_ context.Context, orgID, id string, caller *identity.Principal, req UpdateRoleRequest) (*CustomRole, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -429,6 +441,11 @@ func (r *MemoryRepository) UpdateRole(_ context.Context, orgID, id string, req U
 	}
 	if role.IsSystem {
 		return nil, fmt.Errorf("cannot modify system role")
+	}
+	if req.Permissions != nil {
+		if err := checkRoleWidening(caller, role.Permissions, req.Permissions); err != nil {
+			return nil, err
+		}
 	}
 	if req.Name != nil {
 		role.Name = *req.Name
@@ -458,29 +475,58 @@ func (r *MemoryRepository) DeleteRole(_ context.Context, orgID, id string) error
 	return nil
 }
 
-func (r *MemoryRepository) AssignRole(_ context.Context, orgID string, a *UserRoleAssignment) error {
+// AssignRole implements Repository with the scope validation and the grant
+// ceiling of the PostgreSQL repository. The memory repository knows no sites:
+// a site scope needs the role's permissions in all clients (fail-closed).
+func (r *MemoryRepository) AssignRole(_ context.Context, orgID string, caller *identity.Principal, a *UserRoleAssignment) error {
+	if a.ScopeType == "" {
+		a.ScopeType = "organization"
+	}
+	if err := validateAssignmentScope(a); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	roleID := a.CustomRoleID
 	if a.RoleID != "" {
-		role, ok := r.roles[a.RoleID]
-		if !ok || role.OrganizationID != orgID {
-			return fmt.Errorf("role not found")
-		}
-		a.ID = r.nextIDStr("assign")
-		a.GrantedAt = time.Now().UTC()
-		r.assignments[a.ID] = a
-		return nil
+		roleID = a.RoleID
 	}
-
-	// Verify role exists
-	role, ok := r.roles[a.CustomRoleID]
+	role, ok := r.roles[roleID]
 	if !ok || role.OrganizationID != orgID {
-		return fmt.Errorf("role not found")
+		return errRoleNotFound
+	}
+	if err := grantCeiling(caller, identity.PermRoleManage, toPermissions(role.Permissions), a.ScopeType, a.ScopeID, ""); err != nil {
+		return err
 	}
 
 	a.ID = r.nextIDStr("assign")
 	a.GrantedAt = time.Now().UTC()
 	r.assignments[a.ID] = a
+	return nil
+}
+
+// RevokeRoleAssignment implements Repository with the grant ceiling of
+// AssignRole; like there, a site scope needs the role's permissions in all
+// clients.
+func (r *MemoryRepository) RevokeRoleAssignment(_ context.Context, orgID string, caller *identity.Principal, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a, ok := r.assignments[id]
+	if !ok {
+		return errAssignmentNotFound
+	}
+	roleID := a.CustomRoleID
+	if a.RoleID != "" {
+		roleID = a.RoleID
+	}
+	role, ok := r.roles[roleID]
+	if !ok || role.OrganizationID != orgID {
+		return errAssignmentNotFound
+	}
+	if err := grantCeiling(caller, identity.PermRoleManage, toPermissions(role.Permissions), a.ScopeType, a.ScopeID, ""); err != nil {
+		return revocationCeiling(err)
+	}
+	delete(r.assignments, id)
 	return nil
 }
 

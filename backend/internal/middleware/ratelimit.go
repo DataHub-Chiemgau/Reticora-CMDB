@@ -257,8 +257,8 @@ var preAuthPaths = map[string]bool{
 // endpoint and every request whose authentication failed (401, including
 // invalid API keys and session tokens) counts against the budget of the
 // current minute. Once it is spent, pre-auth requests and requests to
-// authenticated endpoints get 429 until the minute is over. A store error
-// fails closed.
+// authenticated endpoints get 429 with Retry-After until the minute is over.
+// A store error fails closed.
 func PreAuthRateLimiter(perMinute int, store cache.Store) func(http.Handler) http.Handler {
 	if perMinute <= 0 {
 		perMinute = DefaultPreAuthPerMinute
@@ -272,7 +272,8 @@ func PreAuthRateLimiter(perMinute int, store cache.Store) func(http.Handler) htt
 				next.ServeHTTP(w, r)
 				return
 			}
-			windowKey := fmt.Sprintf("preauth:%s:%d", clientIP(r), time.Now().UTC().Unix()/60)
+			now := time.Now().UTC().Unix()
+			windowKey := fmt.Sprintf("preauth:%s:%d", clientIP(r), now/60)
 			used, err := preAuthUsed(r.Context(), store, windowKey)
 			if err != nil {
 				slog.Warn("pre-auth rate limiter backend error, rejecting request", "error", err)
@@ -280,6 +281,8 @@ func PreAuthRateLimiter(perMinute int, store cache.Store) func(http.Handler) htt
 				return
 			}
 			if used >= int64(perMinute) {
+				// The budget renews with the next minute window.
+				w.Header().Set("Retry-After", strconv.FormatInt(60-now%60, 10))
 				httpx.RateLimited(w, r, "too many authentication attempts, try again later")
 				return
 			}

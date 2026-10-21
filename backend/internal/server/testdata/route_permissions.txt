@@ -40,6 +40,7 @@ DELETE /api/v1/racks/{id} rack:write
 DELETE /api/v1/racks/{id}/mounts/{ci_id} rack:write
 DELETE /api/v1/relationship-types/{key} relationship_type:manage
 DELETE /api/v1/relationships/{id} relationship:write
+DELETE /api/v1/role-assignments/{id} role:manage
 DELETE /api/v1/roles/{id} role:manage
 DELETE /api/v1/rooms/{id} location:write
 DELETE /api/v1/saved-views/{id} saved_view:write

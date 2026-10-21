@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -13,7 +14,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -42,11 +47,19 @@ func (a *stubInvitationAccounts) DeleteAccount(_ context.Context, id string) err
 	return nil
 }
 
+// withCaller returns base with the tenant info and the principal of userID in
+// orgID holding every permission in scope (the issuer of the invitations).
+func withCaller(base context.Context, orgID, userID string, scope identity.Scope) context.Context {
+	p := identity.Principal{Subject: userID, OrganizationID: orgID, Type: identity.PrincipalTypeUser,
+		Permissions: identity.AllPermissions(), Scope: &scope, ClientScope: scope.LegacyClientScope()}
+	return tenant.WithTenant(identity.WithPrincipal(base, p), tenant.TenantInfo{OrganizationID: orgID, UserID: userID})
+}
+
 // TestInvitationsAgainstPostgres covers WP-114 (TLC-03, API-05): issue with
 // a stored hash, seven days; accept atomically and once (parallel double
 // acceptance), creating the user with the invited role and scope; renew an
 // expired invitation; revoke; the issuer's scope bounds the invitable
-// scopes; failures roll back.
+// scopes (grant ceiling, WP-394); failures roll back.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestInvitationsAgainstPostgres(t *testing.T) {
@@ -65,9 +78,8 @@ func TestInvitationsAgainstPostgres(t *testing.T) {
 		t.Fatalf("org_admin role: %v", err)
 	}
 
-	asAdmin := func(base context.Context) context.Context {
-		return tenant.WithTenant(base, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
-	}
+	all := identity.ScopeSet{All: true}
+	orgWide := identity.Scope{Clients: all, Sites: all, Teams: all}
 	call := func(reqCtx context.Context, method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(reqCtx)
 		w := httptest.NewRecorder()
@@ -84,7 +96,7 @@ func TestInvitationsAgainstPostgres(t *testing.T) {
 	accept := func(token string) *httptest.ResponseRecorder {
 		return call(ctx, http.MethodPost, "/api/v1/invitations/accept", `{"token":"`+token+`","display_name":"Invited"}`)
 	}
-	orgAdmin := asAdmin(f.OrgCtx(f.OrgA))
+	orgAdmin := withCaller(f.OrgCtx(f.OrgA), f.OrgA, f.User, orgWide)
 
 	// Issue: token once, hash stored, seven days.
 	w, inv := issue(orgAdmin, `{"email":"new@invite.example","role_id":"`+viewerRole+`"}`)
@@ -157,7 +169,8 @@ func TestInvitationsAgainstPostgres(t *testing.T) {
 	}
 
 	// Client scope: the user gets the role on that client only; a
-	// client-restricted issuer cannot invite into another client.
+	// client-restricted issuer cannot invite into another client (grant
+	// ceiling, 403), an unknown client is 422.
 	w, scoped := issue(orgAdmin, `{"email":"tech@invite.example","role_id":"`+viewerRole+`","scope_type":"client","scope_id":"`+f.Client1+`"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("scoped issue: %d %s", w.Code, w.Body.String())
@@ -169,9 +182,12 @@ func TestInvitationsAgainstPostgres(t *testing.T) {
 		WHERE u.organization_id = $1 AND u.email = 'tech@invite.example'`, f.OrgA).Scan(&scopeClient); err != nil || scopeClient == nil || *scopeClient != f.Client1 {
 		t.Errorf("scoped assignment = %v (%v)", scopeClient, err)
 	}
-	client2Admin := asAdmin(f.ClientCtx(f.Client2))
-	if rec, _ := issue(client2Admin, `{"email":"x@invite.example","role_id":"`+viewerRole+`","scope_type":"client","scope_id":"`+f.Client1+`"}`); rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("invite into an invisible client: %d, want 422", rec.Code)
+	client2Admin := withCaller(f.ClientCtx(f.Client2), f.OrgA, f.User, identity.Scope{Clients: identity.ScopeSet{IDs: []string{f.Client2}}, Sites: all, Teams: all})
+	if rec, _ := issue(client2Admin, `{"email":"x@invite.example","role_id":"`+viewerRole+`","scope_type":"client","scope_id":"`+f.Client1+`"}`); rec.Code != http.StatusForbidden {
+		t.Errorf("invite into another client: %d, want 403", rec.Code)
+	}
+	if rec, _ := issue(orgAdmin, `{"email":"x@invite.example","role_id":"`+viewerRole+`","scope_type":"client","scope_id":"`+f.ID()+`"}`); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("invite into an unknown client: %d, want 422", rec.Code)
 	}
 	if rec, _ := issue(orgAdmin, `{"email":"y@invite.example","role_id":"`+f.ID()+`"}`); rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("unknown role: %d, want 422", rec.Code)
@@ -229,7 +245,7 @@ func TestInvitationsAgainstPostgres(t *testing.T) {
 	}
 
 	// Organization B neither sees the invitations nor accepts them with its id.
-	orgBAdmin := tenant.WithTenant(f.OrgCtx(f.OrgB), tenant.TenantInfo{OrganizationID: f.OrgB, UserID: f.User})
+	orgBAdmin := withCaller(f.OrgCtx(f.OrgB), f.OrgB, f.User, orgWide)
 	w = call(orgBAdmin, http.MethodGet, "/api/v1/invitations", "")
 	if strings.Contains(w.Body.String(), "@invite.example") {
 		t.Errorf("organization B sees invitations of A: %s", w.Body.String())
@@ -268,5 +284,517 @@ func TestInvitationsAgainstPostgres(t *testing.T) {
 	var audited int
 	if err := f.Admin.QueryRow(ctx, `SELECT count(DISTINCT action) FROM audit_log WHERE organization_id = $1 AND resource_type = 'user_invitation'`, f.OrgA).Scan(&audited); err != nil || audited != 4 {
 		t.Errorf("audited invitation actions = %d (%v), want issued, accepted, renewed, revoked", audited, err)
+	}
+}
+
+// Grant ceiling of invitations and role assignments (WP-394, TLC-03, RBA-03,
+// API-05; F-015, F-305). Retest:
+//
+//	cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditDefect(Invitation|RoleAssignment)GrantCeiling|TestRolesAssignSunsetPathGrantCeiling|TestInvitationRoleScopeMismatch|TestRoleAssignmentScopeIsNeverWidened|TestRoleAssignmentGrantCeilingTeamScope' ./internal/user/
+
+// auditPrincipalCtx resolves userID through the production chain
+// (AccessGrants → ResolveAccess → TenantScopeFor) and returns its request
+// context with principal, tenant scope and tenant info.
+func auditPrincipalCtx(t *testing.T, f *scopetest.Fixture, userID string) context.Context {
+	t.Helper()
+	bg := context.Background()
+	grants, err := permission.NewPGRepository(f.App).AccessGrants(bg, f.OrgA, userID)
+	if err != nil {
+		t.Fatalf("access grants of %s: %v", userID, err)
+	}
+	acc := identity.ResolveAccess(grants)
+	p := identity.Principal{Subject: userID, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser, Scope: &acc.Scope,
+		PermissionScopes: acc.PermissionScopes, Permissions: acc.Permissions, ClientScope: acc.Scope.LegacyClientScope()}
+	if !p.Has(identity.PermUserManage) {
+		t.Fatalf("fixture: principal %s lacks user:manage", userID)
+	}
+	ts := middleware.TenantScopeFor(&p)
+	ctx := database.ContextWithTenantScope(bg, &ts)
+	ctx = identity.WithPrincipal(ctx, p)
+	return tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: userID, ClientID: p.ClientScope})
+}
+
+func auditRoleID(t *testing.T, f *scopetest.Fixture, name string) string {
+	t.Helper()
+	var id string
+	if err := f.Admin.QueryRow(context.Background(), `SELECT id::text FROM role WHERE organization_id = $1 AND name = $2`, f.OrgA, name).Scan(&id); err != nil {
+		t.Fatalf("role %s: %v", name, err)
+	}
+	return id
+}
+
+func auditPost(mux http.Handler, ctx context.Context, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	return w
+}
+
+// ceilingFixture is organization A of a scopetest fixture with a client-1
+// delegate (org_admin with scope_client_id = client 1, user:manage and
+// role:manage there only), an org-wide org_admin, a site of each client, and
+// the request contexts of both administrators resolved like a session.
+type ceilingFixture struct {
+	*scopetest.Fixture
+	t                        *testing.T
+	delegate, orgAdmin       string
+	delegateCtx, orgAdminCtx context.Context
+	site1, site2             string
+}
+
+func newCeilingFixture(t *testing.T, tag string) *ceilingFixture {
+	t.Helper()
+	f := scopetest.Seed(t, tag)
+	c := &ceilingFixture{Fixture: f, t: t}
+	adminRole := auditRoleID(t, f, "org_admin")
+	c.delegate = f.AppUser(t, f.OrgA, "ceiling-delegate")
+	c.exec(`INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id) VALUES ($1, $2, $3, $4)`,
+		f.OrgA, c.delegate, adminRole, f.Client1)
+	c.orgAdmin = f.AppUser(t, f.OrgA, "ceiling-orgadmin")
+	c.exec(`INSERT INTO role_assignment (organization_id, user_id, role_id) VALUES ($1, $2, $3)`, f.OrgA, c.orgAdmin, adminRole)
+	c.delegateCtx, c.orgAdminCtx = auditPrincipalCtx(t, f, c.delegate), auditPrincipalCtx(t, f, c.orgAdmin)
+	c.site1, c.site2 = c.site(f.Client1, "ceiling-site-1"), c.site(f.Client2, "ceiling-site-2")
+	return c
+}
+
+func (c *ceilingFixture) exec(sql string, args ...any) {
+	c.t.Helper()
+	if _, err := c.Admin.Exec(context.Background(), sql, args...); err != nil {
+		c.t.Fatalf("%s: %v", sql, err)
+	}
+}
+
+func (c *ceilingFixture) count(sql string, args ...any) int {
+	c.t.Helper()
+	var n int
+	if err := c.Admin.QueryRow(context.Background(), sql, args...).Scan(&n); err != nil {
+		c.t.Fatalf("%s: %v", sql, err)
+	}
+	return n
+}
+
+func (c *ceilingFixture) site(clientID, name string) string {
+	c.t.Helper()
+	var id string
+	if err := c.Admin.QueryRow(context.Background(), `INSERT INTO site (organization_id, client_id, name) VALUES ($1, $2, $3) RETURNING id::text`,
+		c.OrgA, clientID, name).Scan(&id); err != nil {
+		c.t.Fatalf("site %s: %v", name, err)
+	}
+	return id
+}
+
+// assignments counts the standard and custom role assignments of a user.
+func (c *ceilingFixture) assignments(userID string) int {
+	c.t.Helper()
+	return c.count(`SELECT (SELECT count(*) FROM role_assignment WHERE user_id = $1)::int
+		+ (SELECT count(*) FROM user_custom_role WHERE user_id = $1)::int`, userID)
+}
+
+// audits counts the audit entries of organization A.
+func (c *ceilingFixture) audits() int {
+	c.t.Helper()
+	return c.count(`SELECT count(*)::int FROM audit_log WHERE organization_id = $1`, c.OrgA)
+}
+
+// forbidden reports whether w is a 403 problem (RFC 7807).
+func forbidden(w *httptest.ResponseRecorder) bool {
+	return w.Code == http.StatusForbidden && strings.HasPrefix(w.Header().Get("Content-Type"), "application/problem+json")
+}
+
+// TestAuditDefectInvitationGrantCeiling covers WP-394 (TLC-03, RBA-03,
+// F-015; formerly a defect test of WP-114): issuing and renewing an
+// invitation needs user:manage and every permission of the invited role in a
+// scope covering the invitation's scope. A client-1 delegate (org_admin with
+// scope_client_id = client 1) gets 403 (RFC 7807) without row and without
+// audit for org_admin or viewer org-wide, for client 2 and a site of client
+// 2; it invites viewer and client_technician into client 1 and viewer at a
+// site of client 1 (a client covers its sites, site.client_id). The
+// org-wide org_admin invites org_admin org-wide. Renewal checks the renewing
+// principal: the delegate cannot renew an org-wide invitation (403, token and
+// validity unchanged) but renews one of client 1.
+func TestAuditDefectInvitationGrantCeiling(t *testing.T) {
+	c := newCeilingFixture(t, "d1")
+	adminRole := auditRoleID(t, c.Fixture, "org_admin")
+	viewerRole := auditRoleID(t, c.Fixture, "viewer")
+	techRole := auditRoleID(t, c.Fixture, "client_technician")
+
+	mux := chi.NewRouter()
+	NewInvitationHandler(NewPGInvitations(c.App)).RegisterRoutes(mux)
+
+	invitations := func(email string) int {
+		t.Helper()
+		return c.count(`SELECT count(*)::int FROM user_invitation WHERE organization_id = $1 AND lower(email) = lower($2)`, c.OrgA, email)
+	}
+	scoped := func(role, scopeType, scopeID string) string {
+		return `{"role_id":"` + role + `","scope_type":"` + scopeType + `","scope_id":"` + scopeID + `"}`
+	}
+
+	for _, tc := range []struct {
+		name    string
+		ctx     context.Context
+		email   string
+		body    string
+		allowed bool
+	}{
+		{"client-1 delegate invites org_admin org-wide (escalation)", c.delegateCtx, "audit-d1-esc-org@invite.example",
+			`{"role_id":"` + adminRole + `","scope_type":"org"}`, false},
+		{"client-1 delegate invites viewer org-wide (scope beyond own)", c.delegateCtx, "audit-d1-viewer-org@invite.example",
+			`{"role_id":"` + viewerRole + `","scope_type":"org"}`, false},
+		{"client-1 delegate invites viewer into client 2", c.delegateCtx, "audit-d1-viewer-c2@invite.example",
+			scoped(viewerRole, "client", c.Client2), false},
+		{"client-1 delegate invites org_admin into client 2", c.delegateCtx, "audit-d1-admin-c2@invite.example",
+			scoped(adminRole, "client", c.Client2), false},
+		{"client-1 delegate invites viewer at a site of client 2", c.delegateCtx, "audit-d1-viewer-s2@invite.example",
+			scoped(viewerRole, "site", c.site2), false},
+		{"client-1 delegate invites viewer into client 1", c.delegateCtx, "audit-d1-viewer-c1@invite.example",
+			scoped(viewerRole, "client", c.Client1), true},
+		{"client-1 delegate invites client_technician into client 1", c.delegateCtx, "audit-d1-tech-c1@invite.example",
+			scoped(techRole, "client", c.Client1), true},
+		{"client-1 delegate invites viewer at a site of client 1", c.delegateCtx, "audit-d1-viewer-s1@invite.example",
+			scoped(viewerRole, "site", c.site1), true},
+		{"org-wide org_admin invites org_admin org-wide", c.orgAdminCtx, "audit-d1-admin-org@invite.example",
+			`{"role_id":"` + adminRole + `","scope_type":"org"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			audits := c.audits()
+			body := `{"email":"` + tc.email + `",` + strings.TrimPrefix(tc.body, "{")
+			w := auditPost(mux, tc.ctx, "/api/v1/invitations", body)
+			n := invitations(tc.email)
+			if tc.allowed {
+				if w.Code != http.StatusCreated || n != 1 || c.audits() != audits+1 {
+					t.Errorf("POST /invitations = %d (%d rows, %d new audit entries), want 201, 1 row and invitation.issued; body %.200s",
+						w.Code, n, c.audits()-audits, w.Body.String())
+				}
+				return
+			}
+			if !forbidden(w) || n != 0 || c.audits() != audits {
+				t.Errorf("POST /invitations = %d %q with %d stored invitation(s) and %d new audit entries, want 403 problem+json, none and no audit: a principal must not invite beyond its own role and scope; body %.200s",
+					w.Code, w.Header().Get("Content-Type"), n, c.audits()-audits, w.Body.String())
+			}
+		})
+	}
+
+	// Renewal: the ceiling applies to the renewing principal.
+	type stored struct {
+		id, hash  string
+		expiresAt time.Time
+	}
+	read := func(email string) stored {
+		t.Helper()
+		var s stored
+		if err := c.Admin.QueryRow(context.Background(), `SELECT id::text, token_hash, expires_at FROM user_invitation
+			WHERE organization_id = $1 AND lower(email) = lower($2)`, c.OrgA, email).Scan(&s.id, &s.hash, &s.expiresAt); err != nil {
+			t.Fatalf("invitation of %s: %v", email, err)
+		}
+		return s
+	}
+	orgWideInv := "audit-d1-renew-org@invite.example"
+	if w := auditPost(mux, c.orgAdminCtx, "/api/v1/invitations", `{"email":"`+orgWideInv+`","role_id":"`+viewerRole+`"}`); w.Code != http.StatusCreated {
+		t.Fatalf("org-wide invitation: %d %s", w.Code, w.Body.String())
+	}
+	t.Run("client-1 delegate renews an org-wide invitation", func(t *testing.T) {
+		before, audits := read(orgWideInv), c.audits()
+		w := auditPost(mux, c.delegateCtx, "/api/v1/invitations/"+before.id+"/renew", "")
+		after := read(orgWideInv)
+		if !forbidden(w) || after != before || c.audits() != audits {
+			t.Errorf("renew = %d (token changed %v, validity changed %v, %d new audit entries), want 403 and nothing changed; body %.200s",
+				w.Code, after.hash != before.hash, !after.expiresAt.Equal(before.expiresAt), c.audits()-audits, w.Body.String())
+		}
+	})
+	t.Run("client-1 delegate renews an invitation of client 1", func(t *testing.T) {
+		before := read("audit-d1-viewer-c1@invite.example")
+		w := auditPost(mux, c.delegateCtx, "/api/v1/invitations/"+before.id+"/renew", "")
+		if w.Code != http.StatusOK || read("audit-d1-viewer-c1@invite.example").hash == before.hash {
+			t.Errorf("renew = %d %.200s, want 200 with a new token", w.Code, w.Body.String())
+		}
+	})
+	t.Run("org-wide org_admin renews the org-wide invitation", func(t *testing.T) {
+		before := read(orgWideInv)
+		w := auditPost(mux, c.orgAdminCtx, "/api/v1/invitations/"+before.id+"/renew", "")
+		if w.Code != http.StatusOK || read(orgWideInv).hash == before.hash {
+			t.Errorf("renew = %d %.200s, want 200 with a new token", w.Code, w.Body.String())
+		}
+	})
+}
+
+// TestAuditDefectRoleAssignmentGrantCeiling covers WP-394 (RBA-03, API-05,
+// F-015; formerly a defect test of WP-114) for POST /role-assignments: the
+// caller needs role:manage and every permission of the standard or custom
+// role in a scope covering the assignment's scope. A client-1 delegate gets
+// 403 (RFC 7807) without row and without audit for org_admin org-wide (to
+// itself or another user), viewer org-wide, org_admin in client 2, viewer at
+// a site of client 2 and a custom role org-wide; it assigns viewer,
+// client_technician and the custom role in client 1 and viewer at a site of
+// client 1 (201). The org-wide org_admin assigns org_admin org-wide.
+func TestAuditDefectRoleAssignmentGrantCeiling(t *testing.T) {
+	c := newCeilingFixture(t, "d3")
+	adminRole := auditRoleID(t, c.Fixture, "org_admin")
+	viewerRole := auditRoleID(t, c.Fixture, "viewer")
+	techRole := auditRoleID(t, c.Fixture, "client_technician")
+	customRole := c.ID()
+	c.exec(`INSERT INTO custom_role (id, organization_id, name, permissions) VALUES ($1, $2, 'ceiling-custom', '["ci:read","ci:write"]')`, customRole, c.OrgA)
+	t.Cleanup(func() {
+		// custom_role has no ON DELETE CASCADE to organization.
+		_, _ = c.Admin.Exec(context.Background(), `DELETE FROM user_custom_role WHERE custom_role_id = $1`, customRole)
+		_, _ = c.Admin.Exec(context.Background(), `DELETE FROM custom_role WHERE id = $1`, customRole)
+	})
+	target := c.AppUser(t, c.OrgA, "audit-d3-target")
+	target2 := c.AppUser(t, c.OrgA, "audit-d3-target2")
+
+	mux := chi.NewRouter()
+	NewHandler(NewPGRepository(c.App)).RegisterRoutes(mux)
+
+	orgWideAdmin := func(userID string) bool {
+		t.Helper()
+		return c.count(`SELECT count(*)::int FROM role_assignment WHERE user_id = $1 AND role_id = $2
+			AND scope_client_id IS NULL AND scope_site_id IS NULL AND scope_team_id IS NULL`, userID, adminRole) > 0
+	}
+	standard := func(user, role, scopeType, scopeID string) string {
+		return `{"user_id":"` + user + `","role_id":"` + role + `","scope_type":"` + scopeType + `","scope_id":"` + scopeID + `"}`
+	}
+
+	for _, tc := range []struct {
+		name    string
+		ctx     context.Context
+		user    string
+		body    string
+		allowed bool
+	}{
+		{"client-1 delegate grants itself org_admin org-wide", c.delegateCtx, c.delegate,
+			`{"user_id":"` + c.delegate + `","role_id":"` + adminRole + `","scope_type":"organization"}`, false},
+		{"client-1 delegate grants another user org_admin org-wide", c.delegateCtx, target,
+			`{"user_id":"` + target + `","role_id":"` + adminRole + `","scope_type":"organization"}`, false},
+		{"client-1 delegate grants viewer org-wide (scope beyond own)", c.delegateCtx, target,
+			`{"user_id":"` + target + `","role_id":"` + viewerRole + `"}`, false},
+		{"client-1 delegate grants org_admin in client 2", c.delegateCtx, target, standard(target, adminRole, "client", c.Client2), false},
+		{"client-1 delegate grants viewer at a site of client 2", c.delegateCtx, target, standard(target, viewerRole, "site", c.site2), false},
+		{"client-1 delegate grants the custom role org-wide", c.delegateCtx, target,
+			`{"user_id":"` + target + `","custom_role_id":"` + customRole + `"}`, false},
+		{"client-1 delegate grants viewer in client 1", c.delegateCtx, target, standard(target, viewerRole, "client", c.Client1), true},
+		{"client-1 delegate grants client_technician in client 1", c.delegateCtx, target, standard(target, techRole, "client", c.Client1), true},
+		{"client-1 delegate grants viewer at a site of client 1", c.delegateCtx, target, standard(target, viewerRole, "site", c.site1), true},
+		{"client-1 delegate grants the custom role in client 1", c.delegateCtx, target,
+			`{"user_id":"` + target + `","custom_role_id":"` + customRole + `","scope_type":"client","scope_id":"` + c.Client1 + `"}`, true},
+		{"org-wide org_admin grants org_admin org-wide", c.orgAdminCtx, target2,
+			`{"user_id":"` + target2 + `","role_id":"` + adminRole + `","scope_type":"organization"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, audits := c.assignments(tc.user), c.audits()
+			w := auditPost(mux, tc.ctx, "/api/v1/role-assignments", tc.body)
+			added := c.assignments(tc.user) - rows
+			if tc.allowed {
+				if w.Code != http.StatusCreated || added != 1 {
+					t.Errorf("POST /role-assignments = %d (%d new assignments), want 201 and one; body %.200s", w.Code, added, w.Body.String())
+				}
+				return
+			}
+			if !forbidden(w) || added != 0 || c.audits() != audits {
+				t.Errorf("POST /role-assignments = %d %q, %d new assignments, %d new audit entries; want 403 problem+json and nothing stored (grant ceiling); body %.200s",
+					w.Code, w.Header().Get("Content-Type"), added, c.audits()-audits, w.Body.String())
+			}
+		})
+	}
+	if orgWideAdmin(c.delegate) || orgWideAdmin(target) || !orgWideAdmin(target2) {
+		t.Errorf("org-wide org_admin: delegate %v, target %v, target2 %v; want only target2", orgWideAdmin(c.delegate), orgWideAdmin(target), orgWideAdmin(target2))
+	}
+}
+
+// TestRolesAssignSunsetPathGrantCeiling covers WP-394 (RBA-03, F-015, E-25)
+// for the sunset path POST /api/v1/roles/assign, the same handler as POST
+// /role-assignments: the client-1 delegate's org-wide org_admin assignment is
+// 403 without row; its viewer assignment in client 1 and the org-wide
+// org_admin's org-wide assignment are 201.
+func TestRolesAssignSunsetPathGrantCeiling(t *testing.T) {
+	c := newCeilingFixture(t, "02")
+	adminRole := auditRoleID(t, c.Fixture, "org_admin")
+	viewerRole := auditRoleID(t, c.Fixture, "viewer")
+	target := c.AppUser(t, c.OrgA, "sunset-target")
+	mux := chi.NewRouter()
+	NewHandler(NewPGRepository(c.App)).RegisterRoutes(mux)
+
+	w := auditPost(mux, c.delegateCtx, "/api/v1/roles/assign", `{"user_id":"`+target+`","role_id":"`+adminRole+`"}`)
+	if !forbidden(w) || c.assignments(target) != 0 {
+		t.Errorf("delegate: org-wide org_admin via /roles/assign = %d, %d assignments; want 403 and none; body %.200s", w.Code, c.assignments(target), w.Body.String())
+	}
+	w = auditPost(mux, c.delegateCtx, "/api/v1/roles/assign",
+		`{"user_id":"`+target+`","role_id":"`+viewerRole+`","scope_type":"client","scope_id":"`+c.Client1+`"}`)
+	if w.Code != http.StatusCreated || c.assignments(target) != 1 {
+		t.Errorf("delegate: viewer in client 1 via /roles/assign = %d %.200s, want 201", w.Code, w.Body.String())
+	}
+	w = auditPost(mux, c.orgAdminCtx, "/api/v1/roles/assign", `{"user_id":"`+target+`","role_id":"`+adminRole+`"}`)
+	if w.Code != http.StatusCreated || c.assignments(target) != 2 {
+		t.Errorf("org-wide org_admin via /roles/assign = %d %.200s, want 201", w.Code, w.Body.String())
+	}
+}
+
+// TestInvitationRoleScopeMismatch covers WP-394 (TLC-03, RBA-02, F-305): a
+// client role (role.scope client) is invited and assigned with scope_type
+// client only, a site role with scope_type site only; an organization role
+// fits every scope. A mismatch is 422 with field scope_type and stores
+// nothing, for POST /invitations and POST /role-assignments alike.
+func TestInvitationRoleScopeMismatch(t *testing.T) {
+	c := newCeilingFixture(t, "03")
+	viewerRole := auditRoleID(t, c.Fixture, "viewer")
+	techRole := auditRoleID(t, c.Fixture, "client_technician")
+	siteRole := c.ID()
+	c.exec(`INSERT INTO role (id, organization_id, name, permissions, scope) VALUES ($1, $2, 'mismatch-site-reader', '["ci:read"]', 'site')`, siteRole, c.OrgA)
+	var team string
+	if err := c.Admin.QueryRow(context.Background(), `INSERT INTO team (organization_id, name) VALUES ($1, 'mismatch team') RETURNING id::text`, c.OrgA).Scan(&team); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		// team has no ON DELETE CASCADE to organization.
+		_, _ = c.Admin.Exec(context.Background(), `DELETE FROM team WHERE id = $1`, team)
+	})
+
+	invitations := chi.NewRouter()
+	NewInvitationHandler(NewPGInvitations(c.App)).RegisterRoutes(invitations)
+	users := chi.NewRouter()
+	NewHandler(NewPGRepository(c.App)).RegisterRoutes(users)
+	field := func(w *httptest.ResponseRecorder) string {
+		var problem struct {
+			Field string `json:"field"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &problem)
+		return problem.Field
+	}
+
+	t.Run("invitations", func(t *testing.T) {
+		for i, tc := range []struct {
+			name, role, scopeType, scopeID string
+			allowed                        bool
+		}{
+			{"client_technician org-wide", techRole, "org", "", false},
+			{"client_technician at a site", techRole, "site", c.site1, false},
+			{"site role org-wide", siteRole, "org", "", false},
+			{"site role in a client", siteRole, "client", c.Client1, false},
+			{"client_technician in client 1", techRole, "client", c.Client1, true},
+			{"viewer at site 1", viewerRole, "site", c.site1, true},
+			{"site role at site 1", siteRole, "site", c.site1, true},
+			{"viewer in client 1", viewerRole, "client", c.Client1, true},
+		} {
+			email := "mismatch-" + strconv.Itoa(i) + "@invite.example"
+			body := `{"email":"` + email + `","role_id":"` + tc.role + `","scope_type":"` + tc.scopeType + `"`
+			if tc.scopeID != "" {
+				body += `,"scope_id":"` + tc.scopeID + `"`
+			}
+			w := auditPost(invitations, c.orgAdminCtx, "/api/v1/invitations", body+"}")
+			n := c.count(`SELECT count(*)::int FROM user_invitation WHERE organization_id = $1 AND email = $2`, c.OrgA, email)
+			if tc.allowed {
+				if w.Code != http.StatusCreated || n != 1 {
+					t.Errorf("%s: %d (%d rows) %.200s, want 201", tc.name, w.Code, n, w.Body.String())
+				}
+				continue
+			}
+			if w.Code != http.StatusUnprocessableEntity || field(w) != "scope_type" || n != 0 {
+				t.Errorf("%s: %d field %q (%d rows) %.200s, want 422 scope_type and no row", tc.name, w.Code, field(w), n, w.Body.String())
+			}
+		}
+	})
+
+	t.Run("role assignments", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, role, scopeType, scopeID string
+			allowed                        bool
+		}{
+			{"client_technician org-wide", techRole, "organization", "", false},
+			{"client_technician at a site", techRole, "site", c.site1, false},
+			{"client_technician in a team", techRole, "team", team, false},
+			{"site role in a team", siteRole, "team", team, false},
+			{"site role in a client", siteRole, "client", c.Client1, false},
+			{"client_technician in client 1", techRole, "client", c.Client1, true},
+			{"viewer at site 1", viewerRole, "site", c.site1, true},
+			{"site role at site 1", siteRole, "site", c.site1, true},
+			{"viewer in a team", viewerRole, "team", team, true},
+		} {
+			user := c.AppUser(t, c.OrgA, "mismatch-"+strings.ReplaceAll(tc.name, " ", "-"))
+			body := `{"user_id":"` + user + `","role_id":"` + tc.role + `","scope_type":"` + tc.scopeType + `"`
+			if tc.scopeID != "" {
+				body += `,"scope_id":"` + tc.scopeID + `"`
+			}
+			w := auditPost(users, c.orgAdminCtx, "/api/v1/role-assignments", body+"}")
+			n := c.assignments(user)
+			if tc.allowed {
+				if w.Code != http.StatusCreated || n != 1 {
+					t.Errorf("%s: %d (%d rows) %.200s, want 201", tc.name, w.Code, n, w.Body.String())
+				}
+				continue
+			}
+			if w.Code != http.StatusUnprocessableEntity || field(w) != "scope_type" || n != 0 {
+				t.Errorf("%s: %d field %q (%d rows) %.200s, want 422 scope_type and no row", tc.name, w.Code, field(w), n, w.Body.String())
+			}
+		}
+	})
+}
+
+// TestRoleAssignmentScopeIsNeverWidened covers WP-394 (RBA-03, API-05): a
+// role assignment that names a client or site scope must name a client or
+// site of the organization; without scope_id, with an unknown one or one of
+// organization B it is 422 with field scope_id and stores nothing, in
+// particular no org-wide assignment (before, POST /role-assignments with
+// scope_type client and no scope_id stored an org-wide one). An org-wide
+// assignment names no scope_id. The answers carry no repository or database
+// text.
+func TestRoleAssignmentScopeIsNeverWidened(t *testing.T) {
+	c := newCeilingFixture(t, "6e")
+	viewerRole := auditRoleID(t, c.Fixture, "viewer")
+	customRole := c.ID()
+	c.exec(`INSERT INTO custom_role (id, organization_id, name, permissions) VALUES ($1, $2, 'widen-custom', '["ci:read"]')`, customRole, c.OrgA)
+	t.Cleanup(func() {
+		_, _ = c.Admin.Exec(context.Background(), `DELETE FROM user_custom_role WHERE custom_role_id = $1`, customRole)
+		_, _ = c.Admin.Exec(context.Background(), `DELETE FROM custom_role WHERE id = $1`, customRole)
+	})
+	var clientB, siteB string
+	if err := c.Admin.QueryRow(context.Background(), `INSERT INTO client (organization_id, name, slug) VALUES ($1, 'widen client b', 'scopetest-6e-cb') RETURNING id::text`,
+		c.OrgB).Scan(&clientB); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Admin.QueryRow(context.Background(), `INSERT INTO site (organization_id, client_id, name) VALUES ($1, $2, 'widen site b') RETURNING id::text`,
+		c.OrgB, clientB).Scan(&siteB); err != nil {
+		t.Fatal(err)
+	}
+	target := c.AppUser(t, c.OrgA, "widen-target")
+	mux := chi.NewRouter()
+	NewHandler(NewPGRepository(c.App)).RegisterRoutes(mux)
+
+	for _, role := range []string{`"role_id":"` + viewerRole + `"`, `"custom_role_id":"` + customRole + `"`} {
+		for _, tc := range []struct{ name, scope, field string }{
+			{"client without scope_id", `"scope_type":"client"`, "scope_id"},
+			{"site without scope_id", `"scope_type":"site"`, "scope_id"},
+			{"client with an invalid scope_id", `"scope_type":"client","scope_id":"not-a-client"`, "scope_id"},
+			{"unknown client", `"scope_type":"client","scope_id":"` + c.ID() + `"`, "scope_id"},
+			{"unknown site", `"scope_type":"site","scope_id":"` + c.ID() + `"`, "scope_id"},
+			{"client of organization B", `"scope_type":"client","scope_id":"` + clientB + `"`, "scope_id"},
+			{"site of organization B", `"scope_type":"site","scope_id":"` + siteB + `"`, "scope_id"},
+			{"organization with a scope_id", `"scope_type":"organization","scope_id":"` + c.Client1 + `"`, "scope_id"},
+			{"unknown scope_type", `"scope_type":"region","scope_id":"` + c.Client1 + `"`, "scope_type"},
+		} {
+			w := auditPost(mux, c.orgAdminCtx, "/api/v1/role-assignments", `{"user_id":"`+target+`",`+role+`,`+tc.scope+`}`)
+			var problem struct {
+				Field  string `json:"field"`
+				Detail string `json:"detail"`
+			}
+			_ = json.Unmarshal(w.Body.Bytes(), &problem)
+			if w.Code != http.StatusUnprocessableEntity || problem.Field != tc.field {
+				t.Errorf("%s (%s): %d field %q %.200s, want 422 %s", tc.name, role, w.Code, problem.Field, w.Body.String(), tc.field)
+			}
+			for _, leak := range []string{"violates", "constraint", "SQLSTATE", "role_assignment", "user_custom_role", "pgx", "ERROR"} {
+				if strings.Contains(w.Body.String(), leak) {
+					t.Errorf("%s (%s): the answer discloses %q: %s", tc.name, role, leak, w.Body.String())
+				}
+			}
+		}
+	}
+	if n := c.assignments(target); n != 0 {
+		t.Fatalf("refused scopes stored %d assignments, want none (and never an org-wide one)", n)
+	}
+	// The valid client and site scopes are stored as such.
+	for _, scope := range []string{`"scope_type":"client","scope_id":"` + c.Client1 + `"`, `"scope_type":"site","scope_id":"` + c.site1 + `"`} {
+		if w := auditPost(mux, c.orgAdminCtx, "/api/v1/role-assignments", `{"user_id":"`+target+`","role_id":"`+viewerRole+`",`+scope+`}`); w.Code != http.StatusCreated {
+			t.Errorf("POST %s: %d %.200s, want 201", scope, w.Code, w.Body.String())
+		}
+	}
+	if n := c.count(`SELECT count(*)::int FROM role_assignment WHERE user_id = $1 AND scope_client_id IS NULL AND scope_site_id IS NULL AND scope_team_id IS NULL`, target); n != 0 {
+		t.Errorf("%d org-wide assignments of the target, want none", n)
 	}
 }

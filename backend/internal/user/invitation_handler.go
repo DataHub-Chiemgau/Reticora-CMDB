@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -38,8 +39,9 @@ func (h *InvitationHandler) WithAccounts(a InvitationAccounts) *InvitationHandle
 }
 
 // RegisterRoutes registers the invitation routes. Issue, list, renew and
-// revoke need user:manage; accept is public, the token is the credential,
-// and it runs through the pre-auth limit.
+// revoke need user:manage, issue and renew within the caller's rights (grant
+// ceiling); accept is public, the token is the credential, and it runs
+// through the pre-auth limit.
 func (h *InvitationHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/invitations", h.List)
 	r.Post("/api/v1/invitations", h.Issue)
@@ -57,7 +59,10 @@ func (h *InvitationHandler) unavailable(w http.ResponseWriter) bool {
 }
 
 func writeInvitationError(w http.ResponseWriter, r *http.Request, err error) {
+	var ceiling *GrantCeilingError
 	switch {
+	case errors.As(err, &ceiling):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ceiling.Error())
 	case errors.Is(err, ErrInvitationNotFound), errors.Is(err, ErrInvitationInvalid):
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 	case errors.Is(err, ErrInvitationExpired):
@@ -91,8 +96,21 @@ func (h *InvitationHandler) List(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Invitation]{Data: items, Total: len(items), Limit: len(items)})
 }
 
+// invitingPrincipal is the principal whose rights bound an issued or renewed
+// invitation (grant ceiling); without one the request is refused.
+func invitingPrincipal(w http.ResponseWriter, r *http.Request) (*identity.Principal, bool) {
+	p, ok := identity.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "invitations are issued by an authenticated principal")
+		return nil, false
+	}
+	return &p, true
+}
+
 // Issue creates an invitation valid for seven days. The response carries
-// the token once; only its hash is stored.
+// the token once; only its hash is stored. The issuer must hold user:manage
+// and the permissions of the role in a scope covering the invitation's
+// scope (403 otherwise).
 func (h *InvitationHandler) Issue(w http.ResponseWriter, r *http.Request) {
 	if h.unavailable(w) {
 		return
@@ -100,6 +118,10 @@ func (h *InvitationHandler) Issue(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.UserID == "" {
 		api.WriteError(w, http.StatusForbidden, "Forbidden", "invitations are issued by a user")
+		return
+	}
+	caller, ok := invitingPrincipal(w, r)
+	if !ok {
 		return
 	}
 	var req struct {
@@ -119,7 +141,7 @@ func (h *InvitationHandler) Issue(w http.ResponseWriter, r *http.Request) {
 	}
 	inv := &Invitation{OrganizationID: t.OrganizationID, Email: req.Email, RoleID: req.RoleID,
 		ScopeType: req.ScopeType, ScopeID: req.ScopeID, InvitedBy: t.UserID, ExpiresAt: h.now().Add(InvitationTTL)}
-	if err := h.repo.IssueInvitation(r.Context(), inv, hash); err != nil {
+	if err := h.repo.IssueInvitation(r.Context(), caller, inv, hash); err != nil {
 		writeInvitationError(w, r, err)
 		return
 	}
@@ -128,9 +150,14 @@ func (h *InvitationHandler) Issue(w http.ResponseWriter, r *http.Request) {
 }
 
 // Renew gives a pending or expired invitation a new token and seven more
-// days.
+// days. The grant ceiling applies to the renewing principal, not to the
+// original issuer.
 func (h *InvitationHandler) Renew(w http.ResponseWriter, r *http.Request) {
 	if h.unavailable(w) {
+		return
+	}
+	caller, ok := invitingPrincipal(w, r)
+	if !ok {
 		return
 	}
 	orgID := tenant.FromContext(r.Context()).OrganizationID
@@ -139,7 +166,7 @@ func (h *InvitationHandler) Renew(w http.ResponseWriter, r *http.Request) {
 		writeInvitationError(w, r, err)
 		return
 	}
-	inv, err := h.repo.RenewInvitation(r.Context(), orgID, chi.URLParam(r, "id"), hash, h.now().Add(InvitationTTL))
+	inv, err := h.repo.RenewInvitation(r.Context(), orgID, chi.URLParam(r, "id"), caller, hash, h.now().Add(InvitationTTL))
 	if err != nil {
 		writeInvitationError(w, r, err)
 		return

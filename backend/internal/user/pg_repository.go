@@ -763,11 +763,16 @@ func (r *PGRepository) CreateRole(ctx context.Context, role *CustomRole) error {
 	})
 }
 
-func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, req UpdateRoleRequest) (*CustomRole, error) {
+// UpdateRole implements Repository. Permissions it adds must be held by
+// caller organization-wide (checkRoleWidening): the role applies to all its
+// assignments.
+func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, caller *identity.Principal, req UpdateRoleRequest) (*CustomRole, error) {
 	var item *CustomRole
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var isSystem bool
-		if err := tx.QueryRow(ctx, "SELECT is_system FROM custom_role WHERE id = $1 AND organization_id = $2", id, orgID).Scan(&isSystem); err != nil {
+		var current []string
+		if err := tx.QueryRow(ctx, `SELECT is_system, ARRAY(SELECT jsonb_array_elements_text(COALESCE(permissions, '[]'::jsonb)))
+			FROM custom_role WHERE id = $1 AND organization_id = $2 FOR UPDATE`, id, orgID).Scan(&isSystem, &current); err != nil {
 			if err == pgx.ErrNoRows {
 				return fmt.Errorf("role not found")
 			}
@@ -775,6 +780,11 @@ func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, req Upd
 		}
 		if isSystem {
 			return fmt.Errorf("cannot modify system role")
+		}
+		if req.Permissions != nil {
+			if err := checkRoleWidening(caller, current, req.Permissions); err != nil {
+				return err
+			}
 		}
 
 		setClauses := make([]string, 0, 4)
@@ -848,25 +858,35 @@ func (r *PGRepository) DeleteRole(ctx context.Context, orgID, id string) error {
 	})
 }
 
-func (r *PGRepository) AssignRole(ctx context.Context, orgID string, a *UserRoleAssignment) error {
+// AssignRole implements Repository. The scope must name its client, site or
+// team (validateAssignmentScope), the role must fit it, and caller must hold
+// role:manage and the role's permissions in a scope covering it
+// (checkAssignmentTarget, grant ceiling); otherwise nothing is stored.
+func (r *PGRepository) AssignRole(ctx context.Context, orgID string, caller *identity.Principal, a *UserRoleAssignment) error {
+	if a.ScopeType == "" {
+		a.ScopeType = "organization"
+	}
+	if err := validateAssignmentScope(a); err != nil {
+		return err
+	}
 	// Standard roles (role_id) are stored in role_assignment; custom roles
 	// (custom_role_id) in user_custom_role. Both feed EffectivePermissions.
 	if a.RoleID != "" {
-		return r.assignStandardRole(ctx, orgID, a)
+		return r.assignStandardRole(ctx, orgID, caller, a)
 	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var exists bool
-		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM custom_role WHERE id = $1 AND organization_id = $2)", a.CustomRoleID, orgID).Scan(&exists); err != nil {
-			return fmt.Errorf("check role for assignment: %w", err)
-		}
-		if !exists {
-			return fmt.Errorf("role not found")
-		}
-		if a.ScopeType == "" {
-			a.ScopeType = "organization"
-		}
-		if err := checkTeamScope(ctx, tx, orgID, a); err != nil {
+		role, found, err := readCustomRole(ctx, tx, orgID, a.CustomRoleID)
+		if err != nil {
 			return err
+		}
+		if !found {
+			return errRoleNotFound
+		}
+		if _, _, err = assignmentUser(ctx, tx, orgID, a.UserID); err != nil {
+			return err
+		}
+		if targetErr := checkAssignmentTarget(ctx, tx, orgID, caller, role, a); targetErr != nil {
+			return targetErr
 		}
 		query := `
 			INSERT INTO user_custom_role (
@@ -878,7 +898,7 @@ func (r *PGRepository) AssignRole(ctx context.Context, orgID string, a *UserRole
 			) VALUES ($1, $2, $3, $4, $5)
 			RETURNING id::text, granted_at
 		`
-		if err := tx.QueryRow(ctx, query,
+		if err = tx.QueryRow(ctx, query,
 			a.UserID,
 			a.CustomRoleID,
 			a.ScopeType,
@@ -891,52 +911,56 @@ func (r *PGRepository) AssignRole(ctx context.Context, orgID string, a *UserRole
 	})
 }
 
+// assignmentUser returns oidc subject and e-mail of the user of an
+// assignment. The user must belong to the organization: the foreign key alone
+// would accept a user of another one.
+func assignmentUser(ctx context.Context, tx pgx.Tx, orgID, userID string) (subject, email string, err error) {
+	err = tx.QueryRow(ctx, "SELECT COALESCE(oidc_subject, ''), email FROM app_user WHERE id::text = $1 AND organization_id = $2",
+		userID, orgID).Scan(&subject, &email)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", errUserNotFound
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("check user for assignment: %w", err)
+	}
+	return subject, email, nil
+}
+
 // assignStandardRole assigns a seeded standard role (table `role`) to a user,
 // mapping scope_type onto the role_assignment scope columns. The organization
-// scope maps to NULL client/site/team; client/site scopes validate the
-// reference, a team scope needs a team of the organization (checkTeamScope).
+// scope maps to NULL client/site/team; a client or site scope needs a client
+// or site of the organization, a team scope a team (checkAssignmentTarget).
 // Assigning the same role in the same scope again returns the existing
 // assignment instead of a second row (role_assignment_scope_key, NULLS NOT
 // DISTINCT, so also for the organization scope).
 //
 // A grant of org_admin binds the IdP account of the user to MFA before the
-// commit (WP-358); when that fails, nothing is assigned and the error wraps
-// ErrMFAUnavailable.
-func (r *PGRepository) assignStandardRole(ctx context.Context, orgID string, a *UserRoleAssignment) error {
+// commit (WP-358), after the grant ceiling; when that fails, nothing is
+// assigned and the error wraps ErrMFAUnavailable.
+func (r *PGRepository) assignStandardRole(ctx context.Context, orgID string, caller *identity.Principal, a *UserRoleAssignment) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var roleName string
-		err := tx.QueryRow(ctx, "SELECT name FROM role WHERE id::text = $1 AND organization_id = $2", a.RoleID, orgID).Scan(&roleName)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("role not found")
-		}
+		role, found, err := readStandardRole(ctx, tx, orgID, a.RoleID)
 		if err != nil {
-			return fmt.Errorf("check standard role for assignment: %w", err)
+			return err
 		}
-		// The user must belong to the organization: the foreign key alone
-		// would accept a user of another one.
-		var subject, email string
-		err = tx.QueryRow(ctx, "SELECT COALESCE(oidc_subject, ''), email FROM app_user WHERE id::text = $1 AND organization_id = $2",
-			a.UserID, orgID).Scan(&subject, &email)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("user not found")
+		if !found {
+			return errRoleNotFound
 		}
+		subject, email, err := assignmentUser(ctx, tx, orgID, a.UserID)
 		if err != nil {
-			return fmt.Errorf("check user for assignment: %w", err)
+			return err
+		}
+		if targetErr := checkAssignmentTarget(ctx, tx, orgID, caller, role, a); targetErr != nil {
+			return targetErr
 		}
 		var scopeClient, scopeSite, scopeTeam any
 		switch a.ScopeType {
-		case "", "organization":
 		case "client":
-			scopeClient = nilIfEmpty(a.ScopeID)
+			scopeClient = a.ScopeID
 		case "site":
-			scopeSite = nilIfEmpty(a.ScopeID)
+			scopeSite = a.ScopeID
 		case "team":
-			if scopeErr := checkTeamScope(ctx, tx, orgID, a); scopeErr != nil {
-				return scopeErr
-			}
 			scopeTeam = a.ScopeID
-		default:
-			return fmt.Errorf("unsupported scope_type %q", a.ScopeType)
 		}
 		err = tx.QueryRow(ctx, `
 			INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id, scope_site_id, scope_team_id)
@@ -956,7 +980,7 @@ func (r *PGRepository) assignStandardRole(ctx context.Context, orgID string, a *
 		if err != nil {
 			return fmt.Errorf("assign standard role: %w", err)
 		}
-		if roleName == OrgAdminRole {
+		if role.Name == OrgAdminRole {
 			return bindMFA(ctx, r.mfa, subject, email)
 		}
 		return nil
@@ -972,14 +996,126 @@ func checkTeamScope(ctx context.Context, tx pgx.Tx, orgID string, a *UserRoleAss
 		return nil
 	}
 	if !isUUID(a.ScopeID) {
-		return fmt.Errorf("team not found")
+		return errTeamNotFound
 	}
 	var exists bool
 	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM team WHERE id = $1 AND organization_id = $2)", a.ScopeID, orgID).Scan(&exists); err != nil {
 		return fmt.Errorf("check team for assignment: %w", err)
 	}
 	if !exists {
-		return fmt.Errorf("team not found")
+		return errTeamNotFound
+	}
+	return nil
+}
+
+// RevokeRoleAssignment implements Repository (DELETE /role-assignments/{id},
+// AUT-02, F-017). The id is looked up in role_assignment (standard role) and
+// then in user_custom_role (custom role) of the organization and locked; the
+// caller must hold role:manage and the role's permissions in a scope
+// covering the assignment's scope (checkGrantCeiling, the rule of
+// AssignRole). The row is deleted and role_assignment.revoked is audited in
+// the same transaction. The user loses the rights at the next refresh, which
+// reads the assignments again. The IdP account keeps mfa_required when
+// org_admin is revoked (WP-358: MFA stays), so no org_admin loses MFA here.
+func (r *PGRepository) RevokeRoleAssignment(ctx context.Context, orgID string, caller *identity.Principal, id string) error {
+	if !isUUID(id) {
+		return errAssignmentNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		a, table, err := lockRoleAssignment(ctx, tx, orgID, id)
+		if err != nil {
+			return err
+		}
+		var role *targetRole
+		var found bool
+		if a.RoleID != "" {
+			role, found, err = readStandardRole(ctx, tx, orgID, a.RoleID)
+		} else {
+			role, found, err = readCustomRole(ctx, tx, orgID, a.CustomRoleID)
+		}
+		if err != nil {
+			return err
+		}
+		if !found {
+			return errAssignmentNotFound
+		}
+		if err = checkGrantCeiling(ctx, tx, orgID, caller, identity.PermRoleManage, role.Permissions, a.ScopeType, a.ScopeID); err != nil {
+			return revocationCeiling(err)
+		}
+		var tag pgconn.CommandTag
+		if a.RoleID != "" {
+			tag, err = tx.Exec(ctx, `DELETE FROM role_assignment WHERE organization_id = $1 AND id = $2`, orgID, id)
+		} else {
+			tag, err = tx.Exec(ctx, `DELETE FROM user_custom_role WHERE organization_id = $1 AND id = $2`, orgID, id)
+		}
+		if err != nil {
+			return fmt.Errorf("revoke role assignment: %w", err)
+		}
+		if tag.RowsAffected() != 1 {
+			return errAssignmentNotFound
+		}
+		return recordRevocationAudit(ctx, tx, orgID, caller, a, table, role.Name)
+	})
+}
+
+// lockRoleAssignment reads and locks the assignment id of the organization
+// and names its table: role_assignment, with the scope columns mapped onto
+// scope_type and scope_id as ListUserRoles does, or user_custom_role.
+func lockRoleAssignment(ctx context.Context, tx pgx.Tx, orgID, id string) (a *UserRoleAssignment, table string, err error) {
+	a = &UserRoleAssignment{ID: id}
+	err = tx.QueryRow(ctx, `
+		SELECT user_id::text, role_id::text,
+		       CASE WHEN scope_site_id IS NOT NULL THEN 'site'
+		            WHEN scope_client_id IS NOT NULL THEN 'client'
+		            WHEN scope_team_id IS NOT NULL THEN 'team'
+		            ELSE 'organization' END,
+		       COALESCE(COALESCE(scope_site_id, scope_client_id, scope_team_id)::text, ''), created_at
+		  FROM role_assignment WHERE organization_id = $1 AND id = $2 FOR UPDATE`, orgID, id).
+		Scan(&a.UserID, &a.RoleID, &a.ScopeType, &a.ScopeID, &a.GrantedAt)
+	if err == nil {
+		return a, "role_assignment", nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, "", fmt.Errorf("read role assignment: %w", err)
+	}
+	err = tx.QueryRow(ctx, `
+		SELECT user_id::text, custom_role_id::text, scope_type, COALESCE(scope_id::text, ''), granted_at, COALESCE(granted_by::text, '')
+		  FROM user_custom_role WHERE organization_id = $1 AND id = $2 FOR UPDATE`, orgID, id).
+		Scan(&a.UserID, &a.CustomRoleID, &a.ScopeType, &a.ScopeID, &a.GrantedAt, &a.GrantedBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, "", errAssignmentNotFound
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("read custom role assignment: %w", err)
+	}
+	return a, "user_custom_role", nil
+}
+
+// recordRevocationAudit appends role_assignment.revoked: who revoked (the
+// caller, a user session or an API key acting as its owner), the table, the
+// user, the role and the scope of the assignment.
+func recordRevocationAudit(ctx context.Context, tx pgx.Tx, orgID string, caller *identity.Principal, a *UserRoleAssignment, table, roleName string) error {
+	actor, actorType := "", "user"
+	if isUUID(caller.Subject) {
+		actor = caller.Subject
+	}
+	if caller.Type == identity.PrincipalTypeAPIKey {
+		actorType = "api_key"
+	}
+	changes := map[string]any{"table": table, "user_id": a.UserID, "role": roleName, "scope_type": a.ScopeType}
+	if a.RoleID != "" {
+		changes["role_id"] = a.RoleID
+	} else {
+		changes["custom_role_id"] = a.CustomRoleID
+	}
+	if a.ScopeID != "" {
+		changes["scope_id"] = a.ScopeID
+	}
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+		OrganizationID: orgID, ActorID: actor, ActorType: actorType, Action: ActionRoleAssignmentRevoked,
+		ResourceType: "role_assignment", ResourceID: a.ID, Changes: changes,
+	}); err != nil {
+		return fmt.Errorf("audit %s: %w", ActionRoleAssignmentRevoked, err)
 	}
 	return nil
 }
