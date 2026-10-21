@@ -22,8 +22,8 @@
 #          scenario (420 s) is shorter than the RPO limit (900 s), so a data
 #          loss above the limit is not observable.        -> case restore_rpo_window
 #   WP-102 (TEC-15) P2 "No signature verification before installation":
-#          the installers must verify the signed release artefacts (cosign)
-#          before installing.                              -> case install_signature_*
+#          fixed by WP-387; the cases install_signature_* are in
+#          tests/install-signature.test.sh.
 #   WP-103 (OPS-05) P2 "alertmanager.yaml is rejected by Alertmanager's config
 #          validation (no global SMTP smarthost)" + gap high "Alertmanager
 #          config validation in CI".                       -> case alertmanager_*
@@ -132,16 +132,6 @@ else
     fail "restore_rpo_window: the write window exceeds the RPO limit, so an RPO violation is observable" \
         "WRITE_SECONDS=${write_window}s <= RPO_LIMIT=${rpo_limit}s: rpo = last_commit - restored_last stays below the limit whenever the restore succeeds"
 fi
-
-# ─── WP-102: signature verification before installation (TEC-15) ────────────
-for f in install-vm.sh install-cloud.sh; do
-    if grep -qE 'cosign[^#]*verify(-blob)?' "$f"; then
-        ok "install_signature_${f%.sh}: ${f} verifies the cosign signature of what it installs"
-    else
-        fail "install_signature_${f%.sh}: ${f} verifies the cosign signature of what it installs" \
-            "no 'cosign verify'/'cosign verify-blob' in ${f}; $(grep -nE 'curl -fsSL "\$(tarball|base)|git clone|compose_cmd pull' "$f" | head -n 3 | cut -c1-120)"
-    fi
-done
 
 # ─── WP-103: the Alertmanager configuration is loadable ─────────────────────
 am_static="$(python3 - <<'PY'

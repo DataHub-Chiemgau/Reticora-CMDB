@@ -27,19 +27,27 @@ check() { # <name> <command …>
 }
 
 COMPOSE=deploy/docker-compose/docker-compose.yml
+OVERRIDE=deploy/docker-compose/docker-compose.override.yml
 PGDIR=deploy/docker-compose/postgres
 CONF=$PGDIR/pgbackrest.conf
 K8S=deploy/k8s/base/components/backup
 
-# The postgres service of the compose file as one block.
+# The postgres service of the compose file (or the given one) as one block.
 service_block() {
-    awk -v svc="$1" '$0 == "  " svc ":" {f=1; print; next} f && /^  [^ #]/ {exit} f {print}' "$COMPOSE"
+    awk -v svc="$1" '$0 == "  " svc ":" {f=1; print; next} f && /^  [^ #]/ {exit} f {print}' "${2:-$COMPOSE}"
 }
 
 # ─── Compose: WAL archiving and base backups ─────────────────────────────────
 pg="$(service_block postgres)"
 backup="$(service_block backup)"
-check "postgres is built with pgBackRest" grep -q 'context: ./postgres' <<<"$pg"
+# The image with pgBackRest: built from ./postgres by the source-build
+# override, or the signed reticora-postgres of the release (same Dockerfile,
+# RETICORA_POSTGRES_IMAGE, WP-387); the backup service runs the same image.
+check "postgres is built with pgBackRest" \
+    bash -c 'grep -q "context: ./postgres" <<<"$1" && grep -qF "image: \${RETICORA_POSTGRES_IMAGE:-reticora-postgres:latest}" <<<"$2" \
+        && grep -qF "image: \${RETICORA_POSTGRES_IMAGE:-reticora-postgres:latest}" <<<"$3" \
+        && grep -q "dockerfile: deploy/docker-compose/postgres/Dockerfile" .github/workflows/release.yml' \
+    _ "$(service_block postgres "$OVERRIDE")" "$pg" "$backup"
 check "postgres archives WAL (archive_mode=on)" grep -q 'archive_mode=on' <<<"$pg"
 check "archive_command is pgbackrest archive-push" grep -q 'archive_command=pgbackrest --stanza=reticora archive-push %p' <<<"$pg"
 timeout="$(sed -n 's/.*archive_timeout=\([0-9]*\).*/\1/p' <<<"$pg")"

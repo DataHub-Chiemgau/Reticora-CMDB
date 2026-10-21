@@ -18,6 +18,12 @@
 # Re-running the script reuses the existing .env values as defaults and is
 # idempotent: existing volumes, keys and configuration are preserved.
 #
+# Release mode (RETICORA_IMAGE_REGISTRY set, TEC-15): reticora-server,
+# reticora-frontend and reticora-postgres are verified with 'cosign verify'
+# against the identity of the release workflow and pinned by digest in .env
+# before anything starts. Without a registry the images are built from this
+# checkout and are not signature-verified (default until E-69 is decided).
+#
 # Usage:
 #   ./install-cloud.sh                    interactive installation
 #   ./install-cloud.sh --non-interactive  use existing .env / defaults /
@@ -51,6 +57,11 @@ automatic renewal.
 
 Re-running the script reuses the existing .env values as defaults and is
 idempotent: existing volumes, keys and configuration are preserved.
+
+With RETICORA_IMAGE_REGISTRY (and RETICORA_IMAGE_TAG=v<version>) the signed
+release images are installed: verified with cosign before the start and
+pinned by digest. Without it the images are built from this checkout and are
+not signature-verified.
 
 Usage:
   ./install-cloud.sh                    interactive installation
@@ -468,6 +479,11 @@ RETICORA_KEYCLOAK_PORT=$RETICORA_KEYCLOAK_PORT
 # Source of prebuilt images (leave empty to build from this checkout)
 RETICORA_IMAGE_REGISTRY=$RETICORA_IMAGE_REGISTRY
 RETICORA_IMAGE_TAG=$RETICORA_IMAGE_TAG
+# Signed release images, pinned by the digest that cosign verified (set by the
+# installer in the release mode; empty = images built from this checkout)
+RETICORA_SERVER_IMAGE=${RETICORA_SERVER_IMAGE:-}
+RETICORA_FRONTEND_IMAGE=${RETICORA_FRONTEND_IMAGE:-}
+RETICORA_POSTGRES_IMAGE=${RETICORA_POSTGRES_IMAGE:-}
 
 # Container image garbage collection
 RETICORA_GC_KEEP_IMAGES=$RETICORA_GC_KEEP_IMAGES
@@ -480,6 +496,19 @@ EOF
     fi
     merge_env_extras "$tmp"
     mv "$tmp" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+}
+
+# env_set <key> <value> — replaces the line <key>=… that write_env wrote
+# (the image digests verified after write_env).
+env_set() {
+    local tmp
+    tmp="$(mktemp)"
+    if ! awk -v k="$1" -v v="$2" 'index($0, k "=") == 1 { print k "=" v; found = 1; next } { print }
+        END { if (!found) print k "=" v }' "$ENV_FILE" > "$tmp" || ! mv "$tmp" "$ENV_FILE"; then
+        rm -f "$tmp"
+        die "Could not update $1 in $ENV_FILE."
+    fi
     chmod 600 "$ENV_FILE"
 }
 
@@ -707,6 +736,11 @@ collect_config() {
     local def_tag
     def_tag="$(env_get RETICORA_IMAGE_TAG || true)"
     ask RETICORA_IMAGE_TAG "Image tag" "${def_tag:-latest}"
+    # Set by provide_images from the verified digests (release mode only); a
+    # pin of an earlier run is never reused unverified.
+    RETICORA_SERVER_IMAGE=""
+    RETICORA_FRONTEND_IMAGE=""
+    RETICORA_POSTGRES_IMAGE=""
 
     RETICORA_GC_KEEP_IMAGES="$(env_get RETICORA_GC_KEEP_IMAGES || true)"
     RETICORA_GC_KEEP_IMAGES="${RETICORA_GC_KEEP_IMAGES:-3}"
@@ -1210,29 +1244,61 @@ check_issuer_from_container() {
 }
 
 # ─── Images: build / pull ─────────────────────────────────────────────────────
+# verify_release_image <image> <variable> — 'cosign verify' of
+# <registry>/<image>:<tag> against the identity of the release workflow (with
+# a version tag: of exactly that release). The signature must name <image>
+# (no other signed Reticora image under its name); <variable> is set to
+# <registry>/<image>@<digest> of the verified image.
+verify_release_image() {
+    local image="$1" ref out err digest
+    ref="$RETICORA_IMAGE_REGISTRY/$image:$RETICORA_IMAGE_TAG"
+    ensure_cosign
+    err="$(mktemp)"
+    if ! out="$("$COSIGN_BIN" verify "$ref" \
+        --certificate-identity-regexp "$(release_identity_regexp "$RETICORA_IMAGE_TAG")" \
+        --certificate-oidc-issuer "$RELEASE_OIDC_ISSUER" 2>"$err")"; then
+        tail -n 3 "$err" >&2
+        rm -f "$err"
+        die "Signature check failed: $ref is not signed by the release workflow of $RELEASE_REPOSITORY; nothing was started ($SIGNATURE_TROUBLESHOOTING)."
+    fi
+    rm -f "$err"
+    digest="$(jq -r --arg image "$image" '[.[] | select((.critical.identity["docker-reference"] // "") | endswith("/" + $image))
+        | .critical.image["docker-manifest-digest"]] | unique | if length == 1 then .[0] else empty end' <<<"$out" 2>/dev/null)" || digest=""
+    [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] \
+        || die "Signature check failed: the verified signatures of $ref do not name $image with one digest; nothing was started ($SIGNATURE_TROUBLESHOOTING)."
+    printf -v "$2" '%s@%s' "$RETICORA_IMAGE_REGISTRY/$image" "$digest"
+    success "Signed image verified: $image@$digest"
+}
+
 provide_images() {
     if [ -n "$RETICORA_IMAGE_REGISTRY" ]; then
-        # Prebuilt images: disable the source-build override so compose uses
-        # the registry images referenced by RETICORA_SERVER_IMAGE /
-        # RETICORA_FRONTEND_IMAGE.
+        # Release mode (TEC-15): only the signed release images, pinned in
+        # .env by the digest cosign verified; nothing is built locally, also
+        # not PostgreSQL. Disabling the source-build override removes every
+        # build: section, so compose can only use the pinned images.
         if [ -f "$OVERRIDE_FILE" ]; then
             mv "$OVERRIDE_FILE" "$OVERRIDE_FILE.disabled"
         fi
-        info "Using prebuilt images from registry: $RETICORA_IMAGE_REGISTRY (tag $RETICORA_IMAGE_TAG)"
-        RETICORA_SERVER_IMAGE="$RETICORA_IMAGE_REGISTRY/reticora-server:$RETICORA_IMAGE_TAG" \
-        RETICORA_FRONTEND_IMAGE="$RETICORA_IMAGE_REGISTRY/reticora-frontend:$RETICORA_IMAGE_TAG" \
-            compose_cmd pull server frontend || die "Pulling the images failed."
+        info "Verifying the signed release images from $RETICORA_IMAGE_REGISTRY (tag $RETICORA_IMAGE_TAG) …"
+        verify_release_image reticora-server RETICORA_SERVER_IMAGE
+        verify_release_image reticora-frontend RETICORA_FRONTEND_IMAGE
+        verify_release_image reticora-postgres RETICORA_POSTGRES_IMAGE
+        env_set RETICORA_SERVER_IMAGE "$RETICORA_SERVER_IMAGE"
+        env_set RETICORA_FRONTEND_IMAGE "$RETICORA_FRONTEND_IMAGE"
+        env_set RETICORA_POSTGRES_IMAGE "$RETICORA_POSTGRES_IMAGE"
+        compose_cmd pull server frontend postgres || die "Pulling the verified images failed."
     else
-        # Local source build: make sure the build override is active.
+        # Local source build: make sure the build override is active. The
+        # images are not signature-verified (transition rule of E-69).
         if [ -f "$OVERRIDE_FILE.disabled" ]; then
             mv "$OVERRIDE_FILE.disabled" "$OVERRIDE_FILE"
         fi
         info "Building the Reticora images (this can take a few minutes) …"
         compose_cmd build server frontend || die "Image build failed."
+        # PostgreSQL with pgBackRest (WP-100).
+        info "Building the PostgreSQL image with pgBackRest …"
+        compose_cmd build postgres || die "Building the PostgreSQL image failed."
     fi
-    # PostgreSQL with pgBackRest is always built locally (WP-100).
-    info "Building the PostgreSQL image with pgBackRest …"
-    compose_cmd build postgres || die "Building the PostgreSQL image failed."
     if [ -n "$RETICORA_TLS_DOMAIN" ]; then
         compose_cmd pull certbot || die "Pulling the certbot image failed."
     fi
@@ -1840,6 +1906,12 @@ main() {
   Ports:             UI=$RETICORA_FRONTEND_PORT API=$RETICORA_SERVER_PORT Keycloak=$RETICORA_KEYCLOAK_PORT
   Image source:      ${RETICORA_IMAGE_REGISTRY:-<local build>} (tag $RETICORA_IMAGE_TAG)
 EOF
+    if [ -n "$RETICORA_IMAGE_REGISTRY" ]; then
+        info "Release mode: the images are verified with cosign (release workflow identity) and pinned by digest before the start."
+    else
+        # Transition rule of E-69: the local source build stays the default.
+        warn "Local source build: the images are built from this checkout and are not signature-verified. RETICORA_IMAGE_REGISTRY with RETICORA_IMAGE_TAG=v<version> installs the signed release images ($SIGNATURE_TROUBLESHOOTING)."
+    fi
     if is_tty; then
         confirm "Start the installation with these settings?" "yes" || die "Aborted by user."
     fi

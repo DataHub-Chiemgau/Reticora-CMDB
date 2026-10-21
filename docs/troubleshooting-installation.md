@@ -286,6 +286,7 @@ The installer is safe to re-run and reuses existing `.env` values as defaults:
 | Let's Encrypt cert | Not re-issued when a real certificate is present. |
 | Realm file | Re-rendered and validated on every run. Keycloak imports it only while the realm does not exist (`start --import-realm` skips an existing realm). |
 | Migrations | Tracked in `reticora_schema_migrations`; already-applied versions are skipped. |
+| Image pins (release mode) | `RETICORA_SERVER_IMAGE`, `RETICORA_FRONTEND_IMAGE` and `RETICORA_POSTGRES_IMAGE` are written by the installer: verified again with cosign and re-pinned on every run of the release mode, empty for the local source build. A pin of an earlier run is never reused unverified. |
 
 **Rotating passwords and OIDC settings:** change the value in `.env` (or at
 the installer's prompt) and re-run the installer. Every applied Keycloak
@@ -358,3 +359,85 @@ curl -fsS http://localhost:3000/ | head
 
 The CI workflow `.github/workflows/install-smoke.yml` runs these exact checks
 on every change to the installer or the compose stack.
+
+---
+
+## 9. Signature verification
+
+The release workflow (`.github/workflows/release.yml`) signs its images,
+binaries and the manifest `SHA256SUMS` keyless with cosign (TEC-15, E-31).
+The installers verify these signatures **before** they install anything;
+every check is fail-closed: a failed or impossible check stops the
+installation with rc 1 and changes nothing that is running.
+
+**What is verified, and what is not (transition rule of E-69):**
+
+| Installer path | Verification |
+|---|---|
+| `install-cloud.sh` with `RETICORA_IMAGE_REGISTRY` (release mode) | `cosign verify` of `reticora-server`, `reticora-frontend` and `reticora-postgres` (`<registry>/<image>:<RETICORA_IMAGE_TAG>`). The verified digest is pinned in `.env` (`RETICORA_*_IMAGE=<registry>/<image>@sha256:…`), only these images are pulled, nothing is built — also not PostgreSQL. All before `compose up`. |
+| `install-vm.sh --release v<version>` (`RETICORA_COLLECTOR_RELEASE`) | The collector binary `reticora-collector-linux-<arch>` of the release: `cosign verify-blob` with its `.sigstore.json`, and its sha256 against the signed `SHA256SUMS`, before it is copied to `/opt/reticora-collector`. systemd mode only. |
+| `install.sh --ref v<version>`, `install-vm.sh` with `RETICORA_REPO_REF=v<version>` — when they download the sources (run outside a checkout, e.g. piped from curl) | The signed `SHA256SUMS` of the release, then the commit of the checked-out tag against `SOURCE_COMMIT` (git) or the sha256 of `reticora-source-<version>.tar.gz` (without git, checked before it is unpacked). A mismatch stops before anything of the source runs or is built. |
+| `install-vm.sh` source build | The Go toolchain it downloads is checked against the sha256 that go.dev publishes (`https://go.dev/dl/?mode=json&include=all`) before it is unpacked. |
+| Default: local source build (`install-cloud.sh` without registry, `install-vm.sh` without `--release`) | **Not signature-verified.** The installer says so at the start. A ref that is no release tag (e.g. `main`) prints `Source not signature-verified (no release tag)`. Until E-69 is decided the source build stays the default; switching the default to the signed release artifacts is WP-388. |
+
+The signer must be `release.yml` of `DataHub-Chiemgau/Reticora-CMDB` on a
+version tag, issued by `https://token.actions.githubusercontent.com` — the
+identity the collector updater pins as well. With a version tag
+(`RETICORA_IMAGE_TAG=v1.2.3`, `--release v1.2.3`, `--ref v1.2.3`) the
+signature must be from exactly that release, so the signed files of an older
+release do not pass as the requested one. Releases are always fetched from
+`https://github.com/DataHub-Chiemgau/Reticora-CMDB/releases/download/<tag>/`;
+a git mirror (`--repo`) is accepted when its tag is the signed commit. The
+release mode of `install-cloud.sh` still takes the compose file, the realm
+and the migrations from the checkout it runs in: install it from a verified
+release tag (`./install.sh --cloud --ref v<version>`).
+
+**cosign:** an installed `cosign` (v2) is used. Otherwise the installer
+downloads cosign v2.4.1 for linux/amd64 or linux/arm64 from the sigstore
+release and checks it against its published sha256 before every use (cache:
+`RETICORA_TOOLS_DIR`, default `/var/cache/reticora` as root, otherwise
+`~/.cache/reticora`).
+
+**Release mode of the cloud installer:**
+
+```bash
+RETICORA_IMAGE_REGISTRY=ghcr.io/datahub-chiemgau RETICORA_IMAGE_TAG=v1.2.3 \
+  ./install.sh --cloud --ref v1.2.3
+sudo ./install.sh --vm --ref v1.2.3 --release v1.2.3   # collector VM
+```
+
+**Check by hand** (the commands the installers run):
+
+```bash
+identity='^https://github\.com/DataHub-Chiemgau/Reticora-CMDB/\.github/workflows/release\.yml@refs/tags/v1\.2\.3$'
+issuer=https://token.actions.githubusercontent.com
+# Images: prints the verified digest (critical.image.docker-manifest-digest)
+cosign verify ghcr.io/datahub-chiemgau/reticora-server:v1.2.3 \
+  --certificate-identity-regexp "$identity" --certificate-oidc-issuer "$issuer"
+# Release files: manifest first, then each file against it
+base=https://github.com/DataHub-Chiemgau/Reticora-CMDB/releases/download/v1.2.3
+curl -fsSLO "$base/SHA256SUMS" -fsSLO "$base/SHA256SUMS.sigstore.json" \
+  -fsSLO "$base/reticora-collector-linux-amd64" -fsSLO "$base/reticora-collector-linux-amd64.sigstore.json"
+cosign verify-blob --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity-regexp "$identity" --certificate-oidc-issuer "$issuer" SHA256SUMS
+cosign verify-blob --bundle reticora-collector-linux-amd64.sigstore.json \
+  --certificate-identity-regexp "$identity" --certificate-oidc-issuer "$issuer" reticora-collector-linux-amd64
+sha256sum -c --ignore-missing SHA256SUMS
+# Source: the commit of the tag
+curl -fsSL "$base/SOURCE_COMMIT"; git -C /opt/reticora-cmdb rev-parse HEAD
+```
+
+**Error messages:**
+
+| Message | Cause | Fix |
+|---|---|---|
+| `Signature check failed: <file or image> is not signed by the release workflow …` | cosign rejected the signature: manipulated file or image, a signature of another identity (fork, other workflow) or of another release, a tag without signed images, or no registry access | Do not install. Check the tag and the registry (`docker login` for a private registry) and verify by hand as above; a mirror must keep the signatures (`cosign copy`). |
+| `Signature check failed: the verified signatures of <ref> do not name <image> with one digest` | The tag carries a signed image of another name (e.g. the frontend image under `reticora-server`) | Do not install; the registry content is wrong. |
+| `Checksum mismatch: <file> … is not the file of the signed manifest SHA256SUMS` | The downloaded binary, tarball or `SOURCE_COMMIT` is not the one of the release | Do not install; download again from the release page. |
+| `Source check failed: the checkout of <tag> in <dir> is commit …, the signed release names …` | The tag in the repository (or a mirror) points to another commit than the release, or an old checkout could not be updated | Do not build; remove the checkout or use the official repository. |
+| `cosign is required to verify the signed release artifacts …` | No cosign installed and the download from github.com/sigstore failed (or no build for this CPU) | Install cosign v2 (https://docs.sigstore.dev/cosign/system_config/installation/) and re-run. |
+| `The downloaded cosign v2.4.1 does not match its published sha256 checksum` | The cosign download was manipulated or truncated | Re-run; install cosign yourself if it persists. |
+| `Could not download <file> of release <tag> …` | The release has no such file (tag not released, or released before WP-387 without `SHA256SUMS.sigstore.json`) or no network | Use a release that publishes the signed manifest, or the source build. |
+| `Checksum mismatch: the downloaded go<version>.linux-<arch>.tar.gz is not the file go.dev publishes` | The Go toolchain download was manipulated | Re-run; install Go yourself if it persists. |
+| `… the Go toolchain is not installed unverified` (warning) | go.dev's checksum list was not reachable | The installer falls back to a prebuilt `bin/collector` or the existing binary; otherwise install Go yourself. |
+| `--release installs the signed collector binary in the systemd mode …` | `--release` with `--docker` | The Docker mode builds the collector image from source. |

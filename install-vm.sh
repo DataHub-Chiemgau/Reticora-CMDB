@@ -17,10 +17,18 @@
 # The installer is idempotent: re-running it reuses the existing configuration
 # as defaults and upgrades the installation in place.
 #
+# Signature verification (TEC-15): --release v<version> installs the signed
+# collector binary of that release, checked with cosign verify-blob and against
+# the signed SHA256SUMS before it is copied. The default is still the source
+# build (transition rule of E-69), reported as not signature-verified; its Go
+# toolchain is checked against the sha256 of go.dev, a release tag as source
+# (RETICORA_REPO_REF=v<version>) against the signed release.
+#
 # Usage:
 #   sudo ./install-vm.sh                      interactive installation (systemd)
 #   sudo ./install-vm.sh --docker             use Docker instead of systemd
 #   sudo ./install-vm.sh --non-interactive    use existing config / defaults
+#   sudo ./install-vm.sh --release v1.2.3     signed release binary (systemd)
 #
 set -euo pipefail
 
@@ -33,6 +41,10 @@ MODE="systemd"
 NON_INTERACTIVE=0
 REPO_URL="${RETICORA_REPO_URL:-https://github.com/DataHub-Chiemgau/Reticora-CMDB.git}"
 REPO_REF="${RETICORA_REPO_REF:-main}"
+# Release whose signed collector binary is installed (empty = source build).
+COLLECTOR_RELEASE="${RETICORA_COLLECTOR_RELEASE:-}"
+# The Go toolchain of the source build is installed to $GO_INSTALL_PARENT/go.
+GO_INSTALL_PARENT="/usr/local"
 
 print_usage() {
     cat <<'EOF'
@@ -57,20 +69,30 @@ Usage:
   sudo ./install-vm.sh                      interactive installation (systemd)
   sudo ./install-vm.sh --docker             use Docker instead of systemd
   sudo ./install-vm.sh --non-interactive    use existing config / defaults
+  sudo ./install-vm.sh --release v1.2.3     install the signed collector binary
+                                            of that release (systemd mode;
+                                            RETICORA_COLLECTOR_RELEASE)
+
+Without --release the collector is built from source and is not
+signature-verified. RETICORA_REPO_REF=v<version> checks a downloaded source
+against the signed release.
 EOF
 }
 
-for arg in "$@"; do
-    case "$arg" in
+while [ "$#" -gt 0 ]; do
+    case "$1" in
         --docker) MODE="docker" ;;
         --systemd) MODE="systemd" ;;
         --non-interactive) NON_INTERACTIVE=1 ;;
+        --release) [ "$#" -ge 2 ] || { echo "--release requires a version tag" >&2; exit 2; }; COLLECTOR_RELEASE="$2"; shift ;;
+        --release=*) COLLECTOR_RELEASE="${1#*=}" ;;
         -h|--help)
             print_usage
             exit 0
             ;;
-        *) echo "Unknown option: $arg" >&2; exit 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
+    shift
 done
 
 # ─── Output helpers ───────────────────────────────────────────────────────────
@@ -86,9 +108,17 @@ success() { printf '%s✔%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
 warn()    { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
 die()     { printf '%s✘ Error:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 
-# Platform, Docker/Compose and sizing checks (INS-07).
+# Platform, Docker/Compose and sizing checks (INS-07), signature verification
+# (TEC-15).
 # shellcheck source=install-preflight.sh
 . "$SCRIPT_DIR/install-preflight.sh"
+
+if [ -n "$COLLECTOR_RELEASE" ]; then
+    is_release_tag "$COLLECTOR_RELEASE" \
+        || die "--release expects a version tag v<version> of a signed release, not '$COLLECTOR_RELEASE'."
+    [ "$MODE" = "systemd" ] \
+        || die "--release installs the signed collector binary in the systemd mode; the Docker mode builds the collector image from source."
+fi
 
 trim() {
     local s="$1"
@@ -464,17 +494,21 @@ SOURCE_DIR="$SCRIPT_DIR"
 
 # Downloads the sources when they are not next to this script. Failure is not
 # fatal: the systemd mode can still fall back to a prebuilt binary or an
-# existing installation.
+# existing installation. A release tag (REPO_REF v*) is the exception: its
+# source is checked against the signed release, and a failed download or
+# check stops the installation before the build.
 ensure_sources() {
     [ -f "$SOURCE_DIR/go.work" ] && [ -d "$SOURCE_DIR/collector" ] && return 0
 
     SOURCE_DIR="${RETICORA_SOURCE_DIR:-/opt/reticora-cmdb}"
-    if [ -f "$SOURCE_DIR/go.work" ] && [ -d "$SOURCE_DIR/collector" ] && [ ! -d "$SOURCE_DIR/.git" ]; then
+    if [ -f "$SOURCE_DIR/go.work" ] && [ -d "$SOURCE_DIR/collector" ] && [ ! -d "$SOURCE_DIR/.git" ] \
+        && ! is_release_tag "$REPO_REF"; then
         return 0
     fi
 
     info "Downloading the Reticora sources from $REPO_URL ($REPO_REF) …"
     ensure_command curl curl ca-certificates
+    is_release_tag "$REPO_REF" || warn_unverified_source "$REPO_REF"
     have_cmd git || install_packages git || true
 
     if have_cmd git; then
@@ -487,6 +521,18 @@ ensure_sources() {
             git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$SOURCE_DIR" \
                 || warn "Could not clone $REPO_URL into $SOURCE_DIR."
         fi
+        if is_release_tag "$REPO_REF"; then
+            verify_source_checkout "$SOURCE_DIR" "$REPO_REF"
+        fi
+    elif is_release_tag "$REPO_REF"; then
+        local tmp
+        ensure_command tar
+        tmp="$(mktemp -d)"
+        fetch_source_tarball "$REPO_REF" "$tmp/reticora.tar.gz"
+        mkdir -p "$SOURCE_DIR"
+        tar -xzf "$tmp/reticora.tar.gz" -C "$SOURCE_DIR" --strip-components=1 \
+            || die "Could not unpack the verified source tarball."
+        rm -rf "$tmp"
     else
         local base tarball tmp
         base="${REPO_URL%.git}"
@@ -529,10 +575,19 @@ go_version_ok() {
     [ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -n 1)" = "$want" ]
 }
 
+# go_toolchain_sha256 <file> — the sha256 that go.dev publishes for <file>
+# (https://go.dev/dl/?mode=json&include=all, one object per file).
+go_toolchain_sha256() {
+    curl -fsSL 'https://go.dev/dl/?mode=json&include=all' \
+        | tr -d ' \t\r\n' | tr '}' '\n' \
+        | grep -F "\"filename\":\"$1\"" \
+        | sed -nE 's/.*"sha256":"([0-9a-f]{64})".*/\1/p' | sed -n 1p
+}
+
 ensure_go_toolchain() {
     go_version_ok && return 0
 
-    local want arch tarball tmp
+    local want arch file tarball tmp sha
     want="$(sed -n 's/^go \([0-9.]*\).*/\1/p' "$SOURCE_DIR/go.work" 2>/dev/null | head -n 1)"
     want="${want:-1.25.0}"
     case "$(uname -m)" in
@@ -546,31 +601,69 @@ ensure_go_toolchain() {
         return 1
     fi
 
-    info "Installing the Go $want toolchain to /usr/local/go …"
+    info "Installing the Go $want toolchain to $GO_INSTALL_PARENT/go …"
     ensure_command curl curl ca-certificates
     ensure_command tar
-    tarball="https://go.dev/dl/go${want}.linux-${arch}.tar.gz"
+    file="go${want}.linux-${arch}.tar.gz"
+    tarball="https://go.dev/dl/$file"
     tmp="$(mktemp -d)"
     if ! curl -fsSL "$tarball" -o "$tmp/go.tar.gz"; then
         rm -rf "$tmp"
         warn "Could not download $tarball."
         return 1
     fi
-    rm -rf /usr/local/go
-    tar -C /usr/local -xzf "$tmp/go.tar.gz" || { rm -rf "$tmp"; warn "Could not unpack the Go toolchain."; return 1; }
+    # Unpacked only with the sha256 that go.dev publishes for this file.
+    sha="$(go_toolchain_sha256 "$file")" || sha=""
+    if [ -z "$sha" ]; then
+        rm -rf "$tmp"
+        warn "Could not read the sha256 checksum of $file from go.dev; the Go toolchain is not installed unverified."
+        return 1
+    fi
+    if ! printf '%s  %s\n' "$sha" "$tmp/go.tar.gz" | sha256sum -c - >/dev/null 2>&1; then
+        rm -rf "$tmp"
+        die "Checksum mismatch: the downloaded $file is not the file go.dev publishes (sha256 $sha); the Go toolchain was not installed ($SIGNATURE_TROUBLESHOOTING)."
+    fi
+    rm -rf "$GO_INSTALL_PARENT/go"
+    tar -C "$GO_INSTALL_PARENT" -xzf "$tmp/go.tar.gz" || { rm -rf "$tmp"; warn "Could not unpack the Go toolchain."; return 1; }
     rm -rf "$tmp"
-    export PATH="/usr/local/go/bin:$PATH"
+    export PATH="$GO_INSTALL_PARENT/go/bin:$PATH"
     go_version_ok || { warn "The installed Go toolchain is still not usable."; return 1; }
     success "Go toolchain: $(go env GOVERSION)"
 }
 
 # ─── Collector binary / image provisioning ────────────────────────────────────
+# install_release_collector <file> — the collector binary of release
+# $COLLECTOR_RELEASE: its keyless signature (cosign verify-blob) and its
+# sha256 in the signed manifest SHA256SUMS are checked before it is copied.
+install_release_collector() {
+    local arch name tmp
+    case "$(uname -m)" in
+        x86_64|amd64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) die "The collector release is built for linux/amd64 and linux/arm64, not for $(uname -m)." ;;
+    esac
+    name="reticora-collector-linux-$arch"
+    info "Downloading the signed collector $COLLECTOR_RELEASE ($name) …"
+    tmp="$(mktemp -d)"
+    fetch_release_manifest "$COLLECTOR_RELEASE" "$tmp"
+    fetch_release_file "$COLLECTOR_RELEASE" "$name" "$tmp"
+    fetch_release_file "$COLLECTOR_RELEASE" "$name.sigstore.json" "$tmp"
+    cosign_verify_blob "$tmp/$name" "$tmp/$name.sigstore.json" "$COLLECTOR_RELEASE"
+    check_release_file "$tmp" "$name"
+    cp "$tmp/$name" "$1" || die "Could not copy the verified collector binary to $1."
+    rm -rf "$tmp"
+    success "Collector $COLLECTOR_RELEASE verified (cosign verify-blob, sha256 in the signed SHA256SUMS)"
+}
+
 provide_collector_systemd() {
     info "Installing the collector binary …"
     mkdir -p "$INSTALL_DIR" "$RETICORA_SPOOL_DIR"
 
     local bin_src=""
-    if [ -f "$SOURCE_DIR/go.work" ] && ensure_go_toolchain; then
+    if [ -n "$COLLECTOR_RELEASE" ]; then
+        install_release_collector "$INSTALL_DIR/collector.new"
+        bin_src="$INSTALL_DIR/collector.new"
+    elif [ -f "$SOURCE_DIR/go.work" ] && ensure_go_toolchain; then
         info "Building the collector from source …"
         (cd "$SOURCE_DIR" && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" \
             -o "$INSTALL_DIR/collector.new" ./collector/cmd/collector) \
@@ -720,6 +813,12 @@ main() {
   Interval:          $RETICORA_DISCOVERY_INTERVAL (heartbeat $RETICORA_HEARTBEAT_INTERVAL)
   mTLS cert file:    ${RETICORA_TLS_CLIENT_CERT_FILE:-<enrollment keystore>}
 EOF
+    if [ -n "$COLLECTOR_RELEASE" ]; then
+        info "Collector: signed release $COLLECTOR_RELEASE, verified with cosign verify-blob and the signed SHA256SUMS before the installation."
+    else
+        # Transition rule of E-69: the source build stays the default.
+        warn "Collector: built from source (or a local prebuilt binary) — not signature-verified. --release v<version> installs the signed release binary ($SIGNATURE_TROUBLESHOOTING)."
+    fi
     if is_tty; then
         confirm "Start the installation with these settings?" "yes" || die "Aborted by user."
     fi
@@ -727,7 +826,9 @@ EOF
     write_env
     success "Environment written to $ENV_FILE"
 
-    ensure_sources || true
+    # The release binary needs no sources; a release tag as source is checked
+    # (fail-closed) before the build.
+    [ -n "$COLLECTOR_RELEASE" ] || ensure_sources || true
 
     if [ "$MODE" = "docker" ]; then
         install_docker_setup

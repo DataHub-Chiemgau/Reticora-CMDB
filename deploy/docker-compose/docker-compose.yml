@@ -21,18 +21,22 @@
 #   cd deploy/docker-compose
 #   docker compose --env-file .env up -d
 # To run with prebuilt registry images instead, set RETICORA_SERVER_IMAGE /
-# RETICORA_FRONTEND_IMAGE in .env and rename docker-compose.override.yml to
-# docker-compose.override.yml.disabled (install-cloud.sh does this for you).
+# RETICORA_FRONTEND_IMAGE / RETICORA_POSTGRES_IMAGE in .env and rename
+# docker-compose.override.yml to docker-compose.override.yml.disabled.
+# install-cloud.sh does this in its release mode (RETICORA_IMAGE_REGISTRY):
+# it verifies the signed release images with cosign and pins them by digest
+# (TEC-15).
 
 services:
   postgres:
     # TimescaleDB with pgBackRest (deploy/docker-compose/postgres, WP-100):
     # every WAL segment is archived to the pgbackrest volume (and the
     # offsite S3 repository when configured), at the latest every 5 minutes
-    # (archive_timeout) — RPO <= 15 min (NFR-05).
+    # (archive_timeout) — RPO <= 15 min (NFR-05). The release mode runs the
+    # signed reticora-postgres image (RETICORA_POSTGRES_IMAGE, pinned by
+    # digest); build: lives in docker-compose.override.yml like for server and
+    # frontend.
     image: ${RETICORA_POSTGRES_IMAGE:-reticora-postgres:latest}
-    build:
-      context: ./postgres
     restart: unless-stopped
     entrypoint: ["reticora-pgbackrest-env.sh", "docker-entrypoint.sh"]
     command:
