@@ -10,6 +10,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -170,7 +171,8 @@ func (r *PGRepository) GetReviewItem(ctx context.Context, orgID, id string) (*It
 // ResolveReviewItem implements Repository. Resolving an unlicensed_ci item
 // is audited (ENT-03); resolved_by and the audit actor are both
 // resolution.ResolvedBy, the principal of the request (the system when
-// empty).
+// empty). Every resolution writes review.resolved in its transaction
+// (EVT-02).
 func (r *PGRepository) ResolveReviewItem(ctx context.Context, orgID, id string, resolution *Resolution) (*Item, error) {
 	var item *Item
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -185,24 +187,41 @@ func (r *PGRepository) ResolveReviewItem(ctx context.Context, orgID, id string, 
 		if err != nil {
 			return err
 		}
-		if item.Kind != KindUnlicensedCI {
-			return nil
+		if item.Kind == KindUnlicensedCI {
+			actorType := "user"
+			if resolution.ResolvedBy == "" {
+				actorType = "system"
+			}
+			if _, err = audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+				OrganizationID: orgID, ActorID: resolution.ResolvedBy, ActorType: actorType,
+				Action: "unlicensed_ci." + item.Status, ResourceType: "review_item", ResourceID: item.ID,
+				Changes: map[string]any{"resolution": item.Resolution, "device_key": item.Payload["device_key"]},
+			}); err != nil {
+				return err
+			}
 		}
-		actorType := "user"
-		if resolution.ResolvedBy == "" {
-			actorType = "system"
-		}
-		_, err = audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
-			OrganizationID: orgID, ActorID: resolution.ResolvedBy, ActorType: actorType,
-			Action: "unlicensed_ci." + item.Status, ResourceType: "review_item", ResourceID: item.ID,
-			Changes: map[string]any{"resolution": item.Resolution, "device_key": item.Payload["device_key"]},
-		})
-		return err
+		return recordResolved(ctx, tx, item)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return item, nil
+}
+
+// recordResolved writes review.resolved of item in tx: in a context
+// transaction (an effect that resolves the item with its own writes, e.g.
+// the CI it creates) right before its commit, else at once
+// (database.BeforeCommit, WP-334). The data names the item and its
+// resolution, not the reported payload.
+func recordResolved(ctx context.Context, tx pgx.Tx, item *Item) error {
+	data := map[string]any{"id": item.ID, "kind": item.Kind, "status": item.Status, "action": item.Action,
+		"resolution": item.Resolution, "resolved_by": item.ResolvedBy, "resolved_at": item.ResolvedAt,
+		"object_key": item.ObjectKey, "candidate_ci_ids": item.CandidateCIIDs, "client_id": item.ClientID, "site_id": item.SiteID}
+	return database.BeforeCommit(ctx, func() error {
+		_, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: item.OrganizationID, Type: events.ReviewResolved,
+			EntityID: item.ID, Data: data})
+		return err
+	})
 }
 
 // scopeID passes a client or site id to the derivation trigger; anything but

@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -259,4 +263,175 @@ func TestRelationshipEdgesFollowREL02(t *testing.T) {
 			t.Errorf("after the transfer: confidence %v attributes %s (%v)", confidence, attrs, err)
 		}
 	})
+}
+
+// TestRelationshipEventsCommitWithTheEdge covers EVT-01/EVT-02 for the
+// relationship repository (WP-400, F-043): Create, Delete and
+// DeleteWithPolicy write relationship.created and relationship.removed in
+// the transaction of the edge, with the edge as entity (entity_seq per
+// edge) and its CIs in the data. A rolled back context transaction (the
+// discovery ingest), a refused write (duplicate, CI of organization B,
+// unknown CI, CI outside the client scope, discovery edge without force,
+// organization B) and a repository without outbox write no event.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRelationshipEventsCommitWithTheEdge(t *testing.T) {
+	f := scopetest.Seed(t, "92")
+	bg := context.Background()
+	ctx := f.OrgCtx(f.OrgA)
+	repo := relationship.NewPGRepository(f.App).WithEvents(events.NewOutbox())
+	c1a, c1b := f.CI(t, f.OrgA, f.Client1, "evt-c1a"), f.CI(t, f.OrgA, f.Client1, "evt-c1b")
+	c2 := f.CI(t, f.OrgA, f.Client2, "evt-c2")
+	foreign := f.CI(t, f.OrgB, "", "evt-foreign")
+	outbox := func(org string) []string {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT type || ' ' || entity_id || ' ' || entity_seq || ' ' ||
+				COALESCE(data->>'source_ci_id', '') || '->' || COALESCE(data->>'target_ci_id', '')
+			FROM event_outbox WHERE organization_id = $1 ORDER BY sequence`, org)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+	event := func(typ string, rel *relationship.Relationship, seq int) string {
+		return fmt.Sprintf("%s %s %d %s->%s", typ, rel.ID, seq, rel.SourceCIID, rel.TargetCIID)
+	}
+	exists := func(id string) bool {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci_relationship WHERE id::text = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n == 1
+	}
+	var want []string
+	check := func(step string) {
+		t.Helper()
+		if got := outbox(f.OrgA); !slices.Equal(got, want) {
+			t.Fatalf("%s: events of organization A\n got %q\nwant %q", step, got, want)
+		}
+	}
+
+	committed := &relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1a, TargetCIID: c1b, RelType: "depends_on"}
+	if err := repo.Create(ctx, committed); err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, event(events.RelationshipCreated, committed, 1))
+	check("create")
+
+	// A rolled back context transaction takes the edge and its event.
+	errRollback := errors.New("roll back")
+	rolledBack := &relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1b, TargetCIID: c1a, RelType: "depends_on"}
+	if err := database.WithRequestTenantTx(ctx, f.App, f.OrgA, func(ctx context.Context) error {
+		if err := repo.Create(ctx, rolledBack); err != nil {
+			return err
+		}
+		return errRollback
+	}); !errors.Is(err, errRollback) {
+		t.Fatalf("rolled back create: %v", err)
+	}
+	if rolledBack.ID == "" || exists(rolledBack.ID) {
+		t.Fatalf("rolled back edge %q is stored", rolledBack.ID)
+	}
+	check("rolled back create")
+	// A committed context transaction writes the event with the edge.
+	joined := &relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1b, TargetCIID: c1a, RelType: "depends_on"}
+	if err := database.WithRequestTenantTx(ctx, f.App, f.OrgA, func(ctx context.Context) error {
+		return repo.Create(ctx, joined)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, event(events.RelationshipCreated, joined, 1))
+	check("create in a context transaction")
+
+	// Refused writes.
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		rel  relationship.Relationship
+	}{
+		{"duplicate", ctx, relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1a, TargetCIID: c1b, RelType: "depends_on"}},
+		{"CI of organization B", ctx, relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1a, TargetCIID: foreign, RelType: "depends_on"}},
+		{"unknown CI", ctx, relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: f.ID(), TargetCIID: c1a, RelType: "depends_on"}},
+		{"CI outside the client scope", f.ClientCtx(f.Client1), relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1a, TargetCIID: c2, RelType: "depends_on"}},
+	} {
+		if err := repo.Create(tc.ctx, &tc.rel); err == nil {
+			t.Errorf("create with %s succeeded", tc.name)
+		}
+	}
+	if err := repo.Delete(f.OrgCtx(f.OrgB), f.OrgB, committed.ID); err == nil {
+		t.Error("organization B deleted A's edge")
+	}
+	if err := repo.Delete(f.ClientCtx(f.Client2), f.OrgA, committed.ID); err == nil {
+		t.Error("a principal of client 2 deleted an edge of client 1")
+	}
+	if err := repo.DeleteWithPolicy(f.OrgCtx(f.OrgB), f.OrgB, committed.ID, true); err == nil {
+		t.Error("organization B deleted A's edge by policy")
+	}
+	var discovered relationship.Relationship
+	if err := f.Admin.QueryRow(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type, source)
+		VALUES ($1, $2, $3, 'connected_to', 'discovery') RETURNING id::text, source_ci_id::text, target_ci_id::text`,
+		f.OrgA, c1a, c1b).Scan(&discovered.ID, &discovered.SourceCIID, &discovered.TargetCIID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteWithPolicy(ctx, f.OrgA, discovered.ID, false); !errors.Is(err, relationship.ErrForceRequired) {
+		t.Errorf("discovery edge without force: %v", err)
+	}
+	// A delete in a rolled back context transaction keeps edge and silence.
+	if err := database.WithRequestTenantTx(ctx, f.App, f.OrgA, func(ctx context.Context) error {
+		if err := repo.Delete(ctx, f.OrgA, committed.ID); err != nil {
+			return err
+		}
+		return errRollback
+	}); !errors.Is(err, errRollback) || !exists(committed.ID) {
+		t.Fatalf("rolled back delete: %v, edge kept %v", err, exists(committed.ID))
+	}
+	check("refused and rolled back writes")
+	if n := len(outbox(f.OrgB)); n != 0 {
+		t.Errorf("organization B has %d events", n)
+	}
+
+	// Deletes: the discovery edge with force (and its suppression), the
+	// manual edges by policy and directly; the removal is the second event
+	// of an edge created through the repository.
+	if err := repo.DeleteWithPolicy(ctx, f.OrgA, discovered.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, event(events.RelationshipRemoved, &discovered, 1))
+	if err := repo.DeleteWithPolicy(ctx, f.OrgA, joined.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, event(events.RelationshipRemoved, joined, 2))
+	if err := repo.Delete(ctx, f.OrgA, committed.ID); err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, event(events.RelationshipRemoved, committed, 2))
+	check("deletes")
+	var payload struct {
+		ID, RelType, Source string
+	}
+	if err := f.Admin.QueryRow(bg, `SELECT data->>'id', data->>'rel_type', data->>'source' FROM event_outbox
+		WHERE organization_id = $1 AND type = 'relationship.removed' AND entity_id = $2`, f.OrgA, discovered.ID).Scan(&payload.ID, &payload.RelType, &payload.Source); err != nil ||
+		payload != (struct{ ID, RelType, Source string }{discovered.ID, "connected_to", "discovery"}) {
+		t.Errorf("relationship.removed data of the discovery edge: %+v, %v", payload, err)
+	}
+
+	// Without an outbox the repository writes no event.
+	plain := relationship.NewPGRepository(f.App)
+	silent := &relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1a, TargetCIID: c1b, RelType: "runs_on"}
+	if err := plain.Create(ctx, silent); err != nil {
+		t.Fatal(err)
+	}
+	if err := plain.Delete(ctx, f.OrgA, silent.ID); err != nil {
+		t.Fatal(err)
+	}
+	check("repository without outbox")
 }

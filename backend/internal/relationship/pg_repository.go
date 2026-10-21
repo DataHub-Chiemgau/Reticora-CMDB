@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -43,6 +45,9 @@ type PGRepository struct {
 	// bulkFrontier is the frontier size beyond which a traversal reads every
 	// edge of the organization at once instead of the next level.
 	bulkFrontier int
+	// outbox receives relationship.created and relationship.removed
+	// (WithEvents).
+	outbox *events.Outbox
 }
 
 // DefaultBulkFrontier: a traversal whose frontier exceeds this many nodes
@@ -61,6 +66,33 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 func (r *PGRepository) WithBulkFrontier(n int) *PGRepository {
 	r.bulkFrontier = max(n, 0)
 	return r
+}
+
+// WithEvents makes Create, Delete and DeleteWithPolicy write
+// relationship.created and relationship.removed into the outbox of their
+// transaction (EVT-01, EVT-02): a refused or rolled back mutation leaves no
+// event.
+func (r *PGRepository) WithEvents(outbox *events.Outbox) *PGRepository {
+	r.outbox = outbox
+	return r
+}
+
+// recordEvent writes the event of an edge mutation in tx, with the edge as
+// written or deleted as data: in a context transaction (the discovery
+// ingest) right before its commit, after every other write, else at once
+// (database.BeforeCommit: the outbox takes an organization-wide lock until
+// the commit, WP-334).
+func (r *PGRepository) recordEvent(ctx context.Context, tx pgx.Tx, eventType string, rel *Relationship) error {
+	if r.outbox == nil {
+		return nil
+	}
+	// The caller may change its edge before a later commit.
+	edge := *rel
+	edge.Attributes = maps.Clone(rel.Attributes)
+	return database.BeforeCommit(ctx, func() error {
+		_, err := r.outbox.Append(ctx, tx, &events.Event{OrgID: edge.OrganizationID, Type: eventType, EntityID: edge.ID, Data: &edge})
+		return err
+	})
 }
 
 // visibleEndpoints restricts relationship rows to edges whose source and
@@ -227,7 +259,7 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 		rel.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
 		rel.LastConfirmedAt = confirmedAt.UTC().Format(time.RFC3339Nano)
 		rel.VerifiedAt = formatTime(verifiedAt)
-		return nil
+		return r.recordEvent(ctx, tx, events.RelationshipCreated, rel)
 	})
 }
 
@@ -291,14 +323,15 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmdTag, err := tx.Exec(ctx, "DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2 AND "+visibleEndpoints, id, orgID)
+		deleted, err := scanRelationship(tx.QueryRow(ctx, "DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2 AND "+
+			visibleEndpoints+" RETURNING "+relationshipSelectColumns, id, orgID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
 		if err != nil {
 			return fmt.Errorf("delete relationship: %w", err)
 		}
-		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
-		}
-		return nil
+		return r.recordEvent(ctx, tx, events.RelationshipRemoved, deleted)
 	})
 }
 
@@ -308,15 +341,15 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 // edges are deleted as asked.
 func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, force bool) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var source, relType, src, dst string
-		err := tx.QueryRow(ctx, `SELECT source, rel_type, source_ci_id::text, target_ci_id::text FROM ci_relationship
-			WHERE id = $1 AND organization_id = $2 AND `+visibleEndpoints+` FOR UPDATE`, id, orgID).Scan(&source, &relType, &src, &dst)
+		edge, err := scanRelationship(tx.QueryRow(ctx, `SELECT `+relationshipSelectColumns+` FROM ci_relationship
+			WHERE id = $1 AND organization_id = $2 AND `+visibleEndpoints+` FOR UPDATE`, id, orgID))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("not found")
 		}
 		if err != nil {
 			return fmt.Errorf("delete relationship: %w", err)
 		}
+		source, relType, src, dst := edge.Source, edge.RelType, edge.SourceCIID, edge.TargetCIID
 		if source == "discovery" && !force {
 			return ErrForceRequired
 		}
@@ -324,7 +357,7 @@ func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, f
 			return fmt.Errorf("delete relationship: %w", err)
 		}
 		if source != "discovery" {
-			return nil
+			return r.recordEvent(ctx, tx, events.RelationshipRemoved, edge)
 		}
 		tag, err := tx.Exec(ctx, `INSERT INTO relationship_suppression (organization_id, source_ci_id, target_ci_id, relationship_type_id)
 			SELECT $1, $2, $3, rt.id FROM relationship_type rt
@@ -347,7 +380,7 @@ func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, f
 				return fmt.Errorf("suppress relationship: unknown relationship type %q", relType)
 			}
 		}
-		return nil
+		return r.recordEvent(ctx, tx, events.RelationshipRemoved, edge)
 	})
 }
 
