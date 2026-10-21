@@ -593,3 +593,7 @@ CI-03;[B];B;frontend/src/pages/CIFormModal.test.tsx;WP-397
 MET-04;B/G1;B;frontend/e2e-real/ci-lifecycle.spec.ts;WP-397
 CI-01;[B], Teilfelder [P2]/[P3];B;frontend/src/pages/CIFormModal.test.tsx;WP-397
 TST-03;[B], Teilumfang [P2];B;frontend/e2e-real/ci-lifecycle.spec.ts;WP-397
+NTF-01;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+NTF-04;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+API-05;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+RBA-02;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398

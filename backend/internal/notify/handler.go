@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -173,6 +176,22 @@ const secretPlaceholder = "********"
 // secretKeys are the configuration keys that are never returned.
 var secretKeys = []string{"password", "secret"}
 
+// maskURL shows a URL as scheme and host only: path and query of an
+// incoming webhook carry its token, user info a password (F-154).
+func maskURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return secretPlaceholder
+	}
+	return u.Scheme + "://" + u.Host + "/" + secretPlaceholder
+}
+
+// urlPattern finds URLs in texts such as a delivery's last error.
+var urlPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"'<>]+`)
+
+// maskURLs masks every URL in text like maskURL.
+func maskURLs(text string) string { return urlPattern.ReplaceAllStringFunc(text, maskURL) }
+
 func redact(ch *Channel) *Channel {
 	out := *ch
 	out.Config = map[string]any{}
@@ -183,6 +202,9 @@ func redact(ch *Channel) *Channel {
 		if v, ok := out.Config[k].(string); ok && v != "" {
 			out.Config[k] = secretPlaceholder
 		}
+	}
+	if v, ok := out.Config["url"].(string); ok && v != "" && ch.Provider == ProviderWebhook {
+		out.Config["url"] = maskURL(v)
 	}
 	return &out
 }
@@ -267,7 +289,8 @@ func (h *Handler) GetChannel(w http.ResponseWriter, r *http.Request) {
 
 // UpdateChannel handles PATCH /api/v1/notification-channels/{id}: given
 // fields replace the stored ones; a configuration replaces the stored one,
-// a secret sent back as the placeholder keeps its value.
+// a secret sent back as the placeholder and a webhook url sent back masked
+// keep their value.
 func (h *Handler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)
 	if !ok {
@@ -299,6 +322,9 @@ func (h *Handler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 				req.Config[k] = ch.Config[k]
 			}
 		}
+		if stored, _ := ch.Config["url"].(string); stored != "" && ch.Provider == ProviderWebhook && req.Config["url"] == maskURL(stored) {
+			req.Config["url"] = stored
+		}
 		ch.Config = req.Config
 	}
 	if err = h.c.Channels.Update(r.Context(), ch); err != nil {
@@ -319,6 +345,39 @@ func (h *Handler) DeleteChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deliveryView is a delivery in the list: whom, what and how it went, but
+// not the content. Body and data hold links such as an invitation's, URLs
+// in subject and error are masked (F-154).
+type deliveryView struct {
+	ID             string      `json:"id"`
+	OrganizationID string      `json:"organization_id"`
+	ChannelID      string      `json:"channel_id"`
+	Recipient      Recipient   `json:"recipient"`
+	Recipients     []Recipient `json:"recipients,omitempty"`
+	Category       string      `json:"category"`
+	Critical       bool        `json:"critical"`
+	Subject        string      `json:"subject"`
+	DedupKey       string      `json:"dedup_key,omitempty"`
+	Status         string      `json:"status"`
+	Attempts       int         `json:"attempts"`
+	MaxAttempts    int         `json:"max_attempts"`
+	NextAttemptAt  time.Time   `json:"next_attempt_at"`
+	LastError      string      `json:"last_error,omitempty"`
+	ProviderID     string      `json:"provider_id,omitempty"`
+	SentAt         *time.Time  `json:"sent_at,omitempty"`
+}
+
+func viewDelivery(d *QueuedDelivery) deliveryView {
+	v := deliveryView{ID: d.ID, OrganizationID: d.OrganizationID, ChannelID: d.ChannelID, Recipient: d.Recipient,
+		Recipients: d.Recipients, Category: d.Category, Critical: d.Critical, Subject: maskURLs(d.Subject),
+		DedupKey: d.DedupKey, Status: d.Status, Attempts: d.Attempts, MaxAttempts: d.MaxAttempts,
+		NextAttemptAt: d.NextAttemptAt, LastError: maskURLs(d.LastError), ProviderID: d.ProviderID, SentAt: d.SentAt}
+	if strings.HasPrefix(d.RecipientKey, "mail:") && v.Recipient.Email == "" {
+		v.Recipient.Email = strings.TrimPrefix(d.RecipientKey, "mail:")
+	}
+	return v
 }
 
 // ListDeliveries handles GET /api/v1/notification-deliveries: the latest
@@ -343,13 +402,9 @@ func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
 	if hasMore {
 		items = items[:page.Limit]
 	}
-	if items == nil {
-		items = []QueuedDelivery{}
-	}
+	out := make([]deliveryView, len(items))
 	for i := range items {
-		if strings.HasPrefix(items[i].RecipientKey, "mail:") && items[i].Recipient.Email == "" {
-			items[i].Recipient.Email = strings.TrimPrefix(items[i].RecipientKey, "mail:")
-		}
+		out[i] = viewDelivery(&items[i])
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[QueuedDelivery]{Data: items, Limit: page.Limit, Offset: page.Offset, HasMore: hasMore})
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[deliveryView]{Data: out, Limit: page.Limit, Offset: page.Offset, HasMore: hasMore})
 }

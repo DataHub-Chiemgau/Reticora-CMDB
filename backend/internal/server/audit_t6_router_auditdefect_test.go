@@ -23,14 +23,12 @@
 //   - TestAuditDefectDiscoveryJobInGenericJobModel
 //     WP-129 (JOB-01) P2 "Discovery jobs are never registered in the generic job
 //     model (adapter not wired)". Gap (high).
-//   - TestAuditDefectNotificationAdministrationNeedsNotificationManage
-//     WP-139 / WP-137 (RBA-01, RBA-02, NTF-01) P2 "Viewer and engineer can read all
-//     notification deliveries and channel configs (webhook:read instead of
-//     notification:manage)" and "Webhook channel URL (token) returned unredacted".
-//     Gap (high): channel read authorization and redaction through the router.
 //
 // TestAuditDefectForeignPrivateCITypeRejected (WP-120, F-144) is fixed by
-// WP-396 and lives in ci_type_ref_integration_test.go.
+// WP-396 and lives in ci_type_ref_integration_test.go;
+// TestAuditDefectNotificationAdministrationNeedsNotificationManage (WP-139,
+// WP-137, F-154) is fixed by WP-398 and lives in
+// notification_authz_integration_test.go.
 //
 // Retest:
 //
@@ -276,39 +274,4 @@ func TestAuditDefectDiscoveryJobInGenericJobModel(t *testing.T) {
 	if r = e.Call(t, otherOrg, http.MethodGet, "/api/v1/jobs/"+jobID, ``); r.Code != http.StatusNotFound {
 		t.Errorf("organization B GET /jobs/%s = %d, want 404", jobID, r.Code)
 	}
-}
-
-func TestAuditDefectNotificationAdministrationNeedsNotificationManage(t *testing.T) {
-	e := t6NewEnv(t, "d9", nil)
-	f := e.F
-	admin := t6As{f.OrgA, f.AppUser(t, f.OrgA, "audit-d9-admin"), t6RolePerms(t, "org_admin")}
-	const token = "AUDITD9TOKENXYZ"
-	r := e.Call(t, admin, http.MethodPost, "/api/v1/notification-channels",
-		`{"name":"audit-d9-chat","provider":"webhook","config":{"url":"https://hooks.example.invalid/services/T0/B0/`+token+`"},"enabled":true}`)
-	if r.Code != http.StatusCreated {
-		t.Fatalf("org_admin POST /notification-channels = %d %s", r.Code, t6Short(r.Body))
-	}
-	channel := t6ID(r.Body)
-
-	for _, role := range []string{"viewer", "engineer"} {
-		caller := t6As{f.OrgA, f.AppUser(t, f.OrgA, "audit-d9-"+role), t6RolePerms(t, role)}
-		for _, path := range []string{"/api/v1/notification-deliveries", "/api/v1/notification-channels", "/api/v1/notification-channels/" + channel} {
-			t.Run(role+" GET "+path, func(t *testing.T) {
-				r := e.Call(t, caller, http.MethodGet, path, ``)
-				if r.Code != http.StatusForbidden {
-					t.Errorf("%s GET %s = %d, want 403 (RBA-02: notification:manage is org_admin only); token leaked: %v",
-						role, path, r.Code, strings.Contains(string(r.Body), token))
-				}
-			})
-		}
-	}
-	t.Run("org_admin GET channel does not reveal the webhook token", func(t *testing.T) {
-		r := e.Call(t, admin, http.MethodGet, "/api/v1/notification-channels/"+channel, ``)
-		if r.Code != http.StatusOK {
-			t.Fatalf("org_admin GET channel = %d", r.Code)
-		}
-		if strings.Contains(string(r.Body), token) {
-			t.Errorf("channel response contains the incoming-webhook token: %s", t6Short(r.Body))
-		}
-	})
 }

@@ -6510,7 +6510,12 @@ paths:
       operationId: listNotificationChannels
       tags: [Notifications]
       summary: Notification channels of the organization
-      description: Secrets (password, secret) are returned as `********`.
+      description: >-
+        Requires notification:manage (RBA-02: org_admin only). Secrets
+        (password, secret) are returned as `********`, the url of a webhook
+        channel as scheme and host with masked path and query
+        (`https://hooks.example.org/********`): path and query carry the
+        token of an incoming webhook.
       responses:
         '200':
           description: Channels
@@ -6529,10 +6534,15 @@ paths:
                       $ref: '#/components/schemas/NotificationChannel'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       operationId: createNotificationChannel
       tags: [Notifications]
       summary: Create a notification channel
+      description: >-
+        Requires notification:manage. The response is redacted like the
+        list.
       requestBody:
         required: true
         content:
@@ -6550,6 +6560,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
 
@@ -6560,6 +6572,7 @@ paths:
       operationId: getNotificationChannel
       tags: [Notifications]
       summary: Get a notification channel
+      description: Requires notification:manage; redacted like the list.
       responses:
         '200':
           description: Channel
@@ -6569,6 +6582,8 @@ paths:
                 $ref: '#/components/schemas/NotificationChannel'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
@@ -6576,8 +6591,10 @@ paths:
       tags: [Notifications]
       summary: Update name, configuration or enabled flag
       description: >-
-        A configuration replaces the stored one; a secret sent back as
-        `********` keeps its value. Kind and provider cannot change.
+        Requires notification:manage. A configuration replaces the stored
+        one; a secret sent back as `********` and a webhook url sent back as
+        returned (masked) keep their value. Kind and provider cannot
+        change.
       requestBody:
         required: true
         content:
@@ -6595,6 +6612,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -6603,11 +6622,14 @@ paths:
       operationId: deleteNotificationChannel
       tags: [Notifications]
       summary: Delete a notification channel
+      description: Requires notification:manage.
       responses:
         '204':
           description: Deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -6616,6 +6638,12 @@ paths:
       operationId: listNotificationDeliveries
       tags: [Notifications]
       summary: Latest notification deliveries with their status
+      description: >-
+        Requires notification:manage (RBA-02: org_admin only). A delivery
+        shows recipients, category, subject, status, attempts and the last
+        error, not its content (body, data): links and tokens such as an
+        invitation link are not returned, URLs in subject and last error are
+        masked like the url of a webhook channel.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -6637,6 +6665,8 @@ paths:
                       $ref: '#/components/schemas/NotificationDelivery'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/vrfs:
     get:
@@ -12114,7 +12144,8 @@ components:
           description: >-
             central_smtp: sender_name, reply_to; smtp: host, port, tls
             (starttls|tls|none), username, password, from; webhook: url,
-            secret. Secrets are returned as `********`.
+            secret. Secrets are returned as `********`, the webhook url as
+            scheme and host with masked path and query.
         enabled: {type: boolean}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
@@ -12136,7 +12167,10 @@ components:
 
     NotificationDelivery:
       type: object
-      required: [id, organization_id, channel_id, recipient, category, critical, subject, body, status, attempts, max_attempts, next_attempt_at]
+      description: >-
+        A queued delivery without its content: body and data (links,
+        tokens) stay in the delivery queue.
+      required: [id, organization_id, channel_id, recipient, category, critical, subject, status, attempts, max_attempts, next_attempt_at]
       properties:
         id: {type: string}
         organization_id: {type: string}
@@ -12150,10 +12184,6 @@ components:
         category: {type: string}
         critical: {type: boolean}
         subject: {type: string}
-        body: {type: string}
-        data:
-          type: object
-          additionalProperties: true
         dedup_key: {type: string}
         status:
           type: string

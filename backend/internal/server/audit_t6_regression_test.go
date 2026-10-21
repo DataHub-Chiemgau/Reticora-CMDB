@@ -17,9 +17,9 @@
 //     org_admin CRUD 201/200/200/204 with a redacted response and only
 //     ciphertext in the database; organization B gets 404 on A's channel;
 //     GET /notifications lists only the caller's own items and marking
-//     another user's item read is 404. (The viewer/engineer 403 part is a
-//     defect: audit_t6_router_auditdefect_test.go
-//     TestAuditDefectNotificationAdministrationNeedsNotificationManage.)
+//     another user's item read is 404. (The viewer/engineer 403 part and
+//     the redaction of webhook url and delivery contents:
+//     notification_authz_integration_test.go, WP-398.)
 //
 // Retest:
 //

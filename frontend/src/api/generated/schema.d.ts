@@ -3415,11 +3415,14 @@ export interface paths {
     };
     /**
      * Notification channels of the organization
-     * @description Secrets (password, secret) are returned as `********`.
+     * @description Requires notification:manage (RBA-02: org_admin only). Secrets (password, secret) are returned as `********`, the url of a webhook channel as scheme and host with masked path and query (`https://hooks.example.org/********`): path and query carry the token of an incoming webhook.
      */
     get: operations['listNotificationChannels'];
     put?: never;
-    /** Create a notification channel */
+    /**
+     * Create a notification channel
+     * @description Requires notification:manage. The response is redacted like the list.
+     */
     post: operations['createNotificationChannel'];
     delete?: never;
     options?: never;
@@ -3436,17 +3439,23 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get a notification channel */
+    /**
+     * Get a notification channel
+     * @description Requires notification:manage; redacted like the list.
+     */
     get: operations['getNotificationChannel'];
     put?: never;
     post?: never;
-    /** Delete a notification channel */
+    /**
+     * Delete a notification channel
+     * @description Requires notification:manage.
+     */
     delete: operations['deleteNotificationChannel'];
     options?: never;
     head?: never;
     /**
      * Update name, configuration or enabled flag
-     * @description A configuration replaces the stored one; a secret sent back as `********` keeps its value. Kind and provider cannot change.
+     * @description Requires notification:manage. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. Kind and provider cannot change.
      */
     patch: operations['updateNotificationChannel'];
     trace?: never;
@@ -3458,7 +3467,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Latest notification deliveries with their status */
+    /**
+     * Latest notification deliveries with their status
+     * @description Requires notification:manage (RBA-02: org_admin only). A delivery shows recipients, category, subject, status, attempts and the last error, not its content (body, data): links and tokens such as an invitation link are not returned, URLs in subject and last error are masked like the url of a webhook channel.
+     */
     get: operations['listNotificationDeliveries'];
     put?: never;
     post?: never;
@@ -6689,7 +6701,7 @@ export interface components {
       kind: 'email' | 'inapp' | 'webhook' | 'sms' | 'pager';
       /** @enum {string} */
       provider: 'central_smtp' | 'smtp' | 'inapp' | 'webhook';
-      /** @description central_smtp: sender_name, reply_to; smtp: host, port, tls (starttls|tls|none), username, password, from; webhook: url, secret. Secrets are returned as `********`. */
+      /** @description central_smtp: sender_name, reply_to; smtp: host, port, tls (starttls|tls|none), username, password, from; webhook: url, secret. Secrets are returned as `********`, the webhook url as scheme and host with masked path and query. */
       config?: {
         [key: string]: unknown;
       };
@@ -6710,6 +6722,7 @@ export interface components {
       };
       enabled?: boolean;
     };
+    /** @description A queued delivery without its content: body and data (links, tokens) stay in the delivery queue. */
     NotificationDelivery: {
       id: string;
       organization_id: string;
@@ -6719,10 +6732,6 @@ export interface components {
       category: string;
       critical: boolean;
       subject: string;
-      body: string;
-      data?: {
-        [key: string]: unknown;
-      };
       dedup_key?: string;
       /** @enum {string} */
       status: 'pending' | 'sending' | 'sent' | 'failed' | 'suppressed';
@@ -18709,6 +18718,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
     };
   };
   createNotificationChannel: {
@@ -18735,6 +18745,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
     };
   };
@@ -18759,6 +18770,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18781,6 +18793,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18810,6 +18823,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
     };
@@ -18848,6 +18862,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
     };
   };
   listVRFs: {
