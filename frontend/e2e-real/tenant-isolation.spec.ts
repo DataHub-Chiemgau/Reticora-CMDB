@@ -41,8 +41,9 @@ import { api, signupTenant, stamp, uiLogin, BASE, type Account } from './support
  *  T17 A's audit viewer shows time and object ........... WP-133, WP-132, WP-191 (AUD-05, AUD-07, UI-01..UI-10 audit viewer)
  *  T18 site-scoped user of A sees own client and site ... WP-392, WP-390, WP-109 (TEN-01, TEN-02, TEN-09, RBA-03; F-014, F-141)
  *
- * The fixture data of A (beforeAll) is created through the REST API the UI uses: the CI
- * form cannot create CIs (T16) and clients have no UI form; T01/T02/T16 drive the UI forms.
+ * The fixture data of A (beforeAll) is created through the REST API the UI uses, so a
+ * broken form does not hide the later steps (clients have no UI form); T01/T02/T16 drive
+ * the UI forms.
  * Playwright restarts the worker after a failed test and beforeAll then builds a new pair
  * of tenants, so every test proves its claim on its own (each write attempt is followed by
  * an "A unchanged" check in the same test).
@@ -263,9 +264,9 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
     expect(a.orgId, 'two separate organizations').not.toBe(b.orgId);
     const s = stamp();
 
-    // A's fixture world through the REST API the UI uses. The CI form cannot
-    // create CIs (T16) and clients have no UI form; T01, T02 and T16 drive
-    // the UI forms of A.
+    // A's fixture world through the REST API the UI uses, so a broken form
+    // does not hide the later steps (clients have no UI form); T01, T02 and
+    // T16 drive the UI forms of A.
     const types = await ok<List<{ id: string; key: string }>>(
       rq,
       a.token,
