@@ -2,7 +2,7 @@ module github.com/DataHub-Chiemgau/Reticora-CMDB/backend
 
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 replace github.com/DataHub-Chiemgau/Reticora-CMDB/collector => ../collector
 
