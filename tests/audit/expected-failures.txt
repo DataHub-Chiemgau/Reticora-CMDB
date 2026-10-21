@@ -124,7 +124,6 @@ e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;05 an invitation sends t
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles;F-201
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09c viewer UI: saving a webhook is refused visibly, not silently;F-062
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;12 after the upgrade the user creates a CI through the UI form (UI → API → DB → UI);F-016
-e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;13 an admin can revoke the role again and the user loses the rights at the next sign-in;F-017
 e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T14 B’s relationship to A’s CI is rejected with a client error and nothing is stored;F-145
 e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T15 the topology rooted at A’s CI answers B with "not found", like neighbours and impact;F-161
 e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T16 A creates a CI through the CMDB form, it is stored in A’s organization and invisible to B;F-016

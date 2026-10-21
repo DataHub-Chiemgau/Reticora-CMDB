@@ -101,4 +101,27 @@ func TestMemoryRepositoryTeamsAndRoles(t *testing.T) {
 	if len(assignments) != 1 || assignments[0].CustomRoleID != role.ID {
 		t.Fatalf("unexpected assignments: %+v", assignments)
 	}
+
+	// Revoking needs the same as assigning (WP-395): the client-1 caller
+	// gets GrantCeilingError, another organization and an unknown id
+	// errAssignmentNotFound; the org-wide caller revokes it once.
+	for _, caller := range []*identity.Principal{nil, client1} {
+		if revokeErr := repo.RevokeRoleAssignment(context.Background(), "org-1", caller, a.ID); !errors.As(revokeErr, &ceiling) {
+			t.Fatalf("revocation by %+v: %v, want GrantCeilingError", caller, revokeErr)
+		}
+	}
+	for org, id := range map[string]string{"org-2": a.ID, "org-1": "assign-unknown"} {
+		if revokeErr := repo.RevokeRoleAssignment(context.Background(), org, admin, id); !errors.Is(revokeErr, errAssignmentNotFound) {
+			t.Fatalf("revocation of %s in %s: %v, want errAssignmentNotFound", id, org, revokeErr)
+		}
+	}
+	if revokeErr := repo.RevokeRoleAssignment(context.Background(), "org-1", admin, a.ID); revokeErr != nil {
+		t.Fatal(revokeErr)
+	}
+	if assignments, err = repo.ListUserRoles(context.Background(), "org-1", "user-1"); err != nil || len(assignments) != 0 {
+		t.Fatalf("assignments after the revocation: %+v, %v", assignments, err)
+	}
+	if revokeErr := repo.RevokeRoleAssignment(context.Background(), "org-1", admin, a.ID); !errors.Is(revokeErr, errAssignmentNotFound) {
+		t.Fatalf("second revocation: %v, want errAssignmentNotFound", revokeErr)
+	}
 }

@@ -8737,6 +8737,37 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/role-assignments/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    delete:
+      operationId: revokeRoleAssignment
+      tags: [Roles]
+      summary: Revoke a role assignment (API-05, AUT-02)
+      description: >-
+        Removes a standard or custom role assignment of the organization (the
+        id of GET /api/v1/role-assignments). Grant ceiling (RBA-03, F-017):
+        the caller must hold role:manage and every permission of the role in
+        a scope covering the assignment's scope, the rule of POST
+        /api/v1/role-assignments; otherwise 403 and the assignment stays. An
+        unknown id or an assignment of another organization is 404. The
+        assignment is removed and the audit entry role_assignment.revoked
+        (caller, table, user, role, scope) is written in one transaction. The
+        user loses the rights at the next token refresh or sign-in (AUT-02);
+        an access token issued before keeps them until it expires. Revoking
+        org_admin leaves the MFA binding of the IdP account (Keycloak realm
+        role mfa_required) in place. Roles from IdP groups are revoked in the
+        IdP, not here.
+      responses:
+        '204':
+          description: Role assignment revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/roles/{id}:
     parameters:
       - $ref: '#/components/parameters/ResourceID'

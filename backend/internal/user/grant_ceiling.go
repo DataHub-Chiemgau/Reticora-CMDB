@@ -18,20 +18,39 @@ import (
 // renewing an invitation (user:manage) and assigning a role (role:manage,
 // POST /role-assignments and the sunset path /roles/assign) need every
 // permission of the role, and the permission of the route, in a scope that
-// covers the target scope. The coverage rule is identity.GrantCeiling; this
-// file builds the target grant and resolves the client of a site. A role
-// fits its scope (F-305): a client role is assigned in a client, a site role
-// in a site, an organization role in any scope.
+// covers the target scope; revoking an assignment (DELETE
+// /role-assignments/{id}, F-017) needs the same as assigning it. The
+// coverage rule is identity.GrantCeiling; this file builds the target grant
+// and resolves the client of a site. A role fits its scope (F-305): a client
+// role is assigned in a client, a site role in a site, an organization role
+// in any scope.
 
-// GrantCeilingError refuses an invitation or role assignment beyond the
-// caller's rights (403). Missing are the permissions of the role, or of the
-// route, that the caller does not hold in a scope covering the target scope.
+// GrantCeilingError refuses an invitation, role assignment or revocation
+// beyond the caller's rights (403). Missing are the permissions of the role,
+// or of the route, that the caller does not hold in a scope covering the
+// target scope.
 type GrantCeilingError struct {
 	Missing []identity.Permission
+	// Revocation marks the refusal of revoking an assignment (same rule,
+	// other wording).
+	Revocation bool
 }
 
 func (e *GrantCeilingError) Error() string {
+	if e.Revocation {
+		return "revoking the role assignment requires " + joinPermissions(e.Missing) + " in its scope"
+	}
 	return "granting the role in this scope requires " + joinPermissions(e.Missing) + " in that scope"
+}
+
+// revocationCeiling words a GrantCeilingError of err for the revocation of an
+// assignment; other errors pass unchanged.
+func revocationCeiling(err error) error {
+	var ceiling *GrantCeilingError
+	if errors.As(err, &ceiling) {
+		ceiling.Revocation = true
+	}
+	return err
 }
 
 // RoleWideningError refuses a change of a role definition that adds
@@ -54,11 +73,13 @@ func joinPermissions(perms []identity.Permission) string {
 }
 
 // Errors of a role assignment that answer 404: the role, the user or the team
-// of the scope is not one of the organization. The text is the detail.
+// of the scope is not one of the organization, or the assignment to revoke is
+// none of the organization. The text is the detail.
 var (
-	errRoleNotFound = errors.New("role not found")
-	errUserNotFound = errors.New("user not found")
-	errTeamNotFound = errors.New("team not found")
+	errRoleNotFound       = errors.New("role not found")
+	errUserNotFound       = errors.New("user not found")
+	errTeamNotFound       = errors.New("team not found")
+	errAssignmentNotFound = errors.New("role assignment not found")
 )
 
 // targetRole is the role an invitation or assignment hands out: its scope

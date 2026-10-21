@@ -4443,6 +4443,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/role-assignments/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Revoke a role assignment (API-05, AUT-02)
+     * @description Removes a standard or custom role assignment of the organization (the id of GET /api/v1/role-assignments). Grant ceiling (RBA-03, F-017): the caller must hold role:manage and every permission of the role in a scope covering the assignment's scope, the rule of POST /api/v1/role-assignments; otherwise 403 and the assignment stays. An unknown id or an assignment of another organization is 404. The assignment is removed and the audit entry role_assignment.revoked (caller, table, user, role, scope) is written in one transaction. The user loses the rights at the next token refresh or sign-in (AUT-02); an access token issued before keeps them until it expires. Revoking org_admin leaves the MFA binding of the IdP account (Keycloak realm role mfa_required) in place. Roles from IdP groups are revoked in the IdP, not here.
+     */
+    delete: operations['revokeRoleAssignment'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/roles/{id}': {
     parameters: {
       query?: never;
@@ -21278,6 +21301,30 @@ export interface operations {
       404: components['responses']['NotFound'];
       422: components['responses']['UnprocessableEntity'];
       503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  revokeRoleAssignment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Role assignment revoked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
     };
   };
   getRole: {
