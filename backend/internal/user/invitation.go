@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -91,9 +92,13 @@ type InvitationAccounts interface {
 
 // InvitationRepository persists invitations.
 type InvitationRepository interface {
-	IssueInvitation(ctx context.Context, inv *Invitation, tokenHash string) error
+	// IssueInvitation stores the invitation if caller may grant its role in
+	// its scope (grant ceiling, GrantCeilingError).
+	IssueInvitation(ctx context.Context, caller *identity.Principal, inv *Invitation, tokenHash string) error
 	ListInvitations(ctx context.Context, orgID string) ([]Invitation, error)
-	RenewInvitation(ctx context.Context, orgID, id, tokenHash string, expiresAt time.Time) (*Invitation, error)
+	// RenewInvitation checks the grant ceiling against caller, the renewing
+	// principal, not against the original issuer.
+	RenewInvitation(ctx context.Context, orgID, id string, caller *identity.Principal, tokenHash string, expiresAt time.Time) (*Invitation, error)
 	RevokeInvitation(ctx context.Context, orgID, id string) error
 	// AcceptInvitation consumes the invitation of tokenHash atomically and
 	// once, creates the user with the invited role and scope, and runs
@@ -203,13 +208,15 @@ func recordInvitationAudit(ctx context.Context, tx pgx.Tx, orgID, actor, id, act
 }
 
 // IssueInvitation implements InvitationRepository. The role and the scope
-// must exist in the organization and be visible to the issuer (RLS).
-func (r *PGInvitations) IssueInvitation(ctx context.Context, inv *Invitation, tokenHash string) error {
+// must exist in the organization and be visible to the issuer (RLS), the
+// role must fit the scope, and the issuer must hold user:manage and the
+// role's permissions in a scope covering it (checkInvitationTargets).
+func (r *PGInvitations) IssueInvitation(ctx context.Context, caller *identity.Principal, inv *Invitation, tokenHash string) error {
 	if err := validateInvitation(inv); err != nil {
 		return err
 	}
 	return database.WithRequestTenant(ctx, r.pool, inv.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := checkInvitationTargets(ctx, tx, inv); err != nil {
+		if err := checkInvitationTargets(ctx, tx, caller, inv); err != nil {
 			return err
 		}
 		var pending bool
@@ -235,32 +242,27 @@ func (r *PGInvitations) IssueInvitation(ctx context.Context, inv *Invitation, to
 	})
 }
 
-// checkInvitationTargets verifies role and scope inside the organization.
-func checkInvitationTargets(ctx context.Context, tx pgx.Tx, inv *Invitation) error {
-	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM role WHERE id = $1 AND organization_id = $2)`,
-		inv.RoleID, inv.OrganizationID).Scan(&exists); err != nil {
-		return fmt.Errorf("check invitation role: %w", err)
+// checkInvitationTargets verifies role and scope inside the organization: the
+// role is a role of the organization (422 role_id) that fits the scope
+// (checkRoleScope, 422 scope_type), the issuer holds user:manage and every
+// permission of the role in a scope covering the invitation's scope
+// (checkGrantCeiling, 403), and the client or site is one of the organization
+// the issuer can read (422 scope_id).
+func checkInvitationTargets(ctx context.Context, tx pgx.Tx, caller *identity.Principal, inv *Invitation) error {
+	role, found, err := readStandardRole(ctx, tx, inv.OrganizationID, inv.RoleID)
+	if err != nil {
+		return err
 	}
-	if !exists {
+	if !found {
 		return &api.FieldError{Field: "role_id", Message: "role not found", Status: 422}
 	}
-	var query string
-	switch inv.ScopeType {
-	case "client":
-		query = `SELECT EXISTS (SELECT 1 FROM client WHERE id = $1 AND organization_id = $2)`
-	case "site":
-		query = `SELECT EXISTS (SELECT 1 FROM site WHERE id = $1 AND organization_id = $2)`
-	default:
-		return nil
+	if scopeErr := checkRoleScope(role.Scope, inv.ScopeType); scopeErr != nil {
+		return scopeErr
 	}
-	if err := tx.QueryRow(ctx, query, inv.ScopeID, inv.OrganizationID).Scan(&exists); err != nil {
-		return fmt.Errorf("check invitation scope: %w", err)
+	if ceilingErr := checkGrantCeiling(ctx, tx, inv.OrganizationID, caller, identity.PermUserManage, role.Permissions, inv.ScopeType, inv.ScopeID); ceilingErr != nil {
+		return ceilingErr
 	}
-	if !exists {
-		return &api.FieldError{Field: "scope_id", Message: inv.ScopeType + " not found", Status: 422}
-	}
-	return nil
+	return checkScopeTarget(ctx, tx, inv.OrganizationID, inv.ScopeType, inv.ScopeID)
 }
 
 // ListInvitations implements InvitationRepository (newest first).
@@ -287,8 +289,9 @@ func (r *PGInvitations) ListInvitations(ctx context.Context, orgID string) ([]In
 
 // RenewInvitation implements InvitationRepository: a pending or expired
 // invitation gets a new token and a new validity; the old token stops
-// working.
-func (r *PGInvitations) RenewInvitation(ctx context.Context, orgID, id, tokenHash string, expiresAt time.Time) (*Invitation, error) {
+// working. The renewing principal must hold user:manage and the role's
+// permissions in a scope covering the invitation's scope (grant ceiling).
+func (r *PGInvitations) RenewInvitation(ctx context.Context, orgID, id string, caller *identity.Principal, tokenHash string, expiresAt time.Time) (*Invitation, error) {
 	if !isUUID(id) {
 		return nil, ErrInvitationNotFound
 	}
@@ -304,6 +307,17 @@ func (r *PGInvitations) RenewInvitation(ctx context.Context, orgID, id, tokenHas
 		}
 		if current.AcceptedAt != nil {
 			return ErrInvitationAccepted
+		}
+		role, found, err := readStandardRole(ctx, tx, orgID, current.RoleID)
+		if err != nil {
+			return err
+		}
+		var perms []identity.Permission
+		if found {
+			perms = role.Permissions
+		}
+		if ceilingErr := checkGrantCeiling(ctx, tx, orgID, caller, identity.PermUserManage, perms, current.ScopeType, current.ScopeID); ceilingErr != nil {
+			return ceilingErr
 		}
 		inv, err = scanInvitation(tx.QueryRow(ctx, `UPDATE user_invitation SET token_hash = $3, expires_at = $4
 			WHERE organization_id = $1 AND id = $2 RETURNING `+invitationColumns, orgID, id, tokenHash, expiresAt))

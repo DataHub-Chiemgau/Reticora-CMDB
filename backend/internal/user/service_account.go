@@ -38,15 +38,11 @@ type RoleCeilingError struct {
 }
 
 func (e *RoleCeilingError) Error() string {
-	perms := make([]string, len(e.Missing))
-	for i, p := range e.Missing {
-		perms[i] = string(p)
-	}
 	if e.Removed != nil {
 		return "removing the assignment of role " + e.Removed.RoleID + e.Removed.scopeText() +
-			" requires " + strings.Join(perms, ", ") + " in its scope"
+			" requires " + joinPermissions(e.Missing) + " in its scope"
 	}
-	return "the role assignments would grant " + strings.Join(perms, ", ") + " beyond the caller's rights"
+	return "the role assignments would grant " + joinPermissions(e.Missing) + " beyond the caller's rights"
 }
 
 // ServiceAccount is a non-human principal of an organization (RBA-08). It
@@ -466,37 +462,21 @@ func assignmentGrant(ctx context.Context, tx pgx.Tx, orgID string, role ServiceA
 	}
 	if role.ScopeSiteID != nil {
 		grant.Sites = []string{*role.ScopeSiteID}
-		if role.ScopeClientID == nil && isUUID(*role.ScopeSiteID) {
-			var client string
-			err := tx.QueryRow(ctx, `SELECT client_id::text FROM site WHERE organization_id = $1 AND id = $2`, orgID, *role.ScopeSiteID).Scan(&client)
-			switch {
-			case err == nil:
+		if role.ScopeClientID == nil {
+			client, err := siteClient(ctx, tx, orgID, *role.ScopeSiteID)
+			if err != nil {
+				return grant, err
+			}
+			if client != "" {
 				grant.Clients = []string{client}
-			case !errors.Is(err, pgx.ErrNoRows):
-				return grant, fmt.Errorf("read site client: %w", err)
 			}
 		}
 	}
-	if !isUUID(role.RoleID) {
-		return grant, nil
+	target, found, err := readStandardRole(ctx, tx, orgID, role.RoleID)
+	if err != nil || !found {
+		return grant, err
 	}
-	var keys []string
-	err := tx.QueryRow(ctx, `
-		SELECT ARRAY(SELECT DISTINCT k FROM (
-		           SELECT rp.permission_key AS k FROM role_permission rp
-		            WHERE rp.role_id = ro.id AND rp.organization_id = ro.organization_id
-		           UNION SELECT jsonb_array_elements_text(COALESCE(ro.permissions, '[]'::jsonb))) keys
-		         WHERE k IN (SELECT key FROM permission) ORDER BY k)
-		  FROM role ro WHERE ro.organization_id = $1 AND ro.id = $2`, orgID, role.RoleID).Scan(&keys)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return grant, nil
-	}
-	if err != nil {
-		return grant, fmt.Errorf("read role permissions: %w", err)
-	}
-	for _, k := range keys {
-		grant.Permissions = append(grant.Permissions, identity.Permission(k))
-	}
+	grant.Permissions = target.Permissions
 	return grant, nil
 }
 

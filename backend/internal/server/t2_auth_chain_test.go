@@ -75,7 +75,12 @@ func newT2Stack(t *testing.T) *t2Stack {
 // example Enforce for the quotas).
 func newT2StackWith(t *testing.T, entOpts entitlement.Options) *t2Stack {
 	t.Helper()
-	repos := server.MemoryRepositories()
+	return newT2StackFrom(t, entOpts, server.MemoryRepositories())
+}
+
+// newT2StackFrom builds the stack over the given repositories.
+func newT2StackFrom(t *testing.T, entOpts entitlement.Options, repos server.Repositories) *t2Stack {
+	t.Helper()
 	store := cache.NewMemoryStore()
 	revocations := identity.NewSessionRevocations(store)
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)

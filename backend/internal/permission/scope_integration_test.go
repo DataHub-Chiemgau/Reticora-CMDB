@@ -335,7 +335,7 @@ func TestClientOnlyUserSeesOnlyAssignedClient(t *testing.T) {
 func TestMemoryAccessGrantsConfineSitesToTheirClient(t *testing.T) {
 	ctx := context.Background()
 	repo := permission.NewMemoryRepository()
-	if _, err := repo.ReplaceRolePermissions(ctx, "org-1", "viewer", "", []string{"ci:read"}); err != nil {
+	if _, err := repo.ReplaceRolePermissions(ctx, "org-1", "viewer", "", &identity.Principal{Permissions: identity.AllPermissions()}, []string{"ci:read"}); err != nil {
 		t.Fatal(err)
 	}
 	repo.RegisterSite("org-1", "site-1", "client-1")
@@ -435,7 +435,10 @@ func TestRoleAssignmentsTeamScope(t *testing.T) {
 	mux := chi.NewRouter()
 	user.NewHandler(user.NewPGRepository(pool)).RegisterRoutes(mux)
 	scope := database.OrgWideScope(rbaOrg, rbaUserOrg)
-	reqCtx := tenant.WithTenant(database.ContextWithTenantScope(ctx, &scope), tenant.TenantInfo{OrganizationID: rbaOrg, UserID: rbaUserOrg})
+	// An org-wide administrator with every permission (grant ceiling, WP-394).
+	caller := identity.Principal{Subject: rbaUserOrg, OrganizationID: rbaOrg, Type: identity.PrincipalTypeUser, Permissions: identity.AllPermissions()}
+	reqCtx := tenant.WithTenant(database.ContextWithTenantScope(identity.WithPrincipal(ctx, caller), &scope),
+		tenant.TenantInfo{OrganizationID: rbaOrg, UserID: rbaUserOrg})
 	call := func(method, path string, body any) (int, string) {
 		t.Helper()
 		raw := ""

@@ -2,9 +2,11 @@ package user
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 )
 
 func TestMemoryRepositoryUserCRUD(t *testing.T) {
@@ -79,8 +81,18 @@ func TestMemoryRepositoryTeamsAndRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &UserRoleAssignment{UserID: "user-1", CustomRoleID: role.ID, ScopeType: "organization"}
-	if err := repo.AssignRole(context.Background(), "org-1", a); err != nil {
-		t.Fatal(err)
+	// The grant ceiling holds in memory as well: a caller without the role's
+	// rights org-wide assigns nothing.
+	var ceiling *GrantCeilingError
+	client1 := &identity.Principal{Permissions: []identity.Permission{identity.PermRoleManage, identity.PermCIRead}, ClientScope: "client-1"}
+	for _, caller := range []*identity.Principal{nil, client1} {
+		if assignErr := repo.AssignRole(context.Background(), "org-1", caller, a); !errors.As(assignErr, &ceiling) {
+			t.Fatalf("org-wide assignment by %+v: %v, want GrantCeilingError", caller, assignErr)
+		}
+	}
+	admin := &identity.Principal{Permissions: []identity.Permission{identity.PermRoleManage, identity.PermCIRead}}
+	if assignErr := repo.AssignRole(context.Background(), "org-1", admin, a); assignErr != nil {
+		t.Fatal(assignErr)
 	}
 	assignments, err := repo.ListUserRoles(context.Background(), "org-1", "user-1")
 	if err != nil {

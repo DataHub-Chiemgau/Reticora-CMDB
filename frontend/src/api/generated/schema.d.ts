@@ -4154,7 +4154,7 @@ export interface paths {
     put?: never;
     /**
      * Invite an address with a predefined role and scope (TLC-03)
-     * @description The invitation is valid for seven days. The response carries the token once; only its hash is stored. Role and scope must exist in the organization (422 otherwise); a pending invitation for the same address is a conflict (renew it instead). Requires user:manage.
+     * @description The invitation is valid for seven days. The response carries the token once; only its hash is stored. Role and scope must exist in the organization (422 otherwise); a client role (scope client) is invited with scope_type client only, a site role with scope_type site only, an organization role with any scope_type (422 field scope_type otherwise, F-305). Grant ceiling (RBA-03, F-015): the issuer must hold user:manage and every permission of the role in a scope covering the invitation's scope (a client covers its sites, site.client_id); otherwise 403, nothing is stored or audited. A pending invitation for the same address is a conflict (renew it instead). Requires user:manage.
      */
     post: operations['issueInvitation'];
     delete?: never;
@@ -4197,7 +4197,7 @@ export interface paths {
     put?: never;
     /**
      * Renew a pending or expired invitation (TLC-03)
-     * @description A new token and seven more days; the old token stops working. An accepted invitation is 409. Requires user:manage.
+     * @description A new token and seven more days; the old token stops working. An accepted invitation is 409. The grant ceiling of the issue applies to the renewing principal, not to the original issuer: it must hold user:manage and every permission of the invited role in a scope covering the invitation's scope (403 otherwise, nothing changes). Requires user:manage.
      */
     post: operations['renewInvitation'];
     delete?: never;
@@ -4413,7 +4413,7 @@ export interface paths {
     /**
      * Assign a custom role to a user
      * @deprecated
-     * @description Like POST /api/v1/role-assignments.
+     * @description Like POST /api/v1/role-assignments, with the same grant ceiling (403).
      */
     post: operations['assignRoleLegacy'];
     delete?: never;
@@ -4434,7 +4434,7 @@ export interface paths {
     put?: never;
     /**
      * Assign a role to a user (API-05)
-     * @description The user and the role must belong to the organization, and a team scope must name a team of the organization (404 otherwise). Assigning a standard role again in the same scope stores no second assignment and answers with the existing one. Assigning the standard role org_admin binds the IdP account of the user to MFA (Keycloak realm role mfa_required, AUT-09) before the assignment is stored; a user without IdP account yet is bound at the first login. When the binding fails (no Keycloak admin client, admin API refused or unreachable), nothing is assigned and the answer is 503.
+     * @description The user and the role must belong to the organization, and a team scope must name a team of the organization (404 otherwise). A client or site scope must name a client or site of the organization in scope_id, an organization-wide assignment names none (422 field scope_id otherwise; a scope is never widened to the organization). A client role (scope client) is assigned with scope_type client only, a site role with scope_type site only, an organization role or custom role with any scope_type (422 field scope_type otherwise, F-305). Grant ceiling (RBA-03, F-015): the caller must hold role:manage and every permission of the standard or custom role in a scope covering the assignment's scope (a client covers its sites, site.client_id; a team scope needs the clients and sites of the whole organization and that team); otherwise 403 and nothing is stored, before any MFA binding. Assigning a standard role again in the same scope stores no second assignment and answers with the existing one. Assigning the standard role org_admin binds the IdP account of the user to MFA (Keycloak realm role mfa_required, AUT-09) before the assignment is stored; a user without IdP account yet is bound at the first login. When the binding fails (no Keycloak admin client, admin API refused or unreachable), nothing is assigned and the answer is 503.
      */
     post: operations['createRoleAssignment'];
     delete?: never;
@@ -4461,7 +4461,10 @@ export interface paths {
     delete: operations['deleteRole'];
     options?: never;
     head?: never;
-    /** Update a custom role */
+    /**
+     * Update a custom role
+     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the role stays unchanged.
+     */
     patch: operations['updateRole'];
     trace?: never;
   };
@@ -4563,7 +4566,10 @@ export interface paths {
     };
     /** List permissions granted to a role */
     get: operations['listRolePermissions'];
-    /** Replace permissions granted to a role */
+    /**
+     * Replace permissions granted to a role
+     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds to the role must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the permissions of the role stay unchanged.
+     */
     put: operations['replaceRolePermissions'];
     post?: never;
     delete?: never;
@@ -10673,10 +10679,11 @@ export interface components {
       /** @description ID of a standard (builtin) role; mutually exclusive with custom_role_id. */
       role_id?: string;
       /**
-       * @description Scope of the assignment (RBA-03); defaults to "organization" when omitted. client, site and team name the client, site or team in scope_id; a team scope needs a team of the organization (404 otherwise). A site assignment is confined to the client of its site. The scopes of all assignments of a user are united per dimension (clients, sites, teams) and the dimensions are intersected (E-70 option 1): a site assignment next to a client assignment limits the sites of that client as well (client C1 plus a site S1 of C1 grants C1 at S1 and without site only), and a team assignment limits the tickets of every assignment to its team plus tickets without team, which stay read-only (E-11, TEN-05). An org-wide assignment lifts every dimension.
+       * @description Scope of the assignment (RBA-03); defaults to "organization" when omitted. client, site and team name the client, site or team in scope_id: a client or site scope needs a client or site of the organization (422 otherwise), a team scope a team of the organization (404 otherwise). A site assignment is confined to the client of its site. The scopes of all assignments of a user are united per dimension (clients, sites, teams) and the dimensions are intersected (E-70 option 1): a site assignment next to a client assignment limits the sites of that client as well (client C1 plus a site S1 of C1 grants C1 at S1 and without site only), and a team assignment limits the tickets of every assignment to its team plus tickets without team, which stay read-only (E-11, TEN-05). An org-wide assignment lifts every dimension.
        * @enum {string}
        */
       scope_type?: 'organization' | 'client' | 'site' | 'team';
+      /** @description The client, site or team of a scoped assignment; omitted for organization. */
       scope_id?: string;
     };
     SearchHit: {
@@ -21208,7 +21215,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -21265,7 +21274,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -21344,6 +21355,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };

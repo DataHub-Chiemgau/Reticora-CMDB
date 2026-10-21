@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -70,15 +71,24 @@ func (r *PGRepository) ListRolePermissions(ctx context.Context, orgID, roleID st
 	return items, err
 }
 
-func (r *PGRepository) ReplaceRolePermissions(ctx context.Context, orgID, roleID, grantedBy string, keys []string) ([]RolePermissionGrant, error) {
+// ReplaceRolePermissions implements Repository. The role grants
+// role_permission and role.permissions (AccessGrants); keys that neither
+// holds are added and must be held by caller organization-wide
+// (checkWidening), otherwise nothing changes.
+func (r *PGRepository) ReplaceRolePermissions(ctx context.Context, orgID, roleID, grantedBy string, caller *identity.Principal, keys []string) ([]RolePermissionGrant, error) {
 	items := make([]RolePermissionGrant, 0)
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var exists bool
-		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM role WHERE id = $1 AND organization_id = $2)", roleID, orgID).Scan(&exists); err != nil {
-			return fmt.Errorf("check role: %w", err)
-		}
-		if !exists {
+		var current []string
+		err := tx.QueryRow(ctx, `
+			SELECT ARRAY(SELECT rp.permission_key FROM role_permission rp
+			              WHERE rp.role_id = ro.id AND rp.organization_id = ro.organization_id
+			             UNION SELECT jsonb_array_elements_text(COALESCE(ro.permissions, '[]'::jsonb)))
+			  FROM role ro WHERE ro.id = $1 AND ro.organization_id = $2`, roleID, orgID).Scan(&current)
+		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("role not found")
+		}
+		if err != nil {
+			return fmt.Errorf("check role: %w", err)
 		}
 		seen := make(map[string]struct{})
 		for _, key := range keys {
@@ -87,24 +97,26 @@ func (r *PGRepository) ReplaceRolePermissions(ctx context.Context, orgID, roleID
 			}
 			seen[key] = struct{}{}
 			var known bool
-			if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM permission WHERE key = $1)", key).Scan(&known); err != nil {
+			if err = tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM permission WHERE key = $1)", key).Scan(&known); err != nil {
 				return fmt.Errorf("check permission: %w", err)
 			}
 			if !known {
 				return fmt.Errorf("unknown permission %q", key)
 			}
 		}
-		if _, err := tx.Exec(ctx, "DELETE FROM role_permission WHERE organization_id = $1 AND role_id = $2", orgID, roleID); err != nil {
+		if wideningErr := checkWidening(caller, current, keys); wideningErr != nil {
+			return wideningErr
+		}
+		if _, err = tx.Exec(ctx, "DELETE FROM role_permission WHERE organization_id = $1 AND role_id = $2", orgID, roleID); err != nil {
 			return fmt.Errorf("clear role permissions: %w", err)
 		}
 		for key := range seen {
-			if _, err := tx.Exec(ctx, `
+			if _, err = tx.Exec(ctx, `
 				INSERT INTO role_permission (organization_id, role_id, permission_key, granted_by)
 				VALUES ($1, $2, $3, NULLIF($4, '')::uuid)`, orgID, roleID, key, grantedBy); err != nil {
 				return fmt.Errorf("grant permission: %w", err)
 			}
 		}
-		var err error
 		items, err = scanRolePermissions(ctx, tx, orgID, roleID)
 		return err
 	})

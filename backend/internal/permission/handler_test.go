@@ -8,14 +8,22 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
+// orgWide is a caller holding every permission organization-wide; it seeds
+// role permissions past the widening ceiling.
+var orgWide = &identity.Principal{Permissions: identity.AllPermissions()}
+
+// request sends a request of userID in orgID as an org-wide principal with
+// every permission (the authorization middleware is not part of the mux).
 func request(mux chi.Router, method, path, body, orgID, userID string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	if orgID != "" {
-		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: orgID, UserID: userID}))
+		ctx := identity.WithPrincipal(req.Context(), identity.Principal{Subject: userID, OrganizationID: orgID, Permissions: identity.AllPermissions()})
+		req = req.WithContext(tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: orgID, UserID: userID}))
 	}
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -32,7 +40,7 @@ func setupPermission() (*MemoryRepository, chi.Router) {
 
 func TestPermissionCatalogueAndRoleGrants(t *testing.T) {
 	repo, mux := setupPermission()
-	if _, err := repo.ReplaceRolePermissions(context.Background(), "org-1", "admin-role", "", []string{"role:manage"}); err != nil {
+	if _, err := repo.ReplaceRolePermissions(context.Background(), "org-1", "admin-role", "", orgWide, []string{"role:manage"}); err != nil {
 		t.Fatal(err)
 	}
 	repo.AssignRoleToUser("org-1", "admin", "admin-role")
@@ -63,7 +71,7 @@ func TestPermissionCatalogueAndRoleGrants(t *testing.T) {
 
 func TestPermissionValidationAndTenant(t *testing.T) {
 	repo, mux := setupPermission()
-	if _, err := repo.ReplaceRolePermissions(context.Background(), "org-1", "admin-role", "", []string{"role:manage"}); err != nil {
+	if _, err := repo.ReplaceRolePermissions(context.Background(), "org-1", "admin-role", "", orgWide, []string{"role:manage"}); err != nil {
 		t.Fatal(err)
 	}
 	repo.AssignRoleToUser("org-1", "admin", "admin-role")

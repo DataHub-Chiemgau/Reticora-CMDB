@@ -1,9 +1,11 @@
 package permission
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -80,11 +82,17 @@ func (h *Handler) ListRole(w http.ResponseWriter, r *http.Request) {
 }
 
 // ReplaceRole handles PUT /api/v1/roles/{id}/permissions. The route is gated
-// by the role:manage authorization middleware; the handler only needs the
-// tenant context.
+// by the role:manage authorization middleware. The role applies to all its
+// assignments, so permissions it adds must be held by the caller
+// organization-wide (403 otherwise, RBA-03, F-015).
 func (h *Handler) ReplaceRole(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
 	if !ok {
+		return
+	}
+	p, ok := identity.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "changing a role requires an authenticated principal")
 		return
 	}
 	var req ReplaceRolePermissionsRequest
@@ -92,7 +100,12 @@ func (h *Handler) ReplaceRole(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	items, err := h.repo.ReplaceRolePermissions(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), t.UserID, req.PermissionKeys)
+	items, err := h.repo.ReplaceRolePermissions(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), t.UserID, &p, req.PermissionKeys)
+	var widening *RoleWideningError
+	if errors.As(err, &widening) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", widening.Error())
+		return
+	}
 	if err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return

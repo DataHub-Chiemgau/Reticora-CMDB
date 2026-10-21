@@ -583,3 +583,5 @@ TEN-02;[B];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-39
 TEN-02;[B];B;backend/internal/tenant/rls/located_site_scope_integration_test.go;WP-393
 TEN-05;[B];B;backend/internal/tenant/rls/located_site_scope_integration_test.go;WP-393
 TEN-09;[Q];B;backend/internal/tenant/rls/catalog_integration_test.go;WP-393
+TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-394
+API-05;[B];B;backend/internal/user/grant_ceiling_test.go;WP-394
