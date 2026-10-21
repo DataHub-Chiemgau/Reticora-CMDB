@@ -266,6 +266,8 @@ func (s *Service) GetByID(ctx context.Context, orgID, id string) (*Item, error) 
 }
 
 // Create inserts a new CI after verifying the tenant's licensed CI limit.
+// The type is the writer's choice (ChosenType): an ID that is no UUID is
+// refused here, the repository reads the type in the writing transaction.
 func (s *Service) Create(ctx context.Context, item *Item) error {
 	if s.limit != nil {
 		_, total, err := s.repo.List(ctx, item.OrganizationID, FilterParams{}, api.PaginationParams{Limit: 1})
@@ -283,6 +285,10 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 	if err := validateTypedColumns(typed); err != nil {
 		return err
 	}
+	if err := checkCITypeID(item.CITypeID); err != nil {
+		return err
+	}
+	item.ChosenType = true
 	if err := s.validate(ctx, item.OrganizationID, item.CITypeID, "", nil, withTyped(item.Attributes, typed)); err != nil {
 		return err
 	}

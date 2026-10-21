@@ -9,8 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
+)
+
+// CI types of the tests: a type is named by its ID, a UUID (CI-01; a key
+// such as "server" is refused with 422, WP-396).
+const (
+	testServerType = "c1000000-0000-4000-8000-000000000001"
+	testSwitchType = "c1000000-0000-4000-8000-000000000002"
 )
 
 func tenantCtx(r *http.Request) *http.Request {
@@ -25,7 +33,7 @@ func TestHandler_CreateAndGet(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	// Create a CI
-	body := `{"name":"sw-core-01","ci_type_id":"type-switch","manufacturer":"Cisco","model":"C9300"}`
+	body := `{"name":"sw-core-01","ci_type_id":"` + testSwitchType + `","manufacturer":"Cisco","model":"C9300"}`
 	req := httptest.NewRequest("POST", "/api/v1/cis", bytes.NewBufferString(body))
 	req = tenantCtx(req)
 	w := httptest.NewRecorder()
@@ -78,7 +86,7 @@ func TestHandler_CreateTakesTheFieldsOfCI01(t *testing.T) {
 	}
 
 	full := map[string]any{
-		"ci_type_id": "type-server", "name": "srv-01", "client_id": "client-1", "location_id": "loc-1",
+		"ci_type_id": testServerType, "name": "srv-01", "client_id": "client-1", "location_id": "loc-1",
 		"parent_ci_id": "ci-chassis", "status": "maintenance",
 		"manufacturer": "Dell", "model": "R750", "serial_number": "SN1", "hardware_uuid": "4c4c4544-0000-1000-8000-000000000001",
 		"management_ip": "10.0.0.5", "primary_mac": "00:11:22:33:44:55", "hostname": "srv-01", "fqdn": "srv-01.example.org",
@@ -110,7 +118,7 @@ func TestHandler_CreateTakesTheFieldsOfCI01(t *testing.T) {
 	}
 
 	for source, manual := range map[string]bool{SourceImport: true, SourceManual: true, SourceAPI: false} {
-		w = create(`{"ci_type_id":"type-server","name":"srv-` + source + `","discovery_source":"` + source + `"}`)
+		w = create(`{"ci_type_id":"` + testServerType + `","name":"srv-` + source + `","discovery_source":"` + source + `"}`)
 		if w.Code != http.StatusCreated {
 			t.Fatalf("%s: %d %s", source, w.Code, w.Body.String())
 		}
@@ -121,9 +129,34 @@ func TestHandler_CreateTakesTheFieldsOfCI01(t *testing.T) {
 		}
 	}
 
-	if w = create(`{"ci_type_id":"type-server","name":"x","discovery_source":"discovery"}`); w.Code != http.StatusBadRequest ||
+	if w = create(`{"ci_type_id":"` + testServerType + `","name":"x","discovery_source":"discovery"}`); w.Code != http.StatusBadRequest ||
 		!bytes.Contains(w.Body.Bytes(), []byte(`"field":"discovery_source"`)) {
 		t.Errorf("unknown source: %d %s, want 400 with the field", w.Code, w.Body.String())
+	}
+}
+
+// TestHandler_CreateNeedsTheTypeID covers WP-396 (CI-01; backend part of
+// F-016): a ci_type_id that is no UUID, such as the key "server" the CI
+// dialog sent, is 422 on ci_type_id instead of 400, and no CI is stored.
+func TestHandler_CreateNeedsTheTypeID(t *testing.T) {
+	repo := NewMemoryRepository()
+	mux := chi.NewRouter()
+	NewHandler(NewService(repo)).RegisterRoutes(mux)
+	for _, typeID := range []string{"server", "type-switch"} {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantCtx(httptest.NewRequest(http.MethodPost, "/api/v1/cis",
+			bytes.NewBufferString(`{"name":"srv-key","ci_type_id":"`+typeID+`"}`))))
+		var problem struct {
+			Violations []Violation `json:"violations"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &problem)
+		if w.Code != http.StatusUnprocessableEntity || len(problem.Violations) != 1 ||
+			problem.Violations[0] != (Violation{Field: "ci_type_id", Detail: "not the ID (UUID) of a CI type"}) {
+			t.Errorf("POST /cis with ci_type_id %q: %d %s, want 422 on ci_type_id", typeID, w.Code, w.Body.String())
+		}
+	}
+	if _, total, err := repo.List(context.Background(), "org-1", FilterParams{}, api.PaginationParams{Limit: 10}); err != nil || total != 0 {
+		t.Errorf("CIs stored: %d, %v; want none", total, err)
 	}
 }
 
@@ -293,7 +326,7 @@ func TestHandler_IncludeAndRestore(t *testing.T) {
 		mux.ServeHTTP(w, tenantCtx(httptest.NewRequest(method, path, bytes.NewBufferString(body))))
 		return w
 	}
-	w := call("POST", "/api/v1/cis", `{"name":"inc-1","ci_type_id":"type-switch"}`)
+	w := call("POST", "/api/v1/cis", `{"name":"inc-1","ci_type_id":"`+testSwitchType+`"}`)
 	var item Item
 	_ = json.Unmarshal(w.Body.Bytes(), &item)
 

@@ -71,6 +71,13 @@ type Item struct {
 	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
 	CreatedAt     string     `json:"created_at"`
 	UpdatedAt     string     `json:"updated_at"`
+	// ChosenType marks a create through the CI service (POST /cis): the
+	// writer chose the type, which must be an active system type or an
+	// active type of the organization, read in the writing transaction
+	// (CI-01, TEN-09). Discovery and the agent create CIs of the types they
+	// resolved without it; a type of another organization is refused on
+	// every path by the trigger ci_type_organization (migration 000153).
+	ChosenType bool `json:"-"`
 }
 
 // AssetFacts are the canonical data of the asset a CI is linked to, shown

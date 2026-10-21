@@ -38,7 +38,7 @@ func TestIndexingRepository_CreateIndexesDocument(t *testing.T) {
 
 	item := &Item{
 		OrganizationID: "org-1",
-		CITypeID:       "type-switch",
+		CITypeID:       testSwitchType,
 		Name:           "sw-core-01",
 		Manufacturer:   "Cisco",
 		Model:          "C9300",
@@ -73,7 +73,7 @@ func TestIndexingRepository_UpdateAndDelete(t *testing.T) {
 	indexer := &recordingIndexer{}
 	svc := NewService(NewIndexingRepository(repo, indexer))
 
-	item := &Item{OrganizationID: "org-1", CITypeID: "type-server", Name: "srv-01"}
+	item := &Item{OrganizationID: "org-1", CITypeID: testServerType, Name: "srv-01"}
 	if err := svc.Create(context.Background(), item); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestIndexingRepository_IndexFailureDoesNotFailMutation(t *testing.T) {
 	indexer := &recordingIndexer{err: fmt.Errorf("search backend down")}
 	svc := NewService(NewIndexingRepository(repo, indexer))
 
-	item := &Item{OrganizationID: "org-1", CITypeID: "type-server", Name: "srv-02"}
+	item := &Item{OrganizationID: "org-1", CITypeID: testServerType, Name: "srv-02"}
 	if err := svc.Create(context.Background(), item); err != nil {
 		t.Fatalf("create must succeed despite index failure: %v", err)
 	}

@@ -587,3 +587,5 @@ TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-394
 API-05;[B];B;backend/internal/user/grant_ceiling_test.go;WP-394
 AUT-02;[B];B;backend/internal/user/role_assignment_integration_test.go;WP-395
 API-05;[B];B;backend/internal/user/role_assignment_integration_test.go;WP-395
+CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/server/ci_type_ref_integration_test.go;WP-396
+TEN-09;[Q];B;backend/internal/server/ci_type_ref_integration_test.go;WP-396

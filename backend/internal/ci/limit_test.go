@@ -33,11 +33,11 @@ func TestServiceCreateEnforcesEntitlementLimit(t *testing.T) {
 	svc := NewServiceWithLimits(NewMemoryRepository(), stubLimitGuard{max: 1})
 	ctx := context.Background()
 
-	if err := svc.Create(ctx, &Item{OrganizationID: "org-1", Name: "ci-1", CITypeID: "type-1"}); err != nil {
+	if err := svc.Create(ctx, &Item{OrganizationID: "org-1", Name: "ci-1", CITypeID: testServerType}); err != nil {
 		t.Fatalf("expected the first CI to be created: %v", err)
 	}
 
-	err := svc.Create(ctx, &Item{OrganizationID: "org-1", Name: "ci-2", CITypeID: "type-1"})
+	err := svc.Create(ctx, &Item{OrganizationID: "org-1", Name: "ci-2", CITypeID: testServerType})
 	if err == nil {
 		t.Fatal("expected the licensed CI limit to be enforced")
 	}
@@ -56,7 +56,7 @@ func TestServiceCreateWithoutGuardIsUnlimited(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 3; i++ {
-		if err := svc.Create(ctx, &Item{OrganizationID: "org-1", Name: fmt.Sprintf("ci-%d", i), CITypeID: "type-1"}); err != nil {
+		if err := svc.Create(ctx, &Item{OrganizationID: "org-1", Name: fmt.Sprintf("ci-%d", i), CITypeID: testServerType}); err != nil {
 			t.Fatalf("expected creation without a limit guard to succeed: %v", err)
 		}
 	}

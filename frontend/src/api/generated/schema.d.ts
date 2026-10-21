@@ -7410,6 +7410,7 @@ export interface components {
       readonly site_id?: string;
       /** @description Room of location_id (the location or its nearest room ancestor), derived by the server. */
       readonly room_id?: string;
+      /** @description A system type or a type of the CI's organization; the database refuses a type of another organization on every write path (CI-01, TEN-09). */
       ci_type_id: string;
       name: string;
       status: components['schemas']['CIStatus'];
@@ -7470,6 +7471,7 @@ export interface components {
       invoice_number?: string;
     };
     CreateCIRequest: {
+      /** @description ID (UUID) of an active system type or an active type of the organization (GET /api/v1/ci-types; CI-01, TEN-09), not its key. Any other value is rejected (422 on ci_type_id); an unknown ID and a type of another organization get the same answer. */
       ci_type_id: string;
       client_id?: string;
       /** @description Node of the location tree; site and room of the CI follow from it. */
@@ -11566,6 +11568,15 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      /** @description A field value is not allowed; `violations` names the field, e.g. ci_type_id that is no UUID ("not the ID (UUID) of a CI type"), names no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or a deactivated type ("the CI type is deactivated"). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -11742,7 +11753,10 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': {
-          /** Format: uuid */
+          /**
+           * Format: uuid
+           * @description ID of an active system type or an active type of the organization (CI-01, TEN-09).
+           */
           ci_type_id: string;
         };
       };
@@ -11761,13 +11775,13 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The target type does not exist. */
+      /** @description The target type is not allowed, `violations` names ci_type_id: no UUID ("not the ID (UUID) of a CI type"), no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or deactivated ("the CI type is deactivated"). */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/problem+json': components['schemas']['ProblemDetail'];
+          'application/problem+json': components['schemas']['ViolationProblem'];
         };
       };
     };

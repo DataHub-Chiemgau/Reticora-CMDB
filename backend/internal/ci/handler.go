@@ -269,13 +269,16 @@ func (h *Handler) ChangeType(w http.ResponseWriter, r *http.Request) {
 	result, err := h.svc.ChangeType(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), strings.TrimSpace(body.CITypeID))
 	switch {
 	case errors.Is(err, ErrUnknownType):
-		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		// Unknown and of another organization alike (TEN-09).
+		writeValidationError(w, ciTypeViolation(ciTypeNotFound))
 		return
 	case err != nil && err.Error() == "not found":
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 		return
 	case err != nil:
-		api.WriteRepoError(w, err)
+		if !writeValidationError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 	w.Header().Set("ETag", api.ETag(result.CI.Version))

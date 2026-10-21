@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"sort"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
 // Reclassification of CIs (CI-11): discovery may raise generic_device to a
@@ -29,6 +31,31 @@ var ErrReclassificationRefused = errors.New("discovery may only raise generic_de
 
 // ErrUnknownType: the target type does not exist for the organization.
 var ErrUnknownType = errors.New("unknown CI type")
+
+// Violations of ci_type_id (CI-01, TEN-09; F-144, F-016): a CI has an active
+// system type or an active type of its organization, named by its ID. An
+// unknown ID and a private type of another organization get the same answer,
+// so the answer does not tell whether a foreign type exists.
+const (
+	ciTypeNotAnID     = "not the ID (UUID) of a CI type"
+	ciTypeNotFound    = "CI type not found"
+	ciTypeDeactivated = "the CI type is deactivated"
+)
+
+// ciTypeViolation is the 422 on ci_type_id with detail.
+func ciTypeViolation(detail string) error {
+	return &ValidationError{Violations: []Violation{{Field: "ci_type_id", Detail: detail}}}
+}
+
+// checkCITypeID refuses a ci_type_id that is no UUID, such as the key
+// "server", before it reaches a query (422 instead of the 400 of the failed
+// cast).
+func checkCITypeID(id string) error {
+	if !api.IsUUID(id) {
+		return ciTypeViolation(ciTypeNotAnID)
+	}
+	return nil
+}
 
 // TypeFinding is a required attribute of the target type the CI does not
 // carry; it is reported, the change is not blocked.
@@ -72,11 +99,16 @@ func MissingRequired(required []string, attrs map[string]any) []TypeFinding {
 	return findings
 }
 
-// ChangeType changes the type of a CI (manual mode).
+// ChangeType changes the type of a CI (manual mode). The target is the
+// writer's choice like the type of a new CI: an ID that is no UUID is
+// refused here, the repository reads the type in the writing transaction.
 func (s *Service) ChangeType(ctx context.Context, orgID, ciID, typeID string) (*TypeChangeResult, error) {
 	changer, ok := s.repo.(TypeChanger)
 	if !ok {
 		return nil, errors.New("type change is not supported by this repository")
+	}
+	if err := checkCITypeID(typeID); err != nil {
+		return nil, err
 	}
 	return changer.ChangeType(ctx, orgID, ciID, typeID, TypeChangeManual)
 }
