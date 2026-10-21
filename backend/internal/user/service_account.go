@@ -454,7 +454,11 @@ func checkRoleCeiling(ctx context.Context, tx pgx.Tx, orgID string, caller *iden
 
 // assignmentGrant is the grant of one assignment: the catalog permissions of
 // the role (as ServiceAccountGrants resolves them) in the assignment's scope.
-// An unknown role grants nothing; the assignment itself is then refused.
+// A site assignment without client names the client of its site, like
+// ServiceAccountGrants; a site the caller cannot read keeps no client and then
+// needs the caller's rights in all clients (identity.GrantCeiling,
+// fail-closed). An unknown role grants nothing; the assignment itself is then
+// refused.
 func assignmentGrant(ctx context.Context, tx pgx.Tx, orgID string, role ServiceAccountRole) (identity.Grant, error) {
 	grant := identity.Grant{}
 	if role.ScopeClientID != nil {
@@ -462,6 +466,16 @@ func assignmentGrant(ctx context.Context, tx pgx.Tx, orgID string, role ServiceA
 	}
 	if role.ScopeSiteID != nil {
 		grant.Sites = []string{*role.ScopeSiteID}
+		if role.ScopeClientID == nil && isUUID(*role.ScopeSiteID) {
+			var client string
+			err := tx.QueryRow(ctx, `SELECT client_id::text FROM site WHERE organization_id = $1 AND id = $2`, orgID, *role.ScopeSiteID).Scan(&client)
+			switch {
+			case err == nil:
+				grant.Clients = []string{client}
+			case !errors.Is(err, pgx.ErrNoRows):
+				return grant, fmt.Errorf("read site client: %w", err)
+			}
+		}
 	}
 	if !isUUID(role.RoleID) {
 		return grant, nil
@@ -488,7 +502,10 @@ func assignmentGrant(ctx context.Context, tx pgx.Tx, orgID string, role ServiceA
 
 // ServiceAccountGrants implements ServiceAccountRepository. It runs on behalf
 // of the account's organization, without a principal scope (E-08), like the
-// grant resolution of a user at login.
+// grant resolution of a user at login. Like a user's site assignment
+// (permission.AccessGrants), a site assignment is confined to the client of
+// its site (RBA-03, TEN-09); a site outside the organization, or of another
+// client than scope_client_id, grants nothing (fail-closed, E-08).
 func (r *PGServiceAccounts) ServiceAccountGrants(ctx context.Context, orgID, id string) ([]identity.Grant, error) {
 	grants := []identity.Grant{}
 	if !isUUID(id) {
@@ -497,7 +514,7 @@ func (r *PGServiceAccounts) ServiceAccountGrants(ctx context.Context, orgID, id 
 	scope := database.OrgWideScope(orgID, "")
 	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT sar.scope_client_id::text, sar.scope_site_id::text,
+			SELECT COALESCE(s.client_id, sar.scope_client_id)::text, sar.scope_site_id::text,
 			       ARRAY(SELECT DISTINCT k FROM (
 			           SELECT rp.permission_key AS k FROM role_permission rp
 			            WHERE rp.role_id = sar.role_id AND rp.organization_id = sar.organization_id
@@ -506,9 +523,11 @@ func (r *PGServiceAccounts) ServiceAccountGrants(ctx context.Context, orgID, id 
 			  FROM service_account_role sar
 			  JOIN service_account sa ON sa.id = sar.service_account_id AND sa.is_active
 			  JOIN role ro ON ro.id = sar.role_id AND ro.organization_id = sar.organization_id
+			  LEFT JOIN site s ON s.id = sar.scope_site_id AND s.organization_id = sar.organization_id
 			 WHERE sar.organization_id = $1 AND sar.service_account_id = $2
 			   AND (ro.scope <> 'client' OR sar.scope_client_id IS NOT NULL)
-			   AND (ro.scope <> 'site' OR sar.scope_site_id IS NOT NULL)`, orgID, id)
+			   AND (ro.scope <> 'site' OR sar.scope_site_id IS NOT NULL)
+			   AND (sar.scope_site_id IS NULL OR s.client_id = COALESCE(sar.scope_client_id, s.client_id))`, orgID, id)
 		if err != nil {
 			return fmt.Errorf("list service account grants: %w", err)
 		}

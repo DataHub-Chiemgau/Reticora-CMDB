@@ -16,6 +16,7 @@ const (
 	scopeClientA = "aaaaaaaa-0000-4000-8000-000000000001"
 	scopeClientB = "bbbbbbbb-0000-4000-8000-000000000002"
 	scopeSiteA   = "cccccccc-0000-4000-8000-000000000003"
+	scopeSiteB   = "dddddddd-0000-4000-8000-000000000004"
 )
 
 func TestResolveAccessUnitesScopesPerDimension(t *testing.T) {
@@ -60,6 +61,32 @@ func TestResolveAccessUnitesScopesPerDimension(t *testing.T) {
 			},
 			want: Scope{Clients: ScopeSet{IDs: []string{scopeClientA}}, Sites: ScopeSet{IDs: []string{scopeSiteA}}, Teams: all},
 		},
+		{
+			name:   "site grant is confined to the client of its site (WP-390)",
+			grants: []Grant{{Permissions: []Permission{PermCIRead}, Clients: []string{scopeClientA}, Sites: []string{scopeSiteA}}},
+			want:   Scope{Clients: ScopeSet{IDs: []string{scopeClientA}}, Sites: ScopeSet{IDs: []string{scopeSiteA}}, Teams: all},
+		},
+		{
+			name: "site grants of two clients unite clients and sites",
+			grants: []Grant{
+				{Permissions: []Permission{PermCIRead}, Clients: []string{scopeClientA}, Sites: []string{scopeSiteA}},
+				{Permissions: []Permission{PermCIRead}, Clients: []string{scopeClientB}, Sites: []string{scopeSiteB}},
+			},
+			want: Scope{Clients: ScopeSet{IDs: []string{scopeClientA, scopeClientB}}, Sites: ScopeSet{IDs: []string{scopeSiteA, scopeSiteB}}, Teams: all},
+		},
+		{
+			name:   "sites without clients restrict the clients to none (E-08)",
+			grants: []Grant{{Permissions: []Permission{PermCIRead}, Sites: []string{scopeSiteA}}},
+			want:   Scope{Clients: ScopeSet{}, Sites: ScopeSet{IDs: []string{scopeSiteA}}, Teams: all},
+		},
+		{
+			name: "an org-wide grant sets every dimension to all beside a site grant",
+			grants: []Grant{
+				{Permissions: []Permission{PermCIRead}, Clients: []string{scopeClientA}, Sites: []string{scopeSiteA}},
+				OrgWideGrant([]Permission{PermCIRead}),
+			},
+			want: Scope{Clients: all, Sites: all, Teams: all},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -68,6 +95,43 @@ func TestResolveAccessUnitesScopesPerDimension(t *testing.T) {
 				t.Fatalf("scope = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestResolveAccessSiteGrantScopesEveryPermission covers WP-390 (RBA-03,
+// TEN-09, F-014): every permission of a site grant is valid in the client and
+// site of the grant only, also as the narrower scope beside an org-wide grant;
+// a grant with sites but without clients holds its permissions in no client,
+// so its legacy client scope is NoScopeID.
+func TestResolveAccessSiteGrantScopesEveryPermission(t *testing.T) {
+	site := Scope{Clients: ScopeSet{IDs: []string{scopeClientA}}, Sites: ScopeSet{IDs: []string{scopeSiteA}}, Teams: ScopeSet{All: true}}
+	siteGrant := Grant{Permissions: []Permission{PermCIRead, PermCIWrite}, Clients: []string{scopeClientA}, Sites: []string{scopeSiteA}}
+
+	access := ResolveAccess([]Grant{siteGrant})
+	if !access.Scope.equal(&site) || access.Scope.LegacyClientScope() != scopeClientA {
+		t.Fatalf("scope = %+v (legacy %q), want client A at site A", access.Scope, access.Scope.LegacyClientScope())
+	}
+	p := Principal{Scope: &access.Scope, PermissionScopes: access.PermissionScopes, Permissions: access.Permissions}
+	for _, perm := range []Permission{PermCIRead, PermCIWrite} {
+		if s, ok := p.ScopeFor(perm); !ok || !s.equal(&site) {
+			t.Errorf("%s scope = %+v %v, want client A at site A", perm, s, ok)
+		}
+	}
+
+	mixed := ResolveAccess([]Grant{OrgWideGrant([]Permission{PermCIRead}), siteGrant})
+	if !mixed.Scope.OrgWide() {
+		t.Fatalf("union scope beside an org-wide grant = %+v, want org-wide", mixed.Scope)
+	}
+	if s, ok := mixed.PermissionScopes[PermCIWrite]; !ok || !s.equal(&site) {
+		t.Errorf("ci:write scope = %+v %v, want client A at site A", s, ok)
+	}
+	if _, ok := mixed.PermissionScopes[PermCIRead]; ok {
+		t.Errorf("ci:read is org-wide and needs no narrower scope: %+v", mixed.PermissionScopes)
+	}
+
+	unmapped := ResolveAccess([]Grant{{Permissions: []Permission{PermCIRead}, Sites: []string{scopeSiteA}}})
+	if unmapped.Scope.Clients.All || len(unmapped.Scope.Clients.IDs) != 0 || unmapped.Scope.LegacyClientScope() != NoScopeID {
+		t.Fatalf("sites without clients: clients = %+v (legacy %q), want none", unmapped.Scope.Clients, unmapped.Scope.LegacyClientScope())
 	}
 }
 

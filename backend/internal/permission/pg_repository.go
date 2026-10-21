@@ -161,7 +161,10 @@ func (r *PGRepository) EffectivePermissions(ctx context.Context, orgID, userID s
 // scope_client_id/scope_site_id) and custom role assignment (user_custom_role
 // with scope_type/scope_id) of the user. NULL scope columns mean org-wide.
 // Assignments of a client or site scope without scope ID are invalid and grant
-// nothing (fail-closed). Only permissions of the catalogue are returned.
+// nothing (fail-closed). A site assignment is confined to the client of its
+// site (site.client_id, RBA-03, TEN-09); a site outside the organization, or
+// of another client than the assignment's scope_client_id, grants nothing
+// (fail-closed, E-08). Only permissions of the catalogue are returned.
 func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) ([]identity.Grant, error) {
 	grants := make([]identity.Grant, 0)
 	// Login and refresh resolve the scope here, so no principal scope exists
@@ -173,7 +176,7 @@ func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) (
 			SELECT client_id, site_id,
 			       ARRAY(SELECT DISTINCT k FROM unnest(keys) AS k WHERE k IN (SELECT key FROM permission) ORDER BY k)
 			FROM (
-				SELECT ra.scope_client_id::text AS client_id, ra.scope_site_id::text AS site_id,
+				SELECT COALESCE(s.client_id, ra.scope_client_id)::text AS client_id, ra.scope_site_id::text AS site_id,
 				       ARRAY(
 				           SELECT rp.permission_key FROM role_permission rp
 				           WHERE rp.role_id = ra.role_id AND rp.organization_id = ra.organization_id
@@ -182,19 +185,25 @@ func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) (
 				       ) AS keys
 				FROM role_assignment ra
 				JOIN role ro ON ro.id = ra.role_id AND ro.organization_id = ra.organization_id
+				LEFT JOIN site s ON s.id = ra.scope_site_id AND s.organization_id = ra.organization_id
 				WHERE ra.organization_id = $1 AND ra.user_id = $2
 				  -- A client-scope role (C of RBA-02) grants only within an
 				  -- assigned client, a site-scope role only within a site.
 				  AND (ro.scope <> 'client' OR ra.scope_client_id IS NOT NULL)
 				  AND (ro.scope <> 'site' OR ra.scope_site_id IS NOT NULL)
+				  -- A site grants within its client only.
+				  AND (ra.scope_site_id IS NULL OR s.client_id = COALESCE(ra.scope_client_id, s.client_id))
 				UNION ALL
-				SELECT CASE WHEN ucr.scope_type = 'client' THEN ucr.scope_id::text END,
+				SELECT CASE WHEN ucr.scope_type = 'client' THEN ucr.scope_id::text
+				            WHEN ucr.scope_type = 'site' THEN s.client_id::text END,
 				       CASE WHEN ucr.scope_type = 'site' THEN ucr.scope_id::text END,
 				       ARRAY(SELECT jsonb_array_elements_text(COALESCE(cr.permissions, '[]'::jsonb)))
 				FROM user_custom_role ucr
 				JOIN custom_role cr ON cr.id = ucr.custom_role_id
+				LEFT JOIN site s ON ucr.scope_type = 'site' AND s.id = ucr.scope_id AND s.organization_id = cr.organization_id
 				WHERE cr.organization_id = $1 AND ucr.user_id = $2
 				  AND (ucr.scope_type = 'organization' OR ucr.scope_id IS NOT NULL)
+				  AND (ucr.scope_type <> 'site' OR s.id IS NOT NULL)
 			) assignments`, orgID, userID)
 		if err != nil {
 			return fmt.Errorf("list role assignments: %w", err)

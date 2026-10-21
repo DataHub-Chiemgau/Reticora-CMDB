@@ -573,3 +573,6 @@ INS-02;[B];A;tests/install-cloud-issuer-order.test.sh;WP-385
 INS-05;[B];A;tests/install-reinstall.test.sh;WP-386
 TEC-15;[B];A;tests/install-signature.test.sh;WP-387
 COL-06;[B], Air-Gapped [O];A;tests/install-signature.test.sh;WP-387
+TEN-01;[B], Reseller [P4];B;backend/internal/locations/sitescope_integration_test.go;WP-390
+RBA-03;[B];B;backend/internal/identity/principal_scope_test.go;WP-390
+TEN-09;[Q];B;backend/internal/locations/sitescope_integration_test.go;WP-390
