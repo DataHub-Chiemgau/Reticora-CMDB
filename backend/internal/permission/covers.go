@@ -2,30 +2,32 @@ package permission
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 )
 
 // Covers reports whether grants hold the permission for an object in the
-// given client and site (empty: an object of the whole organization). An
-// org-wide grant covers every object; a client or site grant covers the
-// objects of its clients or sites only, and no organization-wide object
-// (RBA-03, fail-closed). Notification recipients are resolved with it
-// (NTF-03): only who may read the object hears of it.
+// given client and site (empty: an object of the whole organization). The
+// grants are resolved as for the session (identity.ResolveAccess): the scope
+// of the permission is the union per dimension, and client and site must both
+// lie in it (E-70 option 1, like the RLS), so a site grant beside a client
+// grant does not cover the client's objects at other sites and a team grant
+// beside a client grant does not cover other clients. An org-wide scope
+// covers every object; a scope restricted in a dimension covers no object
+// without a value there (RBA-03, fail-closed). The objects carry no team, so
+// the team dimension does not restrict them (E-11: rows without team are
+// visible). Notification recipients are resolved with it (NTF-03): only who
+// may read the object hears of it.
 func Covers(grants []identity.Grant, key identity.Permission, clientID, siteID string) bool {
-	for i := range grants {
-		g := &grants[i]
-		if !slices.Contains(g.Permissions, key) {
-			continue
-		}
-		if len(g.Clients) == 0 && len(g.Sites) == 0 {
-			return true
-		}
-		clientOK := len(g.Clients) == 0 || (clientID != "" && slices.Contains(g.Clients, clientID))
-		siteOK := len(g.Sites) == 0 || (siteID != "" && slices.Contains(g.Sites, siteID))
-		if clientOK && siteOK {
-			return true
-		}
+	access := identity.ResolveAccess(grants)
+	p := identity.Principal{Scope: &access.Scope, PermissionScopes: access.PermissionScopes, Permissions: access.Permissions}
+	scope, ok := p.ScopeFor(key)
+	if !ok {
+		return false
 	}
-	return false
+	in := func(set identity.ScopeSet, id string) bool {
+		return set.All || (id != "" && slices.Contains(set.IDs, strings.ToLower(id)))
+	}
+	return in(scope.Clients, clientID) && in(scope.Sites, siteID)
 }

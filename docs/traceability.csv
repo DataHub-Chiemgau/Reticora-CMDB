@@ -576,3 +576,5 @@ COL-06;[B], Air-Gapped [O];A;tests/install-signature.test.sh;WP-387
 TEN-01;[B], Reseller [P4];B;backend/internal/locations/sitescope_integration_test.go;WP-390
 RBA-03;[B];B;backend/internal/identity/principal_scope_test.go;WP-390
 TEN-09;[Q];B;backend/internal/locations/sitescope_integration_test.go;WP-390
+RBA-03;[B];B;backend/internal/permission/scope_integration_test.go;WP-391
+TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-391

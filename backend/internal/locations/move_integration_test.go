@@ -172,8 +172,9 @@ func TestLocationDeleteRefusedWithDependencies(t *testing.T) {
 	scoped := mustCreate(t, repo, ctx, f.OrgA, locations.CreateRequest{Kind: locations.KindSite, ClientID: f.Client1, Name: "del-scoped"})
 	roleID := f.ID()
 	exec(`INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 'del-role', '[]')`, roleID, f.OrgA)
-	exec(`INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id, scope_site_id) VALUES ($1, $2, $3, $4, $5)`,
-		f.OrgA, f.AppUser(t, f.OrgA, "del-user"), roleID, f.Client1, scoped.ID)
+	// A site assignment names the site only (WP-391): its client is the site's.
+	exec(`INSERT INTO role_assignment (organization_id, user_id, role_id, scope_site_id) VALUES ($1, $2, $3, $4)`,
+		f.OrgA, f.AppUser(t, f.OrgA, "del-user"), roleID, scoped.ID)
 	expect("/api/v1/sites/"+scoped.ID, http.StatusConflict, "role_assignment")
 
 	// The references are untouched.

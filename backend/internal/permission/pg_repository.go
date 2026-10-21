@@ -158,13 +158,16 @@ func (r *PGRepository) EffectivePermissions(ctx context.Context, orgID, userID s
 }
 
 // AccessGrants reads every role assignment (role_assignment with
-// scope_client_id/scope_site_id) and custom role assignment (user_custom_role
-// with scope_type/scope_id) of the user. NULL scope columns mean org-wide.
-// Assignments of a client or site scope without scope ID are invalid and grant
-// nothing (fail-closed). A site assignment is confined to the client of its
-// site (site.client_id, RBA-03, TEN-09); a site outside the organization, or
-// of another client than the assignment's scope_client_id, grants nothing
-// (fail-closed, E-08). Only permissions of the catalogue are returned.
+// scope_client_id/scope_site_id/scope_team_id) and custom role assignment
+// (user_custom_role with scope_type/scope_id) of the user. NULL scope columns
+// mean org-wide. Assignments of a client, site or team scope without scope ID
+// are invalid and grant nothing (fail-closed). A site assignment is confined
+// to the client of its site (site.client_id, RBA-03, TEN-09); a site outside
+// the organization, or of another client than the assignment's
+// scope_client_id, grants nothing (fail-closed, E-08). A team assignment
+// restricts the team dimension to its team (Grant.Teams, RBA-03, E-11); a
+// custom role assignment of a team outside the organization grants nothing.
+// Only permissions of the catalogue are returned.
 func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) ([]identity.Grant, error) {
 	grants := make([]identity.Grant, 0)
 	// Login and refresh resolve the scope here, so no principal scope exists
@@ -173,10 +176,11 @@ func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) (
 	scope := database.OrgWideScope(orgID, userID)
 	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT client_id, site_id,
+			SELECT client_id, site_id, team_id,
 			       ARRAY(SELECT DISTINCT k FROM unnest(keys) AS k WHERE k IN (SELECT key FROM permission) ORDER BY k)
 			FROM (
 				SELECT COALESCE(s.client_id, ra.scope_client_id)::text AS client_id, ra.scope_site_id::text AS site_id,
+				       ra.scope_team_id::text AS team_id,
 				       ARRAY(
 				           SELECT rp.permission_key FROM role_permission rp
 				           WHERE rp.role_id = ra.role_id AND rp.organization_id = ra.organization_id
@@ -197,22 +201,26 @@ func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) (
 				SELECT CASE WHEN ucr.scope_type = 'client' THEN ucr.scope_id::text
 				            WHEN ucr.scope_type = 'site' THEN s.client_id::text END,
 				       CASE WHEN ucr.scope_type = 'site' THEN ucr.scope_id::text END,
+				       CASE WHEN ucr.scope_type = 'team' THEN ucr.scope_id::text END,
 				       ARRAY(SELECT jsonb_array_elements_text(COALESCE(cr.permissions, '[]'::jsonb)))
 				FROM user_custom_role ucr
 				JOIN custom_role cr ON cr.id = ucr.custom_role_id
 				LEFT JOIN site s ON ucr.scope_type = 'site' AND s.id = ucr.scope_id AND s.organization_id = cr.organization_id
+				-- scope_id has no foreign key: a team must exist in the organization.
+				LEFT JOIN team tm ON ucr.scope_type = 'team' AND tm.id = ucr.scope_id AND tm.organization_id = cr.organization_id
 				WHERE cr.organization_id = $1 AND ucr.user_id = $2
 				  AND (ucr.scope_type = 'organization' OR ucr.scope_id IS NOT NULL)
 				  AND (ucr.scope_type <> 'site' OR s.id IS NOT NULL)
+				  AND (ucr.scope_type <> 'team' OR tm.id IS NOT NULL)
 			) assignments`, orgID, userID)
 		if err != nil {
 			return fmt.Errorf("list role assignments: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var clientID, siteID *string
+			var clientID, siteID, teamID *string
 			var keys []string
-			if err := rows.Scan(&clientID, &siteID, &keys); err != nil {
+			if err := rows.Scan(&clientID, &siteID, &teamID, &keys); err != nil {
 				return fmt.Errorf("scan role assignment: %w", err)
 			}
 			grant := identity.Grant{Permissions: toPermissions(keys)}
@@ -221,6 +229,9 @@ func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) (
 			}
 			if siteID != nil {
 				grant.Sites = []string{*siteID}
+			}
+			if teamID != nil {
+				grant.Teams = []string{*teamID}
 			}
 			grants = append(grants, grant)
 		}
