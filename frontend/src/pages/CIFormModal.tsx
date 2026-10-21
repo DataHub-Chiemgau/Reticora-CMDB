@@ -3,11 +3,15 @@ import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
 import type { CI, CICreateRequest, CIUpdateRequest } from '../api/client';
+import { localizedText } from '../api/cmdb';
+import { useCIType, useCITypes } from '../api/cmdbHooks';
 import { useCreateCI, useUpdateCI } from '../api/hooks';
+import { DynamicForm, validateAll } from '../components/form/DynamicForm';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
+import { evaluateField } from '../lib/fieldmeta';
 
 interface CIFormModalProps {
   open: boolean;
@@ -27,7 +31,6 @@ interface CIFormValues {
   firmware_version: string;
 }
 
-const ciTypeValues = ['server', 'switch', 'router', 'firewall', 'pdu', 'ups', 'nas', 'client'];
 const statusValues = ['active', 'inactive', 'maintenance', 'decommissioned'];
 
 function toFormValues(ci?: CI | null): CIFormValues {
@@ -48,31 +51,62 @@ function optionalValue(value: string) {
   return trimmed ? trimmed : undefined;
 }
 
+function isBlank(value: unknown) {
+  return value === undefined || value === null || (typeof value === 'string' && !value.trim());
+}
+
 export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const createMutation = useCreateCI();
   const updateMutation = useUpdateCI();
   const isEditMode = Boolean(ci);
   const [values, setValues] = useState<CIFormValues>(() => toFormValues(ci));
   const [errors, setErrors] = useState<Partial<Record<keyof CIFormValues, string>>>({});
+  const [attributes, setAttributes] = useState<Record<string, unknown>>(() => ci?.attributes ?? {});
+  const [attributeErrors, setAttributeErrors] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
     if (open) {
       setValues(toFormValues(ci));
       setErrors({});
+      setAttributes(ci?.attributes ?? {});
+      setAttributeErrors({});
     }
   }, [ci, open]);
 
-  const typeOptions = useMemo(
-    () => [
-      { value: '', label: t('form.selectPlaceholder') },
-      ...ciTypeValues.map((value) => ({
-        value,
-        label: value.charAt(0).toUpperCase() + value.slice(1),
-      })),
-    ],
-    [t],
+  // The types come from the metamodel (GET /ci-types: the active system types
+  // and the organization's own, MET-04), read again at every opening so a type
+  // created at runtime is offered without a reload or release. The option value
+  // is the type id, which POST /cis expects as ci_type_id (CI-03).
+  const ciTypes = useCITypes({ limit: 200 }, { enabled: open, staleTime: 0 });
+  // The chosen type's schema: its attributes are rendered below the fields.
+  const selectedType = useCIType(values.ci_type_id || undefined, { enabled: open, staleTime: 0 });
+  const typeFields = useMemo(
+    () => (selectedType.data?.id === values.ci_type_id ? (selectedType.data.fields ?? []) : []),
+    [selectedType.data, values.ci_type_id],
   );
+
+  const typeOptions = useMemo(() => {
+    const types = ciTypes.data?.data ?? [];
+    const stored = selectedType.data;
+    // Editing keeps the stored type selectable after it was deactivated.
+    const offered =
+      isEditMode &&
+      stored &&
+      stored.id === ci?.ci_type_id &&
+      !types.some((ty) => ty.id === stored.id)
+        ? [...types, stored]
+        : types;
+    return [
+      { value: '', label: t('form.selectPlaceholder') },
+      ...offered
+        .map((ty) => ({
+          value: ty.id,
+          label: localizedText(ty.display_name, i18n.language) || ty.key,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label, i18n.language)),
+    ];
+  }, [ciTypes.data, selectedType.data, isEditMode, ci?.ci_type_id, t, i18n.language]);
 
   const statusOptions = useMemo(
     () =>
@@ -97,11 +131,16 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
       : ({} as Record<string, string>);
 
   const fieldErrors: Partial<Record<keyof CIFormValues, string>> = { ...errors };
+  const attributeFieldErrors: Record<string, string | null> = { ...attributeErrors };
+  const attributeNames = new Set(typeFields.map((field) => field.name));
   const unmappedViolations: string[] = [];
   for (const [field, detail] of Object.entries(serverViolations)) {
+    const attribute = field.startsWith('attributes.') ? field.slice('attributes.'.length) : field;
     if (field in values) {
       const key = field as keyof CIFormValues;
       if (!fieldErrors[key]) fieldErrors[key] = detail;
+    } else if (attributeNames.has(attribute)) {
+      if (!attributeFieldErrors[attribute]) attributeFieldErrors[attribute] = detail;
     } else {
       unmappedViolations.push(`${field}: ${detail}`);
     }
@@ -120,6 +159,27 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
     setErrors((current) => ({ ...current, [key]: undefined }));
   }
 
+  function setAttribute(name: string, value: unknown) {
+    setAttributes((current) => ({ ...current, [name]: value }));
+    setAttributeErrors((current) => ({ ...current, [name]: null }));
+  }
+
+  // The values of the chosen type's attributes that apply in the current state;
+  // hidden fields and values left from another type are not sent. Editing sends
+  // only changed values (PATCH merges the attributes).
+  function attributePayload(): Record<string, unknown> | undefined {
+    const payload: Record<string, unknown> = {};
+    for (const def of typeFields) {
+      const value = attributes[def.name];
+      if (isBlank(value) || !evaluateField(def, attributes).visible) continue;
+      if (isEditMode && JSON.stringify(value) === JSON.stringify(ci?.attributes?.[def.name])) {
+        continue;
+      }
+      payload[def.name] = value;
+    }
+    return Object.keys(payload).length > 0 ? payload : undefined;
+  }
+
   function validate() {
     const nextErrors: Partial<Record<keyof CIFormValues, string>> = {};
 
@@ -131,8 +191,14 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
       nextErrors.ci_type_id = t('form.validation.ciTypeRequired');
     }
 
+    const nextAttributeErrors = validateAll(typeFields, attributes);
+
     setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
+    setAttributeErrors(nextAttributeErrors);
+    return (
+      Object.keys(nextErrors).length === 0 &&
+      Object.values(nextAttributeErrors).every((error) => !error)
+    );
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -150,6 +216,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
       serial_number: optionalValue(values.serial_number),
       management_ip: optionalValue(values.management_ip),
       firmware_version: optionalValue(values.firmware_version),
+      attributes: attributePayload(),
       discovery_source: 'manual',
     };
 
@@ -161,6 +228,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
       serial_number: optionalValue(values.serial_number),
       management_ip: optionalValue(values.management_ip),
       firmware_version: optionalValue(values.firmware_version),
+      attributes: attributePayload(),
     };
 
     try {
@@ -197,9 +265,14 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
         <Select
           label={t('form.fields.ciType')}
           value={values.ci_type_id}
-          onChange={(event) => setValue('ci_type_id', event.target.value)}
+          onChange={(event) => {
+            setValue('ci_type_id', event.target.value);
+            setAttributeErrors({});
+          }}
           options={typeOptions}
-          error={fieldErrors.ci_type_id}
+          error={
+            fieldErrors.ci_type_id ?? (ciTypes.isError ? t('form.typesLoadFailed') : undefined)
+          }
           disabled={isEditMode}
           required
         />
@@ -243,6 +316,23 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
             className="sm:col-span-2"
           />
         </div>
+
+        {typeFields.length > 0 ? (
+          <div className="space-y-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              {t('form.typeAttributes')}
+            </h3>
+            <DynamicForm
+              fields={typeFields}
+              values={attributes}
+              errors={attributeFieldErrors}
+              onChange={setAttribute}
+            />
+          </div>
+        ) : null}
+        {selectedType.isError ? (
+          <p className="text-sm text-red-600 dark:text-red-400">{t('form.typeSchemaLoadFailed')}</p>
+        ) : null}
 
         {bannerMessage ? (
           <p role="alert" className="text-sm text-red-600 dark:text-red-400">

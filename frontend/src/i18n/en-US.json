@@ -240,6 +240,9 @@
     "editCI": "Edit CI",
     "ciDescription": "Manage master data and status of the Configuration Item.",
     "selectPlaceholder": "Please select",
+    "typeAttributes": "Type attributes",
+    "typesLoadFailed": "The CI types could not be loaded.",
+    "typeSchemaLoadFailed": "The attributes of the CI type could not be loaded.",
     "fields": {
       "name": "Name",
       "ciType": "CI Type",

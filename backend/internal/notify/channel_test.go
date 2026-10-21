@@ -7,17 +7,35 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
+
+// staticResolver answers the lookup of a name with one address.
+type staticResolver map[string]string
+
+func (r staticResolver) LookupNetIP(_ context.Context, _, host string) ([]netip.Addr, error) {
+	a, ok := r[host]
+	if !ok {
+		return nil, fmt.Errorf("no such host %s", host)
+	}
+	return []netip.Addr{netip.MustParseAddr(a)}, nil
+}
 
 // fakeSMTP is a minimal SMTP server that records one session per mail.
 type fakeSMTP struct {
@@ -206,7 +224,9 @@ func TestEmailOverSMTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sender := NewSender(map[string]Provider{ProviderSMTP: NewEmailProvider(central), ProviderCentralSMTP: NewEmailProvider(central)})
+	// The own server runs on the loopback interface: on premises.
+	sender := NewSender(map[string]Provider{ProviderSMTP: NewEmailProvider(central).WithEgress(egress.Options{AllowPrivate: true}),
+		ProviderCentralSMTP: NewEmailProvider(central)})
 	msg := &Message{Category: "export", Subject: "Export fertig – Größe 2 MB", Body: "Der Export ist bereit.\nGrüße",
 		To: []Recipient{{Email: "ops@acme.example", Name: "Ops Team"}, {UserID: "u-1"}, {Email: "admin@acme.example"}}}
 	d, err := sender.Send(ctx, own, msg)
@@ -264,6 +284,160 @@ func TestEmailOverSMTP(t *testing.T) {
 	if _, err = noCentral.Send(ctx, centralCh, msg); err == nil {
 		t.Error("central channel without central SMTP")
 	}
+}
+
+// TestOwnSMTPServerEgressPolicy covers SEC-08, NTF-01 and REP-01 (WP-399,
+// F-153): the server of an organization's own SMTP channel is held to the
+// egress policy. In the SaaS mode (no RETICORA_EGRESS_ALLOW_PRIVATE)
+// private, loopback, unique-local and internal names and ports other than
+// 25, 465 and 587 are refused when the channel is stored (422 with the
+// field and the setting named) and when the provider connects, also for a
+// name that resolves into the internal network only then (DNS rebinding);
+// public servers are accepted. With AllowPrivate=true the internal relay
+// of a dedicated, on-premises or air-gapped installation is accepted and
+// reached. The central server is the operator's and stays exempt.
+func TestOwnSMTPServerEgressPolicy(t *testing.T) {
+	ctx := context.Background()
+	smtpChannel := func(name, host string, port int, tls string) string {
+		return fmt.Sprintf(`{"name":%q,"provider":"smtp","config":{"host":%q,"port":%d,"tls":%q,"from":"cmdb@acme.example",
+			"username":"cmdb","password":"pw"}}`, name, host, port, tls)
+	}
+	serve := func(policy egress.Options) (*Center, func(method, path, body string) *httptest.ResponseRecorder) {
+		center := NewMemoryCenter()
+		mux := chi.NewRouter()
+		NewHandler(center).WithEgress(policy).RegisterRoutes(mux)
+		return center, func(method, path, body string) *httptest.ResponseRecorder {
+			req := httptest.NewRequest(method, path, strings.NewReader(body))
+			req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "u-1"}))
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			return w
+		}
+	}
+	refused := []struct {
+		host        string
+		port        int
+		field, mode string
+	}{
+		{"10.0.0.5", 587, "host", "private"},
+		{"192.168.1.25", 25, "host", "private"},
+		{"127.0.0.1", 22, "host", "loopback, port 22"},
+		{"fd12:3456::25", 25, "host", "unique local fd00::/8"},
+		{"fe80::25", 25, "host", "link-local"},
+		{"localhost", 587, "host", "loopback name"},
+		{"relay.corp.internal", 587, "host", "internal name"},
+		{"mail.example.org", 22, "port", "public host, port 22"},
+		{"93.184.216.34", 2525, "port", "public address, port 2525"},
+	}
+
+	t.Run("SaaS mode refuses internal servers and other ports when stored", func(t *testing.T) {
+		center, call := serve(egress.Options{})
+		for i, c := range refused {
+			w := call(http.MethodPost, "/api/v1/notification-channels", smtpChannel(fmt.Sprintf("own-%d", i), c.host, c.port, "starttls"))
+			if w.Code != http.StatusUnprocessableEntity || problemField(w) != c.field {
+				t.Errorf("%s %s:%d = %d %s, want 422 field %s", c.mode, c.host, c.port, w.Code, w.Body.String(), c.field)
+			}
+			if !strings.Contains(w.Body.String(), "RETICORA_EGRESS_ALLOW_PRIVATE=true") {
+				t.Errorf("%s: the refusal does not name RETICORA_EGRESS_ALLOW_PRIVATE: %s", c.mode, w.Body.String())
+			}
+		}
+		if list, _ := center.Channels.List(ctx, "org-1"); len(list) != 0 {
+			t.Errorf("%d refused channels stored", len(list))
+		}
+		// Public servers on the SMTP ports are accepted.
+		var id string
+		for i, c := range []struct {
+			host string
+			port int
+			tls  string
+		}{{"mail.example.org", 587, "starttls"}, {"93.184.216.34", 465, "tls"}, {"2606:4700::1111", 25, "starttls"}} {
+			w := call(http.MethodPost, "/api/v1/notification-channels", smtpChannel(fmt.Sprintf("public-%d", i), c.host, c.port, c.tls))
+			if w.Code != http.StatusCreated {
+				t.Errorf("public %s:%d = %d %s", c.host, c.port, w.Code, w.Body.String())
+			}
+			var ch Channel
+			_ = json.Unmarshal(w.Body.Bytes(), &ch)
+			id = ch.ID
+		}
+		// A PATCH is held to the same policy; a rename of a stored channel is not.
+		w := call(http.MethodPatch, "/api/v1/notification-channels/"+id, `{"config":{"host":"10.0.0.5","port":587,
+			"from":"cmdb@acme.example","username":"cmdb","password":"pw-2"}}`)
+		if w.Code != http.StatusUnprocessableEntity || problemField(w) != "host" {
+			t.Errorf("PATCH to 10.0.0.5 = %d %s, want 422 field host", w.Code, w.Body.String())
+		}
+		if ch, _ := center.Channels.Get(ctx, "org-1", id); ch == nil || ch.Config["host"] != "2606:4700::1111" {
+			t.Errorf("stored channel after the refused PATCH: %+v", ch)
+		}
+	})
+
+	t.Run("SaaS mode refuses internal servers when sending", func(t *testing.T) {
+		srv := newFakeSMTP(t, false)
+		provider := NewEmailProvider(nil).WithEgress(egress.Options{Resolver: staticResolver{
+			"relay.example.test": "127.0.0.1", "mail.example.test": "10.0.0.5"}})
+		for _, c := range []struct {
+			host string
+			port int
+		}{{"127.0.0.1", srv.port()}, {"10.0.0.5", 587}, {"fd12:3456::25", 25}, {"relay.example.test", 587}, {"mail.example.test", 25},
+			{"relay.example.test", srv.port()}} {
+			ch := &Channel{Name: "own", Provider: ProviderSMTP, Enabled: true, Config: map[string]any{"host": c.host,
+				"port": float64(c.port), "tls": "none", "from": "cmdb@acme.example", "username": "cmdb", "password": "pw"}}
+			if _, err := provider.Send(ctx, ch, &Message{Subject: "s", Body: "b", To: []Recipient{{Email: "ops@acme.example"}}}); !errors.Is(err, egress.ErrBlockedDestination) {
+				t.Errorf("send to %s:%d: %v, want %v", c.host, c.port, err, egress.ErrBlockedDestination)
+			}
+		}
+		srv.mu.Lock()
+		defer srv.mu.Unlock()
+		if len(srv.auth) != 0 || len(srv.data) != 0 {
+			t.Errorf("the loopback server was reached: %d AUTH, %d mails", len(srv.auth), len(srv.data))
+		}
+	})
+
+	t.Run("AllowPrivate accepts and reaches internal relays", func(t *testing.T) {
+		policy := egress.Options{AllowPrivate: true}
+		center, call := serve(policy)
+		for i, c := range refused {
+			if c.host == "localhost" {
+				continue
+			}
+			if w := call(http.MethodPost, "/api/v1/notification-channels", smtpChannel(fmt.Sprintf("own-%d", i), c.host, c.port, "starttls")); w.Code != http.StatusCreated {
+				t.Errorf("AllowPrivate %s %s:%d = %d %s", c.mode, c.host, c.port, w.Code, w.Body.String())
+			}
+		}
+		if list, _ := center.Channels.List(ctx, "org-1"); len(list) != len(refused)-1 {
+			t.Errorf("%d channels stored, want %d", len(list), len(refused)-1)
+		}
+		// The relay accepts mail without AUTH (net/smtp sends no password
+		// unencrypted to another host than localhost).
+		srv := newFakeSMTP(t, false)
+		policy.Resolver = staticResolver{"relay.example.test": "127.0.0.1"}
+		ch := &Channel{Name: "own", Provider: ProviderSMTP, Enabled: true, Config: map[string]any{"host": "relay.example.test",
+			"port": float64(srv.port()), "tls": "none", "from": "cmdb@acme.example"}}
+		if _, err := NewEmailProvider(nil).WithEgress(policy).Send(ctx, ch, &Message{Subject: "s", Body: "b",
+			To: []Recipient{{Email: "ops@acme.example"}}}); err != nil {
+			t.Fatalf("send to the internal relay: %v", err)
+		}
+		srv.mu.Lock()
+		defer srv.mu.Unlock()
+		if len(srv.data) != 1 || strings.Join(srv.rcpt[0], ",") != "<ops@acme.example>" {
+			t.Errorf("internal relay: %d mails", len(srv.data))
+		}
+	})
+
+	t.Run("the central server is exempt", func(t *testing.T) {
+		srv := newFakeSMTP(t, false)
+		central, err := NewSMTPSender(&SMTPConfig{Host: "127.0.0.1", Port: srv.port(), TLS: SMTPNone, From: "noreply@reticora.example"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ch := &Channel{Name: "central", Provider: ProviderCentralSMTP, Enabled: true, Config: map[string]any{"sender_name": "ACME"}}
+		if _, err = NewEmailProvider(central).Send(ctx, ch, &Message{Subject: "s", Body: "b", To: []Recipient{{Email: "ops@acme.example"}}}); err != nil {
+			t.Errorf("central server on the loopback interface: %v", err)
+		}
+		_, call := serve(egress.Options{})
+		if w := call(http.MethodPost, "/api/v1/notification-channels", `{"name":"central","provider":"central_smtp","config":{"sender_name":"ACME"}}`); w.Code != http.StatusCreated {
+			t.Errorf("central channel = %d %s", w.Code, w.Body.String())
+		}
+	})
 }
 
 // TestInAppAndWebhookChannels covers the in-app and webhook providers and

@@ -23,6 +23,7 @@ import { api, signupTenant, stamp, uiLogin, BASE, type Account } from './support
  *
  * Test → WP (requirement IDs) proven:
  *  L01  create a CI through the CMDB form, open it ........... WP-120 (CI-01), WP-117 (CI-03), WP-201 (TST-03)
+ *  L01b runtime org type in the form, no reload; not in B .... WP-119 (MET-04), WP-117 (CI-03), WP-397
  *  L02  required-field / format validation, nothing stored .... WP-117 (CI-03, MET-11), WP-163 (API-03), WP-201 (TST-03)
  *  L03a double click on the create button of the form ......... WP-201 (TST-03), WP-120 (CI-01)
  *  L03b Idempotency-Key replay, conflicting reuse, parallel ... WP-050 (API-04)
@@ -410,6 +411,97 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     await expect(detailValue(page, 'Management-IP')).toHaveText('10.20.30.40');
     await expect(detailValue(page, 'Firmware')).toHaveText('2.1.0');
     await expect(main.getByText('Wartung', { exact: true }).first()).toBeVisible();
+  });
+
+  test('L01b an organization type created at runtime is offered by the CMDB form without a reload, the CI is stored with its attribute, another organization is not offered the type', async ({
+    browser,
+  }) => {
+    test.setTimeout(4 * 60_000);
+    const page = w.page;
+    const label = `Laufzeittyp ${w.s}`;
+
+    // The SPA is loaded and the dialog has read the types before the new type exists.
+    let dialog = await openCreateForm(page);
+    let typeSelect = dialog.getByLabel('CI-Typ');
+    await expect(typeSelect.locator('option', { hasText: 'Server' }).first()).toBeAttached();
+    await expect(typeSelect.locator('option', { hasText: label })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+    await expect(dialog).toBeHidden();
+    await page.evaluate(() => {
+      (window as unknown as { l01bLoaded?: boolean }).l01bLoaded = true;
+    });
+
+    // MET-04: an organization type with an attribute, created at runtime through the API.
+    const created = await ok<{ id: string; organization_id?: string; is_active: boolean }>(
+      'POST',
+      '/ci-types',
+      {
+        key: `lc_runtime_${w.s}`,
+        name: `lc-runtime-${w.s}`,
+        display_name: { de: label, en: `Runtime type ${w.s}` },
+        fields: [
+          { name: 'rack_units', label: 'Höheneinheiten', data_type: 'integer', required: true },
+        ],
+      },
+    );
+    expect(created.organization_id, 'the type belongs to the own organization').toBe(w.orgId);
+    expect(created.is_active).toBe(true);
+
+    // No reload, no release: the dialog offers the type, renders its attribute
+    // and posts the type id (CI-03) with the attribute value.
+    await page.getByRole('button', { name: 'CI erstellen' }).first().click();
+    dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('heading', { name: 'CI erstellen' })).toBeVisible();
+    const name = `lc-runtime-ci-${w.s}`;
+    await dialog.getByLabel('Name', { exact: true }).fill(name);
+    typeSelect = dialog.getByLabel('CI-Typ');
+    await typeSelect.selectOption({ label });
+    await dialog.getByLabel('Höheneinheiten').fill('2');
+    const posted = waitForPath(page, '/cis', 'POST');
+    await dialog.getByRole('button', { name: 'Anlegen' }).click();
+    const res = await posted;
+    expect(res.status(), `POST /cis with the runtime type: ${await res.text()}`).toBe(201);
+    expect(res.request().postDataJSON()).toMatchObject({
+      ci_type_id: created.id,
+      attributes: { rack_units: 2 },
+    });
+    const ci = (await res.json()) as CI;
+    await expect(dialog).toBeHidden();
+    expect(
+      await page.evaluate(() => (window as unknown as { l01bLoaded?: boolean }).l01bLoaded),
+      'the SPA was not reloaded',
+    ).toBe(true);
+    const stored = (await getCI(ci.id)) as CI & { attributes?: Record<string, unknown> };
+    expect(stored).toMatchObject({
+      organization_id: w.orgId,
+      ci_type_id: created.id,
+      name,
+      is_manual: true,
+    });
+    expect(stored.attributes?.rack_units).toBe(2);
+
+    // Negative: another organization neither lists nor offers the type.
+    const ctxB = await browser.newContext({
+      baseURL: BASE,
+      locale: 'de-DE',
+      extraHTTPHeaders: { 'X-Real-IP': realIp() },
+    });
+    try {
+      const pageB = await ctxB.newPage();
+      const accountB = await signupTenant(pageB, w.rq, 'cilifeb');
+      const tokenB = await uiLogin(pageB, accountB);
+      expect(claims(tokenB).org, 'a second organization').not.toBe(w.orgId);
+      const typesB = await api<List<{ id: string }>>(w.rq, tokenB, 'GET', '/ci-types?limit=200');
+      expect(typesB.status).toBe(200);
+      expect(rows(typesB.body).map((t) => t.id)).not.toContain(created.id);
+      const dialogB = await openCreateForm(pageB);
+      const typeSelectB = dialogB.getByLabel('CI-Typ');
+      await expect(typeSelectB.locator('option', { hasText: 'Server' }).first()).toBeAttached();
+      await expect(typeSelectB.locator('option', { hasText: label })).toHaveCount(0);
+      await expect(typeSelectB.locator(`option[value="${created.id}"]`)).toHaveCount(0);
+    } finally {
+      await ctxB.close();
+    }
   });
 
   test('L02 required-field and format errors are shown in the form and nothing is stored', async () => {

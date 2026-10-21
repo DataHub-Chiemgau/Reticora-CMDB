@@ -240,6 +240,9 @@
     "editCI": "CI bearbeiten",
     "ciDescription": "Pflegen Sie Stammdaten und Status des Configuration Items.",
     "selectPlaceholder": "Bitte auswählen",
+    "typeAttributes": "Typattribute",
+    "typesLoadFailed": "Die CI-Typen konnten nicht geladen werden.",
+    "typeSchemaLoadFailed": "Die Attribute des CI-Typs konnten nicht geladen werden.",
     "fields": {
       "name": "Name",
       "ciType": "CI-Typ",

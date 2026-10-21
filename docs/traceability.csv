@@ -587,3 +587,17 @@ TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-394
 API-05;[B];B;backend/internal/user/grant_ceiling_test.go;WP-394
 AUT-02;[B];B;backend/internal/user/role_assignment_integration_test.go;WP-395
 API-05;[B];B;backend/internal/user/role_assignment_integration_test.go;WP-395
+CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/server/ci_type_ref_integration_test.go;WP-396
+TEN-09;[Q];B;backend/internal/server/ci_type_ref_integration_test.go;WP-396
+CI-03;[B];B;frontend/src/pages/CIFormModal.test.tsx;WP-397
+MET-04;B/G1;B;frontend/e2e-real/ci-lifecycle.spec.ts;WP-397
+CI-01;[B], Teilfelder [P2]/[P3];B;frontend/src/pages/CIFormModal.test.tsx;WP-397
+TST-03;[B], Teilumfang [P2];B;frontend/e2e-real/ci-lifecycle.spec.ts;WP-397
+NTF-01;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+NTF-04;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+API-05;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+RBA-02;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+NTF-01;[B];B;backend/internal/notify/channel_secret_test.go;WP-399
+TEC-13;[B];B;backend/internal/notify/channel_secret_test.go;WP-399
+REP-01;[B];B;backend/internal/notify/channel_test.go;WP-399
+SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-399

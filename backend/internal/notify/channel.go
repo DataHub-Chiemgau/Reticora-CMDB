@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
 
 // Channel kinds (NTF-01); sms and pager get their providers with NTF-02.
@@ -32,7 +33,9 @@ const (
 	// the organization as sender name.
 	ProviderCentralSMTP = "central_smtp"
 	// ProviderSMTP sends over the organization's own SMTP (dedicated,
-	// on-premises, air-gapped).
+	// on-premises, air-gapped). Its server is held to the egress policy
+	// (SEC-08): a relay in the internal network needs
+	// RETICORA_EGRESS_ALLOW_PRIVATE=true.
 	ProviderSMTP    = "smtp"
 	ProviderInApp   = "inapp"
 	ProviderWebhook = "webhook"
@@ -93,6 +96,24 @@ func (c *Channel) Validate() error {
 		}
 	}
 	return nil
+}
+
+// CheckEgress checks the destination of the channel against the egress
+// policy when it is stored (SEC-08): the server of an organization's own
+// SMTP channel (SMTPConfig.CheckEgress); the central server is the
+// operator's configuration.
+func (c *Channel) CheckEgress(opts egress.Options) error {
+	if c.Provider != ProviderSMTP {
+		return nil
+	}
+	cfg, err := SMTPConfigFrom(c.Config)
+	if err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	return cfg.CheckEgress(opts)
 }
 
 // Recipient is one addressee of a message.

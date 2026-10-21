@@ -3415,11 +3415,14 @@ export interface paths {
     };
     /**
      * Notification channels of the organization
-     * @description Secrets (password, secret) are returned as `********`.
+     * @description Requires notification:manage (RBA-02: org_admin only). Secrets (password, secret) are returned as `********`, the url of a webhook channel as scheme and host with masked path and query (`https://hooks.example.org/********`): path and query carry the token of an incoming webhook.
      */
     get: operations['listNotificationChannels'];
     put?: never;
-    /** Create a notification channel */
+    /**
+     * Create a notification channel
+     * @description Requires notification:manage. The response is redacted like the list. The server of an own SMTP channel (provider smtp) is held to the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true an IP literal or name of a private, loopback, link-local or unique-local network and a port other than 25, 465 or 587 are refused with 422 (field host or port, the detail names the setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254) are refused in every mode. The address a name resolves to is checked again on every connection. central_smtp is the operator's server and exempt.
+     */
     post: operations['createNotificationChannel'];
     delete?: never;
     options?: never;
@@ -3436,17 +3439,23 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get a notification channel */
+    /**
+     * Get a notification channel
+     * @description Requires notification:manage; redacted like the list.
+     */
     get: operations['getNotificationChannel'];
     put?: never;
     post?: never;
-    /** Delete a notification channel */
+    /**
+     * Delete a notification channel
+     * @description Requires notification:manage.
+     */
     delete: operations['deleteNotificationChannel'];
     options?: never;
     head?: never;
     /**
      * Update name, configuration or enabled flag
-     * @description A configuration replaces the stored one; a secret sent back as `********` keeps its value. Kind and provider cannot change.
+     * @description Requires notification:manage. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. A secret sent back as `********` while the configuration changes its destination (smtp: host, port, tls or username; webhook: url) is refused with 400 (field password or secret): it must be entered again. A configuration is held to the egress policy like on create (422, field host or port). Kind and provider cannot change.
      */
     patch: operations['updateNotificationChannel'];
     trace?: never;
@@ -3458,7 +3467,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Latest notification deliveries with their status */
+    /**
+     * Latest notification deliveries with their status
+     * @description Requires notification:manage (RBA-02: org_admin only). A delivery shows recipients, category, subject, status, attempts and the last error, not its content (body, data): links and tokens such as an invitation link are not returned, URLs in subject and last error are masked like the url of a webhook channel.
+     */
     get: operations['listNotificationDeliveries'];
     put?: never;
     post?: never;
@@ -6689,7 +6701,7 @@ export interface components {
       kind: 'email' | 'inapp' | 'webhook' | 'sms' | 'pager';
       /** @enum {string} */
       provider: 'central_smtp' | 'smtp' | 'inapp' | 'webhook';
-      /** @description central_smtp: sender_name, reply_to; smtp: host, port, tls (starttls|tls|none), username, password, from; webhook: url, secret. Secrets are returned as `********`. */
+      /** @description central_smtp: sender_name, reply_to; smtp: host, port, tls (starttls|tls|none), username, password, from; webhook: url, secret. Secrets are returned as `********`, the webhook url as scheme and host with masked path and query. The smtp host and port are held to the egress policy (SEC-08). */
       config?: {
         [key: string]: unknown;
       };
@@ -6710,6 +6722,7 @@ export interface components {
       };
       enabled?: boolean;
     };
+    /** @description A queued delivery without its content: body and data (links, tokens) stay in the delivery queue. */
     NotificationDelivery: {
       id: string;
       organization_id: string;
@@ -6719,10 +6732,6 @@ export interface components {
       category: string;
       critical: boolean;
       subject: string;
-      body: string;
-      data?: {
-        [key: string]: unknown;
-      };
       dedup_key?: string;
       /** @enum {string} */
       status: 'pending' | 'sending' | 'sent' | 'failed' | 'suppressed';
@@ -7410,6 +7419,7 @@ export interface components {
       readonly site_id?: string;
       /** @description Room of location_id (the location or its nearest room ancestor), derived by the server. */
       readonly room_id?: string;
+      /** @description A system type or a type of the CI's organization; the database refuses a type of another organization on every write path (CI-01, TEN-09). */
       ci_type_id: string;
       name: string;
       status: components['schemas']['CIStatus'];
@@ -7470,6 +7480,7 @@ export interface components {
       invoice_number?: string;
     };
     CreateCIRequest: {
+      /** @description ID (UUID) of an active system type or an active type of the organization (GET /api/v1/ci-types; CI-01, TEN-09), not its key. Any other value is rejected (422 on ci_type_id); an unknown ID and a type of another organization get the same answer. */
       ci_type_id: string;
       client_id?: string;
       /** @description Node of the location tree; site and room of the CI follow from it. */
@@ -11566,6 +11577,15 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      /** @description A field value is not allowed; `violations` names the field, e.g. ci_type_id that is no UUID ("not the ID (UUID) of a CI type"), names no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or a deactivated type ("the CI type is deactivated"). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -11742,7 +11762,10 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': {
-          /** Format: uuid */
+          /**
+           * Format: uuid
+           * @description ID of an active system type or an active type of the organization (CI-01, TEN-09).
+           */
           ci_type_id: string;
         };
       };
@@ -11761,13 +11784,13 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The target type does not exist. */
+      /** @description The target type is not allowed, `violations` names ci_type_id: no UUID ("not the ID (UUID) of a CI type"), no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or deactivated ("the CI type is deactivated"). */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/problem+json': components['schemas']['ProblemDetail'];
+          'application/problem+json': components['schemas']['ViolationProblem'];
         };
       };
     };
@@ -18695,6 +18718,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
     };
   };
   createNotificationChannel: {
@@ -18721,7 +18745,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   getNotificationChannel: {
@@ -18745,6 +18771,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18767,6 +18794,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18796,8 +18824,10 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listNotificationDeliveries: {
@@ -18834,6 +18864,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
     };
   };
   listVRFs: {

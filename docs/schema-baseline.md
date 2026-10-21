@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000152_located_site_scope
+Stand: Migration 000153_ci_type_org_check
 
 ## Prüfung
 
@@ -235,7 +235,12 @@ Globale Kataloge ohne Org-Spalte sind nach E-10 eine dokumentierte Ausnahme,
 keine Lücke: Sie werden nur durch Migrationen gepflegt und sind für die
 App-Rolle schreibgeschützt. Heute ist das nur `permission` (WP-024). Globale
 Katalogzeilen in Tabellen mit Org-Spalte (`organization_id IS NULL`, z. B.
-System-CI-Typen) sind über getrennte Policies je Kommando nur lesbar.
+System-CI-Typen) sind über getrennte Policies je Kommando nur lesbar. Ein CI
+hat einen System-Typ oder einen Typ seiner Organisation: Der einspaltige
+Fremdschlüssel `ci_ci_type_id_fkey` umgeht RLS, deshalb prüft der
+Constraint-Trigger `trg_ci_type_organization` (Migration 000153, WP-396,
+F-144) jedes INSERT und jede Änderung von `ci_type_id` (23514
+`ci_type_organization`).
 
 Die organisationsübergreifende Tabelle `operator_audit` (SEC-07, WP-070) ist
 die zweite dokumentierte Ausnahme ohne Org-Spalte: ENABLE + FORCE RLS mit einer

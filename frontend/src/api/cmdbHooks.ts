@@ -23,14 +23,33 @@ import {
 } from './cmdb';
 import type { FieldDefinition } from '../lib/fieldmeta';
 
-export function useCITypes(
-  params: { include_inactive?: boolean; category?: string; search?: string } = {},
-) {
-  return useQuery({ queryKey: ['ci-types', params], queryFn: () => ciTypeApi.list(params) });
+/** Query options a caller may set; the CI dialog loads only while open, uncached (MET-04). */
+interface QueryControl {
+  enabled?: boolean;
+  staleTime?: number;
 }
 
-export function useCIType(id: string | undefined) {
-  return useQuery({ queryKey: ['ci-types', id], queryFn: () => ciTypeApi.get(id!), enabled: !!id });
+export function useCITypes(
+  params: { include_inactive?: boolean; category?: string; search?: string; limit?: number } = {},
+  options: QueryControl = {},
+) {
+  return useQuery({
+    queryKey: ['ci-types', params],
+    queryFn: () => ciTypeApi.list(params),
+    ...options,
+  });
+}
+
+export function useCIType(
+  id: string | undefined,
+  { enabled = true, ...options }: QueryControl = {},
+) {
+  return useQuery({
+    queryKey: ['ci-types', id],
+    queryFn: () => ciTypeApi.get(id!),
+    ...options,
+    enabled: !!id && enabled,
+  });
 }
 
 export function useCITypeTemplates() {

@@ -1,8 +1,9 @@
 // Package egress provides the outbound HTTP client for user-configured
-// destinations (webhooks, SCIM connectors). It blocks private, loopback,
-// link-local, cloud-metadata and IPv6 unique-local targets, connects to the
-// address it checked (DNS pinning against rebinding) and re-checks every one
-// of at most three redirects (SEC-08).
+// destinations (webhooks, SCIM connectors) and the dialer for other
+// protocols (an organization's own SMTP server). It blocks private,
+// loopback, link-local, cloud-metadata and IPv6 unique-local targets,
+// connects to the address it checked (DNS pinning against rebinding) and
+// re-checks every one of at most three redirects (SEC-08).
 package egress
 
 import (
@@ -35,9 +36,9 @@ type Resolver interface {
 // Options configures a client.
 type Options struct {
 	// AllowPrivate permits private, loopback and link-local destinations,
-	// for on-premises installations whose webhooks and connectors live in
-	// the internal network (RETICORA_EGRESS_ALLOW_PRIVATE). Cloud metadata
-	// endpoints stay blocked.
+	// for on-premises installations whose webhooks, connectors and SMTP
+	// relays live in the internal network (RETICORA_EGRESS_ALLOW_PRIVATE).
+	// Cloud metadata endpoints stay blocked.
 	AllowPrivate bool
 	// Timeout bounds a request; zero uses DefaultTimeout.
 	Timeout time.Duration
@@ -84,7 +85,9 @@ func mustPrefixes(cidrs ...string) []netip.Prefix {
 
 // Allowed reports whether a connection to ip is permitted.
 func (o Options) Allowed(ip netip.Addr) bool {
-	ip = ip.Unmap()
+	// A prefix never contains an address with a zone (fe80::1%eth0): judge
+	// the address without it.
+	ip = ip.WithZone("").Unmap()
 	// NAT64 (64:ff9b::/96) embeds an IPv4 address: judge that address.
 	if ip.Is6() && netip.MustParsePrefix("64:ff9b::/96").Contains(ip) {
 		b := ip.As16()
@@ -124,7 +127,15 @@ func (o Options) ValidateURL(raw string) error {
 	if u.User != nil {
 		return fmt.Errorf("%w: credentials in the URL", ErrBlockedDestination)
 	}
-	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	return o.ValidateHost(u.Hostname())
+}
+
+// ValidateHost checks a destination host (name or IP literal) when it is
+// stored: an IP literal must be allowed; localhost and internal suffixes
+// are blocked unless private destinations are. The authoritative check of
+// the resolved address happens on every connection.
+func (o Options) ValidateHost(host string) error {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
 	if host == "" {
 		return fmt.Errorf("%w: missing host", ErrBlockedDestination)
 	}
@@ -141,9 +152,18 @@ func (o Options) ValidateURL(raw string) error {
 	return nil
 }
 
-// NewClient returns the egress HTTP client. It never uses an environment
-// proxy, which would bypass the destination check.
-func NewClient(opts Options) *http.Client {
+// Dialer opens connections to user-configured destinations: it resolves
+// the host once, refuses it when one of its addresses is blocked and
+// connects to the checked address (DNS pinning against rebinding).
+type Dialer struct {
+	opts     Options
+	resolver Resolver
+	// dial connects to the checked address (tests replace it).
+	dial func(ctx context.Context, network, address string) (net.Conn, error)
+}
+
+// NewDialer returns the egress dialer; Timeout bounds a connect.
+func NewDialer(opts Options) *Dialer {
 	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -152,28 +172,42 @@ func NewClient(opts Options) *http.Client {
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
-	dialer := &net.Dialer{Timeout: timeout}
+	return &Dialer{opts: opts, resolver: resolver, dial: (&net.Dialer{Timeout: timeout}).DialContext}
+}
+
+// DialContext connects to address (host:port) like net.Dialer.DialContext.
+func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	addrs, err := resolve(ctx, d.resolver, host)
+	if err != nil {
+		return nil, err
+	}
+	// Every resolved address must be allowed: a name that also points into
+	// the internal network is rejected as a whole. The error does not name
+	// the address: it reaches the tenant (a delivery's last error) and
+	// would answer lookups of internal names.
+	for _, ip := range addrs {
+		if !d.opts.Allowed(ip) {
+			return nil, fmt.Errorf("%w: %s resolves to a blocked address", ErrBlockedDestination, host)
+		}
+	}
+	// Pinning: connect to the checked address, never resolve again.
+	return d.dial(ctx, network, net.JoinHostPort(addrs[0].Unmap().String(), port))
+}
+
+// NewClient returns the egress HTTP client. It never uses an environment
+// proxy, which would bypass the destination check.
+func NewClient(opts Options) *http.Client {
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
 	transport := &http.Transport{
-		Proxy: nil,
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(address)
-			if err != nil {
-				return nil, err
-			}
-			addrs, err := resolve(ctx, resolver, host)
-			if err != nil {
-				return nil, err
-			}
-			// Every resolved address must be allowed: a name that also
-			// points into the internal network is rejected as a whole.
-			for _, ip := range addrs {
-				if !opts.Allowed(ip) {
-					return nil, fmt.Errorf("%w: %s resolves to %s", ErrBlockedDestination, host, ip)
-				}
-			}
-			// Pinning: connect to the checked address, never resolve again.
-			return dialer.DialContext(ctx, network, net.JoinHostPort(addrs[0].Unmap().String(), port))
-		},
+		Proxy:                 nil,
+		DialContext:           NewDialer(opts).DialContext,
 		ForceAttemptHTTP2:     true,
 		TLSHandshakeTimeout:   timeout,
 		ResponseHeaderTimeout: timeout,

@@ -23,14 +23,12 @@
 //   - TestAuditDefectDiscoveryJobInGenericJobModel
 //     WP-129 (JOB-01) P2 "Discovery jobs are never registered in the generic job
 //     model (adapter not wired)". Gap (high).
-//   - TestAuditDefectNotificationAdministrationNeedsNotificationManage
-//     WP-139 / WP-137 (RBA-01, RBA-02, NTF-01) P2 "Viewer and engineer can read all
-//     notification deliveries and channel configs (webhook:read instead of
-//     notification:manage)" and "Webhook channel URL (token) returned unredacted".
-//     Gap (high): channel read authorization and redaction through the router.
-//   - TestAuditDefectForeignPrivateCITypeRejected
-//     WP-120 (CI-01, TEN-05, TEN-09) P2 "POST /cis accepts a private CI type of
-//     another organization". Gap (critical): tenant tests for POST /cis.
+//
+// TestAuditDefectForeignPrivateCITypeRejected (WP-120, F-144) is fixed by
+// WP-396 and lives in ci_type_ref_integration_test.go;
+// TestAuditDefectNotificationAdministrationNeedsNotificationManage (WP-139,
+// WP-137, F-154) is fixed by WP-398 and lives in
+// notification_authz_integration_test.go.
 //
 // Retest:
 //
@@ -275,82 +273,5 @@ func TestAuditDefectDiscoveryJobInGenericJobModel(t *testing.T) {
 	}
 	if r = e.Call(t, otherOrg, http.MethodGet, "/api/v1/jobs/"+jobID, ``); r.Code != http.StatusNotFound {
 		t.Errorf("organization B GET /jobs/%s = %d, want 404", jobID, r.Code)
-	}
-}
-
-func TestAuditDefectNotificationAdministrationNeedsNotificationManage(t *testing.T) {
-	e := t6NewEnv(t, "d9", nil)
-	f := e.F
-	admin := t6As{f.OrgA, f.AppUser(t, f.OrgA, "audit-d9-admin"), t6RolePerms(t, "org_admin")}
-	const token = "AUDITD9TOKENXYZ"
-	r := e.Call(t, admin, http.MethodPost, "/api/v1/notification-channels",
-		`{"name":"audit-d9-chat","provider":"webhook","config":{"url":"https://hooks.example.invalid/services/T0/B0/`+token+`"},"enabled":true}`)
-	if r.Code != http.StatusCreated {
-		t.Fatalf("org_admin POST /notification-channels = %d %s", r.Code, t6Short(r.Body))
-	}
-	channel := t6ID(r.Body)
-
-	for _, role := range []string{"viewer", "engineer"} {
-		caller := t6As{f.OrgA, f.AppUser(t, f.OrgA, "audit-d9-"+role), t6RolePerms(t, role)}
-		for _, path := range []string{"/api/v1/notification-deliveries", "/api/v1/notification-channels", "/api/v1/notification-channels/" + channel} {
-			t.Run(role+" GET "+path, func(t *testing.T) {
-				r := e.Call(t, caller, http.MethodGet, path, ``)
-				if r.Code != http.StatusForbidden {
-					t.Errorf("%s GET %s = %d, want 403 (RBA-02: notification:manage is org_admin only); token leaked: %v",
-						role, path, r.Code, strings.Contains(string(r.Body), token))
-				}
-			})
-		}
-	}
-	t.Run("org_admin GET channel does not reveal the webhook token", func(t *testing.T) {
-		r := e.Call(t, admin, http.MethodGet, "/api/v1/notification-channels/"+channel, ``)
-		if r.Code != http.StatusOK {
-			t.Fatalf("org_admin GET channel = %d", r.Code)
-		}
-		if strings.Contains(string(r.Body), token) {
-			t.Errorf("channel response contains the incoming-webhook token: %s", t6Short(r.Body))
-		}
-	})
-}
-
-func TestAuditDefectForeignPrivateCITypeRejected(t *testing.T) {
-	e := t6NewEnv(t, "da", nil)
-	f := e.F
-	bg := context.Background()
-	orgB := t6As{f.OrgB, f.AppUser(t, f.OrgB, "audit-da-b"), identity.AllPermissions()}
-	orgType := func(org, key string) string {
-		t.Helper()
-		var id string
-		if err := f.Admin.QueryRow(bg, `INSERT INTO ci_type (organization_id, key, name) VALUES ($1, $2, $2) RETURNING id::text`, org, key).Scan(&id); err != nil {
-			t.Fatalf("type %s: %v", key, err)
-		}
-		return id
-	}
-	privateA := orgType(f.OrgA, "audit-da-private-a")
-	ownB := orgType(f.OrgB, "audit-da-own-b")
-	var systemType string
-	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL LIMIT 1`).Scan(&systemType); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name, typeID string
-		want         int
-	}{
-		{"org A's private type", privateA, http.StatusUnprocessableEntity},
-		{"system type", systemType, http.StatusCreated},
-		{"org B's own type", ownB, http.StatusCreated},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := e.Call(t, orgB, http.MethodPost, "/api/v1/cis", `{"name":"audit-da-`+strings.ReplaceAll(tc.name, " ", "-")+`","ci_type_id":"`+tc.typeID+`"}`)
-			rows := e.Count(t, `SELECT count(*) FROM ci WHERE organization_id = $1 AND ci_type_id = $2`, f.OrgB, tc.typeID)
-			wantRows := 0
-			if tc.want == http.StatusCreated {
-				wantRows = 1
-			}
-			if r.Code != tc.want || rows != wantRows {
-				t.Errorf("org B POST /cis with %s = %d (org-B rows referencing it: %d), want %d and %d row(s): %s",
-					tc.name, r.Code, rows, tc.want, wantRows, t6Short(r.Body))
-			}
-		})
 	}
 }

@@ -498,6 +498,9 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				COALESCE(location_id::text, ''), health, version, schema_version, created_at, updated_at
 		`
 
+		if err := checkCITypes(ctx, tx, item.OrganizationID, []*Item{item}); err != nil {
+			return err
+		}
 		if err := checkParents(ctx, tx, item.OrganizationID, []*Item{item}); err != nil {
 			return err
 		}
@@ -570,6 +573,9 @@ func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*It
 		}
 	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := checkCITypes(ctx, tx, orgID, items); err != nil {
+			return err
+		}
 		if err := checkParents(ctx, tx, orgID, items); err != nil {
 			return err
 		}
@@ -924,6 +930,55 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	})
 
 	return item, r.uniqueField(ctx, orgID, err)
+}
+
+// checkCITypes keeps the type of a CI within its organization (CI-01,
+// TEN-09; F-144). The foreign key of ci_type_id has one column and bypasses
+// row level security; the trigger ci_type_organization refuses a type of
+// another organization on every path. Here a type ID that is no UUID is
+// refused before any statement, and the types the writer chose (ChosenType)
+// are read in the writing transaction under the principal's row level
+// security with one statement: a private type of another organization is
+// invisible and, like an unknown ID, "CI type not found"; a deactivated type
+// is refused. Items without ChosenType (discovery, agent) cost no statement.
+func checkCITypes(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) error {
+	var chosen []string
+	for _, item := range items {
+		if err := checkCITypeID(item.CITypeID); err != nil {
+			return err
+		}
+		if item.ChosenType {
+			chosen = append(chosen, item.CITypeID)
+		}
+	}
+	if len(chosen) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT t.is_active
+		FROM unnest($2::uuid[]) WITH ORDINALITY AS l(id, ord)
+		LEFT JOIN ci_type t ON t.id = l.id AND (t.organization_id IS NULL OR t.organization_id = $1)
+		ORDER BY l.ord`, orgID, chosen)
+	if err != nil {
+		return fmt.Errorf("read ci types: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var active *bool
+		if err := rows.Scan(&active); err != nil {
+			return fmt.Errorf("read ci types: %w", err)
+		}
+		switch {
+		case active == nil:
+			return ciTypeViolation(ciTypeNotFound)
+		case !*active:
+			return ciTypeViolation(ciTypeDeactivated)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read ci types: %w", err)
+	}
+	return nil
 }
 
 // parentOfAnotherClient is the violation of a parent outside the CI's client.
@@ -1494,6 +1549,10 @@ func locationError(err error) error {
 		return &ValidationError{Violations: []Violation{{Field: "health", Detail: "the health is computed from monitoring"}}}
 	case "ci_asset_id_fkey":
 		return &ValidationError{Violations: []Violation{{Field: "asset_id", Detail: "asset not found"}}}
+	case "ci_ci_type_id_fkey", "ci_type_organization":
+		// An unknown type and a type of another organization (trigger of
+		// migration 000153) are the same answer (TEN-09).
+		return ciTypeViolation(ciTypeNotFound)
 	case "ci_location_from_asset":
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: locationOwnedByAsset}}}
 	}
@@ -1822,6 +1881,9 @@ func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, cli
 // relationships, mounts, asset link and history stay; required attributes
 // of the target type the CI lacks are reported as findings.
 func (r *PGRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode string) (*TypeChangeResult, error) {
+	if !api.IsUUID(typeID) {
+		return nil, ErrUnknownType
+	}
 	result := &TypeChangeResult{Findings: []TypeFinding{}}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
@@ -1832,10 +1894,13 @@ func (r *PGRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode
 			}
 			return fmt.Errorf("get ci for type change: %w", err)
 		}
+		// The target is read under the principal's row level security: a
+		// private type of another organization is unknown (TEN-09).
 		var toKey string
 		var required []string
-		err = tx.QueryRow(ctx, `SELECT COALESCE(key, name), COALESCE(required_fields, '{}') FROM ci_type
-			WHERE id = $1 AND (organization_id = $2 OR organization_id IS NULL)`, typeID, orgID).Scan(&toKey, &required)
+		var active bool
+		err = tx.QueryRow(ctx, `SELECT COALESCE(key, name), COALESCE(required_fields, '{}'), is_active FROM ci_type
+			WHERE id = $1 AND (organization_id = $2 OR organization_id IS NULL)`, typeID, orgID).Scan(&toKey, &required, &active)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrUnknownType
@@ -1855,9 +1920,14 @@ func (r *PGRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode
 			result.CI = before
 			return nil
 		}
+		// A person cannot choose a deactivated type (CI-01); discovery
+		// raises generic_device to the type it resolved, as it creates CIs.
+		if mode == TypeChangeManual && !active {
+			return ciTypeViolation(ciTypeDeactivated)
+		}
 		if _, err = tx.Exec(ctx, `UPDATE ci SET ci_type_id = $3, version = version + 1, updated_at = NOW()
 			WHERE id = $1 AND organization_id = $2`, ciID, orgID, typeID); err != nil {
-			return fmt.Errorf("change ci type: %w", err)
+			return locationError(fmt.Errorf("change ci type: %w", err))
 		}
 		after, err := scanCI(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2", ciSelectColumns), ciID, orgID))
 		if err != nil {

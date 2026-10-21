@@ -169,7 +169,7 @@ func TestServiceCreateRejectsInvalidAttributes(t *testing.T) {
 	repo := NewMemoryRepository()
 	svc := NewService(repo).WithFieldResolver(stubResolver{defs: serverKindDefs()})
 
-	item := &Item{OrganizationID: "org-1", CITypeID: "type-1", Name: "srv-01", Attributes: map[string]any{}}
+	item := &Item{OrganizationID: "org-1", CITypeID: testServerType, Name: "srv-01", Attributes: map[string]any{}}
 	err := svc.Create(context.Background(), item)
 	if _, ok := AsValidationError(err); !ok {
 		t.Fatalf("expected validation error, got %v", err)
@@ -205,11 +205,11 @@ func TestReservedNamespaces(t *testing.T) {
 	svc := NewService(NewMemoryRepository())
 	ctx := context.Background()
 	var reserved *ReservedKeyError
-	err := svc.Create(ctx, &Item{OrganizationID: "org-1", CITypeID: "t", Name: "x", Attributes: map[string]any{"_overrides": map[string]any{}, "rack": "R1"}})
+	err := svc.Create(ctx, &Item{OrganizationID: "org-1", CITypeID: testServerType, Name: "x", Attributes: map[string]any{"_overrides": map[string]any{}, "rack": "R1"}})
 	if !errors.As(err, &reserved) || len(reserved.Fields) != 1 || reserved.Fields[0] != "attributes._overrides" {
 		t.Errorf("create with _overrides: %v", err)
 	}
-	item := &Item{OrganizationID: "org-1", CITypeID: "t", Name: "x", Attributes: map[string]any{"rack": "R1"}}
+	item := &Item{OrganizationID: "org-1", CITypeID: testServerType, Name: "x", Attributes: map[string]any{"rack": "R1"}}
 	if err = svc.Create(ctx, item); err != nil {
 		t.Fatal(err)
 	}
@@ -263,11 +263,11 @@ func TestTypedColumnsTakePartInValidation(t *testing.T) {
 	ctx := context.Background()
 
 	// Required: the typed hostname counts, an attribute is not needed.
-	missing := &Item{OrganizationID: "org-1", CITypeID: "t", Name: "srv", Attributes: map[string]any{}}
+	missing := &Item{OrganizationID: "org-1", CITypeID: testServerType, Name: "srv", Attributes: map[string]any{}}
 	if got := fieldsOf(svc.Create(ctx, missing)); len(got) != 1 || got[0] != "hostname" {
 		t.Fatalf("missing hostname: %v", got)
 	}
-	item := &Item{OrganizationID: "org-1", CITypeID: "t", Name: "srv", Hostname: "srv-01", OSName: "linux", Attributes: map[string]any{}}
+	item := &Item{OrganizationID: "org-1", CITypeID: testServerType, Name: "srv", Hostname: "srv-01", OSName: "linux", Attributes: map[string]any{}}
 	if err := svc.Create(ctx, item); err != nil {
 		t.Fatalf("typed hostname rejected: %v", err)
 	}
@@ -289,10 +289,10 @@ func TestTypedColumnsTakePartInValidation(t *testing.T) {
 	// The typed columns' own data types, with or without definitions.
 	plain := NewService(NewMemoryRepository())
 	for field, item := range map[string]*Item{
-		"management_ip": {OrganizationID: "org-1", CITypeID: "t", Name: "a", ManagementIP: "10.0.0.300"},
-		"primary_mac":   {OrganizationID: "org-1", CITypeID: "t", Name: "b", PrimaryMAC: "not-a-mac"},
-		"hardware_uuid": {OrganizationID: "org-1", CITypeID: "t", Name: "c", HardwareUUID: "1234"},
-		"name":          {OrganizationID: "org-1", CITypeID: "t", Name: "two\nlines"},
+		"management_ip": {OrganizationID: "org-1", CITypeID: testServerType, Name: "a", ManagementIP: "10.0.0.300"},
+		"primary_mac":   {OrganizationID: "org-1", CITypeID: testServerType, Name: "b", PrimaryMAC: "not-a-mac"},
+		"hardware_uuid": {OrganizationID: "org-1", CITypeID: testServerType, Name: "c", HardwareUUID: "1234"},
+		"name":          {OrganizationID: "org-1", CITypeID: testServerType, Name: "two\nlines"},
 	} {
 		if got := fieldsOf(plain.Create(ctx, item)); len(got) != 1 || got[0] != field {
 			t.Errorf("%s: %v", field, got)
@@ -302,7 +302,7 @@ func TestTypedColumnsTakePartInValidation(t *testing.T) {
 	// A manual create keeps every typed field of the request.
 	mux := chi.NewRouter()
 	NewHandler(plain).RegisterRoutes(mux)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/cis", strings.NewReader(`{"ci_type_id":"t","name":"sw-01",
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/cis", strings.NewReader(`{"ci_type_id":"`+testSwitchType+`","name":"sw-01",
 		"hostname":"sw-01","fqdn":"sw-01.example","os_name":"ios","os_version":"17","primary_mac":"00:1a:2b:3c:4d:5e",
 		"hardware_uuid":"c0de1170-0000-4000-8000-000000000009","sys_object_id":"1.3.6.1.4.1.9"}`))
 	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))

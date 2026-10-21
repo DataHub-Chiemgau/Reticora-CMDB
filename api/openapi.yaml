@@ -693,6 +693,17 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: >-
+            A field value is not allowed; `violations` names the field, e.g.
+            ci_type_id that is no UUID ("not the ID (UUID) of a CI type"),
+            names no system type and no type of the organization ("CI type
+            not found", the same for an unknown ID and a type of another
+            organization) or a deactivated type ("the CI type is
+            deactivated").
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -861,7 +872,12 @@ paths:
               type: object
               required: [ci_type_id]
               properties:
-                ci_type_id: { type: string, format: uuid }
+                ci_type_id:
+                  type: string
+                  format: uuid
+                  description: >-
+                    ID of an active system type or an active type of the
+                    organization (CI-01, TEN-09).
       responses:
         '200':
           description: The type change and its findings
@@ -878,10 +894,15 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: The target type does not exist.
+          description: >-
+            The target type is not allowed, `violations` names ci_type_id: no
+            UUID ("not the ID (UUID) of a CI type"), no system type and no
+            type of the organization ("CI type not found", the same for an
+            unknown ID and a type of another organization) or deactivated
+            ("the CI type is deactivated").
           content:
             application/problem+json:
-              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
 
   /api/v1/cis/{id}/merge:
     parameters:
@@ -6489,7 +6510,12 @@ paths:
       operationId: listNotificationChannels
       tags: [Notifications]
       summary: Notification channels of the organization
-      description: Secrets (password, secret) are returned as `********`.
+      description: >-
+        Requires notification:manage (RBA-02: org_admin only). Secrets
+        (password, secret) are returned as `********`, the url of a webhook
+        channel as scheme and host with masked path and query
+        (`https://hooks.example.org/********`): path and query carry the
+        token of an incoming webhook.
       responses:
         '200':
           description: Channels
@@ -6508,10 +6534,23 @@ paths:
                       $ref: '#/components/schemas/NotificationChannel'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       operationId: createNotificationChannel
       tags: [Notifications]
       summary: Create a notification channel
+      description: >-
+        Requires notification:manage. The response is redacted like the
+        list. The server of an own SMTP channel (provider smtp) is held to
+        the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true
+        an IP literal or name of a private, loopback, link-local or
+        unique-local network and a port other than 25, 465 or 587 are
+        refused with 422 (field host or port, the detail names the
+        setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254)
+        are refused in every mode. The address a name resolves to is checked
+        again on every connection. central_smtp is the operator's server and
+        exempt.
       requestBody:
         required: true
         content:
@@ -6529,8 +6568,12 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/notification-channels/{id}:
     parameters:
@@ -6539,6 +6582,7 @@ paths:
       operationId: getNotificationChannel
       tags: [Notifications]
       summary: Get a notification channel
+      description: Requires notification:manage; redacted like the list.
       responses:
         '200':
           description: Channel
@@ -6548,6 +6592,8 @@ paths:
                 $ref: '#/components/schemas/NotificationChannel'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
@@ -6555,8 +6601,14 @@ paths:
       tags: [Notifications]
       summary: Update name, configuration or enabled flag
       description: >-
-        A configuration replaces the stored one; a secret sent back as
-        `********` keeps its value. Kind and provider cannot change.
+        Requires notification:manage. A configuration replaces the stored
+        one; a secret sent back as `********` and a webhook url sent back as
+        returned (masked) keep their value. A secret sent back as `********`
+        while the configuration changes its destination (smtp: host, port,
+        tls or username; webhook: url) is refused with 400 (field password
+        or secret): it must be entered again. A configuration is held to the
+        egress policy like on create (422, field host or port). Kind and
+        provider cannot change.
       requestBody:
         required: true
         content:
@@ -6574,19 +6626,26 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     delete:
       operationId: deleteNotificationChannel
       tags: [Notifications]
       summary: Delete a notification channel
+      description: Requires notification:manage.
       responses:
         '204':
           description: Deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -6595,6 +6654,12 @@ paths:
       operationId: listNotificationDeliveries
       tags: [Notifications]
       summary: Latest notification deliveries with their status
+      description: >-
+        Requires notification:manage (RBA-02: org_admin only). A delivery
+        shows recipients, category, subject, status, attempts and the last
+        error, not its content (body, data): links and tokens such as an
+        invitation link are not returned, URLs in subject and last error are
+        masked like the url of a webhook channel.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -6616,6 +6681,8 @@ paths:
                       $ref: '#/components/schemas/NotificationDelivery'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/vrfs:
     get:
@@ -12093,7 +12160,9 @@ components:
           description: >-
             central_smtp: sender_name, reply_to; smtp: host, port, tls
             (starttls|tls|none), username, password, from; webhook: url,
-            secret. Secrets are returned as `********`.
+            secret. Secrets are returned as `********`, the webhook url as
+            scheme and host with masked path and query. The smtp host and
+            port are held to the egress policy (SEC-08).
         enabled: {type: boolean}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
@@ -12115,7 +12184,10 @@ components:
 
     NotificationDelivery:
       type: object
-      required: [id, organization_id, channel_id, recipient, category, critical, subject, body, status, attempts, max_attempts, next_attempt_at]
+      description: >-
+        A queued delivery without its content: body and data (links,
+        tokens) stay in the delivery queue.
+      required: [id, organization_id, channel_id, recipient, category, critical, subject, status, attempts, max_attempts, next_attempt_at]
       properties:
         id: {type: string}
         organization_id: {type: string}
@@ -12129,10 +12201,6 @@ components:
         category: {type: string}
         critical: {type: boolean}
         subject: {type: string}
-        body: {type: string}
-        data:
-          type: object
-          additionalProperties: true
         dedup_key: {type: string}
         status:
           type: string
@@ -13151,6 +13219,10 @@ components:
           description: Room of location_id (the location or its nearest room ancestor), derived by the server.
         ci_type_id:
           type: string
+          description: >-
+            A system type or a type of the CI's organization; the database
+            refuses a type of another organization on every write path
+            (CI-01, TEN-09).
         name:
           type: string
         status:
@@ -13249,6 +13321,11 @@ components:
       properties:
         ci_type_id:
           type: string
+          description: >-
+            ID (UUID) of an active system type or an active type of the
+            organization (GET /api/v1/ci-types; CI-01, TEN-09), not its key.
+            Any other value is rejected (422 on ci_type_id); an unknown ID
+            and a type of another organization get the same answer.
         client_id:
           type: string
         location_id:

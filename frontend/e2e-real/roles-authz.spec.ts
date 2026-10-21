@@ -728,7 +728,7 @@ test('08 viewer UI: CIs are visible; creating or editing a CI is not offered or 
     await create.click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('Name').fill(uiName);
-    await dialog.getByLabel('CI-Typ').selectOption('server');
+    await dialog.getByLabel('CI-Typ').selectOption({ label: 'Server' });
     const post = page.waitForResponse(
       (r) => r.url().endsWith('/api/v1/cis') && r.request().method() === 'POST',
     );

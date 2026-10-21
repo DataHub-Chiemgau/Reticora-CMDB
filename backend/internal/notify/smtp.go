@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
 
 // TLS modes of an SMTP server.
@@ -85,6 +87,47 @@ func (c *SMTPConfig) Validate() error {
 	return nil
 }
 
+// smtpPorts are the ports an organization's own server may use unless
+// private destinations are allowed: relay, implicit TLS and submission.
+var smtpPorts = map[int]bool{25: true, 465: true, 587: true}
+
+// allowPrivate is the setting the errors of CheckEgress name for internal
+// relays.
+const allowPrivate = "RETICORA_EGRESS_ALLOW_PRIVATE=true"
+
+// DestinationError rejects the server of an organization's own SMTP
+// channel under the egress policy (SEC-08): the request field and the
+// reason, which wraps egress.ErrBlockedDestination.
+type DestinationError struct {
+	Field string
+	Err   error
+}
+
+func (e *DestinationError) Error() string { return e.Err.Error() }
+
+func (e *DestinationError) Unwrap() error { return e.Err }
+
+// CheckEgress checks an organization's own server (provider smtp) against
+// the egress policy when it is stored and before every send: no IP literal
+// or name of the internal network or a cloud metadata endpoint, and only
+// the ports 25, 465 and 587, unless private destinations are allowed. The
+// address the name resolves to is checked on every connection (DNS
+// rebinding). The configuration must be valid.
+func (c *SMTPConfig) CheckEgress(opts egress.Options) error {
+	if err := opts.ValidateHost(c.Host); err != nil {
+		// Metadata endpoints stay blocked with the setting as well.
+		if (egress.Options{AllowPrivate: true}).ValidateHost(c.Host) == nil {
+			err = fmt.Errorf("%w; an SMTP relay in the internal network needs %s", err, allowPrivate)
+		}
+		return &DestinationError{Field: "host", Err: err}
+	}
+	if !opts.AllowPrivate && !smtpPorts[c.Port] {
+		return &DestinationError{Field: "port", Err: fmt.Errorf("%w: port %d (25, 465 or 587; other ports need %s)",
+			egress.ErrBlockedDestination, c.Port, allowPrivate)}
+	}
+	return nil
+}
+
 // parseAddress accepts one address without line breaks (header injection).
 func parseAddress(s string) (*mail.Address, error) {
 	if strings.ContainsAny(s, "\r\n") {
@@ -100,6 +143,10 @@ type SMTPSender struct {
 	// TLSConfig overrides the TLS settings (tests with their own CA).
 	TLSConfig *tls.Config
 	now       func() time.Time
+	// connect opens the connection to the server; nil uses a plain
+	// net.Dialer (the central server of the operator), organization
+	// servers get the egress dialer.
+	connect func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 // NewSMTPSender creates a sender; the configuration must be valid.
@@ -188,16 +235,28 @@ func (s *SMTPSender) tlsConfig() *tls.Config {
 // is required when configured.
 func (s *SMTPSender) dial(ctx context.Context) (*smtp.Client, error) {
 	addr := net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.Port))
-	dialer := &net.Dialer{}
-	var conn net.Conn
-	var err error
-	if s.cfg.TLS == SMTPTLS {
-		conn, err = (&tls.Dialer{NetDialer: dialer, Config: s.tlsConfig()}).DialContext(ctx, "tcp", addr)
-	} else {
-		conn, err = dialer.DialContext(ctx, "tcp", addr)
+	connect := s.connect
+	if connect == nil {
+		connect = (&net.Dialer{}).DialContext
 	}
+	conn, err := connect(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("smtp connect %s: %w", addr, err)
+	}
+	if s.cfg.TLS == SMTPTLS {
+		// TLS over the connection the dialer checked, verified for the
+		// configured host name.
+		cfg := s.tlsConfig()
+		if cfg.ServerName == "" {
+			cfg = cfg.Clone()
+			cfg.ServerName = s.cfg.Host
+		}
+		tlsConn := tls.Client(conn, cfg)
+		if err = tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("smtp connect %s: %w", addr, err)
+		}
+		conn = tlsConn
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
@@ -266,17 +325,30 @@ func (s *SMTPSender) compose(from *mail.Address, to []*mail.Address, m *Mail) (m
 // EmailProvider delivers e-mail channels: central_smtp over the
 // installation's server with the organization as sender name (the central
 // relay signs with DKIM for its domain, SPF covers it), smtp over the
-// organization's own server.
+// organization's own server under the egress policy (SEC-08).
 type EmailProvider struct {
 	central *SMTPSender
+	// egress is the destination policy of organization servers; the
+	// central server is the operator's configuration and exempt.
+	egress egress.Options
+	dialer *egress.Dialer
 	// TLSConfig overrides the TLS settings of organization servers (tests).
 	TLSConfig *tls.Config
 }
 
 // NewEmailProvider creates the provider; central may be nil (no central
-// SMTP configured: central_smtp channels fail).
+// SMTP configured: central_smtp channels fail). Organization servers are
+// held to the default egress policy, which blocks every internal
+// destination.
 func NewEmailProvider(central *SMTPSender) *EmailProvider {
-	return &EmailProvider{central: central}
+	return (&EmailProvider{central: central}).WithEgress(egress.Options{})
+}
+
+// WithEgress sets the destination policy of organization servers
+// (RETICORA_EGRESS_ALLOW_PRIVATE).
+func (p *EmailProvider) WithEgress(opts egress.Options) *EmailProvider {
+	p.egress, p.dialer = opts, egress.NewDialer(opts)
+	return p
 }
 
 // Send implements Provider.
@@ -299,7 +371,13 @@ func (p *EmailProvider) Send(ctx context.Context, ch *Channel, msg *Message) (*D
 		if sender, err = NewSMTPSender(&cfg); err != nil {
 			return nil, err
 		}
+		// Checked again on every send: the channel may have been stored
+		// under another policy.
+		if err := cfg.CheckEgress(p.egress); err != nil {
+			return nil, err
+		}
 		sender.TLSConfig = p.TLSConfig
+		sender.connect = p.dialer.DialContext
 	default:
 		return nil, fmt.Errorf("provider %s is no e-mail provider", ch.Provider)
 	}
