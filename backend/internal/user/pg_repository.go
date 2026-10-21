@@ -865,6 +865,9 @@ func (r *PGRepository) AssignRole(ctx context.Context, orgID string, a *UserRole
 		if a.ScopeType == "" {
 			a.ScopeType = "organization"
 		}
+		if err := checkTeamScope(ctx, tx, orgID, a); err != nil {
+			return err
+		}
 		query := `
 			INSERT INTO user_custom_role (
 				user_id,
@@ -890,7 +893,11 @@ func (r *PGRepository) AssignRole(ctx context.Context, orgID string, a *UserRole
 
 // assignStandardRole assigns a seeded standard role (table `role`) to a user,
 // mapping scope_type onto the role_assignment scope columns. The organization
-// scope maps to NULL client/site; client/site scopes validate the reference.
+// scope maps to NULL client/site/team; client/site scopes validate the
+// reference, a team scope needs a team of the organization (checkTeamScope).
+// Assigning the same role in the same scope again returns the existing
+// assignment instead of a second row (role_assignment_scope_key, NULLS NOT
+// DISTINCT, so also for the organization scope).
 //
 // A grant of org_admin binds the IdP account of the user to MFA before the
 // commit (WP-358); when that fails, nothing is assigned and the error wraps
@@ -916,29 +923,35 @@ func (r *PGRepository) assignStandardRole(ctx context.Context, orgID string, a *
 		if err != nil {
 			return fmt.Errorf("check user for assignment: %w", err)
 		}
-		var scopeClient, scopeSite any
+		var scopeClient, scopeSite, scopeTeam any
 		switch a.ScopeType {
 		case "", "organization":
 		case "client":
 			scopeClient = nilIfEmpty(a.ScopeID)
 		case "site":
 			scopeSite = nilIfEmpty(a.ScopeID)
+		case "team":
+			if scopeErr := checkTeamScope(ctx, tx, orgID, a); scopeErr != nil {
+				return scopeErr
+			}
+			scopeTeam = a.ScopeID
 		default:
 			return fmt.Errorf("unsupported scope_type %q", a.ScopeType)
 		}
 		err = tx.QueryRow(ctx, `
-			INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id, scope_site_id)
-			VALUES ($1, $2, $3, $4, $5)
-			ON CONFLICT (user_id, role_id, scope_client_id, scope_site_id) DO NOTHING
+			INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id, scope_site_id, scope_team_id)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (user_id, role_id, scope_client_id, scope_site_id, scope_team_id) DO NOTHING
 			RETURNING id::text, created_at
-		`, orgID, a.UserID, a.RoleID, scopeClient, scopeSite).Scan(&a.ID, &a.GrantedAt)
+		`, orgID, a.UserID, a.RoleID, scopeClient, scopeSite, scopeTeam).Scan(&a.ID, &a.GrantedAt)
 		if err == pgx.ErrNoRows {
 			// Already assigned: load the existing assignment id.
 			err = tx.QueryRow(ctx, `
 				SELECT id::text, created_at FROM role_assignment
 				WHERE organization_id = $1 AND user_id = $2 AND role_id = $3
 				  AND scope_client_id IS NOT DISTINCT FROM $4 AND scope_site_id IS NOT DISTINCT FROM $5
-			`, orgID, a.UserID, a.RoleID, scopeClient, scopeSite).Scan(&a.ID, &a.GrantedAt)
+				  AND scope_team_id IS NOT DISTINCT FROM $6
+			`, orgID, a.UserID, a.RoleID, scopeClient, scopeSite, scopeTeam).Scan(&a.ID, &a.GrantedAt)
 		}
 		if err != nil {
 			return fmt.Errorf("assign standard role: %w", err)
@@ -948,6 +961,27 @@ func (r *PGRepository) assignStandardRole(ctx context.Context, orgID string, a *
 		}
 		return nil
 	})
+}
+
+// checkTeamScope requires the team of a team-scoped assignment to be a team
+// of the organization visible to the caller (RBA-03): user_custom_role.scope_id
+// has no foreign key, and the one of role_assignment would only answer with a
+// constraint error. Other scope types pass.
+func checkTeamScope(ctx context.Context, tx pgx.Tx, orgID string, a *UserRoleAssignment) error {
+	if a.ScopeType != "team" {
+		return nil
+	}
+	if !isUUID(a.ScopeID) {
+		return fmt.Errorf("team not found")
+	}
+	var exists bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM team WHERE id = $1 AND organization_id = $2)", a.ScopeID, orgID).Scan(&exists); err != nil {
+		return fmt.Errorf("check team for assignment: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("team not found")
+	}
+	return nil
 }
 
 func (r *PGRepository) ListUserRoles(ctx context.Context, orgID, userID string) ([]UserRoleAssignment, error) {
@@ -968,9 +1002,10 @@ func (r *PGRepository) ListUserRoles(ctx context.Context, orgID, userID string) 
 				   CASE
 					   WHEN scope_site_id IS NOT NULL THEN 'site'
 					   WHEN scope_client_id IS NOT NULL THEN 'client'
+					   WHEN scope_team_id IS NOT NULL THEN 'team'
 					   ELSE 'organization'
 				   END,
-				   COALESCE(COALESCE(scope_site_id, scope_client_id)::text, ''),
+				   COALESCE(COALESCE(scope_site_id, scope_client_id, scope_team_id)::text, ''),
 				   created_at, ''
 			FROM role_assignment
 			WHERE organization_id = $1 AND user_id = $2

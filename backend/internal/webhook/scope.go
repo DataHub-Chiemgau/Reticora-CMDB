@@ -224,13 +224,14 @@ func optionalString(fields map[string]json.RawMessage, name string) (string, boo
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // objectQueries read id, client and site of the rows of a kind, deleted_at
-// ignored: a deleted CI keeps the scope its events were about.
+// ignored: a deleted CI keeps the scope its events were about. Assets and
+// quantity items carry the site of their location (WP-392).
 var objectQueries = map[ObjectKind]string{
 	ObjectCI: `SELECT id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
 		FROM ci WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
-	ObjectAsset: `SELECT id::text, COALESCE(client_id::text, ''), ''
+	ObjectAsset: `SELECT id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
 		FROM asset WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
-	ObjectQuantityItem: `SELECT id::text, COALESCE(client_id::text, ''), ''
+	ObjectQuantityItem: `SELECT id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
 		FROM quantity_item WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
 }
 

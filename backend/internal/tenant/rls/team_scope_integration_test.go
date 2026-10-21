@@ -3,10 +3,14 @@ package rls_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -158,5 +162,111 @@ func TestTeamRoomAndPersonScope(t *testing.T) {
 	}
 	if c, _ := clientOf("desk_booking", "booking1"); c != f.Client2 {
 		t.Errorf("booking1 after site move: client %s, want client 2", c)
+	}
+}
+
+// TestTeamScopedAssignment covers WP-391 (RBA-03, TEN-04, TEN-05; CH25,
+// E-11, F-049; formerly the defect test TestAuditT1TeamScopedAssignment of
+// WP-009): the engineer role is assigned for team 1 through POST
+// /api/v1/role-assignments (201), a team of organization B or an unknown team
+// is 404 without a row. The user's access is resolved the way login and
+// refresh do (permission.AccessGrants + identity.ResolveAccess +
+// middleware.TenantScopeFor): the team scope is exactly team 1, so the user
+// sees the tickets of team 1 and those without team, not those of team 2;
+// tickets without team are read-only (TEN-05).
+//
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=… go test -count=1 -run '^TestTeamScopedAssignment$' ./internal/tenant/rls/
+func TestTeamScopedAssignment(t *testing.T) {
+	w := newT1World(t, "d7")
+	f := w.f
+	bg := context.Background()
+	team1 := w.create(w.orgA, "/api/v1/teams", map[string]any{"name": "t1-team-1"})
+	team2 := w.create(w.orgA, "/api/v1/teams", map[string]any{"name": "t1-team-2"})
+	teamB := w.create(w.orgB, "/api/v1/teams", map[string]any{"name": "t1-team-b"})
+	member := f.AppUser(t, f.OrgA, "t1-team-member")
+	if _, err := f.Admin.Exec(bg, `DELETE FROM role_assignment WHERE user_id = $1`, member); err != nil {
+		t.Fatal(err)
+	}
+	engineer := w.scalar(`SELECT id::text FROM role WHERE organization_id = $1 AND name = 'engineer'`, f.OrgA)
+	ticket1 := w.scalar(`INSERT INTO ticket (organization_id, title, reporter_id, team_id) VALUES ($1, 't1-team-ticket-1', $2, $3) RETURNING id::text`, f.OrgA, w.userA, team1)
+	ticket2 := w.scalar(`INSERT INTO ticket (organization_id, title, reporter_id, team_id) VALUES ($1, 't1-team-ticket-2', $2, $3) RETURNING id::text`, f.OrgA, w.userA, team2)
+	ticket0 := w.scalar(`INSERT INTO ticket (organization_id, title, reporter_id) VALUES ($1, 't1-team-ticket-0', $2) RETURNING id::text`, f.OrgA, w.userA)
+
+	for name, teamID := range map[string]string{"team of organization B": teamB, "unknown team": f.ID()} {
+		code, body := w.do(w.orgA, http.MethodPost, "/api/v1/role-assignments", map[string]any{
+			"user_id": member, "role_id": engineer, "scope_type": "team", "scope_id": teamID,
+		})
+		if code != http.StatusNotFound {
+			t.Errorf("RBA-03: POST /role-assignments for a %s answered %d %s, want 404", name, code, trim(body))
+		}
+	}
+	if n := w.scalar(`SELECT count(*)::text FROM role_assignment WHERE user_id = $1`, member); n != "0" {
+		t.Fatalf("refused team assignments stored %s rows", n)
+	}
+	code, body := w.do(w.orgA, http.MethodPost, "/api/v1/role-assignments", map[string]any{
+		"user_id": member, "role_id": engineer, "scope_type": "team", "scope_id": team1,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("RBA-03: POST /role-assignments with scope_type team answered %d %s, want 201", code, trim(body))
+	}
+
+	grants, err := permission.NewPGRepository(f.App).AccessGrants(bg, f.OrgA, member)
+	if err != nil {
+		t.Fatalf("AccessGrants: %v", err)
+	}
+	access := identity.ResolveAccess(grants)
+	if access.Scope.Teams.All || len(access.Scope.Teams.IDs) != 1 || access.Scope.Teams.IDs[0] != team1 {
+		t.Fatalf("RBA-03/WP-009 AC1: the resolved team scope of a user assigned for team 1 is %+v (grants %+v), want exactly team 1",
+			access.Scope.Teams, grants)
+	}
+	principal := identity.Principal{Subject: member, OrganizationID: f.OrgA, Scope: &access.Scope}
+	scope := middleware.TenantScopeFor(&principal)
+	seen := map[string]bool{}
+	if err := database.WithTenant(bg, f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text FROM ticket WHERE id = ANY($1::uuid[])`, []string{ticket1, ticket2, ticket0})
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			seen[id] = true
+		}
+		return rows.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !seen[ticket1] || seen[ticket2] || !seen[ticket0] {
+		t.Errorf("CH25/TEN-05: team-1 user sees ticket of team 1 %v, of team 2 %v, without team %v; want true/false/true",
+			seen[ticket1], seen[ticket2], seen[ticket0])
+	}
+
+	// TEN-05: rows without team stay visible but not writable.
+	for _, c := range []struct {
+		name, sql string
+		args      []any
+		ok        bool
+	}{
+		{"update the ticket of team 1", `UPDATE ticket SET title = 't1-team-ticket-1b' WHERE id = $1`, []any{ticket1}, true},
+		{"update the ticket without team", `UPDATE ticket SET title = 't1-team-ticket-0b' WHERE id = $1`, []any{ticket0}, false},
+		{"delete the ticket without team", `DELETE FROM ticket WHERE id = $1`, []any{ticket0}, false},
+		{"insert a ticket without team", `INSERT INTO ticket (organization_id, title, reporter_id) VALUES ($1, 't1-team-new', $2)`, []any{f.OrgA, member}, false},
+		{"insert a ticket of team 1", `INSERT INTO ticket (organization_id, title, reporter_id, team_id) VALUES ($1, 't1-team-new-1', $2, $3)`, []any{f.OrgA, member, team1}, true},
+	} {
+		err := database.WithTenant(bg, f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			tag, err := tx.Exec(ctx, c.sql, c.args...)
+			if err == nil && tag.RowsAffected() == 0 {
+				return errors.New("no row written")
+			}
+			return err
+		})
+		if (err == nil) != c.ok {
+			t.Errorf("TEN-05: team-1 user: %s: err=%v, want ok=%v", c.name, err, c.ok)
+		}
 	}
 }

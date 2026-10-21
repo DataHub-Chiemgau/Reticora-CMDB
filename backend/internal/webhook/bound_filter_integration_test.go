@@ -38,8 +38,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
 
-// boundFixture is organization A with a role granting ci:read and service
-// accounts holding it in client 1, in site 1 and org-wide.
+// boundFixture is organization A with a role granting ci:read and
+// asset:read and service accounts holding it in client 1, in site 1 and
+// org-wide.
 type boundFixture struct {
 	*scopetest.Fixture
 	sa1, saSite, saAll string
@@ -59,7 +60,7 @@ func newBoundFixture(t *testing.T, tag string) *boundFixture {
 	orgCtx := f.OrgCtx(f.OrgA)
 
 	readRole := f.ID()
-	if _, err := f.Admin.Exec(bg, `INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 't2-webhook-reader', '["ci:read"]')`, readRole, f.OrgA); err != nil {
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 't2-webhook-reader', '["ci:read", "asset:read"]')`, readRole, f.OrgA); err != nil {
 		t.Fatal(err)
 	}
 	saRepo := user.NewPGServiceAccounts(f.App)
@@ -110,6 +111,25 @@ func (b *boundFixture) ciIn(t *testing.T, clientID, siteID, name string) string 
 		if _, err := b.Admin.Exec(context.Background(), `UPDATE ci SET location_id = $2 WHERE id = $1`, id, siteID); err != nil {
 			t.Fatal(err)
 		}
+	}
+	return id
+}
+
+// inventoryIn inserts an asset or quantity item of client 1 in siteID (""
+// none); the site is derived from the location (migration 000151).
+func (b *boundFixture) inventoryIn(t *testing.T, table, siteID, name string) string {
+	t.Helper()
+	var location any
+	if siteID != "" {
+		location = siteID
+	}
+	sql := `INSERT INTO quantity_item (organization_id, client_id, name, location_id) VALUES ($1, $2, $3, $4) RETURNING id::text`
+	if table == "asset" {
+		sql = `INSERT INTO asset (organization_id, client_id, asset_tag, name, location_id) VALUES ($1, $2, $3, $3, $4) RETURNING id::text`
+	}
+	var id string
+	if err := b.Admin.QueryRow(context.Background(), sql, b.OrgA, b.Client1, name, location).Scan(&id); err != nil {
+		t.Fatalf("insert %s %s: %v", table, name, err)
 	}
 	return id
 }
@@ -215,8 +235,11 @@ func TestAuditT2BoundSubscriptionGetsOnlyReadableClientEvents(t *testing.T) {
 
 // TestBoundSubscriptionScopeResolution covers the scope sources of the
 // filter: the payload's client_id/site_id, the referenced CIs (several
-// objects, CIs without client or site, merged and hard-deleted victims) and
-// events whose scope cannot be resolved.
+// objects, CIs without client or site, merged and hard-deleted victims),
+// assets and quantity items with the site of their location (WP-392) and
+// events whose scope cannot be resolved. The site-1 account is confined to
+// client 1, the client of its site (WP-390, F-014): no object of client 2
+// reaches it.
 func TestBoundSubscriptionScopeResolution(t *testing.T) {
 	f := newBoundFixture(t, "f6")
 	bg := context.Background()
@@ -227,6 +250,10 @@ func TestBoundSubscriptionScopeResolution(t *testing.T) {
 	inSite1 := f.ciIn(t, f.Client1, f.site1, "scope-site1")
 	inSite2 := f.ciIn(t, f.Client1, f.site2, "scope-site2")
 	deleted := f.ciIn(t, f.Client2, "", "scope-c2-deleted")
+	assetSite1 := f.inventoryIn(t, "asset", f.site1, "scope-asset-site1")
+	assetSite2 := f.inventoryIn(t, "asset", f.site2, "scope-asset-site2")
+	assetUnplaced := f.inventoryIn(t, "asset", "", "scope-asset-unplaced")
+	itemSite2 := f.inventoryIn(t, "quantity_item", f.site2, "scope-item-site2")
 	if _, err := f.Admin.Exec(bg, `UPDATE ci SET deleted_at = now() WHERE id = $1`, deleted); err != nil {
 		t.Fatal(err)
 	}
@@ -239,16 +266,16 @@ func TestBoundSubscriptionScopeResolution(t *testing.T) {
 		want    want
 	}{
 		{"payload scope client 1", events.CICreated, func() any { return map[string]any{"id": c2, "client_id": f.Client1} }, want{1, 1, 1, 1}},
-		{"payload scope client 2", events.CICreated, func() any { return map[string]any{"id": c1, "client_id": f.Client2} }, want{1, 0, 1, 1}},
+		{"payload scope client 2", events.CICreated, func() any { return map[string]any{"id": c1, "client_id": f.Client2} }, want{1, 0, 0, 1}},
 		{"payload scope site 2", events.CIChanged, func() any { return map[string]any{"id": inSite1, "client_id": f.Client1, "site_id": f.site2} }, want{1, 1, 0, 1}},
 		{"resolved CI of client 1", events.CIChanged, func() any { return map[string]any{"id": c1, "name": "x"} }, want{1, 1, 1, 1}},
-		{"resolved CI of client 2", events.CIChanged, func() any { return map[string]any{"id": c2, "name": "x"} }, want{1, 0, 1, 1}},
+		{"resolved CI of client 2", events.CIChanged, func() any { return map[string]any{"id": c2, "name": "x"} }, want{1, 0, 0, 1}},
 		{"resolved CI without client", events.CIChanged, func() any { return map[string]any{"id": shared} }, want{1, 1, 1, 1}},
 		{"resolved CI in site 1", events.CIChanged, func() any { return map[string]any{"id": inSite1} }, want{1, 1, 1, 1}},
 		{"resolved CI in site 2", events.CIChanged, func() any { return map[string]any{"id": inSite2} }, want{1, 1, 0, 1}},
-		{"soft-deleted CI of client 2", events.CIDeleted, func() any { return map[string]any{"id": strings.ToUpper(deleted)} }, want{1, 0, 1, 1}},
+		{"soft-deleted CI of client 2", events.CIDeleted, func() any { return map[string]any{"id": strings.ToUpper(deleted)} }, want{1, 0, 0, 1}},
 		{"relationship within client 1", events.RelationshipRemoved, func() any { return f.removedPayload(c1, c1b) }, want{1, 1, 1, 1}},
-		{"relationship client 1 to client 2", events.RelationshipRemoved, func() any { return f.removedPayload(c1, c2) }, want{1, 0, 1, 1}},
+		{"relationship client 1 to client 2", events.RelationshipRemoved, func() any { return f.removedPayload(c1, c2) }, want{1, 0, 0, 1}},
 		{"relationship client 1 to shared CI", events.RelationshipCreated, func() any { return f.removedPayload(c1, shared) }, want{1, 1, 1, 1}},
 		{"relationship site 1 to site 2", events.RelationshipCreated, func() any { return f.removedPayload(inSite1, inSite2) }, want{1, 1, 0, 1}},
 		{"merge within client 1", events.CIMerged, func() any {
@@ -256,7 +283,7 @@ func TestBoundSubscriptionScopeResolution(t *testing.T) {
 		}, want{1, 1, 1, 1}},
 		{"merge across clients", events.CIMerged, func() any {
 			return f.mergedPayload(t, f.ciIn(t, f.Client1, "", "scope-mx-s"), f.ciIn(t, f.Client2, "", "scope-mx-v"))
-		}, want{1, 0, 1, 1}},
+		}, want{1, 0, 0, 1}},
 		{"merge victim of client 2 hard-deleted (ci_merge snapshot)", events.CIMerged, func() any {
 			survivor, victim := f.ciIn(t, f.Client1, "", "scope-mh-s"), f.ciIn(t, f.Client2, "", "scope-mh-v")
 			p := f.mergedPayload(t, survivor, victim)
@@ -264,10 +291,15 @@ func TestBoundSubscriptionScopeResolution(t *testing.T) {
 				t.Fatalf("hard-delete the victim: %v", err)
 			}
 			return p
-		}, want{1, 0, 1, 1}},
-		{"instance field of a client-2 CI", "ci_attribute.changed", func() any { return map[string]any{"ci_id": c2, "name": "rack"} }, want{1, 0, 1, 1}},
+		}, want{1, 0, 0, 1}},
+		{"instance field of a client-2 CI", "ci_attribute.changed", func() any { return map[string]any{"ci_id": c2, "name": "rack"} }, want{1, 0, 0, 1}},
 		{"attribute definition (organization)", "ci_attribute.changed", func() any { return map[string]any{"id": f.ID(), "key": "rack"} }, want{1, 1, 1, 1}},
-		{"override of a client-2 CI", "override.changed", func() any { return map[string]any{"id": f.ID(), "ci_id": c2, "field_name": "name"} }, want{1, 0, 1, 1}},
+		{"override of a client-2 CI", "override.changed", func() any { return map[string]any{"id": f.ID(), "ci_id": c2, "field_name": "name"} }, want{1, 0, 0, 1}},
+		// Assets and quantity items carry the site of their location (WP-392).
+		{"movement of an asset in site 1", "inventory.movement", func() any { return map[string]any{"id": f.ID(), "item_kind": "asset", "asset_id": assetSite1} }, want{1, 1, 1, 1}},
+		{"movement of an asset in site 2", "inventory.movement", func() any { return map[string]any{"id": f.ID(), "item_kind": "asset", "asset_id": assetSite2} }, want{1, 1, 0, 1}},
+		{"movement of an unplaced asset", "inventory.movement", func() any { return map[string]any{"id": f.ID(), "item_kind": "asset", "asset_id": assetUnplaced} }, want{1, 1, 1, 1}},
+		{"reservation of a quantity item in site 2", "reservation.created", func() any { return map[string]any{"id": f.ID(), "quantity_item_id": itemSite2} }, want{1, 1, 0, 1}},
 		// Not resolvable: unbound and org-wide subscriptions only.
 		{"unknown CI", events.CIChanged, func() any { return map[string]any{"id": f.ID()} }, want{1, 0, 0, 1}},
 		{"CI id not a UUID", events.CIChanged, func() any { return map[string]any{"id": "not-a-uuid"} }, want{1, 0, 0, 1}},

@@ -22,7 +22,6 @@ go;backend/internal/discovery;TestAuditUnclassifiedReviewOnlyForUnclassifiedDevi
 go;backend/internal/history;TestAuditT3HistoryIncludesLocationChange;F-093
 go;backend/internal/iga;TestAuditT1ApprovalNeverLosesTheProvisioningTask;F-056
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
-go;backend/internal/locations;TestAuditDefectSiteGrantConfinedToClientAndSite;F-014 F-141
 go;backend/internal/locations;TestAuditT3LocationDeleteRefusesChildren;F-023
 go;backend/internal/locations;TestAuditT3SiteDeleteKeepsNetworkObjects;F-024
 go;backend/internal/middleware;TestAuditT2RefusedCredentialTrafficKeepsOrgBudget;F-019
@@ -49,9 +48,7 @@ go;backend/internal/server;TestAuditT3HealthRefreshRunsInG1;F-087
 go;backend/internal/server;TestAuditT3OverrideRefusesReservedNames;F-092
 go;backend/internal/tenant/rls;TestAuditT1RepositoryErrorsAreSanitized;F-047
 go;backend/internal/tenant/rls;TestAuditT1ScopeRefusalsAreNot5xx;F-058 F-161
-go;backend/internal/tenant/rls;TestAuditT1SiteScopeOfLocatedTables;F-053
 go;backend/internal/tenant/rls;TestAuditT1StructuredSearchForReadRoles;F-055
-go;backend/internal/tenant/rls;TestAuditT1TeamScopedAssignment;F-049
 go;backend/internal/tenant/rls;TestAuditT5CIReactivationThroughProductionDecoratorChain;F-037 F-119
 go;backend/internal/topology;TestAuditT3BlastRadiusMarksHeuristicCIs;F-098
 go;backend/internal/traceability;TestAuditT5GateIDsAreNotTracedByTheChecklistItself;F-121

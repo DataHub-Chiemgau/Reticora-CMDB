@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,6 +22,7 @@ import (
 )
 
 const (
+	backendDir      = "../../.."
 	migrationsDir   = "../../../migrations"
 	planPath        = "../../../../docs/plan/implementierungsplan.md"
 	baselineDocPath = "../../../../docs/schema-baseline.md"
@@ -51,7 +53,20 @@ type catalogTable struct {
 	// barrierView: the table's view of rls.ViewProtectedTables passes
 	// rls.RuleViewBarrier.
 	barrierView bool
-	policies    []catalogPolicy
+	// refs are the location and CI reference columns (rls.RuleLocatedScope);
+	// treeNode: the id references location (site, building, room, rack).
+	refs     []string
+	treeNode bool
+	// clientDim, siteDim: the table carries the dimension (client_id,
+	// source_client_id or target_client_id; likewise site, for site its id).
+	clientDim, siteDim bool
+	policies           []catalogPolicy
+}
+
+// lacksLocatedScope reports whether rls.RuleLocatedScope applies to the
+// table and it lacks the client or the site dimension.
+func (tbl *catalogTable) lacksLocatedScope() bool {
+	return tbl.org && (len(tbl.refs) > 0 || tbl.treeNode) && (!tbl.clientDim || !tbl.siteDim)
 }
 
 var commands = []string{"SELECT", "INSERT", "UPDATE", "DELETE"}
@@ -85,6 +100,8 @@ var globalRows = regexp.MustCompile(`\borganization_id IS NULL\b`)
 // TestRLSCatalog checks every tenant table against the rules of
 // rls.KnownGaps (TEN-03, TEN-05, TEN-09) and requires the known gap list to be
 // exact: unlisted violations and listed gaps that no longer occur both fail.
+// Likewise every entry of rls.DerivedScopeTables must name an existing test
+// and a table that rls.RuleLocatedScope reports (TEN-02, WP-393).
 func TestRLSCatalog(t *testing.T) {
 	dsn := testDatabaseURL(t)
 	ctx := context.Background()
@@ -128,12 +145,43 @@ func TestRLSCatalog(t *testing.T) {
 	sort.Strings(closed)
 	if len(unlisted) > 0 {
 		t.Errorf("RLS rule violations without a known gap; fix the policies (new tables must meet every rule "+
-			"and must not be added to rls.KnownGaps):\n  %s", strings.Join(unlisted, "\n  "))
+			"and must not be added to rls.KnownGaps; %s: add client_id and site_id or document the derived "+
+			"scope in rls.DerivedScopeTables):\n  %s", rls.RuleLocatedScope, strings.Join(unlisted, "\n  "))
 	}
 	if len(closed) > 0 {
 		t.Errorf("known RLS gaps are closed; remove them from rls.KnownGaps and docs/schema-baseline.md:\n  %s",
 			strings.Join(closed, "\n  "))
 	}
+
+	for _, name := range slices.Sorted(maps.Keys(rls.DerivedScopeTables)) {
+		d := rls.DerivedScopeTables[name]
+		if tbl, ok := tables[name]; !ok || !tbl.lacksLocatedScope() {
+			t.Errorf("rls.DerivedScopeTables: %s: rule %s does not report the table (it has no location or CI "+
+				"reference, or carries client_id and site_id); remove the entry", name, rls.RuleLocatedScope)
+		}
+		if d.Path == "" || d.Reason == "" {
+			t.Errorf("rls.DerivedScopeTables: %s: derivation path and reason are required", name)
+		}
+		if err := testExists(d.TestFile, d.TestName); err != nil {
+			t.Errorf("rls.DerivedScopeTables: %s: test of the derivation: %v", name, err)
+		}
+	}
+}
+
+// testExists checks that file (relative to backend/) is a Go test file that
+// declares the test function name.
+func testExists(file, name string) error {
+	if !strings.HasSuffix(file, "_test.go") || !regexp.MustCompile(`^Test\w+$`).MatchString(name) {
+		return fmt.Errorf("%q in %q is not a Go test", name, file)
+	}
+	data, err := os.ReadFile(filepath.Join(backendDir, filepath.FromSlash(file)))
+	if err != nil {
+		return err
+	}
+	if !regexp.MustCompile(`(?m)^func ` + name + `\(t \*testing\.T\) \{`).Match(data) {
+		return fmt.Errorf("%s does not declare %s", file, name)
+	}
+	return nil
 }
 
 // TestKnownGapsList validates rls.KnownGaps without a database: no duplicates,
@@ -146,6 +194,7 @@ func TestKnownGapsList(t *testing.T) {
 		rls.RuleSystemWrite: true, rls.RuleGlobalRows: true, rls.RuleClientScope: true,
 		rls.RuleSiteScope: true, rls.RuleTeamScope: true, rls.RuleOrgColumn: true,
 		rls.RuleReadOnlyCatalog: true, rls.RuleViewBarrier: true, rls.RuleOperatorOnly: true,
+		rls.RuleLocatedScope: true,
 	}
 	plan, err := os.ReadFile(planPath)
 	if err != nil {
@@ -219,13 +268,17 @@ func gapsTable() string {
 
 // violations evaluates every catalog rule for one table.
 func violations(tbl *catalogTable) []rls.Rule {
+	var out []rls.Rule
+	if _, derived := rls.DerivedScopeTables[tbl.name]; tbl.lacksLocatedScope() && !derived {
+		out = append(out, rls.RuleLocatedScope)
+	}
 	if _, ok := rls.ViewProtectedTables[tbl.name]; ok {
 		// Documented exception (ADR 0001): no direct privilege for the
 		// application, access only through the security-barrier view.
 		if tbl.appAccess || !tbl.barrierView {
-			return []rls.Rule{rls.RuleViewBarrier}
+			out = append(out, rls.RuleViewBarrier)
 		}
-		return nil
+		return out
 	}
 	if slices.Contains(rls.GlobalCatalogTables, tbl.name) {
 		// Documented exception (E-10): a global catalog without
@@ -253,7 +306,6 @@ func violations(tbl *catalogTable) []rls.Rule {
 	if !tbl.org && tbl.name != "organization" {
 		return []rls.Rule{rls.RuleOrgColumn}
 	}
-	var out []rls.Rule
 	if !tbl.rls {
 		out = append(out, rls.RuleRLSEnabled)
 	}
@@ -379,7 +431,15 @@ func loadCatalog(ctx context.Context, t *testing.T, pool *pgxpool.Pool) map[stri
 		       bool_or(a.attname = 'organization_id'), bool_or(a.attname = 'client_id'),
 		       bool_or(a.attname = 'site_id'), bool_or(a.attname = 'team_id'),
 		       has_table_privilege('reticora_app', c.oid, 'INSERT, UPDATE, DELETE'),
-		       has_table_privilege('reticora_app', c.oid, 'SELECT, INSERT, UPDATE, DELETE')
+		       has_table_privilege('reticora_app', c.oid, 'SELECT, INSERT, UPDATE, DELETE'),
+		       COALESCE(array_agg(a.attname::text ORDER BY a.attnum)
+		                FILTER (WHERE a.attname ~ '^(\w+_)?(location|room|rack|ci)_id$'), '{}'),
+		       EXISTS (SELECT 1 FROM pg_constraint k
+		                 JOIN pg_attribute ka ON ka.attrelid = k.conrelid AND ka.attnum = ANY (k.conkey)
+		                WHERE k.conrelid = c.oid AND k.contype = 'f' AND k.confrelid = to_regclass('public.location')
+		                  AND ka.attname = 'id'),
+		       bool_or(a.attname IN ('client_id', 'source_client_id', 'target_client_id')),
+		       bool_or(a.attname IN ('site_id', 'source_site_id', 'target_site_id') OR (c.relname = 'site' AND a.attname = 'id'))
 		  FROM pg_class c
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
 		  JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
@@ -391,7 +451,8 @@ func loadCatalog(ctx context.Context, t *testing.T, pool *pgxpool.Pool) map[stri
 	}
 	for rows.Next() {
 		tbl := &catalogTable{}
-		if scanErr := rows.Scan(&tbl.name, &tbl.rls, &tbl.force, &tbl.org, &tbl.client, &tbl.site, &tbl.team, &tbl.appWrite, &tbl.appAccess); scanErr != nil {
+		if scanErr := rows.Scan(&tbl.name, &tbl.rls, &tbl.force, &tbl.org, &tbl.client, &tbl.site, &tbl.team, &tbl.appWrite, &tbl.appAccess,
+			&tbl.refs, &tbl.treeNode, &tbl.clientDim, &tbl.siteDim); scanErr != nil {
 			t.Fatalf("scan table: %v", scanErr)
 		}
 		tables[tbl.name] = tbl

@@ -54,7 +54,74 @@ const (
 	// LEVEL SECURITY, and every policy requires OperatorGUC, so tenant
 	// transactions neither read nor write them.
 	RuleOperatorOnly Rule = "operator-only"
+	// RuleLocatedScope: every tenant table with a location or CI reference
+	// (a column location_id, room_id, rack_id or ci_id, also with a prefix
+	// such as from_location_id or child_ci_id, or a node of the location
+	// tree whose id references location) carries the client and the site
+	// dimension of the referenced object (client_id and site_id, also with
+	// the prefix source_ or target_; for site its id) (TEN-02), or is listed
+	// in DerivedScopeTables. client-scope and site-scope then check the
+	// predicates.
+	RuleLocatedScope Rule = "located-scope"
 )
+
+// DerivedScope documents a tenant table with a location or CI reference
+// that carries no client_id and site_id of its own (RuleLocatedScope).
+type DerivedScope struct {
+	// Path names the references the client and site of a row follow and
+	// the predicate that applies them.
+	Path string
+	// Reason says why the table has no scope columns.
+	Reason string
+	// TestFile (relative to backend/) and TestName name the test that
+	// checks the derivation; the catalog test requires both to exist.
+	TestFile, TestName string
+}
+
+// DerivedScopeTables are the tables RuleLocatedScope reports whose scope is
+// derived from the objects they reference instead of own columns. This is a
+// documented exception, not a gap: the catalog test fails for an entry
+// without its test and for an entry of a table the rule does not report
+// (for example after the table got client_id and site_id), so the list
+// only shrinks.
+var DerivedScopeTables = map[string]DerivedScope{
+	"asset_movement": {
+		Path: "asset_id -> asset, quantity_item_id -> quantity_item (movement.movementVisible)",
+		Reason: "a movement belongs to its item; from_location_id and to_location_id are history, " +
+			"the visibility follows the item's client and site",
+		TestFile: "internal/movement/movement_scope_integration_test.go", TestName: "TestMovementRepositoryClientScope",
+	},
+	"assignment": {
+		Path:     "asset_id -> asset, ci_id -> ci (assignment.assignmentVisible)",
+		Reason:   "an assignment is visible only when its asset and CI are; it has no location of its own",
+		TestFile: "internal/assignment/assignment_scope_integration_test.go", TestName: "TestAssignmentRepositoryClientScope",
+	},
+	"building": {
+		Path:     "site_id -> site (site predicate in building_isolation, client via tenantapi.buildingVisible)",
+		Reason:   "a building carries its site; the site determines the client",
+		TestFile: "internal/tenantapi/tenantapi_scope_integration_test.go", TestName: "TestTenantRepositoryClientScope",
+	},
+	"composition": {
+		Path:     "parent_asset_id, child_asset_id -> asset, child_ci_id -> ci (composition.compositionVisible)",
+		Reason:   "a composition row links two items and is visible only when both are",
+		TestFile: "internal/composition/composition_scope_integration_test.go", TestName: "TestCompositionRepositoryClientScope",
+	},
+	"form_submission": {
+		Path:     "form_id -> form_def, ci_id -> ci, ticket_id -> ticket (form.submissionVisible)",
+		Reason:   "a submission is visible only when its form, CI and ticket are",
+		TestFile: "internal/form/form_scope_integration_test.go", TestName: "TestFormRepositoryClientScope",
+	},
+	"metric_sample": {
+		Path:     "ci_id -> ci (security-barrier views metric_sample_v and metric_sample_1h_v, migration 000143)",
+		Reason:   "TimescaleDB hypertable without row level security (ViewProtectedTables)",
+		TestFile: "internal/monitoring/audit_t1_metric_scope_integration_test.go", TestName: "TestMetricViewsHonourScope",
+	},
+	"stock_scan": {
+		Path:     "asset_id -> asset, ci_id -> ci (stocktake.scanVisible)",
+		Reason:   "a scan is visible only when the scanned asset and CI are",
+		TestFile: "internal/stocktake/stocktake_scope_integration_test.go", TestName: "TestStocktakeRepositoryClientScope",
+	},
+}
 
 // ViewProtectedTables maps tables that cannot carry row level security to
 // the security-barrier view the application must use instead. TimescaleDB
@@ -113,8 +180,7 @@ const KnownGapsBaselineMigration = 57
 // here and for entries that no longer occur, so the list only shrinks: the
 // work package that closes a gap removes its entry in the same change.
 //
-// Tables that only inherit client or site from a referenced object (CI child
-// tables, documents, tickets, desks) have no own scope column yet, so no rule
-// applies to them; WP-025, WP-028 and WP-029 add the columns together with the
-// policies, after which client-scope and site-scope cover them automatically.
+// Tables with a location or CI reference carry client_id and site_id, which
+// client-scope and site-scope check, or are documented in
+// DerivedScopeTables (RuleLocatedScope, WP-393).
 var KnownGaps = []Gap{}

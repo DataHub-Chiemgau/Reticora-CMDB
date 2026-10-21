@@ -143,10 +143,11 @@ func scanClient(s scanner) (*Client, error) {
 
 // --- Clients ---
 
-// Buildings and rooms carry no client or site scope column yet (WP-026,
-// WP-027). They are visible only when their site is visible under the
-// transaction's tenant scope, whose site policy filters the subqueries; a
-// building without site belongs to the whole organization.
+// Rooms carry the client and site of their location row (migration 000152),
+// buildings their site only. Both are visible only when their site is
+// visible under the transaction's tenant scope, whose site policy filters
+// the subqueries (for rooms in addition to their own policy); a building
+// without site belongs to the whole organization.
 const (
 	buildingVisible = "(building.site_id IS NULL OR EXISTS (SELECT 1 FROM site WHERE site.id = building.site_id))"
 	roomVisible     = `EXISTS (SELECT 1 FROM building WHERE building.id = room.building_id

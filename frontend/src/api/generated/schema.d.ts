@@ -4434,7 +4434,7 @@ export interface paths {
     put?: never;
     /**
      * Assign a role to a user (API-05)
-     * @description The user and the role must belong to the organization (404 otherwise). Assigning the standard role org_admin binds the IdP account of the user to MFA (Keycloak realm role mfa_required, AUT-09) before the assignment is stored; a user without IdP account yet is bound at the first login. When the binding fails (no Keycloak admin client, admin API refused or unreachable), nothing is assigned and the answer is 503.
+     * @description The user and the role must belong to the organization, and a team scope must name a team of the organization (404 otherwise). Assigning a standard role again in the same scope stores no second assignment and answers with the existing one. Assigning the standard role org_admin binds the IdP account of the user to MFA (Keycloak realm role mfa_required, AUT-09) before the assignment is stored; a user without IdP account yet is bound at the first login. When the binding fails (no Keycloak admin client, admin API refused or unreachable), nothing is assigned and the answer is 503.
      */
     post: operations['createRoleAssignment'];
     delete?: never;
@@ -10655,7 +10655,12 @@ export interface components {
       user_id: string;
       custom_role_id?: string;
       role_id?: string;
-      scope_type: string;
+      /**
+       * @description Scope of the assignment (RBA-03); see AssignRoleRequest.scope_type.
+       * @enum {string}
+       */
+      scope_type: 'organization' | 'client' | 'site' | 'team';
+      /** @description Client, site or team of the scope; absent for organization. */
       scope_id?: string;
       /** Format: date-time */
       granted_at: string;
@@ -10667,8 +10672,11 @@ export interface components {
       custom_role_id?: string;
       /** @description ID of a standard (builtin) role; mutually exclusive with custom_role_id. */
       role_id?: string;
-      /** @description Defaults to "organization" when omitted. */
-      scope_type?: string;
+      /**
+       * @description Scope of the assignment (RBA-03); defaults to "organization" when omitted. client, site and team name the client, site or team in scope_id; a team scope needs a team of the organization (404 otherwise). A site assignment is confined to the client of its site. The scopes of all assignments of a user are united per dimension (clients, sites, teams) and the dimensions are intersected (E-70 option 1): a site assignment next to a client assignment limits the sites of that client as well (client C1 plus a site S1 of C1 grants C1 at S1 and without site only), and a team assignment limits the tickets of every assignment to its team plus tickets without team, which stay read-only (E-11, TEN-05). An org-wide assignment lifts every dimension.
+       * @enum {string}
+       */
+      scope_type?: 'organization' | 'client' | 'site' | 'team';
       scope_id?: string;
     };
     SearchHit: {

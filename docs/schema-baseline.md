@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000149_credential_kind_nas
+Stand: Migration 000152_located_site_scope
 
 ## Prüfung
 
@@ -140,6 +140,7 @@ Policies für `PUBLIC` oder `reticora_app`:
 | `team-scope` | Tabellen mit `team_id` verwenden `app.team_scope` in `USING` und `WITH CHECK` (CH25) |
 | `org-column` | jede Tabelle außer `organization`, `schema_migrations` und den globalen Katalogen hat `organization_id` |
 | `read-only-catalog` | globale Kataloge ohne `organization_id` (`rls.GlobalCatalogTables`) gewähren `reticora_app` kein INSERT/UPDATE/DELETE |
+| `located-scope` | Tabellen mit Standort- oder CI-Bezug (Spalte `location_id`, `room_id`, `rack_id` oder `ci_id`, auch mit Präfix wie `from_location_id` oder `child_ci_id`, oder Knoten des Standortbaums) tragen Client- und Site-Dimension (`client_id` und `site_id`, auch mit Präfix `source_`/`target_`) oder stehen in `rls.DerivedScopeTables` (TEN-02) |
 
 Das Verhalten der Policies prüft `TestRLSMatrix`
 (`backend/internal/tenant/rls/matrix_integration_test.go`, WP-065) für jede
@@ -190,6 +191,45 @@ die Propagationstrigger zu. Bewusste Abweichungen von WP-028 AK1:
   löschen sie nur, wenn jeder Link in ihrem Schreib-Scope liegt (Migrationen
   000139 und 000146; ein Link auf ein org-weites Objekt zählt nicht, E-09),
   und legen keine unverlinkten an (WP-341).
+
+### Standort von Assets und Mengenartikeln (WP-392)
+
+`asset` und `quantity_item` tragen `site_id`, den Standort ihrer Location
+(Migration 000151, F-141). Der Trigger `derive_location_site` setzt ihn bei
+jedem INSERT und jeder Änderung von `location_id` oder `site_id` und
+überschreibt geschriebene Werte; er liest die Location mit erweitertem
+Client- und Site-Scope (`app_scope_widen`), eine Location einer anderen
+Organisation gilt als nicht gefunden (23503). Ändert eine Location ihren
+Standort (Verschieben, Umhängen), leitet `location_refresh_asset_site` die
+Zeilen an ihr neu ab. Die Policies prüfen `app.site_scope` wie bei `ci`
+(Migration 000063): Zeilen ohne Standort bleiben lesbar, schreiben dürfen
+sie nur org-weite Prinzipale (E-09).
+
+### Standort von Räumen und Racks (WP-393)
+
+`room` und `rack` tragen `client_id` und `site_id` ihrer 1:1-Location-Zeile
+(Migration 000152, F-053), beide `NOT NULL`: Jeder Raum und jedes Rack hat
+eine Location mit Client und Standort, org-weite Zeilen gibt es nicht. Der
+Trigger `derive_location_row_scope` setzt die Werte bei jedem INSERT und
+UPDATE und überschreibt geschriebene Werte; er liest die Location mit
+erweitertem Client- und Site-Scope. Ändert die Location-Zeile eines Raums
+oder Racks Client oder Standort (Verschieben im Baum, Client-Wechsel der
+Site), leitet `location_refresh_room_rack_scope` die Zeile neu ab. Die
+Policies `room_isolation` und `rack_isolation` verwenden das Prädikat von
+`location` (Migration 000062) in USING und WITH CHECK. Die Suchzeilen
+(`search_document`) von Assets und ihren Reservierungen übernehmen den
+Standort des Assets, Reservierungen von Mengenartikeln Client und Standort
+des Artikels, und folgen deren Änderung.
+
+Tabellen mit Standort- oder CI-Bezug ohne eigene Scope-Spalten stehen mit
+Ableitungspfad, Begründung und prüfendem Test in `rls.DerivedScopeTables`
+(`backend/internal/tenant/rls/known_gaps.go`, Regel `located-scope`):
+`asset_movement`, `assignment`, `composition`, `form_submission` und
+`stock_scan` (Sichtbarkeit über das referenzierte Asset, CI, Formular bzw.
+Ticket per Repository-Prädikat), `building` (Standort per `site_id`, Client
+über die Site) und `metric_sample` (über die Views `metric_sample_v` und
+`metric_sample_1h_v`). `TestRLSCatalog` scheitert für einen Eintrag ohne
+vorhandenen Test und für einen Eintrag, den die Regel nicht meldet.
 
 Globale Kataloge ohne Org-Spalte sind nach E-10 eine dokumentierte Ausnahme,
 keine Lücke: Sie werden nur durch Migrationen gepflegt und sind für die

@@ -3,6 +3,7 @@ package permission
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -35,6 +36,9 @@ type MemoryRepository struct {
 	catalogue   map[string]Permission
 	roleGrants  map[string]map[string]RolePermissionGrant
 	assignments map[string][]assignment
+	// siteClients maps the sites of an organization to their client
+	// (RegisterSite).
+	siteClients map[string]string
 }
 
 // assignment is one role assignment of the memory repository; empty client and
@@ -55,6 +59,7 @@ func NewMemoryRepository() *MemoryRepository {
 		catalogue:   catalogue,
 		roleGrants:  make(map[string]map[string]RolePermissionGrant),
 		assignments: make(map[string][]assignment),
+		siteClients: make(map[string]string),
 	}
 }
 
@@ -116,23 +121,52 @@ func (r *MemoryRepository) HasPermission(ctx context.Context, orgID, userID, key
 	return false, nil
 }
 
+// AccessGrants derives the scope like PGRepository.AccessGrants: a site
+// assignment is confined to the clients of its sites (RegisterSite); a site of
+// unknown client, or of another client than the assignment's clients, grants
+// nothing (fail-closed, E-08).
 func (r *MemoryRepository) AccessGrants(_ context.Context, orgID, userID string) ([]identity.Grant, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	assignments := r.assignments[userGrantKey(orgID, userID)]
 	grants := make([]identity.Grant, 0, len(assignments))
 	for _, a := range assignments {
+		clients, ok := r.assignmentClients(orgID, a)
+		if !ok {
+			continue
+		}
 		keys := make(map[string]struct{})
 		for key := range r.roleGrants[grantKey(orgID, a.roleID)] {
 			keys[key] = struct{}{}
 		}
 		grants = append(grants, identity.Grant{
 			Permissions: toPermissions(sortedKeys(keys)),
-			Clients:     append([]string(nil), a.clients...),
+			Clients:     clients,
 			Sites:       append([]string(nil), a.sites...),
 		})
 	}
 	return grants, nil
+}
+
+// assignmentClients returns the client scope of an assignment: its clients,
+// or for a site assignment the clients of its sites. It reports false when a
+// site has no known client in the organization or lies outside the
+// assignment's clients.
+func (r *MemoryRepository) assignmentClients(orgID string, a assignment) ([]string, bool) {
+	if len(a.sites) == 0 {
+		return append([]string(nil), a.clients...), true
+	}
+	clients := make([]string, 0, len(a.sites))
+	for _, site := range a.sites {
+		client, ok := r.siteClients[siteKey(orgID, site)]
+		if !ok || (len(a.clients) > 0 && !slices.Contains(a.clients, client)) {
+			return nil, false
+		}
+		if !slices.Contains(clients, client) {
+			clients = append(clients, client)
+		}
+	}
+	return clients, true
 }
 
 // RoleGrants grants the target matrix of the named org-scope standard roles
@@ -154,6 +188,14 @@ func (r *MemoryRepository) RoleGrants(_ context.Context, _ string, roleNames []s
 // AssignRoleToUser exists for handler tests and --no-db fixtures.
 func (r *MemoryRepository) AssignRoleToUser(orgID, userID, roleID string) {
 	r.AssignScopedRoleToUser(orgID, userID, roleID, nil, nil)
+}
+
+// RegisterSite records the client of a site of the organization; a site
+// assignment derives its client from it (AccessGrants).
+func (r *MemoryRepository) RegisterSite(orgID, siteID, clientID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.siteClients[siteKey(orgID, siteID)] = clientID
 }
 
 // AssignScopedRoleToUser assigns a role restricted to clients and sites.
@@ -196,3 +238,4 @@ func sortedKeys(set map[string]struct{}) []string {
 
 func grantKey(orgID, roleID string) string     { return orgID + ":" + roleID }
 func userGrantKey(orgID, userID string) string { return orgID + ":" + userID }
+func siteKey(orgID, siteID string) string      { return orgID + ":" + siteID }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -340,6 +341,34 @@ func TestServiceAccountRoleCeiling(t *testing.T) {
 		}
 	})
 
+	// WP-390: a site assignment names the client of its site, so the client
+	// admin covers a site of client 1 but not a site of client 2 or an
+	// unknown site.
+	t.Run("client admin assigns a site of client 1 only", func(t *testing.T) {
+		siteOf := func(room string) string {
+			t.Helper()
+			var site string
+			if err := f.Admin.QueryRow(bg, `SELECT b.site_id::text FROM room r JOIN building b ON b.id = r.building_id WHERE r.id = $1`, room).Scan(&site); err != nil {
+				t.Fatalf("site of room: %v", err)
+			}
+			return site
+		}
+		site1, site2 := siteOf(f.Room(t, f.Client1, "sa-ceiling-c1")), siteOf(f.Room(t, f.Client2, "sa-ceiling-c2"))
+		atSite := func(site string) string {
+			return `{"roles":[{"role_id":"` + engineer + `","scope_site_id":"` + site + `"}]}`
+		}
+		sa := newSA(f.OrgA, "sa-ceiling-site")
+		if w := call(clientAdmin, rolesPath(sa), atSite(site1)); w.Code != http.StatusOK {
+			t.Fatalf("engineer at a site of client 1: %d %s, want 200", w.Code, w.Body.String())
+		}
+		before, auditBefore := assignments(sa), audited(sa)
+		if before != engineer+"/-/"+site1 {
+			t.Fatalf("assignments %q, want the engineer at site 1", before)
+		}
+		refused(t, call(clientAdmin, rolesPath(sa), atSite(site2)), sa, before, auditBefore, "ci:read")
+		refused(t, call(clientAdmin, rolesPath(sa), atSite(f.ID())), sa, before, auditBefore, "ci:read")
+	})
+
 	t.Run("caller without role:manage", func(t *testing.T) {
 		sa := newSA(f.OrgA, "sa-ceiling-no-role-manage")
 		refused(t, call(userManager, rolesPath(sa), orgWide), sa, "", 0, "role:manage")
@@ -354,4 +383,126 @@ func TestServiceAccountRoleCeiling(t *testing.T) {
 			t.Errorf("org B account assignments %q, want none", got)
 		}
 	})
+}
+
+// TestServiceAccountSiteGrantConfinedToClient covers WP-390 (RBA-03, TEN-09,
+// F-014) for service accounts: an API key of an account whose role is
+// assigned at a site of client 1 acts in that client only. Through the auth
+// chain (AuthMiddlewareWithAPIKeys → TenantMiddleware → contact handler) the
+// key reads the contact of client 1 but not the contact of client 2, and the
+// webhook filter refuses objects of client 2 to the account.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestServiceAccountSiteGrantConfinedToClient(t *testing.T) {
+	f := scopetest.Seed(t, "08")
+	bg := context.Background()
+	room := f.Room(t, f.Client1, "sa-site-c1")
+	var site1 string
+	if err := f.Admin.QueryRow(bg, `SELECT b.site_id::text FROM room r JOIN building b ON b.id = r.building_id WHERE r.id = $1`, room).Scan(&site1); err != nil {
+		t.Fatalf("site of room: %v", err)
+	}
+	contacts := contact.NewPGRepository(f.App)
+	own := &contact.Contact{OrganizationID: f.OrgA, ClientID: f.Client1, DisplayName: "Site client contact"}
+	foreign := &contact.Contact{OrganizationID: f.OrgA, ClientID: f.Client2, DisplayName: "Other client contact"}
+	for _, c := range []*contact.Contact{own, foreign} {
+		if err := contacts.Create(f.OrgCtx(f.OrgA), c); err != nil {
+			t.Fatalf("create contact %s: %v", c.DisplayName, err)
+		}
+	}
+
+	// An org-wide administrator assigns the role at site 1 and creates the
+	// account's key.
+	admin := f.AppUser(t, f.OrgA, "sa-site-admin")
+	adminPrincipal := identity.Principal{Subject: admin, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser,
+		Permissions: []identity.Permission{identity.PermRoleManage, identity.PermAPIKeyManage, identity.PermContactRead}}
+	repo := user.NewPGServiceAccounts(f.App)
+	sa := &user.ServiceAccount{OrganizationID: f.OrgA, Name: "sa-site-reader"}
+	if err := repo.CreateServiceAccount(f.OrgCtx(f.OrgA), sa); err != nil {
+		t.Fatalf("create service account: %v", err)
+	}
+	roleID := f.ID()
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 'sa-site-role', '["contact:read"]')`, roleID, f.OrgA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetServiceAccountRoles(f.OrgCtx(f.OrgA), f.OrgA, sa.ID, &adminPrincipal,
+		[]user.ServiceAccountRole{{RoleID: roleID, ScopeSiteID: &site1}}); err != nil {
+		t.Fatalf("assign role at site 1: %v", err)
+	}
+	keys := identity.NewPGAPIKeyStore(f.App)
+	access := user.ServiceAccountAccess{Repo: repo}
+	keyMux := chi.NewRouter()
+	identity.NewAPIKeyHandler(keys).WithOwnerAccess(permission.NewPGRepository(f.App)).
+		WithServiceAccountAccess(access).RegisterRoutes(keyMux)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys",
+		strings.NewReader(`{"name":"site-reader-key","permissions":["contact:read"],"service_account_id":"`+sa.ID+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	scope := database.OrgWideScope(f.OrgA, admin)
+	ctx := identity.WithPrincipal(req.Context(), adminPrincipal)
+	ctx = tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: admin})
+	w := httptest.NewRecorder()
+	keyMux.ServeHTTP(w, req.WithContext(database.ContextWithTenantScope(ctx, &scope)))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create bound key: %d %s", w.Code, w.Body.String())
+	}
+	var key struct {
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &key); err != nil || key.Key == "" {
+		t.Fatalf("bound key %s, %v", w.Body.String(), err)
+	}
+
+	// The key's requests run through the production auth chain.
+	service := identity.NewAPIKeyServiceWithStore(keys).WithOwnerAccess(permission.NewPGRepository(f.App)).
+		WithServiceAccountAccess(access)
+	info, err := service.Validate(bg, key.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Scope == nil || info.Scope.Clients.All || len(info.Scope.Clients.IDs) != 1 || info.Scope.Clients.IDs[0] != f.Client1 ||
+		info.Scope.Sites.All || len(info.Scope.Sites.IDs) != 1 || info.Scope.Sites.IDs[0] != site1 {
+		t.Errorf("key scope %+v, want client 1 at site 1", info.Scope)
+	}
+	contactMux := chi.NewRouter()
+	contact.NewHandler(contacts).RegisterRoutes(contactMux)
+	protected := middleware.Chain(middleware.AuthMiddlewareWithAPIKeys(nil, service), middleware.TenantMiddleware)(contactMux)
+	get := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("X-API-Key", key.Key)
+		w := httptest.NewRecorder()
+		protected.ServeHTTP(w, req)
+		return w
+	}
+
+	// Negative: the contact of client 2 is not readable, neither by id nor in
+	// the list.
+	if w := get("/api/v1/contacts/" + foreign.ID); w.Code != http.StatusNotFound {
+		t.Errorf("contact of client 2: %d %s, want 404", w.Code, w.Body.String())
+	}
+	list := get("/api/v1/contacts?limit=100")
+	if list.Code != http.StatusOK || strings.Contains(list.Body.String(), foreign.ID) {
+		t.Errorf("contact list %d %s contains the contact of client 2", list.Code, list.Body.String())
+	}
+	// Positive: the contact of client 1 is readable.
+	if w := get("/api/v1/contacts/" + own.ID); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), own.ID) {
+		t.Errorf("contact of client 1: %d %s, want 200", w.Code, w.Body.String())
+	}
+	if !strings.Contains(list.Body.String(), own.ID) {
+		t.Errorf("contact list %s lacks the contact of client 1", list.Body.String())
+	}
+
+	// The webhook filter confines the account in the same way.
+	for _, tc := range []struct {
+		name    string
+		objects []webhook.ObjectScope
+		want    bool
+	}{
+		{"client 1 at site 1", []webhook.ObjectScope{{ClientID: f.Client1, SiteID: site1}}, true},
+		{"client 2", []webhook.ObjectScope{{ClientID: f.Client2}}, false},
+		{"client 2 at site 1", []webhook.ObjectScope{{ClientID: f.Client2, SiteID: site1}}, false},
+	} {
+		if ok, err := access.CanReadEvent(bg, f.OrgA, sa.ID, "contact:read", tc.objects); err != nil || ok != tc.want {
+			t.Errorf("CanReadEvent(%s) = %v, %v; want %v", tc.name, ok, err, tc.want)
+		}
+	}
 }

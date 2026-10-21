@@ -39,6 +39,7 @@ import { api, signupTenant, stamp, uiLogin, BASE, type Account } from './support
  *  T15 topology rooted at A's CI ........................ WP-031, WP-163, WP-208 (IMP-06, API-03, TEN-09)
  *  T16 A creates a CI through the CMDB form ............. WP-117 (CI-03), WP-239, WP-010, WP-208 (TEN-06, TEN-09)
  *  T17 A's audit viewer shows time and object ........... WP-133, WP-132, WP-191 (AUD-05, AUD-07, UI-01..UI-10 audit viewer)
+ *  T18 site-scoped user of A sees own client and site ... WP-392, WP-390, WP-109 (TEN-01, TEN-02, TEN-09, RBA-03; F-014, F-141)
  *
  * The fixture data of A (beforeAll) is created through the REST API the UI uses: the CI
  * form cannot create CIs (T16) and clients have no UI form; T01/T02/T16 drive the UI forms.
@@ -1210,6 +1211,172 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
       if (entry.resource_id) {
         expect(object, `object of ${entry.action}`).toContain(entry.resource_id);
       }
+    }
+  });
+
+  test('T18 site-scoped user sees only own client and site', async ({ browser }) => {
+    // Real-stack part of the retest of F-014 (client dimension) and F-141
+    // (site dimension): A invites a viewer at site 1 of client A1 (role
+    // assignment with scope_site_id, WP-390). In the UI and the API the
+    // invitee sees the CIs and contacts of client A1 at site 1, nothing of
+    // client A2 and nothing at site 1b of client A1. Assets carry the site
+    // too (WP-392), but the inventory module is off after E-03; the
+    // PostgreSQL tests site_policies_integration_test.go and
+    // sitescope_integration_test.go prove them.
+    test.setTimeout(3 * 60_000);
+    const mark = `iso-t18-${w.s}`;
+    const clientA2 = await ok<{ id: string; name: string }>(w.rq, w.a.token, 'POST', '/clients', {
+      name: `Iso Client A2 ${w.s}`,
+      slug: `iso-client-a2-${w.s}`,
+    });
+    const newSite = (name: string, clientId: string) =>
+      ok<Location>(w.rq, w.a.token, 'POST', '/locations', {
+        kind: 'site',
+        name,
+        client_id: clientId,
+      });
+    const site1b = await newSite(`Iso Site A1b ${w.s}`, w.client.id);
+    const site2 = await newSite(`Iso Site A2 ${w.s}`, clientA2.id);
+    const newCI = (name: string, body: Record<string, unknown>) =>
+      ok<CI>(w.rq, w.a.token, 'POST', '/cis', { ci_type_id: w.serverType, name, ...body });
+    const own = await newCI(`${mark}-a1-site1`, { client_id: w.client.id, location_id: w.site.id });
+    const atSite1b = await newCI(`${mark}-a1-site1b`, {
+      client_id: w.client.id,
+      location_id: site1b.id,
+    });
+    const foreignCIs = [
+      atSite1b,
+      await newCI(`${mark}-a2-site2`, { client_id: clientA2.id, location_id: site2.id }),
+      await newCI(`${mark}-a2-unplaced`, { client_id: clientA2.id }),
+    ];
+    // One search word common to both contacts (the SPA sends the query
+    // form-encoded).
+    const contactWord = `T18c${w.s}`;
+    const contactName = `${contactWord} Kontakt`;
+    const newContact = (suffix: string, clientId: string) =>
+      ok<{ id: string }>(w.rq, w.a.token, 'POST', '/contacts', {
+        display_name: `${contactName} ${suffix}`,
+        email: `${mark}-${suffix.toLowerCase()}@audit-e2e.de`,
+        client_id: clientId,
+      });
+    const ownContact = await newContact('A1', w.client.id);
+    const foreignContact = await newContact('A2', clientA2.id);
+
+    // Invitation as viewer at site 1 of client A1, accepted through the API.
+    const roles = await ok<List<{ id: string; name: string }>>(
+      w.rq,
+      w.a.token,
+      'GET',
+      '/roles?limit=100',
+    );
+    const viewerRole = rows(roles).find((r) => r.name === 'viewer')?.id ?? '';
+    expect(viewerRole, 'system role viewer (RBA-02)').not.toBe('');
+    const account = { email: `${mark}@audit-e2e.de`, password: `Audit-t18-${w.s}!aA` };
+    const invitation = await ok<{ token?: string; scope_type: string; scope_id?: string }>(
+      w.rq,
+      w.a.token,
+      'POST',
+      '/invitations',
+      { email: account.email, role_id: viewerRole, scope_type: 'site', scope_id: w.site.id },
+    );
+    expect(invitation).toMatchObject({ scope_type: 'site', scope_id: w.site.id });
+    expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+    const accept = await w.rq.post(`${BASE}/api/v1/invitations/accept`, {
+      data: { token: invitation.token, password: account.password, display_name: 'Iso T18 Viewer' },
+      failOnStatusCode: false,
+    });
+    expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);
+    const accepted = (await accept.json()) as { user_id: string; organization_id: string };
+    expect(accepted.organization_id).toBe(w.a.orgId);
+
+    // Sign-in in the browser.
+    const ctx = await browser.newContext({ baseURL: BASE, locale: 'de-DE' });
+    try {
+      const page = await ctx.newPage();
+      const token = await uiLogin(page, account);
+      expect(claims(token).sub, 'the session is the invited user').toBe(accepted.user_id);
+      const main = page.locator('#main-content');
+
+      // CMDB list in the UI: the own CI, none of client A2 or of site 1b.
+      const listed = page.waitForResponse(
+        (r) =>
+          r.url().includes('/api/v1/cis?') &&
+          r.url().includes(`search=${mark}`) &&
+          r.request().method() === 'GET',
+      );
+      await page.goto('/cmdb');
+      await page.getByLabel('Configuration Items durchsuchen').fill(mark);
+      const listRes = await listed;
+      expect(listRes.status(), 'CMDB list of the site user').toBe(200);
+      expect(rows((await listRes.json()) as List<CI>).map((c) => c.id)).toEqual([own.id]);
+      await expect(main.getByText(own.name, { exact: true })).toBeVisible();
+      for (const ci of foreignCIs) {
+        await expect(main.getByText(ci.name, { exact: true })).toHaveCount(0);
+      }
+      const cmdbText = await bodyText(page);
+      expect(foreignCIs.filter((ci) => cmdbText.includes(ci.name))).toEqual([]);
+
+      // The CI page of a CI at site 1b answers "not found".
+      const detail = waitForApi(page, `/cis/${atSite1b.id}`);
+      await page.goto(`/cmdb/${atSite1b.id}`);
+      expect((await detail).status(), 'CI of site 1b in the UI').toBe(404);
+      await expect(
+        page.getByText('Das Configuration Item konnte nicht geladen werden'),
+      ).toBeVisible();
+      expect(await bodyText(page)).not.toContain(atSite1b.name);
+
+      // Contacts in the UI (command palette, SRC-01): the own one, not the
+      // one of client A2.
+      await page.goto('/cmdb');
+      await expect(page.getByLabel('Configuration Items durchsuchen')).toBeVisible();
+      await page.keyboard.press('Control+k');
+      const box = page.getByRole('combobox', { name: 'Befehle durchsuchen' });
+      await expect(box).toBeVisible();
+      const searched = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/search') && r.url().includes(`q=${contactWord}`),
+      );
+      await box.fill(contactWord);
+      expect((await searched).status(), 'search of the site user').toBe(200);
+      await expect(page.getByRole('option', { name: new RegExp(`${contactName} A1`) })).toHaveCount(
+        1,
+      );
+      await expect(page.getByRole('option', { name: new RegExp(`${contactName} A2`) })).toHaveCount(
+        0,
+      );
+      await page.keyboard.press('Escape');
+
+      // API with the session of the browser: lists and objects by id.
+      const contacts = await api<List<{ id: string }>>(
+        page.request,
+        token,
+        'GET',
+        '/contacts?limit=200',
+      );
+      expect(contacts.status).toBe(200);
+      expect(rows(contacts.body).map((c) => c.id)).toContain(ownContact.id);
+      expect(rows(contacts.body).map((c) => c.id)).not.toContain(foreignContact.id);
+      const cis = await api<List<CI>>(page.request, token, 'GET', `/cis?search=${mark}&limit=200`);
+      expect(cis.status).toBe(200);
+      expect(rows(cis.body).map((c) => c.id)).toEqual([own.id]);
+      expect((await api(page.request, token, 'GET', `/contacts/${ownContact.id}`)).status).toBe(
+        200,
+      );
+      expect((await api(page.request, token, 'GET', `/cis/${own.id}`)).status).toBe(200);
+      const foreignContactRes = await api(
+        page.request,
+        token,
+        'GET',
+        `/contacts/${foreignContact.id}`,
+      );
+      expect(foreignContactRes.status, 'GET /contacts/{client A2}').toBe(404);
+      expect(JSON.stringify(foreignContactRes.body)).not.toContain(contactName);
+      for (const ci of foreignCIs) {
+        const r = await api(page.request, token, 'GET', `/cis/${ci.id}`);
+        expect(r.status, `GET /cis/{${ci.name}} as the site user`).toBe(404);
+        expect(JSON.stringify(r.body)).not.toContain(ci.name);
+      }
+    } finally {
+      await ctx.close();
     }
   });
 });

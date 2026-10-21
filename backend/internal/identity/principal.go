@@ -135,7 +135,10 @@ func (s ScopeSet) equal(o ScopeSet) bool {
 
 // Grant is one role assignment: the permissions of the role together with the
 // scope it was assigned in. Empty ID lists leave the dimension unrestricted, so
-// a grant without any restriction is org-wide (RBA-03).
+// a grant without any restriction is org-wide (RBA-03). A site grant also names
+// the client of its site; sites without clients restrict the client dimension
+// to none (fail-closed, E-08). A team grant restricts the team dimension only:
+// the team predicate applies to rows that carry a team (TEN-05, E-11).
 type Grant struct {
 	Permissions []Permission
 	Clients     []string
@@ -159,11 +162,23 @@ type Access struct {
 
 // ResolveAccess combines role grants according to RBA-03: permissions are the
 // union of all grants; scopes are the union of the scope sets per dimension.
-// An org-wide grant sets every dimension to all (NULL in the GUCs). A dimension
-// no grant restricts is not limited by the grants (e.g. a client assignment
-// leaves sites unrestricted within the client). Without any grant every
-// dimension is empty, so the principal sees nothing (E-08, fail-closed).
-// Team scopes act in addition to client and site scopes (E-11, intersection).
+// Only an org-wide grant sets every dimension to all (NULL in the GUCs); no
+// client or site grant leaves the client dimension unrestricted. A site grant
+// carries the client of its site (permission.AccessGrants), so a site-scoped
+// principal is confined to that client and site (TEN-09); a grant with sites
+// but without clients restricts the clients to none (E-08, fail-closed).
+// Otherwise a dimension no grant restricts is not limited by the grants (e.g. a
+// client assignment leaves sites unrestricted within the client, a team
+// assignment leaves clients and sites unrestricted). Without any grant every
+// dimension is empty, so the principal sees nothing (E-08, fail-closed). Team
+// scopes act in addition to client and site scopes (E-11, intersection).
+//
+// Mixed grants follow E-70 option 1 (transition rule): the dimensions are
+// united separately and intersect in the RLS (TEN-04 GUCs), not as rectangles
+// per grant. A client grant C1 beside a site grant S1 yields clients C1 plus
+// the client of S1 and sites S1 only, so rows of C1 at other sites are not
+// visible; a team grant beside a client grant likewise narrows the tickets of
+// that client to the team (and rows without team).
 func ResolveAccess(grants []Grant) Access {
 	access := Access{Scope: aggregateScope(grants)}
 	byPermission := make(map[Permission][]Grant)
@@ -204,18 +219,22 @@ func aggregateScope(grants []Grant) Scope {
 		}
 	}
 	return Scope{
-		Clients: unionDimension(grants, func(g Grant) []string { return g.Clients }),
-		Sites:   unionDimension(grants, func(g Grant) []string { return g.Sites }),
-		Teams:   unionDimension(grants, func(g Grant) []string { return g.Teams }),
+		// A grant with sites restricts the client dimension even without
+		// clients: it is then confined to no client (E-08, fail-closed).
+		Clients: unionDimension(grants, func(g Grant) ([]string, bool) { return g.Clients, len(g.Clients) > 0 || len(g.Sites) > 0 }),
+		Sites:   unionDimension(grants, func(g Grant) ([]string, bool) { return g.Sites, len(g.Sites) > 0 }),
+		Teams:   unionDimension(grants, func(g Grant) ([]string, bool) { return g.Teams, len(g.Teams) > 0 }),
 	}
 }
 
-func unionDimension(grants []Grant, ids func(Grant) []string) ScopeSet {
+// unionDimension unites the IDs of the grants that restrict a dimension; when
+// no grant restricts it, the dimension is all.
+func unionDimension(grants []Grant, dimension func(Grant) (ids []string, restricts bool)) ScopeSet {
 	seen := make(map[string]struct{})
 	restricted := false
 	for _, g := range grants {
-		values := ids(g)
-		if len(values) == 0 {
+		values, restricts := dimension(g)
+		if !restricts {
 			continue
 		}
 		restricted = true
