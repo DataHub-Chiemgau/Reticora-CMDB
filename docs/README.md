@@ -820,7 +820,7 @@ counts and verifies the audit hash chain with the `audit-verify` binary.
 
 | Service | Image | Purpose |
 |---------|-------|---------|
-| PostgreSQL + TimescaleDB | timescale/timescaledb:latest-pg16 | Primary database with time-series |
+| PostgreSQL + TimescaleDB | timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731 | Primary database with time-series |
 | NATS | nats:2.10-alpine | Event bus (JetStream) |
 | Redis | redis:7-alpine | Cache, sessions, rate-limiting |
 | MinIO (Silo build) | pgsty/minio:RELEASE.2026-08-04T00-00-00Z | S3-compatible object storage; `minio/minio` is no longer published |
@@ -935,7 +935,9 @@ Continuous Integration runs on **GitHub Actions** (`.github/workflows/ci.yml`), 
 A version tag `v*` starts the release workflow. Tools follow E-31.
 
 1. It builds the edge binaries `reticora-collector` and `reticora-agent` for linux/amd64 and linux/arm64.
-2. It builds the images `reticora-server`, `reticora-collector` and `reticora-frontend` and pushes them to `ghcr.io/datahub-chiemgau`.
+2. It builds the images `reticora-server`, `reticora-collector`, `reticora-frontend` and `reticora-postgres` and pushes them to `ghcr.io/datahub-chiemgau`.
+   - `reticora-postgres` is TimescaleDB with pgBackRest (`deploy/docker-compose/postgres/Dockerfile`). Its base is pinned by version and digest (the same TimescaleDB reference as CI and the dev stack, E-96), its Go helpers `gosu` and `timescaledb-tune` are rebuilt with the repository's Go toolchain, and the pgBackRest tarball is checked by sha256.
+   - Before the push, Trivy scans each image with the threshold of the CI job `image-scan`: Critical/High findings with an available fix block. Exceptions follow `security/scan-exceptions.txt`, see [security/abhaengigkeitsscans.md](security/abhaengigkeitsscans.md).
 3. Syft generates an SPDX SBOM for every binary and every image, plus one for the source tree.
 4. Everything is signed keyless with cosign: a Fulcio certificate for the identity of the release workflow and an entry in the Rekor log.
    - Binaries and SBOMs get a Sigstore bundle (`<file>.sigstore.json`).
@@ -969,7 +971,7 @@ cosign verify ghcr.io/datahub-chiemgau/reticora-server:<tag> \
 - Kubernetes deployment via GitOps (ArgoCD or Flux).
 - Database migration validation in CI.
 - Integration tests against docker-compose services.
-- Security scanning (Trivy, CodeQL).
+- Static code analysis (CodeQL); dependency and container scans run in CI (`govulncheck`, `npm-audit`, `image-scan`).
 - Dependency update automation (Dependabot/Renovate).
 
 ### Getting Started

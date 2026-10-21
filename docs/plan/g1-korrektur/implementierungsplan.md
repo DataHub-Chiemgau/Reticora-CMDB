@@ -3686,7 +3686,7 @@ TEC-15;[B];A;tests/install-signature.test.sh;WP-388
 - [ ] Die image-scan-Matrix enthält {image: postgres, context: deploy/docker-compose/postgres, dockerfile: deploy/docker-compose/postgres/Dockerfile}; release.yml scannt jedes Image vor dem Push mit derselben Trivy-Schwelle (Critical/High mit verfügbarem Fix blockieren, E-31).
 - [ ] Retest F-124: Strukturtest tests/ci-config.test.sh (neu, im CI-Job gate ausgeführt) übernimmt den Fall image_scan_coverage und ist grün; Negativfall mit Fixture (Release-Eintrag ohne Scan-Eintrag) → FAIL; der CI-Lauf des PR zeigt das Artefakt trivy-postgres.
 - [ ] F-284: scripts/ci/check-scan-exceptions.sh läuft vor govulncheck, npm-audit und Trivy und verlangt je Nicht-Kommentarzeile von security/scan-exceptions.txt exp:, since:<Datum> und sev:critical|high mit exp <= since + 7 Tage (critical) bzw. + 30 Tage (high); Fälle in tests/ci-config.test.sh: Zeile ohne exp: → FAIL, High mit exp > since + 30 Tage → FAIL, gültige Zeile → ok.
-- [ ] F-291: Das Dockerfile pinnt TIMESCALE_IMAGE per Version und Digest (2.17.2-pg16 wie in CI) und prüft den pgBackRest-Tarball per sha256 (ARG PGBACKREST_SHA256); statischer Fall in tests/ci-config.test.sh; CI-Image-Build grün.
+- [ ] F-291: Das Dockerfile pinnt TIMESCALE_IMAGE per Version und Digest (Version nach [E-96](entscheidungen.md#e-96): 2.31.0-pg16, dieselbe Referenz in CI und Deploy) und prüft den pgBackRest-Tarball per sha256 (ARG PGBACKREST_SHA256); statischer Fall in tests/ci-config.test.sh; CI-Image-Build grün.
 - [ ] F-294: docs/README.md nennt alle vier signierten Images inkl. reticora-postgres; docs/security/abhaengigkeitsscans.md beschreibt Matrix, Ausnahmeformat und SLA-Prüfung.
 - [ ] Ratchet: Fall image_scan_coverage aus tests/audit/ops-config.test.sh entfernt (ist es der letzte, wird die Datei gelöscht), Eintrag aus tests/audit/expected-failures.txt entfernt. Regression: Jobs govulncheck, npm-audit, image-scan und gate grün.
 
@@ -3718,7 +3718,7 @@ SEC-11;[Q];A;tests/ci-config.test.sh;WP-389
 TST-04;[Q];A;tests/ci-config.test.sh;WP-389
 ```
 
-**Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01); [E-31](../entscheidungen.md#e-31)
+**Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01); [E-31](../entscheidungen.md#e-31); [E-96](entscheidungen.md#e-96) TimescaleDB-Version des Datenbank-Images und Funde seines Basisimages (entschieden: Option 2, Auftraggeber 2026-10-21)
 
 **Nicht Bestandteil:** Scan-Läufe auf dem Release-Kandidaten (WP-595 (`t5-rc-evidence`)); Bewertung der Dev-Advisories im Review (WP-452 (`t5-review-g1`)).
 

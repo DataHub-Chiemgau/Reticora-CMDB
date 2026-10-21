@@ -97,8 +97,9 @@ jobs:
     services:
       postgres:
         # TimescaleDB is required by migration 000020 (metric_sample hypertable);
-        # matches the docker-compose database image.
-        image: timescale/timescaledb:2.17.2-pg16
+        # every TimescaleDB image of the repository is this reference, pinned
+        # by version and digest (E-96, tests/ci-config.test.sh).
+        image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
         env:
           POSTGRES_USER: reticora
           POSTGRES_PASSWORD: reticora
@@ -300,7 +301,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: timescale/timescaledb:2.17.2-pg16
+        image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
         env:
           POSTGRES_USER: reticora
           POSTGRES_PASSWORD: reticora
@@ -409,6 +410,12 @@ jobs:
 
       - name: Gate and structure checks (REP-01, GATE-01/02/05, SEQ-01, DOD-01, GLO-11)
         run: ./tests/rep01-structure.test.sh
+
+      # SEC-11/TST-04 (WP-389): every release image is in the image-scan
+      # matrix and scanned before the push, the scan exceptions keep the CVE
+      # fix SLA, the database image is pinned.
+      - name: CI configuration of the scans (SEC-11, TST-04)
+        run: ./tests/ci-config.test.sh
 
       # SEC-07 (WP-362): every break-glass use alarms. promtool pinned to the
       # Prometheus 3.5 LTS release, checksum from its sha256sums.txt.
@@ -566,7 +573,9 @@ jobs:
   # SEC-11/TST-04 (WP-004): dependency and container scans on every PR.
   # Critical and High findings block; accepted findings need an entry with an
   # expiry within the CVE fix SLA in security/scan-exceptions.txt (see
-  # docs/security/abhaengigkeitsscans.md). Reports are uploaded as artifacts.
+  # docs/security/abhaengigkeitsscans.md), checked by
+  # scripts/ci/check-scan-exceptions.sh before every scan (WP-389). Reports
+  # are uploaded as artifacts.
   govulncheck:
     runs-on: ubuntu-latest
     strategy:
@@ -575,6 +584,9 @@ jobs:
         module: [backend, collector, edgecore]
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check scan exceptions (SEC-11 SLA)
+        run: ./scripts/ci/check-scan-exceptions.sh
 
       - uses: actions/setup-go@v5
         with:
@@ -616,6 +628,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check scan exceptions (SEC-11 SLA)
+        run: ./scripts/ci/check-scan-exceptions.sh
 
       - uses: actions/setup-node@v4
         with:
@@ -667,22 +682,30 @@ jobs:
           - image: frontend
             context: frontend
             dockerfile: frontend/Dockerfile
+          # reticora-postgres of release.yml (WP-389, F-124).
+          - image: postgres
+            context: deploy/docker-compose/postgres
+            dockerfile: deploy/docker-compose/postgres/Dockerfile
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check scan exceptions (SEC-11 SLA)
+        run: ./scripts/ci/check-scan-exceptions.sh
 
       - name: Build image
         run: docker build -t "reticora-${{ matrix.image }}:scan" -f "${{ matrix.dockerfile }}" "${{ matrix.context }}"
 
       # Trivy (E-31): OS packages and application dependencies of the built
       # image. Critical/High findings with an available fix block; the
-      # exceptions file uses the .trivyignore format with exp: dates. The
-      # pinned CLI image drives the runner's Docker daemon.
+      # exceptions file uses the .trivyignore format with exp: dates. The CLI
+      # image, pinned by version and digest (as in release.yml), drives the
+      # runner's Docker daemon.
       - name: Scan image with Trivy
         run: |
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v "$PWD:/work" -w /work \
-            aquasec/trivy:0.75.0 image \
+            aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image \
             --severity CRITICAL,HIGH --ignore-unfixed \
             --ignorefile security/scan-exceptions.txt \
             --format json --output "trivy-${{ matrix.image }}.json" \

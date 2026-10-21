@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -80,12 +81,23 @@ func mustExec(ctx context.Context, t *testing.T, pool *pgxpool.Pool, statements 
 	}
 }
 
-func expectError(ctx context.Context, t *testing.T, pool *pgxpool.Pool, sql, contains string) {
+// expectRefused: sql fails with SQLSTATE 0A000 (feature_not_supported) and
+// one of the messages. TimescaleDB 2.18 renamed compression to columnstore
+// in its messages; the database image moved from 2.17.2 to 2.31.0 (E-96,
+// WP-389), so both wordings of the same refusal are accepted.
+func expectRefused(ctx context.Context, t *testing.T, pool *pgxpool.Pool, sql string, messages ...string) {
 	t.Helper()
 	_, err := pool.Exec(ctx, sql)
-	if err == nil || !strings.Contains(err.Error(), contains) {
-		t.Fatalf("%s: got error %v, want %q", sql, err, contains)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "0A000" {
+		t.Fatalf("%s: got error %v, want SQLSTATE 0A000 with one of %q", sql, err, messages)
 	}
+	for _, m := range messages {
+		if pgErr.Message == m {
+			return
+		}
+	}
+	t.Fatalf("%s: got %q, want one of %q", sql, pgErr.Message, messages)
 }
 
 func TestTimescaleRefusesRLSWithCompression(t *testing.T) {
@@ -97,10 +109,11 @@ func TestTimescaleRefusesRLSWithCompression(t *testing.T) {
 		`ALTER TABLE `+m+` ENABLE ROW LEVEL SECURITY`,
 		`ALTER TABLE `+m+` FORCE ROW LEVEL SECURITY`,
 	)
-	expectError(ctx, t, admin,
+	expectRefused(ctx, t, admin,
 		`ALTER TABLE `+m+` SET (timescaledb.compress, timescaledb.compress_segmentby = 'organization_id')`,
-		"compression cannot be used on table with row security")
-	expectError(ctx, t, admin,
+		"compression cannot be used on table with row security",
+		"columnstore cannot be used on table with row security")
+	expectRefused(ctx, t, admin,
 		`CREATE MATERIALIZED VIEW `+spikeSchema+`.m_1h WITH (timescaledb.continuous) AS
 		 SELECT time_bucket('1 hour', time) AS bucket, organization_id, avg(value) AS avg_value
 		 FROM `+m+` GROUP BY 1, 2 WITH NO DATA`,
@@ -112,8 +125,9 @@ func TestTimescaleRefusesRLSWithCompression(t *testing.T) {
 		`ALTER TABLE `+m+` DISABLE ROW LEVEL SECURITY`,
 		`ALTER TABLE `+m+` SET (timescaledb.compress, timescaledb.compress_segmentby = 'organization_id')`,
 	)
-	expectError(ctx, t, admin, `ALTER TABLE `+m+` ENABLE ROW LEVEL SECURITY`,
-		"operation not supported on hypertables that have compression enabled")
+	expectRefused(ctx, t, admin, `ALTER TABLE `+m+` ENABLE ROW LEVEL SECURITY`,
+		"operation not supported on hypertables that have compression enabled",
+		"operation not supported on hypertables that have columnstore enabled")
 }
 
 func TestSecurityBarrierViewsIsolateMetrics(t *testing.T) {
