@@ -5,7 +5,11 @@
 # (Fulcio certificate for this workflow's identity, Rekor log entry). The
 # edge updater (edgecore/update) installs a binary only after
 # `cosign verify-blob` accepted its bundle for exactly this workflow on a
-# version tag.
+# version tag. The installers (WP-387) verify the same identity before the
+# installation: the images (install-cloud.sh release mode), the collector
+# binary (install-vm.sh --release) and the source of a release tag (install.sh,
+# install-vm.sh) against the signed manifest SHA256SUMS, which lists
+# SOURCE_COMMIT and the source tarball reticora-source-<tag>.tar.gz.
 name: Release
 
 on:
@@ -63,6 +67,15 @@ jobs:
           done
           syft scan dir:. -o spdx-json=dist/reticora-source.spdx.json
 
+      # The source of the tag for the installers (WP-387, TEC-15): the commit
+      # a checkout of the tag must be, and the tarball installed without git.
+      - name: Source tarball and commit
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD > dist/SOURCE_COMMIT
+          git archive --format=tar.gz --prefix="reticora-source-$GITHUB_REF_NAME/" \
+            -o "dist/reticora-source-$GITHUB_REF_NAME.tar.gz" HEAD
+
       - name: Sign binaries and SBOMs (cosign keyless)
         run: |
           set -euo pipefail
@@ -97,7 +110,18 @@ jobs:
               '{version: $version, channel: $channel, downloadUrl: $url, signatureBundleUrl: $bundle, checksums: {sha256: $sha}, publishedAt: $published}' \
               > "$bin.release.json"
           done
-          (cd dist && sha256sum reticora-* > SHA256SUMS)
+          (cd dist && sha256sum reticora-* SOURCE_COMMIT > SHA256SUMS)
+
+      # The manifest is what the installers verify first (WP-387): signed
+      # like every other file and checked with the identity they pin.
+      - name: Sign the release manifest
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
+          cosign verify-blob --bundle dist/SHA256SUMS.sigstore.json \
+            --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            dist/SHA256SUMS
 
       - name: Publish the GitHub release
         env:

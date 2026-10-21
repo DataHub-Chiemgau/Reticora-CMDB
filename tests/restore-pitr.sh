@@ -60,9 +60,11 @@ services:
     ports: !reset []
 YML
 
+# docker-compose.override.yml carries the build: of the postgres image.
 compose() {
     docker compose -p "$PROJECT" --env-file "$ENV_FILE" \
-        -f "$ROOT/deploy/docker-compose/docker-compose.yml" -f "$OVERRIDE" "$@"
+        -f "$ROOT/deploy/docker-compose/docker-compose.yml" \
+        -f "$ROOT/deploy/docker-compose/docker-compose.override.yml" -f "$OVERRIDE" "$@"
 }
 # shellcheck disable=SC2329 # invoked by the EXIT trap
 cleanup() {

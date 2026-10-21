@@ -571,3 +571,5 @@ DIS-09;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
 INS-06;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
 INS-02;[B];A;tests/install-cloud-issuer-order.test.sh;WP-385
 INS-05;[B];A;tests/install-reinstall.test.sh;WP-386
+TEC-15;[B];A;tests/install-signature.test.sh;WP-387
+COL-06;[B], Air-Gapped [O];A;tests/install-signature.test.sh;WP-387
