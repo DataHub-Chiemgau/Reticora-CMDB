@@ -884,10 +884,10 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     const onRequest = (r: { url(): string; method(): string }) => {
       if (isCreate(r)) sent++;
     };
-    // The server answers the creates in the order they arrive: the second
-    // POST is passed on only after the first one has been answered, so the
-    // repeat is always the one refused with 409 (otherwise the server could
-    // answer the second click first and the double click would pass by chance).
+    // The dialog sends one create per double click (F-314). Should a second
+    // POST still be sent, the server answers the creates in the order they
+    // arrive: it is passed on only after the first one has been answered, so
+    // the repeat is always the one refused with 409.
     let firstAnswered = () => {};
     const firstDone = new Promise<void>((resolve) => (firstAnswered = resolve));
     let routed = 0;
@@ -930,11 +930,8 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
       page.off('request', onRequest);
       page.off('response', onResponse);
     }
-    expect(
-      statuses.filter((s) => s === 201),
-      `exactly one create succeeds (answers ${statuses.join(',')})`,
-    ).toHaveLength(1);
-    for (const s of statuses) expect([201, 409], 'a repeat is refused as a conflict').toContain(s);
+    expect(sent, `the double click sends one create (answers ${statuses.join(',')})`).toBe(1);
+    expect(statuses, 'the create succeeds').toEqual([201]);
     const rels = await ok<
       List<{ id: string; source_ci_id: string; target_ci_id: string; rel_type: string }>
     >('GET', `/cis/${app.id}/relationships`);
@@ -944,16 +941,13 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     expect(edges, 'exactly one stored edge app depends_on db').toHaveLength(1);
     // Feedback: the user's create succeeded, so the dialog closes and no error
     // is reported for it.
-    await expect
-      .soft(dialog, 'the dialog closes after the successful create')
-      .toBeHidden({ timeout: 10_000 });
-    await expect
-      .soft(
-        page.getByRole('alert').filter({ hasText: /\S/ }),
-        'no error shown for a successful create',
-      )
-      .toHaveCount(0, { timeout: 5_000 });
-    if (await dialog.isVisible()) await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+    await expect(dialog, 'the dialog closes after the successful create').toBeHidden({
+      timeout: 10_000,
+    });
+    await expect(
+      page.getByRole('alert').filter({ hasText: /\S/ }),
+      'no error shown for a successful create',
+    ).toHaveCount(0, { timeout: 5_000 });
 
     // UI after reload: the relationship card and the neighbours show db.
     await page.reload();

@@ -103,11 +103,22 @@ function useRelationshipInvalidation(ciId: string) {
   };
 }
 
-export function useCreateRelationship(ciId: string) {
+/**
+ * onCreated runs after every successful create. It belongs to the hook: the
+ * callbacks passed to mutate run only for the latest call, so a later call
+ * would swallow the success of an earlier one (F-314).
+ */
+export function useCreateRelationship(
+  ciId: string,
+  { onCreated }: { onCreated?: () => void } = {},
+) {
   const invalidate = useRelationshipInvalidation(ciId);
   return useMutation({
     mutationFn: (data: RelationshipCreateRequest) => relationshipApi.create(data),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      onCreated?.();
+    },
   });
 }
 

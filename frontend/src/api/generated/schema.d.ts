@@ -12278,13 +12278,24 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description Structural relationship type, which is projected and cannot be stored */
-      422: {
+      403: components['responses']['Forbidden'];
+      /** @description The edge exists already (the same source, target, type and interfaces), e.g. a repeated create */
+      409: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, or an unknown ID. `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ViolationProblem'] | components['schemas']['ProblemDetail'];
         };
       };
       500: components['responses']['InternalServerError'];

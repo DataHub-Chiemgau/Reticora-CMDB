@@ -194,37 +194,49 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 		if rel.Source == "" {
 			rel.Source = "manual"
 		}
+		// The endpoints are checked under the caller's scope in the same
+		// statement as the insert: a CI the caller cannot see (another
+		// organization, a client or site outside the scope, an unknown id)
+		// inserts nothing and is named by its sentinel (F-145).
 		query := `
-			INSERT INTO ci_relationship (
-				organization_id,
-				source_ci_id,
-				target_ci_id,
-				rel_type,
-				attributes,
-				source,
-				confidence,
-				first_seen_at,
-				last_seen_at,
-				verification_state,
-				source_system,
-				notes,
-				source_interface_id,
-				target_interface_id,
-				last_confirmed_at,
-				verified_by,
-				verified_at
+			WITH ends AS (
+				SELECT EXISTS (SELECT 1 FROM ci WHERE ci.id = $2::uuid) AS source_visible,
+				       EXISTS (SELECT 1 FROM ci WHERE ci.id = $3::uuid) AS target_visible
+			), created AS (
+				INSERT INTO ci_relationship (
+					organization_id,
+					source_ci_id,
+					target_ci_id,
+					rel_type,
+					attributes,
+					source,
+					confidence,
+					first_seen_at,
+					last_seen_at,
+					verification_state,
+					source_system,
+					notes,
+					source_interface_id,
+					target_interface_id,
+					last_confirmed_at,
+					verified_by,
+					verified_at
+				)
+				SELECT $1::uuid, $2::uuid, $3::uuid, $4::text, $5::jsonb, $6::text, $7::numeric,
+					$8::timestamptz, $9::timestamptz, $10::text, $11::text, $12::text,
+					$13::uuid, $14::uuid, now(),
+					(SELECT id FROM app_user WHERE id::text = $15::text),
+					CASE WHEN $10::text = 'verified' THEN now() END
+				FROM ends WHERE ends.source_visible AND ends.target_visible
+				RETURNING id::text AS id, created_at, updated_at, last_confirmed_at,
+					COALESCE(verified_by::text, '') AS verified_by, verified_at
 			)
-			SELECT $1::uuid, $2::uuid, $3::uuid, $4::text, $5::jsonb, $6::text, $7::numeric,
-				$8::timestamptz, $9::timestamptz, $10::text, $11::text, $12::text,
-				$13::uuid, $14::uuid, now(),
-				(SELECT id FROM app_user WHERE id::text = $15::text),
-				CASE WHEN $10::text = 'verified' THEN now() END
-			WHERE EXISTS (SELECT 1 FROM ci WHERE ci.id = $2)
-			  AND EXISTS (SELECT 1 FROM ci WHERE ci.id = $3)
-			RETURNING id::text, created_at, updated_at, last_confirmed_at, COALESCE(verified_by::text, ''), verified_at
+			SELECT ends.source_visible, ends.target_visible, created.*
+			FROM ends LEFT JOIN created ON true
 		`
-		var createdAt, updatedAt, confirmedAt time.Time
-		var verifiedAt *time.Time
+		var sourceVisible, targetVisible bool
+		var id, verifiedBy *string
+		var createdAt, updatedAt, confirmedAt, verifiedAt *time.Time
 		firstSeen := any(nil)
 		if rel.Source != "manual" {
 			firstSeen = time.Now().UTC()
@@ -249,15 +261,26 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 			nilIfEmptyStr(rel.SourceInterfaceID),
 			nilIfEmptyStr(rel.TargetInterfaceID),
 			rel.VerifiedBy,
-		).Scan(&rel.ID, &createdAt, &updatedAt, &confirmedAt, &rel.VerifiedBy, &verifiedAt); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("not found")
-			}
+		).Scan(&sourceVisible, &targetVisible, &id, &createdAt, &updatedAt, &confirmedAt, &verifiedBy, &verifiedAt); err != nil {
 			return fmt.Errorf("create relationship: %w", err)
 		}
-		rel.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
-		rel.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
-		rel.LastConfirmedAt = confirmedAt.UTC().Format(time.RFC3339Nano)
+		var invisible []error
+		if !sourceVisible {
+			invisible = append(invisible, ErrSourceCINotFound)
+		}
+		if !targetVisible {
+			invisible = append(invisible, ErrTargetCINotFound)
+		}
+		if len(invisible) > 0 {
+			return errors.Join(invisible...)
+		}
+		if id == nil {
+			return fmt.Errorf("create relationship: no row inserted")
+		}
+		rel.ID, rel.VerifiedBy = *id, *verifiedBy
+		rel.CreatedAt = formatTime(createdAt)
+		rel.UpdatedAt = formatTime(updatedAt)
+		rel.LastConfirmedAt = formatTime(confirmedAt)
 		rel.VerifiedAt = formatTime(verifiedAt)
 		return r.recordEvent(ctx, tx, events.RelationshipCreated, rel)
 	})

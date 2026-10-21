@@ -1047,6 +1047,7 @@
     "incoming": "Source → this CI",
     "type": "Relationship type",
     "targetCi": "CI ID of the other end",
+    "ciNotFound": "No CI with this ID was found.",
     "notes": "Note",
     "verificationState": "Verification state",
     "state": {

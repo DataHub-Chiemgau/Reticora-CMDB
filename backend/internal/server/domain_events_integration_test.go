@@ -147,17 +147,17 @@ func TestAuditDefectDomainEventsEmitted(t *testing.T) {
 			// Projected types are refused before the repository (422).
 			{"projected rel_type", http.MethodPost, "/api/v1/relationships",
 				`{"source_ci_id":"` + a + `","target_ci_id":"` + b + `","rel_type":"contains"}`, admin, http.StatusUnprocessableEntity},
-			// No row: the target is invisible or unknown (the status is
-			// WP-401's; any refusal writes no event).
+			// No row: the target is invisible or unknown (422 on
+			// target_ci_id, WP-401).
 			{"CI of organization B as target", http.MethodPost, "/api/v1/relationships",
-				`{"source_ci_id":"` + a + `","target_ci_id":"` + foreign + `","rel_type":"depends_on"}`, admin, 0},
+				`{"source_ci_id":"` + a + `","target_ci_id":"` + foreign + `","rel_type":"depends_on"}`, admin, http.StatusUnprocessableEntity},
 			{"unknown CI as target", http.MethodPost, "/api/v1/relationships",
-				`{"source_ci_id":"` + a + `","target_ci_id":"` + f.ID() + `","rel_type":"depends_on"}`, admin, 0},
+				`{"source_ci_id":"` + a + `","target_ci_id":"` + f.ID() + `","rel_type":"depends_on"}`, admin, http.StatusUnprocessableEntity},
 			{"discovery edge without force", http.MethodDelete, "/api/v1/relationships/" + discoveryEdge, ``, admin, http.StatusConflict},
 			{"organization B deletes A's edge", http.MethodDelete, "/api/v1/relationships/" + edge, ``, otherOrg, http.StatusNotFound},
 		} {
 			r := e.Call(t, tc.as, tc.method, tc.path, tc.body)
-			if (tc.status != 0 && r.Code != tc.status) || r.Code < 300 {
+			if r.Code != tc.status {
 				t.Errorf("%s: %s %s = %d %s, want %d", tc.name, tc.method, tc.path, r.Code, t6Short(r.Body), tc.status)
 			}
 		}

@@ -143,6 +143,17 @@ var ValidSources = map[string]bool{
 // suppression.
 var ErrForceRequired = errors.New("a discovery edge is deleted only with force=true; discovery then no longer recreates it")
 
+// ErrSourceCINotFound and ErrTargetCINotFound refuse an edge whose source or
+// target CI the caller cannot see: a CI of another organization, of a client
+// or site outside the scope, or an unknown id (F-145). Create answers 422 on
+// source_ci_id or target_ci_id, the same for each of them, so the answer does
+// not tell a foreign CI from an unknown one. A repository joins both when
+// neither endpoint is visible.
+var (
+	ErrSourceCINotFound = errors.New("source CI not found")
+	ErrTargetCINotFound = errors.New("target CI not found")
+)
+
 // PolicyDeleter deletes an edge by the source policy (REL-03, REL-04): a
 // discovery edge only with force, then suppressed for its CIs and type.
 type PolicyDeleter interface {
@@ -605,11 +616,49 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Create(r.Context(), rel); err != nil {
+		if writeEndpointError(w, err) {
+			return
+		}
 		api.WriteRepoError(w, err)
 		return
 	}
 
 	api.WriteJSON(w, http.StatusCreated, rel)
+}
+
+// violation is one rejected field of a 422 (ViolationProblem).
+type violation struct {
+	Field  string `json:"field"`
+	Detail string `json:"detail"`
+}
+
+// writeEndpointError answers an edge with an endpoint the caller cannot see
+// (ErrSourceCINotFound, ErrTargetCINotFound) with 422 and a violation per
+// such endpoint (F-145). It reports whether err was one.
+func writeEndpointError(w http.ResponseWriter, err error) bool {
+	var violations []violation
+	var details []string
+	for _, end := range []struct {
+		field string
+		err   error
+	}{{"source_ci_id", ErrSourceCINotFound}, {"target_ci_id", ErrTargetCINotFound}} {
+		if errors.Is(err, end.err) {
+			violations = append(violations, violation{Field: end.field, Detail: end.err.Error()})
+			details = append(details, end.field+": "+end.err.Error())
+		}
+	}
+	if len(violations) == 0 {
+		return false
+	}
+	api.WriteProblemBody(w, http.StatusUnprocessableEntity, struct {
+		api.ProblemDetail
+		Violations []violation `json:"violations"`
+	}{
+		ProblemDetail: api.ProblemDetail{Type: "https://reticora.io/problems/422", Title: "Unprocessable Entity",
+			Status: http.StatusUnprocessableEntity, Detail: strings.Join(details, "; ")},
+		Violations: violations,
+	})
+	return true
 }
 
 // validRelType resolves the rel_type against the metadata catalogue when

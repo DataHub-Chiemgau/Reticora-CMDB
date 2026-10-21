@@ -1115,21 +1115,33 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
 
   test('T14 B’s relationship to A’s CI is rejected with a client error and nothing is stored', async () => {
     const before = await snapshotA();
+    // Each attempt names the endpoints B cannot see.
     const attempts = [
-      { source_ci_id: w.bOwn.id, target_ci_id: w.ci1.id },
-      { source_ci_id: w.ci1.id, target_ci_id: w.bOwn.id },
-      { source_ci_id: w.ci1.id, target_ci_id: w.ci2.id },
+      { ends: { source_ci_id: w.bOwn.id, target_ci_id: w.ci1.id }, fields: ['target_ci_id'] },
+      { ends: { source_ci_id: w.ci1.id, target_ci_id: w.bOwn.id }, fields: ['source_ci_id'] },
+      {
+        ends: { source_ci_id: w.ci1.id, target_ci_id: w.ci2.id },
+        fields: ['source_ci_id', 'target_ci_id'],
+      },
     ];
     const statuses: string[] = [];
-    for (const ends of attempts) {
-      const r = await api(w.rq, w.b.token, 'POST', '/relationships', {
-        ...ends,
-        rel_type: 'depends_on',
-        source: 'manual',
-      });
+    const refusals: { ends: string; got: string; want: string }[] = [];
+    for (const { ends, fields } of attempts) {
+      const r = await api<{ violations?: { field: string }[] }>(
+        w.rq,
+        w.b.token,
+        'POST',
+        '/relationships',
+        { ...ends, rel_type: 'depends_on', source: 'manual' },
+      );
       statuses.push(`${ends.source_ci_id}->${ends.target_ci_id}: ${r.status}`);
       expect(r.status, `relationship ${JSON.stringify(ends)} by B`).not.toBeLessThan(300);
       expectNoTraceOfA('rejection', r.body, [w.ci1.id, w.ci2.id]);
+      refusals.push({
+        ends: JSON.stringify(ends),
+        got: `${r.status} ${(r.body?.violations ?? []).map((v) => v.field).join(',')}`,
+        want: `422 ${fields.join(',')}`,
+      });
     }
     // Nothing persisted: not for B, not in A's graph.
     const relsB = await api<List<Relationship>>(
@@ -1144,6 +1156,11 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
     // (API-03: RFC 7807 table – 404/422), not an internal error.
     for (const s of statuses) {
       expect(s, 'status of the rejection').toMatch(/: (400|403|404|422)$/);
+    }
+    // 422 with violations on the endpoint(s) B cannot see, the same answer as
+    // for an unknown CI (F-145).
+    for (const r of refusals) {
+      expect(r.got, `refusal of ${r.ends} names the invisible endpoints`).toBe(r.want);
     }
   });
 

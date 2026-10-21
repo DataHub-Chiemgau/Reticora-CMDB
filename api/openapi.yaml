@@ -1409,11 +1409,30 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '422':
-          description: Structural relationship type, which is projected and cannot be stored
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: >-
+            The edge exists already (the same source, target, type and
+            interfaces), e.g. a repeated create
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: >-
+            The source or target CI is not visible to the caller: a CI of
+            another organization, of a client or site outside the scope, or
+            an unknown ID. `violations` names source_ci_id, target_ci_id or
+            both ("source CI not found", "target CI not found"), the same
+            answer for a foreign and an unknown CI; nothing is stored (F-145).
+            Without violations: a structural relationship type, which is
+            projected and cannot be stored, or an interface of another CI.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ViolationProblem' }
+                  - { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 

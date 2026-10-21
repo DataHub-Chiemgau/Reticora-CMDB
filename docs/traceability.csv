@@ -603,3 +603,5 @@ REP-01;[B];B;backend/internal/notify/channel_test.go;WP-399
 SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-399
 EVT-02;[B];B;backend/internal/server/domain_events_integration_test.go;WP-400
 EVT-01;[B];B;backend/internal/server/domain_events_integration_test.go;WP-400
+REL-02;[B];B;backend/internal/relationship/relationship_scope_integration_test.go;WP-401
+REL-04;[B];B;backend/internal/relationship/relationship_scope_integration_test.go;WP-401
