@@ -309,12 +309,12 @@ Visualisierungen:
 
 Feature-Keys mit Limits pro Mandant auf einer Codebasis, serverseitig in REST und GraphQL durchgesetzt:
 
-| Paket | Umfang (Auszug) | max_cis / Collectors / Nutzer |
+| Paket | Umfang (Auszug) | max_cis / Collectors / Nutzer / Beta-Preis / Final-Preis |
 |---|---|---|
-| **Essential** | CMDB-Kern, Discovery, Topologie, Rack, Export, Webhooks, API; ab P2 Assets, Dokumente, Import, Ticketing Essential | 500 / 2 / 5 |
-| **Standard** | + Ticketing Standard, Signatur, Lager, Inventur, Barcode, DATEV | 2.500 / 5 / 25 |
-| **Pro** | + SMS/Pager, Workflows, Compliance-Findings, Ticketing Pro, Disposition, erweitertes Audit | 10.000 / 20 / 100 |
-| **Enterprise** | + Monitoring, Reseller, RFID, GIS, Endpoint-Agent, Schlüssel, Schulung, Dedicated Instance | 50.000 / ∞ / ∞ |
+| **Essential** | CMDB-Kern, Discovery, Topologie, Rack, Export, Webhooks, API; ab P2 Assets, Dokumente, Import, Ticketing Essential | 500 / 2 / 5 / 29€-290€ / 49€-490€ |
+| **Standard** | + Ticketing Standard, Signatur, Lager, Inventur, Barcode, DATEV | 2.500 / 5 / 25 / 69€-690€ / 149€-1490€ |
+| **Pro** | + SMS/Pager, Workflows, Compliance-Findings, Ticketing Pro, Disposition, erweitertes Audit | 10.000 / 20 / 100 / 149€-1490€ / 299€-2990€ |
+| **Enterprise** | + Monitoring, Reseller, RFID, GIS, Endpoint-Agent, Schlüssel, Schulung, Dedicated Instance | 50.000 / ∞ / ∞ / NONE / ab 990€ |
 | **Add-ons** | IGA, KI – zu jedem Paket zubuchbar | – |
 
 Paketmatrix und Limits sind noch zu bestätigen.
