@@ -298,7 +298,8 @@ start, then `issue_tls_certificate` requests the real certificate:
    the installer uses `sudo -n`, otherwise it stops and names the paths).
 2. **Request.** `certbot certonly --webroot … -d <domain> --cert-name
    <domain> --deploy-hook "sh /usr/local/bin/reticora-certbot-deploy-hook.sh"`
-   in a one-off `certbot` container stores the lineage in
+   (plus `--server <RETICORA_ACME_SERVER>` when set, see "Staging and test
+   CAs" below) in a one-off `certbot` container stores the lineage in
    `live/<domain>/` (symlinks into `archive/<domain>/`).
 3. **Failure.** When the request fails (challenge, rate limit, storage
    error), whatever certbot left of the lineage is removed and the
@@ -358,6 +359,65 @@ An installation that ran into the former "live directory exists" error may
 still hold a second lineage `live/<domain>-0001/`; the installer no longer
 uses it. Remove it with
 `docker compose --env-file .env run --rm --no-deps --entrypoint certbot certbot delete --cert-name <domain>-0001`.
+
+### Staging and test CAs (`RETICORA_ACME_SERVER`, `RETICORA_ACME_CA_BUNDLE`)
+
+By default certbot requests the certificate from Let's Encrypt production
+and trusts the public CAs of its image for that connection. Two optional
+settings point it at another ACME server, e.g. Let's Encrypt staging (no
+production rate limits while testing) or a private ACME CA. The installer
+does not ask for them: it takes them from its environment, otherwise from
+`.env`, and writes them to `.env`, from where the `certbot` service gets
+them as well.
+
+| Variable | Effect | Empty (default) |
+|---|---|---|
+| `RETICORA_ACME_SERVER` | ACME directory URL: `--server` of the installer's `certbot certonly` and of `certbot renew` in the renewal loop of the `certbot` service; certbot records it in `renewal/<domain>.conf` | Let's Encrypt production, `https://acme-v02.api.letsencrypt.org/directory` |
+| `RETICORA_ACME_CA_BUNDLE` | Absolute path of a PEM file with the CA of the ACME server's **HTTPS endpoint**. The `certbot` service mounts it read-only at `/etc/reticora/acme-ca.pem` and sets `REQUESTS_CA_BUNDLE` to it, for the request and the renewals | the public CAs of the certbot image |
+| `RETICORA_TLS_CA_BUNDLE` | Environment only: CA of the **issued** chain for the installer's `openssl` checks (is a real certificate present, `validate_tls_material <domain> 1`) | the host's trust store |
+
+The installer stops before it writes anything when `RETICORA_ACME_SERVER`
+is not an `https://` URL (blanks, quotes and `$` are refused) or
+`RETICORA_ACME_CA_BUNDLE` is not an absolute path (letters, digits, `.`,
+`_`, `+`, `-`, `/`) of a readable PEM certificate. The bundle *replaces* the
+image's CAs for certbot's ACME connections; it must contain the CA of the
+configured server and changes nothing about the certificate nginx serves.
+
+**Private ACME CA or Pebble:** set `RETICORA_ACME_SERVER`,
+`RETICORA_ACME_CA_BUNDLE` (CA of the server's HTTPS endpoint) and, on every
+installer run, `RETICORA_TLS_CA_BUNDLE` (root of the issued chains): without
+it the chain check after the request (`validate_tls_material <domain> 1`)
+aborts, and a re-run takes the certificate for the placeholder and requests
+a new one. The host must trust that root as well: on a re-run the issuer
+check from the host uses curl with the system trust store (or
+`CURL_CA_BUNDLE`), and browsers need it.
+`tests/install-acme-pebble.test.sh` (CI job `tls-domain-pebble` of
+`install-smoke.yml`) installs this way against Pebble.
+
+**Let's Encrypt staging** is such a CA as well, only its endpoint has a
+public certificate (no `RETICORA_ACME_CA_BUNDLE`):
+
+```bash
+RETICORA_ACME_SERVER=https://acme-staging-v02.api.letsencrypt.org/directory \
+RETICORA_TLS_CA_BUNDLE=/path/to/staging-roots.pem ./install-cloud.sh
+```
+
+`staging-roots.pem` holds the staging roots Let's Encrypt publishes
+(letsencrypt.org/docs/staging-environment); neither browsers nor the host
+trust them. To switch to production, empty `RETICORA_ACME_SERVER` in `.env`
+and re-run the installer without `RETICORA_TLS_CA_BUNDLE`: the staging
+certificate then counts as untrusted and is replaced.
+
+**Changing the server later:** the renewal loop then renews against the new
+server, but certbot has an account there only after a request of the
+installer; until then the renewals fail (`docker compose --env-file .env
+logs certbot`). A certificate that the trust store accepts is not requested
+again. To get it from the new server, stop the stack (`docker compose
+--env-file .env down`; the data volumes stay), remove the certificate
+(`docker compose --env-file .env run --rm --no-deps --entrypoint certbot certbot delete --cert-name <domain>`)
+and re-run the installer: it starts the stack with a new placeholder and
+requests the certificate. (With the stack running, nginx would keep serving
+the removed certificate from memory and the issuer check would fail.)
 
 ### Issued certificate not loadable by nginx
 

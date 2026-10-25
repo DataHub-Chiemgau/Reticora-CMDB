@@ -1,0 +1,65 @@
+# Pebble, the ACME test server of Let's Encrypt, with challtestsrv as its DNS
+# server — the ACME side of tests/install-acme-pebble.test.sh (WP-420,
+# INS-02, TEC-09). The test starts it with
+#   PEBBLE_TLS_DIR=<dir> docker compose -f tests/fixtures/pebble/docker-compose.pebble.yml up -d
+# and runs install-cloud.sh with RETICORA_ACME_SERVER=https://<host IP>:14000/dir.
+#
+# Both services use the host's network: the certbot container of the
+# installation reaches the ACME API on <host IP>:14000, and Pebble's
+# validation reaches the frontend (nginx, ports 80/443 published on the host)
+# at the address challtestsrv answers for the domain, without traffic between
+# two compose networks.
+#
+#   pebble        ACME API 0.0.0.0:14000, management API 127.0.0.1:15000
+#                 (/roots/0: the root of the issued chains, new on every
+#                 start). Both serve <PEBBLE_TLS_DIR>/cert.pem, a certificate
+#                 for the host IP that the test issues from its own CA; that
+#                 CA is RETICORA_ACME_CA_BUNDLE. Challenges are validated on
+#                 port 80 of the address challtestsrv returns, at once
+#                 (PEBBLE_VA_NOSLEEP), every nonce is accepted
+#                 (PEBBLE_WFE_NONCEREJECT=0) and every order needs a fresh
+#                 validation (PEBBLE_AUTHZREUSE=0).
+#   challtestsrv  DNS 127.0.0.1:8053, only for Pebble, management API
+#                 127.0.0.1:8055 (/add-a, /clear-a). No default addresses: a
+#                 domain without an A record does not resolve and its
+#                 challenge fails. Its own challenge responders are off.
+#
+# PEBBLE_TLS_DIR defaults to ./tls (not in the repository) only so that
+# `docker compose config` works without the test.
+name: reticora-pebble
+
+services:
+  pebble:
+    image: ghcr.io/letsencrypt/pebble:2.10.1@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199
+    network_mode: host
+    command: ["-config", "/fixture/pebble-config.json", "-dnsserver", "127.0.0.1:8053"]
+    environment:
+      PEBBLE_VA_NOSLEEP: "1"
+      PEBBLE_WFE_NONCEREJECT: "0"
+      PEBBLE_AUTHZREUSE: "0"
+    volumes:
+      - ./pebble-config.json:/fixture/pebble-config.json:ro
+      - ${PEBBLE_TLS_DIR:-./tls}:/fixture/tls:ro
+    depends_on:
+      - challtestsrv
+
+  challtestsrv:
+    image: ghcr.io/letsencrypt/pebble-challtestsrv:2.10.1@sha256:12ce21884def456bcf9786542113949e1f19dc7738d2c70e156c2d0c38a1405b
+    network_mode: host
+    command:
+      - -defaultIPv4
+      - ""
+      - -defaultIPv6
+      - ""
+      - -dnsserver
+      - 127.0.0.1:8053
+      - -management
+      - 127.0.0.1:8055
+      - -http01
+      - ""
+      - -https01
+      - ""
+      - -tlsalpn01
+      - ""
+      - -doh
+      - ""

@@ -46,6 +46,11 @@ NON_INTERACTIVE=0
 RELEASE="${RETICORA_RELEASE:-}"
 # Registry of the signed images (empty: .env, otherwise RELEASE_REGISTRY).
 IMAGE_REGISTRY_OVERRIDE="${RETICORA_IMAGE_REGISTRY:-}"
+# ACME server of the TLS certificate and the CA bundle the certbot container
+# trusts for it (empty: .env, otherwise Let's Encrypt production with the
+# image's public CAs; WP-420, staging and test CAs).
+ACME_SERVER_OVERRIDE="${RETICORA_ACME_SERVER:-}"
+ACME_CA_BUNDLE_OVERRIDE="${RETICORA_ACME_CA_BUNDLE:-}"
 # E-69 (Option 1): the signed release artifacts are the default; the local
 # source build only with --build-from-source (RETICORA_BUILD_FROM_SOURCE=1).
 case "${RETICORA_BUILD_FROM_SOURCE:-0}" in
@@ -437,6 +442,22 @@ valid_initial_admin_email() {
 valid_optional_domain() { [ -z "$1" ] || valid_domain "$1"; }
 valid_optional_email()  { [ -z "$1" ] || valid_email "$1"; }
 
+# valid_optional_acme_server <url> — empty, or the https:// directory URL of
+# an ACME server. It is written to .env and reaches certbot's command line,
+# so only URL characters without quotes, blanks or '$' are accepted.
+valid_optional_acme_server() {
+    [ -z "$1" ] || [[ "$1" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~%/-]*)?$ ]]
+}
+
+# valid_optional_ca_bundle <path> — empty, or the absolute path of a readable
+# PEM certificate file. docker-compose.yml mounts it into the certbot
+# container (short volume syntax: no ':' or ',') and it is written to .env.
+valid_optional_ca_bundle() {
+    [ -z "$1" ] && return 0
+    [[ "$1" =~ ^/[A-Za-z0-9._/+-]+$ ]] && [ -f "$1" ] && [ -r "$1" ] &&
+        openssl x509 -in "$1" -noout >/dev/null 2>&1
+}
+
 # ─── .env handling ────────────────────────────────────────────────────────────
 env_get() {
     # env_get <key> [file] — prints the raw value from the existing .env (or
@@ -496,6 +517,12 @@ RETICORA_OIDC_REDIRECT_URL=$RETICORA_OIDC_REDIRECT_URL
 # HTTPS / Let's Encrypt (empty = plain HTTP)
 RETICORA_TLS_DOMAIN=$RETICORA_TLS_DOMAIN
 RETICORA_CERT_EMAIL=$RETICORA_CERT_EMAIL
+# ACME server of the certificate request and the renewals (empty = Let's
+# Encrypt production) and the CA bundle the certbot container trusts for its
+# HTTPS endpoint (empty = the image's public CAs); staging and test CAs, see
+# docs/troubleshooting-installation.md
+RETICORA_ACME_SERVER=${RETICORA_ACME_SERVER:-}
+RETICORA_ACME_CA_BUNDLE=${RETICORA_ACME_CA_BUNDLE:-}
 # nginx TLS template mounted into the frontend (empty one without a domain)
 RETICORA_NGINX_TLS_TEMPLATE=$(tls_template_source)
 
@@ -744,6 +771,18 @@ collect_config() {
     else
         RETICORA_CERT_EMAIL="$def_cert_email"
     fi
+
+    # ACME server and the certbot container's CA bundle for it (WP-420): from
+    # the environment, otherwise from .env; never asked for. Empty means
+    # Let's Encrypt production (certbot's default) and the public CAs of the
+    # certbot image. Through .env both reach the certbot service, which
+    # requests and renews the certificate (docker-compose.yml).
+    RETICORA_ACME_SERVER="${ACME_SERVER_OVERRIDE:-$(env_get RETICORA_ACME_SERVER || true)}"
+    valid_optional_acme_server "$RETICORA_ACME_SERVER" \
+        || die "RETICORA_ACME_SERVER ('$RETICORA_ACME_SERVER') must be the https:// directory URL of an ACME server, e.g. https://acme-staging-v02.api.letsencrypt.org/directory (see docs/troubleshooting-installation.md, 'Staging and test CAs')."
+    RETICORA_ACME_CA_BUNDLE="${ACME_CA_BUNDLE_OVERRIDE:-$(env_get RETICORA_ACME_CA_BUNDLE || true)}"
+    valid_optional_ca_bundle "$RETICORA_ACME_CA_BUNDLE" \
+        || die "RETICORA_ACME_CA_BUNDLE ('$RETICORA_ACME_CA_BUNDLE') must be the absolute path of a readable PEM certificate file (letters, digits, '.', '_', '+', '-' and '/' only; see docs/troubleshooting-installation.md, 'Staging and test CAs')."
 
     # With TLS enabled, the UI is served on the standard ports: HTTPS on 443
     # (RETICORA_HTTPS_PORT) and plain HTTP on 80, which must be reachable from
@@ -1144,6 +1183,16 @@ issue_tls_certificate() {
     if [ -n "$RETICORA_CERT_EMAIL" ]; then
         email_args=(--email "$RETICORA_CERT_EMAIL")
     fi
+    # RETICORA_ACME_SERVER (WP-420): another ACME directory than certbot's
+    # default, Let's Encrypt production, e.g. staging or a test CA. certbot
+    # records it in renewal/<domain>.conf; the renewal loop of the certbot
+    # service passes it as well. The certbot service mounts
+    # RETICORA_ACME_CA_BUNDLE as REQUESTS_CA_BUNDLE (docker-compose.yml).
+    local -a server_args=()
+    if [ -n "${RETICORA_ACME_SERVER:-}" ]; then
+        server_args=(--server "$RETICORA_ACME_SERVER")
+        info "(ACME server: $RETICORA_ACME_SERVER)"
+    fi
 
     stash_tls_placeholder
 
@@ -1160,7 +1209,7 @@ issue_tls_certificate() {
         -d "$RETICORA_TLS_DOMAIN" --cert-name "$RETICORA_TLS_DOMAIN" \
         --non-interactive --agree-tos \
         --deploy-hook "$CERTBOT_DEPLOY_HOOK" \
-        "${email_args[@]}"; then
+        "${email_args[@]}" "${server_args[@]}"; then
         issued=1
     elif ! tls_cert_is_selfsigned; then
         # An error after the lineage was stored: keep the certificate and check
@@ -2101,6 +2150,9 @@ print_summary() {
         else
             ui_url="https://$RETICORA_TLS_DOMAIN"
             tls_note="  TLS certificate:   Let's Encrypt (auto-renewed by the certbot service)"
+            if [ -n "${RETICORA_ACME_SERVER:-}" ]; then
+                tls_note="  TLS certificate:   $RETICORA_ACME_SERVER (auto-renewed by the certbot service)"
+            fi
         fi
     fi
     cat <<EOF

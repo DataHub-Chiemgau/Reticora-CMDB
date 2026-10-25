@@ -8,7 +8,6 @@ go;backend/internal/agent;TestAuditT3AgentTelemetryFollowsMergedCI;F-083
 go;backend/internal/ci;TestAuditT3MergePatchNullClearsTypedField;F-080
 go;backend/internal/ci;TestAuditT3UnmergeKeepsLaterSurvivorEdits;F-097
 go;backend/internal/ci;TestAuditT7BulkJobCancelStopsWork;F-162
-go;backend/internal/config;TestAuditT5K8sRenderedEnvSatisfiesStartCheck;F-036
 go;backend/internal/discovery;TestAuditCARolloverKeepsEnrolledCollectorTrust;F-102
 go;backend/internal/discovery;TestAuditConcurrentEdgePKIExportConsistent;F-104
 go;backend/internal/discovery;TestAuditDefectDiscoveryTypedValuesValidated;F-143
@@ -16,7 +15,6 @@ go;backend/internal/discovery;TestAuditIdentitySearchWithMACsUsesIndexes;F-114
 go;backend/internal/discovery;TestAuditPowerRedundancyIndependentOfBatchOrder;F-112
 go;backend/internal/discovery;TestAuditT3PoisonRecordDoesNotTakeValidRecordsDown;F-090
 go;backend/internal/discovery;TestAuditT3ProbableDuplicateMergeIsCIMerge;F-096
-go;backend/internal/discovery;TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices;F-030
 go;backend/internal/history;TestAuditT3HistoryIncludesLocationChange;F-093
 go;backend/internal/iga;TestAuditT1ApprovalNeverLosesTheProvisioningTask;F-056
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
@@ -36,21 +34,15 @@ go;backend/internal/server;TestAuditT2ListsAreCursorPages;F-075
 go;backend/internal/server;TestAuditT3HealthRefreshRunsInG1;F-087
 go;backend/internal/server;TestAuditT3OverrideRefusesReservedNames;F-092
 go;backend/internal/tenant/rls;TestAuditT1StructuredSearchForReadRoles;F-055
-go;backend/internal/tenant/rls;TestAuditT5CIReactivationThroughProductionDecoratorChain;F-037 F-119
 go;backend/internal/topology;TestAuditT3BlastRadiusMarksHeuristicCIs;F-098
 go;backend/internal/traceability;TestAuditT5GateIDsAreNotTracedByTheChecklistItself;F-121
 go;backend/internal/traceability;TestAuditT5ValidateRejectsNonTestEvidence;F-121
 go;backend/internal/webhook;TestAuditDefectWebhookConsumerKeepsEventsOnTransientErrors;F-151
-go;collector/collectorcmd;TestAuditClassifiedDeviceNotUploadedAsFallback;F-030
 go;collector/collectorcmd;TestAuditCollectorEnrollsFromEnvironment;F-101
-go;collector/collectorcmd;TestAuditCollectorRenewsCertificateAt60Percent;F-026
 go;collector/collectorcmd;TestAuditScopeExpansionCompleteOrReported;F-106
 go;collector/collectorcmd;TestAuditScopeScheduleSurvivesRestart;F-109
 go;collector/collectorcmd;TestAuditT7MetricSamplesReachTheServerAuthenticated;F-046
-go;collector/collectorcmd;TestAuditWMIAuthFailureReachesScopeRun;F-029
-go;collector/plugins/snmp;TestAuditSNMPCollectsNeighbors;F-032
 go;collector/plugins/snmp;TestAuditSNMPv3AuthFailureReported;F-105
-go;collector/plugins/wmi;TestAuditWMIFailuresAreErrors;F-029
 go;edgecore/buffer;TestAuditT3CorruptHeadDoesNotBlockSpool;F-085
 go;edgecore/buffer;TestAuditT3SpoolLossSurvivesRestart;F-084
 sh;tests/audit/collector-install-cli.test.sh;INS-06 violated;F-110
@@ -92,8 +84,6 @@ e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, e
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L07 the audit viewer shows the CI change with time, actor, action and object, the chain verifies;F-078
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L10b the CSV export button of the CMDB list downloads the CIs of the list;F-077
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L12b two sessions edit different fields of the same CI: no change is lost and the edits merge field by field;F-228
-e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L14 names and fields with quotes or backslashes are stored like any other text (API create, edit form);F-045
-e2e-real;chromium:frontend/e2e-real/discovery-override.spec.ts;Discovery → reconciliation → override protection → review D07 "Override aufheben" in the CI detail returns the field to the observed value;F-100
 e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L02 names are unique per parent level and the rack height is 1–60 (explicit 0 → 422);F-302
 e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L08 moving a mounted CI is recorded in ci_change, audit and the unified history shown on the CI page;F-253
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles;F-201

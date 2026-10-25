@@ -5410,7 +5410,7 @@ API-04;[B];C;backend/internal/middleware/ratelimit_test.go;WP-410
 LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-411
 ```
 
-**Entscheidungsbedarf:** [E-71](entscheidungen.md#e-71) LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten (offen, Empfehlung als Übergangsregel); [E-19](../entscheidungen.md#e-19)
+**Entscheidungsbedarf:** [E-71](entscheidungen.md#e-71) LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten (entschieden: Option 1, 2026-10-25); [E-19](../entscheidungen.md#e-19)
 
 **Nicht Bestandteil:** Anzeige der Abhängigkeitsarten im Standortbaum (WP-474 (`t3-loc-tree-ui`)); location_change in der Historie (WP-473 (`t3-history-location`)); Rack-Löschregeln (erfüllt).
 

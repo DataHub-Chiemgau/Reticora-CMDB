@@ -3,6 +3,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -54,6 +55,29 @@ type Plugin interface {
 	Probe(ctx context.Context, targets []string, creds map[string]string) ([]Result, error)
 	// Collect gathers the DeviceRecord of one target (DIS-05).
 	Collect(ctx context.Context, target string, creds map[string]string) (*DeviceRecord, error)
+}
+
+// ErrAuthFailed marks a collection the target refused for its credentials
+// (e.g. HTTP 401/403): the target answered, but did not accept the account
+// or denied it access. The scope run reports the cause auth_failed (DIS-08).
+var ErrAuthFailed = errors.New("auth_failed")
+
+// ErrUnreachable marks a collection that could not reach the target: the
+// connection failed, timed out or broke off. The scope run reports the cause
+// unreachable (DIS-08).
+var ErrUnreachable = errors.New("unreachable")
+
+// ErrorCause is the cause of a collection error the plugin marked
+// (auth_failed, unreachable); empty otherwise, then the server derives the
+// cause from the message (DIS-08).
+func ErrorCause(err error) string {
+	switch {
+	case errors.Is(err, ErrAuthFailed):
+		return "auth_failed"
+	case errors.Is(err, ErrUnreachable):
+		return "unreachable"
+	}
+	return ""
 }
 
 // CollectRecord turns the result of a plugin's collection into the

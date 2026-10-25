@@ -9789,7 +9789,7 @@ export interface components {
         [key: string]: unknown;
       };
       candidate_ci_ids?: string[];
-      /** @description The principal (user or service account) that resolved the item; absent when the system adopted an unlicensed_ci item after max_cis was raised. */
+      /** @description The principal (user or service account) that resolved the item; absent when the system resolved it: an unlicensed_ci item adopted after max_cis was raised, or an unclassified_device item closed with resolution reclassified because discovery classified its CI later (DIS-02). */
       resolved_by?: string;
       /** Format: date-time */
       resolved_at?: string;

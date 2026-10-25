@@ -18,7 +18,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-68](#e-68) | Credential-Art für das NAS-Plugin (Synology DSM) | offen (Empfehlung als Übergangsregel) | WP-379 |
 | [E-69](#e-69) | TEC-15: Installationsquelle für die Signaturprüfung vor der Installation | entschieden: Option 1 (Auftraggeber, 2026-10-21) | WP-387, WP-388, WP-595 |
 | [E-70](#e-70) | Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03) | offen (Empfehlung als Übergangsregel) | WP-391 |
-| [E-71](#e-71) | LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten | offen (Empfehlung als Übergangsregel) | WP-411 |
+| [E-71](#e-71) | LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten | entschieden: Option 1 (Auftraggeber, 2026-10-25) | WP-411 |
 | [E-72](#e-72) | Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) | offen (Empfehlung als Übergangsregel) | WP-427, WP-560, WP-574 |
 | [E-73](#e-73) | Indizierte Attributfilter unter Row-Level-Security | offen (Empfehlung als Übergangsregel) | WP-435 |
 | [E-74](#e-74) | OPS-04 in Kubernetes: Datenbankseite der WAL-Archivierung | offen (Empfehlung als Übergangsregel) | WP-444 |
@@ -321,7 +321,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-25)
 
 **Frage:** Darf eine Site gelöscht werden, an der VLANs, Subnetze, Collectoren, Discovery-Scopes, Agent-Enrollment-Tokens oder Merge-Tombstones hängen? LOC-11 nennt nur CIs, Assets, Mounts und Kinder; heute kaskadieren bzw. lösen die Fremdschlüssel diese Objekte still (F-024).
 
@@ -333,7 +333,11 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: entspricht dem Schutzgedanken von LOC-11 und OVR-01 (kein stiller Verlust); die bis zu 12 Monate lange Sperre durch Tombstones ist hinnehmbar, weil sie mit der 301-Weiterleitung des Victims nach CI-12 (12 Monate) endet; Option 3 kann später als Erweiterung folgen.
 
-**Übergangsregel:** WP-411 (`t3-loc-delete-409`) setzt Option 1 um. Entscheidet der Auftraggeber Option 2 oder 3, betrifft das nur die Abhängigkeitsliste in `locations/dependencies.go` und die FK-Aktionen einer Folgemigration.
+**Umsetzung:** WP-411 (`t3-loc-delete-409`), Migration 000157, gemergt mit PR #90 (Real-Stack L05 grün). Die Abhängigkeitsliste steht in `locations/dependencies.go`. Option 3 kann später als Erweiterung folgen. Sie sollte die Objekte dann auf eine andere Site umhängen statt `site_id` zu leeren, sonst würde ihre Sichtbarkeit still ausgeweitet.
+
+Folgen der Entscheidung:
+- Eine Site mit einem Merge-Tombstone ist bis `tombstone_until` (höchstens 12 Monate) nicht löschbar.
+- Ein verbrauchtes, noch nicht abgelaufenes Enrollment-Token blockiert bis zu seinem Ablauf (Standard 24 h, höchstens 30 Tage). Das Schema kennt keinen Widerrufsstatus.
 
 **Betroffene IDs:** LOC-11
 

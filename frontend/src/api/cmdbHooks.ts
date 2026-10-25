@@ -2,7 +2,7 @@
  * cmdbHooks — TanStack Query hooks for the enterprise CMDB extension API.
  * Mirrors the conventions of api/hooks.ts (query keys, invalidation).
  */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import {
   attributeDefinitionApi,
   ciTypeApi,
@@ -291,6 +291,20 @@ export function useFieldProvenance(ciId: string | undefined) {
   });
 }
 
+/**
+ * Setting or clearing an override changes the effective value of the CI and
+ * raises its version (API-07): the CI detail, the CI lists and the field values
+ * are read again, so the page shows the new value without a reload (CI-10,
+ * F-100) and the edit form sends the new version as If-Match.
+ */
+function invalidateOverride(qc: QueryClient, ciId: string) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ['ci-fields', ciId] }),
+    qc.invalidateQueries({ queryKey: ['ci', ciId] }),
+    qc.invalidateQueries({ queryKey: ['cis'] }),
+  ]);
+}
+
 export function useSetOverride(ciId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -305,10 +319,7 @@ export function useSetOverride(ciId: string) {
       reason: string;
       protectedFlag?: boolean;
     }) => overrideApi.setOverride(ciId, field, value, reason, protectedFlag),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['ci-fields', ciId] });
-      qc.invalidateQueries({ queryKey: ['ci', ciId] });
-    },
+    onSuccess: () => invalidateOverride(qc, ciId),
   });
 }
 
@@ -316,7 +327,7 @@ export function useClearOverride(ciId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (field: string) => overrideApi.clearOverride(ciId, field),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ci-fields', ciId] }),
+    onSuccess: () => invalidateOverride(qc, ciId),
   });
 }
 

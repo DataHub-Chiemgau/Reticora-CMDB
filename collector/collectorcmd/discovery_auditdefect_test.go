@@ -3,7 +3,7 @@
 // Phase-1 acceptance audit, group T4-collector-load – DEFECT tests for the
 // collector's discovery passes (must fail until the defects are fixed).
 //
-// WP-151 (DIS-02), WP-153 (DIS-09), WP-154 (DIS-10), WP-155 (DIS-08).
+// WP-153 (DIS-09), WP-154 (DIS-10).
 //
 // Findings encoded here (one test each):
 //   - TestAuditScopeExpansionCompleteOrReported – WP-153 P2 "Scopes larger
@@ -13,16 +13,14 @@
 //     immediately and again after each restart". The test feeds the scope
 //     list as the server would send it with the run state the server holds
 //     (last_run_at/next_run_at, the audit's recommended fields).
-//   - TestAuditWMIAuthFailureReachesScopeRun – WP-155 P2 "Credential failures
-//     of WMI and SNMPv3 are invisible: the scope run reports ok" (WMI part).
-//   - TestAuditClassifiedDeviceNotUploadedAsFallback – WP-151 P1 "Every swept
-//     device gets a (recurring) false unclassified_device review" (collector
-//     part: the evidence-less sweep record of an SNMP-classified device is
-//     uploaded as classified_by=fallback).
 //
 // TestAuditCredentialKindRouting and TestAuditPerScopeCredentials (F-028,
-// F-013) moved to discovery_credentials_test.go (WP-378); the shared helpers
-// are in discovery_helpers_test.go.
+// F-013) moved to discovery_credentials_test.go (WP-378),
+// TestAuditWMIAuthFailureReachesScopeRun (F-029) to
+// discovery_errors_test.go (WP-415),
+// TestAuditClassifiedDeviceNotUploadedAsFallback (F-030) to
+// discovery_classify_test.go (WP-417); the shared helpers are in
+// discovery_helpers_test.go.
 //
 // The scope run reports travel over NATS like in production; the tests need
 // TEST_NATS_URL (a plain NATS server, e.g. nats://localhost:54222).
@@ -30,19 +28,14 @@
 // Retest:
 //
 //	cd collector && TEST_NATS_URL=nats://localhost:54222 go test -tags auditdefect -count=1 -v \
-//	  -run 'TestAuditScopeExpansionCompleteOrReported|TestAuditScopeScheduleSurvivesRestart|TestAuditWMIAuthFailureReachesScopeRun|TestAuditClassifiedDeviceNotUploadedAsFallback' ./collectorcmd/
+//	  -run 'TestAuditScopeExpansionCompleteOrReported|TestAuditScopeScheduleSurvivesRestart' ./collectorcmd/
 package collectorcmd
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"net/http"
 	"testing"
 	"time"
-
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/sweep"
 )
 
 // TestAuditScopeExpansionCompleteOrReported: a scope the API accepts
@@ -120,104 +113,5 @@ func TestAuditScopeScheduleSurvivesRestart(t *testing.T) {
 		if swept := len(spy.seen(tc.target)) > 0; swept != tc.wantSweep {
 			t.Errorf("%s: swept=%v at %s, want %v", tc.name, swept, now.Format(time.RFC3339), tc.wantSweep)
 		}
-	}
-}
-
-// TestAuditWMIAuthFailureReachesScopeRun: a WinRM endpoint that refuses the
-// credentials shows up as an error of the scope run with protocol and
-// target (DIS-08), not as a clean run.
-func TestAuditWMIAuthFailureReachesScopeRun(t *testing.T) {
-	runs := auditCaptureScopeRuns(t)
-	up, _ := auditUploadSink(t)
-	ln, ip := auditLoopback(t, 5985)
-	srv := &http.Server{ReadHeaderTimeout: 2 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("WWW-Authenticate", "Negotiate")
-		w.WriteHeader(http.StatusUnauthorized)
-	})}
-	go func() { _ = srv.Serve(ln) }()
-	t.Cleanup(func() { _ = srv.Close() })
-	auditUsePlugins(t) // reset state; the shipped wmi plugin stays registered
-	// The scope's WMI credential comes from the bundle (WP-378: local
-	// credentials do not apply to server scopes).
-	auditInstallBundle(bundleCredential{ID: "cred-wmi", Kind: "wmi", Secret: map[string]any{"username": "u", "password": "wrong"}})
-	collectorScopes.set([]collectorScope{{ID: "6f0b6f0e-0000-4000-8000-0000000000a9", Kind: "host", Target: ip, Schedule: "24h",
-		CredentialIDs: []string{"cred-wmi"}, Plugins: []string{"wmi"}}}, nil)
-	runDueDiscovery(context.Background(), &collectorConfig{}, up, newScheduler(), &hostCache{}, time.Now())
-
-	all := runs()
-	if len(all) != 1 {
-		t.Fatalf("scope run reports = %d, want 1", len(all))
-	}
-	for _, e := range all[0].Result.Errors {
-		if e.Protocol == "wmi" && e.Target == ip {
-			return
-		}
-	}
-	t.Errorf("WinRM answered 401 for every request, but the scope run reported records=%d error_count=%d errors=%+v (want an error with protocol wmi and target %s)",
-		all[0].Result.Records, all[0].Result.ErrorCount, all[0].Result.Errors, ip)
-}
-
-// TestAuditClassifiedDeviceNotUploadedAsFallback: a device that SNMP
-// classified (Catalyst sysObjectID) is not uploaded a second time as an
-// evidence-less generic_device with classified_by=fallback from its sweep
-// record, which makes the server open a false unclassified_device review
-// every sweep (DIS-02).
-func TestAuditClassifiedDeviceNotUploadedAsFallback(t *testing.T) {
-	up, uploaded := auditUploadSink(t)
-	ln, ip := auditLoopback(t, 22)
-	t.Cleanup(func() { _ = ln.Close() })
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			_ = c.Close()
-		}
-	}()
-	realSweep := sweep.New()
-	realSweep.TCPPorts = []int{22}
-	realSweep.Timeout = time.Second
-	hit := func(targets []string) []plugins.Result {
-		var out []plugins.Result
-		for _, tg := range targets {
-			out = append(out, plugins.Result{IP: tg, Name: tg})
-		}
-		return out
-	}
-	sweepSpy := &auditSpy{name: "sweep", alive: hit, collect: func(ctx context.Context, target string) (*plugins.DeviceRecord, error) {
-		return realSweep.Collect(ctx, target, nil)
-	}}
-	snmpSpy := &auditSpy{name: "snmp", alive: hit, collect: func(_ context.Context, target string) (*plugins.DeviceRecord, error) {
-		return plugins.CollectRecord("snmp", &plugins.Result{CIType: "network.device", Name: "core-sw-1", IP: target, Attributes: map[string]any{
-			"sysObjectID": "1.3.6.1.4.1.9.1.2494",
-			"sysDescr":    "Cisco IOS XE Software, Catalyst L3 Switch Software (CAT9K_IOSXE), C9300-48P",
-			"sysName":     "core-sw-1",
-		}}, nil, time.Now())
-	}}
-	auditUsePlugins(t, sweepSpy, snmpSpy)
-	collectorScopes.set([]collectorScope{{ID: "6f0b6f0e-0000-4000-8000-0000000000aa", Kind: "host", Target: ip, Schedule: "24h", Plugins: []string{"sweep", "snmp"}}}, nil)
-	runDueDiscovery(context.Background(), &collectorConfig{}, up, newScheduler(), &hostCache{}, time.Now())
-
-	recs := uploaded()
-	var classified, fallback []string
-	for _, r := range recs {
-		if r.TargetIP != ip {
-			continue
-		}
-		by, _ := r.Attributes["classified_by"].(string)
-		entry := fmt.Sprintf("%s:%s/%s", r.Source, r.Classification.CIType, by)
-		if by == "fallback" {
-			fallback = append(fallback, entry)
-		} else {
-			classified = append(classified, entry)
-		}
-	}
-	if len(classified) == 0 {
-		t.Fatalf("control: the SNMP record of %s was not uploaded as classified (uploaded %d records: classified=%v fallback=%v)", ip, len(recs), classified, fallback)
-	}
-	if len(fallback) > 0 {
-		t.Errorf("DIS-02 violated: the SNMP-classified device %s was also uploaded as %v next to %v; the server opens an unclassified_device review for it on every sweep",
-			ip, fallback, classified)
 	}
 }

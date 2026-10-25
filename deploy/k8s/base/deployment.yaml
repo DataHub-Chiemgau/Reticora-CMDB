@@ -61,6 +61,45 @@ spec:
                   name: reticora-secrets
                   key: master-key
                   optional: false
+            # OIDC login. The issuer is mandatory outside development (start
+            # check, requiredOutsideDevelopment, F-036); issuer, client ID and
+            # redirect URL come from the operator's ConfigMap reticora-config,
+            # the client secret from reticora-secrets. Like the master key,
+            # every reference is mandatory: a missing ConfigMap, secret or
+            # key keeps the pod in CreateContainerConfigError.
+            - name: RETICORA_OIDC_ISSUER_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: reticora-config
+                  key: oidc-issuer-url
+                  optional: false
+            - name: RETICORA_OIDC_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: reticora-config
+                  key: oidc-client-id
+                  optional: false
+            - name: RETICORA_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-secrets
+                  key: oidc-client-secret
+                  optional: false
+            - name: RETICORA_OIDC_REDIRECT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: reticora-config
+                  key: oidc-redirect-url
+                  optional: false
+            # Accept page of the invitation mail, an absolute URL
+            # https://<host>/invitations/accept. Without it issuing and
+            # renewing invitations answers 503 (WP-421, F-041).
+            - name: RETICORA_INVITATION_ACCEPT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: reticora-config
+                  key: invitation-accept-url
+                  optional: false
             # Operator switches of the background workers (OPS-02,
             # docs/ops/workers.md). A dedicated worker deployment keeps them
             # on and the API deployment switches them off, or vice versa.

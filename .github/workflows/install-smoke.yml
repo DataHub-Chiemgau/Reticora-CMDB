@@ -24,6 +24,8 @@ on:
       - 'backend/Dockerfile'
       - 'frontend/Dockerfile'
       - 'tests/install-*.sh'
+      # WP-420: Pebble and challtestsrv of tests/install-acme-pebble.test.sh.
+      - 'tests/fixtures/pebble/**'
       - 'tests/backup-*.sh'
       - 'tests/nats-mtls.test.sh'
       - 'frontend/e2e/onboarding.spec.ts'
@@ -52,6 +54,8 @@ on:
       - 'backend/Dockerfile'
       - 'frontend/Dockerfile'
       - 'tests/install-*.sh'
+      # WP-420: Pebble and challtestsrv of tests/install-acme-pebble.test.sh.
+      - 'tests/fixtures/pebble/**'
       - 'tests/backup-*.sh'
       - 'tests/nats-mtls.test.sh'
       - 'frontend/e2e/onboarding.spec.ts'
@@ -327,6 +331,35 @@ jobs:
         run: |
           cd deploy/docker-compose
           docker compose --env-file .env down -v --remove-orphans || true
+
+  # INS-02/TEC-09 (WP-420, F-033/F-034/F-035): the TLS-domain path against a
+  # real ACME server. Pebble with challtestsrv (tests/fixtures/pebble/)
+  # issues, certbot/certbot:v2.11.0 requests and renews, the installer runs
+  # with RETICORA_TLS_DOMAIN, RETICORA_ACME_SERVER and the CA bundles: first
+  # installation, re-run without a new order, key and chain readable for
+  # nginx (uid 101) after the issuance and after a forced renewal, both
+  # issuer checks in every installer log, failed challenge. The domain is an
+  # sslip.io name of the runner's IP (header of the test).
+  tls-domain-pebble:
+    needs: installer-script-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make installer scripts executable
+        run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
+
+      - name: Installer against Pebble (issuance, re-run, uid 101 after issuance and renewal, issuer checks, failed challenge)
+        run: ./tests/install-acme-pebble.test.sh "$RUNNER_TEMP/tls-domain-pebble"
+
+      - name: Upload the installer, Pebble and stack logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tls-domain-pebble
+          path: ${{ runner.temp }}/tls-domain-pebble/
+          retention-days: 14
 
   # INS-05 (WP-386, F-125): a re-run of the installer applies rotated
   # passwords and Keycloak values to the existing installation (persisted

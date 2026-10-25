@@ -17,7 +17,10 @@ import (
 //
 // The decorator lives at the repository boundary so that every write path
 // (REST handler, collector bulk ingest, workflow executor) keeps the index
-// in sync, not only the CI service.
+// in sync, not only the CI service. It offers every exported method of the
+// PostgreSQL repository (except WithEvents): callers find the optional
+// interfaces by type assertion, and a method the decorator hides is lost
+// in production, where the repository is always decorated (SR-11, F-037).
 type indexingRepository struct {
 	Repository
 	indexer Indexer
@@ -100,6 +103,38 @@ func (r *indexingRepository) RestoreDeleted(ctx context.Context, orgID, id strin
 	}
 	r.index(ctx, item)
 	return item, nil
+}
+
+// reactivator reactivates a CI seen again after its deletion (CI-13); the
+// discovery review handler asserts it.
+type reactivator interface {
+	Restore(ctx context.Context, orgID, id string) (*Item, error)
+}
+
+// Restore forwards the reactivation of a deleted CI (CI-13, merge of a
+// resurrected_device review) and indexes the CI again.
+func (r *indexingRepository) Restore(ctx context.Context, orgID, id string) (*Item, error) {
+	restorer, ok := r.Repository.(reactivator)
+	if !ok {
+		return nil, errors.New("reactivation is not supported by this repository")
+	}
+	item, err := restorer.Restore(ctx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	r.index(ctx, item)
+	return item, nil
+}
+
+// UniqueConflicts forwards the check of the unique attributes (MET-15), so
+// the service refuses a taken value before the write; without it no
+// attribute is reported and only the unique index guards.
+func (r *indexingRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, clientID, ciID string, attrs map[string]any) ([]string, error) {
+	checker, ok := r.Repository.(UniqueChecker)
+	if !ok {
+		return nil, nil
+	}
+	return checker.UniqueConflicts(ctx, orgID, ciTypeID, clientID, ciID, attrs)
 }
 
 // GetByIDs forwards the batch read (NFR-02); without it every CI is read

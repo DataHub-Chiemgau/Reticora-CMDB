@@ -642,3 +642,20 @@ TEC-09;[B];A;tests/install-cloud-acme.test.sh;WP-419
 NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/user/invitation_integration_test.go;WP-421
 TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-421
 LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-411
+CI-10;[B];D;frontend/src/api/cmdbHooks.test.tsx;WP-413
+API-07;[B];D;frontend/e2e-real/discovery-override.spec.ts;WP-413
+DIS-04;[B];D;collector/plugins/wmi/wmi_test.go;WP-415
+DIS-08;[Q];D;collector/collectorcmd/discovery_errors_test.go;WP-415
+OPS-03;[B], [P5];A;backend/internal/config/k8s_required_env_test.go;WP-422
+OPS-01;[B];A;backend/internal/config/k8s_required_env_test.go;WP-422
+INS-02;[B];A;tests/install-acme-pebble.test.sh;WP-420
+TEC-09;[B];A;tests/install-acme-pebble.test.sh;WP-420
+TOP-01;[B];D;collector/plugins/snmp/neighbors_test.go;WP-416
+CI-13;[B];D;backend/internal/tenant/rls/ci_decorator_chain_integration_test.go;WP-418
+GATE-02;[Q];D;backend/internal/tenant/rls/ci_decorator_chain_integration_test.go;WP-418
+DIS-02;[B], Profilliste (V);D;backend/internal/discovery/ingest_review_integration_test.go;WP-417
+COL-04;[B];D;collector/collectorcmd/lifecycle_test.go;WP-414
+DIS-08;[Q];D;collector/collectorcmd/natsconn_test.go;WP-414
+AUD-04;[B];B;backend/internal/audit/pg_roundtrip_integration_test.go;WP-423
+CI-03;[B];B;backend/internal/ci/special_chars_integration_test.go;WP-423
+MET-11;B/G1, Teil P2/G2;B;backend/internal/ci/special_chars_integration_test.go;WP-423

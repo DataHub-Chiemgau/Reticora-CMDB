@@ -71,13 +71,19 @@ import {
  *  D06 bulk resolution in the review inbox: two items accepted with one action, result
  *      reported, persisted ............................................. WP-196 (UI-16), WP-088 (REC-08), WP-089 (REC-12)
  *  D07 "Override aufheben" in the CI detail returns the field to the observed value, the
- *      page shows it, the clear is audited ............................. WP-060 (OVR-01, CI-10)
+ *      page shows it without a reload (overview and provenance agree), the clear is audited
+ *      ................................................................. WP-060 (OVR-01, CI-10), WP-413 (CI-10, F-100)
  *  D08 a disabled collector can no longer deliver: status shown in the UI; without a
  *      restart the running collector is cut off within 10 s (no request over the NATS edge
  *      answered, last_seen_at and CI count unchanged over two discovery cycles); after a
- *      restart heartbeats and discovery results are refused, nothing new persisted
- *      (positive control first: last_seen_at rises) ...................... WP-145 (COL-04), WP-143 (COL-01), WP-085 (REC-01),
- *      WP-381 (COL-04, F-025)
+ *      restart heartbeats and discovery results are refused, nothing new persisted, the
+ *      collector logs the refusal of the NATS endpoint with its cause and no successful
+ *      connection (positive control first: last_seen_at rises) ........... WP-145 (COL-04), WP-143 (COL-01), WP-085 (REC-01),
+ *      WP-381 (COL-04, F-025), WP-414 (DIS-08, F-258)
+ *  D09 override against an open editor: the edit form is open, a second session of the
+ *      same user sets an override on model ("Override setzen", the version rises); saving
+ *      the form with a changed model is refused with 409, the form shows the conflict and
+ *      the override stays (value, provenance, version, UI) ............. WP-061 (API-07, OVR-01), WP-412/WP-413 (F-021)
  *
  * The Discovery UI has no control to disable a collector (CollectorCard shows only the
  * status); D08 therefore disables it through PATCH /collectors/{id} (collector:manage, the
@@ -469,7 +475,10 @@ function tooltipValue(tip: ReturnType<Page['locator']>, label: string) {
   return tip.locator(`dt:text-is("${label}") + dd`);
 }
 
-/** setOverrideUI sets a manual value through the "Override setzen" dialog of the CI detail. */
+/**
+ * setOverrideUI sets a manual value through the "Override setzen" dialog of the CI detail and
+ * returns the response of the PUT.
+ */
 async function setOverrideUI(page: Page, field: string, value: string, reason: string) {
   const row = await provenanceRow(page, field);
   await row.getByRole('button', { name: 'Override setzen' }).click();
@@ -481,8 +490,10 @@ async function setOverrideUI(page: Page, field: string, value: string, reason: s
     (r) => r.url().includes(`/fields/${field}/override`) && r.request().method() === 'PUT',
   );
   await dialog.getByRole('button', { name: 'Speichern' }).click();
-  expect((await saved).status(), 'PUT override').toBe(200);
+  const response = await saved;
+  expect(response.status(), 'PUT override').toBe(200);
   await expect(dialog).toBeHidden();
+  return response;
 }
 
 /**
@@ -1083,10 +1094,14 @@ test.describe('Discovery → reconciliation → override protection → review',
     );
     await row.getByRole('button', { name: 'Override aufheben' }).click();
     expect((await cleared).status(), 'DELETE override').toBe(200);
-    // The page shows the effective value at once, not the cleared override (CI-10).
-    await expect
-      .soft(detailValue(page, 'Modell'), 'overview after "Override aufheben" without reload')
-      .toHaveText(SIM.firewallModel);
+    // The page shows the effective value at once, not the cleared override (CI-10, F-100):
+    // overview and provenance agree without a reload.
+    await expect(
+      detailValue(page, 'Modell'),
+      'overview after "Override aufheben" without reload',
+    ).toHaveText(SIM.firewallModel);
+    await expect(row.getByRole('button', { name: 'Override setzen' })).toBeVisible();
+    await expect(provenanceCell(row, 'Effektiv')).toHaveText(JSON.stringify(SIM.firewallModel));
 
     // WP-060: the effective value is the current observed value again.
     expect((await getCI(ci.id)).model).toBe(SIM.firewallModel);
@@ -1224,8 +1239,15 @@ test.describe('Discovery → reconciliation → override protection → review',
     expect
       .soft(log, 'no heartbeat accepted')
       .not.toMatch(/"msg":"heartbeat completed","status":(200|"ok"|"active")/);
-    // NATS account locked (COL-04): no request over the edge is answered. (The collector
-    // logs "connected over mTLS" also when the endpoint refuses it – RetryOnFailedConnect.)
+    // NATS account locked (COL-04): no request over the edge is answered.
+    // DIS-08 (WP-414, F-258): the collector logs the refusal of the NATS endpoint with its
+    // cause (authorization) and no successful connection.
+    expect
+      .soft(log, 'the refusal of the NATS endpoint is logged with its cause')
+      .toMatch(/"msg":"collector NATS endpoint refused"[^\n]*"error":"[^"\n]*authorization/i);
+    expect
+      .soft(log, 'no successful NATS connection logged')
+      .not.toContain('collector NATS endpoint connected over mTLS');
     expect.soft(log, 'no heartbeat over the NATS edge').not.toContain('"transport":"edge"');
     expect.soft(log, 'no credential bundle over NATS').not.toContain('credential bundle updated');
     expect.soft(log, 'no subnets reported over NATS').not.toContain('local subnets reported');
@@ -1241,5 +1263,83 @@ test.describe('Discovery → reconciliation → override protection → review',
     await stopCollector();
     // The run is over: the next run enrolls its own collector.
     rmSync(STATE_FILE, { force: true });
+  });
+
+  test('D09 an override set in a second session while the edit form is open: saving the form with a changed model is refused with 409, the override stays', async ({
+    browser,
+  }) => {
+    const { page } = w;
+    await renewToken();
+    const ci = await getCI((await ciByName('sim-fw-02')).id);
+    const manual = `Audit-FW2-${stamp()}`;
+    const stale = `Audit-Stale-${stamp()}`;
+    const reason = 'Austauschgerät vor Ort geprüft';
+    expect(ci.model, 'the discovered model (precondition)').toBe(SIM.firewallModel);
+
+    // Session 1 opens the edit form on the version it read.
+    await openCI(page, ci);
+    // The first "Bearbeiten" is the page action; the others belong to relationships.
+    await page.getByRole('button', { name: 'Bearbeiten', exact: true }).first().click();
+    const form = page.getByRole('dialog');
+    await expect(form.getByRole('heading', { name: 'CI bearbeiten' })).toBeVisible();
+    await expect(form.getByLabel('Modell')).toHaveValue(SIM.firewallModel);
+
+    // Session 2 (the same user, signed in a second time) sets an override on model.
+    const s2 = await openSession(browser, w.account, realIp());
+    try {
+      await openCI(s2.page, ci);
+      const put = await setOverrideUI(s2.page, 'model', manual, reason);
+      // API-07 (WP-412): the override is a manual write, the CI version rises.
+      expect(put.headers()['etag'], 'ETag of the override').toBe(`"${ci.version + 1}"`);
+      // CI-10: the detail of session 2 shows the manual value without a reload.
+      await expect(detailValue(s2.page, 'Modell')).toHaveText(manual);
+    } finally {
+      await s2.ctx.close();
+    }
+
+    // Session 1 saves its open form with a changed model: refused, nothing is overwritten.
+    await form.getByLabel('Modell').fill(stale);
+    const patched = page.waitForResponse(
+      (r) => r.url().includes(`/cis/${ci.id}`) && r.request().method() === 'PATCH',
+    );
+    await form.getByRole('button', { name: 'Speichern' }).click();
+    const res = await patched;
+    expect(res.request().headers()['if-match'], 'the form sends the version it read').toBe(
+      `"${ci.version}"`,
+    );
+    expect(
+      res.status(),
+      `save of the stale form answered ${res.status()}: ${await res.text()}`,
+    ).toBe(409);
+    expect(await res.json(), '409 names the field and the current version').toMatchObject({
+      fields: ['model'],
+      current_version: ci.version + 1,
+    });
+    // The form shows the conflict and stays open with the input.
+    await expect(form, 'the form stays open with the refusal').toBeVisible();
+    await expect(form.getByRole('alert'), 'conflict hint in the form').toContainText('model');
+    await expect(form.getByLabel('Modell')).toHaveValue(stale);
+
+    // OVR-01: the override stays – effective value, provenance, version, list.
+    const stored = await getCI(ci.id);
+    expect(stored.model, 'the override is not overwritten').toBe(manual);
+    expect(stored.version, 'the refused save wrote nothing').toBe(ci.version + 1);
+    expect(await provField(ci.id, 'model')).toMatchObject({
+      value: manual,
+      reason: 'override',
+      override_reason: reason,
+      override_author: w.me,
+      protected: true,
+      discovered_value: SIM.firewallModel,
+    });
+    expect((await fleet()).get(ci.name)?.model, 'list: effective value').toBe(manual);
+
+    // Session 1 closes the form; after a reload it shows the override.
+    await form.getByRole('button', { name: 'Abbrechen' }).click();
+    await expect(form).toBeHidden();
+    await page.reload();
+    await expect(detailValue(page, 'Modell')).toHaveText(manual);
+    const row = await provenanceRow(page, 'model');
+    await expect(provenanceCell(row, 'Override')).toHaveText(JSON.stringify(manual));
   });
 });

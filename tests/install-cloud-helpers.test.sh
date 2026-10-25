@@ -193,22 +193,32 @@ test_tls_incomplete_chain_rejected() {
 # mounts (WP-419). Only the call is checked: certbot's storage, the deploy
 # hook and the nginx check are covered by tests/install-cloud-acme.test.sh.
 test_tls_acme_uses_certbot_entrypoint() {
+    unset RETICORA_ACME_SERVER RETICORA_ACME_CA_BUNDLE
     RETICORA_TLS_DOMAIN="acme.example.com"
     RETICORA_CERT_EMAIL="ops@example.com"
     COMPOSE_DIR="$TMP_ROOT/tls-acme"
     local calls="$TMP_ROOT/tls-acme-calls" want
     compose_cmd() { printf '[%s]' "$@" >> "$calls"; printf '\n' >> "$calls"; return 1; }
     issue_tls_certificate
-    want='[run][--rm][--no-deps][--entrypoint][certbot][certbot][certonly][--webroot][-w][/var/www/certbot]'
-    want+='[-d][acme.example.com][--cert-name][acme.example.com][--non-interactive][--agree-tos]'
-    want+='[--deploy-hook][sh /usr/local/bin/reticora-certbot-deploy-hook.sh][--email][ops@example.com]'
+    want="$(certbot_call_without_acme_settings acme.example.com)"
     [ "$(head -n 1 "$calls")" = "$want" ] || { printf 'got:  %s\nwant: %s\n' "$(head -n 1 "$calls")" "$want"; return 1; }
-    # The certbot service mounts the hook there and renews with it as well.
+    # The certbot service mounts the hook there and renews with it as well
+    # (against the ACME server of the issuance, WP-420).
+    # shellcheck disable=SC2016 # literal text of docker-compose.yml
     grep -qx -- '      - ./certbot-deploy-hook.sh:/usr/local/bin/reticora-certbot-deploy-hook.sh:ro' \
         "$REPO_ROOT/deploy/docker-compose/docker-compose.yml" &&
-        grep -q -- 'certbot renew --webroot -w /var/www/certbot --quiet --deploy-hook "sh /usr/local/bin/reticora-certbot-deploy-hook.sh";' \
+        grep -q -- 'certbot renew --webroot -w /var/www/certbot --quiet --deploy-hook "sh /usr/local/bin/reticora-certbot-deploy-hook.sh" --server "$$RETICORA_ACME_SERVER";' \
             "$REPO_ROOT/deploy/docker-compose/docker-compose.yml" &&
         [ -f "$REPO_ROOT/deploy/docker-compose/certbot-deploy-hook.sh" ]
+}
+
+# certbot_call_without_acme_settings <domain> — install-cloud.sh's certbot call
+# before WP-420 (compose_cmd argv, e-mail ops@example.com); without
+# RETICORA_ACME_SERVER and RETICORA_ACME_CA_BUNDLE it stays exactly this.
+certbot_call_without_acme_settings() {
+    printf '%s' '[run][--rm][--no-deps][--entrypoint][certbot][certbot][certonly][--webroot][-w][/var/www/certbot]'
+    printf '[-d][%s][--cert-name][%s][--non-interactive][--agree-tos]' "$1" "$1"
+    printf '%s' '[--deploy-hook][sh /usr/local/bin/reticora-certbot-deploy-hook.sh][--email][ops@example.com]'
 }
 
 # A served real certificate is not requested again.
@@ -740,12 +750,16 @@ test_runtime_login_compose() {
     grep -qx '      POSTGRES_USER: reticora' "$compose" && grep -qx '      PGUSER: reticora' "$compose"
 }
 
-# Kubernetes: base and staging (which replaces the env list) take the
-# server's DSN from the runtime-login secret, never from the migration one.
+# Kubernetes: the base takes the server's DSN from the runtime-login secret,
+# never from the migration one; the overlays inherit it (staging patches only
+# what differs, WP-422) or, where they set it, use the same secret.
 test_runtime_login_k8s() {
     local f ref
-    for f in deploy/k8s/base/deployment.yaml deploy/k8s/overlays/staging/kustomization.yaml; do
-        ref="$(grep -A5 -- '- name: RETICORA_DATABASE_URL' "$REPO_ROOT/$f")"
+    ref="$(grep -A5 -- '- name: RETICORA_DATABASE_URL' "$REPO_ROOT/deploy/k8s/base/deployment.yaml")"
+    printf '%s' "$ref" | grep -q 'name: reticora-db-runtime' && printf '%s' "$ref" | grep -q 'key: database-url' || return 1
+    for f in "$REPO_ROOT"/deploy/k8s/overlays/*/kustomization.yaml; do
+        ref="$(grep -A5 -- '- name: RETICORA_DATABASE_URL' "$f" || true)"
+        [ -z "$ref" ] && continue
         printf '%s' "$ref" | grep -q 'name: reticora-db-runtime' && printf '%s' "$ref" | grep -q 'key: database-url' || return 1
     done
     if grep -rhE '^[^#]*name: reticora-db-migrate' "$REPO_ROOT/deploy/k8s"; then return 1; fi
@@ -817,6 +831,167 @@ run_test    "image source: default is the signed release registry, also after a 
 run_test    "image source: a mirror from .env or RETICORA_IMAGE_REGISTRY"                  test_image_source_mirror
 run_test    "image source: --release names the release without asking GitHub"              test_image_source_release
 run_test    "image source: --build-from-source writes no registry and no release"          test_image_source_build_from_source
+
+# ─── ACME server and CA bundle (WP-420) ──────────────────────────────────────
+# RETICORA_ACME_SERVER and RETICORA_ACME_CA_BUNDLE (environment, otherwise
+# .env) reach the certbot request (--server), .env and the certbot service
+# (REQUESTS_CA_BUNDLE, the mounted bundle, --server of the renewal loop).
+# Without them the request is unchanged and the service renews against Let's
+# Encrypt production with the image's CAs. The real run against Pebble is
+# tests/install-acme-pebble.test.sh.
+
+# acme_env <name> — legacy .env with a TLS domain and the e-mail of the call.
+acme_env() {
+    write_legacy_env "$1"
+    sed -i 's/^RETICORA_TLS_DOMAIN=.*/RETICORA_TLS_DOMAIN=acme.example.com/' "$ENV_FILE"
+    printf 'RETICORA_CERT_EMAIL=ops@example.com\n' >> "$ENV_FILE"
+}
+
+# acme_bundle <name> — a PEM CA certificate file.
+acme_bundle() {
+    local f="$TMP_ROOT/$1-acme-ca.pem"
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "$TMP_ROOT/$1-acme-ca.key" -out "$f" -days 2 \
+        -subj "/CN=ACME endpoint test CA" 2>/dev/null
+    printf '%s' "$f"
+}
+
+# certbot_service <env file> — the certbot service of docker-compose.yml as
+# docker compose renders it with <env file> (JSON). rc 2 when docker compose
+# or jq is missing; the compose file text is checked in any case.
+certbot_service() {
+    command -v jq >/dev/null && docker compose version >/dev/null 2>&1 || return 2
+    env -u RETICORA_ACME_SERVER -u RETICORA_ACME_CA_BUNDLE docker compose --env-file "$1" \
+        -f "$REPO_ROOT/deploy/docker-compose/docker-compose.yml" config --format json certbot | jq -c '.services.certbot'
+}
+
+# compose_certbot_text — the certbot service's ACME lines in docker-compose.yml.
+# shellcheck disable=SC2016 # literal text of docker-compose.yml
+compose_certbot_text() {
+    local f="$REPO_ROOT/deploy/docker-compose/docker-compose.yml"
+    grep -qxF '      RETICORA_ACME_SERVER: "${RETICORA_ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}"' "$f" &&
+        grep -qxF '      REQUESTS_CA_BUNDLE: "${RETICORA_ACME_CA_BUNDLE:+/etc/reticora/acme-ca.pem}"' "$f" &&
+        grep -qxF '      - ${RETICORA_ACME_CA_BUNDLE:-/dev/null}:/etc/reticora/acme-ca.pem:ro' "$f" &&
+        grep -qF -- '--deploy-hook "sh /usr/local/bin/reticora-certbot-deploy-hook.sh" --server "$$RETICORA_ACME_SERVER";' "$f"
+}
+
+# certbot_service_has <json> <server> <bundle source> <REQUESTS_CA_BUNDLE>
+certbot_service_has() {
+    jq -e --arg server "$2" --arg source "$3" --arg requests "$4" '
+        .environment.RETICORA_ACME_SERVER == $server
+        and (.environment.REQUESTS_CA_BUNDLE // "") == $requests
+        and ([.volumes[] | select(.target == "/etc/reticora/acme-ca.pem" and .source == $source and .read_only == true)] | length == 1)
+        and (.command[1] | test("--server \"[$]+RETICORA_ACME_SERVER\";"))' <<< "$1" >/dev/null \
+        || { echo "certbot service: $1"; return 1; }
+}
+
+# shellcheck disable=SC2034,SC2317 # variables and stubs used by the installer functions
+test_acme_settings_absent_unchanged() {
+    unset RETICORA_ACME_SERVER RETICORA_ACME_CA_BUNDLE
+    ACME_SERVER_OVERRIDE=""
+    ACME_CA_BUNDLE_OVERRIDE=""
+    acme_env acme-absent
+    collect_config >/dev/null
+    write_env
+    [ -z "$RETICORA_ACME_SERVER" ] && [ -z "$RETICORA_ACME_CA_BUNDLE" ] || return 1
+    grep -qx 'RETICORA_ACME_SERVER=' "$ENV_FILE" && grep -qx 'RETICORA_ACME_CA_BUNDLE=' "$ENV_FILE" || return 1
+    COMPOSE_DIR="$TMP_ROOT/acme-absent"
+    local calls="$TMP_ROOT/acme-absent-calls" want out
+    compose_cmd() { printf '[%s]' "$@" >> "$calls"; printf '\n' >> "$calls"; return 1; }
+    out="$(issue_tls_certificate 2>&1)"
+    want="$(certbot_call_without_acme_settings acme.example.com)"
+    [ "$(head -n 1 "$calls")" = "$want" ] || { printf 'got:  %s\nwant: %s\n' "$(head -n 1 "$calls")" "$want"; return 1; }
+    ! grep -q 'ACME server' <<< "$out" || return 1
+    compose_certbot_text || { echo "docker-compose.yml: certbot service without the ACME settings"; return 1; }
+    local svc rc=0
+    svc="$(certbot_service "$ENV_FILE")" || rc=$?
+    [ "$rc" -ne 2 ] || { echo "docker compose/jq missing: rendering not checked"; return 0; }
+    [ "$rc" -eq 0 ] || return 1
+    certbot_service_has "$svc" "https://acme-v02.api.letsencrypt.org/directory" /dev/null ""
+}
+
+# shellcheck disable=SC2317 # the stub is called by the installer functions
+test_acme_settings_reach_certbot() {
+    local bundle server="https://acme.test.example:14000/dir"
+    bundle="$(acme_bundle acme-set)"
+    # As in the environment of the installer run.
+    RETICORA_ACME_SERVER="$server" RETICORA_ACME_CA_BUNDLE="$bundle" load_installer
+    acme_env acme-set
+    collect_config >/dev/null
+    write_env
+    [ "$RETICORA_ACME_SERVER" = "$server" ] && [ "$RETICORA_ACME_CA_BUNDLE" = "$bundle" ] || return 1
+    grep -qx "RETICORA_ACME_SERVER=$server" "$ENV_FILE" && grep -qx "RETICORA_ACME_CA_BUNDLE=$bundle" "$ENV_FILE" || return 1
+    COMPOSE_DIR="$TMP_ROOT/acme-set"
+    local calls="$TMP_ROOT/acme-set-calls" want out
+    compose_cmd() { printf '[%s]' "$@" >> "$calls"; printf '\n' >> "$calls"; return 1; }
+    out="$(issue_tls_certificate 2>&1)"
+    want="$(certbot_call_without_acme_settings acme.example.com)[--server][$server]"
+    [ "$(head -n 1 "$calls")" = "$want" ] || { printf 'got:  %s\nwant: %s\n' "$(head -n 1 "$calls")" "$want"; return 1; }
+    grep -qF "(ACME server: $server)" <<< "$out" || return 1
+    compose_certbot_text || return 1
+    local svc rc=0
+    svc="$(certbot_service "$ENV_FILE")" || rc=$?
+    [ "$rc" -ne 2 ] || { echo "docker compose/jq missing: rendering not checked"; return 0; }
+    [ "$rc" -eq 0 ] || return 1
+    certbot_service_has "$svc" "$server" "$bundle" /etc/reticora/acme-ca.pem
+}
+
+# A re-run keeps the settings of .env; the environment overrides them.
+# shellcheck disable=SC2034 # read by the installer functions
+test_acme_settings_from_env_file() {
+    local bundle
+    bundle="$(acme_bundle acme-kept)"
+    acme_env acme-kept
+    printf 'RETICORA_ACME_SERVER=https://acme-staging-v02.api.letsencrypt.org/directory\nRETICORA_ACME_CA_BUNDLE=%s\n' "$bundle" >> "$ENV_FILE"
+    ACME_SERVER_OVERRIDE=""
+    ACME_CA_BUNDLE_OVERRIDE=""
+    collect_config >/dev/null
+    [ "$RETICORA_ACME_SERVER" = "https://acme-staging-v02.api.letsencrypt.org/directory" ] && [ "$RETICORA_ACME_CA_BUNDLE" = "$bundle" ] || return 1
+    ACME_SERVER_OVERRIDE="https://10.1.0.5:14000/dir"
+    collect_config >/dev/null
+    [ "$RETICORA_ACME_SERVER" = "https://10.1.0.5:14000/dir" ] && [ "$RETICORA_ACME_CA_BUNDLE" = "$bundle" ]
+}
+
+# Values that would break .env, the volume or certbot's command line are
+# refused before anything is written.
+# shellcheck disable=SC2034 # read by the installer functions
+test_acme_settings_validated() {
+    local bundle v out
+    bundle="$(acme_bundle acme-valid)"
+    for v in "" "https://acme-v02.api.letsencrypt.org/directory" "https://10.1.0.5:14000/dir" "https://ca.internal:9000/acme/acme/directory"; do
+        valid_optional_acme_server "$v" || { echo "refused: '$v'"; return 1; }
+    done
+    for v in "http://acme.example/dir" "acme.example/dir" "https://acme.example/dir x" "https://acme.example/\$HOME" \
+        "https://acme.example/'dir'" "https://" $'https://acme.example/dir\nRETICORA_X=1'; do
+        ! valid_optional_acme_server "$v" || { echo "accepted: '$v'"; return 1; }
+    done
+    if ! valid_optional_ca_bundle "" || ! valid_optional_ca_bundle "$bundle"; then
+        echo "refused: $bundle"
+        return 1
+    fi
+    printf 'no certificate\n' > "$TMP_ROOT/acme-valid-not-pem.pem"
+    cp "$bundle" "$TMP_ROOT/acme:valid.pem"
+    for v in "$TMP_ROOT/missing.pem" "$TMP_ROOT/acme-valid-not-pem.pem" "$TMP_ROOT/acme:valid.pem" "$TMP_ROOT" /dev/null; do
+        ! valid_optional_ca_bundle "$v" || { echo "accepted: '$v'"; return 1; }
+    done
+    # A relative path, even of an existing PEM file (compose would resolve it
+    # against deploy/docker-compose/).
+    (cd "$TMP_ROOT" && ! valid_optional_ca_bundle "${bundle##*/}") || { echo "accepted the relative path ${bundle##*/}"; return 1; }
+    acme_env acme-invalid
+    ACME_SERVER_OVERRIDE="http://acme.example/dir"
+    if out="$(collect_config 2>&1)"; then echo "collect_config accepted http://"; return 1; fi
+    grep -q "RETICORA_ACME_SERVER ('http://acme.example/dir') must be the https:// directory URL" <<< "$out" || { printf '%s\n' "$out" | tail -n 2; return 1; }
+    ACME_SERVER_OVERRIDE=""
+    ACME_CA_BUNDLE_OVERRIDE="$TMP_ROOT/missing.pem"
+    if out="$(collect_config 2>&1)"; then echo "collect_config accepted a missing bundle"; return 1; fi
+    grep -q "RETICORA_ACME_CA_BUNDLE ('$TMP_ROOT/missing.pem') must be the absolute path of a readable PEM certificate file" <<< "$out" \
+        || { printf '%s\n' "$out" | tail -n 2; return 1; }
+    grep -q "Staging and test CAs" "$REPO_ROOT/docs/troubleshooting-installation.md"
+}
+
+run_test   "acme: without RETICORA_ACME_SERVER/_CA_BUNDLE the certbot call is unchanged" test_acme_settings_absent_unchanged
+run_test   "acme: ACME server and CA bundle reach certonly, .env and the certbot service" test_acme_settings_reach_certbot
+run_test   "acme: settings of .env are kept, the environment overrides them"        test_acme_settings_from_env_file
+run_test   "acme: invalid ACME server or CA bundle is refused"                       test_acme_settings_validated
 
 # ─── collector NATS endpoint on a re-run (WP-381) ─────────────────────────────
 

@@ -348,8 +348,48 @@ openssl s_client -connect 10.0.20.5:5986 </dev/null 2>/dev/null \
 ## 3. Kubernetes (Kustomize)
 
 `deploy/k8s/` contains the server deployment (`base`) and the `staging` and
-`prod` overlays. The manifests do not create secrets; create them in the target
-namespace before the first rollout.
+`prod` overlays. The manifests create neither the secrets nor the ConfigMap
+`reticora-config`; create them in the namespace of the overlay (`reticora` for
+`base` and `prod`, `reticora-staging` for `staging`) before the first rollout.
+
+**Required secrets and configuration.** Outside development the server's start
+check requires `RETICORA_DATABASE_URL`, `RETICORA_REDIS_URL`,
+`RETICORA_MASTER_KEY` and `RETICORA_OIDC_ISSUER_URL`
+(`requiredOutsideDevelopment` in `backend/internal/config/config.go`) and exits
+without one of them. The login also needs the OIDC client, and invitations need
+the accept page: without `RETICORA_INVITATION_ACCEPT_URL`, `POST /invitations`
+and `POST /invitations/{id}/renew` answer 503. The base provides all of them,
+`staging` and `prod` inherit them (staging only patches
+`RETICORA_ENVIRONMENT=staging`, replicas and resources and drops the HPA). Every
+reference is mandatory (`optional: false`): a missing secret, ConfigMap or key
+keeps the pod in `CreateContainerConfigError`.
+
+| Variable | Source (base, inherited by `staging` and `prod`) |
+|---|---|
+| `RETICORA_DATABASE_URL` | secret `reticora-db-runtime`, key `database-url` (runtime login, see below) |
+| `RETICORA_REDIS_URL` | literal `redis://redis:6379` in `base/deployment.yaml` |
+| `RETICORA_MASTER_KEY` | secret `reticora-secrets`, key `master-key` |
+| `RETICORA_OIDC_ISSUER_URL` | ConfigMap `reticora-config`, key `oidc-issuer-url` (Keycloak realm, reachable from the users' browsers) |
+| `RETICORA_OIDC_CLIENT_ID` | ConfigMap `reticora-config`, key `oidc-client-id` |
+| `RETICORA_OIDC_CLIENT_SECRET` | secret `reticora-secrets`, key `oidc-client-secret` |
+| `RETICORA_OIDC_REDIRECT_URL` | ConfigMap `reticora-config`, key `oidc-redirect-url` (`https://<host>/auth/callback`) |
+| `RETICORA_INVITATION_ACCEPT_URL` | ConfigMap `reticora-config`, key `invitation-accept-url` (`https://<host>/invitations/accept`) |
+| `RETICORA_SESSION_KEY_PATH` | secret `reticora-session-key`, key `private.pem`, mounted at `/etc/reticora/session` |
+
+`prod` additionally includes the components `opensearch`, `backup` and
+`nats-edge`, which need: secret `reticora-backup` (keys `database-url`,
+`aws-access-key-id`, `aws-secret-access-key`), secret `reticora-pgbackrest`
+(keys `cipher-pass`, `s3-key`, `s3-key-secret`, `ca.crt`, `tls.crt`,
+`tls.key`), optionally secret `reticora-opensearch` (`username`, `password`,
+only with the security plugin), a ReadWriteMany storage class for the PVC
+`reticora-collector-pki`, and the host names of the collector endpoint in the
+shipped ConfigMap `reticora-nats-edge` (key `hosts`, replace
+`nats.example.com`).
+
+`reticora-config` is provided by the operator like the secrets and is
+deliberately not generated with placeholders: its values differ for every
+installation, and a placeholder issuer or accept URL would pass the start
+check but break the login and the links of the invitation mails.
 
 The database needs two logins with separate secrets (TEN-03):
 
@@ -375,9 +415,15 @@ kubectl -n reticora create secret generic reticora-db-migrate \
 kubectl -n reticora create secret generic reticora-db-runtime \
   --from-literal=database-url='postgres://reticora_runtime:…@db:5432/reticora?sslmode=require&application_name=reticora-server'
 kubectl -n reticora create secret generic reticora-secrets \
-  --from-literal=master-key="$(openssl rand -base64 32)"
+  --from-literal=master-key="$(openssl rand -base64 32)" \
+  --from-literal=oidc-client-secret='…'
 kubectl -n reticora create secret generic reticora-session-key \
   --from-file=private.pem=session-private.pem
+kubectl -n reticora create configmap reticora-config \
+  --from-literal=oidc-issuer-url='https://cmdb.example.com/realms/reticora' \
+  --from-literal=oidc-client-id='reticora-app' \
+  --from-literal=oidc-redirect-url='https://cmdb.example.com/auth/callback' \
+  --from-literal=invitation-accept-url='https://cmdb.example.com/invitations/accept'
 ```
 
 An existing deployment that still has `reticora-secrets/database-url` keeps
@@ -419,8 +465,24 @@ mandatory: the deployment references `reticora-secrets/master-key` without
 `optional`, so a missing key keeps the pod in `CreateContainerConfigError`,
 and the server's start check refuses an empty key. Keep the master key in a
 backup outside the cluster; without it, stored credentials cannot be
-decrypted. CI (`k8s-manifests`) builds base and both overlays and asserts the
-secret reference.
+decrypted.
+
+**Images.** `prod` uses the signed release images
+`ghcr.io/datahub-chiemgau/reticora-server` and
+`ghcr.io/datahub-chiemgau/reticora-postgres` (pgBackRest CronJob) with the
+release tag (`newTag: v1.0.0`); raise `newTag` in
+`deploy/k8s/overlays/prod/kustomization.yaml` with each release. NATS,
+OpenSearch and the TimescaleDB image of the `pg_dump` CronJob are upstream
+images that the release does not build. `staging` uses
+`reticora-cmdb/server:staging`, an image the operator builds and pushes.
+
+CI (`k8s-manifests`) builds base and both overlays and asserts the master-key
+secret reference, the required configuration
+(`backend/internal/config/k8s_required_env_test.go`: every key above in base,
+staging and prod, the server's start check with the rendered env, fixture
+overlays without a key are reported) and the image origin (every Reticora image
+of the prod build is a release image `ghcr.io/datahub-chiemgau/reticora-*` with
+a tag `v*`).
 
 ## Layout
 

@@ -56,6 +56,46 @@ func TestReviewItemFromConflict(t *testing.T) {
 	}
 }
 
+// TestUnclassifiedReviewIsAboutTheResolvedCI covers WP-417 (DIS-02, F-030):
+// the unclassified_device item is about the CI the record resolved to – its
+// object, candidate, client and site – and exists only while that CI is a
+// generic_device.
+func TestUnclassifiedReviewIsAboutTheResolvedCI(t *testing.T) {
+	ic := &IdentityContext{GenericDeviceTypeID: "type-generic"}
+	// An org-wide record of a scope site; the CI belongs to client 2.
+	record := IngestItem{CITypeName: "type-generic", Name: "10.0.0.9", ManagementIP: "10.0.0.9", SiteID: "site-of-scope",
+		Attributes: map[string]any{"classified_by": "fallback"}}
+	device := &ci.Item{ID: "ci-9", CITypeID: "type-generic", ClientID: "client-2", SiteID: "site-2"}
+
+	item := unclassifiedReview("org-1", &record, device, ic)
+	if item == nil {
+		t.Fatal("no item for a generic_device CI")
+	}
+	if item.Kind != ReviewKindUnclassifiedDevice || item.Status != ReviewStatusOpen || item.OrganizationID != "org-1" ||
+		item.ObjectKey != "ci:ci-9" || len(item.CandidateCIIDs) != 1 || item.CandidateCIIDs[0] != "ci-9" {
+		t.Errorf("item = %+v, want an open unclassified_device item about ci-9", item)
+	}
+	if item.ClientID != "client-2" || item.SiteID != "site-2" {
+		t.Errorf("client/site = %q/%q, want those of the CI (client-2/site-2)", item.ClientID, item.SiteID)
+	}
+	if item.Payload["reason"] != ReasonNoProfileMatch || item.Payload["ci_id"] != "ci-9" || item.Payload["management_ip"] != "10.0.0.9" {
+		t.Errorf("payload = %v", item.Payload)
+	}
+
+	for name, tc := range map[string]struct {
+		device *ci.Item
+		ic     *IdentityContext
+	}{
+		"CI classified by another protocol": {&ci.Item{ID: "ci-9", CITypeID: "type-switch"}, ic},
+		"no identity context":               {device, nil},
+		"generic_device type unknown":       {device, &IdentityContext{}},
+	} {
+		if got := unclassifiedReview("org-1", &record, tc.device, tc.ic); got != nil {
+			t.Errorf("%s: item %+v, want none", name, got)
+		}
+	}
+}
+
 func TestBulkIngestPersistsReviewItems(t *testing.T) {
 	ciRepo := ci.NewMemoryRepository()
 	// Two existing CIs sharing a serial number → ambiguous match.

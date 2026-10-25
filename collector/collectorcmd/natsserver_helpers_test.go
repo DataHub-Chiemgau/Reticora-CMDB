@@ -1,7 +1,7 @@
 // Shared helpers of the collector's tests against a real nats-server: a
 // private CA for the mTLS channel, a free port and the nats-server binary.
-// natsconn_test.go uses them without a build tag (WP-381),
-// lifecycle_auditdefect_test.go with the tag auditdefect.
+// natsconn_test.go (WP-381) and lifecycle_test.go (WP-414) use them without
+// a build tag, lifecycle_auditdefect_test.go with the tag auditdefect.
 package collectorcmd
 
 import (

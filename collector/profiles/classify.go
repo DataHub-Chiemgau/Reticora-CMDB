@@ -14,7 +14,9 @@ import (
 // SNMP → Redfish → Banner. The first stage with a matching profile decides
 // type, vendor, model, plugin and system template. Without a match the
 // device is a generic_device classified by "fallback" (the server opens an
-// unclassified_device review); the MAC OUI still names its vendor.
+// unclassified_device review); the MAC OUI still names its vendor. The
+// sweep record of a device another protocol classified is folded into that
+// record before the upload (MergeByTarget).
 
 // GenericDevice is the CI type of devices no profile matched.
 const GenericDevice = "generic_device"
@@ -284,6 +286,73 @@ func (r *Registry) ClassifyRecord(rec *plugins.DeviceRecord) Result {
 		}
 	}
 	return res
+}
+
+// MergeByTarget merges the classified records of one discovery run per
+// scope and target before the upload (DIS-02): the chain classifies a
+// device, and the sweep only tells that the target answered. The sweep
+// record of a target that a profile classified through another protocol of
+// the same scope is folded into that protocol's record – the sweep's MAC,
+// hostname and FQDN fill what that record lacks – and is not uploaded on its
+// own; the server would take it for an unclassified device. Only for a
+// target no protocol classified does the sweep record stay, as
+// generic_device with classified_by "fallback". The records of the other
+// protocols are kept as they are.
+func MergeByTarget(recs []plugins.DeviceRecord) []plugins.DeviceRecord {
+	classified := map[string]int{}
+	for i := range recs {
+		if key := targetKey(&recs[i]); key != "" && profileMatched(&recs[i]) {
+			if _, ok := classified[key]; !ok {
+				classified[key] = i
+			}
+		}
+	}
+	if len(classified) == 0 {
+		return recs
+	}
+	folded := make([]bool, len(recs))
+	for i := range recs {
+		into, ok := classified[targetKey(&recs[i])]
+		if !ok || recs[i].Source != "sweep" || profileMatched(&recs[i]) {
+			continue
+		}
+		id, sweep := &recs[into].Identity, recs[i].Identity
+		for _, f := range []struct {
+			dst *string
+			src string
+		}{{&id.PrimaryMAC, sweep.PrimaryMAC}, {&id.Hostname, sweep.Hostname}, {&id.FQDN, sweep.FQDN}} {
+			if *f.dst == "" {
+				*f.dst = f.src
+			}
+		}
+		folded[i] = true
+	}
+	out := make([]plugins.DeviceRecord, 0, len(recs))
+	for i := range recs {
+		if !folded[i] {
+			out = append(out, recs[i])
+		}
+	}
+	return out
+}
+
+// targetKey is the target of a record within its scope: the address, or
+// the name of a target configured by name that has no address yet.
+func targetKey(rec *plugins.DeviceRecord) string {
+	target := rec.TargetIP
+	if target == "" {
+		target = rec.Identity.Hostname
+	}
+	if target == "" {
+		return ""
+	}
+	return rec.ScopeID + "/" + target
+}
+
+// profileMatched reports whether the chain classified rec with a profile.
+func profileMatched(rec *plugins.DeviceRecord) bool {
+	by, _ := rec.Attributes["classified_by"].(string)
+	return by != "" && by != StageFallback
 }
 
 var (

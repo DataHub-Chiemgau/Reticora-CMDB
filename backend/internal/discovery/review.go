@@ -3,10 +3,12 @@ package discovery
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
@@ -100,10 +102,82 @@ func (n afterCommitNotifier) ReviewOpened(ctx context.Context, item *reviews.Ite
 // no collector profile matched (DIS-02); its generic_device CI exists.
 const ReasonNoProfileMatch = "no_profile_match"
 
+// ReasonReclassified is the resolution of an unclassified_device item whose
+// CI discovery classified later (DIS-02).
+const ReasonReclassified = "reclassified"
+
 // unclassifiedDevice reports whether the collector's classification chain
 // found no profile for the item (generic_device, classified_by fallback).
 func unclassifiedDevice(item *IngestItem) bool {
 	return item.CITypeName == "generic_device" && item.Attributes["classified_by"] == "fallback"
+}
+
+// unclassifiedReview is the unclassified_device item of a record no
+// collector profile matched (DIS-02), about the CI its identity resolved
+// to; nil unless that CI is a generic_device: another protocol may have
+// classified the device. The CI is the object (one item per CI, REC-08) and
+// the candidate, so the item has the client and site of the CI (WP-342; the
+// database derives them from the candidate, migration 000140).
+func unclassifiedReview(orgID string, item *IngestItem, device *ci.Item, ic *IdentityContext) *ReviewItem {
+	if ic == nil || ic.GenericDeviceTypeID == "" || device.CITypeID != ic.GenericDeviceTypeID {
+		return nil
+	}
+	return &ReviewItem{
+		OrganizationID: orgID,
+		Kind:           ReviewKindUnclassifiedDevice,
+		Status:         ReviewStatusOpen,
+		ClientID:       device.ClientID,
+		SiteID:         device.SiteID,
+		Payload: map[string]any{
+			"reason":        ReasonNoProfileMatch,
+			"ci_id":         device.ID,
+			"ci_type_name":  ci.GenericDeviceType,
+			"name":          item.Name,
+			"manufacturer":  item.Manufacturer,
+			"model":         item.Model,
+			"serial_number": item.SerialNumber,
+			"management_ip": item.ManagementIP,
+			"sys_object_id": item.SysObjectID,
+			"fingerprint":   item.Fingerprint,
+			"raw_data":      item.RawData,
+		},
+		CandidateCIIDs: []string{device.ID},
+		ObjectKey:      "ci:" + device.ID,
+	}
+}
+
+// reviewUnclassified opens the unclassified_device item of record item once
+// its CI is resolved (unclassifiedReview); a dismissed item stays dismissed.
+// It reports whether an item was opened.
+func (h *Handler) reviewUnclassified(ctx context.Context, orgID string, item *IngestItem, device *ci.Item, ic *IdentityContext) (bool, error) {
+	review := unclassifiedReview(orgID, item, device, ic)
+	if review == nil {
+		return false, nil
+	}
+	return h.ReviewService().OpenUnlessDismissed(ctx, review, "reason")
+}
+
+// resolveReclassified closes the open unclassified_device item of a CI that
+// discovery raised from generic_device to a specific type (DIS-02): the
+// device is classified, nothing is left to review.
+func (h *Handler) resolveReclassified(ctx context.Context, orgID, ciID string) error {
+	open, _, err := h.repo.ListReviewItems(ctx, orgID, ReviewFilter{Kind: ReviewKindUnclassifiedDevice, ObjectKey: "ci:" + ciID,
+		Status: ReviewStatusOpen}, api.PaginationParams{Limit: 1})
+	if err != nil {
+		return err
+	}
+	for i := range open {
+		if _, err = h.repo.ResolveReviewItem(ctx, orgID, open[i].ID, &Resolution{Status: ReviewStatusResolved,
+			Note: ReasonReclassified}); err != nil {
+			return err
+		}
+		id := open[i].ID
+		database.AfterCommit(ctx, func(ctx context.Context) {
+			slog.InfoContext(ctx, "review item resolved", "event", "review.resolved", "organization_id", orgID,
+				"review_item_id", id, "kind", ReviewKindUnclassifiedDevice, "resolution", ReasonReclassified)
+		})
+	}
+	return nil
 }
 
 // openReview opens a review item, deduplicated per object and type, and
