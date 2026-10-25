@@ -662,3 +662,9 @@ MET-11;B/G1, Teil P2/G2;B;backend/internal/ci/special_chars_integration_test.go;
 REL-02;[B];B;backend/internal/server/manual_edge_integration_test.go;WP-424
 REL-05;[B];B;backend/internal/server/manual_edge_integration_test.go;WP-424
 NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-424
+JOB-02;[B], Zusätze [P2], [P3];B;backend/cmd/server/main_test.go;WP-425
+OPS-03;[B], [P5];B;backend/cmd/server/main_test.go;WP-425
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/jobs/notices_integration_test.go;WP-425
+EVT-02;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
+ENT-07;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
+COL-04;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425

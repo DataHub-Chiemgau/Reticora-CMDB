@@ -80,7 +80,7 @@ func TestPhaseOneEventsNotify(t *testing.T) {
 	}{
 		{events.ReviewCreated, map[string]any{"id": "r-1", "kind": "probable_duplicate"}, "review", []string{adminMail}},
 		{events.CollectorOffline, map[string]any{"id": "c-1", "name": "dc1-collector", "last_seen_at": "2026-10-13T10:00:00Z"}, "collector", []string{adminMail}},
-		{events.EntitlementWarning, map[string]any{"feature": "max_cis", "used": 95, "limit": 100}, "entitlement", []string{adminMail}},
+		{events.EntitlementWarning, map[string]any{"feature": "discovery", "valid_until": "2026-10-20T00:00:00Z", "days_left": 7}, "entitlement", []string{adminMail}},
 		{events.EntitlementExpired, map[string]any{"feature": "discovery", "expired_at": "2026-10-01"}, "entitlement", []string{adminMail}},
 		{events.InvitationCreated, map[string]any{"email": "new@acme.example", "organization_name": "ACME", "expires_at": "2026-10-20",
 			"link": "https://app/invite"}, "invitation", []string{"new@acme.example"}},

@@ -26,7 +26,7 @@ stop a single worker during an incident, without touching the API.
 | `export` | `RETICORA_WORKER_EXPORT_ENABLED` | Processes queued asynchronous export jobs. Only active with object storage. A job that has been running for 15 minutes is queued again: its instance died (TEC-14). |
 | `ingest` | `RETICORA_WORKER_INGEST_ENABLED` | Consumes `ingest.>` from NATS (REC-01): one consumer per ingest lane (`RETICORA_INGEST_LANES`, default 4), the consumer of the releases before the lanes and lanes left by a higher lane count; at most 6 batches at a time per instance. The API still publishes to the queue. It also answers the collectors' records and heartbeats over the NATS endpoint (`collector.<org>.<id>.ingest`, `….heartbeat`, COL-08); a request of an unknown or disabled collector is refused before it is handled and changes nothing (COL-04). Only an instance running this worker reports the backlog per lane in `/readyz` (`details.ingest`, its last 30-s sample); every instance running it holds up to 1,542 identity locks, which sizes the PostgreSQL lock table. See [`docs/betrieb/ingest-spuren.md`](../betrieb/ingest-spuren.md). |
 | `monitoring` | `RETICORA_WORKER_MONITORING_ENABLED` | Evaluates alert rules and the health of the CIs. |
-| `scheduler` | `RETICORA_WORKER_SCHEDULER_ENABLED` | Runs the system jobs on their cron schedules (JOB-02). Every replica runs a scheduler; one leads through a PostgreSQL advisory lock, each job kind also runs under a lock of its own, so scaling (HPA) never runs a job twice. When the leader stops or loses its database session, another replica takes over and catches up on missed slots, at most `MaxCatchUp` per kind (state in `scheduler_run`). Registered: `reservation.expire` (every minute) releases expired reservations; the retention runs (nightly, see below). |
+| `scheduler` | `RETICORA_WORKER_SCHEDULER_ENABLED` | Runs the system jobs on their cron schedules (JOB-02). Every replica runs a scheduler; one leads through a PostgreSQL advisory lock, each job kind also runs under a lock of its own, so scaling (HPA) never runs a job twice. When the leader stops or loses its database session, another replica takes over and catches up on missed slots, at most `MaxCatchUp` per kind (state in `scheduler_run`). Registered: `reservation.expire` (every minute) releases expired reservations; the retention runs (nightly, see below); the notice runs `entitlement.notices` and `certificate.notices` (daily, see below). |
 | `events` | `RETICORA_WORKER_EVENTS_ENABLED` | Publishes the domain events of the transactional outbox (`event_outbox`) in sequence order per organization to the NATS stream `RETICORA_EVENTS` (`events.<org_id>.<type>`, 30 days / 10 GB) and to the webhook subscriptions; one instance per organization at a time (EVT-01, EVT-02). Without NATS the webhooks still receive the events. |
 | `notifier` | `RETICORA_WORKER_NOTIFIER_ENABLED` | Delivers queued notifications (`notification_delivery`) over their channels — e-mail, in-app, webhook — with retry and exponential backoff (5 attempts), deduplication by key, the recipients' quiet hours and muted categories (critical notifications ignore both); replicas share the queue, a delivery whose instance died is taken over after 10 minutes (NTF-04). |
 | `nats_edge` | `RETICORA_WORKER_NATS_EDGE_ENABLED` | Collector NATS endpoint (COL-08): writes the collector CA bundle, the server certificate of `nats-edge` (host names from `RETICORA_NATS_EDGE_HOSTS`, renewed from 60 % of its lifetime) and the generated `edge.conf` into `RETICORA_PKI_DIR` (daily), and answers the endpoint's authorization callout at `RETICORA_NATS_EDGE_URL`: only certificates of the collector CA that are not revoked, of collectors that are not disabled, each confined to its own subjects, for at most 15 minutes per authorization (docs/betrieb/firewall-matrix.md). A disable, announced on the internal NATS (`discovery.collector.disabled`, also by other replicas), makes one instance cut the collector's open connections through the endpoint's system account within seconds; a failure is logged as `discovery.collector.kick_failed` and retried. The first connection with a renewed certificate revokes its predecessors; hourly it revokes predecessors whose successor was issued 7 days ago (docs/betrieb/collector-ca.md). Run it on one or more server instances; its keys derive from the master key. |
@@ -112,6 +112,39 @@ space until autovacuum has run. Check the chains afterwards with
 with a quote or a control character, storable only since 000158, ends the
 re-chain of its organization, and the restored function cannot verify that
 chain.
+
+## Notice runs (JOB-02, ENT-07, COL-04)
+
+Two daily runs of the scheduler announce what would otherwise stop
+unannounced: an entitlement reaching its `valid_until` and a collector
+certificate that is about to end. Each notice is a domain event of the
+outbox and goes out like every event to the event stream, the webhook
+subscriptions and the notifications (NTF-05).
+
+| Run | When | Event | Recipients of the notification |
+|---|---|---|---|
+| `entitlement.notices` | daily 04:13 | `entitlement.warning` 14, 7 and 1 day before `valid_until` of an enabled entitlement (`feature`, `valid_until`, `days_left`); `entitlement.expired` once after it (`feature`, `expired_at`) | users with `user:manage` |
+| `certificate.notices` | daily 04:23 | `certificate.expiring` (`name`, `expires_at`, `fingerprint`; for a collector also `collector_id`, `client_id`, `site_id`) | users with `discovery:manage` in the collector's client and site; for the CA in the organization |
+
+- Each notice is sent once. The run records it in `notice_sent`
+  (organization, event type, key) in the transaction that writes the event;
+  the outbox keeps no key and its cleanup removes published events after
+  30 days, so a later run does not send it again. The key of a warning is
+  the entitlement, its `valid_until` and the threshold, that of the expiry
+  the entitlement and its `valid_until`: an extended `valid_until` is warned
+  of again at 14, 7 and 1 day.
+- Missed runs are caught up once (scheduler). The run then sends only the
+  youngest due threshold: a first run six days before `valid_until` sends
+  the warning of 7 days, not the one of 14 days as well.
+- A collector renews its certificate from 60 % of its 90 days
+  (docs/betrieb/collector-ca.md) and checks every 24 hours. A certificate
+  counts as expiring when the collector has not renewed it two days after
+  that point (day 56, 34 days before its end): the collector is offline,
+  cannot reach the endpoint or is refused. Disabled collectors and revoked
+  certificates are left out.
+- The active collector CA counts as expiring from 60 % of its lifetime (6 of
+  its 10 years); every organization with a collector that holds a
+  certificate receives one notice. The CA roll-over is an operator task.
 
 ## Key rotation (SEC-06)
 

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 )
 
 // flakyProvider fails a number of times, then records.
@@ -255,6 +257,134 @@ func TestInvitationNotificationSkipsWebhookChannels(t *testing.T) {
 	for _, r := range rows {
 		if r.Category == "invitation" && r.ChannelID != env.mailCh.ID {
 			t.Errorf("invitation delivery over channel %s, want the e-mail channel only", r.ChannelID)
+		}
+	}
+}
+
+// noticeData is the data of a notice as the event consumer reads it from
+// the outbox: the JSON object the run wrote.
+func noticeData(t *testing.T, notice any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(notice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := map[string]any{}
+	if err = json.Unmarshal(raw, &data); err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// renderProblems lists what is wrong with a rendered notice: the subject
+// does not name subjectWant, the German or the English text does not name
+// every value of bodyWant, or a placeholder of a missing or mistyped value
+// ("<nil>", "%!") appears.
+func renderProblems(subject, body, subjectWant string, bodyWant ...string) []string {
+	var problems []string
+	for _, bad := range []string{"<nil>", "%!"} {
+		if strings.Contains(subject+body, bad) {
+			problems = append(problems, "contains "+bad)
+		}
+	}
+	if !strings.Contains(subject, subjectWant) {
+		problems = append(problems, "subject does not name "+subjectWant)
+	}
+	de, en, ok := strings.Cut(body, "\n\n")
+	if !ok {
+		problems = append(problems, "body has no German and English part")
+	}
+	for _, want := range bodyWant {
+		if !strings.Contains(de, want) || !strings.Contains(en, want) {
+			problems = append(problems, "text does not name "+want+" in German and English")
+		}
+	}
+	return problems
+}
+
+// TestNoticesOfTheJOB02RunsRender covers WP-425 (NTF-05, ENT-07, COL-04):
+// with the payloads of the entitlement.notices and certificate.notices runs
+// (jobs.EntitlementNotice and jobs.CertificateNotice, as written in
+// TestEntitlementNotices and TestCertificateNotices) subject and text of
+// entitlement.warning name feature, valid_until and days_left,
+// entitlement.expired feature and expired_at, certificate.expiring the
+// certificate's name and end — in German and English, without "<nil>" or
+// "%!". The check reports a warning without valid_until or days_left
+// (negative cases). Collector certificates and the collector CA reach
+// discovery:manage in the collector's client and site, a CI certificate
+// still its readers and contacts.
+func TestNoticesOfTheJOB02RunsRender(t *testing.T) {
+	const validUntil, ended = "2026-11-08T04:13:00Z", "2026-12-18T09:30:00Z"
+	for _, tc := range []struct {
+		name, typ, subject string
+		notice             any
+		body               []string
+	}{
+		{"warning 7 days ahead", events.EntitlementWarning, "discovery",
+			&jobs.EntitlementNotice{Feature: "discovery", ValidUntil: validUntil, DaysLeft: 7}, []string{"discovery", validUntil, "7"}},
+		{"warning 14 days ahead", events.EntitlementWarning, "webhooks",
+			&jobs.EntitlementNotice{Feature: "webhooks", ValidUntil: validUntil, DaysLeft: 14}, []string{"webhooks", validUntil, "14"}},
+		{"warning 1 day ahead", events.EntitlementWarning, "discovery",
+			&jobs.EntitlementNotice{Feature: "discovery", ValidUntil: validUntil, DaysLeft: 1}, []string{"discovery", validUntil, "1"}},
+		{"expired", events.EntitlementExpired, "discovery",
+			&jobs.EntitlementNotice{Feature: "discovery", ExpiredAt: validUntil}, []string{"discovery", validUntil}},
+		{"collector certificate", events.CertificateExpiring, "dc1-collector",
+			&jobs.CertificateNotice{Name: "dc1-collector", ExpiresAt: ended, Fingerprint: "9f86d081884c7d65",
+				CollectorID: "c-1", ClientID: "client-1", SiteID: "site-1"}, []string{"dc1-collector", ended}},
+		{"collector CA", events.CertificateExpiring, "Reticora Collector CA 2019-10-25 0a1b2c3d",
+			&jobs.CertificateNotice{Name: "Reticora Collector CA 2019-10-25 0a1b2c3d", ExpiresAt: ended, Fingerprint: "60303ae22b998861"},
+			[]string{"Reticora Collector CA 2019-10-25 0a1b2c3d", ended}},
+	} {
+		subject, body := Subscriptions[tc.typ].Render(noticeData(t, tc.notice))
+		if problems := renderProblems(subject, body, tc.subject, tc.body...); len(problems) > 0 {
+			t.Errorf("%s: %v\nsubject %q\nbody %q", tc.name, problems, subject, body)
+		}
+	}
+	for days, want := range map[int][]string{1: {"noch 1 Tag)", "(1 day left)"}, 7: {"noch 7 Tage)", "(7 days left)"}} {
+		_, body := Subscriptions[events.EntitlementWarning].Render(noticeData(t,
+			&jobs.EntitlementNotice{Feature: "discovery", ValidUntil: validUntil, DaysLeft: days}))
+		for _, w := range want {
+			if !strings.Contains(body, w) {
+				t.Errorf("warning with days_left %d: %q does not contain %q", days, body, w)
+			}
+		}
+	}
+
+	// Negative cases: the check reports a warning without valid_until and
+	// one without days_left.
+	for name, data := range map[string]map[string]any{
+		"without valid_until": noticeData(t, &jobs.EntitlementNotice{Feature: "discovery", DaysLeft: 7}),
+		"without days_left":   {"feature": "discovery", "valid_until": validUntil},
+	} {
+		subject, body := Subscriptions[events.EntitlementWarning].Render(data)
+		if problems := renderProblems(subject, body, "discovery", "discovery", validUntil, "7"); len(problems) == 0 {
+			t.Errorf("a warning %s passes the check: %q %q", name, subject, body)
+		}
+	}
+
+	// Audiences.
+	for _, tc := range []struct {
+		name       string
+		typ        string
+		data       map[string]any
+		permission identity.Permission
+		client     string
+		site       string
+		ci         string
+	}{
+		{"collector certificate", events.CertificateExpiring, noticeData(t, &jobs.CertificateNotice{Name: "dc1-collector", ExpiresAt: ended,
+			Fingerprint: "9f86d081884c7d65", CollectorID: "c-1", ClientID: "client-1", SiteID: "site-1"}),
+			identity.PermDiscoveryManage, "client-1", "site-1", ""},
+		{"collector CA", events.CertificateExpiring, noticeData(t, &jobs.CertificateNotice{Name: "CA", ExpiresAt: ended, Fingerprint: "60303ae22b998861"}),
+			identity.PermDiscoveryManage, "", "", ""},
+		{"CI certificate", events.CertificateExpiring, map[string]any{"ci_id": "ci-1", "name": "www.acme.example", "expires_at": ended, "client_id": "client-1"},
+			identity.PermCIRead, "client-1", "", "ci-1"},
+		{"entitlement warning", events.EntitlementWarning, noticeData(t, &jobs.EntitlementNotice{Feature: "discovery", ValidUntil: validUntil, DaysLeft: 7}),
+			identity.PermUserManage, "", "", ""},
+	} {
+		a := Subscriptions[tc.typ].Audience(tc.data)
+		if a.Permission != tc.permission || !a.AllWithPermission || a.ClientID != tc.client || a.SiteID != tc.site || a.CIID != tc.ci {
+			t.Errorf("%s: audience %+v, want %s in client %q, site %q, CI %q", tc.name, a, tc.permission, tc.client, tc.site, tc.ci)
 		}
 	}
 }
