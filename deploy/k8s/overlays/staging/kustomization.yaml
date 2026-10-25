@@ -14,57 +14,38 @@ images:
     newTag: staging
 
 patches:
-  # Single replica, no HPA and smaller resource footprint for staging.
+  # Single replica, no HPA and smaller resource footprint for staging. The
+  # strategic merge patch sets only what differs from the base; env entries
+  # merge by name, so every other variable of the base (runtime login
+  # reticora-db-runtime (TEN-03), master key, OIDC, invitation accept URL,
+  # worker switches) is inherited, and a new mandatory key of the base
+  # reaches staging without repeating it here (OPS-03, F-036). The references
+  # resolve in this namespace: the operator creates the secrets and the
+  # ConfigMap reticora-config with the staging values (deploy/README.md).
   - target:
       kind: Deployment
       name: reticora-server
     patch: |-
-      - op: replace
-        path: /spec/replicas
-        value: 1
-      - op: replace
-        path: /spec/template/spec/containers/0/env
-        value:
-          - name: RETICORA_PORT
-            value: "8080"
-          # The env list is replaced as a whole: the server keeps the
-          # runtime-login secret of the base deployment (TEN-03), never the
-          # migration login (reticora-db-migrate).
-          - name: RETICORA_DATABASE_URL
-            valueFrom:
-              secretKeyRef:
-                name: reticora-db-runtime
-                key: database-url
-                optional: false
-          - name: RETICORA_NATS_URL
-            value: "nats://nats:4222"
-          - name: RETICORA_REDIS_URL
-            value: "redis://redis:6379"
-          - name: RETICORA_ENVIRONMENT
-            value: "staging"
-          - name: RETICORA_OTEL_ENDPOINT
-            value: ""
-          - name: RETICORA_METRICS_TENANT_LABEL
-            value: "false"
-          - name: RETICORA_SESSION_KEY_PATH
-            value: "/etc/reticora/session/private.pem"
-          # The env list is replaced as a whole, so the mandatory master key
-          # of the base deployment has to be repeated here (OPS-03).
-          - name: RETICORA_MASTER_KEY
-            valueFrom:
-              secretKeyRef:
-                name: reticora-secrets
-                key: master-key
-                optional: false
-      - op: replace
-        path: /spec/template/spec/containers/0/resources
-        value:
-          requests:
-            cpu: 50m
-            memory: 128Mi
-          limits:
-            cpu: 250m
-            memory: 256Mi
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: reticora-server
+      spec:
+        replicas: 1
+        template:
+          spec:
+            containers:
+              - name: server
+                env:
+                  - name: RETICORA_ENVIRONMENT
+                    value: "staging"
+                resources:
+                  requests:
+                    cpu: 50m
+                    memory: 128Mi
+                  limits:
+                    cpu: 250m
+                    memory: 256Mi
 
   # Remove the HPA in staging; a single replica is sufficient.
   - target:

@@ -36,6 +36,13 @@ jobs:
       - name: Build
         run: go build ./...
 
+      # internal/config renders deploy/k8s (WP-422); in the CI the test fails
+      # without KUSTOMIZE, the same pin as the job k8s-manifests.
+      - name: Install kustomize
+        run: |
+          go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+          echo "KUSTOMIZE=$(go env GOPATH)/bin/kustomize" >> "$GITHUB_ENV"
+
       - name: Test
         run: go test -race -coverprofile=coverage.out ./...
 
@@ -170,6 +177,13 @@ jobs:
 
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@v1.13.0
+
+      # internal/config renders deploy/k8s (WP-422); in the CI the test fails
+      # without KUSTOMIZE, the same pin as the job k8s-manifests.
+      - name: Install kustomize
+        run: |
+          go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+          echo "KUSTOMIZE=$(go env GOPATH)/bin/kustomize" >> "$GITHUB_ENV"
 
       # COL-08/PRI-07 (WP-374): the collector edge tests run
       # deploy/docker-compose/nats-edge.conf with a real nats-server.
@@ -781,8 +795,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+
       - name: Install kustomize
-        run: go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+        run: |
+          go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+          echo "KUSTOMIZE=$(go env GOPATH)/bin/kustomize" >> "$GITHUB_ENV"
 
       - name: Validate base and overlays build
         # kustomize build parses every manifest and resolves patches/components,
@@ -807,3 +827,61 @@ jobs:
             fi
             echo "$overlay: RETICORA_MASTER_KEY <- reticora-secrets/master-key"
           done
+
+      # OPS-01/OPS-03 (WP-422, F-036): base, staging and prod provide every key
+      # of requiredOutsideDevelopment plus the OIDC client and
+      # RETICORA_INVITATION_ACCEPT_URL, none by an optional reference, and the
+      # server's start check accepts the rendered env; fixture overlays without
+      # the issuer or the accept URL are reported. deploy/README.md names every
+      # key.
+      - name: Assert required configuration
+        working-directory: backend
+        run: go test -count=1 -v -run 'TestAuditT5K8sRenderedEnvSatisfiesStartCheck|TestK8sREADMENamesRequiredEnv' ./internal/config/
+
+      # F-293 (WP-422): every Reticora image of the prod build is a signed
+      # release image of release.yml, ghcr.io/datahub-chiemgau/<image of the
+      # release matrix> with a version tag v*. NATS, OpenSearch and the
+      # TimescaleDB image of the pg_dump CronJob are upstream images the release
+      # does not build. Negative fixture: an overlay that switches the server
+      # back to reticora-cmdb/server is rejected.
+      - name: Assert release image origin
+        run: |
+          set -euo pipefail
+          released=$(sed -nE 's/^ +- image: (reticora-[a-z0-9-]+)$/\1/p' .github/workflows/release.yml)
+          [ -n "$released" ] || { echo "::error::no image found in the release.yml matrix"; exit 1; }
+          # foreign_images <dir>: the images of the build that are neither a
+          # release image nor one of the upstream images.
+          foreign_images() {
+            kustomize build "$1" | sed -nE 's/^ *(- )?image: *"?([^" ]+)"?$/\2/p' | sort -u | while read -r image; do
+              case "$image" in
+                ghcr.io/datahub-chiemgau/*)
+                  name=${image#ghcr.io/datahub-chiemgau/}
+                  name=${name%%[:@]*}
+                  if grep -qxF "$name" <<<"$released" &&
+                    [[ $image =~ ^ghcr\.io/datahub-chiemgau/[a-z0-9-]+:v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(@sha256:[0-9a-f]{64})?$ ]]; then
+                    continue
+                  fi
+                  ;;
+                nats:* | opensearchproject/opensearch:* | timescale/timescaledb:*) continue ;;
+              esac
+              echo "$image"
+            done
+          }
+          images=$(kustomize build deploy/k8s/overlays/prod | sed -nE 's/^ *(- )?image: *//p' | sort -u)
+          echo "$images"
+          grep -q '^ghcr\.io/datahub-chiemgau/reticora-server:v' <<<"$images" || { echo "::error::the prod build has no release image of the server"; exit 1; }
+          foreign=$(foreign_images deploy/k8s/overlays/prod)
+          if [ -n "$foreign" ]; then
+            echo "::error::deploy/k8s/overlays/prod uses images that are no release images ghcr.io/datahub-chiemgau/reticora-*:v*: $(tr '\n' ' ' <<<"$foreign")"
+            exit 1
+          fi
+          fixture=$(mktemp -d "$RUNNER_TEMP/k8s-images.XXXXXX")
+          printf '%s\n' 'resources:' "  - $(realpath --relative-to="$fixture" deploy/k8s/overlays/prod)" 'images:' \
+            '  - name: ghcr.io/datahub-chiemgau/reticora-server' '    newName: reticora-cmdb/server' '    newTag: "1.0.0"' \
+            >"$fixture/kustomization.yaml"
+          foreign=$(foreign_images "$fixture")
+          if [ "$foreign" != "reticora-cmdb/server:1.0.0" ]; then
+            echo "::error::the image check does not reject reticora-cmdb/server in a fixture overlay (reported: '$foreign')"
+            exit 1
+          fi
+          echo "fixture overlay with reticora-cmdb/server:1.0.0: rejected"

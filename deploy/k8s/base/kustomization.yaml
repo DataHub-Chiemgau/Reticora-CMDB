@@ -1,12 +1,21 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# Required secrets (not generated here, see deploy/README.md):
+# Required secrets and ConfigMap (not generated here, see deploy/README.md):
 #   reticora-db-runtime   key database-url (runtime login, NOSUPERUSER NOBYPASSRLS)
-#   reticora-secrets      key master-key
+#   reticora-secrets      keys master-key, oidc-client-secret
 #   reticora-session-key  key private.pem
+#   reticora-config       keys oidc-issuer-url, oidc-client-id,
+#                         oidc-redirect-url, invitation-accept-url
 # The migration login (secret reticora-db-migrate) is used only by the
 # operator's migration run and is not referenced by any manifest here.
+#
+# reticora-config is provided by the operator like the secrets, in the
+# namespace of each overlay, and is deliberately not generated here with
+# placeholders: its values are different for every installation, and a
+# placeholder issuer or accept URL would pass the server's start check but
+# break the login and the links of the invitation mails. Without the
+# ConfigMap or one of its keys the pod stays in CreateContainerConfigError.
 resources:
   - deployment.yaml
   - service.yaml

@@ -740,12 +740,16 @@ test_runtime_login_compose() {
     grep -qx '      POSTGRES_USER: reticora' "$compose" && grep -qx '      PGUSER: reticora' "$compose"
 }
 
-# Kubernetes: base and staging (which replaces the env list) take the
-# server's DSN from the runtime-login secret, never from the migration one.
+# Kubernetes: the base takes the server's DSN from the runtime-login secret,
+# never from the migration one; the overlays inherit it (staging patches only
+# what differs, WP-422) or, where they set it, use the same secret.
 test_runtime_login_k8s() {
     local f ref
-    for f in deploy/k8s/base/deployment.yaml deploy/k8s/overlays/staging/kustomization.yaml; do
-        ref="$(grep -A5 -- '- name: RETICORA_DATABASE_URL' "$REPO_ROOT/$f")"
+    ref="$(grep -A5 -- '- name: RETICORA_DATABASE_URL' "$REPO_ROOT/deploy/k8s/base/deployment.yaml")"
+    printf '%s' "$ref" | grep -q 'name: reticora-db-runtime' && printf '%s' "$ref" | grep -q 'key: database-url' || return 1
+    for f in "$REPO_ROOT"/deploy/k8s/overlays/*/kustomization.yaml; do
+        ref="$(grep -A5 -- '- name: RETICORA_DATABASE_URL' "$f" || true)"
+        [ -z "$ref" ] && continue
         printf '%s' "$ref" | grep -q 'name: reticora-db-runtime' && printf '%s' "$ref" | grep -q 'key: database-url' || return 1
     done
     if grep -rhE '^[^#]*name: reticora-db-migrate' "$REPO_ROOT/deploy/k8s"; then return 1; fi

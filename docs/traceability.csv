@@ -646,3 +646,5 @@ CI-10;[B];D;frontend/src/api/cmdbHooks.test.tsx;WP-413
 API-07;[B];D;frontend/e2e-real/discovery-override.spec.ts;WP-413
 DIS-04;[B];D;collector/plugins/wmi/wmi_test.go;WP-415
 DIS-08;[Q];D;collector/collectorcmd/discovery_errors_test.go;WP-415
+OPS-03;[B], [P5];A;backend/internal/config/k8s_required_env_test.go;WP-422
+OPS-01;[B];A;backend/internal/config/k8s_required_env_test.go;WP-422

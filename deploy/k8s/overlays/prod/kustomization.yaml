@@ -18,16 +18,24 @@ namespace: reticora
 commonLabels:
   app.kubernetes.io/environment: production
 
+# The signed release images: release.yml pushes
+# ghcr.io/datahub-chiemgau/reticora-<name>:<tag> for every version tag v*
+# (cosign keyless, F-293). Raise newTag with each release; CI (k8s-manifests)
+# rejects any other origin of a Reticora image in this build.
 images:
   - name: reticora-cmdb/server
-    newTag: "1.0.0"
+    newName: ghcr.io/datahub-chiemgau/reticora-server
+    newTag: v1.0.0
   - name: reticora-cmdb/postgres
-    newTag: "1.0.0"
+    newName: ghcr.io/datahub-chiemgau/reticora-postgres
+    newTag: v1.0.0
 
 patches:
   # Scale out for production and raise the resource envelope. The base already
-  # sets RETICORA_ENVIRONMENT=production, the observability env vars and the
-  # mandatory RETICORA_MASTER_KEY from the reticora-secrets secret.
+  # sets RETICORA_ENVIRONMENT=production, the observability env vars, the
+  # mandatory RETICORA_MASTER_KEY and OIDC client secret from the
+  # reticora-secrets secret and the OIDC settings and invitation accept URL
+  # from the reticora-config ConfigMap.
   - target:
       kind: Deployment
       name: reticora-server
