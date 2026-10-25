@@ -3,8 +3,10 @@ package topology
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -147,6 +149,83 @@ func TestGetNeighborsNotFound(t *testing.T) {
 	mux.ServeHTTP(w, tenantReq("GET", "/api/v1/topology/cis/missing/neighbors"))
 	if w.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+// relationsOnly hides the Traverser of the memory repository, so the
+// handler walks the graph hop by hop.
+type relationsOnly struct{ relationship.Repository }
+
+// TestGetTopologyRootNotFound covers F-161 (WP-403) in the memory profile: a
+// root_ci_id the caller does not see (unknown, of another organization,
+// deleted) answers 404 "ci not found" like GetNeighbors, the same answer for
+// each and without the id; a root that is no UUID is 400 on root_ci_id.
+// Both walks (recursive traversal and hop by hop) answer alike.
+func TestGetTopologyRootNotFound(t *testing.T) {
+	for _, walk := range []string{"traversal", "iterative"} {
+		t.Run(walk, func(t *testing.T) {
+			ciRepo, relRepo, ids := seed(t)
+			var rels relationship.Repository = relRepo
+			if walk == "iterative" {
+				rels = relationsOnly{relRepo}
+			}
+			h := NewHandler(ciRepo, rels)
+			if (h.traverser != nil) != (walk == "traversal") {
+				t.Fatalf("walk %s: traverser %v", walk, h.traverser != nil)
+			}
+			mux := chi.NewRouter()
+			h.RegisterRoutes(mux)
+			get := func(root string) (int, string) {
+				w := httptest.NewRecorder()
+				mux.ServeHTTP(w, tenantReq("GET", "/api/v1/topology?root_ci_id="+root))
+				return w.Code, w.Body.String()
+			}
+
+			foreign := &ci.Item{OrganizationID: "org-2", Name: "foreign-root", CITypeID: "server"}
+			deleted := &ci.Item{OrganizationID: "org-1", Name: "deleted-root", CITypeID: "server"}
+			for _, item := range []*ci.Item{foreign, deleted} {
+				if err := ciRepo.Create(context.Background(), item); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := ciRepo.Delete(context.Background(), "org-1", deleted.ID); err != nil {
+				t.Fatal(err)
+			}
+			// The problems are equal but for the trace id of the request.
+			answers := map[string]string{}
+			for name, root := range map[string]string{
+				"unknown":            "00000000-0000-4000-8000-0000000000ff",
+				"other organization": foreign.ID,
+				"deleted":            deleted.ID,
+			} {
+				code, body := get(root)
+				var p map[string]any
+				if code != http.StatusNotFound || json.Unmarshal([]byte(body), &p) != nil || p["detail"] != "ci not found" {
+					t.Errorf("%s root: %d %s, want 404 ci not found", name, code, body)
+				}
+				if strings.Contains(body, root) || strings.Contains(body, "foreign-root") {
+					t.Errorf("%s root: the answer names the CI: %s", name, body)
+				}
+				delete(p, "trace_id")
+				answers[name] = fmt.Sprint(p)
+			}
+			for name, answer := range answers {
+				if answer != answers["unknown"] {
+					t.Errorf("%s root answers %s, an unknown root %s", name, answer, answers["unknown"])
+				}
+			}
+
+			code, body := get("not-a-uuid")
+			var fp struct {
+				Field string `json:"field"`
+			}
+			if code != http.StatusBadRequest || json.Unmarshal([]byte(body), &fp) != nil || fp.Field != "root_ci_id" {
+				t.Errorf("root not-a-uuid: %d %s, want 400 on root_ci_id", code, body)
+			}
+			if code, body := get(ids["sw1"]); code != http.StatusOK {
+				t.Errorf("own root: %d %s", code, body)
+			}
+		})
 	}
 }
 

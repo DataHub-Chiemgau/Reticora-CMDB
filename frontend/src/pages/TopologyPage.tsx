@@ -129,6 +129,10 @@ export function TopologyPage() {
   // More than 2,000 CIs without a filter: the server answers 422 and the
   // page asks for a site or type first (UI-06).
   const tooLarge = error instanceof ApiError && error.status === 422;
+  // A start CI the server does not show (deleted, of another tenant or out
+  // of scope, e.g. a stale deep link) is 404 (F-161): the page says so and
+  // leads back to the full view instead of reporting a load error.
+  const rootNotFound = rootCiId !== '' && error instanceof ApiError && error.status === 404;
   const typeOptions = (ciTypes?.data ?? []).map((type) => ({
     value: type.id,
     label: localizedText(type.display_name, i18n.language) || type.name,
@@ -260,6 +264,16 @@ export function TopologyPage() {
           typeOptions={typeOptions}
           siteOptions={siteOptions}
           onStart={(type, site) => updateParams({ type, site })}
+        />
+      ) : rootNotFound ? (
+        <EmptyState
+          title={t('topology.rootNotFound')}
+          description={t('topology.rootNotFoundHint')}
+          action={
+            <Button variant="secondary" onClick={() => updateParam('root', '')}>
+              {t('topology.showAll')}
+            </Button>
+          }
         />
       ) : error ? (
         <ErrorState

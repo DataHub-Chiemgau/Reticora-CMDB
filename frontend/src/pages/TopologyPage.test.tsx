@@ -188,6 +188,74 @@ describe('TopologyPage', () => {
     expect(await screen.findByText(/mehr als 2.000 CIs/)).toBeInTheDocument();
   });
 
+  it('says that a start CI is not found or not visible and leads back to the full view (F-161)', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const respond = (body: unknown, status = 200) =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: {
+            'Content-Type': status === 200 ? 'application/json' : 'application/problem+json',
+          },
+        });
+      if (url.includes('/topology')) {
+        return url.includes('root_ci_id=')
+          ? respond({ title: 'Not Found', status: 404, detail: 'ci not found' }, 404)
+          : respond(graph);
+      }
+      if (url.includes('/ci-types')) return respond(ciTypes);
+      return respond({ detail: 'unexpected' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<TopologyPage />, { route: '/topology?root=ci-gone&depth=3' });
+
+    expect(await screen.findByText('CI nicht gefunden oder nicht sichtbar')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Das Start-CI dieser Ansicht existiert nicht mehr oder liegt außerhalb Ihres Sichtbereichs.',
+      ),
+    ).toBeInTheDocument();
+    // Not the generic load error, and not the English detail of the server.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('Die Topologie konnte nicht geladen werden')).not.toBeInTheDocument();
+    expect(screen.queryByText('ci not found')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('topology-graph')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zur Gesamtansicht' }));
+
+    expect(await screen.findByTestId('topology-graph')).toHaveTextContent('2/1');
+    expect(screen.queryByText('CI nicht gefunden oder nicht sichtbar')).not.toBeInTheDocument();
+    const topologyUrls = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => url.includes('/topology'));
+    expect(topologyUrls[0]).toContain('root_ci_id=ci-gone');
+    expect(topologyUrls[topologyUrls.length - 1]).not.toContain('root_ci_id');
+  });
+
+  it('reports a failed topology request with a start CI as a load error, not as not found', async () => {
+    stubFetchRoutes({
+      '/topology': new Response(
+        JSON.stringify({
+          title: 'Internal Error',
+          status: 500,
+          detail: 'the request could not be completed',
+        }),
+        { status: 500, headers: { 'Content-Type': 'application/problem+json' } },
+      ),
+      '/ci-types': ciTypes,
+    });
+
+    renderWithProviders(<TopologyPage />, { route: '/topology?root=ci-1' });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Die Topologie konnte nicht geladen werden',
+    );
+    expect(screen.getByRole('button', { name: 'Erneut versuchen' })).toBeInTheDocument();
+    expect(screen.queryByText('CI nicht gefunden oder nicht sichtbar')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Zur Gesamtansicht' })).not.toBeInTheDocument();
+  });
+
   it('opens a start dialog with site and type above 2,000 CIs (UI-06)', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

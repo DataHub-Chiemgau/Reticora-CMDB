@@ -42,7 +42,6 @@ go;backend/internal/server;TestAuditT2ListsAreCursorPages;F-075
 go;backend/internal/server;TestAuditT3HealthRefreshRunsInG1;F-087
 go;backend/internal/server;TestAuditT3OverrideRefusesReservedNames;F-092
 go;backend/internal/tenant/rls;TestAuditT1RepositoryErrorsAreSanitized;F-047
-go;backend/internal/tenant/rls;TestAuditT1ScopeRefusalsAreNot5xx;F-058 F-161
 go;backend/internal/tenant/rls;TestAuditT1StructuredSearchForReadRoles;F-055
 go;backend/internal/tenant/rls;TestAuditT5CIReactivationThroughProductionDecoratorChain;F-037 F-119
 go;backend/internal/topology;TestAuditT3BlastRadiusMarksHeuristicCIs;F-098
@@ -110,5 +109,4 @@ e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks 
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;05 an invitation sends the invitee an e-mail (NTF-05 event "Einladung");F-041
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles;F-201
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09c viewer UI: saving a webhook is refused visibly, not silently;F-062
-e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T15 the topology rooted at A’s CI answers B with "not found", like neighbours and impact;F-161
 e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T17 A’s audit viewer shows when and on which object each of A’s entries happened;F-078

@@ -5034,7 +5034,9 @@ paths:
             type: string
         - name: root_ci_id
           in: query
-          description: When set, returns a subgraph reachable from this CI.
+          description: >-
+            When set, returns a subgraph reachable from this CI (a UUID). A
+            CI the caller does not see is 404.
           schema:
             type: string
         - name: depth
@@ -5051,6 +5053,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TopologyGraph'
+        '400':
+          description: >-
+            root_ci_id, client_id, site_id or ci_type is no UUID (for
+            root_ci_id with field root_ci_id).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '404':
+          description: >-
+            root_ci_id names no CI the caller sees: an unknown or deleted CI,
+            a CI of another organization or of a client or site outside the
+            scope. The answer is the same in each case ("ci not found") and
+            does not name the CI (F-161).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
           description: >-
             Without root_ci_id the filtered topology holds more than 2,000

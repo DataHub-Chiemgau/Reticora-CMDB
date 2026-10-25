@@ -8,9 +8,8 @@ package rls_test
 // Wurzel per continue übersprungen; Fremdverweise akzeptieren jeden
 // Nicht-2xx-Code": a relationship to a CI outside the scope is refused and
 // not stored; neighbours and impact of an invisible root answer 404. (The
-// exact refusal status is a confirmed defect: POST /relationships and GET
-// /topology?root_ci_id answer 500 there, see TestAuditT1ScopeRefusalsAreNot5xx
-// behind the auditdefect tag.)
+// exact refusal status, 422 for POST /relationships and 404 for GET
+// /topology?root_ci_id, is checked by TestScopeRefusalsAreNot5xx.)
 //
 // Retest:
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_01?sslmode=disable \

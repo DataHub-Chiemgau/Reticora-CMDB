@@ -16793,7 +16793,7 @@ export interface operations {
         site_id?: string;
         /** @description CI type id (ci.ci_type_id) to filter by. */
         ci_type?: string;
-        /** @description When set, returns a subgraph reachable from this CI. */
+        /** @description When set, returns a subgraph reachable from this CI (a UUID). A CI the caller does not see is 404. */
         root_ci_id?: string;
         /** @description Traversal depth from root_ci_id (default 2, max 20). */
         depth?: number;
@@ -16813,7 +16813,25 @@ export interface operations {
           'application/json': components['schemas']['TopologyGraph'];
         };
       };
+      /** @description root_ci_id, client_id, site_id or ci_type is no UUID (for root_ci_id with field root_ci_id). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       401: components['responses']['Unauthorized'];
+      /** @description root_ci_id names no CI the caller sees: an unknown or deleted CI, a CI of another organization or of a client or site outside the scope. The answer is the same in each case ("ci not found") and does not name the CI (F-161). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Without root_ci_id the filtered topology holds more than 2,000 CIs (IMP-06); narrow it with site_id, client_id or ci_type (a CI type id) or set root_ci_id. */
       422: {
         headers: {

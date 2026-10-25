@@ -610,3 +610,6 @@ TST-04;[Q];A;tests/ci-config.test.sh;WP-389
 TEC-15;[B];A;tests/install-signature.test.sh;WP-388
 MON-02;[B];C;backend/internal/monitoring/ci_metrics_integration_test.go;WP-402
 SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/ast_integration_test.go;WP-405
+IMP-06;[B];C;backend/internal/topology/limit_integration_test.go;WP-403
+IMP-05;[B];C;backend/internal/topology/multi_integration_test.go;WP-403
+UI-06;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-403
