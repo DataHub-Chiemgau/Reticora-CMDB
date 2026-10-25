@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 )
 
 // counts reads the seeded rows of one organization through the maintenance
@@ -18,6 +21,10 @@ func counts(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
 		"client":            `SELECT count(*) FROM client WHERE organization_id = $1`,
 		"rack":              `SELECT count(*) FROM rack WHERE organization_id = $1`,
 		"ci":                `SELECT count(*) FROM ci WHERE organization_id = $1`,
+		"ci_location":       `SELECT count(*) FROM ci WHERE organization_id = $1 AND location_id IS NOT NULL`,
+		"ci_site":           `SELECT count(*) FROM ci WHERE organization_id = $1 AND site_id IS NOT NULL`,
+		"ci_room":           `SELECT count(*) FROM ci WHERE organization_id = $1 AND room_id IS NOT NULL`,
+		"ci_document":       `SELECT count(*) FROM search_document WHERE organization_id = $1 AND entity_type = 'ci'`,
 		"rack_mount":        `SELECT count(*) FROM rack_mount WHERE organization_id = $1`,
 		"network_interface": `SELECT count(*) FROM network_interface WHERE organization_id = $1`,
 		"ip_address":        `SELECT count(*) FROM ip_address WHERE organization_id = $1`,
@@ -42,43 +49,47 @@ func counts(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
 	return out
 }
 
-// TestSeedSIM01 covers SIM-01 and the load seed of NFR-10 (WP-203): the
-// demo organization and acme hold the SIM-01 data set, the demo
-// organization scales with -objects, every id is deterministic and a second
-// run changes nothing. The seed runs through the application pool, subject
-// to the tenant policies.
+// TestSeedSIM01 covers SIM-01 and the load seed of NFR-10 (WP-203, WP-433):
+// the demo organization and acme hold the SIM-01 data set, the demo
+// organization scales with -objects (here the 10.000 objects of NFR-10),
+// every id is deterministic and a second run changes nothing. Every CI has a
+// location, from which the database derives site and room (F-278), and a
+// document in the search index, so the global search finds it (F-277).
+// tests/integrity-check.sql finds no violation in either organization. The
+// seed runs through the application pool, subject to the tenant policies.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestSeedSIM01(t *testing.T) {
 	f := scopetest.Seed(t, "c3")
 	ctx := context.Background()
 	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	opts := Options{Prefix: "seedtest-", Objects: 1000, Metrics: 2000, At: at}
+	opts := Options{Prefix: "seedtest-", Objects: 10000, Metrics: 2000, At: at}
 
 	summary, err := Run(ctx, f.App, opts)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if len(summary.Orgs) != 2 || summary.Orgs[0].Slug != "seedtest-demo" || summary.Orgs[0].Admin != "admin@demo.local" ||
-		summary.Orgs[1].Slug != "seedtest-acme" {
+		summary.Orgs[1].Slug != "seedtest-acme" || summary.Orgs[1].Admin != "admin@acme.local" {
 		t.Fatalf("organizations = %+v", summary.Orgs)
 	}
 	demo, acme := summary.Orgs[0].ID, summary.Orgs[1].ID
-	if demo != ID("seedtest-", "org", "demo") {
-		t.Errorf("demo id %s is not deterministic", demo)
+	if demo != ID("seedtest-", "org", "demo") || acme != ID("seedtest-", "org", "acme") {
+		t.Errorf("organization ids %s, %s are not deterministic", demo, acme)
 	}
 
 	features := len(entitlement.PlanFeatures(entitlement.PlanPro))
 	want := func(objects, metrics int) map[string]int {
 		return map[string]int{
-			"client": 2, "rack": 2, "ci": objects, "rack_mount": 40, "network_interface": objects,
+			"client": 2, "rack": 2, "ci": objects, "ci_location": objects, "ci_site": objects, "ci_room": objects,
+			"ci_document": objects, "rack_mount": 40, "network_interface": objects,
 			"ip_address": objects, "lldp": objects - 4 + 1, "ci_relationship": 2*(objects-4) + 1,
 			"metric_sample": metrics, "collector": 1, "discovery_scope": 2, "review_item": 3, "webhook": 1,
 			"vrf": 2, "entitlement": features, "org_admin": 1,
 		}
 	}
 	check := func(round string) {
-		for org, expected := range map[string]map[string]int{demo: want(1000, 2000), acme: want(40, 40)} {
+		for org, expected := range map[string]map[string]int{demo: want(10000, 2000), acme: want(40, 40)} {
 			got := counts(t, f, org)
 			for table, n := range expected {
 				if got[table] != n {
@@ -89,8 +100,7 @@ func TestSeedSIM01(t *testing.T) {
 	}
 	check("first run")
 
-	// Determinism: the Go ids and the ids PostgreSQL derives agree, and a
-	// second run with the same options adds nothing.
+	// Determinism: the Go ids and the ids PostgreSQL derives agree.
 	var name string
 	if err := f.Admin.QueryRow(ctx, `SELECT name FROM ci WHERE id = $1`, ID("seedtest-demo", "ci", "7")).Scan(&name); err != nil || name != "srv-00007" {
 		t.Errorf("ci 7: name %q, err %v", name, err)
@@ -102,10 +112,77 @@ func TestSeedSIM01(t *testing.T) {
 		rackID != ID("seedtest-demo", "rack", "2") || position != 1 {
 		t.Errorf("ci 21: rack %s position %d (err %v), want rack 2 position 1", rackID, position, err)
 	}
+
+	// Location chain (F-278): a mounted CI is located at its rack like a
+	// mount through the API places it (RCK-03), the database derives the
+	// server room hq and its site; the other CIs are in the server room of
+	// their client.
+	for _, c := range []struct{ ci, location, kind, client string }{
+		{"21", ID("seedtest-demo", "rack", "2"), "rack", "hq"},
+		{"42", ID("seedtest-demo", "room", "hq"), "room", "hq"},
+		{"41", ID("seedtest-demo", "room", "branch"), "room", "branch"},
+	} {
+		var location, kind, room, roomName, site, client string
+		if err := f.Admin.QueryRow(ctx, `SELECT COALESCE(c.location_id::text, ''), COALESCE(l.kind, ''), COALESCE(c.room_id::text, ''), COALESCE(r.name, ''),
+				COALESCE(c.site_id::text, ''), c.client_id::text
+			FROM ci c LEFT JOIN location l ON l.id = c.location_id LEFT JOIN room r ON r.id = c.room_id WHERE c.id = $1`,
+			ID("seedtest-demo", "ci", c.ci)).Scan(&location, &kind, &room, &roomName, &site, &client); err != nil {
+			t.Errorf("ci %s: location: %v", c.ci, err)
+			continue
+		}
+		if location != c.location || kind != c.kind || room != ID("seedtest-demo", "room", c.client) ||
+			roomName != "Server room "+c.client || site != ID("seedtest-demo", "site", c.client) ||
+			client != ID("seedtest-demo", "client", c.client) {
+			t.Errorf("ci %s: location %s (%s), room %s (%q), site %s, client %s; want %s %s in server room %s",
+				c.ci, location, kind, room, roomName, site, client, c.kind, c.location, c.client)
+		}
+	}
+
+	// Search (F-277): the global search of each organization finds its own
+	// srv-00021, as created through the API, and nothing of the other one.
+	for _, org := range []struct{ id, prefix, other string }{{demo, "seedtest-demo", "seedtest-acme"}, {acme, "seedtest-acme", "seedtest-demo"}} {
+		scope := database.OrgWideScope(org.id, "")
+		res, err := search.NewPGRepository(f.App).Query(database.ContextWithTenantScope(ctx, &scope),
+			search.Query{OrganizationID: org.id, Text: "srv-00021"})
+		if err != nil {
+			t.Fatalf("search in %s: %v", org.prefix, err)
+		}
+		id := ID(org.prefix, "ci", "21")
+		if res.Total != 1 || len(res.Data) != 1 || res.Data[0].EntityType != "ci" || res.Data[0].EntityID != id ||
+			res.Data[0].Title != "srv-00021" || res.Data[0].URL != "/cmdb/"+id {
+			t.Errorf("search srv-00021 in %s: %+v, want only ci %s", org.prefix, res.Data, id)
+		}
+		for _, hit := range res.Data {
+			if hit.EntityID == ID(org.other, "ci", "21") {
+				t.Errorf("search in %s finds ci 21 of %s", org.prefix, org.other)
+			}
+		}
+	}
+
+	// Data integrity of the load seed (ABN-03, NFR-10).
+	for _, org := range []string{demo, acme} {
+		if violations := integrityViolations(t, f, org); len(violations) > 0 {
+			t.Errorf("integrity check of org %s: %v", org, violations)
+		}
+	}
+
+	// A second run with the same options adds nothing and rewrites no
+	// search document.
+	documents := func() (n int, latest time.Time) {
+		if err := f.Admin.QueryRow(ctx, `SELECT count(*), COALESCE(max(updated_at), 'epoch') FROM search_document
+			WHERE organization_id IN ($1, $2) AND entity_type = 'ci'`, demo, acme).Scan(&n, &latest); err != nil {
+			t.Fatalf("search documents: %v", err)
+		}
+		return n, latest
+	}
+	n, latest := documents()
 	if _, err := Run(ctx, f.App, opts); err != nil {
 		t.Fatalf("second seed: %v", err)
 	}
 	check("second run")
+	if n2, latest2 := documents(); n2 != n || !latest2.Equal(latest) {
+		t.Errorf("second run: %d search documents, last update %s; want %d, %s", n2, latest2, n, latest)
+	}
 
 	// The organizations are isolated: the demo data is invisible in acme.
 	var leaked int
@@ -113,6 +190,50 @@ func TestSeedSIM01(t *testing.T) {
 		WHERE r.organization_id = $1 AND c.organization_id <> $1`, acme).Scan(&leaked); err != nil || leaked != 0 {
 		t.Errorf("cross-organization relationships: %d, err %v", leaked, err)
 	}
+}
+
+// integrityViolations runs tests/integrity-check.sql for one organization
+// and returns the checks with violations (ABN-03).
+func integrityViolations(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
+	t.Helper()
+	script, err := os.ReadFile("../../../tests/integrity-check.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	tx, err := f.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err = tx.Exec(ctx, `SELECT set_config('integrity.org', $1, true)`, orgID); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := tx.Query(ctx, string(script))
+	if err != nil {
+		t.Fatalf("integrity check: %v", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	checks := 0
+	for rows.Next() {
+		var name string
+		var n int
+		if err := rows.Scan(&name, &n); err != nil {
+			t.Fatal(err)
+		}
+		checks++
+		if n > 0 {
+			out[name] = n
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if checks == 0 {
+		t.Fatal("integrity check returned no checks")
+	}
+	return out
 }
 
 func TestSeedOptionsAreBounded(t *testing.T) {

@@ -22,6 +22,11 @@ export const KEYCLOAK_ADMIN_PASSWORD = process.env.E2E_KEYCLOAK_ADMIN_PASSWORD |
 export const COLLECTOR_BIN = process.env.E2E_COLLECTOR_BIN || '';
 /** A build of collector/cmd/fakesnmp; without it startFakeSnmp builds one. */
 export const FAKESNMP_BIN = process.env.E2E_FAKESNMP_BIN || '';
+/** A build of backend/cmd/seed; without it seedDemo builds one. */
+export const SEED_BIN = process.env.E2E_SEED_BIN || '';
+/** PostgreSQL of the stack with the migration login (README.md); seedDemo seeds it. */
+export const DATABASE_URL =
+  process.env.E2E_DATABASE_URL || 'postgres://reticora:reticora@localhost:55432/e2e';
 
 /** The repository root (this file is frontend/e2e-real/support/stack.ts). */
 const REPO = fileURLToPath(new URL('../../../', import.meta.url));
@@ -209,6 +214,166 @@ export async function keycloakAdminToken(request: APIRequestContext): Promise<st
   });
   expect(res.ok(), `Keycloak admin token: ${res.status()}`).toBe(true);
   return ((await res.json()) as { access_token: string }).access_token;
+}
+
+/** seedId is the deterministic id of a seeded row (backend/cmd/seed ID, md5(key)::uuid). */
+export function seedId(...parts: string[]): string {
+  const h = createHash('md5').update(parts.join('/')).digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
+
+/** An organization of the SIM-01 seed as the seed prints it. */
+export interface SeededOrg {
+  slug: string;
+  id: string;
+  admin: string;
+}
+
+let seedBin = SEED_BIN;
+
+/** seedBinary builds backend/cmd/seed once (Go toolchain on PATH). */
+function seedBinary(): string {
+  if (seedBin) return seedBin;
+  const bin = join(mkdtempSync(join(tmpdir(), 'reticora-seed-')), 'seed');
+  const built = spawnSync('go', ['build', '-o', bin, './cmd/seed'], {
+    cwd: join(REPO, 'backend'),
+    env: { ...process.env, GOWORK: 'off', CGO_ENABLED: '0' },
+    encoding: 'utf8',
+    timeout: 8 * 60_000,
+  });
+  expect(
+    built.status,
+    `go build ./cmd/seed: ${built.error ?? ''} ${built.stderr} ${built.stdout}`,
+  ).toBe(0);
+  seedBin = bin;
+  return bin;
+}
+
+/**
+ * seedDemo runs the SIM-01 seed (backend/cmd/seed, WP-203) against the stack database
+ * (DATABASE_URL): the organizations demo (plan pro, admin@demo.local) and acme
+ * (admin@acme.local) with 40 CIs each, located and in the search index (WP-433). The seed
+ * is deterministic and inserts only what is missing, so a second run changes nothing. It
+ * returns the organizations the seed prints.
+ */
+export function seedDemo(): SeededOrg[] {
+  const run = spawnSync(seedBinary(), ['-database-url', DATABASE_URL], {
+    encoding: 'utf8',
+    timeout: 5 * 60_000,
+  });
+  expect(run.status, `seed: ${run.error ?? ''} ${run.stderr}`).toBe(0);
+  return run.stdout
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => {
+      const [slug = '', id = '', admin = ''] = line.split('\t');
+      return { slug, id, admin };
+    });
+}
+
+/** A user of the development realm deploy/keycloak/realm-reticora-dev.json. */
+interface RealmUser {
+  username: string;
+  email: string;
+  enabled: boolean;
+  emailVerified?: boolean;
+  firstName?: string;
+  lastName?: string;
+  attributes?: Record<string, string[]>;
+  groups?: string[];
+  realmRoles?: string[];
+  credentials?: { type: string; value: string; temporary?: boolean }[];
+}
+
+/**
+ * devRealmAccount returns the account of the user `email` of the development realm
+ * deploy/keycloak/realm-reticora-dev.json and makes sure the realm reticora of the stack
+ * holds it. The development stack imports that realm with its users. Keycloak imports a
+ * realm only when it does not exist yet, and an installed stack imports the production
+ * realm, which has no users (deploy/keycloak/README.md). Only when the realm exists without
+ * the user (import of the development realm skipped), the user is created through the
+ * Keycloak admin API with the attributes, groups, realm roles and password of the JSON; the
+ * creation is logged and reported as `created`.
+ */
+export async function devRealmAccount(
+  request: APIRequestContext,
+  email: string,
+): Promise<{ account: Pick<Account, 'email' | 'password'>; created: boolean }> {
+  const realm = JSON.parse(
+    readFileSync(join(REPO, 'deploy/keycloak/realm-reticora-dev.json'), 'utf8'),
+  ) as { users?: RealmUser[] };
+  const user = realm.users?.find((u) => u.username === email);
+  const password = user?.credentials?.find((c) => c.type === 'password')?.value ?? '';
+  expect(user, `${email} in realm-reticora-dev.json`).toBeTruthy();
+  expect(password, `password of ${email} in realm-reticora-dev.json`).not.toBe('');
+  const account = { email, password };
+
+  const admin = `${KEYCLOAK}/admin/realms/reticora`;
+  const headers = { Authorization: `Bearer ${await keycloakAdminToken(request)}` };
+  const userId = async (): Promise<string> => {
+    const res = await request.get(`${admin}/users`, {
+      headers,
+      params: { username: email, exact: 'true' },
+    });
+    expect(res.ok(), `GET users?username=${email}: ${res.status()}`).toBe(true);
+    return ((await res.json()) as { id: string }[])[0]?.id ?? '';
+  };
+  if (await userId()) return { account, created: false };
+
+  console.log(
+    `realm reticora exists without ${email} (the development realm was not imported): ` +
+      'creating the user from realm-reticora-dev.json through the Keycloak admin API',
+  );
+  const u = user!;
+  const created = await request.post(`${admin}/users`, {
+    headers,
+    data: {
+      username: u.username,
+      email: u.email,
+      enabled: u.enabled,
+      emailVerified: u.emailVerified ?? false,
+      firstName: u.firstName,
+      lastName: u.lastName,
+      attributes: u.attributes ?? {},
+    },
+  });
+  expect(created.status(), `POST users ${email}: ${await created.text()}`).toBe(201);
+  const id = await userId();
+  expect(id, `${email} after its creation`).not.toBe('');
+  const reset = await request.put(`${admin}/users/${id}/reset-password`, {
+    headers,
+    data: { type: 'password', value: password, temporary: false },
+  });
+  expect(reset.status(), `password of ${email}: ${await reset.text()}`).toBe(204);
+  if (u.groups?.length) {
+    const res = await request.get(`${admin}/groups`, { headers });
+    expect(res.ok(), `GET groups: ${res.status()}`).toBe(true);
+    const groups = (await res.json()) as { id: string; path: string }[];
+    for (const path of u.groups) {
+      const group = groups.find((g) => g.path === path);
+      expect(group, `group ${path} in the realm`).toBeTruthy();
+      const joined = await request.put(`${admin}/users/${id}/groups/${group!.id}`, { headers });
+      expect(joined.status(), `${email} joins ${path}: ${await joined.text()}`).toBe(204);
+    }
+  }
+  if (u.realmRoles?.length) {
+    const roles: unknown[] = [];
+    for (const name of u.realmRoles) {
+      const res = await request.get(`${admin}/roles/${encodeURIComponent(name)}`, { headers });
+      expect(res.ok(), `GET roles/${name}: ${res.status()}`).toBe(true);
+      roles.push(await res.json());
+    }
+    const mapped = await request.post(`${admin}/users/${id}/role-mappings/realm`, {
+      headers,
+      data: roles,
+    });
+    expect(mapped.status(), `realm roles of ${email}: ${await mapped.text()}`).toBe(204);
+  }
+  console.log(
+    `created ${email}: organization_id ${JSON.stringify(u.attributes?.organization_id ?? [])}, ` +
+      `realm roles ${JSON.stringify(u.realmRoles ?? [])}, groups ${JSON.stringify(u.groups ?? [])}`,
+  );
+  return { account, created: true };
 }
 
 /**

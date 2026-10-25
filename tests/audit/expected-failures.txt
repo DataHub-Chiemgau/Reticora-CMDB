@@ -43,7 +43,6 @@ go;edgecore/buffer;TestAuditT3CorruptHeadDoesNotBlockSpool;F-085
 go;edgecore/buffer;TestAuditT3SpoolLossSurvivesRestart;F-084
 sh;tests/audit/collector-install-cli.test.sh;INS-06 violated;F-110
 sh;tests/audit/compose-port-policy.test.sh;COL-08 violated;F-103
-sh;tests/audit/demo-realm-users.test.sh;SIM-01 violated;F-113
 sh;tests/audit/g1-gate-evidence.test.sh;abn01_texts;F-138
 sh;tests/audit/g1-gate-evidence.test.sh;install_evidence_current;F-122
 sh;tests/audit/g1-gate-evidence.test.sh;known_defect_SR-11;F-038 F-119

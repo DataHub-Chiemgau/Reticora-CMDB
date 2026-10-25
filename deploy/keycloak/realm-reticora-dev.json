@@ -402,6 +402,58 @@
       "realmRoles": [
         "viewer"
       ]
+    },
+    {
+      "username": "admin@demo.local",
+      "enabled": true,
+      "email": "admin@demo.local",
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Admin",
+      "attributes": {
+        "organization_id": [
+          "9c741956-c776-b03d-6652-27f1f4ae33d2"
+        ]
+      },
+      "groups": [
+        "/reticora-admin"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Demo-Dev-2024!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "org_admin"
+      ]
+    },
+    {
+      "username": "admin@acme.local",
+      "enabled": true,
+      "email": "admin@acme.local",
+      "emailVerified": true,
+      "firstName": "Acme",
+      "lastName": "Admin",
+      "attributes": {
+        "organization_id": [
+          "8d47b7d0-d07b-96df-c81e-7b8187a15867"
+        ]
+      },
+      "groups": [
+        "/reticora-admin"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Acme-Dev-2024!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "org_admin"
+      ]
     }
   ]
 }
