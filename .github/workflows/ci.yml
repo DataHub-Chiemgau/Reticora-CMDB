@@ -455,6 +455,34 @@ jobs:
           REQUIRE_PROMTOOL: "1"
         run: ./tests/audit/t2-break-glass-alert.test.sh
 
+  # OPS-05 (WP-446): the Alertmanager configuration loads (amtool
+  # check-config), the PrometheusRule groups pass promtool check rules and
+  # their unit tests in deploy/monitoring/tests. amtool v0.27.0 and promtool
+  # v2.54.1 pinned, checksums from the releases' sha256sums.txt.
+  monitoring-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install amtool, promtool and PyYAML
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL -o "$RUNNER_TEMP/am.tgz" \
+            https://github.com/prometheus/alertmanager/releases/download/v0.27.0/alertmanager-0.27.0.linux-amd64.tar.gz
+          echo "23c3f5a3c73de91dbaec419f3c492bef636deb02680808e5d842e6553aa16074  $RUNNER_TEMP/am.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/am.tgz" -C "$RUNNER_TEMP/bin" --strip-components=1 alertmanager-0.27.0.linux-amd64/amtool
+          curl -sSfL -o "$RUNNER_TEMP/prometheus.tgz" \
+            https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.linux-amd64.tar.gz
+          echo "31715ef65e8a898d0f97c8c08c03b6b9afe485ac84e1698bcfec90fc6e62924f  $RUNNER_TEMP/prometheus.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/prometheus.tgz" -C "$RUNNER_TEMP/bin" --strip-components=1 prometheus-2.54.1.linux-amd64/promtool
+          echo "AMTOOL=$RUNNER_TEMP/bin/amtool" >> "$GITHUB_ENV"
+          echo "PROMTOOL=$RUNNER_TEMP/bin/promtool" >> "$GITHUB_ENV"
+          python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+
+      - name: Alertmanager configuration and alert rules (OPS-05)
+        run: ./tests/monitoring-config.test.sh
+
   lint:
     runs-on: ubuntu-latest
     strategy:

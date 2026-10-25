@@ -61,8 +61,6 @@ sh;tests/audit/g1-gate-evidence.test.sh;rep01_pt_lowercase;F-300
 sh;tests/audit/g1-gate-evidence.test.sh;rep01_sr_bold_critical;F-300
 sh;tests/audit/g1-gate-evidence.test.sh;subprocessors;F-137
 sh;tests/audit/log-retention.test.sh;NFR-06 logs 30 days;F-150
-sh;tests/audit/ops-config.test.sh;alertmanager_amtool;F-132
-sh;tests/audit/ops-config.test.sh;alertmanager_smtp;F-132
 sh;tests/audit/ops-config.test.sh;k8s_wal_archive;F-128
 sh;tests/audit/ops-config.test.sh;outage_smtp;F-135
 sh;tests/audit/ops-config.test.sh;restore_rpo_window;F-130

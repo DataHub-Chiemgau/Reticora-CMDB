@@ -183,11 +183,64 @@ Every worker exports these series, labelled `worker`:
 |---|---|
 | `ReticoraWorkerStopped` | A switched-on worker is not running, for 5 minutes |
 | `ReticoraWorkerErrors` | More than 5 failures in 15 minutes |
-| `ReticoraWorkerNoSuccess` | No successful cycle for 30 minutes |
+| `ReticoraWorkerNoSuccess` | A running worker has had no cycle without error for 35 minutes, or none since its start for 30 minutes |
 | `ReticoraWorkerBacklog` | Backlog above 1000 |
 | `ReticoraWorkerBacklogGrowing` | Backlog grows for 30 minutes |
 
+`ReticoraWorkerNoSuccess` relies on every worker recording each cycle, an
+idle one as well (`observability.ObserveWorkerRun`). A worker that has not
+completed a cycle without error since its process started has no
+`reticora_worker_last_success_timestamp_seconds` series; the rule starts from
+`reticora_worker_up` and only removes workers with a success in the last
+5 minutes, so it fires for such a worker too, 30 minutes after the start
+(also after a restart). `nats_edge`, `credential_bundles`, `discovery_scopes`
+and `jobs` do not record their cycles yet (F-133); until they do, the alert
+fires for them 30 minutes after the start.
+
 `deploy/monitoring/alertmanager.yaml` routes all alerts to the operators. Critical alerts also go to the on-call webhook. The product's notification channel (NTF) is added with WP-137. The Grafana dashboard `deploy/grafana/dashboard-overview.json` shows runs, errors, backlog and running instances.
+
+### Alert delivery
+
+The alert chain of an installation:
+
+1. Prometheus scrapes `/metrics` of every server instance (worker, HTTP and
+   break-glass series).
+2. It evaluates the rules of `deploy/monitoring/worker-rules.yaml`,
+   `slo-rules.yaml` and `operator-rules.yaml`: as PrometheusRule resources
+   with the Prometheus Operator, or their `spec` as plain `rule_files`.
+3. Alertmanager loads `deploy/monitoring/alertmanager.yaml`: all alerts go to
+   the receiver `operators` (e-mail, repeated every 4 hours), critical ones
+   also to `operators-critical` (e-mail and the on-call webhook, hourly).
+   `ReticoraWorkerStopped` suppresses `ReticoraWorkerNoSuccess` of the same
+   worker.
+
+The file ships with placeholders of the reserved domain `.invalid`; replace
+them before loading it:
+
+| Setting | Placeholder | Set to |
+|---|---|---|
+| `global.smtp_smarthost` | `smtp.example.invalid:587` | Host and port of the SMTP relay |
+| `global.smtp_from` | `alertmanager@example.invalid` | Sender address of the alert e-mails |
+| `global.smtp_auth_username` | `alertmanager@example.invalid` | SMTP login; remove it with `smtp_auth_password_file` for a relay without authentication |
+| `global.smtp_auth_password_file` | `/etc/alertmanager/secrets/smtp-password` | File with the SMTP password, for example a mounted secret; never write the password into the file |
+| `email_configs[].to` | `ops@example.invalid` | Addresses of the operators and of the on-call team |
+| `webhook_configs[].url` | `https://oncall.example.invalid/alertmanager` | On-call pager or chat bridge |
+
+`global.smtp_require_tls: true` stays unless the relay offers no STARTTLS.
+Check the edited file with `amtool check-config alertmanager.yaml`
+(Alertmanager refuses to load a file with e-mail receivers but without an
+SMTP smarthost and sender).
+
+The CI job `monitoring-config` runs `tests/monitoring-config.test.sh` with
+amtool v0.27.0 and promtool v2.54.1 (both pinned with their checksums):
+`amtool check-config` of the shipped file, `promtool check rules` on the
+groups of every PrometheusRule and `promtool test rules` on the unit tests in
+`deploy/monitoring/tests` (`worker-rules.test.yaml`: each worker alert fires
+and stays silent where it must; `operator-rules.test.yaml`). Locally:
+
+```bash
+AMTOOL=<amtool> PROMTOOL=<promtool> ./tests/monitoring-config.test.sh
+```
 
 ### Break-glass alert (SEC-07)
 

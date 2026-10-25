@@ -666,3 +666,4 @@ COL-04;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
 MON-02;[B];C;backend/internal/discovery/edge_metrics_integration_test.go;WP-426
 GLO-11;[Q];A;backend/internal/traceability/traceability_test.go;WP-450
 DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-450
+OPS-05;[B];A;tests/monitoring-config.test.sh;WP-446

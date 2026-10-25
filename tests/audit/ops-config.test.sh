@@ -23,19 +23,20 @@
 #          fixed by WP-387; the cases install_signature_* are in
 #          tests/install-signature.test.sh.
 #   WP-103 (OPS-05) P2 "alertmanager.yaml is rejected by Alertmanager's config
-#          validation (no global SMTP smarthost)" + gap high "Alertmanager
-#          config validation in CI".                       -> case alertmanager_*
+#          validation (no global SMTP smarthost)": fixed by WP-446; the cases
+#          alertmanager_smtp and alertmanager_amtool are in
+#          tests/monitoring-config.test.sh.
 #   WP-104 (OPS-06) P2 "SMTP outage scenario reported N/A although SMTP
 #          delivery exists" (notify/smtp.go, WP-137).      -> case outage_smtp
 #
 # Tools: python3 with PyYAML (as tests/rep01-structure.test.sh), plus
 #   kustomize v5 (KUSTOMIZE=<path> or PATH; CI: go install
 #   sigs.k8s.io/kustomize/kustomize/v5@v5.8.1), terraform >= 1.5
-#   (TERRAFORM=<path> or PATH), optional amtool (AMTOOL=<path> or PATH).
-#   A missing required tool is reported as a FAIL of its case.
+#   (TERRAFORM=<path> or PATH). A missing tool is reported as a FAIL of its
+#   case.
 #
 # Retest:
-#   KUSTOMIZE=<kustomize> TERRAFORM=<terraform> AMTOOL=<amtool> ./tests/audit/ops-config.test.sh
+#   KUSTOMIZE=<kustomize> TERRAFORM=<terraform> ./tests/audit/ops-config.test.sh
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
@@ -110,35 +111,6 @@ elif [ "$write_window" -gt "$rpo_limit" ]; then
 else
     fail "restore_rpo_window: the write window exceeds the RPO limit, so an RPO violation is observable" \
         "WRITE_SECONDS=${write_window}s <= RPO_LIMIT=${rpo_limit}s: rpo = last_commit - restored_last stays below the limit whenever the restore succeeds"
-fi
-
-# ─── WP-103: the Alertmanager configuration is loadable ─────────────────────
-am_static="$(python3 - <<'PY'
-import yaml
-cfg = yaml.safe_load(open("deploy/monitoring/alertmanager.yaml"))
-g = cfg.get("global") or {}
-problems = []
-for r in cfg.get("receivers", []):
-    for e in r.get("email_configs") or []:
-        if not (e.get("smarthost") or g.get("smtp_smarthost")):
-            problems.append(f"receiver {r['name']}: email_configs without smarthost and no global smtp_smarthost")
-        if not (e.get("from") or g.get("smtp_from")):
-            problems.append(f"receiver {r['name']}: email_configs without from and no global smtp_from")
-print("\n".join(problems))
-PY
-)"
-if [ -z "$am_static" ]; then
-    ok "alertmanager_smtp: every email receiver has an SMTP smarthost and sender"
-else
-    fail "alertmanager_smtp: every email receiver has an SMTP smarthost and sender" "$am_static"
-fi
-AMTOOL_BIN="$(tool AMTOOL amtool || true)"
-if [ -n "$AMTOOL_BIN" ]; then
-    if "$AMTOOL_BIN" check-config deploy/monitoring/alertmanager.yaml >"$TMP_ROOT/amtool.log" 2>&1; then
-        ok "alertmanager_amtool: amtool check-config accepts deploy/monitoring/alertmanager.yaml"
-    else
-        fail "alertmanager_amtool: amtool check-config accepts deploy/monitoring/alertmanager.yaml" "$(grep -E 'FAILED|error' "$TMP_ROOT/amtool.log" | head -n 3)"
-    fi
 fi
 
 # ─── WP-104: the SMTP outage scenario is exercised ──────────────────────────
