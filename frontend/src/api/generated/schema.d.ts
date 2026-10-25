@@ -2552,7 +2552,7 @@ export interface paths {
     };
     /**
      * Metric series of one CI (MON-02)
-     * @description Returns the series of one CI for the detail view: the named metric or, without name, every metric the CI reported since from (default the last 24 hours). Requires the monitoring feature. A CI outside the caller's client/site scope, unknown or with a malformed id answers 404.
+     * @description Returns the series of one CI for the detail view: the named metric or, without name, every metric the CI reported since from (default the last 24 hours). Requires the monitoring feature. A CI outside the caller's client/site scope or unknown answers 404, a malformed id 400.
      */
     get: operations['getCIMetrics'];
     put?: never;

@@ -3,9 +3,9 @@ package rls_test
 // Metrics channel of the CI detail view through the complete PostgreSQL
 // router (WP-344, F-052, TEN-06, MON-01). GET /api/v1/cis/{id}/metrics
 // answers like GET /api/v1/cis/{id}: 404 for a CI outside the principal's
-// client/site scope, of another organization, unknown or with a malformed
-// id, with or without name filter, and the body never names its series.
-// Visible CIs keep their series.
+// client/site scope, of another organization or unknown, with or without
+// name filter, and the body never names its series. Visible CIs keep their
+// series. A malformed id answers 400 (WP-402, F-167).
 //
 // Retest:
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_01?sslmode=disable \
@@ -77,10 +77,10 @@ func TestCIMetricsEndpointScope(t *testing.T) {
 			}
 		}
 	}
-	// Unknown and malformed ids name no CI either.
-	for _, id := range []string{"00000000-0000-4000-8000-000000000044", "not-a-uuid"} {
-		if code, body := w.do(w.orgA, http.MethodGet, "/api/v1/cis/"+id+"/metrics", nil); code != http.StatusNotFound {
-			t.Errorf("GET /cis/%s/metrics: %d %s, want 404", id, code, trim(body))
+	// An unknown id names no CI either; a malformed one is a bad request.
+	for id, want := range map[string]int{"00000000-0000-4000-8000-000000000044": http.StatusNotFound, "not-a-uuid": http.StatusBadRequest} {
+		if code, body := w.do(w.orgA, http.MethodGet, "/api/v1/cis/"+id+"/metrics", nil); code != want {
+			t.Errorf("GET /cis/%s/metrics: %d %s, want %d", id, code, trim(body), want)
 		}
 	}
 }

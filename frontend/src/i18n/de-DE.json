@@ -200,6 +200,7 @@
     "diverged": "abweichend",
     "provenance": "Herkunft & Overrides",
     "noProvenance": "Noch keine Provenienz-Daten (erstellt bei der nächsten Discovery).",
+    "provenanceLoadError": "Die Herkunftsdaten konnten nicht geladen werden",
     "instanceFieldsHint": "Felder nur für dieses Gerät (z. B. iLO-IP, SAP-SID) — ohne den Typ zu ändern.",
     "overrideValue": "Wert",
     "setOverride": "Override setzen",

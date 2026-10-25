@@ -839,10 +839,14 @@ const defaultCIMetricsWindow = 24 * time.Hour
 
 // CIMetrics handles GET /api/v1/cis/{id}/metrics?name=&from=&to=&step=
 // (MON-02): the series of one CI, all its metrics or the named one; the
-// detail view draws them as lines. A CI outside the caller's scope, unknown
-// or malformed answers 404.
+// detail view draws them as lines. A CI outside the caller's scope or
+// unknown answers 404, a malformed id 400 (F-167).
 func (h *Handler) CIMetrics(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := requireOrgID(w, r)
+	if !ok {
+		return
+	}
+	ciID, ok := api.ParseUUIDParam(w, r, "id", "")
 	if !ok {
 		return
 	}
@@ -851,7 +855,7 @@ func (h *Handler) CIMetrics(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	query.CIID = chi.URLParam(r, "id")
+	query.CIID = ciID
 	if v, ok := h.store.(CIVisibility); ok {
 		visible, verr := v.CIVisible(r.Context(), orgID, query.CIID)
 		if verr != nil {
