@@ -76,9 +76,10 @@ import {
  *  D08 a disabled collector can no longer deliver: status shown in the UI; without a
  *      restart the running collector is cut off within 10 s (no request over the NATS edge
  *      answered, last_seen_at and CI count unchanged over two discovery cycles); after a
- *      restart heartbeats and discovery results are refused, nothing new persisted
- *      (positive control first: last_seen_at rises) ...................... WP-145 (COL-04), WP-143 (COL-01), WP-085 (REC-01),
- *      WP-381 (COL-04, F-025)
+ *      restart heartbeats and discovery results are refused, nothing new persisted, the
+ *      collector logs the refusal of the NATS endpoint with its cause and no successful
+ *      connection (positive control first: last_seen_at rises) ........... WP-145 (COL-04), WP-143 (COL-01), WP-085 (REC-01),
+ *      WP-381 (COL-04, F-025), WP-414 (DIS-08, F-258)
  *  D09 override against an open editor: the edit form is open, a second session of the
  *      same user sets an override on model ("Override setzen", the version rises); saving
  *      the form with a changed model is refused with 409, the form shows the conflict and
@@ -1238,8 +1239,15 @@ test.describe('Discovery → reconciliation → override protection → review',
     expect
       .soft(log, 'no heartbeat accepted')
       .not.toMatch(/"msg":"heartbeat completed","status":(200|"ok"|"active")/);
-    // NATS account locked (COL-04): no request over the edge is answered. (The collector
-    // logs "connected over mTLS" also when the endpoint refuses it – RetryOnFailedConnect.)
+    // NATS account locked (COL-04): no request over the edge is answered.
+    // DIS-08 (WP-414, F-258): the collector logs the refusal of the NATS endpoint with its
+    // cause (authorization) and no successful connection.
+    expect
+      .soft(log, 'the refusal of the NATS endpoint is logged with its cause')
+      .toMatch(/"msg":"collector NATS endpoint refused"[^\n]*"error":"[^"\n]*authorization/i);
+    expect
+      .soft(log, 'no successful NATS connection logged')
+      .not.toContain('collector NATS endpoint connected over mTLS');
     expect.soft(log, 'no heartbeat over the NATS edge').not.toContain('"transport":"edge"');
     expect.soft(log, 'no credential bundle over NATS').not.toContain('credential bundle updated');
     expect.soft(log, 'no subnets reported over NATS').not.toContain('local subnets reported');

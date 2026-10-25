@@ -10,10 +10,12 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -65,8 +67,11 @@ func TestNATSEndpointAndOptions(t *testing.T) {
 		}
 	}
 	// It keeps reconnecting, also after repeated authentication refusals
-	// (WP-381, TestCollectorNATSReconnectsAfterAuthRefusals).
-	if o.MaxReconnect != -1 || !o.RetryOnFailedConnect || !o.IgnoreAuthErrorAbort {
+	// (WP-381, TestCollectorNATSReconnectsAfterAuthRefusals). The first
+	// connection is retried by connectNATS, which logs every refusal; with
+	// RetryOnFailedConnect nats.go would report none before it (WP-414,
+	// F-258, TestCollectorNATSLogsRefusalNotSuccess).
+	if o.MaxReconnect != -1 || o.RetryOnFailedConnect || !o.IgnoreAuthErrorAbort {
 		t.Fatalf("reconnect options: max reconnects %d, retry on failed connect %v, ignore auth error abort %v",
 			o.MaxReconnect, o.RetryOnFailedConnect, o.IgnoreAuthErrorAbort)
 	}
@@ -155,7 +160,7 @@ authorization {
 	closed := make(chan struct{})
 	// Shorter waits than in production (5 s plus up to 1 s TLS jitter) keep
 	// the test fast; giving up on repeated refusals does not depend on them.
-	nc, err := nats.Connect(fmt.Sprintf("tls://127.0.0.1:%d", port), append(opts,
+	opts = append(opts,
 		nats.ReconnectWait(50*time.Millisecond),
 		nats.ReconnectJitter(0, 0),
 		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
@@ -164,7 +169,16 @@ authorization {
 			}
 		}),
 		nats.ClosedHandler(func(*nats.Conn) { close(closed) }),
-	)...)
+	)
+	// The first connection waits for the nats-server to listen (in the
+	// collector connectNATS retries it).
+	var nc *nats.Conn
+	for range 50 {
+		if nc, err = nats.Connect(fmt.Sprintf("tls://127.0.0.1:%d", port), opts...); err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,4 +224,145 @@ authorization {
 	if err = nc.FlushTimeout(5 * time.Second); err != nil {
 		t.Fatalf("round trip after the reconnect: %v", err)
 	}
+}
+
+// TestCollectorNATSLogsRefusalNotSuccess covers WP-414 (DIS-08, F-258):
+// with RetryOnFailedConnect nats.Connect returns without an error also when
+// the endpoint refuses the collector, and runNATS logged "connected over
+// mTLS" unconditionally. Against a real nats-server with mTLS that refuses
+// the collector's certificate (verify_and_map, like the callout refuses a
+// disabled collector), runNATS logs no success and one "collector NATS
+// endpoint refused" with the cause over several refused attempts; once the
+// endpoint accepts it, "connected" follows; refused again after a
+// configuration reload, one further "refused" and no success; accepted
+// again, "connected" once more.
+func TestCollectorNATSLogsRefusalNotSuccess(t *testing.T) {
+	bin := natsServerBin(t)
+	dir := t.TempDir()
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ca := newAuditPKI(t)
+	now := time.Now()
+	serverKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	write("ca.pem", ca.pem)
+	write("server.pem", ca.issue(t, &serverKey.PublicKey, pkix.Name{CommonName: "127.0.0.1"}, now.Add(-time.Hour), now.Add(24*time.Hour), true))
+	write("server-key.pem", auditKeyPEM(t, serverKey))
+	const orgID, colID = "6f0b6f0e-0000-4000-8000-0000000000c3", "6f0b6f0e-0000-4000-8000-0000000000c4"
+	colKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	credPath := filepath.Join(dir, "credentials.json")
+	if err := (&keystore.FileStore{Path: credPath}).Save(context.Background(), keystore.Credentials{
+		DeviceID:             colID,
+		ClientCertificatePEM: ca.issue(t, &colKey.PublicKey, pkix.Name{CommonName: colID, Organization: []string{orgID}}, now.Add(-time.Hour), now.Add(24*time.Hour), false),
+		ClientPrivateKeyPEM:  auditKeyPEM(t, colKey),
+		CertificateAuthority: ca.pem,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	port := auditFreeTCPPort(t)
+	admit := func(user string) {
+		write("nats.conf", fmt.Sprintf(`listen: "127.0.0.1:%d"
+tls {
+  cert_file: "server.pem"
+  key_file: "server-key.pem"
+  ca_file: "ca.pem"
+  verify_and_map: true
+  handshake_first: true
+  timeout: 5
+}
+authorization {
+  users = [ { user: %q } ]
+}
+`, port, user))
+	}
+	collectorUser := "CN=" + colID + ",O=" + orgID
+	// The endpoint refuses the collector from the start.
+	admit("CN=someone-else")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv := exec.CommandContext(ctx, bin, "-c", "nats.conf")
+	srv.Dir = dir
+	serverLog := &lockedBuffer{}
+	srv.Stdout, srv.Stderr = serverLog, serverLog
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cancel(); _ = srv.Wait() }()
+	reload := func(user string) {
+		admit(user)
+		if err := srv.Process.Signal(syscall.SIGHUP); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refusedByServer := func() int { return strings.Count(serverLog.String(), "authentication error") }
+
+	logs := &lockedBuffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	wait := natsReconnectWait
+	natsReconnectWait = 50 * time.Millisecond
+	t.Cleanup(func() { natsReconnectWait = wait })
+	t.Setenv("RETICORA_NATS_URL", fmt.Sprintf("tls://127.0.0.1:%d", port))
+	runCtx, stopRun := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runNATS(runCtx, collectorConfig{ServerURL: "https://cmdb.example.com", CredentialsPath: credPath})
+	}()
+	defer func() { stopRun(); <-done }()
+
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if cond() {
+				return
+			}
+		}
+		t.Fatalf("timeout waiting for %s; collector log:\n%s\nserver log tail:\n%s", what, logs.String(), auditTail(serverLog.String(), 5))
+	}
+	const connected, refused = `"msg":"collector NATS endpoint connected over mTLS"`, `"msg":"collector NATS endpoint refused"`
+	count := func(from int, msg string) int { return strings.Count(logs.String()[from:], msg) }
+	refusedLine := func(from int) string {
+		for _, line := range strings.Split(logs.String()[from:], "\n") {
+			if strings.Contains(line, refused) {
+				return line
+			}
+		}
+		return ""
+	}
+
+	// Refused from the start (a disabled collector restarted): no success,
+	// one refusal with the cause.
+	waitFor("three refused connection attempts", func() bool { return refusedByServer() >= 3 })
+	if n := count(0, connected); n != 0 {
+		t.Errorf("F-258: the collector logged %d successful connections while the endpoint refused it:\n%s", n, logs.String())
+	}
+	if n := count(0, refused); n != 1 || !strings.Contains(strings.ToLower(refusedLine(0)), "authorization violation") {
+		t.Errorf("F-258: want one %s with the cause (authorization violation) over %d refused attempts, got %d:\n%s",
+			refused, refusedByServer(), n, logs.String())
+	}
+
+	// Accepted: the success is logged.
+	reload(collectorUser)
+	waitFor("the connection after the endpoint accepted the collector", func() bool { return count(0, connected) == 1 })
+
+	// Refused again (configuration reload, the server drops the
+	// connection): no success, one further refusal.
+	offset, attempts := len(logs.String()), refusedByServer()
+	reload("CN=someone-else")
+	waitFor("three further refused connection attempts", func() bool { return refusedByServer() >= attempts+3 })
+	if n := count(offset, connected); n != 0 {
+		t.Errorf("F-258: the collector logged %d successful connections after the endpoint refused it again:\n%s", n, logs.String()[offset:])
+	}
+	if n := count(offset, refused); n != 1 || !strings.Contains(strings.ToLower(refusedLine(offset)), "authorization violation") {
+		t.Errorf("F-258: want one %s with the cause after the endpoint refused the collector again (%d attempts), got %d:\n%s",
+			refused, refusedByServer()-attempts, n, logs.String()[offset:])
+	}
+
+	// Accepted again: connected once more.
+	reload(collectorUser)
+	waitFor("the reconnect after the endpoint accepted the collector again", func() bool { return count(offset, connected) == 1 })
 }

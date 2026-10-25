@@ -39,7 +39,6 @@ go;backend/internal/traceability;TestAuditT5GateIDsAreNotTracedByTheChecklistIts
 go;backend/internal/traceability;TestAuditT5ValidateRejectsNonTestEvidence;F-121
 go;backend/internal/webhook;TestAuditDefectWebhookConsumerKeepsEventsOnTransientErrors;F-151
 go;collector/collectorcmd;TestAuditCollectorEnrollsFromEnvironment;F-101
-go;collector/collectorcmd;TestAuditCollectorRenewsCertificateAt60Percent;F-026
 go;collector/collectorcmd;TestAuditScopeExpansionCompleteOrReported;F-106
 go;collector/collectorcmd;TestAuditScopeScheduleSurvivesRestart;F-109
 go;collector/collectorcmd;TestAuditT7MetricSamplesReachTheServerAuthenticated;F-046
