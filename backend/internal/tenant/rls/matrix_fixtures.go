@@ -69,3 +69,14 @@ var Channels = []Channel{
 // organization, one client, one site, one team, several clients with one
 // site, and the whole other organization.
 var ScopeKinds = []string{"org", "client", "site", "team", "multi", "other-org"}
+
+// ClientMatrixTables lists tables the RLS matrix (TestRLSMatrix, WP-065)
+// must run with their client and site dimension, with the reason. The matrix
+// finds the tenant tables in the catalog; a listed table it does not run
+// (no RLS, no privilege of the application role, inherited scope) or runs
+// without client_id or site_id fails it, so a derived table cannot drop out
+// of the client matrix unnoticed.
+var ClientMatrixTables = map[string]string{
+	"ci_identity_mac": "identity MACs of ci with the client and site of their CI, kept by the trigger on ci " +
+		"(migration 000161, WP-434); the identity search of discovery reads it under the scope of the principal",
+}

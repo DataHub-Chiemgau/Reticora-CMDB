@@ -677,3 +677,4 @@ GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-451
 NFR-05;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-443
 OPS-04;[B], [P5];A;tests/backup-config.test.sh;WP-443
 NFR-09;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-443
+NFR-01;[B], Teilumfang [P5];LT;backend/internal/discovery/scale_integration_test.go;WP-434

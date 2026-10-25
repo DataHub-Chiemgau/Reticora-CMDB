@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant/rls"
 )
 
 // matrixHiddenGlobalRows lists the tables whose global rows (organization_id
@@ -141,6 +142,9 @@ func scopeDenied(err error) bool {
 // rows are seeded through real parents with active triggers, shared,
 // one-sided, unlinked and org-wide-linked rows included (inheritedModels).
 //
+// The tables of rls.ClientMatrixTables must be among them with their client
+// and site dimension (WP-434).
+//
 // It runs only against PostgreSQL (TEST_DATABASE_URL).
 func TestRLSMatrix(t *testing.T) {
 	dsn := testDatabaseURL(t)
@@ -172,6 +176,12 @@ func TestRLSMatrix(t *testing.T) {
 	tables := loadMatrixTables(ctx, t, admin)
 	if len(tables) < 50 {
 		t.Fatalf("only %d tenant tables found; is the database migrated?", len(tables))
+	}
+	for _, name := range slices.Sorted(maps.Keys(rls.ClientMatrixTables)) {
+		i := slices.IndexFunc(tables, func(tbl *matrixTable) bool { return tbl.name == name })
+		if i < 0 || tables[i].inherited || len(tables[i].scope["client"]) == 0 || len(tables[i].scope["site"]) == 0 {
+			t.Errorf("rls.ClientMatrixTables: the matrix does not run %s with its client and site dimension", name)
+		}
 	}
 	for _, tbl := range tables {
 		t.Run(tbl.name, func(t *testing.T) {

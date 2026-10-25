@@ -869,11 +869,11 @@ func (r *PGRepository) MarkRecordsProcessed(ctx context.Context, orgID string, r
 const identityPage = 1000
 
 // IdentityCandidates returns the ids of the CIs an incoming device may be,
-// using the indexes on serial number, hardware UUID, primary MAC, management
-// IP and hostname/FQDN plus the attribute index for interface MACs, over the
-// whole inventory of the organization (REC-02, NFR-01). The matches are read
-// page by page on (created_at, id) without an upper bound (WP-205).
-// Soft-deleted CIs are excluded.
+// using the indexes on serial number, hardware UUID, management IP and
+// hostname/FQDN plus the MAC index of ci_identity_mac for primary and
+// interface MACs, over the whole inventory of the organization (REC-02,
+// NFR-01). The matches are read page by page on (created_at, id) without an
+// upper bound (WP-205). Soft-deleted CIs are excluded.
 func (r *PGRepository) IdentityCandidates(ctx context.Context, orgID string, q *IdentityQuery) ([]string, error) {
 	var ids []string
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -972,11 +972,15 @@ func (r *PGRepository) DeletedIdentityCandidates(ctx context.Context, orgID stri
 
 // identityFilter matches CIs by the indexed identity columns of q: only
 // the parts q carries become terms, so the planner combines the indexes on
-// serial number, hardware UUID, primary MAC, interface MACs, management IP
-// and hostname/FQDN (BitmapOr) instead of scanning the inventory (NFR-01,
-// NFR-03). Hostnames compare with the stored lower-case columns (migration
-// 000134): lower() is not leakproof and keeps an index unused under RLS. The arguments start at $2 after the organization; ok is false
-// when q carries no identity.
+// serial number, hardware UUID, management IP, hostname/FQDN and the primary
+// key (BitmapOr) instead of scanning the inventory (NFR-01, NFR-03).
+// Hostnames compare with the stored lower-case columns (migration 000134):
+// lower() is not leakproof and keeps an index unused under RLS. Primary and
+// interface MACs come from ci_identity_mac (migration 000161, WP-434) with
+// leakproof equality only; the ids are an array of an InitPlan, because an
+// IN sub-select within the OR would be a filter on every CI of the
+// organization. The arguments start at $2 after the organization; ok is
+// false when q carries no identity.
 func identityFilter(orgID string, q *IdentityQuery) (predicate string, args []any, ok bool) {
 	args = []any{orgID}
 	var terms []string
@@ -991,12 +995,7 @@ func identityFilter(orgID string, q *IdentityQuery) (predicate string, args []an
 		add("hardware_uuid = $%d::uuid", q.HardwareUUID)
 	}
 	if len(q.MACs) > 0 {
-		add("primary_mac = ANY($%d::macaddr[])", q.MACs)
-		macDocs := make([]string, 0, len(q.MACs))
-		for _, mac := range q.MACs {
-			macDocs = append(macDocs, `{"fingerprint":{"mac_addresses":["`+mac+`"]}}`)
-		}
-		add("attributes @> ANY($%d::jsonb[])", macDocs)
+		add("id = ANY (ARRAY(SELECT ci_id FROM ci_identity_mac WHERE organization_id = $1 AND mac = ANY($%d::macaddr[])))", q.MACs)
 	}
 	if ip := hostOnly(q.ManagementIP); ip != "" {
 		add("management_ip = $%d::inet", ip)
@@ -1056,30 +1055,29 @@ func identityBranches(keys *IdentityKeys, deleted bool) (branches []identityBran
 		branch("uuid", "uuid", fmt.Sprintf("$%d::text[]::uuid[]", add(keys.UUIDs)), "c.hardware_uuid = k.v", "c.hardware_uuid = k.v")
 	}
 	if len(keys.MACs) > 0 {
+		// Primary and interface MACs come from ci_identity_mac (migration
+		// 000161, WP-434): (organization_id, mac) and the join on the
+		// primary key of ci are index conditions; one row per CI and MAC.
+		// The live branch repeats the values as mac = ANY on the side
+		// table, so its scan reads only the batch's MACs whatever join
+		// order the planner picks (with outdated statistics it may start
+		// from the side table and leave mac = k.v to the join). The
+		// parameter is bound as macaddr[]: a cast from text[] is no
+		// leakproof expression and would stay above the RLS barrier.
 		n := add(keys.MACs)
-		branch("primary_mac", "mac", fmt.Sprintf("$%d::text[]::macaddr[]", n), "c.primary_mac = k.v", "c.primary_mac = k.v")
-		// Interface MACs of the fingerprint: jsonb containment is not
-		// leakproof and reads the organization's CIs once per batch (per
-		// record before); the array elements narrow the containment test
-		// to the matching values, the test itself stays exact.
-		state := "IS NULL"
 		if deleted {
-			state = "IS NOT NULL"
-		}
-		var columns string
-		if deleted {
-			columns = "'mac'::text AS kind, k.n, c.id"
+			branches = append(branches, identityBranch{"mac", fmt.Sprintf(`SELECT 'mac'::text AS kind, k.n, d.id
+			FROM unnest($%d::macaddr[]) WITH ORDINALITY AS k(v, n)
+			CROSS JOIN LATERAL (SELECT c.id FROM ci_identity_mac m JOIN ci c ON c.id = m.ci_id
+				WHERE m.organization_id = $1 AND m.mac = k.v AND c.organization_id = $1 AND c.deleted_at IS NOT NULL
+				ORDER BY c.deleted_at DESC, c.id LIMIT 1000) d`, n)})
 		} else {
-			columns = "c.id, c.created_at, 'mac'::text AS kind, k.n"
+			branches = append(branches, identityBranch{"mac", fmt.Sprintf(`SELECT c.id, c.created_at, 'mac'::text AS kind, k.n
+			FROM unnest($%[1]d::macaddr[]) WITH ORDINALITY AS k(v, n)
+			JOIN ci_identity_mac m ON m.organization_id = $1 AND m.mac = k.v AND m.mac = ANY($%[1]d::macaddr[])
+			JOIN ci c ON c.id = m.ci_id
+			WHERE c.organization_id = $1 AND c.deleted_at IS NULL`, n)})
 		}
-		branches = append(branches, identityBranch{"fingerprint_mac", fmt.Sprintf(`SELECT %s
-			FROM ci c
-			CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(c.attributes -> 'fingerprint' -> 'mac_addresses') = 'array'
-				THEN c.attributes -> 'fingerprint' -> 'mac_addresses' END) AS fm(v)
-			JOIN unnest($%d::text[]) WITH ORDINALITY AS k(v, n) ON k.v = fm.v
-			WHERE c.organization_id = $1 AND c.deleted_at %s
-				AND c.attributes @> jsonb_build_object('fingerprint', jsonb_build_object('mac_addresses', jsonb_build_array(k.v)))`,
-			columns, n, state)})
 	}
 	if len(keys.IPs) > 0 {
 		branch("ip", "ip", fmt.Sprintf("$%d::text[]::inet[]", add(keys.IPs)), "c.management_ip = k.v", "c.management_ip = k.v")
@@ -1098,8 +1096,8 @@ func identityBranches(keys *IdentityKeys, deleted bool) (branches []identityBran
 
 // identityHitsSQL is the live candidate query of branches, read page by
 // page on (created_at, id, kind, n) from parameter first on. UNION drops the
-// repeated hit of a MAC that is primary and in the fingerprint, and of a
-// host name that is hostname and FQDN.
+// repeated hit of a host name that is hostname and FQDN (a MAC that is
+// primary and in the fingerprint is one row of ci_identity_mac).
 func identityHitsSQL(branches []identityBranch, first int) string {
 	parts := make([]string, len(branches))
 	for i, b := range branches {

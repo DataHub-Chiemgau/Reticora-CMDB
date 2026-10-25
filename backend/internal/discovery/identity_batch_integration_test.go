@@ -23,8 +23,9 @@ import (
 // management IP, hostname and FQDN, beyond one page of 1,000 hits with equal
 // created_at, and the newest 1,000 soft-deleted CIs – and each branch of
 // them reads ci only through its identity index under row-level security.
-// The fingerprint MACs are the documented exception: jsonb containment is
-// not leakproof, so that branch reads the organization once per batch.
+// The MAC branch reads ci_identity_mac through its index and ci through the
+// primary key, for primary and fingerprint MACs alike (WP-434, migration
+// 000161; before, jsonb containment read the organization once per batch).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestIdentityHitsMatchSingle(t *testing.T) {
@@ -61,8 +62,10 @@ func TestIdentityHitsMatchSingle(t *testing.T) {
 		FROM generate_series(1, $3) AS n`, f.OrgA, serverType, gone); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Admin.Exec(bg, `ANALYZE ci`); err != nil {
-		t.Fatal(err)
+	for _, table := range []string{"ci", "ci_identity_mac"} {
+		if _, err := f.Admin.Exec(bg, `ANALYZE `+table); err != nil {
+			t.Fatal(err)
+		}
 	}
 	repo := discovery.NewPGRepository(f.App)
 	ctx := f.OrgCtx(f.OrgA)
@@ -134,7 +137,7 @@ func TestIdentityHitsMatchSingle(t *testing.T) {
 	}
 	byIndex := map[string][]string{
 		"serial": {"idx_ci_serial", "uq_ci_org_serial"}, "uuid": {"idx_ci_hardware_uuid", "uq_ci_org_hardware_uuid"},
-		"primary_mac": {"idx_ci_primary_mac", "uq_ci_org_primary_mac"}, "ip": {"idx_ci_mgmt_ip", "idx_ci_mgmt_ip_sys_object"},
+		"mac": {}, "ip": {"idx_ci_mgmt_ip", "idx_ci_mgmt_ip_sys_object"},
 		"hostname": {"idx_ci_hostname_lc"}, "fqdn": {"idx_ci_fqdn_lc"}, "host": {"idx_ci_hostname_lc", "idx_ci_fqdn_lc"},
 	}
 	for _, c := range []struct {
@@ -143,23 +146,33 @@ func TestIdentityHitsMatchSingle(t *testing.T) {
 	}{
 		{"serial", discovery.IdentityKeys{Serials: values(func(n int) string { return fmt.Sprintf("IH-%d", n) })}},
 		{"uuid", discovery.IdentityKeys{UUIDs: values(uuidOf)}},
-		{"primary_mac", discovery.IdentityKeys{MACs: values(func(n int) string { return macOf("00:1b:21:", n) })}},
-		{"fingerprint_mac", discovery.IdentityKeys{MACs: values(func(n int) string { return macOf("00:1b:22:", n) })}},
+		{"mac", discovery.IdentityKeys{MACs: values(func(n int) string { return macOf("00:1b:21:", n) })}},
+		{"mac", discovery.IdentityKeys{MACs: values(func(n int) string { return macOf("00:1b:22:", n) })}},
 		{"ip", discovery.IdentityKeys{IPs: values(func(n int) string { return fmt.Sprintf("10.88.%d.%d", n/250, n%250+1) })}},
 		{"hostname", discovery.IdentityKeys{Hostnames: values(func(n int) string { return fmt.Sprintf("ih-host-%d", n) })}},
 		{"fqdn", discovery.IdentityKeys{Hostnames: values(func(n int) string { return fmt.Sprintf("ih-host-%d.example.test", n) })}},
 		{"host", discovery.IdentityKeys{Hostnames: values(func(n int) string { return fmt.Sprintf("ih-gone-%d", n) })}},
 	} {
+		found := false
 		for _, deleted := range []bool{false, true} {
 			query, args, ok := discovery.IdentityBranchQuery(f.OrgA, &c.keys, deleted, c.name)
 			if !ok {
 				continue
 			}
+			found = true
 			reads := ciReads(t, f, query, args...)
 			label := fmt.Sprintf("%s (deleted %v)", c.name, deleted)
-			if c.name == "fingerprint_mac" {
-				t.Logf("%s reads ci with %v (jsonb containment is not leakproof: one organization scan per batch)", label, reads)
-				continue
+			if c.name == "mac" {
+				macReads := relationReads(t, f, "ci_identity_mac", query, args...)
+				for _, r := range macReads {
+					if r.index != "idx_ci_identity_mac" || !strings.Contains(r.cond, "mac = ") {
+						t.Errorf("%s reads ci_identity_mac with %s (index condition %q), want idx_ci_identity_mac on the MACs: %s",
+							label, r, r.cond, query)
+					}
+				}
+				if len(macReads) == 0 {
+					t.Errorf("%s: no read of ci_identity_mac in the plan", label)
+				}
 			}
 			for _, r := range reads {
 				allowed := append([]string{"ci_pkey", "ci_id_organization_key"}, byIndex[c.name]...)
@@ -171,11 +184,15 @@ func TestIdentityHitsMatchSingle(t *testing.T) {
 				t.Errorf("%s: no read of ci in the plan", label)
 			}
 		}
+		if !found {
+			t.Errorf("the batch candidate query has no branch %s", c.name)
+		}
 	}
 }
 
-// ciRead is a node of a plan that reads ci, with its index.
-type ciRead struct{ node, index string }
+// ciRead is a node of a plan that reads ci, with its index and index
+// condition.
+type ciRead struct{ node, index, cond string }
 
 func (r ciRead) String() string { return strings.TrimSpace(r.node + " " + r.index) }
 
@@ -183,6 +200,13 @@ func (r ciRead) String() string { return strings.TrimSpace(r.node + " " + r.inde
 // tenant context of organization A (row-level security applies). A bitmap
 // heap scan is reported with the indexes of its bitmap.
 func ciReads(t *testing.T, f *scopetest.Fixture, query string, args ...any) []ciRead {
+	t.Helper()
+	return relationReads(t, f, "ci", query, args...)
+}
+
+// relationReads returns the nodes of the plan of query that read relation,
+// like ciReads.
+func relationReads(t *testing.T, f *scopetest.Fixture, relation, query string, args ...any) []ciRead {
 	t.Helper()
 	var plan []byte
 	scope := database.OrgWideScope(f.OrgA, "")
@@ -196,38 +220,38 @@ func ciReads(t *testing.T, f *scopetest.Fixture, query string, args ...any) []ci
 		t.Fatal(err)
 	}
 	var out []ciRead
-	var bitmapIndexes func(node map[string]any) []string
-	bitmapIndexes = func(node map[string]any) []string {
-		var names []string
+	var bitmapIndexes func(node map[string]any) []ciRead
+	bitmapIndexes = func(node map[string]any) []ciRead {
+		var reads []ciRead
 		if name, ok := node["Index Name"].(string); ok {
-			names = append(names, name)
+			cond, _ := node["Index Cond"].(string)
+			reads = append(reads, ciRead{"Bitmap Heap Scan", name, cond})
 		}
 		children, _ := node["Plans"].([]any)
 		for _, c := range children {
 			if child, ok := c.(map[string]any); ok {
-				names = append(names, bitmapIndexes(child)...)
+				reads = append(reads, bitmapIndexes(child)...)
 			}
 		}
-		return names
+		return reads
 	}
 	var walk func(node map[string]any)
 	walk = func(node map[string]any) {
 		nodeType, _ := node["Node Type"].(string)
-		if node["Relation Name"] == "ci" {
+		if node["Relation Name"] == relation {
 			switch nodeType {
 			case "Bitmap Heap Scan":
 				children, _ := node["Plans"].([]any)
 				for _, c := range children {
 					if child, ok := c.(map[string]any); ok {
-						for _, name := range bitmapIndexes(child) {
-							out = append(out, ciRead{nodeType, name})
-						}
+						out = append(out, bitmapIndexes(child)...)
 					}
 				}
 				return
 			default:
 				index, _ := node["Index Name"].(string)
-				out = append(out, ciRead{nodeType, index})
+				cond, _ := node["Index Cond"].(string)
+				out = append(out, ciRead{nodeType, index, cond})
 			}
 		}
 		children, _ := node["Plans"].([]any)
