@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
 func TestCompileSQLEmptySpec(t *testing.T) {
@@ -185,7 +188,8 @@ func TestFilterASTCompilesAndOrNot(t *testing.T) {
 		{"field": "attributes.ram_gb", "op": "gte", "value": 16},
 		{"field": "asset.warranty_end", "op": "lt", "value": "2027-01-01"},
 		{"field": "ci_type", "op": "in", "value": ["server", "switch"]},
-		{"field": "created_at", "op": "gt", "value": "x'); DROP TABLE ci; --"}
+		{"field": "created_at", "op": "gt", "value": "2026-01-01T00:00:00Z"},
+		{"field": "hostname", "op": "eq", "value": "x'); DROP TABLE ci; --"}
 	]}`)
 	if err := ast.Validate("ci"); err != nil {
 		t.Fatal(err)
@@ -195,16 +199,18 @@ func TestFilterASTCompilesAndOrNot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"((ci.status = $2 OR ci.status = $3) AND (NOT COALESCE(ci.name ILIKE $4, false)) AND (ci.attributes->>$5)::numeric >= $6::numeric",
+		"((ci.status = $2 OR ci.status = $3) AND (NOT COALESCE(ci.name ILIKE $4, false)) AND " +
+			"CASE WHEN jsonb_typeof(ci.attributes->$5) = 'number' THEN (ci.attributes->>$5)::numeric END >= $6::numeric",
 		"EXISTS (SELECT 1 FROM asset sa WHERE sa.id = ci.asset_id AND (sa.warranty_end)::timestamptz < $7::timestamptz)",
 		"(SELECT COALESCE(t.key, t.name) FROM ci_type t WHERE t.id = ci.ci_type_id) = ANY($8::text[])",
-		"(ci.created_at)::timestamptz > $9::timestamptz)",
+		"(ci.created_at)::timestamptz > $9::timestamptz",
+		"ci.hostname = $10)",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("SQL lacks %q:\n%s", want, sql)
 		}
 	}
-	if strings.Contains(sql, "DROP") || next != 10 || len(args) != 9 || args[3] != "test%" || args[4] != "ram_gb" {
+	if strings.Contains(sql, "DROP") || next != 11 || len(args) != 10 || args[3] != "test%" || args[4] != "ram_gb" {
 		t.Errorf("args %v, next %d", args, next)
 	}
 	// The AST joins the flat fields of the spec.
@@ -242,5 +248,170 @@ func TestFilterASTValidation(t *testing.T) {
 	}
 	if err := mustAST(t, `{"field": "warranty_end", "op": "lte", "value": "2027-01-01"}`).Validate("asset"); err != nil {
 		t.Errorf("asset field: %v", err)
+	}
+}
+
+// TestFilterASTValuesPerFieldKind covers F-179 (WP-405): Validate checks
+// every value against the kind of its field (uuid, RFC 3339 time or date,
+// number, bool, text), each element of in included, before any SQL runs,
+// and names the refused value in the path; the valid values of every kind
+// pass.
+func TestFilterASTValuesPerFieldKind(t *testing.T) {
+	const id = "00000000-0000-4000-8000-0000000000aa"
+	for _, c := range []struct{ kind, raw, path string }{
+		// uuid
+		{"ci", `{"field": "client_id", "op": "eq", "value": "not-a-uuid"}`, ".value"},
+		{"ci", `{"field": "site_id", "op": "ne", "value": 5}`, ".value"},
+		{"ci", `{"field": "client_id", "op": "in", "value": ["` + id + `", "x"]}`, ".value[1]"},
+		{"ci", `{"field": "asset.location_id", "op": "eq", "value": "{` + id + `}"}`, ".value"},
+		// time
+		{"ci", `{"field": "created_at", "op": "gt", "value": "garbage"}`, ".value"},
+		{"ci", `{"field": "created_at", "op": "gt", "value": 2020}`, ".value"},
+		{"ci", `{"field": "updated_at", "op": "lt", "value": "2024-02-30"}`, ".value"},
+		{"ci", `{"field": "last_seen_at", "op": "gte", "value": "0000-01-01"}`, ".value"},
+		{"ci", `{"field": "created_at", "op": "lte", "value": "2024-01-01T00:00:00+16:00"}`, ".value"},
+		{"ci", `{"field": "created_at", "op": "lte", "value": "2024-01-01T00:00:00+00:60"}`, ".value"},
+		{"ci", `{"field": "created_at", "op": "lte", "value": "2024-01-01T00:00:00,5Z"}`, ".value"},
+		{"ci", `{"field": "created_at", "op": "eq", "value": "today"}`, ".value"},
+		{"asset", `{"field": "purchase_date", "op": "in", "value": ["2024-01-01", "2024-13-01"]}`, ".value[1]"},
+		// number
+		{"asset", `{"field": "purchase_cost", "op": "gt", "value": "100"}`, ".value"},
+		{"asset", `{"field": "purchase_cost", "op": "in", "value": [1, true]}`, ".value[1]"},
+		{"ci", `{"field": "asset.purchase_cost", "op": "lte", "value": "1e3"}`, ".value"},
+		// bool
+		{"ci", `{"field": "is_manual", "op": "eq", "value": "yes"}`, ".value"},
+		{"ci", `{"field": "is_manual", "op": "in", "value": [true, 1]}`, ".value[1]"},
+		// text
+		{"ci", `{"field": "name", "op": "eq", "value": 5}`, ".value"},
+		{"ci", `{"field": "hostname", "op": "like", "value": "a\u0000b"}`, ".value"},
+		{"ci", `{"field": "status", "op": "in", "value": ["active", {"a": 1}]}`, ".value[1]"},
+		{"ci", `{"field": "ci_type", "op": "in", "value": [["server"]]}`, ".value[0]"},
+		{"ci", `{"field": "name", "op": "eq", "value": null}`, ".value"},
+		{"ci", `{"field": "name", "op": "in", "value": "x"}`, ".value"},
+		// attributes take one scalar type
+		{"ci", `{"field": "attributes.ram", "op": "in", "value": [{"a": 1}]}`, ".value[0]"},
+		{"ci", `{"field": "attributes.ram", "op": "in", "value": [8, "16"]}`, ".value[1]"},
+		{"ci", `{"field": "attributes.ram", "op": "eq", "value": [8]}`, ".value"},
+		{"asset", `{"field": "attributes.cost_center", "op": "eq", "value": {"a": 1}}`, ".value"},
+		{"ci", `{"field": "attributes.flag", "op": "lt", "value": true}`, ""},
+		// exists takes a boolean or nothing
+		{"ci", `{"field": "hostname", "op": "exists", "value": "no"}`, ".value"},
+		// the path leads to the value in the tree
+		{"ci", `{"and": [{"field": "name", "op": "eq", "value": "x"}, {"or": [{"field": "client_id", "op": "eq", "value": "x"}]}]}`, ".and[1].or[0].value"},
+	} {
+		err := mustAST(t, c.raw).Validate(c.kind)
+		var astErr *ASTError
+		if !errors.As(err, &astErr) || astErr.Path != c.path {
+			t.Errorf("%s (%s): %v, want an ASTError at where%s", c.raw, c.kind, err, c.path)
+		}
+	}
+	for _, c := range []struct{ kind, raw string }{
+		{"ci", `{"field": "client_id", "op": "eq", "value": "` + id + `"}`},
+		{"ci", `{"field": "site_id", "op": "in", "value": ["` + id + `", "` + strings.ToUpper(id) + `"]}`},
+		{"ci", `{"field": "created_at", "op": "gt", "value": "2024-01-01T00:00:00Z"}`},
+		{"ci", `{"field": "created_at", "op": "lt", "value": "2024-01-01T10:00:00.123456789+15:59"}`},
+		{"ci", `{"field": "updated_at", "op": "gte", "value": "0001-01-01"}`},
+		{"ci", `{"field": "last_seen_at", "op": "lte", "value": "9999-12-31T23:59:59-15:59"}`},
+		{"asset", `{"field": "warranty_end", "op": "in", "value": ["2024-01-01", "2024-02-29"]}`},
+		{"asset", `{"field": "purchase_cost", "op": "gt", "value": -1.5}`},
+		{"asset", `{"field": "purchase_cost", "op": "in", "value": [1, 1e300]}`},
+		{"ci", `{"field": "is_manual", "op": "eq", "value": false}`},
+		{"ci", `{"field": "is_manual", "op": "ne", "value": true}`},
+		{"ci", `{"field": "name", "op": "like", "value": "web*"}`},
+		{"ci", `{"field": "status", "op": "in", "value": ["active", "maintenance"]}`},
+		{"ci", `{"field": "attributes.ram", "op": "gte", "value": 16}`},
+		{"ci", `{"field": "attributes.ram", "op": "in", "value": [8, 64]}`},
+		{"ci", `{"field": "attributes.flag", "op": "eq", "value": true}`},
+		{"ci", `{"field": "attributes.installed", "op": "gte", "value": "2024-01-01"}`},
+		{"ci", `{"field": "attributes.firmware", "op": "gt", "value": "1.2"}`},
+		{"asset", `{"field": "attributes.cost_center", "op": "in", "value": ["CC-1", "CC-2"]}`},
+		{"ci", `{"field": "attributes.ram", "op": "exists", "value": false}`},
+		{"ci", `{"field": "hostname", "op": "exists"}`},
+	} {
+		if err := mustAST(t, c.raw).Validate(c.kind); err != nil {
+			t.Errorf("%s (%s): %v", c.raw, c.kind, err)
+		}
+	}
+}
+
+// TestFilterASTAttributeCastsAreGuarded covers F-165 (WP-405): a dynamic
+// attribute is cast only under the check of its JSON type (number,
+// boolean, a string holding a time), so a value of another type compares
+// as NULL instead of failing the query; text and the typed columns need
+// no check.
+func TestFilterASTAttributeCastsAreGuarded(t *testing.T) {
+	for _, c := range []struct{ kind, raw, want string }{
+		{"ci", `{"field": "attributes.ram_gb", "op": "gte", "value": 16}`,
+			`CASE WHEN jsonb_typeof(ci.attributes->$2) = 'number' THEN (ci.attributes->>$2)::numeric END >= $3::numeric`},
+		{"ci", `{"field": "attributes.ram_gb", "op": "ne", "value": 8}`,
+			`CASE WHEN jsonb_typeof(ci.attributes->$2) = 'number' THEN (ci.attributes->>$2)::numeric END IS DISTINCT FROM $3::numeric`},
+		{"ci", `{"field": "attributes.ram_gb", "op": "in", "value": [8, 64]}`,
+			`CASE WHEN jsonb_typeof(ci.attributes->$2) = 'number' THEN (ci.attributes->>$2)::numeric END = ANY($3::numeric[])`},
+		{"ci", `{"field": "attributes.monitored", "op": "eq", "value": true}`,
+			`CASE WHEN jsonb_typeof(ci.attributes->$2) = 'boolean' THEN (ci.attributes->>$2)::boolean END = $3::boolean`},
+		{"asset", `{"field": "attributes.installed", "op": "lt", "value": "2024-01-01T00:00:00Z"}`,
+			`CASE WHEN jsonb_typeof(asset.custom_fields->$2) = 'string' AND asset.custom_fields->>$2 ~ '^\d{4}-\d{2}-\d{2}' ` +
+				`AND pg_input_is_valid(asset.custom_fields->>$2, 'timestamptz') THEN (asset.custom_fields->>$2)::timestamptz END < $3::timestamptz`},
+		{"ci", `{"field": "attributes.installed", "op": "eq", "value": "2024-01-01"}`, `ci.attributes->>$2 = $3`},
+		{"ci", `{"field": "attributes.ram_gb", "op": "exists", "value": false}`, `ci.attributes->>$2 IS NULL`},
+		{"ci", `{"field": "created_at", "op": "gt", "value": "2024-01-01"}`, `(ci.created_at)::timestamptz > $2::timestamptz`},
+		{"ci", `{"field": "is_manual", "op": "eq", "value": true}`, `(ci.is_manual)::boolean = $2::boolean`},
+	} {
+		ast := mustAST(t, c.raw)
+		if err := ast.Validate(c.kind); err != nil {
+			t.Fatalf("%s: %v", c.raw, err)
+		}
+		sql, _, _, err := ast.CompileSQL(c.kind, c.kind, []any{"org"}, 2)
+		if err != nil || sql != c.want {
+			t.Errorf("%s:\n got %s (%v)\nwant %s", c.raw, sql, err, c.want)
+		}
+	}
+}
+
+// TestFilterASTSpecValidationNamesTheField covers F-179 and the saved-view
+// part of F-047 (WP-405): the ids of the flat filter fields are UUIDs
+// (upstream_of, downstream_of, client_id, location_id) and an invalid AST
+// value is a 422 field error naming where.<path>, both for the query
+// (FilterSpec.Validate, also inside CompileSQL before any SQL is built)
+// and for a saved view (filter_spec.<field>).
+func TestFilterASTSpecValidationNamesTheField(t *testing.T) {
+	for _, c := range []struct {
+		spec  FilterSpec
+		field string
+	}{
+		{FilterSpec{UpstreamOf: "not-a-uuid"}, "upstream_of"},
+		{FilterSpec{DownstreamOf: "x"}, "downstream_of"},
+		{FilterSpec{ClientID: "client-1"}, "client_id"},
+		{FilterSpec{LocationID: "berlin"}, "location_id"},
+		{FilterSpec{Where: mustAST(t, `{"field": "client_id", "op": "eq", "value": "not-a-uuid"}`)}, "where.value"},
+		{FilterSpec{Where: mustAST(t, `{"or": [{"field": "name", "op": "eq", "value": "x"}, {"field": "created_at", "op": "in", "value": ["x"]}]}`)},
+			"where.or[1].value[0]"},
+		{FilterSpec{Where: mustAST(t, `{"field": "password", "op": "eq", "value": "x"}`)}, "where"},
+	} {
+		var fe *api.FieldError
+		if err := c.spec.Validate("ci"); !errors.As(err, &fe) || fe.Field != c.field || fe.Status != http.StatusUnprocessableEntity {
+			t.Errorf("%+v: %v, want a 422 field error on %s", c.spec, err, c.field)
+		}
+		if where, _, err := c.spec.CompileSQL("ci", []any{"org"}, 2); !errors.As(err, &fe) || where != "" {
+			t.Errorf("CompileSQL %+v: %q %v, want the field error and no SQL", c.spec, where, err)
+		}
+		raw, err := json.Marshal(c.spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var filter map[string]any
+		if err = json.Unmarshal(raw, &filter); err != nil {
+			t.Fatal(err)
+		}
+		err = ValidateView("ci", &UpsertRequest{Name: "v", FilterSpec: filter})
+		if !errors.As(err, &fe) || fe.Field != "filter_spec."+c.field || fe.Status != http.StatusUnprocessableEntity {
+			t.Errorf("saved view %+v: %v, want a 422 field error on filter_spec.%s", c.spec, err, c.field)
+		}
+	}
+	const id = "00000000-0000-4000-8000-0000000000aa"
+	valid := FilterSpec{UpstreamOf: id, DownstreamOf: id, ClientID: id, LocationID: id,
+		Where: mustAST(t, `{"field": "attributes.ram_gb", "op": "gte", "value": 16}`)}
+	if err := valid.Validate("ci"); err != nil {
+		t.Errorf("valid spec: %v", err)
 	}
 }

@@ -2,6 +2,7 @@ package savedview
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,8 +11,9 @@ import (
 )
 
 // ValidateView checks a view against VIE-01: the filter (its AST in
-// where), the sort keys and columns are fields of the entity kind, sort
-// directions are asc or desc, role ids are UUIDs.
+// where and its ids, FilterSpec.Validate), the sort keys and columns are
+// fields of the entity kind, sort directions are asc or desc, role ids are
+// UUIDs.
 func ValidateView(entityKind string, req *UpsertRequest) error {
 	if entityKind == "" {
 		entityKind = "ci"
@@ -28,10 +30,12 @@ func ValidateView(entityKind string, req *UpsertRequest) error {
 		if err = json.Unmarshal(raw, &spec); err != nil {
 			return &api.FieldError{Field: "filter_spec", Message: "not a filter spec: " + err.Error(), Status: http.StatusUnprocessableEntity}
 		}
-		if spec.Where != nil {
-			if err = spec.Where.Validate(entityKind); err != nil {
-				return &api.FieldError{Field: "filter_spec.where", Message: err.Error(), Status: http.StatusUnprocessableEntity}
+		if err = spec.Validate(entityKind); err != nil {
+			var fe *api.FieldError
+			if errors.As(err, &fe) {
+				return &api.FieldError{Field: "filter_spec." + fe.Field, Message: fe.Message, Status: fe.Status}
 			}
+			return err
 		}
 	}
 	for i, key := range req.Sort {

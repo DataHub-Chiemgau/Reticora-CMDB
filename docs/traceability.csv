@@ -609,3 +609,4 @@ SEC-11;[Q];A;tests/ci-config.test.sh;WP-389
 TST-04;[Q];A;tests/ci-config.test.sh;WP-389
 TEC-15;[B];A;tests/install-signature.test.sh;WP-388
 MON-02;[B];C;backend/internal/monitoring/ci_metrics_integration_test.go;WP-402
+SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/ast_integration_test.go;WP-405
