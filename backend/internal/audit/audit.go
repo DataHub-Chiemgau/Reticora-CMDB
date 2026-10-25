@@ -2,6 +2,7 @@
 package audit
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -80,13 +82,13 @@ var GenesisHash = strings.Repeat("0", 64)
 //
 //	hash = SHA-256(previous_hash || SHA-256(canonical JSON))
 //
-// over the binary values, hex-encoded. The canonical JSON is the
-// serialization of the persisted row, identical to the database function
-// audit_entry_hash (migration 000117): organization_id and seq first, a
-// microsecond-precision RFC3339 UTC timestamp, plain ids and the stored
-// JSONB changes payload. Because the BEFORE INSERT trigger computes the
-// hash from the stored columns, verification over the stored row always
-// reproduces the stored hash.
+// over the binary values (the canonical JSON as UTF-8), hex-encoded. The
+// canonical JSON is the serialization of the persisted row, identical to the
+// database function audit_entry_hash (migration 000158): organization_id and
+// seq first, a microsecond-precision RFC3339 UTC timestamp, plain ids and the
+// stored changes payload in its jsonb text form. Because the BEFORE INSERT
+// trigger computes the hash from the stored columns, verification over the
+// stored row always reproduces the stored hash.
 func ComputeHash(entry *Entry) string {
 	payload := canonicalHashPayload(
 		entry.OrganizationID,
@@ -114,49 +116,185 @@ func ComputeHash(entry *Entry) string {
 }
 
 // canonicalHashPayload builds the canonical JSON hashed both here and in
-// audit_entry_hash: a JSON object with fixed key order where `changes` is the
-// compact JSON serialization of the payload (jsonb-normalized on write).
+// audit_entry_hash: a JSON object with fixed key order whose strings are
+// escaped like to_jsonb(text)::text and where `changes` is the payload in its
+// jsonb text form (jsonbText).
 func canonicalHashPayload(orgID string, seq int64, timestamp, actorID, actorType, action, resourceType, resourceID string,
 	changes map[string]interface{}, source, requestID, correlationID string) string {
 	changesJSON := "{}"
 	if changes != nil {
-		if b, err := json.Marshal(changes); err == nil {
-			changesJSON = string(b)
+		if text, err := jsonbText(changes); err == nil {
+			changesJSON = text
 		}
-	}
-	q := func(s string) string {
-		b, err := json.Marshal(s)
-		if err != nil {
-			return `""`
-		}
-		return string(b)
 	}
 	var sb strings.Builder
 	sb.WriteString(`{"organization_id":`)
-	sb.WriteString(q(orgID))
+	writeJSONBString(&sb, orgID)
 	sb.WriteString(`,"seq":`)
 	sb.WriteString(strconv.FormatInt(seq, 10))
 	sb.WriteString(`,"timestamp":`)
-	sb.WriteString(q(timestamp))
+	writeJSONBString(&sb, timestamp)
 	sb.WriteString(`,"actor_id":`)
-	sb.WriteString(q(actorID))
+	writeJSONBString(&sb, actorID)
 	sb.WriteString(`,"actor_type":`)
-	sb.WriteString(q(actorType))
+	writeJSONBString(&sb, actorType)
 	sb.WriteString(`,"action":`)
-	sb.WriteString(q(action))
+	writeJSONBString(&sb, action)
 	sb.WriteString(`,"resource_type":`)
-	sb.WriteString(q(resourceType))
+	writeJSONBString(&sb, resourceType)
 	sb.WriteString(`,"resource_id":`)
-	sb.WriteString(q(resourceID))
+	writeJSONBString(&sb, resourceID)
 	sb.WriteString(`,"changes":`)
 	sb.WriteString(changesJSON)
 	sb.WriteString(`,"source":`)
-	sb.WriteString(q(source))
+	writeJSONBString(&sb, source)
 	sb.WriteString(`,"request_id":`)
-	sb.WriteString(q(requestID))
+	writeJSONBString(&sb, requestID)
 	sb.WriteString(`,"correlation_id":`)
-	sb.WriteString(q(correlationID))
+	writeJSONBString(&sb, correlationID)
 	sb.WriteString(`}`)
+	return sb.String()
+}
+
+// jsonbText returns v as PostgreSQL prints it once the recorder stored its
+// JSON encoding as jsonb (jsonb::text): object keys ordered by byte length,
+// then bytewise; ", " between members and elements, ": " after a key;
+// strings escaped like escape_json, numbers as numeric prints them.
+func jsonbText(v any) (string, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var generic any
+	if err := dec.Decode(&generic); err != nil {
+		return "", err
+	}
+	var sb strings.Builder
+	writeJSONB(&sb, generic)
+	return sb.String(), nil
+}
+
+func writeJSONB(sb *strings.Builder, v any) {
+	switch x := v.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Slice(keys, func(i, j int) bool {
+			if len(keys[i]) != len(keys[j]) {
+				return len(keys[i]) < len(keys[j])
+			}
+			return keys[i] < keys[j]
+		})
+		sb.WriteByte('{')
+		for i, k := range keys {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			writeJSONBString(sb, k)
+			sb.WriteString(": ")
+			writeJSONB(sb, x[k])
+		}
+		sb.WriteByte('}')
+	case []any:
+		sb.WriteByte('[')
+		for i, e := range x {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			writeJSONB(sb, e)
+		}
+		sb.WriteByte(']')
+	case string:
+		writeJSONBString(sb, x)
+	case json.Number:
+		sb.WriteString(numericText(string(x)))
+	case bool:
+		sb.WriteString(strconv.FormatBool(x))
+	default:
+		sb.WriteString("null")
+	}
+}
+
+// writeJSONBString writes s as a JSON string escaped like PostgreSQL's
+// escape_json: \b \f \n \r \t \" \\, other control characters as \u00xx,
+// everything else (also non-ASCII, <, >, &) unchanged.
+func writeJSONBString(sb *strings.Builder, s string) {
+	const hexDigits = "0123456789abcdef"
+	sb.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '\b':
+			sb.WriteString(`\b`)
+		case '\f':
+			sb.WriteString(`\f`)
+		case '\n':
+			sb.WriteString(`\n`)
+		case '\r':
+			sb.WriteString(`\r`)
+		case '\t':
+			sb.WriteString(`\t`)
+		case '"':
+			sb.WriteString(`\"`)
+		case '\\':
+			sb.WriteString(`\\`)
+		default:
+			if c < 0x20 {
+				sb.WriteString(`\u00`)
+				sb.WriteByte(hexDigits[c>>4])
+				sb.WriteByte(hexDigits[c&0xf])
+			} else {
+				sb.WriteByte(c)
+			}
+		}
+	}
+	sb.WriteByte('"')
+}
+
+// maxNumericWeight is the most digits before the decimal point a numeric
+// holds; jsonb refuses larger numbers.
+const maxNumericWeight = 131072
+
+// numericText prints a JSON number like PostgreSQL's numeric: in decimal
+// notation, with as many digits after the point as the input has minus its
+// exponent, and zero without a sign.
+func numericText(n string) string {
+	negative := strings.HasPrefix(n, "-")
+	mantissa, exponent := strings.TrimPrefix(n, "-"), 0
+	if i := strings.IndexAny(mantissa, "eE"); i >= 0 {
+		e, err := strconv.Atoi(mantissa[i+1:])
+		if err != nil || e > maxNumericWeight || e < -maxNumericWeight {
+			return n
+		}
+		mantissa, exponent = mantissa[:i], e
+	}
+	intPart, fraction, _ := strings.Cut(mantissa, ".")
+	digits := intPart + fraction
+	point := len(intPart) + exponent
+	scale := max(len(fraction)-exponent, 0)
+	if point < 0 {
+		digits = strings.Repeat("0", -point) + digits
+		point = 0
+	}
+	if missing := point + scale - len(digits); missing > 0 {
+		digits += strings.Repeat("0", missing)
+	}
+	var sb strings.Builder
+	if negative && strings.Trim(digits, "0") != "" {
+		sb.WriteByte('-')
+	}
+	if whole := strings.TrimLeft(digits[:point], "0"); whole != "" {
+		sb.WriteString(whole)
+	} else {
+		sb.WriteByte('0')
+	}
+	if scale > 0 {
+		sb.WriteByte('.')
+		sb.WriteString(digits[point : point+scale])
+	}
 	return sb.String()
 }
 

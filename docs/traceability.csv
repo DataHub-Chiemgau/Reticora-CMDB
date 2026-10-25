@@ -656,3 +656,6 @@ GATE-02;[Q];D;backend/internal/tenant/rls/ci_decorator_chain_integration_test.go
 DIS-02;[B], Profilliste (V);D;backend/internal/discovery/ingest_review_integration_test.go;WP-417
 COL-04;[B];D;collector/collectorcmd/lifecycle_test.go;WP-414
 DIS-08;[Q];D;collector/collectorcmd/natsconn_test.go;WP-414
+AUD-04;[B];B;backend/internal/audit/pg_roundtrip_integration_test.go;WP-423
+CI-03;[B];B;backend/internal/ci/special_chars_integration_test.go;WP-423
+MET-11;B/G1, Teil P2/G2;B;backend/internal/ci/special_chars_integration_test.go;WP-423

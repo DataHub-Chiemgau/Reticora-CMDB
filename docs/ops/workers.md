@@ -86,6 +86,33 @@ retention run (migration 000119). A soft-deleted CI that is still referenced
 (TimescaleDB policy, 400 days), logs (30 days) and backups (35 days) expire
 where they are kept.
 
+### Re-chaining with migration 000158 (AUD-04)
+
+Migration 000158 makes `audit_entry_hash` hash the canonical JSON as UTF-8
+(WP-423). Entries with a backslash in their canonical JSON were hashed
+differently before, so the migration re-chains each organization's chain in
+seq order, in batches of 1000, from its first such entry; chains without one
+keep their hashes. The re-chain stops at an entry that was not intact before
+(changed, missing or wrongly linked), so `audit-verify` still reports that
+break. The migration runs in one transaction and holds a SHARE ROW EXCLUSIVE
+lock on `audit_log`: audited writes wait until it has finished, reads go on.
+
+Run time for 1,000,000 entries of one organization (PostgreSQL 16.15 with
+TimescaleDB 2.31.0, 4 shared vCPUs, about 0.7 kB of changes per entry):
+
+| Case | Up | Down |
+|---|---|---|
+| No entry with a backslash (every hash is checked, none rewritten) | about 40 s | about 45 s |
+| Backslash in the first entry (all 1,000,000 entries re-chained) | 2 min 29 s | 2 min 35 s |
+
+The time grows linearly with the number of entries. Every re-chained entry
+gets a new row version, so `audit_log` needs up to its size again in disk
+space until autovacuum has run. Check the chains afterwards with
+`audit-verify -all`. The down migration re-chains back the same way; an entry
+with a quote or a control character, storable only since 000158, ends the
+re-chain of its organization, and the restored function cannot verify that
+chain.
+
 ## Key rotation (SEC-06)
 
 | Run | When | What |

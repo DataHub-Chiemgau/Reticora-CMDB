@@ -1048,9 +1048,8 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
 
   test('L10 an export job started in the UI completes and its download contains the CI', async () => {
     const page = w.page;
-    // A name with the CSV separator and umlauts must survive the export.
-    // (Double quotes are covered by L14: such a CI cannot even be stored.)
-    const name = `lc-export-${w.s} Müller; Rack 7`;
+    // A name with the CSV separator, double quotes and umlauts must survive the export.
+    const name = `lc-export-${w.s} Müller; "Rack 7"`;
     const ci = await newCI({ name, manufacturer: 'Exportwerk', serial_number: `SN-EXP-${w.s}` });
     const total = (await ok<List<CI>>('GET', '/cis?limit=1')).total;
 
@@ -1082,6 +1081,10 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     // EXP-01: UTF-8 with BOM, semicolon separated.
     expect([...bytes.subarray(0, 3)], 'UTF-8 BOM').toEqual([0xef, 0xbb, 0xbf]);
     const text = bytes.subarray(3).toString('utf8');
+    // RFC 4180: the field is quoted and a double quote inside it is doubled.
+    expect(text, 'the name is one quoted field with doubled quotes').toContain(
+      `;"${name.replace(/"/g, '""')}";`,
+    );
     const table = parseCsv(text, ';').filter((r) => r.length > 1 || r[0] !== '');
     const header = table[0] ?? [];
     expect(header, 'semicolon-separated header with the name column').toContain('name');
