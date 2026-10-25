@@ -118,7 +118,7 @@ Die Kanten zeigen die Priorität, keine harte Sperre: Ein WP darf beginnen, soba
 
 ### Stand der Entscheidungen
 
-Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-59) bis [E-95](entscheidungen.md#e-95)). Alle tragen eine Empfehlung als Übergangsregel, sodass kein WP gesperrt ist; widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst. Die WP-Blöcke nennen die Entscheidung im Feld „Entscheidungsbedarf“. Ausnahme: WP-388 (`t5-install-default`) beginnt erst, wenn E-69 mit Option 1 entschieden ist; bei Option 2 oder 3 entfällt es mit Vermerk. Unabhängig von Entscheidungen warten WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-455 (`t5-v2-ids`) auf die externen Lieferungen A-02, A-07 und A-11.
+Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-59) bis [E-95](entscheidungen.md#e-95)). Alle tragen eine Empfehlung als Übergangsregel, sodass kein WP gesperrt ist; widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst. Die WP-Blöcke nennen die Entscheidung im Feld „Entscheidungsbedarf“. Ausnahme war WP-388 (`t5-install-default`), das erst nach der Entscheidung von E-69 für Option 1 beginnen durfte; E-69 ist am 2026-10-21 mit Option 1 entschieden, WP-388 ist umgesetzt. Unabhängig von Entscheidungen warten WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-455 (`t5-v2-ids`) auf die externen Lieferungen A-02, A-07 und A-11.
 
 ### Alle Arbeitspakete
 
@@ -3598,7 +3598,7 @@ TEC-15;[B];A;tests/install-signature.test.sh;WP-387
 COL-06;[B], Air-Gapped [O];A;tests/install-signature.test.sh;WP-387
 ```
 
-**Entscheidungsbedarf:** [E-31](../entscheidungen.md#e-31); [E-69](entscheidungen.md#e-69) TEC-15: Installationsquelle für die Signaturprüfung vor der Installation (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-31](../entscheidungen.md#e-31); [E-69](entscheidungen.md#e-69) TEC-15: Installationsquelle für die Signaturprüfung vor der Installation (entschieden: Option 1, Auftraggeber 2026-10-21)
 
 **Nicht Bestandteil:** Wechsel des Standards auf signierte Release-Artefakte (WP-388 (`t5-install-default`)); Echt-cosign-Nachweis gegen ein veröffentlichtes Release (WP-545 (`t5-release-evidence`)); Offline-Bundle für Air-Gapped ([O], INS-08).
 
@@ -3653,7 +3653,7 @@ COL-06;[B], Air-Gapped [O];A;tests/install-signature.test.sh;WP-387
 TEC-15;[B];A;tests/install-signature.test.sh;WP-388
 ```
 
-**Entscheidungsbedarf:** [E-69](entscheidungen.md#e-69) TEC-15: Installationsquelle für die Signaturprüfung vor der Installation (offen, Empfehlung als Übergangsregel); [E-31](../entscheidungen.md#e-31)
+**Entscheidungsbedarf:** [E-69](entscheidungen.md#e-69) TEC-15: Installationsquelle für die Signaturprüfung vor der Installation (entschieden: Option 1, Auftraggeber 2026-10-21); [E-31](../entscheidungen.md#e-31)
 
 **Nicht Bestandteil:** Offline-Bundle für Air-Gapped ([O], INS-08); Lauf des Jobs release-mode auf dem RC-Tag (WP-595 (`t5-rc-evidence`)).
 
@@ -3686,7 +3686,7 @@ TEC-15;[B];A;tests/install-signature.test.sh;WP-388
 - [ ] Die image-scan-Matrix enthält {image: postgres, context: deploy/docker-compose/postgres, dockerfile: deploy/docker-compose/postgres/Dockerfile}; release.yml scannt jedes Image vor dem Push mit derselben Trivy-Schwelle (Critical/High mit verfügbarem Fix blockieren, E-31).
 - [ ] Retest F-124: Strukturtest tests/ci-config.test.sh (neu, im CI-Job gate ausgeführt) übernimmt den Fall image_scan_coverage und ist grün; Negativfall mit Fixture (Release-Eintrag ohne Scan-Eintrag) → FAIL; der CI-Lauf des PR zeigt das Artefakt trivy-postgres.
 - [ ] F-284: scripts/ci/check-scan-exceptions.sh läuft vor govulncheck, npm-audit und Trivy und verlangt je Nicht-Kommentarzeile von security/scan-exceptions.txt exp:, since:<Datum> und sev:critical|high mit exp <= since + 7 Tage (critical) bzw. + 30 Tage (high); Fälle in tests/ci-config.test.sh: Zeile ohne exp: → FAIL, High mit exp > since + 30 Tage → FAIL, gültige Zeile → ok.
-- [ ] F-291: Das Dockerfile pinnt TIMESCALE_IMAGE per Version und Digest (2.17.2-pg16 wie in CI) und prüft den pgBackRest-Tarball per sha256 (ARG PGBACKREST_SHA256); statischer Fall in tests/ci-config.test.sh; CI-Image-Build grün.
+- [ ] F-291: Das Dockerfile pinnt TIMESCALE_IMAGE per Version und Digest (Version nach [E-96](entscheidungen.md#e-96): 2.31.0-pg16, dieselbe Referenz in CI und Deploy) und prüft den pgBackRest-Tarball per sha256 (ARG PGBACKREST_SHA256); statischer Fall in tests/ci-config.test.sh; CI-Image-Build grün.
 - [ ] F-294: docs/README.md nennt alle vier signierten Images inkl. reticora-postgres; docs/security/abhaengigkeitsscans.md beschreibt Matrix, Ausnahmeformat und SLA-Prüfung.
 - [ ] Ratchet: Fall image_scan_coverage aus tests/audit/ops-config.test.sh entfernt (ist es der letzte, wird die Datei gelöscht), Eintrag aus tests/audit/expected-failures.txt entfernt. Regression: Jobs govulncheck, npm-audit, image-scan und gate grün.
 
@@ -3718,7 +3718,7 @@ SEC-11;[Q];A;tests/ci-config.test.sh;WP-389
 TST-04;[Q];A;tests/ci-config.test.sh;WP-389
 ```
 
-**Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01); [E-31](../entscheidungen.md#e-31)
+**Entscheidungsbedarf:** [E-01](../entscheidungen.md#e-01); [E-31](../entscheidungen.md#e-31); [E-96](entscheidungen.md#e-96) TimescaleDB-Version des Datenbank-Images und Funde seines Basisimages (entschieden: Option 2, Auftraggeber 2026-10-21)
 
 **Nicht Bestandteil:** Scan-Läufe auf dem Release-Kandidaten (WP-595 (`t5-rc-evidence`)); Bewertung der Dev-Advisories im Review (WP-452 (`t5-review-g1`)).
 
@@ -16150,7 +16150,7 @@ GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-595
 INS-01;[Q];G1;tests/rep01-structure.test.sh;WP-595
 ```
 
-**Entscheidungsbedarf:** [E-27](../entscheidungen.md#e-27); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel); [E-69](entscheidungen.md#e-69) TEC-15: Installationsquelle für die Signaturprüfung vor der Installation (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-27](../entscheidungen.md#e-27); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel); [E-69](entscheidungen.md#e-69) TEC-15: Installationsquelle für die Signaturprüfung vor der Installation (entschieden: Option 1, Auftraggeber 2026-10-21)
 
 **Nicht Bestandteil:** Lieferungen A-02, A-07, A-11 (WP-455 (`t5-v2-ids`), WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`)); grünes gate-final auf dem geprüften Commit, Verweise auf `audit/g1-reaudit/` und Gate-Entscheidung G1 (WP-600 (`k-gate`)); Wiederholung aller Retests (WP-596 (`k-reaudit-1`) bis WP-598 (`k-reaudit-3`), WP-599 (`k-audit-ext`)).
 

@@ -16,6 +16,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -663,7 +664,7 @@ func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *Enrollmen
 // the read-only system flag (the hash is the credential). The consuming
 // UPDATE … WHERE used_at IS NULL … RETURNING lets concurrent enrollments
 // with one code succeed exactly once; a failed registration leaves the
-// code unused.
+// code unused and writes no collector.enrolled.
 func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *Collector, issue CertIssuer) (*IssuedCert, error) {
 	hash := enrollmentCodeHash(rawCode)
 	var orgID string
@@ -716,14 +717,21 @@ func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *C
 			codeID, c.ID); uerr != nil {
 			return fmt.Errorf("record enrolled collector: %w", uerr)
 		}
-		if issue == nil {
-			return nil
+		if issue != nil {
+			var ierr error
+			if cert, ierr = issue(ctx, orgID, c.ID); ierr != nil {
+				return ierr
+			}
+			if rerr := recordCertificateTx(ctx, tx, orgID, c, cert); rerr != nil {
+				return rerr
+			}
 		}
-		var ierr error
-		if cert, ierr = issue(ctx, orgID, c.ID); ierr != nil {
-			return ierr
-		}
-		return recordCertificateTx(ctx, tx, orgID, c, cert)
+		// collector.enrolled (EVT-02) commits with the collector, after its
+		// other writes; the data leaves out the configuration.
+		_, eerr := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.CollectorEnrolled, EntityID: c.ID,
+			Data: map[string]any{"id": c.ID, "name": c.Name, "version": c.Version, "client_id": c.ClientID, "site_id": c.SiteID,
+				"status": c.Status, "cert_fingerprint": c.CertFingerprint, "cert_not_after": c.CertNotAfter}})
+		return eerr
 	})
 	return cert, err
 }

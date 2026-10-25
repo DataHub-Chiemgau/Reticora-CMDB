@@ -9,7 +9,7 @@
  * provenance that makes an edge trustworthy: where it came from and whether a
  * human has verified it.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ApiError, verificationStates } from '../../api/client';
@@ -67,24 +67,36 @@ export function verificationBadgeVariant(
 
 export function CIRelationshipsCard({ ciId }: { ciId: string }) {
   const { t } = useTranslation();
-  const relationshipsQuery = useCIRelationships(ciId);
-  const createRelationship = useCreateRelationship(ciId);
-  const updateRelationship = useUpdateRelationship(ciId);
-  const deleteRelationship = useDeleteRelationship(ciId);
-
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<Relationship | null>(null);
 
-  const mutationError = (createRelationship.error ||
-    updateRelationship.error ||
-    deleteRelationship.error) as Error | null;
+  const relationshipsQuery = useCIRelationships(ciId);
+  const createRelationship = useCreateRelationship(ciId, {
+    onCreated: () => setShowCreate(false),
+  });
+  const updateRelationship = useUpdateRelationship(ciId);
+  const deleteRelationship = useDeleteRelationship(ciId);
+  // One create at a time (F-314): a submit while a create is pending is
+  // dropped. The ref holds before the pending state has rendered and
+  // disabled the button, e.g. for two clicks in one task.
+  const creating = useRef(false);
+
+  // A failed create is shown in its dialog.
+  const mutationError = (updateRelationship.error || deleteRelationship.error) as Error | null;
 
   const relationships = relationshipsQuery.data?.data ?? [];
 
   return (
     <Card title={t('ci.relationships')}>
       <div className="mb-3 flex justify-end">
-        <Button size="sm" variant="secondary" onClick={() => setShowCreate(true)}>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => {
+            createRelationship.reset();
+            setShowCreate(true);
+          }}
+        >
           + {t('relationship.add', 'Beziehung hinzufügen')}
         </Button>
       </div>
@@ -196,7 +208,15 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
         ciId={ciId}
         pending={createRelationship.isPending}
         error={createRelationship.error as Error | null}
-        onSubmit={(data, done) => createRelationship.mutate(data, { onSuccess: done })}
+        onSubmit={(data) => {
+          if (creating.current) return;
+          creating.current = true;
+          createRelationship.mutate(data, {
+            onSettled: () => {
+              creating.current = false;
+            },
+          });
+        }}
       />
 
       <EditRelationshipModal
@@ -216,17 +236,14 @@ interface CreateModalProps {
   ciId: string;
   pending: boolean;
   error: Error | null;
-  onSubmit: (
-    data: {
-      source_ci_id: string;
-      target_ci_id: string;
-      rel_type: string;
-      source: string;
-      verification_state: string;
-      notes?: string;
-    },
-    done: () => void,
-  ) => void;
+  onSubmit: (data: {
+    source_ci_id: string;
+    target_ci_id: string;
+    rel_type: string;
+    source: string;
+    verification_state: string;
+    notes?: string;
+  }) => void;
 }
 
 function CreateRelationshipModal({
@@ -242,8 +259,24 @@ function CreateRelationshipModal({
   const [relType, setRelType] = useState<string>(relTypeOptions[0] ?? 'connected_to');
   const [direction, setDirection] = useState<'outgoing' | 'incoming'>('outgoing');
   const [notes, setNotes] = useState('');
+  // The form starts empty whenever the dialog opens.
+  const [shown, setShown] = useState(open);
+  if (open !== shown) {
+    setShown(open);
+    if (open) {
+      setTargetId('');
+      setNotes('');
+    }
+  }
 
   const violations = error instanceof ApiError ? error.violationsByField() : {};
+  // An endpoint the caller cannot see, foreign or unknown, is refused with
+  // 422 on source_ci_id or target_ci_id (F-145); the dialog names it at the
+  // CI ID it asks for, in the UI language.
+  const endpointNotFound =
+    violations.source_ci_id || violations.target_ci_id
+      ? t('relationship.ciNotFound', 'Kein CI mit dieser ID gefunden.')
+      : undefined;
 
   return (
     <Modal
@@ -257,24 +290,17 @@ function CreateRelationshipModal({
           e.preventDefault();
           const trimmed = targetId.trim();
           if (!trimmed) return;
-          onSubmit(
-            {
-              // A relationship created here is a human assertion, so it is
-              // recorded as manual and pre-verified: the operator entering it
-              // is the verification.
-              source_ci_id: direction === 'outgoing' ? ciId : trimmed,
-              target_ci_id: direction === 'outgoing' ? trimmed : ciId,
-              rel_type: relType,
-              source: 'manual',
-              verification_state: 'verified',
-              notes: notes.trim() || undefined,
-            },
-            () => {
-              setTargetId('');
-              setNotes('');
-              onOpenChange(false);
-            },
-          );
+          onSubmit({
+            // A relationship created here is a human assertion, so it is
+            // recorded as manual and pre-verified: the operator entering it
+            // is the verification.
+            source_ci_id: direction === 'outgoing' ? ciId : trimmed,
+            target_ci_id: direction === 'outgoing' ? trimmed : ciId,
+            rel_type: relType,
+            source: 'manual',
+            verification_state: 'verified',
+            notes: notes.trim() || undefined,
+          });
         }}
       >
         <Select
@@ -298,7 +324,7 @@ function CreateRelationshipModal({
           value={targetId}
           required
           onChange={(e) => setTargetId(e.target.value)}
-          error={violations.target_ci_id || violations.source_ci_id}
+          error={endpointNotFound}
         />
         <Input
           label={t('relationship.notes', 'Notiz')}

@@ -1047,6 +1047,7 @@
     "incoming": "Quelle → dieses CI",
     "type": "Beziehungstyp",
     "targetCi": "CI-ID der Gegenstelle",
+    "ciNotFound": "Kein CI mit dieser ID gefunden.",
     "notes": "Notiz",
     "verificationState": "Prüfstatus",
     "state": {

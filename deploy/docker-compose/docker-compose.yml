@@ -23,9 +23,9 @@
 # To run with prebuilt registry images instead, set RETICORA_SERVER_IMAGE /
 # RETICORA_FRONTEND_IMAGE / RETICORA_POSTGRES_IMAGE in .env and rename
 # docker-compose.override.yml to docker-compose.override.yml.disabled.
-# install-cloud.sh does this in its release mode (RETICORA_IMAGE_REGISTRY):
-# it verifies the signed release images with cosign and pins them by digest
-# (TEC-15).
+# install-cloud.sh does this in its release mode, the default (E-69): it
+# verifies the signed release images with cosign and pins them by digest
+# (TEC-15); --build-from-source builds them with the override instead.
 
 services:
   postgres:

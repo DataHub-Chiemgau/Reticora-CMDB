@@ -601,3 +601,10 @@ NTF-01;[B];B;backend/internal/notify/channel_secret_test.go;WP-399
 TEC-13;[B];B;backend/internal/notify/channel_secret_test.go;WP-399
 REP-01;[B];B;backend/internal/notify/channel_test.go;WP-399
 SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-399
+EVT-02;[B];B;backend/internal/server/domain_events_integration_test.go;WP-400
+EVT-01;[B];B;backend/internal/server/domain_events_integration_test.go;WP-400
+REL-02;[B];B;backend/internal/relationship/relationship_scope_integration_test.go;WP-401
+REL-04;[B];B;backend/internal/relationship/relationship_scope_integration_test.go;WP-401
+SEC-11;[Q];A;tests/ci-config.test.sh;WP-389
+TST-04;[Q];A;tests/ci-config.test.sh;WP-389
+TEC-15;[B];A;tests/install-signature.test.sh;WP-388

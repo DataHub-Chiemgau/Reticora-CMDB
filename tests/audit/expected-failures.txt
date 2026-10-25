@@ -30,7 +30,6 @@ go;backend/internal/middleware;TestAuditT2SuccessfulRefreshDoesNotConsumePreAuth
 go;backend/internal/rack;TestAuditDefectRackHeightNotBelowMounts;F-140
 go;backend/internal/relationship;TestAuditCleanupCronScopeDeadline;F-111
 go;backend/internal/server;TestAuditDefectDiscoveryJobInGenericJobModel;F-146
-go;backend/internal/server;TestAuditDefectDomainEventsEmitted;F-043
 go;backend/internal/server;TestAuditDefectManualEdgeSurvivesInterfaceSync;F-042
 go;backend/internal/server;TestAuditDefectRouteAuditFailureLeavesNoUnauditedMutation;F-149
 go;backend/internal/server;TestAuditDefectRouteAuditStoresOldAndNewValues;F-148
@@ -86,7 +85,6 @@ sh;tests/audit/install-cloud-acme.test.sh;acme;F-033 F-034
 sh;tests/audit/log-retention.test.sh;NFR-06 logs 30 days;F-150
 sh;tests/audit/ops-config.test.sh;alertmanager_amtool;F-132
 sh;tests/audit/ops-config.test.sh;alertmanager_smtp;F-132
-sh;tests/audit/ops-config.test.sh;image_scan_coverage;F-124
 sh;tests/audit/ops-config.test.sh;k8s_wal_archive;F-128
 sh;tests/audit/ops-config.test.sh;outage_smtp;F-135
 sh;tests/audit/ops-config.test.sh;restore_rpo_window;F-130
@@ -102,7 +100,6 @@ e2e-real;chromium:frontend/e2e-real/bulk-jobs-export.spec.ts;Bulk operations, jo
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L05 clearing a field in the edit form removes the stored value (merge patch);F-081
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L05b PATCH is a JSON merge patch: null removes a typed field, absent members stay;F-080
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L07 the audit viewer shows the CI change with time, actor, action and object, the chain verifies;F-078
-e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L08 a relationship created on the detail page shows as neighbour and in the impact view along its direction;F-314
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L10b the CSV export button of the CMDB list downloads the CIs of the list;F-077
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L12b two sessions edit different fields of the same CI: no change is lost and the edits merge field by field;F-228
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L14 names and fields with quotes or backslashes are stored like any other text (API create, edit form);F-045
@@ -113,6 +110,5 @@ e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks 
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;05 an invitation sends the invitee an e-mail (NTF-05 event "Einladung");F-041
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles;F-201
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09c viewer UI: saving a webhook is refused visibly, not silently;F-062
-e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T14 B’s relationship to A’s CI is rejected with a client error and nothing is stored;F-145
 e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T15 the topology rooted at A’s CI answers B with "not found", like neighbours and impact;F-161
 e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T17 A’s audit viewer shows when and on which object each of A’s entries happened;F-078

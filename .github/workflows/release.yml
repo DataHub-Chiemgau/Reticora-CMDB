@@ -154,6 +154,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # SEC-11 (WP-389): Trivy reads the exceptions file below.
+      - name: Check scan exceptions (SEC-11 SLA)
+        run: ./scripts/ci/check-scan-exceptions.sh
+
       - uses: sigstore/cosign-installer@v3.7.0
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
@@ -164,6 +168,50 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      # Scan before the push (WP-389, SEC-11, E-31): the image is built into
+      # the local Docker store and scanned with the threshold of the ci.yml
+      # image-scan job (Critical/High with an available fix block). The push
+      # step builds from the same cache; the next step checks that the pushed
+      # image has the scanned layers.
+      - name: Build the image for the scan
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          load: true
+          tags: ${{ env.REGISTRY }}/${{ matrix.image }}:${{ github.ref_name }}
+
+      - name: Scan image with Trivy
+        env:
+          IMAGE_TAG: ${{ env.REGISTRY }}/${{ matrix.image }}:${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          docker image inspect --format '{{json .RootFS.Layers}}' "$IMAGE_TAG" > "$RUNNER_TEMP/scanned-layers.json"
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/work" -w /work \
+            aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image \
+            --severity CRITICAL,HIGH --ignore-unfixed \
+            --ignorefile security/scan-exceptions.txt \
+            --format json --output "trivy-${{ matrix.image }}.json" \
+            --exit-code 1 \
+            "$IMAGE_TAG"
+
+      - name: Summarize findings
+        if: always()
+        run: |
+          if [ -s "trivy-${{ matrix.image }}.json" ]; then
+            jq -r '[.Results[]?.Vulnerabilities[]? | "\(.VulnerabilityID) \(.Severity) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)"] | unique | .[]' "trivy-${{ matrix.image }}.json"
+          fi
+
+      - name: Upload the scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-${{ matrix.image }}
+          path: trivy-${{ matrix.image }}.json
+          retention-days: 90
+
       - name: Build and push
         id: push
         uses: docker/build-push-action@v6
@@ -172,6 +220,16 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ env.REGISTRY }}/${{ matrix.image }}:${{ github.ref_name }}
+
+      - name: The pushed image is the scanned one
+        env:
+          IMAGE_TAG: ${{ env.REGISTRY }}/${{ matrix.image }}:${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$(docker image inspect --format '{{json .RootFS.Layers}}' "$IMAGE_TAG")" != "$(cat "$RUNNER_TEMP/scanned-layers.json")" ]; then
+            echo "::error::the pushed image differs from the scanned one; it is not signed"
+            exit 1
+          fi
 
       - name: Generate the image SBOM
         uses: anchore/sbom-action@v0.17.8

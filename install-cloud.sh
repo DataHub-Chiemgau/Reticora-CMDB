@@ -18,16 +18,21 @@
 # Re-running the script reuses the existing .env values as defaults and is
 # idempotent: existing volumes, keys and configuration are preserved.
 #
-# Release mode (RETICORA_IMAGE_REGISTRY set, TEC-15): reticora-server,
-# reticora-frontend and reticora-postgres are verified with 'cosign verify'
-# against the identity of the release workflow and pinned by digest in .env
-# before anything starts. Without a registry the images are built from this
-# checkout and are not signature-verified (default until E-69 is decided).
+# Release mode (TEC-15; the default per E-69, Option 1): the signed release
+# images reticora-server, reticora-frontend and reticora-postgres of the
+# release (--release, otherwise the release tag of this checkout or the
+# newest release) are verified with 'cosign verify' against the identity of
+# the release workflow and pinned by digest in .env before anything starts.
+# This checkout — compose file, realm, migrations — must be the signed source
+# of that release. --build-from-source builds the images from this checkout
+# instead; they are not signature-verified.
 #
 # Usage:
 #   ./install-cloud.sh                    interactive installation
 #   ./install-cloud.sh --non-interactive  use existing .env / defaults /
 #                                         generated secrets without prompting
+#   ./install-cloud.sh --release v1.2.3   the signed images of that release
+#   ./install-cloud.sh --build-from-source  local build, not signature-verified
 #
 set -euo pipefail
 
@@ -37,6 +42,17 @@ COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
 OVERRIDE_FILE="$COMPOSE_DIR/docker-compose.override.yml"
 ENV_FILE="$COMPOSE_DIR/.env"
 NON_INTERACTIVE=0
+# Release whose signed images are installed (empty: chosen in select_release).
+RELEASE="${RETICORA_RELEASE:-}"
+# Registry of the signed images (empty: .env, otherwise RELEASE_REGISTRY).
+IMAGE_REGISTRY_OVERRIDE="${RETICORA_IMAGE_REGISTRY:-}"
+# E-69 (Option 1): the signed release artifacts are the default; the local
+# source build only with --build-from-source (RETICORA_BUILD_FROM_SOURCE=1).
+case "${RETICORA_BUILD_FROM_SOURCE:-0}" in
+    1) BUILD_FROM_SOURCE=1 ;;
+    0) BUILD_FROM_SOURCE=0 ;;
+    *) echo "RETICORA_BUILD_FROM_SOURCE must be 1 (build from source) or 0, not '$RETICORA_BUILD_FROM_SOURCE'" >&2; exit 2 ;;
+esac
 
 print_usage() {
     cat <<'EOF'
@@ -58,27 +74,41 @@ automatic renewal.
 Re-running the script reuses the existing .env values as defaults and is
 idempotent: existing volumes, keys and configuration are preserved.
 
-With RETICORA_IMAGE_REGISTRY (and RETICORA_IMAGE_TAG=v<version>) the signed
-release images are installed: verified with cosign before the start and
-pinned by digest. Without it the images are built from this checkout and are
-not signature-verified.
+By default the signed release images are installed: those of --release
+v<version>, otherwise of the release tag this checkout is on, otherwise of the
+newest release — verified with cosign before the start and pinned by digest.
+This checkout must be the signed source of that release (a git checkout of
+its tag, or its source tarball); ./install.sh --cloud --ref v<version>
+downloads it. --build-from-source builds the images from this checkout
+instead; they are not signature-verified.
 
 Usage:
   ./install-cloud.sh                    interactive installation
   ./install-cloud.sh --non-interactive  use existing .env / defaults /
                                         generated secrets without prompting
+  ./install-cloud.sh --release v1.2.3   the signed images of that release
+                                        (RETICORA_RELEASE; registry:
+                                        RETICORA_IMAGE_REGISTRY, default
+                                        ghcr.io/datahub-chiemgau)
+  ./install-cloud.sh --build-from-source  build the images from this checkout
+                                        — not signature-verified
+                                        (RETICORA_BUILD_FROM_SOURCE=1)
 EOF
 }
 
-for arg in "$@"; do
-    case "$arg" in
+while [ "$#" -gt 0 ]; do
+    case "$1" in
         --non-interactive) NON_INTERACTIVE=1 ;;
+        --build-from-source) BUILD_FROM_SOURCE=1 ;;
+        --release) [ "$#" -ge 2 ] || { echo "--release requires a version tag" >&2; exit 2; }; RELEASE="$2"; shift ;;
+        --release=*) RELEASE="${1#*=}" ;;
         -h|--help)
             print_usage
             exit 0
             ;;
-        *) echo "Unknown option: $arg" >&2; exit 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
+    shift
 done
 
 # ─── Output helpers ───────────────────────────────────────────────────────────
@@ -94,9 +124,17 @@ success() { printf '%s✔%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
 warn()    { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
 die()     { printf '%s✘ Error:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 
-# Platform, Docker/Compose and sizing checks (INS-07).
+# Platform, Docker/Compose and sizing checks (INS-07), signature verification
+# (TEC-15).
 # shellcheck source=install-preflight.sh
 . "$SCRIPT_DIR/install-preflight.sh"
+
+if [ -n "$RELEASE" ]; then
+    is_release_tag "$RELEASE" \
+        || die "--release expects a version tag v<version> of a signed release, not '$RELEASE'."
+    [ "$BUILD_FROM_SOURCE" != 1 ] \
+        || die "--release installs the signed images of a release, --build-from-source builds them from this checkout; use one of them."
+fi
 
 # ─── Generic helpers ──────────────────────────────────────────────────────────
 trim() {
@@ -476,7 +514,8 @@ RETICORA_FRONTEND_PORT=$RETICORA_FRONTEND_PORT
 RETICORA_SERVER_PORT=$RETICORA_SERVER_PORT
 RETICORA_KEYCLOAK_PORT=$RETICORA_KEYCLOAK_PORT
 
-# Source of prebuilt images (leave empty to build from this checkout)
+# Registry and release of the signed images (E-69: the default; both empty
+# when the images were built from this checkout with --build-from-source)
 RETICORA_IMAGE_REGISTRY=$RETICORA_IMAGE_REGISTRY
 RETICORA_IMAGE_TAG=$RETICORA_IMAGE_TAG
 # Signed release images, pinned by the digest that cosign verified (set by the
@@ -552,8 +591,8 @@ preflight() {
         die "Compose file not found at $COMPOSE_FILE — run this script from a full checkout, or use ./install.sh which downloads the sources for you."
     fi
 
-    if [ ! -f "$SCRIPT_DIR/backend/Dockerfile" ] && [ -z "$(env_get RETICORA_IMAGE_REGISTRY || true)" ]; then
-        warn "backend/Dockerfile not found; image build will fail unless RETICORA_IMAGE_REGISTRY points to prebuilt images."
+    if [ "$BUILD_FROM_SOURCE" = 1 ] && [ ! -f "$SCRIPT_DIR/backend/Dockerfile" ]; then
+        warn "backend/Dockerfile not found; the image build of --build-from-source will fail (it needs a full checkout)."
     fi
 }
 
@@ -728,14 +767,21 @@ collect_config() {
     def_port="$(env_get RETICORA_KEYCLOAK_PORT || true)"
     ask_validated RETICORA_KEYCLOAK_PORT "Host port for Keycloak" "${def_port:-8180}" valid_port
 
-    # ── Images ──
-    ask RETICORA_IMAGE_REGISTRY "Image registry for prebuilt images (empty = build locally)" "$(env_get RETICORA_IMAGE_REGISTRY || true)"
-    # Normalize a whitespace-only answer to empty so the summary shows
-    # "<local build>" and provide_images takes the local-build branch.
-    RETICORA_IMAGE_REGISTRY="$(trim "$RETICORA_IMAGE_REGISTRY")"
-    local def_tag
-    def_tag="$(env_get RETICORA_IMAGE_TAG || true)"
-    ask RETICORA_IMAGE_TAG "Image tag" "${def_tag:-latest}"
+    # ── Images (E-69, Option 1) ──
+    # Default: the signed release images, verified and pinned in
+    # provide_images; the release is chosen in select_release.
+    # --build-from-source builds them from this checkout instead.
+    if [ "$BUILD_FROM_SOURCE" = 1 ]; then
+        RETICORA_IMAGE_REGISTRY=""
+        RETICORA_IMAGE_TAG=""
+    else
+        local def_registry
+        def_registry="${IMAGE_REGISTRY_OVERRIDE:-$(env_get RETICORA_IMAGE_REGISTRY || true)}"
+        ask RETICORA_IMAGE_REGISTRY "Registry of the signed release images" "${def_registry:-$RELEASE_REGISTRY}"
+        RETICORA_IMAGE_REGISTRY="$(trim "$RETICORA_IMAGE_REGISTRY")"
+        RETICORA_IMAGE_REGISTRY="${RETICORA_IMAGE_REGISTRY:-$RELEASE_REGISTRY}"
+        RETICORA_IMAGE_TAG="$RELEASE"
+    fi
     # Set by provide_images from the verified digests (release mode only); a
     # pin of an earlier run is never reused unverified.
     RETICORA_SERVER_IMAGE=""
@@ -1243,53 +1289,84 @@ check_issuer_from_container() {
     success "OIDC issuer is reachable from the backend container"
 }
 
-# ─── Images: build / pull ─────────────────────────────────────────────────────
-# verify_release_image <image> <variable> — 'cosign verify' of
-# <registry>/<image>:<tag> against the identity of the release workflow (with
-# a version tag: of exactly that release). The signature must name <image>
-# (no other signed Reticora image under its name); <variable> is set to
-# <registry>/<image>@<digest> of the verified image.
-verify_release_image() {
-    local image="$1" ref out err digest
-    ref="$RETICORA_IMAGE_REGISTRY/$image:$RETICORA_IMAGE_TAG"
-    ensure_cosign
-    err="$(mktemp)"
-    if ! out="$("$COSIGN_BIN" verify "$ref" \
-        --certificate-identity-regexp "$(release_identity_regexp "$RETICORA_IMAGE_TAG")" \
-        --certificate-oidc-issuer "$RELEASE_OIDC_ISSUER" 2>"$err")"; then
-        tail -n 3 "$err" >&2
-        rm -f "$err"
-        die "Signature check failed: $ref is not signed by the release workflow of $RELEASE_REPOSITORY; nothing was started ($SIGNATURE_TROUBLESHOOTING)."
+# ─── Release: selection and source ────────────────────────────────────────────
+# select_release — E-69 (Option 1): the release whose signed images are
+# installed: --release (RETICORA_RELEASE), the release tag this checkout is
+# on, otherwise the newest release.
+select_release() {
+    [ "$BUILD_FROM_SOURCE" != 1 ] || return 0
+    local tag="$RELEASE"
+    if [ -z "$tag" ] && have_cmd git && [ -e "$SCRIPT_DIR/.git" ]; then
+        tag="$(git -C "$SCRIPT_DIR" describe --tags --exact-match HEAD 2>/dev/null)" || tag=""
+        is_release_tag "$tag" || tag=""
     fi
-    rm -f "$err"
-    digest="$(jq -r --arg image "$image" '[.[] | select((.critical.identity["docker-reference"] // "") | endswith("/" + $image))
-        | .critical.image["docker-manifest-digest"]] | unique | if length == 1 then .[0] else empty end' <<<"$out" 2>/dev/null)" || digest=""
-    [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] \
-        || die "Signature check failed: the verified signatures of $ref do not name $image with one digest; nothing was started ($SIGNATURE_TROUBLESHOOTING)."
-    printf -v "$2" '%s@%s' "$RETICORA_IMAGE_REGISTRY/$image" "$digest"
-    success "Signed image verified: $image@$digest"
+    [ -n "$tag" ] || latest_release_tag tag
+    RETICORA_IMAGE_TAG="$tag"
 }
 
+# verify_source_tree <dir> <tag> — every file of the signed source tarball of
+# release <tag> is unchanged in <dir> (a checkout without git). Files the
+# installer adds (.env, secrets, the rendered realm) are not part of it; the
+# release mode keeps the source-build override as .disabled.
+verify_source_tree() {
+    local tmp out override="deploy/docker-compose/docker-compose.override.yml"
+    tmp="$(mktemp -d)"
+    fetch_source_tarball "$2" "$tmp/source.tar.gz"
+    mkdir "$tmp/src"
+    tar -xzf "$tmp/source.tar.gz" -C "$tmp/src" --strip-components=1 \
+        || { rm -rf "$tmp"; die "Could not unpack the verified source tarball of $2."; }
+    (cd "$tmp/src" && find . -type f -print0 | sort -z | xargs -0 -r sha256sum) > "$tmp/files.sha256" \
+        || { rm -rf "$tmp"; die "Could not read the verified source tarball of $2."; }
+    if [ ! -e "$1/$override" ] && [ -e "$1/$override.disabled" ]; then
+        sed -i "s|  \./$override\$|  ./$override.disabled|" "$tmp/files.sha256"
+    fi
+    if ! out="$(cd "$1" && sha256sum -c --quiet "$tmp/files.sha256" 2>/dev/null)"; then
+        rm -rf "$tmp"
+        die "Source check failed: $1 is not the source of release $2 ($(printf '%s\n' "$out" | head -n 3 | tr '\n' ' ')…); nothing was installed ($SIGNATURE_TROUBLESHOOTING)."
+    fi
+    rm -rf "$tmp"
+    success "Source verified: $1 matches reticora-source-$2.tar.gz of the signed release"
+}
+
+# verify_release_checkout — release mode: the compose file, the realm and the
+# migrations come from this checkout, so it must be the signed source of the
+# release: a git checkout its commit (SOURCE_COMMIT), any other directory
+# every file of the signed source tarball. Before anything is written.
+verify_release_checkout() {
+    [ "$BUILD_FROM_SOURCE" != 1 ] || return 0
+    info "Checking that $SCRIPT_DIR is the signed source of release $RETICORA_IMAGE_TAG (compose file, realm, migrations; another checkout: ./install.sh --cloud --ref $RETICORA_IMAGE_TAG downloads it, --build-from-source installs this one unverified) …"
+    if have_cmd git && [ -e "$SCRIPT_DIR/.git" ]; then
+        verify_source_checkout "$SCRIPT_DIR" "$RETICORA_IMAGE_TAG"
+    else
+        verify_source_tree "$SCRIPT_DIR" "$RETICORA_IMAGE_TAG"
+    fi
+}
+
+# ─── Images: build / pull ─────────────────────────────────────────────────────
 provide_images() {
-    if [ -n "$RETICORA_IMAGE_REGISTRY" ]; then
-        # Release mode (TEC-15): only the signed release images, pinned in
-        # .env by the digest cosign verified; nothing is built locally, also
-        # not PostgreSQL. Disabling the source-build override removes every
-        # build: section, so compose can only use the pinned images.
+    if [ "$BUILD_FROM_SOURCE" != 1 ]; then
+        # Release mode (TEC-15, the default per E-69): only the signed release
+        # images, pinned in .env by the digest cosign verified; nothing is
+        # built locally, also not PostgreSQL. Disabling the source-build
+        # override removes every build: section, so compose can only use the
+        # pinned images.
+        if [ -z "$RETICORA_IMAGE_REGISTRY" ] || [ -z "$RETICORA_IMAGE_TAG" ]; then
+            die "No registry or release selected for the signed images; name the release with --release v<version>, or build from this checkout with --build-from-source."
+        fi
         if [ -f "$OVERRIDE_FILE" ]; then
             mv "$OVERRIDE_FILE" "$OVERRIDE_FILE.disabled"
         fi
         info "Verifying the signed release images from $RETICORA_IMAGE_REGISTRY (tag $RETICORA_IMAGE_TAG) …"
-        verify_release_image reticora-server RETICORA_SERVER_IMAGE
-        verify_release_image reticora-frontend RETICORA_FRONTEND_IMAGE
-        verify_release_image reticora-postgres RETICORA_POSTGRES_IMAGE
+        verify_release_image "$RETICORA_IMAGE_REGISTRY" reticora-server "$RETICORA_IMAGE_TAG" RETICORA_SERVER_IMAGE
+        verify_release_image "$RETICORA_IMAGE_REGISTRY" reticora-frontend "$RETICORA_IMAGE_TAG" RETICORA_FRONTEND_IMAGE
+        verify_release_image "$RETICORA_IMAGE_REGISTRY" reticora-postgres "$RETICORA_IMAGE_TAG" RETICORA_POSTGRES_IMAGE
         env_set RETICORA_SERVER_IMAGE "$RETICORA_SERVER_IMAGE"
         env_set RETICORA_FRONTEND_IMAGE "$RETICORA_FRONTEND_IMAGE"
         env_set RETICORA_POSTGRES_IMAGE "$RETICORA_POSTGRES_IMAGE"
         compose_cmd pull server frontend postgres || die "Pulling the verified images failed."
     else
-        # Local source build: make sure the build override is active. The
-        # images are not signature-verified (transition rule of E-69).
+        # Local source build (--build-from-source): make sure the build
+        # override is active. The images are not signature-verified.
         if [ -f "$OVERRIDE_FILE.disabled" ]; then
             mv "$OVERRIDE_FILE.disabled" "$OVERRIDE_FILE"
         fi
@@ -1896,6 +1973,11 @@ EOF
 main() {
     preflight
     collect_config
+    select_release
+    local image_source="<local build from this checkout (--build-from-source)>"
+    if [ "$BUILD_FROM_SOURCE" != 1 ]; then
+        image_source="$RETICORA_IMAGE_REGISTRY (signed release $RETICORA_IMAGE_TAG)"
+    fi
     echo
     info "Configuration:"
     cat <<EOF
@@ -1904,18 +1986,18 @@ main() {
   OIDC redirect:     $RETICORA_OIDC_REDIRECT_URL
   HTTPS (TLS):       ${RETICORA_TLS_DOMAIN:-<disabled — plain HTTP>}
   Ports:             UI=$RETICORA_FRONTEND_PORT API=$RETICORA_SERVER_PORT Keycloak=$RETICORA_KEYCLOAK_PORT
-  Image source:      ${RETICORA_IMAGE_REGISTRY:-<local build>} (tag $RETICORA_IMAGE_TAG)
+  Image source:      $image_source
 EOF
-    if [ -n "$RETICORA_IMAGE_REGISTRY" ]; then
-        info "Release mode: the images are verified with cosign (release workflow identity) and pinned by digest before the start."
+    if [ "$BUILD_FROM_SOURCE" != 1 ]; then
+        info "Release mode: the images are verified with cosign (release workflow identity) and pinned by digest before the start; this checkout must be the signed source of release $RETICORA_IMAGE_TAG."
     else
-        # Transition rule of E-69: the local source build stays the default.
-        warn "Local source build: the images are built from this checkout and are not signature-verified. RETICORA_IMAGE_REGISTRY with RETICORA_IMAGE_TAG=v<version> installs the signed release images ($SIGNATURE_TROUBLESHOOTING)."
+        warn "Local source build: the images are built from this checkout and are not signature-verified (--build-from-source). Without the switch the signed release images are installed ($SIGNATURE_TROUBLESHOOTING)."
     fi
     if is_tty; then
         confirm "Start the installation with these settings?" "yes" || die "Aborted by user."
     fi
 
+    verify_release_checkout
     write_env
     success "Environment written to $ENV_FILE"
     ensure_session_key

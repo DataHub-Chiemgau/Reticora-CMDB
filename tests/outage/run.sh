@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # run.sh — outage and backpressure suite (WP-104, OPS-06). Runs against an
-# installed Compose stack (./install.sh --cloud --non-interactive) and
+# installed Compose stack (./install.sh --cloud --non-interactive
+# --build-from-source, as in outage.yml) and
 # simulates the outage of every dependency:
 #
 #   postgres, nats, redis, minio (S3)  stopped for OUTAGE_SECONDS: /readyz

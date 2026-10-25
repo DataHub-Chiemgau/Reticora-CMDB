@@ -6,10 +6,8 @@
 #
 # Findings encoded (one case each):
 #   WP-004 (SEC-11) P2 "Released image reticora-postgres is never
-#          vulnerability-scanned" + gap high "Coverage of released images by
-#          the image scan is not checked": every Dockerfile of the release
-#          build-push matrix must be in the ci.yml image-scan (Trivy) matrix.
-#                                                          -> case image_scan_*
+#          vulnerability-scanned": fixed by WP-389; the case
+#          image_scan_coverage is in tests/ci-config.test.sh.
 #   WP-100 (NFR-05, OPS-04) P2 "K8s backup component provisions no WAL
 #          archiving": the prod overlay must configure WAL archiving
 #          (archive_mode / archive-push).                  -> case k8s_wal_archive
@@ -55,25 +53,6 @@ tool() { # tool <ENVVAR> <name>
     if [ -n "$v" ]; then printf '%s' "$v"; return 0; fi
     command -v "$2" 2>/dev/null
 }
-
-# ─── WP-004: every released image is scanned ────────────────────────────────
-scan_gap="$(python3 - <<'PY'
-import yaml
-rel = yaml.safe_load(open(".github/workflows/release.yml"))
-ci = yaml.safe_load(open(".github/workflows/ci.yml"))
-def matrix(job):
-    return [(e.get("dockerfile"), e.get("image")) for e in job["strategy"]["matrix"]["include"]]
-released = [m for job in rel["jobs"].values() if "strategy" in job and "include" in job["strategy"].get("matrix", {})
-            for m in matrix(job) if m[0]]
-scanned = {d for d, _ in matrix(ci["jobs"]["image-scan"])}
-print(" ".join(f"{img}({d})" for d, img in released if d not in scanned))
-PY
-)"
-if [ -z "$scan_gap" ]; then
-    ok "image_scan_coverage: every Dockerfile of the release image matrix is in the ci.yml image-scan matrix"
-else
-    fail "image_scan_coverage: every Dockerfile of the release image matrix is in the ci.yml image-scan matrix" "not scanned: $scan_gap"
-fi
 
 # ─── WP-100: WAL archiving in the Kubernetes production overlay ─────────────
 KUSTOMIZE_BIN="$(tool KUSTOMIZE kustomize || true)"

@@ -7,10 +7,6 @@
 //     WP-128 (REL-02, REL-05) P1 "Manual verified port-level edges are silently
 //     deleted when discovery removes an interface (ON DELETE CASCADE)".
 //     Gap (high): manual edges survive discovery's interface removal.
-//   - TestAuditDefectDomainEventsEmitted
-//     WP-136 (EVT-02) P1 "EVT-02 event types never emitted (relationship.created,
-//     collector.enrolled, review.resolved; relationship.removed only on
-//     discovery cleanup)". Gap (critical): producer test per EVT-02 type.
 //   - TestAuditDefectRouteAuditFailureLeavesNoUnauditedMutation
 //     WP-133 (WP table AUD-05, AUD-09; criterion "jede schreibende Route
 //     erzeugt Audit"; requirement texts AUD-04 capture through an outbox,
@@ -28,7 +24,9 @@
 // WP-396 and lives in ci_type_ref_integration_test.go;
 // TestAuditDefectNotificationAdministrationNeedsNotificationManage (WP-139,
 // WP-137, F-154) is fixed by WP-398 and lives in
-// notification_authz_integration_test.go.
+// notification_authz_integration_test.go;
+// TestAuditDefectDomainEventsEmitted (WP-136, F-043) is fixed by WP-400 and
+// lives in domain_events_integration_test.go.
 //
 // Retest:
 //
@@ -90,93 +88,6 @@ func TestAuditDefectManualEdgeSurvivesInterfaceSync(t *testing.T) {
 	if after != before {
 		t.Errorf("manual edge changed by discovery: %s → %s", before, after)
 	}
-}
-
-func TestAuditDefectDomainEventsEmitted(t *testing.T) {
-	e := t6NewEnv(t, "d5", nil)
-	f := e.F
-	bg := context.Background()
-	admin := t6As{f.OrgA, f.AppUser(t, f.OrgA, "audit-d5-admin"), identity.AllPermissions()}
-	outbox := func(typ, entity string) int {
-		return e.Count(t, `SELECT count(*) FROM event_outbox WHERE organization_id = $1 AND type = $2 AND ($3 = '' OR entity_id = $3)`, f.OrgA, typ, entity)
-	}
-	a, b := f.CI(t, f.OrgA, "", "audit-d5-a"), f.CI(t, f.OrgA, "", "audit-d5-b")
-
-	var edge string
-	t.Run("relationship.created on POST /relationships", func(t *testing.T) {
-		r := e.Call(t, admin, http.MethodPost, "/api/v1/relationships", `{"source_ci_id":"`+a+`","target_ci_id":"`+b+`","rel_type":"depends_on"}`)
-		if r.Code != http.StatusCreated {
-			t.Fatalf("POST /relationships = %d %s", r.Code, t6Short(r.Body))
-		}
-		edge = t6ID(r.Body)
-		if n := outbox("relationship.created", edge); n != 1 {
-			t.Errorf("relationship.created events for edge %s = %d, want 1 (EVT-02)", edge, n)
-		}
-	})
-	t.Run("duplicate relationship (409) emits nothing more", func(t *testing.T) {
-		before := outbox("relationship.created", "")
-		r := e.Call(t, admin, http.MethodPost, "/api/v1/relationships", `{"source_ci_id":"`+a+`","target_ci_id":"`+b+`","rel_type":"depends_on"}`)
-		if r.Code != http.StatusConflict {
-			t.Fatalf("duplicate POST /relationships = %d, want 409", r.Code)
-		}
-		if after := outbox("relationship.created", ""); after != before {
-			t.Errorf("relationship.created after refused duplicate = %d, want %d", after, before)
-		}
-	})
-	t.Run("relationship.removed on DELETE /relationships/{id}", func(t *testing.T) {
-		if edge == "" {
-			t.Fatal("no edge created")
-		}
-		r := e.Call(t, admin, http.MethodDelete, "/api/v1/relationships/"+edge, ``)
-		if r.Code != http.StatusNoContent {
-			t.Fatalf("DELETE /relationships = %d %s", r.Code, t6Short(r.Body))
-		}
-		if n := outbox("relationship.removed", edge); n != 1 {
-			t.Errorf("relationship.removed events for edge %s = %d, want 1 (EVT-02)", edge, n)
-		}
-	})
-	t.Run("collector.enrolled on POST /collectors/enroll", func(t *testing.T) {
-		r := e.Call(t, admin, http.MethodPost, "/api/v1/collectors/enrollment-codes", `{"label":"audit-d5"}`)
-		if r.Code != http.StatusCreated {
-			t.Fatalf("POST /collectors/enrollment-codes = %d %s", r.Code, t6Short(r.Body))
-		}
-		var code struct {
-			Code string `json:"code"`
-		}
-		if err := json.Unmarshal(r.Body, &code); err != nil {
-			t.Fatal(err)
-		}
-		r = e.Call(t, t6As{}, http.MethodPost, "/api/v1/collectors/enroll", `{"code":"`+code.Code+`","name":"audit-d5-collector"}`)
-		if r.Code != http.StatusCreated {
-			t.Fatalf("POST /collectors/enroll = %d %s", r.Code, t6Short(r.Body))
-		}
-		collector := t6ID(r.Body)
-		if n := outbox("collector.enrolled", collector); n != 1 {
-			t.Errorf("collector.enrolled events for collector %s = %d, want 1 (EVT-02)", collector, n)
-		}
-		// A second use of the code is refused and emits nothing.
-		before := outbox("collector.enrolled", "")
-		if r = e.Call(t, t6As{}, http.MethodPost, "/api/v1/collectors/enroll", `{"code":"`+code.Code+`","name":"audit-d5-collector-2"}`); r.Code == http.StatusCreated {
-			t.Fatalf("second enrollment with one code = 201")
-		}
-		if after := outbox("collector.enrolled", ""); after != before {
-			t.Errorf("collector.enrolled after refused enrollment = %d, want %d", after, before)
-		}
-	})
-	t.Run("review.resolved on POST /review-items/{id}/resolve", func(t *testing.T) {
-		var item string
-		if err := f.Admin.QueryRow(bg, `INSERT INTO review_item (organization_id, kind, payload) VALUES ($1, 'unclassified_device', '{"ip":"192.0.2.55"}') RETURNING id::text`,
-			f.OrgA).Scan(&item); err != nil {
-			t.Fatal(err)
-		}
-		r := e.Call(t, admin, http.MethodPost, "/api/v1/review-items/"+item+"/resolve", `{"action":"dismiss"}`)
-		if r.Code != http.StatusOK {
-			t.Fatalf("resolve = %d %s", r.Code, t6Short(r.Body))
-		}
-		if n := outbox("review.resolved", item); n != 1 {
-			t.Errorf("review.resolved events for item %s = %d, want 1 (EVT-02)", item, n)
-		}
-	})
 }
 
 // t6FailingAuditor simulates an unavailable audit store.

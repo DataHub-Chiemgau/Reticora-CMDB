@@ -1,6 +1,6 @@
 # Entscheidungen – Korrekturplan G1
 
-Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../entscheidungen.md) (E-01 bis E-36, E-56 bis E-58) und [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md) (E-37 bis E-55). Jede Entscheidung nennt Status, Frage, Optionen, Empfehlung, Übergangsregel sowie betroffene IDs und WPs. Alle Entscheidungen sind offen; ihre Empfehlung gilt als Übergangsregel, damit die WPs starten können. Widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst. Ausnahme: WP-388 (`t5-install-default`) beginnt erst, wenn E-69 mit Option 1 entschieden ist; bei Option 2 oder 3 entfällt es mit Vermerk. Unabhängig von Entscheidungen warten WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-455 (`t5-v2-ids`) auf die externen Lieferungen A-02, A-07 und A-11.
+Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../entscheidungen.md) (E-01 bis E-36, E-56 bis E-58) und [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md) (E-37 bis E-55). Jede Entscheidung nennt Status, Frage, Optionen, Empfehlung, Übergangsregel sowie betroffene IDs und WPs. Alle Entscheidungen sind offen; ihre Empfehlung gilt als Übergangsregel, damit die WPs starten können. Widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst. Ausnahme war WP-388 (`t5-install-default`), das erst nach der Entscheidung von E-69 für Option 1 beginnen durfte; E-69 ist am 2026-10-21 mit Option 1 entschieden, WP-388 ist umgesetzt. Unabhängig von Entscheidungen warten WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-455 (`t5-v2-ids`) auf die externen Lieferungen A-02, A-07 und A-11.
 
 ## Übersicht
 
@@ -16,7 +16,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-66](#e-66) | API-07/API-08: Bulk-Statusänderung bei erzwungenem If-Match | offen (Empfehlung als Übergangsregel) | WP-368 |
 | [E-67](#e-67) | Credentials eines Discovery-Scopes ohne credential_ids | offen (Empfehlung als Übergangsregel) | WP-376, WP-378, WP-384, WP-496 |
 | [E-68](#e-68) | Credential-Art für das NAS-Plugin (Synology DSM) | offen (Empfehlung als Übergangsregel) | WP-379 |
-| [E-69](#e-69) | TEC-15: Installationsquelle für die Signaturprüfung vor der Installation | offen (Empfehlung als Übergangsregel) | WP-387, WP-388, WP-595 |
+| [E-69](#e-69) | TEC-15: Installationsquelle für die Signaturprüfung vor der Installation | entschieden: Option 1 (Auftraggeber, 2026-10-21) | WP-387, WP-388, WP-595 |
 | [E-70](#e-70) | Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03) | offen (Empfehlung als Übergangsregel) | WP-391 |
 | [E-71](#e-71) | LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten | offen (Empfehlung als Übergangsregel) | WP-411 |
 | [E-72](#e-72) | Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) | offen (Empfehlung als Übergangsregel) | WP-427, WP-560, WP-574 |
@@ -43,6 +43,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-93](#e-93) | Materialisierung org-globaler Attributdefinitionen (MET-16) | offen (Empfehlung als Übergangsregel) | WP-590 |
 | [E-94](#e-94) | Korrektur der Migration 000110 (Duplikat-Suffixe der Interfaces) | offen (Empfehlung als Übergangsregel) | WP-592 |
 | [E-95](#e-95) | Durchsetzung von allowed_source_types, allowed_target_types und cardinality (REL-01) | offen (Empfehlung als Übergangsregel) | WP-592 |
+| [E-96](#e-96) | TimescaleDB-Version des Datenbank-Images und Funde seines Basisimages | entschieden: Option 2 (Auftraggeber, 2026-10-21) | WP-389 |
 
 ## E-59
 
@@ -272,7 +273,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** TEC-15: Installationsquelle für die Signaturprüfung vor der Installation
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-21)
 
 **Frage:** Welche Artefakte installiert der Installer standardmäßig, damit 'Signaturprüfung vor Installation' greift: die signierten Release-Images und -Binaries oder einen lokalen Quellbuild, der nicht signiert sein kann?
 
@@ -284,7 +285,9 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1.
 
-**Übergangsregel:** WP-387 (`t5-install-signature`) setzt die fail-closed-Prüfung im Release-Modus von install-cloud.sh, für den Collector-Release-Download in install-vm.sh und für den Quellbezug von einem Release-Tag in install.sh und install-vm.sh um (in allen Optionen nötig) und lässt den Standard unverändert; der Quellbuild meldet 'nicht signaturgeprüft'. Nach Entscheidung für Option 1 stellt WP-388 (`t5-install-default`) den Standard um; bei Option 2 oder 3 entfällt WP-388 (`t5-install-default`) mit Vermerk.
+**Übergangsregel (bis 2026-10-21):** WP-387 (`t5-install-signature`) setzt die fail-closed-Prüfung im Release-Modus von install-cloud.sh, für den Collector-Release-Download in install-vm.sh und für den Quellbezug von einem Release-Tag in install.sh und install-vm.sh um (in allen Optionen nötig) und lässt den Standard unverändert; der Quellbuild meldet 'nicht signaturgeprüft'. Nach Entscheidung für Option 1 stellt WP-388 (`t5-install-default`) den Standard um; bei Option 2 oder 3 entfällt WP-388 (`t5-install-default`) mit Vermerk.
+
+**Umsetzung:** WP-388 (`t5-install-default`): install.sh, install-cloud.sh und install-vm.sh installieren standardmäßig die signierten Release-Artefakte des genannten (`--ref`/`--release v<version>`) bzw. neuesten Releases — Quelle nur von einem Release-Tag mit Manifestprüfung, Images per 'cosign verify' mit Digest-Pin, Collector-Binary per 'cosign verify-blob' bzw. im Docker-Modus das signierte Collector-Image; install-cloud.sh prüft zusätzlich, dass sein Checkout (Compose-Datei, Realm, Migrationen) die signierte Quelle dieses Releases ist. Der Quellbuild nur noch per `--build-from-source` (`RETICORA_BUILD_FROM_SOURCE=1`) mit der Warnung 'not signature-verified'; ein Ref ohne Release-Tag bricht ohne den Schalter mit Hinweis ab. Die CI-Läufe des unveröffentlichten Stands (install-smoke.yml, outage.yml) bauen mit dem Schalter, der Job release-mode prüft den Standardpfad auf Tags v*.
 
 **Betroffene IDs:** TEC-15, COL-06, INS-01
 
@@ -858,3 +861,24 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Betroffene WPs:** WP-592
 
+## E-96
+
+**Thema:** TimescaleDB-Version des Datenbank-Images und Funde seines Basisimages
+
+**Status:** entschieden: Option 2 (Auftraggeber, 2026-10-21)
+
+**Frage:** WP-389 pinnt `TIMESCALE_IMAGE` laut F-291-Kriterium auf `2.17.2-pg16` „wie in CI“. Der erste Scan von `reticora-postgres` mit der Schwelle des Jobs `image-scan` (Trivy 0.75.0, Critical/High mit Fix) findet im Basisimage 2.17.2-pg16 443 Funde; der Job wäre rot. Ein Pin unter dem bisher gleitenden `latest-pg16` riskiert zudem ein Downgrade für Datenbanken, deren Erweiterung ein neueres Image angelegt hat. 2.31.0-pg16 (am 2026-10-21 die neueste 2.x-pg16, Ziel von `latest-pg16`) hat 80 Funde: 79 in den Go-Programmen des Basisimages (`gosu`, `timescaledb-tune`, `timescaledb-parallel-copy`: Go-Standardbibliothek, golang.org/x/crypto, x/text, pgx) und 1 im Alpine-Paket libexpat. Welche Version gilt, und wie werden die Funde behoben?
+
+**Optionen:**
+
+- 1) 2.17.2 wie im Plan, die Funde als Scan-Ausnahmen; das bricht die SEC-11-SLA (Critical 7, High 30 Tage), weil sich die Funde nicht innerhalb der Frist beheben lassen.
+- 2) 2.31.0 per Version und Digest überall (DB-Image, CI- und Deploy-Images); die Go-Hilfsprogramme des Basisimages werden entfernt oder mit der Go-Toolchain des Repositorys neu gebaut, der verbleibende Paketfund per Upgrade behoben.
+- 3) Der gleitende Tag `latest-pg16` bleibt.
+
+**Empfehlung:** Option 2: der Scan wird ohne Ausnahme grün, bestehende Datenbanken erleben kein Downgrade, und CI testet die Version, die ausgeliefert wird. Option 3 lässt F-291 offen (nicht reproduzierbar, ungeprüfte Updates).
+
+**Umsetzung:** WP-389 (`t5-image-scan`): `TIMESCALE_IMAGE` = `timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731` (Digest des Multi-Arch-Index gegen Docker Hub geprüft); dieselbe Referenz in `ci.yml` (migrations, auditdefect), `load.yml`, `restore-test.yml`, im Backup-CronJob von `deploy/k8s`, in `docker-compose.yml`, `docs/README.md` und ADR 0001; `tests/ci-config.test.sh` (`timescale_image_refs`) prüft jede Referenz. Die Stufe `go-tools` des Dockerfiles baut `timescaledb-tune` (v0.19.0) und `gosu` (Commit des Tags 1.19), die Versionen des Basisimages, mit `golang:1.26.10-alpine` (per Digest) neu; `timescaledb-parallel-copy` wird entfernt (weder Entrypoint, Init-Skripte noch Reticora nutzen es); `apk upgrade libexpat`. Der Spike-Test von ADR 0001 akzeptiert die in TimescaleDB 2.18 umbenannten Fehlertexte (columnstore statt compression). Umstieg bestehender Datenbanken (`ALTER EXTENSION timescaledb UPDATE` bei deaktiviertem Event-Trigger `reticora_restrict_app_ddl`) in `docs/security/abhaengigkeitsscans.md`.
+
+**Betroffene IDs:** SEC-11, TST-04, MON-01
+
+**Betroffene WPs:** WP-389

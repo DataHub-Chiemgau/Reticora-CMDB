@@ -310,8 +310,8 @@ func TestCIChildEdgeToOrgWideCI(t *testing.T) {
 	if code, resp := w.do(scoped1, http.MethodPost, "/api/v1/relationships", map[string]any{"source_ci_id": orgWideCI, "target_ci_id": orgWide2, "rel_type": "runs_on"}); !refused(code) {
 		t.Errorf("E-09: POST /api/v1/relationships between two org-wide CIs as client1: %d %s, want 403/404", code, trim(resp))
 	}
-	// An endpoint outside the scope is refused; the status (500 today) is
-	// F-145, WP-401 (t6-rel-errors).
+	// An endpoint outside the scope is refused like an unknown CI: 422 on
+	// its field (F-145, WP-401).
 	for _, tc := range []struct {
 		p    *channelPrincipal
 		body map[string]any
@@ -319,8 +319,9 @@ func TestCIChildEdgeToOrgWideCI(t *testing.T) {
 		{scoped1, map[string]any{"source_ci_id": own, "target_ci_id": foreign, "rel_type": "runs_on"}},
 		{scoped2, map[string]any{"source_ci_id": foreign, "target_ci_id": own, "rel_type": "runs_on"}},
 	} {
-		if code, resp := w.do(tc.p, http.MethodPost, "/api/v1/relationships", tc.body); code == http.StatusCreated {
-			t.Errorf("POST /api/v1/relationships %v as %s: %d %s, want refused", tc.body, tc.p.kind, code, trim(resp))
+		if code, resp := w.do(tc.p, http.MethodPost, "/api/v1/relationships", tc.body); code != http.StatusUnprocessableEntity ||
+			!strings.Contains(resp, `"field":"target_ci_id"`) {
+			t.Errorf("POST /api/v1/relationships %v as %s: %d %s, want 422 on target_ci_id", tc.body, tc.p.kind, code, trim(resp))
 		}
 	}
 	if n := w.scalar(`SELECT count(*)::text FROM ci_relationship WHERE rel_type = 'runs_on' AND (source_ci_id IN ($1, $2, $3) OR target_ci_id IN ($1, $2, $3))`, own, orgWide2, foreign); n != "0" {

@@ -50,7 +50,10 @@ Das ist zugleich der Nachweis für ABN-01 (d), siehe `docs/acceptance/abn-01.md`
 ## Prüfschritte des Smoke-Tests
 
 1. `install-cloud.sh` nicht interaktiv mit Testdomäne. Die Preflight-Prüfung
-   der Plattform ist Teil des Installers (WP-093).
+   der Plattform ist Teil des Installers (WP-093). Der geprüfte, noch nicht
+   veröffentlichte Stand wird mit `--build-from-source` gebaut; den
+   Standardpfad mit den signierten Release-Artefakten prüft auf Tags `v*` der
+   Job `release-mode` (WP-388, E-69).
 2. Alle erwarteten Compose-Dienste laufen und sind healthy
    (`tests/install-smoke-health.sh`).
 3. Die Backup-Kette ist eingerichtet: pgBackRest-Stanza und erstes Backup.

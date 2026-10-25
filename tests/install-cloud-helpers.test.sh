@@ -407,7 +407,11 @@ test_issuer_checks_order() {
     RETICORA_FRONTEND_PORT=80
     RETICORA_SERVER_PORT=8080
     RETICORA_IMAGE_REGISTRY=""
-    RETICORA_IMAGE_TAG="latest"
+    RETICORA_IMAGE_TAG=""
+    # The order of the issuer checks is the same in both modes; the source
+    # build needs no release (E-69: the default selects and verifies one,
+    # tests/install-signature.test.sh).
+    BUILD_FROM_SOURCE=1
     preflight() { :; }
     collect_config() { :; }
     write_env() { :; }
@@ -754,6 +758,60 @@ expect_fail "runtime login: an unsafe password in .env is refused"              
 run_test    "runtime login: password validation"                                 test_runtime_password_validation
 run_test    "runtime login: the compose server uses reticora_runtime"            test_runtime_login_compose
 run_test    "runtime login: k8s server DSN comes from the runtime secret"        test_runtime_login_k8s
+
+# ─── image source on a (re-)run (WP-388, E-69 Option 1) ──────────────────────
+# The signed release images are the default, also for the .env of an earlier
+# source build; a mirror comes from RETICORA_IMAGE_REGISTRY or .env, the
+# release from --release (otherwise select_release in main). collect_config
+# itself never asks GitHub; --build-from-source writes neither registry nor
+# release.
+
+# shellcheck disable=SC2317 # the stubs are called by the installer functions
+test_image_source_default() {
+    write_legacy_env image-default
+    curl() { echo "collect_config must not call curl" >&2; return 1; }
+    collect_config >/dev/null
+    [ "$RETICORA_IMAGE_REGISTRY" = "ghcr.io/datahub-chiemgau" ] && [ -z "$RETICORA_IMAGE_TAG" ] || return 1
+    write_env
+    grep -qx 'RETICORA_IMAGE_REGISTRY=ghcr.io/datahub-chiemgau' "$ENV_FILE" && grep -qx 'RETICORA_SERVER_IMAGE=' "$ENV_FILE"
+}
+
+# shellcheck disable=SC2034 # read by the installer functions
+test_image_source_mirror() {
+    write_legacy_env image-mirror
+    sed -i 's|^RETICORA_IMAGE_REGISTRY=.*|RETICORA_IMAGE_REGISTRY=registry.example.test/reticora|' "$ENV_FILE"
+    collect_config >/dev/null
+    [ "$RETICORA_IMAGE_REGISTRY" = "registry.example.test/reticora" ] || return 1
+    IMAGE_REGISTRY_OVERRIDE="mirror.example.test/reticora"
+    collect_config >/dev/null
+    [ "$RETICORA_IMAGE_REGISTRY" = "mirror.example.test/reticora" ]
+}
+
+# shellcheck disable=SC2317,SC2034 # stubs and variables used by the installer
+test_image_source_release() {
+    write_legacy_env image-release
+    RELEASE="v2.0.1"
+    curl() { return 1; }
+    collect_config >/dev/null
+    [ "$RETICORA_IMAGE_TAG" = "v2.0.1" ] || return 1
+    select_release
+    [ "$RETICORA_IMAGE_TAG" = "v2.0.1" ]
+}
+
+# shellcheck disable=SC2034 # read by the installer functions
+test_image_source_build_from_source() {
+    write_legacy_env image-bfs
+    BUILD_FROM_SOURCE=1
+    collect_config >/dev/null
+    select_release
+    write_env
+    grep -qx 'RETICORA_IMAGE_REGISTRY=' "$ENV_FILE" && grep -qx 'RETICORA_IMAGE_TAG=' "$ENV_FILE"
+}
+
+run_test    "image source: default is the signed release registry, also after a source build" test_image_source_default
+run_test    "image source: a mirror from .env or RETICORA_IMAGE_REGISTRY"                  test_image_source_mirror
+run_test    "image source: --release names the release without asking GitHub"              test_image_source_release
+run_test    "image source: --build-from-source writes no registry and no release"          test_image_source_build_from_source
 
 # ─── collector NATS endpoint on a re-run (WP-381) ─────────────────────────────
 
