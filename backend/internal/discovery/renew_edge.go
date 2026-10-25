@@ -17,6 +17,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 )
 
 // Certificate renewal over the collector's NATS channel (COL-04, F-012): a
@@ -134,6 +136,8 @@ type CertificateRenewal struct {
 	ca         *CA
 	repo       *PGRepository
 	now        func() time.Time
+	// cycles counts the renewals that failed on the server's side (OPS-05).
+	cycles *observability.Cycles
 }
 
 // NewCertificateRenewal creates the service on the collector CA.
@@ -149,6 +153,15 @@ func (s *CertificateRenewal) WithClock(now func() time.Time) *CertificateRenewal
 	return s
 }
 
+// WithCycles counts the renewals that failed on the server's side
+// (RenewalUnavailable, a reply that could not be sent) into cycles, the
+// cycles of the worker that serves them (credential_bundles, OPS-05). A
+// refused renewal is no failure.
+func (s *CertificateRenewal) WithCycles(cycles *observability.Cycles) *CertificateRenewal {
+	s.cycles = cycles
+	return s
+}
+
 // Serve answers the renewal requests on nc (subject
 // collector.<org>.<id>.certificate.renew; the endpoint lets a collector
 // publish only below its own subject tree) until ctx ends.
@@ -158,8 +171,13 @@ func (s *CertificateRenewal) Serve(ctx context.Context, nc *nats.Conn) error {
 		if msg.Reply == "" {
 			return
 		}
-		raw, _ := json.Marshal(s.Renew(ctx, msg.Subject, msg.Data))
+		resp := s.Renew(ctx, msg.Subject, msg.Data)
+		if resp.Error == RenewalUnavailable {
+			s.cycles.Fail()
+		}
+		raw, _ := json.Marshal(resp)
 		if rerr := msg.Respond(raw); rerr != nil {
+			s.cycles.Fail()
 			slog.Error("certificate renewal reply", "error", rerr)
 		}
 	})

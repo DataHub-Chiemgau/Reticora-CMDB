@@ -268,6 +268,76 @@ func TestWorkerSwitches(t *testing.T) {
 	}
 }
 
+// TestOfflineDetectorSwitch covers WP-447 (OPS-02, F-289): the offline
+// detector is the registered worker offline_detector, switched by
+// RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED; off, its job ci.offline_detector
+// is not registered (cmd/server TestOfflineDetectorRunsUnderItsWorkerSwitch).
+// The former RETICORA_OFFLINE_DETECTOR_ENABLED still switches it while the
+// convention's switch is not set and is reported as deprecated; next to it
+// it is ignored. A set RETICORA_WORKER_*_ENABLED that switches no registered
+// worker is reported, not refused.
+func TestOfflineDetectorSwitch(t *testing.T) {
+	clearEnv(t)
+	key := WorkerEnvKey(WorkerOfflineDetector)
+	if key != "RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED" || !IsWorker(WorkerOfflineDetector) {
+		t.Fatalf("offline detector: switch %s, registered %v", key, IsWorker(WorkerOfflineDetector))
+	}
+	for _, tc := range []struct {
+		name, convention, alias string
+		enabled                 bool
+		warning                 string
+	}{
+		{"default", "", "", true, ""},
+		{"convention off", "false", "", false, ""},
+		{"convention on", "true", "", true, ""},
+		{"alias off", "", "false", false, OfflineDetectorAlias + " is deprecated: use " + key},
+		{"alias on", "", "1", true, OfflineDetectorAlias + " is deprecated: use " + key},
+		{"convention on, alias off", "true", "false", true, OfflineDetectorAlias + " is deprecated and ignored: " + key + " is set"},
+		{"convention off, alias on", "false", "true", false, OfflineDetectorAlias + " is deprecated and ignored: " + key + " is set"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(key, tc.convention)
+			t.Setenv(OfflineDetectorAlias, tc.alias)
+			cfg := Load()
+			if cfg.WorkerEnabled(WorkerOfflineDetector) != tc.enabled {
+				t.Errorf("offline detector enabled: %v, want %v", cfg.WorkerEnabled(WorkerOfflineDetector), tc.enabled)
+			}
+			if got := strings.Join(cfg.Warnings(), "\n"); tc.warning == "" && strings.Contains(got, OfflineDetectorAlias) ||
+				tc.warning != "" && !strings.Contains(got, tc.warning) {
+				t.Errorf("warnings %q, want %q", got, tc.warning)
+			}
+			if err := cfg.Validate(false); err != nil {
+				t.Errorf("start check: %v", err)
+			}
+		})
+	}
+
+	t.Setenv(key, "")
+	t.Setenv(OfflineDetectorAlias, "")
+	t.Setenv("RETICORA_WORKER_FOO_ENABLED", "false")
+	t.Setenv("RETICORA_WORKER_Export_ENABLED", "false")
+	t.Setenv("RETICORA_WORKER_BAR_ENABLED", "")
+	t.Setenv(WorkerEnvKey(WorkerNotifier), "false")
+	cfg := Load()
+	warnings := strings.Join(cfg.Warnings(), "\n")
+	for _, unknown := range []string{"RETICORA_WORKER_FOO_ENABLED", "RETICORA_WORKER_Export_ENABLED"} {
+		if !strings.Contains(warnings, unknown+" switches no registered worker and is ignored") {
+			t.Errorf("unknown switch %s: no warning in %q", unknown, warnings)
+		}
+	}
+	for _, quiet := range []string{"RETICORA_WORKER_BAR_ENABLED", WorkerEnvKey(WorkerNotifier)} {
+		if strings.Contains(warnings, quiet) {
+			t.Errorf("%s reported: %q", quiet, warnings)
+		}
+	}
+	if !cfg.WorkerEnabled(WorkerExport) || cfg.WorkerEnabled(WorkerNotifier) {
+		t.Errorf("export %v (the misspelt switch must not apply), notifier %v", cfg.WorkerEnabled(WorkerExport), cfg.WorkerEnabled(WorkerNotifier))
+	}
+	if err := cfg.Validate(false); err != nil {
+		t.Errorf("an unknown switch is a warning, not a start error: %v", err)
+	}
+}
+
 // TestDefaultOrgAdminRoleRequiresAdminClient covers WP-367 (AUT-09, E-65
 // option 1): outside development the default role org_admin needs the
 // Keycloak admin client that binds a new org_admin to MFA; the start check

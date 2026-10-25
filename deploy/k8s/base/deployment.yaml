@@ -127,6 +127,10 @@ spec:
               value: "true"
             - name: RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED
               value: "true"
+            # CI offline detector (REC-09, LCY-05), a system job of the
+            # scheduler.
+            - name: RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

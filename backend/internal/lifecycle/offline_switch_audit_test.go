@@ -7,10 +7,10 @@
 // off, an unparsable value is refused by Validate (the server does not start
 // with it) and keeps the default; the detector's job is ci.offline_detector
 // every 5 minutes and the edge cleanup relationship.cleanup every hour.
-//
-// Not covered here (needs a production change): cmd/server/main.go registers
-// the jobs inline, so whether cfg.OfflineDetector actually adds or omits the
-// job is not reachable from a test without extracting that code.
+// Since WP-447 (F-289) the switch is the one of the worker offline_detector
+// (RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED) and the former name its
+// deprecated alias; whether the switch adds or omits the job is covered by
+// TestOfflineDetectorRunsUnderItsWorkerSwitch in cmd/server.
 //
 // Retest:
 //
@@ -42,9 +42,10 @@ func TestAuditOfflineDetectorSwitchAndSchedules(t *testing.T) {
 	for _, tc := range cases {
 		t.Run("RETICORA_OFFLINE_DETECTOR_ENABLED="+tc.value, func(t *testing.T) {
 			t.Setenv("RETICORA_OFFLINE_DETECTOR_ENABLED", tc.value)
+			t.Setenv(config.WorkerEnvKey(config.WorkerOfflineDetector), "")
 			cfg := config.Load()
-			if cfg.OfflineDetector != tc.want {
-				t.Errorf("OfflineDetector = %v, want %v", cfg.OfflineDetector, tc.want)
+			if got := cfg.WorkerEnabled(config.WorkerOfflineDetector); got != tc.want {
+				t.Errorf("offline detector enabled = %v, want %v", got, tc.want)
 			}
 			err := cfg.Validate(true)
 			refused := err != nil && strings.Contains(err.Error(), "RETICORA_OFFLINE_DETECTOR_ENABLED has an invalid value")

@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -462,6 +463,15 @@ func (h *Handler) scopeHandlers() map[string]func(ctx context.Context, orgID, co
 	}
 }
 
+// WithScopeCycles counts the scope requests that failed on the server's
+// side (the collector could not be looked up, the reply could not be sent)
+// into cycles, the cycles of the worker discovery_scopes (OPS-05). An
+// unknown or disabled collector is no failure.
+func (h *Handler) WithScopeCycles(cycles *observability.Cycles) *Handler {
+	h.scopeCycles = cycles
+	return h
+}
+
 // ServeCollectorScopes answers the scope requests, run results and subnet
 // reports of the collectors on nc until ctx ends (DIS-09). A request of an
 // unknown or disabled collector is refused before its handler runs,
@@ -475,6 +485,9 @@ func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error
 			if ok {
 				sctx := systemContext(ctx, orgID)
 				if cerr := h.checkCollector(sctx, orgID, collectorID); cerr != nil {
+					if !errors.Is(cerr, ErrCollectorDisabled) && !errors.Is(cerr, api.ErrNotFound) {
+						h.scopeCycles.Fail()
+					}
 					slog.Warn("collector scope request refused", "organization_id", orgID, "collector_id", collectorID,
 						"suffix", suffix, "error", cerr)
 					resp = map[string]string{"error": "not available"}
@@ -485,6 +498,7 @@ func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error
 			raw, _ := json.Marshal(resp)
 			if msg.Reply != "" {
 				if rerr := msg.Respond(raw); rerr != nil {
+					h.scopeCycles.Fail()
 					slog.Error("collector scope reply", "error", rerr)
 				}
 			}

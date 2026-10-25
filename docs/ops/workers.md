@@ -12,11 +12,24 @@ stop a single worker during an incident, without touching the API.
   serving requests.
 - An invalid value (for example `maybe`) stops the start check
   (fail-closed, OPS-01).
+- A set `RETICORA_WORKER_<NAME>_ENABLED` whose name is not a registered
+  worker (a typo, a planned worker) has no effect; the server logs it at
+  start as `configuration warning`.
 - The registry is `config.WorkerNames` in `backend/internal/config/config.go`.
-  The server starts its workers through `server.StartWorkers`, which refuses
-  names that are not registered or that appear twice.
-- A new worker adds its name to `config.WorkerNames` and registers under it
-  in `backend/cmd/server/main.go`, in the work package that introduces it.
+  The server builds its workers in `buildWorkers`
+  (`backend/cmd/server/workers.go`) and starts them through
+  `server.StartWorkers`, which refuses names that are not registered or that
+  appear twice. A worker that runs as a system job of the scheduler
+  (`offline_detector`) is registered in `systemJobs` in the same file only
+  while its switch is on.
+- A new worker adds its name to `config.WorkerNames`, registers under it in
+  `buildWorkers` (or `systemJobs`) and records its cycles (see
+  [Metrics and alerts](#metrics-and-alerts-ops-05)), in the work package that
+  introduces it. Its switch goes into `deploy/docker-compose/docker-compose.yml`
+  (from `.env`) and `deploy/k8s/base/deployment.yaml`;
+  `TestEveryWorkerExportsRunAndErrorMetrics` and
+  `TestEveryWorkerSwitchIsDeployable` (`backend/cmd/server/workers_metrics_test.go`)
+  fail for a registered worker without them.
 
 ## Registered workers
 
@@ -33,6 +46,7 @@ stop a single worker during an incident, without touching the API.
 | `credential_bundles` | `RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED` | Answers the collectors' bundle requests (`collector.<org>.<id>.credentials.request` over the NATS endpoint): verifies the presented certificate (collector CA, not revoked, collector not disabled) and returns the effective credentials of the collector's enabled discovery scopes (a scope with `credential_ids` those, a scope without them the organization-wide ones and those of its client; only credentials that are organization-wide or of the scope's client; without an enabled scope none, E-67), encrypted for the collector's key (ECDH P-256, HKDF, AES-GCM); every delivery is audited (`credential.bundle_delivered`, COL-02). It also renews the collectors' certificates (`collector.<org>.<id>.certificate.renew`, queue group): signed with the current key, from 60 % of the lifetime, audited as `collector.certificate_issued` (COL-04, docs/betrieb/collector-ca.md). Needs `RETICORA_NATS_URL`. |
 | `discovery_scopes` | `RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED` | Serves the collectors' discovery scopes over the NATS endpoint (DIS-09): `collector.<org>.<id>.scopes.request` returns the enabled scopes of a collector that is not disabled, `…scopes.result` records a run (`last_run_at`, `last_result`, `next_run_at`), `…subnets.report` turns the local subnets a collector reports after enrollment into `scope_suggested` review items (accepting one creates the scope). A request of an unknown or disabled collector is refused before it is handled and changes nothing (COL-04). Needs `RETICORA_NATS_URL`. |
 | `jobs` | `RETICORA_WORKER_JOBS_ENABLED` | Consumes the `JOBS` work-queue stream on NATS (`jobs.<kind>`, TEC-14): one durable consumer per job kind, the database claim runs each job once, a job whose instance died is taken over after its timeout. Only active with NATS. |
+| `offline_detector` | `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED` | The CI offline detector (REC-09, LCY-05), the system job `ci.offline_detector` of the scheduler (every 5 minutes, on the leading replica): an observable, discovered CI whose `last_seen_at` is older than three times the interval of its discovery scope becomes `unknown` (`ci.offline`), and `active` again once seen (`ci.online`). Switched off, the job is not registered on this instance; since a replica with the switch on can lead, switch it off on every instance. The former switch `RETICORA_OFFLINE_DETECTOR_ENABLED` still applies while `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED` is not set and is logged as deprecated; next to it, it is ignored. Needs the database. |
 
 ## Destinations of the notifier (SEC-08)
 
@@ -175,7 +189,34 @@ Every worker exports these series, labelled `worker`:
 | `reticora_worker_runs_total` | Completed cycles (poll, sweep, batch) |
 | `reticora_worker_errors_total` | Failures inside the cycles |
 | `reticora_worker_last_success_timestamp_seconds` | Time of the last cycle without error |
-| `reticora_worker_backlog` | Waiting items, sampled every 30 s: queued exports (`export`), due deliveries (`webhook_dispatcher`), pending and unacknowledged messages (`ingest`, all lanes; per lane in `reticora_ingest_lane_backlog`) |
+| `reticora_worker_backlog` | Waiting items, sampled every 30 s: queued exports (`export`), due deliveries (`webhook_dispatcher`), pending and unacknowledged messages (`ingest`, all lanes; per lane in `reticora_ingest_lane_backlog`), due queued jobs of the kinds the queue runs (`jobs`) |
+
+A cycle is one real pass of the worker, not a message and not an idle tick
+that checks nothing: a cycle without failure moves the last-success time, so
+it must only succeed while the worker could do its work. A failed backlog
+sample also counts as an error.
+
+| Worker | One cycle | Failures of the cycle | Backlog |
+|---|---|---|---|
+| `webhook_dispatcher` | One claim of the due deliveries (every 15 s) | The claim fails | Due deliveries |
+| `export` | Reclaim of stale jobs and processing of the pending ones (every 2 s) | Each failed job or storage step | Queued exports |
+| `ingest` | One fetch of a lane (up to 1 s) and its batch | The fetch fails | Pending and unacknowledged messages |
+| `monitoring` | One evaluation of every enabled rule (every minute) | Each failing step | None: every rule is evaluated in each cycle, nothing waits |
+| `scheduler` | One tick of the leading replica (every 15 s): the due slots of every job kind | Each kind whose slot or run failed. A replica that does not lead records no cycle | None: missed slots are caught up (`MaxCatchUp`), they do not queue |
+| `events` | One pass over the pending outbox events of every organization (every second) | The pass fails | None: each pass publishes everything pending; events wait only while publishing fails, which the errors report |
+| `notifier` | One claim and delivery of the due notifications (every 5 s) | The claim or a delivery fails | None: each cycle delivers everything due; deliveries wait only for their backoff or the recipient's quiet hours, by design |
+| `jobs` | One sweep (every minute): the stream `JOBS` answers, the queued jobs due for longer than a minute are announced again | The stream does not answer, the listing or an announcement fails, and since the previous sweep: each failed attempt of a job (as with `export`), each storage error of a claim or result, each error of a consumer | Due queued jobs of the kinds the queue runs; the other kinds of the job table are tracked for `export` and the `scheduler` |
+| `nats_edge` | One pass (at start, then every minute): the database answers, the connections of the authorization callout and of the cut of disabled collectors answer a round trip, neither service has stopped | Each failing check, and since the previous pass: each failed PKI export (daily), sweep of superseded certificates (hourly), callout answer and cut | None: it answers the callout requests of the endpoint, nothing queues on the server |
+| `credential_bundles` | One pass (at start, then every minute): the internal NATS connection answers a round trip, the database answers, the certificate renewal has not stopped | Each failing check, and since the previous pass: each bundle or renewal that failed on the server's side (`bundle unavailable`, `renewal_unavailable`) and each reply that could not be sent. A refused collector (unknown, disabled, revoked) is an answer, not a failure | None: requests and replies, an unanswered request times out at the collector |
+| `discovery_scopes` | One pass (at start, then every minute): the internal NATS connection answers a round trip, the database answers | Each failing check, and since the previous pass: each collector lookup that failed (not: unknown or disabled) and each reply that could not be sent | None, as `credential_bundles` |
+| `offline_detector` | One run of `ci.offline_detector` (every 5 minutes, on the leading scheduler) | The run fails | None: a scheduled run, nothing queues |
+
+The `offline_detector` runs in the loop of the `scheduler`: it exports
+`reticora_worker_runs_total`, `reticora_worker_errors_total` and
+`reticora_worker_last_success_timestamp_seconds`, not `enabled`, `up` or
+`backlog`; whether it runs is `reticora_worker_up{worker="scheduler"}`. A
+failed run also counts as an error of the `scheduler` and is stored in
+`scheduler_run`.
 
 `deploy/monitoring/worker-rules.yaml` defines these alerts:
 
@@ -193,9 +234,12 @@ completed a cycle without error since its process started has no
 `reticora_worker_last_success_timestamp_seconds` series; the rule starts from
 `reticora_worker_up` and only removes workers with a success in the last
 5 minutes, so it fires for such a worker too, 30 minutes after the start
-(also after a restart). `nats_edge`, `credential_bundles`, `discovery_scopes`
-and `jobs` do not record their cycles yet (F-133); until they do, the alert
-fires for them 30 minutes after the start.
+(also after a restart). Every worker started through `server.StartWorkers`
+records a cycle at least every minute (the `scheduler` on its leading
+replica; the rule takes the latest success of all instances), so a working
+one never fires; one whose dependency (database, NATS, the edge endpoint)
+stays unreachable fires after 35 minutes, idle or not. The cycles of all
+registered workers are checked by `TestEveryWorkerExportsRunAndErrorMetrics`.
 
 `deploy/monitoring/alertmanager.yaml` routes all alerts to the operators. Critical alerts also go to the on-call webhook. The product's notification channel (NTF) is added with WP-137. The Grafana dashboard `deploy/grafana/dashboard-overview.json` shows runs, errors, backlog and running instances.
 
@@ -263,10 +307,15 @@ introduces it:
 
 | Planned name | Requirement |
 |---|---|
-| `offline_detector` | Offline detection for collectors and agents |
 | `audit_runner` | Audit jobs |
 | `workflow` | Workflows [P3] |
 | `iga` | IGA provisioning tasks [A] |
+
+The offline detection is registered: `offline_detector` for the CIs (see
+above); the offline status of the collectors is the system job
+`collector.status` of the scheduler (every minute, COL-01). Until a planned
+worker exists, its switch has no effect and is logged as a configuration
+warning.
 
 ## Example: dedicated worker instance
 
@@ -281,7 +330,15 @@ RETICORA_WORKER_SCHEDULER_ENABLED=false
 RETICORA_WORKER_JOBS_ENABLED=false
 RETICORA_WORKER_EVENTS_ENABLED=false
 RETICORA_WORKER_NOTIFIER_ENABLED=false
+RETICORA_WORKER_NATS_EDGE_ENABLED=false
+RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED=false
+RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED=false
+RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED=false
 ```
+
+In the Compose installation each of these is read from `.env`; in
+Kubernetes it is an `env` entry of the server container
+(`deploy/k8s/base/deployment.yaml`).
 
 The worker instance keeps the defaults. At startup the log shows
 `worker started` or `worker disabled` for each worker.

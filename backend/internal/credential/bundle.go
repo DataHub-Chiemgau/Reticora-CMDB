@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 )
 
 // Credential bundles (COL-02): the server hands a collector the credentials
@@ -212,14 +214,28 @@ type BundleAuditor interface {
 	BundleDelivered(ctx context.Context, t *BundleTarget, credentialIDs []string) error
 }
 
+// WithCycles returns a copy of the service whose bundle answers count the
+// requests that failed on the server's side (the bundle could not be built
+// or audited, the reply could not be sent) into cycles, the cycles of the
+// worker credential_bundles (OPS-05). A refused collector is no failure.
+func (s *Service) WithCycles(cycles *observability.Cycles) *Service {
+	c := *s
+	c.cycles = cycles
+	return &c
+}
+
 // ServeBundles answers the bundle requests of the collectors on nc
 // (subject collector.<org>.<id>.credentials.request; the endpoint lets a
 // collector publish only below its own subject tree) until ctx ends.
 func (s *Service) ServeBundles(ctx context.Context, nc *nats.Conn, verify CollectorVerifier, audit BundleAuditor) error {
 	sub, err := nc.Subscribe("collector.*.*"+BundleRequestSuffix, func(msg *nats.Msg) {
 		resp := s.answerBundle(ctx, msg, verify, audit)
+		if resp.Error == bundleUnavailable {
+			s.cycles.Fail()
+		}
 		raw, _ := json.Marshal(resp)
 		if rerr := msg.Respond(raw); rerr != nil {
+			s.cycles.Fail()
 			slog.Error("credential bundle reply", "error", rerr)
 		}
 	})
@@ -247,13 +263,16 @@ func (s *Service) answerBundle(ctx context.Context, msg *nats.Msg, verify Collec
 	sealed, ids, err := s.Bundle(tctx, target)
 	if err != nil {
 		slog.Error("credential bundle", "collector_id", target.CollectorID, "error", err)
-		return BundleResponse{Error: "bundle unavailable"}
+		return BundleResponse{Error: bundleUnavailable}
 	}
 	if audit != nil {
 		if aerr := audit.BundleDelivered(tctx, target, ids); aerr != nil {
 			slog.Error("audit credential bundle", "collector_id", target.CollectorID, "error", aerr)
-			return BundleResponse{Error: "bundle unavailable"}
+			return BundleResponse{Error: bundleUnavailable}
 		}
 	}
 	return BundleResponse{Bundle: sealed}
 }
+
+// bundleUnavailable answers a request that failed on the server's side.
+const bundleUnavailable = "bundle unavailable"
