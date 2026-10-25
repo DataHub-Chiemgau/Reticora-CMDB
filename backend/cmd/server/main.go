@@ -20,6 +20,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/bootstrap"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
@@ -327,11 +328,6 @@ func main() {
 			repos.Search = osBackend
 		}
 	}
-	// Keep the tenant search index in sync with every CI write (REST handler,
-	// collector bulk ingest, workflow executor). Indexing is best-effort: a
-	// failing search backend never breaks CI persistence, and the index can
-	// always be rebuilt via POST /api/v1/search/reindex.
-	repos.CI = ci.NewIndexingRepository(repos.CI, search.NewCIIndexer(repos.Search))
 	// A rack placement moves the CI (and the CIs of its asset) in SQL; the
 	// remote index learns of the new client and site only through this
 	// decorator (TEC-12, WP-346). The PostgreSQL index follows by trigger.
@@ -359,14 +355,6 @@ func main() {
 	}
 	slog.Info("entitlement enforcement configured",
 		"default_plan", cfg.DefaultPlan, "enforced", cfg.EntitlementEnforcement)
-
-	// Mirror CI mutations into the retrieval chunk store so the governed RAG
-	// assistant has tenant-owned content to ground its answers. Chunks are
-	// embedded only for organizations that opted in and hold the ai add-on
-	// (AI-02); otherwise they stay lexical.
-	// The router wires the same consent into the Ask path.
-	repos.CI = ci.NewIndexingRepository(repos.CI, ai.NewCIChunkIndexer(repos.AI, aiProvider).
-		WithConsent(ai.NewOrgConsent(repos.AI, entitlementSvc)))
 
 	// Webhook and connector destinations and own SMTP servers are user
 	// input: every outbound call goes through the egress client or dialer
@@ -424,6 +412,11 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("late modules", "enabled", modules.EnabledKeys())
+	// CI writes keep the search index in sync and, only with the module ai
+	// (F-301), the retrieval chunks; the consent is the one the router wires
+	// into the Ask path (AI-02).
+	repos.CI = bootstrap.NewCIRepository(repos.CI, repos.Search, repos.AI, aiProvider,
+		ai.NewOrgConsent(repos.AI, entitlementSvc), modules)
 	// A worker of a switched-off module does not start (WP-214).
 	workerEnabled := func(name string) bool {
 		return cfg.WorkerEnabled(name) && modules.WorkerAllowed(name)

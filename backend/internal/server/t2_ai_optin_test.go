@@ -34,6 +34,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/bootstrap"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
@@ -133,10 +134,17 @@ func TestAuditT2AIAskRequiresOrgOptIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := &t2CountingProvider{}
-	// The router builds the consent itself (ai.NewOrgConsent over repos.AI
-	// and the entitlements), as for the indexer of cmd/server/main.go.
+	// The CI repository as cmd/server/main.go builds it with the module ai
+	// (bootstrap.NewCIRepository, WP-418); the router builds the consent
+	// itself (ai.NewOrgConsent over repos.AI and the entitlements), the
+	// same as the chunk indexer's.
+	modules, err := server.ParseModules("ai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repos.CI = bootstrap.NewCIRepository(repos.CI, repos.Search, repos.AI, provider, ai.NewOrgConsent(repos.AI, entitlements), modules)
 	mux, _, err := server.NewRouter(repos, server.Options{
-		Version: "t2-ai", Entitlements: entitlements, CIService: ci.NewServiceWithLimits(repos.CI, entitlements),
+		Version: "t2-ai", Modules: modules, Entitlements: entitlements, CIService: ci.NewServiceWithLimits(repos.CI, entitlements),
 		Credentials: credential.NewService(repos.Credential, encryptor), OIDC: identity.NewOIDCProvider(identity.OIDCConfig{}),
 		AIProvider: provider,
 	})
