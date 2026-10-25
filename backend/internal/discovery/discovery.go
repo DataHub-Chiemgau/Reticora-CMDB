@@ -1249,35 +1249,17 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 	}
 
 	// No collector profile matched (DIS-02): the device becomes a
-	// generic_device CI and a reviewer classifies it.
-	if frame.noProfile[i] {
-		clientID, siteID := h.deviceReviewScope(ctx, orgID, &item)
-		opened, openErr := h.openReview(ctx, &ReviewItem{
-			OrganizationID: orgID,
-			Kind:           ReviewKindUnclassifiedDevice,
-			Status:         ReviewStatusOpen,
-			ClientID:       clientID,
-			SiteID:         siteID,
-			Payload: map[string]any{
-				"reason":        ReasonNoProfileMatch,
-				"ci_type_name":  ci.GenericDeviceType,
-				"name":          item.Name,
-				"manufacturer":  item.Manufacturer,
-				"model":         item.Model,
-				"serial_number": item.SerialNumber,
-				"management_ip": item.ManagementIP,
-				"sys_object_id": item.SysObjectID,
-				"fingerprint":   item.Fingerprint,
-				"raw_data":      item.RawData,
-			},
-			ObjectKey: deviceKey(&item),
-		})
-		if openErr != nil {
-			return openErr
+	// generic_device CI and a reviewer classifies it, once the identity is
+	// resolved and only while the CI is still a generic_device.
+	openUnclassified := func(device *ci.Item) error {
+		if !frame.noProfile[i] {
+			return nil
 		}
+		opened, err := h.reviewUnclassified(ctx, orgID, &item, device, identity)
 		if opened {
 			resp.ReviewItems++
 		}
+		return err
 	}
 
 	var candidates []ci.Item
@@ -1370,6 +1352,9 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 				return reviewErr
 			}
 			resp.ReviewItems++
+		}
+		if err := openUnclassified(&newItem); err != nil {
+			return err
 		}
 	case ReconcileMatched:
 		matched := findCI(candidates, result.MatchedCIID)
@@ -1501,6 +1486,9 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 		// through the type change service (CI-11).
 		if typeErr := h.raiseGenericType(ctx, orgID, updated, typeID, identity); typeErr != nil {
 			return typeErr
+		}
+		if reviewErr := openUnclassified(updated); reviewErr != nil {
+			return reviewErr
 		}
 		out.ciID = updated.ID
 		resp.Updated++
@@ -1906,7 +1894,9 @@ func firstNonEmpty(preferred, fallback string) string {
 }
 
 // raiseGenericType reclassifies a matched generic_device CI to the specific
-// type the device reported (CI-11); discovery never changes other types.
+// type the device reported (CI-11) and closes the CI's open
+// unclassified_device item as reclassified (DIS-02); discovery never
+// changes other types.
 func (h *Handler) raiseGenericType(ctx context.Context, orgID string, matched *ci.Item, typeID string, ic *IdentityContext) error {
 	if ic == nil || ic.GenericDeviceTypeID == "" || matched.CITypeID != ic.GenericDeviceTypeID ||
 		typeID == "" || typeID == ic.GenericDeviceTypeID {
@@ -1924,5 +1914,8 @@ func (h *Handler) raiseGenericType(ctx context.Context, orgID string, matched *c
 		return fmt.Errorf("reclassify generic device: %w", err)
 	}
 	*matched = *result.CI
-	return nil
+	if matched.CITypeID == ic.GenericDeviceTypeID {
+		return nil
+	}
+	return h.resolveReclassified(ctx, orgID, matched.ID)
 }

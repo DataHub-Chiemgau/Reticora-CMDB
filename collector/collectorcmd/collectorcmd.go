@@ -487,7 +487,10 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 	if len(outcomes) == 0 {
 		return 0
 	}
-	records = deliverableRecords(ctx, records)
+	// The sweep record of a target another protocol of its scope classified
+	// is no unclassified device of its own (DIS-02); targets configured by
+	// name have their address by now.
+	records = profiles.MergeByTarget(deliverableRecords(ctx, records))
 	// Upload the records in a compressed batch; the spool flusher delivers
 	// what could not be sent.
 	var uploadErr *runError

@@ -653,3 +653,4 @@ TEC-09;[B];A;tests/install-acme-pebble.test.sh;WP-420
 TOP-01;[B];D;collector/plugins/snmp/neighbors_test.go;WP-416
 CI-13;[B];D;backend/internal/tenant/rls/ci_decorator_chain_integration_test.go;WP-418
 GATE-02;[Q];D;backend/internal/tenant/rls/ci_decorator_chain_integration_test.go;WP-418
+DIS-02;[B], Profilliste (V);D;backend/internal/discovery/ingest_review_integration_test.go;WP-417

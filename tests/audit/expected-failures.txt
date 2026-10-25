@@ -15,7 +15,6 @@ go;backend/internal/discovery;TestAuditIdentitySearchWithMACsUsesIndexes;F-114
 go;backend/internal/discovery;TestAuditPowerRedundancyIndependentOfBatchOrder;F-112
 go;backend/internal/discovery;TestAuditT3PoisonRecordDoesNotTakeValidRecordsDown;F-090
 go;backend/internal/discovery;TestAuditT3ProbableDuplicateMergeIsCIMerge;F-096
-go;backend/internal/discovery;TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices;F-030
 go;backend/internal/history;TestAuditT3HistoryIncludesLocationChange;F-093
 go;backend/internal/iga;TestAuditT1ApprovalNeverLosesTheProvisioningTask;F-056
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
@@ -39,7 +38,6 @@ go;backend/internal/topology;TestAuditT3BlastRadiusMarksHeuristicCIs;F-098
 go;backend/internal/traceability;TestAuditT5GateIDsAreNotTracedByTheChecklistItself;F-121
 go;backend/internal/traceability;TestAuditT5ValidateRejectsNonTestEvidence;F-121
 go;backend/internal/webhook;TestAuditDefectWebhookConsumerKeepsEventsOnTransientErrors;F-151
-go;collector/collectorcmd;TestAuditClassifiedDeviceNotUploadedAsFallback;F-030
 go;collector/collectorcmd;TestAuditCollectorEnrollsFromEnvironment;F-101
 go;collector/collectorcmd;TestAuditCollectorRenewsCertificateAt60Percent;F-026
 go;collector/collectorcmd;TestAuditScopeExpansionCompleteOrReported;F-106

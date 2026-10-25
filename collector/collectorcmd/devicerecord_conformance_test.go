@@ -29,8 +29,9 @@ import (
 // GLO-12): what the collector uploads in a discovery cycle is a DeviceRecord
 // batch, and every record validates against api/devicerecord.schema.json.
 // The cycle runs the real sweep plugin against a local listener (by address
-// and by host name) and fixture plugins under the SNMP, power and Redfish
-// protocol names that return results shaped like those plugins' results.
+// and by host name) and a second host only the sweep finds, and fixture
+// plugins under the SNMP, power and Redfish protocol names that return
+// results shaped like those plugins' results.
 func TestCollectorOutputConformsToDeviceRecordSchema(t *testing.T) {
 	schema := loadDeviceRecordSchema(t)
 
@@ -49,6 +50,18 @@ func TestCollectorOutputConformsToDeviceRecordSchema(t *testing.T) {
 		}
 	}()
 	port := listener.Addr().(*net.TCPAddr).Port
+	// A second host on the same port that only the sweep answers for.
+	other, otherIP := auditLoopback(t, port)
+	defer other.Close()
+	go func() {
+		for {
+			conn, acceptErr := other.Accept()
+			if acceptErr != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
 
 	swap := map[string]plugins.Plugin{
 		"sweep": &sweep.Plugin{Timeout: time.Second, Concurrency: 4, TCPPorts: []int{port}},
@@ -73,10 +86,10 @@ func TestCollectorOutputConformsToDeviceRecordSchema(t *testing.T) {
 	}
 	before := time.Now().Add(-time.Second)
 	records := discoveryUpload(t, swap, func(cfg *collectorConfig) {
-		cfg.ScanSubnets = []string{"127.0.0.1/32", "localhost"}
+		cfg.ScanSubnets = []string{"127.0.0.1/32", "localhost", otherIP}
 		cfg.Protocols = []string{"sweep", "snmp", "power", "redfish"}
 	})
-	sources := map[string]int{}
+	sources, sweeps := map[string]int{}, map[string]int{}
 	for i, raw := range records {
 		var doc any
 		if err = json.Unmarshal(raw, &doc); err != nil {
@@ -96,11 +109,22 @@ func TestCollectorOutputConformsToDeviceRecordSchema(t *testing.T) {
 			t.Errorf("record %d observed_at %s is not the time of the cycle", i, rec.ObservedAt)
 		}
 		sources[rec.Source]++
+		if rec.Source == "sweep" {
+			sweeps[rec.TargetIP]++
+		}
 	}
-	// Sweep finds the listener by address and by name; SNMP and power report
-	// as snmp; Redfish once.
-	if sources["sweep"] != 2 || sources["snmp"] != 2 || sources["redfish"] != 1 || len(records) != 5 {
-		t.Errorf("records by source: %v", sources)
+	// Sweep finds the listener by address and by name and the second host;
+	// SNMP and power report as snmp; Redfish once. The sweep records of
+	// 127.0.0.1, which SNMP classified, are folded into the SNMP record
+	// (WP-417, DIS-02); the host name counts there when it resolves to
+	// 127.0.0.1 first.
+	byName := 0
+	if addrs, err := net.DefaultResolver.LookupHost(context.Background(), "localhost"); err == nil && len(addrs) > 0 && addrs[0] != "127.0.0.1" {
+		byName = 1
+	}
+	if sweeps["127.0.0.1"] != 0 || sweeps[otherIP] != 1 || sources["sweep"] != 1+byName || sources["snmp"] != 2 || sources["redfish"] != 1 ||
+		len(records) != 4+byName {
+		t.Errorf("records by source: %v, sweep records by target: %v", sources, sweeps)
 	}
 }
 

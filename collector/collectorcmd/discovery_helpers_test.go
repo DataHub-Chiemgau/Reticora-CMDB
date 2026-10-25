@@ -1,7 +1,8 @@
 // Shared helpers of the collector's discovery tests (WP-378): the tests
 // moved out of discovery_auditdefect_test.go (discovery_credentials_test.go,
-// bundle_test.go, discovery_errors_test.go) use them without a build tag,
-// the defect tests still in that file with the tag auditdefect.
+// bundle_test.go, discovery_errors_test.go, discovery_classify_test.go) use
+// them without a build tag, the defect tests still in that file with the tag
+// auditdefect.
 package collectorcmd
 
 import (

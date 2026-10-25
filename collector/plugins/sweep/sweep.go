@@ -210,6 +210,11 @@ func reverseName(ip string) string {
 }
 
 // Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+// The record tells that the target answered (open ports, PTR name; the ARP
+// MAC comes with the probe hit) and carries no evidence for the
+// classification chain: the collector folds it into the record of a
+// protocol that classified the target and uploads it as generic_device
+// only when no protocol did (profiles.MergeByTarget, DIS-02).
 func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
 	observedAt := time.Now()
 	res, err := p.collect(ctx, target, creds)
