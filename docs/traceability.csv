@@ -626,3 +626,5 @@ WFL-01;[P3];B;backend/internal/workflow/submit_form_integration_test.go;WP-603
 IGA-01;[A];B;backend/internal/iga/access_request_workflow_integration_test.go;WP-603
 INS-05;[B];A;tests/timescaledb-update.test.sh;WP-604
 OPS-01;[B];A;tests/timescaledb-update.test.sh;WP-604
+TEN-09;[Q];B;backend/internal/webhook/subscription_scope_integration_test.go;WP-601
+WHK-01;[B];B;backend/internal/webhook/subscription_scope_integration_test.go;WP-601

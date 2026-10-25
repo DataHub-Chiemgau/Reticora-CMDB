@@ -754,10 +754,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List webhook subscriptions */
+    /**
+     * List webhook subscriptions
+     * @description Lists the subscriptions in the caller's scope (TEN-09, E-98): those whose creator's client, site and team scope lies in the caller's scope. Subscriptions created before this rule apply to the whole organization and are listed for callers without client, site and team restriction only. Every route with a subscription id answers 404 for a subscription outside the caller's scope.
+     */
     get: operations['listWebhooks'];
     put?: never;
-    /** Create a webhook subscription */
+    /**
+     * Create a webhook subscription
+     * @description The subscription takes the client, site and team scope of its creator (TEN-09, E-98): only callers whose scope covers it see and manage it, and it receives only events whose objects lie in that scope; events of unknown scope and events about objects of the whole organization reach subscriptions of creators without restriction only. A service account in `service_account_id` must be visible to the creator (422 otherwise); the subscription then receives only the events both the creator's scope and the account's read rights cover.
+     */
     post: operations['createWebhook'];
     delete?: never;
     options?: never;
@@ -887,7 +893,7 @@ export interface paths {
     };
     /**
      * List the webhook dead-letter queue
-     * @description Returns deliveries that exhausted their retry budget and were moved to the dead-letter queue, newest first. Operators inspect this queue to find permanently failed deliveries and replay them.
+     * @description Returns deliveries that exhausted their retry budget and were moved to the dead-letter queue, newest first: those of the subscriptions in the caller's scope (E-98). Operators inspect this queue to find permanently failed deliveries and replay them.
      */
     get: operations['listWebhookDeadLetters'];
     put?: never;
@@ -7785,7 +7791,7 @@ export interface components {
       headers?: {
         [key: string]: string;
       };
-      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose objects the account may read; every CI or asset an event references must be readable, objects without client or site count as readable like under RLS. An event whose scope cannot be determined reaches the subscription only when the account reads org-wide. */
+      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose objects the account may read; every CI or asset an event references must be readable, objects without client or site count as readable like under RLS. An event whose scope cannot be determined reaches the subscription only when the account reads org-wide. The account must be visible to the creator (422 otherwise), and the scope of the creator still applies: the binding never widens it (E-98). */
       service_account_id?: string;
     };
     WebhookDelivery: {
@@ -12424,6 +12430,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

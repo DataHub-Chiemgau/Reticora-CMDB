@@ -122,11 +122,43 @@ func EventReadPermission(event string) string {
 	return ""
 }
 
-// mayDeliver reports whether a subscription receives the event: unbound
-// subscriptions receive every event of the organization, bound ones only
-// events whose objects their service account may read. objects is the
-// resolved scope of the event (eventObjects; nil: unknown).
+// covers reports whether a subscription with the scope snapshot s receives
+// an event about objects (eventObjects; nil: scope unknown), E-98: an
+// org-wide snapshot (none, or no dimension restricted) receives every event;
+// a restricted one only events whose objects all lie in it, with a client
+// in its clients and a site in its sites where it restricts them. Events of
+// unknown scope and events about objects of the whole organization
+// (organizational metadata, rows without client and site) reach org-wide
+// snapshots only. The objects carry no team: the team dimension does not
+// restrict them, like row level security of ci, asset and quantity_item.
+func (s *Scope) covers(objects []ObjectScope) bool {
+	if s.orgWide() {
+		return true
+	}
+	if len(objects) == 0 {
+		return false
+	}
+	for _, o := range objects {
+		if o.ClientID == "" && o.SiteID == "" {
+			return false
+		}
+		if (s.Clients != nil && !containsID(s.Clients, o.ClientID)) || (s.Sites != nil && !containsID(s.Sites, o.SiteID)) {
+			return false
+		}
+	}
+	return true
+}
+
+// mayDeliver reports whether a subscription receives the event: the objects
+// of the event must lie in the scope snapshot of the subscription (covers,
+// E-98); then unbound subscriptions receive the event, bound ones only when
+// their service account may read its objects as well, so a binding never
+// widens the scope of the subscription's creator. objects is the resolved
+// scope of the event (eventObjects; nil: unknown).
 func (d *Dispatcher) mayDeliver(ctx context.Context, orgID, event string, objects []ObjectScope, sub *Subscription) bool {
+	if !sub.Scope.covers(objects) {
+		return false
+	}
 	if sub.ServiceAccountID == "" {
 		return true
 	}
@@ -260,10 +292,11 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 		return
 	}
 
-	// Events reach every subscription of the organization, independent of
-	// the acting principal's client scope: the lookup runs org-wide on behalf
-	// of the organization (E-08; WP-022 moves the dispatcher to a system
-	// principal per organization).
+	// The lookup finds every subscription of the organization, independent
+	// of the acting principal's client scope: it runs org-wide on behalf of
+	// the organization (E-08; WP-022 moves the dispatcher to a system
+	// principal per organization). mayDeliver then applies the scope
+	// snapshot of each subscription (E-98).
 	var subs []Subscription
 	seen := map[string]bool{}
 	for _, name := range append([]string{event}, aliases...) {
@@ -290,10 +323,10 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 	}
 
 	// The scope of the event objects is resolved once, and only when a
-	// bound subscription needs it.
+	// bound subscription or a restricted scope snapshot needs it.
 	var objects []ObjectScope
 	for i := range subs {
-		if subs[i].ServiceAccountID != "" {
+		if subs[i].ServiceAccountID != "" || !subs[i].Scope.orgWide() {
 			objects = d.eventObjects(ctx, orgID, event, body)
 			break
 		}
@@ -427,10 +460,18 @@ func (d *Dispatcher) Retry(ctx context.Context, orgID, subscriptionID, deliveryI
 	return r.Requeue(ctx, orgID, subscriptionID, deliveryID, d.now())
 }
 
-// ListDeadLetters returns the dead-letter queue of a tenant.
+// ListDeadLetters returns the dead-letter queue of a tenant: the entries of
+// the subscriptions visible in ctx (E-98). The PostgreSQL store reads them
+// under row level security; for the memory store the repository decides.
 func (d *Dispatcher) ListDeadLetters(ctx context.Context, orgID string, page api.PaginationParams) ([]DeadLetter, int, error) {
 	if d == nil || d.store == nil {
 		return nil, 0, ErrNoDeliveryStore
+	}
+	if m, ok := d.store.(*MemoryDeliveryStore); ok && d.repo != nil {
+		return m.listDeadLetters(orgID, page, func(subscriptionID string) bool {
+			_, err := d.repo.GetByID(ctx, orgID, subscriptionID)
+			return err == nil
+		})
 	}
 	return d.store.ListDeadLetters(ctx, orgID, page)
 }

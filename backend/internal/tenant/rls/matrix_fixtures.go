@@ -43,8 +43,9 @@ var Channels = []Channel{
 		Write: "POST /api/v1/review-items/{id}/resolve"},
 	{Name: "review-without-candidates", Read: "GET /api/v1/review-items, GET /api/v1/review-items/{id} (items without candidates)",
 		Write: "POST /api/v1/review-items/{id}/resolve"},
-	{Name: "webhook", Read: "GET /api/v1/webhooks, GET /api/v1/webhooks/{id}",
-		Write: "POST /api/v1/webhooks, DELETE /api/v1/webhooks/{id}"},
+	{Name: "webhook", Read: "GET /api/v1/webhooks, GET /api/v1/webhooks/{id}, GET /api/v1/webhooks/{id}/deliveries, GET /api/v1/webhooks/dead-letters",
+		Write: "POST /api/v1/webhooks (also with service_account_id), POST /api/v1/webhooks/{id}/test, POST /api/v1/webhooks/{id}/rotate-secret, " +
+			"POST /api/v1/webhooks/{id}/deliveries/{delivery_id}/retry, DELETE /api/v1/webhooks/{id}"},
 	{Name: "notification", Read: "GET /api/v1/notifications",
 		Write: "POST /api/v1/notifications/{id}/read, POST /api/v1/notifications/read-all"},
 	{Name: "job", Read: "GET /api/v1/jobs, GET /api/v1/jobs/{id}, GET /api/v1/jobs/{id}/result",

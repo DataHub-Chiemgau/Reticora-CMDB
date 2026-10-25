@@ -317,7 +317,7 @@ type channelMatrix struct {
 	mounts                              [3]object
 	metric                              map[string]string
 	reviews, reviewsNoCandidates        []object
-	hookA, hookB                        object
+	hooks                               []matrixHook
 	noteOwn, noteOther, noteB           object
 	jobC1, jobS2, jobTeam, jobMulti     object
 	jobSystem, jobB, exportJob          object
@@ -460,9 +460,12 @@ func newChannelMatrix(t *testing.T) *channelMatrix {
 		{m.review(t, f.OrgB, "", "", ""), m.onlyB},
 	}
 
-	// Organization-level objects: webhooks; user-level: the inbox.
-	m.hookA = object{m.hook(t, f.OrgA), m.allA}
-	m.hookB = object{m.hook(t, f.OrgB), m.onlyB}
+	// Webhook subscriptions with the scope snapshot of their creator
+	// (WP-601, E-98), each with a failed delivery and a dead letter;
+	// user-level: the inbox.
+	for _, s := range m.hookSnapshots() {
+		m.hooks = append(m.hooks, m.hook(t, s))
+	}
 	m.noteOwn = object{m.note(t, f.OrgA, m.userA), seenBy("org", "client", "site", "team", "multi")}
 	m.noteOther = object{m.note(t, f.OrgA, m.otherA), seenBy("other-user")}
 	m.noteB = object{m.note(t, f.OrgB, m.userB), m.onlyB}
@@ -917,24 +920,102 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 		return m.review(t, [4]string{f.OrgA, f.OrgA, f.OrgA, f.OrgB}[i], "", [4]string{f.Client1, f.Client2, "", ""}[i], [4]string{m.site1, m.site2, "", ""}[i])
 	})
 
-	// Webhook subscriptions are objects of the organization (no client or
-	// site column): every principal of the organization reads and manages
-	// them, the other organization never.
-	hooks := []object{m.hookA, m.hookB}
+	// Webhook subscriptions carry the scope snapshot of their creator
+	// (WP-601, E-98): list, detail, deliveries and dead letters show a
+	// subscription where its snapshot lies in the caller's scope; test,
+	// secret rotation, retry and delete of any other answer 404 like an
+	// unknown id and change nothing. Every principal creates subscriptions
+	// with its own scope as snapshot; a service account of the other
+	// organization is not found (422 on service_account_id).
+	hookObjects := func(dead bool) []object {
+		var out []object
+		for _, h := range m.hooks {
+			id := h.id
+			if dead {
+				id = h.dead
+			}
+			out = append(out, object{id, h.seen})
+		}
+		return out
+	}
 	rows["webhook"] = matrixRow{
 		read: func(p *channelPrincipal) []matrixProbe {
-			return append([]matrixProbe{list(p, "/api/v1/webhooks", hooks...)}, details(p, "/api/v1/webhooks/", "", hooks...)...)
+			out := append([]matrixProbe{list(p, "/api/v1/webhooks?limit=200", hookObjects(false)...)},
+				details(p, "/api/v1/webhooks/", "", hookObjects(false)...)...)
+			for _, h := range m.hooks {
+				probe := get("/api/v1/webhooks/"+h.id+"/deliveries", h.seen.status(p, http.StatusOK))
+				if h.seen[p.kind] {
+					probe.show = []string{h.failed}
+				} else {
+					probe.hide = []string{h.failed}
+				}
+				out = append(out, probe)
+			}
+			return append(out, get("/api/v1/webhooks/"+unknownID+"/deliveries", http.StatusNotFound),
+				list(p, "/api/v1/webhooks/dead-letters?limit=200", hookObjects(true)...))
 		},
 		write: func(t *testing.T, p *channelPrincipal) []matrixProbe {
-			name := m.name("chm-hook")
-			out := []matrixProbe{{method: http.MethodPost, path: "/api/v1/webhooks", want: http.StatusCreated,
-				body:  map[string]any{"name": name, "url": "https://hooks.example.org/" + name, "secret": "s", "events": []string{"ci.created"}},
-				after: m.count(true, `SELECT count(*) FROM webhook_subscription WHERE organization_id = $1 AND name = $2`, p.org, name)}}
-			for _, h := range []object{{m.hook(t, f.OrgA), m.allA}, {m.hook(t, f.OrgB), m.onlyB}} {
-				out = append(out, matrixProbe{method: http.MethodDelete, path: "/api/v1/webhooks/" + h.id, want: h.seen.status(p, http.StatusNoContent),
-					after: m.count(!h.seen[p.kind], `SELECT count(*) FROM webhook_subscription WHERE id = $1`, h.id)})
+			// snapshot is the scope of p as the creator's snapshot is stored.
+			dim := func(s identity.ScopeSet) string {
+				if s.All {
+					return "NULL"
+				}
+				return "{" + strings.Join(s.IDs, ",") + "}"
 			}
-			return append(out, matrixProbe{method: http.MethodDelete, path: "/api/v1/webhooks/" + unknownID, want: http.StatusNotFound})
+			snapshot := "true|" + dim(p.scope.Clients) + "|" + dim(p.scope.Sites) + "|" + dim(p.scope.Teams)
+			stored := `SELECT COALESCE((SELECT scope_recorded::text || '|' || COALESCE(scope_clients::text, 'NULL') || '|' ||
+				COALESCE(scope_sites::text, 'NULL') || '|' || COALESCE(scope_teams::text, 'NULL')
+				FROM webhook_subscription WHERE organization_id = $1 AND name = $2), 'not stored')`
+			otherOrg := map[string]string{f.OrgA: f.OrgB, f.OrgB: f.OrgA}[p.org]
+			account := func(org string) string {
+				return m.scalar(t, `INSERT INTO service_account (organization_id, name) VALUES ($1, $2) RETURNING id::text`, org, m.name("chm-sa"))
+			}
+			var out []matrixProbe
+			for _, c := range []struct {
+				sa     string
+				want   int
+				stored bool
+			}{{"", http.StatusCreated, true}, {account(p.org), http.StatusCreated, true}, {account(otherOrg), http.StatusUnprocessableEntity, false}} {
+				name := m.name("chm-hook")
+				body := map[string]any{"name": name, "url": "https://hooks.example.org/" + name, "secret": "s", "events": []string{"ci.created"}}
+				var show []string
+				if c.sa != "" {
+					body["service_account_id"] = c.sa
+				}
+				if !c.stored {
+					show = []string{`"field":"service_account_id"`}
+				}
+				out = append(out, matrixProbe{method: http.MethodPost, path: "/api/v1/webhooks", body: body, want: c.want, show: show,
+					after: func(t *testing.T) {
+						t.Helper()
+						if c.stored {
+							if got := m.scalar(t, stored, p.org, name); got != snapshot {
+								t.Errorf("snapshot of the subscription %s created by %s: %s, want %s", name, p.kind, got, snapshot)
+							}
+							return
+						}
+						m.count(false, `SELECT count(*) FROM webhook_subscription WHERE name = $1`, name)(t)
+					}})
+			}
+			for _, s := range m.hookSnapshots() {
+				h := m.hook(t, s)
+				status := func(ok int) int { return h.seen.status(p, ok) }
+				out = append(out,
+					matrixProbe{method: http.MethodPost, path: "/api/v1/webhooks/" + h.id + "/test", want: status(http.StatusOK)},
+					matrixProbe{method: http.MethodPost, path: "/api/v1/webhooks/" + h.id + "/rotate-secret", body: map[string]any{"secret": "chm-rotated-secret"},
+						want:  status(http.StatusOK),
+						after: m.count(h.seen[p.kind], `SELECT count(*) FROM webhook_subscription WHERE id = $1 AND secret = 'chm-rotated-secret'`, h.id)},
+					matrixProbe{method: http.MethodPost, path: "/api/v1/webhooks/" + h.id + "/deliveries/" + h.failed + "/retry", want: status(http.StatusAccepted),
+						after: m.count(!h.seen[p.kind], `SELECT count(*) FROM webhook_delivery WHERE id = $1 AND status = 'failed'`, h.failed)},
+					matrixProbe{method: http.MethodDelete, path: "/api/v1/webhooks/" + h.id, want: status(http.StatusNoContent),
+						after: m.count(!h.seen[p.kind], `SELECT count(*) FROM webhook_subscription WHERE id = $1`, h.id)})
+			}
+			for _, probe := range []struct{ method, path string }{
+				{http.MethodPost, "/test"}, {http.MethodPost, "/rotate-secret"}, {http.MethodPost, "/deliveries/" + unknownID + "/retry"}, {http.MethodDelete, ""},
+			} {
+				out = append(out, matrixProbe{method: probe.method, path: "/api/v1/webhooks/" + unknownID + probe.path, want: http.StatusNotFound})
+			}
+			return out
 		},
 	}
 
@@ -1321,10 +1402,65 @@ func (m *channelMatrix) review(t *testing.T, org, candidate, client, site string
 		org, fmt.Sprintf(`{"name":%q}`, m.name("chm-review")), candidates, client, site)
 }
 
-func (m *channelMatrix) hook(t *testing.T, org string) string {
+// hookSnapshot is the scope snapshot of a webhook subscription of the
+// matrix and the principals that see it. clients, sites and teams are
+// comma-separated ("" = unrestricted in the dimension); clients "-" stores
+// no snapshot, as for the subscriptions from before migration 000155.
+type hookSnapshot struct {
+	org, clients, sites, teams string
+	seen                       seen
+}
+
+// matrixHook is a webhook subscription of the matrix with a failed delivery
+// and a dead letter.
+type matrixHook struct {
+	object
+	failed, dead string
+}
+
+// hookSnapshots are the webhook subscriptions of the matrix (WP-601, E-98):
+// a subscription is visible where its snapshot lies in the caller's scope;
+// a dimension without snapshot needs a caller unrestricted in it, a
+// subscription without snapshot an org-wide one.
+func (m *channelMatrix) hookSnapshots() []hookSnapshot {
+	f := m.f
+	return []hookSnapshot{
+		{f.OrgA, f.Client1, "", "", seenBy("org", "other-user", "client")},
+		{f.OrgA, "", m.site2, "", seenBy("org", "other-user", "site")},
+		{f.OrgA, "", "", m.team, seenBy("org", "other-user", "team")},
+		{f.OrgA, f.Client1 + "," + f.Client2, m.site1, "", seenBy("org", "other-user", "multi")},
+		{f.OrgA, "-", "", "", seenBy("org", "other-user")},
+		{f.OrgB, "-", "", "", m.onlyB},
+	}
+}
+
+// hook inserts a webhook subscription with the snapshot s, a failed
+// delivery and a dead letter. Its URL is a loopback address the egress
+// protection refuses at once, so a test delivery needs no network.
+func (m *channelMatrix) hook(t *testing.T, s hookSnapshot) matrixHook {
 	t.Helper()
-	return m.scalar(t, `INSERT INTO webhook_subscription (organization_id, name, url, secret, events)
-		VALUES ($1, $2, 'https://hooks.example.org/h', 's', '{ci.created}') RETURNING id::text`, org, m.name("chm-hook"))
+	arr := func(v string) any {
+		if v == "" {
+			return nil
+		}
+		return strings.Split(v, ",")
+	}
+	clients, recorded := s.clients, s.clients != "-"
+	if !recorded {
+		clients = ""
+	}
+	h := matrixHook{object: object{seen: s.seen}}
+	h.id = m.scalar(t, `INSERT INTO webhook_subscription (organization_id, name, url, secret, events, scope_recorded, scope_clients, scope_sites, scope_teams)
+		VALUES ($1, $2, 'https://127.0.0.1/chm-hook', 's', '{ci.created}', $3, $4::uuid[], $5::uuid[], $6::uuid[]) RETURNING id::text`,
+		s.org, m.name("chm-hook"), recorded, arr(clients), arr(s.sites), arr(s.teams))
+	delivery := func(status string) string {
+		return m.scalar(t, `INSERT INTO webhook_delivery (organization_id, subscription_id, event, payload, status, attempt, max_attempts)
+			VALUES ($1, $2, 'ci.created', '{}', $3, 6, 6) RETURNING id::text`, s.org, h.id, status)
+	}
+	h.failed = delivery("failed")
+	h.dead = m.scalar(t, `INSERT INTO webhook_dead_letter (delivery_id, organization_id, subscription_id, event, payload, attempts)
+		VALUES ($1, $2, $3, 'ci.created', '{}', 6) RETURNING id::text`, delivery("dead"), s.org, h.id)
+	return h
 }
 
 func (m *channelMatrix) note(t *testing.T, org, user string) string {

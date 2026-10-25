@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // TestEventScopeResolution covers WP-356 (RBA-08): every subscribable event
@@ -204,6 +207,99 @@ func TestDispatcherDeliversEventsOfUnknownScopeOnlyOrgWide(t *testing.T) {
 			map[string]int{"unbound": 1, "orgwide": 1}},
 	} {
 		if g := run(tc.resolver, tc.event, tc.payload); !reflect.DeepEqual(g, tc.want) {
+			raw, _ := json.Marshal(tc.payload)
+			t.Errorf("%s: %s %s delivered %v, want %v", tc.name, tc.event, raw, g, tc.want)
+		}
+	}
+}
+
+// TestDispatcherDeliversWithinTheScopeSnapshot covers E-98 (WP-601,
+// TEN-09): a subscription with the scope snapshot of a restricted creator
+// receives only events whose objects all lie in the snapshot; events of
+// unknown scope and events about objects of the whole organization reach
+// only subscriptions with an org-wide snapshot or without one (the existing
+// subscriptions, delivery unchanged). The objects carry no team, so a
+// team-only snapshot is not restricted by them. A subscription with a
+// client-1 snapshot bound to an org-wide service account receives the
+// client-1 events only: the binding does not widen the creator's scope.
+func TestDispatcherDeliversWithinTheScopeSnapshot(t *testing.T) {
+	var mu sync.Mutex
+	got := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got[strings.TrimPrefix(r.URL.Path, "/")]++
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	access := fakeAccess{"sa-all|ci:read|c1": true, "sa-all|ci:read|C2": true, "sa-all|ci:read|": true, "sa-all|ci:read|*": true}
+	const ciC1, ciC1S2, ciC1NoSite = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"
+	const ciShared, ciC2 = "44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"
+	objects := fakeResolver{ciC1: {ClientID: "c1", SiteID: "s1"}, ciC1S2: {ClientID: "c1", SiteID: "s2"}, ciC1NoSite: {ClientID: "c1"},
+		ciShared: {}, ciC2: {ClientID: "C2", SiteID: "s3"}}
+
+	run := func(event string, payload any) map[string]int {
+		t.Helper()
+		mu.Lock()
+		got = map[string]int{}
+		mu.Unlock()
+		repo := NewMemoryRepository()
+		for _, sub := range []Subscription{
+			{Name: "legacy"},
+			{Name: "orgwide", Scope: &Scope{}},
+			{Name: "client1", Scope: &Scope{Clients: []string{"C1"}}},
+			{Name: "site1", Scope: &Scope{Clients: []string{"c1"}, Sites: []string{"s1"}}},
+			{Name: "team", Scope: &Scope{Teams: []string{"t1"}}},
+			{Name: "noclient", Scope: &Scope{Clients: []string{}}},
+			{Name: "bound", Scope: &Scope{Clients: []string{"c1"}}, ServiceAccountID: "sa-all"},
+		} {
+			sub.OrganizationID, sub.URL, sub.Secret, sub.Events, sub.IsActive = "org-1", server.URL+"/"+sub.Name, "secret", []string{event}, true
+			if err := repo.Create(context.Background(), &sub); err != nil {
+				t.Fatal(err)
+			}
+		}
+		d := NewDispatcher(repo, server.Client(), DispatcherOptions{Access: access, Objects: objects, PollInterval: -1})
+		// The scope of the acting principal does not matter: the dispatcher
+		// reads the subscriptions of the whole organization.
+		scope := database.OrgWideScope("org-1", "")
+		scope.Clients = database.ScopeIDs("c2")
+		d.Dispatch(database.ContextWithTenantScope(context.Background(), &scope), "org-1", event, payload)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = d.Shutdown(ctx)
+		mu.Lock()
+		defer mu.Unlock()
+		return maps.Clone(got)
+	}
+
+	orgWideAnd := func(names ...string) map[string]int {
+		out := map[string]int{"legacy": 1, "orgwide": 1}
+		for _, name := range names {
+			out[name] = 1
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name    string
+		event   string
+		payload any
+		want    map[string]int
+	}{
+		{"CI of client 1 at site 1", "ci.changed", map[string]any{"id": ciC1}, orgWideAnd("client1", "site1", "team", "bound")},
+		{"CI of client 1 at site 2", "ci.changed", map[string]any{"id": ciC1S2}, orgWideAnd("client1", "team", "bound")},
+		{"CI of client 1 without site", "ci.changed", map[string]any{"id": ciC1NoSite}, orgWideAnd("client1", "team", "bound")},
+		{"payload scope client 1", "ci.created", map[string]any{"id": ciC2, "client_id": "c1"}, orgWideAnd("client1", "team", "bound")},
+		{"CI of client 2", "ci.changed", map[string]any{"id": ciC2}, orgWideAnd("team")},
+		{"relationship client 1 to client 2", "relationship.created", map[string]any{"source_ci_id": ciC1, "target_ci_id": ciC2}, orgWideAnd("team")},
+		{"merge within client 1", "ci.merged", map[string]any{"survivor_id": ciC1, "victim_id": ciC1S2}, orgWideAnd("client1", "team", "bound")},
+		{"CI without client and site", "ci.changed", map[string]any{"id": ciShared}, orgWideAnd()},
+		{"merge of client 1 with a CI without client", "ci.merged", map[string]any{"survivor_id": ciC1, "victim_id": ciShared}, orgWideAnd()},
+		{"organizational", "ci_type.created", map[string]any{"id": "t"}, orgWideAnd()},
+		{"unknown CI", "ci.changed", map[string]any{"id": "66666666-6666-4666-8666-666666666666"}, orgWideAnd()},
+		{"not resolvable type", "lifecycle.transitioned", map[string]any{"ci_id": ciC1, "client_id": "c1"}, orgWideAnd()},
+		{"event without scope rule", "workflow.custom", map[string]any{"id": ciC1, "client_id": "c1"}, orgWideAnd()},
+	} {
+		if g := run(tc.event, tc.payload); !reflect.DeepEqual(g, tc.want) {
 			raw, _ := json.Marshal(tc.payload)
 			t.Errorf("%s: %s %s delivered %v, want %v", tc.name, tc.event, raw, g, tc.want)
 		}

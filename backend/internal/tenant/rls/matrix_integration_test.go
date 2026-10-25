@@ -38,6 +38,8 @@ var matrixOrgWideWrites = map[string]string{
 // it (E-09); the snapshot rules are pinned by the test named here.
 var matrixSnapshotScoped = map[string]string{
 	"job": "jobs in the scope of their creator, migration 000154 (WP-404, F-163): jobs.TestJobScopeAgainstPostgres",
+	"webhook_subscription": "webhook subscriptions in the scope of their creator, migration 000155 (WP-601, E-98): " +
+		"webhook.TestSubscriptionScopeAgainstPostgres",
 }
 
 // restricted reports whether the principal is restricted in any scope

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -224,15 +225,23 @@ func (s *MemoryDeliveryStore) MoveToDeadLetter(_ context.Context, rec DeliveryRe
 
 // ListDeadLetters returns the dead-letter queue of one tenant, newest first.
 func (s *MemoryDeliveryStore) ListDeadLetters(_ context.Context, orgID string, page api.PaginationParams) ([]DeadLetter, int, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	return s.listDeadLetters(orgID, page, nil)
+}
 
+// listDeadLetters returns the dead letters of one tenant whose subscription
+// keep accepts (nil: every one), newest first.
+func (s *MemoryDeliveryStore) listDeadLetters(orgID string, page api.PaginationParams, keep func(subscriptionID string) bool) ([]DeadLetter, int, error) {
+	s.mu.RLock()
 	var all []DeadLetter
 	for _, dl := range s.deadLetters {
 		if dl.OrganizationID != orgID {
 			continue
 		}
 		all = append(all, dl)
+	}
+	s.mu.RUnlock()
+	if keep != nil {
+		all = slices.DeleteFunc(all, func(dl DeadLetter) bool { return !keep(dl.SubscriptionID) })
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].DeadAt.After(all[j].DeadAt) })
 
