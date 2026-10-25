@@ -102,10 +102,12 @@ func (h *Handler) SetOverride(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "override.changed", fv)
-	api.WriteJSON(w, http.StatusOK, fv)
+	writeOverride(w, fv)
 }
 
-// ClearOverride handles DELETE /api/v1/cis/{id}/fields/{name}/override
+// ClearOverride handles DELETE /api/v1/cis/{id}/fields/{name}/override. An
+// unknown CI or field is 404, any other failure goes through
+// api.WriteRepoError (F-232).
 func (h *Handler) ClearOverride(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -113,11 +115,25 @@ func (h *Handler) ClearOverride(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fv, err := h.repo.ClearOverride(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), chi.URLParam(r, "name"))
-	if err != nil {
+	if errors.Is(err, ErrNotFound) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "field value not found")
 		return
 	}
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
 	h.dispatch(r, t.OrganizationID, "override.changed", fv)
+	writeOverride(w, fv)
+}
+
+// writeOverride answers an override change with the field value and the
+// CI's new version as ETag (API-07): the next PATCH of the CI sends it as
+// If-Match.
+func writeOverride(w http.ResponseWriter, fv *FieldValue) {
+	if fv.CIVersion > 0 {
+		w.Header().Set("ETag", api.ETag(fv.CIVersion))
+	}
 	api.WriteJSON(w, http.StatusOK, fv)
 }
 

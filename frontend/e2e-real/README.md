@@ -21,6 +21,13 @@ The server needs self-signup enabled (`RETICORA_SIGNUP_VERIFY_URL`, `RETICORA_SI
 client, SMTP) exactly as `e2e/fixtures/setup-onboarding.sh` configures it. Every spec creates its own tenants through
 the self-signup UI (`support/stack.ts`, `signupTenant`), so specs do not depend on each other or on seed data.
 
+Invitations need `RETICORA_INVITATION_ACCEPT_URL`, the page the link of the invitation mail opens (WP-421, NTF-05);
+without it `POST /api/v1/invitations` and `/invitations/{id}/renew` answer 503 and `roles-authz.spec.ts` fails. The
+installed stack derives it from `RETICORA_PUBLIC_BASE_URL` (`deploy/docker-compose/docker-compose.yml`), the onboarding
+overlay `e2e/fixtures/docker-compose.e2e.yml` sets it to `${E2E_BASE_URL:-http://localhost:3000}/invitations/accept`.
+Issue and renewal mail the link to the invitee over the tenant's e-mail channel (`roles-authz.spec.ts` test 05 reads it
+from the mail catcher).
+
 ## Real collector and SNMP fake (`onboarding-bundle.spec.ts`, WP-384)
 
 `discovery-override.spec.ts` runs the collector with the simulated fleet (`RETICORA_SIMULATE=true`).

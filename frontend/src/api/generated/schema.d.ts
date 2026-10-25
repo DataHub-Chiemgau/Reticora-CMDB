@@ -762,7 +762,7 @@ export interface paths {
     put?: never;
     /**
      * Create a webhook subscription
-     * @description The subscription takes the client, site and team scope of its creator (TEN-09, E-98): only callers whose scope covers it see and manage it, and it receives only events whose objects lie in that scope; events of unknown scope and events about objects of the whole organization reach subscriptions of creators without restriction only. A service account in `service_account_id` must be visible to the creator (422 otherwise); the subscription then receives only the events both the creator's scope and the account's read rights cover.
+     * @description The subscription takes the client, site and team scope of its creator (TEN-09, E-98): only callers whose scope covers it see and manage it, and it receives only events whose objects lie in that scope; events of unknown scope and events about objects of the whole organization reach subscriptions of creators without restriction only. A service account in `service_account_id` must be visible to the creator (422 otherwise); the subscription then receives only the events both the creator's scope and the account's read rights cover. invitation.created is delivered without its link: the acceptance token reaches the invitee by mail only.
      */
     post: operations['createWebhook'];
     delete?: never;
@@ -4172,7 +4172,7 @@ export interface paths {
     put?: never;
     /**
      * Invite an address with a predefined role and scope (TLC-03)
-     * @description The invitation is valid for seven days. The response carries the token once; only its hash is stored. Role and scope must exist in the organization (422 otherwise); a client role (scope client) is invited with scope_type client only, a site role with scope_type site only, an organization role with any scope_type (422 field scope_type otherwise, F-305). Grant ceiling (RBA-03, F-015): the issuer must hold user:manage and every permission of the role in a scope covering the invitation's scope (a client covers its sites, site.client_id); otherwise 403, nothing is stored or audited. A pending invitation for the same address is a conflict (renew it instead). Requires user:manage.
+     * @description The invitation is valid for seven days. The response carries the token once; only its hash is stored. Role and scope must exist in the organization (422 otherwise); a client role (scope client) is invited with scope_type client only, a site role with scope_type site only, an organization role with any scope_type (422 field scope_type otherwise, F-305). Grant ceiling (RBA-03, F-015): the issuer must hold user:manage and every permission of the role in a scope covering the invitation's scope (a client covers its sites, site.client_id); otherwise 403, nothing is stored or audited. A pending invitation for the same address is a conflict (renew it instead). In the same transaction the event invitation.created (NTF-05) mails the invitee the organization name, the expiry and the link RETICORA_INVITATION_ACCEPT_URL?token=<token>; a refused issue (403, 409, 422) creates no event. Webhook deliveries of the event leave out the link. Without RETICORA_INVITATION_ACCEPT_URL the server answers 503 (invitations not configured), like the signup without verification page. Requires user:manage.
      */
     post: operations['issueInvitation'];
     delete?: never;
@@ -4215,7 +4215,7 @@ export interface paths {
     put?: never;
     /**
      * Renew a pending or expired invitation (TLC-03)
-     * @description A new token and seven more days; the old token stops working. An accepted invitation is 409. The grant ceiling of the issue applies to the renewing principal, not to the original issuer: it must hold user:manage and every permission of the invited role in a scope covering the invitation's scope (403 otherwise, nothing changes). Requires user:manage.
+     * @description A new token and seven more days; the old token stops working. An accepted invitation is 409. The grant ceiling of the issue applies to the renewing principal, not to the original issuer: it must hold user:manage and every permission of the invited role in a scope covering the invitation's scope (403 otherwise, nothing changes). Like the issue, the renewal mails the invitee the new link and expiry (invitation.created); without RETICORA_INVITATION_ACCEPT_URL it answers 503 (invitations not configured). Requires user:manage.
      */
     post: operations['renewInvitation'];
     delete?: never;
@@ -6005,13 +6005,13 @@ export interface paths {
     get?: never;
     /**
      * Set a manual field override
-     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden.
+     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden. The override is a manual write (API-07): in the same transaction the CI version rises by one and the CI history records the change (change_type override; an attribute counts as the field attributes, as for PATCH), so a PATCH of the field with an older If-Match is refused with 409.
      */
     put: operations['putCisIdFieldsNameOverride'];
     post?: never;
     /**
      * Clear a manual field override
-     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited.
+     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited. Clearing an override is a manual write (API-07): the CI version rises by one and the CI history records the change, as for PUT. A field without an override keeps the version.
      */
     delete: operations['deleteCisIdFieldsNameOverride'];
     options?: never;
@@ -6296,7 +6296,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a leaf node
-     * @description Refused with 409 while the node has child locations or CIs, assets, stock items, movements, rack mounts or role assignments reference it (LOC-11). Deleting a site, building, room or rack through its own endpoint checks the whole subtree.
+     * @description Refused with 409 while the node has child locations or CIs, assets, stock items, movements, rack mounts or role assignments reference it (LOC-11); a site also while VLANs, subnets, collectors, discovery scopes, unexpired agent enrollment tokens or merge tombstones within tombstone_until are bound to it (E-71). Expired tokens and tombstones are removed with the site. Deleting a site, building, room or rack through its own endpoint follows the same rules; no delete cascades into the subtree.
      */
     delete: operations['deleteLocation'];
     options?: never;
@@ -7376,6 +7376,11 @@ export interface components {
       tms?: string[] | null;
       name?: string;
       email?: string;
+      /**
+       * @description Session id: the refresh family started at login. Every refresh
+       *     keeps it; the per-session rate limit counts it (API-04).
+       */
+      sid?: string;
       jti?: string;
       groups?: string[];
       /**
@@ -9161,6 +9166,7 @@ export interface components {
       }[];
     };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
+      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). */
       dependencies: (
         | 'location'
         | 'ci'
@@ -9169,6 +9175,12 @@ export interface components {
         | 'asset_movement'
         | 'rack_mount'
         | 'role_assignment'
+        | 'vlan'
+        | 'subnet'
+        | 'collector'
+        | 'discovery_scope'
+        | 'agent_enrollment_token'
+        | 'ci_merge'
       )[];
     };
     /** @enum {string} */
@@ -25995,6 +26007,8 @@ export interface operations {
       /** @description Field provenance after the change */
       200: {
         headers: {
+          /** @description The new CI version (API-07); send it as If-Match with a PATCH of the CI. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -26013,6 +26027,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      500: components['responses']['InternalServerError'];
     };
   };
   deleteCisIdFieldsNameOverride: {
@@ -26031,6 +26046,8 @@ export interface operations {
       /** @description Field provenance after the change */
       200: {
         headers: {
+          /** @description The CI version after the change (API-07); send it as If-Match with a PATCH of the CI. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -26038,7 +26055,16 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
+      /** @description Unknown or invisible CI, or the CI has no value of the field */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
     };
   };
   createCisIdLifecycleTransitions: {

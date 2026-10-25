@@ -45,9 +45,9 @@ type Principal struct {
 	Permissions []Permission
 	// Type distinguishes interactive users from service tokens.
 	Type PrincipalType
-	// Credential identifies the credential of the request: the token id
-	// (jti) of a session or the id of an API key. The per-credential rate
-	// limit counts it (API-04).
+	// Credential identifies the credential of the request: the session id
+	// (sid; the token id jti for tokens without sid) of a session or the id
+	// of an API key. The per-credential rate limit counts it (API-04).
 	Credential string
 }
 

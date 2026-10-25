@@ -225,7 +225,7 @@ func allPermissions() []Permission {
 
 // SessionClaims represent the internal RS256 session JWT claims. On the wire
 // they follow AUT-02 (see MarshalJSON): sub, org, scopes, cls[], sts[],
-// tms[], name, email, plus jti, iat and exp as NumericDate.
+// tms[], name, email, plus sid, jti, iat and exp as NumericDate.
 type SessionClaims struct {
 	Subject        string
 	OrganizationID string
@@ -242,6 +242,10 @@ type SessionClaims struct {
 	Groups           []string
 	Name             string
 	Email            string
+	// SessionID (sid) names the session: the refresh family started at
+	// login. Every refresh keeps it, so the per-session rate limit of API-04
+	// counts the session, not the access token.
+	SessionID string
 	// ID is the token id (jti) a logout revokes.
 	ID string
 	// Operator marks an operator session of the /admin path (SEC-07). Such a
@@ -270,6 +274,7 @@ type sessionClaimsWire struct {
 	Groups           []string                        `json:"groups,omitempty"`
 	Name             string                          `json:"name,omitempty"`
 	Email            string                          `json:"email,omitempty"`
+	SessionID        string                          `json:"sid,omitempty"`
 	ID               string                          `json:"jti,omitempty"`
 	Operator         bool                            `json:"opr,omitempty"`
 	IssuedAt         int64                           `json:"iat,omitempty"`
@@ -347,6 +352,7 @@ func (c SessionClaims) MarshalJSON() ([]byte, error) { //nolint:gocritic // see 
 		Groups:         c.Groups,
 		Name:           c.Name,
 		Email:          c.Email,
+		SessionID:      c.SessionID,
 		ID:             c.ID,
 		Operator:       c.Operator,
 		IssuedAt:       numericDate(c.IssuedAt),
@@ -383,6 +389,7 @@ func (c *SessionClaims) UnmarshalJSON(data []byte) error {
 		Groups:         w.Groups,
 		Name:           w.Name,
 		Email:          w.Email,
+		SessionID:      w.SessionID,
 		ID:             w.ID,
 		Operator:       w.Operator,
 		IssuedAt:       fromNumericDate(w.IssuedAt),

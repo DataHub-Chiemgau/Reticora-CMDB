@@ -366,6 +366,10 @@ func randomToken(n int) (string, error) {
 // newTokenID returns a random JWT id (jti).
 func newTokenID() (string, error) { return randomToken(16) }
 
+// newSessionID returns a random session id (sid): the refresh family of a
+// login.
+func newSessionID() (string, error) { return randomToken(16) }
+
 // Refresh token errors. Every one of them ends the session; the handler
 // answers 401 and clears the refresh cookie.
 var (
@@ -375,9 +379,9 @@ var (
 	ErrRefreshReused = errors.New("identity: refresh token was already used; session revoked")
 )
 
-// RefreshGrant is the session a refresh token stands for: its family, the
-// start of the family and the claims of the last access token (without
-// iat, exp and jti).
+// RefreshGrant is the session a refresh token stands for: its family (the
+// session id sid of its access tokens), the start of the family and the
+// claims of the last access token (without iat, exp and jti).
 type RefreshGrant struct {
 	Family  string        `json:"family"`
 	Started time.Time     `json:"started"`
@@ -410,15 +414,19 @@ func refreshKey(token string) string {
 func refreshFamilyRevokedKey(family string) string { return "refresh-family-revoked:" + family }
 
 // Issue stores a new refresh token for the grant and returns it. A grant
-// without family starts a new one.
+// without family starts a new one; a grant whose family is set but not
+// started (the sid of a login) starts that family.
 func (r *RefreshSessions) Issue(ctx context.Context, grant *RefreshGrant) (string, error) {
 	now := time.Now().UTC()
 	if grant.Family == "" {
-		family, err := randomToken(16)
+		family, err := newSessionID()
 		if err != nil {
 			return "", err
 		}
-		grant.Family, grant.Started = family, now
+		grant.Family = family
+	}
+	if grant.Started.IsZero() {
+		grant.Started = now
 	}
 	grant.Issued = now
 	token, err := randomToken(32)

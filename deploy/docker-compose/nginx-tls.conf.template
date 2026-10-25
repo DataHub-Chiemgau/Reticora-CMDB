@@ -38,7 +38,10 @@ server {
 }
 
 # HTTPS: Let's Encrypt certificate under /etc/letsencrypt, bind-mounted
-# from deploy/docker-compose/letsencrypt (managed by certbot).
+# from deploy/docker-compose/letsencrypt (managed by certbot). nginx runs as
+# uid/gid 101 here: until the issuance live/<domain>/ holds the world-readable
+# bootstrap placeholder, afterwards certbot's lineage, whose key the deploy
+# hook (certbot-deploy-hook.sh) gives to group 101 with mode 0640 (WP-419).
 server {
     listen 443 ssl;
     http2 on;

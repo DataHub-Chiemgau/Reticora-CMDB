@@ -156,7 +156,7 @@ func (r *MemoryRepository) ClearOverride(_ context.Context, orgID, ciID, fieldNa
 	defer r.mu.Unlock()
 	fv, ok := r.values[key(orgID, ciID, fieldName)]
 	if !ok {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 	fv.OverrideValue = nil
 	fv.OverrideAuthor = ""

@@ -13,12 +13,15 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -47,6 +50,10 @@ func (a *stubInvitationAccounts) DeleteAccount(_ context.Context, id string) err
 	return nil
 }
 
+// testAcceptURL is the accept page of the invitation links in these tests
+// (RETICORA_INVITATION_ACCEPT_URL).
+const testAcceptURL = "https://cmdb.example.invalid/invitations/accept"
+
 // withCaller returns base with the tenant info and the principal of userID in
 // orgID holding every permission in scope (the issuer of the invitations).
 func withCaller(base context.Context, orgID, userID string, scope identity.Scope) context.Context {
@@ -66,7 +73,7 @@ func TestInvitationsAgainstPostgres(t *testing.T) {
 	f := scopetest.Seed(t, "87")
 	ctx := context.Background()
 	repo := NewPGInvitations(f.App)
-	h := NewInvitationHandler(repo)
+	h := NewInvitationHandler(repo).WithAcceptURL(testAcceptURL)
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
@@ -287,6 +294,285 @@ func TestInvitationsAgainstPostgres(t *testing.T) {
 	}
 }
 
+// TestAuditDefectInvitationCreatedEvent covers WP-421 (NTF-05, TLC-03,
+// F-041; formerly a defect test of WP-140/WP-114): issue and renewal append
+// exactly one invitation.created in their transaction, with the address (a
+// vault surrogate in the outbox, SEC-05), the organization name, the expiry
+// and the link RETICORA_INVITATION_ACCEPT_URL?token=<token>; the renewal's
+// event carries the new token. Refused issues and renewals (409 duplicate
+// or accepted, 403 grant ceiling, 422, 400, 404), the acceptance and
+// rolled-back transactions (the event cannot be written: nothing is stored)
+// append nothing. Without accept URL issue and renewal answer 503
+// (invitations not configured) and change nothing. Organization B gets no
+// event. Retest:
+//
+//	cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditDefectInvitationCreatedEvent' ./internal/user/
+func TestAuditDefectInvitationCreatedEvent(t *testing.T) {
+	f := scopetest.Seed(t, "d2")
+	bg := context.Background()
+	key, err := crypto.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := crypto.NewEnvelopeEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Personal event data travels as vault surrogates (SEC-05), as in the
+	// server.
+	vault := pii.NewVault(f.App, enc)
+	pii.SetDefault(vault)
+	t.Cleanup(func() { pii.SetDefault(nil) })
+
+	viewerRole := auditRoleID(t, f, "viewer")
+	mux := chi.NewRouter()
+	NewInvitationHandler(NewPGInvitations(f.App)).WithAcceptURL(testAcceptURL).RegisterRoutes(mux)
+	// An org-wide org_admin issues and renews (grant ceiling, WP-394); a
+	// client-1 org_admin may not invite org-wide.
+	admin := f.AppUser(t, f.OrgA, "audit-d2-orgadmin")
+	delegate := f.AppUser(t, f.OrgA, "audit-d2-delegate")
+	for _, stmt := range []struct {
+		user   string
+		client *string
+	}{{admin, nil}, {delegate, &f.Client1}} {
+		if _, err := f.Admin.Exec(bg, `INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id) VALUES ($1, $2, $3, $4)`,
+			f.OrgA, stmt.user, auditRoleID(t, f, "org_admin"), stmt.client); err != nil {
+			t.Fatal(err)
+		}
+	}
+	adminCtx, delegateCtx := auditPrincipalCtx(t, f, admin), auditPrincipalCtx(t, f, delegate)
+	var orgName string
+	if err := f.Admin.QueryRow(bg, `SELECT name FROM organization WHERE id = $1`, f.OrgA).Scan(&orgName); err != nil {
+		t.Fatal(err)
+	}
+
+	type event struct {
+		EntityID string
+		Raw      string         // data as stored
+		RawEmail any            // email as stored
+		Data     map[string]any // data with the surrogates resolved
+	}
+	outbox := func(orgID string) []event {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT COALESCE(entity_id, ''), data::text FROM event_outbox
+			WHERE organization_id = $1 AND type = 'invitation.created' ORDER BY sequence`, orgID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []event
+		for rows.Next() {
+			var e event
+			if err := rows.Scan(&e.EntityID, &e.Raw); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, e)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		scope := database.OrgWideScope(orgID, "")
+		for i := range out {
+			var data map[string]any
+			if err := json.Unmarshal([]byte(out[i].Raw), &data); err != nil {
+				t.Fatalf("event data %s: %v", out[i].Raw, err)
+			}
+			out[i].RawEmail = data["email"]
+			if err := database.WithTenant(bg, f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+				revealed, rerr := pii.RevealTx(ctx, tx, orgID, data)
+				out[i].Data, _ = revealed.(map[string]any)
+				return rerr
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return out
+	}
+	checkEvent := func(t *testing.T, e event, inv Invitation, email string) {
+		t.Helper()
+		if ref, sealed := pii.RefID(e.RawEmail); !sealed || ref == "" || strings.Contains(strings.ToLower(e.Raw), strings.ToLower(email)) {
+			t.Errorf("invitation.created stores the address in clear, want a vault surrogate (SEC-05): %s", e.Raw)
+		}
+		if got, _ := e.Data["email"].(string); !strings.EqualFold(got, email) {
+			t.Errorf("invitation.created email = %q, want %q", got, email)
+		}
+		if got, _ := e.Data["organization_name"].(string); got != orgName {
+			t.Errorf("invitation.created organization_name = %q, want %q", got, orgName)
+		}
+		if got, _ := e.Data["expires_at"].(string); got != inv.ExpiresAt.UTC().Format(time.RFC3339) {
+			t.Errorf("invitation.created expires_at = %q, want %q", got, inv.ExpiresAt.UTC().Format(time.RFC3339))
+		}
+		if link, _ := e.Data["link"].(string); inv.Token == "" || link != testAcceptURL+"?token="+inv.Token {
+			t.Errorf("invitation.created link = %q, want %q", link, testAcceptURL+"?token="+inv.Token)
+		}
+		if id, _ := e.Data["id"].(string); id != inv.ID || e.EntityID != inv.ID {
+			t.Errorf("invitation.created id %q, entity %q, want %q", id, e.EntityID, inv.ID)
+		}
+	}
+	decode := func(t *testing.T, w *httptest.ResponseRecorder) Invitation {
+		t.Helper()
+		var inv Invitation
+		if err := json.Unmarshal(w.Body.Bytes(), &inv); err != nil {
+			t.Fatalf("%s: %v", w.Body.String(), err)
+		}
+		return inv
+	}
+	stored := func(id string) (hash string) {
+		t.Helper()
+		if err := f.Admin.QueryRow(bg, `SELECT token_hash FROM user_invitation WHERE id = $1`, id).Scan(&hash); err != nil {
+			t.Fatal(err)
+		}
+		return hash
+	}
+	rows := func(email string) int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM user_invitation WHERE organization_id = $1 AND lower(email) = lower($2)`,
+			f.OrgA, email).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	email := "audit-d2-invitee@invite.example"
+	w := auditPost(mux, adminCtx, "/api/v1/invitations", `{"email":"`+email+`","role_id":"`+viewerRole+`"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("issue = %d %s", w.Code, w.Body.String())
+	}
+	inv := decode(t, w)
+
+	t.Run("issue emits exactly one invitation.created", func(t *testing.T) {
+		got := outbox(f.OrgA)
+		if len(got) != 1 {
+			t.Fatalf("invitation.created events after issue = %d, want 1 (NTF-05: the invitee gets the link by mail)", len(got))
+		}
+		checkEvent(t, got[0], inv, email)
+	})
+
+	t.Run("refused issues emit nothing", func(t *testing.T) {
+		before := len(outbox(f.OrgA))
+		for _, tc := range []struct {
+			name string
+			ctx  context.Context
+			body string
+			want int
+		}{
+			{"duplicate pending invitation", adminCtx, `{"email":"` + email + `","role_id":"` + viewerRole + `"}`, http.StatusConflict},
+			{"client-1 org_admin invites org-wide (grant ceiling)", delegateCtx, `{"email":"audit-d2-ceiling@invite.example","role_id":"` + viewerRole + `"}`, http.StatusForbidden},
+			{"unknown role", adminCtx, `{"email":"audit-d2-unknown@invite.example","role_id":"` + f.ID() + `"}`, http.StatusUnprocessableEntity},
+			{"invalid address", adminCtx, `{"email":"not an address","role_id":"` + viewerRole + `"}`, http.StatusBadRequest},
+		} {
+			if w := auditPost(mux, tc.ctx, "/api/v1/invitations", tc.body); w.Code != tc.want {
+				t.Errorf("%s = %d %s, want %d", tc.name, w.Code, w.Body.String(), tc.want)
+			}
+		}
+		if after := len(outbox(f.OrgA)); after != before {
+			t.Errorf("events after refused issues = %d, want %d", after, before)
+		}
+	})
+
+	t.Run("renew emits a new invitation.created with the new token", func(t *testing.T) {
+		before := len(outbox(f.OrgA))
+		w := auditPost(mux, adminCtx, "/api/v1/invitations/"+inv.ID+"/renew", ``)
+		if w.Code != http.StatusOK {
+			t.Fatalf("renew = %d %s", w.Code, w.Body.String())
+		}
+		renewed := decode(t, w)
+		got := outbox(f.OrgA)
+		if len(got) != before+1 {
+			t.Fatalf("invitation.created events after renew = %d, want %d", len(got), before+1)
+		}
+		checkEvent(t, got[len(got)-1], renewed, email)
+		if renewed.Token == inv.Token || strings.Contains(got[len(got)-1].Raw, inv.Token) {
+			t.Errorf("the renewal's event carries the old token")
+		}
+	})
+
+	t.Run("refused renewals and the acceptance emit nothing", func(t *testing.T) {
+		accepted := decode(t, auditPost(mux, adminCtx, "/api/v1/invitations", `{"email":"audit-d2-accepted@invite.example","role_id":"`+viewerRole+`"}`))
+		before := len(outbox(f.OrgA))
+		if w := auditPost(mux, context.Background(), "/api/v1/invitations/accept", `{"token":"`+accepted.Token+`"}`); w.Code != http.StatusCreated {
+			t.Fatalf("accept = %d %s", w.Code, w.Body.String())
+		}
+		for _, tc := range []struct {
+			name, id string
+			ctx      context.Context
+			want     int
+		}{
+			{"accepted invitation", accepted.ID, adminCtx, http.StatusConflict},
+			{"client-1 org_admin renews an org-wide invitation (grant ceiling)", inv.ID, delegateCtx, http.StatusForbidden},
+			{"unknown invitation", f.ID(), adminCtx, http.StatusNotFound},
+		} {
+			if w := auditPost(mux, tc.ctx, "/api/v1/invitations/"+tc.id+"/renew", ``); w.Code != tc.want {
+				t.Errorf("renew %s = %d %s, want %d", tc.name, w.Code, w.Body.String(), tc.want)
+			}
+		}
+		if after := len(outbox(f.OrgA)); after != before {
+			t.Errorf("events after the acceptance and refused renewals = %d, want %d", after, before)
+		}
+	})
+
+	t.Run("a rolled-back issue or renewal emits nothing and stores nothing", func(t *testing.T) {
+		before, hash := len(outbox(f.OrgA)), stored(inv.ID)
+		// A vault without key cannot seal the address: the event cannot be
+		// written, so the transaction of the issue or renewal rolls back.
+		pii.SetDefault(pii.NewVault(f.App, nil))
+		const lost = "audit-d2-rollback@invite.example"
+		issued := auditPost(mux, adminCtx, "/api/v1/invitations", `{"email":"`+lost+`","role_id":"`+viewerRole+`"}`)
+		renewed := auditPost(mux, adminCtx, "/api/v1/invitations/"+inv.ID+"/renew", ``)
+		pii.SetDefault(vault)
+		if issued.Code != http.StatusInternalServerError {
+			t.Errorf("issue without event = %d %s, want 500", issued.Code, issued.Body.String())
+		}
+		if renewed.Code != http.StatusInternalServerError {
+			t.Errorf("renewal without event = %d %s, want 500", renewed.Code, renewed.Body.String())
+		}
+		if n := rows(lost); n != 0 {
+			t.Errorf("rolled-back issue stored %d invitations", n)
+		}
+		if stored(inv.ID) != hash {
+			t.Error("rolled-back renewal replaced the token")
+		}
+		if after := len(outbox(f.OrgA)); after != before {
+			t.Errorf("events after rolled-back transactions = %d, want %d", after, before)
+		}
+	})
+
+	t.Run("without accept URL issue and renewal answer 503", func(t *testing.T) {
+		unconfigured := chi.NewRouter()
+		NewInvitationHandler(NewPGInvitations(f.App)).RegisterRoutes(unconfigured)
+		before, hash := len(outbox(f.OrgA)), stored(inv.ID)
+		const unsent = "audit-d2-unconfigured@invite.example"
+		for _, path := range []string{"/api/v1/invitations", "/api/v1/invitations/" + inv.ID + "/renew"} {
+			w := auditPost(unconfigured, adminCtx, path, `{"email":"`+unsent+`","role_id":"`+viewerRole+`"}`)
+			var problem struct {
+				Detail string `json:"detail"`
+			}
+			_ = json.Unmarshal(w.Body.Bytes(), &problem)
+			if w.Code != http.StatusServiceUnavailable || problem.Detail != "invitations not configured" ||
+				!strings.HasPrefix(w.Header().Get("Content-Type"), "application/problem+json") {
+				t.Errorf("POST %s = %d %q %s, want 503 problem+json 'invitations not configured'", path, w.Code, w.Header().Get("Content-Type"), w.Body.String())
+			}
+		}
+		if rows(unsent) != 0 || stored(inv.ID) != hash || len(outbox(f.OrgA)) != before {
+			t.Errorf("unconfigured: %d invitations stored, token changed %v, %d new events; want nothing changed",
+				rows(unsent), stored(inv.ID) != hash, len(outbox(f.OrgA))-before)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/invitations", nil).WithContext(adminCtx)
+		list := httptest.NewRecorder()
+		unconfigured.ServeHTTP(list, req)
+		if list.Code != http.StatusOK {
+			t.Errorf("list without accept URL = %d, want 200", list.Code)
+		}
+	})
+
+	t.Run("organization B sees no invitation event", func(t *testing.T) {
+		if got := outbox(f.OrgB); len(got) != 0 {
+			t.Errorf("organization B invitation events = %d, want 0", len(got))
+		}
+	})
+}
+
 // Grant ceiling of invitations and role assignments (WP-394, TLC-03, RBA-03,
 // API-05; F-015, F-305). Retest:
 //
@@ -419,7 +705,7 @@ func TestAuditDefectInvitationGrantCeiling(t *testing.T) {
 	techRole := auditRoleID(t, c.Fixture, "client_technician")
 
 	mux := chi.NewRouter()
-	NewInvitationHandler(NewPGInvitations(c.App)).RegisterRoutes(mux)
+	NewInvitationHandler(NewPGInvitations(c.App)).WithAcceptURL(testAcceptURL).RegisterRoutes(mux)
 
 	invitations := func(email string) int {
 		t.Helper()
@@ -648,7 +934,7 @@ func TestInvitationRoleScopeMismatch(t *testing.T) {
 	})
 
 	invitations := chi.NewRouter()
-	NewInvitationHandler(NewPGInvitations(c.App)).RegisterRoutes(invitations)
+	NewInvitationHandler(NewPGInvitations(c.App)).WithAcceptURL(testAcceptURL).RegisterRoutes(invitations)
 	users := chi.NewRouter()
 	NewHandler(NewPGRepository(c.App)).RegisterRoutes(users)
 	field := func(w *httptest.ResponseRecorder) string {

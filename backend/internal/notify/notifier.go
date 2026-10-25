@@ -19,6 +19,10 @@ type Request struct {
 	Category string
 	// Critical notifications ignore quiet hours and muted categories.
 	Critical bool
+	// Personal notifications go to the recipients' own addresses and
+	// inboxes only: webhook channels, which post to a URL of the
+	// organization, do not get them (Subscription.Personal).
+	Personal bool
 	Subject  string
 	Body     string
 	Data     map[string]any
@@ -197,6 +201,9 @@ func (n *Notifier) Notify(ctx context.Context, orgID string, req *Request) (int,
 			MaxAttempts: n.MaxAttempts, NextAttemptAt: now}
 		switch ch.Kind {
 		case KindWebhook:
+			if req.Personal {
+				continue
+			}
 			row := base
 			row.RecipientKey, row.Recipients = "*", req.Recipients
 			rows = append(rows, row)

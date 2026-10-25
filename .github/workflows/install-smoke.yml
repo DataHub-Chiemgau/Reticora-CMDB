@@ -115,6 +115,13 @@ jobs:
       - name: install-cloud.sh issuer checks after the frontend start
         run: ./tests/install-cloud-issuer-order.test.sh
 
+      # INS-03/TEC-09 (WP-419, F-033/F-034): Let's Encrypt issuance without a
+      # second lineage, key and chain readable for nginx (uid 101) through
+      # certbot's deploy hook, nginx -t before the success message. As root
+      # like certbot and its deploy hook in the certbot container.
+      - name: install-cloud.sh Let's Encrypt issuance (placeholder, deploy hook)
+        run: sudo ./tests/install-cloud-acme.test.sh
+
       - name: install-smoke-health.sh
         run: ./tests/install-smoke-health.test.sh
 

@@ -1542,6 +1542,8 @@ paths:
         only. A service account in `service_account_id` must be visible to
         the creator (422 otherwise); the subscription then receives only the
         events both the creator's scope and the account's read rights cover.
+        invitation.created is delivered without its link: the acceptance
+        token reaches the invitee by mail only.
       requestBody:
         required: true
         content:
@@ -8326,7 +8328,13 @@ paths:
         scope covering the invitation's scope (a client covers its sites,
         site.client_id); otherwise 403, nothing is stored or audited. A
         pending invitation for the same address is a conflict (renew it
-        instead). Requires user:manage.
+        instead). In the same transaction the event invitation.created
+        (NTF-05) mails the invitee the organization name, the expiry and
+        the link RETICORA_INVITATION_ACCEPT_URL?token=<token>; a refused
+        issue (403, 409, 422) creates no event. Webhook deliveries of the
+        event leave out the link. Without RETICORA_INVITATION_ACCEPT_URL
+        the server answers 503 (invitations not configured), like the
+        signup without verification page. Requires user:manage.
       requestBody:
         required: true
         content:
@@ -8416,7 +8424,9 @@ paths:
         to the renewing principal, not to the original issuer: it must hold
         user:manage and every permission of the invited role in a scope
         covering the invitation's scope (403 otherwise, nothing changes).
-        Requires user:manage.
+        Like the issue, the renewal mails the invitee the new link and
+        expiry (invitation.created); without RETICORA_INVITATION_ACCEPT_URL
+        it answers 503 (invitations not configured). Requires user:manage.
       responses:
         '200':
           description: Invitation renewed, with its new token
@@ -11231,7 +11241,11 @@ paths:
       description: >-
         The CI takes the value at once; automation sources never overwrite it
         (REC-03). Structural columns (client_id, location_id, ci_type_id, ...)
-        cannot be overridden.
+        cannot be overridden. The override is a manual write (API-07): in the
+        same transaction the CI version rises by one and the CI history
+        records the change (change_type override; an attribute counts as the
+        field attributes, as for PATCH), so a PATCH of the field with an
+        older If-Match is refused with 409.
       requestBody:
         required: true
         content:
@@ -11240,6 +11254,10 @@ paths:
       responses:
         '200':
           description: Field provenance after the change
+          headers:
+            ETag:
+              description: The new CI version (API-07); send it as If-Match with a PATCH of the CI.
+              schema: { type: string }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/FieldProvenance' }
@@ -11251,21 +11269,34 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
     delete:
       operationId: deleteCisIdFieldsNameOverride
       tags: [CIs]
       summary: Clear a manual field override
       description: >-
         The CI returns to the current observed value, when there is one, in
-        the same transaction; the change is audited.
+        the same transaction; the change is audited. Clearing an override is
+        a manual write (API-07): the CI version rises by one and the CI
+        history records the change, as for PUT. A field without an override
+        keeps the version.
       responses:
         '200':
           description: Field provenance after the change
+          headers:
+            ETag:
+              description: The CI version after the change (API-07); send it as If-Match with a PATCH of the CI.
+              schema: { type: string }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/FieldProvenance' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+        '404':
+          description: Unknown or invisible CI, or the CI has no value of the field
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/cis/{id}/lifecycle-transitions:
     post:
@@ -11660,8 +11691,12 @@ paths:
       description: >-
         Refused with 409 while the node has child locations or CIs, assets,
         stock items, movements, rack mounts or role assignments reference it
-        (LOC-11). Deleting a site, building, room or rack through its own
-        endpoint checks the whole subtree.
+        (LOC-11); a site also while VLANs, subnets, collectors, discovery
+        scopes, unexpired agent enrollment tokens or merge tombstones within
+        tombstone_until are bound to it (E-71). Expired tokens and tombstones
+        are removed with the site. Deleting a site, building, room or rack
+        through its own endpoint follows the same rules; no delete cascades
+        into the subtree.
       responses:
         '204':
           description: Deleted
@@ -13475,6 +13510,11 @@ components:
           type: string
         email:
           type: string
+        sid:
+          type: string
+          description: |
+            Session id: the refresh family started at login. Every refresh
+            keeps it; the per-session rate limit counts it (API-04).
         jti:
           type: string
         groups:
@@ -16374,9 +16414,14 @@ components:
           properties:
             dependencies:
               type: array
+              description: >-
+                Kinds of the objects that keep the location: location means
+                child locations; vlan, subnet, collector, discovery_scope,
+                agent_enrollment_token (unexpired) and ci_merge (tombstone
+                within tombstone_until) are bound to a site (E-71).
               items:
                 type: string
-                enum: [location, ci, asset, quantity_item, asset_movement, rack_mount, role_assignment]
+                enum: [location, ci, asset, quantity_item, asset_movement, rack_mount, role_assignment, vlan, subnet, collector, discovery_scope, agent_enrollment_token, ci_merge]
     LocationKind:
       type: string
       enum: [site, building, room, rack, warehouse, zone, shelf, bin]

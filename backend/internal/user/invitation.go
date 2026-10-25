@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"net/url"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -26,7 +28,8 @@ import (
 // predefined role and scope; the invitation is valid for InvitationTTL and
 // accepted once, atomically, which creates the app_user with that role.
 // Expired invitations can be renewed. Only the SHA-256 hash of the token is
-// stored; the token is shown once, on issue and on renewal.
+// stored; the token is shown once, on issue and on renewal, and goes to the
+// invitee in the link of the invitation mail (invitation.created, NTF-05).
 
 // InvitationTTL is the validity of an invitation (TLC-03).
 const InvitationTTL = 7 * 24 * time.Hour
@@ -93,12 +96,15 @@ type InvitationAccounts interface {
 // InvitationRepository persists invitations.
 type InvitationRepository interface {
 	// IssueInvitation stores the invitation if caller may grant its role in
-	// its scope (grant ceiling, GrantCeilingError).
-	IssueInvitation(ctx context.Context, caller *identity.Principal, inv *Invitation, tokenHash string) error
+	// its scope (grant ceiling, GrantCeilingError), and in the same
+	// transaction the event invitation.created with link, the acceptance
+	// link of the token.
+	IssueInvitation(ctx context.Context, caller *identity.Principal, inv *Invitation, tokenHash, link string) error
 	ListInvitations(ctx context.Context, orgID string) ([]Invitation, error)
 	// RenewInvitation checks the grant ceiling against caller, the renewing
-	// principal, not against the original issuer.
-	RenewInvitation(ctx context.Context, orgID, id string, caller *identity.Principal, tokenHash string, expiresAt time.Time) (*Invitation, error)
+	// principal, not against the original issuer; like IssueInvitation it
+	// appends invitation.created with the link of the new token.
+	RenewInvitation(ctx context.Context, orgID, id string, caller *identity.Principal, tokenHash, link string, expiresAt time.Time) (*Invitation, error)
 	RevokeInvitation(ctx context.Context, orgID, id string) error
 	// AcceptInvitation consumes the invitation of tokenHash atomically and
 	// once, creates the user with the invited role and scope, and runs
@@ -106,6 +112,16 @@ type InvitationRepository interface {
 	// transaction.
 	AcceptInvitation(ctx context.Context, orgID, tokenHash, displayName string,
 		createAccount func(ctx context.Context, inv *Invitation, role string) error) (*AcceptedInvitation, error)
+}
+
+// InvitationLink returns the acceptance link of token: acceptURL with the
+// query parameter token.
+func InvitationLink(acceptURL *url.URL, token string) string {
+	u := *acceptURL
+	q := u.Query()
+	q.Set("token", token)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // NewInvitationToken returns a token for orgID and its stored hash. The
@@ -207,11 +223,26 @@ func recordInvitationAudit(ctx context.Context, tx pgx.Tx, orgID, actor, id, act
 	return nil
 }
 
+// appendInvitationCreated appends invitation.created for inv in tx, the
+// transaction of the issue or renewal: the notification mails link and
+// expiry to the invitee (NTF-05). The address travels as a vault surrogate
+// (SEC-05); webhook deliveries leave out the link (webhook.go).
+func appendInvitationCreated(ctx context.Context, tx pgx.Tx, inv *Invitation, link string) error {
+	var orgName string
+	if err := tx.QueryRow(ctx, `SELECT name FROM organization WHERE id = $1`, inv.OrganizationID).Scan(&orgName); err != nil {
+		return fmt.Errorf("read organization name: %w", err)
+	}
+	_, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: inv.OrganizationID, Type: events.InvitationCreated, EntityID: inv.ID,
+		Data: map[string]any{"id": inv.ID, "email": inv.Email, "organization_name": orgName,
+			"expires_at": inv.ExpiresAt.UTC().Format(time.RFC3339), "link": link}})
+	return err
+}
+
 // IssueInvitation implements InvitationRepository. The role and the scope
 // must exist in the organization and be visible to the issuer (RLS), the
 // role must fit the scope, and the issuer must hold user:manage and the
 // role's permissions in a scope covering it (checkInvitationTargets).
-func (r *PGInvitations) IssueInvitation(ctx context.Context, caller *identity.Principal, inv *Invitation, tokenHash string) error {
+func (r *PGInvitations) IssueInvitation(ctx context.Context, caller *identity.Principal, inv *Invitation, tokenHash, link string) error {
 	if err := validateInvitation(inv); err != nil {
 		return err
 	}
@@ -237,8 +268,11 @@ func (r *PGInvitations) IssueInvitation(ctx context.Context, caller *identity.Pr
 			return fmt.Errorf("insert invitation: %w", err)
 		}
 		*inv = *created
-		return recordInvitationAudit(ctx, tx, inv.OrganizationID, inv.InvitedBy, inv.ID, "invitation.issued",
-			map[string]any{"role_id": inv.RoleID, "scope_type": inv.ScopeType, "scope_id": inv.ScopeID})
+		if err := recordInvitationAudit(ctx, tx, inv.OrganizationID, inv.InvitedBy, inv.ID, "invitation.issued",
+			map[string]any{"role_id": inv.RoleID, "scope_type": inv.ScopeType, "scope_id": inv.ScopeID}); err != nil {
+			return err
+		}
+		return appendInvitationCreated(ctx, tx, inv, link)
 	})
 }
 
@@ -289,9 +323,10 @@ func (r *PGInvitations) ListInvitations(ctx context.Context, orgID string) ([]In
 
 // RenewInvitation implements InvitationRepository: a pending or expired
 // invitation gets a new token and a new validity; the old token stops
-// working. The renewing principal must hold user:manage and the role's
-// permissions in a scope covering the invitation's scope (grant ceiling).
-func (r *PGInvitations) RenewInvitation(ctx context.Context, orgID, id string, caller *identity.Principal, tokenHash string, expiresAt time.Time) (*Invitation, error) {
+// working, the invitee gets a mail with the new link. The renewing
+// principal must hold user:manage and the role's permissions in a scope
+// covering the invitation's scope (grant ceiling).
+func (r *PGInvitations) RenewInvitation(ctx context.Context, orgID, id string, caller *identity.Principal, tokenHash, link string, expiresAt time.Time) (*Invitation, error) {
 	if !isUUID(id) {
 		return nil, ErrInvitationNotFound
 	}
@@ -324,10 +359,16 @@ func (r *PGInvitations) RenewInvitation(ctx context.Context, orgID, id string, c
 		if err != nil {
 			return fmt.Errorf("renew invitation: %w", err)
 		}
-		return recordInvitationAudit(ctx, tx, orgID, tenant.FromContext(ctx).UserID, id, "invitation.renewed",
-			map[string]any{"expires_at": expiresAt.UTC().Format(time.RFC3339)})
+		if aerr := recordInvitationAudit(ctx, tx, orgID, tenant.FromContext(ctx).UserID, id, "invitation.renewed",
+			map[string]any{"expires_at": expiresAt.UTC().Format(time.RFC3339)}); aerr != nil {
+			return aerr
+		}
+		return appendInvitationCreated(ctx, tx, inv, link)
 	})
-	return inv, err
+	if err != nil {
+		return nil, err
+	}
+	return inv, nil
 }
 
 // RevokeInvitation implements InvitationRepository: a pending or expired

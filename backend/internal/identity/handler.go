@@ -202,7 +202,8 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		writeIdentityError(w, err)
 		return
 	}
-	refreshToken, err := h.refresh.Issue(r.Context(), &RefreshGrant{Claims: withoutTokenTimes(&result.claims)})
+	// The session id of the login names the refresh family (sid, API-04).
+	refreshToken, err := h.refresh.Issue(r.Context(), &RefreshGrant{Family: result.claims.SessionID, Claims: withoutTokenTimes(&result.claims)})
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "store refresh token")
 		return
@@ -268,6 +269,9 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	refreshedClaims := cloneSessionClaims(&grant.Claims)
+	// The new access token stays in the session of the refresh family, so
+	// the per-session rate limit does not start over (sid, API-04).
+	refreshedClaims.SessionID = grant.Family
 	// Roles and scopes are re-read on every refresh so revoked or narrowed
 	// assignments take effect without a new login.
 	if err = h.applyAccess(r.Context(), &refreshedClaims); err != nil {
@@ -500,6 +504,11 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 			}
 			return "", time.Time{}, authResult{}, mfaErr
 		}
+	}
+	// The login starts the session: its id (sid) names the refresh family
+	// the callback opens and stays the same across refreshes (API-04).
+	if claims.SessionID, err = newSessionID(); err != nil {
+		return "", time.Time{}, authResult{}, err
 	}
 	if stampErr := stampToken(&claims); stampErr != nil {
 		return "", time.Time{}, authResult{}, stampErr

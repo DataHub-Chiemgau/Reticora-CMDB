@@ -44,6 +44,10 @@ type FieldValue struct {
 	Diverged  bool      `json:"diverged"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// CIVersion is the version of the CI after SetOverride or ClearOverride
+	// (API-07); the handler returns it as ETag. Zero when the repository
+	// keeps no CI version (memory profile).
+	CIVersion int64 `json:"-"`
 }
 
 // SetOverrideRequest is the payload for setting a manual override.

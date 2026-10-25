@@ -6,7 +6,6 @@ go;backend/cmd/server;TestAuditT5ReadinessCoversSMTP;F-126
 go;backend/cmd/server;TestAuditT5ReadinessObjectStorageURLEndpoint;F-127
 go;backend/internal/agent;TestAuditT3AgentTelemetryFollowsMergedCI;F-083
 go;backend/internal/ci;TestAuditT3MergePatchNullClearsTypedField;F-080
-go;backend/internal/ci;TestAuditT3OverrideWritesRaiseVersion;F-021
 go;backend/internal/ci;TestAuditT3UnmergeKeepsLaterSurvivorEdits;F-097
 go;backend/internal/ci;TestAuditT7BulkJobCancelStopsWork;F-162
 go;backend/internal/config;TestAuditT5K8sRenderedEnvSatisfiesStartCheck;F-036
@@ -21,10 +20,6 @@ go;backend/internal/discovery;TestAuditUnclassifiedReviewOnlyForUnclassifiedDevi
 go;backend/internal/history;TestAuditT3HistoryIncludesLocationChange;F-093
 go;backend/internal/iga;TestAuditT1ApprovalNeverLosesTheProvisioningTask;F-056
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
-go;backend/internal/locations;TestAuditT3LocationDeleteRefusesChildren;F-023
-go;backend/internal/locations;TestAuditT3SiteDeleteKeepsNetworkObjects;F-024
-go;backend/internal/middleware;TestAuditT2RefusedCredentialTrafficKeepsOrgBudget;F-019
-go;backend/internal/middleware;TestAuditT2SessionBudgetSurvivesTokenRefresh;F-076
 go;backend/internal/middleware;TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget;F-063
 go;backend/internal/rack;TestAuditDefectRackHeightNotBelowMounts;F-140
 go;backend/internal/relationship;TestAuditCleanupCronScopeDeadline;F-111
@@ -45,7 +40,6 @@ go;backend/internal/tenant/rls;TestAuditT5CIReactivationThroughProductionDecorat
 go;backend/internal/topology;TestAuditT3BlastRadiusMarksHeuristicCIs;F-098
 go;backend/internal/traceability;TestAuditT5GateIDsAreNotTracedByTheChecklistItself;F-121
 go;backend/internal/traceability;TestAuditT5ValidateRejectsNonTestEvidence;F-121
-go;backend/internal/user;TestAuditDefectInvitationCreatedEvent;F-041
 go;backend/internal/webhook;TestAuditDefectWebhookConsumerKeepsEventsOnTransientErrors;F-151
 go;collector/collectorcmd;TestAuditClassifiedDeviceNotUploadedAsFallback;F-030
 go;collector/collectorcmd;TestAuditCollectorEnrollsFromEnvironment;F-101
@@ -78,7 +72,6 @@ sh;tests/audit/g1-gate-evidence.test.sh;rep01_pt_kritisch;F-300
 sh;tests/audit/g1-gate-evidence.test.sh;rep01_pt_lowercase;F-300
 sh;tests/audit/g1-gate-evidence.test.sh;rep01_sr_bold_critical;F-300
 sh;tests/audit/g1-gate-evidence.test.sh;subprocessors;F-137
-sh;tests/audit/install-cloud-acme.test.sh;acme;F-033 F-034
 sh;tests/audit/log-retention.test.sh;NFR-06 logs 30 days;F-150
 sh;tests/audit/ops-config.test.sh;alertmanager_amtool;F-132
 sh;tests/audit/ops-config.test.sh;alertmanager_smtp;F-132
@@ -102,9 +95,7 @@ e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, e
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L14 names and fields with quotes or backslashes are stored like any other text (API create, edit form);F-045
 e2e-real;chromium:frontend/e2e-real/discovery-override.spec.ts;Discovery → reconciliation → override protection → review D07 "Override aufheben" in the CI detail returns the field to the observed value;F-100
 e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L02 names are unique per parent level and the rack height is 1–60 (explicit 0 → 422);F-302
-e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L05 deleting a site, building or room with child locations through /sites, /buildings or /rooms is refused (409);F-023
 e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L08 moving a mounted CI is recorded in ci_change, audit and the unified history shown on the CI page;F-253
-e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;05 an invitation sends the invitee an e-mail (NTF-05 event "Einladung");F-041
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles;F-201
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09c viewer UI: saving a webhook is refused visibly, not silently;F-062
 e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T17 A’s audit viewer shows when and on which object each of A’s entries happened;F-078

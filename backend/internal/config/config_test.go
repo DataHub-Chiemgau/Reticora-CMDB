@@ -37,7 +37,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range append(append([]string{
 		"RETICORA_ENVIRONMENT", "RETICORA_RATE_LIMIT_RPM", "RETICORA_RATE_LIMIT_ORG_RPM", "RETICORA_METRICS_TENANT_LABEL", "RETICORA_NATS_URL",
-		"RETICORA_INGEST_LANES",
+		"RETICORA_INGEST_LANES", "RETICORA_INVITATION_ACCEPT_URL",
 	}, requiredOutsideDevelopment...), s3Keys...) {
 		t.Setenv(key, "")
 	}
@@ -149,6 +149,49 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 				t.Fatalf("Validate() = %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestInvitationAcceptURL covers WP-421 (TLC-03, NTF-05, F-041): the link
+// of the invitation mail. Development defaults to the Vite accept page;
+// outside development there is no default (issue and renew answer 503).
+// http is valid in production, the HTTP default path of the installer runs
+// production on http://<host>; a doubled slash after the host (base URL with
+// a trailing slash) is collapsed. A URL without host, a relative URL,
+// another scheme and user info fail the start check.
+func TestInvitationAcceptURL(t *testing.T) {
+	clearEnv(t)
+	if cfg := Load(); cfg.InvitationAcceptURL != "http://localhost:5173/invitations/accept" || cfg.Validate(true) != nil {
+		t.Errorf("development default: %q, %v", cfg.InvitationAcceptURL, cfg.Validate(true))
+	}
+	setAll(t, productionEnv)
+	if cfg := Load(); cfg.InvitationAcceptURL != "" || cfg.Validate(false) != nil {
+		t.Errorf("production without accept URL: %q, %v; want none and a valid configuration", cfg.InvitationAcceptURL, cfg.Validate(false))
+	}
+	for _, c := range []struct{ in, want string }{
+		{"http://192.0.2.10/invitations/accept", "http://192.0.2.10/invitations/accept"},
+		{"http://192.0.2.10:3000/invitations/accept", "http://192.0.2.10:3000/invitations/accept"},
+		{"https://cmdb.example.com/invitations/accept", "https://cmdb.example.com/invitations/accept"},
+		{"https://cmdb.example.com//invitations/accept", "https://cmdb.example.com/invitations/accept"},
+	} {
+		t.Setenv("RETICORA_INVITATION_ACCEPT_URL", c.in)
+		cfg := Load()
+		if err := cfg.Validate(false); err != nil || cfg.InvitationAcceptURL != c.want {
+			t.Errorf("production with %q: %q, %v; want %q and a valid configuration", c.in, cfg.InvitationAcceptURL, err, c.want)
+		}
+	}
+	for _, env := range []string{EnvProduction, EnvDevelopment} {
+		t.Setenv("RETICORA_ENVIRONMENT", env)
+		for _, bad := range []string{"https:///invitations/accept", "/invitations/accept", "invitations/accept",
+			"ftp://cmdb.example.com/invitations/accept", "https://user:secret@cmdb.example.com/invitations/accept"} {
+			t.Setenv("RETICORA_INVITATION_ACCEPT_URL", bad)
+			err := Load().Validate(false)
+			if err == nil || !strings.Contains(err.Error(), "RETICORA_INVITATION_ACCEPT_URL") {
+				t.Errorf("%s with %q: %v, want an error naming RETICORA_INVITATION_ACCEPT_URL", env, bad, err)
+			} else if strings.Contains(err.Error(), "secret") {
+				t.Errorf("the start check repeats the value: %v", err)
+			}
+		}
 	}
 }
 

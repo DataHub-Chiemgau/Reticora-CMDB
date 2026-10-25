@@ -3,6 +3,7 @@ package locations_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -175,13 +176,19 @@ func TestLocationTreeMoveAndCycle(t *testing.T) {
 		}
 	}
 
-	// Deleting a site removes its tree, specialist rows included.
-	if _, err := f.Admin.Exec(context.Background(), `DELETE FROM site WHERE id = $1`, b.site.ID); err != nil {
-		t.Fatalf("delete site: %v", err)
+	// Deleting a site does not take its tree along (WP-411): the foreign keys
+	// refuse it. Deleting the tree removes the specialist rows with their
+	// nodes.
+	var de *locations.DependencyError
+	if _, err := f.Admin.Exec(context.Background(), `DELETE FROM site WHERE id = $1`, b.site.ID); !errors.As(locations.DeleteError(err), &de) || !slices.Equal(de.Kinds, []string{locations.DependencyLocation}) {
+		t.Errorf("delete site b with its tree: %v, want a location dependency", err)
+	}
+	if _, err := f.Admin.Exec(context.Background(), `DELETE FROM location WHERE site_id = $1`, b.site.ID); err != nil {
+		t.Fatalf("delete the tree of site b: %v", err)
 	}
 	var left int
 	if err := f.Admin.QueryRow(context.Background(), `
-		SELECT (SELECT count(*) FROM location WHERE site_id = $1) + (SELECT count(*) FROM room WHERE id = $2)`,
+		SELECT (SELECT count(*) FROM location WHERE site_id = $1) + (SELECT count(*) FROM site WHERE id = $1) + (SELECT count(*) FROM room WHERE id = $2)`,
 		b.site.ID, a.room.ID).Scan(&left); err != nil || left != 0 {
 		t.Errorf("rows left after site delete: %d, %v", left, err)
 	}

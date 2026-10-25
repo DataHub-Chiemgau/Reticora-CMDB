@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 	"unicode/utf8"
 
@@ -23,12 +24,29 @@ const minInvitedPasswordLength = 12
 type InvitationHandler struct {
 	repo     InvitationRepository
 	accounts InvitationAccounts
-	now      func() time.Time
+	// acceptURL is the page the link of the invitation mail opens
+	// (RETICORA_INVITATION_ACCEPT_URL); nil: issue and renew answer 503.
+	acceptURL *url.URL
+	now       func() time.Time
 }
 
 // NewInvitationHandler creates the handler; a nil repository answers 503.
+// Issue and renew need WithAcceptURL as well.
 func NewInvitationHandler(repo InvitationRepository) *InvitationHandler {
 	return &InvitationHandler{repo: repo, now: time.Now}
+}
+
+// WithAcceptURL sets the page the link of the invitation mail opens; the
+// link adds the token as query parameter. An empty value or one that is not
+// an absolute http(s) URL (config.Validate) leaves invitations
+// unconfigured: issue and renew answer 503, like the signup without
+// verification page.
+func (h *InvitationHandler) WithAcceptURL(raw string) *InvitationHandler {
+	h.acceptURL = nil
+	if u, err := url.Parse(raw); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != "" && u.User == nil {
+		h.acceptURL = u
+	}
+	return h
 }
 
 // WithAccounts lets the acceptance create the IdP account with the given
@@ -53,6 +71,19 @@ func (h *InvitationHandler) RegisterRoutes(r chi.Router) {
 func (h *InvitationHandler) unavailable(w http.ResponseWriter) bool {
 	if h.repo == nil {
 		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "invitations need the database")
+		return true
+	}
+	return false
+}
+
+// unconfigured refuses issue and renewal without accept URL: the invitee
+// would get no usable link (NTF-05).
+func (h *InvitationHandler) unconfigured(w http.ResponseWriter) bool {
+	if h.unavailable(w) {
+		return true
+	}
+	if h.acceptURL == nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "invitations not configured")
 		return true
 	}
 	return false
@@ -108,11 +139,12 @@ func invitingPrincipal(w http.ResponseWriter, r *http.Request) (*identity.Princi
 }
 
 // Issue creates an invitation valid for seven days. The response carries
-// the token once; only its hash is stored. The issuer must hold user:manage
-// and the permissions of the role in a scope covering the invitation's
-// scope (403 otherwise).
+// the token once; only its hash is stored. The invitee gets the link with
+// the token by mail (invitation.created in the issue's transaction). The
+// issuer must hold user:manage and the permissions of the role in a scope
+// covering the invitation's scope (403 otherwise).
 func (h *InvitationHandler) Issue(w http.ResponseWriter, r *http.Request) {
-	if h.unavailable(w) {
+	if h.unconfigured(w) {
 		return
 	}
 	t := tenant.FromContext(r.Context())
@@ -141,7 +173,7 @@ func (h *InvitationHandler) Issue(w http.ResponseWriter, r *http.Request) {
 	}
 	inv := &Invitation{OrganizationID: t.OrganizationID, Email: req.Email, RoleID: req.RoleID,
 		ScopeType: req.ScopeType, ScopeID: req.ScopeID, InvitedBy: t.UserID, ExpiresAt: h.now().Add(InvitationTTL)}
-	if err := h.repo.IssueInvitation(r.Context(), caller, inv, hash); err != nil {
+	if err := h.repo.IssueInvitation(r.Context(), caller, inv, hash, InvitationLink(h.acceptURL, token)); err != nil {
 		writeInvitationError(w, r, err)
 		return
 	}
@@ -150,10 +182,10 @@ func (h *InvitationHandler) Issue(w http.ResponseWriter, r *http.Request) {
 }
 
 // Renew gives a pending or expired invitation a new token and seven more
-// days. The grant ceiling applies to the renewing principal, not to the
-// original issuer.
+// days; the invitee gets a mail with the new link. The grant ceiling
+// applies to the renewing principal, not to the original issuer.
 func (h *InvitationHandler) Renew(w http.ResponseWriter, r *http.Request) {
-	if h.unavailable(w) {
+	if h.unconfigured(w) {
 		return
 	}
 	caller, ok := invitingPrincipal(w, r)
@@ -166,7 +198,7 @@ func (h *InvitationHandler) Renew(w http.ResponseWriter, r *http.Request) {
 		writeInvitationError(w, r, err)
 		return
 	}
-	inv, err := h.repo.RenewInvitation(r.Context(), orgID, chi.URLParam(r, "id"), caller, hash, h.now().Add(InvitationTTL))
+	inv, err := h.repo.RenewInvitation(r.Context(), orgID, chi.URLParam(r, "id"), caller, hash, InvitationLink(h.acceptURL, token), h.now().Add(InvitationTTL))
 	if err != nil {
 		writeInvitationError(w, r, err)
 		return

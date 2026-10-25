@@ -205,7 +205,7 @@ func (r *PGRepository) DeleteRack(ctx context.Context, orgID, id string) error {
 			return ErrNotFound
 		}
 		// Mounted CIs keep the rack (LOC-11): no cascade to rack_mount.
-		if err := locations.CheckDeletable(ctx, tx, id, true); err != nil {
+		if err := locations.CheckDeletable(ctx, tx, id); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, "DELETE FROM rack WHERE organization_id = $1 AND id = $2", orgID, id); err != nil {

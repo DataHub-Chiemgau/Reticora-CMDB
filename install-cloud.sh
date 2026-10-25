@@ -851,15 +851,26 @@ ensure_session_key() {
 #   1. bootstrap_tls_cert   — create a self-signed placeholder certificate so
 #                             nginx can start with the TLS configuration before
 #                             the real certificate exists.
-#   2. issue_tls_certificate — run certbot with the webroot plugin (nginx must
-#                             already serve /.well-known/acme-challenge/),
+#   2. issue_tls_certificate — move the placeholder aside, run certbot with
+#                             the webroot plugin (nginx must already serve
+#                             /.well-known/acme-challenge/) and its deploy
+#                             hook, check that nginx can load the new pair,
 #                             then reload nginx to pick up the real cert.
 # The long-running certbot service in the compose file renews the certificate
-# twice a day (no-op until it is close to expiry).
+# twice a day (no-op until it is close to expiry) with the same deploy hook.
 
 letsencrypt_dir() { printf '%s/letsencrypt' "$COMPOSE_DIR"; }
 
 tls_live_dir() { printf '%s/letsencrypt/live/%s' "$COMPOSE_DIR" "$RETICORA_TLS_DOMAIN"; }
+
+# certbot --deploy-hook (WP-419, F-034): deploy/docker-compose/certbot-deploy-hook.sh,
+# mounted into the certbot service, gives the private key to group 101 (0640)
+# and makes the chain readable, so nginx (uid/gid 101) in the frontend can
+# load both. Run through sh: certbot only checks that the first word of a hook
+# is executable, and the mounted file keeps its host mode.
+CERTBOT_DEPLOY_HOOK="sh /usr/local/bin/reticora-certbot-deploy-hook.sh"
+
+TLS_TROUBLESHOOTING="see docs/troubleshooting-installation.md, 'Issued certificate not loadable by nginx'"
 
 # tls_ca_cert_path_in_container — path of the served certificate as seen by the
 # server container (./letsencrypt is bind-mounted at /etc/letsencrypt there).
@@ -1006,18 +1017,26 @@ validate_tls_material() {
 
     # The public keys of certificate and private key must be identical,
     # otherwise nginx refuses to load the pair ("key values mismatch").
-    local cert_pub key_pub
-    cert_pub="$(openssl x509 -in "$cert" -noout -pubkey 2>/dev/null | openssl sha256)"
-    key_pub="$(openssl pkey -in "$key" -pubout 2>/dev/null | openssl sha256)"
-    [ -n "$cert_pub" ] && [ "$cert_pub" = "$key_pub" ] \
-        || die "TLS certificate $cert and private key $key do not match."
+    # certbot's key (root, group 101, 0640 after the deploy hook) is not
+    # readable for an installer that runs without root; after the issuance
+    # (chain=1) nginx -t in the frontend checks the pair instead
+    # (issue_tls_certificate).
+    local cert_pub key_pub key_note="key matches"
+    if [ "$chain" = "1" ] && [ ! -r "$key" ]; then
+        key_note="key checked by nginx"
+    else
+        cert_pub="$(openssl x509 -in "$cert" -noout -pubkey 2>/dev/null | openssl sha256)"
+        key_pub="$(openssl pkey -in "$key" -pubout 2>/dev/null | openssl sha256)"
+        [ -n "$cert_pub" ] && [ "$cert_pub" = "$key_pub" ] \
+            || die "TLS certificate $cert and private key $key do not match."
+    fi
     if [ "$chain" = "1" ]; then
         tls_cert_is_trusted "$cert" \
             || die "TLS certificate chain $cert does not verify against the system trust store (incomplete chain or untrusted issuer)."
-        success "TLS material for $domain is consistent (parses, SAN present, key matches, chain verifies)"
+        success "TLS material for $domain is consistent (parses, SAN present, $key_note, chain verifies)"
         return 0
     fi
-    success "TLS material for $domain is consistent (parses, SAN present, key matches)"
+    success "TLS material for $domain is consistent (parses, SAN present, $key_note)"
 }
 
 # reload_frontend_after_bootstrap — `compose up -d` leaves an unchanged
@@ -1028,6 +1047,88 @@ reload_frontend_after_bootstrap() {
     compose_cmd exec -T frontend nginx -s reload >/dev/null 2>&1 \
         || compose_cmd restart frontend >/dev/null 2>&1 \
         || warn "Could not reload the frontend to activate the regenerated bootstrap certificate."
+}
+
+# tls_lineage_paths — where certbot stores the lineage of the domain, relative
+# to letsencrypt/: the live and archive directories and the renewal
+# configuration.
+tls_lineage_paths() {
+    printf '%s\n' "live/$RETICORA_TLS_DOMAIN" "archive/$RETICORA_TLS_DOMAIN" "renewal/$RETICORA_TLS_DOMAIN.conf"
+}
+
+# tls_placeholder_backup_dir — keeps the placeholder while certbot creates the
+# lineage; inside letsencrypt/ (git-ignored, same file system), which certbot
+# does not read.
+tls_placeholder_backup_dir() { printf '%s/reticora-placeholder/%s' "$(letsencrypt_dir)" "$RETICORA_TLS_DOMAIN"; }
+
+# tls_rm <path> — removes a path; files certbot created belong to root (it
+# runs as root in its container), so with sudo -n when that is needed.
+tls_rm() {
+    rm -rf "$1" 2>/dev/null || sudo -n rm -rf "$1" 2>/dev/null || true
+    [ ! -e "$1" ] && [ ! -L "$1" ]
+}
+
+# tls_move_lineage <from> <to> — moves the existing paths of
+# tls_lineage_paths from one letsencrypt tree into the other; stops at the
+# first path that cannot be moved.
+tls_move_lineage() {
+    local from="$1" to="$2" rel
+    while IFS= read -r rel; do
+        [ -e "$from/$rel" ] || [ -L "$from/$rel" ] || continue
+        [ ! -e "$to/$rel" ] && [ ! -L "$to/$rel" ] || return 1
+        mkdir -p "$to/${rel%/*}" 2>/dev/null || sudo -n mkdir -p "$to/${rel%/*}" 2>/dev/null || return 1
+        mv "$from/$rel" "$to/$rel" 2>/dev/null || sudo -n mv "$from/$rel" "$to/$rel" 2>/dev/null || return 1
+    done < <(tls_lineage_paths)
+}
+
+# stash_tls_placeholder — F-033: certbot refuses to store a new lineage while
+# live/<domain> holds the bootstrap placeholder ("CertStorageError: live
+# directory exists", after it has placed the ACME order), and an existing
+# renewal/<domain>.conf turns the request into a second lineage
+# <domain>-0001. Before the request live/<domain>, archive/<domain> and
+# renewal/<domain>.conf therefore move into the backup directory.
+stash_tls_placeholder() {
+    local le backup
+    # The domain names the paths that are moved and removed (also with sudo).
+    valid_domain "$RETICORA_TLS_DOMAIN" || die "Invalid TLS domain '$RETICORA_TLS_DOMAIN'."
+    le="$(letsencrypt_dir)"
+    backup="$(tls_placeholder_backup_dir)"
+    # A backup an interrupted run left behind is stale: bootstrap_tls_cert has
+    # created a new placeholder in live/<domain> since.
+    tls_rm "$backup" \
+        || die "Cannot remove the stale placeholder backup $backup. Delete it manually and re-run this installer."
+    if ! tls_move_lineage "$le" "$backup"; then
+        tls_move_lineage "$backup" "$le" || true
+        die "Cannot move the placeholder certificate of $RETICORA_TLS_DOMAIN (live/, archive/, renewal/ under $le) aside before the Let's Encrypt request; certbot cannot store the certificate while it is there. Move it into $backup manually and re-run this installer."
+    fi
+}
+
+# restore_tls_placeholder — after a failed request: removes what certbot left
+# of the lineage (e.g. the empty renewal configuration it writes before it
+# stores the certificate) and moves the placeholder back.
+restore_tls_placeholder() {
+    local le backup rel
+    le="$(letsencrypt_dir)"
+    backup="$(tls_placeholder_backup_dir)"
+    while IFS= read -r rel; do
+        tls_rm "$le/$rel" || warn "Could not remove $le/$rel, left behind by the failed certbot run."
+    done < <(tls_lineage_paths)
+    if tls_move_lineage "$backup" "$le"; then
+        tls_rm "$backup" || true
+    else
+        warn "Could not restore the placeholder certificate from $backup; move its contents back into $le manually."
+    fi
+}
+
+# tls_check_failed <message> — aborts when nginx cannot load the issued
+# certificate. issue_tls_certificate runs after create_initial_admin, so — as
+# in issuer_check_failed — the run that has just created the administrator
+# shows its temporary password first.
+tls_check_failed() {
+    if [ -n "$INITIAL_ADMIN_PASSWORD" ]; then
+        printf '%s\n' "$(initial_login_line)" >&2
+    fi
+    die "$*"
 }
 
 issue_tls_certificate() {
@@ -1044,28 +1145,55 @@ issue_tls_certificate() {
         email_args=(--email "$RETICORA_CERT_EMAIL")
     fi
 
+    stash_tls_placeholder
+
     # The certbot container shares the webroot volume with the frontend, and
     # ./letsencrypt is bind-mounted as /etc/letsencrypt in both. nginx is
-    # already running with the bootstrap certificate, serving the challenge
-    # directory over plain HTTP on port 80. The service's entrypoint is the
-    # renewal loop shell, so the one-off run selects the certbot binary.
+    # already running with the bootstrap certificate (in memory), serving the
+    # challenge directory over plain HTTP on port 80. The service's entrypoint
+    # is the renewal loop shell, so the one-off run selects the certbot binary.
+    # --cert-name keeps the lineage at live/<domain>; certbot records the
+    # deploy hook in renewal/<domain>.conf as well.
+    local issued=0 out
     if compose_cmd run --rm --no-deps --entrypoint certbot certbot certonly \
         --webroot -w /var/www/certbot \
-        -d "$RETICORA_TLS_DOMAIN" \
+        -d "$RETICORA_TLS_DOMAIN" --cert-name "$RETICORA_TLS_DOMAIN" \
         --non-interactive --agree-tos \
+        --deploy-hook "$CERTBOT_DEPLOY_HOOK" \
         "${email_args[@]}"; then
-        validate_tls_material "$RETICORA_TLS_DOMAIN" 1
-        compose_cmd exec -T frontend nginx -s reload >/dev/null 2>&1 \
-            || warn "Could not reload nginx automatically; restart the frontend to activate the certificate: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE restart frontend"
-        success "Let's Encrypt certificate issued for $RETICORA_TLS_DOMAIN"
-        success "HTTPS is now active at https://$RETICORA_TLS_DOMAIN"
-    else
+        issued=1
+    elif ! tls_cert_is_selfsigned; then
+        # An error after the lineage was stored: keep the certificate and check
+        # it, a later run would otherwise place another order.
+        warn "certbot reported an error after storing the certificate for $RETICORA_TLS_DOMAIN; checking the stored certificate."
+        issued=1
+    fi
+    if [ "$issued" != "1" ]; then
+        restore_tls_placeholder
         warn "Let's Encrypt certificate issuance failed."
         warn "Common causes: DNS does not point at this host, or ports 80/443"
         warn "are not reachable from the internet. The stack keeps running with"
         warn "the self-signed bootstrap certificate; re-run this installer after"
         warn "fixing connectivity, or check the logs:"
         warn "  ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs certbot"
+        return 0
+    fi
+    tls_rm "$(tls_placeholder_backup_dir)" || warn "Could not remove the placeholder backup $(tls_placeholder_backup_dir)."
+
+    validate_tls_material "$RETICORA_TLS_DOMAIN" 1
+    # F-034: nginx in the frontend runs as uid 101. It must be able to load
+    # the stored chain and key (deploy hook) before it is told to reload: a
+    # failed reload goes unnoticed, nginx keeps the placeholder in memory and
+    # the next start of the frontend fails.
+    if ! out="$(compose_cmd exec -T frontend nginx -t 2>&1)"; then
+        printf '%s\n' "$out" | tail -n 5 >&2
+        tls_check_failed "nginx in the frontend (uid 101) cannot load the certificate and key certbot stored in $(tls_live_dir) (nginx -t failed). HTTPS still serves the bootstrap certificate, and the frontend will not start again until the files are readable ($TLS_TROUBLESHOOTING)."
+    fi
+    success "Let's Encrypt certificate issued for $RETICORA_TLS_DOMAIN"
+    if compose_cmd exec -T frontend nginx -s reload >/dev/null 2>&1; then
+        success "HTTPS is now active at https://$RETICORA_TLS_DOMAIN"
+    else
+        warn "Could not reload nginx automatically; restart the frontend to activate the certificate: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE restart frontend"
     fi
 }
 
