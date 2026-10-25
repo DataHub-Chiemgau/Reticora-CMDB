@@ -29,8 +29,10 @@ import (
 // device.
 func TestAuditClassifiedDeviceNotUploadedAsFallback(t *testing.T) {
 	up, uploaded := auditUploadSink(t)
-	ln, ip := auditLoopback(t, 22)
-	other, otherIP := auditLoopback(t, 22)
+	// An unprivileged port: CI runs the tests without root.
+	ln, ip := auditLoopback(t, 0)
+	port := ln.Addr().(*net.TCPAddr).Port
+	other, otherIP := auditLoopback(t, port)
 	for _, l := range []net.Listener{ln, other} {
 		t.Cleanup(func() { _ = l.Close() })
 		go func() {
@@ -44,7 +46,7 @@ func TestAuditClassifiedDeviceNotUploadedAsFallback(t *testing.T) {
 		}()
 	}
 	realSweep := sweep.New()
-	realSweep.TCPPorts = []int{22}
+	realSweep.TCPPorts = []int{port}
 	realSweep.Timeout = time.Second
 	macs := map[string]string{ip: "00:1b:21:41:70:01", otherIP: "00:1b:21:41:70:02"}
 	sweepSpy := &auditSpy{name: "sweep", alive: func(targets []string) []plugins.Result {
