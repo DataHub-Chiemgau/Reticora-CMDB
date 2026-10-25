@@ -3,7 +3,7 @@
 // Phase-1 acceptance audit, group T4-collector-load – DEFECT tests for the
 // collector's discovery passes (must fail until the defects are fixed).
 //
-// WP-151 (DIS-02), WP-153 (DIS-09), WP-154 (DIS-10), WP-155 (DIS-08).
+// WP-151 (DIS-02), WP-153 (DIS-09), WP-154 (DIS-10).
 //
 // Findings encoded here (one test each):
 //   - TestAuditScopeExpansionCompleteOrReported – WP-153 P2 "Scopes larger
@@ -13,16 +13,16 @@
 //     immediately and again after each restart". The test feeds the scope
 //     list as the server would send it with the run state the server holds
 //     (last_run_at/next_run_at, the audit's recommended fields).
-//   - TestAuditWMIAuthFailureReachesScopeRun – WP-155 P2 "Credential failures
-//     of WMI and SNMPv3 are invisible: the scope run reports ok" (WMI part).
 //   - TestAuditClassifiedDeviceNotUploadedAsFallback – WP-151 P1 "Every swept
 //     device gets a (recurring) false unclassified_device review" (collector
 //     part: the evidence-less sweep record of an SNMP-classified device is
 //     uploaded as classified_by=fallback).
 //
 // TestAuditCredentialKindRouting and TestAuditPerScopeCredentials (F-028,
-// F-013) moved to discovery_credentials_test.go (WP-378); the shared helpers
-// are in discovery_helpers_test.go.
+// F-013) moved to discovery_credentials_test.go (WP-378),
+// TestAuditWMIAuthFailureReachesScopeRun (F-029) to
+// discovery_errors_test.go (WP-415); the shared helpers are in
+// discovery_helpers_test.go.
 //
 // The scope run reports travel over NATS like in production; the tests need
 // TEST_NATS_URL (a plain NATS server, e.g. nats://localhost:54222).
@@ -30,14 +30,13 @@
 // Retest:
 //
 //	cd collector && TEST_NATS_URL=nats://localhost:54222 go test -tags auditdefect -count=1 -v \
-//	  -run 'TestAuditScopeExpansionCompleteOrReported|TestAuditScopeScheduleSurvivesRestart|TestAuditWMIAuthFailureReachesScopeRun|TestAuditClassifiedDeviceNotUploadedAsFallback' ./collectorcmd/
+//	  -run 'TestAuditScopeExpansionCompleteOrReported|TestAuditScopeScheduleSurvivesRestart|TestAuditClassifiedDeviceNotUploadedAsFallback' ./collectorcmd/
 package collectorcmd
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"testing"
 	"time"
 
@@ -121,40 +120,6 @@ func TestAuditScopeScheduleSurvivesRestart(t *testing.T) {
 			t.Errorf("%s: swept=%v at %s, want %v", tc.name, swept, now.Format(time.RFC3339), tc.wantSweep)
 		}
 	}
-}
-
-// TestAuditWMIAuthFailureReachesScopeRun: a WinRM endpoint that refuses the
-// credentials shows up as an error of the scope run with protocol and
-// target (DIS-08), not as a clean run.
-func TestAuditWMIAuthFailureReachesScopeRun(t *testing.T) {
-	runs := auditCaptureScopeRuns(t)
-	up, _ := auditUploadSink(t)
-	ln, ip := auditLoopback(t, 5985)
-	srv := &http.Server{ReadHeaderTimeout: 2 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("WWW-Authenticate", "Negotiate")
-		w.WriteHeader(http.StatusUnauthorized)
-	})}
-	go func() { _ = srv.Serve(ln) }()
-	t.Cleanup(func() { _ = srv.Close() })
-	auditUsePlugins(t) // reset state; the shipped wmi plugin stays registered
-	// The scope's WMI credential comes from the bundle (WP-378: local
-	// credentials do not apply to server scopes).
-	auditInstallBundle(bundleCredential{ID: "cred-wmi", Kind: "wmi", Secret: map[string]any{"username": "u", "password": "wrong"}})
-	collectorScopes.set([]collectorScope{{ID: "6f0b6f0e-0000-4000-8000-0000000000a9", Kind: "host", Target: ip, Schedule: "24h",
-		CredentialIDs: []string{"cred-wmi"}, Plugins: []string{"wmi"}}}, nil)
-	runDueDiscovery(context.Background(), &collectorConfig{}, up, newScheduler(), &hostCache{}, time.Now())
-
-	all := runs()
-	if len(all) != 1 {
-		t.Fatalf("scope run reports = %d, want 1", len(all))
-	}
-	for _, e := range all[0].Result.Errors {
-		if e.Protocol == "wmi" && e.Target == ip {
-			return
-		}
-	}
-	t.Errorf("WinRM answered 401 for every request, but the scope run reported records=%d error_count=%d errors=%+v (want an error with protocol wmi and target %s)",
-		all[0].Result.Records, all[0].Result.ErrorCount, all[0].Result.Errors, ip)
 }
 
 // TestAuditClassifiedDeviceNotUploadedAsFallback: a device that SNMP

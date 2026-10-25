@@ -1,7 +1,7 @@
-// Shared helpers of the collector's discovery tests (WP-378): the credential
-// tests moved out of discovery_auditdefect_test.go (discovery_credentials_test.go,
-// bundle_test.go) use them without a build tag, the defect tests still in
-// that file with the tag auditdefect.
+// Shared helpers of the collector's discovery tests (WP-378): the tests
+// moved out of discovery_auditdefect_test.go (discovery_credentials_test.go,
+// bundle_test.go, discovery_errors_test.go) use them without a build tag,
+// the defect tests still in that file with the tag auditdefect.
 package collectorcmd
 
 import (
@@ -15,7 +15,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -113,8 +115,6 @@ func auditInstallBundle(creds ...bundleCredential) {
 }
 
 // auditScopeRun is a scope run report as the server receives it.
-//
-//nolint:unused // used by the defect tests (build tag auditdefect)
 type auditScopeRun struct {
 	ScopeID string `json:"scope_id"`
 	Result  struct {
@@ -124,16 +124,11 @@ type auditScopeRun struct {
 	} `json:"result"`
 }
 
-// auditCaptureScopeRuns connects the scope channel to TEST_NATS_URL and
+// auditCaptureScopeRuns connects the scope channel to a NATS server and
 // answers the collector's scopes.result requests like the server.
-//
-//nolint:unused // used by the defect tests (build tag auditdefect)
 func auditCaptureScopeRuns(t *testing.T) func() []auditScopeRun {
 	t.Helper()
-	url := os.Getenv("TEST_NATS_URL")
-	if url == "" {
-		t.Fatal("TEST_NATS_URL is required: the scope run reports travel over NATS")
-	}
+	url := auditNATSURL(t)
 	nc, err := nats.Connect(url, nats.Timeout(5*time.Second))
 	if err != nil {
 		t.Fatalf("connect %s: %v", url, err)
@@ -166,6 +161,35 @@ func auditCaptureScopeRuns(t *testing.T) func() []auditScopeRun {
 		mu.Lock()
 		defer mu.Unlock()
 		return slices.Clone(runs)
+	}
+}
+
+// auditNATSURL is TEST_NATS_URL or, without it, a plain nats-server from
+// TEST_NATS_SERVER_BIN started for the test (the CI job of the collector
+// module provides only the binary).
+func auditNATSURL(t *testing.T) string {
+	t.Helper()
+	if url := os.Getenv("TEST_NATS_URL"); url != "" {
+		return url
+	}
+	bin := natsServerBin(t)
+	port := strconv.Itoa(auditFreeTCPPort(t))
+	addr := "127.0.0.1:" + port
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := exec.CommandContext(ctx, bin, "-a", "127.0.0.1", "-p", port)
+	if err := srv.Start(); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cancel(); _ = srv.Wait() })
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if conn, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
+			_ = conn.Close()
+			return "nats://" + addr
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("nats-server %s did not listen on %s", bin, addr)
+		}
 	}
 }
 
@@ -207,8 +231,6 @@ func auditUploadSink(t *testing.T) (*uploader, func() []plugins.DeviceRecord) {
 }
 
 // auditLoopback binds port on a random 127.x.y.z address.
-//
-//nolint:unused // used by the defect tests (build tag auditdefect)
 func auditLoopback(t *testing.T, port int) (net.Listener, string) {
 	t.Helper()
 	var lastErr error

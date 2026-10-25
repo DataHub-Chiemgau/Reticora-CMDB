@@ -47,10 +47,8 @@ go;collector/collectorcmd;TestAuditCollectorRenewsCertificateAt60Percent;F-026
 go;collector/collectorcmd;TestAuditScopeExpansionCompleteOrReported;F-106
 go;collector/collectorcmd;TestAuditScopeScheduleSurvivesRestart;F-109
 go;collector/collectorcmd;TestAuditT7MetricSamplesReachTheServerAuthenticated;F-046
-go;collector/collectorcmd;TestAuditWMIAuthFailureReachesScopeRun;F-029
 go;collector/plugins/snmp;TestAuditSNMPCollectsNeighbors;F-032
 go;collector/plugins/snmp;TestAuditSNMPv3AuthFailureReported;F-105
-go;collector/plugins/wmi;TestAuditWMIFailuresAreErrors;F-029
 go;edgecore/buffer;TestAuditT3CorruptHeadDoesNotBlockSpool;F-085
 go;edgecore/buffer;TestAuditT3SpoolLossSurvivesRestart;F-084
 sh;tests/audit/collector-install-cli.test.sh;INS-06 violated;F-110

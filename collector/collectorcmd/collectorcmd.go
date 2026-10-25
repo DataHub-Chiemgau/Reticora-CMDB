@@ -462,7 +462,7 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 			hits, err := plug.Probe(ctx, targets, creds)
 			if err != nil {
 				slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
-				errs = append(errs, runError{Protocol: protocol, Message: err.Error()})
+				errs = append(errs, runError{Protocol: protocol, Cause: plugins.ErrorCause(err), Message: err.Error()})
 				continue
 			}
 			if protocol == "sweep" {
@@ -579,7 +579,9 @@ func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits
 				if err != nil {
 					slog.Warn("discovery target failed; reporting the probe result", "event", "discovery.target.failed",
 						"protocol", protocol, "target", hit.IP, "error", err)
-					failures[i] = &runError{Protocol: protocol, Target: hit.IP, Message: err.Error()}
+					// The cause the plugin knows (auth_failed, unreachable) goes
+					// with protocol and target into the scope run (DIS-08).
+					failures[i] = &runError{Protocol: protocol, Target: hit.IP, Cause: plugins.ErrorCause(err), Message: err.Error()}
 				}
 				out[i] = plugins.RecordFromResult(protocol, hit, probedAt)
 				return

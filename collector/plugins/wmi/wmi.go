@@ -3,6 +3,7 @@ package wmi
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/xml"
 	"fmt"
@@ -23,6 +24,17 @@ const (
 	winRMHTTPSPort     = 5986
 	defaultTimeout     = 15 * time.Second
 	defaultConcurrency = 16
+
+	wsmanActionEnumerate = "http://schemas.xmlsoap.org/ws/2004/09/enumeration/Enumerate"
+	wsmanActionPull      = "http://schemas.xmlsoap.org/ws/2004/09/enumeration/Pull"
+	// maxEnvelopeSize is the largest response WinRM may send
+	// (wsman:MaxEnvelopeSize); a longer response is refused, not truncated.
+	maxEnvelopeSize  = 32768
+	maxResponseBytes = 2 * maxEnvelopeSize
+	// maxPulls and maxEnumerationBytes bound one enumeration: a WinRM that
+	// never ends the sequence fails instead of looping.
+	maxPulls            = 256
+	maxEnumerationBytes = 4 << 20
 )
 
 // wmiClasses are the WMI classes one collection enumerates.
@@ -210,16 +222,92 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 	return result, nil
 }
 
-// wsmanEnumerate performs a WS-Management Enumerate request for a WMI class.
-// It fails with plugins.ErrTLSUntrusted when the certificate of the endpoint
-// is not trusted; the handshake failed, the credentials were not sent.
+// wsmanEnumerate enumerates the instances of a WMI class as DSP0226 (8.2)
+// and WS-Enumeration specify: Enumerate with OptimizeEnumeration, then Pull
+// with the latest enumeration context until EndOfSequence. It returns the
+// Items of all responses. Every failure is an error (DIS-08), see wsmanCall.
 func (p *Plugin) wsmanEnumerate(ctx context.Context, client *http.Client, baseURL, username, password, wmiClass string) (string, error) {
-	// Build WS-Management SOAP Enumerate request
-	soapEnvelope := buildWSManEnumerate(wmiClass)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL, strings.NewReader(soapEnvelope))
+	resp, err := p.wsmanCall(ctx, client, baseURL, username, password, "Enumerate "+wmiClass, buildWSManEnumerate(baseURL, wmiClass, newMessageID()))
 	if err != nil {
-		return "", nil
+		return "", err
+	}
+	batch := resp.Body.Enumerate
+	if batch == nil {
+		return "", fmt.Errorf("wmi: Enumerate %s: unexpected response without EnumerateResponse", wmiClass)
+	}
+	var items strings.Builder
+	items.WriteString("<Items>")
+	for pulls := 0; ; pulls++ {
+		items.WriteString(batch.Items.XML)
+		if items.Len() > maxEnumerationBytes {
+			return "", fmt.Errorf("wmi: Enumerate %s: the instances exceed %d bytes", wmiClass, maxEnumerationBytes)
+		}
+		if batch.EndOfSequence != nil {
+			break
+		}
+		if batch.Context == "" {
+			return "", fmt.Errorf("wmi: Enumerate %s: unexpected response without EnumerationContext and EndOfSequence", wmiClass)
+		}
+		if pulls == maxPulls {
+			return "", fmt.Errorf("wmi: Enumerate %s: no EndOfSequence after %d Pull requests", wmiClass, maxPulls)
+		}
+		resp, err = p.wsmanCall(ctx, client, baseURL, username, password, "Pull "+wmiClass, buildWSManPull(baseURL, wmiClass, newMessageID(), batch.Context))
+		if err != nil {
+			return "", err
+		}
+		next := resp.Body.Pull
+		if next == nil {
+			return "", fmt.Errorf("wmi: Pull %s: unexpected response without PullResponse", wmiClass)
+		}
+		if next.Context == "" {
+			// Without a new context the previous one stays valid.
+			next.Context = batch.Context
+		}
+		batch = next
+	}
+	items.WriteString("</Items>")
+	return items.String(), nil
+}
+
+// wsmanResponse is the part of a WS-Management response the plugin reads.
+type wsmanResponse struct {
+	XMLName xml.Name `xml:"http://www.w3.org/2003/05/soap-envelope Envelope"`
+	Body    struct {
+		Fault     *wsmanFault       `xml:"Fault"`
+		Enumerate *enumerationBatch `xml:"EnumerateResponse"`
+		Pull      *enumerationBatch `xml:"PullResponse"`
+	} `xml:"Body"`
+}
+
+// enumerationBatch is an EnumerateResponse or PullResponse: the context for
+// the next Pull, the instances (wsman:Items or wsen:Items) and the end of the
+// sequence.
+type enumerationBatch struct {
+	Context string `xml:"EnumerationContext"`
+	Items   struct {
+		XML string `xml:",innerxml"`
+	} `xml:"Items"`
+	EndOfSequence *struct{} `xml:"EndOfSequence"`
+}
+
+// wsmanFault is a SOAP 1.2 fault; WinRM names the error in the subcode
+// (e.g. w:AccessDenied, w:InvalidSelectors).
+type wsmanFault struct {
+	Subcode string `xml:"Code>Subcode>Value"`
+	Reason  string `xml:"Reason>Text"`
+}
+
+// wsmanCall posts one WS-Management request (op names it in errors). It
+// fails with plugins.ErrTLSUntrusted when the certificate of the endpoint is
+// not trusted (the handshake failed, the credentials were not sent), with
+// plugins.ErrUnreachable when the connection fails or breaks off, with
+// plugins.ErrAuthFailed when WinRM refuses the credentials (HTTP 401/403,
+// SOAP fault AccessDenied), and with an error on any other SOAP fault,
+// non-2xx status or a response that is no SOAP envelope.
+func (p *Plugin) wsmanCall(ctx context.Context, client *http.Client, baseURL, username, password, op, envelope string) (*wsmanResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL, strings.NewReader(envelope))
+	if err != nil {
+		return nil, fmt.Errorf("wmi: %s: %w", op, err)
 	}
 	req.SetBasicAuth(username, password)
 	req.Header.Set("Content-Type", "application/soap+xml;charset=UTF-8")
@@ -228,23 +316,71 @@ func (p *Plugin) wsmanEnumerate(ctx context.Context, client *http.Client, baseUR
 	// succeeded (COL-02).
 	resp, err := client.Do(req)
 	if err != nil {
-		if plugins.UntrustedCertificate(err) {
-			return "", fmt.Errorf("wmi: %w: certificate of %s not trusted by the system roots or RETICORA_WMI_TLS_SCOPES, no credentials sent: %v",
+		switch {
+		case plugins.UntrustedCertificate(err):
+			return nil, fmt.Errorf("wmi: %w: certificate of %s not trusted by the system roots or RETICORA_WMI_TLS_SCOPES, no credentials sent: %v",
 				plugins.ErrTLSUntrusted, req.URL.Host, err)
+		case ctx.Err() != nil:
+			return nil, fmt.Errorf("wmi: %s: %w", op, ctx.Err())
 		}
-		return "", nil
+		return nil, fmt.Errorf("wmi: %w: %s: %v", plugins.ErrUnreachable, op, err)
 	}
 	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 65536))
-	if err != nil {
-		return "", nil
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("wmi: %w: %s: WinRM refused the credentials (HTTP %s)", plugins.ErrAuthFailed, op, resp.Status)
 	}
-	return string(body), nil
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("wmi: %w: %s: reading the response: %v", plugins.ErrUnreachable, op, err)
+	}
+	if len(body) > maxResponseBytes {
+		return nil, fmt.Errorf("wmi: %s: response exceeds %d bytes (HTTP status %d)", op, maxResponseBytes, resp.StatusCode)
+	}
+	var env wsmanResponse
+	decodeErr := xml.Unmarshal(body, &env)
+	if f := env.Body.Fault; decodeErr == nil && f != nil {
+		// WinRM answers faults with HTTP 500; the subcode says why.
+		_, subcode, _ := strings.Cut(strings.TrimSpace(f.Subcode), ":")
+		if subcode == "" {
+			subcode = strings.TrimSpace(f.Subcode)
+		}
+		reason := strings.Join(strings.Fields(f.Reason), " ")
+		if subcode == "AccessDenied" {
+			return nil, fmt.Errorf("wmi: %w: %s: SOAP fault %s: %s", plugins.ErrAuthFailed, op, subcode, reason)
+		}
+		return nil, fmt.Errorf("wmi: %s: SOAP fault %s (HTTP status %d): %s", op, subcode, resp.StatusCode, reason)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, fmt.Errorf("wmi: %s: unexpected HTTP status %s", op, resp.Status)
+	}
+	if decodeErr != nil {
+		return nil, fmt.Errorf("wmi: %s: malformed response: %v", op, decodeErr)
+	}
+	return &env, nil
 }
 
-// buildWSManEnumerate creates a SOAP envelope for WS-Management Enumerate.
-func buildWSManEnumerate(wmiClass string) string {
+// buildWSManEnumerate creates the Enumerate request for a WMI class
+// (DSP0226 8.2): OptimizeEnumeration asks for the first instances in the
+// EnumerateResponse.
+func buildWSManEnumerate(to, wmiClass, messageID string) string {
+	return buildWSManRequest(to, wmiClass, wsmanActionEnumerate, messageID, `<wsen:Enumerate>
+      <wsman:OptimizeEnumeration/>
+      <wsman:MaxElements>32000</wsman:MaxElements>
+    </wsen:Enumerate>`)
+}
+
+// buildWSManPull creates the Pull request that continues an enumeration.
+func buildWSManPull(to, wmiClass, messageID, enumerationContext string) string {
+	return buildWSManRequest(to, wmiClass, wsmanActionPull, messageID, `<wsen:Pull>
+      <wsen:EnumerationContext>`+xmlText(enumerationContext)+`</wsen:EnumerationContext>
+      <wsen:MaxElements>32000</wsen:MaxElements>
+    </wsen:Pull>`)
+}
+
+// buildWSManRequest creates a SOAP envelope for WS-Management with the
+// addressing headers DSP0226 requires (To, ResourceURI, ReplyTo, Action,
+// MessageID).
+func buildWSManRequest(to, wmiClass, action, messageID, body string) string {
 	resourceURI := fmt.Sprintf("http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/%s", wmiClass)
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
@@ -252,19 +388,36 @@ func buildWSManEnumerate(wmiClass string) string {
             xmlns:wsen="http://schemas.xmlsoap.org/ws/2004/09/enumeration"
             xmlns:wsman="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd">
   <s:Header>
-    <wsa:To>https://windows-host:5986/wsman</wsa:To>
-    <wsman:ResourceURI>%s</wsman:ResourceURI>
+    <wsa:To>%s</wsa:To>
+    <wsman:ResourceURI s:mustUnderstand="true">%s</wsman:ResourceURI>
     <wsa:ReplyTo>
-      <wsa:Address>http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</wsa:Address>
+      <wsa:Address s:mustUnderstand="true">http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</wsa:Address>
     </wsa:ReplyTo>
-    <wsa:Action>http://schemas.xmlsoap.org/ws/2004/09/enumeration/Enumerate</wsa:Action>
-    <wsman:MaxEnvelopeSize>32768</wsman:MaxEnvelopeSize>
+    <wsa:Action s:mustUnderstand="true">%s</wsa:Action>
+    <wsa:MessageID>%s</wsa:MessageID>
+    <wsman:MaxEnvelopeSize s:mustUnderstand="true">%d</wsman:MaxEnvelopeSize>
     <wsman:OperationTimeout>PT60S</wsman:OperationTimeout>
   </s:Header>
   <s:Body>
-    <wsen:Enumerate/>
+    %s
   </s:Body>
-</s:Envelope>`, resourceURI)
+</s:Envelope>`, xmlText(to), resourceURI, action, messageID, maxEnvelopeSize, body)
+}
+
+// newMessageID returns a fresh wsa:MessageID (uuid: plus a random UUID).
+func newMessageID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("uuid:%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+// xmlText escapes s for XML character data.
+func xmlText(s string) string {
+	var b strings.Builder
+	_ = xml.EscapeText(&b, []byte(s))
+	return b.String()
 }
 
 // extractWMIField attempts to find a named XML element value in a WS-Management response.
