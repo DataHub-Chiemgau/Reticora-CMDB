@@ -2,6 +2,7 @@ package ai
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -126,7 +127,10 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 		prompt := buildPrompt(req.Question, chunks)
 		answer, pt, ct, err = h.provider.Chat([]Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: prompt}})
 		if err != nil {
-			api.WriteError(w, http.StatusBadGateway, "AI provider error", err.Error())
+			// The provider's error can name its endpoint and echo its
+			// response; it goes to the log only (API-03).
+			slog.WarnContext(r.Context(), "ai: provider request failed", "error", err)
+			api.WriteError(w, http.StatusBadGateway, "AI provider error", "the AI provider did not answer")
 			return
 		}
 	}

@@ -216,6 +216,7 @@ type ConflictError struct {
 	Current int64
 }
 
+// validation: a fixed rule text with the names of the changed fields.
 func (e *ConflictError) Error() string {
 	return fmt.Sprintf("fields changed since the If-Match version: %s", strings.Join(e.Fields, ", "))
 }

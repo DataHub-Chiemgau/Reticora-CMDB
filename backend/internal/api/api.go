@@ -39,6 +39,7 @@ type PaginationParams struct {
 // cursor is returned in Cursor. A malformed or forged cursor is reported
 // through PaginationParams.CursorError so callers can reject the request
 // instead of silently falling back to the first page.
+// validation: CursorError carries the fixed texts of DecodeCursor (API-03).
 func ParsePagination(r *http.Request) PaginationParams {
 	p := PaginationParams{Limit: DefaultPageLimit, Offset: 0}
 	if v := r.URL.Query().Get("limit"); v != "" {
@@ -244,6 +245,7 @@ func ETag(version int64) string {
 // ParseIfMatch reads the If-Match header: ok is false when there is none;
 // "*" yields IfMatchAny; a weak tag (W/) is accepted like a strong one. A
 // value that is not a version is an error (412 for the caller).
+// validation: the error names the refused If-Match value only.
 func ParseIfMatch(r *http.Request) (version int64, ok bool, err error) {
 	raw := strings.TrimSpace(r.Header.Get("If-Match"))
 	if raw == "" {

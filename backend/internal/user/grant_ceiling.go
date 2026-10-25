@@ -36,6 +36,7 @@ type GrantCeilingError struct {
 	Revocation bool
 }
 
+// validation: a fixed rule text with the missing permissions.
 func (e *GrantCeilingError) Error() string {
 	if e.Revocation {
 		return "revoking the role assignment requires " + joinPermissions(e.Missing) + " in its scope"
@@ -60,6 +61,7 @@ type RoleWideningError struct {
 	Missing []identity.Permission
 }
 
+// validation: a fixed rule text with the missing permissions.
 func (e *RoleWideningError) Error() string {
 	return "adding " + joinPermissions(e.Missing) + " to the role requires holding them organization-wide"
 }

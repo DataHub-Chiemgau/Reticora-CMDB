@@ -848,6 +848,7 @@ type ListFilter struct {
 }
 
 // ParseListFilter reads the filter query parameters.
+// validation: fixed texts naming the refused parameter.
 func ParseListFilter(r *http.Request) (ListFilter, error) {
 	q := r.URL.Query()
 	f := ListFilter{

@@ -8,6 +8,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -242,6 +243,10 @@ type registrar interface {
 	RegisterRoutes(r chi.Router)
 }
 
+// errMergeGone refuses the revert of a merge job whose merge no longer
+// exists (409).
+var errMergeGone = errors.New("the merge of the job no longer exists")
+
 // NewRouter builds the complete API router. Every route the server exposes is
 // registered here; there is no other registration site. It also returns the
 // tenant-aware HTTP metrics middleware, which the caller mounts on the outer
@@ -369,9 +374,20 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
 				if opts.CIService == nil {
-					return ci.ErrMergeUnsupported
+					return &jobs.RevertRefusedError{Reason: ci.ErrMergeUnsupported}
 				}
+				// The refusals of the unmerge answer with the sentinel's text
+				// (409); a repository error reaches the client sanitized
+				// (API-03).
 				_, err := opts.CIService.RevertMerge(ctx, job.OrganizationID, job.RefID)
+				for _, refusal := range []error{ci.ErrSnapshotExpired, ci.ErrMergeConflict, ci.ErrMergeUnsupported} {
+					if errors.Is(err, refusal) {
+						return &jobs.RevertRefusedError{Reason: refusal}
+					}
+				}
+				if err != nil && err.Error() == "not found" {
+					return &jobs.RevertRefusedError{Reason: errMergeGone}
+				}
 				return err
 			})
 		// A CI merge is a job (CI-12, JOB-01); bulk operations from 100

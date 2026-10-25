@@ -542,6 +542,46 @@ func TestCallbackFailsWhenMFACannotBeEnforced(t *testing.T) {
 	}
 }
 
+// dbFailingProvisioner fails every login with the text of a database error.
+type dbFailingProvisioner struct{ statusProvisioner }
+
+func (dbFailingProvisioner) EnsureUser(context.Context, string, string, string, string) (string, error) {
+	return "", errors.New(`ERROR: new row violates row-level security policy for table "app_user" (SQLSTATE 42501)`)
+}
+
+// TestCallbackHidesProvisioningErrors covers API-03 (WP-408): a login whose
+// user provisioning fails answers 502 with a fixed text; the database error
+// goes to the log only.
+func TestCallbackHidesProvisioningErrors(t *testing.T) {
+	orgID := "123e4567-e89b-12d3-a456-426614174000"
+	fake := newFakeOIDCServer(t)
+	fake.mutateClaims = func(claims map[string]any) {
+		claims["groups"] = []string{orgID}
+	}
+	handler := NewHandler(NewOIDCProvider(OIDCConfig{
+		IssuerURL:    fake.issuer(),
+		ClientID:     "reticora-app",
+		ClientSecret: "top-secret",
+		RedirectURL:  "https://app.example.com/callback",
+	}), testSessionIssuer(t)).WithProvisioning(dbFailingProvisioner{}, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/callback",
+		strings.NewReader(`{"code":"auth-code","state":"nonce","code_verifier":"verifier-123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.Callback(w, req)
+
+	body := w.Body.String()
+	if w.Code != http.StatusBadGateway || !strings.Contains(body, "the login could not be completed") {
+		t.Fatalf("login with failing provisioning: status %d body %s, want 502 with the fixed text", w.Code, body)
+	}
+	for _, leak := range []string{"SQLSTATE", "app_user", "row-level security", "provision user", `"token"`} {
+		if strings.Contains(body, leak) {
+			t.Errorf("login with failing provisioning: body %s contains %q", body, leak)
+		}
+	}
+}
+
 // fakeMFA records the OIDC subjects RequireMFA is called with; err fails
 // every binding (an admin API that refuses, or no admin client like
 // user.UnavailableMFA).

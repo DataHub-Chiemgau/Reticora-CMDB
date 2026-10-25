@@ -1,6 +1,7 @@
 package contact
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -196,7 +197,10 @@ func (h *Handler) Link(w http.ResponseWriter, r *http.Request) {
 		if api.WriteDBError(w, err) {
 			return
 		}
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		// The repository's text stays in the log (API-03): a driver or
+		// connection error must not reach the client.
+		slog.WarnContext(r.Context(), "contact link failed", "error", err)
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "the CI and the contact could not be linked")
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, link)

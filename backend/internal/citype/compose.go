@@ -31,6 +31,7 @@ func (e *CompositionError) CompositionKey() string { return e.Key }
 // apply (allOf), the default and the presentation of the last layer that
 // sets them win; a different data type is an error. Keys keep the order
 // of their first appearance.
+// validation: CompositionError names the key and the rule that fails.
 func Compose(layers ...[]fieldmeta.FieldDefinition) ([]fieldmeta.FieldDefinition, error) {
 	order := make([]string, 0, 16)
 	byName := make(map[string]fieldmeta.FieldDefinition, 16)

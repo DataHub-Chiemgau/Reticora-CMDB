@@ -7,6 +7,7 @@ import (
 )
 
 // validateCIDR parses and normalizes a CIDR prefix using net/netip.
+// validation: the parse error of the request value.
 func validateCIDR(cidr string) (string, error) {
 	p, err := netip.ParsePrefix(strings.TrimSpace(cidr))
 	if err != nil {
@@ -16,6 +17,7 @@ func validateCIDR(cidr string) (string, error) {
 }
 
 // validateIP parses a bare IP address (no prefix) using net/netip.
+// validation: the parse error of the request value.
 func validateIP(ip string) (string, error) {
 	addr, err := netip.ParseAddr(strings.TrimSpace(ip))
 	if err != nil {
@@ -25,6 +27,7 @@ func validateIP(ip string) (string, error) {
 }
 
 // ipInSubnet reports whether ip belongs to the given cidr.
+// validation: the parse errors of the values.
 func ipInSubnet(ip, cidr string) (bool, error) {
 	addr, err := netip.ParseAddr(strings.TrimSpace(ip))
 	if err != nil {

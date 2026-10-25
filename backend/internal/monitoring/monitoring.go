@@ -700,6 +700,8 @@ func requireOrgID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return orgID, true
 }
 
+// metricQueryFromRequest reads the metric query parameters.
+// validation: fixed texts naming the parameter.
 func metricQueryFromRequest(r *http.Request, orgID string) (MetricQuery, error) {
 	query := MetricQuery{
 		OrgID: orgID,
@@ -741,6 +743,8 @@ func parseRequestTime(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid timestamp %q", value)
 }
 
+// decodeMetrics reads the metrics of an ingest body.
+// validation: the read error of the body and fixed texts.
 func decodeMetrics(body io.ReadCloser) ([]Metric, error) {
 	defer body.Close()
 	data, err := io.ReadAll(body)
@@ -774,6 +778,8 @@ func decodeMetrics(body io.ReadCloser) ([]Metric, error) {
 	return nil, errors.New("unable to decode metrics payload")
 }
 
+// decodeJSON decodes a single JSON object from body.
+// validation: the decode errors of the body, as api.ReadJSON.
 func decodeJSON(body io.ReadCloser, dest any) error {
 	defer body.Close()
 	dec := json.NewDecoder(body)

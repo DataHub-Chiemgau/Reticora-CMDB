@@ -158,7 +158,7 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 	item, err := h.repo.Issue(r.Context(), a)
 	if err != nil {
 		if strings.Contains(err.Error(), "not available") {
-			api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+			api.WriteError(w, http.StatusConflict, "Conflict", "key item is not available")
 			return
 		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "key item not found")
@@ -177,7 +177,7 @@ func (h *Handler) Return(w http.ResponseWriter, r *http.Request) {
 	item, err := h.repo.Return(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		if strings.Contains(err.Error(), "not issued") {
-			api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+			api.WriteError(w, http.StatusConflict, "Conflict", "key item is not issued")
 			return
 		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "key item not found")

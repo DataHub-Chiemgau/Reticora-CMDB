@@ -577,6 +577,8 @@ func (h *Handler) DeleteInstanceField(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// validateField checks a field of a CI type.
+// validation: the texts of fieldmeta.ValidateDefinition.
 func validateField(f Field) error {
 	return fieldmeta.ValidateDefinition(f.Definition())
 }

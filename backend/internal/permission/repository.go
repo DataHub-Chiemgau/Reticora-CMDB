@@ -52,6 +52,7 @@ type RoleWideningError struct {
 	Missing []identity.Permission
 }
 
+// validation: a fixed rule text with the missing permissions.
 func (e *RoleWideningError) Error() string {
 	keys := make([]string, len(e.Missing))
 	for i, p := range e.Missing {

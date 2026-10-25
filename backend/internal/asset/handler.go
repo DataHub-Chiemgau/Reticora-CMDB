@@ -244,6 +244,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 // composition child (spec §5, 409): the parent asset owns Field.
 type ParentOwnedFieldError struct{ Field string }
 
+// validation: a fixed rule text with the field name of the request.
 func (e *ParentOwnedFieldError) Error() string {
 	return fmt.Sprintf("field %q is owned by the parent asset and is read-only on composition children", e.Field)
 }

@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -20,8 +21,19 @@ import (
 // answers 404 for any other job. Cancelling and reverting a job needs the
 // permission of its kind, or being its creator.
 
-// Reverter undoes a finished job of one kind.
+// Reverter undoes a finished job of one kind. A refusal with a domain text
+// (409) is a *RevertRefusedError; any other error is a repository error and
+// reaches the client sanitized (API-03).
 type Reverter func(ctx context.Context, job *Job) error
+
+// RevertRefusedError is a reverter's refusal, e.g. an expired merge
+// snapshot (409).
+type RevertRefusedError struct{ Reason error }
+
+// validation: the reverter passes a fixed domain sentinel (server/router.go).
+func (e *RevertRefusedError) Error() string { return e.Reason.Error() }
+
+func (e *RevertRefusedError) Unwrap() error { return e.Reason }
 
 // ErrNotRevertible: the kind defines no revert (E-25) or the job did not
 // succeed.
@@ -236,10 +248,15 @@ func (h *APIHandler) Revert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := revert(r.Context(), job); err != nil {
-		if api.WriteFieldError(w, err) {
-			return
+		var refused *RevertRefusedError
+		switch {
+		case api.WriteFieldError(w, err):
+		case errors.As(err, &refused):
+			api.WriteError(w, http.StatusConflict, "Conflict", refused.Error())
+		default:
+			slog.WarnContext(r.Context(), "job revert failed", "job_id", job.ID, "error", err)
+			api.WriteRepoError(w, err)
 		}
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{"job_id": job.ID, "reverted": true})

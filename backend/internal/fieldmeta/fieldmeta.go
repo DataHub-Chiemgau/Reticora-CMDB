@@ -203,6 +203,7 @@ type Predicate struct {
 var ReservedNames = map[string]bool{"_overrides": true, "_observed": true, "_provenance": true, "_instance": true}
 
 // ValidateDefinition checks structural validity of a field definition.
+// validation: fixed texts naming the field and the rule.
 func ValidateDefinition(def FieldDefinition) error {
 	if strings.TrimSpace(def.Name) == "" {
 		return fmt.Errorf("field name is required")
@@ -444,6 +445,7 @@ func stringifyAll(values []any) []string {
 // combining the type check with the validation rules. Empty values are valid
 // unless the field is required (required checks happen at the form/transition
 // level via FieldState).
+// validation: fixed texts naming the field and the rule.
 func ValidateValue(def FieldDefinition, value any) error {
 	if isEmpty(value) {
 		return nil

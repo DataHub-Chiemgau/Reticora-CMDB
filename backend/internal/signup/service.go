@@ -366,8 +366,10 @@ func (s *Service) CreateOrganization(ctx context.Context, op operator.Identity, 
 				err = errors.Join(err, fmt.Errorf("delete account %s after failed creation: %w", accountID, derr))
 			}
 		}
+		// The fixed text only: err may carry the failed cleanup with the
+		// account id and the IdP's answer (API-03).
 		if errors.Is(err, ErrAccountExists) {
-			return operator.CreatedOrganization{}, &api.ConflictError{Field: "admin_email", Message: err.Error()}
+			return operator.CreatedOrganization{}, &api.ConflictError{Field: "admin_email", Message: ErrAccountExists.Error()}
 		}
 		return operator.CreatedOrganization{}, err
 	}

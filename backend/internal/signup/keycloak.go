@@ -121,7 +121,7 @@ func (k *KeycloakAccounts) CreateAccount(ctx context.Context, a Account) (string
 func (k *KeycloakAccounts) CreateInvitedAccount(ctx context.Context, email, displayName, password, orgID, role string) (string, error) {
 	id, err := k.createAccount(ctx, Account{Email: email, DisplayName: displayName, Password: password, OrganizationID: orgID}, role == orgAdminRole)
 	if errors.Is(err, ErrAccountExists) {
-		return "", &api.ConflictError{Field: "email", Message: err.Error()}
+		return "", &api.ConflictError{Field: "email", Message: ErrAccountExists.Error()}
 	}
 	return id, err
 }

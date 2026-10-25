@@ -15,6 +15,8 @@ type FieldError struct {
 	Status int
 }
 
+// validation: the field and its message; handler_errors_test checks where a
+// message is built.
 func (e *FieldError) Error() string { return e.Field + ": " + e.Message }
 
 // ConflictError reports a unique field whose value is already taken (409).
@@ -23,6 +25,7 @@ type ConflictError struct {
 	Message string
 }
 
+// validation: the field and its message, as FieldError.
 func (e *ConflictError) Error() string { return e.Field + ": " + e.Message }
 
 // FieldProblem is an RFC 7807 problem that names the request field.
