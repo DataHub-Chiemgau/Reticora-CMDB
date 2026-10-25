@@ -44,6 +44,8 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-94](#e-94) | Korrektur der Migration 000110 (Duplikat-Suffixe der Interfaces) | offen (Empfehlung als Übergangsregel) | WP-592 |
 | [E-95](#e-95) | Durchsetzung von allowed_source_types, allowed_target_types und cardinality (REL-01) | offen (Empfehlung als Übergangsregel) | WP-592 |
 | [E-96](#e-96) | TimescaleDB-Version des Datenbank-Images und Funde seines Basisimages | entschieden: Option 2 (Auftraggeber, 2026-10-21) | WP-389 |
+| [E-97](#e-97) | Obergrenze der Dauer von Alarmregeln (MON-01) | entschieden: 9600 h (Auftraggeber, 2026-10-25) | WP-406 |
+| [E-98](#e-98) | Webhook-Abos und der Scope ihres Erzeugers (TEN-09) | entschieden: Option B (Auftraggeber, 2026-10-25) | WP-601 |
 
 ## E-59
 
@@ -882,3 +884,46 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 **Betroffene IDs:** SEC-11, TST-04, MON-01
 
 **Betroffene WPs:** WP-389
+
+## E-97
+
+**Thema:** Obergrenze der Dauer von Alarmregeln (MON-01)
+
+**Status:** entschieden: 9600 h (Auftraggeber, 2026-10-25)
+
+**Frage:** WP-406 (`t1-err-ident-loc`) prüft die Dauer einer Alarmregel vor der Umwandlung in eine Ganzzahl; der Plan nennt keinen Höchstwert. Welche Obergrenze gilt?
+
+**Optionen:**
+
+1. 9600 h (400 Tage), die Aufbewahrungsdauer der Metriken nach MON-01: eine längere Dauer kann nie erfüllt werden.
+2. Keine fachliche Obergrenze, nur die technische Grenze des Datentyps.
+
+**Empfehlung:** Option 1.
+
+**Umsetzung:** WP-406 (`t1-err-ident-loc`): Dauer außerhalb 0 bis 9600 h ergibt 422 mit Feldfehler; numerische Werte werden vor der Umwandlung geprüft. Vom Auftraggeber am 2026-10-25 bestätigt.
+
+**Betroffene IDs:** MON-01
+
+**Betroffene WPs:** WP-406
+
+## E-98
+
+**Thema:** Webhook-Abos und der Scope ihres Erzeugers (TEN-09)
+
+**Status:** entschieden: Option B (Auftraggeber, 2026-10-25)
+
+**Frage:** Webhook-Abos gehören der ganzen Organisation. Jeder client- oder site-beschränkte Principal mit `webhook:manage` legt Abos an und löscht sie; ein Abo ohne Service-Account erhält die Events aller Clients (Fund der Kanalmatrix in WP-409 (`t1-channel-matrix`)). Wie wird das begrenzt?
+
+**Optionen:**
+
+- A) Webhook-Verwaltung nur für Principals ohne Client- und Site-Einschränkung; beschränkte Principals erhalten 403.
+- B) Abos tragen den Scope ihres Erzeugers: Verwaltung nur im eigenen Scope, Zustellung nur von Events, deren Objekte im Scope liegen; bestehende Abos bleiben org-weit.
+
+**Empfehlung:** Option B: beschränkte Teams können Webhooks für ihre Clients weiter nutzen, und ein gebundener Service-Account erweitert den Scope des Erzeugers nicht.
+
+**Umsetzung:** WP-601 (`k1n-webhook-scope`).
+
+**Betroffene IDs:** TEN-09, TEN-06, WHK-01
+
+**Betroffene WPs:** WP-601
+
