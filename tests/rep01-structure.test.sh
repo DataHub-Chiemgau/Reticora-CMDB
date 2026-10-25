@@ -28,7 +28,9 @@
 #   GATE-05  no [O] ID has a traceability row of the gate;
 #   SEQ-01   the checklist documents the order per epic (E-07);
 #   DOD-01   the PR template carries the Definition of Done;
-#   ABN-01   the frozen acceptance artefacts are unchanged (WP-212);
+#   ABN-01   the frozen acceptance artefacts are unchanged and each scenario
+#            test, fixture and data file of (d) and (e) is frozen (WP-212,
+#            WP-456);
 #   GLO-11   the traceability check is a blocking CI job and blocks missing
 #            [B]/[Q] IDs (E-30);
 #   and every workflow under .github/workflows is valid YAML.
@@ -122,6 +124,21 @@ done
 check "ABN-01 protocol docs/acceptance/abn-01.md exists" "[ -s docs/acceptance/abn-01.md ]"
 check "ABN-01 frozen artefacts match docs/acceptance/artefakte/SHA256SUMS" \
     "sha256sum --quiet -c docs/acceptance/artefakte/SHA256SUMS >/dev/null 2>&1"
+# WP-456: the scenario tests of (d) and (e) (onboarding, conflict mocked and
+# on the real stack), the onboarding fixture and the data stand in SHA256SUMS,
+# and the generation command of the artefakte README names each of them.
+# The backticks are the literal Markdown fence; the variable is read by check
+# through eval.
+# shellcheck disable=SC2016,SC2034
+abn01_cmd=$(sed -n '/^```sh/,/^```/p' docs/acceptance/artefakte/README.md)
+for f in frontend/e2e/onboarding.spec.ts frontend/e2e/conflict.spec.ts \
+    frontend/e2e-real/abn-01-konflikt.spec.ts frontend/e2e/fixtures/setup-onboarding.sh \
+    docs/acceptance/artefakte/abn-01-e-konflikt.json; do
+    check "ABN-01 ${f} is frozen in docs/acceptance/artefakte/SHA256SUMS" \
+        "grep -qE '^[0-9a-f]{64}  ${f}\$' docs/acceptance/artefakte/SHA256SUMS"
+    check "ABN-01 the generation command in docs/acceptance/artefakte/README.md names ${f}" \
+        "grep -qF '${f}' <<< \"\$abn01_cmd\""
+done
 
 # --- DOD-01, GLO-11 ---------------------------------------------------------
 check "DOD-01 the PR template carries the Definition of Done" \

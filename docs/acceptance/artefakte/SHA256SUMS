@@ -1,4 +1,5 @@
-1ced8f6d9b59052124bfcd9b3118315b181b090e4432a98e42ba18d04b83e231  frontend/e2e/onboarding.spec.ts
+520651c6528f8f7b3dc915d63e41b1903d0d775e6b8639c4ff12772b2bf63c5a  frontend/e2e/onboarding.spec.ts
 863bc6f19b852f2a1d66a1a30c053617952a485d8bea845bc600b08a68e92780  frontend/e2e/conflict.spec.ts
+52869cec747e974c605a15c3c2e0d913a39ba3bc793f55f4cf5f3a33b23aa238  frontend/e2e-real/abn-01-konflikt.spec.ts
 36ce16f8036329cf620191368e2e1a4d138e4c8911c1fec97683cb9eeb885cd5  frontend/e2e/fixtures/setup-onboarding.sh
 b2a7bb40de2062469354f21f36beb653bf522757a64ef944470283f3a44af5d3  docs/acceptance/artefakte/abn-01-e-konflikt.json
