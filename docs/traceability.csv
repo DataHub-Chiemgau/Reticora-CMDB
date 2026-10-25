@@ -671,3 +671,6 @@ SIM-01;[B], Teilumfang [P2];LT;backend/cmd/seed/seed_integration_test.go;WP-433
 NFR-10;[Q];LT;backend/cmd/seed/seed_integration_test.go;WP-433
 OPS-01;[B];A;backend/cmd/server/startup_readiness_integration_test.go;WP-442
 COL-08;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-429
+GATE-01;[Q];G1;tests/rep01-structure.test.sh;WP-451
+GATE-02;[Q];G1;tests/rep01-structure.test.sh;WP-451
+GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-451

@@ -8,8 +8,8 @@ automatisierte Protokolle gegen eingefrorene Daten. Die Daten liegen in
 
 | Teil | Szenario | Tag | Status G1 | Nachweis |
 |---|---|---|---|---|
-| (a) | CMDB-Szenario, 34 Schritte, aus V §65 | [Q] | PASS (Erklärung des Auftraggebers) | Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B4); Originaltext nachzureichen (E-02, A-02) |
-| (b) | System-Szenario, 20 Schritte, aus V §66 | [Q] | PASS (Erklärung des Auftraggebers) | Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B4); Originaltext nachzureichen (E-02, A-02) |
+| (a) | CMDB-Szenario, 34 Schritte, aus V §65 | [Q] | offen | Erklärung des Auftraggebers vom 2026-10-15 (B4), Nachweis ausstehend: Originaltext nachzureichen (E-02, A-02; WP-457) |
+| (b) | System-Szenario, 20 Schritte, aus V §66 | [Q] | offen | Erklärung des Auftraggebers vom 2026-10-15 (B4), Nachweis ausstehend: Originaltext nachzureichen (E-02, A-02; WP-457) |
 | (c) | Metamodell-Szenario | [P2] | nicht G1 | Phase 2 |
 | (d) | Onboarding-Szenario | [B] | **PASS** | `frontend/e2e/onboarding.spec.ts`, Lauf auf der frischen Installation (`docs/acceptance/g1-installation.md`) |
 | (e) | Konflikt-Szenario | [B] | **PASS** | `frontend/e2e/conflict.spec.ts` mit `artefakte/abn-01-e-konflikt.json` |
@@ -29,6 +29,14 @@ erklärt. Die Texte liegen im Repository weiterhin nicht vor; (a) und (b) sind
 durch diese Erklärung abgenommen, nicht durch einen Test. Nachzureichen sind
 die Texte in `docs/spec/`; danach kommen sie wie oben beschrieben unverändert
 in dieses Verzeichnis, und jeder Schritt wird zugeordnet.
+
+Nachtrag 2026-10-25 (WP-451, E-76): Die Erklärung des Auftraggebers ersetzt
+den Nachweis nicht. (a) und (b) stehen auf „offen“ mit der Begründung
+„Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend“; ABN-01
+steht in `docs/acceptance/g1-gate.md` auf „offen“ und in
+`docs/acceptance/g1-ausnahmen.csv`, bis die Szenariotexte eingefroren und
+Schritt für Schritt protokolliert sind (WP-457). (d) und (e) bleiben durch
+Tests belegt.
 
 ## (d) Onboarding-Szenario
 

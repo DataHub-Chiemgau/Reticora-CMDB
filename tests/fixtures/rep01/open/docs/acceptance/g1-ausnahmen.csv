@@ -1,0 +1,10 @@
+id;art;grund;entscheidung;lieferung
+AUT-05;erklaerung;Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76;A-02
+AUT-06;erklaerung;Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76;A-02
+NET-04;erklaerung;Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76;A-02
+NFR-08;erklaerung;Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76;A-07
+NFR-09;erklaerung;Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76;A-11
+ABN-01;erklaerung;Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76;A-02
+GATE-03;erklaerung;Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76;A-07
+GATE-02;erklaerung;abgeleitet aus den übrigen Zeilen (Fixture);E-76;Wegfall der übrigen Ausnahmen
+GATE-04;np;GA-Regel, nicht Teil von G1 (Fixture);E-03;keine zu G1
