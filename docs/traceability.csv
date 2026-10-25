@@ -668,3 +668,4 @@ NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/jobs/notices_integration_test
 EVT-02;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
 ENT-07;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
 COL-04;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
+MON-02;[B];C;backend/internal/discovery/edge_metrics_integration_test.go;WP-426

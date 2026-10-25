@@ -228,8 +228,9 @@ func (c *cronSpec) dayMatches(t time.Time) bool {
 
 // --- spool ------------------------------------------------------------------
 
-// runSpoolFlusher delivers the upload spool every interval and whenever
-// the backend became reachable again, independent of discovery (NFR-03).
+// runSpoolFlusher delivers the upload spool and the buffered metric
+// batches (MON-02) every interval and whenever the backend became reachable
+// again, independent of discovery (NFR-03).
 func runSpoolFlusher(ctx context.Context, up *uploader, interval time.Duration) {
 	if interval <= 0 {
 		interval = defaultSpoolFlush
@@ -238,6 +239,7 @@ func runSpoolFlusher(ctx context.Context, up *uploader, interval time.Duration) 
 	defer ticker.Stop()
 	for {
 		up.flushSpool(ctx)
+		up.flushMetrics(ctx)
 		select {
 		case <-ctx.Done():
 			slog.Info("spool flusher stopped")

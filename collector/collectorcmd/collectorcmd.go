@@ -262,6 +262,8 @@ type uploader struct {
 	// flushMu serializes spool deliveries; flushNow wakes the flusher.
 	flushMu  sync.Mutex
 	flushNow chan struct{}
+	// metrics holds the metric batches the edge did not take yet (edge.go).
+	metrics metricBuffer
 }
 
 // LicenseStatusHeader carries the discovery license status on heartbeat
@@ -1017,9 +1019,9 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 
 // runTrapReceiver receives SNMP traps and forwards them as metric events to
 // the monitoring ingest, so the existing alert rules can fire on traps (e.g.
-// "any linkDown trap → critical alert"). Failed uploads are logged and
-// dropped: traps are fire-and-forget events, spooling them like discovery
-// results would delay alerts past the point where they are useful.
+// "any linkDown trap → critical alert"). Without the edge a trap waits in
+// the bounded metric buffer; it is not spooled to disk like discovery
+// results, which would delay alerts past the point where they are useful.
 func runTrapReceiver(ctx context.Context, cfg collectorConfig, up *uploader) {
 	if err := newTrapReceiver(cfg, up).Run(ctx); err != nil {
 		slog.Error("snmp trap receiver stopped", "error", err)
@@ -1036,7 +1038,7 @@ func newTrapReceiver(cfg collectorConfig, up *uploader) *snmp.TrapReceiver {
 		Sink: func(ctx context.Context, ev snmp.TrapEvent) {
 			slog.Info("snmp trap received", "source", ev.SourceIP, "trap_oid", ev.TrapOID)
 			if err := up.uploadTrapEvent(ctx, ev); err != nil {
-				slog.Warn("trap event upload failed", "source", ev.SourceIP, "trap_oid", ev.TrapOID, "error", err)
+				slog.Error("trap event upload failed", "source", ev.SourceIP, "trap_oid", ev.TrapOID, "count", 1, "error", err)
 			}
 		},
 	}
@@ -1080,9 +1082,7 @@ func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 		}
 		if len(samples) > 0 {
 			if err := up.uploadMetricSamples(ctx, samples); err != nil {
-				slog.Warn("metric sample upload failed", "count", len(samples), "error", err)
-			} else {
-				slog.Info("metric samples uploaded", "count", len(samples))
+				slog.Error("metric sample upload failed", "count", len(samples), "error", err)
 			}
 		}
 
@@ -1096,7 +1096,7 @@ func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 }
 
 // uploadMetricSamples converts collector metric samples into monitoring
-// ingest payloads and POSTs them in one batch.
+// ingest samples and sends them over the edge (postMetrics, edge.go).
 func (u *uploader) uploadMetricSamples(ctx context.Context, samples []plugins.MetricSample) error {
 	if u.cfg.ServerURL == "" || u.cfg.OrganizationID == "" || u.cfg.CollectorID == "" {
 		return nil
@@ -1115,38 +1115,11 @@ func (u *uploader) uploadMetricSamples(ctx context.Context, samples []plugins.Me
 			"timestamp": now.Format(time.RFC3339Nano),
 		})
 	}
-	payload, err := json.Marshal(metrics)
-	if err != nil {
-		return fmt.Errorf("marshal metric samples: %w", err)
-	}
-	return u.postMetricsPayload(ctx, payload)
-}
-
-// postMetricsPayload POSTs a monitoring ingest payload (shared by trap
-// events and polled metrics).
-func (u *uploader) postMetricsPayload(ctx context.Context, payload []byte) error {
-	endpoint := strings.TrimRight(u.cfg.ServerURL, "/") + "/api/v1/monitoring/metrics"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return fmt.Errorf("build metrics upload request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Organization-ID", u.cfg.OrganizationID)
-	req.Header.Set("X-Collector-ID", u.cfg.CollectorID)
-
-	resp, err := u.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("metrics upload request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("metrics upload failed with status %d", resp.StatusCode)
-	}
-	return nil
+	return u.postMetrics(ctx, metrics)
 }
 
 // uploadTrapEvent maps a normalized trap onto a monitoring metric sample and
-// POSTs it to the ingest endpoint. The metric name is stable so alert rules
+// sends it to the monitoring ingest. The metric name is stable so alert rules
 // can target it; trap-specific context travels in the labels.
 func (u *uploader) uploadTrapEvent(ctx context.Context, ev snmp.TrapEvent) error {
 	if u.cfg.ServerURL == "" || u.cfg.OrganizationID == "" || u.cfg.CollectorID == "" {
@@ -1175,7 +1148,7 @@ func (u *uploader) uploadTrapEvent(ctx context.Context, ev snmp.TrapEvent) error
 	if err != nil {
 		return fmt.Errorf("marshal trap event: %w", err)
 	}
-	return u.postMetricsPayload(ctx, payload)
+	return u.postMetricsPayload(ctx, payload, 1)
 }
 
 // agentTelemetryTopic is the spool topic of relayed agent telemetry; it is
@@ -1659,13 +1632,13 @@ func pollPowerValues(ctx context.Context, hits []plugins.Result, creds map[strin
 	return samples
 }
 
-// uploadSamples sends metric samples; a failure is logged, the next run
-// sends fresh values.
+// uploadSamples sends metric samples over the edge; without it they wait
+// in the metric buffer, a refusal or drop is logged as an error.
 func uploadSamples(ctx context.Context, up *uploader, samples []plugins.MetricSample) {
 	if len(samples) == 0 || up == nil {
 		return
 	}
 	if err := up.uploadMetricSamples(ctx, samples); err != nil {
-		slog.Warn("metric sample upload failed", "count", len(samples), "error", err)
+		slog.Error("metric sample upload failed", "count", len(samples), "error", err)
 	}
 }

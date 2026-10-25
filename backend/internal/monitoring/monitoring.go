@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -532,14 +533,52 @@ func (h *Handler) IngestMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metrics, err := decodeMetrics(r.Body)
+	data, err := readMetricsBody(r.Body)
 	if err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if len(metrics) == 0 {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "at least one metric is required")
+	result, err := h.IngestPayload(r.Context(), orgID, data)
+	var invalid *InvalidMetricsError
+	switch {
+	case errors.As(err, &invalid):
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", invalid.Error())
 		return
+	case err != nil:
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusAccepted, map[string]any{"ingested": result.Ingested, "unassigned": result.Unassigned})
+}
+
+// InvalidMetricsError is an ingest body that is refused with 400: no
+// metric, a metric without a name or no metric JSON.
+type InvalidMetricsError struct{ Detail string }
+
+// validation: the fixed texts of decodeMetrics and IngestPayload.
+func (e *InvalidMetricsError) Error() string { return e.Detail }
+
+// IngestResult counts the samples of an ingest (MON-02): those stored with
+// their CI and those without a CI, which are not stored.
+type IngestResult struct {
+	Ingested   int `json:"ingested"`
+	Unassigned int `json:"unassigned"`
+}
+
+// IngestPayload stores the metrics of an ingest body for the organization;
+// POST /api/v1/monitoring/metrics and the collectors' edge subject .metrics
+// share it (MON-02). Collector samples carry the polled address, not the
+// CI: they are assigned by it among the CIs the scope of ctx sees, so a
+// client- or site-scoped caller assigns only to its own CIs. A sample
+// without a CI is not stored (metric_sample.ci_id is required) and counted
+// as unassigned. A body without valid metrics is an *InvalidMetricsError.
+func (h *Handler) IngestPayload(ctx context.Context, orgID string, data []byte) (IngestResult, error) {
+	metrics, err := decodeMetrics(data)
+	if err != nil {
+		return IngestResult{}, &InvalidMetricsError{Detail: err.Error()}
+	}
+	if len(metrics) == 0 {
+		return IngestResult{}, &InvalidMetricsError{Detail: "at least one metric is required"}
 	}
 
 	now := time.Now().UTC()
@@ -553,22 +592,17 @@ func (h *Handler) IngestMetrics(w http.ResponseWriter, r *http.Request) {
 			metrics[i].Labels = make(map[string]string)
 		}
 		if strings.TrimSpace(metrics[i].Name) == "" {
-			api.WriteError(w, http.StatusBadRequest, "Bad Request", "metric name is required")
-			return
+			return IngestResult{}, &InvalidMetricsError{Detail: "metric name is required"}
 		}
 	}
 
-	// Collector samples carry the polled address, not the CI: assign them
-	// by it; a sample without a CI is not stored (metric_sample.ci_id is
-	// required) and counted as unassigned (MON-02).
-	assigned, unassigned := h.assignCIs(r.Context(), orgID, metrics)
+	assigned, unassigned := h.assignCIs(ctx, orgID, metrics)
 	if len(assigned) > 0 {
-		if err := h.store.Ingest(r.Context(), assigned); err != nil {
-			api.WriteRepoError(w, err)
-			return
+		if err := h.store.Ingest(ctx, assigned); err != nil {
+			return IngestResult{}, err
 		}
 	}
-	api.WriteJSON(w, http.StatusAccepted, map[string]any{"ingested": len(assigned), "unassigned": unassigned})
+	return IngestResult{Ingested: len(assigned), Unassigned: unassigned}, nil
 }
 
 // ListAlerts handles GET /api/v1/monitoring/alerts.
@@ -743,14 +777,16 @@ func parseRequestTime(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid timestamp %q", value)
 }
 
-// decodeMetrics reads the metrics of an ingest body.
-// validation: the read error of the body and fixed texts.
-func decodeMetrics(body io.ReadCloser) ([]Metric, error) {
+// readMetricsBody reads an ingest body.
+// validation: the read error of the body, like api.ReadJSON.
+func readMetricsBody(body io.ReadCloser) ([]byte, error) {
 	defer body.Close()
-	data, err := io.ReadAll(body)
-	if err != nil {
-		return nil, err
-	}
+	return io.ReadAll(body)
+}
+
+// decodeMetrics reads the metrics of an ingest body.
+// validation: fixed texts.
+func decodeMetrics(data []byte) ([]Metric, error) {
 	if len(strings.TrimSpace(string(data))) == 0 {
 		return nil, errors.New("request body is required")
 	}
@@ -868,6 +904,25 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// CIAddressResolver assigns collector metric samples to the CI whose
+// management IP the collector polled (MON-02). The CIs are read in the
+// scope of ctx: on the edge that of the collector, so a collector of a
+// client or a site finds only the CIs of its client or site (an org-wide
+// one those of the organization); an address two visible CIs share
+// assigns nothing.
+type CIAddressResolver struct{ CIs ci.Repository }
+
+// ResolveCI implements CIResolver.
+func (a CIAddressResolver) ResolveCI(ctx context.Context, orgID, address string) (ciID string, ok bool) {
+	items, _, err := a.CIs.List(ctx, orgID, ci.FilterParams{Filters: []api.Filter{
+		{Field: "management_ip", Op: api.OpExact, Kind: api.KindText, Values: []string{address}},
+	}}, api.PaginationParams{Limit: 2})
+	if err != nil || len(items) != 1 {
+		return "", false
+	}
+	return items[0].ID, true
 }
 
 // assignCIs fills the ci_id of samples from their target label and returns

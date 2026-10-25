@@ -459,6 +459,10 @@ type Handler struct {
 	// beforeCreate, when set, runs after a transaction decided to create
 	// new CIs and before it inserts them (tests of concurrent lanes).
 	beforeCreate func(ctx context.Context)
+	// metrics and features take the collectors' metric samples on the
+	// edge (WithEdgeMetrics, MON-02).
+	metrics  MetricsIngester
+	features FeatureStatus
 }
 
 // CITypeLookup resolves a CI type name or UUID to the canonical ci_type id.

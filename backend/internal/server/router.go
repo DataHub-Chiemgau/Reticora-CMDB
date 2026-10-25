@@ -419,6 +419,16 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.CollectorCA != nil {
 		discoveryHandler.WithCA(opts.CollectorCA)
 	}
+	// The collectors' metric samples arrive on the edge (.metrics) and run
+	// through the ingest of POST /monitoring/metrics with the monitoring
+	// entitlement of that route (MON-02, F-046).
+	monitoringHandler := monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)).
+		WithCIResolver(monitoring.CIAddressResolver{CIs: repos.CI})
+	var monitoringFeatures discovery.FeatureStatus
+	if opts.Entitlements != nil {
+		monitoringFeatures = opts.Entitlements
+	}
+	discoveryHandler.WithEdgeMetrics(monitoringHandler, monitoringFeatures)
 	// Discovered values pass the field rules of manual writes (CI-03).
 	if opts.CIService != nil {
 		discoveryHandler.WithObservedValidator(opts.CIService)
@@ -498,7 +508,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
 		ipam.NewHandler(repos.IPAM),
-		monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)).WithCIResolver(ciAddressResolver{repo: repos.CI}),
+		monitoringHandler,
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
 			WithSources(bffSources(&repos, topologyHandler, bffJobs)),
 		relationshiptype.NewHandler(repos.RelationshipType),
