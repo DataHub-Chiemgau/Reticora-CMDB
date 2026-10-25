@@ -43,6 +43,12 @@ spec:
       labels:
         app.kubernetes.io/component: nats-edge
     spec:
+      # The server (user and group nobody, 65534, backend/Dockerfile) writes
+      # server-key.pem and edge.conf with mode 0640: the endpoint reads them
+      # as a member of that group (WP-429, F-104). The PKI volume is mounted
+      # read-only, so the kubelet changes no ownership or mode on it.
+      securityContext:
+        fsGroup: 65534
       containers:
         - name: nats-edge
           image: nats:2.10-alpine
@@ -80,6 +86,7 @@ spec:
         - name: collector-pki
           persistentVolumeClaim:
             claimName: reticora-collector-pki
+            readOnly: true
 ---
 apiVersion: v1
 kind: Service
