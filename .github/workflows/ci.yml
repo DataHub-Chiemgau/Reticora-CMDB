@@ -287,9 +287,12 @@ jobs:
         run: make seed
 
   # GLO-11/DOD-01: docs/traceability.csv is checked on every PR (E-30).
-  # Format, known IDs, existing test files and the rows the plans prescribe for
-  # the PR's work packages block; completeness is reported until gate G1. The
-  # plans are docs/plan/implementierungsplan.md and the G1 remediation plan
+  # Format, known IDs, test files (by form; other evidence only from the
+  # allow-list of planned rows, never the gate checklist) and the rows the
+  # plans prescribe for the PR's work packages block. Since gate G1 every
+  # [B]/[Q] ID needs a row or an entry in docs/acceptance/g1-ausnahmen.csv
+  # (E-76); [Pn]/[A] completeness is reported. The plans are
+  # docs/plan/implementierungsplan.md and the G1 remediation plan
   # docs/plan/g1-korrektur/implementierungsplan.md (WP-336); WP numbers are
   # unique across both.
   traceability:
@@ -302,20 +305,13 @@ jobs:
           go-version: "1.26.10"
 
       # Work packages are taken from the PR title and the "Arbeitspakete:" line
-      # of the PR template. Untrusted text is only read through env variables.
-      - name: Determine work packages of the pull request
-        if: github.event_name == 'pull_request'
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          wps=$( { printf '%s\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY" | grep -iE '^[*_ ]*Arbeitspakete?[*_ ]*:' || true; } \
-            | grep -oE 'WP-[0-9]{3}' | sort -u | tr '\n' ' ' || true)
-          echo "Work packages: ${wps:-none}"
-          echo "TRACEABILITY_WPS=${wps}" >> "$GITHUB_ENV"
-
+      # of the PR template, ranges included ("WP-332 – WP-335"). The untrusted
+      # texts reach the Go test only as env variables; no shell reads them.
       - name: Check docs/traceability.csv
         working-directory: backend
+        env:
+          TRACEABILITY_PR_TITLE: ${{ github.event.pull_request.title }}
+          TRACEABILITY_PR_BODY: ${{ github.event.pull_request.body }}
         run: go test -count=1 -v -run 'TestTraceabilityFile' ./internal/traceability/
 
   # TST-04 (WP-337): the defect tests of the Phase-1 acceptance audit run

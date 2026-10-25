@@ -457,11 +457,6 @@ GLO-11;[Q];G1;backend/internal/traceability/traceability_test.go;WP-213
 WHK-01;[B];G1;backend/internal/webhook/whk01_test.go;WP-213
 WHK-01;[B];G1;backend/internal/webhook/whk01_integration_test.go;WP-213
 AUD-02;[B];G1;backend/internal/contact/handler_test.go;WP-213
-AUT-05;[B];G1;docs/acceptance/g1-gate.md;WP-213
-AUT-06;[B];G1;docs/acceptance/g1-gate.md;WP-213
-NET-04;[B];G1;docs/acceptance/g1-gate.md;WP-213
-NFR-08;[B];G1;docs/acceptance/g1-gate.md;WP-213
-GATE-04;[Q], Bezug GA;G1;docs/acceptance/g1-gate.md;WP-213
 NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/ingest_budget_integration_test.go;WP-332
 NFR-03;[B], Teilumfang [P5];G1;backend/internal/ci/create_many_integration_test.go;WP-333
 NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/consumer_integration_test.go;WP-334
@@ -669,3 +664,5 @@ EVT-02;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
 ENT-07;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
 COL-04;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
 MON-02;[B];C;backend/internal/discovery/edge_metrics_integration_test.go;WP-426
+GLO-11;[Q];A;backend/internal/traceability/traceability_test.go;WP-450
+DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-450

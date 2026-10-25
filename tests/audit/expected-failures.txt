@@ -34,8 +34,6 @@ go;backend/internal/server;TestAuditT3HealthRefreshRunsInG1;F-087
 go;backend/internal/server;TestAuditT3OverrideRefusesReservedNames;F-092
 go;backend/internal/tenant/rls;TestAuditT1StructuredSearchForReadRoles;F-055
 go;backend/internal/topology;TestAuditT3BlastRadiusMarksHeuristicCIs;F-098
-go;backend/internal/traceability;TestAuditT5GateIDsAreNotTracedByTheChecklistItself;F-121
-go;backend/internal/traceability;TestAuditT5ValidateRejectsNonTestEvidence;F-121
 go;backend/internal/webhook;TestAuditDefectWebhookConsumerKeepsEventsOnTransientErrors;F-151
 go;collector/collectorcmd;TestAuditCollectorEnrollsFromEnvironment;F-101
 go;collector/collectorcmd;TestAuditScopeExpansionCompleteOrReported;F-106
