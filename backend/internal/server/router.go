@@ -442,6 +442,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		aiEntitlements = opts.Entitlements
 	}
 	aiConsent := ai.NewOrgConsent(repos.AI, aiEntitlements)
+	// One executor runs the runs of the workflow API and the run an IGA
+	// access request starts (WFL-04).
+	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
+		WithFieldGuard(override.NewGuard(repos.Override))
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -480,11 +484,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		search.NewHandler(repos.Search, repos.Permission),
 		sla.NewHandler(repos.SLA, repos.Ticket),
 		form.NewHandler(repos.Form),
-		workflow.NewHandler(repos.Workflow, workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
-			WithFieldGuard(override.NewGuard(repos.Override))),
+		workflow.NewHandler(repos.Workflow, workflowRuns),
 		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)).
 			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(opts), entitlementLister{svc: opts.Entitlements})),
-		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow).WithEgress(opts.Egress),
+		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow).
+			WithWorkflowRuns(accessRequestRuns(opts.Modules, workflowRuns)).WithEgress(opts.Egress),
 		tenantapi.NewHandler(repos.TenantHierarchy),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
@@ -543,6 +547,16 @@ func alertStoreFor(store monitoring.MetricStore) monitoring.AlertStore {
 		return evaluating.AlertStore()
 	}
 	return nil
+}
+
+// accessRequestRuns is the executor that starts the workflow run of an IGA
+// access request (WFL-04): none while the workflows module is off (E-03),
+// so a switched-off module executes no workflow action.
+func accessRequestRuns(modules *ModuleSet, runs *workflow.Executor) iga.RunStarter {
+	if !modules.Enabled("workflows") {
+		return nil
+	}
+	return runs
 }
 
 // reportAuditVerifier returns the audit-chain verifier for the security

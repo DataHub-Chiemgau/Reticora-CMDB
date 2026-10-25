@@ -622,3 +622,5 @@ WFL-01;[P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go
 TEN-09;[Q];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-409
 TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-409
 TEN-06;[B];B;backend/internal/server/handler_errors_test.go;WP-408
+WFL-01;[P3];B;backend/internal/workflow/submit_form_integration_test.go;WP-603
+IGA-01;[A];B;backend/internal/iga/access_request_workflow_integration_test.go;WP-603

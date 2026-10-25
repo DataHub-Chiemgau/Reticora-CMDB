@@ -17,6 +17,13 @@ import (
 type PGRepository struct{ pool *pgxpool.Pool }
 
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
+
+// RunInTx implements TxRunner: fn runs in one transaction of the context's
+// tenant scope, which every repository call with fn's context joins.
+func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantTx(ctx, r.pool, orgID, fn)
+}
+
 func nullString(v string) any {
 	if v == "" {
 		return nil
