@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -49,7 +50,8 @@ const ladderDepth = 20
 // at once (WP-335): a hub with 3,000 neighbours costs the same as one with
 // 1,200; that regime has a fixed statement more than the level regime.
 // Within a regime the count depends on the depth only: 40 chains of 20
-// levels cost the same as one.
+// levels cost the same as one. The topology without a root is covered by
+// checkTopologyWithoutRoot (WP-602).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestTopologyQueryBudget(t *testing.T) {
@@ -99,9 +101,6 @@ func TestTopologyQueryBudget(t *testing.T) {
 		return root
 	}
 	ladders := map[int]string{1: ladder("budget-ladder-1", 1), 40: ladder("budget-ladder-40", 40)}
-	if _, err := f.Admin.Exec(bg, `ANALYZE ci; ANALYZE ci_relationship`); err != nil {
-		t.Fatal(err)
-	}
 
 	cfg := f.App.Config()
 	counter := &queryCounter{}
@@ -111,6 +110,13 @@ func TestTopologyQueryBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	// Before the ANALYZE below: the topology without a root answers on the
+	// statistics from before its bulk inserts.
+	t.Run("without root", func(t *testing.T) { checkTopologyWithoutRoot(t, f, pool, counter) })
+
+	if _, err := f.Admin.Exec(bg, `ANALYZE ci; ANALYZE ci_relationship`); err != nil {
+		t.Fatal(err)
+	}
 	mux := chi.NewRouter()
 	topology.NewHandler(ci.NewPGRepository(pool), relationship.NewPGRepository(pool)).
 		WithRelationshipTypes(relationshiptype.NewPGRepository(pool)).RegisterRoutes(mux)
@@ -190,6 +196,232 @@ func TestTopologyQueryBudget(t *testing.T) {
 		}
 		if seqScan(t, plan, "ci_relationship") {
 			t.Errorf("edges %s read ci_relationship with a sequential scan: %s", name, plan)
+		}
+	}
+}
+
+// perNodeEdges hides the batch edge read (relationship.EdgeReader) of the
+// PostgreSQL repository: the topology without a root then lists the edges
+// of each CI, the path before WP-602.
+type perNodeEdges struct{ relationship.Repository }
+
+// checkTopologyWithoutRoot covers NFR-02, IMP-06 and ABN-02 (WP-602) for the
+// topology without a root against PostgreSQL. Every answer is taken right
+// after the bulk inserts, without ANALYZE:
+//   - 20 and 2,000 nodes cost the same statements, at most 10: the edges
+//     of the node set are one statement (and one for the visibility of
+//     their CIs), not one read per node.
+//   - 2,000 nodes answer within 3 s (NFR-02).
+//   - Graph without a root, the source of the BFF query topology, sends the
+//     same statements and returns the same graph.
+//
+// Each answer, for the organization, a client-1 and a site-1 principal,
+// then equals the per-node read (the path before WP-602) on the same data:
+// the same nodes and edges, the edges ordered by id. It holds the stored
+// edges and the projected containment between visible CIs of the set as the
+// pattern of the data predicts, and no edge to a CI outside the set, a
+// deleted CI or a location (located_in).
+func checkTopologyWithoutRoot(t *testing.T, f *scopetest.Fixture, pool *pgxpool.Pool, counter *queryCounter) {
+	bg := context.Background()
+	site1, site2 := f.ID(), f.ID()
+	for _, s := range []string{site1, site2} {
+		if _, err := f.Admin.Exec(bg, `INSERT INTO site (id, organization_id, client_id, name) VALUES ($1, $2, $3, $4)`,
+			s, f.OrgA, f.Client1, "rootless "+s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outside := f.CI(t, f.OrgA, f.Client1, "rootless-outside")
+	// graph inserts n CIs of the global type key: every third of client 2,
+	// every third org-wide, the others of client 1 at site 1 or site 2. CI i
+	// is connected_to i+1, every tenth depends_on the first, every 17th is
+	// also powered_by i+1; every 13th runs_on a CI of another type, every
+	// 19th depends_on a deleted CI of the type. Every seventh is contained
+	// in i-1, but every eleventh in the other CI and every 23rd in a deleted
+	// one. It returns the id of the type.
+	graph := func(key string, n int) string {
+		t.Helper()
+		var typeID string
+		if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = $1 AND organization_id IS NULL`, key).Scan(&typeID); err != nil {
+			t.Fatal(err)
+		}
+		prefix := "rootless-" + key
+		for _, s := range []struct {
+			sql  string
+			args []any
+		}{
+			{`INSERT INTO ci (id, organization_id, client_id, location_id, ci_type_id, name, status)
+				SELECT md5($1 || $2 || i)::uuid, $1::uuid, CASE i % 3 WHEN 0 THEN $4::uuid WHEN 1 THEN $3::uuid END,
+					CASE WHEN i % 3 = 1 THEN CASE WHEN i % 2 = 1 THEN $5::uuid ELSE $6::uuid END END,
+					$7::uuid, $2 || '-' || i, 'active'
+				FROM generate_series(1, $8::int) AS i
+				UNION ALL
+				SELECT md5($1 || $2 || 'deleted' || k)::uuid, $1::uuid, $3::uuid, NULL, $7::uuid, $2 || '-deleted-' || k, 'active'
+				FROM generate_series(0, 2) AS k`,
+				[]any{f.OrgA, prefix, f.Client1, f.Client2, site1, site2, typeID, n}},
+			{`INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+				SELECT $1::uuid, md5($1 || $2 || e.src)::uuid, COALESCE(e.other, md5($1 || $2 || e.dst)::uuid), e.rel FROM (
+					SELECT i AS src, (i + 1)::text AS dst, NULL::uuid AS other, 'connected_to' AS rel FROM generate_series(1, $3::int - 1) AS i
+					UNION ALL SELECT i, '1', NULL, 'depends_on' FROM generate_series(2, $3::int) AS i WHERE i % 10 = 0
+					UNION ALL SELECT i, (i + 1)::text, NULL, 'powered_by' FROM generate_series(1, $3::int - 1) AS i WHERE i % 17 = 0
+					UNION ALL SELECT i, NULL, $4::uuid, 'runs_on' FROM generate_series(1, $3::int) AS i WHERE i % 13 = 0
+					UNION ALL SELECT i, 'deleted' || (i % 3), NULL, 'depends_on' FROM generate_series(1, $3::int) AS i WHERE i % 19 = 0) e`,
+				[]any{f.OrgA, prefix, n, outside}},
+			{`UPDATE ci SET parent_ci_id = CASE WHEN g.i % 11 = 0 THEN $4::uuid
+					WHEN g.i % 23 = 0 THEN md5($1 || $2 || 'deleted0')::uuid ELSE md5($1 || $2 || (g.i - 1))::uuid END
+				FROM generate_series(2, $3::int) AS g(i)
+				WHERE (g.i % 7 = 0 OR g.i % 11 = 0 OR g.i % 23 = 0) AND ci.id = md5($1 || $2 || g.i)::uuid`,
+				[]any{f.OrgA, prefix, n, outside}},
+			{`UPDATE ci SET deleted_at = now() WHERE id IN (SELECT md5($1 || $2 || 'deleted' || k)::uuid FROM generate_series(0, 2) AS k)`,
+				[]any{f.OrgA, prefix}},
+		} {
+			if _, err := f.Admin.Exec(bg, s.sql, s.args...); err != nil {
+				t.Fatalf("seed %s: %v", prefix, err)
+			}
+		}
+		return typeID
+	}
+	small, large := graph("switch", 20), graph("router", topology.MaxTopologyNodes)
+
+	mux := chi.NewRouter()
+	h := topology.NewHandler(ci.NewPGRepository(pool), relationship.NewPGRepository(pool))
+	h.RegisterRoutes(mux)
+	perNode := topology.NewHandler(ci.NewPGRepository(pool), perNodeEdges{relationship.NewPGRepository(pool)})
+	as := func(scope *database.TenantScope) context.Context {
+		return tenant.WithTenant(database.ContextWithTenantScope(bg, scope),
+			tenant.TenantInfo{OrganizationID: scope.OrgID, UserID: f.User})
+	}
+	orgWide := database.OrgWideScope(f.OrgA, f.User)
+	get := func(path string) (topology.Graph, int64, time.Duration) {
+		t.Helper()
+		before, start := counter.n.Load(), time.Now()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, http.NoBody).WithContext(as(&orgWide)))
+		elapsed, statements := time.Since(start), counter.n.Load()-before
+		var g topology.Graph
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &g) != nil {
+			t.Fatalf("GET %s: %d %.300s", path, w.Code, w.Body.String())
+		}
+		return g, statements, elapsed
+	}
+
+	// Statements and time: the first answers after the inserts.
+	smallGraph, smallCount, _ := get("/api/v1/topology?ci_type=" + small)
+	largeGraph, largeCount, elapsed := get("/api/v1/topology?ci_type=" + large)
+	if len(smallGraph.Nodes) != 20 || len(largeGraph.Nodes) != topology.MaxTopologyNodes {
+		t.Fatalf("topology without a root: %d and %d nodes, want 20 and %d", len(smallGraph.Nodes), len(largeGraph.Nodes), topology.MaxTopologyNodes)
+	}
+	const budget = 10
+	if smallCount != largeCount || largeCount > budget {
+		t.Errorf("topology without a root: %d statements for 20 nodes, %d for 2,000, want the same, at most %d (N+1)", smallCount, largeCount, budget)
+	}
+	if elapsed > 3*time.Second {
+		t.Errorf("topology without a root: 2,000 nodes in %v without ANALYZE, budget 3 s (NFR-02)", elapsed)
+	}
+	t.Logf("topology without a root: %d statements for 20 and 2,000 nodes; 2,000 nodes and %d edges in %v without ANALYZE",
+		largeCount, len(largeGraph.Edges), elapsed.Round(time.Millisecond))
+
+	// The source of the BFF query topology.
+	before := counter.n.Load()
+	viaGraph, err := h.Graph(as(&orgWide), f.OrgA, "", topology.ParseDepth(""), &ci.FilterParams{TypeID: large})
+	if statements := counter.n.Load() - before; err != nil || statements != largeCount || !reflect.DeepEqual(viaGraph, largeGraph) {
+		t.Errorf("Graph without a root: %d statements, %v, equal to GET /topology %v", statements, err, reflect.DeepEqual(viaGraph, largeGraph))
+	}
+
+	// The answers under each scope, before any ANALYZE. CI i of the pattern
+	// is visible to the client-1 principal unless it belongs to client 2,
+	// to the site-1 principal unless it is at site 2.
+	client1, site1Scope := database.OrgWideScope(f.OrgA, f.User), database.OrgWideScope(f.OrgA, f.User)
+	client1.Clients = database.ScopeIDs(f.Client1)
+	site1Scope.Sites = database.ScopeIDs(site1)
+	cases := []struct {
+		name    string
+		scope   *database.TenantScope
+		typeID  string
+		n       int
+		visible func(i int) bool
+		answer  topology.Graph
+	}{
+		{"organization, 20 CIs", &orgWide, small, 20, func(int) bool { return true }, smallGraph},
+		{"organization", &orgWide, large, topology.MaxTopologyNodes, func(int) bool { return true }, largeGraph},
+		{"client 1", &client1, large, topology.MaxTopologyNodes, func(i int) bool { return i%3 != 0 }, topology.Graph{}},
+		{"site 1", &site1Scope, large, topology.MaxTopologyNodes, func(i int) bool { return i%3 != 1 || i%2 == 1 }, topology.Graph{}},
+	}
+	for i := range cases {
+		c := &cases[i]
+		if c.answer.Nodes != nil {
+			continue
+		}
+		start := time.Now()
+		if c.answer, err = h.Graph(as(c.scope), f.OrgA, "", topology.ParseDepth(""), &ci.FilterParams{TypeID: c.typeID}); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		t.Logf("%s: %d nodes and %d edges in %v without ANALYZE", c.name, len(c.answer.Nodes), len(c.answer.Edges), time.Since(start).Round(time.Millisecond))
+	}
+
+	// The per-node reference reads after an ANALYZE only: on the
+	// statistics of a fresh database it needs about 100 ms per CI, minutes
+	// for 2,000 CIs (the defect of WP-602).
+	if _, err := f.Admin.Exec(bg, `ANALYZE ci; ANALYZE ci_relationship`); err != nil {
+		t.Fatal(err)
+	}
+	for i := range cases {
+		c := &cases[i]
+		ctx := as(c.scope)
+		start := time.Now()
+		old, err := perNode.Graph(ctx, f.OrgA, "", topology.ParseDepth(""), &ci.FilterParams{TypeID: c.typeID})
+		if err != nil {
+			t.Fatalf("%s, per node: %v", c.name, err)
+		}
+		t.Logf("%s, per node: %v after ANALYZE", c.name, time.Since(start).Round(time.Millisecond))
+		if !reflect.DeepEqual(c.answer, old) {
+			t.Errorf("%s: %d nodes and %d edges, the per-node read %d and %d", c.name, len(c.answer.Nodes), len(c.answer.Edges), len(old.Nodes), len(old.Edges))
+		}
+		if again, err := h.Graph(ctx, f.OrgA, "", topology.ParseDepth(""), &ci.FilterParams{TypeID: c.typeID}); err != nil || !reflect.DeepEqual(again, c.answer) {
+			t.Errorf("%s: the answer after ANALYZE differs (%v)", c.name, err)
+		}
+		if !slices.IsSortedFunc(c.answer.Edges, func(a, b topology.Edge) int { return strings.Compare(a.ID, b.ID) }) {
+			t.Errorf("%s: edges not ordered by id", c.name)
+		}
+
+		// The expectation from the pattern: the edges between two visible
+		// CIs of the type, stored and projected (contains, parent → child).
+		nodes, stored, contained := 0, 0, 0
+		for i := 1; i <= c.n; i++ {
+			if !c.visible(i) {
+				continue
+			}
+			nodes++
+			if i < c.n && c.visible(i+1) {
+				stored++ // connected_to
+				if i%17 == 0 {
+					stored++ // powered_by
+				}
+			}
+			if i%10 == 0 && c.visible(1) {
+				stored++ // depends_on the first
+			}
+			if i%7 == 0 && i%11 != 0 && i%23 != 0 && c.visible(i-1) {
+				contained++
+			}
+		}
+		ids := map[string]bool{}
+		for _, n := range c.answer.Nodes {
+			ids[n.ID] = true
+		}
+		gotStored, gotContained := 0, 0
+		for _, e := range c.answer.Edges {
+			if !ids[e.SourceCIID] || !ids[e.TargetCIID] {
+				t.Errorf("%s: edge %+v leaves the node set", c.name, e)
+			}
+			if e.Source == relationship.ProjectionSource && e.RelType == "contains" {
+				gotContained++
+			} else {
+				gotStored++
+			}
+		}
+		if len(c.answer.Nodes) != nodes || gotStored != stored || gotContained != contained {
+			t.Errorf("%s: %d nodes, %d stored and %d projected edges, want %d, %d and %d",
+				c.name, len(c.answer.Nodes), gotStored, gotContained, nodes, stored, contained)
 		}
 	}
 }

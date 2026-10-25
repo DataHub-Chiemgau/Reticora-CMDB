@@ -630,3 +630,5 @@ TEN-09;[Q];B;backend/internal/webhook/subscription_scope_integration_test.go;WP-
 WHK-01;[B];B;backend/internal/webhook/subscription_scope_integration_test.go;WP-601
 NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-605
 ABN-02;[Q];LT;backend/internal/ci/list_budget_integration_test.go;WP-605
+IMP-06;[B];C;backend/internal/topology/querybudget_integration_test.go;WP-602
+NFR-02;[B];C;backend/internal/topology/querybudget_integration_test.go;WP-602

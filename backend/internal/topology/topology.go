@@ -12,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -225,7 +226,8 @@ func (h *Handler) Graph(ctx context.Context, orgID, rootCIID string, depth int, 
 func ParseDepth(raw string) int { return parseDepth(raw) }
 
 // buildFull lists all CIs matching the filter and every edge whose endpoints are
-// both in the resulting node set.
+// both in the resulting node set, ordered by id. GET /topology without a root
+// and the BFF query topology share it.
 func (h *Handler) buildFull(ctx context.Context, orgID string, filter ci.FilterParams) (Graph, error) {
 	items, total, err := h.ciRepo.List(ctx, orgID, filter, api.PaginationParams{Limit: MaxTopologyNodes, Offset: 0})
 	if err != nil {
@@ -241,35 +243,55 @@ func (h *Handler) buildFull(ctx context.Context, orgID string, filter ci.FilterP
 
 	nodeSet := make(map[string]struct{}, len(items))
 	nodes := make([]Node, 0, len(items))
+	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		nodeSet[item.ID] = struct{}{}
 		nodes = append(nodes, nodeFromItem(item))
+		ids = append(ids, item.ID)
 	}
 
-	edges := make([]Edge, 0)
-	seen := make(map[string]struct{})
-	for id := range nodeSet {
-		rels, err := h.listRelationships(ctx, orgID, id)
-		if err != nil {
-			return Graph{}, err
-		}
-		for i := range rels {
-			rel := &rels[i]
-			if _, ok := nodeSet[rel.SourceCIID]; !ok {
-				continue
-			}
-			if _, ok := nodeSet[rel.TargetCIID]; !ok {
-				continue
-			}
-			if _, dup := seen[rel.ID]; dup {
-				continue
-			}
-			seen[rel.ID] = struct{}{}
-			edges = append(edges, edgeFromRel(rel))
-		}
+	rels, err := h.edgesAmong(ctx, orgID, ids)
+	if err != nil {
+		return Graph{}, err
 	}
+	edges := make([]Edge, 0, len(rels))
+	seen := make(map[string]struct{}, len(rels))
+	for i := range rels {
+		rel := &rels[i]
+		if _, ok := nodeSet[rel.SourceCIID]; !ok {
+			continue
+		}
+		if _, ok := nodeSet[rel.TargetCIID]; !ok {
+			continue
+		}
+		if _, dup := seen[rel.ID]; dup {
+			continue
+		}
+		seen[rel.ID] = struct{}{}
+		edges = append(edges, edgeFromRel(rel))
+	}
+	slices.SortFunc(edges, func(a, b Edge) int { return strings.Compare(a.ID, b.ID) })
 
 	return Graph{Nodes: nodes, Edges: edges}, nil
+}
+
+// edgesAmong reads the edges between the CIs of ids: in one statement when
+// the repository reads them in batches (relationship.EdgeReader, NFR-02),
+// else the edges of each CI (the memory repository); buildFull keeps those
+// between two of ids.
+func (h *Handler) edgesAmong(ctx context.Context, orgID string, ids []string) ([]relationship.Relationship, error) {
+	if reader, ok := h.relRepo.(relationship.EdgeReader); ok {
+		return reader.EdgesAmong(ctx, orgID, ids)
+	}
+	var rels []relationship.Relationship
+	for _, id := range ids {
+		list, err := h.listRelationships(ctx, orgID, id)
+		if err != nil {
+			return nil, err
+		}
+		rels = append(rels, list...)
+	}
+	return rels, nil
 }
 
 // buildFromRoot walks the configuration graph from rootCIID up to depth hops.
