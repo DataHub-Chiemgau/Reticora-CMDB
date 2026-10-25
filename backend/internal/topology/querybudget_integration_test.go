@@ -208,9 +208,11 @@ type perNodeEdges struct{ relationship.Repository }
 // checkTopologyWithoutRoot covers NFR-02, IMP-06 and ABN-02 (WP-602) for the
 // topology without a root against PostgreSQL. Every answer is taken right
 // after the bulk inserts, without ANALYZE:
-//   - 20 and 2,000 nodes cost the same statements, at most 10: the edges
-//     of the node set are one statement (and one for the visibility of
-//     their CIs), not one read per node.
+//   - 2,000 nodes cost at most 10 statements and 20 nodes one fewer: the
+//     edges of the node set are one statement (and one for the visibility
+//     of their CIs), not one read per node. The 20 CIs end the page of the
+//     CI list, so it takes their count from the page and skips its COUNT
+//     (WP-605); the full page of 2,000 counts.
 //   - 2,000 nodes answer within 3 s (NFR-02).
 //   - Graph without a root, the source of the BFF query topology, sends the
 //     same statements and returns the same graph.
@@ -311,14 +313,14 @@ func checkTopologyWithoutRoot(t *testing.T, f *scopetest.Fixture, pool *pgxpool.
 		t.Fatalf("topology without a root: %d and %d nodes, want 20 and %d", len(smallGraph.Nodes), len(largeGraph.Nodes), topology.MaxTopologyNodes)
 	}
 	const budget = 10
-	if smallCount != largeCount || largeCount > budget {
-		t.Errorf("topology without a root: %d statements for 20 nodes, %d for 2,000, want the same, at most %d (N+1)", smallCount, largeCount, budget)
+	if smallCount+1 != largeCount || largeCount > budget {
+		t.Errorf("topology without a root: %d statements for 20 nodes, %d for 2,000, want one more for the COUNT of the full page, at most %d (N+1)", smallCount, largeCount, budget)
 	}
 	if elapsed > 3*time.Second {
 		t.Errorf("topology without a root: 2,000 nodes in %v without ANALYZE, budget 3 s (NFR-02)", elapsed)
 	}
-	t.Logf("topology without a root: %d statements for 20 and 2,000 nodes; 2,000 nodes and %d edges in %v without ANALYZE",
-		largeCount, len(largeGraph.Edges), elapsed.Round(time.Millisecond))
+	t.Logf("topology without a root: %d statements for 20 nodes, %d for 2,000; 2,000 nodes and %d edges in %v without ANALYZE",
+		smallCount, largeCount, len(largeGraph.Edges), elapsed.Round(time.Millisecond))
 
 	// The source of the BFF query topology.
 	before := counter.n.Load()
