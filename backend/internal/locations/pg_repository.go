@@ -215,24 +215,12 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter Filter) ([
 }
 
 // Delete removes a leaf node; a node with children is refused with
-// ErrHasChildren and one still referenced elsewhere with ErrInUse. The
-// specialist row goes with the location row (ON DELETE CASCADE).
+// ErrHasChildren and one still referenced elsewhere with ErrInUse (see
+// DeleteNode). The specialist row goes with the location row (ON DELETE
+// CASCADE).
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cur, err := get(ctx, tx, id)
-		if err != nil {
-			return err
-		}
-		if depErr := CheckDeletable(ctx, tx, id, false); depErr != nil {
-			return depErr
-		}
-		if _, err = tx.Exec(ctx, `DELETE FROM location WHERE id = $1`, id); err != nil {
-			if mapped := DeleteError(err); mapped != err {
-				return mapped
-			}
-			return fmt.Errorf("delete location: %w", err)
-		}
-		return recordAudit(ctx, tx, "location.deleted", cur, map[string]any{"before": cur})
+		return DeleteNode(ctx, tx, id, `DELETE FROM location WHERE id = $1`, id)
 	})
 }
 

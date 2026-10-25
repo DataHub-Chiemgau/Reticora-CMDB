@@ -641,3 +641,4 @@ INS-03;[B];A;tests/install-cloud-acme.test.sh;WP-419
 TEC-09;[B];A;tests/install-cloud-acme.test.sh;WP-419
 NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/user/invitation_integration_test.go;WP-421
 TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-421
+LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-411

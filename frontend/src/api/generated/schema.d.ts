@@ -6296,7 +6296,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a leaf node
-     * @description Refused with 409 while the node has child locations or CIs, assets, stock items, movements, rack mounts or role assignments reference it (LOC-11). Deleting a site, building, room or rack through its own endpoint checks the whole subtree.
+     * @description Refused with 409 while the node has child locations or CIs, assets, stock items, movements, rack mounts or role assignments reference it (LOC-11); a site also while VLANs, subnets, collectors, discovery scopes, unexpired agent enrollment tokens or merge tombstones within tombstone_until are bound to it (E-71). Expired tokens and tombstones are removed with the site. Deleting a site, building, room or rack through its own endpoint follows the same rules; no delete cascades into the subtree.
      */
     delete: operations['deleteLocation'];
     options?: never;
@@ -9166,6 +9166,7 @@ export interface components {
       }[];
     };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
+      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). */
       dependencies: (
         | 'location'
         | 'ci'
@@ -9174,6 +9175,12 @@ export interface components {
         | 'asset_movement'
         | 'rack_mount'
         | 'role_assignment'
+        | 'vlan'
+        | 'subnet'
+        | 'collector'
+        | 'discovery_scope'
+        | 'agent_enrollment_token'
+        | 'ci_merge'
       )[];
     };
     /** @enum {string} */

@@ -283,9 +283,11 @@ func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, visible, id
 	})
 }
 
-// deleteLocation deletes a site, building or room row, which cascades to
-// its subtree of the location tree. Objects that reference the subtree keep
-// it: the delete is refused with a *locations.DependencyError (LOC-11).
+// deleteLocation deletes a site, building or room row under the rules of
+// the location API (LOC-11): child locations and objects that reference
+// the node refuse the delete with a *locations.DependencyError, nothing
+// cascades into the subtree, and the delete is audited
+// (locations.DeleteNode).
 func (r *PGRepository) deleteLocation(ctx context.Context, orgID, table, visible, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var found bool
@@ -296,13 +298,7 @@ func (r *PGRepository) deleteLocation(ctx context.Context, orgID, table, visible
 		if !found {
 			return fmt.Errorf("not found")
 		}
-		if err := locations.CheckDeletable(ctx, tx, id, true); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE organization_id = $1 AND id = $2", orgID, id); err != nil {
-			return locations.DeleteError(err)
-		}
-		return nil
+		return locations.DeleteNode(ctx, tx, id, "DELETE FROM "+table+" WHERE organization_id = $1 AND id = $2", orgID, id)
 	})
 }
 
