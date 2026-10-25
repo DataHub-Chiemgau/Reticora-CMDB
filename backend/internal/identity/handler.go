@@ -275,12 +275,14 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err = stampToken(&refreshedClaims); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		slog.ErrorContext(r.Context(), "refresh: stamp session token", "error", err)
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "stamp session token")
 		return
 	}
 	token, err := h.sessions.Issue(refreshedClaims)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		slog.ErrorContext(r.Context(), "refresh: issue session token", "error", err)
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "issue session token")
 		return
 	}
 	grant.Claims = withoutTokenTimes(&refreshedClaims)
@@ -390,9 +392,15 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Like the auth middleware: the cause, e.g. an unreadable revocation
+	// list, stays out of the response (API-03); a revoked session says so.
 	claims, err := h.sessions.Validate(token)
-	if err != nil {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
+	switch {
+	case errors.Is(err, ErrSessionRevoked):
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", ErrSessionRevoked.Error())
+		return
+	case err != nil:
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "invalid session token")
 		return
 	}
 	if !claims.ExpiresAt.IsZero() && time.Now().UTC().After(claims.ExpiresAt) {
@@ -541,6 +549,8 @@ func (h *Handler) applyAccess(ctx context.Context, claims *SessionClaims) error 
 	return nil
 }
 
+// bearerTokenFromRequest reads the bearer token of the Authorization header.
+// validation: fixed texts.
 func bearerTokenFromRequest(r *http.Request) (string, error) {
 	authz := strings.TrimSpace(r.Header.Get("Authorization"))
 	if authz == "" {
@@ -624,7 +634,11 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		strings.Contains(err.Error(), "OIDC client ID is required"):
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 	default:
-		api.WriteError(w, http.StatusBadGateway, "Bad Gateway", err.Error())
+		// The code exchange with the IdP, the provisioning of the user and
+		// the role lookup: their texts (IdP responses, database errors) go
+		// to the log only (API-03).
+		slog.Error("login failed", "error", err)
+		api.WriteError(w, http.StatusBadGateway, "Bad Gateway", "the login could not be completed")
 	}
 }
 

@@ -41,6 +41,8 @@ type Violation struct {
 	Detail string `json:"detail"`
 }
 
+// validation: the violations of the field metadata (fieldmeta) and the
+// fixed rule texts of the repository.
 func (e *ValidationError) Error() string {
 	parts := make([]string, 0, len(e.Violations))
 	for _, v := range e.Violations {
@@ -50,6 +52,7 @@ func (e *ValidationError) Error() string {
 }
 
 // AsValidationError reports whether err is (or wraps) a *ValidationError.
+// validation: see ValidationError.Error.
 func AsValidationError(err error) (*ValidationError, bool) {
 	var ve *ValidationError
 	if errors.As(err, &ve) {
@@ -191,6 +194,7 @@ type ReservedKeyError struct {
 	Fields []string
 }
 
+// validation: a fixed rule text with the refused attribute keys.
 func (e *ReservedKeyError) Error() string {
 	return strings.Join(e.Fields, ", ") + ": reserved namespace, not allowed as an attribute key (GLO-13)"
 }

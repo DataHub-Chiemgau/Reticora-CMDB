@@ -108,10 +108,11 @@ func TestAuditT1ModuleChannelsClientScope(t *testing.T) {
 					}
 				}
 				if k.name == "reservations" {
-					// The exact status (404) is part of the WP-017 error
-					// contract defect, see TestAuditT1RepositoryErrorsAreSanitized.
-					if code, body := w.do(p, http.MethodPost, k.detail+k.other+"/release", nil); code < 400 {
-						t.Errorf("POST %s%s/release as %s: %d %s, want refused", k.detail, k.other, p.kind, code, trim(body))
+					// A reservation outside the scope answers 404 like an
+					// unknown one (WP-017 error contract, WP-407; see
+					// TestRepositoryErrorsAreSanitized).
+					if code, body := w.do(p, http.MethodPost, k.detail+k.other+"/release", nil); code != http.StatusNotFound {
+						t.Errorf("POST %s%s/release as %s: %d %s, want 404", k.detail, k.other, p.kind, code, trim(body))
 					}
 				}
 			}

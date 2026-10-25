@@ -279,7 +279,18 @@ func (r *PGRepository) ListMounts(ctx context.Context, orgID, rackID string, pag
 	return out, total, err
 }
 
+// CreateMount implements Repository. Rack and CI ids are checked before any
+// SQL; the CI must be visible under the caller's scope, so an unknown CI,
+// one of another organization and one of a client or site outside the scope
+// all fail with ErrCINotFound, before the foreign key (checked without RLS)
+// or the policy of rack_mount could tell them apart (TEN-04, API-03).
 func (r *PGRepository) CreateMount(ctx context.Context, m *RackMount) error {
+	if !api.IsUUID(m.RackID) {
+		return ErrRackNotFound
+	}
+	if err := api.RequireUUID("ci_id", m.CIID); err != nil {
+		return err
+	}
 	return database.WithRequestTenant(ctx, r.pool, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		var height int
 		err := tx.QueryRow(ctx, "SELECT height_units FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, m.OrganizationID, m.RackID).Scan(&height)
@@ -288,6 +299,14 @@ func (r *PGRepository) CreateMount(ctx context.Context, m *RackMount) error {
 		}
 		if err != nil {
 			return err
+		}
+		var ciVisible bool
+		if err = tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ci WHERE organization_id = $1 AND id = $2)",
+			m.OrganizationID, m.CIID).Scan(&ciVisible); err != nil {
+			return fmt.Errorf("check ci of mount: %w", err)
+		}
+		if !ciVisible {
+			return ErrCINotFound
 		}
 		existing, err := mountsForRackTx(ctx, tx, m.OrganizationID, m.RackID)
 		if err != nil {
@@ -327,6 +346,9 @@ func (r *PGRepository) GetMount(ctx context.Context, orgID, id string) (*RackMou
 
 // MountByCI implements Repository.
 func (r *PGRepository) MountByCI(ctx context.Context, orgID, ciID string) (*RackMount, error) {
+	if !api.IsUUID(ciID) {
+		return nil, ErrNotFound
+	}
 	var m *RackMount
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -362,7 +384,7 @@ func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req Up
 		if req.Face != nil {
 			face = *req.Face
 			if !ValidFaces[face] {
-				return fmt.Errorf("%w: invalid face", ErrValidation)
+				return ruleError(ErrValidation, "invalid face")
 			}
 		}
 		var rackHeight int
@@ -558,14 +580,20 @@ func nilIfEmptyPtr(v *string) any {
 
 // mountWriteError maps a failed mount write: a collision the exclusion
 // constraint caught (concurrent writers), a CI that is mounted already and
-// a child CI of a composition are conflicts (409); the rest is invalid.
+// a child CI of a composition are conflicts (409) with a fixed domain
+// message; the rest stays a database error for api.WriteRepoError, whose
+// constraint, policy or trigger text never reaches the client (F-047).
 func mountWriteError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch {
-		case pgErr.Code == "23P01", pgErr.Code == "23505", pgErr.ConstraintName == "rack_mount_composition_child":
-			return fmt.Errorf("%w: %s", ErrConflict, pgErr.Message)
+		case pgErr.Code == "23P01":
+			return ruleError(ErrConflict, "overlaps another mount")
+		case pgErr.Code == "23505":
+			return ruleError(ErrConflict, "ci already mounted")
+		case pgErr.ConstraintName == "rack_mount_composition_child":
+			return ruleError(ErrConflict, "the CI is part of a composition; its parent is mounted")
 		}
 	}
-	return fmt.Errorf("%w: %v", ErrValidation, err)
+	return fmt.Errorf("write rack mount: %w", err)
 }

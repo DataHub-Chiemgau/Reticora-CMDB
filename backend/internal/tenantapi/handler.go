@@ -1,7 +1,9 @@
 package tenantapi
 
 import (
+	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
@@ -76,13 +78,17 @@ func writeWriteError(w http.ResponseWriter, err error, notFound string) {
 
 // writeCreateError reports a failed create of a building or room: field
 // errors and conflicts with their field (LOC-04, LOC-05), database errors
-// sanitized, an unknown or invisible parent as 400.
+// sanitized, an unknown or invisible parent as 400. Other repository
+// errors go to the log only (API-03).
 func writeCreateError(w http.ResponseWriter, err error) {
 	switch {
 	case writeFieldError(w, err):
 	case api.WriteDBError(w, err):
+	case err.Error() == "not found", strings.HasSuffix(err.Error(), " not found"):
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "the parent site or building was not found")
 	default:
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		slog.Warn("create of a building or room failed", "error", err)
+		api.WriteRepoError(w, err)
 	}
 }
 

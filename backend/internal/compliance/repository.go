@@ -2,6 +2,7 @@ package compliance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -9,6 +10,10 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
+
+// ErrNotFound: the rule is unknown or of another organization; both answer
+// 404 alike (TEN-04).
+var ErrNotFound = errors.New("compliance rule not found")
 
 type Repository interface {
 	ListRules(ctx context.Context, orgID, ciTypeID, category string, activeOnly bool, page api.PaginationParams) ([]Rule, int, error)
@@ -29,9 +34,11 @@ type MemoryRepository struct {
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{rules: map[string]*Rule{}, results: map[string]*Result{}}
 }
-func (r *MemoryRepository) nextID(prefix string) string {
+// nextID returns ids of UUID form, as the handler accepts only UUID ids
+// (API-03); rules and results share the counter, so ids stay unique.
+func (r *MemoryRepository) nextID(_ string) string {
 	r.next++
-	return fmt.Sprintf("%s-%d", prefix, r.next)
+	return fmt.Sprintf("00000000-0000-4000-8000-%012d", r.next)
 }
 func (r *MemoryRepository) ListRules(_ context.Context, orgID, ciTypeID, category string, activeOnly bool, page api.PaginationParams) ([]Rule, int, error) {
 	r.mu.RLock()
@@ -50,7 +57,7 @@ func (r *MemoryRepository) GetRule(_ context.Context, orgID, id string) (*Rule, 
 	defer r.mu.RUnlock()
 	rule := r.rules[id]
 	if rule == nil || rule.OrganizationID != orgID {
-		return nil, fmt.Errorf("compliance rule not found")
+		return nil, ErrNotFound
 	}
 	cp := *rule
 	return &cp, nil
@@ -71,7 +78,7 @@ func (r *MemoryRepository) UpdateRule(_ context.Context, orgID, id string, req U
 	defer r.mu.Unlock()
 	rule := r.rules[id]
 	if rule == nil || rule.OrganizationID != orgID {
-		return nil, fmt.Errorf("compliance rule not found")
+		return nil, ErrNotFound
 	}
 	if req.CITypeID != nil {
 		rule.CITypeID = *req.CITypeID
@@ -106,7 +113,7 @@ func (r *MemoryRepository) DeleteRule(_ context.Context, orgID, id string) error
 	defer r.mu.Unlock()
 	rule := r.rules[id]
 	if rule == nil || rule.OrganizationID != orgID {
-		return fmt.Errorf("compliance rule not found")
+		return ErrNotFound
 	}
 	delete(r.rules, id)
 	return nil

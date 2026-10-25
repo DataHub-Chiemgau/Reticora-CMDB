@@ -106,6 +106,7 @@ type JobRepository interface {
 }
 
 // Validate checks a create request and returns a human-readable problem.
+// validation: fixed texts.
 func (r *CreateJobRequest) Validate() error {
 	switch r.Format {
 	case "csv", "datev", "json":

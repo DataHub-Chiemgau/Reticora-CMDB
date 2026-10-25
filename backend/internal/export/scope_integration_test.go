@@ -133,6 +133,27 @@ func TestExportJobRunsWithCreatorScope(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || w.Code != http.StatusOK || list.Total != 0 {
 		t.Errorf("other user lists %d jobs (status %d), want none", list.Total, w.Code)
 	}
+	// The creator reads a job only while its scope covers the job's
+	// snapshot, as for the job it is mirrored into (WP-404, WP-409): not the
+	// client-1 job restricted to client 2, not the org-wide job (nor the one
+	// without snapshot) restricted to client 1, and no download URL.
+	client2 := database.OrgWideScope(f.OrgA, f.User)
+	client2.Clients = database.ScopeIDs(f.Client2)
+	for job, scope := range map[string]*database.TenantScope{restrictedJob: &client2, orgWideJob: &client1, legacyJob: &client1} {
+		if w := request(http.MethodGet, "/api/v1/export/jobs/"+job, "", f.User, scope); w.Code != http.StatusNotFound ||
+			strings.Contains(w.Body.String(), "download_url") {
+			t.Errorf("creator reads job %s outside its scope: status %d body %s, want 404", job, w.Code, w.Body.String())
+		}
+	}
+	for _, c := range []struct {
+		scope *database.TenantScope
+		want  int
+	}{{&client2, 0}, {&client1, 1}, {&orgWide, 3}} {
+		w := request(http.MethodGet, "/api/v1/export/jobs", "", f.User, c.scope)
+		if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || w.Code != http.StatusOK || list.Total != c.want {
+			t.Errorf("creator with clients %v lists %d jobs (status %d), want %d", c.scope.Clients.IDs(), list.Total, w.Code, c.want)
+		}
+	}
 
 	// Site and team snapshots (WP-347, open since WP-035): the export of a
 	// site- or team-scoped user holds exactly the CIs that scope reads.

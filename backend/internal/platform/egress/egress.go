@@ -116,6 +116,7 @@ func (o Options) Allowed(ip netip.Addr) bool {
 // host, no credentials in the URL, and no host that is blocked without a DNS
 // lookup (IP literals, localhost, internal suffixes). The authoritative
 // check of the resolved address happens on every connection.
+// validation: ErrBlockedDestination with the refused URL part.
 func (o Options) ValidateURL(raw string) error {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {

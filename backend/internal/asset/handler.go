@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"reflect"
 
@@ -149,10 +150,13 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
 	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "asset not found")
+		writeAssetError(w, r, err)
 		return
 	}
 
@@ -229,11 +233,40 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Create(r.Context(), a); err != nil {
-		api.WriteRepoError(w, err)
+		writeAssetError(w, r, err)
 		return
 	}
 
 	api.WriteJSON(w, http.StatusCreated, a)
+}
+
+// ParentOwnedFieldError refuses a write to a shared inventory property of a
+// composition child (spec §5, 409): the parent asset owns Field.
+type ParentOwnedFieldError struct{ Field string }
+
+// validation: a fixed rule text with the field name of the request.
+func (e *ParentOwnedFieldError) Error() string {
+	return fmt.Sprintf("field %q is owned by the parent asset and is read-only on composition children", e.Field)
+}
+
+// writeAssetError answers a failed asset request: an asset that is unknown,
+// of another organization or outside the caller's scope is 404 (TEN-04), a
+// parent-owned field of a composition child 409 with its domain message, a
+// linked CI that is no UUID or not visible 422 on ci_id. Database errors go
+// through api.WriteRepoError; no table, constraint, policy or SQLSTATE text
+// reaches the client (API-03, F-047), the log keeps it.
+func writeAssetError(w http.ResponseWriter, r *http.Request, err error) {
+	var owned *ParentOwnedFieldError
+	switch {
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
+	case errors.As(err, &owned):
+		api.WriteError(w, http.StatusConflict, "Conflict", owned.Error())
+	case api.WriteFieldError(w, err):
+	default:
+		slog.WarnContext(r.Context(), "asset request failed", "error", err)
+		api.WriteRepoError(w, err)
+	}
 }
 
 // Update handles PATCH /api/v1/assets/{id}
@@ -244,7 +277,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	// The id reaches the composition lookup and SQL only as a UUID (F-047).
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
 	var req UpdateRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -255,21 +292,22 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	// properties (spec §5). Reject writes to parent-owned fields when the
 	// asset participates as a composition child.
 	if err := h.rejectParentOwnedFields(r.Context(), t.OrganizationID, id, &req); err != nil {
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		writeAssetError(w, r, err)
 		return
 	}
 
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "asset not found")
+		writeAssetError(w, r, err)
 		return
 	}
 
 	api.WriteJSON(w, http.StatusOK, item)
 }
 
-// rejectParentOwnedFields returns an error when the request writes a
-// parent-owned shared inventory property on a composition child.
+// rejectParentOwnedFields returns a *ParentOwnedFieldError when the request
+// writes a parent-owned shared inventory property on a composition child,
+// the error of the composition lookup when it fails.
 func (h *Handler) rejectParentOwnedFields(ctx context.Context, orgID, id string, req *UpdateRequest) error {
 	if h.composition == nil {
 		return nil
@@ -287,7 +325,7 @@ func (h *Handler) rejectParentOwnedFields(ctx context.Context, orgID, id string,
 		// A nil-to-nil clear is allowed; only setting a value conflicts.
 		empty := reflect.Zero(f.Type().Elem())
 		if !reflect.DeepEqual(f.Elem().Interface(), empty.Interface()) {
-			return fmt.Errorf("field %q is owned by the parent asset and is read-only on composition children", column)
+			return &ParentOwnedFieldError{Field: column}
 		}
 	}
 	return nil
@@ -301,9 +339,13 @@ func (h *Handler) Label(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "asset not found")
+		writeAssetError(w, r, err)
 		return
 	}
 	baseURL := r.URL.Query().Get("base_url")
@@ -323,9 +365,12 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "asset not found")
+		writeAssetError(w, r, err)
 		return
 	}
 

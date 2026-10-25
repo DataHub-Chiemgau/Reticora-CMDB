@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -46,6 +47,28 @@ type PGRepository struct {
 // NewPGRepository creates a new PostgreSQL-backed asset repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
+}
+
+// requireCI fails with a 422 field error on ci_id when the CI to link is no
+// UUID or not visible under the caller's scope. The foreign key on ci is
+// checked without row level security: a CI of another organization or
+// client was linked (201) and an unknown one refused with the constraint
+// text, so the two could be told apart (TEN-04, API-03, F-047).
+func requireCI(ctx context.Context, tx pgx.Tx, orgID, ciID string) error {
+	if nilIfEmpty(ciID) == nil {
+		return nil
+	}
+	if err := api.RequireUUID("ci_id", ciID); err != nil {
+		return err
+	}
+	var visible bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1 AND organization_id = $2)", ciID, orgID).Scan(&visible); err != nil {
+		return fmt.Errorf("check ci of asset: %w", err)
+	}
+	if !visible {
+		return &api.FieldError{Field: "ci_id", Message: "CI not found", Status: http.StatusUnprocessableEntity}
+	}
+	return nil
 }
 
 // List returns paginated assets filtered by the given parameters.
@@ -147,7 +170,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Asset, e
 		asset, err = scanAsset(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get asset by id: %w", err)
 		}
@@ -164,6 +187,14 @@ func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 	return database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if a.CustomFields == nil {
 			a.CustomFields = make(map[string]any)
+		}
+		if nilIfEmpty(a.ClientID) != nil {
+			if err := api.RequireUUID("client_id", a.ClientID); err != nil {
+				return err
+			}
+		}
+		if err := requireCI(ctx, tx, a.OrganizationID, a.CIID); err != nil {
+			return err
 		}
 
 		query := `
@@ -212,6 +243,11 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	var asset *Asset
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if req.CIID != nil {
+			if err := requireCI(ctx, tx, orgID, *req.CIID); err != nil {
+				return err
+			}
+		}
 		setClauses := make([]string, 0, 14)
 		args := []any{id}
 		argPos := 2
@@ -264,7 +300,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			asset, err = scanAsset(tx.QueryRow(ctx, query, id, orgID))
 			if err != nil {
 				if err == pgx.ErrNoRows {
-					return fmt.Errorf("not found")
+					return ErrNotFound
 				}
 				return fmt.Errorf("get asset for update: %w", err)
 			}
@@ -279,7 +315,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		asset, err = scanAsset(tx.QueryRow(ctx, query, args...))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("update asset: %w", err)
 		}
@@ -297,7 +333,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 			return fmt.Errorf("delete asset: %w", err)
 		}
 		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
+			return ErrNotFound
 		}
 		return nil
 	})

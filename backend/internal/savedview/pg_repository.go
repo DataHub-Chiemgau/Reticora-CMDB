@@ -74,7 +74,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id, userID string) (*
 			selectColumns), id, orgID, nilIfEmpty(userID)))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get saved view: %w", err)
 		}
@@ -158,7 +158,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id, ownerID string, re
 			strings.Join(sets, ", "), pos, selectColumns), append(args, nilIfEmpty(ownerID))...))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("update saved view: %w", err)
 		}
@@ -178,7 +178,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id, ownerID string) er
 			return fmt.Errorf("delete saved view: %w", err)
 		}
 		if cmd.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
+			return ErrNotFound
 		}
 		return nil
 	})

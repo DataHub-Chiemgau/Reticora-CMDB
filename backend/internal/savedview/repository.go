@@ -2,6 +2,7 @@ package savedview
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -9,6 +10,14 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
+
+// ErrNotFound: the view is unknown, of another organization or a private
+// view of somebody else (VIE-01); all answer the same 404.
+var ErrNotFound = errors.New("saved view not found")
+
+// ErrConflict: the owner has a view of this name already (409; PostgreSQL
+// reports the unique violation, 23505).
+var ErrConflict = errors.New("a saved view with this name already exists")
 
 // Repository defines persistence for saved views.
 type Repository interface {
@@ -70,7 +79,7 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id, userID string) 
 	defer r.mu.RUnlock()
 	v, ok := r.views[id]
 	if !ok || v.OrganizationID != orgID || (!v.Shared && v.OwnerID != userID) {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 	out := *v
 	return &out, nil
@@ -82,7 +91,7 @@ func (r *MemoryRepository) Create(_ context.Context, view *View) error {
 	for _, existing := range r.views {
 		if existing.OrganizationID == view.OrganizationID &&
 			existing.OwnerID == view.OwnerID && existing.Name == view.Name {
-			return fmt.Errorf("a saved view with this name already exists")
+			return ErrConflict
 		}
 	}
 	normalizeView(view)
@@ -102,10 +111,17 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id, ownerID string, 
 	defer r.mu.Unlock()
 	v, ok := r.views[id]
 	if !ok || v.OrganizationID != orgID {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 	if !v.Shared && v.OwnerID != ownerID {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
+	}
+	if req.Name != "" && req.Name != v.Name {
+		for _, existing := range r.views {
+			if existing.OrganizationID == v.OrganizationID && existing.OwnerID == v.OwnerID && existing.Name == req.Name {
+				return nil, ErrConflict
+			}
+		}
 	}
 	if req.Name != "" {
 		v.Name = req.Name
@@ -136,7 +152,7 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id, ownerID string) 
 	defer r.mu.Unlock()
 	v, ok := r.views[id]
 	if !ok || v.OrganizationID != orgID || (!v.Shared && v.OwnerID != ownerID) {
-		return fmt.Errorf("not found")
+		return ErrNotFound
 	}
 	delete(r.views, id)
 	return nil

@@ -191,6 +191,7 @@ var ErrCoreNotDeactivatable = errors.New("cmdb_core is always active and cannot 
 // ValidationError is an entitlement that cannot be stored as given.
 type ValidationError struct{ err error }
 
+// validation: the fixed texts of Entitlement.Validate (invalid).
 func (e *ValidationError) Error() string { return e.err.Error() }
 func (e *ValidationError) Unwrap() error { return e.err }
 
@@ -225,6 +226,7 @@ type LimitExceededError struct {
 	Current    int64
 }
 
+// validation: the feature key and the counts of the limit.
 func (e *LimitExceededError) Error() string {
 	return fmt.Sprintf("entitlement limit for %q exceeded: %d of %d in use", e.FeatureKey, e.Current, e.Limit)
 }
@@ -241,6 +243,7 @@ type FeatureNotEntitledError struct {
 	FeatureKey string
 }
 
+// validation: a fixed text with the feature key.
 func (e *FeatureNotEntitledError) Error() string {
 	return fmt.Sprintf("feature %q is not included in the current plan", e.FeatureKey)
 }
@@ -258,6 +261,7 @@ type LicenseExpiredError struct {
 	ValidUntil time.Time
 }
 
+// validation: a fixed text with the end of the license.
 func (e *LicenseExpiredError) Error() string {
 	return fmt.Sprintf("the discovery license expired at %s; discovery and ingest are stopped",
 		e.ValidUntil.UTC().Format(time.RFC3339))

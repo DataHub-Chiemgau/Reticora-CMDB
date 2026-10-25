@@ -190,6 +190,7 @@ type UniqueError struct {
 	index string
 }
 
+// validation: a fixed rule text with the names of the unique attributes.
 func (e *UniqueError) Error() string {
 	return "another CI holds the value of the unique attribute(s): " + strings.Join(e.Fields, ", ")
 }

@@ -615,3 +615,10 @@ IMP-05;[B];C;backend/internal/topology/multi_integration_test.go;WP-403
 UI-06;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-403
 API-09;[B];C;backend/internal/jobs/scope_integration_test.go;WP-404
 JOB-03;[B];C;backend/internal/jobs/scope_integration_test.go;WP-404
+TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-406
+TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-407
+TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-407
+WFL-01;[P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-407
+TEN-09;[Q];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-409
+TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-409
+TEN-06;[B];B;backend/internal/server/handler_errors_test.go;WP-408

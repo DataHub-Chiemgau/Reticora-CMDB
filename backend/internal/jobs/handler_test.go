@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
@@ -168,6 +170,46 @@ func TestJobAPIRevert(t *testing.T) {
 	}
 	if len(f.reverted) != 1 || f.reverted[0] != merge.ID {
 		t.Errorf("reverted %v", f.reverted)
+	}
+}
+
+// TestJobAPIRevertErrors covers API-03 (WP-408): a reverter's refusal is
+// 409 with its domain text; any other error of a reverter is a repository
+// error and answers sanitized, without its text.
+func TestJobAPIRevertErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status int
+		detail string
+	}{
+		{"refusal", &RevertRefusedError{Reason: errors.New("the merge snapshot has expired")},
+			http.StatusConflict, "the merge snapshot has expired"},
+		{"database error", fmt.Errorf("unmerge: %w", &pgconn.PgError{Code: "42501",
+			Message: `new row violates row-level security policy for table "ci_merge"`}),
+			http.StatusForbidden, "the operation is not permitted"},
+		{"other error", errors.New("unmerge: failed to connect to `host=10.0.0.5 user=reticora`"),
+			http.StatusInternalServerError, "the request could not be completed"},
+	} {
+		svc := NewService(NewMemoryRepository())
+		svc.Register(Kind{Name: "ci.merge", MaxAttempts: 1})
+		f := &apiFixture{svc: svc, mux: chi.NewRouter()}
+		NewAPIHandler(svc).WithKind("ci.merge", identity.PermCIDelete, func(context.Context, *Job) error {
+			return tc.err
+		}).RegisterRoutes(f.mux)
+		job := f.enqueue(t, "ci.merge", "alice", "")
+		f.finish(t, job, nil)
+
+		w := f.call("POST", "/api/v1/jobs/"+job.ID+"/revert", "alice")
+		body := w.Body.String()
+		if w.Code != tc.status || !strings.Contains(body, tc.detail) {
+			t.Errorf("%s: %d %s, want %d with %q", tc.name, w.Code, body, tc.status, tc.detail)
+		}
+		for _, leak := range []string{"ci_merge", "row-level security", "10.0.0.5", "unmerge"} {
+			if strings.Contains(body, leak) {
+				t.Errorf("%s: body %s contains %q", tc.name, body, leak)
+			}
+		}
 	}
 }
 

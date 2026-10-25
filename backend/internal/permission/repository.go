@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -9,8 +10,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 )
+
+// ErrRoleNotFound: the standard role is not one of the organization (404).
+var ErrRoleNotFound = errors.New("role not found")
+
+// unknownPermission refuses a permission key outside the catalogue: a 400
+// field error naming permission_keys.
+func unknownPermission(key string) error {
+	return &api.FieldError{Field: "permission_keys", Message: fmt.Sprintf("unknown permission %q", key)}
+}
 
 // Repository defines persistence operations for permission grants.
 type Repository interface {
@@ -41,6 +52,7 @@ type RoleWideningError struct {
 	Missing []identity.Permission
 }
 
+// validation: a fixed rule text with the missing permissions.
 func (e *RoleWideningError) Error() string {
 	keys := make([]string, len(e.Missing))
 	for i, p := range e.Missing {
@@ -126,7 +138,7 @@ func (r *MemoryRepository) ReplaceRolePermissions(_ context.Context, orgID, role
 	now := time.Now().UTC()
 	for _, key := range keys {
 		if _, ok := r.catalogue[key]; !ok {
-			return nil, fmt.Errorf("unknown permission %q", key)
+			return nil, unknownPermission(key)
 		}
 		unique[key] = RolePermissionGrant{OrganizationID: orgID, RoleID: roleID, PermissionKey: key, GrantedAt: now, GrantedBy: grantedBy}
 	}

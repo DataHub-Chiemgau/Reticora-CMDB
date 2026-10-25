@@ -36,6 +36,7 @@ type GrantCeilingError struct {
 	Revocation bool
 }
 
+// validation: a fixed rule text with the missing permissions.
 func (e *GrantCeilingError) Error() string {
 	if e.Revocation {
 		return "revoking the role assignment requires " + joinPermissions(e.Missing) + " in its scope"
@@ -60,6 +61,7 @@ type RoleWideningError struct {
 	Missing []identity.Permission
 }
 
+// validation: a fixed rule text with the missing permissions.
 func (e *RoleWideningError) Error() string {
 	return "adding " + joinPermissions(e.Missing) + " to the role requires holding them organization-wide"
 }
@@ -74,11 +76,12 @@ func joinPermissions(perms []identity.Permission) string {
 
 // Errors of a role assignment that answer 404: the role, the user or the team
 // of the scope is not one of the organization, or the assignment to revoke is
-// none of the organization. The text is the detail.
+// none of the organization. The text is the detail. Role and team wrap
+// ErrNotFound for the team and role handlers.
 var (
-	errRoleNotFound       = errors.New("role not found")
+	errRoleNotFound       = fmt.Errorf("role %w", ErrNotFound)
 	errUserNotFound       = errors.New("user not found")
-	errTeamNotFound       = errors.New("team not found")
+	errTeamNotFound       = fmt.Errorf("team %w", ErrNotFound)
 	errAssignmentNotFound = errors.New("role assignment not found")
 )
 

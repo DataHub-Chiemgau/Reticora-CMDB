@@ -80,7 +80,7 @@ func (s *PGAlertStore) CreateRule(ctx context.Context, rule AlertRule) (AlertRul
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return AlertRule{}, fmt.Errorf("alert rule already exists")
+			return AlertRule{}, ErrAlertRuleExists
 		}
 		return AlertRule{}, fmt.Errorf("create alert rule: %w", err)
 	}

@@ -37,6 +37,7 @@ type RoleCeilingError struct {
 	Removed *ServiceAccountRole
 }
 
+// validation: a fixed rule text with the role and the missing permissions.
 func (e *RoleCeilingError) Error() string {
 	if e.Removed != nil {
 		return "removing the assignment of role " + e.Removed.RoleID + e.Removed.scopeText() +

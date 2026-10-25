@@ -3,6 +3,7 @@ package iga
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -37,6 +38,24 @@ type scimResource map[string]any
 
 func scimErr(w http.ResponseWriter, status int, typ, detail string) {
 	api.WriteJSON(w, status, scimResource{"schemas": []string{scimErrorSchema}, "status": strconv.Itoa(status), "scimType": typ, "detail": detail})
+}
+
+// scimRepoErr answers a failed repository call of a SCIM request with the
+// sanitized status and detail of api.ClassifyDBError (a taken userName or
+// group name: 409 uniqueness), anything else 500 with a fixed text; no
+// table, constraint or SQLSTATE text reaches the client (API-03, F-047), the
+// log keeps it.
+func scimRepoErr(w http.ResponseWriter, r *http.Request, err error) {
+	slog.WarnContext(r.Context(), "scim request failed", "error", err)
+	if status, _, detail, ok := api.ClassifyDBError(err); ok {
+		typ := ""
+		if status == http.StatusConflict {
+			typ = "uniqueness"
+		}
+		scimErr(w, status, typ, detail)
+		return
+	}
+	scimErr(w, 500, "", "the request could not be completed")
 }
 func scimMeta(kind, id string, t time.Time) scimResource {
 	return scimResource{"resourceType": kind, "location": "/scim/v2/" + kind + "s/" + id, "created": t, "lastModified": t}
@@ -79,7 +98,7 @@ func (h *Handler) SCIMListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	users, total, err := h.users.ListUsers(r.Context(), t.OrganizationID, filter, api.PaginationParams{Limit: count, Offset: start - 1})
 	if err != nil {
-		scimErr(w, 500, "", err.Error())
+		scimRepoErr(w, r, err)
 		return
 	}
 	res := []scimResource{}
@@ -139,7 +158,7 @@ func (h *Handler) SCIMCreateUser(w http.ResponseWriter, r *http.Request) {
 		u.ExternalID = v
 	}
 	if err := h.users.CreateUser(r.Context(), u); err != nil {
-		scimErr(w, 500, "", err.Error())
+		scimRepoErr(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 201, scimUser(*u))
@@ -230,7 +249,7 @@ func (h *Handler) SCIMListGroups(w http.ResponseWriter, r *http.Request) {
 	start, count := scimPaging(r)
 	teams, total, err := h.users.ListTeams(r.Context(), t.OrganizationID, "", api.PaginationParams{Limit: count, Offset: start - 1})
 	if err != nil {
-		scimErr(w, 500, "", err.Error())
+		scimRepoErr(w, r, err)
 		return
 	}
 	res := []scimResource{}
@@ -270,7 +289,7 @@ func (h *Handler) SCIMCreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.users.CreateTeam(r.Context(), g); err != nil {
-		scimErr(w, 500, "", err.Error())
+		scimRepoErr(w, r, err)
 		return
 	}
 	applyMembers(r.Context(), h, t.OrganizationID, g.ID, body)

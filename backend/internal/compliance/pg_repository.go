@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -23,6 +24,30 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{po
 // transaction's tenant scope: the ci policy filters the subquery, while
 // compliance_result carries no client column yet (WP-025).
 const resultVisible = "EXISTS (SELECT 1 FROM ci WHERE ci.id = compliance_result.ci_id)"
+
+// requireCIType fails with a 422 field error on ci_type_id when the type of
+// a rule is no UUID or neither a system type nor a type of the
+// organization. The foreign key on ci_type is checked without row level
+// security: a private type of another organization was accepted (201) and
+// an unknown one refused with the constraint text, so the two could be told
+// apart (TEN-04, API-03, F-047; like WP-396 for CIs).
+func requireCIType(ctx context.Context, tx pgx.Tx, orgID, ciTypeID string) error {
+	if ciTypeID == "" {
+		return nil
+	}
+	if err := api.RequireUUID("ci_type_id", ciTypeID); err != nil {
+		return err
+	}
+	var visible bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ci_type WHERE id = $1 AND (organization_id IS NULL OR organization_id = $2))",
+		ciTypeID, orgID).Scan(&visible); err != nil {
+		return fmt.Errorf("check ci type of rule: %w", err)
+	}
+	if !visible {
+		return &api.FieldError{Field: "ci_type_id", Message: "CI type not found", Status: http.StatusUnprocessableEntity}
+	}
+	return nil
+}
 
 func (r *PGRepository) ListRules(ctx context.Context, orgID, ciTypeID, category string, activeOnly bool, page api.PaginationParams) ([]Rule, int, error) {
 	var out []Rule
@@ -70,7 +95,7 @@ func (r *PGRepository) GetRule(ctx context.Context, orgID, id string) (*Rule, er
 		var err error
 		rule, err = scanRule(tx.QueryRow(ctx, "SELECT "+ruleCols+" FROM compliance_rule WHERE organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("compliance rule not found")
+			return ErrNotFound
 		}
 		return err
 	})
@@ -80,6 +105,9 @@ func (r *PGRepository) CreateRule(ctx context.Context, rule *Rule) error {
 	return database.WithRequestTenant(ctx, r.pool, rule.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if rule.Expression == nil {
 			rule.Expression = JSONMap{}
+		}
+		if err := requireCIType(ctx, tx, rule.OrganizationID, rule.CITypeID); err != nil {
+			return err
 		}
 		return tx.QueryRow(ctx, `INSERT INTO compliance_rule (organization_id,ci_type_id,name,description,severity,category,expression,remediation_hint,active) VALUES ($1,NULLIF($2,'')::uuid,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text, created_at, updated_at`, rule.OrganizationID, rule.CITypeID, rule.Name, rule.Description, rule.Severity, rule.Category, rule.Expression, rule.RemediationHint, rule.Active).Scan(&rule.ID, &rule.CreatedAt, &rule.UpdatedAt)
 	})
@@ -91,6 +119,9 @@ func (r *PGRepository) UpdateRule(ctx context.Context, orgID, id string, req Upd
 		args := []any{id, orgID}
 		pos := 3
 		if req.CITypeID != nil {
+			if err := requireCIType(ctx, tx, orgID, *req.CITypeID); err != nil {
+				return err
+			}
 			set = append(set, fmt.Sprintf("ci_type_id=NULLIF($%d,'')::uuid", pos))
 			args = append(args, *req.CITypeID)
 			pos++
@@ -133,13 +164,16 @@ func (r *PGRepository) UpdateRule(ctx context.Context, orgID, id string, req Upd
 		if len(set) == 0 {
 			var err error
 			rule, err = scanRule(tx.QueryRow(ctx, "SELECT "+ruleCols+" FROM compliance_rule WHERE id=$1 AND organization_id=$2", id, orgID))
+			if err == pgx.ErrNoRows {
+				return ErrNotFound
+			}
 			return err
 		}
 		set = append(set, "updated_at=now()")
 		var err error
 		rule, err = scanRule(tx.QueryRow(ctx, fmt.Sprintf("UPDATE compliance_rule SET %s WHERE id=$1 AND organization_id=$2 RETURNING %s", strings.Join(set, ","), ruleCols), args...))
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("compliance rule not found")
+			return ErrNotFound
 		}
 		return err
 	})
@@ -152,7 +186,7 @@ func (r *PGRepository) DeleteRule(ctx context.Context, orgID, id string) error {
 			return err
 		}
 		if cmd.RowsAffected() == 0 {
-			return fmt.Errorf("compliance rule not found")
+			return ErrNotFound
 		}
 		return nil
 	})

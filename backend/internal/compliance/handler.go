@@ -2,6 +2,7 @@ package compliance
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -44,15 +45,47 @@ func org(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
 	}
 	return t, true
 }
+
+// writeComplianceError answers a failed compliance request: a rule that is
+// unknown or of another organization is 404 (TEN-04), a CI type that is no
+// UUID or not visible 422 on ci_type_id. Database errors go through
+// api.WriteRepoError; no table, constraint, policy or SQLSTATE text reaches
+// the client (API-03, F-047), the log keeps it.
+func writeComplianceError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
+	case api.WriteFieldError(w, err):
+	default:
+		slog.WarnContext(r.Context(), "compliance request failed", "error", err)
+		api.WriteRepoError(w, err)
+	}
+}
+
+// ciTypeFilter returns the ci_type_id filter of r; a value that is set but
+// no UUID is answered 400 before it reaches SQL (API-03).
+func ciTypeFilter(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := r.URL.Query().Get("ci_type_id")
+	if id != "" && !api.IsUUID(id) {
+		api.WriteFieldError(w, &api.FieldError{Field: "ci_type_id", Message: "must be a UUID"})
+		return "", false
+	}
+	return id, true
+}
+
 func (h *Handler) ListRules(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)
 	if !ok {
 		return
 	}
+	ciTypeID, ok := ciTypeFilter(w, r)
+	if !ok {
+		return
+	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListRules(r.Context(), t.OrganizationID, r.URL.Query().Get("ci_type_id"), r.URL.Query().Get("category"), r.URL.Query().Get("active") == "true", page)
+	items, total, err := h.repo.ListRules(r.Context(), t.OrganizationID, ciTypeID, r.URL.Query().Get("category"), r.URL.Query().Get("active") == "true", page)
 	if err != nil {
-		api.WriteError(w, 500, "Internal Error", err.Error())
+		writeComplianceError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 200, api.ListResponse[Rule]{Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total})
@@ -62,9 +95,13 @@ func (h *Handler) GetRule(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := h.repo.GetRule(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	item, err := h.repo.GetRule(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, 404, "Not Found", "compliance rule not found")
+		writeComplianceError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 200, item)
@@ -88,8 +125,10 @@ func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		active = *req.Active
 	}
 	item := &Rule{OrganizationID: t.OrganizationID, CITypeID: req.CITypeID, Name: req.Name, Description: req.Description, Severity: req.Severity, Category: req.Category, Expression: req.Expression, RemediationHint: req.RemediationHint, Active: active}
+	// An unknown CI type and a private type of another organization answer
+	// alike, 422 on ci_type_id (F-047, TEN-04).
 	if err := h.repo.CreateRule(r.Context(), item); err != nil {
-		api.WriteError(w, 500, "Internal Error", err.Error())
+		writeComplianceError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 201, item)
@@ -99,14 +138,18 @@ func (h *Handler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
 	var req UpdateRuleRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
-	item, err := h.repo.UpdateRule(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
+	item, err := h.repo.UpdateRule(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
-		api.WriteError(w, 404, "Not Found", "compliance rule not found")
+		writeComplianceError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 200, item)
@@ -116,8 +159,12 @@ func (h *Handler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteRule(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
-		api.WriteError(w, 404, "Not Found", "compliance rule not found")
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	if err := h.repo.DeleteRule(r.Context(), t.OrganizationID, id); err != nil {
+		writeComplianceError(w, r, err)
 		return
 	}
 	w.WriteHeader(204)
@@ -143,10 +190,14 @@ func (h *Handler) ListResults(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	ciTypeID, ok := ciTypeFilter(w, r)
+	if !ok {
+		return
+	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListResults(r.Context(), t.OrganizationID, r.URL.Query().Get("ci_type_id"), r.URL.Query().Get("status"), page)
+	items, total, err := h.repo.ListResults(r.Context(), t.OrganizationID, ciTypeID, r.URL.Query().Get("status"), page)
 	if err != nil {
-		api.WriteError(w, 500, "Internal Error", err.Error())
+		writeComplianceError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 200, api.ListResponse[Result]{Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total})
@@ -156,9 +207,13 @@ func (h *Handler) Score(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, _, err := h.repo.ListResults(r.Context(), t.OrganizationID, r.URL.Query().Get("ci_type_id"), "", api.PaginationParams{Limit: 100})
+	ciTypeID, ok := ciTypeFilter(w, r)
+	if !ok {
+		return
+	}
+	items, _, err := h.repo.ListResults(r.Context(), t.OrganizationID, ciTypeID, "", api.PaginationParams{Limit: 100})
 	if err != nil {
-		api.WriteError(w, 500, "Internal Error", err.Error())
+		writeComplianceError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 200, summarize(items))
@@ -178,7 +233,7 @@ func (h *Handler) Report(w http.ResponseWriter, r *http.Request) {
 	}
 	report, err := h.reports.Generate(r.Context(), t.OrganizationID, r.URL.Query().Get("standard"))
 	if err != nil {
-		api.WriteError(w, 500, "Internal Error", err.Error())
+		writeComplianceError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 200, report)

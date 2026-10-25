@@ -3,6 +3,7 @@ package movement
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -38,23 +39,55 @@ const movementSelectColumns = `
 const movementVisible = `(asset_movement.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = asset_movement.asset_id))
 	AND (asset_movement.quantity_item_id IS NULL OR EXISTS (SELECT 1 FROM quantity_item WHERE quantity_item.id = asset_movement.quantity_item_id))`
 
-// requireVisible fails with "not found" when the written row of table does not
-// satisfy visible, i.e. when a write pointed it at an object outside the
-// tenant scope; the transaction is then rolled back.
+// requireVisible fails with api.ErrNotFound when the written row of table
+// does not satisfy visible, i.e. when a write pointed it at an object outside
+// the tenant scope; the transaction is then rolled back.
 func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
 	var ok bool
 	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
 		return fmt.Errorf("check %s visibility: %w", table, err)
 	}
 	if !ok {
-		return fmt.Errorf("not found")
+		return api.ErrNotFound
 	}
 	return nil
 }
 
+// requireRow fails with missing when id (if set) names no row of table that
+// is visible under the caller's scope. The foreign keys of asset_movement
+// and quantity_item are checked without row level security: an object of
+// another organization or outside the scope passed them, an unknown one
+// failed with the constraint text, so the two could be told apart (TEN-04,
+// API-03, F-047). The check runs before the write, in its transaction.
+func requireRow(ctx context.Context, tx pgx.Tx, table, orgID, id string, missing error) error {
+	if nilIfEmpty(id) == nil {
+		return nil
+	}
+	if !api.IsUUID(id) {
+		return missing
+	}
+	var visible bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND organization_id = $2)", id, orgID).Scan(&visible); err != nil {
+		return fmt.Errorf("check %s: %w", table, err)
+	}
+	if !visible {
+		return missing
+	}
+	return nil
+}
+
+// locationNotFound is the 422 field error of a location that is no UUID or
+// not visible under the caller's scope.
+func locationNotFound(field string) error {
+	return &api.FieldError{Field: field, Message: "location not found", Status: http.StatusUnprocessableEntity}
+}
+
 // Record appends a movement. The append-only trigger on asset_movement
 // rejects any later mutation; quantity items get their stock level adjusted
-// inside the same transaction.
+// inside the same transaction. An asset or quantity item that is unknown, of
+// another organization or outside the caller's scope fails with
+// ErrAssetNotFound or ErrItemNotFound, a location likewise with a 422 field
+// error, before anything is written.
 func (r *PGRepository) Record(ctx context.Context, m *Movement) error {
 	if !MovementTypes[m.MovementType] {
 		return fmt.Errorf("invalid movement_type %q", m.MovementType)
@@ -66,6 +99,19 @@ func (r *PGRepository) Record(ctx context.Context, m *Movement) error {
 		return fmt.Errorf("asset_id or quantity_item_id is required")
 	}
 	return database.WithRequestTenant(ctx, r.pool, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		for _, ref := range []struct {
+			table, id string
+			missing   error
+		}{
+			{"asset", m.AssetID, ErrAssetNotFound},
+			{"quantity_item", m.QuantityItemID, ErrItemNotFound},
+			{"location", m.FromLocationID, locationNotFound("from_location_id")},
+			{"location", m.ToLocationID, locationNotFound("to_location_id")},
+		} {
+			if err := requireRow(ctx, tx, ref.table, m.OrganizationID, ref.id, ref.missing); err != nil {
+				return err
+			}
+		}
 		err := tx.QueryRow(ctx, `
 			INSERT INTO asset_movement (
 				organization_id, item_kind, asset_id, quantity_item_id,
@@ -206,7 +252,7 @@ func (r *PGRepository) GetItem(ctx context.Context, orgID, id string) (*Quantity
 			itemSelectColumns), id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrItemNotFound
 			}
 			return fmt.Errorf("get quantity item: %w", err)
 		}
@@ -216,11 +262,22 @@ func (r *PGRepository) GetItem(ctx context.Context, orgID, id string) (*Quantity
 	return out, err
 }
 
-// CreateItem inserts a quantity item.
+// CreateItem inserts a quantity item. A location that is unknown, of another
+// organization or outside the caller's scope is a 422 field error; a client
+// outside the scope is refused by the policy of quantity_item, an unknown
+// one or one of another organization by its composite foreign key.
 func (r *PGRepository) CreateItem(ctx context.Context, item *QuantityItem) error {
+	if nilIfEmpty(item.ClientID) != nil {
+		if err := api.RequireUUID("client_id", item.ClientID); err != nil {
+			return err
+		}
+	}
 	return database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if item.Attributes == nil {
 			item.Attributes = map[string]any{}
+		}
+		if err := requireRow(ctx, tx, "location", item.OrganizationID, item.LocationID, locationNotFound("location_id")); err != nil {
+			return err
 		}
 		category := item.Category
 		if category == "" {
@@ -248,6 +305,11 @@ func (r *PGRepository) CreateItem(ctx context.Context, item *QuantityItem) error
 func (r *PGRepository) UpdateItem(ctx context.Context, orgID, id string, req UpdateItemRequest) (*QuantityItem, error) {
 	var out *QuantityItem
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if req.LocationID != nil {
+			if err := requireRow(ctx, tx, "location", orgID, *req.LocationID, locationNotFound("location_id")); err != nil {
+				return err
+			}
+		}
 		sets := []string{}
 		args := []any{id, orgID}
 		pos := 3
@@ -292,7 +354,7 @@ func (r *PGRepository) UpdateItem(ctx context.Context, orgID, id string, req Upd
 				itemSelectColumns), id, orgID))
 			if err != nil {
 				if err == pgx.ErrNoRows {
-					return fmt.Errorf("not found")
+					return ErrItemNotFound
 				}
 				return err
 			}
@@ -304,7 +366,7 @@ func (r *PGRepository) UpdateItem(ctx context.Context, orgID, id string, req Upd
 			strings.Join(sets, ", "), itemSelectColumns), args...))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrItemNotFound
 			}
 			return fmt.Errorf("update quantity item: %w", err)
 		}
@@ -323,7 +385,7 @@ func (r *PGRepository) DeleteItem(ctx context.Context, orgID, id string) error {
 			return fmt.Errorf("delete quantity item: %w", err)
 		}
 		if cmd.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
+			return ErrItemNotFound
 		}
 		return nil
 	})

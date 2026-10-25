@@ -2,12 +2,32 @@ package reservation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+)
+
+var (
+	// ErrNotFound: the reservation is unknown, of another organization or
+	// reserves an item outside the caller's scope; all answer 404 alike
+	// (TEN-04).
+	ErrNotFound = errors.New("reservation not found")
+	// ErrAssetNotFound: the asset to reserve is unknown, of another
+	// organization or outside the caller's scope (404, TEN-04).
+	ErrAssetNotFound = errors.New("asset not found")
+	// ErrItemNotFound: the quantity item to reserve is unknown, of another
+	// organization or outside the caller's scope (404, TEN-04).
+	ErrItemNotFound = errors.New("inventory item not found")
+	// ErrConflict: the serialized asset has an active reservation already
+	// (409; PostgreSQL enforces it with a partial unique index).
+	ErrConflict = errors.New("asset already has an active reservation")
+	// ErrNotActive: the reservation was released, expired or consumed
+	// already (409).
+	ErrNotActive = errors.New("reservation is not active")
 )
 
 // Repository defines persistence for reservations.
@@ -79,7 +99,7 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Reserv
 	defer r.mu.RUnlock()
 	res, ok := r.items[id]
 	if !ok || res.OrganizationID != orgID {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 	out := *res
 	return &out, nil
@@ -92,7 +112,7 @@ func (r *MemoryRepository) Create(_ context.Context, res *Reservation) error {
 		for _, existing := range r.items {
 			if existing.OrganizationID == res.OrganizationID &&
 				existing.AssetID == res.AssetID && existing.State == "active" {
-				return fmt.Errorf("asset already has an active reservation")
+				return ErrConflict
 			}
 		}
 	}
@@ -114,10 +134,10 @@ func (r *MemoryRepository) Transition(_ context.Context, orgID, id, state string
 	defer r.mu.Unlock()
 	res, ok := r.items[id]
 	if !ok || res.OrganizationID != orgID {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 	if res.State != "active" {
-		return nil, fmt.Errorf("reservation is not active")
+		return nil, ErrNotActive
 	}
 	if !States[state] || state == "active" {
 		return nil, fmt.Errorf("invalid target state %q", state)

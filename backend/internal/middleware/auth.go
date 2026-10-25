@@ -117,6 +117,7 @@ func devAuthEnvironment() bool {
 // authenticateRequest resolves the caller's credentials. An X-API-Key header
 // takes precedence over a bearer token so service tokens keep working for
 // clients that forward both.
+// validation: fixed texts; verifier and key store errors are not passed on.
 func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIKeyAuthenticator) (identity.Principal, Claims, error) {
 	if apiKey := strings.TrimSpace(r.Header.Get("X-API-Key")); apiKey != "" {
 		if apiKeys == nil {

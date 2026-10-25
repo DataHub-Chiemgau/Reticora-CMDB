@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -67,6 +68,16 @@ type AlertRule struct {
 	PendingSince *time.Time `json:"pending_since,omitempty"`
 	LastFiredAt  *time.Time `json:"last_fired_at,omitempty"`
 }
+
+// MaxAlertDuration bounds the duration of an alert rule: the condition must
+// hold that long before the rule fires, and metric samples are kept 400 days
+// (MON-01), so a longer duration could never be observed. A duration outside
+// 0..MaxAlertDuration is a 422 field error (it would overflow the interval
+// read back from PostgreSQL, F-047).
+const MaxAlertDuration = 400 * 24 * time.Hour
+
+// ErrAlertRuleExists: a rule with the given id exists already (409).
+var ErrAlertRuleExists = errors.New("alert rule already exists")
 
 // AlertEvent describes a fired alert.
 type AlertEvent struct {
@@ -155,6 +166,9 @@ func (r *AlertRule) UnmarshalJSON(data []byte) error {
 		}
 		duration = parsed
 	case float64:
+		if value < 0 || value > float64(MaxAlertDuration) {
+			return durationRangeError()
+		}
 		duration = time.Duration(value)
 	default:
 		return errors.New("duration must be a string or number")
@@ -217,7 +231,7 @@ func (m *AlertManager) CreateRule(_ context.Context, rule AlertRule) (AlertRule,
 	}
 	for _, existing := range m.rules {
 		if existing.ID == rule.ID && existing.OrgID == rule.OrgID {
-			return AlertRule{}, fmt.Errorf("alert rule %q already exists", rule.ID)
+			return AlertRule{}, ErrAlertRuleExists
 		}
 	}
 	m.rules = append(m.rules, rule)
@@ -580,18 +594,21 @@ func (h *Handler) CreateAlert(w http.ResponseWriter, r *http.Request) {
 
 	var rule AlertRule
 	if err := decodeJSON(r.Body, &rule); err != nil {
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 	if err := validateAlertRule(&rule); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		api.WriteFieldError(w, err)
 		return
 	}
 	rule.OrgID = orgID
 
 	created, err := h.alerts.CreateRule(r.Context(), rule)
 	if err != nil {
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		writeAlertError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, created)
@@ -627,8 +644,19 @@ func (h *Handler) UpdateAlert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Duration != nil {
-		if _, err := time.ParseDuration(*req.Duration); err != nil {
+		d, err := time.ParseDuration(*req.Duration)
+		if err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid duration: "+err.Error())
+			return
+		}
+		if err := checkAlertDuration(d); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
+	if req.Name != nil {
+		if err := api.RejectNUL("name", *req.Name); err != nil {
+			api.WriteFieldError(w, err)
 			return
 		}
 	}
@@ -639,7 +667,7 @@ func (h *Handler) UpdateAlert(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "alert rule not found")
 			return
 		}
-		api.WriteRepoError(w, err)
+		writeAlertError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, rule)
@@ -672,6 +700,8 @@ func requireOrgID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return orgID, true
 }
 
+// metricQueryFromRequest reads the metric query parameters.
+// validation: fixed texts naming the parameter.
 func metricQueryFromRequest(r *http.Request, orgID string) (MetricQuery, error) {
 	query := MetricQuery{
 		OrgID: orgID,
@@ -713,6 +743,8 @@ func parseRequestTime(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid timestamp %q", value)
 }
 
+// decodeMetrics reads the metrics of an ingest body.
+// validation: the read error of the body and fixed texts.
 func decodeMetrics(body io.ReadCloser) ([]Metric, error) {
 	defer body.Close()
 	data, err := io.ReadAll(body)
@@ -746,6 +778,8 @@ func decodeMetrics(body io.ReadCloser) ([]Metric, error) {
 	return nil, errors.New("unable to decode metrics payload")
 }
 
+// decodeJSON decodes a single JSON object from body.
+// validation: the decode errors of the body, as api.ReadJSON.
 func decodeJSON(body io.ReadCloser, dest any) error {
 	defer body.Close()
 	dec := json.NewDecoder(body)
@@ -759,17 +793,26 @@ func decodeJSON(body io.ReadCloser, dest any) error {
 	return nil
 }
 
+// validateAlertRule checks a new rule before it is stored: a 400 field error
+// for a missing or NUL-carrying text and an unknown condition or severity,
+// 422 for a duration out of range (API-03, F-047).
 func validateAlertRule(rule *AlertRule) error {
 	if strings.TrimSpace(rule.Name) == "" {
-		return errors.New("name is required")
+		return &api.FieldError{Field: "name", Message: "is required"}
 	}
 	if strings.TrimSpace(rule.MetricName) == "" {
-		return errors.New("metric_name is required")
+		return &api.FieldError{Field: "metric_name", Message: "is required"}
+	}
+	if err := api.RejectNUL("name", rule.Name); err != nil {
+		return err
+	}
+	if err := api.RejectNUL("metric_name", rule.MetricName); err != nil {
+		return err
 	}
 	switch rule.Condition {
 	case "gt", "lt", "eq":
 	default:
-		return errors.New("condition must be one of gt, lt or eq")
+		return &api.FieldError{Field: "condition", Message: "must be one of gt, lt or eq"}
 	}
 	if rule.Severity == "" {
 		rule.Severity = "warning"
@@ -777,9 +820,34 @@ func validateAlertRule(rule *AlertRule) error {
 	switch rule.Severity {
 	case "critical", "warning", "info":
 	default:
-		return errors.New("severity must be one of critical, warning or info")
+		return &api.FieldError{Field: "severity", Message: "must be one of critical, warning or info"}
+	}
+	return checkAlertDuration(rule.Duration)
+}
+
+// checkAlertDuration refuses a duration outside 0..MaxAlertDuration (422).
+func checkAlertDuration(d time.Duration) error {
+	if d < 0 || d > MaxAlertDuration {
+		return durationRangeError()
 	}
 	return nil
+}
+
+func durationRangeError() error {
+	return &api.FieldError{Field: "duration", Message: "must be between 0s and " + MaxAlertDuration.String(),
+		Status: http.StatusUnprocessableEntity}
+}
+
+// writeAlertError answers a failed alert rule write: a taken id is 409;
+// store errors go through api.WriteRepoError, so no driver or SQLSTATE text
+// reaches the client (F-047), the log keeps it.
+func writeAlertError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, ErrAlertRuleExists) {
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrAlertRuleExists.Error())
+		return
+	}
+	slog.WarnContext(r.Context(), "alert rule write failed", "error", err)
+	api.WriteRepoError(w, err)
 }
 
 func cloneLabels(labels map[string]string) map[string]string {

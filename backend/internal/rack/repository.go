@@ -21,7 +21,29 @@ var (
 	// ErrConflict: the mount collides with another, exceeds the rack or
 	// mounts a child CI of a composition (RCK-01, RCK-02: 409).
 	ErrConflict = errors.New("conflict")
+	// ErrCINotFound: the CI to mount is unknown, of another organization or
+	// outside the caller's scope; all three answer alike (422 on ci_id).
+	ErrCINotFound = errors.New("ci not found")
 )
+
+// RuleError refuses a mount by a rack rule (RCK-01, RCK-02): Rule is
+// ErrValidation (400) or ErrConflict (409), Detail the fixed domain message
+// the handler shows. Database errors never become a RuleError, so no driver,
+// constraint or policy text reaches the client (API-03, F-047).
+type RuleError struct {
+	Rule   error
+	Detail string
+}
+
+func (e *RuleError) Error() string { return e.Rule.Error() + ": " + e.Detail }
+
+// Unwrap makes errors.Is(err, ErrValidation) and ErrConflict hold.
+func (e *RuleError) Unwrap() error { return e.Rule }
+
+// ruleError builds a RuleError; format and args yield the domain message.
+func ruleError(rule error, format string, args ...any) error {
+	return &RuleError{Rule: rule, Detail: fmt.Sprintf(format, args...)}
+}
 
 // Repository defines persistence operations for racks, mounts, and cables.
 type Repository interface {
@@ -57,13 +79,13 @@ func facesOverlap(a, b string) bool {
 // excludes the mount being updated (pass "" when creating).
 func validateMountFit(rackHeight, positionU, heightU int, face string, existing []RackMount, selfID string) error {
 	if positionU < 1 {
-		return fmt.Errorf("%w: position_u must be >= 1", ErrValidation)
+		return ruleError(ErrValidation, "position_u must be >= 1")
 	}
 	if heightU < 1 {
-		return fmt.Errorf("%w: height_u must be >= 1", ErrValidation)
+		return ruleError(ErrValidation, "height_u must be >= 1")
 	}
 	if positionU+heightU-1 > rackHeight {
-		return fmt.Errorf("%w: mount exceeds rack height of %dU", ErrConflict, rackHeight)
+		return ruleError(ErrConflict, "mount exceeds rack height of %dU", rackHeight)
 	}
 	start, end := positionU, positionU+heightU
 	for _, e := range existing {
@@ -72,7 +94,7 @@ func validateMountFit(rackHeight, positionU, heightU int, face string, existing 
 		}
 		eStart, eEnd := e.PositionU, e.PositionU+e.HeightU
 		if start < eEnd && eStart < end {
-			return fmt.Errorf("%w: overlaps mount at position %dU (%s)", ErrConflict, e.PositionU, e.Face)
+			return ruleError(ErrConflict, "overlaps mount at position %dU (%s)", e.PositionU, e.Face)
 		}
 	}
 	return nil
@@ -246,7 +268,7 @@ func (r *MemoryRepository) CreateMount(_ context.Context, m *RackMount) error {
 	}
 	for _, e := range r.mounts {
 		if e.CIID == m.CIID {
-			return fmt.Errorf("%w: ci already mounted", ErrConflict)
+			return ruleError(ErrConflict, "ci already mounted")
 		}
 	}
 	if err := validateMountFit(rk.HeightUnits, m.PositionU, m.HeightU, m.Face, r.mountsForRack(m.RackID), ""); err != nil {
@@ -310,7 +332,7 @@ func (r *MemoryRepository) UpdateMount(_ context.Context, orgID, id string, req 
 	if req.Face != nil {
 		face = *req.Face
 		if !ValidFaces[face] {
-			return nil, fmt.Errorf("%w: invalid face", ErrValidation)
+			return nil, ruleError(ErrValidation, "invalid face")
 		}
 	}
 	if rk != nil {

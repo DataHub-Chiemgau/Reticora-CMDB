@@ -183,11 +183,11 @@ func (h *Handler) Book(w http.ResponseWriter, r *http.Request) {
 	created, err := h.repo.Book(r.Context(), b)
 	if err != nil {
 		if strings.Contains(err.Error(), "already booked") {
-			api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+			api.WriteError(w, http.StatusConflict, "Conflict", ErrAlreadyBooked.Error())
 			return
 		}
 		if strings.Contains(err.Error(), "after starts_at") {
-			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", "ends_at must be after starts_at")
 			return
 		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "desk not found")
