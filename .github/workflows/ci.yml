@@ -778,7 +778,8 @@ jobs:
           retention-days: 30
 
   # NFR-09/PRI-11 (WP-105): the Terraform module only accepts EU regions for
-  # all data locations (primary, backups, logs, search index).
+  # all data locations (primary, backups, logs, search index). NFR-05
+  # (WP-443): a production plan needs a backup replica in another EU region.
   terraform:
     runs-on: ubuntu-latest
     defaults:
@@ -798,21 +799,11 @@ jobs:
           terraform init -backend=false -input=false
           terraform validate
 
-      - name: EU regions are accepted
-        run: terraform plan -input=false -var region=eu-central-1 -var backup_region=europe-west3 -var log_region=westeurope -var search_region=fsn1
-
-      - name: Non-EU regions are rejected
-        run: |
-          set -u
-          for var in region=us-east-1 region=eu-west-2 region=eu-central-2 region=europe-west6 \
-                     backup_region=us-west-2 log_region=eastus search_region=switzerlandnorth \
-                     backup_replica_region=us-east-1 backup_retention_days=30; do
-            if terraform plan -input=false -var "$var" > /dev/null 2>&1; then
-              echo "::error::terraform accepted the non-EU setting $var"
-              exit 1
-            fi
-            echo "rejected: $var"
-          done
+      # tests/backup.tftest.hcl: production without, with an identical and
+      # with a distinct EU replica region; EU regions accepted and non-EU
+      # regions rejected for every data location. Plans only, no provider.
+      - name: Backup replication and EU regions (terraform test)
+        run: terraform test
 
   k8s-manifests:
     runs-on: ubuntu-latest

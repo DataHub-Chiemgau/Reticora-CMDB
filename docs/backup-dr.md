@@ -41,11 +41,15 @@ without it no backup can be restored.
   plus pgBackRest, with WAL archiving switched on. Configuration:
   `deploy/docker-compose/postgres/pgbackrest.conf`.
 - `backup` runs the same image, `reticora-backup.sh run`:
+  - it checks its settings first and does not start if one is invalid:
+    `RETICORA_BACKUP_HOUR` must be an hour 0..23 (`08` is 8), and the bucket
+    of an S3 repository must be versioned (`verify-repo`, see below);
   - it creates the stanza, checks the archiving and takes a first full
     backup;
   - then it takes one full backup per day at `RETICORA_BACKUP_HOUR` (UTC,
     default 2);
-  - it is healthy while the newest backup is younger than 26 hours.
+  - it is healthy while the bucket versioning is `Enabled` and the newest
+    backup is younger than 26 hours.
 - Repository `repo1`: the `pgbackrest` volume on the same host.
 - Offsite repository `repo2` (S3 over HTTPS, recommended): set these in
   `.env`; the installer keeps them on re-runs:
@@ -59,7 +63,8 @@ without it no backup can be restored.
   ```
 
   WAL and backups then go to both repositories. The bucket must have
-  versioning and replication into a second EU region (see below).
+  versioning and replication into a second EU region (see below); without
+  versioning the backup service does not start.
 
 Commands, with the environment of the container:
 
@@ -67,6 +72,7 @@ Commands, with the environment of the container:
 cd deploy/docker-compose
 docker compose --env-file .env exec backup reticora-pgbackrest-env.sh pgbackrest --stanza=reticora info
 docker compose --env-file .env exec backup reticora-pgbackrest-env.sh reticora-backup.sh health
+docker compose --env-file .env exec backup reticora-pgbackrest-env.sh reticora-backup.sh verify-repo
 ```
 
 ### Kubernetes
@@ -75,8 +81,10 @@ The component `deploy/k8s/base/components/backup` contains:
 
 - the `reticora-pgbackrest` ConfigMap: S3 repository, encryption, 35 days
   retention;
-- the CronJob `reticora-pgbackrest-full`: a daily full backup over the
-  pgBackRest TLS connection to the database host.
+- the CronJob `reticora-pgbackrest-full`: `reticora-backup.sh verify-repo`,
+  then a daily full backup over the pgBackRest TLS connection to the
+  database host. If the bucket is not versioned, the job fails without a
+  backup.
 
 On the database host, PostgreSQL archives with the same repository
 configuration and runs `pgbackrest server`. Secret: `reticora-pgbackrest`
@@ -91,9 +99,45 @@ PITR takes the place of pgBackRest, with the same RPO, RTO and retention.
 - If the object store refuses, the server logs `bucket versioning could not
   be enabled`.
 - Replication into a second EU region is part of the provider setup:
-  - Terraform: `backup_replica_region`, output `backup_policy`; production
-    requires it;
+  - Terraform: `backup_replica_region`, output `backup_policy`. For
+    `environment = "production"`, `terraform plan` fails without it or with
+    the backup region as replica region (variable validation, NFR-05).
+    `deploy/terraform/tests/backup.tftest.hcl` proves this and the EU
+    regions with `terraform test` (CI job `terraform`, no cloud
+    credentials);
   - MinIO: `mc replicate add`.
+
+#### Bucket versioning of the pgBackRest repository (`verify-repo`)
+
+`reticora-backup.sh verify-repo` enforces versioning for every S3
+repository of pgBackRest:
+
+- Which repositories: every `repo<n>-type=s3`, from the environment
+  (`PGBACKREST_REPO<n>_*`) or from `[global]` of the configuration file
+  (`PGBACKREST_CONFIG`, default `/etc/pgbackrest/pgbackrest.conf`).
+  - Compose: `repo2` from `RETICORA_BACKUP_S3_*`, through
+    `reticora-pgbackrest-env.sh`. Called without it while
+    `RETICORA_BACKUP_S3_BUCKET` is set, the check fails instead of skipping
+    the bucket.
+  - Kubernetes: `repo1` of the ConfigMap.
+  - Without an S3 repository there is nothing to check; it reports that and
+    succeeds.
+- The check: a signed `GET ?versioning` with curl (`--aws-sigv4`, the
+  repository's own key) to `repo<n>-s3-endpoint`. It honours
+  `s3-uri-style`, `storage-port`, `storage-ca-file`, `storage-ca-path` and
+  `storage-verify-tls`.
+  - `Enabled` passes.
+  - Any other result fails: `Suspended`, never enabled, an S3 error (only
+    its code is shown, e.g. `HTTP 403 AccessDenied`) or no connection.
+  - The key and the secret go to curl on stdin. They appear neither on a
+    command line nor in a message.
+- The key needs `s3:GetBucketVersioning` on the bucket, in addition to the
+  object permissions of pgBackRest.
+- Where it runs:
+  - Compose: `reticora-backup.sh run` checks at the start and does not
+    start on failure. `health` checks every time, so the service turns
+    unhealthy as soon as versioning is suspended.
+  - Kubernetes: the CronJob runs it before every backup.
 
 ## Restore procedure (PITR)
 

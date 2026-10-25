@@ -674,3 +674,6 @@ COL-08;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-429
 GATE-01;[Q];G1;tests/rep01-structure.test.sh;WP-451
 GATE-02;[Q];G1;tests/rep01-structure.test.sh;WP-451
 GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-451
+NFR-05;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-443
+OPS-04;[B], [P5];A;tests/backup-config.test.sh;WP-443
+NFR-09;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-443
