@@ -288,12 +288,16 @@ func (p *Plugin) probeV3(ctx context.Context, target string, cfg *v3Config) (*pl
 	}, true
 }
 
-// collectV3 collects target over SNMPv3 authPriv.
-func (p *Plugin) collectV3(ctx context.Context, target string, cfg *v3Config) (*plugins.Result, error) {
+// collectV3 collects target and its neighbours over SNMPv3 authPriv.
+func (p *Plugin) collectV3(ctx context.Context, target string, cfg *v3Config) (*plugins.Result, []plugins.DeviceNeighbor, error) {
 	g := p.v3Session(ctx, target, cfg)
 	if err := g.Connect(); err != nil {
-		return nil, fmt.Errorf("snmp v3: connect %s: %w", target, err)
+		return nil, nil, fmt.Errorf("snmp v3: connect %s: %w", target, err)
 	}
 	defer g.Conn.Close()
-	return p.collectSession(g, target, "v3")
+	result, err := p.collectSession(g, target, "v3")
+	if err != nil {
+		return nil, nil, err
+	}
+	return result, walkNeighbors(g, target, result.Interfaces), nil
 }

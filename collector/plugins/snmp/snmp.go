@@ -205,21 +205,28 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 	return results, ctx.Err()
 }
 
-// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03)
+// with the neighbours of its LLDP and bridge tables (DIS-05).
 func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
 	observedAt := time.Now()
-	res, err := p.collect(ctx, target, creds)
-	return plugins.CollectRecord(p.Name(), res, err, observedAt)
+	res, neighbors, err := p.collect(ctx, target, creds)
+	rec, err := plugins.CollectRecord(p.Name(), res, err, observedAt)
+	if err != nil {
+		return nil, err
+	}
+	rec.Neighbors = neighbors
+	return rec, nil
 }
 
-// collect retrieves inventory and telemetry from a single SNMP endpoint.
-func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
+// collect retrieves inventory, telemetry and neighbours from a single SNMP
+// endpoint.
+func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, []plugins.DeviceNeighbor, error) {
 	community := creds["community"]
 	if community == "" {
 		community = "public"
 	}
 	if v3, useV3, err := v3FromCreds(creds); err != nil {
-		return nil, err
+		return nil, nil, err
 	} else if useV3 {
 		return p.collectV3(ctx, target, v3)
 	}
@@ -228,11 +235,11 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 	// from the message header (which echoes the community).
 	g := p.v2cSession(ctx, target, community)
 	if err := g.Connect(); err != nil {
-		return nil, fmt.Errorf("snmp: dial %s: %w", target, err)
+		return nil, nil, fmt.Errorf("snmp: dial %s: %w", target, err)
 	}
 	defer g.Conn.Close()
 	if result, err := p.collectSession(g, target, "v2c"); err == nil {
-		return result, nil
+		return result, walkNeighbors(g, target, result.Interfaces), nil
 	}
 	// A device that leaves the GET unanswered keeps its address as name.
 	return &plugins.Result{
@@ -240,7 +247,7 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 		Name:       target,
 		IP:         target,
 		Attributes: map[string]any{"protocol": "snmp", "snmpVersion": "v2c"},
-	}, nil
+	}, nil, nil
 }
 
 // buildSNMPv2cGet constructs a minimal SNMPv2c GET-Request packet.

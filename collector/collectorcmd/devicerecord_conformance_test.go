@@ -10,13 +10,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gosnmp/gosnmp"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/internal/fakesnmp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/snmp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/sweep"
 )
 
@@ -45,6 +50,141 @@ func TestCollectorOutputConformsToDeviceRecordSchema(t *testing.T) {
 	}()
 	port := listener.Addr().(*net.TCPAddr).Port
 
+	swap := map[string]plugins.Plugin{
+		"sweep": &sweep.Plugin{Timeout: time.Second, Concurrency: 4, TCPPorts: []int{port}},
+		"snmp": fixturePlugin{"snmp", plugins.Result{
+			CIType: "network.device", Name: "core-sw-1", IP: "127.0.0.1",
+			Manufacturer: "Cisco", Model: "C9300", Serial: "FOC1234", Firmware: "17.9.4", MAC: "00:11:22:33:44:55",
+			Attributes: map[string]any{"protocol": "snmp", "sysDescr": "Cisco IOS XE", "sysObjectID": "1.3.6.1.4.1.9.1.2494",
+				"sysLocation": "R1", "snmpVersion": "v2c", "hostname": "core-sw-1"},
+			Interfaces: []plugins.NetworkInterface{
+				{Name: "Gi1/0/1", MAC: "00:11:22:33:44:56", Speed: 1000, MTU: 1500, AdminUp: true, OperUp: true, IfIndex: 1, VlanID: 10},
+				{Name: "Gi1/0/2", IfIndex: 2},
+			},
+		}},
+		"power": fixturePlugin{"power", plugins.Result{
+			CIType: "power-device", Name: "ups-1", IP: "127.0.0.1", Manufacturer: "APC", Model: "Smart-UPS",
+			Attributes: map[string]any{"category": "power", "protocol": "snmp", "deviceType": "ups", "upsCapable": true},
+		}},
+		"redfish": fixturePlugin{"redfish", plugins.Result{
+			CIType: "bmc", Name: "127.0.0.1", IP: "127.0.0.1",
+			Attributes: map[string]any{"api": "redfish", "redfishVersion": "1.15.0", "bmcUUID": "4c4c4544-0042-3510-8051-b4c04f4a4e33"},
+		}},
+	}
+	before := time.Now().Add(-time.Second)
+	records := discoveryUpload(t, swap, func(cfg *collectorConfig) {
+		cfg.ScanSubnets = []string{"127.0.0.1/32", "localhost"}
+		cfg.Protocols = []string{"sweep", "snmp", "power", "redfish"}
+	})
+	sources := map[string]int{}
+	for i, raw := range records {
+		var doc any
+		if err = json.Unmarshal(raw, &doc); err != nil {
+			t.Fatal(err)
+		}
+		for _, problem := range schema.validate(doc) {
+			t.Errorf("record %d: %s\n%s", i, problem, raw)
+		}
+		var rec plugins.DeviceRecord
+		if err = json.Unmarshal(raw, &rec); err != nil {
+			t.Fatal(err)
+		}
+		if violations := rec.Validate(); len(violations) > 0 {
+			t.Errorf("record %d breaks the Go contract: %v", i, violations)
+		}
+		if rec.ObservedAt.Before(before) || rec.ObservedAt.After(time.Now()) {
+			t.Errorf("record %d observed_at %s is not the time of the cycle", i, rec.ObservedAt)
+		}
+		sources[rec.Source]++
+	}
+	// Sweep finds the listener by address and by name; SNMP and power report
+	// as snmp; Redfish once.
+	if sources["sweep"] != 2 || sources["snmp"] != 2 || sources["redfish"] != 1 || len(records) != 5 {
+		t.Errorf("records by source: %v", sources)
+	}
+}
+
+// TestCollectorUploadsSNMPNeighbors covers WP-416 (DIS-05, TOP-01): the
+// neighbours the SNMP plugin reads from the LLDP and bridge tables of a
+// switch arrive in the uploaded DeviceRecord as neighbors (protocol, local
+// interface, remote MAC, IP, host name and interface) and the record
+// validates against api/devicerecord.schema.json. The cycle runs the real
+// SNMP plugin against the SNMPv2c fake (internal/fakesnmp).
+func TestCollectorUploadsSNMPNeighbors(t *testing.T) {
+	schema := loadDeviceRecordSchema(t)
+	const community = "conformance-community"
+	s := func(oid, v string) gosnmp.SnmpPDU {
+		return gosnmp.SnmpPDU{Name: "." + oid, Type: gosnmp.OctetString, Value: []byte(v)}
+	}
+	i := func(oid string, v int) gosnmp.SnmpPDU {
+		return gosnmp.SnmpPDU{Name: "." + oid, Type: gosnmp.Integer, Value: v}
+	}
+	agent, err := fakesnmp.Listen("127.0.0.1:0", fakesnmp.Config{Community: community, SysName: "access-sw-1",
+		SysDescr: "Reticora SNMP fake", SysObjectID: ".1.3.6.1.4.1.8072.3.2.10"},
+		// IF-MIB ifDescr, BRIDGE-MIB dot1dBasePortIfIndex (bridge port 1, 2 = ifIndex 1, 2).
+		s("1.3.6.1.2.1.2.2.1.2.1", "GigabitEthernet1/0/1"), s("1.3.6.1.2.1.2.2.1.2.2", "GigabitEthernet1/0/2"),
+		i("1.3.6.1.2.1.17.1.4.1.2.1", 1), i("1.3.6.1.2.1.17.1.4.1.2.2", 2),
+		// LLDP: dist-sw-2 (chassis MAC, port Te1/1/1, management address 192.0.2.12) on local port 1.
+		i("1.0.8802.1.1.2.1.3.7.1.2.1", 5), s("1.0.8802.1.1.2.1.3.7.1.3.1", "GigabitEthernet1/0/1"),
+		i("1.0.8802.1.1.2.1.4.1.1.4.0.1.1", 4),
+		gosnmp.SnmpPDU{Name: ".1.0.8802.1.1.2.1.4.1.1.5.0.1.1", Type: gosnmp.OctetString, Value: []byte{0x00, 0x1b, 0x54, 0xaa, 0xbb, 0xcc}},
+		i("1.0.8802.1.1.2.1.4.1.1.6.0.1.1", 5), s("1.0.8802.1.1.2.1.4.1.1.7.0.1.1", "Te1/1/1"),
+		s("1.0.8802.1.1.2.1.4.1.1.9.0.1.1", "dist-sw-2"),
+		i("1.0.8802.1.1.2.1.4.2.1.3.0.1.1.1.4.192.0.2.12", 2),
+		// FDB: 00:50:56:01:02:03 learned on bridge port 2.
+		i("1.3.6.1.2.1.17.4.3.1.2.0.80.86.1.2.3", 2), i("1.3.6.1.2.1.17.4.3.1.3.0.80.86.1.2.3", 3),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- agent.Serve() }()
+	defer func() {
+		_ = agent.Close()
+		<-served
+	}()
+
+	records := discoveryUpload(t, map[string]plugins.Plugin{"snmp": &snmp.Plugin{Timeout: time.Second, Port: agent.Addr().Port}},
+		func(cfg *collectorConfig) {
+			cfg.ScanSubnets = []string{"127.0.0.1/32"}
+			cfg.Protocols = []string{"snmp"}
+			cfg.Credentials = map[string]string{"snmp.community": community}
+		})
+	if len(records) != 1 {
+		t.Fatalf("uploaded records: %d, want 1", len(records))
+	}
+	var doc map[string]any
+	if err = json.Unmarshal(records[0], &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, problem := range schema.validate(doc) {
+		t.Errorf("record: %s\n%s", problem, records[0])
+	}
+	var rec plugins.DeviceRecord
+	if err = json.Unmarshal(records[0], &rec); err != nil {
+		t.Fatal(err)
+	}
+	if violations := rec.Validate(); len(violations) > 0 {
+		t.Errorf("record breaks the Go contract: %v", violations)
+	}
+	want := []any{
+		map[string]any{"protocol": "lldp", "local_interface": "GigabitEthernet1/0/1", "remote_mac": "00:1b:54:aa:bb:cc",
+			"remote_ip": "192.0.2.12", "remote_hostname": "dist-sw-2", "remote_interface": "Te1/1/1"},
+		map[string]any{"protocol": "fdb", "local_interface": "GigabitEthernet1/0/2", "remote_mac": "00:50:56:01:02:03"},
+	}
+	if !reflect.DeepEqual(doc["neighbors"], want) {
+		t.Errorf("uploaded neighbors = %v, want %v\n%s", doc["neighbors"], want, records[0])
+	}
+	if rec.Source != "snmp" || rec.TargetIP != "127.0.0.1" || rec.System.Name != "access-sw-1" || len(rec.Interfaces) != 2 {
+		t.Errorf("record: source %q, target %q, name %q, interfaces %+v", rec.Source, rec.TargetIP, rec.System.Name, rec.Interfaces)
+	}
+}
+
+// discoveryUpload runs the discovery loop with the plugins of swap in the
+// registry against a capturing ingest endpoint and returns the records of
+// the one batch it uploads; configure completes the configuration.
+func discoveryUpload(t *testing.T, swap map[string]plugins.Plugin, configure func(*collectorConfig)) []json.RawMessage {
+	t.Helper()
 	var (
 		mu      sync.Mutex
 		batches [][]byte
@@ -71,27 +211,6 @@ func TestCollectorOutputConformsToDeviceRecordSchema(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	swap := map[string]plugins.Plugin{
-		"sweep": &sweep.Plugin{Timeout: time.Second, Concurrency: 4, TCPPorts: []int{port}},
-		"snmp": fixturePlugin{"snmp", plugins.Result{
-			CIType: "network.device", Name: "core-sw-1", IP: "127.0.0.1",
-			Manufacturer: "Cisco", Model: "C9300", Serial: "FOC1234", Firmware: "17.9.4", MAC: "00:11:22:33:44:55",
-			Attributes: map[string]any{"protocol": "snmp", "sysDescr": "Cisco IOS XE", "sysObjectID": "1.3.6.1.4.1.9.1.2494",
-				"sysLocation": "R1", "snmpVersion": "v2c", "hostname": "core-sw-1"},
-			Interfaces: []plugins.NetworkInterface{
-				{Name: "Gi1/0/1", MAC: "00:11:22:33:44:56", Speed: 1000, MTU: 1500, AdminUp: true, OperUp: true, IfIndex: 1, VlanID: 10},
-				{Name: "Gi1/0/2", IfIndex: 2},
-			},
-		}},
-		"power": fixturePlugin{"power", plugins.Result{
-			CIType: "power-device", Name: "ups-1", IP: "127.0.0.1", Manufacturer: "APC", Model: "Smart-UPS",
-			Attributes: map[string]any{"category": "power", "protocol": "snmp", "deviceType": "ups", "upsCapable": true},
-		}},
-		"redfish": fixturePlugin{"redfish", plugins.Result{
-			CIType: "bmc", Name: "127.0.0.1", IP: "127.0.0.1",
-			Attributes: map[string]any{"api": "redfish", "redfishVersion": "1.15.0", "bmcUUID": "4c4c4544-0042-3510-8051-b4c04f4a4e33"},
-		}},
-	}
 	for name, plug := range swap {
 		previous, had := pluginRegistry[name]
 		pluginRegistry[name] = plug
@@ -105,14 +224,12 @@ func TestCollectorOutputConformsToDeviceRecordSchema(t *testing.T) {
 	}
 
 	cfg := testConfig(srv.URL, "")
-	cfg.ScanSubnets = []string{"127.0.0.1/32", "localhost"}
-	cfg.Protocols = []string{"sweep", "snmp", "power", "redfish"}
 	cfg.DiscoveryInterval = time.Hour
+	configure(&cfg)
 	up, err := newUploader(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := time.Now().Add(-time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -143,32 +260,7 @@ func TestCollectorOutputConformsToDeviceRecordSchema(t *testing.T) {
 	if err = json.Unmarshal(batches[0], &batch); err != nil {
 		t.Fatalf("batch is not a DeviceRecord batch: %v", err)
 	}
-	sources := map[string]int{}
-	for i, raw := range batch.Records {
-		var doc any
-		if err = json.Unmarshal(raw, &doc); err != nil {
-			t.Fatal(err)
-		}
-		for _, problem := range schema.validate(doc) {
-			t.Errorf("record %d: %s\n%s", i, problem, raw)
-		}
-		var rec plugins.DeviceRecord
-		if err = json.Unmarshal(raw, &rec); err != nil {
-			t.Fatal(err)
-		}
-		if violations := rec.Validate(); len(violations) > 0 {
-			t.Errorf("record %d breaks the Go contract: %v", i, violations)
-		}
-		if rec.ObservedAt.Before(before) || rec.ObservedAt.After(time.Now()) {
-			t.Errorf("record %d observed_at %s is not the time of the cycle", i, rec.ObservedAt)
-		}
-		sources[rec.Source]++
-	}
-	// Sweep finds the listener by address and by name; SNMP and power report
-	// as snmp; Redfish once.
-	if sources["sweep"] != 2 || sources["snmp"] != 2 || sources["redfish"] != 1 || len(batch.Records) != 5 {
-		t.Errorf("records by source: %v", sources)
-	}
+	return batch.Records
 }
 
 // TestDeviceRecordSchemaAndGoValidationAgree feeds malformed records to both

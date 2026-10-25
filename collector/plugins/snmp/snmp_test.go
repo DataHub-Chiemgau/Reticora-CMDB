@@ -230,7 +230,7 @@ func TestCollectFromSNMPFake(t *testing.T) {
 func TestCollectNameFallsBackToTarget(t *testing.T) {
 	// Fake that never answers => all GETs time out => empty sysName.
 	p := &Plugin{Timeout: 100 * time.Millisecond}
-	res, err := p.collect(context.Background(), "192.0.2.55", nil)
+	res, _, err := p.collect(context.Background(), "192.0.2.55", nil)
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
