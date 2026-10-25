@@ -31,6 +31,21 @@ var matrixOrgWideWrites = map[string]string{
 	"vrf": "routing domains of the whole organization (TEN-10, WP-372, F-089)",
 }
 
+// matrixSnapshotScoped lists the tables that carry a scope snapshot of their
+// creator (uuid arrays) instead of client, site and team columns. A
+// synthesized row has no snapshot and belongs to the whole organization, so
+// only principals without client, site and team restriction read and write
+// it (E-09); the snapshot rules are pinned by the test named here.
+var matrixSnapshotScoped = map[string]string{
+	"job": "jobs in the scope of their creator, migration 000154 (WP-404, F-163): jobs.TestJobScopeAgainstPostgres",
+}
+
+// restricted reports whether the principal is restricted in any scope
+// dimension.
+func (p *matrixPrincipal) restricted() bool {
+	return p.scope["client"] != nil || p.scope["site"] != nil || p.scope["team"] != nil
+}
+
 // matrixPrincipal is one tenant context of the matrix: organization plus
 // client, site and team scope (nil = all of the organization, TEN-04).
 type matrixPrincipal struct {
@@ -63,6 +78,9 @@ func (p *matrixPrincipal) read(tbl *matrixTable, r scopeRow) bool {
 	default:
 		return false
 	}
+	if _, snapshot := matrixSnapshotScoped[tbl.name]; snapshot && p.restricted() {
+		return false
+	}
 	for _, dim := range scopeDimensions {
 		if len(tbl.scope[dim]) > 0 && !dimRead(p.scope[dim], r.dims[dim]) {
 			return false
@@ -76,6 +94,9 @@ func (p *matrixPrincipal) write(tbl *matrixTable, r scopeRow) bool {
 		return false
 	}
 	if _, orgWide := matrixOrgWideWrites[tbl.name]; orgWide && (p.scope["client"] != nil || p.scope["site"] != nil) {
+		return false
+	}
+	if _, snapshot := matrixSnapshotScoped[tbl.name]; snapshot && p.restricted() {
 		return false
 	}
 	for _, dim := range scopeDimensions {
@@ -109,7 +130,9 @@ func scopeDenied(err error) bool {
 // principal's scope and to claim an org-wide row. Reads are pinned exactly
 // (TEN-05): org-wide rows are visible to scoped principals, global rows to
 // everyone except in matrixHiddenGlobalRows. The tables of
-// matrixOrgWideWrites are written by org-wide principals only (E-09).
+// matrixOrgWideWrites are written by org-wide principals only (E-09); the
+// rows of matrixSnapshotScoped, which carry no scope snapshot, are read and
+// written by principals without any scope restriction only.
 //
 // Inherited tables (document, maintenance_window, review_item,
 // training_assignment) run with every principal too (WP-353, F-354): their

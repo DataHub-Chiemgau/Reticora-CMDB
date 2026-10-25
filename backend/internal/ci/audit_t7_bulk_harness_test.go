@@ -4,8 +4,8 @@ package ci_test
 // PostgreSQL integration through the production CI and job handlers
 // (ci.NewHandler + jobs.NewAPIHandler on the PG repositories). Used by
 // bulk_integration_test.go (TestAuditT7BulkReportMatchesStoredStatus,
-// WP-368) and audit_t7_bulk_jobs_auditdefect_test.go (WP-181, WP-182
-// defects).
+// WP-368), bulk_jobs_integration_test.go (TestAuditT7JobAPIHonoursClientScope,
+// WP-404) and audit_t7_bulk_jobs_auditdefect_test.go (WP-181 defect).
 
 import (
 	"bytes"

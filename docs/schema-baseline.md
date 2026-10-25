@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000153_ci_type_org_check
+Stand: Migration 000154_job_scope
 
 ## Prüfung
 
@@ -161,6 +161,15 @@ Client- und Site-Einschränkung (E-09, `matrixOrgWideWrites`); gescopte
 Prinzipale lesen sie. Heute ist das `vrf` (Migration 000148, WP-372, F-089):
 die restriktiven Policies `vrf_scoped_insert`, `vrf_scoped_update` und
 `vrf_scoped_delete` verlangen leeres `app.client_scope` und `app.site_scope`.
+`job` trägt statt Client-, Site- und Team-Spalten den Scope-Snapshot seines
+Erzeugers (`scope_recorded`, `scope_clients`, `scope_sites`, `scope_teams`,
+Migration 000154, WP-404, F-163): `job_isolation` verlangt in `USING` und
+`WITH CHECK` je Dimension leere Scope-GUC oder einen Snapshot, der vollständig
+im Scope liegt; die restriktive `job_scope_select` wendet das auch auf die
+Lesezugriffe an, die `job_system_select` sonst org-weit öffnen würde. Jobs ohne
+Snapshot (Systemjobs, Altbestand) lesen und schreiben nur Prinzipale ohne
+jede Scope-Einschränkung (`matrixSnapshotScoped`); die Snapshot-Regeln prüft
+`TestJobScopeAgainstPostgres` (`backend/internal/jobs/scope_integration_test.go`).
 Die Testzeilen werden mit
 `session_replication_role = replica` synthetisiert (ohne Fremdschlüssel und
 Trigger, RLS bleibt aktiv). Tabellen, deren Policy den Scope über eine
@@ -338,7 +347,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `internal_order` | ja | ja | internal_order_isolation (ALL), internal_order_scoped_delete (DELETE), internal_order_scoped_update (UPDATE) |
 | `internal_order_item` | ja | ja | internal_order_item_isolation (ALL) |
 | `ip_address` | ja | ja | ip_address_scoped_delete (DELETE), ip_address_scoped_update (UPDATE), org_isolation (ALL) |
-| `job` | ja | ja | job_isolation (ALL), job_system_select (SELECT) |
+| `job` | ja | ja | job_isolation (ALL), job_scope_select (SELECT), job_system_select (SELECT) |
 | `key_assignment` | ja | ja | key_assignment_isolation (ALL), key_assignment_scoped_delete (DELETE), key_assignment_scoped_update (UPDATE) |
 | `key_item` | ja | ja | key_item_isolation (ALL), key_item_scoped_delete (DELETE), key_item_scoped_update (UPDATE) |
 | `lifecycle_definition` | ja | ja | lifecycle_definition_isolation_delete (DELETE), lifecycle_definition_isolation_insert (INSERT), lifecycle_definition_isolation_select (SELECT), lifecycle_definition_isolation_update (UPDATE) |

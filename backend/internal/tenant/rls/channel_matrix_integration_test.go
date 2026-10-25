@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -220,6 +221,14 @@ func TestChannelMatrix(t *testing.T) {
 		($1, $2, 'review', 'chm-note-own', 'x'), ($1, $3, 'review', 'chm-note-other', 'x')`, f.OrgA, userA, otherA)
 	exec(`INSERT INTO webhook_subscription (organization_id, name, url, secret, events) VALUES ($1, 'chm-hook-a', 'https://a.example/h', 's', '{ci.created}'),
 		($2, 'chm-hook-b', 'https://b.example/h', 's', '{ci.created}')`, f.OrgA, f.OrgB)
+	// A ci.bulk job of the client principal over ci1, with the scope
+	// snapshot jobs.Service.Enqueue stores for it (WP-404, F-163).
+	var bulkJob string
+	if err := f.Admin.QueryRow(bg, `INSERT INTO job (organization_id, kind, params, created_by, scope_recorded, scope_clients)
+		VALUES ($1, 'ci.bulk', $2, $3, true, ARRAY[$4::uuid]) RETURNING id::text`,
+		f.OrgA, fmt.Sprintf(`{"action":"set_status","ids":[%q],"status":"inactive"}`, ci1), userA, f.Client1).Scan(&bulkJob); err != nil {
+		t.Fatal(err)
+	}
 
 	// visible is the expected visibility of a CI for a principal: its
 	// organization, client and site must be in scope (no team dimension on
@@ -320,8 +329,23 @@ func TestChannelMatrix(t *testing.T) {
 		}
 	}
 
-	// Organization-level channels: reviews, webhooks and jobs never cross
-	// the organization; the notification inbox is the caller's own.
+	// Organization-level channels: reviews and webhooks never cross the
+	// organization; a job is visible where the scope snapshot of its
+	// creator (client 1, sites and teams org-wide) lies in the caller's
+	// scope (WP-404); the notification inbox is the caller's own.
+	jobVisible := func(p *channelPrincipal) bool {
+		return p.org == f.OrgA && inSet(p.scope.Clients, f.Client1) && p.scope.Sites.All && p.scope.Teams.All
+	}
+	client2 := &channelPrincipal{kind: "client 2", org: f.OrgA, user: otherA, scope: identity.Scope{Clients: only(f.Client2), Sites: all(), Teams: all()}}
+	for _, p := range append(slices.Clone(principals), client2) {
+		code, body := env.call(p, http.MethodGet, "/api/v1/jobs", nil)
+		if code != http.StatusOK {
+			t.Errorf("jobs as %s: %d %s", p.kind, code, trim(body))
+		}
+		if got, want := strings.Contains(body, bulkJob), jobVisible(p); got != want {
+			t.Errorf("jobs as %s: the ci.bulk job of client 1 listed %v, want %v", p.kind, got, want)
+		}
+	}
 	for _, p := range principals {
 		for _, ch := range []struct{ path, marker string }{
 			{"/api/v1/review-items", "chm-review"},
@@ -345,11 +369,7 @@ func TestChannelMatrix(t *testing.T) {
 				t.Errorf("review-items as %s shows a review about the invisible CI %s", p.kind, ci2)
 			}
 		}
-		code, body := env.call(p, http.MethodGet, "/api/v1/jobs", nil)
-		if code != http.StatusOK {
-			t.Errorf("jobs as %s: %d %s", p.kind, code, trim(body))
-		}
-		code, body = env.call(p, http.MethodGet, "/api/v1/notifications", nil)
+		code, body := env.call(p, http.MethodGet, "/api/v1/notifications", nil)
 		if code != http.StatusOK {
 			t.Errorf("notifications as %s: %d %s", p.kind, code, trim(body))
 		}

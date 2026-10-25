@@ -15,10 +15,11 @@ import (
 )
 
 // PGRepository stores jobs in PostgreSQL. Jobs belong to the organization
-// and carry no client or site, so every operation runs with the
-// organization-wide scope of orgID — from requests and from workers alike.
-// Request paths (a tenant scope in the context) additionally see export
-// jobs only of their own user (ownExport).
+// and carry the scope snapshot of their creator (migration 000154). Request
+// paths (a tenant scope in the context) run with the principal's complete
+// scope, so row level security shows them only the jobs whose snapshot lies
+// in their scope, and export jobs only of their own user (ownExport); worker
+// and system paths run with the organization-wide scope of orgID.
 type PGRepository struct {
 	pool *pgxpool.Pool
 }
@@ -29,7 +30,8 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{po
 const jobColumns = `id::text, COALESCE(organization_id::text, ''), kind, status, progress, params, result,
 	COALESCE(error, ''), COALESCE(idempotency_key, ''), COALESCE(created_by::text, ''), attempts, max_attempts,
 	run_after, COALESCE(timeout_seconds, 0), COALESCE(ref_table, ''), COALESCE(ref_id::text, ''),
-	created_at, updated_at, started_at, finished_at`
+	created_at, updated_at, started_at, finished_at,
+	scope_recorded, scope_clients::text[], scope_sites::text[], scope_teams::text[]`
 
 // ownExport restricts request paths to the export jobs of the principal
 // (EXP-01, F-059), the rule of export.ownJob for the mirrored rows: the
@@ -37,25 +39,40 @@ const jobColumns = `id::text, COALESCE(organization_id::text, ''), kind, status,
 // a user id sees no export job. Other kinds are unaffected.
 const ownExport = `(ref_table IS DISTINCT FROM 'export_job' OR created_by::text = NULLIF(current_setting('app.user_id', true), ''))`
 
-// requestUser returns the user of the request's tenant scope; ok is false
-// on worker and system paths, which carry no scope and see every job of
-// the organization.
-func requestUser(ctx context.Context) (user string, ok bool) {
-	scope, ok := database.TenantScopeFromContext(ctx)
-	return scope.UserID, ok
+// sourceRows read the creator and the scope snapshot of the row a tracked
+// job mirrors, for the tables that keep them (migration 000068): a job the
+// export worker tracks after the fact (Mirror, no request scope) takes both
+// from its export job.
+var sourceRows = map[string]string{
+	"export_job": `SELECT COALESCE(initiated_by::text, ''), scope_recorded,
+		scope_clients::text[], scope_sites::text[], scope_teams::text[]
+		FROM export_job WHERE organization_id = $1 AND id = $2::uuid`,
+}
+
+// requestPath reports whether ctx carries the tenant scope of a request;
+// worker and system paths carry none and see every job of the
+// organization.
+func requestPath(ctx context.Context) bool {
+	_, ok := database.TenantScopeFromContext(ctx)
+	return ok
 }
 
 // visible is the condition ownExport on request paths, otherwise none.
 func visible(ctx context.Context) string {
-	if _, ok := requestUser(ctx); ok {
+	if requestPath(ctx) {
 		return " AND " + ownExport
 	}
 	return ""
 }
 
-func (r *PGRepository) inOrg(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	user, _ := requestUser(ctx)
-	scope := database.OrgWideScope(orgID, user)
+// inScope runs fn in the transaction of the call: on request paths with the
+// principal's complete scope (database.WithRequestTenant), on worker and
+// system paths organization-wide.
+func (r *PGRepository) inScope(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	if requestPath(ctx) {
+		return database.WithRequestTenant(ctx, r.pool, orgID, fn)
+	}
+	scope := database.OrgWideScope(orgID, "")
 	return database.WithTenant(ctx, r.pool, &scope, fn)
 }
 
@@ -63,14 +80,20 @@ func scanJob(row pgx.Row) (*Job, error) {
 	j := &Job{}
 	var status string
 	var result []byte
+	var recorded bool
+	var scope Scope
 	if err := row.Scan(&j.ID, &j.OrganizationID, &j.Kind, &status, &j.Progress, &j.Params, &result,
 		&j.Error, &j.IdempotencyKey, &j.CreatedBy, &j.Attempts, &j.MaxAttempts, &j.RunAfter, &j.TimeoutSeconds,
-		&j.RefTable, &j.RefID, &j.CreatedAt, &j.UpdatedAt, &j.StartedAt, &j.FinishedAt); err != nil {
+		&j.RefTable, &j.RefID, &j.CreatedAt, &j.UpdatedAt, &j.StartedAt, &j.FinishedAt,
+		&recorded, &scope.Clients, &scope.Sites, &scope.Teams); err != nil {
 		return nil, err
 	}
 	j.Status = Status(status)
 	if len(result) > 0 {
 		j.Result = result
+	}
+	if recorded {
+		j.Scope = &scope
 	}
 	return j, nil
 }
@@ -82,10 +105,13 @@ func nilIfEmpty(s string) any {
 	return s
 }
 
-// Insert implements Repository.
+// Insert implements Repository. The job stores its scope snapshot
+// (job.Scope, nil: none); a tracked job without one takes creator and
+// snapshot of its source row (sourceRows). On request paths WITH CHECK of
+// job_isolation refuses a snapshot outside the principal's scope.
 func (r *PGRepository) Insert(ctx context.Context, job *Job) (bool, error) {
 	created := false
-	err := r.inOrg(ctx, job.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.inScope(ctx, job.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		params := job.Params
 		if len(params) == 0 {
 			params = []byte("{}")
@@ -95,14 +121,38 @@ func (r *PGRepository) Insert(ctx context.Context, job *Job) (bool, error) {
 			timeout = job.TimeoutSeconds
 		}
 		maxAttempts := max(job.MaxAttempts, 1)
+		createdBy, scope := job.CreatedBy, job.Scope
+		if query, ok := sourceRows[job.RefTable]; ok && scope == nil && isUUID(job.RefID) {
+			var src Scope
+			var initiator string
+			var recorded bool
+			err := tx.QueryRow(ctx, query, job.OrganizationID, job.RefID).Scan(&initiator, &recorded,
+				&src.Clients, &src.Sites, &src.Teams)
+			switch {
+			case err == nil:
+				if recorded {
+					scope = &src
+				}
+				if createdBy == "" {
+					createdBy = initiator
+				}
+			case !errors.Is(err, pgx.ErrNoRows):
+				return fmt.Errorf("read the source row of the job: %w", err)
+			}
+		}
+		snapshot := Scope{}
+		if scope != nil {
+			snapshot = *scope
+		}
 		inserted, err := scanJob(tx.QueryRow(ctx, `
 			INSERT INTO job (organization_id, kind, status, params, idempotency_key, created_by, max_attempts,
-				run_after, timeout_seconds, ref_table, ref_id)
-			VALUES ($1, $2, 'queued', $3, $4, $5::uuid, $6, $7, $8, $9, $10::uuid)
+				run_after, timeout_seconds, ref_table, ref_id, scope_recorded, scope_clients, scope_sites, scope_teams)
+			VALUES ($1, $2, 'queued', $3, $4, $5::uuid, $6, $7, $8, $9, $10::uuid, $11, $12::uuid[], $13::uuid[], $14::uuid[])
 			ON CONFLICT DO NOTHING
 			RETURNING `+jobColumns,
-			job.OrganizationID, job.Kind, params, nilIfEmpty(job.IdempotencyKey), surrogate(job.CreatedBy),
-			maxAttempts, job.RunAfter, timeout, nilIfEmpty(job.RefTable), nilIfEmpty(job.RefID)))
+			job.OrganizationID, job.Kind, params, nilIfEmpty(job.IdempotencyKey), surrogate(createdBy),
+			maxAttempts, job.RunAfter, timeout, nilIfEmpty(job.RefTable), nilIfEmpty(job.RefID),
+			scope != nil, snapshot.Clients, snapshot.Sites, snapshot.Teams))
 		if err == nil {
 			*job, created = *inserted, true
 			return nil
@@ -110,10 +160,14 @@ func (r *PGRepository) Insert(ctx context.Context, job *Job) (bool, error) {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("insert job: %w", err)
 		}
-		// The idempotency key or the reference is taken: the first job.
+		// The idempotency key or the reference is taken: the first job,
+		// unless the caller cannot see it.
 		existing, err := scanJob(tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM job
-			WHERE organization_id = $1 AND ((kind = $2 AND idempotency_key = $3) OR (ref_table = $4 AND ref_id = $5::uuid))`,
+			WHERE organization_id = $1 AND ((kind = $2 AND idempotency_key = $3) OR (ref_table = $4 AND ref_id = $5::uuid))`+visible(ctx),
 			job.OrganizationID, job.Kind, nilIfEmpty(job.IdempotencyKey), nilIfEmpty(job.RefTable), nilIfEmpty(job.RefID)))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: the idempotency key or reference belongs to a job outside the scope", ErrNotFound)
+		}
 		if err != nil {
 			return fmt.Errorf("read existing job: %w", err)
 		}
@@ -126,7 +180,7 @@ func (r *PGRepository) Insert(ctx context.Context, job *Job) (bool, error) {
 func (r *PGRepository) getOne(ctx context.Context, orgID, where string, args ...any) (*Job, error) {
 	var out *Job
 	own := visible(ctx)
-	err := r.inOrg(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.inScope(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		j, err := scanJob(tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM job WHERE organization_id = $1 AND `+where+own,
 			append([]any{orgID}, args...)...))
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -159,7 +213,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter Filter, pa
 	out := []Job{}
 	var total int
 	own := visible(ctx)
-	err := r.inOrg(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.inScope(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where, args := []string{"organization_id = $1"}, []any{orgID}
 		if filter.Kind != "" {
 			args = append(args, filter.Kind)
@@ -199,7 +253,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter Filter, pa
 // workers take different jobs.
 func (r *PGRepository) ClaimNext(ctx context.Context, orgID string, kinds []string, now time.Time) (*Job, error) {
 	var out *Job
-	err := r.inOrg(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.inScope(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		j, err := scanJob(tx.QueryRow(ctx, `
 			UPDATE job SET status = 'running', attempts = attempts + 1, started_at = $3, finished_at = NULL
 			WHERE id = (
@@ -228,7 +282,7 @@ func (r *PGRepository) ClaimID(ctx context.Context, orgID, id string, now time.T
 		return nil, ErrNotFound
 	}
 	var out *Job
-	err := r.inOrg(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.inScope(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		j, err := scanJob(tx.QueryRow(ctx, `
 			UPDATE job SET status = 'running', attempts = attempts + 1, started_at = $3, finished_at = NULL
 			WHERE organization_id = $1 AND id = $2 AND status = 'queued' AND run_after <= $3
@@ -285,7 +339,7 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []
 	}
 	var out *Job
 	own := visible(ctx)
-	err := r.inOrg(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.inScope(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		fromText := make([]string, len(from))
 		for i, s := range from {
 			fromText[i] = string(s)
@@ -326,7 +380,7 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []
 // RunningSince implements Repository.
 func (r *PGRepository) RunningSince(ctx context.Context, orgID string, t time.Time) ([]Job, error) {
 	var out []Job
-	err := r.inOrg(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.inScope(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+jobColumns+` FROM job
 			WHERE organization_id = $1 AND status = 'running' AND started_at < $2`, orgID, t)
 		if err != nil {

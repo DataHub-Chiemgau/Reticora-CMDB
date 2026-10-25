@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -44,9 +45,19 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	return f
 }
 
-// call runs a request as user with the given permissions.
+// call runs a request as an org-wide user with the given permissions.
 func (f *apiFixture) call(method, path, user string, perms ...identity.Permission) *httptest.ResponseRecorder {
+	scope := database.OrgWideScope("org-1", user)
+	return f.callIn(&scope, method, path, user, perms...)
+}
+
+// callIn runs a request as user with the tenant scope (nil: none) and the
+// given permissions.
+func (f *apiFixture) callIn(scope *database.TenantScope, method, path, user string, perms ...identity.Permission) *httptest.ResponseRecorder {
 	ctx := tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: "org-1", UserID: user})
+	if scope != nil {
+		ctx = database.ContextWithTenantScope(ctx, scope)
+	}
 	ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: user, OrganizationID: "org-1",
 		Permissions: append([]identity.Permission{identity.PermJobRead}, perms...)})
 	w := httptest.NewRecorder()
@@ -157,6 +168,137 @@ func TestJobAPIRevert(t *testing.T) {
 	}
 	if len(f.reverted) != 1 || f.reverted[0] != merge.ID {
 		t.Errorf("reverted %v", f.reverted)
+	}
+}
+
+// TestJobAPIHidesJobsOutsideTheScope covers F-163 (TEN-09, WP-404) on the
+// handler: a job whose scope snapshot lies outside the caller's scope is
+// 404 on every route, before the 403 of mayControl and the 409 of a
+// finished or not revertible job, also for a holder of the kind's
+// permission; a job without snapshot is the whole organization's, and a
+// request without tenant scope sees no job. The memory repository has no
+// row level security, so the handler's own check answers here.
+func TestJobAPIHidesJobsOutsideTheScope(t *testing.T) {
+	f := newAPIFixture(t)
+	scoped := func(user, client string) *database.TenantScope {
+		s := database.OrgWideScope("org-1", user)
+		s.Clients = database.ScopeIDs(client)
+		return &s
+	}
+	client1 := scoped("alice", "c1000000-0000-4000-8000-000000000001")
+	client2 := scoped("bob", "c2000000-0000-4000-8000-000000000002")
+	orgWide := database.OrgWideScope("org-1", "carol")
+	ctx1 := database.ContextWithTenantScope(context.Background(), client1)
+	bulk, _, err := f.svc.Enqueue(ctx1, "org-1", "ci.bulk", nil, EnqueueOptions{CreatedBy: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	merge, _, err := f.svc.Enqueue(ctx1, "org-1", "ci.merge", nil, EnqueueOptions{CreatedBy: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.finish(t, merge, nil)
+	system := f.enqueue(t, "system.index", "", "")
+	if bulk.Scope == nil || len(bulk.Scope.Clients) != 1 || bulk.Scope.Sites != nil || bulk.Scope.Teams != nil || system.Scope != nil {
+		t.Fatalf("scope snapshots: bulk %+v, system %+v", bulk.Scope, system.Scope)
+	}
+
+	all := []identity.Permission{identity.PermCIWrite, identity.PermCIDelete}
+	for _, c := range []struct {
+		name  string
+		scope *database.TenantScope
+		user  string
+		id    string
+	}{
+		{"client 2, bulk job of client 1", client2, "bob", bulk.ID},
+		{"client 2, merge job of client 1", client2, "bob", merge.ID},
+		{"client 1, system job", client1, "alice", system.ID},
+		{"no tenant scope, bulk job", nil, "alice", bulk.ID},
+	} {
+		for _, req := range []struct{ method, path string }{
+			{"GET", "/api/v1/jobs/" + c.id},
+			{"GET", "/api/v1/jobs/" + c.id + "/result"},
+			{"DELETE", "/api/v1/jobs/" + c.id},
+			{"POST", "/api/v1/jobs/" + c.id + "/revert"},
+		} {
+			if w := f.callIn(c.scope, req.method, req.path, c.user, all...); w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), c.id) {
+				t.Errorf("%s: %s %s = %d %s, want 404", c.name, req.method, req.path, w.Code, w.Body.String())
+			}
+		}
+	}
+	if j, _ := f.svc.Get(context.Background(), "org-1", bulk.ID); j.Status != StatusQueued {
+		t.Errorf("the bulk job is %s after the refused cancels, want queued", j.Status)
+	}
+	for _, c := range []struct {
+		name  string
+		scope *database.TenantScope
+		user  string
+		ids   []string
+	}{
+		{"creator, client 1", client1, "alice", []string{bulk.ID, merge.ID}},
+		{"org-wide", &orgWide, "carol", []string{bulk.ID, merge.ID, system.ID}},
+	} {
+		for _, id := range c.ids {
+			if w := f.callIn(c.scope, "GET", "/api/v1/jobs/"+id, c.user); w.Code != http.StatusOK {
+				t.Errorf("%s: GET /jobs/%s = %d, want 200", c.name, id, w.Code)
+			}
+		}
+	}
+	// Visible jobs keep the order 403 before the cancel, 409 before 403 on
+	// a revert the kind does not define.
+	if w := f.callIn(&orgWide, "DELETE", "/api/v1/jobs/"+bulk.ID, "carol"); w.Code != http.StatusForbidden {
+		t.Errorf("org-wide stranger cancels: %d, want 403", w.Code)
+	}
+	if w := f.callIn(&orgWide, "POST", "/api/v1/jobs/"+bulk.ID+"/revert", "carol"); w.Code != http.StatusConflict {
+		t.Errorf("org-wide stranger reverts a bulk job: %d, want 409", w.Code)
+	}
+	if w := f.callIn(client1, "DELETE", "/api/v1/jobs/"+bulk.ID, "alice"); w.Code != http.StatusOK {
+		t.Errorf("creator cancels: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestJobVisibleTo pins the rule of job_isolation (migration 000154) in
+// Job.VisibleTo per dimension: org-wide callers see every snapshot, a
+// restricted caller only a snapshot completely in its scope (an empty one
+// included), never a dimension that is org-wide in the snapshot; export
+// jobs only their creator.
+func TestJobVisibleTo(t *testing.T) {
+	const c1, c2, s1 = "c1000000-0000-4000-8000-000000000001", "c2000000-0000-4000-8000-000000000002", "51000000-0000-4000-8000-000000000001"
+	scope := func(clients, sites []string) *database.TenantScope {
+		s := database.OrgWideScope("org-1", "alice")
+		if clients != nil {
+			s.Clients = database.ScopeIDs(clients...)
+		}
+		if sites != nil {
+			s.Sites = database.ScopeIDs(sites...)
+		}
+		return &s
+	}
+	job := func(snapshot *Scope) *Job { return &Job{OrganizationID: "org-1", Kind: "ci.bulk", Scope: snapshot} }
+	for _, c := range []struct {
+		name   string
+		job    *Job
+		caller *database.TenantScope
+		want   bool
+	}{
+		{"org-wide caller, no snapshot", job(nil), scope(nil, nil), true},
+		{"client caller, no snapshot", job(nil), scope([]string{c1}, nil), false},
+		{"client caller, own client", job(&Scope{Clients: []string{c1}}), scope([]string{c1}, nil), true},
+		{"client caller, upper-case id", job(&Scope{Clients: []string{strings.ToUpper(c1)}}), scope([]string{c1}, nil), true},
+		{"client caller, other client", job(&Scope{Clients: []string{c2}}), scope([]string{c1}, nil), false},
+		{"client caller, two clients", job(&Scope{Clients: []string{c1, c2}}), scope([]string{c1}, nil), false},
+		{"two clients caller, one client", job(&Scope{Clients: []string{c2}}), scope([]string{c1, c2}, nil), true},
+		{"client caller, empty client snapshot", job(&Scope{Clients: []string{}}), scope([]string{c1}, nil), true},
+		{"site caller, snapshot org-wide in sites", job(&Scope{Clients: []string{c1}}), scope(nil, []string{s1}), false},
+		{"site caller, own site", job(&Scope{Sites: []string{s1}}), scope(nil, []string{s1}), true},
+		{"other organization", &Job{OrganizationID: "org-2", Kind: "ci.bulk"}, scope(nil, nil), false},
+		{"export job, creator", &Job{OrganizationID: "org-1", RefTable: "export_job", CreatedBy: "alice"}, scope(nil, nil), true},
+		{"export job, other user", &Job{OrganizationID: "org-1", RefTable: "export_job", CreatedBy: "bob"}, scope(nil, nil), false},
+		{"nil scope", job(nil), nil, false},
+	} {
+		if got := c.job.VisibleTo(c.caller); got != c.want {
+			t.Errorf("%s: VisibleTo = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 

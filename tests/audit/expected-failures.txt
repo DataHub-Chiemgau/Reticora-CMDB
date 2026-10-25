@@ -9,7 +9,6 @@ go;backend/internal/ci;TestAuditT3MergePatchNullClearsTypedField;F-080
 go;backend/internal/ci;TestAuditT3OverrideWritesRaiseVersion;F-021
 go;backend/internal/ci;TestAuditT3UnmergeKeepsLaterSurvivorEdits;F-097
 go;backend/internal/ci;TestAuditT7BulkJobCancelStopsWork;F-162
-go;backend/internal/ci;TestAuditT7JobAPIHonoursClientScope;F-163
 go;backend/internal/config;TestAuditT5K8sRenderedEnvSatisfiesStartCheck;F-036
 go;backend/internal/discovery;TestAuditCARolloverKeepsEnrolledCollectorTrust;F-102
 go;backend/internal/discovery;TestAuditConcurrentEdgePKIExportConsistent;F-104
