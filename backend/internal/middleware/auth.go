@@ -34,6 +34,9 @@ type Claims struct {
 	IssuedAt         int64                                  `json:"iat,omitempty"`
 	// TokenID is the jti of a session token.
 	TokenID string `json:"jti,omitempty"`
+	// SessionID is the sid of a session token: the refresh family that
+	// every access token of the session carries.
+	SessionID string `json:"sid,omitempty"`
 }
 
 // SessionVerifier verifies the signature of session tokens issued by the
@@ -168,7 +171,13 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 		Permissions:      claims.Permissions,
 		Type:             identity.PrincipalTypeUser,
 	}
-	if claims.TokenID != "" {
+	// The session budget of API-04 counts the session (sid), which every
+	// refresh keeps; tokens issued without sid (until they expire, at most
+	// 15 minutes) are counted by their token id.
+	switch {
+	case claims.SessionID != "":
+		principal.Credential = "session:" + claims.SessionID
+	case claims.TokenID != "":
 		principal.Credential = "session:" + claims.TokenID
 	}
 	if principal.Scope != nil {
@@ -219,6 +228,7 @@ func authenticate(r *http.Request, verifier SessionVerifier) (Claims, error) {
 		IssuedAt:         sessionClaims.IssuedAt.Unix(),
 		ExpiresAt:        sessionClaims.ExpiresAt.Unix(),
 		TokenID:          sessionClaims.ID,
+		SessionID:        sessionClaims.SessionID,
 	}, nil
 }
 

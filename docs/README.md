@@ -244,9 +244,11 @@ RS256 session token. The verifier is mandatory and the returned ID token is
 signature-verified against the provider's JWKS with issuer, audience, expiry
 and issued-at checks. The session token follows AUT-02: it lives 15 minutes,
 carries `sub`, `org`, `scopes`, `cls`/`sts`/`tms` (client, site and team scope;
-`null` = whole organization), `name`, `email`, `jti`, `iat` and `exp`, and its
-header names the signing key in `kid` (RFC 7638 thumbprint). Every subsequent
-request carries that token as a bearer token in the `Authorization` header.
+`null` = whole organization), `name`, `email`, `sid` (the session: the refresh
+family of the login, kept by every refresh and counted by the per-session rate
+limit), `jti`, `iat` and `exp`, and its header names the signing key in `kid`
+(RFC 7638 thumbprint). Every subsequent request carries that token as a bearer
+token in the `Authorization` header.
 The refresh token is never visible to JavaScript: the callback sets it as the
 HttpOnly, Secure, SameSite=Strict cookie `reticora_refresh` (path
 `/api/v1/auth`), and the client calls `POST /api/v1/auth/refresh` once on a

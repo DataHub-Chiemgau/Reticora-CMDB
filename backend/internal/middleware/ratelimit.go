@@ -23,9 +23,10 @@ const (
 )
 
 // RateLimits are the per-minute budgets of the authenticated rate limit
-// (API-04). PerCredential counts one API key or one session (token id);
-// PerOrganization counts all requests of an organization. Requests without
-// a principal are counted per client IP with PerCredential.
+// (API-04). PerCredential counts one API key or one session (sid, the
+// refresh family of a login); PerOrganization counts the requests of an
+// organization that their credential budget admitted. Requests without a
+// principal are counted per client IP with PerCredential.
 type RateLimits struct {
 	PerCredential   int
 	PerOrganization int
@@ -55,10 +56,18 @@ func RateLimiterWithStore(requestsPerMinute int, store cache.Store) func(http.Ha
 
 // RateLimiterWithLimits enforces the per-credential and the per-organization
 // budget (API-04) with fixed one-minute windows in the store, so all
-// replicas share them. Every response carries X-RateLimit-Limit,
-// X-RateLimit-Remaining and X-RateLimit-Reset for the tighter budget; a
-// refused request gets 429 with Retry-After. A store error fails closed.
+// replicas share them. The credential budget decides first; only a request
+// it admits counts against the organization budget. Every response carries
+// X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset for the
+// tighter budget; a refused request gets 429 with Retry-After. A store
+// error fails closed.
 func RateLimiterWithLimits(limits RateLimits, store cache.Store) func(http.Handler) http.Handler {
+	return rateLimiter(limits, store, time.Now)
+}
+
+// rateLimiter is RateLimiterWithLimits with the clock that picks the
+// one-minute window.
+func rateLimiter(limits RateLimits, store cache.Store, now func() time.Time) func(http.Handler) http.Handler {
 	limits = limits.withDefaults()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +79,7 @@ func RateLimiterWithLimits(limits RateLimits, store cache.Store) func(http.Handl
 				next.ServeHTTP(w, r)
 				return
 			}
-			decision, err := limits.take(r, store, time.Now().UTC())
+			decision, err := limits.take(r, store, now().UTC())
 			if err != nil {
 				// Fail closed: a cache outage must not turn the rate limiter
 				// off, otherwise brute-force protection silently disappears
@@ -107,7 +116,13 @@ func (d rateDecision) writeHeaders(w http.ResponseWriter) {
 	h.Set("X-RateLimit-Reset", strconv.Itoa(d.reset))
 }
 
-// take counts the request in its budgets and reports the decision.
+// take counts the request against its budgets and reports the decision.
+// The credential budget comes first: a request it refuses is not counted
+// against the organization budget, so a client that keeps retrying after
+// 429 cannot use up the budget of the other credentials of its
+// organization (API-04). Each budget decides on the value its atomic
+// increment returns, so concurrent requests on all replicas never admit
+// more than the limit.
 func (l RateLimits) take(r *http.Request, store cache.Store, now time.Time) (rateDecision, error) {
 	window := now.Unix() / 60
 	reset := int(60 - now.Unix()%60)
@@ -119,25 +134,19 @@ func (l RateLimits) take(r *http.Request, store cache.Store, now time.Time) (rat
 	if principal, ok := PrincipalFromContext(r.Context()); ok && principal.OrganizationID != "" {
 		budgets = append(budgets, budget{"org:" + principal.OrganizationID, "organization", l.PerOrganization})
 	}
-	d := rateDecision{allowed: true, remaining: -1, reset: reset}
+	d := rateDecision{allowed: true, remaining: -1, reset: reset, scope: "credential"}
 	for _, b := range budgets {
 		count, err := store.Increment(r.Context(), fmt.Sprintf("ratelimit:%s:%d", b.key, window), 2*time.Minute)
 		if err != nil {
 			return rateDecision{}, err
 		}
-		remaining := max(int64(b.limit)-count, 0)
 		if count > int64(b.limit) {
-			d.allowed = false
-			if d.scope == "" {
-				d.scope = b.scope
-			}
+			// Refused by this budget: the budgets after it are not counted.
+			return rateDecision{limit: b.limit, remaining: 0, reset: reset, scope: b.scope}, nil
 		}
-		if d.remaining < 0 || int(remaining) < d.remaining {
-			d.remaining, d.limit = int(remaining), b.limit
+		if remaining := int(int64(b.limit) - count); d.remaining < 0 || remaining < d.remaining {
+			d.remaining, d.limit = remaining, b.limit
 		}
-	}
-	if d.scope == "" {
-		d.scope = "credential"
 	}
 	return d, nil
 }
@@ -158,7 +167,7 @@ func isOperationalProbe(r *http.Request) bool {
 
 // rateLimitKey derives the bucket key from the authenticated principal so the
 // caller cannot influence its own limit by rotating headers: the credential
-// (API key or session token id) when known, otherwise the principal.
+// (API key or session) when known, otherwise the principal.
 // Requests without a principal (public auth endpoints) are bucketed by
 // client IP, which keeps credential-stuffing and code-exchange brute force
 // throttled.

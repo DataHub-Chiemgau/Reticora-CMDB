@@ -7376,6 +7376,11 @@ export interface components {
       tms?: string[] | null;
       name?: string;
       email?: string;
+      /**
+       * @description Session id: the refresh family started at login. Every refresh
+       *     keeps it; the per-session rate limit counts it (API-04).
+       */
+      sid?: string;
       jti?: string;
       groups?: string[];
       /**
