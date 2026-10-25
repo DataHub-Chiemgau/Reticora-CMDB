@@ -429,11 +429,14 @@ services:
     # certificate is close to expiry; the real issuance runs once from
     # install-cloud.sh. Uses the host's /bin/sh loop instead of the image
     # entrypoint (which requires a certbot subcommand as its first argument).
+    # The deploy hook makes a renewed key and chain readable for nginx
+    # (uid/gid 101) in the frontend, as after the issuance (WP-419, F-034).
     entrypoint: /bin/sh
-    command: -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
+    command: -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet --deploy-hook "sh /usr/local/bin/reticora-certbot-deploy-hook.sh"; sleep 12h & wait $${!}; done'
     volumes:
       - ./letsencrypt:/etc/letsencrypt
       - certbot-webroot:/var/www/certbot
+      - ./certbot-deploy-hook.sh:/usr/local/bin/reticora-certbot-deploy-hook.sh:ro
 
 volumes:
   pgdata:

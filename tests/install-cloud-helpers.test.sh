@@ -188,24 +188,27 @@ test_tls_incomplete_chain_rejected() {
     validate_tls_material "$RETICORA_TLS_DOMAIN" 1
 }
 
-# The ACME request runs certbot itself, not the renewal-loop entrypoint.
+# The ACME request runs certbot itself, not the renewal-loop entrypoint, with
+# the webroot, the lineage name and the deploy hook that the certbot service
+# mounts (WP-419). Only the call is checked: certbot's storage, the deploy
+# hook and the nginx check are covered by tests/install-cloud-acme.test.sh.
 test_tls_acme_uses_certbot_entrypoint() {
     RETICORA_TLS_DOMAIN="acme.example.com"
     RETICORA_CERT_EMAIL="ops@example.com"
-    local live="$TMP_ROOT/tls-acme/live/$RETICORA_TLS_DOMAIN" calls="$TMP_ROOT/compose-calls"
-    make_ca_chain "$TMP_ROOT/tls-acme-issued" "$RETICORA_TLS_DOMAIN"
-    make_cert "$live" "$RETICORA_TLS_DOMAIN"
-    tls_live_dir() { printf '%s' "$live"; }
-    compose_cmd() {
-        printf '%s\n' "$*" >> "$calls"
-        # certbot "issues" the real chain.
-        if [ "$1" = "run" ]; then cp "$TMP_ROOT/tls-acme-issued/fullchain.pem" "$TMP_ROOT/tls-acme-issued/privkey.pem" "$live/"; fi
-        return 0
-    }
-    RETICORA_TLS_CA_BUNDLE="$TMP_ROOT/tls-acme-issued/ca.pem"
+    COMPOSE_DIR="$TMP_ROOT/tls-acme"
+    local calls="$TMP_ROOT/tls-acme-calls" want
+    compose_cmd() { printf '[%s]' "$@" >> "$calls"; printf '\n' >> "$calls"; return 1; }
     issue_tls_certificate
-    grep -q -- "run --rm --no-deps --entrypoint certbot certbot certonly --webroot -w /var/www/certbot -d acme.example.com" "$calls" \
-        && grep -q -- "--email ops@example.com" "$calls" && grep -q -- "exec -T frontend nginx -s reload" "$calls"
+    want='[run][--rm][--no-deps][--entrypoint][certbot][certbot][certonly][--webroot][-w][/var/www/certbot]'
+    want+='[-d][acme.example.com][--cert-name][acme.example.com][--non-interactive][--agree-tos]'
+    want+='[--deploy-hook][sh /usr/local/bin/reticora-certbot-deploy-hook.sh][--email][ops@example.com]'
+    [ "$(head -n 1 "$calls")" = "$want" ] || { printf 'got:  %s\nwant: %s\n' "$(head -n 1 "$calls")" "$want"; return 1; }
+    # The certbot service mounts the hook there and renews with it as well.
+    grep -qx -- '      - ./certbot-deploy-hook.sh:/usr/local/bin/reticora-certbot-deploy-hook.sh:ro' \
+        "$REPO_ROOT/deploy/docker-compose/docker-compose.yml" &&
+        grep -q -- 'certbot renew --webroot -w /var/www/certbot --quiet --deploy-hook "sh /usr/local/bin/reticora-certbot-deploy-hook.sh";' \
+            "$REPO_ROOT/deploy/docker-compose/docker-compose.yml" &&
+        [ -f "$REPO_ROOT/deploy/docker-compose/certbot-deploy-hook.sh" ]
 }
 
 # A served real certificate is not requested again.
@@ -236,7 +239,7 @@ run_test   "tls: the self-signed placeholder is detected"                 test_t
 run_test   "tls: a missing certificate counts as placeholder"              test_tls_missing_counts_as_placeholder
 run_test   "tls: a verifying chain is a real certificate"                  test_tls_trusted_chain_detected
 expect_fail "tls: an incomplete chain is rejected after issuance"          test_tls_incomplete_chain_rejected
-run_test   "tls: ACME runs certbot with the webroot and reloads nginx"     test_tls_acme_uses_certbot_entrypoint
+run_test   "tls: ACME runs certbot with the webroot and the deploy hook"  test_tls_acme_uses_certbot_entrypoint
 run_test   "tls: no new request while a real certificate is served"        test_tls_acme_skipped_with_real_certificate
 run_test   "tls: the TLS template is mounted only with a domain"           test_tls_template_selection
 

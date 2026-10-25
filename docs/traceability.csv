@@ -637,3 +637,5 @@ API-04;[B];C;backend/internal/middleware/ratelimit_test.go;WP-410
 OVR-01;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-412
 CI-10;[B];D;backend/internal/ci/effective_view_integration_test.go;WP-412
 API-07;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-412
+INS-03;[B];A;tests/install-cloud-acme.test.sh;WP-419
+TEC-09;[B];A;tests/install-cloud-acme.test.sh;WP-419

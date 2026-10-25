@@ -281,6 +281,66 @@ Keycloak.
 `.env` to the served fullchain, which the server trusts in addition to the
 system store. Re-run the installer if the variable is missing.
 
+### How the Let's Encrypt certificate is issued
+
+With a domain (`RETICORA_TLS_DOMAIN`) the installer first creates a
+self-signed placeholder in `letsencrypt/live/<domain>/` so that nginx can
+start, then `issue_tls_certificate` requests the real certificate:
+
+1. **Placeholder backup.** certbot refuses to store a new certificate while
+   `live/<domain>/` exists ("CertStorageError: live directory exists", after
+   the ACME order has been placed), and an existing
+   `renewal/<domain>.conf` — e.g. the empty one such a failed request leaves
+   behind — makes it create a second lineage `live/<domain>-0001/`. The
+   installer therefore moves `live/<domain>`, `archive/<domain>` and
+   `renewal/<domain>.conf` into `letsencrypt/reticora-placeholder/<domain>/`
+   before the request (files certbot created belong to root; without root
+   the installer uses `sudo -n`, otherwise it stops and names the paths).
+2. **Request.** `certbot certonly --webroot … -d <domain> --cert-name
+   <domain> --deploy-hook "sh /usr/local/bin/reticora-certbot-deploy-hook.sh"`
+   in a one-off `certbot` container stores the lineage in
+   `live/<domain>/` (symlinks into `archive/<domain>/`).
+3. **Failure.** When the request fails (challenge, rate limit, storage
+   error), whatever certbot left of the lineage is removed and the
+   placeholder moves back: the stack keeps serving it, nothing is left that
+   would force a `-0001` lineage on the next run. If certbot reports an
+   error only after it stored a verifying certificate, the certificate is
+   kept and checked as below.
+4. **Success.** The backup is deleted, the chain is checked against the trust
+   store (`validate_tls_material <domain> 1`), then `nginx -t` runs in the
+   frontend (as its nginx user, uid 101) and only after that
+   `nginx -s reload`. A re-run with a valid certificate places no order.
+
+**File permissions (deploy hook).** certbot runs as root and keeps
+`archive/` and `live/` at `0700` and the private key at `0600`; nginx in the
+frontend runs as uid/gid 101 and reads the files through the read-only bind
+mount `./letsencrypt:/etc/letsencrypt`. `deploy/docker-compose/certbot-deploy-hook.sh`
+runs after the issuance (installer) and after every renewal (`certbot renew`
+loop of the `certbot` service) and sets:
+
+| Path | Owner | Mode |
+|---|---|---|
+| `archive/`, `live/`, `archive/<domain>/`, `live/<domain>/` | root | `0755` |
+| `cert*.pem`, `chain*.pem`, `fullchain*.pem` | root | `0644` |
+| current `privkey*.pem` | root, group **101** | `0640` |
+
+Of the two options (group 101, or a copy owned by uid 101 in a directory of
+its own) the hook uses the group: nginx keeps reading the paths certbot
+manages (`live/<domain>/`), certbot carries the group and mode of the key
+over to each renewed key, and no second copy of the key exists. The key is
+never world-readable. The directories stay `0755` instead of `0750`: the
+chain is public, and the server container (user nobody) reads
+`live/<domain>/fullchain.pem` as `RETICORA_OIDC_CA_CERT_FILE` and does not
+start without it; an installer running without root reads it as well. Such
+an installer cannot read the key itself; `nginx -t` checks the pair instead.
+
+**Effect on the host:** group 101 is a number, so it applies to the host's
+`deploy/docker-compose/letsencrypt/` as well. Members of the host group with
+gid 101 (`getent group 101`; on Debian/Ubuntu often `ssl-cert`,
+`systemd-journal` or a service group) can read the private key there.
+Remove such members or keep the directory out of their reach (e.g. a
+`0700` parent directory) if they must not.
+
 ### Let's Encrypt issuance fails
 
 **Symptom:** Installer warns "Let's Encrypt certificate issuance failed".
@@ -290,8 +350,46 @@ from the internet (the ACME http-01 challenge needs port 80).
 
 **Fix:** Fix DNS/firewall, then re-run the installer — issuance is retried and
 nginx is reloaded automatically. The stack keeps working with the bootstrap
-certificate in the meantime. Logs:
+certificate in the meantime (the placeholder is restored after the failed
+request). Logs:
 `docker compose --env-file .env logs certbot`.
+
+An installation that ran into the former "live directory exists" error may
+still hold a second lineage `live/<domain>-0001/`; the installer no longer
+uses it. Remove it with
+`docker compose --env-file .env run --rm --no-deps --entrypoint certbot certbot delete --cert-name <domain>-0001`.
+
+### Issued certificate not loadable by nginx
+
+**Symptom:** After "Requesting a Let's Encrypt certificate" the installer
+aborts with rc 1: "nginx in the frontend (uid 101) cannot load the
+certificate and key certbot stored in …/letsencrypt/live/<domain> (nginx -t
+failed)", preceded by the output of `nginx -t` (e.g. `cannot load
+certificate key … Permission denied`). It does not report "Let's Encrypt
+certificate issued" or "HTTPS is now active". nginx still serves the
+placeholder from memory, and the frontend does not start again until the
+files are readable.
+
+**Cause:** The deploy hook did not run or failed (certbot logs an error of
+the deploy hook in its output), e.g. because
+`deploy/docker-compose/certbot-deploy-hook.sh` is missing from the compose
+directory, so the key is still `0600` root in an `archive/` with `0700`.
+
+**Fix:** Restore `certbot-deploy-hook.sh` from the release/checkout if it is
+missing (Docker creates an empty directory of that name for a missing
+bind-mount source; remove it first). Run the hook for the lineage, then
+check and reload nginx:
+
+```bash
+docker compose --env-file .env run --rm --no-deps --entrypoint sh \
+  -e RENEWED_LINEAGE=/etc/letsencrypt/live/<domain> certbot \
+  /usr/local/bin/reticora-certbot-deploy-hook.sh
+docker compose --env-file .env exec -T frontend nginx -t
+docker compose --env-file .env exec -T frontend nginx -s reload
+```
+
+A re-run of the installer does not request the certificate again (it is
+valid); it relies on the permissions being fixed.
 
 ---
 
@@ -339,7 +437,7 @@ The installer is safe to re-run and reuses existing `.env` values as defaults:
 | Keycloak admin password | A changed `KEYCLOAK_ADMIN_PASSWORD` is set through the admin CLI: login with the password of `.env.previous`, then with the new one; afterwards the old password no longer works. |
 | OIDC client `reticora-app` | Secret (`RETICORA_OIDC_CLIENT_SECRET`), redirect URIs and web origins (from `RETICORA_OIDC_REDIRECT_URL` and `RETICORA_OIDC_ISSUER_URL`) of the rendered realm file are compared with the running realm; each differing value is applied with one `kcadm update clients/<id>`. |
 | TLS bootstrap cert | Reused; regenerated when SAN-less or expiring within a day (a running frontend reloads it before the issuer checks). |
-| Let's Encrypt cert | Not re-issued when a real certificate is present. |
+| Let's Encrypt cert | Not re-issued when a real certificate is present (no ACME order, no `-0001` lineage). A failed request restores the placeholder. |
 | Realm file | Re-rendered and validated on every run. Keycloak imports it only while the realm does not exist (`start --import-realm` skips an existing realm). |
 | TimescaleDB extension | The server is stopped before the migrations; an extension below the version of the current database image is updated (`scripts/ops/timescaledb-update.sh`), a current one is left alone. |
 | Migrations | Tracked in `reticora_schema_migrations`; already-applied versions are skipped. |
