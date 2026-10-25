@@ -11231,7 +11231,11 @@ paths:
       description: >-
         The CI takes the value at once; automation sources never overwrite it
         (REC-03). Structural columns (client_id, location_id, ci_type_id, ...)
-        cannot be overridden.
+        cannot be overridden. The override is a manual write (API-07): in the
+        same transaction the CI version rises by one and the CI history
+        records the change (change_type override; an attribute counts as the
+        field attributes, as for PATCH), so a PATCH of the field with an
+        older If-Match is refused with 409.
       requestBody:
         required: true
         content:
@@ -11240,6 +11244,10 @@ paths:
       responses:
         '200':
           description: Field provenance after the change
+          headers:
+            ETag:
+              description: The new CI version (API-07); send it as If-Match with a PATCH of the CI.
+              schema: { type: string }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/FieldProvenance' }
@@ -11251,21 +11259,34 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
     delete:
       operationId: deleteCisIdFieldsNameOverride
       tags: [CIs]
       summary: Clear a manual field override
       description: >-
         The CI returns to the current observed value, when there is one, in
-        the same transaction; the change is audited.
+        the same transaction; the change is audited. Clearing an override is
+        a manual write (API-07): the CI version rises by one and the CI
+        history records the change, as for PUT. A field without an override
+        keeps the version.
       responses:
         '200':
           description: Field provenance after the change
+          headers:
+            ETag:
+              description: The CI version after the change (API-07); send it as If-Match with a PATCH of the CI.
+              schema: { type: string }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/FieldProvenance' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+        '404':
+          description: Unknown or invisible CI, or the CI has no value of the field
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/cis/{id}/lifecycle-transitions:
     post:

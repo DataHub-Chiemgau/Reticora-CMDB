@@ -3,6 +3,10 @@ package ci_test
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,12 +16,15 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // TestEffectiveViewAndOverrideClear covers WP-060 (OVR-01, CI-10): GET and
 // list return the effective value (override before observed value) alike;
 // setting an override updates the CI at once; clearing it returns the CI to
-// the current observed value in one transaction with an audit entry.
+// the current observed value in one transaction with an audit entry. Since
+// WP-412 (API-07) both raise the CI version: GET after the clear returns the
+// observed value with the new ETag; a clear without an override keeps it.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestEffectiveViewAndOverrideClear(t *testing.T) {
@@ -32,6 +39,18 @@ func TestEffectiveViewAndOverrideClear(t *testing.T) {
 	ctx := tenant.WithTenant(database.ContextWithTenantScope(bg, &scope), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: user})
 	repo := ci.NewPGRepository(f.App)
 	overrides := override.NewPGRepository(f.App)
+	mux := chi.NewRouter()
+	ci.NewHandler(ci.NewService(repo)).RegisterRoutes(mux)
+	// get answers GET /api/v1/cis/{id} as the API does: ETag and body.
+	get := func() (etag, body string) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/cis/"+ciID, nil).WithContext(ctx))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET: %d %s", w.Code, w.Body.String())
+		}
+		return w.Header().Get("ETag"), w.Body.String()
+	}
 
 	// An override written without updating the row (as before WP-060) is
 	// still what every read returns.
@@ -62,12 +81,20 @@ func TestEffectiveViewAndOverrideClear(t *testing.T) {
 		t.Errorf("attribute removed by override still shown: %v", item.Attributes)
 	}
 
-	// Setting an override updates the CI row in the same transaction.
-	if _, err := overrides.SetOverride(ctx, f.OrgA, ciID, "owner", "ops", user, "handover", true); err != nil {
+	// Setting an override updates the CI row in the same transaction and
+	// raises the version.
+	if etag, _ := get(); etag != `"1"` {
+		t.Errorf("ETag before the override %s, want \"1\"", etag)
+	}
+	set, err := overrides.SetOverride(ctx, f.OrgA, ciID, "owner", "ops", user, "handover", true)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if set.CIVersion != 2 {
+		t.Errorf("CI version after setting the override %d, want 2", set.CIVersion)
+	}
 	var rowOwner string
-	if err := f.Admin.QueryRow(bg, `SELECT attributes->>'owner' FROM ci WHERE id = $1`, ciID).Scan(&rowOwner); err != nil || rowOwner != "ops" {
+	if err = f.Admin.QueryRow(bg, `SELECT attributes->>'owner' FROM ci WHERE id = $1`, ciID).Scan(&rowOwner); err != nil || rowOwner != "ops" {
 		t.Errorf("CI row after setting the override: owner %q, %v", rowOwner, err)
 	}
 	if item = effective(); item.Attributes["owner"] != "ops" {
@@ -75,25 +102,47 @@ func TestEffectiveViewAndOverrideClear(t *testing.T) {
 	}
 
 	// Clearing returns to the current observed value.
-	if _, err := overrides.RecordDiscovered(ctx, f.OrgA, ciID, "model", "discovered-model", "snmp", time.Now()); err != nil {
+	if _, err = overrides.RecordDiscovered(ctx, f.OrgA, ciID, "model", "discovered-model", "snmp", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := overrides.ClearOverride(ctx, f.OrgA, ciID, "model"); err != nil {
+	cleared, err := overrides.ClearOverride(ctx, f.OrgA, ciID, "model")
+	if err != nil {
 		t.Fatal(err)
 	}
 	var rowModel string
-	if err := f.Admin.QueryRow(bg, `SELECT model FROM ci WHERE id = $1`, ciID).Scan(&rowModel); err != nil || rowModel != "discovered-model" {
+	if err = f.Admin.QueryRow(bg, `SELECT model FROM ci WHERE id = $1`, ciID).Scan(&rowModel); err != nil || rowModel != "discovered-model" {
 		t.Errorf("CI row after clearing: model %q, %v", rowModel, err)
 	}
 	if item = effective(); item.Model != "discovered-model" {
 		t.Errorf("effective model after clearing %q, want the observed value", item.Model)
 	}
-	// Without an observation the value stays as it is.
-	if _, err := overrides.ClearOverride(ctx, f.OrgA, ciID, "owner"); err != nil {
+	// GET after the clear returns the observed value and the new ETag.
+	if cleared.CIVersion != 3 || item.Version != 3 {
+		t.Errorf("CI version after clearing: returned %d, read %d, want 3", cleared.CIVersion, item.Version)
+	}
+	if etag, body := get(); etag != `"3"` || !strings.Contains(body, `"model":"discovered-model"`) {
+		t.Errorf("GET after clearing: ETag %s, body %s; want \"3\" and the observed model", etag, body)
+	}
+	// Clearing again finds no override: nothing changes, the version stays.
+	again, err := overrides.ClearOverride(ctx, f.OrgA, ciID, "model")
+	if err != nil || again.CIVersion != 3 {
+		t.Errorf("second clear: %+v %v, want version 3", again, err)
+	}
+	// Without an observation the value stays as it is; the version rises.
+	if cleared, err = overrides.ClearOverride(ctx, f.OrgA, ciID, "owner"); err != nil {
 		t.Fatal(err)
 	}
 	if item = effective(); item.Attributes["owner"] != "ops" {
 		t.Errorf("owner after clearing without observation: %v", item.Attributes["owner"])
+	}
+	if etag, _ := get(); cleared.CIVersion != 4 || etag != `"4"` {
+		t.Errorf("CI version after clearing owner: returned %d, ETag %s; want 4", cleared.CIVersion, etag)
+	}
+	// An unknown field or CI is not found.
+	for name, c := range map[string][2]string{"unknown field": {ciID, "no-such-field"}, "unknown CI": {f.ID(), "model"}} {
+		if _, err = overrides.ClearOverride(ctx, f.OrgA, c[0], c[1]); !errors.Is(err, override.ErrNotFound) {
+			t.Errorf("clear, %s: %v, want ErrNotFound", name, err)
+		}
 	}
 
 	var audited []string
@@ -110,8 +159,10 @@ func TestEffectiveViewAndOverrideClear(t *testing.T) {
 		audited = append(audited, a)
 	}
 	rows.Close()
-	want := []string{"ci.override_set:owner", "ci.override_cleared:model", "ci.override_cleared:owner"}
-	if len(audited) != len(want) || audited[0] != want[0] || audited[1] != want[1] || audited[2] != want[2] {
+	// The second clear of model is audited as well, although it found no
+	// override.
+	want := []string{"ci.override_set:owner", "ci.override_cleared:model", "ci.override_cleared:model", "ci.override_cleared:owner"}
+	if !slices.Equal(audited, want) {
 		t.Errorf("audit entries %v, want %v", audited, want)
 	}
 

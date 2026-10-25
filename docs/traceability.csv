@@ -634,3 +634,6 @@ IMP-06;[B];C;backend/internal/topology/querybudget_integration_test.go;WP-602
 NFR-02;[B];C;backend/internal/topology/querybudget_integration_test.go;WP-602
 UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-606
 API-04;[B];C;backend/internal/middleware/ratelimit_test.go;WP-410
+OVR-01;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-412
+CI-10;[B];D;backend/internal/ci/effective_view_integration_test.go;WP-412
+API-07;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-412

@@ -6005,13 +6005,13 @@ export interface paths {
     get?: never;
     /**
      * Set a manual field override
-     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden.
+     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden. The override is a manual write (API-07): in the same transaction the CI version rises by one and the CI history records the change (change_type override; an attribute counts as the field attributes, as for PATCH), so a PATCH of the field with an older If-Match is refused with 409.
      */
     put: operations['putCisIdFieldsNameOverride'];
     post?: never;
     /**
      * Clear a manual field override
-     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited.
+     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited. Clearing an override is a manual write (API-07): the CI version rises by one and the CI history records the change, as for PUT. A field without an override keeps the version.
      */
     delete: operations['deleteCisIdFieldsNameOverride'];
     options?: never;
@@ -26000,6 +26000,8 @@ export interface operations {
       /** @description Field provenance after the change */
       200: {
         headers: {
+          /** @description The new CI version (API-07); send it as If-Match with a PATCH of the CI. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -26018,6 +26020,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      500: components['responses']['InternalServerError'];
     };
   };
   deleteCisIdFieldsNameOverride: {
@@ -26036,6 +26039,8 @@ export interface operations {
       /** @description Field provenance after the change */
       200: {
         headers: {
+          /** @description The CI version after the change (API-07); send it as If-Match with a PATCH of the CI. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -26043,7 +26048,16 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
+      /** @description Unknown or invisible CI, or the CI has no value of the field */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
     };
   };
   createCisIdLifecycleTransitions: {

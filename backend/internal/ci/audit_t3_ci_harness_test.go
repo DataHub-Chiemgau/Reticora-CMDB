@@ -3,8 +3,9 @@ package ci_test
 // Phase-1 acceptance audit, group T3-data-ingest: test harness (no test of
 // its own). It wires the production CI and override handlers on the
 // PostgreSQL repositories, as the server does for /api/v1/cis/**. Used by
-// bulk_integration_test.go (TestAuditT3BulkStatusIsManualWrite, WP-368) and
-// audit_t3_manual_writes_auditdefect_test.go (WP-057, WP-061 defects).
+// bulk_integration_test.go (TestAuditT3BulkStatusIsManualWrite, WP-368),
+// concurrency_integration_test.go (TestAuditT3OverrideWritesRaiseVersion,
+// WP-412) and audit_t3_manual_writes_auditdefect_test.go (WP-057 defect).
 
 import (
 	"context"
