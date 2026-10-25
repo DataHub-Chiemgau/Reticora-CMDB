@@ -114,19 +114,32 @@ paths:
       security: []
       summary: Readiness check
       description: >-
-        Checks the configured dependencies (database with required
-        extensions, Redis, object storage, NATS) with a timeout per check.
+        Checks the configured dependencies of the instance with a timeout of
+        two seconds per check (OPS-01): `database` (with the required
+        extensions), `redis`, `object_storage` (a TCP connection to the
+        host:port the S3 client uses for RETICORA_S3_ENDPOINT, also for a URL
+        or an endpoint without port: 443 or 80 by scheme or
+        RETICORA_S3_USE_SSL), `nats`, and `smtp` when RETICORA_SMTP_HOST is
+        set (connection, 220 greeting and EHLO in the TLS mode of
+        RETICORA_SMTP_TLS; no mail is sent and no credentials are used, and
+        one connection answers the requests of a second, WP-442). A
+        dependency that is not configured has no key. While a
+        configured mail server is unreachable, the instance answers 503 and
+        leaves the load balancer.
         The database check also fails while the event trigger that restricts
         the application roles to index DDL is disabled or missing, e.g. after
         an aborted TimescaleDB extension update (WP-604, OPS-01); an extension
         below the version of its installed library is only logged as a
         warning by the start check of the server.
-        Liveness stays on /healthz. Failing checks are only named; the cause
-        is logged by the server. On an instance that runs the ingest
-        worker, `details.ingest` reports the last 30-second sample of the
-        ingest lane backlog (WP-334, OPS-05), summed over all organizations,
-        with its `sampled_at`; the request itself makes no call to NATS. The
-        detail is informational and never changes the status.
+        Liveness stays on /healthz. Failing checks are only named; the server
+        logs "readiness check failed" with the check, its address (without
+        credentials) and the cause once when a check turns unavailable, and
+        "readiness check recovered" once when it passes again. On an instance
+        that runs the ingest worker, `details.ingest` reports the last
+        30-second sample of the ingest lane backlog (WP-334, OPS-05), summed
+        over all organizations, with its `sampled_at`; the request itself
+        makes no call to NATS. The detail is informational and never changes
+        the status.
       responses:
         '200':
           description: All dependencies are usable
@@ -13360,13 +13373,39 @@ components:
           enum: [ready, not_ready]
         checks:
           type: object
-          description: Result per dependency.
+          description: >-
+            Result per configured dependency; a dependency the instance is
+            not configured for has no key.
+          properties:
+            database:
+              type: string
+              enum: [ok, unavailable]
+              description: PostgreSQL with the required extensions and the DDL event trigger.
+            redis:
+              type: string
+              enum: [ok, unavailable]
+            object_storage:
+              type: string
+              enum: [ok, unavailable]
+              description: >-
+                S3 endpoint (RETICORA_S3_ENDPOINT) at the host:port its client
+                connects to.
+            nats:
+              type: string
+              enum: [ok, unavailable]
+            smtp:
+              type: string
+              enum: [ok, unavailable]
+              description: >-
+                Central SMTP server, only with RETICORA_SMTP_HOST: connection,
+                220 greeting and EHLO in the configured TLS mode (WP-442).
           additionalProperties:
             type: string
             enum: [ok, unavailable]
           example:
             database: ok
-            redis: unavailable
+            redis: ok
+            smtp: unavailable
         details:
           type: object
           description: >-

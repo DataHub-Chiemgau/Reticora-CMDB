@@ -17,7 +17,7 @@ package main
 // ready") — it needs a second, unmigrated database on the test server.
 //
 // The helpers below (binary build, environment, fake OIDC/S3 endpoints) are
-// shared with startup_readiness_auditdefect_test.go.
+// shared with startup_readiness_integration_test.go.
 //
 // Retest:
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_08?sslmode=disable \
@@ -175,6 +175,19 @@ type auditServerRun struct {
 // otherwise it waits for the process to exit. timeout bounds both.
 func auditStartServer(t *testing.T, env map[string]string, waitReady bool, timeout time.Duration) auditServerRun {
 	t.Helper()
+	return auditRunServer(t, env, waitReady, timeout, nil)
+}
+
+// auditStartServerThen is auditStartServer with waitReady; once /readyz has
+// answered, then runs with a function that probes /readyz again, and the
+// server is stopped afterwards.
+func auditStartServerThen(t *testing.T, env map[string]string, timeout time.Duration, then func(readyz func() (int, string))) auditServerRun {
+	t.Helper()
+	return auditRunServer(t, env, true, timeout, then)
+}
+
+func auditRunServer(t *testing.T, env map[string]string, waitReady bool, timeout time.Duration, then func(readyz func() (int, string))) auditServerRun {
+	t.Helper()
 	bin := auditServerBinary(t)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -229,6 +242,18 @@ func auditStartServer(t *testing.T, env map[string]string, waitReady bool, timeo
 			body, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
 			run.readyCode, run.readyBody = resp.StatusCode, strings.TrimSpace(string(body))
+			if then != nil {
+				then(func() (int, string) {
+					again, getErr := client.Get(url)
+					if getErr != nil {
+						t.Errorf("/readyz: %v", getErr)
+						return 0, ""
+					}
+					defer again.Body.Close()
+					body, _ := io.ReadAll(again.Body)
+					return again.StatusCode, strings.TrimSpace(string(body))
+				})
+			}
 			break
 		}
 		if time.Now().After(deadline) {

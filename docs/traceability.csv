@@ -669,3 +669,4 @@ DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-450
 OPS-05;[B];A;tests/monitoring-config.test.sh;WP-446
 SIM-01;[B], Teilumfang [P2];LT;backend/cmd/seed/seed_integration_test.go;WP-433
 NFR-10;[Q];LT;backend/cmd/seed/seed_integration_test.go;WP-433
+OPS-01;[B];A;backend/cmd/server/startup_readiness_integration_test.go;WP-442

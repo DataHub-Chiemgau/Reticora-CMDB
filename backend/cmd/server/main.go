@@ -162,7 +162,7 @@ func main() {
 	case err == nil:
 		defer redisClient.Close()
 		cacheStore = cache.NewRedisStore(redisClient.Unwrap())
-		readiness = append(readiness, server.ReadinessCheck{Name: "redis", Check: redisClient.Ping})
+		readiness = append(readiness, server.ReadinessCheck{Name: "redis", Address: redisClient.Unwrap().Options().Addr, Check: redisClient.Ping})
 		slog.Info("Redis cache store initialized")
 	case *noDB || (cfg.IsDevelopment() && !cfg.IsSet("RETICORA_REDIS_URL")):
 		slog.Warn("Redis unreachable; using the per-process in-memory cache (development only)", "error", err)
@@ -232,11 +232,17 @@ func main() {
 		// the streaming export stays available. Configured object storage
 		// that cannot be used is fatal outside development.
 		if cfg.S3Configured() {
-			s3Store, s3Err := setupObjectStorage(cfg)
+			// /readyz probes the host:port the S3 client connects to, also
+			// for a URL or an endpoint without port (F-127).
+			s3Check, s3Err := server.ObjectStorageReadiness(cfg.S3Endpoint, cfg.S3UseSSL)
+			var s3Store *blob.S3Store
+			if s3Err == nil {
+				s3Store, s3Err = setupObjectStorage(cfg)
+			}
 			switch {
 			case s3Err == nil:
 				blobStore = s3Store
-				readiness = append(readiness, server.TCPReadiness("object_storage", cfg.S3Endpoint))
+				readiness = append(readiness, s3Check)
 			case cfg.IsDevelopment():
 				slog.Warn("S3 blob storage unavailable; asynchronous export jobs are disabled", "error", s3Err)
 			default:
@@ -363,6 +369,12 @@ func main() {
 	// Notifications (NTF-01, NTF-04): channels with encrypted provider
 	// settings, the in-app center and the delivery queue of the notifier.
 	smtpSender := centralSMTP(cfg)
+	// A configured central SMTP server is a dependency of the instance
+	// (OPS-01, F-126): while it is unreachable, /readyz answers 503 and the
+	// instance leaves the load balancer.
+	if smtpSender != nil {
+		readiness = append(readiness, server.SMTPReadiness(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPTLS))
+	}
 	notifications := notify.NewMemoryCenter()
 	if auditPool != nil {
 		notifications = &notify.Center{

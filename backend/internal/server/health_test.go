@@ -1,17 +1,24 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -225,6 +232,335 @@ func TestTCPReadiness(t *testing.T) {
 	_ = ln.Close()
 	if err := TCPReadiness("s", addr).Check(context.Background()); err == nil {
 		t.Fatal("closed port reported as ready")
+	}
+}
+
+// TestObjectStorageAddress covers F-127 (WP-442, OPS-01): object_storage is
+// probed at the host:port blob.NewS3Store connects to for every endpoint
+// form it accepts; a URL's scheme beats RETICORA_S3_USE_SSL, user
+// information is dropped, and an invalid endpoint is an error that does not
+// repeat it.
+func TestObjectStorageAddress(t *testing.T) {
+	for _, tc := range []struct {
+		endpoint string
+		useSSL   bool
+		want     string
+	}{
+		{"http://h:9000", false, "h:9000"},
+		{"https://h", false, "h:443"},
+		{"h", true, "h:443"},
+		{"h", false, "h:80"},
+		{"h:9000", false, "h:9000"},
+		{"h:9000", true, "h:9000"},
+		{"http://h", true, "h:80"},
+		{"https://h:9443/", false, "h:9443"},
+		{"minio:9000/", false, "minio:9000"},
+		{"s3.eu-central-1.amazonaws.com", true, "s3.eu-central-1.amazonaws.com:443"},
+		{"http://[::1]:9000", false, "[::1]:9000"},
+		{"http://AKIAEXAMPLE:s3-secret@h:9000", false, "h:9000"},
+	} {
+		got, err := ObjectStorageAddress(tc.endpoint, tc.useSSL)
+		if err != nil || got != tc.want {
+			t.Errorf("ObjectStorageAddress(%q, useSSL=%t) = %q, %v; want %q", tc.endpoint, tc.useSSL, got, err, tc.want)
+		}
+		check, err := ObjectStorageReadiness(tc.endpoint, tc.useSSL)
+		if err != nil || check.Name != "object_storage" || check.Address != tc.want || check.Check == nil {
+			t.Errorf("ObjectStorageReadiness(%q, useSSL=%t) = %+v, %v", tc.endpoint, tc.useSSL, check, err)
+		}
+	}
+	for _, endpoint := range []string{
+		"", " ", "http://", "http://user:s3-secret@h:port", "h:port", "://h", "http://:9000", "http://%zz",
+	} {
+		got, err := ObjectStorageAddress(endpoint, false)
+		if err == nil {
+			t.Errorf("ObjectStorageAddress(%q) = %q, want an error", endpoint, got)
+			continue
+		}
+		if strings.Contains(err.Error(), "s3-secret") {
+			t.Errorf("ObjectStorageAddress(%q): error repeats the credentials: %v", endpoint, err)
+		}
+		if _, err := ObjectStorageReadiness(endpoint, false); err == nil {
+			t.Errorf("ObjectStorageReadiness(%q) accepted the endpoint", endpoint)
+		}
+	}
+}
+
+// smtpTestServer is an SMTP server on 127.0.0.1 for SMTPReadiness. It sends
+// greeting first (none: it never answers); with tlsConfig it offers
+// STARTTLS, or with implicit it speaks TLS from the start.
+type smtpTestServer struct {
+	greeting  string
+	tlsConfig *tls.Config
+	implicit  bool
+}
+
+func (s smtpTestServer) start(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go s.session(conn)
+		}
+	}()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func (s smtpTestServer) session(conn net.Conn) {
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if s.greeting == "" {
+		_, _ = io.Copy(io.Discard, conn)
+		return
+	}
+	if s.implicit {
+		tlsConn := tls.Server(conn, s.tlsConfig)
+		if tlsConn.Handshake() != nil {
+			return
+		}
+		conn = tlsConn
+	}
+	reply := func(line string) { _, _ = io.WriteString(conn, line+"\r\n") }
+	reply(s.greeting)
+	r := bufio.NewReader(conn)
+	secured := s.implicit
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return
+		}
+		switch cmd := strings.ToUpper(strings.TrimSpace(line)); {
+		case strings.HasPrefix(cmd, "EHLO"):
+			if s.tlsConfig != nil && !secured {
+				reply("250-test")
+				reply("250 STARTTLS")
+			} else {
+				reply("250 test")
+			}
+		case cmd == "STARTTLS" && s.tlsConfig != nil:
+			reply("220 ready to start TLS")
+			tlsConn := tls.Server(conn, s.tlsConfig)
+			if tlsConn.Handshake() != nil {
+				return
+			}
+			conn, r, secured = tlsConn, bufio.NewReader(tlsConn), true
+		case cmd == "QUIT":
+			reply("221 bye")
+			return
+		default:
+			reply("502 command not implemented")
+		}
+	}
+}
+
+// smtpTestTLS returns a server certificate for 127.0.0.1 and the pool that
+// trusts it.
+func smtpTestTLS(t *testing.T) (*tls.Config, *x509.CertPool) {
+	t.Helper()
+	srv := httptest.NewTLSServer(http.NotFoundHandler())
+	srv.Close()
+	roots := x509.NewCertPool()
+	roots.AddCert(srv.Certificate())
+	return &tls.Config{Certificates: srv.TLS.Certificates, MinVersion: tls.VersionTLS12}, roots
+}
+
+// TestSMTPReadiness covers F-126 (WP-442, OPS-01): the smtp check passes
+// when the server greets with 220 and answers EHLO in the configured TLS
+// mode, and fails within the readiness timeout on a closed port, a refusing
+// or silent server, a missing STARTTLS, an untrusted certificate or a
+// server without implicit TLS.
+func TestSMTPReadiness(t *testing.T) {
+	serverTLS, roots := smtpTestTLS(t)
+	plain := smtpTestServer{greeting: "220 test ESMTP"}.start(t)
+	refusing := smtpTestServer{greeting: "554 no service"}.start(t)
+	silent := smtpTestServer{}.start(t)
+	startTLS := smtpTestServer{greeting: "220 test ESMTP", tlsConfig: serverTLS}.start(t)
+	implicitTLS := smtpTestServer{greeting: "220 test ESMTP", tlsConfig: serverTLS, implicit: true}.start(t)
+	closedLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := closedLn.Addr().(*net.TCPAddr).Port
+	_ = closedLn.Close()
+
+	for _, tc := range []struct {
+		name    string
+		port    int
+		mode    string
+		roots   *x509.CertPool
+		wantErr string
+	}{
+		{"open, tls none", plain, "none", nil, ""},
+		{"closed port", closed, "none", nil, "refused"},
+		{"greeting other than 220", refusing, "none", nil, "smtp greeting"},
+		{"no greeting within the timeout", silent, "none", nil, "smtp greeting"},
+		{"starttls not offered", plain, "starttls", roots, "offers no STARTTLS"},
+		{"starttls", startTLS, "starttls", roots, ""},
+		{"starttls with an untrusted certificate", startTLS, "starttls", nil, "smtp STARTTLS"},
+		{"implicit tls", implicitTLS, "tls", roots, ""},
+		{"implicit tls with an untrusted certificate", implicitTLS, "tls", nil, "smtp TLS"},
+		{"implicit tls against a plain server", plain, "tls", roots, "smtp TLS"},
+	} {
+		check := smtpReadiness("127.0.0.1", tc.port, tc.mode, tc.roots)
+		if want := net.JoinHostPort("127.0.0.1", strconv.Itoa(tc.port)); check.Name != "smtp" || check.Address != want {
+			t.Errorf("%s: check %q at %q, want smtp at %s", tc.name, check.Name, check.Address, want)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), readinessTimeout)
+		start := time.Now()
+		err := check.Check(ctx)
+		cancel()
+		if elapsed := time.Since(start); elapsed > readinessTimeout+time.Second {
+			t.Errorf("%s: check took %v, want within the readiness timeout %v", tc.name, elapsed, readinessTimeout)
+		}
+		switch {
+		case tc.wantErr == "" && err != nil:
+			t.Errorf("%s: %v", tc.name, err)
+		case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.wantErr)
+		}
+	}
+
+	// The exported constructor checks with the system roots.
+	if check := SMTPReadiness("127.0.0.1", plain, "none"); check.Check(context.Background()) != nil {
+		t.Error("SMTPReadiness: open server reported as unavailable")
+	}
+	if check := SMTPReadiness("127.0.0.1", startTLS, "starttls"); check.Check(context.Background()) == nil {
+		t.Error("SMTPReadiness: a certificate outside the system roots was accepted")
+	}
+}
+
+// TestSMTPReadinessBoundsConnections: /readyz is unauthenticated, so a burst
+// of probes must not become a burst of connections to the relay (security
+// review of WP-442). Concurrent probes and probes within
+// smtpReadinessReuse share one connection; afterwards the server is asked
+// again, and an outage is reported. A probe whose caller went away is not
+// reused.
+func TestSMTPReadinessBoundsConnections(t *testing.T) {
+	var sessions atomic.Int32
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	srv := smtpTestServer{greeting: "220 test ESMTP"}
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			sessions.Add(1)
+			go srv.session(conn)
+		}
+	}()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	check := SMTPReadiness("127.0.0.1", port, "none")
+	if err := check.Check(cancelled); err == nil {
+		t.Fatal("a probe with a cancelled context passed")
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 20)
+	for range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- check.Check(context.Background())
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent probe: %v", err)
+		}
+	}
+	if err := check.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := sessions.Load(); got != 1 {
+		t.Fatalf("21 probes within %v opened %d connections, want 1", smtpReadinessReuse, got)
+	}
+
+	_ = ln.Close()
+	time.Sleep(smtpReadinessReuse + 100*time.Millisecond)
+	if err := check.Check(context.Background()); err == nil {
+		t.Fatalf("server stopped %v ago: still reported as ready", smtpReadinessReuse)
+	}
+}
+
+// TestReadyzLogsStatusChanges covers WP-442 (OPS-01): a check that turns
+// unavailable writes one line "readiness check failed" with its name and
+// address, a recovery one line "readiness check recovered"; probes with an
+// unchanged status write nothing. The address of an object storage
+// endpoint with user information carries no credentials.
+func TestReadyzLogsStatusChanges(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	var failing atomic.Bool
+	smtpCheck := ReadinessCheck{Name: "smtp", Address: "mail.example:587", Check: func(context.Context) error {
+		if failing.Load() {
+			return errors.New("dial tcp 192.0.2.25:587: connect: connection refused")
+		}
+		return nil
+	}}
+	mux := chi.NewRouter()
+	registerOperational(mux, "test", false, []ReadinessCheck{ok("database"), smtpCheck})
+	const (
+		failedLine    = `level=WARN msg="readiness check failed" check=smtp address=mail.example:587 error="dial tcp 192.0.2.25:587: connect: connection refused"`
+		recoveredLine = `level=INFO msg="readiness check recovered" check=smtp address=mail.example:587`
+	)
+	for i, step := range []struct {
+		failing           bool
+		failed, recovered int
+	}{
+		{false, 0, 0}, {false, 0, 0},
+		{true, 1, 0}, {true, 1, 0}, {true, 1, 0},
+		{false, 1, 1}, {false, 1, 1},
+		{true, 2, 1},
+	} {
+		failing.Store(step.failing)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+		if want := map[bool]int{false: http.StatusOK, true: http.StatusServiceUnavailable}[step.failing]; rec.Code != want {
+			t.Fatalf("probe %d: /readyz = %d, want %d", i+1, rec.Code, want)
+		}
+		failed, recovered := strings.Count(logs.String(), failedLine), strings.Count(logs.String(), recoveredLine)
+		if failed != step.failed || recovered != step.recovered || strings.Count(logs.String(), "\n") != failed+recovered {
+			t.Fatalf("probe %d (failing %t): %d failed and %d recovered lines, want %d and %d; log:\n%s",
+				i+1, step.failing, failed, recovered, step.failed, step.recovered, logs.String())
+		}
+	}
+
+	logs.Reset()
+	closedLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := closedLn.Addr().String()
+	_ = closedLn.Close()
+	s3Check, err := ObjectStorageReadiness("http://AKIAREADYZ:s3-secret-key@"+closed, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, body, _ := serveReadiness(t, s3Check); code != http.StatusServiceUnavailable || body.Checks["object_storage"] != "unavailable" {
+		t.Fatalf("closed object storage: %d %v", code, body.Checks)
+	}
+	if line := logs.String(); !strings.Contains(line, `msg="readiness check failed" check=object_storage address=`+closed+" ") ||
+		strings.Contains(line, "AKIAREADYZ") || strings.Contains(line, "s3-secret-key") {
+		t.Errorf("object storage failure, want the address %s without credentials:\n%s", closed, line)
 	}
 }
 

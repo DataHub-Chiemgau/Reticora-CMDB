@@ -45,6 +45,16 @@ healthy".
 | Database password mismatch | `logs postgres` / `logs server` show `SQLSTATE 28P01` (password authentication failed) | Re-run the installer — `sync_db_password` probes both databases (CMDB and Keycloak) over TCP and resets a stale role password to the value in `.env` using a temporary trust-auth instance. **Manual alternative (data loss):** `docker compose down -v` removes the stale volume. |
 | Migrations not applied | `logs server` shows missing tables/columns | Re-run the installer; migrations run before the server starts. |
 | DDL event trigger disabled | `logs server` shows `database is not ready … event trigger reticora_restrict_app_ddl is not enabled` (or `is missing`); `/readyz` answers `"database":"unavailable"` | An aborted TimescaleDB update left it disabled — see [TimescaleDB extension update failed](#timescaledb-extension-update-failed). Re-run the installer; the update step enables it again. |
+| SMTP server unreachable | `logs server` shows `"msg":"readiness check failed","check":"smtp","address":"<host>:<port>"` with the cause (e.g. `connection refused`, `smtp server offers no STARTTLS`, `x509: …`); `/readyz` answers 503 with `"smtp":"unavailable"` | With `RETICORA_SMTP_HOST` set, the SMTP server is a dependency of the server: `/readyz` connects, waits for the 220 greeting and sends EHLO in the TLS mode of `RETICORA_SMTP_TLS` (no mail, no login). An installation whose configured mail server is unreachable therefore fails in `wait_for_service server` ("Reticora server did not become healthy"). Make the server reachable from the container with the configured port and TLS mode (`starttls` needs an offered STARTTLS, `tls` implicit TLS, both a certificate for the host name the server trusts), or remove `RETICORA_SMTP_HOST` from the server's environment (e.g. the Compose override that sets the `RETICORA_SMTP_*` variables) until the relay exists; self-signup and `central_smtp` notifications stay off without it. Then re-run the installer. |
+| Object storage unreachable | `logs server` shows `"msg":"readiness check failed","check":"object_storage","address":"<host>:<port>"`; `/readyz` answers `"object_storage":"unavailable"` | The address is the one the S3 client uses for `RETICORA_S3_ENDPOINT`: the scheme of a URL is removed, and an endpoint without port gets 443 (`https://` or `RETICORA_S3_USE_SSL=true`) or 80. Check that MinIO or the managed S3 answers on that address. |
+
+Every readiness check that turns unavailable writes exactly one log line
+`readiness check failed` with the check, its address (host and port, never
+user name, password or keys) and the cause; it is not repeated on every
+probe, and `readiness check recovered` follows once the dependency is back.
+The installer prints the last 40 lines of the server log when
+`wait_for_service server` fails (`show_service_logs`), so the line is
+visible there.
 
 **General diagnosis:**
 

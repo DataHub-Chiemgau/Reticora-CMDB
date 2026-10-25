@@ -251,7 +251,16 @@ artifact for 90 days.
 | Collector, server unreachable | `TestUploadRecords_FailureSpoolsAndFlushDelivers`, `TestHeartbeatReportsSpoolBackpressureAndLoss` | Records go to the spool and are delivered once the server is reachable. The spool level and every loss are reported. |
 | Collector spool limits | `TestDiskBufferSizeLimitAppliesBackpressure`, `TestDiskBufferMaxAgeKeepsMessagesFor24Hours`, `TestPersistenceAcrossBufferInstances` | A full spool refuses new data instead of dropping old data silently. The spool survives restarts. |
 | Webhook target down | `TestDispatcherPersistsAndRetriesFailedDelivery`, `TestDispatcherMarksDeliveryFailedAfterMaxAttempts` | Deliveries are persisted and retried. After the last attempt they go to the dead-letter queue. |
-| SMTP | — | Not applicable while no SMTP delivery exists (TEC-13). It becomes a scenario with the notification channel. |
+| SMTP (with `RETICORA_SMTP_HOST`) | `tests/outage/run.sh` still reports it as N/A until its scenario exists (WP-449). `TestAuditT5ReadinessCoversSMTP` (`backend/cmd/server`) stops the mail server under a running server binary. | `/readyz` answers 503 with `"smtp":"unavailable"`, so **a mail-server outage takes every instance out of the load balancer** (Compose healthcheck, Kubernetes readinessProbe) although the API itself would still work. The server logs `readiness check failed` with `check=smtp` and the address once, and is ready again when the server answers. Without `RETICORA_SMTP_HOST` there is no `smtp` check. |
+
+A configured SMTP server is a readiness dependency like the others (OPS-01,
+WP-442): while it is unreachable, all instances report not ready at the same
+time, so plan relay maintenance like a database maintenance window, or remove
+`RETICORA_SMTP_HOST` for the duration (self-signup and `central_smtp`
+notifications are off without it). For the same reason an installation with
+a configured but unreachable SMTP server fails in `wait_for_service server`;
+the server log shown by the installer names the check and its address
+([troubleshooting](troubleshooting-installation.md#container-docker-compose-server-1-is-unhealthy)).
 
 Run it locally after an installation of the checkout
 (`./install.sh --cloud --non-interactive --build-from-source`, as in CI):

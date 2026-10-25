@@ -2,18 +2,24 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/smtp"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -37,11 +43,13 @@ const readinessDetailTimeout = 300 * time.Millisecond
 // WP-334) within readinessDetailTimeout, or "unavailable"; a check with only
 // a Detail is informational: it is not listed in checks and never changes
 // the status, and a slow Detail never delays the answer by more than
-// readinessDetailTimeout.
+// readinessDetailTimeout. Address is the host:port the check connects to,
+// without credentials; the log line of a failing check names it.
 type ReadinessCheck struct {
-	Name   string
-	Check  func(ctx context.Context) error
-	Detail func(ctx context.Context) (any, error)
+	Name    string
+	Address string
+	Check   func(ctx context.Context) error
+	Detail  func(ctx context.Context) (any, error)
 }
 
 type readinessResponse struct {
@@ -52,9 +60,11 @@ type readinessResponse struct {
 
 // readinessHandler runs all checks in parallel and answers 200 when every
 // check passes and 503 otherwise. The endpoint is unauthenticated, so the
-// response only names the failing dependency; the error goes to the log.
-// Details carry no tenant data.
+// response only names the failing dependency; the error goes to the log,
+// once per change of a check's status (readinessLog). Details carry no
+// tenant data.
 func readinessHandler(checks []ReadinessCheck) http.HandlerFunc {
+	transitions := &readinessLog{failing: map[string]bool{}}
 	return func(w http.ResponseWriter, r *http.Request) {
 		resp := readinessResponse{Status: "ready", Checks: make(map[string]string, len(checks))}
 		var mu sync.Mutex
@@ -82,10 +92,10 @@ func readinessHandler(checks []ReadinessCheck) http.HandlerFunc {
 				ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
 				defer cancel()
 				err := c.Check(ctx)
+				transitions.record(&c, err)
 				mu.Lock()
 				defer mu.Unlock()
 				if err != nil {
-					slog.Warn("readiness check failed", "check", c.Name, "error", err)
 					resp.Checks[c.Name] = "unavailable"
 					resp.Status = "not_ready"
 					return
@@ -102,6 +112,32 @@ func readinessHandler(checks []ReadinessCheck) http.HandlerFunc {
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	}
+}
+
+// readinessLog remembers which checks failed on the last probe. /readyz is
+// probed every few seconds, so a failing dependency is logged once when its
+// check turns unavailable — with name, address and error, which the
+// installer shows from the log tail when the server does not become healthy
+// — and once when it recovers, not on every probe.
+type readinessLog struct {
+	mu      sync.Mutex
+	failing map[string]bool
+}
+
+// record logs the result err of c when the status of c changed; a check
+// starts as ok.
+func (l *readinessLog) record(c *ReadinessCheck, err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if failing := err != nil; failing == l.failing[c.Name] {
+		return
+	}
+	l.failing[c.Name] = err != nil
+	if err != nil {
+		slog.Warn("readiness check failed", "check", c.Name, "address", c.Address, "error", err)
+		return
+	}
+	slog.Info("readiness check recovered", "check", c.Name, "address", c.Address)
 }
 
 // readinessDetail returns the detail of c, or "unavailable" when it fails or
@@ -158,7 +194,9 @@ const DDLGuardEventTrigger = "reticora_restrict_app_ddl"
 // and the versions go to the log only, not to the unauthenticated /readyz.
 func DatabaseReadiness(pool *pgxpool.Pool, extensions []string) ReadinessCheck {
 	var versionsCompared atomic.Bool
-	return ReadinessCheck{Name: "database", Check: func(ctx context.Context) error {
+	conn := pool.Config().ConnConfig
+	address := net.JoinHostPort(conn.Host, strconv.Itoa(int(conn.Port)))
+	return ReadinessCheck{Name: "database", Address: address, Check: func(ctx context.Context) error {
 		var (
 			missing []string
 			trigger *string
@@ -225,7 +263,7 @@ func warnOutdatedExtensions(ctx context.Context, pool *pgxpool.Pool, extensions 
 // opened. It serves dependencies without a cheap protocol-level probe here
 // (object storage endpoint, NATS).
 func TCPReadiness(name, address string) ReadinessCheck {
-	return ReadinessCheck{Name: name, Check: func(ctx context.Context) error {
+	return ReadinessCheck{Name: name, Address: address, Check: func(ctx context.Context) error {
 		var d net.Dialer
 		conn, err := d.DialContext(ctx, "tcp", address)
 		if err != nil {
@@ -233,4 +271,155 @@ func TCPReadiness(name, address string) ReadinessCheck {
 		}
 		return conn.Close()
 	}}
+}
+
+// ObjectStorageReadiness checks the S3 endpoint (RETICORA_S3_ENDPOINT) at
+// the host:port its client connects to (ObjectStorageAddress).
+func ObjectStorageReadiness(endpoint string, useSSL bool) (ReadinessCheck, error) {
+	address, err := ObjectStorageAddress(endpoint, useSSL)
+	if err != nil {
+		return ReadinessCheck{}, err
+	}
+	return TCPReadiness("object_storage", address), nil
+}
+
+// ObjectStorageAddress returns the host:port blob.NewS3Store connects to for
+// endpoint (F-127): the scheme of a URL (http://, https://) is removed and
+// decides TLS, otherwise useSSL (RETICORA_S3_USE_SSL) does; without a port
+// the default port of the scheme applies, 443 or 80. User information of a
+// URL is dropped, and errors do not repeat the endpoint, so neither carries
+// credentials.
+func ObjectStorageAddress(endpoint string, useSSL bool) (string, error) {
+	if strings.TrimSpace(endpoint) == "" {
+		return "", errors.New("object storage endpoint is empty")
+	}
+	if strings.Contains(endpoint, "://") {
+		u, err := url.Parse(endpoint)
+		if err != nil {
+			return "", fmt.Errorf("object storage endpoint is no valid URL: %w", urlCause(err))
+		}
+		if u.Host == "" {
+			return "", errors.New("object storage endpoint has no host")
+		}
+		endpoint = u.Host
+		switch u.Scheme {
+		case "https":
+			useSSL = true
+		case "http":
+			useSSL = false
+		}
+	}
+	scheme, port := "http", "80"
+	if useSSL {
+		scheme, port = "https", "443"
+	}
+	// The S3 client builds its request URLs from scheme and endpoint; the
+	// HTTP transport dials their host with the default port of the scheme.
+	u, err := url.Parse(scheme + "://" + strings.TrimRight(endpoint, "/"))
+	if err != nil {
+		return "", fmt.Errorf("object storage endpoint is no valid host[:port]: %w", urlCause(err))
+	}
+	if u.Hostname() == "" {
+		return "", errors.New("object storage endpoint has no host")
+	}
+	if u.Port() != "" {
+		port = u.Port()
+	}
+	return net.JoinHostPort(u.Hostname(), port), nil
+}
+
+// urlCause strips the URL that url.Parse repeats in its error.
+func urlCause(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return urlErr.Err
+	}
+	return err
+}
+
+// smtpReadinessReuse is how long the result of an SMTP probe answers further
+// probes. /readyz is unauthenticated and not rate-limited: without it every
+// request would open a connection to the relay, and a relay that throttles
+// or blocks a client for a burst of connections would take every instance
+// out of the load balancer. The orchestrators probe every 5 s or less often,
+// so they always get a fresh result.
+const smtpReadinessReuse = time.Second
+
+// SMTPReadiness checks the central SMTP server (RETICORA_SMTP_*, TEC-13)
+// within the readiness timeout: connection, 220 greeting and EHLO in the
+// configured TLS mode — implicit TLS for tls, an offered and completed
+// STARTTLS for starttls, as the sender requires them. It sends no mail and
+// does not authenticate, so it needs no credentials. One probe runs at a
+// time, and its result answers the probes of the next smtpReadinessReuse.
+func SMTPReadiness(host string, port int, tlsMode string) ReadinessCheck {
+	return smtpReadiness(host, port, tlsMode, nil)
+}
+
+// smtpReadiness is SMTPReadiness; roots replaces the system roots for the
+// certificate of the server (tests).
+func smtpReadiness(host string, port int, tlsMode string, roots *x509.CertPool) ReadinessCheck {
+	address := net.JoinHostPort(host, strconv.Itoa(port))
+	tlsConfig := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12, RootCAs: roots}
+	var (
+		mu      sync.Mutex
+		probed  time.Time
+		lastErr error
+	)
+	return ReadinessCheck{Name: "smtp", Address: address, Check: func(ctx context.Context) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if !probed.IsZero() && time.Since(probed) < smtpReadinessReuse {
+			return lastErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := probeSMTP(ctx, address, host, tlsMode, tlsConfig)
+		// A probe whose caller went away says nothing about the server.
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			probed, lastErr = time.Now(), err
+		}
+		return err
+	}}
+}
+
+// probeSMTP opens one SMTP session to address in tlsMode and ends it after
+// EHLO (and STARTTLS).
+func probeSMTP(ctx context.Context, address, host, tlsMode string, tlsConfig *tls.Config) error {
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return err
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	if tlsMode == notify.SMTPTLS {
+		tlsConn := tls.Client(conn, tlsConfig)
+		if err = tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return fmt.Errorf("smtp TLS: %w", err)
+		}
+		conn = tlsConn
+	}
+	client, err := smtp.NewClient(conn, host)
+	if err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("smtp greeting: %w", err)
+	}
+	defer client.Close()
+	if err = client.Hello("localhost"); err != nil {
+		return fmt.Errorf("smtp EHLO: %w", err)
+	}
+	if tlsMode == notify.SMTPStartTLS {
+		if ok, _ := client.Extension("STARTTLS"); !ok {
+			return errors.New("smtp server offers no STARTTLS")
+		}
+		if err = client.StartTLS(tlsConfig); err != nil {
+			return fmt.Errorf("smtp STARTTLS: %w", err)
+		}
+	}
+	// The server was usable; a failed goodbye does not change that.
+	_ = client.Quit()
+	return nil
 }
