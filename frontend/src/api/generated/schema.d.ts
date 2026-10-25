@@ -3765,7 +3765,10 @@ export interface paths {
     get: operations['getNetworkInterface'];
     put?: never;
     post?: never;
-    /** Delete a network interface */
+    /**
+     * Delete a network interface
+     * @description Deletes the interface (REL-05). An edge that names it as its source or target interface and is not an unverified discovery edge – a manual or verified edge, or an edge of another source – keeps it: 409, `relationship_ids` lists those edges the caller can see. The unverified discovery edges at the interface are removed with it and recorded in the history of its CI (ci_change relationship_change). Addresses bound to the interface are unbound; one whose address is also present unbound in the same VRF is deleted with the interface.
+     */
     delete: operations['deleteNetworkInterface'];
     options?: never;
     head?: never;
@@ -9164,6 +9167,10 @@ export interface components {
         field: string;
         detail: string;
       }[];
+    };
+    InterfaceInUseProblem: components['schemas']['ProblemDetail'] & {
+      /** @description IDs of the edges visible to the caller that keep the interface (REL-05): every edge at the interface except an unverified discovery edge. */
+      relationship_ids?: string[];
     };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
       /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). */
@@ -19869,6 +19876,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description The CI does not exist or the caller cannot see it, e.g. a CI of another organization (F-311). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
@@ -19920,6 +19936,16 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description Edges keep the interface; `relationship_ids` names those the caller can see (empty when only edges outside its scope do). Without `relationship_ids`: an address of the interface collides with an unbound address the caller cannot see. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['InterfaceInUseProblem'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
     };
   };
   updateNetworkInterface: {

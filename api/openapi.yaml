@@ -7458,6 +7458,12 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The CI does not exist or the caller cannot see it, e.g. a CI of another organization (F-311).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
@@ -7514,6 +7520,15 @@ paths:
       operationId: deleteNetworkInterface
       tags: [IPAM]
       summary: Delete a network interface
+      description: >-
+        Deletes the interface (REL-05). An edge that names it as its source
+        or target interface and is not an unverified discovery edge – a
+        manual or verified edge, or an edge of another source – keeps it:
+        409, `relationship_ids` lists those edges the caller can see. The
+        unverified discovery edges at the interface are removed with it and
+        recorded in the history of its CI (ci_change relationship_change).
+        Addresses bound to the interface are unbound; one whose address is
+        also present unbound in the same VRF is deleted with the interface.
       responses:
         '204':
           description: Network interface deleted
@@ -7521,6 +7536,18 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            Edges keep the interface; `relationship_ids` names those the
+            caller can see (empty when only edges outside its scope do).
+            Without `relationship_ids`: an address of the interface collides
+            with an unbound address the caller cannot see.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/InterfaceInUseProblem'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /api/v1/assignments/{id}/return:
     x-phase: P2
@@ -16406,6 +16433,19 @@ components:
                 properties:
                   field: { type: string }
                   detail: { type: string }
+    InterfaceInUseProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - type: object
+          properties:
+            relationship_ids:
+              type: array
+              description: >-
+                IDs of the edges visible to the caller that keep the
+                interface (REL-05): every edge at the interface except an
+                unverified discovery edge.
+              items:
+                type: string
     DependencyProblem:
       allOf:
         - $ref: '#/components/schemas/ProblemDetail'

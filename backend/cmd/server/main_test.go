@@ -16,14 +16,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
@@ -319,5 +326,77 @@ func TestHTTPHandlerServesCookieOnlyRefreshAndLogout(t *testing.T) {
 	}
 	if again := cs.do(http.MethodPost, "/api/v1/auth/refresh", "", rotated.Value, "", ""); again.Code != http.StatusUnauthorized {
 		t.Errorf("cookie-only refresh after the logout: %d %s, want 401", again.Code, strings.TrimSpace(again.Body.String()))
+	}
+}
+
+// TestSystemJobsCoverJOB02 covers the scheduler wiring of JOB-02 and OPS-03
+// (WP-425, F-044): registerSystemJobs, which main runs, registers on a
+// database every system job of the JOB-02 [B] list — offline detector,
+// edge cleanup (TOP-02), hard delete of soft-deleted CIs (CI-05) and the
+// retention runs (AUD-09), index DDL (DB-04), certificate renewal (the
+// certificate.notices run of COL-04) and entitlement warnings (ENT-07). The
+// audit runner (AUD-04) is not a scheduled job: the audit chain is written
+// synchronously with each change (E-56, F-316 deferred). Without a database
+// the notice runs are not registered.
+func TestSystemJobsCoverJOB02(t *testing.T) {
+	// The pool never connects: registration only builds the runs.
+	pool, err := pgxpool.New(context.Background(), "postgres://reticora@127.0.0.1:1/reticora?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	masterKey, err := crypto.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := crypto.NewEnvelopeEncryptor(masterKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modules, err := server.ParseModules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{OfflineDetector: true, RetentionAuditYears: 10, RetentionHistoryDays: 1095,
+		RetentionSoftDeleteDays: 90, RetentionReviewItemDays: 365}
+	deps := func(pool *pgxpool.Pool, repos server.Repositories) *systemJobDeps {
+		dispatcher := webhook.NewDispatcher(repos.Webhook, nil, webhook.DispatcherOptions{PollInterval: -1})
+		t.Cleanup(func() { _ = dispatcher.Shutdown(context.Background()) })
+		return &systemJobDeps{cfg: cfg, pool: pool, encryptor: encryptor, repos: &repos, modules: modules,
+			entitlements: entitlement.NewService(repos.Entitlement, entitlement.Options{}), dispatcher: dispatcher}
+	}
+
+	scheduler := jobs.NewScheduler(jobs.NewMemoryLocker(), jobs.NewMemoryStateStore())
+	if err = registerSystemJobs(scheduler, deps(pool, server.PostgresRepositories(pool, audit.NewPGRecorder()))); err != nil {
+		t.Fatalf("register the system jobs: %v", err)
+	}
+	registered := map[string]bool{}
+	for _, kind := range scheduler.Kinds() {
+		registered[kind] = true
+	}
+	for _, job := range []struct{ requirement, kind string }{
+		{"offline detector", lifecycle.OfflineDetectorKind},
+		{"edge cleanup (TOP-02)", relationship.CleanupKind},
+		{"hard delete of soft-deleted CIs (CI-05)", jobs.RetentionSoftDeleted},
+		{"retention of the audit log (AUD-09)", jobs.RetentionAuditLog},
+		{"retention of the history (AUD-09)", jobs.RetentionHistory},
+		{"index DDL (DB-04)", citype.IndexJobKind},
+		{"certificate renewal (COL-04)", jobs.CertificateNoticesKind},
+		{"entitlement warnings (ENT-07)", jobs.EntitlementNoticesKind},
+	} {
+		if !registered[job.kind] {
+			t.Errorf("JOB-02 %s: kind %s is not registered (registered: %v)", job.requirement, job.kind, scheduler.Kinds())
+		}
+	}
+
+	// --no-db: the notice runs need the database and are not registered.
+	memory := jobs.NewScheduler(jobs.NewMemoryLocker(), jobs.NewMemoryStateStore())
+	if err = registerSystemJobs(memory, deps(nil, server.MemoryRepositories())); err != nil {
+		t.Fatalf("register the system jobs without a database: %v", err)
+	}
+	for _, kind := range memory.Kinds() {
+		if kind == jobs.EntitlementNoticesKind || kind == jobs.CertificateNoticesKind {
+			t.Errorf("without a database %s is registered", kind)
+		}
 	}
 }

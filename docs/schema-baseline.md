@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000158_audit_hash_utf8
+Stand: Migration 000160_notice_sent
 
 ## Prüfung
 
@@ -376,6 +376,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `metric_sample` | nein | nein | – |
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |
 | `network_interface` | ja | ja | network_interface_scoped_delete (DELETE), network_interface_scoped_update (UPDATE), org_isolation (ALL) |
+| `notice_sent` | ja | ja | notice_sent_isolation (ALL) |
 | `notification_channel` | ja | ja | notification_channel_isolation (ALL) |
 | `notification_delivery` | ja | ja | notification_delivery_isolation (ALL), notification_delivery_system_select (SELECT) |
 | `notification_inbox` | ja | ja | notification_inbox_isolation (ALL) |

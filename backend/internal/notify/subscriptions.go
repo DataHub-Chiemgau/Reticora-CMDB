@@ -62,14 +62,21 @@ var Subscriptions = map[string]Subscription{
 		},
 	},
 	events.EntitlementWarning: {
+		// The expiry warning of the entitlement.notices run, 14, 7 and 1
+		// day before valid_until (ENT-07, WP-425).
 		Category: "entitlement",
 		Audience: func(map[string]any) *Audience {
 			return &Audience{Permission: identity.PermUserManage, AllWithPermission: true}
 		},
 		Render: func(d map[string]any) (string, string) {
-			return "Lizenz-Warnung: " + str(d, "feature"),
-				text("Die Lizenzgrenze für "+str(d, "feature")+" ist fast erreicht: "+fmt.Sprint(d["used"])+" von "+fmt.Sprint(d["limit"])+".",
-					"The licence limit of "+str(d, "feature")+" is almost reached: "+fmt.Sprint(d["used"])+" of "+fmt.Sprint(d["limit"])+".")
+			days := fmt.Sprint(d["days_left"])
+			de, en := "noch "+days+" Tage", days+" days left"
+			if days == "1" {
+				de, en = "noch 1 Tag", "1 day left"
+			}
+			return "Lizenz läuft ab: " + str(d, "feature"),
+				text("Die Lizenz für "+str(d, "feature")+" läuft am "+str(d, "valid_until")+" ab ("+de+").",
+					"The licence of "+str(d, "feature")+" expires on "+str(d, "valid_until")+" ("+en+").")
 		},
 	},
 	events.EntitlementExpired: {
@@ -144,10 +151,24 @@ var Subscriptions = map[string]Subscription{
 	events.CertificateExpiring: {
 		Category: "certificate", Critical: true,
 		Audience: func(d map[string]any) *Audience {
+			// The certificate of a collector and the collector CA (the
+			// certificate.notices run, COL-04, WP-425) concern whoever
+			// manages discovery in the collector's client and site, like
+			// collector.offline; the certificate of a CI its readers and
+			// contacts.
+			if str(d, "ci_id") == "" {
+				return &Audience{Permission: identity.PermDiscoveryManage, AllWithPermission: true,
+					ClientID: str(d, "client_id"), SiteID: str(d, "site_id")}
+			}
 			return &Audience{Permission: identity.PermCIRead, AllWithPermission: true, ClientID: str(d, "client_id"),
 				SiteID: str(d, "site_id"), CIID: str(d, "ci_id"), ContactRoles: []string{"owner", "operations"}}
 		},
 		Render: func(d map[string]any) (string, string) {
+			if str(d, "collector_id") != "" {
+				return "Collector-Zertifikat läuft ab: " + str(d, "name"),
+					text("Das Zertifikat des Collectors "+str(d, "name")+" wurde nicht rechtzeitig erneuert und läuft am "+str(d, "expires_at")+" ab.",
+						"The certificate of collector "+str(d, "name")+" was not renewed in time and expires on "+str(d, "expires_at")+".")
+			}
 			return "Zertifikat läuft ab: " + str(d, "name"),
 				text("Das Zertifikat "+str(d, "name")+" läuft am "+str(d, "expires_at")+" ab.",
 					"Certificate "+str(d, "name")+" expires on "+str(d, "expires_at")+".")

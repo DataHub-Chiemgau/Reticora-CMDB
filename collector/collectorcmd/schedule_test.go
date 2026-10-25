@@ -125,19 +125,31 @@ func (p *recordingPlugin) Collect(_ context.Context, target string, _ map[string
 }
 
 // TestPollsTargetTheSweptHosts: a due poll probes the hosts the last
-// sweep of the scope found, not the whole range.
+// sweep of the scope found, not the whole range. The sweep's reachability
+// samples go over the edge; a metric upload reaching the HTTP API without
+// a credential fails the test (the real API refuses it with 401, F-046).
 func TestPollsTargetTheSweptHosts(t *testing.T) {
 	t.Cleanup(func() { collectorScopes = &scopeCache{} })
 	var uploads, metricUploads atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/monitoring/metrics") {
-			metricUploads.Add(1)
-		} else {
-			uploads.Add(1)
+		if strings.HasSuffix(r.URL.Path, "/monitoring/metrics") && r.Header.Get("Authorization") == "" {
+			t.Errorf("F-046: a metric upload without the edge and without Authorization reached the HTTP API (%s)", r.URL.Path)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
 		}
+		uploads.Add(1)
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer srv.Close()
+	// The edge answers the metric samples only; the records take the HTTP
+	// ingest.
+	withEdge(t, func(_ context.Context, suffix string, _ []byte) ([]byte, error) {
+		if suffix != edgeMetricsSuffix {
+			return nil, errNoEdge
+		}
+		metricUploads.Add(1)
+		return []byte(`{"status":202,"ingested":2,"unassigned":0}`), nil
+	})
 	up, err := newUploader(context.Background(), testConfig(srv.URL, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)

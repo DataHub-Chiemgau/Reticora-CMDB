@@ -464,7 +464,13 @@ func (h *Handler) CreateInterface(w http.ResponseWriter, r *http.Request) {
 		Description:    req.Description,
 	}
 	if err := h.repo.CreateInterface(r.Context(), ni); err != nil {
-		if !api.WriteFieldError(w, err) {
+		switch {
+		case api.WriteFieldError(w, err):
+		case errors.Is(err, ErrNotFound):
+			// An unknown CI or one the caller cannot see, e.g. of
+			// another organization (F-311).
+			api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
+		default:
 			api.WriteRepoError(w, err)
 		}
 		return
@@ -511,15 +517,36 @@ func (h *Handler) UpdateInterface(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, ni)
 }
 
-// DeleteInterface handles DELETE /api/v1/network-interfaces/{id}
+// interfaceInUseProblem is the 409 problem of an interface that edges keep
+// (REL-05).
+type interfaceInUseProblem struct {
+	api.ProblemDetail
+	RelationshipIDs []string `json:"relationship_ids"`
+}
+
+// DeleteInterface handles DELETE /api/v1/network-interfaces/{id}: 409 while
+// an edge other than an unverified discovery edge names the interface, 404
+// for an interface the caller cannot see; unverified discovery edges go
+// with the interface.
 func (h *Handler) DeleteInterface(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := org(w, r)
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteInterface(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
+	err := h.repo.DeleteInterface(r.Context(), orgID, chi.URLParam(r, "id"))
+	var inUse *InterfaceInUseError
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.As(err, &inUse):
+		api.WriteProblemBody(w, http.StatusConflict, interfaceInUseProblem{
+			ProblemDetail: api.ProblemDetail{Type: "https://reticora.io/problems/409", Title: "Conflict",
+				Status: http.StatusConflict, Detail: inUse.Error()},
+			RelationshipIDs: append([]string{}, inUse.RelationshipIDs...),
+		})
+	case errors.Is(err, ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", "network interface not found")
-		return
+	default:
+		api.WriteRepoError(w, err)
 	}
-	w.WriteHeader(http.StatusNoContent)
 }

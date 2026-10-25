@@ -22,7 +22,6 @@ go;backend/internal/middleware;TestAuditT2SuccessfulRefreshDoesNotConsumePreAuth
 go;backend/internal/rack;TestAuditDefectRackHeightNotBelowMounts;F-140
 go;backend/internal/relationship;TestAuditCleanupCronScopeDeadline;F-111
 go;backend/internal/server;TestAuditDefectDiscoveryJobInGenericJobModel;F-146
-go;backend/internal/server;TestAuditDefectManualEdgeSurvivesInterfaceSync;F-042
 go;backend/internal/server;TestAuditDefectRouteAuditFailureLeavesNoUnauditedMutation;F-149
 go;backend/internal/server;TestAuditDefectRouteAuditStoresOldAndNewValues;F-148
 go;backend/internal/server;TestAuditT2AIOptInSettableThroughAPI;F-074
@@ -41,7 +40,6 @@ go;backend/internal/webhook;TestAuditDefectWebhookConsumerKeepsEventsOnTransient
 go;collector/collectorcmd;TestAuditCollectorEnrollsFromEnvironment;F-101
 go;collector/collectorcmd;TestAuditScopeExpansionCompleteOrReported;F-106
 go;collector/collectorcmd;TestAuditScopeScheduleSurvivesRestart;F-109
-go;collector/collectorcmd;TestAuditT7MetricSamplesReachTheServerAuthenticated;F-046
 go;collector/plugins/snmp;TestAuditSNMPv3AuthFailureReported;F-105
 go;edgecore/buffer;TestAuditT3CorruptHeadDoesNotBlockSpool;F-085
 go;edgecore/buffer;TestAuditT3SpoolLossSurvivesRestart;F-084
