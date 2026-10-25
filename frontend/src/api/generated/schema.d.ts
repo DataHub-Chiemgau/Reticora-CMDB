@@ -30,7 +30,7 @@ export interface paths {
     };
     /**
      * Readiness check
-     * @description Checks the configured dependencies (database with required extensions, Redis, object storage, NATS) with a timeout per check. Liveness stays on /healthz. Failing checks are only named; the cause is logged by the server. On an instance that runs the ingest worker, `details.ingest` reports the last 30-second sample of the ingest lane backlog (WP-334, OPS-05), summed over all organizations, with its `sampled_at`; the request itself makes no call to NATS. The detail is informational and never changes the status.
+     * @description Checks the configured dependencies (database with required extensions, Redis, object storage, NATS) with a timeout per check. The database check also fails while the event trigger that restricts the application roles to index DDL is disabled or missing, e.g. after an aborted TimescaleDB extension update (WP-604, OPS-01); an extension below the version of its installed library is only logged as a warning by the start check of the server. Liveness stays on /healthz. Failing checks are only named; the cause is logged by the server. On an instance that runs the ingest worker, `details.ingest` reports the last 30-second sample of the ingest lane backlog (WP-334, OPS-05), summed over all organizations, with its `sampled_at`; the request itself makes no call to NATS. The detail is informational and never changes the status.
      */
     get: operations['getReadiness'];
     put?: never;

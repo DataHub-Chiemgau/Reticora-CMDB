@@ -153,22 +153,41 @@ auf, die CI auf 2.17.2. Geprüft am 2026-10-21 mit einer Datenbank, die mit
   Reticora-Datenbank läuft davor der Event-Trigger `reticora_restrict_app_ddl`
   (Migration 000078) und lädt die alte Version; die Sitzung bricht dann mit
   `FATAL: "timescaledb" already loaded with a different version` ab, die
-  Version bleibt. Ablauf als Bootstrap-Superuser `reticora`, jede Anweisung
-  in einer eigenen Sitzung (Compose: `docker compose exec postgres …`), bei
-  gestopptem Dienst `server`, weil der Event-Trigger solange die DDL der
-  App-Rollen nicht einschränkt:
+  Version bleibt.
+- Das Update führt `scripts/ops/timescaledb-update.sh` aus (WP-604): Es liest
+  `extversion` und `default_version`; ist die Erweiterung älter, schaltet es
+  den Event-Trigger aus, führt das Update aus und schaltet den Trigger wieder
+  ein, jede Anweisung in einer eigenen `psql -X`-Sitzung als
+  Bootstrap-Superuser. Solange ein Login der App-Rollen (`reticora_app`,
+  `reticora_owner`, ohne SUPERUSER) mit der Datenbank verbunden ist, schaltet
+  es den Trigger nicht aus und bricht nach `TSDB_UPDATE_SESSION_WAIT`
+  Sekunden (15) ab. Bricht es ab, schaltet ein Trap den Trigger trotzdem
+  wieder ein; einen von einem früheren Abbruch ausgeschalteten Trigger
+  schaltet es ein. `postgres` und `template1` (ohne den Event-Trigger)
+  erhalten nur das Update. Bei aktueller Version ändert es nichts.
+  `install-cloud.sh` stoppt bei jedem Lauf den Dienst `server` und ruft das
+  Skript zwischen dem Passwortabgleich und den Migrationen auf; bei
+  Kubernetes mit externer Datenbank führt es der Betreiber vor dem Rollout
+  aus (`deploy/README.md`, Abschnitt 3). Der Server startet nicht und
+  `/readyz` meldet `database: unavailable`, solange der Trigger ausgeschaltet
+  ist oder fehlt; eine Erweiterung unter `default_version` meldet die
+  Startprüfung als Warnung im Log. Manuell (Compose):
 
   ```sh
-  psql -X -U reticora -d reticora -c 'ALTER EVENT TRIGGER reticora_restrict_app_ddl DISABLE'
-  psql -X -U reticora -d reticora -c 'ALTER EXTENSION timescaledb UPDATE'
-  psql -X -U reticora -d reticora -c 'ALTER EVENT TRIGGER reticora_restrict_app_ddl ENABLE'
-  psql -X -U reticora -d reticora -Atc "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'"
+  compose="docker compose --env-file deploy/docker-compose/.env -f deploy/docker-compose/docker-compose.yml"
+  $compose stop server
+  scripts/ops/timescaledb-update.sh -- $compose exec -T postgres psql -U reticora
+  $compose up -d server
   ```
 
-  In `postgres` und `template1` (ohne den Event-Trigger) genügt die zweite
-  Anweisung. Die Kompressions-Policy heißt danach `Columnstore Policy` statt
+  Die Kompressions-Policy heißt danach `Columnstore Policy` statt
   `Compression Policy`; Schema-Baseline-Test und die Metrik-Tests
   (`internal/monitoring`) waren auf der so aktualisierten Datenbank grün.
+  `tests/timescaledb-update.test.sh` prüft den Ablauf mit Stubs und, mit
+  `TSDB_UPDATE_TEST_DATABASE_URL` (CI-Job `migrations`), gegen eine mit
+  2.17.2 angelegte und migrierte Datenbank: danach `default_version`,
+  Trigger aktiv, Migrationen vollständig und
+  `TestSchemaBaselineMatchesMigratedSchema` grün.
 - Eine Datenbank, deren Erweiterung neuer als 2.31.0 ist, ist mit diesem
   Image nicht nutzbar: Der Server startet, aber jede Anweisung in ihr
   scheitert mit `could not access file "$libdir/timescaledb-<Version>"`

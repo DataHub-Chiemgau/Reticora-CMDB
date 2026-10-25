@@ -118,6 +118,7 @@ stub_stack() {
     }
     wait_for_service() { return 0; }
     sync_db_password() { :; }
+    update_timescaledb() { :; }
     run_migrations() { :; }
     seed_default_organization() { :; }
     ensure_runtime_login() { :; }

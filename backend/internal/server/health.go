@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
@@ -139,23 +140,85 @@ func readinessDetail(parent context.Context, c ReadinessCheck) any {
 	return map[string]string{"error": "unavailable"}
 }
 
-// DatabaseReadiness checks that PostgreSQL answers and that the given
-// extensions are installed.
+// DDLGuardEventTrigger is the event trigger of migration 000078 that
+// restricts the application roles to index DDL (CH19). The update of the
+// TimescaleDB extension disables it for the duration of the update
+// (scripts/ops/timescaledb-update.sh, WP-604); an aborted update could leave
+// it disabled.
+const DDLGuardEventTrigger = "reticora_restrict_app_ddl"
+
+// DatabaseReadiness checks that PostgreSQL answers, that the given
+// extensions are installed and that DDLGuardEventTrigger exists and is
+// enabled (OPS-01, WP-604). Both are catalog lookups. The first check — the
+// start check of cmd/server — also logs a warning for every given extension
+// that is not at the default version of its installed library: after an
+// image update TimescaleDB keeps its version until
+// scripts/ops/timescaledb-update.sh raises it. That comparison reads the
+// extension control files of the server, so it is not repeated per probe,
+// and the versions go to the log only, not to the unauthenticated /readyz.
 func DatabaseReadiness(pool *pgxpool.Pool, extensions []string) ReadinessCheck {
+	var versionsCompared atomic.Bool
 	return ReadinessCheck{Name: "database", Check: func(ctx context.Context) error {
-		var missing []string
+		var (
+			missing []string
+			trigger *string
+		)
 		err := pool.QueryRow(ctx, `
-			SELECT COALESCE(array_agg(e ORDER BY e), '{}')
-			FROM unnest($1::text[]) AS e
-			WHERE NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = e)`, extensions).Scan(&missing)
+			SELECT ARRAY(SELECT e FROM unnest($1::text[]) AS e
+			              WHERE NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = e)
+			              ORDER BY e),
+			       (SELECT evtenabled::text FROM pg_event_trigger WHERE evtname = $2)`,
+			extensions, DDLGuardEventTrigger).Scan(&missing, &trigger)
 		if err != nil {
 			return fmt.Errorf("query database: %w", err)
+		}
+		if versionsCompared.CompareAndSwap(false, true) {
+			warnOutdatedExtensions(ctx, pool, extensions)
 		}
 		if len(missing) > 0 {
 			return fmt.Errorf("missing PostgreSQL extensions: %s", strings.Join(missing, ", "))
 		}
+		switch {
+		case trigger == nil:
+			return fmt.Errorf("event trigger %s is missing; apply the migrations", DDLGuardEventTrigger)
+		// O: enabled, A: always; D (disabled) and R (replica only) do not
+		// fire in the sessions of the application.
+		case *trigger != "O" && *trigger != "A":
+			return fmt.Errorf("event trigger %s is not enabled (evtenabled %s); "+
+				"run scripts/ops/timescaledb-update.sh or, as the bootstrap superuser, ALTER EVENT TRIGGER %s ENABLE",
+				DDLGuardEventTrigger, *trigger, DDLGuardEventTrigger)
+		}
 		return nil
 	}}
+}
+
+// warnOutdatedExtensions logs a warning for every extension of extensions
+// whose installed version differs from the default version of the library
+// the server ships.
+func warnOutdatedExtensions(ctx context.Context, pool *pgxpool.Pool, extensions []string) {
+	rows, err := pool.Query(ctx, `
+		SELECT e.extname::text, e.extversion, a.default_version
+		  FROM pg_extension e JOIN pg_available_extensions a ON a.name = e.extname
+		 WHERE e.extname = ANY($1::text[]) AND e.extversion IS DISTINCT FROM a.default_version
+		 ORDER BY e.extname`, extensions)
+	if err != nil {
+		slog.Warn("could not compare the PostgreSQL extension versions", "error", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, version, defaultVersion string
+		if err := rows.Scan(&name, &version, &defaultVersion); err != nil {
+			slog.Warn("could not compare the PostgreSQL extension versions", "error", err)
+			return
+		}
+		slog.Warn("PostgreSQL extension is not at the version of its installed library; "+
+			"update it with scripts/ops/timescaledb-update.sh (TimescaleDB) or ALTER EXTENSION <name> UPDATE",
+			"extension", name, "version", version, "default_version", defaultVersion)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("could not compare the PostgreSQL extension versions", "error", err)
+	}
 }
 
 // TCPReadiness checks that a TCP connection to address (host:port) can be

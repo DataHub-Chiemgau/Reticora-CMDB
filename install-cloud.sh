@@ -1541,6 +1541,12 @@ start_stack() {
 
     sync_db_password
 
+    # The server of the previous run must not work on the database while its
+    # TimescaleDB extension is updated and the schema migrated (WP-604).
+    info "Stopping the Reticora server for the database update …"
+    compose_cmd stop server || die "Could not stop the Reticora server before the database update."
+    update_timescaledb
+
     run_migrations
     seed_default_organization
     ensure_runtime_login
@@ -1603,6 +1609,26 @@ start_stack() {
     # proxy, which cannot answer before the frontend runs (F-035).
     check_issuer_from_host
     check_issuer_from_container
+}
+
+# update_timescaledb — a database created with an older image keeps its
+# TimescaleDB extension version; scripts/ops/timescaledb-update.sh raises it
+# to the version of the current image (WP-604, INS-05), each statement in a
+# psql -X session of its own as the bootstrap superuser, with the event
+# trigger reticora_restrict_app_ddl disabled only around the update. A current
+# extension is left alone. Runs with the server stopped, before the
+# migrations.
+update_timescaledb() {
+    info "Checking the TimescaleDB extension version …"
+    # The compose files of compose_cmd.
+    local files=(-f "$COMPOSE_FILE")
+    if [ -f "$OVERRIDE_FILE" ]; then
+        files+=(-f "$OVERRIDE_FILE")
+    fi
+    bash "$SCRIPT_DIR/scripts/ops/timescaledb-update.sh" --database reticora -- \
+        "${COMPOSE[@]}" --env-file "$ENV_FILE" "${files[@]}" exec -T postgres psql -U reticora \
+        || die "The TimescaleDB extension update failed — see docs/troubleshooting-installation.md, 'TimescaleDB extension update failed'."
+    success "TimescaleDB extension is current"
 }
 
 run_migrations() {

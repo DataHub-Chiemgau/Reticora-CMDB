@@ -44,6 +44,7 @@ healthy".
 | Session key unreadable | `docker compose logs server` shows `read session key: permission denied` or `is a directory` | Re-run the installer — `ensure_session_key` removes Docker-created directories and fixes ownership (`uid:65534`, mode `0640`). |
 | Database password mismatch | `logs postgres` / `logs server` show `SQLSTATE 28P01` (password authentication failed) | Re-run the installer — `sync_db_password` probes both databases (CMDB and Keycloak) over TCP and resets a stale role password to the value in `.env` using a temporary trust-auth instance. **Manual alternative (data loss):** `docker compose down -v` removes the stale volume. |
 | Migrations not applied | `logs server` shows missing tables/columns | Re-run the installer; migrations run before the server starts. |
+| DDL event trigger disabled | `logs server` shows `database is not ready … event trigger reticora_restrict_app_ddl is not enabled` (or `is missing`); `/readyz` answers `"database":"unavailable"` | An aborted TimescaleDB update left it disabled — see [TimescaleDB extension update failed](#timescaledb-extension-update-failed). Re-run the installer; the update step enables it again. |
 
 **General diagnosis:**
 
@@ -51,6 +52,61 @@ healthy".
 docker compose --env-file .env logs --tail 80 server
 docker compose --env-file .env ps   # shows health status of every service
 ```
+
+### TimescaleDB extension update failed
+
+**Symptom:** `install-cloud.sh` aborts with "The TimescaleDB extension update
+failed", after a line such as
+`timescaledb-update: error: reticora: ALTER EXTENSION timescaledb UPDATE failed; timescaledb stays at 2.17.2`.
+Updating by hand without the script ends with
+
+```text
+FATAL:  "timescaledb" already loaded with a different version
+DETAIL:  The new version is "2.31.0", this session is using version "2.17.2". The session will be restarted.
+```
+
+**Cause:** a database keeps the TimescaleDB extension version it was created
+with when the database image brings a newer TimescaleDB. Before the
+migrations, the installer stops the server and runs
+`scripts/ops/timescaledb-update.sh`, which raises the extension in `reticora`,
+`postgres` and `template1` to the image's version (WP-604). The update must be
+the first statement of its session; in `reticora` the event trigger
+`reticora_restrict_app_ddl` would load the old library first (the FATAL
+above), so the script disables it only around the update and enables it
+again, also when the update fails.
+
+**Fix:**
+
+- Read the `timescaledb-update:` lines and the PostgreSQL error before them;
+  `docker compose --env-file .env logs --tail 80 postgres` shows the server
+  side. Re-run the installer; the step is idempotent and leaves a current
+  extension alone.
+- `the application is still connected (<logins>)`: a login of the
+  application roles still had a session after 15 seconds
+  (`TSDB_UPDATE_SESSION_WAIT`); the script does not disable the trigger while
+  the application can run DDL. Stop every process that uses the runtime login
+  (`docker compose --env-file .env stop server`; Kubernetes: scale
+  `reticora-server` to 0) and re-run.
+- `timescaledb … is newer than the installed library`: the database was
+  served by a newer image. Install a release whose `reticora-postgres` image
+  carries at least that TimescaleDB version; this image cannot serve it.
+- `the event trigger reticora_restrict_app_ddl could not be enabled again`:
+  enable it by hand before the server starts, then check the state (`O` is
+  enabled):
+
+  ```bash
+  docker compose --env-file .env exec -T postgres psql -X -U reticora -d reticora \
+    -c 'ALTER EVENT TRIGGER reticora_restrict_app_ddl ENABLE'
+  docker compose --env-file .env exec -T postgres psql -X -U reticora -d reticora \
+    -Atc "SELECT evtenabled FROM pg_event_trigger WHERE evtname = 'reticora_restrict_app_ddl'"
+  ```
+
+The server refuses to start, and `/readyz` reports `"database":"unavailable"`,
+while the trigger is disabled or missing; an extension below the version of
+the installed library is logged by the server as a warning at start
+(`PostgreSQL extension is not at the version of its installed library`). On
+Kubernetes with an external database the operator runs the script before the
+rollout (`deploy/README.md`, section 3).
 
 ---
 
@@ -285,6 +341,7 @@ The installer is safe to re-run and reuses existing `.env` values as defaults:
 | TLS bootstrap cert | Reused; regenerated when SAN-less or expiring within a day (a running frontend reloads it before the issuer checks). |
 | Let's Encrypt cert | Not re-issued when a real certificate is present. |
 | Realm file | Re-rendered and validated on every run. Keycloak imports it only while the realm does not exist (`start --import-realm` skips an existing realm). |
+| TimescaleDB extension | The server is stopped before the migrations; an extension below the version of the current database image is updated (`scripts/ops/timescaledb-update.sh`), a current one is left alone. |
 | Migrations | Tracked in `reticora_schema_migrations`; already-applied versions are skipped. |
 | Image pins (release mode) | `RETICORA_SERVER_IMAGE`, `RETICORA_FRONTEND_IMAGE` and `RETICORA_POSTGRES_IMAGE` are written by the installer: verified again with cosign and re-pinned on every run of the release mode (the default), empty for the local source build (`--build-from-source`). A pin of an earlier run is never reused unverified. The mode is not remembered: every run without `--build-from-source` installs the signed release (section 9). |
 
