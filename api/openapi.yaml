@@ -1912,8 +1912,9 @@ paths:
       tags: [Export]
       summary: List asynchronous export jobs
       description: Returns the caller's own export jobs newest first; jobs of
-        other users are not listed. Completed, unexpired jobs carry a
-        time-limited signed download URL.
+        other users are not listed, nor jobs whose recorded scope (`scope`)
+        the caller's current scope no longer covers. Completed, unexpired
+        jobs carry a time-limited signed download URL.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -2106,8 +2107,9 @@ paths:
       tags: [Export]
       summary: List asynchronous export jobs
       description: Returns the caller's own export jobs newest first; jobs of
-        other users are not listed. Completed, unexpired jobs carry a
-        time-limited signed download URL.
+        other users are not listed, nor jobs whose recorded scope (`scope`)
+        the caller's current scope no longer covers. Completed, unexpired
+        jobs carry a time-limited signed download URL.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -2162,8 +2164,9 @@ paths:
       x-successor: '/api/v1/exports/{id}'
       tags: [Export]
       summary: Get an export job
-      description: Only the job's creator reads it; for anyone else the job
-        does not exist (404).
+      description: Only the job's creator reads it, and only while its current
+        scope covers the scope the job recorded (`scope`); for anyone else the
+        job does not exist (404).
       responses:
         '200':
           description: Export job
@@ -2183,8 +2186,9 @@ paths:
       operationId: getExportJob
       tags: [Export]
       summary: Get an export job
-      description: Only the job's creator reads it; for anyone else the job
-        does not exist (404).
+      description: Only the job's creator reads it, and only while its current
+        scope covers the scope the job recorded (`scope`); for anyone else the
+        job does not exist (404).
       responses:
         '200':
           description: Export job

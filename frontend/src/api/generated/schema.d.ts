@@ -990,7 +990,7 @@ export interface paths {
     /**
      * List asynchronous export jobs
      * @deprecated
-     * @description Returns the caller's own export jobs newest first; jobs of other users are not listed. Completed, unexpired jobs carry a time-limited signed download URL.
+     * @description Returns the caller's own export jobs newest first; jobs of other users are not listed, nor jobs whose recorded scope (`scope`) the caller's current scope no longer covers. Completed, unexpired jobs carry a time-limited signed download URL.
      */
     get: operations['listExportJobsLegacy'];
     put?: never;
@@ -1106,7 +1106,7 @@ export interface paths {
     };
     /**
      * List asynchronous export jobs
-     * @description Returns the caller's own export jobs newest first; jobs of other users are not listed. Completed, unexpired jobs carry a time-limited signed download URL.
+     * @description Returns the caller's own export jobs newest first; jobs of other users are not listed, nor jobs whose recorded scope (`scope`) the caller's current scope no longer covers. Completed, unexpired jobs carry a time-limited signed download URL.
      */
     get: operations['listExportJobs'];
     put?: never;
@@ -1138,7 +1138,7 @@ export interface paths {
     /**
      * Get an export job
      * @deprecated
-     * @description Only the job's creator reads it; for anyone else the job does not exist (404).
+     * @description Only the job's creator reads it, and only while its current scope covers the scope the job recorded (`scope`); for anyone else the job does not exist (404).
      */
     get: operations['getExportJobLegacy'];
     put?: never;
@@ -1161,7 +1161,7 @@ export interface paths {
     };
     /**
      * Get an export job
-     * @description Only the job's creator reads it; for anyone else the job does not exist (404).
+     * @description Only the job's creator reads it, and only while its current scope covers the scope the job recorded (`scope`); for anyone else the job does not exist (404).
      */
     get: operations['getExportJob'];
     put?: never;

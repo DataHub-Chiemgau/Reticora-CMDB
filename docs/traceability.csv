@@ -619,3 +619,5 @@ TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;
 TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-407
 TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-407
 WFL-01;[P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-407
+TEN-09;[Q];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-409
+TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-409

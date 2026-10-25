@@ -20,8 +20,20 @@ const jobColumns = `id::text, organization_id::text, COALESCE(initiated_by::text
 // ownJob restricts request paths to the jobs of the principal: the user id
 // comes from the transaction's tenant scope, not from the request. It is
 // compared as text, so a principal without a user id (or one that is no
-// uuid) sees no job instead of failing.
-const ownJob = `initiated_by::text = NULLIF(current_setting('app.user_id', true), '')`
+// uuid) sees no job instead of failing. The job's scope snapshot must lie in
+// the principal's scope, the rule of job_isolation for the job the export is
+// mirrored into (migration 000154, WP-404): a creator whose scope no longer
+// covers the export neither lists nor reads it and gets no download URL of
+// data its scope does not read (WP-409, TEN-09). In every dimension the
+// principal is org-wide (empty GUC) or the snapshot lies completely in its
+// scope; a job without snapshot is the organization's.
+const ownJob = `initiated_by::text = NULLIF(current_setting('app.user_id', true), '')` +
+	` AND (NULLIF(current_setting('` + database.ClientScopeGUC + `', true), '') IS NULL` +
+	` OR (scope_clients IS NOT NULL AND scope_clients <@ string_to_array(current_setting('` + database.ClientScopeGUC + `', true), ',')::uuid[]))` +
+	` AND (NULLIF(current_setting('` + database.SiteScopeGUC + `', true), '') IS NULL` +
+	` OR (scope_sites IS NOT NULL AND scope_sites <@ string_to_array(current_setting('` + database.SiteScopeGUC + `', true), ',')::uuid[]))` +
+	` AND (NULLIF(current_setting('` + database.TeamScopeGUC + `', true), '') IS NULL` +
+	` OR (scope_teams IS NOT NULL AND scope_teams <@ string_to_array(current_setting('` + database.TeamScopeGUC + `', true), ',')::uuid[]))`
 
 // PGJobRepository implements JobRepository on PostgreSQL with RLS. Request
 // paths run in database.WithTenant with the principal's scope; the worker

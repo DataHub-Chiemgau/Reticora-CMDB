@@ -3,7 +3,9 @@ package export
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,10 +42,36 @@ func (r *MemoryJobRepository) CreateJob(_ context.Context, orgID string, job *Jo
 }
 
 // ownedBy mirrors the creator restriction of the PostgreSQL repository: with
-// a tenant scope in ctx, only the scope's user owns jobs.
+// a tenant scope in ctx, only the scope's user owns jobs, and only while the
+// job's scope snapshot lies in the scope (WP-409).
 func ownedBy(ctx context.Context, job *Job) bool {
 	scope, ok := database.TenantScopeFromContext(ctx)
-	return !ok || (scope.UserID != "" && job.InitiatedBy == scope.UserID)
+	return !ok || (scope.UserID != "" && job.InitiatedBy == scope.UserID && withinScope(job.Scope, &scope))
+}
+
+// withinScope reports whether in every dimension the scope is org-wide or
+// holds every id of the snapshot; a job without snapshot needs an org-wide
+// scope (ownJob of the PostgreSQL repository).
+func withinScope(snapshot *JobScope, scope *database.TenantScope) bool {
+	if snapshot == nil {
+		snapshot = &JobScope{}
+	}
+	within := func(ids []string, set database.ScopeSet) bool {
+		if set.IsAll() {
+			return true
+		}
+		if ids == nil {
+			return false
+		}
+		allowed := set.IDs()
+		for _, id := range ids {
+			if !slices.ContainsFunc(allowed, func(a string) bool { return strings.EqualFold(a, id) }) {
+				return false
+			}
+		}
+		return true
+	}
+	return within(snapshot.Clients, scope.Clients) && within(snapshot.Sites, scope.Sites) && within(snapshot.Teams, scope.Teams)
 }
 
 func (r *MemoryJobRepository) GetJob(ctx context.Context, orgID, id string) (*Job, error) {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/go-chi/chi/v5"
@@ -200,6 +201,31 @@ func TestListJobsTenantIsolation(t *testing.T) {
 	for _, job := range resp.Data {
 		if job.OrganizationID != "org-1" {
 			t.Fatalf("cross-tenant job leaked: %s", job.OrganizationID)
+		}
+	}
+}
+
+// TestJobOutsideTheCreatorsScope covers the memory repository's mirror of
+// ownJob (WP-409): the creator reads and lists a job only while its scope
+// covers the job's snapshot.
+func TestJobOutsideTheCreatorsScope(t *testing.T) {
+	const client1, client2 = "00000000-0000-4000-8000-0000000000c1", "00000000-0000-4000-8000-0000000000c2"
+	jobs, _, _, mux := newJobEnv(t, ci.NewMemoryRepository())
+	job := &Job{Format: "json", InitiatedBy: "user-1", Scope: &JobScope{Clients: []string{client1}}}
+	if err := jobs.CreateJob(context.Background(), "org-1", job); err != nil {
+		t.Fatal(err)
+	}
+	for client, want := range map[string]int{client1: http.StatusOK, client2: http.StatusNotFound} {
+		scope := database.OrgWideScope("org-1", "user-1")
+		scope.Clients = database.ScopeIDs(client)
+		for path, ok := range map[string]string{"/api/v1/export/jobs/" + job.ID: job.ID, "/api/v1/export/jobs": job.ID} {
+			req := tenantCtx(httptest.NewRequest("GET", path, nil))
+			req = req.WithContext(database.ContextWithTenantScope(req.Context(), &scope))
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if listed := strings.Contains(w.Body.String(), ok); listed != (want == http.StatusOK) || (path != "/api/v1/export/jobs" && w.Code != want) {
+				t.Errorf("GET %s with client scope %s: %d, job shown %v; want %d", path, client, w.Code, listed, want)
+			}
 		}
 	}
 }
