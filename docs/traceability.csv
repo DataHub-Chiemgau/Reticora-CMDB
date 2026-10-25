@@ -615,3 +615,4 @@ IMP-05;[B];C;backend/internal/topology/multi_integration_test.go;WP-403
 UI-06;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-403
 API-09;[B];C;backend/internal/jobs/scope_integration_test.go;WP-404
 JOB-03;[B];C;backend/internal/jobs/scope_integration_test.go;WP-404
+TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-406

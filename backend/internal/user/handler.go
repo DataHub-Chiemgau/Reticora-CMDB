@@ -456,10 +456,13 @@ func (h *Handler) GetTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", "team not found")
+	if !ok {
+		return
+	}
 	item, err := h.repo.GetTeam(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "team not found")
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
@@ -492,7 +495,7 @@ func (h *Handler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.CreateTeam(r.Context(), team); err != nil {
-		api.WriteRepoError(w, err)
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
@@ -506,7 +509,10 @@ func (h *Handler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", "team not found")
+	if !ok {
+		return
+	}
 	var req UpdateTeamRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -515,7 +521,7 @@ func (h *Handler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.repo.UpdateTeam(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "team not found")
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
@@ -529,9 +535,12 @@ func (h *Handler) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", "team not found")
+	if !ok {
+		return
+	}
 	if err := h.repo.DeleteTeam(r.Context(), t.OrganizationID, id); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "team not found")
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
@@ -545,10 +554,13 @@ func (h *Handler) ListTeamMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	teamID := chi.URLParam(r, "id")
+	teamID, ok := api.ParseUUIDParam(w, r, "id", "team not found")
+	if !ok {
+		return
+	}
 	members, err := h.repo.ListTeamMembers(r.Context(), t.OrganizationID, teamID)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
@@ -562,7 +574,10 @@ func (h *Handler) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	teamID := chi.URLParam(r, "id")
+	teamID, ok := api.ParseUUIDParam(w, r, "id", "team not found")
+	if !ok {
+		return
+	}
 	var req AddMemberRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -586,7 +601,7 @@ func (h *Handler) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.AddTeamMember(r.Context(), t.OrganizationID, member); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
@@ -600,15 +615,45 @@ func (h *Handler) RemoveTeamMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	teamID := chi.URLParam(r, "teamId")
-	userID := chi.URLParam(r, "userId")
+	teamID, ok := api.ParseUUIDParam(w, r, "teamId", "team not found")
+	if !ok {
+		return
+	}
+	userID, ok := api.ParseUUIDParam(w, r, "userId", "team member not found")
+	if !ok {
+		return
+	}
 
 	if err := h.repo.RemoveTeamMember(r.Context(), t.OrganizationID, teamID, userID); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeTeamError answers a failed team, team member or role request: an
+// object that is unknown, of another organization or outside the caller's
+// team scope is 404 with notFound (a member: "team member not found"), a
+// duplicate member 409, a system role 404, a user or lead outside the
+// organization the 422 field error (TEN-04). Database errors go through
+// api.WriteRepoError (23505 is 409 without the constraint name, F-047);
+// their text goes to the log only.
+func writeTeamError(w http.ResponseWriter, r *http.Request, notFound string, err error) {
+	switch {
+	case errors.Is(err, errMemberNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "team member not found")
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", notFound)
+	case errors.Is(err, ErrConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
+	case errors.Is(err, ErrSystemRole):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrSystemRole.Error())
+	case api.WriteFieldError(w, err):
+	default:
+		slog.WarnContext(r.Context(), "team or role request failed", "error", err)
+		api.WriteRepoError(w, err)
+	}
 }
 
 // --- Role handlers ---
@@ -643,10 +688,13 @@ func (h *Handler) GetRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", "role not found")
+	if !ok {
+		return
+	}
 	item, err := h.repo.GetRole(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "role not found")
+		writeTeamError(w, r, "role not found", err)
 		return
 	}
 
@@ -696,7 +744,10 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", "role not found")
+	if !ok {
+		return
+	}
 	var req UpdateRoleRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -715,7 +766,7 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+		writeTeamError(w, r, "role not found", err)
 		return
 	}
 
@@ -729,9 +780,12 @@ func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", "role not found")
+	if !ok {
+		return
+	}
 	if err := h.repo.DeleteRole(r.Context(), t.OrganizationID, id); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+		writeTeamError(w, r, "role not found", err)
 		return
 	}
 

@@ -2,6 +2,7 @@ package rack
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"sort"
 
@@ -62,17 +63,29 @@ func org(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return t.OrganizationID, true
 }
 
-// writeRepoError maps repository sentinel errors to HTTP responses.
-func writeRepoError(w http.ResponseWriter, err error, notFoundMsg string) {
+// writeRepoError maps repository sentinel errors to HTTP responses: a rack
+// rule answers with its fixed domain message (RuleError: 400 or 409, e.g.
+// the occupied units), a CI that is unknown or outside the scope 422 on
+// ci_id. Database errors go through api.WriteRepoError; no driver,
+// constraint or policy text reaches the client (F-047), the log keeps it.
+func writeRepoError(w http.ResponseWriter, r *http.Request, err error, notFoundMsg string) {
+	var rule *RuleError
 	switch {
 	case errors.Is(err, ErrNotFound), errors.Is(err, ErrRackNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", notFoundMsg)
-	case errors.Is(err, ErrValidation):
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+	case errors.Is(err, ErrCINotFound):
+		api.WriteFieldError(w, &api.FieldError{Field: "ci_id", Message: "CI not found", Status: http.StatusUnprocessableEntity})
+	case errors.As(err, &rule) && errors.Is(rule.Rule, ErrConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", rule.Detail)
+	case errors.As(err, &rule):
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", rule.Detail)
 	case errors.Is(err, ErrConflict):
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		api.WriteError(w, http.StatusConflict, "Conflict", "the mount conflicts with the occupancy of the rack")
+	case errors.Is(err, ErrValidation):
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "the mount is not valid")
 	case api.WriteFieldError(w, err):
 	default:
+		slog.WarnContext(r.Context(), "rack request failed", "error", err)
 		api.WriteRepoError(w, err)
 	}
 }
@@ -150,7 +163,7 @@ func (h *Handler) CreateRack(w http.ResponseWriter, r *http.Request) {
 		Notes:          req.Notes,
 	}
 	if err := h.repo.CreateRack(r.Context(), rk); err != nil {
-		writeRepoError(w, err, "rack not found")
+		writeRepoError(w, r, err, "rack not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, rk)
@@ -193,7 +206,7 @@ func (h *Handler) UpdateRack(w http.ResponseWriter, r *http.Request) {
 	}
 	rk, err := h.repo.UpdateRack(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		writeRepoError(w, err, "rack not found")
+		writeRepoError(w, r, err, "rack not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, rk)
@@ -237,12 +250,12 @@ func (h *Handler) GetLayout(w http.ResponseWriter, r *http.Request) {
 	}
 	rk, err := h.repo.GetRack(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
-		writeRepoError(w, err, "rack not found")
+		writeRepoError(w, r, err, "rack not found")
 		return
 	}
 	mounts, _, err := h.repo.ListMounts(r.Context(), orgID, rk.ID, api.PaginationParams{Limit: maxLayoutMounts})
 	if err != nil {
-		writeRepoError(w, err, "rack not found")
+		writeRepoError(w, r, err, "rack not found")
 		return
 	}
 	sort.Slice(mounts, func(i, j int) bool { return mounts[i].PositionU < mounts[j].PositionU })
@@ -309,20 +322,20 @@ func (h *Handler) PutMount(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, ErrNotFound):
 		m := &RackMount{OrganizationID: orgID, RackID: rackID, CIID: ciID, PositionU: req.PositionU, HeightU: req.HeightU, Face: req.Face}
 		if cerr := h.repo.CreateMount(r.Context(), m); cerr != nil {
-			writeRepoError(w, cerr, "rack not found")
+			writeRepoError(w, r, cerr, "rack not found")
 			return
 		}
 		api.WriteJSON(w, http.StatusCreated, m)
 		return
 	case err != nil:
-		writeRepoError(w, err, "rack not found")
+		writeRepoError(w, r, err, "rack not found")
 		return
 	}
 	m, err := h.repo.UpdateMount(r.Context(), orgID, current.ID, UpdateMountRequest{
 		RackID: &rackID, PositionU: &req.PositionU, HeightU: &req.HeightU, Face: &req.Face,
 	})
 	if err != nil {
-		writeRepoError(w, err, "rack not found")
+		writeRepoError(w, r, err, "rack not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, m)
@@ -340,7 +353,7 @@ func (h *Handler) UnmountCI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err = h.repo.DeleteMount(r.Context(), orgID, m.ID); err != nil {
-		writeRepoError(w, err, "rack mount not found")
+		writeRepoError(w, r, err, "rack mount not found")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -355,7 +368,7 @@ func (h *Handler) ListMounts(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListMounts(r.Context(), orgID, chi.URLParam(r, "id"), page)
 	if err != nil {
-		writeRepoError(w, err, "rack not found")
+		writeRepoError(w, r, err, "rack not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[RackMount]{
@@ -420,7 +433,7 @@ func (h *Handler) CreateMount(w http.ResponseWriter, r *http.Request) {
 		Face:           face,
 	}
 	if err := h.repo.CreateMount(r.Context(), m); err != nil {
-		writeRepoError(w, err, "rack not found")
+		writeRepoError(w, r, err, "rack not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, m)
@@ -453,7 +466,7 @@ func (h *Handler) UpdateMount(w http.ResponseWriter, r *http.Request) {
 	}
 	m, err := h.repo.UpdateMount(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		writeRepoError(w, err, "rack mount not found")
+		writeRepoError(w, r, err, "rack mount not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, m)
@@ -466,7 +479,7 @@ func (h *Handler) DeleteMount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.DeleteMount(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
-		writeRepoError(w, err, "rack mount not found")
+		writeRepoError(w, r, err, "rack mount not found")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

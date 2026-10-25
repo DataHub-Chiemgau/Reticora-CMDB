@@ -60,7 +60,7 @@ func recordPlacement(ctx context.Context, tx pgx.Tx, orgID, ciID, action string,
 				WHERE organization_id = $1 AND id = $2`, orgID, ciID, location)
 		}
 		if err != nil {
-			return fmt.Errorf("%w: set location from rack placement: %v", ErrValidation, err)
+			return fmt.Errorf("set location from rack placement: %w", err)
 		}
 	}
 

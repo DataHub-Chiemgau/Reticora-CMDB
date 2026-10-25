@@ -10,15 +10,9 @@ package rls_test
 // api.WriteRepoError (no table, constraint, policy, SQLSTATE or driver text;
 // the status names the client error). Confirmed P2 findings, each one case of
 // the table below (the cases of WP-010 and WP-011 moved to
-// TestRepositoryErrorsAreSanitized in error_sanitization_integration_test.go,
-// WP-343):
-//   - WP-012 (RBA-01..03): team members / role ids that are no UUID,
-//     duplicate team member, role-assignment role id.
-//   - WP-014 (LOC-01, RCK-01): rack mount with an invalid, unknown or
-//     out-of-scope CI (RLS policy text disclosed to a client-scoped user).
-//   - WP-015 (SRC-02, VIEW-01): saved-view duplicate, structured search
-//     upstream_of, full-text search NUL.
-//   - WP-016 (MON-01): alert rule NUL name and duration overflow.
+// TestRepositoryErrorsAreSanitized in error_sanitization_integration_test.go
+// with WP-343, those of WP-012, WP-014, WP-015 and WP-016 with WP-406; the
+// rest follows with WP-407):
 //   - WP-017 (AST-01, AST-04): reservation unknown asset / invalid id /
 //     release of an invisible (client-2) reservation answering 409 instead
 //     of 404, asset PATCH with an invalid id (composition lookup).
@@ -42,21 +36,11 @@ import (
 func TestAuditT1RepositoryErrorsAreSanitized(t *testing.T) {
 	w := newT1World(t, "d5")
 	f := w.f
-	ci2 := f.CI(t, f.OrgA, f.Client2, "t1-err-c2")
-	room1 := f.Room(t, f.Client1, "t1-err-s1")
-	rack := w.scalar(`INSERT INTO rack (organization_id, room_id, name) VALUES ($1, $2, 't1-err-rack') RETURNING id::text`, f.OrgA, room1)
 	ticket := w.scalar(`INSERT INTO ticket (organization_id, title, reporter_id) VALUES ($1, 't1-err-ticket', $2) RETURNING id::text`, f.OrgA, w.userA)
 	client1 := w.as("client1", only(f.Client1), all())
-	const nul = "x\x00y"
 	const unknown = "00000000-0000-4000-8000-0000000000ff"
 
-	// Fixtures created through the API: the first request of each duplicate
-	// pair must succeed.
-	team := w.create(w.orgA, "/api/v1/teams", map[string]any{"name": "t1-err-team"})
-	if code, body := w.do(w.orgA, http.MethodPost, "/api/v1/teams/"+team+"/members", map[string]any{"user_id": w.userA}); code < 200 || code >= 300 {
-		t.Fatalf("setup: add team member: %d %s", code, trim(body))
-	}
-	w.create(w.orgA, "/api/v1/saved-views", map[string]any{"name": "t1-dup", "entity_kind": "ci"})
+	// Fixture created through the API.
 	reservation2 := w.create(w.orgA, "/api/v1/reservations", map[string]any{"asset_id": f.Asset(t, f.OrgA, f.Client2, "t1-err-a2")})
 
 	for _, c := range []struct {
@@ -66,28 +50,6 @@ func TestAuditT1RepositoryErrorsAreSanitized(t *testing.T) {
 		body         any
 		want         []int
 	}{
-		{"WP-012", "team members of an invalid team id", w.orgA, http.MethodGet, "/api/v1/teams/not-a-uuid/members", nil, []int{400, 404}},
-		{"WP-012", "duplicate team member", w.orgA, http.MethodPost, "/api/v1/teams/" + team + "/members", map[string]any{"user_id": w.userA}, []int{409}},
-		{"WP-012", "role assignment with an invalid role id", w.orgA, http.MethodPost, "/api/v1/role-assignments", map[string]any{"user_id": w.userA,
-			"role_id": "not-a-uuid"}, []int{400, 404, 422}},
-		{"WP-012", "role permissions of an invalid role id", w.orgA, http.MethodPut, "/api/v1/roles/not-a-uuid/permissions",
-			map[string]any{"permission_keys": []string{"ci:read"}}, []int{400, 404}},
-		{"WP-012", "PATCH role with an invalid id", w.orgA, http.MethodPatch, "/api/v1/roles/not-a-uuid", map[string]any{"name": "x"}, []int{400, 404}},
-		{"WP-012", "DELETE role with an invalid id", w.orgA, http.MethodDelete, "/api/v1/roles/not-a-uuid", nil, []int{400, 404}},
-		{"WP-014", "rack mount with an invalid ci_id", w.orgA, http.MethodPost, "/api/v1/racks/" + rack + "/mounts", map[string]any{"ci_id": "not-a-uuid",
-			"position_u": 1, "height_u": 1, "face": "front"}, []int{400, 422}},
-		{"WP-014", "rack mount with an unknown ci_id", w.orgA, http.MethodPost, "/api/v1/racks/" + rack + "/mounts", map[string]any{"ci_id": unknown,
-			"position_u": 1, "height_u": 1, "face": "front"}, []int{404, 422}},
-		{"WP-014", "rack mount of a client-2 CI by client 1", client1, http.MethodPost, "/api/v1/racks/" + rack + "/mounts", map[string]any{"ci_id": ci2,
-			"position_u": 3, "height_u": 1, "face": "front"}, []int{403, 404, 422}},
-		{"WP-015", "saved view duplicate", w.orgA, http.MethodPost, "/api/v1/saved-views", map[string]any{"name": "t1-dup", "entity_kind": "ci"}, []int{409}},
-		{"WP-015", "structured search with an invalid upstream_of", w.orgA, http.MethodPost, "/api/v1/search/query", map[string]any{"entity_kind": "ci",
-			"upstream_of": "not-a-uuid"}, []int{400, 422}},
-		{"WP-015", "full-text search with a NUL byte", w.orgA, http.MethodGet, "/api/v1/search?q=a%00b", nil, []int{400, 422}},
-		{"WP-016", "alert rule with a NUL byte", w.orgA, http.MethodPost, "/api/v1/monitoring/alerts", map[string]any{"name": nul, "metric_name": "cpu",
-			"condition": "gt", "threshold": 1}, []int{400, 422}},
-		{"WP-016", "alert rule duration overflow", w.orgA, http.MethodPost, "/api/v1/monitoring/alerts", map[string]any{"name": "t1", "metric_name": "cpu",
-			"condition": "gt", "threshold": 1, "duration": int64(9223372036854775807)}, []int{400, 422}},
 		{"WP-017", "reservation of an unknown asset", w.orgA, http.MethodPost, "/api/v1/reservations", map[string]any{"asset_id": unknown}, []int{404, 422}},
 		{"WP-017", "release of an invalid reservation id", w.orgA, http.MethodPost, "/api/v1/reservations/not-a-uuid/release", nil, []int{400, 404}},
 		{"WP-017", "release of a client-2 reservation by client 1", client1, http.MethodPost, "/api/v1/reservations/" + reservation2 + "/release", nil, []int{404}},

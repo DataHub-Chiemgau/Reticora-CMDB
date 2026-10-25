@@ -21,6 +21,21 @@ var ErrUserOwnsOpenObjects = errors.New("user owns open objects; hand them over 
 // reference; deactivate or anonymize the user instead (TLC-04).
 var ErrUserReferenced = errors.New("user is referenced by existing records; deactivate or anonymize instead")
 
+// ErrNotFound: the team, team member or role is not one of the organization
+// or lies outside the caller's scope; both answer the same 404 (API-03,
+// TEN-04). The repositories wrap it with the object (errTeamNotFound,
+// errRoleNotFound, errMemberNotFound).
+var ErrNotFound = errors.New("not found")
+
+// ErrConflict: the user is a member of the team already (409; PostgreSQL
+// reports the unique violation, 23505).
+var ErrConflict = errors.New("the user is a member of the team already")
+
+// ErrSystemRole: system roles are neither changed nor deleted.
+var ErrSystemRole = errors.New("system roles cannot be changed or deleted")
+
+var errMemberNotFound = fmt.Errorf("team member %w", ErrNotFound)
+
 // DeactivationHook runs inside the transaction of a deactivation or
 // anonymization, after the user was found and locked in the organization and
 // before the commit; an error rolls the change back. The handler revokes the
@@ -111,9 +126,12 @@ func (r *MemoryRepository) AgeForTesting(id string, age time.Duration) {
 	}
 }
 
-func (r *MemoryRepository) nextIDStr(prefix string) string {
+// nextIDStr returns a new id in UUID form like the PostgreSQL ids, which
+// the handlers check before the repository (api.ParseUUIDParam); the
+// counter is shared by all kinds, so prefix only documents the caller.
+func (r *MemoryRepository) nextIDStr(_ string) string {
 	r.nextID++
-	return fmt.Sprintf("%s-%d", prefix, r.nextID)
+	return fmt.Sprintf("00000000-0000-4000-8000-%012d", r.nextID)
 }
 
 // --- Users ---
@@ -273,7 +291,7 @@ func (r *MemoryRepository) GetTeam(_ context.Context, orgID, id string) (*Team, 
 
 	t, ok := r.teams[id]
 	if !ok || t.OrganizationID != orgID {
-		return nil, fmt.Errorf("team not found")
+		return nil, errTeamNotFound
 	}
 	return t, nil
 }
@@ -296,7 +314,7 @@ func (r *MemoryRepository) UpdateTeam(_ context.Context, orgID, id string, req U
 
 	t, ok := r.teams[id]
 	if !ok || t.OrganizationID != orgID {
-		return nil, fmt.Errorf("team not found")
+		return nil, errTeamNotFound
 	}
 	if req.Name != nil {
 		t.Name = *req.Name
@@ -317,7 +335,7 @@ func (r *MemoryRepository) DeleteTeam(_ context.Context, orgID, id string) error
 
 	t, ok := r.teams[id]
 	if !ok || t.OrganizationID != orgID {
-		return fmt.Errorf("team not found")
+		return errTeamNotFound
 	}
 	delete(r.teams, id)
 	// Remove team members
@@ -335,7 +353,12 @@ func (r *MemoryRepository) AddTeamMember(_ context.Context, orgID string, m *Tea
 
 	t, ok := r.teams[m.TeamID]
 	if !ok || t.OrganizationID != orgID {
-		return fmt.Errorf("team not found")
+		return errTeamNotFound
+	}
+	for _, existing := range r.members {
+		if existing.TeamID == m.TeamID && existing.UserID == m.UserID {
+			return ErrConflict
+		}
 	}
 
 	m.ID = r.nextIDStr("member")
@@ -351,7 +374,7 @@ func (r *MemoryRepository) RemoveTeamMember(_ context.Context, orgID, teamID, us
 
 	t, ok := r.teams[teamID]
 	if !ok || t.OrganizationID != orgID {
-		return fmt.Errorf("team not found")
+		return errTeamNotFound
 	}
 
 	for mid, m := range r.members {
@@ -361,7 +384,7 @@ func (r *MemoryRepository) RemoveTeamMember(_ context.Context, orgID, teamID, us
 			return nil
 		}
 	}
-	return fmt.Errorf("member not found")
+	return errMemberNotFound
 }
 
 func (r *MemoryRepository) ListTeamMembers(_ context.Context, orgID, teamID string) ([]TeamMember, error) {
@@ -370,7 +393,7 @@ func (r *MemoryRepository) ListTeamMembers(_ context.Context, orgID, teamID stri
 
 	t, ok := r.teams[teamID]
 	if !ok || t.OrganizationID != orgID {
-		return nil, fmt.Errorf("team not found")
+		return nil, errTeamNotFound
 	}
 
 	var result []TeamMember
@@ -414,7 +437,7 @@ func (r *MemoryRepository) GetRole(_ context.Context, orgID, id string) (*Custom
 
 	role, ok := r.roles[id]
 	if !ok || role.OrganizationID != orgID {
-		return nil, fmt.Errorf("role not found")
+		return nil, errRoleNotFound
 	}
 	return role, nil
 }
@@ -437,10 +460,10 @@ func (r *MemoryRepository) UpdateRole(_ context.Context, orgID, id string, calle
 
 	role, ok := r.roles[id]
 	if !ok || role.OrganizationID != orgID {
-		return nil, fmt.Errorf("role not found")
+		return nil, errRoleNotFound
 	}
 	if role.IsSystem {
-		return nil, fmt.Errorf("cannot modify system role")
+		return nil, ErrSystemRole
 	}
 	if req.Permissions != nil {
 		if err := checkRoleWidening(caller, role.Permissions, req.Permissions); err != nil {
@@ -466,10 +489,10 @@ func (r *MemoryRepository) DeleteRole(_ context.Context, orgID, id string) error
 
 	role, ok := r.roles[id]
 	if !ok || role.OrganizationID != orgID {
-		return fmt.Errorf("role not found")
+		return errRoleNotFound
 	}
 	if role.IsSystem {
-		return fmt.Errorf("cannot delete system role")
+		return ErrSystemRole
 	}
 	delete(r.roles, id)
 	return nil

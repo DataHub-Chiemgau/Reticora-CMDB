@@ -85,7 +85,7 @@ func (r *PGRepository) ReplaceRolePermissions(ctx context.Context, orgID, roleID
 			             UNION SELECT jsonb_array_elements_text(COALESCE(ro.permissions, '[]'::jsonb)))
 			  FROM role ro WHERE ro.id = $1 AND ro.organization_id = $2`, roleID, orgID).Scan(&current)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("role not found")
+			return ErrRoleNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("check role: %w", err)
@@ -101,7 +101,7 @@ func (r *PGRepository) ReplaceRolePermissions(ctx context.Context, orgID, roleID
 				return fmt.Errorf("check permission: %w", err)
 			}
 			if !known {
-				return fmt.Errorf("unknown permission %q", key)
+				return unknownPermission(key)
 			}
 		}
 		if wideningErr := checkWidening(caller, current, keys); wideningErr != nil {

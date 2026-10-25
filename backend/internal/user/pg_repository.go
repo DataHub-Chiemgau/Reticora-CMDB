@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -465,7 +466,7 @@ func (r *PGRepository) GetTeam(ctx context.Context, orgID, id string) (*Team, er
 		item, err = scanTeam(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("team not found")
+				return errTeamNotFound
 			}
 			return fmt.Errorf("get team: %w", err)
 		}
@@ -477,8 +478,32 @@ func (r *PGRepository) GetTeam(ctx context.Context, orgID, id string) (*Team, er
 	return item, nil
 }
 
+// requireOrgUser fails with a 422 field error when userID is no user of
+// the organization. The foreign key on app_user is checked without RLS: a
+// user of another organization would become a member or lead, and answer
+// differently from an unknown one (TEN-04, API-03).
+func requireOrgUser(ctx context.Context, tx pgx.Tx, orgID, field, userID string) error {
+	if err := api.RequireUUID(field, userID); err != nil {
+		return err
+	}
+	var exists bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM app_user WHERE id = $1 AND organization_id = $2)",
+		userID, orgID).Scan(&exists); err != nil {
+		return fmt.Errorf("check %s: %w", field, err)
+	}
+	if !exists {
+		return &api.FieldError{Field: field, Message: "user not found", Status: http.StatusUnprocessableEntity}
+	}
+	return nil
+}
+
 func (r *PGRepository) CreateTeam(ctx context.Context, t *Team) error {
 	return database.WithRequestTenant(ctx, r.pool, t.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if nilIfEmpty(t.LeadID) != nil {
+			if err := requireOrgUser(ctx, tx, t.OrganizationID, "lead_id", t.LeadID); err != nil {
+				return err
+			}
+		}
 		query := `
 			INSERT INTO team (
 				organization_id,
@@ -503,6 +528,11 @@ func (r *PGRepository) CreateTeam(ctx context.Context, t *Team) error {
 func (r *PGRepository) UpdateTeam(ctx context.Context, orgID, id string, req UpdateTeamRequest) (*Team, error) {
 	var item *Team
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if req.LeadID != nil && nilIfEmpty(*req.LeadID) != nil {
+			if err := requireOrgUser(ctx, tx, orgID, "lead_id", *req.LeadID); err != nil {
+				return err
+			}
+		}
 		setClauses := make([]string, 0, 4)
 		args := []any{id, orgID}
 		argPos := 3
@@ -524,7 +554,7 @@ func (r *PGRepository) UpdateTeam(ctx context.Context, orgID, id string, req Upd
 			item, err = scanTeam(tx.QueryRow(ctx, query, id, orgID))
 			if err != nil {
 				if err == pgx.ErrNoRows {
-					return fmt.Errorf("team not found")
+					return errTeamNotFound
 				}
 				return fmt.Errorf("get team for update: %w", err)
 			}
@@ -541,7 +571,7 @@ func (r *PGRepository) UpdateTeam(ctx context.Context, orgID, id string, req Upd
 		item, err = scanTeam(tx.QueryRow(ctx, query, args...))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("team not found")
+				return errTeamNotFound
 			}
 			return fmt.Errorf("update team: %w", err)
 		}
@@ -557,7 +587,7 @@ func (r *PGRepository) DeleteTeam(ctx context.Context, orgID, id string) error {
 			return fmt.Errorf("delete team: %w", err)
 		}
 		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("team not found")
+			return errTeamNotFound
 		}
 		return nil
 	})
@@ -570,7 +600,10 @@ func (r *PGRepository) AddTeamMember(ctx context.Context, orgID string, m *TeamM
 			return fmt.Errorf("check team for member: %w", err)
 		}
 		if !exists {
-			return fmt.Errorf("team not found")
+			return errTeamNotFound
+		}
+		if err := requireOrgUser(ctx, tx, orgID, "user_id", m.UserID); err != nil {
+			return err
 		}
 		role := m.RoleInTeam
 		if role == "" {
@@ -585,6 +618,15 @@ func (r *PGRepository) AddTeamMember(ctx context.Context, orgID string, m *TeamM
 			RETURNING id::text, role_in_team, joined_at
 		`
 		if err := tx.QueryRow(ctx, query, m.TeamID, m.UserID, role).Scan(&m.ID, &m.RoleInTeam, &m.JoinedAt); err != nil {
+			// The policy of team_member refuses a team outside the
+			// caller's team scope: not found like an unknown team.
+			var pgErr *pgconn.PgError
+			switch {
+			case errors.As(err, &pgErr) && pgErr.Code == "23505":
+				return ErrConflict
+			case errors.As(err, &pgErr) && pgErr.Code == "42501":
+				return errTeamNotFound
+			}
 			return fmt.Errorf("add team member: %w", err)
 		}
 		return nil
@@ -598,14 +640,14 @@ func (r *PGRepository) RemoveTeamMember(ctx context.Context, orgID, teamID, user
 			return fmt.Errorf("check team for member removal: %w", err)
 		}
 		if !exists {
-			return fmt.Errorf("team not found")
+			return errTeamNotFound
 		}
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM team_member WHERE team_id = $1 AND user_id = $2", teamID, userID)
 		if err != nil {
 			return fmt.Errorf("remove team member: %w", err)
 		}
 		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("member not found")
+			return errMemberNotFound
 		}
 		return nil
 	})
@@ -619,7 +661,7 @@ func (r *PGRepository) ListTeamMembers(ctx context.Context, orgID, teamID string
 			return fmt.Errorf("check team for members: %w", err)
 		}
 		if !exists {
-			return fmt.Errorf("team not found")
+			return errTeamNotFound
 		}
 		query := fmt.Sprintf("SELECT %s FROM team_member WHERE team_id = $1 ORDER BY joined_at ASC", teamMemberSelectColumns)
 		rows, err := tx.Query(ctx, query, teamID)
@@ -723,7 +765,7 @@ func (r *PGRepository) GetRole(ctx context.Context, orgID, id string) (*CustomRo
 		item, err = scanCustomRole(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("role not found")
+				return errRoleNotFound
 			}
 			return fmt.Errorf("get role: %w", err)
 		}
@@ -774,12 +816,12 @@ func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, caller 
 		if err := tx.QueryRow(ctx, `SELECT is_system, ARRAY(SELECT jsonb_array_elements_text(COALESCE(permissions, '[]'::jsonb)))
 			FROM custom_role WHERE id = $1 AND organization_id = $2 FOR UPDATE`, id, orgID).Scan(&isSystem, &current); err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("role not found")
+				return errRoleNotFound
 			}
 			return fmt.Errorf("check role: %w", err)
 		}
 		if isSystem {
-			return fmt.Errorf("cannot modify system role")
+			return ErrSystemRole
 		}
 		if req.Permissions != nil {
 			if err := checkRoleWidening(caller, current, req.Permissions); err != nil {
@@ -826,7 +868,7 @@ func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, caller 
 		item, err = scanCustomRole(tx.QueryRow(ctx, query, args...))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("role not found")
+				return errRoleNotFound
 			}
 			return fmt.Errorf("update role: %w", err)
 		}
@@ -840,19 +882,19 @@ func (r *PGRepository) DeleteRole(ctx context.Context, orgID, id string) error {
 		var isSystem bool
 		if err := tx.QueryRow(ctx, "SELECT is_system FROM custom_role WHERE id = $1 AND organization_id = $2", id, orgID).Scan(&isSystem); err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("role not found")
+				return errRoleNotFound
 			}
 			return fmt.Errorf("check role for delete: %w", err)
 		}
 		if isSystem {
-			return fmt.Errorf("cannot delete system role")
+			return ErrSystemRole
 		}
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM custom_role WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete role: %w", err)
 		}
 		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("role not found")
+			return errRoleNotFound
 		}
 		return nil
 	})

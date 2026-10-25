@@ -2,6 +2,7 @@ package savedview
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -96,9 +97,13 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), ownerID(r))
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, id, ownerID(r))
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "saved view not found")
+		writeViewError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, item)
@@ -135,7 +140,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		SharedWithRoles: req.SharedWithRoles,
 	}
 	if err := h.repo.Create(r.Context(), view); err != nil {
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		writeViewError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, view)
@@ -147,14 +152,18 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
 	var req UpsertRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	current, err := h.repo.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), ownerID(r))
+	current, err := h.repo.GetByID(r.Context(), t.OrganizationID, id, ownerID(r))
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "saved view not found")
+		writeViewError(w, r, err)
 		return
 	}
 	kind := req.EntityKind
@@ -165,9 +174,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, verr)
 		return
 	}
-	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), ownerID(r), req)
+	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, ownerID(r), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "saved view not found")
+		// A name the owner uses for another view is 409, not 404 (F-047).
+		writeViewError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, item)
@@ -179,11 +189,33 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	if err := h.repo.Delete(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), ownerID(r)); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "saved view not found")
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	if err := h.repo.Delete(r.Context(), t.OrganizationID, id, ownerID(r)); err != nil {
+		writeViewError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeViewError answers a failed saved-view request: a view that is
+// unknown, of another organization or not the caller's to read or change is
+// 404 (VIE-01), a name the owner uses for another view 409 (in memory
+// ErrConflict, in PostgreSQL 23505). Database errors go through
+// api.WriteRepoError like the engine errors of Query: no constraint name or
+// SQLSTATE reaches the client (API-03, F-047), the log keeps the text.
+func writeViewError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
+	case errors.Is(err, ErrConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
+	default:
+		slog.WarnContext(r.Context(), "saved view request failed", "error", err)
+		api.WriteRepoError(w, err)
+	}
 }
 
 // Query handles POST /api/v1/search/query — executes a structured filter spec

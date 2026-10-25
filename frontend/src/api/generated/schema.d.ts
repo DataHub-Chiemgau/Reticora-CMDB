@@ -4365,7 +4365,10 @@ export interface paths {
     /** List members of a team */
     get: operations['listTeamMembers'];
     put?: never;
-    /** Add a member to a team */
+    /**
+     * Add a member to a team
+     * @description A team that is unknown, of another organization or outside the caller's team scope is 404 alike; a user_id that is no user of the organization is 422 on user_id (TEN-04, API-03).
+     */
     post: operations['addTeamMember'];
     delete?: never;
     options?: never;
@@ -9669,7 +9672,7 @@ export interface components {
       /** @enum {string} */
       condition?: 'gt' | 'lt' | 'eq';
       threshold?: number;
-      /** @description Go duration string. */
+      /** @description Go duration string between 0s and 9600h (400 days). */
       duration?: string;
       /** @enum {string} */
       severity?: 'critical' | 'warning' | 'info';
@@ -9706,7 +9709,7 @@ export interface components {
       /** @enum {string} */
       condition: 'gt' | 'lt' | 'eq';
       threshold: number;
-      /** @description Go duration string. */
+      /** @description Go duration string between 0s and 9600h (400 days); nanoseconds as a number are accepted too. */
       duration?: string;
       /** @enum {string} */
       severity?: 'critical' | 'warning' | 'info';
@@ -16527,6 +16530,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       409: components['responses']['Conflict'];
+      /** @description duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   deleteAlert: {
@@ -16580,6 +16592,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listReviewItems: {
@@ -17857,6 +17878,15 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      /** @description ci_id is no UUID, or names a CI that is unknown, of another organization or outside the caller's scope; all answer alike (TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   deleteRackMountByCI: {
@@ -17961,6 +17991,15 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      /** @description ci_id is no UUID, or names a CI that is unknown, of another organization or outside the caller's scope; all answer alike (TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listMounts: {
@@ -18030,6 +18069,15 @@ export interface operations {
       404: components['responses']['NotFound'];
       /** @description The mount collides or is not allowed (RCK-01, RCK-02). */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description ci_id is no UUID, or names a CI that is unknown, of another organization or outside the caller's scope; all answer alike (TEN-04). */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -21048,6 +21096,24 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description A team of this name exists already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description lead_id is no user of the organization (an unknown user and one of another organization answer alike). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -21097,6 +21163,15 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description Records such as tickets still reference the team. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateTeam: {
@@ -21127,6 +21202,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description A team of this name exists already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description lead_id is no user of the organization (an unknown user and one of another organization answer alike). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listTeamMembers: {
@@ -21182,6 +21275,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The user is a member of the team already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description user_id is no user of the organization (an unknown user and one of another organization answer alike). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   removeTeamMember: {
@@ -21464,6 +21575,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description A role of this name exists already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   exportUserData: {
@@ -21601,6 +21721,15 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      /** @description The role id is no UUID. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -21632,6 +21761,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      /** @description The role is no standard role of the organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -26737,6 +26875,15 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description The caller has a view of this name already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column or role id. */
       422: {
         headers: {
@@ -26857,6 +27004,15 @@ export interface operations {
         content?: never;
       };
       404: components['responses']['NotFound'];
+      /** @description The owner has another view of this name; the view stays unchanged. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column or role id. */
       422: {
         headers: {
