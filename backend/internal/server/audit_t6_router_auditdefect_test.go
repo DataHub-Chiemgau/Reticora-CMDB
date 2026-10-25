@@ -3,10 +3,6 @@
 // Phase-1 acceptance audit, group T6-epic-b – DEFECT tests through the
 // production router (must fail until fixed). Harness: audit_t6_harness_test.go.
 //
-//   - TestAuditDefectManualEdgeSurvivesInterfaceSync
-//     WP-128 (REL-02, REL-05) P1 "Manual verified port-level edges are silently
-//     deleted when discovery removes an interface (ON DELETE CASCADE)".
-//     Gap (high): manual edges survive discovery's interface removal.
 //   - TestAuditDefectRouteAuditFailureLeavesNoUnauditedMutation
 //     WP-133 (WP table AUD-05, AUD-09; criterion "jede schreibende Route
 //     erzeugt Audit"; requirement texts AUD-04 capture through an outbox,
@@ -26,7 +22,9 @@
 // WP-137, F-154) is fixed by WP-398 and lives in
 // notification_authz_integration_test.go;
 // TestAuditDefectDomainEventsEmitted (WP-136, F-043) is fixed by WP-400 and
-// lives in domain_events_integration_test.go.
+// lives in domain_events_integration_test.go;
+// TestAuditDefectManualEdgeSurvivesInterfaceSync (WP-128, F-042) is fixed by
+// WP-424 and lives in manual_edge_integration_test.go.
 //
 // Retest:
 //
@@ -44,51 +42,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
-
-func TestAuditDefectManualEdgeSurvivesInterfaceSync(t *testing.T) {
-	e := t6NewEnv(t, "d4", nil)
-	f := e.F
-	bg := context.Background()
-	admin := t6As{f.OrgA, f.AppUser(t, f.OrgA, "audit-d4-admin"), identity.AllPermissions()}
-	sw1, sw2 := f.CI(t, f.OrgA, f.Client1, "audit-d4-sw1"), f.CI(t, f.OrgA, f.Client1, "audit-d4-sw2")
-	var port string
-	if err := f.Admin.QueryRow(bg, `INSERT INTO network_interface (organization_id, ci_id, name) VALUES ($1, $2, 'Gi1/0/1') RETURNING id::text`,
-		f.OrgA, sw1).Scan(&port); err != nil {
-		t.Fatal(err)
-	}
-	r := e.Call(t, admin, http.MethodPost, "/api/v1/relationships",
-		`{"source_ci_id":"`+sw1+`","target_ci_id":"`+sw2+`","rel_type":"connected_to","source":"manual","source_interface_id":"`+port+`"}`)
-	if r.Code != http.StatusCreated {
-		t.Fatalf("POST /relationships = %d %s", r.Code, t6Short(r.Body))
-	}
-	edge := t6ID(r.Body)
-	var before string
-	if err := f.Admin.QueryRow(bg, `SELECT source || '/' || verification_state FROM ci_relationship WHERE id = $1`, edge).Scan(&before); err != nil {
-		t.Fatal(err)
-	}
-
-	// Discovery reports sw1 without Gi1/0/1 often enough for REC-07 to remove it.
-	repo := ipam.NewPGRepository(f.App)
-	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA})
-	for i := 0; i < ipam.MaxMissedObservations; i++ {
-		if _, err := repo.SyncDiscoveredInterfaces(ctx, f.OrgA, sw1, []ipam.ObservedInterface{{Name: "Gi1/0/2"}}); err != nil {
-			t.Fatalf("sync %d: %v", i+1, err)
-		}
-	}
-
-	var after string
-	err := f.Admin.QueryRow(bg, `SELECT source || '/' || verification_state FROM ci_relationship WHERE id = $1`, edge).Scan(&after)
-	if err != nil {
-		t.Fatalf("manual edge %s (%s) is gone after %d discovery syncs without its interface: %v – REL-05: manual edges never disappear through discovery",
-			edge, before, ipam.MaxMissedObservations, err)
-	}
-	if after != before {
-		t.Errorf("manual edge changed by discovery: %s → %s", before, after)
-	}
-}
 
 // t6FailingAuditor simulates an unavailable audit store.
 type t6FailingAuditor struct{}

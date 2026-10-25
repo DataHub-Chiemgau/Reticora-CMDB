@@ -659,3 +659,6 @@ DIS-08;[Q];D;collector/collectorcmd/natsconn_test.go;WP-414
 AUD-04;[B];B;backend/internal/audit/pg_roundtrip_integration_test.go;WP-423
 CI-03;[B];B;backend/internal/ci/special_chars_integration_test.go;WP-423
 MET-11;B/G1, Teil P2/G2;B;backend/internal/ci/special_chars_integration_test.go;WP-423
+REL-02;[B];B;backend/internal/server/manual_edge_integration_test.go;WP-424
+REL-05;[B];B;backend/internal/server/manual_edge_integration_test.go;WP-424
+NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-424

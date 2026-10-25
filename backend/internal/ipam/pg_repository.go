@@ -5,12 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -504,6 +508,11 @@ func (r *PGRepository) CreateInterface(ctx context.Context, ni *NetworkInterface
 			ni.OrganizationID, ni.CIID, ni.Name, ni.IfIndex, nilIfEmpty(ni.MAC), ni.IfType, ni.SpeedMbps, ni.MTU,
 			ni.IsManagement, ni.IsUplink, ni.AdminStatus, ni.OperStatus, nilIfEmpty(ni.Description), nilIfEmpty(ni.VLANID),
 		).Scan(&ni.ID, &ni.CreatedAt, &ni.UpdatedAt); err != nil {
+			// An unknown CI is not found, like a CI the caller cannot see
+			// (requireVisible, F-311).
+			if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.ConstraintName == "network_interface_ci_id_fkey" {
+				return ErrNotFound
+			}
 			return api.FieldDBError(err, interfaceFields)
 		}
 		return requireVisible(ctx, tx, "network_interface", nicVisible, ni.ID)
@@ -609,8 +618,101 @@ func (r *PGRepository) UpdateInterface(ctx context.Context, orgID, id string, re
 	return ni, err
 }
 
+// DeleteInterface deletes an interface with removeInterfaces (REL-05,
+// F-042, F-312). An edge that keeps it refuses the delete with
+// *InterfaceInUseError naming the edges the caller can see; the removal of
+// its discovery edges is rolled back then.
 func (r *PGRepository) DeleteInterface(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "network_interface", nicVisible, id)
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var ciID, name string
+		err := tx.QueryRow(ctx, "SELECT ci_id::text, name FROM network_interface WHERE organization_id = $1 AND id = $2 AND "+nicVisible+" FOR UPDATE",
+			orgID, id).Scan(&ciID, &name)
+		var pgErr *pgconn.PgError
+		switch {
+		case errors.Is(err, pgx.ErrNoRows), errors.As(err, &pgErr) && pgErr.Code == "22P02":
+			return ErrNotFound
+		case err != nil:
+			return fmt.Errorf("read interface: %w", err)
+		}
+		removed, err := removeInterfaces(ctx, tx, orgID, ciID, []string{id}, "")
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.TableName == "ci_relationship" {
+			// An edge outside the caller's scope names the interface.
+			return &InterfaceInUseError{}
+		}
+		if err != nil || len(removed) > 0 {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT id::text FROM ci_relationship WHERE organization_id = $1
+			AND (source_interface_id = $2 OR target_interface_id = $2) ORDER BY id`, orgID, id)
+		if err != nil {
+			return fmt.Errorf("read relationships of interface %s: %w", name, err)
+		}
+		edges, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return fmt.Errorf("read relationships of interface %s: %w", name, err)
+		}
+		return &InterfaceInUseError{RelationshipIDs: edges}
+	})
+}
+
+// changeActor is the user of ctx as actor_id of a ci_change row, or nil
+// when the subject of ctx is no user id.
+func changeActor(ctx context.Context) any {
+	if id := tenant.FromContext(ctx).UserID; audit.IsUUID(id) {
+		return id
+	}
+	return nil
+}
+
+// removeInterfaces removes the interfaces ids of the CI ciID and returns the
+// names of those it removed (REL-05, F-042). An interface that an edge
+// other than an unverified discovery edge names as an end – manual,
+// verified or of another source – stays; the foreign keys of the interface
+// ends are NO ACTION (000159). The unverified discovery edges at the
+// interfaces are deleted first, whether the interface stays or not, and
+// each is recorded in the history of the CI (ci_change relationship_change
+// with the edge as old_value, AUD-03; reason completes the comment). A bound
+// address whose address is also unbound in the same VRF is deleted with its
+// interface; the foreign key would unbind it into a duplicate of that row
+// (F-312). Other addresses are unbound as before.
+func removeInterfaces(ctx context.Context, tx pgx.Tx, orgID, ciID string, ids []string, reason string) ([]string, error) {
+	if _, err := tx.Exec(ctx, `WITH removed AS (
+			DELETE FROM ci_relationship r
+			WHERE r.organization_id = $1 AND (r.source_interface_id = ANY ($3::uuid[]) OR r.target_interface_id = ANY ($3::uuid[]))
+			  AND r.source = 'discovery' AND r.verification_state <> 'verified'
+			RETURNING r.id, r.source_ci_id, r.target_ci_id, r.rel_type, r.source, r.verification_state,
+				r.source_interface_id, r.target_interface_id)
+		INSERT INTO ci_change (organization_id, ci_id, actor_id, change_type, field_name, old_value, new_value, comment)
+		SELECT $1, $2, $4::uuid, 'relationship_change', 'relationships', to_jsonb(removed), NULL,
+			format('removed with interface %s%s', (SELECT string_agg(n.name, ', ' ORDER BY n.name) FROM network_interface n
+				WHERE n.id = ANY ($3::uuid[]) AND n.id IN (removed.source_interface_id, removed.target_interface_id)), $5::text)
+		FROM removed ORDER BY removed.id`, orgID, ciID, ids, changeActor(ctx), reason); err != nil {
+		return nil, fmt.Errorf("remove discovery edges: %w", err)
+	}
+	var free []string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(array_agg(n.id::text), '{}') FROM network_interface n
+		WHERE n.id = ANY ($1::uuid[]) AND NOT EXISTS (SELECT 1 FROM ci_relationship r
+			WHERE r.source_interface_id = n.id OR r.target_interface_id = n.id)`, ids).Scan(&free); err != nil {
+		return nil, fmt.Errorf("read relationships of interfaces: %w", err)
+	}
+	if len(free) == 0 {
+		return nil, nil
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM ip_address a WHERE a.interface_id = ANY ($1::uuid[]) AND EXISTS (
+			SELECT 1 FROM ip_address u WHERE u.organization_id = a.organization_id AND u.vrf_id = a.vrf_id
+			  AND u.address = a.address AND u.interface_id IS NULL)`, free); err != nil {
+		return nil, fmt.Errorf("remove addresses: %w", err)
+	}
+	rows, err := tx.Query(ctx, `DELETE FROM network_interface WHERE id = ANY ($1::uuid[]) RETURNING name`, free)
+	if err != nil {
+		return nil, fmt.Errorf("remove interfaces: %w", err)
+	}
+	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("remove interfaces: %w", err)
+	}
+	slices.Sort(names)
+	return names, nil
 }
 
 // ObservedInterface is an interface of a CI as one discovery record reported
@@ -640,8 +742,10 @@ const MaxMissedObservations = 3
 // interfaces of a CI (REC-07, NET-01): reported interfaces and addresses are
 // created or updated and their miss_count is reset; those of the CI the
 // observation did not report count one miss and are removed at the third
-// consecutive miss, with an entry in the CI's history. The caller syncs only
-// observations that report interfaces at all.
+// consecutive miss, with an entry in the CI's history. An interface that a
+// manual or verified edge names is not removed and keeps counting misses
+// (REL-05, removeInterfaces). The caller syncs only observations that report
+// interfaces at all.
 func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID string, observed []ObservedInterface) (SyncResult, error) {
 	var res SyncResult
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -707,7 +811,7 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 		removedIPs, err := missAndRemove(ctx, tx, `UPDATE ip_address a SET miss_count = a.miss_count + 1
 			FROM network_interface n
 			WHERE a.interface_id = n.id AND n.ci_id = $1 AND NOT (a.id::text = ANY($2::text[]))
-			RETURNING a.id::text, host(a.address), a.miss_count`, ciID, seenIPs, "ip_address")
+			RETURNING a.id::text, host(a.address), a.miss_count`, ciID, seenIPs, "ip_address", nil)
 		if err != nil {
 			return err
 		}
@@ -717,7 +821,10 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 		}
 		removedInterfaces, err := missAndRemove(ctx, tx, `UPDATE network_interface SET miss_count = miss_count + 1
 			WHERE ci_id = $1 AND NOT (id::text = ANY($2::text[]))
-			RETURNING id::text, name, miss_count`, ciID, seenIDs, "network_interface")
+			RETURNING id::text, name, miss_count`, ciID, seenIDs, "network_interface", func(ids []string) ([]string, error) {
+			return removeInterfaces(ctx, tx, orgID, ciID, ids,
+				fmt.Sprintf(" after %d observations without it (REC-07)", MaxMissedObservations))
+		})
 		if err != nil {
 			return err
 		}
@@ -741,8 +848,11 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 }
 
 // missAndRemove counts one miss with countQuery and deletes the rows of
-// table that reached MaxMissedObservations; it returns their names.
-func missAndRemove(ctx context.Context, tx pgx.Tx, countQuery, ciID string, seen []string, table string) ([]string, error) {
+// table that reached MaxMissedObservations; it returns their names. remove,
+// when set, removes those rows by their ids instead and returns the names of
+// the rows it removed.
+func missAndRemove(ctx context.Context, tx pgx.Tx, countQuery, ciID string, seen []string, table string,
+	remove func(ids []string) ([]string, error)) ([]string, error) {
 	if seen == nil {
 		seen = []string{}
 	}
@@ -766,7 +876,11 @@ func missAndRemove(ctx context.Context, tx pgx.Tx, countQuery, ciID string, seen
 	if rowsErr := rows.Err(); rowsErr != nil {
 		return nil, rowsErr
 	}
-	if len(ids) > 0 {
+	switch {
+	case len(ids) == 0:
+	case remove != nil:
+		return remove(ids)
+	default:
 		if _, err = tx.Exec(ctx, "DELETE FROM "+table+" WHERE id::text = ANY($1::text[])", ids); err != nil {
 			return nil, fmt.Errorf("remove %s: %w", table, err)
 		}
