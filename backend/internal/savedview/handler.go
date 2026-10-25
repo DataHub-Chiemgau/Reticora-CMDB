@@ -3,6 +3,7 @@ package savedview
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -213,15 +214,17 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	if spec.Where != nil {
-		if err := spec.Where.Validate(spec.entityKind()); err != nil {
-			api.WriteFieldError(w, &api.FieldError{Field: "where", Message: err.Error(), Status: http.StatusUnprocessableEntity})
-			return
-		}
+	// Values are checked before any SQL runs: 422 naming the field.
+	if err := spec.Validate(spec.entityKind()); err != nil {
+		api.WriteFieldError(w, err)
+		return
 	}
 	items, total, err := h.query.Query(r.Context(), t.OrganizationID, spec, page)
 	if err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		// A validated spec compiles to SQL whose casts cannot fail; any
+		// error left is internal and its text goes to the log only (API-03).
+		slog.ErrorContext(r.Context(), "structured search failed", "error", err)
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[QueryResult]{

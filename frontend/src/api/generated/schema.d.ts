@@ -2552,7 +2552,7 @@ export interface paths {
     };
     /**
      * Metric series of one CI (MON-02)
-     * @description Returns the series of one CI for the detail view: the named metric or, without name, every metric the CI reported since from (default the last 24 hours). Requires the monitoring feature. A CI outside the caller's client/site scope, unknown or with a malformed id answers 404.
+     * @description Returns the series of one CI for the detail view: the named metric or, without name, every metric the CI reported since from (default the last 24 hours). Requires the monitoring feature. A CI outside the caller's client/site scope or unknown answers 404, a malformed id 400.
      */
     get: operations['getCIMetrics'];
     put?: never;
@@ -6537,7 +6537,7 @@ export interface paths {
     put?: never;
     /**
      * Execute a structured filter spec (saved-view DSL) against CIs or assets
-     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists. Fields are the whitelisted columns of the entity kind, its dynamic attributes (attributes.<key>) and, for CIs, the fields of the linked asset (asset.<field>). At most 10 levels and 100 nodes; an invalid AST is 422 naming the node.
+     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists. Fields are the whitelisted columns of the entity kind, its dynamic attributes (attributes.<key>) and, for CIs, the fields of the linked asset (asset.<field>). At most 10 levels and 100 nodes. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the type of the value (for in of the first element, all elements sharing it): a number only with numeric values, a boolean only with booleans, a time string with lt, lte, gt or gte only with values holding a time, other strings as text. An attribute value of another JSON type counts as missing: it matches neither eq, in nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value or where.value[0], or the flat field).
      */
     post: operations['queryByFilterSpec'];
     delete?: never;
@@ -7063,7 +7063,7 @@ export interface components {
       field?: string;
       /** @enum {string} */
       op?: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'like' | 'in' | 'exists';
-      /** @description A string, number or boolean; a list for in. */
+      /** @description A value of the field's kind (UUID, RFC 3339 time or date, number, boolean or string); a non-empty list of them for in; true, false or nothing for exists. */
       value?: unknown;
     };
     SavedViewSortKey: {
@@ -16793,7 +16793,7 @@ export interface operations {
         site_id?: string;
         /** @description CI type id (ci.ci_type_id) to filter by. */
         ci_type?: string;
-        /** @description When set, returns a subgraph reachable from this CI. */
+        /** @description When set, returns a subgraph reachable from this CI (a UUID). A CI the caller does not see is 404. */
         root_ci_id?: string;
         /** @description Traversal depth from root_ci_id (default 2, max 20). */
         depth?: number;
@@ -16813,7 +16813,25 @@ export interface operations {
           'application/json': components['schemas']['TopologyGraph'];
         };
       };
+      /** @description root_ci_id, client_id, site_id or ci_type is no UUID (for root_ci_id with field root_ci_id). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       401: components['responses']['Unauthorized'];
+      /** @description root_ci_id names no CI the caller sees: an unknown or deleted CI, a CI of another organization or of a client or site outside the scope. The answer is the same in each case ("ci not found") and does not name the CI (F-161). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Without root_ci_id the filtered topology holds more than 2,000 CIs (IMP-06); narrow it with site_id, client_id or ci_type (a CI type id) or set root_ci_id. */
       422: {
         headers: {
@@ -26719,7 +26737,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Invalid filter AST, sort key, column or role id. */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column or role id. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -26839,7 +26857,7 @@ export interface operations {
         content?: never;
       };
       404: components['responses']['NotFound'];
-      /** @description Invalid filter AST, sort key, column or role id. */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column or role id. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -26958,7 +26976,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Invalid filter spec */
+      /** @description Invalid filter spec (malformed JSON, unknown member or entity_kind), or a value the database refuses after the checks (e.g. NUL in a flat text field); the detail is generic and never carries database text. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -26972,7 +26990,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Invalid filter AST. */
+      /** @description Invalid filter AST or filter value; field names it (where.<path> or the flat field). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -26981,6 +26999,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      500: components['responses']['InternalServerError'];
     };
   };
 }

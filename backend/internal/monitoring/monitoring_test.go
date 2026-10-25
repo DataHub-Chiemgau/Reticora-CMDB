@@ -209,8 +209,10 @@ func (f fakeCIResolver) ResolveCI(_ context.Context, _, address string) (string,
 }
 
 func TestIngestAssignsCollectorSamplesByTarget(t *testing.T) {
+	// GET /cis/{id}/metrics takes UUIDs only (F-167).
+	const ci5 = "00000000-0000-4000-8000-0000000000c5"
 	store := NewMemoryMetricStore()
-	h := NewHandler(store).WithCIResolver(fakeCIResolver{"10.0.0.5": "ci-5"})
+	h := NewHandler(store).WithCIResolver(fakeCIResolver{"10.0.0.5": ci5})
 	r := chi.NewRouter()
 	h.RegisterRoutes(r)
 
@@ -230,7 +232,7 @@ func TestIngestAssignsCollectorSamplesByTarget(t *testing.T) {
 		t.Fatalf("ingest response = %s", got)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/cis/ci-5/metrics", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/cis/"+ci5+"/metrics", nil)
 	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -244,7 +246,7 @@ func TestIngestAssignsCollectorSamplesByTarget(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.CIID != "ci-5" || len(resp.Series) != 2 {
+	if resp.CIID != ci5 || len(resp.Series) != 2 {
 		t.Fatalf("ci metrics = %+v", resp)
 	}
 	if resp.Series[0].Name != "sweep_reachable" || resp.Series[1].Name != "ups_battery_charge_percent" {
@@ -254,7 +256,7 @@ func TestIngestAssignsCollectorSamplesByTarget(t *testing.T) {
 		t.Fatalf("ups series = %+v", resp.Series[1].Points)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/cis/ci-5/metrics?name=sweep_reachable", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/cis/"+ci5+"/metrics?name=sweep_reachable", nil)
 	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)

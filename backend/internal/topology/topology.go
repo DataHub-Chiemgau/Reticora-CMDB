@@ -5,6 +5,7 @@ package topology
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -27,6 +28,13 @@ const (
 	defaultDepth     = 2
 	maxDepth         = 20
 )
+
+// ErrCINotFound reports a root_ci_id the caller does not see: an unknown or
+// deleted CI, a CI of another organization or outside the client or site
+// scope. GET /topology answers 404 "ci not found" for each alike, like
+// GetNeighbors (F-161); it wraps api.ErrNotFound, so WriteRepoError answers
+// 404 as well.
+var ErrCINotFound = fmt.Errorf("ci %w", api.ErrNotFound)
 
 // Node is a CI vertex in the topology graph.
 type Node struct {
@@ -135,6 +143,10 @@ func (h *Handler) GetTopology(w http.ResponseWriter, r *http.Request) {
 		TypeID:   ciType,
 	})
 	if err != nil {
+		if errors.Is(err, ErrCINotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
+			return
+		}
 		if !api.WriteFieldError(w, err) {
 			api.WriteRepoError(w, err)
 		}
@@ -196,9 +208,14 @@ func (h *Handler) writeSingleImpact(w http.ResponseWriter, r *http.Request, id s
 
 // Graph returns the topology graph: from rootCIID up to depth hops (the CI
 // type of filter narrows the nodes), or without a root the CIs of filter
-// with their edges, at most MaxTopologyNodes (IMP-06, 422 beyond).
+// with their edges, at most MaxTopologyNodes (IMP-06, 422 beyond). A root
+// that is no UUID is a 400 *api.FieldError, a root the caller does not see
+// ErrCINotFound.
 func (h *Handler) Graph(ctx context.Context, orgID, rootCIID string, depth int, filter *ci.FilterParams) (Graph, error) {
 	if rootCIID != "" {
+		if !api.IsUUID(rootCIID) {
+			return Graph{}, &api.FieldError{Field: "root_ci_id", Message: "must be a UUID"}
+		}
 		return h.buildFromRoot(ctx, orgID, rootCIID, depth, filter.TypeID)
 	}
 	return h.buildFull(ctx, orgID, *filter)
@@ -271,7 +288,7 @@ func (h *Handler) buildFromRoot(ctx context.Context, orgID, rootCIID string, dep
 // buildFromRootViaTraversal expands the subgraph with a single recursive
 // traversal query, then resolves the discovered nodes.
 func (h *Handler) buildFromRootViaTraversal(ctx context.Context, orgID, rootCIID string, depth int, ciType string) (Graph, error) {
-	root, err := h.ciRepo.GetByID(ctx, orgID, rootCIID)
+	root, err := h.root(ctx, orgID, rootCIID)
 	if err != nil {
 		return Graph{}, err
 	}
@@ -307,7 +324,7 @@ func (h *Handler) buildFromRootViaTraversal(ctx context.Context, orgID, rootCIID
 // buildFromRootIterative performs a breadth-first traversal from rootCIID up
 // to depth hops, querying relationships one frontier at a time.
 func (h *Handler) buildFromRootIterative(ctx context.Context, orgID, rootCIID string, depth int, ciType string) (Graph, error) {
-	root, err := h.ciRepo.GetByID(ctx, orgID, rootCIID)
+	root, err := h.root(ctx, orgID, rootCIID)
 	if err != nil {
 		return Graph{}, err
 	}
@@ -356,6 +373,17 @@ func (h *Handler) buildFromRootIterative(ctx context.Context, orgID, rootCIID st
 	}
 
 	return assembleGraph(nodes, slices.Collect(maps.Values(edgeSet)), rootCIID, ciType), nil
+}
+
+// root reads the root CI of a walk. A CI the repository does not find
+// (unknown, deleted, or invisible under the caller's organization and
+// scope) is ErrCINotFound; any other failure stays as it is.
+func (h *Handler) root(ctx context.Context, orgID, rootCIID string) (*ci.Item, error) {
+	root, err := h.ciRepo.GetByID(ctx, orgID, rootCIID)
+	if err != nil && (err.Error() == "not found" || errors.Is(err, api.ErrNotFound)) {
+		return nil, ErrCINotFound
+	}
+	return root, err
 }
 
 // resolveNodes adds the visible, not deleted CIs among ids to nodes, in one

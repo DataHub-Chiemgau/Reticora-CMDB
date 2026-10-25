@@ -30,6 +30,7 @@ import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { Modal } from '../ui/Modal';
 import { SkeletonList } from '../ui/Skeleton';
+import { ErrorState } from '../ui/ErrorState';
 
 function Section({
   title,
@@ -228,7 +229,10 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
   const rows = values.data?.data ?? [];
   const diverged = rows.filter((r) => r.diverged);
   return (
-    <Section title={t('ci.provenance', 'Herkunft & Overrides')} count={diverged.length}>
+    <Section
+      title={t('ci.provenance', 'Herkunft & Overrides')}
+      count={values.data ? diverged.length : undefined}
+    >
       <p className="mb-3 text-xs text-gray-500">
         {t(
           'ci.provenanceHint',
@@ -236,6 +240,14 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
         )}
       </p>
       {values.isLoading ? <SkeletonList rows={2} label="…" /> : null}
+      {/* A failed request is no empty provenance (F-350). */}
+      {values.isError ? (
+        <ErrorState
+          title={t('ci.provenanceLoadError', 'Die Herkunftsdaten konnten nicht geladen werden')}
+          retryLabel={t('common.retry', 'Erneut versuchen')}
+          onRetry={() => void values.refetch()}
+        />
+      ) : null}
       <ul className="space-y-2 text-sm">
         {rows.map((fv) => (
           <li
@@ -297,7 +309,7 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
             </p>
           </li>
         ))}
-        {rows.length === 0 && !values.isLoading ? (
+        {rows.length === 0 && !values.isLoading && !values.isError ? (
           <li className="text-sm text-gray-500">
             {t(
               'ci.noProvenance',

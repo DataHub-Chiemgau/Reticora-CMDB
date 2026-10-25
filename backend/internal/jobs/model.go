@@ -8,7 +8,11 @@ package jobs
 import (
 	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // Status of a job.
@@ -69,6 +73,69 @@ type Job struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 	StartedAt      *time.Time `json:"started_at,omitempty"`
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	// Scope is the scope snapshot of the job; nil for a job without one.
+	Scope *Scope `json:"-"`
+}
+
+// Scope is the scope snapshot of a job (TEN-09, F-163): the client, site
+// and team scope its creator had when queueing it, or for a tracked job the
+// snapshot of the row it mirrors (export: the export job). A nil dimension
+// is the whole organization, an empty one no id. A job without snapshot
+// (system jobs, jobs from before migration 000154) belongs to the whole
+// organization.
+type Scope struct {
+	Clients []string
+	Sites   []string
+	Teams   []string
+}
+
+// ScopeOf returns the snapshot of a tenant scope.
+func ScopeOf(s *database.TenantScope) *Scope {
+	set := func(d database.ScopeSet) []string {
+		if d.IsAll() {
+			return nil
+		}
+		if ids := d.IDs(); ids != nil {
+			return ids
+		}
+		return []string{}
+	}
+	return &Scope{Clients: set(s.Clients), Sites: set(s.Sites), Teams: set(s.Teams)}
+}
+
+// VisibleTo reports whether a principal with the tenant scope s sees the
+// job, the rule of job_isolation (migration 000154) and of the export
+// creator rule (ownExport): the job belongs to the organization of s, in
+// every dimension s is org-wide or the job's snapshot lies completely in
+// s, and an export job only to its creator. A job without snapshot is
+// visible to org-wide principals only (E-09).
+func (j *Job) VisibleTo(s *database.TenantScope) bool {
+	if s == nil || !strings.EqualFold(j.OrganizationID, s.OrgID) {
+		return false
+	}
+	if j.RefTable == "export_job" && (s.UserID == "" || !strings.EqualFold(j.CreatedBy, s.UserID)) {
+		return false
+	}
+	snapshot := j.Scope
+	if snapshot == nil {
+		snapshot = &Scope{}
+	}
+	within := func(ids []string, set database.ScopeSet) bool {
+		if set.IsAll() {
+			return true
+		}
+		if ids == nil {
+			return false
+		}
+		allowed := set.IDs()
+		for _, id := range ids {
+			if !slices.ContainsFunc(allowed, func(a string) bool { return strings.EqualFold(a, id) }) {
+				return false
+			}
+		}
+		return true
+	}
+	return within(snapshot.Clients, s.Clients) && within(snapshot.Sites, s.Sites) && within(snapshot.Teams, s.Teams)
 }
 
 // Kind configures the jobs of one kind: how often they are tried, how long

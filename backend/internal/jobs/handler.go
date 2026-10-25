@@ -8,14 +8,17 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // Generic job API (API-09, JOB-03): GET /jobs, GET /jobs/{id} with the
 // result, DELETE /jobs/{id} (cancel) and POST /jobs/{id}/revert where the
-// kind defines a revert (E-25). Reading needs job:read; cancelling and
-// reverting a job needs the permission of its kind, or being its creator.
+// kind defines a revert (E-25). Reading needs job:read and covers the jobs
+// whose scope snapshot lies in the caller's scope (TEN-09); every route
+// answers 404 for any other job. Cancelling and reverting a job needs the
+// permission of its kind, or being its creator.
 
 // Reverter undoes a finished job of one kind.
 type Reverter func(ctx context.Context, job *Job) error
@@ -97,12 +100,26 @@ func validStatus(s Status) bool {
 	return false
 }
 
-// job loads the job of the path or writes 404.
+// visibleTo reports whether the caller sees the job: its tenant scope
+// covers the scope snapshot of the job (Job.VisibleTo, TEN-09, F-163). The
+// PostgreSQL repository reads under the same rule; a request without tenant
+// scope sees no job.
+func visibleTo(r *http.Request, job *Job) bool {
+	scope, ok := database.TenantScopeFromContext(r.Context())
+	return ok && job.VisibleTo(&scope)
+}
+
+func notFound(w http.ResponseWriter) {
+	api.WriteError(w, http.StatusNotFound, "Not Found", "job not found")
+}
+
+// job loads the job of the path or writes 404, also for a job outside the
+// caller's scope.
 func (h *APIHandler) job(w http.ResponseWriter, r *http.Request, orgID string) (*Job, bool) {
 	job, err := h.svc.Get(r.Context(), orgID, chi.URLParam(r, "id"))
 	switch {
-	case errors.Is(err, ErrNotFound):
-		api.WriteError(w, http.StatusNotFound, "Not Found", "job not found")
+	case errors.Is(err, ErrNotFound) || (err == nil && !visibleTo(r, job)):
+		notFound(w)
 		return nil, false
 	case err != nil:
 		api.WriteRepoError(w, err)
@@ -142,18 +159,23 @@ func (h *APIHandler) Result(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(job.Result)
 }
 
-// mayControl reports whether the caller may cancel or revert the job: its
-// creator, or a principal with the permission of its kind.
-func (h *APIHandler) mayControl(r *http.Request, job *Job) bool {
+// mayControl decides whether the caller may cancel or revert the job: a job
+// outside the caller's scope is not found (404, before 403 and 409,
+// F-163); otherwise its creator and a principal with the permission of its
+// kind may (0), anyone else is refused (403).
+func (h *APIHandler) mayControl(r *http.Request, job *Job) int {
+	if !visibleTo(r, job) {
+		return http.StatusNotFound
+	}
 	if user := tenant.FromContext(r.Context()).UserID; user != "" && user == job.CreatedBy {
-		return true
+		return 0
 	}
-	perm, ok := h.kindPermissions[job.Kind]
-	if !ok || perm == "" {
-		return false
+	if perm, ok := h.kindPermissions[job.Kind]; ok && perm != "" {
+		if p, ok := identity.PrincipalFromContext(r.Context()); ok && p.Has(perm) {
+			return 0
+		}
 	}
-	p, ok := identity.PrincipalFromContext(r.Context())
-	return ok && p.Has(perm)
+	return http.StatusForbidden
 }
 
 // Cancel handles DELETE /api/v1/jobs/{id}: a queued or running job is
@@ -167,7 +189,11 @@ func (h *APIHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		return
 	}
-	if !h.mayControl(r, job) {
+	switch h.mayControl(r, job) {
+	case http.StatusNotFound:
+		notFound(w)
+		return
+	case http.StatusForbidden:
 		api.WriteError(w, http.StatusForbidden, "Forbidden", "only the creator or a holder of the permission of the job kind may cancel it")
 		return
 	}
@@ -175,6 +201,8 @@ func (h *APIHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, ErrTransition):
 		api.WriteError(w, http.StatusConflict, "Conflict", "the job is "+string(job.Status)+" and cannot be cancelled")
+	case errors.Is(err, ErrNotFound):
+		notFound(w)
 	case err != nil:
 		api.WriteRepoError(w, err)
 	default:
@@ -193,12 +221,17 @@ func (h *APIHandler) Revert(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		return
 	}
+	control := h.mayControl(r, job)
+	if control == http.StatusNotFound {
+		notFound(w)
+		return
+	}
 	revert, defined := h.reverters[job.Kind]
 	if !defined || job.Status != StatusSucceeded {
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrNotRevertible.Error()+": kind "+job.Kind+", status "+string(job.Status))
 		return
 	}
-	if !h.mayControl(r, job) {
+	if control == http.StatusForbidden {
 		api.WriteError(w, http.StatusForbidden, "Forbidden", "only the creator or a holder of the permission of the job kind may revert it")
 		return
 	}

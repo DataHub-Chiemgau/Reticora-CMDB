@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
@@ -84,8 +85,20 @@ type EnqueueOptions struct {
 	RunAfter time.Time
 }
 
-// Enqueue creates a queued job of a registered kind. With an idempotency
-// key a second call returns the first job unchanged (created false).
+// creatorScope is the scope snapshot of a job queued with ctx: the tenant
+// scope of the request (TEN-09, F-163); nil outside a request (system jobs
+// and workers), which leaves the job to org-wide principals.
+func creatorScope(ctx context.Context) *Scope {
+	scope, ok := database.TenantScopeFromContext(ctx)
+	if !ok {
+		return nil
+	}
+	return ScopeOf(&scope)
+}
+
+// Enqueue creates a queued job of a registered kind with the scope of its
+// creator (creatorScope). With an idempotency key a second call returns the
+// first job unchanged (created false).
 func (s *Service) Enqueue(ctx context.Context, orgID, kind string, params any, opts EnqueueOptions) (*Job, bool, error) {
 	k, err := s.kind(kind)
 	if err != nil {
@@ -102,6 +115,7 @@ func (s *Service) Enqueue(ctx context.Context, orgID, kind string, params any, o
 		OrganizationID: orgID, Kind: kind, Status: StatusQueued, Params: raw,
 		IdempotencyKey: opts.IdempotencyKey, CreatedBy: opts.CreatedBy,
 		MaxAttempts: k.MaxAttempts, TimeoutSeconds: int(k.Timeout / time.Second), RunAfter: opts.RunAfter,
+		Scope: creatorScope(ctx),
 	}
 	if job.RunAfter.IsZero() {
 		job.RunAfter = s.now()
@@ -256,14 +270,21 @@ type Tracker interface {
 }
 
 // Track implements Tracker: a queued job of kind for the row refTable/refID
-// (idempotent per row). Tracked jobs are executed by their own worker; the
+// (idempotent per row) with the scope of its creator (creatorScope); a job
+// tracked outside a request takes the scope of its row where the row keeps
+// one (export). A row already tracked by a job outside the caller's scope
+// counts as tracked. Tracked jobs are executed by their own worker; the
 // kind needs no registration.
 func (s *Service) Track(ctx context.Context, orgID, kind, refTable, refID, createdBy string) error {
 	job := &Job{
 		OrganizationID: orgID, Kind: kind, Status: StatusQueued, Params: []byte("{}"),
 		CreatedBy: createdBy, MaxAttempts: 1, RefTable: refTable, RefID: refID, RunAfter: s.now(),
+		Scope: creatorScope(ctx),
 	}
 	_, err := s.repo.Insert(ctx, job)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
 	return err
 }
 

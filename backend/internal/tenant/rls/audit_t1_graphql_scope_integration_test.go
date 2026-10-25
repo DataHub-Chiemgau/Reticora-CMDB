@@ -41,7 +41,14 @@ func TestAuditT1GraphQLFieldsHonourScope(t *testing.T) {
 	w.create(w.orgA, "/api/v1/relationships", map[string]any{"source_ci_id": ci1, "target_ci_id": ci2, "rel_type": "depends_on"})
 	review2 := w.scalar(`INSERT INTO review_item (organization_id, kind, payload, candidate_ci_ids) VALUES ($1, 'probable_duplicate', $2, ARRAY[$3::uuid]) RETURNING id::text`,
 		f.OrgA, fmt.Sprintf(`{"name":"t1gql-review","ci_id":%q}`, ci2), ci2)
-	jobA := w.scalar(`INSERT INTO job (organization_id, kind, status) VALUES ($1, 't1gql.kind', 'queued') RETURNING id::text`, f.OrgA)
+	// Jobs carry the scope snapshot of their creator (WP-404): one of
+	// client 1, one of client 2 and a system job without snapshot.
+	job := func(client string) string {
+		return w.scalar(`INSERT INTO job (organization_id, kind, status, scope_recorded, scope_clients)
+			VALUES ($1, 't1gql.kind', 'queued', true, ARRAY[$2::uuid]) RETURNING id::text`, f.OrgA, client)
+	}
+	jobA, jobA2 := job(f.Client1), job(f.Client2)
+	jobSystem := w.scalar(`INSERT INTO job (organization_id, kind, status) VALUES ($1, 't1gql.system', 'queued') RETURNING id::text`, f.OrgA)
 	jobB := w.scalar(`INSERT INTO job (organization_id, kind, status) VALUES ($1, 't1gql.kindb', 'queued') RETURNING id::text`, f.OrgB)
 
 	queries := map[string]string{
@@ -57,11 +64,11 @@ func TestAuditT1GraphQLFieldsHonourScope(t *testing.T) {
 	// what each principal must see in which query (positive controls).
 	foreign := map[string][]string{
 		"org":       {ciB, "t1gql-borg", jobB},
-		"client1":   {ci2, "t1gql-two", review2, ciB, "t1gql-borg", jobB},
-		"other-org": {ci1, ci2, "t1gql-one", "t1gql-two", review2, jobA},
+		"client1":   {ci2, "t1gql-two", review2, ciB, "t1gql-borg", jobA2, jobSystem, jobB},
+		"other-org": {ci1, ci2, "t1gql-one", "t1gql-two", review2, jobA, jobA2, jobSystem},
 	}
 	own := map[string]map[string]string{
-		"org":       {"ci(two)": "t1gql-two", "relationships": ci2, "topology": ci2, "searchEverything": "t1gql-two", "reviewInbox": review2, "jobs": jobA},
+		"org":       {"ci(two)": "t1gql-two", "relationships": ci2, "topology": ci2, "searchEverything": "t1gql-two", "reviewInbox": review2, "jobs": jobSystem},
 		"client1":   {"ci(one)": "t1gql-one", "searchEverything": "t1gql-one", "topology": ci1, "jobs": jobA},
 		"other-org": {"jobs": jobB},
 	}

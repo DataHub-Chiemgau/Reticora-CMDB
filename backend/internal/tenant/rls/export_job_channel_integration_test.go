@@ -6,7 +6,8 @@ package rls_test
 // a job to its creator only, as GET /api/v1/export/jobs does. Another user
 // of another client and an org-wide org_admin, both with job:read, neither
 // list it nor reach it by id (404); EXP-01 defines no exception for
-// administrators. Other jobs stay visible.
+// administrators. Other jobs stay visible within the scope of their
+// creator (WP-404).
 //
 // Formerly the probe TestProbeV05ExportJobsVisibleInGenericJobs (audit_db_05).
 //
@@ -68,12 +69,19 @@ func TestExportJobsStayWithTheirCreator(t *testing.T) {
 		created.ID).Scan(&jobID, &status); err != nil || status != string(jobs.StatusSucceeded) {
 		t.Fatalf("setup: generic job of the export: %s %s %v", jobID, status, err)
 	}
-	// A job of another kind stays visible to every job:read holder.
-	var otherJob string
-	if err := f.Admin.QueryRow(bg, `INSERT INTO job (organization_id, kind, status, created_by) VALUES ($1, 'wp347.other', 'queued', $2)
-		RETURNING id::text`, f.OrgA, userA).Scan(&otherJob); err != nil {
-		t.Fatalf("setup: other job: %v", err)
+	// A job of another kind stays visible to every job:read holder whose
+	// scope covers it (WP-404): one per client, with the snapshot of A and
+	// of B.
+	otherJobs := map[*channelPrincipal]string{}
+	for p, client := range map[*channelPrincipal]string{a: f.Client1, b: f.Client2} {
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO job (organization_id, kind, status, created_by, scope_recorded, scope_clients)
+			VALUES ($1, 'wp347.other', 'queued', $2, true, ARRAY[$3::uuid]) RETURNING id::text`, f.OrgA, p.user, client).Scan(&id); err != nil {
+			t.Fatalf("setup: other job: %v", err)
+		}
+		otherJobs[p] = id
 	}
+	otherJob := otherJobs[a]
 
 	listed := func(p *channelPrincipal, path string) (map[string]bool, int) {
 		t.Helper()
@@ -94,18 +102,26 @@ func TestExportJobsStayWithTheirCreator(t *testing.T) {
 		return ids, list.Total
 	}
 
-	// The creator sees the job.
-	if ids, _ := listed(a, "/api/v1/jobs"); !ids[jobID] || !ids[otherJob] {
-		t.Errorf("creator lists %v, want the export job %s and the other job", ids, jobID)
+	// The creator sees the job, and the other job of its client only.
+	if ids, _ := listed(a, "/api/v1/jobs"); !ids[jobID] || !ids[otherJob] || ids[otherJobs[b]] {
+		t.Errorf("creator lists %v, want the export job %s and the other job of client 1", ids, jobID)
 	}
 	if code, body := env.call(a, http.MethodGet, "/api/v1/jobs/"+jobID, nil); code != http.StatusOK || !strings.Contains(body, created.ID) {
 		t.Errorf("creator GET /jobs/{id}: %d %s, want 200", code, trim(body))
 	}
 
-	for _, p := range []*channelPrincipal{b, orgAdmin} {
+	for p, others := range map[*channelPrincipal][]string{b: {otherJobs[b]}, orgAdmin: {otherJobs[a], otherJobs[b]}} {
 		ids, _ := listed(p, "/api/v1/jobs")
-		if ids[jobID] || !ids[otherJob] {
-			t.Errorf("F-059: %s lists %v, want the other job without the export job %s", p.kind, ids, jobID)
+		if ids[jobID] || len(ids) != len(others) {
+			t.Errorf("F-059: %s lists %v, want the other jobs %v without the export job %s", p.kind, ids, others, jobID)
+		}
+		for _, other := range others {
+			if !ids[other] {
+				t.Errorf("%s does not list the other job %s", p.kind, other)
+			}
+			if code, body := env.call(p, http.MethodGet, "/api/v1/jobs/"+other, nil); code != http.StatusOK {
+				t.Errorf("%s GET the other job: %d %s, want 200", p.kind, code, trim(body))
+			}
 		}
 		if ids, total := listed(p, "/api/v1/jobs?kind=export"); len(ids) != 0 || total != 0 {
 			t.Errorf("F-059: %s lists %d export jobs %v, want none", p.kind, total, ids)
@@ -121,9 +137,9 @@ func TestExportJobsStayWithTheirCreator(t *testing.T) {
 				t.Errorf("F-059: %s %s %s: %d %s, want 404 without the job", p.kind, req.method, req.path, code, trim(body))
 			}
 		}
-		if code, body := env.call(p, http.MethodGet, "/api/v1/jobs/"+otherJob, nil); code != http.StatusOK {
-			t.Errorf("%s GET the other job: %d %s, want 200", p.kind, code, trim(body))
-		}
+	}
+	if code, body := env.call(b, http.MethodGet, "/api/v1/jobs/"+otherJob, nil); code != http.StatusNotFound {
+		t.Errorf("%s GET the other job of client 1: %d %s, want 404", b.kind, code, trim(body))
 	}
 	// Nothing above changed the job.
 	if err := f.Admin.QueryRow(bg, `SELECT status FROM job WHERE id = $1`, jobID).Scan(&status); err != nil || status != string(jobs.StatusSucceeded) {

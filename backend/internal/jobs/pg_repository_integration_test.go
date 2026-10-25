@@ -143,8 +143,8 @@ func TestJobsAgainstPostgres(t *testing.T) {
 // the generic job model mirrors export jobs, and request paths see such a
 // job only as its creator — like export.ownJob, without an exception for
 // org-wide administrators. Without a user id in the scope no export job is
-// visible; other kinds and the worker paths (no scope in the context) stay
-// organization-wide.
+// visible; other kinds follow the scope only (TestJobScopeAgainstPostgres)
+// and the worker paths (no scope in the context) stay organization-wide.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestExportJobsOnlyForTheirCreator(t *testing.T) {
@@ -161,7 +161,9 @@ func TestExportJobsOnlyForTheirCreator(t *testing.T) {
 		return database.ContextWithTenantScope(bg, &scope)
 	}
 	creator := as(f.User, f.Client1)
-	foreign := as(other, f.Client2)
+	// Another user of the creator's client: the scope covers the jobs of
+	// the creator (WP-404), only the creator rule hides the export.
+	foreign := as(other, f.Client1)
 	orgAdmin := as(f.ID())
 	anonymous := as("")
 

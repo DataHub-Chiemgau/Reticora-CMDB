@@ -1167,11 +1167,25 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
   test('T15 the topology rooted at A’s CI answers B with "not found", like neighbours and impact', async () => {
     const neighbours = await api(w.rq, w.b.token, 'GET', `/topology/cis/${w.ci1.id}/neighbors`);
     expect(NOT_FOUND).toContain(neighbours.status);
-    const rooted = await api(w.rq, w.b.token, 'GET', `/topology?root_ci_id=${w.ci1.id}`);
+    const rooted = await api<{ detail?: string }>(
+      w.rq,
+      w.b.token,
+      'GET',
+      `/topology?root_ci_id=${w.ci1.id}`,
+    );
     expectNoTraceOfA('GET /topology?root_ci_id={A} as B', rooted.body, [w.ci1.id]);
     expect(NOT_FOUND, `GET /topology?root_ci_id={A} as B → ${rooted.status}`).toContain(
       rooted.status,
     );
+    // 404 "ci not found", the same answer as for an unknown root (F-161).
+    const unknown = await api<{ detail?: string }>(
+      w.rq,
+      w.b.token,
+      'GET',
+      '/topology?root_ci_id=00000000-0000-4000-8000-0000000000ff',
+    );
+    expect(`${rooted.status} ${rooted.body?.detail}`).toBe('404 ci not found');
+    expect(`${unknown.status} ${unknown.body?.detail}`).toBe('404 ci not found');
   });
 
   test('T16 A creates a CI through the CMDB form; it is stored in A’s organization and invisible to B', async () => {
