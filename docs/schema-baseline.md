@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000155_webhook_scope
+Stand: Migration 000156_ci_list_sort_index
 
 ## Prüfung
 
@@ -68,6 +68,12 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_org_location ON ci (organization_
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_org_asset ON ci (organization_id, asset_id) WHERE asset_id IS NOT NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_org_parent ON ci (organization_id, parent_ci_id) WHERE parent_ci_id IS NOT NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_attributes_path ON ci USING gin (attributes jsonb_path_ops);
+```
+
+Ebenso der Index der Standardsortierung der CI-Liste (WP-605, NFR-02):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_list_sort ON ci (organization_id, created_at DESC, id DESC) INCLUDE (client_id, site_id) WHERE deleted_at IS NULL;
 ```
 
 Jede Anweisung einzeln ausführen (nicht in einer Transaktion); ein

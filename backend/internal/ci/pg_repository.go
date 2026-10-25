@@ -234,11 +234,6 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		}
 
 		whereClause := strings.Join(whereParts, " AND ")
-		countQuery := "SELECT COUNT(*) FROM ci WHERE " + whereClause
-		if err := tx.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
-			return fmt.Errorf("count cis: %w", err)
-		}
-
 		sortColumn, sortDirection := NormalizeSort(filter)
 
 		// Keyset pagination: when a cursor is supplied it replaces the OFFSET
@@ -254,18 +249,27 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			argPos += 2
 		}
 
+		// Sort keys and limit (NFR-02, WP-605): the keys are qualified because
+		// the select list names id::text "id", and ORDER BY id sorted by that
+		// text, which no index delivers (the keyset clause compares the uuid).
+		// The limit is a sub-select: the planner cannot estimate the client
+		// predicate of ci_isolation and expects an org-wide principal to see
+		// 0.5 % of the organization's CIs, so with LIMIT 50 known at 10,000
+		// CIs it read and sorted the whole organization instead of the first
+		// entries of idx_ci_list_sort. Without the value it assumes a page of
+		// 10 % of the rows, as in the generic plan of a prepared statement.
 		var listQuery string
 		if page.Cursor != nil {
 			listArgs = append(listArgs, page.Limit)
 			listQuery = fmt.Sprintf(
-				"SELECT %s FROM ci WHERE %s ORDER BY %s %s, id %s LIMIT $%d",
+				"SELECT %s FROM ci WHERE %s ORDER BY ci.%s %s, ci.id %s LIMIT (SELECT $%d::bigint)",
 				ciSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos,
 			)
 		} else {
 			listArgs = append(listArgs, page.Limit, page.Offset)
 			listQuery = fmt.Sprintf(
-				"SELECT %s FROM ci WHERE %s ORDER BY %s %s, id %s LIMIT $%d OFFSET $%d",
+				"SELECT %s FROM ci WHERE %s ORDER BY ci.%s %s, ci.id %s LIMIT (SELECT $%d::bigint) OFFSET $%d",
 				ciSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos, argPos+1,
 			)
@@ -289,6 +293,18 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			return fmt.Errorf("iterate cis: %w", err)
 		}
 		rows.Close()
+
+		// total counts every matching CI. Without a cursor, a page that is
+		// shorter than the limit and not past the end holds the last rows, so
+		// it gives the count; otherwise the count reads the matching CIs once
+		// more (without filters an index-only scan of idx_ci_list_sort can
+		// serve it).
+		if page.Cursor == nil && len(items) < page.Limit && (len(items) > 0 || page.Offset == 0) {
+			total = page.Offset + len(items)
+		} else if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ci WHERE "+whereClause, args...).Scan(&total); err != nil {
+			return fmt.Errorf("count cis: %w", err)
+		}
+
 		ptrs := make([]*Item, len(items))
 		for i := range items {
 			ptrs[i] = &items[i]
