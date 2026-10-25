@@ -13057,7 +13057,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The kind defines no revert or the job did not succeed. */
+      /** @description The kind defines no revert, the job did not succeed, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes, the merge kind has no unmerge, or the merge no longer exists. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -13066,6 +13066,8 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
     };
   };
   listExportJobs: {
@@ -17482,7 +17484,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -17629,7 +17633,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

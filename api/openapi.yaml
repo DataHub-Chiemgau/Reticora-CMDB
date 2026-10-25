@@ -2096,10 +2096,18 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The kind defines no revert or the job did not succeed.
+          description: >-
+            The kind defines no revert, the job did not succeed, or the
+            reverter refused it: the merge snapshot expired, the merge
+            conflicts with later changes, the merge kind has no unmerge, or
+            the merge no longer exists.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /api/v1/exports:
     get:
@@ -5623,6 +5631,10 @@ paths:
           $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -5730,6 +5742,10 @@ paths:
           $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
