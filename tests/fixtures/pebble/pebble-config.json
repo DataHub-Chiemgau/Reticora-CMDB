@@ -1,0 +1,23 @@
+{
+  "pebble": {
+    "listenAddress": "0.0.0.0:14000",
+    "managementListenAddress": "127.0.0.1:15000",
+    "certificate": "/fixture/tls/cert.pem",
+    "privateKey": "/fixture/tls/key.pem",
+    "httpPort": 80,
+    "tlsPort": 443,
+    "ocspResponderURL": "",
+    "externalAccountBindingRequired": false,
+    "retryAfter": {
+      "authz": 3,
+      "order": 5
+    },
+    "keyAlgorithm": "ecdsa",
+    "profiles": {
+      "default": {
+        "description": "Reticora installer test (tests/install-acme-pebble.test.sh)",
+        "validityPeriod": 7776000
+      }
+    }
+  }
+}

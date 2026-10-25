@@ -580,12 +580,13 @@ test_invalid_domain_moves_nothing() {
 
 # ─── renewal ────────────────────────────────────────────────────────────────
 # The certbot service renews with the same deploy hook, mounted from
-# deploy/docker-compose/certbot-deploy-hook.sh.
+# deploy/docker-compose/certbot-deploy-hook.sh (--server of the renewal loop:
+# WP-420, tests/install-cloud-helpers.test.sh).
 test_renewal_loop_runs_deploy_hook() {
     local cmd path hook="${CERTBOT_DEPLOY_HOOK:-}"
     [ -n "$hook" ] || { echo "install-cloud.sh passes no deploy hook (CERTBOT_DEPLOY_HOOK)"; return 1; }
     cmd="$(grep -E '^[[:space:]]+command: .*certbot renew' "$COMPOSE_SRC")"
-    grep -qF -- "certbot renew --webroot -w /var/www/certbot --quiet --deploy-hook \"$hook\";" <<< "$cmd" \
+    grep -qF -- "certbot renew --webroot -w /var/www/certbot --quiet --deploy-hook \"$hook\"" <<< "$cmd" \
         || { echo "renewal loop without the deploy hook: $cmd"; return 1; }
     path="${hook#sh }"
     [ "$(certbot_mount_source "$path")" = "$REPO_ROOT/deploy/docker-compose/certbot-deploy-hook.sh" ] \
