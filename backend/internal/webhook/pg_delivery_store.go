@@ -35,6 +35,14 @@ func orgScope(orgID string) *database.TenantScope {
 	return &scope
 }
 
+// visibleSubscription restricts the deliveries or dead letters of the table
+// alias to the subscriptions the transaction sees: webhook_subscription is
+// read under its row level security (migration 000155), so a request reads
+// only those of the subscriptions in its scope (E-98, TEN-09).
+func visibleSubscription(alias string) string {
+	return `EXISTS (SELECT 1 FROM webhook_subscription s WHERE s.id = ` + alias + `.subscription_id)`
+}
+
 // Enqueue stores a new pending delivery for the tenant.
 func (s *PGDeliveryStore) Enqueue(ctx context.Context, rec DeliveryRecord) (DeliveryRecord, error) {
 	stored := rec
@@ -215,14 +223,15 @@ func (s *PGDeliveryStore) claimDueForOrg(ctx context.Context, orgID string, now 
 	return records, err
 }
 
-// ListBySubscription returns the delivery history of a subscription.
+// ListBySubscription returns the delivery history of a subscription the
+// caller sees.
 func (s *PGDeliveryStore) ListBySubscription(ctx context.Context, orgID, subscriptionID string, page api.PaginationParams) ([]DeliveryRecord, int, error) {
 	records := make([]DeliveryRecord, 0)
 	total := 0
 
 	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
-			"SELECT COUNT(*) FROM webhook_delivery WHERE subscription_id = $1", subscriptionID,
+			"SELECT COUNT(*) FROM webhook_delivery d WHERE d.subscription_id = $1 AND "+visibleSubscription("d"), subscriptionID,
 		).Scan(&total); err != nil {
 			return fmt.Errorf("count webhook deliveries: %w", err)
 		}
@@ -231,8 +240,8 @@ func (s *PGDeliveryStore) ListBySubscription(ctx context.Context, orgID, subscri
 			SELECT id::text, organization_id::text, subscription_id::text, event, status,
 			       attempt, max_attempts, response_status, duration_ms, error,
 			       next_retry_at, delivered_at, created_at
-			FROM webhook_delivery
-			WHERE subscription_id = $1
+			FROM webhook_delivery d
+			WHERE d.subscription_id = $1 AND `+visibleSubscription("d")+`
 			ORDER BY created_at DESC
 			LIMIT $2 OFFSET $3
 		`, subscriptionID, page.Limit, page.Offset)
@@ -335,14 +344,15 @@ func (s *PGDeliveryStore) MoveToDeadLetter(ctx context.Context, rec DeliveryReco
 	})
 }
 
-// ListDeadLetters returns the dead-letter queue of one tenant, newest first.
+// ListDeadLetters returns the dead-letter queue of one tenant, newest first:
+// the dead letters of the subscriptions the caller sees.
 func (s *PGDeliveryStore) ListDeadLetters(ctx context.Context, orgID string, page api.PaginationParams) ([]DeadLetter, int, error) {
 	letters := make([]DeadLetter, 0)
 	total := 0
 
 	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
-			"SELECT COUNT(*) FROM webhook_dead_letter WHERE organization_id = $1", orgID,
+			"SELECT COUNT(*) FROM webhook_dead_letter dl WHERE dl.organization_id = $1 AND "+visibleSubscription("dl"), orgID,
 		).Scan(&total); err != nil {
 			return fmt.Errorf("count webhook dead letters: %w", err)
 		}
@@ -350,8 +360,8 @@ func (s *PGDeliveryStore) ListDeadLetters(ctx context.Context, orgID string, pag
 		rows, err := tx.Query(ctx, `
 			SELECT id::text, delivery_id::text, organization_id::text, subscription_id::text,
 			       event, attempts, last_status_code, last_error, first_attempt_at, dead_at
-			FROM webhook_dead_letter
-			WHERE organization_id = $1
+			FROM webhook_dead_letter dl
+			WHERE dl.organization_id = $1 AND `+visibleSubscription("dl")+`
 			ORDER BY dead_at DESC
 			LIMIT $2 OFFSET $3
 		`, orgID, page.Limit, page.Offset)
@@ -441,13 +451,15 @@ func (s *PGDeliveryStore) CountDeadSince(ctx context.Context, orgID, subscriptio
 	return n, nil
 }
 
-// Requeue puts a failed or dead delivery back into the queue with a fresh
-// retry budget and removes its dead letter (WHK-01).
+// Requeue puts a failed or dead delivery of a subscription the caller sees
+// back into the queue with a fresh retry budget and removes its dead letter
+// (WHK-01).
 func (s *PGDeliveryStore) Requeue(ctx context.Context, orgID, subscriptionID, deliveryID string, now time.Time) (DeliveryRecord, error) {
 	var rec DeliveryRecord
 	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var status string
-		err := tx.QueryRow(ctx, `SELECT status FROM webhook_delivery WHERE id = $1 AND subscription_id = $2 FOR UPDATE`,
+		err := tx.QueryRow(ctx, `SELECT d.status FROM webhook_delivery d WHERE d.id = $1 AND d.subscription_id = $2 AND `+
+			visibleSubscription("d")+` FOR UPDATE OF d`,
 			deliveryID, subscriptionID).Scan(&status)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("not found")

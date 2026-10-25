@@ -12,7 +12,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // TestWHK01RetrySchedule covers the backoff of WHK-01: 30 s, 2 min, 10 min,
@@ -119,7 +118,7 @@ func TestWHK01HeadersDeactivationAndRetry(t *testing.T) {
 	}
 	mux := chi.NewRouter()
 	NewHandler(repo, d).RegisterRoutes(mux)
-	ctx := tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: "org-1"})
+	ctx := orgWideCtx(context.Background(), "org-1", "")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/"+subID+"/deliveries/"+records[0].ID+"/retry", nil).WithContext(ctx))
 	if w.Code != http.StatusAccepted {

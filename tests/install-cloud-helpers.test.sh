@@ -371,6 +371,7 @@ stub_issuer_stack() {
     }
     wait_for_service() { printf 'wait %s\n' "$1" >> "$STACK_CALLS"; }
     sync_db_password() { :; }
+    update_timescaledb() { :; }
     run_migrations() { :; }
     seed_default_organization() { :; }
     ensure_runtime_login() { :; }
@@ -621,6 +622,7 @@ test_runtime_login_order() {
     compose_cmd() { printf 'compose %s\n' "$*" >> "$calls"; }
     wait_for_service() { return 0; }
     sync_db_password() { printf 'sync_db_password\n' >> "$calls"; }
+    update_timescaledb() { :; }
     run_migrations() { printf 'run_migrations\n' >> "$calls"; }
     seed_default_organization() { printf 'seed\n' >> "$calls"; }
     ensure_runtime_login() { printf 'ensure_runtime_login\n' >> "$calls"; }
@@ -825,6 +827,7 @@ test_nats_edge_recreated_after_server() {
     compose_cmd() { printf 'compose %s\n' "$*" >> "$calls"; }
     wait_for_service() { printf 'wait %s\n' "$1" >> "$calls"; }
     sync_db_password() { :; }
+    update_timescaledb() { :; }
     run_migrations() { :; }
     seed_default_organization() { :; }
     ensure_runtime_login() { :; }

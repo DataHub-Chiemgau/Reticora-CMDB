@@ -7,6 +7,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"testing"
 	"time"
@@ -179,6 +180,119 @@ func TestExecutorSubmitFormInvalidValues(t *testing.T) {
 	}
 	if len(steps) != 1 || steps[0].Status != StatusFailed || steps[0].Error == "" {
 		t.Fatalf("expected failed step with error message, got %+v", steps)
+	}
+}
+
+// TestExecutorStartThenExecute covers WP-603 (WFL-04): Start stores the
+// pending run of a matching trigger and executes no action, Execute runs
+// it; TriggerMatches applies the rule of Start.
+func TestExecutorStartThenExecute(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	tickets := ticket.NewMemoryRepository()
+	exec := NewExecutor(repo, tickets, ci.NewMemoryRepository(), form.NewMemoryRepository(), nil)
+	def := &Definition{OrganizationID: "org-1", Name: "wf", Trigger: JSONMap{"type": "event", "event": "iga.access_request"},
+		Actions: []JSONMap{{"type": "create_ticket", "title": "Grant", "reporter_id": "00000000-0000-4000-8000-0000000000aa"}}, Active: true}
+	if err := repo.CreateDefinition(ctx, def); err != nil {
+		t.Fatal(err)
+	}
+	if !TriggerMatches(def, "iga.access_request") || TriggerMatches(def, "manual") || TriggerMatches(nil, "iga.access_request") ||
+		TriggerMatches(&Definition{Trigger: JSONMap{"type": "manual", "event": "iga.access_request"}}, "iga.access_request") {
+		t.Error("TriggerMatches differs from the rule of Start")
+	}
+	if _, err := exec.Start(ctx, "org-1", def, "manual", JSONMap{}); !errors.Is(err, ErrTriggerMismatch) {
+		t.Fatalf("start with another trigger: %v, want ErrTriggerMismatch", err)
+	}
+	run, err := exec.Start(ctx, "org-1", def, "iga.access_request", JSONMap{"subject_user_id": "u-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps, _ := repo.ListSteps(ctx, "org-1", run.ID)
+	_, created, _ := tickets.List(ctx, "org-1", ticket.FilterParams{}, api.PaginationParams{Limit: 10})
+	if run.ID == "" || run.Status != StatusPending || run.Trigger != "iga.access_request" || len(steps) != 0 || created != 0 {
+		t.Fatalf("started run %+v with %d steps and %d tickets, want a stored pending run without action", run, len(steps), created)
+	}
+	if run, err = exec.Execute(ctx, "org-1", def, run); err != nil {
+		t.Fatal(err)
+	}
+	steps, _ = repo.ListSteps(ctx, "org-1", run.ID)
+	_, created, _ = tickets.List(ctx, "org-1", ticket.FilterParams{}, api.PaginationParams{Limit: 10})
+	if run.Status != StatusSucceeded || len(steps) != 1 || created != 1 || run.Context["subject_user_id"] != "u-2" {
+		t.Fatalf("executed run %+v with %d steps and %d tickets, want succeeded with one ticket", run, len(steps), created)
+	}
+}
+
+// TestExecutorSubmitFormRules covers WP-603 (WFL-02) with the memory
+// repositories: submit_form submits as the user who triggered the run,
+// empty for a trigger without a user and never "workflow", and refuses an
+// inactive form, values against the schema and an unknown form like POST
+// /forms/{id}/submissions, with the fixed text of the rule and the fields of
+// a schema violation in the step output. TestSubmitFormActionOnPostgres
+// shows it on PostgreSQL.
+func TestExecutorSubmitFormRules(t *testing.T) {
+	ctx := context.Background()
+	const user = "00000000-0000-4000-8000-0000000000aa"
+	repo := NewMemoryRepository()
+	forms := form.NewMemoryRepository()
+	exec := NewExecutor(repo, nil, nil, forms, nil)
+	schema := form.JSONMap{"type": "object", "required": []any{"name"}}
+	active := &form.Definition{OrganizationID: "org-1", Name: "active", Schema: schema, Active: true}
+	inactive := &form.Definition{OrganizationID: "org-1", Name: "inactive", Schema: schema}
+	for _, d := range []*form.Definition{active, inactive} {
+		if err := forms.CreateDefinition(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(ctx context.Context, action JSONMap) (*Run, Step) {
+		t.Helper()
+		def := &Definition{OrganizationID: "org-1", Name: "wf", Trigger: JSONMap{"type": "manual"}, Actions: []JSONMap{action}, Active: true}
+		if err := repo.CreateDefinition(ctx, def); err != nil {
+			t.Fatal(err)
+		}
+		r, err := exec.Trigger(ctx, "org-1", def, "manual", JSONMap{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		steps, err := repo.ListSteps(ctx, "org-1", r.ID)
+		if err != nil || len(steps) != 1 {
+			t.Fatalf("steps of run %s: %+v, %v", r.ID, steps, err)
+		}
+		return r, steps[0]
+	}
+
+	userCtx := tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: "org-1", UserID: user})
+	for _, c := range []struct {
+		name   string
+		ctx    context.Context
+		wantBy string
+	}{{"triggered by a user", userCtx, user}, {"triggered without a user", ctx, ""}} {
+		r, step := run(c.ctx, JSONMap{"type": "submit_form", "form_id": active.ID, "values": map[string]any{"name": "x"}})
+		id, _ := step.Output["submission_id"].(string)
+		sub, err := forms.GetSubmission(ctx, "org-1", id)
+		if r.Status != StatusSucceeded || err != nil || sub.SubmittedBy != c.wantBy {
+			t.Errorf("%s: run %s %q, submission %+v %v; want succeeded, submitted_by %q", c.name, r.Status, step.Error, sub, err, c.wantBy)
+		}
+	}
+
+	for _, c := range []struct {
+		name   string
+		action JSONMap
+		want   string
+		fields int
+	}{
+		{"inactive form", JSONMap{"type": "submit_form", "form_id": inactive.ID, "values": map[string]any{"name": "x"}}, "form definition is inactive", 0},
+		{"required value missing", JSONMap{"type": "submit_form", "form_id": active.ID, "values": map[string]any{}}, form.ValidationError{}.Error(), 1},
+		{"unknown form", JSONMap{"type": "submit_form", "form_id": "00000000-0000-4000-8000-0000000000ff"}, form.ErrNotFound.Error(), 0},
+		{"form id no UUID", JSONMap{"type": "submit_form", "form_id": "f1"}, form.ErrNotFound.Error(), 0},
+	} {
+		r, step := run(userCtx, c.action)
+		fields, _ := step.Output["fields"].([]form.FieldError)
+		if r.Status != StatusFailed || step.Status != StatusFailed || step.Error != c.want || len(fields) != c.fields {
+			t.Errorf("%s: run %s step %s %q fields %v, want failed %q with %d fields", c.name, r.Status, step.Status, step.Error, fields, c.want, c.fields)
+		}
+	}
+	if _, total, _ := forms.ListSubmissions(ctx, "org-1", form.SubmissionFilter{}, api.PaginationParams{Limit: 10}); total != 2 {
+		t.Errorf("submissions: %d, want the 2 accepted ones", total)
 	}
 }
 

@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -87,6 +89,103 @@ func TestGetTopologyClientFilter(t *testing.T) {
 	}
 	if len(g.Edges) != 0 {
 		t.Errorf("expected no edges, got %d", len(g.Edges))
+	}
+}
+
+// batchEdges gives the memory repository the batch edge read
+// (relationship.EdgeReader) and records its calls; the topology without a
+// root must then not list the edges of each CI.
+type batchEdges struct {
+	*relationship.MemoryRepository
+	t     *testing.T
+	calls [][]string
+}
+
+func (b *batchEdges) List(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]relationship.Relationship, int, error) {
+	b.t.Errorf("the topology without a root lists the edges of %q", ciID)
+	return b.MemoryRepository.List(ctx, orgID, ciID, page)
+}
+
+// EdgesAmong answers every edge of the organization, so the handler's own
+// check of the node set shows as well.
+func (b *batchEdges) EdgesAmong(ctx context.Context, orgID string, ids []string) ([]relationship.Relationship, error) {
+	b.calls = append(b.calls, slices.Clone(ids))
+	rels, _, err := b.MemoryRepository.List(ctx, orgID, "", api.PaginationParams{Limit: 100})
+	return rels, err
+}
+
+// TestGetTopologyFullEdgeOrder covers NFR-02 and ABN-02 (WP-602) in the
+// memory profile: without a root, a repository that reads the edges among a
+// set of CIs in batches (relationship.EdgeReader) is asked once for the
+// node set and never per CI; the memory repository keeps the read per CI.
+// Both answer the same graph: the edges between two nodes, each once,
+// ordered by id, the same on every request.
+func TestGetTopologyFullEdgeOrder(t *testing.T) {
+	ciRepo, relRepo, ids := seed(t)
+	// More edges than the seed, one of them to the CI of client-b.
+	for _, e := range [][3]string{
+		{ids["pdu1"], ids["sw1"], "depends_on"},
+		{ids["other"], ids["sw1"], "connected_to"},
+		{ids["sw1"], ids["pdu1"], "connected_to"},
+	} {
+		if err := relRepo.Create(context.Background(), &relationship.Relationship{OrganizationID: "org-1", SourceCIID: e[0], TargetCIID: e[1], RelType: e[2]}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	batch := &batchEdges{MemoryRepository: relRepo, t: t}
+	for _, c := range []struct {
+		name  string
+		rels  relationship.Repository
+		path  string
+		nodes int
+		edges int
+	}{
+		{"per CI", relRepo, "/api/v1/topology", 4, 5},
+		{"per CI, client-a", relRepo, "/api/v1/topology?client_id=client-a", 3, 4},
+		{"batch", batch, "/api/v1/topology", 4, 5},
+		{"batch, client-a", batch, "/api/v1/topology?client_id=client-a", 3, 4},
+	} {
+		mux := chi.NewRouter()
+		NewHandler(ciRepo, c.rels).RegisterRoutes(mux)
+		batch.calls = nil
+		var first string
+		for i := 0; i < 5; i++ {
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, tenantReq("GET", c.path))
+			var g Graph
+			if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &g) != nil {
+				t.Fatalf("%s: %d %s", c.name, w.Code, w.Body.String())
+			}
+			if i == 0 {
+				first = w.Body.String()
+			} else if w.Body.String() != first {
+				t.Errorf("%s: answer %d differs from the first:\n%s\n%s", c.name, i, w.Body.String(), first)
+			}
+			if len(g.Nodes) != c.nodes || len(g.Edges) != c.edges {
+				t.Fatalf("%s: %d nodes and %d edges, want %d and %d", c.name, len(g.Nodes), len(g.Edges), c.nodes, c.edges)
+			}
+			nodes := map[string]bool{}
+			for _, n := range g.Nodes {
+				nodes[n.ID] = true
+			}
+			for j, e := range g.Edges {
+				if !nodes[e.SourceCIID] || !nodes[e.TargetCIID] {
+					t.Errorf("%s: edge %+v leaves the node set", c.name, e)
+				}
+				if j > 0 && g.Edges[j-1].ID >= e.ID {
+					t.Errorf("%s: edges not ordered by id: %+v", c.name, g.Edges)
+				}
+			}
+			if c.rels == batch {
+				ids := make([]string, len(g.Nodes))
+				for j, n := range g.Nodes {
+					ids[j] = n.ID
+				}
+				if len(batch.calls) != i+1 || !slices.Equal(batch.calls[i], ids) {
+					t.Errorf("%s: EdgesAmong calls %v, want one per request with the nodes %v", c.name, batch.calls, ids)
+				}
+			}
+		}
 	}
 }
 

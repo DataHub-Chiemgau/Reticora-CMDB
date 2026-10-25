@@ -156,6 +156,18 @@ jobs:
           GRANT reticora_app TO reticora_test_runtime;
           SQL
 
+      # INS-05/OPS-01 (WP-604): update of the TimescaleDB extension of an
+      # existing database (scripts/ops/timescaledb-update.sh, start_stack of
+      # install-cloud.sh) with stubs, and against a database of its own that
+      # is created with timescaledb 2.17.2 and migrated: afterwards
+      # default_version, the event trigger enabled, no migration left and
+      # TestSchemaBaselineMatchesMigratedSchema green. The database is dropped
+      # at the end.
+      - name: TimescaleDB extension update from an older version
+        env:
+          TSDB_UPDATE_TEST_DATABASE_URL: postgres://reticora:reticora@localhost:5432/postgres?sslmode=disable
+        run: ./tests/timescaledb-update.test.sh
+
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@v1.13.0
 

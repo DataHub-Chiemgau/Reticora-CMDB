@@ -535,6 +535,43 @@ func frontierEdges(ctx context.Context, tx pgx.Tx, orgID string, frontier []stri
 		WHERE r.organization_id = $1 AND (r.source_ci_id = ANY($2::uuid[]) OR r.target_ci_id = ANY($2::uuid[]))`, orgID, frontier)
 }
 
+// EdgesAmong implements EdgeReader under the caller's full tenant scope
+// (NFR-02, WP-602), like a level of TraverseFrom: one statement reads the
+// edges of graphEdges, the stored relationships and the projected
+// containment as List and TraverseFrom read them, between two of ids; a
+// second one the CIs among ids that are visible and not deleted under the
+// same scope (visibleCIs). An edge is kept when both of its CIs are, as
+// visibleEndpoints keeps it for List. Neither statement joins edges with
+// ci: the plan of such a join follows the statistics, and with stale ones
+// it read the CIs of the organization once per edge (seconds for 2,000
+// CIs). Both statements are filtered by the constant ids alone.
+func (r *PGRepository) EdgesAmong(ctx context.Context, orgID string, ids []string) ([]Relationship, error) {
+	result := make([]Relationship, 0)
+	if len(ids) == 0 {
+		return result, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		edges, err := readEdges(ctx, tx, `SELECT `+traversalSelectColumns+` FROM `+graphEdges+` r
+			WHERE r.organization_id = $1 AND r.source_ci_id = ANY($2::uuid[]) AND r.target_ci_id = ANY($2::uuid[])
+			ORDER BY r.id`, orgID, ids)
+		if err != nil {
+			return err
+		}
+		visible := make(map[string]bool, len(ids))
+		if err := visibleCIs(ctx, tx, orgID, ids, visible); err != nil {
+			return err
+		}
+		for _, e := range visibleEdges(edges, edgeRowEnds, visible) {
+			result = append(result, Relationship{ID: e.id, SourceCIID: e.sourceCIID, TargetCIID: e.targetCIID, RelType: e.relType, Source: e.source})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // organizationEdges reads every traversable edge of the organization in one
 // statement, then the visible, not deleted CIs, and keeps the edges between
 // two of them.

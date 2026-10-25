@@ -27,8 +27,31 @@ type Handler struct {
 	runner      *TaskRunner
 	drift       *DriftDetector
 	workflows   workflow.Repository
+	runs        RunStarter
+	tx          TxRunner
 }
 
+// AccessRequestEvent is the trigger event of the workflow run an access
+// request starts (WFL-04).
+const AccessRequestEvent = "iga.access_request"
+
+// RunStarter starts the workflow run of an access request (WFL-04): Start
+// stores the pending run, Execute runs its actions. The workflow executor
+// implements it.
+type RunStarter interface {
+	Start(ctx context.Context, orgID string, def *workflow.Definition, trigger string, payload workflow.JSONMap) (*workflow.Run, error)
+	Execute(ctx context.Context, orgID string, def *workflow.Definition, run *workflow.Run) (*workflow.Run, error)
+}
+
+// TxRunner runs fn in one transaction of the context's tenant scope: the
+// repository calls fn makes with its context join it
+// (database.ContextWithTx). The IGA PG repository implements it.
+type TxRunner interface {
+	RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error
+}
+
+// NewHandler creates the IGA handler. A repository that is a TxRunner stores
+// an access request and the run of its workflow in one transaction.
 func NewHandler(repo Repository, users user.Repository, creds *credential.Service, discoveryRepo discovery.Repository, workflows workflow.Repository) *Handler {
 	registry := NewRegistry(discoveryRepo, nil)
 	decrypt := func(ctx context.Context, orgID, id string) (JSONMap, error) {
@@ -37,8 +60,21 @@ func NewHandler(repo Repository, users user.Repository, creds *credential.Servic
 		}
 		return creds.Decrypt(ctx, orgID, id)
 	}
-	return &Handler{repo: repo, users: users, credentials: creds, registry: registry, lifecycle: NewLifecycleService(repo), runner: NewTaskRunner(repo, registry, decrypt), drift: NewDriftDetector(repo, registry, decrypt), workflows: workflows}
+	h := &Handler{repo: repo, users: users, credentials: creds, registry: registry, lifecycle: NewLifecycleService(repo), runner: NewTaskRunner(repo, registry, decrypt), drift: NewDriftDetector(repo, registry, decrypt), workflows: workflows}
+	if runner, ok := repo.(TxRunner); ok {
+		h.tx = runner
+	}
+	return h
 }
+
+// WithWorkflowRuns sets the executor that starts the workflow run of an
+// access request (WFL-04). Without it or without the workflow repository an
+// access request starts no run.
+func (h *Handler) WithWorkflowRuns(runs RunStarter) *Handler {
+	h.runs = runs
+	return h
+}
+
 // WithEgress sets the destination policy of connector URLs (SEC-08).
 func (h *Handler) WithEgress(opts egress.Options) *Handler {
 	h.registry.WithEgress(opts)
@@ -384,22 +420,81 @@ func (h *Handler) CreateAccessRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	ar := &AccessRequest{OrganizationID: t.OrganizationID, RequesterID: t.UserID, SubjectUserID: req.SubjectUserID, ConnectorID: req.ConnectorID, Entitlement: req.Entitlement, Reason: req.Reason, Status: "pending"}
-	if h.workflows != nil {
-		defs, _, _ := h.workflows.ListDefinitions(r.Context(), t.OrganizationID, true, api.PaginationParams{Limit: 50})
-		for _, d := range defs {
-			if m, ok := d.Trigger["event"].(string); ok && m == "iga.access_request" {
-				ar.WorkflowRunID = d.ID
-				break
-			}
-		}
+	def, err := h.accessRequestWorkflow(r.Context(), t.OrganizationID)
+	if err != nil {
+		slog.WarnContext(r.Context(), "iga: list access request workflows failed", "error", err)
+		api.WriteRepoError(w, err)
+		return
 	}
-	// A subject or connector of another organization is 422 on its field
-	// like an unknown one (TEN-04, F-047).
-	if err := h.repo.CreateAccessRequest(r.Context(), ar); err != nil {
+	// The pending run of the workflow and the request are stored in one
+	// transaction, the run first so the request names it: a refused request
+	// leaves no run, a run that cannot be stored no request, and
+	// workflow_run_id never names a missing run (WFL-04). The actions run
+	// after the commit; a failing one marks the run failed, the request
+	// stays. A subject or connector of another organization is 422 on its
+	// field like an unknown one (TEN-04, F-047).
+	var run *workflow.Run
+	err = h.inTx(r.Context(), t.OrganizationID, func(ctx context.Context) error {
+		if def != nil {
+			var startErr error
+			run, startErr = h.runs.Start(ctx, t.OrganizationID, def, AccessRequestEvent, workflow.JSONMap{
+				"requester_id": ar.RequesterID, "subject_user_id": ar.SubjectUserID, "connector_id": ar.ConnectorID,
+				"entitlement": ar.Entitlement, "reason": ar.Reason,
+			})
+			if startErr != nil {
+				return startErr
+			}
+			ar.WorkflowRunID = run.ID
+		}
+		return h.repo.CreateAccessRequest(ctx, ar)
+	})
+	if err != nil {
 		writeIGAError(w, r, err)
 		return
 	}
+	if run != nil {
+		// The first status update of the run stores the request id in its
+		// context. The committed run executes even when the client goes
+		// away.
+		run.Context["access_request_id"] = ar.ID
+		if _, err = h.runs.Execute(context.WithoutCancel(r.Context()), t.OrganizationID, def, run); err != nil {
+			slog.WarnContext(r.Context(), "iga: workflow run of an access request failed", "access_request_id", ar.ID, "workflow_run_id", run.ID, "error", err)
+		}
+	}
 	api.WriteJSON(w, 201, ar)
+}
+
+// accessRequestWorkflow returns the first active workflow definition, by
+// name, whose trigger is AccessRequestEvent; nil when there is none or the
+// handler starts no runs.
+func (h *Handler) accessRequestWorkflow(ctx context.Context, orgID string) (*workflow.Definition, error) {
+	if h.workflows == nil || h.runs == nil {
+		return nil, nil
+	}
+	page := api.PaginationParams{Limit: 50}
+	for {
+		defs, total, err := h.workflows.ListDefinitions(ctx, orgID, true, page)
+		if err != nil {
+			return nil, err
+		}
+		for i := range defs {
+			if workflow.TriggerMatches(&defs[i], AccessRequestEvent) {
+				return &defs[i], nil
+			}
+		}
+		page.Offset += page.Limit
+		if len(defs) == 0 || page.Offset >= total {
+			return nil, nil
+		}
+	}
+}
+
+// inTx runs fn in one transaction, or as it is without a TxRunner.
+func (h *Handler) inTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	if h.tx == nil {
+		return fn(ctx)
+	}
+	return h.tx.RunInTx(ctx, orgID, fn)
 }
 func (h *Handler) ApproveAccessRequest(w http.ResponseWriter, r *http.Request) {
 	h.decideAccess(w, r, "approved")

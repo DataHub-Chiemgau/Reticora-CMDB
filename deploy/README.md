@@ -385,6 +385,35 @@ the old pods running but cannot roll out new ones until
 `reticora-db-runtime` exists (`CreateContainerConfigError`); create the
 runtime login and its secret first.
 
+**TimescaleDB extension update (before the rollout).** A database keeps the
+TimescaleDB extension version it was created with when its server gets a
+newer TimescaleDB (image or package). Before the migrations of a rollout,
+raise it with the migration login (the bootstrap superuser, which owns the
+extension and the event trigger `reticora_restrict_app_ddl`). The script
+disables that trigger only around `ALTER EXTENSION timescaledb UPDATE`, which
+it otherwise breaks (`FATAL: "timescaledb" already loaded with a different
+version`), enables it again also on failure, and changes nothing when the
+extension is current. Stop the server first: while the trigger is disabled,
+the application roles are not restricted to index DDL, so the script refuses
+the update while a login of `reticora_app` or `reticora_owner` is still
+connected.
+
+```bash
+kubectl -n reticora scale deployment/reticora-server --replicas=0
+PGPASSWORD='…' PGSSLMODE=require \
+  scripts/ops/timescaledb-update.sh --database reticora -- psql -h db.example.org -p 5432 -U reticora
+migrate -path backend/migrations -database "$MIGRATION_DATABASE_URL" up
+kubectl -n reticora apply -k deploy/k8s/overlays/prod   # sets the replicas again
+```
+
+A managed PostgreSQL whose administrator login cannot run `ALTER EVENT
+TRIGGER` follows the provider's extension upgrade instead; afterwards
+`SELECT evtenabled FROM pg_event_trigger WHERE evtname =
+'reticora_restrict_app_ddl'` must return `O`. The server refuses to start, and
+`/readyz` reports `database: unavailable`, while the trigger is disabled or
+missing; an extension below the version of its installed library is logged
+as a warning at start (OPS-01).
+
 `RETICORA_MASTER_KEY` (envelope encryption of credentials, OPS-03) is
 mandatory: the deployment references `reticora-secrets/master-key` without
 `optional`, so a missing key keeps the pod in `CreateContainerConfigError`,

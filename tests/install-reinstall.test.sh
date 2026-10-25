@@ -17,6 +17,9 @@
 #      the new secret 200, with the old one 401; each rotation logged once,
 #      without its value;
 #   3. third run without a change: no kcadm write call, no rotation logged.
+# Before the runs it checks the order of start_stack: the Keycloak steps
+# above, and the server stop and TimescaleDB update between sync_db_password
+# and run_migrations (WP-604).
 # The realm ships reticora-app without a service account; for the
 # client_credentials check the test enables it after the first run. The
 # installer leaves that setting alone (only secret, redirect URIs and web
@@ -94,17 +97,30 @@ installer_run() {
     ) > "$1" 2>&1
 }
 
-# The steps above are those of start_stack, in its order.
-mirrors_start_stack() {
+# start_stack_order <step>... — the steps occur in start_stack in this order.
+start_stack_order() {
     local body prev=0 n step
     # shellcheck disable=SC1090
     body="$(set --; . "$HARNESS" >/dev/null 2>&1; declare -f start_stack)"
-    for step in 'up -d postgres nats redis minio keycloak-db' 'wait_for_service keycloak-db' 'up -d keycloak' \
-        'wait_for_service keycloak ' 'validate_keycloak_bootstrap' 'create_initial_admin'; do
+    for step in "$@"; do
         n="$(printf '%s\n' "$body" | grep -n -F -- "$step" | head -n 1 | cut -d: -f1)"
         [ -n "$n" ] && [ "$n" -gt "$prev" ] || return 1
         prev="$n"
     done
+}
+
+# The steps above are those of start_stack, in its order.
+mirrors_start_stack() {
+    start_stack_order 'up -d postgres nats redis minio keycloak-db' 'wait_for_service keycloak-db' 'up -d keycloak' \
+        'wait_for_service keycloak ' 'validate_keycloak_bootstrap' 'create_initial_admin'
+}
+
+# A re-run on a newer database image (WP-604): after the password sync the
+# server is stopped and the TimescaleDB extension updated
+# (scripts/ops/timescaledb-update.sh, tests/timescaledb-update.test.sh),
+# before the migrations.
+updates_timescaledb_before_migrations() {
+    start_stack_order 'sync_db_password' 'compose_cmd stop server' 'update_timescaledb' 'run_migrations'
 }
 
 # Admin CLI of the test itself (own config file inside the container).
@@ -150,6 +166,8 @@ previous_env_applied() {
 no_rotation_logged() { ! grep -q -e 'Keycloak rotation:' -e 'Changed since the last run' "$LOG"; }
 
 check "the test runs the Keycloak steps of start_stack in its order" mirrors_start_stack
+check "start_stack stops the server and updates TimescaleDB between sync_db_password and run_migrations" \
+    updates_timescaledb_before_migrations
 
 # ─── 1. first run with values A ──────────────────────────────────────────────
 cat > "$T_ENV" <<ENV

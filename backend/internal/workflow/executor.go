@@ -53,7 +53,22 @@ func (e *Executor) WithFieldGuard(g *override.Guard) *Executor {
 	return e
 }
 
+// Trigger starts a run of def for trigger with payload as its context and
+// executes its actions (Start, then Execute).
 func (e *Executor) Trigger(ctx context.Context, orgID string, def *Definition, trigger string, payload JSONMap) (*Run, error) {
+	run, err := e.Start(ctx, orgID, def, trigger, payload)
+	if err != nil {
+		return nil, err
+	}
+	return e.Execute(ctx, orgID, def, run)
+}
+
+// Start stores a pending run of def for trigger with payload as its context
+// and executes no action. A caller that stores the run together with its own
+// rows in one transaction (database.ContextWithTx) executes it with Execute
+// after the commit, so a failing action never rolls back the run that
+// records the failure (WFL-04).
+func (e *Executor) Start(ctx context.Context, orgID string, def *Definition, trigger string, payload JSONMap) (*Run, error) {
 	if def == nil {
 		return nil, fmt.Errorf("workflow definition is required")
 	}
@@ -64,7 +79,19 @@ func (e *Executor) Trigger(ctx context.Context, orgID string, def *Definition, t
 	if err := e.repo.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
+	return run, nil
+}
+
+// Execute runs the actions of a run that Start stored.
+func (e *Executor) Execute(ctx context.Context, orgID string, def *Definition, run *Run) (*Run, error) {
 	return e.resume(ctx, orgID, def, run, "")
+}
+
+// TriggerMatches reports whether event starts runs of def under the rule of
+// Trigger: the event of the trigger, or "manual" for a manual or scheduled
+// definition.
+func TriggerMatches(def *Definition, event string) bool {
+	return def != nil && triggerMatches(def.Trigger, event)
 }
 
 func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment string) (*Run, error) {
@@ -244,25 +271,58 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, ac
 		if e.forms == nil {
 			return nil, false, fmt.Errorf("form repository unavailable")
 		}
-		formID := str(action, "form_id", "")
-		var vals map[string]any
-		if raw, exists := action["values"]; exists && raw != nil {
-			v, ok := raw.(map[string]any)
-			if !ok {
-				return nil, false, fmt.Errorf("submit_form action values must be an object, got %T", raw)
-			}
-			vals = v
-		}
-		sub := &form.Submission{OrganizationID: orgID, FormID: formID, Values: form.JSONMap(vals), SubmittedBy: "workflow", Status: "submitted"}
-		if err := e.forms.CreateSubmission(ctx, sub); err != nil {
-			return nil, false, err
-		}
-		return JSONMap{"submission_id": sub.ID}, false, nil
+		return e.submitForm(ctx, orgID, action)
 	case "noop", "":
 		return JSONMap{}, false, nil
 	default:
 		return nil, false, fmt.Errorf("unsupported workflow action %q", typ)
 	}
+}
+
+// errFormInactive: submit_form names an inactive form definition, which
+// the form API refuses as well.
+var errFormInactive = errors.New("form definition is inactive")
+
+// submitForm submits the form of a submit_form action under the rules of
+// POST /forms/{id}/submissions (WFL-01, WFL-02): the definition must be
+// visible in the caller's scope and active, and the values must match its
+// schema. A refused submission fails the step with the fixed text of the
+// rule, the fields of a schema violation in the step output. submitted_by is
+// the user who triggered the run, empty (NULL) for a trigger without a user:
+// the column holds user ids, the origin "workflow" is the step that names
+// the submission.
+func (e *Executor) submitForm(ctx context.Context, orgID string, action JSONMap) (JSONMap, bool, error) {
+	values := form.JSONMap{}
+	if raw, exists := action["values"]; exists && raw != nil {
+		v, ok := raw.(map[string]any)
+		if !ok {
+			return nil, false, fmt.Errorf("submit_form action values must be an object, got %T", raw)
+		}
+		values = v
+	}
+	formID := str(action, "form_id", "")
+	if !api.IsUUID(formID) {
+		return nil, false, form.ErrNotFound
+	}
+	def, err := e.forms.GetDefinition(ctx, orgID, formID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !def.Active {
+		return nil, false, errFormInactive
+	}
+	if err := form.Validate(def.Schema, values); err != nil {
+		var ve form.ValidationError
+		if errors.As(err, &ve) {
+			return JSONMap{"fields": ve.Fields}, false, err
+		}
+		return nil, false, err
+	}
+	sub := &form.Submission{OrganizationID: orgID, FormID: def.ID, Values: values, SubmittedBy: tenant.FromContext(ctx).UserID, Status: "submitted"}
+	if err := e.forms.CreateSubmission(ctx, sub); err != nil {
+		return nil, false, err
+	}
+	return JSONMap{"submission_id": sub.ID}, false, nil
 }
 
 func triggerMatches(trigger JSONMap, event string) bool {

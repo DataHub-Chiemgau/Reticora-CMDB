@@ -22,6 +22,11 @@ type UpdateRequest struct {
 }
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
+// Subscriptions carry the scope snapshot of their creator (migration
+// 000155): request paths run with the principal's complete scope
+// (database.WithRequestTenant), so row level security shows them only the
+// subscriptions whose snapshot lies in their scope; the dispatcher and the
+// system paths run with the organization-wide scope.
 type PGRepository struct {
 	pool *pgxpool.Pool
 }
@@ -32,7 +37,8 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 }
 
 const webhookSelectColumns = `id, organization_id, name, url, secret, events, is_active, headers,
-	COALESCE(service_account_id::text, ''), created_at, updated_at, COALESCE(previous_secret, ''), previous_secret_expires_at`
+	COALESCE(service_account_id::text, ''), created_at, updated_at, COALESCE(previous_secret, ''), previous_secret_expires_at,
+	scope_recorded, scope_clients::text[], scope_sites::text[], scope_teams::text[]`
 
 // List returns paginated subscriptions.
 func (r *PGRepository) List(ctx context.Context, orgID string, page api.PaginationParams) ([]Subscription, int, error) {
@@ -92,6 +98,11 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Subscrip
 	return sub, nil
 }
 
+// Create stores the subscription with its scope snapshot (sub.Scope, nil:
+// none); WITH CHECK of webhook_sub_isolation refuses a snapshot outside the
+// principal's scope. A bound service account must be visible in the
+// principal's transaction, otherwise the binding is refused
+// (errServiceAccountNotFound).
 func (r *PGRepository) Create(ctx context.Context, sub *Subscription) error {
 	return database.WithRequestTenant(ctx, r.pool, sub.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		headersJSON, err := json.Marshal(sub.Headers)
@@ -99,9 +110,28 @@ func (r *PGRepository) Create(ctx context.Context, sub *Subscription) error {
 			return fmt.Errorf("marshal headers: %w", err)
 		}
 
+		if sub.ServiceAccountID != "" {
+			visible := uuidPattern.MatchString(sub.ServiceAccountID)
+			if visible {
+				if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM service_account WHERE id = $1::uuid)`,
+					sub.ServiceAccountID).Scan(&visible); err != nil {
+					return fmt.Errorf("read service account: %w", err)
+				}
+			}
+			if !visible {
+				return errServiceAccountNotFound
+			}
+		}
+
+		snapshot := Scope{}
+		if sub.Scope != nil {
+			snapshot = *sub.Scope
+		}
 		query := `
-			INSERT INTO webhook_subscription (organization_id, name, url, secret, events, is_active, headers, service_account_id)
-			VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5, $6, NULLIF($7, '')::uuid)
+			INSERT INTO webhook_subscription (organization_id, name, url, secret, events, is_active, headers, service_account_id,
+				scope_recorded, scope_clients, scope_sites, scope_teams)
+			VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5, $6, NULLIF($7, '')::uuid,
+				$8, $9::uuid[], $10::uuid[], $11::uuid[])
 			RETURNING id::text, created_at, updated_at
 		`
 		var createdAt, updatedAt time.Time
@@ -113,6 +143,10 @@ func (r *PGRepository) Create(ctx context.Context, sub *Subscription) error {
 			sub.IsActive,
 			headersJSON,
 			sub.ServiceAccountID,
+			sub.Scope != nil,
+			snapshot.Clients,
+			snapshot.Sites,
+			snapshot.Teams,
 		).Scan(&sub.ID, &createdAt, &updatedAt); err != nil {
 			return fmt.Errorf("create webhook: %w", err)
 		}
@@ -244,6 +278,8 @@ func scanWebhook(scanner webhookScanner) (*Subscription, error) {
 	sub := &Subscription{}
 	var createdAt, updatedAt time.Time
 	var headersJSON []byte
+	var recorded bool
+	var scope Scope
 
 	if err := scanner.Scan(
 		&sub.ID,
@@ -259,8 +295,15 @@ func scanWebhook(scanner webhookScanner) (*Subscription, error) {
 		&updatedAt,
 		&sub.PreviousSecret,
 		&sub.PreviousSecretExpiresAt,
+		&recorded,
+		&scope.Clients,
+		&scope.Sites,
+		&scope.Teams,
 	); err != nil {
 		return nil, err
+	}
+	if recorded {
+		sub.Scope = &scope
 	}
 
 	sub.CreatedAt = createdAt.UTC().Format(time.RFC3339)

@@ -14,7 +14,6 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -534,7 +533,7 @@ func TestRotatedSecretSignsDuringOverlap(t *testing.T) {
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/"+sub.ID+"/rotate-secret", nil)
-	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "u-1"}))
+	req = req.WithContext(orgWideCtx(req.Context(), "org-1", "u-1"))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	var out struct {

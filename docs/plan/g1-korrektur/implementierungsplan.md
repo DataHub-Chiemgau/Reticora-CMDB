@@ -31,18 +31,20 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 |---|---|---:|---:|---|
 | [K0 Prüfrahmen](#k0-prüfrahmen) | WP-336 – WP-338 | 3 | 4,5 | Traceability liest den Korrekturplan; Defekttests laufen als Ratchet in CI; Real-Stack-E2E läuft in CI gegen die installierte Instanz. |
 | [K1 Sicherheit und Mandantentrennung](#k1-sicherheit-und-mandantentrennung) | WP-339 – WP-409 | 71 | 99,0 | Alle P0 und die P1/P2 mit Sicherheits- oder Isolationswirkung behoben; ihre Defekttests grün und überführt. |
+| [K1-Nachträge](#k1-nachträge) | WP-601 – WP-605 | 5 | 7,0 | Funde aus der Umsetzung von K1 behoben: Webhook-Abos im Scope ihres Erzeugers (E-98), Topologie ohne Root ohne N+1, IGA-/Workflow-Fehler, Upgrade der TimescaleDB-Extension, Index der CI-Listensortierung. |
 | [K2 Datenintegrität und Kernprozesse](#k2-datenintegrität-und-kernprozesse) | WP-410 – WP-426 | 17 | 27,0 | Alle übrigen P1 behoben: keine stillen Datenverluste, Kernprozesse (CI-Anlage, Sitzung, Discovery, Reconciliation) im Real-Stack grün. |
 | [K3 Installation, Betrieb und Gate-Nachweise](#k3-installation-betrieb-und-gate-nachweise) | WP-427 – WP-459 | 33 | 48,5 | Installer-, Zertifikats-, K8s-, Backup- und Monitoring-Befunde behoben; Gate- und Abnahmedokumente führen jeden betroffenen Punkt mit Zwischenstand (offen mit Korrektur-WP oder belegt PASS); den Endstand stellt K7 her. |
 | [K4 Funktions-, Validierungs- und Bedienmängel](#k4-funktions--validierungs--und-bedienmängel) | WP-460 – WP-531 | 72 | 99,0 | Alle übrigen P2 behoben. |
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **265** | **362,5** | |
+| **Summe** | | **270** | **369,5** | |
 
 ```mermaid
 flowchart LR
     K0["K0 Prüfrahmen<br/>3 WPs · 4,5 PT"]
     K1["K1 Sicherheit und Mandantentrennung<br/>71 WPs · 99,0 PT"]
+    K1N["K1-Nachträge<br/>5 WPs · 7,0 PT"]
     K2["K2 Datenintegrität und Kernprozesse<br/>17 WPs · 27,0 PT"]
     K3["K3 Installation, Betrieb und Gate-Nachweise<br/>33 WPs · 48,5 PT"]
     K4["K4 Funktions-, Validierungs- und Bedienmängel<br/>72 WPs · 99,0 PT"]
@@ -50,6 +52,7 @@ flowchart LR
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
+    K1 --> K1N
     K0 --> K2
     K0 --> K3
     K1 --> K4
@@ -389,6 +392,11 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-598](#wp-598--wiederholungsprüfung-installation-betrieb-fundament-epic-b-und-oberfläche) | `k-reaudit-3` | Wiederholungsprüfung Installation, Betrieb, Fundament (Epic B) und Oberfläche | K7 | 2,0 | – | 112 WPs (siehe Block) |
 | [WP-599](#wp-599--abnahmeprüfung-der-nicht-auditierten-g1-pflicht-wps-wp-214-wp-240--wp-242-wp-332--wp-335) | `k-audit-ext` | Abnahmeprüfung der nicht auditierten G1-Pflicht-WPs (WP-214, WP-240 – WP-242, WP-332 – WP-335) | K7 | 2,0 | – | WP-338, WP-595 |
 | [WP-600](#wp-600--gate-g1-nach-der-korrektur-checkliste-sicherheitsreview-und-freigabeentscheidung) | `k-gate` | Gate G1 nach der Korrektur: Checkliste, Sicherheitsreview und Freigabeentscheidung | K7 | 1,5 | – | WP-532, WP-595, WP-596, WP-597, WP-598, WP-599 |
+| [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
+| [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
+| [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
+| [WP-604](#wp-604--upgrade-der-timescaledb-extension-im-installer) | `k1n-tsdb-update` | Upgrade der TimescaleDB-Extension im Installer | K1N | 1,5 | – | WP-389 |
+| [WP-605](#wp-605--ci-liste-index-der-standardsortierung-und-zählung-vorzug-aus-wp-438) | `k1n-cilist-sort` | CI-Liste: Index der Standardsortierung und Zählung (Vorzug aus WP-438) | K1N | 1,5 | F-117 | – |
 
 ## Konventionen für alle WPs
 
@@ -4997,6 +5005,247 @@ TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-
 
 **Nicht Bestandteil:** Behebung der Kanaldefekte selbst (eigene WPs); TST-02-Zuordnung und Zieltest-Prüfung (WP-559 (`t1-tst02-mapping`)); Real-Stack-Isolation (WP-338 (`k-e2e-real-ci`), WP-535 (`t1-ev-client-real-stack`)).
 
+## K1-Nachträge
+
+Funde aus der Umsetzung von K1, die kein K1-WP abdeckt. Der Auftraggeber hat am 2026-10-25 beauftragt, sie als eigene WPs umzusetzen; [E-98](entscheidungen.md#e-98) entscheidet die Webhook-Frage. Für WP-601 (`k1n-webhook-scope`) und WP-604 (`k1n-tsdb-update`) gilt das Upgrade-Muster aus WP-404 (`t7-job-scope`): bestehende Daten bleiben org-weit oder in ihrer Version, neue erhalten die Einschränkung. WP-605 (`k1n-cilist-sort`) zieht aus WP-438 (`t4-cilist-perf`) nur den Index der Standardsortierung und die Zählung vor; die Ursachenanalyse auf der E-58-Umgebung, die globale Suche und der Szenario-Mix aus WP-437 (`t4-load-scenarios`) bleiben in WP-438.
+
+### WP-601 – Webhook-Abos tragen den Scope ihres Erzeugers
+
+**Schlüssel:** `k1n-webhook-scope` · **Meilenstein:** K1-Nachträge · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
+
+**Voraussetzungen (gemergt):** WP-404 (`t7-job-scope`), WP-409 (`t1-channel-matrix`)
+
+**Befunde:** keine Befund-ID; Fund der Kanalmatrix aus WP-409 (`t1-channel-matrix`), bewertet nach TEN-09 („Jede Cross-Org- oder Cross-Client-Exposition ist Critical“).
+
+**Problem:** `webhook_subscription` (Migration 000007, Policy `webhook_sub_isolation` aus 000023) prüft nur die Organisation; Spalten für Erzeuger oder Scope gibt es nicht. Die Handler (`webhook/webhook.go:310-603`) prüfen nur `OrganizationID`: ein client- oder site-beschränkter Principal mit `webhook:manage` sieht, legt an (201), testet und löscht (204) jedes Abo der Organisation, und die Dead-Letter-Liste (`pg_delivery_store.go:339`) zeigt die ganze Organisation. `dispatcher.go` `mayDeliver` (:129-143) stellt einem Abo ohne Service-Account jedes Event der Organisation zu; ein beschränkter Erzeuger erhält so Events aller Clients. Create (:578-587) bindet einen beliebigen Service-Account, ein beschränkter Erzeuger erhält damit dessen org-weite Rechte. `TestWebhookRepositoryScope` (`webhook_scope_integration_test.go:21`) und die Matrixzeile `webhook` (WP-409) schreiben das Verhalten fest.
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration 000155 nach dem Muster von 000154: `webhook_subscription` erhält `scope_recorded`, `scope_clients`, `scope_sites`, `scope_teams` und `webhook_subscription_scope_check`; `webhook_sub_isolation` (FOR ALL) prüft in USING und WITH CHECK Organisation und Scope-Prädikat; eine RESTRICTIVE SELECT-Policy (`app.system = 'on'` oder Scope-Prädikat) verhindert, dass eine freizügige Policy alle Abos zeigt. ENABLE + FORCE bleiben; up/down mit Roundtrip, `docs/schema-baseline.md` neu erzeugt, RLS-Katalogtests angepasst.
+- [ ] Bestehende Abos erhalten keinen Snapshot: sie bleiben org-weit (Zustellung unverändert) und sind nur für Principals ohne Client-, Site- und Team-Einschränkung sichtbar und verwaltbar (Upgrade-Hinweis im PR).
+- [ ] Create speichert den Scope des Erzeugers aus dem Request (`database.TenantScopeFromContext`, wie `jobs.ScopeOf`). Ein gebundener Service-Account muss für den Erzeuger sichtbar sein, sonst 422 auf `service_account_id`.
+- [ ] Liste, Detail, Löschen, Test, Secret-Rotation, Zustellungen und Retry antworten für ein Abo außerhalb des Scopes 404, gleich wie für ein unbekanntes; die Dead-Letter-Liste zeigt nur Einträge sichtbarer Abos.
+- [ ] Zustellung: ein Abo mit eingeschränktem Snapshot erhält nur Events, deren aufgelöste Objekte (`webhook/scope.go` `eventObjects`) vollständig im Snapshot liegen; Events ohne auflösbare Objekte oder org-weite Events erhalten nur Abos mit org-weitem Snapshot. Für gebundene Abos gilt die Schnittmenge aus Snapshot und Rechten des Service-Accounts.
+- [ ] Tests: `subscription_scope_integration_test.go` (neu, PG): Client-1-Erzeuger sieht und verwaltet nur eigene Abos, fremde und unbekannte antworten identisch 404, Create mit nicht sichtbarem Service-Account 422, Snapshot gespeichert, altes Abo ohne Snapshot nur org-weit sichtbar. `TestWebhookRepositoryScope` auf das neue Verhalten umgeschrieben. Dispatcher-Test: Abo mit Client-1-Snapshot erhält ein Client-1-Event, kein Client-2-, kein org-weites und kein nicht auflösbares Event; gebundenes Abo mit Client-1-Snapshot und org-weitem Service-Account erhält nur Client-1-Events. Matrixzeile `webhook` in `TestChannelMatrix` mit exakten Status je Scope.
+- [ ] Rot vor dem Fix, grün danach (Ausgabe im PR); bestehende Webhook-Tests (gebundene Abos, Zustellung, Retry, Rotation) und e2e-real W01 sowie `roles-authz` 06 und 09c bleiben grün.
+
+**Dateien (11 Einträge, Migration = 2):**
+
+- backend/migrations/000155_webhook_scope.up.sql (neu)
+- backend/migrations/000155_webhook_scope.down.sql (neu)
+- backend/internal/webhook/webhook.go
+- backend/internal/webhook/pg_repository.go
+- backend/internal/webhook/pg_delivery_store.go
+- backend/internal/webhook/dispatcher.go
+- backend/internal/webhook/subscription_scope_integration_test.go (neu)
+- backend/internal/webhook/webhook_scope_integration_test.go
+- backend/internal/tenant/rls/channel_matrix_integration_test.go
+- docs/schema-baseline.md
+- docs/traceability.csv
+
+**Migration/RLS:** 000155: Scope-Spalten und Check auf `webhook_subscription`, `webhook_sub_isolation` mit Org- und Scope-Prädikat in USING und WITH CHECK, RESTRICTIVE SELECT-Policy; ENABLE + FORCE RLS bleiben; up/down mit Roundtrip.
+
+**Tests:**
+
+- `webhook/subscription_scope_integration_test.go` (Verwaltung im Scope, Snapshot, Service-Account-Bindung, Altbestand).
+- Dispatcher-Tests der Zustellung je Snapshot und für gebundene Abos; `TestChannelMatrix` Zeile `webhook`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TEN-09;[Q];B;backend/internal/webhook/subscription_scope_integration_test.go;WP-601
+WHK-01;[B];B;backend/internal/webhook/subscription_scope_integration_test.go;WP-601
+```
+
+**Entscheidungsbedarf:** [E-98](entscheidungen.md#e-98) (entschieden: Option B)
+
+**Nicht Bestandteil:** RotateSecret im Request-Scope und fairer Retry-Claim (WP-562 (`t1-webhook-scope`)); Payload nach Rechten des Service-Accounts (WP-356 (`t2-webhook-bound-scope`), gemergt).
+
+### WP-602 – Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage
+
+**Schlüssel:** `k1n-topology-batch` · **Meilenstein:** K1-Nachträge · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-403 (`t7-topology-root`)
+
+**Befunde:** keine Befund-ID; Fund aus WP-403 (`t7-topology-root`): bei 2.000 Knoten etwa 50 s mit veralteter Statistik, etwa 4 s nach `ANALYZE` (`topology/limit_integration_test.go:208-210`).
+
+**Problem:** `buildFull` (`topology/topology.go:229-273`) liest die Kanten je Knoten über `relRepo.List` (:251-252) in je eigener Transaktion mit COUNT und Seiten-SELECT: bei 2.000 Knoten etwa 2.000 Aufrufe und 8.000 Statements, je Kante zwei `EXISTS`-Prüfungen (`visibleEndpoints`). Die Reihenfolge der Kanten ist zufällig (Map-Iteration). Derselbe Pfad bedient die GraphQL-Topologie ohne Root (`graphqlbff/resolver.go:258`). `TestTopologyQueryBudget` prüft nur Anfragen mit Root.
+
+**Akzeptanzkriterien:**
+
+- [ ] Das Relationship-Repository liest die Kanten unter einer Knotenmenge in einem Statement (z. B. `EdgesAmong(ctx, orgID, ids)` über `graphEdges` mit `= ANY($n::uuid[])`, Sichtbarkeit unter der RLS des Aufrufers, Grundlage `frontierEdges`); `buildFull` nutzt es über ein optionales Interface, das Memory-Repository behält den bisherigen Weg.
+- [ ] Antwort fachlich unverändert: dieselben Knoten und Kanten wie bisher (Gleichheitstest gegen den alten Pfad auf denselben Daten), Kanten in stabiler Reihenfolge; Grenze 2.000 (422) und Filter wie in WP-403.
+- [ ] Statement-Budget: `TestTopologyQueryBudget` um Anfragen ohne Root erweitert; 20 und 2.000 Knoten senden dieselbe Anzahl Statements (≤ 10).
+- [ ] Laufzeit: 2.000 Knoten ohne vorheriges `ANALYZE` antworten in < 3 s (NFR-02) im PG-Test; Messwert im PR.
+- [ ] Rot vor dem Fix (Budget-Test), grün danach; `TestTopologyRootAndLimitAgainstPostgres`, `TestTopologyQueryBudget`, `TestImpactWorstCase` und die GraphQL-Tests grün.
+
+**Dateien (6 Einträge, Migration = 2):**
+
+- backend/internal/relationship/pg_repository.go
+- backend/internal/relationship/relationship.go
+- backend/internal/topology/topology.go
+- backend/internal/topology/querybudget_integration_test.go
+- backend/internal/topology/topology_test.go
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `topology/querybudget_integration_test.go`: Anfragen ohne Root (20 und 2.000 Knoten, gleiche Statementzahl, Laufzeit < 3 s ohne `ANALYZE`, Gleichheit mit dem alten Pfad).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+IMP-06;[B];C;backend/internal/topology/querybudget_integration_test.go;WP-602
+NFR-02;[B];C;backend/internal/topology/querybudget_integration_test.go;WP-602
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Lastszenario für die Topologie ohne Root (WP-437 (`t4-load-scenarios`)).
+
+### WP-603 – IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID
+
+**Schlüssel:** `k1n-iga-workflow` · **Meilenstein:** K1-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-407 (`t1-err-modules`)
+
+**Befunde:** keine Befund-ID; Funde aus WP-407 (`t1-err-modules`), im Audit dokumentiert in `docs/audit/09-module-phase2plus.md:66` (WFL-02, Critical) und `:68` (WFL-04, High).
+
+**Problem:** `iga/handler.go` `CreateAccessRequest` (:365-403) sucht eine aktive Workflow-Definition mit Trigger-Event `iga.access_request`, verwirft den Fehler von `ListDefinitions` (:388) und schreibt die ID der Definition nach `workflow_run_id` (:391), das auf `workflow_run(id)` verweist (000029:69); ein Lauf wird nicht gestartet. Existiert eine passende Definition, scheitert die Anfrage (seit WP-407 generisches 422). Die Workflow-Aktion `submit_form` (`workflow/executor.go:243-260`) schreibt `SubmittedBy: "workflow"` in die UUID-Spalte `form_submission.submitted_by` (000027:31) und scheitert auf PostgreSQL immer (22P02); sie umgeht außerdem die Schema-Prüfung und die Aktiv-Prüfung des Formular-Handlers (`form/handler.go:253`). Beide Module sind nach E-03 standardmäßig nicht geroutet.
+
+**Akzeptanzkriterien:**
+
+- [ ] Der IGA-Handler erhält den Workflow-Executor (oder ein schmales Interface zum Start eines Laufs). Bei passender aktiver Definition startet `CreateAccessRequest` einen Lauf mit Trigger `iga.access_request` und den Daten der Anfrage und speichert dessen ID in `workflow_run_id`; ohne Definition bleibt `workflow_run_id` leer. Fehler von `ListDefinitions` werden geloggt und über `api.WriteRepoError` beantwortet.
+- [ ] `submit_form` setzt `SubmittedBy` auf den auslösenden Benutzer (`tenant.FromContext(ctx).UserID`) bzw. leer (NULL) bei einem Systemauslöser; die Herkunft „workflow“ steht nicht in der UUID-Spalte. Dieselbe Schema- und Aktiv-Prüfung wie im Formular-Handler; ungültige Werte beenden den Schritt mit bereinigtem Fehler.
+- [ ] PG-Tests: Zugriffsanfrage mit passender Definition → 201, Lauf existiert mit Trigger `iga.access_request`, `workflow_run_id` = Lauf-ID; ohne Definition → `workflow_run_id` NULL. Lauf mit `submit_form` auf PostgreSQL → Lauf erfolgreich, `form_submission` mit `submitted_by` = auslösender Benutzer; inaktives Formular und schemawidrige Werte → Schritt fehlgeschlagen ohne SQL-Text.
+- [ ] Rot vor dem Fix, grün danach; `TestRepositoryErrorsAreSanitized` und die IGA-, Workflow- und Form-Tests grün.
+
+**Dateien (8 Einträge, Migration = 2):**
+
+- backend/internal/iga/handler.go
+- backend/internal/server/router.go
+- backend/internal/workflow/executor.go
+- backend/internal/iga/access_request_workflow_integration_test.go (neu)
+- backend/internal/workflow/submit_form_integration_test.go (neu)
+- backend/internal/workflow/executor_test.go
+- backend/internal/iga/iga_test.go
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `iga/access_request_workflow_integration_test.go` (Lauf gestartet und referenziert, ohne Definition NULL).
+- `workflow/submit_form_integration_test.go` (Absender, Schema- und Aktiv-Prüfung auf PostgreSQL).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+WFL-01;[P3];B;backend/internal/workflow/submit_form_integration_test.go;WP-603
+IGA-01;[A];B;backend/internal/iga/access_request_workflow_integration_test.go;WP-603
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** übrige IGA-Fachlogik (WP-232 `m-iga`, nach E-03 zurückgestellt); F-056 (WP-461 (`t3-iga-approve-task`)).
+
+### WP-604 – Upgrade der TimescaleDB-Extension im Installer
+
+**Schlüssel:** `k1n-tsdb-update` · **Meilenstein:** K1-Nachträge · **Epic (Traceability):** A · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-389 (`t5-image-scan`)
+
+**Befunde:** keine Befund-ID; Fund aus WP-389 (`t5-image-scan`), [E-96](entscheidungen.md#e-96).
+
+**Problem:** Seit E-96 liefert das DB-Image TimescaleDB 2.31.0 mit den Bibliotheken 2.13.0 bis 2.31.0; bestehende Datenbanken behalten ihre Extension-Version. `ALTER EXTENSION timescaledb UPDATE` scheitert in der Reticora-Datenbank: der Event-Trigger `reticora_restrict_app_ddl` (000078:130-142, `ddl_command_start` ohne Tag-Filter) lädt die alte Bibliothek, die Sitzung bricht mit `FATAL: "timescaledb" already loaded with a different version` ab. `docs/security/abhaengigkeitsscans.md:140-177` beschreibt ein Handverfahren (Server stoppen, Trigger aus, Update, Trigger an, je eigene `psql -X`-Sitzung). Der Installer (`install-cloud.sh` `start_stack`, :1535-1606) führt es nicht aus und stoppt den alten Server vor den Migrationen nicht; nichts prüft, ob der Trigger nach einem abgebrochenen Update wieder aktiv ist.
+
+**Akzeptanzkriterien:**
+
+- [ ] `scripts/ops/timescaledb-update.sh` (neu): ermittelt `extversion` und `default_version`; ist die Extension älter, schaltet es den Trigger aus, führt das Update aus und schaltet den Trigger wieder ein, jede Anweisung in einer eigenen `psql -X`-Sitzung als Bootstrap-Superuser; `postgres` und `template1` erhalten nur das Update; ein Fehler schaltet den Trigger trotzdem wieder ein (trap) und bricht mit Meldung ab; ein zweiter Lauf ändert nichts.
+- [ ] `install-cloud.sh` `start_stack` stoppt den Dienst `server` vor dem Update und ruft das Skript zwischen `sync_db_password` und `run_migrations` auf; die Reihenfolge ist in `tests/install-reinstall.test.sh` (`mirrors_start_stack`) festgehalten.
+- [ ] Die Bereitschaftsprüfung (`/readyz` bzw. die Startprüfung des Servers, OPS-01) meldet einen deaktivierten `reticora_restrict_app_ddl` als nicht bereit und eine Extension-Version unter `default_version` als Warnung.
+- [ ] Tests: `tests/timescaledb-update.test.sh` (neu, Stubs für `docker compose`/`psql`): Reihenfolge, Idempotenz, Wiedereinschalten bei Fehler, keine Aktion bei aktueller Version. PG-Test gegen eine Datenbank mit `CREATE EXTENSION timescaledb VERSION '<ältere Version>'` (aus dem 2.31.0-Image verfügbar), danach Migrationen: das Skript hebt auf `default_version`, der Trigger ist aktiv, die Migrationen und `TestSchemaBaselineMatchesMigratedSchema` laufen.
+- [ ] `docs/security/abhaengigkeitsscans.md` verweist auf das Skript statt des Handverfahrens; `deploy/README.md` (Kubernetes, externe Datenbank) beschreibt den Schritt für Betreiber vor dem Rollout; `docs/troubleshooting-installation.md` nennt die Fehlermeldung.
+
+**Dateien (9 Einträge, Migration = 2):**
+
+- scripts/ops/timescaledb-update.sh (neu)
+- install-cloud.sh
+- backend/internal/server/health.go
+- tests/timescaledb-update.test.sh (neu)
+- tests/install-reinstall.test.sh
+- docs/security/abhaengigkeitsscans.md
+- deploy/README.md
+- docs/troubleshooting-installation.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration; der Event-Trigger bleibt unverändert (Deny-by-default nach CH19).
+
+**Tests:**
+
+- `tests/timescaledb-update.test.sh` (Ablauf mit Stubs).
+- PG-Test des Updates von einer älteren Extension-Version; Bereitschaftsprüfung mit deaktiviertem Trigger.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+INS-05;[B];A;tests/timescaledb-update.test.sh;WP-604
+OPS-01;[B];A;tests/timescaledb-update.test.sh;WP-604
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Offline-Update-Bundle (INS-08, [O]); Wiederherstellung älterer Sicherungen (OPS-04, eigener Restore-Pfad).
+
+### WP-605 – CI-Liste: Index der Standardsortierung und Zählung (Vorzug aus WP-438)
+
+**Schlüssel:** `k1n-cilist-sort` · **Meilenstein:** K1-Nachträge · **Epic (Traceability):** LT · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** keine (außer den Prüfrahmen-WPs, Konvention 11)
+
+**Befunde:** [F-117](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-117) (Beitrag; schließt WP-438 (`t4-cilist-perf`))
+
+**Problem:** Der nächtliche `load.yml`-Lauf (api, 10.000 Objekte) scheitert seit 2026-10-16 fast jede Nacht an `http_req_duration{name:list}` p95 < 500 ms (589, 575 und 574 ms am 19., 20. und 21. Oktober); E-58 setzt einen grünen nächtlichen Lauf auf dem Release-Kandidaten voraus. `GET /cis?limit=50` sortiert nach `created_at DESC, id DESC` (`ci/sort.go:20-30`) ohne passenden Index und zählt bei jeder Anfrage alle CIs der Organisation (`ci/pg_repository.go:237-239`); beide Abfragen lesen die ganze Organisation und werten die RLS-Policy je Zeile aus.
+
+**Akzeptanzkriterien:**
+
+- [ ] Ursachenbestätigung zuerst: `EXPLAIN (ANALYZE, BUFFERS)` der Listen- und Zählabfrage als `reticora_app` bei 10.000 CIs vor und nach dem Fix, Ausgabe im PR.
+- [ ] Migration 000156: Index `(organization_id, created_at DESC, id DESC) WHERE deleted_at IS NULL` auf `ci`; die Listenabfrage nutzt ihn als `reticora_app` (Plan-Test). Die Zählung wird günstiger, ohne die API zu brechen; eine geänderte Semantik von `total` nur spec-first in `openapi.yaml` mit `schema.d.ts`.
+- [ ] Statement- und Plan-Test `ci/list_budget_integration_test.go` (neu): GET /cis bei 10.000 CIs → feste Anzahl Statements, Index-Scan ohne org-weiten Sort; Negativfall nach `DROP INDEX` → Test nennt den fehlenden Index.
+- [ ] Nachweis im Lasttest: zwei aufeinanderfolgende `load.yml`-Läufe (api, per workflow_dispatch auf dem Branch) mit `list` p95 < 500 ms und allen übrigen Schwellen eingehalten; Lauf-IDs im PR. Gelingt das trotz Index nicht, nennt der PR die gemessenen Werte und Ursachen, und WP-438 (`t4-cilist-perf`) übernimmt.
+- [ ] Bestehende CI-Listen-, Sortier- und Filtertests grün; `docs/schema-baseline.md` neu erzeugt.
+
+**Dateien (8 Einträge, Migration = 2):**
+
+- backend/migrations/000156_ci_list_sort_index.up.sql (neu)
+- backend/migrations/000156_ci_list_sort_index.down.sql (neu)
+- backend/internal/ci/pg_repository.go
+- backend/internal/ci/list_budget_integration_test.go (neu)
+- api/openapi.yaml (nur bei geänderter Semantik von `total`)
+- frontend/src/api/generated/schema.d.ts (nur bei geänderter Spec)
+- docs/schema-baseline.md
+- docs/traceability.csv
+
+**Migration/RLS:** 000156: Index für die Standardsortierung der CI-Liste; RLS unverändert.
+
+**Tests:**
+
+- `ci/list_budget_integration_test.go` (Statementzahl, Index-Nutzung als `reticora_app`, Negativfall).
+- `load.yml`-Läufe (api) als Nachweis.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-605
+ABN-02;[Q];LT;backend/internal/ci/list_budget_integration_test.go;WP-605
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Ursachenanalyse mit `pg_stat_statements`/`auto_explain`/pprof auf der E-58-Umgebung, globale Suche und Szenario-Mix (WP-438 (`t4-cilist-perf`), WP-437 (`t4-load-scenarios`)); deterministische EXPLAIN-Prüfung (WP-436 (`t4-explain-budget`)).
+
 ## K2 Datenintegrität und Kernprozesse
 
 **Ausstieg:** Alle übrigen P1 behoben: keine stillen Datenverluste, Kernprozesse (CI-Anlage, Sitzung, Discovery, Reconciliation) im Real-Stack grün.
@@ -6805,7 +7054,7 @@ NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-438
 
 **Entscheidungsbedarf:** [E-17](../entscheidungen.md#e-17); [E-58](../entscheidungen.md#e-58)
 
-**Nicht Bestandteil:** Listen und Suche über 25.000 Objekten (E-17, Folge-WP vor GA); dedizierter Referenzhost (SR-06).
+**Nicht Bestandteil:** Listen und Suche über 25.000 Objekten (E-17, Folge-WP vor GA); dedizierter Referenzhost (SR-06). Vorgezogen: Index der Standardsortierung und Zählung der CI-Liste in WP-605 (`k1n-cilist-sort`); dieses WP baut darauf auf.
 
 ### WP-439 – Lastbericht: drei archivierte Läufe, 1.000 Records/s und NFR-01-Volumina, Folge-WPs mit Kennung
 

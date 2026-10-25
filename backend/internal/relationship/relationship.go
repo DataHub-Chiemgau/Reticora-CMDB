@@ -208,6 +208,19 @@ type Traverser interface {
 	TraverseFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error)
 }
 
+// EdgeReader reads the edges among a set of CIs at once, with a number of
+// statements that does not grow with the set, so the topology without a
+// root reads its edges without one query per node (NFR-02, ABN-02). The
+// memory repository does not implement it; the topology then lists the
+// edges of each CI.
+type EdgeReader interface {
+	// EdgesAmong returns the edges the topology shows (the stored
+	// relationships and the projected containment) whose source and target
+	// are both among ids and are visible, not deleted CIs under the
+	// caller's scope, ordered by id.
+	EdgesAmong(ctx context.Context, orgID string, ids []string) ([]Relationship, error)
+}
+
 // MemoryRepository is an in-memory relationship store.
 type MemoryRepository struct {
 	mu    sync.RWMutex

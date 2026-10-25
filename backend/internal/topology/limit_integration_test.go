@@ -205,9 +205,10 @@ func TestTopologyRootAndLimitAgainstPostgres(t *testing.T) {
 		// Org-wide servers fill organization A up to exactly 2,000 CIs.
 		seeded := slices.Concat(atSite1, ofClient2, []string{atSite2}, switches)
 		all := sorted(slices.Concat(seeded, insert(topology.MaxTopologyNodes-len(seeded), "limit-bulk", nil, nil, nil))...)
-		// Statistics as after autoanalyze: with those of the nearly empty
-		// table, the 2,000 relationship reads of the answer take about 50 s
-		// instead of 4 s.
+		// Statistics as after autoanalyze. Before WP-602 the answer read the
+		// relationships of each of the 2,000 CIs and took about 50 s with the
+		// statistics of the nearly empty table; checkTopologyWithoutRoot
+		// covers the answer without ANALYZE.
 		if _, err := f.Admin.Exec(bg, `ANALYZE ci`); err != nil {
 			t.Fatal(err)
 		}

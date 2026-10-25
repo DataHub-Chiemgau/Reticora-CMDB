@@ -8,10 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -36,6 +39,84 @@ type Subscription struct {
 	PreviousSecretExpiresAt *time.Time `json:"previous_secret_expires_at,omitempty"`
 	CreatedAt               string     `json:"created_at"`
 	UpdatedAt               string     `json:"updated_at"`
+	// Scope is the scope snapshot of the subscription; nil for one without.
+	Scope *Scope `json:"-"`
+}
+
+// Scope is the scope snapshot of a subscription (TEN-09, E-98): the client,
+// site and team scope its creator had when creating it. A nil dimension is
+// the whole organization, an empty one no id. A subscription without
+// snapshot (from before migration 000155) belongs to the whole
+// organization.
+type Scope struct {
+	Clients []string
+	Sites   []string
+	Teams   []string
+}
+
+// ScopeOf returns the snapshot of a tenant scope.
+func ScopeOf(s *database.TenantScope) *Scope {
+	set := func(d database.ScopeSet) []string {
+		if d.IsAll() {
+			return nil
+		}
+		if ids := d.IDs(); ids != nil {
+			return ids
+		}
+		return []string{}
+	}
+	return &Scope{Clients: set(s.Clients), Sites: set(s.Sites), Teams: set(s.Teams)}
+}
+
+// orgWide reports whether the snapshot grants the whole organization: no
+// snapshot, or none of its dimensions restricted.
+func (s *Scope) orgWide() bool {
+	return s == nil || (s.Clients == nil && s.Sites == nil && s.Teams == nil)
+}
+
+// containsID reports whether ids holds id, ignoring case.
+func containsID(ids []string, id string) bool {
+	return slices.ContainsFunc(ids, func(v string) bool { return strings.EqualFold(v, id) })
+}
+
+// VisibleTo reports whether a principal with the tenant scope s sees and
+// manages the subscription, the rule of webhook_sub_isolation (migration
+// 000155): the subscription belongs to the organization of s, and in every
+// dimension s is org-wide or the snapshot lies completely in s. A
+// subscription without snapshot is visible to org-wide principals only
+// (E-09).
+func (sub *Subscription) VisibleTo(s *database.TenantScope) bool {
+	if s == nil || !strings.EqualFold(sub.OrganizationID, s.OrgID) {
+		return false
+	}
+	snapshot := sub.Scope
+	if snapshot == nil {
+		snapshot = &Scope{}
+	}
+	within := func(ids []string, set database.ScopeSet) bool {
+		if set.IsAll() {
+			return true
+		}
+		if ids == nil {
+			return false
+		}
+		allowed := set.IDs()
+		for _, id := range ids {
+			if !containsID(allowed, id) {
+				return false
+			}
+		}
+		return true
+	}
+	return within(snapshot.Clients, s.Clients) && within(snapshot.Sites, s.Sites) && within(snapshot.Teams, s.Teams)
+}
+
+// visibleIn reports whether the subscription is visible in ctx: a request
+// (a tenant scope in ctx) sees the subscriptions its scope covers
+// (VisibleTo), a call without scope (dispatcher, system paths) every one.
+func visibleIn(ctx context.Context, sub *Subscription) bool {
+	scope, ok := database.TenantScopeFromContext(ctx)
+	return !ok || sub.VisibleTo(&scope)
 }
 
 // SecretOverlap is how long a rotated secret stays valid (SEC-06).
@@ -146,7 +227,9 @@ type Repository interface {
 	ListByEvent(ctx context.Context, orgID, event string) ([]Subscription, error)
 }
 
-// MemoryRepository is an in-memory webhook store.
+// MemoryRepository is an in-memory webhook store. Like the PostgreSQL
+// repository it shows a request only the subscriptions in its scope
+// (visibleIn).
 type MemoryRepository struct {
 	mu    sync.RWMutex
 	items map[string]*Subscription
@@ -158,13 +241,13 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{items: make(map[string]*Subscription)}
 }
 
-func (r *MemoryRepository) List(_ context.Context, orgID string, page api.PaginationParams) ([]Subscription, int, error) {
+func (r *MemoryRepository) List(ctx context.Context, orgID string, page api.PaginationParams) ([]Subscription, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	var result []Subscription
 	for _, sub := range r.items {
-		if sub.OrganizationID != orgID {
+		if sub.OrganizationID != orgID || !visibleIn(ctx, sub) {
 			continue
 		}
 		result = append(result, *sub)
@@ -182,12 +265,12 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, page api.Pagina
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Subscription, error) {
+func (r *MemoryRepository) GetByID(ctx context.Context, orgID, id string) (*Subscription, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	sub, ok := r.items[id]
-	if !ok || sub.OrganizationID != orgID {
+	if !ok || sub.OrganizationID != orgID || !visibleIn(ctx, sub) {
 		return nil, fmt.Errorf("not found")
 	}
 	return sub, nil
@@ -206,12 +289,12 @@ func (r *MemoryRepository) Create(_ context.Context, sub *Subscription) error {
 	return nil
 }
 
-func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
+func (r *MemoryRepository) Delete(ctx context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	sub, ok := r.items[id]
-	if !ok || sub.OrganizationID != orgID {
+	if !ok || sub.OrganizationID != orgID || !visibleIn(ctx, sub) {
 		return fmt.Errorf("not found")
 	}
 	delete(r.items, id)
@@ -230,13 +313,13 @@ func (r *MemoryRepository) Deactivate(_ context.Context, orgID, id string) error
 	return nil
 }
 
-func (r *MemoryRepository) ListByEvent(_ context.Context, orgID, event string) ([]Subscription, error) {
+func (r *MemoryRepository) ListByEvent(ctx context.Context, orgID, event string) ([]Subscription, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	var result []Subscription
 	for _, sub := range r.items {
-		if sub.OrganizationID != orgID || !sub.IsActive {
+		if sub.OrganizationID != orgID || !sub.IsActive || !visibleIn(ctx, sub) {
 			continue
 		}
 		for _, e := range sub.Events {
@@ -319,24 +402,47 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/webhooks/{id}/deliveries/{delivery_id}/retry", h.RetryDelivery)
 }
 
+// tenantOf returns the tenant scope of the request or writes 401: every
+// webhook route works in the organization and the scope of the caller
+// (TEN-09); the tenant middleware attaches both.
+func tenantOf(w http.ResponseWriter, r *http.Request) (database.TenantScope, bool) {
+	scope, ok := database.TenantScopeFromContext(r.Context())
+	if t := tenant.FromContext(r.Context()); !ok || t.OrganizationID == "" || !strings.EqualFold(scope.OrgID, t.OrganizationID) {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return database.TenantScope{}, false
+	}
+	return scope, true
+}
+
+// subscription loads the subscription of the path or writes 404, also for a
+// subscription outside the caller's scope (VisibleTo, E-98), independent of
+// the repository: every route with a subscription id answers as for an
+// unknown one.
+func (h *Handler) subscription(w http.ResponseWriter, r *http.Request, scope *database.TenantScope) (*Subscription, bool) {
+	sub, err := h.repo.GetByID(r.Context(), scope.OrgID, chi.URLParam(r, "id"))
+	if err != nil || !sub.VisibleTo(scope) {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
+		return nil, false
+	}
+	return sub, true
+}
+
 // RetryDelivery handles POST /api/v1/webhooks/{id}/deliveries/{delivery_id}/retry:
 // a failed or dead delivery gets a new round of attempts (WHK-01).
 func (h *Handler) RetryDelivery(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+	scope, ok := tenantOf(w, r)
+	if !ok {
 		return
 	}
 	if h.retrier == nil {
 		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "webhook delivery store is not configured")
 		return
 	}
-	id := chi.URLParam(r, "id")
-	if _, err := h.repo.GetByID(r.Context(), t.OrganizationID, id); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
+	sub, found := h.subscription(w, r, &scope)
+	if !found {
 		return
 	}
-	rec, err := h.retrier.Retry(r.Context(), t.OrganizationID, id, chi.URLParam(r, "delivery_id"))
+	rec, err := h.retrier.Retry(r.Context(), scope.OrgID, sub.ID, chi.URLParam(r, "delivery_id"))
 	switch {
 	case errors.Is(err, ErrNoDeliveryStore):
 		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", err.Error())
@@ -353,9 +459,8 @@ func (h *Handler) RetryDelivery(w http.ResponseWriter, r *http.Request) {
 // secret (generated, or the one given) replaces the current one, which
 // stays valid for SecretOverlap; the new secret is returned once.
 func (h *Handler) RotateSecret(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+	scope, ok := tenantOf(w, r)
+	if !ok {
 		return
 	}
 	rotator, ok := h.repo.(SecretRotator)
@@ -383,7 +488,13 @@ func (h *Handler) RotateSecret(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "secret must have at least 16 characters")
 		return
 	}
-	sub, err := rotator.RotateSecret(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req.Secret, time.Now().Add(SecretOverlap))
+	// The repository rotates organization-wide (WP-562 moves it to the
+	// request scope): the subscription must be visible to the caller first.
+	current, found := h.subscription(w, r, &scope)
+	if !found {
+		return
+	}
+	sub, err := rotator.RotateSecret(r.Context(), scope.OrgID, current.ID, req.Secret, time.Now().Add(SecretOverlap))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
 		return
@@ -395,9 +506,8 @@ func (h *Handler) RotateSecret(w http.ResponseWriter, r *http.Request) {
 // Test handles POST /api/v1/webhooks/{id}/test by sending a single signed
 // `webhook.test` payload to the subscription URL and returning the attempt.
 func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+	scope, ok := tenantOf(w, r)
+	if !ok {
 		return
 	}
 	if h.deliverer == nil {
@@ -405,10 +515,8 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
-	sub, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
-	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
+	sub, found := h.subscription(w, r, &scope)
+	if !found {
 		return
 	}
 
@@ -429,9 +537,8 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 // ListDeliveries handles GET /api/v1/webhooks/{id}/deliveries and returns the
 // durable delivery history including retry state.
 func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+	scope, ok := tenantOf(w, r)
+	if !ok {
 		return
 	}
 	if h.deliveries == nil {
@@ -439,14 +546,13 @@ func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
-	if _, err := h.repo.GetByID(r.Context(), t.OrganizationID, id); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
+	sub, found := h.subscription(w, r, &scope)
+	if !found {
 		return
 	}
 
 	page := api.ParsePagination(r)
-	records, total, err := h.deliveries.ListDeliveries(r.Context(), t.OrganizationID, id, page)
+	records, total, err := h.deliveries.ListDeliveries(r.Context(), scope.OrgID, sub.ID, page)
 	if err != nil {
 		if errors.Is(err, ErrNoDeliveryStore) {
 			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", err.Error())
@@ -466,11 +572,11 @@ func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListDeadLetters handles GET /api/v1/webhooks/dead-letters and returns the
-// deliveries that exhausted their retry budget, newest first.
+// deliveries that exhausted their retry budget, newest first: those of the
+// subscriptions in the caller's scope (E-98).
 func (h *Handler) ListDeadLetters(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+	scope, ok := tenantOf(w, r)
+	if !ok {
 		return
 	}
 	if h.deadLetters == nil {
@@ -479,7 +585,7 @@ func (h *Handler) ListDeadLetters(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page := api.ParsePagination(r)
-	letters, total, err := h.deadLetters.ListDeadLetters(r.Context(), t.OrganizationID, page)
+	letters, total, err := h.deadLetters.ListDeadLetters(r.Context(), scope.OrgID, page)
 	if err != nil {
 		if errors.Is(err, ErrNoDeliveryStore) {
 			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", err.Error())
@@ -498,16 +604,16 @@ func (h *Handler) ListDeadLetters(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// List handles GET /api/v1/webhooks
+// List handles GET /api/v1/webhooks: the subscriptions in the caller's
+// scope.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+	scope, ok := tenantOf(w, r)
+	if !ok {
 		return
 	}
 
 	page := api.ParsePagination(r)
-	subs, total, err := h.repo.List(r.Context(), t.OrganizationID, page)
+	subs, total, err := h.repo.List(r.Context(), scope.OrgID, page)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -528,27 +634,34 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 // Get handles GET /api/v1/webhooks/{id}
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+	scope, ok := tenantOf(w, r)
+	if !ok {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
-	sub, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
-	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
+	sub, found := h.subscription(w, r, &scope)
+	if !found {
 		return
 	}
 
 	api.WriteJSON(w, http.StatusOK, sub.redacted())
 }
 
-// Create handles POST /api/v1/webhooks
+// errServiceAccountNotFound refuses binding a subscription to a service
+// account its creator does not see: unknown, malformed or of another
+// organization.
+var errServiceAccountNotFound = &api.FieldError{Field: "service_account_id", Message: "service account not found",
+	Status: http.StatusUnprocessableEntity}
+
+// Create handles POST /api/v1/webhooks. The subscription stores the scope
+// of its creator (ScopeOf, E-98): only principals whose scope covers it see
+// and manage it, and it receives only the events whose objects lie in it. A
+// bound service account must be visible to the creator; deliveries then
+// need its read right as well, so the binding never widens the creator's
+// scope.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+	scope, ok := tenantOf(w, r)
+	if !ok {
 		return
 	}
 
@@ -575,8 +688,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.ServiceAccountID != "" && !uuidPattern.MatchString(req.ServiceAccountID) {
+		api.WriteFieldError(w, errServiceAccountNotFound)
+		return
+	}
+
 	sub := &Subscription{
-		OrganizationID:   t.OrganizationID,
+		OrganizationID:   scope.OrgID,
 		Name:             req.Name,
 		URL:              req.URL,
 		Secret:           req.Secret,
@@ -584,10 +702,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		IsActive:         true,
 		Headers:          req.Headers,
 		ServiceAccountID: req.ServiceAccountID,
+		Scope:            ScopeOf(&scope),
 	}
 
 	if err := h.repo.Create(r.Context(), sub); err != nil {
-		api.WriteRepoError(w, err)
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 
@@ -596,14 +717,16 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /api/v1/webhooks/{id}
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+	scope, ok := tenantOf(w, r)
+	if !ok {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
-	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
+	sub, found := h.subscription(w, r, &scope)
+	if !found {
+		return
+	}
+	if err := h.repo.Delete(r.Context(), scope.OrgID, sub.ID); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
 		return
 	}

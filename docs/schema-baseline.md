@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000154_job_scope
+Stand: Migration 000156_ci_list_sort_index
 
 ## Prüfung
 
@@ -68,6 +68,12 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_org_location ON ci (organization_
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_org_asset ON ci (organization_id, asset_id) WHERE asset_id IS NOT NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_org_parent ON ci (organization_id, parent_ci_id) WHERE parent_ci_id IS NOT NULL;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_attributes_path ON ci USING gin (attributes jsonb_path_ops);
+```
+
+Ebenso der Index der Standardsortierung der CI-Liste (WP-605, NFR-02):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_list_sort ON ci (organization_id, created_at DESC, id DESC) INCLUDE (client_id, site_id) WHERE deleted_at IS NULL;
 ```
 
 Jede Anweisung einzeln ausführen (nicht in einer Transaktion); ein
@@ -170,6 +176,13 @@ Lesezugriffe an, die `job_system_select` sonst org-weit öffnen würde. Jobs ohn
 Snapshot (Systemjobs, Altbestand) lesen und schreiben nur Prinzipale ohne
 jede Scope-Einschränkung (`matrixSnapshotScoped`); die Snapshot-Regeln prüft
 `TestJobScopeAgainstPostgres` (`backend/internal/jobs/scope_integration_test.go`).
+`webhook_subscription` trägt denselben Snapshot (Migration 000155, WP-601,
+E-98): `webhook_sub_isolation` prüft Organisation und Snapshot in `USING` und
+`WITH CHECK`, die restriktive `webhook_sub_scope_select` jeden Lesezugriff
+(außer mit `app.system`); Abos ohne Snapshot (Altbestand) lesen und verwalten
+nur Prinzipale ohne jede Scope-Einschränkung, die Regeln prüft
+`TestSubscriptionScopeAgainstPostgres`
+(`backend/internal/webhook/subscription_scope_integration_test.go`).
 Die Testzeilen werden mit
 `session_replication_role = replica` synthetisiert (ohne Fremdschlüssel und
 Trigger, RLS bleibt aktiv). Tabellen, deren Policy den Scope über eine
@@ -411,7 +424,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `vrf` | ja | ja | vrf_isolation (ALL), vrf_scoped_delete (DELETE), vrf_scoped_insert (INSERT), vrf_scoped_update (UPDATE) |
 | `webhook_dead_letter` | ja | ja | webhook_dead_letter_isolation (ALL), webhook_dead_letter_system_select (SELECT) |
 | `webhook_delivery` | ja | ja | webhook_delivery_isolation (ALL), webhook_delivery_system_select (SELECT) |
-| `webhook_subscription` | ja | ja | webhook_sub_isolation (ALL) |
+| `webhook_subscription` | ja | ja | webhook_sub_isolation (ALL), webhook_sub_scope_select (SELECT) |
 | `workflow_def` | ja | ja | workflow_def_tenant_isolation (ALL) |
 | `workflow_run` | ja | ja | workflow_run_tenant_isolation (ALL) |
 | `workflow_step` | ja | ja | workflow_step_tenant_isolation (ALL) |
