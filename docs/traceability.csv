@@ -680,3 +680,4 @@ NFR-09;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-443
 NFR-01;[B], Teilumfang [P5];LT;backend/internal/discovery/scale_integration_test.go;WP-434
 OPS-05;[B];A;backend/cmd/server/workers_metrics_test.go;WP-447
 OPS-02;[B], [P3], [A];A;backend/internal/config/config_test.go;WP-447
+COL-04;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-430

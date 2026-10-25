@@ -164,8 +164,19 @@ func (s *CertificateRenewal) WithCycles(cycles *observability.Cycles) *Certifica
 
 // Serve answers the renewal requests on nc (subject
 // collector.<org>.<id>.certificate.renew; the endpoint lets a collector
-// publish only below its own subject tree) until ctx ends.
+// publish only below its own subject tree) until ctx ends. On the
+// announcement of a change of the collector CA it reads the CA state anew;
+// the version check before every signature covers a missed one (COL-04).
 func (s *CertificateRenewal) Serve(ctx context.Context, nc *nats.Conn) error {
+	go func() {
+		if err := watchCAChanges(ctx, nc, s.ca, func() {
+			if _, err := s.ca.state(ctx); err != nil {
+				slog.Error("reload the collector CA", "error", err)
+			}
+		}); err != nil {
+			slog.Error("collector CA changes", "error", err)
+		}
+	}()
 	sub, err := nc.QueueSubscribe("collector.*.*"+CertificateRenewSuffix, renewalQueue, func(msg *nats.Msg) {
 		// Without a reply subject nobody would receive the certificate.
 		if msg.Reply == "" {

@@ -5,9 +5,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -1104,6 +1106,475 @@ func TestEdgePKIExportLock(t *testing.T) {
 		_ = discovery.ExportEdgePKI(bg, e.ca, nil, filepath.Join(t.TempDir(), "pki"), hosts, time.Now())
 	}()
 	released("after a panic in the export")
+}
+
+// TestAuditCARolloverKeepsEnrolledCollectorTrust covers F-102 (WP-145,
+// WP-430, COL-04): after a CA roll-over the export keeps issuing the edge
+// server certificate from the previous CA, so a collector enrolled before
+// (its bundle holds only that CA) and one enrolled after it (both anchors)
+// trust the endpoint; ca.pem holds both anchors, the certificate of the
+// collector enrolled after it comes from the new CA. After the retirement
+// the server certificate comes from the new CA and ca.pem holds only it.
+//
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/<db>?sslmode=disable \
+//	  go test -count=1 -v -p 1 -run 'TestAuditCARolloverKeepsEnrolledCollectorTrust' ./internal/discovery/
+func TestAuditCARolloverKeepsEnrolledCollectorTrust(t *testing.T) {
+	e, enc := auditEdge(t, "d1")
+	bg := context.Background()
+	secrets, err := discovery.DeriveEdgeSecrets(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	_, _, enrolled := auditEnroll(t, e, "audit-roll-old")
+	if err = discovery.ExportEdgePKI(bg, e.ca, secrets, dir, []string{"localhost"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	verifyServer := func(bundlePEM string) error {
+		raw, rerr := os.ReadFile(filepath.Join(dir, "server.pem"))
+		if rerr != nil {
+			return rerr
+		}
+		roots := x509.NewCertPool()
+		roots.AppendCertsFromPEM([]byte(bundlePEM))
+		_, verr := parseCert(t, string(raw)).Verify(x509.VerifyOptions{Roots: roots, DNSName: "localhost",
+			KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}})
+		return verr
+	}
+	anchors := func() int {
+		raw, rerr := os.ReadFile(filepath.Join(dir, "ca.pem"))
+		if rerr != nil {
+			t.Fatal(rerr)
+		}
+		return strings.Count(string(raw), "BEGIN CERTIFICATE")
+	}
+	if verr := verifyServer(enrolled.CABundlePEM); verr != nil {
+		t.Fatalf("control before roll-over: %v", verr)
+	}
+	if _, err = e.ca.Rollover(bg, discovery.CAChangeOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err = discovery.ExportEdgePKI(bg, e.ca, secrets, dir, []string{"localhost"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	_, _, fresh := auditEnroll(t, e, "audit-roll-new")
+	if verr := verifyServer(fresh.CABundlePEM); verr != nil {
+		t.Errorf("a collector enrolled after the roll-over does not trust the edge: %v", verr)
+	}
+	if verr := verifyServer(enrolled.CABundlePEM); verr != nil {
+		t.Errorf("COL-04 violated: after the CA roll-over a collector enrolled before it no longer trusts the edge server certificate (outage at the next nats-edge restart): %v", verr)
+	}
+	if n := anchors(); n != 2 {
+		t.Errorf("ca.pem holds %d trust anchors during the roll-over, want 2", n)
+	}
+	// The certificate issued after the roll-over comes from the new CA: the
+	// bundle the collector enrolled before holds does not verify it.
+	if verifies(parseCert(t, fresh.CertificatePEM), enrolled.CABundlePEM) || !verifies(parseCert(t, fresh.CertificatePEM), fresh.CABundlePEM) {
+		t.Error("the collector certificate issued after the roll-over is not from the new CA")
+	}
+
+	// After the retirement (forced: the collector enrolled before still holds
+	// a certificate of the previous CA) the server certificate comes from the
+	// new CA.
+	if _, err = e.ca.RetirePrevious(bg, discovery.CAChangeOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err = discovery.ExportEdgePKI(bg, e.ca, secrets, dir, []string{"localhost"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if verr := verifyServer(fresh.CABundlePEM); verr != nil {
+		t.Errorf("after the retirement the collector enrolled during the roll-over does not trust the edge: %v", verr)
+	}
+	if verr := verifyServer(string(pemOf(parseCert(t, fresh.CABundlePEM).Raw))); verr != nil {
+		t.Errorf("after the retirement the server certificate is not from the new CA: %v", verr)
+	}
+	if n := anchors(); n != 1 {
+		t.Errorf("ca.pem holds %d trust anchors after the retirement, want 1", n)
+	}
+}
+
+// collectorCAServerBinary builds backend/cmd/server for the command
+// server collector-ca.
+func collectorCAServerBinary(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "server")
+	if out, err := exec.Command("go", "build", "-o", bin, "../../cmd/server").CombinedOutput(); err != nil {
+		t.Fatalf("go build cmd/server: %v\n%s", err, out)
+	}
+	return bin
+}
+
+// TestCollectorCARolloverAcrossReplicas covers F-102 end to end (WP-430,
+// COL-04): two server instances, each with its own CA and edge worker on the
+// same database and PKI volume, serve the deployed endpoint (real
+// nats-server) and the renewal; server collector-ca runs as a third process.
+// Nothing is restarted.
+//   - rollover: both instances reload on the announcement, before any use,
+//     and sign by the new CA; ca.pem holds both anchors, the server
+//     certificate stays the one of the previous CA. A collector enrolled
+//     before (its bundle holds only the previous CA) connects anew; one
+//     renewed after the roll-over connects with its certificate of the new
+//     CA, which the endpoint trusts since the command had it reload ca.pem.
+//   - retire: refused with the number of collectors on the previous CA,
+//     collector_ca unchanged; with --force it retires the previous CA,
+//     audited with that number. The endpoint, reloaded, serves a server
+//     certificate of the new CA and trusts only it: the renewed collector
+//     connects anew with its bundle, the one enrolled before no longer.
+//   - A collector connected like the collector binary (reconnecting) is
+//     connected again after each reload and delivers to the internal NATS;
+//     the reload re-reads the accounts of nats-edge, which closes the
+//     connections the callout admitted.
+//   - A collector cannot publish the announcement (callout permissions).
+//
+// It needs TEST_NATS_SERVER_BIN and builds cmd/server.
+//
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/<db>?sslmode=disable \
+//	  TEST_NATS_SERVER_BIN=<path to nats-server 2.10+> go test -count=1 -v -p 1 \
+//	  -run 'TestCollectorCARolloverAcrossReplicas' ./internal/discovery/
+func TestCollectorCARolloverAcrossReplicas(t *testing.T) {
+	natsBin := edgeNATSServerBin(t)
+	f := scopetest.Seed(t, "c5")
+	bg := context.Background()
+	clean := func() { _, _ = f.Admin.Exec(bg, `DELETE FROM collector_ca`) }
+	clean()
+	t.Cleanup(clean)
+	serverBin := collectorCAServerBinary(t)
+	masterKey, err := crypto.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := crypto.NewEnvelopeEncryptor(masterKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instA, instB := discovery.NewCA(f.App, enc), discovery.NewCA(f.App, enc)
+	e := &edgeFixture{f: f, ca: instA, repo: discovery.NewPGRepository(f.App)}
+	secrets, err := discovery.DeriveEdgeSecrets(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The deployed endpoint with the PKI volume of both instances.
+	dir := t.TempDir()
+	pki := filepath.Join(dir, "pki")
+	hosts := []string{"localhost", "127.0.0.1"}
+	if err = discovery.ExportEdgePKI(bg, instA, secrets, pki, hosts, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	conf, err := os.ReadFile("../../../deploy/docker-compose/nats-edge.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(dir, "nats-edge.conf"), conf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	corePort, leafPort, edgePort := auditFreePort(t), auditFreePort(t), auditFreePort(t)
+	if err = os.WriteFile(filepath.Join(dir, "core.conf"), fmt.Appendf(nil, "port: %d\nleafnodes { port: %d }\n", corePort, leafPort), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	startNATSServer(t, natsBin, dir, nil, "-c", "core.conf")
+	startNATSServer(t, natsBin, dir, []string{fmt.Sprintf("RETICORA_NATS_EDGE_LEAF_URL=nats://127.0.0.1:%d", leafPort)},
+		"-c", "nats-edge.conf", "-p", fmt.Sprint(edgePort))
+	coreURL, edgeURL := fmt.Sprintf("nats://127.0.0.1:%d", corePort), fmt.Sprintf("tls://127.0.0.1:%d", edgePort)
+	dialCore := func() *nats.Conn {
+		t.Helper()
+		var nc *nats.Conn
+		var cerr error
+		for range 50 {
+			if nc, cerr = nats.Connect(coreURL, nats.NoReconnect()); cerr == nil {
+				t.Cleanup(nc.Close)
+				return nc
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Fatalf("internal NATS: %v", cerr)
+		return nil
+	}
+	ctx, cancel := context.WithCancel(bg)
+	t.Cleanup(cancel)
+	for _, inst := range []*discovery.CA{instA, instB} {
+		go discovery.RunEdge(ctx, &discovery.EdgeConfig{Pool: f.App, CA: inst, Secrets: secrets, PKIDir: pki, Hosts: hosts,
+			URL: edgeURL, Bus: dialCore()})
+	}
+	renewal := discovery.NewCertificateRenewal(f.App, instB)
+	go func() { _ = renewal.Serve(ctx, dialCore()) }()
+	core := dialCore()
+	announced, err := core.SubscribeSync(discovery.CollectorCAChangedSubject)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A collector reaches the endpoint with its certificate and the CA bundle
+	// it received, as the collector binary does.
+	dial := func(id string, cert tls.Certificate, bundle string) (*nats.Conn, error) {
+		roots := x509.NewCertPool()
+		roots.AppendCertsFromPEM([]byte(bundle))
+		return nats.Connect(edgeURL, nats.Secure(&tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}),
+			nats.TLSHandshakeFirst(), nats.Timeout(3*time.Second), nats.CustomInboxPrefix(discovery.CollectorInbox(id)), nats.NoReconnect())
+	}
+	// stay keeps a connection like the collector binary: it reconnects
+	// forever (the reload of the endpoint re-reads its accounts and closes
+	// the connections the callout admitted; they connect again at once).
+	stay := func(id string, cert tls.Certificate, bundle string) *edgeCollector {
+		t.Helper()
+		c := &edgeCollector{down: make(chan error, 64), up: make(chan struct{}, 64), errs: make(chan error, 64)}
+		roots := x509.NewCertPool()
+		roots.AppendCertsFromPEM([]byte(bundle))
+		var cerr error
+		for range 50 {
+			c.nc, cerr = nats.Connect(edgeURL, nats.Secure(&tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}),
+				nats.TLSHandshakeFirst(), nats.Timeout(3*time.Second), nats.CustomInboxPrefix(discovery.CollectorInbox(id)),
+				nats.MaxReconnects(-1), nats.ReconnectWait(100*time.Millisecond), nats.ReconnectJitter(0, 0), nats.IgnoreAuthErrorAbort(),
+				nats.DisconnectErrHandler(func(_ *nats.Conn, derr error) {
+					select {
+					case c.down <- derr:
+					default:
+					}
+				}),
+				nats.ReconnectHandler(func(*nats.Conn) {
+					select {
+					case c.up <- struct{}{}:
+					default:
+					}
+				}),
+				nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, herr error) {
+					select {
+					case c.errs <- herr:
+					default:
+					}
+				}))
+			if cerr == nil {
+				t.Cleanup(c.nc.Close)
+				return c
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		t.Fatalf("collector %s cannot connect to the endpoint: %v", id, cerr)
+		return nil
+	}
+	oldID, oldKey, oldCert := auditEnroll(t, e, "rollover-old")
+	renewID, renewKey, renewCert := auditEnrollWith(t, e, agedCA(e, enc, 55), f.OrgA, "rollover-renew")
+	staying := stay(renewID, clientIdentity(t, renewKey, renewCert), renewCert.CABundlePEM)
+	ncRenew, violations := staying.nc, staying.errs
+	ownSubject := discovery.CollectorSubject(f.OrgA, renewID) + ".ingest"
+	ownSub, err := core.SubscribeSync(discovery.CollectorSubject(f.OrgA, renewID) + ".>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivered(t, ncRenew, ownSub, ownSubject, "before-rollover")
+	servedBefore, err := os.ReadFile(filepath.Join(pki, "server.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A collector cannot announce a change of the CA.
+	forged, err := discovery.CAChangeMessage(instA, "forged", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = ncRenew.Publish(discovery.CollectorCAChangedSubject, forged)
+	_ = ncRenew.Flush()
+	select {
+	case verr := <-violations:
+		if !strings.Contains(strings.ToLower(verr.Error()), "permissions violation for publish") {
+			t.Fatalf("announcement by a collector: %v", verr)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("a collector published on " + discovery.CollectorCAChangedSubject)
+	}
+	if msg, nerr := announced.NextMsg(time.Second); nerr == nil {
+		t.Fatalf("the announcement of a collector reached the internal NATS: %s", msg.Data)
+	}
+
+	// The third process: server collector-ca with the server's configuration.
+	env := []string{
+		"RETICORA_DATABASE_URL=" + scopetest.AppDSN(t),
+		"RETICORA_MASTER_KEY=" + masterKey,
+		"RETICORA_PKI_DIR=" + pki,
+		"RETICORA_NATS_EDGE_URL=" + edgeURL,
+		"RETICORA_NATS_EDGE_HOSTS=" + strings.Join(hosts, ","),
+		"RETICORA_NATS_URL=" + coreURL,
+	}
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "RETICORA_") {
+			env = append(env, kv)
+		}
+	}
+	cli := func(args ...string) (int, string) {
+		t.Helper()
+		cmd := exec.Command(serverBin, append([]string{"collector-ca"}, args...)...)
+		cmd.Env = env
+		out, cerr := cmd.CombinedOutput()
+		var exitErr *exec.ExitError
+		switch {
+		case cerr == nil:
+			return 0, string(out)
+		case errors.As(cerr, &exitErr):
+			return exitErr.ExitCode(), string(out)
+		}
+		t.Fatalf("server collector-ca %v: %v", args, cerr)
+		return 0, ""
+	}
+	audits := func(action, active string) []map[string]any {
+		t.Helper()
+		rows, qerr := f.Admin.Query(bg, `SELECT operator_kind, details FROM operator_audit WHERE action = $1 AND details->>'active' = $2 ORDER BY id`, action, active)
+		if qerr != nil {
+			t.Fatal(qerr)
+		}
+		defer rows.Close()
+		var out []map[string]any
+		for rows.Next() {
+			var kind string
+			var details map[string]any
+			if serr := rows.Scan(&kind, &details); serr != nil {
+				t.Fatal(serr)
+			}
+			details["operator_kind"] = kind
+			out = append(out, details)
+		}
+		return out
+	}
+	caCert := func(state string) []*x509.Certificate {
+		t.Helper()
+		rows, qerr := f.Admin.Query(bg, `SELECT cert_pem FROM collector_ca WHERE state = $1 ORDER BY created_at`, state)
+		if qerr != nil {
+			t.Fatal(qerr)
+		}
+		defer rows.Close()
+		var out []*x509.Certificate
+		for rows.Next() {
+			var p string
+			if serr := rows.Scan(&p); serr != nil {
+				t.Fatal(serr)
+			}
+			out = append(out, parseCert(t, p))
+		}
+		return out
+	}
+	fingerprint := func(c *x509.Certificate) string {
+		sum := sha256.Sum256(c.Raw)
+		return hex.EncodeToString(sum[:])
+	}
+	anchors := func() int {
+		t.Helper()
+		raw, rerr := os.ReadFile(filepath.Join(pki, "ca.pem"))
+		if rerr != nil {
+			t.Fatal(rerr)
+		}
+		return strings.Count(string(raw), "BEGIN CERTIFICATE")
+	}
+	previousCA := parseCert(t, oldCert.CABundlePEM)
+
+	// Roll-over.
+	if code, out := cli("rollover"); code != 0 || !strings.Contains(out, "reloaded") {
+		t.Fatalf("server collector-ca rollover: exit %d\n%s", code, out)
+	}
+	active := caCert("active")
+	if len(active) != 1 || len(caCert("previous")) != 1 || fingerprint(active[0]) == fingerprint(previousCA) {
+		t.Fatal("collector_ca after the roll-over: want a new active and the former one as previous")
+	}
+	newCA, newFP := active[0], fingerprint(active[0])
+	if rolled := audits("collector_ca.rolled_over", newFP); len(rolled) != 1 || rolled[0]["edge_reloaded"] != true ||
+		rolled[0]["operator_kind"] != "break_glass" {
+		t.Fatalf("audit of the roll-over: %v", rolled)
+	}
+	if msg, nerr := announced.NextMsg(5 * time.Second); nerr != nil || discovery.VerifyCAChange(instA, msg.Data, time.Now()) != nil {
+		t.Fatalf("the roll-over was not announced: %v", nerr)
+	}
+	// Both instances reload on the announcement, before any signature or
+	// callout would check the version.
+	deadline := time.Now().Add(10 * time.Second)
+	for discovery.LoadedCAFingerprint(instA) != newFP || discovery.LoadedCAFingerprint(instB) != newFP {
+		if time.Now().After(deadline) {
+			t.Fatal("the instances did not reload the CA state on the announcement")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	for name, inst := range map[string]*discovery.CA{"A": instA, "B": instB} {
+		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		issued, serr := inst.Sign(bg, csrFor(t, oldID, key), f.OrgA, oldID)
+		if serr != nil || parseCert(t, issued.CertificatePEM).CheckSignatureFrom(newCA) != nil {
+			t.Fatalf("instance %s does not sign by the new CA after the roll-over (%v)", name, serr)
+		}
+	}
+	served, err := os.ReadFile(filepath.Join(pki, "server.pem"))
+	if err != nil || string(served) != string(servedBefore) || anchors() != 2 {
+		t.Fatalf("during the roll-over ca.pem holds %d anchors (want 2) and the server certificate changed: %v", anchors(), string(served) != string(servedBefore))
+	}
+
+	// The collector enrolled before connects anew with its bundle.
+	nc, err := dial(oldID, clientIdentity(t, oldKey, oldCert), oldCert.CABundlePEM)
+	if err != nil {
+		t.Fatalf("COL-04: a collector enrolled before the roll-over cannot connect: %v", err)
+	}
+	nc.Close()
+	// The connected collector is connected again after the reload and
+	// delivers.
+	delivered(t, ncRenew, ownSub, ownSubject, "after-rollover")
+	t.Logf("connected collector across the reload of the roll-over: disconnects %v, reconnects %d",
+		drain(staying.down), len(drain(staying.up)))
+	// It renews: a certificate of the new CA with both anchors. Like the
+	// collector binary it starts a new session with it.
+	subject := renewalSubject(f.OrgA, renewID)
+	renewedKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	resp := askRenewal(t, ncRenew, subject, renewalRequest(t, subject, subjectCSR(t, renewID, f.OrgA, renewedKey), renewCert.CertificatePEM, time.Now(), renewKey))
+	if resp.Error != "" || resp.IssuedCert == nil || parseCert(t, resp.CertificatePEM).CheckSignatureFrom(newCA) != nil ||
+		strings.Count(resp.CABundlePEM, "BEGIN CERTIFICATE") != 2 {
+		t.Fatalf("renewal after the roll-over: %+v", resp)
+	}
+	renewed := clientIdentity(t, renewedKey, resp.IssuedCert)
+	staying.nc.Close()
+	renewedSession := stay(renewID, renewed, resp.CABundlePEM)
+	delivered(t, renewedSession.nc, ownSub, ownSubject, "renewed")
+
+	// Retirement: refused while the collector enrolled before is on the
+	// previous CA, then forced.
+	if code, out := cli("retire"); code != 1 || !strings.Contains(out, "1 active collectors") {
+		t.Fatalf("server collector-ca retire with a collector on the previous CA: exit %d\n%s", code, out)
+	}
+	if len(caCert("previous")) != 1 || len(audits("collector_ca.retired", newFP)) != 0 {
+		t.Fatal("a refused retirement changed collector_ca or was audited")
+	}
+	if code, out := cli("retire", "--force"); code != 0 || !strings.Contains(out, "reloaded") {
+		t.Fatalf("server collector-ca retire --force: exit %d\n%s", code, out)
+	}
+	retired := audits("collector_ca.retired", newFP)
+	if len(retired) != 1 || retired[0]["force"] != true || retired[0]["overridden_collectors"] != float64(1) ||
+		fmt.Sprint(retired[0]["retired"]) != fmt.Sprint([]any{fingerprint(previousCA)}) || retired[0]["edge_reloaded"] != true {
+		t.Fatalf("audit of the forced retirement: %v", retired)
+	}
+	if len(caCert("previous")) != 0 || anchors() != 1 {
+		t.Fatalf("after the retirement: %d previous CAs, ca.pem with %d anchors", len(caCert("previous")), anchors())
+	}
+	if msg, nerr := announced.NextMsg(5 * time.Second); nerr != nil || discovery.VerifyCAChange(instB, msg.Data, time.Now()) != nil {
+		t.Fatalf("the retirement was not announced: %v", nerr)
+	}
+	if served, err = os.ReadFile(filepath.Join(pki, "server.pem")); err != nil || parseCert(t, string(served)).CheckSignatureFrom(newCA) != nil {
+		t.Fatalf("after the retirement the server certificate is not by the new CA (%v)", err)
+	}
+	// The endpoint, reloaded and not restarted, serves the new server
+	// certificate: the renewed collector's session is connected again and
+	// delivers, a new connection verifies the server certificate of the new
+	// CA with its bundle.
+	delivered(t, renewedSession.nc, ownSub, ownSubject, "after-retire")
+	t.Logf("renewed collector across the reload of the retirement: disconnects %v, reconnects %d",
+		drain(renewedSession.down), len(drain(renewedSession.up)))
+	if nc, err = dial(renewID, renewed, resp.CABundlePEM); err != nil {
+		t.Fatalf("COL-04: after the retirement the renewed collector cannot connect: %v", err)
+	}
+	state, err := nc.TLSConnectionState()
+	if err != nil || state.PeerCertificates[0].CheckSignatureFrom(newCA) != nil {
+		t.Fatalf("the endpoint serves no server certificate of the new CA after the retirement (%v)", err)
+	}
+	nc.Close()
+	if nc, err = dial(oldID, clientIdentity(t, oldKey, oldCert), oldCert.CABundlePEM); err == nil {
+		nc.Close()
+		t.Fatal("after the forced retirement a collector on the retired CA still connects")
+	}
 }
 
 func pemOf(der []byte) []byte {

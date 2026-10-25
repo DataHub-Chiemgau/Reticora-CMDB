@@ -6,7 +6,6 @@ go;backend/internal/agent;TestAuditT3AgentTelemetryFollowsMergedCI;F-083
 go;backend/internal/ci;TestAuditT3MergePatchNullClearsTypedField;F-080
 go;backend/internal/ci;TestAuditT3UnmergeKeepsLaterSurvivorEdits;F-097
 go;backend/internal/ci;TestAuditT7BulkJobCancelStopsWork;F-162
-go;backend/internal/discovery;TestAuditCARolloverKeepsEnrolledCollectorTrust;F-102
 go;backend/internal/discovery;TestAuditDefectDiscoveryTypedValuesValidated;F-143
 go;backend/internal/discovery;TestAuditPowerRedundancyIndependentOfBatchOrder;F-112
 go;backend/internal/discovery;TestAuditT3PoisonRecordDoesNotTakeValidRecordsDown;F-090

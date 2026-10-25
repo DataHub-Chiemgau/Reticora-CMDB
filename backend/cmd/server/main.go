@@ -57,6 +57,11 @@ import (
 var version = "dev"
 
 func main() {
+	// Operator command of the collector CA (COL-04): server collector-ca
+	// status|rollover|retire [--force] (collectorca.go).
+	if len(os.Args) > 1 && os.Args[1] == collectorCACommand {
+		os.Exit(runCollectorCA(context.Background(), os.Args[2:], config.Load(), os.Stdout, os.Stderr))
+	}
 	noDB := flag.Bool("no-db", false,
 		"run with in-memory repositories for local development; all data is lost on restart")
 	checkIssuer := flag.Bool("check-oidc-issuer", false,

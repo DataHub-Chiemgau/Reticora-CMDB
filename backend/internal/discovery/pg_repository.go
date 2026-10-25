@@ -718,6 +718,11 @@ func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *C
 			return fmt.Errorf("record enrolled collector: %w", uerr)
 		}
 		if issue != nil {
+			// No change of the collector CA runs while the certificate is
+			// issued and recorded (lockCAShared).
+			if lerr := lockCAShared(ctx, tx); lerr != nil {
+				return lerr
+			}
 			var ierr error
 			if cert, ierr = issue(ctx, orgID, c.ID); ierr != nil {
 				return ierr
@@ -786,6 +791,9 @@ func (r *PGRepository) RenewEdgeCertificate(ctx context.Context, orgID, collecto
 			return errCertificateNotCurrent
 		case renewed:
 			return fmt.Errorf("%w: the certificate was renewed within the last %s", ErrRenewalNotDue, renewalReplayWindow)
+		}
+		if lerr := lockCAShared(ctx, tx); lerr != nil {
+			return lerr
 		}
 		if cert, err = issue(ctx, orgID, collectorID); err != nil {
 			return err
