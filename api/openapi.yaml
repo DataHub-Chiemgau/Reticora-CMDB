@@ -1542,6 +1542,8 @@ paths:
         only. A service account in `service_account_id` must be visible to
         the creator (422 otherwise); the subscription then receives only the
         events both the creator's scope and the account's read rights cover.
+        invitation.created is delivered without its link: the acceptance
+        token reaches the invitee by mail only.
       requestBody:
         required: true
         content:
@@ -8326,7 +8328,13 @@ paths:
         scope covering the invitation's scope (a client covers its sites,
         site.client_id); otherwise 403, nothing is stored or audited. A
         pending invitation for the same address is a conflict (renew it
-        instead). Requires user:manage.
+        instead). In the same transaction the event invitation.created
+        (NTF-05) mails the invitee the organization name, the expiry and
+        the link RETICORA_INVITATION_ACCEPT_URL?token=<token>; a refused
+        issue (403, 409, 422) creates no event. Webhook deliveries of the
+        event leave out the link. Without RETICORA_INVITATION_ACCEPT_URL
+        the server answers 503 (invitations not configured), like the
+        signup without verification page. Requires user:manage.
       requestBody:
         required: true
         content:
@@ -8416,7 +8424,9 @@ paths:
         to the renewing principal, not to the original issuer: it must hold
         user:manage and every permission of the invited role in a scope
         covering the invitation's scope (403 otherwise, nothing changes).
-        Requires user:manage.
+        Like the issue, the renewal mails the invitee the new link and
+        expiry (invitation.created); without RETICORA_INVITATION_ACCEPT_URL
+        it answers 503 (invitations not configured). Requires user:manage.
       responses:
         '200':
           description: Invitation renewed, with its new token

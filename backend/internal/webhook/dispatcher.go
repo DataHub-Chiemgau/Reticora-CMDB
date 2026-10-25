@@ -321,6 +321,12 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 		slog.Error("marshal webhook payload failed", "error", err, "organization_id", orgID, "event", event)
 		return
 	}
+	// Stored and sent without the withheld keys (the invitation link).
+	body, ok := redactPayload(event, body)
+	if !ok {
+		slog.Error("webhook payload without its withheld keys could not be built; not delivered", "organization_id", orgID, "event", event)
+		return
+	}
 
 	// The scope of the event objects is resolved once, and only when a
 	// bound subscription or a restricted scope snapshot needs it.

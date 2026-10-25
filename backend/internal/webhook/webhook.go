@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -216,6 +218,36 @@ var ValidEvents = map[string]bool{
 	"entitlement.expired":  true,
 	"invitation.created":   true,
 	"certificate.expiring": true,
+}
+
+// withheldKeys are the data keys of an event that webhook deliveries never
+// carry: the link of invitation.created holds the acceptance token, with
+// which a webhook receiver could accept the invitation itself (NTF-05,
+// F-041). Only the invitee gets it, by mail.
+var withheldKeys = map[string][]string{
+	events.InvitationCreated: {"link", "token"},
+}
+
+// redactPayload returns the webhook body of event: body without the
+// withheld keys of the event. ok is false when such a body is not a JSON
+// object; it is then not delivered.
+func redactPayload(event string, body []byte) (redacted []byte, ok bool) {
+	keys := withheldKeys[event]
+	if len(keys) == 0 {
+		return body, true
+	}
+	var data map[string]json.RawMessage
+	if err := json.Unmarshal(body, &data); err != nil {
+		return nil, false
+	}
+	for _, k := range keys {
+		delete(data, k)
+	}
+	out, err := json.Marshal(data)
+	if err != nil {
+		return nil, false
+	}
+	return out, true
 }
 
 // Repository defines persistence operations for webhooks.

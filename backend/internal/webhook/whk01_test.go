@@ -2,6 +2,8 @@ package webhook
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
 // TestWHK01RetrySchedule covers the backoff of WHK-01: 30 s, 2 min, 10 min,
@@ -139,4 +142,89 @@ func TestWHK01HeadersDeactivationAndRetry(t *testing.T) {
 		}
 		return false
 	})
+}
+
+// TestWHK01InvitationCreatedWithoutLink covers WP-421 (NTF-05, F-041): the
+// webhook delivery of invitation.created, from the outbox publisher
+// (Consume) and from Dispatch, carries the invitation's id, address,
+// organization name and expiry, but neither the link nor a token, so a
+// webhook receiver cannot accept the invitation; the stored delivery (the
+// source of retries) holds neither. An invitation.created payload that is
+// not a JSON object is not delivered. Other events keep their keys.
+func TestWHK01InvitationCreatedWithoutLink(t *testing.T) {
+	var mu sync.Mutex
+	bodies := map[string][]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies[r.Header.Get("X-Reticora-Event")] = append(bodies[r.Header.Get("X-Reticora-Event")], string(b))
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	received := func(event string) []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), bodies[event]...)
+	}
+
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	if err := repo.Create(ctx, &Subscription{OrganizationID: "org-1", Name: "hook", URL: server.URL,
+		Secret: "secret", Events: []string{"invitation.created", "ci.created"}, IsActive: true}); err != nil {
+		t.Fatal(err)
+	}
+	subID := subscriptionID(t, repo)
+	store := NewMemoryDeliveryStore()
+	d := NewDispatcher(repo, server.Client(), DispatcherOptions{Deliveries: store, PollInterval: -1})
+	defer func() { _ = d.Shutdown(context.Background()) }()
+
+	const token = "8f0c3c7e-2a5b-4d4e-9a51-0d1e2f3a4b5c.c2VjcmV0LXRva2VuLW9mLXRoZS1pbnZpdGF0aW9u"
+	data, _ := json.Marshal(map[string]any{"id": "inv-1", "email": "new@x.example", "organization_name": "ACME",
+		"expires_at": "2026-11-01T12:00:00Z", "link": "https://cmdb.example/invitations/accept?token=" + token, "token": token})
+	if err := d.Consume(ctx, &events.Envelope{ID: "e-1", OrgID: "org-1", Type: events.InvitationCreated, Data: data}); err != nil {
+		t.Fatal(err)
+	}
+	d.Dispatch(ctx, "org-1", events.InvitationCreated, map[string]any{"id": "inv-2", "email": "other@x.example",
+		"link": "https://cmdb.example/invitations/accept?token=" + token})
+	waitFor(t, func() bool { return len(received(events.InvitationCreated)) == 2 })
+	for _, body := range received(events.InvitationCreated) {
+		var got map[string]any
+		if err := json.Unmarshal([]byte(body), &got); err != nil {
+			t.Fatalf("delivery %s: %v", body, err)
+		}
+		if strings.Contains(body, token) || got["link"] != nil || got["token"] != nil {
+			t.Errorf("invitation.created delivered with link or token: %s", body)
+		}
+		if got["email"] == nil || got["id"] == nil {
+			t.Errorf("invitation.created delivered without its other data: %s", body)
+		}
+		if got["id"] == "inv-1" && (got["organization_name"] != "ACME" || got["expires_at"] != "2026-11-01T12:00:00Z") {
+			t.Errorf("invitation.created delivered without organization name or expiry: %s", body)
+		}
+	}
+	records, _, err := store.ListBySubscription(ctx, "org-1", subID, api.PaginationParams{Limit: 10})
+	if err != nil || len(records) != 2 {
+		t.Fatalf("stored deliveries: %d (%v)", len(records), err)
+	}
+	for _, rec := range records {
+		if strings.Contains(string(rec.Payload), token) || strings.Contains(string(rec.Payload), `"link"`) {
+			t.Errorf("stored delivery %s keeps the link: %s", rec.ID, rec.Payload)
+		}
+	}
+
+	// Not a JSON object: nothing to redact safely, nothing delivered.
+	d.Dispatch(ctx, "org-1", events.InvitationCreated, "https://cmdb.example/invitations/accept?token="+token)
+	if records, _, _ = store.ListBySubscription(ctx, "org-1", subID, api.PaginationParams{Limit: 10}); len(records) != 2 {
+		t.Errorf("a non-object invitation.created was stored for delivery: %d deliveries", len(records))
+	}
+	// Other events keep their keys.
+	d.Dispatch(ctx, "org-1", "ci.created", map[string]any{"id": "ci-1", "link": "https://cmdb.example/cis/ci-1"})
+	waitFor(t, func() bool { return len(received("ci.created")) == 1 })
+	if body := received("ci.created")[0]; !strings.Contains(body, `"link":"https://cmdb.example/cis/ci-1"`) {
+		t.Errorf("ci.created lost its link: %s", body)
+	}
+	if got := received(events.InvitationCreated); len(got) != 2 {
+		t.Errorf("invitation.created deliveries = %d, want 2", len(got))
+	}
 }

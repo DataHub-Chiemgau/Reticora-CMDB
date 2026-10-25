@@ -223,6 +223,10 @@ type Options struct {
 	Notifications *notify.Center
 	// InvitationAccounts creates the IdP account of an accepted invitation.
 	InvitationAccounts user.InvitationAccounts
+	// InvitationAcceptURL is the page the link of the invitation mail opens
+	// (RETICORA_INVITATION_ACCEPT_URL); empty: issuing and renewing
+	// invitations answers 503.
+	InvitationAcceptURL string
 	// MFA binds the IdP account of every new org_admin to the second factor
 	// (WP-358): role assignment and first login of the PostgreSQL user
 	// repository, and the login callback for org_admin from the IdP group
@@ -296,10 +300,11 @@ func apiKeyHandler(repos *Repositories) *identity.APIKeyHandler {
 	return h
 }
 
-// invitationHandler builds the invitations (TLC-03); with an IdP admin
-// client the acceptance creates the account.
+// invitationHandler builds the invitations (TLC-03); the accept URL makes
+// the link of the invitation mail, with an IdP admin client the acceptance
+// creates the account.
 func invitationHandler(repos *Repositories, opts *Options) *user.InvitationHandler {
-	h := user.NewInvitationHandler(repos.Invitations)
+	h := user.NewInvitationHandler(repos.Invitations).WithAcceptURL(opts.InvitationAcceptURL)
 	if opts.InvitationAccounts != nil {
 		h.WithAccounts(opts.InvitationAccounts)
 	}

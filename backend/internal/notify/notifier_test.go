@@ -2,10 +2,14 @@ package notify
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
 // flakyProvider fails a number of times, then records.
@@ -195,5 +199,62 @@ func TestNotifierHonoursPreferences(t *testing.T) {
 	}
 	if until := overnight.QuietUntil(time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)); !until.IsZero() {
 		t.Errorf("noon is not quiet: %s", until)
+	}
+}
+
+// audienceResolver resolves an audience to its direct recipients and the
+// users it names directly.
+type audienceResolver struct{}
+
+func (audienceResolver) Resolve(_ context.Context, _ string, a *Audience) ([]Recipient, error) {
+	out := append([]Recipient(nil), a.Direct...)
+	for _, id := range a.DirectUserIDs {
+		out = append(out, Recipient{UserID: id, Email: id + "@x.example"})
+	}
+	return out, nil
+}
+
+// TestInvitationNotificationSkipsWebhookChannels covers WP-421 (NTF-05,
+// F-041): the invitation mail carries the acceptance link, so
+// invitation.created reaches the invitee's address over the e-mail channel
+// only; the organization's webhook channel gets neither a delivery nor the
+// link. Another event (export.completed) still reaches the webhook channel.
+func TestInvitationNotificationSkipsWebhookChannels(t *testing.T) {
+	ctx := context.Background()
+	env := newNotifierEnv(t)
+	consumer := NewEventConsumer(audienceResolver{}, env.n)
+	link := "https://cmdb.example/invitations/accept?token=org-1.secret"
+	invitation, _ := json.Marshal(map[string]any{"email": "new@x.example", "organization_name": "ACME",
+		"expires_at": "2026-10-20T12:00:00Z", "link": link})
+	if err := consumer.Consume(ctx, &events.Envelope{ID: "e-1", OrgID: "org-1", Type: events.InvitationCreated, Data: invitation}); err != nil {
+		t.Fatal(err)
+	}
+	export, _ := json.Marshal(map[string]any{"format": "csv", "row_count": 3, "initiated_by": "u-1"})
+	if err := consumer.Consume(ctx, &events.Envelope{ID: "e-2", OrgID: "org-1", Type: events.ExportCompleted, Data: export}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.n.ProcessDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var invitationMails []string
+	for _, m := range env.mail.sent {
+		if m.Category == "invitation" {
+			invitationMails = append(invitationMails, m.To[0].Email)
+			if !strings.Contains(m.Body, link) {
+				t.Errorf("invitation mail without the link: %q", m.Body)
+			}
+		}
+	}
+	if len(invitationMails) != 1 || invitationMails[0] != "new@x.example" {
+		t.Errorf("invitation mails to %v, want only the invitee", invitationMails)
+	}
+	if len(env.hook.sent) != 1 || env.hook.sent[0].Category != "export" {
+		t.Fatalf("webhook channel deliveries %+v, want only export.completed", env.hook.sent)
+	}
+	rows, _ := env.store.List(ctx, "org-1", 100, 0)
+	for _, r := range rows {
+		if r.Category == "invitation" && r.ChannelID != env.mailCh.ID {
+			t.Errorf("invitation delivery over channel %s, want the e-mail channel only", r.ChannelID)
+		}
 	}
 }

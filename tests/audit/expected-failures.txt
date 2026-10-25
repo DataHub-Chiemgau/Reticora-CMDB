@@ -42,7 +42,6 @@ go;backend/internal/tenant/rls;TestAuditT5CIReactivationThroughProductionDecorat
 go;backend/internal/topology;TestAuditT3BlastRadiusMarksHeuristicCIs;F-098
 go;backend/internal/traceability;TestAuditT5GateIDsAreNotTracedByTheChecklistItself;F-121
 go;backend/internal/traceability;TestAuditT5ValidateRejectsNonTestEvidence;F-121
-go;backend/internal/user;TestAuditDefectInvitationCreatedEvent;F-041
 go;backend/internal/webhook;TestAuditDefectWebhookConsumerKeepsEventsOnTransientErrors;F-151
 go;collector/collectorcmd;TestAuditClassifiedDeviceNotUploadedAsFallback;F-030
 go;collector/collectorcmd;TestAuditCollectorEnrollsFromEnvironment;F-101
@@ -100,7 +99,6 @@ e2e-real;chromium:frontend/e2e-real/discovery-override.spec.ts;Discovery → rec
 e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L02 names are unique per parent level and the rack height is 1–60 (explicit 0 → 422);F-302
 e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L05 deleting a site, building or room with child locations through /sites, /buildings or /rooms is refused (409);F-023
 e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L08 moving a mounted CI is recorded in ci_change, audit and the unified history shown on the CI page;F-253
-e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;05 an invitation sends the invitee an e-mail (NTF-05 event "Einladung");F-041
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles;F-201
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09c viewer UI: saving a webhook is refused visibly, not silently;F-062
 e2e-real;chromium:frontend/e2e-real/tenant-isolation.spec.ts;tenant isolation (TEN-06, TEN-09) T17 A’s audit viewer shows when and on which object each of A’s entries happened;F-078

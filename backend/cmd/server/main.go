@@ -493,9 +493,10 @@ func main() {
 		Events:               emitterOf(auditPool),
 		SignupProtection:     signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
-		InvitationAccounts: invitationAccounts(cfg),
-		MFA:                mfa,
-		CollectorCA:        collectorPKI,
+		InvitationAccounts:  invitationAccounts(cfg),
+		InvitationAcceptURL: invitationAcceptURL(cfg),
+		MFA:                 mfa,
+		CollectorCA:         collectorPKI,
 	}, httpStages{
 		preAuth:     middleware.PreAuthRateLimiter(cfg.PreAuthRateLimitRPM, cacheStore),
 		auth:        authMiddleware,
@@ -990,6 +991,15 @@ func invitationAccounts(cfg *config.Config) user.InvitationAccounts {
 		return kc
 	}
 	return nil
+}
+
+// invitationAcceptURL is the page the link of the invitation mail opens;
+// without it issuing and renewing invitations answers 503.
+func invitationAcceptURL(cfg *config.Config) string {
+	if cfg.InvitationAcceptURL == "" {
+		slog.Warn("no RETICORA_INVITATION_ACCEPT_URL: issuing and renewing invitations answers 503 until it is configured")
+	}
+	return cfg.InvitationAcceptURL
 }
 
 // mfaEnforcer binds the IdP accounts of new org_admins to MFA through the

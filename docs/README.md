@@ -388,7 +388,8 @@ form previews; both run the cases of `api/rules.conformance.json`.
 Users join an organization by invitation (`/api/v1/invitations`, TLC-03,
 `user:manage`): an invitation names the address, a role and its scope
 (org, client or site within the issuer's own scope), is valid for seven
-days and stores only the hash of its token, which the response shows once.
+days and stores only the hash of its token, which the response shows once
+and the invitee receives by mail as link (`invitation.created`, NTF-05).
 `POST /api/v1/invitations/accept` (public, pre-auth limit) consumes it
 atomically and once and creates the user with that role; with the Keycloak
 admin client the accepting person's password creates the IdP account.
@@ -893,6 +894,7 @@ The server is configured via environment variables:
 - `RETICORA_ENVIRONMENT` — Environment name (development/staging/production).
 - `RETICORA_DEFAULT_PLAN` — Plan provisioned for the `--no-db` demo organization (default `essential`); organizations in the database are provisioned with their own plan.
 - `RETICORA_SIGNUP_VERIFY_URL` — page the self-signup verification link opens; the token is appended as `?token=` (TLC-01). Self-signup also needs `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` / `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET` (a confidential client of the realm in `RETICORA_OIDC_ISSUER_URL` whose service account holds `realm-management/manage-users`) and the central SMTP server (`RETICORA_SMTP_*`); until all exist, `POST /api/v1/signup` answers 503.
+- `RETICORA_INVITATION_ACCEPT_URL` — page the link of the invitation mail opens; the token is appended as `?token=` (TLC-03, NTF-05). An absolute `http` or `https` URL (`http` is accepted in production for the HTTP default path); development defaults to `http://localhost:5173/invitations/accept`, Docker Compose derives it from `RETICORA_PUBLIC_BASE_URL`. Without it `POST /api/v1/invitations` and `/invitations/{id}/renew` answer 503. The mail goes over the organization's e-mail channels only; webhook deliveries of `invitation.created` leave out the link.
 - `RETICORA_MASTER_KEY_PREVIOUS` — master keys being rotated out (comma-separated, SEC-06): their data keys stay readable until the nightly `rotation.master_key` run has rewrapped them with `RETICORA_MASTER_KEY`; then remove them (see [`docs/ops/workers.md`](ops/workers.md)).
 - `RETICORA_SMTP_HOST`, `RETICORA_SMTP_PORT` (587), `RETICORA_SMTP_USERNAME`, `RETICORA_SMTP_PASSWORD`, `RETICORA_SMTP_FROM`, `RETICORA_SMTP_TLS` (`starttls` default, `tls`, `none`) — the central SMTP server of the installation (TEC-13): verification e-mails of the self-signup and the `central_smtp` notification channels, which send with the organization as sender name; DKIM and SPF are set up for the sender domain at the relay. Organizations of dedicated, on-premises and air-gapped installations configure their own server as an `smtp` channel; its credentials are stored encrypted (NTF-01).
 - `RETICORA_SIGNUP_CAPTCHA_KEY` — HMAC key (at least 32 characters, the same on every instance) that signs the self-hosted ALTCHA challenges of `GET /api/v1/signup/challenge` (E-33); without it each instance draws a random key, so challenges verify only where they were issued. Signups additionally pass the pre-auth limit, at most 5 signups per client IP and hour (shared cache) and the disposable-domain blocklist (`backend/internal/signup/disposable/`, updated monthly by the *Disposable domains* workflow).

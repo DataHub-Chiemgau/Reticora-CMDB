@@ -311,6 +311,9 @@ services:
       # while only the self-signed bootstrap certificate is installed. Empty
       # (the default) means "system trust store only".
       RETICORA_OIDC_CA_CERT_FILE: "${RETICORA_OIDC_CA_CERT_FILE:-}"
+      # Page the link of the invitation mail opens (TLC-03, NTF-05), on the
+      # public base URL install-cloud.sh writes into .env (same default).
+      RETICORA_INVITATION_ACCEPT_URL: "${RETICORA_PUBLIC_BASE_URL:-http://localhost:3000}/invitations/accept"
       RETICORA_ENVIRONMENT: "production"
       # Optional: switch the search backend from PostgreSQL FTS (default) to
       # OpenSearch. Only takes effect when the `opensearch` compose profile is

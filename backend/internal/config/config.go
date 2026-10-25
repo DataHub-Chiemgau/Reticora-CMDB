@@ -132,6 +132,12 @@ type Config struct {
 	TrialDays            int    // ENT-07: 30
 	TrialMaxCIs          int    // ENT-07: 100
 
+	// InvitationAcceptURL is the page the link of an invitation mail opens
+	// (TLC-03, NTF-05); the link adds ?token=<token>. Without it, issuing and
+	// renewing invitations answers 503. Development defaults to
+	// DefaultInvitationAcceptURL.
+	InvitationAcceptURL string
+
 	// PreAuthRateLimitRPM is the budget of authentication attempts per
 	// client IP and minute (AUT-10, default 20).
 	PreAuthRateLimitRPM int
@@ -239,6 +245,7 @@ func Load() *Config {
 		TrialPlan:                 l.str("RETICORA_TRIAL_PLAN", "standard"),
 		TrialDays:                 l.integer("RETICORA_TRIAL_DAYS", 30),
 		TrialMaxCIs:               l.integer("RETICORA_TRIAL_MAX_CIS", 100),
+		InvitationAcceptURL:       l.str("RETICORA_INVITATION_ACCEPT_URL", ""),
 		DefaultProvisionRole:      l.str("RETICORA_DEFAULT_PROVISION_ROLE", "viewer"),
 		EntitlementEnforcement:    l.str("RETICORA_ENTITLEMENT_ENFORCEMENT", "true") != "false",
 
@@ -296,8 +303,16 @@ func Load() *Config {
 	cfg.explicit = l.set
 	cfg.invalid = l.invalid
 
+	// Compose derives the accept URL from RETICORA_PUBLIC_BASE_URL, which may
+	// end with a slash: https://host//invitations/accept becomes
+	// https://host/invitations/accept.
+	cfg.InvitationAcceptURL = collapseLeadingSlashes(cfg.InvitationAcceptURL)
+
 	if cfg.Environment == EnvDevelopment {
 		cfg.LogLevel = slog.LevelDebug
+		if cfg.InvitationAcceptURL == "" {
+			cfg.InvitationAcceptURL = DefaultInvitationAcceptURL
+		}
 	} else if !cfg.anySet(s3Keys...) {
 		// Outside development the local MinIO defaults are never used
 		// silently: without explicit settings object storage is disabled.
@@ -305,6 +320,32 @@ func Load() *Config {
 	}
 
 	return cfg
+}
+
+// DefaultInvitationAcceptURL is the accept page of the development frontend
+// (Vite on port 5173).
+const DefaultInvitationAcceptURL = "http://localhost:5173/invitations/accept"
+
+// collapseLeadingSlashes replaces a run of slashes at the start of the path
+// of raw with one; any other value stays as it is.
+func collapseLeadingSlashes(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || !strings.HasPrefix(u.Path, "//") {
+		return raw
+	}
+	u.Path, u.RawPath = "/"+strings.TrimLeft(u.Path, "/"), ""
+	return u.String()
+}
+
+// absoluteHTTPURL reports whether raw is an absolute http or https URL with
+// a host and without user info.
+func absoluteHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil || u.Hostname() == "" {
+		return false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	return scheme == "http" || scheme == "https"
 }
 
 // Minimum retention periods of NFR-06 and AUD-09.
@@ -432,6 +473,12 @@ func (c *Config) Validate(noDB bool) error {
 	}
 	if c.SignupCaptchaKey != "" && len(c.SignupCaptchaKey) < 32 {
 		errs = append(errs, fmt.Errorf("RETICORA_SIGNUP_CAPTCHA_KEY must have at least 32 characters"))
+	}
+	// The invitation mail carries this link. http is allowed in every
+	// environment: the HTTP default path of the installer runs production
+	// on http://<host>.
+	if c.InvitationAcceptURL != "" && !absoluteHTTPURL(c.InvitationAcceptURL) {
+		errs = append(errs, fmt.Errorf("RETICORA_INVITATION_ACCEPT_URL must be an absolute http or https URL with a host and without user info"))
 	}
 	if c.TrialDays <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_TRIAL_DAYS must be positive, got %d", c.TrialDays))

@@ -20,6 +20,9 @@ type Subscription struct {
 	Category string
 	// Critical notifications ignore quiet hours and muted categories.
 	Critical bool
+	// Personal notifications carry a credential of their recipients (the
+	// invitation link): they reach the recipients only, no webhook channel.
+	Personal bool
 	Audience func(data map[string]any) *Audience
 	// Render returns subject and body (German, then English).
 	Render func(data map[string]any) (subject, body string)
@@ -81,7 +84,9 @@ var Subscriptions = map[string]Subscription{
 		},
 	},
 	events.InvitationCreated: {
-		Category: "invitation", Critical: true,
+		// The link holds the acceptance token: whoever reads it can accept
+		// the invitation (F-041), so it goes to the invitee's address only.
+		Category: "invitation", Critical: true, Personal: true,
 		Audience: func(d map[string]any) *Audience {
 			return &Audience{Direct: []Recipient{{Email: str(d, "email")}}}
 		},
@@ -213,7 +218,7 @@ func (c *EventConsumer) Consume(ctx context.Context, env *events.Envelope) error
 	}
 	subject, body := sub.Render(data)
 	data["event_id"], data["event_type"] = env.ID, env.Type
-	_, err = c.notifier.Notify(ctx, env.OrgID, &Request{Category: sub.Category, Critical: sub.Critical, Subject: subject,
-		Body: body, Data: data, DedupKey: env.Type + ":" + env.ID, Recipients: recipients})
+	_, err = c.notifier.Notify(ctx, env.OrgID, &Request{Category: sub.Category, Critical: sub.Critical, Personal: sub.Personal,
+		Subject: subject, Body: body, Data: data, DedupKey: env.Type + ":" + env.ID, Recipients: recipients})
 	return err
 }
