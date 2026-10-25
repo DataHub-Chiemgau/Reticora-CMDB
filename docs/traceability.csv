@@ -681,3 +681,5 @@ NFR-01;[B], Teilumfang [P5];LT;backend/internal/discovery/scale_integration_test
 OPS-05;[B];A;backend/cmd/server/workers_metrics_test.go;WP-447
 OPS-02;[B], [P3], [A];A;backend/internal/config/config_test.go;WP-447
 COL-04;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-430
+GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-452
+SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-452

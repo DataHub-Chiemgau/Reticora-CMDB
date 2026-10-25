@@ -8,7 +8,10 @@
 #   GATE-01  an open Critical finding in the security review or the pentest
 #            summary (every finding table including the annex; severity
 #            normalised: bold, case, Kritisch/Hoch) keeps GATE-01 and the gate
-#            result from PASS and 'bestanden';
+#            result from PASS and 'bestanden'; SR-11 (CI-13 [B] unusable in
+#            the production wiring) is recorded and rated at least High, open
+#            or fixed (F-119); the review records the P0 findings F-001 to
+#            F-015 of the Phase-1 audit as Critical SR findings (WP-452);
 #   GATE-02  every [B]/[Q] ID that docs/acceptance/g1-gate.md carries as N/P,
 #            WARN or offen has a reason, and every traceability row pointing to
 #            the checklist names an ID listed there; the IDs of
@@ -18,7 +21,8 @@
 #            when every ID is;
 #   GATE-03  an open High/Critical pentest finding keeps GATE-03 from PASS;
 #            TEN-09 is PASS only once the review records the rack site-scope
-#            bypass (F-040); PASS of an ID bound to a delivery needs the
+#            bypass (F-040), and the review records it (SR-12, WP-452); PASS
+#            of an ID bound to a delivery needs the
 #            delivery (A-07, A-11, A-02; made unconditional by WP-453 to
 #            WP-457);
 #   GATE-05  no [O] ID has a traceability row of the gate;
@@ -153,6 +157,10 @@ done
 #   PASS, unless the finding is below High and section "Abgleich offener
 #   Befunde" of the checklist gives a reason (| Befund | ID | Begründung |,
 #   at least five words) why the finding does not touch the requirement.
+# - Every row of SR-11 in the review is rated High or Critical, also when it
+#   is fixed: a [B] function unusable in the production wiring blocks a gate
+#   (docs/audit/README.md; F-119, known_defect_SR-11 assertion 2 of
+#   tests/audit/g1-gate-evidence.test.sh, moved by WP-452).
 
 # section FILE ERE prints the body of the first section whose heading matches,
 # up to the next heading of the same or a higher level.
@@ -190,6 +198,12 @@ finding_rows() {
             id = trim($2); if (id == "") id = "-"
             printf "%s\t%s\t%s\t%d\t%s\n", tag, id, sev, open, $0
         }' "$2"
+}
+
+# rack_rows FINDINGS prints the SR/PT rows of FINDINGS (finding_rows output)
+# that record the site-scope bypass in the rack channel (F-002, F-040).
+rack_rows() {
+    awk -F'\t' '$2 ~ /^(SR|PT)-[0-9]+$/ { print $5 }' <<< "$1" | grep -i 'rack' | grep -iE 'site[- ]?scope|TEN-09' || true
 }
 
 # word TEXT: first word of a status, lower case, without bold and trailing
@@ -309,6 +323,13 @@ gate_check() {
         [ "$res" = bestanden ] && v gate01_critical "the result is 'bestanden' with open Critical findings: $crit"
     fi
 
+    # F-119: SR-11 is recorded, and every row of it is rated High or Critical.
+    s="$(awk -F'\t' '$1 == "R" && $2 == "SR-11" { print $3 }' <<< "$findings")"
+    [ -n "$s" ] || v sr11_severity "SR-11 has no finding row in docs/security/review-g1.md"
+    while IFS= read -r sev; do
+        [ -z "$sev" ] || [ "$sev" = critical ] || [ "$sev" = high ] || v sr11_severity "SR-11 is rated $sev"
+    done <<< "$s"
+
     # GATE-03: an open High/Critical pentest finding keeps GATE-03 from PASS.
     if [ -n "$pthc" ]; then
         is_pass GATE-03 && v gate03_pentest "GATE-03 is PASS with open High/Critical pentest findings: $pthc"
@@ -402,7 +423,7 @@ gate_check() {
 
     # F-040: TEN-09 is PASS only once the review records the rack site-scope
     # bypass.
-    rack="$(awk -F'\t' '$2 ~ /^(SR|PT)-[0-9]+$/ { print $5 }' <<< "$findings" | grep -i 'rack' | grep -iE 'site[- ]?scope|TEN-09' || true)"
+    rack="$(rack_rows "$findings")"
     if [ -z "$rack" ]; then
         is_pass TEN-09 && v rack_site_scope "TEN-09 is PASS, but no review or pentest finding records the rack site-scope bypass (F-002)"
         [ "$(word "$ten09")" = pass ] && v rack_site_scope "GATE-03 'Isolationstest (TEN-09)' is PASS, but no finding records the rack site-scope bypass (F-002)"
@@ -466,13 +487,15 @@ gate_check() {
     return 0
 }
 
-GATE_RULES=(result gate01_critical gate03_pentest gate03_rows finding_ids exceptions declaration gate02_all
-    result_rows reasons agree rack_site_scope delivery_pentest delivery_subprocessors delivery_abn01 delivery_v2)
+GATE_RULES=(result gate01_critical sr11_severity gate03_pentest gate03_rows finding_ids exceptions declaration
+    gate02_all result_rows reasons agree rack_site_scope delivery_pentest delivery_subprocessors delivery_abn01
+    delivery_v2)
 FINAL_RULES=(final_critical final_pentest final_gate_rows final_exceptions)
 describe() {
     case "$1" in
         result) echo "the checklist states the gate result (offen or bestanden)" ;;
         gate01_critical) echo "GATE-01 an open Critical finding (review, pentest, annex) keeps GATE-01 and the result from PASS" ;;
+        sr11_severity) echo "GATE-01 SR-11 (CI-13 [B] unusable in the production wiring) is recorded and rated at least High (F-119)" ;;
         gate03_pentest) echo "GATE-03 an open High/Critical pentest finding keeps GATE-03 from PASS" ;;
         gate03_rows) echo "GATE-03 is PASS only when every condition is" ;;
         finding_ids) echo "GATE-02 an open SR/PT finding keeps the catalog IDs it names from PASS" ;;
@@ -505,6 +528,23 @@ for rule in "${rules[@]}"; do
         while IFS= read -r hit; do fail "$(describe "$rule"): $hit"; done <<< "$hits"
     fi
 done
+
+# --- Security review (WP-452) -----------------------------------------------
+# The review records the rack site-scope bypass, so rack_site_scope above can
+# let TEN-09 become PASS (F-040), and every P0 finding of the Phase-1 audit
+# with security impact as a Critical SR finding (F-002 is SR-12, F-003 SR-13).
+review_findings="$(finding_rows R docs/security/review-g1.md)"
+# shellcheck disable=SC2016 # expanded when check evaluates the condition
+check "GATE-03 the security review records the rack site-scope bypass as a finding (F-002, F-040)" \
+    '[ -n "$(rack_rows "$review_findings")" ]'
+p0_missing=""
+for n in $(seq 1 15); do
+    fid="$(printf 'F-%03d' "$n")"
+    awk -F'\t' '$2 ~ /^SR-[0-9]+$/ && $3 == "critical" { print $5 }' <<< "$review_findings" |
+        grep -qE "(^|[^0-9A-Za-z-])${fid}([^0-9]|\$)" || p0_missing+="${fid} "
+done
+check "GATE-01 the security review records the P0 findings F-001 to F-015 of the Phase-1 audit as Critical SR findings${p0_missing:+ (missing: ${p0_missing% })}" \
+    "[ -z '${p0_missing}' ]"
 
 # --- Fixture self-tests (WP-451) --------------------------------------------
 # Each case copies a fixture of tests/fixtures/rep01, changes it and runs the
@@ -596,7 +636,14 @@ critical_but_bestanden() {
 selftest result_critical open gate01_critical - critical_but_bestanden
 # F-038 (known_defect_SR-11, generalised): an open finding naming CI-13 keeps
 # CI-13 from PASS; a finding below High can be reconciled, High cannot.
-selftest finding_names_id final finding_ids - append "$R" '| SR-11 | Low | offen | „reaktivieren“ aus CI-13 ist in der Produktionsverdrahtung nicht nutzbar. | Folge-WP |'
+selftest finding_names_id final finding_ids - append "$R" '| SR-11 | High | offen | „reaktivieren“ aus CI-13 ist in der Produktionsverdrahtung nicht nutzbar. | Folge-WP |'
+# F-119 (known_defect_SR-11 assertion 2, moved by WP-452): SR-11 is recorded
+# and rated at least High, open or fixed, in every spelling.
+selftest sr11_low_open    open  sr11_severity sr11_severity subst "$R" 's/^\| SR-11 \| High \|/| SR-11 | Low |/'
+selftest sr11_low_fixed   final sr11_severity sr11_severity subst "$R" 's/^\| SR-11 \| High \|/| SR-11 | Low |/'
+selftest sr11_bold_mittel final sr11_severity sr11_severity subst "$R" 's/^\| SR-11 \| High \|/| **SR-11** | **Mittel** |/'
+selftest sr11_missing     final sr11_severity sr11_severity drop "$R" '^\| SR-11 \|'
+selftest sr11_hoch        final pass pass subst "$R" 's/^\| SR-11 \| High \|/| SR-11 | **Hoch** |/'
 selftest finding_reconciled_missing final finding_ids - drop "$C" '^\| SR-08 \| NFR-03 \|'
 selftest finding_reconciled_high final finding_ids - subst "$R" 's/^\| SR-08 \| Low \|/| SR-08 | High |/'
 selftest finding_reconciled_short final finding_ids - subst "$C" 's/^\| SR-08 \| NFR-03 \| .*/| SR-08 | NFR-03 | erfüllt |/'
