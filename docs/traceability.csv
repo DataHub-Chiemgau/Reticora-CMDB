@@ -632,3 +632,4 @@ NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-605
 ABN-02;[Q];LT;backend/internal/ci/list_budget_integration_test.go;WP-605
 IMP-06;[B];C;backend/internal/topology/querybudget_integration_test.go;WP-602
 NFR-02;[B];C;backend/internal/topology/querybudget_integration_test.go;WP-602
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-606

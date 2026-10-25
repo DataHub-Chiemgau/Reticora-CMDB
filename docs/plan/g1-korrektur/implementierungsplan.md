@@ -31,20 +31,20 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 |---|---|---:|---:|---|
 | [K0 Prüfrahmen](#k0-prüfrahmen) | WP-336 – WP-338 | 3 | 4,5 | Traceability liest den Korrekturplan; Defekttests laufen als Ratchet in CI; Real-Stack-E2E läuft in CI gegen die installierte Instanz. |
 | [K1 Sicherheit und Mandantentrennung](#k1-sicherheit-und-mandantentrennung) | WP-339 – WP-409 | 71 | 99,0 | Alle P0 und die P1/P2 mit Sicherheits- oder Isolationswirkung behoben; ihre Defekttests grün und überführt. |
-| [K1-Nachträge](#k1-nachträge) | WP-601 – WP-605 | 5 | 7,0 | Funde aus der Umsetzung von K1 behoben: Webhook-Abos im Scope ihres Erzeugers (E-98), Topologie ohne Root ohne N+1, IGA-/Workflow-Fehler, Upgrade der TimescaleDB-Extension, Index der CI-Listensortierung. |
+| [K1-Nachträge](#k1-nachträge) | WP-601 – WP-606 | 6 | 7,5 | Funde aus der Umsetzung von K1 behoben: Webhook-Abos im Scope ihres Erzeugers (E-98), Topologie ohne Root ohne N+1, IGA-/Workflow-Fehler, Upgrade der TimescaleDB-Extension, Index der CI-Listensortierung, a11y-Prüfung abgestürzter Seiten. |
 | [K2 Datenintegrität und Kernprozesse](#k2-datenintegrität-und-kernprozesse) | WP-410 – WP-426 | 17 | 27,0 | Alle übrigen P1 behoben: keine stillen Datenverluste, Kernprozesse (CI-Anlage, Sitzung, Discovery, Reconciliation) im Real-Stack grün. |
 | [K3 Installation, Betrieb und Gate-Nachweise](#k3-installation-betrieb-und-gate-nachweise) | WP-427 – WP-459 | 33 | 48,5 | Installer-, Zertifikats-, K8s-, Backup- und Monitoring-Befunde behoben; Gate- und Abnahmedokumente führen jeden betroffenen Punkt mit Zwischenstand (offen mit Korrektur-WP oder belegt PASS); den Endstand stellt K7 her. |
 | [K4 Funktions-, Validierungs- und Bedienmängel](#k4-funktions--validierungs--und-bedienmängel) | WP-460 – WP-531 | 72 | 99,0 | Alle übrigen P2 behoben. |
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **270** | **369,5** | |
+| **Summe** | | **271** | **370,0** | |
 
 ```mermaid
 flowchart LR
     K0["K0 Prüfrahmen<br/>3 WPs · 4,5 PT"]
     K1["K1 Sicherheit und Mandantentrennung<br/>71 WPs · 99,0 PT"]
-    K1N["K1-Nachträge<br/>5 WPs · 7,0 PT"]
+    K1N["K1-Nachträge<br/>6 WPs · 7,5 PT"]
     K2["K2 Datenintegrität und Kernprozesse<br/>17 WPs · 27,0 PT"]
     K3["K3 Installation, Betrieb und Gate-Nachweise<br/>33 WPs · 48,5 PT"]
     K4["K4 Funktions-, Validierungs- und Bedienmängel<br/>72 WPs · 99,0 PT"]
@@ -397,6 +397,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
 | [WP-604](#wp-604--upgrade-der-timescaledb-extension-im-installer) | `k1n-tsdb-update` | Upgrade der TimescaleDB-Extension im Installer | K1N | 1,5 | – | WP-389 |
 | [WP-605](#wp-605--ci-liste-index-der-standardsortierung-und-zählung-vorzug-aus-wp-438) | `k1n-cilist-sort` | CI-Liste: Index der Standardsortierung und Zählung (Vorzug aus WP-438) | K1N | 1,5 | F-117 | – |
+| [WP-606](#wp-606--a11y-prüfung-erkennt-seiten-die-nach-dem-laden-abstürzen) | `k1n-a11y-crash` | a11y-Prüfung erkennt Seiten, die nach dem Laden abstürzen | K1N | 0,5 | – | – |
 
 ## Konventionen für alle WPs
 
@@ -5245,6 +5246,46 @@ ABN-02;[Q];LT;backend/internal/ci/list_budget_integration_test.go;WP-605
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Ursachenanalyse mit `pg_stat_statements`/`auto_explain`/pprof auf der E-58-Umgebung, globale Suche und Szenario-Mix (WP-438 (`t4-cilist-perf`), WP-437 (`t4-load-scenarios`)); deterministische EXPLAIN-Prüfung (WP-436 (`t4-explain-budget`)).
+
+### WP-606 – a11y-Prüfung erkennt Seiten, die nach dem Laden abstürzen
+
+**Schlüssel:** `k1n-a11y-crash` · **Meilenstein:** K1-Nachträge · **Epic (Traceability):** C · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** keine (außer den Prüfrahmen-WPs, Konvention 11)
+
+**Befunde:** keine Befund-ID (Fund aus der CI von WP-601 bis WP-605, PR #88)
+
+**Problem:** `frontend/e2e/a11y.spec.ts` (WP-193) beantwortet jede API-Anfrage mit einer leeren Liste. Drei Seiten lesen eine Antwort, die keine Liste ist:
+- Das Dashboard liest den Compliance-Score (`overall.score`).
+- Die Topologie liest einen Graphen (`nodes`, `edges`).
+- Die Berechtigungsseite liest den Katalog als Array.
+
+Kommt die leere Liste an, wirft die Seite, und die App wird ausgehängt. Der Test prüft die App-Shell nur vor den Anfragen. Danach prüft axe ein leeres Dokument und meldet keine Verstöße. In Chromium, Edge und WebKit war der Test für alle drei Seiten deshalb grün, ohne sie zu prüfen. In Firefox kam die Antwort im ersten Lauf von PR #88 vor der Shell-Prüfung, und `/dashboard` war rot.
+
+**Akzeptanzkriterien:**
+
+- [ ] Nach `networkidle` steht die App-Shell noch, und kein ungefangener Seitenfehler ist aufgetreten. Andernfalls scheitert der Test mit dem Fehlertext.
+- [ ] Rot gegen den alten Mock: `/dashboard`, `/topology` und `/permissions` scheitern mit ihrem Seitenfehler.
+- [ ] Der Mock beantwortet `GET /compliance/score`, `GET /topology` und `GET /permissions` mit leeren Antworten in der Form von `api/openapi.yaml`; alle Hauptseiten sind grün.
+
+**Dateien (2 Einträge):**
+
+- frontend/e2e/a11y.spec.ts
+- docs/traceability.csv
+
+**Migration/RLS:** keine
+
+**Tests:** `frontend/e2e/a11y.spec.ts` in allen Browser-Projekten (CI-Job e2e).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-606
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Eine Error-Boundary je Seite oder je Widget. Der Server liefert die Formen laut Spezifikation; ein abweichender Mock ist ein Testfehler.
 
 ## K2 Datenintegrität und Kernprozesse
 
