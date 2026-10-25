@@ -3,6 +3,7 @@ package ticket
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -100,14 +101,34 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
 	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "ticket not found")
+		writeTicketError(w, r, err)
 		return
 	}
 
 	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// writeTicketError answers a failed ticket request: a ticket that is
+// unknown, of another organization or outside the caller's scope is 404
+// (TEN-04), an assignee, team, CI or asset that is no UUID or not visible
+// 422 on its field. Database errors go through api.WriteRepoError; no table,
+// constraint, policy or SQLSTATE text reaches the client (API-03, F-047),
+// the log keeps it.
+func writeTicketError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
+	case api.WriteFieldError(w, err):
+	default:
+		slog.WarnContext(r.Context(), "ticket request failed", "error", err)
+		api.WriteRepoError(w, err)
+	}
 }
 
 // Create handles POST /api/v1/tickets
@@ -158,7 +179,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Create(r.Context(), ticket); err != nil {
-		api.WriteRepoError(w, err)
+		writeTicketError(w, r, err)
 		return
 	}
 	if h.sla != nil {
@@ -176,7 +197,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
 	var req UpdateRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -185,7 +209,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "ticket not found")
+		writeTicketError(w, r, err)
 		return
 	}
 	if h.sla != nil && req.Status != nil {
@@ -210,9 +234,12 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "ticket not found")
+		writeTicketError(w, r, err)
 		return
 	}
 
@@ -227,7 +254,11 @@ func (h *Handler) AddComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ticketID := chi.URLParam(r, "id")
+	// The ticket id reaches SQL only as a UUID (F-047).
+	ticketID, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
 	var req CommentRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -248,7 +279,7 @@ func (h *Handler) AddComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.AddComment(r.Context(), comment); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+		writeTicketError(w, r, err)
 		return
 	}
 	if h.sla != nil && !comment.IsInternal {
@@ -266,12 +297,15 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ticketID := chi.URLParam(r, "id")
+	ticketID, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
 	page := api.ParsePagination(r)
 
 	comments, total, err := h.repo.ListComments(r.Context(), t.OrganizationID, ticketID, page)
 	if err != nil {
-		api.WriteRepoError(w, err)
+		writeTicketError(w, r, err)
 		return
 	}
 

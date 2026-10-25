@@ -2,12 +2,21 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+)
+
+var (
+	// ErrNotFound: the workflow definition is unknown or of another
+	// organization; both answer 404 alike (TEN-04).
+	ErrNotFound = errors.New("workflow definition not found")
+	// ErrRunNotFound: the run is unknown or of another organization (404).
+	ErrRunNotFound = errors.New("workflow run not found")
 )
 
 type Repository interface {
@@ -36,9 +45,11 @@ type MemoryRepository struct {
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{definitions: map[string]*Definition{}, runs: map[string]*Run{}, steps: map[string]*Step{}}
 }
-func (r *MemoryRepository) nextID(prefix string) string {
+// nextID returns ids of UUID form, as the handler accepts only UUID ids
+// (API-03); definitions, runs and steps share the counter.
+func (r *MemoryRepository) nextID(_ string) string {
 	r.next++
-	return fmt.Sprintf("%s-%d", prefix, r.next)
+	return fmt.Sprintf("00000000-0000-4000-8000-%012d", r.next)
 }
 func (r *MemoryRepository) ListDefinitions(_ context.Context, orgID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error) {
 	r.mu.RLock()
@@ -57,7 +68,7 @@ func (r *MemoryRepository) GetDefinition(_ context.Context, orgID, id string) (*
 	defer r.mu.RUnlock()
 	d := r.definitions[id]
 	if d == nil || d.OrganizationID != orgID {
-		return nil, fmt.Errorf("workflow definition not found")
+		return nil, ErrNotFound
 	}
 	cp := *d
 	return &cp, nil
@@ -78,7 +89,7 @@ func (r *MemoryRepository) UpdateDefinition(_ context.Context, orgID, id string,
 	defer r.mu.Unlock()
 	d := r.definitions[id]
 	if d == nil || d.OrganizationID != orgID {
-		return nil, fmt.Errorf("workflow definition not found")
+		return nil, ErrNotFound
 	}
 	if req.Name != nil {
 		d.Name = *req.Name
@@ -107,7 +118,7 @@ func (r *MemoryRepository) DeleteDefinition(_ context.Context, orgID, id string)
 	defer r.mu.Unlock()
 	d := r.definitions[id]
 	if d == nil || d.OrganizationID != orgID {
-		return fmt.Errorf("workflow definition not found")
+		return ErrNotFound
 	}
 	delete(r.definitions, id)
 	return nil
@@ -131,7 +142,7 @@ func (r *MemoryRepository) GetRun(_ context.Context, orgID, id string) (*Run, er
 	defer r.mu.RUnlock()
 	run := r.runs[id]
 	if run == nil || run.OrganizationID != orgID {
-		return nil, fmt.Errorf("workflow run not found")
+		return nil, ErrRunNotFound
 	}
 	cp := *run
 	cp.Steps = r.stepsForLocked(orgID, id)
@@ -156,7 +167,7 @@ func (r *MemoryRepository) UpdateRunStatus(_ context.Context, orgID, id, status 
 	defer r.mu.Unlock()
 	run := r.runs[id]
 	if run == nil || run.OrganizationID != orgID {
-		return nil, fmt.Errorf("workflow run not found")
+		return nil, ErrRunNotFound
 	}
 	run.Status = status
 	run.FinishedAt = finished

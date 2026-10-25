@@ -2,6 +2,8 @@ package reservation
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -82,12 +84,42 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "reservation not found")
+		writeReservationError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// writeReservationError answers a failed reservation request: a reservation,
+// asset or quantity item that is unknown, of another organization or outside
+// the caller's scope is 404 with a fixed text (TEN-04), an asset reserved
+// already or a reservation no longer active 409 with its domain message.
+// Database errors go through api.WriteRepoError; no table, constraint,
+// policy or SQLSTATE text reaches the client (API-03, F-047), the log keeps
+// it.
+func writeReservationError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
+	case errors.Is(err, ErrAssetNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrAssetNotFound.Error())
+	case errors.Is(err, ErrItemNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrItemNotFound.Error())
+	case errors.Is(err, ErrConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
+	case errors.Is(err, ErrNotActive):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrNotActive.Error())
+	case api.WriteFieldError(w, err):
+	default:
+		slog.WarnContext(r.Context(), "reservation request failed", "error", err)
+		api.WriteRepoError(w, err)
+	}
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -104,6 +136,18 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.AssetID == "" && req.QuantityItemID == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "asset_id or quantity_item_id is required")
 		return
+	}
+	// Ids reach SQL only as UUIDs: a malformed one is a 422 field error,
+	// not a driver message (API-03).
+	for _, f := range [][2]string{{"asset_id", req.AssetID}, {"quantity_item_id", req.QuantityItemID},
+		{"assignee_id", req.AssigneeID}, {"order_id", req.OrderID}, {"ticket_id", req.TicketID}} {
+		if f[1] == "" {
+			continue
+		}
+		if err := api.RequireUUID(f[0], f[1]); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
 	}
 	res := &Reservation{
 		OrganizationID: t.OrganizationID,
@@ -159,7 +203,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		res.CreatedBy = p.Subject
 	}
 	if err := h.repo.Create(r.Context(), res); err != nil {
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		writeReservationError(w, r, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "reservation.created", res)
@@ -173,9 +217,15 @@ func (h *Handler) Release(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	item, err := h.repo.Transition(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), "released")
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	// A reservation outside the caller's scope is 404 like an unknown one,
+	// one released already 409 (F-047).
+	item, err := h.repo.Transition(r.Context(), t.OrganizationID, id, "released")
 	if err != nil {
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		writeReservationError(w, r, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "reservation.released", item)

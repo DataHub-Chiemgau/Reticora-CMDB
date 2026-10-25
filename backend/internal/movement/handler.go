@@ -2,6 +2,8 @@ package movement
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -59,6 +61,43 @@ func (h *Handler) dispatch(r *http.Request, orgID, event string, payload any) {
 	}
 }
 
+// writeMovementError answers a failed movement or quantity-item request: an
+// asset or quantity item that is unknown, of another organization or outside
+// the caller's scope is 404 with a fixed text (TEN-04), a location likewise
+// 422 on its field, a taken SKU 409. Database errors go through
+// api.WriteRepoError; no table, constraint, policy or SQLSTATE text reaches
+// the client (API-03, F-047), the log keeps it.
+func writeMovementError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, ErrItemNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrItemNotFound.Error())
+	case errors.Is(err, ErrAssetNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrAssetNotFound.Error())
+	case errors.Is(err, ErrConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
+	case api.WriteFieldError(w, err):
+	default:
+		slog.WarnContext(r.Context(), "inventory movement request failed", "error", err)
+		api.WriteRepoError(w, err)
+	}
+}
+
+// requireUUIDs answers 422 on the first field whose value is set but no
+// UUID, so no malformed id reaches SQL (API-03), and reports whether all
+// were valid. fields alternates field names and values.
+func requireUUIDs(w http.ResponseWriter, fields ...string) bool {
+	for i := 0; i+1 < len(fields); i += 2 {
+		if fields[i+1] == "" {
+			continue
+		}
+		if err := api.RequireUUID(fields[i], fields[i+1]); err != nil {
+			api.WriteFieldError(w, err)
+			return false
+		}
+	}
+	return true
+}
+
 // ListMovements handles GET /api/v1/stock-movements
 func (h *Handler) ListMovements(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
@@ -91,11 +130,15 @@ func (h *Handler) ListAssetMovements(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
+	assetID, ok := api.ParseUUIDParam(w, r, "id", ErrAssetNotFound.Error())
+	if !ok {
+		return
+	}
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListMovements(r.Context(), t.OrganizationID,
-		MovementFilter{AssetID: chi.URLParam(r, "id")}, page)
+		MovementFilter{AssetID: assetID}, page)
 	if err != nil {
-		api.WriteRepoError(w, err)
+		writeMovementError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Movement]{
@@ -128,6 +171,11 @@ func (h *Handler) Record(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "quantity is required for quantity items")
 		return
 	}
+	if !requireUUIDs(w, "asset_id", req.AssetID, "quantity_item_id", req.QuantityItemID, "from_location_id", req.FromLocationID,
+		"to_location_id", req.ToLocationID, "ticket_id", req.TicketID, "order_id", req.OrderID, "workflow_run_id", req.WorkflowRunID,
+		"document_id", req.DocumentID) {
+		return
+	}
 	m := &Movement{
 		OrganizationID: t.OrganizationID,
 		ItemKind:       req.ItemKind,
@@ -147,8 +195,10 @@ func (h *Handler) Record(w http.ResponseWriter, r *http.Request) {
 	if p, ok := identity.PrincipalFromContext(r.Context()); ok {
 		m.ActorID = p.Subject
 	}
+	// An asset or quantity item outside the caller's scope is 404 like an
+	// unknown one, and nothing is recorded (F-047, TEN-04).
 	if err := h.repo.Record(r.Context(), m); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeMovementError(w, r, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "inventory.movement", m)
@@ -181,9 +231,13 @@ func (h *Handler) GetItem(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	item, err := h.repo.GetItem(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrItemNotFound.Error())
+	if !ok {
+		return
+	}
+	item, err := h.repo.GetItem(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "inventory item not found")
+		writeMovementError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, item)
@@ -205,6 +259,9 @@ func (h *Handler) CreateItem(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name is required")
 		return
 	}
+	if !requireUUIDs(w, "client_id", req.ClientID, "location_id", req.LocationID) {
+		return
+	}
 	item := &QuantityItem{
 		OrganizationID: t.OrganizationID,
 		ClientID:       req.ClientID,
@@ -219,7 +276,7 @@ func (h *Handler) CreateItem(w http.ResponseWriter, r *http.Request) {
 		Attributes:     req.Attributes,
 	}
 	if err := h.repo.CreateItem(r.Context(), item); err != nil {
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		writeMovementError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, item)
@@ -232,14 +289,21 @@ func (h *Handler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrItemNotFound.Error())
+	if !ok {
+		return
+	}
 	var req UpdateItemRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	item, err := h.repo.UpdateItem(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
+	if req.LocationID != nil && !requireUUIDs(w, "location_id", *req.LocationID) {
+		return
+	}
+	item, err := h.repo.UpdateItem(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "inventory item not found")
+		writeMovementError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, item)
@@ -283,9 +347,13 @@ func (h *Handler) ConvertToAsset(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "asset conversion is not configured")
 		return
 	}
-	item, err := h.repo.GetItem(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrItemNotFound.Error())
+	if !ok {
+		return
+	}
+	item, err := h.repo.GetItem(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "inventory item not found")
+		writeMovementError(w, r, err)
 		return
 	}
 	var req struct {
@@ -340,8 +408,12 @@ func (h *Handler) DeleteItem(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	if err := h.repo.DeleteItem(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "inventory item not found")
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrItemNotFound.Error())
+	if !ok {
+		return
+	}
+	if err := h.repo.DeleteItem(r.Context(), t.OrganizationID, id); err != nil {
+		writeMovementError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

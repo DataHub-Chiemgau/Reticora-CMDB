@@ -2314,6 +2314,19 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: client_id lies outside the caller's scope.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: >-
+            ci_id or client_id is no UUID, or ci_id names a CI that is unknown,
+            of another organization or outside the caller's scope (all alike,
+            TEN-04), or client_id names no client of the organization.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -2359,6 +2372,18 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The field is owned by the parent asset of a composition (spec §5).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: >-
+            ci_id is no UUID or names a CI that is unknown, of another
+            organization or outside the caller's scope (all alike, TEN-04).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
     delete:
       operationId: deleteAsset
       tags: [Assets]
@@ -4258,6 +4283,16 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: >-
+            assignee_id, team_id, related_ci_id or related_asset_id is no UUID
+            or names an object that is unknown, of another organization or
+            outside the caller's scope (all alike, TEN-04); `field` names it.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -4301,8 +4336,18 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: >-
+            assignee_id, team_id, related_ci_id or related_asset_id is no UUID
+            or names an object that is unknown, of another organization or
+            outside the caller's scope (all alike, TEN-04); `field` names it.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
     delete:
       operationId: deleteTicket
       tags: [Tickets]
@@ -9287,6 +9332,16 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: client_id lies outside the caller's scope.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: client_id is no UUID or names no client of the organization.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -9357,8 +9412,18 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: client_id lies outside the caller's scope.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: client_id is no UUID or names no client of the organization.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
     delete:
       operationId: deleteSLAPolicy
       tags: [SLA]
@@ -9408,11 +9473,21 @@ paths:
               schema:
                 $ref: '#/components/schemas/TicketSLA'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: No SLA policy matches the priority of the ticket (no sla_id given).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: >-
+            sla_id is no UUID or names a policy that is unknown, of another
+            organization or outside the caller's scope (all alike, TEN-04).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
 
 
@@ -9434,6 +9509,7 @@ paths:
           schema: { type: boolean }
       responses:
         '200': { description: Paginated form definitions, content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinitionListResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
     post:
@@ -9447,6 +9523,8 @@ paths:
         '201': { description: Form definition created, content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: "client_id lies outside the caller's scope, or a client-scoped caller names no client (E-09).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
+        '422': { description: client_id is no UUID or names no client of the organization., content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/forms/{id}:
     x-phase: P3
@@ -9470,7 +9548,9 @@ paths:
         '200': { description: Form definition updated, content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: "client_id lies outside the caller's scope.", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: client_id is no UUID or names no client of the organization., content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
     delete:
       operationId: deleteFormDefinition
       tags: [Forms]
@@ -9496,6 +9576,7 @@ paths:
       responses:
         '200': { description: Paginated form submissions, content: { application/json: { schema: { $ref: '#/components/schemas/FormSubmissionListResponse' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
     post:
       operationId: createFormSubmission
@@ -9509,6 +9590,7 @@ paths:
         '400': { description: Bad request or validation problem, content: { application/json: { schema: { $ref: '#/components/schemas/ValidationProblem' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: "ci_id or ticket_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
   /api/v1/form-submissions:
     x-phase: P3
     get:
@@ -9533,6 +9615,7 @@ paths:
           schema: { type: string }
       responses:
         '200': { description: Paginated form submissions, content: { application/json: { schema: { $ref: '#/components/schemas/FormSubmissionListResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/form-submissions/{id}:
@@ -9633,6 +9716,7 @@ paths:
           schema: { type: string }
       responses:
         '200': { description: Paginated workflow runs, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowRunListResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/workflow-runs/{id}:
@@ -9658,6 +9742,7 @@ paths:
         '200': { description: Updated workflow run, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowRun' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/compliance/rules:
     x-phase: P3
     get:
@@ -9679,6 +9764,7 @@ paths:
           schema: { type: boolean }
       responses:
         '200': { description: Paginated compliance rules, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceRuleListResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
     post:
@@ -9690,6 +9776,7 @@ paths:
         '201': { description: Compliance rule created, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceRule' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { description: "ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/rules/{id}:
     x-phase: P3
@@ -9712,6 +9799,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: "ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
     delete:
       operationId: deleteComplianceRule
       tags: [Compliance]
@@ -9750,6 +9838,7 @@ paths:
           schema: { type: string, enum: [pass, fail, not_applicable] }
       responses:
         '200': { description: Paginated compliance results, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceResultListResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/score:
@@ -9764,6 +9853,7 @@ paths:
           schema: { type: string }
       responses:
         '200': { description: Compliance score, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceEvaluationResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/report:
@@ -9827,6 +9917,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: "credential_id or collector_id is no UUID or names no object of the organization (unknown and foreign alike, TEN-04).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/connectors/{id}:
@@ -9865,6 +9956,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: "credential_id or collector_id is no UUID or names no object of the organization (unknown and foreign alike, TEN-04).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '500': { $ref: '#/components/responses/InternalServerError' }
     delete:
       operationId: deleteIGAConnector
@@ -10030,6 +10122,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: "user_id or a connector_id of the matching policies is no UUID or names no object of the organization (unknown and foreign alike, TEN-04).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/access-requests:
@@ -10066,6 +10159,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: "subject_user_id is missing, no UUID or no user of the organization, or connector_id names no connector of the organization (unknown and foreign alike, TEN-04).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/access-requests/{id}/approve:
@@ -10150,6 +10244,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: "An item names a user or connector that is no UUID or no object of the organization (unknown and foreign alike, TEN-04); `field` names it.", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/access-reviews/{id}/items:
@@ -10236,6 +10331,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: "connector_id is no UUID or names no connector of the organization (unknown and foreign alike, TEN-04).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/drift/{id}/remediate:
@@ -10299,6 +10395,7 @@ paths:
         requestBody: { required: true, content: { application/scim+json: { schema: { $ref: '#/components/schemas/SCIMResource' } }, application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
         responses:
           '201': { description: SCIM user, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+          '409': { description: "The userName is taken (scimType uniqueness); the detail names no constraint (F-047)." }
   /scim/v2/Users/{id}:
     x-phase: A
     parameters:
@@ -10392,6 +10489,7 @@ paths:
         requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
         responses:
           '201': { description: SCIM group, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+          '409': { description: "The displayName is taken (scimType uniqueness); the detail names no constraint (F-047)." }
   /scim/v2/Groups/{id}:
     x-phase: A
     parameters:
@@ -10616,6 +10714,8 @@ paths:
           description: List the movement ledger of an asset
         '401':
           description: Unauthorized
+        '404':
+          description: The asset id is no UUID.
 
   /api/v1/assets/{id}/state:
     x-phase: P2
@@ -11315,8 +11415,19 @@ paths:
       responses:
         '201':
           description: Manage quantity-based inventory items
+        '400':
+          description: name is missing.
         '401':
           description: Unauthorized
+        '403':
+          description: client_id lies outside the caller's scope.
+        '409':
+          description: An item with this SKU exists already.
+        '422':
+          description: >-
+            client_id or location_id is no UUID, client_id names no client of
+            the organization, or location_id a location that is unknown, of
+            another organization or outside the caller's scope (all alike).
 
   /api/v1/inventory/items/{id}:
     x-phase: P2
@@ -11328,6 +11439,8 @@ paths:
           description: Read, update or delete a quantity inventory item
         '401':
           description: Unauthorized
+        '404':
+          description: The item is unknown, of another organization or outside the caller's scope.
     patch:
       operationId: updateInventoryItemsId
       summary: Read, update or delete a quantity inventory item
@@ -11336,6 +11449,12 @@ paths:
           description: Read, update or delete a quantity inventory item
         '401':
           description: Unauthorized
+        '404':
+          description: The item is unknown, of another organization or outside the caller's scope.
+        '422':
+          description: >-
+            location_id is no UUID or names a location that is unknown, of
+            another organization or outside the caller's scope (all alike).
     delete:
       operationId: deleteInventoryItemsId
       summary: Read, update or delete a quantity inventory item
@@ -11344,6 +11463,8 @@ paths:
           description: Read, update or delete a quantity inventory item
         '401':
           description: Unauthorized
+        '404':
+          description: The item is unknown, of another organization or outside the caller's scope.
 
   /api/v1/lifecycle-definitions:
     get:
@@ -11648,8 +11769,18 @@ paths:
       responses:
         '201':
           description: Manage inventory reservations
+        '400':
+          description: Neither asset_id nor quantity_item_id is set, or a value is invalid.
         '401':
           description: Unauthorized
+        '404':
+          description: >-
+            The asset or quantity item is unknown, of another organization or
+            outside the caller's scope (all alike, TEN-04).
+        '409':
+          description: The asset has an active reservation already.
+        '422':
+          description: An id field is no UUID; `field` names it.
 
   /api/v1/reservations/{id}:
     x-phase: P2
@@ -11661,6 +11792,8 @@ paths:
           description: Read a reservation
         '401':
           description: Unauthorized
+        '404':
+          description: The reservation is unknown, of another organization or outside the caller's scope.
 
   /api/v1/reservations/{id}/release:
     x-phase: P2
@@ -11672,6 +11805,12 @@ paths:
           description: Release a reservation
         '401':
           description: Unauthorized
+        '404':
+          description: >-
+            The reservation is unknown, of another organization or reserves an
+            item outside the caller's scope (all alike, TEN-04).
+        '409':
+          description: The reservation is no longer active.
 
   /api/v1/saved-views:
     get:
@@ -11806,8 +11945,19 @@ paths:
       responses:
         '201':
           description: List and record inventory movements (append-only ledger)
+        '400':
+          description: movement_type is invalid or the item or quantity is missing.
         '401':
           description: Unauthorized
+        '404':
+          description: >-
+            The asset or quantity item is unknown, of another organization or
+            outside the caller's scope (all alike, TEN-04); nothing is recorded.
+        '422':
+          description: >-
+            An id field is no UUID, or from_location_id/to_location_id names a
+            location that is unknown, of another organization or outside the
+            caller's scope; `field` names it.
 
 
   /api/v1/inventory/items/{id}/convert:
@@ -11820,6 +11970,8 @@ paths:
           description: Serialized asset created from one unit
         '401':
           description: Unauthorized
+        '404':
+          description: The item is unknown, of another organization or outside the caller's scope.
         '409':
           description: No stock available to convert
 

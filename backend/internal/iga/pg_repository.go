@@ -3,7 +3,9 @@ package iga
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -20,6 +22,39 @@ func nullString(v string) any {
 		return nil
 	}
 	return v
+}
+
+// requireRef fails with a 422 field error on field when id (if set) is no
+// UUID or names no row of table visible under the caller's scope. The
+// foreign keys of the IGA tables (app_user, credential, collector,
+// iga_connector) are checked without row level security: an object of
+// another organization passed them and an unknown one failed with the
+// constraint text, so the two could be told apart (TEN-04, API-03, F-047).
+// The check runs before the write, in its transaction.
+func requireRef(ctx context.Context, tx pgx.Tx, table, field, missing, orgID, id string) error {
+	if id == "" {
+		return nil
+	}
+	if err := api.RequireUUID(field, id); err != nil {
+		return err
+	}
+	var visible bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND organization_id = $2)", id, orgID).Scan(&visible); err != nil {
+		return fmt.Errorf("check %s: %w", field, err)
+	}
+	if !visible {
+		return &api.FieldError{Field: field, Message: missing, Status: http.StatusUnprocessableEntity}
+	}
+	return nil
+}
+
+// requireConnectorRefs checks the credential and the collector a connector
+// names (empty: none).
+func requireConnectorRefs(ctx context.Context, tx pgx.Tx, orgID, credentialID, collectorID string) error {
+	if err := requireRef(ctx, tx, "credential", "credential_id", "credential not found", orgID, credentialID); err != nil {
+		return err
+	}
+	return requireRef(ctx, tx, "collector", "collector_id", "collector not found", orgID, collectorID)
 }
 
 const connectorCols = `id::text, organization_id::text, name, type, COALESCE(base_url,''), COALESCE(credential_id::text,''), COALESCE(collector_id::text,''), capabilities, config, status, last_sync_at, created_at, updated_at`
@@ -63,8 +98,11 @@ func (r *PGRepository) GetConnector(ctx context.Context, orgID, id string) (*Con
 	var out *ConnectorConfig
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		v, err := scanConnector(tx.QueryRow(ctx, "SELECT "+connectorCols+" FROM iga_connector WHERE organization_id=$1 AND id=$2", orgID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrConnectorNotFound
+		}
 		if err != nil {
-			return fmt.Errorf("connector not found")
+			return fmt.Errorf("get connector: %w", err)
 		}
 		out = v
 		return nil
@@ -82,6 +120,9 @@ func (r *PGRepository) CreateConnector(ctx context.Context, c *ConnectorConfig) 
 		c.Config = JSONMap{}
 	}
 	return database.WithRequestTenant(ctx, r.pool, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireConnectorRefs(ctx, tx, c.OrganizationID, c.CredentialID, c.CollectorID); err != nil {
+			return err
+		}
 		return tx.QueryRow(ctx, `INSERT INTO iga_connector (organization_id,name,type,base_url,credential_id,collector_id,capabilities,config,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text, created_at, updated_at`, c.OrganizationID, c.Name, c.Type, nullString(c.BaseURL), nullString(c.CredentialID), nullString(c.CollectorID), c.Capabilities, c.Config, c.Status).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
 	})
 }
@@ -112,6 +153,16 @@ func (r *PGRepository) UpdateConnector(ctx context.Context, orgID, id string, re
 		cur.Status = *req.Status
 	}
 	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var credentialID, collectorID string
+		if req.CredentialID != nil {
+			credentialID = *req.CredentialID
+		}
+		if req.CollectorID != nil {
+			collectorID = *req.CollectorID
+		}
+		if refErr := requireConnectorRefs(ctx, tx, orgID, credentialID, collectorID); refErr != nil {
+			return refErr
+		}
 		_, err := tx.Exec(ctx, `UPDATE iga_connector SET name=$3,base_url=$4,credential_id=$5,collector_id=$6,capabilities=$7,config=$8,status=$9,updated_at=now() WHERE organization_id=$1 AND id=$2`, orgID, id, cur.Name, nullString(cur.BaseURL), nullString(cur.CredentialID), nullString(cur.CollectorID), cur.Capabilities, cur.Config, cur.Status)
 		return err
 	})
@@ -127,7 +178,7 @@ func (r *PGRepository) DeleteConnector(ctx context.Context, orgID, id string) er
 			return err
 		}
 		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("connector not found")
+			return ErrConnectorNotFound
 		}
 		return nil
 	})
@@ -190,8 +241,11 @@ func (r *PGRepository) GetTask(ctx context.Context, orgID, id string) (*Provisio
 	var out *ProvisioningTask
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		v, err := scanTask(tx.QueryRow(ctx, "SELECT "+taskCols+" FROM iga_provisioning_task WHERE organization_id=$1 AND id=$2", orgID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrTaskNotFound
+		}
 		if err != nil {
-			return fmt.Errorf("task not found")
+			return fmt.Errorf("get task: %w", err)
 		}
 		out = v
 		return nil
@@ -212,6 +266,12 @@ func (r *PGRepository) CreateTask(ctx context.Context, t *ProvisioningTask) erro
 		t.Payload = JSONMap{}
 	}
 	return database.WithRequestTenant(ctx, r.pool, t.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireRef(ctx, tx, "iga_connector", "connector_id", "connector not found", t.OrganizationID, t.ConnectorID); err != nil {
+			return err
+		}
+		if err := requireRef(ctx, tx, "app_user", "user_id", "user not found", t.OrganizationID, t.UserID); err != nil {
+			return err
+		}
 		return tx.QueryRow(ctx, `INSERT INTO iga_provisioning_task (organization_id,connector_id,user_id,external_id,action,status,payload,max_attempts,next_run_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text,created_at,updated_at`, t.OrganizationID, t.ConnectorID, nullString(t.UserID), nullString(t.ExternalID), t.Action, t.Status, t.Payload, t.MaxAttempts, t.NextRunAt).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
 	})
 }
@@ -335,12 +395,21 @@ func (r *PGRepository) CreateAccessRequest(ctx context.Context, a *AccessRequest
 		a.Status = "pending"
 	}
 	return database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireRef(ctx, tx, "app_user", "subject_user_id", "user not found", a.OrganizationID, a.SubjectUserID); err != nil {
+			return err
+		}
+		if err := requireRef(ctx, tx, "iga_connector", "connector_id", "connector not found", a.OrganizationID, a.ConnectorID); err != nil {
+			return err
+		}
 		return tx.QueryRow(ctx, `INSERT INTO iga_access_request (organization_id,requester_id,subject_user_id,connector_id,entitlement,reason,status,workflow_run_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id::text,created_at,updated_at`, a.OrganizationID, a.RequesterID, a.SubjectUserID, nullString(a.ConnectorID), a.Entitlement, a.Reason, a.Status, nullString(a.WorkflowRunID)).Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt)
 	})
 }
 func (r *PGRepository) DecideAccessRequest(ctx context.Context, orgID, id, status, actor, comment string) (*AccessRequest, error) {
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE iga_access_request SET status=$3,decision_by=$4,decision_comment=$5,decided_at=now(),updated_at=now() WHERE organization_id=$1 AND id=$2`, orgID, id, status, nullString(actor), comment)
+		tag, err := tx.Exec(ctx, `UPDATE iga_access_request SET status=$3,decision_by=$4,decision_comment=$5,decided_at=now(),updated_at=now() WHERE organization_id=$1 AND id=$2`, orgID, id, status, nullString(actor), comment)
+		if err == nil && tag.RowsAffected() == 0 {
+			return ErrAccessRequestNotFound
+		}
 		return err
 	})
 	if err != nil {
@@ -418,6 +487,12 @@ func (r *PGRepository) CreateReview(ctx context.Context, rv *AccessReview, items
 			it := &items[i]
 			it.OrganizationID = rv.OrganizationID
 			it.ReviewID = rv.ID
+			if err := requireRef(ctx, tx, "app_user", fmt.Sprintf("items[%d].user_id", i), "user not found", it.OrganizationID, it.UserID); err != nil {
+				return err
+			}
+			if err := requireRef(ctx, tx, "iga_connector", fmt.Sprintf("items[%d].connector_id", i), "connector not found", it.OrganizationID, it.ConnectorID); err != nil {
+				return err
+			}
 			if err := tx.QueryRow(ctx, `INSERT INTO iga_access_review_item (organization_id,review_id,user_id,connector_id,entitlement) VALUES ($1,$2,$3,$4,$5) RETURNING id::text,created_at,updated_at`, it.OrganizationID, it.ReviewID, it.UserID, nullString(it.ConnectorID), it.Entitlement).Scan(&it.ID, &it.CreatedAt, &it.UpdatedAt); err != nil {
 				return err
 			}
@@ -448,7 +523,10 @@ func (r *PGRepository) ListReviewItems(ctx context.Context, orgID, reviewID stri
 }
 func (r *PGRepository) DecideReviewItem(ctx context.Context, orgID, id, decision, actor string) (*AccessReviewItem, error) {
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE iga_access_review_item SET decision=$3,decision_by=$4,decided_at=now(),updated_at=now() WHERE organization_id=$1 AND id=$2`, orgID, id, decision, nullString(actor))
+		tag, err := tx.Exec(ctx, `UPDATE iga_access_review_item SET decision=$3,decision_by=$4,decided_at=now(),updated_at=now() WHERE organization_id=$1 AND id=$2`, orgID, id, decision, nullString(actor))
+		if err == nil && tag.RowsAffected() == 0 {
+			return ErrReviewItemNotFound
+		}
 		return err
 	})
 	if err != nil {
@@ -519,8 +597,11 @@ func (r *PGRepository) GetDrift(ctx context.Context, orgID, id string) (*DriftFi
 	var out *DriftFinding
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		v, err := scanDrift(tx.QueryRow(ctx, "SELECT "+driftCols+" FROM iga_drift_finding WHERE organization_id=$1 AND id=$2", orgID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrDriftNotFound
+		}
 		if err != nil {
-			return fmt.Errorf("drift not found")
+			return fmt.Errorf("get drift: %w", err)
 		}
 		out = v
 		return nil

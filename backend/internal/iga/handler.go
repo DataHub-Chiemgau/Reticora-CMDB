@@ -2,6 +2,8 @@ package iga
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -90,6 +92,31 @@ func tenantInfo(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool
 	}
 	return t, true
 }
+
+// notFoundErrors are the objects of the module that are unknown or of
+// another organization (404 with the fixed text, TEN-04).
+var notFoundErrors = []error{ErrConnectorNotFound, ErrTaskNotFound, ErrAccessRequestNotFound, ErrReviewItemNotFound, ErrDriftNotFound}
+
+// writeIGAError answers a failed IGA request: an object that is unknown or
+// of another organization is 404 with a fixed text (TEN-04), a user,
+// connector, credential or collector a request names that is no UUID or not
+// of the organization 422 on its field. Database errors go through
+// api.WriteRepoError; no table, constraint, policy or SQLSTATE text reaches
+// the client (API-03, F-047), the log keeps it.
+func writeIGAError(w http.ResponseWriter, r *http.Request, err error) {
+	for _, missing := range notFoundErrors {
+		if errors.Is(err, missing) {
+			api.WriteError(w, 404, "Not Found", missing.Error())
+			return
+		}
+	}
+	if api.WriteFieldError(w, err) {
+		return
+	}
+	slog.WarnContext(r.Context(), "iga request failed", "error", err)
+	api.WriteRepoError(w, err)
+}
+
 func (h *Handler) ListConnectors(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
 	if !ok {
@@ -97,15 +124,19 @@ func (h *Handler) ListConnectors(w http.ResponseWriter, r *http.Request) {
 	}
 	p := api.ParsePagination(r)
 	items, total, err := h.repo.ListConnectors(r.Context(), t.OrganizationID, p)
-	respondList(w, items, total, p, err)
+	respondList(w, r, items, total, p, err)
 }
 func (h *Handler) GetConnector(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
 	if !ok {
 		return
 	}
-	v, err := h.repo.GetConnector(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
-	respondOne(w, v, err, "connector not found")
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrConnectorNotFound.Error())
+	if !ok {
+		return
+	}
+	v, err := h.repo.GetConnector(r.Context(), t.OrganizationID, id)
+	respondOne(w, r, v, err)
 }
 func (h *Handler) CreateConnector(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
@@ -125,7 +156,7 @@ func (h *Handler) CreateConnector(w http.ResponseWriter, r *http.Request) {
 	if credID == "" && req.Secret != nil && h.credentials != nil {
 		c, err := h.credentials.Create(r.Context(), credential.CreateRequest{OrganizationID: t.OrganizationID, Name: req.Name + " token", Kind: credential.KindAPIToken, Scope: "iga", Secret: req.Secret})
 		if err != nil {
-			api.WriteError(w, 400, "Bad Request", err.Error())
+			writeIGAError(w, r, err)
 			return
 		}
 		credID = c.ID
@@ -138,14 +169,20 @@ func (h *Handler) CreateConnector(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
+	// A credential or collector of another organization answers like an
+	// unknown one, 422 on its field (TEN-04, F-047).
 	if err := h.repo.CreateConnector(r.Context(), c); err != nil {
-		api.WriteError(w, 500, "Internal Error", err.Error())
+		writeIGAError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 201, c)
 }
 func (h *Handler) UpdateConnector(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
+	if !ok {
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrConnectorNotFound.Error())
 	if !ok {
 		return
 	}
@@ -157,21 +194,25 @@ func (h *Handler) UpdateConnector(w http.ResponseWriter, r *http.Request) {
 	if req.Secret != nil && h.credentials != nil {
 		c, err := h.credentials.Create(r.Context(), credential.CreateRequest{OrganizationID: t.OrganizationID, Name: "IGA connector token", Kind: credential.KindAPIToken, Scope: "iga", Secret: req.Secret})
 		if err != nil {
-			api.WriteError(w, 400, "Bad Request", err.Error())
+			writeIGAError(w, r, err)
 			return
 		}
 		req.CredentialID = &c.ID
 	}
-	v, err := h.repo.UpdateConnector(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
-	respondOne(w, v, err, "connector not found")
+	v, err := h.repo.UpdateConnector(r.Context(), t.OrganizationID, id, req)
+	respondOne(w, r, v, err)
 }
 func (h *Handler) DeleteConnector(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteConnector(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
-		api.WriteError(w, 404, "Not Found", "connector not found")
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrConnectorNotFound.Error())
+	if !ok {
+		return
+	}
+	if err := h.repo.DeleteConnector(r.Context(), t.OrganizationID, id); err != nil {
+		writeIGAError(w, r, err)
 		return
 	}
 	w.WriteHeader(204)
@@ -181,9 +222,13 @@ func (h *Handler) TestConnector(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	c, err := h.repo.GetConnector(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrConnectorNotFound.Error())
+	if !ok {
+		return
+	}
+	c, err := h.repo.GetConnector(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, 404, "Not Found", "connector not found")
+		writeIGAError(w, r, err)
 		return
 	}
 	err = h.registry.ValidateBaseURL(c.Type, c.BaseURL)
@@ -198,7 +243,10 @@ func (h *Handler) SyncConnector(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrConnectorNotFound.Error())
+	if !ok {
+		return
+	}
 	now := time.Now().UTC()
 	_ = h.repo.MarkConnectorSynced(r.Context(), t.OrganizationID, id, now)
 	findings, err := h.drift.Reconcile(r.Context(), t.OrganizationID, id, nil)
@@ -216,24 +264,32 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	p := api.ParsePagination(r)
 	items, total, err := h.repo.ListTasks(r.Context(), t.OrganizationID, r.URL.Query().Get("status"), p)
-	respondList(w, items, total, p, err)
+	respondList(w, r, items, total, p, err)
 }
 func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
 	if !ok {
 		return
 	}
-	v, err := h.repo.GetTask(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
-	respondOne(w, v, err, "task not found")
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrTaskNotFound.Error())
+	if !ok {
+		return
+	}
+	v, err := h.repo.GetTask(r.Context(), t.OrganizationID, id)
+	respondOne(w, r, v, err)
 }
 func (h *Handler) RetryTask(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
 	if !ok {
 		return
 	}
-	task, err := h.repo.GetTask(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrTaskNotFound.Error())
+	if !ok {
+		return
+	}
+	task, err := h.repo.GetTask(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, 404, "Not Found", "task not found")
+		writeIGAError(w, r, err)
 		return
 	}
 	task.Status = TaskStatusPending
@@ -249,7 +305,7 @@ func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 	}
 	p := api.ParsePagination(r)
 	items, total, err := h.repo.ListPolicies(r.Context(), t.OrganizationID, r.URL.Query().Get("event"), false, p)
-	respondList(w, items, total, p, err)
+	respondList(w, r, items, total, p, err)
 }
 func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
@@ -267,7 +323,7 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	p := &LifecyclePolicy{OrganizationID: t.OrganizationID, Name: req.Name, Event: req.Event, Priority: req.Priority, Active: active, Conditions: req.Conditions, Actions: req.Actions}
 	if err := h.repo.CreatePolicy(r.Context(), p); err != nil {
-		api.WriteError(w, 500, "Internal Error", err.Error())
+		writeIGAError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 201, p)
@@ -282,9 +338,17 @@ func (h *Handler) ResolveLifecycle(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
+	if change.UserID != "" {
+		if err := api.RequireUUID("user_id", change.UserID); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
+	// A user or connector of another organization is 422 on its field like
+	// an unknown one (TEN-04, F-047).
 	tasks, err := h.lifecycle.Resolve(r.Context(), t.OrganizationID, change)
 	if err != nil {
-		api.WriteError(w, 500, "Internal Error", err.Error())
+		writeIGAError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 202, tasks)
@@ -296,7 +360,7 @@ func (h *Handler) ListAccessRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	p := api.ParsePagination(r)
 	items, total, err := h.repo.ListAccessRequests(r.Context(), t.OrganizationID, r.URL.Query().Get("status"), p)
-	respondList(w, items, total, p, err)
+	respondList(w, r, items, total, p, err)
 }
 func (h *Handler) CreateAccessRequest(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
@@ -308,6 +372,17 @@ func (h *Handler) CreateAccessRequest(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
+	// The subject is required; ids reach SQL only as UUIDs (F-047).
+	if err := api.RequireUUID("subject_user_id", req.SubjectUserID); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	if req.ConnectorID != "" {
+		if err := api.RequireUUID("connector_id", req.ConnectorID); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
 	ar := &AccessRequest{OrganizationID: t.OrganizationID, RequesterID: t.UserID, SubjectUserID: req.SubjectUserID, ConnectorID: req.ConnectorID, Entitlement: req.Entitlement, Reason: req.Reason, Status: "pending"}
 	if h.workflows != nil {
 		defs, _, _ := h.workflows.ListDefinitions(r.Context(), t.OrganizationID, true, api.PaginationParams{Limit: 50})
@@ -318,8 +393,10 @@ func (h *Handler) CreateAccessRequest(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// A subject or connector of another organization is 422 on its field
+	// like an unknown one (TEN-04, F-047).
 	if err := h.repo.CreateAccessRequest(r.Context(), ar); err != nil {
-		api.WriteError(w, 500, "Internal Error", err.Error())
+		writeIGAError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 201, ar)
@@ -335,11 +412,15 @@ func (h *Handler) decideAccess(w http.ResponseWriter, r *http.Request, status st
 	if !ok {
 		return
 	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrAccessRequestNotFound.Error())
+	if !ok {
+		return
+	}
 	var req DecisionRequest
 	_ = api.ReadJSON(r, &req)
-	ar, err := h.repo.DecideAccessRequest(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), status, t.UserID, req.Comment)
+	ar, err := h.repo.DecideAccessRequest(r.Context(), t.OrganizationID, id, status, t.UserID, req.Comment)
 	if err != nil {
-		api.WriteError(w, 404, "Not Found", "access request not found")
+		writeIGAError(w, r, err)
 		return
 	}
 	if status == "approved" && ar.ConnectorID != "" {
@@ -354,7 +435,7 @@ func (h *Handler) ListReviews(w http.ResponseWriter, r *http.Request) {
 	}
 	p := api.ParsePagination(r)
 	items, total, err := h.repo.ListReviews(r.Context(), t.OrganizationID, r.URL.Query().Get("status"), p)
-	respondList(w, items, total, p, err)
+	respondList(w, r, items, total, p, err)
 }
 func (h *Handler) CreateReview(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
@@ -368,7 +449,7 @@ func (h *Handler) CreateReview(w http.ResponseWriter, r *http.Request) {
 	}
 	rv := &AccessReview{OrganizationID: t.OrganizationID, Name: req.Name, Description: req.Description, DueAt: req.DueAt, Status: "active"}
 	if err := h.repo.CreateReview(r.Context(), rv, req.Items); err != nil {
-		api.WriteError(w, 500, "Internal Error", err.Error())
+		writeIGAError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 201, rv)
@@ -378,12 +459,20 @@ func (h *Handler) ListReviewItems(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	reviewID, ok := api.ParseUUIDParam(w, r, "id", "access review not found")
+	if !ok {
+		return
+	}
 	p := api.ParsePagination(r)
-	items, total, err := h.repo.ListReviewItems(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), p)
-	respondList(w, items, total, p, err)
+	items, total, err := h.repo.ListReviewItems(r.Context(), t.OrganizationID, reviewID, p)
+	respondList(w, r, items, total, p, err)
 }
 func (h *Handler) DecideReviewItem(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
+	if !ok {
+		return
+	}
+	itemID, ok := api.ParseUUIDParam(w, r, "itemId", ErrReviewItemNotFound.Error())
 	if !ok {
 		return
 	}
@@ -395,9 +484,9 @@ func (h *Handler) DecideReviewItem(w http.ResponseWriter, r *http.Request) {
 	if req.Decision == "" {
 		req.Decision = ReviewDecisionApprove
 	}
-	it, err := h.repo.DecideReviewItem(r.Context(), t.OrganizationID, chi.URLParam(r, "itemId"), req.Decision, t.UserID)
+	it, err := h.repo.DecideReviewItem(r.Context(), t.OrganizationID, itemID, req.Decision, t.UserID)
 	if err != nil {
-		api.WriteError(w, 404, "Not Found", "review item not found")
+		writeIGAError(w, r, err)
 		return
 	}
 	if req.Decision == ReviewDecisionRevoke && it.ConnectorID != "" {
@@ -412,7 +501,7 @@ func (h *Handler) ListDrift(w http.ResponseWriter, r *http.Request) {
 	}
 	p := api.ParsePagination(r)
 	items, total, err := h.repo.ListDrift(r.Context(), t.OrganizationID, r.URL.Query().Get("status"), p)
-	respondList(w, items, total, p, err)
+	respondList(w, r, items, total, p, err)
 }
 func (h *Handler) ReconcileDrift(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
@@ -424,9 +513,25 @@ func (h *Handler) ReconcileDrift(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
+	if err := api.RequireUUID("connector_id", req.ConnectorID); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	findings, err := h.drift.Reconcile(r.Context(), t.OrganizationID, req.ConnectorID, nil)
-	if err != nil {
-		api.WriteError(w, 400, "Bad Request", err.Error())
+	switch {
+	case errors.Is(err, ErrConnectorNotFound):
+		// Unknown and of another organization alike (TEN-04).
+		api.WriteFieldError(w, &api.FieldError{Field: "connector_id", Message: ErrConnectorNotFound.Error(), Status: 422})
+		return
+	case err != nil:
+		if _, _, _, isDB := api.ClassifyDBError(err); isDB {
+			writeIGAError(w, r, err)
+			return
+		}
+		// The connector could not be built or read: the cause (egress
+		// decision, remote answer) stays in the log (F-047).
+		slog.WarnContext(r.Context(), "iga drift reconciliation failed", "connector_id", req.ConnectorID, "error", err)
+		api.WriteError(w, 400, "Bad Request", "the connector could not be reconciled")
 		return
 	}
 	for i := range findings {
@@ -439,9 +544,13 @@ func (h *Handler) RemediateDrift(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	f, err := h.repo.GetDrift(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrDriftNotFound.Error())
+	if !ok {
+		return
+	}
+	f, err := h.repo.GetDrift(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, 404, "Not Found", "drift not found")
+		writeIGAError(w, r, err)
 		return
 	}
 	action := TaskActionCreateAccount
@@ -455,16 +564,16 @@ func (h *Handler) RemediateDrift(w http.ResponseWriter, r *http.Request) {
 	_ = h.repo.UpdateDrift(r.Context(), f)
 	api.WriteJSON(w, 202, task)
 }
-func respondList[T any](w http.ResponseWriter, items []T, total int, p api.PaginationParams, err error) {
+func respondList[T any](w http.ResponseWriter, r *http.Request, items []T, total int, p api.PaginationParams, err error) {
 	if err != nil {
-		api.WriteError(w, 500, "Internal Error", err.Error())
+		writeIGAError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 200, api.ListResponse[T]{Data: items, Total: total, Limit: p.Limit, Offset: p.Offset, HasMore: p.Offset+p.Limit < total})
 }
-func respondOne(w http.ResponseWriter, v any, err error, msg string) {
+func respondOne(w http.ResponseWriter, r *http.Request, v any, err error) {
 	if err != nil {
-		api.WriteError(w, 404, "Not Found", msg)
+		writeIGAError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, 200, v)

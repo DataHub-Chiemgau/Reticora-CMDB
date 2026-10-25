@@ -2,18 +2,35 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
+// Rules of a trigger or approval (400 with the fixed message; the handler
+// shows no other error text, API-03, F-047).
+var (
+	// ErrTriggerMismatch: the trigger does not match the definition.
+	ErrTriggerMismatch = errors.New("workflow trigger does not match")
+	// ErrNotWaiting: the run waits for no approval.
+	ErrNotWaiting = errors.New("workflow run is not waiting for approval")
+	// ErrInvalidDecision: an approval decision is approved or rejected.
+	ErrInvalidDecision = errors.New("decision must be approved or rejected")
+	// ErrInvalidAction: an action of the definition has a type that is no
+	// string.
+	ErrInvalidAction = errors.New("workflow action type must be a string")
 )
 
 type Executor struct {
@@ -41,7 +58,7 @@ func (e *Executor) Trigger(ctx context.Context, orgID string, def *Definition, t
 		return nil, fmt.Errorf("workflow definition is required")
 	}
 	if !triggerMatches(def.Trigger, trigger) {
-		return nil, fmt.Errorf("workflow trigger does not match")
+		return nil, ErrTriggerMismatch
 	}
 	run := &Run{OrganizationID: orgID, WorkflowID: def.ID, Status: StatusPending, Trigger: trigger, Context: payload, StartedAt: time.Now().UTC()}
 	if err := e.repo.CreateRun(ctx, run); err != nil {
@@ -60,7 +77,7 @@ func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment 
 		return nil, err
 	}
 	if run.Status != StatusWaitingApproval {
-		return nil, fmt.Errorf("workflow run is not waiting for approval")
+		return nil, ErrNotWaiting
 	}
 	steps, err := e.repo.ListSteps(ctx, orgID, runID)
 	if err != nil {
@@ -74,7 +91,7 @@ func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment 
 		}
 	}
 	if waiting == nil {
-		return nil, fmt.Errorf("approval step not found")
+		return nil, fmt.Errorf("approval step not found: %w", ErrNotWaiting)
 	}
 	out := JSONMap{"decision": decision, "comment": comment}
 	if decision == "rejected" {
@@ -85,7 +102,7 @@ func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment 
 		return e.repo.UpdateRunStatus(ctx, orgID, runID, StatusCancelled, &now, run.Context)
 	}
 	if decision != "approved" {
-		return nil, fmt.Errorf("decision must be approved or rejected")
+		return nil, ErrInvalidDecision
 	}
 	if _, err := e.repo.UpdateStep(ctx, orgID, waiting.ID, StatusSucceeded, out, ""); err != nil {
 		return nil, fmt.Errorf("complete approval step: %w", err)
@@ -126,7 +143,7 @@ func (e *Executor) resume(ctx context.Context, orgID string, def *Definition, ru
 			return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusWaitingApproval, nil, run.Context)
 		}
 		if err != nil {
-			if _, uerr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusFailed, out, err.Error()); uerr != nil {
+			if _, uerr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusFailed, out, stepErrorText(step.ID, err)); uerr != nil {
 				slog.Error("workflow: failed to mark step failed", "step_id", step.ID, "error", uerr)
 			}
 			now := time.Now().UTC()
@@ -139,6 +156,22 @@ func (e *Executor) resume(ctx context.Context, orgID string, def *Definition, ru
 	}
 	now := time.Now().UTC()
 	return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusSucceeded, &now, run.Context)
+}
+
+// stepErrorText is the error text a failed step stores, which the run API
+// shows: a database error becomes its sanitized classification without
+// table, constraint, policy or SQLSTATE text (API-03, F-047), the log keeps
+// it; the errors of the actions themselves keep their text.
+func stepErrorText(stepID string, err error) string {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err.Error()
+	}
+	slog.Warn("workflow: step failed", "step_id", stepID, "error", err)
+	if _, _, detail, ok := api.ClassifyDBError(err); ok {
+		return detail
+	}
+	return "the action could not be completed"
 }
 
 // failRun best-effort marks the run failed; the original error is returned to
@@ -158,7 +191,7 @@ func actionType(action JSONMap) (string, error) {
 	}
 	typ, ok := raw.(string)
 	if !ok {
-		return "", fmt.Errorf("workflow action type must be a string, got %T", raw)
+		return "", fmt.Errorf("%w, got %T", ErrInvalidAction, raw)
 	}
 	if typ == "" {
 		return "noop", nil

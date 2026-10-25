@@ -13320,6 +13320,24 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description client_id lies outside the caller's scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description ci_id or client_id is no UUID, or ci_id names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04), or client_id names no client of the organization. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13399,6 +13417,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The field is owned by the parent asset of a composition (spec §5). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description ci_id is no UUID or names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listAssignments: {
@@ -15968,6 +16004,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -16046,7 +16092,17 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listTicketComments: {
@@ -21859,6 +21915,24 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description client_id lies outside the caller's scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description client_id is no UUID or names no client of the organization. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -21976,7 +22050,25 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description client_id lies outside the caller's scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
+      /** @description client_id is no UUID or names no client of the organization. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getTicketSLA: {
@@ -22029,9 +22121,26 @@ export interface operations {
           'application/json': components['schemas']['TicketSLA'];
         };
       };
-      400: components['responses']['BadRequest'];
+      /** @description No SLA policy matches the priority of the ticket (no sla_id given). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description sla_id is no UUID or names a policy that is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listFormDefinitions: {
@@ -22070,6 +22179,7 @@ export interface operations {
           'application/json': components['schemas']['FormDefinitionListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -22098,6 +22208,24 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description client_id lies outside the caller's scope, or a client-scoped caller names no client (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description client_id is no UUID or names no client of the organization. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -22176,7 +22304,25 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description client_id lies outside the caller's scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
+      /** @description client_id is no UUID or names no client of the organization. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listFormSubmissions: {
@@ -22218,6 +22364,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -22257,6 +22404,15 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description ci_id or ticket_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listAllFormSubmissions: {
@@ -22297,6 +22453,7 @@ export interface operations {
           'application/json': components['schemas']['FormSubmissionListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -22536,6 +22693,7 @@ export interface operations {
           'application/json': components['schemas']['WorkflowRunListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -22592,6 +22750,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listComplianceRules: {
@@ -22631,6 +22790,7 @@ export interface operations {
           'application/json': components['schemas']['ComplianceRuleListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -22659,6 +22819,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -22738,6 +22907,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   evaluateCompliance: {
@@ -22799,6 +22977,7 @@ export interface operations {
           'application/json': components['schemas']['ComplianceResultListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -22823,6 +23002,7 @@ export interface operations {
           'application/json': components['schemas']['ComplianceEvaluationResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -22961,6 +23141,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description credential_id or collector_id is no UUID or names no object of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -23124,6 +23313,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description credential_id or collector_id is no UUID or names no object of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -23544,6 +23742,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description user_id or a connector_id of the matching policies is no UUID or names no object of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -23648,6 +23855,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description subject_user_id is missing, no UUID or no user of the organization, or connector_id names no connector of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -23866,6 +24082,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description An item names a user or connector that is no UUID or no object of the organization (unknown and foreign alike, TEN-04); `field` names it. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -24081,6 +24306,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description connector_id is no UUID or names no connector of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -24234,6 +24468,13 @@ export interface operations {
         content: {
           'application/json': components['schemas']['SCIMResource'];
         };
+      };
+      /** @description The userName is taken (scimType uniqueness); the detail names no constraint (F-047). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
@@ -24501,6 +24742,13 @@ export interface operations {
         content: {
           'application/json': components['schemas']['SCIMResource'];
         };
+      };
+      /** @description The displayName is taken (scimType uniqueness); the detail names no constraint (F-047). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
@@ -24944,6 +25192,13 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The asset id is no UUID. */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -26152,8 +26407,36 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description name is missing. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description client_id lies outside the caller's scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description An item with this SKU exists already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description client_id or location_id is no UUID, client_id names no client of the organization, or location_id a location that is unknown, of another organization or outside the caller's scope (all alike). */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -26184,6 +26467,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description The item is unknown, of another organization or outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   deleteInventoryItemsId: {
@@ -26209,6 +26499,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description The item is unknown, of another organization or outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   updateInventoryItemsId: {
@@ -26229,6 +26526,20 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The item is unknown, of another organization or outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description location_id is no UUID or names a location that is unknown, of another organization or outside the caller's scope (all alike). */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -26752,8 +27063,36 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Neither asset_id nor quantity_item_id is set, or a value is invalid. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The asset or quantity item is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The asset has an active reservation already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description An id field is no UUID; `field` names it. */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -26784,6 +27123,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description The reservation is unknown, of another organization or outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   createReservationsIdRelease: {
@@ -26804,6 +27150,20 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The reservation is unknown, of another organization or reserves an item outside the caller's scope (all alike, TEN-04). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The reservation is no longer active. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -27065,8 +27425,29 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description movement_type is invalid or the item or quantity is missing. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The asset or quantity item is unknown, of another organization or outside the caller's scope (all alike, TEN-04); nothing is recorded. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description An id field is no UUID, or from_location_id/to_location_id names a location that is unknown, of another organization or outside the caller's scope; `field` names it. */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -27092,6 +27473,13 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The item is unknown, of another organization or outside the caller's scope. */
+      404: {
         headers: {
           [name: string]: unknown;
         };
