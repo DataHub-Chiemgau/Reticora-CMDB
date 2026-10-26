@@ -6,6 +6,14 @@ Akzeptanzkriterien von WP-439. Messbasis ist der Workflow `load.yml` auf der
 nach E-58 anerkannten Umgebung (GitHub-Standard-Runner mit 4 CPUs); die
 Messbasis der Budgets sind 10.000 Objekte je Organisation (E-17).
 
+Nachtrag 2026-10-26 (WP-612, `k3n-load-evidence`): Nach den K3-Nachträgen
+WP-607 bis WP-611 liegen drei weitere vollständige Läufe auf `main` vor
+(Commit `3910aae`). Der Workflow `load-evidence.yml` (Run 40320307297) hat
+sie aus ihren Archiven nach E-58 bewertet: alle Budgets im Median gehalten,
+kein Job in zwei Läufen rot (Abschnitt „Nachweisläufe nach den
+K3-Nachträgen“). Damit sind AK 3 von WP-439 und die Offenen Punkte 1 und 11
+erledigt.
+
 **Quelle der Werte:** Die Werte der Läufe 1 bis 3 stammen aus den
 k6-Zusammenfassungen und Protokollzeilen in den Job-Logs der Läufe
 40269518264, 40270929166 und 40271818796 (Abschnitt „Läufe“). Das Archiv je
@@ -17,17 +25,21 @@ Abschnitt „Archiv eines Laufs“). Werte, die nur im Archiv stehen (`lscpu`,
 `/proc/meminfo`), sind als „Archiv steht aus“ markiert und **nicht
 belegt**. Alle anderen Zahlen stammen aus den genannten GitHub-Läufen
 (Lauf-ID angegeben) oder, als historisch gekennzeichnet, aus früheren
-Nachweisläufen. Fett: Schwelle verfehlt.
+Nachweisläufen. Die Nachweisläufe 40316485305, 40316488267 und 40316491988
+(WP-612) sind zusätzlich in GitHub Actions aus ihren Archiven bewertet
+(`load-evidence.yml`, Run 40320307297, Artefakt
+`load-evidence-40320307297`); ihre Mediane stammen aus dieser Bewertung,
+die Einzelwerte aus den Job-Logs. Fett: Schwelle verfehlt.
 
 ## Stand der Akzeptanzkriterien (WP-439)
 
 | AK | Inhalt | Stand | Nachweis |
 |---|---|---|---|
 | 1 | Seed-Optionen für die NFR-01-Volumina, deterministisch und begrenzt | erfüllt; Tests lokal grün (TimescaleDB 2.31.0); in den drei Läufen erzeugt der Seed die Volumina vollständig | `backend/cmd/seed` (`-interfaces-per-ci`, `-ips-per-ci`, `-relationships-per-ci`, `-orgs`); `seed_integration_test.go`: `TestSeedNFR01Volumes` (Mengen, Verteilung, Determinismus, zweiter Lauf), `TestSeedOptionsAreBounded` (Grenzen); Abschnitt „NFR-01-Volumina“ |
-| 2 | `load.yml`-Job `nfr01-volume` mit `api.js` und den NFR-02-Schwellen | erfüllt; der Job läuft in allen drei Läufen und ist **rot**: NFR-02 hält auf den NFR-01-Volumina nicht (Offene Punkte, Punkt 11) | `.github/workflows/load.yml` (Matrix-Eintrag `nfr01-volume`, Schritt „Seeded volumes (NFR-01)“) |
-| 3 | Drei aufeinanderfolgende vollständige `load.yml`-Läufe mit exit 0, archiviert; seit der Ergänzung zu E-58 vom 2026-10-26 bewertet nach dem Median der drei Läufe | **nicht erfüllt** | Drei vollständige Läufe liegen vor (Abschnitt „Läufe“). Nach dem Median der drei Läufe (Abschnitt „Bewertung nach E-58“) halten `api`, `ingest` und `ingest-spool` jedes Budget; verfehlt sind `nfr01-volume` (rot in drei Läufen, Punkt 11) und `ingest-rediscover` (rot in zwei Läufen, Punkt 1). Die Archive sind gebaut, aber noch nicht ins Repository übernommen |
-| 4 | Bericht: p95 je Budget aus den drei Läufen, 200 Records/s und Max-Drain gegenüber 1.000 Records/s [P5], NFR-01-Volumina gemessen, Umfangskorrektur SR-04, offene Punkte mit Folge-WP oder Entscheidung | Werte der drei Läufe eingetragen; CPU und RAM je Lauf stehen nur im Archiv (**steht aus**); sechs offene Punkte haben noch keine Folge-WP-Nummer (Vorschlag an den Auftraggeber); die Punkte 1 und 11 behandeln WP-607 bis WP-612 (K3-Nachträge) | dieses Dokument |
-| 5 | Retests F-279, WP-206, WP-204 | **nicht bestanden** bzw. **stehen aus** | Abschnitt „Retests“ |
+| 2 | `load.yml`-Job `nfr01-volume` mit `api.js` und den NFR-02-Schwellen | erfüllt; der Job läuft in allen Läufen. Vor den K3-Nachträgen war er in drei Läufen **rot** (Punkt 11); nach WP-607 bis WP-611 hält er jedes Budget im Median und ist in einem von drei Läufen rot | `.github/workflows/load.yml` (Matrix-Eintrag `nfr01-volume`, Schritt „Seeded volumes (NFR-01)“) |
+| 3 | Drei aufeinanderfolgende vollständige `load.yml`-Läufe mit exit 0, archiviert; seit der Ergänzung zu E-58 vom 2026-10-26 bewertet nach dem Median der drei Läufe | **erfüllt** (nach der Ergänzung zu E-58, WP-612) | Drei vollständige Läufe auf `3910aae` (Abschnitt „Nachweisläufe nach den K3-Nachträgen“); `load-evidence.yml` (Run 40320307297) bewertet ihre Archive mit `tests/load/evaluate-runs.sh`: alle Budgets gehalten, Exit 0. Die drei Läufe davor (`8ca7f4b`) verfehlten `ingest-rediscover` und `nfr01-volume`. Die Archive liegen als Artefakte der Läufe vor; ins Repository übernommen sind sie noch nicht (Retest WP-204) |
+| 4 | Bericht: p95 je Budget aus den drei Läufen, 200 Records/s und Max-Drain gegenüber 1.000 Records/s [P5], NFR-01-Volumina gemessen, Umfangskorrektur SR-04, offene Punkte mit Folge-WP oder Entscheidung | Werte der drei Läufe eingetragen; CPU und RAM je Lauf stehen nur im Archiv (**steht aus**); sechs offene Punkte haben noch keine Folge-WP-Nummer (Vorschlag an den Auftraggeber); die Punkte 1 und 11 sind mit WP-607 bis WP-612 (K3-Nachträge) erledigt | dieses Dokument |
+| 5 | Retests F-279, WP-206, WP-204 | WP-206 und F-118 **bestanden**; F-279 und WP-204 **stehen aus** (Übernahme der Archive) | Abschnitt „Retests“ |
 
 ## Messumgebung und Ablauf (E-58)
 
@@ -70,7 +82,49 @@ schwankt die Datenbankzeit je Record der Wiederentdeckung zwischen 6,4 und
 
 ## Läufe
 
+### Nachweisläufe nach den K3-Nachträgen (WP-612)
+
+Drei Läufe per `workflow_dispatch` auf `main`, Commit `3910aae` (Merge von
+PR #98 mit WP-607 bis WP-611), `scenarios=all`, `objects` 10.000,
+`duration` 2 min, gleichzeitig gestartet, jeweils im ersten Versuch; jeder
+Job läuft auf einem eigenen Runner. Integritätsprüfung nach jedem der 15
+Jobs: 0 Verletzungen in 20 Prüfungen. Der Job `archive` hat in jedem Lauf
+das Archiv gebaut (jeder Job hat ein Artefakt).
+
+| Lauf | Lauf-ID | Commit (Lauf / Server) | `api` | `ingest` | `ingest-spool` | `ingest-rediscover` | `nfr01-volume` | Vollständig | exit 0 |
+|---|---|---|---|---|---|---|---|---|---|
+| N1 | [40316485305](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40316485305) | `3910aae` / `3910aae` | grün | grün | grün | grün | grün | ja | ja |
+| N2 | [40316488267](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40316488267) | `3910aae` / `3910aae` | grün | grün | grün | grün | grün | ja | ja |
+| N3 | [40316491988](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40316491988) | `3910aae` / `3910aae` | grün | grün | grün | grün | **rot** | ja | nein |
+
+In N3 verfehlt `nfr01-volume` eine Schwelle: `impact` mit p95 2.094,5 ms
+(Budget 2.000 ms); jede andere Schwelle hält.
+
+Bewertung nach E-58 durch `load-evidence.yml` (Run [40320307297](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40320307297)) aus den Archiven
+`load-archive-40316485305`, `load-archive-40316488267` und
+`load-archive-40316491988` mit `tests/load/evaluate-runs.sh`. Ergebnis:
+„Bewertung nach E-58 (Median über drei Läufe): alle Budgets gehalten“,
+Exit 0. Mediane aus dieser Bewertung:
+
+| Job | rot in Läufen | Urteil | Budgets im Median (p95 in ms; Bulk, Flush und Verzögerung in s) |
+|---|---|---|---|
+| `api` | 0 von 3 | **gehalten** (13 von 13) | list 166,5; list_name_filter 299,5; global_search 349,9; filter 125,4; attr_filter 120,1; relationships 260,6; detail 75,2; rack 105,3; topology 766,0; impact 1.148,2; impact_full 1.139,5; bulk_500 15,14 s; Checks 100 % |
+| `ingest` | 0 von 3 | **gehalten** (6 von 6) | Verzögerung max 1,59 s; `POST /ingest/bulk` 22,5; 0 fehlend |
+| `ingest-spool` | 0 von 3 | **gehalten** (6 von 6) | Spool-Flush 27,41 s; Abbau 414,7/s; 0 fehlend |
+| `ingest-rediscover` | 0 von 3 | **gehalten** (7 von 7) | Verzögerung max 2,35 s (Budget < 30 s); 0 fehlend, 0 neue CIs |
+| `nfr01-volume` | 1 von 3 (N3) | **gehalten** (13 von 13) | list 103,7; list_name_filter 132,8; global_search 206,6; filter 81,2; attr_filter 78,8; relationships 134,3; detail 56,1; rack 71,6; topology 432,1; impact 1.127,3; impact_full 1.028,7; bulk_500 13,46 s; Checks 100 % |
+
+Gegenüber den Läufen vor den K3-Nachträgen (`8ca7f4b`, Abschnitt
+„Bewertung nach E-58“): auf den NFR-01-Volumina `impact` 4.080 → 1.127 ms,
+`impact_full` 3.990 → 1.029 ms, `relationships` 2.430 → 134 ms,
+`global_search` 720,5 → 206,6 ms, `bulk_500` 38,63 → 13,46 s; die
+Wiederentdeckung höchstens 55,60 → 2,35 s Verzögerung im Median (je Lauf
+9,14 s, 2,35 s und 2,33 s).
+
 ### Archivierte Läufe (AK 3)
+
+Stand vor den K3-Nachträgen (Commit `8ca7f4b`). Den Nachweis von AK 3
+führen die Nachweisläufe im vorigen Abschnitt.
 
 Als vollständig zählt ein Lauf mit `scenarios=all` (alle fünf Jobs) im
 ersten Versuch, dessen `ergebnis.md` „Vollständig: ja“ meldet; exit 0 heißt
@@ -115,7 +169,8 @@ Läufe 1 bis 3 in diesem Bericht gebildet (Quelle: Job-Logs);
 
 Damit hält NFR-02 bei 10.000 Objekten nach E-58; NFR-02 auf den
 NFR-01-Volumina (Punkt 11) und NFR-03 für die Wiederentdeckung (Punkt 1)
-sind verfehlt. AK 3 ist nicht erfüllt.
+sind verfehlt. Für diese Läufe war AK 3 nicht erfüllt; erfüllt ist es mit
+den Nachweisläufen nach den K3-Nachträgen (WP-612).
 
 ### Vorlauf: Run 40257485919 (Commit `0f6b322`, nicht archiviert)
 
@@ -198,7 +253,8 @@ drei Läufe, nach dem seit der Ergänzung zu E-58 bewertet wird (Abschnitt
   6,4 statt 16 bis 18 ms Datenbankzeit je Record auf demselben Commit.
   **NFR-03 ist bei 200 Records/s für die Wiederentdeckung nicht
   erfüllt**; ob die Schwelle hält, hängt vom Runner ab (Offene Punkte,
-  Punkt 1).
+  Punkt 1). Stand vor WP-608: In den Nachweisläufen N1 bis N3 hält die
+  Wiederentdeckung die 30 s in jedem Lauf (höchstens 9,14 s, Tabelle unten).
 
 Ursachenvergleich F-118 (Szenario `rediscover`, 200 Records/s angeboten,
 9.000 Records; Werte aus den Artefakten bzw. Job-Logs der Läufe):
@@ -211,6 +267,9 @@ Ursachenvergleich F-118 (Szenario `rediscover`, 200 Records/s angeboten,
 | 40269518264 (Lauf 1) | `8ca7f4b` | 146,9/s (179,6/s) | 4,82 s (5,14 s) | 6,4 ms | 839,8 | 691,5 | 48,6 |
 | 40270929166 (Lauf 2) | `8ca7f4b` | 51,5/s (89,5/s) | 51,55 s (55,60 s) | 18,0 ms | 837,2 | 638,5 | 56,8 |
 | 40271818796 (Lauf 3) | `8ca7f4b` | 62,4/s (89,5/s) | 50,95 s (55,60 s) | 15,7 ms | 872,1 | 708,4 | 57,7 |
+| 40316485305 (N1) | `3910aae` (nach WP-608) | 89,4/s (166,4/s) | 9,04 s (9,14 s) | 9,6 ms | 501,2 | 66,5 | 31,3 |
+| 40316488267 (N2) | `3910aae` (nach WP-608) | 253,1/s (195,0/s) | 2,11 s (2,35 s) | 4,2 ms | 402,0 | 64,6 | 29,1 |
+| 40316491988 (N3) | `3910aae` (nach WP-608) | 190,7/s (192,6/s) | 2,23 s (2,33 s) | 4,2 ms | 409,2 | 64,0 | 29,2 |
 
 WP-434 (Identitätssuche mit MACs über den Index) senkt Datenbankzeit und
 Plankosten je Record auf etwa ein Fünftel und hebt den Abbau auf mehr als
@@ -219,6 +278,11 @@ schnellen Runner. In den Läufen 1 bis 3 sind Puffer und Plankosten je
 Record nahezu gleich (837 bis 872 bzw. 639 bis 708); die Datenbankzeit je
 Record schwankt dagegen um den Faktor 2,8. Den Durchsatz anzuheben ist
 nicht Teil von WP-439.
+
+Nach WP-608 (Nachweisläufe N1 bis N3): 29 bis 31 Statements, 402 bis 501
+Puffer und 4,2 bis 9,6 ms Datenbankzeit je Record; die Verzögerung bleibt in
+allen drei Läufen unter 30 s (höchstens 9,14 s), 0 fehlende Records, 0 neue
+CIs, Integritätsprüfung 0. Damit ist der Retest von F-118 bestanden.
 
 **Ursache und Korrektur (WP-608, 2026-10-26).** Lokal nachgestellt wie im
 Job `ingest-rediscover` (Seed mit 10.000 Objekten, Suchindex, `ANALYZE`,
@@ -488,41 +552,42 @@ Fingerprint-MACs liest seit WP-434 die Seitentabelle `ci_identity_mac` über
 ihren Index (Abschnitt „Umfangskorrektur SR-04“). Die Batch-Provenienz liest
 `ci` einmal je Statement (`TestRecordDiscoveredBatchReadsCIsOnce`).
 
-## Bewertung (Stand 2026-10-26)
+## Bewertung (Stand 2026-10-26, nach WP-612)
 
-- **NFR-02:** Bei 10.000 Objekten hält jedes Budget im Vorlauf und in den
-  Läufen 1 und 3, in Lauf 2 verfehlen sechs Szenarien ihr Budget im p95
-  (CPU-Konkurrenz auf dem Runner, Punkt 3); im Median der drei Läufe hält
-  jedes Budget, nach der Ergänzung zu E-58 ist NFR-02 bei 10.000 Objekten
-  damit **erfüllt**. Auf den NFR-01-Volumina verfehlen `impact`,
-  `impact_full` und `relationships` ihr Budget in allen drei Läufen deutlich
-  (Punkt 11); dort ist NFR-02 **nicht erfüllt**.
-- **NFR-03:** Neue Geräte mit 200 Records/s und der Spool-Flush halten die
-  Budgets in allen Läufen. Die Wiederentdeckung mit 200 Records/s verfehlt
-  die Verzögerung von 30 s in zwei von drei Läufen (Punkt 1); NFR-03 ist
-  damit für G1 **nicht vollständig erfüllt**. 1.000 Records/s (Phase 5,
-  [P5]) erreicht keine gemessene Konfiguration, der Spool-Abbau kommt bis
-  963 Records/s (Punkt 2).
-- **NFR-01:** Die Volumina sind in drei Läufen erzeugt und gezählt
-  (10.000 CIs, 50.000 Interfaces, 200.000 Adressen, 100.000 Beziehungen,
-  503 Organisationen); die Budgets von NFR-02 halten darauf nicht (Punkt 11).
+- **NFR-02:** Bei 10.000 Objekten hält jedes Budget im Median der drei
+  Läufe, vor und nach den K3-Nachträgen. Auf den NFR-01-Volumina verfehlten
+  `impact`, `impact_full` und `relationships` vor den K3-Nachträgen ihr
+  Budget in allen drei Läufen (Punkt 11); nach WP-607 bis WP-611 hält dort
+  jedes Budget im Median (`impact` 1.127 ms, `relationships` 134 ms), der
+  Job ist in einem von drei Läufen rot (`impact` 2.094,5 ms in N3). NFR-02
+  ist nach E-58 **erfüllt**, auch auf den NFR-01-Volumina.
+- **NFR-03:** Neue Geräte mit 200 Records/s, Spool-Flush und
+  Wiederentdeckung halten nach WP-608 in allen drei Nachweisläufen jedes
+  Budget (Verzögerung der Wiederentdeckung höchstens 9,14 s, 0 neue CIs).
+  NFR-03 ist für G1 **erfüllt**. 1.000 Records/s (Phase 5, [P5]) ist kein
+  G1-Budget: Der Spool-Abbau erreicht 1.092 Records/s in N1, aber nur 386
+  und 415 Records/s in N2 und N3 (Punkt 2).
+- **NFR-01:** Die Volumina sind in allen sechs Läufen mit `nfr01-volume`
+  erzeugt und gezählt (10.000 CIs, 50.000 Interfaces, 200.000 Adressen,
+  100.000 Beziehungen, 503 Organisationen); die Budgets von NFR-02 halten
+  darauf nach den K3-Nachträgen im Median.
 - **NFR-10:** Der Lasttest gegen NFR-01 bis NFR-03 läuft im Workflow
-  `load.yml`; drei vollständige Läufe liegen vor, ihre Werte stehen in
-  diesem Bericht. Die Archive sind gebaut, im Repository liegen sie noch
-  nicht.
-- **GATE-03 „Lasttest bestanden“:** `docs/acceptance/g1-gate.md` stützt das
-  Gate auf die Läufe vom 2026-10-14/15 (E-58, historische Abschnitte unten).
-  Das seit WP-437 gemessene Szenario `rediscover` verfehlt NFR-03; diese
-  Abweichung ist bei der Gate-Prüfung nach der Korrektur (WP-600,
-  `k-gate`) zu bewerten.
+  `load.yml`, die Bewertung über drei Läufe in `load-evidence.yml`. Die
+  Archive liegen als Artefakte der Läufe vor, im Repository noch nicht
+  (Retest WP-204).
+- **GATE-03 „Lasttest bestanden“:** belegt durch die Nachweisläufe N1 bis N3
+  und ihre Bewertung nach E-58 (`load-evidence.yml`, Run 40320307297);
+  `docs/acceptance/g1-gate.md` verweist darauf. Die Läufe auf dem
+  Release-Kandidaten folgen mit WP-595.
 
 ## Retests (AK 5)
 
 | Retest | Verlangt | Stand |
 |---|---|---|
 | F-279 | Doku-Review von `lasttest-g1.md` gegen die archivierten Artefakte | **steht aus**: Der Bericht nennt 1.000 Records/s als [P5] mit Max-Drain und die gemessenen NFR-01-Volumina mit den Werten der drei Läufe aus den Job-Logs; das Review gegen die Archive ist erst nach deren Übernahme möglich. |
-| WP-206 | drei saubere Läufe archiviert | **nicht bestanden**: Auch nach dem Median der drei Läufe (E-58) sind `ingest-rediscover` und `nfr01-volume` verfehlt (Punkte 1 und 11). |
-| WP-204 | archivierter `load.yml`-Lauf | **steht aus**: Die Archive `load-archive-<Lauf-ID>` der drei Läufe sind gebaut; die Übernahme nach `docs/acceptance/artefakte/lasttest/<Lauf-ID>/` steht aus. |
+| WP-206 | drei saubere Läufe archiviert | **bestanden** nach der Ergänzung zu E-58: Die Nachweisläufe N1 bis N3 halten jedes Budget im Median, kein Job ist in zwei Läufen rot (`load-evidence.yml`, Run 40320307297, aus den Archiven der Läufe). Die Läufe davor (`8ca7f4b`) waren nicht bestanden. Die Übernahme der Archive ins Repository ist Teil von WP-204. |
+| F-118 | Wiederentdeckung mit 200 Records/s: Verzögerung < 30 s, 0 neue CIs, Integritätsprüfung 0 | **bestanden** in N1 bis N3 (höchstens 9,14 s, 0 neue CIs, 0 Verletzungen in 20 Prüfungen; Tabelle beim Ursachenvergleich F-118). |
+| WP-204 | archivierter `load.yml`-Lauf | **steht aus**: Die Archive `load-archive-<Lauf-ID>` der Läufe sind gebaut (zuletzt N1 bis N3) und in GitHub Actions bewertet; die Übernahme nach `docs/acceptance/artefakte/lasttest/<Lauf-ID>/` steht aus, weil die Arbeitsumgebung den Blob-Speicher der Artefakte nicht erreicht. |
 
 ## Offene Punkte
 
@@ -540,8 +605,10 @@ Auftraggeber, die Nummer wird hier nachgetragen.
    Organisation samt COMMIT, die Topologie in drei weiteren Transaktionen je
    Record und der Adressabgleich ohne Index (Absatz „Ursache und Korrektur
    (WP-608)“ beim Ursachenvergleich F-118). Lokal 31 statt 53 Statements
-   und die halbe CPU je Record, Abbau etwa verdoppelt. Der Nachweis in der
-   CI (drei Läufe nach E-58) steht aus: WP-612 (`k3n-load-evidence`).
+   und die halbe CPU je Record, Abbau etwa verdoppelt. **Erledigt** mit
+   WP-612 (`k3n-load-evidence`): In den Nachweisläufen N1 bis N3 hält die
+   Wiederentdeckung die 30 s in jedem Lauf (höchstens 9,14 s, 29 bis 31
+   Statements je Record).
 2. **NFR-03, 1.000 Records/s in Phase 5 [P5]:** Max-Drain 328–963
    Records/s auf 4 CPUs (Szenario `spool`); kein G1-Budget. Folge-WP:
    offen, Vorschlag an den Auftraggeber (Ingest-Durchsatz für Phase 5,
@@ -606,7 +673,12 @@ Auftraggeber, die Nummer wird hier nachgetragen.
     - WP-610 (`k3n-hot-path`): `last_used_at` und JIT (U4, U5);
     - WP-611 (`k3n-impact-lean`): Impact-CPU (U3).
 
-    WP-612 (`k3n-load-evidence`) weist danach drei Läufe nach E-58 nach.
+    **Erledigt** mit WP-612 (`k3n-load-evidence`): In den Nachweisläufen N1
+    bis N3 hält `nfr01-volume` jedes Budget im Median (`impact` 1.127 ms,
+    `impact_full` 1.029 ms, `relationships` 134 ms), rot in einem von drei
+    Läufen (`impact` 2.094,5 ms in N3). Rest: Die Reserve von `impact` auf
+    langsamen Runnern ist klein; der Referenzhost vor GA (Punkt 3, SR-06)
+    misst sie ohne geteilte Runner.
 
 Erledigt seit dem letzten Stand: NFR-03-Durchsatz neuer Geräte und
 Spool-Flush (WP-332 bis WP-334), Impact unter Parallellast (WP-335),
