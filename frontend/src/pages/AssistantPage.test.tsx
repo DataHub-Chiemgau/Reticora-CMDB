@@ -11,7 +11,7 @@ afterEach(() => {
 describe('AssistantPage', () => {
   it('asks a question and renders citations', async () => {
     stubFetchRoutes({
-      '/ai/conversations': [],
+      '/ai/conversations': { data: [], total: 0, limit: 200, offset: 0, has_more: false },
       '/ai/ask': {
         conversation_id: 'conv-1',
         answer: 'Router prüfen.',

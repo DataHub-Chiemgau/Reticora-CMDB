@@ -47,7 +47,7 @@ func (r *PGRepository) GetConversation(ctx context.Context, orgID, id string) (C
 func (r *PGRepository) ListConversations(ctx context.Context, orgID, userID string) ([]Conversation, error) {
 	var out []Conversation
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT id::text, organization_id::text, COALESCE(user_id::text,''), title, created_at, updated_at FROM ai_conversation WHERE organization_id=$1 AND (NULLIF($2,'')::uuid IS NULL OR user_id=NULLIF($2,'')::uuid) ORDER BY updated_at DESC LIMIT 100`, orgID, userID)
+		rows, err := tx.Query(ctx, `SELECT id::text, organization_id::text, COALESCE(user_id::text,''), title, created_at, updated_at FROM ai_conversation WHERE organization_id=$1 AND (NULLIF($2,'')::uuid IS NULL OR user_id=NULLIF($2,'')::uuid) ORDER BY updated_at DESC, id DESC`, orgID, userID)
 		if err != nil {
 			return err
 		}

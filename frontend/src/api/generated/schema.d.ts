@@ -2575,7 +2575,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Query metric points */
+    /**
+     * Query metric points
+     * @description The series is paged in chronological order with `limit` and the signed `cursor` (API-02); a client that needs the whole series follows `next_cursor` to the end.
+     */
     get: operations['queryMetrics'];
     put?: never;
     /** Ingest one or more metrics */
@@ -2613,7 +2616,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List alert rules */
+    /**
+     * List alert rules
+     * @description Ordered by name, paged with `limit` and the signed `cursor` (API-02); a client that needs every rule follows `next_cursor` to the end.
+     */
     get: operations['listAlerts'];
     put?: never;
     /** Create an alert rule */
@@ -4183,7 +4189,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List entities linked to a document */
+    /**
+     * List entities linked to a document
+     * @description Newest first, paged with `limit` and the signed `cursor` (API-02); a client that needs every link follows `next_cursor` to the end.
+     */
     get: operations['getDocumentLinks'];
     put?: never;
     /**
@@ -5579,7 +5588,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List assistant conversations */
+    /**
+     * List assistant conversations
+     * @description Most recently updated first, paged with `limit` and the signed `cursor` (API-02); a client that needs every conversation follows `next_cursor` to the end.
+     */
     get: operations['listAIConversations'];
     put?: never;
     /** Create an assistant conversation */
@@ -9845,6 +9857,9 @@ export interface components {
       timestamp: string;
       value: number;
     };
+    MetricPointListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['MetricPoint'][];
+    };
     /** @description Partial alert rule update; every field is optional and only set fields are applied. */
     UpdateAlertRuleRequest: {
       name?: string;
@@ -9880,6 +9895,9 @@ export interface components {
        * @description Timestamp of the last notification for the current firing.
        */
       last_fired_at?: string;
+    };
+    AlertRuleListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['AlertRule'][];
     };
     CreateAlertRuleRequest: {
       id?: string;
@@ -10805,6 +10823,9 @@ export interface components {
       /** Format: date-time */
       created_at: string;
     };
+    DocumentLinkListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['DocumentLink'][];
+    };
     CreateDocumentLinkRequest: {
       entity_type: string;
       entity_id: string;
@@ -10949,6 +10970,9 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    AIConversationListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['AIConversation'][];
     };
     AICitation: {
       entity_type: string;
@@ -16727,6 +16751,21 @@ export interface operations {
         to?: string;
         /** @description Go duration string used for aggregation, for example 5m or 1h. */
         step?: string;
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
       };
       header?: never;
       path?: never;
@@ -16734,13 +16773,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Metric point series */
+      /** @description Paginated metric point series */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['MetricPoint'][];
+          'application/json': components['schemas']['MetricPointListResponse'];
         };
       };
       400: components['responses']['BadRequest'];
@@ -16811,22 +16850,39 @@ export interface operations {
   };
   listAlerts: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Alert rules */
+      /** @description Paginated alert rules */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['AlertRule'][];
+          'application/json': components['schemas']['AlertRuleListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
     };
   };
@@ -21019,7 +21075,23 @@ export interface operations {
   };
   getDocumentLinks: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -21029,15 +21101,16 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Document links */
+      /** @description Paginated document links */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['DocumentLink'][];
+          'application/json': components['schemas']['DocumentLinkListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -25433,22 +25506,39 @@ export interface operations {
   };
   listAIConversations: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Conversations */
+      /** @description Paginated conversations */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['AIConversation'][];
+          'application/json': components['schemas']['AIConversationListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
     };

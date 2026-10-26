@@ -4800,6 +4800,10 @@ paths:
       operationId: queryMetrics
       tags: [Monitoring]
       summary: Query metric points
+      description: >-
+        The series is paged in chronological order with `limit` and the signed
+        `cursor` (API-02); a client that needs the whole series follows
+        `next_cursor` to the end.
       parameters:
         - name: ci_id
           in: query
@@ -4824,15 +4828,16 @@ paths:
           schema:
             type: string
           description: Go duration string used for aggregation, for example 5m or 1h.
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Metric point series
+          description: Paginated metric point series
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/MetricPoint'
+                $ref: '#/components/schemas/MetricPointListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4924,15 +4929,22 @@ paths:
       operationId: listAlerts
       tags: [Monitoring]
       summary: List alert rules
+      description: >-
+        Ordered by name, paged with `limit` and the signed `cursor` (API-02); a
+        client that needs every rule follows `next_cursor` to the end.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Alert rules
+          description: Paginated alert rules
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/AlertRule'
+                $ref: '#/components/schemas/AlertRuleListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
     post:
@@ -8426,15 +8438,22 @@ paths:
       operationId: getDocumentLinks
       tags: [Documents]
       summary: List entities linked to a document
+      description: >-
+        Newest first, paged with `limit` and the signed `cursor` (API-02); a
+        client that needs every link follows `next_cursor` to the end.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Document links
+          description: Paginated document links
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/DocumentLink'
+                $ref: '#/components/schemas/DocumentLinkListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -10863,14 +10882,21 @@ paths:
       operationId: listAIConversations
       tags: [AI]
       summary: List assistant conversations
+      description: >-
+        Most recently updated first, paged with `limit` and the signed `cursor`
+        (API-02); a client that needs every conversation follows `next_cursor`
+        to the end.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Conversations
+          description: Paginated conversations
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/AIConversation' }
+              schema: { $ref: '#/components/schemas/AIConversationListResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
     post:
@@ -17710,6 +17736,17 @@ components:
         value:
           type: number
 
+    MetricPointListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/MetricPoint'
+
     UpdateAlertRuleRequest:
       type: object
       description: Partial alert rule update; every field is optional and only set fields are applied.
@@ -17763,6 +17800,17 @@ components:
           type: string
           format: date-time
           description: Timestamp of the last notification for the current firing.
+
+    AlertRuleListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/AlertRule'
 
     CreateAlertRuleRequest:
       type: object
@@ -19472,6 +19520,17 @@ components:
           type: string
           format: date-time
 
+    DocumentLinkListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/DocumentLink'
+
     CreateDocumentLinkRequest:
       type: object
       required: [entity_type, entity_id]
@@ -19763,6 +19822,17 @@ components:
         title: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    AIConversationListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/AIConversation'
 
     AICitation:
       type: object

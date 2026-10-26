@@ -43,12 +43,17 @@ func (h *Handler) ListConversations(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
+	// {data, next_cursor} with limit and the signed cursor (API-02, F-075).
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 	items, err := h.repo.ListConversations(r.Context(), t.OrganizationID, t.UserID)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, items)
+	api.WriteJSON(w, http.StatusOK, api.Page(items, page))
 }
 func (h *Handler) CreateConversation(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())

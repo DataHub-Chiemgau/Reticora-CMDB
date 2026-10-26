@@ -479,13 +479,16 @@ export async function bffQuery<T>(query: string, variables?: Record<string, unkn
  * Reads every page of a cursor-paginated list (API-02): the first page with
  * the maximum limit of 200, then `next_cursor` until the server sends none.
  * For callers that need the complete set (permission catalogue, role
- * grants, team members); a single page would silently cut it short.
+ * grants, team members, the module lists of monitoring, document links and
+ * assistant conversations); a single page would silently cut it short.
+ * `params` are the list's filters, sent with every page.
  */
-export async function fetchAllPages<T>(path: string): Promise<T[]> {
+export async function fetchAllPages<T>(path: string, params: object = {}): Promise<T[]> {
   const items: T[] = [];
   let cursor: string | undefined;
   do {
-    const query = new URLSearchParams({ limit: '200' });
+    const query = new URLSearchParams(buildQuery(params));
+    query.set('limit', '200');
     if (cursor) query.set('cursor', cursor);
     const page = await fetchAPI<PaginatedResponse<T>>(`${path}?${query.toString()}`);
     items.push(...(page.data ?? []));
@@ -1039,7 +1042,7 @@ export const documentApi = {
     return fetchAPI(`/documents/${id}/links`, { method: 'POST', body: JSON.stringify(data) });
   },
   getLinks(id: string): Promise<DocumentLink[]> {
-    return fetchAPI(`/documents/${id}/links`);
+    return fetchAllPages(`/documents/${id}/links`);
   },
 };
 
@@ -1461,7 +1464,7 @@ export interface AIAskResponse {
 }
 export const aiApi = {
   conversations(): Promise<AIConversation[]> {
-    return fetchAPI('/ai/conversations');
+    return fetchAllPages('/ai/conversations');
   },
   createConversation(title?: string): Promise<AIConversation> {
     return fetchAPI('/ai/conversations', { method: 'POST', body: JSON.stringify({ title }) });
@@ -2117,10 +2120,10 @@ export const monitoringApi = {
     return fetchAPI(`/cis/${ciId}/metrics${buildQuery(params)}`);
   },
   queryMetrics(params: MetricQueryParams = {}): Promise<MetricPoint[]> {
-    return fetchAPI(`/monitoring/metrics${buildQuery(params)}`);
+    return fetchAllPages('/monitoring/metrics', params);
   },
   listAlerts(): Promise<AlertRule[]> {
-    return fetchAPI('/monitoring/alerts');
+    return fetchAllPages('/monitoring/alerts');
   },
   createAlert(data: AlertRuleCreateRequest): Promise<AlertRule> {
     return fetchAPI('/monitoring/alerts', { method: 'POST', body: JSON.stringify(data) });

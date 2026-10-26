@@ -1,10 +1,10 @@
 // Architecture and runtime tests of the list contract (API-02): every list
 // is a cursor page {data, next_cursor}, never a bare array, and an empty
-// list is "data": [] (WP-164, WP-466, F-075, F-214).
+// list is "data": [] (WP-164, WP-466, WP-467, F-075, F-214).
 //
 // Retest:
 //
-//	cd backend && go test -count=1 -v -run 'TestEveryListIsCursorPaginated|TestAuditT2ListsAreCursorPages|TestEmptyListsAnswerAnEmptyDataArray' ./internal/server/
+//	cd backend && go test -count=1 -v -run 'TestEveryListIsCursorPaginated|TestAuditT2ContractHasNoBareArrayLists|TestAuditT2ListsAreCursorPages|TestEmptyListsAnswerAnEmptyDataArray' ./internal/server/
 package server_test
 
 import (
@@ -29,16 +29,6 @@ import (
 // paginationSpecPath is the contract, relative to this package.
 const paginationSpecPath = "../../../api/openapi.yaml"
 
-// bareArrayListsUntilWP467 are the lists of the late-phase modules (E-03)
-// that still answer a bare JSON array; WP-467 (t2-pagination-modules) turns
-// them into cursor pages and removes this list (F-075).
-var bareArrayListsUntilWP467 = map[string]string{
-	"/api/v1/monitoring/metrics":   "WP-467 (t2-pagination-modules)",
-	"/api/v1/monitoring/alerts":    "WP-467 (t2-pagination-modules)",
-	"/api/v1/documents/{id}/links": "WP-467 (t2-pagination-modules)",
-	"/api/v1/ai/conversations":     "WP-467 (t2-pagination-modules)",
-}
-
 // notALists are GET operations whose body has a data array but that are no
 // list resources: a file export streams every row in one document.
 var notALists = map[string]string{
@@ -47,8 +37,8 @@ var notALists = map[string]string{
 }
 
 // TestEveryListIsCursorPaginated is the architecture test of API-02 over
-// the contract: no GET answers a bare JSON array (apart from the transition
-// list bareArrayListsUntilWP467), every list (GET with a data array)
+// the contract: no GET answers a bare JSON array, every list (GET with a
+// data array)
 // documents next_cursor, every list that takes a limit also takes the
 // signed cursor, and the shared limit allows at most 200.
 func TestEveryListIsCursorPaginated(t *testing.T) {
@@ -112,13 +102,8 @@ func TestEveryListIsCursorPaginated(t *testing.T) {
 		if media == nil {
 			continue
 		}
-		isBare := resolve(media["schema"])["type"] == "array"
-		_, transitional := bareArrayListsUntilWP467[path]
-		switch {
-		case isBare && !transitional:
+		if resolve(media["schema"])["type"] == "array" {
 			bare = append(bare, "GET "+path)
-		case !isBare && transitional:
-			t.Errorf("GET %s is no bare array any more: remove it from bareArrayListsUntilWP467", path)
 		}
 		props := properties(media["schema"])
 		if data := resolve(props["data"]); data == nil || data["type"] != "array" {
@@ -144,6 +129,58 @@ func TestEveryListIsCursorPaginated(t *testing.T) {
 	sort.Strings(bare)
 	if len(bare) > 0 {
 		t.Errorf("%d GET operations answer a bare JSON array instead of {data, next_cursor} (API-02, F-075):\n  %s", len(bare), strings.Join(bare, "\n  "))
+	}
+}
+
+// TestAuditT2ContractHasNoBareArrayLists: no GET operation of the contract
+// answers 200 with a bare JSON array, not even an export or a catalog;
+// every list is {data, next_cursor} (WP-164, WP-466, WP-467, API-02, F-075).
+func TestAuditT2ContractHasNoBareArrayLists(t *testing.T) {
+	raw, err := os.ReadFile(paginationSpecPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err = yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	resolve := func(v any) map[string]any {
+		m, _ := v.(map[string]any)
+		for m != nil {
+			ref, ok := m["$ref"].(string)
+			if !ok {
+				break
+			}
+			var cur any = doc
+			for _, part := range strings.Split(strings.TrimPrefix(ref, "#/"), "/") {
+				cur = cur.(map[string]any)[part]
+			}
+			m, _ = cur.(map[string]any)
+		}
+		return m
+	}
+	var bare []string
+	gets := 0
+	for path, item := range doc["paths"].(map[string]any) {
+		get, ok := item.(map[string]any)["get"].(map[string]any)
+		if !ok {
+			continue
+		}
+		gets++
+		responses, _ := get["responses"].(map[string]any)
+		ok200 := resolve(responses["200"])
+		content, _ := ok200["content"].(map[string]any)
+		media, _ := content["application/json"].(map[string]any)
+		if schema := resolve(media["schema"]); schema != nil && schema["type"] == "array" {
+			bare = append(bare, "GET "+path)
+		}
+	}
+	if gets < 100 {
+		t.Fatalf("only %d GET operations found; the spec reader is broken", gets)
+	}
+	sort.Strings(bare)
+	if len(bare) > 0 {
+		t.Errorf("%d GET operations answer a bare JSON array instead of {data, next_cursor} (API-02):\n  %s", len(bare), strings.Join(bare, "\n  "))
 	}
 }
 
