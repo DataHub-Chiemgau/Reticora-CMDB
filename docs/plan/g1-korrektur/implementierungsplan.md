@@ -6428,7 +6428,7 @@ MON-02;[B];C;backend/internal/discovery/edge_metrics_integration_test.go;WP-426
 TEN-03;[B];B;backend/internal/database/migrations_roundtrip_integration_test.go;WP-427
 ```
 
-**Entscheidungsbedarf:** [E-72](entscheidungen.md#e-72) Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) (offen, Empfehlung als Übergangsregel); [E-26](../entscheidungen.md#e-26)
+**Entscheidungsbedarf:** [E-72](entscheidungen.md#e-72) Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) (entschieden: Option 1, Auftraggeber 2026-10-26); [E-26](../entscheidungen.md#e-26)
 
 **Nicht Bestandteil:** Migration 000066 (WP-560 (`t1-doc-blob-cleanup`)); übrige Down-Migrationen.
 
@@ -7125,7 +7125,7 @@ NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-438
 
 - [ ] Seed-Optionen für die NFR-01-Volumina (`-interfaces-per-ci`, `-ips-per-ci`, `-relationships-per-ci`, `-orgs`), deterministisch und begrenzt; `seed_integration_test.go` prüft Mengen, Determinismus und Grenzen.
 - [ ] `load.yml`-Job `nfr01-volume`: 10.000 Objekte mit 50.000 Interfaces, 200.000 IPs und 100.000 Beziehungen in einer Org plus 500 kleine Orgs; `api.js` mit den NFR-02-Schwellen.
-- [ ] Drei aufeinanderfolgende vollständige `load.yml`-Läufe auf der E-58-Umgebung mit exit 0; k6-Zusammenfassungen, Commit, `lscpu`, RAM und Konfiguration liegen unter `docs/acceptance/artefakte/lasttest/<lauf-id>/`.
+- [ ] Drei aufeinanderfolgende vollständige `load.yml`-Läufe auf der E-58-Umgebung mit exit 0; k6-Zusammenfassungen, Commit, `lscpu`, RAM und Konfiguration liegen unter `docs/acceptance/artefakte/lasttest/<lauf-id>/`. Nach der Ergänzung zu E-58 vom 2026-10-26 gilt statt „exit 0 in jedem Lauf“: jedes Budget hält im Median der drei Läufe, und kein Job ist in zwei oder mehr Läufen rot (`tests/load/evaluate-runs.sh`).
 - [ ] `lasttest-g1.md`: p95 je Budget aus den drei Läufen; 200 rec/s gemessen und gemessener Max-Drain gegenüber 1.000 rec/s (NFR-03 Phase 5, als [P5] gekennzeichnet); NFR-01-Volumina gemessen; Umfangskorrektur zu SR-04 (MAC- und Attributklasse behoben); jeder offene Punkt nennt ein Folge-WP (Schlüssel oder Nummer) oder eine Entscheidung (E-17, E-58).
 - [ ] Retest F-279: Doku-Review gegen die archivierten Artefakte; Retest WP-206: drei saubere Läufe archiviert; Retest WP-204: archivierter `load.yml`-Lauf.
 
@@ -14394,7 +14394,7 @@ TEN-06;[B];B;backend/internal/document/document_scope_integration_test.go;WP-560
 AGT-06;[P4];B;frontend/src/api/client.test.ts;WP-560
 ```
 
-**Entscheidungsbedarf:** [E-72](entscheidungen.md#e-72) Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) (offen, Empfehlung als Übergangsregel); [E-03](../entscheidungen.md#e-03)
+**Entscheidungsbedarf:** [E-72](entscheidungen.md#e-72) Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) (entschieden: Option 1, Auftraggeber 2026-10-26); [E-03](../entscheidungen.md#e-03)
 
 **Nicht Bestandteil:** Versionierung und Speicherlimits von Dokumenten (MGT-01, Phase 2); Upload/Download in der UI (MGT-01, Phase 2; F-188 ist mit dem Entfernen des Storage-Key-Felds behoben); Agent-UI.
 
@@ -15214,7 +15214,7 @@ AST-05;[P2];B;backend/internal/relationship/projection_integration_test.go;WP-57
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/relationship/projection_integration_test.go;WP-574
 ```
 
-**Entscheidungsbedarf:** [E-26](../entscheidungen.md#e-26); [E-72](entscheidungen.md#e-72) Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-26](../entscheidungen.md#e-26); [E-72](entscheidungen.md#e-72) Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) (entschieden: Option 1, Auftraggeber 2026-10-26)
 
 **Nicht Bestandteil:** Zyklusschutz bei nebenläufigen Schreibvorgängen (bestehender Trigger); Sichtbarkeit des Parents (WP-370 (`t3-parent-scope`)); DROP ROLE im down-Pfad derselben Datei `000056_rls_enforcement.down.sql` (WP-427 (`t1-mig56-down`), Entscheidung E-72; anderer Abschnitt; keine Abhängigkeit, das später gemergte WP gleicht die Datei an).
 
@@ -16704,7 +16704,7 @@ P3-Befunde, die dieser Plan nach [E-60](entscheidungen.md#e-60) nicht behebt. Ih
 | [F-316](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-316) | Audit-Kette synchron unter Org-Lock bis COMMIT statt asynchroner Outbox mit Single-Runner (AUD-04) | WP-132 | Bewusst akzeptierte Abweichung ohne AK-Wirkung: Die synchrone Audit-Kette unter Org-Lock statt asynchroner Outbox mit Single-Runner (AUD-04-Architekturtext) hat der Auftraggeber in E-56 (entschieden 2026-10-15, Abschnitt „Audit-Kette und Outbox“) als verbleibende Grenze mit Folge-WP „Outbox-Nummerierung“ anerkannt. F-316 verletzt keines der WP-132-Kriterien (Kette je Org mit Sequenz, audit-verify meldet die Bruchstelle, keine Gabelung bei Nebenläufigkeit; Regressionsschutz TestAuditChainPerOrganizationPG); WP-132 ist allein wegen F-045 TEILWEISE BESTANDEN, das WP-423 (`t6-audit-hash-utf8`) behebt. Es gibt keinen Funktionsverlust, nur eine dokumentierte Durchsatzgrenze je Org. Der JOB-02-Wiring-Test (WP-425 (`t6-job02-notices`)) nimmt den Audit-Runner ausdrücklich aus. | Folge-WP Outbox-Nummerierung nach E-56 vor GA (Asynchroner Audit-Runner nach AUD-04/JOB-02); Regressionsschutz bis dahin TestAuditChainPerOrganizationPG. |
 | [F-349](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-349) | Override-Autor wird im Provenienz-Tooltip als rohe User-ID gezeigt | WP-198 | Bewusst akzeptierte kosmetische Abweichung ohne AK-Wirkung: das REC-10-Kriterium von WP-198 (Quelle, Zeit, Rang/Override-Grund) ist erfüllt, WP-198 BESTANDEN; die User-ID ist korrekt und eindeutig. Die Auflösung von Surrogat-IDs zu Anzeigenamen für die UI ist kein Phase-1-AK. | Folge-WP im Phase-2-Plan (Anzeigename des Override-Autors in Provenienz-Tooltip und Historie, z. B. `override_author_name` serverseitig nach der Empfehlung des Befunds); bis dahin bekannte Einschränkung in `docs/acceptance/g1-gate.md` (E-60). |
 
-Bedingte Zurückstellung: Entscheidet der Auftraggeber E-72 mit Option 2, stellen WP-427 (`t1-mig56-down`) und WP-560 (`t1-doc-blob-cleanup`) zusätzlich F-193 bzw. F-187 zurück; beide sind dann hier und in `abdeckung-befunde.csv` nachzutragen.
+Bedingte Zurückstellung: Entscheidet der Auftraggeber E-72 mit Option 2, stellen WP-427 (`t1-mig56-down`) und WP-560 (`t1-doc-blob-cleanup`) zusätzlich F-193 bzw. F-187 zurück; beide sind dann hier und in `abdeckung-befunde.csv` nachzutragen. Nachtrag 2026-10-26: E-72 ist mit Option 1 entschieden; die Zurückstellung entfällt. Die Ursache von F-287 (DROP ROLE in 000056 down) behebt WP-427 mit; sein Retest von F-193 deckt den Retest von F-287 ab (zweite migrierte Datenbank, danach `SET ROLE reticora_app`). Ob F-287 damit aus der Zurückstellung fällt, bewertet WP-600 (`k-gate`).
 
 ## Abdeckung
 

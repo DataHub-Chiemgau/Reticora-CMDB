@@ -32,6 +32,8 @@
 # memory, configuration) and outcomes of all jobs into one artifact,
 # load-archive-<run id>, that docs/acceptance/artefakte/lasttest/<run id>/
 # takes over unchanged (tests/load/archive-run.sh, tests/load/README.md).
+# The evidence of three runs is evaluated from their archives by the median
+# rule of E-58 (tests/load/evaluate-runs.sh, self-test in the job prepare).
 name: Load test
 
 on:
@@ -78,6 +80,9 @@ jobs:
 
       - name: Test the run archive
         run: ./tests/load/archive-run.test.sh
+
+      - name: Test the evaluation over three runs
+        run: ./tests/load/evaluate-runs.test.sh
 
       - name: Resolve server_ref
         id: ref

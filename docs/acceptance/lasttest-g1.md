@@ -25,7 +25,7 @@ Nachweisläufen. Fett: Schwelle verfehlt.
 |---|---|---|---|
 | 1 | Seed-Optionen für die NFR-01-Volumina, deterministisch und begrenzt | erfüllt; Tests lokal grün (TimescaleDB 2.31.0); in den drei Läufen erzeugt der Seed die Volumina vollständig | `backend/cmd/seed` (`-interfaces-per-ci`, `-ips-per-ci`, `-relationships-per-ci`, `-orgs`); `seed_integration_test.go`: `TestSeedNFR01Volumes` (Mengen, Verteilung, Determinismus, zweiter Lauf), `TestSeedOptionsAreBounded` (Grenzen); Abschnitt „NFR-01-Volumina“ |
 | 2 | `load.yml`-Job `nfr01-volume` mit `api.js` und den NFR-02-Schwellen | erfüllt; der Job läuft in allen drei Läufen und ist **rot**: NFR-02 hält auf den NFR-01-Volumina nicht (Offene Punkte, Punkt 11) | `.github/workflows/load.yml` (Matrix-Eintrag `nfr01-volume`, Schritt „Seeded volumes (NFR-01)“) |
-| 3 | Drei aufeinanderfolgende vollständige `load.yml`-Läufe mit exit 0, archiviert | **nicht erfüllt** | Drei vollständige Läufe liegen vor (Abschnitt „Läufe“), keiner endet mit exit 0: `nfr01-volume` ist in allen drei rot (Punkt 11), `ingest-rediscover` in zwei (Punkt 1), `api` in einem (Punkt 3). Die Archive sind gebaut, aber noch nicht ins Repository übernommen |
+| 3 | Drei aufeinanderfolgende vollständige `load.yml`-Läufe mit exit 0, archiviert; seit der Ergänzung zu E-58 vom 2026-10-26 bewertet nach dem Median der drei Läufe | **nicht erfüllt** | Drei vollständige Läufe liegen vor (Abschnitt „Läufe“). Nach dem Median der drei Läufe (Abschnitt „Bewertung nach E-58“) halten `api`, `ingest` und `ingest-spool` jedes Budget; verfehlt sind `nfr01-volume` (rot in drei Läufen, Punkt 11) und `ingest-rediscover` (rot in zwei Läufen, Punkt 1). Die Archive sind gebaut, aber noch nicht ins Repository übernommen |
 | 4 | Bericht: p95 je Budget aus den drei Läufen, 200 Records/s und Max-Drain gegenüber 1.000 Records/s [P5], NFR-01-Volumina gemessen, Umfangskorrektur SR-04, offene Punkte mit Folge-WP oder Entscheidung | Werte der drei Läufe eingetragen; CPU und RAM je Lauf stehen nur im Archiv (**steht aus**); acht offene Punkte haben noch keine Folge-WP-Nummer (Vorschlag an den Auftraggeber) | dieses Dokument |
 | 5 | Retests F-279, WP-206, WP-204 | **nicht bestanden** bzw. **stehen aus** | Abschnitt „Retests“ |
 
@@ -92,7 +92,30 @@ nach jedem der 15 Jobs: 0 Verletzungen in 20 Prüfungen.
 Archiv: Artefakte `load-archive-40269518264`, `load-archive-40270929166` und
 `load-archive-40271818796` der Läufe; die Übernahme nach
 `docs/acceptance/artefakte/lasttest/<Lauf-ID>/` steht aus (Quelle der Werte,
-oben). AK 3 ist nicht erfüllt: Kein Lauf endet mit exit 0.
+oben). Kein Lauf endet mit exit 0; bewertet wird seit der Ergänzung zu
+E-58 nach dem Median der drei Läufe (nächster Abschnitt).
+
+### Bewertung nach E-58 (Median über drei Läufe)
+
+Ergänzung zu E-58 vom 2026-10-26 (`docs/plan/entscheidungen.md`): Ein
+Budget gilt als gehalten, wenn der Median seiner Messwerte aus den drei
+Läufen im Budget liegt; ein Job gilt als verfehlt, wenn er in mindestens
+zwei der drei Läufe rot ist. Die Mediane unten sind aus den Werten der
+Läufe 1 bis 3 in diesem Bericht gebildet (Quelle: Job-Logs);
+`tests/load/evaluate-runs.sh` bildet sie aus den Archiven, sobald diese
+übernommen sind. Fett: im Median verfehlt.
+
+| Job | rot in Läufen | Bewertung | Budgets im Median (p95, ms; Bulk und Verzögerung in s) |
+|---|---|---|---|
+| `api` | 1 von 3 (Lauf 2) | **gehalten** | list 247,7; list_name_filter 380,4; global_search 485,2; filter 208,6; attr_filter 221,7; relationships 273,7; detail 163,0; rack 212,2; topology 1.050; impact 1.610; impact_full 1.710; bulk_500 19,35 s; Checks 100 % |
+| `ingest` | 0 von 3 | **gehalten** | Verzögerung max 1,61 s; `POST /ingest/bulk` 26,4; 0 fehlend |
+| `ingest-spool` | 0 von 3 | **gehalten** | Spool-Flush 15,74 s; Abbau 694,6/s; 0 fehlend |
+| `ingest-rediscover` | 2 von 3 | **verfehlt** | Verzögerung max **55,60 s** (Budget < 30 s); 0 fehlend, 0 neue CIs |
+| `nfr01-volume` | 3 von 3 | **verfehlt** | list 440,3; list_name_filter 495,9; **global_search 720,5**; filter 374,5; **attr_filter 529,8**; **relationships 2.430**; detail 296,9; **rack 419,0**; topology 1.880; **impact 4.080**; **impact_full 3.990**; **bulk_500 38,63 s** |
+
+Damit hält NFR-02 bei 10.000 Objekten nach E-58; NFR-02 auf den
+NFR-01-Volumina (Punkt 11) und NFR-03 für die Wiederentdeckung (Punkt 1)
+sind verfehlt. AK 3 ist nicht erfüllt.
 
 ### Vorlauf: Run 40257485919 (Commit `0f6b322`, nicht archiviert)
 
@@ -142,10 +165,11 @@ Lauf 2 verfehlen sechs Szenarien ihr Budget: `list`, `list_name_filter`,
 dabei bei 60 bis 153 ms, nahe an Lauf 1 (41 bis 188 ms); nur p90 und p95
 steigen auf 336 bis 565 ms, auch beim Einzelabruf `detail` über den
 Primärschlüssel. Die teuren Szenarien `impact` und `topology` waren in
-Lauf 2 schneller als in Lauf 1. Das Muster passt zu CPU-Konkurrenz auf dem Runner, nicht zu einer
-einzelnen Abfrage. **NFR-02 hält bei 10.000 Objekten damit nicht in drei
-aufeinanderfolgenden Läufen**; auf dem geteilten Runner fehlt der Abstand
-zu den Budgets (Offene Punkte, Punkt 3).
+Lauf 2 schneller als in Lauf 1. Das Muster passt zu CPU-Konkurrenz auf dem
+Runner, nicht zu einer einzelnen Abfrage. NFR-02 hält bei 10.000 Objekten
+damit nicht in drei aufeinanderfolgenden Läufen, wohl aber im Median der
+drei Läufe, nach dem seit der Ergänzung zu E-58 bewertet wird (Abschnitt
+„Bewertung nach E-58“; Offene Punkte, Punkt 3).
 
 ## NFR-03: 200 Records/s und Max-Drain gegenüber 1.000 Records/s (AK 4)
 
@@ -388,10 +412,11 @@ ihren Index (Abschnitt „Umfangskorrektur SR-04“). Die Batch-Provenienz liest
 
 - **NFR-02:** Bei 10.000 Objekten hält jedes Budget im Vorlauf und in den
   Läufen 1 und 3, in Lauf 2 verfehlen sechs Szenarien ihr Budget im p95
-  (CPU-Konkurrenz auf dem Runner, Punkt 3). Auf den NFR-01-Volumina
-  verfehlen `impact`, `impact_full` und `relationships` ihr Budget in allen
-  drei Läufen deutlich (Punkt 11). NFR-02 ist damit für G1 **nicht
-  erfüllt**.
+  (CPU-Konkurrenz auf dem Runner, Punkt 3); im Median der drei Läufe hält
+  jedes Budget, nach der Ergänzung zu E-58 ist NFR-02 bei 10.000 Objekten
+  damit **erfüllt**. Auf den NFR-01-Volumina verfehlen `impact`,
+  `impact_full` und `relationships` ihr Budget in allen drei Läufen deutlich
+  (Punkt 11); dort ist NFR-02 **nicht erfüllt**.
 - **NFR-03:** Neue Geräte mit 200 Records/s und der Spool-Flush halten die
   Budgets in allen Läufen. Die Wiederentdeckung mit 200 Records/s verfehlt
   die Verzögerung von 30 s in zwei von drei Läufen (Punkt 1); NFR-03 ist
@@ -416,7 +441,7 @@ ihren Index (Abschnitt „Umfangskorrektur SR-04“). Die Batch-Provenienz liest
 | Retest | Verlangt | Stand |
 |---|---|---|
 | F-279 | Doku-Review von `lasttest-g1.md` gegen die archivierten Artefakte | **steht aus**: Der Bericht nennt 1.000 Records/s als [P5] mit Max-Drain und die gemessenen NFR-01-Volumina mit den Werten der drei Läufe aus den Job-Logs; das Review gegen die Archive ist erst nach deren Übernahme möglich. |
-| WP-206 | drei saubere Läufe archiviert | **nicht bestanden**: Keiner der drei Läufe ist sauber (Abschnitt „Läufe“; Punkte 1, 3 und 11). |
+| WP-206 | drei saubere Läufe archiviert | **nicht bestanden**: Auch nach dem Median der drei Läufe (E-58) sind `ingest-rediscover` und `nfr01-volume` verfehlt (Punkte 1 und 11). |
 | WP-204 | archivierter `load.yml`-Lauf | **steht aus**: Die Archive `load-archive-<Lauf-ID>` der drei Läufe sind gebaut; die Übernahme nach `docs/acceptance/artefakte/lasttest/<Lauf-ID>/` steht aus. |
 
 ## Offene Punkte
@@ -442,9 +467,12 @@ Auftraggeber, die Nummer wird hier nachgetragen.
    Lauf 2 sechs leichte Szenarien das p95-Budget von NFR-02 bei Medianen im
    Rahmen der anderen Läufe, und die Datenbankzeit je Record der
    Wiederentdeckung schwankt um den Faktor 2,8. Ein Nachweis „drei Läufe mit
-   exit 0“ hängt damit auch vom zugeteilten Runner ab. Entscheidung: offen,
-   Vorschlag an den Auftraggeber (E-58 ergänzen: dedizierter Runner oder
-   Budgetabstand für G1).
+   exit 0“ hängt damit auch vom zugeteilten Runner ab. Entscheidung:
+   Ergänzung zu E-58 vom 2026-10-26 (Option A): Bewertung nach dem Median
+   der drei Läufe, ein Job ist verfehlt, wenn er in mindestens zwei Läufen
+   rot ist (Abschnitt „Bewertung nach E-58“, `tests/load/evaluate-runs.sh`).
+   Kein offener Punkt mehr für die Bewertungsregel; der Referenzhost vor GA
+   bleibt.
 4. **Listen und Suche über etwa 25.000 Objekte (Headroom 50.000):**
    Entscheidung E-17 (Option 1): bekannte Einschränkung ohne Budgetzusage,
    Folge-WP vor GA. Die Zählung und der Index der Standardsortierung der

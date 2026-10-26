@@ -15,5 +15,10 @@ Laufs“.
 | `<Lauf-ID>/<job>/seed-<job>.txt`, `volumes-<job>.txt`, `integrity-<job>.txt`, `statements-<job>.txt` | Seed-Dauer, Datenbestand nach dem Seed, Integritätsprüfung, Datenbankkosten |
 | `<Lauf-ID>/SHA256SUMS` | Prüfsummen; `cd <Lauf-ID> && sha256sum -c SHA256SUMS` |
 
+Bewertung der drei Archive eines Nachweises nach E-58 (Median über drei
+Läufe; `tests/load/README.md`, Abschnitt „Bewertung über drei Läufe“):
+`tests/load/evaluate-runs.sh <Lauf-ID-1> <Lauf-ID-2> <Lauf-ID-3>` mit den
+Pfaden der drei Verzeichnisse hier.
+
 Die Läufe und ihre Werte stehen in `docs/acceptance/lasttest-g1.md`
 (Abschnitt „Läufe“). Noch ist kein Lauf archiviert.

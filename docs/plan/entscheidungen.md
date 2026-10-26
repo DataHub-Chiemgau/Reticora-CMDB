@@ -1,6 +1,6 @@
 # Entscheidungen – Phase 0/1
 
-Stand: 2026-10-15. Gehört zu [`implementierungsplan.md`](implementierungsplan.md). Die Empfehlung ist ein Vorschlag des Plans und keine neue Anforderung.
+Stand: 2026-10-26. Gehört zu [`implementierungsplan.md`](implementierungsplan.md). Die Empfehlung ist ein Vorschlag des Plans und keine neue Anforderung.
 
 **Freigabe vom 2026-10-01:** Der Auftraggeber hat angewiesen, nach den Empfehlungen vorzugehen. Daraus folgt:
 
@@ -23,6 +23,8 @@ Stand: 2026-10-15. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 **Nachtrag vom 2026-10-19 (Phase-1-Abnahmeaudit):** Das Abnahmeaudit vom 2026-10-18 (`audit/phase1-final/PHASE1_AUDIT_REPORT.md`) endete mit NO-GO: 102 WPs TEILWEISE BESTANDEN, 47 FEHLGESCHLAGEN, 354 Befunde (16 P0, 30 P1). Der Korrekturplan [`g1-korrektur/implementierungsplan.md`](g1-korrektur/implementierungsplan.md) zerlegt die Behebung in WPs ab WP-336; sein Entscheidungsbedarf steht ab E-59 in [`g1-korrektur/entscheidungen.md`](g1-korrektur/entscheidungen.md). Die Entscheidungen dieses Dokuments gelten weiter; ihre Zählung ändert sich nicht. Die Erklärungen des Auftraggebers vom 2026-10-15 zu B3, B4 und B6 sind im Audit nicht durch Nachweise im Repository belegt; der Korrekturplan führt die Nachweise als eigene WPs.
 
 **Nachtrag vom 2026-10-25 (WP-451, Gate-Checkliste nach E-76):** Die Erklärungen des Auftraggebers vom 2026-10-15 zu B3, B4 und B6 ersetzen keinen Nachweis (GATE-02). Nach der Übergangsregel von [E-76](g1-korrektur/entscheidungen.md#e-76) stehen AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01 (a)/(b), GATE-03 (Pentest-Anteil) und GATE-02 in `docs/acceptance/g1-gate.md` auf „offen“ mit der Begründung „Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend“ und in `docs/acceptance/g1-ausnahmen.csv`; das Gate-Ergebnis lautet „offen“. Die Nachträge zu [E-02](#e-02), [E-28](#e-28) und [E-35](#e-35) sind korrigiert. Kein Status einer Entscheidung ändert sich; die Zählung bleibt.
+
+**Nachtrag vom 2026-10-26 (Ergänzung zu E-58, Bewertung über drei Läufe):** Die drei vollständigen `load.yml`-Läufe von WP-439 (Runs 40269518264, 40270929166, 40271818796, Commit `8ca7f4b`) zeigen auf den geteilten GitHub-Runnern eine Streuung, die einzelne Läufe unabhängig vom Code rot färbt. Der Auftraggeber hat am 2026-10-26 die Ergänzung zu [E-58](#e-58) nach der Empfehlung entschieden: Ein Lastbudget gilt als gehalten, wenn der Median der Messwerte aus drei Läufen im Budget liegt; ein Job gilt als verfehlt, wenn er in mindestens zwei der drei Läufe rot ist. Die Regel ersetzt für den G1-Nachweis „drei Läufe mit exit 0“ (WP-439, AK 3). Kein Status ändert sich; die Zählung bleibt.
 
 | Nr. | Thema | Status | Sperrt / betrifft | WPs mit Verweis |
 |---|---|---|---|---:|
@@ -1141,13 +1143,20 @@ Stand 2026-10-14: Der Lauf auf Commit `dbbfded` hält alle Schwellen ein und mis
 
 Stand 2026-10-15: `load.yml` führt seit `458a96d` jedes Szenario als eigenen Job mit frischer Datenbank, Seed und `ANALYZE` aus, wie es das Nachweisprotokoll verlangt; vorher liefen die Szenarien nacheinander gegen einen Seed. Der grüne `load.yml`-Lauf liegt vor: [Run 38665599979](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38665599979) auf Commit `918a832` (Code-Stand der G1-Nachbesserung mit allen Nachträgen; spätere Commits ändern nur Dokumentation) hält auf dem Standard-Runner `ubuntu-latest` (4 CPUs, 15,61 GB RAM) alle k6-Schwellen ein. Darunter sind Impact Tiefe 20 p95 852 ms (kompakt) und 882 ms (Standardform), Abbau ab Sendeende 798 Records/s, Spool-Flush 15,1 s und eine Verzögerung von höchstens 1,84 s ohne fehlenden Record. Die Auflage „mindestens ein grüner `load.yml`-Lauf“ ist damit für diesen Commit erfüllt; nach dem Merge wiederholt der nächtliche Lauf den Nachweis auf dem Release-Kandidaten. Die k6-Zusammenfassungen sind Artefakte des Laufs (aufbewahrt bis 2027-01-13). Der letzte Lauf vor der Nachbesserung (Run 38514977761, Commit `fa76b16`, Code wie die Basis `02ebb76`) hatte auf dem Runner 38,47 Records/s gemessen, etwa die Hälfte des Nachweishosts (74 Records/s); damals bestimmten die Commits je Record den Durchsatz. Mit dem Batch-Schreibpfad ist der Runner beim Ingest schneller als der Nachweishost. Die Empfehlung (Option 1) ist damit gestärkt: Zwei unabhängige Umgebungen mit 4 vCPU halten jede Schwelle ein (`docs/acceptance/lasttest-g1.md`, Abschnitt „GitHub-Lauf“). Am 2026-10-15 hat der Auftraggeber Option 1 entschieden (Aufgabe A-14).
 
-**Blockiert / Auswirkung:** Keine Sperre mehr: GATE-03 „Lasttest bestanden“ (NFR-10) ist mit dem Nachweis aus WP-334 und WP-335 anerkannt. SR-06 bleibt bis zum dedizierten Referenzhost vor GA offen.
+**Ergänzung vom 2026-10-26 (Bewertung über drei Läufe):** Entscheidung des Auftraggebers vom 2026-10-26 nach der Empfehlung aus WP-439 (`t4-load-report`).
+
+- **Anlass:** Die drei vollständigen `load.yml`-Läufe von WP-439 auf Commit `8ca7f4b` (Runs [40269518264](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40269518264), [40270929166](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40270929166), [40271818796](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40271818796)) streuen auf den geteilten Runnern stark: Bei gleichem Code verfehlt `api.js` in einem Lauf sechs p95-Budgets bei unveränderten Medianen, und die Datenbankzeit je Record der Wiederentdeckung schwankt um den Faktor 2,8. „Drei Läufe mit exit 0“ hängt damit auch vom zugeteilten Runner ab.
+- **Optionen:** (A) Bewertung über den Median dreier Läufe; (B) dedizierter Runner für `load.yml`, bereitgestellt vom Auftraggeber; (C) unverändert drei Läufe mit exit 0.
+- **Festlegung:** Option A. Ein Lastbudget (k6-Schwelle) gilt als gehalten, wenn der Median seiner Messwerte aus den drei Läufen des Nachweises im Budget liegt; bei einer p95-Schwelle ist der Messwert je Lauf das p95 dieses Laufs. Ein Job gilt als verfehlt, wenn er in mindestens zwei der drei Läufe rot ist; ein fehlender Job zählt in seinem Lauf als rot. Die Regel ersetzt für den G1-Nachweis die Forderung „drei aufeinanderfolgende Läufe mit exit 0“ (WP-439, AK 3). Jeder Lauf bleibt archiviert; die Bewertung macht `tests/load/evaluate-runs.sh` reproduzierbar. Die übrigen Auflagen und der dedizierte Referenzhost vor GA (SR-06) bleiben.
+- **Folge mit den drei Läufen:** NFR-02 bei 10.000 Objekten und NFR-03 für neue Geräte und Spool halten im Median. Verfehlt bleiben `ingest-rediscover` (rot in zwei Läufen, F-118) und `nfr01-volume` (rot in allen drei Läufen, NFR-02 auf den NFR-01-Volumina); beide sind Befunde für Folge-WPs, keine Streuung.
+
+**Blockiert / Auswirkung:** Keine Sperre mehr: GATE-03 „Lasttest bestanden“ (NFR-10) ist mit dem Nachweis aus WP-334 und WP-335 anerkannt. SR-06 bleibt bis zum dedizierten Referenzhost vor GA offen. Seit der Ergänzung vom 2026-10-26 bewertet WP-439 den Lastnachweis nach dem Median dreier Läufe.
 
 **Quelle:** GATE-03, INS-07, NFR-03, NFR-10; `docs/security/review-g1.md` (SR-06); `docs/acceptance/lasttest-g1.md`; `docs/acceptance/g1-gate.md`
 
 **Betroffene IDs:** GATE-03, INS-07, NFR-02, NFR-03, NFR-10
 
-**Betroffene WPs:** WP-334 (`nfr03-lanes`), WP-335 (`nfr02-impact`)
+**Betroffene WPs:** WP-334 (`nfr03-lanes`), WP-335 (`nfr02-impact`), WP-439 (`t4-load-report`, Ergänzung vom 2026-10-26)
 
 ## Offene Aufgaben
 

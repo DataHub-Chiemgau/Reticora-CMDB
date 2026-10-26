@@ -204,7 +204,9 @@ LOG="$TMP_ROOT/import.log"
 if installer_run import "$LOG"; then ok "Keycloak recreated with the current realm export"; else fail "Keycloak recreated with the current realm export"; show_log "$LOG"; fi
 kc_login
 export_realm "$TMP_ROOT/import.json"
-import_skipped() { compose logs keycloak 2>&1 | grep -q "Realm 'reticora' already exists. Import skipped"; }
+# grep reads the whole log: with pipefail, grep -q would end the pipe at the
+# first match and fail the check through SIGPIPE of compose logs.
+import_skipped() { compose logs keycloak 2>&1 | grep -F "Realm 'reticora' already exists. Import skipped" >/dev/null; }
 unchanged_by_import() {
     [ -n "$(settings "$TMP_ROOT/legacy.json")" ] && [ "$(settings "$TMP_ROOT/legacy.json")" = "$(settings "$TMP_ROOT/import.json")" ]
 }
