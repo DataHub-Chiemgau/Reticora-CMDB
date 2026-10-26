@@ -27,6 +27,46 @@ type Change struct {
 	// SiteID is the site of the CI when the change was made (ci_change),
 	// or the site of the moved location (location_change).
 	SiteID string `json:"site_id,omitempty"`
+
+	// The fields below describe a change of a CI after AUD-03 (E-82 option
+	// 2); only ci_change entries carry them. One entry is one change set:
+	// the field rows of one write. A change set of one row also keeps
+	// field_name, old_value and new_value; one of several rows leaves them
+	// empty. A row written before 000167 has no change set and is an entry
+	// of its own.
+
+	// ChangeKind is the kind of the change (ChangeKinds).
+	ChangeKind string `json:"change_kind,omitempty"`
+	// ChangeSetID groups the field rows of one write; empty for a row
+	// written before 000167.
+	ChangeSetID string `json:"change_set_id,omitempty"`
+	// FieldChanges are the changed fields of the change set; a row without
+	// a field (create, delete) is none.
+	FieldChanges []FieldChange `json:"field_changes,omitempty"`
+	// ChangeSource is the source of the change (ui, api, collector, import,
+	// system, as in the audit log); the JSON name keeps source for the trail.
+	ChangeSource  string     `json:"change_source,omitempty"`
+	CollectorID   string     `json:"collector_id,omitempty"`
+	RequestID     string     `json:"request_id,omitempty"`
+	CorrelationID string     `json:"correlation_id,omitempty"`
+	ObservedAt    *time.Time `json:"observed_at,omitempty"`
+	// ActorUserID is the user who made the change (not an API key).
+	ActorUserID string `json:"actor_user_id,omitempty"`
+}
+
+// FieldChange is one changed field of a change set (AUD-03).
+type FieldChange struct {
+	Field string `json:"field"`
+	Old   any    `json:"old"`
+	New   any    `json:"new"`
+}
+
+// ListOptions narrow the history of an entity. IncludeAudit adds the audit
+// entries of a CI (E-78); ChangeKind keeps only the CI changes of that kind
+// (AUD-03), entries without a kind drop out.
+type ListOptions struct {
+	IncludeAudit bool
+	ChangeKind   string
 }
 
 // Sources of the unified CI and location history.

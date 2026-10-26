@@ -46,11 +46,11 @@ func TestHistoryRepositoryClientScope(t *testing.T) {
 
 	ctx := f.ClientCtx(f.Client1)
 	page := api.PaginationParams{Limit: 100}
-	changes, total, err := repo.List(ctx, f.OrgA, "ci", own, page, true)
+	changes, total, err := repo.List(ctx, f.OrgA, "ci", own, page, history.ListOptions{IncludeAudit: true})
 	if err != nil || total != 1 || len(changes) != 1 {
 		t.Fatalf("client-1 trail of own CI: total=%d len=%d err=%v, want 1/1/nil", total, len(changes), err)
 	}
-	changes, total, err = repo.List(ctx, f.OrgA, "ci", foreign, page, true)
+	changes, total, err = repo.List(ctx, f.OrgA, "ci", foreign, page, history.ListOptions{IncludeAudit: true})
 	if !errors.Is(err, api.ErrNotFound) || total != 0 || len(changes) != 0 {
 		t.Fatalf("client-1 trail of client-2 CI: total=%d len=%d err=%v, want 0/0/api.ErrNotFound", total, len(changes), err)
 	}
@@ -70,7 +70,7 @@ func TestHistoryRepositoryClientScope(t *testing.T) {
 		t.Fatalf("client-2 CI trail has %d rows, want 1", count)
 	}
 
-	if _, _, err = repo.List(context.Background(), f.OrgA, "ci", own, page, true); !errors.Is(err, database.ErrNoTenantScope) {
+	if _, _, err = repo.List(context.Background(), f.OrgA, "ci", own, page, history.ListOptions{IncludeAudit: true}); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)
 	}
 }
@@ -105,7 +105,7 @@ func TestLocationHistoryClientScope(t *testing.T) {
 	if rec, _ := getHistory(ctx, t, h, "/api/v1/history/location/"+moved[f.Client2]); rec.Code != http.StatusNotFound {
 		t.Fatalf("client-1 history of a client-2 room: %d %s, want 404", rec.Code, rec.Body)
 	}
-	if _, _, err := history.NewPGRepository(f.App).List(ctx, f.OrgA, "location", moved[f.Client2], api.PaginationParams{Limit: 100}, true); !errors.Is(err, api.ErrNotFound) {
+	if _, _, err := history.NewPGRepository(f.App).List(ctx, f.OrgA, "location", moved[f.Client2], api.PaginationParams{Limit: 100}, history.ListOptions{IncludeAudit: true}); !errors.Is(err, api.ErrNotFound) {
 		t.Fatalf("client-1 repository list of a client-2 room: %v, want api.ErrNotFound", err)
 	}
 	if err := locs.Delete(orgCtx, f.OrgA, moved[f.Client2]); err != nil {

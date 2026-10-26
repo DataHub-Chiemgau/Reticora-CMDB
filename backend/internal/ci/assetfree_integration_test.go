@@ -98,7 +98,7 @@ func TestAssetFreeCIAgainstPostgres(t *testing.T) {
 	if _, err = cis.Update(ctx, f.OrgA, app.ID, ci.UpdateRequest{Name: &name}); err != nil {
 		t.Fatal(err)
 	}
-	changes, total, err := history.NewPGRepository(f.App).List(ctx, f.OrgA, "ci", app.ID, api.PaginationParams{Limit: 20}, true)
+	changes, total, err := history.NewPGRepository(f.App).List(ctx, f.OrgA, "ci", app.ID, api.PaginationParams{Limit: 20}, history.ListOptions{IncludeAudit: true})
 	if err != nil || total == 0 || len(changes) == 0 {
 		t.Errorf("history: %d entries, %v", total, err)
 	}

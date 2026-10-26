@@ -7363,6 +7363,58 @@ export interface components {
        * @description The site of the CI when the change was made (ci_change), or the site of the moved location (location_change).
        */
       site_id?: string;
+      /**
+       * @description The kind of a CI change (AUD-03); only ci_change entries carry it and the fields below. A ci_change entry is one change set, the field rows of one write; one of several rows has no field_name, old_value and new_value, field_changes holds them.
+       * @enum {string}
+       */
+      change_kind?:
+        | 'created'
+        | 'updated'
+        | 'deleted'
+        | 'restored'
+        | 'merged'
+        | 'type_changed'
+        | 'relationship_added'
+        | 'relationship_removed'
+        | 'status_changed';
+      /**
+       * Format: uuid
+       * @description The change set of the entry; absent for a row written before the change sets, which is an entry of its own.
+       */
+      change_set_id?: string;
+      /** @description The changed fields of the change set, ordered by field name; a row without a field (create, delete) is none. */
+      field_changes?: components['schemas']['HistoryFieldChange'][];
+      /**
+       * @description The source of the CI change as in the audit log (AUD-03); source names the trail of the entry.
+       * @enum {string}
+       */
+      change_source?: 'ui' | 'api' | 'collector' | 'import' | 'system';
+      /**
+       * Format: uuid
+       * @description The collector of a discovery change.
+       */
+      collector_id?: string;
+      /** @description The X-Request-ID of the request that made the change (AUD-07). */
+      request_id?: string;
+      /** @description The correlation id of the change (X-Correlation-ID, or the record of a discovery change). */
+      correlation_id?: string;
+      /**
+       * Format: date-time
+       * @description The time of the observation of a discovery change.
+       */
+      observed_at?: string;
+      /**
+       * Format: uuid
+       * @description The user who made the change; absent for an API key or the system.
+       */
+      actor_user_id?: string;
+    };
+    HistoryFieldChange: {
+      field: string;
+      /** @description The value before the change; null when the field was empty. */
+      old: unknown;
+      /** @description The value after the change; null when the field was cleared. */
+      new: unknown;
     };
     HistoryListResponse: {
       data: components['schemas']['HistoryChange'][];
@@ -26934,6 +26986,17 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        /** @description Keeps only the CI changes of this kind (AUD-03); entries without a change kind (entity_change, location_change, audit) are left out. Only for entity type ci; an unknown kind or another entity type is 400 naming the field change_kind. */
+        change_kind?:
+          | 'created'
+          | 'updated'
+          | 'deleted'
+          | 'restored'
+          | 'merged'
+          | 'type_changed'
+          | 'relationship_added'
+          | 'relationship_removed'
+          | 'status_changed';
       };
       header?: never;
       path: {
@@ -26946,7 +27009,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change rows (with the site at the time), entity_change rows, audit entries and the location_change rows of its location and the location's ancestors. For a location it is its entity_change rows and the location_change rows of the location (also after its deletion) and of its ancestors. A location_change entry has change_type location_change, field_name parent_id, and old_value/new_value objects with location_id, location_name, parent_id and path. Without audit:read the audit entries are left out (audit_included false). */
+      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change changes with the site at the time, one entry per change set with change_kind and field_changes (AUD-03; a row written before the change sets is an entry of its own), entity_change rows, audit entries and the location_change rows of its location and the location's ancestors. For a location it is its entity_change rows and the location_change rows of the location (also after its deletion) and of its ancestors. A location_change entry has change_type location_change, field_name parent_id, and old_value/new_value objects with location_id, location_name, parent_id and path. Without audit:read the audit entries are left out (audit_included false). */
       200: {
         headers: {
           [name: string]: unknown;
@@ -26955,7 +27018,7 @@ export interface operations {
           'application/json': components['schemas']['HistoryListResponse'];
         };
       };
-      /** @description The entity type is not one of the listed types, or the id is no UUID. */
+      /** @description The entity type is not one of the listed types, the id is no UUID, or change_kind is no known kind or is given for another entity type than ci (field change_kind). */
       400: {
         headers: {
           [name: string]: unknown;

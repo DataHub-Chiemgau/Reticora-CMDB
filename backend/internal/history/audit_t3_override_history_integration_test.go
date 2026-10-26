@@ -41,7 +41,7 @@ func TestAuditT3HistoryIncludesOverrides(t *testing.T) {
 		t.Fatalf("clear override: %v", err)
 	}
 	repo := history.NewPGRepository(f.App)
-	all, total, err := repo.List(ctx, f.OrgA, "ci", ciID, api.PaginationParams{Limit: 100}, true)
+	all, total, err := repo.List(ctx, f.OrgA, "ci", ciID, api.PaginationParams{Limit: 100}, history.ListOptions{IncludeAudit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestAuditT3HistoryIncludesOverrides(t *testing.T) {
 	}
 
 	client2 := tenant.WithTenant(f.ClientCtx(f.Client2), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
-	other, otherTotal, err := repo.List(client2, f.OrgA, "ci", ciID, api.PaginationParams{Limit: 100}, true)
+	other, otherTotal, err := repo.List(client2, f.OrgA, "ci", ciID, api.PaginationParams{Limit: 100}, history.ListOptions{IncludeAudit: true})
 	if !errors.Is(err, api.ErrNotFound) || otherTotal != 0 || len(other) != 0 {
 		t.Errorf("client-2 principal reads %d history entries of a client-1 CI (%v), want 0 and api.ErrNotFound", otherTotal, err)
 	}

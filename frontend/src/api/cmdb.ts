@@ -598,6 +598,41 @@ export interface EntityChange {
   source?: 'ci_change' | 'entity_change' | 'audit' | 'location_change';
   /** Site of the CI when the change was made. */
   site_id?: string;
+  /** Kind of a CI change (AUD-03); only ci_change entries carry it and the fields below. */
+  change_kind?: ChangeKind;
+  /**
+   * Change set of a ci_change entry: the field rows of one write. Absent for
+   * a row written before the change sets, which is an entry of its own.
+   */
+  change_set_id?: string;
+  /** Changed fields of the change set, ordered by field name. */
+  field_changes?: FieldChange[];
+  /** Source of the CI change as in the audit log (`source` names the trail). */
+  change_source?: 'ui' | 'api' | 'collector' | 'import' | 'system';
+  collector_id?: string;
+  request_id?: string;
+  correlation_id?: string;
+  observed_at?: string;
+  actor_user_id?: string;
+}
+
+/** Kinds of a CI change (AUD-03). */
+export type ChangeKind =
+  | 'created'
+  | 'updated'
+  | 'deleted'
+  | 'restored'
+  | 'merged'
+  | 'type_changed'
+  | 'relationship_added'
+  | 'relationship_removed'
+  | 'status_changed';
+
+/** One changed field of a change set (AUD-03). */
+export interface FieldChange {
+  field: string;
+  old: unknown;
+  new: unknown;
 }
 
 export interface StateSnapshot {
@@ -614,7 +649,11 @@ export interface HistoryPage extends PaginatedResponse<EntityChange> {
 }
 
 export const historyApi = {
-  list(entityType: string, id: string, params: { limit?: number; offset?: number } = {}) {
+  list(
+    entityType: string,
+    id: string,
+    params: { limit?: number; offset?: number; change_kind?: ChangeKind } = {},
+  ) {
     return fetchAPI<HistoryPage>(`/history/${entityType}/${id}${qs(params)}`);
   },
   stateAt(entityType: 'assets' | 'cis', id: string, at?: string): Promise<StateSnapshot> {

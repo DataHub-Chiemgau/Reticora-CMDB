@@ -39,7 +39,7 @@ import {
  *  L04  edit on the detail page, reload, persisted, If-Match .. WP-061 (API-07), WP-057 (CI-04, OVR-01), WP-201 (TST-03)
  *  L05  clearing a field in the edit form is persisted ........ WP-057 (CI-04), WP-201 (TST-03)
  *  L05b merge patch: null removes a typed field (RFC 7396) .... WP-057 (CI-04)
- *  L06  history and audit trail of the edit with the actor .... WP-171 (CI-06, AUD-03), WP-133 (AUD-05), WP-134 (AUD-07), WP-132 (AUD-04)
+ *  L06  history and audit trail of the edit with the actor .... WP-171 (CI-06, AUD-03), WP-133 (AUD-05), WP-134 (AUD-07), WP-132 (AUD-04), WP-488 (AUD-03 change sets)
  *  L07  audit viewer UI shows the entry; chain verifies ....... WP-171 (CI-06), WP-133 (AUD-05), WP-132 (AUD-04), WP-191/WP-192 (UI-01..10 audit viewer)
  *  L08  relationship in the UI (double click), neighbours, impact WP-128 (REL-02), WP-127 (REL-01), WP-176 (IMP-01), WP-177 (IMP-02), WP-201 (TST-03)
  *  L09  list filter, full-text search, command palette ........ WP-032 (SRC-01), WP-165 (API-02), WP-191/WP-192 (UI-01..10 palette), WP-201 (TST-03)
@@ -95,6 +95,11 @@ interface HistoryEntry {
   new_value?: unknown;
   source?: string;
   created_at: string;
+  /** AUD-03 (WP-488): a ci_change entry is one change set with its field changes. */
+  change_kind?: string;
+  change_set_id?: string;
+  field_changes?: { field: string; old: unknown; new: unknown }[];
+  request_id?: string;
 }
 
 interface AuditEntry {
@@ -837,46 +842,70 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     await expect(page.getByRole('heading', { name: ci.name, exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Bearbeiten', exact: true }).click();
     const dialog = page.getByRole('dialog');
+    // Name and model in one save: one write, one change set (AUD-03, WP-488).
     const renamed = `lc-hist-new-${w.s}`;
     await dialog.getByLabel('Name', { exact: true }).fill(renamed);
+    await dialog.getByLabel('Modell').fill('H2');
     const patched = waitForPath(page, `/cis/${ci.id}`, 'PATCH');
     await dialog.getByRole('button', { name: 'Speichern' }).click();
     const res = await patched;
     expect(res.status()).toBe(200);
     const requestId = res.headers()['x-request-id'] ?? '';
+    expect(requestId, 'X-Request-ID of the PATCH').not.toBe('');
     await expect(dialog).toBeHidden();
 
-    // API: the unified history holds the creation and the field change with
-    // who, when, what, old and new (CI-06, AUD-03, AUD-07).
+    // API: the unified history holds the creation and the change with who,
+    // when, what, old and new (CI-06, AUD-03, AUD-07): exactly one entry with
+    // the two field changes and the request id of the PATCH.
     const created = await pollHistory(
       ci.id,
       (e) => /creat/i.test(e.change_type),
       'history entry of the creation',
     );
     expect(created.actor_id).toBe(w.userId);
-    const change = await pollHistory(
-      ci.id,
-      (e) => e.field_name === 'name' && e.new_value === renamed,
-      'history entry of the rename',
-    );
-    expect(change.old_value).toBe(ci.name);
+    const isEdit = (e: HistoryEntry) =>
+      (e.field_changes ?? []).some((f) => f.field === 'name' && f.new === renamed);
+    const change = await pollHistory(ci.id, isEdit, 'history entry of the edit');
+    expect(change.change_kind).toBe('updated');
+    expect(change.change_set_id, 'the edit is a change set').toBeTruthy();
+    expect(change.field_changes, 'one entry with both fields').toEqual([
+      { field: 'model', old: 'H1', new: 'H2' },
+      { field: 'name', old: ci.name, new: renamed },
+    ]);
+    expect(change.request_id, 'request id of the PATCH').toBe(requestId);
     expect(change.actor_id, 'the acting user').toBe(w.userId);
     expect(Number.isNaN(Date.parse(change.created_at))).toBe(false);
+    const history200 = await ok<List<HistoryEntry>>('GET', `/history/ci/${ci.id}?limit=200`);
+    expect(
+      rows(history200).filter(
+        (e) =>
+          isEdit(e) ||
+          (e.source === 'ci_change' && (e.field_name === 'name' || e.field_name === 'model')),
+      ),
+      'exactly one history entry of the edit',
+    ).toHaveLength(1);
     const changes = await ok<List<HistoryEntry>>('GET', `/cis/${ci.id}/changes`);
     expect(
       rows(changes).some((e) => e.field_name === 'name' && e.actor_id === w.userId),
       'GET /cis/{id}/changes lists the rename with its actor',
     ).toBe(true);
 
-    // UI: the history section of the detail page lists the rename.
+    // UI: after a reload the history section of the detail page shows the
+    // edit as one entry with a line per field: name, old and new value.
     await page.reload();
     await expect(page.getByRole('heading', { name: renamed, exact: true })).toBeVisible();
     await page.locator('summary', { hasText: 'Historie' }).click();
     const history = page.getByRole('list', { name: 'Historie' });
     await expect(history).toBeVisible();
-    await expect(history.getByRole('listitem').filter({ hasText: /·\s*name\b/ })).not.toHaveCount(
-      0,
-    );
+    const editEntry = history
+      .locator(':scope > li')
+      .filter({ hasText: `name: ${ci.name} → ${renamed}` })
+      .filter({ hasText: 'model: H1 → H2' });
+    await expect(editEntry, 'one history entry with both fields').toHaveCount(1);
+    await expect(editEntry.getByRole('listitem')).toHaveText([
+      'model: H1 → H2',
+      `name: ${ci.name} → ${renamed}`,
+    ]);
     await expect(history.locator('time').first()).toHaveAttribute('datetime', /\d{4}-\d{2}-\d{2}T/);
 
     // Audit trail (AUD-04/05/07): the change with actor, old/new, request id.

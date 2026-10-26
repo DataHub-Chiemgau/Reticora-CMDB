@@ -11851,13 +11851,27 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
+        - name: change_kind
+          in: query
+          required: false
+          description: >-
+            Keeps only the CI changes of this kind (AUD-03); entries without a
+            change kind (entity_change, location_change, audit) are left out.
+            Only for entity type ci; an unknown kind or another entity type
+            is 400 naming the field change_kind.
+          schema:
+            type: string
+            enum: [created, updated, deleted, restored, merged, type_changed, relationship_added, relationship_removed, status_changed]
       responses:
         '200':
           description: >-
             The change history of an entity, newest first. For a CI it is the
-            unified history of CI-06: its ci_change rows (with the site at the
-            time), entity_change rows, audit entries and the location_change
-            rows of its location and the location's ancestors. For a location
+            unified history of CI-06: its ci_change changes with the site at
+            the time, one entry per change set with change_kind and
+            field_changes (AUD-03; a row written before the change sets is an
+            entry of its own), entity_change rows, audit entries and the
+            location_change rows of its location and the location's
+            ancestors. For a location
             it is its entity_change rows and the location_change rows of the
             location (also after its deletion) and of its ancestors. A
             location_change entry has change_type location_change, field_name
@@ -11869,7 +11883,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/HistoryListResponse'
         '400':
-          description: The entity type is not one of the listed types, or the id is no UUID.
+          description: >-
+            The entity type is not one of the listed types, the id is no UUID,
+            or change_kind is no known kind or is given for another entity
+            type than ci (field change_kind).
           content:
             application/problem+json:
               schema:
@@ -13835,6 +13852,59 @@ components:
           description: >-
             The site of the CI when the change was made (ci_change), or the
             site of the moved location (location_change).
+        change_kind:
+          type: string
+          enum: [created, updated, deleted, restored, merged, type_changed, relationship_added, relationship_removed, status_changed]
+          description: >-
+            The kind of a CI change (AUD-03); only ci_change entries carry it
+            and the fields below. A ci_change entry is one change set, the
+            field rows of one write; one of several rows has no field_name,
+            old_value and new_value, field_changes holds them.
+        change_set_id:
+          type: string
+          format: uuid
+          description: >-
+            The change set of the entry; absent for a row written before the
+            change sets, which is an entry of its own.
+        field_changes:
+          type: array
+          description: >-
+            The changed fields of the change set, ordered by field name; a
+            row without a field (create, delete) is none.
+          items: { $ref: '#/components/schemas/HistoryFieldChange' }
+        change_source:
+          type: string
+          enum: [ui, api, collector, import, system]
+          description: >-
+            The source of the CI change as in the audit log (AUD-03); source
+            names the trail of the entry.
+        collector_id:
+          type: string
+          format: uuid
+          description: The collector of a discovery change.
+        request_id:
+          type: string
+          description: The X-Request-ID of the request that made the change (AUD-07).
+        correlation_id:
+          type: string
+          description: The correlation id of the change (X-Correlation-ID, or the record of a discovery change).
+        observed_at:
+          type: string
+          format: date-time
+          description: The time of the observation of a discovery change.
+        actor_user_id:
+          type: string
+          format: uuid
+          description: The user who made the change; absent for an API key or the system.
+    HistoryFieldChange:
+      type: object
+      required: [field, old, new]
+      properties:
+        field: { type: string }
+        old:
+          description: The value before the change; null when the field was empty.
+        new:
+          description: The value after the change; null when the field was cleared.
     HistoryListResponse:
       type: object
       required: [data]

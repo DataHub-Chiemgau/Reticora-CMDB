@@ -126,7 +126,10 @@ type ListResponse struct {
 // List handles GET /api/v1/history/{entityType}/{id}. The route needs
 // ci:read; the history of an entity type needs its read permission, and the
 // audit entries of a CI are part of it only with audit:read (CI-06, E-78).
-// The trail is read under the caller's tenant scope.
+// The trail is read under the caller's tenant scope. A CI change is one
+// entry per change set with its field_changes; change_kind keeps the CI
+// changes of one kind, an unknown kind or another entity type is 400
+// (AUD-03).
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -144,16 +147,28 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusForbidden, "Forbidden", "missing required permission: "+string(required))
 		return
 	}
-	includeAudit := entityType == "ci" && principal.Has(identity.PermAuditRead)
+	opts := ListOptions{IncludeAudit: entityType == "ci" && principal.Has(identity.PermAuditRead)}
+	if q := r.URL.Query(); q.Has("change_kind") {
+		opts.ChangeKind = q.Get("change_kind")
+		if !ChangeKinds[opts.ChangeKind] {
+			api.WriteFieldError(w, &api.FieldError{Field: "change_kind",
+				Message: "must be one of created, updated, deleted, restored, merged, type_changed, relationship_added, relationship_removed, status_changed"})
+			return
+		}
+		if entityType != "ci" {
+			api.WriteFieldError(w, &api.FieldError{Field: "change_kind", Message: "filters the history of a ci only"})
+			return
+		}
+	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.List(r.Context(), t.OrganizationID, entityType, chi.URLParam(r, "id"), page, includeAudit)
+	items, total, err := h.repo.List(r.Context(), t.OrganizationID, entityType, chi.URLParam(r, "id"), page, opts)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
 	resp := ListResponse{
 		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
-		HasMore: page.Offset+page.Limit < total, AuditIncluded: includeAudit,
+		HasMore: page.Offset+page.Limit < total, AuditIncluded: opts.IncludeAudit,
 	}
 	if resp.HasMore && len(items) > 0 {
 		resp.NextCursor = api.EncodeOffsetCursor(page.Offset + len(items))
