@@ -2078,15 +2078,346 @@ apply_keycloak_rotation() {
     [ ! -f "$ENV_FILE" ] || save_env_previous
 }
 
-# create_initial_admin — applies a rotation (apply_keycloak_rotation), removes
-# the demo administrator of earlier releases and creates the individual
-# administrator once: org_admin (MFA required), member of reticora-admin,
-# organization attribute of the default organization, random temporary
-# password and mandatory password change and OTP setup at first login.
-# Re-runs leave an existing administrator alone.
+# ─── Realm settings on every run (AUT-09, SEC-07, F-061) ─────────────────────
+# `start --import-realm` imports the realm file only while the realm does not
+# exist ("Realm 'reticora' already exists. Import skipped"): the password and
+# lockout policy, the MFA flow, the roles, groups and the acr scope of a newer
+# release never reached an installation whose realm an earlier release
+# imported (F-061), and Keycloak 24 dropped the organization_id of every user
+# the installer created in such a realm (attribute not declared).
+# apply_realm_settings applies them from the rendered realm file on every run
+# (first installation and re-run): missing settings are added and weaker
+# values raised; stricter values and further settings of the operator are
+# kept. Every change is logged; none of these settings is a secret.
+KC_REALM_TROUBLESHOOTING="see deploy/keycloak/README.md, 'Upgrade'"
+
+# Password policies of the realm file whose value is a minimum (a higher value
+# is stricter); the others (notUsername, notEmail) only have to be present.
+KC_POLICY_MINIMUMS='["length","upperCase","lowerCase","digits","specialChars","passwordHistory"]'
+# Lockout: fewer failures until the lockout are stricter (failureFactor);
+# longer waits and a longer failure memory as well.
+KC_LOCKOUT_MAXIMUMS='["failureFactor"]'
+KC_LOCKOUT_MINIMUMS='["waitIncrementSeconds","maxFailureWaitSeconds","minimumQuickLoginWaitSeconds","quickLoginCheckMilliSeconds","maxDeltaTimeSeconds"]'
+
+# The client scope acr as Keycloak creates it in every new realm; added only
+# when a realm lacks it.
+KC_ACR_SCOPE='{"name":"acr","description":"OpenID Connect scope for add acr (authentication context class reference) to the token","protocol":"openid-connect","attributes":{"include.in.token.scope":"false","display.on.consent.screen":"false"},"protocolMappers":[{"name":"acr loa level","protocol":"openid-connect","protocolMapper":"oidc-acr-mapper","consentRequired":false,"config":{"id.token.claim":"true","introspection.token.claim":"true","access.token.claim":"true"}}]}'
+
+# kc_realm_plan <realm file> — reads the running realm (partial export) on
+# stdin and prints what apply_realm_settings has to change, as JSON: roles,
+# composites, groups, group roles and default client scopes to add, the
+# state of the browser flow, the realm fields and attributes to set, and a
+# log line per change ("log") and per stricter or different value that is
+# kept ("kept"). Flows compare by what Keycloak runs (requirement,
+# authenticator or sub-flow, authenticator config), not by names.
+kc_realm_plan() {
+    jq -c --slurpfile realm "$1" --argjson minimums "$KC_POLICY_MINIMUMS" \
+        --argjson lockmax "$KC_LOCKOUT_MAXIMUMS" --argjson lockmin "$KC_LOCKOUT_MINIMUMS" '
+        def items: if . == null or . == "" then [] else [splits(" and ") | capture("^(?<name>[^(]+)(\\((?<value>.*)\\))?$")] end;
+        def policy: .name + (if (.value // "") == "" then "" else "(\(.value))" end);
+        def num: (tonumber? // null);
+        def has_name($n): index([$n]) != null;
+        def tree($r; $alias):
+            ([($r.authenticationFlows // [])[] | select(.alias == $alias) | .authenticationExecutions // []] | first // [])
+            | sort_by(.priority)
+            | map(. as $e | {requirement: $e.requirement,
+                step: (if $e.authenticatorFlow then {flow: tree($r; $e.flowAlias)} else $e.authenticator end),
+                config: (if $e.authenticatorConfig then
+                    [($r.authenticatorConfig // [])[] | select(.alias == $e.authenticatorConfig) | .config] | first
+                    else null end)});
+        def subflows($r; $alias):
+            [($r.authenticationFlows // [])[] | select(.alias == $alias) | (.authenticationExecutions // [])[]
+                | select(.authenticatorFlow) | .flowAlias][] | ., subflows($r; .);
+        . as $have | $realm[0] as $want | $want.browserFlow as $fa
+        | ([($have.authenticationFlows // [])[] | select(.alias == $fa)] | first) as $hflow
+        | ([$fa, subflows($want; $fa)]) as $wanted_flows
+        | (if $hflow == null then [] else [$fa, subflows($have; $fa)] end) as $old_flows
+        | ($have.passwordPolicy | items) as $hp
+        | (reduce ($want.passwordPolicy | items)[] as $w ({p: $hp, log: [], kept: []};
+            ([.p[].name] | index([$w.name])) as $i
+            | if $i == null then .p += [$w] | .log += ["password policy \($w | policy) added"]
+              elif ($minimums | has_name($w.name)) and ($w.value | num) != null then
+                (.p[$i].value | num) as $h | ($w.value | num) as $n
+                | if $h == null or $h < $n then
+                    .log += ["password policy \(.p[$i] | policy) raised to \($w | policy)"] | .p[$i].value = $w.value
+                  elif $h > $n then .kept += ["password policy \(.p[$i] | policy) (stricter than \($w | policy))"]
+                  else . end
+              else . end)) as $pp
+        | (reduce ("bruteForceProtected", $lockmax[], $lockmin[]) as $f ({set: {}, log: [], kept: []};
+            $want[$f] as $w | $have[$f] as $h
+            | if $w == null then .
+              elif $f == "bruteForceProtected" then
+                (if $w == true and $h != true then .set[$f] = true | .log += ["brute-force detection enabled"] else . end)
+              elif ($lockmax | has_name($f)) then
+                (if $h == null or $h < 1 or $h > $w then .set[$f] = $w | .log += ["\($f) \($h // "unset") lowered to \($w)"]
+                 elif $h < $w then .kept += ["\($f) \($h) (stricter than \($w))"] else . end)
+              else
+                (if $h == null or $h < $w then .set[$f] = $w | .log += ["\($f) \($h // "unset") raised to \($w)"]
+                 elif $h > $w then .kept += ["\($f) \($h) (stricter than \($w))"] else . end)
+              end)) as $lock
+        | (reduce (($want.attributes // {}) | to_entries[]) as $e ({set: {}, log: [], kept: []};
+            (($have.attributes // {})[$e.key]) as $h
+            | if $h == null or $h == "" then .set[$e.key] = $e.value | .log += ["attribute \($e.key) set to \($e.value)"]
+              elif $h != $e.value then .kept += ["attribute \($e.key) \($h) (bundled: \($e.value))"]
+              else . end)) as $attrs
+        | {
+            roles: [$want.roles.realm[] | select(.name | startswith("default-roles-") | not)
+                | select(.name as $n | [($have.roles.realm // [])[].name] | has_name($n) | not) | {name, description}],
+            composites: [$want.roles.realm[] | select(.composites.realm) | . as $w
+                | ([($have.roles.realm // [])[] | select(.name == $w.name) | .composites.realm // []] | first // []) as $h
+                | $w.composites.realm[] | select(. as $c | $h | has_name($c) | not) | {role: $w.name, composite: .}],
+            groups: [$want.groups[].name | select(. as $n | [($have.groups // [])[].name] | has_name($n) | not)],
+            group_roles: [$want.groups[] | . as $w
+                | ([($have.groups // [])[] | select(.name == $w.name)] | first) as $hg
+                | ($w.realmRoles // [])[] | select(. as $r | ($hg.realmRoles // []) | has_name($r) | not)
+                | {group: $w.name, id: $hg.id, role: .}],
+            scopes: [$want.clients[] | select(.defaultClientScopes) | . as $w
+                | ([($have.clients // [])[] | select(.clientId == $w.clientId)] | first) as $hc | select($hc != null)
+                | $w.defaultClientScopes[] | select(. as $s | ($hc.defaultClientScopes // []) | has_name($s) | not)
+                | {client: $w.clientId, client_uuid: $hc.id, scope: .,
+                   scope_id: (. as $s | [($have.clientScopes // [])[] | select(.name == $s) | .id] | first)}],
+            flow: {
+                alias: $fa,
+                state: (if $hflow == null then "missing" elif tree($have; $fa) == tree($want; $fa) then "same" else "different" end),
+                id: $hflow.id,
+                binding: ($have.browserFlow // ""),
+                collisions: [($have.authenticationFlows // [])[].alias
+                    | select(. as $a | ($wanted_flows | has_name($a)) and ($old_flows | has_name($a) | not))]
+            },
+            realm: ($lock.set + (if ($pp.log | length) > 0 then {passwordPolicy: ($pp.p | map(policy) | join(" and "))} else {} end)),
+            attributes: $attrs.set,
+            log: ($pp.log + $lock.log + $attrs.log),
+            kept: ($pp.kept + $lock.kept + $attrs.kept)
+        }'
+}
+
+# kc_call <args…> — kcadm with its messages shown only on failure: it
+# reports every created object ("Created new … with id …") and an empty line
+# per read on stderr.
+kc_call() {
+    local err rc=0
+    { err="$(kcadm "$@" 2>&1 >&3 3>&-)" || rc=$?; } 3>&1
+    [ "$rc" -eq 0 ] || printf '%s\n' "$err" >&2
+    return "$rc"
+}
+
+# kc_flow_path <alias> — the admin API path of a flow (aliases contain spaces).
+kc_flow_path() { printf 'authentication/flows/%s' "$(jq -rn --arg a "$1" '$a | @uri')"; }
+
+# kc_flow_executions <realm file> <alias> — the executions of the flow in the
+# realm file, one JSON object per line, in the order of their priorities.
+kc_flow_executions() {
+    jq -c --arg a "$2" '.authenticationFlows[] | select(.alias == $a) | .authenticationExecutions | sort_by(.priority)[]' "$1"
+}
+
+# kc_build_flow <realm file> <alias> — fills the empty flow <alias> as the
+# realm file defines it: authenticators and sub-flows in the order of their
+# priorities, then the requirement and authenticator config of each (new
+# executions are DISABLED); sub-flows recursively. The executions are read
+# into an array first: kcadm (docker compose exec) would consume the input of
+# a read loop.
+kc_build_flow() {
+    local realm_file="$1" alias="$2" path ex listing i=0 config sub
+    local executions=() ids=()
+    path="$(kc_flow_path "$alias")"
+    mapfile -t executions < <(kc_flow_executions "$realm_file" "$alias")
+    for ex in "${executions[@]}"; do
+        if [ "$(jq -r .authenticatorFlow <<<"$ex")" = true ]; then
+            jq -c --arg a "$(jq -r .flowAlias <<<"$ex")" \
+                '.authenticationFlows[] | select(.alias == $a) | {alias, description, type: .providerId}' "$realm_file" \
+                | kc_call create "$path/executions/flow" -r reticora -f - >/dev/null || return 1
+        else
+            kc_call create "$path/executions/execution" -r reticora -s provider="$(jq -r .authenticator <<<"$ex")" \
+                </dev/null >/dev/null || return 1
+        fi
+    done
+    # Keycloak lists the executions of the flow (level 0) in creation order.
+    listing="$(kc_call get "$path/executions" -r reticora </dev/null)" || return 1
+    mapfile -t ids < <(jq -r '.[] | select(.level == 0) | .id' <<<"$listing")
+    [ "${#ids[@]}" -eq "${#executions[@]}" ] || return 1
+    for ex in "${executions[@]}"; do
+        if [ "$(jq -r .requirement <<<"$ex")" != DISABLED ]; then
+            jq -c --arg id "${ids[$i]}" '{id: $id, requirement}' <<<"$ex" \
+                | kc_call update "$path/executions" -r reticora -f - >/dev/null || return 1
+        fi
+        config="$(jq -r '.authenticatorConfig // empty' <<<"$ex")"
+        if [ -n "$config" ]; then
+            jq -c --arg a "$config" '[.authenticatorConfig[] | select(.alias == $a) | {alias, config}] | first' "$realm_file" \
+                | kc_call create "authentication/executions/${ids[$i]}/config" -r reticora -f - >/dev/null || return 1
+        fi
+        sub="$(jq -r 'select(.authenticatorFlow) | .flowAlias' <<<"$ex")"
+        if [ -n "$sub" ]; then
+            kc_build_flow "$realm_file" "$sub" || return 1
+        fi
+        i=$((i + 1))
+    done
+}
+
+# kc_create_flow <realm file> <alias> — creates the top-level flow <alias>
+# of the realm file with its executions.
+kc_create_flow() {
+    jq -c --arg a "$2" '.authenticationFlows[] | select(.alias == $a) | {alias, description, providerId, topLevel, builtIn}' "$1" \
+        | kc_call create authentication/flows -r reticora -f - >/dev/null && kc_build_flow "$1" "$2"
+}
+
+# kc_apply_flow <realm file> <plan> — makes the browser flow of the realm file
+# (browser-mfa) exist as the realm file defines it: created when missing,
+# rebuilt when it differs and is not bound (left over from an interrupted run
+# or an earlier release). Returns 1 when the flow differs and is bound: it
+# may be a customization and is kept (warning); it must not be rebound.
+kc_apply_flow() {
+    local realm_file="$1" plan="$2" alias state binding collisions listing config configs=()
+    alias="$(jq -r .flow.alias <<<"$plan")"
+    state="$(jq -r .flow.state <<<"$plan")"
+    binding="$(jq -r .flow.binding <<<"$plan")"
+    [ "$state" != same ] || return 0
+    if [ "$state" = different ] && [ "$binding" = "$alias" ]; then
+        warn "Keycloak realm: the bound browser flow $alias differs from the bundled realm (customized or from an earlier release) and is kept; compare it with deploy/keycloak/realm-reticora.json ($KC_REALM_TROUBLESHOOTING)."
+        return 1
+    fi
+    collisions="$(jq -r '.flow.collisions | join(", ")' <<<"$plan")"
+    [ -z "$collisions" ] || die "Cannot create the Keycloak flow $alias: the realm already has flows named $collisions ($KC_REALM_TROUBLESHOOTING)."
+    if [ "$state" = different ]; then
+        # Its authenticator configs go too; they are referenced by id.
+        if ! listing="$(kc_call get "$(kc_flow_path "$alias")/executions" -r reticora </dev/null)" \
+            || ! mapfile -t configs < <(jq -r '.[] | .authenticationConfig // empty' <<<"$listing") \
+            || ! kc_call delete "authentication/flows/$(jq -r .flow.id <<<"$plan")" -r reticora </dev/null; then
+            die "Could not remove the unbound Keycloak flow $alias that differs from the bundled realm ($KC_REALM_TROUBLESHOOTING)."
+        fi
+        for config in "${configs[@]}"; do
+            kc_call delete "authentication/config/$config" -r reticora </dev/null \
+                || die "Could not remove an authenticator config of the old flow $alias ($KC_REALM_TROUBLESHOOTING)."
+        done
+        success "Keycloak realm: unbound flow $alias that differed from the bundled realm removed"
+    fi
+    kc_create_flow "$realm_file" "$alias" \
+        || die "Could not create the Keycloak flow $alias ($KC_REALM_TROUBLESHOOTING)."
+    success "Keycloak realm: flow $alias created (OTP for mfa_required, acr levels 1 and 2)"
+}
+
+# apply_realm_settings — applies the realm settings of the rendered realm file
+# to the running realm (the admin CLI is logged in): the declared user profile
+# attributes (organization_id), the realm roles and their composites, the
+# groups and their realm roles, the default client scopes of the clients
+# (acr), the browser flow browser-mfa and its binding, the password policy,
+# the brute-force detection and the realm attributes (acr.loa.map). A browser
+# flow other than Keycloak's built-in "browser" is the operator's choice and
+# stays bound (warning).
+apply_realm_settings() {
+    local realm_file="$COMPOSE_DIR/.generated/realm-reticora.json" current plan profile declared line changed=0
+    local alias binding realm_set attributes client scope client_uuid scope_id roles=() flow_kept=0
+    [ -f "$realm_file" ] || die "The rendered realm file $realm_file is missing."
+    info "Applying the realm settings (policies, MFA flow, roles, groups, acr scope) …"
+    # A partial export lists the realm in the format of the realm file (client
+    # secrets masked); it is only read.
+    if ! current="$(kc_call create partial-export -r reticora -q exportGroupsAndRoles=true -q exportClients=true -o </dev/null)" \
+        || ! plan="$(printf '%s' "$current" | kc_realm_plan "$realm_file")"; then
+        die "Could not read the Keycloak realm 'reticora' ($KC_REALM_TROUBLESHOOTING)."
+    fi
+
+    # Declared attributes first: Keycloak 24 drops undeclared ones, such as
+    # the organization_id of the initial administrator.
+    if ! profile="$(kc_call get users/profile -r reticora </dev/null)" \
+        || ! declared="$(jq -c --slurpfile realm "$realm_file" '[.attributes[].name] as $have
+            | [$realm[0].components["org.keycloak.userprofile.UserProfileProvider"][0].config["kc.user.profile.config"][0]
+               | fromjson | .attributes[] | select(.name as $n | $have | index([$n]) == null)]' <<<"$profile")"; then
+        die "Could not read the user profile of the Keycloak realm ($KC_REALM_TROUBLESHOOTING)."
+    fi
+    if [ "$declared" != "[]" ]; then
+        jq -c --argjson add "$declared" '.attributes += $add' <<<"$profile" \
+            | kc_call update users/profile -r reticora -f - >/dev/null \
+            || die "Could not declare the user profile attributes of the realm ($KC_REALM_TROUBLESHOOTING)."
+        success "Keycloak realm: user profile attribute $(jq -r 'map(.name) | join(", ")' <<<"$declared") declared (admin only)"
+        changed=1
+    fi
+
+    mapfile -t roles < <(jq -c '.roles[]' <<<"$plan")
+    for line in "${roles[@]}"; do
+        printf '%s' "$line" | kc_call create roles -r reticora -f - >/dev/null \
+            || die "Could not create the realm role $(jq -r .name <<<"$line") ($KC_REALM_TROUBLESHOOTING)."
+        success "Keycloak realm: role $(jq -r .name <<<"$line") created"
+        changed=1
+    done
+    for line in $(jq -r '.composites[] | "\(.role)=\(.composite)"' <<<"$plan"); do
+        kc_call add-roles -r reticora --rname "${line%%=*}" --rolename "${line#*=}" </dev/null \
+            || die "Could not add the role ${line#*=} to the realm role ${line%%=*} ($KC_REALM_TROUBLESHOOTING)."
+        success "Keycloak realm: role ${line%%=*} contains ${line#*=}"
+        changed=1
+    done
+    for line in $(jq -r '.groups[]' <<<"$plan"); do
+        kc_call create groups -r reticora -s name="$line" </dev/null >/dev/null \
+            || die "Could not create the group $line ($KC_REALM_TROUBLESHOOTING)."
+        success "Keycloak realm: group $line created"
+        changed=1
+    done
+    for line in $(jq -r '.group_roles[] | "\(.group)=\(.role)"' <<<"$plan"); do
+        kc_call add-roles -r reticora --gpath "/${line%%=*}" --rolename "${line#*=}" </dev/null \
+            || die "Could not map the realm role ${line#*=} to the group ${line%%=*} ($KC_REALM_TROUBLESHOOTING)."
+        success "Keycloak realm: group ${line%%=*} carries the realm role ${line#*=}"
+        changed=1
+    done
+    for line in $(jq -r '.scopes[] | "\(.client)=\(.scope)=\(.client_uuid)=\(.scope_id // "")"' <<<"$plan"); do
+        IFS='=' read -r client scope client_uuid scope_id <<<"$line"
+        if [ -z "$scope_id" ]; then
+            [ "$scope" = acr ] || die "The Keycloak realm has no client scope $scope ($KC_REALM_TROUBLESHOOTING)."
+            scope_id="$(printf '%s' "$KC_ACR_SCOPE" | kc_call create client-scopes -r reticora -f - -i)" || scope_id=""
+            [ -n "$scope_id" ] || die "Could not create the client scope acr ($KC_REALM_TROUBLESHOOTING)."
+            success "Keycloak realm: client scope acr created"
+        fi
+        kc_call update "clients/$client_uuid/default-client-scopes/$scope_id" -r reticora </dev/null \
+            || die "Could not add the default client scope $scope to the client $client ($KC_REALM_TROUBLESHOOTING)."
+        success "Keycloak realm: client $client has the default client scope $scope"
+        changed=1
+    done
+
+    # The flow first, then its binding with the realm fields: a flow is bound
+    # only as the realm file defines it.
+    alias="$(jq -r .flow.alias <<<"$plan")"
+    binding="$(jq -r .flow.binding <<<"$plan")"
+    realm_set="$(jq -c .realm <<<"$plan")"
+    attributes="$(jq -c .attributes <<<"$plan")"
+    if kc_apply_flow "$realm_file" "$plan"; then
+        [ "$(jq -r .flow.state <<<"$plan")" = same ] || changed=1
+        if [ -z "$binding" ] || [ "$binding" = browser ]; then
+            realm_set="$(jq -c --arg a "$alias" '. + {browserFlow: $a}' <<<"$realm_set")"
+            plan="$(jq -c --arg l "browser flow ${binding:-unset} replaced by $alias" '.log += [$l]' <<<"$plan")"
+        elif [ "$binding" != "$alias" ]; then
+            warn "Keycloak realm: the browser flow $binding is bound instead of $alias and kept; make sure it requires the second factor for mfa_required ($KC_REALM_TROUBLESHOOTING)."
+            flow_kept=1
+        fi
+    else
+        flow_kept=1
+    fi
+    if [ "$realm_set" != "{}" ] || [ "$attributes" != "{}" ]; then
+        # The whole representation goes back: Keycloak drops the realm
+        # attributes (and security headers) a partial one does not list.
+        kc_call get realms/reticora </dev/null \
+            | jq -c --argjson set "$realm_set" --argjson attrs "$attributes" '. * $set | .attributes = ((.attributes // {}) + $attrs)' \
+            | kc_call update realms/reticora -f - >/dev/null \
+            || die "Could not update the password policy, lockout and browser flow of the realm ($KC_REALM_TROUBLESHOOTING)."
+        changed=1
+    fi
+    while IFS= read -r line; do
+        success "Keycloak realm: $line"
+    done < <(jq -r '.log[]' <<<"$plan")
+    while IFS= read -r line; do
+        info "Keycloak realm: kept $line"
+    done < <(jq -r '.kept[]' <<<"$plan")
+    [ "$changed" -eq 1 ] || [ "$flow_kept" -eq 1 ] \
+        || success "Keycloak realm settings match the bundled realm (policies, MFA flow, roles, groups, acr scope)"
+}
+
+# create_initial_admin — applies a rotation (apply_keycloak_rotation) and the
+# realm settings (apply_realm_settings), removes the demo administrator of
+# earlier releases and creates the individual administrator once: org_admin
+# (MFA required), member of reticora-admin, organization attribute of the
+# default organization, random temporary password and mandatory password
+# change and OTP setup at first login. Re-runs leave an existing
+# administrator alone.
 create_initial_admin() {
     INITIAL_ADMIN_PASSWORD=""
     apply_keycloak_rotation
+    apply_realm_settings
     info "Ensuring the initial administrator exists …"
 
     local legacy_id

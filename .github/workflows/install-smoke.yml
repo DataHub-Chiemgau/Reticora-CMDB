@@ -488,6 +488,14 @@ jobs:
       - name: Keycloak rotation of the installer (Keycloak 24)
         run: ./tests/install-reinstall.test.sh
 
+      # AUT-09/SEC-07 (WP-428, F-061): --import-realm skips the realm an
+      # earlier release imported (the one before WP-044); the installer
+      # applies policies, MFA flow, roles, groups, acr scope and the declared
+      # organization_id, creates the administrator in it, keeps stricter
+      # values and changes nothing on a re-run.
+      - name: Keycloak realm upgrade from the realm before WP-044 (Keycloak 24)
+        run: ./tests/keycloak-realm-upgrade.test.sh
+
       # Local build of the checked-out state in every run (E-69).
       - name: First installation
         run: ./install.sh --cloud --non-interactive --build-from-source

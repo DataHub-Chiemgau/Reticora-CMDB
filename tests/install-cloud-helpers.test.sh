@@ -1072,6 +1072,136 @@ test_initial_password_random() {
         && printf '%s' "$a" | grep -q '[0-9]' && printf '%s' "$a" | grep -q '[^A-Za-z0-9]'
 }
 
+# fake_realm <kcadm args…> — the realm of the fake admin CLI (WP-428): a realm
+# in the format of Keycloak's partial export in KC_STATE/realm.json, which the
+# calls of apply_realm_settings change and its partial export reads back
+# (client secrets masked). Flows keep their executions with ids, requirement
+# and authenticator config like Keycloak: new executions are DISABLED and
+# listed in creation order; a realm update replaces every field it sends,
+# the attributes as a whole. Every write is recorded in KCADM_WRITES with
+# what it changes (names, never a value of the client). KC_FAIL_REALM=1
+# makes the realm update fail. Returns 3 for a call it does not handle.
+# shellcheck disable=SC2317,SC2016 # called by the compose_cmd stub of fake_kcadm; jq programs
+fake_realm() {
+    local verb="$1" path="$2" realm="$KC_STATE/realm.json" body="$KC_STATE/realm-body" a prev="" flow=""
+    local provider="" name="" rname="" gpath="" rolename=""
+    shift 2
+    for a in "$@"; do
+        case "$prev" in
+            -s) case "$a" in provider=*) provider="${a#provider=}" ;; name=*) name="${a#name=}" ;; esac ;;
+            --rname) rname="$a" ;;
+            --gpath) gpath="${a#/}" ;;
+            --rolename) rolename="$a" ;;
+        esac
+        prev="$a"
+    done
+    case "$path" in
+        authentication/flows/*/*) flow="${path#authentication/flows/}"; flow="${flow%%/*}"; flow="$(printf '%b' "${flow//%/\\x}")" ;;
+    esac
+    # realm_set <jq program> [jq args…] — changes the realm.
+    realm_set() { jq "$@" "$realm" > "$realm.new" && mv "$realm.new" "$realm"; }
+    # flow_of <execution id> — the alias of the flow that holds the execution.
+    flow_of() { jq -r --arg id "$1" '[.authenticationFlows[] | select(any(.authenticationExecutions[]; .id == $id)) | .alias] | first' "$realm"; }
+    next_id() { a=$(( $(cat "$KC_STATE/seq" 2>/dev/null || echo 0) + 1 )); echo "$a" > "$KC_STATE/seq"; printf '%s-%s' "$1" "$a"; }
+    case "$verb $path" in
+        "create partial-export") jq '(.clients[]?.secret) |= "**********"' "$realm" ;;
+        "get users/profile")
+            jq '.components["org.keycloak.userprofile.UserProfileProvider"][0].config["kc.user.profile.config"][0] | fromjson' "$realm" ;;
+        "update users/profile")
+            cat > "$body"
+            printf 'update users/profile %s\n' "$(jq -r --slurpfile r "$realm" '[.attributes[].name]
+                - [$r[0].components["org.keycloak.userprofile.UserProfileProvider"][0].config["kc.user.profile.config"][0]
+                   | fromjson | .attributes[].name] | join(",")' "$body")" >> "$KCADM_WRITES"
+            realm_set --slurpfile b "$body" \
+                '.components["org.keycloak.userprofile.UserProfileProvider"][0].config["kc.user.profile.config"] = [$b[0] | tojson]' ;;
+        "create roles")
+            cat > "$body"
+            printf 'create role %s\n' "$(jq -r .name "$body")" >> "$KCADM_WRITES"
+            realm_set --slurpfile b "$body" '.roles.realm += [$b[0] + {composite: false}]' ;;
+        "add-roles -r")
+            if [ -n "$rname" ]; then
+                printf 'add-roles role %s %s\n' "$rname" "$rolename" >> "$KCADM_WRITES"
+                realm_set --arg r "$rname" --arg c "$rolename" \
+                    '(.roles.realm[] | select(.name == $r)) |= (.composite = true | .composites.realm = ((.composites.realm // []) + [$c]))'
+            elif [ -n "$gpath" ]; then
+                printf 'add-roles group %s %s\n' "$gpath" "$rolename" >> "$KCADM_WRITES"
+                realm_set --arg g "$gpath" --arg c "$rolename" '(.groups[] | select(.name == $g)) |= (.realmRoles = ((.realmRoles // []) + [$c]))'
+            else
+                return 3
+            fi ;;
+        "create groups")
+            printf 'create group %s\n' "$name" >> "$KCADM_WRITES"
+            realm_set --arg n "$name" '.groups += [{id: ("group-" + $n), name: $n, path: ("/" + $n), realmRoles: []}]' ;;
+        "create client-scopes")
+            cat > "$body"
+            printf 'create client-scope %s\n' "$(jq -r .name "$body")" >> "$KCADM_WRITES"
+            realm_set --slurpfile b "$body" '.clientScopes += [$b[0] + {id: ("scope-" + $b[0].name)}]'
+            printf 'scope-%s\n' "$(jq -r .name "$body")" ;;
+        "update clients/"*"/default-client-scopes/"*)
+            a="${path#clients/}"
+            printf 'default-client-scope %s\n' "$(jq -r --arg c "${a%%/*}" --arg s "${path##*/}" \
+                '"\(.clients[] | select(.id == $c) | .clientId) \(.clientScopes[] | select(.id == $s) | .name)"' "$realm")" >> "$KCADM_WRITES"
+            realm_set --arg c "${a%%/*}" --arg s "${path##*/}" \
+                '([.clientScopes[] | select(.id == $s) | .name] | first) as $n | (.clients[] | select(.id == $c) | .defaultClientScopes) += [$n]' ;;
+        "create authentication/flows")
+            cat > "$body"
+            printf 'create flow %s\n' "$(jq -r .alias "$body")" >> "$KCADM_WRITES"
+            realm_set --slurpfile b "$body" '.authenticationFlows += [$b[0] + {id: ("flow-" + $b[0].alias), authenticationExecutions: []}]' ;;
+        "create authentication/flows/"*"/executions/execution")
+            printf 'create execution %s %s\n' "$flow" "$provider" >> "$KCADM_WRITES"
+            realm_set --arg f "$flow" --arg p "$provider" --arg id "$(next_id exec)" '(.authenticationFlows[] | select(.alias == $f)
+                | .authenticationExecutions) |= . + [{id: $id, authenticator: $p, authenticatorFlow: false, requirement: "DISABLED", priority: length}]' ;;
+        "create authentication/flows/"*"/executions/flow")
+            cat > "$body"
+            printf 'create sub-flow %s %s\n' "$flow" "$(jq -r .alias "$body")" >> "$KCADM_WRITES"
+            realm_set --arg f "$flow" --slurpfile b "$body" --arg id "$(next_id exec)" '(.authenticationFlows[] | select(.alias == $f)
+                | .authenticationExecutions) |= . + [{id: $id, authenticatorFlow: true, flowAlias: $b[0].alias, requirement: "DISABLED", priority: length}]
+                | .authenticationFlows += [{id: ("flow-" + $b[0].alias), alias: $b[0].alias, description: $b[0].description,
+                    providerId: $b[0].type, topLevel: false, builtIn: false, authenticationExecutions: []}]' ;;
+        "get authentication/flows/"*"/executions")
+            jq --arg f "$flow" 'def rows($r; $a; $level):
+                    [$r.authenticationFlows[] | select(.alias == $a) | .authenticationExecutions[]] | sort_by(.priority) | to_entries[]
+                    | .key as $i | .value as $e
+                    | {id: $e.id, requirement: $e.requirement, level: $level, index: $i, providerId: $e.authenticator,
+                       authenticationFlow: $e.authenticatorFlow, displayName: ($e.flowAlias // $e.authenticator),
+                       authenticationConfig: ([$r.authenticatorConfig[] | select(.alias == $e.authenticatorConfig) | .id] | first)},
+                      (if $e.authenticatorFlow then rows($r; $e.flowAlias; $level + 1) else empty end);
+                [rows(.; $f; 0)]' "$realm" ;;
+        "update authentication/flows/"*"/executions")
+            cat > "$body"
+            a="$(jq -r .id "$body")"
+            printf 'requirement %s %s %s\n' "$(flow_of "$a")" "$(jq -r --arg id "$a" \
+                '[.authenticationFlows[].authenticationExecutions[] | select(.id == $id) | .authenticator // .flowAlias] | first' "$realm")" \
+                "$(jq -r .requirement "$body")" >> "$KCADM_WRITES"
+            realm_set --slurpfile b "$body" '(.authenticationFlows[].authenticationExecutions[] | select(.id == $b[0].id) | .requirement) = $b[0].requirement' ;;
+        "create authentication/executions/"*"/config")
+            cat > "$body"
+            a="${path#authentication/executions/}"
+            printf 'create config %s\n' "$(jq -r .alias "$body")" >> "$KCADM_WRITES"
+            realm_set --slurpfile b "$body" --arg e "${a%/config}" --arg id "$(next_id config)" '.authenticatorConfig += [$b[0] + {id: $id}]
+                | (.authenticationFlows[].authenticationExecutions[] | select(.id == $e) | .authenticatorConfig) = $b[0].alias' ;;
+        "delete authentication/flows/"*)
+            printf 'delete flow %s\n' "$(jq -r --arg id "${path##*/}" '.authenticationFlows[] | select(.id == $id) | .alias' "$realm")" >> "$KCADM_WRITES"
+            realm_set --arg id "${path##*/}" 'def subs($r; $a): [$r.authenticationFlows[] | select(.alias == $a) | .authenticationExecutions[]
+                    | select(.authenticatorFlow) | .flowAlias][] | ., subs($r; .);
+                . as $r | ([.authenticationFlows[] | select(.id == $id) | .alias] | first) as $top | [$top, subs($r; $top)] as $gone
+                | .authenticationFlows |= map(select(.alias as $a | $gone | index([$a]) == null))' ;;
+        "delete authentication/config/"*)
+            printf 'delete config %s\n' "$(jq -r --arg id "${path##*/}" '.authenticatorConfig[] | select(.id == $id) | .alias' "$realm")" >> "$KCADM_WRITES"
+            realm_set --arg id "${path##*/}" '.authenticatorConfig |= map(select(.id != $id))' ;;
+        "get realms/reticora")
+            jq 'del(.roles, .groups, .clients, .clientScopes, .authenticationFlows, .authenticatorConfig, .components, .users)' "$realm" ;;
+        "update realms/reticora")
+            cat > "$body"
+            [ -z "${KC_FAIL_REALM:-}" ] || return 1
+            printf 'update realm %s\n' "$(jq -r --slurpfile r "$realm" '[(to_entries[] | select(.key != "attributes" and .value != $r[0][.key]) | .key),
+                ((.attributes // {}) | to_entries[] | select(.value != ($r[0].attributes // {})[.key]) | "attributes.\(.key)")] | sort | join(",")' "$body")" \
+                >> "$KCADM_WRITES"
+            realm_set --slurpfile b "$body" '. + $b[0]' ;;
+        *) return 3 ;;
+    esac
+}
+
 # A fake Keycloak admin CLI: records the calls and knows the users listed in
 # KC_USERS (username=id). The state a rotation changes lives in files under
 # KC_STATE (kcadm also runs in pipelines, i.e. subshells): the password of
@@ -1097,6 +1227,9 @@ fake_kcadm() {
             prev="$a"
         done
         printf '%s\n' "${logged[*]}" >> "$KCADM_LOG"
+        local rc=0
+        fake_realm "$@" || rc=$?
+        [ "$rc" -eq 3 ] || return "$rc"
         case "$1 $2" in
             "config credentials")
                 if [ "$pw" = "$(cat "$KC_STATE/admin-password")" ]; then
@@ -1153,14 +1286,64 @@ fake_kcadm() {
 
 # kc_applied — the fake Keycloak holds the current admin password and the
 # client of the realm rendered from the current values (in another order:
-# Keycloak stores the lists as sets).
+# Keycloak stores the lists as sets), and the realm as a fresh import of the
+# rendered realm (kc_imported_realm).
 kc_applied() {
     configure_realm >/dev/null
     printf '%s\n' "$KEYCLOAK_ADMIN_PASSWORD" > "$KC_STATE/admin-password"
     jq '.clients[] | select(.clientId == "reticora-app")
         | {id: "client-uuid", clientId, secret, redirectUris: (.redirectUris | reverse), webOrigins: (.webOrigins | reverse), serviceAccountsEnabled}' \
         "$COMPOSE_DIR/.generated/realm-reticora.json" > "$KC_STATE/client.json"
+    kc_imported_realm "$COMPOSE_DIR/.generated/realm-reticora.json" > "$KC_STATE/realm.json"
 }
+
+# kc_imported_realm <realm file> — the partial export of a realm Keycloak
+# imported from the file: ids for the client, groups, flows, executions and
+# authenticator configs, the client scopes Keycloak creates in every realm,
+# its built-in browser flow and an attribute of its own (cibaInterval).
+kc_imported_realm() {
+    jq '.clients |= map(. + {id: "client-uuid"})
+        | .groups |= map(. + {id: ("group-" + .name), realmRoles: (.realmRoles // [])})
+        | .clientScopes = (["profile", "email", "acr", "roles", "web-origins"] | map({id: ("scope-" + .), name: .}))
+        | .authenticationFlows = ([{alias: "browser", providerId: "basic-flow", topLevel: true, builtIn: true,
+              authenticationExecutions: [{authenticator: "auth-cookie", authenticatorFlow: false, requirement: "ALTERNATIVE", priority: 10}]}]
+            + (.authenticationFlows // []))
+        | .authenticationFlows |= map(.alias as $a | . + {id: ("flow-" + $a)}
+            | .authenticationExecutions |= (to_entries | map(.value + {id: "exec-\($a)-\(.key)"})))
+        | .authenticatorConfig = ((.authenticatorConfig // []) | map(. + {id: ("config-" + .alias)}))
+        | .attributes = ((.attributes // {}) + {cibaInterval: "5"})
+        | .browserFlow = (.browserFlow // "browser")' "$1"
+}
+
+# kc_legacy_realm — the fake realm becomes the realm of the release before
+# WP-044 (tests/keycloak/realm-reticora-legacy.json) as Keycloak 24 imports
+# it: no password policy, brute-force detection off with Keycloak's defaults,
+# browser flow "browser", no organization_id in the user profile.
+kc_legacy_realm() {
+    local current="$KC_STATE/realm.json"
+    sed -e "s/RETICORA_OIDC_CLIENT_SECRET_PLACEHOLDER/$RETICORA_OIDC_CLIENT_SECRET/g" \
+        -e "s|RETICORA_OIDC_REDIRECT_URL_PLACEHOLDER|$RETICORA_OIDC_REDIRECT_URL|g" \
+        -e "s|RETICORA_OIDC_REDIRECT_ORIGIN_PLACEHOLDER|http://192.0.2.10:3000|g" \
+        -e "s|RETICORA_OIDC_ISSUER_ORIGIN_PLACEHOLDER|http://192.0.2.10:8180|g" \
+        "$REPO_ROOT/tests/keycloak/realm-reticora-legacy.json" > "$KC_STATE/legacy.json"
+    kc_imported_realm "$KC_STATE/legacy.json" | jq --slurpfile cur "$current" 'del(.users)
+        | . + {bruteForceProtected: false, permanentLockout: false, failureFactor: 30, waitIncrementSeconds: 60,
+               maxFailureWaitSeconds: 900, minimumQuickLoginWaitSeconds: 60, quickLoginCheckMilliSeconds: 1000,
+               maxDeltaTimeSeconds: 43200}
+        | .components = ($cur[0].components | .["org.keycloak.userprofile.UserProfileProvider"][0].config["kc.user.profile.config"]
+            |= map(fromjson | .attributes |= map(select(.name != "organization_id")) | tojson))' > "$KC_STATE/realm.new"
+    mv "$KC_STATE/realm.new" "$current"
+}
+
+# kc_realm_edit <jq program> [jq args…] — changes the fake realm (operator
+# settings, a customized flow) before a run.
+kc_realm_edit() {
+    jq "$@" "$KC_STATE/realm.json" > "$KC_STATE/realm.new" && mv "$KC_STATE/realm.new" "$KC_STATE/realm.json"
+}
+
+# kc_log_writes — the kcadm calls of KCADM_LOG that write; the partial export
+# of apply_realm_settings is a POST that only reads.
+kc_log_writes() { grep -E '^(update|create|delete|set-password|add-roles) ' "$KCADM_LOG" | grep -v '^create partial-export '; }
 
 test_initial_admin_created_with_temporary_password() {
     fake_kcadm
@@ -1182,7 +1365,7 @@ test_initial_admin_not_recreated() {
     KC_USERS="ops@acme.example=existing-id"
     create_initial_admin || return 1
     [ -z "$INITIAL_ADMIN_PASSWORD" ] || return 1
-    if grep -qE '^(create|set-password|delete)' "$KCADM_LOG"; then return 1; fi
+    if kc_log_writes | grep -qE '^(create|set-password|delete)'; then return 1; fi
     initial_login_line | grep -q 'password not shown again' || return 1
 }
 
@@ -1286,7 +1469,7 @@ test_rotation_unchanged_writes_nothing() {
     create_initial_admin > "$out" 2>&1 || { cat "$out"; return 1; }
     [ ! -s "$KCADM_WRITES" ] || { cat "$KCADM_WRITES"; return 1; }
     [ "$(tr '\n' ' ' < "$KC_STATE/logins")" = "ok " ] &&
-        ! grep -qE '^(update|create|delete|set-password)' "$KCADM_LOG" &&
+        [ -z "$(kc_log_writes)" ] &&
         ! grep -q -e 'Keycloak rotation:' -e 'Changed since the last run' "$out" &&
         grep -q 'client secret, redirect URIs and web origins match the configuration' "$out"
 }
@@ -1377,6 +1560,216 @@ run_test    "rotation: a refused admin login aborts with a hint"                
 run_test    "rotation: a failing client update aborts with a hint"                       test_rotation_update_failure_aborts
 run_test    "rotation: .env is kept as .env.previous (0600) until applied"               test_rotation_env_previous_backup
 run_test    "rotation: the troubleshooting guide covers the rotation"                    test_rotation_documented
+
+# ─── realm settings on every run (WP-428, AUT-09, SEC-07, F-061) ─────────────
+# `start --import-realm` skips the existing realm on an upgrade; the installer
+# applies the settings of the realm file with apply_realm_settings (run by
+# create_initial_admin). tests/keycloak-realm-upgrade.test.sh runs the same
+# against Keycloak 24.
+
+REALM_FILE_REL=".generated/realm-reticora.json"
+
+# kc_legacy_rerun — a re-run of the installer on an installation whose realm
+# the release before WP-044 imported: the client already has the configured
+# values, the demo administrator of that release exists.
+kc_legacy_rerun() {
+    fake_kcadm
+    KC_USERS="admin@reticora.local=legacy-id"
+    kc_legacy_realm
+}
+
+# realm_writes_of <kind…> — the KCADM_WRITES lines of these kinds, sorted.
+realm_writes_of() {
+    local kinds
+    kinds="$(printf '%s|' "$@")"
+    grep -E "^(${kinds%|}) " "$KCADM_WRITES" | LC_ALL=C sort
+}
+
+# realm_like_file — the fake realm has every setting of the rendered realm
+# file: the plan of the installer finds nothing to change, browser-mfa is
+# bound.
+realm_like_file() {
+    jq '(.clients[]?.secret) |= "**********"' "$KC_STATE/realm.json" | kc_realm_plan "$COMPOSE_DIR/$REALM_FILE_REL" \
+        | jq -e '.roles == [] and .composites == [] and .groups == [] and .group_roles == [] and .scopes == []
+            and .flow.state == "same" and .flow.binding == "browser-mfa" and .realm == {} and .attributes == {}' >/dev/null
+}
+
+# file_count <jq filter> — counts over the rendered realm file.
+file_count() { jq "$1" "$COMPOSE_DIR/$REALM_FILE_REL"; }
+
+# Re-run against the legacy realm: every missing setting is applied with
+# exactly one kcadm call (the flow with one call per flow, execution,
+# requirement and authenticator config of the realm file), the user profile
+# before the administrator is created, every change logged, no secret.
+test_realm_upgrade_applies_once() {
+    kc_legacy_rerun
+    local out="$TMP_ROOT/realm-upgrade-out" profile admin subflows executions requirements configs
+    create_initial_admin > "$out" 2>&1 || { cat "$out"; return 1; }
+    subflows="$(file_count '[.authenticationFlows[].authenticationExecutions[] | select(.authenticatorFlow)] | length')"
+    executions="$(file_count '[.authenticationFlows[].authenticationExecutions[] | select(.authenticatorFlow | not)] | length')"
+    requirements="$(file_count '[.authenticationFlows[].authenticationExecutions[] | select(.requirement != "DISABLED")] | length')"
+    configs="$(file_count '.authenticatorConfig | length')"
+    [ "$(realm_writes_of 'update users/profile' 'create role' 'add-roles' 'create group' 'default-client-scope' 'update realm')" = \
+        "$(printf '%s\n' 'add-roles group operators operator' 'add-roles group reticora-admin mfa_required' \
+            'add-roles role operator mfa_required' 'add-roles role org_admin mfa_required' 'create group operators' \
+            'create role mfa_required' 'create role operator' 'default-client-scope reticora-app acr' \
+            'update realm attributes.acr.loa.map,browserFlow,bruteForceProtected,failureFactor,passwordPolicy' \
+            'update users/profile organization_id')" ] || { cat "$KCADM_WRITES"; return 1; }
+    # The flow: one call per flow, execution, requirement and config of the
+    # realm file, none twice, nothing else.
+    if ! { [ -z "$(sort "$KCADM_WRITES" | uniq -d)" ] &&
+        [ "$(grep -c '^create flow ' "$KCADM_WRITES")" -eq 1 ] &&
+        [ "$(grep -c '^create sub-flow ' "$KCADM_WRITES")" -eq "$subflows" ] &&
+        [ "$(grep -c '^create execution ' "$KCADM_WRITES")" -eq "$executions" ] &&
+        [ "$(grep -c '^requirement ' "$KCADM_WRITES")" -eq "$requirements" ] &&
+        [ "$(grep -c '^create config ' "$KCADM_WRITES")" -eq "$configs" ] &&
+        [ "$(wc -l < "$KCADM_WRITES")" -eq $((10 + 1 + subflows + executions + requirements + configs)) ]; }; then
+        sort "$KCADM_WRITES"
+        return 1
+    fi
+    realm_like_file || return 1
+    # The whole realm representation went back: Keycloak's own attributes stay.
+    jq -e '.attributes.cibaInterval == "5" and .passwordPolicy == "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername(undefined) and notEmail(undefined) and passwordHistory(5)"' \
+        "$KC_STATE/realm.json" >/dev/null || return 1
+    # organization_id is declared before the administrator is created with it.
+    profile="$(grep -n '^update users/profile' "$KCADM_LOG" | cut -d: -f1)"
+    admin="$(grep -n '^create users -r reticora' "$KCADM_LOG" | cut -d: -f1)"
+    [ -n "$profile" ] && [ -n "$admin" ] && [ "$profile" -lt "$admin" ] || return 1
+    grep -q -F 'Keycloak realm: user profile attribute organization_id declared (admin only)' "$out" &&
+        grep -q -F 'Keycloak realm: role mfa_required created' "$out" &&
+        grep -q -F 'Keycloak realm: role org_admin contains mfa_required' "$out" &&
+        grep -q -F 'Keycloak realm: group operators carries the realm role operator' "$out" &&
+        grep -q -F 'Keycloak realm: client reticora-app has the default client scope acr' "$out" &&
+        grep -q -F 'Keycloak realm: flow browser-mfa created (OTP for mfa_required, acr levels 1 and 2)' "$out" &&
+        grep -q -F 'Keycloak realm: password policy length(12) added' "$out" &&
+        grep -q -F 'Keycloak realm: brute-force detection enabled' "$out" &&
+        grep -q -F 'Keycloak realm: failureFactor 30 lowered to 5' "$out" &&
+        grep -q -F 'Keycloak realm: attribute acr.loa.map set to {"1":1,"2":2}' "$out" &&
+        grep -q -F 'Keycloak realm: browser flow browser replaced by browser-mfa' "$out" &&
+        grep -q -F 'Initial administrator ops@acme.example created' "$out" &&
+        ! grep -q 'client-secret-0' "$out" && ! grep -q 'client-secret-0' "$KCADM_LOG"
+}
+
+# A second re-run changes nothing: two reads, no write, reported unchanged.
+test_realm_second_rerun_unchanged() {
+    kc_legacy_rerun
+    create_initial_admin >/dev/null 2>&1 || return 1
+    # The users after the first run: the demo administrator removed, the
+    # initial administrator created.
+    KC_USERS="ops@acme.example=new-id"
+    : > "$KCADM_WRITES"
+    : > "$KCADM_LOG"
+    local out="$TMP_ROOT/realm-second-out"
+    create_initial_admin > "$out" 2>&1 || { cat "$out"; return 1; }
+    if [ -s "$KCADM_WRITES" ] || [ -n "$(kc_log_writes)" ]; then cat "$KCADM_WRITES"; return 1; fi
+    [ "$(grep -cE '^(create partial-export|get users/profile) ' "$KCADM_LOG")" -eq 2 ] &&
+        grep -q -F 'Keycloak realm settings match the bundled realm (policies, MFA flow, roles, groups, acr scope)' "$out" &&
+        ! grep -q -F 'Keycloak realm: kept' "$out"
+}
+
+# Stricter values of the operator stay (longer passwords, longer history, an
+# extra policy, fewer failures until the lockout), weaker ones are raised;
+# both are logged.
+test_realm_stricter_values_kept() {
+    kc_legacy_rerun
+    kc_realm_edit '. + {passwordPolicy: "length(16) and passwordHistory(10) and forceExpiredPasswordChange(365) and digits(0)",
+        failureFactor: 3, bruteForceProtected: true, maxFailureWaitSeconds: 300}'
+    local out="$TMP_ROOT/realm-strict-out"
+    create_initial_admin > "$out" 2>&1 || { cat "$out"; return 1; }
+    jq -e '.passwordPolicy == "length(16) and passwordHistory(10) and forceExpiredPasswordChange(365) and digits(1) and upperCase(1) and lowerCase(1) and specialChars(1) and notUsername(undefined) and notEmail(undefined)"
+        and .failureFactor == 3 and .bruteForceProtected == true and .maxFailureWaitSeconds == 900' "$KC_STATE/realm.json" >/dev/null \
+        || { jq -c '{passwordPolicy, failureFactor, maxFailureWaitSeconds}' "$KC_STATE/realm.json"; return 1; }
+    [ "$(realm_writes_of 'update realm')" = 'update realm attributes.acr.loa.map,browserFlow,maxFailureWaitSeconds,passwordPolicy' ] || { cat "$KCADM_WRITES"; return 1; }
+    grep -q -F 'Keycloak realm: kept password policy length(16) (stricter than length(12))' "$out" &&
+        grep -q -F 'Keycloak realm: kept password policy passwordHistory(10) (stricter than passwordHistory(5))' "$out" &&
+        grep -q -F 'Keycloak realm: kept failureFactor 3 (stricter than 5)' "$out" &&
+        grep -q -F 'Keycloak realm: password policy digits(0) raised to digits(1)' "$out" &&
+        grep -q -F 'Keycloak realm: maxFailureWaitSeconds 300 raised to 900' "$out" &&
+        ! grep -q -F 'Keycloak realm: brute-force detection enabled' "$out"
+}
+
+# A realm without the client scope acr gets it (as Keycloak creates it) and
+# the client gets it as default scope.
+test_realm_acr_scope_created() {
+    kc_legacy_rerun
+    kc_realm_edit '.clientScopes |= map(select(.name != "acr"))'
+    create_initial_admin >/dev/null 2>&1 || return 1
+    [ "$(realm_writes_of 'create client-scope' 'default-client-scope')" = "$(printf '%s\n' 'create client-scope acr' 'default-client-scope reticora-app acr')" ] &&
+        jq -e '.clientScopes[] | select(.name == "acr") | .protocolMappers[0].protocolMapper == "oidc-acr-mapper"' "$KC_STATE/realm.json" >/dev/null &&
+        realm_like_file
+}
+
+# A bound browser-mfa that differs from the realm file (e.g. an added
+# WebAuthn step) is the operator's: kept with a warning, nothing written.
+test_realm_custom_bound_flow_kept() {
+    fake_kcadm
+    KC_USERS="ops@acme.example=existing-id"
+    kc_realm_edit '(.authenticationFlows[] | select(.alias == "browser-mfa forms") | .authenticationExecutions)
+        += [{id: "exec-webauthn", authenticator: "webauthn-authenticator", authenticatorFlow: false, requirement: "REQUIRED", priority: 40}]'
+    local out="$TMP_ROOT/realm-custom-flow-out"
+    create_initial_admin > "$out" 2>&1 || { cat "$out"; return 1; }
+    [ ! -s "$KCADM_WRITES" ] &&
+        grep -q -F 'Keycloak realm: the bound browser flow browser-mfa differs from the bundled realm (customized or from an earlier release) and is kept' "$out" &&
+        jq -e '[.authenticationFlows[].authenticationExecutions[] | select(.id == "exec-webauthn")] | length == 1' "$KC_STATE/realm.json" >/dev/null &&
+        ! grep -q -F 'match the bundled realm' "$out"
+}
+
+# An unbound browser-mfa that differs (e.g. an interrupted earlier run) is
+# rebuilt from the realm file, with its authenticator configs, and bound.
+test_realm_unbound_flow_rebuilt() {
+    fake_kcadm
+    KC_USERS="ops@acme.example=existing-id"
+    kc_realm_edit '.browserFlow = "browser"
+        | (.authenticationFlows[] | select(.alias == "browser-mfa level 2") | .authenticationExecutions) |= map(select(.authenticator != "allow-access-authenticator"))'
+    local out="$TMP_ROOT/realm-rebuild-out"
+    create_initial_admin > "$out" 2>&1 || { cat "$out"; return 1; }
+    [ "$(realm_writes_of 'delete flow' 'delete config' 'create flow' 'update realm')" = \
+        "$(printf '%s\n' 'create flow browser-mfa' 'delete config loa-1' 'delete config loa-2' 'delete config mfa-required-role' \
+            'delete config no-mfa-required-role' 'delete flow browser-mfa' 'update realm browserFlow')" ] || { cat "$KCADM_WRITES"; return 1; }
+    jq -e '(.authenticatorConfig | length) == 4' "$KC_STATE/realm.json" >/dev/null &&
+        grep -q -F 'Keycloak realm: unbound flow browser-mfa that differed from the bundled realm removed' "$out" &&
+        grep -q -F 'Keycloak realm: browser flow browser replaced by browser-mfa' "$out" && realm_like_file
+}
+
+# A browser flow of the operator other than Keycloak's built-in "browser"
+# stays bound (warning); browser-mfa exists for it to switch to.
+test_realm_operator_browser_flow_kept() {
+    fake_kcadm
+    KC_USERS="ops@acme.example=existing-id"
+    kc_realm_edit '.browserFlow = "corporate-sso" | .authenticationFlows += [{id: "flow-corporate-sso", alias: "corporate-sso",
+        providerId: "basic-flow", topLevel: true, builtIn: false, authenticationExecutions: []}]'
+    local out="$TMP_ROOT/realm-operator-flow-out"
+    create_initial_admin > "$out" 2>&1 || { cat "$out"; return 1; }
+    [ ! -s "$KCADM_WRITES" ] && jq -e '.browserFlow == "corporate-sso"' "$KC_STATE/realm.json" >/dev/null &&
+        grep -q -F 'Keycloak realm: the browser flow corporate-sso is bound instead of browser-mfa and kept' "$out"
+}
+
+# A failing realm update aborts the run with the hint of the README.
+test_realm_update_failure_aborts() {
+    kc_legacy_rerun
+    KC_FAIL_REALM=1
+    local out="$TMP_ROOT/realm-fail-out" rc
+    (create_initial_admin) > "$out" 2>&1; rc=$?
+    [ "$rc" -eq 1 ] &&
+        grep -q -F "Could not update the password policy, lockout and browser flow of the realm (see deploy/keycloak/README.md, 'Upgrade')" "$out" &&
+        ! grep -q 'Initial administrator ops@acme.example created' "$out"
+}
+
+test_realm_upgrade_documented() {
+    grep -q '^## Upgrade' "$REPO_ROOT/deploy/keycloak/README.md" &&
+        grep -q 'apply_realm_settings' "$REPO_ROOT/deploy/keycloak/README.md" &&
+        grep -q 'Import skipped' "$REPO_ROOT/deploy/keycloak/README.md"
+}
+
+run_test    "realm upgrade: a re-run on the legacy realm applies each missing setting once" test_realm_upgrade_applies_once
+run_test    "realm upgrade: a second re-run changes nothing"                                test_realm_second_rerun_unchanged
+run_test    "realm upgrade: stricter operator values stay, weaker ones are raised"         test_realm_stricter_values_kept
+run_test    "realm upgrade: a missing client scope acr is created"                         test_realm_acr_scope_created
+run_test    "realm upgrade: a customized bound browser-mfa is kept with a warning"         test_realm_custom_bound_flow_kept
+run_test    "realm upgrade: an unbound browser-mfa that differs is rebuilt and bound"      test_realm_unbound_flow_rebuilt
+run_test    "realm upgrade: an operator's browser flow stays bound with a warning"         test_realm_operator_browser_flow_kept
+run_test    "realm upgrade: a failing realm update aborts with a hint"                     test_realm_update_failure_aborts
+run_test    "realm upgrade: deploy/keycloak/README.md describes the upgrade"               test_realm_upgrade_documented
 
 # ─── summary ──────────────────────────────────────────────────────────────────
 echo

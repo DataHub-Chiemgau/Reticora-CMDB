@@ -216,8 +216,10 @@ services:
     restart: unless-stopped
     # `start` with an imported realm: users created via the admin console are
     # persisted in keycloak-db (the previous `start-dev` used an in-memory
-    # database, losing everything on restart). The realm is re-imported only
-    # when the container is recreated.
+    # database, losing everything on restart). The realm file is imported
+    # only while the realm does not exist ("Import skipped" otherwise);
+    # install-cloud.sh applies the settings of a newer realm file on every
+    # run (apply_realm_settings, deploy/keycloak/README.md "Upgrade").
     command: start --import-realm --hostname-strict=false
     environment:
       KC_DB: postgres

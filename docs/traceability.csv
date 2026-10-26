@@ -699,3 +699,4 @@ OPS-06;[Q];A;tests/outage/run.sh;WP-449
 NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-438
 INS-06;[B];D;tests/audit/collector-install-cli.test.sh;WP-432
 COL-06;[B], Air-Gapped [O];D;tests/install-vm-cosign.test.sh;WP-432
+AUT-09;[B];B;tests/keycloak-realm-upgrade.test.sh;WP-428
