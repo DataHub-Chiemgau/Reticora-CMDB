@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -82,6 +85,53 @@ func TestWriteRepoErrorSanitizesPostgresErrors(t *testing.T) {
 			}
 			if _, ok := problem["title"]; !ok {
 				t.Fatalf("RFC 7807 response must carry a title: %s", body)
+			}
+		})
+	}
+}
+
+// TestWriteRepoErrorUnavailableDependency covers WP-449 (OPS-06, F-136): a
+// dependency that is unreachable before anything was stored (ErrUnavailable,
+// e.g. the ingest queue while NATS is down, or a database connection that
+// could not be established) is refused visibly with 503 and Retry-After, so
+// the client keeps its data and sends it again; the answer names no
+// internals. A connection lost during a statement stays 500: the write may
+// have committed.
+func TestWriteRepoErrorUnavailableDependency(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := l.Addr().String()
+	_ = l.Close()
+	_, connectErr := pgconn.Connect(context.Background(), "postgres://reticora_runtime:secret@"+closed+"/reticora?sslmode=disable&connect_timeout=2")
+	var typed *pgconn.ConnectError
+	if !errors.As(connectErr, &typed) {
+		t.Fatalf("connecting to a closed port: %T %v, want *pgconn.ConnectError", connectErr, connectErr)
+	}
+
+	for name, tc := range map[string]struct {
+		err    error
+		status int
+	}{
+		"ingest queue down":         {fmt.Errorf("%w: ingest queue reconnecting", ErrUnavailable), http.StatusServiceUnavailable},
+		"publish failed":            {fmt.Errorf("%w: publish ingest message: %w", ErrUnavailable, errors.New("nats: timeout")), http.StatusServiceUnavailable},
+		"database unreachable":      {fmt.Errorf("begin tenant transaction: %w", connectErr), http.StatusServiceUnavailable},
+		"connection lost mid-query": {fmt.Errorf("insert ci: %w", io.ErrUnexpectedEOF), http.StatusInternalServerError},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			WriteRepoError(w, tc.err)
+			if w.Code != tc.status {
+				t.Fatalf("status %d (%s), want %d", w.Code, w.Body.String(), tc.status)
+			}
+			if tc.status == http.StatusServiceUnavailable && w.Header().Get("Retry-After") != UnavailableRetryAfter {
+				t.Errorf("Retry-After %q, want %q", w.Header().Get("Retry-After"), UnavailableRetryAfter)
+			}
+			for _, leak := range []string{"nats", "ingest queue", "reticora_runtime", closed, "connect", "dial"} {
+				if strings.Contains(w.Body.String(), leak) {
+					t.Errorf("answer names %q: %s", leak, w.Body.String())
+				}
 			}
 		})
 	}

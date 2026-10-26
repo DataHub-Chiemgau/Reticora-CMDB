@@ -1,5 +1,6 @@
-// Shared helpers of the load scenarios (NFR-10, WP-204).
+// Shared helpers of the load scenarios (NFR-10, WP-204, WP-437).
 import http from 'k6/http';
+import crypto from 'k6/crypto';
 import { check, fail } from 'k6';
 
 export const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8080').replace(/\/$/, '');
@@ -36,6 +37,40 @@ export function firstID(query) {
     fail(`no CI for ${query}; seed the database first (make seed SEED_OBJECTS=10000)`);
   }
   return data[0].id;
+}
+
+// total returns the total of a CI list query (-1 on an error).
+export function total(query, name = 'count') {
+  const res = http.get(`${BASE_URL}/api/v1/cis?limit=1${query ? `&${query}` : ''}`, params(name));
+  return res.status === 200 ? Number(res.json('total')) : -1;
+}
+
+// The demo organization of backend/cmd/seed (-prefix empty): its slug and
+// the second octet of its management network.
+const SEED_PREFIX = __ENV.SEED_PREFIX || 'demo';
+const SEED_OCTET = Number(__ENV.SEED_OCTET || 10);
+
+const hex2 = (v) => (v & 255).toString(16).padStart(2, '0');
+
+// seedDevice returns CI n of the demo organization as cmd/seed derives it:
+// 1-2 switches, 3-4 PDUs, the rest servers; serial number, management IP
+// and the MAC of eth0 from md5 of the seed key, like the seed's SQL.
+export function seedDevice(n) {
+  const kind = n <= 2 ? ['sw', 'switch', 'RX-48'] : n <= 4 ? ['pdu', 'pdu', 'PX-16'] : ['srv', 'server', 'R-1U'];
+  const mac = crypto.md5(`${SEED_PREFIX}/mac/${n}`, 'hex');
+  return {
+    n,
+    name: `${kind[0]}-${String(n).padStart(5, '0')}`,
+    type: kind[1],
+    model: kind[2],
+    serial: `SN${crypto.md5(`${SEED_PREFIX}/serial/${n}`, 'hex').slice(0, 12).toUpperCase()}`,
+    ip: `10.${SEED_OCTET}.${Math.floor(n / 250)}.${(n % 250) + 1}`,
+    mac: `02:${[0, 2, 4, 6, 8].map((i) => mac.slice(i, i + 2)).join(':')}`,
+    // Globally administered MACs the seed does not hold (REC-02 ignores
+    // locally administered ones such as 02:…): the chassis MAC and eth1.
+    chassisMAC: `ac:1f:6b:00:${hex2(n >> 8)}:${hex2(n)}`,
+    eth1MAC: `ac:1f:6b:01:${hex2(n >> 8)}:${hex2(n)}`,
+  };
 }
 
 // uuid returns a random version 4 UUID (record ids of the ingest).

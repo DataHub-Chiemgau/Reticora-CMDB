@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"regexp"
@@ -79,6 +80,15 @@ type Config struct {
 	OperatorGroup        string
 	OperatorMFAACR       string
 	AllowInsecureDevAuth bool // opt-in: accept session tokens without signature verification
+	// Alertmanager bridge of the operator path (OPS-05, E-75):
+	// RETICORA_OPS_ALERT_TOKEN is the bearer token Alertmanager sends (at
+	// least 32 characters, not the break-glass token; surrounding white
+	// space is dropped as Alertmanager drops it from its credentials file);
+	// RETICORA_OPS_ALERT_ORG_ID is the operator organization whose
+	// notification channels deliver the alerts. Without the organization the
+	// bridge answers 404 and Alertmanager delivers by e-mail only.
+	OpsAlertToken string
+	OpsAlertOrgID string
 
 	// Entitlements
 	DefaultPlan string // plan provisioned for the --no-db demo organization
@@ -109,6 +119,12 @@ type Config struct {
 	// metrics. It multiplies the series count by the number of tenants, so it
 	// is opt-in for bounded-tenant deployments.
 	MetricsTenantLabel bool
+	// PprofAddr is the loopback address of the profiling listener
+	// (RETICORA_PPROF_ADDR, e.g. 127.0.0.1:6060; NFR-02, WP-438): the CPU
+	// profile of a load run. Empty (the default) starts no listener; the
+	// start check allows it only in development, on a loopback IP and
+	// without RETICORA_EGRESS_ALLOW_PRIVATE.
+	PprofAddr string
 
 	// EgressAllowPrivate permits webhook and connector destinations and own
 	// SMTP servers in private networks and on other SMTP ports (dedicated,
@@ -233,6 +249,8 @@ func Load() *Config {
 		OperatorGroup:           l.str("RETICORA_OPERATOR_GROUP", "operators"),
 		OperatorMFAACR:          l.str("RETICORA_OPERATOR_MFA_ACR", "2"),
 		AllowInsecureDevAuth:    l.str("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
+		OpsAlertToken:           strings.TrimSpace(l.str("RETICORA_OPS_ALERT_TOKEN", "")),
+		OpsAlertOrgID:           strings.TrimSpace(l.str("RETICORA_OPS_ALERT_ORG_ID", "")),
 
 		DefaultPlan: l.str("RETICORA_DEFAULT_PLAN", "essential"),
 
@@ -260,6 +278,7 @@ func Load() *Config {
 		// Opt-in: the organization_id label multiplies the HTTP metric series
 		// by the tenant count. Default off; enable for bounded-tenant setups.
 		MetricsTenantLabel: l.boolean("RETICORA_METRICS_TENANT_LABEL", false),
+		PprofAddr:          strings.TrimSpace(l.str("RETICORA_PPROF_ADDR", "")),
 		RateLimitRPM:       l.integer("RETICORA_RATE_LIMIT_RPM", 600),
 		RateLimitOrgRPM:    l.integer("RETICORA_RATE_LIMIT_ORG_RPM", 6000),
 
@@ -299,6 +318,10 @@ func Load() *Config {
 		cfg.workers[name] = l.boolean(WorkerEnvKey(name), true)
 	}
 	cfg.warnings = l.checkWorkerSwitches(cfg.workers)
+	if cfg.OpsAlertToken != "" && cfg.OpsAlertOrgID == "" {
+		cfg.warnings = append(cfg.warnings, "RETICORA_OPS_ALERT_TOKEN is set without RETICORA_OPS_ALERT_ORG_ID: "+
+			"the Alertmanager bridge answers 404 (E-75)")
+	}
 
 	cfg.explicit = l.set
 	cfg.invalid = l.invalid
@@ -479,6 +502,8 @@ func (c *Config) Validate(noDB bool) error {
 	if c.OperatorToken != "" && len(c.OperatorToken) < 32 {
 		errs = append(errs, fmt.Errorf("RETICORA_OPERATOR_TOKEN must have at least 32 characters"))
 	}
+	errs = append(errs, c.opsAlertErrors()...)
+	errs = append(errs, c.pprofErrors()...)
 	switch c.TrialPlan {
 	case "essential", "standard", "pro", "enterprise":
 	default:
@@ -568,6 +593,59 @@ func (c *Config) Validate(noDB bool) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// uuidValue matches a UUID in its canonical text form.
+var uuidValue = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// opsAlertErrors checks the Alertmanager bridge (OPS-05, E-75): the
+// operator organization is a UUID and needs the token; the token has at
+// least 32 characters and is not the break-glass token, whose every use is
+// an alarm and which must not sit in Alertmanager's secrets.
+func (c *Config) opsAlertErrors() []error {
+	var errs []error
+	if c.OpsAlertToken != "" && len(c.OpsAlertToken) < 32 {
+		errs = append(errs, fmt.Errorf("RETICORA_OPS_ALERT_TOKEN must have at least 32 characters"))
+	}
+	if c.OpsAlertToken != "" && c.OpsAlertToken == c.OperatorToken {
+		errs = append(errs, fmt.Errorf("RETICORA_OPS_ALERT_TOKEN must differ from RETICORA_OPERATOR_TOKEN"))
+	}
+	if c.OpsAlertOrgID != "" {
+		if !uuidValue.MatchString(c.OpsAlertOrgID) {
+			errs = append(errs, fmt.Errorf("RETICORA_OPS_ALERT_ORG_ID must be the UUID of the operator organization"))
+		}
+		if c.OpsAlertToken == "" {
+			errs = append(errs, fmt.Errorf("RETICORA_OPS_ALERT_ORG_ID requires RETICORA_OPS_ALERT_TOKEN"))
+		}
+	}
+	return errs
+}
+
+// pprofErrors checks the profiling listener (RETICORA_PPROF_ADDR, WP-438).
+// The profiles show the server's code paths and run CPU profiles on
+// request, so nobody but the host may reach them: a loopback IP with a port,
+// only in development (the load runs of load.yml), and not together with
+// RETICORA_EGRESS_ALLOW_PRIVATE, which lets webhooks and connectors reach
+// loopback addresses.
+func (c *Config) pprofErrors() []error {
+	if c.PprofAddr == "" {
+		return nil
+	}
+	var errs []error
+	host, port, err := net.SplitHostPort(c.PprofAddr)
+	ip := net.ParseIP(host)
+	n, perr := strconv.Atoi(port)
+	if err != nil || ip == nil || !ip.IsLoopback() || perr != nil || n < 1 || n > 65535 {
+		errs = append(errs, fmt.Errorf("RETICORA_PPROF_ADDR=%q must be a loopback IP with a port, e.g. 127.0.0.1:6060", c.PprofAddr))
+	}
+	if !c.IsDevelopment() {
+		errs = append(errs, fmt.Errorf("RETICORA_PPROF_ADDR is only allowed with RETICORA_ENVIRONMENT=%s, not %s", EnvDevelopment, c.Environment))
+	}
+	if c.EgressAllowPrivate {
+		errs = append(errs, fmt.Errorf("RETICORA_PPROF_ADDR must not be combined with RETICORA_EGRESS_ALLOW_PRIVATE=true: "+
+			"webhooks and connectors could reach the profiles on the loopback address"))
+	}
+	return errs
 }
 
 // loader reads RETICORA_* variables and records which were set and which

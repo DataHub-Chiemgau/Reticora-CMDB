@@ -3,6 +3,7 @@ package database_test
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
@@ -141,7 +143,9 @@ func (m *migrator) upTo(ctx context.Context, target int) {
 // previous version exactly. Each migration is checked in isolation on the way
 // up: schema before up N must equal the schema after up N + down N, and
 // re-applying N must give the schema after the first up N again. The last
-// iteration is the down 1/up 1 check of the newest migration.
+// iteration is the down 1/up 1 check of the newest migration. Migrations
+// whose down or up also writes rows have a data check (migrationDataChecks)
+// around their down and the following up.
 func TestMigrationsRoundtrip(t *testing.T) {
 	dsn := testDatabaseURL(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -172,7 +176,14 @@ func TestMigrationsRoundtrip(t *testing.T) {
 		before := schemaDump(ctx, t, conn)
 		m.up(ctx)
 		afterUp := schemaDump(ctx, t, conn)
+		check, hasCheck := migrationDataChecks[f.name]
+		if hasCheck {
+			check.seed(ctx, t, conn)
+		}
 		m.down(ctx)
+		if hasCheck {
+			check.afterDown(ctx, t, conn)
+		}
 		diff, unused := withoutKnownDeviations(f.version, diffLines(before, schemaDump(ctx, t, conn)))
 		if diff != "" {
 			t.Errorf("down %06d_%s does not restore the schema of version %06d (- before up, + after down):\n%s",
@@ -183,6 +194,9 @@ func TestMigrationsRoundtrip(t *testing.T) {
 				f.version, f.name, strings.Join(unused, ", "))
 		}
 		m.up(ctx)
+		if hasCheck {
+			check.afterUp(ctx, t, conn)
+		}
 		if diff := diffLines(afterUp, schemaDump(ctx, t, conn)); diff != "" {
 			t.Errorf("re-applying %06d_%s after its down gives a different schema (- first up, + second up):\n%s",
 				f.version, f.name, diff)
@@ -271,6 +285,161 @@ var knownDownDeviations = map[int][]string{
 	// 000056 down keeps FORCE ROW LEVEL SECURITY on purpose (see the comment in
 	// the migration): reverting it would weaken tenant isolation.
 	56: {"relation alert_rule ", "relation webhook_dead_letter "},
+}
+
+// dataCheck seeds rows after the up of a migration (seed) and checks what
+// its down (afterDown) and the up that follows (afterUp) do with them; the
+// schema dumps do not see rows. afterDown removes the objects the schema
+// comparison would see, afterUp removes the rows.
+type dataCheck struct {
+	seed, afterDown, afterUp func(ctx context.Context, t *testing.T, conn *pgx.Conn)
+}
+
+// migrationDataChecks are the data checks by migration name.
+var migrationDataChecks = map[string]dataCheck{
+	"attr_text_leakproof": {seedAttrText, attrTextDownQueuesJobs, attrTextUpQueuesRebuilds},
+}
+
+// The fixture of attr_text_leakproof (000162, WP-435): an organization with
+// a searchable type definition (index over reticora_attr_text), a unique
+// global definition (index still over ->>, with a queued rebuild job), a
+// definition without index and a searchable system definition.
+const (
+	rt162Org      = "c0de0162-0000-4000-8000-000000000001"
+	rt162Type     = "c0de0162-0000-4000-8000-000000000002"
+	rt162Indexed  = "c0de0162-0000-4000-8000-000000000011"
+	rt162Unique   = "c0de0162-0000-4000-8000-000000000012"
+	rt162Plain    = "c0de0162-0000-4000-8000-000000000013"
+	rt162System   = "c0de0162-0000-4000-8000-000000000014"
+	rt162IndexA   = "idx_attr_c0de0162000040008000000000000011"
+	rt162IndexB   = "idx_attr_c0de0162000040008000000000000012_u"
+	rt162Function = "public.reticora_attr_text(jsonb, text)"
+)
+
+func execAll(ctx context.Context, t *testing.T, conn *pgx.Conn, stmts ...string) {
+	t.Helper()
+	for _, s := range stmts {
+		if _, err := conn.Exec(ctx, s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+}
+
+func seedAttrText(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+	execAll(ctx, t, conn,
+		`INSERT INTO organization (id, name, slug) VALUES ('`+rt162Org+`', 'roundtrip 000162', 'roundtrip-000162')`,
+		`INSERT INTO ci_type (id, organization_id, key, name) VALUES ('`+rt162Type+`', '`+rt162Org+`', 'rt162-type', 'rt162-type')`,
+		`INSERT INTO attribute_definition (id, organization_id, ci_type_id, scope, key, data_type, searchable, is_unique, unique_scope) VALUES
+			('`+rt162Indexed+`', '`+rt162Org+`', '`+rt162Type+`', 'type', 'rt162_a', 'text', true, false, 'org'),
+			('`+rt162Unique+`', '`+rt162Org+`', NULL, 'global', 'rt162_b', 'text', false, true, 'client'),
+			('`+rt162Plain+`', '`+rt162Org+`', '`+rt162Type+`', 'type', 'rt162_c', 'text', false, false, 'org'),
+			('`+rt162System+`', NULL, NULL, 'global', 'rt162_d', 'text', true, false, 'org')`,
+		`CREATE INDEX `+rt162IndexA+` ON ci (organization_id, reticora_attr_text(attributes, 'rt162_a'))
+			WHERE deleted_at IS NULL AND reticora_attr_text(attributes, 'rt162_a') IS NOT NULL
+			  AND organization_id = '`+rt162Org+`'::uuid AND ci_type_id = '`+rt162Type+`'::uuid`,
+		`CREATE UNIQUE INDEX `+rt162IndexB+` ON ci (organization_id, client_id, (attributes ->> 'rt162_b')) NULLS NOT DISTINCT
+			WHERE deleted_at IS NULL AND (attributes ->> 'rt162_b') IS NOT NULL AND organization_id = '`+rt162Org+`'::uuid`,
+		`INSERT INTO job (organization_id, kind, params, max_attempts, timeout_seconds)
+			VALUES ('`+rt162Org+`', 'attribute.index.rebuild', '{"definition_id": "`+rt162Unique+`"}', 3, 3600)`)
+}
+
+// queuedJobs lists the definition ids of the jobs of kind in status of the
+// fixture organization, with their attempts and timeout.
+func queuedJobs(ctx context.Context, t *testing.T, conn *pgx.Conn, kind, status string) []string {
+	t.Helper()
+	rows, err := conn.Query(ctx, `
+		SELECT (params ->> 'definition_id') || ' ' || max_attempts || ' ' || timeout_seconds || ' ' || (finished_at IS NOT NULL)
+		  FROM job WHERE organization_id = $1 AND kind = $2 AND status = $3 ORDER BY 1`, rt162Org, kind, status)
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	jobs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	return jobs
+}
+
+// attrTextDownQueuesJobs: the down drops the function with the indexes
+// built over it, keeps the indexes over ->>, cancels the queued rebuild jobs
+// and queues one attribute.index job per searchable or unique definition
+// of an organization, which the DDL job of the previous version builds
+// over ->> again.
+func attrTextDownQueuesJobs(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+	var function, indexA, indexB *string
+	if err := conn.QueryRow(ctx, `SELECT to_regprocedure($1)::text, to_regclass($2)::text, to_regclass($3)::text`,
+		rt162Function, rt162IndexA, rt162IndexB).Scan(&function, &indexA, &indexB); err != nil {
+		t.Fatal(err)
+	}
+	if function != nil || indexA != nil || indexB == nil {
+		t.Errorf("down 000162: function %v, index over the function %v, index over ->> %v; want the function and its index gone, the other index kept",
+			function, indexA, indexB)
+	}
+	if got, want := queuedJobs(ctx, t, conn, "attribute.index", "queued"),
+		[]string{rt162Indexed + " 3 3600 false", rt162Unique + " 3 3600 false"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("down 000162 queued attribute.index jobs %v, want %v (searchable or unique definitions of an organization)", got, want)
+	}
+	if got := queuedJobs(ctx, t, conn, "attribute.index.rebuild", "cancelled"); strings.Join(got, ",") != rt162Unique+" 3 3600 true" {
+		t.Errorf("down 000162: cancelled rebuild jobs %v, want the queued one", got)
+	}
+	execAll(ctx, t, conn, `DROP INDEX `+rt162IndexB, `DELETE FROM job WHERE organization_id = '`+rt162Org+`'`)
+}
+
+// attrTextUpQueuesRebuilds: the up creates the leakproof function and
+// queues one attribute.index.rebuild job per searchable or unique
+// definition of an organization.
+func attrTextUpQueuesRebuilds(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+	var leakproof bool
+	if err := conn.QueryRow(ctx, `SELECT proleakproof FROM pg_proc WHERE oid = to_regprocedure($1)`, rt162Function).Scan(&leakproof); err != nil || !leakproof {
+		t.Errorf("up 000162: reticora_attr_text leakproof %v, %v", leakproof, err)
+	}
+	if got, want := queuedJobs(ctx, t, conn, "attribute.index.rebuild", "queued"),
+		[]string{rt162Indexed + " 3 3600 false", rt162Unique + " 3 3600 false"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("up 000162 queued rebuild jobs %v, want %v (searchable or unique definitions of an organization)", got, want)
+	}
+	execAll(ctx, t, conn,
+		`DELETE FROM job WHERE organization_id = '`+rt162Org+`'`,
+		`DELETE FROM attribute_definition WHERE id IN ('`+rt162Indexed+`', '`+rt162Unique+`', '`+rt162Plain+`', '`+rt162System+`')`,
+		`DELETE FROM ci_type WHERE id = '`+rt162Type+`'`,
+		`DELETE FROM organization WHERE id = '`+rt162Org+`'`)
+}
+
+// TestAttrTextMigrationNeedsSuperuser covers the guard of migration 000162
+// (WP-435, E-73): only a superuser can declare reticora_attr_text
+// LEAKPROOF; for any other role the migration stops at its first statement
+// with insufficient_privilege and a message that names decision E-73 and
+// its option B. It runs the up file as reticora_owner in a transaction that
+// is rolled back, so the schema is not changed.
+func TestAttrTextMigrationNeedsSuperuser(t *testing.T) {
+	dsn := testDatabaseURL(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer conn.Close(context.Background())
+	up, err := os.ReadFile(filepath.Join(migrationsDir, "000162_attr_text_leakproof.up.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if _, err = tx.Exec(ctx, `SET LOCAL ROLE `+database.DefaultOwnerRole); err != nil {
+		t.Fatal(err)
+	}
+	_, err = tx.Exec(ctx, string(up))
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "42501" || !strings.Contains(pgErr.Message, "E-73") ||
+		!strings.Contains(pgErr.Message, "option B") || !strings.Contains(pgErr.Message, "superuser") {
+		t.Fatalf("migration 000162 as %s: %v; want insufficient_privilege naming E-73 option B", database.DefaultOwnerRole, err)
+	}
 }
 
 // withoutKnownDeviations removes the diff lines covered by

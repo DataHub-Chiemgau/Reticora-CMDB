@@ -233,8 +233,14 @@ services:
       # never become healthy even though startup succeeded.
       KC_HEALTH_ENABLED: "true"
       KC_PROXY: edge
+    # Plain HTTP with the admin console: 127.0.0.1 only (COL-08,
+    # docs/betrieb/firewall-matrix.md); browsers sign in through the
+    # frontend (/realms/, /resources/). An installation without a TLS domain
+    # addresses its OIDC issuer on this port of the host IP: install-cloud.sh
+    # then opts in (RETICORA_PUBLISH_DIRECT_PORTS=true) and sets
+    # RETICORA_DIRECT_PORTS_BIND=0.0.0.0.
     ports:
-      - "${RETICORA_KEYCLOAK_PORT:-8180}:8080"
+      - "${RETICORA_DIRECT_PORTS_BIND:-127.0.0.1}:${RETICORA_KEYCLOAK_PORT:-8180}:8080"
     volumes:
       # .generated/realm-reticora.json is written by install-cloud.sh with the
       # configured OIDC client secret substituted.
@@ -354,8 +360,12 @@ services:
       # Read-only view of the TLS material so RETICORA_OIDC_CA_CERT_FILE can
       # reference the certificate that this host serves for the issuer domain.
       - ./letsencrypt:/etc/letsencrypt:ro
+    # Plain-HTTP API: 127.0.0.1 only like Keycloak (COL-08); from outside
+    # the API is reached through the frontend (/api/, /bff/). All interfaces
+    # only with RETICORA_DIRECT_PORTS_BIND=0.0.0.0 (opt-in of an installation
+    # without a TLS domain, see keycloak).
     ports:
-      - "${RETICORA_SERVER_PORT:-8080}:8080"
+      - "${RETICORA_DIRECT_PORTS_BIND:-127.0.0.1}:${RETICORA_SERVER_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,8 +1,10 @@
 package discovery
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -424,68 +426,147 @@ const edgePKILockWait = time.Minute
 // certificate and key for the host names (server.pem, server-key.pem) and
 // its TLS, account and callout configuration (edge.conf, included by
 // nats-edge.conf). Replicas sharing dir export under an advisory lock, each
-// file through a temporary file of its own. An existing server key pair is
-// kept only while key and certificate match, the certificate stems from the
-// CA that issues the edge server certificate and 60 % of its lifetime have
-// not passed; the endpoint picks up new files on reload.
+// file through a temporary file of its own, from the CA state current under
+// the lock (a change of the CA writes the files under the same lock). An
+// existing server key pair is kept only while key and certificate match,
+// the certificate stems from the edge issuer (the oldest trusted CA: the
+// previous one during a roll-over) and 60 % of its lifetime have not
+// passed; the endpoint picks up new files on reload.
 func ExportEdgePKI(ctx context.Context, ca *CA, sec *EdgeSecrets, dir string, hosts []string, now time.Time) error {
-	// Loading the CA takes a connection of its own: before the lock, so the
-	// export holds only the lock's connection.
-	bundle, err := ca.TrustBundle(ctx)
-	if err != nil {
-		return err
-	}
-	return withEdgePKILock(ctx, ca.pool, func() error {
-		return writeEdgePKI(ctx, ca, bundle, sec, dir, hosts, now)
-	})
+	_, _, err := exportEdgePKI(ctx, ca, sec, dir, hosts, now)
+	return err
 }
 
-// writeEdgePKI writes the files of ExportEdgePKI; the caller holds the lock
-// of the export.
-func writeEdgePKI(ctx context.Context, ca *CA, bundle string, sec *EdgeSecrets, dir string, hosts []string, now time.Time) error {
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return fmt.Errorf("pki dir: %w", err)
-	}
-	if err := writeFileAtomic(filepath.Join(dir, "ca.pem"), []byte(bundle), edgePublicMode); err != nil {
-		return err
-	}
-	if err := writeFileAtomic(filepath.Join(dir, "edge.conf"), []byte(edgeConf(sec)), edgeSecretMode); err != nil {
-		return err
-	}
-	certPath, keyPath := filepath.Join(dir, "server.pem"), filepath.Join(dir, "server-key.pem")
-	if keepServerPair(certPath, keyPath, ca.edgeServerIssuer(), now) {
-		// A key written by an earlier version may be readable by others.
-		return narrowMode(keyPath, edgeSecretMode)
-	}
-	certPEM, keyPEM, err := ca.IssueServer(ctx, hosts, EdgeServerCertValidity)
+// edgeExport is the outcome of an export: whether a file changed, and the
+// server certificate before it (nil without one), which a running endpoint
+// serves until it reloads.
+type edgeExport struct {
+	changed bool
+	served  []byte
+}
+
+// exportEdgePKI is ExportEdgePKI; it also returns the outcome and the CA
+// state it wrote.
+func exportEdgePKI(ctx context.Context, ca *CA, sec *EdgeSecrets, dir string, hosts []string, now time.Time) (*edgeExport, *caState, error) {
+	// Loading the CA takes a connection of its own: before the lock, so the
+	// export holds only the lock's connection. Under the lock the version is
+	// checked again on that connection.
+	st, err := ca.state(ctx)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	return writeServerPair(certPath, []byte(certPEM), keyPath, []byte(keyPEM))
+	var ex *edgeExport
+	err = withEdgePKILock(ctx, ca.pool, func(ctx context.Context, tx pgx.Tx) error {
+		cur, serr := ca.stateTx(ctx, tx)
+		if serr != nil {
+			return serr
+		}
+		if cur != nil {
+			st = cur
+		}
+		ex, serr = writeEdgePKI(st, sec, dir, hosts, now, ca.now())
+		return serr
+	})
+	return ex, st, err
+}
+
+// writeEdgePKI writes the files of ExportEdgePKI for the CA state st; the
+// caller holds the lock of the export. now decides whether the server
+// certificate is due, a new one is issued at issueAt (the CA's clock).
+func writeEdgePKI(st *caState, sec *EdgeSecrets, dir string, hosts []string, now, issueAt time.Time) (*edgeExport, error) {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, fmt.Errorf("pki dir: %w", err)
+	}
+	ex := &edgeExport{}
+	certPath, keyPath := filepath.Join(dir, "server.pem"), filepath.Join(dir, "server-key.pem")
+	if served, err := os.ReadFile(certPath); err == nil {
+		ex.served = served
+	}
+	for _, f := range []struct {
+		name string
+		data []byte
+		mode os.FileMode
+	}{{"ca.pem", []byte(st.bundle()), edgePublicMode}, {"edge.conf", []byte(edgeConf(sec)), edgeSecretMode}} {
+		path := filepath.Join(dir, f.name)
+		if old, err := os.ReadFile(path); err != nil || !bytes.Equal(old, f.data) {
+			ex.changed = true
+		}
+		if err := writeFileAtomic(path, f.data, f.mode); err != nil {
+			return nil, err
+		}
+	}
+	if keepServerPair(certPath, keyPath, st.edge.cert, now) {
+		// A key written by an earlier version may be readable by others.
+		return ex, narrowMode(keyPath, edgeSecretMode)
+	}
+	certPEM, keyPEM, err := issueWithKey(st.edge, "reticora-collector-nats", hosts, EdgeServerCertValidity, x509.ExtKeyUsageServerAuth, issueAt)
+	if err != nil {
+		return nil, err
+	}
+	ex.changed = true
+	return ex, writeServerPair(certPath, []byte(certPEM), keyPath, []byte(keyPEM))
 }
 
 // withEdgePKILock runs export under the advisory lock of the export
-// (edgePKILockClass). The lock lives in a transaction of its own, which
-// holds one connection of pool for as long as export runs: its end releases
-// lock and connection on every path, an error and a panic included.
-func withEdgePKILock(ctx context.Context, pool *pgxpool.Pool, export func() error) error {
-	return database.WithSystem(ctx, pool, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`, fmt.Sprintf("%dms", edgePKILockWait.Milliseconds())); err != nil {
-			return fmt.Errorf("edge PKI lock: %w", err)
+// (edgePKILockClass). The lock lives in a transaction of its own (operator
+// context: export reads collector_ca on it), which holds one connection of
+// pool for as long as export runs: its end releases lock and connection on
+// every path, an error and a panic included.
+func withEdgePKILock(ctx context.Context, pool *pgxpool.Pool, export func(ctx context.Context, tx pgx.Tx) error) error {
+	return database.WithOperator(ctx, pool, func(ctx context.Context, tx pgx.Tx) error {
+		if err := lockEdgePKI(ctx, tx); err != nil {
+			return err
 		}
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, 0)`, edgePKILockClass); err != nil {
-			return fmt.Errorf("edge PKI lock: %w", err)
-		}
-		return export()
+		return export(ctx, tx)
 	})
 }
 
-// edgeServerIssuer is the CA certificate that issues the endpoint's server
-// certificate (IssueServer): the active CA.
-func (ca *CA) edgeServerIssuer() *x509.Certificate {
-	ca.mu.Lock()
-	defer ca.mu.Unlock()
-	return ca.cert
+// lockEdgePKI takes the lock of the export within tx, waiting at most
+// edgePKILockWait.
+func lockEdgePKI(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`, fmt.Sprintf("%dms", edgePKILockWait.Milliseconds())); err != nil {
+		return fmt.Errorf("edge PKI lock: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, 0)`, edgePKILockClass); err != nil {
+		return fmt.Errorf("edge PKI lock: %w", err)
+	}
+	return nil
+}
+
+// applyEdgeChange writes the endpoint's files for the CA state after a
+// change within the change's transaction tx, under the lock of the export
+// (the exports of the replicas wait for the commit and then read the new
+// state), and has the endpoint reload them: the change commits only once
+// the endpoint loaded them (COL-04).
+func applyEdgeChange(ctx context.Context, tx pgx.Tx, edge *EdgeConfig, st *caState, now time.Time) error {
+	if err := lockEdgePKI(ctx, tx); err != nil {
+		return err
+	}
+	ex, err := writeEdgePKI(st, edge.Secrets, edge.PKIDir, edge.Hosts, now, now)
+	if err != nil {
+		return err
+	}
+	if err = reloadEdge(ctx, edge.URL, edge.Secrets.SysPassword, st, ex.served, now); err != nil {
+		return fmt.Errorf("reload the collector NATS endpoint: %w", err)
+	}
+	return nil
+}
+
+// restoreEdge exports the endpoint's files again from the committed CA
+// state after a change that wrote them did not commit, and has a running
+// endpoint reload them.
+func restoreEdge(ctx context.Context, ca *CA, edge *EdgeConfig) error {
+	now := ca.now()
+	ex, st, err := exportEdgePKI(ctx, ca, edge.Secrets, edge.PKIDir, edge.Hosts, now)
+	if err != nil {
+		return fmt.Errorf("restore the files of the collector NATS endpoint: %w", err)
+	}
+	if ex.changed && ex.served != nil {
+		if err = reloadEdge(ctx, edge.URL, edge.Secrets.SysPassword, st, ex.served, now); err != nil {
+			return fmt.Errorf("reload the restored files of the collector NATS endpoint (restart nats-edge): %w", err)
+		}
+	}
+	return nil
 }
 
 // keepServerPair reports whether the server key pair in the files stays: the
@@ -583,6 +664,75 @@ func writeTemp(path string, data []byte, mode os.FileMode) (string, error) {
 	return f.Name(), nil
 }
 
+// Requests of the endpoint's system account to reload the configuration:
+// every server answers the ping, then each one reloads (nats-server 2.10+).
+const (
+	edgePingSubject   = "$SYS.REQ.SERVER.PING"
+	edgeReloadSubject = "$SYS.REQ.SERVER.%s.RELOAD"
+)
+
+// reloadEdge has every server of the endpoint at url reload its
+// configuration and files ($SYS.REQ.SERVER.<id>.RELOAD as the edge worker's
+// system login, WP-381) and checks that it loaded those of the CA state st:
+// afterwards it admits a client certificate of the active CA and serves a
+// server certificate of the trust bundle. Until it reloads, the endpoint
+// serves served, the server certificate before the export; the reload
+// connection accepts exactly that certificate besides the trust bundle,
+// since after a retirement its CA is no longer trusted. Its client
+// certificate is one of the edge issuer, which the endpoint trusts before
+// and after the change.
+func reloadEdge(ctx context.Context, url, sysPassword string, st *caState, served []byte, now time.Time) error {
+	tlsConf, err := edgeClientTLSFor(st, st.edge, EdgeSysUser, now)
+	if err != nil {
+		return err
+	}
+	if served != nil {
+		if cert, perr := parsePEMCert(string(served)); perr == nil {
+			tlsConf.RootCAs.AddCert(cert)
+		}
+	}
+	nc, err := nats.Connect(url, nats.Name(EdgeSysUser), nats.UserInfo(EdgeSysUser, sysPassword), nats.Secure(tlsConf),
+		nats.TLSHandshakeFirst(), nats.Timeout(edgeSysTimeout), nats.NoReconnect())
+	if err != nil {
+		return fmt.Errorf("connect %s as %s: %w", url, EdgeSysUser, err)
+	}
+	defer nc.Close()
+	servers, err := sysRequestAll(nc, edgePingSubject, nil)
+	if err != nil {
+		return err
+	}
+	for _, s := range servers {
+		msg, rerr := nc.Request(fmt.Sprintf(edgeReloadSubject, s.Server.ID), nil, edgeReloadTimeout)
+		if rerr != nil {
+			return fmt.Errorf("reload server %s: %w", s.Server.ID, rerr)
+		}
+		var answer edgeServerAnswer
+		if jerr := json.Unmarshal(msg.Data, &answer); jerr != nil {
+			return fmt.Errorf("reload server %s: %w", s.Server.ID, jerr)
+		}
+		if answer.Error != nil {
+			return fmt.Errorf("reload server %s: %s", s.Server.ID, answer.Error.Description)
+		}
+	}
+	probe, err := edgeClientTLSFor(st, st.active, EdgeSysUser, now)
+	if err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	pc, err := nats.Connect(url, nats.Name(EdgeSysUser), nats.UserInfo(EdgeSysUser, sysPassword), nats.Secure(probe),
+		nats.TLSHandshakeFirst(), nats.Timeout(edgeSysTimeout), nats.NoReconnect())
+	if err != nil {
+		return fmt.Errorf("the endpoint did not load the files of the collector CA: %w", err)
+	}
+	pc.Close()
+	return nil
+}
+
+// edgeReloadTimeout bounds the reload of one server.
+const edgeReloadTimeout = 10 * time.Second
+
 // EdgeConfig configures the collector NATS endpoint worker.
 type EdgeConfig struct {
 	Pool    *pgxpool.Pool
@@ -596,7 +746,8 @@ type EdgeConfig struct {
 	URL string
 	// Bus is the internal NATS: the worker receives the disables of
 	// collectors on it (CollectorDisabledSubject) and cuts their open
-	// connections at URL; nil cuts none, the user JWTs still expire.
+	// connections at URL; nil cuts none, the user JWTs still expire. It also
+	// receives the changes of the collector CA (CollectorCAChangedSubject).
 	Bus *nats.Conn
 	// UserValidity is the lifetime of the user JWTs of the callout; 0 is
 	// EdgeUserValidity (tests shorten it).
@@ -619,19 +770,37 @@ const (
 	edgeKickCheck    = "cut of disabled collectors"
 )
 
-// RunEdge keeps the endpoint's files current (daily), serves its
-// authorization callout, cuts the open connections of collectors that are
-// disabled and revokes the certificates superseded by a renewal at the
-// latest SupersededGrace after it (hourly) until ctx ends.
+// RunEdge keeps the endpoint's files current (daily and on every change of
+// the collector CA, CollectorCAChangedSubject) and has a running endpoint
+// reload changed ones, serves its authorization callout, cuts the open
+// connections of collectors that are disabled and revokes the certificates
+// superseded by a renewal at the latest SupersededGrace after it (hourly)
+// until ctx ends.
 func RunEdge(ctx context.Context, c *EdgeConfig) {
 	export := func() {
 		if c.PKIDir == "" {
 			return
 		}
-		if err := ExportEdgePKI(ctx, c.CA, c.Secrets, c.PKIDir, c.Hosts, time.Now().UTC()); err != nil {
+		now := time.Now().UTC()
+		ex, st, err := exportEdgePKI(ctx, c.CA, c.Secrets, c.PKIDir, c.Hosts, now)
+		if err != nil {
 			c.Cycles.Fail()
 			slog.Error("export collector NATS PKI", "dir", c.PKIDir, "error", err)
+			return
 		}
+		// The endpoint reads its files only at its start and on reload: a
+		// running one (a server certificate was there) reloads changed files,
+		// a renewed server certificate or the trust anchors of a change of
+		// the CA.
+		if !ex.changed || ex.served == nil || c.URL == "" {
+			return
+		}
+		if rerr := reloadEdge(ctx, c.URL, c.Secrets.SysPassword, st, ex.served, now); rerr != nil {
+			slog.Warn("reload of the collector NATS endpoint failed; it loads its files at its next start", "event", "discovery.edge.reload_failed",
+				"url", c.URL, "error", rerr)
+			return
+		}
+		slog.Info("collector NATS endpoint reloaded its files", "event", "discovery.edge.reloaded", "url", c.URL)
 	}
 	sweep := func() {
 		if c.Pool == nil {
@@ -646,6 +815,21 @@ func RunEdge(ctx context.Context, c *EdgeConfig) {
 	}
 	export()
 	sweep()
+	// Announcements of a change of the CA arrive in the subscription's
+	// goroutine; one pending reload covers any number of them.
+	caChanged := make(chan struct{}, 1)
+	if c.Bus != nil {
+		go func() {
+			if err := watchCAChanges(ctx, c.Bus, c.CA, func() {
+				select {
+				case caChanged <- struct{}{}:
+				default:
+				}
+			}); err != nil {
+				slog.Error("collector CA changes", "error", err)
+			}
+		}()
+	}
 	if c.URL != "" {
 		go func() {
 			if err := serveEdgeAuth(ctx, c); err != nil {
@@ -672,6 +856,12 @@ func RunEdge(ctx context.Context, c *EdgeConfig) {
 			return
 		case <-ticker.C:
 			export()
+		case <-caChanged:
+			// The CA state is read anew (version check), the files follow it.
+			if _, err := c.CA.state(ctx); err != nil {
+				slog.Error("reload the collector CA", "error", err)
+			}
+			export()
 		case <-sweeps.C:
 			sweep()
 		}
@@ -687,12 +877,19 @@ func serveEdgeAuth(ctx context.Context, c *EdgeConfig) error {
 		svc.validity = c.UserValidity
 	}
 	svc.cycles = c.Cycles
-	tlsConf, err := edgeClientTLS(ctx, c.CA, EdgeAuthUser)
-	if err != nil {
-		return err
+	// Every (re)connect presents a client certificate of the CA state current
+	// then and verifies the endpoint with its trust bundle: after a
+	// retirement the former ones no longer fit the endpoint (COL-04).
+	clientCert := func() (tls.Certificate, error) {
+		conf, cerr := edgeClientTLS(ctx, c.CA, EdgeAuthUser)
+		if cerr != nil {
+			return tls.Certificate{}, cerr
+		}
+		return conf.Certificates[0], nil
 	}
+	roots := func() (*x509.CertPool, error) { return c.CA.TrustPool(ctx) }
 	nc, err := nats.Connect(c.URL, nats.Name(EdgeAuthUser), nats.UserInfo(EdgeAuthUser, c.Secrets.Password),
-		nats.Secure(tlsConf), nats.TLSHandshakeFirst(), nats.RetryOnFailedConnect(true), nats.MaxReconnects(-1))
+		nats.ClientTLSConfig(clientCert, roots), nats.TLSHandshakeFirst(), nats.RetryOnFailedConnect(true), nats.MaxReconnects(-1))
 	if err != nil {
 		return fmt.Errorf("connect %s: %w", c.URL, err)
 	}
@@ -703,9 +900,21 @@ func serveEdgeAuth(ctx context.Context, c *EdgeConfig) error {
 }
 
 // edgeClientTLS is the TLS configuration of a Reticora service at the
-// endpoint: an internal client certificate of the collector CA (CN = name).
+// endpoint for one connection: an internal client certificate (CN = name)
+// of the edge issuer, which the endpoint trusts before and after a change
+// of the CA, and the trust bundle as roots.
 func edgeClientTLS(ctx context.Context, ca *CA, name string) (*tls.Config, error) {
-	certPEM, keyPEM, err := ca.IssueInternalClient(ctx, name, EdgeServerCertValidity)
+	st, err := ca.state(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return edgeClientTLSFor(st, st.edge, name, ca.now())
+}
+
+// edgeClientTLSFor is edgeClientTLS for the CA state st with a client
+// certificate of issuer.
+func edgeClientTLSFor(st *caState, issuer *caCert, name string, now time.Time) (*tls.Config, error) {
+	certPEM, keyPEM, err := issueWithKey(issuer, name, nil, EdgeServerCertValidity, x509.ExtKeyUsageClientAuth, now)
 	if err != nil {
 		return nil, err
 	}
@@ -713,11 +922,91 @@ func edgeClientTLS(ctx context.Context, ca *CA, name string) (*tls.Config, error
 	if err != nil {
 		return nil, err
 	}
-	roots, err := ca.TrustPool(ctx)
-	if err != nil {
-		return nil, err
-	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM([]byte(st.bundle()))
 	return &tls.Config{Certificates: []tls.Certificate{pair}, RootCAs: roots, MinVersion: tls.VersionTLS12}, nil
+}
+
+// CollectorCAChangedSubject is the subject of the internal NATS on which a
+// change of collector_ca (Rollover, RetirePrevious) is announced
+// (AnnounceCAChange): every replica reads its CA state anew, its edge worker
+// exports the endpoint's files and has the endpoint reload changed ones
+// (COL-04). The internal NATS authenticates nobody and the collectors may
+// publish only below their own subject tree: the announcement carries no
+// state, only the version of collector_ca, a timestamp and a MAC with a key
+// derived from the master key; a receiver checks MAC and age and reads
+// collector_ca itself.
+const CollectorCAChangedSubject = "discovery.collector_ca.changed"
+
+// caChangeMaxAge bounds the age of an announcement (replay).
+const caChangeMaxAge = 5 * time.Minute
+
+// caChangeAnnouncement is the message on CollectorCAChangedSubject.
+type caChangeAnnouncement struct {
+	Version string `json:"version"`
+	At      string `json:"at"`
+	MAC     string `json:"mac"`
+}
+
+// caChangeMAC authenticates an announcement of version at the time at.
+func (ca *CA) caChangeMAC(version, at string) []byte {
+	m := hmac.New(sha256.New, ca.enc.Derive("reticora/collector-ca/changed"))
+	m.Write([]byte("reticora-collector-ca-changed\n" + version + "\n" + at))
+	return m.Sum(nil)
+}
+
+// AnnounceCAChange announces on the internal NATS that collector_ca changed
+// (ch committed).
+func (ca *CA) AnnounceCAChange(nc *nats.Conn, ch *CAChange) error {
+	data, err := ca.caChangeMessage(ch.version, time.Now())
+	if err != nil {
+		return err
+	}
+	if perr := nc.Publish(CollectorCAChangedSubject, data); perr != nil {
+		return perr
+	}
+	return nc.Flush()
+}
+
+// caChangeMessage is the announcement of version at the time at.
+func (ca *CA) caChangeMessage(version string, at time.Time) ([]byte, error) {
+	ts := at.UTC().Format(time.RFC3339Nano)
+	return json.Marshal(caChangeAnnouncement{Version: version, At: ts, MAC: hex.EncodeToString(ca.caChangeMAC(version, ts))})
+}
+
+// verifyCAChange checks an announcement: its MAC and an age of at most
+// caChangeMaxAge at now.
+func (ca *CA) verifyCAChange(data []byte, now time.Time) error {
+	var a caChangeAnnouncement
+	if err := json.Unmarshal(data, &a); err != nil {
+		return fmt.Errorf("malformed announcement: %w", err)
+	}
+	mac, err := hex.DecodeString(a.MAC)
+	if err != nil || !hmac.Equal(mac, ca.caChangeMAC(a.Version, a.At)) {
+		return errors.New("the announcement is not authentic")
+	}
+	at, err := time.Parse(time.RFC3339Nano, a.At)
+	if err != nil || now.Sub(at).Abs() > caChangeMaxAge {
+		return fmt.Errorf("the announcement of %q is outside %s", a.At, caChangeMaxAge)
+	}
+	return nil
+}
+
+// watchCAChanges calls changed for every authentic announcement on
+// CollectorCAChangedSubject (every replica, no queue group) until ctx ends.
+func watchCAChanges(ctx context.Context, nc *nats.Conn, ca *CA, changed func()) error {
+	sub, err := nc.Subscribe(CollectorCAChangedSubject, func(msg *nats.Msg) {
+		if verr := ca.verifyCAChange(msg.Data, time.Now()); verr != nil {
+			slog.Warn("collector CA change announcement ignored", "subject", msg.Subject, "error", verr)
+			return
+		}
+		changed()
+	})
+	if err != nil {
+		return fmt.Errorf("subscribe %s: %w", CollectorCAChangedSubject, err)
+	}
+	<-ctx.Done()
+	return sub.Unsubscribe()
 }
 
 // CollectorDisabledSubject is the subject of the internal NATS on which the
@@ -775,7 +1064,7 @@ func AnnounceDisabled(nc *nats.Conn, orgID, collectorID string) error {
 type edgeKicker struct {
 	url        string
 	password   string
-	tls        *tls.Config
+	ca         *CA
 	authorizer *EdgeAuthorizer
 	// validity is the lifetime of the user JWTs: after it every connection
 	// opened before the disable has passed the callout again.
@@ -787,11 +1076,7 @@ type edgeKicker struct {
 // serveEdgeKick cuts the connections of every collector announced on
 // CollectorDisabledSubject until ctx ends.
 func serveEdgeKick(ctx context.Context, c *EdgeConfig) error {
-	tlsConf, err := edgeClientTLS(ctx, c.CA, EdgeSysUser)
-	if err != nil {
-		return err
-	}
-	k := &edgeKicker{url: c.URL, password: c.Secrets.SysPassword, tls: tlsConf, authorizer: NewEdgeAuthorizer(c.Pool, c.CA),
+	k := &edgeKicker{url: c.URL, password: c.Secrets.SysPassword, ca: c.CA, authorizer: NewEdgeAuthorizer(c.Pool, c.CA),
 		validity: EdgeUserValidity, cycles: c.Cycles}
 	if c.UserValidity > 0 {
 		k.validity = c.UserValidity
@@ -873,7 +1158,11 @@ func (k *edgeKicker) cut(ctx context.Context, ev collectorDisabledEvent) (int, e
 	if err != nil {
 		return 0, fmt.Errorf("collector status: %w", err)
 	}
-	nc, err := nats.Connect(k.url, nats.Name(EdgeSysUser), nats.UserInfo(EdgeSysUser, k.password), nats.Secure(k.tls),
+	tlsConf, err := edgeClientTLS(ctx, k.ca, EdgeSysUser)
+	if err != nil {
+		return 0, err
+	}
+	nc, err := nats.Connect(k.url, nats.Name(EdgeSysUser), nats.UserInfo(EdgeSysUser, k.password), nats.Secure(tlsConf),
 		nats.TLSHandshakeFirst(), nats.Timeout(edgeSysTimeout), nats.NoReconnect())
 	if err != nil {
 		return 0, fmt.Errorf("connect %s as %s: %w", k.url, EdgeSysUser, err)

@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
@@ -143,10 +144,45 @@ func listPlanProblem(t *testing.T, plan []byte) string {
 	return strings.Join(problems, "; ") + ": " + describePlan(nodes)
 }
 
+// seedListCIs inserts n CIs of organization A as cmd/seed places them: in
+// pairs with the same created_at (the order falls back on the id),
+// alternately of client 1 and client 2, each in a room of its client, so
+// ci_derive_location gives every CI a site; every tenth is in
+// maintenance. With a client and a site on every CI, the planner estimates
+// one CI visible to an org-wide principal (the client and site predicates
+// of ci_isolation, 0.5 % each).
+func seedListCIs(t *testing.T, f *scopetest.Fixture, n int) {
+	t.Helper()
+	bg := context.Background()
+	var serverType string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&serverType); err != nil {
+		t.Fatal(err)
+	}
+	room1, room2 := f.Room(t, f.Client1, "list-room-1"), f.Room(t, f.Client2, "list-room-2")
+	if _, err := f.Admin.Exec(bg, `INSERT INTO ci (organization_id, client_id, location_id, ci_type_id, name, status, created_at)
+		SELECT $1, CASE WHEN i % 2 = 0 THEN $2::uuid ELSE $3::uuid END, CASE WHEN i % 2 = 0 THEN $4::uuid ELSE $5::uuid END,
+			$6, 'list-' || i, CASE WHEN i % 10 = 0 THEN 'maintenance' ELSE 'active' END,
+			'2026-01-01 00:00:00+00'::timestamptz + ((i / 2) || ' seconds')::interval
+		FROM generate_series(1, $7::int) AS i`, f.OrgA, f.Client1, f.Client2, room1, room2, serverType, n); err != nil {
+		t.Fatal(err)
+	}
+	var sited int
+	if err := f.Admin.QueryRow(bg, `SELECT count(site_id) FROM ci WHERE organization_id = $1`, f.OrgA).Scan(&sited); err != nil || sited != n {
+		t.Fatalf("%d of %d CIs with a site (%v)", sited, n, err)
+	}
+}
+
 // explainAsApp returns the plan of stmt as the application role in the
 // tenant context of an org-wide principal of orgID, so the row level
 // policies are part of it. prepare runs first in the same transaction.
 func explainAsApp(t *testing.T, app *pgxpool.Pool, orgID string, stmt loggedStatement, prepare ...string) []byte {
+	t.Helper()
+	return explainAsAppWith(t, app, orgID, "FORMAT JSON", stmt, prepare...)
+}
+
+// explainAsAppWith is explainAsApp with the EXPLAIN options (e.g. ANALYZE,
+// VERBOSE; FORMAT JSON among them).
+func explainAsAppWith(t *testing.T, app *pgxpool.Pool, orgID, options string, stmt loggedStatement, prepare ...string) []byte {
 	t.Helper()
 	var plan []byte
 	scope := database.OrgWideScope(orgID, "")
@@ -156,7 +192,7 @@ func explainAsApp(t *testing.T, app *pgxpool.Pool, orgID string, stmt loggedStat
 				return err
 			}
 		}
-		return tx.QueryRow(ctx, "EXPLAIN (FORMAT JSON) "+stmt.sql, stmt.args...).Scan(&plan)
+		return tx.QueryRow(ctx, "EXPLAIN ("+options+") "+stmt.sql, stmt.args...).Scan(&plan)
 	})
 	if err != nil {
 		t.Fatalf("explain %s: %v", stmt.sql, err)
@@ -164,32 +200,24 @@ func explainAsApp(t *testing.T, app *pgxpool.Pool, orgID string, stmt loggedStat
 	return plan
 }
 
-// TestCIListBudget covers NFR-02 and ABN-02 for GET /cis (WP-605, F-117)
-// against PostgreSQL with 10,000 CIs: a page of the list sends a fixed
-// number of statements (no N+1), reads its rows from idx_ci_list_sort as
-// the application role without sorting the organization (also ascending
-// and on the next page of its cursor), and total stays the exact count,
-// which a page shorter than the limit gives without counting. Without the
-// index the plan check names it.
+// TestCIListBudget covers NFR-02 and ABN-02 for GET /cis (WP-605, WP-438,
+// F-117) against PostgreSQL with 10,000 CIs that carry a client and a site
+// like the seed's (with them the planner expects one visible CI): a page of
+// the list sends a fixed number of statements (no N+1), reads its rows from
+// idx_ci_list_sort as the application role without sorting the
+// organization (also ascending and on the next page of its cursor), and
+// total stays the exact count, which a page shorter than the limit gives
+// without counting. The plan is the one of the request's transaction: the
+// settings the request made before the page apply. Without the index the
+// plan check names it.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestCIListBudget(t *testing.T) {
 	f := scopetest.Seed(t, "f7")
 	bg := context.Background()
-	var serverType string
-	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&serverType); err != nil {
-		t.Fatal(err)
-	}
-	// Pairs of CIs share created_at, so the order falls back on the id; a
-	// deleted CI and the CIs of organization B stay out of the list.
+	// A deleted CI and the CIs of organization B stay out of the list.
 	const n = 10000
-	if _, err := f.Admin.Exec(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status, created_at)
-		SELECT $1, CASE WHEN i % 2 = 0 THEN $2::uuid ELSE $3::uuid END, $4, 'list-' || i,
-			CASE WHEN i % 10 = 0 THEN 'maintenance' ELSE 'active' END,
-			'2026-01-01 00:00:00+00'::timestamptz + ((i / 2) || ' seconds')::interval
-		FROM generate_series(1, $5::int) AS i`, f.OrgA, f.Client1, f.Client2, serverType, n); err != nil {
-		t.Fatal(err)
-	}
+	seedListCIs(t, f, n)
 	f.CI(t, f.OrgB, "", "list-other-org")
 	deleted := f.CI(t, f.OrgA, f.Client1, "list-deleted")
 	if _, err := f.Admin.Exec(bg, `UPDATE ci SET deleted_at = now() WHERE id = $1`, deleted); err != nil {
@@ -269,14 +297,29 @@ func TestCIListBudget(t *testing.T) {
 		}
 		return pages[0]
 	}
+	// pagePlan EXPLAINs the page as the application role after the
+	// settings (SET LOCAL) the request made before it.
+	pagePlan := func(stmts []loggedStatement) []byte {
+		t.Helper()
+		var settings []string
+		for _, s := range stmts {
+			if strings.Contains(s.sql, "ORDER BY") {
+				break
+			}
+			if strings.HasPrefix(s.sql, "SET LOCAL ") {
+				settings = append(settings, s.sql)
+			}
+		}
+		return explainAsApp(t, f.App, f.OrgA, pageStatement(stmts), settings...)
+	}
 	counts := func(stmts []loggedStatement) int { return len(with(stmts, "COUNT(*)")) }
 
 	// Warm the pool: the first connection switches its role.
 	get(url.Values{"limit": {"1"}})
 
-	// begin with the tenant context, page, count, overrides of the page,
-	// commit.
-	const listStatements = 5
+	// begin with the tenant context, sorting off for the page (the default
+	// order without filters), page, count, overrides of the page, commit.
+	const listStatements = 6
 	page, stmts := get(url.Values{"limit": {"50"}})
 	if got := ids(page); strings.Join(got, ",") != strings.Join(order[:50], ",") {
 		t.Errorf("first page: %v, want the first 50 of created_at DESC, id DESC", got)
@@ -287,7 +330,7 @@ func TestCIListBudget(t *testing.T) {
 	if len(stmts) != listStatements || counts(stmts) != 1 {
 		t.Errorf("GET /cis?limit=50: %d statements (%d counts), want %d with one count", len(stmts), counts(stmts), listStatements)
 	}
-	if problem := listPlanProblem(t, explainAsApp(t, f.App, f.OrgA, pageStatement(stmts))); problem != "" {
+	if problem := listPlanProblem(t, pagePlan(stmts)); problem != "" {
 		t.Errorf("GET /cis?limit=50: the page %s", problem)
 	}
 	for _, limit := range []string{"10", "200"} {
@@ -301,14 +344,14 @@ func TestCIListBudget(t *testing.T) {
 	if got := ids(next); strings.Join(got, ",") != strings.Join(order[50:100], ",") {
 		t.Errorf("cursor page: %v, want rows 51-100", got)
 	}
-	if problem := listPlanProblem(t, explainAsApp(t, f.App, f.OrgA, pageStatement(stmts))); problem != "" {
+	if problem := listPlanProblem(t, pagePlan(stmts)); problem != "" {
 		t.Errorf("cursor page: the page %s", problem)
 	}
 	asc, stmts := get(url.Values{"limit": {"50"}, "sort_dir": {"asc"}})
 	if got := ids(asc); len(got) != 50 || got[0] != order[n-1] || got[49] != order[n-50] {
 		t.Errorf("ascending page: %v, want the last 50 of the descending order reversed", got)
 	}
-	if problem := listPlanProblem(t, explainAsApp(t, f.App, f.OrgA, pageStatement(stmts))); problem != "" {
+	if problem := listPlanProblem(t, pagePlan(stmts)); problem != "" {
 		t.Errorf("ascending page: the page %s", problem)
 	}
 
@@ -327,9 +370,28 @@ func TestCIListBudget(t *testing.T) {
 	if len(found.Data) != 1 || found.Total != 1 || counts(stmts) != 0 {
 		t.Errorf("search: %d rows, total %d, %d counts; want 1, 1, 0", len(found.Data), found.Total, counts(stmts))
 	}
-	filtered, _ := get(url.Values{"limit": {"50"}, "status": {"maintenance"}})
+	filtered, stmts := get(url.Values{"limit": {"50"}, "status": {"maintenance"}})
 	if filtered.Total != n/10 {
 		t.Errorf("filter status=maintenance: total %d, want %d", filtered.Total, n/10)
+	}
+	if s := with(stmts, "enable_sort"); len(s) != 0 {
+		t.Errorf("filter status=maintenance: %d statements set enable_sort; a filter keeps the planner's choice", len(s))
+	}
+
+	// In a caller's transaction the list switches sorting back on for the
+	// statements that follow it.
+	var sorting string
+	if err = database.WithRequestTenant(f.OrgCtx(f.OrgA), pool, f.OrgA, func(ctx context.Context, tx pgx.Tx) error {
+		items, _, lerr := ci.NewPGRepository(pool).List(database.ContextWithTx(ctx, tx), f.OrgA, ci.FilterParams{}, api.PaginationParams{Limit: 50})
+		if lerr != nil || len(items) != 50 {
+			return fmt.Errorf("list in the caller's transaction: %d items, %v", len(items), lerr)
+		}
+		return tx.QueryRow(ctx, `SELECT current_setting('enable_sort')`).Scan(&sorting)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if sorting != "on" {
+		t.Errorf("enable_sort %q in the caller's transaction after the list, want on", sorting)
 	}
 
 	// The index holds the columns ci_isolation reads, so an index-only scan
@@ -346,7 +408,8 @@ func TestCIListBudget(t *testing.T) {
 	}
 
 	// Negative case: without the index the check names it. The index is
-	// dropped in a transaction that is rolled back.
+	// dropped in a transaction that is rolled back; the request's setting
+	// applies.
 	_, stmts = get(url.Values{"limit": {"50"}})
 	stmt := pageStatement(stmts)
 	tx, err := f.Admin.Begin(bg)
@@ -358,6 +421,7 @@ func TestCIListBudget(t *testing.T) {
 	for _, s := range []string{
 		"SET LOCAL lock_timeout = '30s'",
 		"DROP INDEX " + listSortIndex,
+		"SET LOCAL enable_sort = off",
 		"SET LOCAL ROLE reticora_app",
 	} {
 		if _, err = tx.Exec(bg, s); err != nil {
@@ -375,5 +439,122 @@ func TestCIListBudget(t *testing.T) {
 		t.Errorf("without %s the check reports %q, want the index named", listSortIndex, problem)
 	} else {
 		t.Logf("without the index: %s", problem)
+	}
+}
+
+// planWork returns the rows the nodes of an EXPLAIN (ANALYZE, FORMAT JSON)
+// plan produced and discarded in joins, over all their loops, without the
+// scans of ci (their filters also see the CIs of other organizations).
+func planWork(t *testing.T, plan []byte) float64 {
+	t.Helper()
+	var work float64
+	for _, n := range planNodes(t, plan) {
+		if n["Relation Name"] == "ci" {
+			continue
+		}
+		rows, _ := n["Actual Rows"].(float64)
+		removed, _ := n["Rows Removed by Join Filter"].(float64)
+		loops, _ := n["Actual Loops"].(float64)
+		work += (rows + removed) * loops
+	}
+	return work
+}
+
+// TestCINodeReadBudget covers NFR-02 for the node read of topology and
+// impact (ci.ListNodes; WP-438, F-117) against PostgreSQL with 10,000 CIs
+// that carry a client and a site and 500 manual overrides, as the bulk
+// scenario of tests/load/api.js writes them: the nodes carry the effective
+// values, and as the application role the work of the statement grows with
+// the CIs and their overrides, not with their product. The planner expects
+// one visible CI; with the overrides of the organization aggregated in a
+// joined subquery it aggregated all of them again for every CI.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestCINodeReadBudget(t *testing.T) {
+	f := scopetest.Seed(t, "f7")
+	bg := context.Background()
+	const n, overridden = 10000, 500
+	seedListCIs(t, f, n)
+	if _, err := f.Admin.Exec(bg, `INSERT INTO ci_field_value (organization_id, ci_id, field_name, override_value, override_reason, override_at, protected)
+		SELECT organization_id, id, 'status', '"retired"', 'node read budget', now(), true
+		FROM ci WHERE organization_id = $1 AND name LIKE 'list-%' ORDER BY name LIMIT $2`, f.OrgA, overridden); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Admin.Exec(bg, `VACUUM (ANALYZE) ci, ci_field_value`); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	retired := map[string]bool{}
+	rows, err := f.Admin.Query(bg, `SELECT c.id::text, v.ci_id IS NOT NULL FROM ci c
+		LEFT JOIN ci_field_value v ON v.ci_id = c.id AND v.field_name = 'status' AND v.override_at IS NOT NULL
+		WHERE c.organization_id = $1 ORDER BY c.name`, f.OrgA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		var over bool
+		if err = rows.Scan(&id, &over); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+		retired[id] = over
+	}
+	if err = rows.Err(); err != nil || len(ids) != n || len(retired) != n {
+		t.Fatalf("%d CIs (%v), want %d", len(ids), err, n)
+	}
+
+	cfg := f.App.Config()
+	trace := &statementLog{}
+	cfg.ConnConfig.Tracer = trace
+	cfg.MinConns = 0
+	pool, err := pgxpool.NewWithConfig(bg, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	repo := ci.NewPGRepository(pool)
+	ctx := f.OrgCtx(f.OrgA)
+	// All CIs (the read of the organization, above 2,000 ids) and 100 of
+	// them, half of those overridden (by ids).
+	for _, c := range []struct {
+		name string
+		ids  []string
+	}{{"organization", ids}, {"by ids", ids[overridden-50 : overridden+50]}} {
+		before := trace.mark()
+		nodes, lerr := repo.ListNodes(ctx, f.OrgA, c.ids)
+		if lerr != nil {
+			t.Fatal(lerr)
+		}
+		if len(nodes) != len(c.ids) {
+			t.Errorf("%s: %d nodes, want %d", c.name, len(nodes), len(c.ids))
+		}
+		wrong := 0
+		for _, node := range nodes {
+			if retired[node.ID] != (node.Status == "retired") {
+				wrong++
+			}
+		}
+		if wrong > 0 {
+			t.Errorf("%s: %d nodes without their effective status", c.name, wrong)
+		}
+		stmts := trace.since(before)
+		var read *loggedStatement
+		for i := range stmts {
+			if strings.Contains(stmts[i].sql, "FROM ci c") {
+				read = &stmts[i]
+			}
+		}
+		if read == nil {
+			t.Fatalf("%s: no node read among %d statements", c.name, len(stmts))
+		}
+		plan := explainAsAppWith(t, f.App, f.OrgA, "ANALYZE, FORMAT JSON", *read)
+		budget := 10 * float64(len(c.ids)+overridden)
+		if work := planWork(t, plan); work > budget {
+			t.Errorf("%s: the node read handles %.0f rows besides the scan of ci, want at most %.0f (10 per CI and override): %s",
+				c.name, work, budget, describePlan(planNodes(t, plan)))
+		} else {
+			t.Logf("%s: %.0f rows besides the scan of ci: %s", c.name, work, describePlan(planNodes(t, plan)))
+		}
 	}
 }

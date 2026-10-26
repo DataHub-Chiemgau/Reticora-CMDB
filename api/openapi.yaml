@@ -11,6 +11,16 @@ info:
     carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and
     `X-RateLimit-Reset` (seconds until the window ends) for the budget
     closest to exhaustion; a refused request gets 429 with `Retry-After`.
+
+    Dependency outages (OPS-06): a request that needs an unreachable
+    dependency is refused before anything is stored, with 503 and
+    `Retry-After`: every request with a well-formed API key while the key
+    store (database) is unreachable (not 401: the key is not known to be invalid,
+    and the refusal does not count against the pre-auth limit), an ingest
+    while the ingest queue (NATS) is unreachable, and a request whose
+    database connection cannot be established. While Redis is unreachable
+    the rate limits refuse with 429. A 2xx answer means stored or durably
+    queued.
   contact:
     name: DataHub Chiemgau
   license:
@@ -368,6 +378,66 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/admin/alerts/alertmanager:
+    post:
+      operationId: receiveAlertmanagerAlerts
+      tags: [Operator]
+      security:
+        - OpsAlertAuth: []
+      summary: Operations alerts of Alertmanager into the notification channels (OPS-05)
+      description: |
+        Webhook receiver of Alertmanager (payload version 4, E-75). Each
+        notification of an alert group becomes one notification (category
+        `ops_alert`) of the operator organization RETICORA_OPS_ALERT_ORG_ID
+        on its enabled notification channels, addressed to its users who hold
+        monitoring:write organization-wide. A firing group with an alert of
+        severity `critical` ignores quiet hours and muted categories. The
+        deduplication key is derived from the group key, the status and the
+        latest `startsAt` of the group's alerts: a repeated notification
+        queues nothing, a resolved group or a new alert in it notifies again.
+        A queued notification is recorded in the audit log of the operator
+        organization (`notification.ops_alert_queued`, without the token).
+
+        Only the bearer token RETICORA_OPS_ALERT_TOKEN authenticates: user
+        sessions, API keys and operator credentials are refused with 401,
+        which is recorded in operator_audit. Without an operator organization
+        the endpoint answers 404 (also with a valid token) and Alertmanager
+        keeps delivering by e-mail. A request carries at most 1 MiB and 100
+        alerts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertmanagerWebhook'
+      responses:
+        '202':
+          description: The notification is queued, or was queued by an earlier identical request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsAlertReceipt'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: Body larger than 1 MiB
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: Not an Alertmanager payload of version 4 (status, group key, alerts, startsAt), or more than 100 alerts
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/auth/config:
     get:
@@ -1824,6 +1894,8 @@ paths:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
 
   /api/v1/discovery/jobs:
     get:
@@ -8027,7 +8099,11 @@ paths:
         updating or queueing them for manual review. This is the canonical
         endpoint that `/api/v1/discovery/ingest` aliases. Both require the
         discovery feature; after the discovery license expired they answer
-        403 with the problem type license-expired (CH21).
+        403 with the problem type license-expired (CH21). While the ingest
+        queue (NATS) is unreachable both answer 503 at once and queue
+        nothing, not even after the reconnect (OPS-06, WP-449); records of
+        the batch queued before a failure are deduplicated by record_id when
+        the batch is sent again.
       parameters:
         - name: Content-Encoding
           in: header
@@ -8077,6 +8153,8 @@ paths:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
 
   /api/v1/credentials:
     get:
@@ -12160,6 +12238,10 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
+      description: >-
+        API key of AUT-04. While the key store (database) is unreachable, a
+        request with a well-formed key is refused with 503 and Retry-After,
+        not with 401 (OPS-06).
     OperatorAuth:
       type: http
       scheme: bearer
@@ -12170,6 +12252,10 @@ components:
       in: header
       name: X-Operator-Token
       description: RETICORA_OPERATOR_TOKEN, bootstrap and break-glass only; every use raises an alarm.
+    OpsAlertAuth:
+      type: http
+      scheme: bearer
+      description: RETICORA_OPS_ALERT_TOKEN of the Alertmanager bridge (OPS-05), sent by Alertmanager from a credentials file.
 
   parameters:
     ResourceID:
@@ -12378,6 +12464,20 @@ components:
             $ref: '#/components/schemas/ProblemDetail'
     ServiceUnavailable:
       description: A required subsystem is not configured or temporarily unavailable
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    DependencyUnavailable:
+      description: >-
+        A dependency the request needs is unreachable (OPS-06): the ingest
+        queue (NATS), the API key store (database) or a database connection
+        that cannot be established. Nothing was stored; the request may be
+        repeated after Retry-After.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds after which the request may be repeated.
       content:
         application/problem+json:
           schema:
@@ -17131,6 +17231,83 @@ components:
           format: int64
         reason:
           type: string
+
+    AlertmanagerWebhook:
+      type: object
+      description: >-
+        Payload of an Alertmanager webhook notification, version 4 (field names
+        as Alertmanager sends them); further fields are ignored.
+      required: [version, groupKey, status, alerts]
+      properties:
+        version:
+          type: string
+          enum: ['4']
+        groupKey:
+          type: string
+          description: Key of the alert group (route and group labels).
+        truncatedAlerts:
+          type: integer
+          minimum: 0
+          description: Alerts Alertmanager left out (max_alerts).
+        status:
+          type: string
+          enum: [firing, resolved]
+        receiver:
+          type: string
+        groupLabels:
+          type: object
+          additionalProperties: { type: string }
+        commonLabels:
+          type: object
+          additionalProperties: { type: string }
+        commonAnnotations:
+          type: object
+          additionalProperties: { type: string }
+        externalURL:
+          type: string
+        alerts:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/AlertmanagerAlert'
+
+    AlertmanagerAlert:
+      type: object
+      required: [status, labels, startsAt]
+      properties:
+        status:
+          type: string
+          enum: [firing, resolved]
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        annotations:
+          type: object
+          additionalProperties: { type: string }
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        generatorURL:
+          type: string
+        fingerprint:
+          type: string
+
+    OpsAlertReceipt:
+      type: object
+      required: [notification, deliveries]
+      properties:
+        notification:
+          type: string
+          enum: [queued, duplicate]
+          description: duplicate when an earlier request with the same deduplication key queued the notification.
+        deliveries:
+          type: integer
+          minimum: 0
+          description: Deliveries this request queued on the channels of the operator organization.
 
     User:
       type: object

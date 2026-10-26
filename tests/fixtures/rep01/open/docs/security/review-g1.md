@@ -10,7 +10,7 @@ Befunde sind erfunden; sie folgen nur dem Format von
 |---|---|---|---|---|
 | SR-01 | High | **behoben** (WP-000) | Fixture-Befund ohne Katalog-ID. | Fixture. |
 | SR-08 | Low | offen | Die Reserve bei NFR-03 ist knapp; die Schwelle ist eingehalten. | Folge-WP. |
-| SR-11 | Low | offen | „reaktivieren“ aus CI-13 ist in der Produktionsverdrahtung nicht nutzbar. | Folge-WP. |
+| SR-11 | High | offen | „reaktivieren“ aus CI-13 ist in der Produktionsverdrahtung nicht nutzbar. | Folge-WP. |
 
 ## Anhang: Critical/High-Befunde des Audits
 

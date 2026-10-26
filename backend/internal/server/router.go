@@ -180,6 +180,13 @@ type Options struct {
 	// audit fails and is logged, tests and --no-db).
 	Operator     operator.Config
 	OperatorPool *pgxpool.Pool
+	// OpsAlerts configures the Alertmanager bridge of the operator path
+	// (OPS-05, E-75): without an operator organization it answers 404.
+	// Notifier queues its notifications on the channels of that
+	// organization; without it, or without OperatorPool, a configured
+	// bridge answers 503.
+	OpsAlerts operator.AlertConfig
+	Notifier  *notify.Notifier
 	// UserProvisioner auto-creates the app_user on first OIDC login (nil
 	// disables). DefaultProvisionRole names the standard role assigned on
 	// first login (empty assigns none).
@@ -286,6 +293,18 @@ func operatorHandler(opts *Options) *operator.Handler {
 		h.WithOrgCreator(opts.Signup)
 	}
 	return h
+}
+
+// alertBridge builds the Alertmanager bridge (OPS-05, E-75): the alerts go
+// to the channels of the operator organization, written in its tenant
+// transaction; refused requests are recorded in operator_audit.
+func alertBridge(repos *Repositories, opts *Options) *operator.AlertBridge {
+	b := operator.NewAlertBridge(opts.OpsAlerts, operator.NewAuditor(opts.OperatorPool))
+	if opts.OperatorPool != nil && opts.Notifier != nil && opts.Notifications != nil && repos.Permission != nil {
+		b.WithDelivery(opts.OperatorPool, opts.Notifier, opts.Notifications.Channels,
+			notify.NewPGResolver(opts.OperatorPool, repos.Permission))
+	}
+	return b
 }
 
 // apiKeyHandler builds the api-keys resource with the same owner and
@@ -464,6 +483,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
+		alertBridge(&repos, &opts),
 		apiKeyHandler(&repos),
 		user.NewServiceAccountHandler(repos.ServiceAccounts),
 		invitationHandler(&repos, &opts),

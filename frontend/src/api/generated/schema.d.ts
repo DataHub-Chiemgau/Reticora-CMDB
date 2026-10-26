@@ -161,6 +161,43 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/admin/alerts/alertmanager': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Operations alerts of Alertmanager into the notification channels (OPS-05)
+     * @description Webhook receiver of Alertmanager (payload version 4, E-75). Each
+     *     notification of an alert group becomes one notification (category
+     *     `ops_alert`) of the operator organization RETICORA_OPS_ALERT_ORG_ID
+     *     on its enabled notification channels, addressed to its users who hold
+     *     monitoring:write organization-wide. A firing group with an alert of
+     *     severity `critical` ignores quiet hours and muted categories. The
+     *     deduplication key is derived from the group key, the status and the
+     *     latest `startsAt` of the group's alerts: a repeated notification
+     *     queues nothing, a resolved group or a new alert in it notifies again.
+     *     A queued notification is recorded in the audit log of the operator
+     *     organization (`notification.ops_alert_queued`, without the token).
+     *
+     *     Only the bearer token RETICORA_OPS_ALERT_TOKEN authenticates: user
+     *     sessions, API keys and operator credentials are refused with 401,
+     *     which is recorded in operator_audit. Without an operator organization
+     *     the endpoint answers 404 (also with a valid token) and Alertmanager
+     *     keeps delivering by e-mail. A request carries at most 1 MiB and 100
+     *     alerts.
+     */
+    post: operations['receiveAlertmanagerAlerts'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/auth/config': {
     parameters: {
       query?: never;
@@ -4035,7 +4072,7 @@ export interface paths {
     put?: never;
     /**
      * Ingest discovery results in bulk
-     * @description Reconciles a batch of discovered items against existing CIs, creating, updating or queueing them for manual review. This is the canonical endpoint that `/api/v1/discovery/ingest` aliases. Both require the discovery feature; after the discovery license expired they answer 403 with the problem type license-expired (CH21).
+     * @description Reconciles a batch of discovered items against existing CIs, creating, updating or queueing them for manual review. This is the canonical endpoint that `/api/v1/discovery/ingest` aliases. Both require the discovery feature; after the discovery license expired they answer 403 with the problem type license-expired (CH21). While the ingest queue (NATS) is unreachable both answer 503 at once and queue nothing, not even after the reconnect (OPS-06, WP-449); records of the batch queued before a failure are deduplicated by record_id when the batch is sent again.
      */
     post: operations['bulkIngest'];
     delete?: never;
@@ -9625,6 +9662,54 @@ export interface components {
       broken_at?: number;
       reason?: string;
     };
+    /** @description Payload of an Alertmanager webhook notification, version 4 (field names as Alertmanager sends them); further fields are ignored. */
+    AlertmanagerWebhook: {
+      /** @enum {string} */
+      version: '4';
+      /** @description Key of the alert group (route and group labels). */
+      groupKey: string;
+      /** @description Alerts Alertmanager left out (max_alerts). */
+      truncatedAlerts?: number;
+      /** @enum {string} */
+      status: 'firing' | 'resolved';
+      receiver?: string;
+      groupLabels?: {
+        [key: string]: string;
+      };
+      commonLabels?: {
+        [key: string]: string;
+      };
+      commonAnnotations?: {
+        [key: string]: string;
+      };
+      externalURL?: string;
+      alerts: components['schemas']['AlertmanagerAlert'][];
+    };
+    AlertmanagerAlert: {
+      /** @enum {string} */
+      status: 'firing' | 'resolved';
+      labels: {
+        [key: string]: string;
+      };
+      annotations?: {
+        [key: string]: string;
+      };
+      /** Format: date-time */
+      startsAt: string;
+      /** Format: date-time */
+      endsAt?: string;
+      generatorURL?: string;
+      fingerprint?: string;
+    };
+    OpsAlertReceipt: {
+      /**
+       * @description duplicate when an earlier request with the same deduplication key queued the notification.
+       * @enum {string}
+       */
+      notification: 'queued' | 'duplicate';
+      /** @description Deliveries this request queued on the channels of the operator organization. */
+      deliveries: number;
+    };
     User: {
       id: string;
       organization_id: string;
@@ -10914,6 +10999,17 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
+    /** @description A dependency the request needs is unreachable (OPS-06): the ingest queue (NATS), the API key store (database) or a database connection that cannot be established. Nothing was stored; the request may be repeated after Retry-After. */
+    DependencyUnavailable: {
+      headers: {
+        /** @description Seconds after which the request may be repeated. */
+        'Retry-After'?: number;
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
     /** @description The location or its subtree is still referenced; dependencies lists the kinds of referencing objects */
     LocationInUse: {
       headers: {
@@ -11278,6 +11374,53 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  receiveAlertmanagerAlerts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AlertmanagerWebhook'];
+      };
+    };
+    responses: {
+      /** @description The notification is queued, or was queued by an earlier identical request */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OpsAlertReceipt'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description Body larger than 1 MiB */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Not an Alertmanager payload of version 4 (status, group key, alerts, startsAt), or more than 100 alerts */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   getAuthConfig: {
@@ -12747,6 +12890,7 @@ export interface operations {
         };
       };
       500: components['responses']['InternalServerError'];
+      503: components['responses']['DependencyUnavailable'];
     };
   };
   listDiscoveryJobs: {
@@ -20536,6 +20680,7 @@ export interface operations {
         };
       };
       500: components['responses']['InternalServerError'];
+      503: components['responses']['DependencyUnavailable'];
     };
   };
   listCredentials: {

@@ -398,3 +398,103 @@ func TestDevAuthOnlyInDevelopment(t *testing.T) {
 		t.Errorf("production without the dev login: %v", err)
 	}
 }
+
+// TestOpsAlertBridgeSettings covers WP-448 (OPS-05, E-75): the Alertmanager
+// bridge starts with a token of at least 32 characters and the UUID of the
+// operator organization; an organization without token, an organization
+// that is no UUID, a short token and the break-glass token as alert token
+// fail the start check. A token without organization leaves the bridge off
+// (404) and is reported.
+func TestOpsAlertBridgeSettings(t *testing.T) {
+	const token = "ops-alert-token-with-at-least-32-chars"
+	const org = "6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f"
+	for name, tc := range map[string]struct {
+		env  map[string]string
+		want string // empty: valid
+	}{
+		"bridge off":             {map[string]string{}, ""},
+		"token and organization": {map[string]string{"RETICORA_OPS_ALERT_TOKEN": token, "RETICORA_OPS_ALERT_ORG_ID": org}, ""},
+		// Values from secret files end with a line break; Alertmanager
+		// sends the token of its credentials file without it.
+		"values from secret files": {map[string]string{"RETICORA_OPS_ALERT_TOKEN": token + "\n", "RETICORA_OPS_ALERT_ORG_ID": " " + org + "\n"}, ""},
+		"token only (bridge off)":  {map[string]string{"RETICORA_OPS_ALERT_TOKEN": token}, ""},
+		"padded short token":       {map[string]string{"RETICORA_OPS_ALERT_TOKEN": "  short" + strings.Repeat(" ", 30), "RETICORA_OPS_ALERT_ORG_ID": org}, "at least 32 characters"},
+		"organization only":        {map[string]string{"RETICORA_OPS_ALERT_ORG_ID": org}, "RETICORA_OPS_ALERT_ORG_ID requires RETICORA_OPS_ALERT_TOKEN"},
+		"organization is no UUID":  {map[string]string{"RETICORA_OPS_ALERT_TOKEN": token, "RETICORA_OPS_ALERT_ORG_ID": "operators"}, "must be the UUID"},
+		"short token":              {map[string]string{"RETICORA_OPS_ALERT_TOKEN": "short", "RETICORA_OPS_ALERT_ORG_ID": org}, "at least 32 characters"},
+		"break-glass token reused": {map[string]string{"RETICORA_OPS_ALERT_TOKEN": token, "RETICORA_OPERATOR_TOKEN": token,
+			"RETICORA_OPS_ALERT_ORG_ID": org}, "must differ from RETICORA_OPERATOR_TOKEN"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			clearEnv(t)
+			for _, key := range []string{"RETICORA_OPS_ALERT_TOKEN", "RETICORA_OPS_ALERT_ORG_ID", "RETICORA_OPERATOR_TOKEN"} {
+				t.Setenv(key, "")
+			}
+			setAll(t, tc.env)
+			cfg := Load()
+			err := cfg.Validate(false)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("Validate() = %v, want nil", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("Validate() = %v, want an error containing %q", err, tc.want)
+			}
+			if tc.want == "" && tc.env["RETICORA_OPS_ALERT_ORG_ID"] != "" && (cfg.OpsAlertToken != token || cfg.OpsAlertOrgID != org) {
+				t.Errorf("loaded token %q, organization %q", cfg.OpsAlertToken, cfg.OpsAlertOrgID)
+			}
+			warned := false
+			for _, w := range cfg.Warnings() {
+				warned = warned || strings.Contains(w, "RETICORA_OPS_ALERT_TOKEN is set without RETICORA_OPS_ALERT_ORG_ID")
+			}
+			if want := name == "token only (bridge off)"; warned != want {
+				t.Errorf("warning about the token without organization: %v, want %v (%v)", warned, want, cfg.Warnings())
+			}
+		})
+	}
+}
+
+// TestPprofAddrSetting covers WP-438 (NFR-02): the profiling listener is off
+// by default and starts only on a loopback IP with a port, only in
+// development and not together with RETICORA_EGRESS_ALLOW_PRIVATE, which
+// lets webhooks reach loopback addresses.
+func TestPprofAddrSetting(t *testing.T) {
+	for name, tc := range map[string]struct {
+		env  map[string]string
+		want string // empty: valid
+	}{
+		"off by default":            {map[string]string{}, ""},
+		"IPv4 loopback":             {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:6060"}, ""},
+		"IPv6 loopback":             {map[string]string{"RETICORA_PPROF_ADDR": "[::1]:6060"}, ""},
+		"all interfaces":            {map[string]string{"RETICORA_PPROF_ADDR": ":6060"}, "must be a loopback IP"},
+		"unspecified address":       {map[string]string{"RETICORA_PPROF_ADDR": "0.0.0.0:6060"}, "must be a loopback IP"},
+		"private address":           {map[string]string{"RETICORA_PPROF_ADDR": "10.0.0.5:6060"}, "must be a loopback IP"},
+		"host name":                 {map[string]string{"RETICORA_PPROF_ADDR": "localhost:6060"}, "must be a loopback IP"},
+		"no port":                   {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1"}, "must be a loopback IP"},
+		"port 0":                    {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:0"}, "must be a loopback IP"},
+		"port out of range":         {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:70000"}, "must be a loopback IP"},
+		"staging":                   {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:6060", "RETICORA_ENVIRONMENT": EnvStaging}, "only allowed with RETICORA_ENVIRONMENT=development"},
+		"production":                {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:6060", "RETICORA_ENVIRONMENT": EnvProduction}, "only allowed with RETICORA_ENVIRONMENT=development"},
+		"egress to private targets": {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:6060", "RETICORA_EGRESS_ALLOW_PRIVATE": "true"}, "must not be combined with RETICORA_EGRESS_ALLOW_PRIVATE"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("RETICORA_PPROF_ADDR", "")
+			t.Setenv("RETICORA_EGRESS_ALLOW_PRIVATE", "")
+			if env := tc.env["RETICORA_ENVIRONMENT"]; env != "" && env != EnvDevelopment {
+				setAll(t, productionEnv)
+			}
+			setAll(t, tc.env)
+			cfg := Load()
+			if cfg.PprofAddr != tc.env["RETICORA_PPROF_ADDR"] {
+				t.Errorf("PprofAddr %q, want %q", cfg.PprofAddr, tc.env["RETICORA_PPROF_ADDR"])
+			}
+			err := cfg.Validate(false)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("Validate() = %v, want nil", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("Validate() = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+}

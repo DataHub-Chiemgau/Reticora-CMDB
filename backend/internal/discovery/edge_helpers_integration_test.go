@@ -1,7 +1,7 @@
 // Shared helpers of the collector edge tests on PostgreSQL (WP-374):
 // TestCollectorNATSEndpointAuthorization and the edge tests moved out of
-// collector_pki_auditdefect_test.go use them without a build tag, the defect
-// tests still in that file with the tag auditdefect.
+// collector_pki_auditdefect_test.go (deleted with WP-430, its last defect
+// test) use them.
 package discovery_test
 
 import (

@@ -144,6 +144,14 @@ jobs:
       - name: Collector NATS endpoint accepts only collector certificates (COL-08)
         run: ./tests/nats-mtls.test.sh
 
+      # COL-08/PRI-07 (WP-431, F-103): docker compose config of the .env that
+      # install-cloud.sh writes. With a TLS domain only 80/443/4222 on all
+      # interfaces, REST API (8080) and Keycloak (8180) on 127.0.0.1; an IP
+      # installation publishes them only through the installer's opt-in
+      # RETICORA_PUBLISH_DIRECT_PORTS=true, with a warning.
+      - name: Compose port policy (COL-08)
+        run: ./tests/audit/compose-port-policy.test.sh
+
   # INS-01/TEC-09/GATE-03 (WP-092): the cloud installer on every platform of
   # CH22. Ubuntu runs natively on the GitHub runners; Debian 12 runs the
   # installer in a debian:12 container that drives the runner's Docker daemon

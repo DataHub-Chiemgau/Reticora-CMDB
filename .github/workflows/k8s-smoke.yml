@@ -1,0 +1,151 @@
+name: k8s-smoke
+
+# Runtime smoke of the Kubernetes manifests (OPS-03, WP-441). The job
+# k8s-manifests of ci.yml renders them only; here a kind cluster runs the
+# staging overlay with the server image of this commit against the test
+# dependencies of tests/k8s/fixtures (TimescaleDB, Redis, NATS with
+# JetStream, MinIO, secret reticora-secrets, ConfigMap reticora-config), and
+# tests/k8s/kind-smoke.sh checks:
+#   - the pod reticora-server is Ready within 5 min, /readyz answers 200;
+#   - master-key removed from reticora-secrets: CreateContainerConfigError;
+#   - master-key empty: exit 1 with 'requires RETICORA_MASTER_KEY';
+#   - oidc-issuer-url empty in reticora-config: exit 1 with
+#     'requires RETICORA_OIDC_ISSUER_URL';
+#   - oidc-issuer-url removed from reticora-config: CreateContainerConfigError.
+# The protocol (setup and case log, pods, describe and logs of every case,
+# cluster state, kind export logs) is the artifact k8s-smoke-protocol.
+on:
+  pull_request:
+    paths:
+      - "deploy/k8s/**"
+      - "backend/Dockerfile"
+      # The loader decides the empty-value cases (an empty value is unset).
+      - "backend/internal/config/config.go"
+      - "tests/k8s/**"
+      - ".github/workflows/k8s-smoke.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "41 2 * * *" # nightly at 02:41 UTC
+
+# The job only reads the repository; the cluster lives on the runner.
+permissions:
+  contents: read
+
+concurrency:
+  group: k8s-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # kind and its node image, pinned by version and digest: the checksum of
+  # the release asset and the default node image of this kind release
+  # (pkg/apis/config/defaults/image.go at the tag).
+  KIND_VERSION: v0.33.0
+  KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+  KIND_NODE_IMAGE: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+  # kubectl of the node's Kubernetes version (checksum of dl.k8s.io).
+  KUBECTL_VERSION: v1.37.0
+  KUBECTL_SHA256: 6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f
+  KIND_CLUSTER: reticora-smoke
+
+jobs:
+  kind:
+    runs-on: ubuntu-24.04
+    # A green run takes a few minutes; the limit leaves room for a run in
+    # which every case waits for its timeout, so the protocol is uploaded.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare the protocol directory
+        run: |
+          mkdir -p "$RUNNER_TEMP/k8s-smoke" "$RUNNER_TEMP/bin"
+          echo "ARTIFACT_DIR=$RUNNER_TEMP/k8s-smoke" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # The decision logic of the smoke (pod states, logs, /readyz, order of
+      # the cluster changes) against a stubbed kubectl, before the cluster
+      # exists.
+      - name: Self-test of the smoke script
+        run: ./tests/k8s/kind-smoke.test.sh
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+
+      # The pins of ci.yml: kustomize of the job k8s-manifests, golang-migrate
+      # of the job migrations.
+      - name: Install kustomize and golang-migrate
+        run: |
+          go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+          echo "KUSTOMIZE=$(go env GOPATH)/bin/kustomize" >> "$GITHUB_ENV"
+          echo "MIGRATE=$(go env GOPATH)/bin/migrate" >> "$GITHUB_ENV"
+
+      - name: Install kind and kubectl
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/bin/kind" \
+            "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  $RUNNER_TEMP/bin/kind" | sha256sum -c -
+          curl -sSfL -o "$RUNNER_TEMP/bin/kubectl" \
+            "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  $RUNNER_TEMP/bin/kubectl" | sha256sum -c -
+          chmod 0755 "$RUNNER_TEMP/bin/kind" "$RUNNER_TEMP/bin/kubectl"
+          kind version
+          kubectl version --client
+
+      - name: Create the kind cluster
+        run: |
+          kind create cluster --name "$KIND_CLUSTER" --image "$KIND_NODE_IMAGE" --wait 180s
+          kubectl version
+          kubectl get nodes -o wide
+
+      # The server image of this commit under the name the staging overlay
+      # renders (reticora-cmdb/server:staging); a tag other than latest keeps
+      # imagePullPolicy IfNotPresent, so the loaded image is used.
+      - name: Build and load the server image
+        run: |
+          image=$("$KUSTOMIZE" build deploy/k8s/overlays/staging | sed -nE 's/^ *image: *//p' | sort -u)
+          if [ "$(wc -l <<<"$image")" -ne 1 ] || [[ ${image##*/} != *:* ]] || [[ $image == *:latest ]]; then
+            echo "::error::the staging overlay must render exactly one image with a tag other than latest, got: $image"
+            exit 1
+          fi
+          echo "server image: $image"
+          docker build -f backend/Dockerfile -t "$image" .
+          kind load docker-image "$image" --name "$KIND_CLUSTER"
+
+      - name: Apply the fixtures, migrate the database, create the runtime login
+        run: ./tests/k8s/kind-smoke.sh setup 2>&1 | tee "$ARTIFACT_DIR/setup.log"
+
+      - name: Smoke cases (staging overlay)
+        run: ./tests/k8s/kind-smoke.sh run 2>&1 | tee "$ARTIFACT_DIR/kind-smoke.log"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### k8s-smoke (run ${GITHUB_RUN_ID})"
+            echo '```'
+            cat "$ARTIFACT_DIR/kind-smoke.log" 2>/dev/null || echo "no case protocol (setup failed?)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect the cluster state
+        if: always()
+        run: |
+          kubectl get all,secrets,configmaps,events -A -o wide > "$ARTIFACT_DIR/cluster.txt" 2>&1 || true
+          kind export logs "$ARTIFACT_DIR/kind-logs" --name "$KIND_CLUSTER" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: k8s-smoke-protocol
+          path: ${{ runner.temp }}/k8s-smoke
+          retention-days: 30
+
+      - name: Delete the kind cluster
+        if: always()
+        run: kind delete cluster --name "$KIND_CLUSTER" || true

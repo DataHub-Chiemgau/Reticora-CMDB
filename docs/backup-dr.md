@@ -285,17 +285,46 @@ it is missing there). Check from backup whether rows were lost:
 
 `tests/outage/run.sh` tests the behaviour on a dependency outage against an
 installed Compose stack. `.github/workflows/outage.yml` runs it every night,
-before every release (`release.yml` publishes only after it passed) and on
-changes to the suite. The protocol `outage-report.md` is kept as a workflow
-artifact for 90 days.
+before every release (`release.yml` publishes only after it passed), on
+changes to the suite and by hand (`workflow_dispatch`). Before the
+installation it merges Mailpit and the central SMTP server of the
+installation (`RETICORA_SMTP_HOST=mailpit`) into the source-build override
+(`tests/outage/smtp.sh overlay`), so `/readyz` has the `smtp` check from the
+first start. The protocol `outage-report.md` and the protocol of the
+negative self-test (`outage-selftest-report.md`) are kept as the workflow
+artifact `outage-report` for 90 days. `tests/outage/config.test.sh` (CI job
+`gate`) checks the suite without a stack: the SMTP scenario, the accounting
+and the self-test against stubs, the overlay and outage.yml.
+
+During every dependency outage `tests/outage/load.sh` sends 50 API writes
+(`POST /api/v1/cis`) and 50 ingest records (`POST /api/v1/ingest/bulk`, one
+record per request) with the API key of an organization seeded by
+`cmd/seed` (slug prefix `outage-`). Every answer must be accepted (2xx) or
+visibly refused (429 or 503). After the dependency is back the suite waits
+until the ingest queue (stream `RETICORA_INGEST`) is empty and no
+`event_outbox` entry that occurred before the recovery is unpublished, and
+then counts in the database: the CIs with the run's serial-number prefix
+must be exactly the accepted writes and records (**accepted == persisted**).
+An accepted write that is missing is lost, a refused one that is stored
+anyway is late; both fail the scenario, as does a server restart
+(`RestartCount`). Timing and log lines decide nothing. Every count is in the
+protocol.
 
 | Scenario | Simulation | Expected |
 |---|---|---|
-| PostgreSQL, NATS, Redis, object storage (MinIO) | `docker compose stop <service>` for 30 s | `/readyz` answers 503 and reports exactly that dependency as `unavailable`, so load balancers stop routing (backpressure). The server process keeps running without restarts and is ready again after the restart. A marker row written before the outage is still there. |
+| PostgreSQL, NATS, Redis, object storage (MinIO) | `docker compose stop <service>` for at least 30 s, with the load | `/readyz` answers 503 and reports exactly that dependency as `unavailable`, so load balancers stop routing (backpressure). The server process keeps running without restarts and is ready again after the restart. A marker row written before the outage is still there. The load: PostgreSQL down → every request 503 (the API key cannot be checked: not 401, so the pre-auth limit does not lock the client out); NATS down → CI writes accepted (the event outbox keeps their events until NATS is back), ingest refused with 503 at once and never queued later; Redis down → 429 (the rate limiter fails closed); MinIO down → accepted. Then accepted == persisted, the ingest queue is empty and the outbox published. |
+| SMTP (`RETICORA_SMTP_HOST`, Mailpit) | `docker compose stop mailpit`, with the load; an invitation (a notification over the e-mail channel `central_smtp`) during the outage | `/readyz` answers 503 with `"smtp":"unavailable"`, so **a mail-server outage takes every instance out of the load balancer** (Compose healthcheck, Kubernetes readinessProbe) although the API itself still works (the load is accepted). The delivery stays `pending` with `attempts` ≥ 1 and the cause in `last_error`. The notifier retries 2 minutes after the first failure (doubling, at most 5 attempts), so Mailpit stays down at least 25 s after the failed attempt; once it is back the delivery is `sent` within 120 s and Mailpit holds exactly one message to the invitee. The server logs `readiness check failed` with `check=smtp` and the address once. Without `RETICORA_SMTP_HOST` there is no `smtp` check. |
 | Collector, server unreachable | `TestUploadRecords_FailureSpoolsAndFlushDelivers`, `TestHeartbeatReportsSpoolBackpressureAndLoss` | Records go to the spool and are delivered once the server is reachable. The spool level and every loss are reported. |
 | Collector spool limits | `TestDiskBufferSizeLimitAppliesBackpressure`, `TestDiskBufferMaxAgeKeepsMessagesFor24Hours`, `TestPersistenceAcrossBufferInstances` | A full spool refuses new data instead of dropping old data silently. The spool survives restarts. |
 | Webhook target down | `TestDispatcherPersistsAndRetriesFailedDelivery`, `TestDispatcherMarksDeliveryFailedAfterMaxAttempts` | Deliveries are persisted and retried. After the last attempt they go to the dead-letter queue. |
-| SMTP (with `RETICORA_SMTP_HOST`) | `tests/outage/run.sh` still reports it as N/A until its scenario exists (WP-449). `TestAuditT5ReadinessCoversSMTP` (`backend/cmd/server`) stops the mail server under a running server binary. | `/readyz` answers 503 with `"smtp":"unavailable"`, so **a mail-server outage takes every instance out of the load balancer** (Compose healthcheck, Kubernetes readinessProbe) although the API itself would still work. The server logs `readiness check failed` with `check=smtp` and the address once, and is ready again when the server answers. Without `RETICORA_SMTP_HOST` there is no `smtp` check. |
+| Negative self-test | `OUTAGE_SELFTEST_DROP=1 ./tests/outage/run.sh minio`: the last ingest record of the load counts as accepted but is never sent | The run fails with exactly that record lost; outage.yml fails if it passes or fails for another reason. |
+
+A refusal for an unreachable dependency is 503 with `Retry-After`: a
+request with an API key while PostgreSQL is down, an ingest while NATS is
+down (nothing is queued), and a request whose database connection cannot be
+established. A collector keeps such a batch in its spool and sends it again;
+records of the batch that were queued before a failure are deduplicated by
+`record_id` (REC-01).
 
 A configured SMTP server is a readiness dependency like the others (OPS-01,
 WP-442): while it is unreachable, all instances report not ready at the same
@@ -306,12 +335,18 @@ a configured but unreachable SMTP server fails in `wait_for_service server`;
 the server log shown by the installer names the check and its address
 ([troubleshooting](troubleshooting-installation.md#container-docker-compose-server-1-is-unhealthy)).
 
-Run it locally after an installation of the checkout
-(`./install.sh --cloud --non-interactive --build-from-source`, as in CI):
+Run it locally like CI: merge Mailpit into the override
+(`./tests/outage/smtp.sh overlay deploy/docker-compose/docker-compose.override.yml`;
+the file is rewritten without its comments, restore it afterwards), then
+install the checkout (`./install.sh --cloud --non-interactive
+--build-from-source`):
 
 ```bash
-./tests/outage/run.sh            # all scenarios
-./tests/outage/run.sh nats redis # selected scenarios
+./tests/outage/run.sh                         # all scenarios
+./tests/outage/run.sh nats redis              # selected scenarios
+OUTAGE_SELFTEST_DROP=1 OUTAGE_REPORT=outage-selftest-report.md \
+  ./tests/outage/run.sh minio                 # must fail: one record lost
+./tests/outage/config.test.sh                 # without a stack (CI job gate)
 ```
 
 ## DR checklist

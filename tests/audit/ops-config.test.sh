@@ -28,7 +28,8 @@
 #          alertmanager_smtp and alertmanager_amtool are in
 #          tests/monitoring-config.test.sh.
 #   WP-104 (OPS-06) P2 "SMTP outage scenario reported N/A although SMTP
-#          delivery exists" (notify/smtp.go, WP-137).      -> case outage_smtp
+#          delivery exists": fixed by WP-449; the case outage_smtp is in
+#          tests/outage/config.test.sh (CI job gate).
 #
 # Tools: python3 with PyYAML (as tests/rep01-structure.test.sh), plus
 #   kustomize v5 (KUSTOMIZE=<path> or PATH; CI: go install
@@ -81,17 +82,6 @@ elif [ "$write_window" -gt "$rpo_limit" ]; then
 else
     fail "restore_rpo_window: the write window exceeds the RPO limit, so an RPO violation is observable" \
         "WRITE_SECONDS=${write_window}s <= RPO_LIMIT=${rpo_limit}s: rpo = last_commit - restored_last stays below the limit whenever the restore succeeds"
-fi
-
-# ─── WP-104: the SMTP outage scenario is exercised ──────────────────────────
-smtp_case="$(grep -nE '^ *smtp\)' tests/outage/run.sh || true)"
-if [ -n "$smtp_case" ] && ! printf '%s' "$smtp_case" | grep -q 'report N/A'; then
-    ok "outage_smtp: tests/outage/run.sh simulates the SMTP outage instead of reporting N/A"
-elif [ -z "$smtp_case" ]; then
-    fail "outage_smtp: tests/outage/run.sh has an SMTP outage scenario" "<no smtp) case>"
-else
-    fail "outage_smtp: tests/outage/run.sh simulates the SMTP outage instead of reporting N/A" \
-        "$smtp_case; SMTP delivery exists: $(ls backend/internal/notify/smtp.go 2>/dev/null)"
 fi
 
 echo

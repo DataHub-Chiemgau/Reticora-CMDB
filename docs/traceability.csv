@@ -680,3 +680,20 @@ NFR-09;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-443
 NFR-01;[B], Teilumfang [P5];LT;backend/internal/discovery/scale_integration_test.go;WP-434
 OPS-05;[B];A;backend/cmd/server/workers_metrics_test.go;WP-447
 OPS-02;[B], [P3], [A];A;backend/internal/config/config_test.go;WP-447
+COL-04;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-430
+GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-452
+SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-452
+ABN-01;[Q];G1;frontend/e2e-real/abn-01-konflikt.spec.ts;WP-456
+OPS-05;[B];A;backend/internal/operator/alerts_integration_test.go;WP-448
+ABN-02;[Q];LT;backend/internal/ci/attr_filter_plan_integration_test.go;WP-435
+NFR-10;[Q];LT;tests/load/api.js;WP-437
+ABN-02;[Q];LT;tests/load/api.js;WP-437
+NFR-02;[B];LT;tests/load/api.js;WP-437
+NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-437
+ABN-03;[Q], jeweilige Phase;LT;backend/internal/ci/integrity_check_integration_test.go;WP-437
+OPS-03;[B], [P5];A;tests/k8s/kind-smoke.sh;WP-441
+COL-08;[B];D;tests/audit/compose-port-policy.test.sh;WP-431
+PRI-07;Grundsatz (ohne Tag);D;tests/audit/compose-port-policy.test.sh;WP-431
+ABN-02;[Q];LT;backend/internal/ci/querybudget_integration_test.go;WP-436
+OPS-06;[Q];A;tests/outage/run.sh;WP-449
+NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-438

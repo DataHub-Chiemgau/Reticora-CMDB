@@ -2,14 +2,24 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // counts reads the seeded rows of one organization through the maintenance
@@ -25,6 +35,7 @@ func counts(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
 		"ci_site":           `SELECT count(*) FROM ci WHERE organization_id = $1 AND site_id IS NOT NULL`,
 		"ci_room":           `SELECT count(*) FROM ci WHERE organization_id = $1 AND room_id IS NOT NULL`,
 		"ci_document":       `SELECT count(*) FROM search_document WHERE organization_id = $1 AND entity_type = 'ci'`,
+		"ci_attribute":      `SELECT count(*) FROM ci WHERE organization_id = $1 AND attributes->>'` + AttributeKey + `' LIKE 'CC-___'`,
 		"rack_mount":        `SELECT count(*) FROM rack_mount WHERE organization_id = $1`,
 		"network_interface": `SELECT count(*) FROM network_interface WHERE organization_id = $1`,
 		"ip_address":        `SELECT count(*) FROM ip_address WHERE organization_id = $1`,
@@ -39,6 +50,8 @@ func counts(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
 		"entitlement":       `SELECT count(*) FROM entitlement WHERE organization_id = $1 AND plan = 'pro'`,
 		"org_admin": `SELECT count(*) FROM role_assignment a JOIN role r ON r.id = a.role_id
 			WHERE a.organization_id = $1 AND r.name = 'org_admin'`,
+		"attribute_definition": `SELECT count(*) FROM attribute_definition WHERE organization_id = $1 AND key = '` + AttributeKey + `'
+			AND ci_type_id IS NULL AND scope = 'global' AND data_type = 'text' AND searchable`,
 	} {
 		var n int
 		if err := f.Admin.QueryRow(context.Background(), query, orgID).Scan(&n); err != nil {
@@ -55,8 +68,12 @@ func counts(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
 // every id is deterministic and a second run changes nothing. Every CI has a
 // location, from which the database derives site and room (F-278), and a
 // document in the search index, so the global search finds it (F-277).
-// tests/integrity-check.sql finds no violation in either organization. The
-// seed runs through the application pool, subject to the tenant policies.
+// For the load scenarios of WP-437 (F-116) every CI holds a value of the
+// searchable attribute cost_center, whose definition and index the seed
+// creates, so the CI list filters on it; the relationships of a server and
+// of the core switch are found per CI. tests/integrity-check.sql finds no
+// violation in either organization. The seed runs through the application
+// pool, subject to the tenant policies.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestSeedSIM01(t *testing.T) {
@@ -64,6 +81,11 @@ func TestSeedSIM01(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	opts := Options{Prefix: "seedtest-", Objects: 10000, Metrics: 2000, At: at}
+	// The attribute indexes are schema objects; they go with the test.
+	for _, prefix := range []string{"seedtest-demo", "seedtest-acme"} {
+		index := citype.IndexName(ID(prefix, "attribute", AttributeKey), false)
+		t.Cleanup(func() { _, _ = f.Admin.Exec(context.Background(), `DROP INDEX IF EXISTS `+index) })
+	}
 
 	summary, err := Run(ctx, f.App, opts)
 	if err != nil {
@@ -82,7 +104,7 @@ func TestSeedSIM01(t *testing.T) {
 	want := func(objects, metrics int) map[string]int {
 		return map[string]int{
 			"client": 2, "rack": 2, "ci": objects, "ci_location": objects, "ci_site": objects, "ci_room": objects,
-			"ci_document": objects, "rack_mount": 40, "network_interface": objects,
+			"ci_document": objects, "ci_attribute": objects, "attribute_definition": 1, "rack_mount": 40, "network_interface": objects,
 			"ip_address": objects, "lldp": objects - 4 + 1, "ci_relationship": 2*(objects-4) + 1,
 			"metric_sample": metrics, "collector": 1, "discovery_scope": 2, "review_item": 3, "webhook": 1,
 			"vrf": 2, "entitlement": features, "org_admin": 1,
@@ -157,6 +179,91 @@ func TestSeedSIM01(t *testing.T) {
 				t.Errorf("search in %s finds ci 21 of %s", org.prefix, org.other)
 			}
 		}
+	}
+
+	// Attribute filter and relationships of the load test (F-116, WP-437):
+	// the searchable attribute has its index (as the attribute.index job
+	// builds it), the CI list filters on it like the attr_filter scenario of
+	// tests/load/api.js, and the relationships of a CI are found like the
+	// relationships scenario asks for them.
+	ctxOf := func(org string) context.Context {
+		return tenant.WithTenant(f.OrgCtx(org), tenant.TenantInfo{OrganizationID: org, UserID: f.User})
+	}
+	mux := chi.NewRouter()
+	ci.NewHandler(ci.NewService(ci.NewPGRepository(f.App))).RegisterRoutes(mux)
+	relationship.NewHandler(relationship.NewPGRepository(f.App)).RegisterRoutes(mux)
+	get := func(org, target string, out any) int {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, target, nil).WithContext(ctxOf(org)))
+		if err := json.Unmarshal(w.Body.Bytes(), out); err != nil {
+			t.Errorf("GET %s: %d %s", target, w.Code, w.Body.String())
+		}
+		return w.Code
+	}
+	for _, c := range []struct {
+		org, prefix, value string
+		want               int
+	}{{demo, "seedtest-demo", "CC-001", 10000 / CostCenters}, {acme, "seedtest-acme", "CC-002", 1}} {
+		var valid bool
+		index := citype.IndexName(ID(c.prefix, "attribute", AttributeKey), false)
+		if err := f.Admin.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i JOIN pg_class x ON x.oid = i.indexrelid
+			WHERE x.relname = $1`, index).Scan(&valid); err != nil || !valid {
+			t.Errorf("%s: attribute index %s valid %v, err %v", c.prefix, index, valid, err)
+		}
+		var page struct {
+			Data []struct {
+				Name       string         `json:"name"`
+				Attributes map[string]any `json:"attributes"`
+			} `json:"data"`
+			Total int `json:"total"`
+		}
+		target := "/api/v1/cis?limit=50&" + url.Values{"filter[attributes." + AttributeKey + "]": {c.value}}.Encode()
+		if code := get(c.org, target, &page); code != http.StatusOK || page.Total != c.want || len(page.Data) != min(c.want, 50) {
+			t.Errorf("%s: %s: %d, total %d, %d rows; want %d", c.prefix, target, code, page.Total, len(page.Data), c.want)
+		}
+		for _, row := range page.Data {
+			if row.Attributes[AttributeKey] != c.value {
+				t.Errorf("%s: %s holds %v, filtered for %s", c.prefix, row.Name, row.Attributes[AttributeKey], c.value)
+			}
+		}
+	}
+	type relationships struct {
+		Data []struct {
+			SourceCIID string `json:"source_ci_id"`
+			TargetCIID string `json:"target_ci_id"`
+			RelType    string `json:"rel_type"`
+		} `json:"data"`
+		Total   int  `json:"total"`
+		HasMore bool `json:"has_more"`
+	}
+	// srv-00042 (server room hq): LLDP to sw-00001, power from pdu-00003 and
+	// its room as the projected located_in.
+	var rels relationships
+	srv42 := ID("seedtest-demo", "ci", "42")
+	if code := get(demo, "/api/v1/cis/"+srv42+"/relationships", &rels); code != http.StatusOK || rels.Total != 3 || len(rels.Data) != 3 {
+		t.Errorf("relationships of srv-00042: %d, %+v", code, rels)
+	}
+	edges := map[string]string{}
+	for _, r := range rels.Data {
+		if r.SourceCIID == srv42 {
+			edges[r.RelType] = r.TargetCIID
+		}
+	}
+	if _, located := edges["located_in"]; !located || edges["connected_to"] != ID("seedtest-demo", "ci", "1") ||
+		edges["powered_by"] != ID("seedtest-demo", "ci", "3") {
+		t.Errorf("relationships of srv-00042: %v, want connected_to sw-00001, powered_by pdu-00003 and located_in", edges)
+	}
+	// sw-00001 is the hub: the uplink, every even server over LLDP and its
+	// projected edges, one page at a time.
+	var projected int
+	sw1 := ID("seedtest-demo", "ci", "1")
+	if err := f.Admin.QueryRow(ctx, `SELECT count(*) FROM ci_structure_edge WHERE source_ci_id = $1 OR target_ci_id = $1`, sw1).Scan(&projected); err != nil {
+		t.Fatal(err)
+	}
+	if code := get(demo, "/api/v1/cis/"+sw1+"/relationships", &rels); code != http.StatusOK ||
+		rels.Total != (10000-4)/2+1+projected || len(rels.Data) != 50 || !rels.HasMore {
+		t.Errorf("relationships of sw-00001: %d, total %d (%d rows), want %d", code, rels.Total, len(rels.Data), (10000-4)/2+1+projected)
 	}
 
 	// Data integrity of the load seed (ABN-03, NFR-10).

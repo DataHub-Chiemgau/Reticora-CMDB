@@ -1,12 +1,14 @@
 # Alertmanager routing for the Reticora alerts (WP-103, OPS-05): every alert
 # of slo-rules.yaml, worker-rules.yaml and operator-rules.yaml reaches the
-# operators; critical alerts (among them ReticoraOperatorBreakGlassUsed,
-# SEC-07) also page the on-call receiver and repeat hourly. Replace the SMTP
-# placeholders under global and the receiver endpoints with the operators'
-# relay and addresses (docs/ops/workers.md, "Alert delivery"). The NTF
-# channel of the product (WP-137) is added as another receiver once it
-# exists. Checked by tests/monitoring-config.test.sh (amtool check-config,
-# CI job monitoring-config).
+# operators by e-mail and through the NTF bridge of the server (WP-448,
+# E-75) on the notification channels of the operator organization; critical
+# alerts (among them ReticoraOperatorBreakGlassUsed, SEC-07) also page the
+# on-call receiver and repeat hourly. Replace the SMTP placeholders under
+# global and the receiver endpoints with the operators' relay, addresses and
+# server URL (docs/ops/workers.md, "Alert delivery"). Without
+# RETICORA_OPS_ALERT_ORG_ID on the server the bridge answers 404 and the
+# e-mail receivers deliver alone. Checked by tests/monitoring-config.test.sh
+# (amtool check-config, CI job monitoring-config).
 global:
   # Placeholders, not credentials (.invalid, RFC 2606): the SMTP relay that
   # delivers the e-mail receivers. The password is read from a file (for
@@ -33,6 +35,19 @@ receivers:
     email_configs:
       - to: ops@example.invalid
         send_resolved: true
+    webhook_configs:
+      # NTF bridge (POST /api/v1/admin/alerts/alertmanager): the server
+      # queues one notification per group and status on the channels of the
+      # operator organization. The token is RETICORA_OPS_ALERT_TOKEN, read
+      # from a file (a mounted secret) and never written into this file.
+      - &ntf-bridge
+        url: https://reticora.example.invalid/api/v1/admin/alerts/alertmanager
+        send_resolved: true
+        max_alerts: 50
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/secrets/ops-alert-token
   - name: operators-critical
     email_configs:
       - to: ops@example.invalid
@@ -41,6 +56,7 @@ receivers:
       # On-call pager or chat bridge.
       - url: https://oncall.example.invalid/alertmanager
         send_resolved: true
+      - *ntf-bridge
 
 inhibit_rules:
   # A stopped worker explains its missing runs.

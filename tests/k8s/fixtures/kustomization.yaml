@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Test dependencies of the kind smoke (tests/k8s/kind-smoke.sh, workflow
+# k8s-smoke, OPS-03, WP-441) in the namespace of deploy/k8s/overlays/staging:
+#   postgres         TimescaleDB, the bootstrap superuser migrates the schema;
+#                    kind-smoke.sh setup creates the runtime login afterwards
+#   redis, nats      the literal URLs of the base (redis:6379, nats:4222, NATS
+#                    with JetStream)
+#   minio            object storage of the test cluster; the staging overlay
+#                    does not configure RETICORA_S3_*, so the server does not
+#                    use it (WP-444 uses it as the pgBackRest repository)
+#   reticora-secrets, reticora-db-runtime, reticora-config
+#                    what the operator provides (deploy/README.md, section 3)
+# The secret reticora-session-key (an RSA key generated per run) is created
+# by kind-smoke.sh setup and is not committed. Every value here is test-only:
+# never apply this kustomization outside a throwaway cluster.
+namespace: reticora-staging
+
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - redis.yaml
+  - nats.yaml
+  - minio.yaml
+  - reticora-secrets.yaml
+  - reticora-config.yaml

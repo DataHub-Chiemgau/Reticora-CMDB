@@ -57,6 +57,11 @@ import (
 var version = "dev"
 
 func main() {
+	// Operator command of the collector CA (COL-04): server collector-ca
+	// status|rollover|retire [--force] (collectorca.go).
+	if len(os.Args) > 1 && os.Args[1] == collectorCACommand {
+		os.Exit(runCollectorCA(context.Background(), os.Args[2:], config.Load(), os.Stdout, os.Stderr))
+	}
 	noDB := flag.Bool("no-db", false,
 		"run with in-memory repositories for local development; all data is lost on restart")
 	checkIssuer := flag.Bool("check-oidc-issuer", false,
@@ -483,6 +488,8 @@ func main() {
 			MFAACRValues:    strings.Split(cfg.OperatorMFAACR, ","),
 		},
 		OperatorPool:         auditPool,
+		OpsAlerts:            operator.AlertConfig{Token: cfg.OpsAlertToken, OrgID: cfg.OpsAlertOrgID},
+		Notifier:             notifier,
 		UserProvisioner:      userProvisioner(repos),
 		DefaultProvisionRole: cfg.DefaultProvisionRole,
 		Audit:                auditHandler,
@@ -553,6 +560,18 @@ func main() {
 			slog.Error("worker shutdown error", "error", err)
 		}
 	}()
+
+	// The profiling listener (RETICORA_PPROF_ADDR, WP-438): off unless set,
+	// loopback only and development only (config.Validate).
+	if cfg.PprofAddr != "" {
+		profiling, addr, perr := startProfiling(cfg.PprofAddr)
+		if perr != nil {
+			slog.Error("failed to start the profiling listener", "error", perr)
+			os.Exit(1)
+		}
+		defer profiling.Close()
+		slog.Warn("profiling listener enabled", "addr", addr.String())
+	}
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,

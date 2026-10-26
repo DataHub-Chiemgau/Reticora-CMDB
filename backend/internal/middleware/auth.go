@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -17,6 +19,10 @@ import (
 )
 
 type claimsContextKey struct{}
+
+// errAuthUnavailable: the credential could not be checked because its
+// store is unreachable (identity.ErrAPIKeyUnavailable); answered with 503.
+var errAuthUnavailable = errors.New("authentication unavailable")
 
 // Claims contains the subset of JWT claims used by the development auth flow.
 type Claims struct {
@@ -97,6 +103,14 @@ func AuthMiddlewareWithAPIKeys(verifier SessionVerifier, apiKeys APIKeyAuthentic
 			}
 
 			principal, claims, err := authenticateRequest(r, verifier, apiKeys)
+			if errors.Is(err, errAuthUnavailable) {
+				// The key store is unreachable: the request is refused
+				// visibly and may be repeated, it is not a failed
+				// authentication (OPS-06; not counted by the pre-auth limit).
+				slog.WarnContext(r.Context(), "API key verification unavailable", "error", err)
+				api.WriteUnavailable(w, "authentication is temporarily unavailable, try again later")
+				return
+			}
 			if err != nil {
 				api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
 				return
@@ -127,6 +141,9 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 			return identity.Principal{}, Claims{}, fmt.Errorf("API key authentication is not configured")
 		}
 		info, err := apiKeys.Validate(r.Context(), apiKey)
+		if errors.Is(err, identity.ErrAPIKeyUnavailable) {
+			return identity.Principal{}, Claims{}, fmt.Errorf("%w: %w", errAuthUnavailable, err)
+		}
 		if err != nil || info == nil {
 			return identity.Principal{}, Claims{}, fmt.Errorf("invalid API key")
 		}

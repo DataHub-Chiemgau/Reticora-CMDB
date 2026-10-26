@@ -117,3 +117,29 @@ const (
 
 // SetLockTimeout replaces the lock timeout of r's ingest lock statements.
 func SetLockTimeout(r *PGRepository, d time.Duration) { r.lockTimeout = d }
+
+// CALockClass is the class of the CA lock (WP-430): a change of the
+// collector CA holds it exclusively, the issuance of a collector certificate
+// shared.
+const CALockClass = caLockClass
+
+// LoadedCAFingerprint is the SHA-256 (hex) of the active CA in ca's memory,
+// without the version check of a use; empty before the first use.
+func LoadedCAFingerprint(ca *CA) string {
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
+	if ca.st == nil {
+		return ""
+	}
+	return ca.st.active.info().Fingerprint
+}
+
+// CAChangeMessage is the announcement AnnounceCAChange publishes for the
+// version of collector_ca at the time at.
+func CAChangeMessage(ca *CA, version string, at time.Time) ([]byte, error) {
+	return ca.caChangeMessage(version, at)
+}
+
+// VerifyCAChange is the check of an announcement on
+// CollectorCAChangedSubject at now.
+func VerifyCAChange(ca *CA, data []byte, now time.Time) error { return ca.verifyCAChange(data, now) }

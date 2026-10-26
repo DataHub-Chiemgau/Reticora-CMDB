@@ -1,9 +1,10 @@
 // Package main provides the seed CLI (SIM-01, NFR-10): the demo organization
 // (plan pro, admin@demo.local) and the organization "acme" for isolation
 // tests, each with two clients, a site chain with two racks, CIs with LLDP
-// and power relationships, mounts, metrics, a collector with scopes, three
-// reviews, an echo webhook and a VRF example. -objects scales the demo
-// organization up to 50.000 CIs for the load test. It is never deployed.
+// and power relationships and a searchable attribute, mounts, metrics, a
+// collector with scopes, three reviews, an echo webhook and a VRF example.
+// -objects scales the demo organization up to 50.000 CIs for the load test.
+// It is never deployed.
 package main
 
 import (

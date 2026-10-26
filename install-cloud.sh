@@ -540,6 +540,12 @@ RETICORA_OIDC_CA_CERT_FILE=$(tls_ca_cert_path_in_container)
 RETICORA_FRONTEND_PORT=$RETICORA_FRONTEND_PORT
 RETICORA_SERVER_PORT=$RETICORA_SERVER_PORT
 RETICORA_KEYCLOAK_PORT=$RETICORA_KEYCLOAK_PORT
+# REST API and Keycloak (plain HTTP, admin console included) are published
+# on 127.0.0.1 only; on all interfaces (true, bind 0.0.0.0) only in an
+# installation without a TLS domain. Derived on every run from
+# RETICORA_TLS_DOMAIN (COL-08, docs/betrieb/firewall-matrix.md).
+RETICORA_PUBLISH_DIRECT_PORTS=${RETICORA_PUBLISH_DIRECT_PORTS:-false}
+RETICORA_DIRECT_PORTS_BIND=${RETICORA_DIRECT_PORTS_BIND:-127.0.0.1}
 
 # Registry and release of the signed images (E-69: the default; both empty
 # when the images were built from this checkout with --build-from-source)
@@ -805,6 +811,7 @@ collect_config() {
     ask_validated RETICORA_SERVER_PORT "Host port for the REST API" "${def_port:-8080}" valid_port
     def_port="$(env_get RETICORA_KEYCLOAK_PORT || true)"
     ask_validated RETICORA_KEYCLOAK_PORT "Host port for Keycloak" "${def_port:-8180}" valid_port
+    select_direct_ports
 
     # ── Images (E-69, Option 1) ──
     # Default: the signed release images, verified and pinned in
@@ -829,6 +836,33 @@ collect_config() {
 
     RETICORA_GC_KEEP_IMAGES="$(env_get RETICORA_GC_KEEP_IMAGES || true)"
     RETICORA_GC_KEEP_IMAGES="${RETICORA_GC_KEEP_IMAGES:-3}"
+}
+
+# select_direct_ports — the REST API (RETICORA_SERVER_PORT) and Keycloak with
+# its admin console (RETICORA_KEYCLOAK_PORT) speak plain HTTP. With a TLS
+# domain they stay on 127.0.0.1 (RETICORA_DIRECT_PORTS_BIND, also the default
+# of docker-compose.yml): from outside only 80/443 (frontend with its /api/
+# and /realms/ proxies) and 4222 (nats-edge) are open (COL-08,
+# docs/betrieb/firewall-matrix.md). An installation without a TLS domain (IP
+# address or localhost) addresses its OIDC issuer on the Keycloak port of the
+# host IP, which the browsers and the backend container reach only when the
+# port is published on all interfaces: there the installer opts in with
+# RETICORA_PUBLISH_DIRECT_PORTS=true and warns. Derived on every run; a value
+# in .env is not taken over.
+select_direct_ports() {
+    if [ -n "$RETICORA_TLS_DOMAIN" ]; then
+        RETICORA_PUBLISH_DIRECT_PORTS=false
+        RETICORA_DIRECT_PORTS_BIND=127.0.0.1
+        case "$RETICORA_OIDC_ISSUER_URL" in
+            *://*:"$RETICORA_KEYCLOAK_PORT"/*)
+                warn "RETICORA_OIDC_ISSUER_URL ($RETICORA_OIDC_ISSUER_URL) names the Keycloak port $RETICORA_KEYCLOAK_PORT, which is bound to 127.0.0.1 with a TLS domain: the browsers and the backend container cannot reach it. Use https://$RETICORA_TLS_DOMAIN/realms/reticora (frontend proxy)."
+                ;;
+        esac
+        return 0
+    fi
+    RETICORA_PUBLISH_DIRECT_PORTS=true
+    RETICORA_DIRECT_PORTS_BIND=0.0.0.0
+    warn "Installation without a TLS domain: the REST API (port $RETICORA_SERVER_PORT) and Keycloak including its admin console (port $RETICORA_KEYCLOAK_PORT) are published on all interfaces without TLS (RETICORA_PUBLISH_DIRECT_PORTS=true; the OIDC issuer of an IP installation is served on the Keycloak port of the host IP). Allow both ports only from trusted networks in the host firewall, or install with a TLS domain (docs/betrieb/firewall-matrix.md)."
 }
 
 # ─── Session signing key ──────────────────────────────────────────────────────
@@ -2142,7 +2176,10 @@ print_summary() {
     echo
     printf '%s%sInstallation complete%s\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
     local ui_url="http://localhost:$RETICORA_FRONTEND_PORT"
-    local tls_note=""
+    local tls_note="" ports_note="  Direct ports:      REST API and Keycloak on 127.0.0.1 only"
+    if [ "${RETICORA_PUBLISH_DIRECT_PORTS:-false}" = true ]; then
+        ports_note="  ⚠ Direct ports:    REST API and Keycloak (admin console included) on all interfaces without TLS — allow them only from trusted networks in the host firewall (docs/betrieb/firewall-matrix.md)"
+    fi
     if [ -n "$RETICORA_TLS_DOMAIN" ]; then
         if tls_cert_is_selfsigned; then
             ui_url="https://$RETICORA_TLS_DOMAIN"
@@ -2160,6 +2197,7 @@ print_summary() {
   Web UI:            $ui_url  (host port $RETICORA_FRONTEND_PORT)
   REST API:          http://localhost:$RETICORA_SERVER_PORT  (health: /healthz)
   Keycloak console:  http://localhost:$RETICORA_KEYCLOAK_PORT  (user: $KEYCLOAK_ADMIN)
+$ports_note
 $(initial_login_line)
 ${tls_note:+$tls_note
 }
@@ -2192,6 +2230,7 @@ main() {
   OIDC redirect:     $RETICORA_OIDC_REDIRECT_URL
   HTTPS (TLS):       ${RETICORA_TLS_DOMAIN:-<disabled — plain HTTP>}
   Ports:             UI=$RETICORA_FRONTEND_PORT API=$RETICORA_SERVER_PORT Keycloak=$RETICORA_KEYCLOAK_PORT
+  API and Keycloak:  bound to ${RETICORA_DIRECT_PORTS_BIND:-127.0.0.1} (RETICORA_PUBLISH_DIRECT_PORTS=${RETICORA_PUBLISH_DIRECT_PORTS:-false})
   Image source:      $image_source
 EOF
     if [ "$BUILD_FROM_SOURCE" != 1 ]; then

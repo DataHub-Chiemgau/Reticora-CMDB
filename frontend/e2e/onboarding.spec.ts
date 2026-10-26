@@ -17,7 +17,9 @@ import { keycloakOtp } from './support/totp';
 // secure-context requirement of crypto.subtle (PKCE).
 // ABN-01 (d): self-signup with verification and trial, login, dashboard,
 // collector enrollment, scope confirmation, 30 simulated devices, a review
-// resolved, an impact query and an export.
+// resolved, an impact query and an export. The impact step sets a dependency
+// between two simulated CIs and expects it in the impact; a CI without any
+// relationship impacts nothing (WP-456, F-299).
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
 const SERVER = process.env.E2E_SERVER_URL || 'http://localhost:8080';
@@ -287,20 +289,68 @@ test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)'
       )
       .toBeLessThan(before);
 
-    // Impact of one CI (failure simulation in the topology).
-    const cis = await apiGet<{ data: { id: string; name: string }[] }>(
+    // Impact of one CI (failure simulation in the topology). The simulated fleet
+    // guarantees no dependency (F-299): the server sim-srv-01 of the fleet
+    // (SIM-02) is made to depend on the NAS sim-nas-01, so the impact of
+    // sim-nas-01 must name it.
+    const headers = { Authorization: `Bearer ${token}` };
+    const fleet = (
+      await apiGet<{ data: { id: string; name: string; ci_type_id: string }[] }>(
+        request,
+        token,
+        '/cis?limit=100',
+      )
+    ).data;
+    const simulated = (name: string) => {
+      const ci = fleet.find((c) => c.name === name);
+      expect(ci, `simulated CI ${name}`).toBeTruthy();
+      return ci!;
+    };
+    const dependent = simulated('sim-srv-01');
+    const provider = simulated('sim-nas-01');
+    const related = await request.post(`${BASE}/api/v1/relationships`, {
+      headers,
+      data: { source_ci_id: dependent.id, target_ci_id: provider.id, rel_type: 'depends_on' },
+    });
+    expect(related.status(), `POST /relationships: ${await related.text()}`).toBe(201);
+    const impact = await apiGet<{ impacted: { id: string; heuristic: boolean }[] }>(
       request,
       token,
-      '/cis?limit=1',
+      `/impact/${provider.id}`,
     );
-    const impact = await apiGet<{ impacted: unknown[] }>(
+    expect(impact.impacted.length).toBeGreaterThanOrEqual(1);
+    expect(impact.impacted.map((n) => n.id)).toContain(dependent.id);
+    // Reached over the dependency, not only over the network heuristic (IMP-03).
+    expect(impact.impacted.find((n) => n.id === dependent.id)?.heuristic).toBe(false);
+    const simulation = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Ausfallsimulation', exact: true }) });
+    await page.goto(`/topology?simulate=${provider.id}`);
+    await expect(simulation.getByText(dependent.name, { exact: true })).toBeVisible();
+
+    // Negative case: a CI without any relationship impacts nothing, and the
+    // failure simulation says so.
+    const lone = await request.post(`${BASE}/api/v1/cis`, {
+      headers,
+      data: { name: `e2e-ohne-beziehung-${stamp}`, ci_type_id: dependent.ci_type_id },
+    });
+    expect(lone.status(), `POST /cis: ${await lone.text()}`).toBe(201);
+    const loneId = ((await lone.json()) as { id: string }).id;
+    const relations = await apiGet<{ total: number }>(
       request,
       token,
-      `/impact/${cis.data[0]!.id}`,
+      `/cis/${loneId}/relationships`,
     );
-    expect(Array.isArray(impact.impacted)).toBe(true);
-    await page.goto(`/topology?simulate=${cis.data[0]!.id}`);
-    await expect(page.getByText('Ausfallsimulation')).toBeVisible();
+    expect(relations.total).toBe(0);
+    const none = await apiGet<{ impacted: unknown[]; count: number }>(
+      request,
+      token,
+      `/impact/${loneId}`,
+    );
+    expect(none.impacted).toEqual([]);
+    expect(none.count).toBe(0);
+    await page.goto(`/topology?simulate=${loneId}`);
+    await expect(simulation.getByText(/Dieses CI hat keine abhängigen CIs/)).toBeVisible();
 
     // Export: the job completes with every CI, the file downloads.
     const created = await request.post(`${BASE}/api/v1/exports`, {

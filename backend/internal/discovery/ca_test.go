@@ -10,13 +10,20 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
@@ -76,8 +83,9 @@ func verifies(cert *x509.Certificate, bundle string) bool {
 // afterwards; disabling the collector revokes its certificates (signed
 // revocation list) and refuses renewal; a CA roll-over keeps both trust
 // anchors (also in the CA bundle of new certificates) until the previous
-// CA is retired; the CA is kept in the database, encrypted under the master
-// key.
+// CA is retired, which is refused while the collector still holds a
+// certificate of it unless forced (WP-430); the CA is kept in the database,
+// encrypted under the master key.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestCollectorPKI(t *testing.T) {
@@ -183,7 +191,7 @@ func TestCollectorPKI(t *testing.T) {
 	}
 
 	// CA roll-over: both anchors, then only the new one.
-	if err = ca.Rollover(bg); err != nil {
+	if _, err = ca.Rollover(bg, discovery.CAChangeOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	bundle, err := ca.TrustBundle(bg)
@@ -202,8 +210,19 @@ func TestCollectorPKI(t *testing.T) {
 	if other, berr := discovery.NewCA(f.App, enc).TrustBundle(bg); berr != nil || other != bundle {
 		t.Fatalf("second instance bundle differs (%v)", berr)
 	}
-	if err = ca.RetirePrevious(bg); err != nil {
-		t.Fatal(err)
+	// The collector still holds certificates of the previous CA (enrolled and
+	// renewed before the roll-over): the retirement is refused with their
+	// number and changes nothing (WP-430); forced, it retires the CA.
+	var inUse *discovery.PreviousCAInUseError
+	if _, err = ca.RetirePrevious(bg, discovery.CAChangeOptions{}); !errors.As(err, &inUse) || inUse.Collectors != 1 {
+		t.Fatalf("retirement with a collector on the previous CA: %v", err)
+	}
+	if again, _ := ca.TrustBundle(bg); again != bundle {
+		t.Fatal("a refused retirement changed the trust anchors")
+	}
+	retired, err := ca.RetirePrevious(bg, discovery.CAChangeOptions{Force: true})
+	if err != nil || retired.Overridden != 1 || len(retired.Retired) != 1 || len(retired.Previous) != 0 {
+		t.Fatalf("forced retirement: %+v (%v)", retired, err)
 	}
 	if bundle, _ = ca.TrustBundle(bg); strings.Count(bundle, "BEGIN CERTIFICATE") != 1 || verifies(cert, bundle) {
 		t.Fatal("the retired CA is still trusted")
@@ -250,5 +269,279 @@ func TestCollectorPKI(t *testing.T) {
 	}
 	if _, perr := x509.ParsePKCS8PrivateKey(keyCT); perr == nil {
 		t.Fatal("the CA key is stored in plaintext")
+	}
+}
+
+// TestCollectorCARetireRefusedWhileInUse covers the lock of the retirement
+// (WP-430, COL-04, F-102): after a roll-over RetirePrevious refuses with the
+// number of active collectors that hold a certificate of the previous CA
+// (their bundle lacks the new CA until they renew, WP-414) and changes
+// nothing. Counted are a collector enrolled before and one renewed after the
+// roll-over whose predecessor is not revoked yet; not counted are a disabled
+// collector (its certificates are revoked) and the renewed one once its
+// predecessor is revoked. The query of docs/betrieb/collector-ca.md lists
+// exactly the counted collectors. Without any left the retirement succeeds
+// without force; a second one finds no previous CA.
+func TestCollectorCARetireRefusedWhileInUse(t *testing.T) {
+	e, enc := auditEdge(t, "c1")
+	f := e.f
+	bg := context.Background()
+	stays, _, _ := auditEnroll(t, e, "retire-stays")
+	renews, renewKey, renewCert := auditEnrollWith(t, e, agedCA(e, enc, 55), f.OrgA, "retire-renews")
+	disabledID, _, _ := auditEnroll(t, e, "retire-disabled")
+	// A collector of another organization counts as well: the CA spans them.
+	otherID, _, _ := auditEnrollIn(t, e, f.OrgB, "retire-other-org")
+	if _, err := e.ca.Rollover(bg, discovery.CAChangeOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	doc, rerr := os.ReadFile("../../../docs/betrieb/collector-ca.md")
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	listQuery := regexp.MustCompile("(?s)<!-- query: previous-ca-collectors -->\n```sql\n(.*?)```").FindSubmatch(doc)
+	if listQuery == nil {
+		t.Fatal("docs/betrieb/collector-ca.md: no query previous-ca-collectors")
+	}
+	onPrevious := func(after string, ids ...string) {
+		t.Helper()
+		want := len(ids)
+		rows, err := f.Admin.Query(bg, `SELECT collector_id::text FROM (`+strings.TrimSuffix(strings.TrimSpace(string(listQuery[1])), ";")+`) q`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		listed, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatal(err)
+		}
+		slices.Sort(listed)
+		slices.Sort(ids)
+		if fmt.Sprint(listed) != fmt.Sprint(ids) {
+			t.Fatalf("%s: the query of the runbook lists %v, want %v", after, listed, ids)
+		}
+		st, err := e.ca.Status(bg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Collectors != want || len(st.Previous) != 1 {
+			t.Fatalf("%s: %d collectors on the previous CA, %d previous CAs; want %d and 1", after, st.Collectors, len(st.Previous), want)
+		}
+		var inUse *discovery.PreviousCAInUseError
+		if _, err = e.ca.RetirePrevious(bg, discovery.CAChangeOptions{}); !errors.As(err, &inUse) || inUse.Collectors != want ||
+			!strings.Contains(err.Error(), strconv.Itoa(want)+" active collectors") {
+			t.Fatalf("%s: retirement = %v, want the refusal with %d collectors", after, err, want)
+		}
+		var previous int
+		if err = f.Admin.QueryRow(bg, `SELECT count(*) FROM collector_ca WHERE state = 'previous'`).Scan(&previous); err != nil || previous != 1 {
+			t.Fatalf("%s: a refused retirement changed collector_ca (%d previous, %v)", after, previous, err)
+		}
+	}
+	onPrevious("after the roll-over", stays, renews, disabledID, otherID)
+
+	disabled := discovery.CollectorDisabled
+	for _, c := range []struct{ org, id string }{{f.OrgA, disabledID}, {f.OrgB, otherID}} {
+		if _, err := e.repo.UpdateCollector(f.OrgCtx(c.org), c.org, c.id, &discovery.CollectorPatch{Status: &disabled}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	onPrevious("after the disables", stays, renews)
+
+	// The renewal issues a certificate of the new CA; the predecessor stays
+	// valid until the collector connects with the successor.
+	subject := discovery.CollectorSubject(f.OrgA, renews) + discovery.CertificateRenewSuffix
+	newKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	resp := discovery.NewCertificateRenewal(f.App, e.ca).Renew(bg, subject,
+		renewalRequest(t, subject, subjectCSR(t, renews, f.OrgA, newKey), renewCert.CertificatePEM, time.Now(), renewKey))
+	if resp.Error != "" || resp.IssuedCert == nil || strings.Count(resp.CABundlePEM, "BEGIN CERTIFICATE") != 2 {
+		t.Fatalf("renewal after the roll-over: %+v", resp)
+	}
+	if verifies(parseCert(t, resp.CertificatePEM), renewCert.CABundlePEM) {
+		t.Fatal("the renewal after the roll-over was signed by the previous CA")
+	}
+	onPrevious("after the renewal, before the predecessor is revoked", stays, renews)
+	if _, err := discovery.RevokeSupersededCertificates(bg, f.App, 0); err != nil {
+		t.Fatal(err)
+	}
+	if revoked, err := e.ca.IsRevoked(bg, renewCert.Serial); err != nil || !revoked {
+		t.Fatalf("control: the predecessor of the renewed certificate is not revoked (%v)", err)
+	}
+	onPrevious("after the predecessor was revoked", stays)
+
+	if _, err := e.repo.UpdateCollector(f.OrgCtx(f.OrgA), f.OrgA, stays, &discovery.CollectorPatch{Status: &disabled}); err != nil {
+		t.Fatal(err)
+	}
+	ch, err := e.ca.RetirePrevious(bg, discovery.CAChangeOptions{})
+	if err != nil || ch.Overridden != 0 || len(ch.Retired) != 1 || len(ch.Previous) != 0 || ch.EdgeIssuer != ch.Active {
+		t.Fatalf("retirement without collectors on the previous CA: %+v (%v)", ch, err)
+	}
+	if _, err = e.ca.RetirePrevious(bg, discovery.CAChangeOptions{Force: true}); !errors.Is(err, discovery.ErrNoPreviousCA) {
+		t.Fatalf("second retirement: %v, want %v", err, discovery.ErrNoPreviousCA)
+	}
+}
+
+// TestCollectorCAReloadsAfterVersionChange covers the fallback of the reload
+// (WP-430, COL-04): replica B loaded the CA; replica A rolls over and no
+// announcement reaches B. B still holds the former state in memory, but its
+// next signature comes from the new CA, its trust bundle and its callout
+// know both anchors and it issues the edge server certificate by the
+// previous CA (version check of collector_ca). After A retired the previous
+// CA, B no longer admits a certificate of it and issues the edge server
+// certificate by the new CA.
+func TestCollectorCAReloadsAfterVersionChange(t *testing.T) {
+	e, enc := auditEdge(t, "c2")
+	f := e.f
+	bg := context.Background()
+	replicaA, replicaB := e.ca, discovery.NewCA(f.App, enc)
+	oldID, oldKey, oldCert := auditEnrollWith(t, e, replicaB, f.OrgA, "reload-old")
+	first := parseCert(t, oldCert.CABundlePEM)
+	loadedBefore := discovery.LoadedCAFingerprint(replicaB)
+	if loadedBefore == "" {
+		t.Fatal("control: replica B has not loaded the CA")
+	}
+	ch, err := replicaA.Rollover(bg, discovery.CAChangeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := discovery.LoadedCAFingerprint(replicaB); got != loadedBefore {
+		t.Fatal("control: replica B reloaded without a use")
+	}
+	signed, err := replicaB.Sign(bg, csrFor(t, oldID, oldKey), f.OrgA, oldID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parseCert(t, signed.CertificatePEM).CheckSignatureFrom(first) == nil || discovery.LoadedCAFingerprint(replicaB) != ch.Active.Fingerprint {
+		t.Fatal("replica B signed by the previous CA after the roll-over of replica A")
+	}
+	if bundle, berr := replicaB.TrustBundle(bg); berr != nil || strings.Count(bundle, "BEGIN CERTIFICATE") != 2 {
+		t.Fatalf("trust bundle of replica B after the roll-over: %v", berr)
+	}
+	authz := discovery.NewEdgeAuthorizer(f.App, replicaB)
+	for name, certPEM := range map[string]string{"previous CA": oldCert.CertificatePEM, "new CA": signed.CertificatePEM} {
+		if _, aerr := authz.Authorize(bg, []string{certPEM}); aerr != nil {
+			t.Fatalf("callout of replica B during the roll-over, certificate of the %s: %v", name, aerr)
+		}
+	}
+	serverPEM, _, err := replicaB.IssueServer(bg, []string{"localhost"}, time.Hour)
+	if err != nil || parseCert(t, serverPEM).CheckSignatureFrom(first) != nil {
+		t.Fatalf("edge server certificate of replica B during the roll-over not by the previous CA (%v)", err)
+	}
+
+	if _, err = replicaA.RetirePrevious(bg, discovery.CAChangeOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = authz.Authorize(bg, []string{oldCert.CertificatePEM}); err == nil {
+		t.Fatal("replica B admits a certificate of the retired CA")
+	}
+	if _, err = authz.Authorize(bg, []string{signed.CertificatePEM}); err != nil {
+		t.Fatalf("replica B refuses a certificate of the active CA: %v", err)
+	}
+	// The first anchor of a bundle issued during the roll-over is the new CA.
+	if serverPEM, _, err = replicaB.IssueServer(bg, []string{"localhost"}, time.Hour); err != nil ||
+		parseCert(t, serverPEM).CheckSignatureFrom(parseCert(t, signed.CABundlePEM)) != nil {
+		t.Fatalf("edge server certificate of replica B after the retirement not by the new CA (%v)", err)
+	}
+}
+
+// TestCollectorCAChangeLock covers the CA lock (WP-430): a roll-over waits
+// while a certificate is being issued (another session holds the lock
+// shared), and an enrollment waits while a change holds it exclusively; each
+// finishes once the lock is released.
+func TestCollectorCAChangeLock(t *testing.T) {
+	e, _ := auditEdge(t, "c3")
+	f := e.f
+	bg := context.Background()
+	if _, err := e.ca.TrustBundle(bg); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := f.Admin.Acquire(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Release()
+	waits := func(what, lock, unlock string, run func() error) {
+		t.Helper()
+		if _, lerr := holder.Exec(bg, lock, discovery.CALockClass); lerr != nil {
+			t.Fatal(lerr)
+		}
+		done := make(chan error, 1)
+		go func() { done <- run() }()
+		select {
+		case rerr := <-done:
+			_, _ = holder.Exec(bg, unlock, discovery.CALockClass)
+			t.Fatalf("%s did not wait for the CA lock (%v)", what, rerr)
+		case <-time.After(time.Second):
+		}
+		if _, lerr := holder.Exec(bg, unlock, discovery.CALockClass); lerr != nil {
+			t.Fatal(lerr)
+		}
+		select {
+		case rerr := <-done:
+			if rerr != nil {
+				t.Fatalf("%s: %v", what, rerr)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s did not finish after the CA lock was released", what)
+		}
+	}
+	waits("a roll-over during an issuance", `SELECT pg_advisory_lock_shared($1, 0)`, `SELECT pg_advisory_unlock_shared($1, 0)`, func() error {
+		_, rerr := e.ca.Rollover(bg, discovery.CAChangeOptions{})
+		return rerr
+	})
+	raw := "scopetest-c3-lock"
+	code := &discovery.EnrollmentCode{OrganizationID: f.OrgA, Label: raw, ExpiresAt: time.Now().Add(time.Hour)}
+	code.SetRawCode(raw)
+	if err = e.repo.CreateEnrollmentCode(f.OrgCtx(f.OrgA), code); err != nil {
+		t.Fatal(err)
+	}
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	csr := csrFor(t, "", key)
+	waits("an enrollment during a change", `SELECT pg_advisory_lock($1, 0)`, `SELECT pg_advisory_unlock($1, 0)`, func() error {
+		_, rerr := e.repo.EnrollCollector(bg, raw, &discovery.Collector{Name: "lock"}, func(ctx context.Context, org, id string) (*discovery.IssuedCert, error) {
+			return e.ca.Sign(ctx, csr, org, id)
+		})
+		return rerr
+	})
+}
+
+// TestCollectorCAChangeAnnouncementAuthenticated covers the announcement of
+// a change of the CA (WP-430): the internal NATS authenticates nobody, so a
+// receiver accepts only an announcement with the MAC of the master key, at
+// most 5 minutes old. A changed version, a MAC of another master key, an
+// old timestamp and garbage are refused.
+func TestCollectorCAChangeAnnouncementAuthenticated(t *testing.T) {
+	newEnc := func() *crypto.EnvelopeEncryptor {
+		t.Helper()
+		key, err := crypto.GenerateMasterKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		enc, err := crypto.NewEnvelopeEncryptor(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return enc
+	}
+	ca, foreign := discovery.NewCA(nil, newEnc()), discovery.NewCA(nil, newEnc())
+	now := time.Now()
+	msg, err := discovery.CAChangeMessage(ca, "v1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = discovery.VerifyCAChange(ca, msg, now.Add(time.Minute)); err != nil {
+		t.Fatalf("authentic announcement refused: %v", err)
+	}
+	other, _ := discovery.CAChangeMessage(foreign, "v1", now)
+	stale, _ := discovery.CAChangeMessage(ca, "v1", now.Add(-6*time.Minute))
+	for name, data := range map[string][]byte{
+		"changed version":     []byte(strings.Replace(string(msg), `"v1"`, `"v2"`, 1)),
+		"another master key":  other,
+		"older than 5 min":    stale,
+		"no MAC":              []byte(`{"version":"v1","at":"` + now.UTC().Format(time.RFC3339Nano) + `"}`),
+		"no JSON":             []byte("reload"),
+		"empty":               nil,
+		"MAC of empty fields": []byte(`{"mac":""}`),
+	} {
+		if verr := discovery.VerifyCAChange(ca, data, now); verr == nil {
+			t.Errorf("%s: announcement accepted", name)
+		}
 	}
 }

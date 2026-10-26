@@ -36,16 +36,14 @@
 #   WP-211 P2 "G1-Installationsnachweis gilt für 1b6671f/37752e1, nicht für den
 #          aktuellen Release-Kandidaten"                     -> case install_evidence_current
 #
-# Known reproduced production defects (audit probes, see the Go defect tests
-# of group T5/T1) that must not stand as PASS while open:
-#   SR-11 -> CI-13: backend/internal/tenant/rls/audit_t5_sr11_decorator_chain_auditdefect_test.go
-#   rack site-scope bypass -> TEN-09: T1 TestAuditT1RackChannelSiteScope
-#
 # Moved into tests/rep01-structure.test.sh (WP-451): rep01_* (fixture
 # self-tests on tests/fixtures/rep01/), rack_site_scope, pass_by_declaration
 # and assertion 1 of known_defect, generalised (an open SR/PT finding keeps
 # every catalog ID it names from PASS). Assertion 2 of known_defect (SR-11
-# severity) stays here until WP-452.
+# rated High or Critical) moved there with WP-452 as rule sr11_severity, also
+# for a fixed SR-11. The production defects behind them are fixed: SR-11 by
+# WP-418 (TestAuditT5CIReactivationThroughProductionDecoratorChain), the rack
+# site-scope bypass (SR-12) by WP-340 (TestRackChannelSiteScope).
 #
 # Retest:
 #   ./tests/audit/g1-gate-evidence.test.sh
@@ -59,7 +57,6 @@ FAIL=0
 ok()   { PASS=$((PASS + 1)); printf 'ok   %s\n' "$1"; }
 fail() { FAIL=$((FAIL + 1)); printf 'FAIL %s\n' "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/     /' | head -n 12; return 0; }
 
-REVIEW=docs/security/review-g1.md
 PENTEST=docs/security/pentest-g1.md
 
 # Normalised severity of a markdown cell: strips **, blanks, case; maps the
@@ -108,31 +105,6 @@ if [ -z "$open_pt" ]; then
 else
     fail "pentest_open: no open High/Critical PT finding" "$open_pt"
 fi
-
-# ─── WP-213 P1 / WP-209 P2: known open defects must not stand as PASS ───────
-# known_defect <finding id> <catalog id>: a [B] function that is unusable in
-# production must be rated at least High (gate-relevant). Assertion 1 (the
-# checklist does not carry the ID as PASS while the finding is open) runs
-# generalised in tests/rep01-structure.test.sh (WP-451).
-known_defect() {
-    local fid="$1" cid="$2" row sev status
-    row="$(grep -E "^\| *${fid} *\|" "$REVIEW" | head -n 1)"
-    if [ -z "$row" ]; then
-        fail "known_defect_${fid}: ${fid} is recorded in ${REVIEW}" "<no row>"
-        return
-    fi
-    sev="$(printf '%s' "$row" | cut -d'|' -f3)"
-    status="$(printf '%s' "$row" | cut -d'|' -f4)"
-    if is_closed "$status"; then
-        ok "known_defect_${fid}: ${fid} is fixed; ${cid} may be PASS"
-        return
-    fi
-    case "$(norm_severity "$sev")" in
-        critical|high) ok "known_defect_${fid}: ${fid} (${cid} [B] unusable in production) is rated High or Critical" ;;
-        *) fail "known_defect_${fid}: ${fid} (${cid} [B] unusable in production) is rated High or Critical" "severity:$(printf '%s' "$sev")" ;;
-    esac
-}
-known_defect SR-11 CI-13
 
 # ─── WP-212 P2: ABN-01 (a)/(b) frozen original texts ────────────────────────
 for f in abn-01-a-cmdb.md abn-01-b-system.md; do
