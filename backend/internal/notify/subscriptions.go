@@ -8,6 +8,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 )
 
 // The notification events of phase 1 (NTF-05): which domain event reaches
@@ -40,6 +41,12 @@ var Subscriptions = map[string]Subscription{
 	events.ReviewCreated: {
 		Category: "review",
 		Audience: func(d map[string]any) *Audience {
+			if str(d, "kind") == reviews.KindUnlicensedCI {
+				// A device held because max_cis is reached is a licensing
+				// matter: it goes to the org_admins only (ENT-03, CH21).
+				return &Audience{Permission: identity.PermReviewResolve, Roles: []string{"org_admin"},
+					ClientID: str(d, "client_id"), SiteID: str(d, "site_id")}
+			}
 			return &Audience{Permission: identity.PermReviewResolve, AllWithPermission: true,
 				ClientID: str(d, "client_id"), SiteID: str(d, "site_id")}
 		},

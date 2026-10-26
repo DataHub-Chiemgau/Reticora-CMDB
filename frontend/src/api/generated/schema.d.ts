@@ -295,6 +295,10 @@ export interface paths {
      *     invitation, or an account an administrator made org_admin) binds the
      *     IdP account to MFA (Keycloak realm role mfa_required, AUT-09); when
      *     that fails, the login answers 503 and changes nothing.
+     *     A first login with a pending invitation creates the user only within
+     *     max_users (active users, ENT-03); at the limit it answers 403
+     *     entitlement-limit, creates no user and leaves the invitation open.
+     *     A deactivated user, and a first login without an admission, get 403.
      */
     post: operations['authCallback'];
     delete?: never;
@@ -2461,6 +2465,11 @@ export interface paths {
      *     it, the requested permissions within the account's grants, must lie
      *     within the caller's own scope; otherwise 403. A deactivated account's
      *     permissions are then required organization-wide.
+     *
+     *     A new key counts against max_api_keys (ENT-03): at the limit of the
+     *     active keys (neither revoked nor expired) the request gets 403
+     *     entitlement-limit and no key is created. A rotation replaces a key
+     *     and is not checked.
      */
     post: operations['createAPIKey'];
     delete?: never;
@@ -2532,7 +2541,10 @@ export interface paths {
     /** List users */
     get: operations['listUsers'];
     put?: never;
-    /** Create a user */
+    /**
+     * Create a user
+     * @description The new user counts against max_users (ENT-03): at the limit of the organization's active users the request gets 403 entitlement-limit and no user is created.
+     */
     post: operations['createUser'];
     delete?: never;
     options?: never;
@@ -3898,7 +3910,10 @@ export interface paths {
     /** List discovery collectors */
     get: operations['listCollectors'];
     put?: never;
-    /** Register a discovery collector */
+    /**
+     * Register a discovery collector
+     * @description The new collector counts against max_collectors (ENT-03): at the limit of the organization's collectors that are not disabled, counted organization-wide, the request gets 403 entitlement-limit and no collector is registered.
+     */
     post: operations['registerCollector'];
     delete?: never;
     options?: never;
@@ -3937,7 +3952,7 @@ export interface paths {
     put?: never;
     /**
      * Enroll a collector with an enrollment code
-     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential (valid 24 h, consumed exactly once). On success the collector identity is registered under the code's organization and returned with its id. With `csr` (PEM certificate signing request of the collector's locally generated key) the internal CA issues the collector's client certificate (CN = collector id, 90 days, COL-04).
+     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential (valid 24 h, consumed exactly once). On success the collector identity is registered under the code's organization and returned with its id. With `csr` (PEM certificate signing request of the collector's locally generated key) the internal CA issues the collector's client certificate (CN = collector id, 90 days, COL-04). The enrollment counts against max_collectors of the code's organization (ENT-03): at the limit it answers 403 entitlement-limit, registers nothing and leaves the code unused and valid.
      */
     post: operations['enrollCollector'];
     delete?: never;
@@ -4241,7 +4256,7 @@ export interface paths {
     put?: never;
     /**
      * Accept an invitation (TLC-03)
-     * @description The token is the credential; the request passes the pre-auth limit (AUT-10). The invitation is consumed atomically and once: it creates the user with the invited role and scope. With the IdP admin client the password creates the IdP account (never stored by Reticora); otherwise the user signs in with an existing IdP account of the address, which the first login links. 404 for an unknown, revoked or used token, 410 for an expired one, 409 when the organization already has a user with the address. An org_admin account is bound to MFA (Keycloak realm role mfa_required, AUT-09); when that fails, the account is deleted again, the acceptance answers 503 and the invitation stays open.
+     * @description The token is the credential; the request passes the pre-auth limit (AUT-10). The invitation is consumed atomically and once: it creates the user with the invited role and scope. With the IdP admin client the password creates the IdP account (never stored by Reticora); otherwise the user signs in with an existing IdP account of the address, which the first login links. 404 for an unknown, revoked or used token, 410 for an expired one, 409 when the organization already has a user with the address. An org_admin account is bound to MFA (Keycloak realm role mfa_required, AUT-09); when that fails, the account is deleted again, the acceptance answers 503 and the invitation stays open. The new user counts against max_users (active users, ENT-03): at the limit the acceptance answers 403 entitlement-limit, creates neither user nor IdP account and the invitation stays open.
      */
     post: operations['acceptInvitation'];
     delete?: never;
@@ -11033,6 +11048,15 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
+    /** @description Forbidden: a missing permission, the organization's plan does not include the feature (type https://reticora.io/problems/feature-not-entitled, ENT-05), or the quota of the operation is reached (type https://reticora.io/problems/entitlement-limit, ENT-03): max_users for users, max_api_keys for API keys, max_collectors for collectors. Nothing is created; after a downgrade below the stock the existing objects stay usable and readable (ENT-08). */
+    EntitlementLimit: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
     /** @description Resource not found */
     NotFound: {
       headers: {
@@ -11659,6 +11683,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['EntitlementLimit'];
       500: components['responses']['InternalServerError'];
       503: components['responses']['ServiceUnavailable'];
     };
@@ -16520,7 +16545,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['FeatureNotEntitled'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       /** @description Name, permissions, expiry or environment invalid */
       422: {
@@ -16663,6 +16688,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['EntitlementLimit'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -20464,6 +20490,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['EntitlementLimit'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -20536,6 +20563,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['EntitlementLimit'];
       422: components['responses']['UnprocessableEntity'];
       503: components['responses']['ServiceUnavailable'];
     };
@@ -21227,6 +21255,7 @@ export interface operations {
         };
       };
       400: components['responses']['BadRequest'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       /** @description The invitation has expired */

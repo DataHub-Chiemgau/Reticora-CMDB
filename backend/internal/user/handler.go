@@ -10,6 +10,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
@@ -48,6 +49,7 @@ type Handler struct {
 	tickets     TicketActivityLister
 	assignments AssignmentLister
 	sessions    SessionRevoker
+	quota       QuotaGuard
 }
 
 // NewHandler creates a new user/team/role handler. contacts may be nil; the
@@ -73,6 +75,14 @@ func (h *Handler) WithPrivacySources(tickets TicketActivityLister, assignments A
 // and refresh tokens of the user immediately (TLC-04, AUT-02).
 func (h *Handler) WithSessionRevoker(sessions SessionRevoker) *Handler {
 	h.sessions = sessions
+	return h
+}
+
+// WithQuota enforces max_users on POST /users against the active users of
+// the organization (ENT-03); over the limit the request gets 403
+// entitlement-limit and no user is created.
+func (h *Handler) WithQuota(q QuotaGuard) *Handler {
+	h.quota = q
 	return h
 }
 
@@ -212,6 +222,18 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		ExternalID:     req.ExternalID,
 	}
 
+	if h.quota != nil {
+		active, err := h.repo.CountActiveUsers(r.Context(), t.OrganizationID)
+		if err == nil {
+			err = h.quota.AllowCreate(r.Context(), t.OrganizationID, entitlement.LimitMaxUsers, active)
+		}
+		if err != nil {
+			if !api.WriteEntitlementError(w, err) {
+				api.WriteRepoError(w, err)
+			}
+			return
+		}
+	}
 	if err := h.repo.CreateUser(r.Context(), u); err != nil {
 		api.WriteRepoError(w, err)
 		return

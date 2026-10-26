@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 )
 
@@ -536,6 +537,54 @@ func TestCallbackFailsWhenMFACannotBeEnforced(t *testing.T) {
 
 	if w.Code != http.StatusServiceUnavailable || strings.Contains(w.Body.String(), `"token"`) || strings.Contains(w.Body.String(), "keycloak") {
 		t.Fatalf("login without enforceable MFA: status %d body %s, want 503 without token and cause", w.Code, w.Body.String())
+	}
+	if len(w.Result().Cookies()) != 0 {
+		t.Errorf("refresh cookie set: %v", w.Result().Cookies())
+	}
+}
+
+// quotaLimitError is the refusal of the entitlement service when max_users
+// is reached (entitlement.LimitExceededError; that package imports this one).
+type quotaLimitError struct{}
+
+func (quotaLimitError) Error() string {
+	return `entitlement limit for "max_users" exceeded: 1 of 1 in use`
+}
+func (quotaLimitError) LimitExceeded() bool { return true }
+func (quotaLimitError) ProblemType() string { return api.ProblemEntitlementLimit }
+
+// quotaFailingProvisioner fails every login like a first login with an
+// invitation while max_users is reached (WP-472).
+type quotaFailingProvisioner struct{ statusProvisioner }
+
+func (quotaFailingProvisioner) EnsureUser(context.Context, string, string, string, string) (string, error) {
+	return "", fmt.Errorf("ensure oidc user: %w", quotaLimitError{})
+}
+
+// TestCallbackRefusesFirstLoginOverUserQuota covers WP-472 (ENT-03): a
+// first login with an invitation at max_users answers 403
+// entitlement-limit without session and refresh cookie.
+func TestCallbackRefusesFirstLoginOverUserQuota(t *testing.T) {
+	orgID := "123e4567-e89b-12d3-a456-426614174000"
+	fake := newFakeOIDCServer(t)
+	fake.mutateClaims = func(claims map[string]any) {
+		claims["groups"] = []string{orgID}
+	}
+	handler := NewHandler(NewOIDCProvider(OIDCConfig{
+		IssuerURL:    fake.issuer(),
+		ClientID:     "reticora-app",
+		ClientSecret: "top-secret",
+		RedirectURL:  "https://app.example.com/callback",
+	}), testSessionIssuer(t)).WithProvisioning(quotaFailingProvisioner{}, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/callback",
+		strings.NewReader(`{"code":"auth-code","state":"nonce","code_verifier":"verifier-123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.Callback(w, req)
+
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), api.ProblemEntitlementLimit) || strings.Contains(w.Body.String(), `"token"`) {
+		t.Fatalf("first login over max_users: status %d body %s, want 403 entitlement-limit without token", w.Code, w.Body.String())
 	}
 	if len(w.Result().Cookies()) != 0 {
 		t.Errorf("refresh cookie set: %v", w.Result().Cookies())

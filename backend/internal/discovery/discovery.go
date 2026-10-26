@@ -23,6 +23,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
@@ -162,6 +163,11 @@ type BulkIngestResponse struct {
 type Repository interface {
 	ListCollectors(ctx context.Context, orgID string, page api.PaginationParams) ([]Collector, int, error)
 	RegisterCollector(ctx context.Context, c *Collector) error
+	// CountCollectors counts the collectors of the organization that are
+	// not disabled, the stock max_collectors is checked against (ENT-03).
+	// It counts organization-wide, whatever the caller's client or site
+	// scope.
+	CountCollectors(ctx context.Context, orgID string) (int64, error)
 	// Heartbeat records a heartbeat and returns the collector's status: a
 	// pending or offline collector becomes active, a paused one stays
 	// paused, a disabled one is refused (ErrCollectorDisabled).
@@ -185,6 +191,12 @@ type Repository interface {
 	// With issue, the collector's first certificate is issued (CN =
 	// collector id) and recorded in the same transaction (COL-04).
 	EnrollCollector(ctx context.Context, rawCode string, c *Collector, issue CertIssuer) (*IssuedCert, error)
+	// EnrollCollectorWithQuota is EnrollCollector that first checks
+	// max_collectors of the code's organization with quota (nil: no
+	// check), in the same transaction and before the code is consumed: a
+	// refused enrollment returns the guard's error, registers nothing and
+	// leaves the code valid (ENT-03).
+	EnrollCollectorWithQuota(ctx context.Context, rawCode string, c *Collector, issue CertIssuer, quota QuotaGuard) (*IssuedCert, error)
 	// Renewal is no repository call of the API: the collector renews over
 	// its NATS channel with proof of its current key (CertificateRenewal,
 	// PGRepository.RenewEdgeCertificate, F-012).
@@ -268,6 +280,23 @@ func (r *MemoryRepository) ListCollectors(_ context.Context, orgID string, page 
 	return result[start:end], total, nil
 }
 
+// CountCollectors implements Repository.
+func (r *MemoryRepository) CountCollectors(_ context.Context, orgID string) (int64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.countCollectors(orgID), nil
+}
+
+func (r *MemoryRepository) countCollectors(orgID string) int64 {
+	var n int64
+	for _, c := range r.collectors {
+		if c.OrganizationID == orgID && c.Status != CollectorDisabled {
+			n++
+		}
+	}
+	return n
+}
+
 func (r *MemoryRepository) RegisterCollector(_ context.Context, c *Collector) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -339,12 +368,23 @@ func (r *MemoryRepository) CreateEnrollmentCode(_ context.Context, code *Enrollm
 }
 
 func (r *MemoryRepository) EnrollCollector(ctx context.Context, rawCode string, c *Collector, issue CertIssuer) (*IssuedCert, error) {
+	return r.EnrollCollectorWithQuota(ctx, rawCode, c, issue, nil)
+}
+
+// EnrollCollectorWithQuota implements Repository.
+func (r *MemoryRepository) EnrollCollectorWithQuota(ctx context.Context, rawCode string, c *Collector, issue CertIssuer, quota QuotaGuard) (*IssuedCert, error) {
 	r.mu.Lock()
 	id, ok := r.enrollHashes[enrollmentCodeHash(rawCode)]
 	code := r.enrollCodes[id]
 	if !ok || code == nil || code.UsedAt != nil || time.Now().UTC().After(code.ExpiresAt) {
 		r.mu.Unlock()
 		return nil, fmt.Errorf("enrollment code invalid, expired or already used")
+	}
+	if quota != nil {
+		if err := quota.AllowCreate(ctx, code.OrganizationID, entitlement.LimitMaxCollectors, r.countCollectors(code.OrganizationID)); err != nil {
+			r.mu.Unlock()
+			return nil, err
+		}
 	}
 	now := time.Now().UTC()
 	code.UsedAt = &now
@@ -434,7 +474,7 @@ type FieldProvenance struct {
 
 // Handler provides HTTP handlers for discovery endpoints.
 type Handler struct {
-	limits     LimitGuard
+	limits     QuotaGuard
 	license    EdgeLicense
 	repo       Repository
 	ciRepo     ci.Repository
@@ -787,6 +827,18 @@ func (h *Handler) RegisterCollector(w http.ResponseWriter, r *http.Request) {
 		c.Config = make(map[string]any)
 	}
 
+	if h.limits != nil {
+		current, err := h.repo.CountCollectors(r.Context(), t.OrganizationID)
+		if err == nil {
+			err = h.limits.AllowCreate(r.Context(), t.OrganizationID, entitlement.LimitMaxCollectors, current)
+		}
+		if err != nil {
+			if !api.WriteEntitlementError(w, err) {
+				api.WriteRepoError(w, err)
+			}
+			return
+		}
+	}
 	if err := h.repo.RegisterCollector(r.Context(), &c); err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -886,10 +938,14 @@ func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
 		}
 		issue = h.issuer(req.CSR)
 	}
-	cert, err := h.repo.EnrollCollector(r.Context(), req.Code, c, issue)
+	// max_collectors of the code's organization is checked before the code
+	// is consumed: at the limit the answer is 403 entitlement-limit and the
+	// code stays valid (ENT-03).
+	cert, err := h.repo.EnrollCollectorWithQuota(r.Context(), req.Code, c, issue, h.limits)
 	if err != nil {
 		var fe *api.FieldError
 		switch {
+		case api.WriteEntitlementError(w, err):
 		case errors.As(err, &fe):
 			api.WriteRepoError(w, err)
 		case errors.Is(err, ErrInvalidCSR):

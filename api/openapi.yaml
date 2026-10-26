@@ -589,6 +589,10 @@ paths:
         invitation, or an account an administrator made org_admin) binds the
         IdP account to MFA (Keycloak realm role mfa_required, AUT-09); when
         that fails, the login answers 503 and changes nothing.
+        A first login with a pending invitation creates the user only within
+        max_users (active users, ENT-03); at the limit it answers 403
+        entitlement-limit, creates no user and leaves the invitation open.
+        A deactivated user, and a first login without an admission, get 403.
       requestBody:
         required: true
         content:
@@ -611,6 +615,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
         '500':
           $ref: '#/components/responses/InternalServerError'
         '503':
@@ -4582,6 +4588,11 @@ paths:
         it, the requested permissions within the account's grants, must lie
         within the caller's own scope; otherwise 403. A deactivated account's
         permissions are then required organization-wide.
+
+        A new key counts against max_api_keys (ENT-03): at the limit of the
+        active keys (neither revoked nor expired) the request gets 403
+        entitlement-limit and no key is created. A rotation replaces a key
+        and is not checked.
       requestBody:
         required: true
         content:
@@ -4600,7 +4611,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/FeatureNotEntitled'
+          $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -4706,6 +4717,10 @@ paths:
       operationId: createUser
       tags: [Users]
       summary: Create a user
+      description: >-
+        The new user counts against max_users (ENT-03): at the limit of the
+        organization's active users the request gets 403 entitlement-limit
+        and no user is created.
       requestBody:
         required: true
         content:
@@ -4723,6 +4738,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -7815,6 +7832,11 @@ paths:
       operationId: registerCollector
       tags: [Collectors]
       summary: Register a discovery collector
+      description: >-
+        The new collector counts against max_collectors (ENT-03): at the
+        limit of the organization's collectors that are not disabled,
+        counted organization-wide, the request gets 403 entitlement-limit
+        and no collector is registered.
       requestBody:
         required: true
         content:
@@ -7832,6 +7854,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -7885,6 +7909,9 @@ paths:
         returned with its id. With `csr` (PEM certificate signing request of
         the collector's locally generated key) the internal CA issues the
         collector's client certificate (CN = collector id, 90 days, COL-04).
+        The enrollment counts against max_collectors of the code's
+        organization (ENT-03): at the limit it answers 403 entitlement-limit,
+        registers nothing and leaves the code unused and valid.
       requestBody:
         required: true
         content:
@@ -7914,6 +7941,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '503':
@@ -8575,6 +8604,9 @@ paths:
         already has a user with the address. An org_admin account is bound
         to MFA (Keycloak realm role mfa_required, AUT-09); when that fails,
         the account is deleted again, the acceptance answers 503 and the
+        invitation stays open. The new user counts against max_users
+        (active users, ENT-03): at the limit the acceptance answers 403
+        entitlement-limit, creates neither user nor IdP account and the
         invitation stays open.
       requestBody:
         required: true
@@ -8591,6 +8623,8 @@ paths:
                 $ref: '#/components/schemas/AcceptedInvitation'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -12608,6 +12642,20 @@ components:
         include the feature of this operation (rack_view for racks and
         mounts, api_access for API keys; type
         https://reticora.io/problems/feature-not-entitled, ENT-05).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    EntitlementLimit:
+      description: >-
+        Forbidden: a missing permission, the organization's plan does not
+        include the feature (type
+        https://reticora.io/problems/feature-not-entitled, ENT-05), or the
+        quota of the operation is reached (type
+        https://reticora.io/problems/entitlement-limit, ENT-03): max_users
+        for users, max_api_keys for API keys, max_collectors for collectors.
+        Nothing is created; after a downgrade below the stock the existing
+        objects stay usable and readable (ENT-08).
       content:
         application/problem+json:
           schema:

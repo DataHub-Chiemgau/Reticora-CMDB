@@ -109,8 +109,10 @@ type InvitationRepository interface {
 	// AcceptInvitation consumes the invitation of tokenHash atomically and
 	// once, creates the user with the invited role and scope, and runs
 	// createAccount with the name of the invited role inside the
-	// transaction.
-	AcceptInvitation(ctx context.Context, orgID, tokenHash, displayName string,
+	// transaction. With quota, max_users is checked against the active
+	// users first (ENT-03); its refusal rolls back: the invitation stays
+	// open and createAccount does not run.
+	AcceptInvitation(ctx context.Context, orgID, tokenHash, displayName string, quota QuotaGuard,
 		createAccount func(ctx context.Context, inv *Invitation, role string) error) (*AcceptedInvitation, error)
 }
 
@@ -404,10 +406,11 @@ func (r *PGInvitations) RevokeInvitation(ctx context.Context, orgID, id string) 
 // login). The conditional UPDATE consumes the invitation exactly once: a
 // concurrent second acceptance waits for the row lock and then finds it
 // accepted.
-func (r *PGInvitations) AcceptInvitation(ctx context.Context, orgID, tokenHash, displayName string,
+func (r *PGInvitations) AcceptInvitation(ctx context.Context, orgID, tokenHash, displayName string, quota QuotaGuard,
 	createAccount func(ctx context.Context, inv *Invitation, role string) error) (*AcceptedInvitation, error) {
 	var accepted *AcceptedInvitation
-	err := database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
+	scope := loginScope(orgID)
+	err := database.WithTenant(ctx, r.pool, scope, func(ctx context.Context, tx pgx.Tx) error {
 		inv, err := scanInvitation(tx.QueryRow(ctx, `UPDATE user_invitation SET accepted_at = now()
 			WHERE organization_id = $1 AND token_hash = $2 AND accepted_at IS NULL AND expires_at > now()
 			RETURNING `+invitationColumns, orgID, tokenHash))
@@ -433,6 +436,9 @@ func (r *PGInvitations) AcceptInvitation(ctx context.Context, orgID, tokenHash, 
 		}
 		if exists {
 			return ErrInvitationUserExists
+		}
+		if quotaErr := allowUserTx(ctx, tx, scope, quota, orgID); quotaErr != nil {
+			return quotaErr
 		}
 		if strings.TrimSpace(displayName) == "" {
 			displayName = inv.Email

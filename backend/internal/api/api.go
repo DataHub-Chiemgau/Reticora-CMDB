@@ -279,6 +279,18 @@ func WriteTypedProblem(w http.ResponseWriter, status int, err error) bool {
 	return true
 }
 
+// WriteEntitlementError writes a refusal of the entitlement service (an
+// exhausted quota or a feature outside the plan) as 403 with its problem
+// type (entitlement-limit, feature-not-entitled) and reports whether err
+// was one.
+func WriteEntitlementError(w http.ResponseWriter, err error) bool {
+	var refusal interface{ LimitExceeded() bool }
+	if !errors.As(err, &refusal) || !refusal.LimitExceeded() {
+		return false
+	}
+	return WriteTypedProblem(w, http.StatusForbidden, err)
+}
+
 // ReadJSON decodes JSON from request body.
 func ReadJSON(r *http.Request, v any) error {
 	defer r.Body.Close()

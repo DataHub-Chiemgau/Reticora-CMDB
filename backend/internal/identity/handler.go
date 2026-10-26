@@ -618,6 +618,9 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		writeContextError(w, err)
 	case errors.Is(err, ErrUserInactive), errors.Is(err, ErrFirstLoginNotPermitted):
 		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
+	case api.WriteEntitlementError(w, err):
+		// A first login with an invitation while max_users is reached
+		// (ENT-03): 403 entitlement-limit, the invitation stays open.
 	case errors.Is(err, ErrMFAUnavailable):
 		// The cause names the admin API; it goes to the log only.
 		slog.Error("login: org_admin without enforceable MFA", "error", err)
