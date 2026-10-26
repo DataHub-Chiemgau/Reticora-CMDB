@@ -11021,9 +11021,12 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
-    /** @description Unauthorized */
+    /** @description Unauthorized: the credential is missing or invalid. A failed authentication counts against the pre-auth budget of the client IP (AUT-10); the X-RateLimit headers describe that budget. */
     Unauthorized: {
       headers: {
+        'X-RateLimit-Limit': components['headers']['X-RateLimit-Limit'];
+        'X-RateLimit-Remaining': components['headers']['X-RateLimit-Remaining'];
+        'X-RateLimit-Reset': components['headers']['X-RateLimit-Reset'];
         [name: string]: unknown;
       };
       content: {
@@ -11093,7 +11096,7 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
-    /** @description A rate limit is spent: the pre-auth budget of the client IP (AUT-10), the budget of the API key or session, or the organization budget (API-04). */
+    /** @description A rate limit is spent: the pre-auth budget of the client IP (AUT-10), the budget of the API key or session, or the organization budget (API-04). The X-RateLimit headers describe the budget that refused the request. */
     TooManyRequests: {
       headers: {
         /** @description Seconds until the budget is renewed. */

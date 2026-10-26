@@ -116,6 +116,9 @@ func AuthMiddlewareWithAPIKeys(verifier SessionVerifier, apiKeys APIKeyAuthentic
 				return
 			}
 
+			// A valid credential is no failed attempt: its pre-auth unit is
+			// given back before the handler runs (AUT-10).
+			releasePreAuthSlot(r.Context())
 			ctx := identity.WithPrincipal(r.Context(), principal)
 			ctx = identity.WithPermissions(ctx, principal.Permissions)
 			ctx = context.WithValue(ctx, claimsContextKey{}, claims)

@@ -329,6 +329,57 @@ func TestHTTPHandlerServesCookieOnlyRefreshAndLogout(t *testing.T) {
 	}
 }
 
+// TestHTTPHandlerSetsRateLimitHeadersBeforeTheLimiter covers WP-462 (API-04,
+// AUT-10, F-217) through the handler the server serves: answers refused
+// before the rate limit stage carry the X-RateLimit headers of the pre-auth
+// budget of the client IP (401 for an invalid bearer, 429 of the pre-auth
+// limit with Retry-After); an authenticated answer, here 403 of the route
+// authorization, carries those of the credential budget, which overwrite
+// them. A successful refresh and an authenticated request leave the
+// pre-auth budget untouched.
+func TestHTTPHandlerSetsRateLimitHeadersBeforeTheLimiter(t *testing.T) {
+	if left := 60 - time.Now().UTC().Unix()%60; left < 5 {
+		// All requests of the test share one minute window.
+		time.Sleep(time.Duration(left)*time.Second + 100*time.Millisecond)
+	}
+	cs := newChainStack(t)
+	token, cookie := cs.login(t, identity.PermPermissionRead)
+	type headers struct{ limit, remaining, reset, retry string }
+	headersOf := func(w *httptest.ResponseRecorder) headers {
+		h := w.Header()
+		return headers{h.Get("X-RateLimit-Limit"), h.Get("X-RateLimit-Remaining"), h.Get("X-RateLimit-Reset"), h.Get("Retry-After")}
+	}
+	check := func(what string, w *httptest.ResponseRecorder, code int, limit, remaining string, retry bool) {
+		t.Helper()
+		got := headersOf(w)
+		reset, err := strconv.Atoi(got.reset)
+		if w.Code != code || got.limit != limit || got.remaining != remaining || err != nil || reset < 1 || reset > 60 || (got.retry != "") != retry {
+			t.Errorf("%s: %d %+v; want %d with X-RateLimit-Limit %s, -Remaining %s, -Reset 1..60, Retry-After %v",
+				what, w.Code, got, code, limit, remaining, retry)
+		}
+		if retry && got.retry != got.reset {
+			t.Errorf("%s: Retry-After %s, want the seconds until the window ends (%s)", what, got.retry, got.reset)
+		}
+	}
+
+	// A successful refresh passes the rate limit stage too (counted per IP
+	// there) and does not count against the pre-auth budget: the first
+	// failed attempt below leaves 19.
+	w := cs.do(http.MethodPost, "/api/v1/auth/refresh", "", cookie, "", "")
+	check("successful refresh", w, http.StatusOK, "600", "599", false)
+	w = cs.do(http.MethodGet, "/api/v1/cis", token, "", "", "")
+	check("403 of the route authorization", w, http.StatusForbidden, "600", "599", false)
+	for i := 1; i <= middleware.DefaultPreAuthPerMinute; i++ {
+		w = cs.do(http.MethodGet, "/api/v1/me", "not-a-token", "", "", "")
+		check("401 for an invalid bearer, attempt "+strconv.Itoa(i), w, http.StatusUnauthorized, "20", strconv.Itoa(middleware.DefaultPreAuthPerMinute-i), false)
+	}
+	w = cs.do(http.MethodGet, "/api/v1/me", token, "", "", "")
+	check("pre-auth 429 after 20 failed attempts", w, http.StatusTooManyRequests, "20", "0", true)
+	if strings.Join(cs.trace, ",") != "pre-auth" {
+		t.Errorf("pre-auth 429: stages %v, want only pre-auth", cs.trace)
+	}
+}
+
 // TestSystemJobsCoverJOB02 covers the scheduler wiring of JOB-02 and OPS-03
 // (WP-425, F-044): registerSystemJobs, which main runs, registers on a
 // database every system job of the JOB-02 [B] list — offline detector (with

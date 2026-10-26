@@ -21,6 +21,9 @@ func (downStore) Set(context.Context, string, string, time.Duration) error {
 func (downStore) Increment(context.Context, string, time.Duration) (int64, error) {
 	return 0, errors.New("redis down")
 }
+func (downStore) Decrement(context.Context, string) (int64, error) {
+	return 0, errors.New("redis down")
+}
 func (downStore) Delete(context.Context, string) error { return errors.New("redis down") }
 func (downStore) Close() error                         { return nil }
 

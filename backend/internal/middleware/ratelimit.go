@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
@@ -261,13 +262,31 @@ var preAuthPaths = map[string]bool{
 	"/api/v1/admin/auth/callback": true,
 }
 
+// refreshPath is the pre-auth endpoint whose successful answers do not
+// count: behind one NAT address the token renewals of many users would
+// otherwise spend the budget and log them out (F-063).
+const refreshPath = "/api/v1/auth/refresh"
+
 // PreAuthRateLimiter limits authentication attempts per client IP before any
-// credential is checked (AUT-10, API-04). Every request to a pre-auth
-// endpoint and every request whose authentication failed (401, including
-// invalid API keys and session tokens) counts against the budget of the
-// current minute. Once it is spent, pre-auth requests and requests to
-// authenticated endpoints get 429 with Retry-After until the minute is over.
-// A store error fails closed.
+// credential is checked (AUT-10, API-04). Each request to a pre-auth
+// endpoint or to an authenticated endpoint takes one unit of the budget of
+// the current minute with an atomic increment before it is served; the
+// value the increment returns decides, so concurrent requests on all
+// replicas never admit more than the budget. What counts:
+//   - login callback, signup, signup verification, invitation acceptance,
+//     enrollment and operator callback: every request;
+//   - the session refresh: only answers outside 2xx, a successful refresh
+//     gives its unit back;
+//   - authenticated endpoints (API keys, sessions, operator path): only
+//     failed authentications (401); a request gives its unit back as soon as
+//     its authentication succeeds (or, on the operator path, when it is
+//     answered with anything but 401).
+//
+// Once the budget is spent, pre-auth requests and requests to authenticated
+// endpoints get 429 with Retry-After until the minute is over. Every
+// response of a limited path carries X-RateLimit-Limit, -Remaining and
+// -Reset of the IP budget; the rate limit after authentication overwrites
+// them with the credential budget (API-04). A store error fails closed.
 func PreAuthRateLimiter(perMinute int, store cache.Store) func(http.Handler) http.Handler {
 	if perMinute <= 0 {
 		perMinute = DefaultPreAuthPerMinute
@@ -282,32 +301,48 @@ func PreAuthRateLimiter(perMinute int, store cache.Store) func(http.Handler) htt
 				return
 			}
 			now := time.Now().UTC().Unix()
+			reset := 60 - now%60
 			windowKey := fmt.Sprintf("preauth:%s:%d", clientIP(r), now/60)
-			used, err := preAuthUsed(r.Context(), store, windowKey)
+			count, err := store.Increment(r.Context(), windowKey, 2*time.Minute)
 			if err != nil {
 				slog.Warn("pre-auth rate limiter backend error, rejecting request", "error", err)
 				httpx.RateLimited(w, r, "rate limiter unavailable, try again later")
 				return
 			}
-			if used >= int64(perMinute) {
-				// The budget renews with the next minute window.
-				w.Header().Set("Retry-After", strconv.FormatInt(60-now%60, 10))
+			h := w.Header()
+			h.Set("X-RateLimit-Limit", strconv.Itoa(perMinute))
+			h.Set("X-RateLimit-Remaining", strconv.FormatInt(max(int64(perMinute)-count, 0), 10))
+			h.Set("X-RateLimit-Reset", strconv.FormatInt(reset, 10))
+			if count > int64(perMinute) {
+				// A refused request is no attempt: its unit is given back,
+				// so the counter holds only the admitted ones. The budget
+				// renews with the next minute window.
+				(&preAuthSlot{store: store, key: windowKey, held: true}).release(r.Context())
+				h.Set("Retry-After", strconv.FormatInt(reset, 10))
 				httpx.RateLimited(w, r, "too many authentication attempts, try again later")
 				return
 			}
-			if preAuth {
-				if _, err = store.Increment(r.Context(), windowKey, 2*time.Minute); err != nil {
-					slog.Warn("pre-auth rate limiter backend error, rejecting request", "error", err)
-					httpx.RateLimited(w, r, "rate limiter unavailable, try again later")
-					return
-				}
+			if preAuth && r.URL.Path != refreshPath {
 				next.ServeHTTP(w, r)
 				return
 			}
+			slot := &preAuthSlot{store: store, key: windowKey, held: true}
 			rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
-			next.ServeHTTP(rw, r)
-			if rw.status == http.StatusUnauthorized {
-				if _, err = store.Increment(r.Context(), windowKey, 2*time.Minute); err != nil {
+			if preAuth {
+				next.ServeHTTP(rw, r)
+				if rw.status >= 200 && rw.status < 300 {
+					slot.release(r.Context())
+				}
+				return
+			}
+			next.ServeHTTP(rw, r.WithContext(context.WithValue(r.Context(), preAuthSlotKey{}, slot)))
+			switch {
+			case rw.status != http.StatusUnauthorized:
+				slot.release(r.Context())
+			case slot.released():
+				// Authenticated, but answered 401 after all: a failed
+				// authentication counts.
+				if _, err = store.Increment(context.WithoutCancel(r.Context()), windowKey, 2*time.Minute); err != nil {
 					slog.Warn("pre-auth rate limiter: failed attempt not counted", "error", err)
 				}
 			}
@@ -315,14 +350,43 @@ func PreAuthRateLimiter(perMinute int, store cache.Store) func(http.Handler) htt
 	}
 }
 
-func preAuthUsed(ctx context.Context, store cache.Store, key string) (int64, error) {
-	value, found, err := store.Get(ctx, key)
-	if err != nil || !found {
-		return 0, err
+// preAuthSlot is the unit of the pre-auth budget a request holds while it
+// is served.
+type preAuthSlot struct {
+	store cache.Store
+	key   string
+	mu    sync.Mutex
+	held  bool
+}
+
+type preAuthSlotKey struct{}
+
+// release gives the unit back once; a store error leaves it counted.
+func (s *preAuthSlot) release(ctx context.Context) {
+	s.mu.Lock()
+	held := s.held
+	s.held = false
+	s.mu.Unlock()
+	if !held {
+		return
 	}
-	n, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		return 0, nil
+	// The client may be gone by now; the unit is given back regardless.
+	if _, err := s.store.Decrement(context.WithoutCancel(ctx), s.key); err != nil {
+		slog.Warn("pre-auth rate limiter: unit not given back", "error", err)
 	}
-	return n, nil
+}
+
+func (s *preAuthSlot) released() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.held
+}
+
+// releasePreAuthSlot gives back the pre-auth unit of a request whose
+// authentication succeeded, so a valid credential holds the IP budget only
+// while it is checked, not while the handler runs.
+func releasePreAuthSlot(ctx context.Context) {
+	if slot, ok := ctx.Value(preAuthSlotKey{}).(*preAuthSlot); ok {
+		slot.release(ctx)
+	}
 }

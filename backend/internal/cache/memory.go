@@ -85,6 +85,25 @@ func (m *MemoryStore) Increment(_ context.Context, key string, ttl time.Duration
 	return count, nil
 }
 
+func (m *MemoryStore) Decrement(_ context.Context, key string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	entry, exists := m.entries[key]
+	if !exists || (!entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt)) {
+		delete(m.entries, key)
+		return 0, nil
+	}
+	count, err := strconv.ParseInt(entry.value, 10, 64)
+	if err != nil {
+		// Corrupted (non-numeric) entry: reset the counter, as Increment does.
+		count = 1
+	}
+	count--
+	m.entries[key] = memEntry{value: strconv.FormatInt(count, 10), expiresAt: entry.expiresAt}
+	return count, nil
+}
+
 func (m *MemoryStore) Delete(_ context.Context, key string) error {
 	m.mu.Lock()
 	delete(m.entries, key)

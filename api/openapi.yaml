@@ -12,6 +12,16 @@ info:
     `X-RateLimit-Reset` (seconds until the window ends) for the budget
     closest to exhaustion; a refused request gets 429 with `Retry-After`.
 
+    Pre-auth limit (AUT-10): 20 authentication attempts per minute and
+    client IP (configurable), checked before any credential. Login
+    callback, signup, signup verification, invitation acceptance,
+    collector enrollment and operator callback count every request; the
+    session refresh counts only answers outside 2xx; authenticated
+    endpoints count only failed authentications (401). Answers refused
+    before the rate limit above (401, pre-auth 429) carry the
+    `X-RateLimit-*` headers of the pre-auth budget, a pre-auth 429 also
+    `Retry-After`.
+
     Dependency outages (OPS-06): a request that needs an unreachable
     dependency is refused before anything is stored, with 503 and
     `Retry-After`: every request with a well-formed API key while the key
@@ -12652,7 +12662,17 @@ components:
           schema:
             $ref: '#/components/schemas/ProblemDetail'
     Unauthorized:
-      description: Unauthorized
+      description: >-
+        Unauthorized: the credential is missing or invalid. A failed
+        authentication counts against the pre-auth budget of the client IP
+        (AUT-10); the X-RateLimit headers describe that budget.
+      headers:
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/X-RateLimit-Limit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/X-RateLimit-Remaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/X-RateLimit-Reset'
       content:
         application/problem+json:
           schema:
@@ -12715,7 +12735,8 @@ components:
       description: >-
         A rate limit is spent: the pre-auth budget of the client IP (AUT-10),
         the budget of the API key or session, or the organization budget
-        (API-04).
+        (API-04). The X-RateLimit headers describe the budget that refused
+        the request.
       headers:
         Retry-After:
           schema: { type: integer }
