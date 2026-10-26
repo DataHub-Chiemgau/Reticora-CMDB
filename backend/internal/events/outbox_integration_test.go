@@ -233,8 +233,12 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 	if err = f.Admin.QueryRow(bg, `SELECT count(*) FROM event_outbox WHERE organization_id = $1 AND published_at IS NULL`, f.OrgA).Scan(&pending); err != nil || pending != 0 {
 		t.Errorf("pending after publishing: %d %v", pending, err)
 	}
-	if n, _ := pub.PublishPending(bg); n != 0 {
-		t.Errorf("published again: %d", n)
+	// Events of other organizations (rows of earlier test packages in the
+	// shared database, WP-427) may still be pending; none of A's may go out
+	// a second time.
+	_, _ = pub.PublishPending(bg)
+	if again := len(ofA()) - len(a); again != 0 {
+		t.Errorf("published again: %d", again)
 	}
 	if js != nil {
 		stream, streamErr := js.Stream(bg, events.StreamName)

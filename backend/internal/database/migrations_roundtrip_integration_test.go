@@ -22,9 +22,9 @@ import (
 
 // The roundtrip test drives the migrations itself, with the semantics of
 // golang-migrate (one simple-protocol Exec per file, bookkeeping in
-// schema_migrations), so the database stays usable for the migrate CLI. It
-// changes the whole schema of TEST_DATABASE_URL and leaves it fully migrated;
-// CI therefore runs the packages sequentially (go test -p 1).
+// schema_migrations), so its database stays usable for the migrate CLI. It
+// works in databases of its own on the server of TEST_DATABASE_URL and drops
+// them at the end; the database of TEST_DATABASE_URL is not changed (F-193).
 
 const migrationsDir = "../../migrations"
 
@@ -117,7 +117,7 @@ func (m *migrator) exec(ctx context.Context, path string, target int) {
 	// Without arguments pgx uses the simple protocol, so the whole file runs
 	// as one implicit transaction like with golang-migrate.
 	if _, err := m.conn.Exec(ctx, string(sqlText)); err != nil {
-		m.t.Fatalf("apply %s: %v", filepath.Base(path), err)
+		m.t.Fatalf("apply %s: %v (database left dirty at version %d)", filepath.Base(path), err, target)
 	}
 	m.setVersion(ctx, target, false)
 }
@@ -146,23 +146,31 @@ func (m *migrator) upTo(ctx context.Context, target int) {
 // iteration is the down 1/up 1 check of the newest migration. Migrations
 // whose down or up also writes rows have a data check (migrationDataChecks)
 // around their down and the following up.
+//
+// The roundtrip runs in a fresh database of its own, so the shared test
+// database stays untouched. A second database of the same cluster, migrated
+// like another installation (staging next to production), holds grants to
+// the cluster-wide role reticora_app throughout (F-193, F-287): down to 0 and
+// up must pass without a dirty version, the rows the migrations seed must be
+// complete again, the members of reticora_app must stay, and the second
+// database must be unchanged and still work with SET ROLE reticora_app.
 func TestMigrationsRoundtrip(t *testing.T) {
 	dsn := testDatabaseURL(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	conn, err := pgx.Connect(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer conn.Close(context.Background())
-
 	files := loadMigrations(t)
 	latest := len(files)
+
+	peer := scratchDatabase(ctx, t, dsn, "peer")
+	(&migrator{t: t, conn: peer, files: files}).upTo(ctx, latest)
+	peerSchema := schemaDump(ctx, t, peer)
+	members := appRoleMembers(ctx, t, peer)
+
+	conn := scratchDatabase(ctx, t, dsn, "roundtrip")
 	m := &migrator{t: t, conn: conn, files: files}
 	m.upTo(ctx, latest)
-	truncateAll(ctx, t, conn)
-	restoreAppRoleMembers(ctx, t, conn, dsn)
+	seedA := seedRows(ctx, t, conn)
 	schemaA := schemaDump(ctx, t, conn)
 
 	for m.version(ctx) > 0 {
@@ -170,6 +178,11 @@ func TestMigrationsRoundtrip(t *testing.T) {
 	}
 	if leftovers := objectsOutsideExtensions(schemaDump(ctx, t, conn)); len(leftovers) > 0 {
 		t.Errorf("objects left after migrating down to version 0:\n  %s", strings.Join(leftovers, "\n  "))
+	}
+	// 000056 down keeps reticora_app only for other databases: nothing in
+	// this one (privileges, default privileges) may still depend on it.
+	if deps := appRoleDependencies(ctx, t, conn); len(deps) > 0 {
+		t.Errorf("objects of this database still depend on %s at version 0:\n  %s", database.DefaultAppRole, strings.Join(deps, "\n  "))
 	}
 
 	for _, f := range files {
@@ -206,20 +219,124 @@ func TestMigrationsRoundtrip(t *testing.T) {
 	if diff := diffLines(schemaA, schemaDump(ctx, t, conn)); diff != "" {
 		t.Errorf("schema after down to 0 and up differs from the initial schema (- A, + B):\n%s", diff)
 	}
+	if v := m.version(ctx); v != latest {
+		t.Errorf("version after down to 0 and up: %d, want %d", v, latest)
+	}
+	seedB := seedRows(ctx, t, conn)
+	if diff := diffLines(seedA, seedB); diff != "" {
+		t.Errorf("rows after down to 0 and up differ from the freshly migrated database (- before, + after):\n%s", diff)
+	}
+	t.Logf("rows after down to 0 and up: %s", seedSummary(seedB))
+
+	if diff := diffLines(members, appRoleMembers(ctx, t, peer)); diff != "" {
+		t.Errorf("members of %s changed by the roundtrip (- before, + after):\n%s", database.DefaultAppRole, diff)
+		restoreAppRoleMembers(ctx, t, peer, members)
+	}
+	if diff := diffLines(peerSchema, schemaDump(ctx, t, peer)); diff != "" {
+		t.Errorf("roundtrip in another database changed the second database (- before, + after):\n%s", diff)
+	}
+	peerUsableAsAppRole(ctx, t, peer)
 }
 
-// restoreAppRoleMembers grants reticora_app again to its current members when
-// the test ends. Role memberships are cluster state outside the schema:
-// 000056 down drops reticora_app together with its memberships, among them
-// the runtime login the later test packages open their application pools
-// with (TEST_APP_DATABASE_URL, WP-349).
-func restoreAppRoleMembers(ctx context.Context, t *testing.T, conn *pgx.Conn, dsn string) {
+// scratchDatabase creates an empty database on the server of dsn and returns
+// a connection to it as the user of dsn. The database is dropped when the
+// test ends.
+func scratchDatabase(ctx context.Context, t *testing.T, dsn, purpose string) *pgx.Conn {
+	t.Helper()
+	admin, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = admin.Close(context.Background()) }()
+	name := fmt.Sprintf("reticora_wp427_%s_%d", purpose, time.Now().UnixNano())
+	if _, err = admin.Exec(ctx, "CREATE DATABASE "+name+" TEMPLATE template0"); err != nil {
+		t.Fatalf("create database %s: %v", name, err)
+	}
+	t.Cleanup(func() {
+		drop, cerr := pgx.Connect(context.Background(), dsn)
+		if cerr != nil {
+			t.Errorf("drop database %s: %v", name, cerr)
+			return
+		}
+		defer func() { _ = drop.Close(context.Background()) }()
+		if _, cerr = drop.Exec(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)"); cerr != nil {
+			t.Errorf("drop database %s: %v", name, cerr)
+		}
+	})
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse TEST_DATABASE_URL: %v", err)
+	}
+	cfg.Database = name
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("connect %s: %v", name, err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	return conn
+}
+
+// seedRows describes the rows a migrated database holds before any test
+// writes: the row count of every table, the permission catalog, the global CI
+// types and the organizations (F-193: a failed rollback had removed most of
+// them).
+func seedRows(ctx context.Context, t *testing.T, conn *pgx.Conn) []string {
+	t.Helper()
+	var counts string
+	if err := conn.QueryRow(ctx, `
+		SELECT string_agg(format('SELECT %L || count(*) FROM %I', 'rows ' || c.relname || ' ', c.relname), ' UNION ALL ')
+		  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+		 WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname <> 'schema_migrations'`).Scan(&counts); err != nil {
+		t.Fatalf("list tables: %v", err)
+	}
+	var lines []string
+	for _, q := range []string{
+		counts,
+		`SELECT 'permission ' || key FROM permission`,
+		`SELECT 'global ci_type ' || key FROM ci_type WHERE organization_id IS NULL`,
+		`SELECT 'organization ' || id || ' ' || slug FROM organization`,
+	} {
+		rows, err := conn.Query(ctx, q)
+		if err != nil {
+			t.Fatalf("seed rows: %v\n%s", err, q)
+		}
+		got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatalf("seed rows: %v\n%s", err, q)
+		}
+		lines = append(lines, got...)
+	}
+	sort.Strings(lines)
+	return lines
+}
+
+// seedSummary counts the permissions and global CI types of seedRows and
+// names the organizations.
+func seedSummary(lines []string) string {
+	var permissions, ciTypes int
+	var orgs []string
+	for _, l := range lines {
+		switch {
+		case strings.HasPrefix(l, "permission "):
+			permissions++
+		case strings.HasPrefix(l, "global ci_type "):
+			ciTypes++
+		case strings.HasPrefix(l, "organization "):
+			orgs = append(orgs, strings.TrimPrefix(l, "organization "))
+		}
+	}
+	return fmt.Sprintf("%d permissions, %d global CI types, organizations %v", permissions, ciTypes, orgs)
+}
+
+// appRoleMembers lists the members of reticora_app, a role of the whole
+// cluster, as the GRANT statements that restore them.
+func appRoleMembers(ctx context.Context, t *testing.T, conn *pgx.Conn) []string {
 	t.Helper()
 	rows, err := conn.Query(ctx, `
 		SELECT format('GRANT %I TO %I WITH ADMIN %s, INHERIT %s, SET %s',
 		              r.rolname, pg_get_userbyid(m.member), m.admin_option::text, m.inherit_option::text, m.set_option::text)
 		  FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
-		 WHERE r.rolname = $1`, database.DefaultAppRole)
+		 WHERE r.rolname = $1 ORDER BY 1`, database.DefaultAppRole)
 	if err != nil {
 		t.Fatalf("list members of %s: %v", database.DefaultAppRole, err)
 	}
@@ -227,51 +344,71 @@ func restoreAppRoleMembers(ctx context.Context, t *testing.T, conn *pgx.Conn, ds
 	if err != nil {
 		t.Fatalf("list members of %s: %v", database.DefaultAppRole, err)
 	}
-	t.Cleanup(func() {
-		restore, err := pgx.Connect(context.Background(), dsn)
-		if err != nil {
-			t.Errorf("restore members of %s: %v", database.DefaultAppRole, err)
-			return
-		}
-		defer func() { _ = restore.Close(context.Background()) }()
-		for _, grant := range grants {
-			if _, err := restore.Exec(context.Background(), grant); err != nil {
-				t.Errorf("restore members of %s: %s: %v", database.DefaultAppRole, grant, err)
-			}
-		}
-	})
+	return grants
 }
 
-// truncateAll removes the rows other tests left behind. Migrating down to 0
-// drops all data anyway, but rows referencing seeded catalog entries (for
-// example CIs of a global system type) would make a down migration fail. The
-// final up seeds the catalogs again, so later tests see a fresh schema.
-func truncateAll(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+// appRoleDependencies lists the objects of the current database that depend
+// on reticora_app (pg_shdepend: privileges, default privileges, ownership).
+func appRoleDependencies(ctx context.Context, t *testing.T, conn *pgx.Conn) []string {
 	t.Helper()
 	rows, err := conn.Query(ctx, `
-		SELECT string_agg(format('%I', c.relname), ', ')
-		  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-		 WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname <> 'schema_migrations'`)
+		SELECT d.deptype::text || ' ' || pg_describe_object(d.classid, d.objid, d.objsubid)
+		  FROM pg_shdepend d
+		  JOIN pg_database db ON db.oid = d.dbid AND db.datname = current_database()
+		  JOIN pg_roles r ON r.oid = d.refobjid AND d.refclassid = 'pg_authid'::regclass
+		 WHERE r.rolname = $1 ORDER BY 1`, database.DefaultAppRole)
 	if err != nil {
-		t.Fatalf("list tables: %v", err)
+		t.Fatalf("list dependencies on %s: %v", database.DefaultAppRole, err)
 	}
-	var tables *string
-	for rows.Next() {
-		if err := rows.Scan(&tables); err != nil {
-			t.Fatalf("list tables: %v", err)
+	deps, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("list dependencies on %s: %v", database.DefaultAppRole, err)
+	}
+	return deps
+}
+
+// restoreAppRoleMembers grants reticora_app again to its former members, so
+// a failed roundtrip does not take the runtime login of the later test
+// packages (TEST_APP_DATABASE_URL, WP-349) with it.
+func restoreAppRoleMembers(ctx context.Context, t *testing.T, conn *pgx.Conn, grants []string) {
+	t.Helper()
+	for _, grant := range grants {
+		if _, err := conn.Exec(ctx, grant); err != nil {
+			t.Errorf("restore members of %s: %s: %v", database.DefaultAppRole, grant, err)
 		}
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		t.Fatalf("list tables: %v", err)
+}
+
+// peerUsableAsAppRole checks that the second database still works for the
+// application role (F-287): SET ROLE reticora_app succeeds and reads a
+// tenant table under its policy and a global catalog table.
+func peerUsableAsAppRole(ctx context.Context, t *testing.T, peer *pgx.Conn) {
+	t.Helper()
+	var org, slug string
+	var permissions int
+	if err := peer.QueryRow(ctx, `SELECT id::text, slug, (SELECT count(*) FROM permission) FROM organization ORDER BY id LIMIT 1`).
+		Scan(&org, &slug, &permissions); err != nil {
+		t.Fatalf("second database: read organization: %v", err)
 	}
-	if tables == nil {
-		return
+	tx, err := peer.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// Replica mode skips the append-only triggers of audit_log and
-	// asset_movement; the whole statement runs as one implicit transaction.
-	if _, err := conn.Exec(ctx, "SET session_replication_role = replica; TRUNCATE "+*tables+" CASCADE; SET session_replication_role = DEFAULT"); err != nil {
-		t.Fatalf("truncate test data: %v", err)
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if _, err := tx.Exec(ctx, `SET LOCAL ROLE `+database.DefaultAppRole); err != nil {
+		t.Fatalf("second database: SET ROLE %s: %v", database.DefaultAppRole, err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.org_id', $1, true)`, org); err != nil {
+		t.Fatalf("second database: set app.org_id: %v", err)
+	}
+	var gotSlug string
+	var gotPermissions int
+	if err := tx.QueryRow(ctx, `SELECT slug, (SELECT count(*) FROM permission) FROM organization`).Scan(&gotSlug, &gotPermissions); err != nil {
+		t.Fatalf("second database: SELECT as %s: %v", database.DefaultAppRole, err)
+	}
+	if gotSlug != slug || gotPermissions != permissions {
+		t.Errorf("second database as %s: organization %q, %d permissions; want %q, %d",
+			database.DefaultAppRole, gotSlug, gotPermissions, slug, permissions)
 	}
 }
 
