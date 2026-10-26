@@ -20,6 +20,7 @@ import {
   savedViewApi,
   type AttributeIndexFlags,
   type CITypeCreateRequest,
+  type LocationUpdateRequest,
 } from './cmdb';
 import type { FieldDefinition } from '../lib/fieldmeta';
 
@@ -190,6 +191,23 @@ export function useCreateLocation() {
   return useMutation({
     mutationFn: locationApi.create,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['locations'] }),
+  });
+}
+
+/**
+ * useUpdateLocation renames and/or moves a node (PATCH /locations/{id},
+ * LOC-07). A move re-derives path, site and client of the whole subtree, so
+ * the tree, every location detail and the history are refetched.
+ */
+export function useUpdateLocation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: LocationUpdateRequest }) =>
+      locationApi.update(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['locations'] });
+      qc.invalidateQueries({ queryKey: ['history'] });
+    },
   });
 }
 

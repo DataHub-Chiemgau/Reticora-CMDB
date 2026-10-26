@@ -275,6 +275,11 @@ export class ApiError extends Error {
   readonly title?: string;
   readonly detail?: string;
   readonly violations: FieldViolation[];
+  /**
+   * dependencies are the kinds of objects that keep a resource from being
+   * deleted (DependencyProblem of a 409, LOC-11), e.g. `location` or `ci`.
+   */
+  readonly dependencies: string[];
   /** traceId is the request id of the failed request (API-03), for support. */
   readonly traceId?: string;
 
@@ -285,6 +290,7 @@ export class ApiError extends Error {
       title?: string;
       detail?: string;
       violations?: FieldViolation[];
+      dependencies?: string[];
       traceId?: string;
     } = {},
   ) {
@@ -294,6 +300,7 @@ export class ApiError extends Error {
     this.title = options.title;
     this.detail = options.detail;
     this.violations = options.violations ?? [];
+    this.dependencies = options.dependencies ?? [];
     this.traceId = options.traceId;
   }
 
@@ -325,6 +332,7 @@ export class ApiError extends Error {
       title?: unknown;
       detail?: unknown;
       violations?: unknown;
+      dependencies?: unknown;
       trace_id?: unknown;
     };
 
@@ -346,10 +354,17 @@ export class ApiError extends Error {
         })
       : [];
 
+    const dependencies: string[] = Array.isArray(problem.dependencies)
+      ? problem.dependencies.filter(
+          (entry): entry is string => typeof entry === 'string' && entry !== '',
+        )
+      : [];
+
     return new ApiError(status, detail || title || statusText, {
       title,
       detail,
       violations,
+      dependencies,
       traceId,
     });
   }

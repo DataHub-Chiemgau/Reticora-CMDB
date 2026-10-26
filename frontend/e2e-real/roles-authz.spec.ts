@@ -33,6 +33,7 @@ import {
  *  04 expired invitation 410, renewable ....... TLC-03 ("7 Tage", "erneuerbar") → WP-114
  *  05 invitation e-mail ....................... NTF-05 ("Einladung"), TLC-03 → WP-140, WP-114
  *  06 viewer API boundaries (403) ............. RBA-02, RBA-04, RBA-01, AUT-04 → WP-045, WP-046, WP-068, WP-067, WP-114
+ *     incl. location writes, tree UI, engineer . LOC-07, RBA-02               → WP-474
  *  07 viewer self-escalation refused .......... RBA-02, RBA-03, RBA-04, TLC-03 → WP-045, WP-046, WP-009, WP-114
  *  08 viewer UI: CIs read-only ................ RBA-02, RBA-04 (UI-04/UI-05)  → WP-046, WP-045
  *  09 viewer UI: admin pages .................. RBA-02, RBA-04               → WP-046, WP-045
@@ -507,9 +508,29 @@ test('06 the viewer reads CIs, but every write, delete and administrative call i
 }) => {
   const viewer = await ensureViewer(request);
   const ci = await ensureCI(request);
-  const { context, token } = await signIn(browser, viewer);
+  const { context, page, token } = await signIn(browser, viewer);
   const v = (method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, data?: unknown) =>
     api(request, token, method, path, data);
+
+  // Location tree of the administrator: the viewer reads it but writes nothing (LOC-07).
+  const locClient = await adminCall<{ id: string }>(request, 'POST', '/clients', {
+    name: `authz-loc-client-${run}`,
+    slug: `authz-loc-client-${run}`,
+  });
+  expect(locClient.status, JSON.stringify(locClient.body)).toBe(201);
+  const locSite = await adminCall<{ id: string; name: string }>(request, 'POST', '/locations', {
+    kind: 'site',
+    name: `authz-site-${run}`,
+    client_id: locClient.body.id,
+  });
+  expect(locSite.status, JSON.stringify(locSite.body)).toBe(201);
+  const locBuilding = await adminCall<{ id: string; name: string }>(request, 'POST', '/locations', {
+    kind: 'building',
+    name: `authz-building-${run}`,
+    parent_id: locSite.body.id,
+  });
+  expect(locBuilding.status, JSON.stringify(locBuilding.body)).toBe(201);
+  expect((await v('GET', `/locations/${locBuilding.body.id}`)).status).toBe(200);
 
   // Read is allowed (ci:read, location:read).
   const list = await api<{ data: CI[] }>(request, token, 'GET', '/cis?limit=50');
@@ -580,12 +601,125 @@ test('06 the viewer reads CIs, but every write, delete and administrative call i
       { name: `v-${run}`, provider: 'inapp' },
     ],
     ['audit log', 'GET', '/audit-log'],
+    [
+      'create location',
+      'POST',
+      '/locations',
+      { kind: 'building', name: `viewer-building-${run}`, parent_id: locSite.body.id },
+    ],
+    [
+      'rename/move location',
+      'PATCH',
+      `/locations/${locBuilding.body.id}`,
+      { name: `viewer-renamed-building-${run}` },
+    ],
+    ['delete location', 'DELETE', `/locations/${locBuilding.body.id}`],
   ];
   for (const [label, method, path, data] of refused) {
     const res = await v(method, path, data);
     expect.soft(res.status, `${label}: ${method} ${path} → ${JSON.stringify(res.body)}`).toBe(403);
   }
+
+  // Tree UI: every refused write is shown to the viewer, none fails silently (LOC-07).
+  const forbidden = 'Keine Berechtigung für diese Aktion.';
+  await page.goto('/locations');
+  const row = page
+    .locator('#main-content li > div')
+    .filter({ has: page.getByText(locBuilding.body.name, { exact: true }) });
+  await expect(row).toBeVisible();
+  // Add a child.
+  await row.getByRole('button', { name: '+ Unterpunkt' }).click();
+  let dialog = page.getByRole('dialog', { name: `Unterpunkt in ${locBuilding.body.name}` });
+  await dialog.getByLabel('Name', { exact: true }).fill(`viewer-room-${run}`);
+  let sent = page.waitForResponse(
+    (r) => r.url().endsWith('/api/v1/locations') && r.request().method() === 'POST',
+  );
+  await dialog.getByRole('button', { name: 'Anlegen' }).click();
+  expect((await sent).status()).toBe(403);
+  await expect(dialog.getByRole('alert')).toHaveText(forbidden);
+  await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+  // Rename.
+  await row.getByRole('button', { name: 'Bearbeiten' }).click();
+  dialog = page.getByRole('dialog', { name: `${locBuilding.body.name} bearbeiten` });
+  await dialog.getByLabel('Name', { exact: true }).fill(`viewer-ui-renamed-${run}`);
+  sent = page.waitForResponse(
+    (r) =>
+      r.url().endsWith(`/api/v1/locations/${locBuilding.body.id}`) &&
+      r.request().method() === 'PATCH',
+  );
+  await dialog.getByRole('button', { name: 'Speichern' }).click();
+  expect((await sent).status()).toBe(403);
+  await expect(dialog.getByRole('alert')).toHaveText(forbidden);
+  await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+  // Delete after the confirmation.
+  await row.getByRole('button', { name: 'Löschen' }).click();
+  dialog = page.getByRole('dialog', { name: `„${locBuilding.body.name}“ löschen?` });
+  sent = page.waitForResponse(
+    (r) =>
+      r.url().endsWith(`/api/v1/locations/${locBuilding.body.id}`) &&
+      r.request().method() === 'DELETE',
+  );
+  await dialog.getByRole('button', { name: 'Löschen' }).click();
+  expect((await sent).status()).toBe(403);
+  await expect(
+    page.getByRole('alert').filter({ hasText: `Löschen nicht möglich: ${forbidden}` }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(row).toBeVisible();
   await context.close();
+
+  // Nothing of it was stored: the building is unchanged, no child exists.
+  const building = await adminCall<{ name: string; parent_id?: string }>(
+    request,
+    'GET',
+    `/locations/${locBuilding.body.id}`,
+  );
+  expect(building.status, 'the building was not deleted').toBe(200);
+  expect(building.body).toMatchObject({ name: locBuilding.body.name, parent_id: locSite.body.id });
+  const children = await adminCall<{ data: { name: string }[] }>(
+    request,
+    'GET',
+    `/locations?parent_id=${locBuilding.body.id}`,
+  );
+  expect(children.status).toBe(200);
+  expect(children.body.data, 'no location was created below the building').toEqual([]);
+  const siblings = await adminCall<{ data: { name: string }[] }>(
+    request,
+    'GET',
+    `/locations?parent_id=${locSite.body.id}`,
+  );
+  expect(siblings.body.data.map((l) => l.name)).toEqual([locBuilding.body.name]);
+
+  // Positive case: an engineer (location:write) creates, renames and deletes (201/200/204).
+  const engineerAddress = email('loc-engineer');
+  const engineerInv = await issue(request, engineerAddress, 'engineer');
+  const engineerAccepted = await acceptInvitation(
+    request,
+    engineerInv.token!,
+    password('loc-engineer'),
+  );
+  expect(engineerAccepted.status, JSON.stringify(engineerAccepted.body)).toBe(201);
+  const engineer = await signIn(browser, {
+    email: engineerAddress,
+    password: password('loc-engineer'),
+  });
+  const e = (method: 'POST' | 'PATCH' | 'DELETE', path: string, data?: unknown) =>
+    api<{ id: string; name: string }>(request, engineer.token, method, path, data);
+  const created = await e('POST', '/locations', {
+    kind: 'building',
+    name: `engineer-building-${run}`,
+    parent_id: locSite.body.id,
+  });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  const renamedByEngineer = await e('PATCH', `/locations/${created.body.id}`, {
+    name: `engineer-building-renamed-${run}`,
+  });
+  expect(renamedByEngineer.status, JSON.stringify(renamedByEngineer.body)).toBe(200);
+  expect(renamedByEngineer.body.name).toBe(`engineer-building-renamed-${run}`);
+  const deletedByEngineer = await e('DELETE', `/locations/${created.body.id}`);
+  expect(deletedByEngineer.status, JSON.stringify(deletedByEngineer.body)).toBe(204);
+  expect((await adminCall(request, 'GET', `/locations/${created.body.id}`)).status).toBe(404);
+  await engineer.context.close();
 
   // DB (through the admin's view): nothing the viewer tried exists or changed.
   const after = await adminCall<CI>(request, 'GET', `/cis/${ci.id}`);

@@ -25,8 +25,9 @@ import {
  *
  * One organization is created through the self-signup UI. Its administrator builds the
  * location tree in the location tree page (UI → POST /locations → PostgreSQL → tree after
- * reload), the rules of the tree and of rack placement are then driven through the REST API
- * the SPA uses (the UI offers no move or mount form) and every result is read back through
+ * reload) and renames and moves a node in its edit dialog (L11); the rules of the tree and of
+ * rack placement are then driven through the REST API the SPA uses (the UI offers no mount
+ * form) and every result is read back through
  * the API, read-only database probes (psql, E2E_DATABASE_URL, default
  * postgres://reticora:reticora@localhost:55432/e2e) and the pages that show it (location
  * tree, racks, room plan, CI detail history).
@@ -37,8 +38,9 @@ import {
  *  L02 names unique per level (409 naming the field), rack
  *      height 1–60, explicit 0 → 422 ...................... WP-107, WP-108 (LOC-03, LOC-04, LOC-05, LOC-06)
  *  L03 cycle and parent-matrix violations are refused ...... WP-026, WP-053 (LOC-10, LOC-07)
- *  L04 non-empty location cannot be deleted (tree UI/API);
- *      an empty leaf can ................................... WP-055 (LOC-11)
+ *  L04 non-empty location cannot be deleted (tree UI/API,
+ *      confirmation, 409 names the kinds); an empty leaf
+ *      can ................................................... WP-055, WP-474 (LOC-11)
  *  L05 DELETE /sites|/buildings|/rooms of a node with
  *      child locations → 409, subtree untouched ............ WP-055 (LOC-11)
  *  L06 mount a CI (PUT mounts/{ci_id}); rack page and room
@@ -53,9 +55,12 @@ import {
  *  L10 moving a room re-derives path/site of the subtree,
  *      CIs and mounts; location_change and audit ........... WP-055, WP-026, WP-109, WP-025
  *                                                              (LOC-11, LOC-10, TEN-01, TEN-02)
+ *  L11 rename and move a room in the tree UI's edit dialog;
+ *      tree, path and site of the subtree after reload, one
+ *      location_change row, audit .......................... WP-474 (LOC-07, LOC-11; F-079)
  *
  * The fixtures of L02–L10 are built through the REST API the UI uses (clients have no UI
- * form, mounts and moves no UI form). Each test builds its own hierarchy, so a failing test
+ * form, mounts no UI form). Each test builds its own hierarchy, so a failing test
  * does not influence the others (Playwright restarts the worker and beforeAll signs up a new
  * organization).
  */
@@ -206,6 +211,17 @@ async function openRack(page: Page, rack: { id: string; name: string }, heightUn
     await loaded;
   }
   await expect(page.getByRole('heading', { name: `${rack.name} · Vorderseite` })).toBeVisible();
+}
+
+/**
+ * confirmDelete answers the confirmation dialog the tree page opens before it
+ * deletes a node (F-225); the DELETE is sent only after this.
+ */
+async function confirmDelete(page: Page, name: string) {
+  const dialog = page.getByRole('dialog', { name: `„${name}“ löschen?` });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Löschen' }).click();
+  await expect(dialog).toBeHidden();
 }
 
 /** mountLine is the entry of a CI in the mount list of the racks page. */
@@ -632,15 +648,34 @@ test.describe('locations and racks (LOC-*, RCK-*)', () => {
     });
 
     await page.goto('/locations');
-    // Site with children → refused, message, still there after reload.
+    // Delete asks first; cancelling sends nothing (F-225).
+    let deletes = 0;
+    const countDeletes = (r: { method(): string; url(): string }) => {
+      if (r.method() === 'DELETE' && r.url().includes('/api/v1/locations/')) deletes++;
+    };
+    page.on('request', countDeletes);
+    await treeRow(page, h.site.name).getByRole('button', { name: 'Löschen' }).click();
+    const confirm = page.getByRole('dialog', { name: `„${h.site.name}“ löschen?` });
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole('button', { name: 'Abbrechen' }).click();
+    await expect(confirm).toBeHidden();
+    await expect(treeRow(page, h.site.name)).toBeVisible();
+    expect(deletes, 'cancel sends no DELETE').toBe(0);
+    page.off('request', countDeletes);
+
+    // Site with children → refused, the message names the kinds, still there after reload.
     const del = waitForApi(page, `/locations/${h.site.id}`, 'DELETE');
     await treeRow(page, h.site.name).getByRole('button', { name: 'Löschen' }).click();
+    await confirmDelete(page, h.site.name);
     const res = await del;
     const text = await res.text();
     expect(res.status(), `DELETE site with children: ${text}`).toBe(409);
     expect((JSON.parse(text) as Problem).dependencies).toContain('location');
     await expect(
-      page.getByRole('alert').filter({ hasText: 'Löschen nicht möglich' }),
+      page
+        .getByRole('alert')
+        .filter({ hasText: 'Löschen nicht möglich: noch verwendet von' })
+        .filter({ hasText: 'Unterstandorte' }),
     ).toBeVisible();
     // Room with a rack → refused as well (API).
     const roomDel = await api<Problem>(w.rq, w.t.token, 'DELETE', `/locations/${h.room.id}`);
@@ -658,6 +693,7 @@ test.describe('locations and racks (LOC-*, RCK-*)', () => {
     // An empty leaf is deleted through the UI, recorded in the audit and gone after reload.
     const leafDel = waitForApi(page, `/locations/${empty.id}`, 'DELETE');
     await treeRow(page, empty.name).getByRole('button', { name: 'Löschen' }).click();
+    await confirmDelete(page, empty.name);
     expect((await leafDel).status()).toBe(204);
     await expect(treeRow(page, empty.name)).toHaveCount(0);
     await page.reload();
@@ -1017,9 +1053,14 @@ test.describe('locations and racks (LOC-*, RCK-*)', () => {
     await treeRow(page, h.room.name).getByRole('button', { name: 'expand' }).click();
     const del = waitForApi(page, `/locations/${h.rack.id}`, 'DELETE');
     await treeRow(page, h.rack.name).getByRole('button', { name: 'Löschen' }).click();
+    await confirmDelete(page, h.rack.name);
     expect((await del).status()).toBe(409);
     await expect(
-      page.getByRole('alert').filter({ hasText: 'Löschen nicht möglich' }),
+      page
+        .getByRole('alert')
+        .filter({ hasText: 'Löschen nicht möglich' })
+        .filter({ hasText: 'CIs' })
+        .filter({ hasText: 'Rack-Montagen' }),
     ).toBeVisible();
     await page.reload();
     await treeRow(page, h.room.name).getByRole('button', { name: 'expand' }).click();
@@ -1117,5 +1158,134 @@ test.describe('locations and racks (LOC-*, RCK-*)', () => {
     await expect(
       page.getByTestId('room-plan').getByRole('button', { name: new RegExp(`^${ci.name},`) }),
     ).toBeVisible();
+  });
+
+  test('L11 the tree UI renames a room and moves it into another building; tree, path and site follow, one location_change row and the audit record it', async () => {
+    const page = w.t.page;
+    const h1 = await hierarchy('L11a');
+    const h2 = await hierarchy('L11b');
+    const renamed = `L11 Raum umbenannt ${w.s}`;
+
+    // UI: edit dialog of the room – new name and a parent of another site (LOC-07).
+    await page.goto('/locations');
+    await treeRow(page, h1.room.name).getByRole('button', { name: 'Bearbeiten' }).click();
+    const dialog = page.getByRole('dialog', { name: `${h1.room.name} bearbeiten` });
+    await expect(dialog).toBeVisible();
+    const parent = dialog.getByLabel('Übergeordneter Knoten');
+    await expect(parent).toHaveValue(h1.building.id);
+    // Only buildings are offered for a room (LOC-10), labelled with the path.
+    const offered = await parent
+      .locator('option')
+      .evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value));
+    expect(offered).toContain(h2.building.id);
+    for (const id of [h1.site.id, h2.site.id, h1.room.id, h1.rack.id, h2.room.id]) {
+      expect(offered, `${id} is not a valid parent of a room`).not.toContain(id);
+    }
+    await dialog.getByLabel('Name', { exact: true }).fill(renamed);
+    await parent.selectOption({ label: `${h2.site.name} › ${h2.building.name}` });
+    const patched = waitForApi(page, `/locations/${h1.room.id}`, 'PATCH');
+    await dialog.getByRole('button', { name: 'Speichern' }).click();
+    const res = await patched;
+    expect(res.status(), `PATCH /locations/{id}: ${await res.text()}`).toBe(200);
+    expect(res.request().postDataJSON()).toEqual({ name: renamed, parent_id: h2.building.id });
+    await expect(dialog).toBeHidden();
+
+    // DB → UI after reload: the room hangs below the new building with its rack.
+    await page.reload();
+    await expect(childRow(page, h2.building.name, renamed)).toBeVisible();
+    await expect(childRow(page, h1.building.name, renamed)).toHaveCount(0);
+    await expect(treeRow(page, h1.room.name)).toHaveCount(0);
+    const toggle = treeRow(page, renamed).getByRole('button', { name: 'expand' });
+    if (await toggle.isVisible()) await toggle.click();
+    await expect(childRow(page, renamed, h1.rack.name)).toBeVisible();
+    // The edit dialog shows the new parent with its path.
+    await treeRow(page, renamed).getByRole('button', { name: 'Bearbeiten' }).click();
+    const again = page.getByRole('dialog', { name: `${renamed} bearbeiten` });
+    await expect(again.getByLabel('Übergeordneter Knoten')).toHaveValue(h2.building.id);
+    await expect(again.getByLabel('Übergeordneter Knoten').locator('option:checked')).toHaveText(
+      `${h2.site.name} › ${h2.building.name}`,
+    );
+    await again.getByRole('button', { name: 'Abbrechen' }).click();
+    await expect(again).toBeHidden();
+
+    // API: path and site of the room and its subtree are re-derived (LOC-10, TEN-02).
+    const roomPath = `${label(h2.site.id)}.${label(h2.building.id)}.${label(h1.room.id)}`;
+    expect(await getLocation(h1.room.id)).toMatchObject({
+      name: renamed,
+      parent_id: h2.building.id,
+      site_id: h2.site.id,
+      client_id: w.client.id,
+      path: roomPath,
+    });
+    expect(await getLocation(h1.rack.id)).toMatchObject({
+      parent_id: h1.room.id,
+      site_id: h2.site.id,
+      path: `${roomPath}.${label(h1.rack.id)}`,
+    });
+    // DB: location rows and the specialist row of the room.
+    expect(
+      dbRows(
+        `SELECT id::text, name, parent_id::text, site_id::text, path::text
+           FROM location WHERE organization_id = '${uuid(w.t.orgId)}'
+            AND id IN ('${uuid(h1.room.id)}', '${uuid(h1.rack.id)}') ORDER BY nlevel(path)`,
+      ),
+    ).toEqual([
+      {
+        id: h1.room.id,
+        name: renamed,
+        parent_id: h2.building.id,
+        site_id: h2.site.id,
+        path: roomPath,
+      },
+      {
+        id: h1.rack.id,
+        name: h1.rack.name,
+        parent_id: h1.room.id,
+        site_id: h2.site.id,
+        path: `${roomPath}.${label(h1.rack.id)}`,
+      },
+    ]);
+    expect(
+      dbRows(`SELECT building_id::text AS b, name FROM room WHERE id = '${uuid(h1.room.id)}'`),
+    ).toEqual([{ b: h2.building.id, name: renamed }]);
+
+    // location_change: exactly one new row – the moved room, not its subtree (LOC-11).
+    const lc = dbRows<{
+      location_id: string;
+      location_name: string;
+      old_parent_id: string;
+      new_parent_id: string;
+      old_path: string;
+      new_path: string;
+      site_id: string;
+      changed_by: string | null;
+    }>(
+      `SELECT location_id::text, location_name, old_parent_id::text, new_parent_id::text,
+              old_path, new_path, site_id::text, changed_by
+         FROM location_change WHERE organization_id = '${uuid(w.t.orgId)}'
+          AND location_id IN ('${uuid(h1.room.id)}', '${uuid(h1.rack.id)}')`,
+    );
+    expect(lc).toHaveLength(1);
+    expect(lc[0]).toMatchObject({
+      location_id: h1.room.id,
+      location_name: renamed,
+      old_parent_id: h1.building.id,
+      new_parent_id: h2.building.id,
+      old_path: `${label(h1.site.id)}.${label(h1.building.id)}.${label(h1.room.id)}`,
+      new_path: roomPath,
+      site_id: h2.site.id,
+    });
+    expect(lc[0].changed_by, 'the move names the user').toBeTruthy();
+
+    // Audit: one entry for the move (old/new parent) and one for the rename.
+    const audit = await auditOf(h1.room.id);
+    const moved = audit.filter((a) => a.action === 'location.moved');
+    expect(moved, JSON.stringify(audit.map((a) => a.action))).toHaveLength(1);
+    expect(at(moved[0].changes, 'parent_id', 'old')).toBe(h1.building.id);
+    expect(at(moved[0].changes, 'parent_id', 'new')).toBe(h2.building.id);
+    const renames = audit.filter((a) => a.action === 'location.renamed');
+    expect(renames, JSON.stringify(audit.map((a) => a.action))).toHaveLength(1);
+    expect(at(renames[0].changes, 'name', 'old')).toBe(h1.room.name);
+    expect(at(renames[0].changes, 'name', 'new')).toBe(renamed);
   });
 });

@@ -730,3 +730,5 @@ SRC-03;[P2], Textsyntax [O];B;backend/internal/savedview/scope_integration_test.
 CI-04;[B];D;backend/internal/ci/manual_override_integration_test.go;WP-476
 REC-01;[B];D;backend/internal/discovery/consumer_integration_test.go;WP-481
 NFR-03;[B], Teilumfang [P5];D;backend/internal/discovery/consumer_test.go;WP-481
+LOC-07;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-474
+LOC-11;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-474

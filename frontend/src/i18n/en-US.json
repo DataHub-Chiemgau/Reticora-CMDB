@@ -1018,6 +1018,27 @@
       "zone": "Zone",
       "shelf": "Shelf",
       "bin": "Bin"
+    },
+    "editTitle": "Edit {{name}}",
+    "parent": "Parent node",
+    "forbidden": "You do not have permission for this action.",
+    "deleteTitle": "Delete “{{name}}”?",
+    "deleteConfirm": "The node is deleted permanently. As long as child locations or other objects reference it, the server refuses the deletion.",
+    "inUse": "still referenced by {{kinds}}",
+    "dependencies": {
+      "location": "child locations",
+      "ci": "CIs",
+      "asset": "assets",
+      "quantity_item": "stock items",
+      "asset_movement": "movements",
+      "rack_mount": "rack mounts",
+      "role_assignment": "role assignments",
+      "vlan": "VLANs",
+      "subnet": "subnets",
+      "collector": "collectors",
+      "discovery_scope": "discovery scopes",
+      "agent_enrollment_token": "valid agent enrollment tokens",
+      "ci_merge": "CI merges (tombstones)"
     }
   },
   "savedviews": {

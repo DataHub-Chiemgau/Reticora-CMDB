@@ -1018,6 +1018,27 @@
       "zone": "Zone",
       "shelf": "Regal",
       "bin": "Fach"
+    },
+    "editTitle": "{{name}} bearbeiten",
+    "parent": "Übergeordneter Knoten",
+    "forbidden": "Keine Berechtigung für diese Aktion.",
+    "deleteTitle": "„{{name}}“ löschen?",
+    "deleteConfirm": "Der Knoten wird endgültig gelöscht. Solange Unterpunkte oder andere Objekte auf ihn verweisen, lehnt der Server das Löschen ab.",
+    "inUse": "noch verwendet von {{kinds}}",
+    "dependencies": {
+      "location": "Unterstandorte",
+      "ci": "CIs",
+      "asset": "Assets",
+      "quantity_item": "Mengenartikel",
+      "asset_movement": "Bewegungen",
+      "rack_mount": "Rack-Montagen",
+      "role_assignment": "Rollenzuweisungen",
+      "vlan": "VLANs",
+      "subnet": "Subnetze",
+      "collector": "Collectors",
+      "discovery_scope": "Discovery-Scopes",
+      "agent_enrollment_token": "gültige Agent-Enrollment-Tokens",
+      "ci_merge": "CI-Zusammenführungen (Tombstones)"
     }
   },
   "savedviews": {
