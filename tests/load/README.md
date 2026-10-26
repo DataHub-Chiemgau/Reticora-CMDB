@@ -26,6 +26,9 @@ Budgets: Wird ein Budget verfehlt, schlägt der Lauf fehl.
 der Mischlast mit (wie `topology` und `impact`); die gleichzeitige Last des
 Laufs wächst damit um etwa ein Fünftel (32 auf 38 VUs).
 
+Der Job `nfr01-volume` von `load.yml` führt `api.js` mit denselben
+Schwellen auf den Volumina von NFR-01 aus (Abschnitt „NFR-01-Volumina“).
+
 ## Ablauf
 
 ```sh
@@ -64,16 +67,54 @@ der Impact-Szenarien und die Seiten der Beziehungssuche), `ATTR_KEY` und
 `SEED_PREFIX` und `SEED_OCTET` (lib.js; Demo-Organisation des Seeds,
 Standard `demo` und 10).
 
+### NFR-01-Volumina (WP-439)
+
+NFR-01 nennt je Organisation 50.000 Interfaces, 200.000 IP-Adressen und
+100.000 Beziehungen sowie 500 Organisationen je SaaS-Instanz (Phase 1). Der
+Seed erzeugt sie mit vier Optionen für die Demo-Organisation; acme und die
+kleinen Organisationen behalten den SIM-01-Datenbestand:
+
+| Option | Standard | Grenzen | NFR-01 bei 10.000 Objekten | Wirkung |
+|---|---|---|---|---|
+| `-interfaces-per-ci` | 1 | 1–10 | 5 (50.000) | `eth0` (Management-Interface wie bisher) und `eth1` bis `eth<n-1>` je CI |
+| `-ips-per-ci` | 1 | 1–40 | 20 (200.000) | die Management-Adresse auf `eth0`, die übrigen reihum auf den Interfaces, eindeutig im Subnetz „Server networks“ `100.64.0.0/10` der Standard-VRF |
+| `-relationships-per-ci` | 0 | 0 oder 2–20 | 10 (100.000) | füllt die SIM-01-Beziehungen (LLDP, Strom, Uplink, etwa 2 je CI) mit `depends_on` zwischen Servern auf `n · objects` auf; Switches und PDUs bleiben unberührt, der Impact des Core-Switches umfasst weiter alle CIs außer ihm und den PDUs (`api.js`) |
+| `-orgs` | 0 | 0–5.000 | 500 | kleine Organisationen `org-0001` bis `org-<n>` mit dem SIM-01-Datenbestand von acme (40 CIs, Attribut mit Index, Collector, Reviews, Webhook) |
+
+Alle Zeilen haben deterministische IDs; `eth0` und die Management-Adresse
+behalten die IDs des SIM-01-Seeds, sodass `ingest.js` (`rediscover`) auch
+gegen einen Volumen-Seed passt. Ein zweiter Lauf ändert nichts.
+`backend/cmd/seed/seed_integration_test.go` (`TestSeedNFR01Volumes`,
+`TestSeedOptionsAreBounded`) prüft Mengen, Verteilung, Determinismus und
+Grenzen.
+
+```sh
+go run ./backend/cmd/seed -database-url "$DATABASE_URL" -objects 10000 \
+  -interfaces-per-ci 5 -ips-per-ci 20 -relationships-per-ci 10 -orgs 500 \
+  -api-key-file /tmp/load.key
+```
+
+Lokal (geteilter Host mit 4 CPUs, TimescaleDB 2.31.0) dauerte dieser Seed
+5 min 40 s, davon etwa 1 min 24 s für die Demo-Organisation und der Rest für
+die 500 kleinen Organisationen (je eine Transaktion, Suchindex und
+Attributindex); der Seed mit 10.000 Objekten ohne Volumina 15 s. Der Job
+`nfr01-volume` (unten) misst die Seed-Dauer auf dem Runner
+(`seed-nfr01-volume.txt`).
+
 ### Workflow
 
 `.github/workflows/load.yml` (manuell und nächtlich) führt diese Schritte aus:
-`api.js`, `ingest.js` (`load`), `ingest.js` (`spool`) und `ingest.js`
-(`rediscover`) als getrennte Jobs einer Matrix (`api`, `ingest`,
-`ingest-spool`, `ingest-rediscover`), jeder mit frischer Datenbank, Seed,
-neu aufgebautem Suchindex, `ANALYZE` und einem Server mit 4 Spuren
-(Standard). Nach dem k6-Lauf prüft ein eigener Schritt die Daten mit
-`tests/integrity-check.sql`; eine Verletzung lässt den Job scheitern
-(ABN-03, F-281). Eingaben:
+`api.js`, `ingest.js` (`load`), `ingest.js` (`spool`), `ingest.js`
+(`rediscover`) und `api.js` auf den NFR-01-Volumina als getrennte Jobs einer
+Matrix (`api`, `ingest`, `ingest-spool`, `ingest-rediscover`,
+`nfr01-volume`), jeder mit frischer Datenbank, Seed, neu aufgebautem
+Suchindex, `ANALYZE` und einem Server mit 4 Spuren (Standard). Der Schritt
+„Seeded volumes (NFR-01)“ zählt nach dem Seed CIs, Interfaces, Adressen und
+Beziehungen der Demo-Organisation und die Organisationen
+(`volumes-<job>.txt`); im Job `nfr01-volume` scheitert er unter 10.000,
+50.000, 200.000, 100.000 bzw. 500. Nach dem k6-Lauf prüft ein eigener
+Schritt die Daten mit `tests/integrity-check.sql`; eine Verletzung lässt den
+Job scheitern (ABN-03, F-281). Eingaben:
 
 - `objects` (`OBJECTS`) und `duration` (`DURATION`, `api.js`);
 - `scenarios`: die Jobs, kommagetrennt, oder `all` (Standard);
@@ -86,17 +127,66 @@ neu aufgebautem Suchindex, `ANALYZE` und einem Server mit 4 Spuren
   Lauf dort mit einer Fehlermeldung ab, bevor ein Job baut oder seedet. Der
   Seed eines Commits vor WP-437 legt das Attribut `cost_center` nicht an;
   `api.js` ist mit einem solchen `server_ref` nicht aussagekräftig, der
-  Vergleich läuft nur mit `ingest-rediscover`.
+  Vergleich läuft nur mit `ingest-rediscover`. Der Seed eines Commits vor
+  WP-439 kennt die Volumen-Optionen nicht; `nfr01-volume` scheitert damit
+  im Schritt „Seed“.
 
 Jeder Job lädt seine Ergebnisse als eigenes Artefakt hoch
 (`load-results-api`, `load-results-ingest`, `load-results-ingest-spool`,
-`load-results-ingest-rediscover`): die k6-Zusammenfassung (`<job>.json`,
-`<job>.txt`), die Integritätsprüfung (`integrity-<job>.txt`), die
-Datenbankkosten (`statements-<job>.txt`), Commit, `server_ref`, CPU und RAM
-(`run-<job>.txt`), `/readyz` und das Server-Log; der Job `api` zusätzlich
-die Pläne langsamer Statements und das CPU-Profil des Servers (siehe
-Ursachenanalyse NFR-02). Das Ergebnis des G1-Laufs steht in
+`load-results-ingest-rediscover`, `load-results-nfr01-volume`): die
+k6-Zusammenfassung (`<job>.json`, `<job>.txt`), die Integritätsprüfung
+(`integrity-<job>.txt`), die Datenbankkosten (`statements-<job>.txt`), die
+Seed-Dauer (`seed-<job>.txt`), den Datenbestand nach dem Seed
+(`volumes-<job>.txt`), das Laufprotokoll (`run-<job>.txt`: Lauf- und
+Server-Commit, Lauf-URL, Skript, Szenario,
+`objects`, `duration`, Seed-Optionen, Spurzahl, Rate-Limits, Versionen von
+k6, Go, PostgreSQL und TimescaleDB, Container-Images, vollständiges `lscpu`,
+`/proc/meminfo` und `free -h`), das Ergebnis des Jobs und seiner Schritte
+(`result-<job>.txt`), `/readyz` und das Server-Log; die `api.js`-Jobs
+zusätzlich die Pläne langsamer Statements und das CPU-Profil des Servers
+(siehe Ursachenanalyse NFR-02). Das Ergebnis des G1-Laufs steht in
 `docs/acceptance/lasttest-g1.md`.
+
+### Archiv eines Laufs (WP-439, E-58)
+
+Der Job `archive` läuft nach allen Lastjobs, auch wenn einer rot ist, und
+legt mit `tests/load/archive-run.sh` (Selbsttest
+`tests/load/archive-run.test.sh` im Job `prepare`) ein Artefakt
+`load-archive-<Lauf-ID>` an. Es enthält genau das Verzeichnis
+`<Lauf-ID>/`, das unter `docs/acceptance/artefakte/lasttest/` archiviert
+wird:
+
+- `<Lauf-ID>/<job>/` je ausgewähltem Job: `<job>.json` (k6
+  `--summary-export`), `<job>.txt` (k6-Ausgabe ohne die Fortschrittszeilen),
+  `run-<job>.txt`, `result-<job>.txt`, `seed-<job>.txt`, `volumes-<job>.txt`,
+  `integrity-<job>.txt`, `statements-<job>.txt` und, soweit vorhanden,
+  `slow-plans-<job>.txt`, `cpu-<job>.txt` und `readyz-<job>.json`. Server-
+  und PostgreSQL-Logs und das binäre CPU-Profil bleiben in den
+  Job-Artefakten des Laufs.
+- `<Lauf-ID>/ergebnis.md`: Lauf (Link, Versuch, Ereignis, Branch), Lauf- und
+  Server-Commit, Eingaben, ob jeder ausgewählte Job ein Artefakt hat
+  („Vollständig“) und ob alle grün sind, je Job Status (Seed, Volumina, k6,
+  Integritätsprüfung), CPU, RAM, Konfiguration, Datenbestand und jede
+  k6-Schwelle mit Messwert und Ergebnis. Dieselbe Übersicht steht in der
+  Zusammenfassung des Laufs auf GitHub.
+- `<Lauf-ID>/SHA256SUMS`: Prüfsummen aller Dateien des Verzeichnisses.
+
+Übernahme in das Repository (GitHub CLI, angemeldet; die Lauf-ID steht in
+der URL des Laufs):
+
+```sh
+run=<Lauf-ID>
+gh run download "$run" -R DataHub-Chiemgau/Reticora-CMDB -n "load-archive-$run" \
+  -D docs/acceptance/artefakte/lasttest
+(cd "docs/acceptance/artefakte/lasttest/$run" && sha256sum -c SHA256SUMS)
+```
+
+Ohne GitHub CLI: Artefakt `load-archive-<Lauf-ID>` auf der Seite des Laufs
+laden und nach `docs/acceptance/artefakte/lasttest/` entpacken. Danach die
+Werte aus `ergebnis.md` in `docs/acceptance/lasttest-g1.md` übernehmen
+(Platzhalter `⟨LAUF-n…⟩`). Als „vollständiger Lauf“ zählt ein Lauf mit
+`scenarios=all` im ersten Versuch, dessen `ergebnis.md` „Vollständig: ja“
+meldet; „exit 0“ heißt „Ergebnis: alle Jobs grün“.
 
 ### Datenbankkosten je Record (F-118)
 
