@@ -1,0 +1,42 @@
+# Database side of the backup chain (WP-444, OPS-04, NFR-05, E-29, E-74).
+#
+# postgresql.conf: PostgreSQL starts with config_file pointing here
+# (statefulset.yaml). It includes the configuration of the data directory
+# (initdb and timescaledb-tune at the first start) and then sets WAL
+# archiving, which takes precedence: every completed WAL segment goes with
+# pgBackRest archive-push to the repository (ConfigMap reticora-pgbackrest of
+# the backup component), at the latest every 5 minutes (archive_timeout), so
+# the restore point objective stays below 15 minutes (NFR-05).
+# archive_command and archive_timeout take effect on a reload
+# (pg_ctl reload), archive_mode on a restart. The include names PGDATA of
+# statefulset.yaml.
+#
+# pgbackrest-db.conf: added to the repository configuration as
+# /etc/pgbackrest/conf.d/db.conf. The pgBackRest TLS server answers only
+# clients with a certificate of the CA ca.crt and the common name
+# pgbackrest-client (the CronJob, secret reticora-pgbackrest, tls.crt), and
+# only for the stanza reticora. pg1-path is PGDATA and must equal pg1-path of
+# the ConfigMap reticora-pgbackrest (repo-host.conf).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reticora-postgres
+data:
+  postgresql.conf: |
+    include = '/var/lib/postgresql/data/pgdata/postgresql.conf'
+    archive_mode = on
+    archive_command = 'pgbackrest --stanza=reticora archive-push %p'
+    archive_timeout = 300
+  pgbackrest-db.conf: |
+    [global]
+    tls-server-address=*
+    tls-server-ca-file=/etc/pgbackrest/tls/ca.crt
+    tls-server-cert-file=/etc/pgbackrest/tls/server.crt
+    tls-server-key-file=/etc/pgbackrest/tls/server.key
+    tls-server-auth=pgbackrest-client=reticora
+
+    [reticora]
+    pg1-path=/var/lib/postgresql/data/pgdata
+    pg1-socket-path=/var/run/postgresql
+    pg1-user=reticora
+    pg1-database=reticora

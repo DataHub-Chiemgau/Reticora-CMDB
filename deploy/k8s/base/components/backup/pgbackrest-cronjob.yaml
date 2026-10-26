@@ -1,11 +1,16 @@
 # Daily full base backup with pgBackRest (WP-100, OPS-04): together with
 # the continuous WAL archive (archive_timeout 300 s) the restore point
 # objective stays below 15 minutes (NFR-05); each backup expires backups
-# older than 35 days (NFR-06). Requires the reticora-pgbackrest secret:
+# older than 35 days (NFR-06). The job reads the database over the
+# pgBackRest TLS server of reticora-db (component postgres, WP-444).
+# Requires the reticora-pgbackrest secret:
 #   kubectl create secret generic reticora-pgbackrest \
 #     --from-literal=cipher-pass=... \
 #     --from-literal=s3-key=... --from-literal=s3-key-secret=... \
-#     --from-file=ca.crt --from-file=tls.crt --from-file=tls.key
+#     --from-file=ca.crt --from-file=tls.crt --from-file=tls.key \
+#     --from-file=server.crt --from-file=server.key
+# tls.crt is the client certificate (common name pgbackrest-client),
+# server.crt the one of the TLS server (reticora-db), both of the CA ca.crt.
 # The cipher pass must equal the one of the database host; without it no
 # backup can be restored. Before the backup, `reticora-backup.sh
 # verify-repo` reads the versioning of the S3 bucket with the same key
@@ -30,6 +35,9 @@ spec:
             runAsUser: 70 # postgres in the Alpine image
             runAsGroup: 70
             runAsNonRoot: true
+            # Secret files belong to root; fsGroup lets postgres read the
+            # client key (0440, which pgBackRest accepts for a root-owned key).
+            fsGroup: 70
           containers:
             - name: pgbackrest
               # deploy/docker-compose/postgres, published by release.yml.
@@ -58,6 +66,10 @@ spec:
                 - name: config
                   mountPath: /etc/pgbackrest/pgbackrest.conf
                   subPath: pgbackrest.conf
+                  readOnly: true
+                - name: config
+                  mountPath: /etc/pgbackrest/conf.d/repo-host.conf
+                  subPath: repo-host.conf
                   readOnly: true
                 - name: tls
                   mountPath: /etc/pgbackrest/tls

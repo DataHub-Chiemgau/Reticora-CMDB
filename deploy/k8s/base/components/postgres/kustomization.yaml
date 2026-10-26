@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# PostgreSQL with WAL archiving (WP-444, OPS-04, NFR-05; E-29 pgBackRest,
+# E-74 transitional rule: option 1). Include from an overlay together with
+# the backup component, which provides the repository and the daily full
+# backup:
+#   components:
+#     - ../../base/components/postgres
+#     - ../../base/components/backup
+#
+# - statefulset.yaml: StatefulSet and Service reticora-db, image
+#   reticora-postgres (TimescaleDB plus pgBackRest,
+#   deploy/docker-compose/postgres), one PersistentVolumeClaim. Container
+#   postgres archives every WAL segment with pgBackRest archive-push to the
+#   repository of the ConfigMap reticora-pgbackrest; container pgbackrest
+#   creates the stanza and runs the pgBackRest TLS server (port 8432), over
+#   which the CronJob reticora-pgbackrest-full takes the full backup.
+# - postgres-configmap.yaml: ConfigMap reticora-postgres with the PostgreSQL
+#   settings (archive_mode, archive_command, archive_timeout) and the
+#   pgBackRest settings of the database side (TLS server, data directory).
+#
+# Secrets (provided by the operator, deploy/README.md):
+#   reticora-postgres    key password: the bootstrap superuser reticora (the
+#                        migration login of reticora-db-migrate)
+#   reticora-pgbackrest  keys cipher-pass, s3-key, s3-key-secret (the
+#                        repository), ca.crt, server.crt, server.key (TLS
+#                        server of reticora-db); the backup component reads
+#                        tls.crt and tls.key from it (client certificate)
+# The server reaches the database through its runtime DSN
+# (reticora-db-runtime, host reticora-db).
+resources:
+  - statefulset.yaml
+  - postgres-configmap.yaml

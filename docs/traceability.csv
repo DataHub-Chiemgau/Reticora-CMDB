@@ -705,3 +705,5 @@ INS-01;[Q];A;tests/install-smoke-health.test.sh;WP-440
 NFR-05;[B];A;tests/restore-pitr-config.test.sh;WP-445
 OPS-04;[B], [P5];A;tests/restore-pitr.sh;WP-445
 NFR-06;[B];B;tests/audit/log-retention.test.sh;WP-458
+OPS-04;[B], [P5];A;tests/k8s/kind-smoke.sh;WP-444
+NFR-05;[B];A;tests/k8s/kind-smoke.sh;WP-444

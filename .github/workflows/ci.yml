@@ -938,3 +938,111 @@ jobs:
             exit 1
           fi
           echo "fixture overlay with reticora-cmdb/server:1.0.0: rejected"
+
+      # OPS-04/NFR-05 (WP-444, F-128, E-74 transitional rule): the prod build
+      # archives WAL. A ConfigMap sets archive_mode = on, archive_command =
+      # 'pgbackrest --stanza=reticora archive-push %p' and archive_timeout of
+      # at most 900 s; a StatefulSet container of the image reticora-postgres
+      # starts PostgreSQL with that file (config_file) on a
+      # PersistentVolumeClaim; a container of the same pod runs the pgBackRest
+      # TLS server with server.crt/server.key of the secret
+      # reticora-pgbackrest, and the Service reticora-db (pg1-host of the
+      # backup component) selects the pod on port 8432. Negative fixture: an
+      # overlay with the backup component but without the component postgres
+      # is rejected. The runtime proof is the case wal_archive of the workflow
+      # k8s-smoke.
+      - name: Assert WAL archiving
+        run: |
+          set -euo pipefail
+          python3 -c 'import yaml' 2>/dev/null || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+          cat >"$RUNNER_TEMP/wal_archiving.py" <<'PY'
+          # The problems of the WAL archiving in a kustomize build (stdin), one per line.
+          import re
+          import sys
+
+          import yaml
+
+          docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
+          problems = []
+
+
+          def settings(text):
+              # key = value lines of a postgresql.conf, quotes and comments removed
+              out = {}
+              for line in text.splitlines():
+                  m = re.match(r"\s*(\w+)\s*=?\s*('(?:[^']|'')*'|[^#\s]*)", line)
+                  if m:
+                      out[m.group(1)] = m.group(2).strip("'")
+              return out
+
+
+          def command(c):
+              return (c.get("command") or []) + (c.get("args") or [])
+
+
+          confs = [(d["metadata"]["name"], key, settings(text)) for d in docs if d["kind"] == "ConfigMap"
+                   for key, text in (d.get("data") or {}).items() if "archive_mode" in settings(text)]
+          if not confs:
+              problems.append("no ConfigMap sets archive_mode")
+          for name, key, s in confs:
+              where = f"ConfigMap {name}, {key}"
+              if s.get("archive_mode") != "on":
+                  problems.append(f"{where}: archive_mode is {s.get('archive_mode')!r}, not on")
+              if s.get("archive_command") != "pgbackrest --stanza=reticora archive-push %p":
+                  problems.append(f"{where}: archive_command is {s.get('archive_command')!r}, not pgBackRest archive-push")
+              timeout = s.get("archive_timeout", "")
+              if not timeout.isdigit() or not 0 < int(timeout) <= 900:
+                  problems.append(f"{where}: archive_timeout {timeout or 'unset'} is not 1..900 s (RPO 15 min)")
+              users = []
+              for sts in (d for d in docs if d["kind"] == "StatefulSet"):
+                  pod = sts["spec"]["template"]["spec"]
+                  maps = {v["name"]: v.get("configMap") or {} for v in pod.get("volumes", [])}
+                  for c in pod["containers"]:
+                      for m in c.get("volumeMounts", []):
+                          cm = maps.get(m["name"], {})
+                          items = {i["key"]: i["path"] for i in cm.get("items", [])} if cm.get("items") else {key: key}
+                          if cm.get("name") == name and key in items and \
+                                  f"config_file={m['mountPath'].rstrip('/')}/{items[key]}" in command(c):
+                              users.append((sts, pod, c))
+              if not users:
+                  problems.append(f"no StatefulSet container starts PostgreSQL with config_file of the {where}")
+              for sts, pod, c in users:
+                  at = f"StatefulSet {sts['metadata']['name']}"
+                  if "/reticora-postgres:" not in c["image"]:
+                      problems.append(f"{at}: {c['name']} runs {c['image']}, not the image reticora-postgres")
+                  if not sts["spec"].get("volumeClaimTemplates"):
+                      problems.append(f"{at}: no volumeClaimTemplates, the data directory does not persist")
+                  if not any("pgbackrest server" in " ".join(command(x)) for x in pod["containers"]):
+                      problems.append(f"{at}: no container runs the pgBackRest TLS server (pgbackrest server)")
+                  keys = set()
+                  for v in pod.get("volumes", []):
+                      refs = [v["secret"]] if "secret" in v else \
+                          [p["secret"] for p in v.get("projected", {}).get("sources", []) if "secret" in p]
+                      for ref in refs:
+                          if ref.get("secretName", ref.get("name")) == "reticora-pgbackrest":
+                              keys |= {i["key"] for i in ref.get("items", [])}
+                  if not {"server.crt", "server.key"} <= keys:
+                      problems.append(f"{at}: server.crt and server.key of the secret reticora-pgbackrest are not mounted")
+                  labels = sts["spec"]["template"]["metadata"].get("labels", {})
+                  svc = [d for d in docs if d["kind"] == "Service" and d["metadata"]["name"] == "reticora-db"]
+                  selector = svc[0]["spec"].get("selector") if svc else None
+                  if not selector or any(labels.get(k) != v for k, v in selector.items()) or \
+                          8432 not in [p.get("port") for p in svc[0]["spec"].get("ports", [])]:
+                      problems.append(f"no Service reticora-db that selects the pods of the {at} on port 8432")
+          print("\n".join(problems))
+          PY
+          problems=$(kustomize build deploy/k8s/overlays/prod | python3 "$RUNNER_TEMP/wal_archiving.py")
+          if [ -n "$problems" ]; then
+            echo "::error::deploy/k8s/overlays/prod does not archive WAL: $(tr '\n' ';' <<<"$problems")"
+            exit 1
+          fi
+          echo "deploy/k8s/overlays/prod: archive_mode = on, archive_command pgbackrest archive-push, archive_timeout <= 900 s, TLS server reticora-db:8432"
+          fixture=$(mktemp -d "$RUNNER_TEMP/k8s-wal.XXXXXX")
+          printf '%s\n' 'resources:' "  - $(realpath --relative-to="$fixture" deploy/k8s/base)" 'components:' \
+            "  - $(realpath --relative-to="$fixture" deploy/k8s/base/components/backup)" >"$fixture/kustomization.yaml"
+          problems=$(kustomize build "$fixture" | python3 "$RUNNER_TEMP/wal_archiving.py")
+          if [ -z "$problems" ]; then
+            echo "::error::the WAL archiving check accepts a fixture overlay without the component postgres"
+            exit 1
+          fi
+          echo "fixture overlay without the component postgres: rejected ($(tr '\n' ';' <<<"$problems"))"

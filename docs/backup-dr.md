@@ -77,19 +77,98 @@ docker compose --env-file .env exec backup reticora-pgbackrest-env.sh reticora-b
 
 ### Kubernetes
 
-The component `deploy/k8s/base/components/backup` contains:
+The overlay `prod` includes two components (decision E-74, transitional
+rule: option 1). `staging` includes neither and has no backup: it runs
+against a database the operator provides.
 
-- the `reticora-pgbackrest` ConfigMap: S3 repository, encryption, 35 days
-  retention;
-- the CronJob `reticora-pgbackrest-full`: `reticora-backup.sh verify-repo`,
-  then a daily full backup over the pgBackRest TLS connection to the
-  database host. If the bucket is not versioned, the job fails without a
-  backup.
+- `deploy/k8s/base/components/postgres`, the database `reticora-db`: a
+  StatefulSet with one replica and a PersistentVolumeClaim (50 Gi), the
+  Service `reticora-db` (5432 PostgreSQL, 8432 pgBackRest TLS server) and
+  the image `reticora-postgres`, the same as in Compose and in the backup
+  job.
+  - Container `postgres`: PostgreSQL starts with `config_file` from the
+    ConfigMap `reticora-postgres`. It includes the configuration of the data
+    directory and sets `archive_mode = on`,
+    `archive_command = 'pgbackrest --stanza=reticora archive-push %p'` and
+    `archive_timeout = 300`.
+  - Container `pgbackrest`: creates the stanza as soon as the database
+    accepts connections, then runs the pgBackRest TLS server
+    (`pgbackrest server`). If `stanza-create` fails (repository unreachable,
+    wrong key), it retries every 30 s. Until then the WAL waits in `pg_wal`.
+  - The TLS server accepts only client certificates of the CA `ca.crt` with
+    the common name `pgbackrest-client`, and only for the stanza `reticora`
+    (`tls-server-auth`).
+  - The server and the migrations connect to `reticora-db:5432` (secrets
+    `reticora-db-runtime` and `reticora-db-migrate`, deploy/README.md).
+- `deploy/k8s/base/components/backup`:
+  - the ConfigMap `reticora-pgbackrest`. `pgbackrest.conf` is the S3
+    repository (encryption, 35 days retention); the database and the job
+    read it. `repo-host.conf` is read by the job only and points it at
+    `reticora-db` over TLS;
+  - the CronJob `reticora-pgbackrest-full`: `reticora-backup.sh
+    verify-repo`, then a daily full backup over the TLS server. If the
+    bucket is not versioned, the job fails without a backup;
+  - the CronJob `reticora-backup` (pg_dump, see below).
 
-On the database host, PostgreSQL archives with the same repository
-configuration and runs `pgbackrest server`. Secret: `reticora-pgbackrest`
-(cipher pass, S3 keys, TLS client certificate). With a managed database, its
-PITR takes the place of pgBackRest, with the same RPO, RTO and retention.
+Secrets (nothing secret is in a ConfigMap):
+
+| Secret | Key | Used for |
+| ------ | --- | -------- |
+| `reticora-postgres` | `password` | bootstrap superuser `reticora` of the image (the migration login) |
+| `reticora-pgbackrest` | `cipher-pass`, `s3-key`, `s3-key-secret` | repository: archive-push and stanza in the database, the backup job |
+| | `ca.crt` | CA of both certificates, used for nothing else: every certificate it signs with the common name `pgbackrest-client` can read the database |
+| | `server.crt`, `server.key` | TLS server of `reticora-db`; the certificate must name `reticora-db` (subjectAltName) |
+| | `tls.crt`, `tls.key` | client certificate of the job, common name `pgbackrest-client` |
+
+```bash
+openssl req -x509 -newkey rsa:3072 -nodes -keyout ca.key -out ca.crt -days 3650 -subj "/CN=Reticora pgBackRest CA"
+openssl req -new -newkey rsa:3072 -nodes -keyout server.key -out server.csr -subj "/CN=reticora-db"
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 825 -out server.crt \
+  -extfile <(printf 'subjectAltName=DNS:reticora-db,DNS:reticora-db.reticora.svc\nextendedKeyUsage=serverAuth\n')
+openssl req -new -newkey rsa:3072 -nodes -keyout tls.key -out tls.csr -subj "/CN=pgbackrest-client"
+openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 825 -out tls.crt \
+  -extfile <(printf 'extendedKeyUsage=clientAuth\n')
+kubectl -n reticora create secret generic reticora-postgres --from-literal=password="$(openssl rand -base64 32)"
+kubectl -n reticora create secret generic reticora-pgbackrest \
+  --from-literal=cipher-pass="$(openssl rand -base64 48)" \
+  --from-literal=s3-key=… --from-literal=s3-key-secret=… \
+  --from-file=ca.crt --from-file=server.crt --from-file=server.key --from-file=tls.crt --from-file=tls.key
+```
+
+Keep `ca.key` and a copy of the cipher pass outside the cluster; without the
+cipher pass no backup can be restored. The key needs, besides the object
+permissions of pgBackRest, `s3:GetBucketVersioning` (`verify-repo`).
+
+After the first rollout:
+
+```bash
+kubectl -n reticora exec reticora-db-0 -c postgres -- pgbackrest --stanza=reticora check
+kubectl -n reticora exec reticora-db-0 -c postgres -- \
+  psql -U reticora -d reticora -c 'SELECT archived_count, last_archived_wal, failed_count FROM pg_stat_archiver'
+# The first full backup now instead of at 02:00:
+kubectl -n reticora create job --from=cronjob/reticora-pgbackrest-full reticora-pgbackrest-first
+```
+
+Proof: the CI job `k8s-manifests` checks the rendered `prod` build (step
+`Assert WAL archiving`: the archive settings, the StatefulSet that starts
+PostgreSQL with them, the TLS server, the Service). The case `wal_archive` of
+the workflow `k8s-smoke` runs both components in kind with MinIO as the
+repository: `pgbackrest check`, `archived_count` after `pg_switch_wal()`, a
+full backup by a job of the CronJob, and a failed backup with a wrong
+cipher pass.
+
+**Alternatives (E-74, still open).** Option 1 is a transitional rule. A
+decision for another option replaces only the component `postgres`, the
+assertion `Assert WAL archiving` and the kind case `wal_archive`:
+
+- Option 2, the operator's database: remove the component `postgres` from
+  the overlay. The database host archives into the same repository
+  (`archive-push` with the `[global]` of `pgbackrest.conf`) and runs
+  `pgbackrest server` with a certificate for its host name. Patch
+  `pg1-host` and `pg1-path` in `repo-host.conf`.
+- Option 3, managed PostgreSQL with the provider's PITR (E-29 option 3):
+  neither the component `postgres` nor the pgBackRest CronJob. The
+  provider's PITR takes their place, with the same RPO, RTO and retention.
 
 ### Object storage: versioning and replication (NFR-05)
 

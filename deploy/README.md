@@ -458,15 +458,37 @@ keeps the pod in `CreateContainerConfigError`.
 | `RETICORA_INVITATION_ACCEPT_URL` | ConfigMap `reticora-config`, key `invitation-accept-url` (`https://<host>/invitations/accept`) |
 | `RETICORA_SESSION_KEY_PATH` | secret `reticora-session-key`, key `private.pem`, mounted at `/etc/reticora/session` |
 
-`prod` additionally includes the components `opensearch`, `backup` and
-`nats-edge`, which need: secret `reticora-backup` (keys `database-url`,
-`aws-access-key-id`, `aws-secret-access-key`), secret `reticora-pgbackrest`
-(keys `cipher-pass`, `s3-key`, `s3-key-secret`, `ca.crt`, `tls.crt`,
-`tls.key`), optionally secret `reticora-opensearch` (`username`, `password`,
-only with the security plugin), a ReadWriteMany storage class for the PVC
-`reticora-collector-pki`, and the host names of the collector endpoint in the
-shipped ConfigMap `reticora-nats-edge` (key `hosts`, replace
+`prod` additionally includes the components `opensearch`, `postgres`,
+`backup` and `nats-edge`, which need: secret `reticora-postgres` (key
+`password`, the bootstrap superuser `reticora` of the database), secret
+`reticora-backup` (keys `database-url`, `aws-access-key-id`,
+`aws-secret-access-key`), secret `reticora-pgbackrest` (keys `cipher-pass`,
+`s3-key`, `s3-key-secret`, `ca.crt`, `tls.crt`, `tls.key`, `server.crt`,
+`server.key`), optionally secret `reticora-opensearch` (`username`,
+`password`, only with the security plugin), a default storage class for the
+PVC of `reticora-db` (ReadWriteOnce, 50 Gi), a ReadWriteMany storage class
+for the PVC `reticora-collector-pki`, and the host names of the collector
+endpoint in the shipped ConfigMap `reticora-nats-edge` (key `hosts`, replace
 `nats.example.com`).
+
+**Database and WAL archiving (OPS-04, E-74).** The component `postgres` runs
+the database `reticora-db` (StatefulSet, one replica, image
+`reticora-postgres`, Service `reticora-db` on 5432) with WAL archiving:
+every WAL segment goes with pgBackRest `archive-push` to the S3 repository
+of the component `backup` (`archive_timeout = 300`, RPO 15 min), and the
+pgBackRest TLS server on port 8432 serves the daily full backup of the
+CronJob `reticora-pgbackrest-full`. The secret `reticora-pgbackrest` holds
+the repository key and cipher pass, the CA `ca.crt`, the server certificate
+of `reticora-db` (`server.crt`, `server.key`, subjectAltName `reticora-db`)
+and the client certificate of the job (`tls.crt`, `tls.key`, common name
+`pgbackrest-client`); `docs/backup-dr.md` (section Kubernetes) shows how to
+create them and how to check the archive after the rollout. Point
+`reticora-db-migrate` and `reticora-db-runtime` at the host `reticora-db`.
+The component is decision E-74's transitional rule (option 1): with a
+database of the operator (option 2) or managed PostgreSQL with the provider's
+PITR (option 3), remove it from the overlay; `docs/backup-dr.md` describes
+what then takes its place. `staging` includes neither `postgres` nor
+`backup` and has no backup.
 
 `reticora-config` is provided by the operator like the secrets and is
 deliberately not generated with placeholders: its values differ for every
@@ -477,7 +499,8 @@ The database needs two logins with separate secrets (TEN-03):
 
 - **Migration login** (secret `reticora-db-migrate`, key `database-url`): the
   owner/superuser that runs `golang-migrate` on `backend/migrations/` before a
-  rollout. No manifest references it; keep it out of the server's namespace if
+  rollout; with the component `postgres` the bootstrap superuser `reticora`
+  with the password of `reticora-postgres`. No manifest references it; keep it out of the server's namespace if
   migrations run elsewhere. It must have SUPERUSER: migration `000162`
   declares the function of the attribute indexes LEAKPROOF and stops
   otherwise (decision E-73; operation without a superuser needs its
@@ -565,7 +588,8 @@ logging service).
 
 **Images.** `prod` uses the signed release images
 `ghcr.io/datahub-chiemgau/reticora-server` and
-`ghcr.io/datahub-chiemgau/reticora-postgres` (pgBackRest CronJob) with the
+`ghcr.io/datahub-chiemgau/reticora-postgres` (database `reticora-db` and
+pgBackRest CronJob) with the
 release tag (`newTag: v1.0.0`); raise `newTag` in
 `deploy/k8s/overlays/prod/kustomization.yaml` with each release. NATS,
 OpenSearch and the TimescaleDB image of the `pg_dump` CronJob are upstream
@@ -576,15 +600,17 @@ CI (`k8s-manifests`) builds base and both overlays and asserts the master-key
 secret reference, the required configuration
 (`backend/internal/config/k8s_required_env_test.go`: every key above in base,
 staging and prod, the server's start check with the rendered env, fixture
-overlays without a key are reported) and the image origin (every Reticora image
+overlays without a key are reported), the image origin (every Reticora image
 of the prod build is a release image `ghcr.io/datahub-chiemgau/reticora-*` with
-a tag `v*`).
+a tag `v*`) and the WAL archiving of the prod build (archive settings, the
+StatefulSet that starts PostgreSQL with them, the TLS server and the Service
+`reticora-db`; an overlay without the component `postgres` is rejected).
 
 **Runtime smoke in kind.** The workflow `k8s-smoke`
 (`.github/workflows/k8s-smoke.yml`: on pull requests that change
 `deploy/k8s/**`, `backend/Dockerfile`, the config loader
-`backend/internal/config/config.go` or the smoke itself, nightly and on
-demand) observes the `staging` overlay on a cluster: it creates a kind cluster
+`backend/internal/config/config.go`, the image `deploy/docker-compose/postgres`
+or the smoke itself, nightly and on demand) observes the `staging` overlay on a cluster: it creates a kind cluster
 (kind and node image pinned by version and digest), builds the server image of
 the commit as `reticora-cmdb/server:staging` and loads it, applies the test
 dependencies of `tests/k8s/fixtures` (TimescaleDB, Redis, NATS with
@@ -601,14 +627,27 @@ migrates the database, creates the runtime login and runs
 - with an empty `master-key` or `oidc-issuer-url` the container ends with
   exit 1 and logs `requires RETICORA_MASTER_KEY` or
   `requires RETICORA_OIDC_ISSUER_URL` (the start check treats an empty value
-  as unset).
+  as unset);
+- `wal_archive` (WP-444): the test overlay `tests/k8s/fixtures/overlay-wal`
+  (the components `postgres` and `backup` on top of `staging`, MinIO with TLS
+  as the repository, image `reticora-cmdb/postgres:kind-smoke` built from
+  `deploy/docker-compose/postgres`) makes `reticora-db` Ready;
+  `pgbackrest --stanza=reticora check` ends with rc 0;
+  `pg_stat_archiver.archived_count` rises within 120 s after
+  `SELECT pg_switch_wal()`; a job created from the CronJob
+  `reticora-pgbackrest-full` adds a full backup; the same job with a wrong
+  cipher pass (only in that job) fails because it cannot decrypt
+  `backup.info`. For it, `setup` creates a test CA with the certificates of
+  MinIO, of `reticora-db` and of the client `pgbackrest-client`, the secret
+  `reticora-pgbackrest` with a random cipher pass, and the versioned bucket
+  `reticora-backup`.
 
 The protocol of a run is the artifact `k8s-smoke-protocol`. The values in
 `tests/k8s/fixtures` are test-only and known to everybody; never apply them
 outside a throwaway cluster. `kind-smoke.sh` therefore refuses every kubectl
 context but a kind cluster (`kind-<name>`); locally it runs as
 `tests/k8s/kind-smoke.sh setup` and `tests/k8s/kind-smoke.sh run` after
-loading the server image into the cluster.
+loading the server and the postgres image into the cluster.
 
 ## Layout
 

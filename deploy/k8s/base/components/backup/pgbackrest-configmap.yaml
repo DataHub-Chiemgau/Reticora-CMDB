@@ -1,17 +1,30 @@
-# pgBackRest repository host (WP-100, OPS-04, E-29). The database runs
-# outside the cluster (or in its own StatefulSet) with
-#   archive_mode = on
-#   archive_command = 'pgbackrest --stanza=reticora archive-push %p'
-#   archive_timeout = 300
-# and the pgBackRest TLS server (`pgbackrest server`, tls-server-* options),
-# using this same repository configuration. The CronJob in
-# pgbackrest-cronjob.yaml takes the daily full backup over that TLS
-# connection. Runbook: docs/backup-dr.md.
+# pgBackRest repository (WP-100, OPS-04, E-29), read by both sides of the
+# backup chain:
+# - pgbackrest.conf, the encrypted S3 repository: the database of the
+#   component postgres archives every WAL segment there (archive_command
+#   'pgbackrest --stanza=reticora archive-push %p', archive_timeout 300, see
+#   its ConfigMap reticora-postgres) and the CronJob in pgbackrest-cronjob.yaml
+#   writes the daily full backup there;
+# - repo-host.conf, only for the CronJob (/etc/pgbackrest/conf.d): it reaches
+#   the database over the pgBackRest TLS server of reticora-db with the client
+#   certificate of the secret reticora-pgbackrest (WP-444, E-74). pg1-path is
+#   PGDATA of the component postgres.
+# Without the component postgres the database host must provide the same:
+# archive-push to this repository and `pgbackrest server` (docs/backup-dr.md).
+# Runbook: docs/backup-dr.md.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: reticora-pgbackrest
 data:
+  repo-host.conf: |
+    [reticora]
+    pg1-host=reticora-db
+    pg1-host-type=tls
+    pg1-host-ca-file=/etc/pgbackrest/tls/ca.crt
+    pg1-host-cert-file=/etc/pgbackrest/tls/tls.crt
+    pg1-host-key-file=/etc/pgbackrest/tls/tls.key
+    pg1-path=/var/lib/postgresql/data/pgdata
   pgbackrest.conf: |
     [global]
     # Offsite repository: S3 bucket in the backup region (NFR-09), with
@@ -31,11 +44,3 @@ data:
     process-max=2
     log-level-console=info
     log-level-file=off
-
-    [reticora]
-    pg1-host=reticora-db.reticora.svc
-    pg1-host-type=tls
-    pg1-host-ca-file=/etc/pgbackrest/tls/ca.crt
-    pg1-host-cert-file=/etc/pgbackrest/tls/tls.crt
-    pg1-host-key-file=/etc/pgbackrest/tls/tls.key
-    pg1-path=/var/lib/postgresql/data

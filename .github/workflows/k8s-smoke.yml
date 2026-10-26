@@ -11,7 +11,13 @@ name: k8s-smoke
 #   - master-key empty: exit 1 with 'requires RETICORA_MASTER_KEY';
 #   - oidc-issuer-url empty in reticora-config: exit 1 with
 #     'requires RETICORA_OIDC_ISSUER_URL';
-#   - oidc-issuer-url removed from reticora-config: CreateContainerConfigError.
+#   - oidc-issuer-url removed from reticora-config: CreateContainerConfigError;
+#   - wal_archive (OPS-04, NFR-05, WP-444): tests/k8s/fixtures/overlay-wal
+#     (components postgres and backup, MinIO with TLS as the repository) with
+#     the reticora-postgres image of this commit: 'pgbackrest check' rc 0,
+#     pg_stat_archiver.archived_count rises within 120 s after
+#     pg_switch_wal(), a job of the CronJob reticora-pgbackrest-full adds a
+#     full backup, the same job with a wrong cipher pass fails.
 # The protocol (setup and case log, pods, describe and logs of every case,
 # cluster state, kind export logs) is the artifact k8s-smoke-protocol.
 on:
@@ -21,6 +27,9 @@ on:
       - "backend/Dockerfile"
       # The loader decides the empty-value cases (an empty value is unset).
       - "backend/internal/config/config.go"
+      # The image reticora-postgres (pgBackRest, reticora-backup.sh) of the
+      # case wal_archive.
+      - "deploy/docker-compose/postgres/**"
       - "tests/k8s/**"
       - ".github/workflows/k8s-smoke.yml"
   workflow_dispatch:
@@ -117,10 +126,24 @@ jobs:
           docker build -f backend/Dockerfile -t "$image" .
           kind load docker-image "$image" --name "$KIND_CLUSTER"
 
+      # The image reticora-postgres of this commit (the build of release.yml)
+      # under the name tests/k8s/fixtures/overlay-wal renders for the
+      # StatefulSet reticora-db and the CronJob reticora-pgbackrest-full.
+      - name: Build and load the postgres image
+        run: |
+          image=$("$KUSTOMIZE" build tests/k8s/fixtures/overlay-wal | sed -nE 's/^ *image: *(reticora-cmdb\/postgres:.*)$/\1/p' | sort -u)
+          if [ "$(wc -l <<<"$image")" -ne 1 ] || [[ $image != reticora-cmdb/postgres:* ]] || [[ $image == *:latest ]]; then
+            echo "::error::overlay-wal must render exactly one reticora-cmdb/postgres image with a tag other than latest, got: $image"
+            exit 1
+          fi
+          echo "postgres image: $image"
+          docker build -f deploy/docker-compose/postgres/Dockerfile -t "$image" deploy/docker-compose/postgres
+          kind load docker-image "$image" --name "$KIND_CLUSTER"
+
       - name: Apply the fixtures, migrate the database, create the runtime login
         run: ./tests/k8s/kind-smoke.sh setup 2>&1 | tee "$ARTIFACT_DIR/setup.log"
 
-      - name: Smoke cases (staging overlay)
+      - name: Smoke cases (staging overlay, wal_archive)
         run: ./tests/k8s/kind-smoke.sh run 2>&1 | tee "$ARTIFACT_DIR/kind-smoke.log"
 
       - name: Summary
