@@ -225,6 +225,7 @@ type MemoryRepository struct {
 	records      map[string]time.Time
 	scopes       map[string]*Scope
 	orgSettings  map[string]map[string]any
+	orgTimezone  map[string]string
 	seq          int
 }
 

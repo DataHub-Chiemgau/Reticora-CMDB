@@ -8,12 +8,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+	_ "time/tzdata" // the organization's IANA zone without the host's zoneinfo
 )
 
 // Separate intervals (DIS-10): the sweep of a scope runs on the scope's
 // schedule (interval or cron, default 24 h), the polls (SNMP, Redfish, SSH,
 // WMI, IPMI, power, NAS) on their own interval per protocol (organization
-// setting, default 15 min, never below 5 min). The discovery loop ticks
+// setting, default 15 min, never below 5 min). A cron schedule is evaluated
+// in the organization's time zone (E-84, option A). The discovery loop ticks
 // every minute and runs only what is due; polls target the hosts the last
 // sweep of the scope found. The upload spool is flushed continuously,
 // independent of discovery (NFR-03).
@@ -59,10 +61,11 @@ func (iv *discoveryIntervals) pollInterval(protocol string) time.Duration {
 }
 
 // schedule is the sweep schedule of a scope: an interval or a cron
-// expression.
+// expression, evaluated in loc (nil: UTC).
 type schedule struct {
 	every time.Duration
 	cron  *cronSpec
+	loc   *time.Location
 }
 
 func parseSchedule(s string, fallback time.Duration) schedule {
@@ -78,9 +81,31 @@ func parseSchedule(s string, fallback time.Duration) schedule {
 // next returns the next run after the run at last.
 func (s schedule) next(last time.Time) time.Time {
 	if s.cron != nil {
-		return s.cron.next(last)
+		return s.cron.nextIn(last, s.loc)
 	}
 	return last.Add(s.every)
+}
+
+// scheduleLocations caches the loaded time zones by name: the passes are
+// built every tick.
+var scheduleLocations sync.Map
+
+// scheduleLocation returns the time zone of the organization's IANA name;
+// an empty or unknown name is UTC.
+func scheduleLocation(name string) *time.Location {
+	if name == "" {
+		return time.UTC
+	}
+	if loc, ok := scheduleLocations.Load(name); ok {
+		return loc.(*time.Location)
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		slog.Warn("unknown organization time zone, cron schedules use UTC", "timezone", name, "error", err)
+		loc = time.UTC
+	}
+	scheduleLocations.Store(name, loc)
+	return loc
 }
 
 // scheduler remembers when each (pass, protocol) is due next.
@@ -92,7 +117,7 @@ type scheduler struct {
 func newScheduler() *scheduler { return &scheduler{next: map[string]time.Time{}} }
 
 // due reports whether key is due at now; a due key is scheduled again with
-// sched. A key seen for the first time is due at once.
+// sched. A key seen for the first time is due at once unless seed set it.
 func (s *scheduler) due(key string, now time.Time, sched schedule) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -101,6 +126,17 @@ func (s *scheduler) due(key string, now time.Time, sched schedule) bool {
 	}
 	s.next[key] = sched.next(now)
 	return true
+}
+
+// seed sets when a key seen for the first time is due: first is called only
+// then, so a (re)started collector takes the run state the server holds
+// (DIS-10).
+func (s *scheduler) seed(key string, first func() time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.next[key]; !ok {
+		s.next[key] = first()
+	}
 }
 
 // nextRun returns when key is due next.
@@ -200,15 +236,32 @@ func cronField(field string, lo, hi int) (map[int]bool, error) {
 }
 
 // next returns the first matching minute after t (UTC).
-func (c *cronSpec) next(t time.Time) time.Time {
-	t = t.UTC().Truncate(time.Minute).Add(time.Minute)
+func (c *cronSpec) next(t time.Time) time.Time { return c.nextIn(t, time.UTC) }
+
+// nextIn returns the first minute after t whose wall clock in loc matches.
+// It steps in real minutes and takes only a wall clock later than the one
+// of t: a daylight-saving change neither repeats a run (the hour after the
+// clocks go back) nor shifts one; a wall-clock time the change skips does
+// not occur that day.
+func (c *cronSpec) nextIn(t time.Time, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.UTC
+	}
+	t = t.In(loc).Truncate(time.Minute)
+	after := wallClock(t)
+	t = t.Add(time.Minute)
 	for limit := 0; limit < 366*24*60; limit++ {
-		if c.month[int(t.Month())] && c.dayMatches(t) && c.hour[t.Hour()] && c.minute[t.Minute()] {
+		if c.month[int(t.Month())] && c.dayMatches(t) && c.hour[t.Hour()] && c.minute[t.Minute()] && wallClock(t).After(after) {
 			return t
 		}
 		t = t.Add(time.Minute)
 	}
 	return t
+}
+
+// wallClock is the local date and time of t without its offset.
+func wallClock(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC)
 }
 
 // dayMatches applies the cron rule: with both day and weekday restricted

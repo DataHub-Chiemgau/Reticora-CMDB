@@ -789,3 +789,4 @@ LOC-04;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-
 LOC-05;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-500
 LOC-06;B/G1;B;backend/internal/rack/height_integration_test.go;WP-500
 RCK-01;[B];B;backend/internal/rack/height_integration_test.go;WP-500
+DIS-10;[B];D;collector/collectorcmd/schedule_test.go;WP-495

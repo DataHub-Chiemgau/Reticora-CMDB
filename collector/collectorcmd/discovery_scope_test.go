@@ -2,17 +2,21 @@
 // every scope the API accepts (up to 65,536 addresses) is discovered
 // completely; a larger one is cut and the run reports it (F-106).
 //
-// The scope run reports travel over NATS like in production; the test needs
-// TEST_NATS_URL or TEST_NATS_SERVER_BIN.
+// Scope schedules after a (re)start (WP-495, DIS-10): the sweep of a scope
+// starts from the run state the server holds, not at once (F-109).
+//
+// The scope run reports travel over NATS like in production; the expansion
+// test needs TEST_NATS_URL or TEST_NATS_SERVER_BIN.
 //
 // Retest:
 //
 //	cd collector && TEST_NATS_URL=nats://localhost:54222 go test -count=1 -v \
-//	  -run 'TestAuditScopeExpansionCompleteOrReported' ./collectorcmd/
+//	  -run 'TestAuditScopeExpansionCompleteOrReported|TestAuditScopeScheduleSurvivesRestart' ./collectorcmd/
 package collectorcmd
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -68,6 +72,57 @@ func TestAuditScopeExpansionCompleteOrReported(t *testing.T) {
 		if len(errs) != 1 || errs[0].Cause != "scope_truncated" || errs[0].Target != s.scope.Target {
 			t.Errorf("scope %s (%s): run errors %+v, want one with cause scope_truncated and the target (no silent truncation)",
 				s.scope.ID, s.scope.Target, errs)
+		}
+	}
+}
+
+// TestAuditScopeScheduleSurvivesRestart: after a (re)start the collector
+// honours the run state the server holds: a cron or interval scope that ran
+// recently is not due; only a never-run scope sweeps at once (DIS-10,
+// F-109). Without next_run_at a cron scope waits for its next match in the
+// organization's time zone and an interval scope for one interval after its
+// last run.
+func TestAuditScopeScheduleSurvivesRestart(t *testing.T) {
+	spy := &auditSpy{name: "sweep"}
+	auditUsePlugins(t, spy)
+	now := time.Date(2026, 10, 15, 10, 7, 0, 0, time.UTC)
+	serverScopes := `[
+	  {"id":"6f0b6f0e-0000-4000-8000-0000000000a6","kind":"host","target":"192.0.2.21","schedule":"0 2 * * *","plugins":["sweep"],"credential_ids":[],
+	   "last_run_at":"2026-10-15T02:00:00Z","next_run_at":"2026-10-16T02:00:00Z"},
+	  {"id":"6f0b6f0e-0000-4000-8000-0000000000a7","kind":"host","target":"192.0.2.22","schedule":"24h","plugins":["sweep"],"credential_ids":[],
+	   "last_run_at":"2026-10-15T09:07:00Z","next_run_at":"2026-10-16T09:07:00Z"},
+	  {"id":"6f0b6f0e-0000-4000-8000-0000000000a8","kind":"host","target":"192.0.2.23","schedule":"24h","plugins":["sweep"],"credential_ids":[]},
+	  {"id":"6f0b6f0e-0000-4000-8000-0000000000ab","kind":"host","target":"192.0.2.24","schedule":"0 2 * * *","plugins":["sweep"],"credential_ids":[],
+	   "timezone":"Europe/Berlin"},
+	  {"id":"6f0b6f0e-0000-4000-8000-0000000000ac","kind":"host","target":"192.0.2.25","schedule":"6h","plugins":["sweep"],"credential_ids":[],
+	   "last_run_at":"2026-10-15T08:07:00Z"}
+	]`
+	var scopes []collectorScope
+	if err := json.Unmarshal([]byte(serverScopes), &scopes); err != nil {
+		t.Fatal(err)
+	}
+	collectorScopes.set(scopes, nil)
+	// A fresh scheduler is what a collector start (or auto-update restart) has.
+	sched := newScheduler()
+	runDueDiscovery(context.Background(), &collectorConfig{}, nil, sched, &hostCache{}, now)
+
+	cases := []struct {
+		name, id, target string
+		wantSweep        bool
+		wantNext         string
+	}{
+		{"cron 0 2 * * * scope that ran at 02:00 is not due at 10:07", "6f0b6f0e-0000-4000-8000-0000000000a6", "192.0.2.21", false, "2026-10-16T02:00:00Z"},
+		{"24h scope that ran an hour ago is not due after a restart", "6f0b6f0e-0000-4000-8000-0000000000a7", "192.0.2.22", false, "2026-10-16T09:07:00Z"},
+		{"never-run scope sweeps at once (control)", "6f0b6f0e-0000-4000-8000-0000000000a8", "192.0.2.23", true, "2026-10-16T10:07:00Z"},
+		{"cron scope without next_run_at waits for its next match (02:00 in Berlin)", "6f0b6f0e-0000-4000-8000-0000000000ab", "192.0.2.24", false, "2026-10-16T00:00:00Z"},
+		{"6h scope without next_run_at is due one interval after its last run", "6f0b6f0e-0000-4000-8000-0000000000ac", "192.0.2.25", false, "2026-10-15T14:07:00Z"},
+	}
+	for _, tc := range cases {
+		if swept := len(spy.seen(tc.target)) > 0; swept != tc.wantSweep {
+			t.Errorf("%s: swept=%v at %s, want %v", tc.name, swept, now.Format(time.RFC3339), tc.wantSweep)
+		}
+		if next := sched.nextRun(tc.id + "/sweep").UTC().Format(time.RFC3339); next != tc.wantNext {
+			t.Errorf("%s: next sweep %s, want %s", tc.name, next, tc.wantNext)
 		}
 	}
 }

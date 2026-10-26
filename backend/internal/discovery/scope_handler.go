@@ -300,7 +300,11 @@ const (
 )
 
 // CollectorScope is a scope as the collector receives it; CredentialIDs are
-// its effective credentials (E-67), not the stored list.
+// its effective credentials (E-67), not the stored list. LastRunAt and
+// NextRunAt are the run state the server holds (RFC 3339; a new scope has
+// no last run and is due at its creation): a (re)started collector
+// schedules the sweep from them instead of at once (DIS-10, F-109). Timezone is the organization's time zone, in
+// which the collector evaluates a cron schedule (E-84 option A).
 type CollectorScope struct {
 	ID            string   `json:"id"`
 	Kind          string   `json:"kind"`
@@ -311,6 +315,9 @@ type CollectorScope struct {
 	Schedule      string   `json:"schedule"`
 	CredentialIDs []string `json:"credential_ids"`
 	Plugins       []string `json:"plugins"`
+	LastRunAt     string   `json:"last_run_at,omitempty"`
+	NextRunAt     string   `json:"next_run_at,omitempty"`
+	Timezone      string   `json:"timezone"`
 }
 
 // ScopesResponse answers a scopes request.
@@ -377,6 +384,10 @@ func (h *Handler) CollectorScopes(ctx context.Context, orgID, collectorID string
 	if err != nil {
 		return nil, err
 	}
+	tz, err := repo.OrganizationTimezone(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]CollectorScope, 0, len(scopes))
 	for i := range scopes {
 		s := &scopes[i]
@@ -385,7 +396,8 @@ func (h *Handler) CollectorScopes(ctx context.Context, orgID, collectorID string
 			ids = []string{}
 		}
 		out = append(out, CollectorScope{ID: s.ID, Kind: s.Kind, Target: s.Target, ClientID: s.ClientID, SiteID: s.SiteID,
-			VRFID: s.VRFID, Schedule: s.Schedule, CredentialIDs: ids, Plugins: s.Plugins})
+			VRFID: s.VRFID, Schedule: s.Schedule, CredentialIDs: ids, Plugins: s.Plugins,
+			LastRunAt: s.LastRunAt, NextRunAt: s.NextRunAt, Timezone: tz})
 	}
 	return out, nil
 }

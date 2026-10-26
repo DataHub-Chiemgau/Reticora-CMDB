@@ -418,6 +418,8 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 	}
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
+	// Every start has a new scheduler: the sweep of a scope starts from the
+	// run state the server sends with it, not at once (F-109).
 	sched, hosts := newScheduler(), &hostCache{}
 
 	for {

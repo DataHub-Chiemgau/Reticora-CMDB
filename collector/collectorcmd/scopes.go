@@ -27,7 +27,9 @@ import (
 // server (not enrolled, no NATS endpoint) the collector scans
 // RETICORA_SCAN_SUBNETS as before.
 
-// collectorScope is a scope as the server sends it.
+// collectorScope is a scope as the server sends it, with the run state the
+// server holds (RFC 3339; last_run_at empty before the first run) and the
+// organization's time zone of its cron schedule (DIS-10).
 type collectorScope struct {
 	ID            string   `json:"id"`
 	Kind          string   `json:"kind"`
@@ -38,6 +40,9 @@ type collectorScope struct {
 	Schedule      string   `json:"schedule"`
 	CredentialIDs []string `json:"credential_ids"`
 	Plugins       []string `json:"plugins"`
+	LastRunAt     string   `json:"last_run_at,omitempty"`
+	NextRunAt     string   `json:"next_run_at,omitempty"`
+	Timezone      string   `json:"timezone,omitempty"`
 }
 
 type scopeCache struct {
@@ -278,8 +283,10 @@ func discoveryPasses(cfg *collectorConfig) []discoveryPass {
 	for i := range scopes {
 		s := scopes[i]
 		targets, truncated := scopeTargets(&s)
+		sweep := parseSchedule(s.Schedule, sweepDefault)
+		sweep.loc = scheduleLocation(s.Timezone)
 		out = append(out, discoveryPass{key: s.ID, scope: &s, targets: targets, truncated: truncated, protocols: s.Plugins,
-			sweep: parseSchedule(s.Schedule, sweepDefault), intervals: intervals})
+			sweep: sweep, intervals: intervals})
 	}
 	return out
 }
@@ -295,11 +302,31 @@ func (p *discoveryPass) protocolSchedule(protocol string) schedule {
 	return schedule{every: p.intervals.pollInterval(protocol)}
 }
 
+// firstSweep is when the sweep of a scope is due after a (re)start of the
+// collector (DIS-10, F-109): at the next_run_at the server holds; without
+// it a cron scope at its next match and an interval scope one interval
+// after its last run; a scope that never ran at once.
+func (p *discoveryPass) firstSweep(now time.Time) time.Time {
+	if at, err := time.Parse(time.RFC3339, p.scope.NextRunAt); err == nil {
+		return at
+	}
+	if p.sweep.cron != nil {
+		return p.sweep.next(now)
+	}
+	if last, err := time.Parse(time.RFC3339, p.scope.LastRunAt); err == nil {
+		return p.sweep.next(last)
+	}
+	return now
+}
+
 // dueProtocols returns the protocols due at now, the sweep first so the
 // polls of the same run use its hosts.
 func (p *discoveryPass) dueProtocols(sched *scheduler, now time.Time) []string {
 	var due []string
 	for _, protocol := range p.protocols {
+		if protocol == "sweep" && p.scope != nil {
+			sched.seed(p.key+"/"+protocol, func() time.Time { return p.firstSweep(now) })
+		}
 		if sched.due(p.key+"/"+protocol, now, p.protocolSchedule(protocol)) {
 			if protocol == "sweep" {
 				due = append([]string{protocol}, due...)

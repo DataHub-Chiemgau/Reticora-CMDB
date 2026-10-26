@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -93,6 +94,72 @@ func TestDiscoveryIntervalsFromSettings(t *testing.T) {
 	repo.SetOrgSettings("org-1", map[string]any{"discovery": map[string]any{"poll_interval": "20m"}})
 	if iv, _ := repo.DiscoveryIntervals(context.Background(), "org-1"); iv.Poll != "20m0s" {
 		t.Errorf("memory intervals = %+v", iv)
+	}
+}
+
+// TestScopeChannelCarriesRunStateAndTimezone covers WP-495 (DIS-10, F-109,
+// F-266, E-84 option A): scopes.request hands the collector each scope's
+// last_run_at and next_run_at as the server holds them (absent before the
+// first run) and the organization's time zone, so a (re)started collector
+// schedules the sweeps from them and evaluates cron in that zone.
+func TestScopeChannelCarriesRunStateAndTimezone(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	col := &Collector{OrganizationID: "org-1", Name: "col", Status: CollectorActive, Config: map[string]any{}}
+	if err := repo.RegisterCollector(ctx, col); err != nil {
+		t.Fatal(err)
+	}
+	ran := NewScope("org-1", &ScopeInput{CollectorID: col.ID, Kind: ScopeKindHost, Target: "192.0.2.21", Schedule: "0 2 * * *"})
+	fresh := NewScope("org-1", &ScopeInput{CollectorID: col.ID, Kind: ScopeKindHost, Target: "192.0.2.22"})
+	for _, s := range []*Scope{ran, fresh} {
+		if err := repo.CreateScope(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := NewHandler(repo, nil)
+	if err := h.RecordCollectorScopeRun(ctx, "org-1", col.ID, &ScopeResultReport{ScopeID: ran.ID,
+		At: time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), NextRun: time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC),
+		Result: map[string]any{"records": 1}}); err != nil {
+		t.Fatal(err)
+	}
+	request := func() map[string]map[string]any {
+		t.Helper()
+		resp := h.scopeHandlers()[ScopesRequestSuffix](ctx, "org-1", col.ID, []byte(`{}`))
+		raw, err := json.Marshal(resp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			Scopes []map[string]any `json:"scopes"`
+			Error  string           `json:"error"`
+		}
+		if err = json.Unmarshal(raw, &body); err != nil || body.Error != "" {
+			t.Fatalf("scopes.request = %s (%v)", raw, err)
+		}
+		out := map[string]map[string]any{}
+		for _, s := range body.Scopes {
+			id, _ := s["id"].(string)
+			out[id] = s
+		}
+		return out
+	}
+
+	got := request()
+	if s := got[ran.ID]; s["last_run_at"] != "2026-10-15T00:00:00Z" || s["next_run_at"] != "2026-10-16T00:00:00Z" || s["timezone"] != "UTC" {
+		t.Errorf("scope that ran: %v, want last_run_at, next_run_at and timezone UTC (the default)", s)
+	}
+	// A new scope is due at its creation (next_run_at = created), it has no
+	// last run.
+	if s := got[fresh.ID]; s == nil || s["timezone"] != "UTC" || s["next_run_at"] != fresh.NextRunAt {
+		t.Errorf("scope that never ran: %v, want next_run_at %s (its creation)", s, fresh.NextRunAt)
+	} else if _, has := s["last_run_at"]; has {
+		t.Errorf("scope that never ran carries last_run_at: %v", s)
+	}
+	repo.SetOrgTimezone("org-1", "Europe/Berlin")
+	for id, s := range request() {
+		if s["timezone"] != "Europe/Berlin" {
+			t.Errorf("scope %s: timezone %v, want the organization's Europe/Berlin", id, s["timezone"])
+		}
 	}
 }
 

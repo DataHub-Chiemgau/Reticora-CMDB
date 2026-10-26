@@ -158,6 +158,29 @@ func TestAuditScopeChannelOverNATS(t *testing.T) {
 		}
 	})
 
+	// WP-495 (DIS-10, F-109, E-84): the next scopes.request hands the
+	// collector the stored run state and the organization's time zone, read
+	// as reticora_app under the collector's tenant.
+	t.Run("scopes.request carries the run state and the organization's time zone", func(t *testing.T) {
+		if _, uerr := f.Admin.Exec(bg, `UPDATE organization SET timezone = 'Europe/Berlin' WHERE id = $1`, f.OrgA); uerr != nil {
+			t.Fatal(uerr)
+		}
+		stored, gerr := repo.GetScope(org, f.OrgA, enabled.ID)
+		if gerr != nil {
+			t.Fatal(gerr)
+		}
+		var resp discovery.ScopesResponse
+		request(base+discovery.ScopesRequestSuffix, map[string]any{}, &resp)
+		if len(resp.Scopes) != 1 {
+			t.Fatalf("scopes = %+v, error %q", resp.Scopes, resp.Error)
+		}
+		s := resp.Scopes[0]
+		if s.LastRunAt == "" || s.LastRunAt != stored.LastRunAt || s.NextRunAt == "" || s.NextRunAt != stored.NextRunAt || s.Timezone != "Europe/Berlin" {
+			t.Errorf("scope = last_run_at %q next_run_at %q timezone %q, want %q %q Europe/Berlin",
+				s.LastRunAt, s.NextRunAt, s.Timezone, stored.LastRunAt, stored.NextRunAt)
+		}
+	})
+
 	t.Run("subnets.report suggests routable subnets only", func(t *testing.T) {
 		var resp map[string]int
 		request(base+discovery.SubnetsReportSuffix, discovery.SubnetsReport{Subnets: []string{"10.98.7.0/24", "127.0.0.0/8", "169.254.0.0/16"}}, &resp)
