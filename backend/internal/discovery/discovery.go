@@ -923,15 +923,19 @@ func generateEnrollmentCode() (string, error) {
 }
 
 // CollectorSpoolReport is the offline spool state a collector sends with its
-// heartbeat (NFR-04, COL-05, OPS-06). Dropped counters only grow while the
-// collector runs.
+// heartbeat (NFR-04, COL-05, OPS-06). The dropped counters are the losses
+// since the last heartbeat the server accepted: the collector acknowledges
+// them after that heartbeat's 204.
 type CollectorSpoolReport struct {
 	Messages         int   `json:"messages"`
 	Bytes            int64 `json:"bytes"`
 	OldestAgeSeconds int64 `json:"oldest_age_seconds"`
 	DroppedMessages  int64 `json:"dropped_messages"`
 	DroppedBytes     int64 `json:"dropped_bytes"`
-	Backpressure     bool  `json:"backpressure"`
+	// DroppedSamples counts metric samples and traps the collector dropped
+	// on upload failures (E-79: counted, not spooled).
+	DroppedSamples int64 `json:"dropped_samples"`
+	Backpressure   bool  `json:"backpressure"`
 }
 
 // CollectorHeartbeatRequest is the optional body of a collector heartbeat.
@@ -969,15 +973,7 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	// A paused collector stops scanning until the license is active again
 	// (ENT-07).
 	w.Header().Set(CollectorStatusHeader, status)
-	if s := req.Spool; s != nil && (s.DroppedMessages > 0 || s.Backpressure) {
-		slog.WarnContext(r.Context(), "collector reported spool data loss or backpressure",
-			"event", "collector.spool.degraded",
-			"organization_id", t.OrganizationID, "collector_id", id,
-			"spool_messages", s.Messages, "spool_bytes", s.Bytes,
-			"spool_oldest_age_seconds", s.OldestAgeSeconds,
-			"dropped_messages", s.DroppedMessages, "dropped_bytes", s.DroppedBytes,
-			"backpressure", s.Backpressure)
-	}
+	recordSpoolReport(r.Context(), t.OrganizationID, id, req.Spool)
 
 	w.WriteHeader(http.StatusNoContent)
 }

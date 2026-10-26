@@ -456,6 +456,67 @@ func TestAckLossReducesOnlyAcknowledgedTotals(t *testing.T) {
 	}
 }
 
+// WP-483: a spooled batch the server refused for good is moved to the
+// quarantine and counted; a refused batch that was never spooled is written
+// to the quarantine and counted; RecordLoss counts a loss the caller saw.
+// All three are persisted and reported to OnDrop as LossRejected.
+func TestRejectQuarantineAndRecordLossCount(t *testing.T) {
+	dir := t.TempDir()
+	ctx := testCtx(t)
+	var reasons []string
+	b := &DiskBuffer{Dir: dir, OnDrop: func(l Loss) { reasons = append(reasons, l.Reason) }}
+	poison, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("poison")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("next")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := spoolSize(t, dir)
+	if err = b.Reject(ctx, poison); err != nil {
+		t.Fatalf("Reject: %v", err)
+	}
+	if err = b.Reject(ctx, poison); err != nil {
+		t.Fatalf("second Reject: %v", err)
+	}
+	if err = b.Reject(ctx, "../loss"); err == nil {
+		t.Fatal("Reject accepted an id outside the spool")
+	}
+	msgs, err := b.PeekBatch(ctx, 10)
+	if err != nil || len(msgs) != 1 || msgs[0].ID != next {
+		t.Fatalf("spool after Reject = %+v (%v), want only the next message", msgs, err)
+	}
+	if _, err = os.Stat(filepath.Join(dir, QuarantineDir, poison+".json")); err != nil {
+		t.Fatalf("rejected message not quarantined: %v", err)
+	}
+
+	if err = b.Quarantine(ctx, &Message{Topic: "t", Payload: []byte("fresh")}); err != nil {
+		t.Fatalf("Quarantine: %v", err)
+	}
+	if spoolSize(t, dir) >= size {
+		t.Fatalf("spool grew by the quarantined message")
+	}
+	if err = b.RecordLoss(ctx, Loss{Messages: 2, Reason: LossRejected}); err != nil {
+		t.Fatalf("RecordLoss: %v", err)
+	}
+	if err = b.RecordLoss(ctx, Loss{}); err != nil {
+		t.Fatalf("empty RecordLoss: %v", err)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(dir, QuarantineDir))
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("quarantine = %d entries (%v), want 2", len(entries), err)
+	}
+	st, err := (&DiskBuffer{Dir: dir}).Stats(ctx)
+	if err != nil || st.Messages != 1 || st.DroppedMessages != 4 || st.DroppedBytes == 0 {
+		t.Fatalf("stats after restart = %+v (%v), want 1 message and 4 losses", st, err)
+	}
+	if len(reasons) != 3 || reasons[0] != LossRejected || reasons[1] != LossRejected || reasons[2] != LossRejected {
+		t.Fatalf("OnDrop reasons = %v, want 3x %s", reasons, LossRejected)
+	}
+}
+
 // Entries and loss totals are written through a temp file and renamed into
 // place: no temp file remains, and every file in the spool is complete.
 func TestEnqueueWritesAtomically(t *testing.T) {

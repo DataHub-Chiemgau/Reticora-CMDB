@@ -3,6 +3,7 @@ package collectorcmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -57,8 +58,10 @@ func TestUploadPrefersTheEdge(t *testing.T) {
 	}
 }
 
-// TestEdgeRefusals: an expired license pauses the collector, other refusals
-// are upload errors (the batch is spooled by the caller).
+// TestEdgeRefusals: an expired license pauses the collector; a refusal for
+// good (4xx other than 408/429) is errUploadRejected (the caller
+// quarantines the batch), 5xx is transient (the caller spools it); an
+// accepted batch names the rejected records (WP-481).
 func TestEdgeRefusals(t *testing.T) {
 	up, err := newUploader(context.Background(), testConfig("http://127.0.0.1:1", ""))
 	if err != nil {
@@ -67,20 +70,29 @@ func TestEdgeRefusals(t *testing.T) {
 	withEdge(t, func(context.Context, string, []byte) ([]byte, error) {
 		return []byte(`{"status":403,"type":"` + problemLicenseExpired + `"}`), nil
 	})
-	if err = up.postViaEdge(context.Background(), []byte(`{}`)); !errors.Is(err, errLicenseExpired) || !up.paused.Load() {
+	if _, err = up.postViaEdge(context.Background(), []byte(`{}`)); !errors.Is(err, errLicenseExpired) || !up.paused.Load() {
 		t.Fatalf("expired license: %v, paused %v", err, up.paused.Load())
 	}
 	withEdge(t, func(context.Context, string, []byte) ([]byte, error) {
-		return []byte(`{"status":202,"license_status":"active"}`), nil
+		return []byte(`{"status":202,"license_status":"active","result":{"accepted":3,"rejected":2}}`), nil
 	})
-	if err = up.postViaEdge(context.Background(), []byte(`{}`)); err != nil || up.paused.Load() {
-		t.Fatalf("renewed license: %v, paused %v", err, up.paused.Load())
+	lost, err := up.postViaEdge(context.Background(), []byte(`{}`))
+	if err != nil || up.paused.Load() || lost != 2 {
+		t.Fatalf("renewed license: %v, paused %v, lost %d (want 2)", err, up.paused.Load(), lost)
 	}
 	withEdge(t, func(context.Context, string, []byte) ([]byte, error) {
 		return []byte(`{"status":422,"error":"records[0].source missing"}`), nil
 	})
-	if err = up.postViaEdge(context.Background(), []byte(`{}`)); err == nil {
-		t.Fatal("refused batch reported as delivered")
+	if _, err = up.postViaEdge(context.Background(), []byte(`{}`)); !errors.Is(err, errUploadRejected) {
+		t.Fatalf("refused batch: %v, want errUploadRejected", err)
+	}
+	for _, status := range []int{408, 429, 503} {
+		withEdge(t, func(context.Context, string, []byte) ([]byte, error) {
+			return []byte(fmt.Sprintf(`{"status":%d,"error":"busy"}`, status)), nil
+		})
+		if _, err = up.postViaEdge(context.Background(), []byte(`{}`)); err == nil || errors.Is(err, errUploadRejected) {
+			t.Fatalf("status %d: %v, want a transient error", status, err)
+		}
 	}
 }
 

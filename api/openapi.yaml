@@ -13182,13 +13182,24 @@ components:
     CollectorSpoolReport:
       type: object
       additionalProperties: false
-      description: Offline spool state of a collector; dropped counters only grow while the collector runs.
+      description: >-
+        Offline spool state of a collector. The dropped counters are the losses not yet acknowledged:
+        the collector reduces them by the reported amounts once the heartbeat was answered with 204.
+        Reported losses raise reticora_collector_spool_dropped_total (kind messages or samples),
+        backpressure raises reticora_collector_spool_backpressure_total.
       properties:
         messages: { type: integer }
         bytes: { type: integer, format: int64 }
         oldest_age_seconds: { type: integer, format: int64 }
-        dropped_messages: { type: integer, format: int64 }
+        dropped_messages:
+          type: integer
+          format: int64
+          description: Lost spool batches (expired, size limit, corrupt, refused with 4xx and quarantined), records rejected in an accepted batch and rejected or unreadable agent telemetry.
         dropped_bytes: { type: integer, format: int64 }
+        dropped_samples:
+          type: integer
+          format: int64
+          description: Metric samples and traps dropped on upload failures; they are counted, not spooled (E-79).
         backpressure: { type: boolean }
     IGAObject:
       type: object

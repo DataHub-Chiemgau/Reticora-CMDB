@@ -45,6 +45,8 @@ type edgeReply struct {
 	CollectorStatus string `json:"collector_status"`
 	Ingested        int    `json:"ingested"`
 	Unassigned      int    `json:"unassigned"`
+	// Result answers an accepted ingest; it names the rejected records.
+	Result *ingestResult `json:"result"`
 }
 
 // edgeRequest sends data on the collector's subject tree; tests replace it.
@@ -68,28 +70,30 @@ var edgeRequest = func(ctx context.Context, suffix string, data []byte) ([]byte,
 	return msg.Data, nil
 }
 
-// postViaEdge delivers a records payload over the edge. errNoEdge means the
-// HTTP path has to take it.
-func (u *uploader) postViaEdge(ctx context.Context, payload []byte) error {
+// postViaEdge delivers a records payload over the edge and returns the
+// number of records the server rejected in the accepted batch. errNoEdge
+// means the HTTP path has to take it; a refusal for good (4xx other than
+// 408/429) is errUploadRejected.
+func (u *uploader) postViaEdge(ctx context.Context, payload []byte) (lost int, err error) {
 	raw, err := edgeRequest(ctx, edgeIngestSuffix, payload)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var reply edgeReply
 	if err = json.Unmarshal(raw, &reply); err != nil {
-		return fmt.Errorf("edge ingest reply: %w", err)
+		return 0, fmt.Errorf("edge ingest reply: %w", err)
 	}
 	if reply.Status == http.StatusForbidden && reply.Type == problemLicenseExpired {
 		u.setLicenseStatus("expired")
-		return errLicenseExpired
+		return 0, errLicenseExpired
 	}
 	if reply.Status >= 400 {
-		return fmt.Errorf("upload failed with status %d: %s", reply.Status, reply.Error)
+		return 0, uploadStatusError(reply.Status, reply.Error)
 	}
 	if reply.LicenseStatus != "" {
 		u.setLicenseStatus(reply.LicenseStatus)
 	}
-	return nil
+	return reply.Result.lost(), nil
 }
 
 // heartbeatViaEdge sends a heartbeat over the edge; ok is false when the
@@ -143,8 +147,9 @@ type metricBuffer struct {
 	sendMu  sync.Mutex
 }
 
-// push appends a batch and drops the oldest beyond maxMetricBatches.
-func (b *metricBuffer) push(batch *metricBatch) {
+// push appends a batch and drops the oldest beyond maxMetricBatches; it
+// returns the number of samples dropped.
+func (b *metricBuffer) push(batch *metricBatch) (droppedSamples int) {
 	b.mu.Lock()
 	b.batches = append(b.batches, batch)
 	var dropped []*metricBatch
@@ -156,7 +161,9 @@ func (b *metricBuffer) push(batch *metricBatch) {
 	for _, d := range dropped {
 		slog.Error("metric samples dropped: the edge channel took none of the buffered batches",
 			"event", "collector.metrics.dropped", "count", d.samples, "max_batches", maxMetricBatches)
+		droppedSamples += d.samples
 	}
+	return droppedSamples
 }
 
 // oldest returns the oldest batch, nil when the buffer is empty.
@@ -215,10 +222,11 @@ func (u *uploader) postMetrics(ctx context.Context, metrics []map[string]any) er
 // .metrics, after the batches still buffered. No request without a
 // credential goes to the HTTP API (F-046): without the edge the batch waits
 // in the buffer. It returns the refusal of this batch (status >= 400) or
-// its drop; a waiting batch is no error.
+// its drop; a waiting batch is no error. Every dropped or refused sample is
+// counted (dropped_samples, E-79).
 func (u *uploader) postMetricsPayload(ctx context.Context, payload []byte, count int) error {
 	batch := &metricBatch{payload: payload, samples: count}
-	u.metrics.push(batch)
+	u.dropSamples(u.metrics.push(batch))
 	held, err := u.deliverMetrics(ctx, batch)
 	if held {
 		slog.Warn("metric samples held until the edge channel takes them", "event", "collector.metrics.held",
@@ -235,9 +243,9 @@ func (u *uploader) flushMetrics(ctx context.Context) {
 
 // deliverMetrics sends the buffered batches oldest first. It stops while
 // the edge cannot take them or a request failed (held: batches wait); a
-// refused or oversized batch is dropped and logged as an error with its
-// status and count, except own, whose refusal or drop it returns to the
-// caller.
+// refused or oversized batch is dropped, counted (dropped_samples) and
+// logged as an error with its status and count, except own, whose refusal
+// or drop it returns to the caller.
 func (u *uploader) deliverMetrics(ctx context.Context, own *metricBatch) (held bool, ownErr error) {
 	u.metrics.sendMu.Lock()
 	defer u.metrics.sendMu.Unlock()
@@ -258,6 +266,9 @@ func (u *uploader) deliverMetrics(ctx context.Context, own *metricBatch) (held b
 			return true, ownErr
 		}
 		u.metrics.remove(batch)
+		if err != nil {
+			u.dropSamples(batch.samples)
+		}
 		switch {
 		case err == nil:
 		case batch == own:

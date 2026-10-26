@@ -47,11 +47,11 @@ import (
 )
 
 type collectorConfig struct {
-	ServerURL         string
-	OrganizationID    string
-	CollectorID       string
-	ScanSubnets       []string
-	Protocols         []string
+	ServerURL      string
+	OrganizationID string
+	CollectorID    string
+	ScanSubnets    []string
+	Protocols      []string
 	// Simulate replaces discovery by the deterministic 30-device fleet of
 	// plugins/simulate (RETICORA_SIMULATE, SIM-02); refused in production.
 	Simulate bool
@@ -264,6 +264,9 @@ type uploader struct {
 	flushNow chan struct{}
 	// metrics holds the metric batches the edge did not take yet (edge.go).
 	metrics metricBuffer
+	// droppedSamples counts the metric samples and traps dropped since the
+	// last heartbeat the server accepted (E-79: counted, not spooled).
+	droppedSamples atomic.Int64
 }
 
 // LicenseStatusHeader carries the discovery license status on heartbeat
@@ -685,37 +688,108 @@ func (u *uploader) uploadRecordsAt(ctx context.Context, records []plugins.Device
 		}
 	}
 
-	if err := u.postPayload(ctx, payload); err != nil {
-		if errors.Is(err, errLicenseExpired) {
-			return err
-		}
-		if spoolErr := u.spoolResults(ctx, payload, sourceTime); spoolErr != nil {
-			return fmt.Errorf("upload failed (%v) and spooling failed: %w", err, spoolErr)
-		}
+	lost, err := u.postPayload(ctx, payload)
+	switch {
+	case err == nil:
+		u.countRejected(ctx, lost)
+		return nil
+	case errors.Is(err, errLicenseExpired):
+		return err
+	case errors.Is(err, errUploadRejected):
+		// A poison batch is never spooled: retrying it would only repeat the
+		// refusal and hold up the batches behind it (F-085).
+		u.quarantineBatch(ctx, payload, sourceTime, err)
 		return err
 	}
-	return nil
+	if spoolErr := u.spoolResults(ctx, payload, sourceTime); spoolErr != nil {
+		return fmt.Errorf("upload failed (%v) and spooling failed: %w", err, spoolErr)
+	}
+	return err
+}
+
+// errUploadRejected marks a batch the server refused for good (a poison
+// batch): a 4xx answer other than 408 and 429. 5xx, 408, 429 and network
+// errors are transient; the batch stays in the spool and is retried.
+var errUploadRejected = errors.New("upload rejected")
+
+// permanentStatus reports whether an HTTP status refuses a request for
+// good: every 4xx except 408 (timeout) and 429 (rate limit).
+func permanentStatus(code int) bool {
+	return code >= 400 && code < 500 && code != http.StatusRequestTimeout && code != http.StatusTooManyRequests
+}
+
+// uploadStatusError classifies a refused upload by its status.
+func uploadStatusError(code int, detail string) error {
+	if permanentStatus(code) {
+		return fmt.Errorf("%w with status %d: %s", errUploadRejected, code, detail)
+	}
+	return fmt.Errorf("upload failed with status %d: %s", code, detail)
+}
+
+// ingestResult is the part of the ingest answer (202) the collector reads:
+// the records the server rejected one by one (WP-481) and those refused for
+// an observed_at in the future. Both are lost.
+type ingestResult struct {
+	Rejected       int `json:"rejected"`
+	RejectedFuture int `json:"rejected_future"`
+}
+
+func (r *ingestResult) lost() int {
+	if r == nil {
+		return 0
+	}
+	return max(r.Rejected, 0) + max(r.RejectedFuture, 0)
+}
+
+// countRejected counts the records the server rejected in an accepted batch
+// as a loss of the spool, reported with the next heartbeat.
+func (u *uploader) countRejected(ctx context.Context, records int) {
+	if records <= 0 {
+		return
+	}
+	slog.Error("records rejected by the backend; counted as lost", "event", "collector.records.rejected", "count", records)
+	if u.spool == nil {
+		return
+	}
+	if err := u.spool.RecordLoss(ctx, buffer.Loss{Messages: records, Reason: buffer.LossRejected}); err != nil {
+		slog.Error("recording rejected records failed", "count", records, "error", err)
+	}
+}
+
+// quarantineBatch keeps a batch the server refused for good in the spool's
+// quarantine directory and counts it as a loss.
+func (u *uploader) quarantineBatch(ctx context.Context, payload []byte, sourceTime time.Time, cause error) {
+	slog.Error("batch rejected by the backend; quarantined and counted as lost", "event", "collector.spool.quarantined",
+		"error", cause)
+	if u.spool == nil {
+		return
+	}
+	if err := u.spool.Quarantine(ctx, &buffer.Message{Topic: spoolTopic, Payload: payload, CreatedAt: sourceTime.UTC()}); err != nil {
+		slog.Error("quarantining the rejected batch failed", "error", err)
+	}
 }
 
 // postPayload delivers a single JSON payload: over the edge when the
-// collector holds its NATS channel, else compressed to the HTTP ingest.
-func (u *uploader) postPayload(ctx context.Context, payload []byte) error {
-	if err := u.postViaEdge(ctx, payload); !errors.Is(err, errNoEdge) {
-		return err
+// collector holds its NATS channel, else compressed to the HTTP ingest. It
+// returns the number of records the server rejected in an accepted batch;
+// a batch refused for good fails with errUploadRejected.
+func (u *uploader) postPayload(ctx context.Context, payload []byte) (lost int, err error) {
+	if lost, err = u.postViaEdge(ctx, payload); !errors.Is(err, errNoEdge) {
+		return lost, err
 	}
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(payload); err != nil {
-		return fmt.Errorf("compress results: %w", err)
+		return 0, fmt.Errorf("compress results: %w", err)
 	}
 	if err := gz.Close(); err != nil {
-		return fmt.Errorf("finalize compression: %w", err)
+		return 0, fmt.Errorf("finalize compression: %w", err)
 	}
 
 	endpoint := strings.TrimRight(u.cfg.ServerURL, "/") + "/api/v1/discovery/ingest"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &buf)
 	if err != nil {
-		return fmt.Errorf("build upload request: %w", err)
+		return 0, fmt.Errorf("build upload request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
@@ -724,23 +798,28 @@ func (u *uploader) postPayload(ctx context.Context, payload []byte) error {
 
 	resp, err := u.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("upload request: %w", err)
+		return 0, fmt.Errorf("upload request: %w", err)
 	}
 	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 
-	if resp.StatusCode == http.StatusForbidden {
-		var problem struct {
-			Type string `json:"type"`
-		}
-		if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&problem) == nil && problem.Type == problemLicenseExpired {
-			u.setLicenseStatus("expired")
-			return errLicenseExpired
-		}
-	}
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("upload failed with status %d", resp.StatusCode)
+		var problem struct {
+			Type   string `json:"type"`
+			Detail string `json:"detail"`
+		}
+		_ = json.Unmarshal(body, &problem)
+		if resp.StatusCode == http.StatusForbidden && problem.Type == problemLicenseExpired {
+			u.setLicenseStatus("expired")
+			return 0, errLicenseExpired
+		}
+		return 0, uploadStatusError(resp.StatusCode, problem.Detail)
 	}
-	return nil
+	var result ingestResult
+	if json.Unmarshal(body, &result) != nil {
+		return 0, nil
+	}
+	return result.lost(), nil
 }
 
 // postAgentTelemetry forwards an endpoint-agent telemetry payload to the
@@ -772,16 +851,17 @@ func (u *uploader) postAgentTelemetry(ctx context.Context, token string, payload
 	defer resp.Body.Close()
 
 	switch {
-	case resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests:
-		return fmt.Errorf("telemetry upload failed with status %d", resp.StatusCode)
-	case resp.StatusCode >= 400:
+	case permanentStatus(resp.StatusCode):
 		return fmt.Errorf("%w: status %d", errTelemetryRejected, resp.StatusCode)
+	case resp.StatusCode >= 400:
+		return fmt.Errorf("telemetry upload failed with status %d", resp.StatusCode)
 	}
 	return nil
 }
 
-// errTelemetryRejected marks a 4xx answer: the backend refused the agent
-// credential or payload, so the telemetry is not spooled for a retry.
+// errTelemetryRejected marks a 4xx answer other than 408 and 429: the
+// backend refused the agent credential or payload, so the telemetry is not
+// spooled for a retry.
 var errTelemetryRejected = errors.New("agent telemetry rejected")
 
 // spoolResults persists an undeliverable batch to the disk buffer. A full
@@ -825,8 +905,13 @@ func (u *uploader) logSpoolStats(ctx context.Context) {
 const spoolFlushBatch = 64
 
 // flushSpool delivers buffered batches in source-time order until the spool is
-// empty. Delivery stops at the first failure so spooled batches are never
-// reordered or dropped.
+// empty. A transient failure (network, 5xx, 408, 429) stops the delivery:
+// the batch stays and is retried on the next flush (the flusher's interval
+// or the next accepted heartbeat), so spooled batches are never reordered.
+// A batch the server refuses for good (4xx, a poison batch) is quarantined
+// and counted as lost, and the delivery continues with the next batch
+// (F-085); records rejected inside an accepted batch are counted as lost
+// before the batch is acknowledged.
 func (u *uploader) flushSpool(ctx context.Context) {
 	if u.spool == nil || u.cfg.ServerURL == "" || u.paused.Load() {
 		return
@@ -850,24 +935,37 @@ func (u *uploader) flushSpool(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			var deliver func() error
+			var lost int
+			var err error
 			switch msg.Topic {
 			case spoolTopic:
-				deliver = func() error { return u.postPayload(ctx, msg.Payload) }
+				lost, err = u.postPayload(ctx, msg.Payload)
 			case agentTelemetryTopic:
-				deliver = func() error { return u.replayAgentTelemetry(ctx, msg.Payload) }
+				err = u.replayAgentTelemetry(ctx, msg.Payload)
 			default:
-				continue
+				err = fmt.Errorf("%w: unknown spool topic %q", errUploadRejected, msg.Topic)
 			}
-			if err := deliver(); err != nil {
-				if errors.Is(err, errLicenseExpired) {
-					// The spooled batches stay until the license is renewed.
-					slog.Warn("spool flush postponed; discovery license expired", "message_id", msg.ID)
+			switch {
+			case err == nil:
+			case errors.Is(err, errLicenseExpired):
+				// The spooled batches stay until the license is renewed.
+				slog.Warn("spool flush postponed; discovery license expired", "message_id", msg.ID)
+				return
+			case errors.Is(err, errUploadRejected):
+				if qErr := u.spool.Reject(ctx, msg.ID); qErr != nil {
+					slog.Error("quarantining a rejected spool batch failed", "message_id", msg.ID, "error", qErr)
 					return
 				}
-				slog.Warn("spool flush postponed; backend still unreachable", "message_id", msg.ID, "error", err)
+				slog.Error("spooled batch rejected by the backend; quarantined and counted as lost",
+					"event", "collector.spool.quarantined", "message_id", msg.ID, "error", err)
+				progressed = true
+				continue
+			default:
+				slog.Warn("spool flush postponed; backend unavailable, retried on the next flush",
+					"message_id", msg.ID, "error", err)
 				return
 			}
+			u.countRejected(ctx, lost)
 			if err := u.spool.Ack(ctx, []string{msg.ID}); err != nil {
 				slog.Error("spool ack failed", "message_id", msg.ID, "error", err)
 				return
@@ -883,18 +981,20 @@ func (u *uploader) flushSpool(ctx context.Context) {
 }
 
 // replayAgentTelemetry delivers a spooled relay message to the agent
-// telemetry endpoint. A message the backend rejects (4xx) is dropped instead
-// of blocking the spool.
+// telemetry endpoint. A message that is unreadable or that the backend
+// rejects for good (4xx other than 408/429) is counted as lost and then
+// dropped instead of blocking the spool (F-233); the loss is recorded
+// before the caller acknowledges the message.
 func (u *uploader) replayAgentTelemetry(ctx context.Context, message []byte) error {
 	var msg relayMessage
 	if err := json.Unmarshal(message, &msg); err != nil {
-		slog.Error("spooled agent telemetry unreadable; dropped", "error", err)
-		return nil
+		slog.Error("spooled agent telemetry unreadable; dropped and counted as lost", "error", err)
+		return u.spool.RecordLoss(ctx, buffer.Loss{Messages: 1, Bytes: int64(len(message)), Reason: buffer.LossCorrupt})
 	}
 	err := u.postAgentTelemetry(ctx, msg.Token, msg.Telemetry)
 	if errors.Is(err, errTelemetryRejected) {
-		slog.Warn("spooled agent telemetry rejected; dropped", "error", err)
-		return nil
+		slog.Warn("spooled agent telemetry rejected; dropped and counted as lost", "error", err)
+		return u.spool.RecordLoss(ctx, buffer.Loss{Messages: 1, Bytes: int64(len(message)), Reason: buffer.LossRejected})
 	}
 	return err
 }
@@ -920,7 +1020,7 @@ func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader, on
 	defer ticker.Stop()
 
 	for {
-		status, ok := postHeartbeat(ctx, up.client, cfg, up.spoolReport(ctx))
+		status, ok := up.heartbeat(ctx, cfg)
 		if status != "" {
 			up.setLicenseStatus(status)
 		}
@@ -940,15 +1040,49 @@ func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader, on
 	}
 }
 
+// heartbeat sends one heartbeat with the spool report. Once the server
+// accepted it, the reported losses are acknowledged: the persisted spool
+// totals and the dropped samples shrink by exactly the reported amounts, so
+// a loss recorded meanwhile goes with the next heartbeat and a heartbeat
+// that fails reports the same losses again.
+func (u *uploader) heartbeat(ctx context.Context, cfg collectorConfig) (status string, ok bool) {
+	report := u.spoolReport(ctx)
+	status, ok = postHeartbeat(ctx, u.client, cfg, report)
+	if ok {
+		u.ackLoss(ctx, report)
+	}
+	return status, ok
+}
+
+// ackLoss acknowledges the losses of a spool report the server accepted.
+func (u *uploader) ackLoss(ctx context.Context, report *spoolReport) {
+	if report == nil {
+		return
+	}
+	if report.DroppedSamples > 0 {
+		u.droppedSamples.Add(-report.DroppedSamples)
+	}
+	if u.spool != nil && (report.DroppedMessages > 0 || report.DroppedBytes > 0) {
+		if err := u.spool.AckLoss(ctx, report.DroppedMessages, report.DroppedBytes); err != nil {
+			slog.Error("acknowledging reported spool losses failed; they are reported again", "error", err)
+		}
+	}
+}
+
 // spoolReport is the spool state sent with every heartbeat so the server sees
-// backlog, backpressure and losses (NFR-04, OPS-06).
+// backlog, backpressure and losses (NFR-04, OPS-06). The dropped counters
+// are the losses not yet acknowledged by an accepted heartbeat.
 type spoolReport struct {
 	Messages         int   `json:"messages"`
 	Bytes            int64 `json:"bytes"`
 	OldestAgeSeconds int64 `json:"oldest_age_seconds"`
 	DroppedMessages  int64 `json:"dropped_messages"`
 	DroppedBytes     int64 `json:"dropped_bytes"`
-	Backpressure     bool  `json:"backpressure"`
+	// DroppedSamples counts metric samples and traps dropped on upload
+	// failures (E-79); omitted while zero, so a server without the field
+	// still accepts the heartbeat.
+	DroppedSamples int64 `json:"dropped_samples,omitempty"`
+	Backpressure   bool  `json:"backpressure"`
 }
 
 type heartbeatBody struct {
@@ -956,20 +1090,35 @@ type heartbeatBody struct {
 }
 
 func (u *uploader) spoolReport(ctx context.Context) *spoolReport {
+	report := &spoolReport{DroppedSamples: max(u.droppedSamples.Load(), 0)}
 	if u.spool == nil {
-		return nil
+		if report.DroppedSamples == 0 {
+			return nil
+		}
+		return report
 	}
 	stats, err := u.spool.Stats(ctx)
 	if err != nil {
-		return nil
+		slog.Warn("spool stats unavailable for the heartbeat", "error", err)
+		if report.DroppedSamples == 0 {
+			return nil
+		}
+		return report
 	}
-	return &spoolReport{
-		Messages:         stats.Messages,
-		Bytes:            stats.Bytes,
-		OldestAgeSeconds: int64(stats.OldestAge.Seconds()),
-		DroppedMessages:  stats.DroppedMessages,
-		DroppedBytes:     stats.DroppedBytes,
-		Backpressure:     u.backpressure(ctx),
+	report.Messages = stats.Messages
+	report.Bytes = stats.Bytes
+	report.OldestAgeSeconds = int64(stats.OldestAge.Seconds())
+	report.DroppedMessages = stats.DroppedMessages
+	report.DroppedBytes = stats.DroppedBytes
+	report.Backpressure = u.backpressure(ctx)
+	return report
+}
+
+// dropSamples counts metric samples or traps that were dropped; the next
+// heartbeat reports them (E-79, NFR-04).
+func (u *uploader) dropSamples(n int) {
+	if n > 0 {
+		u.droppedSamples.Add(int64(n))
 	}
 }
 

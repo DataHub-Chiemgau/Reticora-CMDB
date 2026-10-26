@@ -7039,17 +7039,25 @@ export interface components {
     CollectorHeartbeatRequest: {
       spool?: components['schemas']['CollectorSpoolReport'];
     };
-    /** @description Offline spool state of a collector; dropped counters only grow while the collector runs. */
+    /** @description Offline spool state of a collector. The dropped counters are the losses not yet acknowledged: the collector reduces them by the reported amounts once the heartbeat was answered with 204. Reported losses raise reticora_collector_spool_dropped_total (kind messages or samples), backpressure raises reticora_collector_spool_backpressure_total. */
     CollectorSpoolReport: {
       messages?: number;
       /** Format: int64 */
       bytes?: number;
       /** Format: int64 */
       oldest_age_seconds?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Lost spool batches (expired, size limit, corrupt, refused with 4xx and quarantined), records rejected in an accepted batch and rejected or unreadable agent telemetry.
+       */
       dropped_messages?: number;
       /** Format: int64 */
       dropped_bytes?: number;
+      /**
+       * Format: int64
+       * @description Metric samples and traps dropped on upload failures; they are counted, not spooled (E-79).
+       */
+      dropped_samples?: number;
       backpressure?: boolean;
     };
     IGAObject: {

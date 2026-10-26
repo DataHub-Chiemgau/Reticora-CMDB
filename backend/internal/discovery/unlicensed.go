@@ -59,6 +59,8 @@ func RegisterMetrics(reg prometheus.Registerer) {
 	}, func() float64 { return float64(UnlicensedQueued()) }))
 	// Discovery error states (DIS-08).
 	reg.MustRegister(scopeRuns, discoveryErrors)
+	// Losses and backpressure reported by the collectors (NFR-04, F-234).
+	reg.MustRegister(collectorSpoolDropped, collectorSpoolBackpressure)
 	reg.MustRegister(ingestLanesGauge, laneBacklog, laneRecords, recordRetries, deadLetters)
 }
 

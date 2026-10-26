@@ -52,10 +52,15 @@ const (
 	// LossCorrupt is an undecodable spool entry; it is moved to the
 	// quarantine directory so it cannot block the rest of the spool.
 	LossCorrupt = "corrupt"
+	// LossRejected is data the server refused for good (4xx): a poison
+	// batch quarantined with Reject or Quarantine, or records and telemetry
+	// the caller counts with RecordLoss.
+	LossRejected = "rejected"
 )
 
 // QuarantineDir is the subdirectory of the spool that receives undecodable
-// entries for later inspection; they are never delivered.
+// entries and batches the server refused for good, for later inspection;
+// they are never delivered.
 const QuarantineDir = "quarantine"
 
 // lossFile holds the unacknowledged loss totals inside the spool directory.
@@ -377,6 +382,94 @@ func (b *DiskBuffer) AckLoss(ctx context.Context, messages, bytes int64) error {
 	b.droppedMsgs = max(b.droppedMsgs-max(messages, 0), 0)
 	b.droppedBytes = max(b.droppedBytes-max(bytes, 0), 0)
 	return b.saveLossLocked()
+}
+
+// RecordLoss counts a loss the caller observed itself (e.g. records the
+// server rejected in an accepted batch). It is persisted and reported to
+// OnDrop like the spool's own losses and acknowledged with AckLoss.
+func (b *DiskBuffer) RecordLoss(ctx context.Context, l Loss) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if l.Messages <= 0 {
+		return nil
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.recordLossLocked(l)
+}
+
+// Reject moves a spooled message the server refused for good (a poison
+// batch) to QuarantineDir and counts it as LossRejected, so the delivery
+// continues with the next message instead of retrying it forever.
+func (b *DiskBuffer) Reject(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	name := id + ".json"
+	if filepath.Base(name) != name {
+		return fmt.Errorf("buffer: invalid message id %q", id)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	info, err := os.Stat(filepath.Join(b.Dir, name))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("buffer: reject %s: %w", id, err)
+	}
+	if err := b.quarantineLocked(name); err != nil {
+		return err
+	}
+	return b.recordLossLocked(Loss{Messages: 1, Bytes: info.Size(), Reason: LossRejected})
+}
+
+// Quarantine stores a message that was never spooled but that the server
+// refused for good in QuarantineDir and counts it as LossRejected. The
+// spool's size limit does not apply; nothing in the spool is dropped for it.
+func (b *DiskBuffer) Quarantine(ctx context.Context, in *Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	msg := *in
+	if msg.CreatedAt.IsZero() {
+		msg.CreatedAt = time.Now().UTC()
+	}
+	if msg.ID == "" {
+		id, err := newMessageID(msg.CreatedAt)
+		if err != nil {
+			return err
+		}
+		msg.ID = id
+	}
+	name := msg.ID + ".json"
+	if filepath.Base(name) != name {
+		return fmt.Errorf("buffer: invalid message id %q", msg.ID)
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("buffer: encode message: %w", err)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	dir := filepath.Join(b.Dir, QuarantineDir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("buffer: create quarantine: %w", err)
+	}
+	if err := b.writeFileAtomic(filepath.Join(dir, name), data); err != nil {
+		return fmt.Errorf("buffer: quarantine %s: %w", name, err)
+	}
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("buffer: quarantine %s: %w", name, err)
+	}
+	return b.recordLossLocked(Loss{Messages: 1, Bytes: int64(len(data)), Reason: LossRejected})
 }
 
 // quarantineLocked moves a file of the spool directory to QuarantineDir.
