@@ -24,6 +24,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
@@ -463,6 +464,9 @@ type Handler struct {
 	// edge (WithEdgeMetrics, MON-02).
 	metrics  MetricsIngester
 	features FeatureStatus
+	// scopeCycles counts the scope requests that failed on the server's
+	// side (worker discovery_scopes, OPS-05); nil counts none.
+	scopeCycles *observability.Cycles
 }
 
 // CITypeLookup resolves a CI type name or UUID to the canonical ci_type id.

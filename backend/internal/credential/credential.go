@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 )
 
@@ -119,6 +120,9 @@ type DEKUpdater interface {
 type Service struct {
 	repo      Repository
 	encryptor *crypto.EnvelopeEncryptor
+	// cycles counts the bundle requests that failed on the server's side
+	// (worker credential_bundles, OPS-05); nil counts none.
+	cycles *observability.Cycles
 }
 
 // NewService creates a new credential service.

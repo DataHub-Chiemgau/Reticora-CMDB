@@ -1037,7 +1037,7 @@ test_prod_realm_has_no_users() {
 }
 
 test_prod_path_has_no_known_password() {
-    if grep -rqE 'admin123|Admin-Dev-2024' deploy/keycloak/realm-reticora.json install-cloud.sh install.sh deploy/docker-compose; then return 1; fi
+    if grep -rqE 'admin123|Admin-Dev-2024|Demo-Dev-2024|Acme-Dev-2024' deploy/keycloak/realm-reticora.json install-cloud.sh install.sh deploy/docker-compose; then return 1; fi
 }
 
 test_prod_realm_policies() {
@@ -1049,9 +1049,12 @@ test_prod_realm_policies() {
     realm_py "any(a['name'] == 'organization_id' and a['permissions']['edit'] == ['admin'] for a in json.loads(r['components']['org.keycloak.userprofile.UserProfileProvider'][0]['config']['kc.user.profile.config'][0])['attributes'])" || return 1
 }
 
-test_dev_realm_differs_only_by_demo_user() {
+test_dev_realm_differs_only_by_demo_users() {
     realm_py "{k: v for k, v in d.items() if k not in ('users', 'displayName')} == {k: v for k, v in r.items() if k not in ('users', 'displayName')}" || return 1
-    realm_py "[u['username'] for u in d['users']] == ['admin@reticora.local'] and 'org_admin' not in d['users'][0]['realmRoles']" || return 1
+    # The demo user of the development stack (no org_admin) and the
+    # administrators of the seeded organizations demo and acme (SIM-01,
+    # WP-433; tests/audit/demo-realm-users.test.sh checks them).
+    realm_py "[u['username'] for u in d['users']] == ['admin@reticora.local', 'admin@demo.local', 'admin@acme.local'] and 'org_admin' not in d['users'][0]['realmRoles']" || return 1
 }
 
 test_dev_compose_mounts_dev_realm_only() {
@@ -1190,7 +1193,7 @@ test_initial_admin_rejects_demo_account() {
 run_test    "production realm contains no user"                          test_prod_realm_has_no_users
 run_test    "no known password in the production path"                   test_prod_path_has_no_known_password
 run_test    "realm sets password, lockout and MFA policy"                 test_prod_realm_policies
-run_test    "dev realm differs from production only by the demo user"     test_dev_realm_differs_only_by_demo_user
+run_test    "dev realm differs from production only by the demo users"    test_dev_realm_differs_only_by_demo_users
 run_test    "dev compose imports the dev realm, production never"         test_dev_compose_mounts_dev_realm_only
 run_test    "initial password is random and meets the policy"             test_initial_password_random
 run_test    "initial administrator gets a temporary password once"        test_initial_admin_created_with_temporary_password

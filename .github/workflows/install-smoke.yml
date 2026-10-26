@@ -96,6 +96,12 @@ jobs:
       - name: install-cloud.sh helpers
         run: ./tests/install-cloud-helpers.test.sh
 
+      # SIM-01 (WP-433, F-113): the development realm holds the administrators
+      # of the seeded organizations demo and acme (organization ids of
+      # backend/cmd/seed, org_admin); their passwords exist only there.
+      - name: Demo administrators of the seed in the development realm (SIM-01)
+        run: ./tests/audit/demo-realm-users.test.sh
+
       # TEC-15/COL-06 (WP-387, F-131): signature verification before the
       # installation — release mode of install-cloud.sh, the collector release
       # and the Go toolchain of install-vm.sh, the source of a release tag in

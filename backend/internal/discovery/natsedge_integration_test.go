@@ -789,6 +789,323 @@ func TestDisabledCollectorCutFallsBackToJWTExpiry(t *testing.T) {
 	}
 }
 
+// edgePKIFiles are the files ExportEdgePKI writes; nothing else, no
+// temporary file, stays in the directory.
+var edgePKIFiles = []string{"ca.pem", "edge.conf", "server-key.pem", "server.pem"}
+
+// checkEdgePKIDir reports what is wrong with an exported PKI directory: a
+// file other than edgePKIFiles, a server key pair nats-edge cannot load, a
+// server certificate the collector CA bundle does not verify for localhost,
+// or a key or edge.conf readable beyond 0640.
+func checkEdgePKIDir(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	if !slices.Equal(names, edgePKIFiles) {
+		return fmt.Errorf("files %v, want %v", names, edgePKIFiles)
+	}
+	pair, err := tls.LoadX509KeyPair(filepath.Join(dir, "server.pem"), filepath.Join(dir, "server-key.pem"))
+	if err != nil {
+		return fmt.Errorf("key pair: %w", err)
+	}
+	bundle, err := os.ReadFile(filepath.Join(dir, "ca.pem"))
+	if err != nil {
+		return err
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(bundle)
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return err
+	}
+	if _, err = leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "localhost", KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); err != nil {
+		return fmt.Errorf("server certificate: %w", err)
+	}
+	for _, name := range []string{"server-key.pem", "edge.conf"} {
+		st, serr := os.Stat(filepath.Join(dir, name))
+		if serr != nil {
+			return serr
+		}
+		if perm := st.Mode().Perm(); perm&^0o640 != 0 {
+			return fmt.Errorf("%s has mode %o, want at most 0640", name, perm)
+		}
+	}
+	return nil
+}
+
+// TestAuditConcurrentEdgePKIExportConsistent covers F-104 (WP-146, WP-429,
+// COL-08): three server replicas sharing the database and the PKI volume
+// (k8s prod overlay: 3 replicas, ReadWriteMany) export at the same time,
+// 60 times. Every export succeeds and leaves exactly the four files: a
+// server key pair nats-edge can load, from the collector CA, the key and
+// edge.conf at most 0640, no temporary file.
+//
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/<db>?sslmode=disable \
+//	  go test -count=1 -v -p 1 -run 'TestAuditConcurrentEdgePKIExportConsistent' ./internal/discovery/
+func TestAuditConcurrentEdgePKIExportConsistent(t *testing.T) {
+	e, enc := auditEdge(t, "d2")
+	bg := context.Background()
+	secrets, err := discovery.DeriveEdgeSecrets(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Three server replicas sharing the database and the PKI volume.
+	replicas := []*discovery.CA{e.ca, discovery.NewCA(e.f.App, enc), discovery.NewCA(e.f.App, enc)}
+	for _, ca := range replicas {
+		if _, err = ca.TrustBundle(bg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const runs = 60
+	var inconsistent, errored int
+	var firstInconsistency, firstError string
+	for i := range runs {
+		dir := filepath.Join(t.TempDir(), fmt.Sprintf("pki-%d", i))
+		var wg sync.WaitGroup
+		errs := make([]error, len(replicas))
+		for j, ca := range replicas {
+			wg.Go(func() {
+				errs[j] = discovery.ExportEdgePKI(bg, ca, secrets, dir, []string{"localhost", "127.0.0.1"}, time.Now())
+			})
+		}
+		wg.Wait()
+		if jerr := errors.Join(errs...); jerr != nil {
+			errored++
+			if firstError == "" {
+				firstError = jerr.Error()
+			}
+		}
+		if cerr := checkEdgePKIDir(dir); cerr != nil {
+			inconsistent++
+			if firstInconsistency == "" {
+				firstInconsistency = cerr.Error()
+			}
+		}
+	}
+	if inconsistent > 0 {
+		t.Errorf("%d of %d concurrent three-replica exports left a PKI directory nats-edge cannot use as is (first: %s)", inconsistent, runs, firstInconsistency)
+	}
+	if errored > 0 {
+		t.Errorf("%d of %d concurrent three-replica exports failed (first: %s)", errored, runs, firstError)
+	}
+}
+
+// TestEdgePKIExportKeepsOnlyMatchingPair covers the reuse of an existing
+// server key pair (WP-429, F-104): a matching pair of the collector CA that
+// is not due stays unchanged, a key an earlier version left readable by
+// others is narrowed to 0640; a key of another issuance, a missing key, a
+// pair of a foreign CA and a pair due for renewal are replaced by a new
+// pair of the collector CA.
+func TestEdgePKIExportKeepsOnlyMatchingPair(t *testing.T) {
+	e, enc := auditEdge(t, "d2")
+	bg := context.Background()
+	secrets, err := discovery.DeriveEdgeSecrets(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosts := []string{"localhost", "127.0.0.1"}
+	dir := filepath.Join(t.TempDir(), "pki")
+	certPath, keyPath := filepath.Join(dir, "server.pem"), filepath.Join(dir, "server-key.pem")
+	export := func(now time.Time) {
+		t.Helper()
+		if eerr := discovery.ExportEdgePKI(bg, e.ca, secrets, dir, hosts, now); eerr != nil {
+			t.Fatal(eerr)
+		}
+		if cerr := checkEdgePKIDir(dir); cerr != nil {
+			t.Fatal(cerr)
+		}
+	}
+	read := func(path string) string {
+		t.Helper()
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			t.Fatal(rerr)
+		}
+		return string(data)
+	}
+	write := func(path, data string) {
+		t.Helper()
+		if werr := os.WriteFile(path, []byte(data), 0o600); werr != nil {
+			t.Fatal(werr)
+		}
+	}
+	export(time.Now())
+	cert, key := read(certPath), read(keyPath)
+
+	// Positive: the matching pair of the CA, not due, stays as it is; the
+	// files an earlier version wrote with 0644 are no longer readable by
+	// others.
+	for _, name := range []string{"server-key.pem", "edge.conf"} {
+		if err = os.Chmod(filepath.Join(dir, name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	export(time.Now())
+	if read(certPath) != cert || read(keyPath) != key {
+		t.Fatal("a matching server key pair of the collector CA that is not due was replaced")
+	}
+
+	// Negative: the key of another issuance next to the certificate.
+	_, otherKey, err := e.ca.IssueServer(bg, hosts, discovery.EdgeServerCertValidity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(keyPath, otherKey)
+	export(time.Now())
+	if read(certPath) == cert || read(keyPath) == otherKey || read(keyPath) == key {
+		t.Fatal("a certificate with the key of another issuance was kept instead of replaced")
+	}
+
+	// Negative: no key.
+	cert = read(certPath)
+	if err = os.Remove(keyPath); err != nil {
+		t.Fatal(err)
+	}
+	export(time.Now())
+	if read(certPath) == cert {
+		t.Fatal("a certificate without its key was kept")
+	}
+
+	// Negative: a matching pair of a foreign CA.
+	foreignKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	foreignTmpl := &x509.Certificate{SerialNumber: big.NewInt(9), Subject: pkix.Name{CommonName: "reticora-collector-nats"},
+		DNSNames: []string{"localhost"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(discovery.EdgeServerCertValidity),
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	foreignDER, err := x509.CreateCertificate(rand.Reader, foreignTmpl, foreignTmpl, &foreignKey.PublicKey, foreignKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignKeyDER, err := x509.MarshalPKCS8PrivateKey(foreignKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignCert := string(pemOf(foreignDER))
+	write(certPath, foreignCert)
+	write(keyPath, string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: foreignKeyDER})))
+	if _, err = tls.LoadX509KeyPair(certPath, keyPath); err != nil {
+		t.Fatalf("control: the foreign pair matches: %v", err)
+	}
+	export(time.Now())
+	if read(certPath) == foreignCert {
+		t.Fatal("a server certificate of a foreign CA was kept")
+	}
+
+	// Negative: the pair of the CA is due for renewal (60 % of its
+	// lifetime).
+	cert = read(certPath)
+	export(time.Now().Add(time.Duration(float64(discovery.EdgeServerCertValidity) * discovery.RenewAfter)))
+	if read(certPath) == cert {
+		t.Fatal("a server certificate due for renewal was kept")
+	}
+}
+
+// edgePKILockClass is the class of the export's advisory lock
+// (natsedge.go); TestEdgePKIExportLock proves the export takes it.
+const edgePKILockClass int32 = 0x52504b49
+
+// TestEdgePKIExportLock covers the lock of the export (WP-429, F-104): an
+// export waits, holding one connection of the pool and writing nothing,
+// while another replica holds the lock, and finishes once it is released.
+// Afterwards, also after an export that failed or panicked, the lock is free
+// and the export holds no connection of the pool.
+func TestEdgePKIExportLock(t *testing.T) {
+	e, enc := auditEdge(t, "d2")
+	bg := context.Background()
+	secrets, err := discovery.DeriveEdgeSecrets(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.ca.TrustBundle(bg); err != nil {
+		t.Fatal(err)
+	}
+	hosts := []string{"localhost", "127.0.0.1"}
+	released := func(after string) {
+		t.Helper()
+		var held int
+		if qerr := e.f.Admin.QueryRow(bg, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND classid::bigint = $1
+			AND objid = 0 AND objsubid = 2`, int64(uint32(edgePKILockClass))).Scan(&held); qerr != nil {
+			t.Fatal(qerr)
+		}
+		if held != 0 {
+			t.Fatalf("%s: the lock of the export is still held", after)
+		}
+		for i := 0; e.f.App.Stat().AcquiredConns() != 0; i++ {
+			if i == 50 {
+				t.Fatalf("%s: the export still holds %d connections of the pool", after, e.f.App.Stat().AcquiredConns())
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+
+	// Another replica holds the lock.
+	holder, err := e.f.Admin.Acquire(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Release()
+	if _, err = holder.Exec(bg, `SELECT pg_advisory_lock($1, 0)`, edgePKILockClass); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "pki")
+	done := make(chan error, 1)
+	go func() { done <- discovery.ExportEdgePKI(bg, e.ca, secrets, dir, hosts, time.Now()) }()
+	select {
+	case err = <-done:
+		_, _ = holder.Exec(bg, `SELECT pg_advisory_unlock($1, 0)`, edgePKILockClass)
+		t.Fatalf("the export did not wait for the lock another replica holds (%v)", err)
+	case <-time.After(time.Second):
+	}
+	if _, serr := os.Stat(dir); !errors.Is(serr, os.ErrNotExist) {
+		t.Errorf("the export wrote %s while another replica held the lock (%v)", dir, serr)
+	}
+	if n := e.f.App.Stat().AcquiredConns(); n != 1 {
+		t.Errorf("the waiting export holds %d connections of the pool, want 1", n)
+	}
+	if _, err = holder.Exec(bg, `SELECT pg_advisory_unlock($1, 0)`, edgePKILockClass); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err = <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the export did not finish after the lock was released")
+	}
+	if err = checkEdgePKIDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	released("after an export")
+
+	// An export that fails: its directory cannot be created below a file.
+	file := filepath.Join(t.TempDir(), "file")
+	if err = os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err = discovery.ExportEdgePKI(bg, e.ca, secrets, filepath.Join(file, "pki"), hosts, time.Now()); err == nil {
+		t.Fatal("control: an export below a file succeeded")
+	}
+	released("after a failed export")
+
+	// An export that panics: without secrets edge.conf cannot be written.
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("control: the export without secrets did not panic")
+			}
+		}()
+		_ = discovery.ExportEdgePKI(bg, e.ca, nil, filepath.Join(t.TempDir(), "pki"), hosts, time.Now())
+	}()
+	released("after a panic in the export")
+}
+
 func pemOf(der []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }

@@ -23,7 +23,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/bootstrap"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -33,13 +32,10 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
@@ -47,8 +43,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/signup"
@@ -78,6 +72,11 @@ func main() {
 	// passwords never reach the log (SEC-01).
 	logger := slog.New(httpx.NewRedactingHandler(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel})))
 	slog.SetDefault(logger)
+	// A deprecated switch or a worker switch without a worker (OPS-02,
+	// F-289) is reported, not refused.
+	for _, w := range cfg.Warnings() {
+		slog.Warn("configuration warning", "warning", w)
+	}
 
 	// Fail-closed start (OPS-01): missing or invalid settings stop the server
 	// instead of silently falling back to development defaults.
@@ -162,7 +161,7 @@ func main() {
 	case err == nil:
 		defer redisClient.Close()
 		cacheStore = cache.NewRedisStore(redisClient.Unwrap())
-		readiness = append(readiness, server.ReadinessCheck{Name: "redis", Check: redisClient.Ping})
+		readiness = append(readiness, server.ReadinessCheck{Name: "redis", Address: redisClient.Unwrap().Options().Addr, Check: redisClient.Ping})
 		slog.Info("Redis cache store initialized")
 	case *noDB || (cfg.IsDevelopment() && !cfg.IsSet("RETICORA_REDIS_URL")):
 		slog.Warn("Redis unreachable; using the per-process in-memory cache (development only)", "error", err)
@@ -232,11 +231,17 @@ func main() {
 		// the streaming export stays available. Configured object storage
 		// that cannot be used is fatal outside development.
 		if cfg.S3Configured() {
-			s3Store, s3Err := setupObjectStorage(cfg)
+			// /readyz probes the host:port the S3 client connects to, also
+			// for a URL or an endpoint without port (F-127).
+			s3Check, s3Err := server.ObjectStorageReadiness(cfg.S3Endpoint, cfg.S3UseSSL)
+			var s3Store *blob.S3Store
+			if s3Err == nil {
+				s3Store, s3Err = setupObjectStorage(cfg)
+			}
 			switch {
 			case s3Err == nil:
 				blobStore = s3Store
-				readiness = append(readiness, server.TCPReadiness("object_storage", cfg.S3Endpoint))
+				readiness = append(readiness, s3Check)
 			case cfg.IsDevelopment():
 				slog.Warn("S3 blob storage unavailable; asynchronous export jobs are disabled", "error", s3Err)
 			default:
@@ -363,6 +368,12 @@ func main() {
 	// Notifications (NTF-01, NTF-04): channels with encrypted provider
 	// settings, the in-app center and the delivery queue of the notifier.
 	smtpSender := centralSMTP(cfg)
+	// A configured central SMTP server is a dependency of the instance
+	// (OPS-01, F-126): while it is unreachable, /readyz answers 503 and the
+	// instance leaves the load balancer.
+	if smtpSender != nil {
+		readiness = append(readiness, server.SMTPReadiness(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPTLS))
+	}
 	notifications := notify.NewMemoryCenter()
 	if auditPool != nil {
 		notifications = &notify.Center{
@@ -521,123 +532,14 @@ func main() {
 
 	// Background workers, each under its operator switch
 	// RETICORA_WORKER_<NAME>_ENABLED (OPS-02), so they can run on dedicated
-	// instances.
-	workers := []server.Worker{{
-		// Re-send persisted webhook deliveries that are due for a retry.
-		Name: config.WorkerWebhookDispatcher,
-		Run:  func(ctx context.Context) { webhookDispatcher.RunRetries(ctx, 15*time.Second) },
-		Backlog: backlogOf(repos.WebhookDeliveries, func(ctx context.Context, c dueCounter) (int, error) {
-			return c.CountDue(ctx, time.Now().UTC())
-		}),
-	}, {
-		// System jobs on the scheduler (JOB-02): one replica leads through
-		// a PostgreSQL advisory lock and runs the due slots. At start the
-		// existing org_admins are bound to MFA (WP-358, idempotent).
-		Name: config.WorkerScheduler,
-		Run: func(ctx context.Context) {
-			if users, ok := repos.User.(*user.PGRepository); ok && mfa != nil {
-				go reconcileMFA(ctx, users)
-			}
-			systemScheduler.Run(ctx)
-		},
-	}}
-	// Process queued asynchronous export jobs. All replicas share the queue
-	// via FOR UPDATE SKIP LOCKED, so jobs are never run twice.
-	if blobStore != nil {
-		exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, blobStore)
-		if repos.Jobs != nil {
-			exportWorker.Tracker = jobs.NewService(repos.Jobs)
-			exportWorker.Events = emitterOf(auditPool)
-		}
-		workers = append(workers, server.Worker{
-			Name: config.WorkerExport,
-			Run:  func(ctx context.Context) { exportWorker.Run(ctx, 2*time.Second) },
-			Backlog: backlogOf(repos.ExportJobs, func(ctx context.Context, c pendingCounter) (int, error) {
-				return c.CountPending(ctx)
-			}),
-		})
-	}
-	// Publish the domain events of the outbox to RETICORA_EVENTS and the
-	// webhook subscriptions (EVT-01, WP-136).
-	if repos.EventOutbox && auditPool != nil {
-		// Subscribed events become notifications (NTF-05).
-		publisher := events.NewPublisher(auditPool, eventStream, webhookDispatcher,
-			notify.NewEventConsumer(notify.NewPGResolver(auditPool, permission.NewPGRepository(auditPool)), notifier))
-		setupCtx, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
-		err = publisher.Setup(setupCtx)
-		cancelSetup()
-		if err != nil {
-			slog.Error("failed to set up the event stream on NATS", "error", err)
-			os.Exit(1)
-		}
-		workers = append(workers, server.Worker{Name: config.WorkerEvents, Run: publisher.Run})
-	}
-	// Deliver queued notifications with retry (NTF-04).
-	if collectorPKI != nil && (cfg.PKIDir != "" || cfg.NATSEdgeURL != "") {
-		edgeSecrets, edgeErr := discovery.DeriveEdgeSecrets(encryptor)
-		if edgeErr != nil {
-			slog.Error("failed to derive the collector NATS endpoint keys", "error", edgeErr)
-			os.Exit(1)
-		}
-		// Over the internal NATS the worker learns of the disables of
-		// collectors, also from other replicas, and cuts their open
-		// connections at the endpoint (COL-04, F-025).
-		edge := &discovery.EdgeConfig{Pool: auditPool, CA: collectorPKI, Secrets: edgeSecrets, PKIDir: cfg.PKIDir,
-			Hosts: splitList(cfg.NATSEdgeHosts), URL: cfg.NATSEdgeURL, Bus: coreNATS}
-		workers = append(workers, server.Worker{Name: config.WorkerNATSEdge, Run: func(ctx context.Context) { discovery.RunEdge(ctx, edge) }})
-	}
-	// Credential bundles for the collectors over their NATS channel,
-	// encrypted for each collector's key (COL-02), and the renewal of their
-	// certificates on the same channel with proof of the current key
-	// (COL-04, F-012).
-	if collectorPKI != nil && coreNATS != nil {
-		gate := discovery.NewBundleGate(auditPool, collectorPKI)
-		renewal := discovery.NewCertificateRenewal(auditPool, collectorPKI)
-		workers = append(workers, server.Worker{Name: config.WorkerCredentialBundles, Run: func(ctx context.Context) {
-			go func() {
-				if rerr := renewal.Serve(ctx, coreNATS); rerr != nil {
-					slog.Error("collector certificate renewal", "error", rerr)
-				}
-			}()
-			if serr := credentialService.ServeBundles(ctx, coreNATS, gate, gate); serr != nil {
-				slog.Error("credential bundles", "error", serr)
-			}
-		}})
-	}
-	// Discovery scopes, their run results and the subnets a collector
-	// reports after enrollment (scope_suggested) over the collectors' NATS
-	// channel (DIS-09).
-	if coreNATS != nil {
-		scopeChannel := discovery.NewHandler(repos.Discovery, repos.CI)
-		workers = append(workers, server.Worker{Name: config.WorkerDiscoveryScopes, Run: func(ctx context.Context) {
-			if serr := scopeChannel.ServeCollectorScopes(ctx, coreNATS); serr != nil {
-				slog.Error("discovery scopes", "error", serr)
-			}
-		}})
-	}
-	workers = append(workers, server.Worker{Name: config.WorkerNotifier, Run: func(ctx context.Context) { notifier.Run(ctx, 5*time.Second) }})
-	// Run the jobs announced on the JOBS work queue (TEC-14).
-	if jobQueue != nil {
-		workers = append(workers, server.Worker{Name: config.WorkerJobs, Run: jobQueue.Run})
-	}
-	// Consume ingest.> (REC-01).
-	if ingestQueue != nil {
-		workers = append(workers, server.Worker{Name: config.WorkerIngest, Run: ingestQueue.Run, Backlog: ingestQueue.Backlog})
-	}
-	// Evaluate monitoring alert rules against the metric store. Fired alerts
-	// are logged via the default notifier; evaluation state is persisted in
-	// the alert store so restarts neither re-notify nor lose pending
-	// durations.
-	if alertStore, ok := repos.Metrics.(monitoring.EvaluatingStore); ok {
-		evaluator := monitoring.NewEvaluator(repos.Metrics, alertStore.AlertStore(), nil)
-		// The health of the CIs follows the monitoring state (DB-05).
-		if refresher, ok := repos.Metrics.(monitoring.HealthRefreshingStore); ok {
-			evaluator.WithHealth(refresher.HealthRefresher())
-		}
-		workers = append(workers, server.Worker{
-			Name: config.WorkerMonitoring,
-			Run:  func(ctx context.Context) { evaluator.Run(ctx, time.Minute) },
-		})
+	// instances (workers.go).
+	workers, err := buildWorkers(&workerDeps{cfg: cfg, pool: auditPool, encryptor: encryptor, repos: &repos, mfa: mfa,
+		dispatcher: webhookDispatcher, scheduler: systemScheduler, blobs: blobStore, eventStream: eventStream,
+		notifier: notifier, collectorPKI: collectorPKI, coreNATS: coreNATS, credentials: credentialService,
+		jobQueue: jobQueue, ingestQueue: ingestQueue})
+	if err != nil {
+		slog.Error("failed to set up the workers", "error", err)
+		os.Exit(1)
 	}
 	workerSet, err := server.StartWorkers(workerEnabled, workers...)
 	if err != nil {
@@ -860,26 +762,6 @@ func runIssuerCheck(cfg *config.Config) int {
 	return 0
 }
 
-// Backlog sources of the workers (OPS-05); the PostgreSQL repositories
-// implement them, the in-memory ones of --no-db report no backlog.
-type (
-	pendingCounter interface {
-		CountPending(ctx context.Context) (int, error)
-	}
-	dueCounter interface {
-		CountDue(ctx context.Context, now time.Time) (int, error)
-	}
-)
-
-// backlogOf returns count bound to repo when repo implements C, else nil.
-func backlogOf[C any](repo any, count func(context.Context, C) (int, error)) func(context.Context) (int, error) {
-	c, ok := repo.(C)
-	if !ok {
-		return nil
-	}
-	return func(ctx context.Context) (int, error) { return count(ctx, c) }
-}
-
 // centralSMTP is the installation's SMTP server (TEC-13); nil without
 // RETICORA_SMTP_HOST.
 func centralSMTP(cfg *config.Config) *notify.SMTPSender {
@@ -1047,85 +929,6 @@ func objectResolverOf(pool *pgxpool.Pool) webhook.ObjectResolver {
 		return nil
 	}
 	return webhook.NewPGObjectResolver(pool)
-}
-
-// systemJobDeps is what the system jobs of the scheduler run on; pool is
-// nil with --no-db.
-type systemJobDeps struct {
-	cfg          *config.Config
-	pool         *pgxpool.Pool
-	encryptor    *crypto.EnvelopeEncryptor
-	repos        *server.Repositories
-	modules      *server.ModuleSet
-	entitlements *entitlement.Service
-	dispatcher   *webhook.Dispatcher
-}
-
-// registerSystemJobs registers the system jobs (JOB-02, OPS-03) with the
-// scheduler. Without a database only the reservation sweeper runs.
-func registerSystemJobs(scheduler *jobs.Scheduler, d *systemJobDeps) error {
-	// Release expired reservations (spec §10); reservations belong to the
-	// inventory module (WP-214).
-	var systemJobs []jobs.Schedule
-	if d.modules.Enabled("inventory") {
-		systemJobs = append(systemJobs, reservation.NewSweeper(d.repos.Reservation, d.dispatcher).Schedule())
-	}
-	// Retention runs per kind of data (NFR-06, AUD-09) and key rotation
-	// (SEC-06).
-	if pool := d.pool; pool != nil {
-		systemJobs = append(systemJobs, jobs.NewRotation(pool, d.encryptor, dekRotator{repo: credential.NewPGRepository(pool)},
-			webhook.NewPGRepository(pool)).Schedules()...)
-		systemJobs = append(systemJobs, jobs.NewRetention(pool, jobs.RetentionFromDays(d.cfg.RetentionAuditYears,
-			d.cfg.RetentionHistoryDays, d.cfg.RetentionSoftDeleteDays, d.cfg.RetentionReviewItemDays)).Schedules()...)
-		// Collector status: offline after five minutes without heartbeat,
-		// paused while the discovery license is not active (COL-01, COL-05).
-		collectorStatus := discovery.NewStatusMonitor(pool)
-		collectorStatus.Licensed = func(ctx context.Context, orgID string) (bool, error) {
-			_, status, serr := d.entitlements.Status(ctx, orgID, entitlement.FeatureDiscovery)
-			return status == entitlement.StatusActive, serr
-		}
-		systemJobs = append(systemJobs, collectorStatus.Schedule())
-		// CIs not seen for three scope intervals become unknown (REC-09,
-		// LCY-05); RETICORA_OFFLINE_DETECTOR_ENABLED switches it off.
-		if d.cfg.OfflineDetector {
-			systemJobs = append(systemJobs, lifecycle.NewOfflineDetector(pool).Schedule())
-		}
-		// Unconfirmed and suppressed discovery edges are removed (TOP-02).
-		systemJobs = append(systemJobs, relationship.NewCleanup(pool).Schedule())
-		// Personal data of existing history entries into the vault (SEC-05).
-		systemJobs = append(systemJobs, jobs.NewPIIBackfill(pool).Schedule())
-		// Attribute indexes of searchable/unique attributes (DB-04, MET-15).
-		if typeRepo, ok := d.repos.CIType.(*citype.PGRepository); ok && d.repos.Jobs != nil {
-			ddlJob := citype.NewDDLJob(pool, jobs.NewService(d.repos.Jobs))
-			typeRepo.WithIndexScheduler(ddlJob)
-			systemJobs = append(systemJobs, ddlJob.Schedule())
-		}
-		// Expiry warnings of the entitlements (ENT-07) and expiring
-		// collector certificates (COL-04), each notice once (WP-425).
-		systemJobs = append(systemJobs, jobs.NewEntitlementNotices(pool).Schedule(),
-			jobs.NewCertificateNotices(pool).Schedule())
-	}
-	for i := range systemJobs {
-		if err := scheduler.Register(&systemJobs[i]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// dekRotator adapts the credential store to the rotation runs.
-type dekRotator struct{ repo *credential.PGRepository }
-
-func (d dekRotator) RotateOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (keyVersion, rotated int, err error) {
-	res, err := d.repo.RotateOrgDEK(ctx, orgID, enc)
-	if err != nil {
-		return 0, 0, err
-	}
-	return res.KeyVersion, res.Rotated, nil
-}
-
-func (d dekRotator) RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (bool, error) {
-	return d.repo.RewrapOrgDEK(ctx, orgID, enc)
 }
 
 // collectorCA is the internal CA of the collector certificates (COL-04);

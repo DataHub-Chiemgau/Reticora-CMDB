@@ -331,7 +331,8 @@ func TestHTTPHandlerServesCookieOnlyRefreshAndLogout(t *testing.T) {
 
 // TestSystemJobsCoverJOB02 covers the scheduler wiring of JOB-02 and OPS-03
 // (WP-425, F-044): registerSystemJobs, which main runs, registers on a
-// database every system job of the JOB-02 [B] list — offline detector,
+// database every system job of the JOB-02 [B] list — offline detector (with
+// its worker switch on, WP-447),
 // edge cleanup (TOP-02), hard delete of soft-deleted CIs (CI-05) and the
 // retention runs (AUD-09), index DDL (DB-04), certificate renewal (the
 // certificate.notices run of COL-04) and entitlement warnings (ENT-07). The
@@ -339,12 +340,84 @@ func TestHTTPHandlerServesCookieOnlyRefreshAndLogout(t *testing.T) {
 // synchronously with each change (E-56, F-316 deferred). Without a database
 // the notice runs are not registered.
 func TestSystemJobsCoverJOB02(t *testing.T) {
-	// The pool never connects: registration only builds the runs.
-	pool, err := pgxpool.New(context.Background(), "postgres://reticora@127.0.0.1:1/reticora?sslmode=disable")
-	if err != nil {
-		t.Fatal(err)
+	t.Setenv(config.WorkerEnvKey(config.WorkerOfflineDetector), "true")
+	t.Setenv(config.OfflineDetectorAlias, "")
+	cfg := config.Load()
+	registered := registeredSystemJobs(t, systemJobTestDeps(t, cfg, true))
+	for _, job := range []struct{ requirement, kind string }{
+		{"offline detector", lifecycle.OfflineDetectorKind},
+		{"edge cleanup (TOP-02)", relationship.CleanupKind},
+		{"hard delete of soft-deleted CIs (CI-05)", jobs.RetentionSoftDeleted},
+		{"retention of the audit log (AUD-09)", jobs.RetentionAuditLog},
+		{"retention of the history (AUD-09)", jobs.RetentionHistory},
+		{"index DDL (DB-04)", citype.IndexJobKind},
+		{"certificate renewal (COL-04)", jobs.CertificateNoticesKind},
+		{"entitlement warnings (ENT-07)", jobs.EntitlementNoticesKind},
+	} {
+		if !registered[job.kind] {
+			t.Errorf("JOB-02 %s: kind %s is not registered (registered: %v)", job.requirement, job.kind, registered)
+		}
 	}
-	t.Cleanup(pool.Close)
+
+	// --no-db: the notice runs need the database and are not registered.
+	for kind := range registeredSystemJobs(t, systemJobTestDeps(t, cfg, false)) {
+		if kind == jobs.EntitlementNoticesKind || kind == jobs.CertificateNoticesKind {
+			t.Errorf("without a database %s is registered", kind)
+		}
+	}
+}
+
+// TestOfflineDetectorRunsUnderItsWorkerSwitch covers WP-447 (OPS-02,
+// F-289): ci.offline_detector is registered only while the switch of the
+// worker offline_detector is on. RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED
+// is the switch; the former RETICORA_OFFLINE_DETECTOR_ENABLED still
+// applies without it and is reported as deprecated, next to it it is
+// ignored.
+func TestOfflineDetectorRunsUnderItsWorkerSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		name, convention, alias string
+		registered              bool
+		warning                 string
+	}{
+		{"default", "", "", true, ""},
+		{"convention on", "true", "", true, ""},
+		{"convention off", "false", "", false, ""},
+		{"alias off", "", "false", false, "is deprecated: use RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED"},
+		{"alias on", "", "true", true, "is deprecated: use RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED"},
+		{"convention before alias", "true", "false", true, "is deprecated and ignored"},
+		{"convention off, alias on", "false", "true", false, "is deprecated and ignored"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(config.WorkerEnvKey(config.WorkerOfflineDetector), tc.convention)
+			t.Setenv(config.OfflineDetectorAlias, tc.alias)
+			cfg := config.Load()
+			if got := registeredSystemJobs(t, systemJobTestDeps(t, cfg, true))[lifecycle.OfflineDetectorKind]; got != tc.registered {
+				t.Errorf("%s registered: %v, want %v", lifecycle.OfflineDetectorKind, got, tc.registered)
+			}
+			warnings := strings.Join(cfg.Warnings(), "\n")
+			if tc.warning == "" && strings.Contains(warnings, config.OfflineDetectorAlias) ||
+				tc.warning != "" && !strings.Contains(warnings, config.OfflineDetectorAlias+" "+tc.warning) {
+				t.Errorf("warnings %q, want %q", warnings, tc.warning)
+			}
+		})
+	}
+}
+
+// systemJobTestDeps are the dependencies of the system jobs with cfg; with
+// withDB on a pool that never connects (registration only builds the runs),
+// without as with --no-db.
+func systemJobTestDeps(t *testing.T, cfg *config.Config, withDB bool) *systemJobDeps {
+	t.Helper()
+	var pool *pgxpool.Pool
+	repos := server.MemoryRepositories()
+	if withDB {
+		var err error
+		if pool, err = pgxpool.New(context.Background(), "postgres://reticora@127.0.0.1:1/reticora?sslmode=disable"); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(pool.Close)
+		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
+	}
 	masterKey, err := crypto.GenerateMasterKey()
 	if err != nil {
 		t.Fatal(err)
@@ -357,46 +430,23 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config.Config{OfflineDetector: true, RetentionAuditYears: 10, RetentionHistoryDays: 1095,
-		RetentionSoftDeleteDays: 90, RetentionReviewItemDays: 365}
-	deps := func(pool *pgxpool.Pool, repos server.Repositories) *systemJobDeps {
-		dispatcher := webhook.NewDispatcher(repos.Webhook, nil, webhook.DispatcherOptions{PollInterval: -1})
-		t.Cleanup(func() { _ = dispatcher.Shutdown(context.Background()) })
-		return &systemJobDeps{cfg: cfg, pool: pool, encryptor: encryptor, repos: &repos, modules: modules,
-			entitlements: entitlement.NewService(repos.Entitlement, entitlement.Options{}), dispatcher: dispatcher}
-	}
+	dispatcher := webhook.NewDispatcher(repos.Webhook, nil, webhook.DispatcherOptions{PollInterval: -1})
+	t.Cleanup(func() { _ = dispatcher.Shutdown(context.Background()) })
+	return &systemJobDeps{cfg: cfg, pool: pool, encryptor: encryptor, repos: &repos, modules: modules,
+		entitlements: entitlement.NewService(repos.Entitlement, entitlement.Options{}), dispatcher: dispatcher}
+}
 
+// registeredSystemJobs registers the system jobs as main does and returns
+// the kinds of the scheduler.
+func registeredSystemJobs(t *testing.T, d *systemJobDeps) map[string]bool {
+	t.Helper()
 	scheduler := jobs.NewScheduler(jobs.NewMemoryLocker(), jobs.NewMemoryStateStore())
-	if err = registerSystemJobs(scheduler, deps(pool, server.PostgresRepositories(pool, audit.NewPGRecorder()))); err != nil {
+	if err := registerSystemJobs(scheduler, d); err != nil {
 		t.Fatalf("register the system jobs: %v", err)
 	}
 	registered := map[string]bool{}
 	for _, kind := range scheduler.Kinds() {
 		registered[kind] = true
 	}
-	for _, job := range []struct{ requirement, kind string }{
-		{"offline detector", lifecycle.OfflineDetectorKind},
-		{"edge cleanup (TOP-02)", relationship.CleanupKind},
-		{"hard delete of soft-deleted CIs (CI-05)", jobs.RetentionSoftDeleted},
-		{"retention of the audit log (AUD-09)", jobs.RetentionAuditLog},
-		{"retention of the history (AUD-09)", jobs.RetentionHistory},
-		{"index DDL (DB-04)", citype.IndexJobKind},
-		{"certificate renewal (COL-04)", jobs.CertificateNoticesKind},
-		{"entitlement warnings (ENT-07)", jobs.EntitlementNoticesKind},
-	} {
-		if !registered[job.kind] {
-			t.Errorf("JOB-02 %s: kind %s is not registered (registered: %v)", job.requirement, job.kind, scheduler.Kinds())
-		}
-	}
-
-	// --no-db: the notice runs need the database and are not registered.
-	memory := jobs.NewScheduler(jobs.NewMemoryLocker(), jobs.NewMemoryStateStore())
-	if err = registerSystemJobs(memory, deps(nil, server.MemoryRepositories())); err != nil {
-		t.Fatalf("register the system jobs without a database: %v", err)
-	}
-	for _, kind := range memory.Kinds() {
-		if kind == jobs.EntitlementNoticesKind || kind == jobs.CertificateNoticesKind {
-			t.Errorf("without a database %s is registered", kind)
-		}
-	}
+	return registered
 }

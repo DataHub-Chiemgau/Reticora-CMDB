@@ -352,7 +352,7 @@ Zielwerte:
 
 ## 16. Qualitätssicherung
 
-- **Traceability:** Jede Anforderung ist über [`docs/traceability.csv`](docs/traceability.csv) (`id;tag;epic;testdatei;wp`) auf Epic, Testdatei und Arbeitspaket rückführbar. Der CI-Job `traceability` (`backend/internal/traceability`) prüft Format, bekannte IDs, vorhandene Testdateien und die im Implementierungsplan vorgesehenen Zeilen der WPs eines PRs; die Vollständigkeit aller [B]/[Pn]/[A]-IDs wird berichtet und ist ab G1 blockierend (E-30).
+- **Traceability:** [`docs/traceability.csv`](docs/traceability.csv) (`id;tag;epic;testdatei;wp`) führt Anforderungen auf Epic, Testdatei und Arbeitspaket zurück. Der CI-Job `traceability` (`backend/internal/traceability`) prüft Format, bekannte IDs, die Testdatei (vorhanden und nach ihrer Form ein Test: `*_test.go`, `*.test.ts(x)`, `*.spec.ts`, `*.tftest.hcl`, `tests/**/*.sh|js|ts`; andere Nachweise nur für die 21 im Plan vorgeschriebenen Zeilen der Allow-List, die Gate-Checkliste nie) und die in den Plänen vorgesehenen Zeilen der WPs eines PRs aus Titel und Zeile „Arbeitspakete:“, Bereiche wie „WP-332 – WP-335“ eingeschlossen. Seit G1 blockiert jede [B]/[Q]-ID ohne Zeile, die nicht in [`docs/acceptance/g1-ausnahmen.csv`](docs/acceptance/g1-ausnahmen.csv) steht; Ausnahmen zählen nicht als abgenommen und werden getrennt berichtet (E-30, E-76). [Pn]/[A]-IDs späterer Phasen werden nur berichtet, mit der Anzahl der IDs ohne Zeile.
 - **Definition of Done pro PR:** OpenAPI, RLS, Audit/Events, i18n, Tests, Lint, Doku, Traceability. Arbeitspakete umfassen 0,5–2 Tage; die Checkliste steht in der [PR-Vorlage](.github/pull_request_template.md).
 - **Tests:**
   - Unit, u. a. ≥ 20 Reconciliation-Fälle

@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -86,7 +88,8 @@ func (o *Options) Validate() error {
 // Run seeds the demo organization (plan pro, admin@demo.local) and the
 // organization "acme" for isolation tests (SIM-01). Every row has a
 // deterministic id and is inserted only if missing, so a second run with the
-// same options changes nothing.
+// same options changes nothing. After the seed transaction of an
+// organization its CIs are indexed for the search (index).
 func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error) {
 	if err := opts.Validate(); err != nil {
 		return Summary{}, err
@@ -107,6 +110,9 @@ func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error)
 		o.issueKey = opts.APIKey && n == 0
 		if err := database.WithOrganizationSetup(ctx, pool, o.id, o.seed); err != nil {
 			return Summary{}, fmt.Errorf("seed %s: %w", slug, err)
+		}
+		if err := o.index(ctx, pool); err != nil {
+			return Summary{}, fmt.Errorf("index %s: %w", slug, err)
 		}
 		summary.Orgs = append(summary.Orgs, Org{ID: o.id, Slug: slug, Admin: o.admin, APIKey: o.apiKey})
 	}
@@ -212,15 +218,18 @@ func (o *orgSeed) locations(ctx context.Context, tx pgx.Tx) error {
 
 // cis creates the CIs: two switches, two PDUs and servers. The first 40
 // belong to the first client and are mounted in the racks (20 each); the
-// rest of a load seed alternates between the clients.
+// rest of a load seed alternates between the clients. Every CI has a
+// location: a mounted CI its rack, as a mount through the API sets it
+// (RCK-03), every other CI the server room of its client. The database
+// derives site_id and room_id from it (ci_derive_location).
 func (o *orgSeed) cis(ctx context.Context, tx pgx.Tx) error {
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO ci (id, organization_id, client_id, site_id, room_id, ci_type_id, name, status, manufacturer, model,
+		INSERT INTO ci (id, organization_id, client_id, location_id, ci_type_id, name, status, manufacturer, model,
 			serial_number, management_ip, hostname, discovery_source, first_seen_at, last_seen_at, health)
 		SELECT md5($1 || '/ci/' || i)::uuid, $2,
 			CASE WHEN i <= $5 OR i % 2 = 0 THEN md5($1 || '/client/hq')::uuid ELSE md5($1 || '/client/branch')::uuid END,
-			CASE WHEN i <= $5 OR i % 2 = 0 THEN md5($1 || '/site/hq')::uuid ELSE md5($1 || '/site/branch')::uuid END,
-			CASE WHEN i <= $5 OR i % 2 = 0 THEN md5($1 || '/room/hq')::uuid ELSE md5($1 || '/room/branch')::uuid END,
+			CASE WHEN i <= 20 THEN md5($1 || '/rack/1')::uuid WHEN i <= $5 THEN md5($1 || '/rack/2')::uuid
+				WHEN i % 2 = 0 THEN md5($1 || '/room/hq')::uuid ELSE md5($1 || '/room/branch')::uuid END,
 			t.id,
 			CASE WHEN i <= 2 THEN 'sw-' WHEN i <= 4 THEN 'pdu-' ELSE 'srv-' END || lpad(i::text, 5, '0'),
 			'active', 'Reticora Labs',
@@ -396,4 +405,56 @@ func (o *orgSeed) loadTestKey(ctx context.Context, tx pgx.Tx) error {
 	}
 	o.apiKey = key.Plaintext
 	return nil
+}
+
+// indexBatch is the number of search documents index writes with one
+// statement.
+const indexBatch = 5000
+
+// index writes the search documents of the seeded CIs that have none yet
+// through the CI indexer of the server (search.CIIndexer on the PostgreSQL
+// index), so the global search finds them like CIs created through the API
+// (SRC-01). It runs after the seed transaction, org-wide: the index derives
+// the client and site of a document from the committed CI. A CI with a
+// document keeps it, so a second run changes nothing.
+func (o *orgSeed) index(ctx context.Context, pool *pgxpool.Pool) error {
+	scope := database.OrgWideScope(o.id, "")
+	ctx = database.ContextWithTenantScope(ctx, &scope)
+	indexer := search.NewCIIndexer(search.NewPGRepository(pool))
+	return database.WithTenant(ctx, pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT c.id::text, c.name, COALESCE(c.hostname, ''), COALESCE(c.manufacturer, ''), COALESCE(c.model, ''),
+				COALESCE(c.serial_number, ''), COALESCE(c.os_name, ''), COALESCE(c.os_version, ''),
+				COALESCE(c.client_id::text, ''), COALESCE(c.site_id::text, '')
+			FROM generate_series(1, $3::int) AS i
+			JOIN ci c ON c.id = md5($2 || '/ci/' || i)::uuid AND c.organization_id = $1 AND c.deleted_at IS NULL
+			WHERE NOT EXISTS (SELECT 1 FROM search_document d
+				WHERE d.organization_id = $1 AND d.entity_type = 'ci' AND d.entity_id = c.id)
+			ORDER BY i`, o.id, o.prefix, o.objects)
+		if err != nil {
+			return err
+		}
+		var docs []ci.Document
+		for rows.Next() {
+			item := ci.Item{OrganizationID: o.id}
+			if err = rows.Scan(&item.ID, &item.Name, &item.Hostname, &item.Manufacturer, &item.Model, &item.SerialNumber,
+				&item.OSName, &item.OSVersion, &item.ClientID, &item.SiteID); err != nil {
+				rows.Close()
+				return err
+			}
+			docs = append(docs, ci.IndexDocumentFor(&item))
+		}
+		rows.Close()
+		if err = rows.Err(); err != nil {
+			return err
+		}
+		// The indexer joins this transaction.
+		ctx = database.ContextWithTx(ctx, tx)
+		for start := 0; start < len(docs); start += indexBatch {
+			if err = indexer.IndexDocuments(ctx, docs[start:min(start+indexBatch, len(docs))]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

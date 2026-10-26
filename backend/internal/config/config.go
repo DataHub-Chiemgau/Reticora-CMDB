@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -182,9 +183,6 @@ type Config struct {
 	LLMEmbeddingModel string
 	// AirGapped disables every external AI call (AI-02, air-gapped profile).
 	AirGapped bool
-	// OfflineDetector switches the CI offline detector on (REC-09, LCY-05;
-	// RETICORA_OFFLINE_DETECTOR_ENABLED, default true).
-	OfflineDetector bool
 	// Modules lists the enabled late modules (RETICORA_MODULES, WP-214):
 	// empty switches every module with a phase tag from P2 or [A] off (the
 	// G1 default after E-03), "all" switches them all on.
@@ -195,9 +193,11 @@ type Config struct {
 	workers map[string]bool
 
 	// explicit records the RETICORA_* variables that were set; invalid
-	// lists variables whose value could not be parsed.
+	// lists variables whose value could not be parsed; warnings are the
+	// settings the server accepts but reports at start (Warnings).
 	explicit map[string]bool
 	invalid  []string
+	warnings []string
 }
 
 // Load reads configuration from environment variables with RETICORA_ prefix
@@ -289,7 +289,6 @@ func Load() *Config {
 		LLMChatModel:      l.str("RETICORA_LLM_CHAT_MODEL", ""),
 		LLMEmbeddingModel: l.str("RETICORA_LLM_EMBEDDING_MODEL", ""),
 		AirGapped:         l.boolean("RETICORA_AIR_GAPPED", false),
-		OfflineDetector:   l.boolean("RETICORA_OFFLINE_DETECTOR_ENABLED", true),
 		Modules:           l.str("RETICORA_MODULES", ""),
 
 		LogLevel: slog.LevelInfo,
@@ -299,6 +298,7 @@ func Load() *Config {
 	for _, name := range WorkerNames {
 		cfg.workers[name] = l.boolean(WorkerEnvKey(name), true)
 	}
+	cfg.warnings = l.checkWorkerSwitches(cfg.workers)
 
 	cfg.explicit = l.set
 	cfg.invalid = l.invalid
@@ -382,6 +382,9 @@ const (
 	WorkerNATSEdge          = "nats_edge"
 	WorkerCredentialBundles = "credential_bundles"
 	WorkerDiscoveryScopes   = "discovery_scopes"
+	// WorkerOfflineDetector runs as the system job ci.offline_detector of
+	// the scheduler (REC-09, LCY-05, F-289).
+	WorkerOfflineDetector = "offline_detector"
 )
 
 // WorkerNames lists every registered worker.
@@ -397,12 +400,22 @@ var WorkerNames = []string{
 	WorkerNATSEdge,
 	WorkerCredentialBundles,
 	WorkerDiscoveryScopes,
+	WorkerOfflineDetector,
 }
+
+// OfflineDetectorAlias is the former switch of the offline detector (WP-157).
+// It still applies while RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED is not set
+// and is reported as deprecated (F-289).
+const OfflineDetectorAlias = "RETICORA_OFFLINE_DETECTOR_ENABLED"
 
 // WorkerEnvKey returns the switch variable of a worker.
 func WorkerEnvKey(name string) string {
 	return "RETICORA_WORKER_" + strings.ToUpper(name) + "_ENABLED"
 }
+
+// Warnings lists the settings the server accepts but reports at start: a
+// deprecated switch, a worker switch without a registered worker (OPS-02).
+func (c *Config) Warnings() []string { return append([]string(nil), c.warnings...) }
 
 // IsWorker reports whether name is a registered worker.
 func IsWorker(name string) bool {
@@ -596,6 +609,39 @@ func (l *loader) boolean(key string, defaultValue bool) bool {
 		return defaultValue
 	}
 	return b
+}
+
+// checkWorkerSwitches applies the alias of the offline detector to workers
+// and reports it, and reports every set RETICORA_WORKER_*_ENABLED that
+// switches no registered worker: it has no effect (F-289).
+func (l *loader) checkWorkerSwitches(workers map[string]bool) []string {
+	var warnings []string
+	if alias := l.boolean(OfflineDetectorAlias, true); l.set[OfflineDetectorAlias] {
+		key := WorkerEnvKey(WorkerOfflineDetector)
+		if l.set[key] {
+			warnings = append(warnings, fmt.Sprintf("%s is deprecated and ignored: %s is set", OfflineDetectorAlias, key))
+		} else {
+			workers[WorkerOfflineDetector] = alias
+			warnings = append(warnings, fmt.Sprintf("%s is deprecated: use %s", OfflineDetectorAlias, key))
+		}
+	}
+	var unknown []string
+	for _, kv := range os.Environ() {
+		key, value, _ := strings.Cut(kv, "=")
+		if value == "" || !strings.HasPrefix(key, "RETICORA_WORKER_") || !strings.HasSuffix(key, "_ENABLED") {
+			continue
+		}
+		if name := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(key, "RETICORA_WORKER_"), "_ENABLED")); !IsWorker(name) ||
+			WorkerEnvKey(name) != key {
+			unknown = append(unknown, key)
+		}
+	}
+	sort.Strings(unknown)
+	for _, key := range unknown {
+		warnings = append(warnings, fmt.Sprintf("%s switches no registered worker and is ignored (workers: %s)",
+			key, strings.Join(WorkerNames, ", ")))
+	}
+	return warnings
 }
 
 // dsnKeyValueSecret matches the password of a key=value connection string

@@ -287,9 +287,12 @@ jobs:
         run: make seed
 
   # GLO-11/DOD-01: docs/traceability.csv is checked on every PR (E-30).
-  # Format, known IDs, existing test files and the rows the plans prescribe for
-  # the PR's work packages block; completeness is reported until gate G1. The
-  # plans are docs/plan/implementierungsplan.md and the G1 remediation plan
+  # Format, known IDs, test files (by form; other evidence only from the
+  # allow-list of planned rows, never the gate checklist) and the rows the
+  # plans prescribe for the PR's work packages block. Since gate G1 every
+  # [B]/[Q] ID needs a row or an entry in docs/acceptance/g1-ausnahmen.csv
+  # (E-76); [Pn]/[A] completeness is reported. The plans are
+  # docs/plan/implementierungsplan.md and the G1 remediation plan
   # docs/plan/g1-korrektur/implementierungsplan.md (WP-336); WP numbers are
   # unique across both.
   traceability:
@@ -302,20 +305,13 @@ jobs:
           go-version: "1.26.10"
 
       # Work packages are taken from the PR title and the "Arbeitspakete:" line
-      # of the PR template. Untrusted text is only read through env variables.
-      - name: Determine work packages of the pull request
-        if: github.event_name == 'pull_request'
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          wps=$( { printf '%s\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY" | grep -iE '^[*_ ]*Arbeitspakete?[*_ ]*:' || true; } \
-            | grep -oE 'WP-[0-9]{3}' | sort -u | tr '\n' ' ' || true)
-          echo "Work packages: ${wps:-none}"
-          echo "TRACEABILITY_WPS=${wps}" >> "$GITHUB_ENV"
-
+      # of the PR template, ranges included ("WP-332 – WP-335"). The untrusted
+      # texts reach the Go test only as env variables; no shell reads them.
       - name: Check docs/traceability.csv
         working-directory: backend
+        env:
+          TRACEABILITY_PR_TITLE: ${{ github.event.pull_request.title }}
+          TRACEABILITY_PR_BODY: ${{ github.event.pull_request.body }}
         run: go test -count=1 -v -run 'TestTraceabilityFile' ./internal/traceability/
 
   # TST-04 (WP-337): the defect tests of the Phase-1 acceptance audit run
@@ -458,6 +454,34 @@ jobs:
         env:
           REQUIRE_PROMTOOL: "1"
         run: ./tests/audit/t2-break-glass-alert.test.sh
+
+  # OPS-05 (WP-446): the Alertmanager configuration loads (amtool
+  # check-config), the PrometheusRule groups pass promtool check rules and
+  # their unit tests in deploy/monitoring/tests. amtool v0.27.0 and promtool
+  # v2.54.1 pinned, checksums from the releases' sha256sums.txt.
+  monitoring-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install amtool, promtool and PyYAML
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL -o "$RUNNER_TEMP/am.tgz" \
+            https://github.com/prometheus/alertmanager/releases/download/v0.27.0/alertmanager-0.27.0.linux-amd64.tar.gz
+          echo "23c3f5a3c73de91dbaec419f3c492bef636deb02680808e5d842e6553aa16074  $RUNNER_TEMP/am.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/am.tgz" -C "$RUNNER_TEMP/bin" --strip-components=1 alertmanager-0.27.0.linux-amd64/amtool
+          curl -sSfL -o "$RUNNER_TEMP/prometheus.tgz" \
+            https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.linux-amd64.tar.gz
+          echo "31715ef65e8a898d0f97c8c08c03b6b9afe485ac84e1698bcfec90fc6e62924f  $RUNNER_TEMP/prometheus.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/prometheus.tgz" -C "$RUNNER_TEMP/bin" --strip-components=1 prometheus-2.54.1.linux-amd64/promtool
+          echo "AMTOOL=$RUNNER_TEMP/bin/amtool" >> "$GITHUB_ENV"
+          echo "PROMTOOL=$RUNNER_TEMP/bin/promtool" >> "$GITHUB_ENV"
+          python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+
+      - name: Alertmanager configuration and alert rules (OPS-05)
+        run: ./tests/monitoring-config.test.sh
 
   lint:
     runs-on: ubuntu-latest
@@ -754,7 +778,8 @@ jobs:
           retention-days: 30
 
   # NFR-09/PRI-11 (WP-105): the Terraform module only accepts EU regions for
-  # all data locations (primary, backups, logs, search index).
+  # all data locations (primary, backups, logs, search index). NFR-05
+  # (WP-443): a production plan needs a backup replica in another EU region.
   terraform:
     runs-on: ubuntu-latest
     defaults:
@@ -774,21 +799,11 @@ jobs:
           terraform init -backend=false -input=false
           terraform validate
 
-      - name: EU regions are accepted
-        run: terraform plan -input=false -var region=eu-central-1 -var backup_region=europe-west3 -var log_region=westeurope -var search_region=fsn1
-
-      - name: Non-EU regions are rejected
-        run: |
-          set -u
-          for var in region=us-east-1 region=eu-west-2 region=eu-central-2 region=europe-west6 \
-                     backup_region=us-west-2 log_region=eastus search_region=switzerlandnorth \
-                     backup_replica_region=us-east-1 backup_retention_days=30; do
-            if terraform plan -input=false -var "$var" > /dev/null 2>&1; then
-              echo "::error::terraform accepted the non-EU setting $var"
-              exit 1
-            fi
-            echo "rejected: $var"
-          done
+      # tests/backup.tftest.hcl: production without, with an identical and
+      # with a distinct EU replica region; EU regions accepted and non-EU
+      # regions rejected for every data location. Plans only, no provider.
+      - name: Backup replication and EU regions (terraform test)
+        run: terraform test
 
   k8s-manifests:
     runs-on: ubuntu-latest

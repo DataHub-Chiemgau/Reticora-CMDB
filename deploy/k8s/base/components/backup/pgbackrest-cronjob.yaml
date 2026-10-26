@@ -7,7 +7,10 @@
 #     --from-literal=s3-key=... --from-literal=s3-key-secret=... \
 #     --from-file=ca.crt --from-file=tls.crt --from-file=tls.key
 # The cipher pass must equal the one of the database host; without it no
-# backup can be restored.
+# backup can be restored. Before the backup, `reticora-backup.sh
+# verify-repo` reads the versioning of the S3 bucket with the same key
+# (s3:GetBucketVersioning); unless it is Enabled the job fails without a
+# backup (NFR-05, WP-443).
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -31,7 +34,10 @@ spec:
             - name: pgbackrest
               # deploy/docker-compose/postgres, published by release.yml.
               image: reticora-cmdb/postgres:latest
-              command: ["pgbackrest", "--stanza=reticora", "--type=full", "backup"]
+              command:
+                - /bin/sh
+                - -c
+                - reticora-backup.sh verify-repo && exec pgbackrest --stanza=reticora --type=full backup
               env:
                 - name: PGBACKREST_REPO1_CIPHER_PASS
                   valueFrom:

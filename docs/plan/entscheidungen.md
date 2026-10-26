@@ -22,10 +22,12 @@ Stand: 2026-10-15. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Nachtrag vom 2026-10-19 (Phase-1-Abnahmeaudit):** Das Abnahmeaudit vom 2026-10-18 (`audit/phase1-final/PHASE1_AUDIT_REPORT.md`) endete mit NO-GO: 102 WPs TEILWEISE BESTANDEN, 47 FEHLGESCHLAGEN, 354 Befunde (16 P0, 30 P1). Der Korrekturplan [`g1-korrektur/implementierungsplan.md`](g1-korrektur/implementierungsplan.md) zerlegt die Behebung in WPs ab WP-336; sein Entscheidungsbedarf steht ab E-59 in [`g1-korrektur/entscheidungen.md`](g1-korrektur/entscheidungen.md). Die Entscheidungen dieses Dokuments gelten weiter; ihre Zählung ändert sich nicht. Die Erklärungen des Auftraggebers vom 2026-10-15 zu B3, B4 und B6 sind im Audit nicht durch Nachweise im Repository belegt; der Korrekturplan führt die Nachweise als eigene WPs.
 
+**Nachtrag vom 2026-10-25 (WP-451, Gate-Checkliste nach E-76):** Die Erklärungen des Auftraggebers vom 2026-10-15 zu B3, B4 und B6 ersetzen keinen Nachweis (GATE-02). Nach der Übergangsregel von [E-76](g1-korrektur/entscheidungen.md#e-76) stehen AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01 (a)/(b), GATE-03 (Pentest-Anteil) und GATE-02 in `docs/acceptance/g1-gate.md` auf „offen“ mit der Begründung „Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend“ und in `docs/acceptance/g1-ausnahmen.csv`; das Gate-Ergebnis lautet „offen“. Die Nachträge zu [E-02](#e-02), [E-28](#e-28) und [E-35](#e-35) sind korrigiert. Kein Status einer Entscheidung ändert sich; die Zählung bleibt.
+
 | Nr. | Thema | Status | Sperrt / betrifft | WPs mit Verweis |
 |---|---|---|---|---:|
 | [E-01](#e-01) | Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 | entschieden | Keine Sperre mehr; WPs mit Verweis prüfen ihre Kriterien gegen den Text. | 130 |
-| [E-02](#e-02) | Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) | offen | Laut Erklärung des Auftraggebers vom 2026-10-15 geliefert (B4 erledigt); die Texte sind in `docs/spec/` nachzureichen. Teilumfänge von c-ui-*, WP-152 (`d-protocols`), WP-212 (`g1-abnahme`), WP-231 (`m-workflow`), WP-232 (`m-iga`), WP-237 (`m-ui-mods`), WP-219 (`m-relay`). | 9 |
+| [E-02](#e-02) | Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) | offen | Laut Erklärung des Auftraggebers vom 2026-10-15 erledigt (B4), Nachweis ausstehend: Die Texte sind in `docs/spec/` nachzureichen; bis dahin stehen AUT-05, AUT-06, NET-04 und ABN-01 auf „offen“ (E-76). Teilumfänge von c-ui-*, WP-152 (`d-protocols`), WP-212 (`g1-abnahme`), WP-231 (`m-workflow`), WP-232 (`m-iga`), WP-237 (`m-ui-mods`), WP-219 (`m-relay`). | 9 |
 | [E-03](#e-03) | Umgang mit vorhandenem Code späterer Phasen im G1-Release | entschieden | Steuert den gesamten Meilenstein M-S und den G1-Umfang. | 37 |
 | [E-04](#e-04) | Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells | entschieden | Keiner für M0; Namensschema für WP-142 (`b-met-ddl`). | 3 |
 | [E-05](#e-05) | Fehlende oder abweichende Tags | entschieden | Keiner (Annahme konservativ). | 1 |
@@ -104,6 +106,8 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 **Aufgabe:** v2-Originaltexte (UI-01–UI-10, ABN-01, DIS-04, IGA, WFL-04, AUT-05/06, NET-04, REP-01) nachliefern. Zuständig: Auftraggeber/Product Owner. Termin: vor Epic C (UI) bzw. vor WP-212 (ABN-01).
 
 **Nachtrag 2026-10-15:** Der Auftraggeber hat G1-Blocker B4 (v2-Texte zu AUT-05, AUT-06, NET-04 und ABN-01 (a)/(b)) am 2026-10-15 für erledigt erklärt. Die Texte liegen im Repository nicht vor; sie sind in `docs/spec/` nachzureichen (Aufgabe A-02: laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen). Der Status bleibt offen, bis die Texte vorliegen: Erst dann lässt sich Option 1 umsetzen und prüfen, ob die bestehende Umsetzung den Texten entspricht. Die Übergangsregel gilt bis dahin weiter.
+
+**Korrektur 2026-10-25 (WP-451):** `docs/acceptance/g1-gate.md` führte AUT-05, AUT-06, NET-04 und ABN-01 (a)/(b) von 2026-10-15 bis 2026-10-25 als „PASS (Erklärung des Auftraggebers)“. Die Erklärung ersetzt den Nachweis nicht: Nach der Übergangsregel von [E-76](g1-korrektur/entscheidungen.md#e-76) stehen sie auf „offen“ (Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend) und in `docs/acceptance/g1-ausnahmen.csv`, bis die Texte vorliegen und abgeglichen sind (WP-455, WP-457).
 
 **Frage:** Mehrere IDs verweisen auf nicht vorliegende v2-Texte: individuelle Verträge UI-01–UI-10, ABN-01 (a)/(b) aus „V §65–66“, DIS-04-Umfang „wie v2“, IGA-Details, WFL-04-Ketten, AUT-05, AUT-06, NET-04 sowie der v2-Bestandteil von REP-01.
 
@@ -778,7 +782,9 @@ Ein höherer Zielwert entwertet die G1-Messungen und macht vor G1 weitere WPs n�
 
 **Aufgabe:** Pentest-Dienstleister beauftragen, Umfang und Termin festlegen. Zuständig: Auftraggeber. Termin: parallel zu Epic C, vor WP-210.
 
-**Nachtrag 2026-10-15:** Der Auftraggeber hat G1-Blocker B3 (externer Pentest ohne offene High/Critical) am 2026-10-15 für erledigt erklärt. Bericht, Befundliste und Nachtest liegen im Repository nicht vor; Zusammenfassung und Befundliste sind in `docs/security/pentest-g1.md` nachzureichen (Aufgabe A-07: laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen). NFR-08 steht in `docs/acceptance/g1-gate.md` auf PASS durch diese Erklärung.
+**Nachtrag 2026-10-15:** Der Auftraggeber hat G1-Blocker B3 (externer Pentest ohne offene High/Critical) am 2026-10-15 für erledigt erklärt. Bericht, Befundliste und Nachtest liegen im Repository nicht vor; Zusammenfassung und Befundliste sind in `docs/security/pentest-g1.md` nachzureichen (Aufgabe A-07: laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen). NFR-08 stand in `docs/acceptance/g1-gate.md` bis 2026-10-25 auf PASS durch diese Erklärung.
+
+**Korrektur 2026-10-25 (WP-451):** Die Erklärung ersetzt den Nachweis nicht. Nach der Übergangsregel von [E-76](g1-korrektur/entscheidungen.md#e-76) stehen NFR-08 und der Pentest-Anteil von GATE-03 in `docs/acceptance/g1-gate.md` auf „offen“ (Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend) und in `docs/acceptance/g1-ausnahmen.csv`, bis Zusammenfassung, Befundliste und Nachtest in `docs/security/pentest-g1.md` vorliegen (WP-453).
 
 **Frage:** GATE-03 verlangt einen Pentest ohne offene High/Critical. Dienstleister, Umfang und Zeitfenster sind festzulegen; NFR-08 ist N/P.
 
@@ -972,7 +978,9 @@ Ein höherer Zielwert entwertet die G1-Messungen und macht vor G1 weitere WPs n�
 
 **Nachtrag 2026-10-14:** Die Erstfassung der Gate-Checkliste führte NFR-09 als PASS. `docs/legal/subprozessoren.md` und `docs/betrieb/referenzmodell.md` sagen aber, dass NFR-09 („Subprozessoren dokumentiert und AVV-fähig“) erst mit der gelieferten Liste erfüllt ist; die Liste ist leer. NFR-09 steht deshalb in `docs/acceptance/g1-gate.md` auf „offen“, und die fehlende Liste ist bis zur Lieferung G1-Blocker B6 (Regel GATE-02, verantwortlich: Betreiber).
 
-**Nachtrag 2026-10-15:** Der Auftraggeber hat G1-Blocker B6 am 2026-10-15 für erledigt erklärt. Die Liste liegt im Repository nicht vor; `docs/legal/subprozessoren.md` ist weiter leer. Sie ist dort nachzureichen (Aufgabe A-11: laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen). NFR-09 steht in `docs/acceptance/g1-gate.md` auf PASS durch diese Erklärung. Der Status bleibt offen, bis die Liste vorliegt, denn Option 1 ist die Lieferung selbst.
+**Nachtrag 2026-10-15:** Der Auftraggeber hat G1-Blocker B6 am 2026-10-15 für erledigt erklärt. Die Liste liegt im Repository nicht vor; `docs/legal/subprozessoren.md` ist weiter leer. Sie ist dort nachzureichen (Aufgabe A-11: laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen). NFR-09 stand in `docs/acceptance/g1-gate.md` bis 2026-10-25 auf PASS durch diese Erklärung. Der Status bleibt offen, bis die Liste vorliegt, denn Option 1 ist die Lieferung selbst.
+
+**Korrektur 2026-10-25 (WP-451):** Die Erklärung ersetzt den Nachweis nicht. Nach der Übergangsregel von [E-76](g1-korrektur/entscheidungen.md#e-76) steht NFR-09 in `docs/acceptance/g1-gate.md` auf „offen“ (Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend) und in `docs/acceptance/g1-ausnahmen.csv`, bis die Liste in `docs/legal/subprozessoren.md` vorliegt (WP-454).
 
 **Optionen:**
 

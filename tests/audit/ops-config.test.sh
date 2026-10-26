@@ -12,9 +12,10 @@
 #          archiving": the prod overlay must configure WAL archiving
 #          (archive_mode / archive-push).                  -> case k8s_wal_archive
 #   WP-100 (NFR-05) P2 "Backup bucket versioning/replication not enforced;
-#          Terraform 'production requires replica' is warning-only": a
-#          production plan without a replica region, or with the replica in
-#          the backup region, must fail.                   -> case terraform_*
+#          Terraform 'production requires replica' is warning-only": fixed
+#          by WP-443; the cases terraform_replica_* are runs of
+#          deploy/terraform/tests/backup.tftest.hcl (terraform test, CI job
+#          terraform), the bucket versioning is in tests/backup-config.test.sh.
 #   WP-101 (NFR-05) P2 "RPO limit check in restore-pitr.sh cannot fail with
 #          default parameters": the continuous-write window of the RPO
 #          scenario (420 s) is shorter than the RPO limit (900 s), so a data
@@ -23,19 +24,19 @@
 #          fixed by WP-387; the cases install_signature_* are in
 #          tests/install-signature.test.sh.
 #   WP-103 (OPS-05) P2 "alertmanager.yaml is rejected by Alertmanager's config
-#          validation (no global SMTP smarthost)" + gap high "Alertmanager
-#          config validation in CI".                       -> case alertmanager_*
+#          validation (no global SMTP smarthost)": fixed by WP-446; the cases
+#          alertmanager_smtp and alertmanager_amtool are in
+#          tests/monitoring-config.test.sh.
 #   WP-104 (OPS-06) P2 "SMTP outage scenario reported N/A although SMTP
 #          delivery exists" (notify/smtp.go, WP-137).      -> case outage_smtp
 #
 # Tools: python3 with PyYAML (as tests/rep01-structure.test.sh), plus
 #   kustomize v5 (KUSTOMIZE=<path> or PATH; CI: go install
-#   sigs.k8s.io/kustomize/kustomize/v5@v5.8.1), terraform >= 1.5
-#   (TERRAFORM=<path> or PATH), optional amtool (AMTOOL=<path> or PATH).
-#   A missing required tool is reported as a FAIL of its case.
+#   sigs.k8s.io/kustomize/kustomize/v5@v5.8.1). A missing tool is reported
+#   as a FAIL of its case.
 #
 # Retest:
-#   KUSTOMIZE=<kustomize> TERRAFORM=<terraform> AMTOOL=<amtool> ./tests/audit/ops-config.test.sh
+#   KUSTOMIZE=<kustomize> ./tests/audit/ops-config.test.sh
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
@@ -70,36 +71,6 @@ else
     fi
 fi
 
-# ─── WP-100: Terraform enforces backup replication for production ───────────
-TF_BIN="$(tool TERRAFORM terraform || true)"
-if [ -z "$TF_BIN" ]; then
-    fail "terraform_replica: terraform available (set TERRAFORM)" "terraform not found"
-else
-    cp -r deploy/terraform "$TMP_ROOT/tf"
-    if ! (cd "$TMP_ROOT/tf" && "$TF_BIN" init -no-color -backend=false -input=false >"$TMP_ROOT/tf-init.log" 2>&1); then
-        fail "terraform_replica: terraform init" "$(tail -n 5 "$TMP_ROOT/tf-init.log")"
-    else
-        tf_plan() { (cd "$TMP_ROOT/tf" && "$TF_BIN" plan -no-color -input=false -lock=false "$@" >"$TMP_ROOT/tf-plan.log" 2>&1); }
-        if tf_plan -var environment=production; then
-            fail "terraform_replica_missing: a production plan without backup_replica_region fails" \
-                "plan exit 0; $(grep -m1 -E 'Warning|Error' "$TMP_ROOT/tf-plan.log")"
-        else
-            ok "terraform_replica_missing: a production plan without backup_replica_region fails"
-        fi
-        if tf_plan -var environment=production -var region=eu-central-1 -var backup_replica_region=eu-central-1; then
-            fail "terraform_replica_same: a production plan with the replica in the backup region fails" \
-                "plan exit 0; $(grep -m1 -E 'Warning|Error' "$TMP_ROOT/tf-plan.log")"
-        else
-            ok "terraform_replica_same: a production plan with the replica in the backup region fails"
-        fi
-        if tf_plan -var environment=production -var region=eu-central-1 -var backup_replica_region=eu-west-1; then
-            ok "terraform_replica_eu (control): a production plan with a distinct EU replica passes"
-        else
-            fail "terraform_replica_eu (control): a production plan with a distinct EU replica passes" "$(grep -m3 -E 'Error' "$TMP_ROOT/tf-plan.log")"
-        fi
-    fi
-fi
-
 # ─── WP-101: the RPO scenario can detect a loss above the limit ─────────────
 rpo_limit="$(sed -nE 's/^RPO_LIMIT="\$\{RETICORA_RPO_LIMIT_SECONDS:-([0-9]+)\}"/\1/p' tests/restore-pitr.sh)"
 write_window="$(sed -nE 's/^WRITE_SECONDS="\$\{RESTORE_WRITE_SECONDS:-([0-9]+)\}"/\1/p' tests/restore-pitr.sh)"
@@ -110,35 +81,6 @@ elif [ "$write_window" -gt "$rpo_limit" ]; then
 else
     fail "restore_rpo_window: the write window exceeds the RPO limit, so an RPO violation is observable" \
         "WRITE_SECONDS=${write_window}s <= RPO_LIMIT=${rpo_limit}s: rpo = last_commit - restored_last stays below the limit whenever the restore succeeds"
-fi
-
-# ─── WP-103: the Alertmanager configuration is loadable ─────────────────────
-am_static="$(python3 - <<'PY'
-import yaml
-cfg = yaml.safe_load(open("deploy/monitoring/alertmanager.yaml"))
-g = cfg.get("global") or {}
-problems = []
-for r in cfg.get("receivers", []):
-    for e in r.get("email_configs") or []:
-        if not (e.get("smarthost") or g.get("smtp_smarthost")):
-            problems.append(f"receiver {r['name']}: email_configs without smarthost and no global smtp_smarthost")
-        if not (e.get("from") or g.get("smtp_from")):
-            problems.append(f"receiver {r['name']}: email_configs without from and no global smtp_from")
-print("\n".join(problems))
-PY
-)"
-if [ -z "$am_static" ]; then
-    ok "alertmanager_smtp: every email receiver has an SMTP smarthost and sender"
-else
-    fail "alertmanager_smtp: every email receiver has an SMTP smarthost and sender" "$am_static"
-fi
-AMTOOL_BIN="$(tool AMTOOL amtool || true)"
-if [ -n "$AMTOOL_BIN" ]; then
-    if "$AMTOOL_BIN" check-config deploy/monitoring/alertmanager.yaml >"$TMP_ROOT/amtool.log" 2>&1; then
-        ok "alertmanager_amtool: amtool check-config accepts deploy/monitoring/alertmanager.yaml"
-    else
-        fail "alertmanager_amtool: amtool check-config accepts deploy/monitoring/alertmanager.yaml" "$(grep -E 'FAILED|error' "$TMP_ROOT/amtool.log" | head -n 3)"
-    fi
 fi
 
 # ─── WP-104: the SMTP outage scenario is exercised ──────────────────────────

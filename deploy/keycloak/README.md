@@ -5,11 +5,15 @@ Two realm files describe the same `reticora` realm:
 | File | Used by | Users |
 |---|---|---|
 | `realm-reticora.json` | production (`install-cloud.sh` renders it into `deploy/docker-compose/.generated/`) | none |
-| `realm-reticora-dev.json` | the development stack (`docker-compose.yml` in the repository root) | demo user `admin@reticora.local` / `Admin-Dev-2024!` |
+| `realm-reticora-dev.json` | the development stack (`docker-compose.yml` in the repository root) | demo user `admin@reticora.local` / `Admin-Dev-2024!`; the administrators of the seeded organizations (`make seed`, SIM-01): `admin@demo.local` / `Demo-Dev-2024!` and `admin@acme.local` / `Acme-Dev-2024!` |
 
-The development realm is the production realm plus the demo user;
+The development realm is the production realm plus the demo users;
 `tests/install-cloud-helpers.test.sh` fails when the two drift apart. Change
-both files together.
+both files together. `admin@demo.local` and `admin@acme.local` carry the
+`organization_id` of the organizations demo and acme of `backend/cmd/seed`
+(`md5('/org/demo')`, `md5('/org/acme')`), the realm role `org_admin` and the
+group `reticora-admin` like the installer's administrator, and set up OTP at
+their first login; `tests/audit/demo-realm-users.test.sh` checks them (WP-433).
 
 Manual import:
 

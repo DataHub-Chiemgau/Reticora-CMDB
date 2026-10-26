@@ -16,10 +16,12 @@ UI → API → PostgreSQL → UI on a running stack. They are not part of the CI
 | `E2E_COLLECTOR_BIN`                                  | –                                                  | collector binary (`collector/cmd/collector`) for discovery flows                                                    |
 | `E2E_FAKESNMP_BIN`                                   | built from `collector/cmd/fakesnmp`                | SNMPv2c fake of `onboarding-bundle.spec.ts` (below); without it `support/stack.ts` builds it with `go build`        |
 | `E2E_DATABASE_URL`                                   | `postgres://reticora:reticora@localhost:55432/e2e` | PostgreSQL of the stack (owner role), read with `psql` by `support/roles-authz.ts` and `support/locations-racks.ts` |
+| `E2E_SEED_BIN`                                       | built from `backend/cmd/seed`                      | SIM-01 seed of `demo-seed.spec.ts` into `E2E_DATABASE_URL` (below); `support/stack.ts` builds it otherwise          |
 
 The server needs self-signup enabled (`RETICORA_SIGNUP_VERIFY_URL`, `RETICORA_SIGNUP_CAPTCHA_KEY`, Keycloak admin
 client, SMTP) exactly as `e2e/fixtures/setup-onboarding.sh` configures it. Every spec creates its own tenants through
-the self-signup UI (`support/stack.ts`, `signupTenant`), so specs do not depend on each other or on seed data.
+the self-signup UI (`support/stack.ts`, `signupTenant`), so specs do not depend on each other or on seed data; only
+`demo-seed.spec.ts` runs the SIM-01 seed itself (below).
 
 Invitations need `RETICORA_INVITATION_ACCEPT_URL`, the page the link of the invitation mail opens (WP-421, NTF-05);
 without it `POST /api/v1/invitations` and `/invitations/{id}/renew` answer 503 and `roles-authz.spec.ts` fails. The
@@ -44,6 +46,16 @@ The collector's SNMP plugin queries port 161, so the user running Playwright mus
 and fails locally while it is higher (`sudo sysctl -w net.ipv4.ip_unprivileged_port_start=0`). The suggested subnet is
 a real network of the host; the spec stops the collector before its first scope pass and disables that scope before
 it starts the collector again, so the host's networks are not scanned.
+
+## SIM-01 demo seed (`demo-seed.spec.ts`, WP-433)
+
+`support/stack.ts` (`seedDemo`) runs the seed `backend/cmd/seed` against `E2E_DATABASE_URL` (built with the Go
+toolchain of the host, or `E2E_SEED_BIN`): the organizations demo and acme with 40 CIs each. The seed is
+deterministic and inserts only what is missing, so the spec can run again on the same stack. It signs in as
+`admin@demo.local`, a user of `deploy/keycloak/realm-reticora-dev.json`. Keycloak imports a realm only when it does
+not exist yet, and an installed stack imports the production realm without users; then `devRealmAccount` creates
+the user through the Keycloak admin API (`E2E_KEYCLOAK_ADMIN`) with the attributes, groups, realm roles and password
+of the JSON and logs that. The user holds `org_admin` and sets up its OTP at the first login.
 
 ## Run
 

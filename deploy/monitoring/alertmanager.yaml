@@ -1,9 +1,22 @@
 # Alertmanager routing for the Reticora alerts (WP-103, OPS-05): every alert
 # of slo-rules.yaml, worker-rules.yaml and operator-rules.yaml reaches the
 # operators; critical alerts (among them ReticoraOperatorBreakGlassUsed,
-# SEC-07) also page the on-call receiver and repeat hourly. Replace the
-# receiver endpoints with the operators' addresses. The NTF channel of the
-# product (WP-137) is added as another receiver once it exists.
+# SEC-07) also page the on-call receiver and repeat hourly. Replace the SMTP
+# placeholders under global and the receiver endpoints with the operators'
+# relay and addresses (docs/ops/workers.md, "Alert delivery"). The NTF
+# channel of the product (WP-137) is added as another receiver once it
+# exists. Checked by tests/monitoring-config.test.sh (amtool check-config,
+# CI job monitoring-config).
+global:
+  # Placeholders, not credentials (.invalid, RFC 2606): the SMTP relay that
+  # delivers the e-mail receivers. The password is read from a file (for
+  # example a mounted secret) and never written into this file.
+  smtp_smarthost: smtp.example.invalid:587
+  smtp_from: alertmanager@example.invalid
+  smtp_auth_username: alertmanager@example.invalid
+  smtp_auth_password_file: /etc/alertmanager/secrets/smtp-password
+  smtp_require_tls: true
+
 route:
   receiver: operators
   group_by: [alertname, worker, organization_id]

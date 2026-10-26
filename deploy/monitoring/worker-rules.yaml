@@ -3,6 +3,8 @@
 # last_success_timestamp_seconds,backlog} per worker name of their operator
 # switch (docs/ops/workers.md). Alerts route to the operators through
 # deploy/monitoring/alertmanager.yaml; the NTF channel follows with WP-137.
+# Unit test: deploy/monitoring/tests/worker-rules.test.yaml
+# (tests/monitoring-config.test.sh, CI job monitoring-config).
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -31,16 +33,22 @@ spec:
             summary: "Worker {{ $labels.worker }} keeps failing"
             description: "More than 5 failures in 15 minutes; the worker log names the failing step."
         - alert: ReticoraWorkerNoSuccess
-          # Running, but no cycle without error for 30 minutes.
+          # Running, but no cycle without error in the last 5 minutes, for
+          # 30 minutes: 35 minutes after the last success. A worker that has
+          # not completed a cycle without error since its process started has
+          # no last-success series and fires 30 minutes after the start
+          # (F-295). Every worker records each cycle, an idle one as well
+          # (observability.ObserveWorkerRun).
           expr: |
-            (time() - max by (worker) (reticora_worker_last_success_timestamp_seconds) > 1800)
-              and on (worker) max by (worker) (reticora_worker_up) == 1
-          for: 5m
+            max by (worker) (reticora_worker_up) == 1
+              unless on (worker)
+            (time() - max by (worker) (reticora_worker_last_success_timestamp_seconds) < 300)
+          for: 30m
           labels:
             severity: critical
           annotations:
             summary: "Worker {{ $labels.worker }} has not completed a run for 30 minutes"
-            description: "Every cycle of the worker failed for 30 minutes (for example database, object storage or NATS unreachable)."
+            description: "Every cycle of the worker failed for 30 minutes, or none has succeeded since the start (for example database, object storage or NATS unreachable)."
         - alert: ReticoraWorkerBacklog
           # Items keep waiting: queued exports, due webhook deliveries or
           # pending ingest messages.
