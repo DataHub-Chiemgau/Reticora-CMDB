@@ -1,5 +1,11 @@
 package topology
 
+import (
+	"context"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+)
+
 // Redundancy postfilter of the impact (IMP-04): over a type with
 // redundant = true (powered_by, member_of_cluster) a dependent fails only
 // when every provider of that type failed; over any other type (hosted_on)
@@ -22,25 +28,153 @@ const (
 	levelHeuristic
 )
 
+// outside is the number of a provider that is no CI of the graph: one
+// beyond the depth of the walk (readFeeds). It never goes down.
+const outside int32 = -1
+
 // redundantProviders lists the providers of each dependent per redundant
-// type, over every edge of the graph: a provider outside the analysis
-// keeps the dependent up.
+// type, over every edge of the graph and every feed to a provider beyond
+// it: a provider outside the analysis keeps the dependent up (F-160).
 func redundantProviders(g *ciGraph, steps []stepRule) map[dependentType][]int32 {
 	providers := map[dependentType][]int32{}
+	for _, edges := range [2][]ciEdge{g.edges, g.feeds} {
+		for i := range edges {
+			e := &edges[i]
+			rule := &steps[e.relType]
+			if !rule.redundant {
+				continue
+			}
+			for _, from := range [2]int32{e.source, e.target} {
+				if to, _, ok := e.step(from, rule); ok && to != outside {
+					key := dependentType{to, e.relType}
+					providers[key] = append(providers[key], from)
+				}
+			}
+		}
+	}
+	return providers
+}
+
+// readFeeds adds to g the edges of a redundant type of each dependent the
+// walk reached over such a type whose edges it may not hold completely,
+// whatever the depth (IMP-04, F-160): the walk from roots keeps every edge
+// of a CI closer than depth hops, but not those of a CI at the depth, so
+// the alternative provider of a dependent at the edge of the analysis may
+// be missing; when the node limit cut the walk, any dependent may lack
+// one. One statement for the analysis (relationship.IncidentEdgeReader,
+// RLS of the caller), none when every such dependent lies within the
+// depth; a provider that is no visible CI of g is outside and counts as
+// up. Without such a reader g stays as it is.
+func (h *Handler) readFeeds(ctx context.Context, orgID string, g *ciGraph, roots []int32, depth int, rules map[string]impactRule) error {
+	reader, ok := h.relRepo.(relationship.IncidentEdgeReader)
+	if !ok {
+		return nil
+	}
+	steps := g.stepRules(rules, impactQuery{})
+	var relTypes []string
+	types := map[string]int32{}
+	for t := range steps {
+		if steps[t].redundant {
+			relTypes = append(relTypes, g.relTypes[t])
+			types[g.relTypes[t]] = int32(t)
+		}
+	}
+	if len(relTypes) == 0 {
+		return nil
+	}
+	hops := g.hopsFrom(roots)
+	dependent := make([]bool, len(g.ids))
+	var ids []string
+	inGraph := map[string]bool{}
 	for i := range g.edges {
 		e := &g.edges[i]
 		rule := &steps[e.relType]
 		if !rule.redundant {
 			continue
 		}
+		inGraph[e.id] = true
 		for _, from := range [2]int32{e.source, e.target} {
-			if to, _, ok := e.step(from, rule); ok {
-				key := dependentType{to, e.relType}
-				providers[key] = append(providers[key], from)
+			to, _, ok := e.step(from, rule)
+			if !ok || dependent[to] || (!g.truncated && hops[to] >= 0 && hops[to] < depth) {
+				continue
+			}
+			dependent[to] = true
+			ids = append(ids, g.ids[to])
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rels, err := reader.EdgesOf(ctx, orgID, ids, relTypes)
+	if err != nil {
+		return err
+	}
+	number := make(map[string]int32, len(g.ids))
+	for n, id := range g.ids {
+		if g.known[n] {
+			number[id] = int32(n)
+		}
+	}
+	end := func(id string) int32 {
+		if n, ok := number[id]; ok {
+			return n
+		}
+		return outside
+	}
+	// An edge between two CIs of g joins its edges: when its provider goes
+	// down, the closure retries the dependent over it. The walk dropped it
+	// because both ends lie at the depth of the analysis, so no path within
+	// the depth passes it. An edge to a provider outside g is a feed.
+	added := false
+	for i := range rels {
+		rel := &rels[i]
+		relType, ok := types[rel.RelType]
+		if !ok || inGraph[rel.ID] {
+			continue
+		}
+		e := ciEdge{id: rel.ID, source: end(rel.SourceCIID), target: end(rel.TargetCIID), relType: relType, origin: rel.Source}
+		if e.source == outside || e.target == outside {
+			g.feeds = append(g.feeds, e)
+			continue
+		}
+		g.edges = append(g.edges, e)
+		added = true
+	}
+	if added {
+		g.first, g.incident = nil, nil
+	}
+	return nil
+}
+
+// hopsFrom returns, by CI number, the fewest hops from one of roots over
+// the edges of g in either direction; -1 for a CI they do not reach.
+func (g *ciGraph) hopsFrom(roots []int32) []int {
+	g.indexIncidence()
+	hops := make([]int, len(g.ids))
+	for n := range hops {
+		hops[n] = -1
+	}
+	queue := make([]int32, 0, len(roots))
+	for _, n := range roots {
+		if hops[n] < 0 {
+			hops[n] = 0
+			queue = append(queue, n)
+		}
+	}
+	for head := 0; head < len(queue); head++ {
+		v := queue[head]
+		for _, i := range g.incidentTo(v) {
+			next := g.edges[i].target
+			if next == v {
+				next = g.edges[i].source
+			}
+			if hops[next] < 0 {
+				hops[next] = hops[v] + 1
+				queue = append(queue, next)
 			}
 		}
 	}
-	return providers
+	return hops
 }
 
 // closeDown is the downward closure of impactOf; a variable, so a test
@@ -72,7 +206,7 @@ func downLevels(g *ciGraph, failed []int32, steps []stepRule) []downLevel {
 	}
 	allDown := func(ns []int32) bool {
 		for _, n := range ns {
-			if level[n] == levelUp {
+			if n == outside || level[n] == levelUp {
 				return false
 			}
 		}

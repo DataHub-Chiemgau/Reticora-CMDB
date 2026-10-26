@@ -120,6 +120,10 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rules := h.impactRules(r.Context(), t.OrganizationID)
+	if err := h.readFeeds(r.Context(), t.OrganizationID, g, []int32{0}, maxDepth, rules); err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
 	impacted := impactOf(g, []int32{0}, impactQuery{depth: maxDepth}, rules)
 	result := BlastRadius{CIID: id, AffectedCIs: []BlastRadiusCI{}}
 	services := map[string]struct{}{}
@@ -653,6 +657,7 @@ func mergeGraphs(graphs []*ciGraph) (merged *ciGraph, roots []int32) {
 	roots = make([]int32, len(graphs))
 	for i, g := range graphs {
 		roots[i] = number[g.ids[0]]
+		merged.truncated = merged.truncated || g.truncated
 	}
 	return merged, roots
 }
@@ -731,9 +736,15 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 		g, roots = mergeGraphs(graphs)
 	}
 
+	// The providers of a redundant type beyond the depth keep their
+	// dependents up (IMP-04, F-160).
+	rules := h.impactRules(ctx, orgID)
+	if err := h.readFeeds(ctx, orgID, g, roots, depth, rules); err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
 	relType := q.Get("rel_type")
-	impacted := impactOf(g, roots, impactQuery{relType: relType, categories: categories, depth: depth},
-		h.impactRules(ctx, orgID))
+	impacted := impactOf(g, roots, impactQuery{relType: relType, categories: categories, depth: depth}, rules)
 	order := impactOrder(g, impacted)
 	impactedNodes := make([]ImpactNode, 0, len(order))
 	summary := ImpactSummary{Failed: len(failed), ByCategory: map[string]int{}}

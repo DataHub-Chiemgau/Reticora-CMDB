@@ -869,7 +869,8 @@ func (g *walkGraph) selectWalk(maxDepth, maxNodes int) *Walk {
 
 	// Beyond the node limit only the nodes closest to the root are kept.
 	kept := order
-	if len(order) > maxNodes {
+	walk.Truncated = len(order) > maxNodes
+	if walk.Truncated {
 		kept = slices.Clone(order)
 		slices.SortFunc(kept, func(a, b int32) int {
 			if depth[a] != depth[b] {
@@ -952,6 +953,37 @@ func (r *PGRepository) EdgesAmong(ctx context.Context, orgID string, ids []strin
 			return err
 		}
 		for _, e := range visibleEdges(edges, edgeRowEnds, visible) {
+			result = append(result, Relationship{ID: e.id, SourceCIID: e.sourceCIID, TargetCIID: e.targetCIID, RelType: e.relType, Source: e.source})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// EdgesOf implements IncidentEdgeReader under the caller's full tenant
+// scope (RLS on ci and ci_relationship): one statement reads the stored
+// relationships of relTypes with an end among ciIDs whose source and
+// target are visible, not deleted CIs (IMP-04, IMP-07). A client-scoped
+// principal thus never learns of an edge to a CI of another client.
+func (r *PGRepository) EdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error) {
+	result := make([]Relationship, 0)
+	if len(ciIDs) == 0 || len(relTypes) == 0 {
+		return result, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		edges, err := readEdges(ctx, tx, `SELECT `+traversalSelectColumns+` FROM ci_relationship r
+			WHERE r.organization_id = $1 AND r.rel_type = ANY($3::text[])
+				AND (r.source_ci_id = ANY($2::uuid[]) OR r.target_ci_id = ANY($2::uuid[]))
+				AND EXISTS (SELECT 1 FROM ci WHERE ci.id = r.source_ci_id AND ci.deleted_at IS NULL)
+				AND EXISTS (SELECT 1 FROM ci WHERE ci.id = r.target_ci_id AND ci.deleted_at IS NULL)
+			ORDER BY r.id`, orgID, ciIDs, relTypes)
+		if err != nil {
+			return err
+		}
+		for _, e := range edges {
 			result = append(result, Relationship{ID: e.id, SourceCIID: e.sourceCIID, TargetCIID: e.targetCIID, RelType: e.relType, Source: e.source})
 		}
 		return nil

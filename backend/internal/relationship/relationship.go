@@ -331,6 +331,9 @@ type Walk struct {
 	CIs []string
 	// Edges are the kept edges, ordered by id.
 	Edges []WalkEdge
+	// Truncated is set when the node limit cut the walk: a kept CI may
+	// then lack edges to CIs within the depth (IMP-04 reads them again).
+	Truncated bool
 }
 
 // WalkEdge is an edge of a Walk; SourceCI and TargetCI are numbers of
@@ -353,6 +356,19 @@ type EdgeReader interface {
 	// are both among ids and are visible, not deleted CIs under the
 	// caller's scope, ordered by id.
 	EdgesAmong(ctx context.Context, orgID string, ids []string) ([]Relationship, error)
+}
+
+// IncidentEdgeReader reads the stored edges of some types that touch a set
+// of CIs, whatever the depth of a walk (IMP-04, F-160): the impact reads
+// every provider of a redundant type of the dependents it reached, also
+// those beyond its depth, in one statement. Both the PostgreSQL and the
+// memory repository implement it.
+type IncidentEdgeReader interface {
+	// EdgesOf returns the stored relationships of one of relTypes whose
+	// source or target is among ciIDs and whose source and target are
+	// both visible, not deleted CIs under the caller's scope, ordered by
+	// id.
+	EdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error)
 }
 
 // MemoryRepository is an in-memory relationship store.
@@ -509,6 +525,39 @@ func (r *MemoryRepository) TraverseFrom(ctx context.Context, orgID, rootCIID str
 		edges = visibleEdges(edges, relationshipEnds, visible)
 	}
 	return SelectTraversal(rootCIID, edges, maxDepth, maxNodes), nil
+}
+
+// EdgesOf implements IncidentEdgeReader on the in-memory edges; with a
+// NodeVisibility only edges between visible, not deleted CIs count, as in
+// TraverseFrom.
+func (r *MemoryRepository) EdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error) {
+	edges := make([]Relationship, 0)
+	if len(ciIDs) == 0 || len(relTypes) == 0 {
+		return edges, nil
+	}
+	r.mu.RLock()
+	for _, rel := range r.items {
+		if rel.OrganizationID == orgID && slices.Contains(relTypes, rel.RelType) &&
+			(slices.Contains(ciIDs, rel.SourceCIID) || slices.Contains(ciIDs, rel.TargetCIID)) {
+			edges = append(edges, *rel)
+		}
+	}
+	visibility := r.visible
+	r.mu.RUnlock()
+
+	if visibility != nil && len(edges) > 0 {
+		var ids []string
+		for i := range edges {
+			ids = append(ids, edges[i].SourceCIID, edges[i].TargetCIID)
+		}
+		visible, err := visibility(ctx, orgID, ids)
+		if err != nil {
+			return nil, err
+		}
+		edges = visibleEdges(edges, relationshipEnds, visible)
+	}
+	slices.SortFunc(edges, func(a, b Relationship) int { return strings.Compare(a.ID, b.ID) })
+	return edges, nil
 }
 
 func relationshipEnds(rel *Relationship) (source, target string) {
