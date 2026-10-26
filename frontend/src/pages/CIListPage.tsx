@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
-import { ciApi, type CIBulkItemResult } from '../api/client';
+import { ApiError, ciApi, exportApi, type CIBulkItemResult, type ExportJob } from '../api/client';
 import { useCIList } from '../api/hooks';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -13,6 +13,7 @@ import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { useCIFilters } from '../stores/ciFilter';
+import { useScopeStore } from '../stores/scope';
 import { useToastStore } from '../stores/toast';
 import { getStatusBadgeVariant, getStatusTranslationKey } from './ciStatus';
 
@@ -21,6 +22,73 @@ interface CIListPageProps {
 }
 
 const bulkStatusValues = ['active', 'inactive', 'maintenance', 'decommissioned'];
+
+type ExportFormat = 'csv' | 'json';
+
+type ExportState =
+  | { phase: 'idle' }
+  | { phase: 'running'; format: ExportFormat; status: ExportJob['status'] }
+  | { phase: 'done'; format: ExportFormat; rows: number }
+  | { phase: 'error'; messageKey: string };
+
+/** Pause between two status reads of the export job. */
+const EXPORT_POLL_INTERVAL_MS = 1000;
+/** Status reads before the page stops waiting; the job stays on the export page. */
+const EXPORT_POLL_LIMIT = 120;
+
+class ExportDownloadError extends Error {}
+
+/**
+ * downloadExport saves the file behind the signed download URL of a completed
+ * export job (EXP-01). The URL carries its own signature: it is fetched
+ * without the session's bearer token, which never leaves the API origin. If
+ * the object store refuses the cross-origin read, the browser opens the
+ * signed URL itself (the object store answers CSV as a download).
+ */
+async function downloadExport(url: string, filename: string) {
+  // Only a web URL is followed, never e.g. a javascript: URL.
+  if (!/^https?:$/.test(new URL(url, window.location.href).protocol)) {
+    throw new ExportDownloadError('download URL is not http(s)');
+  }
+  let href = url;
+  let objectUrl: string | undefined;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new ExportDownloadError(`download answered ${response.status}`);
+    }
+    objectUrl = URL.createObjectURL(await response.blob());
+    href = objectUrl;
+  } catch (error) {
+    if (error instanceof ExportDownloadError) {
+      throw error;
+    }
+  }
+  const anchor = document.createElement('a');
+  anchor.href = href;
+  anchor.download = filename;
+  anchor.rel = 'noopener';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  if (objectUrl) {
+    const revoke = objectUrl;
+    window.setTimeout(() => URL.revokeObjectURL(revoke), 30_000);
+  }
+}
+
+/** exportErrorKey maps a failed export request to its localized message. */
+function exportErrorKey(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 403) {
+      return 'ci.exportJob.forbidden';
+    }
+    if (error.status === 503) {
+      return 'ci.exportJob.unavailable';
+    }
+  }
+  return 'ci.exportJob.failed';
+}
 
 export function CIListPage({ onCreateCI }: CIListPageProps) {
   const { t } = useTranslation();
@@ -34,6 +102,18 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
   const limit = 25;
   const pushToast = useToastStore((state) => state.push);
   const queryClient = useQueryClient();
+  // The list follows the client and site chosen in the layout (withScope).
+  const scopeClientId = useScopeStore((state) => state.clientId);
+  const scopeSiteId = useScopeStore((state) => state.siteId);
+  const [exportState, setExportState] = useState<ExportState>({ phase: 'idle' });
+  // Set on unmount so a running poll loop stops instead of updating a gone page.
+  const unmounted = useRef(false);
+  useEffect(() => {
+    unmounted.current = false;
+    return () => {
+      unmounted.current = true;
+    };
+  }, []);
 
   const { data, isLoading, error, refetch } = useCIList({
     search,
@@ -68,6 +148,55 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
     setSelectedIds((current) =>
       current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id],
     );
+  }
+
+  /**
+   * startExport queues an export job with the active list filters (API-05,
+   * EXP-01), polls it until it is completed and downloads the file over its
+   * signed URL. The job takes status, CI type and client as filters; the
+   * free-text search and the site are no job filters, the status line says so.
+   */
+  async function startExport(format: ExportFormat) {
+    setExportState({ phase: 'running', format, status: 'pending' });
+    try {
+      let job = await exportApi.createJob({
+        format,
+        filters: {
+          ...(status ? { status } : {}),
+          ...(ciTypeId ? { ci_type_id: ciTypeId } : {}),
+          ...(scopeClientId ? { client_id: scopeClientId } : {}),
+        },
+      });
+      for (let reads = 0; job.status === 'pending' || job.status === 'running'; reads++) {
+        if (unmounted.current) {
+          return;
+        }
+        if (reads >= EXPORT_POLL_LIMIT) {
+          setExportState({ phase: 'error', messageKey: 'ci.exportJob.timeout' });
+          return;
+        }
+        setExportState({ phase: 'running', format, status: job.status });
+        if (reads > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, EXPORT_POLL_INTERVAL_MS));
+        }
+        job = await exportApi.getJob(job.id);
+      }
+      if (unmounted.current) {
+        return;
+      }
+      if (job.status !== 'completed' || !job.download_url) {
+        setExportState({ phase: 'error', messageKey: 'ci.exportJob.failed' });
+        return;
+      }
+      await downloadExport(job.download_url, `cis_export.${format}`);
+      if (!unmounted.current) {
+        setExportState({ phase: 'done', format, rows: job.row_count ?? 0 });
+      }
+    } catch (error) {
+      if (!unmounted.current) {
+        setExportState({ phase: 'error', messageKey: exportErrorKey(error) });
+      }
+    }
   }
 
   async function applyBulkStatus() {
@@ -115,14 +244,47 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button onClick={onCreateCI}>{t('form.createCI')}</Button>
-          <Button asChild variant="secondary">
-            <a href={ciApi.exportCIs('csv')}>{t('ci.exportCsv')}</a>
+          <Button
+            variant="secondary"
+            loading={exportState.phase === 'running' && exportState.format === 'csv'}
+            disabled={exportState.phase === 'running'}
+            onClick={() => void startExport('csv')}
+          >
+            {t('ci.exportCsv')}
           </Button>
-          <Button asChild variant="secondary">
-            <a href={ciApi.exportCIs('json')}>{t('ci.exportJson')}</a>
+          <Button
+            variant="secondary"
+            loading={exportState.phase === 'running' && exportState.format === 'json'}
+            disabled={exportState.phase === 'running'}
+            onClick={() => void startExport('json')}
+          >
+            {t('ci.exportJson')}
           </Button>
         </div>
       </div>
+
+      {exportState.phase === 'running' ? (
+        <p role="status" className="text-sm text-gray-700 dark:text-gray-300">
+          {t('ci.exportJob.progress', {
+            format: exportState.format.toUpperCase(),
+            status: t(`export.status_${exportState.status}`),
+          })}
+          {search || scopeSiteId ? ` ${t('ci.exportJob.filtersIgnored')}` : null}
+        </p>
+      ) : null}
+      {exportState.phase === 'done' ? (
+        <p role="status" className="text-sm text-gray-700 dark:text-gray-300">
+          {t('ci.exportJob.done', {
+            format: exportState.format.toUpperCase(),
+            rows: exportState.rows,
+          })}
+        </p>
+      ) : null}
+      {exportState.phase === 'error' ? (
+        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          {t(exportState.messageKey)}
+        </p>
+      ) : null}
 
       <Card>
         <div className="flex flex-wrap gap-3">

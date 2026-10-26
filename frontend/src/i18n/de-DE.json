@@ -169,6 +169,15 @@
     "allStatus": "Alle Status",
     "exportCsv": "CSV exportieren",
     "exportJson": "JSON exportieren",
+    "exportJob": {
+      "progress": "{{format}}-Export: {{status}}",
+      "done": "{{format}}-Export heruntergeladen ({{rows}} Zeilen)",
+      "filtersIgnored": "Suche und Standort werden beim Export nicht angewendet; exportiert werden alle CIs mit dem gewählten Status, Typ und Kunden.",
+      "forbidden": "Export nicht erlaubt: Ihnen fehlt das Recht oder Ihr Tarif enthält den Export nicht.",
+      "unavailable": "Der Export ist derzeit nicht verfügbar. Bitte versuchen Sie es später erneut.",
+      "failed": "Der Export ist fehlgeschlagen. Bitte versuchen Sie es erneut.",
+      "timeout": "Der Export dauert länger als erwartet. Sobald er fertig ist, steht er unter „Export“ zum Download bereit."
+    },
     "overview": "Übersicht",
     "noAttributes": "Keine Attribute hinterlegt",
     "noRelationships": "Keine Beziehungen vorhanden",

@@ -169,6 +169,15 @@
     "allStatus": "All Statuses",
     "exportCsv": "Export CSV",
     "exportJson": "Export JSON",
+    "exportJob": {
+      "progress": "{{format}} export: {{status}}",
+      "done": "{{format}} export downloaded ({{rows}} rows)",
+      "filtersIgnored": "Search and site are not applied to the export; it contains all CIs with the selected status, type and client.",
+      "forbidden": "Export not allowed: you lack the permission or your plan does not include exports.",
+      "unavailable": "Export is currently unavailable. Please try again later.",
+      "failed": "The export failed. Please try again.",
+      "timeout": "The export is taking longer than expected. Once it is done, it is available for download under \"Export\"."
+    },
     "overview": "Overview",
     "noAttributes": "No attributes recorded",
     "noRelationships": "No relationships",

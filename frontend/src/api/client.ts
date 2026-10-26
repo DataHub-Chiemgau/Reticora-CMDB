@@ -578,10 +578,6 @@ export const ciApi = {
   relationships(id: string): Promise<PaginatedResponse<Relationship>> {
     return fetchAPI(`/cis/${id}/relationships`);
   },
-
-  exportCIs(format: 'json' | 'csv' = 'json'): string {
-    return `${API_BASE}/export/cis?format=${format}`;
-  },
 };
 
 export const relationshipApi = {

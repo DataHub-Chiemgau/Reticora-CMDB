@@ -1,20 +1,15 @@
-// Phase-1 acceptance audit, group T2-auth-authz: defect test of the API
-// paths the frontend uses (fails until the finding is fixed).
-//
-// WP-168 (API-05, API-01 catalogue paths), finding P2 "CI list export
-// buttons use deprecated /api/v1/export/cis via plain links, 401 in the
-// browser"; gap (high) "Nothing prevents frontend code from using deprecated
-// API paths". The OpenAPI document marks the old paths deprecated (sunset
-// 2027-10-15) in favour of the catalogue paths; frontend code must not call
-// a path whose every operation is deprecated.
+// API paths the frontend uses (WP-168 API-05, API-01 catalogue paths;
+// WP-468, F-077: the CI list export used the deprecated /api/v1/export/cis as
+// a plain link, 401 in the browser). The OpenAPI document marks the old paths
+// deprecated (sunset 2027-10-15) in favour of the catalogue paths; frontend
+// code must not call a path whose every operation is deprecated, so no
+// deprecated path can come back unnoticed.
 //
 // The deprecated operations are read from the types generated from
 // api/openapi.yaml (src/api/generated/schema.d.ts, kept in sync by
 // generate:api:check; Vite does not serve files outside frontend/); a use is
 // an API path literal (after fetchAPI(, ${API_BASE} or /api/v1) in
 // frontend/src (generated code and tests excluded) and frontend/e2e.
-//
-// Retest: cd frontend && npx vitest run -c vitest.auditdefect.config.ts src/api/deprecatedPaths.auditdefect.ts
 import { describe, expect, it } from 'vitest';
 import spec from './generated/schema.d.ts?raw';
 
@@ -75,9 +70,34 @@ function apiPathPattern(path: string): RegExp {
 }
 
 describe('frontend API paths (catalogue contract)', () => {
+  // The check below is only as good as its two helpers; they are pinned on a
+  // fixed excerpt of the generated types, not on a path of today's contract.
+  it('reads fully deprecated paths and finds their uses', () => {
+    const excerpt = [
+      "  '/api/v1/old/{id}': {",
+      '    /**',
+      '     * @deprecated',
+      '     */',
+      "    get: operations['old'];",
+      '  };',
+      "  '/api/v1/mixed': {",
+      '    /**',
+      '     * @deprecated',
+      '     */',
+      "    get: operations['mixedGet'];",
+      "    post: operations['mixedPost'];",
+      '  };',
+    ].join('\n');
+    expect(deprecatedPaths(excerpt)).toEqual(['/old/{id}']);
+    const old = apiPathPattern('/old/{id}');
+    expect(old.test('return fetchAPI(`/old/${id}`);')).toBe(true);
+    expect(old.test('const u = `${API_BASE}/old/abc?x=1`;')).toBe(true);
+    expect(old.test('await request.get(`${BASE}/api/v1/old/${id}`)')).toBe(true);
+    expect(old.test("return fetchAPI('/older/1');")).toBe(false);
+  });
+
   it('uses no path whose every operation is deprecated', () => {
     const deprecated = deprecatedPaths(spec);
-    expect(deprecated, 'fully deprecated paths of the API contract').toContain('/export/cis');
 
     const uses: string[] = [];
     for (const [file, text] of Object.entries(sources)) {

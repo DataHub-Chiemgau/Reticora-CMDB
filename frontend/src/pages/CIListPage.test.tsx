@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { useLocation } from 'react-router-dom';
 import { CIListPage } from './CIListPage';
 import { ToastViewport } from '../components/ui/Toast';
+import { useScopeStore } from '../stores/scope';
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
 
 const ci = {
@@ -122,6 +123,170 @@ describe('CIListPage', () => {
     const failures = await screen.findByRole('list', { name: 'Fehlgeschlagene CIs' });
     expect(failures).toHaveTextContent('core-sw-01: CI not found');
     expect(await screen.findByText('0 CIs aktualisiert, 1 fehlgeschlagen')).toBeInTheDocument();
+  });
+});
+
+/**
+ * WP-468 (F-077): the export buttons were plain links to the deprecated
+ * /api/v1/export/cis; the browser sent no bearer token and showed the 401 as
+ * raw JSON. They now queue an export job with the list filters, follow it
+ * and download the file over its signed URL.
+ */
+describe('CIListPage export', () => {
+  const list = { data: [ci], total: 1, limit: 25, offset: 0, has_more: false };
+  const signedUrl = 'http://minio:9000/exports/org-1/job-1.csv?X-Amz-Signature=abc';
+
+  function json(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  function job(status: string, extra: Record<string, unknown> = {}) {
+    return {
+      id: 'job-1',
+      organization_id: 'org-1',
+      format: 'csv',
+      status,
+      filters: {},
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      ...extra,
+    };
+  }
+
+  /** stubExport answers the list, the job creation and the job reads in turn. */
+  function stubExport(created: Response, reads: Response[]) {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === signedUrl) {
+        return new Response('﻿id;name\nci-1;core-sw-01\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/csv' },
+        });
+      }
+      if (url.includes('/exports/job-1')) {
+        return (reads.length > 1 ? reads.shift()! : reads[0]!).clone();
+      }
+      if (url.includes('/exports') && init?.method === 'POST') {
+        return created.clone();
+      }
+      if (url.includes('/cis')) {
+        return json(list);
+      }
+      return json({ detail: `unexpected request: ${url}` }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  function calls(fetchMock: ReturnType<typeof stubExport>) {
+    return fetchMock.mock.calls.map(([input, init]) => ({
+      url: typeof input === 'string' ? input : input.toString(),
+      init,
+    }));
+  }
+
+  it('queues a job with the list filters, polls it and downloads the file', async () => {
+    const fetchMock = stubExport(json(job('pending'), 202), [
+      json(job('running')),
+      json(job('completed', { row_count: 1, download_url: signedUrl })),
+    ]);
+    // jsdom has no object URLs; the stubs are restored after the test.
+    const createObjectURL = vi.fn(() => 'blob:export-1');
+    const original = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = vi.fn();
+    onTestFinished(() => {
+      URL.createObjectURL = original.create;
+      URL.revokeObjectURL = original.revoke;
+    });
+    const clicked: { href: string; download: string }[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      clicked.push({ href: this.href, download: this.download });
+    });
+
+    // The client chosen in the layout narrows the list and the export alike.
+    useScopeStore.setState({ clientId: 'client-1', siteId: '' });
+    onTestFinished(() => useScopeStore.setState({ clientId: '', siteId: '' }));
+
+    renderWithProviders(<CIListPage onCreateCI={() => {}} />, {
+      route: '/cmdb?status=active&type=switch&q=core',
+    });
+    await screen.findByRole('link', { name: 'core-sw-01' });
+    fireEvent.click(screen.getByRole('button', { name: 'CSV exportieren' }));
+
+    // Progress is shown while the worker renders the file; the search is no
+    // job filter and the line says so.
+    const progress = await screen.findByText(/CSV-Export: (Ausstehend|Läuft)/);
+    expect(progress).toHaveTextContent('Suche und Standort werden beim Export nicht angewendet');
+    expect(
+      await screen.findByText('CSV-Export heruntergeladen (1 Zeilen)', undefined, {
+        timeout: 4000,
+      }),
+    ).toBeInTheDocument();
+
+    const all = calls(fetchMock);
+    const create = all.find((c) => c.url.endsWith('/api/v1/exports') && c.init?.method === 'POST');
+    expect(create, 'POST /api/v1/exports').toBeTruthy();
+    expect(JSON.parse(create!.init!.body as string)).toEqual({
+      format: 'csv',
+      filters: { status: 'active', ci_type_id: 'switch', client_id: 'client-1' },
+    });
+    // Polled until completed: one read while running, one completed.
+    expect(all.filter((c) => c.url.endsWith('/api/v1/exports/job-1'))).toHaveLength(2);
+    // The signed URL is fetched as is, without the session's headers.
+    const download = all.find((c) => c.url === signedUrl);
+    expect(download, 'download over download_url').toBeTruthy();
+    expect(download!.init).toBeUndefined();
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(clicked).toEqual([{ href: 'blob:export-1', download: 'cis_export.csv' }]);
+    // The deprecated streaming endpoint is not used.
+    expect(all.some((c) => c.url.includes('/export/cis'))).toBe(false);
+  });
+
+  it('shows a localized message when the export is not allowed (403)', async () => {
+    const fetchMock = stubExport(
+      json({ title: 'Forbidden', status: 403, detail: 'feature exports is not entitled' }, 403),
+      [],
+    );
+
+    renderWithProviders(<CIListPage onCreateCI={() => {}} />, { route: '/cmdb' });
+    await screen.findByRole('link', { name: 'core-sw-01' });
+    fireEvent.click(screen.getByRole('button', { name: 'JSON exportieren' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Export nicht erlaubt: Ihnen fehlt das Recht oder Ihr Tarif enthält den Export nicht.',
+    );
+    const create = calls(fetchMock).find((c) => c.init?.method === 'POST');
+    expect(JSON.parse(create!.init!.body as string)).toEqual({ format: 'json', filters: {} });
+    expect(calls(fetchMock).some((c) => c.url.includes('/exports/job-1'))).toBe(false);
+    // The buttons are usable again for a new attempt.
+    expect(screen.getByRole('button', { name: 'JSON exportieren' })).toBeEnabled();
+  });
+
+  it('shows a localized message for server errors and failed jobs', async () => {
+    stubExport(json({ title: 'Service Unavailable', status: 503 }, 503), []);
+    const { unmount } = renderWithProviders(<CIListPage onCreateCI={() => {}} />, {
+      route: '/cmdb',
+    });
+    await screen.findByRole('link', { name: 'core-sw-01' });
+    fireEvent.click(screen.getByRole('button', { name: 'CSV exportieren' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Der Export ist derzeit nicht verfügbar.',
+    );
+    unmount();
+
+    stubExport(json(job('pending'), 202), [json(job('failed', { error_message: 'boom' }))]);
+    renderWithProviders(<CIListPage onCreateCI={() => {}} />, { route: '/cmdb' });
+    await screen.findByRole('link', { name: 'core-sw-01' });
+    fireEvent.click(screen.getByRole('button', { name: 'CSV exportieren' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Der Export ist fehlgeschlagen. Bitte versuchen Sie es erneut.',
+    );
   });
 });
 

@@ -44,7 +44,7 @@ import {
  *  L08  relationship in the UI (double click), neighbours, impact WP-128 (REL-02), WP-127 (REL-01), WP-176 (IMP-01), WP-177 (IMP-02), WP-201 (TST-03)
  *  L09  list filter, full-text search, command palette ........ WP-032 (SRC-01), WP-165 (API-02), WP-191/WP-192 (UI-01..10 palette), WP-201 (TST-03)
  *  L10  export job in the UI, download contains the CI ........ WP-189 (EXP-01), WP-035 (EXP-01), WP-201 (TST-03)
- *  L10b CSV export button of the CMDB list .................... WP-189 (EXP-01), WP-191/WP-192 (UI-01..10 CI list), WP-201 (TST-03)
+ *  L10b CSV export button of the CMDB list (export job) ....... WP-189 (EXP-01), WP-191/WP-192 (UI-01..10 CI list), WP-201 (TST-03), WP-468 (API-05)
  *  L11  delete and restore: status, traversal, search, history  WP-170 (CI-05, LCY-01), WP-169 (API-05, CI-05), WP-031 (CI-05), WP-171 (AUD-03), WP-133 (AUD-05)
  *  L12  concurrent edit in two browser sessions, no lost update WP-061 (API-07, API-03)
  *  L12b two sessions, different fields: no loss, field merge .. WP-061 (API-07), WP-057 (CI-04)
@@ -1158,23 +1158,26 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     const name = `lc-listexport-${w.s}`;
     const ci = await newCI({ name, serial_number: `SN-LEXP-${w.s}` });
     await page.goto('/cmdb');
-    const link = page.locator('#main-content').getByRole('link', { name: 'CSV exportieren' });
-    await expect(link).toBeVisible();
-    const download = page.waitForEvent('download', { timeout: 15_000 }).catch(() => null);
-    const response = page
-      .waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/export/cis', {
-        timeout: 15_000,
-      })
-      .catch(() => null);
-    await link.click();
-    const [file, res] = await Promise.all([download, response]);
+    // WP-468 (F-077): the button queues an export job (POST /exports) with the
+    // list filters, follows it and downloads the file over its signed URL.
+    const button = page.locator('#main-content').getByRole('button', { name: 'CSV exportieren' });
+    await expect(button).toBeVisible();
+    const download = page.waitForEvent('download', { timeout: 120_000 }).catch(() => null);
+    const created = waitForPath(page, '/exports', 'POST');
+    await button.click();
+    const res = await created;
+    expect(res.status(), `POST /exports: ${await res.text()}`).toBe(202);
+    expect((res.request().postDataJSON() as { format?: string }).format).toBe('csv');
+    const file = await download;
     if (!file) {
-      // No download: the browser navigated to the export URL itself.
-      const status = res ? res.status() : 0;
-      const body = res ? (await res.text().catch(() => '')).slice(0, 300) : '';
-      expect(status, `the export button answered ${status}: ${body}`).toBe(200);
+      const alert = await page
+        .getByRole('alert')
+        .textContent()
+        .catch(() => null);
+      expect(alert, 'the export button shows no error').toBeNull();
     }
     expect(file, 'the export button downloads a file').toBeTruthy();
+    expect(file!.suggestedFilename()).toMatch(/\.csv$/);
     const bytes = await readFile(await file!.path());
     expect([...bytes.subarray(0, 3)], 'UTF-8 BOM').toEqual([0xef, 0xbb, 0xbf]);
     const rowsOfFile = parseCsv(bytes.subarray(3).toString('utf8'), ';');
