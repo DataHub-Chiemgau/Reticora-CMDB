@@ -895,158 +895,202 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	var item *Item
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		// FOR UPDATE: the merge patch is computed from this state.
-		beforeQuery := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
-		before, err := scanCI(tx.QueryRow(ctx, beforeQuery, id, orgID))
+		w, err := r.updateRow(ctx, tx, orgID, id, &req)
 		if err != nil {
-			if err == pgx.ErrNoRows {
-				return ErrNotFound
-			}
-			return fmt.Errorf("get ci before update: %w", err)
+			return err
 		}
-		if req.Manual != nil {
-			if preErr := checkPrecondition(ctx, tx, orgID, before, &req); preErr != nil {
-				return preErr
-			}
-		} else if dropErr := dropOverriddenFields(ctx, tx, id, &req); dropErr != nil {
-			return dropErr
-		}
-		if scopeErr := checkContainmentScope(ctx, tx, orgID, before, &req); scopeErr != nil {
-			return scopeErr
-		}
-		if adoptErr := r.adoptCILocation(ctx, tx, orgID, before, &req); adoptErr != nil {
-			return adoptErr
-		}
-
-		setClauses := make([]string, 0, 18)
-		args := []any{id}
-		argPos := 2
-
-		addStringField := func(column string, value *string) {
-			if value == nil {
-				return
-			}
-			setClauses = append(setClauses, fmt.Sprintf("%s = $%d", column, argPos))
-			args = append(args, nilIfEmpty(*value))
-			argPos++
-		}
-
-		addStringField("name", req.Name)
-		addStringField("status", req.Status)
-		addStringField("client_id", req.ClientID)
-		addStringField("asset_id", req.AssetID)
-		addStringField("parent_ci_id", req.ParentCIID)
-		addStringField("location_id", req.LocationID)
-		addStringField("manufacturer", req.Manufacturer)
-		addStringField("model", req.Model)
-		addStringField("serial_number", req.SerialNumber)
-		addStringField("hardware_uuid", req.HardwareUUID)
-		addStringField("management_ip", req.ManagementIP)
-		addStringField("primary_mac", req.PrimaryMAC)
-		addStringField("hostname", req.Hostname)
-		addStringField("fqdn", req.FQDN)
-		addStringField("os_name", req.OSName)
-		addStringField("os_version", req.OSVersion)
-		addStringField("firmware_version", req.FirmwareVersion)
-		addStringField("sys_object_id", req.SysObjectID)
-		addStringField("discovery_source", req.DiscoverySource)
-
-		if req.Attributes != nil {
-			// RFC 7396: nested objects merge, null removes a member (CI-04).
-			// Instance attributes are stored under _instance; the projected
-			// namespaces of the row stay (CI-10).
-			instance, namesErr := instanceFieldNames(ctx, tx, id)
-			if namesErr != nil {
-				return namesErr
-			}
-			setClauses = append(setClauses, fmt.Sprintf("attributes = $%d::jsonb || ci_attribute_namespaces(attributes)", argPos))
-			args = append(args, storedAttributes(MergePatch(before.Attributes, req.Attributes), instance))
-			argPos++
-		}
-
-		if req.LastSeenAt != nil {
-			parsed, err := time.Parse(time.RFC3339, *req.LastSeenAt)
-			if err != nil {
-				// A malformed value is the client's error, not a 500 (F-229).
-				return &ValidationError{Violations: []Violation{{Field: "last_seen_at", Detail: "must be an RFC 3339 date-time"}}}
-			}
-			setClauses = append(setClauses, fmt.Sprintf("last_seen_at = $%d", argPos))
-			args = append(args, parsed)
-			argPos++
-		}
-
-		if len(setClauses) == 0 {
-			item = before
+		item = w.after
+		if len(w.changes) == 0 {
 			return nil
 		}
-
-		setClauses = append(setClauses, "updated_at = NOW()")
-		if req.Manual != nil || req.Authoritative {
-			// Rank >= 92 writes raise the version (API-07).
-			setClauses = append(setClauses, "version = version + 1")
-		}
-		// The tenant predicate is redundant with row-level security but is kept
-		// as defense in depth: a missing or wrong app.org_id must never allow a
-		// cross-tenant write.
-		query := fmt.Sprintf(
-			"UPDATE ci SET %s WHERE id = $1 AND organization_id = $%d AND deleted_at IS NULL RETURNING %s",
-			strings.Join(setClauses, ", "),
-			argPos,
-			ciSelectColumns,
-		)
-		args = append(args, orgID)
-
-		item, err = scanCI(tx.QueryRow(ctx, query, args...))
-		if err != nil {
-			if err == pgx.ErrNoRows {
-				return ErrNotFound
-			}
-			return locationError(fmt.Errorf("update ci: %w", err))
-		}
-
-		if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
+		set := newChangeSet(w.kind())
+		if err := r.recordFieldChanges(ctx, tx, set, orgID, id, item.Version, w.changes); err != nil {
 			return err
 		}
-		changes := diffCI(before, item)
-		if len(changes) == 0 {
-			return nil
-		}
-		if req.Manual != nil {
-			if err := recordManualOverrides(ctx, tx, orgID, before, item, &req); err != nil {
-				return err
-			}
-		}
-		changeType := "update"
-		action := "ci.updated"
-		set := newChangeSet(ChangeKindUpdated)
-		if len(changes) == 1 && changes[0].Field == "status" {
-			changeType = "status_change"
-			action = "ci.status_changed"
-			set.kind = ChangeKindStatusChanged
-		}
-		for _, change := range changes {
-			fieldChangeType := changeType
-			if change.Field == "status" {
-				fieldChangeType = "status_change"
-			}
-			if err := r.recordCIChange(ctx, tx, set, orgID, id, item.Version, fieldChangeType, change.Field, change.Old, change.New); err != nil {
-				return err
-			}
-		}
-		if err := r.recordAudit(ctx, tx, action, item, map[string]interface{}{"before": before, "after": item, "fields": changes}); err != nil {
+		if err := r.recordUpdateAudit(ctx, tx, w); err != nil {
 			return err
 		}
-		changedFields := make([]string, 0, len(changes))
-		for _, change := range changes {
-			changedFields = append(changedFields, change.Field)
-		}
-		if err := r.recordEvent(ctx, tx, events.CIChanged, item, changedFields); err != nil {
-			return err
-		}
-		return nil
+		return r.recordEvent(ctx, tx, events.CIChanged, item, changedFieldNames(w.changes))
 	})
 
 	return item, r.uniqueField(ctx, orgID, err)
+}
+
+// rowUpdate is the UPDATE of a CI row: the row before and after it and the
+// historized fields it changed (diffCI).
+type rowUpdate struct {
+	before, after *Item
+	changes       []ciFieldChange
+}
+
+// kind is the change kind of the field changes (AUD-03): a status change
+// alone is status_changed, everything else updated.
+func (w *rowUpdate) kind() string {
+	if len(w.changes) == 1 && w.changes[0].Field == "status" {
+		return ChangeKindStatusChanged
+	}
+	return ChangeKindUpdated
+}
+
+// recordFieldChanges writes the field rows of an update into the change set.
+func (r *PGRepository) recordFieldChanges(ctx context.Context, tx pgx.Tx, set changeSet, orgID, id string, version int64, changes []ciFieldChange) error {
+	changeType := "update"
+	if len(changes) == 1 && changes[0].Field == "status" {
+		changeType = "status_change"
+	}
+	for _, change := range changes {
+		fieldChangeType := changeType
+		if change.Field == "status" {
+			fieldChangeType = "status_change"
+		}
+		if err := r.recordCIChange(ctx, tx, set, orgID, id, version, fieldChangeType, change.Field, change.Old, change.New); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// recordUpdateAudit writes the audit entry of the field changes of w.
+func (r *PGRepository) recordUpdateAudit(ctx context.Context, tx pgx.Tx, w *rowUpdate) error {
+	action := "ci.updated"
+	if w.kind() == ChangeKindStatusChanged {
+		action = "ci.status_changed"
+	}
+	return r.recordAudit(ctx, tx, action, w.after, map[string]interface{}{"before": w.before, "after": w.after, "fields": w.changes})
+}
+
+// changedFieldNames lists the fields of changes for the event ci.changed.
+func changedFieldNames(changes []ciFieldChange) []string {
+	names := make([]string, 0, len(changes))
+	for _, change := range changes {
+		names = append(names, change.Field)
+	}
+	return names
+}
+
+// updateRow applies req to the row of CI id in tx; it writes the manual
+// overrides of a manual change but no history, audit entry or event.
+func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id string, reqp *UpdateRequest) (*rowUpdate, error) {
+	req := *reqp
+	var item *Item
+	// FOR UPDATE: the merge patch is computed from this state.
+	beforeQuery := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
+	before, err := scanCI(tx.QueryRow(ctx, beforeQuery, id, orgID))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get ci before update: %w", err)
+	}
+	if req.Manual != nil {
+		if preErr := checkPrecondition(ctx, tx, orgID, before, &req); preErr != nil {
+			return nil, preErr
+		}
+	} else if dropErr := dropOverriddenFields(ctx, tx, id, &req); dropErr != nil {
+		return nil, dropErr
+	}
+	if scopeErr := checkContainmentScope(ctx, tx, orgID, before, &req); scopeErr != nil {
+		return nil, scopeErr
+	}
+	if adoptErr := r.adoptCILocation(ctx, tx, orgID, before, &req); adoptErr != nil {
+		return nil, adoptErr
+	}
+
+	setClauses := make([]string, 0, 18)
+	args := []any{id}
+	argPos := 2
+
+	addStringField := func(column string, value *string) {
+		if value == nil {
+			return
+		}
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", column, argPos))
+		args = append(args, nilIfEmpty(*value))
+		argPos++
+	}
+
+	addStringField("name", req.Name)
+	addStringField("status", req.Status)
+	addStringField("client_id", req.ClientID)
+	addStringField("asset_id", req.AssetID)
+	addStringField("parent_ci_id", req.ParentCIID)
+	addStringField("location_id", req.LocationID)
+	addStringField("manufacturer", req.Manufacturer)
+	addStringField("model", req.Model)
+	addStringField("serial_number", req.SerialNumber)
+	addStringField("hardware_uuid", req.HardwareUUID)
+	addStringField("management_ip", req.ManagementIP)
+	addStringField("primary_mac", req.PrimaryMAC)
+	addStringField("hostname", req.Hostname)
+	addStringField("fqdn", req.FQDN)
+	addStringField("os_name", req.OSName)
+	addStringField("os_version", req.OSVersion)
+	addStringField("firmware_version", req.FirmwareVersion)
+	addStringField("sys_object_id", req.SysObjectID)
+	addStringField("discovery_source", req.DiscoverySource)
+
+	if req.Attributes != nil {
+		// RFC 7396: nested objects merge, null removes a member (CI-04).
+		// Instance attributes are stored under _instance; the projected
+		// namespaces of the row stay (CI-10).
+		instance, namesErr := instanceFieldNames(ctx, tx, id)
+		if namesErr != nil {
+			return nil, namesErr
+		}
+		setClauses = append(setClauses, fmt.Sprintf("attributes = $%d::jsonb || ci_attribute_namespaces(attributes)", argPos))
+		args = append(args, storedAttributes(MergePatch(before.Attributes, req.Attributes), instance))
+		argPos++
+	}
+
+	if req.LastSeenAt != nil {
+		parsed, parseErr := time.Parse(time.RFC3339, *req.LastSeenAt)
+		if parseErr != nil {
+			// A malformed value is the client's error, not a 500 (F-229).
+			return nil, &ValidationError{Violations: []Violation{{Field: "last_seen_at", Detail: "must be an RFC 3339 date-time"}}}
+		}
+		setClauses = append(setClauses, fmt.Sprintf("last_seen_at = $%d", argPos))
+		args = append(args, parsed)
+		argPos++
+	}
+
+	if len(setClauses) == 0 {
+		return &rowUpdate{before: before, after: before}, nil
+	}
+
+	setClauses = append(setClauses, "updated_at = NOW()")
+	if req.Manual != nil || req.Authoritative {
+		// Rank >= 92 writes raise the version (API-07).
+		setClauses = append(setClauses, "version = version + 1")
+	}
+	// The tenant predicate is redundant with row-level security but is kept
+	// as defense in depth: a missing or wrong app.org_id must never allow a
+	// cross-tenant write.
+	query := fmt.Sprintf(
+		"UPDATE ci SET %s WHERE id = $1 AND organization_id = $%d AND deleted_at IS NULL RETURNING %s",
+		strings.Join(setClauses, ", "),
+		argPos,
+		ciSelectColumns,
+	)
+	args = append(args, orgID)
+
+	item, err = scanCI(tx.QueryRow(ctx, query, args...))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, locationError(fmt.Errorf("update ci: %w", err))
+	}
+
+	if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
+		return nil, err
+	}
+	w := &rowUpdate{before: before, after: item, changes: diffCI(before, item)}
+	if len(w.changes) > 0 && req.Manual != nil {
+		if err := recordManualOverrides(ctx, tx, orgID, before, item, &req); err != nil {
+			return nil, err
+		}
+	}
+	return w, nil
 }
 
 // checkCITypes keeps the type of a CI within its organization (CI-01,
@@ -1637,9 +1681,11 @@ const (
 )
 
 // changeSet is one write of a CI (AUD-03, E-82 option 2): its field rows in
-// ci_change share the id and the kind.
+// ci_change share the id and the kind. record names the ingest record the
+// write comes from (UpdateRecord).
 type changeSet struct {
 	id, kind string
+	record   *RecordOrigin
 }
 
 // newChangeSet returns a change set of kind with a new id.
@@ -1655,6 +1701,7 @@ func newChangeSet(kind string) changeSet {
 // AUD-07); nil values are stored as NULL.
 type origin struct {
 	actorID, actorUserID, source, requestID, correlationID any
+	collectorID, observedAt                                any
 }
 
 // changeOrigin returns the origin of a change made with ctx: the subject as
@@ -1676,6 +1723,25 @@ func changeOrigin(ctx context.Context) origin {
 	return o
 }
 
+// withRecord adds the ingest record a change comes from (AUD-03): its source
+// is the collector, with the collector's id (a UUID, else none) and the time
+// of the observation; the record id is the correlation id.
+func (o *origin) withRecord(rec *RecordOrigin) {
+	if rec == nil {
+		return
+	}
+	o.source = audit.SourceCollector
+	if audit.IsUUID(rec.CollectorID) {
+		o.collectorID = rec.CollectorID
+	}
+	if !rec.ObservedAt.IsZero() {
+		o.observedAt = rec.ObservedAt.UTC()
+	}
+	if strings.TrimSpace(rec.RecordID) != "" {
+		o.correlationID = rec.RecordID
+	}
+}
+
 // recordCIChange writes one field row of the change set set.
 func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, set changeSet, orgID, ciID string, version int64, changeType, fieldName string, oldValue, newValue any) error {
 	// Personal values are stored as vault surrogates (SEC-05).
@@ -1695,6 +1761,7 @@ func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, set change
 		return fmt.Errorf("marshal new ci change value: %w", err)
 	}
 	who := changeOrigin(ctx)
+	who.withRecord(set.record)
 	_, err = tx.Exec(ctx, `
 		INSERT INTO ci_change (
 			organization_id,
@@ -1710,10 +1777,12 @@ func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, set change
 			actor_user_id,
 			source,
 			request_id,
-			correlation_id
-		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12, $13, $14)
+			correlation_id,
+			collector_id,
+			observed_at
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 	`, orgID, ciID, who.actorID, changeType, nilIfEmpty(fieldName), oldJSON, newJSON, version,
-		set.kind, set.id, who.actorUserID, who.source, who.requestID, who.correlationID)
+		set.kind, set.id, who.actorUserID, who.source, who.requestID, who.correlationID, who.collectorID, who.observedAt)
 	if err != nil {
 		return fmt.Errorf("record ci change: %w", err)
 	}
@@ -2166,71 +2235,178 @@ func (r *PGRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode
 	if !api.IsUUID(typeID) {
 		return nil, ErrUnknownType
 	}
-	result := &TypeChangeResult{Findings: []TypeFinding{}}
+	var result *TypeChangeResult
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
-		before, err := scanCI(tx.QueryRow(ctx, query, ciID, orgID))
+		tc, err := r.changeTypeRow(ctx, tx, orgID, ciID, typeID, mode)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrNotFound
-			}
-			return fmt.Errorf("get ci for type change: %w", err)
+			return err
 		}
-		// The target is read under the principal's row level security: a
-		// private type of another organization is unknown (TEN-09).
-		var toKey string
-		var required []string
-		var active bool
-		err = tx.QueryRow(ctx, `SELECT COALESCE(key, name), COALESCE(required_fields, '{}'), is_active FROM ci_type
-			WHERE id = $1 AND (organization_id = $2 OR organization_id IS NULL)`, typeID, orgID).Scan(&toKey, &required, &active)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrUnknownType
-			}
-			return fmt.Errorf("get target type: %w", err)
-		}
-		var fromKey string
-		if err = tx.QueryRow(ctx, "SELECT COALESCE(key, name) FROM ci_type WHERE id = $1", before.CITypeID).Scan(&fromKey); err != nil &&
-			!errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("get current type: %w", err)
-		}
-		if mode == TypeChangeDiscovery && !DiscoveryMayReclassify(fromKey, toKey) {
-			return ErrReclassificationRefused
-		}
-		result.Findings = MissingRequired(required, before.Attributes)
-		if before.CITypeID == typeID {
-			result.CI = before
+		result = &tc.result
+		if !tc.result.Changed {
 			return nil
 		}
-		// A person cannot choose a deactivated type (CI-01); discovery
-		// raises generic_device to the type it resolved, as it creates CIs.
-		if mode == TypeChangeManual && !active {
-			return ciTypeViolation(ciTypeDeactivated)
-		}
-		if _, err = tx.Exec(ctx, `UPDATE ci SET ci_type_id = $3, version = version + 1, updated_at = NOW()
-			WHERE id = $1 AND organization_id = $2`, ciID, orgID, typeID); err != nil {
-			return locationError(fmt.Errorf("change ci type: %w", err))
-		}
-		after, err := scanCI(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2", ciSelectColumns), ciID, orgID))
-		if err != nil {
-			return fmt.Errorf("get changed ci: %w", err)
-		}
-		result.CI, result.Changed = after, true
-		change := map[string]any{"ci_type_id": typeID, "type": toKey, "mode": mode, "findings": result.Findings}
-		if changeErr := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindTypeChanged), orgID, ciID, after.Version, "type_changed", "ci_type_id",
-			map[string]any{"ci_type_id": before.CITypeID, "type": fromKey}, change); changeErr != nil {
+		if changeErr := r.recordTypeChange(ctx, tx, newChangeSet(ChangeKindTypeChanged), orgID, tc); changeErr != nil {
 			return changeErr
 		}
-		if auditErr := r.recordAudit(ctx, tx, "ci.type_changed", after, map[string]interface{}{
-			"from": fromKey, "to": toKey, "mode": mode, "findings": result.Findings,
-		}); auditErr != nil {
+		if auditErr := r.recordTypeChangeAudit(ctx, tx, tc); auditErr != nil {
 			return auditErr
 		}
 		// EVT-02 has no own type event: ci.changed names ci_type_id.
-		return r.recordEvent(ctx, tx, events.CIChanged, after, []string{"ci_type_id"})
+		return r.recordEvent(ctx, tx, events.CIChanged, tc.result.CI, []string{"ci_type_id"})
 	})
 	if err != nil {
 		return nil, err
+	}
+	return result, nil
+}
+
+// typeChange is the change of the type of a CI row: the result, the type
+// before and the keys of both types.
+type typeChange struct {
+	result         TypeChangeResult
+	fromTypeID     string
+	fromKey, toKey string
+	mode           string
+}
+
+// changeTypeRow changes the type of CI ciID to typeID in tx (CI-11); it
+// writes no history, audit entry or event.
+func (r *PGRepository) changeTypeRow(ctx context.Context, tx pgx.Tx, orgID, ciID, typeID, mode string) (*typeChange, error) {
+	tc := &typeChange{result: TypeChangeResult{Findings: []TypeFinding{}}, mode: mode}
+	query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
+	before, err := scanCI(tx.QueryRow(ctx, query, ciID, orgID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get ci for type change: %w", err)
+	}
+	// The target is read under the principal's row level security: a
+	// private type of another organization is unknown (TEN-09).
+	var required []string
+	var active bool
+	err = tx.QueryRow(ctx, `SELECT COALESCE(key, name), COALESCE(required_fields, '{}'), is_active FROM ci_type
+		WHERE id = $1 AND (organization_id = $2 OR organization_id IS NULL)`, typeID, orgID).Scan(&tc.toKey, &required, &active)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUnknownType
+		}
+		return nil, fmt.Errorf("get target type: %w", err)
+	}
+	if err = tx.QueryRow(ctx, "SELECT COALESCE(key, name) FROM ci_type WHERE id = $1", before.CITypeID).Scan(&tc.fromKey); err != nil &&
+		!errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("get current type: %w", err)
+	}
+	if mode == TypeChangeDiscovery && !DiscoveryMayReclassify(tc.fromKey, tc.toKey) {
+		return nil, ErrReclassificationRefused
+	}
+	tc.fromTypeID = before.CITypeID
+	tc.result.Findings = MissingRequired(required, before.Attributes)
+	if before.CITypeID == typeID {
+		tc.result.CI = before
+		return tc, nil
+	}
+	// A person cannot choose a deactivated type (CI-01); discovery
+	// raises generic_device to the type it resolved, as it creates CIs.
+	if mode == TypeChangeManual && !active {
+		return nil, ciTypeViolation(ciTypeDeactivated)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE ci SET ci_type_id = $3, version = version + 1, updated_at = NOW()
+		WHERE id = $1 AND organization_id = $2`, ciID, orgID, typeID); err != nil {
+		return nil, locationError(fmt.Errorf("change ci type: %w", err))
+	}
+	after, err := scanCI(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2", ciSelectColumns), ciID, orgID))
+	if err != nil {
+		return nil, fmt.Errorf("get changed ci: %w", err)
+	}
+	tc.result.CI, tc.result.Changed = after, true
+	return tc, nil
+}
+
+// recordTypeChange writes the ci_type_id row of a type change into set.
+func (r *PGRepository) recordTypeChange(ctx context.Context, tx pgx.Tx, set changeSet, orgID string, tc *typeChange) error {
+	after := tc.result.CI
+	change := map[string]any{"ci_type_id": after.CITypeID, "type": tc.toKey, "mode": tc.mode, "findings": tc.result.Findings}
+	return r.recordCIChange(ctx, tx, set, orgID, after.ID, after.Version, "type_changed", "ci_type_id",
+		map[string]any{"ci_type_id": tc.fromTypeID, "type": tc.fromKey}, change)
+}
+
+// recordTypeChangeAudit writes the audit entry ci.type_changed.
+func (r *PGRepository) recordTypeChangeAudit(ctx context.Context, tx pgx.Tx, tc *typeChange) error {
+	return r.recordAudit(ctx, tx, "ci.type_changed", tc.result.CI, map[string]interface{}{
+		"from": tc.fromKey, "to": tc.toKey, "mode": tc.mode, "findings": tc.result.Findings,
+	})
+}
+
+// UpdateRecord implements RecordUpdater (AUD-03, CI-11): the field update
+// and the reclassification of one ingest record run in one transaction (the
+// context's, else its own) and are recorded as one change set with the
+// record's origin, one event ci.changed and the audit entries of the update
+// and of the type change. A reclassification discovery may not make
+// (ErrReclassificationRefused, ErrUnknownType) leaves the type as it is.
+func (r *PGRepository) UpdateRecord(ctx context.Context, orgID, id string, rec *RecordUpdate) (*RecordUpdateResult, error) {
+	result := &RecordUpdateResult{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		w, err := r.updateRow(ctx, tx, orgID, id, &rec.Update)
+		if err != nil {
+			return err
+		}
+		item := w.after
+		var tc *typeChange
+		if rec.TypeID != "" && rec.TypeID != item.CITypeID && api.IsUUID(rec.TypeID) {
+			tc, err = r.changeTypeRow(ctx, tx, orgID, id, rec.TypeID, TypeChangeDiscovery)
+			switch {
+			case errors.Is(err, ErrReclassificationRefused), errors.Is(err, ErrUnknownType):
+				tc = nil
+			case err != nil:
+				return err
+			case !tc.result.Changed:
+				tc = nil
+			default:
+				item = tc.result.CI
+				if factsErr := loadAssetFacts(ctx, tx, []*Item{item}); factsErr != nil {
+					return factsErr
+				}
+				result.TypeChanged = true
+			}
+		}
+		result.CI = item
+		if len(w.changes) == 0 && tc == nil {
+			return nil
+		}
+		result.Changed = true
+		kind := w.kind()
+		if tc != nil {
+			kind = ChangeKindTypeChanged
+		}
+		set := newChangeSet(kind)
+		set.record = &rec.Origin
+		if changeErr := r.recordFieldChanges(ctx, tx, set, orgID, id, item.Version, w.changes); changeErr != nil {
+			return changeErr
+		}
+		changed := changedFieldNames(w.changes)
+		if tc != nil {
+			if typeErr := r.recordTypeChange(ctx, tx, set, orgID, tc); typeErr != nil {
+				return typeErr
+			}
+			changed = append(changed, "ci_type_id")
+		}
+		if len(w.changes) > 0 {
+			if auditErr := r.recordUpdateAudit(ctx, tx, w); auditErr != nil {
+				return auditErr
+			}
+		}
+		if tc != nil {
+			if auditErr := r.recordTypeChangeAudit(ctx, tx, tc); auditErr != nil {
+				return auditErr
+			}
+		}
+		// One event per record (EVT-02): ci.changed names every changed
+		// field, ci_type_id included.
+		return r.recordEvent(ctx, tx, events.CIChanged, item, changed)
+	})
+	if err != nil {
+		return nil, r.uniqueField(ctx, orgID, err)
 	}
 	return result, nil
 }

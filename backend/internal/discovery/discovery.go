@@ -1613,17 +1613,27 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			resp.ProtectedInstanceFields++
 		}
 		update.Attributes = writes
-		updated, err := h.ciRepo.Update(ctx, orgID, result.MatchedCIID, update)
+		// The fields, the status and the reclassification of a
+		// generic_device classified now (CI-11) are one change of the
+		// record in one transaction: one change set with the record's
+		// origin and one event ci.changed (AUD-03, EVT-02).
+		changed, err := ci.UpdateRecord(ctx, h.ciRepo, orgID, result.MatchedCIID, &ci.RecordUpdate{
+			Update: update, TypeID: raisedType(matched, typeID, identity),
+			Origin: ci.RecordOrigin{CollectorID: item.CollectorID, ObservedAt: item.ObservedAt, RecordID: item.RecordID},
+		})
 		if err != nil {
 			return err
 		}
+		updated := changed.CI
 		if conflict {
 			resp.ProtectedOverrides++
 		}
-		// A generic_device classified now becomes the specific type
-		// through the type change service (CI-11).
-		if typeErr := h.raiseGenericType(ctx, orgID, updated, typeID, identity); typeErr != nil {
-			return typeErr
+		// The CI is classified now: its unclassified_device item closes
+		// as reclassified (DIS-02).
+		if changed.TypeChanged && updated.CITypeID != identity.GenericDeviceTypeID {
+			if resolveErr := h.resolveReclassified(ctx, orgID, updated.ID); resolveErr != nil {
+				return resolveErr
+			}
 		}
 		if reviewErr := openUnclassified(updated); reviewErr != nil {
 			return reviewErr
@@ -2080,29 +2090,14 @@ func firstNonEmpty(preferred, fallback string) string {
 	return fallback
 }
 
-// raiseGenericType reclassifies a matched generic_device CI to the specific
-// type the device reported (CI-11) and closes the CI's open
-// unclassified_device item as reclassified (DIS-02); discovery never
-// changes other types.
-func (h *Handler) raiseGenericType(ctx context.Context, orgID string, matched *ci.Item, typeID string, ic *IdentityContext) error {
-	if ic == nil || ic.GenericDeviceTypeID == "" || matched.CITypeID != ic.GenericDeviceTypeID ||
-		typeID == "" || typeID == ic.GenericDeviceTypeID {
-		return nil
+// raisedType returns the specific type typeID a matched generic_device CI
+// is raised to (CI-11), or "": discovery never changes other types. A
+// matched CI the candidates did not carry has no type here; the repository
+// checks the types again in the record's transaction.
+func raisedType(matched *ci.Item, typeID string, ic *IdentityContext) string {
+	if ic == nil || ic.GenericDeviceTypeID == "" || typeID == "" || typeID == ic.GenericDeviceTypeID ||
+		(matched.CITypeID != "" && matched.CITypeID != ic.GenericDeviceTypeID) {
+		return ""
 	}
-	changer, ok := h.ciRepo.(ci.TypeChanger)
-	if !ok {
-		return nil
-	}
-	result, err := changer.ChangeType(ctx, orgID, matched.ID, typeID, ci.TypeChangeDiscovery)
-	switch {
-	case errors.Is(err, ci.ErrReclassificationRefused), errors.Is(err, ci.ErrUnknownType):
-		return nil
-	case err != nil:
-		return fmt.Errorf("reclassify generic device: %w", err)
-	}
-	*matched = *result.CI
-	if matched.CITypeID == ic.GenericDeviceTypeID {
-		return nil
-	}
-	return h.resolveReclassified(ctx, orgID, matched.ID)
+	return typeID
 }

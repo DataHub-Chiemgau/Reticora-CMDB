@@ -781,3 +781,5 @@ INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-494
 COL-04;[B];D;collector/collectorcmd/lifecycle_test.go;WP-493
 DIS-04;[B];D;collector/plugins/snmp/v3_agent_test.go;WP-492
 DIS-08;[Q];D;backend/internal/discovery/errors_test.go;WP-492
+AUD-03;[B];C;backend/internal/discovery/ingest_change_integration_test.go;WP-489
+CI-11;[B];C;backend/internal/discovery/ingest_change_integration_test.go;WP-489

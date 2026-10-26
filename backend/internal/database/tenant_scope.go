@@ -259,7 +259,12 @@ type tenantTx struct {
 	after []func(context.Context)
 	// before are the writes BeforeCommit put last.
 	before []func() error
+	// batches are the items AfterCommitBatch collects, by key.
+	batches map[any]*afterBatch
 }
+
+// afterBatch holds the items of one AfterCommitBatch key of a transaction.
+type afterBatch struct{ items []any }
 
 // aborted reports whether a statement failed in the open transaction; it
 // reads the connection's transaction status without a round trip.
@@ -373,6 +378,10 @@ func Savepoint(ctx context.Context, fn func(ctx context.Context) error) error {
 	}
 	t.mu.Lock()
 	mark, beforeMark := len(t.after), len(t.before)
+	batchMarks := make(map[any]int, len(t.batches))
+	for key, b := range t.batches {
+		batchMarks[key] = len(b.items)
+	}
 	t.mu.Unlock()
 	err = fn(ctx)
 	if err == nil && t.aborted() {
@@ -386,6 +395,14 @@ func Savepoint(ctx context.Context, fn func(ctx context.Context) error) error {
 		}
 		t.mu.Lock()
 		t.after, t.before = t.after[:mark], t.before[:beforeMark]
+		for key, b := range t.batches {
+			// A batch opened under the savepoint lost its callback with it.
+			if n, ok := batchMarks[key]; ok {
+				b.items = b.items[:n]
+			} else {
+				delete(t.batches, key)
+			}
+		}
 		t.mu.Unlock()
 		return err
 	}
@@ -441,6 +458,47 @@ func AfterCommit(ctx context.Context, fn func(ctx context.Context)) {
 	t.mu.Unlock()
 	if state == txCommitted {
 		fn(WithoutTx(ctx))
+	}
+}
+
+// AfterCommitBatch adds item to the batch key of the context's transaction:
+// once the transaction has committed, fn (the one of the first item of the
+// batch) runs once with the items in the order they were added, with a
+// context detached from it, like an AfterCommit callback. A rollback drops
+// the batch, the rollback of a savepoint the items added under it. Without
+// a context transaction fn runs at once with item. Work that every write of
+// a transaction would do on its own after the commit (a search index) is
+// done once for all of them.
+func AfterCommitBatch(ctx context.Context, key, item any, fn func(ctx context.Context, items []any)) {
+	t, ok := ctx.Value(txKey{}).(*tenantTx)
+	if !ok || t == nil {
+		fn(ctx, []any{item})
+		return
+	}
+	t.mu.Lock()
+	state := t.state.Load()
+	if state == txOpen {
+		b := t.batches[key]
+		if b == nil {
+			b = &afterBatch{}
+			if t.batches == nil {
+				t.batches = map[any]*afterBatch{}
+			}
+			t.batches[key] = b
+			t.after = append(t.after, func(ctx context.Context) {
+				t.mu.Lock()
+				items := b.items
+				t.mu.Unlock()
+				if len(items) > 0 {
+					fn(ctx, items)
+				}
+			})
+		}
+		b.items = append(b.items, item)
+	}
+	t.mu.Unlock()
+	if state == txCommitted {
+		fn(WithoutTx(ctx), []any{item})
 	}
 }
 
