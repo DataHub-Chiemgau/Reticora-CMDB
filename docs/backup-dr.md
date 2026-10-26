@@ -307,41 +307,47 @@ golang-migrate in `PATH` for the seeded run.
 
 ### Measured values
 
-> **Placeholder: the values come from the `restore-test.yml` run
-> (`workflow_dispatch`) on the WP-445 state and are copied from its
-> artifacts; nothing here is estimated.** The earlier values of 2026-10-12
-> (30 s of writes, toy data volume) are withdrawn (F-292).
+Measured in [restore-test run 40261526875](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40261526875)
+on 2026-10-26 (`pull_request` of PR #95, head `235a7b6` with the WP-445
+state, GitHub-hosted `ubuntu-24.04`); the values are copied from the
+protocol lines of the job logs, nothing here is estimated. The earlier
+values of 2026-10-12 (30 s of writes, toy data volume) are withdrawn
+(F-292).
 
 Default run (job `pitr`, artifact `restore-pitr-report`):
 
 | Field | Value |
 |---|---|
-| Run | _from the run: ID and date_ |
-| Commit | _from the protocol_ |
-| Point in time restore | _rows before / after the target_ |
-| RPO | _measured value and lost rows (limits 360 s and 900 s)_ |
-| RTO point in time restore | _from the protocol_ |
-| RTO latest state | _from the protocol_ |
-| Archiving after the restore | _from the protocol_ |
-| Database size at the first base backup | _from the protocol_ |
+| Run | 40261526875, job `pitr`, 2026-10-26 02:55–03:15 UTC |
+| Commit | `235a7b6` (PR #95, merge ref of the pull request) |
+| Point in time restore | 50000 rows before the target, 0 after (PASS) |
+| RPO | 150.2 s, 6850 of 98051 rows lost (limits 360 s and 900 s: PASS) |
+| RTO point in time restore | 3 s (limit 14400 s) |
+| RTO latest state | 4 s (limit 14400 s) |
+| Archiving after the restore | `pgbackrest check` ok |
+| Database size at the first base backup | 9 MB (restore size 34.1 MB) |
 
 Representative data volume (job `pitr-seeded`, artifact
-`restore-pitr-seeded-report`):
+`restore-pitr-seeded-report`, `seed -objects 10000`):
 
 | Field | Value |
 |---|---|
-| Database size at the first base backup | _from the protocol_ |
-| RTO point in time restore | _from the protocol_ |
-| RTO latest state | _from the protocol_ |
-| RPO | _from the protocol_ |
+| Database size at the first base backup | 56 MB (restore size 84.5 MB) |
+| RTO point in time restore | 4 s (limit 14400 s) |
+| RTO latest state | 4 s (limit 14400 s) |
+| RPO | 150.7 s, 6900 of 98101 rows lost (PASS) |
 
 Negative self-test (job `rpo-negative`, artifact
-`restore-pitr-negative-report`):
+`restore-pitr-negative-report`, `RESTORE_ARCHIVE_TIMEOUT=1200`):
 
 | Field | Value |
 |---|---|
-| Job result | _passed = exit 1 with the line `RPO … FAIL`_ |
-| RPO | _measured value, above 360 s and 900 s_ |
+| Job result | passed: the script exited 1, the protocol ends **Result:** FAILED, only the RPO line fails |
+| RPO | 1068.3 s, above 360 s and 900 s (47350 of 97351 rows lost) |
+
+The RTO values hold for the data volumes of these runs on a CI runner;
+they say nothing about a production volume of several GB (SR-06: dedicated
+reference host before GA).
 
 With continuous writes, the RPO is bounded by `archive_timeout` (300 s)
 plus the archive lag. The RTO grows with the database size and with the WAL
