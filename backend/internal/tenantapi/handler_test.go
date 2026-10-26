@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -205,6 +206,61 @@ func TestOrganizationFields(t *testing.T) {
 	// Slug and plan are not part of the PATCH.
 	if w = do(mux, "PATCH", "/api/v1/org", `{"plan":"enterprise"}`, "org-1"); w.Code != http.StatusBadRequest {
 		t.Errorf("plan accepted: %d", w.Code)
+	}
+}
+
+// TestOrganizationAIOptInRequiresOrgWideUserManage covers WP-463 (AI-02):
+// only a principal holding user:manage for the whole organization changes
+// ai_opt_in; a principal bound to a client, a site or a team, one holding
+// user:manage only in such a scope, or a request without principal gets 403
+// and the value stays; other fields stay writable for them.
+func TestOrganizationAIOptInRequiresOrgWideUserManage(t *testing.T) {
+	_, repo, mux := setup()
+	all := identity.ScopeSet{All: true}
+	some := identity.ScopeSet{IDs: []string{"c-1"}}
+	manage := []identity.Permission{identity.PermUserManage}
+	patch := func(body string, p *identity.Principal) *httptest.ResponseRecorder {
+		r := withTenant(httptest.NewRequest("PATCH", "/api/v1/org", bytes.NewBufferString(body)), "org-1")
+		if p != nil {
+			r = r.WithContext(identity.WithPrincipal(r.Context(), *p))
+		}
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w
+	}
+	optIn := func() bool {
+		o, _ := repo.GetOrganization(context.Background(), "org-1")
+		return o.AIOptIn
+	}
+	for name, p := range map[string]*identity.Principal{
+		"no principal":   nil,
+		"client-bound":   {OrganizationID: "org-1", Permissions: manage, Scope: &identity.Scope{Clients: some, Sites: all, Teams: all}},
+		"site-bound":     {OrganizationID: "org-1", Permissions: manage, Scope: &identity.Scope{Clients: some, Sites: some, Teams: all}},
+		"team-bound":     {OrganizationID: "org-1", Permissions: manage, Scope: &identity.Scope{Clients: all, Sites: all, Teams: some}},
+		"client API key": {OrganizationID: "org-1", Permissions: manage, ClientScope: "c-1", Type: identity.PrincipalTypeAPIKey},
+		"user:manage narrower": {OrganizationID: "org-1", Permissions: append(manage, identity.PermCIRead),
+			Scope:            &identity.Scope{Clients: all, Sites: all, Teams: all},
+			PermissionScopes: map[identity.Permission]identity.Scope{identity.PermUserManage: {Clients: some, Sites: all, Teams: all}}},
+		"org-wide without user:manage": {OrganizationID: "org-1", Permissions: []identity.Permission{identity.PermCIRead},
+			Scope: &identity.Scope{Clients: all, Sites: all, Teams: all}},
+	} {
+		if w := patch(`{"ai_opt_in":true,"name":"Changed"}`, p); w.Code != http.StatusForbidden || optIn() {
+			t.Errorf("%s: %d %s, ai_opt_in %v; want 403 and false", name, w.Code, w.Body.String(), optIn())
+		}
+		if w := patch(`{"name":"Renamed"}`, p); w.Code != http.StatusOK {
+			t.Errorf("%s: PATCH without ai_opt_in: %d; want 200", name, w.Code)
+		}
+	}
+
+	orgAdmin := &identity.Principal{OrganizationID: "org-1", Permissions: manage, Scope: &identity.Scope{Clients: all, Sites: all, Teams: all}}
+	var o Organization
+	w := patch(`{"ai_opt_in":true}`, orgAdmin)
+	if err := json.Unmarshal(w.Body.Bytes(), &o); w.Code != http.StatusOK || err != nil || !o.AIOptIn || !optIn() {
+		t.Fatalf("org-wide user:manage: %d %s; want 200 with ai_opt_in true", w.Code, w.Body.String())
+	}
+	apiKey := &identity.Principal{OrganizationID: "org-1", Permissions: manage, Type: identity.PrincipalTypeAPIKey}
+	if w := patch(`{"ai_opt_in":false}`, apiKey); w.Code != http.StatusOK || optIn() {
+		t.Errorf("org-wide API key with user:manage: %d %s; want 200 with ai_opt_in false", w.Code, w.Body.String())
 	}
 }
 

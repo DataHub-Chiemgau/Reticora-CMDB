@@ -141,6 +141,9 @@ func (r *MemoryRepository) UpdateOrganization(_ context.Context, orgID string, r
 	if req.Locale != nil {
 		o.Locale = *req.Locale
 	}
+	if req.AIOptIn != nil {
+		o.AIOptIn = *req.AIOptIn
+	}
 	o.UpdatedAt = time.Now().UTC()
 	cp := *o
 	return &cp, nil

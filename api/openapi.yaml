@@ -5546,12 +5546,17 @@ paths:
     patch:
       operationId: updateOrganization
       tags: [Organization]
-      summary: Update name, settings, time zone, currency and locale of the organization
+      summary: Update name, settings, time zone, currency, locale and AI opt-in of the organization
       description: >
         The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217
         code (EUR) and the locale a BCP 47 tag, stored in canonical form
         (de-ch → de-CH). Slug and plan are not changed here. An invalid value
-        answers 400 naming the field.
+        answers 400 naming the field. ai_opt_in is the organization's consent
+        to external AI processing (AI-02): only a principal holding user:manage
+        for the whole organization changes it (a client-, site- or team-bound
+        holder gets 403); a change writes the audit entry
+        organization.ai_opt_in_changed with the old and the new value in the
+        same transaction.
       requestBody:
         required: true
         content:
@@ -5569,6 +5574,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -18137,7 +18144,7 @@ components:
     Organization:
       type: object
       description: The tenant (LOC-01).
-      required: [id, name, slug, plan, settings, timezone, currency, locale, created_at, updated_at]
+      required: [id, name, slug, plan, settings, timezone, currency, locale, ai_opt_in, created_at, updated_at]
       properties:
         id:
           type: string
@@ -18162,6 +18169,11 @@ components:
           type: string
           description: BCP 47 language tag.
           example: de-DE
+        ai_opt_in:
+          type: boolean
+          description: >
+            The organization's consent to external AI processing (AI-02);
+            together with the ai add-on it enables the AI assistant.
         created_at:
           type: string
           format: date-time
@@ -18185,6 +18197,11 @@ components:
           type: string
         locale:
           type: string
+        ai_opt_in:
+          type: boolean
+          description: >
+            Organization AI opt-in (AI-02); only a holder of user:manage for the
+            whole organization may set it, the change is audited.
 
     Client:
       type: object

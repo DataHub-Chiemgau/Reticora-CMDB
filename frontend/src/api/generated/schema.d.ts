@@ -2905,8 +2905,8 @@ export interface paths {
     options?: never;
     head?: never;
     /**
-     * Update name, settings, time zone, currency and locale of the organization
-     * @description The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217 code (EUR) and the locale a BCP 47 tag, stored in canonical form (de-ch → de-CH). Slug and plan are not changed here. An invalid value answers 400 naming the field.
+     * Update name, settings, time zone, currency, locale and AI opt-in of the organization
+     * @description The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217 code (EUR) and the locale a BCP 47 tag, stored in canonical form (de-ch → de-CH). Slug and plan are not changed here. An invalid value answers 400 naming the field. ai_opt_in is the organization's consent to external AI processing (AI-02): only a principal holding user:manage for the whole organization changes it (a client-, site- or team-bound holder gets 403); a change writes the audit entry organization.ai_opt_in_changed with the old and the new value in the same transaction.
      */
     patch: operations['updateOrganization'];
     trace?: never;
@@ -10072,6 +10072,8 @@ export interface components {
        * @example de-DE
        */
       locale: string;
+      /** @description The organization's consent to external AI processing (AI-02); together with the ai add-on it enables the AI assistant. */
+      ai_opt_in: boolean;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -10085,6 +10087,8 @@ export interface components {
       timezone?: string;
       currency?: string;
       locale?: string;
+      /** @description Organization AI opt-in (AI-02); only a holder of user:manage for the whole organization may set it, the change is audited. */
+      ai_opt_in?: boolean;
     };
     /** @description Customer of the organization (LOC-02); the name is unique per organization. */
     Client: {
@@ -17488,6 +17492,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
