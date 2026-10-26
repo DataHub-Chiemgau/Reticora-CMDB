@@ -1236,8 +1236,10 @@ func collectorCAServerBinary(t *testing.T) string {
 //	  TEST_NATS_SERVER_BIN=<path to nats-server 2.10+> go test -count=1 -v -p 1 \
 //	  -run 'TestCollectorCARolloverAcrossReplicas' ./internal/discovery/
 func TestCollectorCARolloverAcrossReplicas(t *testing.T) {
-	natsBin := edgeNATSServerBin(t)
+	// The database first: the unit job (no TEST_DATABASE_URL, no
+	// nats-server) skips here instead of failing on the missing server.
 	f := scopetest.Seed(t, "c5")
+	natsBin := edgeNATSServerBin(t)
 	bg := context.Background()
 	clean := func() { _, _ = f.Admin.Exec(bg, `DELETE FROM collector_ca`) }
 	clean()

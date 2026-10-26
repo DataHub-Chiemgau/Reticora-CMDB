@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -77,6 +78,11 @@ func (s *outageNATS) stop() {
 func (s *outageNATS) url() string { return fmt.Sprintf("nats://127.0.0.1:%d", s.port) }
 
 func TestIngestQueueOutageRefusesWithoutLateRecords(t *testing.T) {
+	// Runs in the integration job, which provides TEST_DATABASE_URL and
+	// TEST_NATS_SERVER_BIN; the unit job has no nats-server.
+	if os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("TEST_DATABASE_URL not set; the ingest outage test runs in the integration job with TEST_NATS_SERVER_BIN")
+	}
 	srv := &outageNATS{t: t, bin: edgeNATSServerBin(t), port: auditFreePort(t), store: t.TempDir()}
 	srv.start()
 	t.Cleanup(srv.stop)
