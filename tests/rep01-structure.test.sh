@@ -555,10 +555,12 @@ review_findings="$(finding_rows R docs/security/review-g1.md)"
 check "GATE-03 the security review records the rack site-scope bypass as a finding (F-002, F-040)" \
     '[ -n "$(rack_rows "$review_findings")" ]'
 p0_missing=""
+# Read once, then grep a here-string: with pipefail, `awk | grep -q` fails
+# whenever grep stops early and awk dies of SIGPIPE.
+critical_sr="$(awk -F'\t' '$2 ~ /^SR-[0-9]+$/ && $3 == "critical" { print $5 }' <<< "$review_findings")"
 for n in $(seq 1 15); do
     fid="$(printf 'F-%03d' "$n")"
-    awk -F'\t' '$2 ~ /^SR-[0-9]+$/ && $3 == "critical" { print $5 }' <<< "$review_findings" |
-        grep -qE "(^|[^0-9A-Za-z-])${fid}([^0-9]|\$)" || p0_missing+="${fid} "
+    grep -qE "(^|[^0-9A-Za-z-])${fid}([^0-9]|\$)" <<< "$critical_sr" || p0_missing+="${fid} "
 done
 check "GATE-01 the security review records the P0 findings F-001 to F-015 of the Phase-1 audit as Critical SR findings${p0_missing:+ (missing: ${p0_missing% })}" \
     "[ -z '${p0_missing}' ]"
