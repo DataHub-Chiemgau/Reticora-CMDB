@@ -23,6 +23,7 @@ Der Plan setzt voraus, dass Gate G1 bestanden ist: Alle WPs des Phase-1-Plans (W
 - **94 IDs im Umfang** mit WP-Zuordnung sowie 11 N/P-IDs ohne Wortlaut (nur Entscheidung, siehe E-37): alle IDs mit Tag [P2] sowie die P2-Anteile gemischt getaggter IDs ([B]/[Pn]-Kombinationen, [P2–P3], [P2–P4, A]) und die [Q]-IDs, die nach GATE-02 für jedes Gate gelten (DOD-01, GLO-11, SEQ-01, GATE-01/02/05, ABN-01 c, ABN-02, ABN-03, SEC-11). TKT-03 [O] ist als optionales WP ohne Gate-Wirkung enthalten (GATE-05, E-47).
 - **Nicht Bestandteil:** [P3]-Anteile (Monitoring, Workflows, Compliance, Wartungsfenster, SMS/Pager, Health, DSGVO-Workflows), [P4]-Anteile (Agent, Mobil/Offline, RFID, Inventur Pro, Ticketing Pro, Reseller, Schlüssel, Desk, Schulung, Disposition), [P5] und Add-ons [A] (IGA, KI). Die nach E-03 verschobenen WPs mit ausschließlich P3/P4/[A]-IDs (WP-219, WP-220, WP-228, WP-230 bis WP-234) bleiben verschoben.
 - **89 Arbeitspakete** WP-243 bis WP-331 mit zusammen **141,5 PT**; davon 1 optionales WP ([O]). **G2-Umfang: 88 WPs mit 140,5 PT.**
+- **Nachtrag vom 2026-10-26 (WP-499, F-123):** Meilenstein [M2.11 Lint-Altlast](#m211-lint-altlast-nachtrag-wp-499) mit 17 Arbeitspaketen WP-613 bis WP-629 (14,0 PT) baut die Lint-Altlast hinter `issues.new-from-rev` nach Linter-Kategorie ab (Folge-WP nach WP-001 AK4); sie gehören zu keiner [P2]-ID und ändern die Zahlen oben nicht.
 - **Nummerierung:** Die WP-Nummern setzen die Phase-1-Folge fort, weil die Traceability-Prüfung WP-Nummern global eindeutig verlangt (WP-243 (`p2-trace`) liest beide Pläne). Die verschobenen Phase-1-WPs mit P2-IDs werden durch neue WPs ersetzt (Tabelle unten, E-46); ihre Blöcke im Phase-1-Plan bleiben unverändert und werden nicht mehr als PR-Nummer verwendet.
 - **Reihenfolge** nach SEQ-01, Phase 2: Metamodell (Abschnitt 11) → Verträge, Asset/Lager/Stocktake, Dokumente → Ticketing Essential/Standard → Import, Bulk, Views → G2; „dazu Feldrechte“ (README §17) als eigener Meilenstein direkt nach dem Metamodell, damit alle Modul-DTOs den Feldrechte-Filter von Beginn an einbinden.
 - Format der WP-Blöcke: wie im Phase-1-Plan (Abschnitt „Konventionen“).
@@ -44,6 +45,7 @@ Der Plan setzt voraus, dass Gate G1 bestanden ist: Alle WPs des Phase-1-Plans (W
 | [M2.8 Import, Bulk, Views, Suche, Export, BFF, Historie](#m28-import-bulk-views-suche-export-bff-historie) | Import mit Mapping-Layer (IMP-IO-01), Bulk mit Undo (BLK-02, OVR-03), geteilte Views (VIE-02), Suchfelder und Filter-AST (SRC-02, SRC-03), DATEV (EXP-01), GraphQL-Aggregate (GQL-03), Snapshot und Zustand zum Zeitpunkt T (AUD-08). | WP-301 – WP-312 | 12 | 19,0 | IMP-IO-01, BLK-02, OVR-03, VIE-02, SRC-02, SRC-03, EXP-01 (DATEV), GQL-03, AUD-08 PASS. |
 | [M2.9 Oberflächen Phase 2](#m29-oberflächen-phase-2) | Admin-Oberflächen für das Metamodell, Klick-Builder, Form Builder mit Preview, geführte Anlage, Picker und Alltagsflows, Modul-Oberflächen (Assets, Verträge, Lager, Bestellungen, Inventur, Dokumente, Tickets, Import, Bulk, Views, Beziehungen), Playwright-Abläufe (UI-11, UI-12, UI-14, UI-15, MET-50 bis MET-52, SRC-03, TST-03). | WP-313 – WP-324 | 12 | 22,5 | UI-11, UI-12, UI-14 (P2-Anteil), UI-15, MET-50 bis MET-52, TST-03 (P2-Anteil) PASS; axe ohne Befunde auf neuen Seiten. |
 | [M2.10 Seed, Qualität, Abnahme und Gate G2](#m210-seed-qualität-abnahme-und-gate-g2) | Seed-Erweiterung (SIM-01), TST-01-Pflichtfälle, Performance-Sanity (ABN-02), Konkurrenzmatrix (ABN-03), internes Sicherheitsreview (SEC-11), Abnahmeszenario (c) (ABN-01), Gate G2 (GATE-01/02/05, DOD-01, SEQ-01, GLO-11). | WP-325 – WP-331 | 7 | 10,0 | Gate-Checkliste vollständig belegt; kein offenes Critical; P2-Module im G2-Release über Entitlements freigeschaltet. |
+| [M2.11 Lint-Altlast (Nachtrag WP-499)](#m211-lint-altlast-nachtrag-wp-499) | Abbau der Lint-Altlast hinter `issues.new-from-rev` nach Linter-Kategorie (errcheck, ineffassign, gofmt/goimports, unused/staticcheck/unconvert, govet, gocritic), je WP höchstens 15 Dateien (WP-001 AK4, F-123). | WP-613 – WP-629 | 17 | 14,0 | golangci-lint ohne `new-from-rev` meldet für backend, collector und edgecore 0 Befunde; `new-from-rev` entfernt. |
 
 Reihenfolge nach SEQ-01 (`docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:75`) und README §17:
 
@@ -4475,6 +4477,905 @@ GLO-11;[Q];G2;docs/acceptance/g2-gate.md;WP-331
 **Entscheidungsbedarf:** [E-48](entscheidungen.md#e-48) Traceability-Vollständigkeit für [P2] (Erweiterung von E-30) (vorläufig entschieden (Option 1)); [E-03](../entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden: deaktivieren)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
+
+## M2.11 Lint-Altlast (Nachtrag WP-499)
+
+**Nachtrag vom 2026-10-26 (WP-499, `t5-lint-baseline`, Befund [F-123](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-123)):** WP-001 hat in `backend/.golangci.yml` die Baseline `issues.new-from-rev` gesetzt; sein Akzeptanzkriterium 4 verlangt dafür ein Folge-WP, das nie angelegt wurde. Die Altlast wird hier nach Linter-Kategorie abgebaut, je WP höchstens 15 Dateien. `scripts/ci/lint-debt.sh` zählt im Job `lint` die Befunde je Modul ohne Baseline und scheitert, wenn eine Zahl über `tests/lint-debt-baseline.txt` steigt (Stand bei WP-499: backend 426, collector 28, edgecore 6; golangci-lint v2.14.0). Das letzte WP entfernt `new-from-rev`.
+
+**Ziel:** golangci-lint mit der Repo-Konfiguration meldet ohne `new-from-rev` für backend, collector und edgecore je 0 Befunde (Retest F-123).
+
+**Ausstieg:** `tests/lint-debt-baseline.txt` steht für alle drei Module auf 0; `issues.new-from-rev` und `fetch-depth: 0` des Jobs `lint` sind entfernt (WP-629).
+
+**Konventionen dieses Meilensteins:**
+
+- Die Dateilisten sind der Stand bei WP-499 (`scripts/ci/lint-debt.sh`, golangci-lint v2.14.0, Pfade relativ zum Repository). Ist eine Datei bei Umsetzung umbenannt oder befundfrei, entfällt sie; neue Befunde derselben Kategorie in anderen Dateien gehören zum WP der Kategorie, solange es bei höchstens 15 Dateien bleibt.
+- Jedes WP senkt die Zahlen in `tests/lint-debt-baseline.txt` um die behobenen Befunde (der Job `lint` meldet eine gefallene Zahl als Hinweis); `golangci-lint run` mit Repo-Konfiguration bleibt grün.
+- Keine Prüfung wird abgeschaltet und kein Linter entfernt (`tests/lint-toolchain.test.sh` prüft die Obermenge der v1-Linter); Ausnahmen nur als begründetes `//nolint:<linter>` je Stelle.
+- Verhaltensänderungen (z. B. ein bisher verschluckter Fehler wird gemeldet) werden mit einem Test belegt; reine Umformungen brauchen keinen neuen Test.
+- Die WPs dürfen parallel laufen; WP-629 setzt alle anderen voraus.
+
+| WP | Schlüssel | Titel | PT | Voraussetzungen |
+|---|---|---|---:|---|
+| [WP-613](#wp-613--lint-altlast-ungeprüfte-fehler-errcheck) | `lint-errcheck` | Lint-Altlast: ungeprüfte Fehler (errcheck) | 0,5 | WP-499 |
+| [WP-614](#wp-614--lint-altlast-unwirksame-zuweisungen-ineffassign-12) | `lint-ineffassign-1` | Lint-Altlast: unwirksame Zuweisungen (ineffassign) 1/2 | 0,5 | WP-499 |
+| [WP-615](#wp-615--lint-altlast-unwirksame-zuweisungen-ineffassign-22) | `lint-ineffassign-2` | Lint-Altlast: unwirksame Zuweisungen (ineffassign) 2/2 | 0,5 | WP-499 |
+| [WP-616](#wp-616--lint-altlast-formatierung-gofmtgoimports) | `lint-fmt` | Lint-Altlast: Formatierung (gofmt/goimports) | 0,5 | WP-499 |
+| [WP-617](#wp-617--lint-altlast-toter-code-und-statische-analyse-unused-staticcheck-unconvert) | `lint-unused` | Lint-Altlast: toter Code und statische Analyse (unused, staticcheck, unconvert) | 0,5 | WP-499 |
+| [WP-618](#wp-618--lint-altlast-govet-shadow-unusedwrite-nilness-13) | `lint-govet-1` | Lint-Altlast: govet (shadow, unusedwrite, nilness) 1/3 | 1,0 | WP-499 |
+| [WP-619](#wp-619--lint-altlast-govet-shadow-unusedwrite-nilness-23) | `lint-govet-2` | Lint-Altlast: govet (shadow, unusedwrite, nilness) 2/3 | 1,0 | WP-499 |
+| [WP-620](#wp-620--lint-altlast-govet-shadow-unusedwrite-nilness-33) | `lint-govet-3` | Lint-Altlast: govet (shadow, unusedwrite, nilness) 3/3 | 1,0 | WP-499 |
+| [WP-621](#wp-621--lint-altlast-gocritic-hugeparam-rangevalcopy-stilregeln-19) | `lint-gocritic-1` | Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 1/9 | 1,0 | WP-499 |
+| [WP-622](#wp-622--lint-altlast-gocritic-hugeparam-rangevalcopy-stilregeln-29) | `lint-gocritic-2` | Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 2/9 | 1,0 | WP-499 |
+| [WP-623](#wp-623--lint-altlast-gocritic-hugeparam-rangevalcopy-stilregeln-39) | `lint-gocritic-3` | Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 3/9 | 1,0 | WP-499 |
+| [WP-624](#wp-624--lint-altlast-gocritic-hugeparam-rangevalcopy-stilregeln-49) | `lint-gocritic-4` | Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 4/9 | 1,0 | WP-499 |
+| [WP-625](#wp-625--lint-altlast-gocritic-hugeparam-rangevalcopy-stilregeln-59) | `lint-gocritic-5` | Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 5/9 | 1,0 | WP-499 |
+| [WP-626](#wp-626--lint-altlast-gocritic-hugeparam-rangevalcopy-stilregeln-69) | `lint-gocritic-6` | Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 6/9 | 1,0 | WP-499 |
+| [WP-627](#wp-627--lint-altlast-gocritic-hugeparam-rangevalcopy-stilregeln-79) | `lint-gocritic-7` | Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 7/9 | 1,0 | WP-499 |
+| [WP-628](#wp-628--lint-altlast-gocritic-hugeparam-rangevalcopy-stilregeln-89) | `lint-gocritic-8` | Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 8/9 | 1,0 | WP-499 |
+| [WP-629](#wp-629--lint-altlast-gocritic-hugeparam-rangevalcopy-stilregeln-99) | `lint-gocritic-9` | Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 9/9 | 0,5 | WP-499, WP-613, WP-614, WP-615, WP-616, WP-617, WP-618, WP-619, WP-620, WP-621, WP-622, WP-623, WP-624, WP-625, WP-626, WP-627, WP-628 |
+
+### WP-613 – Lint-Altlast: ungeprüfte Fehler (errcheck)
+
+**Schlüssel:** `lint-errcheck` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 7 Dateien unten 9 Befunde der Kategorie `errcheck` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `errcheck` mehr. Jeder Fehler wird behandelt oder bewusst verworfen; ungeprüftes `json.Unmarshal`/`json.Encode` meldet den Fehler (Log oder Rückgabe), statt still weiterzulaufen (F-123: `internal/agent/pg_repository.go`, `internal/desk/pg_repository.go`, `cmd/server/main.go`, `internal/credential/handler.go`).
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (7 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/cmd/server/main.go (1)
+- backend/internal/agent/pg_repository.go (1)
+- backend/internal/api/api.go (1)
+- backend/internal/credential/handler.go (3)
+- backend/internal/desk/pg_repository.go (1)
+- collector/plugins/nas/nas.go (1)
+- collector/plugins/redfish/redfish.go (1)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-613
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-614 – Lint-Altlast: unwirksame Zuweisungen (ineffassign) 1/2
+
+**Schlüssel:** `lint-ineffassign-1` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 9 Dateien unten 11 Befunde der Kategorie `ineffassign` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `ineffassign` mehr. Unwirksame Zuweisungen werden entfernt; wo die Zuweisung einen übersehenen Fehler- oder Wertpfad zeigt, wird der Pfad korrigiert und mit einem Test belegt.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (9 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/compliance/pg_repository.go (1)
+- backend/internal/composition/pg_repository.go (1)
+- backend/internal/desk/pg_repository.go (1)
+- backend/internal/form/pg_repository.go (1)
+- backend/internal/ipam/pg_repository.go (3)
+- backend/internal/maintenance/pg_repository.go (1)
+- backend/internal/monitoring/evaluator.go (1)
+- backend/internal/monitoring/pg_store.go (1)
+- backend/internal/movement/pg_repository.go (1)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-614
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-615 – Lint-Altlast: unwirksame Zuweisungen (ineffassign) 2/2
+
+**Schlüssel:** `lint-ineffassign-2` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 9 Dateien unten 11 Befunde der Kategorie `ineffassign` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `ineffassign` mehr. Unwirksame Zuweisungen werden entfernt; wo die Zuweisung einen übersehenen Fehler- oder Wertpfad zeigt, wird der Pfad korrigiert und mit einem Test belegt.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (9 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/rack/pg_repository.go (1)
+- backend/internal/relationship/pg_repository.go (1)
+- backend/internal/security/pg_repository.go (1)
+- backend/internal/sla/pg_repository.go (1)
+- backend/internal/stocktake/pg_repository.go (1)
+- backend/internal/tenantapi/pg_repository.go (3)
+- backend/internal/training/pg_repository.go (1)
+- backend/internal/webhook/pg_repository.go (1)
+- backend/internal/workflow/pg_repository.go (1)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-615
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-616 – Lint-Altlast: Formatierung (gofmt/goimports)
+
+**Schlüssel:** `lint-fmt` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 15 Dateien unten 15 Befunde der Kategorie `gofmt`, `goimports` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `gofmt`, `goimports` mehr. Die Dateien sind mit `gofmt` und `goimports` formatiert; keine inhaltliche Änderung.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (15 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/ai/retrieval.go (1)
+- backend/internal/compliance/evaluator_test.go (1)
+- backend/internal/compliance/repository.go (1)
+- backend/internal/desk/model.go (1)
+- backend/internal/document/handler.go (1)
+- backend/internal/form/handler_test.go (1)
+- backend/internal/iga/repository.go (1)
+- backend/internal/keymgmt/model.go (1)
+- backend/internal/search/opensearch.go (1)
+- backend/internal/search/search_test.go (1)
+- backend/internal/security/model.go (1)
+- backend/internal/training/model.go (1)
+- backend/internal/user/model.go (1)
+- backend/internal/workflow/executor_test.go (1)
+- backend/internal/workflow/repository.go (1)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-616
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-617 – Lint-Altlast: toter Code und statische Analyse (unused, staticcheck, unconvert)
+
+**Schlüssel:** `lint-unused` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 8 Dateien unten 14 Befunde der Kategorie `unused`, `staticcheck`, `unconvert` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `unused`, `staticcheck`, `unconvert` mehr. Ungenutzte Bezeichner werden entfernt oder ihr fehlender Aufrufer wird ergänzt; staticcheck- und unconvert-Befunde werden behoben.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (8 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/asset/label.go (1)
+- backend/internal/audit/audit.go (1)
+- backend/internal/discovery/reconciliation.go (3)
+- backend/internal/identity/jwks.go (3)
+- backend/internal/iga/scim.go (1)
+- backend/internal/user/pg_repository.go (2)
+- backend/internal/user/privacy_test.go (1)
+- backend/internal/workflow/executor_test.go (2)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-617
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-618 – Lint-Altlast: govet (shadow, unusedwrite, nilness) 1/3
+
+**Schlüssel:** `lint-govet-1` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 15 Dateien unten 35 Befunde der Kategorie `govet` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `govet` mehr. Verdeckte Variablen (`shadow`) werden umbenannt oder die innere Deklaration entfällt; `unusedwrite` und `nilness` werden behoben. Wo das Verdecken einen Fehlerpfad verschluckt, belegt ein Test das korrigierte Verhalten.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (15 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/cmd/server/main.go (4)
+- backend/internal/audit/pg_roundtrip_integration_test.go (7)
+- backend/internal/cache/memory_test.go (1)
+- backend/internal/ci/pg_repository.go (4)
+- backend/internal/citype/pg_repository.go (2)
+- backend/internal/composition/cycle_integration_test.go (3)
+- backend/internal/consumable/pg_repository.go (1)
+- backend/internal/credential/credential.go (3)
+- backend/internal/credential/credential_test.go (2)
+- backend/internal/credential/handler_test.go (2)
+- backend/internal/database/pool.go (1)
+- backend/internal/discovery/enroll_handler_test.go (2)
+- backend/internal/document/handler.go (1)
+- backend/internal/export/render.go (1)
+- backend/internal/identity/handler_test.go (1)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-618
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-619 – Lint-Altlast: govet (shadow, unusedwrite, nilness) 2/3
+
+**Schlüssel:** `lint-govet-2` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 15 Dateien unten 28 Befunde der Kategorie `govet` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `govet` mehr. Verdeckte Variablen (`shadow`) werden umbenannt oder die innere Deklaration entfällt; `unusedwrite` und `nilness` werden behoben. Wo das Verdecken einen Fehlerpfad verschluckt, belegt ein Test das korrigierte Verhalten.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (15 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/identity/jwks.go (1)
+- backend/internal/identity/oidc.go (4)
+- backend/internal/identity/session.go (1)
+- backend/internal/iga/iga_test.go (1)
+- backend/internal/iga/pg_repository.go (3)
+- backend/internal/ipam/handler_test.go (1)
+- backend/internal/keymgmt/pg_repository.go (1)
+- backend/internal/keymgmt/repository_test.go (1)
+- backend/internal/middleware/auth.go (2)
+- backend/internal/movement/handler.go (1)
+- backend/internal/platform/blob/blob.go (3)
+- backend/internal/rack/handler_test.go (1)
+- backend/internal/rack/pg_repository.go (2)
+- backend/internal/rack/repository.go (1)
+- backend/internal/relationship/pg_repository_integration_test.go (5)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-619
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-620 – Lint-Altlast: govet (shadow, unusedwrite, nilness) 3/3
+
+**Schlüssel:** `lint-govet-3` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 15 Dateien unten 31 Befunde der Kategorie `govet` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `govet` mehr. Verdeckte Variablen (`shadow`) werden umbenannt oder die innere Deklaration entfällt; `unusedwrite` und `nilness` werden behoben. Wo das Verdecken einen Fehlerpfad verschluckt, belegt ein Test das korrigierte Verhalten.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (15 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/stocktake/pg_repository.go (1)
+- backend/internal/stocktake/pg_repository_test.go (4)
+- backend/internal/tenant/rls/isolation_integration_test.go (1)
+- backend/internal/training/repository_test.go (1)
+- backend/internal/user/repository_test.go (3)
+- backend/internal/workflow/executor.go (2)
+- backend/internal/workflow/executor_test.go (2)
+- backend/internal/workflow/handler.go (1)
+- collector/collectorcmd/collectorcmd.go (3)
+- collector/plugins/ipmi/ipmi.go (4)
+- collector/plugins/snmp/snmp.go (2)
+- collector/plugins/snmp/trap.go (2)
+- collector/plugins/ssh/ssh_test.go (1)
+- collector/plugins/sweep/sweep_test.go (2)
+- edgecore/buffer/buffer_test.go (2)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-620
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-621 – Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 1/9
+
+**Schlüssel:** `lint-gocritic-1` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 14 Dateien unten 31 Befunde der Kategorie `gocritic` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `gocritic` mehr. Große Werte werden per Zeiger übergeben bzw. per Index iteriert (`hugeParam`, `rangeValCopy`), die übrigen Stilbefunde (`paramTypeCombine`, `unnamedResult`, `httpNoBody`, `builtinShadow`, `importShadow`, `typeDefFirst`, `nestingReduce` u. a.) werden behoben. Eine Prüfung wird nicht abgeschaltet; ein begründetes `//nolint:gocritic` je Stelle ist nur zulässig, wo die Zeigerübergabe eine öffentliche Schnittstelle bricht.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (14 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/agent/handler.go (1)
+- backend/internal/agent/repository.go (2)
+- backend/internal/ai/ci_indexer.go (1)
+- backend/internal/ai/handler.go (1)
+- backend/internal/ai/pg_repository.go (2)
+- backend/internal/ai/provider.go (3)
+- backend/internal/ai/repository.go (4)
+- backend/internal/ai/retrieval.go (3)
+- backend/internal/asset/pg_repository.go (2)
+- backend/internal/asset/repository.go (3)
+- backend/internal/asset/sort.go (3)
+- backend/internal/assignment/pg_repository.go (1)
+- backend/internal/assignment/repository.go (2)
+- backend/internal/assignment/sort.go (3)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-621
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-622 – Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 2/9
+
+**Schlüssel:** `lint-gocritic-2` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 14 Dateien unten 45 Befunde der Kategorie `gocritic` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `gocritic` mehr. Große Werte werden per Zeiger übergeben bzw. per Index iteriert (`hugeParam`, `rangeValCopy`), die übrigen Stilbefunde (`paramTypeCombine`, `unnamedResult`, `httpNoBody`, `builtinShadow`, `importShadow`, `typeDefFirst`, `nestingReduce` u. a.) werden behoben. Eine Prüfung wird nicht abgeschaltet; ein begründetes `//nolint:gocritic` je Stelle ist nur zulässig, wo die Zeigerübergabe eine öffentliche Schnittstelle bricht.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (14 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/audit/audit.go (1)
+- backend/internal/cache/memory.go (2)
+- backend/internal/cache/redis.go (2)
+- backend/internal/ci/indexing_repository.go (1)
+- backend/internal/ci/memory_repo.go (3)
+- backend/internal/ci/pg_repository.go (2)
+- backend/internal/ci/service.go (3)
+- backend/internal/ci/sort.go (3)
+- backend/internal/ci/validation.go (2)
+- backend/internal/citype/handler.go (2)
+- backend/internal/citype/model.go (2)
+- backend/internal/citype/pg_repository.go (4)
+- backend/internal/citype/repository.go (15)
+- backend/internal/citype/resolver.go (3)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-622
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-623 – Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 3/9
+
+**Schlüssel:** `lint-gocritic-3` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 14 Dateien unten 30 Befunde der Kategorie `gocritic` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `gocritic` mehr. Große Werte werden per Zeiger übergeben bzw. per Index iteriert (`hugeParam`, `rangeValCopy`), die übrigen Stilbefunde (`paramTypeCombine`, `unnamedResult`, `httpNoBody`, `builtinShadow`, `importShadow`, `typeDefFirst`, `nestingReduce` u. a.) werden behoben. Eine Prüfung wird nicht abgeschaltet; ein begründetes `//nolint:gocritic` je Stelle ist nur zulässig, wo die Zeigerübergabe eine öffentliche Schnittstelle bricht.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (14 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/citype/templates.go (3)
+- backend/internal/compliance/evaluator.go (5)
+- backend/internal/compliance/report.go (2)
+- backend/internal/consumable/model.go (1)
+- backend/internal/credential/credential.go (1)
+- backend/internal/discovery/discovery.go (2)
+- backend/internal/discovery/jobs.go (1)
+- backend/internal/discovery/reconciliation.go (6)
+- backend/internal/discovery/review.go (3)
+- backend/internal/discovery/topology.go (2)
+- backend/internal/document/repository.go (1)
+- backend/internal/document/sort.go (1)
+- backend/internal/entitlement/entitlement.go (1)
+- backend/internal/entitlement/pg_repository.go (1)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-623
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-624 – Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 4/9
+
+**Schlüssel:** `lint-gocritic-4` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 14 Dateien unten 30 Befunde der Kategorie `gocritic` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `gocritic` mehr. Große Werte werden per Zeiger übergeben bzw. per Index iteriert (`hugeParam`, `rangeValCopy`), die übrigen Stilbefunde (`paramTypeCombine`, `unnamedResult`, `httpNoBody`, `builtinShadow`, `importShadow`, `typeDefFirst`, `nestingReduce` u. a.) werden behoben. Eine Prüfung wird nicht abgeschaltet; ein begründetes `//nolint:gocritic` je Stelle ist nur zulässig, wo die Zeigerübergabe eine öffentliche Schnittstelle bricht.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (14 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/entitlement/repository.go (1)
+- backend/internal/export/export.go (4)
+- backend/internal/export/memory_job_repository.go (1)
+- backend/internal/export/pg_job_repository.go (1)
+- backend/internal/export/render.go (2)
+- backend/internal/export/worker.go (3)
+- backend/internal/fieldmeta/fieldmeta.go (4)
+- backend/internal/form/validator.go (6)
+- backend/internal/history/model.go (1)
+- backend/internal/history/repository.go (2)
+- backend/internal/identity/apikey.go (1)
+- backend/internal/identity/jwks.go (1)
+- backend/internal/identity/principal.go (2)
+- backend/internal/identity/session.go (1)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-624
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-625 – Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 5/9
+
+**Schlüssel:** `lint-gocritic-5` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 14 Dateien unten 44 Befunde der Kategorie `gocritic` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `gocritic` mehr. Große Werte werden per Zeiger übergeben bzw. per Index iteriert (`hugeParam`, `rangeValCopy`), die übrigen Stilbefunde (`paramTypeCombine`, `unnamedResult`, `httpNoBody`, `builtinShadow`, `importShadow`, `typeDefFirst`, `nestingReduce` u. a.) werden behoben. Eine Prüfung wird nicht abgeschaltet; ein begründetes `//nolint:gocritic` je Stelle ist nur zulässig, wo die Zeigerübergabe eine öffentliche Schnittstelle bricht.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (14 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/iga/connector.go (4)
+- backend/internal/iga/jml.go (1)
+- backend/internal/iga/repository.go (2)
+- backend/internal/iga/scim.go (5)
+- backend/internal/ipam/pg_repository.go (2)
+- backend/internal/ipam/repository.go (3)
+- backend/internal/lifecycle/pg_repository.go (1)
+- backend/internal/lifecycle/repository.go (1)
+- backend/internal/lifecycle/service.go (2)
+- backend/internal/middleware/auth.go (1)
+- backend/internal/monitoring/evaluator.go (2)
+- backend/internal/monitoring/monitoring.go (14)
+- backend/internal/monitoring/pg_alert_store.go (4)
+- backend/internal/monitoring/pg_store.go (2)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-625
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-626 – Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 6/9
+
+**Schlüssel:** `lint-gocritic-6` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 14 Dateien unten 22 Befunde der Kategorie `gocritic` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `gocritic` mehr. Große Werte werden per Zeiger übergeben bzw. per Index iteriert (`hugeParam`, `rangeValCopy`), die übrigen Stilbefunde (`paramTypeCombine`, `unnamedResult`, `httpNoBody`, `builtinShadow`, `importShadow`, `typeDefFirst`, `nestingReduce` u. a.) werden behoben. Eine Prüfung wird nicht abgeschaltet; ein begründetes `//nolint:gocritic` je Stelle ist nur zulässig, wo die Zeigerübergabe eine öffentliche Schnittstelle bricht.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (14 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/movement/repository.go (1)
+- backend/internal/platform/audit/audit.go (4)
+- backend/internal/platform/blob/blob.go (1)
+- backend/internal/platform/httpx/httpx.go (1)
+- backend/internal/privacy/privacy.go (2)
+- backend/internal/rack/repository.go (2)
+- backend/internal/relationship/pg_repository.go (1)
+- backend/internal/relationship/relationship.go (2)
+- backend/internal/relationshiptype/pg_repository.go (1)
+- backend/internal/relationshiptype/repository.go (3)
+- backend/internal/reservation/pg_repository.go (1)
+- backend/internal/reservation/repository.go (1)
+- backend/internal/savedview/filter.go (1)
+- backend/internal/savedview/pg_repository.go (1)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-626
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-627 – Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 7/9
+
+**Schlüssel:** `lint-gocritic-7` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 14 Dateien unten 53 Befunde der Kategorie `gocritic` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `gocritic` mehr. Große Werte werden per Zeiger übergeben bzw. per Index iteriert (`hugeParam`, `rangeValCopy`), die übrigen Stilbefunde (`paramTypeCombine`, `unnamedResult`, `httpNoBody`, `builtinShadow`, `importShadow`, `typeDefFirst`, `nestingReduce` u. a.) werden behoben. Eine Prüfung wird nicht abgeschaltet; ein begründetes `//nolint:gocritic` je Stelle ist nur zulässig, wo die Zeigerübergabe eine öffentliche Schnittstelle bricht.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (14 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/savedview/query.go (2)
+- backend/internal/savedview/repository.go (1)
+- backend/internal/search/ci_indexer.go (1)
+- backend/internal/search/handler.go (1)
+- backend/internal/search/hybrid.go (3)
+- backend/internal/search/opensearch.go (6)
+- backend/internal/search/pg_repository.go (3)
+- backend/internal/search/repository.go (4)
+- backend/internal/server/authz.go (15)
+- backend/internal/server/router.go (5)
+- backend/internal/sla/repository.go (1)
+- backend/internal/stocktake/pg_repository.go (2)
+- backend/internal/stocktake/repository.go (6)
+- backend/internal/stocktake/sort.go (3)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-627
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-628 – Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 8/9
+
+**Schlüssel:** `lint-gocritic-8` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 14 Dateien unten 36 Befunde der Kategorie `gocritic` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `gocritic` mehr. Große Werte werden per Zeiger übergeben bzw. per Index iteriert (`hugeParam`, `rangeValCopy`), die übrigen Stilbefunde (`paramTypeCombine`, `unnamedResult`, `httpNoBody`, `builtinShadow`, `importShadow`, `typeDefFirst`, `nestingReduce` u. a.) werden behoben. Eine Prüfung wird nicht abgeschaltet; ein begründetes `//nolint:gocritic` je Stelle ist nur zulässig, wo die Zeigerübergabe eine öffentliche Schnittstelle bricht.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+
+**Dateien (14 Go-Dateien sowie tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- backend/internal/tenantapi/repository.go (1)
+- backend/internal/ticket/pg_repository.go (2)
+- backend/internal/ticket/repository.go (3)
+- backend/internal/ticket/sort.go (3)
+- backend/internal/topology/topology.go (3)
+- backend/internal/user/handler.go (1)
+- backend/internal/webhook/delivery_store.go (6)
+- backend/internal/webhook/dispatcher.go (9)
+- backend/internal/webhook/pg_delivery_store.go (3)
+- backend/internal/webhook/webhook.go (1)
+- backend/internal/workflow/executor.go (1)
+- backend/internal/workflow/pg_repository.go (1)
+- backend/internal/workflow/repository.go (1)
+- collector/plugins/ipmi/ipmi.go (1)
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-628
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen.
+
+### WP-629 – Lint-Altlast: gocritic (hugeParam, rangeValCopy, Stilregeln) 9/9
+
+**Schlüssel:** `lint-gocritic-9` · **Meilenstein:** M2.11 Lint-Altlast (Nachtrag WP-499) · **Epic (Traceability):** A · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-499 (`t5-lint-baseline`), WP-613 (`lint-errcheck`), WP-614 (`lint-ineffassign-1`), WP-615 (`lint-ineffassign-2`), WP-616 (`lint-fmt`), WP-617 (`lint-unused`), WP-618 (`lint-govet-1`), WP-619 (`lint-govet-2`), WP-620 (`lint-govet-3`), WP-621 (`lint-gocritic-1`), WP-622 (`lint-gocritic-2`), WP-623 (`lint-gocritic-3`), WP-624 (`lint-gocritic-4`), WP-625 (`lint-gocritic-5`), WP-626 (`lint-gocritic-6`), WP-627 (`lint-gocritic-7`), WP-628 (`lint-gocritic-8`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TST-04 | [Q] | TEILWEISE BESTANDEN (WP-001) | P2 (F-123) | Teil | `audit/phase1-final/PHASE1_FINDINGS.md` (F-123) | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
+
+**Problem:** Ohne `issues.new-from-rev` meldet golangci-lint in den 9 Dateien unten 15 Befunde der Kategorie `gocritic` (Stand WP-499); die Baseline aus WP-001 verdeckt sie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Dateien unten haben keinen Befund der Kategorie `gocritic` mehr. Große Werte werden per Zeiger übergeben bzw. per Index iteriert (`hugeParam`, `rangeValCopy`), die übrigen Stilbefunde (`paramTypeCombine`, `unnamedResult`, `httpNoBody`, `builtinShadow`, `importShadow`, `typeDefFirst`, `nestingReduce` u. a.) werden behoben. Eine Prüfung wird nicht abgeschaltet; ein begründetes `//nolint:gocritic` je Stelle ist nur zulässig, wo die Zeigerübergabe eine öffentliche Schnittstelle bricht.
+- [ ] `tests/lint-debt-baseline.txt` ist um die behobenen Befunde gesenkt; `scripts/ci/lint-debt.sh` und der Job `lint` sind grün; `go test` der betroffenen Pakete grün.
+- [ ] `issues.new-from-rev` und der Baseline-Kommentar sind aus `backend/.golangci.yml` entfernt, `fetch-depth: 0` aus dem Job `lint` in `.github/workflows/ci.yml`; `tests/lint-debt-baseline.txt` steht für backend, collector und edgecore auf 0 (Retest F-123: golangci-lint v2.14.0 mit Repo-Konfiguration 0 issues für alle drei Module).
+
+**Dateien (9 Go-Dateien sowie backend/.golangci.yml, .github/workflows/ci.yml und tests/lint-debt-baseline.txt; Befunde je Datei in Klammern):**
+
+- collector/plugins/nas/nas.go (1)
+- collector/plugins/redfish/redfish.go (2)
+- collector/plugins/snmp/snmp.go (2)
+- collector/plugins/snmp/trap.go (1)
+- collector/profiles/profiles.go (5)
+- edgecore/buffer/buffer.go (1)
+- edgecore/keystore/keystore.go (1)
+- edgecore/transport/transport.go (1)
+- edgecore/update/update.go (1)
+- backend/.golangci.yml
+- .github/workflows/ci.yml
+- tests/lint-debt-baseline.txt
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `scripts/ci/lint-debt.sh` (Job `lint`) mit gesenkter Baseline; `tests/lint-toolchain.test.sh`.
+- `go test` der betroffenen Pakete; neue Tests nur für geänderte Fehler- oder Wertpfade.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-629
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Befunde anderer Kategorien in denselben Dateien; Abschalten von Prüfungen oder Linter-Einstellungen; neue Linter.
 
 ## Abdeckung
 

@@ -1,0 +1,9 @@
+# Lint backlog per go.work module: findings of golangci-lint (pinned version,
+# backend/.golangci.yml) without issues.new-from-rev (WP-499, F-123).
+# scripts/ci/lint-debt.sh fails when a number rises; lower a number when a
+# change clears findings. The follow-up work packages "Lint-Altlast" in
+# docs/plan/phase2/implementierungsplan.md bring every number to 0.
+# <module> <findings>
+backend 426
+collector 28
+edgecore 6
