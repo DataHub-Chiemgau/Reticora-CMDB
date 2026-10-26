@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -391,4 +392,64 @@ func dropInvalidWith(ctx context.Context, v ObservedValidator, orgID, typeID, ci
 		slog.WarnContext(ctx, "discovery value rejected by the field metadata", "field", field, "ci_type_id", typeID)
 	}
 	return len(invalid), nil
+}
+
+// dropInvalidTyped removes the typed column values of an item that violate
+// the column's MET-11 data type (a multi-line hostname, a hardware_uuid that
+// is no UUID, a malformed MAC or IP), as a manual write refuses them, and
+// returns how many it dropped (CI-03, MET-11, WP-501). It runs before the
+// identities of a batch are resolved: a malformed identity value would
+// otherwise reach the candidate query or the INSERT and fail the record.
+// The fingerprint's hardware UUID is checked alike, and fingerprint MACs
+// equal to a dropped primary MAC go with it. A dropped name falls back to
+// the hostname or the management IP, as the name of a DeviceRecord does.
+// The item's fingerprint map is replaced, not changed: callers share it.
+func dropInvalidTyped(ctx context.Context, item *IngestItem) int {
+	typed := observedTypedFields(item)
+	values := map[string]any{}
+	for name, ptr := range typed {
+		if *ptr != "" {
+			values[name] = *ptr
+		}
+	}
+	invalid := ci.InvalidTypedColumns(values)
+	dropped := len(invalid)
+	droppedMAC := ""
+	for _, field := range invalid {
+		if field == "primary_mac" {
+			droppedMAC = item.PrimaryMAC
+		}
+		*typed[field] = ""
+		slog.WarnContext(ctx, "discovery value rejected by its data type", "field", field)
+	}
+	fpUUID := fingerprintString(item.Fingerprint["hardware_uuid"])
+	fpInvalid := fpUUID != "" && len(ci.InvalidTypedColumns(map[string]any{"hardware_uuid": fpUUID})) > 0
+	if fpInvalid || droppedMAC != "" {
+		fingerprint := maps.Clone(item.Fingerprint)
+		if fpInvalid {
+			delete(fingerprint, "hardware_uuid")
+			if fpUUID != values["hardware_uuid"] {
+				dropped++
+				slog.WarnContext(ctx, "discovery value rejected by its data type", "field", "fingerprint.hardware_uuid")
+			}
+		}
+		if macs := fingerprintSlice(fingerprint["mac_addresses"]); droppedMAC != "" && len(macs) > 0 {
+			kept := make([]any, 0, len(macs))
+			for _, mac := range macs {
+				if !strings.EqualFold(mac, strings.TrimSpace(droppedMAC)) {
+					kept = append(kept, mac)
+				}
+			}
+			if len(kept) > 0 {
+				fingerprint["mac_addresses"] = kept
+			} else {
+				delete(fingerprint, "mac_addresses")
+			}
+		}
+		item.Fingerprint = fingerprint
+	}
+	if item.Name == "" && values["name"] != nil {
+		item.Name = firstNonEmpty(item.Hostname, item.ManagementIP)
+	}
+	return dropped
 }

@@ -8180,6 +8180,8 @@ export interface components {
       rejected_future?: number;
       /** @description New devices held as unlicensed_ci review items because max_cis is reached (ENT-03, CH21). */
       unlicensed?: number;
+      /** @description Sum over the processed records of the discovered values dropped because a manual write would refuse them: the data type of a typed CI column (MET-11; a multi-line hostname, a hardware_uuid that is no UUID, a malformed MAC or IP) or the field definitions of the CI type (CI-03). The rest of each record is stored; no value fails a record or the batch (WP-501). Absent when no value was dropped; with the queue the records are processed asynchronously and it stays absent. */
+      invalid_values?: number;
       job_id?: string;
       /** @description Records processed, deduplicated or queued (REC-01). A record that fails does not take the others of the request down (WP-481). */
       accepted: number;
@@ -13102,7 +13104,15 @@ export interface operations {
           'application/json': components['schemas']['DiscoveryIngestResponse'];
         };
       };
-      400: components['responses']['BadRequest'];
+      /** @description The body is unusable: no valid JSON or gzip, no records, records and items mixed, or a reserved attribute namespace. A malformed value of a typed CI column (e.g. hardware_uuid, primary_mac, management_ip, a multi-line hostname) refuses nothing: it is dropped, counted in invalid_values, and the rest of its record and the other records are processed (WP-501). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       /** @description Decompressed body larger than 64 MiB */
@@ -13114,7 +13124,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field) */
+      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field). identity.hardware_uuid and identity.primary_mac are values of typed CI columns: a malformed one is dropped and counted in invalid_values instead (WP-501). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -20973,7 +20983,15 @@ export interface operations {
           'application/json': components['schemas']['DiscoveryIngestResponse'];
         };
       };
-      400: components['responses']['BadRequest'];
+      /** @description The body is unusable: no valid JSON or gzip, no records, records and items mixed, or a reserved attribute namespace. A malformed value of a typed CI column (e.g. hardware_uuid, primary_mac, management_ip, a multi-line hostname) refuses nothing: it is dropped, counted in invalid_values, and the rest of its record and the other records are processed (WP-501). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       /** @description Decompressed body larger than 64 MiB */
@@ -20985,7 +21003,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field) */
+      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field). identity.hardware_uuid and identity.primary_mac are values of typed CI columns: a malformed one is dropped and counted in invalid_values instead (WP-501). */
       422: {
         headers: {
           [name: string]: unknown;

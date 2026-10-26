@@ -795,3 +795,5 @@ REL-03;[B];D;backend/internal/discovery/power_test.go;WP-498
 AUD-05;[B];B;backend/internal/server/route_audit_integration_test.go;WP-504
 AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-504
 EVT-01;[B];B;backend/internal/webhook/consume_integration_test.go;WP-506
+MET-11;B/G1, Teil P2/G2;B;backend/internal/discovery/typedvalues_integration_test.go;WP-501
+CI-03;[B];B;backend/internal/discovery/typedvalues_integration_test.go;WP-501

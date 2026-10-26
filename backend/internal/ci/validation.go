@@ -337,14 +337,24 @@ func validateTypedColumns(typed map[string]any) error {
 	return &ValidationError{Violations: violations}
 }
 
+// InvalidTypedColumns returns the typed CI columns among values whose value
+// violates the column's MET-11 data type, sorted: the check
+// validateTypedColumns applies to a manual write. Discovery drops these
+// values before it resolves identities, so a malformed identity value
+// never reaches a query.
+func InvalidTypedColumns(values map[string]any) []string {
+	return invalidObserved(nil, values)
+}
+
 // InvalidObserved returns the fields whose observed values (typed columns
 // and attributes, by field name) violate the field metadata of the CI
-// type: the same value rules as a manual write (CI-03, MET-11). Required
-// fields do not apply, an observation may lack them. Discovery drops the
-// returned values instead of storing them.
+// type or, for a typed column, its own data type: the same value rules as
+// a manual write (CI-03, MET-11). Required fields do not apply, an
+// observation may lack them. Discovery drops the returned values instead
+// of storing them.
 func (s *Service) InvalidObserved(ctx context.Context, orgID, ciTypeID, ciID string, values map[string]any) ([]string, error) {
 	if s.fields == nil || len(values) == 0 {
-		return nil, nil
+		return invalidObserved(nil, values), nil
 	}
 	defs, err := resolveFields(ctx, s.fields, orgID, ciTypeID, ciID)
 	if err != nil {
@@ -359,7 +369,7 @@ func (s *Service) InvalidObserved(ctx context.Context, orgID, ciTypeID, ciID str
 // definitions once per type instead of once per device (NFR-03, WP-333).
 func (s *Service) ObservedRules(ctx context.Context, orgID, ciTypeID string) (func(values map[string]any) []string, error) {
 	if s.fields == nil {
-		return func(map[string]any) []string { return nil }, nil
+		return func(values map[string]any) []string { return invalidObserved(nil, values) }, nil
 	}
 	defs, err := resolveFields(ctx, s.fields, orgID, ciTypeID, "")
 	if err != nil {
@@ -368,20 +378,38 @@ func (s *Service) ObservedRules(ctx context.Context, orgID, ciTypeID string) (fu
 	return func(values map[string]any) []string { return invalidObserved(defs, values) }, nil
 }
 
-// invalidObserved returns the fields of defs whose observed value violates
-// the definition, sorted.
+// invalidObserved returns the fields whose observed value violates their
+// definition in defs or, for a typed column, the column's data type (an
+// implicit definition, as validateTypedColumns checks a manual write),
+// sorted and each once.
 func invalidObserved(defs []fieldmeta.FieldDefinition, values map[string]any) []string {
-	var invalid []string
-	for i := range defs {
-		def := &defs[i]
-		value, ok := values[def.Name]
+	invalid := map[string]bool{}
+	for name, dataType := range typedColumns {
+		value, ok := values[name]
 		if !ok || isBlank(value) {
 			continue
 		}
-		if err := fieldmeta.ValidateValue(*def, value); err != nil {
-			invalid = append(invalid, def.Name)
+		if err := fieldmeta.ValidateValue(fieldmeta.FieldDefinition{Name: name, DataType: dataType}, value); err != nil {
+			invalid[name] = true
 		}
 	}
-	sort.Strings(invalid)
-	return invalid
+	for i := range defs {
+		def := &defs[i]
+		value, ok := values[def.Name]
+		if !ok || isBlank(value) || invalid[def.Name] {
+			continue
+		}
+		if err := fieldmeta.ValidateValue(*def, value); err != nil {
+			invalid[def.Name] = true
+		}
+	}
+	if len(invalid) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(invalid))
+	for name := range invalid {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }

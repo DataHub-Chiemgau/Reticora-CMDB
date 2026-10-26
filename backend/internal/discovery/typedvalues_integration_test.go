@@ -1,25 +1,27 @@
-//go:build auditdefect
-
-// Phase-1 acceptance audit, group T6-epic-b – DEFECT test (must fail until fixed).
+// Typed CI columns in discovery on PostgreSQL (WP-501, MET-11, CI-03,
+// finding F-143).
 //
-// WP-117 (MET-11, CI-03) – acceptance criterion "Discovery-Schreibpfad nutzt
-// dieselbe Validierung".
-// Finding P2 "Discovery skips typed-column data-type validation: invalid values
-// are persisted or fail the whole batch": ci/validation.go invalidObserved only
-// iterates resolved definitions; typedColumns are checked only by
-// Service.Create/Update. A multi-line hostname is stored by discovery while
-// POST /cis rejects it (422); an invalid uuid/mac/ip reaches the INSERT and the
-// legacy contract answers 400 after storing only the records before it.
-// Gap (high): discovery observed-value validation on PostgreSQL for typed
-// columns without definitions, in both ingest contracts.
+//   - TestAuditDefectDiscoveryTypedValuesValidated (moved from
+//     typedvalues_auditdefect_test.go): discovery checks the typed CI
+//     columns with their MET-11 data type, as a manual write does
+//     (ci.InvalidTypedColumns, InvalidObserved and ObservedRules take them
+//     as implicit definitions). A multi-line hostname, a hardware_uuid that
+//     is no UUID, a malformed MAC or IP is dropped (column NULL) and counted
+//     in invalid_values; the rest of the record is stored. Neither ingest
+//     contract refuses or truncates the batch: POST /ingest/bulk with items
+//     and POST /discovery/ingest with DeviceRecords answer 202, every device
+//     is stored, no record is rejected. Before WP-501 the multi-line
+//     hostname was stored, a malformed uuid or IP failed its record and the
+//     DeviceRecord contract answered 422 for the whole batch.
 //
-// Expected (dossier retest): 202, every device stored, the invalid values
-// dropped (column NULL) and counted in invalid_values, other fields stored.
+// The queue path (dedicated nats-server) is TestIngestQueueDropsInvalidTypedValue
+// in ingest_poison_integration_test.go; the manual write keeps refusing the
+// same values (ci/validation_test.go TestObservedTypedValuesFollowManualWrites).
 //
 // Retest:
 //
-//	cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_11?sslmode=disable \
-//	  go test -tags auditdefect -count=1 -v -run 'TestAuditDefectDiscoveryTypedValues' ./internal/discovery/
+//	cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/<db>?sslmode=disable \
+//	  go test -count=1 -v -run 'TestAuditDefectDiscoveryTypedValues' ./internal/discovery/
 package discovery_test
 
 import (
@@ -96,8 +98,11 @@ func TestAuditDefectDiscoveryTypedValuesValidated(t *testing.T) {
 				t.Errorf("device %s stored %+v: %s", c.name, r, c.want)
 			}
 		}
-		if got, _ := resp["invalid_values"].(float64); int(got) < invalid {
-			t.Errorf("invalid_values = %v, want >= %d", resp["invalid_values"], invalid)
+		if got, _ := resp["invalid_values"].(float64); int(got) != invalid {
+			t.Errorf("invalid_values = %v, want %d (the dropped values)", resp["invalid_values"], invalid)
+		}
+		if got, _ := resp["rejected"].(float64); got != 0 {
+			t.Errorf("rejected = %v, want 0: a malformed value fails no record (%v)", resp["rejected"], resp)
 		}
 	}
 	singleLine := func(r typedRow) bool { return !strings.ContainsAny(r.hostname, "\r\n") }
@@ -166,5 +171,43 @@ func TestAuditDefectDiscoveryTypedValuesValidated(t *testing.T) {
 			{"audit-dd-s-uuid", func(r typedRow) bool { return r.uuid == "" && r.serial == "SN-DD-S2" }, "invalid hardware_uuid dropped, other fields kept"},
 			{"audit-dd-s-last", func(r typedRow) bool { return r.serial == "SN-DD-S3" }, "record after the malformed one stored"},
 		})
+	})
+
+	t.Run("records: malformed primary_mac is dropped, a valid one stored", func(t *testing.T) {
+		good := rec("audit-dd-m-valid", "192.0.2.181", "SN-DD-M1")
+		good.Identity.PrimaryMAC = "00:1a:2b:3c:4d:51"
+		bad := rec("audit-dd-m-bad", "192.0.2.182", "SN-DD-M2")
+		bad.Identity.PrimaryMAC = "zz:zz"
+		bad.Identity.Hostname = "m-host"
+		code, resp := post("/api/v1/discovery/ingest", records(t, good, bad))
+		verify(t, code, resp, 1, []check{
+			{"audit-dd-m-valid", func(r typedRow) bool { return r.mac == "00:1a:2b:3c:4d:51" }, "valid primary_mac stored"},
+			{"audit-dd-m-bad", func(r typedRow) bool { return r.mac == "" && r.hostname == "m-host" && r.serial == "SN-DD-M2" },
+				"invalid primary_mac dropped, other fields kept"},
+		})
+	})
+
+	t.Run("records: a malformed value of a known device leaves the stored one", func(t *testing.T) {
+		first := rec("audit-dd-u", "192.0.2.191", "SN-DD-U1")
+		first.Identity.HardwareUUID = "c0de0501-0000-4000-8000-000000000001"
+		first.Identity.Hostname = "u-host-1"
+		code, resp := post("/api/v1/discovery/ingest", records(t, first))
+		verify(t, code, resp, 0, []check{
+			{"audit-dd-u", func(r typedRow) bool { return r.uuid == "c0de0501-0000-4000-8000-000000000001" }, "valid hardware_uuid stored"},
+		})
+		second := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "server", Name: "audit-dd-u", IP: "192.0.2.191", Serial: "SN-DD-U1",
+			Model: "u-model-2"}, time.Now().UTC().Add(-30*time.Second))
+		second.Identity.HardwareUUID = "not-a-uuid"
+		code, resp = post("/api/v1/discovery/ingest", records(t, second))
+		verify(t, code, resp, 1, []check{
+			{"audit-dd-u", func(r typedRow) bool { return r.uuid == "c0de0501-0000-4000-8000-000000000001" }, "the malformed hardware_uuid is not written"},
+		})
+		if updated, _ := resp["updated"].(float64); updated != 1 {
+			t.Errorf("updated = %v, want 1 (the known device)", resp["updated"])
+		}
+		var model string
+		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(model, '') FROM ci WHERE organization_id = $1 AND name = 'audit-dd-u'`, f.OrgA).Scan(&model); err != nil || model != "u-model-2" {
+			t.Errorf("model of the known device = %q, %v; want u-model-2: the rest of the record is stored", model, err)
+		}
 	})
 }

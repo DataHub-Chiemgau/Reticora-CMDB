@@ -130,8 +130,9 @@ type BulkIngestResponse struct {
 	// ProtectedInstanceFields counts matched CIs where discovered values for
 	// instance attributes were not written (MET-14).
 	ProtectedInstanceFields int `json:"protected_instance_fields,omitempty"`
-	// InvalidValues counts discovered values the field metadata rejected;
-	// they are not stored (CI-03, MET-11).
+	// InvalidValues counts discovered values the field metadata or the data
+	// type of their typed column rejected; they are not stored, the rest of
+	// their record is (CI-03, MET-11, WP-501).
 	InvalidValues int `json:"invalid_values,omitempty"`
 	// Duplicates counts records whose record_id was processed within the
 	// last 48 hours; they change nothing (REC-01).
@@ -1280,6 +1281,13 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 	frame.resp.Duplicates = duplicates
 	if len(items) == 0 {
 		return frame, nil
+	}
+	// Typed values a manual write refuses are dropped and counted before
+	// anything resolves identities with them (WP-501). The items are copied:
+	// a frame that starts again checks the values of the caller again.
+	items = slices.Clone(items)
+	for i := range items {
+		frame.resp.InvalidValues += dropInvalidTyped(ctx, &items[i])
 	}
 
 	// Resolve ci_type_name to the canonical ci_type UUID before
