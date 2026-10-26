@@ -2810,7 +2810,7 @@ export interface paths {
   '/api/v1/topology/cis/{id}/impact': {
     parameters: {
       query?: {
-        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20, a larger value is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
@@ -2861,7 +2861,7 @@ export interface paths {
   '/api/v1/impact/{ci_id}': {
     parameters: {
       query?: {
-        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20, a larger value is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
@@ -5983,7 +5983,7 @@ export interface paths {
     };
     /**
      * Compute the blast radius of a CI failure
-     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed. single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one.
+     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed. single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one. As in /api/v1/impact/{ci_id}, a CI reached only over an undirected network edge (connected_to) is a heuristic hit (IMP-03): listed in affected_cis with heuristic true and counted in heuristic_count, but not in affected_count, client_ids or site_ids.
      */
     get: operations['listCisIdBlastRadius'];
     put?: never;
@@ -6001,7 +6001,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List upstream/downstream dependencies of a CI */
+    /**
+     * List upstream/downstream dependencies of a CI
+     * @description Upstream are the CIs this CI depends on, downstream the CIs that depend on it, both read from the impact_direction of each relationship type (IMP-01), the way /api/v1/impact/{ci_id} lets a failure travel: for vm hosted_on server the server is upstream of the vm and the vm downstream of the server; powered_by and the containment projected from parent_ci_id alike. Undirected types (connected_to, a heuristic) and types without impact direction are no dependency. Only CIs the caller sees and that are not deleted are listed or passed (IMP-07).
+     */
     get: operations['listCisIdDependencies'];
     put?: never;
     post?: never;
@@ -7233,6 +7236,34 @@ export interface components {
       impacted: components['schemas']['ImpactNodeFields'][];
       count: number;
       summary: components['schemas']['ImpactSummary'];
+    };
+    BlastRadius: {
+      ci_id: string;
+      /** @description The CIs the failure reaches, certain ones first, then by name; heuristic hits (IMP-03) carry heuristic true. */
+      affected_cis: components['schemas']['BlastRadiusCI'][];
+      /** @description The CIs reached over directed impact rules only, without heuristic hits. */
+      affected_count: number;
+      /** @description The CIs reached only over an undirected network edge (connected_to). */
+      heuristic_count: number;
+      affected_services?: components['schemas']['TopologyNode'][];
+      /** @description Clients of the affected CIs (heuristic hits not included). */
+      client_ids?: string[];
+      /** @description Sites of the affected CIs (heuristic hits not included). */
+      site_ids?: string[];
+      single_points_of_failure?: components['schemas']['TopologyNode'][];
+      protected_by_redundancy?: components['schemas']['TopologyNode'][];
+    };
+    BlastRadiusCI: components['schemas']['TopologyNode'] & {
+      /** @description Reached only over an undirected network edge (connected_to), a second-class path (IMP-03). */
+      heuristic: boolean;
+    };
+    DependencyResult: {
+      ci_id: string;
+      /** @enum {string} */
+      direction: 'upstream' | 'downstream';
+      depth: number;
+      nodes: components['schemas']['TopologyNode'][];
+      count: number;
     };
     ImpactSummary: {
       failed: number;
@@ -17240,7 +17271,7 @@ export interface operations {
         ci_type?: string;
         /** @description When set, returns a subgraph reachable from this CI (a UUID). A CI the caller does not see is 404. */
         root_ci_id?: string;
-        /** @description Traversal depth from root_ci_id (default 2, max 20). */
+        /** @description Traversal depth from root_ci_id (default 2); a larger value than 20 is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
       };
       header?: never;
@@ -17258,7 +17289,7 @@ export interface operations {
           'application/json': components['schemas']['TopologyGraph'];
         };
       };
-      /** @description root_ci_id, client_id, site_id or ci_type is no UUID (for root_ci_id with field root_ci_id). */
+      /** @description root_ci_id, client_id, site_id or ci_type is no UUID (for root_ci_id with field root_ci_id), or depth is no integer or below 1 (field depth). */
       400: {
         headers: {
           [name: string]: unknown;
@@ -17318,7 +17349,7 @@ export interface operations {
   getCIImpactLegacy: {
     parameters: {
       query?: {
-        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20, a larger value is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
@@ -17341,6 +17372,15 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['ImpactAnalysis'];
+        };
+      };
+      /** @description depth is no integer or below 1 (field depth). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
       401: components['responses']['Unauthorized'];
@@ -17366,7 +17406,7 @@ export interface operations {
         categories?: string;
         /** @description Restrict the analysis to one relationship type. */
         rel_type?: string;
-        /** @description Maximum hops of the impact paths. */
+        /** @description Maximum hops of the impact paths; defaults to 20, a larger value is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
         /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
@@ -17404,7 +17444,7 @@ export interface operations {
   getCIImpact: {
     parameters: {
       query?: {
-        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20, a larger value is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
@@ -17430,6 +17470,15 @@ export interface operations {
         content: {
           'application/json':
             components['schemas']['ImpactAnalysis'] | components['schemas']['ImpactAnalysisFields'];
+        };
+      };
+      /** @description depth is no integer or below 1 (field depth). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
       401: components['responses']['Unauthorized'];
@@ -26344,7 +26393,10 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
@@ -26354,7 +26406,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['BlastRadius'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -26363,13 +26417,21 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   listCisIdDependencies: {
     parameters: {
-      query?: never;
+      query?: {
+        direction?: 'upstream' | 'downstream';
+        /** @description Maximum hops; defaults to 20, a larger value is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
+        depth?: number;
+      };
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
@@ -26379,7 +26441,18 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['DependencyResult'];
+        };
+      };
+      /** @description direction is neither upstream nor downstream, or depth is no integer or below 1 (field depth). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -26388,6 +26461,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   listCisIdFieldDefinitions: {

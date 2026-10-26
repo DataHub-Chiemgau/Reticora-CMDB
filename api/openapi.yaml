@@ -5305,11 +5305,13 @@ paths:
             type: string
         - name: depth
           in: query
-          description: Traversal depth from root_ci_id (default 2, max 20).
+          description: >-
+            Traversal depth from root_ci_id (default 2); a larger value than
+            20 is capped at 20. A value that is no integer or below 1 is 400
+            with field depth.
           schema:
             type: integer
             minimum: 1
-            maximum: 20
       responses:
         '200':
           description: Topology graph
@@ -5320,7 +5322,8 @@ paths:
         '400':
           description: >-
             root_ci_id, client_id, site_id or ci_type is no UUID (for
-            root_ci_id with field root_ci_id).
+            root_ci_id with field root_ci_id), or depth is no integer or
+            below 1 (field depth).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -5372,8 +5375,11 @@ paths:
       - $ref: '#/components/parameters/ResourceID'
       - name: depth
         in: query
-        schema: { type: integer, default: 20, maximum: 20 }
-        description: Maximum hops of the impact paths (IMP-02); defaults to 20.
+        schema: { type: integer, default: 20, minimum: 1 }
+        description: >-
+          Maximum hops of the impact paths (IMP-02); defaults to 20, a
+          larger value is capped at 20. A value that is no integer or below
+          1 is 400 with field depth.
       - name: rel_type
         in: query
         schema: { type: string }
@@ -5409,6 +5415,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ImpactAnalysis'
+        '400':
+          description: depth is no integer or below 1 (field depth).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -5448,8 +5459,11 @@ paths:
           description: Restrict the analysis to one relationship type.
         - name: depth
           in: query
-          schema: { type: integer, default: 20, maximum: 20 }
-          description: Maximum hops of the impact paths.
+          schema: { type: integer, default: 20, minimum: 1 }
+          description: >-
+            Maximum hops of the impact paths; defaults to 20, a larger value
+            is capped at 20. A value that is no integer or below 1 is 400
+            with field depth.
         - $ref: '#/components/parameters/ImpactFields'
       responses:
         '200':
@@ -5483,8 +5497,11 @@ paths:
         description: The CI whose outage is simulated.
       - name: depth
         in: query
-        schema: { type: integer, default: 20, maximum: 20 }
-        description: Maximum hops of the impact paths (IMP-02); defaults to 20.
+        schema: { type: integer, default: 20, minimum: 1 }
+        description: >-
+          Maximum hops of the impact paths (IMP-02); defaults to 20, a
+          larger value is capped at 20. A value that is no integer or below
+          1 is 400 with field depth.
       - name: rel_type
         in: query
         schema: { type: string }
@@ -5519,6 +5536,11 @@ paths:
                 anyOf:
                   - { $ref: '#/components/schemas/ImpactAnalysis' }
                   - { $ref: '#/components/schemas/ImpactAnalysisFields' }
+        '400':
+          description: depth is no integer or below 1 (field depth).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -11462,22 +11484,66 @@ paths:
         redundant type (powered_by, member_of_cluster) a CI is affected only
         when all its providers failed. single_points_of_failure lists the
         direct dependents without an alternative provider,
-        protected_by_redundancy those that keep one.
+        protected_by_redundancy those that keep one. As in
+        /api/v1/impact/{ci_id}, a CI reached only over an undirected network
+        edge (connected_to) is a heuristic hit (IMP-03): listed in
+        affected_cis with heuristic true and counted in heuristic_count,
+        but not in affected_count, client_ids or site_ids.
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
       responses:
         '200':
           description: Compute the blast radius of a CI failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlastRadius'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/cis/{id}/dependencies:
     get:
       operationId: listCisIdDependencies
       summary: List upstream/downstream dependencies of a CI
+      description: >-
+        Upstream are the CIs this CI depends on, downstream the CIs that
+        depend on it, both read from the impact_direction of each
+        relationship type (IMP-01), the way /api/v1/impact/{ci_id} lets a
+        failure travel: for vm hosted_on server the server is upstream of
+        the vm and the vm downstream of the server; powered_by and the
+        containment projected from parent_ci_id alike. Undirected types
+        (connected_to, a heuristic) and types without impact direction are
+        no dependency. Only CIs the caller sees and that are not deleted are
+        listed or passed (IMP-07).
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - name: direction
+          in: query
+          schema: { type: string, enum: [upstream, downstream], default: downstream }
+        - name: depth
+          in: query
+          schema: { type: integer, default: 20, minimum: 1 }
+          description: >-
+            Maximum hops; defaults to 20, a larger value is capped at 20. A
+            value that is no integer or below 1 is 400 with field depth.
       responses:
         '200':
           description: List upstream/downstream dependencies of a CI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DependencyResult'
+        '400':
+          description: direction is neither upstream nor downstream, or depth is no integer or below 1 (field depth).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/cis/{id}/field-definitions:
     get:
@@ -13566,6 +13632,60 @@ components:
         count: { type: integer }
         summary:
           $ref: '#/components/schemas/ImpactSummary'
+    BlastRadius:
+      type: object
+      required: [ci_id, affected_cis, affected_count, heuristic_count]
+      properties:
+        ci_id: { type: string }
+        affected_cis:
+          type: array
+          description: >-
+            The CIs the failure reaches, certain ones first, then by name;
+            heuristic hits (IMP-03) carry heuristic true.
+          items: { $ref: '#/components/schemas/BlastRadiusCI' }
+        affected_count:
+          type: integer
+          description: The CIs reached over directed impact rules only, without heuristic hits.
+        heuristic_count:
+          type: integer
+          description: The CIs reached only over an undirected network edge (connected_to).
+        affected_services:
+          type: array
+          items: { $ref: '#/components/schemas/TopologyNode' }
+        client_ids:
+          type: array
+          description: Clients of the affected CIs (heuristic hits not included).
+          items: { type: string }
+        site_ids:
+          type: array
+          description: Sites of the affected CIs (heuristic hits not included).
+          items: { type: string }
+        single_points_of_failure:
+          type: array
+          items: { $ref: '#/components/schemas/TopologyNode' }
+        protected_by_redundancy:
+          type: array
+          items: { $ref: '#/components/schemas/TopologyNode' }
+    BlastRadiusCI:
+      allOf:
+        - $ref: '#/components/schemas/TopologyNode'
+        - type: object
+          required: [heuristic]
+          properties:
+            heuristic:
+              type: boolean
+              description: Reached only over an undirected network edge (connected_to), a second-class path (IMP-03).
+    DependencyResult:
+      type: object
+      required: [ci_id, direction, depth, nodes, count]
+      properties:
+        ci_id: { type: string }
+        direction: { type: string, enum: [upstream, downstream] }
+        depth: { type: integer }
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/TopologyNode' }
+        count: { type: integer }
     ImpactSummary:
       type: object
       required: [failed, impacted, certain, heuristic, by_category]

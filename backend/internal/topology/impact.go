@@ -16,9 +16,10 @@ import (
 )
 
 // DependencyResult is the directed upstream/downstream view of a CI
-// (spec §15). Upstream = what this CI depends on (follow edges target→source
-// out of the node); downstream = what depends on it (source→target into the
-// node's dependents).
+// (spec §15). Upstream = what this CI depends on, downstream = what depends
+// on it, both read from the impact_direction of each relationship type
+// (IMP-01, F-099): vm hosted_on server puts the server upstream of the vm
+// and the vm downstream of the server.
 type DependencyResult struct {
 	CIID      string `json:"ci_id"`
 	Direction string `json:"direction"`
@@ -29,20 +30,31 @@ type DependencyResult struct {
 
 // BlastRadius summarizes the blast radius of a CI failure (spec §15):
 // affected CIs plus the resolved assets, business services, clients and sites
-// reachable through the impact set.
+// reachable through the impact set. As in /impact a CI reached only over an
+// undirected network edge (connected_to) is a heuristic hit (IMP-03,
+// F-098): listed with its mark, counted in HeuristicCount, not in
+// AffectedCount, and its client and site are not affected.
 type BlastRadius struct {
-	CIID             string   `json:"ci_id"`
-	AffectedCIs      []Node   `json:"affected_cis"`
-	AffectedCount    int      `json:"affected_count"`
-	AffectedServices []Node   `json:"affected_services,omitempty"`
-	ClientIDs        []string `json:"client_ids,omitempty"`
-	SiteIDs          []string `json:"site_ids,omitempty"`
+	CIID             string          `json:"ci_id"`
+	AffectedCIs      []BlastRadiusCI `json:"affected_cis"`
+	AffectedCount    int             `json:"affected_count"`
+	HeuristicCount   int             `json:"heuristic_count"`
+	AffectedServices []Node          `json:"affected_services,omitempty"`
+	ClientIDs        []string        `json:"client_ids,omitempty"`
+	SiteIDs          []string        `json:"site_ids,omitempty"`
 	// SinglePointsOfFailure lists the affected CIs that depend on the failed
 	// CI directly without an alternative provider (IMP-04).
 	SinglePointsOfFailure []Node `json:"single_points_of_failure,omitempty"`
 	// ProtectedByRedundancy lists the CIs that depend on the failed CI over
 	// a redundant type but keep a working provider (IMP-04).
 	ProtectedByRedundancy []Node `json:"protected_by_redundancy,omitempty"`
+}
+
+// BlastRadiusCI is a CI of the blast radius; Heuristic marks a CI reached
+// only over an undirected network edge, a second-class path (IMP-03).
+type BlastRadiusCI struct {
+	Node
+	Heuristic bool `json:"heuristic"`
 }
 
 // GetDependencies handles GET /api/v1/cis/{id}/dependencies?direction=up|down
@@ -53,39 +65,35 @@ func (h *Handler) GetDependencies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	root, err := h.ciRepo.GetByID(r.Context(), t.OrganizationID, id)
-	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
-		return
-	}
 	direction := r.URL.Query().Get("direction")
 	if direction == "" {
 		direction = "downstream"
 	}
-	depth := parseDepth(r.URL.Query().Get("depth"))
-	if r.URL.Query().Get("depth") == "" {
-		depth = maxDepth
+	if direction != "upstream" && direction != "downstream" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "direction must be upstream or downstream")
+		return
+	}
+	depth, err := parseDepth(r.URL.Query().Get("depth"), maxDepth)
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	root, err := h.ciRepo.GetByID(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
+		return
 	}
 	g, err := h.graphFrom(r.Context(), t.OrganizationID, root, depth)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	graph := g.topology("")
-	var reachable map[string]struct{}
-	switch direction {
-	case "upstream":
-		reachable = walkDirected(id, graph.Edges, true)
-	case "downstream":
-		reachable = walkDirected(id, graph.Edges, false)
-	default:
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "direction must be upstream or downstream")
-		return
-	}
-	nodes := make([]Node, 0, len(reachable))
-	for _, node := range graph.Nodes {
-		if _, ok := reachable[node.ID]; ok {
-			nodes = append(nodes, node)
+	reached := dependenciesOf(g, g.stepRules(h.impactRules(r.Context(), t.OrganizationID), impactQuery{}),
+		direction == "upstream", depth)
+	nodes := make([]Node, 0)
+	for n := range g.ids {
+		if reached[n] {
+			nodes = append(nodes, g.nodes[n])
 		}
 	}
 	api.WriteJSON(w, http.StatusOK, DependencyResult{
@@ -113,16 +121,22 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 	}
 	rules := h.impactRules(r.Context(), t.OrganizationID)
 	impacted := impactOf(g, []int32{0}, impactQuery{depth: maxDepth}, rules)
-	result := BlastRadius{CIID: id}
+	result := BlastRadius{CIID: id, AffectedCIs: []BlastRadiusCI{}}
 	services := map[string]struct{}{}
 	clients := map[string]struct{}{}
 	sites := map[string]struct{}{}
-	for n := range g.ids {
-		if !g.known[n] || !impacted[n].impacted {
+	// Certain hits first, then by name, as in /impact; a heuristic hit is
+	// listed with its mark but neither counted as affected nor does it
+	// affect its client or site (IMP-03).
+	for _, n := range impactOrder(g, impacted) {
+		node := g.nodes[n]
+		heuristic := impacted[n].heuristic
+		result.AffectedCIs = append(result.AffectedCIs, BlastRadiusCI{Node: node, Heuristic: heuristic})
+		if heuristic {
+			result.HeuristicCount++
 			continue
 		}
-		node := g.nodes[n]
-		result.AffectedCIs = append(result.AffectedCIs, node)
+		result.AffectedCount++
 		if node.ClientID != "" {
 			clients[node.ClientID] = struct{}{}
 		}
@@ -130,7 +144,6 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 			sites[node.SiteID] = struct{}{}
 		}
 	}
-	result.AffectedCount = len(result.AffectedCIs)
 	for id := range clients {
 		result.ClientIDs = append(result.ClientIDs, id)
 	}
@@ -140,42 +153,60 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 	// Business services in the affected set (logical type heuristic: the CI
 	// type key resolves through ci.CITypeID which carries the type id; the
 	// caller can filter by type on the client side).
-	for _, node := range result.AffectedCIs {
-		if _, ok := services[node.ID]; ok {
-			result.AffectedServices = append(result.AffectedServices, node)
+	for i := range result.AffectedCIs {
+		if _, ok := services[result.AffectedCIs[i].ID]; ok {
+			result.AffectedServices = append(result.AffectedServices, result.AffectedCIs[i].Node)
 		}
 	}
 	result.SinglePointsOfFailure, result.ProtectedByRedundancy = redundancyOf(g, 0, impacted, rules)
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
-// walkDirected performs a directed BFS. upstream=true follows edges from
-// target to source (dependencies of the node); otherwise source to target
-// (dependents of the node).
-func walkDirected(rootID string, edges []Edge, upstream bool) map[string]struct{} {
-	reachable := map[string]struct{}{}
-	queue := []string{rootID}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		for _, edge := range edges {
-			var from, to string
+// dependenciesOf walks from the root of g (number 0) along the impact
+// directions of steps (IMP-01, F-099), at most depth hops: downstream the
+// way a failure travels (the CIs that depend on the root), upstream against
+// it (the CIs the root depends on). Only directed types are dependencies:
+// an undirected one (connected_to, a heuristic, IMP-03) and one without
+// impact direction are not followed. g holds only visible, not deleted CIs
+// (IMP-07). It returns, by CI number, the CIs reached, the root excluded.
+func dependenciesOf(g *ciGraph, steps []stepRule, upstream bool, depth int) []bool {
+	g.indexIncidence()
+	reached := make([]bool, len(g.ids))
+	hops := make([]int, len(g.ids))
+	reached[0] = true
+	queue := []int32{0}
+	for head := 0; head < len(queue); head++ {
+		current := queue[head]
+		if hops[current] >= depth {
+			continue
+		}
+		for _, i := range g.incidentTo(current) {
+			e := &g.edges[i]
+			// The dependent and the provider of the edge by its impact
+			// direction.
+			var dependent, provider int32
+			switch steps[e.relType].way {
+			case stepToSource:
+				dependent, provider = e.source, e.target
+			case stepToTarget:
+				dependent, provider = e.target, e.source
+			case stepNone, stepBoth:
+				continue
+			}
+			from, to := provider, dependent
 			if upstream {
-				from, to = edge.TargetCIID, edge.SourceCIID
-			} else {
-				from, to = edge.SourceCIID, edge.TargetCIID
+				from, to = dependent, provider
 			}
-			if from != current || to == rootID {
+			if from != current || reached[to] || !g.known[to] {
 				continue
 			}
-			if _, seen := reachable[to]; seen {
-				continue
-			}
-			reachable[to] = struct{}{}
+			reached[to] = true
+			hops[to] = hops[current] + 1
 			queue = append(queue, to)
 		}
 	}
-	return reachable
+	reached[0] = false
+	return reached
 }
 
 // ImpactNode is an impacted CI with its shortest path from the failed CI
@@ -626,6 +657,31 @@ func mergeGraphs(graphs []*ciGraph) (merged *ciGraph, roots []int32) {
 	return merged, roots
 }
 
+// impactOrder returns the numbers of the impacted, known CIs: certain
+// impacts first, then by name and id, a stable answer.
+func impactOrder(g *ciGraph, impacted []ciHit) []int32 {
+	order := make([]int32, 0, len(impacted))
+	for n := range impacted {
+		if impacted[n].impacted && g.known[n] {
+			order = append(order, int32(n))
+		}
+	}
+	slices.SortFunc(order, func(i, j int32) int {
+		a, b := &impacted[i], &impacted[j]
+		if a.heuristic != b.heuristic {
+			if !a.heuristic {
+				return -1
+			}
+			return 1
+		}
+		if c := strings.Compare(g.nodes[i].Name, g.nodes[j].Name); c != 0 {
+			return c
+		}
+		return strings.Compare(g.nodes[i].ID, g.nodes[j].ID)
+	})
+	return order
+}
+
 // writeImpact analyses the failure of ids and writes the answer: the
 // failed CIs, the impacted CIs with their paths and a summary; single adds
 // the fields of the single-CI short form; sparse lets fields= narrow the
@@ -634,9 +690,10 @@ func mergeGraphs(graphs []*ciGraph) (merged *ciGraph, roots []int32) {
 func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID string, ids []string, single, sparse bool) {
 	ctx := r.Context()
 	q := r.URL.Query()
-	depth := parseDepth(q.Get("depth"))
-	if q.Get("depth") == "" {
-		depth = maxDepth
+	depth, err := parseDepth(q.Get("depth"), maxDepth)
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
 	}
 	categories, err := parseCategories(q.Get("categories"))
 	if err != nil {
@@ -677,26 +734,7 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 	relType := q.Get("rel_type")
 	impacted := impactOf(g, roots, impactQuery{relType: relType, categories: categories, depth: depth},
 		h.impactRules(ctx, orgID))
-	// Certain impacts first, then by name: a stable answer.
-	order := make([]int32, 0, len(impacted))
-	for n := range impacted {
-		if impacted[n].impacted && g.known[n] {
-			order = append(order, int32(n))
-		}
-	}
-	slices.SortFunc(order, func(i, j int32) int {
-		a, b := &impacted[i], &impacted[j]
-		if a.heuristic != b.heuristic {
-			if !a.heuristic {
-				return -1
-			}
-			return 1
-		}
-		if c := strings.Compare(g.nodes[i].Name, g.nodes[j].Name); c != 0 {
-			return c
-		}
-		return strings.Compare(g.nodes[i].ID, g.nodes[j].ID)
-	})
+	order := impactOrder(g, impacted)
 	impactedNodes := make([]ImpactNode, 0, len(order))
 	summary := ImpactSummary{Failed: len(failed), ByCategory: map[string]int{}}
 	for _, n := range order {

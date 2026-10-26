@@ -251,9 +251,12 @@ func (q *queryResolver) Topology(ctx context.Context, rootCiID *string, depth *i
 	if q.sources.Topology == nil {
 		return nil, errUnavailable
 	}
-	d := topology.ParseDepth("")
+	d := topology.DefaultDepth
 	if depth != nil {
-		d = topology.ParseDepth(strconv.Itoa(*depth))
+		// A depth below 1 is bad input as on GET /topology (F-255).
+		if d, err = topology.ParseDepth(strconv.Itoa(*depth)); err != nil {
+			return nil, gqlError(codeBadInput, err.Error())
+		}
 	}
 	graph, err := q.sources.Topology.Graph(ctx, orgID, value(rootCiID), d, &ci.FilterParams{TypeID: value(ciTypeID), SiteID: value(siteID)})
 	if err != nil {

@@ -324,7 +324,7 @@ func checkTopologyWithoutRoot(t *testing.T, f *scopetest.Fixture, pool *pgxpool.
 
 	// The source of the BFF query topology.
 	before := counter.n.Load()
-	viaGraph, err := h.Graph(as(&orgWide), f.OrgA, "", topology.ParseDepth(""), &ci.FilterParams{TypeID: large})
+	viaGraph, err := h.Graph(as(&orgWide), f.OrgA, "", topology.DefaultDepth, &ci.FilterParams{TypeID: large})
 	if statements := counter.n.Load() - before; err != nil || statements != largeCount || !reflect.DeepEqual(viaGraph, largeGraph) {
 		t.Errorf("Graph without a root: %d statements, %v, equal to GET /topology %v", statements, err, reflect.DeepEqual(viaGraph, largeGraph))
 	}
@@ -354,7 +354,7 @@ func checkTopologyWithoutRoot(t *testing.T, f *scopetest.Fixture, pool *pgxpool.
 			continue
 		}
 		start := time.Now()
-		if c.answer, err = h.Graph(as(c.scope), f.OrgA, "", topology.ParseDepth(""), &ci.FilterParams{TypeID: c.typeID}); err != nil {
+		if c.answer, err = h.Graph(as(c.scope), f.OrgA, "", topology.DefaultDepth, &ci.FilterParams{TypeID: c.typeID}); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
 		t.Logf("%s: %d nodes and %d edges in %v without ANALYZE", c.name, len(c.answer.Nodes), len(c.answer.Edges), time.Since(start).Round(time.Millisecond))
@@ -370,7 +370,7 @@ func checkTopologyWithoutRoot(t *testing.T, f *scopetest.Fixture, pool *pgxpool.
 		c := &cases[i]
 		ctx := as(c.scope)
 		start := time.Now()
-		old, err := perNode.Graph(ctx, f.OrgA, "", topology.ParseDepth(""), &ci.FilterParams{TypeID: c.typeID})
+		old, err := perNode.Graph(ctx, f.OrgA, "", topology.DefaultDepth, &ci.FilterParams{TypeID: c.typeID})
 		if err != nil {
 			t.Fatalf("%s, per node: %v", c.name, err)
 		}
@@ -378,7 +378,7 @@ func checkTopologyWithoutRoot(t *testing.T, f *scopetest.Fixture, pool *pgxpool.
 		if !reflect.DeepEqual(c.answer, old) {
 			t.Errorf("%s: %d nodes and %d edges, the per-node read %d and %d", c.name, len(c.answer.Nodes), len(c.answer.Edges), len(old.Nodes), len(old.Edges))
 		}
-		if again, err := h.Graph(ctx, f.OrgA, "", topology.ParseDepth(""), &ci.FilterParams{TypeID: c.typeID}); err != nil || !reflect.DeepEqual(again, c.answer) {
+		if again, err := h.Graph(ctx, f.OrgA, "", topology.DefaultDepth, &ci.FilterParams{TypeID: c.typeID}); err != nil || !reflect.DeepEqual(again, c.answer) {
 			t.Errorf("%s: the answer after ANALYZE differs (%v)", c.name, err)
 		}
 		if !slices.IsSortedFunc(c.answer.Edges, func(a, b topology.Edge) int { return strings.Compare(a.ID, b.ID) }) {

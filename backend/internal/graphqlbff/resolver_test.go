@@ -167,6 +167,10 @@ func TestNewQueries(t *testing.T) {
 	if f.cis.single > 2 || f.cis.batch > 2 || f.cis.nodes != 1 {
 		t.Errorf("topology CI reads: %d single, %d batch, %d node reads", f.cis.single, f.cis.batch, f.cis.nodes)
 	}
+	// A depth below 1 is bad input, not the default depth (F-255).
+	if resp = f.query(t, allRead, `{ topology(rootCiId: "`+f.hub+`", depth: 0) { nodes { id } } }`); resp.code() != codeBadInput {
+		t.Errorf("topology depth 0: %+v", resp)
+	}
 
 	resp = f.query(t, allRead, `{ rackLayout(rackId: "`+f.rack+`") { rack { name heightUnits } mounts { positionU ci { name } } freeFront freeRear } }`)
 	raw, _ := json.Marshal(resp.Data)
