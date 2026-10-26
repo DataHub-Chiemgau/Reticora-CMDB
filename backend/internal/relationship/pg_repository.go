@@ -130,6 +130,40 @@ const graphEdges = `(
 	FROM ci_structure_edge WHERE rel_type = 'contains'
 )`
 
+// listEdges is the edge set List counts and pages: the stored relationships
+// of the organization ($1) with visible endpoints and the projected ones,
+// with byCI those of the CI $2.
+//
+// The edges of one CI are one arm per end of the edge, in the stored and
+// in the projected edges (WP-609): source = $2, and target = $2 for edges
+// whose source is another CI, so an edge of the CI to itself is listed
+// once. As an equality the CI reaches every branch of ci_structure_edge
+// and the join with ci src. An OR of both ends stays a filter above the
+// projection; with RLS the planner estimates one visible CI and, once
+// rack_mount is large (it holds the mounts of all organizations), joins
+// every CI of the organization with the projection (NFR-02).
+func listEdges(byCI bool) string {
+	stored := `
+			SELECT id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, confidence,
+			       first_seen_at, last_seen_at, verification_state, source_system, notes, created_at, updated_at,
+			       source_interface_id, target_interface_id, last_confirmed_at, verified_by, verified_at,
+			       false AS projected, NULL::uuid AS target_location_id
+			FROM ci_relationship WHERE organization_id = $1 AND ` + visibleEndpoints
+	projected := `
+			SELECT * FROM (` + projectedEdges + `) p WHERE p.organization_id = $1`
+	arms := []string{stored, projected}
+	if byCI {
+		arms = make([]string, 0, 4)
+		for _, edges := range []string{stored, projected} {
+			arms = append(arms,
+				edges+` AND source_ci_id = $2`,
+				edges+` AND target_ci_id = $2 AND source_ci_id IS DISTINCT FROM $2`)
+		}
+	}
+	return strings.Join(arms, `
+			UNION ALL`)
+}
+
 // List returns the relationships of the organization (of one CI when ciID
 // is set): the stored ones and, after them, the projected structural ones.
 func (r *PGRepository) List(ctx context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
@@ -138,20 +172,10 @@ func (r *PGRepository) List(ctx context.Context, orgID string, ciID string, page
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		args := []any{orgID}
-		ciFilter := "true"
 		if ciID != "" {
-			ciFilter = "(source_ci_id = $2 OR target_ci_id = $2)"
 			args = append(args, ciID)
 		}
-		edges := fmt.Sprintf(`
-			SELECT id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, confidence,
-			       first_seen_at, last_seen_at, verification_state, source_system, notes, created_at, updated_at,
-			       source_interface_id, target_interface_id, last_confirmed_at, verified_by, verified_at,
-			       false AS projected, NULL::uuid AS target_location_id
-			FROM ci_relationship WHERE organization_id = $1 AND %s AND %s
-			UNION ALL
-			SELECT * FROM (%s) p WHERE p.organization_id = $1 AND %s`,
-			visibleEndpoints, ciFilter, projectedEdges, ciFilter)
+		edges := listEdges(ciID != "")
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ("+edges+") e", args...).Scan(&total); err != nil {
 			return fmt.Errorf("count relationships: %w", err)
 		}
