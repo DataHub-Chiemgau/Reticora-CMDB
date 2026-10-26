@@ -7803,7 +7803,7 @@ export interface components {
       action: string;
       resource_type: string;
       resource_id?: string;
-      /** @description What changed. Domain entries carry old and new values; the entry of a write request names the route, the response status, the written fields and, for resources without a UUID, resource_key. */
+      /** @description What changed. Domain entries carry old and new values; the entry of a write request names the route, the response status, the written fields and, for resources without a UUID, resource_key, and in `values` one `{field, old, new}` per changed column of the row the route changed (a create only new, a delete only old values; AUD-07). Secrets never appear; a personal value appears only as `{"$surrogate": "<id of its row>"}` (CH16). `values_unavailable: true` marks an entry whose row could not be read after the request. */
       changes?: {
         [key: string]: unknown;
       };

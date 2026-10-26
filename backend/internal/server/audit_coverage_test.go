@@ -133,6 +133,66 @@ func TestEveryWriteRouteIsAudited(t *testing.T) {
 	}
 }
 
+// snapshotRegisterGaps checks the route snapshot register (AUD-07, WP-505)
+// against the audited write routes: every route without a domain recorder
+// needs an entry (a table, or the reason it has no row values), and every
+// entry names such a route with a valid spec.
+func snapshotRegisterGaps(writes []string) []string {
+	var gaps []string
+	want := map[string]bool{}
+	for _, key := range writes {
+		if _, exempt := auditExemptions[key]; exempt || domainRecordedRoutes[key] != "" {
+			continue
+		}
+		want[key] = true
+		if _, ok := audit.RouteSnapshotFor(key); !ok {
+			gaps = append(gaps, key+": no entry in the route snapshot register (audit/route_snapshot.go)")
+		}
+	}
+	for _, key := range audit.RouteSnapshotRoutes() {
+		spec, _ := audit.RouteSnapshotFor(key)
+		if !want[key] {
+			gaps = append(gaps, key+": register entry for no audited write route without a domain recorder")
+		}
+		if err := spec.Validate(); err != nil {
+			gaps = append(gaps, fmt.Sprintf("%s: %v", key, err))
+		}
+	}
+	sort.Strings(gaps)
+	return gaps
+}
+
+// TestEveryWriteRouteHasASnapshotEntry is the architecture test of the
+// route snapshot register (AUD-07, WP-505): every audited write route of
+// the authorization catalogue without a domain recorder has an entry, and
+// the register names no other route; a new write route without a recorder
+// and without an entry fails it.
+func TestEveryWriteRouteHasASnapshotEntry(t *testing.T) {
+	table, err := os.ReadFile(routePermissionsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var writes []string
+	for _, line := range strings.Split(strings.TrimSpace(string(table)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && isWriteMethod(fields[0]) {
+			writes = append(writes, fields[0]+" "+fields[1])
+		}
+	}
+	for _, gap := range snapshotRegisterGaps(writes) {
+		t.Error(gap)
+	}
+	// A new route without a recorder and without an entry is a gap.
+	const added = "POST /api/v1/vlans/{id}/a5-new-action"
+	if gaps := snapshotRegisterGaps(append(writes, added)); len(gaps) != 1 || !strings.HasPrefix(gaps[0], added+": no entry") {
+		t.Errorf("a new write route without an entry: gaps %q", gaps)
+	}
+	// So is an entry without a table and without a reason.
+	if err := (&audit.RouteSnapshot{}).Validate(); err == nil {
+		t.Error("an empty register entry is valid")
+	}
+}
+
 // TestWriteRequestsWriteAuditEntries runs write requests through the real
 // router: a successful write stores who, what, which fields, the source,
 // the request and the correlation id; a refused write and a read store
@@ -544,6 +604,9 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 
 	type outcome struct {
 		status, routeEntries, domainEntries int
+		// values: the route entry holds the row values (WP-505);
+		// unavailable: the read after the request failed.
+		values, unavailable bool
 	}
 	results := map[string]outcome{}
 	call := func(key, path, body string) {
@@ -558,9 +621,11 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 		handler.ServeHTTP(w, req.WithContext(ctx))
 		var o outcome
 		o.status = w.Code
-		if qErr := f.Admin.QueryRow(bg, `SELECT count(*) FILTER (WHERE changes ? 'route'), count(*) FILTER (WHERE NOT changes ? 'route')
+		if qErr := f.Admin.QueryRow(bg, `SELECT count(*) FILTER (WHERE changes ? 'route'), count(*) FILTER (WHERE NOT changes ? 'route'),
+				COALESCE(bool_or(changes ? 'values') FILTER (WHERE changes ? 'route'), false),
+				COALESCE(bool_or(changes ? 'values_unavailable'), false)
 			FROM audit_log WHERE organization_id = $1 AND request_id = $2`, f.OrgA, w.Header().Get("X-Request-ID")).
-			Scan(&o.routeEntries, &o.domainEntries); qErr != nil {
+			Scan(&o.routeEntries, &o.domainEntries, &o.values, &o.unavailable); qErr != nil {
 			t.Fatalf("%s: audit entries: %v", key, qErr)
 		}
 		var open int
@@ -688,6 +753,13 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 				t.Errorf("%s = %d: %d route and %d domain entries, want exactly one route entry (a domain recorder belongs in domainRecordedRoutes)",
 					key, o.status, o.routeEntries, o.domainEntries)
 			}
+			// The register finds the row of every route with a table: the
+			// entry holds its values (AUD-07, WP-505).
+			spec, _ := audit.RouteSnapshotFor(key)
+			if o.unavailable || (spec.Table != "") != o.values {
+				t.Errorf("%s = %d: route entry with values %v (unavailable %v), register table %q", key, o.status, o.values,
+					o.unavailable, spec.Table)
+			}
 		}
 		if recorder != "" && auditor.count(key) != 0 {
 			t.Errorf("%s has a domain recorder but stored %d audit intents", key, auditor.count(key))
@@ -707,4 +779,23 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	if succeeded < minSucceeded {
 		t.Errorf("only %d write routes succeeded, want at least %d: the test no longer shows their audit", succeeded, minSucceeded)
 	}
+	// Secrets and personal values of the bodies never reach a route entry
+	// (CH16, WP-505): the webhook secret, the credential, the e-mail
+	// addresses of the contact, the user and the invitation.
+	for _, plain := range []string{"a5-secret-a5-secret-a5", `"community"`, "a5-contact@example.com", "a5-user@example.com",
+		"a5-invite@example.com", "a5-scim@example.com"} {
+		if n := countRows(t, f, `SELECT count(*) FROM audit_log WHERE organization_id = $1 AND changes ? 'route'
+			AND strpos(changes::text, $2) > 0`, f.OrgA, plain); n != 0 {
+			t.Errorf("%d route entries hold %s", n, plain)
+		}
+	}
+}
+
+func countRows(t *testing.T, f *scopetest.Fixture, q string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := f.Admin.QueryRow(context.Background(), q, args...).Scan(&n); err != nil {
+		t.Fatalf("%s: %v", q, err)
+	}
+	return n
 }

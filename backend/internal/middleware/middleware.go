@@ -19,6 +19,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -81,6 +82,15 @@ type RouteAuditor interface {
 	RecordRoute(ctx context.Context, entry *audit.Entry) error
 }
 
+// RouteSnapshotter reads the row a write route changes (AUD-07, WP-505):
+// the row of spec with the key values, in the tenant scope of the request,
+// and its table; nil when there is none. A route auditor that implements
+// it gets the old and new values into the entries of routes without a
+// domain recorder.
+type RouteSnapshotter interface {
+	RouteSnapshot(ctx context.Context, orgID string, spec *audit.RouteSnapshot, keys []any) (map[string]any, string, error)
+}
+
 // AuditMode is how AuditRoute audits a write route.
 type AuditMode int
 
@@ -111,9 +121,14 @@ const maxAuditBody = 1 << 20
 // one transaction, unless a domain recorder already wrote one for the
 // request (with old and new values); a refused request deletes the intent
 // without an entry. The entry names who (actor), when, what (action,
-// resource, the names of the written fields), the source and the request;
-// values stay with the domain history, so the append-only log holds no
-// personal data (CH16).
+// resource, the names of the written fields), the source and the request.
+// For a route of the snapshot register (audit.RouteSnapshotFor) and an
+// auditor that reads snapshots, it reads the row before the handler and
+// after a successful response in the principal's scope and adds the old
+// and new value per changed column ("values", AUD-07, WP-505); excluded
+// columns never appear, personal ones only as a surrogate (CH16). A row
+// that cannot be read before the handler refuses the request (503) like a
+// missing intent.
 //
 // source overrides the source derived from the principal (ingest routes of
 // collectors and agents).
@@ -152,6 +167,20 @@ func AuditRoute(method, pattern string, auditor RouteAuditor, mode AuditMode, so
 					return
 				}
 			}
+			snap := routeSnapshots(r, route, mode, auditor)
+			if snap != nil && !snap.spec.FromResponse() {
+				var err error
+				if snap.before, err = snap.read(ctx, orgID, nil); err != nil {
+					slog.Error("audit snapshot of a write request failed; request refused", "error", err, "action", action,
+						"organization_id", orgID, "request_id", info.RequestID)
+					if derr := auditor.Discard(context.WithoutCancel(ctx), intent); derr != nil {
+						slog.Error("discarding the audit intent of a write request failed", "error", derr, "action", action,
+							"organization_id", orgID, "request_id", info.RequestID)
+					}
+					api.WriteUnavailable(w, "the audit trail is unavailable")
+					return
+				}
+			}
 			rw := &auditResponseWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rw, r)
 			// The response is out: the audit runs even when the client has
@@ -167,6 +196,9 @@ func AuditRoute(method, pattern string, auditor RouteAuditor, mode AuditMode, so
 				return
 			}
 			entry := routeEntry(r, rw, route, fields)
+			if snap != nil {
+				snap.addValues(bg, orgID, rw.body.Bytes(), &entry)
+			}
 			entry.OrganizationID, entry.ActorID, entry.ActorType, entry.Action = orgID, actorID, actorType, action
 			entry.ResourceType, entry.Source, entry.RequestID, entry.CorrelationID = resourceType, source, info.RequestID, info.CorrelationID
 			var err error
@@ -205,6 +237,76 @@ func routeEntry(r *http.Request, rw *auditResponseWriter, route string, fields [
 		changes["fields"] = fields
 	}
 	return audit.Entry{ResourceID: resourceID, Changes: changes}
+}
+
+// routeSnapshot is the snapshot of the row a write route changes.
+type routeSnapshot struct {
+	spec        *audit.RouteSnapshot
+	snapshotter RouteSnapshotter
+	r           *http.Request
+	before      map[string]any
+	table       string
+}
+
+// routeSnapshots returns the snapshot of a route without a domain recorder
+// whose register entry names a table, when the auditor reads snapshots and
+// the request carries the principal's tenant scope; else nil.
+func routeSnapshots(r *http.Request, route string, mode AuditMode, auditor RouteAuditor) *routeSnapshot {
+	if mode != AuditIntent {
+		return nil
+	}
+	spec, ok := audit.RouteSnapshotFor(route)
+	snapshotter, reads := auditor.(RouteSnapshotter)
+	if !ok || !reads || spec.Table == "" {
+		return nil
+	}
+	if _, scoped := database.TenantScopeFromContext(r.Context()); !scoped {
+		return nil
+	}
+	return &routeSnapshot{spec: &spec, snapshotter: snapshotter, r: r}
+}
+
+// read reads the row; without key values there is none.
+func (s *routeSnapshot) read(ctx context.Context, orgID string, response []byte) (map[string]any, error) {
+	keys, ok := s.spec.KeyValues(func(from string) string {
+		switch {
+		case from == "$org":
+			return orgID
+		case from == "$user":
+			return tenant.FromContext(s.r.Context()).UserID
+		case strings.HasPrefix(from, "@"):
+			return responseField(response, from[1:])
+		}
+		return chi.URLParam(s.r, from)
+	})
+	if !ok {
+		return nil, nil
+	}
+	row, table, err := s.snapshotter.RouteSnapshot(ctx, orgID, s.spec, keys)
+	if err != nil {
+		return nil, err
+	}
+	if row != nil {
+		s.table = table
+	}
+	return row, nil
+}
+
+// addValues reads the row after a successful request and adds the old and
+// new value per changed column to the entry; a failed read marks the
+// values unavailable.
+func (s *routeSnapshot) addValues(ctx context.Context, orgID string, response []byte, entry *audit.Entry) {
+	after, err := s.read(ctx, orgID, response)
+	if err != nil {
+		slog.Error("audit snapshot after a write request failed", "error", err, "organization_id", orgID,
+			"request_id", RequestIDFromContext(s.r.Context()))
+		entry.Changes["values_unavailable"] = true
+		return
+	}
+	if s.before == nil && after == nil {
+		return
+	}
+	entry.Changes["values"] = s.spec.ValueChanges(s.table, s.before, after)
 }
 
 // RouteAction derives the audited resource type and action of a route:
@@ -286,12 +388,17 @@ func routeResourceID(r *http.Request) string {
 }
 
 // responseID is the id of a created resource in the response body.
-func responseID(body []byte) string {
-	var obj struct {
-		ID string `json:"id"`
+func responseID(body []byte) string { return responseField(body, "id") }
+
+// responseField is a string field of the JSON object in the response body.
+func responseField(body []byte, name string) string {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(body, &obj) != nil {
+		return ""
 	}
-	if json.Unmarshal(body, &obj) == nil {
-		return obj.ID
+	var v string
+	if json.Unmarshal(obj[name], &v) == nil {
+		return v
 	}
 	return ""
 }

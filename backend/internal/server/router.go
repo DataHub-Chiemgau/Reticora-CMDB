@@ -737,9 +737,15 @@ func routeAuditor(opts *Options) middleware.RouteAuditor {
 		return nil
 	}
 	// Intents, entries and the scheduler's entries belong to the
-	// organization's chain (E-08, WP-504).
+	// organization's chain (E-08, WP-504); the auditor reads the rows of
+	// the snapshot register in the principal's scope, so the entries of
+	// routes without a domain recorder hold old and new values (AUD-07,
+	// WP-505).
 	return audit.NewPGRouteAuditor(opts.AuditPool)
 }
+
+// The production route auditor reads route snapshots (WP-505).
+var _ middleware.RouteSnapshotter = (*audit.PGRouteAuditor)(nil)
 
 // ciHandler builds the CI handler; without the event outbox it hands CI
 // events to the webhook dispatcher directly.

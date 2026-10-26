@@ -820,3 +820,5 @@ UI-07;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
 UI-08;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
 UI-09;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
 UI-10;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+AUD-05;[B];B;backend/internal/server/route_audit_integration_test.go;WP-505
+AUD-07;[B];B;backend/internal/audit/route_snapshot_test.go;WP-505

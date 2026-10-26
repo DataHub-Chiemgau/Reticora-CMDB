@@ -29,10 +29,11 @@ info:
     and the refusal does not count against the pre-auth limit), an ingest
     while the ingest queue (NATS) is unreachable, a request whose
     database connection cannot be established, and a write request whose
-    audit intent cannot be stored (AUD-07: write routes without a domain
-    recorder store the intent before they change anything; the audit entry
-    follows the response or, at the latest, the scheduler run two minutes
-    later). While Redis is unreachable
+    audit intent cannot be stored or whose row cannot be read for the old
+    values (AUD-07: write routes without a domain recorder store the intent
+    and read the row they change before they change anything; the audit
+    entry follows the response or, at the latest, the scheduler run two
+    minutes later). While Redis is unreachable
     the rate limits refuse with 429. A 2xx answer means stored or durably
     queued.
   contact:
@@ -14689,7 +14690,13 @@ components:
           description: >-
             What changed. Domain entries carry old and new values; the entry
             of a write request names the route, the response status, the
-            written fields and, for resources without a UUID, resource_key.
+            written fields and, for resources without a UUID, resource_key,
+            and in `values` one `{field, old, new}` per changed column of the
+            row the route changed (a create only new, a delete only old
+            values; AUD-07). Secrets never appear; a personal value appears
+            only as `{"$surrogate": "<id of its row>"}` (CH16).
+            `values_unavailable: true` marks an entry whose row could not be
+            read after the request.
         source:
           $ref: '#/components/schemas/AuditSource'
         request_id:

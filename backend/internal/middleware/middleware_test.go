@@ -629,3 +629,145 @@ func TestAuditRouteStoresTheIntentBeforeTheHandler(t *testing.T) {
 		t.Errorf("exempt route: %d", w.Code)
 	}
 }
+
+// snapshotStore is an intentStore that reads snapshots of one in-memory
+// row per id.
+type snapshotStore struct {
+	*intentStore
+	rows               map[string]map[string]any
+	reads              []string
+	failRead, failNext bool
+}
+
+func (s *snapshotStore) RouteSnapshot(ctx context.Context, orgID string, spec *audit.RouteSnapshot, keys []any) (map[string]any, string, error) {
+	if _, scoped := database.TenantScopeFromContext(ctx); !scoped {
+		return nil, "", errors.New("no tenant scope")
+	}
+	id := fmt.Sprint(keys[0])
+	s.reads = append(s.reads, id)
+	if s.failRead {
+		return nil, "", errors.New("snapshot down")
+	}
+	if s.failNext {
+		s.failRead = true
+	}
+	row := s.rows[id]
+	if row == nil {
+		return nil, "", nil
+	}
+	copied := map[string]any{}
+	for k, v := range row {
+		copied[k] = v
+	}
+	return copied, spec.Table, nil
+}
+
+// TestAuditRouteStoresOldAndNewValues covers the snapshots of the route
+// audit (AUD-07, WP-505): a route of the register reads its row in the
+// request's tenant scope before the handler and after a successful
+// response and stores {field, old, new} per changed column; a create reads
+// the row of the response's id, a delete keeps the old values. A failed
+// read before the handler refuses the request (503, intent discarded); a
+// failed read afterwards marks the values unavailable. Without a tenant
+// scope or for a route with a domain recorder nothing is read.
+func TestAuditRouteStoresOldAndNewValues(t *testing.T) {
+	const org, user = "11111111-2222-4333-8444-555555555555", "66666666-7777-4888-8999-aaaaaaaaaaaa"
+	const vlan = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	store := &snapshotStore{intentStore: &intentStore{open: map[string]audit.RouteIntent{}}}
+	ran, readsBefore := 0, 0
+	serve := func(method, pattern, path string, mode AuditMode, scoped bool, h func(w http.ResponseWriter)) *httptest.ResponseRecorder {
+		ran, readsBefore, store.reads = 0, 0, nil
+		r := chi.NewRouter()
+		r.With(AuditRoute(method, pattern, store, mode, "")).Method(method, pattern, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			ran++
+			readsBefore = len(store.reads)
+			h(w)
+		}))
+		req := httptest.NewRequest(method, path, strings.NewReader(`{"name":"b"}`))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := identity.WithPrincipal(req.Context(), identity.Principal{Subject: user, OrganizationID: org, Type: identity.PrincipalTypeUser})
+		ctx = tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: org, UserID: user})
+		if scoped {
+			scope := database.OrgWideScope(org, user)
+			ctx = database.ContextWithTenantScope(ctx, &scope)
+		}
+		w := httptest.NewRecorder()
+		RequestID(r).ServeHTTP(w, req.WithContext(ctx))
+		return w
+	}
+	take := func() []audit.Entry {
+		out := store.entries
+		store.entries = nil
+		return out
+	}
+	rename := func(w http.ResponseWriter) {
+		store.rows[vlan]["name"] = "b"
+		w.WriteHeader(http.StatusOK)
+	}
+	values := func(e audit.Entry) string {
+		raw, _ := json.Marshal(e.Changes["values"])
+		return string(raw)
+	}
+
+	// Update: the old value is read before the handler, the new one after.
+	store.rows = map[string]map[string]any{vlan: {"id": vlan, "name": "a", "vlan_id": 7.0}}
+	w := serve(http.MethodPatch, "/api/v1/vlans/{id}", "/api/v1/vlans/"+vlan, AuditIntent, true, rename)
+	entries := take()
+	if w.Code != http.StatusOK || readsBefore != 1 || len(store.reads) != 2 || len(entries) != 1 ||
+		values(entries[0]) != `[{"field":"name","new":"b","old":"a"}]` {
+		t.Fatalf("update: %d, reads before the handler %d, reads %v, entries %+v", w.Code, readsBefore, store.reads, entries)
+	}
+
+	// Create: no read before the handler; the row of the response's id.
+	serve(http.MethodPost, "/api/v1/vlans", "/api/v1/vlans", AuditIntent, true, func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"` + vlan + `"}`))
+	})
+	if entries = take(); readsBefore != 0 || len(entries) != 1 ||
+		values(entries[0]) != `[{"field":"id","new":"`+vlan+`","old":null},{"field":"name","new":"b","old":null},{"field":"vlan_id","new":7,"old":null}]` {
+		t.Errorf("create: reads before %d, entries %+v", readsBefore, entries)
+	}
+
+	// Delete: the old values.
+	w = serve(http.MethodDelete, "/api/v1/vlans/{id}", "/api/v1/vlans/"+vlan, AuditIntent, true, func(w http.ResponseWriter) {
+		delete(store.rows, vlan)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	if entries = take(); w.Code != http.StatusNoContent || len(entries) != 1 ||
+		values(entries[0]) != `[{"field":"id","new":null,"old":"`+vlan+`"},{"field":"name","new":null,"old":"b"},{"field":"vlan_id","new":null,"old":7}]` {
+		t.Errorf("delete: %d %+v", w.Code, entries)
+	}
+
+	// The read before the handler fails: 503, the handler never runs, the
+	// intent is gone.
+	store.rows = map[string]map[string]any{vlan: {"id": vlan, "name": "a"}}
+	store.failRead = true
+	w = serve(http.MethodPatch, "/api/v1/vlans/{id}", "/api/v1/vlans/"+vlan, AuditIntent, true, rename)
+	if w.Code != http.StatusServiceUnavailable || ran != 0 || len(store.open) != 0 || len(take()) != 0 {
+		t.Errorf("failed read before the handler: %d, handler ran %d, open intents %d", w.Code, ran, len(store.open))
+	}
+	// The read after the response fails: the entry says so.
+	store.failRead, store.failNext = false, true
+	serve(http.MethodPatch, "/api/v1/vlans/{id}", "/api/v1/vlans/"+vlan, AuditIntent, true, rename)
+	store.failRead, store.failNext = false, false
+	if entries = take(); len(entries) != 1 || entries[0].Changes["values_unavailable"] != true || entries[0].Changes["values"] != nil {
+		t.Errorf("failed read after the response: %+v", entries)
+	}
+
+	// No tenant scope, a route with a domain recorder, a route without a
+	// table: no read.
+	for _, tc := range []struct {
+		method, pattern, path string
+		mode                  AuditMode
+		scoped                bool
+	}{
+		{http.MethodPatch, "/api/v1/vlans/{id}", "/api/v1/vlans/" + vlan, AuditIntent, false},
+		{http.MethodPatch, "/api/v1/vlans/{id}", "/api/v1/vlans/" + vlan, AuditDomain, true},
+		{http.MethodPost, "/api/v1/search/reindex", "/api/v1/search/reindex", AuditIntent, true},
+	} {
+		serve(tc.method, tc.pattern, tc.path, tc.mode, tc.scoped, rename)
+		if entries = take(); len(store.reads) != 0 || len(entries) != 1 || entries[0].Changes["values"] != nil {
+			t.Errorf("%s %s mode %d scoped %v: reads %v, entries %+v", tc.method, tc.pattern, tc.mode, tc.scoped, store.reads, entries)
+		}
+	}
+}
