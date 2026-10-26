@@ -5702,7 +5702,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Reconstruct asset state at a point in time */
+    /**
+     * Reconstruct asset state at a point in time
+     * @description Replays the changes of the asset (creation, updates, deletion) up to at (default now). An asset the caller cannot see (unknown, deleted, or of another organization, client or site) and one without a recorded change up to at are 404 (JOB-04, F-164).
+     */
     get: operations['listAssetsIdState'];
     put?: never;
     post?: never;
@@ -6147,7 +6150,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Reconstruct CI state at a point in time */
+    /**
+     * Reconstruct CI state at a point in time
+     * @description Replays the change trail of the CI (its ci_change field rows from the creation on and its entity_change rows) up to at (default now), with the values its history shows. A CI the caller cannot see (unknown, or of another organization, client or site) and one without a recorded change up to at are 404 (JOB-04, F-164).
+     */
     get: operations['listCisIdState'];
     put?: never;
     post?: never;
@@ -6205,7 +6211,7 @@ export interface paths {
     put?: never;
     /**
      * State snapshot of a CI or asset as a job (JOB-04)
-     * @description Replays the history of the entity up to at (default now) as a job of kind history.snapshot; 202 with the job, whose result is the state (GET /api/v1/jobs/{id}/result). Without the job model (no database) the state is answered at once (200). GET /cis/{id}/state stays the direct read.
+     * @description Replays the history of the entity up to at (default now) as a job of kind history.snapshot; 202 with the job, whose result is the state (GET /api/v1/jobs/{id}/result). Without the job model (no database) the state is answered at once (200). GET /cis/{id}/state stays the direct read. An entity the caller cannot see (unknown, or of another organization, client or site) is 404 and no job is created; without a recorded change up to at (before the creation) the job fails with "no recorded state before <at>" (404 without the job model).
      */
     post: operations['createStateSnapshot'];
     delete?: never;
@@ -25931,6 +25937,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   listCiFieldsGlobal: {
@@ -26853,6 +26860,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   listCompositions: {
@@ -27025,7 +27033,8 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      /** @description Unknown entity type. */
+      404: components['responses']['NotFound'];
+      /** @description Unknown entity type, or an entity_id that is no UUID. */
       422: {
         headers: {
           [name: string]: unknown;

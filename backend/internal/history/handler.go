@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -73,7 +74,10 @@ type SnapshotRequest struct {
 // snapshot runs as a job (JOB-04, E-25) whose result is the replayed state;
 // the answer is 202 with the job. The job runs on the job queue when there
 // is one (TEC-14), otherwise in the background of this process. Without the
-// job model the snapshot is answered at once (200).
+// job model the snapshot is answered at once (200). An entity the caller
+// cannot see (unknown, of another organization, client or site) is 404
+// before a job exists; without a recorded change up to at the job fails
+// (F-164).
 func (h *Handler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -93,24 +97,36 @@ func (h *Handler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, &api.FieldError{Field: "entity_id", Message: "is required"})
 		return
 	}
+	if err := api.RequireUUID("entity_id", req.EntityID); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	at := time.Now().UTC()
 	if req.At != nil {
 		at = req.At.UTC()
 	}
 	orgID := t.OrganizationID
+	visible, err := h.repo.Visible(r.Context(), orgID, req.EntityType, req.EntityID)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	if !visible {
+		api.WriteRepoError(w, api.ErrNotFound)
+		return
+	}
 	params := SnapshotRequest{EntityType: req.EntityType, EntityID: req.EntityID, At: &at}
 	run := func(ctx context.Context) (any, error) { return h.snapshot(ctx, orgID, &params) }
 	if h.jobs == nil && h.queue == nil {
-		snapshot, err := run(r.Context())
-		if err != nil {
-			api.WriteRepoError(w, err)
+		snapshot, serr := run(r.Context())
+		if serr != nil {
+			writeSnapshotError(w, serr)
 			return
 		}
 		api.WriteJSON(w, http.StatusOK, snapshot)
 		return
 	}
 	var job *jobs.Job
-	var err error
 	if h.queue != nil {
 		job, _, err = h.queue.Submit(r.Context(), orgID, SnapshotJobKind, params, jobs.EnqueueOptions{CreatedBy: t.UserID})
 	} else {
@@ -124,15 +140,40 @@ func (h *Handler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusAccepted, map[string]any{"job_id": job.ID, "status": job.Status, "kind": job.Kind})
 }
 
-// snapshot replays the state of the entity of req at req.At.
-func (h *Handler) snapshot(ctx context.Context, orgID string, req *SnapshotRequest) (any, error) {
+// snapshot replays the state of the entity of req at req.At from its
+// change trail (TrailUpTo). An entity the caller cannot see is
+// api.ErrNotFound; one without a recorded change up to req.At (before its
+// creation or before the first recorded change) is a
+// *NoRecordedStateError, not an empty state (F-164).
+func (h *Handler) snapshot(ctx context.Context, orgID string, req *SnapshotRequest) (*StateSnapshot, error) {
+	visible, err := h.repo.Visible(ctx, orgID, req.EntityType, req.EntityID)
+	if err != nil {
+		return nil, err
+	}
+	if !visible {
+		return nil, api.ErrNotFound
+	}
 	trail, err := h.repo.TrailUpTo(ctx, orgID, req.EntityType, req.EntityID, *req.At)
 	if err != nil {
 		return nil, err
 	}
+	if len(trail) == 0 {
+		return nil, &NoRecordedStateError{At: *req.At}
+	}
 	snapshot := Replay(trail)
 	snapshot.EntityType, snapshot.EntityID, snapshot.At = req.EntityType, req.EntityID, *req.At
-	return snapshot, nil
+	return &snapshot, nil
+}
+
+// writeSnapshotError answers a failed state snapshot: an invisible entity
+// and one without a recorded state are 404.
+func writeSnapshotError(w http.ResponseWriter, err error) {
+	var none *NoRecordedStateError
+	if errors.As(err, &none) {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "no recorded state before "+none.At.UTC().Format(time.RFC3339Nano))
+		return
+	}
+	api.WriteRepoError(w, err)
 }
 
 // RunSnapshotJob runs a snapshot job of the job queue (handler of
@@ -228,7 +269,8 @@ func (h *Handler) CIState(w http.ResponseWriter, r *http.Request) {
 
 // state reconstructs the entity state at the requested point in time
 // (spec §16). Without an "at" parameter the current replay of the full trail
-// is returned.
+// is returned. An entity the caller cannot see and one without a recorded
+// change up to at are 404 (JOB-04, F-164).
 func (h *Handler) state(w http.ResponseWriter, r *http.Request, entityType string) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -244,16 +286,11 @@ func (h *Handler) state(w http.ResponseWriter, r *http.Request, entityType strin
 		}
 		at = parsed
 	}
-	entityID := chi.URLParam(r, "id")
-	trail, err := h.repo.TrailUpTo(r.Context(), t.OrganizationID, entityType, entityID, at)
+	snapshot, err := h.snapshot(r.Context(), t.OrganizationID, &SnapshotRequest{EntityType: entityType, EntityID: chi.URLParam(r, "id"), At: &at})
 	if err != nil {
-		api.WriteRepoError(w, err)
+		writeSnapshotError(w, err)
 		return
 	}
-	snapshot := Replay(trail)
-	snapshot.EntityType = entityType
-	snapshot.EntityID = entityID
-	snapshot.At = at
 	api.WriteJSON(w, http.StatusOK, snapshot)
 }
 

@@ -24,7 +24,7 @@ import (
 // against PostgreSQL: resolving a review item by merge is a job of kind
 // review.merge with the item as reference (succeeded, or failed with the
 // error of the effect); a state snapshot is a job of kind history.snapshot
-// whose result is the replayed state.
+// whose result is the replayed state with the fields of the change trail.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestLongOperationsRunAsJobsAgainstPostgres(t *testing.T) {
@@ -118,8 +118,11 @@ func TestLongOperationsRunAsJobsAgainstPostgres(t *testing.T) {
 	if job == nil || job.Status != jobs.StatusSucceeded || job.Kind != history.SnapshotJobKind {
 		t.Fatalf("snapshot job: %+v %v", job, err)
 	}
+	// The result is the replayed state, not only the entity (WP-516,
+	// F-164): the renamed name of the trail.
 	var snapshot history.StateSnapshot
-	if err = json.Unmarshal(job.Result, &snapshot); err != nil || snapshot.EntityID != ciID {
-		t.Errorf("snapshot result: %s %v", job.Result, err)
+	if err = json.Unmarshal(job.Result, &snapshot); err != nil || snapshot.EntityID != ciID || snapshot.EntityType != "ci" ||
+		snapshot.Fields["name"] != "job-snapshot-renamed" || snapshot.Deleted {
+		t.Errorf("snapshot result: %s %v, want the field name job-snapshot-renamed", job.Result, err)
 	}
 }

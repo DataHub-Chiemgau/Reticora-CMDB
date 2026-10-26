@@ -11188,11 +11188,18 @@ paths:
     get:
       operationId: listAssetsIdState
       summary: Reconstruct asset state at a point in time
+      description: >-
+        Replays the changes of the asset (creation, updates, deletion) up to
+        at (default now). An asset the caller cannot see (unknown, deleted,
+        or of another organization, client or site) and one without a
+        recorded change up to at are 404 (JOB-04, F-164).
       responses:
         '200':
           description: Reconstruct asset state at a point in time
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/ci-fields/global:
     get:
@@ -11797,11 +11804,19 @@ paths:
     get:
       operationId: listCisIdState
       summary: Reconstruct CI state at a point in time
+      description: >-
+        Replays the change trail of the CI (its ci_change field rows from the
+        creation on and its entity_change rows) up to at (default now), with
+        the values its history shows. A CI the caller cannot see (unknown, or
+        of another organization, client or site) and one without a recorded
+        change up to at are 404 (JOB-04, F-164).
       responses:
         '200':
           description: Reconstruct CI state at a point in time
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/compositions:
     x-phase: P2
@@ -11859,7 +11874,10 @@ paths:
         kind history.snapshot; 202 with the job, whose result is the state
         (GET /api/v1/jobs/{id}/result). Without the job model (no database)
         the state is answered at once (200). GET /cis/{id}/state stays the
-        direct read.
+        direct read. An entity the caller cannot see (unknown, or of another
+        organization, client or site) is 404 and no job is created; without
+        a recorded change up to at (before the creation) the job fails with
+        "no recorded state before <at>" (404 without the job model).
       requestBody:
         required: true
         content:
@@ -11898,8 +11916,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '422':
-          description: Unknown entity type.
+          description: Unknown entity type, or an entity_id that is no UUID.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }

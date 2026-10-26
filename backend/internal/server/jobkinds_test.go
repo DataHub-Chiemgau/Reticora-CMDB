@@ -61,6 +61,12 @@ func newJobKindsEnv(t *testing.T, queue func(repo jobs.Repository) *jobs.Queue) 
 		t.Fatal(err)
 	}
 	repos := server.MemoryRepositories()
+	// The CI of the state snapshots has a recorded state: an unknown
+	// entity is 404 and no job (WP-516).
+	if err = repos.History.Record(context.Background(), &history.Change{OrganizationID: jobKindsOrg, EntityType: "ci",
+		EntityID: "c0de0503-0000-4000-8000-0000000000c1", ChangeType: "create", NewValue: map[string]any{"name": "wp-503"}}); err != nil {
+		t.Fatal(err)
+	}
 	var q *jobs.Queue
 	if queue != nil {
 		q = queue(repos.Jobs)
