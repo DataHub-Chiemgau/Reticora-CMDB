@@ -1,8 +1,13 @@
-# Outage and backpressure suite (WP-104, OPS-06): installs the Compose stack
-# and simulates the outage of PostgreSQL, NATS, Redis and object storage,
-# plus the component scenarios (collector with the server unreachable,
-# spool limits, webhook target down). Runs nightly, before every release
-# (called by release.yml) and on changes to the suite.
+# Outage and backpressure suite (WP-104, WP-449, OPS-06): installs the
+# Compose stack with Mailpit as its central SMTP server and simulates the
+# outage of PostgreSQL, NATS, Redis, object storage and SMTP, each under
+# load (tests/outage/load.sh: every answer accepted or visibly refused, then
+# accepted == persisted counted in the database, ingest queue empty, event
+# outbox published), plus the component scenarios (collector with the
+# server unreachable, spool limits, webhook target down) and the negative
+# self-test (one record dropped on purpose must fail). Runs nightly, before
+# every release (called by release.yml), on changes to the suite and by
+# hand (workflow_dispatch).
 name: Outage Suite
 
 on:
@@ -21,13 +26,21 @@ permissions:
 jobs:
   outage:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.10"
+
+      # SMTP scenario (WP-449, F-135): Mailpit and RETICORA_SMTP_HOST go
+      # into the override that the installer merges for its source build,
+      # so the installation already waits for /readyz with the smtp check.
+      - name: Mailpit as the central SMTP server (before the installation)
+        run: |
+          python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+          ./tests/outage/smtp.sh overlay deploy/docker-compose/docker-compose.override.yml
 
       # The checked-out state is not published yet (nightly on main, before
       # release.yml publishes a tag): local build, not signature-verified
@@ -37,22 +50,56 @@ jobs:
         env:
           RETICORA_SOURCE_DIR: ${{ github.workspace }}
 
+      # The organization and API key of the load (cmd/seed, as load.yml).
+      - name: Build the seed of the load
+        working-directory: backend
+        run: go build -o "$RUNNER_TEMP/seed" ./cmd/seed
+
       - name: Run the outage scenarios
         run: ./tests/outage/run.sh
         env:
           OUTAGE_REPORT: ${{ github.workspace }}/outage-report.md
+          OUTAGE_SEED_BIN: ${{ runner.temp }}/seed
+
+      # F-136: the accounting must catch a lost record. The self-test drops
+      # the last ingest record of the load on purpose; the run has to fail
+      # with exactly that record lost and nothing else.
+      - name: Negative self-test (one ingest record dropped on purpose)
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          ./tests/outage/run.sh minio
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the self-test passed although a record was dropped"
+            exit 1
+          fi
+          grep -qE '^\| minio outage \| FAIL \| ingest: accepted [0-9]+ != persisted [0-9]+ \(lost 1: OUTAGE-[0-9]+-minio-I50, late 0\) \|$' outage-selftest-report.md || {
+            echo "::error::the self-test did not fail with exactly the dropped record lost"
+            exit 1
+          }
+        env:
+          OUTAGE_SELFTEST_DROP: "1"
+          OUTAGE_REPORT: ${{ github.workspace }}/outage-selftest-report.md
+          OUTAGE_SEED_BIN: ${{ runner.temp }}/seed
 
       - name: Publish the protocol
         if: always()
         run: |
-          [ -f outage-report.md ] && cat outage-report.md >> "$GITHUB_STEP_SUMMARY" || true
+          for f in outage-report.md outage-selftest-report.md; do
+            [ -f "$f" ] && cat "$f" >> "$GITHUB_STEP_SUMMARY"
+          done
+          true
 
       - name: Upload the protocol
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: outage-report
-          path: outage-report.md
+          path: |
+            outage-report.md
+            outage-selftest-report.md
           retention-days: 90
 
       - name: Show logs on failure
@@ -61,6 +108,7 @@ jobs:
           cd deploy/docker-compose
           docker compose --env-file .env ps || true
           docker compose --env-file .env logs --tail 100 server || true
+          docker compose --env-file .env logs --tail 40 mailpit || true
 
       - name: Cleanup
         if: always()

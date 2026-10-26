@@ -80,9 +80,35 @@ func ClassifyDBError(err error) (status int, title, detail string, ok bool) {
 // of another tenant, which the caller must not tell apart (404).
 var ErrNotFound = errors.New("not found")
 
+// ErrUnavailable marks a dependency the request needs that is unreachable
+// before anything was stored, e.g. the ingest queue while NATS is down
+// (OPS-06): the request is refused with 503 and Retry-After, so a client
+// keeps its data and sends it again instead of losing it.
+var ErrUnavailable = errors.New("service temporarily unavailable")
+
+// UnavailableRetryAfter is the Retry-After (seconds) of a 503 caused by an
+// unreachable dependency.
+const UnavailableRetryAfter = "5"
+
+// IsUnavailable reports ErrUnavailable and a database connection that could
+// not be established (nothing reached the database). A connection lost
+// during a statement is not one of them: the write may have committed.
+func IsUnavailable(err error) bool {
+	var connectErr *pgconn.ConnectError
+	return errors.Is(err, ErrUnavailable) || errors.As(err, &connectErr)
+}
+
+// WriteUnavailable answers 503 with Retry-After: the request was refused
+// because a dependency is unreachable and may be repeated later.
+func WriteUnavailable(w http.ResponseWriter, detail string) {
+	w.Header().Set("Retry-After", UnavailableRetryAfter)
+	WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", detail)
+}
+
 // WriteRepoError reports a repository failure to the client. ErrNotFound
 // becomes 404; recognised PostgreSQL errors become a precise, sanitized
-// RFC 7807 response; anything else becomes a generic 500.
+// RFC 7807 response; an unreachable dependency (IsUnavailable) becomes 503
+// with Retry-After; anything else becomes a generic 500.
 //
 // It exists so handlers never pass err.Error() to the client: raw pgx errors
 // carry table, column and constraint names, and echoing them discloses the
@@ -93,6 +119,10 @@ func WriteRepoError(w http.ResponseWriter, err error) {
 		return
 	}
 	if WriteDBError(w, err) {
+		return
+	}
+	if IsUnavailable(err) {
+		WriteUnavailable(w, "a required service is temporarily unavailable, try again later")
 		return
 	}
 	WriteError(w, http.StatusInternalServerError, "Internal Error", "the request could not be completed")

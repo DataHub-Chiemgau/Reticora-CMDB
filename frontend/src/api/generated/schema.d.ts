@@ -4072,7 +4072,7 @@ export interface paths {
     put?: never;
     /**
      * Ingest discovery results in bulk
-     * @description Reconciles a batch of discovered items against existing CIs, creating, updating or queueing them for manual review. This is the canonical endpoint that `/api/v1/discovery/ingest` aliases. Both require the discovery feature; after the discovery license expired they answer 403 with the problem type license-expired (CH21).
+     * @description Reconciles a batch of discovered items against existing CIs, creating, updating or queueing them for manual review. This is the canonical endpoint that `/api/v1/discovery/ingest` aliases. Both require the discovery feature; after the discovery license expired they answer 403 with the problem type license-expired (CH21). While the ingest queue (NATS) is unreachable both answer 503 at once and queue nothing, not even after the reconnect (OPS-06, WP-449); records of the batch queued before a failure are deduplicated by record_id when the batch is sent again.
      */
     post: operations['bulkIngest'];
     delete?: never;
@@ -10999,6 +10999,17 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
+    /** @description A dependency the request needs is unreachable (OPS-06): the ingest queue (NATS), the API key store (database) or a database connection that cannot be established. Nothing was stored; the request may be repeated after Retry-After. */
+    DependencyUnavailable: {
+      headers: {
+        /** @description Seconds after which the request may be repeated. */
+        'Retry-After'?: number;
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
     /** @description The location or its subtree is still referenced; dependencies lists the kinds of referencing objects */
     LocationInUse: {
       headers: {
@@ -12879,6 +12890,7 @@ export interface operations {
         };
       };
       500: components['responses']['InternalServerError'];
+      503: components['responses']['DependencyUnavailable'];
     };
   };
   listDiscoveryJobs: {
@@ -20668,6 +20680,7 @@ export interface operations {
         };
       };
       500: components['responses']['InternalServerError'];
+      503: components['responses']['DependencyUnavailable'];
     };
   };
   listCredentials: {

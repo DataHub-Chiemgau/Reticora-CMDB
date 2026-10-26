@@ -11,6 +11,16 @@ info:
     carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and
     `X-RateLimit-Reset` (seconds until the window ends) for the budget
     closest to exhaustion; a refused request gets 429 with `Retry-After`.
+
+    Dependency outages (OPS-06): a request that needs an unreachable
+    dependency is refused before anything is stored, with 503 and
+    `Retry-After`: every request with a well-formed API key while the key
+    store (database) is unreachable (not 401: the key is not known to be invalid,
+    and the refusal does not count against the pre-auth limit), an ingest
+    while the ingest queue (NATS) is unreachable, and a request whose
+    database connection cannot be established. While Redis is unreachable
+    the rate limits refuse with 429. A 2xx answer means stored or durably
+    queued.
   contact:
     name: DataHub Chiemgau
   license:
@@ -1884,6 +1894,8 @@ paths:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
 
   /api/v1/discovery/jobs:
     get:
@@ -8087,7 +8099,11 @@ paths:
         updating or queueing them for manual review. This is the canonical
         endpoint that `/api/v1/discovery/ingest` aliases. Both require the
         discovery feature; after the discovery license expired they answer
-        403 with the problem type license-expired (CH21).
+        403 with the problem type license-expired (CH21). While the ingest
+        queue (NATS) is unreachable both answer 503 at once and queue
+        nothing, not even after the reconnect (OPS-06, WP-449); records of
+        the batch queued before a failure are deduplicated by record_id when
+        the batch is sent again.
       parameters:
         - name: Content-Encoding
           in: header
@@ -8137,6 +8153,8 @@ paths:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
 
   /api/v1/credentials:
     get:
@@ -12220,6 +12238,10 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
+      description: >-
+        API key of AUT-04. While the key store (database) is unreachable, a
+        request with a well-formed key is refused with 503 and Retry-After,
+        not with 401 (OPS-06).
     OperatorAuth:
       type: http
       scheme: bearer
@@ -12442,6 +12464,20 @@ components:
             $ref: '#/components/schemas/ProblemDetail'
     ServiceUnavailable:
       description: A required subsystem is not configured or temporarily unavailable
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    DependencyUnavailable:
+      description: >-
+        A dependency the request needs is unreachable (OPS-06): the ingest
+        queue (NATS), the API key store (database) or a database connection
+        that cannot be established. Nothing was stored; the request may be
+        repeated after Retry-After.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds after which the request may be repeated.
       content:
         application/problem+json:
           schema:

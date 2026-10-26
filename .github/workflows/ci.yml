@@ -466,6 +466,13 @@ jobs:
           REQUIRE_PROMTOOL: "1"
         run: ./tests/audit/t2-break-glass-alert.test.sh
 
+      # OPS-06 (WP-449): the outage suite without the installed stack: SMTP
+      # scenario (F-135), load accounting and the negative self-test against
+      # stubs (F-136), Mailpit overlay, outage.yml. The suite itself runs in
+      # outage.yml.
+      - name: Outage suite configuration and load accounting (OPS-06)
+        run: ./tests/outage/config.test.sh
+
   # OPS-05 (WP-446): the Alertmanager configuration loads (amtool
   # check-config), the PrometheusRule groups pass promtool check rules and
   # their unit tests in deploy/monitoring/tests. amtool v0.27.0 and promtool

@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -631,15 +632,24 @@ func (q *NATSIngestQueue) names() []string {
 
 // Publish stores each message on the subject of its lane
 // (ingest.<org>.<lane>.<collector>) and waits for the stream's
-// acknowledgement.
+// acknowledgement. While the connection to NATS is down it refuses at once
+// with api.ErrUnavailable (503, OPS-06): a publish would otherwise wait in
+// the client's reconnect buffer, fail the request after the timeout and
+// still reach the stream after the reconnect, so a refused record would be
+// processed after all. A failed publish is unavailable too; the records
+// published before it are deduplicated by record_id when the client sends
+// the batch again (REC-01).
 func (q *NATSIngestQueue) Publish(ctx context.Context, msgs []IngestMessage) error {
+	if status := q.nc.Status(); status != nats.CONNECTED {
+		return fmt.Errorf("%w: ingest queue %s", api.ErrUnavailable, strings.ToLower(status.String()))
+	}
 	for i := range msgs {
 		data, err := json.Marshal(&msgs[i])
 		if err != nil {
 			return fmt.Errorf("encode ingest message: %w", err)
 		}
 		if _, err = q.js.Publish(ctx, msgs[i].Subject(q.lanes), data); err != nil {
-			return fmt.Errorf("publish ingest message: %w", err)
+			return fmt.Errorf("%w: publish ingest message: %w", api.ErrUnavailable, err)
 		}
 	}
 	return nil

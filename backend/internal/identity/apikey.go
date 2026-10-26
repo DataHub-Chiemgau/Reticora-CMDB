@@ -27,6 +27,12 @@ const (
 
 func apiKeyPrefixFor(environment string) string { return "rk_" + environment + "_" }
 
+// ErrAPIKeyUnavailable: a well-formed key could not be checked because its
+// store or its owner's rights could not be read (database outage). The key
+// is not known to be invalid, so the request is refused with 503, not 401
+// (OPS-06).
+var ErrAPIKeyUnavailable = errors.New("identity: API key verification unavailable")
+
 // APIKeyStore provides persistence for API key metadata.
 type APIKeyStore interface {
 	// LookupByPrefix identifies a key by its public prefix before any
@@ -184,7 +190,7 @@ func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*APIKeyInf
 
 	stored, err := s.store.LookupByPrefix(ctx, publicID)
 	if err != nil {
-		return nil, fmt.Errorf("identity: lookup API key: %w", err)
+		return nil, fmt.Errorf("%w: lookup API key: %w", ErrAPIKeyUnavailable, err)
 	}
 	if stored == nil {
 		return nil, errors.New("identity: API key not found")
@@ -228,7 +234,7 @@ func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*APIKeyInf
 	if s.owners != nil || stored.ServiceAccountID != nil {
 		grants, grantErr := resolve()
 		if grantErr != nil {
-			return nil, fmt.Errorf("identity: resolve API key owner rights: %w", grantErr)
+			return nil, fmt.Errorf("%w: resolve API key owner rights: %w", ErrAPIKeyUnavailable, grantErr)
 		}
 		owner := ResolveAccess(grants)
 		info.Scopes = intersectPermissions(stored.Permissions, owner.Permissions)
