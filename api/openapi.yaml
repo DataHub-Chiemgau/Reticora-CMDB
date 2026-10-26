@@ -5149,7 +5149,11 @@ paths:
         Requires review:resolve. The actions per type (REC-08):
         unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss;
         conflicting_values accept|dismiss; probable_duplicate merge|dismiss
-        (merge removes the new CI); override_conflict accept|dismiss (accept
+        (merge is the CI-12 merge, a ci.merge job, of the new CI into the
+        chosen candidate: its references move, GET on it answers 301 and
+        POST /cis/{id}/unmerge restores it within 30 days; 409 when another
+        merge holds or has merged either CI, the item stays open);
+        override_conflict accept|dismiss (accept
         removes the override and the CI takes the observed value; dismiss
         keeps the override and suppresses the value until the source reports
         another); conflicting_values accept applies the reported serial

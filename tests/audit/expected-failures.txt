@@ -5,7 +5,6 @@
 go;backend/internal/ci;TestAuditT7BulkJobCancelStopsWork;F-162
 go;backend/internal/discovery;TestAuditDefectDiscoveryTypedValuesValidated;F-143
 go;backend/internal/discovery;TestAuditPowerRedundancyIndependentOfBatchOrder;F-112
-go;backend/internal/discovery;TestAuditT3ProbableDuplicateMergeIsCIMerge;F-096
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
 go;backend/internal/rack;TestAuditDefectRackHeightNotBelowMounts;F-140
 go;backend/internal/relationship;TestAuditCleanupCronScopeDeadline;F-111

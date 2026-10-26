@@ -499,6 +499,9 @@ type Handler struct {
 	// (REC-01, WP-334).
 	serial     sync.Map
 	reviewJobs jobs.Tracker
+	// merger carries out the resolution merge of probable_duplicate items
+	// as the CI-12 merge (WithMerger).
+	merger CIMerger
 	// tx runs the frame of a batch and each record in one transaction
 	// (NFR-03); without one every repository call is its own transaction.
 	tx TxRunner

@@ -467,9 +467,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.IngestQueue != nil {
 		opts.IngestQueue.Attach(discoveryHandler)
 	}
-	// Review merges run as jobs (JOB-04).
+	// Review merges run as jobs (JOB-04); the merge of a probable
+	// duplicate is the CI-12 merge, a ci.merge job of its own (CH29).
 	if jobTracker != nil {
 		discoveryHandler.WithReviewJobs(jobTracker)
+	}
+	if opts.CIService != nil {
+		discoveryHandler.WithMerger(opts.CIService)
 	}
 	if opts.Events != nil {
 		discoveryHandler.WithReviewNotifier(reviewEvents{emitter: opts.Events})
