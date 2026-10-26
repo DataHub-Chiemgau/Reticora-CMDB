@@ -43,22 +43,28 @@ func visibleSubscription(alias string) string {
 	return `EXISTS (SELECT 1 FROM webhook_subscription s WHERE s.id = ` + alias + `.subscription_id)`
 }
 
-// Enqueue stores a new pending delivery for the tenant.
+// Enqueue stores a new pending delivery for the tenant. A preset ID is
+// kept; a delivery of an event the subscription already has is not stored
+// again (unique index of migration 000169, WP-506): ErrDeliveryExists.
 func (s *PGDeliveryStore) Enqueue(ctx context.Context, rec DeliveryRecord) (DeliveryRecord, error) {
 	stored := rec
 
 	err := database.WithTenant(ctx, s.pool, orgScope(rec.OrganizationID), func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
 			INSERT INTO webhook_delivery (
-				organization_id, subscription_id, event, payload,
-				status, attempt, max_attempts, next_retry_at
+				id, organization_id, subscription_id, event, payload,
+				status, attempt, max_attempts, next_retry_at,
+				event_id, event_sequence, event_entity_seq
 			)
 			VALUES (
-				current_setting('app.org_id')::uuid, $1, $2, $3,
-				$4, $5, $6, $7
+				COALESCE($1::uuid, gen_random_uuid()), current_setting('app.org_id')::uuid, $2, $3, $4,
+				$5, $6, $7, $8,
+				$9::uuid, $10, $11
 			)
+			ON CONFLICT DO NOTHING
 			RETURNING id::text, created_at
 		`,
+			nullableString(rec.ID),
 			rec.SubscriptionID,
 			rec.Event,
 			rec.Payload,
@@ -66,8 +72,15 @@ func (s *PGDeliveryStore) Enqueue(ctx context.Context, rec DeliveryRecord) (Deli
 			rec.Attempt,
 			maxAttemptsOrDefault(rec.MaxAttempts),
 			rec.NextRetryAt,
+			nullableString(rec.EventID),
+			nullableInt64(rec.EventSequence),
+			nullableInt64(rec.EntitySeq),
 		)
-		if err := row.Scan(&stored.ID, &stored.CreatedAt); err != nil {
+		err := row.Scan(&stored.ID, &stored.CreatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrDeliveryExists
+		}
+		if err != nil {
 			return fmt.Errorf("enqueue webhook delivery: %w", err)
 		}
 		stored.CreatedAt = stored.CreatedAt.UTC()
@@ -193,7 +206,8 @@ func (s *PGDeliveryStore) claimDueForOrg(ctx context.Context, orgID string, now 
 			FROM due
 			WHERE d.id = due.id
 			RETURNING d.id::text, d.organization_id::text, d.subscription_id::text, d.event,
-			          d.payload, d.status, d.attempt, d.max_attempts, d.created_at
+			          d.payload, d.status, d.attempt, d.max_attempts, d.created_at,
+			          COALESCE(d.event_id::text, ''), COALESCE(d.event_sequence, 0), COALESCE(d.event_entity_seq, 0)
 		`, now, limit, now.Add(lease))
 		if err != nil {
 			return fmt.Errorf("claim due webhook deliveries: %w", err)
@@ -212,6 +226,9 @@ func (s *PGDeliveryStore) claimDueForOrg(ctx context.Context, orgID string, now 
 				&rec.Attempt,
 				&rec.MaxAttempts,
 				&rec.CreatedAt,
+				&rec.EventID,
+				&rec.EventSequence,
+				&rec.EntitySeq,
 			); err != nil {
 				return fmt.Errorf("scan webhook delivery: %w", err)
 			}
@@ -424,6 +441,13 @@ func maxAttemptsOrDefault(maxAttempts int) int {
 }
 
 func nullableInt(value int) *int {
+	if value == 0 {
+		return nil
+	}
+	return &value
+}
+
+func nullableInt64(value int64) *int64 {
 	if value == 0 {
 		return nil
 	}

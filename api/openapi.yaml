@@ -1684,6 +1684,20 @@ paths:
         events both the creator's scope and the account's read rights cover.
         invitation.created is delivered without its link: the acceptance
         token reaches the invitee by mail only.
+
+        Every delivery is a POST with the event data as JSON body and the
+        headers X-Reticora-Event (event type), X-Reticora-Delivery
+        (delivery ID) and X-Reticora-Signature (`sha256=` HMAC-SHA256 of
+        the body with the subscription secret). A delivery of a domain
+        event also carries X-Reticora-Event-ID (the event ID),
+        X-Reticora-Sequence (the sequence of the event in the
+        organization) and X-Reticora-Entity-Seq (the sequence of the event
+        among those of its entity; absent for an event without an
+        entity). Delivery is at least once: the delivery ID derives from
+        the event and the subscription, and every retry of a delivery
+        keeps it and the headers, so receivers drop repeats by
+        X-Reticora-Delivery or X-Reticora-Event-ID and order the events of
+        an entity by X-Reticora-Entity-Seq.
       requestBody:
         required: true
         content:

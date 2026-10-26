@@ -794,3 +794,4 @@ IMP-09;[B];D;backend/internal/discovery/power_chain_integration_test.go;WP-498
 REL-03;[B];D;backend/internal/discovery/power_test.go;WP-498
 AUD-05;[B];B;backend/internal/server/route_audit_integration_test.go;WP-504
 AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-504
+EVT-01;[B];B;backend/internal/webhook/consume_integration_test.go;WP-506
