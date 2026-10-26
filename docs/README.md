@@ -603,7 +603,12 @@ troubleshooting (yellow status, disk watermark, unreachable backend).
 client-certificate material is available — from `RETICORA_TLS_CLIENT_CERT`/
 `RETICORA_TLS_CLIENT_KEY` (or the `_FILE` variants), or from the enrollment
 keystore at `RETICORA_CREDENTIALS_PATH` (default
-`/var/lib/reticora-collector/credentials.json`). The mTLS HTTP client is built
+`/var/lib/reticora-collector/credentials.json`). `install-vm.sh` writes that
+path into `collector.env` and puts the command of the Discovery page's enroll
+instruction on PATH as `/usr/local/bin/reticora-collector`, the command its
+systemd unit starts; the image ships the binary under the same name as its
+entrypoint. `reticora-collector enroll --server <url> --code <code>` thus
+stores the identity where the service reads it. The mTLS HTTP client is built
 by `edgecore/transport.NewMTLS` (TLS 1.3 minimum). Without certificate
 material the collector logs a warning and falls back to plain HTTPS/HTTP so
 local development keeps working. Discovery results are uploaded as

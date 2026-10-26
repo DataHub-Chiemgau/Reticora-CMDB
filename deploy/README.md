@@ -276,8 +276,11 @@ The installer asks for:
   by the discovery plugins.
 - **Offline buffer** — spool directory where results are kept while the cloud
   is unreachable.
+- **Auto-updates** (systemd mode, optional) — base URL of the signed collector
+  releases (`RETICORA_UPDATE_URL`, also taken from the environment; empty =
+  off), see `docs/betrieb/collector-updates.md`.
 - **mTLS identity** — client certificate/key/CA files, or empty to use the
-  enrollment keystore at `/opt/reticora-collector/credentials.json`.
+  enrollment keystore at `/var/lib/reticora-collector/credentials.json`.
 
 It then writes `/opt/reticora-collector/collector.env` (mode `600`), installs
 the signed collector of the release — the binary `reticora-collector-linux-<arch>`
@@ -286,7 +289,58 @@ after `cosign verify-blob` and its sha256 in the signed `SHA256SUMS`, or with
 digest (Docker/Compose are installed when missing) — installs and starts a
 `reticora-collector.service` systemd unit — or, with `--docker`, a minimal
 compose project in `/opt/reticora-collector/` — and verifies that the
-collector is running.
+collector is running. In the systemd mode the binary lives at
+`/opt/reticora-collector/collector` and is linked as
+`/usr/local/bin/reticora-collector`, the command the unit starts.
+
+With `RETICORA_UPDATE_URL` (systemd mode) the installer also installs cosign
+`v2.4.1` — the version the release is signed with, checked against its
+published sha256 before it is installed — as `/usr/local/bin/cosign`, where
+the updater of the service finds it; another file there is replaced. Without
+an update URL nothing is installed, and the collector warns at start when
+auto-updates are on but cosign is missing. The Docker mode updates through the
+signed image (re-run with `--release v<version>`) and ignores the update URL.
+
+### Enrollment
+
+The Discovery page shows `reticora-collector enroll --server <url> --code
+<code>` with a one-time code (24 h). Run it on the collector VM as root and
+restart the service:
+
+```bash
+sudo reticora-collector enroll --server https://cmdb.example.com --code <code>
+sudo systemctl restart reticora-collector
+```
+
+The command stores the identity (certificate, key, CA, server URL) at
+`/var/lib/reticora-collector/credentials.json`; `collector.env` names the same
+path (`RETICORA_CREDENTIALS_PATH`), so the service reads it. A re-run of the
+installer over an older installation switches `RETICORA_CREDENTIALS_PATH` from
+`/opt/reticora-collector/credentials.json` to that path and moves an identity
+found there. With `--docker`, the compose project mounts
+`/var/lib/reticora-collector` (mode `700`, owned by the image user `nobody`,
+65534), and the image runs `reticora-collector` as its entrypoint
+(`collector` remains as a link):
+
+```bash
+docker compose -f /opt/reticora-collector/docker-compose.yml run --rm collector \
+  enroll --server https://cmdb.example.com --code <code>
+docker compose -f /opt/reticora-collector/docker-compose.yml restart collector
+```
+
+### ICMP sweep
+
+The sweep pings over an unprivileged ICMP socket where
+`net.ipv4.ping_group_range` allows the collector's group, otherwise over a raw
+socket, which needs `CAP_NET_RAW`; without either, ICMP is off (logged at
+start as `sweep_icmp`) and the sweep uses TCP and ARP. The systemd unit grants
+`AmbientCapabilities=CAP_NET_RAW`. The image sets no file capability and runs
+as `nobody`: with `--docker` (host networking) the host's
+`net.ipv4.ping_group_range` applies — set it on the host if needed
+(`sysctl -w net.ipv4.ping_group_range="0 2147483647"`, persisted in
+`/etc/sysctl.d/`); a container with its own network namespace gets the full
+range from Docker or `--sysctl`. `NET_RAW` works in the container only for
+root (`user: "0:0"`), not for `nobody`.
 
 With `--build-from-source` (`RETICORA_BUILD_FROM_SOURCE=1`) it builds the
 collector locally instead, not signature-verified: it downloads the repository

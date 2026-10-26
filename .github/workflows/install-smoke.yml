@@ -152,6 +152,18 @@ jobs:
       - name: Compose port policy (COL-08)
         run: ./tests/audit/compose-port-policy.test.sh
 
+      # INS-06 (WP-432, F-110): install-vm.sh and the image put the command of
+      # the UI's enroll instruction (reticora-collector) on PATH, and the
+      # service reads the identity where it stores it.
+      - name: Installed collector matches the enroll command of the UI (INS-06)
+        run: ./tests/audit/collector-install-cli.test.sh
+
+      # COL-06 (WP-432, F-260): with RETICORA_UPDATE_URL install-vm.sh installs
+      # the pinned cosign of the updater (with the real cosign of the step
+      # above: RETICORA_TEST_COSIGN), without it nothing.
+      - name: install-vm.sh cosign for the signed auto-updates (COL-06)
+        run: ./tests/install-vm-cosign.test.sh
+
   # INS-01/TEC-09/GATE-03 (WP-092): the cloud installer on every platform of
   # CH22. Ubuntu runs natively on the GitHub runners; Debian 12 runs the
   # installer in a debian:12 container that drives the runner's Docker daemon
@@ -285,6 +297,86 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
           npx playwright test -c e2e/fixtures/playwright.install.config.ts
+
+      # INS-06 (WP-432, retest F-110): the enroll command of the UI on a
+      # collector installed by install-vm.sh. Its functions (systemd mode, the
+      # collector build of setup-onboarding.sh as prebuilt binary, systemctl
+      # stubbed: no systemd in the container) install the collector in a
+      # debian:12 container on the runner's network; there
+      # 'reticora-collector enroll --server <frontend origin> --code <code>'
+      # runs over PATH against this installation: exit 0, the identity at the
+      # default path, collector.env names the same path, the collector is
+      # registered with its certificate, and the binary started like the unit
+      # (ExecStart, EnvironmentFile, systemd's default PATH) authenticates
+      # with that identity (mTLS). The code is stored like
+      # POST /collectors/enrollment-codes stores it (SHA-256), for the
+      # organization of the onboarding suite: the API needs a browser session.
+      - name: Collector installed by install-vm.sh enrolls with the command of the UI (INS-06)
+        if: matrix.platform == 'ubuntu-24.04'
+        run: |
+          set -euo pipefail
+          value() { sed -n "s/^$1=//p" deploy/docker-compose/.env | tail -n 1; }
+          psql_stack() {
+            (cd deploy/docker-compose && docker compose --env-file .env exec -T postgres \
+              psql -U reticora -d reticora -X -qtA -v ON_ERROR_STOP=1 -c "$1")
+          }
+          frontend_port="$(value RETICORA_FRONTEND_PORT)"
+          code="$(openssl rand -hex 24)"
+          org="$(psql_stack "INSERT INTO collector_enrollment_code (organization_id, code_hash, label, expires_at)
+            SELECT id, encode(sha256(convert_to('$code', 'UTF8')), 'hex'), 'install-smoke INS-06', now() + interval '30 minutes'
+            FROM organization WHERE name LIKE 'Muster E2E %' ORDER BY created_at DESC LIMIT 1 RETURNING organization_id")"
+          [ -n "$org" ] || { echo "FAIL: no organization of the onboarding suite"; exit 1; }
+          out="$RUNNER_TEMP/collector-install"
+          mkdir -p "$out"
+          cat > "$out/install-collector.sh" <<'SCRIPT'
+          set -euo pipefail
+          printf '#!/bin/sh\nexit 0\n' > /usr/local/sbin/systemctl
+          chmod +x /usr/local/sbin/systemctl
+          mkdir -p /etc/systemd/system /collector-build/bin /opt/reticora-collector
+          cp /mnt/reticora-collector /collector-build/bin/collector
+          sed -e '/^main "\$@"$/d' /src/install-vm.sh > /tmp/install-vm-lib.sh  # without main, sourced with --build-from-source
+          cp /src/install-preflight.sh /tmp/install-preflight.sh
+          # The answer to the cloud URL question: this installation.
+          printf 'RETICORA_SERVER_URL=%s\n' "$SERVER" > /opt/reticora-collector/collector.env
+          (
+            . /tmp/install-vm-lib.sh --non-interactive --build-from-source
+            SOURCE_DIR=/collector-build    # bin/collector: the prebuilt binary
+            collect_config
+            write_env
+            provide_collector_systemd
+            install_systemd_unit
+          )
+          cd /tmp
+          echo "== reticora-collector on PATH: $(command -v reticora-collector) -> $(readlink -f "$(command -v reticora-collector)")"
+          reticora-collector enroll --server "$SERVER" --code "$CODE" | tee /out/enroll.log
+          creds=/var/lib/reticora-collector/credentials.json
+          env_file=/opt/reticora-collector/collector.env
+          unit=/etc/systemd/system/reticora-collector.service
+          [ -s "$creds" ] || { echo "FAIL: no identity at $creds"; exit 1; }
+          grep -qx "RETICORA_CREDENTIALS_PATH=$creds" "$env_file" \
+            || { echo "FAIL: collector.env names another identity path: $(grep CREDENTIALS "$env_file")"; exit 1; }
+          grep -qx "EnvironmentFile=$env_file" "$unit" || { echo "FAIL: the unit does not read $env_file"; exit 1; }
+          exec_start="$(sed -n 's/^ExecStart=//p' "$unit")"
+          [ "$exec_start" = "$(command -v reticora-collector)" ] || { echo "FAIL: the unit starts $exec_start"; exit 1; }
+          # The service as systemd starts it.
+          mapfile -t service_env < <(grep -E '^[A-Z_]+=' "$env_file")
+          env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin "${service_env[@]}" \
+            timeout 10 "$exec_start" > /out/service.log 2>&1 || true
+          if ! grep '"msg":"collector configured"' /out/service.log | grep -q '"mtls":true'; then
+            echo "FAIL: the service did not authenticate with the identity at $creds"
+            tail -n 20 /out/service.log
+            exit 1
+          fi
+          echo "OK: identity at $creds, read by the service (mTLS)"
+          SCRIPT
+          docker run --rm --network host \
+            -v "$GITHUB_WORKSPACE:/src:ro" -v "$E2E_COLLECTOR_BIN:/mnt/reticora-collector:ro" -v "$out:/out" \
+            -e SERVER="http://localhost:${frontend_port:-3000}" -e CODE="$code" \
+            debian:12 bash /out/install-collector.sh
+          id="$(sed -nE 's/^Collector ".*" enrolled as ([0-9a-f-]{36})\.$/\1/p' "$out/enroll.log")"
+          [ "$(psql_stack "SELECT count(*) FROM collector WHERE id = '$id' AND organization_id = '$org' AND cert_fingerprint IS NOT NULL")" = 1 ] \
+            || { echo "FAIL: collector $id is not registered with a certificate in organization $org"; exit 1; }
+          echo "OK: collector $id enrolled with the command of the UI over PATH"
 
       # WP-338 (TST-03, TST-04): the real-stack suite frontend/e2e-real/ against
       # the same installation, compared with the e2e-real lines of

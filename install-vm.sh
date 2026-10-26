@@ -10,11 +10,18 @@
 #   - generates a minimal docker-compose setup that runs the collector image.
 #
 # Everything the collector needs is provisioned automatically: missing packages
-# (curl, git, tar), Docker/Compose in --docker mode and, for the source build,
-# the Go toolchain and the repository sources.
+# (curl, git, tar), Docker/Compose in --docker mode, for the source build the
+# Go toolchain and the repository sources, and with auto-updates
+# (RETICORA_UPDATE_URL) the pinned cosign the updater verifies releases with.
 #
 # The installer is idempotent: re-running it reuses the existing configuration
 # as defaults and upgrades the installation in place.
+#
+# Enrollment (INS-06): the command the Discovery page shows,
+# 'reticora-collector enroll --server <url> --code <code>', is on PATH
+# (/usr/local/bin/reticora-collector, the binary the unit starts) and stores
+# the identity at /var/lib/reticora-collector/credentials.json, the path
+# collector.env names for the service.
 #
 # Signature verification (TEC-15, default per E-69 Option 1): the signed
 # collector of the newest release, or of --release v<version>, is installed —
@@ -38,6 +45,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/opt/reticora-collector"
 SPOOL_DIR="/var/lib/reticora-collector/spool"
+# The collector identity (INS-06): one path for the service and for the
+# enroll command run from a shell — the CLI default
+# (edgecore/enrollment.DefaultCredentialsPath).
+CREDENTIALS_PATH="/var/lib/reticora-collector/credentials.json"
+# Where older installers pointed the service; prepare_identity moves an
+# identity found there.
+LEGACY_CREDENTIALS_PATH="$INSTALL_DIR/credentials.json"
+# The command of the UI's enroll instruction and of the systemd unit: a link
+# to the installed binary $INSTALL_DIR/collector.
+COLLECTOR_COMMAND="/usr/local/bin/reticora-collector"
+# The user of the collector image (nobody of collector/Dockerfile).
+IMAGE_USER="65534:65534"
+# cosign of the signed auto-updates (COL-06), in the PATH of the service.
+UPDATE_COSIGN="/usr/local/bin/cosign"
 ENV_FILE="$INSTALL_DIR/collector.env"
 SYSTEMD_UNIT="/etc/systemd/system/reticora-collector.service"
 MODE="systemd"
@@ -70,11 +91,17 @@ environment file and either
   - generates a minimal docker-compose setup that runs the collector image.
 
 Everything the collector needs is provisioned automatically: missing packages
-(curl, git, tar), Docker/Compose in --docker mode and, for the source build,
-the Go toolchain and the repository sources.
+(curl, git, tar), Docker/Compose in --docker mode, for the source build the
+Go toolchain and the repository sources, and with auto-updates
+(RETICORA_UPDATE_URL) the pinned cosign the updater verifies releases with.
 
 The installer is idempotent: re-running it reuses the existing configuration
 as defaults and upgrades the installation in place.
+
+Enrollment: the command the Discovery page shows,
+'reticora-collector enroll --server <url> --code <code>', is on PATH and
+stores the identity at /var/lib/reticora-collector/credentials.json, where
+the service reads it.
 
 Usage:
   sudo ./install-vm.sh                      interactive installation (systemd)
@@ -296,6 +323,10 @@ valid_url() {
     return 1
 }
 
+valid_url_or_empty() {
+    [ -z "$1" ] || valid_url "$1"
+}
+
 valid_cidr_list() {
     local list="$1" item
     [ -n "$list" ] || return 1
@@ -379,7 +410,13 @@ RETICORA_SSH_PASSWORD=$RETICORA_SSH_PASSWORD
 # Offline spool (results are buffered here while the cloud is unreachable)
 RETICORA_SPOOL_DIR=$RETICORA_SPOOL_DIR
 
-# mTLS identity (leave empty to use the enrollment keystore)
+# Signed auto-updates (empty = off); the updater verifies every release with
+# cosign (installed by install-vm.sh as $UPDATE_COSIGN)
+RETICORA_UPDATE_URL=$RETICORA_UPDATE_URL
+RETICORA_UPDATE_CHANNEL=$RETICORA_UPDATE_CHANNEL
+
+# mTLS identity (leave empty to use the enrollment keystore, written by
+# 'reticora-collector enroll' to RETICORA_CREDENTIALS_PATH)
 RETICORA_TLS_CLIENT_CERT_FILE=$RETICORA_TLS_CLIENT_CERT_FILE
 RETICORA_TLS_CLIENT_KEY_FILE=$RETICORA_TLS_CLIENT_KEY_FILE
 RETICORA_TLS_CA_FILE=$RETICORA_TLS_CA_FILE
@@ -391,6 +428,38 @@ EOF
     mv "$tmp" "$ENV_FILE"
     chmod 600 "$ENV_FILE"
     chown root:root "$ENV_FILE" 2>/dev/null || true
+    prepare_identity
+}
+
+# prepare_identity — the identity at RETICORA_CREDENTIALS_PATH (INS-06). With
+# the default path, an identity that an older installation kept at
+# LEGACY_CREDENTIALS_PATH is moved there, unless one exists. The image runs as
+# IMAGE_USER: in the Docker mode the default directory belongs to it (mode
+# 700), so that the enroll command in the container can store the identity;
+# the directory of another path is never handed over.
+prepare_identity() {
+    local dir
+    dir="$(dirname "$RETICORA_CREDENTIALS_PATH")"
+    if [ "$RETICORA_CREDENTIALS_PATH" = "$CREDENTIALS_PATH" ] && [ -f "$LEGACY_CREDENTIALS_PATH" ]; then
+        if [ -e "$RETICORA_CREDENTIALS_PATH" ]; then
+            warn "The collector identity is $RETICORA_CREDENTIALS_PATH; $LEGACY_CREDENTIALS_PATH of an older installation is no longer read — remove it."
+        else
+            mkdir -p "$dir"
+            mv "$LEGACY_CREDENTIALS_PATH" "$RETICORA_CREDENTIALS_PATH"
+            success "Collector identity moved from $LEGACY_CREDENTIALS_PATH to $RETICORA_CREDENTIALS_PATH"
+        fi
+    fi
+    [ "$MODE" = "docker" ] || return 0
+    if [ "$dir" != "$(dirname "$CREDENTIALS_PATH")" ]; then
+        warn "The collector image runs as $IMAGE_USER: make $dir writable for it, or the container cannot store its identity there."
+        return 0
+    fi
+    mkdir -p "$dir"
+    chmod 700 "$dir"
+    if ! chown "$IMAGE_USER" "$dir" 2>/dev/null \
+        || { [ -f "$RETICORA_CREDENTIALS_PATH" ] && ! chown "$IMAGE_USER" "$RETICORA_CREDENTIALS_PATH" 2>/dev/null; }; then
+        warn "Could not hand $dir to the user of the collector image ($IMAGE_USER); the container cannot store or read its identity there."
+    fi
 }
 
 # ─── Preflight ────────────────────────────────────────────────────────────────
@@ -485,11 +554,26 @@ collect_config() {
     def_spool="$(env_get RETICORA_SPOOL_DIR || true)"
     ask RETICORA_SPOOL_DIR "Directory for the offline result buffer" "${def_spool:-$SPOOL_DIR}"
 
+    # Signed auto-updates (COL-06, docs/betrieb/collector-updates.md): the
+    # updater verifies every release with cosign, which install_update_cosign
+    # provides. The Docker mode updates through the signed image instead.
+    local def_update
+    def_update="${RETICORA_UPDATE_URL:-$(env_get RETICORA_UPDATE_URL || true)}"
+    if [ "$MODE" = "docker" ]; then
+        [ -z "$def_update" ] || warn "RETICORA_UPDATE_URL is not used in the Docker mode: the container is updated through the signed image (re-run with --release v<version>)."
+        RETICORA_UPDATE_URL=""
+    else
+        ask_validated RETICORA_UPDATE_URL "Base URL of the signed collector releases for auto-updates (optional, empty = no auto-updates)" \
+            "$def_update" valid_url_or_empty
+    fi
+    RETICORA_UPDATE_CHANNEL="${RETICORA_UPDATE_CHANNEL:-$(env_get RETICORA_UPDATE_CHANNEL || true)}"
+
     # mTLS identity
     echo
     info "mTLS configuration: the collector authenticates to the cloud with a client certificate."
     echo "    Provide certificate files here, or leave them empty to use the"
-    echo "    enrollment keystore ($INSTALL_DIR/credentials.json)."
+    echo "    enrollment keystore ($CREDENTIALS_PATH, written by"
+    echo "    'reticora-collector enroll --server <url> --code <code>')."
     ask_validated RETICORA_TLS_CLIENT_CERT_FILE "Path to the client certificate (PEM, empty = enrollment keystore)" \
         "$(env_get RETICORA_TLS_CLIENT_CERT_FILE || true)" valid_existing_file_or_empty
     if [ -n "$RETICORA_TLS_CLIENT_CERT_FILE" ]; then
@@ -503,8 +587,15 @@ collect_config() {
     ask RETICORA_TLS_SERVER_NAME "TLS server name override (usually empty)" \
         "$(env_get RETICORA_TLS_SERVER_NAME || true)"
 
+    # One identity path for the service and the enroll command (INS-06): the
+    # value of older installers is replaced by the default (prepare_identity
+    # moves an identity found there); another path of the operator stays.
     RETICORA_CREDENTIALS_PATH="$(env_get RETICORA_CREDENTIALS_PATH || true)"
-    RETICORA_CREDENTIALS_PATH="${RETICORA_CREDENTIALS_PATH:-$INSTALL_DIR/credentials.json}"
+    case "$RETICORA_CREDENTIALS_PATH" in
+        ""|"$LEGACY_CREDENTIALS_PATH") RETICORA_CREDENTIALS_PATH="$CREDENTIALS_PATH" ;;
+        "$CREDENTIALS_PATH") ;;
+        *) warn "RETICORA_CREDENTIALS_PATH=$RETICORA_CREDENTIALS_PATH differs from the default $CREDENTIALS_PATH: enroll with 'reticora-collector enroll … --credentials $RETICORA_CREDENTIALS_PATH'." ;;
+    esac
 }
 
 # ─── Source bootstrap ─────────────────────────────────────────────────────────
@@ -654,6 +745,45 @@ ensure_go_toolchain() {
     success "Go toolchain: $(go env GOVERSION)"
 }
 
+# ─── cosign for the signed auto-updates ───────────────────────────────────────
+# install_update_cosign — COL-06: the auto-updater verifies every release with
+# 'cosign verify-blob' from the PATH of the service. With RETICORA_UPDATE_URL
+# the pinned cosign of the signature block (COSIGN_VERSION, checked against
+# its sha256 before it is installed) becomes $UPDATE_COSIGN, replacing another
+# file there; without auto-updates nothing is installed.
+install_update_cosign() {
+    [ -n "${RETICORA_UPDATE_URL:-}" ] || return 0
+    local arch sha part
+    case "$(uname -m)" in
+        x86_64|amd64) arch="amd64"; sha="$COSIGN_SHA256_AMD64" ;;
+        aarch64|arm64) arch="arm64"; sha="$COSIGN_SHA256_ARM64" ;;
+        *) die "Auto-updates need cosign $COSIGN_VERSION, which is not published for $(uname -m); install cosign as $UPDATE_COSIGN or leave RETICORA_UPDATE_URL empty." ;;
+    esac
+    if ! printf '%s  %s\n' "$sha" "$UPDATE_COSIGN" | sha256sum -c - >/dev/null 2>&1; then
+        info "Installing cosign $COSIGN_VERSION for the signed auto-updates …"
+        mkdir -p "$(dirname "$UPDATE_COSIGN")"
+        part="$UPDATE_COSIGN.part"
+        rm -f "$part"
+        # The cosign that verified the collector release, if it is the pinned one.
+        if [ -n "$COSIGN_BIN" ] && printf '%s  %s\n' "$sha" "$COSIGN_BIN" | sha256sum -c - >/dev/null 2>&1; then
+            cp "$COSIGN_BIN" "$part"
+        else
+            ensure_command curl curl ca-certificates
+            if ! curl -fsSL "https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-$arch" -o "$part"; then
+                rm -f "$part"
+                die "cosign $COSIGN_VERSION for the auto-updates could not be downloaded; install it as $UPDATE_COSIGN or leave RETICORA_UPDATE_URL empty ($SIGNATURE_TROUBLESHOOTING)."
+            fi
+        fi
+        if ! printf '%s  %s\n' "$sha" "$part" | sha256sum -c - >/dev/null 2>&1; then
+            rm -f "$part"
+            die "The downloaded cosign $COSIGN_VERSION does not match its published sha256 checksum; it was not installed ($SIGNATURE_TROUBLESHOOTING)."
+        fi
+        chmod 755 "$part"
+        mv -f "$part" "$UPDATE_COSIGN"
+    fi
+    success "cosign $COSIGN_VERSION for the signed auto-updates: $UPDATE_COSIGN (sha256 checked)"
+}
+
 # ─── Collector binary / image provisioning ────────────────────────────────────
 # select_release — E-69 (Option 1): the release whose signed collector is
 # installed: --release (RETICORA_COLLECTOR_RELEASE, RETICORA_RELEASE), a
@@ -726,6 +856,10 @@ provide_collector_systemd() {
 
 install_systemd_unit() {
     info "Installing the systemd unit …"
+    # The command of the UI's enroll instruction (INS-06) on PATH; the unit
+    # starts the same. The updater replaces the binary behind the link.
+    mkdir -p "$(dirname "$COLLECTOR_COMMAND")"
+    ln -sfn "$INSTALL_DIR/collector" "$COLLECTOR_COMMAND"
     cat > "$SYSTEMD_UNIT" <<EOF
 [Unit]
 Description=Reticora CMDB Collector
@@ -735,7 +869,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=$ENV_FILE
-ExecStart=$INSTALL_DIR/collector
+ExecStart=$COLLECTOR_COMMAND
 Restart=always
 RestartSec=5
 # The collector needs raw-socket access for network sweeps.
@@ -755,6 +889,10 @@ EOF
 install_docker_setup() {
     info "Installing the Docker-based collector …"
     mkdir -p "$INSTALL_DIR" "$RETICORA_SPOOL_DIR"
+    # The identity directory (INS-06), also for the enroll command in the
+    # container: docker compose run --rm collector enroll --server … --code …
+    local identity_dir
+    identity_dir="$(dirname "${RETICORA_CREDENTIALS_PATH:-$CREDENTIALS_PATH}")"
 
     local pinned_image="" build="" step="build"
     if [ "$BUILD_FROM_SOURCE" != 1 ]; then
@@ -787,6 +925,7 @@ ${build}    env_file:
     network_mode: host
     restart: unless-stopped
     volumes:
+      - $identity_dir:$identity_dir
       - $RETICORA_SPOOL_DIR:$RETICORA_SPOOL_DIR
       - $INSTALL_DIR:$INSTALL_DIR
 EOF
@@ -841,11 +980,17 @@ EOF
         cat <<EOF
   Service:           systemctl status reticora-collector
   Logs:              journalctl -u reticora-collector -f
+  Enrollment:        sudo reticora-collector enroll --server <url> --code <code>
+                     (command of the Discovery page), then
+                     sudo systemctl restart reticora-collector
 EOF
     else
         cat <<EOF
   Compose project:   $INSTALL_DIR/docker-compose.yml
   Logs:              docker compose -f $INSTALL_DIR/docker-compose.yml logs -f
+  Enrollment:        docker compose -f $INSTALL_DIR/docker-compose.yml run --rm collector \\
+                       enroll --server <url> --code <code>, then
+                     docker compose -f $INSTALL_DIR/docker-compose.yml restart collector
 EOF
     fi
     echo
@@ -866,6 +1011,7 @@ main() {
   Protocols:         $RETICORA_DISCOVERY_PROTOCOLS
   Interval:          $RETICORA_DISCOVERY_INTERVAL (heartbeat $RETICORA_HEARTBEAT_INTERVAL)
   mTLS cert file:    ${RETICORA_TLS_CLIENT_CERT_FILE:-<enrollment keystore>}
+  Auto-updates:      ${RETICORA_UPDATE_URL:-off}
 EOF
     if [ "$BUILD_FROM_SOURCE" = 1 ]; then
         warn "Collector: built from source (or a local prebuilt binary) — not signature-verified (--build-from-source). Without the switch the signed collector of the newest release, or of --release v<version>, is installed ($SIGNATURE_TROUBLESHOOTING)."
@@ -888,6 +1034,7 @@ EOF
     if [ "$MODE" = "docker" ]; then
         install_docker_setup
     else
+        install_update_cosign
         provide_collector_systemd
         install_systemd_unit
     fi

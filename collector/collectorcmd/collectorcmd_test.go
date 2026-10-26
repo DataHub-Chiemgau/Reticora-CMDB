@@ -642,6 +642,34 @@ func TestUpdateChannelFromEnv(t *testing.T) {
 	}
 }
 
+// Retest F-260 (COL-06): with auto-updates on, the start warns when cosign
+// is not on PATH, because every update would be refused; the verifier runs
+// the cosign it looked for.
+func TestUpdateCheckerWarnsWithoutCosign(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	cfg := collectorConfig{UpdateURL: "https://updates.example.com", UpdateChannel: update.ChannelStable}
+
+	logs := captureLogs(t)
+	c := newUpdateChecker(&cfg)
+	warnings := logLines(t, logs, "auto-updates are enabled, but cosign is not on PATH: every update is refused until it is installed")
+	if len(warnings) != 1 || warnings[0]["level"] != "WARN" || warnings[0]["event"] != "collector.update.cosign_missing" {
+		t.Errorf("start without cosign on PATH: warnings %v, log %s", warnings, logs.String())
+	}
+	if v, ok := c.Verifier.(update.CosignVerifier); !ok || v.Binary != "cosign" {
+		t.Errorf("verifier = %#v, want CosignVerifier running cosign", c.Verifier)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "cosign"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logs = captureLogs(t)
+	newUpdateChecker(&cfg)
+	if strings.Contains(logs.String(), "collector.update.cosign_missing") {
+		t.Errorf("warning although cosign is on PATH: %s", logs.String())
+	}
+}
+
 func TestSweepConcurrencyIsCappedAt256(t *testing.T) {
 	for value, want := range map[string]int{"": 256, "64": 64, "1000": 256, "-3": 256, "x": 256} {
 		if got := sweepConcurrencyFromEnv(value); got != want {

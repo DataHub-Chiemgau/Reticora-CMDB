@@ -41,8 +41,13 @@ neuere schon.
 | `RETICORA_UPDATE_INTERVAL` | `6h` | Prüfintervall |
 
 Der Collector braucht dafür `cosign` im `PATH` und Schreibrecht auf sein
-Installationsverzeichnis. Docker-Installationen aktualisieren über das
-signierte Image, nicht über den Updater.
+Installationsverzeichnis. `install-vm.sh` installiert mit `RETICORA_UPDATE_URL`
+(Frage des Installers oder Umgebung) cosign `v2.4.1` nach Prüfung der
+veröffentlichten Prüfsumme als `/usr/local/bin/cosign` und schreibt URL und
+Kanal in `collector.env`; ohne Update-URL wird nichts installiert. Fehlt cosign
+bei aktiven Updates, warnt der Collector beim Start
+(`collector.update.cosign_missing`). Docker-Installationen aktualisieren über
+das signierte Image, nicht über den Updater.
 
 ## Außerhalb des Umfangs
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -19,13 +20,23 @@ var Version = "dev"
 // updateArtifact is the binary name of the release manifests.
 const updateArtifact = "reticora-collector"
 
+// cosignBinary is the CLI the verifier runs, looked up in PATH.
+const cosignBinary = "cosign"
+
 // newUpdateChecker builds the signed auto-updater (COL-06): releases of
 // the subscribed channel from RETICORA_UPDATE_URL, installed only after
 // the cosign signature verified and the new binary started with "version".
+// It runs at the start when updates are on and warns when cosign is not on
+// PATH: every update would be refused until it is installed.
 func newUpdateChecker(cfg *collectorConfig) *update.Checker {
+	if _, err := exec.LookPath(cosignBinary); err != nil {
+		slog.Warn("auto-updates are enabled, but cosign is not on PATH: every update is refused until it is installed",
+			"event", "collector.update.cosign_missing", "channel", cfg.UpdateChannel,
+			"hint", "re-run install-vm.sh with RETICORA_UPDATE_URL (installs the pinned cosign as /usr/local/bin/cosign) or install cosign")
+	}
 	return &update.Checker{
 		Source:    &update.HTTPSource{BaseURL: cfg.UpdateURL, Channel: cfg.UpdateChannel, Artifact: updateArtifact},
-		Verifier:  update.CosignVerifier{},
+		Verifier:  update.CosignVerifier{Binary: cosignBinary},
 		Channel:   cfg.UpdateChannel,
 		ProbeArgs: []string{"version"},
 	}
