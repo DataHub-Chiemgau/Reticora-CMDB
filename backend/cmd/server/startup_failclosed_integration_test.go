@@ -11,7 +11,8 @@ package main
 // packaged installation; TEST_DATABASE_URL is only the admin login AppDSN
 // derives it from. Every missing or unusable mandatory dependency must stop the start
 // with exit code 1 and a specific message (fail-closed); a complete
-// configuration must become ready (/readyz 200).
+// configuration must become ready (/readyz 200). An empty master key or
+// issuer counts as missing (the empty-value cases of the kind smoke, WP-441).
 //
 // Not covered here: a fresh database without TimescaleDB ("database is not
 // ready") — it needs a second, unmigrated database on the test server.
@@ -313,6 +314,18 @@ func TestAuditT5ServerStartupFailClosed(t *testing.T) {
 			"requires RETICORA_OIDC_ISSUER_URL"},
 		{"missing master key", func(_ *testing.T, env map[string]string) { delete(env, "RETICORA_MASTER_KEY") },
 			"requires RETICORA_MASTER_KEY"},
+		// Kubernetes passes an empty key of a secret or ConfigMap as an empty
+		// variable. The loader treats it as unset, so the start check of the
+		// staging overlay names it: tests/k8s/kind-smoke.sh asserts these
+		// messages in the pod log (WP-441).
+		{"empty master key (staging)", func(_ *testing.T, env map[string]string) {
+			env["RETICORA_ENVIRONMENT"] = config.EnvStaging
+			env["RETICORA_MASTER_KEY"] = ""
+		}, "RETICORA_ENVIRONMENT=staging requires RETICORA_MASTER_KEY"},
+		{"empty OIDC issuer (staging)", func(_ *testing.T, env map[string]string) {
+			env["RETICORA_ENVIRONMENT"] = config.EnvStaging
+			env["RETICORA_OIDC_ISSUER_URL"] = ""
+		}, "RETICORA_ENVIRONMENT=staging requires RETICORA_OIDC_ISSUER_URL"},
 		{"invalid master key", func(_ *testing.T, env map[string]string) { env["RETICORA_MASTER_KEY"] = "not-a-base64-key" },
 			"failed to init envelope encryptor"},
 		{"missing session key", func(t *testing.T, env map[string]string) {

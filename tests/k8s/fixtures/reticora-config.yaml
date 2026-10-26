@@ -1,0 +1,15 @@
+# The ConfigMap the operator provides for the server (deploy/README.md,
+# section 3). The server does not contact the issuer at start (discovery
+# happens at the first login), so a name under .invalid, which never
+# resolves, is enough for the smoke. kind-smoke.sh empties or removes
+# oidc-issuer-url for its negative cases and applies this file again to
+# restore it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reticora-config
+data:
+  oidc-issuer-url: https://id.kind-smoke.invalid/realms/reticora
+  oidc-client-id: reticora-app
+  oidc-redirect-url: https://cmdb.kind-smoke.invalid/auth/callback
+  invitation-accept-url: https://cmdb.kind-smoke.invalid/invitations/accept

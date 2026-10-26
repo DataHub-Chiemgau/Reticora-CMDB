@@ -487,6 +487,36 @@ overlays without a key are reported) and the image origin (every Reticora image
 of the prod build is a release image `ghcr.io/datahub-chiemgau/reticora-*` with
 a tag `v*`).
 
+**Runtime smoke in kind.** The workflow `k8s-smoke`
+(`.github/workflows/k8s-smoke.yml`: on pull requests that change
+`deploy/k8s/**`, `backend/Dockerfile`, the config loader
+`backend/internal/config/config.go` or the smoke itself, nightly and on
+demand) observes the `staging` overlay on a cluster: it creates a kind cluster
+(kind and node image pinned by version and digest), builds the server image of
+the commit as `reticora-cmdb/server:staging` and loads it, applies the test
+dependencies of `tests/k8s/fixtures` (TimescaleDB, Redis, NATS with
+JetStream, MinIO, the secrets `reticora-secrets` and `reticora-db-runtime`,
+the ConfigMap `reticora-config`; the session key is generated per run),
+migrates the database, creates the runtime login and runs
+`tests/k8s/kind-smoke.sh`:
+
+- the pod `reticora-server` is Ready within 5 minutes and `/readyz` answers
+  200 over `kubectl port-forward`;
+- without the key `master-key` in `reticora-secrets`, or without
+  `oidc-issuer-url` in `reticora-config`, the pod stays in
+  `CreateContainerConfigError`;
+- with an empty `master-key` or `oidc-issuer-url` the container ends with
+  exit 1 and logs `requires RETICORA_MASTER_KEY` or
+  `requires RETICORA_OIDC_ISSUER_URL` (the start check treats an empty value
+  as unset).
+
+The protocol of a run is the artifact `k8s-smoke-protocol`. The values in
+`tests/k8s/fixtures` are test-only and known to everybody; never apply them
+outside a throwaway cluster. `kind-smoke.sh` therefore refuses every kubectl
+context but a kind cluster (`kind-<name>`); locally it runs as
+`tests/k8s/kind-smoke.sh setup` and `tests/k8s/kind-smoke.sh run` after
+loading the server image into the cluster.
+
 ## Layout
 
 ```
