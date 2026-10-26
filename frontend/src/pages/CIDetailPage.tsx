@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { ApiError } from '../api/client';
 import type { TopologyGraphData } from '../api/client';
 import { useCI, useCINeighbors, useUpdateCI } from '../api/hooks';
 import { Badge } from '../components/ui/Badge';
@@ -74,6 +75,16 @@ export function CIDetailPage() {
   const ciQuery = useCI(id);
   const neighborsQuery = useCINeighbors(id);
   const updateCI = useUpdateCI();
+  // Instance attribute saves (API-07, F-082): every save carries If-Match with
+  // the CI version the page shows. The fields save on every valid change, so
+  // the saves run one after another and a save waiting behind another uses
+  // the version that save returned; only the latest waiting values are sent,
+  // always to the CI they were typed on.
+  const attributeSaves = useRef<{
+    running: boolean;
+    pending: { id: string; version?: number; attributes: Record<string, unknown> } | null;
+    saved?: { id: string; version: number };
+  }>({ running: false, pending: null });
 
   if (ciQuery.isLoading) {
     return <SkeletonList rows={5} label={t('app.loading')} />;
@@ -92,6 +103,57 @@ export function CIDetailPage() {
 
   const ci = ciQuery.data;
   const neighbors = neighborsQuery.data ? buildNeighborList(neighborsQuery.data, ci.id) : [];
+
+  function saveAttributes(attrs: Record<string, unknown>) {
+    const queue = attributeSaves.current;
+    queue.pending = { id: ci.id, version: ci.version, attributes: attrs };
+    if (queue.running) return;
+    queue.running = true;
+    void (async () => {
+      try {
+        while (queue.pending) {
+          const next = queue.pending;
+          queue.pending = null;
+          const saved = queue.saved?.id === next.id ? queue.saved.version : undefined;
+          const version =
+            saved !== undefined && (next.version === undefined || saved > next.version)
+              ? saved
+              : next.version;
+          const result = await updateCI.mutateAsync({
+            id: next.id,
+            data: { attributes: next.attributes },
+            version,
+          });
+          if (result.version !== undefined) {
+            queue.saved = { id: result.id, version: result.version };
+          }
+        }
+      } catch {
+        // The refusal is shown through the mutation state; the values typed
+        // after it are not sent on the stale version.
+        queue.pending = null;
+      } finally {
+        queue.running = false;
+      }
+    })();
+  }
+
+  // 409 names the fields changed since the shown version; 412 means the
+  // version is unknown or missing. Both are resolved by reloading the CI.
+  const attributeError = (() => {
+    const err = updateCI.error;
+    if (err instanceof ApiError && err.status === 409) {
+      return new Error(
+        t('ci.instanceFieldsConflict', {
+          fields: err.conflictFields.length > 0 ? err.conflictFields.join(', ') : 'attributes',
+        }),
+      );
+    }
+    if (err instanceof ApiError && err.status === 412) {
+      return new Error(t('ci.instanceFieldsPrecondition'));
+    }
+    return err as Error | null;
+  })();
 
   return (
     <div className="space-y-4">
@@ -228,8 +290,8 @@ export function CIDetailPage() {
         <InstanceFieldsSection
           ciId={ci.id}
           attributes={ci.attributes ?? {}}
-          onChanged={(attrs) => updateCI.mutate({ id: ci.id, data: { attributes: attrs } })}
-          serverError={updateCI.error as Error | null}
+          onChanged={saveAttributes}
+          serverError={attributeError}
         />
         <ProvenanceSection ciId={ci.id} />
         <LifecycleSection entityType="cis" entityId={ci.id} currentState={ci.lifecycle_state} />

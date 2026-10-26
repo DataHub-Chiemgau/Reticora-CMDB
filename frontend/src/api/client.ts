@@ -84,14 +84,18 @@ export interface CICreateRequest {
   discovery_source?: string;
 }
 
+/**
+ * CIUpdateRequest is a JSON merge patch (RFC 7396, CI-04): an absent member
+ * stays, null clears a nullable field.
+ */
 export interface CIUpdateRequest {
   name?: string;
   status?: string;
-  manufacturer?: string;
-  model?: string;
-  serial_number?: string;
-  management_ip?: string;
-  firmware_version?: string;
+  manufacturer?: string | null;
+  model?: string | null;
+  serial_number?: string | null;
+  management_ip?: string | null;
+  firmware_version?: string | null;
   attributes?: Record<string, unknown>;
   discovery_source?: string;
   last_seen_at?: string;
@@ -282,6 +286,8 @@ export class ApiError extends Error {
   readonly dependencies: string[];
   /** traceId is the request id of the failed request (API-03), for support. */
   readonly traceId?: string;
+  /** conflictFields are the fields a 409 names as changed since the If-Match version (API-07). */
+  readonly conflictFields: string[];
 
   constructor(
     status: number,
@@ -292,6 +298,7 @@ export class ApiError extends Error {
       violations?: FieldViolation[];
       dependencies?: string[];
       traceId?: string;
+      conflictFields?: string[];
     } = {},
   ) {
     super(message);
@@ -302,6 +309,7 @@ export class ApiError extends Error {
     this.violations = options.violations ?? [];
     this.dependencies = options.dependencies ?? [];
     this.traceId = options.traceId;
+    this.conflictFields = options.conflictFields ?? [];
   }
 
   /** Whether the failure carries per-field violations that a form can render. */
@@ -334,6 +342,7 @@ export class ApiError extends Error {
       violations?: unknown;
       dependencies?: unknown;
       trace_id?: unknown;
+      fields?: unknown;
     };
 
     const title = typeof problem.title === 'string' ? problem.title : undefined;
@@ -359,6 +368,9 @@ export class ApiError extends Error {
           (entry): entry is string => typeof entry === 'string' && entry !== '',
         )
       : [];
+    const conflictFields = Array.isArray(problem.fields)
+      ? problem.fields.filter((field): field is string => typeof field === 'string')
+      : [];
 
     return new ApiError(status, detail || title || statusText, {
       title,
@@ -366,6 +378,7 @@ export class ApiError extends Error {
       violations,
       dependencies,
       traceId,
+      conflictFields,
     });
   }
 }

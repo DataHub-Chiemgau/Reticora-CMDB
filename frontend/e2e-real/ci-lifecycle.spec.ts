@@ -8,8 +8,17 @@ import {
   type Response,
   type Route,
 } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { api, signupTenant, stamp, uiLogin, BASE, type Account } from './support/stack';
+import {
+  api,
+  signupTenant,
+  stamp,
+  uiLogin,
+  BASE,
+  DATABASE_URL,
+  type Account,
+} from './support/stack';
 
 /*
  * Phase-1 acceptance audit – the core CMDB process of a user, end to end on the real
@@ -40,10 +49,14 @@ import { api, signupTenant, stamp, uiLogin, BASE, type Account } from './support
  *  L12  concurrent edit in two browser sessions, no lost update WP-061 (API-07, API-03)
  *  L12b two sessions, different fields: no loss, field merge .. WP-061 (API-07), WP-057 (CI-04)
  *  L13  ETag / If-Match contract and the org If-Match setting . WP-061 (API-07, API-03), WP-163 (API-03)
+ *  L13b instance attributes save with require_if_match ........ WP-061 (API-07, API-03), WP-477 (F-082)
  *  L14  quotes / backslashes in names and fields are stored ... WP-117 (CI-03, MET-11), WP-120 (CI-01), WP-132 (AUD-04)
  *
  * The UI offers no action to delete or restore a CI (useDeleteCI is not used by any page);
  * L11 therefore drives DELETE and restore through the REST API and checks the effect in the UI.
+ *
+ * L05 reads the stored column with one read-only psql query (E2E_DATABASE_URL), since the
+ * API renders NULL and an empty string alike.
  *
  * A failing test is a product finding: the assertions encode the requirement texts in
  * docs/spec/katalog-v3 and the WP acceptance criteria, not the observed behaviour.
@@ -63,6 +76,7 @@ interface CI {
   serial_number?: string;
   management_ip?: string;
   firmware_version?: string;
+  attributes?: Record<string, unknown>;
   deleted_at?: string;
 }
 
@@ -145,7 +159,7 @@ function realIp(): string {
 
 /** ok asserts a 2xx answer of a setup call and returns its body. */
 async function ok<T>(
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   data?: unknown,
   headers: Record<string, string> = {},
@@ -257,6 +271,23 @@ async function pollAudit(ciId: string, action: string): Promise<AuditEntry> {
     )
     .toBe(true);
   return found!;
+}
+
+/**
+ * db runs ONE read-only query against the stack database with psql variables
+ * (:'name') and returns its rows as JSON objects.
+ */
+function db<T>(select: string, vars: Record<string, string>): T[] {
+  expect(/^\s*select\b/i.test(select), 'read-only query').toBe(true);
+  const args = [DATABASE_URL, '-X', '-At', '-v', 'ON_ERROR_STOP=1'];
+  for (const [name, value] of Object.entries(vars)) args.push('-v', `${name}=${value}`);
+  args.push('-f', '-');
+  const out = execFileSync('psql', args, {
+    input: `SELECT COALESCE(json_agg(q), '[]'::json) FROM (${select}) q;`,
+    encoding: 'utf8',
+    timeout: 15_000,
+  }).trim();
+  return JSON.parse(out) as T[];
 }
 
 /** parseCsv splits a CSV text (RFC 4180 quoting) into rows of fields. */
@@ -750,17 +781,43 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     await dialog.getByLabel('Firmware-Version').fill('');
     const patched = waitForPath(page, `/cis/${ci.id}`, 'PATCH');
     await dialog.getByRole('button', { name: 'Speichern' }).click();
-    expect((await patched).status()).toBe(200);
+    const res = await patched;
+    expect(res.status(), `PATCH from the edit form: ${await res.text()}`).toBe(200);
+    // The form sends only the change, the cleared field as null (RFC 7396).
+    expect(res.request().postDataJSON(), 'PATCH body of the edit form').toEqual({
+      firmware_version: null,
+    });
+    expect(res.request().headers()['if-match']).toBe(`"${ci.version}"`);
     await expect(dialog).toBeHidden();
     await page.reload();
     await expect(page.getByRole('heading', { name: ci.name, exact: true })).toBeVisible();
     await expect(detailValue(page, 'Hersteller')).toHaveText('Vendor To Keep');
-    await expect
-      .soft(detailValue(page, 'Firmware'), 'the cleared value is gone after a reload')
-      .toHaveText('—', { timeout: 10_000 });
+    await expect(
+      detailValue(page, 'Firmware'),
+      'the cleared value is gone after a reload',
+    ).toHaveText('—', { timeout: 10_000 });
     const stored = await getCI(ci.id);
-    expect(stored.firmware_version ?? '', 'cleared in the database').toBe('');
+    expect(stored.firmware_version, 'cleared through the API').toBeUndefined();
     expect(stored.manufacturer).toBe('Vendor To Keep');
+    expect(stored.version, 'one change, one version').toBe(ci.version + 1);
+
+    // DB: the column is NULL, not an empty string; the other field is kept.
+    expect(
+      db<{ firmware_is_null: boolean; manufacturer: string }>(
+        `SELECT firmware_version IS NULL AS firmware_is_null, manufacturer
+           FROM ci WHERE id = :'id' AND organization_id = :'org'`,
+        { id: ci.id, org: w.orgId },
+      ),
+    ).toEqual([{ firmware_is_null: true, manufacturer: 'Vendor To Keep' }]);
+
+    // CI-06: the clearing is a ci_change of the editor with the old value.
+    const change = await pollHistory(
+      ci.id,
+      (e) => e.field_name === 'firmware_version' && e.old_value === '9.9.9',
+      'history entry of the cleared firmware version',
+    );
+    expect([null, undefined, ''], 'new value of the clearing').toContain(change.new_value);
+    expect(change.actor_id, 'the acting user').toBe(w.userId);
   });
 
   test('L05b PATCH is a JSON merge patch: null removes a typed field, absent members stay', async () => {
@@ -1309,26 +1366,34 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
       await d2.getByLabel('Modell').fill('M-session2');
       const p2 = waitForPath(s2.page, `/cis/${ci.id}`, 'PATCH');
       await d2.getByRole('button', { name: 'Speichern' }).click();
-      expect((await p2).status()).toBe(200);
+      const r2 = await p2;
+      expect(r2.status()).toBe(200);
+      expect(r2.request().postDataJSON(), 'session 2 sends only its change').toEqual({
+        model: 'M-session2',
+      });
 
       // Session 1 changes only the manufacturer on its stale editor.
       await d1.getByLabel('Hersteller').fill('Vendor-session1');
       const p1 = waitForPath(s1, `/cis/${ci.id}`, 'PATCH');
       await d1.getByRole('button', { name: 'Speichern' }).click();
       const r1 = await p1;
+      expect(r1.request().headers()['if-match'], 'session 1 read version 1').toBe('"1"');
+      expect(r1.request().postDataJSON(), 'session 1 sends only its change (F-228)').toEqual({
+        manufacturer: 'Vendor-session1',
+      });
 
       // Never a lost update: session 2's model survives whatever happens.
       const stored = await getCI(ci.id);
       expect(stored.model, "session 2's model is kept").toBe('M-session2');
       // API-07: PATCH is field-granular, 409 only when a field of the change
       // was changed in between – the manufacturer was not, so it is saved.
-      expect
-        .soft(
-          r1.status(),
-          `stale save of an untouched field answered ${r1.status()}: ${await r1.text()}`,
-        )
-        .toBe(200);
-      expect.soft(stored.manufacturer, "session 1's manufacturer is saved").toBe('Vendor-session1');
+      expect(
+        r1.status(),
+        `stale save of an untouched field answered ${r1.status()}: ${await r1.text()}`,
+      ).toBe(200);
+      expect(stored.manufacturer, "session 1's manufacturer is saved").toBe('Vendor-session1');
+      expect(stored.version, 'two changes, two versions').toBe(3);
+      await expect(d1, 'the editor closes after saving').toBeHidden();
     } finally {
       await s2.ctx.close();
     }
@@ -1402,6 +1467,50 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
       expect((await patched).status()).toBe(200);
       await expect(dialog).toBeHidden();
       expect((await getCI(ci.id)).model).toBe('E3');
+    } finally {
+      await ok('PATCH', '/org', { settings: { ...settings, require_if_match: false } });
+    }
+  });
+
+  test('L13b with require_if_match the instance attribute edit on the detail page saves with If-Match', async () => {
+    const page = w.page;
+    const ci = await newCI({ name: `lc-inst-${w.s}`, model: 'I0' });
+    await ok('PUT', `/cis/${ci.id}/field-definitions`, {
+      name: 'ilo_ip',
+      label: 'iLO-IP',
+      data_type: 'text',
+    });
+    const before = await getCI(ci.id);
+
+    const org = await ok<{ settings?: Record<string, unknown> }>('GET', '/org');
+    const settings = org.settings ?? {};
+    await ok('PATCH', '/org', { settings: { ...settings, require_if_match: true } });
+    try {
+      await page.goto(`/cmdb/${ci.id}`);
+      await expect(page.getByRole('heading', { name: ci.name, exact: true })).toBeVisible();
+      await page.locator('summary', { hasText: 'Instanzfelder' }).click();
+      const field = page.getByLabel('iLO-IP', { exact: true });
+      await expect(field).toBeVisible();
+
+      // F-082: the inline save carries If-Match with the shown version.
+      const first = waitForPath(page, `/cis/${ci.id}`, 'PATCH');
+      await field.fill('10.9.9.1');
+      const r1 = await first;
+      expect(r1.status(), `instance attribute save: ${await r1.text()}`).toBe(200);
+      expect(r1.request().headers()['if-match']).toBe(`"${before.version}"`);
+      expect(r1.request().postDataJSON()).toMatchObject({ attributes: { ilo_ip: '10.9.9.1' } });
+      await expect.poll(async () => (await getCI(ci.id)).attributes?.ilo_ip).toBe('10.9.9.1');
+
+      // A further change saves on the version the first save produced.
+      const second = waitForPath(page, `/cis/${ci.id}`, 'PATCH');
+      await field.fill('10.9.9.2');
+      const r2 = await second;
+      expect(r2.status(), `second instance attribute save: ${await r2.text()}`).toBe(200);
+      expect(r2.request().headers()['if-match']).toBe(`"${before.version + 1}"`);
+      const stored = await getCI(ci.id);
+      expect(stored.attributes?.ilo_ip).toBe('10.9.9.2');
+      expect(stored.version).toBe(before.version + 2);
+      await expect(page.getByText(/Speichern abgelehnt/)).toHaveCount(0);
     } finally {
       await ok('PATCH', '/org', { settings: { ...settings, require_if_match: false } });
     }

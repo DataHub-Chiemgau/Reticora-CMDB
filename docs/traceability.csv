@@ -734,3 +734,6 @@ LOC-07;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-474
 LOC-11;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-474
 ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-471
 API-04;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-471
+CI-04;[B];D;frontend/src/pages/CIFormModal.test.tsx;WP-477
+API-07;[B];D;frontend/src/pages/CIDetailPage.instance-fields.test.tsx;WP-477
+API-03;[B];D;frontend/src/pages/CIDetailPage.instance-fields.test.tsx;WP-477

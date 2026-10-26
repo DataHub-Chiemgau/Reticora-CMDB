@@ -206,6 +206,8 @@
     "setOverride": "Override setzen",
     "protected": "geschützt",
     "instanceFields": "Instanzfelder",
+    "instanceFieldsConflict": "Speichern abgelehnt: {{fields}} wurde inzwischen von jemand anderem geändert. Bitte die Seite neu laden und die Änderung wiederholen.",
+    "instanceFieldsPrecondition": "Speichern abgelehnt: Die Version dieses CIs ist veraltet oder unbekannt. Bitte die Seite neu laden.",
     "provenanceHint": "Discovery-Wert vs. effektiver Wert. Geschützte manuelle Overrides werden nie von Discovery überschrieben.",
     "discovered": "Discovery",
     "assetCanonical": "Asset (kanonische Daten)",

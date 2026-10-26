@@ -46,6 +46,15 @@ function toFormValues(ci?: CI | null): CIFormValues {
   };
 }
 
+/** The optional typed fields of the form; PATCH clears them with null. */
+const optionalFields = [
+  'manufacturer',
+  'model',
+  'serial_number',
+  'management_ip',
+  'firmware_version',
+] as const;
+
 function optionalValue(value: string) {
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
@@ -166,18 +175,43 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
 
   // The values of the chosen type's attributes that apply in the current state;
   // hidden fields and values left from another type are not sent. Editing sends
-  // only changed values (PATCH merges the attributes).
+  // only changed values (PATCH merges the attributes); a stored value the user
+  // cleared is sent as null, which removes it (RFC 7396, CI-04).
   function attributePayload(): Record<string, unknown> | undefined {
     const payload: Record<string, unknown> = {};
     for (const def of typeFields) {
       const value = attributes[def.name];
-      if (isBlank(value) || !evaluateField(def, attributes).visible) continue;
-      if (isEditMode && JSON.stringify(value) === JSON.stringify(ci?.attributes?.[def.name])) {
+      if (!evaluateField(def, attributes).visible) continue;
+      const stored = ci?.attributes?.[def.name];
+      if (isBlank(value)) {
+        if (isEditMode && !isBlank(stored)) payload[def.name] = null;
+        continue;
+      }
+      if (isEditMode && JSON.stringify(value) === JSON.stringify(stored)) {
         continue;
       }
       payload[def.name] = value;
     }
     return Object.keys(payload).length > 0 ? payload : undefined;
+  }
+
+  // The edit payload holds only the members whose value differs from the
+  // loaded CI (F-228): a stale editor that saves one field does not resend
+  // the others, so If-Match refuses it only when that field changed in the
+  // meantime (API-07). A cleared optional field is sent as null, which the
+  // merge patch stores as NULL (F-081, CI-04); omitting it kept the old value.
+  function updatePayload(): CIUpdateRequest {
+    const payload: CIUpdateRequest = {};
+    const name = values.name.trim();
+    if (name !== (ci?.name ?? '')) payload.name = name;
+    if (values.status !== (ci?.status ?? '')) payload.status = values.status;
+    for (const key of optionalFields) {
+      const next = optionalValue(values[key]);
+      if (next !== optionalValue(ci?.[key] ?? '')) payload[key] = next ?? null;
+    }
+    const attrs = attributePayload();
+    if (attrs) payload.attributes = attrs;
+    return payload;
   }
 
   function validate() {
@@ -220,23 +254,19 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
       discovery_source: 'manual',
     };
 
-    const updatePayload: CIUpdateRequest = {
-      name: values.name.trim(),
-      status: values.status,
-      manufacturer: optionalValue(values.manufacturer),
-      model: optionalValue(values.model),
-      serial_number: optionalValue(values.serial_number),
-      management_ip: optionalValue(values.management_ip),
-      firmware_version: optionalValue(values.firmware_version),
-      attributes: attributePayload(),
-    };
+    const changes = isEditMode ? updatePayload() : {};
+    if (isEditMode && Object.keys(changes).length === 0) {
+      // Nothing changed: no request, no new version.
+      onOpenChange(false);
+      return;
+    }
 
     try {
       const saved =
         isEditMode && ci
           ? await updateMutation.mutateAsync({
               id: ci.id,
-              data: updatePayload,
+              data: changes,
               version: ci.version,
             })
           : await createMutation.mutateAsync(createPayload);

@@ -12,6 +12,12 @@
  *   CITypeLabels.auditdefect.tsx (WP-201, WP-194) moved here unchanged.
  * - CI-01, MET-11: after the type choice the dialog renders the attributes of
  *   the type schema (GET /ci-types/{id}) and sends them in attributes.
+ * - CI-04, API-07 (WP-477, F-081, F-228): editing sends only the members
+ *   whose value differs from the loaded CI, a cleared optional field as null
+ *   (JSON merge patch), and no request at all without a change. Before
+ *   WP-477 the dialog sent every form value and dropped cleared fields
+ *   (optionalValue('') → undefined): the save reported success, the value
+ *   stayed, and a stale editor got 409 for a field it had not touched.
  * - Server-side validation: the backend validates CI attributes against the
  *   CI type's field metadata and answers with per-field `violations`; before
  *   the regression test the client discarded that array, so the user saw one
@@ -439,6 +445,101 @@ describe('CIFormModal type attributes', () => {
     await waitFor(() => expect(patched).toHaveLength(1));
     expect(patched[0]?.attributes).toEqual({ rack_units: 3 });
     expect(patched[0]).not.toHaveProperty('ci_type_id');
+  });
+});
+
+describe('CIFormModal edit sends a merge patch of the changed fields (CI-04, API-07)', () => {
+  const editedCI: CI = {
+    ...storedCI,
+    ci_type_id: SERVER_TYPE_ID,
+    name: 'srv-edit-01',
+    status: 'active',
+    version: 7,
+    manufacturer: 'Old Vendor',
+    model: 'M-0',
+    serial_number: 'SN-1',
+    management_ip: '10.1.1.1',
+    firmware_version: '9.9.9',
+    attributes: {},
+  };
+
+  async function openEditor(ci: CI = editedCI) {
+    const onOpenChange = vi.fn();
+    const backend = stubBackend({ types: [serverType, rackType] });
+    renderWithProviders(<CIFormModal open onOpenChange={onOpenChange} ci={ci} />);
+    await waitFor(() => expect(typeSelect().value).toBe(ci.ci_type_id));
+    return { ...backend, onOpenChange };
+  }
+
+  function patchCalls() {
+    const fetchMock = vi.mocked(fetch);
+    return fetchMock.mock.calls.filter(
+      ([, init]) => (init?.method ?? 'GET').toUpperCase() === 'PATCH',
+    );
+  }
+
+  it('sends only the changed manufacturer, with If-Match on the loaded version', async () => {
+    const { patched, onOpenChange } = await openEditor();
+
+    fireEvent.change(screen.getByLabelText('Hersteller'), { target: { value: 'New Vendor' } });
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(patched).toHaveLength(1));
+    expect(patched[0]).toEqual({ manufacturer: 'New Vendor' });
+    const headers = new Headers(patchCalls()[0]?.[1]?.headers);
+    expect(headers.get('If-Match')).toBe('"7"');
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
+  it('sends a cleared firmware version as null (F-081)', async () => {
+    const { patched } = await openEditor();
+
+    expect(screen.getByLabelText('Firmware-Version')).toHaveValue('9.9.9');
+    fireEvent.change(screen.getByLabelText('Firmware-Version'), { target: { value: '' } });
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(patched).toHaveLength(1));
+    expect(patched[0]).toEqual({ firmware_version: null });
+  });
+
+  it('sends several changes and clearings together, untouched fields stay out', async () => {
+    const { patched } = await openEditor();
+
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'srv-edit-02' } });
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'maintenance' } });
+    fireEvent.change(screen.getByLabelText('Modell'), { target: { value: '  ' } });
+    fireEvent.change(screen.getByLabelText('Management-IP'), { target: { value: '10.1.1.1 ' } });
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(patched).toHaveLength(1));
+    expect(patched[0]).toEqual({ name: 'srv-edit-02', status: 'maintenance', model: null });
+  });
+
+  it('sends no request and closes when nothing changed', async () => {
+    const { patched, onOpenChange } = await openEditor();
+
+    fireEvent.change(screen.getByLabelText('Hersteller'), { target: { value: 'Changed' } });
+    fireEvent.change(screen.getByLabelText('Hersteller'), { target: { value: 'Old Vendor' } });
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(patched, 'no PATCH without a change').toHaveLength(0);
+    expect(patchCalls()).toHaveLength(0);
+  });
+
+  it('sends a cleared type attribute as null and leaves the others out', async () => {
+    const { patched } = await openEditor(storedCI);
+
+    const airflow = await screen.findByLabelText('Luftstrom');
+    expect(airflow).toHaveValue('front_to_back');
+    fireEvent.change(airflow, { target: { value: '' } });
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(patched).toHaveLength(1));
+    expect(patched[0]).toEqual({ attributes: { airflow: null } });
   });
 });
 
