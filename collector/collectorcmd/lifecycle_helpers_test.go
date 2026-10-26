@@ -1,8 +1,7 @@
 // Helpers of the collector life-cycle tests (WP-414): they start the real
 // collector entry point Main() in a child process
 // (TestAuditHelperCollectorMain, the helper-process pattern) and observe it
-// from outside. lifecycle_test.go uses them without a build tag,
-// lifecycle_auditdefect_test.go with the tag auditdefect. The PKI helpers
+// from outside; lifecycle_test.go uses them (WP-414, WP-493). The PKI helpers
 // (auditPKI, newAuditPKI, auditKeyPEM, auditFreeTCPPort) are in
 // natsserver_helpers_test.go.
 package collectorcmd

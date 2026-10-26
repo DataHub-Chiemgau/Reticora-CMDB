@@ -609,7 +609,14 @@ path into `collector.env` and puts the command of the Discovery page's enroll
 instruction on PATH as `/usr/local/bin/reticora-collector`, the command its
 systemd unit starts; the image ships the binary under the same name as its
 entrypoint. `reticora-collector enroll --server <url> --code <code>` thus
-stores the identity where the service reads it. The mTLS HTTP client is built
+stores the identity where the service reads it. Unattended deployments
+(containers, automation) set `RETICORA_ENROLL_TOKEN` (the one-time code) and
+`RETICORA_CLOUD_URL` (the server URL) instead (COL-04): without a keystore the
+first start enrolls with a locally generated key and a CSR, stores the identity
+(mode `600`) and starts normally; with a keystore it does not enroll again.
+Only one of the two variables set, a damaged keystore or a refused code end the
+start with exit code `1` and the cause in the log; the token is never logged
+(details in `deploy/README.md`, "Enrollment"). The mTLS HTTP client is built
 by `edgecore/transport.NewMTLS` (TLS 1.3 minimum). Without certificate
 material the collector logs a warning and falls back to plain HTTPS/HTTP so
 local development keeps working. Discovery results are uploaded as

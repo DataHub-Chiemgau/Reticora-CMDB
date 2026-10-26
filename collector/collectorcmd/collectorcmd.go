@@ -149,19 +149,30 @@ func Main() {
 	if handled, code := runCommand(context.Background(), os.Args[1:], os.Stdout, os.Stderr); handled {
 		os.Exit(code)
 	}
-	collectorCfg := loadCollectorConfig()
-	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
-	pluginRegistry["wmi"] = wmi.New(wmi.WithTLSScopes(collectorCfg.WMITLSScopes...))
-	pluginRegistry["nas"] = nas.New(nas.WithTLSScopes(collectorCfg.NASTLSScopes...))
-	pluginRegistry["sweep"] = newSweep(&collectorCfg)
-	loadProfileDir(os.Getenv("RETICORA_PROFILES_DIR"))
-
 	environment := envOrDefault("RETICORA_ENVIRONMENT", "development")
 	logLevel := slog.LevelInfo
 	if environment == "development" {
 		logLevel = slog.LevelDebug
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
+
+	// Unattended enrollment from RETICORA_ENROLL_TOKEN and
+	// RETICORA_CLOUD_URL before the configuration reads the keystore
+	// (COL-04).
+	if enrolled, err := bootstrapEnrollment(context.Background(), os.Getenv); err != nil {
+		slog.Error("collector enrollment failed", "event", "collector.enroll.failed", "error", err)
+		os.Exit(1)
+	} else if enrolled {
+		slog.Info("collector enrolled from the environment", "event", "collector.enroll.completed",
+			"credentials_path", credentialsPath())
+	}
+
+	collectorCfg := loadCollectorConfig()
+	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
+	pluginRegistry["wmi"] = wmi.New(wmi.WithTLSScopes(collectorCfg.WMITLSScopes...))
+	pluginRegistry["nas"] = nas.New(nas.WithTLSScopes(collectorCfg.NASTLSScopes...))
+	pluginRegistry["sweep"] = newSweep(&collectorCfg)
+	loadProfileDir(os.Getenv("RETICORA_PROFILES_DIR"))
 
 	slog.Info("starting collector", "environment", environment, "version", Version)
 	if err := applySimulation(&collectorCfg, environment); err != nil {
