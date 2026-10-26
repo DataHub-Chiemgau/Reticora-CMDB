@@ -55,6 +55,8 @@ interface World {
   assetName: string;
   ciView: string;
   assetView: string;
+  /** Whether the inventory module (P2, off in G1 by default) serves /assets. */
+  assets: boolean;
   viewer: User;
   ciOnly: User;
 }
@@ -145,6 +147,7 @@ test.describe('Saved views run by read-only roles: search:read and the entity re
       assetName: `sv-${s}-asset`,
       ciView: `Viewer CI ${s}`,
       assetView: `Viewer Asset ${s}`,
+      assets: false,
       viewer: { email: '', password: '' },
       ciOnly: { email: '', password: '' },
     };
@@ -153,7 +156,16 @@ test.describe('Saved views run by read-only roles: search:read and the entity re
     const serverType = (types.data ?? []).find((t) => t.key === 'server')?.id ?? '';
     expect(serverType, 'catalog type server').not.toBe('');
     await ok('POST', '/cis', { ci_type_id: serverType, name: w.ciName });
-    await ok('POST', '/assets', { asset_tag: `sv-${s}`, name: w.assetName });
+    // The inventory module is a P2 module and switched off in G1 by default:
+    // its routes answer 404 (WP-214). The asset view is saved either way; it
+    // carries the asset-kind permission check of S2, a hit only exists with
+    // the module on.
+    const created = await api(w.rq, w.token, 'POST', '/assets', {
+      asset_tag: `sv-${s}`,
+      name: w.assetName,
+    });
+    expect([201, 404], `POST /assets: ${JSON.stringify(created.body)}`).toContain(created.status);
+    w.assets = created.status === 201;
     for (const [name, kind] of [
       [w.ciView, 'ci'],
       [w.assetView, 'asset'],
@@ -199,7 +211,10 @@ test.describe('Saved views run by read-only roles: search:read and the entity re
       await viewButton(page, w.assetView).click();
       const assetRes = await ranAsset;
       expect(assetRes.status(), `POST /search/query (asset) as viewer`).toBe(200);
-      await expect(main.getByRole('link', { name: w.assetName, exact: true })).toBeVisible();
+      if (w.assets) {
+        await expect(main.getByRole('link', { name: w.assetName, exact: true })).toBeVisible();
+      }
+      await expect(main.getByRole('alert')).toHaveCount(0);
 
       // Rebuilding the index is a write operation (search:write).
       const reindex = await api(page.request, token, 'POST', '/search/reindex', {});
