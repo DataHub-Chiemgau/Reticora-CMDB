@@ -3,17 +3,17 @@
 // Phase-1 acceptance audit, group T4-collector-load – DEFECT tests for the
 // collector's discovery passes (must fail until the defects are fixed).
 //
-// WP-153 (DIS-09), WP-154 (DIS-10).
+// WP-154 (DIS-10).
 //
 // Findings encoded here (one test each):
-//   - TestAuditScopeExpansionCompleteOrReported – WP-153 P2 "Scopes larger
-//     than ~4096 addresses are silently truncated by the collector".
 //   - TestAuditScopeScheduleSurvivesRestart – WP-154 P2 "Scope schedules
 //     (cron/interval) are ignored at collector start: every scope sweeps
 //     immediately and again after each restart". The test feeds the scope
 //     list as the server would send it with the run state the server holds
 //     (last_run_at/next_run_at, the audit's recommended fields).
 //
+// TestAuditScopeExpansionCompleteOrReported (F-106) moved to
+// discovery_scope_test.go (WP-494),
 // TestAuditCredentialKindRouting and TestAuditPerScopeCredentials (F-028,
 // F-013) moved to discovery_credentials_test.go (WP-378),
 // TestAuditWMIAuthFailureReachesScopeRun (F-029) to
@@ -28,7 +28,7 @@
 // Retest:
 //
 //	cd collector && TEST_NATS_URL=nats://localhost:54222 go test -tags auditdefect -count=1 -v \
-//	  -run 'TestAuditScopeExpansionCompleteOrReported|TestAuditScopeScheduleSurvivesRestart' ./collectorcmd/
+//	  -run 'TestAuditScopeScheduleSurvivesRestart' ./collectorcmd/
 package collectorcmd
 
 import (
@@ -37,47 +37,6 @@ import (
 	"testing"
 	"time"
 )
-
-// TestAuditScopeExpansionCompleteOrReported: a scope the API accepts
-// (up to 65,536 addresses) is discovered completely, or the run reports
-// the truncation as a scope error (DIS-08/DIS-09).
-func TestAuditScopeExpansionCompleteOrReported(t *testing.T) {
-	runs := auditCaptureScopeRuns(t)
-	spy := &auditSpy{name: "sweep", countOnly: true}
-	auditUsePlugins(t, spy)
-	scopes := []struct {
-		scope collectorScope
-		want  int
-		first string
-	}{
-		{scope: collectorScope{ID: "6f0b6f0e-0000-4000-8000-0000000000a4", Kind: "cidr", Target: "172.17.0.0/16", Schedule: "24h", Plugins: []string{"sweep"}}, want: 65534, first: "172.17.0.1"},
-		{scope: collectorScope{ID: "6f0b6f0e-0000-4000-8000-0000000000a5", Kind: "range", Target: "10.0.0.0-10.0.255.255", Schedule: "24h", Plugins: []string{"sweep"}}, want: 65536, first: "10.0.0.0"},
-	}
-	var list []collectorScope
-	for _, s := range scopes {
-		list = append(list, s.scope)
-	}
-	collectorScopes.set(list, nil)
-	runDueDiscovery(context.Background(), &collectorConfig{}, nil, newScheduler(), &hostCache{}, time.Now())
-
-	spy.mu.Lock()
-	counts := map[string]int{}
-	for i, f := range spy.firsts {
-		counts[f] = spy.counts[i]
-	}
-	spy.mu.Unlock()
-	reported := map[string]int{}
-	for _, r := range runs() {
-		reported[r.ScopeID] = r.Result.ErrorCount + len(r.Result.Errors)
-	}
-	for _, s := range scopes {
-		got := counts[s.first]
-		if got != s.want && reported[s.scope.ID] == 0 {
-			t.Errorf("scope %s (%s): %d of %d addresses discovered and the run reported no error (silent truncation)",
-				s.scope.ID, s.scope.Target, got, s.want)
-		}
-	}
-}
 
 // TestAuditScopeScheduleSurvivesRestart: after a (re)start the collector
 // honours the run state the server holds: a cron or interval scope that ran

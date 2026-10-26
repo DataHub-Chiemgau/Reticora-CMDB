@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -172,5 +173,40 @@ func TestScopeTargetWithoutZone(t *testing.T) {
 	}
 	if s, err := repo.GetScope(context.Background(), "org-1", id); err != nil || s.Kind != ScopeKindHost || s.Target != "fe80::1" {
 		t.Errorf("scope after the refused changes = %+v, %v", s, err)
+	}
+}
+
+// TestScopeLimitContract: the largest scope the API accepts is the one the
+// collector expands completely (collector/collectorcmd/testdata/
+// scope-limits.json, checked against maxScopeAddresses by the collector's
+// test; WP-494, F-106).
+func TestScopeLimitContract(t *testing.T) {
+	raw, err := os.ReadFile("../../../collector/collectorcmd/testdata/scope-limits.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var limits struct {
+		MaxScopeAddresses int `json:"max_scope_addresses"`
+	}
+	if err := json.Unmarshal(raw, &limits); err != nil {
+		t.Fatal(err)
+	}
+	if limits.MaxScopeAddresses != MaxScopeAddresses {
+		t.Fatalf("MaxScopeAddresses = %d, scope-limits.json = %d: the collector would cut scopes the API accepts",
+			MaxScopeAddresses, limits.MaxScopeAddresses)
+	}
+	// The API accepts a /16 and a range of exactly the limit, nothing larger.
+	for _, tc := range []struct {
+		kind, target string
+		ok           bool
+	}{
+		{ScopeKindCIDR, "10.0.0.0/16", true},
+		{ScopeKindRange, "10.0.0.0-10.0.255.255", true},
+		{ScopeKindCIDR, "10.0.0.0/15", false},
+		{ScopeKindRange, "10.0.0.0-10.1.0.0", false},
+	} {
+		if _, err := NormalizeScopeTarget(tc.kind, tc.target); (err == nil) != tc.ok {
+			t.Errorf("NormalizeScopeTarget(%s, %s) = %v, want accepted %v", tc.kind, tc.target, err, tc.ok)
+		}
 	}
 }

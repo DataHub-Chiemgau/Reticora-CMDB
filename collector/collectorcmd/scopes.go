@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -123,28 +124,64 @@ func syncScopes(ctx context.Context, nc *nats.Conn, subject string) {
 	}
 }
 
+// localInterface is a network interface of the collector host with its
+// addresses.
+type localInterface struct {
+	Name  string
+	Addrs []net.Addr
+}
+
+// systemInterfaces reads the interfaces of the collector host.
+func systemInterfaces() ([]localInterface, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]localInterface, 0, len(ifaces))
+	for _, iface := range ifaces {
+		addrs, aerr := iface.Addrs()
+		if aerr != nil {
+			continue
+		}
+		out = append(out, localInterface{Name: iface.Name, Addrs: addrs})
+	}
+	return out, nil
+}
+
+// containerInterfacePrefixes are the name prefixes of the container and
+// bridge interfaces (Docker, Linux bridges of Docker networks, veth pairs,
+// CNI, Flannel, Calico): their networks exist only on the collector host
+// and are no scope suggestions (INS-06).
+var containerInterfacePrefixes = []string{"docker", "br-", "veth", "cni", "flannel", "cali"}
+
 // localSubnets returns the IPv4 subnets of the collector's interfaces
-// (loopback, link-local and host routes excluded).
-func localSubnets(addrs func() ([]net.Addr, error)) []string {
-	list, err := addrs()
+// (container and bridge interfaces, loopback, link-local and host routes
+// excluded).
+func localSubnets(interfaces func() ([]localInterface, error)) []string {
+	list, err := interfaces()
 	if err != nil {
 		return nil
 	}
 	seen := map[string]bool{}
 	var out []string
-	for _, a := range list {
-		p, perr := netip.ParsePrefix(a.String())
-		if perr != nil {
+	for _, iface := range list {
+		if slices.ContainsFunc(containerInterfacePrefixes, func(p string) bool { return strings.HasPrefix(iface.Name, p) }) {
 			continue
 		}
-		ip := p.Addr()
-		if !ip.Is4() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || p.Bits() >= 31 {
-			continue
-		}
-		cidr := p.Masked().String()
-		if !seen[cidr] {
-			seen[cidr] = true
-			out = append(out, cidr)
+		for _, a := range iface.Addrs {
+			p, perr := netip.ParsePrefix(a.String())
+			if perr != nil {
+				continue
+			}
+			ip := p.Addr()
+			if !ip.Is4() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || p.Bits() >= 31 {
+				continue
+			}
+			cidr := p.Masked().String()
+			if !seen[cidr] {
+				seen[cidr] = true
+				out = append(out, cidr)
+			}
 		}
 	}
 	return out
@@ -164,28 +201,43 @@ func reportSubnets(ctx context.Context, nc *nats.Conn, subject string, subnets [
 	slog.Info("local subnets reported", "subnets", subnets, "suggested", resp["suggested"])
 }
 
-// scopeTargets expands a scope into the addresses or names to probe.
-func scopeTargets(s *collectorScope) []string {
+// scopeTargets expands a scope into the addresses or names to probe;
+// truncated reports a CIDR or range with more than maxScopeAddresses
+// addresses, of which only the first are probed.
+func scopeTargets(s *collectorScope) (targets []string, truncated bool) {
 	switch s.Kind {
 	case "cidr":
-		return expandSubnets([]string{s.Target})
+		return expandCIDR(s.Target)
 	case "host":
-		return []string{s.Target}
+		return []string{s.Target}, false
 	case "range":
 		from, to, ok := strings.Cut(s.Target, "-")
 		a, errA := netip.ParseAddr(strings.TrimSpace(from))
 		b, errB := netip.ParseAddr(strings.TrimSpace(to))
 		if !ok || errA != nil || errB != nil {
-			return nil
+			return nil, false
 		}
-		var out []string
-		for ip := a; ip.IsValid() && !b.Less(ip) && len(out) <= maxSubnetExpansionTargets; ip = ip.Next() {
-			out = append(out, ip.String())
+		for ip := a; ip.IsValid() && !b.Less(ip); ip = ip.Next() {
+			if len(targets) == maxScopeAddresses {
+				return targets, true
+			}
+			targets = append(targets, ip.String())
 		}
-		return out
+		return targets, false
 	}
-	return nil
+	return nil, false
 }
+
+// truncationError is the run error of a scope cut at maxScopeAddresses:
+// the run reports it instead of discovering the scope partly in silence
+// (DIS-08, DIS-09).
+func truncationError(s *collectorScope) runError {
+	return runError{Protocol: "scope", Target: s.Target, Cause: causeScopeTruncated,
+		Message: fmt.Sprintf("more than %d addresses per scope are not allowed: only the first %d were discovered", maxScopeAddresses, maxScopeAddresses)}
+}
+
+// causeScopeTruncated is the cause of a scope cut at maxScopeAddresses.
+const causeScopeTruncated = "scope_truncated"
 
 // discoveryPass is one set of targets discovered with a set of protocols;
 // scope is nil for the RETICORA_SCAN_SUBNETS fallback.
@@ -193,6 +245,7 @@ type discoveryPass struct {
 	key       string
 	scope     *collectorScope
 	targets   []string
+	truncated bool // the scope has more addresses than targets holds
 	protocols []string
 	sweep     schedule
 	// poll is the poll interval of the fallback pass; scopes use intervals.
@@ -224,7 +277,8 @@ func discoveryPasses(cfg *collectorConfig) []discoveryPass {
 	out := make([]discoveryPass, 0, len(scopes))
 	for i := range scopes {
 		s := scopes[i]
-		out = append(out, discoveryPass{key: s.ID, scope: &s, targets: scopeTargets(&s), protocols: s.Plugins,
+		targets, truncated := scopeTargets(&s)
+		out = append(out, discoveryPass{key: s.ID, scope: &s, targets: targets, truncated: truncated, protocols: s.Plugins,
 			sweep: parseSchedule(s.Schedule, sweepDefault), intervals: intervals})
 	}
 	return out

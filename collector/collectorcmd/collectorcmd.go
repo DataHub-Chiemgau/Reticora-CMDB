@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strconv"
@@ -452,6 +453,11 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 		passCreds := credentialsFor(cfg, pass.scope)
 		var passRecords []plugins.DeviceRecord
 		var errs []runError
+		if pass.truncated {
+			slog.Warn("discovery scope truncated", "event", "discovery.scope.truncated", "scope_id", pass.scope.ID,
+				"target", pass.scope.Target, "limit", maxScopeAddresses)
+			errs = append(errs, truncationError(pass.scope))
+		}
 		for _, protocol := range due {
 			if ctx.Err() != nil {
 				break
@@ -518,48 +524,52 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 	return len(records)
 }
 
-// expandSubnets converts CIDR notations to individual IP targets.
-const maxSubnetExpansionTargets = 4096
+// maxScopeAddresses bounds the addresses of one CIDR or range scope; it
+// equals discovery.MaxScopeAddresses of the server, so every scope the API
+// accepts is expanded completely (DIS-09). testdata/scope-limits.json is
+// the contract both modules test against.
+const maxScopeAddresses = 65536
 
+// expandSubnets converts CIDR notations to individual IP targets; a
+// subnet larger than maxScopeAddresses is cut and logged.
 func expandSubnets(subnets []string) []string {
 	var targets []string
 	for _, subnet := range subnets {
-		_, ipNet, err := net.ParseCIDR(subnet)
-		if err != nil {
-			// Treat as single host
-			targets = append(targets, subnet)
-			continue
+		subnetTargets, truncated := expandCIDR(subnet)
+		if truncated {
+			slog.Warn("subnet expansion limit reached", "subnet", subnet, "limit", maxScopeAddresses)
 		}
-
-		maskOnes, _ := ipNet.Mask.Size()
-		var subnetTargets []string
-		for ip := ipNet.IP.Mask(ipNet.Mask); ipNet.Contains(ip); incrementIP(ip) {
-			subnetTargets = append(subnetTargets, ip.String())
-			// Safety limit to avoid expanding huge ranges
-			if len(subnetTargets) > maxSubnetExpansionTargets {
-				slog.Warn("subnet expansion limit reached", "subnet", subnet, "limit", maxSubnetExpansionTargets)
-				break
-			}
-		}
-
-		// Remove network and broadcast addresses for /30 and larger prefixes
-		// For /31 and /32 all addresses are usable (point-to-point or host routes)
-		if maskOnes <= 30 && len(subnetTargets) > 2 {
-			subnetTargets = subnetTargets[1 : len(subnetTargets)-1]
-		}
-
 		targets = append(targets, subnetTargets...)
 	}
 	return targets
 }
 
-func incrementIP(ip net.IP) {
-	for j := len(ip) - 1; j >= 0; j-- {
-		ip[j]++
-		if ip[j] > 0 {
+// expandCIDR returns the addresses of a CIDR (a non-CIDR target is a
+// single host) and whether it had more than maxScopeAddresses.
+func expandCIDR(subnet string) (targets []string, truncated bool) {
+	prefix, err := netip.ParsePrefix(subnet)
+	if err != nil {
+		return []string{subnet}, false
+	}
+	prefix = prefix.Masked()
+	// Network and broadcast addresses are skipped for /30 and larger
+	// prefixes; for /31 and /32 all addresses are usable (point-to-point
+	// or host routes).
+	inner := prefix.Bits() <= 30
+	ip := prefix.Addr()
+	if inner {
+		ip = ip.Next()
+	}
+	for ; prefix.Contains(ip); ip = ip.Next() {
+		if inner && !prefix.Contains(ip.Next()) {
 			break
 		}
+		if len(targets) == maxScopeAddresses {
+			return targets, true
+		}
+		targets = append(targets, ip.String())
 	}
+	return targets, false
 }
 
 // collectParallelism bounds the parallel Collect calls of one plugin.

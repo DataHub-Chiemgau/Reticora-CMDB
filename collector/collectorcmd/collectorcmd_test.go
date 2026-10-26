@@ -818,13 +818,69 @@ type fakeAddr string
 func (a fakeAddr) Network() string { return "ip+net" }
 func (a fakeAddr) String() string  { return string(a) }
 
+// TestLocalSubnetsForScopeSuggestions covers INS-06: the subnets of the
+// host's interfaces become scope suggestions; loopback, link-local, host
+// routes and the networks of container and bridge interfaces (Docker,
+// bridges, veth, CNI, Flannel, Calico) do not (F-265).
 func TestLocalSubnetsForScopeSuggestions(t *testing.T) {
-	addrs := func() ([]net.Addr, error) {
-		return []net.Addr{fakeAddr("127.0.0.1/8"), fakeAddr("192.168.10.23/24"), fakeAddr("192.168.10.24/24"),
-			fakeAddr("169.254.1.2/16"), fakeAddr("fe80::1/64"), fakeAddr("10.8.0.1/32"), fakeAddr("172.16.4.9/22")}, nil
+	interfaces := func() ([]localInterface, error) {
+		return []localInterface{
+			{Name: "lo", Addrs: []net.Addr{fakeAddr("127.0.0.1/8")}},
+			{Name: "eth0", Addrs: []net.Addr{fakeAddr("192.168.10.23/24"), fakeAddr("192.168.10.24/24"),
+				fakeAddr("169.254.1.2/16"), fakeAddr("fe80::1/64")}},
+			{Name: "docker0", Addrs: []net.Addr{fakeAddr("172.17.0.1/16")}},
+			{Name: "br-x", Addrs: []net.Addr{fakeAddr("172.18.0.1/16")}},
+			{Name: "veth1a2b3c", Addrs: []net.Addr{fakeAddr("172.19.0.1/16")}},
+			{Name: "cni0", Addrs: []net.Addr{fakeAddr("10.244.0.1/24")}},
+			{Name: "flannel.1", Addrs: []net.Addr{fakeAddr("10.244.1.0/24")}},
+			{Name: "cali12ab", Addrs: []net.Addr{fakeAddr("10.245.0.1/24")}},
+			{Name: "wg0", Addrs: []net.Addr{fakeAddr("10.8.0.1/32")}},
+			{Name: "ens192", Addrs: []net.Addr{fakeAddr("172.16.4.9/22")}},
+		}, nil
 	}
-	if got := strings.Join(localSubnets(addrs), ","); got != "192.168.10.0/24,172.16.4.0/22" {
-		t.Errorf("local subnets = %s", got)
+	if got := strings.Join(localSubnets(interfaces), ","); got != "192.168.10.0/24,172.16.4.0/22" {
+		t.Errorf("local subnets = %s, want 192.168.10.0/24,172.16.4.0/22 (no container or bridge networks)", got)
+	}
+	failing := func() ([]localInterface, error) { return nil, errors.New("no interfaces") }
+	if got := localSubnets(failing); len(got) != 0 {
+		t.Errorf("local subnets without interfaces = %v", got)
+	}
+}
+
+// TestScopeLimitContract: the collector expands as many addresses per
+// scope as the server accepts (testdata/scope-limits.json, checked
+// against discovery.MaxScopeAddresses by the backend's test; F-106).
+func TestScopeLimitContract(t *testing.T) {
+	raw, err := os.ReadFile("testdata/scope-limits.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var limits struct {
+		MaxScopeAddresses int `json:"max_scope_addresses"`
+	}
+	if err := json.Unmarshal(raw, &limits); err != nil {
+		t.Fatal(err)
+	}
+	if limits.MaxScopeAddresses != maxScopeAddresses {
+		t.Fatalf("maxScopeAddresses = %d, scope-limits.json = %d: the collector cuts scopes the server accepts",
+			maxScopeAddresses, limits.MaxScopeAddresses)
+	}
+	// The expansion holds exactly the limit: a /16 without network and
+	// broadcast address, a full /16 range, and a cut larger CIDR.
+	if got, cut := expandCIDR("10.1.0.0/16"); len(got) != 65534 || cut || got[0] != "10.1.0.1" || got[len(got)-1] != "10.1.255.254" {
+		t.Errorf("expand /16 = %d addresses (truncated %v)", len(got), cut)
+	}
+	if got, cut := scopeTargets(&collectorScope{Kind: "range", Target: "10.2.0.0-10.2.255.255"}); len(got) != maxScopeAddresses || cut {
+		t.Errorf("expand range of %d addresses = %d (truncated %v)", maxScopeAddresses, len(got), cut)
+	}
+	if got, cut := expandCIDR("10.4.0.0/14"); len(got) != maxScopeAddresses || !cut {
+		t.Errorf("expand /14 = %d addresses (truncated %v), want %d and truncated", len(got), cut, maxScopeAddresses)
+	}
+	if got, cut := expandCIDR("192.0.2.8/31"); strings.Join(got, ",") != "192.0.2.8,192.0.2.9" || cut {
+		t.Errorf("expand /31 = %v", got)
+	}
+	if got, cut := expandCIDR("192.0.2.9"); strings.Join(got, ",") != "192.0.2.9" || cut {
+		t.Errorf("expand host = %v", got)
 	}
 }
 

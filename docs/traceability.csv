@@ -776,3 +776,5 @@ API-05;[B];C;frontend/src/pages/AuditPage.test.tsx;WP-469
 ENT-07;[B];B;frontend/src/components/EntitlementExpiryBanner.test.tsx;WP-464
 IMP-03;[B];C;frontend/src/components/cmdb/CIDetailSections.impact.test.tsx;WP-491
 IMP-01;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-491
+DIS-09;[B];D;collector/collectorcmd/discovery_scope_test.go;WP-494
+INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-494
