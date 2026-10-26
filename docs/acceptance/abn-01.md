@@ -11,8 +11,8 @@ automatisierte Protokolle gegen eingefrorene Daten. Die Daten liegen in
 | (a) | CMDB-Szenario, 34 Schritte, aus V §65 | [Q] | offen | Erklärung des Auftraggebers vom 2026-10-15 (B4), Nachweis ausstehend: Originaltext nachzureichen (E-02, A-02; WP-457) |
 | (b) | System-Szenario, 20 Schritte, aus V §66 | [Q] | offen | Erklärung des Auftraggebers vom 2026-10-15 (B4), Nachweis ausstehend: Originaltext nachzureichen (E-02, A-02; WP-457) |
 | (c) | Metamodell-Szenario | [P2] | nicht G1 | Phase 2 |
-| (d) | Onboarding-Szenario | [B] | **PASS** | `frontend/e2e/onboarding.spec.ts`, Lauf auf der frischen Installation (`docs/acceptance/g1-installation.md`); Schritt 7 seit WP-456 verschärft, Lauf ausstehend |
-| (e) | Konflikt-Szenario | [B] | **PASS** | `frontend/e2e-real/abn-01-konflikt.spec.ts` (Real-Stack, install-smoke, Lauf ausstehend) und `frontend/e2e/conflict.spec.ts` (gemockt), beide mit `artefakte/abn-01-e-konflikt.json` |
+| (d) | Onboarding-Szenario | [B] | **PASS** | `frontend/e2e/onboarding.spec.ts`, Lauf auf der frischen Installation (`docs/acceptance/g1-installation.md`); Schritt 7 seit WP-456 verschärft, bestanden in install-smoke Run 40258372749 (2026-10-26) |
+| (e) | Konflikt-Szenario | [B] | **PASS** | `frontend/e2e-real/abn-01-konflikt.spec.ts` (Real-Stack, install-smoke Run 40258372749, bestanden) und `frontend/e2e/conflict.spec.ts` (gemockt), beide mit `artefakte/abn-01-e-konflikt.json` |
 
 ## (a) und (b): v2-Texte nach E-02
 
@@ -77,8 +77,9 @@ Ausfallsimulation zeigt es. Negativfall: Ein CI ohne Beziehung hat einen
 leeren Impact, und die Ausfallsimulation zeigt den Hinweis „Dieses CI hat
 keine abhängigen CIs“. Die übrigen Eingaben und Schritte bleiben unverändert;
 die Prüfsumme der Datei in `artefakte/SHA256SUMS` ist neu. Lauf #122 (unten)
-belegt Schritt 7 in der früheren Fassung; der Lauf der verschärften Fassung
-im install-smoke-Lauf des PR steht aus und wird mit Run-ID nachgetragen.
+belegt Schritt 7 in der früheren Fassung; die verschärfte Fassung bestand am
+2026-10-26 in install-smoke Run 40258372749 (Job `install-cloud-smoke (ubuntu-24.04)`,
+Commit `68fa184`, PR #94; 6 passed).
 
 Änderung nach dem Einfrieren, 2026-10-26: Korrektur zu WP-456 (`t5-abn01-de`,
 F-299). Der Negativfall las die Beziehungen des CI ohne Beziehung über
@@ -97,7 +98,7 @@ neu.
 | 4 | Scope bestätigen | Scope aktiv | bestanden |
 | 5 | 30 simulierte Geräte | 30 CIs sichtbar | bestanden |
 | 6 | Review auflösen | Review geschlossen, Ergebnis am CI | bestanden |
-| 7 | Impact abfragen | betroffene CIs zum gewählten CI: nach der Beziehung `sim-srv-01` → `sim-nas-01` nennt der Impact von `sim-nas-01` `sim-srv-01` (API und Ausfallsimulation); ein CI ohne Beziehung hat keinen Impact, mit Hinweis in der UI | ausstehend (WP-456; frühere Fassung in Lauf #122 bestanden) |
+| 7 | Impact abfragen | betroffene CIs zum gewählten CI: nach der Beziehung `sim-srv-01` → `sim-nas-01` nennt der Impact von `sim-nas-01` `sim-srv-01` (API und Ausfallsimulation); ein CI ohne Beziehung hat keinen Impact, mit Hinweis in der UI | bestanden (install-smoke Run 40258372749; frühere Fassung in Lauf #122 bestanden) |
 | 8 | Export laden | Exportdatei mit den CIs | bestanden |
 
 Lauf: [Install Smoke Test #122](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38512314064),
@@ -133,17 +134,21 @@ reproduzieren. Die Übernahme beschreibt `artefakte/README.md`.
 
 | # | Schritt | Erwartung (UI, API, Datenbank) | Ergebnis |
 |---|---|---|---|
-| 0 | Erste Discovery | `srv-abn-01` mit Modell `R-1U` aus `snmp`, `srv-abn-02` ohne Betriebssystem (API, `ci_field_value`) | ausstehend |
-| 1 | CI-Detail, „Herkunft & Overrides“, Override setzen | Dialog: `PUT /cis/{id}/fields/model/override` 200; Feld „geschützt“, Override und Effektiv `R-2U-manual`, Discovery `R-1U`; Herkunft mit Autor und Begründung; `ci.model` und `override_value` in der Datenbank. Override `Linux (manual)` auf `srv-abn-02`/os_name über denselben Endpunkt | ausstehend |
-| 2 | Abweichende Discovery | Ingest meldet `R-3U` und `Linux 6.1`; beide Overrides bleiben, die Herkunft zeigt den gemeldeten Wert „abweichend“; je Feld genau ein offenes `override_conflict` mit dem gemeldeten Wert | ausstehend |
-| 3 | override_conflict sichtbar | Review-Inbox, Typ „Konflikt mit Override“: zwei Einträge; der Diff nennt `srv-abn-01`, beobachtet `R-3U`, im CI `R-2U-manual`, „abweichend“ | ausstehend |
-| 4 | accept | „Übernehmen“: Review `resolved` mit `accept` und Bearbeiter; Override entfernt, `srv-abn-01` hat das Modell `R-3U` | ausstehend |
-| 5 | dismiss | „Verwerfen“: Review `dismissed` mit `dismiss`; Override `Linux (manual)` bleibt; „Keine Review-Items“; beide Ergebnisse nach einem Reload | ausstehend |
+| 0 | Erste Discovery | `srv-abn-01` mit Modell `R-1U` aus `snmp`, `srv-abn-02` ohne Betriebssystem (API, `ci_field_value`) | bestanden |
+| 1 | CI-Detail, „Herkunft & Overrides“, Override setzen | Dialog: `PUT /cis/{id}/fields/model/override` 200; Feld „geschützt“, Override und Effektiv `R-2U-manual`, Discovery `R-1U`; Herkunft mit Autor und Begründung; `ci.model` und `override_value` in der Datenbank. Override `Linux (manual)` auf `srv-abn-02`/os_name über denselben Endpunkt | bestanden |
+| 2 | Abweichende Discovery | Ingest meldet `R-3U` und `Linux 6.1`; beide Overrides bleiben, die Herkunft zeigt den gemeldeten Wert „abweichend“; je Feld genau ein offenes `override_conflict` mit dem gemeldeten Wert | bestanden |
+| 3 | override_conflict sichtbar | Review-Inbox, Typ „Konflikt mit Override“: zwei Einträge; der Diff nennt `srv-abn-01`, beobachtet `R-3U`, im CI `R-2U-manual`, „abweichend“ | bestanden |
+| 4 | accept | „Übernehmen“: Review `resolved` mit `accept` und Bearbeiter; Override entfernt, `srv-abn-01` hat das Modell `R-3U` | bestanden |
+| 5 | dismiss | „Verwerfen“: Review `dismissed` mit `dismiss`; Override `Linux (manual)` bleibt; „Keine Review-Items“; beide Ergebnisse nach einem Reload | bestanden |
 
-Lauf: ausstehend. Der erste grüne install-smoke-Lauf mit dieser Spec wird
-hier mit Run-ID eingetragen; dabei wird `artefakte/abn-01-e-konflikt.json`
-aus dem Lauf neu erzeugt und seine Prüfsumme in `artefakte/SHA256SUMS`
-erneuert.
+Lauf: install-smoke Run 40258372749 vom 2026-10-26 (Job `install-cloud-smoke (ubuntu-24.04)`,
+Commit `68fa184`, PR #94), bestanden in 12,1 s. Die Spec verglich dabei die
+Szenariowerte des Laufs mit `artefakte/abn-01-e-konflikt.json` (sie
+stimmten überein) und schrieb die Datei des Laufs ins Testergebnis
+(Artefakt `e2e-real`, 14 Tage aufbewahrt). Übernahme nach `artefakte/` und neue
+Prüfsumme in `artefakte/SHA256SUMS`: ausstehend, weil das Artefakt aus der
+Arbeitsumgebung nicht abrufbar war; bis dahin gilt die eingefrorene
+Fassung.
 
 Änderung nach dem Einfrieren, 2026-10-25: WP-456 (`t5-abn01-de`, F-298).
 Das Protokoll stützte sich nur auf den gemockten Lauf unten. Neu ist die

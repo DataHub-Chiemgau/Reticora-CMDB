@@ -113,19 +113,25 @@ It then:
 5. verifies the signed release images with cosign, pins them by digest in
    `.env` and pulls them (default), or builds server, frontend and PostgreSQL
    from the checkout (`--build-from-source`, not signature-verified),
-6. starts the infrastructure and applies the SQL migrations from
+6. limits the container logs to 30 days (NFR-06): on a host with
+   systemd-journald with the drop-in
+   `/etc/systemd/journald.conf.d/reticora.conf` (applies to the whole journal
+   of the host), otherwise with the json-file rotation of
+   `docker-compose.logging-json.yml` through `COMPOSE_FILE` in `.env` (see
+   [Container logs](#container-logs-30-days-nfr-06)),
+7. starts the infrastructure and applies the SQL migrations from
    `backend/migrations/` (via `golang-migrate` when installed, otherwise via
    `psql` inside the postgres container; applied versions are tracked in the
    `reticora_schema_migrations` table so re-runs are no-ops), then creates
    or repairs the runtime login `reticora_runtime` (see below),
-7. starts Keycloak, removes the demo administrator of earlier releases and
+8. starts Keycloak, removes the demo administrator of earlier releases and
    creates the individual initial administrator (`RETICORA_INITIAL_ADMIN_EMAIL`)
    with a random temporary password, then starts the API server and the
    frontend,
-8. when a TLS domain is configured: requests the Let's Encrypt certificate
+9. when a TLS domain is configured: requests the Let's Encrypt certificate
    with Certbot (webroot challenge served by nginx) and reloads nginx,
-9. verifies `/healthz` on the API,
-10. optionally garbage-collects superseded container images (keeps the newest
+10. verifies `/healthz` on the API,
+11. optionally garbage-collects superseded container images (keeps the newest
     `RETICORA_GC_KEEP_IMAGES`, default 3, per image).
 
 Afterwards the web UI is reachable at the configured base URL. The installer
@@ -138,6 +144,28 @@ Non-interactive (CI) usage: `./install-cloud.sh --non-interactive` uses the
 existing `.env` values, generated defaults and never prompts. CI installs the
 checked-out, unpublished state with `--build-from-source`; the default path
 runs on release tags (job `release-mode` of `install-smoke.yml`).
+
+### Container logs: 30 days (NFR-06)
+
+Container logs can hold personal data and are kept 30 days (decision E-77,
+details in [docs/ops/workers.md](../docs/ops/workers.md#container-logs-nfr-06)):
+
+- Every service of `docker-compose.yml` logs to the journal of the host
+  (`x-logging`, driver `journald`). On a host with a running systemd-journald
+  the installer writes `/etc/systemd/journald.conf.d/reticora.conf` with
+  `MaxRetentionSec=30day` and `MaxFileSec=1day` and restarts
+  systemd-journald. **This applies to the whole journal of the host**, not
+  only to Reticora; the installer says so when it writes the file. A stricter
+  setting of the operator (at most 30 days, at most one day per file) stays
+  in effect; keep own settings in a drop-in of your own.
+- Without systemd-journald (e.g. Docker in a container without systemd) the
+  journald driver cannot start a container. The installer then selects
+  `docker-compose.logging-json.yml` (json-file, 5 files of 20 MB per
+  container) through `COMPOSE_FILE` in `.env` and warns: this bounds the size,
+  not the age. Run `docker compose --env-file .env …` from
+  `deploy/docker-compose` so that `COMPOSE_FILE` resolves.
+- `docker compose logs <service>` and `docker logs <container>` work with
+  both; `journalctl CONTAINER_NAME=docker-compose-server-1` reads the journal.
 
 ### Database logins (TEN-03)
 
@@ -276,8 +304,11 @@ The installer asks for:
   by the discovery plugins.
 - **Offline buffer** — spool directory where results are kept while the cloud
   is unreachable.
+- **Auto-updates** (systemd mode, optional) — base URL of the signed collector
+  releases (`RETICORA_UPDATE_URL`, also taken from the environment; empty =
+  off), see `docs/betrieb/collector-updates.md`.
 - **mTLS identity** — client certificate/key/CA files, or empty to use the
-  enrollment keystore at `/opt/reticora-collector/credentials.json`.
+  enrollment keystore at `/var/lib/reticora-collector/credentials.json`.
 
 It then writes `/opt/reticora-collector/collector.env` (mode `600`), installs
 the signed collector of the release — the binary `reticora-collector-linux-<arch>`
@@ -286,7 +317,58 @@ after `cosign verify-blob` and its sha256 in the signed `SHA256SUMS`, or with
 digest (Docker/Compose are installed when missing) — installs and starts a
 `reticora-collector.service` systemd unit — or, with `--docker`, a minimal
 compose project in `/opt/reticora-collector/` — and verifies that the
-collector is running.
+collector is running. In the systemd mode the binary lives at
+`/opt/reticora-collector/collector` and is linked as
+`/usr/local/bin/reticora-collector`, the command the unit starts.
+
+With `RETICORA_UPDATE_URL` (systemd mode) the installer also installs cosign
+`v2.4.1` — the version the release is signed with, checked against its
+published sha256 before it is installed — as `/usr/local/bin/cosign`, where
+the updater of the service finds it; another file there is replaced. Without
+an update URL nothing is installed, and the collector warns at start when
+auto-updates are on but cosign is missing. The Docker mode updates through the
+signed image (re-run with `--release v<version>`) and ignores the update URL.
+
+### Enrollment
+
+The Discovery page shows `reticora-collector enroll --server <url> --code
+<code>` with a one-time code (24 h). Run it on the collector VM as root and
+restart the service:
+
+```bash
+sudo reticora-collector enroll --server https://cmdb.example.com --code <code>
+sudo systemctl restart reticora-collector
+```
+
+The command stores the identity (certificate, key, CA, server URL) at
+`/var/lib/reticora-collector/credentials.json`; `collector.env` names the same
+path (`RETICORA_CREDENTIALS_PATH`), so the service reads it. A re-run of the
+installer over an older installation switches `RETICORA_CREDENTIALS_PATH` from
+`/opt/reticora-collector/credentials.json` to that path and moves an identity
+found there. With `--docker`, the compose project mounts
+`/var/lib/reticora-collector` (mode `700`, owned by the image user `nobody`,
+65534), and the image runs `reticora-collector` as its entrypoint
+(`collector` remains as a link):
+
+```bash
+docker compose -f /opt/reticora-collector/docker-compose.yml run --rm collector \
+  enroll --server https://cmdb.example.com --code <code>
+docker compose -f /opt/reticora-collector/docker-compose.yml restart collector
+```
+
+### ICMP sweep
+
+The sweep pings over an unprivileged ICMP socket where
+`net.ipv4.ping_group_range` allows the collector's group, otherwise over a raw
+socket, which needs `CAP_NET_RAW`; without either, ICMP is off (logged at
+start as `sweep_icmp`) and the sweep uses TCP and ARP. The systemd unit grants
+`AmbientCapabilities=CAP_NET_RAW`. The image sets no file capability and runs
+as `nobody`: with `--docker` (host networking) the host's
+`net.ipv4.ping_group_range` applies — set it on the host if needed
+(`sysctl -w net.ipv4.ping_group_range="0 2147483647"`, persisted in
+`/etc/sysctl.d/`); a container with its own network namespace gets the full
+range from Docker or `--sysctl`. `NET_RAW` works in the container only for
+root (`user: "0:0"`), not for `nobody`.
 
 With `--build-from-source` (`RETICORA_BUILD_FROM_SOURCE=1`) it builds the
 collector locally instead, not signature-verified: it downloads the repository
@@ -376,15 +458,37 @@ keeps the pod in `CreateContainerConfigError`.
 | `RETICORA_INVITATION_ACCEPT_URL` | ConfigMap `reticora-config`, key `invitation-accept-url` (`https://<host>/invitations/accept`) |
 | `RETICORA_SESSION_KEY_PATH` | secret `reticora-session-key`, key `private.pem`, mounted at `/etc/reticora/session` |
 
-`prod` additionally includes the components `opensearch`, `backup` and
-`nats-edge`, which need: secret `reticora-backup` (keys `database-url`,
-`aws-access-key-id`, `aws-secret-access-key`), secret `reticora-pgbackrest`
-(keys `cipher-pass`, `s3-key`, `s3-key-secret`, `ca.crt`, `tls.crt`,
-`tls.key`), optionally secret `reticora-opensearch` (`username`, `password`,
-only with the security plugin), a ReadWriteMany storage class for the PVC
-`reticora-collector-pki`, and the host names of the collector endpoint in the
-shipped ConfigMap `reticora-nats-edge` (key `hosts`, replace
+`prod` additionally includes the components `opensearch`, `postgres`,
+`backup` and `nats-edge`, which need: secret `reticora-postgres` (key
+`password`, the bootstrap superuser `reticora` of the database), secret
+`reticora-backup` (keys `database-url`, `aws-access-key-id`,
+`aws-secret-access-key`), secret `reticora-pgbackrest` (keys `cipher-pass`,
+`s3-key`, `s3-key-secret`, `ca.crt`, `tls.crt`, `tls.key`, `server.crt`,
+`server.key`), optionally secret `reticora-opensearch` (`username`,
+`password`, only with the security plugin), a default storage class for the
+PVC of `reticora-db` (ReadWriteOnce, 50 Gi), a ReadWriteMany storage class
+for the PVC `reticora-collector-pki`, and the host names of the collector
+endpoint in the shipped ConfigMap `reticora-nats-edge` (key `hosts`, replace
 `nats.example.com`).
+
+**Database and WAL archiving (OPS-04, E-74).** The component `postgres` runs
+the database `reticora-db` (StatefulSet, one replica, image
+`reticora-postgres`, Service `reticora-db` on 5432) with WAL archiving:
+every WAL segment goes with pgBackRest `archive-push` to the S3 repository
+of the component `backup` (`archive_timeout = 300`, RPO 15 min), and the
+pgBackRest TLS server on port 8432 serves the daily full backup of the
+CronJob `reticora-pgbackrest-full`. The secret `reticora-pgbackrest` holds
+the repository key and cipher pass, the CA `ca.crt`, the server certificate
+of `reticora-db` (`server.crt`, `server.key`, subjectAltName `reticora-db`)
+and the client certificate of the job (`tls.crt`, `tls.key`, common name
+`pgbackrest-client`); `docs/backup-dr.md` (section Kubernetes) shows how to
+create them and how to check the archive after the rollout. Point
+`reticora-db-migrate` and `reticora-db-runtime` at the host `reticora-db`.
+The component is decision E-74's transitional rule (option 1): with a
+database of the operator (option 2) or managed PostgreSQL with the provider's
+PITR (option 3), remove it from the overlay; `docs/backup-dr.md` describes
+what then takes its place. `staging` includes neither `postgres` nor
+`backup` and has no backup.
 
 `reticora-config` is provided by the operator like the secrets and is
 deliberately not generated with placeholders: its values differ for every
@@ -395,7 +499,8 @@ The database needs two logins with separate secrets (TEN-03):
 
 - **Migration login** (secret `reticora-db-migrate`, key `database-url`): the
   owner/superuser that runs `golang-migrate` on `backend/migrations/` before a
-  rollout. No manifest references it; keep it out of the server's namespace if
+  rollout; with the component `postgres` the bootstrap superuser `reticora`
+  with the password of `reticora-postgres`. No manifest references it; keep it out of the server's namespace if
   migrations run elsewhere. It must have SUPERUSER: migration `000162`
   declares the function of the attribute indexes LEAKPROOF and stops
   otherwise (decision E-73; operation without a superuser needs its
@@ -470,9 +575,21 @@ and the server's start check refuses an empty key. Keep the master key in a
 backup outside the cluster; without it, stored credentials cannot be
 decrypted.
 
+**Container logs (NFR-06).** The manifests do not configure log retention:
+the container runtime writes the pod logs to the nodes, where the kubelet
+rotates them by size only. The operator of the cluster provides the 30 days
+(details in [docs/ops/workers.md](../docs/ops/workers.md#container-logs-nfr-06)):
+the kubelet rotation (`containerLogMaxSize`, e.g. `20Mi`, and
+`containerLogMaxFiles`, e.g. `5`) bounds the logs on the nodes, and the
+cluster's log backend that collects them deletes them after 30 days (e.g.
+Loki `retention_period: 720h`, an Elasticsearch/OpenSearch lifecycle policy
+with a delete phase after 30 days, or the retention of the cloud provider's
+logging service).
+
 **Images.** `prod` uses the signed release images
 `ghcr.io/datahub-chiemgau/reticora-server` and
-`ghcr.io/datahub-chiemgau/reticora-postgres` (pgBackRest CronJob) with the
+`ghcr.io/datahub-chiemgau/reticora-postgres` (database `reticora-db` and
+pgBackRest CronJob) with the
 release tag (`newTag: v1.0.0`); raise `newTag` in
 `deploy/k8s/overlays/prod/kustomization.yaml` with each release. NATS,
 OpenSearch and the TimescaleDB image of the `pg_dump` CronJob are upstream
@@ -483,15 +600,17 @@ CI (`k8s-manifests`) builds base and both overlays and asserts the master-key
 secret reference, the required configuration
 (`backend/internal/config/k8s_required_env_test.go`: every key above in base,
 staging and prod, the server's start check with the rendered env, fixture
-overlays without a key are reported) and the image origin (every Reticora image
+overlays without a key are reported), the image origin (every Reticora image
 of the prod build is a release image `ghcr.io/datahub-chiemgau/reticora-*` with
-a tag `v*`).
+a tag `v*`) and the WAL archiving of the prod build (archive settings, the
+StatefulSet that starts PostgreSQL with them, the TLS server and the Service
+`reticora-db`; an overlay without the component `postgres` is rejected).
 
 **Runtime smoke in kind.** The workflow `k8s-smoke`
 (`.github/workflows/k8s-smoke.yml`: on pull requests that change
 `deploy/k8s/**`, `backend/Dockerfile`, the config loader
-`backend/internal/config/config.go` or the smoke itself, nightly and on
-demand) observes the `staging` overlay on a cluster: it creates a kind cluster
+`backend/internal/config/config.go`, the image `deploy/docker-compose/postgres`
+or the smoke itself, nightly and on demand) observes the `staging` overlay on a cluster: it creates a kind cluster
 (kind and node image pinned by version and digest), builds the server image of
 the commit as `reticora-cmdb/server:staging` and loads it, applies the test
 dependencies of `tests/k8s/fixtures` (TimescaleDB, Redis, NATS with
@@ -508,14 +627,27 @@ migrates the database, creates the runtime login and runs
 - with an empty `master-key` or `oidc-issuer-url` the container ends with
   exit 1 and logs `requires RETICORA_MASTER_KEY` or
   `requires RETICORA_OIDC_ISSUER_URL` (the start check treats an empty value
-  as unset).
+  as unset);
+- `wal_archive` (WP-444): the test overlay `tests/k8s/fixtures/overlay-wal`
+  (the components `postgres` and `backup` on top of `staging`, MinIO with TLS
+  as the repository, image `reticora-cmdb/postgres:kind-smoke` built from
+  `deploy/docker-compose/postgres`) makes `reticora-db` Ready;
+  `pgbackrest --stanza=reticora check` ends with rc 0;
+  `pg_stat_archiver.archived_count` rises within 120 s after
+  `SELECT pg_switch_wal()`; a job created from the CronJob
+  `reticora-pgbackrest-full` adds a full backup; the same job with a wrong
+  cipher pass (only in that job) fails because it cannot decrypt
+  `backup.info`. For it, `setup` creates a test CA with the certificates of
+  MinIO, of `reticora-db` and of the client `pgbackrest-client`, the secret
+  `reticora-pgbackrest` with a random cipher pass, and the versioned bucket
+  `reticora-backup`.
 
 The protocol of a run is the artifact `k8s-smoke-protocol`. The values in
 `tests/k8s/fixtures` are test-only and known to everybody; never apply them
 outside a throwaway cluster. `kind-smoke.sh` therefore refuses every kubectl
 context but a kind cluster (`kind-<name>`); locally it runs as
 `tests/k8s/kind-smoke.sh setup` and `tests/k8s/kind-smoke.sh run` after
-loading the server image into the cluster.
+loading the server and the postgres image into the cluster.
 
 ## Layout
 
@@ -527,6 +659,7 @@ deploy/
 ├── docker-compose/
 │   ├── docker-compose.yml            full stack (env-driven, no secrets in git)
 │   ├── docker-compose.override.yml   source-build config (tracked)
+│   ├── docker-compose.logging-json.yml  json-file log rotation without systemd-journald (NFR-06)
 │   ├── nginx-tls.conf.template       TLS nginx config (used when RETICORA_TLS_DOMAIN is set)
 │   ├── .env                          generated by install-cloud.sh (git-ignored)
 │   ├── .generated/                   rendered Keycloak realm (git-ignored)

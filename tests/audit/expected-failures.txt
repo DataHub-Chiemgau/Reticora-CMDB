@@ -36,16 +36,12 @@ go;collector/collectorcmd;TestAuditScopeScheduleSurvivesRestart;F-109
 go;collector/plugins/snmp;TestAuditSNMPv3AuthFailureReported;F-105
 go;edgecore/buffer;TestAuditT3CorruptHeadDoesNotBlockSpool;F-085
 go;edgecore/buffer;TestAuditT3SpoolLossSurvivesRestart;F-084
-sh;tests/audit/collector-install-cli.test.sh;INS-06 violated;F-110
 sh;tests/audit/g1-gate-evidence.test.sh;abn01_texts;F-138
 sh;tests/audit/g1-gate-evidence.test.sh;install_evidence_current;F-122
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_field;F-039
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_findings;F-039
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_summary;F-039
 sh;tests/audit/g1-gate-evidence.test.sh;subprocessors;F-137
-sh;tests/audit/log-retention.test.sh;NFR-06 logs 30 days;F-150
-sh;tests/audit/ops-config.test.sh;k8s_wal_archive;F-128
-sh;tests/audit/ops-config.test.sh;restore_rpo_window;F-130
 vitest;frontend/src/api/deprecatedPaths.auditdefect.ts;frontend API paths (catalogue contract) uses no path whose every operation is deprecated;F-077
 vitest;frontend/src/pages/AuditPage.auditdefect.tsx;AuditPage renders the API audit entry (audit defect) shows the entry time and the affected resource;F-078
 vitest;frontend/src/pages/CITypeAdminPage.auditdefect.tsx;CITypeAdminPage flag update failure (audit defect) shows the 409 reason of a refused unique flag and keeps the dialog open;F-159

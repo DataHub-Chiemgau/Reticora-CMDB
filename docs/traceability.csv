@@ -697,3 +697,13 @@ PRI-07;Grundsatz (ohne Tag);D;tests/audit/compose-port-policy.test.sh;WP-431
 ABN-02;[Q];LT;backend/internal/ci/querybudget_integration_test.go;WP-436
 OPS-06;[Q];A;tests/outage/run.sh;WP-449
 NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-438
+INS-06;[B];D;tests/audit/collector-install-cli.test.sh;WP-432
+COL-06;[B], Air-Gapped [O];D;tests/install-vm-cosign.test.sh;WP-432
+AUT-09;[B];B;tests/keycloak-realm-upgrade.test.sh;WP-428
+INS-03;[B];A;tests/install-acme-pebble.test.sh;WP-440
+INS-01;[Q];A;tests/install-smoke-health.test.sh;WP-440
+NFR-05;[B];A;tests/restore-pitr-config.test.sh;WP-445
+OPS-04;[B], [P5];A;tests/restore-pitr.sh;WP-445
+NFR-06;[B];B;tests/audit/log-retention.test.sh;WP-458
+OPS-04;[B], [P5];A;tests/k8s/kind-smoke.sh;WP-444
+NFR-05;[B];A;tests/k8s/kind-smoke.sh;WP-444

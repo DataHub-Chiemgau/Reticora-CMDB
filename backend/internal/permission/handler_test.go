@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -93,5 +94,52 @@ func TestPermissionValidationAndTenant(t *testing.T) {
 			!strings.Contains(w.Body.String(), "role not found") {
 			t.Fatalf("%s with a malformed role id: expected 404 role not found, got %d %s", method, w.Code, w.Body.String())
 		}
+	}
+}
+
+// TestEffectivePermissionsIncludeSessionGrants: GET /me/permissions of a user
+// session lists the rights the session holds through its IdP groups (RBA-02,
+// F-200), also without any role assignment, merged with the assignments and
+// without duplicates; an API key reads only the assignments of its owner.
+func TestEffectivePermissionsIncludeSessionGrants(t *testing.T) {
+	repo, mux := setupPermission()
+	effective := func(p identity.Principal) []string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/me/permissions", nil)
+		ctx := identity.WithPrincipal(req.Context(), p)
+		req = req.WithContext(tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: "org-1", UserID: p.Subject}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET /me/permissions: %d %s", w.Code, w.Body.String())
+		}
+		var body EffectivePermissionsResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Permissions
+	}
+
+	groupOnly := identity.Principal{Subject: "group-viewer", OrganizationID: "org-1", Type: identity.PrincipalTypeUser,
+		Permissions: []identity.Permission{"ticket:read", "ci:read"}}
+	if got := effective(groupOnly); !slices.Equal(got, []string{"ci:read", "ticket:read"}) {
+		t.Fatalf("group member without role assignment: %v, want the rights of the session", got)
+	}
+
+	if _, err := repo.ReplaceRolePermissions(context.Background(), "org-1", "writer-role", "", orgWide, []string{"ci:read", "ticket:write"}); err != nil {
+		t.Fatal(err)
+	}
+	repo.AssignRoleToUser("org-1", "both", "writer-role")
+	both := identity.Principal{Subject: "both", OrganizationID: "org-1", Type: identity.PrincipalTypeUser,
+		Permissions: []identity.Permission{"ci:read", "ticket:read"}}
+	if got := effective(both); !slices.Equal(got, []string{"ci:read", "ticket:read", "ticket:write"}) {
+		t.Fatalf("assignment and group: %v, want the union without duplicates", got)
+	}
+
+	repo.AssignRoleToUser("org-1", "key-owner", "writer-role")
+	key := identity.Principal{Subject: "key-owner", OrganizationID: "org-1", Type: identity.PrincipalTypeAPIKey,
+		Permissions: []identity.Permission{"ci:read", "admin:manage"}}
+	if got := effective(key); !slices.Equal(got, []string{"ci:read", "ticket:write"}) {
+		t.Fatalf("API key: %v, want only the assignments of its owner", got)
 	}
 }

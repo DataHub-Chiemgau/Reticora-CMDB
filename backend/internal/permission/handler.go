@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -142,5 +143,25 @@ func (h *Handler) Effective(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	// A user session also holds the rights of its IdP groups (RBA-02,
+	// F-200): the identity module resolves them together with the role
+	// assignments at login and refresh, and RequirePermission enforces that
+	// set. Without them a member of reticora-viewer without a role
+	// assignment would read no permission although the API grants the
+	// viewer rights. API keys keep the rights of their owner's assignments.
+	if p, ok := identity.PrincipalFromContext(r.Context()); ok && p.Type == identity.PrincipalTypeUser && p.Subject == t.UserID {
+		keys = withSessionPermissions(keys, p.Permissions)
+	}
 	api.WriteJSON(w, http.StatusOK, EffectivePermissionsResponse{UserID: t.UserID, Permissions: keys})
+}
+
+// withSessionPermissions returns keys and the session's permissions, sorted
+// and without duplicates.
+func withSessionPermissions(keys []string, session []identity.Permission) []string {
+	merged := append([]string{}, keys...)
+	for _, p := range session {
+		merged = append(merged, string(p))
+	}
+	slices.Sort(merged)
+	return slices.Compact(merged)
 }

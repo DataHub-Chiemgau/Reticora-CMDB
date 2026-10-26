@@ -6,10 +6,15 @@ resources:
 
 # Production adds the optional OpenSearch search backend component (Epic G2),
 # which also appends the RETICORA_OPENSEARCH_* / RETICORA_SEARCH_BACKEND env
-# vars to the server deployment, and the nightly backup CronJob (Epic H2),
-# which requires the reticora-backup secret.
+# vars to the server deployment, the database reticora-db with WAL archiving
+# (component postgres, OPS-04, E-74 transitional rule: option 1; secrets
+# reticora-postgres and reticora-pgbackrest) and the backups (Epic H2: daily
+# pgBackRest full backup and nightly pg_dump; secrets reticora-pgbackrest and
+# reticora-backup). Point reticora-db-runtime and reticora-db-migrate at the
+# host reticora-db (deploy/README.md).
 components:
   - ../../base/components/opensearch
+  - ../../base/components/postgres
   - ../../base/components/backup
   - ../../base/components/nats-edge
 

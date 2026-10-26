@@ -352,6 +352,60 @@ gid 101 (`getent group 101`; on Debian/Ubuntu often `ssl-cert`,
 Remove such members or keep the directory out of their reach (e.g. a
 `0700` parent directory) if they must not.
 
+### How the certificate is renewed and served
+
+**Renewal.** The `certbot` service runs `certbot renew` every 12 hours
+against the ACME server of the issuance, with the same deploy hook; certbot
+renews a certificate once it expires within 30 days (Let's Encrypt
+certificates are valid for 90 days) and otherwise does nothing. The renewed
+files appear under the same paths, `letsencrypt/live/<domain>/`.
+
+**Reload.** nginx keeps the certificate it loaded at start in memory, so it
+would serve the old one until it expires. With a domain
+(`RETICORA_TLS_DOMAIN`), the frontend image starts
+`/docker-entrypoint.d/30-reticora-cert-reload.sh` before nginx: every
+`RETICORA_TLS_RELOAD_INTERVAL` seconds it compares the checksum of
+`/etc/letsencrypt/live/<domain>/fullchain.pem` with the one nginx loaded.
+Only when it changed it runs `nginx -t` and then `nginx -s reload`, without
+restarting the container. The frontend log then shows
+`30-reticora-cert-reload.sh: live/<domain>/fullchain.pem changed, nginx
+reloaded` and nginx's `signal 1 (SIGHUP) received …, reconfiguring`. An
+unchanged certificate causes no reload. If `nginx -t` fails (e.g. the deploy
+hook did not run and the renewed key is unreadable, see "Issued certificate
+not loadable by nginx" below), the loop logs `… changed, but nginx -t failed;
+nothing reloaded, nginx keeps serving the previous certificate:` with the
+output of `nginx -t`; nginx keeps running with the previous certificate and
+the loop tries again in the next round. Without a domain no loop runs.
+
+**Reload interval.** `RETICORA_TLS_RELOAD_INTERVAL` in `.env`, in seconds
+(default `21600`, 6 hours; the installer does not write it). A renewed
+certificate is served at the latest one interval after the renewal, long
+before the old one expires. A value that is not a positive whole number is
+replaced by `21600` with a warning in the frontend log. After changing it:
+`docker compose --env-file .env up -d frontend`; the log line
+`30-reticora-cert-reload.sh: reloads nginx when live/<domain>/fullchain.pem
+changes (checked every <n> s)` shows the interval in use.
+
+**Checking the served certificate by hand** (in `deploy/docker-compose`):
+
+```bash
+# Serial and expiry of the certificate nginx serves …
+openssl s_client -connect <domain>:443 -servername <domain> </dev/null 2>/dev/null \
+  | openssl x509 -noout -serial -enddate
+# … and of the one certbot stored
+openssl x509 -in letsencrypt/live/<domain>/cert.pem -noout -serial -enddate
+# Messages of the reload loop and reloads of nginx
+docker compose --env-file .env logs frontend | grep -E '30-reticora-cert-reload|SIGHUP'
+```
+
+Both serials agree at the latest one reload interval after a renewal. If
+they still differ, look for the `nginx -t failed` message, fix its cause and
+reload by hand:
+`docker compose --env-file .env exec -T frontend nginx -t && docker compose --env-file .env exec -T frontend nginx -s reload`.
+`tests/install-acme-pebble.test.sh` (CI job `tls-domain-pebble`) checks
+this after `certbot renew --force-renewal` against Pebble with an interval
+of 10 seconds.
+
 ### Let's Encrypt issuance fails
 
 **Symptom:** Installer warns "Let's Encrypt certificate issuance failed".

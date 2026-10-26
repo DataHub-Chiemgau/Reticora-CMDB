@@ -32,5 +32,8 @@ RUN apk --no-cache upgrade \
 # The image entrypoint renders every mounted template unconditionally; this
 # hook drops the rendered TLS server block again when no domain is set.
 COPY --chmod=0755 docker-entrypoint.d/25-reticora-tls-optional.sh /docker-entrypoint.d/
+# With a domain, this hook starts a loop that reloads nginx (after nginx -t)
+# when certbot has renewed live/<domain>/fullchain.pem (WP-440, F-139).
+COPY --chmod=0755 docker-entrypoint.d/30-reticora-cert-reload.sh /docker-entrypoint.d/
 
 EXPOSE 80

@@ -77,19 +77,98 @@ docker compose --env-file .env exec backup reticora-pgbackrest-env.sh reticora-b
 
 ### Kubernetes
 
-The component `deploy/k8s/base/components/backup` contains:
+The overlay `prod` includes two components (decision E-74, transitional
+rule: option 1). `staging` includes neither and has no backup: it runs
+against a database the operator provides.
 
-- the `reticora-pgbackrest` ConfigMap: S3 repository, encryption, 35 days
-  retention;
-- the CronJob `reticora-pgbackrest-full`: `reticora-backup.sh verify-repo`,
-  then a daily full backup over the pgBackRest TLS connection to the
-  database host. If the bucket is not versioned, the job fails without a
-  backup.
+- `deploy/k8s/base/components/postgres`, the database `reticora-db`: a
+  StatefulSet with one replica and a PersistentVolumeClaim (50 Gi), the
+  Service `reticora-db` (5432 PostgreSQL, 8432 pgBackRest TLS server) and
+  the image `reticora-postgres`, the same as in Compose and in the backup
+  job.
+  - Container `postgres`: PostgreSQL starts with `config_file` from the
+    ConfigMap `reticora-postgres`. It includes the configuration of the data
+    directory and sets `archive_mode = on`,
+    `archive_command = 'pgbackrest --stanza=reticora archive-push %p'` and
+    `archive_timeout = 300`.
+  - Container `pgbackrest`: creates the stanza as soon as the database
+    accepts connections, then runs the pgBackRest TLS server
+    (`pgbackrest server`). If `stanza-create` fails (repository unreachable,
+    wrong key), it retries every 30 s. Until then the WAL waits in `pg_wal`.
+  - The TLS server accepts only client certificates of the CA `ca.crt` with
+    the common name `pgbackrest-client`, and only for the stanza `reticora`
+    (`tls-server-auth`).
+  - The server and the migrations connect to `reticora-db:5432` (secrets
+    `reticora-db-runtime` and `reticora-db-migrate`, deploy/README.md).
+- `deploy/k8s/base/components/backup`:
+  - the ConfigMap `reticora-pgbackrest`. `pgbackrest.conf` is the S3
+    repository (encryption, 35 days retention); the database and the job
+    read it. `repo-host.conf` is read by the job only and points it at
+    `reticora-db` over TLS;
+  - the CronJob `reticora-pgbackrest-full`: `reticora-backup.sh
+    verify-repo`, then a daily full backup over the TLS server. If the
+    bucket is not versioned, the job fails without a backup;
+  - the CronJob `reticora-backup` (pg_dump, see below).
 
-On the database host, PostgreSQL archives with the same repository
-configuration and runs `pgbackrest server`. Secret: `reticora-pgbackrest`
-(cipher pass, S3 keys, TLS client certificate). With a managed database, its
-PITR takes the place of pgBackRest, with the same RPO, RTO and retention.
+Secrets (nothing secret is in a ConfigMap):
+
+| Secret | Key | Used for |
+| ------ | --- | -------- |
+| `reticora-postgres` | `password` | bootstrap superuser `reticora` of the image (the migration login) |
+| `reticora-pgbackrest` | `cipher-pass`, `s3-key`, `s3-key-secret` | repository: archive-push and stanza in the database, the backup job |
+| | `ca.crt` | CA of both certificates, used for nothing else: every certificate it signs with the common name `pgbackrest-client` can read the database |
+| | `server.crt`, `server.key` | TLS server of `reticora-db`; the certificate must name `reticora-db` (subjectAltName) |
+| | `tls.crt`, `tls.key` | client certificate of the job, common name `pgbackrest-client` |
+
+```bash
+openssl req -x509 -newkey rsa:3072 -nodes -keyout ca.key -out ca.crt -days 3650 -subj "/CN=Reticora pgBackRest CA"
+openssl req -new -newkey rsa:3072 -nodes -keyout server.key -out server.csr -subj "/CN=reticora-db"
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 825 -out server.crt \
+  -extfile <(printf 'subjectAltName=DNS:reticora-db,DNS:reticora-db.reticora.svc\nextendedKeyUsage=serverAuth\n')
+openssl req -new -newkey rsa:3072 -nodes -keyout tls.key -out tls.csr -subj "/CN=pgbackrest-client"
+openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 825 -out tls.crt \
+  -extfile <(printf 'extendedKeyUsage=clientAuth\n')
+kubectl -n reticora create secret generic reticora-postgres --from-literal=password="$(openssl rand -base64 32)"
+kubectl -n reticora create secret generic reticora-pgbackrest \
+  --from-literal=cipher-pass="$(openssl rand -base64 48)" \
+  --from-literal=s3-key=… --from-literal=s3-key-secret=… \
+  --from-file=ca.crt --from-file=server.crt --from-file=server.key --from-file=tls.crt --from-file=tls.key
+```
+
+Keep `ca.key` and a copy of the cipher pass outside the cluster; without the
+cipher pass no backup can be restored. The key needs, besides the object
+permissions of pgBackRest, `s3:GetBucketVersioning` (`verify-repo`).
+
+After the first rollout:
+
+```bash
+kubectl -n reticora exec reticora-db-0 -c postgres -- pgbackrest --stanza=reticora check
+kubectl -n reticora exec reticora-db-0 -c postgres -- \
+  psql -U reticora -d reticora -c 'SELECT archived_count, last_archived_wal, failed_count FROM pg_stat_archiver'
+# The first full backup now instead of at 02:00:
+kubectl -n reticora create job --from=cronjob/reticora-pgbackrest-full reticora-pgbackrest-first
+```
+
+Proof: the CI job `k8s-manifests` checks the rendered `prod` build (step
+`Assert WAL archiving`: the archive settings, the StatefulSet that starts
+PostgreSQL with them, the TLS server, the Service). The case `wal_archive` of
+the workflow `k8s-smoke` runs both components in kind with MinIO as the
+repository: `pgbackrest check`, `archived_count` after `pg_switch_wal()`, a
+full backup by a job of the CronJob, and a failed backup with a wrong
+cipher pass.
+
+**Alternatives (E-74, still open).** Option 1 is a transitional rule. A
+decision for another option replaces only the component `postgres`, the
+assertion `Assert WAL archiving` and the kind case `wal_archive`:
+
+- Option 2, the operator's database: remove the component `postgres` from
+  the overlay. The database host archives into the same repository
+  (`archive-push` with the `[global]` of `pgbackrest.conf`) and runs
+  `pgbackrest server` with a certificate for its host name. Patch
+  `pg1-host` and `pg1-path` in `repo-host.conf`.
+- Option 3, managed PostgreSQL with the provider's PITR (E-29 option 3):
+  neither the component `postgres` nor the pgBackRest CronJob. The
+  provider's PITR takes their place, with the same RPO, RTO and retention.
 
 ### Object storage: versioning and replication (NFR-05)
 
@@ -167,12 +246,13 @@ repository of pgBackRest:
 6. Rebuild the search index per tenant: `POST /api/v1/search/reindex`.
 7. Verify the audit hash chains: `go run ./cmd/audit-verify -all` (in `backend/`) checks the chain of every organization and names the first violation of each (sequence gap, broken link, hash mismatch; AUD-04); `-org <id>` checks one.
 
-## Restore proof: RPO and RTO (WP-101, NFR-05)
+## Restore proof: RPO and RTO (WP-101, WP-445, NFR-05)
 
 `tests/restore-pitr.sh` proves the chain with the real image. The `pitr`
-job of `.github/workflows/restore-test.yml` runs it every night and on
-changes to the chain. The protocol `restore-pitr-report.md` is kept as an
-artifact for 90 days and shown in the job summary.
+job of `.github/workflows/restore-test.yml` runs it with its defaults every
+night, on changes to the chain and on `workflow_dispatch`. The protocol
+`restore-pitr-report.md` is kept as an artifact for 90 days and shown in
+the job summary.
 
 The test starts `postgres` and `backup` in a throwaway Compose project and
 writes a workload after the first base backup. It then runs two scenarios:
@@ -180,25 +260,94 @@ writes a workload after the first base backup. It then runs two scenarios:
 1. **Logical error:** archive the current WAL, then restore to a target time
    between two workload phases. Every row before the target must be back,
    none after it.
-2. **Loss of the data volume during continuous writes:** writes run 7
-   minutes, longer than `archive_timeout`, so that a full archive cycle is
-   covered. Then a crash and the restore of the latest archived state.
+2. **Loss of the data volume during continuous writes:** writes run 1,050 s
+   (`RESTORE_WRITE_SECONDS`), longer than the RPO limit of 15 minutes and
+   than three archive cycles. Then a crash and the restore of the latest
+   archived state.
    - Measured RPO: last committed row minus last restored row.
    - The restore follows the timeline created by scenario 1.
 
 Both restores measure the RTO: wipe, restore, WAL replay and promotion.
 After the restore, archiving must work again (`pgbackrest check`). The job
-fails above **RPO 900 s (15 min)** or **RTO 14,400 s (4 h)**, or when the
-point in time restore is not exact.
+fails when the point in time restore is not exact, the RTO exceeds
+**14,400 s (4 h)** or the RPO exceeds one of two limits; the protocol line
+`RPO … PASS|FAIL` names both:
 
-Measured on 2026-10-12 with a 50,000 row workload and 30 s of writes:
+- **Archive cycle:** `archive_timeout` of `docker-compose.yml` plus 60 s,
+  **360 s**. The WAL is archived at the latest every `archive_timeout`; a
+  larger loss means the chain archives less often than configured.
+- **NFR-05:** **900 s (15 min)**.
 
-| Check | Result |
+For the run, the daily backup of the backup service is moved 12 hours
+away, so that no backup archives the write window early.
+
+**Negative self-test (job `rpo-negative`, F-130).** The default run with the
+database on `archive_timeout=1200` (`RESTORE_ARCHIVE_TIMEOUT`). The write
+window ends before `archive_timeout` forces an archive, so the latest
+restore lacks all of it. The job expects exit 1 with the line `RPO … FAIL` above both
+limits and no other failed check; if the script passes, the job fails. With
+the former write window of 420 s, shorter than the limit, the RPO check
+could not fail.
+
+**Representative data volume (job `pitr-seeded`, F-292).** The same proof
+with the migrations applied and the demo organization of `cmd/seed` scaled
+to 10,000 CIs (`RESTORE_SEED_OBJECTS=10000`) in the base backup. Its RTO is
+the statement for a realistic database; the protocol names the database
+size at the first base backup. Artifact `restore-pitr-seeded-report`.
+
+What needs no chain runs in the ci.yml job `gate`:
+`tests/restore-pitr-config.test.sh` checks the write window against both
+limits, the RPO line against fixture numbers, the script against stubs,
+this workflow and the expectation of `rpo-negative`.
+
+Locally: `./tests/restore-pitr.sh` (Docker Compose);
+`RESTORE_ARCHIVE_TIMEOUT=1200` for the self-test;
+`RESTORE_SEED_OBJECTS=10000 RESTORE_SEED_BIN=<built cmd/seed>` with
+golang-migrate in `PATH` for the seeded run.
+
+### Measured values
+
+Measured in [restore-test run 40261526875](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40261526875)
+on 2026-10-26 (`pull_request` of PR #95, head `235a7b6` with the WP-445
+state, GitHub-hosted `ubuntu-24.04`); the values are copied from the
+protocol lines of the job logs, nothing here is estimated. The earlier
+values of 2026-10-12 (30 s of writes, toy data volume) are withdrawn
+(F-292).
+
+Default run (job `pitr`, artifact `restore-pitr-report`):
+
+| Field | Value |
 |---|---|
-| Point in time restore | exact (50,000 rows before the target, none after it) |
-| RPO | 52 s |
-| RTO | 5 s per restore |
-| Archiving after the restore | works |
+| Run | 40261526875, job `pitr`, 2026-10-26 02:55–03:15 UTC |
+| Commit | `235a7b6` (PR #95, merge ref of the pull request) |
+| Point in time restore | 50000 rows before the target, 0 after (PASS) |
+| RPO | 150.2 s, 6850 of 98051 rows lost (limits 360 s and 900 s: PASS) |
+| RTO point in time restore | 3 s (limit 14400 s) |
+| RTO latest state | 4 s (limit 14400 s) |
+| Archiving after the restore | `pgbackrest check` ok |
+| Database size at the first base backup | 9 MB (restore size 34.1 MB) |
+
+Representative data volume (job `pitr-seeded`, artifact
+`restore-pitr-seeded-report`, `seed -objects 10000`):
+
+| Field | Value |
+|---|---|
+| Database size at the first base backup | 56 MB (restore size 84.5 MB) |
+| RTO point in time restore | 4 s (limit 14400 s) |
+| RTO latest state | 4 s (limit 14400 s) |
+| RPO | 150.7 s, 6900 of 98101 rows lost (PASS) |
+
+Negative self-test (job `rpo-negative`, artifact
+`restore-pitr-negative-report`, `RESTORE_ARCHIVE_TIMEOUT=1200`):
+
+| Field | Value |
+|---|---|
+| Job result | passed: the script exited 1, the protocol ends **Result:** FAILED, only the RPO line fails |
+| RPO | 1068.3 s, above 360 s and 900 s (47350 of 97351 rows lost) |
+
+The RTO values hold for the data volumes of these runs on a CI runner;
+they say nothing about a production volume of several GB (SR-06: dedicated
+reference host before GA).
 
 With continuous writes, the RPO is bounded by `archive_timeout` (300 s)
 plus the archive lag. The RTO grows with the database size and with the WAL
@@ -228,7 +377,9 @@ restorability without touching production data:
    via the `audit-verify` binary.
 
 The job fails if the restore or any integrity check fails. It uses only
-generated test data — never real credentials or tenant data.
+generated test data — never real credentials or tenant data. The jobs
+`pitr`, `pitr-seeded` and `rpo-negative` of the same workflow prove the
+pgBackRest chain (see "Restore proof: RPO and RTO" above).
 
 ## Migration 000056: quarantined references (E-26)
 

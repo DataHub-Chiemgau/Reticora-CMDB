@@ -40,6 +40,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_DIR="$SCRIPT_DIR/deploy/docker-compose"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
 OVERRIDE_FILE="$COMPOSE_DIR/docker-compose.override.yml"
+# json-file log rotation of a host without systemd-journald (NFR-06, see
+# configure_log_retention).
+LOGGING_JSON_FILE="$COMPOSE_DIR/docker-compose.logging-json.yml"
 ENV_FILE="$COMPOSE_DIR/.env"
 NON_INTERACTIVE=0
 # Release whose signed images are installed (empty: chosen in select_release).
@@ -264,10 +267,15 @@ compose_cmd() {
     # Passing -f explicitly disables compose's automatic merging of
     # docker-compose.override.yml, so merge it by hand whenever it exists
     # (it carries the build: sections for the local source build). The
-    # prebuilt-image path renames it to .disabled to opt out.
+    # prebuilt-image path renames it to .disabled to opt out. -f also
+    # disables COMPOSE_FILE of .env: the json-file log rotation that it
+    # selects on a host without systemd-journald is merged here as well.
     local files=(-f "$COMPOSE_FILE")
     if [ -f "$OVERRIDE_FILE" ]; then
         files+=(-f "$OVERRIDE_FILE")
+    fi
+    if log_rotation_selected; then
+        files+=(-f "$LOGGING_JSON_FILE")
     fi
     "${COMPOSE[@]}" --env-file "$ENV_FILE" "${files[@]}" "$@"
 }
@@ -586,7 +594,9 @@ env_set() {
 
 # merge_env_extras <new env file> — appends every KEY=value of the existing
 # .env that the installer does not write itself (e.g. RETICORA_HTTP_BIND), so
-# a re-run merges instead of dropping additional configuration (INS-05).
+# a re-run merges instead of dropping additional configuration (INS-05). The
+# COMPOSE_FILE of the json-file log rotation is the installer's own:
+# configure_log_retention sets it again when the host still needs it.
 merge_env_extras() {
     local new="$1" line key extras=()
     [ -f "$ENV_FILE" ] || return 0
@@ -595,6 +605,7 @@ merge_env_extras() {
         key="${line%%=*}"
         [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
         grep -q "^${key}=" "$new" && continue
+        [ "$key" = COMPOSE_FILE ] && names_log_rotation "${line#*=}" && continue
         extras+=("$line")
     done < "$ENV_FILE"
     [ "${#extras[@]}" -gt 0 ] || return 0
@@ -1593,6 +1604,230 @@ provide_images() {
     success "Server and frontend images are available"
 }
 
+# ─── Container logs: 30 days (NFR-06, E-77) ───────────────────────────────────
+# The services log to the journal of the host (docker-compose.yml, logging
+# driver journald). Where systemd-journald runs, the drop-in reticora.conf
+# limits the journal: MaxRetentionSec=30day deletes a journal file once its
+# first entry is older than 30 days, MaxFileSec=1day starts a new file every
+# day, so the entries go after about 30 days. The drop-in applies to the
+# whole journal of the host, not only to Reticora. A key that the host's
+# configuration already holds at least as strictly (at most 30 days, at most
+# one day; also a stricter value written into reticora.conf by the operator)
+# stays in effect and is left out. Without systemd-journald (e.g. Docker in a
+# container without systemd) the journald driver cannot start a container:
+# .env then selects docker-compose.logging-json.yml (json-file rotation,
+# bounded in size, not in age) through COMPOSE_FILE.
+# Root of the journald configuration (tests use a directory of their own).
+JOURNALD_ROOT=""
+JOURNALD_DROPIN="reticora.conf"
+LOG_ROTATION_MARKER="# Container logs without systemd-journald: json-file rotation (NFR-06, docs/ops/workers.md)"
+
+# names_log_rotation <COMPOSE_FILE value> — the value names the json-file
+# log rotation.
+names_log_rotation() {
+    local name="${LOGGING_JSON_FILE##*/}"
+    case ":$1:" in
+        *":$name:"*|*"/$name:"*) return 0 ;;
+    esac
+    return 1
+}
+
+# log_rotation_selected — .env selects the json-file log rotation.
+log_rotation_selected() {
+    local files
+    files="$(env_get COMPOSE_FILE)" || return 1
+    names_log_rotation "$files"
+}
+
+# journald_running — systemd-journald runs on this host (a container without
+# systemd has no systemctl or answers "not booted with systemd").
+journald_running() {
+    have_cmd systemctl && systemctl is-active --quiet systemd-journald >/dev/null 2>&1
+}
+
+# timespan_seconds <value> — a systemd time span (systemd.time(7): 30day,
+# 1month, "2w 3d", a bare number of seconds) in whole seconds; 0 for an empty
+# value, 0 or infinity (no limit). Fails on a value journald does not accept.
+timespan_seconds() {
+    printf '%s\n' "$1" | awk '
+        function unit(u) {
+            if (u == "" || u ~ /^(s|sec|second|seconds)$/) return 1
+            if (u ~ /^(ms|msec)$/) return 0.001
+            if (u ~ /^(us|usec)$/) return 0.000001
+            if (u ~ /^(m|min|minute|minutes)$/) return 60
+            if (u ~ /^(h|hr|hour|hours)$/) return 3600
+            if (u ~ /^(d|day|days)$/) return 86400
+            if (u ~ /^(w|week|weeks)$/) return 604800
+            if (u ~ /^(M|month|months)$/) return 2629800
+            if (u ~ /^(y|year|years)$/) return 31557600
+            return -1
+        }
+        NR == 1 {
+            s = $0
+            gsub(/[ \t]/, "", s)
+            if (s == "" || s == "infinity") { print 0; exit }
+            total = 0
+            while (s != "") {
+                if (!match(s, /^[0-9]+(\.[0-9]+)?/)) { bad = 1; exit }
+                n = substr(s, 1, RLENGTH); s = substr(s, RLENGTH + 1)
+                match(s, /^[A-Za-z]*/); u = substr(s, 1, RLENGTH); s = substr(s, RLENGTH + 1)
+                f = unit(u)
+                if (f < 0) { bad = 1; exit }
+                total += n * f
+            }
+            printf "%d\n", total
+        }
+        END { exit bad }'
+}
+
+# journald_conf_value <file> <key> — the value of the last <key>= line of a
+# journald configuration file; fails when the file does not set <key>.
+journald_conf_value() {
+    [ -f "$1" ] && grep -qE "^[[:space:]]*$2[[:space:]]*=" "$1" 2>/dev/null || return 1
+    trim "$(sed -nE "s/^[[:space:]]*$2[[:space:]]*=//p" "$1" | tail -n 1)"
+}
+
+# journald_setting <key> [drop-in name to leave out] — the value of <key>
+# that systemd-journald applies, in seconds (0: not set, no limit):
+# journald.conf, then the drop-ins of all journald.conf.d directories sorted
+# by file name (of equal names the one in /etc before /run, /usr/local/lib,
+# /usr/lib; a link to /dev/null masks it), the last setting wins
+# (journald.conf(5)). An unparsable value is ignored like journald does.
+journald_setting() {
+    local key="$1" skip="${2:-}" dir f name raw secs=0 s
+    local -a files=()
+    local -A dropins=()
+    for dir in /etc /run /usr/local/lib /usr/lib; do
+        if [ -f "$JOURNALD_ROOT$dir/systemd/journald.conf" ]; then
+            files+=("$JOURNALD_ROOT$dir/systemd/journald.conf")
+            break
+        fi
+    done
+    for dir in /usr/lib /usr/local/lib /run /etc; do
+        for f in "$JOURNALD_ROOT$dir/systemd/journald.conf.d/"*.conf; do
+            [ -e "$f" ] || [ -L "$f" ] || continue
+            name="${f##*/}"
+            [ "$name" != "$skip" ] || continue
+            dropins["$name"]="$f"
+        done
+    done
+    while IFS= read -r name; do
+        [ -n "$name" ] && files+=("${dropins[$name]}")
+    done < <(printf '%s\n' "${!dropins[@]}" | LC_ALL=C sort)
+    for f in ${files[@]+"${files[@]}"}; do
+        raw="$(journald_conf_value "$f" "$key")" || continue
+        s="$(timespan_seconds "$raw")" && secs="$s"
+    done
+    printf '%s\n' "$secs"
+}
+
+# restart_journald — systemd-journald reads its configuration only at start.
+restart_journald() {
+    $SUDO systemctl restart systemd-journald \
+        || warn "Could not restart systemd-journald; the log retention applies from its next start ($SUDO systemctl restart systemd-journald)."
+}
+
+# write_journald_dropin — the drop-in /etc/systemd/journald.conf.d/
+# reticora.conf with MaxRetentionSec=30day and MaxFileSec=1day, each only
+# where the host's configuration without it is not at least as strict;
+# systemd-journald is restarted when the drop-in changed. Fails when it
+# cannot be written (root or sudo needed).
+write_journald_dropin() {
+    local dir="$JOURNALD_ROOT/etc/systemd/journald.conf.d" file spec key value target own_raw own other
+    local -a lines=() kept=()
+    file="$dir/$JOURNALD_DROPIN"
+    for spec in "MaxRetentionSec 30day 2592000" "MaxFileSec 1day 86400"; do
+        read -r key value target <<<"$spec"
+        # A stricter value the operator wrote into reticora.conf is kept.
+        if own_raw="$(journald_conf_value "$file" "$key")" && own="$(timespan_seconds "$own_raw")" \
+            && [ "$own" -gt 0 ] && [ "$own" -lt "$target" ]; then
+            value="$own_raw"
+            target="$own"
+        fi
+        other="$(journald_setting "$key" "$JOURNALD_DROPIN")"
+        if [ "$other" -gt 0 ] && [ "$other" -le "$target" ]; then
+            kept+=("$key")
+        else
+            lines+=("$key=$value")
+        fi
+    done
+    if [ "${#kept[@]}" -gt 0 ]; then
+        info "Container logs: the journald configuration of this host already sets ${kept[*]} at least as strictly; it stays in effect."
+    fi
+    if [ "${#lines[@]}" -eq 0 ]; then
+        if [ -e "$file" ]; then
+            $SUDO rm -f "$file" || return 1
+            restart_journald
+        fi
+    else
+        local content
+        content="$(printf '%s\n' \
+            "# Written by install-cloud.sh (Reticora CMDB, NFR-06): container logs of the" \
+            "# Reticora stack are kept 30 days. Applies to the whole journal of this host." \
+            "# A stricter value in reticora.conf or another drop-in is kept by the" \
+            "# installer; see docs/ops/workers.md, \"Container logs\"." \
+            "[Journal]" "${lines[@]}")"
+        if [ "$(cat "$file" 2>/dev/null)" != "$content" ]; then
+            { $SUDO mkdir -p "$dir" && printf '%s\n' "$content" | $SUDO tee "$file" >/dev/null && $SUDO chmod 644 "$file"; } 2>/dev/null \
+                || return 1
+            restart_journald
+            warn "Container logs: wrote $file (${lines[*]}). It applies to the whole journal of this host, not only to Reticora: systemd-journald deletes every entry after at most 30 days (docs/ops/workers.md, 'Container logs')."
+        fi
+    fi
+    other="$(journald_setting MaxRetentionSec)"
+    if [ "$other" -eq 0 ] || [ "$other" -gt 2592000 ]; then
+        warn "Container logs: a journald drop-in sorting after $JOURNALD_DROPIN sets a longer MaxRetentionSec; the container logs are kept longer than 30 days (NFR-06, docs/ops/workers.md)."
+    else
+        success "Container logs: systemd-journald keeps them at most 30 days"
+    fi
+}
+
+# set_log_rotation <on|off> — COMPOSE_FILE in .env selects the json-file log
+# rotation (on: the files of compose_cmd plus docker-compose.logging-json.yml,
+# relative to deploy/docker-compose) or nothing (off). A COMPOSE_FILE of the
+# operator without the rotation stays.
+set_log_rotation() {
+    local tmp files
+    tmp="$(mktemp)"
+    # The managed lines go with the blank line set_log_rotation put before them.
+    if ! awk -v marker="$LOG_ROTATION_MARKER" -v name="${LOGGING_JSON_FILE##*/}" '
+        $0 == "" { blank++; next }
+        $0 == marker { blank = 0; next }
+        index($0, "COMPOSE_FILE=") == 1 && (index(":" substr($0, 14) ":", ":" name ":") || index(substr($0, 14) ":", "/" name ":")) { next }
+        { for (; blank > 0; blank--) print ""; print }
+        END { for (; blank > 0; blank--) print "" }' "$ENV_FILE" > "$tmp" || ! mv "$tmp" "$ENV_FILE"; then
+        rm -f "$tmp"
+        die "Could not update COMPOSE_FILE in $ENV_FILE."
+    fi
+    if [ "$1" = on ]; then
+        env_get COMPOSE_FILE >/dev/null \
+            && die "COMPOSE_FILE in $ENV_FILE selects other compose files. This host has no systemd-journald, so the installer selects the json-file log rotation there (${LOGGING_JSON_FILE##*/}); remove COMPOSE_FILE from $ENV_FILE and re-run (docs/ops/workers.md, 'Container logs')."
+        files="${COMPOSE_FILE##*/}"
+        [ -f "$OVERRIDE_FILE" ] && files="$files:${OVERRIDE_FILE##*/}"
+        files="$files:${LOGGING_JSON_FILE##*/}"
+        printf '\n%s\nCOMPOSE_FILE=%s\n' "$LOG_ROTATION_MARKER" "$files" >> "$ENV_FILE"
+    fi
+    chmod 600 "$ENV_FILE"
+}
+
+# configure_log_retention — container logs at most 30 days (NFR-06): the
+# journald drop-in where systemd-journald runs, otherwise the json-file
+# rotation through COMPOSE_FILE in .env. Runs after provide_images, which
+# settles whether the source-build override is in use.
+configure_log_retention() {
+    if journald_running; then
+        if write_journald_dropin; then
+            set_log_rotation off
+            return 0
+        fi
+        warn "Container logs: could not write $JOURNALD_ROOT/etc/systemd/journald.conf.d/$JOURNALD_DROPIN (root or sudo needed); using the json-file rotation instead."
+    else
+        info "Container logs: no running systemd-journald on this host."
+    fi
+    set_log_rotation on
+    warn "Container logs: json-file rotation (${LOGGING_JSON_FILE##*/}, 5 files of 20 MB per container), selected through COMPOSE_FILE in $ENV_FILE. It bounds the size, not the age of the logs; the 30 days of NFR-06 need systemd-journald (docs/ops/workers.md, 'Container logs')."
+}
+
 # ─── Stack startup ────────────────────────────────────────────────────────────
 wait_for_service() {
     local service="$1" attempts=60
@@ -2078,15 +2313,346 @@ apply_keycloak_rotation() {
     [ ! -f "$ENV_FILE" ] || save_env_previous
 }
 
-# create_initial_admin — applies a rotation (apply_keycloak_rotation), removes
-# the demo administrator of earlier releases and creates the individual
-# administrator once: org_admin (MFA required), member of reticora-admin,
-# organization attribute of the default organization, random temporary
-# password and mandatory password change and OTP setup at first login.
-# Re-runs leave an existing administrator alone.
+# ─── Realm settings on every run (AUT-09, SEC-07, F-061) ─────────────────────
+# `start --import-realm` imports the realm file only while the realm does not
+# exist ("Realm 'reticora' already exists. Import skipped"): the password and
+# lockout policy, the MFA flow, the roles, groups and the acr scope of a newer
+# release never reached an installation whose realm an earlier release
+# imported (F-061), and Keycloak 24 dropped the organization_id of every user
+# the installer created in such a realm (attribute not declared).
+# apply_realm_settings applies them from the rendered realm file on every run
+# (first installation and re-run): missing settings are added and weaker
+# values raised; stricter values and further settings of the operator are
+# kept. Every change is logged; none of these settings is a secret.
+KC_REALM_TROUBLESHOOTING="see deploy/keycloak/README.md, 'Upgrade'"
+
+# Password policies of the realm file whose value is a minimum (a higher value
+# is stricter); the others (notUsername, notEmail) only have to be present.
+KC_POLICY_MINIMUMS='["length","upperCase","lowerCase","digits","specialChars","passwordHistory"]'
+# Lockout: fewer failures until the lockout are stricter (failureFactor);
+# longer waits and a longer failure memory as well.
+KC_LOCKOUT_MAXIMUMS='["failureFactor"]'
+KC_LOCKOUT_MINIMUMS='["waitIncrementSeconds","maxFailureWaitSeconds","minimumQuickLoginWaitSeconds","quickLoginCheckMilliSeconds","maxDeltaTimeSeconds"]'
+
+# The client scope acr as Keycloak creates it in every new realm; added only
+# when a realm lacks it.
+KC_ACR_SCOPE='{"name":"acr","description":"OpenID Connect scope for add acr (authentication context class reference) to the token","protocol":"openid-connect","attributes":{"include.in.token.scope":"false","display.on.consent.screen":"false"},"protocolMappers":[{"name":"acr loa level","protocol":"openid-connect","protocolMapper":"oidc-acr-mapper","consentRequired":false,"config":{"id.token.claim":"true","introspection.token.claim":"true","access.token.claim":"true"}}]}'
+
+# kc_realm_plan <realm file> — reads the running realm (partial export) on
+# stdin and prints what apply_realm_settings has to change, as JSON: roles,
+# composites, groups, group roles and default client scopes to add, the
+# state of the browser flow, the realm fields and attributes to set, and a
+# log line per change ("log") and per stricter or different value that is
+# kept ("kept"). Flows compare by what Keycloak runs (requirement,
+# authenticator or sub-flow, authenticator config), not by names.
+kc_realm_plan() {
+    jq -c --slurpfile realm "$1" --argjson minimums "$KC_POLICY_MINIMUMS" \
+        --argjson lockmax "$KC_LOCKOUT_MAXIMUMS" --argjson lockmin "$KC_LOCKOUT_MINIMUMS" '
+        def items: if . == null or . == "" then [] else [splits(" and ") | capture("^(?<name>[^(]+)(\\((?<value>.*)\\))?$")] end;
+        def policy: .name + (if (.value // "") == "" then "" else "(\(.value))" end);
+        def num: (tonumber? // null);
+        def has_name($n): index([$n]) != null;
+        def tree($r; $alias):
+            ([($r.authenticationFlows // [])[] | select(.alias == $alias) | .authenticationExecutions // []] | first // [])
+            | sort_by(.priority)
+            | map(. as $e | {requirement: $e.requirement,
+                step: (if $e.authenticatorFlow then {flow: tree($r; $e.flowAlias)} else $e.authenticator end),
+                config: (if $e.authenticatorConfig then
+                    [($r.authenticatorConfig // [])[] | select(.alias == $e.authenticatorConfig) | .config] | first
+                    else null end)});
+        def subflows($r; $alias):
+            [($r.authenticationFlows // [])[] | select(.alias == $alias) | (.authenticationExecutions // [])[]
+                | select(.authenticatorFlow) | .flowAlias][] | ., subflows($r; .);
+        . as $have | $realm[0] as $want | $want.browserFlow as $fa
+        | ([($have.authenticationFlows // [])[] | select(.alias == $fa)] | first) as $hflow
+        | ([$fa, subflows($want; $fa)]) as $wanted_flows
+        | (if $hflow == null then [] else [$fa, subflows($have; $fa)] end) as $old_flows
+        | ($have.passwordPolicy | items) as $hp
+        | (reduce ($want.passwordPolicy | items)[] as $w ({p: $hp, log: [], kept: []};
+            ([.p[].name] | index([$w.name])) as $i
+            | if $i == null then .p += [$w] | .log += ["password policy \($w | policy) added"]
+              elif ($minimums | has_name($w.name)) and ($w.value | num) != null then
+                (.p[$i].value | num) as $h | ($w.value | num) as $n
+                | if $h == null or $h < $n then
+                    .log += ["password policy \(.p[$i] | policy) raised to \($w | policy)"] | .p[$i].value = $w.value
+                  elif $h > $n then .kept += ["password policy \(.p[$i] | policy) (stricter than \($w | policy))"]
+                  else . end
+              else . end)) as $pp
+        | (reduce ("bruteForceProtected", $lockmax[], $lockmin[]) as $f ({set: {}, log: [], kept: []};
+            $want[$f] as $w | $have[$f] as $h
+            | if $w == null then .
+              elif $f == "bruteForceProtected" then
+                (if $w == true and $h != true then .set[$f] = true | .log += ["brute-force detection enabled"] else . end)
+              elif ($lockmax | has_name($f)) then
+                (if $h == null or $h < 1 or $h > $w then .set[$f] = $w | .log += ["\($f) \($h // "unset") lowered to \($w)"]
+                 elif $h < $w then .kept += ["\($f) \($h) (stricter than \($w))"] else . end)
+              else
+                (if $h == null or $h < $w then .set[$f] = $w | .log += ["\($f) \($h // "unset") raised to \($w)"]
+                 elif $h > $w then .kept += ["\($f) \($h) (stricter than \($w))"] else . end)
+              end)) as $lock
+        | (reduce (($want.attributes // {}) | to_entries[]) as $e ({set: {}, log: [], kept: []};
+            (($have.attributes // {})[$e.key]) as $h
+            | if $h == null or $h == "" then .set[$e.key] = $e.value | .log += ["attribute \($e.key) set to \($e.value)"]
+              elif $h != $e.value then .kept += ["attribute \($e.key) \($h) (bundled: \($e.value))"]
+              else . end)) as $attrs
+        | {
+            roles: [$want.roles.realm[] | select(.name | startswith("default-roles-") | not)
+                | select(.name as $n | [($have.roles.realm // [])[].name] | has_name($n) | not) | {name, description}],
+            composites: [$want.roles.realm[] | select(.composites.realm) | . as $w
+                | ([($have.roles.realm // [])[] | select(.name == $w.name) | .composites.realm // []] | first // []) as $h
+                | $w.composites.realm[] | select(. as $c | $h | has_name($c) | not) | {role: $w.name, composite: .}],
+            groups: [$want.groups[].name | select(. as $n | [($have.groups // [])[].name] | has_name($n) | not)],
+            group_roles: [$want.groups[] | . as $w
+                | ([($have.groups // [])[] | select(.name == $w.name)] | first) as $hg
+                | ($w.realmRoles // [])[] | select(. as $r | ($hg.realmRoles // []) | has_name($r) | not)
+                | {group: $w.name, id: $hg.id, role: .}],
+            scopes: [$want.clients[] | select(.defaultClientScopes) | . as $w
+                | ([($have.clients // [])[] | select(.clientId == $w.clientId)] | first) as $hc | select($hc != null)
+                | $w.defaultClientScopes[] | select(. as $s | ($hc.defaultClientScopes // []) | has_name($s) | not)
+                | {client: $w.clientId, client_uuid: $hc.id, scope: .,
+                   scope_id: (. as $s | [($have.clientScopes // [])[] | select(.name == $s) | .id] | first)}],
+            flow: {
+                alias: $fa,
+                state: (if $hflow == null then "missing" elif tree($have; $fa) == tree($want; $fa) then "same" else "different" end),
+                id: $hflow.id,
+                binding: ($have.browserFlow // ""),
+                collisions: [($have.authenticationFlows // [])[].alias
+                    | select(. as $a | ($wanted_flows | has_name($a)) and ($old_flows | has_name($a) | not))]
+            },
+            realm: ($lock.set + (if ($pp.log | length) > 0 then {passwordPolicy: ($pp.p | map(policy) | join(" and "))} else {} end)),
+            attributes: $attrs.set,
+            log: ($pp.log + $lock.log + $attrs.log),
+            kept: ($pp.kept + $lock.kept + $attrs.kept)
+        }'
+}
+
+# kc_call <args…> — kcadm with its messages shown only on failure: it
+# reports every created object ("Created new … with id …") and an empty line
+# per read on stderr.
+kc_call() {
+    local err rc=0
+    { err="$(kcadm "$@" 2>&1 >&3 3>&-)" || rc=$?; } 3>&1
+    [ "$rc" -eq 0 ] || printf '%s\n' "$err" >&2
+    return "$rc"
+}
+
+# kc_flow_path <alias> — the admin API path of a flow (aliases contain spaces).
+kc_flow_path() { printf 'authentication/flows/%s' "$(jq -rn --arg a "$1" '$a | @uri')"; }
+
+# kc_flow_executions <realm file> <alias> — the executions of the flow in the
+# realm file, one JSON object per line, in the order of their priorities.
+kc_flow_executions() {
+    jq -c --arg a "$2" '.authenticationFlows[] | select(.alias == $a) | .authenticationExecutions | sort_by(.priority)[]' "$1"
+}
+
+# kc_build_flow <realm file> <alias> — fills the empty flow <alias> as the
+# realm file defines it: authenticators and sub-flows in the order of their
+# priorities, then the requirement and authenticator config of each (new
+# executions are DISABLED); sub-flows recursively. The executions are read
+# into an array first: kcadm (docker compose exec) would consume the input of
+# a read loop.
+kc_build_flow() {
+    local realm_file="$1" alias="$2" path ex listing i=0 config sub
+    local executions=() ids=()
+    path="$(kc_flow_path "$alias")"
+    mapfile -t executions < <(kc_flow_executions "$realm_file" "$alias")
+    for ex in "${executions[@]}"; do
+        if [ "$(jq -r .authenticatorFlow <<<"$ex")" = true ]; then
+            jq -c --arg a "$(jq -r .flowAlias <<<"$ex")" \
+                '.authenticationFlows[] | select(.alias == $a) | {alias, description, type: .providerId}' "$realm_file" \
+                | kc_call create "$path/executions/flow" -r reticora -f - >/dev/null || return 1
+        else
+            kc_call create "$path/executions/execution" -r reticora -s provider="$(jq -r .authenticator <<<"$ex")" \
+                </dev/null >/dev/null || return 1
+        fi
+    done
+    # Keycloak lists the executions of the flow (level 0) in creation order.
+    listing="$(kc_call get "$path/executions" -r reticora </dev/null)" || return 1
+    mapfile -t ids < <(jq -r '.[] | select(.level == 0) | .id' <<<"$listing")
+    [ "${#ids[@]}" -eq "${#executions[@]}" ] || return 1
+    for ex in "${executions[@]}"; do
+        if [ "$(jq -r .requirement <<<"$ex")" != DISABLED ]; then
+            jq -c --arg id "${ids[$i]}" '{id: $id, requirement}' <<<"$ex" \
+                | kc_call update "$path/executions" -r reticora -f - >/dev/null || return 1
+        fi
+        config="$(jq -r '.authenticatorConfig // empty' <<<"$ex")"
+        if [ -n "$config" ]; then
+            jq -c --arg a "$config" '[.authenticatorConfig[] | select(.alias == $a) | {alias, config}] | first' "$realm_file" \
+                | kc_call create "authentication/executions/${ids[$i]}/config" -r reticora -f - >/dev/null || return 1
+        fi
+        sub="$(jq -r 'select(.authenticatorFlow) | .flowAlias' <<<"$ex")"
+        if [ -n "$sub" ]; then
+            kc_build_flow "$realm_file" "$sub" || return 1
+        fi
+        i=$((i + 1))
+    done
+}
+
+# kc_create_flow <realm file> <alias> — creates the top-level flow <alias>
+# of the realm file with its executions.
+kc_create_flow() {
+    jq -c --arg a "$2" '.authenticationFlows[] | select(.alias == $a) | {alias, description, providerId, topLevel, builtIn}' "$1" \
+        | kc_call create authentication/flows -r reticora -f - >/dev/null && kc_build_flow "$1" "$2"
+}
+
+# kc_apply_flow <realm file> <plan> — makes the browser flow of the realm file
+# (browser-mfa) exist as the realm file defines it: created when missing,
+# rebuilt when it differs and is not bound (left over from an interrupted run
+# or an earlier release). Returns 1 when the flow differs and is bound: it
+# may be a customization and is kept (warning); it must not be rebound.
+kc_apply_flow() {
+    local realm_file="$1" plan="$2" alias state binding collisions listing config configs=()
+    alias="$(jq -r .flow.alias <<<"$plan")"
+    state="$(jq -r .flow.state <<<"$plan")"
+    binding="$(jq -r .flow.binding <<<"$plan")"
+    [ "$state" != same ] || return 0
+    if [ "$state" = different ] && [ "$binding" = "$alias" ]; then
+        warn "Keycloak realm: the bound browser flow $alias differs from the bundled realm (customized or from an earlier release) and is kept; compare it with deploy/keycloak/realm-reticora.json ($KC_REALM_TROUBLESHOOTING)."
+        return 1
+    fi
+    collisions="$(jq -r '.flow.collisions | join(", ")' <<<"$plan")"
+    [ -z "$collisions" ] || die "Cannot create the Keycloak flow $alias: the realm already has flows named $collisions ($KC_REALM_TROUBLESHOOTING)."
+    if [ "$state" = different ]; then
+        # Its authenticator configs go too; they are referenced by id.
+        if ! listing="$(kc_call get "$(kc_flow_path "$alias")/executions" -r reticora </dev/null)" \
+            || ! mapfile -t configs < <(jq -r '.[] | .authenticationConfig // empty' <<<"$listing") \
+            || ! kc_call delete "authentication/flows/$(jq -r .flow.id <<<"$plan")" -r reticora </dev/null; then
+            die "Could not remove the unbound Keycloak flow $alias that differs from the bundled realm ($KC_REALM_TROUBLESHOOTING)."
+        fi
+        for config in "${configs[@]}"; do
+            kc_call delete "authentication/config/$config" -r reticora </dev/null \
+                || die "Could not remove an authenticator config of the old flow $alias ($KC_REALM_TROUBLESHOOTING)."
+        done
+        success "Keycloak realm: unbound flow $alias that differed from the bundled realm removed"
+    fi
+    kc_create_flow "$realm_file" "$alias" \
+        || die "Could not create the Keycloak flow $alias ($KC_REALM_TROUBLESHOOTING)."
+    success "Keycloak realm: flow $alias created (OTP for mfa_required, acr levels 1 and 2)"
+}
+
+# apply_realm_settings — applies the realm settings of the rendered realm file
+# to the running realm (the admin CLI is logged in): the declared user profile
+# attributes (organization_id), the realm roles and their composites, the
+# groups and their realm roles, the default client scopes of the clients
+# (acr), the browser flow browser-mfa and its binding, the password policy,
+# the brute-force detection and the realm attributes (acr.loa.map). A browser
+# flow other than Keycloak's built-in "browser" is the operator's choice and
+# stays bound (warning).
+apply_realm_settings() {
+    local realm_file="$COMPOSE_DIR/.generated/realm-reticora.json" current plan profile declared line changed=0
+    local alias binding realm_set attributes client scope client_uuid scope_id roles=() flow_kept=0
+    [ -f "$realm_file" ] || die "The rendered realm file $realm_file is missing."
+    info "Applying the realm settings (policies, MFA flow, roles, groups, acr scope) …"
+    # A partial export lists the realm in the format of the realm file (client
+    # secrets masked); it is only read.
+    if ! current="$(kc_call create partial-export -r reticora -q exportGroupsAndRoles=true -q exportClients=true -o </dev/null)" \
+        || ! plan="$(printf '%s' "$current" | kc_realm_plan "$realm_file")"; then
+        die "Could not read the Keycloak realm 'reticora' ($KC_REALM_TROUBLESHOOTING)."
+    fi
+
+    # Declared attributes first: Keycloak 24 drops undeclared ones, such as
+    # the organization_id of the initial administrator.
+    if ! profile="$(kc_call get users/profile -r reticora </dev/null)" \
+        || ! declared="$(jq -c --slurpfile realm "$realm_file" '[.attributes[].name] as $have
+            | [$realm[0].components["org.keycloak.userprofile.UserProfileProvider"][0].config["kc.user.profile.config"][0]
+               | fromjson | .attributes[] | select(.name as $n | $have | index([$n]) == null)]' <<<"$profile")"; then
+        die "Could not read the user profile of the Keycloak realm ($KC_REALM_TROUBLESHOOTING)."
+    fi
+    if [ "$declared" != "[]" ]; then
+        jq -c --argjson add "$declared" '.attributes += $add' <<<"$profile" \
+            | kc_call update users/profile -r reticora -f - >/dev/null \
+            || die "Could not declare the user profile attributes of the realm ($KC_REALM_TROUBLESHOOTING)."
+        success "Keycloak realm: user profile attribute $(jq -r 'map(.name) | join(", ")' <<<"$declared") declared (admin only)"
+        changed=1
+    fi
+
+    mapfile -t roles < <(jq -c '.roles[]' <<<"$plan")
+    for line in "${roles[@]}"; do
+        printf '%s' "$line" | kc_call create roles -r reticora -f - >/dev/null \
+            || die "Could not create the realm role $(jq -r .name <<<"$line") ($KC_REALM_TROUBLESHOOTING)."
+        success "Keycloak realm: role $(jq -r .name <<<"$line") created"
+        changed=1
+    done
+    for line in $(jq -r '.composites[] | "\(.role)=\(.composite)"' <<<"$plan"); do
+        kc_call add-roles -r reticora --rname "${line%%=*}" --rolename "${line#*=}" </dev/null \
+            || die "Could not add the role ${line#*=} to the realm role ${line%%=*} ($KC_REALM_TROUBLESHOOTING)."
+        success "Keycloak realm: role ${line%%=*} contains ${line#*=}"
+        changed=1
+    done
+    for line in $(jq -r '.groups[]' <<<"$plan"); do
+        kc_call create groups -r reticora -s name="$line" </dev/null >/dev/null \
+            || die "Could not create the group $line ($KC_REALM_TROUBLESHOOTING)."
+        success "Keycloak realm: group $line created"
+        changed=1
+    done
+    for line in $(jq -r '.group_roles[] | "\(.group)=\(.role)"' <<<"$plan"); do
+        kc_call add-roles -r reticora --gpath "/${line%%=*}" --rolename "${line#*=}" </dev/null \
+            || die "Could not map the realm role ${line#*=} to the group ${line%%=*} ($KC_REALM_TROUBLESHOOTING)."
+        success "Keycloak realm: group ${line%%=*} carries the realm role ${line#*=}"
+        changed=1
+    done
+    for line in $(jq -r '.scopes[] | "\(.client)=\(.scope)=\(.client_uuid)=\(.scope_id // "")"' <<<"$plan"); do
+        IFS='=' read -r client scope client_uuid scope_id <<<"$line"
+        if [ -z "$scope_id" ]; then
+            [ "$scope" = acr ] || die "The Keycloak realm has no client scope $scope ($KC_REALM_TROUBLESHOOTING)."
+            scope_id="$(printf '%s' "$KC_ACR_SCOPE" | kc_call create client-scopes -r reticora -f - -i)" || scope_id=""
+            [ -n "$scope_id" ] || die "Could not create the client scope acr ($KC_REALM_TROUBLESHOOTING)."
+            success "Keycloak realm: client scope acr created"
+        fi
+        kc_call update "clients/$client_uuid/default-client-scopes/$scope_id" -r reticora </dev/null \
+            || die "Could not add the default client scope $scope to the client $client ($KC_REALM_TROUBLESHOOTING)."
+        success "Keycloak realm: client $client has the default client scope $scope"
+        changed=1
+    done
+
+    # The flow first, then its binding with the realm fields: a flow is bound
+    # only as the realm file defines it.
+    alias="$(jq -r .flow.alias <<<"$plan")"
+    binding="$(jq -r .flow.binding <<<"$plan")"
+    realm_set="$(jq -c .realm <<<"$plan")"
+    attributes="$(jq -c .attributes <<<"$plan")"
+    if kc_apply_flow "$realm_file" "$plan"; then
+        [ "$(jq -r .flow.state <<<"$plan")" = same ] || changed=1
+        if [ -z "$binding" ] || [ "$binding" = browser ]; then
+            realm_set="$(jq -c --arg a "$alias" '. + {browserFlow: $a}' <<<"$realm_set")"
+            plan="$(jq -c --arg l "browser flow ${binding:-unset} replaced by $alias" '.log += [$l]' <<<"$plan")"
+        elif [ "$binding" != "$alias" ]; then
+            warn "Keycloak realm: the browser flow $binding is bound instead of $alias and kept; make sure it requires the second factor for mfa_required ($KC_REALM_TROUBLESHOOTING)."
+            flow_kept=1
+        fi
+    else
+        flow_kept=1
+    fi
+    if [ "$realm_set" != "{}" ] || [ "$attributes" != "{}" ]; then
+        # The whole representation goes back: Keycloak drops the realm
+        # attributes (and security headers) a partial one does not list.
+        kc_call get realms/reticora </dev/null \
+            | jq -c --argjson set "$realm_set" --argjson attrs "$attributes" '. * $set | .attributes = ((.attributes // {}) + $attrs)' \
+            | kc_call update realms/reticora -f - >/dev/null \
+            || die "Could not update the password policy, lockout and browser flow of the realm ($KC_REALM_TROUBLESHOOTING)."
+        changed=1
+    fi
+    while IFS= read -r line; do
+        success "Keycloak realm: $line"
+    done < <(jq -r '.log[]' <<<"$plan")
+    while IFS= read -r line; do
+        info "Keycloak realm: kept $line"
+    done < <(jq -r '.kept[]' <<<"$plan")
+    [ "$changed" -eq 1 ] || [ "$flow_kept" -eq 1 ] \
+        || success "Keycloak realm settings match the bundled realm (policies, MFA flow, roles, groups, acr scope)"
+}
+
+# create_initial_admin — applies a rotation (apply_keycloak_rotation) and the
+# realm settings (apply_realm_settings), removes the demo administrator of
+# earlier releases and creates the individual administrator once: org_admin
+# (MFA required), member of reticora-admin, organization attribute of the
+# default organization, random temporary password and mandatory password
+# change and OTP setup at first login. Re-runs leave an existing
+# administrator alone.
 create_initial_admin() {
     INITIAL_ADMIN_PASSWORD=""
     apply_keycloak_rotation
+    apply_realm_settings
     info "Ensuring the initial administrator exists …"
 
     local legacy_id
@@ -2249,6 +2815,7 @@ EOF
     configure_realm
     bootstrap_tls_cert
     provide_images
+    configure_log_retention
     start_stack
     issue_tls_certificate
     verify_stack

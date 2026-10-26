@@ -1,0 +1,218 @@
+# PostgreSQL of the installation with WAL archiving (WP-444, OPS-04, NFR-05,
+# E-29, E-74): the image reticora-postgres (TimescaleDB plus pgBackRest, the
+# same image as the backup CronJob, so archive-push and backup always run the
+# same pgBackRest version) on a PersistentVolumeClaim. One replica; high
+# availability and read replicas are not part of it.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: reticora-db
+spec:
+  serviceName: reticora-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: db
+    spec:
+      # postgres of the Alpine image (uid and gid 70). fsGroup makes the new
+      # volume writable and the secret files readable for it; with
+      # OnRootMismatch the ownership of the data volume is changed only once,
+      # and the entrypoint keeps the data directory at 0700 on every start.
+      securityContext:
+        runAsUser: 70
+        runAsGroup: 70
+        runAsNonRoot: true
+        fsGroup: 70
+        fsGroupChangePolicy: OnRootMismatch
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: postgres
+          # deploy/docker-compose/postgres, published by release.yml.
+          image: reticora-cmdb/postgres:latest
+          args: ["postgres", "-c", "config_file=/etc/reticora/postgres/postgresql.conf"]
+          env:
+            - name: POSTGRES_USER
+              value: reticora
+            - name: POSTGRES_DB
+              value: reticora
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-postgres
+                  key: password
+            # A subdirectory of the volume: its root may hold lost+found, and
+            # initdb needs an empty directory.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            # archive-push writes the encrypted WAL to the S3 repository.
+            - name: PGBACKREST_REPO1_CIPHER_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-pgbackrest
+                  key: cipher-pass
+            - name: PGBACKREST_REPO1_S3_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-pgbackrest
+                  key: s3-key
+            - name: PGBACKREST_REPO1_S3_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-pgbackrest
+                  key: s3-key-secret
+          ports:
+            - containerPort: 5432
+              name: postgres
+          # Over TCP: during the first initialization the temporary server
+          # listens on the socket only.
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "reticora", "-d", "reticora"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          # SIGTERM alone is a smart shutdown, which waits for the pooled
+          # connections of the server until the kill (and a crash recovery at
+          # the next start); the fast shutdown ends them at once, writes a
+          # checkpoint and lets the archiver finish the completed segments.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "pg_ctl -D \"$PGDATA\" -m fast -W stop"]
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: config
+              mountPath: /etc/reticora/postgres
+              readOnly: true
+            - name: pgbackrest
+              mountPath: /etc/pgbackrest
+              readOnly: true
+            - name: socket
+              mountPath: /var/run/postgresql
+        - name: pgbackrest
+          image: reticora-cmdb/postgres:latest
+          # Creates the stanza once the database accepts connections, then
+          # serves the backup job over TLS. stanza-create is idempotent; while
+          # it fails (repository unreachable, wrong cipher pass or S3 key, the
+          # repository holds another cluster) it is retried, archive-push
+          # fails as well and the WAL waits in pg_wal. No readiness probe on
+          # purpose: a problem of the backup chain must not take the database
+          # out of the Service.
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until pg_isready -q -h 127.0.0.1 -U reticora -d reticora; do sleep 2; done
+              until pgbackrest --stanza=reticora stanza-create; do
+                echo "stanza-create failed, retrying in 30 s; WAL archiving waits for the stanza" >&2
+                sleep 30
+              done
+              exec pgbackrest server
+          env:
+            - name: PGBACKREST_REPO1_CIPHER_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-pgbackrest
+                  key: cipher-pass
+            - name: PGBACKREST_REPO1_S3_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-pgbackrest
+                  key: s3-key
+            - name: PGBACKREST_REPO1_S3_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-pgbackrest
+                  key: s3-key-secret
+          ports:
+            - containerPort: 8432
+              name: pgbackrest
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            # Read-only: the backup only reads the data directory.
+            - name: data
+              mountPath: /var/lib/postgresql/data
+              readOnly: true
+            - name: pgbackrest
+              mountPath: /etc/pgbackrest
+              readOnly: true
+            - name: socket
+              mountPath: /var/run/postgresql
+      volumes:
+        - name: config
+          configMap:
+            name: reticora-postgres
+            items:
+              - key: postgresql.conf
+                path: postgresql.conf
+        # /etc/pgbackrest: the repository (backup component), the database
+        # side and the certificates of the TLS server.
+        - name: pgbackrest
+          projected:
+            defaultMode: 0440
+            sources:
+              - configMap:
+                  name: reticora-pgbackrest
+                  items:
+                    - key: pgbackrest.conf
+                      path: pgbackrest.conf
+              - configMap:
+                  name: reticora-postgres
+                  items:
+                    - key: pgbackrest-db.conf
+                      path: conf.d/db.conf
+              - secret:
+                  name: reticora-pgbackrest
+                  items:
+                    - key: ca.crt
+                      path: tls/ca.crt
+                    - key: server.crt
+                      path: tls/server.crt
+                    - key: server.key
+                      path: tls/server.key
+        - name: socket
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 50Gi
+---
+# The database for the server (port 5432, runtime DSN of reticora-db-runtime)
+# and the pgBackRest TLS server for the backup job (port 8432, pg1-host of
+# the ConfigMap reticora-pgbackrest). The TLS server certificate must name
+# reticora-db.
+apiVersion: v1
+kind: Service
+metadata:
+  name: reticora-db
+spec:
+  selector:
+    app.kubernetes.io/component: db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+    - name: pgbackrest
+      port: 8432
+      targetPort: pgbackrest

@@ -1,0 +1,104 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Test overlay of the kind case wal_archive (tests/k8s/kind-smoke.sh, OPS-04,
+# NFR-05, WP-444): base with one server replica (the staging overlay, which
+# the other cases already run, so applying this overlay leaves the server as
+# it is) plus the components postgres and backup, in the namespace of the
+# fixtures. The repository is the MinIO of tests/k8s/fixtures (TLS with the
+# test CA, bucket reticora-backup with versioning): kind-smoke.sh setup
+# creates the CA, the certificates and the secret reticora-pgbackrest. Every
+# value here is test-only: never apply this kustomization outside a
+# throwaway cluster.
+resources:
+  - ../../../../deploy/k8s/overlays/staging
+
+components:
+  - ../../../../deploy/k8s/base/components/postgres
+  - ../../../../deploy/k8s/base/components/backup
+
+namespace: reticora-staging
+
+# The image of this commit, built and loaded into kind by the workflow
+# k8s-smoke; a tag other than latest keeps imagePullPolicy IfNotPresent.
+images:
+  - name: reticora-cmdb/postgres
+    newTag: kind-smoke
+
+# Bootstrap superuser of reticora-db, a test-only password.
+secretGenerator:
+  - name: reticora-postgres
+    literals:
+      - password=kind-smoke-wal-admin
+    options:
+      disableNameSuffixHash: true
+
+patches:
+  # The case starts the backups itself (kubectl create job --from=cronjob/…).
+  - target:
+      kind: CronJob
+    patch: |-
+      - op: add
+        path: /spec/suspend
+        value: true
+
+  # MinIO instead of AWS S3: pgBackRest, and reticora-backup.sh verify-repo,
+  # read PGBACKREST_* before the configuration file, so the shipped
+  # repository configuration (bucket, region, encryption, retention) stays as
+  # it is.
+  - target:
+      kind: StatefulSet
+      name: reticora-db
+    patch: |-
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: reticora-db
+      spec:
+        template:
+          spec:
+            containers:
+              - name: postgres
+                env:
+                  - name: PGBACKREST_REPO1_S3_ENDPOINT
+                    value: minio
+                  - name: PGBACKREST_REPO1_STORAGE_PORT
+                    value: "9000"
+                  - name: PGBACKREST_REPO1_S3_URI_STYLE
+                    value: path
+                  - name: PGBACKREST_REPO1_STORAGE_CA_FILE
+                    value: /etc/pgbackrest/tls/ca.crt
+              - name: pgbackrest
+                env:
+                  - name: PGBACKREST_REPO1_S3_ENDPOINT
+                    value: minio
+                  - name: PGBACKREST_REPO1_STORAGE_PORT
+                    value: "9000"
+                  - name: PGBACKREST_REPO1_S3_URI_STYLE
+                    value: path
+                  - name: PGBACKREST_REPO1_STORAGE_CA_FILE
+                    value: /etc/pgbackrest/tls/ca.crt
+  - target:
+      kind: CronJob
+      name: reticora-pgbackrest-full
+    patch: |-
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: reticora-pgbackrest-full
+      spec:
+        jobTemplate:
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: pgbackrest
+                    env:
+                      - name: PGBACKREST_REPO1_S3_ENDPOINT
+                        value: minio
+                      - name: PGBACKREST_REPO1_STORAGE_PORT
+                        value: "9000"
+                      - name: PGBACKREST_REPO1_S3_URI_STYLE
+                        value: path
+                      - name: PGBACKREST_REPO1_STORAGE_CA_FILE
+                        value: /etc/pgbackrest/tls/ca.crt

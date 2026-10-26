@@ -134,7 +134,8 @@ token_status() {
         -d grant_type=client_credentials -d client_id=reticora-app --data-urlencode "client_secret=$1" \
         "http://localhost:${KC_PORT}/realms/reticora/protocol/openid-connect/token"
 }
-kc_writes() { grep -cE '^(create|update|delete|set-password|add-roles|remove-roles) ' "$KCADM_CALLS"; }
+# The partial export of apply_realm_settings (WP-428) is a POST that only reads.
+kc_writes() { grep -E '^(create|update|delete|set-password|add-roles|remove-roles) ' "$KCADM_CALLS" | grep -vc '^create partial-export$'; }
 no_secret_in_log() {
     local s
     for s in "$A_ADMIN" "$B_ADMIN" "$A_SECRET" "$B_SECRET"; do

@@ -6,9 +6,10 @@ kind: Component
 #     - ../../base/components/backup
 #
 # - pgbackrest-*.yaml: daily full base backup with pgBackRest to the S3
-#   repository (WAL archived continuously by the database host); requires
-#   the reticora-pgbackrest secret. This is the primary backup chain
-#   (OPS-04, NFR-05; RPO 15 min, RTO 4 h, retention 35 days).
+#   repository (WAL archived continuously by the database, component
+#   postgres, WP-444); requires the reticora-pgbackrest secret. This is the
+#   primary backup chain (OPS-04, NFR-05; RPO 15 min, RTO 4 h, retention 35
+#   days).
 # - cronjob.yaml: nightly logical pg_dump as a portable safety net; requires
 #   the reticora-backup secret (database-url, aws-access-key-id,
 #   aws-secret-access-key).

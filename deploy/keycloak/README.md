@@ -29,11 +29,56 @@ Manual import:
 
 `install-cloud.sh` creates the administrator named by
 `RETICORA_INITIAL_ADMIN_EMAIL` through the Keycloak admin CLI after the realm
-import: a random temporary password, shown once in the installer summary and
-never written to disk, and the required actions *update password* and
-*configure OTP*. It removes the demo user `admin@reticora.local` of earlier
-releases, whose password is publicly known. Re-runs leave an existing
-administrator alone.
+import and the realm settings (see Upgrade): a random temporary password,
+shown once in the installer summary and never written to disk, and the
+required actions *update password* and *configure OTP*. It removes the demo
+user `admin@reticora.local` of earlier releases, whose password is publicly
+known. Re-runs leave an existing administrator alone.
+
+## Upgrade
+
+Keycloak starts with `start --import-realm` and imports the realm file only
+while the realm does not exist: on an existing installation it logs
+`Realm 'reticora' already exists. Import skipped` and keeps the realm of the
+release that installed it (F-061; `tests/keycloak-realm-upgrade.test.sh`
+shows it with the realm of the release before WP-044). The policies, the MFA
+flow, roles, groups and the acr scope of a newer realm file therefore reach
+an installation only through the installer: every run of `install-cloud.sh`
+(first installation and re-run) applies them with the admin CLI
+(`apply_realm_settings`, before the initial administrator is created):
+
+- **User profile:** declares the attributes of the realm file that are
+  missing (`organization_id`, admin only). Keycloak 24 drops undeclared
+  attributes: without it the installer's administrator would be created
+  without organization.
+- **Roles and groups:** creates the missing realm roles (`mfa_required`,
+  `operator`, …) and adds `mfa_required` to `org_admin` and `operator`;
+  creates the missing groups and maps their realm roles: `reticora-admin`
+  carries `mfa_required`, `operators` carries `operator`.
+- **acr:** adds the client scope `acr` as a default scope of `reticora-app`
+  (and creates the scope as Keycloak does when the realm lacks it).
+- **Browser flow:** creates the flow `browser-mfa` of the realm file when it
+  is missing and binds it when Keycloak's built-in `browser` is bound. An
+  unbound `browser-mfa` that differs from the realm file (e.g. left by an
+  interrupted run) is rebuilt. A bound `browser-mfa` that differs, and a
+  browser flow of your own, stay bound; the installer warns. To take the
+  bundled flow instead: duplicate your flow, bind the duplicate, delete
+  `browser-mfa`, re-run the installer, bind the new `browser-mfa`
+  (Authentication → Bind flow) and delete the duplicate.
+- **Password policy and lockout:** adds the missing password policies and
+  raises the minimums (`length`, `upperCase`, `lowerCase`, `digits`,
+  `specialChars`, `passwordHistory`) that are lower; enables the brute-force
+  detection, lowers `failureFactor` to 5 and raises shorter waits and failure
+  memory. Stricter values and further policies of yours are kept.
+- **acr levels:** sets the realm attribute `acr.loa.map` when it is missing.
+
+Every change is logged (`Keycloak realm: …`), every stricter value that is
+kept as well (`Keycloak realm: kept …`); a run without anything to change
+reports `Keycloak realm settings match the bundled realm`. Users, the client
+(apart from the rotated secret, redirect URIs and web origins, see
+`docs/troubleshooting-installation.md`) and all other realm settings are left
+alone. A failing call aborts the installer with this section as the hint;
+check the Keycloak log and re-run the installer.
 
 ## Policies (AUT-09, CH26)
 
@@ -164,12 +209,26 @@ of the realm group `operators` whose login used a second factor. The shared
   pending invitation for the organization and the verified e-mail, an account
   created by an administrator or SCIM, or as the first user of an organization
   without users. Every other first login is answered with 403.
-- IdP groups and roles map to the standard roles of the organization by an
-  exact mapping (RBA-02): `reticora-admin`/`org_admin` → org_admin,
-  `reticora-engineer`/`engineer` → engineer, `reticora-viewer`/`viewer` →
-  viewer. The session receives the permissions those roles hold in the
-  database; other group names grant nothing. `client_technician` is valid only
+- **Role model (RBA-02):** the app roles of a session come from the
+  database only, from two sources: the role assignments of the user in
+  Reticora (with their client and site scope) and the IdP groups of the ID
+  token (claim `groups` of the client mapper, group names without path),
+  mapped exactly to the standard roles of the organization:
+  `reticora-admin` → org_admin, `reticora-engineer` → engineer,
+  `reticora-viewer` → viewer (groups named `org_admin`, `engineer` or
+  `viewer` map the same way). The session receives the permissions these
+  roles hold in the database; other group names grant nothing. The realm
+  files contain only the groups `reticora-admin` and `operators` (operator
+  path, see Operators): create `reticora-engineer` and `reticora-viewer`
+  when you manage these roles in Keycloak. `client_technician` is valid only
   in a client scope and is assigned in Reticora, not through the IdP.
+- **Realm roles grant no app right:** the backend does not read Keycloak's
+  realm roles (`realm_access.roles`); `reticora-app` has no `roles` scope, so
+  its tokens carry none. The realm roles `mfa_required`, `org_admin` and
+  `operator` only control the MFA requirement of the browser flow (see
+  Policies); `engineer`, `viewer` and `client_technician` have no effect.
+  Assigning a realm role in Keycloak changes no right in Reticora
+  (`backend/internal/identity/oidc_test.go`).
 - `uma_authorization` is intentionally **not** listed as a default role: on a
   fresh Keycloak import that role does not exist yet at role-resolution time
   and the server aborts with "Unable to find composite realm role".

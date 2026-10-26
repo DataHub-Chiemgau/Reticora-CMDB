@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 #
-# Phase-1 acceptance audit, group T6-epic-b – DEFECT test (fails until fixed).
+# Container logs of the Compose deployment bounded (NFR-06: "Retention: ...
+# Logs 30 Tage"; WP-135, WP-458, F-150). Runs in the CI job gate
+# (.github/workflows/ci.yml); tests/install-log-retention.test.sh runs it
+# against manipulated copies of the compose file as well (negative case).
 #
-# WP-135 (NFR-06: "Retention: ... Logs 30 Tage"; acceptance criterion
-# "Konfiguration mit Mindestwerten aus NFR-06")
-# Finding P2 "NFR-06 log retention (30 days) not configured in any
-# deployment": deploy/docker-compose/docker-compose.yml has no logging
-# section, so Docker's json-file driver keeps container logs without limit;
-# no log shipper with a 30-day retention is shipped (no loki/promtail/
-# fluent-bit config, no 720h/30d retention anywhere in deploy/ or install.sh).
+# Phase-1 acceptance audit, group T6-epic-b (F-150, fixed by WP-458):
+# deploy/docker-compose/docker-compose.yml had no logging section, so
+# Docker's json-file driver kept container logs without limit. Every service
+# now logs to journald (x-logging), which install-cloud.sh limits to 30 days
+# (E-77; docs/ops/workers.md, "Container logs").
 #
 # Requirement encoded (fix-agnostic): the packaged Compose deployment bounds
 # the logs of every service – either each service has a logging section with
@@ -18,7 +19,7 @@
 # (720h / 30d). Kubernetes log retention is a cluster setting and is not
 # asserted here.
 #
-# Needs python3 with PyYAML. Not wired into CI.
+# Needs python3 with PyYAML.
 # Retest: ./tests/audit/log-retention.test.sh
 set -uo pipefail
 

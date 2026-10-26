@@ -3,16 +3,27 @@ name: Restore Test
 # Nightly proof that the backups restore cleanly (only generated fixtures,
 # never real data):
 #   - restore-test: logical dump → restore, audit hash chain still verifies;
-#   - pitr: the pgBackRest chain (WP-101, NFR-05/OPS-04) — point in time
-#     restore and restore after losing the data volume, with measured RPO
-#     (limit 15 min) and RTO (limit 4 h); exceeding a limit fails the job.
-# Also runs when the backup chain or the proof changes.
+#   - pitr: the pgBackRest chain (WP-101, WP-445, NFR-05/OPS-04) with the
+#     defaults of tests/restore-pitr.sh — point in time restore and restore
+#     after losing the data volume during 1050 s of writes, with measured RPO
+#     (limits archive_timeout 300 s + 60 s and 15 min) and RTO (limit 4 h);
+#     exceeding a limit fails the job. Protocol: artifact restore-pitr-report;
+#   - pitr-seeded: the same with the demo organization of cmd/seed scaled to
+#     10,000 CIs in the base backup, the RTO of a representative database
+#     (F-292). Protocol: artifact restore-pitr-seeded-report;
+#   - rpo-negative: self-test of the RPO check (F-130), see the job.
+# The tests/restore-pitr-config.test.sh part that needs no chain (RPO
+# evaluation, this workflow, the expectation of rpo-negative) runs in the
+# ci.yml job gate.
+# Also runs when the backup chain or the proof changes; docker-compose.yml
+# sets archive_timeout, the RPO limit of the proof.
 on:
   schedule:
     - cron: "0 3 * * *" # nightly at 03:00 UTC
   workflow_dispatch:
   pull_request:
     paths:
+      - "deploy/docker-compose/docker-compose.yml"
       - "deploy/docker-compose/postgres/**"
       - "tests/restore-pitr.sh"
       - ".github/workflows/restore-test.yml"
@@ -95,6 +106,8 @@ jobs:
       - name: "Integrity check: audit hash chain verifies after restore"
         run: /tmp/audit-verify -database-url "$RESTORE_DATABASE_URL" -org "$ORG_ID"
 
+  # Default run: 1050 s of writes plus image build, base backup and two
+  # restores stay well within the timeout (about 30 min).
   pitr:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -109,7 +122,7 @@ jobs:
       - name: Publish the protocol
         if: always()
         run: |
-          [ -f restore-pitr-report.md ] && cat restore-pitr-report.md >> "$GITHUB_STEP_SUMMARY" || true
+          if [ -f restore-pitr-report.md ]; then cat restore-pitr-report.md >> "$GITHUB_STEP_SUMMARY"; fi
 
       - name: Upload the protocol
         if: always()
@@ -117,4 +130,97 @@ jobs:
         with:
           name: restore-pitr-report
           path: restore-pitr-report.md
+          retention-days: 90
+
+  # F-292: the RTO statement of docs/backup-dr.md needs a representative
+  # database. Same proof and limits, with the migrations applied and the
+  # demo organization seeded with 10,000 CIs (NFR-10) before the first base
+  # backup.
+  pitr-seeded:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+
+      - name: Install golang-migrate
+        run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+
+      - name: Build the seed
+        working-directory: backend
+        run: go build -o "$RUNNER_TEMP/seed" ./cmd/seed
+
+      - name: Point in time restore with seed -objects 10000
+        run: ./tests/restore-pitr.sh
+        env:
+          RESTORE_SEED_OBJECTS: "10000"
+          RESTORE_SEED_BIN: ${{ runner.temp }}/seed
+          RESTORE_REPORT: ${{ github.workspace }}/restore-pitr-seeded-report.md
+
+      - name: Publish the protocol
+        if: always()
+        run: |
+          if [ -f restore-pitr-seeded-report.md ]; then cat restore-pitr-seeded-report.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload the protocol
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-pitr-seeded-report
+          path: restore-pitr-seeded-report.md
+          retention-days: 90
+
+  # F-130 negative self-test: the RPO check must fail when the chain
+  # archives less often than docker-compose.yml promises. The database runs
+  # with archive_timeout=1200, everything else is the default run: nothing
+  # of the 1050 s write window is archived before the crash, the latest
+  # restore lacks all of it. Expected: exit 1, the line 'RPO … FAIL' above
+  # both limits, no other check failed. If the script passes, the job fails.
+  rpo-negative:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: RPO check with archive_timeout=1200 (must fail)
+        run: |
+          set +e
+          ./tests/restore-pitr.sh
+          rc=$?
+          set -e
+          report=restore-pitr-negative-report.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::restore-pitr.sh passed although the WAL was archived only every 1200 s"
+            exit 1
+          fi
+          if [ "$rc" -ne 1 ] || ! grep -qx '\*\*Result:\*\* FAILED' "$report"; then
+            echo "::error::restore-pitr.sh aborted with exit $rc instead of completing with a failed check"
+            exit 1
+          fi
+          grep -qE '^\| RPO: [^|]+ \| [0-9.]+s, above 360s and 900s \([0-9]+ of [0-9]+ rows lost\) \| 360s \(archive_timeout 300s \+ 60s\), 900s \(NFR-05\) \| FAIL \|$' "$report" || {
+            echo "::error::no line 'RPO … FAIL' above both limits (360 s and 900 s)"
+            exit 1
+          }
+          if [ "$(grep -c ' | FAIL |$' "$report")" -ne 1 ]; then
+            echo "::error::checks other than the RPO failed"
+            exit 1
+          fi
+        env:
+          RESTORE_ARCHIVE_TIMEOUT: "1200"
+          RESTORE_REPORT: ${{ github.workspace }}/restore-pitr-negative-report.md
+
+      - name: Publish the protocol
+        if: always()
+        run: |
+          if [ -f restore-pitr-negative-report.md ]; then cat restore-pitr-negative-report.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload the protocol
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-pitr-negative-report
+          path: restore-pitr-negative-report.md
           retention-days: 90

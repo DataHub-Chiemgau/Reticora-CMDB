@@ -1,7 +1,9 @@
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import {
   BASE,
+  KEYCLOAK,
   api,
+  keycloakAdminToken,
   keycloakLogin,
   signupTenant,
   stamp,
@@ -44,6 +46,7 @@ import {
  *  14 SPA renews the session by cookie ........ AUT-02                       → WP-066, WP-009
  *  14a cookie-only refresh on the API ......... AUT-02, API-04               → WP-364 (F-018)
  *  14b SPA renews when the 15 minutes ran out .. AUT-02                       → WP-066
+ *  15 IdP group reticora-viewer = viewer rights . RBA-02, AUT-09 (F-200)      → WP-046, WP-428
  *
  * The assertions encode the requirement texts (docs/spec/katalog-v3) and the
  * API contract (api/openapi.yaml); a failure is a product finding.
@@ -1156,5 +1159,110 @@ test('14b the SPA renews the session when the access token lifetime has run out 
     .toContain(200);
   await expect(page).not.toHaveURL(/\/login/);
   await expect(page.getByRole('link', { name: ci.name })).toBeVisible();
+  await context.close();
+});
+
+/** keycloakAdmin calls the Keycloak admin API of the realm reticora. */
+async function keycloakAdmin(
+  request: Parameters<typeof api>[0],
+  method: 'GET' | 'POST' | 'PUT',
+  path: string,
+  data?: unknown,
+) {
+  const token = await keycloakAdminToken(request);
+  return request.fetch(`${KEYCLOAK}/admin/realms/reticora${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}` },
+    data,
+    failOnStatusCode: false,
+  });
+}
+
+/**
+ * ensureKeycloakGroup returns the id of the top-level realm group `name`,
+ * created through the admin API when it does not exist (the realm files
+ * contain only reticora-admin and operators, deploy/keycloak/README.md).
+ */
+async function ensureKeycloakGroup(request: Parameters<typeof api>[0], name: string) {
+  const find = async () => {
+    const res = await keycloakAdmin(request, 'GET', `/groups?search=${encodeURIComponent(name)}`);
+    expect(res.status(), `Keycloak list groups: ${await res.text()}`).toBe(200);
+    return ((await res.json()) as { id: string; name: string }[]).find((g) => g.name === name)?.id;
+  };
+  const existing = await find();
+  if (existing) return existing;
+  const created = await keycloakAdmin(request, 'POST', '/groups', { name });
+  expect(created.status(), `Keycloak create group ${name}: ${await created.text()}`).toBe(201);
+  const id = await find();
+  expect(id, `group ${name} after its creation`).toBeTruthy();
+  return id!;
+}
+
+test('15 a member of the IdP group reticora-viewer created through the Keycloak admin API holds exactly the viewer rights', async ({
+  browser,
+  request,
+}) => {
+  // F-200 retest (RBA-02): the app rights come from the IdP group (and the
+  // role assignments), never from Keycloak realm roles.
+  const groupId = await ensureKeycloakGroup(request, 'reticora-viewer');
+  const address = email('groupviewer');
+  const pw = password('groupviewer');
+  // AUT-01: the administrator creates the account in Reticora, without a
+  // role; that admits the first sign-in of the Keycloak account.
+  const created = await adminCall<User>(request, 'POST', '/users', {
+    email: address,
+    display_name: 'Audit Group Viewer',
+  });
+  expect(created.status, `create user: ${JSON.stringify(created.body)}`).toBe(201);
+  const accountId = await createKeycloakUser(request, {
+    email: address,
+    password: pw,
+    orgId: state().orgId!,
+  });
+  const member = await keycloakAdmin(request, 'PUT', `/users/${accountId}/groups/${groupId}`);
+  expect(
+    member.status(),
+    `Keycloak add the account to reticora-viewer: ${await member.text()}`,
+  ).toBe(204);
+
+  // The RBA-02 viewer row as the tenant's database holds it.
+  const roles = await adminCall<{ data: { name: string; permissions: string[] }[] }>(
+    request,
+    'GET',
+    '/roles?limit=100',
+  );
+  expect(roles.status).toBe(200);
+  const viewerRow = [
+    ...(roles.body.data.find((r) => r.name === 'viewer')?.permissions ?? []),
+  ].sort();
+  expect(viewerRow, 'the viewer row of RBA-02').toEqual(expect.arrayContaining(VIEWER_REQUIRED));
+
+  const exactlyViewer = async (bearer: string, label: string) => {
+    const perms = [...(await permissionsOf(request, bearer))].sort();
+    expect(perms, `${label}: GET /me/permissions equals the RBA-02 viewer row`).toEqual(viewerRow);
+    expect((await api(request, bearer, 'GET', '/cis')).status, `${label}: GET /cis`).toBe(200);
+    const write = await api(request, bearer, 'POST', '/cis', {
+      name: `group-viewer-${run}`,
+      ci_type_id: state().serverTypeId,
+      status: 'active',
+      discovery_source: 'manual',
+    });
+    expect(write.status, `${label}: POST /cis`).toBe(403);
+  };
+
+  const { context, page, token } = await signIn(browser, { email: address, password: pw });
+  await exactlyViewer(token, 'first sign-in');
+
+  // The first sign-in also stores the default role of the installation
+  // (RETICORA_DEFAULT_PROVISION_ROLE, viewer). Without any role assignment
+  // the group alone grants the same rights at the next refresh.
+  const me = await api<{ sub: string }>(request, token, 'GET', '/me');
+  expect(me.status).toBe(200);
+  for (const assignment of await assignmentsOf(request, me.body.sub)) {
+    const removed = await adminCall(request, 'DELETE', `/role-assignments/${assignment.id}`);
+    expect([200, 204], `revoke ${assignment.id}: ${removed.status}`).toContain(removed.status);
+  }
+  expect(await assignmentsOf(request, me.body.sub), 'no role assignment left').toEqual([]);
+  await exactlyViewer(await cookieRefresh(page), 'group only, no role assignment');
   await context.close();
 });

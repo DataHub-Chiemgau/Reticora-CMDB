@@ -7,14 +7,16 @@ kind: Kustomization
 #                    kind-smoke.sh setup creates the runtime login afterwards
 #   redis, nats      the literal URLs of the base (redis:6379, nats:4222, NATS
 #                    with JetStream)
-#   minio            object storage of the test cluster; the staging overlay
-#                    does not configure RETICORA_S3_*, so the server does not
-#                    use it (WP-444 uses it as the pgBackRest repository)
+#   minio            object storage of the test cluster with TLS; the staging
+#                    overlay does not configure RETICORA_S3_*, so the server
+#                    does not use it; the case wal_archive (overlay-wal,
+#                    WP-444) uses it as the pgBackRest repository
 #   reticora-secrets, reticora-db-runtime, reticora-config
 #                    what the operator provides (deploy/README.md, section 3)
-# The secret reticora-session-key (an RSA key generated per run) is created
-# by kind-smoke.sh setup and is not committed. Every value here is test-only:
-# never apply this kustomization outside a throwaway cluster.
+# kind-smoke.sh setup creates, per run and not committed, the secrets
+# reticora-session-key (an RSA key), kind-smoke-minio-tls and
+# reticora-pgbackrest (test CA, certificates, cipher pass). Every value here
+# is test-only: never apply this kustomization outside a throwaway cluster.
 namespace: reticora-staging
 
 resources:
