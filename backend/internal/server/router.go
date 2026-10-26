@@ -408,10 +408,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 					return &jobs.RevertRefusedError{Reason: ci.ErrMergeUnsupported}
 				}
 				// The refusals of the unmerge answer with the sentinel's text
-				// (409); a repository error reaches the client sanitized
-				// (API-03).
+				// (409); like an unmerge without force, a survivor changed
+				// after the merge refuses the revert (E-80). A repository
+				// error reaches the client sanitized (API-03).
 				_, err := opts.CIService.RevertMerge(ctx, job.OrganizationID, job.RefID)
-				for _, refusal := range []error{ci.ErrSnapshotExpired, ci.ErrMergeConflict, ci.ErrMergeUnsupported} {
+				for _, refusal := range []error{ci.ErrSnapshotExpired, ci.ErrMergeConflict, ci.ErrUnmergeConflict, ci.ErrMergeUnsupported} {
 					if errors.Is(err, refusal) {
 						return &jobs.RevertRefusedError{Reason: refusal}
 					}

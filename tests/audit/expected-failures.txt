@@ -2,7 +2,6 @@
 # Format: art;ort;test;befund – see tests/audit/README.md. A work package that
 # fixes a finding moves its test into the regular suite and deletes the line.
 # Baseline: main at edccd2d (2026-10-19): 116 go, 34 sh, 11 vitest, 26 e2e-real.
-go;backend/internal/ci;TestAuditT3UnmergeKeepsLaterSurvivorEdits;F-097
 go;backend/internal/ci;TestAuditT7BulkJobCancelStopsWork;F-162
 go;backend/internal/discovery;TestAuditDefectDiscoveryTypedValuesValidated;F-143
 go;backend/internal/discovery;TestAuditPowerRedundancyIndependentOfBatchOrder;F-112

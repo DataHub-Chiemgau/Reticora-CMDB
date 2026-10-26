@@ -221,7 +221,7 @@ func TestMergeMovesEndpointAgentLink(t *testing.T) {
 	if _, err = f.Admin.Exec(bg, `UPDATE endpoint_agent SET status = 'disabled' WHERE id = $1`, agentV); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = repo.Unmerge(ctx, f.OrgA, victim); err != nil {
+	if _, err = repo.Unmerge(ctx, f.OrgA, victim, false); err != nil {
 		t.Fatalf("unmerge: %v", err)
 	}
 	if got, status := link(agentV); got != victim || status != "disabled" {

@@ -1074,7 +1074,23 @@ paths:
         snapshot: both CI rows, the moved relationships, interfaces,
         contacts, history, document links, field values, the asset link and
         the CI link of endpoint agents, and the rows the merge removed. After 30 days the snapshot is gone
-        (410). Requires ci:delete.
+        (410). A survivor changed after the merge (its version is above the
+        version the merge recorded) is not overwritten silently: the unmerge
+        answers 409 with the fields of the later history entries and changes
+        nothing; force=true restores the snapshot over those changes, and
+        the audit entry ci.unmerged names force and the overwritten fields
+        (E-80). The revert of the merge job behaves like an unmerge without
+        force. Requires ci:delete.
+      parameters:
+        - name: force
+          in: query
+          required: false
+          description: >-
+            Restore the snapshot although the survivor changed after the
+            merge; the later changes of the survivor are overwritten.
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Both CIs after the unmerge
@@ -1082,6 +1098,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CIUnmergeResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1089,10 +1107,17 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: One of the CIs is locked by another write.
+          description: >-
+            The survivor changed after the merge (VersionConflictProblem:
+            `fields` names the changed fields, `current_version` the version
+            of the survivor; retry with force=true to overwrite them), or one
+            of the CIs is locked by another write.
           content:
             application/problem+json:
-              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/VersionConflictProblem' }
+                  - { $ref: '#/components/schemas/ProblemDetail' }
         '410':
           description: The merge snapshot is older than 30 days.
           content:
@@ -2228,8 +2253,10 @@ paths:
           description: >-
             The kind defines no revert, the job did not succeed, or the
             reverter refused it: the merge snapshot expired, the merge
-            conflicts with later changes, the merge kind has no unmerge, or
-            the merge no longer exists.
+            conflicts with later changes (one of the CIs is locked, or the
+            survivor changed after the merge: the revert is an unmerge
+            without force, E-80), the merge kind has no unmerge, or the
+            merge no longer exists.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }

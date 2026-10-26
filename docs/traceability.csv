@@ -757,3 +757,4 @@ ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-472
 ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-472
 TEN-06;[B];B;backend/internal/iga/approve_task_integration_test.go;WP-461
 API-05;[B];C;frontend/src/api/deprecatedPaths.test.ts;WP-468
+CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-485
