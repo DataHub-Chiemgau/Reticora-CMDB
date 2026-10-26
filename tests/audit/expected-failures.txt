@@ -13,7 +13,6 @@ go;backend/internal/server;TestAuditDefectRouteAuditFailureLeavesNoUnauditedMuta
 go;backend/internal/server;TestAuditDefectRouteAuditStoresOldAndNewValues;F-148
 go;backend/internal/webhook;TestAuditDefectWebhookConsumerKeepsEventsOnTransientErrors;F-151
 go;collector/collectorcmd;TestAuditScopeScheduleSurvivesRestart;F-109
-go;collector/plugins/snmp;TestAuditSNMPv3AuthFailureReported;F-105
 sh;tests/audit/g1-gate-evidence.test.sh;abn01_texts;F-138
 sh;tests/audit/g1-gate-evidence.test.sh;install_evidence_current;F-122
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_field;F-039

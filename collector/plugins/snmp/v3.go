@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gosnmp/gosnmp"
@@ -143,6 +145,10 @@ var scalarOIDs = []string{
 // table over an open session.
 func (p *Plugin) collectSession(g *gosnmp.GoSNMP, target, version string) (*plugins.Result, error) {
 	pkt, err := g.Get(scalarOIDs)
+	if err == nil {
+		// An SNMPv3 Report PDU carries no value of the request.
+		err = reportPDU(pkt)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("snmp %s: %w", version, err)
 	}
@@ -264,16 +270,214 @@ func ifColumn(oid string) (column string, idx int, ok bool) {
 	return oid[:i], n, true
 }
 
-// probeV3 checks one target with an authenticated, encrypted GET of
-// sysObjectID.
-func (p *Plugin) probeV3(ctx context.Context, target string, cfg *v3Config) (*plugins.Result, bool) {
-	g := p.v3Session(ctx, target, cfg)
-	if err := g.Connect(); err != nil {
+// usmStats report counters (RFC 3414 3.2, SNMP-USER-BASED-SM-MIB): an
+// SNMPv3 agent answers a request its user-based security model refuses
+// with a Report PDU carrying one of these counters.
+const (
+	oidUsmStatsNotInTimeWindows = "1.3.6.1.6.3.15.1.1.2.0"
+	oidUsmStatsUnknownUserNames = "1.3.6.1.6.3.15.1.1.3.0"
+	oidUsmStatsWrongDigests     = "1.3.6.1.6.3.15.1.1.5.0"
+	oidUsmStatsDecryptionErrors = "1.3.6.1.6.3.15.1.1.6.0"
+)
+
+// usmAuthReports are the reports with which an agent refuses the
+// credentials: unknown user, wrong authentication key (digest) or wrong
+// privacy key (decryption). They become plugins.ErrAuthFailed (DIS-08).
+var usmAuthReports = map[string]string{
+	oidUsmStatsUnknownUserNames: "usmStatsUnknownUserNames",
+	oidUsmStatsWrongDigests:     "usmStatsWrongDigests",
+	oidUsmStatsDecryptionErrors: "usmStatsDecryptionErrors",
+}
+
+// errNotInTimeWindow marks a request the agent refused with
+// usmStatsNotInTimeWindows: engine boots/time of the session are out of
+// sync with the agent. v3Request resynchronises once before reporting it.
+var errNotInTimeWindow = errors.New("the agent reports usmStatsNotInTimeWindows (engine boots/time out of sync)")
+
+// errNoSysObjectID: the agent answered the probe without sysObjectID.
+var errNoSysObjectID = errors.New("snmp v3: no sysObjectID")
+
+// usmReportError is a Report PDU gosnmp returned as the response of a
+// request (e.g. a second usmStatsNotInTimeWindows after its own resync).
+type usmReportError struct{ oid string }
+
+func (e *usmReportError) Error() string { return "snmp v3: report " + e.oid }
+
+// reportPDU returns the usmReportError of pkt when it is a Report PDU.
+func reportPDU(pkt *gosnmp.SnmpPacket) error {
+	if pkt == nil || pkt.PDUType != gosnmp.Report {
+		return nil
+	}
+	oid := ""
+	if len(pkt.Variables) == 1 {
+		oid = strings.TrimPrefix(pkt.Variables[0].Name, ".")
+	}
+	return &usmReportError{oid: oid}
+}
+
+// reportConn keeps the usmStats report the agent answered with. RFC 3414
+// 3.2 sends the report for a request the agent cannot authenticate
+// unauthenticated (noAuthNoPriv); gosnmp discards it as "not authentic" and
+// the request ends as if the agent were silent. reportConn reads the
+// reports alongside, so the session tells refused credentials from a
+// silent target. Only a report that echoes the msgID of a request of this
+// session counts.
+type reportConn struct {
+	net.Conn
+	user string
+
+	mu   sync.Mutex
+	sent map[int64]bool // msgIDs of the requests written
+	oid  string
+}
+
+func (c *reportConn) Write(b []byte) (int, error) {
+	if pkt, _ := decodeV3(b, c.user); pkt != nil && pkt.MsgID != 0 {
+		c.mu.Lock()
+		if c.sent == nil {
+			c.sent = map[int64]bool{}
+		}
+		c.sent[int64(pkt.MsgID)] = true
+		c.mu.Unlock()
+	}
+	return c.Conn.Write(b)
+}
+
+func (c *reportConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if n > 0 {
+		if msgID, oid := usmReport(b[:n], c.user); oid != "" {
+			c.mu.Lock()
+			if c.sent[int64(msgID)] {
+				c.oid = oid
+			}
+			c.mu.Unlock()
+		}
+	}
+	return n, err
+}
+
+// report returns the counter OID of the last usmStats report received.
+func (c *reportConn) report() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.oid
+}
+
+// decodeV3 decodes an SNMPv3 message from a copy without keys (gosnmp
+// decrypts in place). The header is always decoded; the PDU only when it
+// is not encrypted, as for a report (whole is true then). nil when raw is
+// no SNMPv3 message.
+func decodeV3(raw []byte, user string) (pkt *gosnmp.SnmpPacket, whole bool) {
+	defer func() {
+		if recover() != nil {
+			pkt, whole = nil, false
+		}
+	}()
+	decoder := &gosnmp.GoSNMP{
+		Version: gosnmp.Version3, SecurityModel: gosnmp.UserSecurityModel, MsgFlags: gosnmp.NoAuthNoPriv,
+		SecurityParameters: &gosnmp.UsmSecurityParameters{UserName: user}, Logger: gosnmp.NewLogger(nil),
+	}
+	pkt, err := decoder.SnmpDecodePacket(slices.Clone(raw))
+	if pkt == nil || pkt.Version != gosnmp.Version3 {
 		return nil, false
 	}
-	defer g.Conn.Close()
-	pkt, err := g.Get([]string{oidSysObjectID})
-	if err != nil || len(pkt.Variables) == 0 || pkt.Variables[0].Type == gosnmp.NoSuchObject {
+	return pkt, err == nil
+}
+
+// usmReport returns the msgID and the counter OID when raw is an SNMPv3
+// Report PDU with one of the usmStats counters above; an empty OID
+// otherwise.
+func usmReport(raw []byte, user string) (msgID uint32, oid string) {
+	pkt, whole := decodeV3(raw, user)
+	if !whole || pkt.PDUType != gosnmp.Report || len(pkt.Variables) != 1 {
+		return 0, ""
+	}
+	name := strings.TrimPrefix(pkt.Variables[0].Name, ".")
+	if _, auth := usmAuthReports[name]; auth || name == oidUsmStatsNotInTimeWindows {
+		return pkt.MsgID, name
+	}
+	return 0, ""
+}
+
+// v3Failure maps a failed request of a session onto the error the scope run
+// reports (DIS-08): a usmStats report that refuses the credentials becomes
+// plugins.ErrAuthFailed with the target, usmStatsNotInTimeWindows
+// errNotInTimeWindow; any other error stays as it is.
+func v3Failure(target string, conn *reportConn, err error) error {
+	var oid string
+	var report *usmReportError
+	switch {
+	case errors.As(err, &report):
+		oid = report.oid
+	case errors.Is(err, gosnmp.ErrWrongDigest):
+		oid = oidUsmStatsWrongDigests
+	case errors.Is(err, gosnmp.ErrUnknownUsername):
+		oid = oidUsmStatsUnknownUserNames
+	case errors.Is(err, gosnmp.ErrDecryption):
+		oid = oidUsmStatsDecryptionErrors
+	case errors.Is(err, gosnmp.ErrNotInTimeWindow):
+		oid = oidUsmStatsNotInTimeWindows
+	default:
+		oid = conn.report()
+	}
+	if name, auth := usmAuthReports[oid]; auth {
+		return fmt.Errorf("snmp v3: %w: %s: authentication failed, the agent reports %s", plugins.ErrAuthFailed, target, name)
+	}
+	if oid == oidUsmStatsNotInTimeWindows {
+		return fmt.Errorf("snmp v3: %s: %w", target, errNotInTimeWindow)
+	}
+	return err
+}
+
+// v3Request runs do on an SNMPv3 authPriv session to target. A request the
+// agent refuses with usmStatsNotInTimeWindows is retried once on a new
+// session, whose engine discovery resynchronises boots and time; only a
+// second refusal is reported.
+func (p *Plugin) v3Request(ctx context.Context, target string, cfg *v3Config, do func(g *gosnmp.GoSNMP) error) error {
+	err := p.v3Attempt(ctx, target, cfg, do)
+	if errors.Is(err, errNotInTimeWindow) {
+		if err = p.v3Attempt(ctx, target, cfg, do); errors.Is(err, errNotInTimeWindow) {
+			return fmt.Errorf("%w, also after a time resync", err)
+		}
+	}
+	return err
+}
+
+// v3Attempt runs do on one session; see v3Request.
+func (p *Plugin) v3Attempt(ctx context.Context, target string, cfg *v3Config, do func(g *gosnmp.GoSNMP) error) error {
+	g := p.v3Session(ctx, target, cfg)
+	if err := g.Connect(); err != nil {
+		return fmt.Errorf("snmp v3: connect %s: %w", target, err)
+	}
+	conn := &reportConn{Conn: g.Conn, user: cfg.user}
+	g.Conn = conn
+	defer conn.Close()
+	if err := do(g); err != nil {
+		return v3Failure(target, conn, err)
+	}
+	return nil
+}
+
+// probeV3 checks one target with an authenticated, encrypted GET of
+// sysObjectID. An agent that answers but refuses the credentials (or stays
+// out of its time window) is a hit, so that Collect reports the failure
+// with the target (DIS-08); a silent target is none.
+func (p *Plugin) probeV3(ctx context.Context, target string, cfg *v3Config) (*plugins.Result, bool) {
+	err := p.v3Request(ctx, target, cfg, func(g *gosnmp.GoSNMP) error {
+		pkt, err := g.Get([]string{oidSysObjectID})
+		if err == nil {
+			err = reportPDU(pkt)
+		}
+		if err != nil {
+			return err
+		}
+		if len(pkt.Variables) == 0 || pkt.Variables[0].Type == gosnmp.NoSuchObject {
+			return errNoSysObjectID
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, plugins.ErrAuthFailed) && !errors.Is(err, errNotInTimeWindow) {
 		return nil, false
 	}
 	return &plugins.Result{
@@ -290,14 +494,18 @@ func (p *Plugin) probeV3(ctx context.Context, target string, cfg *v3Config) (*pl
 
 // collectV3 collects target and its neighbours over SNMPv3 authPriv.
 func (p *Plugin) collectV3(ctx context.Context, target string, cfg *v3Config) (*plugins.Result, []plugins.DeviceNeighbor, error) {
-	g := p.v3Session(ctx, target, cfg)
-	if err := g.Connect(); err != nil {
-		return nil, nil, fmt.Errorf("snmp v3: connect %s: %w", target, err)
-	}
-	defer g.Conn.Close()
-	result, err := p.collectSession(g, target, "v3")
+	var result *plugins.Result
+	var neighbors []plugins.DeviceNeighbor
+	err := p.v3Request(ctx, target, cfg, func(g *gosnmp.GoSNMP) error {
+		var err error
+		if result, err = p.collectSession(g, target, "v3"); err != nil {
+			return err
+		}
+		neighbors = walkNeighbors(g, target, result.Interfaces)
+		return nil
+	})
 	if err != nil {
 		return nil, nil, err
 	}
-	return result, walkNeighbors(g, target, result.Interfaces), nil
+	return result, neighbors, nil
 }

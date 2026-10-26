@@ -148,6 +148,9 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 			defer func() { <-sem }()
 
 			if useV3 {
+				// An agent that refuses the credentials with a usmStats
+				// report is a hit too: its Collect fails with
+				// plugins.ErrAuthFailed and the target (DIS-08).
 				if result, ok := p.probeV3(ctx, t, v3); ok {
 					mu.Lock()
 					results = append(results, *result)

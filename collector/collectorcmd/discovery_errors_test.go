@@ -2,7 +2,8 @@
 // collection failure reaches the scope run with the cause the plugin knows
 // (auth_failed, unreachable), the protocol and the target; the server keeps
 // that cause in last_result. TestAuditWMIAuthFailureReachesScopeRun moved
-// here from discovery_auditdefect_test.go.
+// here from discovery_auditdefect_test.go; TestSNMPv3AuthFailureReachesScopeRun
+// is the SNMPv3 counterpart (WP-492, F-105).
 //
 // The scope run reports travel over NATS like in production: TEST_NATS_URL,
 // or a nats-server from TEST_NATS_SERVER_BIN.
@@ -17,11 +18,16 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gosnmp/gosnmp"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/snmp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/wmi"
 )
 
@@ -151,5 +157,96 @@ func TestAuditWMIAuthFailureReachesScopeRun(t *testing.T) {
 				t.Errorf("scope run records = %d, want the probe hit", res.Records)
 			}
 		})
+	}
+}
+
+// startV3RejectingAgent is an SNMPv3 agent that refuses every credential as
+// RFC 3414 3.2 prescribes: it answers the engine discovery with
+// usmStatsUnknownEngineIDs and every authenticated request with the
+// unauthenticated report usmStatsWrongDigests. It returns its port and the
+// number of wrong-digest reports sent.
+func startV3RejectingAgent(t *testing.T) (int, *atomic.Int32) {
+	t.Helper()
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	const engineID = "\x80\x00\x1f\x88\x80reticora-reject"
+	reports := &atomic.Int32{}
+	go func() {
+		buf := make([]byte, 65535)
+		for {
+			n, peer, rerr := conn.ReadFromUDP(buf)
+			if rerr != nil {
+				return
+			}
+			// Only the header is needed; the encrypted PDU of an
+			// authenticated request does not decode without the keys.
+			decoder := &gosnmp.GoSNMP{Version: gosnmp.Version3, SecurityModel: gosnmp.UserSecurityModel, MsgFlags: gosnmp.NoAuthNoPriv,
+				SecurityParameters: &gosnmp.UsmSecurityParameters{UserName: "agent"}, Logger: gosnmp.NewLogger(nil)}
+			req, _ := decoder.SnmpDecodePacket(slices.Clone(buf[:n]))
+			if req == nil || req.MsgID == 0 {
+				continue
+			}
+			counter := ".1.3.6.1.6.3.15.1.1.4.0" // usmStatsUnknownEngineIDs
+			user := ""
+			if req.MsgFlags&gosnmp.AuthNoPriv != 0 {
+				counter = ".1.3.6.1.6.3.15.1.1.5.0" // usmStatsWrongDigests
+				if usm, ok := req.SecurityParameters.(*gosnmp.UsmSecurityParameters); ok {
+					user = usm.UserName
+				}
+				reports.Add(1)
+			}
+			out, merr := (&gosnmp.SnmpPacket{
+				Version: gosnmp.Version3, MsgFlags: gosnmp.NoAuthNoPriv, SecurityModel: gosnmp.UserSecurityModel,
+				SecurityParameters: &gosnmp.UsmSecurityParameters{UserName: user, AuthoritativeEngineID: engineID,
+					AuthoritativeEngineBoots: 1, AuthoritativeEngineTime: 1000},
+				MsgID: req.MsgID, RequestID: req.RequestID, MsgMaxSize: 65507, PDUType: gosnmp.Report, ContextEngineID: engineID,
+				Variables: []gosnmp.SnmpPDU{{Name: counter, Type: gosnmp.Counter32, Value: uint32(1)}},
+			}).MarshalMsg()
+			if merr == nil {
+				_, _ = conn.WriteToUDP(out, peer)
+			}
+		}
+	}()
+	return conn.LocalAddr().(*net.UDPAddr).Port, reports
+}
+
+// TestSNMPv3AuthFailureReachesScopeRun (WP-492; DIS-08, F-105): an SNMPv3
+// agent that refuses the scope's credentials with usmStatsWrongDigests shows
+// up as exactly one error of the scope run with cause auth_failed, protocol
+// snmp and the target, not as a clean run without the device; the answering
+// agent is still reported from its probe.
+func TestSNMPv3AuthFailureReachesScopeRun(t *testing.T) {
+	runs := auditCaptureScopeRuns(t)
+	up, _ := auditUploadSink(t)
+	port, reports := startV3RejectingAgent(t)
+	const ip = "127.0.0.1"
+	auditUsePlugins(t, &snmp.Plugin{Timeout: time.Second, Port: port, Concurrency: 4})
+	auditInstallBundle(bundleCredential{ID: "cred-v3", Kind: "snmp_v3", Secret: map[string]any{"username": "reticora",
+		"auth_protocol": "SHA256", "auth_password": "wrong-auth-pw", "priv_protocol": "AES", "priv_password": "wrong-priv-pw"}})
+	collectorScopes.set([]collectorScope{{ID: "6f0b6f0e-0000-4000-8000-0000000000b3", Kind: "host", Target: ip, Schedule: "24h",
+		CredentialIDs: []string{"cred-v3"}, Plugins: []string{"snmp"}}}, nil)
+	runDueDiscovery(context.Background(), &collectorConfig{}, up, newScheduler(), &hostCache{}, time.Now())
+
+	all := runs()
+	if len(all) != 1 {
+		t.Fatalf("scope run reports = %d, want 1", len(all))
+	}
+	res := all[0].Result
+	if reports.Load() == 0 {
+		t.Fatal("control: the agent refused no request")
+	}
+	if res.ErrorCount != 1 || len(res.Errors) != 1 {
+		t.Fatalf("the SNMPv3 agent refused the credentials with %d usmStatsWrongDigests report(s), but the scope run reported "+
+			"records=%d error_count=%d errors=%+v (want one error with cause auth_failed, protocol snmp and target %s)",
+			reports.Load(), res.Records, res.ErrorCount, res.Errors, ip)
+	}
+	if e := res.Errors[0]; e.Cause != "auth_failed" || e.Protocol != "snmp" || e.Target != ip || !strings.Contains(e.Message, "usmStatsWrongDigests") {
+		t.Errorf("scope run error = %+v, want cause auth_failed, protocol snmp, target %s and the report in the message", e, ip)
+	}
+	if res.Records != 1 {
+		t.Errorf("scope run records = %d, want the probe hit", res.Records)
 	}
 }

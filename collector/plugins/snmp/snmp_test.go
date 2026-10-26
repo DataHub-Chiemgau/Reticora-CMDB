@@ -15,6 +15,7 @@ import (
 	"github.com/gosnmp/gosnmp"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/internal/fakesnmp"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/profiles"
 )
 
@@ -337,7 +338,7 @@ func v3TestMIB() []gosnmp.SnmpPDU {
 
 // TestSNMPv3AuthPrivRoundTrip covers WP-152 (DIS-04): probe and collect a
 // device over SNMPv3 authPriv (SHA-256/AES) including the interface table;
-// wrong credentials find nothing.
+// credentials the agent refuses are reported as auth_failed (WP-492).
 func TestSNMPv3AuthPrivRoundTrip(t *testing.T) {
 	agent := startV3Agent(t, "reticora", "auth-secret-1", "priv-secret-1", v3TestMIB())
 	creds := map[string]string{"username": "reticora", "auth_protocol": "SHA256", "auth_password": "auth-secret-1",
@@ -371,10 +372,22 @@ func TestSNMPv3AuthPrivRoundTrip(t *testing.T) {
 		t.Errorf("record breaks the contract: %v", v)
 	}
 
-	wrong := map[string]string{"username": "reticora", "auth_password": "wrong-auth-pw", "priv_password": "priv-secret-1"}
+	// Wrong credentials (WP-492, DIS-08): an agent that refuses them with a
+	// usmStatsWrongDigests report (RFC 3414 3.2) is found, and its
+	// collection fails with auth_failed and the target; an agent that leaves
+	// the request unanswered stays a silent target without error.
+	rfc := startRFC3414Agent(t, oidUsmStatsWrongDigests, 0)
+	refused := &Plugin{Timeout: time.Second, Port: rfc.port}
+	if hits, err = refused.Probe(context.Background(), []string{"127.0.0.1"}, v3Bad); err != nil || len(hits) != 1 {
+		t.Errorf("refused credentials: probe found %d devices, %v; want the answering agent", len(hits), err)
+	}
+	if _, err = refused.Collect(context.Background(), "127.0.0.1", v3Bad); !errors.Is(err, plugins.ErrAuthFailed) ||
+		!strings.Contains(err.Error(), "127.0.0.1") || !strings.Contains(err.Error(), "usmStatsWrongDigests") {
+		t.Errorf("refused credentials: collect err = %v, want auth_failed with target and report", err)
+	}
 	quick := &Plugin{Timeout: 200 * time.Millisecond, Port: agent.port()}
-	if hits, err = quick.Probe(context.Background(), []string{"127.0.0.1"}, wrong); err != nil || len(hits) != 0 {
-		t.Errorf("wrong credentials found %d devices, %v", len(hits), err)
+	if hits, err = quick.Probe(context.Background(), []string{"127.0.0.1"}, v3Bad); err != nil || len(hits) != 0 {
+		t.Errorf("unanswered request found %d devices, %v", len(hits), err)
 	}
 }
 
