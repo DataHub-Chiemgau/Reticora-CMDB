@@ -27,8 +27,12 @@ info:
     `Retry-After`: every request with a well-formed API key while the key
     store (database) is unreachable (not 401: the key is not known to be invalid,
     and the refusal does not count against the pre-auth limit), an ingest
-    while the ingest queue (NATS) is unreachable, and a request whose
-    database connection cannot be established. While Redis is unreachable
+    while the ingest queue (NATS) is unreachable, a request whose
+    database connection cannot be established, and a write request whose
+    audit intent cannot be stored (AUD-07: write routes without a domain
+    recorder store the intent before they change anything; the audit entry
+    follows the response or, at the latest, the scheduler run two minutes
+    later). While Redis is unreachable
     the rate limits refuse with 429. A 2xx answer means stored or durably
     queued.
   contact:

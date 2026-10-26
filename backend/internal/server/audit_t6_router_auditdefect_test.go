@@ -3,12 +3,6 @@
 // Phase-1 acceptance audit, group T6-epic-b – DEFECT tests through the
 // production router (must fail until fixed). Harness: audit_t6_harness_test.go.
 //
-//   - TestAuditDefectRouteAuditFailureLeavesNoUnauditedMutation
-//     WP-133 (WP table AUD-05, AUD-09; criterion "jede schreibende Route
-//     erzeugt Audit"; requirement texts AUD-04 capture through an outbox,
-//     AUD-07) P2 "Route audit is written after the response in a
-//     separate transaction; failures are only logged (not gap-free)".
-//     Gap (high): behaviour on audit write failure.
 //   - TestAuditDefectRouteAuditStoresOldAndNewValues
 //     WP-133 (AUD-07 "Wer, Wann, Was, Alt, Neu") P2 "Route-level audit entries
 //     record only field names, no before/after values".
@@ -16,6 +10,8 @@
 //     WP-129 (JOB-01) P2 "Discovery jobs are never registered in the generic job
 //     model (adapter not wired)". Gap (high).
 //
+// TestAuditDefectRouteAuditFailureLeavesNoUnauditedMutation (WP-133, F-149)
+// is fixed by WP-504 and lives in route_audit_integration_test.go;
 // TestAuditDefectForeignPrivateCITypeRejected (WP-120, F-144) is fixed by
 // WP-396 and lives in ci_type_ref_integration_test.go;
 // TestAuditDefectNotificationAdministrationNeedsNotificationManage (WP-139,
@@ -35,37 +31,12 @@ package server_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 )
-
-// t6FailingAuditor simulates an unavailable audit store.
-type t6FailingAuditor struct{}
-
-func (t6FailingAuditor) RecordRoute(context.Context, *audit.Entry) error {
-	return errors.New("audit-t6: audit store unavailable")
-}
-
-func TestAuditDefectRouteAuditFailureLeavesNoUnauditedMutation(t *testing.T) {
-	e := t6NewEnv(t, "d6", t6FailingAuditor{})
-	f := e.F
-	admin := t6As{f.OrgA, f.AppUser(t, f.OrgA, "audit-d6-admin"), identity.AllPermissions()}
-	r := e.Call(t, admin, http.MethodPost, "/api/v1/vrfs", `{"name":"audit-d6-vrf"}`)
-	persisted := e.Count(t, `SELECT count(*) FROM vrf WHERE organization_id = $1 AND name = 'audit-d6-vrf'`, f.OrgA)
-	audited := e.Count(t, `SELECT count(*) FROM audit_log WHERE organization_id = $1 AND resource_type = 'vrfs'`, f.OrgA)
-	t.Logf("POST /vrfs with failing audit store = %d; vrf rows %d; audit rows %d", r.Code, persisted, audited)
-	if persisted > 0 && audited == 0 {
-		t.Errorf("a committed VRF has no audit entry (response %d): AUD-07/WP-133 require gap-free capture – the mutation must roll back or the entry must be retried", r.Code)
-	}
-	if r.Code < 300 && persisted == 0 {
-		t.Errorf("response %d reports success but nothing was stored", r.Code)
-	}
-}
 
 func TestAuditDefectRouteAuditStoresOldAndNewValues(t *testing.T) {
 	e := t6NewEnv(t, "d7", nil)

@@ -40,7 +40,7 @@ stop a single worker during an incident, without touching the API.
 | `ingest` | `RETICORA_WORKER_INGEST_ENABLED` | Consumes `ingest.>` from NATS (REC-01): one consumer per ingest lane (`RETICORA_INGEST_LANES`, default 4), the consumer of the releases before the lanes and lanes left by a higher lane count; at most 6 batches at a time per instance. The API still publishes to the queue. It also answers the collectors' records, heartbeats and metric samples over the NATS endpoint (`collector.<org>.<id>.ingest`, `….heartbeat`, `….metrics`, COL-08, MON-02; the samples are assigned in the collector's client and site scope and need the monitoring entitlement); a request of an unknown or disabled collector is refused before it is handled and changes nothing (COL-04). Only an instance running this worker reports the backlog per lane in `/readyz` (`details.ingest`, its last 30-s sample); every instance running it holds up to 1,542 identity locks, which sizes the PostgreSQL lock table. See [`docs/betrieb/ingest-spuren.md`](../betrieb/ingest-spuren.md). |
 | `monitoring` | `RETICORA_WORKER_MONITORING_ENABLED` | Evaluates the alert rules every minute (MON-04). Part of the module `alerting`: it starts only with `RETICORA_MODULES` naming `alerting` (or `all`), otherwise the server logs `worker disabled` for it. It does not compute `ci.health`; that is the worker `health`. |
 | `health` | `RETICORA_WORKER_HEALTH_ENABLED` | Recomputes `ci.health` of every CI every minute (DB-05, MON-02): per organization, in its tenant transaction, the database function `ci_refresh_health` sets `critical` or `warning` when the latest sample of a metric breaches an enabled alert rule of that severity, `ok` for samples of the last 15 minutes without a breach and `unknown` without such a sample. It belongs to no late module and runs in the G1 default configuration (`RETICORA_MODULES` empty); with the module `alerting` the refresh still runs once per cycle, here and not in `monitoring` (F-087). Run it on one or more instances; a refresh is idempotent. Needs the database. |
-| `scheduler` | `RETICORA_WORKER_SCHEDULER_ENABLED` | Runs the system jobs on their cron schedules (JOB-02). Every replica runs a scheduler; one leads through a PostgreSQL advisory lock, each job kind also runs under a lock of its own, so scaling (HPA) never runs a job twice. When the leader stops or loses its database session, another replica takes over and catches up on missed slots, at most `MaxCatchUp` per kind (state in `scheduler_run`). Registered: `reservation.expire` (every minute) releases expired reservations; the retention runs (nightly, see below); the notice runs `entitlement.notices` and `certificate.notices` (daily, see below). |
+| `scheduler` | `RETICORA_WORKER_SCHEDULER_ENABLED` | Runs the system jobs on their cron schedules (JOB-02). Every replica runs a scheduler; one leads through a PostgreSQL advisory lock, each job kind also runs under a lock of its own, so scaling (HPA) never runs a job twice. When the leader stops or loses its database session, another replica takes over and catches up on missed slots, at most `MaxCatchUp` per kind (state in `scheduler_run`). Registered: `reservation.expire` (every minute) releases expired reservations; the retention runs (nightly, see below); the notice runs `entitlement.notices` and `certificate.notices` (daily, see below); `audit.route_intents` (every minute, see below). |
 | `events` | `RETICORA_WORKER_EVENTS_ENABLED` | Publishes the domain events of the transactional outbox (`event_outbox`) in sequence order per organization to the NATS stream `RETICORA_EVENTS` (`events.<org_id>.<type>`, 30 days / 10 GB) and to the webhook subscriptions; one instance per organization at a time (EVT-01, EVT-02). Without NATS the webhooks still receive the events. |
 | `notifier` | `RETICORA_WORKER_NOTIFIER_ENABLED` | Delivers queued notifications (`notification_delivery`) over their channels — e-mail, in-app, webhook — with retry and exponential backoff (5 attempts), deduplication by key, the recipients' quiet hours and muted categories (critical notifications ignore both); replicas share the queue, a delivery whose instance died is taken over after 10 minutes (NTF-04). |
 | `nats_edge` | `RETICORA_WORKER_NATS_EDGE_ENABLED` | Collector NATS endpoint (COL-08): writes the collector CA bundle, the server certificate of `nats-edge` (host names from `RETICORA_NATS_EDGE_HOSTS`, renewed from 60 % of its lifetime) and the generated `edge.conf` into `RETICORA_PKI_DIR` (daily), and answers the endpoint's authorization callout at `RETICORA_NATS_EDGE_URL`: only certificates of the collector CA that are not revoked, of collectors that are not disabled, each confined to its own subjects, for at most 15 minutes per authorization (docs/betrieb/firewall-matrix.md). A disable, announced on the internal NATS (`discovery.collector.disabled`, also by other replicas), makes one instance cut the collector's open connections through the endpoint's system account within seconds; a failure is logged as `discovery.collector.kick_failed` and retried. The first connection with a renewed certificate revokes its predecessors; hourly it revokes predecessors whose successor was issued 7 days ago (docs/betrieb/collector-ca.md). Run it on one or more server instances; its keys derive from the master key. |
@@ -238,6 +238,29 @@ subscriptions and the notifications (NTF-05).
 - The active collector CA counts as expiring from 60 % of its lifetime (6 of
   its 10 years); every organization with a collector that holds a
   certificate receives one notice. The CA roll-over is an operator task.
+
+## Route audit intents (AUD-07, WP-504)
+
+A write route without a domain recorder (`domainRecordedRoutes` in
+`backend/internal/server/authz.go`) stores an audit intent in
+`audit_route_intent` (actor, route, action, resource, written field names,
+request and correlation id) in a committed transaction before the handler
+runs. If that fails, the request is refused with 503 and `Retry-After` and
+changes nothing. After a successful response the intent is deleted and the
+`audit_log` entry written in one transaction; a refused request deletes it
+without an entry. Routes with a domain recorder write their entry in the
+transaction of the change and store no intent.
+
+The scheduler kind `audit.route_intents` (every minute, one instance at a
+time) turns intents older than two minutes, those of a crash, of a failed
+completion or of a refused request whose intent could not be deleted, into
+`audit_log` entries with `changes.outcome = "unknown"`
+and the original actor, route and request id. Completion and the run take
+the intent with `DELETE ... RETURNING`, so each intent gives exactly one
+entry. An organization whose entries fail keeps its intents for the next
+run. Each run sets `reticora_audit_route_intents_pending` (all intents not
+yet completed); a value that stays above zero for several minutes means the
+audit trail cannot be written.
 
 ## Key rotation (SEC-06)
 

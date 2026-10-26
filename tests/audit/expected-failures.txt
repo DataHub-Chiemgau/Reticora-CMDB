@@ -7,7 +7,6 @@ go;backend/internal/discovery;TestAuditDefectDiscoveryTypedValuesValidated;F-143
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
 go;backend/internal/relationship;TestAuditCleanupCronScopeDeadline;F-111
 go;backend/internal/server;TestAuditDefectDiscoveryJobInGenericJobModel;F-146
-go;backend/internal/server;TestAuditDefectRouteAuditFailureLeavesNoUnauditedMutation;F-149
 go;backend/internal/server;TestAuditDefectRouteAuditStoresOldAndNewValues;F-148
 go;backend/internal/webhook;TestAuditDefectWebhookConsumerKeepsEventsOnTransientErrors;F-151
 sh;tests/audit/g1-gate-evidence.test.sh;abn01_texts;F-138

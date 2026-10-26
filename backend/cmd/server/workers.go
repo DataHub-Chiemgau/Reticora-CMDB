@@ -10,6 +10,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
@@ -351,8 +352,28 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// collector certificates (COL-04), each notice once (WP-425).
 		systemJobs = append(systemJobs, jobs.NewEntitlementNotices(pool).Schedule(),
 			jobs.NewCertificateNotices(pool).Schedule())
+		// Route audit intents no response completed become audit entries
+		// with outcome unknown (AUD-07, WP-504).
+		systemJobs = append(systemJobs, routeIntentsJob(audit.NewPGRouteAuditor(pool)))
 	}
 	return systemJobs
+}
+
+// routeIntentsJob is the scheduler kind audit.route_intents: every minute,
+// on one instance (the scheduler's advisory lock), it turns the route audit
+// intents older than audit.RouteIntentGrace into audit entries with outcome
+// unknown; an organization whose entries fail keeps its intents for the
+// next run. Each run sets reticora_audit_route_intents_pending.
+func routeIntentsJob(auditor *audit.PGRouteAuditor) jobs.Schedule {
+	return jobs.Schedule{Kind: audit.RouteIntentsKind, Spec: "* * * * *", MaxCatchUp: 1, Timeout: 50 * time.Second,
+		Run: func(ctx context.Context) error {
+			written, err := auditor.SweepRouteIntents(ctx)
+			if written > 0 {
+				slog.Warn("route audit entries written from intents no response completed", "entries", written,
+					"outcome", audit.OutcomeUnknown)
+			}
+			return err
+		}}
 }
 
 // workerJob records every run of a system job as a cycle of worker, a

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000167_ci_change_aud03
+Stand: Migration 000168_audit_route_intent
 
 ## Prüfung
 
@@ -360,6 +360,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `assignment` | ja | ja | assignment_tenant_isolation (ALL) |
 | `attribute_definition` | ja | ja | attribute_definition_isolation_delete (DELETE), attribute_definition_isolation_insert (INSERT), attribute_definition_isolation_select (SELECT), attribute_definition_isolation_update (UPDATE) |
 | `audit_log` | ja | ja | audit_isolation (ALL) |
+| `audit_route_intent` | ja | ja | audit_route_intent_isolation (ALL), audit_route_intent_system_select (SELECT) |
 | `building` | ja | ja | building_isolation (ALL) |
 | `cable` | ja | ja | org_isolation (ALL) |
 | `ci` | ja | ja | ci_isolation (ALL), ci_scoped_delete (DELETE), ci_scoped_update (UPDATE) |

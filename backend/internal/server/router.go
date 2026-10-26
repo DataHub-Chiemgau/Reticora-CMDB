@@ -27,7 +27,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
@@ -78,7 +77,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -712,6 +710,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	registry.MustRegister(collectors.NewGoCollector())
 	observability.RegisterWorkerMetrics(registry)
 	jobs.RegisterMetrics(registry)
+	audit.RegisterMetrics(registry)
 	override.RegisterMetrics(registry)
 	operator.RegisterMetrics(registry)
 	entitlement.RegisterMetrics(registry)
@@ -733,22 +732,9 @@ func routeAuditor(opts *Options) middleware.RouteAuditor {
 	if opts.AuditPool == nil {
 		return nil
 	}
-	return pgRouteAuditor{pool: opts.AuditPool, recorder: audit.NewPGRecorder()}
-}
-
-// pgRouteAuditor writes a route's audit entry org-wide on behalf of the
-// organization: the entry belongs to the organization's chain (E-08).
-type pgRouteAuditor struct {
-	pool     *pgxpool.Pool
-	recorder *audit.PGRecorder
-}
-
-func (a pgRouteAuditor) RecordRoute(ctx context.Context, entry *audit.Entry) error {
-	scope := database.OrgWideScope(entry.OrganizationID, "")
-	return database.WithTenant(ctx, a.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := a.recorder.Record(ctx, tx, *entry)
-		return err
-	})
+	// Intents, entries and the scheduler's entries belong to the
+	// organization's chain (E-08, WP-504).
+	return audit.NewPGRouteAuditor(opts.AuditPool)
 }
 
 // ciHandler builds the CI handler; without the event outbox it hands CI
