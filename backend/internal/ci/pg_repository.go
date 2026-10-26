@@ -907,6 +907,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if scopeErr := checkContainmentScope(ctx, tx, orgID, before, &req); scopeErr != nil {
 			return scopeErr
 		}
+		if adoptErr := r.adoptCILocation(ctx, tx, orgID, before, &req); adoptErr != nil {
+			return adoptErr
+		}
 
 		setClauses := make([]string, 0, 18)
 		args := []any{id}
@@ -1171,6 +1174,102 @@ func checkContainmentScope(ctx context.Context, tx pgx.Tx, orgID string, before 
 			Detail: "the CI contains CIs of another client or org-wide CIs (their parent_ci_id)"}}}
 	}
 	return nil
+}
+
+// adoptCILocation keeps the location of a CI that is linked to an asset
+// without location (DB-05, E-81 option 1; F-239): the mirror trigger
+// ci_mirror_asset_location would set the CI's location to the asset's NULL
+// and so drop location, site and room and with them the scope of the CI.
+// The asset takes the location the CI has after the update instead, in the
+// writing transaction under the principal's row level security, with an
+// audit entry on the asset; the trigger then mirrors it back. An asset with
+// a location keeps it and the CI takes it as before. An asset without
+// location the principal may read but not update is refused with 422 on
+// asset_id rather than losing the location silently.
+func (r *PGRepository) adoptCILocation(ctx context.Context, tx pgx.Tx, orgID string, before *Item, req *UpdateRequest) error {
+	if req.AssetID == nil {
+		return nil
+	}
+	assetID := strings.TrimSpace(*req.AssetID)
+	if assetID == "" || assetID == before.AssetID || !api.IsUUID(assetID) {
+		// Unlinking, no new link, or an ID the update itself refuses.
+		return nil
+	}
+	location := before.LocationID
+	if req.LocationID != nil {
+		location = strings.TrimSpace(*req.LocationID)
+	}
+	if location == "" {
+		return nil
+	}
+	tag, err := tx.Exec(ctx, `UPDATE asset SET location_id = $3
+		WHERE id = $1 AND organization_id = $2 AND location_id IS NULL`, assetID, orgID, location)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "42501":
+				return &ValidationError{Violations: []Violation{{Field: "asset_id", Detail: assetCannotTakeLocation}}}
+			case "23503":
+				return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: "location not found"}}}
+			}
+		}
+		return fmt.Errorf("asset takes the location of the CI: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// The asset has a location (mirrored as before), is not visible
+		// (the update refuses the link), or may not be updated here.
+		var unlocated bool
+		err = tx.QueryRow(ctx, `SELECT location_id IS NULL FROM asset WHERE id = $1 AND organization_id = $2`,
+			assetID, orgID).Scan(&unlocated)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return nil
+		case err != nil:
+			return fmt.Errorf("read asset location: %w", err)
+		case unlocated:
+			return &ValidationError{Violations: []Violation{{Field: "asset_id", Detail: assetCannotTakeLocation}}}
+		}
+		return nil
+	}
+	return r.recordAssetLocationAudit(ctx, tx, orgID, assetID, before.ID, location)
+}
+
+// assetCannotTakeLocation refuses a link that would drop the CI's location.
+const assetCannotTakeLocation = "the asset has no location and cannot take the location of the CI"
+
+// recordAssetLocationAudit audits the location an asset took from the CI
+// linked to it (adoptCILocation).
+func (r *PGRepository) recordAssetLocationAudit(ctx context.Context, tx pgx.Tx, orgID, assetID, ciID, location string) error {
+	if r.recorder == nil {
+		return nil
+	}
+	t := tenant.FromContext(ctx)
+	actorType := "system"
+	if strings.TrimSpace(t.UserID) != "" {
+		actorType = "user"
+	}
+	entry := audit.Entry{
+		OrganizationID: orgID,
+		ActorID:        strings.TrimSpace(t.UserID),
+		ActorType:      actorType,
+		Action:         "asset.updated",
+		ResourceType:   "asset",
+		ResourceID:     assetID,
+		Changes: map[string]interface{}{
+			"before": map[string]any{"location_id": nil},
+			"after":  map[string]any{"location_id": location},
+			"fields": []ciFieldChange{{Field: "location_id", Old: nil, New: location}},
+			"reason": "location taken from the CI linked to the asset",
+			"ci_id":  ciID,
+		},
+	}
+	return lastInTx(ctx, func() error {
+		if _, err := r.recorder.Record(ctx, tx, entry); err != nil {
+			return fmt.Errorf("record audit: %w", err)
+		}
+		return nil
+	})
 }
 
 // instanceFieldNames lists the names of the instance attributes of a CI.
