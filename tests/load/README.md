@@ -186,7 +186,51 @@ laden und nach `docs/acceptance/artefakte/lasttest/` entpacken. Danach die
 Werte aus `ergebnis.md` in `docs/acceptance/lasttest-g1.md` übernehmen
 (Platzhalter `⟨LAUF-n…⟩`). Als „vollständiger Lauf“ zählt ein Lauf mit
 `scenarios=all` im ersten Versuch, dessen `ergebnis.md` „Vollständig: ja“
-meldet; „exit 0“ heißt „Ergebnis: alle Jobs grün“.
+meldet; „exit 0“ heißt „Ergebnis: alle Jobs grün“. Für den G1-Nachweis gilt
+statt „drei Läufe mit exit 0“ die Bewertung über drei Läufe (nächster
+Abschnitt).
+
+### Bewertung über drei Läufe (WP-439, E-58)
+
+Nachtrag des Auftraggebers zu E-58 vom 2026-10-26: Der Lastnachweis für G1
+(WP-439, AK 3) wird über die drei Läufe des Nachweises mit dem Median
+bewertet; das ersetzt „drei aufeinanderfolgende Läufe mit exit 0“. Jeder
+Lauf wird weiter wie oben archiviert.
+
+- **Budget:** Eine k6-Schwelle gilt als gehalten, wenn der Median ihrer
+  Messwerte über die drei Läufe sie einhält. Messwert eines Laufs ist der
+  Wert, den seine k6-Zusammenfassung (`<job>.json`) für die Kenngröße der
+  Schwelle meldet: bei `p(95)<500` der p95 des Laufs, bei `max<…`,
+  `count==…` und `value>=…` Maximum, Zähler bzw. Wert; `rate` ist bei einer
+  Rate-Metrik (`checks`, `http_req_failed`) ihr Anteil, bei einem Zähler
+  seine Rate je Sekunde. Zeiten in ms.
+- **Job:** Ein Job gilt als gescheitert, wenn er in mindestens zwei der drei
+  Läufe rot ist (`result-<job>.txt` ohne `status: success`). Ein Job ohne
+  Artefakt zählt in seinem Lauf als rot.
+- **Fehlender Messwert** (Job ohne Artefakt oder ohne k6-Zusammenfassung,
+  Kenngröße nicht exportiert): zählt als verfehlt. Der Median ist dann der
+  schlechtere der beiden anderen Werte; fehlen zwei, gibt es keinen Median
+  und die Schwelle gilt als verfehlt.
+
+`tests/load/evaluate-runs.sh` (Selbsttest `tests/load/evaluate-runs.test.sh`
+im Job `prepare`) wendet die Regel auf genau drei Archive an:
+
+```sh
+a=docs/acceptance/artefakte/lasttest
+tests/load/evaluate-runs.sh "$a/<Lauf-ID-1>" "$a/<Lauf-ID-2>" "$a/<Lauf-ID-3>"
+```
+
+Bewertet werden alle Jobs, die eines der drei `ergebnis.md` nennt. Die
+Ausgabe (Markdown) nennt die drei Läufe (Link, Server-Commit, Eingaben,
+Vollständigkeit und Ergebnis aus `ergebnis.md`), je Job jede Schwelle mit
+dem Messwert je Lauf, dem Median und „gehalten“ ja/nein, den Status des Jobs
+je Lauf („rot in n von 3“) und das Urteil des Jobs, zuletzt die Zeile
+„Bewertung nach E-58 (Median über drei Läufe): alle Budgets gehalten“ bzw.
+„… verfehlt: <Liste>“ (verfehlte Schwellen und Jobs, die in zwei oder drei
+Läufen rot sind). Exit 0, wenn jede Schwelle jedes Jobs im Median gehalten
+und kein Job in mindestens zwei Läufen rot ist, sonst 1; falsche Argumente (nicht genau
+drei Archive, ein Verzeichnis ohne `ergebnis.md`, derselbe Lauf zweimal,
+eine unlesbare k6-Zusammenfassung) Exit 2.
 
 ### Datenbankkosten je Record (F-118)
 
