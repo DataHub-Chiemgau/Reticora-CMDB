@@ -1096,7 +1096,33 @@
     },
     "system": "system",
     "logicalShort": "logical",
-    "fieldCount": "Fields: {{count}}"
+    "fieldCount": "Fields: {{count}}",
+    "editField": "Edit field “{{name}}”",
+    "editFieldAction": "Edit: {{name}}",
+    "editFlagsHint": "Saving changes the index settings of the field; an index job builds the index in the background.",
+    "flagSearchable": "searchable",
+    "flagUnique": "unique",
+    "flagUniqueClient": "unique per client",
+    "flagErrors": {
+      "duplicates": "Uniqueness not enabled: CIs already share a value. Resolve the duplicates first. Reason: {{detail}}",
+      "forbidden": "You are not allowed to manage attributes.",
+      "notFound": "The attribute no longer exists.",
+      "reason": "Reason: {{detail}}",
+      "partial": "The field “{{name}}” was saved, its index settings were not. {{reason}}",
+      "flagsNotSaved": "Index settings not saved. {{reason}}",
+      "fieldNotSaved": "Field not saved. {{reason}}"
+    },
+    "indexJob": {
+      "scheduled": "Index job scheduled",
+      "label": "Index job: {{status}}",
+      "status": {
+        "queued": "queued",
+        "running": "running",
+        "succeeded": "succeeded",
+        "failed": "failed",
+        "cancelled": "cancelled"
+      }
+    }
   },
   "inventory": {
     "assigned": "Assigned",

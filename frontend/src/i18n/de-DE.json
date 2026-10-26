@@ -1096,7 +1096,33 @@
     },
     "system": "System",
     "logicalShort": "logisch",
-    "fieldCount": "Felder: {{count}}"
+    "fieldCount": "Felder: {{count}}",
+    "editField": "Feld „{{name}}“ bearbeiten",
+    "editFieldAction": "Bearbeiten: {{name}}",
+    "editFlagsHint": "Speichern ändert die Index-Einstellungen des Felds; ein Index-Job baut den Index im Hintergrund.",
+    "flagSearchable": "durchsuchbar",
+    "flagUnique": "eindeutig",
+    "flagUniqueClient": "eindeutig je Kunde",
+    "flagErrors": {
+      "duplicates": "Eindeutigkeit nicht aktiviert: Es gibt bereits CIs mit gleichem Wert. Bereinigen Sie die Duplikate zuerst. Grund: {{detail}}",
+      "forbidden": "Keine Berechtigung, Attribute zu verwalten.",
+      "notFound": "Das Attribut existiert nicht mehr.",
+      "reason": "Grund: {{detail}}",
+      "partial": "Das Feld „{{name}}“ wurde gespeichert, die Index-Einstellungen aber nicht. {{reason}}",
+      "flagsNotSaved": "Index-Einstellungen nicht gespeichert. {{reason}}",
+      "fieldNotSaved": "Feld nicht gespeichert. {{reason}}"
+    },
+    "indexJob": {
+      "scheduled": "Index-Job eingeplant",
+      "label": "Index-Job: {{status}}",
+      "status": {
+        "queued": "wartet",
+        "running": "läuft",
+        "succeeded": "abgeschlossen",
+        "failed": "fehlgeschlagen",
+        "cancelled": "abgebrochen"
+      }
+    }
   },
   "inventory": {
     "assigned": "Zugewiesen",

@@ -10,7 +10,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -198,5 +200,118 @@ func TestAttributeDefinitionsAgainstPostgres(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "wp116_asset_tag") {
 		t.Error("organization B does not see the system definition")
+	}
+}
+
+// TestAttributeUniqueFlagConflict covers WP-511 (MET-15, DB-04, F-159)
+// against PostgreSQL over HTTP: PATCH /attribute-definitions/{id} with
+// unique=true while active CIs share a value is 409 with the reason on the
+// field unique; the definition stays non-unique and no index job is queued.
+// Without duplicates (a soft-deleted CI does not count) the same PATCH is
+// 200 and queues the attribute.index job of the definition, which builds
+// idx_attr_<id>_u. The CI type admin renders that reason (CITypeAdminPage).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAttributeUniqueFlagConflict(t *testing.T) {
+	f := scopetest.Seed(t, "89")
+	bg := context.Background()
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	svc := jobs.NewService(jobs.NewPGRepository(f.App))
+	ddl := NewDDLJob(f.App, svc)
+	repo := NewPGRepository(f.App).WithIndexScheduler(ddl)
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+	patch := func(id, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/attribute-definitions/"+id, strings.NewReader(body)).WithContext(ctx)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	queued := func() []jobs.Job {
+		t.Helper()
+		list, _, err := svc.List(bg, f.OrgA, jobs.Filter{Kind: IndexJobKind}, api.PaginationParams{Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return list
+	}
+
+	typ := &Type{OrganizationID: f.OrgA, Key: "wp511-server", Name: "wp511-server", IsObservable: true}
+	if err := repo.Create(ctx, typ); err != nil {
+		t.Fatalf("create type: %v", err)
+	}
+	def, uerr := repo.UpsertField(ctx, f.OrgA, typ.ID, UpsertFieldRequest{Scope: "type", Name: "inventory_no", DataType: "text"})
+	if uerr != nil || def.ID == "" {
+		t.Fatalf("upsert field: %+v %v", def, uerr)
+	}
+	t.Cleanup(func() {
+		for _, unique := range []bool{false, true} {
+			_, _ = f.Admin.Exec(bg, `DROP INDEX IF EXISTS `+IndexName(def.ID, unique))
+		}
+	})
+	var duplicates []string
+	for _, name := range []string{"wp511-a", "wp511-b"} {
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status, attributes)
+			VALUES ($1, $2, $3, $4, 'active', '{"inventory_no": "INV-1"}') RETURNING id::text`,
+			f.OrgA, f.Client1, typ.ID, name).Scan(&id); err != nil {
+			t.Fatalf("seed CI: %v", err)
+		}
+		duplicates = append(duplicates, id)
+	}
+	before := len(queued())
+
+	// Duplicates: 409 with the reason on the field unique, nothing changed.
+	w := patch(def.ID, `{"unique": true, "searchable": false, "unique_scope": "org"}`)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("PATCH unique over duplicates: %d %s, want 409", w.Code, w.Body.String())
+	}
+	var problem struct {
+		Status int    `json:"status"`
+		Detail string `json:"detail"`
+		Field  string `json:"field"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil {
+		t.Fatal(err)
+	}
+	if problem.Status != http.StatusConflict || problem.Field != "unique" || !strings.Contains(problem.Detail, "already share a value") {
+		t.Errorf("409 problem = %+v, want the reason on unique", problem)
+	}
+	stored, gerr := repo.GetAttributeDefinition(ctx, f.OrgA, def.ID)
+	if gerr != nil || stored.Unique {
+		t.Errorf("definition after the refused PATCH = %+v %v, want not unique", stored, gerr)
+	}
+	if n := len(queued()); n != before {
+		t.Errorf("%d index jobs after the refused PATCH, want %d", n, before)
+	}
+
+	// Without duplicates (the soft-deleted CI does not count): 200, the
+	// index job of the definition is queued and builds the unique index.
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET deleted_at = now() WHERE id = $1`, duplicates[1]); err != nil {
+		t.Fatal(err)
+	}
+	w = patch(def.ID, `{"unique": true, "searchable": false, "unique_scope": "org"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH unique without duplicates: %d %s, want 200", w.Code, w.Body.String())
+	}
+	var updated AttributeDefinition
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if !updated.Unique || updated.UniqueScope != "org" {
+		t.Errorf("updated = %+v, want unique per org", updated)
+	}
+	list := queued()
+	if len(list) != before+1 || list[0].Status != jobs.StatusQueued || !strings.Contains(string(list[0].Params), def.ID) {
+		t.Fatalf("index jobs after the PATCH = %+v, want a queued job of %s", list, def.ID)
+	}
+	if _, err := ddl.RunDue(bg); err != nil {
+		t.Fatalf("run index jobs: %v", err)
+	}
+	if list = queued(); list[0].Status != jobs.StatusSucceeded {
+		t.Fatalf("index job = %s %s, want succeeded", list[0].Status, list[0].Error)
+	}
+	if got := readIndex(t, f.Admin, IndexName(def.ID, true)); !got.valid || !got.unique {
+		t.Errorf("unique index = %+v", got)
 	}
 }

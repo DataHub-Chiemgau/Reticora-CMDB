@@ -130,8 +130,26 @@ export interface AttributeIndexFlags {
   unique_scope: 'org' | 'client';
 }
 
+export type AttributeDefinition = components['schemas']['AttributeDefinition'];
+export type AttributeIndexJob = components['schemas']['Job'];
+
+// The job that brings the index of a definition in line with its flags.
+export const ATTRIBUTE_INDEX_JOB_KIND = 'attribute.index';
+
 export const attributeDefinitionApi = {
-  setIndexFlags(id: string, flags: AttributeIndexFlags): Promise<unknown> {
+  list(params: { ci_type_id?: string; scope?: 'type' | 'global' }): Promise<{
+    data: AttributeDefinition[];
+  }> {
+    const query = new URLSearchParams();
+    if (params.ci_type_id) query.set('ci_type_id', params.ci_type_id);
+    if (params.scope) query.set('scope', params.scope);
+    return fetchAPI(`/attribute-definitions?${query.toString()}`);
+  },
+  // The index jobs of the organization, newest first (JOB-03, job:read).
+  indexJobs(): Promise<PaginatedResponse<AttributeIndexJob>> {
+    return fetchAPI(`/jobs?kind=${ATTRIBUTE_INDEX_JOB_KIND}&limit=100`);
+  },
+  setIndexFlags(id: string, flags: AttributeIndexFlags): Promise<AttributeDefinition> {
     return fetchAPI(`/attribute-definitions/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(flags),

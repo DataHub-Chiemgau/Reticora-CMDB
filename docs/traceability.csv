@@ -806,3 +806,5 @@ NTF-03;[B];B;backend/internal/notify/recipients_integration_test.go;WP-507
 TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-497
 JOB-01;[B];B;backend/internal/server/discovery_job_tracking_integration_test.go;WP-502
 REP-01;[B];B;backend/internal/server/discovery_job_tracking_integration_test.go;WP-502
+MET-15;B/G1;B;frontend/src/pages/CITypeAdminPage.flags.test.tsx;WP-511
+DB-04;nicht geliefert;B;backend/internal/citype/attrdef_integration_test.go;WP-511
