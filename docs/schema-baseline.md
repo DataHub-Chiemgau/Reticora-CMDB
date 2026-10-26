@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000164_attr_index_per_key
+Stand: Migration 000165_ip_address_interface_index
 
 ## Prüfung
 
@@ -74,6 +74,12 @@ Ebenso der Index der Standardsortierung der CI-Liste (WP-605, NFR-02):
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_list_sort ON ci (organization_id, created_at DESC, id DESC) INCLUDE (client_id, site_id) WHERE deleted_at IS NULL;
+```
+
+Ebenso der Index der Adressen einer Schnittstelle (WP-608, NFR-03):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ip_address_interface ON ip_address (interface_id) WHERE interface_id IS NOT NULL;
 ```
 
 Jede Anweisung einzeln ausführen (nicht in einer Transaktion); ein

@@ -27,6 +27,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
@@ -850,4 +851,411 @@ func withoutVarying(v any, ids ...string) any {
 		return x
 	}
 	return v
+}
+
+// rediscoverBudget is the statement budget of one re-discovered device on
+// the queue path (WP-608, NFR-03, F-118), amortized over a fetch of about
+// 100 records in four lanes: every statement the ingest sends (frame, the
+// batch transaction of each window, the records the window leaves, the
+// topology and the ledger), BEGIN with the tenant GUCs counted once. The
+// window updates the known devices under its identity locks: per device
+// the observed-value check (3), the row lock, the instance fields, the
+// update with its reads (4), history, search index, interfaces and
+// addresses (6) and audit and outbox under their locks (3); about 21.5 on
+// the first re-discovery of the load test (eth1 new), 17.5 after it. Before
+// WP-608 every known device had a transaction of its own that took its
+// identity locks and read its candidates again, and its neighbor and its
+// edge three transactions more: 36 statements per device.
+const rediscoverBudget = 22
+
+// TestRediscoverStatementBudget covers WP-608 (NFR-03, F-118) against
+// PostgreSQL with the write path of the server (audit, outbox, search index,
+// provenance, observed-value check, instance fields, interfaces and
+// topology), four lanes and the ingest locks of the queue: 100 servers like
+// the seed of the load test (serial number, management IP, eth0 with its
+// address, an LLDP edge to one of two switches) are re-discovered twice with
+// the records of tests/load/ingest.js SCENARIO=rediscover (chassis MAC,
+// eth0 and a new eth1, LLDP neighbor), one device twice in the first fetch:
+//   - at most rediscoverBudget statements per record, the known devices
+//     updated in the batch transaction of their window (one per lane), which
+//     takes the identity locks of its records first and writes audit and
+//     outbox last under their locks (E-56);
+//   - the neighbor looked up once per fetch and lane, the edges read and
+//     re-confirmed with one statement each;
+//   - the result equals the path of one transaction per record (organization
+//     B, the CI repository without batch creation): CI, history, audit
+//     entries, events, search document, interfaces, addresses, identity MACs
+//     and edges per device, the audit chains intact, no new CI;
+//   - the address statements of the interface sync read ip_address through
+//     idx_ip_address_interface (migration 000165) as reticora_app.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRediscoverStatementBudget(t *testing.T) {
+	f := scopetest.Seed(t, "f0")
+	bg := context.Background()
+	const servers = 100
+	for _, org := range []string{f.OrgA, f.OrgB} {
+		seedKnownServers(t, f, org, servers)
+	}
+	type device struct{ serial, ip, mac, name, id, ifID string }
+	devices := func(org string) map[int]device {
+		rows, err := f.Admin.Query(bg, `SELECT i, c.serial_number, host(c.management_ip), n.mac::text, c.name, c.id::text, n.id::text
+			FROM generate_series(1, $2::int) AS i JOIN ci c ON c.id = md5($1 || '/ci/' || i)::uuid
+			JOIN network_interface n ON n.ci_id = c.id AND n.name = 'eth0'`, org, servers+2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		out := map[int]device{}
+		for rows.Next() {
+			var i int
+			var d device
+			if err := rows.Scan(&i, &d.serial, &d.ip, &d.mac, &d.name, &d.id, &d.ifID); err != nil {
+				t.Fatal(err)
+			}
+			out[i] = d
+		}
+		if rows.Err() != nil || len(out) != servers+2 {
+			t.Fatalf("%d seeded devices of %s: %v", len(out), org, rows.Err())
+		}
+		return out
+	}
+	seeded := map[string]map[int]device{f.OrgA: devices(f.OrgA), f.OrgB: devices(f.OrgB)}
+	// The record of ingest.js rediscoverRecord for device n of the seed.
+	hex := func(prefix string, n int) string { return fmt.Sprintf("%s%02x:%02x", prefix, (n>>8)&255, n&255) }
+	record := func(org string, n int, observed time.Time) plugins.DeviceRecord {
+		d, sw := seeded[org][n], seeded[org][1+n%2]
+		return plugins.DeviceRecord{
+			RecordID: plugins.NewRecordID(), ObservedAt: observed, Source: "snmp", TargetIP: d.ip,
+			Identity: plugins.DeviceIdentity{SerialNumber: d.serial, PrimaryMAC: hex("ac:1f:6b:00:", n), Hostname: d.name},
+			Classification: plugins.DeviceClassification{CIType: "server", Manufacturer: "Reticora Labs", Model: "R-1U",
+				SysObjectID: "1.3.6.1.4.1.99999.1.1"},
+			System: plugins.DeviceSystem{Name: d.name, Description: "Reticora Labs R-1U"},
+			Interfaces: []plugins.DeviceInterface{
+				{Name: "eth0", IfIndex: 1, MAC: d.mac, SpeedMbps: 1000, AdminStatus: "up", OperStatus: "up",
+					IPs: []plugins.DeviceIP{{Address: d.ip, PrefixLength: 16}}},
+				{Name: "eth1", IfIndex: 2, MAC: hex("ac:1f:6b:01:", n), SpeedMbps: 1000, AdminStatus: "up", OperStatus: "up"},
+			},
+			Neighbors: []plugins.DeviceNeighbor{{Protocol: "lldp", LocalInterface: "eth0", RemoteMAC: hex("ac:1f:6b:00:", 1+n%2),
+				RemoteIP: sw.ip, RemoteHostname: sw.name, RemoteInterface: fmt.Sprintf("Gi1/0/%d", n%48+1)}},
+		}
+	}
+
+	trace := &txTrace{open: map[*pgx.Conn][]string{}}
+	cfg := f.App.Config()
+	cfg.ConnConfig.Tracer = trace
+	cfg.MinConns = 0
+	pool, err := pgxpool.NewWithConfig(bg, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	// The handler of the server (internal/server/router.go) with four lanes;
+	// without batch creation every record runs in a transaction of its own.
+	build := func(pool *pgxpool.Pool, batch bool) *discovery.Handler {
+		cis := ci.NewIndexingRepository(ci.NewPGRepositoryWithAudit(pool, audit.NewPGRecorder()).WithEvents(events.NewOutbox()),
+			search.NewCIIndexer(search.NewPGRepository(pool)))
+		if !batch {
+			cis = noBatch{cis}
+		}
+		types := citype.NewPGRepository(pool)
+		return discovery.NewHandler(discovery.NewPGRepository(pool), cis, relationship.NewPGRepository(pool).WithEvents(events.NewOutbox())).
+			WithProvenance(manyProvenance{provenance{repo: override.NewPGRepository(pool)}}).
+			WithInstanceFields(types).
+			WithObservedValidator(ci.NewService(cis).WithFieldResolver(types)).
+			WithInterfaces(ipam.NewPGRepository(pool)).
+			WithIngestLanes(4)
+	}
+	handlers := map[string]*discovery.Handler{f.OrgA: build(pool, true), f.OrgB: build(f.App, false)}
+	consume := func(t *testing.T, org string, records []plugins.DeviceRecord) {
+		t.Helper()
+		ctx := tenant.WithTenant(f.OrgCtx(org), tenant.TenantInfo{OrganizationID: org, UserID: f.User})
+		for i, result := range discovery.ConsumeRecords(ctx, handlers[org], org, records...) {
+			if result != "ack" {
+				t.Fatalf("%s: record %d: delivery %s", org, i, result)
+			}
+		}
+	}
+	lock := regexp.MustCompile(`(?s)^with prev as materialized .*pg_advisory_xact_lock_shared\(s\.c, s\.k\)`)
+	edges := func(org string, since time.Time) (n, confirmed int) {
+		if err := f.Admin.QueryRow(bg, `SELECT count(*), count(*) FILTER (WHERE last_confirmed_at >= $2) FROM ci_relationship
+			WHERE organization_id = $1`, org, since).Scan(&n, &confirmed); err != nil {
+			t.Fatal(err)
+		}
+		return n, confirmed
+	}
+
+	var addressStatements []string
+	for pass := 1; pass <= 2; pass++ {
+		t.Run(fmt.Sprintf("re-discovery %d", pass), func(t *testing.T) {
+			start := time.Now().UTC().Truncate(time.Second)
+			observed := time.Now().UTC().Add(-time.Second)
+			for _, org := range []string{f.OrgA, f.OrgB} {
+				var records []plugins.DeviceRecord
+				for n := 3; n <= servers+2; n++ {
+					records = append(records, record(org, n, observed))
+				}
+				if pass == 1 {
+					// The same device twice in one fetch: the window updates it with
+					// the first record, the second follows on its own.
+					again := record(org, 7, observed.Add(500*time.Millisecond))
+					again.Classification.Model = "R-2U"
+					records = append(records, again)
+				}
+				trace.take()
+				consume(t, org, records)
+				if org != f.OrgA {
+					continue
+				}
+				txs, loose := trace.take()
+				statements, updates := len(loose), 0
+				for _, tx := range txs {
+					statements += len(tx)
+					if count(tx, `^update ci set`) == 0 {
+						continue
+					}
+					updates++
+					if !lock.MatchString(tx[1]) {
+						t.Errorf("a transaction that updates CIs does not take the identity locks first: %.200q", tx)
+					}
+					checkLockedTail(t, tx)
+					for _, sql := range tx {
+						if strings.Contains(sql, "update ip_address") {
+							addressStatements = append(addressStatements, sql)
+						}
+					}
+				}
+				perRecord := float64(statements) / float64(len(records))
+				if perRecord > rediscoverBudget {
+					t.Errorf("re-discovery of %d records: %d statements, %.2f per record, budget %d", len(records), statements, perRecord, rediscoverBudget)
+				}
+				// One window per lane, plus the second record of the device sent
+				// twice.
+				if want := 4 + (2 - pass); updates > want {
+					t.Errorf("%d transactions update the %d known devices, want the batch transaction of each window (at most %d)", updates, len(records), want)
+				}
+				neighbors, edgeReads, confirms := 0, 0, 0
+				for _, tx := range txs {
+					neighbors += count(tx, `(?s)^select id::text, created_at\s+from ci\s+where .*deleted_at is null and \(id = any \(array\(select ci_id from ci_identity_mac`)
+					edgeReads += count(tx, `(?s)^select .*(from|join)\s+ci_relationship\b`)
+					confirms += count(tx, `(?s)^update ci_relationship\b`)
+				}
+				if neighbors > 8 || edgeReads > 4 || confirms > 4 {
+					t.Errorf("topology of %d records: %d neighbor lookups, %d edge reads, %d edge updates; want each neighbor once and the edges at once per lane",
+						len(records), neighbors, edgeReads, confirms)
+				}
+				t.Logf("re-discovery %d of %d records: %d statements (%.2f per record) in %d transactions, %d of them update CIs; "+
+					"topology: %d neighbor lookups, %d edge reads, %d edge updates", pass, len(records), statements, perRecord, len(txs), updates,
+					neighbors, edgeReads, confirms)
+			}
+
+			for _, org := range []string{f.OrgA, f.OrgB} {
+				var cis, seen int
+				if err := f.Admin.QueryRow(bg, `SELECT count(*), count(*) FILTER (WHERE last_seen_at >= $2 AND name LIKE 'srv-%')
+					FROM ci WHERE organization_id = $1`, org, start).Scan(&cis, &seen); err != nil {
+					t.Fatal(err)
+				}
+				if cis != servers+2 || seen != servers {
+					t.Errorf("%s: %d CIs (want %d, no new CI), %d servers seen (want %d)", org, cis, servers+2, seen, servers)
+				}
+				if n, confirmed := edges(org, start); n != servers || confirmed != servers {
+					t.Errorf("%s: %d edges (want %d, none new), %d confirmed by the re-discovery", org, n, servers, confirmed)
+				}
+				if result, err := audit.Verify(bg, f.App, org); err != nil || !result.Intact {
+					t.Errorf("%s: audit chain: %+v, %v", org, result, err)
+				}
+			}
+			for n := 3; n <= servers+2; n++ {
+				want := rediscovered(t, f, f.OrgB, seeded[f.OrgB][n].id)
+				got := rediscovered(t, f, f.OrgA, seeded[f.OrgA][n].id)
+				for table := range want {
+					if !reflect.DeepEqual(got[table], want[table]) {
+						w, _ := json.Marshal(want[table])
+						g, _ := json.Marshal(got[table])
+						t.Errorf("device %d: %s of the window differs from one transaction per record:\n window %s\n record %s", n, table, g, w)
+					}
+				}
+			}
+		})
+	}
+
+	// The interface sync confirms an address of an interface and counts a
+	// miss for the addresses of the device's interfaces it did not report.
+	d := seeded[f.OrgA][3]
+	args := map[string][]any{
+		"update ip_address set miss_count = 0":                  {d.ifID, d.ip},
+		"update ip_address a set miss_count = a.miss_count + 1": {d.id, []string{}},
+	}
+	for prefix, a := range args {
+		var sql string
+		for _, s := range addressStatements {
+			if strings.HasPrefix(strings.Join(strings.Fields(s), " "), prefix) {
+				sql = s
+				break
+			}
+		}
+		if sql == "" {
+			t.Errorf("the re-discovery sent no statement %q", prefix)
+			continue
+		}
+		scans := 0
+		for _, r := range relationReads(t, f, "ip_address", sql, a...) {
+			if r.node == "ModifyTable" {
+				continue
+			}
+			scans++
+			if r.index != "idx_ip_address_interface" || !strings.Contains(r.cond, "interface_id") {
+				t.Errorf("%q reads ip_address with %s (index condition %q), want idx_ip_address_interface on interface_id", prefix, r, r.cond)
+			}
+		}
+		if scans == 0 {
+			t.Errorf("no read of ip_address in the plan of %q", sql)
+		}
+	}
+}
+
+// TestDiscoveryEdgesMatchDiscoveryEdge covers WP-608 (TOP-02, NFR-03)
+// against PostgreSQL: DiscoveryEdges reads the edges of several keys with
+// one statement and finds for every key what DiscoveryEdge finds on its
+// own, as the application role: the edge with its id and source, nothing
+// for a key without one (another type, another direction, a CI of another
+// organization) and, for a principal of client 1, nothing for the edge of
+// client 2 (row level security, TEN-05).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestDiscoveryEdgesMatchDiscoveryEdge(t *testing.T) {
+	f := scopetest.Seed(t, "f0")
+	bg := context.Background()
+	repo := discovery.NewPGRepository(f.App)
+	sw, a, b, c := f.CI(t, f.OrgA, "", "wp608-sw"), f.CI(t, f.OrgA, f.Client1, "wp608-a"), f.CI(t, f.OrgA, f.Client1, "wp608-b"),
+		f.CI(t, f.OrgA, f.Client2, "wp608-c")
+	foreign := f.CI(t, f.OrgB, "", "wp608-foreign")
+	for _, e := range []struct{ src, dst, rel, source string }{
+		{a, sw, "connected_to", "discovery"}, {b, sw, "connected_to", "manual"}, {a, b, "depends_on", "discovery"}, {c, sw, "connected_to", "discovery"},
+	} {
+		if _, err := f.Admin.Exec(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type, source)
+			VALUES ($1, $2, $3, $4, $5)`, f.OrgA, e.src, e.dst, e.rel, e.source); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keys := []discovery.EdgeKey{
+		{SourceCIID: a, TargetCIID: sw, RelType: "connected_to"}, {SourceCIID: b, TargetCIID: sw, RelType: "connected_to"},
+		{SourceCIID: a, TargetCIID: b, RelType: "depends_on"}, {SourceCIID: c, TargetCIID: sw, RelType: "connected_to"},
+		{SourceCIID: a, TargetCIID: b, RelType: "connected_to"}, {SourceCIID: sw, TargetCIID: a, RelType: "connected_to"},
+		{SourceCIID: foreign, TargetCIID: sw, RelType: "connected_to"}, {SourceCIID: a, TargetCIID: sw, RelType: "connected_to"},
+	}
+	for name, ctx := range map[string]context.Context{"org-wide": f.OrgCtx(f.OrgA), "client 1": f.ClientCtx(f.Client1)} {
+		found, err := repo.DiscoveryEdges(ctx, f.OrgA, keys)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		hits := 0
+		for _, k := range keys {
+			id, source, ok, err := repo.DiscoveryEdge(ctx, f.OrgA, k.SourceCIID, k.TargetCIID, k.RelType)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, batched := found[k]
+			if batched != ok || got.ID != id || got.Source != source {
+				t.Errorf("%s: key %+v: DiscoveryEdges %+v (%v), DiscoveryEdge %q %q (%v)", name, k, got, batched, id, source, ok)
+			}
+			if ok {
+				hits++
+			}
+		}
+		if want := map[string]int{"org-wide": 5, "client 1": 4}[name]; hits != want {
+			t.Errorf("%s: %d keys with an edge, want %d", name, hits, want)
+		}
+	}
+}
+
+// seedKnownServers creates the devices of a load test seed in org
+// (cmd/seed, SIM-01): the switches 1 and 2 and the servers 3 … servers+2
+// with serial number, management IP and host name, eth0 with a locally
+// administered MAC and the management address, an LLDP edge from every
+// server to switch 1 + n mod 2 (serial numbers and MACs the same in every
+// organization), and 20,000 addresses of no interface in the
+// organization, so that a read of every address of the organization costs
+// what it costs at the volumes of the load test.
+func seedKnownServers(t *testing.T, f *scopetest.Fixture, org string, servers int) {
+	t.Helper()
+	bg := context.Background()
+	devices := servers + 2
+	for _, s := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO ci (id, organization_id, ci_type_id, name, status, manufacturer, model, serial_number, management_ip,
+			hostname, discovery_source, first_seen_at, last_seen_at, attributes)
+		SELECT md5($1 || '/ci/' || i)::uuid, $1::uuid, t.id,
+			CASE WHEN i <= 2 THEN 'sw-' ELSE 'srv-' END || lpad(i::text, 5, '0'), 'active', 'Reticora Labs',
+			CASE WHEN i <= 2 THEN 'RX-48' ELSE 'R-1U' END, 'SN' || upper(substr(md5('rediscover/serial/' || i), 1, 12)),
+			('10.241.' || (i / 250) || '.' || (i % 250 + 1))::inet, CASE WHEN i <= 2 THEN 'sw-' ELSE 'srv-' END || lpad(i::text, 5, '0'),
+			'snmp', now() - interval '30 days', now() - interval '1 day', '{}'::jsonb
+		FROM generate_series(1, $2::int) AS i
+		JOIN ci_type t ON t.organization_id IS NULL AND t.key = CASE WHEN i <= 2 THEN 'switch' ELSE 'server' END`, []any{org, devices}},
+		{`INSERT INTO network_interface (id, organization_id, ci_id, name, mac, if_type, speed_mbps, is_management, oper_status, if_index)
+		SELECT md5($1 || '/if/' || i)::uuid, $1::uuid, md5($1 || '/ci/' || i)::uuid, 'eth0',
+			('02:' || substr(md5('rediscover/mac/' || i), 1, 2) || ':' || substr(md5('rediscover/mac/' || i), 3, 2) || ':' ||
+			 substr(md5('rediscover/mac/' || i), 5, 2) || ':' || substr(md5('rediscover/mac/' || i), 7, 2) || ':' ||
+			 substr(md5('rediscover/mac/' || i), 9, 2))::macaddr, 'ethernet', 1000, true, 'up', 1
+		FROM generate_series(1, $2::int) AS i`, []any{org, devices}},
+		{`INSERT INTO ip_address (organization_id, interface_id, address, type, last_seen_at)
+		SELECT $1::uuid, md5($1 || '/if/' || i)::uuid, ('10.241.' || (i / 250) || '.' || (i % 250 + 1))::inet, 'discovered',
+			now() - interval '1 day'
+		FROM generate_series(1, $2::int) AS i`, []any{org, devices}},
+		{`INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type, source, source_system, confidence,
+			first_seen_at, last_seen_at, last_confirmed_at)
+		SELECT $1::uuid, md5($1 || '/ci/' || i)::uuid, md5($1 || '/ci/' || (1 + i % 2))::uuid, 'connected_to', 'discovery', 'lldp', 1.0,
+			now() - interval '30 days', now() - interval '1 day', now() - interval '1 day'
+		FROM generate_series(3, $2::int) AS i`, []any{org, devices}},
+		{`INSERT INTO ip_address (organization_id, address, type)
+		SELECT $1::uuid, ('10.242.' || (i / 250) || '.' || (i % 250 + 1))::inet, 'discovered'
+		FROM generate_series(1, 20000) AS i`, []any{org}},
+	} {
+		if _, err := f.Admin.Exec(bg, s.sql, s.args...); err != nil {
+			t.Fatalf("seed %s: %v", org, err)
+		}
+	}
+	for _, table := range []string{"ci", "ci_identity_mac", "network_interface", "ip_address", "ci_relationship"} {
+		if _, err := f.Admin.Exec(bg, `ANALYZE `+table); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// rediscovered reads what the ingest keeps of a device per table, with ids,
+// times, hashes and the ids of other rows replaced (WP-608): the CI, its
+// history, audit entries, events, search document, interfaces, addresses,
+// identity MACs and edges.
+func rediscovered(t *testing.T, f *scopetest.Fixture, orgID, ciID string) map[string]any {
+	t.Helper()
+	out := map[string]any{}
+	for table, query := range map[string]string{
+		"ci":        `SELECT jsonb_agg(to_jsonb(x)) FROM ci x WHERE x.id = $1`,
+		"ci_change": `SELECT jsonb_agg(to_jsonb(x) ORDER BY x.ci_version, x.change_type, x.field_name, x.new_value::text) FROM ci_change x WHERE x.ci_id = $1`,
+		"audit_log": `SELECT jsonb_agg(to_jsonb(x) - 'seq' ORDER BY x.seq) FROM audit_log x WHERE x.resource_id = $1 AND x.action LIKE 'ci.%'`,
+		"event_outbox": `SELECT jsonb_agg(to_jsonb(x) - 'sequence' - 'published_at' - 'attempts' - 'last_error' ORDER BY x.sequence)
+			FROM event_outbox x WHERE x.entity_id = $1::text`,
+		"search_document":   `SELECT jsonb_agg(to_jsonb(x)) FROM search_document x WHERE x.entity_id = $1`,
+		"network_interface": `SELECT jsonb_agg(to_jsonb(x) ORDER BY x.name) FROM network_interface x WHERE x.ci_id = $1`,
+		"ip_address": `SELECT jsonb_agg(to_jsonb(a) - 'interface_id' - 'vrf_id' - 'subnet_id' ORDER BY a.address)
+			FROM ip_address a JOIN network_interface n ON n.id = a.interface_id WHERE n.ci_id = $1`,
+		"ci_identity_mac": `SELECT jsonb_agg(m.mac::text ORDER BY m.mac) FROM ci_identity_mac m WHERE m.ci_id = $1`,
+		"ci_relationship": `SELECT jsonb_agg(to_jsonb(r) - 'source_ci_id' - 'target_ci_id' - 'last_confirmed_at' ORDER BY r.rel_type)
+			FROM ci_relationship r WHERE r.source_ci_id = $1`,
+	} {
+		var raw []byte
+		if err := f.Admin.QueryRow(context.Background(), query, ciID).Scan(&raw); err != nil {
+			t.Fatalf("%s of %s: %v", table, ciID, err)
+		}
+		var v any
+		if raw != nil {
+			if err := json.Unmarshal(raw, &v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		out[table] = withoutVarying(v, ciID, orgID)
+	}
+	return out
 }

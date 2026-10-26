@@ -1084,3 +1084,33 @@ func (r *PGRepository) Confirm(ctx context.Context, orgID, id string, confidence
 		return err
 	})
 }
+
+// ConfirmMany implements BatchConfirmer with one UPDATE: the confirmations
+// of an edge apply as one Confirm after the other would (the last reported
+// confidence wins), and the rows are taken in the order of their ids. An
+// edge that is gone or no discovery edge is not changed, as Confirm does
+// not change it.
+func (r *PGRepository) ConfirmMany(ctx context.Context, orgID string, confirmations []Confirmation) error {
+	confidence := make(map[string]*float64, len(confirmations))
+	for _, c := range confirmations {
+		if _, seen := confidence[c.ID]; seen && c.Confidence == nil {
+			continue
+		}
+		confidence[c.ID] = c.Confidence
+	}
+	if len(confidence) == 0 {
+		return nil
+	}
+	ids := slices.Sorted(maps.Keys(confidence))
+	values := make([]*float64, len(ids))
+	for i, id := range ids {
+		values[i] = confidence[id]
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE ci_relationship r
+			SET last_seen_at = now(), last_confirmed_at = now(), confidence = COALESCE(c.confidence, r.confidence)
+			FROM unnest($2::uuid[], $3::numeric[]) AS c(id, confidence)
+			WHERE r.id = c.id AND r.organization_id = $1 AND r.source = 'discovery'`, orgID, ids, values)
+		return err
+	})
+}

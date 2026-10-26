@@ -721,3 +721,4 @@ NFR-02;[B];LT;backend/internal/ci/attr_filter_plan_integration_test.go;WP-607
 NFR-01;[B], Teilumfang [P5];LT;backend/internal/ci/indexes_integration_test.go;WP-607
 NFR-10;[Q];LT;tests/load/evaluate-runs.sh;WP-612
 NFR-02;[B];LT;backend/internal/topology/impact_bench_integration_test.go;WP-611
+NFR-03;[B], Teilumfang [P5];LT;backend/internal/discovery/ingest_budget_integration_test.go;WP-608

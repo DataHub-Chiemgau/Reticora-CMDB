@@ -1018,11 +1018,14 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 // CI repository (WP-333), each window of up to ingestBatch records (with
 // the ingest locks also bounded by its identity keys, see windowEnd) first
 // runs one more transaction: one candidate query for all its records, and
-// its new devices created together. Updates of known devices and every
-// record the batch leaves follow one by one in the order of the records;
-// the records of one device keep their order. When a record fails, the
-// devices its window created in the batch stay committed like the records
-// before it and are entered in the ledger.
+// its new devices created together. Records from the queue (with the
+// ingest locks) also update the known devices there, under the window's
+// identity locks (WP-608). Every record the batch leaves follows one by one
+// in the order of the records; without the ingest locks the updates of
+// known devices do as well. The records of one device keep their order.
+// When a record fails, the devices its window created or updated in the
+// batch stay committed like the records before it and are entered in the
+// ledger.
 func (h *Handler) processItems(ctx context.Context, orgID string, items []IngestItem) (BulkIngestResponse, error) {
 	var resp BulkIngestResponse
 	if h.ciRepo == nil {
@@ -1128,7 +1131,8 @@ type batchFrame struct {
 	// candidates[i] are the identity candidates of record i the batch query
 	// of its window read (WP-333); valid only with prefetched[i] and
 	// without locks: with them, the batch's identity locks end with its
-	// commit, so a record reads its candidates again under its own.
+	// commit, so a record reads its candidates again under its own (the
+	// known devices of the window are updated within it, updateInWindow).
 	candidates [][]ci.Item
 	prefetched []bool
 	// limitExclusive makes every creation of the batch take the exclusive
@@ -1248,13 +1252,35 @@ func (h *Handler) deviceReviewScope(ctx context.Context, orgID string, item *Ing
 // it runs in the record's own transaction. out receives what it changed.
 func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchFrame, i int, out *recordOutcome) error {
 	item := frame.items[i]
-	typeID, identity := frame.typeIDs[i], frame.identity
-	resp := &out.resp
 	// Records that share an identity key never run at the same time: the
 	// locks come first, before anything is read (WP-334).
 	if err := h.lockIdentities(ctx, orgID, frame, &item); err != nil {
 		return err
 	}
+	var candidates []ci.Item
+	if i < len(frame.prefetched) && frame.prefetched[i] && !frame.locking {
+		// Read by the batch query of the window (WP-333): no record before
+		// this one changed them.
+		candidates = frame.candidates[i]
+	} else {
+		var err error
+		if candidates, err = h.identityCandidates(ctx, orgID, &item); err != nil {
+			return err
+		}
+	}
+	return h.reconcileRecord(ctx, orgID, frame, i, &item, candidates, out)
+}
+
+// reconcileRecord reconciles a copy of rec, record i of the frame, against
+// its identity candidates in the context transaction, which holds the
+// identity locks of the record when the frame's records take them: the
+// transaction of the record (processRecord) or the batch transaction of its
+// window (batchWindow). out receives what it changed.
+func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batchFrame, i int, rec *IngestItem, candidates []ci.Item,
+	out *recordOutcome) error {
+	item := *rec
+	typeID, identity := frame.typeIDs[i], frame.identity
+	resp := &out.resp
 
 	// No collector profile matched (DIS-02): the device becomes a
 	// generic_device CI and a reviewer classifies it, once the identity is
@@ -1270,17 +1296,6 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 		return err
 	}
 
-	var candidates []ci.Item
-	if i < len(frame.prefetched) && frame.prefetched[i] && !frame.locking {
-		// Read by the batch query of the window (WP-333): no record before
-		// this one changed them.
-		candidates = frame.candidates[i]
-	} else {
-		var err error
-		if candidates, err = h.identityCandidates(ctx, orgID, &item); err != nil {
-			return err
-		}
-	}
 	result := ResolveIdentity(candidates, &item, identity)
 	// No live CI: a soft-deleted one may be the device (CI-13).
 	if result.Action == ReconcileCreated {
@@ -1587,8 +1602,10 @@ type pendingCI struct {
 // one transaction (NFR-03, WP-333): one query for the live candidates of
 // all records, one for the soft-deleted candidates of the new devices, and
 // the new devices created together (ci.BatchCreator), indexed together and
-// with their provenance in one statement. It marks the records it handled
-// and leaves the candidates it read to the records that follow one by one.
+// with their provenance in one statement; with the ingest locks also the
+// updates of the known devices (updateInWindow, WP-608). It marks the
+// records it handled and leaves the candidates it read to the records that
+// follow one by one.
 // It never fails the ingest: when the batch cannot run or rolls back, every
 // record of the window is processed on its own, which reports any error
 // for its record.
@@ -1703,9 +1720,21 @@ func (h *Handler) batchWindow(ctx context.Context, orgID string, frame *batchFra
 			deletedOf[k] = resurrectionGuard(&qs[k])
 		}
 	}
-	if len(fresh) == 0 {
-		return nil
+	if len(fresh) > 0 {
+		if err := h.createInWindow(ctx, orgID, frame, start, qs, finder, creator, candidates, results, fresh, deletedOf, w); err != nil {
+			return err
+		}
 	}
+	return h.updateInWindow(ctx, orgID, frame, start, first, results, candidates, w)
+}
+
+// createInWindow creates the new devices fresh of the window together
+// (WP-333): one query for their soft-deleted candidates, the creation with
+// one statement, indexed together and with their provenance in one
+// statement.
+func (h *Handler) createInWindow(ctx context.Context, orgID string, frame *batchFrame, start int, qs []IdentityQuery,
+	finder BatchIdentityFinder, creator ci.BatchCreator, candidates [][]ci.Item, results []ReconcileResult, fresh []int,
+	deletedOf []bool, w *windowOutcome) error {
 	// No live CI: a soft-deleted one may be the device (CI-13).
 	var deleted [][]ci.Item
 	if dkeys, drefs := batchKeys(qs, deletedOf); !dkeys.empty() {
@@ -1831,6 +1860,41 @@ func (h *Handler) batchWindow(ctx context.Context, orgID string, frame *batchFra
 		}
 		w.resp.Created++
 		w.done[rec.k], w.ciID[rec.k] = true, rec.ci.ID
+	}
+	return nil
+}
+
+// updateInWindow updates the known devices of the window in its batch
+// transaction when the frame's records take the ingest locks (WP-608,
+// NFR-03). The window holds the identity locks of its records until its
+// commit, so the candidates it read stay valid; a record in a transaction
+// of its own takes the locks and reads the candidates again, and takes the
+// organization's audit and outbox locks and commits for itself. Only the
+// first record of a device in the window is updated here, in the order of
+// the records and after the new devices; the others follow one by one. A
+// record that fails rolls the window back, and its records are processed
+// one by one (processWindow). Without the locks the records use the
+// window's candidates in transactions of their own (WP-333).
+func (h *Handler) updateInWindow(ctx context.Context, orgID string, frame *batchFrame, start int, first []bool,
+	results []ReconcileResult, candidates [][]ci.Item, w *windowOutcome) error {
+	if !frame.locking {
+		return nil
+	}
+	for k := range first {
+		i := start + k
+		// A device no collector profile matched opens its review on its own.
+		if !first[k] || results[k].Action != ReconcileMatched || frame.noProfile[i] {
+			continue
+		}
+		// The window works on a copy: a record it leaves is processed on its
+		// own from what it reported.
+		var out recordOutcome
+		item := cloneItem(&frame.items[i])
+		if err := h.reconcileRecord(ctx, orgID, frame, i, &item, candidates[k], &out); err != nil {
+			return err
+		}
+		w.resp.add(&out.resp)
+		w.done[k], w.ciID[k] = true, out.ciID
 	}
 	return nil
 }

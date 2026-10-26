@@ -193,6 +193,19 @@ func (r *MemoryRepository) Confirm(_ context.Context, orgID, id string, confiden
 	return nil
 }
 
+// BatchConfirmer re-confirms several discovery edges seen again with one
+// statement, each as Confirm does (TOP-02; WP-608, NFR-03).
+type BatchConfirmer interface {
+	ConfirmMany(ctx context.Context, orgID string, confirmations []Confirmation) error
+}
+
+// Confirmation is the re-confirmation of one discovery edge: its id and
+// the reported confidence (nil keeps the stored one).
+type Confirmation struct {
+	ID         string
+	Confidence *float64
+}
+
 // Repository defines persistence operations for relationships.
 type Repository interface {
 	List(ctx context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error)
