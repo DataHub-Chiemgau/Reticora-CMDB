@@ -24,6 +24,7 @@
 #                         archived; other: the count rises, but with an older
 #                         segment; nocount: the segment, but the same count
 #   STUB_FULL_JOB         complete|failed|running, job of the CronJob as is
+#   STUB_FULL_LOG         log of that job (default: the backup command end)
 #   STUB_FULL_LISTED      0: the completed job adds no full backup to info;
 #                         always: a full backup appears whatever the job does
 #   STUB_WRONG_JOB        complete|failed|running, job with a literal cipher
@@ -132,7 +133,7 @@ start_job() {
     else
         outcome=${STUB_FULL_JOB:-complete}
         echo 1 >"$STUB_DIR/rc-$1"
-        printf 'INFO: backup command end: %s\n' "$outcome" >"$STUB_DIR/log-$1"
+        printf '%s\n' "${STUB_FULL_LOG:-INFO: backup command end: $outcome}" >"$STUB_DIR/log-$1"
         if { [ "$outcome" = complete ] && [ "${STUB_FULL_LISTED:-1}" = 1 ]; } || [ "${STUB_FULL_LISTED:-1}" = always ]; then
             echo $(($(counter fulls 0) + 1)) >"$STUB_DIR/fulls"
         fi
@@ -216,7 +217,14 @@ case "${1:-}" in
             reticora-db-0) echo "stub log of reticora-db-0" ;;
             *)
                 b=$(behaviour)
-                case $b in exit:*) rest=${b#exit:}; printf '%s\n' "${rest#*:}" ;; esac ;;
+                case $b in
+                    exit:*) rest=${b#exit:}; printf '%s\n' "${rest#*:}" ;;
+                    # Like kubectl: a container that never restarted has no
+                    # previous log.
+                    *) case " $* " in *' --previous '*)
+                        echo "Error from server (BadRequest): previous terminated container \"server\" in pod \"$2\" not found" >&2
+                        exit 1 ;; esac ;;
+                esac ;;
         esac ;;
     port-forward)
         echo "Forwarding from 127.0.0.1:18080 -> 8080"
@@ -321,7 +329,7 @@ reset() {
     unset STUB_ok STUB_master_key_missing STUB_master_key_empty STUB_issuer_empty STUB_issuer_key_missing \
         STUB_GET_RC STUB_RESTORE_BROKEN STUB_ROLLOUT_RC STUB_EXEC_RC STUB_MIGRATE_RC \
         STUB_DB_ROLLOUT_RC STUB_CHECK_RC STUB_ARCHIVE STUB_FULL_JOB STUB_FULL_LISTED STUB_WRONG_JOB \
-        STUB_WRONG_LOG STUB_WRONG_RC STUB_NO_CIPHER_ENV STUB_BUCKET_RC STUB_OPENSSL_FAIL
+        STUB_WRONG_LOG STUB_FULL_LOG STUB_WRONG_RC STUB_NO_CIPHER_ENV STUB_BUCKET_RC STUB_OPENSSL_FAIL
     export STUB_DIR="$TMP_ROOT/stub" STUB_ROOT="$ROOT"
     rm -rf "$STUB_DIR" "$TMP_ROOT/artifacts"
     mkdir -p "$STUB_DIR"
@@ -557,6 +565,17 @@ export STUB_FULL_JOB=failed
 smoke run ready wal_archive
 check "wal_archive: a failed job of the CronJob fails" \
     fails_with '^FAIL wal_archive: full backup by a job of the CronJob reticora-pgbackrest-full: job kind-smoke-full FailureTarget,Failed, rc 1; full backups before 0'
+
+reset
+export STUB_FULL_JOB=failed
+export STUB_FULL_LOG='2026-10-26 03:04:01.700 P00   INFO: backup command begin 2.56.0: --stanza=reticora --type=full
+2026-10-26 03:04:01.820 P00   WARN: unable to check pg1: [HostConnectError] unable to get address for '"'"'reticora-db'"'"'
+2026-10-26 03:04:01.825 P00  ERROR: [056]: unable to find primary cluster - cannot proceed
+                                    HINT: are all available clusters in recovery?
+2026-10-26 03:04:01.825 P00   INFO: backup command end: aborted with exception [056]'
+smoke run ready wal_archive
+check "wal_archive: a failed job of the CronJob names the WARN and ERROR lines of its log" \
+    fails_with '^FAIL wal_archive: full backup .*rc 1; .*log: .*WARN: unable to check pg1: \[HostConnectError\] .*ERROR: \[056\]: unable to find primary cluster'
 
 reset
 export STUB_FULL_JOB=failed STUB_FULL_LISTED=always

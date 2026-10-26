@@ -295,6 +295,9 @@ snapshot() {
             k logs "$name" -c server --previous --tail=100
         done
     } >"$ARTIFACT_DIR/$1.txt" 2>&1
+    # Diagnostics only: kubectl logs --previous fails for a container that
+    # never restarted, and that must not decide the case that called this.
+    return 0
 }
 
 # ─── Cases ──────────────────────────────────────────────────────────────────
@@ -431,6 +434,17 @@ job_state() {
 # (a wrongly decrypted info file shows up in the error).
 job_log() { k logs "job/$1" -c pgbackrest --tail=30 2>&1 | LC_ALL=C tr -cd '\11\12\40-\176'; }
 
+# job_lines JOB prints the WARN and ERROR lines of the job's log (pgBackRest
+# names the cause of an ERROR in the WARN lines before it, e.g. "unable to
+# check pg1: …" before [056]), else its last three lines, on one line.
+job_lines() {
+    local log lines
+    log=$(job_log "$1")
+    lines=$(grep -E ' (WARN|ERROR): ' <<<"$log" | tail -n 8)
+    [ -n "$lines" ] || lines=$(tail -n 3 <<<"$log")
+    tr '\n' ' ' <<<"$lines"
+}
+
 # full_backups prints the number of full backups of the stanza and their
 # labels, read in the database pod (pgbackrest info).
 full_backups() {
@@ -479,6 +493,7 @@ wal_snapshot() {
             k logs "job/$j" -c pgbackrest --tail=200
         done
     } >"$ARTIFACT_DIR/wal_archive.txt" 2>&1
+    return 0
 }
 
 case_wal_archive() {
@@ -530,7 +545,7 @@ case_wal_archive() {
         if [ "$rc" -eq 0 ] && [[ ,$codes, == *,0,* ]] && full_after=$(full_backups) && [ "${full_after%% *}" -gt "${full_before%% *}" ]; then
             ok "wal_archive: full backup by a job of the CronJob reticora-pgbackrest-full: $state; full backups ${full_before%% *} -> $full_after"
         else
-            fail "wal_archive: full backup by a job of the CronJob reticora-pgbackrest-full: $state; full backups before ${full_before%% *}, after ${full_after:-?}; log: $(job_log kind-smoke-full | tail -n 3 | tr '\n' ' ')"
+            fail "wal_archive: full backup by a job of the CronJob reticora-pgbackrest-full: $state; full backups before ${full_before%% *}, after ${full_after:-?}; log: $(job_lines kind-smoke-full)"
         fi
     fi
 

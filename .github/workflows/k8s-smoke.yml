@@ -162,6 +162,20 @@ jobs:
           kubectl get all,secrets,configmaps,events -A -o wide > "$ARTIFACT_DIR/cluster.txt" 2>&1 || true
           kind export logs "$ARTIFACT_DIR/kind-logs" --name "$KIND_CLUSTER" || true
 
+      # The state the smoke script wrote per case (pods, describe, container
+      # and job logs) also in the job log, so a failure can be read without
+      # downloading the artifact.
+      - name: Show the case protocols on failure
+        if: failure()
+        run: |
+          for f in "$ARTIFACT_DIR"/*.txt; do
+            [ -f "$f" ] || continue
+            [ "$(basename "$f")" = cluster.txt ] && continue
+            echo "::group::$(basename "$f")"
+            tail -n 400 "$f"
+            echo "::endgroup::"
+          done
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
