@@ -722,3 +722,4 @@ NFR-01;[B], Teilumfang [P5];LT;backend/internal/ci/indexes_integration_test.go;W
 NFR-10;[Q];LT;tests/load/evaluate-runs.sh;WP-612
 NFR-02;[B];LT;backend/internal/topology/impact_bench_integration_test.go;WP-611
 NFR-03;[B], Teilumfang [P5];LT;backend/internal/discovery/ingest_budget_integration_test.go;WP-608
+ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-470

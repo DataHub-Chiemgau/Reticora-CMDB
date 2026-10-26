@@ -13,6 +13,10 @@ type Repository interface {
 	// Upsert stores an entitlement, replacing an existing row for the same
 	// (organization, feature) pair.
 	Upsert(ctx context.Context, ent Entitlement) (Entitlement, error)
+	// InsertMissing stores the rows of the organization whose feature has
+	// no row yet and returns their feature keys; an existing row, enabled
+	// or not, is left unchanged.
+	InsertMissing(ctx context.Context, orgID string, ents []Entitlement) ([]string, error)
 }
 
 // MemoryRepository is an in-memory entitlement store used by tests and the
@@ -58,4 +62,34 @@ func (r *MemoryRepository) Upsert(_ context.Context, ent Entitlement) (Entitleme
 
 	r.items[ent.OrganizationID] = append(stored, ent)
 	return ent, nil
+}
+
+// InsertMissing stores the rows whose feature has no row for the
+// organization yet and returns their feature keys.
+func (r *MemoryRepository) InsertMissing(_ context.Context, orgID string, ents []Entitlement) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	stored := r.items[orgID]
+	var added []string
+	for _, ent := range ents {
+		exists := false
+		for i := range stored {
+			if stored[i].FeatureKey == ent.FeatureKey {
+				exists = true
+				break
+			}
+		}
+		if exists {
+			continue
+		}
+		ent.OrganizationID = orgID
+		if ent.UpdatedAt.IsZero() {
+			ent.UpdatedAt = time.Now().UTC()
+		}
+		stored = append(stored, ent)
+		added = append(added, ent.FeatureKey)
+	}
+	r.items[orgID] = stored
+	return added, nil
 }

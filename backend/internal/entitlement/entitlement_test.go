@@ -3,6 +3,7 @@ package entitlement
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 )
@@ -18,7 +19,8 @@ func testService(t *testing.T, plan Plan) *Service {
 
 // TestProvisionedPlanGrantsOnlyPlanFeatures covers WP-072 (ENT-05): an
 // organization is entitled exactly to its rows; an organization without rows
-// has only cmdb_core (no default-plan fallback); provisioning runs once.
+// has only cmdb_core (no default-plan fallback); provisioning again adds
+// only missing plan features (WP-470) and changes no existing row.
 func TestProvisionedPlanGrantsOnlyPlanFeatures(t *testing.T) {
 	svc := testService(t, PlanEssential)
 	ctx := context.Background()
@@ -35,11 +37,21 @@ func TestProvisionedPlanGrantsOnlyPlanFeatures(t *testing.T) {
 	if list, _ := svc.List(ctx, "org-2"); len(list) != 1 || list[0].FeatureKey != FeatureCMDBCore || !list[0].Enabled {
 		t.Errorf("entitlements of an organization without rows: %+v", list)
 	}
-	if done, err := svc.Provision(ctx, "org-1", PlanEnterprise); done || err != nil {
-		t.Errorf("second provisioning: %v, %v; want no change", done, err)
+	if added, err := svc.Provision(ctx, "org-1", PlanEssential); len(added) != 0 || err != nil {
+		t.Errorf("second provisioning: %v, %v; want no change", added, err)
 	}
 	if svc.IsEnabled(ctx, "org-1", FeatureTicketing) {
 		t.Error("second provisioning changed the plan")
+	}
+	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureExportCSV, Plan: PlanEssential}); err != nil {
+		t.Fatal(err)
+	}
+	added, err := svc.Provision(ctx, "org-1", PlanStandard)
+	if err != nil || !slices.Equal(added, []string{FeatureDocuments, FeatureStocktake, FeatureTicketing}) {
+		t.Errorf("provisioning a larger plan: %v, %v; want only the missing features", added, err)
+	}
+	if svc.IsEnabled(ctx, "org-1", FeatureExportCSV) {
+		t.Error("provisioning overwrote the disabled export_csv row")
 	}
 }
 

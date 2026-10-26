@@ -377,8 +377,8 @@ func main() {
 		Cache:   cacheStore,
 		Enforce: cfg.EntitlementEnforcement,
 	})
-	// A missing entitlement row means not entitled (ENT-05): organizations
-	// without rows get the rows of their plan once.
+	// A missing entitlement row means not entitled (ENT-05): every
+	// organization gets the missing rows of its plan at each start (F-210).
 	if err = provisionEntitlements(context.Background(), entitlementSvc, auditPool, cfg.DefaultPlan); err != nil {
 		slog.Error("entitlement provisioning failed", "error", err)
 		os.Exit(1)
@@ -657,9 +657,10 @@ func newHTTPHandler(repos server.Repositories, opts server.Options, stages httpS
 	)(mux), nil
 }
 
-// provisionEntitlements stores the plan's entitlement rows for every
-// organization without rows. Without a database (--no-db) the demo
-// organization gets the default plan.
+// provisionEntitlements stores the missing entitlement rows of its plan for
+// every organization (F-210); existing rows stay unchanged and the added
+// feature keys are logged per organization. Without a database (--no-db)
+// the demo organization gets the default plan.
 func provisionEntitlements(ctx context.Context, svc *entitlement.Service, pool *pgxpool.Pool, defaultPlan string) error {
 	plans := map[string]entitlement.Plan{}
 	if pool == nil {

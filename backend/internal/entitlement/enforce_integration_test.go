@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -219,6 +220,144 @@ func TestEntitlementEnforcement(t *testing.T) {
 	w := httptest.NewRecorder()
 	if !api.WriteTypedProblem(w, http.StatusForbidden, limitErr) || !strings.Contains(w.Body.String(), api.ProblemEntitlementLimit) {
 		t.Errorf("limit problem: %s", w.Body.String())
+	}
+}
+
+// TestProvisionAddsMissingPlanFeatures covers WP-470 (ENT-05, F-210)
+// against PostgreSQL as reticora_app: an organization that holds only
+// cmdb_core from before the plan fallback was removed gets every missing
+// feature of its plan at startup; a deactivated export_csv stays
+// deactivated and no existing row changes; a second start changes nothing;
+// organization B, which is not provisioned, stays untouched.
+//
+// It runs only with TEST_DATABASE_URL.
+func TestProvisionAddsMissingPlanFeatures(t *testing.T) {
+	f := scopetest.Seed(t, "64")
+	bg := context.Background()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Both organizations hold only cmdb_core (with a quota) as before
+	// WP-072; organization A has the pro plan.
+	exec(`UPDATE organization SET plan = 'pro' WHERE id = $1`, f.OrgA)
+	for _, org := range []string{f.OrgA, f.OrgB} {
+		exec(`INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limits, source)
+			VALUES ($1, 'cmdb_core', 'essential', true, '{"max_cis": 500}', 'billing')`, org)
+	}
+	// rows returns the stored rows of the organization, one line each.
+	rows := func(org string) map[string]string {
+		t.Helper()
+		out := map[string]string{}
+		r, err := f.Admin.Query(bg, `SELECT feature_key, plan || '|' || enabled || '|' || limits::text || '|' ||
+			coalesce(valid_until::text, '-') || '|' || source || '|' || updated_at::text
+			FROM entitlement WHERE organization_id = $1`, org)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+		for r.Next() {
+			var key, line string
+			if err = r.Scan(&key, &line); err != nil {
+				t.Fatal(err)
+			}
+			out[key] = line
+		}
+		if err = r.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	// start runs the startup provisioning for organization A with the plan
+	// stored for it.
+	svc := entitlement.NewService(entitlement.NewPGRepository(f.App), entitlement.Options{Cache: cache.NewMemoryStore(), Enforce: true})
+	start := func() int {
+		t.Helper()
+		var plan string
+		if err := f.Admin.QueryRow(bg, `SELECT plan FROM organization WHERE id = $1`, f.OrgA).Scan(&plan); err != nil {
+			t.Fatal(err)
+		}
+		n, err := svc.ProvisionOrganizations(bg, map[string]entitlement.Plan{f.OrgA: entitlement.Plan(plan)})
+		if err != nil {
+			t.Fatalf("provision: %v", err)
+		}
+		return n
+	}
+	routes := enforcedRoutes(svc)
+	if got := call(t, routes, f.OrgA, http.MethodGet, "/api/v1/topology"); got.status != http.StatusForbidden {
+		t.Fatalf("topology before provisioning: %+v, want 403 (F-210)", got)
+	}
+	coreA, rowsB := rows(f.OrgA)[entitlement.FeatureCMDBCore], rows(f.OrgB)
+
+	// Start: every feature of the pro plan is active, the core row is kept.
+	if n := start(); n != 1 {
+		t.Fatalf("first start provisioned %d organizations, want 1", n)
+	}
+	for _, feature := range entitlement.PlanFeatures(entitlement.PlanPro) {
+		if !svc.IsEnabled(f.OrgCtx(f.OrgA), f.OrgA, feature) {
+			t.Errorf("feature %s of the pro plan not active after the start", feature)
+		}
+	}
+	stored := rows(f.OrgA)
+	if len(stored) != len(entitlement.PlanFeatures(entitlement.PlanPro)) {
+		t.Errorf("rows after the start: %v, want exactly the pro plan", stored)
+	}
+	if stored[entitlement.FeatureCMDBCore] != coreA {
+		t.Errorf("cmdb_core row changed: %q, was %q", stored[entitlement.FeatureCMDBCore], coreA)
+	}
+	for _, addon := range entitlement.Addons {
+		if _, ok := stored[addon]; ok {
+			t.Errorf("add-on %s provisioned", addon)
+		}
+	}
+	for _, c := range gatedCalls {
+		if got := call(t, routes, f.OrgA, c.method, c.path); got.status != http.StatusNoContent {
+			t.Errorf("org A %s %s after the start: %+v, want 204", c.method, c.path, got)
+		}
+	}
+
+	// A deactivated export_csv and an expired discovery stay as they are;
+	// only the missing topology row is added again.
+	exec(`UPDATE entitlement SET enabled = false WHERE organization_id = $1 AND feature_key = 'export_csv'`, f.OrgA)
+	exec(`UPDATE entitlement SET valid_until = now() - interval '1 day' WHERE organization_id = $1 AND feature_key = 'discovery'`, f.OrgA)
+	exec(`DELETE FROM entitlement WHERE organization_id = $1 AND feature_key = 'topology'`, f.OrgA)
+	before := rows(f.OrgA)
+	if n := start(); n != 1 {
+		t.Fatalf("start after the deactivation provisioned %d organizations, want 1", n)
+	}
+	after := rows(f.OrgA)
+	if _, ok := after[entitlement.FeatureTopology]; !ok || len(after) != len(before)+1 {
+		t.Errorf("rows after the second start: %v, want the missing topology row added", after)
+	}
+	for key, line := range before {
+		if after[key] != line {
+			t.Errorf("row %s changed: %q, was %q", key, after[key], line)
+		}
+	}
+	if svc.IsEnabled(f.OrgCtx(f.OrgA), f.OrgA, entitlement.FeatureExportCSV) {
+		t.Error("deactivated export_csv active after the start")
+	}
+	if svc.IsEnabled(f.OrgCtx(f.OrgA), f.OrgA, entitlement.FeatureDiscovery) {
+		t.Error("expired discovery active after the start")
+	}
+
+	// A further start changes nothing.
+	settled := rows(f.OrgA)
+	if n := start(); n != 0 {
+		t.Errorf("repeated start provisioned %d organizations, want 0", n)
+	}
+	if again := rows(f.OrgA); !maps.Equal(again, settled) {
+		t.Errorf("repeated start changed rows: %v, was %v", again, settled)
+	}
+
+	// Organization B is untouched.
+	if got := rows(f.OrgB); !maps.Equal(got, rowsB) {
+		t.Errorf("rows of organization B: %v, was %v", got, rowsB)
+	}
+	if got := call(t, routes, f.OrgB, http.MethodGet, "/api/v1/topology"); got.status != http.StatusForbidden {
+		t.Errorf("org B topology: %+v, want 403", got)
 	}
 }
 

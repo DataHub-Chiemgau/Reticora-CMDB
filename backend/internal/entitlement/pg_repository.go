@@ -2,6 +2,7 @@ package entitlement
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -85,6 +86,43 @@ func (r *PGRepository) Upsert(ctx context.Context, ent Entitlement) (Entitlement
 	})
 
 	return stored, err
+}
+
+// InsertMissing stores, in one transaction of the organization's tenant
+// scope, the rows whose feature has no row yet and returns their feature
+// keys. An existing row is never changed (ON CONFLICT DO NOTHING), so a
+// concurrent grant or deactivation wins.
+func (r *PGRepository) InsertMissing(ctx context.Context, orgID string, ents []Entitlement) ([]string, error) {
+	var added []string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		for _, ent := range ents {
+			if ent.Limits == nil {
+				ent.Limits = map[string]int64{}
+			}
+			if ent.Source == "" {
+				ent.Source = "manual"
+			}
+			var feature string
+			err := tx.QueryRow(ctx, `
+				INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limits, valid_until, source)
+				VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5, $6)
+				ON CONFLICT (organization_id, feature_key) DO NOTHING
+				RETURNING feature_key
+			`, ent.FeatureKey, string(ent.Plan), ent.Enabled, ent.Limits, ent.ValidUntil, ent.Source).Scan(&feature)
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("insert entitlement %s: %w", ent.FeatureKey, err)
+			}
+			added = append(added, feature)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return added, nil
 }
 
 type entitlementScanner interface {
