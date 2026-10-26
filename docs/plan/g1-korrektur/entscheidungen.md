@@ -20,7 +20,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-70](#e-70) | Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03) | offen (Empfehlung als Übergangsregel) | WP-391 |
 | [E-71](#e-71) | LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten | entschieden: Option 1 (Auftraggeber, 2026-10-25) | WP-411 |
 | [E-72](#e-72) | Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) | entschieden: Option 1 (Auftraggeber, 2026-10-26) | WP-427, WP-560, WP-574 |
-| [E-73](#e-73) | Indizierte Attributfilter unter Row-Level-Security | offen (Empfehlung als Übergangsregel) | WP-435 |
+| [E-73](#e-73) | Indizierte Attributfilter unter Row-Level-Security | offen (Empfehlung als Übergangsregel); Ergänzung entschieden (Auftraggeber, 2026-10-26) | WP-435, WP-607 |
 | [E-74](#e-74) | OPS-04 in Kubernetes: Datenbankseite der WAL-Archivierung | offen (Empfehlung als Übergangsregel) | WP-444 |
 | [E-75](#e-75) | OPS-05: Alarmierung des Betriebs über NTF-Kanäle | offen (Empfehlung als Übergangsregel) | WP-448 |
 | [E-76](#e-76) | GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis | offen (Empfehlung als Übergangsregel) | WP-450, WP-451, WP-453, WP-454, WP-455, WP-457, WP-595 |
@@ -387,9 +387,15 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-435 (`t4-attr-filter-index`) setzt sie um, die Migration bricht ohne Superuser mit Hinweis auf Option B ab.
 
+**Ergänzung vom 2026-10-26 (Index je Schlüssel):** Der Auftraggeber hat am 2026-10-26 mit der Freigabe der K3-Nachträge entschieden, die Indexe nach Option A je Attribut-Schlüssel statt je Definition und Organisation anzulegen.
+- **Anlass:** Die Lastläufe von WP-439 auf den NFR-01-Volumina: Mit 500 Organisationen, die denselben Schlüssel durchsuchbar machen, trägt `ci` 528 statt 28 Indexe. Planung und Schreibpfad jeder Abfrage auf `ci` werden dadurch etwa zehn- bzw. dreimal teurer, generische Pläne nutzen die Indexe nie (Ursache U1, `docs/acceptance/lasttest-g1.md`, Punkt 11).
+- **Festlegung:** Für eine nicht eindeutige durchsuchbare Definition ohne `ci_type_id` gibt es einen Index je Schlüssel, `(organization_id, reticora_attr_text(attributes, '<key>'))` mit `deleted_at IS NULL` und ohne Organisationsprädikat. Er fällt erst, wenn keine Definition den Schlüssel mehr nutzt. Eindeutige Definitionen und Definitionen mit `ci_type_id` behalten ihren Index je Definition. Die Mandantentrennung bleibt bei RLS (`ci_isolation`, FORCE) und dem expliziten Organisationsfilter; `reticora_attr_text` bleibt LEAKPROOF.
+- **Grenze:** Die Zahl der Indexe wächst weiter mit der Zahl verschiedener Schlüssel. Wächst sie über den Bedarf hinaus, ist Option B (Seitentabelle) der Pfad vor GA.
+- **Umsetzung:** WP-607 (`k3n-attr-index-key`), Migration 000164.
+
 **Betroffene IDs:** ABN-02, NFR-02, NFR-01
 
-**Betroffene WPs:** WP-435
+**Betroffene WPs:** WP-435, WP-607
 
 ## E-74
 

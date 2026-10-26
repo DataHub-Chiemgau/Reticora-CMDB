@@ -34,11 +34,12 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K1-Nachträge](#k1-nachträge) | WP-601 – WP-606 | 6 | 7,5 | Funde aus der Umsetzung von K1 behoben: Webhook-Abos im Scope ihres Erzeugers (E-98), Topologie ohne Root ohne N+1, IGA-/Workflow-Fehler, Upgrade der TimescaleDB-Extension, Index der CI-Listensortierung, a11y-Prüfung abgestürzter Seiten. |
 | [K2 Datenintegrität und Kernprozesse](#k2-datenintegrität-und-kernprozesse) | WP-410 – WP-426 | 17 | 27,0 | Alle übrigen P1 behoben: keine stillen Datenverluste, Kernprozesse (CI-Anlage, Sitzung, Discovery, Reconciliation) im Real-Stack grün. |
 | [K3 Installation, Betrieb und Gate-Nachweise](#k3-installation-betrieb-und-gate-nachweise) | WP-427 – WP-459 | 33 | 48,5 | Installer-, Zertifikats-, K8s-, Backup- und Monitoring-Befunde behoben; Gate- und Abnahmedokumente führen jeden betroffenen Punkt mit Zwischenstand (offen mit Korrektur-WP oder belegt PASS); den Endstand stellt K7 her. |
+| [K3-Nachträge](#k3-nachträge) | WP-607 – WP-612 | 6 | 8,5 | Funde aus den Lastläufen von WP-439 behoben: Attribut-Indexe je Schlüssel (E-73), Beziehungsliste, heißer Pfad (`last_used_at`, JIT), Impact-CPU, Wiederentdeckung (F-118); drei Läufe halten jedes Budget im Median (E-58). |
 | [K4 Funktions-, Validierungs- und Bedienmängel](#k4-funktions--validierungs--und-bedienmängel) | WP-460 – WP-531 | 72 | 99,0 | Alle übrigen P2 behoben. |
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **271** | **370,0** | |
+| **Summe** | | **277** | **378,5** | |
 
 ```mermaid
 flowchart LR
@@ -47,6 +48,7 @@ flowchart LR
     K1N["K1-Nachträge<br/>6 WPs · 7,5 PT"]
     K2["K2 Datenintegrität und Kernprozesse<br/>17 WPs · 27,0 PT"]
     K3["K3 Installation, Betrieb und Gate-Nachweise<br/>33 WPs · 48,5 PT"]
+    K3N["K3-Nachträge<br/>6 WPs · 8,5 PT"]
     K4["K4 Funktions-, Validierungs- und Bedienmängel<br/>72 WPs · 99,0 PT"]
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
@@ -55,12 +57,14 @@ flowchart LR
     K1 --> K1N
     K0 --> K2
     K0 --> K3
+    K3 --> K3N
     K1 --> K4
     K2 --> K4
     K3 --> K5
     K4 --> K5
     K4 --> K6
     K5 --> K7
+    K3N --> K7
     K6 --> K7
 ```
 
@@ -398,6 +402,12 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-604](#wp-604--upgrade-der-timescaledb-extension-im-installer) | `k1n-tsdb-update` | Upgrade der TimescaleDB-Extension im Installer | K1N | 1,5 | – | WP-389 |
 | [WP-605](#wp-605--ci-liste-index-der-standardsortierung-und-zählung-vorzug-aus-wp-438) | `k1n-cilist-sort` | CI-Liste: Index der Standardsortierung und Zählung (Vorzug aus WP-438) | K1N | 1,5 | F-117 | – |
 | [WP-606](#wp-606--a11y-prüfung-erkennt-seiten-die-nach-dem-laden-abstürzen) | `k1n-a11y-crash` | a11y-Prüfung erkennt Seiten, die nach dem Laden abstürzen | K1N | 0,5 | – | – |
+| [WP-607](#wp-607--attribut-indexe-je-schlüssel-statt-je-definition-und-organisation) | `k3n-attr-index-key` | Attribut-Indexe je Schlüssel statt je Definition und Organisation | K3N | 2,0 | – | WP-435, WP-439 |
+| [WP-608](#wp-608--wiederentdeckung-mit-200-recordss-ursache-und-durchsatz) | `k3n-rediscover-throughput` | Wiederentdeckung mit 200 Records/s: Ursache und Durchsatz | K3N | 2,0 | F-118 | WP-437, WP-439 |
+| [WP-609](#wp-609--beziehungsliste-eines-ci-mit-einem-zweig-je-kantenende) | `k3n-relationships-arms` | Beziehungsliste eines CI mit einem Zweig je Kantenende | K3N | 1,0 | – | WP-439 |
+| [WP-610](#wp-610--heißer-pfad-last_used_at-gedrosselt-kein-jit-im-app-pool) | `k3n-hot-path` | Heißer Pfad: `last_used_at` gedrosselt, kein JIT im App-Pool | K3N | 1,0 | – | WP-439 |
+| [WP-611](#wp-611--impact-und-topologie-mit-schlanken-kanten-und-internen-ganzzahl-ids) | `k3n-impact-lean` | Impact und Topologie mit schlanken Kanten und internen Ganzzahl-IDs | K3N | 2,0 | – | WP-439 |
+| [WP-612](#wp-612--lastnachweis-nach-e-58-drei-läufe-nach-den-k3-nachträgen) | `k3n-load-evidence` | Lastnachweis nach E-58: drei Läufe nach den K3-Nachträgen | K3N | 0,5 | – | WP-607, WP-608, WP-609, WP-610, WP-611 |
 
 ## Konventionen für alle WPs
 
@@ -8381,6 +8391,283 @@ SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-459
 **Entscheidungsbedarf:** [E-15](../entscheidungen.md#e-15)
 
 **Nicht Bestandteil:** Real-Stack-Rotation, CA-Rewrap- und DEK-Atomizitätsnachweise (WP-547 (`t6-rotation-evidence`)); JWT- und Webhook-Secret-Rotation (bereits belegt).
+
+## K3-Nachträge
+
+Funde aus den drei vollständigen `load.yml`-Läufen von WP-439 (`t4-load-report`, Runs [40269518264](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40269518264), [40270929166](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40270929166) und [40271818796](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40271818796) auf Commit `8ca7f4b`). Nach der Bewertung über drei Läufe (Ergänzung zu [E-58](../entscheidungen.md#e-58) vom 2026-10-26) sind zwei Jobs verfehlt:
+- **`nfr01-volume`:** in allen drei Läufen rot. NFR-02 hält auf den NFR-01-Volumina nicht (impact bis 4,27 s, relationships bis 2,65 s, dazu je nach Runner bulk_500, global_search, attr_filter und rack).
+- **`ingest-rediscover`:** in zwei Läufen rot. NFR-03 hält für die Wiederentdeckung mit 200 Records/s nicht (F-118).
+
+Der Auftraggeber hat am 2026-10-26 beauftragt, beides in K3 zu beheben. Die Ursachen der Volumen-Verfehlungen sind lokal mit dem Volumen-Seed nachgestellt und mit Prototypen belegt (Ursachen U1 bis U5); jede Ursache ist ein eigenes WP, weil ein WP höchstens 2 PT umfasst. Zusammen lagen die Prototypen lokal in jedem Budget, impact aber nur knapp (1,90 s p95). [E-73](entscheidungen.md#e-73) ist für U1 ergänzt.
+
+- **U1 (WP-607):** ein Partial-Index je Attribut-Definition und Organisation auf `ci` (528 statt 28 Indexe bei 500 Organisationen). Planung jeder Abfrage auf `ci` etwa zehnmal teurer, Schreibpfad dreimal.
+- **U2 (WP-609):** Beziehungsliste eines CI als Nested Loop über alle CIs der Organisation (70.576 statt 138 Puffer je Aufruf).
+- **U3 (WP-611):** Impact liest alle Kanten der Organisation und verarbeitet sie mit String-Maps in Go (0,83 CPU-s je Anfrage).
+- **U4 und U5 (WP-610):** `api_key.last_used_at` bei jeder Anfrage auf derselben Zeile (Sperr-Warteschlange bis 3,3 s); JIT bei der globalen Suche (69 von 75 ms).
+- **F-118 (WP-608):** Durchsatz der Wiederentdeckung; Ursache noch nicht untersucht.
+
+WP-612 (`k3n-load-evidence`) weist danach mit drei neuen Läufen nach, dass die Budgets im Median halten, und schließt damit AK 3 von WP-439.
+
+### WP-607 – Attribut-Indexe je Schlüssel statt je Definition und Organisation
+
+**Schlüssel:** `k3n-attr-index-key` · **Meilenstein:** K3-Nachträge · **Epic (Traceability):** LT · **Aufwand:** 2,0 PT
+
+**Voraussetzungen (gemergt):** WP-435 (`t4-attr-filter-index`), WP-439 (`t4-load-report`)
+
+**Befunde:** keine Befund-ID (Fund aus den Lastläufen von WP-439, Ursache U1)
+
+**Problem:** Der DDL-Job (`citype/ddl_job.go`, `indexStatement`) legt je durchsuchbarer Attribut-Definition einen eigenen Partial-Index auf `ci` an, mit dem Prädikat `organization_id = '<org>'`. Auf den NFR-01-Volumina definiert jede der 500 Organisationen `cost_center` als durchsuchbar; `ci` trägt dann 528 statt 28 Indexe. Lokal gemessen:
+- Planung von `GetByID` 2,11 statt 0,25 ms, der Attributliste 3,31 statt 0,29 ms; unter Last 156 s Planungszeit in 2 min;
+- Schreibpfad des Bulk 22,5 statt 6,8 ms je CI, `ANALYZE ci` 19,7 statt 0,65 s;
+- generische Pläne nutzen die Indexe nie, weil `organization_id = $1` das Index-Prädikat nicht beweist.
+
+**Akzeptanzkriterien:**
+
+- [ ] Ursachenbestätigung zuerst: Planungszeit (`EXPLAIN (SUMMARY)` oder `pg_stat_statements` mit `track_planning`) von `GetByID` und der Attributliste als `reticora_app` mit 2 und mit 200 Organisationen, die denselben Schlüssel durchsuchbar machen; vor dem Fix wächst die Indexzahl auf `ci` mit den Organisationen.
+- [ ] Nach der Ergänzung zu E-73 vom 2026-10-26: Für eine nicht eindeutige durchsuchbare Definition ohne `ci_type_id` legt der DDL-Job einen Index je Attribut-Schlüssel an, `(organization_id, reticora_attr_text(attributes, '<key>')) WHERE deleted_at IS NULL AND reticora_attr_text(attributes, '<key>') IS NOT NULL`, ohne Organisationsprädikat. Der Name ist deterministisch (Hash bei Zeichen außerhalb `[a-z0-9_]`). Der Index wird erst entfernt, wenn keine Definition den Schlüssel mehr nutzt. Eindeutige Definitionen und Definitionen mit `ci_type_id` behalten ihren Index je Definition.
+- [ ] Migration 000164 ersetzt die bestehenden Indexe je Definition nicht eindeutiger Definitionen über Rebuild-Jobs (`CREATE INDEX CONCURRENTLY`, Muster 000162); down stellt den alten Zustand her; Roundtrip grün.
+- [ ] Die Filter-SQL der CI-Liste (`ci/pg_repository.go`) setzt den Schlüssel als Literal; der Attributfilter nutzt den Schlüssel-Index als `reticora_app` im Custom- und im generischen Plan.
+- [ ] Tests:
+  - `ci/indexes_integration_test.go`: Die Zahl der Indexe auf `ci` wächst nicht mit Organisationen, die denselben Schlüssel nutzen; beim Löschen der vorletzten Definition bleibt der Index, bei der letzten fällt er.
+  - `ci/attr_filter_plan_integration_test.go`: Index-Nutzung (Custom und generisch); der Filter einer Organisation liefert nie Zeilen einer anderen (RLS unverändert).
+  - Bestehende Tests von WP-435 und `ci/unique_attr_integration_test.go` grün; `docs/schema-baseline.md` neu erzeugt.
+
+**Dateien (9 Einträge, Migration = 2):**
+
+- backend/internal/citype/ddl_job.go
+- backend/internal/citype/ddl_job_integration_test.go
+- backend/migrations/000164_attr_index_per_key.up.sql (neu)
+- backend/migrations/000164_attr_index_per_key.down.sql (neu)
+- backend/internal/ci/pg_repository.go
+- backend/internal/ci/indexes_integration_test.go
+- backend/internal/ci/attr_filter_plan_integration_test.go
+- docs/schema-baseline.md
+- docs/traceability.csv
+
+**Migration/RLS:** 000164: Rebuild-Jobs für Attribut-Indexe je Schlüssel; RLS und `reticora_attr_text` (LEAKPROOF, 000162) unverändert.
+
+**Tests:**
+
+- `ci/indexes_integration_test.go`, `ci/attr_filter_plan_integration_test.go`, `citype/ddl_job_integration_test.go`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NFR-02;[B];LT;backend/internal/ci/attr_filter_plan_integration_test.go;WP-607
+NFR-01;[B], Teilumfang [P5];LT;backend/internal/ci/indexes_integration_test.go;WP-607
+```
+
+**Entscheidungsbedarf:** [E-73](entscheidungen.md#e-73) Indizierte Attributfilter unter Row-Level-Security (Ergänzung vom 2026-10-26: Index je Schlüssel)
+
+**Nicht Bestandteil:** Seitentabelle für Attributwerte (E-73 Option B, Pfad vor GA, falls die Zahl verschiedener Schlüssel wächst); Batching des Bulk-Pfads.
+
+### WP-608 – Wiederentdeckung mit 200 Records/s: Ursache und Durchsatz
+
+**Schlüssel:** `k3n-rediscover-throughput` · **Meilenstein:** K3-Nachträge · **Epic (Traceability):** LT · **Aufwand:** 2,0 PT
+
+**Voraussetzungen (gemergt):** WP-437 (`t4-load-scenarios`), WP-439 (`t4-load-report`)
+
+**Befunde:** [F-118](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-118) (schließt; WP-437 hat die Hypothese bestätigt, der Retest ist nicht bestanden)
+
+**Problem:** Im Szenario `rediscover` (bekannte Server mit 200 Records/s wiederentdeckt) verfehlt der Server die Verzögerung von 30 s in zwei der drei Läufe von WP-439: höchstens 55,6 s, Abbau ab Sendeende 52 bis 62 Records/s. Je Record fallen 49 bis 58 Statements an, die Datenbankzeit je Record schwankt zwischen den Läufen von 6,4 bis 18,0 ms. Der Abbau neuer Geräte (`ingest`) und der Spool-Abbau halten das Budget; die Ursache des Rests ist nicht untersucht.
+
+**Akzeptanzkriterien:**
+
+- [ ] Ursachenanalyse zuerst, lokal mit dem Seed und `ingest.js SCENARIO=rediscover`: Statements je Record nach Herkunft (`pg_stat_statements`), Sperrwartezeiten (Advisory-Locks, Zeilensperren), CPU-Profil des Servers. Die Analyse nennt die drei größten Kostenposten je Record mit Zahlen.
+- [ ] Die größten Posten sind behoben, ohne Identitätssperre, `max_cis`-Sperre, Audit-Kette oder Outbox-Reihenfolge (E-56) zu lockern. Ein Integrationstest begrenzt die Statements je wiederentdecktem Record auf einen festen Wert (vor dem Fix rot).
+- [ ] Lokaler Nachweis: Abbau der Wiederentdeckung vor und nach dem Fix auf demselben Host.
+- [ ] Nachweis in der CI über WP-612.
+
+**Dateien (6 Einträge, je nach Ursache):**
+
+- backend/internal/discovery/ (Ingest-, Identitäts- und Reconciliation-Pfad: `discovery.go`, `identity.go`, `reconciliation.go`)
+- backend/internal/discovery/ingest_budget_integration_test.go
+- backend/migrations/ (nur bei Index-Bedarf, nächste freie Nummer)
+- docs/schema-baseline.md (nur mit Migration)
+- docs/acceptance/lasttest-g1.md (Ursache in Punkt 1)
+- docs/traceability.csv
+
+**Migration/RLS:** nur falls die Analyse einen fehlenden Index ergibt; RLS unverändert.
+
+**Tests:**
+
+- `discovery/ingest_budget_integration_test.go` (Statements je wiederentdecktem Record).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NFR-03;[B], Teilumfang [P5];LT;backend/internal/discovery/ingest_budget_integration_test.go;WP-608
+```
+
+**Entscheidungsbedarf:** keiner ([E-56](../entscheidungen.md#e-56) gilt unverändert)
+
+**Nicht Bestandteil:** 1.000 Records/s (Phase 5, [P5]); mehr Ingest-Spuren als Standard.
+
+### WP-609 – Beziehungsliste eines CI mit einem Zweig je Kantenende
+
+**Schlüssel:** `k3n-relationships-arms` · **Meilenstein:** K3-Nachträge · **Epic (Traceability):** LT · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-439 (`t4-load-report`)
+
+**Befunde:** keine Befund-ID (Fund aus den Lastläufen von WP-439, Ursache U2)
+
+**Problem:** `relationship.PGRepository.List` filtert die Kanten eines CI mit `(source_ci_id = $2 OR target_ci_id = $2)` über die Vereinigung aus gespeicherten und projizierten Kanten. Das ODER lässt sich nicht in die Projektion `ci_structure_edge` schieben, und unter RLS schätzt der Planer `ci src` auf eine Zeile. Mit den NFR-01-Volumina kippt die Abfrage in einen Nested Loop über alle CIs der Organisation: 70.576 Puffer und 52 ms je Aufruf statt 138 Puffer und 0,7 ms. Im Job `nfr01-volume` verfehlt `relationships` das Budget von 500 ms in allen drei Läufen (bis 2,65 s).
+
+**Akzeptanzkriterien:**
+
+- [ ] Rot vor dem Fix: `EXPLAIN (ANALYZE, BUFFERS)` von `COUNT` und Seite für ein CI bei 10.000 CIs mit 10 Kanten je CI und 200 Organisationen als `reticora_app`; der Test begrenzt die Puffer je Aufruf.
+- [ ] `COUNT` und Seite filtern mit einem Zweig je Kantenende (Quelle `= $2`, Ziel `= $2 AND source IS DISTINCT FROM $2`), in gespeicherten und projizierten Kanten; die Antworten bleiben gleich (Vergleich mit der alten Abfrage für Server, Hubs und `contains`, `mounted_in`, `located_in` in beide Richtungen).
+- [ ] RLS unverändert: `visibleEndpoints`, `security_invoker` der Projektion, `organization_id = $1`; die Scope-Tests (`relationship_scope_integration_test.go`) grün.
+
+**Dateien (4 Einträge):**
+
+- backend/internal/relationship/pg_repository.go
+- backend/internal/relationship/list_plan_integration_test.go (neu)
+- backend/internal/relationship/pg_repository_integration_test.go
+- docs/traceability.csv
+
+**Migration/RLS:** keine
+
+**Tests:**
+
+- `relationship/list_plan_integration_test.go` (Puffer-Budget, gleiche Antworten).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NFR-02;[B];LT;backend/internal/relationship/list_plan_integration_test.go;WP-609
+ABN-02;[Q];LT;backend/internal/relationship/list_plan_integration_test.go;WP-609
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Hubs mit Tausenden Kanten (COUNT und Seite in einer Abfrage, Endpunktprüfung als Semi-Join).
+
+### WP-610 – Heißer Pfad: `last_used_at` gedrosselt, kein JIT im App-Pool
+
+**Schlüssel:** `k3n-hot-path` · **Meilenstein:** K3-Nachträge · **Epic (Traceability):** LT · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-439 (`t4-load-report`)
+
+**Befunde:** keine Befund-ID (Fund aus den Lastläufen von WP-439, Ursachen U4 und U5)
+
+**Problem:**
+- `identity.APIKeyStore.MarkUsed` setzt `api_key.last_used_at = now()` bei jeder Anfrage. Alle Anfragen eines Schlüssels warten so auf dieselbe Zeilensperre; lokal gab es Stillstände bis 3,3 s, und der Bulk-Job wartet mit.
+- `jit` ist an. Die globale Suche überschreitet mit den RLS-Unterplänen die JIT-Schwelle: 69 von 75 ms Ausführung sind JIT-Kompilierung.
+
+**Akzeptanzkriterien:**
+
+- [ ] `last_used_at` wird höchstens einmal je Minute und Schlüssel geschrieben (Bedingung in der UPDATE-Anweisung, keine zusätzliche Sperre); die Anzeige von „zuletzt benutzt“ und die Ablauflogik bleiben korrekt. Test: viele Anfragen in einer Minute → ein Update; nach einer Minute → das nächste.
+- [ ] Der App-Pool setzt `jit = off` (Runtime-Parameter); Test (`database/pool_jit_integration_test.go`): `SHOW jit` über den Pool liefert `off`. Die Wirkung auf die globale Suche steht als `EXPLAIN (ANALYZE)` vor und nach im PR.
+- [ ] Bestehende Tests von `identity` und `database` grün.
+
+**Dateien (5 Einträge):**
+
+- backend/internal/identity/apikey_store.go
+- backend/internal/identity/apikey_lastused_integration_test.go (neu)
+- backend/internal/database/pool.go
+- backend/internal/database/pool_jit_integration_test.go (neu)
+- docs/traceability.csv
+
+**Migration/RLS:** keine
+
+**Tests:**
+
+- `identity/apikey_lastused_integration_test.go`, `database/pool_jit_integration_test.go`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NFR-02;[B];LT;backend/internal/identity/apikey_lastused_integration_test.go;WP-610
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Pool-Größe und Pool-Metriken; `plan_cache_mode`.
+
+### WP-611 – Impact und Topologie mit schlanken Kanten und internen Ganzzahl-IDs
+
+**Schlüssel:** `k3n-impact-lean` · **Meilenstein:** K3-Nachträge · **Epic (Traceability):** LT · **Aufwand:** 2,0 PT
+
+**Voraussetzungen (gemergt):** WP-439 (`t4-load-report`)
+
+**Befunde:** keine Befund-ID (Fund aus den Lastläufen von WP-439, Ursache U3)
+
+**Problem:** Der Impact des Core-Switches liest alle Kanten der Organisation (100.000 auf den NFR-01-Volumina) mit allen Spalten als Text und verarbeitet sie in Go mit `map[string]…`: 0,83 CPU-s je Anfrage, unter Last 70 % der Server-CPU. Die Knoten liest der Server danach ein zweites Mal mit einem Lookup je CI. Im Job `nfr01-volume` verfehlen `impact` und `impact_full` das Budget von 2 s in allen drei Läufen (bis 4,27 s).
+
+**Akzeptanzkriterien:**
+
+- [ ] Rot vor dem Fix: Benchmark der Traversierung (Core-Switch, 10.000 CIs, 100.000 Kanten) mit CPU-Zeit und Allokationen je Anfrage; der Wert steht im PR.
+- [ ] Die Traversierung liest nur die Kantenspalten, die sie braucht (ID, Quelle, Ziel, Typ, Herkunft), UUIDs binär, und rechnet intern mit Ganzzahl-IDs (Adjazenz, BFS, `computeImpact`); Knoten und Overrides werden mit je einer Abfrage gelesen.
+- [ ] Antworten unverändert: Impact kompakt und voll, Topologie Tiefe 1 und 3 und Redundanz sind für den Seed byte-gleich zur alten Implementierung (Test); IMP-07 (nur sichtbare, nicht gelöschte CIs) und die Scope-Tests bleiben grün.
+- [ ] Die CPU-Zeit je Impact-Anfrage sinkt im Benchmark um mindestens 40 %.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/relationship/pg_repository.go
+- backend/internal/relationship/relationship.go
+- backend/internal/topology/topology.go
+- backend/internal/topology/impact.go
+- backend/internal/topology/redundancy.go
+- backend/internal/ci/pg_repository.go
+- backend/internal/topology/impact_bench_integration_test.go (neu)
+- backend/internal/topology/impact_integration_test.go
+- docs/traceability.csv
+
+**Migration/RLS:** keine; Sichtbarkeit weiter über die unter dem Scope des Aufrufers gelesene CI-Menge.
+
+**Tests:**
+
+- `topology/impact_bench_integration_test.go` (Benchmark und Byte-Gleichheit), bestehende Topologie- und Scope-Tests.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NFR-02;[B];LT;backend/internal/topology/impact_bench_integration_test.go;WP-611
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Graph-Cache je Organisation (größter weiterer Hebel, braucht eine Architekturfreigabe zu TEN-06).
+
+### WP-612 – Lastnachweis nach E-58: drei Läufe nach den K3-Nachträgen
+
+**Schlüssel:** `k3n-load-evidence` · **Meilenstein:** K3-Nachträge · **Epic (Traceability):** LT · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-607 (`k3n-attr-index-key`), WP-608 (`k3n-rediscover-throughput`), WP-609 (`k3n-relationships-arms`), WP-610 (`k3n-hot-path`), WP-611 (`k3n-impact-lean`)
+
+**Befunde:** keine Befund-ID (schließt AK 3 von WP-439 und den Retest von WP-206)
+
+**Problem:** AK 3 von WP-439 verlangt drei vollständige `load.yml`-Läufe, die nach der Ergänzung zu E-58 im Median jedes Budget halten. Nach WP-607 bis WP-611 steht dieser Nachweis aus. Die Bewertung macht `tests/load/evaluate-runs.sh` aus den Archiven der Läufe; aus der Arbeitsumgebung sind die Archive nicht abrufbar.
+
+**Akzeptanzkriterien:**
+
+- [ ] Workflow `load-evidence.yml` (manuell, Eingabe: drei Lauf-IDs): lädt die Artefakte `load-archive-<Lauf-ID>` der drei Läufe (`actions/download-artifact` mit `run-id`), bewertet sie mit `tests/load/evaluate-runs.sh` und schreibt das Ergebnis in Job-Log und Zusammenfassung; Exit wie das Skript. actionlint sauber.
+- [ ] Drei vollständige Läufe (`scenarios=all`) auf dem Stand nach WP-611; Bewertung mit `load-evidence.yml`: jeder Job hält im Median, keiner ist in zwei Läufen rot.
+- [ ] `docs/acceptance/lasttest-g1.md`: Werte der drei Läufe, Bewertung, AK 3 und Retests aktualisiert; offene Punkte 1 und 11 geschlossen oder mit verbleibendem Rest.
+
+**Dateien (4 Einträge):**
+
+- .github/workflows/load-evidence.yml (neu)
+- tests/load/README.md
+- docs/acceptance/lasttest-g1.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine
+
+**Tests:**
+
+- `load-evidence.yml` mit den drei Läufen; Selbsttest `tests/load/evaluate-runs.test.sh` (WP-439).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NFR-10;[Q];LT;tests/load/evaluate-runs.sh;WP-612
+```
+
+**Entscheidungsbedarf:** [E-58](../entscheidungen.md#e-58) (Ergänzung vom 2026-10-26, Bewertung über drei Läufe)
+
+**Nicht Bestandteil:** Übernahme der Archive ins Repository, solange die Artefakte aus der Arbeitsumgebung nicht abrufbar sind (Abschnitt „Quelle der Werte“ in `lasttest-g1.md`); dedizierter Referenzhost (SR-06).
 
 ## K4 Funktions-, Validierungs- und Bedienmängel
 

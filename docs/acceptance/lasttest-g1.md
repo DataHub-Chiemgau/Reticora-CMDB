@@ -26,7 +26,7 @@ Nachweisläufen. Fett: Schwelle verfehlt.
 | 1 | Seed-Optionen für die NFR-01-Volumina, deterministisch und begrenzt | erfüllt; Tests lokal grün (TimescaleDB 2.31.0); in den drei Läufen erzeugt der Seed die Volumina vollständig | `backend/cmd/seed` (`-interfaces-per-ci`, `-ips-per-ci`, `-relationships-per-ci`, `-orgs`); `seed_integration_test.go`: `TestSeedNFR01Volumes` (Mengen, Verteilung, Determinismus, zweiter Lauf), `TestSeedOptionsAreBounded` (Grenzen); Abschnitt „NFR-01-Volumina“ |
 | 2 | `load.yml`-Job `nfr01-volume` mit `api.js` und den NFR-02-Schwellen | erfüllt; der Job läuft in allen drei Läufen und ist **rot**: NFR-02 hält auf den NFR-01-Volumina nicht (Offene Punkte, Punkt 11) | `.github/workflows/load.yml` (Matrix-Eintrag `nfr01-volume`, Schritt „Seeded volumes (NFR-01)“) |
 | 3 | Drei aufeinanderfolgende vollständige `load.yml`-Läufe mit exit 0, archiviert; seit der Ergänzung zu E-58 vom 2026-10-26 bewertet nach dem Median der drei Läufe | **nicht erfüllt** | Drei vollständige Läufe liegen vor (Abschnitt „Läufe“). Nach dem Median der drei Läufe (Abschnitt „Bewertung nach E-58“) halten `api`, `ingest` und `ingest-spool` jedes Budget; verfehlt sind `nfr01-volume` (rot in drei Läufen, Punkt 11) und `ingest-rediscover` (rot in zwei Läufen, Punkt 1). Die Archive sind gebaut, aber noch nicht ins Repository übernommen |
-| 4 | Bericht: p95 je Budget aus den drei Läufen, 200 Records/s und Max-Drain gegenüber 1.000 Records/s [P5], NFR-01-Volumina gemessen, Umfangskorrektur SR-04, offene Punkte mit Folge-WP oder Entscheidung | Werte der drei Läufe eingetragen; CPU und RAM je Lauf stehen nur im Archiv (**steht aus**); acht offene Punkte haben noch keine Folge-WP-Nummer (Vorschlag an den Auftraggeber) | dieses Dokument |
+| 4 | Bericht: p95 je Budget aus den drei Läufen, 200 Records/s und Max-Drain gegenüber 1.000 Records/s [P5], NFR-01-Volumina gemessen, Umfangskorrektur SR-04, offene Punkte mit Folge-WP oder Entscheidung | Werte der drei Läufe eingetragen; CPU und RAM je Lauf stehen nur im Archiv (**steht aus**); sechs offene Punkte haben noch keine Folge-WP-Nummer (Vorschlag an den Auftraggeber); die Punkte 1 und 11 behandeln WP-607 bis WP-612 (K3-Nachträge) | dieses Dokument |
 | 5 | Retests F-279, WP-206, WP-204 | **nicht bestanden** bzw. **stehen aus** | Abschnitt „Retests“ |
 
 ## Messumgebung und Ablauf (E-58)
@@ -455,8 +455,8 @@ Auftraggeber, die Nummer wird hier nachgetragen.
    (31,0 s im Vorlauf, 45,1 s in Run 40256148903); Abbau 52–147 Records/s
    bei 49–58 Statements und 6,4–18,0 ms Datenbankzeit je Record
    (Ursachenvergleich F-118). Die Ursache des verbleibenden Durchsatzdefizits
-   ist nicht untersucht. Folge-WP: offen, Vorschlag an den Auftraggeber
-   (Ingest-Durchsatz der Wiederentdeckung).
+   ist nicht untersucht. Folge-WP: WP-608 (`k3n-rediscover-throughput`,
+   K3-Nachträge, beauftragt am 2026-10-26).
 2. **NFR-03, 1.000 Records/s in Phase 5 [P5]:** Max-Drain 328–963
    Records/s auf 4 CPUs (Szenario `spool`); kein G1-Budget. Folge-WP:
    offen, Vorschlag an den Auftraggeber (Ingest-Durchsatz für Phase 5,
@@ -512,9 +512,16 @@ Auftraggeber, die Nummer wird hier nachgetragen.
     `rack`, `list_name_filter` und `detail`. Ursachen laut Statement-Profil:
     Die Kantenabfrage für Impact und Topologie lädt alle Kanten der
     Organisation; `COUNT` und Seite der Beziehungsliste eines CI lesen je
-    Aufruf etwa 72.800 Puffer für im Mittel 19 Zeilen. Folge-WP: offen, Vorschlag an den Auftraggeber (NFR-02 bei
-    NFR-01-Volumina: Beziehungsliste und Kantenabfrage indexgestützt, Impact
-    ohne Laden aller Kanten).
+    Aufruf etwa 72.800 Puffer für im Mittel 19 Zeilen. Die lokale
+    Ursachenanalyse zu diesen Läufen nennt fünf Ursachen (U1 bis U5).
+    Folge-WPs (K3-Nachträge, beauftragt am 2026-10-26):
+    - WP-607 (`k3n-attr-index-key`): Attribut-Indexe je Schlüssel statt je
+      Organisation (U1, Ergänzung zu E-73);
+    - WP-609 (`k3n-relationships-arms`): Beziehungsliste (U2);
+    - WP-610 (`k3n-hot-path`): `last_used_at` und JIT (U4, U5);
+    - WP-611 (`k3n-impact-lean`): Impact-CPU (U3).
+
+    WP-612 (`k3n-load-evidence`) weist danach drei Läufe nach E-58 nach.
 
 Erledigt seit dem letzten Stand: NFR-03-Durchsatz neuer Geräte und
 Spool-Flush (WP-332 bis WP-334), Impact unter Parallellast (WP-335),
