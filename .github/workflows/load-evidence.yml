@@ -1,0 +1,102 @@
+# WP-612 (E-58, NFR-10): evaluates the load-test evidence of three
+# load.yml runs by the median rule of E-58 (supplement of 2026-10-26). The
+# job downloads the archives load-archive-<run id> that the job archive of
+# load.yml uploads, runs tests/load/evaluate-runs.sh on them and writes its
+# report to the job log, the job summary and the artifact
+# load-evidence-<run id of this run>. It exits like the script: 0 when every
+# threshold of every job is held in the median and no job is red in two
+# runs, 1 when not, 2 on a run ID that is no number or given twice. A run
+# without an archive (expired, never archived) fails the download step.
+name: Load evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_1:
+        description: "Run ID of the first load.yml run"
+        required: true
+      run_2:
+        description: "Run ID of the second load.yml run"
+        required: true
+      run_3:
+        description: "Run ID of the third load.yml run"
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  evaluate:
+    name: Evaluate three runs (E-58)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # The inputs reach the shell only as environment variables, and only
+      # numbers reach the download steps.
+      - name: Check the run IDs
+        env:
+          RUN_1: ${{ inputs.run_1 }}
+          RUN_2: ${{ inputs.run_2 }}
+          RUN_3: ${{ inputs.run_3 }}
+        run: |
+          for id in "$RUN_1" "$RUN_2" "$RUN_3"; do
+            case "$id" in
+              '' | *[!0-9]*)
+                echo "::error::run ID '$id' is not a number"
+                exit 2
+                ;;
+            esac
+          done
+          if [ "$RUN_1" = "$RUN_2" ] || [ "$RUN_1" = "$RUN_3" ] || [ "$RUN_2" = "$RUN_3" ]; then
+            echo "::error::the three run IDs must differ"
+            exit 2
+          fi
+
+      # Each archive holds the directory <run id>/ (tests/load/archive-run.sh),
+      # so the three land side by side in archives/.
+      - uses: actions/download-artifact@v4
+        with:
+          name: load-archive-${{ inputs.run_1 }}
+          run-id: ${{ inputs.run_1 }}
+          github-token: ${{ github.token }}
+          path: archives
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: load-archive-${{ inputs.run_2 }}
+          run-id: ${{ inputs.run_2 }}
+          github-token: ${{ github.token }}
+          path: archives
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: load-archive-${{ inputs.run_3 }}
+          run-id: ${{ inputs.run_3 }}
+          github-token: ${{ github.token }}
+          path: archives
+
+      - name: Evaluate by the median rule of E-58
+        env:
+          RUN_1: ${{ inputs.run_1 }}
+          RUN_2: ${{ inputs.run_2 }}
+          RUN_3: ${{ inputs.run_3 }}
+        run: |
+          mkdir -p evidence
+          rc=0
+          tests/load/evaluate-runs.sh "archives/$RUN_1" "archives/$RUN_2" "archives/$RUN_3" > evidence/bewertung.md || rc=$?
+          cat evidence/bewertung.md
+          cat evidence/bewertung.md >> "$GITHUB_STEP_SUMMARY"
+          echo "evaluate-runs.sh exit code: $rc"
+          exit "$rc"
+
+      # The report is kept also when the evaluation fails: a missed budget is
+      # a result.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: load-evidence-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: ignore
