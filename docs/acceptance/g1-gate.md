@@ -349,7 +349,7 @@ verschoben (`docs/security/review-g1.md`).
 
 | Bedingung | Status | Nachweis |
 |---|---|---|
-| Lasttest (NFR-10) bestanden | PASS | `docs/acceptance/lasttest-g1.md`: lokaler Nachweislauf auf Commit `dbbfded` (B1 und B2 geschlossen) und GitHub-Lauf 38665599979 auf Commit `918a832` (`load.yml`, alle Schwellen eingehalten; nach dem Merge nächtlich auf dem Release-Kandidaten wiederholt). Als G1-Nachweis anerkannt (E-58 entschieden, Option 1, 2026-10-15); dedizierter Referenzhost vor GA (SR-06) |
+| Lasttest (NFR-10) bestanden | PASS | `docs/acceptance/lasttest-g1.md`: drei Nachweisläufe von `load.yml` auf `main` (Commit `3910aae`, Runs 40316485305, 40316488267, 40316491988), bewertet nach E-58 (Ergänzung vom 2026-10-26, Median über drei Läufe) mit `load-evidence.yml` (Run 40320307297): alle Budgets gehalten, auch NFR-02 auf den NFR-01-Volumina und die Wiederentdeckung (F-118). Umgebung nach E-58 (Option 1); dedizierter Referenzhost vor GA (SR-06). Läufe auf dem Release-Kandidaten: WP-595 |
 | Pentest ohne offene High/Critical | offen | Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend: Zusammenfassung, Befundliste und Nachtest in `docs/security/pentest-g1.md` (B3, A-07; WP-453) |
 | Isolationstest (TEN-09) vollständig | offen | Die Korrektur-WPs zu WP-208 sind gemergt (Abschnitt GATE-02, TEN-09); der Site-Scope-Bypass im Rack-Kanal (F-002) steht noch nicht als Befund im Review (WP-452). Statuspflege auf dem Release-Kandidaten: WP-595. |
 | Install-Smoke auf beiden Plattformen | PASS | `docs/acceptance/g1-installation.md` (WP-211) |
