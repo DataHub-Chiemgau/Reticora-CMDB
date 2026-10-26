@@ -29,7 +29,9 @@
 #     outbox entry fail the scenario;
 #   - smtp_scenario_*: smtp_outage against stubs: pending with attempts and
 #     last_error, then sent and exactly one mail → PASS; two mails, no failed
-#     attempt, never sent, no smtp check → FAIL.
+#     attempt, never sent, no smtp check → FAIL;
+#   - load_setup_db_url: load_setup hands cmd/seed the bootstrap password of
+#     the installation's .env, also though the seed runs in backend/.
 #
 # Tools: python3 with PyYAML, jq, shellcheck (SHELLCHECK=<path> or PATH) and
 # docker compose. A missing tool is a FAIL of its case.
@@ -37,8 +39,9 @@
 # Usage: [SHELLCHECK=<shellcheck>] ./tests/outage/config.test.sh
 #
 # Single quotes hold patterns and JSON literally (SC2016); the stubs replace
-# functions of the suite and are called from it (SC2317).
-# shellcheck disable=SC2016,SC2317
+# functions of the suite and are called from it (SC2317); every stub run sets
+# the suite's variables in its own subshell (SC2030, SC2031).
+# shellcheck disable=SC2016,SC2317,SC2030,SC2031
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
@@ -432,6 +435,34 @@ else
     rc="$(FAKE_LOAD=2 FAKE_NO_SMTP_CHECK=1 stub_run "$d" smtp)"
     expect_case "smtp_scenario_no_smtp_check: /readyz without smtp (no RETICORA_SMTP_HOST) → FAIL" 1 "$d" "$rc" \
         '^\| smtp outage \| FAIL \| /readyz has no smtp check'
+
+    # load_setup with the real db_admin_url and env_value: the seed runs in
+    # backend/, the default COMPOSE_DIR is relative to the repository root,
+    # so the URL has to be read before the cd (outage.yml once seeded with
+    # an empty password: "grep: deploy/docker-compose/.env: No such file").
+    d="$TMP_ROOT/seed-url"
+    mkdir -p "$d/repo/deploy/docker-compose" "$d/repo/backend"
+    printf 'RETICORA_DB_PASSWORD="p@ss/w0rd"\n' > "$d/repo/deploy/docker-compose/.env"
+    printf '#!/bin/sh\nprintf "%%s" "$RETICORA_DATABASE_URL" > "%s/url"\nwhile [ $# -gt 0 ]; do [ "$1" = -api-key-file ] && printf "rk_test_stub\\n" > "$2"; shift; done\n' "$d" > "$d/seed"
+    chmod +x "$d/seed"
+    repo="$PWD"
+    (
+        cd "$d/repo" || exit 1
+        unset COMPOSE_DIR ENV_FILE
+        # shellcheck source=tests/outage/lib.sh
+        . "$repo/tests/outage/lib.sh"
+        # shellcheck source=tests/outage/load.sh
+        . "$repo/tests/outage/load.sh"
+        psql_exec() { printf 'id-1\n'; }
+        OUTAGE_SEED_BIN="$d/seed" load_setup "$d/load"
+    ) > "$d/out.log" 2>&1
+    want='postgres://reticora:p%40ss%2Fw0rd@127.0.0.1:5432/reticora?sslmode=disable'
+    if [ "$(cat "$d/url" 2>/dev/null)" = "$want" ]; then
+        ok "load_setup_db_url: cmd/seed gets the bootstrap password of the installation's .env (URL read before cd backend)"
+    else
+        fail "load_setup_db_url: cmd/seed gets the bootstrap password of the installation's .env (URL read before cd backend)" \
+            "got: $(cat "$d/url" 2>/dev/null)"$'\n'"want: $want"$'\n'"$(cat "$d/out.log")"
+    fi
 fi
 
 echo

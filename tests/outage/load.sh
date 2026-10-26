@@ -43,8 +43,11 @@ load_setup() {
     local seed=(go run ./cmd/seed)
     [ -n "${OUTAGE_SEED_BIN:-}" ] && seed=("$OUTAGE_SEED_BIN")
     # The database URL with its password goes through the environment
-    # (cmd/seed reads RETICORA_DATABASE_URL), not the command line.
-    if ! (cd backend && RETICORA_DATABASE_URL="$(db_admin_url)" "${seed[@]}" -prefix "$OUTAGE_ORG_PREFIX" \
+    # (cmd/seed reads RETICORA_DATABASE_URL), not the command line. It is
+    # read before the cd: COMPOSE_DIR is relative to the repository root.
+    local db_url
+    db_url="$(db_admin_url)"
+    if ! (cd backend && RETICORA_DATABASE_URL="$db_url" "${seed[@]}" -prefix "$OUTAGE_ORG_PREFIX" \
         -api-key-file "$LOAD_DIR/key") > "$LOAD_DIR/seed.log" 2>&1; then
         LOAD_SETUP_ERROR="cmd/seed failed: $(tail -n 3 "$LOAD_DIR/seed.log" | tr '\n' ' ')"
         return 1
