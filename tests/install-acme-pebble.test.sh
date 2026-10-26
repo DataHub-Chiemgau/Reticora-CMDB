@@ -23,7 +23,17 @@
 #       'OIDC issuer is reachable from the backend container' included
 #       (F-035 in the TLS-domain path);
 #   (e) failed challenge (no A record in challtestsrv): the placeholder
-#       stays, the installer warns and ends with rc 0.
+#       stays, the installer warns and ends with rc 0;
+#   (f) renewal is served without frontend restart (WP-440, F-139): the
+#       serial of the certificate the frontend serves (openssl s_client) is
+#       recorded before 'certbot renew --force-renewal' and must become the
+#       renewed one within the reload interval of
+#       frontend/docker-entrypoint.d/30-reticora-cert-reload.sh
+#       (RETICORA_TLS_RELOAD_INTERVAL=10 in .env), with the same frontend
+#       container; the test waits up to 10 min. Before WP-440 nothing reloaded
+#       nginx, so the served serial stayed unchanged for those 10 min. Negative
+#       case: while the certificate is unchanged the loop runs and nginx logs
+#       no reload over three intervals.
 #
 # Name resolution: Pebble resolves the domain only through challtestsrv (A
 # record of the host IP, removed for (e)). The host and the containers (the
@@ -55,6 +65,14 @@ LE_DIR="$COMPOSE_DIR/letsencrypt"
 PEBBLE_COMPOSE="$REPO_ROOT/tests/fixtures/pebble/docker-compose.pebble.yml"
 CERTBOT_IMAGE="certbot/certbot:v2.11.0"
 SYSTEM_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
+# HTTPS endpoint of the frontend (port 443 published on the host).
+HTTPS_ADDR="127.0.0.1:443"
+# (f): RETICORA_TLS_RELOAD_INTERVAL of the frontend in this test (seconds),
+# the tolerance on top of it (polling every 2 s, nginx -t, reload) and the
+# longest wait for the renewed certificate.
+RELOAD_INTERVAL=10
+RELOAD_SLACK=10
+RENEWAL_WAIT=600
 
 PASS=0
 FAIL=0
@@ -285,7 +303,7 @@ restart_serves_live_chain() {
     stack restart frontend || return 1
     wait_healthy frontend || return 1
     local out served want
-    out="$(openssl s_client -connect 127.0.0.1:443 -servername "$DOMAIN" -verify_hostname "$DOMAIN" \
+    out="$(openssl s_client -connect "$HTTPS_ADDR" -servername "$DOMAIN" -verify_hostname "$DOMAIN" \
         -CAfile "$PEBBLE_ROOT" -verify_return_error </dev/null 2>&1)" \
         || { printf '%s\n' "$out" | tail -n 8; echo "the served chain does not verify against the Pebble root"; return 1; }
     grep -q 'Verify return code: 0 (ok)' <<< "$out" || { printf '%s\n' "$out" | tail -n 8; return 1; }
@@ -328,6 +346,91 @@ renew_with_service_command() {
     key="$(readlink -f "$(live privkey.pem)")"
     case "$key" in */archive/"$DOMAIN"/privkey2.pem) ;; *) echo "renewed key: $key"; return 1 ;; esac
     [ "$(stat -c '%u:%g %a' "$key")" = "0:101 640" ] || { echo "renewed key: $(stat -c '%u:%g %a' "$key"), expected 0:101 640 (deploy hook)"; return 1; }
+}
+
+# ─── (f) renewal without frontend restart (WP-440, F-139) ────────────────────
+
+# served_serial — serial of the certificate the frontend serves for the domain.
+served_serial() {
+    openssl s_client -connect "$HTTPS_ADDR" -servername "$DOMAIN" </dev/null 2>/dev/null \
+        | openssl x509 -noout -serial 2>/dev/null | sed 's/^serial=//'
+}
+
+live_serial() { openssl x509 -in "$(live cert.pem)" -noout -serial 2>/dev/null | sed 's/^serial=//'; }
+
+# frontend_state — container id, start time and restart count of the frontend.
+frontend_state() {
+    local id
+    id="$(stack ps -q frontend)"
+    [ -n "$id" ] || { echo "no frontend container"; return 1; }
+    docker inspect -f '{{.Id}} {{.State.StartedAt}} {{.RestartCount}}' "$id"
+}
+
+# reload_entries — reloads in the nginx log of the frontend: nginx logs every
+# 'nginx -s reload' as "signal 1 (SIGHUP) received from <pid>, reconfiguring".
+reload_entries() {
+    local log
+    log="$(stack logs --no-color frontend 2>&1)"
+    grep -c 'signal 1 (SIGHUP) received' <<< "$log"
+}
+
+# no_reload_without_change — negative case: the reload loop runs in the
+# frontend with the interval of .env, and while live/<domain>/fullchain.pem
+# stays unchanged nginx logs no reload over three intervals.
+no_reload_without_change() {
+    local procs log chain before after
+    procs="$(stack exec -T frontend ps -o args)" || return 1
+    grep -q '[3]0-reticora-cert-reload\.sh' <<< "$procs" \
+        || { echo "no certificate reload loop (30-reticora-cert-reload.sh) runs in the frontend:"; printf '%s\n' "$procs"; return 1; }
+    log="$(stack logs --no-color frontend 2>&1)"
+    grep -qF "fullchain.pem changes (checked every $RELOAD_INTERVAL s)" <<< "$log" \
+        || { echo "the loop does not check every $RELOAD_INTERVAL s (RETICORA_TLS_RELOAD_INTERVAL of .env)"; return 1; }
+    chain="$(sha256sum < "$(live fullchain.pem)")"
+    before="$(reload_entries)"
+    sleep $((3 * RELOAD_INTERVAL))
+    after="$(reload_entries)"
+    [ "$(sha256sum < "$(live fullchain.pem)")" = "$chain" ] || { echo "live/$DOMAIN/fullchain.pem changed during the check"; return 1; }
+    [ "$after" = "$before" ] || {
+        echo "nginx logged $((after - before)) reloads in $((3 * RELOAD_INTERVAL)) s without a certificate change:"
+        stack logs --no-color --tail 20 frontend
+        return 1
+    }
+}
+
+# renewal_served_without_restart <served before> <live before> <frontend before>
+# — (f): after the renewal the same frontend container serves the renewed
+# certificate within the reload interval. The serials and the wait go to
+# $LOG_DIR/renewal-served.txt (also on success).
+renewal_served_without_restart() {
+    local served_before="$1" live_before="$2" frontend_before="$3" want served start elapsed report
+    report="$LOG_DIR/renewal-served.txt"
+    if [ -z "$served_before" ] || [ "$served_before" != "$live_before" ]; then
+        echo "before the renewal the frontend served serial '${served_before:-nothing}', live/$DOMAIN/cert.pem had $live_before"
+        return 1
+    fi
+    want="$(live_serial)"
+    if [ -z "$want" ] || [ "$want" = "$live_before" ]; then
+        echo "live/$DOMAIN/cert.pem was not renewed (serial '$want')"
+        return 1
+    fi
+    start=$SECONDS
+    served="$(served_serial)"
+    while [ "$served" != "$want" ]; do
+        if [ $((SECONDS - start)) -ge "$RENEWAL_WAIT" ]; then
+            echo "served serial unchanged for $RENEWAL_WAIT s without a frontend restart: ${served:-nothing} (before the renewal: $served_before), renewed live/$DOMAIN/cert.pem: $want" | tee "$report"
+            return 1
+        fi
+        sleep 2
+        served="$(served_serial)"
+    done
+    elapsed=$((SECONDS - start))
+    echo "served serial $served_before -> $served after $elapsed s without a frontend restart (reload interval $RELOAD_INTERVAL s)" | tee "$report"
+    [ "$(frontend_state)" = "$frontend_before" ] || { echo "the frontend was restarted or replaced: $frontend_before -> $(frontend_state)"; return 1; }
+    [ "$elapsed" -le $((RELOAD_INTERVAL + RELOAD_SLACK)) ] || { echo "served only after $elapsed s, more than the reload interval $RELOAD_INTERVAL s (+$RELOAD_SLACK s)"; return 1; }
+    local log
+    log="$(stack logs --no-color frontend 2>&1)"
+    grep -qF "30-reticora-cert-reload.sh: live/$DOMAIN/fullchain.pem changed, nginx reloaded" <<< "$log" \
+        || { echo "no reload of the loop in the frontend log"; return 1; }
 }
 
 rerun_places_no_order() {
@@ -419,9 +522,11 @@ main() {
     start_pebble || { fail "pebble: Pebble and challtestsrv start"; exit 1; }
     challtest add-a "{\"host\":\"$DOMAIN\",\"addresses\":[\"$HOST_IP\"]}" >/dev/null || { fail "pebble: A record in challtestsrv"; exit 1; }
 
-    # (a), (d): first installation; .env only names the domain.
+    # (a), (d): first installation; .env only names the domain and, for (f),
+    # the reload interval of the frontend (kept by the installer).
     mkdir -p "$COMPOSE_DIR"
-    printf 'RETICORA_PUBLIC_BASE_URL=https://%s\nRETICORA_TLS_DOMAIN=%s\n' "$DOMAIN" "$DOMAIN" > "$ENV_FILE"
+    printf 'RETICORA_PUBLIC_BASE_URL=https://%s\nRETICORA_TLS_DOMAIN=%s\nRETICORA_TLS_RELOAD_INTERVAL=%s\n' \
+        "$DOMAIN" "$DOMAIN" "$RELOAD_INTERVAL" > "$ENV_FILE"
     chmod 0600 "$ENV_FILE"
     local rc=0
     run_installer first || rc=$?
@@ -436,6 +541,8 @@ main() {
 
     # (c) after the issuance.
     after_issuance_checks "after the issuance"
+    # (f) negative case.
+    check "pebble: unchanged certificate: the reload loop runs and nginx logs no reload" no_reload_without_change
 
     # (b), (d): second installer run.
     local orders
@@ -445,8 +552,16 @@ main() {
     check "pebble: second run rc 0 without a new order or a -0001 lineage" rerun_places_no_order "$orders" "$rc"
     check "pebble: second run logs both issuer checks"                       issuer_checks_logged second
 
-    # (c) after the renewal.
+    # (c), (f) after the renewal: served by the running frontend first, then
+    # after a restart.
+    local served_before live_before frontend_before
+    served_before="$(served_serial)"
+    live_before="$(live_serial)"
+    frontend_before="$(frontend_state)"
     check "pebble: certbot renew --force-renewal (renewal command of the certbot service)" renew_with_service_command
+    check "pebble: renewal is served without frontend restart" \
+        renewal_served_without_restart "$served_before" "$live_before" "$frontend_before"
+    [ ! -f "$LOG_DIR/renewal-served.txt" ] || sed 's/^/     /' "$LOG_DIR/renewal-served.txt"
     after_issuance_checks "after the renewal"
 
     # (e), (d): the challenge fails (no A record in challtestsrv).

@@ -403,9 +403,13 @@ services:
     # When it is set, the nginx image entrypoint renders the TLS template
     # (nginx-tls.conf.template, mounted below) to
     # /etc/nginx/conf.d/reticora-tls.conf, which the nginx.conf baked into the
-    # image includes inside its http block.
+    # image includes inside its http block. With a domain, the image's
+    # 30-reticora-cert-reload.sh checks live/<domain>/fullchain.pem every
+    # RETICORA_TLS_RELOAD_INTERVAL seconds and, when the certbot service has
+    # renewed it, runs nginx -t and then nginx -s reload (WP-440, F-139).
     environment:
       RETICORA_TLS_DOMAIN: "${RETICORA_TLS_DOMAIN:-}"
+      RETICORA_TLS_RELOAD_INTERVAL: "${RETICORA_TLS_RELOAD_INTERVAL:-21600}"
     volumes:
       - ./letsencrypt:/etc/letsencrypt:ro
       - certbot-webroot:/var/www/certbot
@@ -449,7 +453,8 @@ services:
     # entrypoint (which requires a certbot subcommand as its first argument).
     # The deploy hook makes a renewed key and chain readable for nginx
     # (uid/gid 101) in the frontend, as after the issuance (WP-419, F-034).
-    # Renewals go to the ACME server of the issuance (WP-420).
+    # Renewals go to the ACME server of the issuance (WP-420). The frontend
+    # reloads nginx itself when the renewed chain appears (WP-440).
     entrypoint: /bin/sh
     command: -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet --deploy-hook "sh /usr/local/bin/reticora-certbot-deploy-hook.sh" --server "$$RETICORA_ACME_SERVER"; sleep 12h & wait $${!}; done'
     environment:

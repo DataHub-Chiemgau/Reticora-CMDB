@@ -6,7 +6,8 @@
 # Fails when
 #   - docker compose cannot list the services or containers (compose error),
 #   - the container list is not valid JSON,
-#   - an expected service has no container, or its container is not running,
+#   - an expected service has no container, or one of its containers is not
+#     running (every container of a scaled service counts, F-288),
 #   - a container with a health check is not "healthy",
 #   - the server's database sessions (pg_stat_activity, application_name
 #     reticora-server) are missing or do not all log in as reticora_runtime
@@ -14,7 +15,9 @@
 #     check runs when the stack has both a postgres and a server service.
 # The expected services are the ones `docker compose config --services`
 # reports for the active profiles, so a service added to the stack is checked
-# without changing this script. The certbot renewal service is only started
+# without changing this script. One-off containers (`docker compose run`,
+# label com.docker.compose.oneoff=True) are not part of a service and are
+# ignored, whatever their state. The certbot renewal service is only started
 # by install-cloud.sh when RETICORA_TLS_DOMAIN is set; without a domain it is
 # not expected.
 #
@@ -67,24 +70,35 @@ if ! containers=$(printf '%s\n' "$raw" | jq -cs 'if length == 1 and (.[0] | type
     exit 1
 fi
 
+# Labels: one "key=value,…" string (docker compose ps), an object elsewhere.
+# shellcheck disable=SC2016 # jq program
+service_containers='def oneoff: (.Labels // "") as $l
+    | if ($l | type) == "object" then $l["com.docker.compose.oneoff"] == "True"
+      else ($l | tostring | test("(^|,)com\\.docker\\.compose\\.oneoff=True(,|$)")) end;
+    .[] | select(.Service == $s and (oneoff | not))'
+
 failed=0
 printf '%-14s %-10s %-10s %s\n' SERVICE STATE HEALTH CONTAINER
 while IFS= read -r service; do
-    row=$(jq -c --arg s "$service" '[.[] | select(.Service == $s)] | first // empty' <<<"$containers")
-    if [ -z "$row" ]; then
+    # Every container of the service, a stopped replica of a scaled one
+    # included (F-288).
+    rows=$(jq -c --arg s "$service" "$service_containers" <<<"$containers")
+    if [ -z "$rows" ]; then
         printf '%-14s %-10s %-10s %s\n' "$service" missing - -
         failed=1
         continue
     fi
-    state=$(jq -r '.State // ""' <<<"$row")
-    health=$(jq -r '.Health // ""' <<<"$row")
-    name=$(jq -r '.Name // ""' <<<"$row")
-    printf '%-14s %-10s %-10s %s\n' "$service" "${state:--}" "${health:--}" "$name"
-    if [ "$state" != "running" ]; then
-        failed=1
-    elif [ -n "$health" ] && [ "$health" != "healthy" ]; then
-        failed=1
-    fi
+    while IFS= read -r row; do
+        state=$(jq -r '.State // ""' <<<"$row")
+        health=$(jq -r '.Health // ""' <<<"$row")
+        name=$(jq -r '.Name // ""' <<<"$row")
+        printf '%-14s %-10s %-10s %s\n' "$service" "${state:--}" "${health:--}" "$name"
+        if [ "$state" != "running" ]; then
+            failed=1
+        elif [ -n "$health" ] && [ "$health" != "healthy" ]; then
+            failed=1
+        fi
+    done <<<"$rows"
 done <<<"$services"
 
 if [ "$failed" -ne 0 ]; then

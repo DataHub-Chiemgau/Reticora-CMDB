@@ -23,6 +23,11 @@ on:
       - 'deploy/keycloak/**'
       - 'backend/Dockerfile'
       - 'frontend/Dockerfile'
+      # WP-440: entrypoint hooks (TLS, certificate reload) and nginx
+      # configuration baked into the frontend image.
+      - 'frontend/docker-entrypoint.d/**'
+      - 'frontend/nginx.conf'
+      - 'frontend/keycloak-proxy.conf'
       - 'tests/install-*.sh'
       # WP-420: Pebble and challtestsrv of tests/install-acme-pebble.test.sh.
       - 'tests/fixtures/pebble/**'
@@ -53,6 +58,11 @@ on:
       - 'deploy/keycloak/**'
       - 'backend/Dockerfile'
       - 'frontend/Dockerfile'
+      # WP-440: entrypoint hooks (TLS, certificate reload) and nginx
+      # configuration baked into the frontend image.
+      - 'frontend/docker-entrypoint.d/**'
+      - 'frontend/nginx.conf'
+      - 'frontend/keycloak-proxy.conf'
       - 'tests/install-*.sh'
       # WP-420: Pebble and challtestsrv of tests/install-acme-pebble.test.sh.
       - 'tests/fixtures/pebble/**'
@@ -132,7 +142,9 @@ jobs:
       - name: install-cloud.sh Let's Encrypt issuance (placeholder, deploy hook)
         run: sudo ./tests/install-cloud-acme.test.sh
 
-      - name: install-smoke-health.sh
+      # WP-440 (F-288): besides the stubs, a real compose project (redis:7-alpine)
+      # with a scaled service and a one-off container; fails without Docker.
+      - name: install-smoke-health.sh (stubs, scaled service and one-off container)
         run: ./tests/install-smoke-health.test.sh
 
       - name: install-preflight.sh (platform, Docker, Compose, sizing)
@@ -445,7 +457,10 @@ jobs:
   # installation, re-run without a new order, key and chain readable for
   # nginx (uid 101) after the issuance and after a forced renewal, both
   # issuer checks in every installer log, failed challenge. The domain is an
-  # sslip.io name of the runner's IP (header of the test).
+  # sslip.io name of the runner's IP (header of the test). WP-440 (F-139):
+  # the renewed certificate is served without a frontend restart within the
+  # reload interval (10 s here; the test waits up to 10 min), and an
+  # unchanged certificate causes no reload.
   tls-domain-pebble:
     needs: installer-script-tests
     runs-on: ubuntu-24.04
@@ -456,7 +471,7 @@ jobs:
       - name: Make installer scripts executable
         run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
 
-      - name: Installer against Pebble (issuance, re-run, uid 101 after issuance and renewal, issuer checks, failed challenge)
+      - name: Installer against Pebble (issuance, re-run, uid 101 after issuance and renewal, renewal served without restart, issuer checks, failed challenge)
         run: ./tests/install-acme-pebble.test.sh "$RUNNER_TEMP/tls-domain-pebble"
 
       - name: Upload the installer, Pebble and stack logs
