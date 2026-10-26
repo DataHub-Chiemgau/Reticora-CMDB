@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
+import type { AuditEntry } from '../api/client';
 import { useAuditLog, useVerifyAuditChain } from '../api/hooks';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -15,7 +17,7 @@ import { SkeletonList } from '../components/ui/Skeleton';
  * tampered log is visible immediately instead of only in the CLI.
  */
 export function AuditPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [offset, setOffset] = useState(0);
   const limit = 50;
 
@@ -110,12 +112,12 @@ export function AuditPage() {
                 {entries.map((entry) => (
                   <tr key={entry.id} className="text-sm text-gray-700 dark:text-gray-300">
                     <td className="py-2 pr-4 whitespace-nowrap">
-                      {new Date(entry.created_at).toLocaleString()}
+                      {new Date(entry.timestamp).toLocaleString(i18n.language)}
                     </td>
-                    <td className="py-2 pr-4">{entry.actor_email ?? entry.actor_id ?? '—'}</td>
+                    <td className="py-2 pr-4">{entry.actor_id ?? entry.actor_type ?? '—'}</td>
                     <td className="py-2 pr-4 font-mono text-xs">{entry.action}</td>
                     <td className="py-2 font-mono text-xs">
-                      {entry.entity_type ? `${entry.entity_type}/${entry.entity_id ?? ''}` : '—'}
+                      <AuditObject entry={entry} />
                     </td>
                   </tr>
                 ))}
@@ -149,4 +151,28 @@ export function AuditPage() {
       </Card>
     </div>
   );
+}
+
+/**
+ * AuditObject names the resource an entry changed as resource_type/resource_id
+ * and links a CI to its detail page.
+ */
+function AuditObject({ entry }: { entry: AuditEntry }) {
+  if (!entry.resource_type) {
+    return <>—</>;
+  }
+  const label = entry.resource_id
+    ? `${entry.resource_type}/${entry.resource_id}`
+    : entry.resource_type;
+  if (entry.resource_type === 'ci' && entry.resource_id) {
+    return (
+      <Link
+        to={`/cmdb/${encodeURIComponent(entry.resource_id)}`}
+        className="text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        {label}
+      </Link>
+    );
+  }
+  return <>{label}</>;
 }

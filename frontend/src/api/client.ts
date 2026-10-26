@@ -1,5 +1,6 @@
 import { clearSession, getSessionToken, refreshSession } from '../auth/session';
 import { useScopeStore } from '../stores/scope';
+import type { components } from './generated/schema';
 
 const API_BASE = '/api/v1';
 
@@ -2131,23 +2132,11 @@ export const monitoringApi = {
 
 // --- Audit (hash chain verification) ---
 
-export interface AuditEntry {
-  id: string;
-  organization_id: string;
-  actor_id?: string;
-  actor_email?: string;
-  action: string;
-  entity_type?: string;
-  entity_id?: string;
-  details?: Record<string, unknown>;
-  seq?: number;
-  source?: 'ui' | 'api' | 'collector' | 'import' | 'system';
-  request_id?: string;
-  correlation_id?: string;
-  hash?: string;
-  previous_hash?: string;
-  created_at: string;
-}
+/**
+ * AuditEntry is the generated OpenAPI type, so the viewer reads exactly the
+ * fields the API returns (timestamp, resource_type, resource_id; F-078).
+ */
+export type AuditEntry = components['schemas']['AuditEntry'];
 
 export interface AuditVerifyResult {
   intact: boolean;
