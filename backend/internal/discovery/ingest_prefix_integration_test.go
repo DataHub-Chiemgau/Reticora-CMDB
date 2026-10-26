@@ -76,12 +76,14 @@ func captureLogs(t *testing.T) *logCapture {
 }
 
 // TestIngestKeepsPrefixOfFailedBatch covers decision D-3 of WP-332 (NFR-03,
-// REC-01) against PostgreSQL with the write path of the server: a batch of
-// three new devices whose second record fails late in its transaction
+// REC-01) and WP-481 against PostgreSQL with the write path of the server: a
+// batch of three new devices whose second record fails late in its
+// transaction (transiently)
 //   - record by record: the first record stays committed, gets its topology
-//     edge and its ledger entry; the failed record and the one after it leave
-//     nothing; the redelivered batch skips the first as a duplicate and
-//     creates the other two;
+//     edge and its ledger entry; the failed record leaves nothing; the third,
+//     another device, is processed after it (WP-481); the answer is 202 with
+//     the second record rejected and retryable; the redelivered batch skips
+//     the first and the third as duplicates and creates the second;
 //   - with the batch of WP-333: the new devices of the window (first and
 //     third) are created together before the unclassified second runs on its
 //     own, so both stay committed and in the ledger.
@@ -178,7 +180,7 @@ func TestIngestKeepsPrefixOfFailedBatch(t *testing.T) {
 		// leaves committed.
 		committed [3]bool
 	}{
-		{"record by record", false, [3]bool{true, false, false}},
+		{"record by record", false, [3]bool{true, false, true}},
 		{"batch", true, [3]bool{true, false, true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -211,8 +213,14 @@ func TestIngestKeepsPrefixOfFailedBatch(t *testing.T) {
 
 			logsBefore := openedLogs()
 			syncer.arm()
-			if code, _ := post(mux, records); code == http.StatusAccepted || syncer.armed.Load() {
+			// The failing record is rejected alone (WP-481).
+			code, failedResp := post(mux, records)
+			if code != http.StatusAccepted || syncer.armed.Load() {
 				t.Fatalf("ingest with a failing second record: %d, failure injected %v", code, !syncer.armed.Load())
+			}
+			if failedResp.Accepted != 2 || failedResp.Rejected != 1 || len(failedResp.Errors) != 1 ||
+				failedResp.Errors[0].RecordID != records[1].RecordID || !failedResp.Errors[0].Retryable {
+				t.Errorf("answer to the failed batch %+v, want the second record rejected (retryable), the others accepted", failedResp)
 			}
 			want := struct{ created, duplicates int }{}
 			for i, serial := range serials {

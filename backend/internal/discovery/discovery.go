@@ -105,6 +105,9 @@ type IngestItem struct {
 	ScopeID     string    `json:"-"`
 	SiteID      string    `json:"-"`
 	ClientID    string    `json:"-"`
+	// seq is the position of the record among the messages ProcessMessages
+	// processes, plus one; 0 elsewhere. A record failure names it (WP-481).
+	seq int
 
 	// Attributes carries dynamic discovery attributes (spec §1 hybrid model).
 	// They feed per-field provenance records (spec §13) without being forced
@@ -145,6 +148,13 @@ type BulkIngestResponse struct {
 	// reached (ENT-03, CH21); already queued devices count again.
 	Unlicensed int    `json:"unlicensed,omitempty"`
 	JobID      string `json:"job_id,omitempty"`
+	// Accepted counts the records processed, deduplicated or queued;
+	// Rejected those refused with an error, each listed in Errors. A record
+	// that fails does not take the others of its request down (REC-01,
+	// WP-481).
+	Accepted int                 `json:"accepted"`
+	Rejected int                 `json:"rejected"`
+	Errors   []IngestRecordError `json:"errors,omitempty"`
 }
 
 // Repository defines persistence operations for collectors, discovery jobs and
@@ -995,11 +1005,12 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	// processed in this request.
 	msgs := newIngestMessages(r.Context(), t, r.Header.Get("X-Collector-ID"), items)
 	resp, err := h.dispatch(r.Context(), msgs)
-	if err != nil {
+	// Records that fail are listed in the answer; only when no record was
+	// accepted does the request fail as a whole (WP-481).
+	if err = resp.finish(received, rejected, err); err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	resp.Received, resp.RejectedFuture = received, rejected
 	api.WriteJSON(w, http.StatusAccepted, resp)
 }
 
@@ -1009,10 +1020,15 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 //
 // With a transaction runner (the PostgreSQL repository) the frame of the
 // batch runs in one short transaction and every record in exactly one more
-// (NFR-03). A failing record rolls back completely and stops the batch: the
-// records before it stay committed, get their topology and are entered in
-// the ledger, and the error makes the queue deliver the batch again, which
-// skips them as duplicates.
+// (NFR-03). A failing record rolls back completely and the batch goes on
+// with the next record (WP-481): the records processed get their topology
+// and are entered in the ledger, and the error, an *IngestErrors, names each
+// failed record. A record that failed transiently holds back the records
+// after it that share one of its identity keys (the keys of the identity
+// lock, E-56): they fail with it and keep their order when the batch is
+// delivered again; a record that failed for good holds back nothing. A
+// frame that fails for good runs each record in a frame of its own, so
+// that only the records that cause it fail.
 //
 // With the batch queries of the repository and the batch creation of the
 // CI repository (WP-333), each window of up to ingestBatch records (with
@@ -1023,9 +1039,8 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 // identity locks (WP-608). Every record the batch leaves follows one by one
 // in the order of the records; without the ingest locks the updates of
 // known devices do as well. The records of one device keep their order.
-// When a record fails, the devices its window created or updated in the
-// batch stay committed like the records before it and are entered in the
-// ledger.
+// When a record fails in the batch of its window, the window rolls back and
+// its records follow one by one (processWindow).
 func (h *Handler) processItems(ctx context.Context, orgID string, items []IngestItem) (BulkIngestResponse, error) {
 	var resp BulkIngestResponse
 	if h.ciRepo == nil {
@@ -1051,6 +1066,14 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 		reason := retryReason(err)
 		if !locking || attempt >= maxRecordRetries ||
 			(reason != "deadlock" && reason != "serialization" && reason != "out_of_memory") || !retryPause(ctx, reason, attempt) {
+			if len(items) > 1 && classifyRecordError(err).permanent {
+				// A record makes the frame fail for good, e.g. the review of
+				// an unknown type outside the sender's scope: each record
+				// runs on its own, so that only it fails (WP-481).
+				slog.WarnContext(ctx, "ingest frame failed for good; its records are processed one by one",
+					"event", "ingest.frame.fallback", "organization_id", orgID, "records", len(items), "error", err)
+				return h.processEach(ctx, orgID, items)
+			}
 			return resp, err
 		}
 		recordRetries.WithLabelValues(reason).Inc()
@@ -1068,10 +1091,23 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	n := len(frame.items)
 	resolvedCIID := make([]string, n)
 	handled := make([]bool, n)
-	var recordErr error
-windows:
+	// failed are the records that failed; held the identity keys of those
+	// that failed transiently, which hold back the records after them.
+	var failed []RecordError
+	held := heldKeys{}
+	frame.blocked = make([]bool, n)
 	for start, end := 0, 0; start < n; start = end {
 		end = h.windowEnd(orgID, frame, start)
+		if len(held) > 0 {
+			// The batch of the window leaves the records held back, and those
+			// after them that share a key with them.
+			for i := start; i < end; i++ {
+				if keys := identityLockKeys(orgID, frame.identity, &frame.items[i]); frame.typeIDs[i] != "" && held.holds(keys) {
+					frame.blocked[i] = true
+					held.add(keys)
+				}
+			}
+		}
 		h.processWindow(ctx, orgID, frame, start, end, handled, resolvedCIID, &resp)
 		for i := start; i < end; i++ {
 			if handled[i] {
@@ -1082,10 +1118,28 @@ windows:
 				handled[i] = true
 				continue
 			}
+			var keys []int32
+			if len(held) > 0 {
+				keys = identityLockKeys(orgID, frame.identity, &frame.items[i])
+				if frame.blocked[i] || held.holds(keys) {
+					failed = append(failed, newRecordError(&frame.items[i], errHeldBack))
+					held.add(keys)
+					continue
+				}
+			}
 			out, err := h.runRecord(ctx, orgID, frame, i)
 			if err != nil {
-				recordErr = err
-				break windows
+				f := newRecordError(&frame.items[i], err)
+				failed = append(failed, f)
+				slog.WarnContext(ctx, "ingest record failed; the batch goes on with the next record", "event", "ingest.record.failed",
+					"organization_id", orgID, "record_id", f.RecordID, "permanent", f.Permanent, "error", err)
+				if !f.Permanent {
+					if keys == nil {
+						keys = identityLockKeys(orgID, frame.identity, &frame.items[i])
+					}
+					held.add(keys)
+				}
+				continue
 			}
 			// Counted once the record's transaction has committed.
 			resp.add(&out.resp)
@@ -1109,10 +1163,13 @@ windows:
 	// Outlet mappings of PDUs and UPS outlet groups (IMP-09).
 	resp.Relationships += h.derivePowerChain(ctx, orgID, processed, processedCIID)
 	if err := h.markProcessed(ctx, orgID, processed); err != nil {
-		return resp, errors.Join(recordErr, err)
+		return resp, &IngestErrors{Records: failed, Rest: err}
 	}
 	settle(ctx, processed)
-	return resp, recordErr
+	if len(failed) > 0 {
+		return resp, &IngestErrors{Records: failed}
+	}
+	return resp, nil
 }
 
 // batchFrame is what the frame of a batch prepares for its records: the
@@ -1142,6 +1199,9 @@ type batchFrame struct {
 	// locking makes the transactions of the records take the identity and
 	// max_cis locks and retry a lost race (Handler.locking, WP-334).
 	locking bool
+	// blocked marks the records an earlier transient record failure holds
+	// back (WP-481); the batch of their window leaves them.
+	blocked []bool
 }
 
 // recordOutcome is what processing one record changed.
@@ -1620,7 +1680,7 @@ func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchF
 	qs, include := make([]IdentityQuery, n), make([]bool, n)
 	records := 0
 	for k := range n {
-		if frame.typeIDs[start+k] == "" {
+		if frame.typeIDs[start+k] == "" || (start+k < len(frame.blocked) && frame.blocked[start+k]) {
 			continue
 		}
 		qs[k] = identityQuery(&frame.items[start+k])

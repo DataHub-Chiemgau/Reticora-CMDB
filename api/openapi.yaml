@@ -8115,7 +8115,10 @@ paths:
         queue (NATS) is unreachable both answer 503 at once and queue
         nothing, not even after the reconnect (OPS-06, WP-449); records of
         the batch queued before a failure are deduplicated by record_id when
-        the batch is sent again.
+        the batch is sent again. Without the queue the records are processed
+        in the request; a record that fails is rejected alone and listed in
+        errors, the others are processed (WP-481). Only when every record is
+        rejected does the request answer with the error status of the first.
       parameters:
         - name: Content-Encoding
           in: header
@@ -14749,7 +14752,7 @@ components:
 
     DiscoveryIngestResponse:
       type: object
-      required: [received, created, updated, conflicts]
+      required: [received, created, updated, conflicts, accepted, rejected]
       properties:
         received:
           type: integer
@@ -14784,6 +14787,44 @@ components:
             reached (ENT-03, CH21).
         job_id:
           type: string
+        accepted:
+          type: integer
+          description: >-
+            Records processed, deduplicated or queued (REC-01). A record that
+            fails does not take the others of the request down (WP-481).
+        rejected:
+          type: integer
+          description: >-
+            Records refused with an error, each listed in errors. When every
+            record is rejected the request answers with the error status of
+            the first one instead of 202.
+        errors:
+          type: array
+          description: The records refused with an error, one entry each.
+          items:
+            $ref: '#/components/schemas/DiscoveryIngestRecordError'
+
+    DiscoveryIngestRecordError:
+      type: object
+      required: [status, detail, retryable]
+      properties:
+        record_id:
+          type: string
+          description: The record_id of the record; absent for items of the deprecated collector_id/items request.
+        status:
+          type: integer
+          description: >-
+            The HTTP status the record alone would have been answered with,
+            e.g. 403 for a record outside the sender's scope.
+        detail:
+          type: string
+          description: Why the record was refused, without internals.
+        retryable:
+          type: boolean
+          description: >-
+            The failure is transient (database, network, or an earlier record
+            of the same device failed transiently); sent again, the record may
+            succeed. False for a record that can never succeed.
 
     DiscoveryJobStatus:
       type: string

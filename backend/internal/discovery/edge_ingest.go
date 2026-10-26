@@ -165,11 +165,12 @@ func (h *Handler) edgeIngest(ctx context.Context, orgID, collectorID string, dat
 	t := tenant.TenantInfo{OrganizationID: orgID}
 	ctx = tenant.WithTenant(ctx, t)
 	resp, err := h.dispatch(ctx, newIngestMessages(ctx, t, collectorID, items))
-	if err != nil {
+	// Records that fail are listed in the reply; only when no record was
+	// accepted does the request fail as a whole (WP-481).
+	if err = resp.finish(received, rejected, err); err != nil {
 		slog.Error("edge ingest failed", "organization_id", orgID, "collector_id", collectorID, "error", err)
 		return EdgeReply{Status: http.StatusInternalServerError, Error: "ingest failed"}
 	}
-	resp.Received, resp.RejectedFuture = received, rejected
 	return EdgeReply{Status: http.StatusAccepted, LicenseStatus: state, Result: &resp}
 }
 

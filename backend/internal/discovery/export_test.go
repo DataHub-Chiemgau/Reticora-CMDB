@@ -61,6 +61,12 @@ func ProcessItemsInLane(ctx context.Context, h *Handler, orgID string, lane int,
 // scope of ctx, and returns how each delivery ended ("ack", "nak", "term")
 // in the order of observed_at.
 func ConsumeRecords(ctx context.Context, h *Handler, orgID string, recs ...DeviceRecord) []string {
+	return ConsumeRecordsDelivered(ctx, h, orgID, 1, recs...)
+}
+
+// ConsumeRecordsDelivered is ConsumeRecords with every delivery being the
+// delivered-th of its message (ingestMaxDeliver: the last).
+func ConsumeRecordsDelivered(ctx context.Context, h *Handler, orgID string, delivered uint64, recs ...DeviceRecord) []string {
 	items := make([]IngestItem, len(recs))
 	for i := range recs {
 		items[i] = itemFromRecord(&recs[i])
@@ -73,7 +79,7 @@ func ConsumeRecords(ctx context.Context, h *Handler, orgID string, recs ...Devic
 		if err != nil {
 			panic(err)
 		}
-		fakes[i] = &fakeDelivery{data: data, delivered: 1}
+		fakes[i] = &fakeDelivery{data: data, delivered: delivered}
 		deliveries[i] = fakes[i]
 	}
 	consumeBatch(ctx, h, deliveries)
@@ -83,6 +89,10 @@ func ConsumeRecords(ctx context.Context, h *Handler, orgID string, recs ...Devic
 	}
 	return results
 }
+
+// IngestMaxDeliver is the number of deliveries after which the queue gives
+// an ingest message up.
+const IngestMaxDeliver = ingestMaxDeliver
 
 // ItemFromRecord is the ingest item of a record.
 func ItemFromRecord(rec *DeviceRecord) IngestItem { return itemFromRecord(rec) }

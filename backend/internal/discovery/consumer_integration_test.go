@@ -12,6 +12,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -533,4 +534,159 @@ func readinessFromSample(t *testing.T, url string, q *discovery.NATSIngestQueue,
 	if n := requests(); n == 0 {
 		t.Error("the watch saw no JetStream request of a consumer listing")
 	}
+}
+
+// TestPoisonRecordDoesNotTakeValidRecordsDown covers WP-481 (REC-01,
+// NFR-03, F-090; moved from the audit's defect test
+// TestAuditT3PoisonRecordDoesNotTakeValidRecordsDown) against PostgreSQL
+// with RLS and four lanes: a record of client 2 sent by a principal
+// restricted to client 1 can never succeed. On the queue path it is
+// terminated at its first delivery while the valid records of the same lane
+// and group are processed and acknowledged; at the last delivery none of
+// them is given up. The HTTP ingest without a queue processes the valid
+// records and answers 202 with the accepted and rejected records and the
+// error of the poison record by its record_id; a request with only the
+// poison record keeps 403.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestPoisonRecordDoesNotTakeValidRecordsDown(t *testing.T) {
+	f := scopetest.Seed(t, "6f")
+	bg := context.Background()
+	h := discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App)).WithIngestLanes(4)
+	ti := tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User}
+	ciRows := func(serial string) int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci WHERE organization_id = $1 AND serial_number = $2 AND deleted_at IS NULL`, f.OrgA, serial).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	ipSeq := 10
+	record := func(serial, client string, at time.Time) plugins.DeviceRecord {
+		ipSeq++
+		r := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "server", Name: serial, Serial: serial, IP: fmt.Sprintf("192.0.2.%d", ipSeq)}, at)
+		r.ClientID = client
+		return r
+	}
+
+	t.Run("queue path", func(t *testing.T) {
+		t0 := time.Now().UTC().Add(-time.Hour)
+		recs := []plugins.DeviceRecord{record("AUDIT-T3-POISON-Q", f.Client2, t0)}
+		for i := 0; i < 8; i++ {
+			recs = append(recs, record(fmt.Sprintf("AUDIT-T3-GOOD-Q-%d", i), f.Client1, t0.Add(time.Duration(i+1)*time.Second)))
+		}
+		lane := func(r *plugins.DeviceRecord) int {
+			item := discovery.ItemFromRecord(r)
+			return discovery.IngestLane(&item, 4)
+		}
+		poisonLane, sharing := lane(&recs[0]), 0
+		for i := 1; i < len(recs); i++ {
+			if lane(&recs[i]) == poisonLane {
+				sharing++
+			}
+		}
+		if sharing == 0 {
+			t.Fatalf("precondition: no valid record shares lane %d with the poison record", poisonLane)
+		}
+		deadBefore := discovery.IngestDeadLetters()
+		// First delivery: every valid record is processed and acknowledged,
+		// only the poison record is terminated.
+		for i, result := range discovery.ConsumeRecords(f.ClientCtx(f.Client1), h, f.OrgA, recs...) {
+			serial := recs[i].Identity.SerialNumber
+			if i == 0 {
+				if n := ciRows(serial); n != 0 || result != "term" {
+					t.Errorf("out-of-scope poison record at delivery 1: %s with %d CI rows, want term and none", result, n)
+				}
+				continue
+			}
+			if result != "ack" || ciRows(serial) != 1 {
+				t.Errorf("valid record %s (lane %d, poison lane %d) at delivery 1: %s with %d CI rows, want ack and 1 row",
+					serial, lane(&recs[i]), poisonLane, result, ciRows(serial))
+			}
+		}
+		if n := discovery.IngestDeadLetters() - deadBefore; n != 1 {
+			t.Errorf("dead letters grew by %d, want 1 (the poison record)", n)
+		}
+		// Last delivery: no valid record is dead-lettered.
+		for i, result := range discovery.ConsumeRecordsDelivered(f.ClientCtx(f.Client1), h, f.OrgA, discovery.IngestMaxDeliver, recs...) {
+			if i == 0 {
+				continue
+			}
+			serial := recs[i].Identity.SerialNumber
+			if result != "ack" || ciRows(serial) != 1 {
+				t.Errorf("valid record %s at the last delivery: %s with %d CI rows, want it acknowledged and persisted (never dead-lettered)",
+					serial, result, ciRows(serial))
+			}
+		}
+	})
+
+	t.Run("frame", func(t *testing.T) {
+		// A record of an unknown type outside the sender's scope fails the
+		// review the frame opens for it: the records run one by one.
+		t0 := time.Now().UTC().Add(-30 * time.Minute)
+		poison := record("AUDIT-T3-POISON-F", f.Client2, t0)
+		poison.Classification.CIType = "audit-t3-unknown-type"
+		recs := []plugins.DeviceRecord{poison, record("AUDIT-T3-GOOD-F-0", f.Client1, t0.Add(time.Second)),
+			record("AUDIT-T3-GOOD-F-1", f.Client1, t0.Add(2*time.Second))}
+		results := discovery.ConsumeRecords(f.ClientCtx(f.Client1), h, f.OrgA, recs...)
+		if want := []string{"term", "ack", "ack"}; !slices.Equal(results, want) {
+			t.Errorf("deliveries %v, want %v", results, want)
+		}
+		for _, r := range recs[1:] {
+			if n := ciRows(r.Identity.SerialNumber); n != 1 {
+				t.Errorf("valid record %s: %d CI rows, want 1", r.Identity.SerialNumber, n)
+			}
+		}
+	})
+
+	t.Run("http path", func(t *testing.T) {
+		mux := chi.NewRouter()
+		discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App)).RegisterRoutes(mux)
+		post := func(records []plugins.DeviceRecord) *httptest.ResponseRecorder {
+			t.Helper()
+			body, err := json.Marshal(plugins.DeviceRecordBatch{Records: records})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/discovery/ingest", bytes.NewReader(body)).
+				WithContext(tenant.WithTenant(f.ClientCtx(f.Client1), ti)))
+			return w
+		}
+		at := time.Now().UTC().Add(-time.Minute)
+		// Control: the same kind of batch without the poison record is accepted.
+		if w := post([]plugins.DeviceRecord{record("AUDIT-T3-CONTROL-H", f.Client1, at)}); w.Code != http.StatusAccepted || ciRows("AUDIT-T3-CONTROL-H") != 1 {
+			t.Fatalf("control batch without poison: %d %s", w.Code, w.Body.String())
+		}
+		records := []plugins.DeviceRecord{record("AUDIT-T3-POISON-H", f.Client2, at)}
+		for i := 0; i < 2; i++ {
+			records = append(records, record(fmt.Sprintf("AUDIT-T3-GOOD-H-%d", i), f.Client1, at.Add(time.Duration(i+1)*time.Second)))
+		}
+		w := post(records)
+		for _, r := range records[1:] {
+			if n := ciRows(r.Identity.SerialNumber); n != 1 {
+				t.Errorf("HTTP ingest with one out-of-scope record answered %d; valid record %s has %d CI rows, want 1 (the valid records must not be rejected with it)",
+					w.Code, r.Identity.SerialNumber, n)
+			}
+		}
+		if n := ciRows("AUDIT-T3-POISON-H"); n != 0 {
+			t.Errorf("out-of-scope poison record created %d CI rows", n)
+		}
+		var resp discovery.BulkIngestResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); w.Code != http.StatusAccepted || err != nil {
+			t.Fatalf("HTTP ingest with one out-of-scope record: %d %s, want 202", w.Code, w.Body.String())
+		}
+		if resp.Received != 3 || resp.Accepted != 2 || resp.Rejected != 1 || resp.Created != 2 || len(resp.Errors) != 1 ||
+			resp.Errors[0].RecordID != records[0].RecordID || resp.Errors[0].Status != http.StatusForbidden || resp.Errors[0].Retryable {
+			t.Errorf("answer %s, want 2 accepted and the poison record %s rejected with 403, not retryable", w.Body.String(), records[0].RecordID)
+		}
+		if strings.Contains(w.Body.String(), "row-level") || strings.Contains(w.Body.String(), "SQLSTATE") {
+			t.Errorf("answer discloses internals: %s", w.Body.String())
+		}
+		// Only the poison record: rejected as a whole, as before.
+		if w = post([]plugins.DeviceRecord{record("AUDIT-T3-POISON-H2", f.Client2, at)}); w.Code != http.StatusForbidden {
+			t.Errorf("HTTP ingest of only an out-of-scope record: %d %s, want 403", w.Code, w.Body.String())
+		}
+	})
 }

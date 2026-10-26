@@ -59,7 +59,7 @@ func RegisterMetrics(reg prometheus.Registerer) {
 	}, func() float64 { return float64(UnlicensedQueued()) }))
 	// Discovery error states (DIS-08).
 	reg.MustRegister(scopeRuns, discoveryErrors)
-	reg.MustRegister(ingestLanesGauge, laneBacklog, laneRecords, recordRetries)
+	reg.MustRegister(ingestLanesGauge, laneBacklog, laneRecords, recordRetries, deadLetters)
 }
 
 // discoveredAttributes are the attributes a discovered device stores on its

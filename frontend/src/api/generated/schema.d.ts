@@ -4072,7 +4072,7 @@ export interface paths {
     put?: never;
     /**
      * Ingest discovery results in bulk
-     * @description Reconciles a batch of discovered items against existing CIs, creating, updating or queueing them for manual review. This is the canonical endpoint that `/api/v1/discovery/ingest` aliases. Both require the discovery feature; after the discovery license expired they answer 403 with the problem type license-expired (CH21). While the ingest queue (NATS) is unreachable both answer 503 at once and queue nothing, not even after the reconnect (OPS-06, WP-449); records of the batch queued before a failure are deduplicated by record_id when the batch is sent again.
+     * @description Reconciles a batch of discovered items against existing CIs, creating, updating or queueing them for manual review. This is the canonical endpoint that `/api/v1/discovery/ingest` aliases. Both require the discovery feature; after the discovery license expired they answer 403 with the problem type license-expired (CH21). While the ingest queue (NATS) is unreachable both answer 503 at once and queue nothing, not even after the reconnect (OPS-06, WP-449); records of the batch queued before a failure are deduplicated by record_id when the batch is sent again. Without the queue the records are processed in the request; a record that fails is rejected alone and listed in errors, the others are processed (WP-481). Only when every record is rejected does the request answer with the error status of the first.
      */
     post: operations['bulkIngest'];
     delete?: never;
@@ -8044,6 +8044,22 @@ export interface components {
       /** @description New devices held as unlicensed_ci review items because max_cis is reached (ENT-03, CH21). */
       unlicensed?: number;
       job_id?: string;
+      /** @description Records processed, deduplicated or queued (REC-01). A record that fails does not take the others of the request down (WP-481). */
+      accepted: number;
+      /** @description Records refused with an error, each listed in errors. When every record is rejected the request answers with the error status of the first one instead of 202. */
+      rejected: number;
+      /** @description The records refused with an error, one entry each. */
+      errors?: components['schemas']['DiscoveryIngestRecordError'][];
+    };
+    DiscoveryIngestRecordError: {
+      /** @description The record_id of the record; absent for items of the deprecated collector_id/items request. */
+      record_id?: string;
+      /** @description The HTTP status the record alone would have been answered with, e.g. 403 for a record outside the sender's scope. */
+      status: number;
+      /** @description Why the record was refused, without internals. */
+      detail: string;
+      /** @description The failure is transient (database, network, or an earlier record of the same device failed transiently); sent again, the record may succeed. False for a record that can never succeed. */
+      retryable: boolean;
     };
     /** @enum {string} */
     DiscoveryJobStatus: 'queued' | 'running' | 'completed' | 'failed';
