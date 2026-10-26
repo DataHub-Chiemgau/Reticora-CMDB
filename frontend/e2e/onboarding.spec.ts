@@ -339,7 +339,7 @@ test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)'
     const relations = await apiGet<{ total: number }>(
       request,
       token,
-      `/relationships?ci_id=${loneId}`,
+      `/cis/${loneId}/relationships`,
     );
     expect(relations.total).toBe(0);
     const none = await apiGet<{ impacted: unknown[]; count: number }>(
