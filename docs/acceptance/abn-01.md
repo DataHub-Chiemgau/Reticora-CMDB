@@ -80,6 +80,15 @@ die Prüfsumme der Datei in `artefakte/SHA256SUMS` ist neu. Lauf #122 (unten)
 belegt Schritt 7 in der früheren Fassung; der Lauf der verschärften Fassung
 im install-smoke-Lauf des PR steht aus und wird mit Run-ID nachgetragen.
 
+Änderung nach dem Einfrieren, 2026-10-26: Korrektur zu WP-456 (`t5-abn01-de`,
+F-299). Der Negativfall las die Beziehungen des CI ohne Beziehung über
+`GET /api/v1/relationships?ci_id=<id>`. Diese Liste kennt keinen Filter
+`ci_id` und zählte alle Beziehungen der Organisation (install-smoke auf
+PR #94: „Expected: 0, Received: 58“). Die Spec fragt jetzt
+`GET /api/v1/cis/<id>/relationships` ab. Erwartung und übrige Schritte
+bleiben unverändert; die Prüfsumme der Datei in `artefakte/SHA256SUMS` ist
+neu.
+
 | # | Schritt | Erwartung | Ergebnis |
 |---|---|---|---|
 | 1 | Self-Signup | Bestätigungs-Mail, Organisation mit Trial | bestanden |
