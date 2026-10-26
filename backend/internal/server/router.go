@@ -712,6 +712,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	entitlement.RegisterMetrics(registry)
 	discovery.RegisterMetrics(registry)
 	rack.RegisterMetrics(registry)
+	iga.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

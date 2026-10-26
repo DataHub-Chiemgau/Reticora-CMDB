@@ -77,7 +77,11 @@ func (r *TaskRunner) RunTask(ctx context.Context, t *ProvisioningTask) error {
 	t.Attempts++
 	t.LastRunAt = &now
 	t.Status = TaskStatusRunning
-	_ = r.repo.UpdateTask(ctx, t)
+	// An attempt that cannot be recorded does not run (F-056).
+	if err := r.repo.UpdateTask(ctx, t); err != nil {
+		WriteFailures.WithLabelValues("task_status").Inc()
+		return fmt.Errorf("mark provisioning task running: %w", err)
+	}
 	cfg, err := r.repo.GetConnector(ctx, t.OrganizationID, t.ConnectorID)
 	if err == nil {
 		var secret JSONMap
