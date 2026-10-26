@@ -452,3 +452,49 @@ func TestOpsAlertBridgeSettings(t *testing.T) {
 		})
 	}
 }
+
+// TestPprofAddrSetting covers WP-438 (NFR-02): the profiling listener is off
+// by default and starts only on a loopback IP with a port, only in
+// development and not together with RETICORA_EGRESS_ALLOW_PRIVATE, which
+// lets webhooks reach loopback addresses.
+func TestPprofAddrSetting(t *testing.T) {
+	for name, tc := range map[string]struct {
+		env  map[string]string
+		want string // empty: valid
+	}{
+		"off by default":            {map[string]string{}, ""},
+		"IPv4 loopback":             {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:6060"}, ""},
+		"IPv6 loopback":             {map[string]string{"RETICORA_PPROF_ADDR": "[::1]:6060"}, ""},
+		"all interfaces":            {map[string]string{"RETICORA_PPROF_ADDR": ":6060"}, "must be a loopback IP"},
+		"unspecified address":       {map[string]string{"RETICORA_PPROF_ADDR": "0.0.0.0:6060"}, "must be a loopback IP"},
+		"private address":           {map[string]string{"RETICORA_PPROF_ADDR": "10.0.0.5:6060"}, "must be a loopback IP"},
+		"host name":                 {map[string]string{"RETICORA_PPROF_ADDR": "localhost:6060"}, "must be a loopback IP"},
+		"no port":                   {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1"}, "must be a loopback IP"},
+		"port 0":                    {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:0"}, "must be a loopback IP"},
+		"port out of range":         {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:70000"}, "must be a loopback IP"},
+		"staging":                   {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:6060", "RETICORA_ENVIRONMENT": EnvStaging}, "only allowed with RETICORA_ENVIRONMENT=development"},
+		"production":                {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:6060", "RETICORA_ENVIRONMENT": EnvProduction}, "only allowed with RETICORA_ENVIRONMENT=development"},
+		"egress to private targets": {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:6060", "RETICORA_EGRESS_ALLOW_PRIVATE": "true"}, "must not be combined with RETICORA_EGRESS_ALLOW_PRIVATE"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("RETICORA_PPROF_ADDR", "")
+			t.Setenv("RETICORA_EGRESS_ALLOW_PRIVATE", "")
+			if env := tc.env["RETICORA_ENVIRONMENT"]; env != "" && env != EnvDevelopment {
+				setAll(t, productionEnv)
+			}
+			setAll(t, tc.env)
+			cfg := Load()
+			if cfg.PprofAddr != tc.env["RETICORA_PPROF_ADDR"] {
+				t.Errorf("PprofAddr %q, want %q", cfg.PprofAddr, tc.env["RETICORA_PPROF_ADDR"])
+			}
+			err := cfg.Validate(false)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("Validate() = %v, want nil", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("Validate() = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+}

@@ -1,6 +1,7 @@
 -- Database cost of a load run per record (F-118, WP-437), from
 -- pg_stat_statements: the statements of the run by execution time with
--- their calls, mean time, shared buffers and rows per call, and the cost of
+-- their calls, total time and its share of the run's execution time (F-117,
+-- WP-438), mean time, shared buffers and rows per call, and the cost of
 -- their generic plan (EXPLAIN (GENERIC_PLAN), PostgreSQL 16) as the
 -- application role under row level security, with the relations it reads
 -- by a sequential scan. The totals divide the run's execution time and
@@ -61,6 +62,10 @@ $$;
 
 \echo 'Statements by execution time (generic plan as reticora_app):'
 SELECT rank AS "#", calls, round(calls / NULLIF(current_setting('load.records')::numeric, 0), 2) AS "calls/record",
+       round(total_exec_time::numeric) AS "total ms",
+       round((100 * total_exec_time / NULLIF((SELECT sum(s.total_exec_time) FROM pg_stat_statements s
+           WHERE s.dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+             AND s.query NOT ILIKE '%pg_stat_statements%'), 0))::numeric, 1) AS "% of time",
        round(mean_exec_time::numeric, 3) AS "mean ms", round(blocks::numeric / NULLIF(calls, 0), 1) AS "buffers/call",
        round(rows::numeric / NULLIF(calls, 0), 1) AS "rows/call", round(plan_cost, 1) AS "plan cost",
        COALESCE(seq_scans, '') AS "seq scan on", left(regexp_replace(query, '\s+', ' ', 'g'), 140) AS query

@@ -15,6 +15,13 @@
 # a run of ingest-rediscover with server_ref = the parent of the WP-434
 # merge and one with the run's commit; an invalid server_ref ends the run in
 # the job prepare, before anything is built or seeded.
+#
+# Root cause of NFR-02 (WP-438, F-117): every api.js run also records
+# auto_explain plans of the statements over 100 ms (slow-plans-api.txt and
+# the PostgreSQL log) and the CPU profile of the server during the load
+# (cpu-api.pprof, summarized in cpu-api.txt; RETICORA_PPROF_ADDR, loopback
+# only); the cost report lists the statements by their share of the run's
+# execution time (pg_stat_statements).
 name: Load test
 
 on:
@@ -55,6 +62,9 @@ jobs:
 
       - name: Test the server_ref resolution
         run: ./tests/load/resolve-server-ref.test.sh
+
+      - name: Test the plan summary
+        run: ./tests/load/slow-plans.test.sh
 
       - name: Resolve server_ref
         id: ref
@@ -127,13 +137,15 @@ jobs:
           cache-dependency-path: server-src/backend/go.sum
 
       # A service container takes no server options; pg_stat_statements
-      # must be preloaded for the cost per record (F-118).
+      # must be preloaded for the cost per record (F-118), auto_explain for
+      # the plans of api.js (F-117; off until the step that resets the
+      # statistics switches it on).
       - name: Start PostgreSQL
         run: |
           docker run -d --name postgres -p 5432:5432 \
             -e POSTGRES_USER=reticora -e POSTGRES_PASSWORD=reticora -e POSTGRES_DB=reticora \
             timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731 \
-            postgres -c shared_preload_libraries=timescaledb,pg_stat_statements
+            postgres -c shared_preload_libraries=timescaledb,pg_stat_statements,auto_explain
           for _ in $(seq 1 90); do
             psql "$DATABASE_URL" -Atc 'SELECT 1' >/dev/null 2>&1 && exit 0
             sleep 1
@@ -170,6 +182,9 @@ jobs:
         run: |
           "$RUNNER_TEMP/seed" -database-url "$DATABASE_URL" -objects "$OBJECTS" -api-key-file "$RUNNER_TEMP/load.key"
 
+      # RETICORA_PPROF_ADDR (WP-438): the CPU profile of the api.js run, on
+      # the loopback address only (development, the server's default
+      # environment here). A server_ref before WP-438 ignores it.
       - name: Start the server
         run: |
           openssl genrsa -out "$RUNNER_TEMP/session.pem" 2048
@@ -180,6 +195,7 @@ jobs:
           RETICORA_MASTER_KEY="$(head -c 32 /dev/urandom | base64)" \
           RETICORA_RATE_LIMIT_RPM=1000000 RETICORA_RATE_LIMIT_ORG_RPM=1000000 \
           RETICORA_INGEST_LANES=4 \
+          RETICORA_PPROF_ADDR=127.0.0.1:6060 \
           nohup "$RUNNER_TEMP/server" > "$RUNNER_TEMP/server.log" 2>&1 &
           for _ in $(seq 1 60); do curl -fsS http://localhost:8080/healthz >/dev/null && exit 0; sleep 1; done
           cat "$RUNNER_TEMP/server.log"; exit 1
@@ -197,15 +213,31 @@ jobs:
       - name: Analyze the seed
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'ANALYZE'
 
+      # api.js (F-117): from here on auto_explain logs the plan of every
+      # statement over 100 ms with its actual rows and buffers, without
+      # timing each plan node (that would slow every statement down); the
+      # setting reaches the server's open connections with the reload.
       - name: Reset the statement statistics
+        env:
+          K6_SCRIPT: ${{ matrix.script }}
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pg_stat_statements' \
             -c 'SELECT pg_stat_statements_reset()'
+          if [ "$K6_SCRIPT" = api.js ]; then
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+              -c "ALTER SYSTEM SET auto_explain.log_min_duration = '100ms'" \
+              -c 'ALTER SYSTEM SET auto_explain.log_analyze = on' \
+              -c 'ALTER SYSTEM SET auto_explain.log_buffers = on' \
+              -c 'ALTER SYSTEM SET auto_explain.log_timing = off' \
+              -c 'SELECT pg_reload_conf()'
+          fi
 
       - uses: grafana/setup-k6-action@v1
         with:
           k6-version: "0.54.0"
 
+      # api.js (F-117): the server's CPU profile from 10 s after the start
+      # (setup done) to 10 s before the end of DURATION.
       - name: k6 ${{ matrix.scenario }}
         id: k6
         env:
@@ -218,8 +250,51 @@ jobs:
           if [ -n "$K6_SCENARIO" ]; then
             args+=(-e SCENARIO="$K6_SCENARIO")
           fi
+          if [ "$K6_SCRIPT" = api.js ]; then
+            seconds=0 rest="$DURATION"
+            while [[ $rest =~ ^([0-9]+)([hms])(.*)$ ]]; do
+              n=$((10#${BASH_REMATCH[1]}))
+              case ${BASH_REMATCH[2]} in
+                h) seconds=$((seconds + n * 3600)) ;;
+                m) seconds=$((seconds + n * 60)) ;;
+                s) seconds=$((seconds + n)) ;;
+              esac
+              rest=${BASH_REMATCH[3]}
+            done
+            if [ -z "$rest" ] && [ "$seconds" -ge 30 ]; then
+              (
+                sleep 10
+                curl -fsS -o "load-results/cpu-$SCENARIO_NAME.pprof" \
+                  "http://127.0.0.1:6060/debug/pprof/profile?seconds=$((seconds - 20))" \
+                  || echo "::warning title=pprof::no CPU profile of the server (server_ref before WP-438?)"
+              ) &
+            else
+              echo "::warning title=pprof::no CPU profile: DURATION=$DURATION is not h/m/s of at least 30 s"
+            fi
+          fi
+          status=0
           k6 run "${args[@]}" --summary-export "load-results/$SCENARIO_NAME.json" "tests/load/$K6_SCRIPT" \
-            | tee "load-results/$SCENARIO_NAME.txt"
+            | tee "load-results/$SCENARIO_NAME.txt" || status=$?
+          wait
+          exit "$status"
+
+      # F-117 (WP-438): auto_explain off again, so the checks below do not
+      # add plans; the PostgreSQL log, the plans of the statements over
+      # 100 ms by statement and the summary of the CPU profile.
+      - name: Statement plans and CPU profile
+        if: always() && steps.k6.outcome != 'skipped' && matrix.script == 'api.js'
+        run: |
+          mkdir -p load-results
+          psql "$DATABASE_URL" -c 'ALTER SYSTEM RESET auto_explain.log_min_duration' -c 'SELECT pg_reload_conf()' \
+            || echo "::warning title=auto_explain::auto_explain stays on"
+          docker logs postgres > "load-results/postgres-$SCENARIO_NAME.log" 2>&1 || true
+          tests/load/slow-plans.sh "load-results/postgres-$SCENARIO_NAME.log" > "load-results/slow-plans-$SCENARIO_NAME.txt" \
+            || echo "::warning title=slow-plans::the plan summary failed"
+          head -25 "load-results/slow-plans-$SCENARIO_NAME.txt" || true
+          if [ -s "load-results/cpu-$SCENARIO_NAME.pprof" ]; then
+            tests/load/cpu-profile-report.sh "load-results/cpu-$SCENARIO_NAME.pprof" > "load-results/cpu-$SCENARIO_NAME.txt" \
+              || echo "::warning title=pprof::the profile summary failed"
+          fi
 
       # ABN-03, F-281: the data after the run, every check 0.
       - name: Integrity check

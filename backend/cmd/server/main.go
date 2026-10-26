@@ -561,6 +561,18 @@ func main() {
 		}
 	}()
 
+	// The profiling listener (RETICORA_PPROF_ADDR, WP-438): off unless set,
+	// loopback only and development only (config.Validate).
+	if cfg.PprofAddr != "" {
+		profiling, addr, perr := startProfiling(cfg.PprofAddr)
+		if perr != nil {
+			slog.Error("failed to start the profiling listener", "error", perr)
+			os.Exit(1)
+		}
+		defer profiling.Close()
+		slog.Warn("profiling listener enabled", "addr", addr.String())
+	}
+
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
 		Handler:      handler,

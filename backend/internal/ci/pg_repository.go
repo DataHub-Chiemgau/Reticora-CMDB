@@ -149,6 +149,26 @@ func NewPGRepositoryWithAudit(pool *pgxpool.Pool, recorder audit.TxRecorder) *PG
 	return &PGRepository{pool: pool, recorder: recorder}
 }
 
+// withoutSort runs fn with sorting switched off for the planner (SET
+// LOCAL). In a joined transaction (restore) it switches it back to the
+// session's value afterwards; in a transaction of its own the setting ends
+// with it, and the list's statements after the page (count, overrides,
+// asset facts) do not sort. With a failed statement in fn the transaction
+// is aborted and only fn's error counts.
+func withoutSort(ctx context.Context, tx pgx.Tx, restore bool, fn func() error) error {
+	if _, err := tx.Exec(ctx, "SET LOCAL enable_sort = off"); err != nil {
+		return fmt.Errorf("list cis: %w", err)
+	}
+	ferr := fn()
+	if !restore {
+		return ferr
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL enable_sort TO DEFAULT"); err != nil && ferr == nil {
+		return fmt.Errorf("list cis: %w", err)
+	}
+	return ferr
+}
+
 // List returns paginated CIs filtered by the given parameters.
 // attributeFilterKind checks that an attribute may be filtered (API-02):
 // it must be defined (else 422) and searchable (else 400 with a hint), and
@@ -174,6 +194,8 @@ func attributeFilterKind(ctx context.Context, tx pgx.Tx, f api.Filter, key strin
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
 	items := make([]Item, 0)
 	var total int
+	// joined: the list runs in the caller's transaction (database.ContextWithTx).
+	joined := database.InTx(ctx)
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		whereParts := []string{"deleted_at IS NULL"}
@@ -289,24 +311,45 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			)
 		}
 
-		rows, err := tx.Query(ctx, listQuery, listArgs...)
-		if err != nil {
-			return fmt.Errorf("list cis: %w", err)
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			item, err := scanCI(rows)
+		readPage := func() error {
+			rows, err := tx.Query(ctx, listQuery, listArgs...)
 			if err != nil {
-				return fmt.Errorf("scan ci: %w", err)
+				return fmt.Errorf("list cis: %w", err)
 			}
-			items = append(items, *item)
+			defer rows.Close()
+			for rows.Next() {
+				item, err := scanCI(rows)
+				if err != nil {
+					return fmt.Errorf("scan ci: %w", err)
+				}
+				items = append(items, *item)
+			}
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterate cis: %w", err)
+			}
+			return nil
 		}
-
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterate cis: %w", err)
+		// The page of an unfiltered list in the default order is read from
+		// idx_ci_list_sort in index order (NFR-02, WP-438, F-117). Once the
+		// CIs carry a client and a site, the planner estimates the client and
+		// site predicates of ci_isolation at 0.5 % each and expects one
+		// visible CI; the limit then saves nothing in its estimate, and it
+		// reads and sorts the whole organization whenever that is cheaper
+		// than reading all of it through the index (with 10,000 CIs tens of
+		// milliseconds instead of under one). Without sorting, the ordered
+		// index scan is the only plan left; it reads offset + limit entries
+		// (for a client- or site-scoped principal also the invisible ones in
+		// between). Filters keep the planner's choice: a selective one is
+		// cheaper through its own index and a sort.
+		var pageErr error
+		if len(whereParts) == 1 && sortColumn == "created_at" {
+			pageErr = withoutSort(ctx, tx, joined, readPage)
+		} else {
+			pageErr = readPage()
 		}
-		rows.Close()
+		if pageErr != nil {
+			return pageErr
+		}
 
 		// total counts every matching CI. Without a cursor, a page that is
 		// shorter than the limit and not past the end holds the last rows, so
@@ -409,19 +452,24 @@ var nodeOverrideFields = []string{"name", "status", "management_ip"}
 const nodeOrgReadAbove = 2000
 
 // nodeQuery reads the node projection with the overrides of the projected
-// fields ($2); the two %s narrow the overrides and the CIs.
+// fields ($2); %s narrows the CIs. The overrides are read per CI by the
+// index on ci_id (NFR-02, WP-438, F-117): the planner cannot estimate the
+// client and site predicates of ci_isolation and expects one visible CI
+// once the CIs carry a client and a site, so with the overrides of the
+// organization aggregated in a joined subquery it ran a nested loop that
+// aggregated all of them again for every CI (10,000 CIs with 500 overrides:
+// 5.5 s instead of 25 ms).
 const nodeQuery = `SELECT c.id::text, c.name, c.ci_type_id::text, c.status, COALESCE(c.client_id::text, ''),
 		COALESCE(c.site_id::text, ''), COALESCE(host(c.management_ip), ''), o.overrides
 	FROM ci c
-	LEFT JOIN (SELECT f.ci_id, jsonb_object_agg(f.field_name, f.override_value) AS overrides
+	CROSS JOIN LATERAL (SELECT jsonb_object_agg(f.field_name, f.override_value) AS overrides
 		FROM ci_field_value f
-		WHERE %s AND f.field_name = ANY($2::text[]) AND f.override_at IS NOT NULL
-		GROUP BY f.ci_id) o ON o.ci_id = c.id
+		WHERE f.ci_id = c.id AND f.field_name = ANY($2::text[]) AND f.override_at IS NOT NULL) o
 	WHERE c.organization_id = $1 AND %s AND c.deleted_at IS NULL`
 
 var (
-	nodesByID  = fmt.Sprintf(nodeQuery, "f.ci_id = ANY($3::uuid[])", "c.id = ANY($3::uuid[])")
-	nodesByOrg = fmt.Sprintf(nodeQuery, "f.organization_id = $1", "true")
+	nodesByID  = fmt.Sprintf(nodeQuery, "c.id = ANY($3::uuid[])")
+	nodesByOrg = fmt.Sprintf(nodeQuery, "true")
 )
 
 // ListNodes implements NodeReader: the projection of the visible, not

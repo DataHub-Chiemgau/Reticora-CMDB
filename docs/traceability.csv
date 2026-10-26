@@ -696,3 +696,4 @@ COL-08;[B];D;tests/audit/compose-port-policy.test.sh;WP-431
 PRI-07;Grundsatz (ohne Tag);D;tests/audit/compose-port-policy.test.sh;WP-431
 ABN-02;[Q];LT;backend/internal/ci/querybudget_integration_test.go;WP-436
 OPS-06;[Q];A;tests/outage/run.sh;WP-449
+NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-438

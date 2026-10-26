@@ -93,8 +93,10 @@ Jeder Job lädt seine Ergebnisse als eigenes Artefakt hoch
 `load-results-ingest-rediscover`): die k6-Zusammenfassung (`<job>.json`,
 `<job>.txt`), die Integritätsprüfung (`integrity-<job>.txt`), die
 Datenbankkosten (`statements-<job>.txt`), Commit, `server_ref`, CPU und RAM
-(`run-<job>.txt`), `/readyz` und das Server-Log. Das Ergebnis des G1-Laufs
-steht in `docs/acceptance/lasttest-g1.md`.
+(`run-<job>.txt`), `/readyz` und das Server-Log; der Job `api` zusätzlich
+die Pläne langsamer Statements und das CPU-Profil des Servers (siehe
+Ursachenanalyse NFR-02). Das Ergebnis des G1-Laufs steht in
+`docs/acceptance/lasttest-g1.md`.
 
 ### Datenbankkosten je Record (F-118)
 
@@ -109,6 +111,40 @@ Statements) geteilt durch `ingest_records_accepted`. Die Summen enthalten die
 Abfragen, mit denen der Lauf die Sichtbarkeit prüft (`visible-poll`,
 `probe-poll`); sie stehen als eigene Statements in der Liste. Bei `api.js`
 (keine Records) bleibt es bei der Liste.
+
+### Ursachenanalyse NFR-02 (F-117, WP-438)
+
+Jeder `api.js`-Job zeichnet zusätzlich auf, was die Ursachenbestätigung von
+F-117 braucht:
+
+- **pg_stat_statements:** `statements-api.txt` (siehe oben) nennt je
+  Statement auch die Gesamtzeit und ihren Anteil an der Ausführungszeit des
+  Laufs (`total ms`, `% of time`), etwa Seite, `COUNT` und Overrides von
+  `GET /cis` oder die Abfrage der globalen Suche.
+- **auto_explain:** PostgreSQL lädt `auto_explain`; der Schritt vor k6
+  schaltet es ein (`log_min_duration` 100 ms, mit tatsächlichen Zeilen und
+  Puffern, ohne Zeitmessung je Planknoten), der Schritt nach k6 wieder aus.
+  `postgres-api.log` enthält die Pläne, `slow-plans-api.txt`
+  (`tests/load/slow-plans.sh`, Selbsttest `slow-plans.test.sh` im Job
+  `prepare`) fasst sie je Statement zusammen (Ausführungen über 100 ms,
+  Summe, längste) und zeigt den Plan der längsten Ausführung, z. B. ob die
+  Liste den Index der Standardsortierung liest oder die Organisation
+  sortiert und wo RLS-Prädikate Zeilen verwerfen.
+- **CPU-Profil des Servers:** Der Server läuft mit
+  `RETICORA_PPROF_ADDR=127.0.0.1:6060` (nur Loopback, nur in development;
+  die API liefert keine Profile). Während k6 holt der Job das CPU-Profil
+  von 10 s nach dem Start bis 10 s vor dem Ende von `DURATION`
+  (`cpu-api.pprof`); `cpu-api.txt` (`tests/load/cpu-profile-report.sh`)
+  zeigt die Funktionen mit der meisten CPU-Zeit und je Handler der
+  Szenarien, wohin seine Zeit geht (Datenbank und Zeilen dekodieren,
+  JSON-Serialisierung `api.WriteJSON`, ...).
+  Lokal: `go tool pprof -top -cum cpu-api.pprof`.
+
+Lokal ohne Workflow: PostgreSQL mit
+`shared_preload_libraries=timescaledb,pg_stat_statements,auto_explain`
+starten, den Server mit `RETICORA_PPROF_ADDR=127.0.0.1:6060`, während
+`api.js` läuft
+`curl -o cpu.pprof 'http://127.0.0.1:6060/debug/pprof/profile?seconds=60'`.
 
 ### Wiederentdeckung (F-118, WP-437)
 
