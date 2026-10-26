@@ -714,3 +714,4 @@ NFR-02;[B];LT;tests/load/api.js;WP-439
 NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-439
 ABN-02;[Q];LT;tests/load/api.js;WP-439
 TEN-03;[B];B;backend/internal/database/migrations_roundtrip_integration_test.go;WP-427
+NFR-02;[B];LT;backend/internal/identity/apikey_lastused_integration_test.go;WP-610

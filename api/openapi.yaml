@@ -16948,6 +16948,10 @@ components:
         last_used_at:
           type: string
           format: date-time
+          description: >-
+            Time of the last use, accurate to a minute: it is written at most
+            once a minute, so the last use lies between this time and one
+            minute later (WP-610).
         created_at:
           type: string
           format: date-time

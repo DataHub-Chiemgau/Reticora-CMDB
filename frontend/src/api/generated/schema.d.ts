@@ -9521,7 +9521,10 @@ export interface components {
       expires_at?: string;
       /** Format: date-time */
       revoked_at?: string;
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description Time of the last use, accurate to a minute: it is written at most once a minute, so the last use lies between this time and one minute later (WP-610).
+       */
       last_used_at?: string;
       /** Format: date-time */
       created_at: string;

@@ -42,6 +42,7 @@ const PoolMaxConns = 25
 // guaranteed, pool creation fails instead of silently serving cross-tenant
 // data. Every connection uses the UTF-8 client encoding the quoting of the
 // tenant transaction relies on (pinClientEncoding); another one is refused.
+// No connection compiles queries with JIT (disableJIT).
 //
 // On top of that the runtime login is checked: a login (session_user) that is
 // SUPERUSER or BYPASSRLS or reaches such a role is refused, because RESET ROLE
@@ -68,8 +69,8 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 }
 
 // NewAdminPool creates a pool with the same configuration as NewPool (size,
-// client encoding, SET ROLE into the application role, refusal when that
-// role bypasses row level security) but without the check of the runtime
+// client encoding, no JIT, SET ROLE into the application role, refusal when
+// that role bypasses row level security) but without the check of the runtime
 // login (VerifyRLSEnforced, VerifyRoleContract). It is only for command-line
 // tools that log in with the migration/admin login (cmd/seed,
 // cmd/audit-verify, cmd/audit-seed, TEN-03, WP-351); their tenant work still
@@ -104,6 +105,7 @@ func newAppRolePool(ctx context.Context, databaseURL string) (*pgxpool.Pool, err
 	config.MaxConns = PoolMaxConns
 	config.MinConns = 5
 	pinClientEncoding(config)
+	disableJIT(config)
 
 	role := appRole()
 	if role != "" {
@@ -236,6 +238,23 @@ func pinClientEncoding(config *pgxpool.Config) {
 		config.ConnConfig.RuntimeParams = map[string]string{}
 	}
 	config.ConnConfig.RuntimeParams["client_encoding"] = clientEncoding
+}
+
+// disableJIT turns off the JIT compilation of PostgreSQL for the connections
+// of config (WP-610). The row level security policies and the visibility
+// subqueries lift the estimated cost of short requests above jit_above_cost,
+// so PostgreSQL compiled them first: of the 75 ms the global search took, 69
+// were JIT (U5 of the WP-439 load runs). The application runs no queries long
+// enough to repay the compilation. Like the client encoding, the setting is
+// a startup parameter and overrides the database URL and the defaults of the
+// login role and the database; a default of the application role (ALTER ROLE
+// reticora_app SET jit) would not apply, as the connections enter that role
+// with SET ROLE.
+func disableJIT(config *pgxpool.Config) {
+	if config.ConnConfig.RuntimeParams == nil {
+		config.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	config.ConnConfig.RuntimeParams["jit"] = "off"
 }
 
 // checkClientEncoding refuses a connection whose client encoding, as the
