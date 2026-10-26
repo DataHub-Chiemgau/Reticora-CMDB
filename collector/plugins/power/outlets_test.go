@@ -15,7 +15,7 @@ import (
 	"github.com/gosnmp/gosnmp"
 )
 
-// startV2cAgent answers SNMPv2c GET and GETBULK from mib.
+// startV2cAgent answers SNMPv2c GET, GETNEXT and GETBULK from mib.
 func startV2cAgent(t *testing.T, mib map[string]gosnmp.SnmpPDU) int {
 	t.Helper()
 	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
@@ -62,7 +62,19 @@ func startV2cAgent(t *testing.T, mib map[string]gosnmp.SnmpPDU) int {
 						vars = append(vars, gosnmp.SnmpPDU{Name: v.Name, Type: gosnmp.NoSuchObject})
 					}
 				}
-			case gosnmp.GetBulkRequest, gosnmp.GetNextRequest:
+			case gosnmp.GetNextRequest:
+				// One successor per requested variable (RFC 3416 4.2.2).
+				for _, v := range req.Variables {
+					next := gosnmp.SnmpPDU{Name: v.Name, Type: gosnmp.EndOfMibView}
+					for _, oid := range oids {
+						if less(strings.TrimPrefix(v.Name, "."), oid) {
+							next = mib[oid]
+							break
+						}
+					}
+					vars = append(vars, next)
+				}
+			case gosnmp.GetBulkRequest:
 				start := strings.TrimPrefix(req.Variables[0].Name, ".")
 				limit := max(int(req.MaxRepetitions), 1)
 				for _, oid := range oids {

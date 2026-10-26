@@ -669,13 +669,45 @@ delayed alert is usually worse than a lost one. Trap storms are bounded by a
 64-events-in-flight cap. The BER parser is deliberately tolerant: malformed
 varbinds are skipped, never fatal.
 
-**Metric polling (Epic E):** when `RETICORA_METRICS_INTERVAL` is set (e.g.
-`1m`), the collector polls numeric SNMP OIDs on every scan target and uploads
-the samples to the monitoring ingest. The OID list comes from
-`RETICORA_SNMP_POLL_METRICS` (`name=oid,name=oid`, …); when unset, the IF-MIB
-counters of ifIndex 1 (`if_in_octets`, `if_out_octets`, `if_oper_status`)
-are polled. Unreachable targets and non-numeric values are skipped so one
-failing device never stalls a cycle.
+**Metric polling (Epic E, MON-02):** the collector polls base metrics over
+SNMP and uploads them to the monitoring ingest (labels `collector_id` and
+`kind` are added on upload):
+
+- *Interface counters (standard poll, `kind=snmp_poll`):* on by default every
+  300 s on every scan target (`RETICORA_SCAN_SUBNETS`), 16 targets at a time.
+  `RETICORA_METRICS_INTERVAL` sets the interval (e.g. `1m`), `0` turns the
+  poll off. Per interface — at most 256 per device, the first by ifIndex —
+  `if_in_octets` and `if_out_octets` (64-bit `ifHCInOctets`/`ifHCOutOctets`
+  of the ifXTable; without ifXTable the 32-bit ifTable counters) and
+  `if_oper_status` (1 up, 2 down, …), labelled `target`, `ifIndex` and
+  `ifName` when the device reports it. `RETICORA_SNMP_POLL_METRICS`
+  (`name=oid,name=oid`, …) replaces the standard poll with one GET of the
+  listed OIDs.
+- *Power readings (`kind=power`):* after every discovery pass with the
+  `power` protocol, per power device found, labelled `target` and
+  `device=ups|pdu`. A UPS gives the UPS-MIB values `ups_battery_status`,
+  `ups_battery_runtime_seconds`, `ups_battery_charge_percent` and
+  `ups_output_load_percent`. A PDU gives `pdu_current_amps` and, where the
+  device reports it, `pdu_active_power_watts` from the metering table of its
+  vendor family, which the probe recognises by the outlet table: APC Rack
+  PDU 2 (rPDU2PhaseStatusTable, current and power per `phase`, plus
+  `module`), APC Rack PDU/MasterSwitch (rPDULoadStatusTable, current per
+  `phase`; bank rows are left out) and Raritan PX2/PX3 (PDU2-MIB inlet
+  sensors, current and active power per `inlet`). PDUs of other vendors give
+  no readings.
+
+Values a device does not answer (noSuchObject) or answers non-numerically are
+skipped, an unreachable target is skipped for the cycle, so one failing
+device never stalls it. SNMP load of the interface poll per device and
+interval: one GETBULK walk (max-repetitions 50) per column — ifOperStatus,
+ifName, ifHCInOctets, ifHCOutOctets — that is `ceil((n+1)/50)` requests per
+column for n interfaces, at most 6 at the 256-interface cap: up to 24 GETBULK
+requests of up to 50 varbinds each every 300 s (a device without ifXTable:
+two more 32-bit counter walks, the ifXTable walks end after one request
+each). A silent host costs one timeout (5 s) per cycle. The power poll adds
+one GET of four OIDs per UPS or one walk of two to four short columns per
+PDU per discovery pass; the probe asks every SNMP-answering host one GETNEXT
+for the outlet tables.
 
 **Alert evaluation (Epic E):** the server evaluates enabled alert rules once
 per minute against the metric store (`monitoring.Evaluator`). A rule fires
