@@ -247,18 +247,19 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 				// The expression of the attribute indexes (WP-435, E-73):
 				// reticora_attr_text is leakproof, so the comparison is an
 				// index condition under row level security, where ->> was
-				// evaluated only after the policies of ci (F-114). The
-				// indexes are partial on the organization: the query names
-				// it as a value, which ci_isolation (a setting) does not.
+				// evaluated only after the policies of ci (F-114). The key
+				// is a literal, as in the indexes (WP-607): with a parameter
+				// a generic plan of the prepared statement matched no index.
+				// The query names the organization as a value, which
+				// ci_isolation (a setting) does not: it leads the index of
+				// a key and is the predicate of a definition's own index.
 				if !orgNamed {
 					whereParts = append(whereParts, fmt.Sprintf("organization_id = $%d::uuid", argPos))
 					args = append(args, orgID)
 					argPos++
 					orgNamed = true
 				}
-				expr = citype.ValueExpression(fmt.Sprintf("$%d::text", argPos))
-				args = append(args, key)
-				argPos++
+				expr = citype.KeyExpression(key)
 			}
 			if expr == "" {
 				return &api.FieldError{Field: "filter[" + f.Field + "]", Status: http.StatusUnprocessableEntity, Message: "unknown filter field"}

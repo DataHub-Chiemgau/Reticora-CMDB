@@ -104,7 +104,6 @@ func TestCIQueryBudget(t *testing.T) {
 	if err := types.CreateAttributeDefinition(orgCtx, f.OrgA, rack); err != nil {
 		t.Fatalf("create definition: %v", err)
 	}
-	rackIndex := citype.IndexName(rack.ID, false)
 
 	// seed inserts the CIs from..to of org with the identity values of n:
 	// serial BUDGET-n, host name Budget-Host-n, management IP, primary MAC
@@ -130,8 +129,14 @@ func TestCIQueryBudget(t *testing.T) {
 	seed(f.OrgA, []any{f.Client1, f.Client2}, 1, orgCIs)
 	seed(f.OrgB, []any{nil, nil}, 1, 50)
 	if err := ddl.Ensure(bg, f.OrgA, rack.ID); err != nil {
-		t.Fatalf("build %s: %v", rackIndex, err)
+		t.Fatalf("build the index of %s: %v", rack.Key, err)
 	}
+	// A global, not unique definition: the index of its key (WP-607).
+	rackIndexes := attrIndexesOf(t, f.Admin, rack.Key)
+	if problem := keyIndexProblem(rackIndexes, rack.Key); problem != "" {
+		t.Fatalf("E-73: %s", problem)
+	}
+	rackIndex := rackIndexes[0].name
 	analyze := func() {
 		t.Helper()
 		if _, err := f.Admin.Exec(bg, `ANALYZE ci, ci_identity_mac`); err != nil {
