@@ -1023,6 +1023,14 @@ jobs:
                               keys |= {i["key"] for i in ref.get("items", [])}
                   if not {"server.crt", "server.key"} <= keys:
                       problems.append(f"{at}: server.crt and server.key of the secret reticora-pgbackrest are not mounted")
+                  # The pgBackRest TLS server of the Alpine image resolves
+                  # tls-server-address with musl: "*" is no address there and
+                  # the server exits at start (k8s-smoke, [049]).
+                  server_conf = "\n".join(text for d in docs if d["kind"] == "ConfigMap"
+                                          for key, text in (d.get("data") or {}).items() if key.startswith("pgbackrest"))
+                  address = re.findall(r"^\s*tls-server-address\s*=\s*(\S*)", server_conf, re.M)
+                  if not address or any(a in ("", "*") for a in address):
+                      problems.append(f"{at}: tls-server-address is {address or 'unset'}, not an address the TLS server can bind")
                   labels = sts["spec"]["template"]["metadata"].get("labels", {})
                   svc = [d for d in docs if d["kind"] == "Service" and d["metadata"]["name"] == "reticora-db"]
                   selector = svc[0]["spec"].get("selector") if svc else None

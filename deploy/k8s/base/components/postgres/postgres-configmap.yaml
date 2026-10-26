@@ -16,7 +16,9 @@
 # clients with a certificate of the CA ca.crt and the common name
 # pgbackrest-client (the CronJob, secret reticora-pgbackrest, tls.crt), and
 # only for the stanza reticora. pg1-path is PGDATA and must equal pg1-path of
-# the ConfigMap reticora-pgbackrest (repo-host.conf).
+# the ConfigMap reticora-pgbackrest (repo-host.conf). tls-server-address is an
+# address, not "*": the Alpine image resolves it with musl, whose getaddrinfo
+# has no wildcard ("unable to get address for '*'", the server exits).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -29,7 +31,7 @@ data:
     archive_timeout = 300
   pgbackrest-db.conf: |
     [global]
-    tls-server-address=*
+    tls-server-address=0.0.0.0
     tls-server-ca-file=/etc/pgbackrest/tls/ca.crt
     tls-server-cert-file=/etc/pgbackrest/tls/server.crt
     tls-server-key-file=/etc/pgbackrest/tls/server.key
