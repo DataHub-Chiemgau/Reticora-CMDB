@@ -1039,6 +1039,8 @@ Ein höherer Zielwert entwertet die G1-Messungen und macht vor G1 weitere WPs n�
 
 Auch mit einer Spur gilt seit WP-333 innerhalb eines Batch-Fensters (100 Records) die Reihenfolge nur je Gerät: Der Batch-Schreibpfad committet neue Geräte vor den Updates anderer Geräte.
 
+**Ergänzung vom 2026-10-26 (WP-608, Umsetzung, keine neue Festlegung):** Für Records aus der Queue schreibt die Batch-Transaktion eines Fensters seit WP-608 auch die Updates der bekannten Geräte, in Record-Reihenfolge nach den neuen Geräten; neue Geräte und diese Updates committen damit gemeinsam statt nacheinander. Die Festlegung bleibt: Reihenfolge und Dedupe je Gerät sichert die Identitätssperre (weiter die erste Anweisung der Transaktion), über Geräte ohne gemeinsamen Schlüssel gibt es keine Reihenfolge; Zeilensperre vor der Feldentscheidung, Audit und Outbox zuletzt und `max_cis` sind unverändert. Folge für den Betrieb: Die Zeilensperren der bekannten Geräte eines Fensters bleiben bis zu dessen COMMIT (`docs/betrieb/ingest-spuren.md`). Ingest über HTTP (ohne Queue) ändert sich nicht.
+
 **Aufgabe:** erledigt (A-12, 2026-10-15).
 
 **Frage:** Vor der G1-Nachbesserung verarbeitete der Ingest je Organisation seriell nach `observed_at`: ein Batch von 100 war gleichzeitig in Arbeit, ein Mutex je Organisation verhinderte parallele Verarbeitung. Gemessen waren 58 Records/s (Erstlauf WP-206, `docs/acceptance/lasttest-g1.md`, SR-02). Weniger Transaktionen (WP-332) und der Batch-Schreibpfad (WP-333) senken die Zeit je Record; die 200 Records/s je Instanz aus NFR-03 brauchen zusätzlich parallele Spuren innerhalb einer Organisation. Welche Reihenfolgegarantie gilt dann?

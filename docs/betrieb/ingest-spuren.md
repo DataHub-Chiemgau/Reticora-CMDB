@@ -262,7 +262,9 @@ mehr). Audit-Einträge und Events des Fensters entstehen am Ende unter den
 Sperren der Organisation, ein COMMIT für das ganze Fenster. Die
 Batch-Transaktion hält die Zeilensperren ihrer bekannten Geräte bis zu
 ihrem COMMIT (ein Fenster, höchstens 100 Records); eine manuelle Änderung
-eines dieser CIs wartet so lange. Die Wiederentdeckung des Lastszenarios
+eines dieser CIs wartet so lange. Gerät eine Operation über mehrere CIs
+dabei in einen Deadlock mit dem Fenster, bricht PostgreSQL eine Seite ab;
+trifft es das Fenster, rollt es zurück und seine Records laufen einzeln. Die Wiederentdeckung des Lastszenarios
 `rediscover` kostet so etwa 21,5 statt 36 Anweisungen je Record
 (`TestRediscoverStatementBudget`). Organisationen mit `max_cis` zählen je
 anlegender Transaktion einmal neu (2 Anweisungen). Ohne NATS (Ingest in der
