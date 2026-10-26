@@ -4,7 +4,6 @@
 # Baseline: main at edccd2d (2026-10-19): 116 go, 34 sh, 11 vitest, 26 e2e-real.
 go;backend/internal/ci;TestAuditT7BulkJobCancelStopsWork;F-162
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
-go;backend/internal/relationship;TestAuditCleanupCronScopeDeadline;F-111
 go;backend/internal/server;TestAuditDefectDiscoveryJobInGenericJobModel;F-146
 go;backend/internal/server;TestAuditDefectRouteAuditStoresOldAndNewValues;F-148
 sh;tests/audit/g1-gate-evidence.test.sh;abn01_texts;F-138

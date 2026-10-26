@@ -14,6 +14,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/scopeinterval"
 )
 
 // Source policy (REL-08): the seven sources of a relationship and what each
@@ -78,6 +79,9 @@ const CleanupKind = "relationship.cleanup"
 // of source discovery that is not verified and was not confirmed for
 // max(7 days, 5 × the scope interval of its source CI) is removed with the
 // event relationship.removed; so is a discovery edge a suppression covers.
+// The scope interval comes from scopeinterval (shared with the offline
+// detector): a cron scope counts with the gap between its runs, a weekly
+// one with 35 days (F-111).
 type Cleanup struct {
 	pool *pgxpool.Pool
 	now  func() time.Time
@@ -88,7 +92,7 @@ type Cleanup struct {
 const (
 	MinStaleAge    = 7 * 24 * time.Hour
 	StaleIntervals = 5
-	defaultSweep   = 24 * time.Hour
+	defaultSweep   = scopeinterval.Default
 )
 
 // NewCleanup creates the run on pool.
@@ -158,6 +162,7 @@ type cleanupEdge struct {
 	id, source, target, relType string
 	confirmed                   time.Time
 	schedules                   []string
+	lastRuns, nextRuns          []*time.Time
 	suppressed                  bool
 }
 
@@ -185,7 +190,9 @@ func (c *Cleanup) RunOrg(ctx context.Context, orgID string) (CleanupResult, erro
 		rows, err := tx.Query(ctx, `
 			SELECT r.id::text, r.source_ci_id::text, r.target_ci_id::text, r.rel_type,
 				COALESCE(r.last_confirmed_at, r.last_seen_at, r.created_at),
-				COALESCE(array_agg(s.schedule) FILTER (WHERE s.id IS NOT NULL), '{}'),
+				COALESCE(array_agg(s.schedule ORDER BY s.id) FILTER (WHERE s.id IS NOT NULL), '{}'),
+				COALESCE(array_agg(s.last_run_at ORDER BY s.id) FILTER (WHERE s.id IS NOT NULL), '{}'),
+				COALESCE(array_agg(s.next_run_at ORDER BY s.id) FILTER (WHERE s.id IS NOT NULL), '{}'),
 				EXISTS (SELECT 1 FROM relationship_suppression sp JOIN relationship_type rt ON rt.id = sp.relationship_type_id
 					WHERE sp.organization_id = r.organization_id AND rt.key = r.rel_type
 					  AND ((sp.source_ci_id = r.source_ci_id AND sp.target_ci_id = r.target_ci_id)
@@ -205,7 +212,7 @@ func (c *Cleanup) RunOrg(ctx context.Context, orgID string) (CleanupResult, erro
 		}
 		edges, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (cleanupEdge, error) {
 			var e cleanupEdge
-			scanErr := row.Scan(&e.id, &e.source, &e.target, &e.relType, &e.confirmed, &e.schedules, &e.suppressed)
+			scanErr := row.Scan(&e.id, &e.source, &e.target, &e.relType, &e.confirmed, &e.schedules, &e.lastRuns, &e.nextRuns, &e.suppressed)
 			return e, scanErr
 		})
 		if err != nil {
@@ -215,7 +222,7 @@ func (c *Cleanup) RunOrg(ctx context.Context, orgID string) (CleanupResult, erro
 		for i := range edges {
 			e := &edges[i]
 			reason := ""
-			age := staleAge(scopeInterval(e.schedules, fallback))
+			age := staleAge(scopeinterval.Shortest(scopeinterval.Scopes(e.schedules, e.lastRuns, e.nextRuns), fallback, now))
 			switch {
 			case e.suppressed:
 				reason = "suppressed"
@@ -283,23 +290,4 @@ func reportInvalidScopes(ctx context.Context, tx pgx.Tx, orgID string) error {
 			"job", CleanupKind, "organization_id", orgID, "scope_id", v[0], "kind", v[1])
 	}
 	return nil
-}
-
-// scopeInterval returns the shortest interval of the schedules (a cron
-// schedule counts as the default sweep) or fallback.
-func scopeInterval(schedules []string, fallback time.Duration) time.Duration {
-	best := time.Duration(0)
-	for _, s := range schedules {
-		d, err := time.ParseDuration(strings.TrimSpace(s))
-		if err != nil {
-			d = defaultSweep
-		}
-		if best == 0 || d < best {
-			best = d
-		}
-	}
-	if best == 0 {
-		return fallback
-	}
-	return best
 }
