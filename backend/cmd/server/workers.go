@@ -295,6 +295,8 @@ type systemJobDeps struct {
 	dispatcher   *webhook.Dispatcher
 	// jobQueue is the job queue on NATS; nil without NATS.
 	jobQueue *jobs.Queue
+	// notifier bundles the digests (notify.digest); nil: no digest run.
+	notifier *notify.Notifier
 }
 
 // registerSystemJobs registers the system jobs (systemJobs) with the
@@ -363,6 +365,11 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			systemJobs = append(systemJobs, jobs.NewReaper(jobs.NewService(d.repos.Jobs).WithEvents(emitterOf(pool)),
 				jobRequeues(d.jobQueue)).Schedule())
 		}
+		// Digests of the non-critical notification categories (NTF-04,
+		// WP-508).
+		if d.notifier != nil {
+			systemJobs = append(systemJobs, digestJob(d.notifier))
+		}
 	}
 	return systemJobs
 }
@@ -380,6 +387,21 @@ func jobRequeues(queue *jobs.Queue) func(kind string) bool {
 		}
 		return queue != nil && queue.Handles(kind)
 	}
+}
+
+// digestJob is the scheduler kind notify.digest: every minute, on one
+// instance (the scheduler's advisory lock), it queues one delivery per
+// channel, recipient, category and window for the digest items of the
+// windows that ended; the deliveries go out through the notifier worker.
+func digestJob(notifier *notify.Notifier) jobs.Schedule {
+	return jobs.Schedule{Kind: notify.DigestKind, Spec: "* * * * *", MaxCatchUp: 1, Timeout: 50 * time.Second,
+		Run: func(ctx context.Context) error {
+			queued, err := notifier.RunDigest(ctx)
+			if queued > 0 {
+				slog.Info("notification digests queued", "deliveries", queued)
+			}
+			return err
+		}}
 }
 
 // routeIntentsJob is the scheduler kind audit.route_intents: every minute,

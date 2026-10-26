@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000169_webhook_delivery_event_id
+Stand: Migration 000170_notification_digest
 
 ## Prüfung
 
@@ -429,6 +429,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `notice_sent` | ja | ja | notice_sent_isolation (ALL) |
 | `notification_channel` | ja | ja | notification_channel_isolation (ALL) |
 | `notification_delivery` | ja | ja | notification_delivery_isolation (ALL), notification_delivery_system_select (SELECT) |
+| `notification_digest_item` | ja | ja | notification_digest_item_isolation (ALL), notification_digest_item_system_select (SELECT) |
 | `notification_inbox` | ja | ja | notification_inbox_isolation (ALL) |
 | `notification_preference` | ja | ja | notification_preference_isolation (ALL) |
 | `operator_audit` | ja | ja | operator_audit_operator (ALL) |

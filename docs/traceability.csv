@@ -824,3 +824,4 @@ AUD-05;[B];B;backend/internal/server/route_audit_integration_test.go;WP-505
 AUD-07;[B];B;backend/internal/audit/route_snapshot_test.go;WP-505
 IMP-04;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-513
 IMP-05;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-513
+NTF-04;[B];B;backend/internal/notify/digest_integration_test.go;WP-508

@@ -3454,11 +3454,14 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The signed-in user's quiet hours and muted categories */
+    /**
+     * The signed-in user's quiet hours, muted categories and digest
+     * @description Without stored preferences the defaults (Europe/Berlin, nothing muted, digest `{"review":"hourly"}`).
+     */
     get: operations['getNotificationPreferences'];
     /**
-     * Set quiet hours and muted categories
-     * @description Critical notifications ignore both (NTF-04).
+     * Set quiet hours, muted categories and digest
+     * @description Critical notifications ignore quiet hours and muted categories and are never bundled (NTF-04). A digest naming an unknown or critical category or a window other than hourly or daily is refused with 400.
      */
     put: operations['setNotificationPreferences'];
     post?: never;
@@ -6791,6 +6794,15 @@ export interface components {
       /** @example Europe/Berlin */
       time_zone: string;
       muted_categories: string[];
+      /**
+       * @description Categories whose e-mails are bundled into one digest per window (NTF-04): category → hourly (ends at the full hour) or daily (ends at midnight in time_zone). Allowed are the categories with a non-critical event (entitlement, export, job, review, webhook); critical notifications, the in-app center and webhooks are never bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every e-mail on its own.
+       * @example {
+       *       "review": "hourly"
+       *     }
+       */
+      digest?: {
+        [key: string]: 'hourly' | 'daily';
+      };
     };
     NotificationChannel: {
       id: string;

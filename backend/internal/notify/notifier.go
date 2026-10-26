@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -68,12 +69,16 @@ type QueuedDelivery struct {
 	SentAt         *time.Time     `json:"sent_at,omitempty"`
 }
 
-// Preference is a user's quiet hours and muted categories.
+// Preference is a user's quiet hours, muted categories and digest.
 type Preference struct {
 	QuietStart      string   `json:"quiet_start,omitempty"` // HH:MM
 	QuietEnd        string   `json:"quiet_end,omitempty"`
 	TimeZone        string   `json:"time_zone"`
 	MutedCategories []string `json:"muted_categories"`
+	// Digest maps a non-critical category to the window its e-mails are
+	// bundled in (hourly or daily, NTF-04); missing: DefaultDigest, empty:
+	// every e-mail on its own.
+	Digest map[string]string `json:"digest"`
 }
 
 // Validate checks the preference.
@@ -98,7 +103,10 @@ func (p *Preference) Validate() error {
 	if p.MutedCategories == nil {
 		p.MutedCategories = []string{}
 	}
-	return nil
+	if p.Digest == nil {
+		p.Digest = DefaultDigest()
+	}
+	return validateDigest(p.Digest)
 }
 
 // QuietUntil returns the end of the quiet hours that contain t, or the
@@ -168,6 +176,7 @@ type Notifier struct {
 	channels    Repository
 	store       DeliveryStore
 	prefs       PreferenceStore
+	digest      DigestStore
 	sender      *Sender
 	features    FeatureChecker
 	MaxAttempts int
@@ -200,8 +209,10 @@ func (n *Notifier) WithClock(now func() time.Time) *Notifier {
 }
 
 // Notify queues the request on the organization's channels: per recipient
-// for e-mail (with address) and in-app (users), once for a webhook. It
-// returns how many deliveries it queued (dedup skips the known ones).
+// for e-mail (with address) and in-app (users), once for a webhook. An
+// e-mail of a non-critical category the recipient bundles becomes a digest
+// item instead (WithDigest). It returns how many deliveries and digest
+// items it queued (dedup skips the known ones).
 func (n *Notifier) Notify(ctx context.Context, orgID string, req *Request) (int, error) {
 	if strings.TrimSpace(req.Category) == "" || strings.TrimSpace(req.Subject) == "" {
 		return 0, fmt.Errorf("%w: a notification needs a category and a subject", ErrValidation)
@@ -212,6 +223,8 @@ func (n *Notifier) Notify(ctx context.Context, orgID string, req *Request) (int,
 	}
 	now := n.now()
 	var rows []QueuedDelivery
+	var items []DigestItem
+	prefs := map[string]*Preference{}
 	for i := range channels {
 		ch := &channels[i]
 		if !ch.Enabled || (len(req.ChannelIDs) > 0 && !slices.Contains(req.ChannelIDs, ch.ID)) {
@@ -240,16 +253,33 @@ func (n *Notifier) Notify(ctx context.Context, orgID string, req *Request) (int,
 				if key == "" {
 					continue
 				}
+				window, timeZone, perr := n.bundled(ctx, orgID, req, ch.Kind, r, prefs)
+				if perr != nil {
+					return 0, perr
+				}
+				if window != "" {
+					items = append(items, DigestItem{OrganizationID: orgID, ChannelID: ch.ID, Recipient: r, RecipientKey: key,
+						Category: req.Category, Window: window, WindowEnd: windowEnd(window, timeZone, now), Subject: req.Subject,
+						Body: req.Body, Data: req.Data, DedupKey: req.DedupKey, CreatedAt: now})
+					continue
+				}
 				row := base
 				row.Recipient, row.RecipientKey = r, key
 				rows = append(rows, row)
 			}
 		}
 	}
-	if len(rows) == 0 {
-		return 0, nil
+	created := 0
+	if len(items) > 0 {
+		if created, err = n.digest.AddItems(ctx, orgID, items); err != nil {
+			return 0, err
+		}
 	}
-	return n.store.Enqueue(ctx, orgID, rows)
+	if len(rows) == 0 {
+		return created, nil
+	}
+	queued, err := n.store.Enqueue(ctx, orgID, rows)
+	return created + queued, err
 }
 
 // ProcessDue works off the due deliveries and returns how many it sent.
@@ -469,6 +499,7 @@ func (s *MemoryStore) SetPreference(_ context.Context, orgID, userID string, p *
 	cp := *p
 	cp.MutedCategories = append([]string(nil), p.MutedCategories...)
 	sort.Strings(cp.MutedCategories)
+	cp.Digest = maps.Clone(p.Digest)
 	s.prefs[orgID+"/"+userID] = cp
 	return nil
 }

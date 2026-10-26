@@ -417,6 +417,11 @@ func main() {
 		})).
 		// E-mail channels send only with notifications_email (ENT-05).
 		WithEntitlements(entitlementSvc)
+	if auditPool != nil {
+		// E-mails of the categories a user bundles become digest items;
+		// the scheduler kind notify.digest queues them per window (NTF-04).
+		notifier.WithDigest(notify.NewPGDigestStore(auditPool))
+	}
 	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(egressPolicy), webhook.DispatcherOptions{
 		// Subscriptions bound to a service account receive only events whose
 		// object the account may read (RBA-08).
@@ -554,7 +559,7 @@ func main() {
 	}
 	if err = registerSystemJobs(systemScheduler, &systemJobDeps{cfg: cfg, pool: auditPool, encryptor: encryptor,
 		repos: &repos, modules: modules, entitlements: entitlementSvc, dispatcher: webhookDispatcher,
-		jobQueue: jobQueue}); err != nil {
+		jobQueue: jobQueue, notifier: notifier}); err != nil {
 		slog.Error("failed to register a system job", "error", err)
 		os.Exit(1)
 	}
