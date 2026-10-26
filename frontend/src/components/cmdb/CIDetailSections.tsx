@@ -430,6 +430,11 @@ export function ImpactSection({ ciId }: { ciId: string }) {
   const { t } = useTranslation();
   const [enabled, setEnabled] = useState(false);
   const blast = useBlastRadius(ciId, enabled);
+  // Certain hits and CIs reached only over connected_to (the network
+  // heuristic, IMP-03) are listed apart; affected_count counts the former.
+  const affected = blast.data?.affected_cis ?? [];
+  const certain = affected.filter((n) => !n.heuristic);
+  const heuristic = affected.filter((n) => n.heuristic);
 
   return (
     <Section title={t('impact.title', 'Auswirkungsanalyse')}>
@@ -441,9 +446,12 @@ export function ImpactSection({ ciId }: { ciId: string }) {
         <SkeletonList rows={3} label="…" />
       ) : blast.data ? (
         <div className="space-y-3">
-          <div className="flex gap-4 text-sm">
+          <div className="flex flex-wrap gap-4 text-sm">
             <span>
               {t('impact.affected', 'Betroffene CIs')}: <strong>{blast.data.affected_count}</strong>
+            </span>
+            <span>
+              {t('impact.heuristic')}: <strong>{blast.data.heuristic_count}</strong>
             </span>
             <span>
               {t('impact.clients', 'Kunden')}: <strong>{blast.data.client_ids?.length ?? 0}</strong>
@@ -472,14 +480,32 @@ export function ImpactSection({ ciId }: { ciId: string }) {
             <p className="text-xs font-semibold text-gray-500">
               {t('impact.affectedList', 'Betroffen:')}
             </p>
-            <ul className="max-h-40 overflow-y-auto text-sm">
-              {(blast.data.affected_cis ?? []).map((n) => (
-                <li key={n.id}>
-                  • {n.name} <span className="text-xs text-gray-400">({n.ci_type})</span>
-                </li>
-              ))}
-            </ul>
+            {certain.length > 0 ? (
+              <ul className="max-h-40 overflow-y-auto text-sm">
+                {certain.map((n) => (
+                  <li key={n.id}>
+                    • {n.name} <span className="text-xs text-gray-400">({n.ci_type})</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-gray-500">{t('impact.noneAffected')}</p>
+            )}
           </div>
+          {heuristic.length > 0 ? (
+            <div>
+              <p className="text-xs font-semibold text-gray-500">{t('impact.heuristicList')}</p>
+              <p className="text-xs text-gray-500">{t('impact.heuristicHint')}</p>
+              <ul className="max-h-40 overflow-y-auto text-sm">
+                {heuristic.map((n) => (
+                  <li key={n.id}>
+                    • {n.name} <span className="text-xs text-gray-400">({n.ci_type})</span>{' '}
+                    <Badge variant="warning">{t('impact.heuristicMarker')}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </Section>

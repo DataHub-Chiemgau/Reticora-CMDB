@@ -669,14 +669,11 @@ export interface ImpactResult {
   count: number;
 }
 
-export interface BlastRadius {
-  ci_id: string;
-  affected_cis: Array<{ id: string; name: string; ci_type: string }>;
-  affected_count: number;
-  client_ids?: string[];
-  site_ids?: string[];
-  single_points_of_failure?: Array<{ id: string; name: string }>;
-}
+/**
+ * The blast radius of a CI failure: affected_count counts the certain hits,
+ * heuristic_count the CIs reached only over connected_to (IMP-03, WP-490).
+ */
+export type BlastRadius = components['schemas']['BlastRadius'];
 
 /**
  * The fields of an impacted CI that ImpactResult declares (API-02): without

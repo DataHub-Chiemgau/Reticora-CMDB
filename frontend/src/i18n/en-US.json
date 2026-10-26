@@ -533,7 +533,11 @@
       "noImpact": "This CI has no dependents — an outage would have no impact on the graph.",
       "add": "Add failure",
       "remove": "Remove from simulation",
-      "impactMany": "If {{failed}} CIs ({{names}}) fail together, {{count}} further CIs are affected (shown in grey)."
+      "impactMany": "If {{failed}} CIs ({{names}}) fail together, {{count}} further CIs are affected (shown in grey).",
+      "loading": "Computing the impact …",
+      "unavailable": "The impact could not be computed.",
+      "provisionalLoading": "Provisional result along the impact direction of the relationship types; the server analysis is still running.",
+      "provisionalFailed": "The server analysis is unavailable. Provisional result along the impact direction of the relationship types, without the redundancy check."
     },
     "filterRelType": "Relationship type",
     "allRelTypes": "All relationships",
@@ -1010,7 +1014,12 @@
     "spofList": "Single points of failure:",
     "clients": "Clients",
     "title": "Impact analysis",
-    "compute": "Compute blast radius"
+    "compute": "Compute blast radius",
+    "heuristic": "Network heuristic",
+    "heuristicList": "Possibly affected:",
+    "heuristicHint": "Reached only over an undirected network connection (connected_to); whether the failure hits these CIs is not certain. They do not count towards the affected CIs, clients and sites.",
+    "heuristicMarker": "Network heuristic",
+    "noneAffected": "No CIs are certainly affected."
   },
   "composition": {
     "inheritedHint": "Shared inventory data (serial, purchase, warranty, location) comes from the parent asset.",

@@ -147,10 +147,11 @@ export function useDeleteInstanceField(ciId: string) {
 }
 
 // Relationship types
-export function useRelationshipTypes() {
+export function useRelationshipTypes(enabled = true) {
   return useQuery({
     queryKey: ['relationship-types'],
     queryFn: () => relationshipTypeApi.list({ limit: 100 }),
+    enabled,
   });
 }
 
