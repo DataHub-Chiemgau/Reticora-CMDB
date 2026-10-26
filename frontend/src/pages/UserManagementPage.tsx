@@ -102,7 +102,7 @@ function UsersTab({ search }: { search: string }) {
                 <td className="py-2">{user.email}</td>
                 <td className="py-2">
                   <Badge variant={user.status === 'active' ? 'success' : 'danger'}>
-                    {user.status}
+                    {t(`userMgmt.statuses.${user.status}`, user.status)}
                   </Badge>
                 </td>
                 <td className="py-2">

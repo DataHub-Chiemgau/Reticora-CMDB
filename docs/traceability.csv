@@ -839,3 +839,5 @@ JOB-03;[B];C;backend/internal/export/cancel_integration_test.go;WP-515
 JOB-04;[B];C;backend/internal/history/snapshot_integration_test.go;WP-516
 API-08;[B];C;backend/internal/ci/bulk_integration_test.go;WP-517
 BLK-01;[B];C;backend/internal/ci/bulk_integration_test.go;WP-517
+GLO-10;[B];C;frontend/src/i18n/rawEnum.test.ts;WP-525
+UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-525

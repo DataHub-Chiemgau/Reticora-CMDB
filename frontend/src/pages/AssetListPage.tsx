@@ -11,25 +11,24 @@ import { Select } from '../components/ui/Select';
 import { useUndoableDelete } from '../hooks/useUndoableDelete';
 import { useToastStore } from '../stores/toast';
 
-const statusOptions = [
-  { value: '', label: 'Alle' },
-  { value: 'in_stock', label: 'Auf Lager' },
-  { value: 'assigned', label: 'Zugewiesen' },
-  { value: 'maintenance', label: 'Wartung' },
-  { value: 'retired', label: 'Ausgemustert' },
-  { value: 'disposed', label: 'Entsorgt' },
-  { value: 'lost', label: 'Verloren' },
-];
+// Stored asset values (English keys); the labels come from the catalog.
+export const ASSET_STATUSES = [
+  'in_stock',
+  'assigned',
+  'maintenance',
+  'retired',
+  'disposed',
+  'lost',
+] as const;
 
-const categoryOptions = [
-  { value: '', label: 'Alle' },
-  { value: 'hardware', label: 'Hardware' },
-  { value: 'software', label: 'Software' },
-  { value: 'license', label: 'Lizenz' },
-  { value: 'cloud_resource', label: 'Cloud-Ressource' },
-  { value: 'accessory', label: 'Zubehör' },
-  { value: 'other', label: 'Sonstiges' },
-];
+export const ASSET_CATEGORIES = [
+  'hardware',
+  'software',
+  'license',
+  'cloud_resource',
+  'accessory',
+  'other',
+] as const;
 
 function statusVariant(status: string) {
   switch (status) {
@@ -50,6 +49,17 @@ function statusVariant(status: string) {
 
 export function AssetListPage() {
   const { t } = useTranslation();
+  const statusOptions = [
+    { value: '', label: t('common.all', 'Alle') },
+    ...ASSET_STATUSES.map((value) => ({ value, label: t(`asset.statuses.${value}`, value) })),
+  ];
+  const categoryOptions = [
+    { value: '', label: t('common.all', 'Alle') },
+    ...ASSET_CATEGORIES.map((value) => ({
+      value,
+      label: t(`asset.categories.${value}`, value),
+    })),
+  ];
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [category, setCategory] = useState('');
@@ -257,9 +267,13 @@ export function AssetListPage() {
                     </td>
                     <td className="py-2 font-mono">{asset.asset_tag}</td>
                     <td className="py-2">{asset.name}</td>
-                    <td className="py-2">{asset.category}</td>
                     <td className="py-2">
-                      <Badge variant={statusVariant(asset.status)}>{asset.status}</Badge>
+                      {t(`asset.categories.${asset.category}`, asset.category)}
+                    </td>
+                    <td className="py-2">
+                      <Badge variant={statusVariant(asset.status)}>
+                        {t(`asset.statuses.${asset.status}`, asset.status)}
+                      </Badge>
                     </td>
                     <td className="py-2">{asset.location || '—'}</td>
                     <td className="py-2">

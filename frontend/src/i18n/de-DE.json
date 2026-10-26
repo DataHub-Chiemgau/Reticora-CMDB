@@ -247,6 +247,13 @@
       "entity_change": "Historie",
       "audit": "Audit",
       "location_change": "Standortänderung"
+    },
+    "statuses": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv",
+      "maintenance": "Wartung",
+      "decommissioned": "Außer Betrieb",
+      "unknown": "Unbekannt"
     }
   },
   "form": {
@@ -475,7 +482,23 @@
     "purchaseCost": "Kaufpreis",
     "invoiceNumber": "Rechnungsnummer",
     "warrantyEnd": "Garantie bis",
-    "status": "Status"
+    "status": "Status",
+    "statuses": {
+      "in_stock": "Auf Lager",
+      "assigned": "Zugewiesen",
+      "maintenance": "Wartung",
+      "retired": "Ausgemustert",
+      "disposed": "Entsorgt",
+      "lost": "Verloren"
+    },
+    "categories": {
+      "hardware": "Hardware",
+      "software": "Software",
+      "license": "Lizenz",
+      "cloud_resource": "Cloud-Ressource",
+      "accessory": "Zubehör",
+      "other": "Sonstiges"
+    }
   },
   "assignment": {
     "title": "Zuweisungen",
@@ -485,7 +508,14 @@
     "type": "Typ",
     "assignedTo": "Zugewiesen an",
     "assignedAt": "Zugewiesen am",
-    "assetId": "Asset-ID"
+    "assetId": "Asset-ID",
+    "statuses": {
+      "active": "Aktiv",
+      "returned": "Zurückgegeben",
+      "transferred": "Transferiert",
+      "overdue": "Überfällig",
+      "cancelled": "Storniert"
+    }
   },
   "document": {
     "title": "Dokumente",
@@ -495,7 +525,17 @@
     "size": "Größe",
     "version": "Version",
     "upload": "Dokument erstellen",
-    "storageKey": "Storage-Key"
+    "storageKey": "Storage-Key",
+    "categories": {
+      "general": "Allgemein",
+      "contract": "Vertrag",
+      "invoice": "Rechnung",
+      "manual": "Handbuch",
+      "diagram": "Diagramm",
+      "certificate": "Zertifikat",
+      "policy": "Richtlinie",
+      "other": "Sonstiges"
+    }
   },
   "stocktake": {
     "title": "Inventur",
@@ -527,7 +567,21 @@
     "priority": "Priorität",
     "category": "Kategorie",
     "createdAt": "Erstellt",
-    "startWork": "Bearbeiten"
+    "startWork": "Bearbeiten",
+    "statuses": {
+      "open": "Offen",
+      "in_progress": "In Bearbeitung",
+      "waiting": "Wartend",
+      "resolved": "Gelöst",
+      "closed": "Geschlossen"
+    },
+    "categories": {
+      "incident": "Störung",
+      "request": "Anfrage",
+      "problem": "Problem",
+      "change": "Änderung",
+      "task": "Aufgabe"
+    }
   },
   "userMgmt": {
     "title": "Benutzer & Teams",
@@ -539,7 +593,12 @@
     "lastLogin": "Letzter Login",
     "memberCount": "Mitglieder",
     "permissions": "Berechtigungen",
-    "type": "Typ"
+    "type": "Typ",
+    "statuses": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv",
+      "anonymized": "Anonymisiert"
+    }
   },
   "invitations": {
     "title": "Einladungen",
@@ -748,7 +807,15 @@
     "noRuns": "Keine Läufe",
     "noRunsHint": "Gestartete Workflows erscheinen hier.",
     "approve": "Freigeben",
-    "reject": "Ablehnen"
+    "reject": "Ablehnen",
+    "statuses": {
+      "pending": "Ausstehend",
+      "running": "Läuft",
+      "waiting_approval": "Wartet auf Freigabe",
+      "succeeded": "Erfolgreich",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen"
+    }
   },
   "compliance": {
     "title": "Compliance",
@@ -962,7 +1029,16 @@
     "submit": "Einreichen",
     "approve": "Genehmigen",
     "reject": "Ablehnen",
-    "supplier": "Lieferant"
+    "supplier": "Lieferant",
+    "statuses": {
+      "draft": "Entwurf",
+      "submitted": "Eingereicht",
+      "approved": "Genehmigt",
+      "rejected": "Abgelehnt",
+      "ordered": "Bestellt",
+      "received": "Geliefert",
+      "cancelled": "Storniert"
+    }
   },
   "maintenance": {
     "summary": "Wartungen planen und betroffene Kunden benachrichtigen.",
@@ -998,7 +1074,13 @@
     "identifier": "Kennung",
     "issueTitle": "Schlüssel ausgeben",
     "assignTo": "Ausgeben an",
-    "selectUser": "Nutzer wählen"
+    "selectUser": "Nutzer wählen",
+    "statuses": {
+      "available": "Verfügbar",
+      "issued": "Ausgegeben",
+      "lost": "Verloren",
+      "retired": "Ausgemustert"
+    }
   },
   "trainings": {
     "summary": "Kurse mit Zuweisung, Fälligkeit und Nachweis.",

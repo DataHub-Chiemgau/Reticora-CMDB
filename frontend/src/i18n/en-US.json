@@ -247,6 +247,13 @@
       "entity_change": "History",
       "audit": "Audit",
       "location_change": "Location change"
+    },
+    "statuses": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "maintenance": "Maintenance",
+      "decommissioned": "Decommissioned",
+      "unknown": "Unknown"
     }
   },
   "form": {
@@ -475,7 +482,23 @@
     "purchaseCost": "Purchase cost",
     "invoiceNumber": "Invoice number",
     "warrantyEnd": "Warranty end",
-    "status": "Status"
+    "status": "Status",
+    "statuses": {
+      "in_stock": "In stock",
+      "assigned": "Assigned",
+      "maintenance": "Maintenance",
+      "retired": "Retired",
+      "disposed": "Disposed",
+      "lost": "Lost"
+    },
+    "categories": {
+      "hardware": "Hardware",
+      "software": "Software",
+      "license": "License",
+      "cloud_resource": "Cloud resource",
+      "accessory": "Accessory",
+      "other": "Other"
+    }
   },
   "assignment": {
     "title": "Assignments",
@@ -485,7 +508,14 @@
     "type": "Type",
     "assignedTo": "Assigned to",
     "assignedAt": "Assigned at",
-    "assetId": "Asset ID"
+    "assetId": "Asset ID",
+    "statuses": {
+      "active": "Active",
+      "returned": "Returned",
+      "transferred": "Transferred",
+      "overdue": "Overdue",
+      "cancelled": "Cancelled"
+    }
   },
   "document": {
     "title": "Documents",
@@ -495,7 +525,17 @@
     "size": "Size",
     "version": "Version",
     "upload": "Create Document",
-    "storageKey": "Storage Key"
+    "storageKey": "Storage Key",
+    "categories": {
+      "general": "General",
+      "contract": "Contract",
+      "invoice": "Invoice",
+      "manual": "Manual",
+      "diagram": "Diagram",
+      "certificate": "Certificate",
+      "policy": "Policy",
+      "other": "Other"
+    }
   },
   "stocktake": {
     "title": "Stocktake",
@@ -527,7 +567,21 @@
     "priority": "Priority",
     "category": "Category",
     "createdAt": "Created",
-    "startWork": "Start Work"
+    "startWork": "Start Work",
+    "statuses": {
+      "open": "Open",
+      "in_progress": "In progress",
+      "waiting": "Waiting",
+      "resolved": "Resolved",
+      "closed": "Closed"
+    },
+    "categories": {
+      "incident": "Incident",
+      "request": "Request",
+      "problem": "Problem",
+      "change": "Change",
+      "task": "Task"
+    }
   },
   "userMgmt": {
     "title": "Users & Teams",
@@ -539,7 +593,12 @@
     "lastLogin": "Last Login",
     "memberCount": "Members",
     "permissions": "Permissions",
-    "type": "Type"
+    "type": "Type",
+    "statuses": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "anonymized": "Anonymized"
+    }
   },
   "invitations": {
     "title": "Invitations",
@@ -748,7 +807,15 @@
     "noRuns": "No runs",
     "noRunsHint": "Started workflows appear here.",
     "approve": "Approve",
-    "reject": "Reject"
+    "reject": "Reject",
+    "statuses": {
+      "pending": "Pending",
+      "running": "Running",
+      "waiting_approval": "Waiting for approval",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    }
   },
   "compliance": {
     "title": "Compliance",
@@ -962,7 +1029,16 @@
     "submit": "Submit",
     "approve": "Approve",
     "reject": "Reject",
-    "supplier": "Supplier"
+    "supplier": "Supplier",
+    "statuses": {
+      "draft": "Draft",
+      "submitted": "Submitted",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "ordered": "Ordered",
+      "received": "Received",
+      "cancelled": "Cancelled"
+    }
   },
   "maintenance": {
     "summary": "Schedule maintenance and notify affected customers.",
@@ -998,7 +1074,13 @@
     "identifier": "Identifier",
     "issueTitle": "Issue key",
     "assignTo": "Issue to",
-    "selectUser": "Select user"
+    "selectUser": "Select user",
+    "statuses": {
+      "available": "Available",
+      "issued": "Issued",
+      "lost": "Lost",
+      "retired": "Retired"
+    }
   },
   "trainings": {
     "summary": "Courses with assignment, due date and proof.",

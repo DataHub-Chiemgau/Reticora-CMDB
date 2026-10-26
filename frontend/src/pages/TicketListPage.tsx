@@ -8,14 +8,11 @@ import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 
-const statusOptions = [
-  { value: '', label: 'Alle' },
-  { value: 'open', label: 'Offen' },
-  { value: 'in_progress', label: 'In Bearbeitung' },
-  { value: 'waiting', label: 'Wartend' },
-  { value: 'resolved', label: 'Gelöst' },
-  { value: 'closed', label: 'Geschlossen' },
-];
+// Stored ticket statuses and categories (English keys); the labels come
+// from the catalog.
+export const TICKET_STATUSES = ['open', 'in_progress', 'waiting', 'resolved', 'closed'] as const;
+
+export const TICKET_CATEGORIES = ['incident', 'request', 'problem', 'change', 'task'] as const;
 
 const priorityOptions = [
   { value: '', label: 'Alle' },
@@ -23,14 +20,6 @@ const priorityOptions = [
   { value: 'medium', label: 'Mittel' },
   { value: 'high', label: 'Hoch' },
   { value: 'critical', label: 'Kritisch' },
-];
-
-const categoryOptions = [
-  { value: 'incident', label: 'Störung' },
-  { value: 'request', label: 'Anfrage' },
-  { value: 'problem', label: 'Problem' },
-  { value: 'change', label: 'Änderung' },
-  { value: 'task', label: 'Aufgabe' },
 ];
 
 function statusVariant(status: string) {
@@ -67,6 +56,14 @@ function priorityVariant(priority: string) {
 
 export function TicketListPage() {
   const { t } = useTranslation();
+  const statusOptions = [
+    { value: '', label: t('common.all', 'Alle') },
+    ...TICKET_STATUSES.map((value) => ({ value, label: t(`ticket.statuses.${value}`, value) })),
+  ];
+  const categoryOptions = TICKET_CATEGORIES.map((value) => ({
+    value,
+    label: t(`ticket.categories.${value}`, value),
+  }));
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [priority, setPriority] = useState('');
@@ -155,12 +152,16 @@ export function TicketListPage() {
                     <td className="py-2 font-mono text-xs">#{ticket.ticket_number}</td>
                     <td className="py-2 font-medium">{ticket.title}</td>
                     <td className="py-2">
-                      <Badge variant={statusVariant(ticket.status)}>{ticket.status}</Badge>
+                      <Badge variant={statusVariant(ticket.status)}>
+                        {t(`ticket.statuses.${ticket.status}`, ticket.status)}
+                      </Badge>
                     </td>
                     <td className="py-2">
                       <Badge variant={priorityVariant(ticket.priority)}>{ticket.priority}</Badge>
                     </td>
-                    <td className="py-2">{ticket.category}</td>
+                    <td className="py-2">
+                      {t(`ticket.categories.${ticket.category}`, ticket.category)}
+                    </td>
                     <td className="py-2">
                       {new Date(ticket.created_at).toLocaleDateString('de-DE')}
                     </td>

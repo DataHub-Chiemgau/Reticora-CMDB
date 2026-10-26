@@ -8,13 +8,14 @@ import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 
-const statusOptions = [
-  { value: '', label: 'Alle' },
-  { value: 'active', label: 'Aktiv' },
-  { value: 'returned', label: 'Zurückgegeben' },
-  { value: 'transferred', label: 'Transferiert' },
-  { value: 'overdue', label: 'Überfällig' },
-];
+// Stored assignment statuses (English keys); the labels come from the catalog.
+export const ASSIGNMENT_STATUSES = [
+  'active',
+  'returned',
+  'transferred',
+  'overdue',
+  'cancelled',
+] as const;
 
 function statusVariant(status: string) {
   switch (status) {
@@ -33,6 +34,13 @@ function statusVariant(status: string) {
 
 export function AssignmentListPage() {
   const { t } = useTranslation();
+  const statusOptions = [
+    { value: '', label: t('common.all', 'Alle') },
+    ...ASSIGNMENT_STATUSES.map((value) => ({
+      value,
+      label: t(`assignment.statuses.${value}`, value),
+    })),
+  ];
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -104,7 +112,9 @@ export function AssignmentListPage() {
                     <td className="py-2">{item.assignment_type}</td>
                     <td className="py-2">{item.assigned_to}</td>
                     <td className="py-2">
-                      <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
+                      <Badge variant={statusVariant(item.status)}>
+                        {t(`assignment.statuses.${item.status}`, item.status)}
+                      </Badge>
                     </td>
                     <td className="py-2">
                       {new Date(item.assigned_at).toLocaleDateString('de-DE')}

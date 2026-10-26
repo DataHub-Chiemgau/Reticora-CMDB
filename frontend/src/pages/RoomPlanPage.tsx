@@ -270,7 +270,7 @@ export function RoomPlanPage() {
                       >
                         {ci.name}
                       </span>
-                      <Badge variant="info">{ci.status}</Badge>
+                      <Badge variant="info">{t(`ci.statuses.${ci.status}`, ci.status)}</Badge>
                     </div>
                     {/* Form alternative to dragging: key/value input of the position. */}
                     <form
