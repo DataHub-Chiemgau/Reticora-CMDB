@@ -3,6 +3,7 @@ package history_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // TestHistoryRepositoryClientScope runs the history repository with the
@@ -58,5 +61,49 @@ func TestHistoryRepositoryClientScope(t *testing.T) {
 
 	if _, _, err = repo.List(context.Background(), f.OrgA, "ci", own, page); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)
+	}
+}
+
+// TestLocationHistoryClientScope covers LOC-11 and TEN-06 (WP-473): a
+// principal restricted to client 1 reads the history of a moved client-1
+// location, while GET /api/v1/history/location/{id} of a moved client-2
+// location is 404, before and after that location's deletion; an org-wide
+// principal still reads the deleted location's move.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestLocationHistoryClientScope(t *testing.T) {
+	f := scopetest.Seed(t, "16")
+	orgCtx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	locs := locations.NewPGRepository(f.App)
+	moved := map[string]string{}
+	for _, client := range []string{f.Client1, f.Client2} {
+		tree := locationTree{t: t, ctx: orgCtx, org: f.OrgA, clientID: client, repo: locs}
+		site := tree.mk(locations.KindSite, "", "hist-scope-site-"+client[len(client)-2:])
+		b1 := tree.mk(locations.KindBuilding, site, "hist-scope-b1")
+		b2 := tree.mk(locations.KindBuilding, site, "hist-scope-b2")
+		room := tree.mk(locations.KindRoom, b1, "hist-scope-room")
+		tree.move(room, b2)
+		moved[client] = room
+	}
+	h := history.NewHandler(history.NewPGRepository(f.App))
+	ctx := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+
+	if rec, own := getHistory(ctx, t, h, "/api/v1/history/location/"+moved[f.Client1]); rec.Code != http.StatusOK || own.Total != 1 {
+		t.Fatalf("client-1 history of own moved room: %d %s", rec.Code, rec.Body)
+	}
+	if rec, _ := getHistory(ctx, t, h, "/api/v1/history/location/"+moved[f.Client2]); rec.Code != http.StatusNotFound {
+		t.Fatalf("client-1 history of a client-2 room: %d %s, want 404", rec.Code, rec.Body)
+	}
+	if _, _, err := history.NewPGRepository(f.App).List(ctx, f.OrgA, "location", moved[f.Client2], api.PaginationParams{Limit: 100}); !errors.Is(err, api.ErrNotFound) {
+		t.Fatalf("client-1 repository list of a client-2 room: %v, want api.ErrNotFound", err)
+	}
+	if err := locs.Delete(orgCtx, f.OrgA, moved[f.Client2]); err != nil {
+		t.Fatalf("delete client-2 room: %v", err)
+	}
+	if rec, _ := getHistory(ctx, t, h, "/api/v1/history/location/"+moved[f.Client2]); rec.Code != http.StatusNotFound {
+		t.Fatalf("client-1 history of a deleted client-2 room: %d %s, want 404", rec.Code, rec.Body)
+	}
+	if rec, other := getHistory(orgCtx, t, h, "/api/v1/history/location/"+moved[f.Client2]); rec.Code != http.StatusOK || other.Total != 1 {
+		t.Fatalf("org-wide history of the deleted client-2 room: %d %s", rec.Code, rec.Body)
 	}
 }

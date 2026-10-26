@@ -594,8 +594,8 @@ export interface EntityChange {
   new_value?: unknown;
   comment?: string;
   created_at: string;
-  /** Trail of the entry in the unified CI history (CI-06). */
-  source?: 'ci_change' | 'entity_change' | 'audit';
+  /** Trail of the entry in the unified CI and location history (CI-06, LOC-11). */
+  source?: 'ci_change' | 'entity_change' | 'audit' | 'location_change';
   /** Site of the CI when the change was made. */
   site_id?: string;
 }

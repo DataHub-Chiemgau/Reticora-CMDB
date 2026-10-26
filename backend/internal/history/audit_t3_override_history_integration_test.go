@@ -11,8 +11,8 @@ package history_test
 // unified history as audit entries ci.override_set / ci.override_cleared,
 // newest first (cleared before set), and a principal restricted to client 2
 // reads none of the client-1 CI's history.
-// (The location_change part is the defect test
-// audit_t3_location_change_auditdefect_test.go.)
+// (The location_change part is TestAuditT3HistoryIncludesLocationChange in
+// history_integration_test.go.)
 //
 // Retest:
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_03?sslmode=disable \

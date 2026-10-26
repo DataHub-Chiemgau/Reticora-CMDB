@@ -723,3 +723,6 @@ NFR-10;[Q];LT;tests/load/evaluate-runs.sh;WP-612
 NFR-02;[B];LT;backend/internal/topology/impact_bench_integration_test.go;WP-611
 NFR-03;[B], Teilumfang [P5];LT;backend/internal/discovery/ingest_budget_integration_test.go;WP-608
 ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-470
+CI-06;[B];C;backend/internal/history/history_integration_test.go;WP-473
+LOC-10;B/G1;C;backend/internal/history/history_integration_test.go;WP-473
+LOC-11;B/G1;C;backend/internal/history/history_integration_test.go;WP-473

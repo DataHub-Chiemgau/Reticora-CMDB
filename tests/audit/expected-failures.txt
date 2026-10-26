@@ -10,7 +10,6 @@ go;backend/internal/discovery;TestAuditDefectDiscoveryTypedValuesValidated;F-143
 go;backend/internal/discovery;TestAuditPowerRedundancyIndependentOfBatchOrder;F-112
 go;backend/internal/discovery;TestAuditT3PoisonRecordDoesNotTakeValidRecordsDown;F-090
 go;backend/internal/discovery;TestAuditT3ProbableDuplicateMergeIsCIMerge;F-096
-go;backend/internal/history;TestAuditT3HistoryIncludesLocationChange;F-093
 go;backend/internal/iga;TestAuditT1ApprovalNeverLosesTheProvisioningTask;F-056
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
 go;backend/internal/middleware;TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget;F-063

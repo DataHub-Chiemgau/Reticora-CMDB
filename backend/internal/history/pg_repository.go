@@ -60,38 +60,91 @@ func (r *PGRepository) Record(ctx context.Context, change *Change) error {
 	})
 }
 
+// locationChanges selects, as entries of the history of entityType, the
+// location_change rows (WP-055) of the locations the subquery locationIDs
+// names: time, actor, the moved location (id and the name kept after its
+// deletion, WP-411) and its old and new parent and path. $1 is the
+// organization, $2 the entity.
+func locationChanges(entityType, locationIDs string) string {
+	return `
+	SELECT id::text, organization_id::text, '` + entityType + `', $2::uuid::text, COALESCE(changed_by, ''), 'location_change', 'parent_id',
+	       jsonb_build_object('location_id', location_id, 'location_name', location_name, 'parent_id', old_parent_id, 'path', old_path),
+	       jsonb_build_object('location_id', location_id, 'location_name', location_name, 'parent_id', new_parent_id, 'path', new_path),
+	       '', changed_at, 'location_change', site_id::text
+	FROM location_change WHERE organization_id = $1 AND location_id IN (` + locationIDs + `)`
+}
+
+// ancestorsOf selects a location and its ancestors along the ltree path; the
+// argument is a subquery of the location id.
+func ancestorsOf(locationID string) string {
+	return `SELECT a.id FROM location a WHERE a.path @> (SELECT l.path FROM location l WHERE l.id = ` + locationID + `)`
+}
+
 // unifiedCIHistory is the history of a CI (CI-06): its ci_change rows
-// (with the site at the time), the entity_change rows and the audit
-// entries of the CI, one chronological trail.
-const unifiedCIHistory = `
+// (with the site at the time), the entity_change rows, the audit entries of
+// the CI and the location_change rows of its location and the location's
+// ancestors (a room or rack re-parented with the CI in it), one
+// chronological trail.
+var unifiedCIHistory = `
 	SELECT id::text, organization_id::text, 'ci', ci_id::text, COALESCE(actor_id::text, ''), change_type,
 	       COALESCE(field_name, ''), old_value, new_value, COALESCE(comment, ''), created_at, 'ci_change', COALESCE(site_id::text, '')
-	FROM ci_change WHERE organization_id = $1 AND ci_id = $2
+	FROM ci_change WHERE organization_id = $1 AND ci_id = $2::uuid
 	UNION ALL
 	SELECT id::text, organization_id::text, entity_type, entity_id::text, COALESCE(actor_id::text, ''), change_type,
 	       COALESCE(field_name, ''), old_value, new_value, COALESCE(comment, ''), created_at, 'entity_change', ''
-	FROM entity_change WHERE organization_id = $1 AND entity_type = 'ci' AND entity_id = $2
+	FROM entity_change WHERE organization_id = $1 AND entity_type = 'ci' AND entity_id = $2::uuid
 	UNION ALL
 	SELECT id::text, organization_id::text, 'ci', resource_id::text, COALESCE(actor_id::text, ''), action,
 	       '', NULL, changes, '', "timestamp", 'audit', ''
-	FROM audit_log WHERE organization_id = $1 AND resource_type = 'ci' AND resource_id = $2`
+	FROM audit_log WHERE organization_id = $1 AND resource_type = 'ci' AND resource_id = $2::uuid
+	UNION ALL` + locationChanges("ci", ancestorsOf("(SELECT ci.location_id FROM ci WHERE ci.id = $2::uuid)"))
+
+// unifiedLocationHistory is the history of a location (LOC-11): its
+// entity_change rows and the location_change rows of the location itself,
+// found by location_id also after its deletion (WP-411), and of its
+// ancestors while it exists.
+var unifiedLocationHistory = `
+	SELECT id::text, organization_id::text, entity_type, entity_id::text, COALESCE(actor_id::text, ''), change_type,
+	       COALESCE(field_name, ''), old_value, new_value, COALESCE(comment, ''), created_at, 'entity_change', ''
+	FROM entity_change WHERE organization_id = $1 AND entity_type = 'location' AND entity_id = $2::uuid
+	UNION ALL` + locationChanges("location", "SELECT $2::uuid UNION "+ancestorsOf("$2::uuid"))
 
 // listCI returns the unified history of a CI the caller can see, newest
-// first.
+// first; a CI the caller cannot see has none.
 func (r *PGRepository) listCI(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Change, int, error) {
+	return r.listUnified(ctx, orgID, ciID, page, "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid)", unifiedCIHistory, nil)
+}
+
+// listLocation returns the unified history of a location, newest first. A
+// location of which the caller neither sees the row nor a location_change
+// (unknown, deleted without a move, or of another client or site) is
+// api.ErrNotFound.
+func (r *PGRepository) listLocation(ctx context.Context, orgID, locationID string, page api.PaginationParams) ([]Change, int, error) {
+	return r.listUnified(ctx, orgID, locationID, page,
+		"SELECT EXISTS (SELECT 1 FROM location WHERE id = $1::uuid) OR EXISTS (SELECT 1 FROM location_change WHERE location_id = $1::uuid)",
+		unifiedLocationHistory, api.ErrNotFound)
+}
+
+// listUnified pages through a unified history under the caller's tenant
+// scope once visibleSQL ($1: the entity id) confirms the entity; an entity
+// the caller cannot see yields invisibleErr (nil: an empty history).
+func (r *PGRepository) listUnified(ctx context.Context, orgID, id string, page api.PaginationParams, visibleSQL, unified string, invisibleErr error) ([]Change, int, error) {
 	out := []Change{}
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var visible bool
-		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid)", ciID).Scan(&visible); err != nil || !visible {
+		if err := tx.QueryRow(ctx, visibleSQL, id).Scan(&visible); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, "SELECT count(*) FROM ("+unifiedCIHistory+") h", orgID, ciID).Scan(&total); err != nil {
-			return fmt.Errorf("count CI history: %w", err)
+		if !visible {
+			return invisibleErr
 		}
-		rows, err := tx.Query(ctx, "SELECT * FROM ("+unifiedCIHistory+") h ORDER BY 11 DESC, 1 LIMIT $3 OFFSET $4", orgID, ciID, page.Limit, page.Offset)
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM ("+unified+") h", orgID, id).Scan(&total); err != nil {
+			return fmt.Errorf("count history: %w", err)
+		}
+		rows, err := tx.Query(ctx, "SELECT * FROM ("+unified+") h ORDER BY 11 DESC, 1 LIMIT $3 OFFSET $4", orgID, id, page.Limit, page.Offset)
 		if err != nil {
-			return fmt.Errorf("list CI history: %w", err)
+			return fmt.Errorf("list history: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
@@ -115,10 +168,13 @@ func (r *PGRepository) listCI(ctx context.Context, orgID, ciID string, page api.
 }
 
 // List returns the changes of one entity, newest first; for a CI the
-// unified history of CI-06.
+// unified history of CI-06, for a location that of LOC-11.
 func (r *PGRepository) List(ctx context.Context, orgID, entityType, entityID string, page api.PaginationParams) ([]Change, int, error) {
-	if entityType == "ci" {
+	switch entityType {
+	case "ci":
 		return r.listCI(ctx, orgID, entityID, page)
+	case "location":
+		return r.listLocation(ctx, orgID, entityID, page)
 	}
 	var out []Change
 	var total int

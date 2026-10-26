@@ -11,7 +11,7 @@ import "time"
 type Change struct {
 	ID             string    `json:"id"`
 	OrganizationID string    `json:"organization_id"`
-	EntityType     string    `json:"entity_type"` // ci | asset | relationship | location_node | reservation | composition
+	EntityType     string    `json:"entity_type"` // ci | asset | relationship | location | reservation | composition
 	EntityID       string    `json:"entity_id"`
 	ActorID        string    `json:"actor_id,omitempty"`
 	ChangeType     string    `json:"change_type"`
@@ -20,18 +20,21 @@ type Change struct {
 	NewValue       any       `json:"new_value,omitempty"`
 	Comment        string    `json:"comment,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
-	// Source names the trail of the entry in the unified CI history
-	// (CI-06): ci_change, entity_change or audit.
+	// Source names the trail of the entry in the unified CI and location
+	// history (CI-06, LOC-11): ci_change, entity_change, audit or
+	// location_change.
 	Source string `json:"source,omitempty"`
-	// SiteID is the site of the CI when the change was made (ci_change).
+	// SiteID is the site of the CI when the change was made (ci_change),
+	// or the site of the moved location (location_change).
 	SiteID string `json:"site_id,omitempty"`
 }
 
-// Sources of the unified CI history.
+// Sources of the unified CI and location history.
 const (
-	SourceCIChange     = "ci_change"
-	SourceEntityChange = "entity_change"
-	SourceAudit        = "audit"
+	SourceCIChange       = "ci_change"
+	SourceEntityChange   = "entity_change"
+	SourceAudit          = "audit"
+	SourceLocationChange = "location_change"
 )
 
 // StateSnapshot is the reconstructed state of an entity at a point in time.

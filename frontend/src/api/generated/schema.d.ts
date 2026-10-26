@@ -7272,13 +7272,13 @@ export interface components {
       /** Format: date-time */
       created_at: string;
       /**
-       * @description The trail of the entry (CI history only).
+       * @description The trail of the entry (CI and location history only).
        * @enum {string}
        */
-      source?: 'ci_change' | 'entity_change' | 'audit';
+      source?: 'ci_change' | 'entity_change' | 'audit' | 'location_change';
       /**
        * Format: uuid
-       * @description The site of the CI when the change was made.
+       * @description The site of the CI when the change was made (ci_change), or the site of the moved location (location_change).
        */
       site_id?: string;
     };
@@ -26549,7 +26549,8 @@ export interface operations {
       };
       header?: never;
       path: {
-        entityType: string;
+        /** @description The entity type. Locations of the common tree (site to bin) are type location; the retired type location_node is refused with 400. */
+        entityType: 'ci' | 'asset' | 'relationship' | 'location' | 'reservation' | 'composition';
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
       };
@@ -26557,7 +26558,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change rows (with the site at the time), entity_change rows and audit entries. */
+      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change rows (with the site at the time), entity_change rows, audit entries and the location_change rows of its location and the location's ancestors. For a location it is its entity_change rows and the location_change rows of the location (also after its deletion) and of its ancestors. A location_change entry has change_type location_change, field_name parent_id, and old_value/new_value objects with location_id, location_name, parent_id and path. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -26566,12 +26567,30 @@ export interface operations {
           'application/json': components['schemas']['HistoryListResponse'];
         };
       };
+      /** @description The entity type is not one of the listed types, or the id is no UUID. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Unauthorized */
       401: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description The location is unknown or outside the caller's scope: neither the location nor a location_change of it is visible to the caller. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };

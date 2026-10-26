@@ -173,9 +173,12 @@ func (h *Handler) state(w http.ResponseWriter, r *http.Request, entityType strin
 	api.WriteJSON(w, http.StatusOK, snapshot)
 }
 
+// validEntityType lists the entity types with a history; the locations
+// are the common tree of type location (E-19), the retired location_node
+// has none (F-226).
 func validEntityType(entityType string) bool {
 	switch entityType {
-	case "ci", "asset", "relationship", "location_node", "reservation", "composition":
+	case "ci", "asset", "relationship", "location", "reservation", "composition":
 		return true
 	}
 	return false

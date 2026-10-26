@@ -11563,7 +11563,12 @@ paths:
         - name: entityType
           in: path
           required: true
-          schema: { type: string }
+          description: >-
+            The entity type. Locations of the common tree (site to bin) are
+            type location; the retired type location_node is refused with 400.
+          schema:
+            type: string
+            enum: [ci, asset, relationship, location, reservation, composition]
         - $ref: '#/components/parameters/ResourceID'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -11573,13 +11578,33 @@ paths:
           description: >-
             The change history of an entity, newest first. For a CI it is the
             unified history of CI-06: its ci_change rows (with the site at the
-            time), entity_change rows and audit entries.
+            time), entity_change rows, audit entries and the location_change
+            rows of its location and the location's ancestors. For a location
+            it is its entity_change rows and the location_change rows of the
+            location (also after its deletion) and of its ancestors. A
+            location_change entry has change_type location_change, field_name
+            parent_id, and old_value/new_value objects with location_id,
+            location_name, parent_id and path.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HistoryListResponse'
+        '400':
+          description: The entity type is not one of the listed types, or the id is no UUID.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '401':
           description: Unauthorized
+        '404':
+          description: >-
+            The location is unknown or outside the caller's scope: neither the
+            location nor a location_change of it is visible to the caller.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/inventory/availability:
     x-phase: P2
@@ -13396,12 +13421,14 @@ components:
         created_at: { type: string, format: date-time }
         source:
           type: string
-          enum: [ci_change, entity_change, audit]
-          description: The trail of the entry (CI history only).
+          enum: [ci_change, entity_change, audit, location_change]
+          description: The trail of the entry (CI and location history only).
         site_id:
           type: string
           format: uuid
-          description: The site of the CI when the change was made.
+          description: >-
+            The site of the CI when the change was made (ci_change), or the
+            site of the moved location (location_change).
     HistoryListResponse:
       type: object
       required: [data]
