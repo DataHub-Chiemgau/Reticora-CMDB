@@ -1,7 +1,10 @@
 package relationship
 
 import (
+	"cmp"
 	"context"
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -13,6 +16,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -431,104 +436,478 @@ func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, f
 	})
 }
 
-// TraverseFrom walks the configuration graph from rootCIID breadth first,
-// one edge read per hop, under the caller's full tenant scope (RLS on ci and
-// ci_relationship). Each node is expanded once, so a walk costs at most two
-// statements per hop and reads each edge at most twice, whatever cycles the
-// graph has (NFR-02, WP-206; the former recursive CTE re-expanded every node
-// at every depth). Once a level reaches more than bulkFrontier CIs, the walk
-// reads every edge of the organization in one statement instead of the
-// further levels (organizationEdges, WP-335): the statements of a walk then
-// no longer grow with the graph. The walk only passes through CIs that are
-// visible and not deleted: the CIs a level reaches are checked against ci
-// under the same scope, and an edge is followed only when both endpoints
-// passed, so an invisible or deleted intermediate node never connects
-// visible ones (IMP-07). The result follows SelectTraversal, the semantics
-// the memory repository shares.
+// TraverseFrom walks the configuration graph from rootCIID like WalkFrom and
+// returns the kept edges as relationships, ordered by id. The result follows
+// SelectTraversal, the semantics the memory repository shares.
 func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error) {
-	if maxDepth < 1 || maxNodes < 1 {
-		return make([]Relationship, 0), nil
+	walk, err := r.WalkFrom(ctx, orgID, rootCIID, maxDepth, maxNodes)
+	if err != nil {
+		return nil, err
 	}
-	var edges []edgeRow
+	result := make([]Relationship, 0, len(walk.Edges))
+	for i := range walk.Edges {
+		e := &walk.Edges[i]
+		result = append(result, Relationship{ID: e.ID, SourceCIID: walk.CIs[e.SourceCI], TargetCIID: walk.CIs[e.TargetCI],
+			RelType: e.RelType, Source: e.Source})
+	}
+	return result, nil
+}
+
+// WalkFrom implements Walker. It walks the configuration graph from
+// rootCIID breadth first, one edge read per hop, under the caller's full
+// tenant scope (RLS on ci and ci_relationship). Each node is expanded once,
+// so a walk costs at most two statements per hop and reads each edge at
+// most twice, whatever cycles the graph has (NFR-02, WP-206; the former
+// recursive CTE re-expanded every node at every depth). Once a level
+// reaches more than bulkFrontier CIs, the walk reads every edge of the
+// organization in one statement instead of the further levels (WP-335):
+// the statements of a walk then no longer grow with the graph. The walk
+// only passes through CIs that are visible and not deleted: the CIs a level
+// reaches are checked against ci under the same scope, the root with the
+// first of them, and an edge is followed only when both endpoints passed,
+// so an invisible or deleted intermediate node never connects visible ones
+// (IMP-07). The result follows SelectTraversal.
+//
+// The walk reads only what it needs of an edge (id, source, target, type
+// and origin), the ids in their binary form, and works on CI numbers: the
+// adjacency, the hop distances and the selection are slices indexed by
+// number instead of maps keyed by id strings (NFR-02, WP-611). Only the CIs
+// and edges it returns get their text form.
+func (r *PGRepository) WalkFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) (*Walk, error) {
+	if maxDepth < 1 || maxNodes < 1 {
+		return &Walk{CIs: []string{rootCIID}, Edges: []WalkEdge{}}, nil
+	}
+	var root pgtype.UUID
+	if err := root.Scan(rootCIID); err != nil {
+		return nil, fmt.Errorf("traverse relationships: root: %w", err)
+	}
+	g := newWalkGraph(root.Bytes)
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var rootVisible bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE id = $2 AND organization_id = $1 AND deleted_at IS NULL)`,
-			orgID, rootCIID).Scan(&rootVisible); err != nil {
-			return fmt.Errorf("traverse relationships: %w", err)
-		}
-		if !rootVisible {
-			return nil
-		}
-		// A wide level reaches most of the graph: one read of all edges
-		// replaces the further levels, and the selection re-derives the
-		// walk from it.
-		readAll := func() error {
-			var err error
-			edges, err = organizationEdges(ctx, tx, orgID)
-			return err
-		}
-		// visible holds every CI checked so far, true when it is visible
-		// and not deleted; a CI is checked in the level that reaches it.
-		visible := map[string]bool{rootCIID: true}
-		seenEdge := map[string]bool{}
-		reached := 1
-		frontier := []string{rootCIID}
-		hops := maxDepth
-		for hop := 0; hop < hops && len(frontier) > 0; hop++ {
-			if len(frontier) > r.bulkFrontier {
-				return readAll()
-			}
-			level, err := frontierEdges(ctx, tx, orgID, frontier)
-			if err != nil {
-				return err
-			}
-			var unchecked []string
-			fresh := level[:0]
-			for i := range level {
-				if seenEdge[level[i].id] {
-					continue
-				}
-				seenEdge[level[i].id] = true
-				fresh = append(fresh, level[i])
-				for _, id := range []string{level[i].sourceCIID, level[i].targetCIID} {
-					if _, checked := visible[id]; !checked && id != "" {
-						visible[id] = false
-						unchecked = append(unchecked, id)
-					}
-				}
-			}
-			if len(unchecked) > r.bulkFrontier && hop+1 < hops {
-				return readAll()
-			}
-			if err := visibleCIs(ctx, tx, orgID, unchecked, visible); err != nil {
-				return err
-			}
-			for i := range fresh {
-				if visible[fresh[i].sourceCIID] && visible[fresh[i].targetCIID] {
-					edges = append(edges, fresh[i])
-				}
-			}
-			var next []string
-			for _, id := range unchecked {
-				if visible[id] {
-					next = append(next, id)
-				}
-			}
-			reached += len(next)
-			// Beyond the node limit the walk ends after collecting the
-			// edges of the nodes just reached: nodes further away are
-			// dropped by the limit anyway.
-			if reached > maxNodes && len(next) > 0 {
-				hops = min(hops, hop+2)
-			}
-			frontier = next
-		}
-		return nil
+		return r.walk(ctx, tx, orgID, g, maxDepth, maxNodes)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return selectEdgeRows(rootCIID, edges, maxDepth, maxNodes), nil
+	return g.selectWalk(maxDepth, maxNodes), nil
+}
+
+// walk reads the edges and CIs of a walk from the root (number 0) into g.
+func (r *PGRepository) walk(ctx context.Context, tx pgx.Tx, orgID string, g *walkGraph, maxDepth, maxNodes int) error {
+	// A wide level reaches most of the graph: one read of all edges
+	// replaces the further levels, and the selection re-derives the walk
+	// from it. The edges come first, then the CIs, so an edge to a CI
+	// deleted or moved out of the scope in between is dropped.
+	readAll := func() error {
+		edges, err := g.readEdges(ctx, tx, `SELECT `+walkSelectColumns+` FROM `+graphEdges+` r WHERE r.organization_id = $1`, orgID)
+		if err != nil {
+			return err
+		}
+		g.edges = edges
+		return g.checkOrganization(ctx, tx, orgID)
+	}
+	seenEdge := map[edgeKey]struct{}{}
+	reached := 1
+	frontier := []int32{0}
+	hops := maxDepth
+	for hop := 0; hop < hops && len(frontier) > 0; hop++ {
+		if len(frontier) > r.bulkFrontier {
+			return readAll()
+		}
+		ids := make([]uuid, len(frontier))
+		for i, n := range frontier {
+			ids[i] = g.ids[n]
+		}
+		// The edge reads carry no join with ci: the edge rows pass the RLS
+		// of ci_relationship and of the security_invoker view
+		// ci_structure_edge, which leave edges to CIs outside the scope or
+		// deleted ones (and the parent of a containment) unchecked. The
+		// CIs read afterwards under the same scope close that gap (IMP-07).
+		level, err := g.readEdges(ctx, tx, `SELECT `+walkSelectColumns+` FROM `+graphEdges+` r
+			WHERE r.organization_id = $1 AND (r.source_ci_id = ANY($2::uuid[]) OR r.target_ci_id = ANY($2::uuid[]))`, orgID, ids)
+		if err != nil {
+			return err
+		}
+		// The CIs this level reaches first; the root is checked with them.
+		var unchecked []int32
+		fresh := level[:0]
+		for i := range level {
+			if _, seen := seenEdge[level[i].id]; seen {
+				continue
+			}
+			seenEdge[level[i].id] = struct{}{}
+			fresh = append(fresh, level[i])
+			for _, n := range [2]int32{level[i].source, level[i].target} {
+				if g.state[n] == ciUnchecked && n != 0 {
+					g.state[n] = ciHidden
+					unchecked = append(unchecked, n)
+				}
+			}
+		}
+		if len(unchecked) > r.bulkFrontier && hop+1 < hops {
+			return readAll()
+		}
+		check := unchecked
+		if g.state[0] == ciUnchecked {
+			check = append([]int32{0}, unchecked...)
+		}
+		if err := g.checkCIs(ctx, tx, orgID, check); err != nil {
+			return err
+		}
+		if g.state[0] != ciVisible {
+			return nil
+		}
+		for i := range fresh {
+			if g.state[fresh[i].source] == ciVisible && g.state[fresh[i].target] == ciVisible {
+				g.edges = append(g.edges, fresh[i])
+			}
+		}
+		next := unchecked[:0]
+		for _, n := range unchecked {
+			if g.state[n] == ciVisible {
+				next = append(next, n)
+			}
+		}
+		reached += len(next)
+		// Beyond the node limit the walk ends after collecting the edges
+		// of the nodes just reached: nodes further away are dropped by the
+		// limit anyway.
+		if reached > maxNodes && len(next) > 0 {
+			hops = min(hops, hop+2)
+		}
+		frontier = next
+	}
+	return nil
+}
+
+// walkSelectColumns are the columns a walk reads of an edge: the ids in
+// their binary form (readEdges).
+const walkSelectColumns = `r.id, r.source_ci_id, r.target_ci_id, r.rel_type, r.source`
+
+// uuid is an id in its binary form.
+type uuid = [16]byte
+
+// ciState is what a walk knows of a CI's visibility.
+type ciState uint8
+
+const (
+	// ciUnchecked: not checked yet.
+	ciUnchecked ciState = iota
+	// ciHidden: not visible under the scope, deleted, or being checked.
+	ciHidden
+	// ciVisible: visible and not deleted.
+	ciVisible
+)
+
+// walkGraph is what a walk reads: every CI it met as a number (the root is
+// 0) with its id and visibility, and the edges with the numbers of their
+// ends. The types and origins of the edges are interned (text).
+type walkGraph struct {
+	number map[uuid]int32
+	ids    []uuid
+	state  []ciState
+	edges  []walkRow
+	text   []string
+	index  map[string]int32
+}
+
+// walkRow is an edge a walk read.
+type walkRow struct {
+	id             edgeKey
+	source, target int32
+	relType        int32
+	origin         int32
+}
+
+// edgeKey is an edge id as its two big-endian halves: compared like the
+// text form, and cheaper to sort than the bytes.
+type edgeKey [2]uint64
+
+func keyOf(id *uuid) edgeKey {
+	return edgeKey{binary.BigEndian.Uint64(id[:8]), binary.BigEndian.Uint64(id[8:])}
+}
+
+func (k edgeKey) uuid() uuid {
+	var id uuid
+	binary.BigEndian.PutUint64(id[:8], k[0])
+	binary.BigEndian.PutUint64(id[8:], k[1])
+	return id
+}
+
+func compareKeys(a, b edgeKey) int {
+	if a[0] != b[0] {
+		return cmp.Compare(a[0], b[0])
+	}
+	return cmp.Compare(a[1], b[1])
+}
+
+func newWalkGraph(root uuid) *walkGraph {
+	g := &walkGraph{number: map[uuid]int32{}, index: map[string]int32{}}
+	g.ci(root)
+	return g
+}
+
+// ci returns the number of the CI id, a new one for a CI not met before.
+func (g *walkGraph) ci(id uuid) int32 {
+	if n, ok := g.number[id]; ok {
+		return n
+	}
+	n := int32(len(g.ids))
+	g.number[id] = n
+	g.ids = append(g.ids, id)
+	g.state = append(g.state, ciUnchecked)
+	return n
+}
+
+// intern returns the number of a type or origin; the lookup of raw does
+// not copy it.
+func (g *walkGraph) intern(raw []byte) int32 {
+	if n, ok := g.index[string(raw)]; ok {
+		return n
+	}
+	s := string(raw)
+	n := int32(len(g.text))
+	g.index[s] = n
+	g.text = append(g.text, s)
+	return n
+}
+
+// readEdges reads the edges of query (walkSelectColumns) from the raw rows
+// and gives the CIs at their ends numbers.
+func (g *walkGraph) readEdges(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]walkRow, error) {
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("traverse relationships: %w", err)
+	}
+	defer rows.Close()
+	var edges []walkRow
+	var formats []pgconn.FieldDescription
+	for rows.Next() {
+		if formats == nil {
+			formats = rows.FieldDescriptions()
+		}
+		raw := rows.RawValues()
+		if len(raw) != 5 || raw[3] == nil || raw[4] == nil {
+			return nil, errors.New("scan traversed relationship: unexpected row")
+		}
+		var ids [3]uuid
+		for i := range ids {
+			if ids[i], err = uuidValue(raw[i], formats[i].Format); err != nil {
+				return nil, fmt.Errorf("scan traversed relationship: %w", err)
+			}
+		}
+		e := walkRow{id: keyOf(&ids[0]), source: g.ci(ids[1]), target: g.ci(ids[2])}
+		e.relType, e.origin = g.intern(raw[3]), g.intern(raw[4])
+		edges = append(edges, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan traversed relationship: %w", err)
+	}
+	return edges, nil
+}
+
+// checkCIs marks those of the CIs nums that are visible, not deleted CIs
+// under the transaction's scope; the others are hidden.
+func (g *walkGraph) checkCIs(ctx context.Context, tx pgx.Tx, orgID string, nums []int32) error {
+	if len(nums) == 0 {
+		return nil
+	}
+	ids := make([]uuid, len(nums))
+	for i, n := range nums {
+		ids[i] = g.ids[n]
+		g.state[n] = ciHidden
+	}
+	return g.markVisible(ctx, tx, `SELECT id FROM ci WHERE organization_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`, orgID, ids)
+}
+
+// checkOrganization reads the visible, not deleted CIs of the organization
+// and marks the CIs of g by them.
+func (g *walkGraph) checkOrganization(ctx context.Context, tx pgx.Tx, orgID string) error {
+	for n := range g.state {
+		g.state[n] = ciHidden
+	}
+	return g.markVisible(ctx, tx, `SELECT id FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, orgID)
+}
+
+// markVisible marks the CIs of g among the ids query returns visible.
+func (g *walkGraph) markVisible(ctx context.Context, tx pgx.Tx, query string, args ...any) error {
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("read visible cis: %w", err)
+	}
+	defer rows.Close()
+	var format int16
+	first := true
+	for rows.Next() {
+		if first {
+			format, first = rows.FieldDescriptions()[0].Format, false
+		}
+		raw := rows.RawValues()
+		if len(raw) != 1 {
+			return errors.New("read visible cis: unexpected row")
+		}
+		id, err := uuidValue(raw[0], format)
+		if err != nil {
+			return fmt.Errorf("read visible cis: %w", err)
+		}
+		if n, ok := g.number[id]; ok {
+			g.state[n] = ciVisible
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read visible cis: %w", err)
+	}
+	return nil
+}
+
+// uuidValue reads a uuid column of a raw row: 16 bytes in the binary
+// format, the text form in the text format.
+func uuidValue(raw []byte, format int16) (uuid, error) {
+	var id uuid
+	switch {
+	case raw == nil:
+		return id, errors.New("null id")
+	case format == pgx.BinaryFormatCode && len(raw) == len(id):
+		copy(id[:], raw)
+		return id, nil
+	case format == pgx.TextFormatCode:
+		var text pgtype.UUID
+		if err := text.Scan(string(raw)); err != nil {
+			return id, err
+		}
+		return text.Bytes, nil
+	}
+	return id, fmt.Errorf("id of %d bytes in format %d", len(raw), format)
+}
+
+// compareUUID orders ids like their text form.
+func compareUUID(a, b *uuid) int {
+	return compareKeys(keyOf(a), keyOf(b))
+}
+
+// formatUUID returns the text form of id as PostgreSQL writes it.
+func formatUUID(id *uuid) string {
+	var b [36]byte
+	hex.Encode(b[0:8], id[0:4])
+	b[8] = '-'
+	hex.Encode(b[9:13], id[4:6])
+	b[13] = '-'
+	hex.Encode(b[14:18], id[6:8])
+	b[18] = '-'
+	hex.Encode(b[19:23], id[8:10])
+	b[23] = '-'
+	hex.Encode(b[24:], id[10:])
+	return string(b[:])
+}
+
+// selectWalk is SelectTraversal on the CI numbers of g: every node gets
+// its hop distance from the root (at most maxDepth); the maxNodes nodes
+// with the smallest distance (ties by id) are kept, and the walk holds each
+// edge between visible kept nodes that leaves a node closer than maxDepth,
+// ordered by id. The CIs are numbered anew in the order the walk reaches
+// them, over the edges in the order of their ids, so the numbering does not
+// depend on the order the rows were read in.
+func (g *walkGraph) selectWalk(maxDepth, maxNodes int) *Walk {
+	walk := &Walk{CIs: []string{formatUUID(&g.ids[0])}, Edges: []WalkEdge{}}
+	if g.state[0] != ciVisible {
+		return walk
+	}
+	edges := g.edges[:0]
+	for i := range g.edges {
+		if g.state[g.edges[i].source] == ciVisible && g.state[g.edges[i].target] == ciVisible {
+			edges = append(edges, g.edges[i])
+		}
+	}
+	slices.SortFunc(edges, func(a, b walkRow) int { return compareKeys(a.id, b.id) })
+
+	// Adjacency index: the edges of each node in the order of their ids,
+	// each node expands its own edges only (NFR-02).
+	n := len(g.ids)
+	first := make([]int32, n+1)
+	for i := range edges {
+		first[edges[i].source+1]++
+		if edges[i].target != edges[i].source {
+			first[edges[i].target+1]++
+		}
+	}
+	for v := 0; v < n; v++ {
+		first[v+1] += first[v]
+	}
+	incident := make([]int32, first[n])
+	next := slices.Clone(first[:n])
+	for i := range edges {
+		incident[next[edges[i].source]] = int32(i)
+		next[edges[i].source]++
+		if edges[i].target != edges[i].source {
+			incident[next[edges[i].target]] = int32(i)
+			next[edges[i].target]++
+		}
+	}
+
+	depth := make([]int32, n)
+	for v := range depth {
+		depth[v] = -1
+	}
+	depth[0] = 0
+	order := []int32{0}
+	for d, start := int32(1), 0; int(d) <= maxDepth && start < len(order); d++ {
+		end := len(order)
+		for _, v := range order[start:end] {
+			for _, i := range incident[first[v]:first[v+1]] {
+				neighbor := edges[i].target
+				if neighbor == v {
+					neighbor = edges[i].source
+				}
+				if depth[neighbor] < 0 {
+					depth[neighbor] = d
+					order = append(order, neighbor)
+				}
+			}
+		}
+		start = end
+	}
+
+	// Beyond the node limit only the nodes closest to the root are kept.
+	kept := order
+	if len(order) > maxNodes {
+		kept = slices.Clone(order)
+		slices.SortFunc(kept, func(a, b int32) int {
+			if depth[a] != depth[b] {
+				return cmp.Compare(depth[a], depth[b])
+			}
+			return compareUUID(&g.ids[a], &g.ids[b])
+		})
+		limited := make([]bool, n)
+		for _, v := range kept[:maxNodes] {
+			limited[v] = true
+		}
+		kept = order[:0:0]
+		for _, v := range order {
+			if limited[v] {
+				kept = append(kept, v)
+			}
+		}
+	}
+	number := make([]int32, n)
+	for v := range number {
+		number[v] = -1
+	}
+	walk.CIs = make([]string, len(kept))
+	walk.Edges = make([]WalkEdge, 0, len(edges))
+	for k, v := range kept {
+		number[v] = int32(k)
+		walk.CIs[k] = formatUUID(&g.ids[v])
+	}
+	for i := range edges {
+		e := &edges[i]
+		source, target := number[e.source], number[e.target]
+		if source < 0 || target < 0 || min(depth[e.source], depth[e.target]) >= int32(maxDepth) {
+			continue
+		}
+		id := e.id.uuid()
+		walk.Edges = append(walk.Edges, WalkEdge{ID: formatUUID(&id), SourceCI: source, TargetCI: target,
+			RelType: g.text[e.relType], Source: g.text[e.origin]})
+	}
+	return walk
 }
 
 const traversalSelectColumns = `
@@ -539,30 +918,16 @@ const traversalSelectColumns = `
 	r.source
 `
 
-// edgeRow is what a traversal reads of an edge. The organization read holds
-// every edge of the organization, so it keeps only these columns and turns
-// just the selected edges into a Relationship.
+// edgeRow is what EdgesAmong reads of an edge, the ids as text (a walk
+// reads them binary, walkSelectColumns).
 type edgeRow struct{ id, sourceCIID, targetCIID, relType, source string }
 
 func edgeRowEnds(e *edgeRow) (source, target string) { return e.sourceCIID, e.targetCIID }
 
-// frontierEdges reads the edges of the frontier CIs. The edge reads of a
-// traversal carry no join with ci: the edge rows pass the RLS of
-// ci_relationship and of the security_invoker view ci_structure_edge, which
-// leave edges to CIs outside the scope or deleted ones (and the parent of a
-// containment) unchecked. The CIs read afterwards under the same scope
-// close that gap (IMP-07): an edge with an endpoint outside them is
-// dropped, also when that CI was deleted or moved out of the scope after
-// the edges were read.
-func frontierEdges(ctx context.Context, tx pgx.Tx, orgID string, frontier []string) ([]edgeRow, error) {
-	return readEdges(ctx, tx, `SELECT `+traversalSelectColumns+` FROM `+graphEdges+` r
-		WHERE r.organization_id = $1 AND (r.source_ci_id = ANY($2::uuid[]) OR r.target_ci_id = ANY($2::uuid[]))`, orgID, frontier)
-}
-
 // EdgesAmong implements EdgeReader under the caller's full tenant scope
-// (NFR-02, WP-602), like a level of TraverseFrom: one statement reads the
+// (NFR-02, WP-602), like a level of WalkFrom: one statement reads the
 // edges of graphEdges, the stored relationships and the projected
-// containment as List and TraverseFrom read them, between two of ids; a
+// containment as List and WalkFrom read them, between two of ids; a
 // second one the CIs among ids that are visible and not deleted under the
 // same scope (visibleCIs). An edge is kept when both of its CIs are, as
 // visibleEndpoints keeps it for List. Neither statement joins edges with
@@ -594,29 +959,6 @@ func (r *PGRepository) EdgesAmong(ctx context.Context, orgID string, ids []strin
 		return nil, err
 	}
 	return result, nil
-}
-
-// organizationEdges reads every traversable edge of the organization in one
-// statement, then the visible, not deleted CIs, and keeps the edges between
-// two of them.
-func organizationEdges(ctx context.Context, tx pgx.Tx, orgID string) ([]edgeRow, error) {
-	edges, err := readEdges(ctx, tx, `SELECT `+traversalSelectColumns+` FROM `+graphEdges+` r WHERE r.organization_id = $1`, orgID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := tx.Query(ctx, `SELECT id::text FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, orgID)
-	if err != nil {
-		return nil, fmt.Errorf("read visible cis: %w", err)
-	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return nil, fmt.Errorf("read visible cis: %w", err)
-	}
-	visible := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		visible[id] = true
-	}
-	return visibleEdges(edges, edgeRowEnds, visible), nil
 }
 
 func readEdges(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]edgeRow, error) {
@@ -653,18 +995,6 @@ func visibleCIs(ctx context.Context, tx pgx.Tx, orgID string, ids []string, visi
 		visible[id] = true
 	}
 	return nil
-}
-
-// selectEdgeRows is SelectTraversal over edge rows.
-func selectEdgeRows(rootCIID string, edges []edgeRow, maxDepth, maxNodes int) []Relationship {
-	kept := selectEdges(rootCIID, edges, edgeRowEnds, maxDepth, maxNodes)
-	slices.SortFunc(kept, func(a, b int) int { return strings.Compare(edges[a].id, edges[b].id) })
-	result := make([]Relationship, 0, len(kept))
-	for _, i := range kept {
-		e := &edges[i]
-		result = append(result, Relationship{ID: e.id, SourceCIID: e.sourceCIID, TargetCIID: e.targetCIID, RelType: e.relType, Source: e.source})
-	}
-	return result
 }
 
 type relationshipScanner interface {

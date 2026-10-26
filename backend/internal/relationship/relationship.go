@@ -208,6 +208,34 @@ type Traverser interface {
 	TraverseFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error)
 }
 
+// Walker walks like Traverser and returns the walk with its CIs as numbers
+// (NFR-02, WP-611): topology and impact work on the numbers instead of
+// the id strings. The PostgreSQL repository implements it; the memory
+// repository does not.
+type Walker interface {
+	WalkFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) (*Walk, error)
+}
+
+// Walk is the result of a walk: the edges TraverseFrom returns with the
+// numbers of their CIs.
+type Walk struct {
+	// CIs holds the id of each CI the walk keeps by number: the root
+	// first, then the CIs in the order the walk reaches them. A walk from a
+	// root the caller does not see holds the root and no edge.
+	CIs []string
+	// Edges are the kept edges, ordered by id.
+	Edges []WalkEdge
+}
+
+// WalkEdge is an edge of a Walk; SourceCI and TargetCI are numbers of
+// Walk.CIs, Source is the origin of the edge (Relationship.Source).
+type WalkEdge struct {
+	ID                 string
+	SourceCI, TargetCI int32
+	RelType            string
+	Source             string
+}
+
 // EdgeReader reads the edges among a set of CIs at once, with a number of
 // statements that does not grow with the set, so the topology without a
 // root reads its edges without one query per node (NFR-02, ABN-02). The

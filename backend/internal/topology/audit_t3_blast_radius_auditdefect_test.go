@@ -8,7 +8,7 @@ package topology_test
 // WP-176 (IMP-03: connected_to is a heuristic, second-class impact path) P2
 // "Blast radius lists connected_to-only (heuristic) CIs as affected without a
 // heuristic marker": GetBlastRadius (impact.go) copies the impacted graph
-// nodes into AffectedCIs ([]Node) and drops impactHit.heuristic; BlastRadius
+// nodes into AffectedCIs ([]Node) and drops ciHit.heuristic; BlastRadius
 // has no heuristic field. GET /api/v1/impact/{id} marks the same CIs as
 // heuristic (control). The CI detail impact section uses blast-radius.
 // Requirement: a CI reached only over connected_to is marked heuristic in

@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -53,7 +53,8 @@ func (h *Handler) GetDependencies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	if _, err := h.ciRepo.GetByID(r.Context(), t.OrganizationID, id); err != nil {
+	root, err := h.ciRepo.GetByID(r.Context(), t.OrganizationID, id)
+	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
 		return
 	}
@@ -65,11 +66,12 @@ func (h *Handler) GetDependencies(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("depth") == "" {
 		depth = maxDepth
 	}
-	graph, err := h.buildFromRoot(r.Context(), t.OrganizationID, id, depth, "")
+	g, err := h.graphFrom(r.Context(), t.OrganizationID, root, depth)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
+	graph := g.topology("")
 	var reachable map[string]struct{}
 	switch direction {
 	case "upstream":
@@ -99,25 +101,27 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	if _, err := h.ciRepo.GetByID(r.Context(), t.OrganizationID, id); err != nil {
+	root, err := h.ciRepo.GetByID(r.Context(), t.OrganizationID, id)
+	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
 		return
 	}
-	graph, err := h.buildFromRoot(r.Context(), t.OrganizationID, id, maxDepth, "")
+	g, err := h.graphFrom(r.Context(), t.OrganizationID, root, maxDepth)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
 	rules := h.impactRules(r.Context(), t.OrganizationID)
-	impacted := computeImpact([]string{id}, graph.Edges, impactQuery{depth: maxDepth}, rules)
+	impacted := impactOf(g, []int32{0}, impactQuery{depth: maxDepth}, rules)
 	result := BlastRadius{CIID: id}
 	services := map[string]struct{}{}
 	clients := map[string]struct{}{}
 	sites := map[string]struct{}{}
-	for _, node := range graph.Nodes {
-		if _, ok := impacted[node.ID]; !ok {
+	for n := range g.ids {
+		if !g.known[n] || !impacted[n].impacted {
 			continue
 		}
+		node := g.nodes[n]
 		result.AffectedCIs = append(result.AffectedCIs, node)
 		if node.ClientID != "" {
 			clients[node.ClientID] = struct{}{}
@@ -141,7 +145,7 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 			result.AffectedServices = append(result.AffectedServices, node)
 		}
 	}
-	result.SinglePointsOfFailure, result.ProtectedByRedundancy = redundancyFindings(id, graph, impacted, rules)
+	result.SinglePointsOfFailure, result.ProtectedByRedundancy = redundancyOf(g, 0, impacted, rules)
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
@@ -180,7 +184,7 @@ func walkDirected(rootID string, edges []Edge, upstream bool) map[string]struct{
 // the path, so following Via from CI to CI rebuilds the path without
 // transferring it (NFR-02); Relay is set on a certain CI that the shortest
 // path over all edges reaches over another step: a heuristic CI's path
-// continues over the Relay of the certain CIs on it (impactPath).
+// continues over the Relay of the certain CIs on it (ciGraph.path).
 type ImpactNode struct {
 	Node
 	Heuristic bool       `json:"heuristic"`
@@ -249,27 +253,70 @@ func ruleOf(rules map[string]impactRule, relType string) impactRule {
 	return impactRule{direction: relationshiptype.ImpactSourceDependsOnTarget, category: "logical"}
 }
 
-// impactStep returns the CI a failure of from reaches over edge, if any.
-// heuristic is true for an undirected edge.
-func impactStep(edge *Edge, from string, rule impactRule) (to string, heuristic, ok bool) {
-	switch rule.direction {
-	case relationshiptype.ImpactSourceDependsOnTarget:
-		if edge.TargetCIID == from {
-			return edge.SourceCIID, false, true
+// stepRule is the impact rule of a relationship type of a graph with the
+// facet of an analysis: whether its steps are followed.
+type stepRule struct {
+	impactRule
+	way    stepWay
+	follow bool
+}
+
+// stepWay is the impact direction of a type as a number.
+type stepWay uint8
+
+const (
+	stepNone stepWay = iota
+	// stepToSource: the source depends on the target.
+	stepToSource
+	// stepToTarget: the target depends on the source.
+	stepToTarget
+	// stepBoth: undirected, a heuristic step either way (IMP-03).
+	stepBoth
+)
+
+// stepRules resolves the rule of each relationship type of g once for an
+// analysis narrowed by q.
+func (g *ciGraph) stepRules(rules map[string]impactRule, q impactQuery) []stepRule {
+	steps := make([]stepRule, len(g.relTypes))
+	for t, relType := range g.relTypes {
+		rule := ruleOf(rules, relType)
+		way := stepNone
+		switch rule.direction {
+		case relationshiptype.ImpactSourceDependsOnTarget:
+			way = stepToSource
+		case relationshiptype.ImpactTargetDependsOnSource:
+			way = stepToTarget
+		case relationshiptype.ImpactUndirected:
+			way = stepBoth
 		}
-	case relationshiptype.ImpactTargetDependsOnSource:
-		if edge.SourceCIID == from {
-			return edge.TargetCIID, false, true
-		}
-	case relationshiptype.ImpactUndirected:
-		switch from {
-		case edge.SourceCIID:
-			return edge.TargetCIID, true, true
-		case edge.TargetCIID:
-			return edge.SourceCIID, true, true
-		}
+		follow := (q.relType == "" || relType == q.relType) && (len(q.categories) == 0 || q.categories[rule.category])
+		steps[t] = stepRule{impactRule: rule, way: way, follow: follow}
 	}
-	return "", false, false
+	return steps
+}
+
+// step returns the CI a failure of from reaches over e, if any. heuristic
+// is true for an undirected edge.
+func (e *ciEdge) step(from int32, rule *stepRule) (to int32, heuristic, ok bool) {
+	switch rule.way {
+	case stepToSource:
+		if e.target == from {
+			return e.source, false, true
+		}
+	case stepToTarget:
+		if e.source == from {
+			return e.target, false, true
+		}
+	case stepBoth:
+		switch from {
+		case e.source:
+			return e.target, true, true
+		case e.target:
+			return e.source, true, true
+		}
+	case stepNone:
+	}
+	return -1, false, false
 }
 
 // PathStep is one hop of an impact path: the failure passes from FromCIID
@@ -282,26 +329,30 @@ type PathStep struct {
 	Heuristic bool   `json:"heuristic,omitempty"`
 }
 
-// impactLink is the last step of the path to an impacted CI.
-type impactLink struct {
-	from      string
-	relType   string
+// ciLink is the last step of the path to an impacted CI: the CI it comes
+// from and the type it passes, both as numbers of the graph.
+type ciLink struct {
+	from      int32
+	relType   int32
 	category  string
 	heuristic bool
 }
 
-func (l impactLink) via() Via { return Via{CIID: l.from, RelType: l.relType} }
+// via is the step as the answer names it.
+func (g *ciGraph) via(l *ciLink) Via { return Via{CIID: g.ids[l.from], RelType: g.relTypes[l.relType]} }
 
-// impactHit is how the failure reaches one CI: the length of the shortest
-// path and its last step (via), and whether only an undirected network edge
-// reaches the CI. A certain CI carries the step of its shortest directed
-// path in via; relay holds the step of its shortest path over all edges
-// when that differs, the step the paths of heuristic CIs behind it take.
-type impactHit struct {
+// ciHit is how the failure reaches one CI: impacted is set for a CI it
+// reaches, with the length of the shortest path and its last step (via),
+// and whether only an undirected network edge reaches the CI. A certain CI
+// carries the step of its shortest directed path in via; relay holds the
+// step of its shortest path over all edges when that differs, the step the
+// paths of heuristic CIs behind it take.
+type ciHit struct {
+	impacted  bool
 	heuristic bool
 	hops      int
-	via       impactLink
-	relay     *impactLink
+	via       ciLink
+	relay     *ciLink
 }
 
 // impactQuery narrows an impact analysis: one relationship type, a set of
@@ -312,98 +363,94 @@ type impactQuery struct {
 	depth      int
 }
 
-// computeImpact returns the CIs a failure of the failed CIs reaches along
-// the impact directions (IMP-01) with the shortest path to each (IMP-02); a
-// CI reached only over an undirected network edge is heuristic (IMP-03) and
-// then carries its shortest path over all edges. The redundancy postfilter
-// (IMP-04) keeps a CI that still has a working provider of a redundant
-// type. One downward closure serves both walks: breadth-first over the
-// directed steps among the certain CIs, and over all steps among every CI
-// that goes down; edges in a fixed order, so the paths are deterministic.
-// Each walk keeps the last step per CI only: impactPath rebuilds the paths.
-func computeImpact(failedIDs []string, edges []Edge, q impactQuery, rules map[string]impactRule) map[string]impactHit {
-	failed := map[string]bool{}
-	for _, id := range failedIDs {
-		failed[id] = true
-	}
-	follow := func(e *Edge, rule impactRule) bool {
-		if q.relType != "" && e.RelType != q.relType {
-			return false
-		}
-		return len(q.categories) == 0 || q.categories[rule.category]
-	}
-	incident := incidence(edges)
-	level := closeDown(failed, edges, incident, rules, follow)
-	walk := func(withHeuristic bool) map[string]impactHit {
-		hits := make(map[string]impactHit, len(level))
-		queue := make([]string, 0, len(failedIDs))
-		for _, id := range failedIDs {
-			if _, ok := hits[id]; !ok {
-				hits[id] = impactHit{}
-				queue = append(queue, id)
+// impactOf returns, by CI number, how a failure of the failed CIs
+// reaches each CI of g along the impact directions (IMP-01), with the
+// shortest path to each (IMP-02); a CI reached only over an undirected
+// network edge is heuristic (IMP-03) and then carries its shortest path
+// over all edges. The redundancy postfilter (IMP-04) keeps a CI that still
+// has a working provider of a redundant type. One downward closure serves
+// both walks: breadth-first over the directed steps among the certain CIs,
+// and over all steps among every CI that goes down; edges in a fixed order,
+// so the paths are deterministic. Each walk keeps the last step per CI
+// only: path rebuilds the paths. The analysis works on CI numbers (WP-611).
+func impactOf(g *ciGraph, failed []int32, q impactQuery, rules map[string]impactRule) []ciHit {
+	steps := g.stepRules(rules, q)
+	g.indexIncidence()
+	level := closeDown(g, failed, steps)
+	walk := func(withHeuristic bool) []ciHit {
+		hits := make([]ciHit, len(g.ids))
+		queue := make([]int32, 0, len(failed))
+		for _, n := range failed {
+			if !hits[n].impacted {
+				hits[n].impacted = true
+				queue = append(queue, n)
 			}
 		}
-		for len(queue) > 0 {
-			current := queue[0]
-			queue = queue[1:]
+		for head := 0; head < len(queue); head++ {
+			current := queue[head]
 			hops := hits[current].hops
 			if q.depth > 0 && hops >= q.depth {
 				continue
 			}
-			for _, i := range incident[current] {
-				rule := ruleOf(rules, edges[i].RelType)
-				if !follow(&edges[i], rule) {
+			for _, i := range g.incidentTo(current) {
+				e := &g.edges[i]
+				rule := &steps[e.relType]
+				if !rule.follow {
 					continue
 				}
-				to, heuristic, ok := impactStep(&edges[i], current, rule)
+				to, heuristic, ok := e.step(current, rule)
 				if !ok || level[to] == levelUp || (!withHeuristic && (heuristic || level[to] != levelCertain)) {
 					continue
 				}
-				if _, seen := hits[to]; seen {
+				if hits[to].impacted {
 					continue
 				}
-				hits[to] = impactHit{hops: hops + 1, via: impactLink{from: current, relType: edges[i].RelType,
+				hits[to] = ciHit{impacted: true, hops: hops + 1, via: ciLink{from: current, relType: e.relType,
 					category: rule.category, heuristic: heuristic}}
 				queue = append(queue, to)
 			}
 		}
-		for id := range failed {
-			delete(hits, id)
+		for _, n := range failed {
+			hits[n] = ciHit{}
 		}
 		return hits
 	}
 	certain := walk(false)
 	impacted := walk(true)
-	for id, hit := range impacted {
-		sure, ok := certain[id]
-		if !ok {
+	for n := range impacted {
+		hit := &impacted[n]
+		if !hit.impacted {
+			continue
+		}
+		sure := certain[n]
+		if !sure.impacted {
 			hit.heuristic = true
-			impacted[id] = hit
 			continue
 		}
 		if hit.via.from != sure.via.from || hit.via.relType != sure.via.relType {
 			relay := hit.via
 			sure.relay = &relay
 		}
-		impacted[id] = sure
+		*hit = sure
 	}
 	return impacted
 }
 
-// impactPath rebuilds the shortest path to an impacted CI from the last
-// steps (IMP-02): back along via to a failed CI, on the path of a heuristic
-// CI over the relay of the certain CIs it passes.
-func impactPath(hits map[string]impactHit, id string) []PathStep {
-	hit := hits[id]
+// path rebuilds the shortest path to the impacted CI n from the last steps
+// (IMP-02): back along via to a failed CI, on the path of a heuristic CI
+// over the relay of the certain CIs it passes.
+func (g *ciGraph) path(hits []ciHit, n int32) []PathStep {
+	hit := &hits[n]
 	path := make([]PathStep, hit.hops)
-	to := id
+	to := n
 	for i := hit.hops - 1; i >= 0; i-- {
-		at := hits[to]
-		link := at.via
+		at := &hits[to]
+		link := &at.via
 		if hit.heuristic && at.relay != nil {
-			link = *at.relay
+			link = at.relay
 		}
-		path[i] = PathStep{FromCIID: link.from, ToCIID: to, RelType: link.relType, Category: link.category, Heuristic: link.heuristic}
+		path[i] = PathStep{FromCIID: g.ids[link.from], ToCIID: g.ids[to], RelType: g.relTypes[link.relType],
+			Category: link.category, Heuristic: link.heuristic}
 		to = link.from
 	}
 	return path
@@ -553,10 +600,37 @@ func selectImpactFields(n *ImpactNode, fields map[string]bool) impactEntry {
 	return e
 }
 
+// mergeGraphs joins the graphs of several failed CIs (IMP-05): each CI and
+// each edge once, the edges ordered by id. It returns the numbers of the
+// failed CIs, the roots of the graphs.
+func mergeGraphs(graphs []*ciGraph) (merged *ciGraph, roots []int32) {
+	nodes := map[string]Node{}
+	edges := map[string]Edge{}
+	for _, g := range graphs {
+		for n := range g.ids {
+			if g.known[n] {
+				nodes[g.ids[n]] = g.nodes[n]
+			}
+		}
+		for i := range g.edges {
+			e := &g.edges[i]
+			edges[e.id] = Edge{ID: e.id, SourceCIID: g.ids[e.source], TargetCIID: g.ids[e.target],
+				RelType: g.relTypes[e.relType], Source: e.origin}
+		}
+	}
+	merged, number := graphOf(graphs[0].ids[0], nodes, slices.Collect(maps.Values(edges)))
+	roots = make([]int32, len(graphs))
+	for i, g := range graphs {
+		roots[i] = number[g.ids[0]]
+	}
+	return merged, roots
+}
+
 // writeImpact analyses the failure of ids and writes the answer: the
 // failed CIs, the impacted CIs with their paths and a summary; single adds
 // the fields of the single-CI short form; sparse lets fields= narrow the
 // impacted CIs (API-02), and a path is only built when it is returned.
+// Each failed CI is read once, its graph walked once.
 func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID string, ids []string, single, sparse bool) {
 	ctx := r.Context()
 	q := r.URL.Query()
@@ -578,9 +652,7 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 	}
 	withPaths := fields == nil || fields["path"]
 	failed := make([]Node, 0, len(ids))
-	nodes := map[string]Node{}
-	var edgeList []Edge
-	edges := map[string]Edge{}
+	graphs := make([]*ciGraph, 0, len(ids))
 	for _, id := range ids {
 		root, gerr := h.ciRepo.GetByID(ctx, orgID, id)
 		if gerr != nil {
@@ -588,45 +660,54 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 			return
 		}
 		failed = append(failed, nodeFromItem(*root))
-		graph, berr := h.buildFromRoot(ctx, orgID, id, depth, "")
+		g, berr := h.graphFrom(ctx, orgID, root, depth)
 		if berr != nil {
 			api.WriteRepoError(w, berr)
 			return
 		}
-		for _, n := range graph.Nodes {
-			nodes[n.ID] = n
-		}
-		// The edges of one graph are distinct; several graphs share edges.
-		if len(ids) == 1 {
-			edgeList = graph.Edges
-			continue
-		}
-		for _, e := range graph.Edges {
-			edges[e.ID] = e
-		}
+		graphs = append(graphs, g)
 	}
-	for _, e := range edges {
-		edgeList = append(edgeList, e)
+	// The graph of one failed CI is analysed as it is; several graphs
+	// share CIs and edges.
+	g, roots := graphs[0], []int32{0}
+	if len(graphs) > 1 {
+		g, roots = mergeGraphs(graphs)
 	}
-	slices.SortFunc(edgeList, func(a, b Edge) int { return strings.Compare(a.ID, b.ID) })
 
 	relType := q.Get("rel_type")
-	impacted := computeImpact(ids, edgeList, impactQuery{relType: relType, categories: categories, depth: depth},
+	impacted := impactOf(g, roots, impactQuery{relType: relType, categories: categories, depth: depth},
 		h.impactRules(ctx, orgID))
-	impactedNodes := make([]ImpactNode, 0, len(impacted))
-	summary := ImpactSummary{Failed: len(failed), ByCategory: map[string]int{}}
-	for id, hit := range impacted {
-		node, ok := nodes[id]
-		if !ok {
-			continue
+	// Certain impacts first, then by name: a stable answer.
+	order := make([]int32, 0, len(impacted))
+	for n := range impacted {
+		if impacted[n].impacted && g.known[n] {
+			order = append(order, int32(n))
 		}
-		entry := ImpactNode{Node: node, Heuristic: hit.heuristic, Hops: hit.hops, Via: hit.via.via()}
+	}
+	slices.SortFunc(order, func(i, j int32) int {
+		a, b := &impacted[i], &impacted[j]
+		if a.heuristic != b.heuristic {
+			if !a.heuristic {
+				return -1
+			}
+			return 1
+		}
+		if c := strings.Compare(g.nodes[i].Name, g.nodes[j].Name); c != 0 {
+			return c
+		}
+		return strings.Compare(g.nodes[i].ID, g.nodes[j].ID)
+	})
+	impactedNodes := make([]ImpactNode, 0, len(order))
+	summary := ImpactSummary{Failed: len(failed), ByCategory: map[string]int{}}
+	for _, n := range order {
+		hit := &impacted[n]
+		entry := ImpactNode{Node: g.nodes[n], Heuristic: hit.heuristic, Hops: hit.hops, Via: g.via(&hit.via)}
 		if hit.relay != nil {
-			relay := hit.relay.via()
+			relay := g.via(hit.relay)
 			entry.Relay = &relay
 		}
 		if withPaths {
-			entry.Path = impactPath(impacted, id)
+			entry.Path = g.path(impacted, n)
 		}
 		impactedNodes = append(impactedNodes, entry)
 		if hit.heuristic {
@@ -637,17 +718,6 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 		summary.ByCategory[hit.via.category]++
 	}
 	summary.Impacted = len(impactedNodes)
-	// Certain impacts first, then by name: a stable answer.
-	sort.Slice(impactedNodes, func(i, j int) bool {
-		a, b := &impactedNodes[i], &impactedNodes[j]
-		if a.Heuristic != b.Heuristic {
-			return !a.Heuristic
-		}
-		if a.Name != b.Name {
-			return a.Name < b.Name
-		}
-		return a.ID < b.ID
-	})
 	body := map[string]any{
 		"failed_cis": failed,
 		"rel_type":   relType,

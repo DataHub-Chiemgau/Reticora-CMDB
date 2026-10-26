@@ -452,63 +452,88 @@ var nodeOverrideFields = []string{"name", "status", "management_ip"}
 // CIs, as the traversal that reached so many CIs reads all its edges.
 const nodeOrgReadAbove = 2000
 
-// nodeQuery reads the node projection with the overrides of the projected
-// fields ($2); %s narrows the CIs. The overrides are read per CI by the
-// index on ci_id (NFR-02, WP-438, F-117): the planner cannot estimate the
-// client and site predicates of ci_isolation and expects one visible CI
-// once the CIs carry a client and a site, so with the overrides of the
-// organization aggregated in a joined subquery it ran a nested loop that
-// aggregated all of them again for every CI (10,000 CIs with 500 overrides:
-// 5.5 s instead of 25 ms).
+// nodeQuery reads the node projection; %s narrows the CIs. The overrides
+// of the projected fields are a second statement (nodeOverrideQuery),
+// applied in Go (NFR-02, WP-611): the planner cannot estimate the client
+// and site predicates of ci_isolation and expects one visible CI once the
+// CIs carry a client and a site, so with the overrides of the organization
+// aggregated in a joined subquery it ran a nested loop that aggregated all
+// of them again for every CI (10,000 CIs with 500 overrides: 5.5 s instead
+// of 25 ms, WP-438, F-117), and the lateral read per CI that replaced it
+// still looked the overrides up once per CI.
 const nodeQuery = `SELECT c.id::text, c.name, c.ci_type_id::text, c.status, COALESCE(c.client_id::text, ''),
-		COALESCE(c.site_id::text, ''), COALESCE(host(c.management_ip), ''), o.overrides
+		COALESCE(c.site_id::text, ''), COALESCE(host(c.management_ip), '')
 	FROM ci c
-	CROSS JOIN LATERAL (SELECT jsonb_object_agg(f.field_name, f.override_value) AS overrides
-		FROM ci_field_value f
-		WHERE f.ci_id = c.id AND f.field_name = ANY($2::text[]) AND f.override_at IS NOT NULL) o
 	WHERE c.organization_id = $1 AND %s AND c.deleted_at IS NULL`
 
+// nodeOverrideQuery reads the overrides of the projected fields ($2); %s
+// narrows the CIs. The policy of ci_field_value shows the overrides of the
+// CIs the scope shows.
+const nodeOverrideQuery = `SELECT ci_id::text, field_name, override_value FROM ci_field_value
+	WHERE organization_id = $1 AND field_name = ANY($2::text[]) AND override_at IS NOT NULL AND %s`
+
 var (
-	nodesByID  = fmt.Sprintf(nodeQuery, "c.id = ANY($3::uuid[])")
-	nodesByOrg = fmt.Sprintf(nodeQuery, "true")
+	nodesByID          = fmt.Sprintf(nodeQuery, "c.id = ANY($2::uuid[])")
+	nodesByOrg         = fmt.Sprintf(nodeQuery, "true")
+	nodeOverridesByID  = fmt.Sprintf(nodeOverrideQuery, "ci_id = ANY($3::uuid[])")
+	nodeOverridesByOrg = fmt.Sprintf(nodeOverrideQuery, "true")
 )
 
 // ListNodes implements NodeReader: the projection of the visible, not
-// deleted CIs among ids with their overrides in one statement, without
+// deleted CIs among ids with their overrides, one statement each, without
 // attributes and asset facts.
 func (r *PGRepository) ListNodes(ctx context.Context, orgID string, ids []string) ([]Node, error) {
 	nodes := []Node{}
 	if len(ids) == 0 {
 		return nodes, nil
 	}
-	query, args := nodesByID, []any{orgID, nodeOverrideFields, ids}
+	nodeSQL, nodeArgs := nodesByID, []any{orgID, ids}
+	overrideSQL, overrideArgs := nodeOverridesByID, []any{orgID, nodeOverrideFields, ids}
 	var wanted map[string]bool
 	if len(ids) > nodeOrgReadAbove {
-		query, args = nodesByOrg, args[:2]
+		nodeSQL, nodeArgs = nodesByOrg, nodeArgs[:1]
+		overrideSQL, overrideArgs = nodeOverridesByOrg, overrideArgs[:2]
 		wanted = make(map[string]bool, len(ids))
 		for _, id := range ids {
 			wanted[id] = true
 		}
 	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, query, args...)
+		rows, err := tx.Query(ctx, nodeSQL, nodeArgs...)
 		if err != nil {
 			return fmt.Errorf("list ci nodes: %w", err)
 		}
-		defer rows.Close()
+		index := map[string]int{}
 		for rows.Next() {
 			var n Node
-			var overrides map[string]any
-			if err = rows.Scan(&n.ID, &n.Name, &n.CITypeID, &n.Status, &n.ClientID, &n.SiteID, &n.ManagementIP, &overrides); err != nil {
+			if err = rows.Scan(&n.ID, &n.Name, &n.CITypeID, &n.Status, &n.ClientID, &n.SiteID, &n.ManagementIP); err != nil {
+				rows.Close()
 				return fmt.Errorf("scan ci node: %w", err)
 			}
 			if wanted != nil && !wanted[n.ID] {
 				continue
 			}
-			for field, value := range overrides {
-				applyNodeOverride(&n, field, value)
-			}
+			index[n.ID] = len(nodes)
 			nodes = append(nodes, n)
+		}
+		rows.Close()
+		if err = rows.Err(); err != nil || len(nodes) == 0 {
+			return err
+		}
+		rows, err = tx.Query(ctx, overrideSQL, overrideArgs...)
+		if err != nil {
+			return fmt.Errorf("read node overrides: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, field string
+			var value any
+			if err = rows.Scan(&id, &field, &value); err != nil {
+				return fmt.Errorf("scan node override: %w", err)
+			}
+			if i, ok := index[id]; ok {
+				applyNodeOverride(&nodes[i], field, value)
+			}
 		}
 		return rows.Err()
 	})
