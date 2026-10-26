@@ -25,18 +25,25 @@ type outletTable struct {
 }
 
 var outletTables = []outletTable{
-	// APC Rack PDU 2 (rPDU2OutletSwitchedStatusName/State).
+	// APC Rack PDU 2 (rPDU2OutletSwitchedStatusName/State: off 1, on 2).
 	{vendor: "apc-rpdu2", pdu: true, nameOID: "1.3.6.1.4.1.318.1.1.26.9.2.3.1.3", stateOID: "1.3.6.1.4.1.318.1.1.26.9.2.3.1.5", on: 2},
-	// APC Rack PDU (sPDUOutletCtlName/OutletCtl).
-	{vendor: "apc-rpdu", pdu: true, nameOID: "1.3.6.1.4.1.318.1.1.4.5.2.1.3", stateOID: "1.3.6.1.4.1.318.1.1.4.4.2.1.3", on: 1},
-	// Raritan PX2/PX3 (outletName/outletSwitchingState, PDU 1).
+	// APC MasterSwitch / Rack PDU, PowerNet-MIB sPDU (sPDUOutletName of
+	// sPDUOutletConfigTable, sPDUOutletCtl of sPDUOutletControlTable:
+	// on 1, off 2).
+	{vendor: "apc-spdu", pdu: true, nameOID: "1.3.6.1.4.1.318.1.1.4.5.2.1.3", stateOID: "1.3.6.1.4.1.318.1.1.4.4.2.1.3", on: 1},
+	// Raritan PX2/PX3, PDU2-MIB (outletName/outletSwitchingState of PDU 1:
+	// on 7, off 8).
 	{vendor: "raritan", pdu: true, nameOID: "1.3.6.1.4.1.13742.6.3.5.3.1.3.1", stateOID: "1.3.6.1.4.1.13742.6.4.1.2.1.3.1", on: 7},
-	// APC UPS outlet groups (upsOutletGroupStatusName/GroupState).
-	{vendor: "apc-ups", nameOID: "1.3.6.1.4.1.318.1.1.1.12.1.2.1.3", stateOID: "1.3.6.1.4.1.318.1.1.1.12.1.2.1.4", on: 1},
+	// APC UPS outlet groups (upsOutletGroupStatusName, column 2, and
+	// upsOutletGroupStatusGroupState, column 3: on 1, off 2). Column 3 is
+	// the state, not the name (WP-498).
+	{vendor: "apc-ups", nameOID: "1.3.6.1.4.1.318.1.1.1.12.1.2.1.2", stateOID: "1.3.6.1.4.1.318.1.1.1.12.1.2.1.3", on: 1},
 }
 
 // walkOutlets reads the outlet names of the first vendor table the device
 // answers; outlets without a name are left out. pdu reports a PDU table.
+// A device that answers none of the tables has no outlets; that is no
+// error.
 func walkOutlets(g *gosnmp.GoSNMP) (outlets []plugins.DeviceOutlet, pdu bool) {
 	for _, table := range outletTables {
 		names := walkColumn(g, table.nameOID)
@@ -92,11 +99,12 @@ func walkColumn(g *gosnmp.GoSNMP, column string) map[int]string {
 	return out
 }
 
-// isDefaultOutletName reports factory names ("Outlet 1", "Outlet_12")
-// that name nothing.
+// isDefaultOutletName reports factory names ("Outlet 1", "Outlet_12",
+// the UPS outlet group "Outlet Group 3") that name nothing.
 func isDefaultOutletName(name string) bool {
 	n := strings.ToLower(strings.TrimSpace(name))
 	n = strings.TrimLeft(strings.TrimPrefix(n, "outlet"), " _-#")
+	n = strings.TrimLeft(strings.TrimPrefix(n, "group"), " _-#")
 	if _, err := strconv.Atoi(n); err == nil {
 		return true
 	}

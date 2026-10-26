@@ -10,6 +10,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 )
 
@@ -19,7 +20,8 @@ import (
 // power device. A CI fed by more than one power device has redundant feeds:
 // its powered_by edges carry redundant = true and their feed, and the
 // impact postfilter (IMP-04, powered_by is a redundant type) counts it as
-// affected only when all feeds failed.
+// affected only when all feeds failed. An outlet switched off feeds
+// nothing: its edge stays, it does not count for redundant (E-85 option A).
 
 // outletConfidence is the confidence of an outlet-mapped edge: the mapping
 // is typed in by people.
@@ -107,22 +109,18 @@ func PowerFeeds(items []IngestItem, resolvedCIID []string, resolve func(name str
 }
 
 // PowerEdges turns outlet feeds into powered_by edges; feeds of one CI
-// from different power devices are marked redundant. existing lists, per
-// fed CI, the power devices already feeding it (edges of earlier batches).
-func PowerEdges(feeds []OutletFeed, existing map[string]map[string]bool) []DerivedRelationship {
+// from different power devices are marked redundant. An outlet that is
+// switched off (outlet_state=off) gives its edge but feeds nothing (E-85
+// option A). The flag is what the batch shows; derivePowerChain then
+// recomputes it from every stored edge (WP-498).
+func PowerEdges(feeds []OutletFeed) []DerivedRelationship {
 	sources := map[string]map[string]bool{}
 	for _, f := range feeds {
 		if sources[f.FedCIID] == nil {
 			sources[f.FedCIID] = map[string]bool{}
 		}
-		sources[f.FedCIID][f.PowerCIID] = true
-	}
-	for fed, power := range existing {
-		if sources[fed] == nil {
-			continue
-		}
-		for id := range power {
-			sources[fed][id] = true
+		if f.State != "off" {
+			sources[f.FedCIID][f.PowerCIID] = true
 		}
 	}
 	seen := map[string]bool{}
@@ -134,14 +132,17 @@ func PowerEdges(feeds []OutletFeed, existing map[string]map[string]bool) []Deriv
 		}
 		seen[key] = true
 		attrs := map[string]any{"outlet": f.Outlet, "redundant": len(sources[f.FedCIID]) > 1}
+		// A re-confirmation refreshes what the outlet reports; a feed or
+		// state the outlet no longer reports is removed (nil).
+		refresh := map[string]any{"outlet": f.Outlet, "feed": nil, "outlet_state": nil}
 		if f.Feed != "" {
-			attrs["feed"] = f.Feed
+			attrs["feed"], refresh["feed"] = f.Feed, f.Feed
 		}
 		if f.State != "" {
-			attrs["outlet_state"] = f.State
+			attrs["outlet_state"], refresh["outlet_state"] = f.State, f.State
 		}
 		out = append(out, DerivedRelationship{SourceCIID: f.FedCIID, TargetCIID: f.PowerCIID, RelType: "powered_by",
-			Confidence: outletConfidence, Attributes: attrs})
+			Confidence: outletConfidence, Attributes: attrs, Refresh: refresh})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].SourceCIID+out[i].TargetCIID < out[j].SourceCIID+out[j].TargetCIID
@@ -150,7 +151,11 @@ func PowerEdges(feeds []OutletFeed, existing map[string]map[string]bool) []Deriv
 }
 
 // derivePowerChain writes the powered_by edges of the outlet mappings of a
-// batch and returns the number of new edges.
+// batch and returns the number of new edges. When the suppressions cannot
+// be loaded no edge is written (fail-closed, REL-03). Afterwards the
+// redundancy of every CI the batch feeds is recomputed from all its stored
+// discovery edges and set on each of them, so that it depends neither on
+// the batch nor on the lane a PDU arrives in (WP-498, F-112).
 func (h *Handler) derivePowerChain(ctx context.Context, orgID string, items []IngestItem, resolvedCIID []string) int {
 	if h.relRepo == nil {
 		return 0
@@ -177,30 +182,37 @@ func (h *Handler) derivePowerChain(ctx context.Context, orgID string, items []In
 		id, ok := byName[strings.ToLower(name)]
 		return id, ok
 	})
-	// Power devices that already feed these CIs (earlier batches).
-	existing := map[string]map[string]bool{}
-	for _, f := range feeds {
-		if existing[f.FedCIID] != nil {
-			continue
-		}
-		existing[f.FedCIID] = map[string]bool{}
-		rels, _, lerr := h.relRepo.List(ctx, orgID, f.FedCIID, api.PaginationParams{Limit: 1000})
-		if lerr != nil {
-			continue
-		}
-		for i := range rels {
-			if rels[i].RelType == "powered_by" && rels[i].SourceCIID == f.FedCIID {
-				existing[f.FedCIID][rels[i].TargetCIID] = true
-			}
-		}
-	}
-	created := 0
-	for _, d := range PowerEdges(feeds, existing) {
+	var edges []DerivedRelationship
+	var keys []EdgeKey
+	for _, d := range PowerEdges(feeds) {
 		if suppressed != nil && suppressed(d.SourceCIID, d.TargetCIID, d.RelType) {
+			continue
+		}
+		edges = append(edges, d)
+		keys = append(keys, d.key())
+	}
+	// Edges seen again are re-confirmed with what their outlet reports now.
+	known := h.discoveryEdges(ctx, orgID, keys)
+	var confirmations []relationship.Confirmation
+	var fed []string
+	created := 0
+	for _, d := range edges {
+		fed = append(fed, d.SourceCIID)
+		if e, ok := known[d.key()]; ok {
+			if relationship.MayChange(RelationshipSource, e.Source) {
+				confidence := d.Confidence
+				confirmations = append(confirmations, relationship.Confirmation{ID: e.ID, Confidence: &confidence, Attributes: d.Refresh})
+			}
 			continue
 		}
 		if h.upsertRelationship(ctx, orgID, d) {
 			created++
+		}
+	}
+	h.confirmEdges(ctx, orgID, confirmations)
+	if marker, ok := h.relRepo.(relationship.RedundancyMarker); ok && len(fed) > 0 {
+		if err := marker.MarkRedundant(ctx, orgID, "powered_by", fed); err != nil {
+			slog.Warn("power redundancy not recomputed", "event", "discovery.power.redundancy_failed", "organization_id", orgID, "error", err)
 		}
 	}
 	return created
