@@ -2,11 +2,16 @@
  * ReviewInboxPage — the review inbox of reconciliation (UI-16, REC-08):
  * filter by status, type and escalation; a diff of the observation against
  * the CI it concerns; resolution of one item (merge, new, dismiss, accept)
- * or of several items with one action.
+ * or of several items with one action. New of a device of an unknown type
+ * asks for the type of the CI; for a device recorded as generic_device the
+ * inbox shows the next step instead (F-176).
  */
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { useCI } from '../api/hooks';
+import { useCITypes } from '../api/cmdbHooks';
+import { localizedText } from '../api/cmdb';
 import type { CI } from '../api/client';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -16,14 +21,16 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
 import {
-  REVIEW_ACTIONS,
   REVIEW_KINDS,
+  needsCIType,
+  reviewActions,
   useBulkResolveReviews,
   useResolveReview,
   useReviewItems,
   type BulkResult,
   type ReviewAction,
   type ReviewItem,
+  type ReviewResolution,
 } from '../hooks/useReviews';
 
 const STATUSES = ['open', 'resolved', 'dismissed'] as const;
@@ -81,9 +88,12 @@ function summary(item: ReviewItem): string {
 /** commonActions are the actions every selected item allows. */
 export function commonActions(items: ReviewItem[]): ReviewAction[] {
   if (items.length === 0) return [];
-  // merge needs a CI per item: it is not offered in bulk.
+  // merge needs a CI per item and new of a device of an unknown type a
+  // type: neither is offered in bulk.
   return (['new', 'accept', 'dismiss'] as ReviewAction[]).filter((action) =>
-    items.every((item) => (REVIEW_ACTIONS[item.kind] ?? []).includes(action)),
+    items.every(
+      (item) => reviewActions(item).includes(action) && !(action === 'new' && needsCIType(item)),
+    ),
   );
 }
 
@@ -276,14 +286,49 @@ export function ReviewInboxPage() {
 }
 
 function ReviewDetail({ item }: { item: ReviewItem }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const candidates = item.candidate_ci_ids ?? [];
   const [candidate, setCandidate] = useState(candidates[0] ?? '');
   const subject = candidate || (typeof item.payload?.ci_id === 'string' ? item.payload.ci_id : '');
   const { data: ci } = useCI(subject);
   const resolve = useResolveReview();
   const rows = reviewDiff(item, subject ? ci : undefined);
-  const actions = REVIEW_ACTIONS[item.kind] ?? ['dismiss'];
+  const actions = reviewActions(item);
+  // New of a device of an unknown type names the type (ci_type_id): the
+  // active types of /ci-types; the type the device reported is preselected
+  // once it exists.
+  const askType = item.status === 'open' && needsCIType(item) && actions.includes('new');
+  const ciTypes = useCITypes({ limit: 200 }, { enabled: askType });
+  const reportedType =
+    typeof item.payload?.ci_type_name === 'string' ? item.payload.ci_type_name : '';
+  const typeOptions = useMemo(
+    () =>
+      (ciTypes.data?.data ?? [])
+        .map((ty) => ({
+          value: ty.id,
+          key: ty.key,
+          label: localizedText(ty.display_name, i18n.language) || ty.key,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label, i18n.language)),
+    [ciTypes.data, i18n.language],
+  );
+  const [chosenType, setChosenType] = useState('');
+  const ciTypeId = chosenType || typeOptions.find((ty) => ty.key === reportedType)?.value || '';
+  // The generic_device CI of a device no profile matched exists: its type is
+  // set on the CI, new is not offered.
+  const genericCI =
+    item.status === 'open' &&
+    item.kind === 'unclassified_device' &&
+    item.payload?.reason === 'no_profile_match' &&
+    typeof item.payload?.ci_id === 'string'
+      ? item.payload.ci_id
+      : '';
+
+  function resolution(action: ReviewAction): ReviewResolution {
+    if (action === 'merge') return { action, ci_id: candidate };
+    if (action === 'new' && askType) return { action, ci_type_id: ciTypeId };
+    return { action };
+  }
 
   return (
     <Card title={t(`reviews.kinds.${item.kind}`, item.kind)}>
@@ -325,6 +370,31 @@ function ReviewDetail({ item }: { item: ReviewItem }) {
           ))}
         </tbody>
       </table>
+      {genericCI ? (
+        <p className="mt-4 text-sm text-gray-700 dark:text-gray-300">
+          {t('reviews.noProfileMatch')}{' '}
+          <Link to={`/cmdb/${genericCI}`} className="text-blue-600 hover:underline">
+            {t('reviews.openCI')}
+          </Link>
+        </p>
+      ) : null}
+      {askType ? (
+        <div className="mt-4">
+          <Select
+            label={t('reviews.ciType')}
+            value={ciTypeId}
+            onChange={(event) => setChosenType(event.target.value)}
+            error={ciTypes.isError ? t('reviews.ciTypesLoadError') : undefined}
+            options={[
+              { value: '', label: t('reviews.chooseCIType') },
+              ...typeOptions.map(({ value, label }) => ({ value, label })),
+            ]}
+          />
+          <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+            {t('reviews.ciTypeHint', { name: reportedType || '—' })}
+          </p>
+        </div>
+      ) : null}
       {item.status === 'open' ? (
         <div className="mt-4 flex flex-wrap gap-2">
           {actions.map((action) => (
@@ -332,13 +402,12 @@ function ReviewDetail({ item }: { item: ReviewItem }) {
               key={action}
               size="sm"
               variant={action === 'dismiss' ? 'secondary' : 'primary'}
-              disabled={resolve.isPending || (action === 'merge' && !candidate)}
-              onClick={() =>
-                resolve.mutate({
-                  id: item.id,
-                  resolution: action === 'merge' ? { action, ci_id: candidate } : { action },
-                })
+              disabled={
+                resolve.isPending ||
+                (action === 'merge' && !candidate) ||
+                (action === 'new' && askType && !ciTypeId)
               }
+              onClick={() => resolve.mutate({ id: item.id, resolution: resolution(action) })}
             >
               {t(`reviews.actions.${action}`)}
             </Button>

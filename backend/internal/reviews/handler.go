@@ -99,7 +99,7 @@ func (h *Handler) Resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The resolver is always the principal of the request (F-091).
-	res := Resolution{Action: body.Action, CIID: body.CIID, Note: body.Note, ResolvedBy: t.UserID}
+	res := Resolution{Action: body.Action, CIID: body.CIID, CITypeID: body.CITypeID, Note: body.Note, ResolvedBy: t.UserID}
 	item, err := h.svc.Resolve(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), &res)
 	if err != nil {
 		writeError(w, err)
@@ -115,6 +115,8 @@ func writeError(w http.ResponseWriter, err error) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 	case errors.Is(err, ErrAlreadyResolved):
 		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+	case errors.As(err, &refused) && refused.Field != "":
+		api.WriteFieldError(w, &api.FieldError{Field: refused.Field, Message: refused.Message, Status: refused.Status})
 	case errors.As(err, &refused) && refused.Problem != "":
 		api.WriteProblem(w, refused.Status, refused.Problem, http.StatusText(refused.Status), refused.Message)
 	case errors.As(err, &refused):

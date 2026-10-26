@@ -33,6 +33,29 @@ export const REVIEW_ACTIONS: Record<string, ReviewAction[]> = {
   unknown_relationship: ['accept', 'dismiss'],
 };
 
+/**
+ * reviewActions are the actions the inbox offers for an item: those of its
+ * type, without new for an unclassified_device item whose generic_device CI
+ * exists (reason no_profile_match): new is refused (409) for it; the next
+ * step is to set the type on that CI (UI-16, F-176).
+ */
+export function reviewActions(item: Pick<ReviewItem, 'kind' | 'payload'>): ReviewAction[] {
+  const actions = REVIEW_ACTIONS[item.kind] ?? ['dismiss'];
+  if (item.kind === 'unclassified_device' && item.payload?.reason === 'no_profile_match') {
+    return actions.filter((action) => action !== 'new');
+  }
+  return actions;
+}
+
+/**
+ * needsCIType reports whether new must ask for the type of the CI: the type
+ * of an unclassified_device item with reason unknown_ci_type is unknown to
+ * the organization, the resolution names it (ci_type_id).
+ */
+export function needsCIType(item: Pick<ReviewItem, 'kind' | 'payload'>): boolean {
+  return item.kind === 'unclassified_device' && item.payload?.reason === 'unknown_ci_type';
+}
+
 export interface ReviewItem {
   id: string;
   kind: string;
@@ -56,6 +79,8 @@ export interface ReviewFilter {
 export interface ReviewResolution {
   action: ReviewAction;
   ci_id?: string;
+  /** ci_type_id is the type of the CI new creates (UUID of a CI type). */
+  ci_type_id?: string;
 }
 
 function query(filter: ReviewFilter) {

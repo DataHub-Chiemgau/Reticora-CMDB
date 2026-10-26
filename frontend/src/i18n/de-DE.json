@@ -1322,6 +1322,12 @@
     "observed": "Beobachtet",
     "current": "Im CI",
     "differs": "abweichend",
+    "ciType": "CI-Typ des neuen CIs",
+    "chooseCIType": "CI-Typ wählen",
+    "ciTypeHint": "Das Gerät meldete den Typ „{{name}}“, den die Organisation bei der Erfassung nicht kannte. Wählen Sie den Typ des neuen CIs.",
+    "ciTypesLoadError": "Die CI-Typen konnten nicht geladen werden.",
+    "noProfileMatch": "Das Gerät ist bereits als generisches Gerät (generic_device) erfasst. Setzen Sie den Typ am CI und verwerfen Sie dann dieses Item.",
+    "openCI": "CI öffnen",
     "loadError": "Die Review-Items konnten nicht geladen werden",
     "empty": "Keine Review-Items",
     "emptyHint": "Der Abgleich hat nichts zu entscheiden."

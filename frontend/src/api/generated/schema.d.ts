@@ -2718,7 +2718,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -7456,7 +7456,7 @@ export interface components {
       instance?: string;
       /** @description Request id of the failed request (equals the X-Request-ID response header). */
       trace_id: string;
-      /** @description Request field a 400 or 409 refers to (e.g. the unique `name` of a client). */
+      /** @description Request field a 400, 409 or 422 refers to (e.g. the unique `name` of a client). */
       field?: string;
     };
     PaginationEnvelope: {
@@ -10117,6 +10117,11 @@ export interface components {
       action: 'merge' | 'new' | 'dismiss' | 'accept' | 'create';
       /** @description Target candidate CI id, required when action is merge. */
       ci_id?: string;
+      /**
+       * Format: uuid
+       * @description Type of the CI new creates (UI-16), the id of an active system type or of a type of the organization (GET /ci-types). It takes precedence over the type name the item recorded; without it that name is resolved as the ingest resolves it. A value that is no UUID or names no such type is 422 with field ci_type_id.
+       */
+      ci_type_id?: string;
       /** @description Optional human-readable resolution note. */
       resolution?: string;
     };
@@ -17255,7 +17260,7 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      /** @description The action does not resolve items of this type, or new cannot tell the client of the device */
+      /** @description The action does not resolve items of this type, new cannot tell the client of the device, or new has no CI type (field ci_type_id) */
       422: {
         headers: {
           [name: string]: unknown;

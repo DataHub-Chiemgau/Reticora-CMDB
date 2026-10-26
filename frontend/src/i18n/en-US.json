@@ -1322,6 +1322,12 @@
     "observed": "Observed",
     "current": "In the CI",
     "differs": "differs",
+    "ciType": "CI type of the new CI",
+    "chooseCIType": "Choose a CI type",
+    "ciTypeHint": "The device reported the type “{{name}}”, which the organization did not know when the device was recorded. Choose the type of the new CI.",
+    "ciTypesLoadError": "The CI types could not be loaded.",
+    "noProfileMatch": "The device is already recorded as a generic device (generic_device). Set the type on the CI, then dismiss this item.",
+    "openCI": "Open CI",
     "loadError": "The review items could not be loaded",
     "empty": "No review items",
     "emptyHint": "Reconciliation has nothing to decide."
