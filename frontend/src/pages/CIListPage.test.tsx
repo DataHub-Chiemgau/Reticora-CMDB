@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router-dom';
 import { CIListPage } from './CIListPage';
 import { ToastViewport } from '../components/ui/Toast';
@@ -380,5 +381,87 @@ describe('CIListPage filter persistence', () => {
       const urls = listUrls(fetchMock);
       expect(urls[urls.length - 1]).not.toContain('search=stale');
     });
+  });
+});
+
+function PathProbe() {
+  const location = useLocation();
+  return <span data-testid="location-path">{location.pathname}</span>;
+}
+
+// UI-04 / UI-10 (WP-519, F-170): the CI table follows the row keyboard pattern.
+describe('CIListPage keyboard', () => {
+  const second = { ...ci, id: 'ci-2', name: 'core-sw-02' };
+  const third = { ...ci, id: 'ci-3', name: 'core-sw-03' };
+
+  function renderList() {
+    stubFetchRoutes({
+      '/cis': { data: [ci, second, third], total: 3, limit: 25, offset: 0, has_more: false },
+    });
+    return renderWithProviders(
+      <>
+        <CIListPage onCreateCI={() => {}} />
+        <PathProbe />
+      </>,
+      { route: '/cmdb' },
+    );
+  }
+
+  function row(name: string) {
+    return screen.getByRole('link', { name }).closest('tr') as HTMLTableRowElement;
+  }
+
+  it('has one row in the Tab order instead of a link and a checkbox per row', async () => {
+    const user = userEvent.setup();
+    renderList();
+    await screen.findByRole('link', { name: 'core-sw-01' });
+
+    const bodyRows = [row('core-sw-01'), row('core-sw-02'), row('core-sw-03')];
+    expect(bodyRows.map((r) => r.tabIndex)).toEqual([0, -1, -1]);
+    for (const name of ['core-sw-01', 'core-sw-02', 'core-sw-03']) {
+      expect(screen.getByRole('link', { name }).tabIndex).toBe(-1);
+      expect(screen.getByRole('checkbox', { name: `${name} auswählen` }).tabIndex).toBe(-1);
+    }
+
+    // Tab from the select-all box lands on the first row, the next Tab
+    // leaves the table for the paging buttons.
+    act(() => screen.getByRole('checkbox', { name: 'Alle sichtbaren CIs auswählen' }).focus());
+    await user.tab();
+    expect(document.activeElement).toBe(row('core-sw-01'));
+    await user.tab();
+    expect(document.activeElement).not.toBe(row('core-sw-02'));
+    expect(row('core-sw-01').contains(document.activeElement)).toBe(false);
+  });
+
+  it('moves with ArrowDown, toggles the selection with Space and opens with Enter', async () => {
+    const user = userEvent.setup();
+    renderList();
+    await screen.findByRole('link', { name: 'core-sw-01' });
+    act(() => screen.getByRole('checkbox', { name: 'Alle sichtbaren CIs auswählen' }).focus());
+    await user.tab();
+    expect(document.activeElement).toBe(row('core-sw-01'));
+
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(row('core-sw-02'));
+    expect(row('core-sw-02').tabIndex).toBe(0);
+    expect(row('core-sw-01').tabIndex).toBe(-1);
+
+    // Space selects the focused row only; the bulk toolbar appears.
+    await user.keyboard(' ');
+    expect(screen.getByRole('checkbox', { name: 'core-sw-02 auswählen' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'core-sw-01 auswählen' })).not.toBeChecked();
+    expect(await screen.findByText('1 ausgewählt')).toBeInTheDocument();
+    expect(document.activeElement).toBe(row('core-sw-02'));
+    await user.keyboard(' ');
+    expect(screen.getByRole('checkbox', { name: 'core-sw-02 auswählen' })).not.toBeChecked();
+
+    await user.keyboard('{End}');
+    expect(document.activeElement).toBe(row('core-sw-03'));
+    await user.keyboard('{Home}{ArrowDown}');
+    expect(screen.getByTestId('location-path')).toHaveTextContent('/cmdb');
+    await user.keyboard('{Enter}');
+    await waitFor(() =>
+      expect(screen.getByTestId('location-path')).toHaveTextContent('/cmdb/ci-2'),
+    );
   });
 });

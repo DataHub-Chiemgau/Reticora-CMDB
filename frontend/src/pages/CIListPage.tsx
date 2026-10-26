@@ -12,6 +12,7 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
+import { useRowNavigation } from '../components/ui/useRowNavigation';
 import { useCIFilters } from '../stores/ciFilter';
 import { useScopeStore } from '../stores/scope';
 import { useToastStore } from '../stores/toast';
@@ -149,6 +150,14 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
       current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id],
     );
   }
+
+  // Table keyboard pattern (UI-04): one row in the Tab order, arrows move,
+  // Enter opens the detail, Space toggles the selection.
+  const rowNavigation = useRowNavigation({
+    rowIds: data?.data.map((ci) => ci.id) ?? [],
+    onOpen: (id) => navigate(`/cmdb/${id}`),
+    onToggle: toggleSelect,
+  });
 
   /**
    * startExport queues an export job with the active list filters (API-05,
@@ -430,8 +439,9 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
                   {data.data.map((ci) => (
                     <tr
                       key={ci.id}
+                      {...rowNavigation.getRowProps(ci.id)}
                       onClick={() => navigate(`/cmdb/${ci.id}`)}
-                      className="cursor-pointer border-b border-gray-100 transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
+                      className="cursor-pointer border-b border-gray-100 transition hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 dark:border-gray-800 dark:hover:bg-gray-950 dark:focus-visible:bg-gray-950"
                     >
                       <td className="px-4 py-3">
                         <input
@@ -439,6 +449,8 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
                           checked={selectedIds.includes(ci.id)}
                           onChange={() => toggleSelect(ci.id)}
                           onClick={(event) => event.stopPropagation()}
+                          // The row is the Tab stop; Space on it toggles this box.
+                          tabIndex={-1}
                           aria-label={t('ci.bulk.selectRow', { name: ci.name })}
                           className="h-4 w-4 rounded border-gray-300 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                         />
@@ -447,6 +459,8 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
                         <Link
                           to={`/cmdb/${ci.id}`}
                           onClick={(event) => event.stopPropagation()}
+                          // The row is the Tab stop; Enter on it opens this link's target.
+                          tabIndex={-1}
                           className="underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                         >
                           {ci.name}

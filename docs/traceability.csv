@@ -811,3 +811,12 @@ DB-04;nicht geliefert;B;backend/internal/citype/attrdef_integration_test.go;WP-5
 VIE-01;[B];C;backend/internal/savedview/savedview_integration_test.go;WP-518
 TEC-14;[B];B;backend/internal/jobs/queue_integration_test.go;WP-503
 JOB-01;[B];B;backend/internal/server/jobkinds_test.go;WP-503
+UI-01;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-02;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-03;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-04;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-05;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-07;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-08;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-09;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-10;[B];C;frontend/e2e/keyboard.spec.ts;WP-519

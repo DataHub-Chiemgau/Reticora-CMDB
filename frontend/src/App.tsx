@@ -301,7 +301,9 @@ function App() {
       </header>
       {/* Expiring entitlements (ENT-07, WP-464). */}
       {isAuthenticated ? <EntitlementExpiryBanner /> : null}
-      <main id="main-content" className="p-6">
+      {/* Focusable by script only: target of the skip link and of the command
+          palette after a navigation (UI-10, WP-519). */}
+      <main id="main-content" tabIndex={-1} className="p-6 outline-none">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/auth/callback" element={<CallbackPage />} />
