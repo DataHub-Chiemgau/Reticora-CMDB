@@ -8,7 +8,7 @@ import {
   useSaveView,
   useDeleteSavedView,
 } from '../api/cmdbHooks';
-import type { QueryResult } from '../api/cmdb';
+import { ApiError } from '../api/client';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -22,14 +22,17 @@ export function SavedViewsPage() {
   const { t } = useTranslation();
   const views = useSavedViews();
   const presets = useSavedViewPresets();
-  const query = useFilterQuery();
   const saveView = useSaveView();
   const deleteView = useDeleteSavedView();
-  const [results, setResults] = useState<QueryResult[] | null>(null);
   const [activeView, setActiveView] = useState<string>('');
   // Remember what produced the current result set so it can be saved. Without
   // it there is nothing to persist: the page only ever held a display name.
   const [activeSpec, setActiveSpec] = useState<ActiveSpec | null>(null);
+  const query = useFilterQuery(activeSpec);
+  const results = query.data?.data ?? null;
+  // The search needs search:read and the read permission of the queried
+  // entity kind; a 403 is a missing right, not a failure to retry (F-055).
+  const forbidden = query.error instanceof ApiError && query.error.status === 403;
 
   // entity_kind lives in its own column on the saved view, not inside
   // filter_spec, so it has to be folded back in before querying. Without this
@@ -38,8 +41,13 @@ export function SavedViewsPage() {
   const run = (name: string, spec: ActiveSpec, entityKind?: string) => {
     const effective: ActiveSpec = { ...spec, entity_kind: spec.entity_kind ?? entityKind ?? 'ci' };
     setActiveView(name);
+    // Running the same filter again asks the server again instead of
+    // showing the cached result.
+    if (activeSpec && JSON.stringify(activeSpec) === JSON.stringify(effective)) {
+      void query.refetch();
+      return;
+    }
     setActiveSpec(effective);
-    query.mutate(effective, { onSuccess: (res) => setResults(res.data) });
   };
 
   const saveCurrent = () => {
@@ -136,12 +144,20 @@ export function SavedViewsPage() {
               ) : null
             }
           >
-            {query.isPending ? <SkeletonList rows={5} label="…" /> : null}
-            {query.error ? (
+            {query.isFetching ? <SkeletonList rows={5} label="…" /> : null}
+            {forbidden ? (
+              <ErrorState
+                title={t('savedviews.forbidden', 'Keine Berechtigung für diese Ansicht')}
+                description={t(
+                  'savedviews.forbiddenHint',
+                  'Ihnen fehlt das Leserecht für die Objekte, die diese Ansicht abfragt. Wenden Sie sich an Ihre Administration.',
+                )}
+              />
+            ) : query.error ? (
               <ErrorState
                 title={t('app.error')}
                 retryLabel={t('common.retry')}
-                onRetry={() => void 0}
+                onRetry={() => void query.refetch()}
               />
             ) : null}
             {results ? (
@@ -163,11 +179,11 @@ export function SavedViewsPage() {
                   </li>
                 ) : null}
               </ul>
-            ) : (
+            ) : !activeSpec ? (
               <p className="text-sm text-gray-500">
                 {t('savedviews.hint', 'Wählen Sie links eine Ansicht aus.')}
               </p>
-            )}
+            ) : null}
           </Card>
         </div>
       </div>

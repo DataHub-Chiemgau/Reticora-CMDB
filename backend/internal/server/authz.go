@@ -275,6 +275,10 @@ var routeRules = []routeRule{
 	// Assigning roles to a service account is managing roles, as for users
 	// (RBA-08, RBA-01); the account itself stays user:manage.
 	{http.MethodPut, "service-accounts/*/roles", identity.PermRoleManage},
+	// The structured search reads (F-055, SRC-03); the handler also
+	// requires the read right of the queried entity kind. Rebuilding the
+	// index (search/reindex) stays search:write.
+	{http.MethodPost, "search/query", identity.PermSearchRead},
 }
 
 // matchRouteRule returns the permission of the first rule matching the

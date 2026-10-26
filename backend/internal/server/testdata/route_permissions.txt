@@ -456,7 +456,7 @@ POST /api/v1/roles role:manage
 POST /api/v1/roles/assign role:manage
 POST /api/v1/rooms location:write
 POST /api/v1/saved-views saved_view:write
-POST /api/v1/search/query search:write
+POST /api/v1/search/query search:read
 POST /api/v1/search/reindex search:write
 POST /api/v1/security/findings security:write
 POST /api/v1/service-accounts user:manage

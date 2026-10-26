@@ -6586,7 +6586,7 @@ export interface paths {
     put?: never;
     /**
      * Execute a structured filter spec (saved-view DSL) against CIs or assets
-     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists. Fields are the whitelisted columns of the entity kind, its dynamic attributes (attributes.<key>) and, for CIs, the fields of the linked asset (asset.<field>). At most 10 levels and 100 nodes. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the type of the value (for in of the first element, all elements sharing it): a number only with numeric values, a boolean only with booleans, a time string with lt, lte, gt or gte only with values holding a time, other strings as text. An attribute value of another JSON type counts as missing: it matches neither eq, in nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value or where.value[0], or the flat field).
+     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists. Fields are the whitelisted columns of the entity kind, its dynamic attributes (attributes.<key>) and, for CIs, the fields of the linked asset (asset.<field>). At most 10 levels and 100 nodes. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the type of the value (for in of the first element, all elements sharing it): a number only with numeric values, a boolean only with booleans, a time string with lt, lte, gt or gte only with values holding a time, other strings as text. An attribute value of another JSON type counts as missing: it matches neither eq, in nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value or where.value[0], or the flat field). Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); the results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write.
      */
     post: operations['queryByFilterSpec'];
     delete?: never;
@@ -27786,6 +27786,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description The caller lacks search:read or the read permission of the queried entity kind (ci:read or asset:read). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
       /** @description Invalid filter AST or filter value; field names it (where.<path> or the flat field). */
       422: {

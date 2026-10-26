@@ -726,3 +726,4 @@ ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-470
 CI-06;[B];C;backend/internal/history/history_integration_test.go;WP-473
 LOC-10;B/G1;C;backend/internal/history/history_integration_test.go;WP-473
 LOC-11;B/G1;C;backend/internal/history/history_integration_test.go;WP-473
+SRC-03;[P2], Textsyntax [O];B;backend/internal/savedview/scope_integration_test.go;WP-460

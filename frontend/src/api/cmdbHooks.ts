@@ -381,9 +381,20 @@ export function useDeleteSavedView() {
   });
 }
 
-export function useFilterQuery() {
-  return useMutation({
-    mutationFn: (spec: Record<string, unknown> & { entity_kind?: string }) =>
-      savedViewApi.query(spec),
+/**
+ * Runs a structured filter spec (POST /search/query, search:read plus the
+ * read permission of the entity kind). A query rather than a mutation, so a
+ * failed run can be repeated with refetch(); null runs nothing. Not retried
+ * automatically: a 403 is an answer, not a transient failure (F-055).
+ */
+export function useFilterQuery(spec: (Record<string, unknown> & { entity_kind?: string }) | null) {
+  return useQuery({
+    queryKey: ['search-query', spec],
+    queryFn: () => savedViewApi.query(spec!),
+    enabled: spec !== null,
+    // Every run of a view asks the server; a cached result only bridges
+    // the wait.
+    staleTime: 0,
+    retry: false,
   });
 }

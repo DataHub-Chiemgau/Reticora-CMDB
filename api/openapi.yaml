@@ -12221,7 +12221,11 @@ paths:
         comparison and, like a missing key, matches ne. The ids in
         client_id, location_id, upstream_of and downstream_of are UUIDs. A
         violation is 422 with field naming it (where.<path>, e.g.
-        where.and[1].value or where.value[0], or the flat field).
+        where.and[1].value or where.value[0], or the flat field). Requires
+        search:read and the read permission of the entity kind (ci:read for
+        ci, asset:read for asset); the results follow the caller's client,
+        site and team scope. Rebuilding the index (/api/v1/search/reindex)
+        requires search:write.
       requestBody:
         required: true
         content:
@@ -12243,6 +12247,13 @@ paths:
             carries database text.
         '401':
           description: Unauthorized
+        '403':
+          description: >-
+            The caller lacks search:read or the read permission of the
+            queried entity kind (ci:read or asset:read).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
           description: >-
             Invalid filter AST or filter value; field names it (where.<path>

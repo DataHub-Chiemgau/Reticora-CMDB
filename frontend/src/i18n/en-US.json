@@ -1032,7 +1032,9 @@
     "shared": "shared",
     "mine": "My views",
     "save": "Save as view",
-    "namePrompt": "View name"
+    "namePrompt": "View name",
+    "forbidden": "No permission for this view",
+    "forbiddenHint": "You lack the read permission for the objects this view queries. Contact your administrator."
   },
   "lifecycle": {
     "transitionTo": "Transition to",
