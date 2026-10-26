@@ -765,3 +765,4 @@ CI-11;[B];C;backend/internal/ci/change_record_integration_test.go;WP-487
 AI-02;[A];B;backend/internal/tenantapi/tenantapi_scope_integration_test.go;WP-463
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/health_integration_test.go;WP-480
 CI-12;[B];C;backend/internal/discovery/review_resolution_integration_test.go;WP-479
+SEC-08;[B];B;frontend/src/pages/WebhooksPage.test.tsx;WP-465

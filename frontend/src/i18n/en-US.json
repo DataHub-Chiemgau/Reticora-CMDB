@@ -371,6 +371,17 @@
     "noDeadLetters": "No dead letters",
     "noDeadLettersHint": "There are currently no permanently failed deliveries.",
     "retry": "Retry",
+    "readOnly": "You can view webhooks; creating, deleting and testing require the webhook:manage permission.",
+    "errors": {
+      "notSaved": "The webhook was not saved. Please check the marked inputs.",
+      "egress": "Destination blocked by the egress protection, not allowed: {{reason}}",
+      "invalidEvent": "Unknown event: {{event}}",
+      "invalidValue": "Invalid value: {{detail}}",
+      "forbidden": "No permission: this action requires the webhook:manage permission.",
+      "notFound": "The webhook no longer exists. Please reload the page.",
+      "rejected": "Refused by the server: {{detail}}",
+      "failed": "The action failed: {{detail}}"
+    },
     "status": {
       "pending": "pending",
       "delivering": "delivering",

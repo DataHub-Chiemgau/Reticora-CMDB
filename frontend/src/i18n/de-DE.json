@@ -371,6 +371,17 @@
     "noDeadLetters": "Keine Dead Letters",
     "noDeadLettersHint": "Aktuell gibt es keine endgültig fehlgeschlagenen Zustellungen.",
     "retry": "Erneut senden",
+    "readOnly": "Sie können Webhooks einsehen; Anlegen, Löschen und Testen erfordern das Recht webhook:manage.",
+    "errors": {
+      "notSaved": "Der Webhook wurde nicht gespeichert. Bitte prüfen Sie die markierten Eingaben.",
+      "egress": "Ziel vom Egress-Schutz blockiert, nicht erlaubt: {{reason}}",
+      "invalidEvent": "Unbekanntes Event: {{event}}",
+      "invalidValue": "Ungültiger Wert: {{detail}}",
+      "forbidden": "Keine Berechtigung: Für diese Aktion fehlt Ihnen das Recht webhook:manage.",
+      "notFound": "Der Webhook existiert nicht mehr. Bitte laden Sie die Seite neu.",
+      "rejected": "Vom Server abgelehnt: {{detail}}",
+      "failed": "Die Aktion ist fehlgeschlagen: {{detail}}"
+    },
     "status": {
       "pending": "wartend",
       "delivering": "wird zugestellt",
