@@ -839,9 +839,11 @@ paths:
       tags: [CIs]
       summary: Update a configuration item
       description: >-
-        Optimistic concurrency (API-07): If-Match names the version the editor
-        read. A stale version is refused with 409 only when a field of the
-        request was changed since by a write of rank >= 92 (manual, import,
+        JSON merge patch (RFC 7396, CI-04): null clears a nullable field,
+        absent members stay. 404 only for a CI that does not exist or is not
+        visible; any other failure is 500. Optimistic concurrency (API-07):
+        If-Match names the version the editor read. A stale version is
+        refused with 409 only when a field of the request was changed since by a write of rank >= 92 (manual, import,
         workflow); observed discovery updates do not change the version.
         An organization can require If-Match (settings.require_if_match);
         then a request without it is 412, like an unknown version.
@@ -890,6 +892,16 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: >-
+            A field value is not allowed; `violations` names the field, e.g.
+            null on a required field such as name or status ("must not be
+            null").
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     delete:
       operationId: deleteCI
       tags: [CIs]
@@ -13990,8 +14002,12 @@ components:
 
     UpdateCIRequest:
       description: >-
-        A manual change. attributes is an RFC 7396 merge patch (nested objects
-        merge, null removes a member). Every changed field gets a protected
+        A manual change as an RFC 7396 merge patch (CI-04): an absent member
+        stays unchanged; null clears a nullable field (the stored value
+        becomes empty and its protected override holds null); null on name,
+        status, attributes, discovery_source, last_seen_at or change_reason
+        is refused with 422 naming the field. attributes merges nested
+        objects, null removes a member. Every changed field gets a protected
         override that discovery does not overwrite.
       type: object
       properties:
@@ -14003,22 +14019,22 @@ components:
         status:
           $ref: '#/components/schemas/CIStatus'
         client_id:
-          type: string
+          type: [string, 'null']
           description: >-
             A CI that moves to a client cannot contain CIs of another client
             or org-wide CIs (422 on client_id, TEN-05); an org-wide CI (empty
             string) can.
         location_id:
-          type: string
+          type: [string, 'null']
           description: Node of the location tree; site and room of the CI follow from it.
         asset_id:
-          type: string
+          type: [string, 'null']
           description: >-
             Links the CI to an asset (empty string unlinks on update); the CI
             then takes the asset's location, a location in the same request
             is rejected (422).
         parent_ci_id:
-          type: string
+          type: [string, 'null']
           description: >-
             Containing CI (empty string clears it): a visible CI of the CI's
             client or an org-wide CI (TEN-05). A CI the principal cannot see,
@@ -14026,29 +14042,29 @@ components:
             so is a CI of another client (422) and a cycle (422); the parent
             is checked again when client_id changes.
         manufacturer:
-          type: string
+          type: [string, 'null']
         model:
-          type: string
+          type: [string, 'null']
         serial_number:
-          type: string
+          type: [string, 'null']
         hardware_uuid:
-          type: string
+          type: [string, 'null']
         management_ip:
-          type: string
+          type: [string, 'null']
         primary_mac:
-          type: string
+          type: [string, 'null']
         hostname:
-          type: string
+          type: [string, 'null']
         fqdn:
-          type: string
+          type: [string, 'null']
         os_name:
-          type: string
+          type: [string, 'null']
         os_version:
-          type: string
+          type: [string, 'null']
         firmware_version:
-          type: string
+          type: [string, 'null']
         sys_object_id:
-          type: string
+          type: [string, 'null']
         attributes:
           type: object
           additionalProperties: true

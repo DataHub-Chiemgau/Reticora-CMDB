@@ -3,7 +3,6 @@
 # fixes a finding moves its test into the regular suite and deletes the line.
 # Baseline: main at edccd2d (2026-10-19): 116 go, 34 sh, 11 vitest, 26 e2e-real.
 go;backend/internal/agent;TestAuditT3AgentTelemetryFollowsMergedCI;F-083
-go;backend/internal/ci;TestAuditT3MergePatchNullClearsTypedField;F-080
 go;backend/internal/ci;TestAuditT3UnmergeKeepsLaterSurvivorEdits;F-097
 go;backend/internal/ci;TestAuditT7BulkJobCancelStopsWork;F-162
 go;backend/internal/discovery;TestAuditDefectDiscoveryTypedValuesValidated;F-143
@@ -48,7 +47,6 @@ vitest;frontend/src/pages/UserManagementPage.auditdefect.tsx;UserManagementPage 
 e2e-real;chromium:frontend/e2e-real/bulk-jobs-export.spec.ts;Bulk operations, jobs, notifications, saved views, export, webhook egress B04 a malformed id in a bulk request is reported with the status the single change answers (400, not 500);F-327
 e2e-real;chromium:frontend/e2e-real/bulk-jobs-export.spec.ts;Bulk operations, jobs, notifications, saved views, export, webhook egress W01 a webhook to a local catcher is refused by the egress protection, not stored, nothing delivered, and the UI explains the refusal;F-062
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L05 clearing a field in the edit form removes the stored value (merge patch);F-081
-e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L05b PATCH is a JSON merge patch: null removes a typed field, absent members stay;F-080
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L07 the audit viewer shows the CI change with time, actor, action and object, the chain verifies;F-078
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L10b the CSV export button of the CMDB list downloads the CIs of the list;F-077
 e2e-real;chromium:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L12b two sessions edit different fields of the same CI: no change is lost and the edits merge field by field;F-228

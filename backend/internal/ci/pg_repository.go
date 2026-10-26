@@ -386,7 +386,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, er
 		item, err = scanCI(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ci by id: %w", err)
 		}
@@ -893,7 +893,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		before, err := scanCI(tx.QueryRow(ctx, beforeQuery, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ci before update: %w", err)
 		}
@@ -957,7 +957,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if req.LastSeenAt != nil {
 			parsed, err := time.Parse(time.RFC3339, *req.LastSeenAt)
 			if err != nil {
-				return fmt.Errorf("parse last_seen_at: %w", err)
+				// A malformed value is the client's error, not a 500 (F-229).
+				return &ValidationError{Violations: []Violation{{Field: "last_seen_at", Detail: "must be an RFC 3339 date-time"}}}
 			}
 			setClauses = append(setClauses, fmt.Sprintf("last_seen_at = $%d", argPos))
 			args = append(args, parsed)
@@ -988,7 +989,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		item, err = scanCI(tx.QueryRow(ctx, query, args...))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return locationError(fmt.Errorf("update ci: %w", err))
 		}
@@ -1197,7 +1198,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		before, err := scanCI(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ci for delete: %w", err)
 		}
@@ -1219,7 +1220,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 			return fmt.Errorf("delete ci: %w", err)
 		}
 		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
+			return ErrNotFound
 		}
 		released := map[string]any{"status": StatusDecommissioned}
 		if before.AssetID != "" {
@@ -1259,12 +1260,12 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 		if err := tx.QueryRow(ctx, "SELECT deleted_at, COALESCE(merged_into_id::text, '') FROM ci WHERE id = $1 AND organization_id = $2",
 			id, orgID).Scan(&deletedAt, &mergedInto); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ci for restore: %w", err)
 		}
 		if deletedAt == nil {
-			return fmt.Errorf("not found")
+			return ErrNotFound
 		}
 		// A merged CI comes back only through the unmerge (CI-12).
 		if mergedInto != "" {
@@ -1295,7 +1296,7 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 			return locationError(fmt.Errorf("restore ci: %w", err))
 		}
 		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
+			return ErrNotFound
 		}
 		if primary && assetID != "" {
 			if _, err = tx.Exec(ctx, "UPDATE asset SET ci_id = $1 WHERE id = $2 AND ci_id IS NULL", id, assetID); err != nil {
@@ -1726,7 +1727,12 @@ func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before,
 			// The location of a linked CI is the asset's (DB-05).
 			continue
 		}
-		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, change.Field, change.New, req.Manual.Author, reason, true); err != nil {
+		value := change.New
+		if req.isNull(change.Field) {
+			// A field the patch set to null is overridden with null (CH9).
+			value = nil
+		}
+		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, change.Field, value, req.Manual.Author, reason, true); err != nil {
 			return err
 		}
 	}
@@ -1996,7 +2002,7 @@ func (r *PGRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode
 		before, err := scanCI(tx.QueryRow(ctx, query, ciID, orgID))
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ci for type change: %w", err)
 		}

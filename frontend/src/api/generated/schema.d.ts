@@ -426,7 +426,7 @@ export interface paths {
     head?: never;
     /**
      * Update a configuration item
-     * @description Optimistic concurrency (API-07): If-Match names the version the editor read. A stale version is refused with 409 only when a field of the request was changed since by a write of rank >= 92 (manual, import, workflow); observed discovery updates do not change the version. An organization can require If-Match (settings.require_if_match); then a request without it is 412, like an unknown version.
+     * @description JSON merge patch (RFC 7396, CI-04): null clears a nullable field, absent members stay. 404 only for a CI that does not exist or is not visible; any other failure is 500. Optimistic concurrency (API-07): If-Match names the version the editor read. A stale version is refused with 409 only when a field of the request was changed since by a write of rank >= 92 (manual, import, workflow); observed discovery updates do not change the version. An organization can require If-Match (settings.require_if_match); then a request without it is 412, like an unknown version.
      */
     patch: operations['updateCI'];
     trace?: never;
@@ -7585,32 +7585,32 @@ export interface components {
       /** @description Defaults to manual. With manual or import the CI is manual (is_manual); an unknown source is rejected (400 with the field). */
       discovery_source?: components['schemas']['CIDiscoverySource'];
     };
-    /** @description A manual change. attributes is an RFC 7396 merge patch (nested objects merge, null removes a member). Every changed field gets a protected override that discovery does not overwrite. */
+    /** @description A manual change as an RFC 7396 merge patch (CI-04): an absent member stays unchanged; null clears a nullable field (the stored value becomes empty and its protected override holds null); null on name, status, attributes, discovery_source, last_seen_at or change_reason is refused with 422 naming the field. attributes merges nested objects, null removes a member. Every changed field gets a protected override that discovery does not overwrite. */
     UpdateCIRequest: {
       /** @description Reason stored with the overrides of this change. */
       change_reason?: string;
       name?: string;
       status?: components['schemas']['CIStatus'];
       /** @description A CI that moves to a client cannot contain CIs of another client or org-wide CIs (422 on client_id, TEN-05); an org-wide CI (empty string) can. */
-      client_id?: string;
+      client_id?: string | null;
       /** @description Node of the location tree; site and room of the CI follow from it. */
-      location_id?: string;
+      location_id?: string | null;
       /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
-      asset_id?: string;
+      asset_id?: string | null;
       /** @description Containing CI (empty string clears it): a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422); the parent is checked again when client_id changes. */
-      parent_ci_id?: string;
-      manufacturer?: string;
-      model?: string;
-      serial_number?: string;
-      hardware_uuid?: string;
-      management_ip?: string;
-      primary_mac?: string;
-      hostname?: string;
-      fqdn?: string;
-      os_name?: string;
-      os_version?: string;
-      firmware_version?: string;
-      sys_object_id?: string;
+      parent_ci_id?: string | null;
+      manufacturer?: string | null;
+      model?: string | null;
+      serial_number?: string | null;
+      hardware_uuid?: string | null;
+      management_ip?: string | null;
+      primary_mac?: string | null;
+      hostname?: string | null;
+      fqdn?: string | null;
+      os_name?: string | null;
+      os_version?: string | null;
+      firmware_version?: string | null;
+      sys_object_id?: string | null;
       /** @description RFC 7396 merge patch. The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field. */
       attributes?: {
         [key: string]: unknown;
@@ -11907,6 +11907,16 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      /** @description A field value is not allowed; `violations` names the field, e.g. null on a required field such as name or status ("must not be null"). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
     };
   };
   restoreCI: {

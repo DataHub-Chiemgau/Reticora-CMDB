@@ -306,6 +306,10 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 // the mutation transaction so the recorded diff cannot race with concurrent
 // writers.
 func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
+	// null clears a nullable field; on a required one it is refused (CI-04).
+	if err := req.nullViolations(); err != nil {
+		return nil, err
+	}
 	if err := CheckReservedKeys("attributes", req.Attributes); err != nil {
 		return nil, err
 	}

@@ -5,7 +5,8 @@ package ci_test
 // PostgreSQL repositories, as the server does for /api/v1/cis/**. Used by
 // bulk_integration_test.go (TestAuditT3BulkStatusIsManualWrite, WP-368),
 // concurrency_integration_test.go (TestAuditT3OverrideWritesRaiseVersion,
-// WP-412) and audit_t3_manual_writes_auditdefect_test.go (WP-057 defect).
+// WP-412) and manual_override_integration_test.go
+// (TestAuditT3MergePatchNullClearsTypedField, WP-476).
 
 import (
 	"context"

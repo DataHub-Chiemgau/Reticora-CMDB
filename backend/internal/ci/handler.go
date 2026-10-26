@@ -504,10 +504,13 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		if writeValidationError(w, err) {
 			return
 		}
-		if api.WriteDBError(w, err) {
+		// Only a missing CI is 404; any other failure is not hidden as one
+		// (F-229).
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 			return
 		}
-		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
+		api.WriteRepoError(w, err)
 		return
 	}
 	if h.dispatcher != nil {

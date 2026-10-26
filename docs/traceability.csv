@@ -727,3 +727,4 @@ CI-06;[B];C;backend/internal/history/history_integration_test.go;WP-473
 LOC-10;B/G1;C;backend/internal/history/history_integration_test.go;WP-473
 LOC-11;B/G1;C;backend/internal/history/history_integration_test.go;WP-473
 SRC-03;[P2], Textsyntax [O];B;backend/internal/savedview/scope_integration_test.go;WP-460
+CI-04;[B];D;backend/internal/ci/manual_override_integration_test.go;WP-476
