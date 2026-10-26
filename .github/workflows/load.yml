@@ -1,9 +1,20 @@
 # NFR-10 (WP-204): load test against the SIM-01 seed scaled to 10,000
 # objects. The k6 thresholds are the budgets of NFR-02 and NFR-03. Each
 # scenario runs as a job of its own, as the evidence protocol requires
-# (tests/load/README.md): a fresh database, the seed and ANALYZE, then the
-# server with four ingest lanes; one scenario's backlog never reaches the
-# next. Every job uploads its k6 summary as an artifact of its own.
+# (tests/load/README.md): a fresh database, the seed, the rebuilt search
+# index and ANALYZE, then the server with four ingest lanes; one scenario's
+# backlog never reaches the next. After the run tests/integrity-check.sql
+# must find no violation (ABN-03, F-281), and the database cost of the run
+# per record is reported from pg_stat_statements (F-118). Every job uploads
+# its k6 summary, the integrity check and the cost report as an artifact of
+# its own.
+#
+# server_ref (WP-437, F-118): the server, the seed and the migrations are
+# built from that commit, tests/load and tests/integrity-check.sql always
+# from the run's commit. The re-discovery before and after WP-434 compares
+# a run of ingest-rediscover with server_ref = the parent of the WP-434
+# merge and one with the run's commit; an invalid server_ref ends the run in
+# the job prepare, before anything is built or seeded.
 name: Load test
 
 on:
@@ -15,6 +26,12 @@ on:
       duration:
         description: Duration of each read scenario
         default: "2m"
+      server_ref:
+        description: "Commit, tag or branch the server, the seed and the migrations are built from (empty: the run's commit)"
+        default: ""
+      scenarios:
+        description: "Jobs to run, comma-separated (api, ingest, ingest-spool, ingest-rediscover), or all"
+        default: "all"
   schedule:
     - cron: "17 2 * * *"
 
@@ -22,40 +39,64 @@ permissions:
   contents: read
 
 jobs:
+  # Resolves server_ref and selects the scenarios before any job builds or
+  # seeds: an invalid ref or scenario fails here with an error.
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      server_sha: ${{ steps.ref.outputs.sha }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Test the server_ref resolution
+        run: ./tests/load/resolve-server-ref.test.sh
+
+      - name: Resolve server_ref
+        id: ref
+        env:
+          SERVER_REF: ${{ inputs.server_ref }}
+        run: |
+          if ! sha="$(tests/load/resolve-server-ref.sh "$SERVER_REF" "$GITHUB_SHA")"; then
+            echo "$sha"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Server, seed and migrations from \`$sha\` (server_ref \`${SERVER_REF:-}\`); tests/load and tests/integrity-check.sql from \`$GITHUB_SHA\`." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Select the scenarios
+        id: matrix
+        env:
+          SCENARIOS: ${{ inputs.scenarios || 'all' }}
+        run: |
+          all='[{"scenario":"api","script":"api.js","k6_scenario":""},
+                {"scenario":"ingest","script":"ingest.js","k6_scenario":"load"},
+                {"scenario":"ingest-spool","script":"ingest.js","k6_scenario":"spool"},
+                {"scenario":"ingest-rediscover","script":"ingest.js","k6_scenario":"rediscover"}]'
+          want="$(jq -cn --arg s "$SCENARIOS" '$s | gsub("\\s"; "") | split(",") | map(select(. != ""))')"
+          unknown="$(jq -rn --argjson all "$all" --argjson want "$want" '$want - ["all"] - [$all[].scenario] | join(", ")')"
+          if [ -n "$unknown" ] || [ "$want" = "[]" ]; then
+            echo "::error title=scenarios::unknown or no scenario '${unknown:-$SCENARIOS}': api, ingest, ingest-spool, ingest-rediscover or all"
+            exit 1
+          fi
+          matrix="$(jq -cn --argjson all "$all" --argjson want "$want" \
+            'if ($want | index("all")) then $all else [$all[] | select(.scenario as $n | $want | index($n))] end')"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   load:
     name: Load (${{ matrix.scenario }})
+    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Latency budgets (NFR-02).
-          - scenario: api
-            script: api.js
-            args: '-e DURATION="$DURATION" -e OBJECTS="$OBJECTS"'
-          # Ingest delay at 200 records/s (NFR-03).
-          - scenario: ingest
-            script: ingest.js
-            args: '-e SCENARIO=load'
-          # Spool flush and drain rate (NFR-03, COL-05).
-          - scenario: ingest-spool
-            script: ingest.js
-            args: '-e SCENARIO=spool'
+        include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     services:
-      postgres:
-        image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
-        env:
-          POSTGRES_USER: reticora
-          POSTGRES_PASSWORD: reticora
-          POSTGRES_DB: reticora
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U reticora"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
       redis:
         image: redis:7-alpine
         ports:
@@ -68,13 +109,37 @@ jobs:
       RUNTIME_DATABASE_URL: postgres://reticora_test_runtime:reticora_test_runtime@localhost:5432/reticora?sslmode=disable
       OBJECTS: ${{ inputs.objects || '10000' }}
       DURATION: ${{ inputs.duration || '2m' }}
+      SERVER_SHA: ${{ needs.prepare.outputs.server_sha }}
+      SCENARIO_NAME: ${{ matrix.scenario }}
     steps:
+      # The run's commit: tests/load and tests/integrity-check.sql.
       - uses: actions/checkout@v4
+
+      # server_ref (WP-437): the server, the seed and the migrations.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.server_sha }}
+          path: server-src
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.10"
-          cache-dependency-path: backend/go.sum
+          cache-dependency-path: server-src/backend/go.sum
+
+      # A service container takes no server options; pg_stat_statements
+      # must be preloaded for the cost per record (F-118).
+      - name: Start PostgreSQL
+        run: |
+          docker run -d --name postgres -p 5432:5432 \
+            -e POSTGRES_USER=reticora -e POSTGRES_PASSWORD=reticora -e POSTGRES_DB=reticora \
+            timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731 \
+            postgres -c shared_preload_libraries=timescaledb,pg_stat_statements
+          for _ in $(seq 1 90); do
+            psql "$DATABASE_URL" -Atc 'SELECT 1' >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          docker logs postgres
+          exit 1
 
       - name: Start NATS with JetStream
         run: docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
@@ -82,7 +147,7 @@ jobs:
       - name: Migrate
         run: |
           go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
-          migrate -path backend/migrations -database "$DATABASE_URL" up
+          migrate -path server-src/backend/migrations -database "$DATABASE_URL" up
 
       # TEN-03/F-057 (WP-351): the server runs with a runtime login without
       # SUPERUSER/BYPASSRLS, member of reticora_app only (same SQL as the
@@ -95,7 +160,7 @@ jobs:
           SQL
 
       - name: Build server and seed
-        working-directory: backend
+        working-directory: server-src/backend
         run: |
           go build -o "$RUNNER_TEMP/server" ./cmd/server
           go build -o "$RUNNER_TEMP/seed" ./cmd/seed
@@ -104,11 +169,6 @@ jobs:
       - name: Seed (SIM-01, NFR-10)
         run: |
           "$RUNNER_TEMP/seed" -database-url "$DATABASE_URL" -objects "$OBJECTS" -api-key-file "$RUNNER_TEMP/load.key"
-
-      # Statistics of the seeded tables before the first request: without
-      # them the plans depend on when autovacuum gets to the seed.
-      - name: Analyze the seed
-        run: docker exec "${{ job.services.postgres.id }}" psql -U reticora -d reticora -v ON_ERROR_STOP=1 -c 'ANALYZE'
 
       - name: Start the server
         run: |
@@ -121,32 +181,97 @@ jobs:
           RETICORA_RATE_LIMIT_RPM=1000000 RETICORA_RATE_LIMIT_ORG_RPM=1000000 \
           RETICORA_INGEST_LANES=4 \
           nohup "$RUNNER_TEMP/server" > "$RUNNER_TEMP/server.log" 2>&1 &
-          for i in $(seq 1 60); do curl -fsS http://localhost:8080/healthz >/dev/null && exit 0; sleep 1; done
+          for _ in $(seq 1 60); do curl -fsS http://localhost:8080/healthz >/dev/null && exit 0; sleep 1; done
           cat "$RUNNER_TEMP/server.log"; exit 1
+
+      # F-116: the global search reads the index of the whole organization,
+      # rebuilt after the seed as an operator does it.
+      - name: Rebuild the search index
+        run: |
+          curl -fsS -X POST -H "X-API-Key: $(cat "$RUNNER_TEMP/load.key")" http://localhost:8080/api/v1/search/reindex
+          echo
+
+      # Statistics of the seeded tables and the rebuilt index before the
+      # first request: without them the plans depend on when autovacuum
+      # gets to the seed.
+      - name: Analyze the seed
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'ANALYZE'
+
+      - name: Reset the statement statistics
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pg_stat_statements' \
+            -c 'SELECT pg_stat_statements_reset()'
 
       - uses: grafana/setup-k6-action@v1
         with:
           k6-version: "0.54.0"
 
       - name: k6 ${{ matrix.scenario }}
+        id: k6
+        env:
+          K6_SCRIPT: ${{ matrix.script }}
+          K6_SCENARIO: ${{ matrix.k6_scenario }}
         run: |
           set -o pipefail
           mkdir -p load-results
-          k6 run -e BASE_URL=http://localhost:8080 -e API_KEY="$(cat "$RUNNER_TEMP/load.key")" ${{ matrix.args }} \
-            --summary-export "load-results/${{ matrix.scenario }}.json" "tests/load/${{ matrix.script }}" \
-            | tee "load-results/${{ matrix.scenario }}.txt"
+          args=(-e BASE_URL=http://localhost:8080 -e API_KEY="$(cat "$RUNNER_TEMP/load.key")" -e DURATION="$DURATION" -e OBJECTS="$OBJECTS")
+          if [ -n "$K6_SCENARIO" ]; then
+            args+=(-e SCENARIO="$K6_SCENARIO")
+          fi
+          k6 run "${args[@]}" --summary-export "load-results/$SCENARIO_NAME.json" "tests/load/$K6_SCRIPT" \
+            | tee "load-results/$SCENARIO_NAME.txt"
+
+      # ABN-03, F-281: the data after the run, every check 0.
+      - name: Integrity check
+        if: always() && steps.k6.outcome != 'skipped'
+        run: |
+          set -o pipefail
+          mkdir -p load-results
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -At -F '|' -f tests/integrity-check.sql | tee "load-results/integrity-$SCENARIO_NAME.txt"
+          violations="$(awk -F'|' '{s += $2} END {print s + 0}' "load-results/integrity-$SCENARIO_NAME.txt")"
+          checks="$(wc -l < "load-results/integrity-$SCENARIO_NAME.txt")"
+          if [ "$checks" -eq 0 ] || [ "$violations" -ne 0 ]; then
+            echo "::error title=integrity-check::$violations violations in $checks checks after the run"
+            exit 1
+          fi
+          echo "integrity check: 0 violations in $checks checks"
+
+      # F-118: execution time, buffers and generic plan cost of the run's
+      # statements per accepted record (tests/load/statement-costs.sql).
+      - name: Database cost per record
+        if: always() && steps.k6.outcome != 'skipped'
+        run: |
+          set -o pipefail
+          mkdir -p load-results
+          records="$(jq -r '.metrics.ingest_records_accepted.count // 0' "load-results/$SCENARIO_NAME.json" 2>/dev/null || echo 0)"
+          org="$(psql "$DATABASE_URL" -Atc "SELECT id FROM organization WHERE slug = 'demo'")"
+          psql "$DATABASE_URL" -v records="$records" -v org="$org" -f tests/load/statement-costs.sql \
+            | tee "load-results/statements-$SCENARIO_NAME.txt" \
+            || echo "::warning title=statement-costs::the cost report failed"
 
       - name: Ingest backlog per lane
         if: always()
         run: |
           mkdir -p load-results
-          curl -fsS http://localhost:8080/readyz > "load-results/readyz-${{ matrix.scenario }}.json" || true
+          curl -fsS http://localhost:8080/readyz > "load-results/readyz-$SCENARIO_NAME.json" || true
+
+      # E-58: commit, server_ref, CPU and memory of the run.
+      - name: Record the run
+        if: always()
+        run: |
+          mkdir -p load-results
+          {
+            echo "run commit: $GITHUB_SHA"
+            echo "server, seed and migrations: $SERVER_SHA"
+            lscpu | grep -E '^(Model name|CPU\(s\)):'
+            free -h | grep -E '^Mem:'
+          } > "load-results/run-$SCENARIO_NAME.txt"
 
       - name: Collect the server log
         if: always()
         run: |
           mkdir -p load-results
-          cp "$RUNNER_TEMP/server.log" "load-results/server-${{ matrix.scenario }}.log" || true
+          cp "$RUNNER_TEMP/server.log" "load-results/server-$SCENARIO_NAME.log" || true
 
       - uses: actions/upload-artifact@v4
         if: always()

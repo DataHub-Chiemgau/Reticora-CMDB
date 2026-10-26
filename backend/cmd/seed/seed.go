@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -41,6 +43,16 @@ const MaxObjects = 50000
 
 // baseObjects are the CIs of SIM-01: they sit in the two racks.
 const baseObjects = 40
+
+// AttributeKey is the searchable attribute of the seed: a global attribute
+// definition of each organization, a value on every CI. The attribute
+// filter of the load test filters on it (NFR-02, F-116).
+const AttributeKey = "cost_center"
+
+// CostCenters is the number of distinct values of AttributeKey: CI i holds
+// CC-<i mod CostCenters + 1>, three digits, so a value holds 200 of the
+// 10.000 CIs of the NFR-10 seed.
+const CostCenters = 50
 
 // Org is one seeded organization.
 type Org struct {
@@ -89,7 +101,8 @@ func (o *Options) Validate() error {
 // organization "acme" for isolation tests (SIM-01). Every row has a
 // deterministic id and is inserted only if missing, so a second run with the
 // same options changes nothing. After the seed transaction of an
-// organization its CIs are indexed for the search (index).
+// organization its CIs are indexed for the search (index) and the index of
+// its searchable attribute is built (attributeIndex).
 func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error) {
 	if err := opts.Validate(); err != nil {
 		return Summary{}, err
@@ -113,6 +126,9 @@ func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error)
 		}
 		if err := o.index(ctx, pool); err != nil {
 			return Summary{}, fmt.Errorf("index %s: %w", slug, err)
+		}
+		if err := o.attributeIndex(ctx, pool); err != nil {
+			return Summary{}, fmt.Errorf("attribute index %s: %w", slug, err)
 		}
 		summary.Orgs = append(summary.Orgs, Org{ID: o.id, Slug: slug, Admin: o.admin, APIKey: o.apiKey})
 	}
@@ -140,6 +156,7 @@ func (o *orgSeed) seed(ctx context.Context, tx pgx.Tx) error {
 	}{
 		{"organization", o.organization},
 		{"locations", o.locations},
+		{"attributes", o.attributes},
 		{"cis", o.cis},
 		{"network", o.network},
 		{"relationships", o.relationships},
@@ -216,16 +233,39 @@ func (o *orgSeed) locations(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
+// attributes creates the searchable attribute definition AttributeKey, a
+// text attribute of every CI type of the organization (scope global). Its
+// values come with the CIs (cis); the index follows the seed transaction
+// (attributeIndex). The insert skips an existing definition by its id or
+// key (ON CONFLICT without a target).
+func (o *orgSeed) attributes(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `INSERT INTO attribute_definition (id, organization_id, scope, key, display_name, description,
+			data_type, searchable)
+		VALUES ($1, $2, 'global', $3, '{"de":"Kostenstelle","en":"Cost center"}', 'Seed: filter of the load test (NFR-02)',
+			'text', true)
+		ON CONFLICT DO NOTHING`, o.uid("attribute", AttributeKey), o.id, AttributeKey)
+	return err
+}
+
+// attributeIndex builds the index of the searchable attribute as the
+// attribute.index job of the server does after the definition is created
+// (DB-04, citype.DDLJob): concurrently, outside a transaction, as the owner
+// role. An existing valid index is kept, so a second run changes nothing.
+func (o *orgSeed) attributeIndex(ctx context.Context, pool *pgxpool.Pool) error {
+	return citype.NewDDLJob(pool, jobs.NewService(jobs.NewPGRepository(pool))).Ensure(ctx, o.id, o.uid("attribute", AttributeKey))
+}
+
 // cis creates the CIs: two switches, two PDUs and servers. The first 40
 // belong to the first client and are mounted in the racks (20 each); the
 // rest of a load seed alternates between the clients. Every CI has a
 // location: a mounted CI its rack, as a mount through the API sets it
 // (RCK-03), every other CI the server room of its client. The database
-// derives site_id and room_id from it (ci_derive_location).
+// derives site_id and room_id from it (ci_derive_location). Every CI holds
+// a value of the searchable attribute AttributeKey.
 func (o *orgSeed) cis(ctx context.Context, tx pgx.Tx) error {
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO ci (id, organization_id, client_id, location_id, ci_type_id, name, status, manufacturer, model,
-			serial_number, management_ip, hostname, discovery_source, first_seen_at, last_seen_at, health)
+			serial_number, management_ip, hostname, discovery_source, first_seen_at, last_seen_at, health, attributes)
 		SELECT md5($1 || '/ci/' || i)::uuid, $2,
 			CASE WHEN i <= $5 OR i % 2 = 0 THEN md5($1 || '/client/hq')::uuid ELSE md5($1 || '/client/branch')::uuid END,
 			CASE WHEN i <= 20 THEN md5($1 || '/rack/1')::uuid WHEN i <= $5 THEN md5($1 || '/rack/2')::uuid
@@ -237,12 +277,13 @@ func (o *orgSeed) cis(ctx context.Context, tx pgx.Tx) error {
 			'SN' || upper(substr(md5($1 || '/serial/' || i), 1, 12)),
 			('10.' || $3::int || '.' || (i / 250) || '.' || (i % 250 + 1))::inet,
 			CASE WHEN i <= 2 THEN 'sw-' WHEN i <= 4 THEN 'pdu-' ELSE 'srv-' END || lpad(i::text, 5, '0'),
-			'snmp', $4::timestamptz - interval '30 days', $4::timestamptz, 'ok'
+			'snmp', $4::timestamptz - interval '30 days', $4::timestamptz, 'ok',
+			jsonb_build_object($7::text, 'CC-' || lpad((i % $8 + 1)::text, 3, '0'))
 		FROM generate_series(1, $6::int) AS i
 		JOIN ci_type t ON t.organization_id IS NULL
 			AND t.key = CASE WHEN i <= 2 THEN 'switch' WHEN i <= 4 THEN 'pdu' ELSE 'server' END
 		ON CONFLICT (id) DO NOTHING`,
-		o.prefix, o.id, o.octet, o.at, baseObjects, o.objects); err != nil {
+		o.prefix, o.id, o.octet, o.at, baseObjects, o.objects, AttributeKey, CostCenters); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `

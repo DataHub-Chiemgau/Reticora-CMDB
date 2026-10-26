@@ -686,3 +686,8 @@ SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-452
 ABN-01;[Q];G1;frontend/e2e-real/abn-01-konflikt.spec.ts;WP-456
 OPS-05;[B];A;backend/internal/operator/alerts_integration_test.go;WP-448
 ABN-02;[Q];LT;backend/internal/ci/attr_filter_plan_integration_test.go;WP-435
+NFR-10;[Q];LT;tests/load/api.js;WP-437
+ABN-02;[Q];LT;tests/load/api.js;WP-437
+NFR-02;[B];LT;tests/load/api.js;WP-437
+NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-437
+ABN-03;[Q], jeweilige Phase;LT;backend/internal/ci/integrity_check_integration_test.go;WP-437

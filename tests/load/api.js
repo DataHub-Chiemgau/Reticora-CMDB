@@ -2,6 +2,12 @@
 // Each request type is its own scenario; the thresholds are the p95 budgets
 // of NFR-02, so a missed budget fails the run. OBJECTS is the size the
 // demo organization was seeded with (cmd/seed -objects, default 10000).
+// The search budget is measured at the global search the UI uses
+// (global_search, GET /search over the index the workflow rebuilds after
+// the seed), next to the name filter of the CI list (list_name_filter), a
+// filter on a searchable JSONB attribute (attr_filter, the seed's
+// cost_center) and the relationships of a CI (relationships; WP-437,
+// F-116).
 //
 //   k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat key) tests/load/api.js
 import http from 'k6/http';
@@ -12,6 +18,10 @@ import { BASE_URL, firstID, get, params, post } from './lib.js';
 const DURATION = __ENV.DURATION || '1m';
 const VUS = Number(__ENV.VUS || 5);
 const OBJECTS = Number(__ENV.OBJECTS || 10000);
+// The searchable attribute of the seed and its number of values
+// (cmd/seed AttributeKey, CostCenters): CI i holds CC-<i mod 50 + 1>.
+const ATTR_KEY = __ENV.ATTR_KEY || 'cost_center';
+const ATTR_VALUES = Number(__ENV.ATTR_VALUES || 50);
 
 // The bulk of 500 ids runs as a job; its duration is the time until the
 // job finished.
@@ -22,10 +32,15 @@ const reads = (exec) => ({ executor: 'constant-vus', exec, vus: VUS, duration: D
 export const options = {
   scenarios: {
     list: reads('list'),
-    search: reads('search'),
+    list_name_filter: reads('listNameFilter'),
     detail: reads('detail'),
     filter: reads('filter'),
     rack: reads('rack'),
+    // The scenarios of WP-437 join the mixed load with two VUs each: the
+    // concurrent load of the run grows by about a fifth (32 to 38 VUs).
+    global_search: { ...reads('globalSearch'), vus: 2 },
+    attr_filter: { ...reads('attrFilter'), vus: 2 },
+    relationships: { ...reads('relationships'), vus: 2 },
     topology: { ...reads('topology'), vus: 2 },
     impact: { ...reads('impact'), vus: 2 },
     impact_full: { ...reads('impactFull'), vus: 2 },
@@ -33,7 +48,10 @@ export const options = {
   },
   thresholds: {
     'http_req_duration{name:list}': ['p(95)<500'],
-    'http_req_duration{name:search}': ['p(95)<500'],
+    'http_req_duration{name:list_name_filter}': ['p(95)<500'],
+    'http_req_duration{name:global_search}': ['p(95)<500'],
+    'http_req_duration{name:attr_filter}': ['p(95)<500'],
+    'http_req_duration{name:relationships}': ['p(95)<500'],
     'http_req_duration{name:detail}': ['p(95)<300'],
     'http_req_duration{name:filter}': ['p(95)<500'],
     'http_req_duration{name:rack}': ['p(95)<300'],
@@ -52,6 +70,13 @@ export function setup() {
     const page = get(`/cis?limit=200&offset=${offset}&sort_by=name`, 'setup').json('data');
     ids.push(...page.map((c) => c.id));
   }
+  // The relationships are asked for 500 CIs from five pages spread over
+  // the organization; the hubs (the PDUs) are among them at their share.
+  const spread = [];
+  for (let k = 0; k < 5; k++) {
+    const offset = Math.floor((k * OBJECTS) / 5);
+    spread.push(...get(`/cis?limit=100&offset=${offset}&sort_by=name`, 'setup').json('data').map((c) => c.id));
+  }
   const racks = get('/racks?limit=1', 'setup').json('data');
   return {
     // sw-00001 is the core switch of the seed: about half of the CIs hang
@@ -61,6 +86,7 @@ export function setup() {
     server: firstID('search=srv-04242'),
     rack: racks[0].id,
     bulk: ids.slice(0, 500),
+    spread,
   };
 }
 
@@ -71,8 +97,36 @@ export function list() {
   sleep(0.2);
 }
 
-export function search() {
-  get(`/cis?limit=50&search=srv-${pick(9000)}`, 'search');
+// listNameFilter is the name filter of the CI list (name ILIKE), formerly
+// the scenario search.
+export function listNameFilter() {
+  get(`/cis?limit=50&search=srv-${pick(9000)}`, 'list_name_filter');
+  sleep(0.2);
+}
+
+// globalSearch searches a server by its name as the command palette of the
+// UI does (GET /search, five hits).
+export function globalSearch() {
+  const name = `srv-${pick(9000)}`;
+  const res = get(`/search?q=${name}&limit=5`, 'global_search');
+  check(res, { 'global search finds the CI': (r) => r.status === 200 && (r.json('data') || []).some((h) => h.title === name) });
+  sleep(0.2);
+}
+
+// attrFilter filters the CI list on a value of the searchable attribute
+// (200 CIs per value in the NFR-10 seed).
+export function attrFilter() {
+  const value = `CC-${String((Math.floor(Math.random() * OBJECTS) + 1) % ATTR_VALUES + 1).padStart(3, '0')}`;
+  const res = get(`/cis?limit=50&filter[attributes.${ATTR_KEY}]=${value}`, 'attr_filter');
+  check(res, { 'attribute filter finds CIs': (r) => r.status === 200 && (r.json('data') || []).length > 0 });
+  sleep(0.2);
+}
+
+// relationships lists the relationships of a CI as its detail view does.
+export function relationships(data) {
+  const id = data.spread[Math.floor(Math.random() * data.spread.length)];
+  const res = get(`/cis/${id}/relationships`, 'relationships');
+  check(res, { 'relationships of the CI': (r) => r.status === 200 && (r.json('data') || []).length > 0 });
   sleep(0.2);
 }
 
