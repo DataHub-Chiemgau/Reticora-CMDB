@@ -1576,8 +1576,10 @@ func (r *PGRepository) UserActive(ctx context.Context, orgID, userID string) (bo
 }
 
 // EnsureRole assigns the named standard role to the user when they hold no
-// standard role yet, so first login lands on a sensible least-privilege
-// baseline instead of an empty permission set. It reports whether the user
+// role yet, standard or custom, so first login lands on a sensible
+// least-privilege baseline instead of an empty permission set. A user an
+// administrator gave only a custom role keeps exactly that role: the login
+// does not add the default role back (RBA-03). It reports whether the user
 // holds the role afterwards, assigned now or before: the login binds a
 // default role org_admin to MFA (WP-367).
 //
@@ -1589,7 +1591,10 @@ func (r *PGRepository) EnsureRole(ctx context.Context, orgID, userID, roleName s
 	var held bool
 	err := database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		var existing int
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM role_assignment WHERE organization_id = $1 AND user_id = $2`, orgID, userID).Scan(&existing); err != nil {
+		if err := tx.QueryRow(ctx, `
+			SELECT (SELECT COUNT(*) FROM role_assignment WHERE organization_id = $1 AND user_id = $2)
+			     + (SELECT COUNT(*) FROM user_custom_role ucr JOIN custom_role cr ON cr.id = ucr.custom_role_id
+			         WHERE cr.organization_id = $1 AND ucr.user_id = $2)`, orgID, userID).Scan(&existing); err != nil {
 			return fmt.Errorf("check role assignments: %w", err)
 		}
 		if existing == 0 {
