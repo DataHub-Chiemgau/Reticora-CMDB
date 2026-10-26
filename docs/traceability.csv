@@ -826,3 +826,6 @@ IMP-04;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-5
 IMP-05;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-513
 NTF-04;[B];B;backend/internal/notify/digest_integration_test.go;WP-508
 UI-16;[B];C;frontend/src/pages/ReviewInboxPage.test.tsx;WP-528
+NTF-01;[B];B;backend/internal/notify/defaults_integration_test.go;WP-509
+NTF-04;[B];B;backend/internal/notify/defaults_integration_test.go;WP-509
+UI-16;[B];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-509

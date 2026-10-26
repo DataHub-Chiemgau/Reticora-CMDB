@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 )
 
@@ -22,10 +23,21 @@ const AuditAction = "signup.complete"
 // and creates organizations in one organization-setup transaction.
 type PGRepository struct {
 	pool *pgxpool.Pool
+	// centralSMTP: the installation has a central SMTP server, so new
+	// organizations also get a central_smtp channel (F-157).
+	centralSMTP bool
 }
 
 // NewPGRepository creates the repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
+
+// WithCentralSMTP records whether the installation has a central SMTP
+// server (RETICORA_SMTP_HOST): then every new organization gets an e-mail
+// channel over it besides the in-app channel.
+func (r *PGRepository) WithCentralSMTP(configured bool) *PGRepository {
+	r.centralSMTP = configured
+	return r
+}
 
 // CreateRequest stores a pending request.
 func (r *PGRepository) CreateRequest(ctx context.Context, req *PendingRequest) error {
@@ -41,7 +53,8 @@ func (r *PGRepository) CreateRequest(ctx context.Context, req *PendingRequest) e
 
 // Complete implements Repository: in one transaction it locks the request,
 // creates the organization (its triggers seed the standard roles and the
-// default VRF), the first user as org_admin, the trial entitlements, runs
+// default VRF), the first user as org_admin, the trial entitlements, the
+// default notification channels, runs
 // createAccount, writes operator_audit and marks the request completed.
 func (r *PGRepository) Complete(ctx context.Context, tokenHash string, now time.Time, setup *Setup,
 	createAccount func(ctx context.Context, req *PendingRequest) error) (Result, error) {
@@ -51,7 +64,7 @@ func (r *PGRepository) Complete(ctx context.Context, tokenHash string, now time.
 		if err != nil {
 			return err
 		}
-		slug, err := populate(ctx, tx, req.OrganizationName, "", req.Email, req.DisplayName, setup)
+		slug, err := populate(ctx, tx, req.OrganizationName, "", req.Email, req.DisplayName, setup, r.centralSMTP)
 		if err != nil {
 			return err
 		}
@@ -90,7 +103,7 @@ func (r *PGRepository) CreateOrganization(ctx context.Context, spec *Organizatio
 	createAccount func(ctx context.Context) error, audit *operator.AuditEntry) (Result, error) {
 	result := Result{OrganizationID: setup.OrganizationID, Plan: setup.Plan}
 	err := database.WithOrganizationSetup(ctx, r.pool, setup.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		slug, err := populate(ctx, tx, spec.Name, spec.Slug, spec.AdminEmail, spec.AdminDisplayName, setup)
+		slug, err := populate(ctx, tx, spec.Name, spec.Slug, spec.AdminEmail, spec.AdminDisplayName, setup, r.centralSMTP)
 		if err != nil {
 			return err
 		}
@@ -110,9 +123,10 @@ func (r *PGRepository) CreateOrganization(ctx context.Context, spec *Organizatio
 
 // populate is the creation chain shared by signup and operator: the
 // organization (its triggers seed the standard roles and the default VRF),
-// the first user as org_admin and the entitlements of setup. An empty slug
-// is derived from the name.
-func populate(ctx context.Context, tx pgx.Tx, name, slug, email, displayName string, setup *Setup) (string, error) {
+// the first user as org_admin, the entitlements of setup and the default
+// notification channels (in-app, central_smtp with centralSMTP; F-157). An
+// empty slug is derived from the name.
+func populate(ctx context.Context, tx pgx.Tx, name, slug, email, displayName string, setup *Setup, centralSMTP bool) (string, error) {
 	slug, err := insertOrganization(ctx, tx, name, slug, setup)
 	if err != nil {
 		return "", err
@@ -139,6 +153,9 @@ func populate(ctx context.Context, tx pgx.Tx, name, slug, email, displayName str
 			setup.OrganizationID, ent.FeatureKey, string(ent.Plan), ent.Enabled, ent.Limits, ent.ValidUntil, ent.Source); err != nil {
 			return "", fmt.Errorf("insert entitlement %s: %w", ent.FeatureKey, err)
 		}
+	}
+	if cerr := notify.ProvisionDefaultChannels(ctx, tx, setup.OrganizationID, centralSMTP); cerr != nil {
+		return "", cerr
 	}
 	return slug, nil
 }

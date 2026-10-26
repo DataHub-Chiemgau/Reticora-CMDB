@@ -839,7 +839,9 @@ func signupService(cfg *config.Config, pool *pgxpool.Pool, smtpSender *notify.SM
 		accounts signup.Accounts
 	)
 	if pool != nil {
-		repo = signup.NewPGRepository(pool)
+		// New organizations get an e-mail channel over the central SMTP
+		// server when there is one (F-157).
+		repo = signup.NewPGRepository(pool).WithCentralSMTP(smtpSender != nil)
 	}
 	if kc := keycloakAccounts(cfg); kc != nil {
 		accounts = kc

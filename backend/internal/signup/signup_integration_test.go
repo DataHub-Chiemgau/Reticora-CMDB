@@ -22,9 +22,10 @@ import (
 // TestSignupCreatesOrganizationAtomically covers WP-111 (TLC-01, API-05)
 // against PostgreSQL with the application role: a verified signup creates
 // the organization with slug, default VRF, the first user as org_admin, the
-// trial entitlements and an operator_audit entry; a taken slug gets a
-// suffix; a failing IdP rolls everything back; signup_request is invisible
-// to tenant transactions.
+// trial entitlements, the default notification channel (WP-509: in-app, no
+// e-mail channel without a central SMTP server) and an operator_audit
+// entry; a taken slug gets a suffix; a failing IdP rolls everything back;
+// signup_request is invisible to tenant transactions.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL).
 func TestSignupCreatesOrganizationAtomically(t *testing.T) {
@@ -37,12 +38,13 @@ func TestSignupCreatesOrganizationAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer appPool.Close()
+	t.Cleanup(appPool.Close)
 	adminPool, err := database.NewMaintenancePool(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer adminPool.Close()
+	// Closed after the cleanups below, which delete through it.
+	t.Cleanup(adminPool.Close)
 
 	suffix := make([]byte, 4)
 	_, _ = rand.Read(suffix)
@@ -147,6 +149,12 @@ func TestSignupCreatesOrganizationAtomically(t *testing.T) {
 		t.Errorf("entitlements = %v", ents)
 	}
 
+	// Default notification channels (WP-509, F-157): the in-app channel,
+	// enabled; no e-mail channel, the installation has no central SMTP.
+	if got := channelsOf(ctx, t, adminPool, res.OrganizationID); strings.Join(got, ",") != "inapp/inapp/In-App/true" {
+		t.Errorf("notification channels = %v, want the in-app channel only", got)
+	}
+
 	// operator_audit entry without the address; the chain still verifies.
 	var (
 		kind    string
@@ -198,6 +206,10 @@ func TestSignupCreatesOrganizationAtomically(t *testing.T) {
 	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM app_user WHERE email = 'eve@signup.example'`); n != 0 {
 		t.Errorf("users after rollback = %d", n)
 	}
+	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM notification_channel c JOIN organization o ON o.id = c.organization_id
+		WHERE o.name = $1`, orgName); n != 2 {
+		t.Errorf("notification channels after rollback = %d, want the 2 of the created organizations", n)
+	}
 	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM signup_request WHERE token_hash = $1 AND status = 'pending'`, hashToken(token3)); n != 1 {
 		t.Errorf("request is no longer pending after rollback")
 	}
@@ -228,6 +240,24 @@ func TestSignupCreatesOrganizationAtomically(t *testing.T) {
 	}
 }
 
+// channelsOf lists the notification channels of orgID as
+// kind/provider/name/enabled.
+func channelsOf(ctx context.Context, t *testing.T, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, orgID string) []string {
+	t.Helper()
+	rows, err := q.Query(ctx, `SELECT kind || '/' || provider || '/' || name || '/' || enabled FROM notification_channel
+		WHERE organization_id = $1 ORDER BY kind, name`, orgID)
+	if err != nil {
+		t.Fatalf("notification channels: %v", err)
+	}
+	got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("notification channels: %v", err)
+	}
+	return got
+}
+
 func countRows(ctx context.Context, t *testing.T, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, sql string, args ...any) int {
@@ -242,8 +272,9 @@ func countRows(ctx context.Context, t *testing.T, q interface {
 // TestOperatorCreatesOrganizationAtomically covers WP-113 (TLC-02) against
 // PostgreSQL: an operator creates an organization with plan and limits
 // through the signup's creation chain; the operator's audit entry is written
-// in the same transaction; an explicit, taken slug is a conflict and leaves
-// nothing behind.
+// in the same transaction; with a central SMTP server the organization
+// gets the in-app and the central_smtp channel (WP-509); an explicit, taken
+// slug is a conflict and leaves nothing behind.
 func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
@@ -254,12 +285,13 @@ func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer appPool.Close()
+	t.Cleanup(appPool.Close)
 	adminPool, err := database.NewMaintenancePool(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer adminPool.Close()
+	// Closed after the cleanups below, which delete through it.
+	t.Cleanup(adminPool.Close)
 
 	suffix := make([]byte, 4)
 	_, _ = rand.Read(suffix)
@@ -269,7 +301,7 @@ func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
 	})
 
 	accounts := &stubInviter{}
-	svc := NewService(NewPGRepository(appPool), nil, accounts, DefaultConfig())
+	svc := NewService(NewPGRepository(appPool).WithCentralSMTP(true), nil, accounts, DefaultConfig())
 	op := operator.Identity{ID: "op-wp113", Kind: "oidc"}
 	req := &operator.NewOrganization{Name: "Operator Test", Slug: slug, Plan: "pro", AdminEmail: "admin@op.example",
 		Limits: map[string]int64{entitlement.LimitMaxCIs: 7000, entitlement.LimitMaxUsers: 40}}
@@ -297,6 +329,11 @@ func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
 	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM app_user u JOIN role_assignment ra ON ra.user_id = u.id
 		JOIN role r ON r.id = ra.role_id WHERE u.organization_id = $1 AND u.email = 'admin@op.example' AND r.name = 'org_admin'`, created.ID); n != 1 {
 		t.Errorf("org_admin users = %d", n)
+	}
+	// Default notification channels (WP-509): e-mail over the central SMTP
+	// server of the installation and in-app.
+	if got := channelsOf(ctx, t, adminPool, created.ID); strings.Join(got, ",") != "email/central_smtp/E-Mail/true,inapp/inapp/In-App/true" {
+		t.Errorf("notification channels = %v, want central_smtp and in-app", got)
 	}
 	var limits map[string]int64
 	if err = adminPool.QueryRow(ctx, `SELECT limits FROM entitlement WHERE organization_id = $1 AND feature_key = 'cmdb_core'
@@ -330,5 +367,8 @@ func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
 	}
 	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM app_user WHERE email = 'other@op.example'`); n != 0 {
 		t.Errorf("users after conflict = %d", n)
+	}
+	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM notification_channel WHERE organization_id = $1`, created.ID); n != 2 {
+		t.Errorf("notification channels of the organization after a conflict = %d, want 2", n)
 	}
 }

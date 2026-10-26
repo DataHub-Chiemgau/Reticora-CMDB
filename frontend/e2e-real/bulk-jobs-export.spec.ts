@@ -43,8 +43,9 @@ import { api, signupTenant, stamp, uiLogin, BASE, SERVER, type Account } from '.
  *      export listed in the job center, foreign tenant 404
  *      .... WP-189 (EXP-01), WP-035 (EXP-01, TEN-06), WP-182 (API-09), WP-201 (TST-03)
  *  N01 export finished → in-app notification in the notification center, mark read,
- *      persisted, not visible to another tenant ...... WP-140 (NTF-05), WP-139 (NTF-04),
- *      WP-197 (UI-16)
+ *      persisted, not visible to another tenant; the signup tenant has its default in-app
+ *      and central e-mail channels without any setup ...... WP-140 (NTF-05), WP-139 (NTF-04),
+ *      WP-197 (UI-16), WP-509 (NTF-01, NTF-04, UI-16)
  *  W01 webhook to a local catcher (127.0.0.1) in the webhooks page is refused by the egress
  *      protection, not stored, nothing delivered, the refusal is explained in the UI
  *      ..................................................... WP-049 (SEC-08), WP-191/192 (UI-01..10)
@@ -54,9 +55,9 @@ import { api, signupTenant, stamp, uiLogin, BASE, SERVER, type Account } from '.
  *
  * Notes: the CMDB list selects at most the 25 rows of its visible page, so a bulk job
  * (≥ 100 ids) cannot be started from the UI; J01 starts it through the endpoint the UI uses
- * (POST /api/v1/cis/bulk) and follows it in the job center UI. A fresh tenant has no
- * notification channel and the UI offers no page to create one; N01 creates the in-app
- * channel through REST (POST /api/v1/notification-channels).
+ * (POST /api/v1/cis/bulk) and follows it in the job center UI. A fresh tenant gets its
+ * notification channels when it is created (WP-509): N01 creates none and only checks
+ * that they are there.
  *
  * A failing test is a product finding: the assertions encode the requirement texts in
  * docs/spec/katalog-v3 and the WP acceptance criteria, not the observed behaviour.
@@ -921,17 +922,18 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
 
   test('N01 a finished export notifies its initiator in the notification center; read state persists', async () => {
     const page = a.page;
-    // The UI has no page for notification channels: the in-app channel is set up via REST.
-    const channels = rows(await ok<List<{ kind: string }>>(a, 'GET', '/notification-channels'));
-    if (!channels.some((ch) => ch.kind === 'inapp')) {
-      await ok(a, 'POST', '/notification-channels', {
-        name: `In-App ${s}`,
-        kind: 'inapp',
-        provider: 'inapp',
-        enabled: true,
-        config: {},
-      });
-    }
+    // WP-509 (F-157): the signup created the default channels with the tenant, nothing is
+    // set up here — the in-app channel and, since the stack has a central SMTP server
+    // (the signup's verification mail needs it), e-mail over it.
+    const channels = rows(
+      await ok<List<{ kind: string; provider: string; enabled: boolean }>>(
+        a,
+        'GET',
+        '/notification-channels',
+      ),
+    );
+    expect(channels.filter((ch) => ch.kind === 'inapp' && ch.enabled)).toHaveLength(1);
+    expect(channels.filter((ch) => ch.provider === 'central_smtp' && ch.enabled)).toHaveLength(1);
     // One more CI than in any earlier export, so this export's notification text is unique.
     await newCI(a, { name: `nt1x${s}-extra` });
 
