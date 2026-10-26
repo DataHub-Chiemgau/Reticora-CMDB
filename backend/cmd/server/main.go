@@ -414,7 +414,9 @@ func main() {
 			notify.ProviderSMTP:        notify.NewEmailProvider(smtpSender).WithEgress(egressPolicy),
 			notify.ProviderInApp:       notify.NewInAppProvider(notifications.Inbox),
 			notify.ProviderWebhook:     notify.NewWebhookProvider(egress.NewClient(egressPolicy)),
-		}))
+		})).
+		// E-mail channels send only with notifications_email (ENT-05).
+		WithEntitlements(entitlementSvc)
 	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(egressPolicy), webhook.DispatcherOptions{
 		// Subscriptions bound to a service account receive only events whose
 		// object the account may read (RBA-08).

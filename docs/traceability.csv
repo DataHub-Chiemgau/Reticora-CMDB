@@ -732,3 +732,5 @@ REC-01;[B];D;backend/internal/discovery/consumer_integration_test.go;WP-481
 NFR-03;[B], Teilumfang [P5];D;backend/internal/discovery/consumer_test.go;WP-481
 LOC-07;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-474
 LOC-11;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-474
+ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-471
+API-04;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-471

@@ -4557,7 +4557,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
@@ -4596,7 +4596,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -4626,7 +4626,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -4666,7 +4666,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -5951,6 +5951,8 @@ paths:
                 $ref: '#/components/schemas/RackListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
@@ -5978,6 +5980,8 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -5997,6 +6001,8 @@ paths:
                 $ref: '#/components/schemas/Rack'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
@@ -6024,6 +6030,8 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
@@ -6035,6 +6043,8 @@ paths:
           description: Rack deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -6059,6 +6069,8 @@ paths:
                 $ref: '#/components/schemas/RackLayout'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -6101,6 +6113,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -6128,6 +6142,8 @@ paths:
           description: The CI was unmounted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -6155,6 +6171,8 @@ paths:
                 $ref: '#/components/schemas/RackMountListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
     post:
@@ -6185,6 +6203,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -6228,6 +6248,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
     post:
@@ -6254,6 +6276,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -6290,6 +6314,8 @@ paths:
                 $ref: '#/components/schemas/RackMount'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
@@ -6321,6 +6347,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -6347,6 +6375,8 @@ paths:
           description: Rack mount deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -6366,6 +6396,8 @@ paths:
                 $ref: '#/components/schemas/RackMount'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
@@ -6393,6 +6425,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -6415,6 +6449,8 @@ paths:
           description: Rack mount deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -12292,7 +12328,10 @@ components:
       description: >-
         API key of AUT-04. While the key store (database) is unreachable, a
         request with a well-formed key is refused with 503 and Retry-After,
-        not with 401 (OPS-06).
+        not with 401 (OPS-06). Every request with an API key needs the
+        api_access feature of the organization; without it the request is
+        refused with 403 feature-not-entitled on every operation (ENT-05).
+        Session requests do not need api_access.
     OperatorAuth:
       type: http
       scheme: bearer
@@ -12466,6 +12505,16 @@ components:
             $ref: '#/components/schemas/ProblemDetail'
     Forbidden:
       description: Forbidden
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    FeatureNotEntitled:
+      description: >-
+        Forbidden: a missing permission, or the organization's plan does not
+        include the feature of this operation (rack_view for racks and
+        mounts, api_access for API keys; type
+        https://reticora.io/problems/feature-not-entitled, ENT-05).
       content:
         application/problem+json:
           schema:

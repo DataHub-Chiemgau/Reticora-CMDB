@@ -10959,6 +10959,15 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
+    /** @description Forbidden: a missing permission, or the organization's plan does not include the feature of this operation (rack_view for racks and mounts, api_access for API keys; type https://reticora.io/problems/feature-not-entitled, ENT-05). */
+    FeatureNotEntitled: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
     /** @description Resource not found */
     NotFound: {
       headers: {
@@ -16417,7 +16426,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -16445,7 +16454,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       /** @description Name, permissions, expiry or environment invalid */
       422: {
@@ -16479,7 +16488,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
     };
@@ -16510,7 +16519,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       /** @description Overlap out of range */
       422: {
@@ -17975,6 +17984,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -18002,6 +18012,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
@@ -18029,6 +18040,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18052,6 +18064,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       409: components['responses']['LocationInUse'];
     };
@@ -18083,6 +18096,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
@@ -18110,6 +18124,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18150,6 +18165,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       /** @description The mount collides with another on an overlapping face, exceeds the rack height or mounts a child CI of a composition (RCK-01, RCK-02). */
       409: {
@@ -18192,6 +18208,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18233,6 +18250,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18263,6 +18281,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
       409: {
@@ -18321,6 +18340,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18348,6 +18368,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       /** @description The mount collides or is not allowed (RCK-01, RCK-02). */
       409: {
@@ -18391,6 +18412,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18414,6 +18436,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18444,6 +18467,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
       409: {
@@ -18478,6 +18502,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18501,6 +18526,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18531,6 +18557,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
       409: {

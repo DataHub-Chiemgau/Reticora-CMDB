@@ -18,9 +18,7 @@ go;backend/internal/server;TestAuditDefectRouteAuditFailureLeavesNoUnauditedMuta
 go;backend/internal/server;TestAuditDefectRouteAuditStoresOldAndNewValues;F-148
 go;backend/internal/server;TestAuditT2AIOptInSettableThroughAPI;F-074
 go;backend/internal/server;TestAuditT2ContractHasNoBareArrayLists;F-075
-go;backend/internal/server;TestAuditT2EntitlementAPIAccessGatesAPIKeys;F-070
 go;backend/internal/server;TestAuditT2EntitlementQuotasEnforced;F-072
-go;backend/internal/server;TestAuditT2EntitlementRackViewGated;F-070
 go;backend/internal/server;TestAuditT2ListsAreCursorPages;F-075
 go;backend/internal/server;TestAuditT3HealthRefreshRunsInG1;F-087
 go;backend/internal/server;TestAuditT3OverrideRefusesReservedNames;F-092

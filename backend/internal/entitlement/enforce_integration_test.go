@@ -20,6 +20,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -41,6 +42,12 @@ func enforcedRoutes(svc *entitlement.Service) http.Handler {
 	mux.Get("/api/v1/exports", ok)
 	mux.Get("/api/v1/topology", ok)
 	mux.Get("/api/v1/cis/{id}/blast-radius", ok)
+	mux.Get("/api/v1/racks", ok)
+	mux.Get("/api/v1/racks/{id}/layout", ok)
+	mux.Get("/api/v1/mounts", ok)
+	mux.Patch("/api/v1/rack-mounts/{id}", ok)
+	mux.Get("/api/v1/api-keys", ok)
+	mux.Post("/api/v1/api-keys", ok)
 	mux.Get("/api/v1/cis", ok)
 	graphqlbff.NewHandler(ci.NewMemoryRepository(), relationship.NewMemoryRepository()).
 		WithEntitlements(svc).RegisterRoutes(mux)
@@ -55,6 +62,13 @@ type response struct {
 
 func call(t *testing.T, h http.Handler, orgID, method, path string) response {
 	t.Helper()
+	return callAs(t, h, orgID, method, path, identity.PrincipalTypeUser)
+}
+
+// callAs sends the request as a session (PrincipalTypeUser) or as an API
+// key (PrincipalTypeAPIKey) of the organization.
+func callAs(t *testing.T, h http.Handler, orgID, method, path string, typ identity.PrincipalType) response {
+	t.Helper()
 	body := ""
 	if path == "/bff/graphql" {
 		body = `{"query":"{ cis { totalCount } }"}`
@@ -67,7 +81,7 @@ func call(t *testing.T, h http.Handler, orgID, method, path string) response {
 	ctx := database.ContextWithTenantScope(req.Context(), &scope)
 	ctx = tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: orgID})
 	ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: "user-1", OrganizationID: orgID,
-		Permissions: []identity.Permission{identity.PermCIRead}, Type: identity.PrincipalTypeUser})
+		Permissions: []identity.Permission{identity.PermCIRead}, Type: typ})
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req.WithContext(ctx))
 	var problem api.ProblemDetail
@@ -86,6 +100,12 @@ var gatedCalls = []struct{ method, path string }{
 	{http.MethodGet, "/api/v1/exports"},
 	{http.MethodGet, "/api/v1/topology"},
 	{http.MethodGet, "/api/v1/cis/c1/blast-radius"},
+	{http.MethodGet, "/api/v1/racks"},
+	{http.MethodGet, "/api/v1/racks/r1/layout"},
+	{http.MethodGet, "/api/v1/mounts"},
+	{http.MethodPatch, "/api/v1/rack-mounts/m1"},
+	{http.MethodGet, "/api/v1/api-keys"},
+	{http.MethodPost, "/api/v1/api-keys"},
 }
 
 // TestEntitlementEnforcement covers WP-072 (ENT-03, ENT-05, ENT-07, API-04,
@@ -289,6 +309,14 @@ func TestProvisionAddsMissingPlanFeatures(t *testing.T) {
 	if got := call(t, routes, f.OrgA, http.MethodGet, "/api/v1/topology"); got.status != http.StatusForbidden {
 		t.Fatalf("topology before provisioning: %+v, want 403 (F-210)", got)
 	}
+	// WP-471: without the provisioning the new gates would take racks, API
+	// keys and e-mail from an organization that held only cmdb_core.
+	if got := call(t, routes, f.OrgA, http.MethodGet, "/api/v1/racks"); got.status != http.StatusForbidden {
+		t.Fatalf("racks before provisioning: %+v, want 403", got)
+	}
+	if got := callAs(t, routes, f.OrgA, http.MethodGet, "/api/v1/cis", identity.PrincipalTypeAPIKey); got.status != http.StatusForbidden {
+		t.Fatalf("API key before provisioning: %+v, want 403", got)
+	}
 	coreA, rowsB := rows(f.OrgA)[entitlement.FeatureCMDBCore], rows(f.OrgB)
 
 	// Start: every feature of the pro plan is active, the core row is kept.
@@ -316,6 +344,13 @@ func TestProvisionAddsMissingPlanFeatures(t *testing.T) {
 		if got := call(t, routes, f.OrgA, c.method, c.path); got.status != http.StatusNoContent {
 			t.Errorf("org A %s %s after the start: %+v, want 204", c.method, c.path, got)
 		}
+	}
+	// WP-471: racks (above), API keys and e-mail stay available.
+	if got := callAs(t, routes, f.OrgA, http.MethodGet, "/api/v1/cis", identity.PrincipalTypeAPIKey); got.status != http.StatusNoContent {
+		t.Errorf("org A API key request after the start: %+v, want 204", got)
+	}
+	if mail := newMailNotifier(t, f.OrgA, svc); !mail.deliver(t) {
+		t.Errorf("org A e-mail after the start: not sent, want sent (notifications_email provisioned)")
 	}
 
 	// A deactivated export_csv and an expired discovery stay as they are;
@@ -368,4 +403,223 @@ func hasEnabled(list []entitlement.Entitlement, feature string) bool {
 		}
 	}
 	return false
+}
+
+// mailProvider records the e-mails it would send.
+type mailProvider struct{ sent int }
+
+func (m *mailProvider) Send(_ context.Context, _ *notify.Channel, _ *notify.Message) (*notify.Delivery, error) {
+	m.sent++
+	return &notify.Delivery{Recipients: 1}, nil
+}
+
+// mailNotifier is the notifier of the worker with one central e-mail
+// channel and one in-app channel of an organization; the entitlements are
+// read from PostgreSQL as reticora_app in the delivery's scope.
+type mailNotifier struct {
+	n      *notify.Notifier
+	store  *notify.MemoryStore
+	inbox  *notify.MemoryInbox
+	mail   *mailProvider
+	orgID  string
+	notice int
+}
+
+func newMailNotifier(t *testing.T, orgID string, features notify.FeatureChecker) *mailNotifier {
+	t.Helper()
+	repo := notify.NewMemoryRepository()
+	for _, ch := range []*notify.Channel{
+		{OrganizationID: orgID, Name: "mail", Provider: notify.ProviderCentralSMTP, Enabled: true},
+		{OrganizationID: orgID, Name: "center", Provider: notify.ProviderInApp, Enabled: true},
+	} {
+		if err := repo.Create(context.Background(), ch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := &mailNotifier{store: notify.NewMemoryStore(), inbox: notify.NewMemoryInbox(), mail: &mailProvider{}, orgID: orgID}
+	m.n = notify.NewNotifier(repo, m.store, m.store, notify.NewSender(map[string]notify.Provider{
+		notify.ProviderCentralSMTP: m.mail, notify.ProviderInApp: notify.NewInAppProvider(m.inbox)})).WithEntitlements(features)
+	return m
+}
+
+// deliver queues one notification for a user with an address, works it off
+// and reports whether the e-mail was sent. The in-app delivery is always
+// sent; a skipped e-mail carries the reason feature-not-entitled.
+func (m *mailNotifier) deliver(t *testing.T) bool {
+	t.Helper()
+	bg := context.Background()
+	m.notice++
+	before, inbox := m.mail.sent, len(m.inbox.For(m.orgID, "user-1"))
+	if _, err := m.n.Notify(bg, m.orgID, &notify.Request{Category: "export", Subject: "Export fertig",
+		DedupKey:   "export:" + time.Now().Format(time.RFC3339Nano),
+		Recipients: []notify.Recipient{{UserID: "user-1", Email: "ops@example.org"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.n.ProcessDue(bg); err != nil {
+		t.Fatalf("process deliveries: %v", err)
+	}
+	if got := len(m.inbox.For(m.orgID, "user-1")); got != inbox+1 {
+		t.Errorf("in-app delivery %d: %d notices, want %d", m.notice, got, inbox+1)
+	}
+	sent := m.mail.sent > before
+	if !sent {
+		rows, _ := m.store.List(bg, m.orgID, 2, 0)
+		skipped := false
+		for _, r := range rows {
+			skipped = skipped || (r.Status == notify.StatusSuppressed && r.LastError == notify.ReasonFeatureNotEntitled)
+		}
+		if !skipped {
+			t.Errorf("e-mail %d neither sent nor skipped as feature-not-entitled: %+v", m.notice, rows)
+		}
+	}
+	return sent
+}
+
+// TestEntitlementGatesRackAPIAccessEmail covers WP-471 (ENT-05, ENT-03,
+// API-04, F-070) against PostgreSQL (reticora_app) and Redis with two
+// service replicas sharing the cache, for rack_view, api_access and
+// notifications_email:
+//   - provisioned: racks, mounts, API keys, an X-API-Key request and the
+//     e-mail work;
+//   - a grant disabling the feature on replica A refuses it on replica B at
+//     once (403 feature-not-entitled; the e-mail is skipped, in-app stays);
+//     a session request without api_access stays 200;
+//   - enabled again, everything works;
+//   - a change that bypasses the service is seen at the latest when the
+//     cache entry expires: the entry lives at most 60 s, and a replica with
+//     a short lifetime sees the change after it.
+//
+// It runs only with TEST_DATABASE_URL and TEST_REDIS_URL.
+func TestEntitlementGatesRackAPIAccessEmail(t *testing.T) {
+	redisURL := os.Getenv("TEST_REDIS_URL")
+	if redisURL == "" || os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("TEST_DATABASE_URL and TEST_REDIS_URL required; skipping entitlement gate test")
+	}
+	f := scopetest.Seed(t, "64")
+	bg := context.Background()
+	client, err := redisx.Connect(bg, redisURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	store := cache.NewRedisStore(client.Unwrap())
+	key := "entitlements:" + f.OrgA
+	_ = store.Delete(bg, key)
+	t.Cleanup(func() { _ = store.Delete(bg, key) })
+
+	repo := entitlement.NewPGRepository(f.App)
+	replicaA := entitlement.NewService(repo, entitlement.Options{Cache: store, Enforce: true})
+	replicaB := entitlement.NewService(repo, entitlement.Options{Cache: store, Enforce: true})
+	if n, provErr := replicaA.ProvisionOrganizations(bg, map[string]entitlement.Plan{f.OrgA: entitlement.PlanEssential}); n != 1 || provErr != nil {
+		t.Fatalf("provision: %d, %v", n, provErr)
+	}
+	routesB := enforcedRoutes(replicaB)
+	mail := newMailNotifier(t, f.OrgA, replicaB)
+
+	type probe struct {
+		method, path string
+		typ          identity.PrincipalType
+	}
+	gated := map[string][]probe{
+		entitlement.FeatureRackView: {
+			{http.MethodGet, "/api/v1/racks", identity.PrincipalTypeUser},
+			{http.MethodGet, "/api/v1/racks/r1/layout", identity.PrincipalTypeUser},
+			{http.MethodGet, "/api/v1/mounts", identity.PrincipalTypeUser},
+			{http.MethodPatch, "/api/v1/rack-mounts/m1", identity.PrincipalTypeUser},
+		},
+		entitlement.FeatureAPIAccess: {
+			{http.MethodGet, "/api/v1/api-keys", identity.PrincipalTypeUser},
+			{http.MethodPost, "/api/v1/api-keys", identity.PrincipalTypeUser},
+			{http.MethodGet, "/api/v1/cis", identity.PrincipalTypeAPIKey},
+			{http.MethodGet, "/api/v1/exports", identity.PrincipalTypeAPIKey},
+		},
+	}
+	// allowed reports whether the feature's requests (or its e-mail) pass.
+	allowed := func(feature string, want bool) {
+		t.Helper()
+		if feature == entitlement.FeatureNotificationsEmail {
+			if got := mail.deliver(t); got != want {
+				t.Errorf("e-mail sent %t, want %t", got, want)
+			}
+			return
+		}
+		for _, p := range gated[feature] {
+			got := callAs(t, routesB, f.OrgA, p.method, p.path, p.typ)
+			switch {
+			case want && got.status != http.StatusNoContent:
+				t.Errorf("%s: %s %s (%s): %+v, want 204", feature, p.method, p.path, p.typ, got)
+			case !want && (got.status != http.StatusForbidden || got.problem != api.ProblemFeatureNotEntitled):
+				t.Errorf("%s disabled: %s %s (%s): %+v, want 403 feature-not-entitled", feature, p.method, p.path, p.typ, got)
+			}
+		}
+	}
+	grant := func(feature string, enabled bool) {
+		t.Helper()
+		if _, grantErr := replicaA.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: feature,
+			Plan: entitlement.PlanEssential, Enabled: enabled, Source: "manual"}); grantErr != nil {
+			t.Fatal(grantErr)
+		}
+	}
+
+	features := []string{entitlement.FeatureRackView, entitlement.FeatureAPIAccess, entitlement.FeatureNotificationsEmail}
+	for _, feature := range features {
+		allowed(feature, true)
+	}
+	for _, feature := range features {
+		// Replica B has the entitlements cached; the grant on replica A
+		// invalidates them at once.
+		if _, ok, _ := store.Get(bg, key); !ok {
+			t.Fatalf("%s: entitlements of org A not cached in Redis", feature)
+		}
+		grant(feature, false)
+		allowed(feature, false)
+		for _, other := range features {
+			if other != feature {
+				allowed(other, true)
+			}
+		}
+		if feature == entitlement.FeatureAPIAccess {
+			if got := call(t, routesB, f.OrgA, http.MethodGet, "/api/v1/cis"); got.status != http.StatusNoContent {
+				t.Errorf("session request without api_access: %+v, want 204", got)
+			}
+		}
+		grant(feature, true)
+		allowed(feature, true)
+	}
+
+	// A change that bypasses the service: the cached state holds until the
+	// entry expires, at most 60 s after it was cached (ENT-03).
+	if ttl, ttlErr := client.Unwrap().TTL(bg, key).Result(); ttlErr != nil || ttl <= 0 || ttl > entitlement.DefaultCacheTTL {
+		t.Errorf("cache lifetime of the entitlements: %s (%v), want at most %s", ttl, ttlErr, entitlement.DefaultCacheTTL)
+	}
+	_ = store.Delete(bg, key)
+	short := entitlement.NewService(repo, entitlement.Options{Cache: store, Enforce: true, CacheTTL: time.Second})
+	routesShort := enforcedRoutes(short)
+	if got := call(t, routesShort, f.OrgA, http.MethodGet, "/api/v1/racks"); got.status != http.StatusNoContent {
+		t.Fatalf("racks before the direct change: %+v", got)
+	}
+	if _, err = f.Admin.Exec(bg, `UPDATE entitlement SET enabled = false WHERE organization_id = $1
+		AND feature_key IN ('rack_view', 'api_access', 'notifications_email')`, f.OrgA); err != nil {
+		t.Fatal(err)
+	}
+	if got := call(t, routesShort, f.OrgA, http.MethodGet, "/api/v1/racks"); got.status != http.StatusNoContent {
+		t.Errorf("racks within the cache lifetime: %+v, want the cached state", got)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got := call(t, routesShort, f.OrgA, http.MethodGet, "/api/v1/racks")
+		if got.status == http.StatusForbidden {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("racks after the cache lifetime: %+v, want 403", got)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if got := callAs(t, routesShort, f.OrgA, http.MethodGet, "/api/v1/cis", identity.PrincipalTypeAPIKey); got.status != http.StatusForbidden {
+		t.Errorf("API key after the cache lifetime: %+v, want 403", got)
+	}
+	if newMailNotifier(t, f.OrgA, short).deliver(t) {
+		t.Error("e-mail after the cache lifetime: sent, want skipped")
+	}
 }

@@ -1,14 +1,18 @@
 package notify
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
@@ -386,5 +390,126 @@ func TestNoticesOfTheJOB02RunsRender(t *testing.T) {
 		if a.Permission != tc.permission || !a.AllWithPermission || a.ClientID != tc.client || a.SiteID != tc.site || a.CIID != tc.ci {
 			t.Errorf("%s: audience %+v, want %s in client %q, site %q, CI %q", tc.name, a, tc.permission, tc.client, tc.site, tc.ci)
 		}
+	}
+}
+
+// emailFeature answers the notifications_email lookup of the notifier and
+// records the tenant scope of each lookup.
+type emailFeature struct {
+	enabled bool
+	err     error
+	scopes  []string
+}
+
+func (e *emailFeature) Check(ctx context.Context, orgID, featureKey string) (entitlement.Entitlement, bool, error) {
+	scope, _ := database.TenantScopeFromContext(ctx)
+	e.scopes = append(e.scopes, orgID+"|"+scope.OrgID+"|"+featureKey)
+	if e.err != nil {
+		return entitlement.Entitlement{}, false, e.err
+	}
+	return entitlement.Entitlement{OrganizationID: orgID, FeatureKey: featureKey, Enabled: e.enabled}, e.enabled, nil
+}
+
+// TestNotifierEmailNeedsNotificationsEmail covers WP-471 (ENT-05, F-070):
+// the e-mail channels (central_smtp and an own smtp server) send only while
+// the organization holds notifications_email. Without it each e-mail
+// delivery is skipped with the reason feature-not-entitled, stored on the
+// delivery and logged; the in-app delivery of the same request is sent. A
+// failed lookup is retried, not skipped. The lookup runs in the scope of
+// the delivery's organization (the worker has no request scope).
+func TestNotifierEmailNeedsNotificationsEmail(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		enabled bool
+	}{{"entitled", true}, {"not entitled", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			var logs bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
+			repo, store, inbox := NewMemoryRepository(), NewMemoryStore(), NewMemoryInbox()
+			central, own := &flakyProvider{}, &flakyProvider{}
+			centralCh := &Channel{OrganizationID: "org-1", Name: "central", Provider: ProviderCentralSMTP, Enabled: true}
+			ownCh := &Channel{OrganizationID: "org-1", Name: "own", Provider: ProviderSMTP, Enabled: true,
+				Config: map[string]any{"host": "mail.example.org", "from": "cmdb@example.org"}}
+			for _, ch := range []*Channel{centralCh, ownCh,
+				{OrganizationID: "org-1", Name: "center", Provider: ProviderInApp, Enabled: true}} {
+				if err := repo.Create(ctx, ch); err != nil {
+					t.Fatal(err)
+				}
+			}
+			features := &emailFeature{enabled: tc.enabled}
+			n := NewNotifier(repo, store, store, NewSender(map[string]Provider{
+				ProviderCentralSMTP: central, ProviderSMTP: own, ProviderInApp: NewInAppProvider(inbox)})).
+				WithEntitlements(features)
+			if queued, err := n.Notify(ctx, "org-1", &Request{Category: "export", Subject: "Export fertig",
+				Recipients: []Recipient{{UserID: "u-1", Email: "a@x.example"}}}); err != nil || queued != 3 {
+				t.Fatalf("queued %d (%v), want 3", queued, err)
+			}
+			sent, err := n.ProcessDue(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := inbox.For("org-1", "u-1"); len(got) != 1 {
+				t.Errorf("in-app deliveries: %+v, want 1 regardless of notifications_email", got)
+			}
+			if len(features.scopes) != 2 {
+				t.Errorf("notifications_email lookups: %v, want one per e-mail delivery", features.scopes)
+			}
+			for _, s := range features.scopes {
+				if s != "org-1|org-1|"+entitlement.FeatureNotificationsEmail {
+					t.Errorf("lookup %q, want notifications_email in the scope of org-1", s)
+				}
+			}
+			rows, _ := store.List(ctx, "org-1", 10, 0)
+			if tc.enabled {
+				if sent != 3 || len(central.sent) != 1 || len(own.sent) != 1 {
+					t.Errorf("with notifications_email: sent %d, central %d, own smtp %d, want 3, 1, 1", sent, len(central.sent), len(own.sent))
+				}
+				for _, r := range rows {
+					if r.Status != StatusSent {
+						t.Errorf("delivery %s over %s: %s %q, want sent", r.ID, r.ChannelID, r.Status, r.LastError)
+					}
+				}
+				if strings.Contains(logs.String(), ReasonFeatureNotEntitled) {
+					t.Errorf("skip logged with notifications_email: %s", logs.String())
+				}
+				return
+			}
+			if sent != 1 || len(central.sent) != 0 || len(own.sent) != 0 {
+				t.Errorf("without notifications_email: sent %d, central %d, own smtp %d, want 1 (in-app), 0, 0", sent, len(central.sent), len(own.sent))
+			}
+			skipped := 0
+			for _, r := range rows {
+				switch {
+				case r.ChannelID == centralCh.ID || r.ChannelID == ownCh.ID:
+					if r.Status != StatusSuppressed || r.LastError != ReasonFeatureNotEntitled {
+						t.Errorf("e-mail delivery %s: %s %q, want suppressed feature-not-entitled", r.ID, r.Status, r.LastError)
+					}
+					skipped++
+				case r.Status != StatusSent:
+					t.Errorf("in-app delivery %s: %s %q, want sent", r.ID, r.Status, r.LastError)
+				}
+			}
+			if skipped != 2 {
+				t.Errorf("skipped e-mail deliveries: %d, want 2", skipped)
+			}
+			if got := strings.Count(logs.String(), "reason="+ReasonFeatureNotEntitled); got != 2 {
+				t.Errorf("logged skips: %d, want 2; log: %s", got, logs.String())
+			}
+
+			// A failed lookup is retried later, not skipped for good.
+			features.err = errors.New("entitlement store unavailable")
+			if _, err = n.Notify(ctx, "org-1", &Request{Category: "export", Subject: "Zweiter Export",
+				Recipients: []Recipient{{Email: "b@x.example"}}, ChannelIDs: []string{centralCh.ID}}); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = n.ProcessDue(ctx)
+			if last, _ := store.List(ctx, "org-1", 1, 0); last[0].Status != StatusPending || last[0].LastError == ReasonFeatureNotEntitled {
+				t.Errorf("failed lookup: %s %q, want pending for a retry", last[0].Status, last[0].LastError)
+			}
+		})
 	}
 }
