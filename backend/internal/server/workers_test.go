@@ -250,3 +250,50 @@ func readYAML(t *testing.T, path string, v any) {
 		t.Fatalf("%s: %v", path, err)
 	}
 }
+
+// TestAuditT3HealthRefreshRunsInG1 covers WP-480 (DB-05, MON-02, F-087):
+// under the G1 default module set (RETICORA_MODULES unset, E-03) the worker
+// that refreshes ci.health may start. The refresh used to run only inside
+// the alert evaluator, worker config.WorkerMonitoring, which the module
+// alerting (P3) gates, so ci.health stayed 'unknown'. Now the worker
+// config.WorkerHealth refreshes it; it belongs to no late module, the
+// monitoring worker stays gated by alerting.
+//
+// Retest:
+//
+//	cd backend && go test -count=1 -v -run 'TestAuditT3HealthRefreshRunsInG1' ./internal/server/
+func TestAuditT3HealthRefreshRunsInG1(t *testing.T) {
+	// Control: with the alerting module the monitoring worker starts.
+	alerting, err := ParseModules("alerting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !alerting.WorkerAllowed(config.WorkerMonitoring) {
+		t.Fatalf("control: monitoring worker not allowed with RETICORA_MODULES=alerting")
+	}
+
+	g1, err := ParseModules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var allowed []string
+	for _, name := range config.WorkerNames {
+		hostsHealth := name == config.WorkerMonitoring || strings.Contains(name, "health")
+		if hostsHealth && g1.WorkerAllowed(name) {
+			allowed = append(allowed, name)
+		}
+	}
+	if !slices.Equal(allowed, []string{config.WorkerHealth}) {
+		t.Errorf("G1 default module set (RETICORA_MODULES unset): workers that may refresh ci.health %v, want [%s] (%q stays gated by module 'alerting'; DB-05)",
+			allowed, config.WorkerHealth, config.WorkerMonitoring)
+	}
+	// The health worker belongs to no late module, so no module set stops it.
+	for _, m := range LateModules {
+		if slices.Contains(m.Workers, config.WorkerHealth) {
+			t.Errorf("module %s lists the worker %s; ci.health belongs to G1", m.Key, config.WorkerHealth)
+		}
+	}
+	if !alerting.WorkerAllowed(config.WorkerHealth) {
+		t.Errorf("RETICORA_MODULES=alerting stops the worker %s", config.WorkerHealth)
+	}
+}

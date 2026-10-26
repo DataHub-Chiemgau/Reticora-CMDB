@@ -30,7 +30,6 @@ type Evaluator struct {
 	metrics  MetricStore
 	alerts   AlertStore
 	notifier Notifier
-	health   HealthRefresher
 	// Now is overridable for tests.
 	Now func() time.Time
 }
@@ -65,10 +64,49 @@ type HealthRefreshingStore interface {
 	HealthRefresher() HealthRefresher
 }
 
-// WithHealth recomputes the health of the CIs after every evaluation.
-func (e *Evaluator) WithHealth(health HealthRefresher) *Evaluator {
-	e.health = health
-	return e
+// healthWorker is the worker name of the health refresh's metrics and
+// switch (config.WorkerHealth, OPS-02/05).
+const healthWorker = "health"
+
+// HealthWorker recomputes the health of the CIs on a ticker of its own,
+// apart from the alert evaluator: the metrics of MON-02 and ci.health
+// (DB-05) belong to G1, the alert rules to the module alerting (F-087).
+type HealthWorker struct {
+	health HealthRefresher
+}
+
+// NewHealthWorker builds the worker of the health refresh.
+func NewHealthWorker(health HealthRefresher) *HealthWorker {
+	return &HealthWorker{health: health}
+}
+
+// Run refreshes the health every interval (default one minute) until ctx is
+// cancelled. It blocks and is meant to run in its own goroutine.
+func (w *HealthWorker) Run(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		w.Refresh(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// Refresh recomputes the health once; every call is a cycle of the worker
+// health.
+func (w *HealthWorker) Refresh(ctx context.Context) {
+	failures := 0
+	if err := w.health.RefreshHealth(ctx); err != nil {
+		failures++
+		slog.Error("ci health refresh failed", "error", err)
+	}
+	observability.ObserveWorkerRun(healthWorker, failures)
 }
 
 // Run evaluates rules every interval until ctx is cancelled. It blocks and
@@ -107,12 +145,6 @@ func (e *Evaluator) Evaluate(ctx context.Context) {
 		if err := e.evaluateRule(ctx, rule); err != nil {
 			failures++
 			slog.Error("alert evaluation failed", "rule_id", rule.ID, "organization_id", rule.OrgID, "rule", rule.Name, "error", err)
-		}
-	}
-	if e.health != nil {
-		if err := e.health.RefreshHealth(ctx); err != nil {
-			failures++
-			slog.Error("ci health refresh failed", "error", err)
 		}
 	}
 }

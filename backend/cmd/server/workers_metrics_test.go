@@ -95,7 +95,7 @@ func TestEveryWorkerExportsRunAndErrorMetrics(t *testing.T) {
 		}
 		// Without a database dependency in this run the cycle succeeds.
 		for _, name := range []string{config.WorkerWebhookDispatcher, config.WorkerExport, config.WorkerIngest, config.WorkerMonitoring,
-			config.WorkerScheduler, config.WorkerJobs, config.WorkerNotifier} {
+			config.WorkerHealth, config.WorkerScheduler, config.WorkerJobs, config.WorkerNotifier} {
 			if after[name].errors != before[name].errors || after[name].lastSuccess < since {
 				t.Errorf("%s: errors %v -> %v, last success %v (started %v), want a cycle without error",
 					name, before[name].errors, after[name].errors, after[name].lastSuccess, since)
@@ -345,6 +345,7 @@ func (env *workerTestEnv) deps(t *testing.T, failing bool) *workerDeps {
 	center := notify.NewMemoryCenter()
 	var (
 		alerts                     = fakeAlerts{}
+		health                     = fakeHealth{}
 		state      jobs.StateStore = jobs.NewMemoryStateStore()
 		jobRepo                    = repos.Jobs
 		deliveries                 = center.Deliveries
@@ -353,11 +354,12 @@ func (env *workerTestEnv) deps(t *testing.T, failing bool) *workerDeps {
 		repos.WebhookDeliveries = failingWebhookDeliveries{repos.WebhookDeliveries}
 		repos.ExportJobs = failingExportJobs{repos.ExportJobs}
 		alerts.err = errForced
+		health.err = errForced
 		state = failingRunState{state}
 		jobRepo = failingJobs{jobRepo}
 		deliveries = failingNotifications{deliveries}
 	}
-	repos.Metrics = evaluatingMetrics{MetricStore: repos.Metrics, alerts: alerts}
+	repos.Metrics = evaluatingMetrics{MetricStore: repos.Metrics, alerts: alerts, health: health}
 	dispatcher := webhook.NewDispatcher(repos.Webhook, nil, webhook.DispatcherOptions{Deliveries: repos.WebhookDeliveries, PollInterval: -1})
 	t.Cleanup(func() { _ = dispatcher.Shutdown(context.Background()) })
 	scheduler := jobs.NewScheduler(jobs.NewMemoryLocker(), state)
@@ -397,11 +399,14 @@ type (
 		monitoring.AlertStore
 		err error
 	}
+	// fakeHealth refreshes nothing; with err the refresh fails.
+	fakeHealth struct{ err error }
 	// evaluatingMetrics lets the monitoring worker evaluate the in-memory
-	// metric store with alerts.
+	// metric store with alerts and the health worker refresh with health.
 	evaluatingMetrics struct {
 		monitoring.MetricStore
 		alerts monitoring.AlertStore
+		health monitoring.HealthRefresher
 	}
 )
 
@@ -430,6 +435,10 @@ func (failingNotifications) ClaimDue(context.Context, time.Time, int, time.Durat
 func (a fakeAlerts) ListEnabled(context.Context) ([]monitoring.AlertRule, error) { return nil, a.err }
 
 func (m evaluatingMetrics) AlertStore() monitoring.AlertStore { return m.alerts }
+
+func (m evaluatingMetrics) HealthRefresher() monitoring.HealthRefresher { return m.health }
+
+func (h fakeHealth) RefreshHealth(context.Context) error { return h.err }
 
 // TestEveryWorkerSwitchIsDeployable covers WP-447 (OPS-02, F-289): the
 // switch of every registered worker is set in the server service of

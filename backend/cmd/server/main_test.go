@@ -13,10 +13,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
@@ -29,6 +31,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
@@ -500,4 +504,91 @@ func registeredSystemJobs(t *testing.T, d *systemJobDeps) map[string]bool {
 		registered[kind] = true
 	}
 	return registered
+}
+
+// TestHealthWorkerIsWiredInG1 covers WP-480 (DB-05, MON-02, F-087): the
+// workers main builds (buildWorkers) and starts (workerSwitch) include the
+// worker health under the G1 default module set (RETICORA_MODULES unset),
+// while the alert evaluator (monitoring) stays off there. With
+// RETICORA_MODULES=alerting both run and ci.health is refreshed exactly once
+// per cycle of the worker health: the evaluator no longer refreshes it a
+// second time.
+func TestHealthWorkerIsWiredInG1(t *testing.T) {
+	t.Setenv(config.WorkerEnvKey(config.WorkerMonitoring), "true")
+	t.Setenv(config.WorkerEnvKey(config.WorkerHealth), "true")
+	cfg := config.Load()
+	refresher, alerts := &countingHealth{}, &countingAlerts{}
+	repos := server.MemoryRepositories()
+	repos.Metrics = evaluatingMetrics{MetricStore: repos.Metrics, alerts: alerts, health: refresher}
+	built, err := buildWorkers(&workerDeps{cfg: cfg, repos: &repos, cycle: testCycle})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pair []server.Worker
+	for _, w := range built {
+		if w.Name == config.WorkerHealth || w.Name == config.WorkerMonitoring {
+			pair = append(pair, w)
+		}
+	}
+	if len(pair) != 2 {
+		t.Fatalf("buildWorkers: %d of the workers health and monitoring, want both", len(pair))
+	}
+
+	g1, err := server.ParseModules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled := workerSwitch(cfg, g1); !enabled(config.WorkerHealth) || enabled(config.WorkerMonitoring) {
+		t.Errorf("RETICORA_MODULES unset: health starts %v, monitoring starts %v; want true, false",
+			enabled(config.WorkerHealth), enabled(config.WorkerMonitoring))
+	}
+
+	alerting, err := server.ParseModules("alerting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runsBefore := testutil.ToFloat64(observability.WorkerRuns.WithLabelValues(config.WorkerHealth))
+	set, err := server.StartWorkers(workerSwitch(cfg, alerting), pair...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for (refresher.calls.Load() < 3 || alerts.calls.Load() < 3) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err = set.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if started := set.Started(); len(started) != 2 {
+		t.Errorf("RETICORA_MODULES=alerting: started %v, want monitoring and health", started)
+	}
+	cycles := testutil.ToFloat64(observability.WorkerRuns.WithLabelValues(config.WorkerHealth)) - runsBefore
+	if alerts.calls.Load() < 3 || cycles < 3 {
+		t.Fatalf("evaluations %d, health cycles %v; want at least 3 each", alerts.calls.Load(), cycles)
+	}
+	if got := float64(refresher.calls.Load()); got != cycles {
+		t.Errorf("ci.health refreshed %v times in %v cycles of the worker health (%d evaluations); want exactly once per cycle",
+			got, cycles, alerts.calls.Load())
+	}
+}
+
+// countingHealth counts the refreshes of ci.health.
+type countingHealth struct{ calls atomic.Int64 }
+
+func (h *countingHealth) RefreshHealth(context.Context) error {
+	h.calls.Add(1)
+	return nil
+}
+
+// countingAlerts holds no alert rule and counts the evaluations.
+type countingAlerts struct {
+	monitoring.AlertStore
+	calls atomic.Int64
+}
+
+func (a *countingAlerts) ListEnabled(context.Context) ([]monitoring.AlertRule, error) {
+	a.calls.Add(1)
+	return nil, nil
 }

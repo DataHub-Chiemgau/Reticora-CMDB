@@ -12,7 +12,6 @@ go;backend/internal/relationship;TestAuditCleanupCronScopeDeadline;F-111
 go;backend/internal/server;TestAuditDefectDiscoveryJobInGenericJobModel;F-146
 go;backend/internal/server;TestAuditDefectRouteAuditFailureLeavesNoUnauditedMutation;F-149
 go;backend/internal/server;TestAuditDefectRouteAuditStoresOldAndNewValues;F-148
-go;backend/internal/server;TestAuditT3HealthRefreshRunsInG1;F-087
 go;backend/internal/topology;TestAuditT3BlastRadiusMarksHeuristicCIs;F-098
 go;backend/internal/webhook;TestAuditDefectWebhookConsumerKeepsEventsOnTransientErrors;F-151
 go;collector/collectorcmd;TestAuditCollectorEnrollsFromEnvironment;F-101

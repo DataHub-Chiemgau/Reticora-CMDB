@@ -456,9 +456,7 @@ func main() {
 	repos.CI = bootstrap.NewCIRepository(repos.CI, repos.Search, repos.AI, aiProvider,
 		ai.NewOrgConsent(repos.AI, entitlementSvc), modules)
 	// A worker of a switched-off module does not start (WP-214).
-	workerEnabled := func(name string) bool {
-		return cfg.WorkerEnabled(name) && modules.WorkerAllowed(name)
-	}
+	workerEnabled := workerSwitch(cfg, modules)
 	// The backlog per lane as the ingest worker's 30-s sampler read it last,
 	// informational: it never takes the instance out of the load balancer,
 	// and a request never asks NATS (WP-334, OPS-05). Only the ingest worker
