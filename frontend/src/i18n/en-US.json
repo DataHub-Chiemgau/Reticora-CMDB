@@ -316,7 +316,6 @@
       "enable": "Enable",
       "disable": "Disable",
       "delete": "Delete",
-      "invalid": "The scope was refused. Check target and schedule (at least 5 minutes).",
       "health": {
         "ok": "Last run ok",
         "partial": "Partially failed",
@@ -333,6 +332,56 @@
         "config_error": "Configuration error",
         "upload_failed": "Upload failed (buffered)",
         "unknown": "Unknown error"
+      },
+      "edit": "Edit",
+      "editNamed": "Edit scope {{name}}",
+      "enableNamed": "Enable scope {{name}}",
+      "disableNamed": "Disable scope {{name}}",
+      "deleteNamed": "Delete scope {{name}}",
+      "credentialCount": "credentials: {{count}}",
+      "form": {
+        "createTitle": "Add scope to {{collector}}",
+        "editTitle": "Edit scope {{name}}",
+        "name": "Name",
+        "namePlaceholder": "Empty: the target",
+        "site": "Site",
+        "siteNone": "Site of the collector",
+        "vrf": "VRF",
+        "vrfNone": "None (global routing)",
+        "scheduleHint": "Interval (e.g. 24h, at least 5m) or five-field cron expression. Cron runs in the time zone of the organization.",
+        "plugins": "Plugins",
+        "pluginsRequired": "Select at least one plugin.",
+        "targetRequired": "Enter a target.",
+        "credentials": "Credentials",
+        "credentialsHint": "Without a selection the credentials of the client and of the organization apply.",
+        "credentialsNone": "No matching credentials.",
+        "credentialsUnavailable": "The credentials could not be loaded (missing credential:read?). Without a selection the credentials of the client and of the organization apply."
+      },
+      "plugin": {
+        "sweep": "Ping sweep",
+        "snmp": "SNMP",
+        "ssh": "SSH",
+        "wmi": "WMI",
+        "ipmi": "IPMI",
+        "redfish": "Redfish",
+        "power": "UPS/PDU",
+        "nas": "NAS"
+      },
+      "confirmDelete": {
+        "title": "Delete scope?",
+        "text": "The scope {{name}} ({{target}}) is deleted; the collector no longer scans this target.",
+        "confirm": "Delete permanently"
+      },
+      "errors": {
+        "notSaved": "The scope was not saved. Check the marked fields.",
+        "invalidValue": "Invalid value: {{detail}}",
+        "rejected": "The scope was refused: {{detail}}",
+        "saveFailed": "The scope could not be saved: {{reason}}",
+        "toggleFailed": "Scope {{name}} could not be switched: {{reason}}",
+        "deleteFailed": "Scope {{name}} could not be deleted: {{reason}}",
+        "forbidden": "You lack the permission (discovery:manage).",
+        "notFound": "The scope no longer exists.",
+        "reason": "{{detail}}"
       }
     },
     "suggestions": {
@@ -340,7 +389,8 @@
       "intro": "Your collectors reported these subnets after enrollment. Confirm them to have them discovered.",
       "from": "reported by {{collector}}",
       "accept": "Add as scope",
-      "dismiss": "Dismiss"
+      "dismiss": "Dismiss",
+      "failed": "The suggestion could not be resolved: {{reason}}"
     }
   },
   "webhook": {

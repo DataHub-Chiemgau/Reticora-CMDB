@@ -310,13 +310,12 @@
       "target": "Ziel",
       "targetPlaceholder": "z. B. 10.0.0.0/24",
       "schedule": "Zeitplan (Intervall oder Cron)",
-      "add": "Scope hinzufügen",
+      "add": "Scope anlegen",
       "enabled": "Aktiv",
       "disabled": "Inaktiv",
       "enable": "Aktivieren",
       "disable": "Deaktivieren",
       "delete": "Löschen",
-      "invalid": "Der Scope wurde abgelehnt. Prüfen Sie Ziel und Zeitplan (mindestens 5 Minuten).",
       "health": {
         "ok": "Letzter Lauf ok",
         "partial": "Teilweise fehlgeschlagen",
@@ -333,6 +332,56 @@
         "config_error": "Konfigurationsfehler",
         "upload_failed": "Upload fehlgeschlagen (gepuffert)",
         "unknown": "Unbekannter Fehler"
+      },
+      "edit": "Bearbeiten",
+      "editNamed": "Scope {{name}} bearbeiten",
+      "enableNamed": "Scope {{name}} aktivieren",
+      "disableNamed": "Scope {{name}} deaktivieren",
+      "deleteNamed": "Scope {{name}} löschen",
+      "credentialCount": "Credentials: {{count}}",
+      "form": {
+        "createTitle": "Scope anlegen für {{collector}}",
+        "editTitle": "Scope {{name}} bearbeiten",
+        "name": "Name",
+        "namePlaceholder": "Ohne Angabe: das Ziel",
+        "site": "Site",
+        "siteNone": "Site des Collectors",
+        "vrf": "VRF",
+        "vrfNone": "Keine (globales Routing)",
+        "scheduleHint": "Intervall (z. B. 24h, mindestens 5m) oder Cron-Ausdruck mit fünf Feldern. Cron in der Zeitzone der Organisation.",
+        "plugins": "Plugins",
+        "pluginsRequired": "Wählen Sie mindestens ein Plugin.",
+        "targetRequired": "Geben Sie ein Ziel an.",
+        "credentials": "Credentials",
+        "credentialsHint": "Ohne Auswahl gelten die Credentials des Clients und der Organisation.",
+        "credentialsNone": "Keine passenden Credentials vorhanden.",
+        "credentialsUnavailable": "Die Credentials konnten nicht geladen werden (Recht credential:read fehlt?). Ohne Auswahl gelten die Credentials des Clients und der Organisation."
+      },
+      "plugin": {
+        "sweep": "Ping-Sweep",
+        "snmp": "SNMP",
+        "ssh": "SSH",
+        "wmi": "WMI",
+        "ipmi": "IPMI",
+        "redfish": "Redfish",
+        "power": "USV/PDU",
+        "nas": "NAS"
+      },
+      "confirmDelete": {
+        "title": "Scope löschen?",
+        "text": "Der Scope {{name}} ({{target}}) wird gelöscht; der Collector durchsucht dieses Ziel danach nicht mehr.",
+        "confirm": "Endgültig löschen"
+      },
+      "errors": {
+        "notSaved": "Der Scope wurde nicht gespeichert. Prüfen Sie die markierten Felder.",
+        "invalidValue": "Ungültiger Wert: {{detail}}",
+        "rejected": "Der Scope wurde abgelehnt: {{detail}}",
+        "saveFailed": "Der Scope konnte nicht gespeichert werden: {{reason}}",
+        "toggleFailed": "Scope {{name}} konnte nicht umgeschaltet werden: {{reason}}",
+        "deleteFailed": "Scope {{name}} konnte nicht gelöscht werden: {{reason}}",
+        "forbidden": "Ihnen fehlt das Recht dazu (discovery:manage).",
+        "notFound": "Der Scope existiert nicht mehr.",
+        "reason": "{{detail}}"
       }
     },
     "suggestions": {
@@ -340,7 +389,8 @@
       "intro": "Diese Subnetze haben Ihre Collectors nach dem Enrollment gemeldet. Bestätigen Sie sie, damit sie inventarisiert werden.",
       "from": "gemeldet von {{collector}}",
       "accept": "Als Scope übernehmen",
-      "dismiss": "Verwerfen"
+      "dismiss": "Verwerfen",
+      "failed": "Der Vorschlag konnte nicht bearbeitet werden: {{reason}}"
     }
   },
   "webhook": {

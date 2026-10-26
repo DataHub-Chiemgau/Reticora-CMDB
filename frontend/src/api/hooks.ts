@@ -32,9 +32,11 @@ import {
   auditApi,
   privacyApi,
   credentialApi,
+  vrfApi,
 } from '../api/client';
 import type {
   DiscoveryScopeInput,
+  DiscoveryScopePatch,
   CICreateRequest,
   CIListParams,
   CIUpdateRequest,
@@ -170,7 +172,7 @@ export function useDiscoveryScopeMutations(collectorId: string) {
       onSuccess: invalidate,
     }),
     update: useMutation({
-      mutationFn: ({ id, patch }: { id: string; patch: Partial<DiscoveryScopeInput> }) =>
+      mutationFn: ({ id, patch }: { id: string; patch: DiscoveryScopePatch }) =>
         discoveryScopeApi.update(id, patch),
       onSuccess: invalidate,
     }),
@@ -179,6 +181,25 @@ export function useDiscoveryScopeMutations(collectorId: string) {
       onSuccess: invalidate,
     }),
   };
+}
+
+/** The credentials (metadata only) a scope form offers; needs credential:read. */
+export function useCredentials(enabled = true) {
+  return useQuery({
+    queryKey: ['credentials', 'options'],
+    queryFn: () => credentialApi.list({ limit: 200 }),
+    enabled,
+    retry: false,
+  });
+}
+
+/** The VRFs of the organization, the default first (TEN-10). */
+export function useVrfs(enabled = true) {
+  return useQuery({
+    queryKey: ['vrfs', 'options'],
+    queryFn: () => vrfApi.list({ limit: 200 }),
+    enabled,
+  });
 }
 
 export function useScopeSuggestions() {

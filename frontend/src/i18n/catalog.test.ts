@@ -9,6 +9,7 @@ import enUS from './en-US.json';
 import { DASHBOARD_ROLES, parseDashboardRole } from '../stores/dashboard';
 import { STOCKTAKE_SCOPES, STOCKTAKE_STATUSES } from '../pages/StocktakeListPage';
 import { FIELD_TYPES } from '../pages/CITypeAdminPage';
+import { DISCOVERY_PLUGINS } from '../pages/DiscoveryPage';
 
 type Catalog = Record<string, unknown>;
 
@@ -32,6 +33,7 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['stocktake.scopes', STOCKTAKE_SCOPES],
   ['citypes.dataTypes', FIELD_TYPES],
   ['discovery.collectorStatus', COLLECTOR_STATUSES],
+  ['discovery.scopes.plugin', DISCOVERY_PLUGINS],
 ];
 
 describe('i18n catalog', () => {

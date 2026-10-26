@@ -212,15 +212,29 @@ export interface DiscoveryErrorState {
   target?: string;
 }
 
+/** Discovery plugins a scope can run (DiscoveryScope.plugins in api/openapi.yaml). */
+export type DiscoveryPlugin =
+  'sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas';
+
 export interface DiscoveryScopeInput {
   collector_id: string;
   kind: DiscoveryScopeKind;
   target: string;
   name?: string;
+  site_id?: string;
+  vrf_id?: string;
   schedule?: string;
+  /** Empty: the credentials of the scope's client and the organization-wide ones apply (E-67). */
+  credential_ids?: string[];
   plugins?: string[];
   enabled?: boolean;
 }
+
+/**
+ * DiscoveryScopePatch changes a scope; an empty site_id or vrf_id removes
+ * the site or VRF, credential_ids and plugins replace the lists.
+ */
+export type DiscoveryScopePatch = Partial<Omit<DiscoveryScopeInput, 'collector_id'>>;
 
 export interface CIListParams {
   limit?: number;
@@ -648,7 +662,10 @@ export const discoveryScopeApi = {
   create(input: DiscoveryScopeInput): Promise<DiscoveryScope> {
     return fetchAPI('/discovery-scopes', { method: 'POST', body: JSON.stringify(input) });
   },
-  update(id: string, patch: Partial<DiscoveryScopeInput>): Promise<DiscoveryScope> {
+  get(id: string): Promise<DiscoveryScope> {
+    return fetchAPI(`/discovery-scopes/${id}`);
+  },
+  update(id: string, patch: DiscoveryScopePatch): Promise<DiscoveryScope> {
     return fetchAPI(`/discovery-scopes/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
   },
   delete(id: string): Promise<void> {
@@ -1844,7 +1861,24 @@ export const privacyApi = {
   },
 };
 
+/** Credential metadata; the secret material is never returned. */
+export interface Credential {
+  id: string;
+  organization_id: string;
+  /** Unset: organization-wide. */
+  client_id?: string;
+  name: string;
+  kind: string;
+  scope?: string;
+  key_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export const credentialApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<Credential>> {
+    return fetchAPI(`/credentials${buildQuery(params)}`);
+  },
   rotateKeys(): Promise<{ key_version: number; rotated: number }> {
     return fetchAPI('/credentials/rotate-keys', { method: 'POST' });
   },
@@ -2243,6 +2277,23 @@ export interface Site {
   created_at: string;
   updated_at: string;
 }
+
+/** VRF of the organization (TEN-10); every organization has the default VRF. */
+export interface VRF {
+  id: string;
+  organization_id: string;
+  name: string;
+  description?: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const vrfApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<VRF>> {
+    return fetchAPI(`/vrfs${buildQuery(params)}`);
+  },
+};
 
 export const siteApi = {
   list(params: ListParams & { client_id?: string } = {}): Promise<PaginatedResponse<Site>> {

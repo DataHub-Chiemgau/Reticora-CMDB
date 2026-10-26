@@ -799,3 +799,5 @@ MET-11;B/G1, Teil P2/G2;B;backend/internal/discovery/typedvalues_integration_tes
 CI-03;[B];B;backend/internal/discovery/typedvalues_integration_test.go;WP-501
 TLC-03;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-510
 API-05;[B];B;frontend/src/pages/UserManagementPage.test.tsx;WP-510
+DIS-09;[B];D;frontend/e2e-real/discovery-scopes.spec.ts;WP-496
+DIS-08;[Q];D;frontend/src/pages/DiscoveryPage.test.tsx;WP-496
