@@ -122,7 +122,8 @@ export const ciTypeApi = {
 };
 
 // Index flags of an attribute definition (MET-15, DB-04): a change queues
-// the attribute.index job that builds idx_attr_<id> or idx_attr_<id>_u.
+// the job that builds idx_attr_<id>, idx_attr_<id>_u or the index of the key
+// (idx_attr_key_<key>, E-73).
 export interface AttributeIndexFlags {
   searchable: boolean;
   unique: boolean;
