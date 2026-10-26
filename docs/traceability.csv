@@ -748,3 +748,6 @@ COL-05;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-483
 OPS-06;[Q];D;collector/collectorcmd/collectorcmd_test.go;WP-483
 NFR-04;[B], Teilumfang [P5];D;collector/collectorcmd/collectorcmd_test.go;WP-483
 API-02;[B];C;backend/internal/server/pagination_test.go;WP-467
+GLO-13;[B];D;backend/internal/server/override_routes_integration_test.go;WP-478
+CI-10;[B];D;backend/internal/ci/namespace_integration_test.go;WP-478
+REC-03;[B];D;backend/internal/override/decide_test.go;WP-478

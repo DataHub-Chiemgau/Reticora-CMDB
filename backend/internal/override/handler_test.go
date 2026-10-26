@@ -103,3 +103,56 @@ func TestOverrideChangesReturnTheCIVersion(t *testing.T) {
 		}
 	}
 }
+
+// TestOverrideRefusesReservedNames covers WP-478 (GLO-13, E-23; F-092):
+// PUT and DELETE of an override with a reserved namespace as name answer
+// 400 with the field "name" and do not reach the repository; the
+// repositories refuse the names as well (ErrReservedName).
+func TestOverrideRefusesReservedNames(t *testing.T) {
+	// The stub would answer 200: a 400 shows the handler refused first.
+	changed := stubRepository{fv: &override.FieldValue{CIID: "ci-1", CIVersion: 7}}
+	memory := override.NewMemoryRepository()
+	for _, name := range []string{"_overrides", "_observed", "_provenance", "_instance"} {
+		path := "/api/v1/cis/ci-1/fields/" + name + "/override"
+		for method, body := range map[string]string{http.MethodPut: `{"value":"x","reason":"r"}`, http.MethodDelete: ""} {
+			for repoName, repo := range map[string]override.Repository{"stub": changed, "memory": memory} {
+				w := serveOverride(repo, "org-1", method, path, body)
+				if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `"field":"name"`) {
+					t.Errorf("%s %s (%s): %d %s, want 400 with the field name", method, name, repoName, w.Code, w.Body.String())
+				}
+			}
+		}
+		if _, err := memory.SetOverride(context.Background(), "org-1", "ci-1", name, "x", "", "r", true); !errors.Is(err, override.ErrReservedName) {
+			t.Errorf("memory SetOverride %s: %v, want ErrReservedName", name, err)
+		}
+		if _, err := memory.ClearOverride(context.Background(), "org-1", "ci-1", name); !errors.Is(err, override.ErrReservedName) {
+			t.Errorf("memory ClearOverride %s: %v, want ErrReservedName", name, err)
+		}
+	}
+	// A normal attribute and a name that only starts with "_" stay possible.
+	for _, name := range []string{"owner", "_instance_note"} {
+		w := serveOverride(memory, "org-1", http.MethodPut, "/api/v1/cis/ci-1/fields/"+name+"/override", `{"value":"x","reason":"r"}`)
+		if w.Code != http.StatusOK {
+			t.Errorf("PUT %s: %d %s, want 200", name, w.Code, w.Body.String())
+		}
+	}
+	// A repository refusal reaches the client as the same 400.
+	refused := stubRepository{err: fmt.Errorf("set: %w", override.ErrReservedName)}
+	for method, body := range map[string]string{http.MethodPut: `{"value":"x","reason":"r"}`, http.MethodDelete: ""} {
+		w := serveOverride(refused, "org-1", method, "/api/v1/cis/ci-1/fields/owner/override", body)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `"field":"name"`) {
+			t.Errorf("%s with ErrReservedName from the repository: %d %s, want 400", method, w.Code, w.Body.String())
+		}
+	}
+}
+
+// TestSourcePolicyDefaultFollowsREC03 covers WP-478 (REC-03, F-230): GET
+// /reconciliation/source-policy without a policy of the organization
+// returns the REC-03 order (override.DefaultPriorities).
+func TestSourcePolicyDefaultFollowsREC03(t *testing.T) {
+	w := serveOverride(override.NewMemoryRepository(), "org-1", http.MethodGet, "/api/v1/reconciliation/source-policy", "")
+	want := `"priorities":["manual","manual_override","override","import","workflow","ipmi","redfish","agent","snmp","api","integration","wmi","nas","ssh","sweep"]`
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), want) {
+		t.Errorf("GET source-policy: %d %s, want %s", w.Code, w.Body.String(), want)
+	}
+}

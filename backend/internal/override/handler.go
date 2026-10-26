@@ -63,11 +63,30 @@ func (h *Handler) ListForCI(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, api.CompleteList(items))
 }
 
-// SetOverride handles PUT /api/v1/cis/{id}/fields/{name}/override
+// refuseReservedName answers 400 with the field "name" when the path names
+// a reserved attribute namespace (GLO-13, E-23) and reports whether it did.
+func refuseReservedName(w http.ResponseWriter, r *http.Request) bool {
+	if !IsReservedName(chi.URLParam(r, "name")) {
+		return false
+	}
+	writeReservedName(w)
+	return true
+}
+
+func writeReservedName(w http.ResponseWriter) {
+	api.WriteFieldError(w, &api.FieldError{Field: "name",
+		Message: "reserved attribute namespace (_overrides, _observed, _provenance, _instance), not a field (GLO-13)"})
+}
+
+// SetOverride handles PUT /api/v1/cis/{id}/fields/{name}/override. A
+// reserved namespace as name is 400 (GLO-13).
 func (h *Handler) SetOverride(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	if refuseReservedName(w, r) {
 		return
 	}
 	var req SetOverrideRequest
@@ -98,6 +117,10 @@ func (h *Handler) SetOverride(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
 			return
 		}
+		if errors.Is(err, ErrReservedName) {
+			writeReservedName(w)
+			return
+		}
 		api.WriteRepoError(w, err)
 		return
 	}
@@ -106,17 +129,24 @@ func (h *Handler) SetOverride(w http.ResponseWriter, r *http.Request) {
 }
 
 // ClearOverride handles DELETE /api/v1/cis/{id}/fields/{name}/override. An
-// unknown CI or field is 404, any other failure goes through
-// api.WriteRepoError (F-232).
+// unknown CI or field is 404, a reserved namespace as name 400 (GLO-13),
+// any other failure goes through api.WriteRepoError (F-232).
 func (h *Handler) ClearOverride(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
+	if refuseReservedName(w, r) {
+		return
+	}
 	fv, err := h.repo.ClearOverride(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), chi.URLParam(r, "name"))
 	if errors.Is(err, ErrNotFound) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "field value not found")
+		return
+	}
+	if errors.Is(err, ErrReservedName) {
+		writeReservedName(w)
 		return
 	}
 	if err != nil {

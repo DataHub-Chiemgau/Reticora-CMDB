@@ -6059,7 +6059,7 @@ export interface paths {
       header?: never;
       path: {
         id: string;
-        /** @description CI column or attribute name */
+        /** @description CI column or attribute name. The attribute namespaces _overrides, _observed, _provenance and _instance are no fields (GLO-13): 400 with the field name. */
         name: string;
       };
       cookie?: never;
@@ -6067,13 +6067,13 @@ export interface paths {
     get?: never;
     /**
      * Set a manual field override
-     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden. The override is a manual write (API-07): in the same transaction the CI version rises by one and the CI history records the change (change_type override; an attribute counts as the field attributes, as for PATCH), so a PATCH of the field with an older If-Match is refused with 409.
+     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden; a reserved namespace (_overrides, _observed, _provenance, _instance) as name is 400 with the field name (GLO-13). The override is a manual write (API-07): in the same transaction the CI version rises by one and the CI history records the change (change_type override; an attribute counts as the field attributes, as for PATCH), so a PATCH of the field with an older If-Match is refused with 409.
      */
     put: operations['putCisIdFieldsNameOverride'];
     post?: never;
     /**
      * Clear a manual field override
-     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited. Clearing an override is a manual write (API-07): the CI version rises by one and the CI history records the change, as for PUT. A field without an override keeps the version.
+     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited. Clearing an override is a manual write (API-07): the CI version rises by one and the CI history records the change, as for PUT. A field without an override keeps the version. A reserved namespace as name is 400 (GLO-13).
      */
     delete: operations['deleteCisIdFieldsNameOverride'];
     options?: never;
@@ -6397,7 +6397,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read or update the source-priority policy */
+    /**
+     * Read or update the source-priority policy
+     * @description The organization's default policy; without one the built-in priorities: the sources of the REC-03 rank table by descending rank, sources of the same rank by name.
+     */
     get: operations['listReconciliationSourcePolicy'];
     /**
      * Read or update the source-priority policy
@@ -26454,7 +26457,7 @@ export interface operations {
       header?: never;
       path: {
         id: string;
-        /** @description CI column or attribute name */
+        /** @description CI column or attribute name. The attribute namespaces _overrides, _observed, _provenance and _instance are no fields (GLO-13): 400 with the field name. */
         name: string;
       };
       cookie?: never;
@@ -26497,7 +26500,7 @@ export interface operations {
       header?: never;
       path: {
         id: string;
-        /** @description CI column or attribute name */
+        /** @description CI column or attribute name. The attribute namespaces _overrides, _observed, _provenance and _instance are no fields (GLO-13): 400 with the field name. */
         name: string;
       };
       cookie?: never;
@@ -26515,6 +26518,7 @@ export interface operations {
           'application/json': components['schemas']['FieldProvenance'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       /** @description Unknown or invisible CI, or the CI has no value of the field */
       404: {

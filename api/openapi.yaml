@@ -11459,7 +11459,16 @@ paths:
   /api/v1/cis/{id}/fields/{name}/override:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string } }
-      - { name: name, in: path, required: true, schema: { type: string }, description: CI column or attribute name }
+      - name: name
+        in: path
+        required: true
+        description: >-
+          CI column or attribute name. The attribute namespaces _overrides,
+          _observed, _provenance and _instance are no fields (GLO-13): 400
+          with the field name.
+        schema:
+          type: string
+          pattern: '^(?!(_overrides|_observed|_provenance|_instance)$).+$'
     put:
       operationId: putCisIdFieldsNameOverride
       tags: [CIs]
@@ -11467,7 +11476,8 @@ paths:
       description: >-
         The CI takes the value at once; automation sources never overwrite it
         (REC-03). Structural columns (client_id, location_id, ci_type_id, ...)
-        cannot be overridden. The override is a manual write (API-07): in the
+        cannot be overridden; a reserved namespace (_overrides, _observed,
+        _provenance, _instance) as name is 400 with the field name (GLO-13). The override is a manual write (API-07): in the
         same transaction the CI version rises by one and the CI history
         records the change (change_type override; an attribute counts as the
         field attributes, as for PATCH), so a PATCH of the field with an
@@ -11505,7 +11515,7 @@ paths:
         the same transaction; the change is audited. Clearing an override is
         a manual write (API-07): the CI version rises by one and the CI
         history records the change, as for PUT. A field without an override
-        keeps the version.
+        keeps the version. A reserved namespace as name is 400 (GLO-13).
       responses:
         '200':
           description: Field provenance after the change
@@ -11516,6 +11526,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/FieldProvenance' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
           description: Unknown or invisible CI, or the CI has no value of the field
@@ -11986,6 +11997,10 @@ paths:
     get:
       operationId: listReconciliationSourcePolicy
       summary: Read or update the source-priority policy
+      description: >-
+        The organization's default policy; without one the built-in
+        priorities: the sources of the REC-03 rank table by descending rank,
+        sources of the same rank by name.
       responses:
         '200':
           description: Read or update the source-priority policy
