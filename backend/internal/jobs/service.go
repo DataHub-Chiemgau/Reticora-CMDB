@@ -12,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // Defaults of a kind that sets none.
@@ -94,6 +95,27 @@ func creatorScope(ctx context.Context) *Scope {
 		return nil
 	}
 	return ScopeOf(&scope)
+}
+
+// CreatorContext returns ctx with the tenant and the scope of the job's
+// creator, the snapshot creatorScope took when the job was queued: a queue
+// worker runs the job of a request like that request (TEN-09), so row level
+// security shows it the creator's rows only. A job without snapshot (queued
+// outside a request) runs organization-wide, the rule of its visibility
+// (E-09).
+func CreatorContext(ctx context.Context, job *Job) context.Context {
+	scope := database.OrgWideScope(job.OrganizationID, job.CreatedBy)
+	if s := job.Scope; s != nil {
+		set := func(ids []string) database.ScopeSet {
+			if ids == nil {
+				return database.AllScopes()
+			}
+			return database.ScopeIDs(ids...)
+		}
+		scope.Clients, scope.Sites, scope.Teams = set(s.Clients), set(s.Sites), set(s.Teams)
+	}
+	ctx = tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: job.OrganizationID, UserID: job.CreatedBy})
+	return database.ContextWithTenantScope(ctx, &scope)
 }
 
 // Enqueue creates a queued job of a registered kind with the scope of its
@@ -180,14 +202,29 @@ func (s *Service) Succeed(ctx context.Context, orgID, id string, result any) (*J
 // Fail records a failed attempt: the job goes back to the queue after the
 // backoff of its kind while attempts remain, otherwise it fails.
 func (s *Service) Fail(ctx context.Context, orgID, id string, cause error) (*Job, error) {
+	return s.fail(ctx, orgID, id, cause, true, 0)
+}
+
+// failAttempt fails the given attempt of a running job (reaper): retry as
+// in Fail, or at once without a further attempt, whatever attempts remain,
+// when no executor would run the job again. A job that started another
+// attempt meanwhile is left alone (ErrTransition).
+func (s *Service) failAttempt(ctx context.Context, orgID, id string, attempt int, cause error, retry bool) (*Job, error) {
+	return s.fail(ctx, orgID, id, cause, retry, attempt)
+}
+
+func (s *Service) fail(ctx context.Context, orgID, id string, cause error, retry bool, attempt int) (*Job, error) {
 	job, err := s.repo.Get(ctx, orgID, id)
 	if err != nil {
 		return nil, err
 	}
+	if attempt > 0 && job.Attempts != attempt {
+		return nil, fmt.Errorf("%w: attempt %d of the job ended, attempt %d runs", ErrTransition, attempt, job.Attempts)
+	}
 	msg := cause.Error()
 	now := s.now()
 	JobFailures.WithLabelValues(job.Kind).Inc()
-	if job.Attempts < job.MaxAttempts {
+	if retry && job.Attempts < job.MaxAttempts {
 		backoff := DefaultBackoff
 		if k, kerr := s.kind(job.Kind); kerr == nil {
 			backoff = k.Backoff
@@ -225,6 +262,13 @@ func (s *Service) Cancel(ctx context.Context, orgID, id string) (*Job, error) {
 // ErrTimeout is the error of an attempt that exceeded its timeout.
 var ErrTimeout = errors.New("job timed out")
 
+// errWorkerLost is the error of an attempt whose worker did not end it
+// within its timeout: the worker died or was stopped (crash, rolling
+// deploy) and left the job running.
+func errWorkerLost(timeout time.Duration) error {
+	return fmt.Errorf("%w after %s (worker lost)", ErrTimeout, timeout)
+}
+
 // ReapTimeouts fails the running jobs whose attempt exceeded the timeout
 // of the job; it returns how many it failed.
 func (s *Service) ReapTimeouts(ctx context.Context, orgID string) (int, error) {
@@ -240,7 +284,7 @@ func (s *Service) ReapTimeouts(ctx context.Context, orgID string) (int, error) {
 		if timeout <= 0 || j.StartedAt == nil || now.Sub(*j.StartedAt) <= timeout {
 			continue
 		}
-		if _, ferr := s.Fail(ctx, orgID, j.ID, fmt.Errorf("%w after %s", ErrTimeout, timeout)); ferr != nil {
+		if _, ferr := s.Fail(ctx, orgID, j.ID, errWorkerLost(timeout)); ferr != nil {
 			if errors.Is(ferr, ErrTransition) {
 				continue
 			}

@@ -2,6 +2,7 @@ package ci
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -79,6 +80,19 @@ func (s *Service) WithBulkJobs(j BulkJobs) *Service {
 	return s
 }
 
+// BulkQueue submits bulk jobs to the job queue on NATS (TEC-14), whose
+// workers run them with RunBulkJob; jobs.Queue implements it.
+type BulkQueue interface {
+	Submit(ctx context.Context, orgID, kind string, params any, opts jobs.EnqueueOptions) (*jobs.Job, bool, error)
+}
+
+// WithBulkQueue runs the bulk jobs on the job queue instead of in this
+// process: a job outlives the replica that accepted it.
+func (s *Service) WithBulkQueue(q BulkQueue) *Service {
+	s.bulkQueue = q
+	return s
+}
+
 // validateBulk normalizes and checks a bulk request: known action, 1–500
 // distinct ids, a valid status for set_status.
 func validateBulk(req *BulkRequest) error {
@@ -110,15 +124,23 @@ func validateBulk(req *BulkRequest) error {
 }
 
 // Bulk runs the bulk operation synchronously below BulkJobFromIDs ids; from
-// there on it enqueues a job, runs it in the background and returns the
-// job (the result is the job result).
+// there on it returns a job whose result is the report: submitted to the
+// job queue when there is one (TEC-14), otherwise enqueued and run in the
+// background of this process.
 func (s *Service) Bulk(ctx context.Context, orgID string, req *BulkRequest) (*BulkResult, *jobs.Job, error) {
 	if err := validateBulk(req); err != nil {
 		return nil, nil, err
 	}
-	if len(req.IDs) < BulkJobFromIDs || s.bulkJobs == nil {
+	if len(req.IDs) < BulkJobFromIDs || (s.bulkJobs == nil && s.bulkQueue == nil) {
 		result := s.runBulk(ctx, orgID, tenant.FromContext(ctx).UserID, req)
 		return result, nil, nil
+	}
+	if s.bulkQueue != nil {
+		job, _, err := s.bulkQueue.Submit(ctx, orgID, BulkJobKind, req, jobs.EnqueueOptions{CreatedBy: tenant.FromContext(ctx).UserID})
+		if err != nil {
+			return nil, nil, fmt.Errorf("submit bulk job: %w", err)
+		}
+		return nil, job, nil
 	}
 	job, _, err := s.bulkJobs.Enqueue(ctx, orgID, BulkJobKind, req, jobs.EnqueueOptions{CreatedBy: tenant.FromContext(ctx).UserID})
 	if err != nil {
@@ -142,6 +164,21 @@ func (s *Service) runBulkJob(ctx context.Context, orgID, jobID string, req *Bulk
 	if _, err = s.bulkJobs.Succeed(ctx, orgID, jobID, result); err != nil {
 		slog.ErrorContext(ctx, "record bulk job", "job", jobID, "error", err)
 	}
+}
+
+// RunBulkJob runs a bulk job of the job queue (handler of ci.bulk): the
+// operation of its parameters with the tenant and scope of its creator
+// (jobs.CreatorContext), who is the author of its changes. The report is
+// the job result.
+func (s *Service) RunBulkJob(ctx context.Context, job *jobs.Job) (any, error) {
+	var req BulkRequest
+	if err := json.Unmarshal(job.Params, &req); err != nil {
+		return nil, fmt.Errorf("decode bulk job parameters: %w", err)
+	}
+	if err := validateBulk(&req); err != nil {
+		return nil, fmt.Errorf("invalid bulk job parameters: %w", err)
+	}
+	return s.runBulk(jobs.CreatorContext(ctx, job), job.OrganizationID, job.CreatedBy, &req), nil
 }
 
 // bulkWorkers bounds the CIs a bulk changes at once: each change is its own

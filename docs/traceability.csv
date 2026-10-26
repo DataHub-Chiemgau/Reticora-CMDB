@@ -809,3 +809,5 @@ REP-01;[B];B;backend/internal/server/discovery_job_tracking_integration_test.go;
 MET-15;B/G1;B;frontend/src/pages/CITypeAdminPage.flags.test.tsx;WP-511
 DB-04;nicht geliefert;B;backend/internal/citype/attrdef_integration_test.go;WP-511
 VIE-01;[B];C;backend/internal/savedview/savedview_integration_test.go;WP-518
+TEC-14;[B];B;backend/internal/jobs/queue_integration_test.go;WP-503
+JOB-01;[B];B;backend/internal/server/jobkinds_test.go;WP-503

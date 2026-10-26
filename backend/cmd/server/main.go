@@ -519,6 +519,7 @@ func main() {
 		Egress:               egressPolicy,
 		Readiness:            readiness,
 		IngestQueue:          ingestQueue,
+		JobQueue:             jobQueue,
 		Signup:               signupService(cfg, auditPool, smtpSender),
 		Notifications:        notifications,
 		Events:               emitterOf(auditPool),
@@ -552,7 +553,8 @@ func main() {
 		systemScheduler = jobs.NewScheduler(jobs.NewMemoryLocker(), jobs.NewMemoryStateStore())
 	}
 	if err = registerSystemJobs(systemScheduler, &systemJobDeps{cfg: cfg, pool: auditPool, encryptor: encryptor,
-		repos: &repos, modules: modules, entitlements: entitlementSvc, dispatcher: webhookDispatcher}); err != nil {
+		repos: &repos, modules: modules, entitlements: entitlementSvc, dispatcher: webhookDispatcher,
+		jobQueue: jobQueue}); err != nil {
 		slog.Error("failed to register a system job", "error", err)
 		os.Exit(1)
 	}

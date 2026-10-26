@@ -375,3 +375,86 @@ func TestAuditT7BulkReportMatchesStoredStatus(t *testing.T) {
 		}
 	})
 }
+
+// queuedDelivery is a job message handed to Queue.Process.
+type queuedDelivery struct {
+	data  []byte
+	acked bool
+}
+
+func (d *queuedDelivery) Data() []byte                     { return d.data }
+func (d *queuedDelivery) Ack() error                       { d.acked = true; return nil }
+func (d *queuedDelivery) NakWithDelay(time.Duration) error { return nil }
+
+// TestBulkJobOnQueueRunsWithCreatorScope covers WP-503 (TEC-14, JOB-01,
+// TEN-09) against PostgreSQL: with the job queue a bulk change from 100 ids
+// is submitted (queued, no goroutine of the request runs it); the queue's
+// worker runs it outside the request with the scope of its creator, a
+// client-scoped principal: its CIs change with it as the author, the CI of
+// another client is 404 in the report and keeps its status.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestBulkJobOnQueueRunsWithCreatorScope(t *testing.T) {
+	f := scopetest.Seed(t, "b9")
+	bg := context.Background()
+	ctx := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User, ClientID: f.Client1})
+	repo := jobs.NewPGRepository(f.App)
+	queue := jobs.NewQueue(jobs.NewService(repo), nil)
+	svc := ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder())).WithBulkQueue(queue)
+	queue.Handle(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1}, svc.RunBulkJob)
+
+	var ids []string
+	rows, err := f.Admin.Query(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status)
+		SELECT $1, $2, (SELECT id FROM ci_type WHERE key = 'server' AND organization_id IS NULL), 'bulk-queue-' || g, 'active'
+		FROM generate_series(1, 99) g RETURNING id::text`, f.OrgA, f.Client1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	foreign := f.CI(t, f.OrgA, f.Client2, "bulk-queue-foreign")
+	ids = append(ids, foreign)
+
+	res, job, err := svc.Bulk(ctx, f.OrgA, &ci.BulkRequest{Action: ci.BulkSetStatus, IDs: ids, Status: ci.StatusInactive})
+	if err != nil || res != nil || job == nil {
+		t.Fatalf("bulk: %+v %+v %v", res, job, err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got, _ := repo.Get(bg, f.OrgA, job.ID); got.Status != jobs.StatusQueued || got.Scope == nil {
+		t.Fatalf("job after the request: %+v; want queued with the creator's scope", got)
+	}
+
+	data, _ := json.Marshal(jobs.Message{OrganizationID: f.OrgA, JobID: job.ID, Kind: ci.BulkJobKind})
+	d := &queuedDelivery{data: data}
+	if out := queue.Process(bg, d); !out.Ran || !d.acked {
+		t.Fatalf("queue: %+v", out)
+	}
+	done, err := repo.Get(bg, f.OrgA, job.ID)
+	if err != nil || done.Status != jobs.StatusSucceeded {
+		t.Fatalf("job: %+v %v", done, err)
+	}
+	var report ci.BulkResult
+	if err = json.Unmarshal(done.Result, &report); err != nil || report.Succeeded != 99 || report.Failed != 1 {
+		t.Fatalf("report: %+v %v", report, err)
+	}
+	if last := report.Items[len(report.Items)-1]; last.ID != foreign || last.Code != http.StatusNotFound {
+		t.Errorf("CI of another client in the report: %+v, want 404", last)
+	}
+	var inactive, authored int
+	var foreignStatus string
+	if err = f.Admin.QueryRow(bg, `SELECT
+		(SELECT count(*) FROM ci WHERE id = ANY($1::uuid[]) AND status = 'inactive'),
+		(SELECT count(*) FROM ci_change WHERE ci_id = ANY($1::uuid[]) AND field_name = 'status' AND actor_id = $2),
+		(SELECT status FROM ci WHERE id = $3)`, ids, f.User, foreign).Scan(&inactive, &authored, &foreignStatus); err != nil {
+		t.Fatal(err)
+	}
+	if inactive != 99 || authored != 99 || foreignStatus != "active" {
+		t.Errorf("inactive %d, changes by the creator %d, foreign status %s; want 99, 99, active", inactive, authored, foreignStatus)
+	}
+}

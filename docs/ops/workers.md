@@ -40,13 +40,13 @@ stop a single worker during an incident, without touching the API.
 | `ingest` | `RETICORA_WORKER_INGEST_ENABLED` | Consumes `ingest.>` from NATS (REC-01): one consumer per ingest lane (`RETICORA_INGEST_LANES`, default 4), the consumer of the releases before the lanes and lanes left by a higher lane count; at most 6 batches at a time per instance. The API still publishes to the queue. It also answers the collectors' records, heartbeats and metric samples over the NATS endpoint (`collector.<org>.<id>.ingest`, `….heartbeat`, `….metrics`, COL-08, MON-02; the samples are assigned in the collector's client and site scope and need the monitoring entitlement); a request of an unknown or disabled collector is refused before it is handled and changes nothing (COL-04). Only an instance running this worker reports the backlog per lane in `/readyz` (`details.ingest`, its last 30-s sample); every instance running it holds up to 1,542 identity locks, which sizes the PostgreSQL lock table. See [`docs/betrieb/ingest-spuren.md`](../betrieb/ingest-spuren.md). |
 | `monitoring` | `RETICORA_WORKER_MONITORING_ENABLED` | Evaluates the alert rules every minute (MON-04). Part of the module `alerting`: it starts only with `RETICORA_MODULES` naming `alerting` (or `all`), otherwise the server logs `worker disabled` for it. It does not compute `ci.health`; that is the worker `health`. |
 | `health` | `RETICORA_WORKER_HEALTH_ENABLED` | Recomputes `ci.health` of every CI every minute (DB-05, MON-02): per organization, in its tenant transaction, the database function `ci_refresh_health` sets `critical` or `warning` when the latest sample of a metric breaches an enabled alert rule of that severity, `ok` for samples of the last 15 minutes without a breach and `unknown` without such a sample. It belongs to no late module and runs in the G1 default configuration (`RETICORA_MODULES` empty); with the module `alerting` the refresh still runs once per cycle, here and not in `monitoring` (F-087). Run it on one or more instances; a refresh is idempotent. Needs the database. |
-| `scheduler` | `RETICORA_WORKER_SCHEDULER_ENABLED` | Runs the system jobs on their cron schedules (JOB-02). Every replica runs a scheduler; one leads through a PostgreSQL advisory lock, each job kind also runs under a lock of its own, so scaling (HPA) never runs a job twice. When the leader stops or loses its database session, another replica takes over and catches up on missed slots, at most `MaxCatchUp` per kind (state in `scheduler_run`). Registered: `reservation.expire` (every minute) releases expired reservations; the retention runs (nightly, see below); the notice runs `entitlement.notices` and `certificate.notices` (daily, see below); `audit.route_intents` (every minute, see below). |
+| `scheduler` | `RETICORA_WORKER_SCHEDULER_ENABLED` | Runs the system jobs on their cron schedules (JOB-02). Every replica runs a scheduler; one leads through a PostgreSQL advisory lock, each job kind also runs under a lock of its own, so scaling (HPA) never runs a job twice. When the leader stops or loses its database session, another replica takes over and catches up on missed slots, at most `MaxCatchUp` per kind (state in `scheduler_run`). Registered: `reservation.expire` (every minute) releases expired reservations; the retention runs (nightly, see below); the notice runs `entitlement.notices` and `certificate.notices` (daily, see below); `audit.route_intents` (every minute, see below); `jobs.reap` (every minute, see "Job queue and timeout reaper"). |
 | `events` | `RETICORA_WORKER_EVENTS_ENABLED` | Publishes the domain events of the transactional outbox (`event_outbox`) in sequence order per organization to the NATS stream `RETICORA_EVENTS` (`events.<org_id>.<type>`, 30 days / 10 GB) and to the webhook subscriptions; one instance per organization at a time (EVT-01, EVT-02). Without NATS the webhooks still receive the events. |
 | `notifier` | `RETICORA_WORKER_NOTIFIER_ENABLED` | Delivers queued notifications (`notification_delivery`) over their channels — e-mail, in-app, webhook — with retry and exponential backoff (5 attempts), deduplication by key, the recipients' quiet hours and muted categories (critical notifications ignore both); replicas share the queue, a delivery whose instance died is taken over after 10 minutes (NTF-04). |
 | `nats_edge` | `RETICORA_WORKER_NATS_EDGE_ENABLED` | Collector NATS endpoint (COL-08): writes the collector CA bundle, the server certificate of `nats-edge` (host names from `RETICORA_NATS_EDGE_HOSTS`, renewed from 60 % of its lifetime) and the generated `edge.conf` into `RETICORA_PKI_DIR` (daily), and answers the endpoint's authorization callout at `RETICORA_NATS_EDGE_URL`: only certificates of the collector CA that are not revoked, of collectors that are not disabled, each confined to its own subjects, for at most 15 minutes per authorization (docs/betrieb/firewall-matrix.md). A disable, announced on the internal NATS (`discovery.collector.disabled`, also by other replicas), makes one instance cut the collector's open connections through the endpoint's system account within seconds; a failure is logged as `discovery.collector.kick_failed` and retried. The first connection with a renewed certificate revokes its predecessors; hourly it revokes predecessors whose successor was issued 7 days ago (docs/betrieb/collector-ca.md). Run it on one or more server instances; its keys derive from the master key. |
 | `credential_bundles` | `RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED` | Answers the collectors' bundle requests (`collector.<org>.<id>.credentials.request` over the NATS endpoint): verifies the presented certificate (collector CA, not revoked, collector not disabled) and returns the effective credentials of the collector's enabled discovery scopes (a scope with `credential_ids` those, a scope without them the organization-wide ones and those of its client; only credentials that are organization-wide or of the scope's client; without an enabled scope none, E-67), encrypted for the collector's key (ECDH P-256, HKDF, AES-GCM); every delivery is audited (`credential.bundle_delivered`, COL-02). It also renews the collectors' certificates (`collector.<org>.<id>.certificate.renew`, queue group): signed with the current key, from 60 % of the lifetime, audited as `collector.certificate_issued` (COL-04, docs/betrieb/collector-ca.md). Needs `RETICORA_NATS_URL`. |
 | `discovery_scopes` | `RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED` | Serves the collectors' discovery scopes over the NATS endpoint (DIS-09): `collector.<org>.<id>.scopes.request` returns the enabled scopes of a collector that is not disabled with their run state (`last_run_at`, `next_run_at`) and the organization's `timezone` (a (re)started collector schedules each sweep from them instead of at once; a cron schedule is evaluated in that zone, DIS-10), `…scopes.result` records a run (`last_run_at`, `last_result`, `next_run_at`), `…subnets.report` turns the local subnets a collector reports after enrollment into `scope_suggested` review items (accepting one creates the scope). A request of an unknown or disabled collector is refused before it is handled and changes nothing (COL-04). Needs `RETICORA_NATS_URL`. |
-| `jobs` | `RETICORA_WORKER_JOBS_ENABLED` | Consumes the `JOBS` work-queue stream on NATS (`jobs.<kind>`, TEC-14): one durable consumer per job kind, the database claim runs each job once, a job whose instance died is taken over after its timeout. Only active with NATS. |
+| `jobs` | `RETICORA_WORKER_JOBS_ENABLED` | Consumes the `JOBS` work-queue stream on NATS (`jobs.<kind>`, TEC-14): one durable consumer per job kind, the database claim runs each job once, a job whose instance died is taken over after its timeout. Runs the bulk changes (`ci.bulk`) and state snapshots (`history.snapshot`), see "Job queue and timeout reaper". Only active with NATS; with NATS at least one instance must run it, or these jobs stay queued. |
 | `offline_detector` | `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED` | The CI offline detector (REC-09, LCY-05), the system job `ci.offline_detector` of the scheduler (every 5 minutes, on the leading replica): an observable, discovered CI whose `last_seen_at` is older than three times the interval of its discovery scope becomes `unknown` (`ci.offline`), and `active` again once seen (`ci.online`). Switched off, the job is not registered on this instance; since a replica with the switch on can lead, switch it off on every instance. The former switch `RETICORA_OFFLINE_DETECTOR_ENABLED` still applies while `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED` is not set and is logged as deprecated; next to it, it is ignored. Needs the database. |
 
 ## Destinations of the notifier (SEC-08)
@@ -261,6 +261,55 @@ entry. An organization whose entries fail keeps its intents for the next
 run. Each run sets `reticora_audit_route_intents_pending` (all intents not
 yet completed); a value that stays above zero for several minutes means the
 audit trail cannot be written.
+
+## Job queue and timeout reaper (TEC-14, JOB-01, WP-503)
+
+The job kinds the application submits register their handlers in one
+place, `backend/internal/server/jobkinds.go`:
+
+| Kind | Submitted by | Attempts | Timeout |
+|---|---|---|---|
+| `ci.bulk` | `POST /api/v1/cis/bulk` from 100 ids | 1 | 30 min |
+| `history.snapshot` | `POST /api/v1/history/snapshots` | 3 | 15 min |
+
+With NATS (`RETICORA_NATS_URL`) the request stores the job (`job` table,
+status `queued`, with the scope of its creator) and announces it on
+`jobs.<kind>` of the work-queue stream `JOBS`; no goroutine of the request
+runs it. The `jobs` worker of any instance claims it in the database, runs
+it with the tenant and scope of its creator and acknowledges the message
+when the job has ended. A submit of a kind without a handler on the queue
+is refused. If the instance dies after the claim (crash, rolling deploy),
+the message is not acknowledged and comes back after the timeout of the
+kind plus 30 s (`AckWait`); the instance that receives it fails the lost
+attempt with `job timed out after <timeout> (worker lost)` and:
+
+- `history.snapshot` only reads and is idempotent: the job is claimed
+  again and runs in the next attempt, up to three attempts, then it fails;
+- `ci.bulk` has no item progress, a change applied in part must not be
+  repeated: the job fails with `worker lost` and is not run again. The
+  caller checks the CIs and submits the remaining change again.
+
+Without NATS both kinds run in the background of the instance that
+accepted the request, as before; a job of an instance that ends stays
+`running` until the reaper fails it.
+
+The scheduler kind `jobs.reap` (every minute, on the leading instance of
+the scheduler) lists the running jobs of all organizations whose attempt
+exceeded the timeout of the job by more than 30 s (jobs without a timeout,
+the tracked export, discovery and merge jobs, are left to their own
+workers) and fails the attempt with `worker lost`:
+
+- the kinds of the job queue (with NATS) and the attribute index jobs
+  (`attribute.index*`, run again by the scheduler) go back to the queue
+  while attempts remain and fail after `max_attempts`;
+- every other kind fails at once, among them `ci.bulk` and
+  `history.snapshot` without NATS: no executor would run them again.
+
+A job that started another attempt meanwhile is left alone. A finally
+failed job is reported as `job.failed` (NTF-05). The log line
+`jobs of lost workers reaped` with the number of jobs shows each run that
+failed jobs; a failed run counts in `reticora_worker_errors_total` of the
+`scheduler` worker.
 
 ## Key rotation (SEC-06)
 

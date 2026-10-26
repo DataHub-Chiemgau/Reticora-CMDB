@@ -129,8 +129,12 @@ func (q *Queue) Setup(ctx context.Context) error {
 // Submit stores a job and announces it. A job that exists already (same
 // idempotency key) is announced again while it is queued; the claim keeps
 // it from running twice. A failed announcement leaves the job queued for
-// the sweep.
+// the sweep. A kind without a handler (Handle) is refused (ErrUnknownKind):
+// its job would stay queued, since no worker consumes it.
 func (q *Queue) Submit(ctx context.Context, orgID, kind string, params any, opts EnqueueOptions) (*Job, bool, error) {
+	if !q.Handles(kind) {
+		return nil, false, fmt.Errorf("%w: %s has no handler on the job queue", ErrUnknownKind, kind)
+	}
 	job, created, err := q.svc.Enqueue(ctx, orgID, kind, params, opts)
 	if err != nil {
 		return nil, false, err
@@ -259,7 +263,7 @@ func (q *Queue) notClaimed(ctx context.Context, d Delivery, m *Message, mayRecla
 		}
 		return q.nak(d, max(retryDelay, started.Add(timeout).Sub(now)))
 	}
-	failed, err := q.svc.Fail(ctx, job.OrganizationID, job.ID, fmt.Errorf("%w after %s (worker lost)", ErrTimeout, timeout))
+	failed, err := q.svc.Fail(ctx, job.OrganizationID, job.ID, errWorkerLost(timeout))
 	if err != nil {
 		// Taken over or ended meanwhile (ErrTransition) or a storage error.
 		if !errors.Is(err, ErrTransition) {

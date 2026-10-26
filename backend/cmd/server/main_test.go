@@ -409,6 +409,7 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 		{"certificate renewal (COL-04)", jobs.CertificateNoticesKind},
 		{"entitlement warnings (ENT-07)", jobs.EntitlementNoticesKind},
 		{"route audit intents (AUD-07, WP-504)", audit.RouteIntentsKind},
+		{"timeout reaper of the jobs (JOB-01, WP-503)", jobs.ReapKind},
 	} {
 		if !registered[job.kind] {
 			t.Errorf("JOB-02 %s: kind %s is not registered (registered: %v)", job.requirement, job.kind, registered)
@@ -417,7 +418,8 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 
 	// --no-db: the notice runs need the database and are not registered.
 	for kind := range registeredSystemJobs(t, systemJobTestDeps(t, cfg, false)) {
-		if kind == jobs.EntitlementNoticesKind || kind == jobs.CertificateNoticesKind || kind == audit.RouteIntentsKind {
+		if kind == jobs.EntitlementNoticesKind || kind == jobs.CertificateNoticesKind || kind == audit.RouteIntentsKind ||
+			kind == jobs.ReapKind {
 			t.Errorf("without a database %s is registered", kind)
 		}
 	}

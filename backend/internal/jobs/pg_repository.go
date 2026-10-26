@@ -399,6 +399,32 @@ func (r *PGRepository) RunningSince(ctx context.Context, orgID string, t time.Ti
 	return out, err
 }
 
+// RunningOverdue implements Repository. Like QueuedDue it reads across
+// organizations with the system flag, which only widens SELECT; failing a
+// job stays in its tenant.
+func (r *PGRepository) RunningOverdue(ctx context.Context, t time.Time, limit int) ([]Job, error) {
+	var out []Job
+	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+jobColumns+` FROM job
+			WHERE status = 'running' AND organization_id IS NOT NULL AND timeout_seconds IS NOT NULL
+				AND started_at + make_interval(secs => timeout_seconds) < $1
+			ORDER BY started_at LIMIT $2`, t, limit)
+		if err != nil {
+			return fmt.Errorf("list overdue jobs: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			j, err := scanJob(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, *j)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // surrogate is created_by as stored: a UUID surrogate, otherwise none.
 func surrogate(createdBy string) any {
 	if !isUUID(createdBy) {

@@ -293,6 +293,8 @@ type systemJobDeps struct {
 	modules      *server.ModuleSet
 	entitlements *entitlement.Service
 	dispatcher   *webhook.Dispatcher
+	// jobQueue is the job queue on NATS; nil without NATS.
+	jobQueue *jobs.Queue
 }
 
 // registerSystemJobs registers the system jobs (systemJobs) with the
@@ -355,8 +357,29 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// Route audit intents no response completed become audit entries
 		// with outcome unknown (AUD-07, WP-504).
 		systemJobs = append(systemJobs, routeIntentsJob(audit.NewPGRouteAuditor(pool)))
+		// Jobs whose worker was lost (crash, rolling deploy) do not stay
+		// running (JOB-01, TEC-14).
+		if d.repos.Jobs != nil {
+			systemJobs = append(systemJobs, jobs.NewReaper(jobs.NewService(d.repos.Jobs).WithEvents(emitterOf(pool)),
+				jobRequeues(d.jobQueue)).Schedule())
+		}
 	}
 	return systemJobs
+}
+
+// jobRequeues reports the job kinds the reaper puts back into the queue
+// after a lost worker, those with an executor that runs queued jobs again:
+// the kinds of the job queue on NATS and the attribute index jobs of the
+// scheduler. The other kinds fail, among them the in-process jobs without
+// NATS.
+func jobRequeues(queue *jobs.Queue) func(kind string) bool {
+	return func(kind string) bool {
+		switch kind {
+		case citype.IndexJobKind, citype.RebuildJobKind, citype.KeyJobKind:
+			return true
+		}
+		return queue != nil && queue.Handles(kind)
+	}
 }
 
 // routeIntentsJob is the scheduler kind audit.route_intents: every minute,

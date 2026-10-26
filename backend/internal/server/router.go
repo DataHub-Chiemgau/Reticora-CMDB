@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
@@ -215,6 +214,9 @@ type Options struct {
 	// IngestQueue carries discovery records over ingest.> (REC-01); nil
 	// processes them in the request.
 	IngestQueue *discovery.NATSIngestQueue
+	// JobQueue runs the submitted job kinds on the JOBS work queue on NATS
+	// (TEC-14, jobkinds.go); nil runs them in the accepting process.
+	JobQueue *jobs.Queue
 	// Signup is the self-signup flow (TLC-01); nil answers 503.
 	Signup *signup.Service
 	// SignupProtection is the captcha, blocklist and per-IP limit of the
@@ -388,7 +390,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// Export and discovery jobs register in the generic job model (JOB-01).
 	var jobTracker jobs.Tracker
 	var bffJobs graphqlbff.JobSource
-	var historyJobs history.SnapshotJobs
+	historyHandler := history.NewHandler(repos.History)
 	// The generic job API (API-09) serves in both profiles; without a
 	// database it has an empty in-memory job table.
 	jobAPI := jobs.NewAPIHandler(jobs.NewService(jobs.NewMemoryRepository()))
@@ -421,13 +423,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 				return err
 			})
 		// A CI merge is a job (CI-12, JOB-01); bulk operations from 100
-		// ids on as well (API-08, JOB-04).
-		jobService.Register(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute})
-		jobService.Register(jobs.Kind{Name: history.SnapshotJobKind, MaxAttempts: 1, Timeout: 15 * time.Minute})
-		historyJobs = jobService
+		// ids on (API-08, JOB-04) and state snapshots as well, on the job
+		// queue when there is one (jobkinds.go, TEC-14).
 		if opts.CIService != nil {
-			opts.CIService.WithJobs(jobTracker).WithBulkJobs(jobService)
+			opts.CIService.WithJobs(jobTracker)
 		}
+		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -554,7 +555,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		composition.NewHandler(repos.Composition, opts.Dispatcher).
 			WithAssets(parentAssetLookup{repo: repos.Asset}),
 		override.NewHandler(repos.Override, opts.Dispatcher),
-		historyHandler(repos.History, historyJobs),
+		historyHandler,
 		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission),
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider,
@@ -784,14 +785,4 @@ func (r reviewEvents) ReviewOpened(ctx context.Context, item *reviews.Item) {
 		Data: map[string]any{"id": item.ID, "kind": item.Kind, "object_key": item.ObjectKey}}); err != nil {
 		slog.Error("report opened review item", "item", item.ID, "error", err)
 	}
-}
-
-// historyHandler serves the history; with the job model the state snapshot
-// runs as a job (JOB-04).
-func historyHandler(repo history.Repository, snapshotJobs history.SnapshotJobs) *history.Handler {
-	h := history.NewHandler(repo)
-	if snapshotJobs != nil {
-		h.WithJobs(snapshotJobs)
-	}
-	return h
 }
