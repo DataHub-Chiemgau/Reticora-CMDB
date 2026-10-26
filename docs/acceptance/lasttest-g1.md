@@ -6,24 +6,28 @@ Akzeptanzkriterien von WP-439. Messbasis ist der Workflow `load.yml` auf der
 nach E-58 anerkannten Umgebung (GitHub-Standard-Runner mit 4 CPUs); die
 Messbasis der Budgets sind 10.000 Objekte je Organisation (E-17).
 
-**Platzhalter:** Werte in `⟨LAUF-n…⟩` stammen aus dem n-ten der drei
-archivierten `load.yml`-Läufe (Datei
-`docs/acceptance/artefakte/lasttest/<Lauf-ID>/ergebnis.md`, Übernahme siehe
-`tests/load/README.md`, Abschnitt „Archiv eines Laufs“). Solange ein
-Platzhalter steht, ist der Wert **nicht gemessen** und das zugehörige
-Kriterium nicht belegt. Alle anderen Zahlen stammen aus den genannten
-GitHub-Läufen (Lauf-ID angegeben) oder, als historisch gekennzeichnet, aus
-früheren Nachweisläufen.
+**Quelle der Werte:** Die Werte der Läufe 1 bis 3 stammen aus den
+k6-Zusammenfassungen und Protokollzeilen in den Job-Logs der Läufe
+40269518264, 40270929166 und 40271818796 (Abschnitt „Läufe“). Das Archiv je
+Lauf (Artefakt `load-archive-<Lauf-ID>`) hat der Job `archive` in allen
+drei Läufen gebaut; nach `docs/acceptance/artefakte/lasttest/<Lauf-ID>/`
+übernommen ist es noch nicht, weil die Arbeitsumgebung den Blob-Speicher
+der GitHub-Artefakte nicht erreicht (Übernahme siehe `tests/load/README.md`,
+Abschnitt „Archiv eines Laufs“). Werte, die nur im Archiv stehen (`lscpu`,
+`/proc/meminfo`), sind als „Archiv steht aus“ markiert und **nicht
+belegt**. Alle anderen Zahlen stammen aus den genannten GitHub-Läufen
+(Lauf-ID angegeben) oder, als historisch gekennzeichnet, aus früheren
+Nachweisläufen. Fett: Schwelle verfehlt.
 
 ## Stand der Akzeptanzkriterien (WP-439)
 
 | AK | Inhalt | Stand | Nachweis |
 |---|---|---|---|
-| 1 | Seed-Optionen für die NFR-01-Volumina, deterministisch und begrenzt | umgesetzt; Tests lokal grün (TimescaleDB 2.31.0), CI-Lauf steht aus | `backend/cmd/seed` (`-interfaces-per-ci`, `-ips-per-ci`, `-relationships-per-ci`, `-orgs`); `seed_integration_test.go`: `TestSeedNFR01Volumes` (Mengen, Verteilung, Determinismus, zweiter Lauf), `TestSeedOptionsAreBounded` (Grenzen) |
-| 2 | `load.yml`-Job `nfr01-volume` mit `api.js` und den NFR-02-Schwellen | umgesetzt, **Lauf steht aus** | `.github/workflows/load.yml` (Matrix-Eintrag `nfr01-volume`, Schritt „Seeded volumes (NFR-01)“) |
-| 3 | Drei aufeinanderfolgende vollständige `load.yml`-Läufe mit exit 0, archiviert | **nicht erfüllt** | Die Läufe stehen aus (Abschnitt „Läufe“). Solange `ingest-rediscover` die Verzögerung von NFR-03 verfehlt (Offene Punkte, Punkt 1), endet kein vollständiger Lauf mit exit 0. Archivierung vorbereitet: Job `archive`, Artefakt `load-archive-<Lauf-ID>` |
-| 4 | Bericht: p95 je Budget aus den drei Läufen, 200 Records/s und Max-Drain gegenüber 1.000 Records/s [P5], NFR-01-Volumina gemessen, Umfangskorrektur SR-04, offene Punkte mit Folge-WP oder Entscheidung | Struktur und bekannte Werte eingetragen; **Werte der drei Läufe stehen aus**; sieben offene Punkte haben noch keine Folge-WP-Nummer (Vorschlag an den Auftraggeber) | dieses Dokument |
-| 5 | Retests F-279, WP-206, WP-204 | **stehen aus** | Abschnitt „Retests“ |
+| 1 | Seed-Optionen für die NFR-01-Volumina, deterministisch und begrenzt | erfüllt; Tests lokal grün (TimescaleDB 2.31.0); in den drei Läufen erzeugt der Seed die Volumina vollständig | `backend/cmd/seed` (`-interfaces-per-ci`, `-ips-per-ci`, `-relationships-per-ci`, `-orgs`); `seed_integration_test.go`: `TestSeedNFR01Volumes` (Mengen, Verteilung, Determinismus, zweiter Lauf), `TestSeedOptionsAreBounded` (Grenzen); Abschnitt „NFR-01-Volumina“ |
+| 2 | `load.yml`-Job `nfr01-volume` mit `api.js` und den NFR-02-Schwellen | erfüllt; der Job läuft in allen drei Läufen und ist **rot**: NFR-02 hält auf den NFR-01-Volumina nicht (Offene Punkte, Punkt 11) | `.github/workflows/load.yml` (Matrix-Eintrag `nfr01-volume`, Schritt „Seeded volumes (NFR-01)“) |
+| 3 | Drei aufeinanderfolgende vollständige `load.yml`-Läufe mit exit 0, archiviert | **nicht erfüllt** | Drei vollständige Läufe liegen vor (Abschnitt „Läufe“), keiner endet mit exit 0: `nfr01-volume` ist in allen drei rot (Punkt 11), `ingest-rediscover` in zwei (Punkt 1), `api` in einem (Punkt 3). Die Archive sind gebaut, aber noch nicht ins Repository übernommen |
+| 4 | Bericht: p95 je Budget aus den drei Läufen, 200 Records/s und Max-Drain gegenüber 1.000 Records/s [P5], NFR-01-Volumina gemessen, Umfangskorrektur SR-04, offene Punkte mit Folge-WP oder Entscheidung | Werte der drei Läufe eingetragen; CPU und RAM je Lauf stehen nur im Archiv (**steht aus**); acht offene Punkte haben noch keine Folge-WP-Nummer (Vorschlag an den Auftraggeber) | dieses Dokument |
+| 5 | Retests F-279, WP-206, WP-204 | **nicht bestanden** bzw. **stehen aus** | Abschnitt „Retests“ |
 
 ## Messumgebung und Ablauf (E-58)
 
@@ -53,9 +57,16 @@ früheren Nachweisläufen.
 
 | Lauf | CPU (`lscpu`) | RAM (`MemTotal`) |
 |---|---|---|
-| Lauf 1 | ⟨LAUF-1: CPU⟩ | ⟨LAUF-1: RAM⟩ |
-| Lauf 2 | ⟨LAUF-2: CPU⟩ | ⟨LAUF-2: RAM⟩ |
-| Lauf 3 | ⟨LAUF-3: CPU⟩ | ⟨LAUF-3: RAM⟩ |
+| Lauf 1 | Archiv steht aus | Archiv steht aus |
+| Lauf 2 | Archiv steht aus | Archiv steht aus |
+| Lauf 3 | Archiv steht aus | Archiv steht aus |
+
+Jeder Job läuft auf einem eigenen Runner; `lscpu` und `MemTotal` stehen je
+Job in `run-<job>.txt` des Archivs und nicht im Job-Log. Dass die Runner
+verschieden schnell sind, zeigen die Läufe selbst: Bei gleichem Commit
+schwankt die Datenbankzeit je Record der Wiederentdeckung zwischen 6,4 und
+18,0 ms, der Abbau im Szenario `spool` zwischen 388 und 963 Records/s
+(Abschnitt „NFR-03“).
 
 ## Läufe
 
@@ -67,14 +78,21 @@ ersten Versuch, dessen `ergebnis.md` „Vollständig: ja“ meldet; exit 0 heiß
 
 | Lauf | Lauf-ID | Datum | Commit (Lauf / Server) | `api` | `ingest` | `ingest-spool` | `ingest-rediscover` | `nfr01-volume` | Vollständig | exit 0 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | ⟨LAUF-1-ID⟩ | ⟨LAUF-1: Datum⟩ | ⟨LAUF-1: Commits⟩ | ⟨LAUF-1⟩ | ⟨LAUF-1⟩ | ⟨LAUF-1⟩ | ⟨LAUF-1⟩ | ⟨LAUF-1⟩ | ⟨LAUF-1⟩ | ⟨LAUF-1⟩ |
-| 2 | ⟨LAUF-2-ID⟩ | ⟨LAUF-2: Datum⟩ | ⟨LAUF-2: Commits⟩ | ⟨LAUF-2⟩ | ⟨LAUF-2⟩ | ⟨LAUF-2⟩ | ⟨LAUF-2⟩ | ⟨LAUF-2⟩ | ⟨LAUF-2⟩ | ⟨LAUF-2⟩ |
-| 3 | ⟨LAUF-3-ID⟩ | ⟨LAUF-3: Datum⟩ | ⟨LAUF-3: Commits⟩ | ⟨LAUF-3⟩ | ⟨LAUF-3⟩ | ⟨LAUF-3⟩ | ⟨LAUF-3⟩ | ⟨LAUF-3⟩ | ⟨LAUF-3⟩ | ⟨LAUF-3⟩ |
+| 1 | [40269518264](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40269518264) | 2026-10-26 | `8ca7f4b` / `8ca7f4b` | grün | grün | grün | grün | **rot** | ja | nein |
+| 2 | [40270929166](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40270929166) | 2026-10-26 | `8ca7f4b` / `8ca7f4b` | **rot** | grün | grün | **rot** | **rot** | ja | nein |
+| 3 | [40271818796](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40271818796) | 2026-10-26 | `8ca7f4b` / `8ca7f4b` | grün | grün | grün | **rot** | **rot** | ja | nein |
 
-Archiv: `docs/acceptance/artefakte/lasttest/⟨LAUF-n-ID⟩/` je Lauf. Erwartung
-nach dem Vorlauf (unten): `ingest-rediscover` ist rot, solange Punkt 1 der
-offenen Punkte nicht behoben ist; dann hat keiner der drei Läufe exit 0, und
-AK 3 bleibt unerfüllt, auch wenn die übrigen Jobs grün sind.
+Die drei Läufe liefen nacheinander per `workflow_dispatch` mit
+`scenarios=all`, `objects` 10.000 und `duration` 2 min auf dem Branch der
+G1-Korrektur (Commit `8ca7f4b`, Stand von WP-439 und WP-459), jeweils im
+ersten Versuch. Der Job `archive` meldet für jeden Lauf „missing: 0“ (alle
+fünf Jobs vorhanden) und „not green: 1“, „3“ bzw. „2“. Integritätsprüfung
+nach jedem der 15 Jobs: 0 Verletzungen in 20 Prüfungen.
+
+Archiv: Artefakte `load-archive-40269518264`, `load-archive-40270929166` und
+`load-archive-40271818796` der Läufe; die Übernahme nach
+`docs/acceptance/artefakte/lasttest/<Lauf-ID>/` steht aus (Quelle der Werte,
+oben). AK 3 ist nicht erfüllt: Kein Lauf endet mit exit 0.
 
 ### Vorlauf: Run 40257485919 (Commit `0f6b322`, nicht archiviert)
 
@@ -103,22 +121,31 @@ Seed. Werte in ms, Bulk in s.
 
 | Budget (NFR-02) | k6-Szenario | Schwelle | Vorlauf 40257485919 | Lauf 1 | Lauf 2 | Lauf 3 |
 |---|---|---:|---:|---:|---:|---:|
-| Listen | `list` (`GET /cis?limit=50`) | < 500 | 89,4 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Suche (Namensfilter der Liste) | `list_name_filter` | < 500 | 118,9 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Suche (globale Suche der UI) | `global_search` | < 500 | 130,4 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Indizierte Attributfilter | `filter` (`status`, `hostname`) | < 500 | 76,2 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Attributfilter (durchsuchbares JSONB-Attribut) | `attr_filter` | < 500 | 74,7 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Beziehungssuche (ABN-02) | `relationships` | < 500 | 94,4 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| CI-Detail | `detail` | < 300 | 55,3 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Rack-Layout | `rack` | < 300 | 70,7 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Topologie 2.000 Knoten | `topology` (Core-Switch, Tiefe 1) | < 3.000 | 377,8 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Impact Tiefe 20 (kompakt, Oberfläche) | `impact` | < 2.000 | 704,2 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Impact Tiefe 20 (Standardform mit Pfaden) | `impact_full` | < 2.000 | 685,2 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Bulk 500 IDs | `bulk_500_duration` | < 30 s | 7,11 s | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Checks / fehlgeschlagene Anfragen | `checks`, `http_req_failed` | > 99 % / – | 100 % / 0 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
+| Listen | `list` (`GET /cis?limit=50`) | < 500 | 89,4 | 247,7 | **503,8** | 216,8 |
+| Suche (Namensfilter der Liste) | `list_name_filter` | < 500 | 118,9 | 380,4 | **564,9** | 329,3 |
+| Suche (globale Suche der UI) | `global_search` | < 500 | 130,4 | 485,2 | **563,8** | 417,8 |
+| Indizierte Attributfilter | `filter` (`status`, `hostname`) | < 500 | 76,2 | 208,6 | 490,4 | 166,4 |
+| Attributfilter (durchsuchbares JSONB-Attribut) | `attr_filter` | < 500 | 74,7 | 221,7 | 479,6 | 172,2 |
+| Beziehungssuche (ABN-02) | `relationships` | < 500 | 94,4 | 273,7 | **500,6** | 230,8 |
+| CI-Detail | `detail` | < 300 | 55,3 | 163,0 | **467,1** | 126,3 |
+| Rack-Layout | `rack` | < 300 | 70,7 | 212,2 | **484,4** | 163,6 |
+| Topologie 2.000 Knoten | `topology` (Core-Switch, Tiefe 1) | < 3.000 | 377,8 | 1.250 | 845,5 | 1.050 |
+| Impact Tiefe 20 (kompakt, Oberfläche) | `impact` | < 2.000 | 704,2 | 1.830 | 1.370 | 1.610 |
+| Impact Tiefe 20 (Standardform mit Pfaden) | `impact_full` | < 2.000 | 685,2 | 1.800 | 1.300 | 1.710 |
+| Bulk 500 IDs | `bulk_500_duration` | < 30 s | 7,11 s | 20,49 s | 19,35 s | 17,11 s |
+| Checks / fehlgeschlagene Anfragen | `checks`, `http_req_failed` | > 99 % / – | 100 % / 0 | 100 % (15.098 von 15.098) / 0 von 12.893 | 100 % (13.223 von 13.223) / 0 von 11.082 | 100 % (16.165 von 16.165) / 0 von 13.727 |
 
-Im Vorlauf hält jedes Budget. Ob es in drei aufeinanderfolgenden Läufen
-hält, zeigen erst die drei Läufe.
+Im Vorlauf und in den Läufen 1 und 3 hält jedes Budget, mit wenig Abstand
+bei `global_search` (485 bzw. 418 ms) und `impact` (1,83 bzw. 1,61 s). In
+Lauf 2 verfehlen sechs Szenarien ihr Budget: `list`, `list_name_filter`,
+`global_search`, `relationships`, `detail` und `rack`. Ihre Mediane liegen
+dabei bei 60 bis 153 ms, nahe an Lauf 1 (41 bis 188 ms); nur p90 und p95
+steigen auf 336 bis 565 ms, auch beim Einzelabruf `detail` über den
+Primärschlüssel. Die teuren Szenarien `impact` und `topology` waren in
+Lauf 2 schneller als in Lauf 1. Das Muster passt zu CPU-Konkurrenz auf dem Runner, nicht zu einer
+einzelnen Abfrage. **NFR-02 hält bei 10.000 Objekten damit nicht in drei
+aufeinanderfolgenden Läufen**; auf dem geteilten Runner fehlt der Abstand
+zu den Budgets (Offene Punkte, Punkt 3).
 
 ## NFR-03: 200 Records/s und Max-Drain gegenüber 1.000 Records/s (AK 4)
 
@@ -126,22 +153,28 @@ hält, zeigen erst die drei Läufe.
 
 | Messgröße | Budget | Vorlauf 40257485919 | Lauf 1 | Lauf 2 | Lauf 3 |
 |---|---:|---:|---:|---:|---:|
-| `ingest`: 200 Records/s für 60 s angeboten, angenommen / fehlend | 0 fehlend | 12.020 / 0 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| `ingest`: Verzögerung Record → sichtbar, max / p95 | < 30 s | 1,74 s / 1,57 s | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| `ingest`: `POST /ingest/bulk` p95 | < 1 s | 26,8 ms | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| `ingest-spool`: Spool-Flush 10.000 Records | < 5 min | 30,7 s | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| `ingest-spool`: Abbau ab Sendeende (inklusive Senden) | ≥ 200/s | 328,3/s (326,1/s) | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| `ingest-rediscover`: 200 Records/s für 45 s, angenommen / fehlend / neue CIs | 0 / 0 | 9.005 / 0 / 0 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| `ingest-rediscover`: Verzögerung Record → gesehen, max / p95 | < 30 s | **33,9 s / 31,0 s** | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| `ingest-rediscover`: Abbau ab Sendeende (inklusive Senden) | – | 65,9/s (114,1/s) | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
+| `ingest`: 200 Records/s für 60 s angeboten, angenommen / fehlend | 0 fehlend | 12.020 / 0 | 12.020 / 0 | 12.020 / 0 | 12.000 / 0 |
+| `ingest`: Verzögerung Record → sichtbar, max / p95 | < 30 s | 1,74 s / 1,57 s | 1,61 s / 1,59 s | 2,12 s / 1,80 s | 1,46 s / 1,35 s |
+| `ingest`: `POST /ingest/bulk` p95 | < 1 s | 26,8 ms | 24,9 ms | 26,4 ms | 37,8 ms |
+| `ingest-spool`: Spool-Flush 10.000 Records | < 5 min | 30,7 s | 28,72 s | 15,74 s | 11,43 s |
+| `ingest-spool`: Abbau ab Sendeende (inklusive Senden) | ≥ 200/s | 328,3/s (326,1/s) | 387,8/s (348,1/s) | 694,6/s (635,0/s) | 963,0/s (874,2/s) |
+| `ingest-rediscover`: 200 Records/s für 45 s, angenommen / fehlend / neue CIs | 0 / 0 | 9.005 / 0 / 0 | 9.009 / 0 / 0 | 9.004 / 0 / 0 | 9.004 / 0 / 0 |
+| `ingest-rediscover`: Verzögerung Record → gesehen, max / p95 | < 30 s | **33,9 s / 31,0 s** | 5,14 s / 4,82 s | **55,60 s / 51,55 s** | **55,60 s / 50,95 s** |
+| `ingest-rediscover`: Abbau ab Sendeende (inklusive Senden) | – | 65,9/s (114,1/s) | 146,9/s (179,6/s) | 51,5/s (89,5/s) | 62,4/s (89,5/s) |
 
 - **Neue Geräte und Spool:** Mit 200 Records/s neuer Geräte und beim
-  Spool-Flush hält NFR-03 im Vorlauf alle Budgets.
+  Spool-Flush hält NFR-03 im Vorlauf und in allen drei Läufen alle Budgets
+  (in den drei Läufen Verzögerung höchstens 2,12 s, Spool-Flush höchstens
+  28,72 s, 0 fehlend).
 - **Wiederentdeckung:** Werden die geseedeten Server mit 200 Records/s
   wiederentdeckt (SNMP-artige Records mit primärer MAC, zwei Interfaces und
-  LLDP-Nachbar, F-118), verarbeitet der Server nur 66–78 Records/s; die
-  Verzögerung überschreitet 30 s. **NFR-03 ist bei 200 Records/s für die
-  Wiederentdeckung nicht erfüllt** (Offene Punkte, Punkt 1).
+  LLDP-Nachbar, F-118), verarbeitet der Server in den Läufen 2 und 3 nur 52
+  bis 62 Records/s ab Sendeende; die Verzögerung erreicht 51 s p95. Lauf 1
+  bleibt mit 147 Records/s und 4,82 s p95 unter der Schwelle, bei
+  6,4 statt 16 bis 18 ms Datenbankzeit je Record auf demselben Commit.
+  **NFR-03 ist bei 200 Records/s für die Wiederentdeckung nicht
+  erfüllt**; ob die Schwelle hält, hängt vom Runner ab (Offene Punkte,
+  Punkt 1).
 
 Ursachenvergleich F-118 (Szenario `rediscover`, 200 Records/s angeboten,
 9.000 Records; Werte aus den Artefakten bzw. Job-Logs der Läufe):
@@ -151,11 +184,17 @@ Ursachenvergleich F-118 (Szenario `rediscover`, 200 Records/s angeboten,
 | 40256147034 | `c458f0a` (vor WP-434) | 31,6/s (41,3/s) | 2 min 35 s | 76,9 ms | 1.766,6 | 3.639,9 | – |
 | 40256148903 | `7996d8d` (nach WP-434) | 77,6/s (95,2/s) | 45,1 s (49,6 s) | 14,9 ms | 898,7 | 733,1 | 57,8 |
 | 40257485919 | `0f6b322` (Vorlauf) | 65,9/s (114,1/s) | 31,0 s (33,9 s) | 12,7 ms | 919,5 | 697,9 | 53,8 |
+| 40269518264 (Lauf 1) | `8ca7f4b` | 146,9/s (179,6/s) | 4,82 s (5,14 s) | 6,4 ms | 839,8 | 691,5 | 48,6 |
+| 40270929166 (Lauf 2) | `8ca7f4b` | 51,5/s (89,5/s) | 51,55 s (55,60 s) | 18,0 ms | 837,2 | 638,5 | 56,8 |
+| 40271818796 (Lauf 3) | `8ca7f4b` | 62,4/s (89,5/s) | 50,95 s (55,60 s) | 15,7 ms | 872,1 | 708,4 | 57,7 |
 
 WP-434 (Identitätssuche mit MACs über den Index) senkt Datenbankzeit und
 Plankosten je Record auf etwa ein Fünftel und hebt den Abbau auf mehr als
-das Doppelte; unter 30 s kommt die Wiederentdeckung damit nicht. Den
-Durchsatz anzuheben ist nicht Teil von WP-439.
+das Doppelte; unter 30 s kommt die Wiederentdeckung damit nur auf einem
+schnellen Runner. In den Läufen 1 bis 3 sind Puffer und Plankosten je
+Record nahezu gleich (837 bis 872 bzw. 639 bis 708); die Datenbankzeit je
+Record schwankt dagegen um den Faktor 2,8. Den Durchsatz anzuheben ist
+nicht Teil von WP-439.
 
 ### Max-Drain gegenüber 1.000 Records/s [P5]
 
@@ -167,14 +206,17 @@ den höchsten gemessenen Abbau daneben.
 |---|---|---:|---:|---|
 | 38665599979 (historisch) | `918a832` | 798/s | nicht gemessen | 80 % |
 | 40257485919 (Vorlauf) | `0f6b322` | 328,3/s | 65,9/s | 33 % bzw. 7 % |
-| Lauf 1 | ⟨LAUF-1: Commit⟩ | ⟨LAUF-1⟩ | ⟨LAUF-1⟩ | ⟨LAUF-1⟩ |
-| Lauf 2 | ⟨LAUF-2: Commit⟩ | ⟨LAUF-2⟩ | ⟨LAUF-2⟩ | ⟨LAUF-2⟩ |
-| Lauf 3 | ⟨LAUF-3: Commit⟩ | ⟨LAUF-3⟩ | ⟨LAUF-3⟩ | ⟨LAUF-3⟩ |
+| 40269518264 (Lauf 1) | `8ca7f4b` | 387,8/s | 146,9/s | 39 % bzw. 15 % |
+| 40270929166 (Lauf 2) | `8ca7f4b` | 694,6/s | 51,5/s | 69 % bzw. 5 % |
+| 40271818796 (Lauf 3) | `8ca7f4b` | 963,0/s | 62,4/s | 96 % bzw. 6 % |
 
-Eine Instanz auf 4 CPUs erreicht 1.000 Records/s in keinem Szenario. Der
-Abbau im Szenario `spool` fiel zwischen `918a832` und `0f6b322` von 798 auf
-328 Records/s; die Ursache ist nicht untersucht, das G1-Budget von
-200 Records/s hält. [P5]: Offene Punkte, Punkt 2.
+Eine Instanz auf 4 CPUs erreicht 1.000 Records/s in keinem Szenario; am
+nächsten kommt der Spool-Abbau in Lauf 3 mit 963 Records/s. Der Abbau im
+Szenario `spool` schwankt auf demselben Commit zwischen 388 und
+963 Records/s; der frühere Rückgang von 798 (`918a832`) auf 328 Records/s
+(`0f6b322`) ist damit nicht als Regression belegt, sondern liegt in der
+Streuung der Runner. Das G1-Budget von 200 Records/s hält in jedem Lauf.
+[P5]: Offene Punkte, Punkt 2.
 
 ## NFR-01-Volumina (AK 4)
 
@@ -192,31 +234,48 @@ die zusätzlichen Adressen liegen eindeutig im Subnetz „Server networks“.
 
 | Größe | NFR-01 | Lauf 1 | Lauf 2 | Lauf 3 |
 |---|---:|---:|---:|---:|
-| CIs der Demo-Organisation | 10.000 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Interfaces der Demo-Organisation | 50.000 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| IP-Adressen der Demo-Organisation | 200.000 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Beziehungen der Demo-Organisation | 100.000 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Organisationen der Instanz | 500 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Dauer des Seeds (`seed-nfr01-volume.txt`) | – | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
+| CIs der Demo-Organisation | 10.000 | 10.000 | 10.000 | 10.000 |
+| Interfaces der Demo-Organisation | 50.000 | 50.000 | 50.000 | 50.000 |
+| IP-Adressen der Demo-Organisation | 200.000 | 200.000 | 200.000 | 200.000 |
+| Beziehungen der Demo-Organisation | 100.000 | 100.000 | 100.000 | 100.000 |
+| Organisationen der Instanz | 500 | 503 | 503 | 503 |
+| Dauer des Seeds (`seed-nfr01-volume.txt`) | – | 6 min 2 s | 6 min 12 s | 3 min 41 s |
 
 p95 von `api.js` auf den NFR-01-Volumina (Job `nfr01-volume`, Werte in ms,
 Bulk in s):
 
 | Budget (NFR-02) | k6-Szenario | Schwelle | Lauf 1 | Lauf 2 | Lauf 3 |
 |---|---|---:|---:|---:|---:|
-| Listen | `list` | < 500 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Suche (Namensfilter der Liste) | `list_name_filter` | < 500 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Suche (globale Suche der UI) | `global_search` | < 500 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Indizierte Attributfilter | `filter` | < 500 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Attributfilter (JSONB) | `attr_filter` | < 500 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Beziehungssuche | `relationships` | < 500 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| CI-Detail | `detail` | < 300 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Rack-Layout | `rack` | < 300 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Topologie 2.000 Knoten | `topology` | < 3.000 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Impact Tiefe 20 (kompakt) | `impact` | < 2.000 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Impact Tiefe 20 (Standardform) | `impact_full` | < 2.000 | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
-| Bulk 500 IDs | `bulk_500_duration` | < 30 s | ⟨LAUF-1⟩ | ⟨LAUF-2⟩ | ⟨LAUF-3⟩ |
+| Listen | `list` | < 500 | 440,3 | 468,1 | 305,9 |
+| Suche (Namensfilter der Liste) | `list_name_filter` | < 500 | 495,9 | **510,2** | 308,4 |
+| Suche (globale Suche der UI) | `global_search` | < 500 | **720,5** | **749,6** | 398,1 |
+| Indizierte Attributfilter | `filter` | < 500 | 374,5 | 396,2 | 256,7 |
+| Attributfilter (JSONB) | `attr_filter` | < 500 | **529,8** | **570,2** | 345,0 |
+| Beziehungssuche | `relationships` | < 500 | **2.430** | **2.650** | **1.070** |
+| CI-Detail | `detail` | < 300 | 296,9 | **322,1** | 216,3 |
+| Rack-Layout | `rack` | < 300 | **419,0** | **428,1** | 294,6 |
+| Topologie 2.000 Knoten | `topology` | < 3.000 | 1.930 | 1.880 | 967,7 |
+| Impact Tiefe 20 (kompakt) | `impact` | < 2.000 | **4.080** | **4.270** | **2.700** |
+| Impact Tiefe 20 (Standardform) | `impact_full` | < 2.000 | **3.990** | **4.240** | **2.460** |
+| Bulk 500 IDs | `bulk_500_duration` | < 30 s | **38,63 s** | **39,51 s** | 24,61 s |
 
+- **Ergebnis:** Der Seed erzeugt die Volumina in allen drei Läufen
+  vollständig (503 Organisationen: demo, acme, die Standardorganisation aus
+  Migration 000054 und 500 kleine). Alle inhaltlichen Checks bestehen
+  (9.918, 9.372 und 14.042), keine Anfrage schlägt fehl, die
+  Integritätsprüfung meldet 0 Verletzungen.
+  **NFR-02 hält auf den NFR-01-Volumina nicht:** In allen drei Läufen
+  verfehlen `impact` (2,70 bis 4,27 s), `impact_full` (2,46 bis 4,24 s) und
+  `relationships` (1,07 bis 2,65 s) ihr Budget deutlich; in den Läufen 1
+  und 2 zusätzlich `bulk_500`, `global_search`, `attr_filter` und `rack`,
+  in Lauf 2 auch `list_name_filter` und `detail`. Das Statement-Profil des
+  Jobs (`statements-nfr01-volume.txt`, im Job-Log von Lauf 1) zeigt die
+  Ursachen: Die Kantenabfrage für Impact und Topologie lädt je Aufruf alle
+  100.000 Kanten der Organisation (im Mittel 1,19 s, sequenzieller Scan
+  auf `rack_mount`); `COUNT` und Seite der Beziehungsliste eines CI lesen je
+  Aufruf etwa 72.800 Puffer (im Mittel 498 bzw. 485 ms). Diese Abfragen
+  belasten die CPU des Runners und verlängern so auch die übrigen
+  Szenarien. Offene Punkte, Punkt 11.
 - **Lokale Funktionsprobe (kein Nachweis):** Auf einem geteilten
   Entwicklungshost (4 CPUs, andere Lasten parallel) erzeugte der Seed die
   Volumina vollständig (10.000 CIs, 50.000 Interfaces, 200.000 Adressen,
@@ -327,19 +386,25 @@ ihren Index (Abschnitt „Umfangskorrektur SR-04“). Die Batch-Provenienz liest
 
 ## Bewertung (Stand 2026-10-26)
 
-- **NFR-02:** Im Vorlauf 40257485919 hält jedes Budget bei 10.000 Objekten.
-  Die drei archivierten Läufe und die Messung auf den NFR-01-Volumina
-  stehen aus.
+- **NFR-02:** Bei 10.000 Objekten hält jedes Budget im Vorlauf und in den
+  Läufen 1 und 3, in Lauf 2 verfehlen sechs Szenarien ihr Budget im p95
+  (CPU-Konkurrenz auf dem Runner, Punkt 3). Auf den NFR-01-Volumina
+  verfehlen `impact`, `impact_full` und `relationships` ihr Budget in allen
+  drei Läufen deutlich (Punkt 11). NFR-02 ist damit für G1 **nicht
+  erfüllt**.
 - **NFR-03:** Neue Geräte mit 200 Records/s und der Spool-Flush halten die
-  Budgets. Die Wiederentdeckung mit 200 Records/s verfehlt die Verzögerung
-  von 30 s (Punkt 1); NFR-03 ist damit für G1 **nicht vollständig
-  erfüllt**. 1.000 Records/s (Phase 5, [P5]) erreicht keine gemessene
-  Konfiguration (Punkt 2).
-- **NFR-01:** Seed und Job für die Volumina sind umgesetzt; gemessen ist
-  noch nichts davon.
+  Budgets in allen Läufen. Die Wiederentdeckung mit 200 Records/s verfehlt
+  die Verzögerung von 30 s in zwei von drei Läufen (Punkt 1); NFR-03 ist
+  damit für G1 **nicht vollständig erfüllt**. 1.000 Records/s (Phase 5,
+  [P5]) erreicht keine gemessene Konfiguration, der Spool-Abbau kommt bis
+  963 Records/s (Punkt 2).
+- **NFR-01:** Die Volumina sind in drei Läufen erzeugt und gezählt
+  (10.000 CIs, 50.000 Interfaces, 200.000 Adressen, 100.000 Beziehungen,
+  503 Organisationen); die Budgets von NFR-02 halten darauf nicht (Punkt 11).
 - **NFR-10:** Der Lasttest gegen NFR-01 bis NFR-03 läuft im Workflow
-  `load.yml`; die Ergebnisse liegen erst mit den archivierten Läufen im
-  Repository.
+  `load.yml`; drei vollständige Läufe liegen vor, ihre Werte stehen in
+  diesem Bericht. Die Archive sind gebaut, im Repository liegen sie noch
+  nicht.
 - **GATE-03 „Lasttest bestanden“:** `docs/acceptance/g1-gate.md` stützt das
   Gate auf die Läufe vom 2026-10-14/15 (E-58, historische Abschnitte unten).
   Das seit WP-437 gemessene Szenario `rediscover` verfehlt NFR-03; diese
@@ -350,9 +415,9 @@ ihren Index (Abschnitt „Umfangskorrektur SR-04“). Die Batch-Provenienz liest
 
 | Retest | Verlangt | Stand |
 |---|---|---|
-| F-279 | Doku-Review von `lasttest-g1.md` gegen die archivierten Artefakte | **steht aus**: Der Bericht nennt 1.000 Records/s als [P5] mit Max-Drain und die NFR-01-Volumina; die Werte der drei Läufe und ihre Artefakte fehlen noch. |
-| WP-206 | drei saubere Läufe archiviert | **steht aus**; mit rotem `ingest-rediscover` nicht erreichbar (Punkt 1). |
-| WP-204 | archivierter `load.yml`-Lauf | **steht aus**: Archiv `docs/acceptance/artefakte/lasttest/⟨LAUF-1-ID⟩/`. |
+| F-279 | Doku-Review von `lasttest-g1.md` gegen die archivierten Artefakte | **steht aus**: Der Bericht nennt 1.000 Records/s als [P5] mit Max-Drain und die gemessenen NFR-01-Volumina mit den Werten der drei Läufe aus den Job-Logs; das Review gegen die Archive ist erst nach deren Übernahme möglich. |
+| WP-206 | drei saubere Läufe archiviert | **nicht bestanden**: Keiner der drei Läufe ist sauber (Abschnitt „Läufe“; Punkte 1, 3 und 11). |
+| WP-204 | archivierter `load.yml`-Lauf | **steht aus**: Die Archive `load-archive-<Lauf-ID>` der drei Läufe sind gebaut; die Übernahme nach `docs/acceptance/artefakte/lasttest/<Lauf-ID>/` steht aus. |
 
 ## Offene Punkte
 
@@ -361,18 +426,25 @@ heißt: Für den Punkt ist noch kein WP angelegt; er geht als Vorschlag an den
 Auftraggeber, die Nummer wird hier nachgetragen.
 
 1. **NFR-03, Wiederentdeckung mit 200 Records/s:** Verzögerung Record →
-   gesehen 31,0 s p95 und 33,9 s maximal (Vorlauf), 45,1 s p95 in Run
-   40256148903; Abbau 66–78 Records/s bei 54–58 Statements je Record
+   gesehen 51,55 s bzw. 50,95 s p95 in den Läufen 2 und 3, 4,82 s in Lauf 1
+   (31,0 s im Vorlauf, 45,1 s in Run 40256148903); Abbau 52–147 Records/s
+   bei 49–58 Statements und 6,4–18,0 ms Datenbankzeit je Record
    (Ursachenvergleich F-118). Die Ursache des verbleibenden Durchsatzdefizits
    ist nicht untersucht. Folge-WP: offen, Vorschlag an den Auftraggeber
    (Ingest-Durchsatz der Wiederentdeckung).
-2. **NFR-03, 1.000 Records/s in Phase 5 [P5]:** Max-Drain 328–798
-   Records/s auf 4 CPUs; kein G1-Budget. Folge-WP: offen, Vorschlag an den
-   Auftraggeber (Ingest-Durchsatz für Phase 5, zusammen mit Punkt 1 und der
-   Frage, warum der Abbau im Szenario `spool` zwischen `918a832` und
-   `0f6b322` von 798 auf 328 Records/s fiel).
+2. **NFR-03, 1.000 Records/s in Phase 5 [P5]:** Max-Drain 328–963
+   Records/s auf 4 CPUs (Szenario `spool`); kein G1-Budget. Folge-WP:
+   offen, Vorschlag an den Auftraggeber (Ingest-Durchsatz für Phase 5,
+   zusammen mit Punkt 1).
 3. **Dedizierter Referenzhost:** Entscheidung E-58 (Option 1): GitHub-Runner
-   mit 4 CPUs als G1-Nachweis, Referenzhost vor GA (SR-06).
+   mit 4 CPUs als G1-Nachweis, Referenzhost vor GA (SR-06). Die drei Läufe
+   zeigen die Grenze dieser Umgebung: Auf demselben Commit verfehlen in
+   Lauf 2 sechs leichte Szenarien das p95-Budget von NFR-02 bei Medianen im
+   Rahmen der anderen Läufe, und die Datenbankzeit je Record der
+   Wiederentdeckung schwankt um den Faktor 2,8. Ein Nachweis „drei Läufe mit
+   exit 0“ hängt damit auch vom zugeteilten Runner ab. Entscheidung: offen,
+   Vorschlag an den Auftraggeber (E-58 ergänzen: dedizierter Runner oder
+   Budgetabstand für G1).
 4. **Listen und Suche über etwa 25.000 Objekte (Headroom 50.000):**
    Entscheidung E-17 (Option 1): bekannte Einschränkung ohne Budgetzusage,
    Folge-WP vor GA. Die Zählung und der Index der Standardsortierung der
@@ -405,6 +477,16 @@ Auftraggeber, die Nummer wird hier nachgetragen.
     schreibt keine Feldwerte. Folge-WP: offen, Vorschlag an den
     Auftraggeber (partieller Index auf `ci_field_value (organization_id,
     ci_id)` für Overrides, Budget-Fixture mit Feldwerten; Migration).
+11. **NFR-02 auf den NFR-01-Volumina:** Mit 100.000 Beziehungen je
+    Organisation verfehlen `impact` (bis 4,27 s), `impact_full` (bis 4,24 s)
+    und `relationships` (bis 2,65 s) ihr Budget in allen drei Läufen, auf
+    langsamen Runnern zusätzlich `bulk_500`, `global_search`, `attr_filter`,
+    `rack`, `list_name_filter` und `detail`. Ursachen laut Statement-Profil:
+    Die Kantenabfrage für Impact und Topologie lädt alle Kanten der
+    Organisation; `COUNT` und Seite der Beziehungsliste eines CI lesen je
+    Aufruf etwa 72.800 Puffer für im Mittel 19 Zeilen. Folge-WP: offen, Vorschlag an den Auftraggeber (NFR-02 bei
+    NFR-01-Volumina: Beziehungsliste und Kantenabfrage indexgestützt, Impact
+    ohne Laden aller Kanten).
 
 Erledigt seit dem letzten Stand: NFR-03-Durchsatz neuer Geräte und
 Spool-Flush (WP-332 bis WP-334), Impact unter Parallellast (WP-335),
