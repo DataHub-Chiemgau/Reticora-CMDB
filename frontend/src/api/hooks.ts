@@ -17,6 +17,7 @@ import {
   userApi,
   teamApi,
   roleApi,
+  invitationApi,
   permissionApi,
   slaApi,
   formApi,
@@ -53,6 +54,8 @@ import type {
   TicketUpdateRequest,
   TicketListParams,
   UserListParams,
+  InvitationRequest,
+  InvitationAcceptance,
   TopologyParams,
   RackListParams,
   SLAListParams,
@@ -555,6 +558,48 @@ export function useRoleList(params: ListParams = {}) {
   return useQuery({
     queryKey: ['roles', params],
     queryFn: () => roleApi.list(params),
+  });
+}
+
+// --- Invitations (TLC-03) ---
+
+/** useInvitations lists the organization's invitations; enabled only for user:manage holders. */
+export function useInvitations(enabled = true) {
+  return useQuery({
+    queryKey: ['invitations'],
+    queryFn: () => invitationApi.list(),
+    enabled,
+  });
+}
+
+export function useIssueInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: InvitationRequest) => invitationApi.issue(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invitations'] }),
+  });
+}
+
+export function useRenewInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => invitationApi.renew(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invitations'] }),
+  });
+}
+
+export function useRevokeInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => invitationApi.revoke(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invitations'] }),
+  });
+}
+
+/** useAcceptInvitation is the public acceptance; it touches no cached list. */
+export function useAcceptInvitation() {
+  return useMutation({
+    mutationFn: (data: InvitationAcceptance) => invitationApi.accept(data),
   });
 }
 

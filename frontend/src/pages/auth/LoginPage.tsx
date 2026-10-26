@@ -7,6 +7,8 @@ import { startAuthorizationCodeFlow, InsecureContextError } from '../../auth/oid
 type LoginLocationState = {
   from?: string;
   expired?: boolean;
+  /** invitationAccepted is the address of an account the invitation page just created (TLC-03). */
+  invitationAccepted?: string;
 };
 
 export function LoginPage() {
@@ -49,6 +51,14 @@ export function LoginPage() {
         {state?.expired ? (
           <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
             {t('auth.sessionExpired')}
+          </p>
+        ) : null}
+        {state?.invitationAccepted ? (
+          <p
+            role="status"
+            className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-950/40 dark:text-green-200"
+          >
+            {t('auth.invitationAccepted', { email: state.invitationAccepted })}
           </p>
         ) : null}
         {error ? (

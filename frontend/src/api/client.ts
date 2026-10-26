@@ -289,6 +289,8 @@ export class ApiError extends Error {
   readonly traceId?: string;
   /** conflictFields are the fields a 409 names as changed since the If-Match version (API-07). */
   readonly conflictFields: string[];
+  /** field is the request field a FieldProblem names (400, 409 or 422 at one input). */
+  readonly field?: string;
 
   constructor(
     status: number,
@@ -300,6 +302,7 @@ export class ApiError extends Error {
       dependencies?: string[];
       traceId?: string;
       conflictFields?: string[];
+      field?: string;
     } = {},
   ) {
     super(message);
@@ -311,6 +314,7 @@ export class ApiError extends Error {
     this.dependencies = options.dependencies ?? [];
     this.traceId = options.traceId;
     this.conflictFields = options.conflictFields ?? [];
+    this.field = options.field;
   }
 
   /** Whether the failure carries per-field violations that a form can render. */
@@ -344,11 +348,14 @@ export class ApiError extends Error {
       dependencies?: unknown;
       trace_id?: unknown;
       fields?: unknown;
+      field?: unknown;
     };
 
     const title = typeof problem.title === 'string' ? problem.title : undefined;
     const traceId = typeof problem.trace_id === 'string' ? problem.trace_id : undefined;
     const detail = typeof problem.detail === 'string' ? problem.detail : undefined;
+    const field =
+      typeof problem.field === 'string' && problem.field !== '' ? problem.field : undefined;
 
     const violations: FieldViolation[] = Array.isArray(problem.violations)
       ? problem.violations.flatMap((entry) => {
@@ -380,6 +387,7 @@ export class ApiError extends Error {
       dependencies,
       traceId,
       conflictFields,
+      field,
     });
   }
 }
@@ -1319,6 +1327,8 @@ export interface CustomRole {
   name: string;
   description?: string;
   is_system: boolean;
+  /** is_builtin marks the seeded standard roles (RBA-02); only they can be invited (TLC-03). */
+  is_builtin?: boolean;
   permissions: string[];
   created_at: string;
   updated_at: string;
@@ -1376,6 +1386,33 @@ export const teamApi = {
   },
   addMember(teamId: string, data: { user_id: string; role_in_team?: string }): Promise<TeamMember> {
     return fetchAPI(`/teams/${teamId}/members`, { method: 'POST', body: JSON.stringify(data) });
+  },
+};
+
+export type Invitation = components['schemas']['Invitation'];
+export type InvitationRequest = components['schemas']['InvitationRequest'];
+export type InvitationAcceptance = components['schemas']['InvitationAcceptance'];
+export type AcceptedInvitation = components['schemas']['AcceptedInvitation'];
+
+/**
+ * invitationApi issues, renews and revokes the organization's invitations
+ * (TLC-03, user:manage); accept is public, the token is the credential.
+ */
+export const invitationApi = {
+  list(): Promise<Invitation[]> {
+    return fetchAllPages('/invitations');
+  },
+  issue(data: InvitationRequest): Promise<Invitation> {
+    return fetchAPI('/invitations', { method: 'POST', body: JSON.stringify(data) });
+  },
+  renew(id: string): Promise<Invitation> {
+    return fetchAPI(`/invitations/${id}/renew`, { method: 'POST' });
+  },
+  revoke(id: string): Promise<void> {
+    return fetchAPI(`/invitations/${id}`, { method: 'DELETE' });
+  },
+  accept(data: InvitationAcceptance): Promise<AcceptedInvitation> {
+    return fetchAPI('/invitations/accept', { method: 'POST', body: JSON.stringify(data) });
   },
 };
 

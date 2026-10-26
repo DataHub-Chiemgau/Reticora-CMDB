@@ -83,6 +83,10 @@ const FindingsPage = lazyPage(() => import('./pages/FindingsPage'), 'FindingsPag
 const ReviewInboxPage = lazyPage(() => import('./pages/ReviewInboxPage'), 'ReviewInboxPage');
 const JobCenterPage = lazyPage(() => import('./pages/JobCenterPage'), 'JobCenterPage');
 const OnboardingPage = lazyPage(() => import('./pages/OnboardingPage'), 'OnboardingPage');
+const InvitationAcceptPage = lazyPage(
+  () => import('./pages/InvitationAcceptPage'),
+  'InvitationAcceptPage',
+);
 const MapPage = lazyPage(() => import('./pages/MapPage'), 'MapPage');
 const RoomPlanPage = lazyPage(() => import('./pages/RoomPlanPage'), 'RoomPlanPage');
 
@@ -307,6 +311,15 @@ function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <OnboardingPage />
+              </Suspense>
+            }
+          />
+          {/* The invitation link opens the acceptance without a session (TLC-03). */}
+          <Route
+            path="/invitations/accept"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <InvitationAcceptPage />
               </Suspense>
             }
           />

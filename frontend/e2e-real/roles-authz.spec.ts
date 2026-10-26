@@ -32,6 +32,7 @@ import {
  *  03 revoked / renewed / conflicting invites . TLC-03, API-05              → WP-114
  *  04 expired invitation 410, renewable ....... TLC-03 ("7 Tage", "erneuerbar") → WP-114
  *  05 invitation e-mail ....................... NTF-05 ("Einladung"), TLC-03 → WP-140, WP-114
+ *  05b invitation through the UI and its link .. TLC-03, API-05 (F-142)       → WP-510
  *  06 viewer API boundaries (403) ............. RBA-02, RBA-04, RBA-01, AUT-04 → WP-045, WP-046, WP-068, WP-067, WP-114
  *     incl. location writes, tree UI, engineer . LOC-07, RBA-02               → WP-474
  *  07 viewer self-escalation refused .......... RBA-02, RBA-03, RBA-04, TLC-03 → WP-045, WP-046, WP-009, WP-114
@@ -501,6 +502,125 @@ test('05 an invitation sends the invitee an e-mail (NTF-05 event "Einladung")', 
   expect(mail, `invitation e-mail to ${address} in the mail catcher`).not.toBeNull();
   expect(`${mail!.Subject} ${mail!.Text ?? ''}`).toMatch(/einladung|invit/i);
   expect(mail!.Text ?? mail!.HTML ?? '').toContain(state().admin!.org);
+});
+
+test('05b the admin invites in the UI; the mailed link opens the accept page, creates the account and works only once', async ({
+  browser,
+  request,
+}) => {
+  // The invitation mail goes over the organization's e-mail channels (NTF-05).
+  const channel = await adminCall<{ id: string }>(request, 'POST', '/notification-channels', {
+    name: `authz-mail-ui-${run}`,
+    kind: 'email',
+    provider: 'central_smtp',
+    config: {},
+    enabled: true,
+  });
+  expect(channel.status, JSON.stringify(channel.body)).toBe(201);
+  // Two clients: the invitee is scoped to the first and must not see the second.
+  const clientName = `Invite Nord ${run}`;
+  const otherName = `Invite Süd ${run}`;
+  const client = await adminCall<{ id: string }>(request, 'POST', '/clients', {
+    name: clientName,
+    slug: `inv-nord-${run}`,
+  });
+  expect(client.status, JSON.stringify(client.body)).toBe(201);
+  const other = await adminCall<{ id: string }>(request, 'POST', '/clients', {
+    name: otherName,
+    slug: `inv-sued-${run}`,
+  });
+  expect(other.status, JSON.stringify(other.body)).toBe(201);
+
+  // UI: the administrator invites a viewer for the first client.
+  const address = email('uiinvite');
+  const admin = await signIn(browser, state().admin!);
+  await admin.page.goto('/users');
+  const main = admin.page.locator('#main-content');
+  await main.getByRole('button', { name: 'Benutzer einladen' }).click();
+  await main.getByLabel('E-Mail').fill(address);
+  await main.getByLabel('Rolle').selectOption({ label: 'viewer' });
+  await main.getByLabel('Scope-Typ').selectOption('client');
+  await main.getByLabel('Scope-Ziel').selectOption({ label: clientName });
+  await main.getByRole('button', { name: 'Einladung senden' }).click();
+  await expect(main.getByRole('status')).toContainText(`Einladung an ${address} gesendet`);
+  const pendingRow = main.getByRole('row', { name: new RegExp(address.replace(/[.+]/g, '\\$&')) });
+  await expect(pendingRow).toContainText('viewer');
+  await expect(pendingRow).toContainText(`Kunde: ${clientName}`);
+  await expect(pendingRow).toContainText('Offen');
+
+  // Mailpit: the mail carries the link to the accept page with the token.
+  const mail = await mailTo(request, address, 60_000);
+  expect(mail, `invitation e-mail to ${address} in the mail catcher`).not.toBeNull();
+  const match = `${mail!.Text ?? ''} ${mail!.HTML ?? ''}`.match(
+    /https?:\/\/[^\s"'<>]+\/invitations\/accept\?token=[A-Za-z0-9_\-.%]+/,
+  );
+  expect(match, 'the mail contains the accept link').not.toBeNull();
+  const link = new URL(match![0].replace(/&amp;/g, '&'));
+  expect(link.pathname).toBe('/invitations/accept');
+  expect(link.searchParams.get('token')).toBeTruthy();
+
+  // The link opens the public accept page (no session) and creates the account.
+  const inviteeContext = await browser.newContext({ locale: 'de-DE' });
+  const invitee = await inviteeContext.newPage();
+  await invitee.goto(`${link.pathname}${link.search}`);
+  await expect(invitee.getByRole('heading', { name: 'Einladung annehmen' })).toBeVisible();
+  await invitee.getByLabel('Anzeigename').fill('UI Invitee');
+  await invitee.getByLabel(/^Passwort/).fill(password('uiinvite'));
+  await invitee.getByRole('button', { name: 'Konto anlegen' }).click();
+  await invitee.waitForURL(/\/login$/);
+  await expect(invitee.getByRole('status')).toContainText(`Ihr Konto für ${address} ist angelegt`);
+
+  // API → DB: one user with the viewer role, scoped to the first client.
+  const users = (await listUsers(request)).filter((u) => u.email === address);
+  expect(users, 'exactly one account for the invitee').toHaveLength(1);
+  const assignments = await adminCall<{
+    data: (RoleAssignment & { scope_type?: string; scope_id?: string })[];
+  }>(request, 'GET', `/role-assignments?user_id=${users[0]!.id}`);
+  expect(assignments.status).toBe(200);
+  expect(assignments.body.data.map((a) => [a.role_id, a.scope_type, a.scope_id])).toEqual([
+    [state().roles!.viewer, 'client', client.body.id],
+  ]);
+
+  // Login: the invitee signs in; the UI shows the scope (only the invited
+  // client is selectable) and the role (viewer rights, no write or admin right).
+  await invitee.getByRole('button', { name: 'Anmelden' }).click();
+  await keycloakLogin(
+    invitee,
+    { email: address, password: password('uiinvite') },
+    /\/(dashboard|onboarding)/,
+  );
+  await invitee.goto('/permissions');
+  const scopeClient = invitee
+    .getByRole('group', { name: 'Arbeitsbereich' })
+    .getByRole('combobox', { name: 'Kunde', exact: true });
+  await expect(scopeClient).toBeEnabled();
+  await expect(scopeClient.locator('option')).toHaveText(['Alle Kunden', clientName]);
+  const permissionRow = (key: string) =>
+    invitee.getByRole('row', { name: new RegExp(`^${key.replace(':', '\\:')}\\b`) });
+  await expect(permissionRow('ci:read')).toContainText('Gewährt');
+  await expect(permissionRow('ci:write')).toContainText('Nicht gewährt');
+  await expect(permissionRow('user:manage')).toContainText('Nicht gewährt');
+  await inviteeContext.close();
+
+  // The admin list shows the invitation as accepted, without actions.
+  await admin.page.reload();
+  await main.getByRole('button', { name: 'Einladungen', exact: true }).click();
+  await expect(pendingRow).toContainText('Angenommen');
+  await expect(pendingRow.getByRole('button')).toHaveCount(0);
+  await admin.context.close();
+
+  // Negative: the same link a second time is refused and creates nothing.
+  const replayContext = await browser.newContext({ locale: 'de-DE' });
+  const replay = await replayContext.newPage();
+  await replay.goto(`${link.pathname}${link.search}`);
+  await replay.getByLabel('Anzeigename').fill('Replay');
+  await replay.getByLabel(/^Passwort/).fill(password('uireplay'));
+  await replay.getByRole('button', { name: 'Konto anlegen' }).click();
+  await expect(replay.getByRole('alert')).toContainText('bereits verwendet');
+  await expect(replay.getByRole('button', { name: 'Konto anlegen' })).toHaveCount(0);
+  expect(replay.url()).toContain('/invitations/accept');
+  await replayContext.close();
+  expect((await listUsers(request)).filter((u) => u.email === address)).toHaveLength(1);
 });
 
 test('06 the viewer reads CIs, but every write, delete and administrative call is refused with 403', async ({

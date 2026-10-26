@@ -491,6 +491,72 @@
     "permissions": "Berechtigungen",
     "type": "Typ"
   },
+  "invitations": {
+    "title": "Einladungen",
+    "invite": "Benutzer einladen",
+    "send": "Einladung senden",
+    "email": "E-Mail",
+    "role": "Rolle",
+    "chooseRole": "Rolle wählen",
+    "scope": "Scope",
+    "scopeType": "Scope-Typ",
+    "scopeTarget": "Scope-Ziel",
+    "chooseTarget": "Kunde oder Standort wählen",
+    "scopeTypes": {
+      "org": "Organisation",
+      "client": "Kunde",
+      "site": "Standort"
+    },
+    "expires": "Gültig bis",
+    "status": "Status",
+    "statuses": {
+      "pending": "Offen",
+      "accepted": "Angenommen",
+      "expired": "Abgelaufen"
+    },
+    "renew": "Erneuern",
+    "revoke": "Widerrufen",
+    "sent": "Einladung an {{email}} gesendet, gültig bis {{expires}}.",
+    "link": "Einladungslink (wird nur jetzt angezeigt)",
+    "errorTitle": "Einladungen konnten nicht geladen werden",
+    "errors": {
+      "notSaved": "Die Einladung wurde nicht gesendet. Bitte prüfen Sie die markierten Felder.",
+      "emailInvalid": "Bitte geben Sie eine einzelne E-Mail-Adresse ohne Namen ein.",
+      "emailPending": "Für diese Adresse gibt es bereits eine offene Einladung. Erneuern Sie diese in der Liste.",
+      "roleInvalid": "Diese Rolle gibt es in der Organisation nicht. Wählen Sie eine Standardrolle.",
+      "scopeTypeMismatch": "Die Rolle passt nicht zum Scope-Typ: Kundenrollen werden für einen Kunden, Standortrollen für einen Standort vergeben.",
+      "scopeInvalid": "Wählen Sie einen vorhandenen Kunden bzw. Standort.",
+      "scopeRequired": "Bitte wählen Sie das Scope-Ziel.",
+      "forbidden": "Keine Berechtigung für diese Einladung.",
+      "ceiling": "Sie können nur Rollen vergeben, deren Rechte Sie im gewählten Scope selbst besitzen.",
+      "notFound": "Die Einladung gibt es nicht mehr. Die Liste wurde aktualisiert.",
+      "accepted": "Die Einladung wurde bereits angenommen und kann nicht mehr geändert werden.",
+      "unavailable": "Einladungen sind auf diesem Server nicht eingerichtet. Wenden Sie sich an den Betrieb.",
+      "rejected": "Der Server hat die Einladung abgelehnt: {{detail}}",
+      "failed": "Die Aktion ist fehlgeschlagen: {{detail}}"
+    }
+  },
+  "invitationAccept": {
+    "title": "Einladung annehmen",
+    "description": "Legen Sie Ihr Konto an. Rolle und Zugriffsbereich hat die einladende Person festgelegt.",
+    "displayName": "Anzeigename",
+    "password": "Passwort (mindestens {{min}} Zeichen)",
+    "submit": "Konto anlegen",
+    "toLogin": "Zur Anmeldung",
+    "errors": {
+      "notAccepted": "Das Konto wurde nicht angelegt. Bitte prüfen Sie die markierten Felder.",
+      "passwordTooShort": "Das Passwort muss mindestens {{min}} Zeichen haben.",
+      "displayNameTooLong": "Der Anzeigename darf höchstens {{max}} Zeichen haben.",
+      "missingToken": "Der Einladungslink ist unvollständig. Öffnen Sie den Link aus der E-Mail vollständig.",
+      "expired": "Dieser Einladungslink ist abgelaufen. Bitten Sie die Person, die Sie eingeladen hat, die Einladung zu erneuern.",
+      "invalid": "Dieser Einladungslink ist ungültig oder wurde bereits verwendet. Bitten Sie um eine neue Einladung.",
+      "userExists": "Für diese Adresse gibt es in der Organisation bereits ein Konto. Melden Sie sich damit an.",
+      "rateLimited": "Zu viele Versuche. Bitte warten Sie einige Minuten und versuchen Sie es dann erneut.",
+      "userLimit": "Die Organisation hat ihre Höchstzahl an Benutzern erreicht. Wenden Sie sich an die Person, die Sie eingeladen hat.",
+      "unavailable": "Die Annahme ist gerade nicht möglich. Bitte versuchen Sie es später erneut.",
+      "failed": "Die Annahme ist fehlgeschlagen: {{detail}}"
+    }
+  },
   "auth": {
     "loginTitle": "Anmelden",
     "loginDescription": "Melden Sie sich mit Ihrem Organisationskonto bei Reticora CMDB an.",
@@ -502,6 +568,7 @@
     "callbackProgress": "Bitte warten Sie, während Ihre Sitzung geprüft wird.",
     "callbackError": "Die Anmeldung konnte nicht abgeschlossen werden.",
     "sessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
+    "invitationAccepted": "Ihr Konto für {{email}} ist angelegt. Melden Sie sich jetzt an.",
     "backendUnreachable": "Der Server ist nicht erreichbar. Prüfen Sie, ob Reticora läuft und die Adresse stimmt, und versuchen Sie es erneut."
   },
   "topology": {

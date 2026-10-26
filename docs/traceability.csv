@@ -797,3 +797,5 @@ AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-504
 EVT-01;[B];B;backend/internal/webhook/consume_integration_test.go;WP-506
 MET-11;B/G1, Teil P2/G2;B;backend/internal/discovery/typedvalues_integration_test.go;WP-501
 CI-03;[B];B;backend/internal/discovery/typedvalues_integration_test.go;WP-501
+TLC-03;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-510
+API-05;[B];B;frontend/src/pages/UserManagementPage.test.tsx;WP-510

@@ -491,6 +491,72 @@
     "permissions": "Permissions",
     "type": "Type"
   },
+  "invitations": {
+    "title": "Invitations",
+    "invite": "Invite user",
+    "send": "Send invitation",
+    "email": "Email",
+    "role": "Role",
+    "chooseRole": "Choose a role",
+    "scope": "Scope",
+    "scopeType": "Scope type",
+    "scopeTarget": "Scope target",
+    "chooseTarget": "Choose a client or site",
+    "scopeTypes": {
+      "org": "Organization",
+      "client": "Client",
+      "site": "Site"
+    },
+    "expires": "Valid until",
+    "status": "Status",
+    "statuses": {
+      "pending": "Pending",
+      "accepted": "Accepted",
+      "expired": "Expired"
+    },
+    "renew": "Renew",
+    "revoke": "Revoke",
+    "sent": "Invitation sent to {{email}}, valid until {{expires}}.",
+    "link": "Invitation link (shown only now)",
+    "errorTitle": "Invitations could not be loaded",
+    "errors": {
+      "notSaved": "The invitation was not sent. Please check the marked fields.",
+      "emailInvalid": "Please enter a single email address without a name.",
+      "emailPending": "This address already has a pending invitation. Renew it in the list.",
+      "roleInvalid": "This role does not exist in the organization. Choose a standard role.",
+      "scopeTypeMismatch": "The role does not fit the scope type: client roles are granted for a client, site roles for a site.",
+      "scopeInvalid": "Choose an existing client or site.",
+      "scopeRequired": "Please choose the scope target.",
+      "forbidden": "You are not allowed to issue this invitation.",
+      "ceiling": "You can only grant roles whose permissions you hold yourself in the chosen scope.",
+      "notFound": "The invitation no longer exists. The list has been refreshed.",
+      "accepted": "The invitation has already been accepted and can no longer be changed.",
+      "unavailable": "Invitations are not set up on this server. Contact your operations team.",
+      "rejected": "The server rejected the invitation: {{detail}}",
+      "failed": "The action failed: {{detail}}"
+    }
+  },
+  "invitationAccept": {
+    "title": "Accept invitation",
+    "description": "Create your account. The person who invited you has set your role and access scope.",
+    "displayName": "Display name",
+    "password": "Password (at least {{min}} characters)",
+    "submit": "Create account",
+    "toLogin": "Go to sign-in",
+    "errors": {
+      "notAccepted": "The account was not created. Please check the marked fields.",
+      "passwordTooShort": "The password must have at least {{min}} characters.",
+      "displayNameTooLong": "The display name may have at most {{max}} characters.",
+      "missingToken": "The invitation link is incomplete. Open the full link from the email.",
+      "expired": "This invitation link has expired. Ask the person who invited you to renew the invitation.",
+      "invalid": "This invitation link is invalid or has already been used. Ask for a new invitation.",
+      "userExists": "The organization already has an account for this address. Sign in with it.",
+      "rateLimited": "Too many attempts. Please wait a few minutes and try again.",
+      "userLimit": "The organization has reached its maximum number of users. Contact the person who invited you.",
+      "unavailable": "Accepting is not possible right now. Please try again later.",
+      "failed": "Accepting failed: {{detail}}"
+    }
+  },
   "auth": {
     "loginTitle": "Sign in",
     "loginDescription": "Use your organization account to access Reticora CMDB.",
@@ -502,6 +568,7 @@
     "callbackProgress": "Please wait while we verify your session.",
     "callbackError": "Sign-in could not be completed.",
     "sessionExpired": "Your session has expired. Please sign in again.",
+    "invitationAccepted": "Your account for {{email}} has been created. Sign in now.",
     "backendUnreachable": "The server cannot be reached. Check that Reticora is running and the address is correct, then try again."
   },
   "topology": {
