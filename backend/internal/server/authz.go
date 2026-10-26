@@ -512,6 +512,10 @@ var auditExemptions = map[string]string{
 	"POST /api/v1/admin/auth/callback":          "operator path, operator_audit",
 	"POST /api/v1/admin/orgs":                   "operator path, operator_audit",
 	"POST /api/v1/admin/orgs/{id}/entitlements": "operator path, operator_audit",
+	// The Alertmanager bridge (OPS-05, E-75) records a queued alert itself,
+	// in the tenant transaction of the operator organization; refusals go to
+	// operator_audit.
+	"POST /api/v1/admin/alerts/alertmanager": "operator path, audited by the bridge in the operator organization",
 	// Measurements and heartbeats are not history (AUD-03); the CI changes
 	// of an ingest are audited by the CI repository with source collector.
 	"POST /api/v1/agents/telemetry":          "measurements; CI changes audited by the CI repository",

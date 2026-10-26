@@ -241,11 +241,11 @@ one never fires; one whose dependency (database, NATS, the edge endpoint)
 stays unreachable fires after 35 minutes, idle or not. The cycles of all
 registered workers are checked by `TestEveryWorkerExportsRunAndErrorMetrics`.
 
-`deploy/monitoring/alertmanager.yaml` routes all alerts to the operators. Critical alerts also go to the on-call webhook. The product's notification channel (NTF) is added with WP-137. The Grafana dashboard `deploy/grafana/dashboard-overview.json` shows runs, errors, backlog and running instances.
+`deploy/monitoring/alertmanager.yaml` routes all alerts to the operators, by e-mail and through the NTF bridge to the notification channels of the operator organization (below). Critical alerts also go to the on-call webhook. The Grafana dashboard `deploy/grafana/dashboard-overview.json` shows runs, errors, backlog and running instances.
 
 ### Alert delivery
 
-The alert chain of an installation:
+The alert chain of an installation, Prometheus → Alertmanager → NTF:
 
 1. Prometheus scrapes `/metrics` of every server instance (worker, HTTP and
    break-glass series).
@@ -253,10 +253,15 @@ The alert chain of an installation:
    `slo-rules.yaml` and `operator-rules.yaml`: as PrometheusRule resources
    with the Prometheus Operator, or their `spec` as plain `rule_files`.
 3. Alertmanager loads `deploy/monitoring/alertmanager.yaml`: all alerts go to
-   the receiver `operators` (e-mail, repeated every 4 hours), critical ones
-   also to `operators-critical` (e-mail and the on-call webhook, hourly).
-   `ReticoraWorkerStopped` suppresses `ReticoraWorkerNoSuccess` of the same
-   worker.
+   the receiver `operators` (e-mail and the NTF bridge, repeated every
+   4 hours), critical ones instead to `operators-critical` (e-mail, the
+   on-call webhook and the NTF bridge, hourly). `ReticoraWorkerStopped`
+   suppresses `ReticoraWorkerNoSuccess` of the same worker.
+4. The NTF bridge of the server (`POST /api/v1/admin/alerts/alertmanager`,
+   OPS-05, E-75) turns each notification of an alert group into a
+   notification of the operator organization; the `notifier` worker
+   delivers it over that organization's notification channels (e-mail,
+   in-app, webhook) with retry, like every other notification (NTF-04).
 
 The file ships with placeholders of the reserved domain `.invalid`; replace
 them before loading it:
@@ -269,11 +274,61 @@ them before loading it:
 | `global.smtp_auth_password_file` | `/etc/alertmanager/secrets/smtp-password` | File with the SMTP password, for example a mounted secret; never write the password into the file |
 | `email_configs[].to` | `ops@example.invalid` | Addresses of the operators and of the on-call team |
 | `webhook_configs[].url` | `https://oncall.example.invalid/alertmanager` | On-call pager or chat bridge |
+| `webhook_configs[].url` of the NTF bridge (anchor `ntf-bridge`) | `https://reticora.example.invalid/api/v1/admin/alerts/alertmanager` | Base URL of the Reticora server as Alertmanager reaches it (ingress or service), with the path unchanged |
+| `http_config.authorization.credentials_file` of the NTF bridge | `/etc/alertmanager/secrets/ops-alert-token` | File with `RETICORA_OPS_ALERT_TOKEN`, for example a mounted secret; never write the token into the file (`credentials`) |
 
 `global.smtp_require_tls: true` stays unless the relay offers no STARTTLS.
 Check the edited file with `amtool check-config alertmanager.yaml`
 (Alertmanager refuses to load a file with e-mail receivers but without an
 SMTP smarthost and sender).
+
+#### NTF bridge (OPS-05, E-75)
+
+Set on every server instance that serves the API:
+
+| Variable | Meaning |
+|---|---|
+| `RETICORA_OPS_ALERT_ORG_ID` | UUID of the operator organization, a regular organization of the operator team whose notification channels and users receive the alerts. Without it the bridge answers 404, also with a valid token, and the e-mail receivers deliver alone (transition rule of E-75) |
+| `RETICORA_OPS_ALERT_TOKEN` | Bearer token of Alertmanager, at least 32 characters, not `RETICORA_OPERATOR_TOKEN`; surrounding white space (the line break of a secret file) is ignored, as Alertmanager ignores it in its credentials file. Required with `RETICORA_OPS_ALERT_ORG_ID`; a token without the organization is reported at start and leaves the bridge off |
+
+The token is the only credential of the bridge: user sessions, API keys,
+operator sessions and the break-glass token are refused with 401, and each
+refusal is recorded in `operator_audit` (`POST /alerts/alertmanager`, status
+401) and counts against the pre-auth limit of the client address. The token
+is compared in constant time.
+
+What the bridge does with a notification (payload version 4, at most 1 MiB
+and 100 alerts; Alertmanager sends at most 50, `max_alerts`):
+
+- It queues one notification of the category `ops_alert` on every enabled
+  channel of the operator organization, for its users who hold
+  `monitoring:write` organization-wide (`org_admin`, `engineer`); a webhook
+  channel gets one delivery. A firing group with an alert of severity
+  `critical` ignores quiet hours and muted categories; a resolved one and
+  every other group respect them.
+- The deduplication key is derived from the group key, the status and the
+  latest `startsAt` of the group's alerts: Alertmanager's repetitions
+  (`repeat_interval`) and retries queue nothing (answer `duplicate`); the
+  resolution of the group and a new alert in it notify again.
+- Subject (German) and text (German and English) name the alert, its labels,
+  `startsAt` and the summary; label and annotation values are stripped of
+  line breaks and control characters and cut to a fixed length. The values
+  are never logged.
+- The deliveries and the audit entry `notification.ops_alert_queued` in the
+  audit log of the operator organization (status, alert name, number of
+  alerts and deliveries, deduplication key; no token) are written in one
+  transaction of that organization (RLS unchanged). Other organizations do
+  not see them.
+- It answers 503 when the operator organization has no enabled channel or no
+  user with `monitoring:write`: Alertmanager reports the notification as
+  failed (`alertmanager_notifications_failed_total{integration="webhook"}`),
+  the e-mail of the same receiver is delivered regardless.
+
+`TestAlertmanagerConfigDeliversToTheBridge` (`backend/internal/operator`)
+checks that every receiver of the route tree keeps its e-mail and posts to
+the bridge once, with resolved notifications and the token from a
+credentials file; `alerts_integration_test.go` runs the chain from the
+webhook to the delivery on PostgreSQL.
 
 The CI job `monitoring-config` runs `tests/monitoring-config.test.sh` with
 amtool v0.27.0 and promtool v2.54.1 (both pinned with their checksums):

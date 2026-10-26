@@ -2,7 +2,7 @@
 # export reticora_worker_{enabled,up,runs_total,errors_total,
 # last_success_timestamp_seconds,backlog} per worker name of their operator
 # switch (docs/ops/workers.md). Alerts route to the operators through
-# deploy/monitoring/alertmanager.yaml; the NTF channel follows with WP-137.
+# deploy/monitoring/alertmanager.yaml, by e-mail and over the NTF bridge.
 # Unit test: deploy/monitoring/tests/worker-rules.test.yaml
 # (tests/monitoring-config.test.sh, CI job monitoring-config).
 apiVersion: monitoring.coreos.com/v1

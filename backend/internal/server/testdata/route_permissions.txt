@@ -333,6 +333,7 @@ PATCH /api/v1/vrfs/{id} vrf:manage
 PATCH /api/v1/workflows/{id} workflow:write
 PATCH /scim/v2/Groups/{id} iga:write
 PATCH /scim/v2/Users/{id} iga:write
+POST /api/v1/admin/alerts/alertmanager operator
 POST /api/v1/admin/auth/callback operator
 POST /api/v1/admin/orgs operator
 POST /api/v1/admin/orgs/{id}/entitlements operator

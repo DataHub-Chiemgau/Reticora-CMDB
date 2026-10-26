@@ -488,6 +488,8 @@ func main() {
 			MFAACRValues:    strings.Split(cfg.OperatorMFAACR, ","),
 		},
 		OperatorPool:         auditPool,
+		OpsAlerts:            operator.AlertConfig{Token: cfg.OpsAlertToken, OrgID: cfg.OpsAlertOrgID},
+		Notifier:             notifier,
 		UserProvisioner:      userProvisioner(repos),
 		DefaultProvisionRole: cfg.DefaultProvisionRole,
 		Audit:                auditHandler,

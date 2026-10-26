@@ -369,6 +369,66 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/admin/alerts/alertmanager:
+    post:
+      operationId: receiveAlertmanagerAlerts
+      tags: [Operator]
+      security:
+        - OpsAlertAuth: []
+      summary: Operations alerts of Alertmanager into the notification channels (OPS-05)
+      description: |
+        Webhook receiver of Alertmanager (payload version 4, E-75). Each
+        notification of an alert group becomes one notification (category
+        `ops_alert`) of the operator organization RETICORA_OPS_ALERT_ORG_ID
+        on its enabled notification channels, addressed to its users who hold
+        monitoring:write organization-wide. A firing group with an alert of
+        severity `critical` ignores quiet hours and muted categories. The
+        deduplication key is derived from the group key, the status and the
+        latest `startsAt` of the group's alerts: a repeated notification
+        queues nothing, a resolved group or a new alert in it notifies again.
+        A queued notification is recorded in the audit log of the operator
+        organization (`notification.ops_alert_queued`, without the token).
+
+        Only the bearer token RETICORA_OPS_ALERT_TOKEN authenticates: user
+        sessions, API keys and operator credentials are refused with 401,
+        which is recorded in operator_audit. Without an operator organization
+        the endpoint answers 404 (also with a valid token) and Alertmanager
+        keeps delivering by e-mail. A request carries at most 1 MiB and 100
+        alerts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertmanagerWebhook'
+      responses:
+        '202':
+          description: The notification is queued, or was queued by an earlier identical request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsAlertReceipt'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: Body larger than 1 MiB
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: Not an Alertmanager payload of version 4 (status, group key, alerts, startsAt), or more than 100 alerts
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/auth/config:
     get:
       operationId: getAuthConfig
@@ -12170,6 +12230,10 @@ components:
       in: header
       name: X-Operator-Token
       description: RETICORA_OPERATOR_TOKEN, bootstrap and break-glass only; every use raises an alarm.
+    OpsAlertAuth:
+      type: http
+      scheme: bearer
+      description: RETICORA_OPS_ALERT_TOKEN of the Alertmanager bridge (OPS-05), sent by Alertmanager from a credentials file.
 
   parameters:
     ResourceID:
@@ -17131,6 +17195,83 @@ components:
           format: int64
         reason:
           type: string
+
+    AlertmanagerWebhook:
+      type: object
+      description: >-
+        Payload of an Alertmanager webhook notification, version 4 (field names
+        as Alertmanager sends them); further fields are ignored.
+      required: [version, groupKey, status, alerts]
+      properties:
+        version:
+          type: string
+          enum: ['4']
+        groupKey:
+          type: string
+          description: Key of the alert group (route and group labels).
+        truncatedAlerts:
+          type: integer
+          minimum: 0
+          description: Alerts Alertmanager left out (max_alerts).
+        status:
+          type: string
+          enum: [firing, resolved]
+        receiver:
+          type: string
+        groupLabels:
+          type: object
+          additionalProperties: { type: string }
+        commonLabels:
+          type: object
+          additionalProperties: { type: string }
+        commonAnnotations:
+          type: object
+          additionalProperties: { type: string }
+        externalURL:
+          type: string
+        alerts:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/AlertmanagerAlert'
+
+    AlertmanagerAlert:
+      type: object
+      required: [status, labels, startsAt]
+      properties:
+        status:
+          type: string
+          enum: [firing, resolved]
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        annotations:
+          type: object
+          additionalProperties: { type: string }
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        generatorURL:
+          type: string
+        fingerprint:
+          type: string
+
+    OpsAlertReceipt:
+      type: object
+      required: [notification, deliveries]
+      properties:
+        notification:
+          type: string
+          enum: [queued, duplicate]
+          description: duplicate when an earlier request with the same deduplication key queued the notification.
+        deliveries:
+          type: integer
+          minimum: 0
+          description: Deliveries this request queued on the channels of the operator organization.
 
     User:
       type: object

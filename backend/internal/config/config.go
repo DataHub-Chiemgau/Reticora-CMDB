@@ -79,6 +79,15 @@ type Config struct {
 	OperatorGroup        string
 	OperatorMFAACR       string
 	AllowInsecureDevAuth bool // opt-in: accept session tokens without signature verification
+	// Alertmanager bridge of the operator path (OPS-05, E-75):
+	// RETICORA_OPS_ALERT_TOKEN is the bearer token Alertmanager sends (at
+	// least 32 characters, not the break-glass token; surrounding white
+	// space is dropped as Alertmanager drops it from its credentials file);
+	// RETICORA_OPS_ALERT_ORG_ID is the operator organization whose
+	// notification channels deliver the alerts. Without the organization the
+	// bridge answers 404 and Alertmanager delivers by e-mail only.
+	OpsAlertToken string
+	OpsAlertOrgID string
 
 	// Entitlements
 	DefaultPlan string // plan provisioned for the --no-db demo organization
@@ -233,6 +242,8 @@ func Load() *Config {
 		OperatorGroup:           l.str("RETICORA_OPERATOR_GROUP", "operators"),
 		OperatorMFAACR:          l.str("RETICORA_OPERATOR_MFA_ACR", "2"),
 		AllowInsecureDevAuth:    l.str("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
+		OpsAlertToken:           strings.TrimSpace(l.str("RETICORA_OPS_ALERT_TOKEN", "")),
+		OpsAlertOrgID:           strings.TrimSpace(l.str("RETICORA_OPS_ALERT_ORG_ID", "")),
 
 		DefaultPlan: l.str("RETICORA_DEFAULT_PLAN", "essential"),
 
@@ -299,6 +310,10 @@ func Load() *Config {
 		cfg.workers[name] = l.boolean(WorkerEnvKey(name), true)
 	}
 	cfg.warnings = l.checkWorkerSwitches(cfg.workers)
+	if cfg.OpsAlertToken != "" && cfg.OpsAlertOrgID == "" {
+		cfg.warnings = append(cfg.warnings, "RETICORA_OPS_ALERT_TOKEN is set without RETICORA_OPS_ALERT_ORG_ID: "+
+			"the Alertmanager bridge answers 404 (E-75)")
+	}
 
 	cfg.explicit = l.set
 	cfg.invalid = l.invalid
@@ -479,6 +494,7 @@ func (c *Config) Validate(noDB bool) error {
 	if c.OperatorToken != "" && len(c.OperatorToken) < 32 {
 		errs = append(errs, fmt.Errorf("RETICORA_OPERATOR_TOKEN must have at least 32 characters"))
 	}
+	errs = append(errs, c.opsAlertErrors()...)
 	switch c.TrialPlan {
 	case "essential", "standard", "pro", "enterprise":
 	default:
@@ -568,6 +584,32 @@ func (c *Config) Validate(noDB bool) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// uuidValue matches a UUID in its canonical text form.
+var uuidValue = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// opsAlertErrors checks the Alertmanager bridge (OPS-05, E-75): the
+// operator organization is a UUID and needs the token; the token has at
+// least 32 characters and is not the break-glass token, whose every use is
+// an alarm and which must not sit in Alertmanager's secrets.
+func (c *Config) opsAlertErrors() []error {
+	var errs []error
+	if c.OpsAlertToken != "" && len(c.OpsAlertToken) < 32 {
+		errs = append(errs, fmt.Errorf("RETICORA_OPS_ALERT_TOKEN must have at least 32 characters"))
+	}
+	if c.OpsAlertToken != "" && c.OpsAlertToken == c.OperatorToken {
+		errs = append(errs, fmt.Errorf("RETICORA_OPS_ALERT_TOKEN must differ from RETICORA_OPERATOR_TOKEN"))
+	}
+	if c.OpsAlertOrgID != "" {
+		if !uuidValue.MatchString(c.OpsAlertOrgID) {
+			errs = append(errs, fmt.Errorf("RETICORA_OPS_ALERT_ORG_ID must be the UUID of the operator organization"))
+		}
+		if c.OpsAlertToken == "" {
+			errs = append(errs, fmt.Errorf("RETICORA_OPS_ALERT_ORG_ID requires RETICORA_OPS_ALERT_TOKEN"))
+		}
+	}
+	return errs
 }
 
 // loader reads RETICORA_* variables and records which were set and which
