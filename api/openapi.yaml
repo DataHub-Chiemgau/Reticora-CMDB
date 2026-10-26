@@ -11610,6 +11610,13 @@ paths:
     get:
       operationId: getHistoryEntitytypeId
       summary: List the unified change history of an entity
+      description: >-
+        Needs ci:read and the read permission of the entity type: ci:read for
+        ci, relationship:read for relationship, location:read for location,
+        asset:read for asset, reservation and composition (CI-06, E-78). The
+        history is read in the caller's client and site scope. The audit
+        entries of a CI are part of its history only when the caller holds
+        audit:read; audit_included says whether they are.
       parameters:
         - name: entityType
           in: path
@@ -11635,7 +11642,8 @@ paths:
             location (also after its deletion) and of its ancestors. A
             location_change entry has change_type location_change, field_name
             parent_id, and old_value/new_value objects with location_id,
-            location_name, parent_id and path.
+            location_name, parent_id and path. Without audit:read the audit
+            entries are left out (audit_included false).
           content:
             application/json:
               schema:
@@ -11648,10 +11656,19 @@ paths:
                 $ref: '#/components/schemas/ProblemDetail'
         '401':
           description: Unauthorized
+        '403':
+          description: >-
+            The caller lacks ci:read or the read permission of the entity
+            type.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           description: >-
-            The location is unknown or outside the caller's scope: neither the
-            location nor a location_change of it is visible to the caller.
+            The CI is unknown or outside the caller's scope; the location is
+            unknown or outside the caller's scope: neither the location nor a
+            location_change of it is visible to the caller.
           content:
             application/problem+json:
               schema:
@@ -13518,6 +13535,12 @@ components:
         next_cursor:
           type: string
           description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        audit_included:
+          type: boolean
+          description: >-
+            True when the audit entries of the entity are part of the history:
+            a CI's history read with audit:read (E-78). False for a caller
+            without audit:read and for the other entity types.
     ProblemDetail:
       type: object
       description: >-

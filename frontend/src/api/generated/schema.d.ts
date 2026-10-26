@@ -6174,7 +6174,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the unified change history of an entity */
+    /**
+     * List the unified change history of an entity
+     * @description Needs ci:read and the read permission of the entity type: ci:read for ci, relationship:read for relationship, location:read for location, asset:read for asset, reservation and composition (CI-06, E-78). The history is read in the caller's client and site scope. The audit entries of a CI are part of its history only when the caller holds audit:read; audit_included says whether they are.
+     */
     get: operations['getHistoryEntitytypeId'];
     put?: never;
     post?: never;
@@ -7290,6 +7293,8 @@ export interface components {
       has_more?: boolean;
       /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
       next_cursor?: string;
+      /** @description True when the audit entries of the entity are part of the history: a CI's history read with audit:read (E-78). False for a caller without audit:read and for the other entity types. */
+      audit_included?: boolean;
     };
     /** @description RFC 7807 Problem Details object (API-03). Every error response (4xx/5xx) is `application/problem+json` and carries `trace_id`, the request id also returned in the `X-Request-ID` header. */
     ProblemDetail: {
@@ -26611,7 +26616,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change rows (with the site at the time), entity_change rows, audit entries and the location_change rows of its location and the location's ancestors. For a location it is its entity_change rows and the location_change rows of the location (also after its deletion) and of its ancestors. A location_change entry has change_type location_change, field_name parent_id, and old_value/new_value objects with location_id, location_name, parent_id and path. */
+      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change rows (with the site at the time), entity_change rows, audit entries and the location_change rows of its location and the location's ancestors. For a location it is its entity_change rows and the location_change rows of the location (also after its deletion) and of its ancestors. A location_change entry has change_type location_change, field_name parent_id, and old_value/new_value objects with location_id, location_name, parent_id and path. Without audit:read the audit entries are left out (audit_included false). */
       200: {
         headers: {
           [name: string]: unknown;
@@ -26636,7 +26641,16 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description The location is unknown or outside the caller's scope: neither the location nor a location_change of it is visible to the caller. */
+      /** @description The caller lacks ci:read or the read permission of the entity type. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The CI is unknown or outside the caller's scope; the location is unknown or outside the caller's scope: neither the location nor a location_change of it is visible to the caller. */
       404: {
         headers: {
           [name: string]: unknown;

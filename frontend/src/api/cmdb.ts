@@ -608,9 +608,14 @@ export interface StateSnapshot {
   deleted: boolean;
 }
 
+/** A page of a history; audit_included is false without audit:read (E-78). */
+export interface HistoryPage extends PaginatedResponse<EntityChange> {
+  audit_included?: boolean;
+}
+
 export const historyApi = {
   list(entityType: string, id: string, params: { limit?: number; offset?: number } = {}) {
-    return fetchAPI<PaginatedResponse<EntityChange>>(`/history/${entityType}/${id}${qs(params)}`);
+    return fetchAPI<HistoryPage>(`/history/${entityType}/${id}${qs(params)}`);
   },
   stateAt(entityType: 'assets' | 'cis', id: string, at?: string): Promise<StateSnapshot> {
     return fetchAPI(`/${entityType}/${id}/state${qs({ at })}`);

@@ -10,7 +10,7 @@ package history_test
 // override.PGRepository: SetOverride and ClearOverride appear in the CI's
 // unified history as audit entries ci.override_set / ci.override_cleared,
 // newest first (cleared before set), and a principal restricted to client 2
-// reads none of the client-1 CI's history.
+// reads none of the client-1 CI's history (not found, WP-475).
 // (The location_change part is TestAuditT3HistoryIncludesLocationChange in
 // history_integration_test.go.)
 //
@@ -19,6 +19,7 @@ package history_test
 //     go test -count=1 -v -run 'TestAuditT3HistoryIncludesOverrides' ./internal/history/
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -40,7 +41,7 @@ func TestAuditT3HistoryIncludesOverrides(t *testing.T) {
 		t.Fatalf("clear override: %v", err)
 	}
 	repo := history.NewPGRepository(f.App)
-	all, total, err := repo.List(ctx, f.OrgA, "ci", ciID, api.PaginationParams{Limit: 100})
+	all, total, err := repo.List(ctx, f.OrgA, "ci", ciID, api.PaginationParams{Limit: 100}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,8 +69,8 @@ func TestAuditT3HistoryIncludesOverrides(t *testing.T) {
 	}
 
 	client2 := tenant.WithTenant(f.ClientCtx(f.Client2), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
-	other, otherTotal, err := repo.List(client2, f.OrgA, "ci", ciID, api.PaginationParams{Limit: 100})
-	if err != nil || otherTotal != 0 || len(other) != 0 {
-		t.Errorf("client-2 principal reads %d history entries of a client-1 CI (%v), want 0", otherTotal, err)
+	other, otherTotal, err := repo.List(client2, f.OrgA, "ci", ciID, api.PaginationParams{Limit: 100}, true)
+	if !errors.Is(err, api.ErrNotFound) || otherTotal != 0 || len(other) != 0 {
+		t.Errorf("client-2 principal reads %d history entries of a client-1 CI (%v), want 0 and api.ErrNotFound", otherTotal, err)
 	}
 }

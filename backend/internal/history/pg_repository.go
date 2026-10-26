@@ -80,12 +80,11 @@ func ancestorsOf(locationID string) string {
 	return `SELECT a.id FROM location a WHERE a.path @> (SELECT l.path FROM location l WHERE l.id = ` + locationID + `)`
 }
 
-// unifiedCIHistory is the history of a CI (CI-06): its ci_change rows
-// (with the site at the time), the entity_change rows, the audit entries of
-// the CI and the location_change rows of its location and the location's
-// ancestors (a room or rack re-parented with the CI in it), one
-// chronological trail.
-var unifiedCIHistory = `
+// unifiedCIChanges is the change part of the history of a CI (CI-06): its
+// ci_change rows (with the site at the time, overrides included), the
+// entity_change rows and the location_change rows of its location and the
+// location's ancestors (a room or rack re-parented with the CI in it).
+var unifiedCIChanges = `
 	SELECT id::text, organization_id::text, 'ci', ci_id::text, COALESCE(actor_id::text, ''), change_type,
 	       COALESCE(field_name, ''), old_value, new_value, COALESCE(comment, ''), created_at, 'ci_change', COALESCE(site_id::text, '')
 	FROM ci_change WHERE organization_id = $1 AND ci_id = $2::uuid
@@ -93,11 +92,15 @@ var unifiedCIHistory = `
 	SELECT id::text, organization_id::text, entity_type, entity_id::text, COALESCE(actor_id::text, ''), change_type,
 	       COALESCE(field_name, ''), old_value, new_value, COALESCE(comment, ''), created_at, 'entity_change', ''
 	FROM entity_change WHERE organization_id = $1 AND entity_type = 'ci' AND entity_id = $2::uuid
+	UNION ALL` + locationChanges("ci", ancestorsOf("(SELECT ci.location_id FROM ci WHERE ci.id = $2::uuid)"))
+
+// unifiedCIAudit adds the audit entries of the CI to its history; only a
+// caller with audit:read reads them (E-78).
+const unifiedCIAudit = `
 	UNION ALL
 	SELECT id::text, organization_id::text, 'ci', resource_id::text, COALESCE(actor_id::text, ''), action,
 	       '', NULL, changes, '', "timestamp", 'audit', ''
-	FROM audit_log WHERE organization_id = $1 AND resource_type = 'ci' AND resource_id = $2::uuid
-	UNION ALL` + locationChanges("ci", ancestorsOf("(SELECT ci.location_id FROM ci WHERE ci.id = $2::uuid)"))
+	FROM audit_log WHERE organization_id = $1 AND resource_type = 'ci' AND resource_id = $2::uuid`
 
 // unifiedLocationHistory is the history of a location (LOC-11): its
 // entity_change rows and the location_change rows of the location itself,
@@ -110,9 +113,14 @@ var unifiedLocationHistory = `
 	UNION ALL` + locationChanges("location", "SELECT $2::uuid UNION "+ancestorsOf("$2::uuid"))
 
 // listCI returns the unified history of a CI the caller can see, newest
-// first; a CI the caller cannot see has none.
-func (r *PGRepository) listCI(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Change, int, error) {
-	return r.listUnified(ctx, orgID, ciID, page, "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid)", unifiedCIHistory, nil)
+// first, with its audit entries when includeAudit is set; a CI the caller
+// cannot see (unknown, or of another client or site) is api.ErrNotFound.
+func (r *PGRepository) listCI(ctx context.Context, orgID, ciID string, page api.PaginationParams, includeAudit bool) ([]Change, int, error) {
+	unified := unifiedCIChanges
+	if includeAudit {
+		unified += unifiedCIAudit
+	}
+	return r.listUnified(ctx, orgID, ciID, page, "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid)", unified, api.ErrNotFound)
 }
 
 // listLocation returns the unified history of a location, newest first. A
@@ -168,11 +176,12 @@ func (r *PGRepository) listUnified(ctx context.Context, orgID, id string, page a
 }
 
 // List returns the changes of one entity, newest first; for a CI the
-// unified history of CI-06, for a location that of LOC-11.
-func (r *PGRepository) List(ctx context.Context, orgID, entityType, entityID string, page api.PaginationParams) ([]Change, int, error) {
+// unified history of CI-06 (its audit entries only with includeAudit), for
+// a location that of LOC-11.
+func (r *PGRepository) List(ctx context.Context, orgID, entityType, entityID string, page api.PaginationParams, includeAudit bool) ([]Change, int, error) {
 	switch entityType {
 	case "ci":
-		return r.listCI(ctx, orgID, entityID, page)
+		return r.listCI(ctx, orgID, entityID, page, includeAudit)
 	case "location":
 		return r.listLocation(ctx, orgID, entityID, page)
 	}

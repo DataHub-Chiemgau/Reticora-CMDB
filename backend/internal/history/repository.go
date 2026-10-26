@@ -14,8 +14,9 @@ import (
 type Repository interface {
 	// Record appends a change row. The trail is append-only.
 	Record(ctx context.Context, change *Change) error
-	// List returns the changes of one entity, newest first.
-	List(ctx context.Context, orgID, entityType, entityID string, page api.PaginationParams) ([]Change, int, error)
+	// List returns the changes of one entity, newest first; audit entries
+	// are part of a CI's history only with includeAudit (CI-06, E-78).
+	List(ctx context.Context, orgID, entityType, entityID string, page api.PaginationParams, includeAudit bool) ([]Change, int, error)
 	// TrailUpTo returns the changes of one entity up to a point in time,
 	// oldest first, for point-in-time reconstruction.
 	TrailUpTo(ctx context.Context, orgID, entityType, entityID string, at time.Time) ([]Change, error)
@@ -46,8 +47,9 @@ func (r *MemoryRepository) Record(_ context.Context, change *Change) error {
 	return nil
 }
 
-// List returns the changes of one entity, newest first.
-func (r *MemoryRepository) List(_ context.Context, orgID, entityType, entityID string, page api.PaginationParams) ([]Change, int, error) {
+// List returns the changes of one entity, newest first; the in-memory
+// trail holds no audit entries.
+func (r *MemoryRepository) List(_ context.Context, orgID, entityType, entityID string, page api.PaginationParams, _ bool) ([]Change, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Change

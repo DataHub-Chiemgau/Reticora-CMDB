@@ -42,6 +42,7 @@ import {
  *  10 Keycloak user without invitation ........ AUT-01, AUT-09 (CH26)        → WP-043, WP-042
  *  10b Keycloak user without org attribute ..... AUT-09 (CH26, E-14)          → WP-043
  *  11 role upgrade effective at refresh/login . AUT-02, RBA-03, RBA-02       → WP-066, WP-009, WP-046
+ *     incl. engineer reads the CI history ...... CI-06 (E-78)                → WP-475
  *  12 upgraded user creates a CI in the UI .... RBA-02, CI-01 (UI-04)        → WP-046, WP-120, WP-191
  *  13 role revocation effective ............... AUT-02, RBA-03, API-05       → WP-066, WP-009, WP-046
  *  14 SPA renews the session by cookie ........ AUT-02                       → WP-066, WP-009
@@ -1111,6 +1112,32 @@ test('11 an admin role change (viewer → engineer) takes effect at the next ref
   await expect(dialog).toBeHidden();
   await again.page.reload();
   await expect(again.page.getByRole('heading', { name: renamed })).toBeVisible();
+
+  // CI-06, E-78 (WP-475, retest F-094): the engineer (no audit:read) reads
+  // the history of the changed CI: the API answers 200 with the rename and
+  // without audit entries, the UI lists the rename without an error and
+  // says that audit entries need audit:read.
+  expect(perms).not.toContain('audit:read');
+  const hist = await api<{
+    data: { field_name?: string; source?: string }[];
+    audit_included?: boolean;
+  }>(request, again.token, 'GET', `/history/ci/${ci.id}`);
+  expect(hist.status, `GET /history/ci/{id} as engineer: ${JSON.stringify(hist.body)}`).toBe(200);
+  expect(hist.body.audit_included).toBe(false);
+  expect(hist.body.data.some((e) => e.source === 'ci_change' && e.field_name === 'name')).toBe(
+    true,
+  );
+  expect(hist.body.data.some((e) => e.source === 'audit')).toBe(false);
+  await again.page.locator('#main-content summary', { hasText: 'Historie' }).click();
+  const history = again.page.getByRole('list', { name: 'Historie' });
+  await expect(history).toBeVisible();
+  await expect(history.getByRole('listitem').filter({ hasText: /·\s*name\b/ })).not.toHaveCount(0);
+  await expect(again.page.getByText('Die Historie konnte nicht geladen werden.')).toHaveCount(0);
+  await expect(
+    again.page.getByText(
+      'Audit-Einträge sind nicht enthalten; sie erfordern die Berechtigung audit:read.',
+    ),
+  ).toBeVisible();
   await again.context.close();
   const stored = await adminCall<CI>(request, 'GET', `/cis/${ci.id}`);
   expect(stored.body.name).toBe(renamed);

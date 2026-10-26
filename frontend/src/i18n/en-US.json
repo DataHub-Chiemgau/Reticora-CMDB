@@ -231,11 +231,13 @@
     "history": "History",
     "historyEmpty": "No changes yet.",
     "historyLoadError": "The history could not be loaded.",
+    "historyAuditHint": "Audit entries are not included; they require the audit:read permission.",
     "historySite": "Site {{site}}",
     "historySource": {
       "ci_change": "Change",
       "entity_change": "History",
-      "audit": "Audit"
+      "audit": "Audit",
+      "location_change": "Location change"
     }
   },
   "form": {

@@ -3,6 +3,7 @@ package history_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -20,8 +22,9 @@ import (
 // TestUnifiedCIHistory covers CI-06 and AUD-03 (WP-171) against
 // PostgreSQL: the history of a CI unites its ci_change rows (with the site
 // at the time), its entity_change rows and its audit entries in one trail,
-// newest first, paginated over all three; another organization sees none
-// of it.
+// newest first, paginated over all three; without the audit entries
+// (no audit:read, E-78) the rest of the trail stays; another organization
+// sees none of it.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestUnifiedCIHistory(t *testing.T) {
@@ -52,7 +55,7 @@ func TestUnifiedCIHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	all, total, err := repo.List(ctx, f.OrgA, "ci", item.ID, api.PaginationParams{Limit: 100})
+	all, total, err := repo.List(ctx, f.OrgA, "ci", item.ID, api.PaginationParams{Limit: 100}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,13 +72,22 @@ func TestUnifiedCIHistory(t *testing.T) {
 	if total != len(all) || sources[history.SourceCIChange] < 2 || sources[history.SourceAudit] < 2 || sources[history.SourceEntityChange] != 1 {
 		t.Fatalf("total %d, sources %v", total, sources)
 	}
-	page, pageTotal, err := repo.List(ctx, f.OrgA, "ci", item.ID, api.PaginationParams{Limit: 2, Offset: 1})
+	page, pageTotal, err := repo.List(ctx, f.OrgA, "ci", item.ID, api.PaginationParams{Limit: 2, Offset: 1}, true)
 	if err != nil || pageTotal != total || len(page) != 2 || page[0].ID != all[1].ID {
 		t.Errorf("second page: %d/%d %v", len(page), pageTotal, err)
 	}
-	other, otherTotal, err := repo.List(f.OrgCtx(f.OrgB), f.OrgB, "ci", item.ID, api.PaginationParams{Limit: 100})
-	if err != nil || otherTotal != 0 || len(other) != 0 {
-		t.Errorf("another organization reads %d entries (%v)", otherTotal, err)
+	other, otherTotal, err := repo.List(f.OrgCtx(f.OrgB), f.OrgB, "ci", item.ID, api.PaginationParams{Limit: 100}, true)
+	if !errors.Is(err, api.ErrNotFound) || otherTotal != 0 || len(other) != 0 {
+		t.Errorf("another organization reads %d entries (%v), want api.ErrNotFound", otherTotal, err)
+	}
+	changes, changesTotal, err := repo.List(ctx, f.OrgA, "ci", item.ID, api.PaginationParams{Limit: 100}, false)
+	if err != nil || changesTotal != total-sources[history.SourceAudit] || len(changes) != changesTotal {
+		t.Fatalf("history without audit entries: %d/%d entries (%v), want %d", len(changes), changesTotal, err, total-sources[history.SourceAudit])
+	}
+	for _, c := range changes {
+		if c.Source == history.SourceAudit {
+			t.Errorf("history without audit:read lists the audit entry %s", c.ChangeType)
+		}
 	}
 }
 
@@ -167,11 +179,11 @@ func TestAuditT3HistoryIncludesLocationChange(t *testing.T) {
 	}
 	repo := history.NewPGRepository(f.App)
 	page := api.PaginationParams{Limit: 100}
-	_, ciBefore, err := repo.List(ctx, f.OrgA, "ci", ciID, page)
+	_, ciBefore, err := repo.List(ctx, f.OrgA, "ci", ciID, page, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, roomBefore, err := repo.List(ctx, f.OrgA, "location", room2, page)
+	_, roomBefore, err := repo.List(ctx, f.OrgA, "location", room2, page, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +196,7 @@ func TestAuditT3HistoryIncludesLocationChange(t *testing.T) {
 		t.Fatalf("precondition: location_change rows = %d (%v), want 3", rows, err)
 	}
 
-	roomHist, roomAfter, err := repo.List(ctx, f.OrgA, "location", room2, page)
+	roomHist, roomAfter, err := repo.List(ctx, f.OrgA, "location", room2, page, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +208,7 @@ func TestAuditT3HistoryIncludesLocationChange(t *testing.T) {
 	} else {
 		checkMove(t, moves[room2][0], f.User, room2, "audit-t3-hist-room2", b1, b2)
 	}
-	rackHist, _, err := repo.List(ctx, f.OrgA, "location", rack, page)
+	rackHist, _, err := repo.List(ctx, f.OrgA, "location", rack, page, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +216,7 @@ func TestAuditT3HistoryIncludesLocationChange(t *testing.T) {
 		t.Errorf("rack history: moves %v, want the rack's and the room's", moves)
 	}
 
-	ciHist, ciAfter, err := repo.List(ctx, f.OrgA, "ci", ciID, page)
+	ciHist, ciAfter, err := repo.List(ctx, f.OrgA, "ci", ciID, page, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,14 +249,18 @@ func TestAuditT3HistoryIncludesLocationChange(t *testing.T) {
 	}
 }
 
-// getHistory serves GET path through the history handler with ctx.
-func getHistory(ctx context.Context, t *testing.T, h *history.Handler, path string) (*httptest.ResponseRecorder, api.ListResponse[history.Change]) {
+// getHistory serves GET path through the history handler with ctx, as a
+// principal with every permission unless ctx carries one.
+func getHistory(ctx context.Context, t *testing.T, h *history.Handler, path string) (*httptest.ResponseRecorder, history.ListResponse) {
 	t.Helper()
+	if _, ok := identity.PrincipalFromContext(ctx); !ok {
+		ctx = identity.WithPrincipal(ctx, identity.Principal{OrganizationID: tenant.FromContext(ctx).OrganizationID, Permissions: identity.AllPermissions()})
+	}
 	r := chi.NewRouter()
 	h.RegisterRoutes(r)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx))
-	var body api.ListResponse[history.Change]
+	var body history.ListResponse
 	if rec.Code == http.StatusOK {
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatalf("GET %s: %v", path, err)

@@ -574,8 +574,9 @@ export function CIMetricsSection({ ciId }: { ciId: string }) {
 
 /**
  * CIHistorySection lists the unified history of a CI (CI-06): changes,
- * history rows and audit entries, newest first, each with its time and the
- * site of the CI at that time.
+ * history rows, location changes and audit entries, newest first, each with
+ * its time and the site of the CI at that time. Without audit:read the
+ * server leaves the audit entries out (E-78); the section then says so.
  */
 export function CIHistorySection({ ciId }: { ciId: string }) {
   const { t, i18n } = useTranslation();
@@ -617,6 +618,9 @@ export function CIHistorySection({ ciId }: { ciId: string }) {
           ))}
         </ol>
       )}
+      {history.data?.audit_included === false ? (
+        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{t('ci.historyAuditHint')}</p>
+      ) : null}
     </Section>
   );
 }
