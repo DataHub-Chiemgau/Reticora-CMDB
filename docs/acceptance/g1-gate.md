@@ -27,7 +27,9 @@ Prüfungen:
 Konsistenzprüfung (WP-451, Normalmodus):
 
 - Das Ergebnis steht als erste Zeile „**Ergebnis: offen**“ oder
-  „**Ergebnis: bestanden**“ im Abschnitt „Ergebnis“. Der Status einer ID ist
+  „**Ergebnis: bestanden**“ im Abschnitt „Ergebnis“. Das Ergebnis „bedingt
+  bestanden“ nach E-76 Option 2 (Abschnitt „Freigabe nach E-76“) nimmt die
+  Prüfung ab WP-595 an, mit seinen Bedingungen. Der Status einer ID ist
   die Statusspalte des Anhangs; PASS heißt, die Zelle beginnt mit PASS.
 - Befundzeile ist jede Tabellenzeile mit einer Severity-Zelle in
   `docs/security/review-g1.md` (auch im Anhang) und
@@ -86,11 +88,18 @@ NFR-08, NFR-09, ABN-01 (a)/(b), GATE-03 (Pentest-Anteil) und GATE-02 auf
 und TEN-09 stehen wegen offener oder fehlender Befunde des Sicherheitsreviews
 auf „offen“ (F-038, F-040). Das Ergebnis lautet „offen“.
 
+Nachtrag 2026-10-26 (E-76 Option 2): Der Auftraggeber hat E-76 entschieden.
+Seine Erklärung gibt die Abweichung für die IDs der Ausnahmeliste frei; sie
+ersetzt keinen Nachweis. Die IDs bleiben „offen“, die Lieferungen A-02, A-07
+und A-11 sind mit Frist „vor GA“ geschuldet, und G1 darf „bedingt bestanden“
+lauten, sobald jede andere Bedingung von „bestanden“ erfüllt ist (Abschnitt
+„Freigabe nach E-76“). Das Ergebnis lautet weiter „offen“.
+
 ## Ergebnis
 
 **Ergebnis: offen.** G1 ist nicht bestanden. Keine [B]/[Q]-ID steht allein
-durch die Erklärung des Auftraggebers vom 2026-10-15 auf PASS (E-76,
-Übergangsregel). Ausstehende Nachweise:
+durch die Erklärung des Auftraggebers auf PASS (E-76, Option 2). Ausstehende
+Nachweise:
 
 - Pentest (B3, Lieferung A-07): Dienstleister, Zeitraum, Umfang, Befundliste
   und Nachtest in `docs/security/pentest-g1.md` (WP-453). Betrifft NFR-08,
@@ -130,6 +139,35 @@ Für B3, B4 und B6 ersetzt die Erklärung des Auftraggebers den Nachweis nicht
 `docs/acceptance/g1-ausnahmen.csv`, bis die Lieferung vorliegt. Diese
 Checkliste erfindet keine Inhalte: Sie nennt weder Pentest-Befunde noch Texte
 noch Subprozessoren.
+
+### Freigabe nach E-76
+
+Erklärung des Auftraggebers vom 2026-10-26: „GATE-02 darf durch meine hiermit
+erteilte Erklärung abgenommen werden.“ Auf Rückfrage hat er E-76 mit Option 2
+entschieden (`docs/plan/g1-korrektur/entscheidungen.md`). Die Freigabe gilt
+für AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01 (a)/(b), GATE-03
+(Pentest-Anteil) und GATE-02:
+
+- Die IDs bleiben „offen“ mit der Begründung „Erklärung des Auftraggebers,
+  Nachweis ausstehend“ und stehen in `docs/acceptance/g1-ausnahmen.csv`; die
+  Traceability zählt sie nicht als nachgewiesen.
+- G1 darf „bedingt bestanden“ lauten, wenn außer diesen Ausnahmen jede
+  Bedingung von „bestanden“ erfüllt ist: kein offenes Critical, kein offenes
+  High/Critical im Pentest, keine Ausnahme der Art `luecke`, jede GATE-Zeile
+  PASS oder selbst eine Ausnahme dieser Freigabe. Die Prüfung dafür ergänzt
+  WP-595 in `tests/rep01-structure.test.sh`; die Entscheidung trifft WP-600.
+- Die Lieferungen bleiben geschuldet. Mit jeder Lieferung entfernt ihr WP die
+  Zeilen aus der Ausnahmeliste und setzt die IDs nach dem Nachweis auf PASS.
+
+| Lieferung | Inhalt | IDs | WP | Frist |
+|---|---|---|---|---|
+| A-02 | v2-Texte zu AUT-05, AUT-06 und NET-04; Szenariotexte ABN-01 (a) und (b) | AUT-05, AUT-06, NET-04, ABN-01 | WP-455, WP-457 | vor GA |
+| A-07 | Zusammenfassung, Befundliste und Nachtest des externen Pentests | NFR-08, GATE-03 (Pentest-Anteil) | WP-453 | vor GA |
+| A-11 | Subprozessorenliste mit Region und AVV | NFR-09 | WP-454 | vor GA |
+
+Das Ergebnis lautet derzeit „offen“, weil weitere Bedingungen fehlen: GATE-01
+und die offenen Befunde zu CI-13, MET-15 und TEN-09 sowie die Läufe auf dem
+Release-Kandidaten (WP-595).
 
 Geschlossen mit der G1-Nachbesserung:
 

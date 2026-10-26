@@ -7846,7 +7846,7 @@ GLO-11;[Q];A;backend/internal/traceability/traceability_test.go;WP-450
 DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-450
 ```
 
-**Entscheidungsbedarf:** [E-30](../entscheidungen.md#e-30); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-30](../entscheidungen.md#e-30); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (entschieden: Option 2, Auftraggeber 2026-10-26)
 
 **Nicht Bestandteil:** Status der Ausnahme-IDs in der Gate-Checkliste und Abgleich durch den Gate-Checker (WP-451 (`t5-gate-consistency`)); Entfernen der Ausnahmezeilen nach Lieferung (WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-457 (`t5-abn01-ab`), WP-455 (`t5-v2-ids`); GATE-02 in WP-595 (`t5-rc-evidence`)).
 
@@ -7912,7 +7912,7 @@ GATE-02;[Q];G1;tests/rep01-structure.test.sh;WP-451
 GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-451
 ```
 
-**Entscheidungsbedarf:** [E-02](../entscheidungen.md#e-02); [E-27](../entscheidungen.md#e-27); [E-28](../entscheidungen.md#e-28); [E-30](../entscheidungen.md#e-30); [E-35](../entscheidungen.md#e-35); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-02](../entscheidungen.md#e-02); [E-27](../entscheidungen.md#e-27); [E-28](../entscheidungen.md#e-28); [E-30](../entscheidungen.md#e-30); [E-35](../entscheidungen.md#e-35); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (entschieden: Option 2, Auftraggeber 2026-10-26)
 
 **Nicht Bestandteil:** Einträge in docs/security/review-g1.md (WP-452 (`t5-review-g1`)); Lieferungen A-02, A-07, A-11 (WP-457 (`t5-abn01-ab`), WP-455 (`t5-v2-ids`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`)); Läufe auf dem Release-Kandidaten und endgültige Statuspflege (WP-595 (`t5-rc-evidence`)); Produktfixes F-002 (WP-340 (`t1-rack-site-scope`)), F-003 (WP-342 (`t1-review-scope`)) und F-022 (WP-369 (`t3-resurrect-new`)).
 
@@ -8028,7 +8028,7 @@ SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-452
 GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-453
 ```
 
-**Entscheidungsbedarf:** [E-28](../entscheidungen.md#e-28); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-28](../entscheidungen.md#e-28); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (entschieden: Option 2, Auftraggeber 2026-10-26)
 
 **Nicht Bestandteil:** Durchführung des Pentests und Behebung seiner Befunde (je Befund eigenes WP); Aufwand des Dienstleisters.
 
@@ -8085,7 +8085,7 @@ GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-453
 NFR-09;[B];A;tests/rep01-structure.test.sh;WP-454
 ```
 
-**Entscheidungsbedarf:** [E-35](../entscheidungen.md#e-35); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-35](../entscheidungen.md#e-35); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (entschieden: Option 2, Auftraggeber 2026-10-26)
 
 **Nicht Bestandteil:** Abschluss der AV-Verträge selbst (Betreiber).
 
@@ -8146,7 +8146,7 @@ AUT-06;[B];G1;tests/rep01-structure.test.sh;WP-455
 NET-04;[B];G1;tests/rep01-structure.test.sh;WP-455
 ```
 
-**Entscheidungsbedarf:** [E-02](../entscheidungen.md#e-02); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-02](../entscheidungen.md#e-02); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (entschieden: Option 2, Auftraggeber 2026-10-26)
 
 **Nicht Bestandteil:** ABN-01 (a)/(b) (WP-457 (`t5-abn01-ab`)); weitere v2-Texte nach E-02 (UI-01 bis UI-10, DIS-04, IGA, WFL-04, REP-01); Schließen festgestellter Lücken (Folge-WPs).
 
@@ -8266,7 +8266,7 @@ ABN-01;[Q];G1;frontend/e2e-real/abn-01-konflikt.spec.ts;WP-456
 ABN-01;[Q];G1;tests/rep01-structure.test.sh;WP-457
 ```
 
-**Entscheidungsbedarf:** [E-02](../entscheidungen.md#e-02); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-02](../entscheidungen.md#e-02); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (entschieden: Option 2, Auftraggeber 2026-10-26)
 
 **Nicht Bestandteil:** Abgleich von AUT-05, AUT-06 und NET-04 mit den v2-Texten (WP-455 (`t5-v2-ids`)); Schließen festgestellter Lücken (Folge-WPs).
 
@@ -16690,6 +16690,7 @@ SRC-01;[B];C;frontend/e2e-real/search-palette.spec.ts;WP-594
 **Akzeptanzkriterien:**
 
 - [ ] Ausführung nach dem Merge aller Korrektur-WPs aller Gruppen, unmittelbar vor den Wiederholungsprüfungen (WP-596 (`k-reaudit-1`) bis WP-598 (`k-reaudit-3`), WP-599 (`k-audit-ext`)); Release-Kandidat ist der dann aktuelle Stand von main mit Tag v1.0.0-rc.<n>. Die Lieferungs-WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-457 (`t5-abn01-ab`) und WP-455 (`t5-v2-ids`) sind keine Voraussetzung (externe Lieferungen A-02, A-07, A-11); sind sie bis dahin nicht gemergt, führt das Ergebnis ihre IDs als offen. WP-388 (`t5-install-default`) entfällt bei Option 2 oder 3 von E-69; die Voraussetzung gilt dann mit Vermerk als erfüllt.
+- [ ] Ergebnis „bedingt bestanden“ nach E-76 Option 2 (Auftraggeber, 2026-10-26): `tests/rep01-structure.test.sh` nimmt im Abschnitt „Ergebnis“ neben „offen“ und „bestanden“ die Zeile „**Ergebnis: bedingt bestanden**“ an, im Normalmodus und mit `--final`. Zulässig nur, wenn (1) `docs/acceptance/g1-gate.md` einen Abschnitt „Freigabe nach E-76“ mit der Erklärung des Auftraggebers und je offener Lieferung (A-02, A-07, A-11) ihre Frist führt, (2) jede ID, die nicht PASS ist, in `docs/acceptance/g1-ausnahmen.csv` mit Art `erklaerung` oder `np` steht, keine mit `luecke`, (3) jede Zeile der Art `erklaerung` in der Spalte `lieferung` eine Frist nennt, (4) jede GATE-Zeile PASS ist oder selbst eine Ausnahme der Art `erklaerung` (GATE-02, GATE-03 mit Pentest-Anteil) und deren übrige Bedingungen PASS sind, (5) kein offenes Critical und kein offenes High/Critical im Pentest besteht. `--final` verlangt dann statt „keine Ausnahme der Art erklaerung“ die Bedingungen (1) bis (5); „bestanden“ verlangt weiter keine solche Ausnahme. Selbsttests mit einer Fixture `tests/fixtures/rep01/conditional` (zulässig) und je Bedingung ein Gegenfall (ohne Freigabe-Abschnitt, Zeile ohne Frist, Ausnahme `luecke`, GATE-01 offen, offenes Critical, ID offen ohne Ausnahme); die Konsistenzregeln in `docs/acceptance/g1-gate.md` beschreiben das Ergebnis.
 - [ ] install-smoke.yml läuft bei push auf main ohne Pfadfilter sowie weiterhin auf Tags v* und per workflow_dispatch; der PR-Pfadfilter bleibt unverändert.
 - [ ] Neuer Workflow .github/workflows/gate-final.yml (workflow_dispatch, Tags v*) führt 'tests/rep01-structure.test.sh --final' (aus WP-451 (`t5-gate-consistency`), ergänzt um install_evidence_current) und TestTraceabilityFile aus. gate-final.yml läuft auf dem RC-Tag; das Ergebnis (grün oder Liste der offenen Lieferungen und IDs) steht mit Run-ID in g1-gate.md. Ein grünes gate-final ist Eingangsbedingung von WP-600 (`k-gate`), nicht dieses WP.
 - [ ] Endgültige Statuspflege nach dem Stand auf dem RC-Commit: CI-13, TEN-09 (inkl. GATE-03-Zeile 'Isolationstest vollständig'), GATE-01 und GATE-03 in g1-gate.md sowie SR-11, SR-12, SR-13 und die P0-Zeilen in review-g1.md (behoben mit Testverweis oder offen mit Korrektur-WP); V4 und SR-03 nach dem Ergebnis von WP-409 (`t1-channel-matrix`); die GATE-02-Zeile in docs/acceptance/g1-ausnahmen.csv wird entfernt, wenn keine weitere Ausnahme der Art erklaerung oder luecke besteht. Dieser Stand ist der Endstand der Statuspflege in `docs/acceptance/g1-gate.md`, `docs/security/review-g1.md` und `docs/acceptance/g1-installation.md`: WP-600 (`k-gate`) ergänzt in g1-gate.md und review-g1.md nur Verweise auf `audit/g1-reaudit/` und die Gate-Entscheidung und ändert einen Status nur, wenn die Wiederholungsprüfung ihn widerlegt; bei `v1.0.0-rc.<n+1>` trägt WP-600 (`k-gate`) Commit und Lauf-IDs nach.
@@ -16699,11 +16700,12 @@ SRC-01;[B];C;frontend/e2e-real/search-palette.spec.ts;WP-594
 - [ ] Der install-smoke-Lauf auf dem RC-Tag enthält die Real-Stack-Suite in allen sechs Browserprojekten (Matrix aus WP-532 (`k-e2e-real-browsers`)) und den Modul-Lauf von `maintenance.spec.ts` (WP-541 (`t3-maint-e2e`)). Der Ratchet-Vergleich lässt nur Zeilen der nach E-60 zurückgestellten Befunde zu. Lauf-ID in `docs/acceptance/g1-gate.md`.
 - [ ] Bekannte Einschränkungen nach E-60: `docs/acceptance/g1-gate.md` (Abschnitt „Ergebnis“) führt einen Eintrag **E-60** mit den zurückgestellten Befunden F-212, F-287, F-316 und F-349, je mit Begründung und Ziel aus dem Abschnitt „Zurückgestellte Befunde“ des Korrekturplans; F-212 steht zusätzlich als Release-Hinweis im Abschnitt „Release-Kandidat“ von `docs/acceptance/g1-installation.md` (implizit provisionierte Add-on-Zeilen aus 000086 nur auf Zwischenbuild-Installationen). Widerspricht der Auftraggeber E-60, entfällt der Eintrag zugunsten der K6-WPs aus der Übergangsregel. Nachweis: Diff im PR; `bash tests/rep01-structure.test.sh` grün.
 
-**Dateien (11 Einträge, Migration = 2):**
+**Dateien (12 Einträge, Migration = 2):**
 
 - .github/workflows/install-smoke.yml
 - .github/workflows/gate-final.yml (neu)
 - tests/rep01-structure.test.sh
+- tests/fixtures/rep01/conditional/ (neu, E-76 Option 2)
 - tests/audit/g1-gate-evidence.test.sh
 - tests/audit/expected-failures.txt (angelegt in WP-337)
 - docs/acceptance/g1-installation.md
@@ -16727,7 +16729,7 @@ GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-595
 INS-01;[Q];G1;tests/rep01-structure.test.sh;WP-595
 ```
 
-**Entscheidungsbedarf:** [E-27](../entscheidungen.md#e-27); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (offen, Empfehlung als Übergangsregel); [E-69](entscheidungen.md#e-69) TEC-15: Installationsquelle für die Signaturprüfung vor der Installation (entschieden: Option 1, Auftraggeber 2026-10-21)
+**Entscheidungsbedarf:** [E-27](../entscheidungen.md#e-27); [E-76](entscheidungen.md#e-76) GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis (entschieden: Option 2, Auftraggeber 2026-10-26); [E-69](entscheidungen.md#e-69) TEC-15: Installationsquelle für die Signaturprüfung vor der Installation (entschieden: Option 1, Auftraggeber 2026-10-21)
 
 **Nicht Bestandteil:** Lieferungen A-02, A-07, A-11 (WP-455 (`t5-v2-ids`), WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`)); grünes gate-final auf dem geprüften Commit, Verweise auf `audit/g1-reaudit/` und Gate-Entscheidung G1 (WP-600 (`k-gate`)); Wiederholung aller Retests (WP-596 (`k-reaudit-1`) bis WP-598 (`k-reaudit-3`), WP-599 (`k-audit-ext`)).
 
@@ -16947,7 +16949,7 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-599
 - [ ] Pentest-Bericht mit Befundliste im Repository, kein offenes Critical/High (Befunde zu WP-210/WP-213).
 - [ ] `docs/acceptance/g1-gate.md` und `docs/security/review-g1.md`: Die Statuswerte pflegt WP-595 (`t5-rc-evidence`) auf dem RC-Stand. Dieses WP ergänzt nur die Verweise auf die Ergebnisse unter `audit/g1-reaudit/` (`WP_MATRIX_1.md` bis `WP_MATRIX_3.md`, `EXT_MATRIX.md`, `FINDINGS.md`, `PASSED_REGRESSION.md`, `GATE_DECISION.md`) und die Gate-Entscheidung. Einen Statuswert ändert es nur, wenn die Wiederholungsprüfung einen RC-Status widerlegt; die Änderung nennt die neue Befund-ID (ab F-355) und die Evidenz. Jeder PASS-Eintrag verweist auf ausgeführte Evidenz; `bash tests/rep01-structure.test.sh` grün.
 - [ ] Gate-Entscheidung G1 mit Datum und Entscheider in `audit/g1-reaudit/GATE_DECISION.md` (neu); bei GO ist der Start der Phase 2 (WP-243) freigegeben.
-- [ ] Auf dem geprüften Commit läuft `.github/workflows/gate-final.yml` (aus WP-595 (`t5-rc-evidence`)) grün. Damit gilt: `bash tests/rep01-structure.test.sh --final` besteht (kein offenes Critical in Review und Pentest, kein offenes High/Critical im Pentest, jede GATE-Zeile PASS), `TestTraceabilityFile` ist grün, und `docs/acceptance/g1-ausnahmen.csv` enthält keine Zeile der Art `erklaerung` oder `luecke`. Der Normalmodus von `tests/rep01-structure.test.sh` genügt nicht, weil er offene Critical-Zeilen bei GATE-01 'offen' als konsistent akzeptiert (WP-451 (`t5-gate-consistency`)). Lauf-ID in `audit/g1-reaudit/GATE_DECISION.md`.
+- [ ] Auf dem geprüften Commit läuft `.github/workflows/gate-final.yml` (aus WP-595 (`t5-rc-evidence`)) grün. Damit gilt: `bash tests/rep01-structure.test.sh --final` besteht (kein offenes Critical in Review und Pentest, kein offenes High/Critical im Pentest, jede GATE-Zeile PASS), `TestTraceabilityFile` ist grün, und `docs/acceptance/g1-ausnahmen.csv` enthält keine Zeile der Art `erklaerung` oder `luecke`. Nach E-76 Option 2 (Auftraggeber, 2026-10-26) darf G1 stattdessen „bedingt bestanden“ lauten: `--final` besteht dann mit den Bedingungen aus WP-595 (`t5-rc-evidence`) (Freigabe nach E-76 in `g1-gate.md`, nur Ausnahmen der Art `erklaerung` mit Frist oder `np`, keine `luecke`), und `GATE_DECISION.md` nennt die offenen Lieferungen A-02, A-07 und A-11 mit Frist und die IDs, die bis dahin nicht PASS sind. Der Normalmodus von `tests/rep01-structure.test.sh` genügt nicht, weil er offene Critical-Zeilen bei GATE-01 'offen' als konsistent akzeptiert (WP-451 (`t5-gate-consistency`)). Lauf-ID in `audit/g1-reaudit/GATE_DECISION.md`.
 - [ ] Die Lauf-IDs auf dem RC-Tag aus WP-595 (`t5-rc-evidence`) (install-smoke auf allen Plattformen einschließlich Real-Stack-Matrix, ci, release, outage, restore-test, k8s-smoke, load, gate-final) werden übernommen und nicht doppelt ausgeführt. Liegt nach dem RC-Tag ein weiterer Code-Commit auf main (z. B. Korrektur neuer Befunde aus WP-596 (`k-reaudit-1`) bis WP-598 (`k-reaudit-3`) oder WP-599 (`k-audit-ext`)), wird `v1.0.0-rc.<n+1>` gesetzt und `gate-final.yml`, `ci.yml`, `install-smoke.yml` und `load.yml` laufen darauf erneut; dieses WP trägt dann Commit und Lauf-IDs im Abschnitt „Release-Kandidat“ von `docs/acceptance/g1-installation.md` sowie in `docs/acceptance/g1-gate.md` und `docs/security/review-g1.md` nach (Statuswerte nur nach AK 4), sonst scheitert `install_evidence_current` im `--final`-Modus. Ändert ein Commit nach dem RC-Tag nur von `--final` geprüfte Dokumente (z. B. Lieferungen A-02, A-07, A-11), läuft nur `gate-final.yml` erneut. `GATE_DECISION.md` nennt den geprüften Commit und die Lauf-IDs.
 - [ ] Die 64 im Audit BESTANDENEN WPs sind auf dem geprüften Commit nicht zurückgefallen, denn kein WP der Wiederholungsprüfung deckt sie ab: Die in `PHASE1_WP_AUDIT_MATRIX.md` genannten Evidenztests jedes dieser WPs sind im Lauf grün (Liste je WP mit Testname und Lauf-ID in `audit/g1-reaudit/PASSED_REGRESSION.md`). Ein Rückfall ist ein neuer Befund (ID ab F-355) mit Korrektur-WP und verhindert GO.
 

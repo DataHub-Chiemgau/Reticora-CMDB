@@ -1,6 +1,6 @@
 # Entscheidungen – Korrekturplan G1
 
-Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../entscheidungen.md) (E-01 bis E-36, E-56 bis E-58) und [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md) (E-37 bis E-55). Jede Entscheidung nennt Status, Frage, Optionen, Empfehlung, Übergangsregel sowie betroffene IDs und WPs. Alle Entscheidungen sind offen; ihre Empfehlung gilt als Übergangsregel, damit die WPs starten können. Widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst. Ausnahme war WP-388 (`t5-install-default`), das erst nach der Entscheidung von E-69 für Option 1 beginnen durfte; E-69 ist am 2026-10-21 mit Option 1 entschieden, WP-388 ist umgesetzt. E-72 ist am 2026-10-26 mit Option 1 entschieden. Unabhängig von Entscheidungen warten WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-455 (`t5-v2-ids`) auf die externen Lieferungen A-02, A-07 und A-11.
+Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../entscheidungen.md) (E-01 bis E-36, E-56 bis E-58) und [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md) (E-37 bis E-55). Jede Entscheidung nennt Status, Frage, Optionen, Empfehlung, Übergangsregel sowie betroffene IDs und WPs. Alle Entscheidungen sind offen; ihre Empfehlung gilt als Übergangsregel, damit die WPs starten können. Widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst. Ausnahme war WP-388 (`t5-install-default`), das erst nach der Entscheidung von E-69 für Option 1 beginnen durfte; E-69 ist am 2026-10-21 mit Option 1 entschieden, WP-388 ist umgesetzt. E-72 ist am 2026-10-26 mit Option 1 entschieden, E-76 am 2026-10-26 mit Option 2. Unabhängig von Entscheidungen warten WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-455 (`t5-v2-ids`) auf die externen Lieferungen A-02, A-07 und A-11.
 
 ## Übersicht
 
@@ -23,7 +23,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-73](#e-73) | Indizierte Attributfilter unter Row-Level-Security | offen (Empfehlung als Übergangsregel); Ergänzung entschieden (Auftraggeber, 2026-10-26) | WP-435, WP-607 |
 | [E-74](#e-74) | OPS-04 in Kubernetes: Datenbankseite der WAL-Archivierung | offen (Empfehlung als Übergangsregel) | WP-444 |
 | [E-75](#e-75) | OPS-05: Alarmierung des Betriebs über NTF-Kanäle | offen (Empfehlung als Übergangsregel) | WP-448 |
-| [E-76](#e-76) | GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis | offen (Empfehlung als Übergangsregel) | WP-450, WP-451, WP-453, WP-454, WP-455, WP-457, WP-595 |
+| [E-76](#e-76) | GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis | entschieden: Option 2 (Auftraggeber, 2026-10-26) | WP-450, WP-451, WP-453, WP-454, WP-455, WP-457, WP-595, WP-600 |
 | [E-77](#e-77) | NFR-06 „Logs 30 Tage“ in den Auslieferungen | offen (Empfehlung als Übergangsregel) | WP-458 |
 | [E-78](#e-78) | CI-06: Berechtigung der einheitlichen CI-Historie | offen (Empfehlung als Übergangsregel) | WP-475 |
 | [E-79](#e-79) | NFR-04: Verlust von Metrik-Samples und Traps bei Upload-Fehlern | offen (Empfehlung als Übergangsregel) | WP-483 |
@@ -445,7 +445,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 2 (Auftraggeber, 2026-10-26)
 
 **Frage:** Dürfen Anforderungen, deren Nachweis durch die Erklärung des Auftraggebers vom 2026-10-15 ersetzt ist (B3 Pentest, B4 v2-Texte, B6 Subprozessorenliste), in der Gate-Checkliste als PASS stehen, und wie behandelt die zu G1 vollständig blockierende Traceability (E-30) IDs ohne Testnachweis?
 
@@ -459,9 +459,15 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Übergangsregel:** Bis zur Entscheidung führt WP-450 (`t5-trace-evidence`) alle betroffenen IDs (AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01, GATE-03 Pentest-Anteil, GATE-02) in docs/acceptance/g1-ausnahmen.csv mit art=erklaerung, und WP-451 (`t5-gate-consistency`) führt sie in docs/acceptance/g1-gate.md als 'offen' mit Begründung; das ist mit Option 1 und 2 vereinbar. Keine ID steht ohne Nachweis auf PASS, das Gate-Ergebnis lautet 'offen'. Jedes Lieferungs-WP entfernt seine Zeilen; die GATE-02-Zeile entfernt WP-595 (`t5-rc-evidence`), wenn keine andere Ausnahme der Art erklaerung oder luecke besteht.
 
+**Umsetzung:** Der Auftraggeber hat am 2026-10-26 erklärt: „GATE-02 darf durch meine hiermit erteilte Erklärung abgenommen werden“, und auf Rückfrage Option 2 gewählt; die Frist der Lieferungen A-02, A-07 und A-11 ist „vor GA“ (keine abweichende Frist genannt). Die Erklärung gilt für alle oben genannten IDs.
+- Die IDs bleiben, was Option 1 vorsieht: nicht PASS, Status „offen“ mit der Begründung „Erklärung des Auftraggebers, Nachweis ausstehend“, je eine Zeile in `docs/acceptance/g1-ausnahmen.csv` (Art `erklaerung`) mit Lieferung und Frist. Die Traceability zählt sie nicht als nachgewiesen. Eine Erklärung ersetzt keinen Nachweis (F-120); sie gibt die Abweichung frei.
+- Neu ist das Gate-Ergebnis „bedingt bestanden“: Es ist zulässig, wenn außer den Zeilen der Art `erklaerung` mit Frist jede Bedingung von „bestanden“ erfüllt ist (kein offenes Critical, kein offenes High/Critical im Pentest, keine Ausnahme der Art `luecke`, jede GATE-Zeile PASS oder selbst eine solche Ausnahme). Die Freigabe des Auftraggebers steht in `docs/acceptance/g1-gate.md` (Abschnitt „Freigabe nach E-76“). Bis dahin lautet das Ergebnis „offen“, weil andere Bedingungen fehlen (GATE-01, Release-Kandidat).
+- WP-595 (`t5-rc-evidence`, K7) erweitert `tests/rep01-structure.test.sh` (Normalmodus und `--final`) um dieses Ergebnis und seine Bedingungen; WP-600 (`k-gate`, K7) darf G1 mit „bedingt bestanden“ entscheiden.
+- WP-453, WP-454, WP-455 und WP-457 bleiben offen, sind keine Voraussetzung von G1 (wie bisher) und entfernen mit der Lieferung ihre Zeilen; die Frist „vor GA“ steht in `g1-ausnahmen.csv`.
+
 **Betroffene IDs:** GATE-02, GATE-03, NFR-08, NFR-09, ABN-01, AUT-05, AUT-06, NET-04, GLO-11
 
-**Betroffene WPs:** WP-450, WP-451, WP-453, WP-454, WP-455, WP-457, WP-595
+**Betroffene WPs:** WP-450, WP-451, WP-453, WP-454, WP-455, WP-457, WP-595, WP-600
 
 ## E-77
 
