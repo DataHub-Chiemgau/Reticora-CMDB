@@ -30,6 +30,27 @@ type Options struct {
 	Objects int
 	// Metrics is the number of metric samples of the demo organization.
 	Metrics int
+	// The volumes of NFR-01 (WP-439, F-279) apply to the demo organization;
+	// acme and the small organizations keep the SIM-01 data set. Zero is
+	// the SIM-01 seed: one interface and one address per CI and the LLDP,
+	// power and uplink relationships.
+	//
+	// InterfacesPerCI is the number of interfaces of every CI: eth0, the
+	// management interface of SIM-01, and eth1 and up (5 at 10.000 objects
+	// are the 50.000 interfaces of NFR-01).
+	InterfacesPerCI int
+	// IPsPerCI is the number of addresses of every CI: the management
+	// address on eth0 and the others in turn on its interfaces, from
+	// ExtraAddressBase (20 at 10.000 objects are the 200.000 addresses).
+	IPsPerCI int
+	// RelationshipsPerCI fills the relationships of the demo organization
+	// up to RelationshipsPerCI · Objects with dependencies between servers
+	// (depends_on); the SIM-01 relationships stay (10 at 10.000 objects are
+	// the 100.000 relationships).
+	RelationshipsPerCI int
+	// Orgs is the number of small organizations beside demo and acme, each
+	// with the SIM-01 data set of acme (500 per SaaS instance in NFR-01).
+	Orgs int
 	// At anchors every timestamp, so a seed is reproducible.
 	At time.Time
 	// APIKey issues a test API key of the demo administrator for the load
@@ -40,6 +61,22 @@ type Options struct {
 
 // MaxObjects is the headroom of NFR-01.
 const MaxObjects = 50000
+
+// The bounds of the volume options: twice the ratios of NFR-01 per object
+// (5 interfaces, 20 addresses, 10 relationships) and the 5.000
+// organizations of Phase 5.
+const (
+	MaxInterfacesPerCI    = 10
+	MaxIPsPerCI           = 40
+	MaxRelationshipsPerCI = 20
+	MaxOrgs               = 5000
+)
+
+// ExtraAddressBase is the first address beyond the management addresses:
+// address j > 1 of CI i is ExtraAddressBase + (i-1)·(IPsPerCI-1) + j-2, in
+// the subnet "Server networks" 100.64.0.0/10 of the default VRF. It holds
+// MaxObjects · (MaxIPsPerCI-1) addresses.
+const ExtraAddressBase = "100.64.0.0"
 
 // baseObjects are the CIs of SIM-01: they sit in the two racks.
 const baseObjects = 40
@@ -91,34 +128,69 @@ func (o *Options) Validate() error {
 	if o.Metrics < 0 {
 		return fmt.Errorf("metrics must not be negative")
 	}
+	if o.InterfacesPerCI < 0 || o.InterfacesPerCI > MaxInterfacesPerCI {
+		return fmt.Errorf("interfaces per CI must be between 1 and %d", MaxInterfacesPerCI)
+	}
+	if o.IPsPerCI < 0 || o.IPsPerCI > MaxIPsPerCI {
+		return fmt.Errorf("addresses per CI must be between 1 and %d", MaxIPsPerCI)
+	}
+	// Below two per CI the SIM-01 relationships (2 · (objects-4) + 1)
+	// already exceed the total.
+	if o.RelationshipsPerCI != 0 && (o.RelationshipsPerCI < 2 || o.RelationshipsPerCI > MaxRelationshipsPerCI) {
+		return fmt.Errorf("relationships per CI must be 0 (SIM-01) or between 2 and %d", MaxRelationshipsPerCI)
+	}
+	if o.Orgs < 0 || o.Orgs > MaxOrgs {
+		return fmt.Errorf("orgs must be between 0 and %d", MaxOrgs)
+	}
 	if o.At.IsZero() {
 		return fmt.Errorf("an anchor time is required")
 	}
 	return nil
 }
 
-// Run seeds the demo organization (plan pro, admin@demo.local) and the
-// organization "acme" for isolation tests (SIM-01). Every row has a
-// deterministic id and is inserted only if missing, so a second run with the
-// same options changes nothing. After the seed transaction of an
-// organization its CIs are indexed for the search (index) and the index of
-// its searchable attribute is built (attributeIndex).
+// orgSpec is one organization of the seed.
+type orgSpec struct {
+	key, name, domain string
+	octet             int
+	objects, metrics  int
+	// The volumes of NFR-01; 0 is the SIM-01 data set.
+	interfaces, ips, relationships int
+}
+
+// orgSpecs lists the organizations of the seed: the demo organization with
+// the requested size, acme and the small organizations org-0001 and up with
+// the SIM-01 data set. The management networks of the small organizations
+// share 10.12.0.0/16: every organization has VRFs of its own.
+func (o *Options) orgSpecs() []orgSpec {
+	specs := []orgSpec{
+		{"demo", "Demo", "demo.local", 10, o.Objects, o.Metrics, o.InterfacesPerCI, o.IPsPerCI, o.RelationshipsPerCI},
+		{"acme", "acme", "acme.local", 11, baseObjects, baseObjects, 0, 0, 0},
+	}
+	for k := 1; k <= o.Orgs; k++ {
+		key := fmt.Sprintf("org-%04d", k)
+		specs = append(specs, orgSpec{key, fmt.Sprintf("Org %04d", k), key + ".local", 12, baseObjects, baseObjects, 0, 0, 0})
+	}
+	return specs
+}
+
+// Run seeds the demo organization (plan pro, admin@demo.local), the
+// organization "acme" for isolation tests (SIM-01) and Options.Orgs small
+// organizations like acme (NFR-01). Every row has a deterministic id and is
+// inserted only if missing, so a second run with the same options changes
+// nothing. After the seed transaction of an organization its CIs are indexed
+// for the search (index) and the index of its searchable attribute is built
+// (attributeIndex).
 func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error) {
 	if err := opts.Validate(); err != nil {
 		return Summary{}, err
 	}
 	var summary Summary
-	for n, spec := range []struct {
-		slug, name, domain string
-		objects, metrics   int
-	}{
-		{"demo", "Demo", "demo.local", opts.Objects, opts.Metrics},
-		{"acme", "acme", "acme.local", baseObjects, baseObjects},
-	} {
-		slug := opts.Prefix + spec.slug
+	for n, spec := range opts.orgSpecs() {
+		slug := opts.Prefix + spec.key
 		o := orgSeed{
-			id: ID(opts.Prefix, "org", spec.slug), slug: slug, name: spec.name, admin: "admin@" + spec.domain,
-			prefix: opts.Prefix + spec.slug, octet: 10 + n, objects: spec.objects, metrics: spec.metrics, at: opts.At,
+			id: ID(opts.Prefix, "org", spec.key), slug: slug, name: spec.name, admin: "admin@" + spec.domain,
+			prefix: opts.Prefix + spec.key, octet: spec.octet, objects: spec.objects, metrics: spec.metrics, at: opts.At,
+			ifacesPerCI: max(spec.interfaces, 1), ipsPerCI: max(spec.ips, 1), relsPerCI: spec.relationships,
 		}
 		o.issueKey = opts.APIKey && n == 0
 		if err := database.WithOrganizationSetup(ctx, pool, o.id, o.seed); err != nil {
@@ -140,9 +212,12 @@ type orgSeed struct {
 	// octet is the second octet of the organization's 10.x.0.0/16.
 	octet            int
 	objects, metrics int
-	at               time.Time
-	issueKey         bool
-	apiKey           string
+	// interfaces and addresses per CI (at least 1); relationships per CI,
+	// 0 for the SIM-01 relationships only (Options).
+	ifacesPerCI, ipsPerCI, relsPerCI int
+	at                               time.Time
+	issueKey                         bool
+	apiKey                           string
 }
 
 func (o *orgSeed) uid(parts ...string) string {
@@ -296,15 +371,27 @@ func (o *orgSeed) cis(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
-// network creates an interface and an address for every CI in the
+// network creates the interfaces and addresses of every CI in the
 // organization's default VRF, and the VRF example: a VRF with a subnet that
-// overlaps the default one (TEN-10).
+// overlaps the default one (TEN-10). Interface k of CI i is eth<k-1>; eth0
+// holds the management address of the CI, address j > 1 sits on interface
+// (j-1) mod interfaces + 1 (NFR-01 volumes). The first interface and
+// address keep the ids of the SIM-01 seed (…/if/<i>, …/ip/<i>), the others
+// add their number (…/if/<i>/<k>, …/ip/<i>/<j>).
 func (o *orgSeed) network(ctx context.Context, tx pgx.Tx) error {
 	cidr := fmt.Sprintf("10.%d.0.0/16", o.octet)
 	if _, err := tx.Exec(ctx, `INSERT INTO subnet (id, organization_id, client_id, site_id, cidr, name, vrf_id, is_management)
 		SELECT $1, $2, $3, $4, $5::cidr, 'Management', v.id, true FROM vrf v WHERE v.organization_id = $2 AND v.is_default
 		ON CONFLICT (id) DO NOTHING`, o.uid("subnet", "management"), o.id, o.uid("client", "hq"), o.uid("site", "hq"), cidr); err != nil {
 		return err
+	}
+	if o.ipsPerCI > 1 {
+		// The further addresses of every CI, of no client or site.
+		if _, err := tx.Exec(ctx, `INSERT INTO subnet (id, organization_id, cidr, name, vrf_id)
+			SELECT $1, $2, $3::cidr, 'Server networks', v.id FROM vrf v WHERE v.organization_id = $2 AND v.is_default
+			ON CONFLICT (id) DO NOTHING`, o.uid("subnet", "servers"), o.id, ExtraAddressBase+"/10"); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO vrf (id, organization_id, name, description) VALUES ($1, $2, 'customer-a',
 		'VRF example: the same addresses as the management network') ON CONFLICT (id) DO NOTHING`, o.uid("vrf", "customer-a"), o.id); err != nil {
@@ -317,28 +404,56 @@ func (o *orgSeed) network(ctx context.Context, tx pgx.Tx) error {
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO network_interface (id, organization_id, ci_id, name, mac, if_type, speed_mbps, is_management, oper_status, if_index)
-		SELECT md5($1 || '/if/' || i)::uuid, $2, md5($1 || '/ci/' || i)::uuid, 'eth0',
-			('02:' || substr(md5($1 || '/mac/' || i), 1, 2) || ':' || substr(md5($1 || '/mac/' || i), 3, 2) || ':' ||
-			 substr(md5($1 || '/mac/' || i), 5, 2) || ':' || substr(md5($1 || '/mac/' || i), 7, 2) || ':' ||
-			 substr(md5($1 || '/mac/' || i), 9, 2))::macaddr,
-			'ethernet', 1000, true, 'up', 1
-		FROM generate_series(1, $3::int) AS i
-		ON CONFLICT (id) DO NOTHING`, o.prefix, o.id, o.objects); err != nil {
+		SELECT md5(n.key)::uuid, $2, md5($1 || '/ci/' || n.i)::uuid, 'eth' || (n.k - 1),
+			('02:' || substr(md5(n.mac), 1, 2) || ':' || substr(md5(n.mac), 3, 2) || ':' ||
+			 substr(md5(n.mac), 5, 2) || ':' || substr(md5(n.mac), 7, 2) || ':' ||
+			 substr(md5(n.mac), 9, 2))::macaddr,
+			'ethernet', CASE WHEN n.k = 1 THEN 1000 ELSE 10000 END, n.k = 1, 'up', n.k
+		FROM (
+			SELECT i, k, $1 || '/if/' || i || CASE WHEN k = 1 THEN '' ELSE '/' || k END AS key,
+				$1 || '/mac/' || i || CASE WHEN k = 1 THEN '' ELSE '/' || k END AS mac
+			FROM generate_series(1, $3::int) AS i, generate_series(1, $4::int) AS k
+		) n
+		ON CONFLICT (id) DO NOTHING`, o.prefix, o.id, o.objects, o.ifacesPerCI); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO ip_address (id, organization_id, subnet_id, interface_id, address, type, vrf_id, last_seen_at)
-		SELECT md5($1 || '/ip/' || i)::uuid, $2, md5($1 || '/subnet/management')::uuid, md5($1 || '/if/' || i)::uuid,
-			('10.' || $3::int || '.' || (i / 250) || '.' || (i % 250 + 1))::inet, 'discovered', v.id, $4::timestamptz
-		FROM generate_series(1, $5::int) AS i
+		SELECT md5($1 || '/ip/' || a.i || CASE WHEN a.j = 1 THEN '' ELSE '/' || a.j END)::uuid, $2,
+			md5($1 || CASE WHEN a.j = 1 THEN '/subnet/management' ELSE '/subnet/servers' END)::uuid,
+			md5($1 || '/if/' || a.i || CASE WHEN a.k = 1 THEN '' ELSE '/' || a.k END)::uuid,
+			CASE WHEN a.j = 1 THEN ('10.' || $3::int || '.' || (a.i / 250) || '.' || (a.i % 250 + 1))::inet
+				ELSE $8::inet + ((a.i - 1)::bigint * ($7::int - 1) + a.j - 2) END,
+			'discovered', v.id, $4::timestamptz
+		FROM (
+			SELECT i, j, (j - 1) % $6::int + 1 AS k
+			FROM generate_series(1, $5::int) AS i, generate_series(1, $7::int) AS j
+		) a
 		JOIN vrf v ON v.organization_id = $2 AND v.is_default
-		ON CONFLICT (id) DO NOTHING`, o.prefix, o.id, o.octet, o.at, o.objects)
+		ON CONFLICT (id) DO NOTHING`, o.prefix, o.id, o.octet, o.at, o.objects, o.ifacesPerCI, o.ipsPerCI, ExtraAddressBase)
 	return err
 }
 
+// baseRelationships is the number of SIM-01 relationships of a seed with
+// objects CIs (relationships).
+func baseRelationships(objects int) int { return 2*(objects-4) + 1 }
+
 // relationships links every server to a switch over LLDP (connected_to) and
-// to a PDU (powered_by), and the switches to each other.
+// to a PDU (powered_by), and the switches to each other. With
+// relationships per CI (NFR-01 volumes) dependencies between servers fill
+// the organization up to relationships · objects: dependency d (from 1)
+// leads from server s = 5 + (d-1) mod S to the server j places further in
+// the ring of the S servers, j = 1 + (d-1) div S. j stays below S
+// (MaxRelationshipsPerCI), so no server depends on itself or twice on the
+// same server. depends_on runs from the dependent CI to the one it depends
+// on (source_depends_on_target): a server's failure impacts the servers
+// that depend on it, never a switch or a PDU, so the impact of the core
+// switch stays all CIs but itself and the PDUs (tests/load/api.js).
 func (o *orgSeed) relationships(ctx context.Context, tx pgx.Tx) error {
+	dependencies := 0
+	if o.relsPerCI > 0 {
+		dependencies = max(o.relsPerCI*o.objects-baseRelationships(o.objects), 0)
+	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO ci_relationship (id, organization_id, source_ci_id, target_ci_id, rel_type, source, source_system,
 			confidence, first_seen_at, last_seen_at, last_confirmed_at)
@@ -354,8 +469,12 @@ func (o *orgSeed) relationships(ctx context.Context, tx pgx.Tx) error {
 			FROM generate_series(5, $4::int) AS i
 			UNION ALL
 			SELECT 'uplink', 1, 1, 2, 'connected_to', 'discovery', 'lldp', 1.0
+			UNION ALL
+			SELECT 'dependency', d, 5 + (d - 1) % ($4::int - 4), 5 + ((d - 1) % ($4::int - 4) + 1 + (d - 1) / ($4::int - 4)) % ($4::int - 4),
+				'depends_on', 'manual', NULL, NULL
+			FROM generate_series(1, $5::int) AS d
 		) e
-		ON CONFLICT (id) DO NOTHING`, o.prefix, o.id, o.at, o.objects)
+		ON CONFLICT (id) DO NOTHING`, o.prefix, o.id, o.at, o.objects, dependencies)
 	return err
 }
 

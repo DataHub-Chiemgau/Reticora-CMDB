@@ -54,6 +54,13 @@ const (
 	// LEVEL SECURITY, and every policy requires OperatorGUC, so tenant
 	// transactions neither read nor write them.
 	RuleOperatorOnly Rule = "operator-only"
+	// RuleSystemOnly: tables of SystemTables have ENABLE and FORCE ROW LEVEL
+	// SECURITY and the TRUNCATE guard, every policy requires SystemGUC
+	// (USING and WITH CHECK), none covers DELETE, and reticora_app holds
+	// neither DELETE nor TRUNCATE: only the system context reads
+	// (database.WithSystem) and writes (database.WithSystemWrite) them, and
+	// no one deletes their rows.
+	RuleSystemOnly Rule = "system-only"
 	// RuleLocatedScope: every tenant table with a location or CI reference
 	// (a column location_id, room_id, rack_id or ci_id, also with a prefix
 	// such as from_location_id or child_ci_id, or a node of the location
@@ -145,6 +152,15 @@ var GlobalCatalogTables = []string{"permission"}
 // WP-145). This is a documented exception to RuleOrgColumn, not a gap: the
 // catalog test checks RuleOperatorOnly for them instead.
 var OperatorTables = []string{"operator_audit", "signup_request", "scheduler_run", "collector_ca"}
+
+// SystemTables are tables of the installation without organization_id that
+// only the server itself reaches, through the system flag: platform_secret
+// holds the derivation root of the derived secrets, sealed with the master
+// key (SEC-06, WP-459). No tenant and no operator transaction reads it, the
+// server reads it with database.WithSystem and creates and reseals it with
+// database.WithSystemWrite. This is a documented exception to RuleOrgColumn,
+// not a gap: the catalog test checks RuleSystemOnly for them instead.
+var SystemTables = []string{"platform_secret"}
 
 // Session variables (GUCs) the policies are expected to reference. Site and
 // team scope do not exist yet; WP-027 and WP-029 introduce them under these

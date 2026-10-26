@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/md5" //nolint:gosec // deterministic ids, not a security use
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -62,6 +65,19 @@ func counts(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
 	return out
 }
 
+// seedCounts is what counts finds in an organization seeded with objects
+// CIs and metrics samples and without the volumes of NFR-01: the SIM-01
+// data set, scaled.
+func seedCounts(objects, metrics int) map[string]int {
+	return map[string]int{
+		"client": 2, "rack": 2, "ci": objects, "ci_location": objects, "ci_site": objects, "ci_room": objects,
+		"ci_document": objects, "ci_attribute": objects, "attribute_definition": 1, "rack_mount": 40, "network_interface": objects,
+		"ip_address": objects, "lldp": objects - 4 + 1, "ci_relationship": 2*(objects-4) + 1,
+		"metric_sample": metrics, "collector": 1, "discovery_scope": 2, "review_item": 3, "webhook": 1,
+		"vrf": 2, "entitlement": len(entitlement.PlanFeatures(entitlement.PlanPro)), "org_admin": 1,
+	}
+}
+
 // TestSeedSIM01 covers SIM-01 and the load seed of NFR-10 (WP-203, WP-433):
 // the demo organization and acme hold the SIM-01 data set, the demo
 // organization scales with -objects (here the 10.000 objects of NFR-10),
@@ -100,18 +116,8 @@ func TestSeedSIM01(t *testing.T) {
 		t.Errorf("organization ids %s, %s are not deterministic", demo, acme)
 	}
 
-	features := len(entitlement.PlanFeatures(entitlement.PlanPro))
-	want := func(objects, metrics int) map[string]int {
-		return map[string]int{
-			"client": 2, "rack": 2, "ci": objects, "ci_location": objects, "ci_site": objects, "ci_room": objects,
-			"ci_document": objects, "ci_attribute": objects, "attribute_definition": 1, "rack_mount": 40, "network_interface": objects,
-			"ip_address": objects, "lldp": objects - 4 + 1, "ci_relationship": 2*(objects-4) + 1,
-			"metric_sample": metrics, "collector": 1, "discovery_scope": 2, "review_item": 3, "webhook": 1,
-			"vrf": 2, "entitlement": features, "org_admin": 1,
-		}
-	}
 	check := func(round string) {
-		for org, expected := range map[string]map[string]int{demo: want(10000, 2000), acme: want(40, 40)} {
+		for org, expected := range map[string]map[string]int{demo: seedCounts(10000, 2000), acme: seedCounts(40, 40)} {
 			got := counts(t, f, org)
 			for table, n := range expected {
 				if got[table] != n {
@@ -299,6 +305,156 @@ func TestSeedSIM01(t *testing.T) {
 	}
 }
 
+// TestSeedNFR01Volumes covers the volume options of NFR-01 (WP-439, F-279):
+// with InterfacesPerCI, IPsPerCI and RelationshipsPerCI the demo
+// organization holds 5 interfaces, 20 addresses and 10 relationships per
+// CI, the ratios of NFR-01 (50.000, 200.000 and 100.000 at 10.000 objects),
+// here on 1.000 objects; Orgs adds small organizations org-0001 and up with
+// the SIM-01 data set of acme. The rows are spread as the load test
+// expects: eth0 keeps the SIM-01 interface with the management address
+// (tests/load/lib.js seedDevice), the other addresses are unique in the
+// VRF and take client and site of their CI, and the dependencies join
+// servers only, so the impact of the core switch stays the organization
+// but itself and the PDUs (tests/load/api.js). Every id is deterministic,
+// tests/integrity-check.sql finds nothing and a second run adds nothing.
+// The job nfr01-volume of .github/workflows/load.yml seeds 10.000 objects
+// and 500 organizations and records the counts.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestSeedNFR01Volumes(t *testing.T) {
+	f := scopetest.Seed(t, "fa")
+	ctx := context.Background()
+	const objects, small = 1000, 3
+	opts := Options{Prefix: "seedvol-", Objects: objects, Metrics: 0, InterfacesPerCI: 5, IPsPerCI: 20,
+		RelationshipsPerCI: 10, Orgs: small, At: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)}
+	keys := []string{"demo", "acme"}
+	for k := 1; k <= small; k++ {
+		keys = append(keys, fmt.Sprintf("org-%04d", k))
+	}
+	for _, key := range keys {
+		index := citype.IndexName(ID("seedvol-"+key, "attribute", AttributeKey), false)
+		t.Cleanup(func() { _, _ = f.Admin.Exec(context.Background(), `DROP INDEX IF EXISTS `+index) })
+	}
+
+	summary, err := Run(ctx, f.App, opts)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if len(summary.Orgs) != len(keys) {
+		t.Fatalf("organizations = %+v, want %v", summary.Orgs, keys)
+	}
+	for i, key := range keys {
+		if o := summary.Orgs[i]; o.Slug != "seedvol-"+key || o.ID != ID("seedvol-", "org", key) || o.Admin != "admin@"+key+".local" {
+			t.Errorf("organization %d = %+v, want seedvol-%s with admin@%s.local", i, o, key, key)
+		}
+	}
+	demo := summary.Orgs[0].ID
+
+	// Quantities: NFR-01 per object in the demo organization, SIM-01 in
+	// acme and in every small organization.
+	volume := seedCounts(objects, 0)
+	volume["network_interface"] = 5 * objects
+	volume["ip_address"] = 20 * objects
+	volume["ci_relationship"] = 10 * objects
+	check := func(round string) {
+		for i, o := range summary.Orgs {
+			expected := seedCounts(40, 40)
+			if i == 0 {
+				expected = volume
+			}
+			got := counts(t, f, o.ID)
+			for table, n := range expected {
+				if got[table] != n {
+					t.Errorf("%s, %s: %s = %d, want %d", round, o.Slug, table, got[table], n)
+				}
+			}
+		}
+	}
+	check("first run")
+
+	// The spread of the rows in the demo organization; every query counts
+	// the rows that break a rule.
+	for name, query := range map[string]string{
+		"CIs without the interfaces eth0 to eth4": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND
+			(SELECT array_agg(n.name ORDER BY n.if_index) FROM network_interface n WHERE n.ci_id = c.id) IS DISTINCT FROM '{eth0,eth1,eth2,eth3,eth4}'`,
+		"management interfaces other than eth0": `SELECT count(*) FROM network_interface WHERE organization_id = $1 AND is_management <> (name = 'eth0')`,
+		"interfaces without four addresses": `SELECT count(*) FROM network_interface n WHERE n.organization_id = $1 AND
+			(SELECT count(*) FROM ip_address a WHERE a.interface_id = n.id) <> 4`,
+		"CIs whose eth0 lacks the management address": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND NOT EXISTS (
+			SELECT 1 FROM network_interface n JOIN ip_address a ON a.interface_id = n.id
+			WHERE n.ci_id = c.id AND n.name = 'eth0' AND a.address = c.management_ip AND a.subnet_id = md5('seedvol-demo/subnet/management')::uuid)`,
+		"further addresses outside the server networks": `SELECT count(*) FROM ip_address a WHERE a.organization_id = $1
+			AND a.subnet_id IS DISTINCT FROM md5('seedvol-demo/subnet/management')::uuid
+			AND NOT (a.address << '100.64.0.0/10' AND a.subnet_id = md5('seedvol-demo/subnet/servers')::uuid)`,
+		"addresses twice in the VRF": `SELECT count(*) - count(DISTINCT (vrf_id, address)) FROM ip_address WHERE organization_id = $1`,
+		"addresses without the client and site of their CI": `SELECT count(*) FROM ip_address a
+			JOIN network_interface n ON n.id = a.interface_id JOIN ci c ON c.id = n.ci_id
+			WHERE a.organization_id = $1 AND (a.client_id IS DISTINCT FROM c.client_id OR a.site_id IS DISTINCT FROM c.site_id)`,
+		"dependencies not between two servers": `SELECT count(*) FROM ci_relationship r
+			JOIN ci s ON s.id = r.source_ci_id JOIN ci d ON d.id = r.target_ci_id
+			WHERE r.organization_id = $1 AND r.rel_type = 'depends_on'
+			AND (s.name NOT LIKE 'srv-%' OR d.name NOT LIKE 'srv-%' OR s.id = d.id)`,
+		"dependencies twice": `SELECT count(*) - count(DISTINCT (source_ci_id, target_ci_id)) FROM ci_relationship
+			WHERE organization_id = $1 AND rel_type = 'depends_on'`,
+	} {
+		var n int
+		if err := f.Admin.QueryRow(ctx, query, demo).Scan(&n); err != nil || n != 0 {
+			t.Errorf("%s: %d (err %v)", name, n, err)
+		}
+	}
+	var dependencies int
+	if err := f.Admin.QueryRow(ctx, `SELECT count(*) FROM ci_relationship WHERE organization_id = $1 AND rel_type = 'depends_on'`,
+		demo).Scan(&dependencies); err != nil || dependencies != 10*objects-baseRelationships(objects) {
+		t.Errorf("dependencies: %d (err %v), want %d", dependencies, err, 10*objects-baseRelationships(objects))
+	}
+
+	// Determinism: the Go ids and values and those PostgreSQL derives agree.
+	// eth0 keeps the id and MAC of the SIM-01 seed; eth3 of CI 7 is
+	// interface 4; address 13 of CI 7 sits on interface (13-1) mod 5 + 1 = 3
+	// at 100.64.0.0 + 6·19 + 11; dependency 1000 runs from server
+	// 5 + 999 mod 996 = 8 to the server 1 + 999 div 996 = 2 places further.
+	mac := func(key string) string {
+		sum := md5.Sum([]byte(key)) //nolint:gosec // deterministic test data
+		h := hex.EncodeToString(sum[:])
+		return "02:" + h[0:2] + ":" + h[2:4] + ":" + h[4:6] + ":" + h[6:8] + ":" + h[8:10]
+	}
+	for _, c := range []struct{ id, name, mac string }{
+		{ID("seedvol-demo", "if", "7"), "eth0", mac("seedvol-demo/mac/7")},
+		{ID("seedvol-demo", "if", "7", "4"), "eth3", mac("seedvol-demo/mac/7/4")},
+	} {
+		var name, got string
+		if err := f.Admin.QueryRow(ctx, `SELECT name, mac::text FROM network_interface WHERE id = $1 AND ci_id = $2`,
+			c.id, ID("seedvol-demo", "ci", "7")).Scan(&name, &got); err != nil || name != c.name || got != c.mac {
+			t.Errorf("interface %s: %s %s (err %v), want %s %s", c.id, name, got, err, c.name, c.mac)
+		}
+	}
+	var iface, address string
+	if err := f.Admin.QueryRow(ctx, `SELECT interface_id::text, host(address) FROM ip_address WHERE id = $1`,
+		ID("seedvol-demo", "ip", "7", "13")).Scan(&iface, &address); err != nil ||
+		iface != ID("seedvol-demo", "if", "7", "3") || address != "100.64.0.125" {
+		t.Errorf("address 13 of CI 7: %s on %s (err %v), want 100.64.0.125 on eth2", address, iface, err)
+	}
+	var source, target string
+	if err := f.Admin.QueryRow(ctx, `SELECT source_ci_id::text, target_ci_id::text FROM ci_relationship WHERE id = $1`,
+		ID("seedvol-demo", "rel", "dependency", "1000")).Scan(&source, &target); err != nil ||
+		source != ID("seedvol-demo", "ci", "8") || target != ID("seedvol-demo", "ci", "10") {
+		t.Errorf("dependency 1000: %s -> %s (err %v), want srv-00008 -> srv-00010", source, target, err)
+	}
+
+	// Data integrity of every organization (ABN-03).
+	for _, o := range summary.Orgs {
+		if violations := integrityViolations(t, f, o.ID); len(violations) > 0 {
+			t.Errorf("integrity check of %s: %v", o.Slug, violations)
+		}
+	}
+
+	// A second run with the same options adds nothing.
+	if _, err := Run(ctx, f.App, opts); err != nil {
+		t.Fatalf("second seed: %v", err)
+	}
+	check("second run")
+}
+
 // integrityViolations runs tests/integrity-check.sql for one organization
 // and returns the checks with violations (ABN-03).
 func integrityViolations(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
@@ -343,15 +499,55 @@ func integrityViolations(t *testing.T, f *scopetest.Fixture, orgID string) map[s
 	return out
 }
 
+// TestSeedOptionsAreBounded covers the bounds of the seed, also of the
+// volume options of NFR-01 (WP-439): every option outside its bounds is
+// refused before the seed touches the database, the NFR-10 seed, the
+// NFR-01 volumes and the largest seed are accepted, and the largest seed
+// still fits the address space of the server networks and the ring of the
+// dependencies.
 func TestSeedOptionsAreBounded(t *testing.T) {
 	at := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	for _, o := range []Options{{Objects: 39, At: at}, {Objects: MaxObjects + 1, At: at}, {Objects: 40}, {Objects: 40, Metrics: -1, At: at}} {
+	for _, o := range []Options{
+		{Objects: 39, At: at}, {Objects: MaxObjects + 1, At: at}, {Objects: 40}, {Objects: 40, Metrics: -1, At: at},
+		{Objects: 40, InterfacesPerCI: -1, At: at}, {Objects: 40, InterfacesPerCI: MaxInterfacesPerCI + 1, At: at},
+		{Objects: 40, IPsPerCI: -1, At: at}, {Objects: 40, IPsPerCI: MaxIPsPerCI + 1, At: at},
+		{Objects: 40, RelationshipsPerCI: -1, At: at}, {Objects: 40, RelationshipsPerCI: 1, At: at},
+		{Objects: 40, RelationshipsPerCI: MaxRelationshipsPerCI + 1, At: at},
+		{Objects: 40, Orgs: -1, At: at}, {Objects: 40, Orgs: MaxOrgs + 1, At: at},
+	} {
 		if err := o.Validate(); err == nil {
 			t.Errorf("options %+v accepted", o)
+			continue
+		}
+		// Run validates first: the nil pool is never used.
+		if _, err := Run(context.Background(), nil, o); err == nil {
+			t.Errorf("Run with options %+v did not fail", o)
 		}
 	}
-	if err := (&Options{Objects: 10000, Metrics: 2000, At: at}).Validate(); err != nil {
-		t.Errorf("the NFR-10 seed is refused: %v", err)
+	for name, o := range map[string]Options{
+		"the NFR-10 seed":    {Objects: 10000, Metrics: 2000, At: at},
+		"the NFR-01 volumes": {Objects: 10000, Metrics: 2000, InterfacesPerCI: 5, IPsPerCI: 20, RelationshipsPerCI: 10, Orgs: 500, At: at},
+		"the largest seed": {Objects: MaxObjects, Metrics: 2000, InterfacesPerCI: MaxInterfacesPerCI, IPsPerCI: MaxIPsPerCI,
+			RelationshipsPerCI: MaxRelationshipsPerCI, Orgs: MaxOrgs, At: at},
+		"one per CI and two relationships": {Objects: 40, InterfacesPerCI: 1, IPsPerCI: 1, RelationshipsPerCI: 2, At: at},
+	} {
+		if err := o.Validate(); err != nil {
+			t.Errorf("%s is refused: %v", name, err)
+		}
+	}
+	// The further addresses of the largest seed fit 100.64.0.0/10.
+	if n := MaxObjects * (MaxIPsPerCI - 1); n > 1<<22 {
+		t.Errorf("%d further addresses exceed the 4.194.304 of %s/10", n, ExtraAddressBase)
+	}
+	// No server depends on itself: the distance in the ring of the S
+	// servers stays below S for every number of objects (the smallest seed
+	// has the largest share of dependencies per server).
+	for _, objects := range []int{baseObjects, 1000, MaxObjects} {
+		servers := objects - 4
+		dependencies := MaxRelationshipsPerCI*objects - baseRelationships(objects)
+		if farthest := 1 + (dependencies-1)/servers; farthest >= servers {
+			t.Errorf("%d objects: dependency distance %d reaches the %d servers", objects, farthest, servers)
+		}
 	}
 	if got := ID("demo", "ci", "1"); len(got) != 36 || got != ID("demo", "ci", "1") {
 		t.Errorf("ID = %q", got)

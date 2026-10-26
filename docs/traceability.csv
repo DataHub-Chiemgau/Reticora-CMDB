@@ -707,3 +707,9 @@ OPS-04;[B], [P5];A;tests/restore-pitr.sh;WP-445
 NFR-06;[B];B;tests/audit/log-retention.test.sh;WP-458
 OPS-04;[B], [P5];A;tests/k8s/kind-smoke.sh;WP-444
 NFR-05;[B];A;tests/k8s/kind-smoke.sh;WP-444
+SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-459
+NFR-10;[Q];LT;tests/load/api.js;WP-439
+NFR-01;[B], Teilumfang [P5];LT;backend/cmd/seed/seed_integration_test.go;WP-439
+NFR-02;[B];LT;tests/load/api.js;WP-439
+NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-439
+ABN-02;[Q];LT;tests/load/api.js;WP-439

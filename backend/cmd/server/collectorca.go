@@ -109,6 +109,11 @@ func runCollectorCA(ctx context.Context, args []string, cfg *config.Config, stdo
 		printCAStatus(stdout, st)
 		return 0
 	}
+	// The endpoint's secrets and the key of the announcement come from the
+	// derivation root, as in the server (WP-459).
+	if _, err = crypto.LoadDerivationRoot(ctx, pool, enc); err != nil {
+		return fail(err)
+	}
 	edge, err := collectorCAEdge(cfg, enc)
 	if err != nil {
 		return fail(err)

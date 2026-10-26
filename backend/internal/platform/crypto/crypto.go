@@ -6,6 +6,10 @@
 //
 // Plaintext data is encrypted with the DEK using AES-256-GCM. The DEK itself is
 // encrypted (wrapped) with the MEK for storage.
+//
+// The secrets the platform derives (Derive) come from the derivation root, a
+// random key of the installation that is stored wrapped with the MEK
+// (derivation_store.go), so they survive a rotation of the MEK.
 package crypto
 
 import (
@@ -36,6 +40,11 @@ var (
 	ErrDecryptionFailed = errors.New("crypto: decryption failed")
 	// ErrMasterKeyRequired is returned when master key is empty.
 	ErrMasterKeyRequired = errors.New("crypto: master key is required")
+	// ErrDerivationRoot is returned when the sealed derivation root does not
+	// unseal: another master key or tampered ciphertext. It names no key
+	// material.
+	ErrDerivationRoot = errors.New("crypto: the derivation root does not unseal with the configured master keys " +
+		"(RETICORA_MASTER_KEY, RETICORA_MASTER_KEY_PREVIOUS)")
 )
 
 // EnvelopeEncryptor provides envelope encryption using AES-256-GCM. It
@@ -43,10 +52,14 @@ var (
 // the previous ones: DEKs are wrapped with the current key and marked with
 // its key id; DEKs of a previous key stay readable until the rewrap job has
 // moved them to the current key, after which the previous key is retired.
+// The secrets of the installation are derived from the derivation root
+// (Derive), which a master-key rotation does not change.
 type EnvelopeEncryptor struct {
 	masterKey []byte
 	keyID     [keyIDSize]byte
 	previous  []masterKey
+	// root is the open derivation root (OpenDerivationRoot); nil until then.
+	root []byte
 }
 
 type masterKey struct {
@@ -104,12 +117,66 @@ func NewEnvelopeEncryptor(masterKeyBase64 string, previousBase64 ...string) (*En
 }
 
 // Derive returns a 32-byte secret for a purpose (HMAC-SHA256 of the label
-// under the current master key): stable for the installation, different per
-// label, without an extra secret to configure.
+// under the derivation root): stable for the installation, different per
+// label, without an extra secret to configure. The root, not the master
+// key, keeps the derived secrets (the keys of the collector NATS endpoint,
+// the pagination cursor key) unchanged across a master-key rotation
+// (SEC-06). Deriving before the root is open (LoadDerivationRoot,
+// OpenDerivationRoot) is a programming error and panics.
 func (e *EnvelopeEncryptor) Derive(label string) []byte {
-	mac := hmac.New(sha256.New, e.masterKey)
+	if e.root == nil {
+		panic("crypto: Derive before the derivation root is open (LoadDerivationRoot)")
+	}
+	mac := hmac.New(sha256.New, e.root)
 	mac.Write([]byte(label))
 	return mac.Sum(nil)
+}
+
+// NewDerivationRoot draws a derivation root (KeySize bytes of crypto/rand)
+// and returns it sealed with the current master key like a DEK
+// (AES-256-GCM, marked with the key id); the root leaves only sealed.
+// OpenDerivationRoot opens it.
+func (e *EnvelopeEncryptor) NewDerivationRoot() ([]byte, error) {
+	root, err := GenerateDEK()
+	if err != nil {
+		return nil, err
+	}
+	defer clear(root)
+	return e.WrapDEK(root)
+}
+
+// OpenDerivationRoot unseals a derivation root sealed by NewDerivationRoot
+// with the current or a previous master key, or rewrapped since (Rewrap),
+// and has Derive use it. A root that does not unseal fails with
+// ErrDerivationRoot; another root than the open one is refused, so the
+// derived secrets never change while the encryptor is in use. It is called
+// at the start, before the encryptor is shared between goroutines.
+func (e *EnvelopeEncryptor) OpenDerivationRoot(sealed []byte) error {
+	root, err := e.UnwrapDEK(sealed)
+	if err != nil {
+		return ErrDerivationRoot
+	}
+	if e.root != nil {
+		same := hmac.Equal(e.root, root)
+		clear(root)
+		if !same {
+			return errors.New("crypto: another derivation root is already open")
+		}
+		return nil
+	}
+	e.root = root
+	return nil
+}
+
+// UseEphemeralDerivationRoot opens a new derivation root that lives only
+// in this process: for the development mode without a database (--no-db)
+// and for tests. Secrets derived from it change with every start.
+func (e *EnvelopeEncryptor) UseEphemeralDerivationRoot() error {
+	sealed, err := e.NewDerivationRoot()
+	if err != nil {
+		return err
+	}
+	return e.OpenDerivationRoot(sealed)
 }
 
 // KeyID returns the id of the current master key (hex).

@@ -79,7 +79,12 @@ func TestCollectorCACommandUsage(t *testing.T) {
 func TestCollectorCACommand(t *testing.T) {
 	f := scopetest.Seed(t, "c6")
 	bg := context.Background()
-	clean := func() { _, _ = f.Admin.Exec(bg, `DELETE FROM collector_ca`) }
+	// The command opens the derivation root of the database (WP-459), which
+	// goes with the master key this test draws.
+	clean := func() {
+		_, _ = f.Admin.Exec(bg, `DELETE FROM collector_ca`)
+		_, _ = f.Admin.Exec(bg, `DELETE FROM platform_secret`)
+	}
 	clean()
 	t.Cleanup(clean)
 	masterKey, err := crypto.GenerateMasterKey()

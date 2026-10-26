@@ -168,7 +168,7 @@ func isPoolType(expr ast.Expr) bool {
 // cmd/server or internal/, from an unlisted file, or a listed file without a
 // reference fails the test.
 func TestAdminPoolCallersAreListed(t *testing.T) {
-	refs := scanAdminPoolRefs(t)
+	refs := scanFuncRefs(t, "NewAdminPool")
 	if len(refs) == 0 {
 		t.Error("no reference of NewAdminPool found; the scan is broken")
 	}
@@ -210,6 +210,28 @@ func TestAdminPoolCallersAreListed(t *testing.T) {
 	}
 }
 
+// TestSystemWriteCallersAreListed keeps the read-write system transaction
+// (WithSystemWrite, WP-459) to the files of systemWriteCallers: a reference
+// from any other file than a test, and an entry without a reference, fail.
+func TestSystemWriteCallersAreListed(t *testing.T) {
+	hit := map[string]bool{}
+	for _, r := range scanFuncRefs(t, "WithSystemWrite") {
+		if _, ok := systemWriteCallers[r.file]; ok {
+			hit[r.file] = true
+			continue
+		}
+		if !strings.HasSuffix(r.file, "_test.go") {
+			t.Errorf("%s: database.WithSystemWrite writes with the system flag; only the system tables need it, "+
+				"list the caller with its reason in systemWriteCallers", r.pos)
+		}
+	}
+	for file, reason := range systemWriteCallers {
+		if !hit[file] {
+			t.Errorf("systemWriteCallers entry %s (%s) matches no reference of WithSystemWrite any more; remove it", file, reason)
+		}
+	}
+}
+
 // adminPoolViolations checks the references of NewAdminPool against allow:
 // every reference must be in a listed file, every entry must be a tool
 // outside cmd/server and must still match a reference.
@@ -246,10 +268,10 @@ func adminPoolCallerAllowed(file string) bool {
 	return strings.HasPrefix(file, "cmd/") && !strings.HasPrefix(file, "cmd/server/")
 }
 
-// scanAdminPoolRefs returns every reference of NewAdminPool in the Go files
-// of the module, test files and this package included; only the declaration
-// in pool.go is skipped.
-func scanAdminPoolRefs(t *testing.T) []poolCall {
+// scanFuncRefs returns every reference of the function name of this package
+// in the Go files of the module, test files and this package included; only
+// its declaration in pool.go is skipped.
+func scanFuncRefs(t *testing.T, name string) []poolCall {
 	t.Helper()
 	fset := token.NewFileSet()
 	var refs []poolCall
@@ -277,12 +299,12 @@ func scanAdminPoolRefs(t *testing.T) []poolCall {
 		}
 		var decl *ast.Ident
 		for _, d := range file.Decls {
-			if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == "NewAdminPool" && file.Name.Name == "database" {
+			if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == name && file.Name.Name == "database" {
 				decl = fn.Name
 			}
 		}
 		ast.Inspect(file, func(n ast.Node) bool {
-			if id, ok := n.(*ast.Ident); ok && id.Name == "NewAdminPool" && id != decl {
+			if id, ok := n.(*ast.Ident); ok && id.Name == name && id != decl {
 				refs = append(refs, poolCall{file: rel, pos: rel + ":" + strconv.Itoa(fset.Position(id.Pos()).Line), call: id.Name})
 			}
 			return true

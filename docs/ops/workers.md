@@ -242,7 +242,7 @@ subscriptions and the notifications (NTF-05).
 
 | Run | When | What |
 |---|---|---|
-| `rotation.master_key` | nightly 02:23 | Rewraps every data key (organization DEKs, notification channel keys) that a previous master key wrapped. |
+| `rotation.master_key` | nightly 02:23 | Rewraps every data key (organization DEKs, notification channel keys, collector CA keys) that a previous master key wrapped and reseals the derivation root with the current key. |
 | `rotation.org_dek` | nightly 02:33 | Replaces an organization's DEK after one year and re-encrypts its credentials in one transaction; audited as `key.org_dek_rotated`. |
 | `rotation.webhook_secrets` | every 15 minutes | Ends the 24-hour overlap of rotated webhook secrets. |
 
@@ -251,10 +251,45 @@ and the old one in `RETICORA_MASTER_KEY_PREVIOUS` (comma-separated for
 several), restart, and let `rotation.master_key` run (or wait for the night).
 Every wrapped data key names the master key that wrapped it. Once the run
 reports that all data keys use the current key, remove the old key from
-`RETICORA_MASTER_KEY_PREVIOUS`: it is retired. Webhook secrets rotate with
+`RETICORA_MASTER_KEY_PREVIOUS`: it is retired. nats-edge keeps running
+throughout: the secrets the server derives do not depend on the master key
+(below). Webhook secrets rotate with
 `POST /api/v1/webhooks/{id}/rotate-secret`, API keys with
 `POST /api/v1/api-keys/{id}/rotate`; session signing keys carry a `kid` and
 rotate in the identity layer.
+
+Derived secrets (WP-459): the issuer and the logins of the collector NATS
+endpoint (`pki/edge.conf` of nats-edge), the key of the collector CA
+announcements and the pagination cursor key are derived from the derivation
+root of the installation, not from the master key. The root is 32 random
+bytes that the server draws at its first start and keeps in the system table
+`platform_secret`, sealed with the master key; `rotation.master_key` reseals
+it with the current key. A master key rotation changes none of these
+secrets: a restarted server writes the same `edge.conf`, its authorization
+callout logs in to the running nats-edge as before, collectors stay
+connected, and pagination cursors stay valid. No nats-edge restart is needed.
+
+- **Update to this version (once):** the first start after the update draws
+  the root and logs `created the derivation root of the derived secrets`;
+  the derived values change once. The server writes the new `edge.conf`, but
+  it cannot make the running nats-edge reload it (the system login still has
+  the old password), so collectors cannot connect until nats-edge is
+  restarted once after the servers are up:
+  `docker compose restart nats-edge`, or in Kubernetes
+  `kubectl rollout restart deployment/reticora-nats-edge`. Pagination cursors
+  issued before the update answer 400 once; the client loads the first page
+  again. On a new installation nats-edge waits for the files and needs no
+  restart.
+- **A root that does not unseal** (another `RETICORA_MASTER_KEY` without the
+  old one in `RETICORA_MASTER_KEY_PREVIOUS`, a changed row) stops the start
+  with `failed to open the derivation root of the derived secrets`; the
+  server never draws a new root over it, which would change every derived
+  secret. Configure the master key that sealed it (as current or previous
+  key).
+- **New derived secrets on purpose** (for example after the nats-edge
+  passwords leaked): stop every server, delete the row with the migration
+  login (`DELETE FROM platform_secret`; the application role cannot), start
+  the servers and restart nats-edge once, as after the update.
 
 ## Metrics and alerts (OPS-05)
 

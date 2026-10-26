@@ -22,6 +22,16 @@
 # (cpu-api.pprof, summarized in cpu-api.txt; RETICORA_PPROF_ADDR, loopback
 # only); the cost report lists the statements by their share of the run's
 # execution time (pg_stat_statements).
+#
+# NFR-01 (WP-439, F-279): the job nfr01-volume runs api.js on the volumes of
+# NFR-01: 10,000 objects with 50,000 interfaces, 200,000 addresses and
+# 100,000 relationships in the demo organization and 500 small
+# organizations besides it (cmd/seed -interfaces-per-ci, -ips-per-ci,
+# -relationships-per-ci, -orgs); every job records what the seed holds.
+# The job archive gathers the k6 summaries, run records (commit, lscpu,
+# memory, configuration) and outcomes of all jobs into one artifact,
+# load-archive-<run id>, that docs/acceptance/artefakte/lasttest/<run id>/
+# takes over unchanged (tests/load/archive-run.sh, tests/load/README.md).
 name: Load test
 
 on:
@@ -37,7 +47,7 @@ on:
         description: "Commit, tag or branch the server, the seed and the migrations are built from (empty: the run's commit)"
         default: ""
       scenarios:
-        description: "Jobs to run, comma-separated (api, ingest, ingest-spool, ingest-rediscover), or all"
+        description: "Jobs to run, comma-separated (api, ingest, ingest-spool, ingest-rediscover, nfr01-volume), or all"
         default: "all"
   schedule:
     - cron: "17 2 * * *"
@@ -66,6 +76,9 @@ jobs:
       - name: Test the plan summary
         run: ./tests/load/slow-plans.test.sh
 
+      - name: Test the run archive
+        run: ./tests/load/archive-run.test.sh
+
       - name: Resolve server_ref
         id: ref
         env:
@@ -83,14 +96,16 @@ jobs:
         env:
           SCENARIOS: ${{ inputs.scenarios || 'all' }}
         run: |
-          all='[{"scenario":"api","script":"api.js","k6_scenario":""},
-                {"scenario":"ingest","script":"ingest.js","k6_scenario":"load"},
-                {"scenario":"ingest-spool","script":"ingest.js","k6_scenario":"spool"},
-                {"scenario":"ingest-rediscover","script":"ingest.js","k6_scenario":"rediscover"}]'
+          all='[{"scenario":"api","script":"api.js","k6_scenario":"","seed_args":""},
+                {"scenario":"ingest","script":"ingest.js","k6_scenario":"load","seed_args":""},
+                {"scenario":"ingest-spool","script":"ingest.js","k6_scenario":"spool","seed_args":""},
+                {"scenario":"ingest-rediscover","script":"ingest.js","k6_scenario":"rediscover","seed_args":""},
+                {"scenario":"nfr01-volume","script":"api.js","k6_scenario":"",
+                 "seed_args":"-interfaces-per-ci 5 -ips-per-ci 20 -relationships-per-ci 10 -orgs 500"}]'
           want="$(jq -cn --arg s "$SCENARIOS" '$s | gsub("\\s"; "") | split(",") | map(select(. != ""))')"
           unknown="$(jq -rn --argjson all "$all" --argjson want "$want" '$want - ["all"] - [$all[].scenario] | join(", ")')"
           if [ -n "$unknown" ] || [ "$want" = "[]" ]; then
-            echo "::error title=scenarios::unknown or no scenario '${unknown:-$SCENARIOS}': api, ingest, ingest-spool, ingest-rediscover or all"
+            echo "::error title=scenarios::unknown or no scenario '${unknown:-$SCENARIOS}': api, ingest, ingest-spool, ingest-rediscover, nfr01-volume or all"
             exit 1
           fi
           matrix="$(jq -cn --argjson all "$all" --argjson want "$want" \
@@ -121,6 +136,11 @@ jobs:
       DURATION: ${{ inputs.duration || '2m' }}
       SERVER_SHA: ${{ needs.prepare.outputs.server_sha }}
       SCENARIO_NAME: ${{ matrix.scenario }}
+      # The server configuration of every job (E-58: four ingest lanes, the
+      # raised rate limit); the run record names it.
+      INGEST_LANES: "4"
+      RATE_LIMIT_RPM: "1000000"
+      RATE_LIMIT_ORG_RPM: "1000000"
     steps:
       # The run's commit: tests/load and tests/integrity-check.sql.
       - uses: actions/checkout@v4
@@ -178,9 +198,42 @@ jobs:
           go build -o "$RUNNER_TEMP/seed" ./cmd/seed
 
       # The seed is a tool with the migration login (database.NewAdminPool).
-      - name: Seed (SIM-01, NFR-10)
+      # nfr01-volume adds the volumes of NFR-01 (matrix seed_args; a
+      # server_ref before WP-439 has no such options and fails here).
+      - name: Seed (SIM-01, NFR-10, NFR-01)
+        id: seed
+        env:
+          SEED_ARGS: ${{ matrix.seed_args }}
         run: |
-          "$RUNNER_TEMP/seed" -database-url "$DATABASE_URL" -objects "$OBJECTS" -api-key-file "$RUNNER_TEMP/load.key"
+          mkdir -p load-results
+          read -ra volume <<< "$SEED_ARGS"
+          start=$SECONDS
+          "$RUNNER_TEMP/seed" -database-url "$DATABASE_URL" -objects "$OBJECTS" "${volume[@]}" \
+            -api-key-file "$RUNNER_TEMP/load.key" > /dev/null
+          echo "seed seconds: $((SECONDS - start))" | tee "load-results/seed-$SCENARIO_NAME.txt"
+
+      # NFR-01 (WP-439): what the seed holds; nfr01-volume fails below the
+      # volumes of NFR-01 (10,000 objects with 50,000 interfaces, 200,000
+      # addresses and 100,000 relationships in one organization, 500
+      # organizations).
+      - name: Seeded volumes (NFR-01)
+        id: volumes
+        run: |
+          set -o pipefail
+          mkdir -p load-results
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -At -F '|' <<'SQL' | tee "load-results/volumes-$SCENARIO_NAME.txt"
+          WITH demo AS (SELECT id FROM organization WHERE slug = 'demo')
+          SELECT 'CIs of demo', count(*) FROM ci WHERE organization_id = (SELECT id FROM demo) AND deleted_at IS NULL
+          UNION ALL SELECT 'interfaces of demo', count(*) FROM network_interface WHERE organization_id = (SELECT id FROM demo)
+          UNION ALL SELECT 'addresses of demo', count(*) FROM ip_address WHERE organization_id = (SELECT id FROM demo)
+          UNION ALL SELECT 'relationships of demo', count(*) FROM ci_relationship WHERE organization_id = (SELECT id FROM demo)
+          UNION ALL SELECT 'organizations', count(*) FROM organization
+          SQL
+          if [ "$SCENARIO_NAME" = nfr01-volume ]; then
+            awk -F'|' 'BEGIN { split("10000 50000 200000 100000 500", want, " ") }
+              $2 + 0 < want[NR] + 0 { printf "::error title=NFR-01::%s: %s, NFR-01 needs %s\n", $1, $2, want[NR]; bad = 1 }
+              END { exit bad }' "load-results/volumes-$SCENARIO_NAME.txt"
+          fi
 
       # RETICORA_PPROF_ADDR (WP-438): the CPU profile of the api.js run, on
       # the loopback address only (development, the server's default
@@ -193,8 +246,8 @@ jobs:
           RETICORA_NATS_URL=nats://localhost:4222 \
           RETICORA_SESSION_KEY_PATH="$RUNNER_TEMP/session.pem" \
           RETICORA_MASTER_KEY="$(head -c 32 /dev/urandom | base64)" \
-          RETICORA_RATE_LIMIT_RPM=1000000 RETICORA_RATE_LIMIT_ORG_RPM=1000000 \
-          RETICORA_INGEST_LANES=4 \
+          RETICORA_RATE_LIMIT_RPM="$RATE_LIMIT_RPM" RETICORA_RATE_LIMIT_ORG_RPM="$RATE_LIMIT_ORG_RPM" \
+          RETICORA_INGEST_LANES="$INGEST_LANES" \
           RETICORA_PPROF_ADDR=127.0.0.1:6060 \
           nohup "$RUNNER_TEMP/server" > "$RUNNER_TEMP/server.log" 2>&1 &
           for _ in $(seq 1 60); do curl -fsS http://localhost:8080/healthz >/dev/null && exit 0; sleep 1; done
@@ -298,6 +351,7 @@ jobs:
 
       # ABN-03, F-281: the data after the run, every check 0.
       - name: Integrity check
+        id: integrity
         if: always() && steps.k6.outcome != 'skipped'
         run: |
           set -o pipefail
@@ -330,26 +384,103 @@ jobs:
           mkdir -p load-results
           curl -fsS http://localhost:8080/readyz > "load-results/readyz-$SCENARIO_NAME.json" || true
 
-      # E-58: commit, server_ref, CPU and memory of the run.
-      - name: Record the run
-        if: always()
-        run: |
-          mkdir -p load-results
-          {
-            echo "run commit: $GITHUB_SHA"
-            echo "server, seed and migrations: $SERVER_SHA"
-            lscpu | grep -E '^(Model name|CPU\(s\)):'
-            free -h | grep -E '^Mem:'
-          } > "load-results/run-$SCENARIO_NAME.txt"
-
       - name: Collect the server log
         if: always()
         run: |
           mkdir -p load-results
           cp "$RUNNER_TEMP/server.log" "load-results/server-$SCENARIO_NAME.log" || true
 
+      # E-58 (WP-439): commit, server_ref, CPU (lscpu), memory and the
+      # configuration of the run, and the outcome of the job and its steps
+      # (the last step before the upload, so the status is final), for the
+      # archive (tests/load/archive-run.sh).
+      - name: Record the run
+        if: always()
+        env:
+          K6_SCRIPT: ${{ matrix.script }}
+          K6_SCENARIO: ${{ matrix.k6_scenario }}
+          SEED_ARGS: ${{ matrix.seed_args }}
+          JOB_STATUS: ${{ job.status }}
+          SEED_OUTCOME: ${{ steps.seed.outcome }}
+          VOLUMES_OUTCOME: ${{ steps.volumes.outcome }}
+          K6_OUTCOME: ${{ steps.k6.outcome }}
+          INTEGRITY_OUTCOME: ${{ steps.integrity.outcome }}
+        run: |
+          mkdir -p load-results
+          {
+            echo "run commit: $GITHUB_SHA"
+            echo "server, seed and migrations: $SERVER_SHA"
+            echo "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID (attempt $GITHUB_RUN_ATTEMPT)"
+            echo "recorded: $(date -u +%FT%TZ)"
+            echo "script: $K6_SCRIPT"
+            echo "k6 scenario: ${K6_SCENARIO:-default}"
+            echo "objects: $OBJECTS"
+            echo "duration: $DURATION"
+            echo "seed options: ${SEED_ARGS:-none}"
+            echo "ingest lanes: $INGEST_LANES"
+            echo "rate limit rpm: $RATE_LIMIT_RPM"
+            echo "rate limit org rpm: $RATE_LIMIT_ORG_RPM"
+            echo "k6: $(k6 version 2>/dev/null | head -n 1)"
+            echo "go: $(go version 2>/dev/null)"
+            echo "postgresql: $(psql "$DATABASE_URL" -Atc 'SELECT version()' 2>/dev/null)"
+            echo "timescaledb: $(psql "$DATABASE_URL" -Atc "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'" 2>/dev/null)"
+            echo "runner: ${RUNNER_NAME:-} ${ImageOS:-} ${ImageVersion:-}"
+            echo "kernel: $(uname -sr)"
+            docker ps --format 'container: {{.Names}} {{.Image}}' || true
+            lscpu
+            grep -E '^(MemTotal|MemAvailable):' /proc/meminfo
+            free -h
+          } > "load-results/run-$SCENARIO_NAME.txt"
+          {
+            echo "job: $SCENARIO_NAME"
+            echo "status: $JOB_STATUS"
+            echo "seed: ${SEED_OUTCOME:-skipped}"
+            echo "volumes: ${VOLUMES_OUTCOME:-skipped}"
+            echo "k6: ${K6_OUTCOME:-skipped}"
+            echo "integrity: ${INTEGRITY_OUTCOME:-skipped}"
+          } | tee "load-results/result-$SCENARIO_NAME.txt"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: load-results-${{ matrix.scenario }}
           path: load-results/
+
+  # WP-439 (E-58, NFR-10): one artifact per run, load-archive-<run id>, with
+  # the k6 summaries, run records and outcomes of every selected job and
+  # ergebnis.md with every threshold; docs/acceptance/artefakte/lasttest/
+  # takes it over unchanged (tests/load/README.md). It also runs when a load
+  # job failed: a red job is a result of the run.
+  archive:
+    name: Archive
+    needs: [prepare, load]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: load-results-*
+          path: load-artifacts
+
+      - name: Assemble the archive
+        env:
+          MATRIX: ${{ needs.prepare.outputs.matrix }}
+          SERVER_SHA: ${{ needs.prepare.outputs.server_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          INPUT_OBJECTS: ${{ inputs.objects || '10000' }}
+          INPUT_DURATION: ${{ inputs.duration || '2m' }}
+          INPUT_SCENARIOS: ${{ inputs.scenarios || 'all' }}
+          INPUT_SERVER_REF: ${{ inputs.server_ref }}
+        run: |
+          jobs="$(jq -r '[.[].scenario] | join(",")' <<< "$MATRIX")"
+          tests/load/archive-run.sh load-artifacts "load-archive/$GITHUB_RUN_ID" "$jobs"
+          cat "load-archive/$GITHUB_RUN_ID/ergebnis.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: load-archive-${{ github.run_id }}
+          path: load-archive/
+          overwrite: true

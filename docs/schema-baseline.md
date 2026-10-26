@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000162_attr_text_leakproof
+Stand: Migration 000163_platform_secret
 
 ## Prüfung
 
@@ -146,6 +146,7 @@ Policies für `PUBLIC` oder `reticora_app`:
 | `team-scope` | Tabellen mit `team_id` verwenden `app.team_scope` in `USING` und `WITH CHECK` (CH25) |
 | `org-column` | jede Tabelle außer `organization`, `schema_migrations` und den globalen Katalogen hat `organization_id` |
 | `read-only-catalog` | globale Kataloge ohne `organization_id` (`rls.GlobalCatalogTables`) gewähren `reticora_app` kein INSERT/UPDATE/DELETE |
+| `system-only` | Systemtabellen ohne `organization_id` (`rls.SystemTables`) haben ENABLE + FORCE RLS und den TRUNCATE-Schutz, jede Policy verlangt `app.system` (USING und WITH CHECK), keine erlaubt DELETE, `reticora_app` hat kein DELETE/TRUNCATE |
 | `located-scope` | Tabellen mit Standort- oder CI-Bezug (Spalte `location_id`, `room_id`, `rack_id` oder `ci_id`, auch mit Präfix wie `from_location_id` oder `child_ci_id`, oder Knoten des Standortbaums) tragen Client- und Site-Dimension (`client_id` und `site_id`, auch mit Präfix `source_`/`target_`) oder stehen in `rls.DerivedScopeTables` (TEN-02) |
 
 Das Verhalten der Policies prüft `TestRLSMatrix`
@@ -274,6 +275,17 @@ kein UPDATE/DELETE, zusätzlich verhindern Trigger Änderungen
 Organisation und ist nur im Operator-Kontext (`database.WithOperator`,
 `database.WithOrganizationSetup`) erreichbar.
 
+`platform_secret` (Migration 000163, SEC-06, WP-459) ist eine Systemtabelle der
+Installation ohne Org-Spalte, eine weitere dokumentierte Ausnahme
+(`rls.SystemTables`): Sie hält die Ableitungswurzel der abgeleiteten Secrets,
+mit dem Master-Key versiegelt. Jede Policy verlangt das System-Flag
+(`app.system`); der Server liest mit `database.WithSystem` und legt die Wurzel
+nur über `database.WithSystemWrite` an bzw. versiegelt sie neu (Aufrufer in
+`systemWriteCallers`, `TestSystemWriteCallersAreListed`). Mandanten- und
+Operator-Transaktionen lesen und schreiben nichts. Keine Policy erlaubt DELETE,
+`reticora_app` hat kein DELETE, der TRUNCATE-Schutz gilt wie bei den
+Mandantentabellen (`TestRLSCatalog` prüft die Regel `system-only`).
+
 Ein Prädikat gilt als erzwungen, wenn alle permissiven Policies des Kommandos
 oder eine restriktive Policy das GUC verwenden. Die folgende Liste der heute
 bekannten Lücken muss exakt stimmen: Neue Verstöße und bereits geschlossene
@@ -387,6 +399,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `organization` | ja | ja | org_isolation (ALL), organization_system_select (SELECT) |
 | `permission` | nein | nein | – |
 | `pii_subject` | ja | ja | pii_subject_isolation (ALL) |
+| `platform_secret` | ja | ja | platform_secret_system_insert (INSERT), platform_secret_system_select (SELECT), platform_secret_system_update (UPDATE) |
 | `privacy_retention_policy` | ja | ja | privacy_retention_isolation (ALL) |
 | `quantity_item` | ja | ja | quantity_item_isolation (ALL), quantity_item_scoped_delete (DELETE), quantity_item_scoped_update (UPDATE) |
 | `rack` | ja | ja | rack_isolation (ALL) |

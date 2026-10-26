@@ -301,6 +301,10 @@ func newWorkerTestEnv(t *testing.T, url string) *workerTestEnv {
 	if env.enc, err = crypto.NewEnvelopeEncryptor(masterKey); err != nil {
 		t.Fatal(err)
 	}
+	// The keys of the edge worker come from a derivation root (WP-459).
+	if err = env.enc.UseEphemeralDerivationRoot(); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv(config.WorkerEnvKey(config.WorkerOfflineDetector), "true")
 	env.cfg = config.Load()
 	env.cfg.PKIDir = t.TempDir()

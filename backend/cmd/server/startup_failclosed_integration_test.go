@@ -28,6 +28,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -144,6 +146,10 @@ func auditProductionEnv(t *testing.T) map[string]string {
 		t.Skip("TEST_DATABASE_URL and TEST_REDIS_URL are required for the server startup test")
 	}
 	db := scopetest.AppDSN(t)
+	// Every start is a fresh installation: the derivation root of the
+	// database goes with the master key drawn here (WP-459).
+	auditCleanDerivationRoot(t)
+	t.Cleanup(func() { auditCleanDerivationRoot(t) })
 	key, err := crypto.GenerateMasterKey()
 	if err != nil {
 		t.Fatal(err)
@@ -161,6 +167,39 @@ func auditProductionEnv(t *testing.T) map[string]string {
 		env[config.WorkerEnvKey(name)] = "false"
 	}
 	return env
+}
+
+// auditDerivationRoot returns the sealed derivation root of the test
+// database (admin login), nil without one.
+func auditDerivationRoot(t *testing.T) []byte {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatalf("admin connection: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	var sealed []byte
+	if err = conn.QueryRow(ctx, `SELECT sealed FROM platform_secret WHERE name = 'derivation_root'`).Scan(&sealed); err != nil &&
+		!errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("read the derivation root: %v", err)
+	}
+	return sealed
+}
+
+// auditCleanDerivationRoot removes the derivation root of the test
+// database (admin login).
+func auditCleanDerivationRoot(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatalf("admin connection: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	if _, err = conn.Exec(ctx, `DELETE FROM platform_secret`); err != nil {
+		t.Fatalf("remove the derivation root: %v", err)
+	}
 }
 
 type auditServerRun struct {
@@ -377,6 +416,58 @@ func TestAuditT5ServerStartupFailClosed(t *testing.T) {
 		for _, check := range []string{`"database":"ok"`, `"redis":"ok"`} {
 			if !strings.Contains(run.readyBody, check) {
 				t.Errorf("/readyz body %s lacks %s", run.readyBody, check)
+			}
+		}
+	})
+
+	// The derivation root (WP-459): the first start draws it; a start with
+	// a master key that does not unseal it stops with exit code 1 and
+	// neither replaces it nor draws another; with that key as the new one
+	// and the first as the previous one (rotation) the start succeeds. The
+	// root appears in no output.
+	t.Run("derivation root of another master key", func(t *testing.T) {
+		env := auditProductionEnv(t)
+		first := env["RETICORA_MASTER_KEY"]
+		run := auditStartServer(t, env, true, 90*time.Second)
+		if run.readyError != nil || run.readyCode != http.StatusOK {
+			t.Fatalf("first start: /readyz %d, %v\n%s", run.readyCode, run.readyError, auditTail(run.output, 8))
+		}
+		sealed := auditDerivationRoot(t)
+		if sealed == nil || !strings.Contains(run.output, "created the derivation root") {
+			t.Fatalf("the first start drew no derivation root\n%s", auditTail(run.output, 8))
+		}
+		outputs := run.output
+		other, err := crypto.GenerateMasterKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		env["RETICORA_MASTER_KEY"] = other
+		run = auditStartServer(t, env, false, 90*time.Second)
+		outputs += run.output
+		if run.exitCode != 1 || !strings.Contains(run.output, "failed to open the derivation root") ||
+			!strings.Contains(run.output, "does not unseal with the configured master keys") {
+			t.Errorf("start with another master key: exit %d, want 1 with the derivation root\n%s", run.exitCode, auditTail(run.output, 5))
+		}
+		if again := auditDerivationRoot(t); !bytes.Equal(again, sealed) {
+			t.Error("the start with another master key replaced the derivation root")
+		}
+		env["RETICORA_MASTER_KEY_PREVIOUS"] = first
+		run = auditStartServer(t, env, true, 90*time.Second)
+		outputs += run.output
+		if run.readyError != nil || run.readyCode != http.StatusOK || strings.Contains(run.output, "created the derivation root") {
+			t.Errorf("start during the rotation: /readyz %d, %v\n%s", run.readyCode, run.readyError, auditTail(run.output, 8))
+		}
+		enc, err := crypto.NewEnvelopeEncryptor(first)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root, err := enc.UnwrapDEK(sealed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, needle := range []string{hex.EncodeToString(root), base64.StdEncoding.EncodeToString(root), base64.RawURLEncoding.EncodeToString(root)} {
+			if strings.Contains(outputs, needle) {
+				t.Fatal("the server output contains the derivation root")
 			}
 		}
 	})
