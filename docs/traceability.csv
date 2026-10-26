@@ -694,3 +694,4 @@ ABN-03;[Q], jeweilige Phase;LT;backend/internal/ci/integrity_check_integration_t
 OPS-03;[B], [P5];A;tests/k8s/kind-smoke.sh;WP-441
 COL-08;[B];D;tests/audit/compose-port-policy.test.sh;WP-431
 PRI-07;Grundsatz (ohne Tag);D;tests/audit/compose-port-policy.test.sh;WP-431
+ABN-02;[Q];LT;backend/internal/ci/querybudget_integration_test.go;WP-436
