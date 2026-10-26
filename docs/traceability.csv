@@ -802,3 +802,4 @@ API-05;[B];B;frontend/src/pages/UserManagementPage.test.tsx;WP-510
 DIS-09;[B];D;frontend/e2e-real/discovery-scopes.spec.ts;WP-496
 DIS-08;[Q];D;frontend/src/pages/DiscoveryPage.test.tsx;WP-496
 MON-02;[B];C;collector/collectorcmd/power_metrics_test.go;WP-512
+NTF-03;[B];B;backend/internal/notify/recipients_integration_test.go;WP-507
