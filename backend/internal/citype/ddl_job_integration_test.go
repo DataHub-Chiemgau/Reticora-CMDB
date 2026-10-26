@@ -5,7 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -94,7 +96,8 @@ func TestAttributeIndexJob(t *testing.T) {
 	}
 	got := readIndex(t, f.Admin, plain)
 	if !got.found || !got.valid || got.unique || !strings.Contains(got.def, "deleted_at IS NULL") ||
-		!strings.Contains(got.def, "'asset_tag'") || !strings.Contains(got.def, typ.ID) {
+		!strings.Contains(got.def, "reticora_attr_text(attributes, 'asset_tag'::text)") || strings.Contains(got.def, "->>") ||
+		!strings.Contains(got.def, typ.ID) {
 		t.Fatalf("searchable index = %+v", got)
 	}
 
@@ -190,4 +193,274 @@ func TestAttributeIndexJob(t *testing.T) {
 	if readIndex(t, f.Admin, uniq).found || readIndex(t, f.Admin, plain).found {
 		t.Fatal("the index of the deleted definition survived")
 	}
+}
+
+// legacyStatement is the CREATE INDEX statement of d as the DDL job wrote
+// it before migration 000162: over attributes ->> key.
+func legacyStatement(d *AttributeDefinition, name string) string {
+	return strings.ReplaceAll(indexStatement(d, name), ValueExpression(quoteLiteral(d.Key)), "(attributes ->> "+quoteLiteral(d.Key)+")")
+}
+
+// indexOID is the oid of the index name, 0 when there is none.
+func indexOID(t *testing.T, admin *pgxpool.Pool, name string) uint32 {
+	t.Helper()
+	var oid *uint32
+	if err := admin.QueryRow(context.Background(), `SELECT to_regclass($1)::oid`, name).Scan(&oid); err != nil {
+		t.Fatal(err)
+	}
+	if oid == nil {
+		return 0
+	}
+	return *oid
+}
+
+// TestAttributeIndexRebuild covers WP-435 (E-73 option A, DB-04, MET-15):
+// the indexes the DDL job built over attributes ->> key before migration
+// 000162 are rebuilt over reticora_attr_text by the attribute.index.rebuild
+// jobs the migration queues, under their names, with their unique
+// semantics, and the old index is dropped only after the new one is valid:
+//   - the rebuilt indexes hold reticora_attr_text, no ->>, keep unique,
+//     client and NULLS NOT DISTINCT; a second run changes nothing (same
+//     index);
+//   - unique per organization and client: the same value in the same client
+//     and twice without a client is refused by the index, another client, a
+//     soft-deleted CI and a CI without the attribute are not;
+//   - every interrupted state is completed by the next run without a
+//     second build where the new index is valid: build interrupted (the old
+//     index stays valid, the next run builds), build done, drop of the old
+//     index interrupted (old index invalid), rename not done; a leftover
+//     invalid rebuild is built again;
+//   - a run waits for another run on the same definition (advisory lock)
+//     and changes nothing meanwhile.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAttributeIndexRebuild(t *testing.T) {
+	f := scopetest.Seed(t, "f8")
+	bg := context.Background()
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	svc := jobs.NewService(jobs.NewPGRepository(f.App))
+	ddl := NewDDLJob(f.App, svc)
+	// Without the scheduler: the indexes are set up as before migration
+	// 000162.
+	repo := NewPGRepository(f.App)
+
+	typ := &Type{OrganizationID: f.OrgA, Key: "wp435-rebuild", Name: "wp435-rebuild", IsObservable: true}
+	if err := repo.Create(ctx, typ); err != nil {
+		t.Fatalf("create type: %v", err)
+	}
+	host := &AttributeDefinition{CITypeID: typ.ID, Key: "wp435_host", DataType: "text", Searchable: true}
+	serial := &AttributeDefinition{Key: "wp435_serial", DataType: "text", Unique: true, UniqueScope: "client"}
+	for _, d := range []*AttributeDefinition{host, serial} {
+		if err := repo.CreateAttributeDefinition(ctx, f.OrgA, d); err != nil {
+			t.Fatalf("create definition %s: %v", d.Key, err)
+		}
+	}
+	defs := []*AttributeDefinition{host, serial}
+	t.Cleanup(func() {
+		for _, d := range defs {
+			for _, unique := range []bool{false, true} {
+				name := IndexName(d.ID, unique)
+				_, _ = f.Admin.Exec(bg, `DROP INDEX IF EXISTS `+name+`, `+name+RebuildSuffix)
+			}
+		}
+	})
+	// 30 CIs: ten each in client 1, client 2 and without a client, serials
+	// S0…S9 in each.
+	if _, err := f.Admin.Exec(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status, attributes)
+		SELECT $1, (ARRAY[$3::uuid, $4::uuid, NULL])[i / 10 + 1], $2, 'wp435-r-' || i, 'active',
+			jsonb_build_object('wp435_host', 'h' || (i % 5), 'wp435_serial', 'S' || (i % 10))
+		FROM generate_series(0, 29) AS i`, f.OrgA, typ.ID, f.Client1, f.Client2); err != nil {
+		t.Fatalf("seed CIs: %v", err)
+	}
+
+	exec := func(sql string) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	// legacy replaces the indexes of d by the one built before 000162.
+	legacy := func(d *AttributeDefinition) {
+		t.Helper()
+		name := IndexName(d.ID, d.Unique)
+		exec(`DROP INDEX IF EXISTS ` + name + `, ` + name + RebuildSuffix)
+		exec(legacyStatement(d, name))
+		if got := readIndex(t, f.Admin, name); !got.valid || !strings.Contains(got.def, "->>") {
+			t.Fatalf("legacy index = %+v", got)
+		}
+	}
+	// current requires the index of d over reticora_attr_text, valid, with
+	// its unique semantics, and no rebuild index next to it.
+	current := func(d *AttributeDefinition) {
+		t.Helper()
+		name := IndexName(d.ID, d.Unique)
+		got := readIndex(t, f.Admin, name)
+		if !got.found || !got.valid || got.unique != d.Unique || strings.Contains(got.def, "->>") ||
+			!strings.Contains(got.def, "reticora_attr_text(attributes, '"+d.Key+"'::text)") ||
+			(d.UniqueScope == "client") != strings.Contains(got.def, "client_id") ||
+			(d.UniqueScope == "client") != strings.Contains(got.def, "NULLS NOT DISTINCT") {
+			t.Fatalf("index of %s = %+v, want a valid index over reticora_attr_text with the semantics of the definition", d.Key, got)
+		}
+		if readIndex(t, f.Admin, name+RebuildSuffix).found {
+			t.Fatalf("the rebuild index of %s is left over", d.Key)
+		}
+	}
+
+	// The migration queues the rebuild jobs; the DDL job runs them.
+	for _, d := range defs {
+		legacy(d)
+		if _, _, err := svc.Enqueue(ctx, f.OrgA, RebuildJobKind, indexJobParams{DefinitionID: d.ID}, jobs.EnqueueOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if done, err := ddl.RunDue(bg); err != nil || done < 2 {
+		t.Fatalf("RunDue = %d, %v; want both rebuild jobs done", done, err)
+	}
+	list, _, err := svc.List(bg, f.OrgA, jobs.Filter{Kind: RebuildJobKind}, api.PaginationParams{Limit: 10})
+	if err != nil || len(list) != 2 || list[0].Status != jobs.StatusSucceeded || list[1].Status != jobs.StatusSucceeded {
+		t.Fatalf("rebuild jobs = %+v, %v; want two succeeded", list, err)
+	}
+	for _, d := range defs {
+		current(d)
+		name := IndexName(d.ID, d.Unique)
+		before := indexOID(t, f.Admin, name)
+		if err = ddl.Ensure(bg, f.OrgA, d.ID); err != nil {
+			t.Fatal(err)
+		}
+		current(d)
+		if indexOID(t, f.Admin, name) != before {
+			t.Errorf("a second run rebuilt the current index of %s", d.Key)
+		}
+	}
+
+	// MET-15: unique per organization and client over the rebuilt index.
+	serialIndex := IndexName(serial.ID, true)
+	insert := func(client any, value string, deleted bool) error {
+		var deletedAt any
+		if deleted {
+			deletedAt = "2026-01-01T00:00:00Z"
+		}
+		_, ierr := f.Admin.Exec(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status, attributes, deleted_at)
+			VALUES ($1, $2, $3, 'wp435-u-' || gen_random_uuid(), 'active', $4, $5::timestamptz)`,
+			f.OrgA, client, typ.ID, `{"wp435_serial": "`+value+`"}`, deletedAt)
+		return ierr
+	}
+	for _, c := range []struct {
+		name    string
+		client  any
+		value   string
+		deleted bool
+		refused bool
+	}{
+		{"same value, same client", f.Client1, "S3", false, true},
+		{"same value, both without a client", nil, "S3", false, true},
+		{"same value, soft-deleted", f.Client1, "S3", true, false},
+		{"new value", f.Client2, "S99", false, false},
+	} {
+		ierr := insert(c.client, c.value, c.deleted)
+		var pgErr *pgconn.PgError
+		refused := errors.As(ierr, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == serialIndex
+		if refused != c.refused || (ierr != nil && !refused) {
+			t.Errorf("%s: %v, want refused by %s: %v", c.name, ierr, serialIndex, c.refused)
+		}
+	}
+	if _, err = f.Admin.Exec(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status) VALUES ($1, $2, $3, 'wp435-u-none', 'active')`,
+		f.OrgA, f.Client1, typ.ID); err != nil {
+		t.Errorf("a CI without the attribute: %v", err)
+	}
+
+	// Interrupted rebuilds: the next run completes them.
+	for _, d := range defs {
+		name := IndexName(d.ID, d.Unique)
+		rebuild := name + RebuildSuffix
+		for _, s := range []struct {
+			state   string
+			prepare func()
+			renamed bool // the next run renames the rebuild index instead of building one
+		}{
+			{"build done, old index not dropped", func() { exec(indexStatement(d, rebuild)) }, true},
+			{"drop of the old index interrupted", func() {
+				exec(indexStatement(d, rebuild))
+				exec(`UPDATE pg_index SET indisvalid = false WHERE indexrelid = '` + name + `'::regclass`)
+			}, true},
+			{"rename not done", func() {
+				exec(indexStatement(d, rebuild))
+				exec(`DROP INDEX ` + name)
+			}, true},
+			{"invalid rebuild left over", func() {
+				exec(indexStatement(d, rebuild))
+				exec(`UPDATE pg_index SET indisvalid = false WHERE indexrelid = '` + rebuild + `'::regclass`)
+			}, false},
+		} {
+			legacy(d)
+			s.prepare()
+			prepared := indexOID(t, f.Admin, rebuild)
+			if err = ddl.Ensure(bg, f.OrgA, d.ID); err != nil {
+				t.Fatalf("%s, %s: %v", d.Key, s.state, err)
+			}
+			current(d)
+			if renamed := indexOID(t, f.Admin, name) == prepared; renamed != s.renamed {
+				t.Errorf("%s, %s: the index was renamed %v, want %v", d.Key, s.state, renamed, s.renamed)
+			}
+		}
+	}
+
+	// Build interrupted: a transaction that wrote to ci keeps the
+	// concurrent build waiting until the run is cancelled. The old index
+	// stays valid; the next run builds the new one.
+	legacy(serial)
+	blocker, err := f.Admin.Begin(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = blocker.Exec(bg, `UPDATE ci SET name = name WHERE organization_id = $1 AND name = 'wp435-r-0'`, f.OrgA); err != nil {
+		t.Fatal(err)
+	}
+	short, cancel := context.WithTimeout(bg, 3*time.Second)
+	err = ddl.Ensure(short, f.OrgA, serial.ID)
+	cancel()
+	_ = blocker.Rollback(bg)
+	if err == nil {
+		t.Fatal("the run finished although a transaction kept the build waiting")
+	}
+	if got := readIndex(t, f.Admin, serialIndex); !got.valid || !strings.Contains(got.def, "->>") {
+		t.Fatalf("after the interrupted build the old index = %+v, want it valid", got)
+	}
+	if got := readIndex(t, f.Admin, serialIndex+RebuildSuffix); got.found && got.valid {
+		t.Fatalf("the interrupted build left a valid index: %+v", got)
+	} else {
+		t.Logf("interrupted build (%v): rebuild index left behind %v (invalid), old index valid", err, got.found)
+	}
+	if err = ddl.Ensure(bg, f.OrgA, serial.ID); err != nil {
+		t.Fatal(err)
+	}
+	current(serial)
+
+	// Another run holds the definition: this one waits and changes nothing.
+	legacy(serial)
+	holder, err := f.Admin.Acquire(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Release()
+	lockKey := IndexJobKind + "/" + serial.ID
+	if _, err = holder.Exec(bg, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+		t.Fatal(err)
+	}
+	short, cancel = context.WithTimeout(bg, 2500*time.Millisecond)
+	err = ddl.Ensure(short, f.OrgA, serial.ID)
+	cancel()
+	if err == nil || !strings.Contains(err.Error(), "lock attribute definition") {
+		t.Fatalf("run while another holds the definition: %v, want it to wait for the lock", err)
+	}
+	if got := readIndex(t, f.Admin, serialIndex); !strings.Contains(got.def, "->>") || readIndex(t, f.Admin, serialIndex+RebuildSuffix).found {
+		t.Fatalf("the waiting run changed the indexes: %+v", got)
+	}
+	if _, err = holder.Exec(bg, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, lockKey); err != nil {
+		t.Fatal(err)
+	}
+	if err = ddl.Ensure(bg, f.OrgA, serial.ID); err != nil {
+		t.Fatal(err)
+	}
+	current(serial)
 }

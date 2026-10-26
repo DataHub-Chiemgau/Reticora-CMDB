@@ -396,7 +396,10 @@ The database needs two logins with separate secrets (TEN-03):
 - **Migration login** (secret `reticora-db-migrate`, key `database-url`): the
   owner/superuser that runs `golang-migrate` on `backend/migrations/` before a
   rollout. No manifest references it; keep it out of the server's namespace if
-  migrations run elsewhere.
+  migrations run elsewhere. It must have SUPERUSER: migration `000162`
+  declares the function of the attribute indexes LEAKPROOF and stops
+  otherwise (decision E-73; operation without a superuser needs its
+  option B).
 - **Runtime login** (secret `reticora-db-runtime`, key `database-url`): the
   only DSN the server pod receives. It must name a login **without SUPERUSER
   and BYPASSRLS** that is a member of `reticora_app` and of no other role.

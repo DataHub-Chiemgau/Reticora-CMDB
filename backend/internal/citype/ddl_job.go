@@ -21,8 +21,20 @@ import (
 // definition in line with its searchable/unique flags (DB-04, MET-15).
 const IndexJobKind = "attribute.index"
 
+// RebuildJobKind rebuilds the index of a definition that was built over
+// attributes ->> key before migration 000162 (WP-435); the migration queues
+// it, Ensure serves it like IndexJobKind. A server of an earlier version
+// does not know the kind and leaves the jobs to the new one: an
+// attribute.index job would be claimed by it during a rolling update and
+// end without a rebuild.
+const RebuildJobKind = "attribute.index.rebuild"
+
 // IndexPrefix starts the name of every attribute index (DB-04).
 const IndexPrefix = "idx_attr_"
+
+// RebuildSuffix names the index that replaces an index built before
+// migration 000162 until the old one is dropped (Ensure).
+const RebuildSuffix = "_rebuild"
 
 // IndexName is the index of a definition after E-04: idx_attr_ with the
 // definition id as 32 hex characters, unique indexes with the suffix _u.
@@ -55,6 +67,15 @@ func indexRelevant(before, after *AttributeDefinition) bool {
 		(after.Unique && before.UniqueScope != after.UniqueScope)
 }
 
+// ValueExpression is the attribute value as the indexes hold it and the
+// attribute filter of the CI list compares it (WP-435, E-73):
+// reticora_attr_text is attributes ->> key, but leakproof and not inlinable,
+// so the comparison is an index condition under row level security.
+// key is an SQL expression of type text.
+func ValueExpression(key string) string {
+	return "reticora_attr_text(attributes, " + key + ")"
+}
+
 // IndexStatement is the CREATE INDEX statement of a definition; "" when the
 // definition needs no index. A unique index holds the value once per
 // organization, or per organization and client (scope client, a CI without
@@ -66,7 +87,12 @@ func IndexStatement(d *AttributeDefinition) string {
 	if d == nil || (!d.Searchable && !d.Unique) {
 		return ""
 	}
-	value := "(attributes ->> " + quoteLiteral(d.Key) + ")"
+	return indexStatement(d, IndexName(d.ID, d.Unique))
+}
+
+// indexStatement is IndexStatement with the index named name.
+func indexStatement(d *AttributeDefinition, name string) string {
+	value := ValueExpression(quoteLiteral(d.Key))
 	columns := "organization_id, " + value
 	nulls := ""
 	if d.Unique && d.UniqueScope == "client" {
@@ -85,7 +111,7 @@ func IndexStatement(d *AttributeDefinition) string {
 		unique = "UNIQUE "
 	}
 	return fmt.Sprintf("CREATE %sINDEX CONCURRENTLY IF NOT EXISTS %s ON ci (%s)%s WHERE %s",
-		unique, IndexName(d.ID, d.Unique), columns, nulls, strings.Join(where, " AND "))
+		unique, name, columns, nulls, strings.Join(where, " AND "))
 }
 
 // quoteLiteral quotes s as an SQL string literal (standard_conforming_strings
@@ -121,9 +147,10 @@ type DDLJob struct {
 	Batch int
 }
 
-// NewDDLJob creates the job runner and registers its job kind.
+// NewDDLJob creates the job runner and registers its job kinds.
 func NewDDLJob(pool *pgxpool.Pool, svc *jobs.Service) *DDLJob {
 	svc.Register(jobs.Kind{Name: IndexJobKind, MaxAttempts: 3, Timeout: time.Hour})
+	svc.Register(jobs.Kind{Name: RebuildJobKind, MaxAttempts: 3, Timeout: time.Hour})
 	return &DDLJob{pool: pool, jobs: svc, OwnerRole: database.DefaultOwnerRole, Batch: 50}
 }
 
@@ -149,7 +176,7 @@ func (j *DDLJob) Schedule() jobs.Schedule {
 // returns how many succeeded. A failed job is retried after the backoff
 // of its kind; the run itself fails only when the queue cannot be read.
 func (j *DDLJob) RunDue(ctx context.Context) (int, error) {
-	due, err := j.jobs.Due(ctx, j.Batch, IndexJobKind)
+	due, err := j.jobs.Due(ctx, j.Batch, IndexJobKind, RebuildJobKind)
 	if err != nil {
 		return 0, fmt.Errorf("list due index jobs: %w", err)
 	}
@@ -199,13 +226,28 @@ func (j *DDLJob) definition(ctx context.Context, orgID, defID string) (*Attribut
 type existingIndex struct {
 	valid   bool
 	columns int
+	// current: built over reticora_attr_text (ValueExpression); an index
+	// built before migration 000162 holds attributes ->> key, which the
+	// application role cannot use under row level security.
+	current bool
 }
+
+// lockPoll is the interval in which Ensure tries the lock of a definition.
+const lockPoll = time.Second
 
 // Ensure brings the indexes of a definition in line with its flags: the
 // wanted index exists, is valid and was built from the current statement;
 // the other variant (unique or not) and the indexes of a deleted
 // definition are dropped. A build that fails leaves an invalid index,
 // which is dropped before the error is returned.
+//
+// An index built before migration 000162 is rebuilt once (WP-435): the new
+// index is built concurrently next to it (RebuildSuffix), the old one is
+// dropped only after the new one is valid, then the new one takes its
+// name. Every step may be interrupted and the job run again: there is no
+// state in which the old index is gone and the new one missing or
+// invalid, so the filter and a unique attribute keep a valid index. Runs
+// for the same definition (two jobs, two servers) take turns.
 func (j *DDLJob) Ensure(ctx context.Context, orgID, defID string) error {
 	if !isUUIDText(defID) {
 		return fmt.Errorf("%w: %q", ErrAttributeNotFound, defID)
@@ -233,41 +275,111 @@ func (j *DDLJob) Ensure(ctx context.Context, orgID, defID string) error {
 	if _, err = pc.Exec(ctx, "SET ROLE "+pgx.Identifier{j.OwnerRole}.Sanitize()); err != nil {
 		return fmt.Errorf("switch to the owner role: %w", err)
 	}
+	if lerr := lockDefinition(ctx, pc, defID); lerr != nil {
+		return lerr
+	}
+	kept := map[string]existingIndex{}
 	for _, name := range []string{IndexName(defID, false), IndexName(defID, true)} {
-		idx, found, lerr := lookupIndex(ctx, pc, name)
-		if lerr != nil {
-			return lerr
-		}
-		if !found || (name == wanted && idx.valid && idx.columns == columns) {
-			continue
-		}
-		if derr := dropIndex(ctx, pc, name); derr != nil {
-			return derr
+		for _, n := range []string{name, name + RebuildSuffix} {
+			idx, found, lerr := lookupIndex(ctx, pc, n)
+			if lerr != nil {
+				return lerr
+			}
+			if !found {
+				continue
+			}
+			// Kept: the wanted index, one over ->> as well until its
+			// rebuild is valid, and a valid rebuild of it.
+			if name == wanted && idx.valid && idx.columns == columns && (n == name || idx.current) {
+				kept[n] = idx
+				continue
+			}
+			if derr := dropIndex(ctx, pc, n); derr != nil {
+				return derr
+			}
 		}
 	}
 	if stmt == "" {
 		return nil
 	}
-	if _, err = pc.Exec(ctx, stmt); err != nil {
-		// The failed build leaves an invalid index behind.
+	rebuild := wanted + RebuildSuffix
+	old, hasOld := kept[wanted]
+	_, hasNew := kept[rebuild]
+	switch {
+	case hasOld && old.current:
+		if hasNew {
+			return dropIndex(ctx, pc, rebuild)
+		}
+		return nil
+	case !hasOld && !hasNew:
+		return build(ctx, pc, d, stmt, wanted)
+	}
+	// The wanted index holds attributes ->> key, or it is gone after a
+	// rebuild was valid: build the new index (unless it is), drop the old
+	// one, rename.
+	if !hasNew {
+		if berr := build(ctx, pc, d, indexStatement(d, rebuild), rebuild); berr != nil {
+			return berr
+		}
+	}
+	if hasOld {
 		if derr := dropIndex(ctx, pc, wanted); derr != nil {
-			slog.Error("drop failed attribute index", "index", wanted, "error", derr)
+			return derr
+		}
+	}
+	if _, err = pc.Exec(ctx, "ALTER INDEX "+pgx.Identifier{rebuild}.Sanitize()+" RENAME TO "+pgx.Identifier{wanted}.Sanitize()); err != nil {
+		return fmt.Errorf("rename attribute index %s: %w", rebuild, err)
+	}
+	return nil
+}
+
+// build runs the CREATE INDEX statement stmt of d for the index name. The
+// failed build leaves an invalid index behind, which is dropped.
+func build(ctx context.Context, conn *pgx.Conn, d *AttributeDefinition, stmt, name string) error {
+	if _, err := conn.Exec(ctx, stmt); err != nil {
+		if derr := dropIndex(ctx, conn, name); derr != nil {
+			slog.Error("drop failed attribute index", "index", name, "error", derr)
 		}
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return fmt.Errorf("%w %q: %s", ErrDuplicateValues, d.Key, pgErr.Detail)
 		}
-		return fmt.Errorf("create attribute index %s: %w", wanted, err)
+		return fmt.Errorf("create attribute index %s: %w", name, err)
 	}
 	return nil
+}
+
+// lockDefinition takes a session advisory lock on the definition; it ends
+// with the connection. The lock is tried in a loop instead of waited for:
+// a session that waits inside a statement holds a snapshot, for which
+// CREATE INDEX CONCURRENTLY of the holder would wait.
+func lockDefinition(ctx context.Context, conn *pgx.Conn, defID string) error {
+	for {
+		var locked bool
+		if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1, 0))`,
+			IndexJobKind+"/"+strings.ToLower(defID)).Scan(&locked); err != nil {
+			return fmt.Errorf("lock attribute definition %s: %w", defID, err)
+		}
+		if locked {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("lock attribute definition %s: %w", defID, ctx.Err())
+		case <-time.After(lockPoll):
+		}
+	}
 }
 
 func lookupIndex(ctx context.Context, conn *pgx.Conn, name string) (existingIndex, bool, error) {
 	var idx existingIndex
 	err := conn.QueryRow(ctx, `
-		SELECT i.indisvalid, i.indnatts
+		SELECT i.indisvalid, i.indnatts, EXISTS (
+			SELECT 1 FROM pg_depend d
+			WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.refclassid = 'pg_proc'::regclass
+			  AND d.refobjid = to_regprocedure('public.reticora_attr_text(jsonb, text)'))
 		FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
-		WHERE c.relname = $1 AND c.relnamespace = 'public'::regnamespace`, name).Scan(&idx.valid, &idx.columns)
+		WHERE c.relname = $1 AND c.relnamespace = 'public'::regnamespace`, name).Scan(&idx.valid, &idx.columns, &idx.current)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return idx, false, nil
 	}

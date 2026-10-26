@@ -13,6 +13,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
@@ -209,6 +210,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			args = append(args, "%"+filter.Search+"%")
 			argPos++
 		}
+		orgNamed := false
 		for _, f := range filter.Filters {
 			expr := filterColumns[f.Field].expr
 			if key, ok := f.Attribute(); ok {
@@ -220,7 +222,19 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 				if cerr := f.Check(); cerr != nil {
 					return cerr
 				}
-				expr = fmt.Sprintf("attributes->>$%d::text", argPos)
+				// The expression of the attribute indexes (WP-435, E-73):
+				// reticora_attr_text is leakproof, so the comparison is an
+				// index condition under row level security, where ->> was
+				// evaluated only after the policies of ci (F-114). The
+				// indexes are partial on the organization: the query names
+				// it as a value, which ci_isolation (a setting) does not.
+				if !orgNamed {
+					whereParts = append(whereParts, fmt.Sprintf("organization_id = $%d::uuid", argPos))
+					args = append(args, orgID)
+					argPos++
+					orgNamed = true
+				}
+				expr = citype.ValueExpression(fmt.Sprintf("$%d::text", argPos))
 				args = append(args, key)
 				argPos++
 			}
@@ -1843,7 +1857,9 @@ func (r *PGRepository) uniqueField(ctx context.Context, orgID string, err error)
 	if !errors.As(err, &ue) || ue.index == "" {
 		return err
 	}
-	hexID := strings.TrimSuffix(strings.TrimPrefix(ue.index, "idx_attr_"), "_u")
+	// The index of a rebuild carries the suffix until it takes the name of
+	// the old one (citype.DDLJob.Ensure).
+	hexID := strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(ue.index, citype.IndexPrefix), citype.RebuildSuffix), "_u")
 	if len(hexID) != 32 {
 		return err
 	}
