@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -173,6 +174,74 @@ func TestTrackerMirrorsSpecialisedJobs(t *testing.T) {
 	}
 	if job, _ = s.repo.GetByRef(ctx, "org-1", "discovery_job", "ref-2"); job.Status != StatusSucceeded || job.Progress != 100 {
 		t.Errorf("late tracked job: %+v", job)
+	}
+}
+
+// TestMirrorResult covers WP-515 (JOB-03, F-347): MirrorResult stores the
+// result only at the succeeded job mirroring the given row — not at the job
+// of another row, of another table or of another organization —, keeps its
+// status and finish time and refuses a job that did not succeed;
+// IsMirrorCancelled reports the cancel of the mirrored job.
+func TestMirrorResult(t *testing.T) {
+	s, c := newService()
+	ctx := context.Background()
+	for _, ref := range []struct{ org, table, id string }{
+		{"org-1", "export_job", "ref-1"}, {"org-1", "export_job", "ref-2"},
+		{"org-1", "discovery_job", "ref-1"}, {"org-2", "export_job", "ref-1"},
+	} {
+		if err := s.Mirror(ctx, ref.org, ref.table, ref.id, StatusSucceeded, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, _ := s.repo.GetByRef(ctx, "org-1", "export_job", "ref-1")
+	c.advance(time.Minute)
+	if err := s.MirrorResult(ctx, "org-1", "export_job", "ref-1", map[string]any{"export_id": "ref-1", "row_count": 3}); err != nil {
+		t.Fatal(err)
+	}
+	job, _ := s.repo.GetByRef(ctx, "org-1", "export_job", "ref-1")
+	var result struct {
+		ExportID string `json:"export_id"`
+		RowCount int    `json:"row_count"`
+	}
+	if err := json.Unmarshal(job.Result, &result); err != nil || result.ExportID != "ref-1" || result.RowCount != 3 {
+		t.Errorf("result %s (%v), want export ref-1 with 3 rows", job.Result, err)
+	}
+	if job.Status != StatusSucceeded || job.FinishedAt == nil || !job.FinishedAt.Equal(*before.FinishedAt) {
+		t.Errorf("job after the result: %+v, want succeeded with its finish time %v", job, before.FinishedAt)
+	}
+	for _, ref := range []struct{ org, table, id string }{
+		{"org-1", "export_job", "ref-2"}, {"org-1", "discovery_job", "ref-1"}, {"org-2", "export_job", "ref-1"},
+	} {
+		if other, _ := s.repo.GetByRef(ctx, ref.org, ref.table, ref.id); len(other.Result) != 0 {
+			t.Errorf("job of %v got the result %s", ref, other.Result)
+		}
+	}
+	if err := s.MirrorResult(ctx, "org-1", "export_job", "unknown", 1); !errors.Is(err, ErrNotFound) {
+		t.Errorf("result of an untracked row: %v, want ErrNotFound", err)
+	}
+
+	// A cancelled mirrored job takes no result and reports its cancel.
+	if err := s.Track(ctx, "org-1", "export", "export_job", "ref-3", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled, err := s.IsMirrorCancelled(ctx, "org-1", "export_job", "ref-3"); err != nil || cancelled {
+		t.Errorf("queued job: cancelled %v (%v), want false", cancelled, err)
+	}
+	queued, _ := s.repo.GetByRef(ctx, "org-1", "export_job", "ref-3")
+	if _, err := s.Cancel(ctx, "org-1", queued.ID); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled, err := s.IsMirrorCancelled(ctx, "org-1", "export_job", "ref-3"); err != nil || !cancelled {
+		t.Errorf("cancelled job: cancelled %v (%v), want true", cancelled, err)
+	}
+	if cancelled, err := s.IsMirrorCancelled(ctx, "org-1", "export_job", "untracked"); err != nil || cancelled {
+		t.Errorf("untracked row: cancelled %v (%v), want false", cancelled, err)
+	}
+	if err := s.MirrorResult(ctx, "org-1", "export_job", "ref-3", 1); !errors.Is(err, ErrTransition) {
+		t.Errorf("result of a cancelled job: %v, want ErrTransition", err)
+	}
+	if job, _ := s.repo.GetByRef(ctx, "org-1", "export_job", "ref-3"); job.Status != StatusCancelled || len(job.Result) != 0 {
+		t.Errorf("cancelled job: %+v, want cancelled without result", job)
 	}
 }
 

@@ -52,7 +52,8 @@ func ObjectKey(job *Job) string {
 // jobs survive restarts and are never processed twice. A job whose replica
 // died while it ran is queued again after StaleAfter and resumed; only a
 // running job can be completed, so a late original run cannot complete it
-// a second time.
+// a second time. A job whose mirrored job was cancelled (DELETE
+// /api/v1/jobs/{id}) stops before rendering or before completing (cancelled).
 type JobWorker struct {
 	Jobs   JobRepository
 	CIs    ci.Repository
@@ -81,6 +82,42 @@ func (w *JobWorker) mirror(ctx context.Context, job *Job, status jobs.Status, er
 	}
 	if err := w.Tracker.Mirror(ctx, job.OrganizationID, "export_job", job.ID, status, errMsg); err != nil {
 		slog.Warn("mirror export job", "job", job.ID, "error", err)
+	}
+}
+
+// CancelledByUser is the error message of an export whose mirrored job
+// was cancelled through the job API (DELETE /api/v1/jobs/{id}, JOB-03).
+const CancelledByUser = "cancelled by user"
+
+// cancelled reports whether the mirrored job of the export was cancelled:
+// the worker's checkpoint before rendering and before completing (JOB-03,
+// F-162). A tracker without the checkpoint, or one that fails to answer,
+// lets the export go on.
+func (w *JobWorker) cancelled(ctx context.Context, job *Job) bool {
+	tracker, ok := w.Tracker.(jobs.CancelTracker)
+	if !ok {
+		return false
+	}
+	cancelled, err := tracker.IsMirrorCancelled(ctx, job.OrganizationID, "export_job", job.ID)
+	if err != nil {
+		slog.Warn("check export job for cancel", "job", job.ID, "error", err)
+		return false
+	}
+	return cancelled
+}
+
+// stop ends an export whose mirrored job was cancelled: the export job
+// fails with CancelledByUser, an object already stored (key not empty)
+// is deleted, and nothing is reported; the mirrored job stays cancelled.
+func (w *JobWorker) stop(ctx context.Context, job *Job, key string) {
+	slog.Info("export job cancelled", "job", job.ID)
+	if key != "" {
+		if err := w.Blobs.Delete(ctx, w.Bucket, key); err != nil {
+			w.report(job.ID, fmt.Errorf("delete object of cancelled export: %w", err))
+		}
+	}
+	if err := w.Jobs.FailJob(ctx, job.OrganizationID, job.ID, CancelledByUser, w.Now()); err != nil {
+		w.report(job.ID, fmt.Errorf("mark export job cancelled: %w", err))
 	}
 }
 
@@ -141,6 +178,10 @@ func (w *JobWorker) process(ctx context.Context, job Job) {
 		w.fail(ctx, &job, fmt.Errorf("export job has no scope snapshot"))
 		return
 	}
+	if w.cancelled(ctx, &job) {
+		w.stop(ctx, &job, "")
+		return
+	}
 	scope := job.Scope.TenantScope(job.OrganizationID, job.InitiatedBy)
 	renderCtx := database.ContextWithTenantScope(ctx, &scope)
 	var buf bytes.Buffer
@@ -160,12 +201,24 @@ func (w *JobWorker) process(ctx context.Context, job Job) {
 		return
 	}
 
+	if w.cancelled(ctx, &job) {
+		w.stop(ctx, &job, key)
+		return
+	}
 	now := w.Now()
 	if err := w.Jobs.CompleteJob(ctx, job.OrganizationID, job.ID, key, rowCount, int64(buf.Len()), now, now.Add(w.JobTTL)); err != nil {
 		w.report(job.ID, fmt.Errorf("complete export job: %w", err))
 		return
 	}
 	w.mirror(ctx, &job, jobs.StatusSucceeded, "")
+	// The mirrored job names the export and its size (GET
+	// /api/v1/jobs/{id}/result, F-347).
+	if tracker, ok := w.Tracker.(jobs.ResultTracker); ok {
+		if err := tracker.MirrorResult(ctx, job.OrganizationID, "export_job", job.ID,
+			map[string]any{"export_id": job.ID, "row_count": rowCount}); err != nil {
+			slog.Warn("mirror export job result", "job", job.ID, "error", err)
+		}
+	}
 	if w.Events != nil {
 		if err := w.Events.Emit(ctx, &events.Event{OrgID: job.OrganizationID, Type: events.ExportCompleted, EntityID: job.ID,
 			Data: map[string]any{"id": job.ID, "format": job.Format, "row_count": rowCount, "initiated_by": job.InitiatedBy}}); err != nil {

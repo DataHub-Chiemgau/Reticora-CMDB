@@ -450,6 +450,49 @@ type Tracker interface {
 	Mirror(ctx context.Context, orgID, refTable, refID string, status Status, errMsg string) error
 }
 
+// CancelTracker is the optional part of a Tracker whose worker stops a
+// mirrored job that was cancelled through the job API (JOB-03, F-162): the
+// checkpoint IsCancelled of WP-514, addressed by the row the job mirrors.
+type CancelTracker interface {
+	IsMirrorCancelled(ctx context.Context, orgID, refTable, refID string) (bool, error)
+}
+
+// ResultTracker is the optional part of a Tracker that stores the result of
+// a mirrored job once it succeeded (GET /jobs/{id}/result, F-347).
+type ResultTracker interface {
+	MirrorResult(ctx context.Context, orgID, refTable, refID string, result any) error
+}
+
+// IsMirrorCancelled implements CancelTracker: whether the job mirroring the
+// row refTable/refID was cancelled; a row without job is not.
+func (s *Service) IsMirrorCancelled(ctx context.Context, orgID, refTable, refID string) (bool, error) {
+	job, err := s.repo.GetByRef(ctx, orgID, refTable, refID)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return job.Status == StatusCancelled, nil
+}
+
+// MirrorResult implements ResultTracker: the succeeded job mirroring the row
+// refTable/refID keeps result, its status and finish time stay. A job in any
+// other status is ErrTransition.
+func (s *Service) MirrorResult(ctx context.Context, orgID, refTable, refID string, result any) error {
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("encode job result: %w", err)
+	}
+	job, err := s.repo.GetByRef(ctx, orgID, refTable, refID)
+	if err != nil {
+		return err
+	}
+	_, err = s.repo.Transition(ctx, orgID, job.ID, []Status{StatusSucceeded},
+		&Update{Status: StatusSucceeded, Result: raw, FinishedAt: job.FinishedAt})
+	return err
+}
+
 // Track implements Tracker: a queued job of kind for the row refTable/refID
 // (idempotent per row) with the scope of its creator (creatorScope); a job
 // tracked outside a request takes the scope of its row where the row keeps
