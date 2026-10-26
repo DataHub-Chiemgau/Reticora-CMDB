@@ -469,6 +469,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// duplicate is the CI-12 merge, a ci.merge job of its own (CH29).
 	if jobTracker != nil {
 		discoveryHandler.WithReviewJobs(jobTracker)
+		// Discovery jobs are generic jobs discovery.<job_type> whose
+		// status follows discovery_job (JOB-01, F-146).
+		discoveryHandler.WithJobTracker(jobTracker)
 	}
 	if opts.CIService != nil {
 		discoveryHandler.WithMerger(opts.CIService)

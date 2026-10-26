@@ -55,6 +55,21 @@ type CreateJobRequest struct {
 	Config      map[string]any `json:"config,omitempty"`
 }
 
+// jobMirrorStatus maps a discovery job status to the status of its generic
+// job (JOB-01).
+var jobMirrorStatus = map[string]jobs.Status{
+	JobStatusPending:   jobs.StatusQueued,
+	JobStatusRunning:   jobs.StatusRunning,
+	JobStatusCompleted: jobs.StatusSucceeded,
+	JobStatusFailed:    jobs.StatusFailed,
+}
+
+// jobTrackingRepository is a repository whose UpdateJobStatus mirrors the
+// status into the generic job model; the PG repository implements it.
+type jobTrackingRepository interface {
+	setJobTracker(tracker jobs.Tracker)
+}
+
 var validJobTypes = map[string]bool{
 	JobTypeSweep: true,
 	JobTypePoll:  true,
@@ -203,9 +218,14 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusCreated, job)
 }
 
-// WithJobTracker registers discovery jobs in the generic job model.
+// WithJobTracker registers discovery jobs in the generic job model: a
+// created job is tracked as discovery.<job_type>, and the repository's
+// UpdateJobStatus mirrors its status changes (JOB-01).
 func (h *Handler) WithJobTracker(tracker jobs.Tracker) *Handler {
 	h.jobs = tracker
+	if repo, ok := h.repo.(jobTrackingRepository); ok {
+		repo.setJobTracker(tracker)
+	}
 	return h
 }
 

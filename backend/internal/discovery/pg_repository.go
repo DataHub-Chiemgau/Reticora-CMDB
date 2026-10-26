@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -51,6 +52,9 @@ type PGRepository struct {
 	lockTimeout time.Duration
 	// bus announces disables (WithDisableAnnouncer).
 	bus *nats.Conn
+	// tracker mirrors the status changes of discovery jobs into the
+	// generic job model (JOB-01); set by Handler.WithJobTracker.
+	tracker jobs.Tracker
 }
 
 // NewPGRepository creates a new PostgreSQL-backed discovery repository.
@@ -424,6 +428,56 @@ func (r *PGRepository) CreateJob(ctx context.Context, j *Job) error {
 		j.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		return requireVisible(ctx, tx, "discovery_job", jobVisible, j.ID)
 	})
+}
+
+// setJobTracker implements jobTrackingRepository.
+func (r *PGRepository) setJobTracker(tracker jobs.Tracker) {
+	r.tracker = tracker
+}
+
+// UpdateJobStatus sets the status of a discovery job of the tenant scope:
+// running stamps started_at, completed and failed stamp completed_at, and a
+// failed job keeps errMsg as its cause (JobErrorOf). Once committed, the
+// generic job of the discovery job takes the status (JOB-01, like the export
+// worker); a failure there is logged and the status stays.
+func (r *PGRepository) UpdateJobStatus(ctx context.Context, orgID, id, status, errMsg string) (*Job, error) {
+	mirrored, ok := jobMirrorStatus[status]
+	if !ok {
+		return nil, &api.FieldError{Field: "status", Message: "invalid discovery job status"}
+	}
+	if status != JobStatusFailed {
+		errMsg = ""
+	}
+	var job *Job
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		query := fmt.Sprintf(`
+			UPDATE discovery_job SET
+				status = $3,
+				started_at = CASE WHEN $3 = 'pending' THEN started_at ELSE COALESCE(started_at, now()) END,
+				completed_at = CASE WHEN $3 IN ('completed', 'failed') THEN now() ELSE NULL END,
+				result_summary = CASE WHEN $4 = '' THEN result_summary
+					ELSE COALESCE(result_summary, '{}'::jsonb) || jsonb_build_object('error', $4::text) END
+			WHERE id = $1 AND organization_id = $2 AND %s
+			RETURNING %s`, jobVisible, jobSelectColumns)
+		scanned, err := scanJob(tx.QueryRow(ctx, query, id, orgID, status, errMsg))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
+		if err != nil {
+			return fmt.Errorf("update discovery job status: %w", err)
+		}
+		job = scanned
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if r.tracker != nil {
+		if err := r.tracker.Mirror(ctx, orgID, "discovery_job", id, mirrored, errMsg); err != nil {
+			slog.Warn("mirror discovery job", "job", id, "status", status, "error", err)
+		}
+	}
+	return job, nil
 }
 
 func (r *PGRepository) GetJob(ctx context.Context, orgID, id string) (*Job, error) {
