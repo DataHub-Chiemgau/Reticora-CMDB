@@ -22,8 +22,8 @@ import (
 )
 
 // CI merge (CI-12): POST /cis/{survivor}/merge {victim_id} moves the
-// relationships, interfaces (with their IPs), contacts, history, documents
-// and the asset link of the victim to the survivor. Attributes follow the
+// relationships, interfaces (with their IPs), contacts, history, documents,
+// the endpoint agents and the asset link of the victim to the survivor. Attributes follow the
 // provenance rank of the discovery sources, tags are united; the field
 // values (provenance and overrides) of both stay, an override of the victim
 // that contradicts one of the survivor opens an override_conflict review.
@@ -265,6 +265,9 @@ var mergeReferences = []mergeReference{
 	},
 	{key: "history", table: "ci_change", column: "ci_id"},
 	{key: "documents", table: "document_link", column: "entity_id", where: "entity_type = 'ci'"},
+	// The endpoint agent follows its CI, so its next telemetry updates the
+	// survivor instead of creating a new CI (F-083).
+	{key: "agents", table: "endpoint_agent", column: "ci_id"},
 }
 
 // Merge implements Merger in one transaction.
@@ -623,7 +626,14 @@ func (s *Service) Unmerge(ctx context.Context, orgID, victimID string) (*Unmerge
 // written by the unmerge.
 var snapshotTables = map[string]bool{
 	"asset": true, "ci_relationship": true, "network_interface": true, "ci_contact": true,
-	"ci_change": true, "document_link": true, "ci_field_value": true, "ci": true,
+	"ci_change": true, "document_link": true, "ci_field_value": true, "ci": true, "endpoint_agent": true,
+}
+
+// snapshotRestoreColumns limits what the unmerge writes back for a table:
+// of an endpoint agent only the CI link, so its later state (kill-switch,
+// policy, heartbeat) stays.
+var snapshotRestoreColumns = map[string][]string{
+	"endpoint_agent": {"ci_id"},
 }
 
 // tableColumns returns the writable columns of a snapshot table.
@@ -658,6 +668,9 @@ func restoreRow(ctx context.Context, tx pgx.Tx, cols map[string][]string, row *s
 			return err
 		}
 		cols[row.Table] = c
+	}
+	if only, ok := snapshotRestoreColumns[row.Table]; ok && !insert {
+		c = only
 	}
 	list := strings.Join(c, ", ")
 	table := pgx.Identifier{row.Table}.Sanitize()

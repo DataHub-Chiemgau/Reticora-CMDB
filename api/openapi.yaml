@@ -1066,8 +1066,8 @@ paths:
       description: >-
         Restores the merged CI of the path and its survivor from the merge
         snapshot: both CI rows, the moved relationships, interfaces,
-        contacts, history, document links, field values and the asset link,
-        and the rows the merge removed. After 30 days the snapshot is gone
+        contacts, history, document links, field values, the asset link and
+        the CI link of endpoint agents, and the rows the merge removed. After 30 days the snapshot is gone
         (410). Requires ci:delete.
       responses:
         '200':
@@ -3768,7 +3768,9 @@ paths:
         Reconciles the endpoint into a CI (source "agent") and writes health
         metrics into the time-series store. The software inventory lands in the
         CI attributes for patch posture (spec §9.4). Disabled agents (kill-switch)
-        are rejected.
+        are rejected. The CI linked to the agent is the anchor, a merged one
+        through its survivor; only a deleted linked CI is reconciled afresh.
+        A linked CI that cannot be read is 503 and nothing is stored.
       requestBody:
         required: true
         content:
@@ -3786,6 +3788,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
 
   /api/v1/agents/{id}/heartbeat:
     x-phase: P4

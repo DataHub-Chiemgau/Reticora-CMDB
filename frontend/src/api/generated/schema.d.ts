@@ -514,7 +514,7 @@ export interface paths {
     put?: never;
     /**
      * Revert the merge of this (merged) CI within 30 days (CI-12)
-     * @description Restores the merged CI of the path and its survivor from the merge snapshot: both CI rows, the moved relationships, interfaces, contacts, history, document links, field values and the asset link, and the rows the merge removed. After 30 days the snapshot is gone (410). Requires ci:delete.
+     * @description Restores the merged CI of the path and its survivor from the merge snapshot: both CI rows, the moved relationships, interfaces, contacts, history, document links, field values, the asset link and the CI link of endpoint agents, and the rows the merge removed. After 30 days the snapshot is gone (410). Requires ci:delete.
      */
     post: operations['unmergeCI'];
     delete?: never;
@@ -2062,7 +2062,7 @@ export interface paths {
     put?: never;
     /**
      * Ingest endpoint telemetry (health metrics + software inventory)
-     * @description Reconciles the endpoint into a CI (source "agent") and writes health metrics into the time-series store. The software inventory lands in the CI attributes for patch posture (spec §9.4). Disabled agents (kill-switch) are rejected.
+     * @description Reconciles the endpoint into a CI (source "agent") and writes health metrics into the time-series store. The software inventory lands in the CI attributes for patch posture (spec §9.4). Disabled agents (kill-switch) are rejected. The CI linked to the agent is the anchor, a merged one through its survivor; only a deleted linked CI is reconciled afresh. A linked CI that cannot be read is 503 and nothing is stored.
      */
     post: operations['ingestAgentTelemetry'];
     delete?: never;
@@ -15462,6 +15462,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      503: components['responses']['DependencyUnavailable'];
     };
   };
   agentHeartbeat: {

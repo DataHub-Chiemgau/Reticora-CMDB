@@ -167,3 +167,67 @@ func TestMergeAgainstPostgres(t *testing.T) {
 		t.Errorf("snapshot: %v changed %d removed %d", err, len(snap.Changed), len(snap.Removed))
 	}
 }
+
+// TestMergeMovesEndpointAgentLink covers WP-484 (F-083) against PostgreSQL:
+// the merge moves endpoint_agent.ci_id of the victim to the survivor
+// (moved "agents", the row in the snapshot), an agent of another CI stays;
+// the unmerge links the agent to the victim again and restores only the
+// link, so a later kill-switch of the agent stays.
+func TestMergeMovesEndpointAgentLink(t *testing.T) {
+	f := scopetest.Seed(t, "b3")
+	bg := context.Background()
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	repo := ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder())
+	survivor := f.CI(t, f.OrgA, f.Client1, "agent-merge-survivor")
+	victim := f.CI(t, f.OrgA, f.Client1, "agent-merge-victim")
+	other := f.CI(t, f.OrgA, f.Client1, "agent-merge-other")
+	agentV, agentO := f.ID(), f.ID()
+	if _, err := f.Admin.Exec(bg, `INSERT INTO endpoint_agent (id, organization_id, client_id, agent_id, hostname, ci_id) VALUES
+		($1, $2, $3, 'wp484-victim-agent', 'agent-merge-victim', $4), ($5, $2, $3, 'wp484-other-agent', 'agent-merge-other', $6)`,
+		agentV, f.OrgA, f.Client1, victim, agentO, other); err != nil {
+		t.Fatal(err)
+	}
+	link := func(id string) (ciID, status string) {
+		t.Helper()
+		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(ci_id::text, ''), status FROM endpoint_agent WHERE id = $1`, id).Scan(&ciID, &status); err != nil {
+			t.Fatal(err)
+		}
+		return ciID, status
+	}
+
+	res, err := repo.Merge(ctx, f.OrgA, survivor, victim, "")
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if res.Moved["agents"] != 1 {
+		t.Errorf("moved agents %d, want 1 (%v)", res.Moved["agents"], res.Moved)
+	}
+	if got, _ := link(agentV); got != survivor {
+		t.Errorf("agent of the victim linked to %s, want the survivor %s", got, survivor)
+	}
+	if got, _ := link(agentO); got != other {
+		t.Errorf("agent of another CI linked to %s, want unchanged %s", got, other)
+	}
+	var inSnapshot bool
+	if err = f.Admin.QueryRow(bg, `SELECT snapshot->'changed' @> jsonb_build_array(jsonb_build_object('table', 'endpoint_agent',
+		'row', jsonb_build_object('id', $2::text, 'ci_id', $3::text))) FROM ci_merge WHERE victim_id = $1`, victim, agentV, victim).Scan(&inSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if !inSnapshot {
+		t.Error("the merge snapshot holds no endpoint_agent row with the victim link")
+	}
+
+	// The kill-switch after the merge is no part of the merge.
+	if _, err = f.Admin.Exec(bg, `UPDATE endpoint_agent SET status = 'disabled' WHERE id = $1`, agentV); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repo.Unmerge(ctx, f.OrgA, victim); err != nil {
+		t.Fatalf("unmerge: %v", err)
+	}
+	if got, status := link(agentV); got != victim || status != "disabled" {
+		t.Errorf("after the unmerge the agent is linked to %s with status %s, want the victim %s and disabled", got, status, victim)
+	}
+	if got, _ := link(agentO); got != other {
+		t.Errorf("after the unmerge the other agent is linked to %s, want %s", got, other)
+	}
+}
