@@ -1182,6 +1182,30 @@
     "unread": "Ungelesen",
     "empty": "Keine Benachrichtigungen."
   },
+  "entitlementExpiry": {
+    "title": "Ablaufende Funktionen",
+    "message": "Die Funktion „{{feature}}“ läuft am {{date}} ab (in {{days}} Tagen).",
+    "messageOneDay": "Die Funktion „{{feature}}“ läuft am {{date}} ab (in 1 Tag).",
+    "features": {
+      "discovery": "Discovery",
+      "topology": "Topologie",
+      "rack_view": "Rackansicht",
+      "export_csv": "CSV-Export",
+      "webhooks": "Webhooks",
+      "api_access": "API-Zugriff",
+      "notifications_email": "E-Mail-Benachrichtigungen",
+      "inventory": "Inventar",
+      "documents": "Dokumente",
+      "stocktake": "Inventur",
+      "ticketing": "Tickets",
+      "monitoring": "Monitoring",
+      "endpoint_agent": "Endpoint-Agent",
+      "workflow_forms": "Workflows und Formulare",
+      "compliance": "Compliance",
+      "iga": "IGA",
+      "ai": "KI-Assistent"
+    }
+  },
   "jobs": {
     "title": "Jobcenter",
     "subtitle": "Hintergrundjobs aller Arten: Fortschritt, Abbruch und Ergebnis.",

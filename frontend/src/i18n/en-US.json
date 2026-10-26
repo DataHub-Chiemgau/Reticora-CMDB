@@ -1182,6 +1182,30 @@
     "unread": "Unread",
     "empty": "No notifications."
   },
+  "entitlementExpiry": {
+    "title": "Expiring features",
+    "message": "The feature “{{feature}}” expires on {{date}} (in {{days}} days).",
+    "messageOneDay": "The feature “{{feature}}” expires on {{date}} (in 1 day).",
+    "features": {
+      "discovery": "Discovery",
+      "topology": "Topology",
+      "rack_view": "Rack view",
+      "export_csv": "CSV export",
+      "webhooks": "Webhooks",
+      "api_access": "API access",
+      "notifications_email": "E-mail notifications",
+      "inventory": "Inventory",
+      "documents": "Documents",
+      "stocktake": "Stocktake",
+      "ticketing": "Tickets",
+      "monitoring": "Monitoring",
+      "endpoint_agent": "Endpoint agent",
+      "workflow_forms": "Workflows and forms",
+      "compliance": "Compliance",
+      "iga": "IGA",
+      "ai": "AI assistant"
+    }
+  },
   "jobs": {
     "title": "Job center",
     "subtitle": "Background jobs of every kind: progress, cancellation and result.",

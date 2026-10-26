@@ -773,3 +773,4 @@ IMP-02;[B];C;backend/internal/topology/topology_test.go;WP-490
 AUD-03;[B];C;backend/internal/history/history_integration_test.go;WP-488
 AUD-05;[B];C;frontend/src/pages/AuditPage.test.tsx;WP-469
 API-05;[B];C;frontend/src/pages/AuditPage.test.tsx;WP-469
+ENT-07;[B];B;frontend/src/components/EntitlementExpiryBanner.test.tsx;WP-464
