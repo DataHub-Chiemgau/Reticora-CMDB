@@ -186,7 +186,22 @@ test.describe('Saved views run by read-only roles: search:read and the entity re
       permissions: ['ci:read', 'saved_view:read', 'search:read'],
     });
     w.viewer = await invite(viewerRole, 'viewer');
-    w.ciOnly = await invite(ciOnlyRole.id, 'cionly');
+    // An invitation carries a standard role only (RBA-02); the custom role
+    // without asset:read is assigned after the acceptance and the standard
+    // role removed, so the user holds exactly ci:read, saved_view:read and
+    // search:read.
+    w.ciOnly = await invite(viewerRole, 'cionly');
+    const users = await ok<List<{ id: string; email: string }>>('GET', '/users?limit=200');
+    const ciOnlyID = (users.data ?? []).find((u) => u.email === w.ciOnly.email)?.id ?? '';
+    expect(ciOnlyID, 'the accepted ci-only user').not.toBe('');
+    await ok('POST', '/role-assignments', { user_id: ciOnlyID, custom_role_id: ciOnlyRole.id });
+    const assignments = await ok<List<{ id: string; role_id?: string }>>(
+      'GET',
+      `/role-assignments?user_id=${ciOnlyID}`,
+    );
+    const standard = (assignments.data ?? []).filter((a) => a.role_id === viewerRole);
+    expect(standard, 'the viewer assignment of the invitation').toHaveLength(1);
+    await ok('DELETE', `/role-assignments/${standard[0].id}`);
   });
 
   test.afterAll(async () => {
