@@ -683,6 +683,8 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Übergangsregel:** WP-518 (`t7-saved-views-api`) setzt Option 1 um; bei Option 2 oder 3 werden nur das Prädikat in `savedview/pg_repository.go`, die OpenAPI-Beschreibung und `TestAuditT7SavedViewEditDeleteRights` angepasst.
 
+**Umsetzung (2026-10-26):** WP-518 setzt Option 1 um: PATCH und DELETE nur durch den Owner (Prädikat `owner_id` in `savedview/pg_repository.go`, Owner-Prüfung vor der Validierung in `savedview/handler.go`), sonst 404 bei unveränderter Zeile; `SavedViewsPage` bietet „Löschen“ nur für eigene Sichten an. Eingetragen in [`../entscheidungen.md`](../entscheidungen.md) (Nachtrag vom 2026-10-26).
+
 **Betroffene IDs:** VIE-01
 
 **Betroffene WPs:** WP-518, WP-555

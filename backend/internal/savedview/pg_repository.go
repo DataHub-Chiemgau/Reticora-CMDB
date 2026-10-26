@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -95,6 +96,9 @@ func (r *PGRepository) Create(ctx context.Context, view *View) error {
 			entityKind = "ci"
 		}
 		normalizeView(view)
+		if err := checkRoles(ctx, tx, view.OrganizationID, view.SharedWithRoles); err != nil {
+			return err
+		}
 		sortJSON, err := json.Marshal(view.Sort)
 		if err != nil {
 			return err
@@ -109,7 +113,9 @@ func (r *PGRepository) Create(ctx context.Context, view *View) error {
 	})
 }
 
-// Update modifies a view the caller owns (or any shared view).
+// Update modifies a view the caller owns; a view shared with the caller,
+// org-wide or by role, is read-only and not found (E-86, option 1). Only
+// the fields the request sends change (F-166).
 func (r *PGRepository) Update(ctx context.Context, orgID, id, ownerID string, req UpsertRequest) (*View, error) {
 	var out *View
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -146,15 +152,24 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id, ownerID string, re
 			pos++
 		}
 		if req.SharedWithRoles != nil {
+			if err := checkRoles(ctx, tx, orgID, req.SharedWithRoles); err != nil {
+				return err
+			}
 			sets = append(sets, fmt.Sprintf("shared_with_roles = $%d::uuid[]", pos))
 			args = append(args, req.SharedWithRoles)
 			pos++
 		}
-		sets = append(sets, fmt.Sprintf("shared = $%d", pos))
-		args = append(args, req.Shared)
-		pos++
+		if req.Shared != nil {
+			sets = append(sets, fmt.Sprintf("shared = $%d", pos))
+			args = append(args, *req.Shared)
+			pos++
+		}
+		if len(sets) == 0 {
+			// Nothing sent: the owner reads the view back unchanged.
+			sets = append(sets, "name = name")
+		}
 		v, err := scan(tx.QueryRow(ctx, fmt.Sprintf(
-			"UPDATE saved_view SET %s WHERE id = $1 AND organization_id = $2 AND (shared OR owner_id = $%d) RETURNING %s",
+			"UPDATE saved_view SET %s WHERE id = $1 AND organization_id = $2 AND owner_id = $%d RETURNING %s",
 			strings.Join(sets, ", "), pos, selectColumns), append(args, nilIfEmpty(ownerID))...))
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -168,11 +183,12 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id, ownerID string, re
 	return out, err
 }
 
-// Delete removes a view the caller owns (or any shared view).
+// Delete removes a view the caller owns; any other view, shared or not, is
+// not found (E-86, option 1).
 func (r *PGRepository) Delete(ctx context.Context, orgID, id, ownerID string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx,
-			"DELETE FROM saved_view WHERE id = $1 AND organization_id = $2 AND (shared OR owner_id = $3)",
+			"DELETE FROM saved_view WHERE id = $1 AND organization_id = $2 AND owner_id = $3",
 			id, orgID, nilIfEmpty(ownerID))
 		if err != nil {
 			return fmt.Errorf("delete saved view: %w", err)
@@ -182,6 +198,30 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id, ownerID string) er
 		}
 		return nil
 	})
+}
+
+// checkRoles reports the first role id that is neither a role nor a custom
+// role of the organization as 422 on shared_with_roles[i] (F-337). The ids
+// are UUIDs already (ValidateView); RLS limits both tables to the tenant,
+// the organization predicate states it.
+func checkRoles(ctx context.Context, tx pgx.Tx, orgID string, roles []string) error {
+	if len(roles) == 0 {
+		return nil
+	}
+	var missing int
+	err := tx.QueryRow(ctx, `
+		SELECT COALESCE(MIN(r.i), 0) FROM unnest($2::uuid[]) WITH ORDINALITY AS r(id, i)
+		WHERE NOT EXISTS (SELECT 1 FROM role WHERE role.id = r.id AND role.organization_id = $1)
+		  AND NOT EXISTS (SELECT 1 FROM custom_role cr WHERE cr.id = r.id AND cr.organization_id = $1)`,
+		orgID, roles).Scan(&missing)
+	if err != nil {
+		return fmt.Errorf("check saved view roles: %w", err)
+	}
+	if missing > 0 {
+		return &api.FieldError{Field: fmt.Sprintf("shared_with_roles[%d]", missing-1),
+			Message: "not a role of the organization", Status: http.StatusUnprocessableEntity}
+	}
+	return nil
 }
 
 type scanner interface {

@@ -27,9 +27,12 @@ const preset = {
   shared: true,
 };
 
+const me = 'user-1';
+
 const ownView = {
   id: 'view-1',
   organization_id: 'org-1',
+  owner_id: me,
   name: 'My servers',
   entity_kind: 'ci',
   filter_spec: { status: 'active' },
@@ -41,11 +44,17 @@ const ownView = {
  * search answers the n-th POST /search/query (0-based); by default it is an
  * empty result.
  */
-function mockApi(overrides: { views?: unknown[]; search?: (n: number) => Response } = {}) {
+function mockApi(
+  overrides: { views?: unknown[]; search?: (n: number) => Response; me?: string | null } = {},
+) {
   let searches = 0;
   return vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
+    if (url.includes('/me/permissions'))
+      return overrides.me === null
+        ? json({ title: 'Internal Server Error', status: 500 }, 500)
+        : json({ user_id: overrides.me ?? me, permissions: ['saved_view:write'] });
     if (url.includes('/saved-views/presets')) return json({ data: [preset] });
     if (url.includes('/search/query'))
       return overrides.search ? overrides.search(searches++) : json({ data: [], total: 0 });
@@ -135,6 +144,49 @@ describe('SavedViewsPage', () => {
       expect(call).toBeTruthy();
       expect(String(call![0])).toContain(`/saved-views/${ownView.id}`);
     });
+  });
+
+  // E-86 (WP-518): only the owner changes or deletes a view; the server
+  // answers 404 to anybody else, so the page offers no delete for views
+  // shared with the caller by somebody else.
+  it('offers delete only for own views, not for views shared by others', async () => {
+    const foreign = {
+      ...ownView,
+      id: 'view-2',
+      owner_id: 'user-2',
+      name: 'Team servers',
+      shared: true,
+    };
+    const roleShared = {
+      ...ownView,
+      id: 'view-3',
+      owner_id: 'user-3',
+      name: 'Role servers',
+      shared_with_roles: ['r1'],
+    };
+    vi.stubGlobal('fetch', mockApi({ views: [ownView, foreign, roleShared] }));
+
+    renderWithProviders(<SavedViewsPage />);
+
+    expect(
+      await screen.findByRole('button', {
+        name: new RegExp(`(löschen|delete): ${ownView.name}`, 'i'),
+      }),
+    ).toBeInTheDocument();
+    // The foreign views are listed and can be run, but not deleted.
+    expect(screen.getByRole('button', { name: /^Team servers/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Role servers/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /(löschen|delete): Team servers/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /(löschen|delete): Role servers/i })).toBeNull();
+  });
+
+  it('offers no delete while the caller is unknown', async () => {
+    vi.stubGlobal('fetch', mockApi({ views: [ownView], me: null }));
+
+    renderWithProviders(<SavedViewsPage />);
+
+    expect(await screen.findByRole('button', { name: /^My servers/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /(löschen|delete): My servers/i })).toBeNull();
   });
 
   // F-055 (WP-460): the retry of a failed search was a no-op, and a missing

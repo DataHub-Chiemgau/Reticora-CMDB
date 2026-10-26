@@ -136,7 +136,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		FilterSpec:      req.FilterSpec,
 		Sort:            req.Sort,
 		Columns:         req.Columns,
-		Shared:          req.Shared,
+		Shared:          req.Shared != nil && *req.Shared,
 		SharedWithRoles: req.SharedWithRoles,
 	}
 	if err := h.repo.Create(r.Context(), view); err != nil {
@@ -164,6 +164,13 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	current, err := h.repo.GetByID(r.Context(), t.OrganizationID, id, ownerID(r))
 	if err != nil {
 		writeViewError(w, r, err)
+		return
+	}
+	// Only the owner changes a view (E-86, option 1): a view shared with the
+	// caller is read-only and answers 404 like a view the caller cannot
+	// see, before any validation tells them more about it.
+	if user := ownerID(r); user == "" || current.OwnerID != user {
+		writeViewError(w, r, ErrNotFound)
 		return
 	}
 	kind := req.EntityKind
@@ -202,12 +209,17 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // writeViewError answers a failed saved-view request: a view that is
 // unknown, of another organization or not the caller's to read or change is
-// 404 (VIE-01), a name the owner uses for another view 409 (in memory
+// 404 (VIE-01), a role id unknown to the organization 422 naming the
+// field, a name the owner uses for another view 409 (in memory
 // ErrConflict, in PostgreSQL 23505). Database errors go through
 // api.WriteRepoError like the engine errors of Query: no constraint name or
 // SQLSTATE reaches the client (API-03, F-047), the log keeps the text.
 func writeViewError(w http.ResponseWriter, r *http.Request, err error) {
+	var fe *api.FieldError
 	switch {
+	case errors.As(err, &fe):
+		// A role id that is not a role of the organization (F-337).
+		api.WriteFieldError(w, err)
 	case errors.Is(err, ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
 	case errors.Is(err, ErrConflict):

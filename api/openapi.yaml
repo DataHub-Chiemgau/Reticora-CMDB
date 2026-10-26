@@ -12444,7 +12444,7 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column or role id.
+          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -12477,7 +12477,13 @@ paths:
     patch:
       operationId: updateSavedViewsId
       summary: Update a saved view
-      description: The owner changes the view; a view shared org-wide is editable by everybody, a role-shared one only by its owner.
+      description: >-
+        Only the owner changes the view (E-86, option 1). For everybody else a
+        view shared org-wide or with a role is read-only, and its PATCH answers
+        404 like a view the caller cannot see; the view stays unchanged. Only
+        the fields sent change: a request without shared keeps the sharing.
+        Every id in shared_with_roles must be a role or custom role of the
+        organization.
       requestBody:
         required: true
         content:
@@ -12499,13 +12505,16 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column or role id.
+          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
     delete:
       operationId: deleteSavedViewsId
       summary: Delete a saved view
+      description: >-
+        Only the owner deletes the view (E-86, option 1). A view shared with
+        the caller, org-wide or with a role, answers 404 and stays.
       responses:
         '204':
           description: Deleted
@@ -13654,9 +13663,12 @@ components:
         columns:
           type: array
           items: { type: string }
-        shared: { type: boolean }
+        shared:
+          type: boolean
+          description: Shares the view org-wide. A PATCH without it keeps the current sharing.
         shared_with_roles:
           type: array
+          description: Role or custom role ids of the organization whose holders may read the view.
           items: { type: string }
     ImpactAnalysis:
       type: object

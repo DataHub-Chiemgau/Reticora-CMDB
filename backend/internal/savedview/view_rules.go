@@ -13,7 +13,8 @@ import (
 // ValidateView checks a view against VIE-01: the filter (its AST in
 // where and its ids, FilterSpec.Validate), the sort keys and columns are
 // fields of the entity kind, sort directions are asc or desc, role ids are
-// UUIDs.
+// UUIDs. That a role id names a role or custom role of the organization is
+// checked by the repository in the transaction of the write (F-337).
 func ValidateView(entityKind string, req *UpsertRequest) error {
 	if entityKind == "" {
 		entityKind = "ci"

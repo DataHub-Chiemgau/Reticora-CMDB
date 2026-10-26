@@ -30,14 +30,17 @@ type SortKey struct {
 	Dir   string `json:"dir"`
 }
 
-// UpsertRequest is the payload for creating or updating a saved view.
+// UpsertRequest is the payload for creating or updating a saved view. A
+// PATCH changes only the fields it sends: Shared is a pointer so that a
+// request without it keeps the sharing (F-166); the other fields are unset
+// when empty (strings) or nil (lists, filter_spec).
 type UpsertRequest struct {
 	Name            string         `json:"name"`
 	EntityKind      string         `json:"entity_kind"`
 	FilterSpec      map[string]any `json:"filter_spec"`
 	Sort            []SortKey      `json:"sort,omitempty"`
 	Columns         []string       `json:"columns,omitempty"`
-	Shared          bool           `json:"shared,omitempty"`
+	Shared          *bool          `json:"shared,omitempty"`
 	SharedWithRoles []string       `json:"shared_with_roles,omitempty"`
 }
 

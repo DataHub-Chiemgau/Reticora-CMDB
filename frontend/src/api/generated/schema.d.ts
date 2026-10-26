@@ -6576,13 +6576,16 @@ export interface paths {
     get: operations['getSavedViewsId'];
     put?: never;
     post?: never;
-    /** Delete a saved view */
+    /**
+     * Delete a saved view
+     * @description Only the owner deletes the view (E-86, option 1). A view shared with the caller, org-wide or with a role, answers 404 and stays.
+     */
     delete: operations['deleteSavedViewsId'];
     options?: never;
     head?: never;
     /**
      * Update a saved view
-     * @description The owner changes the view; a view shared org-wide is editable by everybody, a role-shared one only by its owner.
+     * @description Only the owner changes the view (E-86, option 1). For everybody else a view shared org-wide or with a role is read-only, and its PATCH answers 404 like a view the caller cannot see; the view stays unchanged. Only the fields sent change: a request without shared keeps the sharing. Every id in shared_with_roles must be a role or custom role of the organization.
      */
     patch: operations['updateSavedViewsId'];
     trace?: never;
@@ -7208,7 +7211,9 @@ export interface components {
       };
       sort?: components['schemas']['SavedViewSortKey'][];
       columns?: string[];
+      /** @description Shares the view org-wide. A PATCH without it keeps the current sharing. */
       shared?: boolean;
+      /** @description Role or custom role ids of the organization whose holders may read the view. */
       shared_with_roles?: string[];
     };
     ImpactAnalysis: {
@@ -27995,7 +28000,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column or role id. */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -28124,7 +28129,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column or role id. */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;

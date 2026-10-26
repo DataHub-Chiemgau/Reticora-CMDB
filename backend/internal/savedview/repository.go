@@ -104,8 +104,9 @@ func (r *MemoryRepository) Create(_ context.Context, view *View) error {
 	return nil
 }
 
-// Update modifies a view. Shared views are editable by anyone in the
-// organization; private views only by their owner.
+// Update modifies a view of its owner; shared views are read-only for
+// everybody else (E-86, option 1). Role ids are not checked against roles
+// here: the memory repository keeps none.
 func (r *MemoryRepository) Update(_ context.Context, orgID, id, ownerID string, req UpsertRequest) (*View, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -113,7 +114,7 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id, ownerID string, 
 	if !ok || v.OrganizationID != orgID {
 		return nil, ErrNotFound
 	}
-	if !v.Shared && v.OwnerID != ownerID {
+	if v.OwnerID == "" || v.OwnerID != ownerID {
 		return nil, ErrNotFound
 	}
 	if req.Name != "" && req.Name != v.Name {
@@ -141,7 +142,9 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id, ownerID string, 
 	if req.SharedWithRoles != nil {
 		v.SharedWithRoles = req.SharedWithRoles
 	}
-	v.Shared = req.Shared
+	if req.Shared != nil {
+		v.Shared = *req.Shared
+	}
 	v.UpdatedAt = time.Now().UTC()
 	out := *v
 	return &out, nil
@@ -151,7 +154,7 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id, ownerID string) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	v, ok := r.views[id]
-	if !ok || v.OrganizationID != orgID || (!v.Shared && v.OwnerID != ownerID) {
+	if !ok || v.OrganizationID != orgID || v.OwnerID == "" || v.OwnerID != ownerID {
 		return ErrNotFound
 	}
 	delete(r.views, id)
