@@ -97,11 +97,11 @@ func TestSeedSIM01(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	opts := Options{Prefix: "seedtest-", Objects: 10000, Metrics: 2000, At: at}
-	// The attribute indexes are schema objects; they go with the test.
-	for _, prefix := range []string{"seedtest-demo", "seedtest-acme"} {
-		index := citype.IndexName(ID(prefix, "attribute", AttributeKey), false)
-		t.Cleanup(func() { _, _ = f.Admin.Exec(context.Background(), `DROP INDEX IF EXISTS `+index) })
-	}
+	// The attribute index of the key is a schema object; it goes with the
+	// test.
+	t.Cleanup(func() {
+		_, _ = f.Admin.Exec(context.Background(), `DROP INDEX IF EXISTS `+citype.KeyIndexName(AttributeKey))
+	})
 
 	summary, err := Run(ctx, f.App, opts)
 	if err != nil {
@@ -212,7 +212,7 @@ func TestSeedSIM01(t *testing.T) {
 		want               int
 	}{{demo, "seedtest-demo", "CC-001", 10000 / CostCenters}, {acme, "seedtest-acme", "CC-002", 1}} {
 		var valid bool
-		index := citype.IndexName(ID(c.prefix, "attribute", AttributeKey), false)
+		index := citype.KeyIndexName(AttributeKey) // one index of the key for every organization (WP-607)
 		if err := f.Admin.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i JOIN pg_class x ON x.oid = i.indexrelid
 			WHERE x.relname = $1`, index).Scan(&valid); err != nil || !valid {
 			t.Errorf("%s: attribute index %s valid %v, err %v", c.prefix, index, valid, err)
@@ -331,14 +331,26 @@ func TestSeedNFR01Volumes(t *testing.T) {
 	for k := 1; k <= small; k++ {
 		keys = append(keys, fmt.Sprintf("org-%04d", k))
 	}
-	for _, key := range keys {
-		index := citype.IndexName(ID("seedvol-"+key, "attribute", AttributeKey), false)
-		t.Cleanup(func() { _, _ = f.Admin.Exec(context.Background(), `DROP INDEX IF EXISTS `+index) })
-	}
+	t.Cleanup(func() {
+		_, _ = f.Admin.Exec(context.Background(), `DROP INDEX IF EXISTS `+citype.KeyIndexName(AttributeKey))
+	})
 
 	summary, err := Run(ctx, f.App, opts)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+	// One index of the searchable attribute for all organizations, none per
+	// definition (WP-607; the cause U1 of the load runs of WP-439).
+	ownIndexes := make([]string, 0, len(keys))
+	for _, key := range keys {
+		ownIndexes = append(ownIndexes, citype.IndexName(ID("seedvol-"+key, "attribute", AttributeKey), false))
+	}
+	var shared bool
+	var own int
+	if err = f.Admin.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL, count(to_regclass(n)) FROM unnest($2::text[]) AS n`,
+		citype.KeyIndexName(AttributeKey), ownIndexes).Scan(&shared, &own); err != nil || !shared || own != 0 {
+		t.Errorf("attribute indexes of %d organizations: index of the key %v, own indexes %d (%v); want the index of the key and no other",
+			len(keys), shared, own, err)
 	}
 	if len(summary.Orgs) != len(keys) {
 		t.Fatalf("organizations = %+v, want %v", summary.Orgs, keys)

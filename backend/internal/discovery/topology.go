@@ -222,9 +222,14 @@ func normalizeKey(value string) string {
 	return strings.TrimSpace(strings.ToLower(value))
 }
 
+// macSeparators removes the separators of the usual MAC notations; one
+// Replacer for every call (building one per call was a few percent of the
+// server's CPU during a re-discovery, WP-608).
+var macSeparators = strings.NewReplacer(":", "", "-", "", ".", "")
+
 func normalizeMAC(value string) string {
 	value = strings.TrimSpace(strings.ToLower(value))
-	value = strings.NewReplacer(":", "", "-", "", ".", "").Replace(value)
+	value = macSeparators.Replace(value)
 	return value
 }
 
@@ -254,23 +259,106 @@ func (h *Handler) deriveTopology(ctx context.Context, orgID string, items []Inge
 		return 0
 	}
 
-	created := 0
+	derived := make([][]DerivedRelationship, len(items))
+	unknown := make([][]UnknownRelationship, len(items))
+	var keys []EdgeKey
 	for i, item := range items {
 		srcID := resolvedCIID[i]
 		if srcID == "" || len(item.Relationships) == 0 {
 			continue
 		}
-		derived, unknown := DeriveTopology(srcID, item.Relationships, index.Resolve, suppressed)
-		for _, d := range derived {
+		derived[i], unknown[i] = DeriveTopology(srcID, item.Relationships, index.Resolve, suppressed)
+		for _, d := range derived[i] {
+			keys = append(keys, d.key())
+		}
+	}
+	// The edges the batch sees again are read with one statement and
+	// re-confirmed with one (WP-608, NFR-03); every other edge takes the
+	// path of one edge, which also finds an edge created earlier in the
+	// batch.
+	known := h.discoveryEdges(ctx, orgID, keys)
+	var confirmations []relationship.Confirmation
+	created := 0
+	for i := range items {
+		for _, d := range derived[i] {
+			if e, ok := known[d.key()]; ok {
+				if relationship.MayChange(RelationshipSource, e.Source) {
+					confidence := d.Confidence
+					confirmations = append(confirmations, relationship.Confirmation{ID: e.ID, Confidence: &confidence})
+				}
+				continue
+			}
 			if h.upsertRelationship(ctx, orgID, d) {
 				created++
 			}
 		}
-		for i := range unknown {
-			h.reviewUnknownRelationship(ctx, orgID, &unknown[i])
+		for j := range unknown[i] {
+			h.reviewUnknownRelationship(ctx, orgID, &unknown[i][j])
 		}
 	}
+	h.confirmEdges(ctx, orgID, confirmations)
 	return created
+}
+
+// EdgeKey is the source, target and type of a discovery edge.
+type EdgeKey struct {
+	SourceCIID, TargetCIID, RelType string
+}
+
+// FoundEdge is the oldest edge of an EdgeKey: its id and source.
+type FoundEdge struct {
+	ID, Source string
+}
+
+func (d *DerivedRelationship) key() EdgeKey {
+	return EdgeKey{SourceCIID: d.SourceCIID, TargetCIID: d.TargetCIID, RelType: d.RelType}
+}
+
+// edgesFinder looks the edges of several keys up with one statement
+// (PostgreSQL, WP-608).
+type edgesFinder interface {
+	DiscoveryEdges(ctx context.Context, orgID string, keys []EdgeKey) (map[EdgeKey]FoundEdge, error)
+}
+
+// discoveryEdges returns the existing edges of keys, read at once; nil when
+// the repository cannot or the read failed, then every edge takes the path
+// of one edge (upsertRelationship).
+func (h *Handler) discoveryEdges(ctx context.Context, orgID string, keys []EdgeKey) map[EdgeKey]FoundEdge {
+	finder, ok := h.repo.(edgesFinder)
+	if !ok || len(keys) == 0 {
+		return nil
+	}
+	found, err := finder.DiscoveryEdges(ctx, orgID, keys)
+	if err != nil {
+		slog.Warn("discovery edges not read at once", "organization_id", orgID, "error", err)
+		return nil
+	}
+	return found
+}
+
+// confirmEdges re-confirms the discovery edges a batch saw again: with one
+// statement where the relationship store can, else, and when that fails,
+// edge by edge as before.
+func (h *Handler) confirmEdges(ctx context.Context, orgID string, confirmations []relationship.Confirmation) {
+	if len(confirmations) == 0 {
+		return
+	}
+	if batch, ok := h.relRepo.(relationship.BatchConfirmer); ok {
+		err := batch.ConfirmMany(ctx, orgID, confirmations)
+		if err == nil {
+			return
+		}
+		slog.Warn("re-confirm discovery edges at once", "organization_id", orgID, "error", err)
+	}
+	confirmer, ok := h.relRepo.(relationship.Confirmer)
+	if !ok {
+		return
+	}
+	for _, c := range confirmations {
+		if err := confirmer.Confirm(ctx, orgID, c.ID, c.Confidence); err != nil {
+			slog.Warn("re-confirm discovery edge", "relationship_id", c.ID, "error", err)
+		}
+	}
 }
 
 // suppressionChecker returns a predicate that reports whether an edge

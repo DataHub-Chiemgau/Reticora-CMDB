@@ -5,10 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -267,26 +268,84 @@ func TestVisibleEdgesFailClosed(t *testing.T) {
 	}
 }
 
-// TestSelectEdgeRowsMatchesSelectTraversal: the organization read selects
-// the same edges as the shared semantics, node limit and depth included.
-func TestSelectEdgeRowsMatchesSelectTraversal(t *testing.T) {
-	var rows []edgeRow
-	var rels []Relationship
-	for i := 0; i < 40; i++ {
-		e := edgeRow{id: fmt.Sprintf("e%02d", i), sourceCIID: fmt.Sprintf("n%02d", i%13), targetCIID: fmt.Sprintf("n%02d", (i*7+3)%13),
-			relType: "connected_to", source: "discovery"}
-		rows = append(rows, e)
-		rels = append(rels, Relationship{ID: e.id, SourceCIID: e.sourceCIID, TargetCIID: e.targetCIID, RelType: e.relType, Source: e.source})
+// TestSelectWalkMatchesSelectTraversal: the selection of a walk on CI
+// numbers (WP-611) keeps the same edges as the shared semantics, node limit
+// and depth included, on random graphs with hidden CIs, self-loops and
+// parallel edges; ties of the node limit go by id as in the text form. The
+// CIs are numbered from the root and each one but the root ends an edge; a
+// hidden root keeps nothing.
+func TestSelectWalkMatchesSelectTraversal(t *testing.T) {
+	rng := rand.New(rand.NewPCG(611, 1))
+	randomID := func() uuid {
+		var id uuid
+		for i := range id {
+			id[i] = byte(rng.IntN(256))
+		}
+		return id
 	}
-	for _, depth := range []int{0, 1, 2, 5} {
-		for _, maxNodes := range []int{1, 3, 8, 100} {
-			got := selectEdgeRows("n00", rows, depth, maxNodes)
-			want := SelectTraversal("n00", rels, depth, maxNodes)
-			if !reflect.DeepEqual(got, want) {
-				t.Errorf("depth %d, %d nodes: %+v, want %+v", depth, maxNodes, got, want)
+	types, origins := []string{"connected_to", "powered_by", "contains"}, []string{"discovery", "manual", ProjectionSource}
+	compared := 0
+	for graph := 0; graph < 300; graph++ {
+		n := 2 + rng.IntN(15)
+		ids := make([]uuid, n)
+		for i := range ids {
+			ids[i] = randomID()
+		}
+		hidden := map[uuid]bool{}
+		for i := 0; i < rng.IntN(3); i++ {
+			hidden[ids[rng.IntN(n)]] = true
+		}
+		g := newWalkGraph(ids[0])
+		for _, i := range rng.Perm(n) {
+			if number := g.ci(ids[i]); i == 0 && number != 0 {
+				t.Fatalf("the root is number %d", number)
+			}
+		}
+		var visible []Relationship
+		for e := 0; e < n+rng.IntN(3*n); e++ {
+			id := randomID()
+			row := walkRow{id: keyOf(&id), source: g.ci(ids[rng.IntN(n)]), target: g.ci(ids[rng.IntN(n)]),
+				relType: g.intern([]byte(types[rng.IntN(len(types))])), origin: g.intern([]byte(origins[rng.IntN(len(origins))]))}
+			g.edges = append(g.edges, row)
+			if !hidden[g.ids[row.source]] && !hidden[g.ids[row.target]] {
+				visible = append(visible, Relationship{ID: formatUUID(&id), SourceCIID: formatUUID(&g.ids[row.source]),
+					TargetCIID: formatUUID(&g.ids[row.target]), RelType: g.text[row.relType], Source: g.text[row.origin]})
+			}
+		}
+		edges := slices.Clone(g.edges)
+		root := formatUUID(&ids[0])
+		for _, depth := range []int{1, 2, 3, 20} {
+			for _, maxNodes := range []int{1, 2, 4, 8, MaxTraversalNodes} {
+				for v := range g.state {
+					g.state[v] = ciVisible
+					if hidden[g.ids[v]] {
+						g.state[v] = ciHidden
+					}
+				}
+				g.edges = slices.Clone(edges)
+				walk := g.selectWalk(depth, maxNodes)
+				got := make([]Relationship, 0, len(walk.Edges))
+				ends := map[int32]bool{0: true}
+				for _, e := range walk.Edges {
+					got = append(got, Relationship{ID: e.ID, SourceCIID: walk.CIs[e.SourceCI], TargetCIID: walk.CIs[e.TargetCI],
+						RelType: e.RelType, Source: e.Source})
+					ends[e.SourceCI], ends[e.TargetCI] = true, true
+				}
+				want := SelectTraversal(root, visible, depth, maxNodes)
+				if hidden[ids[0]] {
+					want = []Relationship{}
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("graph %d, depth %d, %d nodes: %+v, want %+v", graph, depth, maxNodes, got, want)
+				}
+				if walk.CIs[0] != root || len(ends) != len(walk.CIs) || len(walk.CIs) > max(maxNodes, 1) {
+					t.Fatalf("graph %d, depth %d, %d nodes: CIs %v for %d edges", graph, depth, maxNodes, walk.CIs, len(got))
+				}
+				compared += len(got)
 			}
 		}
 	}
+	t.Logf("%d edges compared", compared)
 }
 
 // TestMemoryTraversalVisibility covers IMP-07 in the memory profile

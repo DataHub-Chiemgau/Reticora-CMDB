@@ -232,6 +232,22 @@ und kein Job in mindestens zwei Läufen rot ist, sonst 1; falsche Argumente (nic
 drei Archive, ein Verzeichnis ohne `ergebnis.md`, derselbe Lauf zweimal,
 eine unlesbare k6-Zusammenfassung) Exit 2.
 
+In GitHub Actions macht das der Workflow `load-evidence.yml` (WP-612,
+manuell, Eingaben `run_1` bis `run_3`: die Lauf-IDs der drei
+`load.yml`-Läufe). Er lädt die Artefakte `load-archive-<Lauf-ID>` der drei
+Läufe (`actions/download-artifact` mit `run-id`), ruft
+`tests/load/evaluate-runs.sh` auf und schreibt die Bewertung in Job-Log,
+Zusammenfassung und das Artefakt `load-evidence-<eigene Lauf-ID>`
+(`bewertung.md`, auch bei verfehlten Budgets). Der Job endet wie das
+Skript; eine Lauf-ID, die keine Zahl ist oder doppelt vorkommt, beendet ihn
+vor dem Download mit Exit 2, ein Lauf ohne Archiv (abgelaufen oder ohne Job
+`archive`) im Download-Schritt.
+
+```sh
+gh workflow run load-evidence.yml -R DataHub-Chiemgau/Reticora-CMDB \
+  -f run_1=<Lauf-ID-1> -f run_2=<Lauf-ID-2> -f run_3=<Lauf-ID-3>
+```
+
 ### Datenbankkosten je Record (F-118)
 
 PostgreSQL läuft im Workflow mit `pg_stat_statements`; die Statistik wird

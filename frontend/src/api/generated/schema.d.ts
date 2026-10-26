@@ -6615,7 +6615,7 @@ export interface components {
       default?: unknown;
       enum_values?: string[];
       multi_value: boolean;
-      /** @description Indexed for search: an `attribute.index` job builds `idx_attr_<id>` concurrently (DB-04). */
+      /** @description Indexed for search: a job builds the index concurrently (DB-04). A non-unique definition of an organization without a CI type uses the index of its key, shared by all organizations (`attribute.index.key` job, `idx_attr_key_<key>`, or `idx_attr_keyh_<hash>` for other keys; E-73); other definitions get `idx_attr_<id>` (`attribute.index` job). */
       searchable: boolean;
       /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. */
       unique: boolean;
@@ -9521,7 +9521,10 @@ export interface components {
       expires_at?: string;
       /** Format: date-time */
       revoked_at?: string;
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description Time of the last use, accurate to a minute: it is written at most once a minute, so the last use lies between this time and one minute later (WP-610).
+       */
       last_used_at?: string;
       /** Format: date-time */
       created_at: string;

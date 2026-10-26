@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -121,6 +122,113 @@ func TestTraverseFromProjectsRelTypePG(t *testing.T) {
 	}
 	if len(relsD1) != 2 {
 		t.Fatalf("expected 2 edges at depth 1 (chain start + cycle edge), got %d", len(relsD1))
+	}
+}
+
+// TestRelationshipListOfACIListsEachEdgeOnce covers List for one CI
+// (WP-609, one arm per end of the edge) against PostgreSQL: the stored
+// edges from and to the CI and its edge to itself, the projected contains
+// to its parent and from its child, located_in and mounted_in, each once,
+// with total equal to the edges; pages of three partition them in the
+// order of the list. A principal of client 1 sees neither the edges to a
+// CI of client 2 nor them in the total. Other edges are not listed.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRelationshipListOfACIListsEachEdgeOnce(t *testing.T) {
+	f := scopetest.Seed(t, "06")
+	bg := context.Background()
+	ctx := f.OrgCtx(f.OrgA)
+	repo := relationship.NewPGRepository(f.App)
+	names := map[string]string{}
+	newCI := func(clientID, name string) string {
+		id := f.CI(t, f.OrgA, clientID, name)
+		names[id] = name
+		return id
+	}
+	self, other, parent, child, mounted := newCI(f.Client1, "self"), newCI(f.Client1, "other"),
+		newCI(f.Client1, "parent"), newCI(f.Client1, "child"), newCI(f.Client1, "mounted")
+	foreign := newCI(f.Client2, "client2")
+	room := f.Room(t, f.Client1, "list-room")
+	names[room] = "room"
+	var rack string
+	if err := f.Admin.QueryRow(bg, `INSERT INTO rack (organization_id, room_id, name, height_units) VALUES ($1, $2, 'list-rack', 42)
+		RETURNING id::text`, f.OrgA, room).Scan(&rack); err != nil {
+		t.Fatal(err)
+	}
+	names[rack] = "rack"
+	for _, s := range []struct {
+		sql  string
+		args []any
+	}{
+		{`UPDATE ci SET parent_ci_id = $1, location_id = $2 WHERE id = $3`, []any{parent, room, self}},
+		{`UPDATE ci SET parent_ci_id = $1 WHERE id = $2`, []any{self, child}},
+		{`UPDATE ci SET location_id = $1 WHERE id = $2`, []any{rack, mounted}},
+		{`INSERT INTO rack_mount (organization_id, rack_id, ci_id, position_u, height_u) VALUES ($1, $2, $3, 1, 1)`, []any{f.OrgA, rack, mounted}},
+	} {
+		if _, err := f.Admin.Exec(bg, s.sql, s.args...); err != nil {
+			t.Fatalf("%s: %v", s.sql, err)
+		}
+	}
+	for _, e := range [][3]string{
+		{self, other, "depends_on"}, {other, self, "depends_on"}, {self, self, "runs_on"},
+		{foreign, self, "connected_to"}, {self, foreign, "depends_on"}, {other, foreign, "depends_on"},
+	} {
+		if err := repo.Create(ctx, &relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: e[0], TargetCIID: e[1], RelType: e[2]}); err != nil {
+			t.Fatalf("create %s %s -> %s: %v", e[2], names[e[0]], names[e[1]], err)
+		}
+	}
+	edge := func(r relationship.Relationship) string {
+		target := names[r.TargetCIID]
+		if r.TargetCIID == "" {
+			target = "@" + names[r.TargetLocationID]
+		}
+		return r.RelType + " " + names[r.SourceCIID] + "->" + target
+	}
+	list := func(lctx context.Context, ciID string, page api.PaginationParams) ([]string, int) {
+		t.Helper()
+		rels, total, err := repo.List(lctx, f.OrgA, ciID, page)
+		if err != nil {
+			t.Fatalf("list %s: %v", names[ciID], err)
+		}
+		out := make([]string, len(rels))
+		for i, r := range rels {
+			out[i] = edge(r)
+		}
+		return out, total
+	}
+
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		ci   string
+		want []string
+	}{
+		{"org-wide", ctx, self, []string{"depends_on self->other", "depends_on other->self", "runs_on self->self",
+			"connected_to client2->self", "depends_on self->client2", "contains parent->self", "contains self->child", "located_in self->@room"}},
+		{"client 1", f.ClientCtx(f.Client1), self, []string{"depends_on self->other", "depends_on other->self", "runs_on self->self",
+			"contains parent->self", "contains self->child", "located_in self->@room"}},
+		{"contains: source", ctx, parent, []string{"contains parent->self"}},
+		{"contains: target", ctx, child, []string{"contains self->child"}},
+		{"mounted CI", ctx, mounted, []string{"mounted_in mounted->@rack", "located_in mounted->@rack"}},
+	} {
+		got, total := list(c.ctx, c.ci, api.PaginationParams{Limit: 50})
+		sorted, want := slices.Clone(got), slices.Clone(c.want)
+		slices.Sort(sorted)
+		slices.Sort(want)
+		if !slices.Equal(sorted, want) || total != len(want) {
+			t.Errorf("%s: relationships of %s: total %d, %q; want %d, %q", c.name, names[c.ci], total, got, len(want), c.want)
+		}
+		var paged []string
+		for offset := 0; offset < len(got)+3; offset += 3 {
+			page, pageTotal := list(c.ctx, c.ci, api.PaginationParams{Limit: 3, Offset: offset})
+			if pageTotal != total {
+				t.Errorf("%s: total %d at offset %d, want %d", c.name, pageTotal, offset, total)
+			}
+			paged = append(paged, page...)
+		}
+		if !slices.Equal(paged, got) {
+			t.Errorf("%s: pages of three %q, want the list %q", c.name, paged, got)
+		}
 	}
 }
 

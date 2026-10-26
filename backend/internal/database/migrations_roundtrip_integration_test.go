@@ -435,6 +435,7 @@ type dataCheck struct {
 // migrationDataChecks are the data checks by migration name.
 var migrationDataChecks = map[string]dataCheck{
 	"attr_text_leakproof": {seedAttrText, attrTextDownQueuesJobs, attrTextUpQueuesRebuilds},
+	"attr_index_per_key":  {seedAttrIndexPerKey, attrIndexPerKeyDownQueuesJobs, attrIndexPerKeyUpQueuesKeyJobs},
 }
 
 // The fixture of attr_text_leakproof (000162, WP-435): an organization with
@@ -485,9 +486,15 @@ func seedAttrText(ctx context.Context, t *testing.T, conn *pgx.Conn) {
 // fixture organization, with their attempts and timeout.
 func queuedJobs(ctx context.Context, t *testing.T, conn *pgx.Conn, kind, status string) []string {
 	t.Helper()
+	return orgJobs(ctx, t, conn, rt162Org, kind, status)
+}
+
+// orgJobs is queuedJobs for the organization org.
+func orgJobs(ctx context.Context, t *testing.T, conn *pgx.Conn, org, kind, status string) []string {
+	t.Helper()
 	rows, err := conn.Query(ctx, `
 		SELECT (params ->> 'definition_id') || ' ' || max_attempts || ' ' || timeout_seconds || ' ' || (finished_at IS NOT NULL)
-		  FROM job WHERE organization_id = $1 AND kind = $2 AND status = $3 ORDER BY 1`, rt162Org, kind, status)
+		  FROM job WHERE organization_id = $1 AND kind = $2 AND status = $3 ORDER BY 1`, org, kind, status)
 	if err != nil {
 		t.Fatalf("list jobs: %v", err)
 	}
@@ -542,6 +549,90 @@ func attrTextUpQueuesRebuilds(ctx context.Context, t *testing.T, conn *pgx.Conn)
 		`DELETE FROM attribute_definition WHERE id IN ('`+rt162Indexed+`', '`+rt162Unique+`', '`+rt162Plain+`', '`+rt162System+`')`,
 		`DELETE FROM ci_type WHERE id = '`+rt162Type+`'`,
 		`DELETE FROM organization WHERE id = '`+rt162Org+`'`)
+}
+
+// The fixture of attr_index_per_key (000164, WP-607): an organization with
+// a searchable global definition the index of its key serves (index of the
+// key built, its attribute.index.key job queued), a unique global and a
+// searchable type definition of the same key with their own indexes, a
+// definition without index and a searchable system definition; besides the
+// index of the key one with a hashed name.
+const (
+	rt164Org      = "c0de0164-0000-4000-8000-000000000001"
+	rt164Type     = "c0de0164-0000-4000-8000-000000000002"
+	rt164Shared   = "c0de0164-0000-4000-8000-000000000011"
+	rt164Unique   = "c0de0164-0000-4000-8000-000000000012"
+	rt164Typed    = "c0de0164-0000-4000-8000-000000000013"
+	rt164Plain    = "c0de0164-0000-4000-8000-000000000014"
+	rt164System   = "c0de0164-0000-4000-8000-000000000015"
+	rt164KeyIndex = "idx_attr_key_rt164_a"
+	rt164Hashed   = "idx_attr_keyh_0123456789abcdef0123456789abcdef"
+	rt164IndexU   = "idx_attr_c0de0164000040008000000000000012_u"
+	rt164IndexT   = "idx_attr_c0de0164000040008000000000000013"
+)
+
+func seedAttrIndexPerKey(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+	execAll(ctx, t, conn,
+		`INSERT INTO organization (id, name, slug) VALUES ('`+rt164Org+`', 'roundtrip 000164', 'roundtrip-000164')`,
+		`INSERT INTO ci_type (id, organization_id, key, name) VALUES ('`+rt164Type+`', '`+rt164Org+`', 'rt164-type', 'rt164-type')`,
+		`INSERT INTO attribute_definition (id, organization_id, ci_type_id, scope, key, data_type, searchable, is_unique, unique_scope) VALUES
+			('`+rt164Shared+`', '`+rt164Org+`', NULL, 'global', 'rt164_a', 'text', true, false, 'org'),
+			('`+rt164Unique+`', '`+rt164Org+`', NULL, 'global', 'rt164_b', 'text', true, true, 'org'),
+			('`+rt164Typed+`', '`+rt164Org+`', '`+rt164Type+`', 'type', 'rt164_a', 'text', true, false, 'org'),
+			('`+rt164Plain+`', '`+rt164Org+`', NULL, 'global', 'rt164_c', 'text', false, false, 'org'),
+			('`+rt164System+`', NULL, NULL, 'global', 'rt164_d', 'text', true, false, 'org')`,
+		`CREATE INDEX `+rt164KeyIndex+` ON ci (organization_id, reticora_attr_text(attributes, 'rt164_a'))
+			WHERE deleted_at IS NULL AND reticora_attr_text(attributes, 'rt164_a') IS NOT NULL`,
+		`CREATE INDEX `+rt164Hashed+` ON ci (organization_id, reticora_attr_text(attributes, 'RT164 x'))
+			WHERE deleted_at IS NULL AND reticora_attr_text(attributes, 'RT164 x') IS NOT NULL`,
+		`CREATE UNIQUE INDEX `+rt164IndexU+` ON ci (organization_id, reticora_attr_text(attributes, 'rt164_b'))
+			WHERE deleted_at IS NULL AND reticora_attr_text(attributes, 'rt164_b') IS NOT NULL AND organization_id = '`+rt164Org+`'::uuid`,
+		`CREATE INDEX `+rt164IndexT+` ON ci (organization_id, reticora_attr_text(attributes, 'rt164_a'))
+			WHERE deleted_at IS NULL AND reticora_attr_text(attributes, 'rt164_a') IS NOT NULL
+			  AND organization_id = '`+rt164Org+`'::uuid AND ci_type_id = '`+rt164Type+`'::uuid`,
+		`INSERT INTO job (organization_id, kind, params, max_attempts, timeout_seconds)
+			VALUES ('`+rt164Org+`', 'attribute.index.key', '{"definition_id": "`+rt164Shared+`"}', 3, 3600)`)
+}
+
+// attrIndexPerKeyDownQueuesJobs: the down drops the indexes of keys (the
+// previous version does not know them), keeps the definitions' own
+// indexes, cancels the queued attribute.index.key jobs and queues one
+// attribute.index job per definition an index of its key served, which the
+// DDL job of the previous version builds as the definition's own index.
+func attrIndexPerKeyDownQueuesJobs(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+	var keyIndex, hashed, unique, typed bool
+	if err := conn.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL, to_regclass($2) IS NOT NULL, to_regclass($3) IS NOT NULL, to_regclass($4) IS NOT NULL`,
+		rt164KeyIndex, rt164Hashed, rt164IndexU, rt164IndexT).Scan(&keyIndex, &hashed, &unique, &typed); err != nil {
+		t.Fatal(err)
+	}
+	if keyIndex || hashed || !unique || !typed {
+		t.Errorf("down 000164: indexes of keys present %v %v, own indexes present %v %v; want the indexes of keys gone, the own ones kept",
+			keyIndex, hashed, unique, typed)
+	}
+	if got, want := orgJobs(ctx, t, conn, rt164Org, "attribute.index", "queued"), rt164Shared+" 3 3600 false"; strings.Join(got, ",") != want {
+		t.Errorf("down 000164 queued attribute.index jobs %v, want %s (definitions an index of their key served)", got, want)
+	}
+	if got := orgJobs(ctx, t, conn, rt164Org, "attribute.index.key", "cancelled"); strings.Join(got, ",") != rt164Shared+" 3 3600 true" {
+		t.Errorf("down 000164: cancelled key jobs %v, want the queued one", got)
+	}
+	execAll(ctx, t, conn, `DROP INDEX `+rt164IndexU+`, `+rt164IndexT, `DELETE FROM job WHERE organization_id = '`+rt164Org+`'`)
+}
+
+// attrIndexPerKeyUpQueuesKeyJobs: the up queues one attribute.index.key job
+// per searchable definition of an organization that is not unique and has
+// no CI type, none for the others.
+func attrIndexPerKeyUpQueuesKeyJobs(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+	if got, want := orgJobs(ctx, t, conn, rt164Org, "attribute.index.key", "queued"), rt164Shared+" 3 3600 false"; strings.Join(got, ",") != want {
+		t.Errorf("up 000164 queued key jobs %v, want %s (searchable, not unique definitions without CI type of an organization)", got, want)
+	}
+	execAll(ctx, t, conn,
+		`DELETE FROM job WHERE organization_id = '`+rt164Org+`'`,
+		`DELETE FROM attribute_definition WHERE id IN ('`+rt164Shared+`', '`+rt164Unique+`', '`+rt164Typed+`', '`+rt164Plain+`', '`+rt164System+`')`,
+		`DELETE FROM ci_type WHERE id = '`+rt164Type+`'`,
+		`DELETE FROM organization WHERE id = '`+rt164Org+`'`)
 }
 
 // TestAttrTextMigrationNeedsSuperuser covers the guard of migration 000162

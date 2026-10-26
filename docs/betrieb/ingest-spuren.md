@@ -254,10 +254,22 @@ Für Records aus der Queue kommt je Record- und Batch-Transaktion eine
 Anweisung hinzu (die Identitätssperre samt Wartegrenze), mit einer Spur wie
 mit mehreren: ein Batch von 20 neuen Geräten braucht 11 statt 10
 Anweisungen, ein neuer Record einzeln 13 statt 12. Updates bekannter Geräte
-lesen ihre Kandidaten unter der Sperre neu (2 Anweisungen mehr).
-Organisationen mit `max_cis` zählen je anlegender Transaktion einmal neu
-(2 Anweisungen). Ohne NATS (Ingest in der Anfrage) bleibt es bei 10 und 12
-Anweisungen.
+laufen seit WP-608 in der Batch-Transaktion ihres Fensters, unter dessen
+Identitätssperren und mit den Kandidaten, die das Fenster gelesen hat; nur
+ein weiterer Record desselben Geräts im Fenster folgt in einer eigenen
+Transaktion und liest seine Kandidaten unter der Sperre neu (2 Anweisungen
+mehr). Audit-Einträge und Events des Fensters entstehen am Ende unter den
+Sperren der Organisation, ein COMMIT für das ganze Fenster. Die
+Batch-Transaktion hält die Zeilensperren ihrer bekannten Geräte bis zu
+ihrem COMMIT (ein Fenster, höchstens 100 Records); eine manuelle Änderung
+eines dieser CIs wartet so lange. Gerät eine Operation über mehrere CIs
+dabei in einen Deadlock mit dem Fenster, bricht PostgreSQL eine Seite ab;
+trifft es das Fenster, rollt es zurück und seine Records laufen einzeln. Die Wiederentdeckung des Lastszenarios
+`rediscover` kostet so etwa 21,5 statt 36 Anweisungen je Record
+(`TestRediscoverStatementBudget`). Organisationen mit `max_cis` zählen je
+anlegender Transaktion einmal neu (2 Anweisungen). Ohne NATS (Ingest in der
+Anfrage) bleibt es bei 10 und 12 Anweisungen, Updates bekannter Geräte
+laufen dort einzeln.
 
 ### Lock-Tabelle bemessen
 

@@ -68,6 +68,9 @@ type Handler struct {
 	ciRepo    ci.Repository
 	relRepo   relationship.Repository
 	traverser relationship.Traverser
+	// walker walks with CI numbers (WP-611); the memory repository has
+	// none, its walks go through traverser or hop by hop.
+	walker relationship.Walker
 	// types supplies the impact semantics of the organization's
 	// relationship types; without it the built-in catalogue applies.
 	types relationshiptype.Repository
@@ -75,12 +78,15 @@ type Handler struct {
 
 // NewHandler creates a topology handler backed by the CI and relationship
 // repositories. When the relationship repository also implements
-// relationship.Traverser, graph walks run as a single recursive query
-// instead of iterative hop-by-hop lookups.
+// relationship.Walker or relationship.Traverser, graph walks run as one
+// walk of the repository instead of iterative hop-by-hop lookups.
 func NewHandler(ciRepo ci.Repository, relRepo relationship.Repository) *Handler {
 	h := &Handler{ciRepo: ciRepo, relRepo: relRepo}
 	if traverser, ok := relRepo.(relationship.Traverser); ok {
 		h.traverser = traverser
+	}
+	if walker, ok := relRepo.(relationship.Walker); ok {
+		h.walker = walker
 	}
 	return h
 }
@@ -165,17 +171,18 @@ func (h *Handler) GetNeighbors(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if _, err := h.ciRepo.GetByID(r.Context(), t.OrganizationID, id); err != nil {
+	root, err := h.ciRepo.GetByID(r.Context(), t.OrganizationID, id)
+	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
 		return
 	}
 
-	graph, err := h.buildFromRoot(r.Context(), t.OrganizationID, id, 1, "")
+	g, err := h.graphFrom(r.Context(), t.OrganizationID, root, 1)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, graph)
+	api.WriteJSON(w, http.StatusOK, g.topology(""))
 }
 
 // GetImpact handles GET /api/v1/topology/cis/{id}/impact
@@ -295,66 +302,119 @@ func (h *Handler) edgesAmong(ctx context.Context, orgID string, ids []string) ([
 }
 
 // buildFromRoot walks the configuration graph from rootCIID up to depth hops.
-// It prefers the repository's recursive-CTE traversal (one query for the whole
-// walk) and falls back to iterative breadth-first expansion when the
-// repository does not implement relationship.Traverser. When ciType is
-// non-empty, non-root nodes not matching the type are dropped along with any
-// edges that dangle as a result.
+// When ciType is non-empty, non-root nodes not matching the type are dropped
+// along with any edges that dangle as a result.
 func (h *Handler) buildFromRoot(ctx context.Context, orgID, rootCIID string, depth int, ciType string) (Graph, error) {
-	if h.traverser != nil {
-		return h.buildFromRootViaTraversal(ctx, orgID, rootCIID, depth, ciType)
-	}
-	return h.buildFromRootIterative(ctx, orgID, rootCIID, depth, ciType)
-}
-
-// buildFromRootViaTraversal expands the subgraph with a single recursive
-// traversal query, then resolves the discovered nodes.
-func (h *Handler) buildFromRootViaTraversal(ctx context.Context, orgID, rootCIID string, depth int, ciType string) (Graph, error) {
 	root, err := h.root(ctx, orgID, rootCIID)
 	if err != nil {
 		return Graph{}, err
 	}
-
-	rels, err := h.traverser.TraverseFrom(ctx, orgID, rootCIID, depth, relationship.MaxTraversalNodes)
+	g, err := h.graphFrom(ctx, orgID, root, depth)
 	if err != nil {
 		return Graph{}, err
 	}
+	return g.topology(ciType), nil
+}
 
-	nodes := map[string]Node{rootCIID: nodeFromItem(*root)}
-	// The traversal returns each edge once, ordered by id; the graph keeps
-	// that order.
+// graphFrom walks the configuration graph from root, a CI the caller has
+// read, up to depth hops and resolves the nodes of the walk in one read.
+// It prefers the repository's walk with CI numbers (relationship.Walker,
+// WP-611) and falls back to its traversal or to a breadth-first expansion
+// hop by hop (the memory profile). A CI that is not visible or was removed
+// stays out; its dangling edges are dropped.
+func (h *Handler) graphFrom(ctx context.Context, orgID string, root *ci.Item, depth int) (*ciGraph, error) {
+	if h.walker != nil {
+		return h.walkedGraph(ctx, orgID, root, depth)
+	}
+	var nodes map[string]Node
+	var edges []Edge
+	var err error
+	if h.traverser != nil {
+		nodes, edges, err = h.traversedGraph(ctx, orgID, root, depth)
+	} else {
+		nodes, edges, err = h.iterativeGraph(ctx, orgID, root, depth)
+	}
+	if err != nil {
+		return nil, err
+	}
+	g, _ := graphOf(root.ID, nodes, edges)
+	return g, nil
+}
+
+// walkedGraph is graphFrom with the repository's walk: the graph keeps its
+// CI numbers, and the nodes are read in one query (NFR-02).
+func (h *Handler) walkedGraph(ctx context.Context, orgID string, root *ci.Item, depth int) (*ciGraph, error) {
+	walk, err := h.walker.WalkFrom(ctx, orgID, root.ID, depth, relationship.MaxTraversalNodes)
+	if err != nil {
+		return nil, err
+	}
+	g := &ciGraph{ids: walk.CIs, nodes: make([]Node, len(walk.CIs)), known: make([]bool, len(walk.CIs)),
+		edges: make([]ciEdge, len(walk.Edges))}
+	g.nodes[0], g.known[0] = nodeFromItem(*root), true
+	types := map[string]int32{}
+	for i := range walk.Edges {
+		e := &walk.Edges[i]
+		g.edges[i] = ciEdge{id: e.ID, source: e.SourceCI, target: e.TargetCI, relType: g.typeNumber(types, e.RelType), origin: e.Source}
+	}
+	if len(g.ids) > 1 {
+		nodes, err := h.readNodes(ctx, orgID, g.ids[1:])
+		if err != nil {
+			return nil, err
+		}
+		number := make(map[string]int32, len(g.ids))
+		for n, id := range g.ids {
+			number[id] = int32(n)
+		}
+		for i := range nodes {
+			if n, ok := number[nodes[i].ID]; ok && n != 0 {
+				g.nodes[n], g.known[n] = nodes[i], true
+			}
+		}
+	}
+	kept := g.edges[:0]
+	for _, e := range g.edges {
+		if g.known[e.source] && g.known[e.target] {
+			kept = append(kept, e)
+		}
+	}
+	g.edges = kept
+	return g, nil
+}
+
+// traversedGraph expands the subgraph with the repository's traversal,
+// then resolves the discovered nodes.
+func (h *Handler) traversedGraph(ctx context.Context, orgID string, root *ci.Item, depth int) (map[string]Node, []Edge, error) {
+	rels, err := h.traverser.TraverseFrom(ctx, orgID, root.ID, depth, relationship.MaxTraversalNodes)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	nodes := map[string]Node{root.ID: nodeFromItem(*root)}
 	edges := make([]Edge, 0, len(rels))
 	var ids []string
 	for i := range rels {
 		rel := &rels[i]
 		edges = append(edges, edgeFromRel(rel))
 		for _, neighborID := range []string{rel.SourceCIID, rel.TargetCIID} {
-			if neighborID != "" && neighborID != rootCIID {
+			if neighborID != "" && neighborID != root.ID {
 				ids = append(ids, neighborID)
 			}
 		}
 	}
-	// One read for all nodes (NFR-02). A CI that is not visible or was
-	// removed stays out; its dangling edge is dropped by assembleGraph.
+	// One read for all nodes (NFR-02).
 	if err := h.resolveNodes(ctx, orgID, ids, nodes); err != nil {
-		return Graph{}, err
+		return nil, nil, err
 	}
-
-	return assembleGraph(nodes, edges, rootCIID, ciType), nil
+	return nodes, edges, nil
 }
 
-// buildFromRootIterative performs a breadth-first traversal from rootCIID up
-// to depth hops, querying relationships one frontier at a time.
-func (h *Handler) buildFromRootIterative(ctx context.Context, orgID, rootCIID string, depth int, ciType string) (Graph, error) {
-	root, err := h.root(ctx, orgID, rootCIID)
-	if err != nil {
-		return Graph{}, err
-	}
-
-	nodes := map[string]Node{rootCIID: nodeFromItem(*root)}
+// iterativeGraph performs a breadth-first traversal from root up to depth
+// hops, querying relationships one frontier at a time.
+func (h *Handler) iterativeGraph(ctx context.Context, orgID string, root *ci.Item, depth int) (map[string]Node, []Edge, error) {
+	nodes := map[string]Node{root.ID: nodeFromItem(*root)}
 	edgeSet := make(map[string]Edge)
 	visited := map[string]bool{}
-	frontier := []string{rootCIID}
+	frontier := []string{root.ID}
 
 	for hop := 0; hop < depth && len(frontier) > 0; hop++ {
 		var next []string
@@ -366,7 +426,7 @@ func (h *Handler) buildFromRootIterative(ctx context.Context, orgID, rootCIID st
 
 			rels, err := h.listRelationships(ctx, orgID, id)
 			if err != nil {
-				return Graph{}, err
+				return nil, nil, err
 			}
 			for i := range rels {
 				rel := &rels[i]
@@ -382,9 +442,9 @@ func (h *Handler) buildFromRootIterative(ctx context.Context, orgID, rootCIID st
 		}
 		// The neighbors of one hop in one read (NFR-02). Invisible or
 		// deleted CIs stay out: the walk must not pass through them
-		// (IMP-07); their edges dangle and are dropped by assembleGraph.
+		// (IMP-07); their edges dangle and are dropped.
 		if err := h.resolveNodes(ctx, orgID, next, nodes); err != nil {
-			return Graph{}, err
+			return nil, nil, err
 		}
 		frontier = frontier[:0]
 		for _, neighborID := range next {
@@ -394,7 +454,7 @@ func (h *Handler) buildFromRootIterative(ctx context.Context, orgID, rootCIID st
 		}
 	}
 
-	return assembleGraph(nodes, slices.Collect(maps.Values(edgeSet)), rootCIID, ciType), nil
+	return nodes, slices.Collect(maps.Values(edgeSet)), nil
 }
 
 // root reads the root CI of a walk. A CI the repository does not find
@@ -408,9 +468,8 @@ func (h *Handler) root(ctx context.Context, orgID, rootCIID string) (*ci.Item, e
 	return root, err
 }
 
-// resolveNodes adds the visible, not deleted CIs among ids to nodes, in one
-// query when the repository reads in batches: the node projection without
-// attributes (NFR-02), else the full CIs.
+// resolveNodes adds the visible, not deleted CIs among ids to nodes
+// (readNodes).
 func (h *Handler) resolveNodes(ctx context.Context, orgID string, ids []string, nodes map[string]Node) error {
 	missing := make([]string, 0, len(ids))
 	seen := map[string]bool{}
@@ -423,56 +482,182 @@ func (h *Handler) resolveNodes(ctx context.Context, orgID string, ids []string, 
 	if len(missing) == 0 {
 		return nil
 	}
-	switch reader := h.ciRepo.(type) {
-	case ci.NodeReader:
-		list, err := reader.ListNodes(ctx, orgID, missing)
-		if err != nil {
-			return err
-		}
-		for i := range list {
-			nodes[list[i].ID] = nodeFromCI(&list[i])
-		}
-		return nil
-	case ci.BatchReader:
-		items, err := reader.GetByIDs(ctx, orgID, missing)
-		if err != nil {
-			return err
-		}
-		for i := range items {
-			nodes[items[i].ID] = nodeFromItem(items[i])
-		}
-		return nil
+	list, err := h.readNodes(ctx, orgID, missing)
+	if err != nil {
+		return err
 	}
-	for _, id := range missing {
-		if item, err := h.ciRepo.GetByID(ctx, orgID, id); err == nil {
-			nodes[id] = nodeFromItem(*item)
-		}
+	for i := range list {
+		nodes[list[i].ID] = list[i]
 	}
 	return nil
 }
 
-func assembleGraph(nodes map[string]Node, edges []Edge, rootCIID, ciType string) Graph {
-	included := make(map[string]struct{}, len(nodes))
-	nodeList := make([]Node, 0, len(nodes))
-	for id, node := range nodes {
-		if ciType != "" && id != rootCIID && node.CIType != ciType {
-			continue
+// readNodes reads the visible, not deleted CIs among ids, in one query
+// when the repository reads in batches: the node projection without
+// attributes (NFR-02), else the full CIs.
+func (h *Handler) readNodes(ctx context.Context, orgID string, ids []string) ([]Node, error) {
+	switch reader := h.ciRepo.(type) {
+	case ci.NodeReader:
+		list, err := reader.ListNodes(ctx, orgID, ids)
+		if err != nil {
+			return nil, err
 		}
-		included[id] = struct{}{}
-		nodeList = append(nodeList, node)
+		nodes := make([]Node, len(list))
+		for i := range list {
+			nodes[i] = nodeFromCI(&list[i])
+		}
+		return nodes, nil
+	case ci.BatchReader:
+		items, err := reader.GetByIDs(ctx, orgID, ids)
+		if err != nil {
+			return nil, err
+		}
+		nodes := make([]Node, len(items))
+		for i := range items {
+			nodes[i] = nodeFromItem(items[i])
+		}
+		return nodes, nil
 	}
+	var nodes []Node
+	for _, id := range ids {
+		if item, err := h.ciRepo.GetByID(ctx, orgID, id); err == nil {
+			nodes = append(nodes, nodeFromItem(*item))
+		}
+	}
+	return nodes, nil
+}
 
-	edgeList := make([]Edge, 0, len(edges))
-	for _, edge := range edges {
-		if _, ok := included[edge.SourceCIID]; !ok {
-			continue
-		}
-		if _, ok := included[edge.TargetCIID]; !ok {
-			continue
-		}
-		edgeList = append(edgeList, edge)
+// ciGraph is the graph of a walk with its CIs as numbers (NFR-02, WP-611):
+// the topology, the impact analysis and the redundancy findings index
+// slices by number instead of maps by id. The root is number 0.
+type ciGraph struct {
+	// ids holds the id of each CI by number, nodes its node where known
+	// is set: the CI was read, visible and not deleted.
+	ids   []string
+	nodes []Node
+	known []bool
+	// edges are the edges between two known CIs, ordered by id, with
+	// their type as a number of relTypes.
+	edges    []ciEdge
+	relTypes []string
+	// first and incident list the edges of each CI in graph order: those
+	// of CI n are incident[first[n]:first[n+1]] (indexIncidence).
+	first, incident []int32
+}
+
+// ciEdge is an edge of a ciGraph; origin is the source of the
+// relationship (Edge.Source).
+type ciEdge struct {
+	id             string
+	source, target int32
+	relType        int32
+	origin         string
+}
+
+// typeNumber returns the number of a relationship type in g.
+func (g *ciGraph) typeNumber(types map[string]int32, relType string) int32 {
+	if n, ok := types[relType]; ok {
+		return n
 	}
-	return Graph{Nodes: nodeList, Edges: edgeList}
+	n := int32(len(g.relTypes))
+	types[relType] = n
+	g.relTypes = append(g.relTypes, relType)
+	return n
+}
+
+// graphOf numbers the CIs of a graph given by ids: the root first, then
+// the ends of the edges in the order of their ids, then the other nodes by
+// id. It keeps the edges between two nodes, ordered by id, and returns the
+// number of each id as well.
+func graphOf(rootID string, nodes map[string]Node, edges []Edge) (g *ciGraph, number map[string]int32) {
+	sorted := slices.Clone(edges)
+	slices.SortStableFunc(sorted, func(a, b Edge) int { return strings.Compare(a.ID, b.ID) })
+	g = &ciGraph{}
+	number = map[string]int32{}
+	add := func(id string) int32 {
+		if n, ok := number[id]; ok {
+			return n
+		}
+		n := int32(len(g.ids))
+		number[id] = n
+		node, known := nodes[id]
+		g.ids, g.nodes, g.known = append(g.ids, id), append(g.nodes, node), append(g.known, known)
+		return n
+	}
+	add(rootID)
+	types := map[string]int32{}
+	for i := range sorted {
+		e := &sorted[i]
+		_, source := nodes[e.SourceCIID]
+		_, target := nodes[e.TargetCIID]
+		if source && target {
+			g.edges = append(g.edges, ciEdge{id: e.ID, source: add(e.SourceCIID), target: add(e.TargetCIID),
+				relType: g.typeNumber(types, e.RelType), origin: e.Source})
+		}
+	}
+	for _, id := range slices.Sorted(maps.Keys(nodes)) {
+		add(id)
+	}
+	return g, number
+}
+
+// indexIncidence lists the edges of each CI in graph order, so a step only
+// looks at the edges of the CI it leaves (NFR-02).
+func (g *ciGraph) indexIncidence() {
+	if g.first != nil {
+		return
+	}
+	n := len(g.ids)
+	g.first = make([]int32, n+1)
+	for i := range g.edges {
+		g.first[g.edges[i].source+1]++
+		if g.edges[i].target != g.edges[i].source {
+			g.first[g.edges[i].target+1]++
+		}
+	}
+	for v := 0; v < n; v++ {
+		g.first[v+1] += g.first[v]
+	}
+	g.incident = make([]int32, g.first[n])
+	next := slices.Clone(g.first[:n])
+	for i := range g.edges {
+		e := &g.edges[i]
+		g.incident[next[e.source]] = int32(i)
+		next[e.source]++
+		if e.target != e.source {
+			g.incident[next[e.target]] = int32(i)
+			next[e.target]++
+		}
+	}
+}
+
+// incidentTo returns the edges of CI n in graph order (indexIncidence).
+func (g *ciGraph) incidentTo(n int32) []int32 {
+	return g.incident[g.first[n]:g.first[n+1]]
+}
+
+// topology is the graph as GET /topology answers it: the known CIs in the
+// order of their numbers, of type ciType when it is set (the root always),
+// and the edges between two of them, ordered by id.
+func (g *ciGraph) topology(ciType string) Graph {
+	included := make([]bool, len(g.ids))
+	nodes := make([]Node, 0, len(g.ids))
+	for n := range g.ids {
+		if !g.known[n] || (ciType != "" && n != 0 && g.nodes[n].CIType != ciType) {
+			continue
+		}
+		included[n] = true
+		nodes = append(nodes, g.nodes[n])
+	}
+	edges := make([]Edge, 0, len(g.edges))
+	for i := range g.edges {
+		e := &g.edges[i]
+		if included[e.source] && included[e.target] {
+			edges = append(edges, Edge{ID: e.id, SourceCIID: g.ids[e.source], TargetCIID: g.ids[e.target],
+				RelType: g.relTypes[e.relType], Source: e.origin})
+		}
+	}
+	return Graph{Nodes: nodes, Edges: edges}
 }
 
 func (h *Handler) listRelationships(ctx context.Context, orgID, ciID string) ([]relationship.Relationship, error) {

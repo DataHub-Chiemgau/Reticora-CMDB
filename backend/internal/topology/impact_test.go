@@ -542,11 +542,10 @@ func rebuildFromVia(answer map[string]ImpactNode, id string, rules map[string]im
 // closures without and with undirected steps on random graphs.
 func TestComputeImpactClosesDownOnce(t *testing.T) {
 	calls := 0
-	t.Cleanup(func() { closeDown = downClosure })
-	closeDown = func(failed map[string]bool, edges []Edge, incident map[string][]int, rules map[string]impactRule,
-		follow func(*Edge, impactRule) bool) map[string]downLevel {
+	t.Cleanup(func() { closeDown = downLevels })
+	closeDown = func(g *ciGraph, failed []int32, steps []stepRule) []downLevel {
 		calls++
-		return downClosure(failed, edges, incident, rules, follow)
+		return downLevels(g, failed, steps)
 	}
 	edges := []Edge{
 		{ID: "e1", SourceCIID: "server", TargetCIID: "pdu", RelType: "powered_by"},
@@ -568,8 +567,7 @@ func TestComputeImpactClosesDownOnce(t *testing.T) {
 				TargetCIID: fmt.Sprintf("n%02d", rng.IntN(n)), RelType: types[rng.IntN(len(types))]})
 		}
 		failed := map[string]bool{fmt.Sprintf("n%02d", rng.IntN(n)): true, fmt.Sprintf("n%02d", rng.IntN(n)): true}
-		follow := func(*Edge, impactRule) bool { return true }
-		level := downClosure(failed, edges, incidence(edges), rules, follow)
+		level := downClosure(failed, edges, rules)
 		certain := legacyDownSet(failed, edges, rules, func(_ *Edge, _ impactRule, heuristic bool) bool { return !heuristic })
 		all := legacyDownSet(failed, edges, rules, func(*Edge, impactRule, bool) bool { return true })
 		for i := 0; i < n; i++ {
@@ -590,7 +588,8 @@ func TestComputeImpactClosesDownOnce(t *testing.T) {
 
 // legacyHit, legacyComputeImpact, legacyStepFilter and legacyDownSet are
 // the impact computation before WP-335 (two closures, a copied path per
-// CI), kept as the oracle of the tests above.
+// CI), kept as the oracle of the tests above; impactStep and providerKey
+// are its step and provider key on ids.
 type legacyHit struct {
 	heuristic bool
 	path      []PathStep
@@ -723,4 +722,139 @@ func legacyDownSet(failed map[string]bool, edges []Edge, rules map[string]impact
 		}
 	}
 	return down
+}
+
+// impactStep returns the CI a failure of from reaches over edge, if any.
+// heuristic is true for an undirected edge.
+func impactStep(edge *Edge, from string, rule impactRule) (to string, heuristic, ok bool) {
+	switch rule.direction {
+	case relationshiptype.ImpactSourceDependsOnTarget:
+		if edge.TargetCIID == from {
+			return edge.SourceCIID, false, true
+		}
+	case relationshiptype.ImpactTargetDependsOnSource:
+		if edge.SourceCIID == from {
+			return edge.TargetCIID, false, true
+		}
+	case relationshiptype.ImpactUndirected:
+		switch from {
+		case edge.SourceCIID:
+			return edge.TargetCIID, true, true
+		case edge.TargetCIID:
+			return edge.SourceCIID, true, true
+		}
+	}
+	return "", false, false
+}
+
+// providerKey identifies the providers of one dependent over one type.
+type providerKey struct{ dependent, relType string }
+
+// The tests state the impact on graphs given by id strings. computeImpact,
+// impactPath, downClosure and redundancyFindings number the CIs of such a
+// graph and run the analysis of the handler on the numbers (WP-611):
+// impactOf, ciGraph.path, downLevels and redundancyOf.
+
+// impactHit is a ciHit by id; it keeps its analysis for impactPath.
+type impactHit struct {
+	heuristic bool
+	hops      int
+	via       impactLink
+	relay     *impactLink
+	graph     *ciGraph
+	hits      []ciHit
+	n         int32
+}
+
+// impactLink is a ciLink by id.
+type impactLink struct {
+	from, relType, category string
+	heuristic               bool
+}
+
+func (l impactLink) via() Via { return Via{CIID: l.from, RelType: l.relType} }
+
+// edgeGraph numbers the failed CIs and then the ends of the edges in their
+// order, each a known node; the edges keep their order.
+func edgeGraph(failedIDs []string, edges []Edge) (*ciGraph, []int32) {
+	g := &ciGraph{}
+	number := map[string]int32{}
+	add := func(id string) int32 {
+		if n, ok := number[id]; ok {
+			return n
+		}
+		number[id] = int32(len(g.ids))
+		g.ids, g.nodes, g.known = append(g.ids, id), append(g.nodes, Node{ID: id}), append(g.known, true)
+		return number[id]
+	}
+	failed := make([]int32, len(failedIDs))
+	for i, id := range failedIDs {
+		failed[i] = add(id)
+	}
+	types := map[string]int32{}
+	for _, e := range edges {
+		g.edges = append(g.edges, ciEdge{id: e.ID, source: add(e.SourceCIID), target: add(e.TargetCIID),
+			relType: g.typeNumber(types, e.RelType), origin: e.Source})
+	}
+	return g, failed
+}
+
+// computeImpact is impactOf on a graph given by its edges, by id.
+func computeImpact(failedIDs []string, edges []Edge, q impactQuery, rules map[string]impactRule) map[string]impactHit {
+	g, failed := edgeGraph(failedIDs, edges)
+	hits := impactOf(g, failed, q, rules)
+	link := func(l *ciLink) impactLink {
+		return impactLink{from: g.ids[l.from], relType: g.relTypes[l.relType], category: l.category, heuristic: l.heuristic}
+	}
+	out := map[string]impactHit{}
+	for n := range hits {
+		if !hits[n].impacted {
+			continue
+		}
+		hit := impactHit{heuristic: hits[n].heuristic, hops: hits[n].hops, via: link(&hits[n].via), graph: g, hits: hits, n: int32(n)}
+		if hits[n].relay != nil {
+			relay := link(hits[n].relay)
+			hit.relay = &relay
+		}
+		out[g.ids[n]] = hit
+	}
+	return out
+}
+
+// impactPath is ciGraph.path to the impacted CI id.
+func impactPath(hits map[string]impactHit, id string) []PathStep {
+	hit, ok := hits[id]
+	if !ok {
+		return []PathStep{}
+	}
+	return hit.graph.path(hit.hits, hit.n)
+}
+
+// downClosure is downLevels on a graph given by its edges, every step
+// followed, by id.
+func downClosure(failed map[string]bool, edges []Edge, rules map[string]impactRule) map[string]downLevel {
+	g, numbers := edgeGraph(slices.Sorted(maps.Keys(failed)), edges)
+	level := downLevels(g, numbers, g.stepRules(rules, impactQuery{}))
+	out := make(map[string]downLevel, len(level))
+	for n := range level {
+		out[g.ids[n]] = level[n]
+	}
+	return out
+}
+
+// redundancyFindings is redundancyOf on graph with the hits of
+// computeImpact.
+func redundancyFindings(failedID string, graph Graph, hits map[string]impactHit, rules map[string]impactRule) (spof, protected []Node) {
+	nodes := map[string]Node{}
+	for _, n := range graph.Nodes {
+		nodes[n.ID] = n
+	}
+	g, number := graphOf(failedID, nodes, graph.Edges)
+	impacted := make([]ciHit, len(g.ids))
+	for id, hit := range hits {
+		if n, ok := number[id]; ok {
+			impacted[n] = ciHit{impacted: true, heuristic: hit.heuristic}
+		}
+	}
+	return redundancyOf(g, number[failedID], impacted, rules)
 }

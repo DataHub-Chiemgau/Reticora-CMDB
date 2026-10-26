@@ -39,7 +39,8 @@ type APIKeyStore interface {
 	// tenant is known (system read). It returns nil for unknown and revoked
 	// keys.
 	LookupByPrefix(ctx context.Context, prefix string) (*StoredAPIKey, error)
-	// MarkUsed updates the last_used_at timestamp of a key of orgID.
+	// MarkUsed updates the last_used_at timestamp of a key of orgID, at
+	// most once a minute.
 	MarkUsed(ctx context.Context, orgID, id string) error
 }
 

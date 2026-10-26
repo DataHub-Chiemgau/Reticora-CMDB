@@ -2,11 +2,15 @@ package citype
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -463,4 +467,376 @@ func TestAttributeIndexRebuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	current(serial)
+}
+
+// TestKeyIndexName covers the name and statement of the index of a key
+// (WP-607, E-73 supplement of 2026-10-26): idx_attr_key_<key> for a key of
+// [a-z0-9_] that fits, else idx_attr_keyh_ with 32 hex digits of the
+// SHA-256 of the key; deterministic, a valid unquoted PostgreSQL name of at
+// most 63 bytes, different for different keys, and never the name of a
+// definition's index (idx_attr_<32 hex>). The statement has no predicate
+// on the organization; the literal of the key is an escape string constant
+// when the key holds a backslash.
+func TestKeyIndexName(t *testing.T) {
+	long := strings.Repeat("k", 50)
+	for _, c := range []struct {
+		key, want string
+	}{
+		{"cost_center", "idx_attr_key_cost_center"},
+		{"1st_level_2", "idx_attr_key_1st_level_2"},
+		{long, "idx_attr_key_" + long},
+		{long + "k", "idx_attr_keyh_"},
+		{"Cost_Center", "idx_attr_keyh_"},
+		{"cost-center", "idx_attr_keyh_"},
+		{"cost center", "idx_attr_keyh_"},
+		{"kosten'stelle", "idx_attr_keyh_"},
+		{`back\slash`, "idx_attr_keyh_"},
+		{"größe", "idx_attr_keyh_"},
+		{"idx", "idx_attr_key_idx"},
+	} {
+		name := KeyIndexName(c.key)
+		if strings.HasSuffix(c.want, "_") {
+			sum := sha256.Sum256([]byte(c.key))
+			c.want += hex.EncodeToString(sum[:16])
+		}
+		if name != c.want || name != KeyIndexName(c.key) || len(name) > 63 || !plainKey(name) || !strings.HasPrefix(name, KeyIndexPrefix) {
+			t.Errorf("KeyIndexName(%q) = %q, want %q (at most 63 bytes of [a-z0-9_])", c.key, name, c.want)
+		}
+	}
+	if KeyIndexName("Cost_Center") == KeyIndexName("cost_center") || KeyIndexName("a b") == KeyIndexName("a_b") {
+		t.Error("different keys share an index name")
+	}
+	// A definition's index starts with idx_attr_ and a hex digit.
+	if def := IndexName("abcdef01-0000-4000-8000-000000000001", false); strings.HasPrefix(def, KeyIndexPrefix) {
+		t.Errorf("the index of a definition %s starts like the index of a key", def)
+	}
+	if got, want := KeyIndexStatement("cost_center"), "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_attr_key_cost_center ON ci "+
+		"(organization_id, reticora_attr_text(attributes, 'cost_center')) WHERE deleted_at IS NULL AND "+
+		"reticora_attr_text(attributes, 'cost_center') IS NOT NULL"; got != want {
+		t.Errorf("KeyIndexStatement = %s\nwant %s", got, want)
+	}
+	if got, want := KeyExpression(`a'b\c`), `reticora_attr_text(attributes, E'a''b\\c')`; got != want {
+		t.Errorf("KeyExpression = %s, want %s", got, want)
+	}
+	for _, d := range []*AttributeDefinition{
+		{OrganizationID: "o", Key: "k", Searchable: true},
+		{OrganizationID: "o", Key: "k", Searchable: true, Unique: true},
+		{OrganizationID: "o", Key: "k", Searchable: true, CITypeID: "t"},
+		{Key: "k", Searchable: true},
+		{OrganizationID: "o", Key: "k"},
+	} {
+		want := d.OrganizationID != "" && d.Searchable && !d.Unique && d.CITypeID == ""
+		if UsesKeyIndex(d) != want || (IndexStatement(d) == "") != (want || (!d.Searchable && !d.Unique)) {
+			t.Errorf("%+v: UsesKeyIndex %v, own statement %q; want key index %v", d, UsesKeyIndex(d), IndexStatement(d), want)
+		}
+	}
+}
+
+// TestAttributeIndexPerKeyJob covers the DDL job of WP-607 (DB-04, NFR-01,
+// NFR-02; E-73, supplement of 2026-10-26) against PostgreSQL:
+//   - migration 000164: the attribute.index.key jobs replace the indexes of
+//     the not unique, searchable definitions without CI type (built per
+//     definition and organization before) by the one index of their key;
+//     the unique definition and the type definition of the same key keep
+//     their own index (the same index);
+//   - the index of the key is valid before the definition's own index
+//     goes: a build that is cancelled leaves the own index valid, the next
+//     run completes the switch;
+//   - a key with other characters than [a-z0-9_] gets the hashed name; the
+//     literal of the key means the key under both settings of
+//     standard_conforming_strings, and the index serves the filter;
+//   - reference counting on flag changes: unique or not searchable any
+//     more keeps the index while another organization uses the key and
+//     drops it with the last one; not unique again builds it again and
+//     drops the definition's unique index;
+//   - the deletion of a definition (its key is unknown then) drops the
+//     indexes of keys no definition uses, also one left over, and keeps the
+//     others;
+//   - a run waits for another run on the same key (advisory lock on the
+//     index name) and changes nothing meanwhile.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAttributeIndexPerKeyJob(t *testing.T) {
+	fixtures := []*scopetest.Fixture{scopetest.Seed(t, "9e"), scopetest.Seed(t, "f8")}
+	f := fixtures[0]
+	bg := context.Background()
+	svc := jobs.NewService(jobs.NewPGRepository(f.App))
+	ddl := NewDDLJob(f.App, svc)
+	// Without the scheduler: the jobs are queued and run by the test.
+	repo := NewPGRepository(f.App)
+	// Keys of this run (an index of a key outlives a deleted fixture).
+	run := time.Now().UnixNano()
+	key := fmt.Sprintf("wp607_rack_%d", run)
+	odd := fmt.Sprintf(`WP607 Kosten'stelle\%d`, run)
+	orphan := fmt.Sprintf("wp607_orphan_%d", run)
+	other := fmt.Sprintf("wp607_other_%d", run)
+	t.Cleanup(func() {
+		for _, k := range []string{key, odd, orphan, other} {
+			_, _ = f.Admin.Exec(bg, `DROP INDEX IF EXISTS `+KeyIndexName(k))
+		}
+	})
+	type orgOf struct {
+		ctx context.Context
+		org string
+	}
+	var orgs []orgOf
+	for _, x := range fixtures {
+		for _, org := range []string{x.OrgA, x.OrgB} {
+			orgs = append(orgs, orgOf{tenant.WithTenant(x.OrgCtx(org), tenant.TenantInfo{OrganizationID: org, UserID: x.User}), org})
+		}
+	}
+	create := func(o orgOf, d *AttributeDefinition) *AttributeDefinition {
+		t.Helper()
+		if err := repo.CreateAttributeDefinition(o.ctx, o.org, d); err != nil {
+			t.Fatalf("create definition %s in %s: %v", d.Key, o.org, err)
+		}
+		t.Cleanup(func() {
+			for _, unique := range []bool{false, true} {
+				name := IndexName(d.ID, unique)
+				_, _ = f.Admin.Exec(bg, `DROP INDEX IF EXISTS `+name+`, `+name+RebuildSuffix)
+			}
+		})
+		return d
+	}
+	update := func(o orgOf, d *AttributeDefinition, patch *AttributeDefinitionPatch) {
+		t.Helper()
+		if _, err := repo.UpdateAttributeDefinition(o.ctx, o.org, d.ID, patch); err != nil {
+			t.Fatalf("update definition %s in %s: %v", d.Key, o.org, err)
+		}
+		if err := ddl.Ensure(bg, o.org, d.ID); err != nil {
+			t.Fatalf("index job of %s in %s: %v", d.Key, o.org, err)
+		}
+	}
+	exec := func(sql string) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	keyIndex := KeyIndexName(key)
+	// Ten CIs per organization with the attributes.
+	for _, o := range orgs {
+		if _, err := f.Admin.Exec(bg, `INSERT INTO ci (organization_id, ci_type_id, name, status, attributes)
+			SELECT $1, (SELECT id FROM ci_type WHERE key = 'server' AND organization_id IS NULL LIMIT 1), 'wp607-j-' || i, 'active',
+				jsonb_build_object($2::text, 'R' || i, $3::text, 'V' || i)
+			FROM generate_series(1, 10) AS i`, o.org, key, odd); err != nil {
+			t.Fatalf("seed CIs: %v", err)
+		}
+	}
+
+	// Before migration 000164: three organizations make the key searchable,
+	// each with its own index; a fourth has a unique definition of the key,
+	// the first a type definition of it.
+	typ := &Type{OrganizationID: orgs[0].org, Key: fmt.Sprintf("wp607-type-%d", run), Name: "wp607-type", IsObservable: true}
+	if err := repo.Create(orgs[0].ctx, typ); err != nil {
+		t.Fatalf("create type: %v", err)
+	}
+	var plain []*AttributeDefinition
+	for _, o := range orgs[:3] {
+		d := create(o, &AttributeDefinition{Key: key, DataType: "text", Searchable: true})
+		d.OrganizationID = o.org
+		exec(indexStatement(d, IndexName(d.ID, false)))
+		plain = append(plain, d)
+	}
+	unique := create(orgs[3], &AttributeDefinition{Key: key, DataType: "text", Searchable: true, Unique: true})
+	typed := create(orgs[0], &AttributeDefinition{CITypeID: typ.ID, Key: key, DataType: "text", Searchable: true})
+	if err := ddl.Ensure(bg, orgs[3].org, unique.ID); err != nil {
+		t.Fatalf("index of the unique definition: %v", err)
+	}
+	if err := ddl.Ensure(bg, orgs[0].org, typed.ID); err != nil {
+		t.Fatalf("index of the type definition: %v", err)
+	}
+	own := map[string]uint32{IndexName(unique.ID, true): indexOID(t, f.Admin, IndexName(unique.ID, true)),
+		IndexName(typed.ID, false): indexOID(t, f.Admin, IndexName(typed.ID, false))}
+	for name, oid := range own {
+		if oid == 0 {
+			t.Fatalf("the index %s of the unique or type definition is missing", name)
+		}
+	}
+	for _, d := range plain {
+		if _, _, err := svc.Enqueue(bg, d.OrganizationID, KeyJobKind, indexJobParams{DefinitionID: d.ID}, jobs.EnqueueOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if done, err := ddl.RunDue(bg); err != nil || done < len(plain) {
+		t.Fatalf("RunDue = %d, %v; want the %d key jobs done", done, err, len(plain))
+	}
+	for _, d := range plain {
+		list, _, err := svc.List(bg, d.OrganizationID, jobs.Filter{Kind: KeyJobKind}, api.PaginationParams{Limit: 10})
+		if err != nil || len(list) != 1 || list[0].Status != jobs.StatusSucceeded {
+			t.Fatalf("key job of %s = %+v, %v; want succeeded", d.OrganizationID, list, err)
+		}
+		if readIndex(t, f.Admin, IndexName(d.ID, false)).found {
+			t.Errorf("the own index of the definition in %s survived its key job", d.OrganizationID)
+		}
+	}
+	got := readIndex(t, f.Admin, keyIndex)
+	if !got.found || !got.valid || got.unique || strings.Contains(got.def, "organization_id = ") ||
+		!strings.Contains(got.def, "(organization_id, reticora_attr_text(attributes, '"+key+"'::text))") {
+		t.Fatalf("index of the key = %+v, want (organization_id, value) without a predicate on the organization", got)
+	}
+	for name, oid := range own {
+		if indexOID(t, f.Admin, name) != oid {
+			t.Errorf("the index %s of a unique or type definition changed", name)
+		}
+	}
+
+	// The switch is cancelled while the index of the key is built: the own
+	// index stays valid; the next run completes the switch.
+	d0 := plain[0]
+	exec(`DROP INDEX ` + keyIndex)
+	exec(indexStatement(d0, IndexName(d0.ID, false)))
+	blocker, err := f.Admin.Begin(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = blocker.Exec(bg, `UPDATE ci SET name = name WHERE organization_id = $1 AND name = 'wp607-j-1'`, d0.OrganizationID); err != nil {
+		t.Fatal(err)
+	}
+	short, cancel := context.WithTimeout(bg, 3*time.Second)
+	err = ddl.Ensure(short, d0.OrganizationID, d0.ID)
+	cancel()
+	_ = blocker.Rollback(bg)
+	if err == nil {
+		t.Fatal("the switch finished although a transaction kept the build of the key index waiting")
+	}
+	if own := readIndex(t, f.Admin, IndexName(d0.ID, false)); !own.valid {
+		t.Fatalf("after the cancelled build the own index = %+v, want it valid (no time without an index)", own)
+	}
+	if err = ddl.Ensure(bg, d0.OrganizationID, d0.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !readIndex(t, f.Admin, keyIndex).valid || readIndex(t, f.Admin, IndexName(d0.ID, false)).found {
+		t.Fatal("the next run did not complete the switch to the index of the key")
+	}
+
+	// A key outside [a-z0-9_]: hashed name, the literal holds under both
+	// settings of standard_conforming_strings, the index serves the filter.
+	oddDef := create(orgs[1], &AttributeDefinition{Key: odd, DataType: "text", Searchable: true})
+	if err = ddl.Ensure(bg, orgs[1].org, oddDef.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := readIndex(t, f.Admin, KeyIndexName(odd)); !got.valid || !strings.HasPrefix(KeyIndexName(odd), KeyIndexPrefix+"h_") {
+		t.Fatalf("index of the key %q = %+v (%s)", odd, got, KeyIndexName(odd))
+	}
+	for _, setting := range []string{"on", "off"} {
+		var same bool
+		err = pgx.BeginFunc(bg, f.Admin, func(tx pgx.Tx) error {
+			if _, serr := tx.Exec(bg, `SET LOCAL standard_conforming_strings = `+setting); serr != nil {
+				return serr
+			}
+			// Parsed under the setting (no statement cached from the other).
+			return tx.QueryRow(bg, `SELECT `+quoteLiteral(odd)+` = $1`, pgx.QueryExecModeExec, odd).Scan(&same)
+		})
+		if err != nil || !same {
+			t.Errorf("standard_conforming_strings %s: the literal %s is not the key: %v", setting, quoteLiteral(odd), err)
+		}
+	}
+	var plan string
+	err = pgx.BeginFunc(bg, f.Admin, func(tx pgx.Tx) error {
+		if _, serr := tx.Exec(bg, `SET LOCAL enable_seqscan = off`); serr != nil {
+			return serr
+		}
+		return tx.QueryRow(bg, `EXPLAIN (COSTS OFF) SELECT id FROM ci WHERE deleted_at IS NULL AND organization_id = $1::uuid AND `+
+			KeyExpression(odd)+` = 'V3'`, orgs[1].org).Scan(&plan)
+	})
+	if err != nil || !strings.Contains(plan, KeyIndexName(odd)) {
+		t.Errorf("the filter on %q does not use %s: %s %v", odd, KeyIndexName(odd), plan, err)
+	}
+
+	// Reference counting on flag changes.
+	yes, no := true, false
+	update(orgs[0], plain[0], &AttributeDefinitionPatch{Unique: &yes})
+	if !readIndex(t, f.Admin, IndexName(plain[0].ID, true)).valid || !readIndex(t, f.Admin, keyIndex).valid {
+		t.Fatal("unique in one organization: want its unique index and the index of the key the others use")
+	}
+	update(orgs[1], plain[1], &AttributeDefinitionPatch{Searchable: &no})
+	if !readIndex(t, f.Admin, keyIndex).valid {
+		t.Fatal("not searchable in one organization: the index of the key went while another uses it")
+	}
+	update(orgs[2], plain[2], &AttributeDefinitionPatch{Unique: &yes})
+	if readIndex(t, f.Admin, keyIndex).found {
+		t.Fatal("the last definition of the key became unique: the index of the key survived")
+	}
+	if !readIndex(t, f.Admin, IndexName(plain[2].ID, true)).valid {
+		t.Fatal("the unique index of the last definition is missing")
+	}
+	update(orgs[0], plain[0], &AttributeDefinitionPatch{Unique: &no})
+	if !readIndex(t, f.Admin, keyIndex).valid || readIndex(t, f.Admin, IndexName(plain[0].ID, true)).found {
+		t.Fatal("not unique again: want the index of the key and no unique index of the definition")
+	}
+	for name, oid := range own {
+		if indexOID(t, f.Admin, name) != oid {
+			t.Errorf("the index %s of a unique or type definition changed", name)
+		}
+	}
+
+	// A deletion drops the indexes of keys no definition uses: the one left
+	// over, not the ones in use.
+	exec(KeyIndexStatement(orphan))
+	if err = repo.DeleteAttributeDefinition(orgs[0].ctx, orgs[0].org, typed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = ddl.Ensure(bg, orgs[0].org, typed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if readIndex(t, f.Admin, KeyIndexName(orphan)).found {
+		t.Error("the index of a key no definition uses survived a deletion")
+	}
+	if readIndex(t, f.Admin, IndexName(typed.ID, false)).found {
+		t.Error("the index of the deleted type definition survived")
+	}
+	if !readIndex(t, f.Admin, keyIndex).valid || !readIndex(t, f.Admin, KeyIndexName(odd)).valid {
+		t.Error("a deletion dropped the index of a key in use")
+	}
+
+	// Another run holds the index of the key: this one waits and changes
+	// nothing.
+	exec(`DROP INDEX ` + keyIndex)
+	holder, err := f.Admin.Acquire(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Release()
+	lockKey := IndexJobKind + "/" + keyIndex
+	if _, err = holder.Exec(bg, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+		t.Fatal(err)
+	}
+	short, cancel = context.WithTimeout(bg, 2500*time.Millisecond)
+	err = ddl.Ensure(short, orgs[0].org, plain[0].ID)
+	cancel()
+	if err == nil || !strings.Contains(err.Error(), "lock attribute index") || readIndex(t, f.Admin, keyIndex).found {
+		t.Fatalf("run while another holds the index of the key: %v, want it to wait for the lock and build nothing", err)
+	}
+	if _, err = holder.Exec(bg, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, lockKey); err != nil {
+		t.Fatal(err)
+	}
+	if err = ddl.Ensure(bg, orgs[0].org, plain[0].ID); err != nil || !readIndex(t, f.Admin, keyIndex).valid {
+		t.Fatalf("run after the lock: %v, index %+v", err, readIndex(t, f.Admin, keyIndex))
+	}
+
+	// A deletion waits for another run on the index of a key it would drop;
+	// the error its job records does not name that index (the key may be
+	// one of another organization). After the lock the deletion completes.
+	exec(KeyIndexStatement(other))
+	otherLock := IndexJobKind + "/" + KeyIndexName(other)
+	if _, err = holder.Exec(bg, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, otherLock); err != nil {
+		t.Fatal(err)
+	}
+	if err = repo.DeleteAttributeDefinition(orgs[1].ctx, orgs[1].org, oddDef.ID); err != nil {
+		t.Fatal(err)
+	}
+	short, cancel = context.WithTimeout(bg, 2500*time.Millisecond)
+	err = ddl.Ensure(short, orgs[1].org, oddDef.ID)
+	cancel()
+	if err == nil || strings.Contains(err.Error(), other) || strings.Contains(err.Error(), KeyIndexName(other)) {
+		t.Errorf("deletion while another run holds the index of a key: %v; want it to wait, and an error without the name of the index", err)
+	}
+	if _, err = holder.Exec(bg, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, otherLock); err != nil {
+		t.Fatal(err)
+	}
+	if err = ddl.Ensure(bg, orgs[1].org, oddDef.ID); err != nil || readIndex(t, f.Admin, KeyIndexName(other)).found ||
+		readIndex(t, f.Admin, KeyIndexName(odd)).found || !readIndex(t, f.Admin, keyIndex).valid {
+		t.Errorf("deletion after the lock: %v; want the unused indexes of keys dropped, the one in use kept", err)
+	}
 }

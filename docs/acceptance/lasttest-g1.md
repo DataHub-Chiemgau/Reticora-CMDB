@@ -26,7 +26,7 @@ Nachweisläufen. Fett: Schwelle verfehlt.
 | 1 | Seed-Optionen für die NFR-01-Volumina, deterministisch und begrenzt | erfüllt; Tests lokal grün (TimescaleDB 2.31.0); in den drei Läufen erzeugt der Seed die Volumina vollständig | `backend/cmd/seed` (`-interfaces-per-ci`, `-ips-per-ci`, `-relationships-per-ci`, `-orgs`); `seed_integration_test.go`: `TestSeedNFR01Volumes` (Mengen, Verteilung, Determinismus, zweiter Lauf), `TestSeedOptionsAreBounded` (Grenzen); Abschnitt „NFR-01-Volumina“ |
 | 2 | `load.yml`-Job `nfr01-volume` mit `api.js` und den NFR-02-Schwellen | erfüllt; der Job läuft in allen drei Läufen und ist **rot**: NFR-02 hält auf den NFR-01-Volumina nicht (Offene Punkte, Punkt 11) | `.github/workflows/load.yml` (Matrix-Eintrag `nfr01-volume`, Schritt „Seeded volumes (NFR-01)“) |
 | 3 | Drei aufeinanderfolgende vollständige `load.yml`-Läufe mit exit 0, archiviert; seit der Ergänzung zu E-58 vom 2026-10-26 bewertet nach dem Median der drei Läufe | **nicht erfüllt** | Drei vollständige Läufe liegen vor (Abschnitt „Läufe“). Nach dem Median der drei Läufe (Abschnitt „Bewertung nach E-58“) halten `api`, `ingest` und `ingest-spool` jedes Budget; verfehlt sind `nfr01-volume` (rot in drei Läufen, Punkt 11) und `ingest-rediscover` (rot in zwei Läufen, Punkt 1). Die Archive sind gebaut, aber noch nicht ins Repository übernommen |
-| 4 | Bericht: p95 je Budget aus den drei Läufen, 200 Records/s und Max-Drain gegenüber 1.000 Records/s [P5], NFR-01-Volumina gemessen, Umfangskorrektur SR-04, offene Punkte mit Folge-WP oder Entscheidung | Werte der drei Läufe eingetragen; CPU und RAM je Lauf stehen nur im Archiv (**steht aus**); acht offene Punkte haben noch keine Folge-WP-Nummer (Vorschlag an den Auftraggeber) | dieses Dokument |
+| 4 | Bericht: p95 je Budget aus den drei Läufen, 200 Records/s und Max-Drain gegenüber 1.000 Records/s [P5], NFR-01-Volumina gemessen, Umfangskorrektur SR-04, offene Punkte mit Folge-WP oder Entscheidung | Werte der drei Läufe eingetragen; CPU und RAM je Lauf stehen nur im Archiv (**steht aus**); sechs offene Punkte haben noch keine Folge-WP-Nummer (Vorschlag an den Auftraggeber); die Punkte 1 und 11 behandeln WP-607 bis WP-612 (K3-Nachträge) | dieses Dokument |
 | 5 | Retests F-279, WP-206, WP-204 | **nicht bestanden** bzw. **stehen aus** | Abschnitt „Retests“ |
 
 ## Messumgebung und Ablauf (E-58)
@@ -219,6 +219,86 @@ schnellen Runner. In den Läufen 1 bis 3 sind Puffer und Plankosten je
 Record nahezu gleich (837 bis 872 bzw. 639 bis 708); die Datenbankzeit je
 Record schwankt dagegen um den Faktor 2,8. Den Durchsatz anzuheben ist
 nicht Teil von WP-439.
+
+**Ursache und Korrektur (WP-608, 2026-10-26).** Lokal nachgestellt wie im
+Job `ingest-rediscover` (Seed mit 10.000 Objekten, Suchindex, `ANALYZE`,
+Server mit 4 Spuren und NATS mit JetStream wie in `load.yml`, `ingest.js`
+`SCENARIO=rediscover`; TimescaleDB 2.31.0 mit `pg_stat_statements` und
+`track_planning`; Host mit 4 CPUs, mit anderen Arbeiten geteilt). Vor der
+Korrektur je Record 53,1 Statements, 11,9 ms Ausführungs- und 2,3 ms
+Planungszeit und 894 Puffer, wie in den Läufen 1 bis 3; Abbau ab Sendeende
+66 Records/s, Verzögerung bis 34,3 s. Die drei größten Kostenposten je
+Record:
+
+1. **Eine Transaktion je bekanntem Gerät mit der seriellen Sperre der
+   Organisation.** Jedes Update eines bekannten Geräts lief in einer
+   eigenen Transaktion: Identitätssperren, die Kandidaten unter ihnen ein
+   zweites Mal gelesen (3 Statements, 0,93 ms Planung), am Ende Audit-Kette
+   und Outbox unter den Sperren der Organisation bis einschließlich COMMIT
+   samt WAL-Flush. Warten auf die Audit-Sperre 1,85 ms je Record (15,5 %
+   der Ausführungszeit), Audit- und Outbox-Insert zusammen 1,62 ms; dieser
+   Abschnitt läuft über alle Spuren nacheinander. In einem Lauf des alten
+   Codes (mit dem Index aus Punkt 3) mit zeitweise langsamem Datenträger
+   (Stichproben: `IO:WALSync`, `LWLock:WALWrite`) stieg das Warten auf
+   12,7 ms je Record und der Abbau fiel auf 10 Records/s: dieselbe Mechanik
+   erklärt die Streuung der Datenbankzeit je Record zwischen den Läufen
+   (6,4 bis 18,0 ms).
+2. **Topologie in drei weiteren Transaktionen je Record.** Nachbar suchen,
+   Kante suchen und Kante bestätigen liefen je Record in eigenen
+   Transaktionen: 12 der 53 Statements (23 %), 0,78 ms Planung und ein
+   weiteres COMMIT je Record, obwohl alle Records eines Fetches nur zwei
+   Switches als Nachbarn melden.
+3. **Adressabgleich ohne Index.** Die beiden Anweisungen des
+   Schnittstellenabgleichs auf `ip_address` (Adresse bestätigen, Fehlbeobachtung
+   zählen) lasen über `uq_ip_address_org_vrf_interface_address` die Einträge
+   aller Adressen der Organisation (`vrf_id` steht vor `interface_id`):
+   1,51 ms und 399 von 894 Puffern je Record (45 %), linear mit den Adressen
+   der Organisation (NFR-01: 200.000).
+
+Daneben bleibt `UPDATE ci` mit 2,4 ms je Record (20 %): kein HOT-Update,
+weil sich `last_seen_at` und `attributes` ändern (28 Indexe), und bei der
+ersten Wiederentdeckung der Abgleich von `ci_identity_mac`, weil neue MACs
+hinzukommen (einzeln mit `EXPLAIN ANALYZE` als `reticora_app`: 3,7 ms, davon
+2,4 ms der Trigger; ohne neue MACs 1,2 ms). Der Server lag bei 0,6 Kernen,
+davon ein Viertel Systemaufrufe der Rundreisen und 3,8 % ein je Aufruf neu
+gebauter `strings.Replacer` der MAC-Normalisierung.
+
+Korrektur in WP-608, ohne Identitätssperre, `max_cis`-Sperre, Audit-Kette
+oder Outbox-Reihenfolge zu lockern (E-56): Records aus der Queue
+aktualisieren die bekannten Geräte in der Batch-Transaktion ihres Fensters
+unter dessen Identitätssperren und mit dessen Kandidaten, Audit und Outbox
+weiter zuletzt, ein COMMIT je Fenster; ein weiterer Record desselben Geräts
+folgt wie bisher einzeln. Die Topologie eines Fetches sucht jeden Nachbarn
+einmal und liest und bestätigt die Kanten mit je einem Statement. Migration
+000165 legt `idx_ip_address_interface` an. Die MAC-Normalisierung nutzt einen
+gemeinsamen `Replacer`. `TestRediscoverStatementBudget`
+(`backend/internal/discovery/ingest_budget_integration_test.go`) begrenzt die
+Statements je wiederentdecktem Record auf 22 (vorher 36,0, nachher 21,6 bei
+der ersten und 17,6 bei der zweiten Wiederentdeckung) und prüft, dass das
+Ergebnis dem Weg mit einer Transaktion je Record gleicht.
+
+Lokal vorher und nachher auf demselben Host (abwechselnd, je frische
+Datenbank; der Host war mit anderen Arbeiten belegt, Last 2 bis 9 auf
+4 CPUs, die Zeiten sind daher nur relativ aussagekräftig):
+
+| Lauf | Statements je Record | Ausführung je Record (davon Audit-Sperre) | Planung je Record | Puffer je Record | CPU PostgreSQL + Server je Record | Abbau ab Sendeende (inklusive) | Verzögerung max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| vorher 1 | 55,5 | 20,2 ms (3,1 ms) | 4,0 ms | 874 | 28,7 ms | 59,7/s (67,2/s) | **89,0 s** |
+| nachher 1 | 30,6 | 11,8 ms (1,1 ms) | 0,6 ms | 428 | 14,7 ms | 113,8/s (134,7/s) | 21,8 s |
+| vorher 2 | 55,6 | 19,5 ms (2,9 ms) | 4,3 ms | 925 | 26,9 ms | 27,1/s (69,4/s) | **84,8 s** |
+| nachher 2 | 32,3 | 14,2 ms (1,5 ms) | 0,8 ms | 439 | 14,7 ms | 77,4/s (106,9/s) | **39,2 s** |
+| vorher 3 | 54,8 | 14,2 ms (1,6 ms) | 3,0 ms | 865 | 26,0 ms | 62,9/s (94,1/s) | **50,7 s** |
+| nachher 3 | 30,5 | 10,3 ms (0,9 ms) | 0,5 ms | 421 | 15,3 ms | – (155,4/s) | 13,0 s |
+
+Die Statements je Record enthalten hier auch den Event-Publisher, die
+Webhook-Zustellung und die Abfragen von k6; CPU ist die des Containers mit
+PostgreSQL und die des Serverprozesses während des k6-Laufs. Im Lauf
+„nachher 3“ waren zum Sendeende schon 8.827 von 9.008 Records sichtbar; der
+Abbau ab Sendeende (181 Records) ist dort nicht aussagekräftig. Der Bedarf
+an CPU je Record halbiert sich (26,0 bis 28,7 auf 14,7 bis 15,3 ms), der
+Abbau verdoppelt sich etwa; auf dem belegten Host bleibt einer der drei
+Läufe nachher über 30 s. Den Nachweis auf der Umgebung von E-58 führt
+WP-612.
 
 ### Max-Drain gegenüber 1.000 Records/s [P5]
 
@@ -454,9 +534,14 @@ Auftraggeber, die Nummer wird hier nachgetragen.
    gesehen 51,55 s bzw. 50,95 s p95 in den Läufen 2 und 3, 4,82 s in Lauf 1
    (31,0 s im Vorlauf, 45,1 s in Run 40256148903); Abbau 52–147 Records/s
    bei 49–58 Statements und 6,4–18,0 ms Datenbankzeit je Record
-   (Ursachenvergleich F-118). Die Ursache des verbleibenden Durchsatzdefizits
-   ist nicht untersucht. Folge-WP: offen, Vorschlag an den Auftraggeber
-   (Ingest-Durchsatz der Wiederentdeckung).
+   (Ursachenvergleich F-118). Ursache untersucht und behoben in WP-608
+   (`k3n-rediscover-throughput`, K3-Nachträge): eine Transaktion je
+   bekanntem Gerät mit der seriellen Audit- und Outbox-Sperre der
+   Organisation samt COMMIT, die Topologie in drei weiteren Transaktionen je
+   Record und der Adressabgleich ohne Index (Absatz „Ursache und Korrektur
+   (WP-608)“ beim Ursachenvergleich F-118). Lokal 31 statt 53 Statements
+   und die halbe CPU je Record, Abbau etwa verdoppelt. Der Nachweis in der
+   CI (drei Läufe nach E-58) steht aus: WP-612 (`k3n-load-evidence`).
 2. **NFR-03, 1.000 Records/s in Phase 5 [P5]:** Max-Drain 328–963
    Records/s auf 4 CPUs (Szenario `spool`); kein G1-Budget. Folge-WP:
    offen, Vorschlag an den Auftraggeber (Ingest-Durchsatz für Phase 5,
@@ -512,9 +597,16 @@ Auftraggeber, die Nummer wird hier nachgetragen.
     `rack`, `list_name_filter` und `detail`. Ursachen laut Statement-Profil:
     Die Kantenabfrage für Impact und Topologie lädt alle Kanten der
     Organisation; `COUNT` und Seite der Beziehungsliste eines CI lesen je
-    Aufruf etwa 72.800 Puffer für im Mittel 19 Zeilen. Folge-WP: offen, Vorschlag an den Auftraggeber (NFR-02 bei
-    NFR-01-Volumina: Beziehungsliste und Kantenabfrage indexgestützt, Impact
-    ohne Laden aller Kanten).
+    Aufruf etwa 72.800 Puffer für im Mittel 19 Zeilen. Die lokale
+    Ursachenanalyse zu diesen Läufen nennt fünf Ursachen (U1 bis U5).
+    Folge-WPs (K3-Nachträge, beauftragt am 2026-10-26):
+    - WP-607 (`k3n-attr-index-key`): Attribut-Indexe je Schlüssel statt je
+      Organisation (U1, Ergänzung zu E-73);
+    - WP-609 (`k3n-relationships-arms`): Beziehungsliste (U2);
+    - WP-610 (`k3n-hot-path`): `last_used_at` und JIT (U4, U5);
+    - WP-611 (`k3n-impact-lean`): Impact-CPU (U3).
+
+    WP-612 (`k3n-load-evidence`) weist danach drei Läufe nach E-58 nach.
 
 Erledigt seit dem letzten Stand: NFR-03-Durchsatz neuer Geräte und
 Spool-Flush (WP-332 bis WP-334), Impact unter Parallellast (WP-335),

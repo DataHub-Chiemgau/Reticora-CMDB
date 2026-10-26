@@ -167,7 +167,7 @@ func normalizedMACEqual(left, right string) bool {
 
 func normalizeMACValue(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.NewReplacer(":", "", "-", "", ".", "").Replace(value)
+	value = macSeparators.Replace(value)
 	if len(value) != 12 {
 		return ""
 	}

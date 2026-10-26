@@ -262,13 +262,29 @@ func (s *PGAPIKeyStore) Rotate(ctx context.Context, orgID, id string, overlapUnt
 	return &RotatedAPIKey{Created: created, Previous: old, Plaintext: generated.Plaintext}, nil
 }
 
-// MarkUsed updates the last_used_at timestamp. It runs while the key is being
-// validated, before a principal exists, on behalf of the key's organization,
-// so it uses an org-wide scope (E-08).
+// lastUsedInterval is the precision of api_key.last_used_at: MarkUsed
+// writes it at most once per interval and key (WP-610).
+const lastUsedInterval = time.Minute
+
+// MarkUsed updates the last_used_at timestamp, at most once per
+// lastUsedInterval (WP-610). The condition is part of the UPDATE: a row
+// written less than lastUsedInterval ago does not match, so the requests of
+// a key in between neither write nor lock it. Before, every request wrote
+// the same row and waited for the lock of the previous one (U4 of the WP-439
+// load runs: up to 3.3 s). A request that meets the one write of the
+// interval waits for that single short transaction; PostgreSQL then checks
+// the condition again on the new row version and leaves it. last_used_at is
+// accurate to the interval: the last use lies between last_used_at and
+// lastUsedInterval later.
+//
+// It runs while the key is being validated, before a principal exists, on
+// behalf of the key's organization, so it uses an org-wide scope (E-08).
 func (s *PGAPIKeyStore) MarkUsed(ctx context.Context, orgID, id string) error {
 	scope := database.OrgWideScope(orgID, "")
 	return database.WithTenant(ctx, s.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "UPDATE api_key SET last_used_at = now() WHERE id = $1", id); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE api_key SET last_used_at = now()
+			WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - make_interval(secs => $2))`,
+			id, lastUsedInterval.Seconds()); err != nil {
 			return fmt.Errorf("update api_key last_used: %w", err)
 		}
 		return nil
@@ -468,13 +484,15 @@ func (m *MemoryAPIKeyStore) Rotate(ctx context.Context, orgID, id string, overla
 	return &RotatedAPIKey{Created: created, Previous: previous, Plaintext: generated.Plaintext}, nil
 }
 
-// MarkUsed implements APIKeyStore.
+// MarkUsed implements APIKeyStore with the interval of PGAPIKeyStore.
 func (m *MemoryAPIKeyStore) MarkUsed(_ context.Context, orgID, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if k := m.find(orgID, id); k != nil {
 		now := time.Now().UTC()
-		k.LastUsedAt = &now
+		if k.LastUsedAt == nil || k.LastUsedAt.Before(now.Add(-lastUsedInterval)) {
+			k.LastUsedAt = &now
+		}
 	}
 	return nil
 }

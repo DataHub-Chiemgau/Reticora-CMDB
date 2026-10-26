@@ -944,6 +944,43 @@ func (r *PGRepository) DiscoveryEdge(ctx context.Context, orgID, sourceID, targe
 	return id, source, found, err
 }
 
+// DiscoveryEdges finds the edges of several (source, target, type) keys with
+// one statement, each as DiscoveryEdge finds it: the oldest edge of the key
+// (WP-608, NFR-03). A key without an edge is missing from the map. The
+// re-discovery of a batch reads the edges of all its devices at once
+// instead of one transaction per edge.
+func (r *PGRepository) DiscoveryEdges(ctx context.Context, orgID string, keys []EdgeKey) (map[EdgeKey]FoundEdge, error) {
+	out := make(map[EdgeKey]FoundEdge, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	sources, targets, types := make([]string, len(keys)), make([]string, len(keys)), make([]string, len(keys))
+	for i, k := range keys {
+		sources[i], targets[i], types[i] = k.SourceCIID, k.TargetCIID, k.RelType
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT ON (k.n) k.n, r.id::text, r.source
+			FROM unnest($2::uuid[], $3::uuid[], $4::text[]) WITH ORDINALITY AS k(source_ci_id, target_ci_id, rel_type, n)
+			JOIN ci_relationship r ON r.organization_id = $1 AND r.source_ci_id = k.source_ci_id
+				AND r.target_ci_id = k.target_ci_id AND r.rel_type = k.rel_type
+			ORDER BY k.n, r.created_at, r.id`, orgID, sources, targets, types)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var n int
+			var e FoundEdge
+			if err := rows.Scan(&n, &e.ID, &e.Source); err != nil {
+				return err
+			}
+			out[keys[n-1]] = e
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // DeletedIdentityCandidates returns the soft-deleted CIs an incoming device
 // may be, with the fields identity resolution compares (CI-13).
 func (r *PGRepository) DeletedIdentityCandidates(ctx context.Context, orgID string, q *IdentityQuery) ([]ci.Item, error) {
