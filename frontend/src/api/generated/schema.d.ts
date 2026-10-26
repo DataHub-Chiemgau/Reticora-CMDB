@@ -472,7 +472,7 @@ export interface paths {
     put?: never;
     /**
      * Change the type of a CI (CI-11)
-     * @description Manual reclassification. The CI keeps its id, relationships, mounts, asset link and history; required attributes of the target type the CI does not carry are returned as findings and do not block. The change is recorded as ci_change type_change, audit ci.type_changed and event ci.changed (changed_fields ci_type_id). Discovery uses the same service but may only raise generic_device to a specific type.
+     * @description Manual reclassification. The CI keeps its id, relationships, mounts, asset link and history; required attributes of the target type the CI does not carry are returned as findings and do not block. The change is recorded as ci_change type_changed, audit ci.type_changed and event ci.changed (changed_fields ci_type_id). Discovery uses the same service but may only raise generic_device to a specific type.
      */
     post: operations['changeCIType'];
     delete?: never;

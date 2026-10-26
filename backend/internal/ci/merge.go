@@ -402,11 +402,11 @@ func (r *PGRepository) Merge(ctx context.Context, orgID, survivorID, victimID, m
 			return fmt.Errorf("record merge: %w", err)
 		}
 
-		if cerr := r.recordCIChange(ctx, tx, orgID, survivorID, merged.Version, "reconciliation_decision", "merged_ci",
+		if cerr := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindMerged), orgID, survivorID, merged.Version, "reconciliation_decision", "merged_ci",
 			nil, map[string]any{"victim_id": victimID, "merge_id": result.MergeID, "moved": result.Moved}); cerr != nil {
 			return cerr
 		}
-		if cerr := r.recordCIChange(ctx, tx, orgID, victimID, victim.Version+1, "delete", "merged_into_id",
+		if cerr := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindMerged), orgID, victimID, victim.Version+1, "delete", "merged_into_id",
 			map[string]any{"status": victim.Status}, map[string]any{"merged_into_id": survivorID, "merge_id": result.MergeID}); cerr != nil {
 			return cerr
 		}
@@ -827,7 +827,7 @@ func (r *PGRepository) Unmerge(ctx context.Context, orgID, victimID string, forc
 			return fmt.Errorf("read victim: %w", err)
 		}
 		for _, item := range []*Item{result.Survivor, result.Victim} {
-			if cerr := r.recordCIChange(ctx, tx, orgID, item.ID, item.Version, "reconciliation_decision", "unmerged_ci",
+			if cerr := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindRestored), orgID, item.ID, item.Version, "reconciliation_decision", "unmerged_ci",
 				nil, map[string]any{"merge_id": result.MergeID, "survivor_id": survivorID, "victim_id": victimID}); cerr != nil {
 				return cerr
 			}

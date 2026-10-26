@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000166_ci_field_value_reserved
+Stand: Migration 000167_ci_change_aud03
 
 ## Prüfung
 
@@ -307,6 +307,36 @@ TestKnownGapsDocumented ./internal/tenant/rls/` neu.
 |---|---|---|
 
 <!-- rls-known-gaps:end -->
+
+## CI-Änderungen `ci_change` (AUD-03, WP-487)
+
+Nach Entscheidung E-82 (Option 2) bleibt `ci_change` feldgranular: eine Zeile
+je geändertem Feld, darauf beruhen die feldgranulare 409-Prüfung (API-07,
+`ci_version`) und der Merge. Migration 000167 ergänzt die Spalten von AUD-03:
+
+| Spalte | Inhalt |
+|---|---|
+| `change_kind` | `NOT NULL`, CHECK `chk_ci_change_kind`: `created`, `updated`, `deleted`, `restored`, `merged`, `type_changed`, `relationship_added`, `relationship_removed`, `status_changed`; gilt für die ganze Änderungsgruppe (ein Statuswechsel zusammen mit weiteren Feldern ist `updated`) |
+| `change_set_id` | gruppiert die Feldzeilen eines Schreibvorgangs eines CI; Bestandszeilen vor 000167 haben `NULL` |
+| `actor_user_id` | Benutzer-ID des Akteurs (Surrogat, keine Personendaten); `NULL` bei API-Schlüsseln, deren ID in `actor_id` steht |
+| `collector_id`, `observed_at` | Collector und Beobachtungszeitpunkt einer Discovery-Änderung |
+| `source` | Quelle wie in `audit_log` (CHECK `chk_ci_change_source`: `ui`, `api`, `collector`, `import`, `system`) |
+| `request_id`, `correlation_id` | Request- und Correlation-ID der Anfrage (AUD-07) |
+
+Die Schreibpfade des CI-Repositorys (`recordCIChange`, `recordCreates` in
+`backend/internal/ci`) setzen `change_kind`, `change_set_id`,
+`actor_user_id`, `source`, `request_id` und `correlation_id`;
+`collector_id` und `observed_at` setzt der Ingest-Pfad (WP-489).
+
+Der Typwechsel heißt `type_changed` (CI-11, `chk_ci_change_type`); die
+Migration benennt bestehende `type_change`-Zeilen um und leitet
+`change_kind` der Bestandszeilen aus `change_type`, Feld und Werten ab
+(Funktion `ci_change_kind`; Zeilen desselben CI mit gleichem `created_at`
+gelten als ein Schreibvorgang). Der Trigger `ci_change_kind` (`BEFORE INSERT
+OR UPDATE`) setzt `change_kind` für Schreiber, die es nicht setzen (ipam,
+rack, override), und speichert `type_change` als `type_changed`, auch wenn
+der Unmerge Zeilen aus einem älteren Merge-Snapshot zurückschreibt. Die
+Policies und `ENABLE` + `FORCE ROW LEVEL SECURITY` sind unverändert.
 
 ## Tabellen, RLS und Policies
 

@@ -436,6 +436,7 @@ type dataCheck struct {
 var migrationDataChecks = map[string]dataCheck{
 	"attr_text_leakproof": {seedAttrText, attrTextDownQueuesJobs, attrTextUpQueuesRebuilds},
 	"attr_index_per_key":  {seedAttrIndexPerKey, attrIndexPerKeyDownQueuesJobs, attrIndexPerKeyUpQueuesKeyJobs},
+	"ci_change_aud03":     {seedCIChangeAUD03, ciChangeAUD03Down, ciChangeAUD03Up},
 }
 
 // The fixture of attr_text_leakproof (000162, WP-435): an organization with
@@ -633,6 +634,111 @@ func attrIndexPerKeyUpQueuesKeyJobs(ctx context.Context, t *testing.T, conn *pgx
 		`DELETE FROM attribute_definition WHERE id IN ('`+rt164Shared+`', '`+rt164Unique+`', '`+rt164Typed+`', '`+rt164Plain+`', '`+rt164System+`')`,
 		`DELETE FROM ci_type WHERE id = '`+rt164Type+`'`,
 		`DELETE FROM organization WHERE id = '`+rt164Org+`'`)
+}
+
+// The fixture of ci_change_aud03 (000167, WP-487): ci_change rows of the
+// legacy writers, one per case of the change_kind mapping; two rows of one
+// write (same CI and created_at) are a status change and a name. The rows
+// carry a client the scope trigger would clear: the backfill keeps it.
+const (
+	rt167Org    = "c0de0167-0000-4000-8000-000000000001"
+	rt167Type   = "c0de0167-0000-4000-8000-000000000002"
+	rt167CI     = "c0de0167-0000-4000-8000-000000000003"
+	rt167Client = "c0de0167-0000-4000-8000-000000000004"
+)
+
+// rt167Rows are the fixture rows: id suffix, change_type, field, old and
+// new value, created_at offset in seconds and the change_kind the backfill
+// gives them.
+var rt167Rows = []struct{ id, changeType, field, oldValue, newValue, at, kind string }{
+	{"11", "create", "", "null", `{"name": "rt167"}`, "1", "created"},
+	{"12", "type_changed", "ci_type_id", `"a"`, `"b"`, "2", "type_changed"},
+	{"13", "status_change", "status", `"active"`, `"maintenance"`, "3", "status_changed"},
+	{"14", "status_change", "status", `"maintenance"`, `"active"`, "4", "updated"},
+	{"15", "update", "name", `"rt167"`, `"rt167b"`, "4", "updated"},
+	{"16", "update", "deleted_at", `"deleted"`, "null", "5", "restored"},
+	{"17", "reconciliation_decision", "deleted_at", `"deleted"`, "null", "6", "restored"},
+	{"18", "reconciliation_decision", "merged_ci", "null", `{"victim_id": "v"}`, "7", "merged"},
+	{"19", "reconciliation_decision", "unmerged_ci", "null", `{"merge_id": "m"}`, "8", "restored"},
+	{"1a", "delete", "merged_into_id", `{}`, `{"merged_into_id": "s"}`, "9", "merged"},
+	{"1b", "delete", "", `{}`, `{}`, "10", "deleted"},
+	{"1c", "relationship_change", "relationships", `{"id": "r"}`, "", "11", "relationship_removed"},
+	{"1d", "relationship_change", "relationships", "", `{"id": "r"}`, "12", "relationship_added"},
+	{"1e", "movement", "rack_mount", "null", `{"rack_id": "r"}`, "13", "updated"},
+	{"1f", "override", "model", `"a"`, `"b"`, "14", "updated"},
+}
+
+func seedCIChangeAUD03(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+	execAll(ctx, t, conn,
+		`INSERT INTO organization (id, name, slug) VALUES ('`+rt167Org+`', 'roundtrip 000167', 'roundtrip-000167')`,
+		`INSERT INTO ci_type (id, organization_id, key, name) VALUES ('`+rt167Type+`', '`+rt167Org+`', 'rt167-type', 'rt167-type')`,
+		`INSERT INTO ci (id, organization_id, ci_type_id, name, status) VALUES ('`+rt167CI+`', '`+rt167Org+`', '`+rt167Type+`', 'rt167', 'active')`)
+	for _, r := range rt167Rows {
+		execAll(ctx, t, conn, `INSERT INTO ci_change (id, organization_id, ci_id, change_type, field_name, old_value, new_value, created_at)
+			VALUES ('c0de0167-0000-4000-8000-0000000000`+r.id+`', '`+rt167Org+`', '`+rt167CI+`', '`+r.changeType+`',
+				NULLIF('`+r.field+`', ''), NULLIF('`+r.oldValue+`', '')::jsonb, NULLIF('`+r.newValue+`', '')::jsonb,
+				'2026-01-01T00:00:00Z'::timestamptz + interval '`+r.at+` seconds')`)
+	}
+	execAll(ctx, t, conn,
+		`ALTER TABLE ci_change DISABLE TRIGGER ci_change_scope`,
+		`UPDATE ci_change SET client_id = '`+rt167Client+`' WHERE ci_id = '`+rt167CI+`'`,
+		`ALTER TABLE ci_change ENABLE TRIGGER ci_change_scope`)
+}
+
+// ciChangeAUD03Rows lists id suffix, change_type and client of the fixture
+// rows, with change_kind when withKind is set.
+func ciChangeAUD03Rows(ctx context.Context, t *testing.T, conn *pgx.Conn, withKind bool) []string {
+	t.Helper()
+	kind := `''`
+	if withKind {
+		kind = `change_kind`
+	}
+	rows, err := conn.Query(ctx, `SELECT right(id::text, 2) || ' ' || change_type || ' ' || `+kind+` || ' ' || COALESCE(client_id::text, '')
+		FROM ci_change WHERE ci_id = $1 ORDER BY id`, rt167CI)
+	if err != nil {
+		t.Fatalf("list ci_change: %v", err)
+	}
+	got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("list ci_change: %v", err)
+	}
+	return got
+}
+
+// ciChangeAUD03Down: the down renames type_changed back to type_change and
+// keeps every row and its client.
+func ciChangeAUD03Down(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+	var want []string
+	for _, r := range rt167Rows {
+		changeType := r.changeType
+		if changeType == "type_changed" {
+			changeType = "type_change"
+		}
+		want = append(want, r.id+" "+changeType+"  "+rt167Client)
+	}
+	if got := ciChangeAUD03Rows(ctx, t, conn, false); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("down 000167 ci_change rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// ciChangeAUD03Up: the up renames type_change to type_changed and gives
+// each row the change_kind of its change (backfill); the clients stay.
+func ciChangeAUD03Up(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+	var want []string
+	for _, r := range rt167Rows {
+		want = append(want, r.id+" "+r.changeType+" "+r.kind+" "+rt167Client)
+	}
+	if got := ciChangeAUD03Rows(ctx, t, conn, true); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("up 000167 ci_change rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	execAll(ctx, t, conn,
+		`DELETE FROM ci_change WHERE ci_id = '`+rt167CI+`'`,
+		`DELETE FROM ci WHERE id = '`+rt167CI+`'`,
+		`DELETE FROM ci_type WHERE id = '`+rt167Type+`'`,
+		`DELETE FROM organization WHERE id = '`+rt167Org+`'`)
 }
 
 // TestAttrTextMigrationNeedsSuperuser covers the guard of migration 000162

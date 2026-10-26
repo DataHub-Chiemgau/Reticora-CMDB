@@ -49,13 +49,22 @@ type StateSnapshot struct {
 }
 
 // Change types (kept as data, not code; the CHECK constraint lists the
-// current vocabulary but new classes are additive).
+// current vocabulary but new classes are additive). The type change is
+// type_changed (CI-11, 000167).
 var ChangeTypes = map[string]bool{
 	"create": true, "update": true, "delete": true, "status_change": true,
-	"attribute_change": true, "type_change": true, "lifecycle_transition": true,
+	"attribute_change": true, "type_changed": true, "lifecycle_transition": true,
 	"location_change": true, "movement": true, "override": true,
 	"reconciliation_decision": true, "parent_child_change": true,
 	"assignment": true, "relationship_change": true,
+}
+
+// ChangeKinds are the kinds of a CI change (AUD-03, ci_change.change_kind
+// of 000167): the kind holds for the change set of one write.
+var ChangeKinds = map[string]bool{
+	"created": true, "updated": true, "deleted": true, "restored": true,
+	"merged": true, "type_changed": true, "relationship_added": true,
+	"relationship_removed": true, "status_changed": true,
 }
 
 // Replay reconstructs the field state from an ordered change trail (oldest
