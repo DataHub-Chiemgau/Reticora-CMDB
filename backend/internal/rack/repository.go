@@ -68,6 +68,13 @@ type Repository interface {
 	DeleteCable(ctx context.Context, orgID, id string) error
 }
 
+// heightBelowMountsError refuses a rack height below top, the highest unit
+// occupied by a mount (RCK-01): 409 on height_units naming that unit.
+func heightBelowMountsError(top int) error {
+	return &api.ConflictError{Field: "height_units",
+		Message: fmt.Sprintf("mounts occupy the rack up to unit %d; height_units must be at least %d", top, top)}
+}
+
 // facesOverlap reports whether two faces share rack space: front and rear
 // are separate, both covers either (RCK-01 face ranges).
 func facesOverlap(a, b string) bool {
@@ -202,6 +209,14 @@ func (r *MemoryRepository) UpdateRack(_ context.Context, orgID, id string, req U
 		rk.Name = *req.Name
 	}
 	if req.HeightUnits != nil {
+		top := 0
+		mounts := r.mountsForRack(id)
+		for i := range mounts {
+			top = max(top, mounts[i].PositionU+mounts[i].HeightU-1)
+		}
+		if *req.HeightUnits < top {
+			return nil, heightBelowMountsError(top)
+		}
 		rk.HeightUnits = *req.HeightUnits
 	}
 	if req.WidthMM != nil {

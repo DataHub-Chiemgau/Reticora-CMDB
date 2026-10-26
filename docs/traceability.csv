@@ -783,3 +783,9 @@ DIS-04;[B];D;collector/plugins/snmp/v3_agent_test.go;WP-492
 DIS-08;[Q];D;backend/internal/discovery/errors_test.go;WP-492
 AUD-03;[B];C;backend/internal/discovery/ingest_change_integration_test.go;WP-489
 CI-11;[B];C;backend/internal/discovery/ingest_change_integration_test.go;WP-489
+LOC-03;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-500
+API-05;[B];B;backend/internal/locations/unique_conflict_integration_test.go;WP-500
+LOC-04;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-500
+LOC-05;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-500
+LOC-06;B/G1;B;backend/internal/rack/height_integration_test.go;WP-500
+RCK-01;[B];B;backend/internal/rack/height_integration_test.go;WP-500

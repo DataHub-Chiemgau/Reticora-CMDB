@@ -11226,6 +11226,15 @@ export interface components {
         'application/problem+json': components['schemas']['DependencyProblem'];
       };
     };
+    /** @description The name is taken below the same parent: a site per client, a building per site, a room per building, a rack per room (LOC-03..06). `field` is `name`; nothing was stored. */
+    LocationNameTaken: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
     /** @description The request violates the parent matrix or a field rule; violations name the field */
     LocationViolation: {
       headers: {
@@ -18337,7 +18346,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
+      /** @description The name is taken in the room (`field` name), or height_units is below the highest unit occupied by a mount, max(position_u + height_u − 1) (RCK-01): `field` is height_units and `detail` names that unit. The rack is unchanged. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -27417,6 +27434,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['LocationNameTaken'];
       422: components['responses']['LocationViolation'];
     };
   };
@@ -27515,6 +27533,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['LocationNameTaken'];
       422: components['responses']['LocationViolation'];
     };
   };

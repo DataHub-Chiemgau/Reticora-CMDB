@@ -36,7 +36,9 @@ import {
  *  L01 site → building → room → rack in the tree UI ........ WP-026, WP-053, WP-108, WP-109
  *                                                              (LOC-07, LOC-10, LOC-06, TEN-01, TEN-02)
  *  L02 names unique per level (409 naming the field), rack
- *      height 1–60, explicit 0 → 422 ...................... WP-107, WP-108 (LOC-03, LOC-04, LOC-05, LOC-06)
+ *      height 1–60, explicit 0 → 422, not below the highest
+ *      mounted unit (409 on height_units) ................. WP-107, WP-108, WP-500
+ *                                                              (LOC-03, LOC-04, LOC-05, LOC-06, RCK-01)
  *  L03 cycle and parent-matrix violations are refused ...... WP-026, WP-053 (LOC-10, LOC-07)
  *  L04 non-empty location cannot be deleted (tree UI/API,
  *      confirmation, 409 names the kinds); an empty leaf
@@ -444,19 +446,16 @@ test.describe('locations and racks (LOC-*, RCK-*)', () => {
     await expect(dialog.locator('[role="alert"], .text-red-600').first()).toBeVisible();
     await dialog.getByRole('button', { name: 'Abbrechen' }).click();
     // The conflict names the field (WP-107: "Konflikte liefern 409 mit Feldbezug"), on the
-    // tree endpoint the dialog uses as on the site resource itself. Soft, so that the
-    // remaining uniqueness rules are still checked when this one fails.
-    expect
-      .soft(body, 'POST /locations: the 409 of a duplicate site names the field name')
-      .toMatch(/"field"\s*:\s*"name"/);
+    // tree endpoint the dialog uses as on the site resource itself (WP-500, F-302).
+    expect(body, 'POST /locations: the 409 of a duplicate site names the field name').toMatch(
+      /"field"\s*:\s*"name"/,
+    );
     const viaSites = await api<Problem>(w.rq, w.t.token, 'POST', '/sites', {
       client_id: w.client.id,
       name: h.site.name,
     });
     expect(viaSites.status, `POST /sites duplicate: ${JSON.stringify(viaSites.body)}`).toBe(409);
-    expect
-      .soft(JSON.stringify(viaSites.body), 'POST /sites: the 409 names the field name')
-      .toMatch(/"field"\s*:\s*"name"/);
+    expect(at(viaSites.body, 'field'), 'POST /sites: the 409 names the field name').toBe('name');
     expect(
       dbRows(
         `SELECT id FROM site WHERE organization_id = '${uuid(w.t.orgId)}' AND name = '${h.site.name.replace(/'/g, "''")}'`,
@@ -483,10 +482,8 @@ test.describe('locations and racks (LOC-*, RCK-*)', () => {
         name,
         parent_id: parent,
       });
-      expect(
-        [409, 422],
-        `duplicate ${kind} name: ${dup.status} ${JSON.stringify(dup.body)}`,
-      ).toContain(dup.status);
+      expect(dup.status, `duplicate ${kind} name: ${JSON.stringify(dup.body)}`).toBe(409);
+      expect(at(dup.body, 'field'), `duplicate ${kind} name: the 409 names the field`).toBe('name');
     }
     const rackDup = await api<Problem>(w.rq, w.t.token, 'POST', '/racks', {
       room_id: h.room.id,
@@ -552,6 +549,31 @@ test.describe('locations and racks (LOC-*, RCK-*)', () => {
     // The rack created via /racks is a node of the canonical tree below its room.
     const asNode = await getLocation(dflt.id);
     expect(asNode).toMatchObject({ kind: 'rack', parent_id: h.room.id, site_id: h.site.id });
+
+    // A rack does not shrink below its highest occupied unit (RCK-01, WP-500, F-140): with a
+    // mount at U40 h2 the rack keeps 42 HE on PATCH 39 (409 on height_units); 41 is allowed.
+    const ci = await newCI('l02-u40', { location_id: h.room.id });
+    const put = await putMount(dflt.id, ci.id, { position_u: 40, height_u: 2, face: 'front' });
+    expect(put.status, `PUT mounts/{ci_id} at U40: ${JSON.stringify(put.body)}`).toBe(201);
+    const shrink = await api<Problem>(w.rq, w.t.token, 'PATCH', `/racks/${dflt.id}`, {
+      height_units: 39,
+    });
+    expect(shrink.status, `PATCH /racks height_units 39: ${JSON.stringify(shrink.body)}`).toBe(409);
+    expect(at(shrink.body, 'field')).toBe('height_units');
+    expect(shrink.body.detail, 'the problem names the highest occupied unit').toContain('41');
+    expect(await ok<Rack>(w.rq, w.t.token, 'GET', `/racks/${dflt.id}`)).toMatchObject({
+      height_units: 42,
+    });
+    expect(
+      dbRows<{ height_units: number }>(
+        `SELECT height_units FROM rack WHERE id = '${uuid(dflt.id)}'`,
+      ),
+    ).toEqual([{ height_units: 42 }]);
+    const fits = await api<Rack>(w.rq, w.t.token, 'PATCH', `/racks/${dflt.id}`, {
+      height_units: 41,
+    });
+    expect(fits.status, `PATCH /racks height_units 41: ${JSON.stringify(fits.body)}`).toBe(200);
+    expect(fits.body.height_units).toBe(41);
   });
 
   test('L03 a cycle or a parent-matrix violation is refused with 422 on parent_id and changes nothing', async () => {

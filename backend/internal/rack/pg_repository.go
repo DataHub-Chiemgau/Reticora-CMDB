@@ -143,9 +143,48 @@ func (r *PGRepository) CreateRack(ctx context.Context, rk *Rack) error {
 	})
 }
 
+// lockRackHeight locks the rack row (FOR UPDATE) and returns its height.
+// Writers that compare mounts with the height (UpdateRack, CreateMount,
+// UpdateMount) take this lock first, so a mount and a reduction of the
+// height cannot pass their checks against each other's old state (RCK-01).
+func lockRackHeight(ctx context.Context, tx pgx.Tx, orgID, id string) (int, error) {
+	var height int
+	err := tx.QueryRow(ctx, "SELECT height_units FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible+" FOR UPDATE",
+		orgID, id).Scan(&height)
+	return height, err
+}
+
+// checkHeightCoversMounts refuses a height below the highest unit occupied
+// by a mount of the rack (RCK-01: position_u + height_u − 1 ≤ height_units)
+// with 409 on height_units; the message names that unit. The caller holds
+// the lock of lockRackHeight.
+func checkHeightCoversMounts(ctx context.Context, tx pgx.Tx, orgID, id string, height int) error {
+	var top int
+	if err := tx.QueryRow(ctx,
+		"SELECT COALESCE(MAX(position_u + height_u - 1), 0) FROM rack_mount WHERE organization_id = $1 AND rack_id = $2",
+		orgID, id).Scan(&top); err != nil {
+		return fmt.Errorf("highest mounted unit: %w", err)
+	}
+	if height < top {
+		return heightBelowMountsError(top)
+	}
+	return nil
+}
+
 func (r *PGRepository) UpdateRack(ctx context.Context, orgID, id string, req UpdateRackRequest) (*Rack, error) {
 	var rk *Rack
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := lockRackHeight(ctx, tx, orgID, id); err != nil {
+			if err == pgx.ErrNoRows {
+				return ErrNotFound
+			}
+			return err
+		}
+		if req.HeightUnits != nil {
+			if err := checkHeightCoversMounts(ctx, tx, orgID, id, *req.HeightUnits); err != nil {
+				return err
+			}
+		}
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -292,8 +331,9 @@ func (r *PGRepository) CreateMount(ctx context.Context, m *RackMount) error {
 		return err
 	}
 	return database.WithRequestTenant(ctx, r.pool, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		var height int
-		err := tx.QueryRow(ctx, "SELECT height_units FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, m.OrganizationID, m.RackID).Scan(&height)
+		// The rack row stays locked until commit: a concurrent reduction of
+		// its height waits for the mount and then sees it (RCK-01).
+		height, err := lockRackHeight(ctx, tx, m.OrganizationID, m.RackID)
 		if err == pgx.ErrNoRows {
 			return ErrRackNotFound
 		}
@@ -387,8 +427,8 @@ func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req Up
 				return ruleError(ErrValidation, "invalid face")
 			}
 		}
-		var rackHeight int
-		heightErr := tx.QueryRow(ctx, "SELECT height_units FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, orgID, rackID).Scan(&rackHeight)
+		// Lock the target rack as CreateMount does (RCK-01).
+		rackHeight, heightErr := lockRackHeight(ctx, tx, orgID, rackID)
 		if heightErr == pgx.ErrNoRows {
 			return ErrRackNotFound
 		}

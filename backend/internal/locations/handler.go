@@ -157,6 +157,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		writeFieldProblem(w, r, &FieldError{Field: "parent_id", Message: err.Error(), Err: err})
 	case errors.Is(err, ErrInvalidInput):
 		httpx.ValidationError(w, r, err.Error())
+	case api.WriteFieldError(w, err):
+		// A duplicate name: 409 with field name (LOC-03..06).
 	default:
 		api.WriteRepoError(w, err)
 	}
