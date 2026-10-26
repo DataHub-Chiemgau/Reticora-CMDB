@@ -1,6 +1,6 @@
 # Entscheidungen – Korrekturplan G1
 
-Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../entscheidungen.md) (E-01 bis E-36, E-56 bis E-58) und [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md) (E-37 bis E-55). Jede Entscheidung nennt Status, Frage, Optionen, Empfehlung, Übergangsregel sowie betroffene IDs und WPs. Alle Entscheidungen sind offen; ihre Empfehlung gilt als Übergangsregel, damit die WPs starten können. Widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst. Ausnahme war WP-388 (`t5-install-default`), das erst nach der Entscheidung von E-69 für Option 1 beginnen durfte; E-69 ist am 2026-10-21 mit Option 1 entschieden, WP-388 ist umgesetzt. Unabhängig von Entscheidungen warten WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-455 (`t5-v2-ids`) auf die externen Lieferungen A-02, A-07 und A-11.
+Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../entscheidungen.md) (E-01 bis E-36, E-56 bis E-58) und [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md) (E-37 bis E-55). Jede Entscheidung nennt Status, Frage, Optionen, Empfehlung, Übergangsregel sowie betroffene IDs und WPs. Alle Entscheidungen sind offen; ihre Empfehlung gilt als Übergangsregel, damit die WPs starten können. Widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst. Ausnahme war WP-388 (`t5-install-default`), das erst nach der Entscheidung von E-69 für Option 1 beginnen durfte; E-69 ist am 2026-10-21 mit Option 1 entschieden, WP-388 ist umgesetzt. E-72 ist am 2026-10-26 mit Option 1 entschieden. Unabhängig von Entscheidungen warten WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-455 (`t5-v2-ids`) auf die externen Lieferungen A-02, A-07 und A-11.
 
 ## Übersicht
 
@@ -19,7 +19,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-69](#e-69) | TEC-15: Installationsquelle für die Signaturprüfung vor der Installation | entschieden: Option 1 (Auftraggeber, 2026-10-21) | WP-387, WP-388, WP-595 |
 | [E-70](#e-70) | Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03) | offen (Empfehlung als Übergangsregel) | WP-391 |
 | [E-71](#e-71) | LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten | entschieden: Option 1 (Auftraggeber, 2026-10-25) | WP-411 |
-| [E-72](#e-72) | Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) | offen (Empfehlung als Übergangsregel) | WP-427, WP-560, WP-574 |
+| [E-72](#e-72) | Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) | entschieden: Option 1 (Auftraggeber, 2026-10-26) | WP-427, WP-560, WP-574 |
 | [E-73](#e-73) | Indizierte Attributfilter unter Row-Level-Security | offen (Empfehlung als Übergangsregel) | WP-435 |
 | [E-74](#e-74) | OPS-04 in Kubernetes: Datenbankseite der WAL-Archivierung | offen (Empfehlung als Übergangsregel) | WP-444 |
 | [E-75](#e-75) | OPS-05: Alarmierung des Betriebs über NTF-Kanäle | offen (Empfehlung als Übergangsregel) | WP-448 |
@@ -347,7 +347,7 @@ Folgen der Entscheidung:
 
 **Thema:** Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-26)
 
 **Frage:** Der Projektplan ändert bestehende Migrationen nicht. 000056.down droppt die clusterweite Rolle reticora_app und scheitert in geteilten Clustern (F-193); 000066.up leert nicht konforme Storage-Keys ohne Bericht je Dokument (F-187). Beides lässt sich nur in den Migrationen selbst beheben.
 
@@ -358,7 +358,11 @@ Folgen der Entscheidung:
 
 **Empfehlung:** Option 1 nach dem Präzedenzfall E-26; bereits migrierte Installationen erhalten den Release-Hinweis.
 
-**Übergangsregel:** Roundtrip-Test in eigener Datenbank und Upgrade-Hinweise werden sofort umgesetzt; die Änderung der Migrationsdateien erfolgt mit der Freigabe von Option 1. Bei Option 2 werden F-193 und F-187 mit PO-Freigabe als akzeptierte Abweichungen zurückgestellt (Release-Hinweis).
+**Umsetzung:** Der Auftraggeber hat am 2026-10-26 Option 1 nach der Empfehlung entschieden. Damit dürfen die ausgelieferten Migrationen in genau diesen Punkten geändert werden; jede Änderung bekommt einen Release-Hinweis in `docs/betrieb/upgrade-hinweise.md`.
+- 000056 down: WP-427 (`t1-mig56-down`, K3) entzieht die Rechte in der eigenen Datenbank und droppt `reticora_app` nur ohne fremde Abhängigkeiten; `TestMigrationsRoundtrip` läuft in einer eigenen Datenbank (F-193).
+- 000066 up: WP-560 (`t1-doc-blob-cleanup`, K6) schreibt vor dem Leeren je Dokument einen Bericht in `migration_quarantine` (F-187).
+- 000056 down auf Altinstallationen: WP-574 (`t3-migration-guards`, K6) prüft `to_regclass('migration_quarantine')` (F-224).
+Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nicht; für sie gilt der Release-Hinweis.
 
 **Betroffene IDs:** TEN-03, MGT-01
 
