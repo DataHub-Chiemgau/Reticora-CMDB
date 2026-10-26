@@ -244,6 +244,32 @@ jobs:
           sleep 5
           ./tests/install-smoke-health.sh deploy/docker-compose .env
 
+      # NFR-06 (WP-458, E-77): the installer chose the log retention of the
+      # platform — on the runners (systemd) journald with the 30-day drop-in,
+      # in the debian:12 container (no systemd) the json-file rotation through
+      # COMPOSE_FILE — and docker compose logs reads the server's log with it.
+      - name: Container logs bounded and readable with docker compose logs (NFR-06)
+        env:
+          PLATFORM_CONTAINER: ${{ matrix.container }}
+        run: |
+          set -euo pipefail
+          cd deploy/docker-compose
+          if [ -z "$PLATFORM_CONTAINER" ]; then
+            want=journald
+            grep -qx 'MaxRetentionSec=30day' /etc/systemd/journald.conf.d/reticora.conf \
+              || { echo "FAIL: no journald drop-in with MaxRetentionSec=30day"; exit 1; }
+            if grep -q '^COMPOSE_FILE=' .env; then echo "FAIL: .env selects $(grep '^COMPOSE_FILE=' .env)"; exit 1; fi
+          else
+            want=json-file
+            grep -qE '^COMPOSE_FILE=.*docker-compose\.logging-json\.yml$' .env \
+              || { echo "FAIL: .env does not select docker-compose.logging-json.yml"; exit 1; }
+          fi
+          driver="$(docker inspect --format '{{.HostConfig.LogConfig.Type}}' "$(docker compose --env-file .env ps -q server)")"
+          [ "$driver" = "$want" ] || { echo "FAIL: the server logs with $driver, expected $want"; exit 1; }
+          lines="$(docker compose --env-file .env logs --no-color --tail 20 server | wc -l)"
+          [ "$lines" -gt 0 ] || { echo "FAIL: docker compose logs server read nothing ($driver)"; exit 1; }
+          echo "OK: the server logs with $driver; docker compose logs read $lines lines"
+
       # WP-100 (OPS-04): WAL archiving works and a base backup exists.
       - name: Verify the backup chain
         run: |

@@ -432,7 +432,7 @@ jobs:
 
   # Gate G1 (WP-213): REP-01 structure, gate checklist, open Critical findings,
   # frozen acceptance artefacts and workflow syntax; the break-glass alert
-  # (WP-362, SEC-07).
+  # (WP-362, SEC-07); the container log retention (WP-458, NFR-06).
   gate:
     runs-on: ubuntu-latest
     steps:
@@ -480,6 +480,18 @@ jobs:
       # restore-test.yml.
       - name: Restore proof configuration and RPO evaluation (NFR-05, OPS-04)
         run: ./tests/restore-pitr-config.test.sh
+
+      # NFR-06 (WP-458, F-150, E-77): every compose service logs to journald;
+      # install-cloud.sh writes the 30-day journald drop-in where
+      # systemd-journald runs, otherwise it selects the json-file rotation
+      # through COMPOSE_FILE (systemctl and docker stubbed, docker compose
+      # config with and without the rotation, negative copies of the compose
+      # file).
+      - name: Container logs 30 days (NFR-06)
+        run: ./tests/audit/log-retention.test.sh
+
+      - name: Installer log retention, journald drop-in or json-file fallback (NFR-06)
+        run: ./tests/install-log-retention.test.sh
 
   # OPS-05 (WP-446): the Alertmanager configuration loads (amtool
   # check-config), the PrometheusRule groups pass promtool check rules and

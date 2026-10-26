@@ -97,8 +97,9 @@ the last removed entry, from which verification continues. The database
 allows the deletion only for entries older than ten years and only inside a
 retention run (migration 000119). A soft-deleted CI that is still referenced
 (asset, assignment, ticket) stays. Events (stream, 30 days), metrics
-(TimescaleDB policy, 400 days), logs (30 days) and backups (35 days) expire
-where they are kept.
+(TimescaleDB policy, 400 days), container logs (30 days, see
+[Container logs](#container-logs-nfr-06)) and backups (35 days) expire where
+they are kept.
 
 ### Re-chaining with migration 000158 (AUD-04)
 
@@ -126,6 +127,83 @@ space until autovacuum has run. Check the chains afterwards with
 with a quote or a control character, storable only since 000158, ends the
 re-chain of its organization, and the restored function cannot verify that
 chain.
+
+## Container logs (NFR-06)
+
+The logs of the containers (server, frontend, Keycloak, databases, NATS, …)
+can hold personal data such as user names, e-mail and IP addresses. They are
+kept 30 days and then deleted (NFR-06, decision E-77 Option 1).
+
+| Deployment | Mechanism | Set up by |
+|---|---|---|
+| Compose on a host with systemd-journald (Ubuntu 22.04/24.04, Debian 12) | every service logs to the journal (`x-logging` in `deploy/docker-compose/docker-compose.yml`, driver `journald`); the drop-in `/etc/systemd/journald.conf.d/reticora.conf` sets `MaxRetentionSec=30day` and `MaxFileSec=1day` | `install-cloud.sh` |
+| Compose without systemd-journald (e.g. Docker in a container without systemd) | `deploy/docker-compose/docker-compose.logging-json.yml`: json-file with `max-size: 20m` and `max-file: 5` for every service, selected through `COMPOSE_FILE` in `.env` | `install-cloud.sh` (fallback) |
+| Kubernetes | node rotation and a log backend with 30 days retention | operator (below) |
+
+**journald.** `MaxRetentionSec` deletes a journal file once its first entry
+is older than 30 days, checked when journald starts a new file.
+`MaxFileSec=1day` starts a new journal file every day, so the entries go
+after about 30 days (29 to 31); with journald's default of one file per month
+they could stay up to a month longer. journald also keeps its size
+limit (`SystemMaxUse`, by default 10 % of the file system, at most 4 GB).
+journald reads the drop-in only at its start, so the installer restarts
+`systemd-journald` when it writes or changes it.
+
+**The drop-in applies to the whole host.** It limits the entire journal, not
+only the containers of Reticora: system services, the kernel, SSH logins and
+other containers on the host lose their entries after 30 days as well. The
+installer says so when it writes the drop-in. A host whose other logs must be
+kept longer forwards them elsewhere (e.g. rsyslog) or runs Reticora on a
+host of its own.
+
+**Settings of the operator.** The installer does not loosen a stricter
+setting: a `MaxRetentionSec` of at most 30 days or a `MaxFileSec` of at most
+one day in `journald.conf` or another drop-in stays in effect, `reticora.conf`
+then leaves that key out and is not written (or removed) when it would set
+nothing; a stricter value written into `reticora.conf` itself is kept.
+Otherwise the installer rewrites `reticora.conf` on every run; keep your own
+settings in a drop-in of your own (e.g. `50-site.conf`). The drop-ins apply in
+the order of their file names: one sorting after `reticora.conf` with a longer
+`MaxRetentionSec` overrides it, and the installer warns about that. Writing
+the drop-in needs root or sudo; without it the installer uses the json-file
+fallback and says so.
+
+**Reading the logs.** `docker compose logs <service>` (in
+`deploy/docker-compose`) and `docker logs <container>` read both drivers;
+the journal also answers `journalctl CONTAINER_NAME=docker-compose-server-1`.
+journald limits the messages per service (by default 10,000 per 30 seconds,
+scaled by the free disk space); all containers count as `docker.service`.
+When a burst of the server exceeds it, journald logs `Suppressed … messages
+from docker.service` and drops the lines; raise `LogRateLimitIntervalSec=` /
+`LogRateLimitBurst=` in a drop-in for `docker.service` (systemd 240 and later)
+if that happens.
+
+**Fallback without systemd-journald.** The journald driver cannot start a
+container where no systemd-journald runs. The installer then writes
+`COMPOSE_FILE=docker-compose.yml[:docker-compose.override.yml]:docker-compose.logging-json.yml`
+into `.env` (the override only with `--build-from-source`), merges the file
+into its own compose calls and warns. `docker compose --env-file .env …` in
+`deploy/docker-compose` merges it as well (`COMPOSE_FILE` is relative to the
+current directory). The rotation bounds the size (at most 5 × 20 MB per
+container), not the age: on a quiet service a line can stay longer than 30
+days. For the 30 days run the stack on a host with systemd-journald; a re-run
+of the installer there switches to journald and removes `COMPOSE_FILE` again.
+A `COMPOSE_FILE` of your own without the rotation stops the installer on such
+a host.
+
+**Kubernetes.** The manifests do not configure logs: the container runtime
+writes them to the nodes (`/var/log/pods`), where the kubelet rotates them by
+size. The operator of the cluster provides:
+
+- the node rotation through the kubelet configuration, e.g.
+  `containerLogMaxSize: 20Mi` and `containerLogMaxFiles: 5`, which bounds the
+  size on the nodes but not the age;
+- a log backend that collects the pod logs and deletes them after 30 days,
+  e.g. Loki with `retention_period: 720h`, an index lifecycle policy with a
+  delete phase after 30 days in Elasticsearch/OpenSearch, or the retention
+  of the cloud provider's logging service.
+
+Without such a backend the 30 days of NFR-06 are not met on Kubernetes.
 
 ## Notice runs (JOB-02, ENT-07, COL-04)
 

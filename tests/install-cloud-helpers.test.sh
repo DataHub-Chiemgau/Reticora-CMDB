@@ -433,6 +433,9 @@ test_issuer_checks_order() {
     configure_realm() { :; }
     bootstrap_tls_cert() { TLS_BOOTSTRAP_REGENERATED=1; }
     provide_images() { :; }
+    # Would write the journald drop-in of the host (NFR-06,
+    # tests/install-log-retention.test.sh).
+    configure_log_retention() { :; }
     issue_tls_certificate() { :; }
     verify_stack() { :; }
     gc_images() { :; }

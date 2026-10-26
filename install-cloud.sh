@@ -40,6 +40,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_DIR="$SCRIPT_DIR/deploy/docker-compose"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
 OVERRIDE_FILE="$COMPOSE_DIR/docker-compose.override.yml"
+# json-file log rotation of a host without systemd-journald (NFR-06, see
+# configure_log_retention).
+LOGGING_JSON_FILE="$COMPOSE_DIR/docker-compose.logging-json.yml"
 ENV_FILE="$COMPOSE_DIR/.env"
 NON_INTERACTIVE=0
 # Release whose signed images are installed (empty: chosen in select_release).
@@ -264,10 +267,15 @@ compose_cmd() {
     # Passing -f explicitly disables compose's automatic merging of
     # docker-compose.override.yml, so merge it by hand whenever it exists
     # (it carries the build: sections for the local source build). The
-    # prebuilt-image path renames it to .disabled to opt out.
+    # prebuilt-image path renames it to .disabled to opt out. -f also
+    # disables COMPOSE_FILE of .env: the json-file log rotation that it
+    # selects on a host without systemd-journald is merged here as well.
     local files=(-f "$COMPOSE_FILE")
     if [ -f "$OVERRIDE_FILE" ]; then
         files+=(-f "$OVERRIDE_FILE")
+    fi
+    if log_rotation_selected; then
+        files+=(-f "$LOGGING_JSON_FILE")
     fi
     "${COMPOSE[@]}" --env-file "$ENV_FILE" "${files[@]}" "$@"
 }
@@ -586,7 +594,9 @@ env_set() {
 
 # merge_env_extras <new env file> — appends every KEY=value of the existing
 # .env that the installer does not write itself (e.g. RETICORA_HTTP_BIND), so
-# a re-run merges instead of dropping additional configuration (INS-05).
+# a re-run merges instead of dropping additional configuration (INS-05). The
+# COMPOSE_FILE of the json-file log rotation is the installer's own:
+# configure_log_retention sets it again when the host still needs it.
 merge_env_extras() {
     local new="$1" line key extras=()
     [ -f "$ENV_FILE" ] || return 0
@@ -595,6 +605,7 @@ merge_env_extras() {
         key="${line%%=*}"
         [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
         grep -q "^${key}=" "$new" && continue
+        [ "$key" = COMPOSE_FILE ] && names_log_rotation "${line#*=}" && continue
         extras+=("$line")
     done < "$ENV_FILE"
     [ "${#extras[@]}" -gt 0 ] || return 0
@@ -1593,6 +1604,230 @@ provide_images() {
     success "Server and frontend images are available"
 }
 
+# ─── Container logs: 30 days (NFR-06, E-77) ───────────────────────────────────
+# The services log to the journal of the host (docker-compose.yml, logging
+# driver journald). Where systemd-journald runs, the drop-in reticora.conf
+# limits the journal: MaxRetentionSec=30day deletes a journal file once its
+# first entry is older than 30 days, MaxFileSec=1day starts a new file every
+# day, so the entries go after about 30 days. The drop-in applies to the
+# whole journal of the host, not only to Reticora. A key that the host's
+# configuration already holds at least as strictly (at most 30 days, at most
+# one day; also a stricter value written into reticora.conf by the operator)
+# stays in effect and is left out. Without systemd-journald (e.g. Docker in a
+# container without systemd) the journald driver cannot start a container:
+# .env then selects docker-compose.logging-json.yml (json-file rotation,
+# bounded in size, not in age) through COMPOSE_FILE.
+# Root of the journald configuration (tests use a directory of their own).
+JOURNALD_ROOT=""
+JOURNALD_DROPIN="reticora.conf"
+LOG_ROTATION_MARKER="# Container logs without systemd-journald: json-file rotation (NFR-06, docs/ops/workers.md)"
+
+# names_log_rotation <COMPOSE_FILE value> — the value names the json-file
+# log rotation.
+names_log_rotation() {
+    local name="${LOGGING_JSON_FILE##*/}"
+    case ":$1:" in
+        *":$name:"*|*"/$name:"*) return 0 ;;
+    esac
+    return 1
+}
+
+# log_rotation_selected — .env selects the json-file log rotation.
+log_rotation_selected() {
+    local files
+    files="$(env_get COMPOSE_FILE)" || return 1
+    names_log_rotation "$files"
+}
+
+# journald_running — systemd-journald runs on this host (a container without
+# systemd has no systemctl or answers "not booted with systemd").
+journald_running() {
+    have_cmd systemctl && systemctl is-active --quiet systemd-journald >/dev/null 2>&1
+}
+
+# timespan_seconds <value> — a systemd time span (systemd.time(7): 30day,
+# 1month, "2w 3d", a bare number of seconds) in whole seconds; 0 for an empty
+# value, 0 or infinity (no limit). Fails on a value journald does not accept.
+timespan_seconds() {
+    printf '%s\n' "$1" | awk '
+        function unit(u) {
+            if (u == "" || u ~ /^(s|sec|second|seconds)$/) return 1
+            if (u ~ /^(ms|msec)$/) return 0.001
+            if (u ~ /^(us|usec)$/) return 0.000001
+            if (u ~ /^(m|min|minute|minutes)$/) return 60
+            if (u ~ /^(h|hr|hour|hours)$/) return 3600
+            if (u ~ /^(d|day|days)$/) return 86400
+            if (u ~ /^(w|week|weeks)$/) return 604800
+            if (u ~ /^(M|month|months)$/) return 2629800
+            if (u ~ /^(y|year|years)$/) return 31557600
+            return -1
+        }
+        NR == 1 {
+            s = $0
+            gsub(/[ \t]/, "", s)
+            if (s == "" || s == "infinity") { print 0; exit }
+            total = 0
+            while (s != "") {
+                if (!match(s, /^[0-9]+(\.[0-9]+)?/)) { bad = 1; exit }
+                n = substr(s, 1, RLENGTH); s = substr(s, RLENGTH + 1)
+                match(s, /^[A-Za-z]*/); u = substr(s, 1, RLENGTH); s = substr(s, RLENGTH + 1)
+                f = unit(u)
+                if (f < 0) { bad = 1; exit }
+                total += n * f
+            }
+            printf "%d\n", total
+        }
+        END { exit bad }'
+}
+
+# journald_conf_value <file> <key> — the value of the last <key>= line of a
+# journald configuration file; fails when the file does not set <key>.
+journald_conf_value() {
+    [ -f "$1" ] && grep -qE "^[[:space:]]*$2[[:space:]]*=" "$1" 2>/dev/null || return 1
+    trim "$(sed -nE "s/^[[:space:]]*$2[[:space:]]*=//p" "$1" | tail -n 1)"
+}
+
+# journald_setting <key> [drop-in name to leave out] — the value of <key>
+# that systemd-journald applies, in seconds (0: not set, no limit):
+# journald.conf, then the drop-ins of all journald.conf.d directories sorted
+# by file name (of equal names the one in /etc before /run, /usr/local/lib,
+# /usr/lib; a link to /dev/null masks it), the last setting wins
+# (journald.conf(5)). An unparsable value is ignored like journald does.
+journald_setting() {
+    local key="$1" skip="${2:-}" dir f name raw secs=0 s
+    local -a files=()
+    local -A dropins=()
+    for dir in /etc /run /usr/local/lib /usr/lib; do
+        if [ -f "$JOURNALD_ROOT$dir/systemd/journald.conf" ]; then
+            files+=("$JOURNALD_ROOT$dir/systemd/journald.conf")
+            break
+        fi
+    done
+    for dir in /usr/lib /usr/local/lib /run /etc; do
+        for f in "$JOURNALD_ROOT$dir/systemd/journald.conf.d/"*.conf; do
+            [ -e "$f" ] || [ -L "$f" ] || continue
+            name="${f##*/}"
+            [ "$name" != "$skip" ] || continue
+            dropins["$name"]="$f"
+        done
+    done
+    while IFS= read -r name; do
+        [ -n "$name" ] && files+=("${dropins[$name]}")
+    done < <(printf '%s\n' "${!dropins[@]}" | LC_ALL=C sort)
+    for f in ${files[@]+"${files[@]}"}; do
+        raw="$(journald_conf_value "$f" "$key")" || continue
+        s="$(timespan_seconds "$raw")" && secs="$s"
+    done
+    printf '%s\n' "$secs"
+}
+
+# restart_journald — systemd-journald reads its configuration only at start.
+restart_journald() {
+    $SUDO systemctl restart systemd-journald \
+        || warn "Could not restart systemd-journald; the log retention applies from its next start ($SUDO systemctl restart systemd-journald)."
+}
+
+# write_journald_dropin — the drop-in /etc/systemd/journald.conf.d/
+# reticora.conf with MaxRetentionSec=30day and MaxFileSec=1day, each only
+# where the host's configuration without it is not at least as strict;
+# systemd-journald is restarted when the drop-in changed. Fails when it
+# cannot be written (root or sudo needed).
+write_journald_dropin() {
+    local dir="$JOURNALD_ROOT/etc/systemd/journald.conf.d" file spec key value target own_raw own other
+    local -a lines=() kept=()
+    file="$dir/$JOURNALD_DROPIN"
+    for spec in "MaxRetentionSec 30day 2592000" "MaxFileSec 1day 86400"; do
+        read -r key value target <<<"$spec"
+        # A stricter value the operator wrote into reticora.conf is kept.
+        if own_raw="$(journald_conf_value "$file" "$key")" && own="$(timespan_seconds "$own_raw")" \
+            && [ "$own" -gt 0 ] && [ "$own" -lt "$target" ]; then
+            value="$own_raw"
+            target="$own"
+        fi
+        other="$(journald_setting "$key" "$JOURNALD_DROPIN")"
+        if [ "$other" -gt 0 ] && [ "$other" -le "$target" ]; then
+            kept+=("$key")
+        else
+            lines+=("$key=$value")
+        fi
+    done
+    if [ "${#kept[@]}" -gt 0 ]; then
+        info "Container logs: the journald configuration of this host already sets ${kept[*]} at least as strictly; it stays in effect."
+    fi
+    if [ "${#lines[@]}" -eq 0 ]; then
+        if [ -e "$file" ]; then
+            $SUDO rm -f "$file" || return 1
+            restart_journald
+        fi
+    else
+        local content
+        content="$(printf '%s\n' \
+            "# Written by install-cloud.sh (Reticora CMDB, NFR-06): container logs of the" \
+            "# Reticora stack are kept 30 days. Applies to the whole journal of this host." \
+            "# A stricter value in reticora.conf or another drop-in is kept by the" \
+            "# installer; see docs/ops/workers.md, \"Container logs\"." \
+            "[Journal]" "${lines[@]}")"
+        if [ "$(cat "$file" 2>/dev/null)" != "$content" ]; then
+            { $SUDO mkdir -p "$dir" && printf '%s\n' "$content" | $SUDO tee "$file" >/dev/null && $SUDO chmod 644 "$file"; } 2>/dev/null \
+                || return 1
+            restart_journald
+            warn "Container logs: wrote $file (${lines[*]}). It applies to the whole journal of this host, not only to Reticora: systemd-journald deletes every entry after at most 30 days (docs/ops/workers.md, 'Container logs')."
+        fi
+    fi
+    other="$(journald_setting MaxRetentionSec)"
+    if [ "$other" -eq 0 ] || [ "$other" -gt 2592000 ]; then
+        warn "Container logs: a journald drop-in sorting after $JOURNALD_DROPIN sets a longer MaxRetentionSec; the container logs are kept longer than 30 days (NFR-06, docs/ops/workers.md)."
+    else
+        success "Container logs: systemd-journald keeps them at most 30 days"
+    fi
+}
+
+# set_log_rotation <on|off> — COMPOSE_FILE in .env selects the json-file log
+# rotation (on: the files of compose_cmd plus docker-compose.logging-json.yml,
+# relative to deploy/docker-compose) or nothing (off). A COMPOSE_FILE of the
+# operator without the rotation stays.
+set_log_rotation() {
+    local tmp files
+    tmp="$(mktemp)"
+    # The managed lines go with the blank line set_log_rotation put before them.
+    if ! awk -v marker="$LOG_ROTATION_MARKER" -v name="${LOGGING_JSON_FILE##*/}" '
+        $0 == "" { blank++; next }
+        $0 == marker { blank = 0; next }
+        index($0, "COMPOSE_FILE=") == 1 && (index(":" substr($0, 14) ":", ":" name ":") || index(substr($0, 14) ":", "/" name ":")) { next }
+        { for (; blank > 0; blank--) print ""; print }
+        END { for (; blank > 0; blank--) print "" }' "$ENV_FILE" > "$tmp" || ! mv "$tmp" "$ENV_FILE"; then
+        rm -f "$tmp"
+        die "Could not update COMPOSE_FILE in $ENV_FILE."
+    fi
+    if [ "$1" = on ]; then
+        env_get COMPOSE_FILE >/dev/null \
+            && die "COMPOSE_FILE in $ENV_FILE selects other compose files. This host has no systemd-journald, so the installer selects the json-file log rotation there (${LOGGING_JSON_FILE##*/}); remove COMPOSE_FILE from $ENV_FILE and re-run (docs/ops/workers.md, 'Container logs')."
+        files="${COMPOSE_FILE##*/}"
+        [ -f "$OVERRIDE_FILE" ] && files="$files:${OVERRIDE_FILE##*/}"
+        files="$files:${LOGGING_JSON_FILE##*/}"
+        printf '\n%s\nCOMPOSE_FILE=%s\n' "$LOG_ROTATION_MARKER" "$files" >> "$ENV_FILE"
+    fi
+    chmod 600 "$ENV_FILE"
+}
+
+# configure_log_retention — container logs at most 30 days (NFR-06): the
+# journald drop-in where systemd-journald runs, otherwise the json-file
+# rotation through COMPOSE_FILE in .env. Runs after provide_images, which
+# settles whether the source-build override is in use.
+configure_log_retention() {
+    if journald_running; then
+        if write_journald_dropin; then
+            set_log_rotation off
+            return 0
+        fi
+        warn "Container logs: could not write $JOURNALD_ROOT/etc/systemd/journald.conf.d/$JOURNALD_DROPIN (root or sudo needed); using the json-file rotation instead."
+    else
+        info "Container logs: no running systemd-journald on this host."
+    fi
+    set_log_rotation on
+    warn "Container logs: json-file rotation (${LOGGING_JSON_FILE##*/}, 5 files of 20 MB per container), selected through COMPOSE_FILE in $ENV_FILE. It bounds the size, not the age of the logs; the 30 days of NFR-06 need systemd-journald (docs/ops/workers.md, 'Container logs')."
+}
+
 # ─── Stack startup ────────────────────────────────────────────────────────────
 wait_for_service() {
     local service="$1" attempts=60
@@ -2580,6 +2815,7 @@ EOF
     configure_realm
     bootstrap_tls_cert
     provide_images
+    configure_log_retention
     start_stack
     issue_tls_certificate
     verify_stack

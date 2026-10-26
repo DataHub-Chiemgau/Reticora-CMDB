@@ -42,7 +42,6 @@ sh;tests/audit/g1-gate-evidence.test.sh;pentest_field;F-039
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_findings;F-039
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_summary;F-039
 sh;tests/audit/g1-gate-evidence.test.sh;subprocessors;F-137
-sh;tests/audit/log-retention.test.sh;NFR-06 logs 30 days;F-150
 sh;tests/audit/ops-config.test.sh;k8s_wal_archive;F-128
 vitest;frontend/src/api/deprecatedPaths.auditdefect.ts;frontend API paths (catalogue contract) uses no path whose every operation is deprecated;F-077
 vitest;frontend/src/pages/AuditPage.auditdefect.tsx;AuditPage renders the API audit entry (audit defect) shows the entry time and the affected resource;F-078

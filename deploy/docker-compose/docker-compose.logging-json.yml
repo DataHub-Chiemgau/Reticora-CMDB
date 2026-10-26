@@ -1,0 +1,49 @@
+# Fallback of the container log retention (NFR-06, E-77) for a host without
+# systemd-journald, where the journald logging driver of docker-compose.yml
+# cannot start a container (e.g. Docker inside a container without systemd):
+# json-file with rotation for every service. The journald driver accepts no
+# max-size/max-file options, hence a file of its own; it replaces the logging
+# section of each service.
+#
+# install-cloud.sh selects it through COMPOSE_FILE in .env when it finds no
+# running systemd-journald, so `docker compose --env-file .env …` from this
+# directory merges it. By hand:
+#   docker compose --env-file .env -f docker-compose.yml \
+#     -f docker-compose.logging-json.yml up -d
+#
+# The rotation bounds the size (5 files of 20 MB per container), not the
+# age: a log line is removed once its file is rotated out, which on a quiet
+# service can take longer than 30 days. See docs/ops/workers.md, "Container
+# logs". tests/install-log-retention.test.sh checks that every service of
+# docker-compose.yml is listed here.
+x-logging-json: &logging-json
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  postgres:
+    logging: *logging-json
+  backup:
+    logging: *logging-json
+  nats:
+    logging: *logging-json
+  nats-edge:
+    logging: *logging-json
+  redis:
+    logging: *logging-json
+  minio:
+    logging: *logging-json
+  keycloak-db:
+    logging: *logging-json
+  keycloak:
+    logging: *logging-json
+  opensearch:
+    logging: *logging-json
+  server:
+    logging: *logging-json
+  frontend:
+    logging: *logging-json
+  certbot:
+    logging: *logging-json

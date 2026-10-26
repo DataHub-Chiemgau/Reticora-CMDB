@@ -27,6 +27,17 @@
 # verifies the signed release images with cosign and pins them by digest
 # (TEC-15); --build-from-source builds them with the override instead.
 
+# Container logs are kept 30 days (NFR-06, E-77): every service logs to the
+# journal of the host, and install-cloud.sh limits the journal with the
+# drop-in /etc/systemd/journald.conf.d/reticora.conf (MaxRetentionSec=30day;
+# it applies to the whole journal of the host). A host without
+# systemd-journald cannot start a container with this driver; there
+# install-cloud.sh selects docker-compose.logging-json.yml (json-file with
+# rotation) through COMPOSE_FILE in .env. docker logs and docker compose logs
+# read both. See docs/ops/workers.md, "Container logs".
+x-logging: &logging
+  driver: journald
+
 services:
   postgres:
     # TimescaleDB with pgBackRest (deploy/docker-compose/postgres, WP-100):
@@ -38,6 +49,7 @@ services:
     # frontend.
     image: ${RETICORA_POSTGRES_IMAGE:-reticora-postgres:latest}
     restart: unless-stopped
+    logging: *logging
     entrypoint: ["reticora-pgbackrest-env.sh", "docker-entrypoint.sh"]
     command:
       - postgres
@@ -80,6 +92,7 @@ services:
   backup:
     image: ${RETICORA_POSTGRES_IMAGE:-reticora-postgres:latest}
     restart: unless-stopped
+    logging: *logging
     user: postgres
     entrypoint: ["reticora-pgbackrest-env.sh", "reticora-backup.sh"]
     command: ["run"]
@@ -114,6 +127,7 @@ services:
   nats:
     image: nats:2.10-alpine
     restart: unless-stopped
+    logging: *logging
     command: ["-c", "/etc/nats/nats.conf"]
     ports:
       - "127.0.0.1:${RETICORA_NATS_LOCAL_PORT:-4223}:4222"
@@ -135,6 +149,7 @@ services:
   nats-edge:
     image: nats:2.10-alpine
     restart: unless-stopped
+    logging: *logging
     working_dir: /etc/nats
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -165,6 +180,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *logging
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
@@ -181,6 +197,7 @@ services:
     # included, AGPLv3), pinned by release tag and digest.
     image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     restart: unless-stopped
+    logging: *logging
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${RETICORA_S3_ACCESS_KEY:?RETICORA_S3_ACCESS_KEY must be set}
@@ -199,6 +216,7 @@ services:
   keycloak-db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_DB: keycloak
       POSTGRES_USER: keycloak
@@ -214,6 +232,7 @@ services:
   keycloak:
     image: quay.io/keycloak/keycloak:24.0
     restart: unless-stopped
+    logging: *logging
     # `start` with an imported realm: users created via the admin console are
     # persisted in keycloak-db (the previous `start-dev` used an in-memory
     # database, losing everything on restart). The realm file is imported
@@ -264,6 +283,7 @@ services:
   opensearch:
     image: opensearchproject/opensearch:2.13.0
     restart: unless-stopped
+    logging: *logging
     profiles: ["opensearch"]
     environment:
       discovery.type: single-node
@@ -294,6 +314,7 @@ services:
     # build: lives in docker-compose.override.yml so this file also works
     # standalone with prebuilt registry images.
     restart: unless-stopped
+    logging: *logging
     environment:
       RETICORA_PORT: "8080"
       # Runtime login reticora_runtime (TEN-03): LOGIN NOSUPERUSER NOBYPASSRLS,
@@ -391,6 +412,7 @@ services:
     # build: lives in docker-compose.override.yml so this file also works
     # standalone with prebuilt registry images.
     restart: unless-stopped
+    logging: *logging
     # The unprivileged nginx worker must be able to write its pid file and
     # temp directories. frontend/nginx.conf places all of them under /tmp
     # (a tmpfs is root-owned and therefore not writable for the nginx user),
@@ -447,6 +469,7 @@ services:
   certbot:
     # Pinned version for reproducible deployments.
     image: certbot/certbot:v2.11.0
+    logging: *logging
     # Idles between renewal checks: certbot renew is a no-op until the
     # certificate is close to expiry; the real issuance runs once from
     # install-cloud.sh. Uses the host's /bin/sh loop instead of the image

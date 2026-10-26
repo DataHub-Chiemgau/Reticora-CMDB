@@ -113,19 +113,25 @@ It then:
 5. verifies the signed release images with cosign, pins them by digest in
    `.env` and pulls them (default), or builds server, frontend and PostgreSQL
    from the checkout (`--build-from-source`, not signature-verified),
-6. starts the infrastructure and applies the SQL migrations from
+6. limits the container logs to 30 days (NFR-06): on a host with
+   systemd-journald with the drop-in
+   `/etc/systemd/journald.conf.d/reticora.conf` (applies to the whole journal
+   of the host), otherwise with the json-file rotation of
+   `docker-compose.logging-json.yml` through `COMPOSE_FILE` in `.env` (see
+   [Container logs](#container-logs-30-days-nfr-06)),
+7. starts the infrastructure and applies the SQL migrations from
    `backend/migrations/` (via `golang-migrate` when installed, otherwise via
    `psql` inside the postgres container; applied versions are tracked in the
    `reticora_schema_migrations` table so re-runs are no-ops), then creates
    or repairs the runtime login `reticora_runtime` (see below),
-7. starts Keycloak, removes the demo administrator of earlier releases and
+8. starts Keycloak, removes the demo administrator of earlier releases and
    creates the individual initial administrator (`RETICORA_INITIAL_ADMIN_EMAIL`)
    with a random temporary password, then starts the API server and the
    frontend,
-8. when a TLS domain is configured: requests the Let's Encrypt certificate
+9. when a TLS domain is configured: requests the Let's Encrypt certificate
    with Certbot (webroot challenge served by nginx) and reloads nginx,
-9. verifies `/healthz` on the API,
-10. optionally garbage-collects superseded container images (keeps the newest
+10. verifies `/healthz` on the API,
+11. optionally garbage-collects superseded container images (keeps the newest
     `RETICORA_GC_KEEP_IMAGES`, default 3, per image).
 
 Afterwards the web UI is reachable at the configured base URL. The installer
@@ -138,6 +144,28 @@ Non-interactive (CI) usage: `./install-cloud.sh --non-interactive` uses the
 existing `.env` values, generated defaults and never prompts. CI installs the
 checked-out, unpublished state with `--build-from-source`; the default path
 runs on release tags (job `release-mode` of `install-smoke.yml`).
+
+### Container logs: 30 days (NFR-06)
+
+Container logs can hold personal data and are kept 30 days (decision E-77,
+details in [docs/ops/workers.md](../docs/ops/workers.md#container-logs-nfr-06)):
+
+- Every service of `docker-compose.yml` logs to the journal of the host
+  (`x-logging`, driver `journald`). On a host with a running systemd-journald
+  the installer writes `/etc/systemd/journald.conf.d/reticora.conf` with
+  `MaxRetentionSec=30day` and `MaxFileSec=1day` and restarts
+  systemd-journald. **This applies to the whole journal of the host**, not
+  only to Reticora; the installer says so when it writes the file. A stricter
+  setting of the operator (at most 30 days, at most one day per file) stays
+  in effect; keep own settings in a drop-in of your own.
+- Without systemd-journald (e.g. Docker in a container without systemd) the
+  journald driver cannot start a container. The installer then selects
+  `docker-compose.logging-json.yml` (json-file, 5 files of 20 MB per
+  container) through `COMPOSE_FILE` in `.env` and warns: this bounds the size,
+  not the age. Run `docker compose --env-file .env …` from
+  `deploy/docker-compose` so that `COMPOSE_FILE` resolves.
+- `docker compose logs <service>` and `docker logs <container>` work with
+  both; `journalctl CONTAINER_NAME=docker-compose-server-1` reads the journal.
 
 ### Database logins (TEN-03)
 
@@ -524,6 +552,17 @@ and the server's start check refuses an empty key. Keep the master key in a
 backup outside the cluster; without it, stored credentials cannot be
 decrypted.
 
+**Container logs (NFR-06).** The manifests do not configure log retention:
+the container runtime writes the pod logs to the nodes, where the kubelet
+rotates them by size only. The operator of the cluster provides the 30 days
+(details in [docs/ops/workers.md](../docs/ops/workers.md#container-logs-nfr-06)):
+the kubelet rotation (`containerLogMaxSize`, e.g. `20Mi`, and
+`containerLogMaxFiles`, e.g. `5`) bounds the logs on the nodes, and the
+cluster's log backend that collects them deletes them after 30 days (e.g.
+Loki `retention_period: 720h`, an Elasticsearch/OpenSearch lifecycle policy
+with a delete phase after 30 days, or the retention of the cloud provider's
+logging service).
+
 **Images.** `prod` uses the signed release images
 `ghcr.io/datahub-chiemgau/reticora-server` and
 `ghcr.io/datahub-chiemgau/reticora-postgres` (pgBackRest CronJob) with the
@@ -581,6 +620,7 @@ deploy/
 ├── docker-compose/
 │   ├── docker-compose.yml            full stack (env-driven, no secrets in git)
 │   ├── docker-compose.override.yml   source-build config (tracked)
+│   ├── docker-compose.logging-json.yml  json-file log rotation without systemd-journald (NFR-06)
 │   ├── nginx-tls.conf.template       TLS nginx config (used when RETICORA_TLS_DOMAIN is set)
 │   ├── .env                          generated by install-cloud.sh (git-ignored)
 │   ├── .generated/                   rendered Keycloak realm (git-ignored)
