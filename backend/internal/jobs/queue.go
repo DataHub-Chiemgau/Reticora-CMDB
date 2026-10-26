@@ -99,6 +99,18 @@ func (q *Queue) Handle(k Kind, h Handler) {
 	q.handlers[k.Name] = h
 }
 
+// IsCancelled reports whether the job was cancelled, the checkpoint of a
+// handler of a cancellable kind (Service.IsCancelled).
+func (q *Queue) IsCancelled(ctx context.Context, orgID, id string) (bool, error) {
+	return q.svc.IsCancelled(ctx, orgID, id)
+}
+
+// SaveCancelledResult stores the result of a job cancelled while it ran
+// (Service.SaveCancelledResult).
+func (q *Queue) SaveCancelledResult(ctx context.Context, orgID, id string, result any) (*Job, error) {
+	return q.svc.SaveCancelledResult(ctx, orgID, id, result)
+}
+
 func (q *Queue) handler(kind string) (Handler, bool) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
@@ -197,13 +209,20 @@ func (q *Queue) process(ctx context.Context, d Delivery, m *Message, mayReclaim 
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	timed, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, stop := q.svc.runContext(timed, job.OrganizationID, job.ID)
 	result, herr := h(runCtx, job)
+	stop()
 	cancel()
 	if ctx.Err() != nil {
 		// Shutdown: the job stays running and the message unacknowledged;
 		// after the timeout another worker takes the job over.
 		return Outcome{Ran: true}
+	}
+	// Cancelled while it ran (JOB-03, F-162): its result is not stored
+	// and its status stays; the message needs no further delivery.
+	if cancelled, cerr := q.svc.IsCancelled(ctx, job.OrganizationID, job.ID); cerr == nil && cancelled {
+		return q.ack(d, true)
 	}
 	if herr == nil {
 		if _, err = q.svc.Succeed(ctx, job.OrganizationID, job.ID, result); err != nil && !errors.Is(err, ErrTransition) {

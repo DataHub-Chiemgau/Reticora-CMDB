@@ -18,9 +18,18 @@ import (
 var (
 	// bulkJobKind: a bulk change applied in part has no item progress, so
 	// it is never repeated; after a lost worker it fails ("worker lost").
-	bulkJobKind = jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute}
-	// snapshotJobKind only reads and is idempotent: it is retried.
-	snapshotJobKind = jobs.Kind{Name: history.SnapshotJobKind, MaxAttempts: 3, Timeout: 15 * time.Minute}
+	// A running bulk job can be cancelled: it stops before its next
+	// checkpoint and keeps the partial report (JOB-03, F-162).
+	bulkJobKind = jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute, Cancellable: true}
+	// snapshotJobKind only reads and is idempotent: it is retried. A
+	// running snapshot can be cancelled; its result is dropped.
+	snapshotJobKind = jobs.Kind{Name: history.SnapshotJobKind, MaxAttempts: 3, Timeout: 15 * time.Minute, Cancellable: true}
+	// exportJobKind is the generic job the export worker mirrors (Track);
+	// its worker runs on its own, the registration only declares that a
+	// running export can be cancelled (the worker's checkpoint: WP-515).
+	// Every other running kind, e.g. review.merge or the discovery
+	// mirrors, refuses a cancel (409).
+	exportJobKind = jobs.Kind{Name: "export", MaxAttempts: 1, Cancellable: true}
 )
 
 // jobKind is a submitted kind and the handler that runs its jobs.
@@ -39,11 +48,12 @@ func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler)
 	return kinds
 }
 
-// registerJobKinds registers the submitted kinds with svc, the job service
-// of the requests, and wires their submitters: with queue (NATS) the
+// registerJobKinds registers the submitted kinds and the export kind with
+// svc, the job service of the requests, and wires their submitters: with queue (NATS) the
 // handlers run on the queue and the submitters submit there, without it
 // the submitters run their jobs in this process on svc.
 func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, historyHandler *history.Handler) {
+	svc.Register(exportJobKind)
 	for _, k := range applicationJobKinds(ciService, historyHandler) {
 		svc.Register(k.kind)
 		if queue != nil {

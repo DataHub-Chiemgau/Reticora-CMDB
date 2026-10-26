@@ -391,3 +391,104 @@ func TestJobMetrics(t *testing.T) {
 		t.Errorf("oldest queued age %v", age)
 	}
 }
+
+// TestJobAPICancelRunningJobsByKind covers WP-514 (JOB-03, API-08, UI-16,
+// F-162): a running job is cancelled only when its kind declares it
+// cancellable while running (ci.bulk, history.snapshot, export); a running
+// job of another kind, also a mirrored one (review.merge), is 409 and keeps
+// running; a queued job of every kind is cancelled. Every job answer
+// carries cancellable, per kind and status. A job cancelled while running
+// serves the partial result it kept (200).
+func TestJobAPICancelRunningJobsByKind(t *testing.T) {
+	f := newAPIFixture(t)
+	f.svc.Register(Kind{Name: "ci.bulk", MaxAttempts: 1, Cancellable: true})
+	ctx := context.Background()
+	start := func(job *Job) {
+		t.Helper()
+		if claimed, err := f.svc.ClaimJob(ctx, "org-1", job.ID); err != nil || claimed == nil {
+			t.Fatalf("claim %s: %+v %v", job.Kind, claimed, err)
+		}
+	}
+	runningBulk := f.enqueue(t, "ci.bulk", "alice", "")
+	start(runningBulk)
+	runningMerge := f.enqueue(t, "ci.merge", "alice", "")
+	start(runningMerge)
+	queuedBulk := f.enqueue(t, "ci.bulk", "alice", "")
+	queuedMerge := f.enqueue(t, "ci.merge", "alice", "")
+	queuedSystem := f.enqueue(t, "system.index", "alice", "")
+	done := f.enqueue(t, "ci.bulk", "alice", "")
+	f.finish(t, done, map[string]int{"succeeded": 1})
+	// A mirrored job (review.merge, no registered kind) that runs.
+	if err := f.svc.Track(ctx, "org-1", "review.merge", "review_item", "r-1", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.Mirror(ctx, "org-1", "review_item", "r-1", StatusRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	mirrored, err := f.svc.repo.GetByRef(ctx, "org-1", "review_item", "r-1")
+	if err != nil || mirrored.Status != StatusRunning {
+		t.Fatalf("mirrored job: %+v %v", mirrored, err)
+	}
+
+	want := map[string]bool{
+		runningBulk.ID: true, runningMerge.ID: false, mirrored.ID: false,
+		queuedBulk.ID: true, queuedMerge.ID: true, queuedSystem.ID: true, done.ID: false,
+	}
+	for id, cancellable := range want {
+		w := f.call("GET", "/api/v1/jobs/"+id, "alice")
+		var got map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d %s", id, w.Code, w.Body.String())
+		}
+		if got["cancellable"] != cancellable {
+			t.Errorf("GET: job %s (%v, %v): cancellable = %v, want %v", id, got["kind"], got["status"], got["cancellable"], cancellable)
+		}
+	}
+	var list struct {
+		Data []map[string]any `json:"data"`
+	}
+	w := f.call("GET", "/api/v1/jobs?limit=50", "alice")
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || len(list.Data) != len(want) {
+		t.Fatalf("list: %d %s", w.Code, w.Body.String())
+	}
+	for _, item := range list.Data {
+		if c := want[item["id"].(string)]; item["cancellable"] != c {
+			t.Errorf("list: job %v (%v, %v): cancellable = %v, want %v", item["id"], item["kind"], item["status"], item["cancellable"], c)
+		}
+	}
+
+	// Running, not cancellable: 409 with the kind; the job keeps running.
+	for _, j := range []*Job{runningMerge, mirrored} {
+		w := f.call("DELETE", "/api/v1/jobs/"+j.ID, "alice")
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "the job kind "+j.Kind+" cannot be cancelled while running") {
+			t.Errorf("cancel running %s: %d %s, want 409", j.Kind, w.Code, w.Body.String())
+		}
+		if got, _ := f.svc.Get(ctx, "org-1", j.ID); got.Status != StatusRunning {
+			t.Errorf("running %s after the refused cancel: %s", j.Kind, got.Status)
+		}
+	}
+	// Running ci.bulk and queued jobs of every kind: 200, cancelled.
+	for _, j := range []*Job{runningBulk, queuedBulk, queuedMerge, queuedSystem} {
+		w := f.call("DELETE", "/api/v1/jobs/"+j.ID, "alice")
+		var got map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusOK ||
+			got["status"] != string(StatusCancelled) || got["cancellable"] != false {
+			t.Errorf("cancel %s %s: %d %s, want 200 cancelled", j.Kind, j.ID, w.Code, w.Body.String())
+		}
+	}
+	if w := f.call("DELETE", "/api/v1/jobs/"+done.ID, "alice"); w.Code != http.StatusConflict {
+		t.Errorf("cancel a succeeded job: %d", w.Code)
+	}
+
+	// The cancelled bulk job without a report has no result (409); with
+	// the partial report its worker kept it is served (200).
+	if w := f.call("GET", "/api/v1/jobs/"+runningBulk.ID+"/result", "alice"); w.Code != http.StatusConflict {
+		t.Errorf("result of a cancelled job without report: %d", w.Code)
+	}
+	if _, err := f.svc.SaveCancelledResult(ctx, "org-1", runningBulk.ID, map[string]int{"skipped": 3}); err != nil {
+		t.Fatal(err)
+	}
+	if w := f.call("GET", "/api/v1/jobs/"+runningBulk.ID+"/result", "alice"); w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"skipped":3}` {
+		t.Errorf("result of a cancelled job with report: %d %s", w.Code, w.Body.String())
+	}
+}

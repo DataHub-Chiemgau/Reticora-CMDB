@@ -216,3 +216,82 @@ func TestBulkJobWritesAsItsCreator(t *testing.T) {
 	}
 	repo.checkManual(t, "user-2", ids)
 }
+
+// cancelOnClaim is a job service on which the bulk job is cancelled right
+// after its claim; it counts the cancel checkpoints.
+type cancelOnClaim struct {
+	*jobs.Service
+	mu     sync.Mutex
+	checks int
+}
+
+func (c *cancelOnClaim) ClaimJob(ctx context.Context, orgID, id string) (*jobs.Job, error) {
+	job, err := c.Service.ClaimJob(ctx, orgID, id)
+	if err == nil && job != nil {
+		_, err = c.Cancel(ctx, orgID, id)
+	}
+	return job, err
+}
+
+func (c *cancelOnClaim) IsCancelled(ctx context.Context, orgID, id string) (bool, error) {
+	c.mu.Lock()
+	c.checks++
+	c.mu.Unlock()
+	return c.Service.IsCancelled(ctx, orgID, id)
+}
+
+// TestBulkJobStopsAfterCancel covers WP-514 (JOB-03, BLK-01, F-162) on the
+// in-process path: a bulk job asks for a cancel before every 25th id, at
+// most one query per 25 ids; cancelled while running it starts no further
+// id and keeps the partial report on the cancelled job: the ids changed
+// before the checkpoint with their result, the others skipped.
+func TestBulkJobStopsAfterCancel(t *testing.T) {
+	repo, ids := newBulkRepo(t, 100)
+	jobSvc := jobs.NewService(jobs.NewMemoryRepository())
+	jobSvc.Register(jobs.Kind{Name: BulkJobKind, MaxAttempts: 1, Cancellable: true})
+	cancels := &cancelOnClaim{Service: jobSvc}
+	svc := NewService(repo).WithBulkJobs(cancels)
+	req := &BulkRequest{Action: BulkSetStatus, IDs: ids, Status: StatusMaintenance}
+	ctx := tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: "org-1"})
+	job, _, err := jobSvc.Enqueue(ctx, "org-1", BulkJobKind, req, jobs.EnqueueOptions{CreatedBy: "user-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.runBulkJob(ctx, "org-1", job.ID, req)
+
+	if job, err = jobSvc.Get(ctx, "org-1", job.ID); err != nil || job.Status != jobs.StatusCancelled {
+		t.Fatalf("job: %+v %v, want cancelled", job, err)
+	}
+	var report BulkResult
+	if err = json.Unmarshal(job.Result, &report); err != nil {
+		t.Fatalf("the cancelled job keeps no report: %q %v", job.Result, err)
+	}
+	if !report.Cancelled || report.Total != 100 || report.Succeeded != bulkCancelEvery || report.Skipped != 100-bulkCancelEvery || report.Failed != 0 {
+		t.Errorf("report: cancelled %v, total %d, succeeded %d, skipped %d, failed %d; want true, 100, 25, 75, 0",
+			report.Cancelled, report.Total, report.Succeeded, report.Skipped, report.Failed)
+	}
+	for i, item := range report.Items {
+		want := bulkResultOK
+		if i >= bulkCancelEvery {
+			want = bulkResultSkipped
+		}
+		if item.ID != ids[i] || item.Result != want {
+			t.Errorf("item %d: %+v, want %s of %s", i, item, want, ids[i])
+		}
+	}
+	repo.mu.Lock()
+	written := len(repo.requests)
+	repo.mu.Unlock()
+	if written != bulkCancelEvery || cancels.checks != 1 {
+		t.Errorf("%d CIs written with %d checkpoints, want %d with 1", written, cancels.checks, bulkCancelEvery)
+	}
+
+	// Not cancelled: one checkpoint per 25 ids, every id done.
+	repo2, ids2 := newBulkRepo(t, 101)
+	checks := 0
+	all := NewService(repo2).runBulk(ctx, "org-1", "user-2", &BulkRequest{Action: BulkSetStatus, IDs: ids2, Status: StatusMaintenance},
+		func() bool { checks++; return false })
+	if all.Succeeded != 101 || all.Skipped != 0 || all.Cancelled || checks != 4 {
+		t.Errorf("uncancelled run: %d ok, %d skipped, cancelled %v, %d checkpoints; want 101, 0, false, 4", all.Succeeded, all.Skipped, all.Cancelled, checks)
+	}
+}

@@ -2220,7 +2220,14 @@ paths:
       description: >-
         Allowed for the creator of the job and for holders of the permission
         of its kind (ci.bulk ci:write, ci.merge ci:delete, export
-        export:run). A finished job is 409.
+        export:run). A queued job of every kind is cancelled. A running job
+        is cancelled only when its kind can be cancelled while running
+        (ci.bulk, history.snapshot, export; the job's cancellable field):
+        its worker stops at the next checkpoint and records no further
+        status, a bulk change keeps its partial report as the result
+        (processed ids with their result, the others skipped). A running
+        job of any other kind (e.g. review.merge, the discovery jobs) and a
+        finished job are 409.
       responses:
         '200':
           description: The cancelled job
@@ -2235,7 +2242,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The job is finished already.
+          description: >-
+            The job is finished already, or it runs and its kind cannot be
+            cancelled while running.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -2247,6 +2256,9 @@ paths:
       operationId: getJobResult
       tags: [Jobs]
       summary: The result of a succeeded job
+      description: >-
+        Also the partial result a job cancelled while running kept, e.g.
+        the report of a bulk change (status cancelled).
       responses:
         '200':
           description: The result of the job (its shape depends on the kind)
@@ -13903,6 +13915,12 @@ components:
         total: { type: integer }
         succeeded: { type: integer }
         failed: { type: integer }
+        skipped:
+          type: integer
+          description: Ids not processed because the bulk job was cancelled.
+        cancelled:
+          type: boolean
+          description: The bulk job was cancelled while running and stopped before the skipped ids.
         items:
           type: array
           items:
@@ -13910,8 +13928,10 @@ components:
             required: [id, result, code]
             properties:
               id: { type: string }
-              result: { type: string, enum: [ok, error] }
-              code: { type: integer }
+              result: { type: string, enum: [ok, error, skipped] }
+              code:
+                type: integer
+                description: The HTTP status the single operation would have answered; 0 for a skipped id.
               error: { type: string }
     CITypeChangeResult:
       type: object
@@ -15453,7 +15473,7 @@ components:
 
     Job:
       type: object
-      required: [id, kind, status, progress, attempts, max_attempts, created_at, updated_at]
+      required: [id, kind, status, progress, attempts, max_attempts, created_at, updated_at, cancellable]
       properties:
         id: { type: string }
         organization_id: { type: string }
@@ -15477,6 +15497,12 @@ components:
         updated_at: { type: string, format: date-time }
         started_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time }
+        cancellable:
+          type: boolean
+          description: >-
+            Whether DELETE /jobs/{id} cancels the job now: true for a queued
+            job and for a running job of a kind that can be cancelled while
+            running (ci.bulk, history.snapshot, export), false otherwise.
     JobListResponse:
       type: object
       required: [data, total, limit, offset, has_more]

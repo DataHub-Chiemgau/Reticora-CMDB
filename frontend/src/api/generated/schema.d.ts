@@ -1094,7 +1094,7 @@ export interface paths {
     post?: never;
     /**
      * Cancel a queued or running job
-     * @description Allowed for the creator of the job and for holders of the permission of its kind (ci.bulk ci:write, ci.merge ci:delete, export export:run). A finished job is 409.
+     * @description Allowed for the creator of the job and for holders of the permission of its kind (ci.bulk ci:write, ci.merge ci:delete, export export:run). A queued job of every kind is cancelled. A running job is cancelled only when its kind can be cancelled while running (ci.bulk, history.snapshot, export; the job's cancellable field): its worker stops at the next checkpoint and records no further status, a bulk change keeps its partial report as the result (processed ids with their result, the others skipped). A running job of any other kind (e.g. review.merge, the discovery jobs) and a finished job are 409.
      */
     delete: operations['cancelJob'];
     options?: never;
@@ -1112,7 +1112,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** The result of a succeeded job */
+    /**
+     * The result of a succeeded job
+     * @description Also the partial result a job cancelled while running kept, e.g. the report of a bulk change (status cancelled).
+     */
     get: operations['getJobResult'];
     put?: never;
     post?: never;
@@ -7337,10 +7340,15 @@ export interface components {
       total: number;
       succeeded: number;
       failed: number;
+      /** @description Ids not processed because the bulk job was cancelled. */
+      skipped?: number;
+      /** @description The bulk job was cancelled while running and stopped before the skipped ids. */
+      cancelled?: boolean;
       items: {
         id: string;
         /** @enum {string} */
-        result: 'ok' | 'error';
+        result: 'ok' | 'error' | 'skipped';
+        /** @description The HTTP status the single operation would have answered; 0 for a skipped id. */
         code: number;
         error?: string;
       }[];
@@ -8266,6 +8274,8 @@ export interface components {
       started_at?: string;
       /** Format: date-time */
       finished_at?: string;
+      /** @description Whether DELETE /jobs/{id} cancels the job now: true for a queued job and for a running job of a kind that can be cancelled while running (ci.bulk, history.snapshot, export), false otherwise. */
+      cancellable: boolean;
     };
     JobListResponse: {
       data: components['schemas']['Job'][];
@@ -13442,7 +13452,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The job is finished already. */
+      /** @description The job is finished already, or it runs and its kind cannot be cancelled while running. */
       409: {
         headers: {
           [name: string]: unknown;

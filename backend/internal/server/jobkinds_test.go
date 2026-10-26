@@ -3,10 +3,12 @@ package server_test
 // WP-503 (JOB-01, TEC-14, F-147): the job kinds the application submits run
 // on the JOBS work queue on NATS; their handlers are registered in one
 // place (jobkinds.go). Without NATS they stay on the in-process path.
+// WP-514 (JOB-03, F-162): the registration declares which running kinds
+// can be cancelled.
 //
 // Retest:
 //
-//	cd backend && go test -count=1 -run 'TestEverySubmittedKindHasAHandler|TestJobKindsRunInProcessWithoutQueue' ./internal/server/
+//	cd backend && go test -count=1 -run 'TestEverySubmittedKindHasAHandler|TestJobKindsRunInProcessWithoutQueue|TestJobKindsDeclareCancellable' ./internal/server/
 
 import (
 	"context"
@@ -79,26 +81,14 @@ func newJobKindsEnv(t *testing.T, queue func(repo jobs.Repository) *jobs.Queue) 
 	return &jobKindsEnv{handler: middleware.TenantMiddleware(mux), jobs: repos.Jobs}, q
 }
 
+// jobKindsUser is the org_admin of the requests.
+const jobKindsUser = "c0de0503-0000-4000-8000-0000000000f1"
+
 // submit sends a request of an org_admin that answers with a job and
 // returns the job id.
 func (e *jobKindsEnv) submit(t *testing.T, path, body string) string {
 	t.Helper()
-	keys, ok := permission.StandardRolePermissions("org_admin")
-	if !ok {
-		t.Fatal("standard role org_admin unknown")
-	}
-	perms := make([]identity.Permission, 0, len(keys))
-	for _, k := range keys {
-		perms = append(perms, identity.Permission(k))
-	}
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	p := identity.Principal{Subject: "c0de0503-0000-4000-8000-0000000000f1", OrganizationID: jobKindsOrg, Type: identity.PrincipalTypeUser,
-		Scope:       &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},
-		Permissions: perms, Credential: "wp-503"}
-	ctx := identity.WithPermissions(identity.WithPrincipal(req.Context(), p), p.Permissions)
-	w := httptest.NewRecorder()
-	e.handler.ServeHTTP(w, req.WithContext(ctx))
+	w := e.request(t, http.MethodPost, path, body)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("POST %s: %d %s, want 202 with a job", path, w.Code, w.Body)
 	}
@@ -114,6 +104,35 @@ func (e *jobKindsEnv) submit(t *testing.T, path, body string) string {
 		t.Fatalf("POST %s answered no job: %s", path, w.Body)
 	}
 	return id
+}
+
+// call sends a request without body of the org_admin.
+func (e *jobKindsEnv) call(t *testing.T, method, path string) (int, string) {
+	t.Helper()
+	w := e.request(t, method, path, "")
+	return w.Code, w.Body.String()
+}
+
+// request sends a request of an org_admin.
+func (e *jobKindsEnv) request(t *testing.T, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	keys, ok := permission.StandardRolePermissions("org_admin")
+	if !ok {
+		t.Fatal("standard role org_admin unknown")
+	}
+	perms := make([]identity.Permission, 0, len(keys))
+	for _, k := range keys {
+		perms = append(perms, identity.Permission(k))
+	}
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	p := identity.Principal{Subject: jobKindsUser, OrganizationID: jobKindsOrg, Type: identity.PrincipalTypeUser,
+		Scope:       &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},
+		Permissions: perms, Credential: "wp-503"}
+	ctx := identity.WithPermissions(identity.WithPrincipal(req.Context(), p), p.Permissions)
+	w := httptest.NewRecorder()
+	e.handler.ServeHTTP(w, req.WithContext(ctx))
+	return w
 }
 
 // bulkBody is a bulk status change of n ids, enough for a job.
@@ -295,6 +314,52 @@ func TestJobKindsRunInProcessWithoutQueue(t *testing.T) {
 				t.Fatalf("in-process job did not end: %+v %v", job, err)
 			}
 			time.Sleep(20 * time.Millisecond)
+		}
+	}
+}
+
+// TestJobKindsDeclareCancellable covers WP-514 (JOB-03, UI-16, F-162): the
+// registration of the router declares which running jobs can be cancelled
+// (jobkinds.go): ci.bulk, history.snapshot and export can, a running
+// mirrored review.merge cannot (409); the job API reports it as
+// cancellable.
+func TestJobKindsDeclareCancellable(t *testing.T) {
+	env, _ := newJobKindsEnv(t, func(repo jobs.Repository) *jobs.Queue { return jobs.NewQueue(jobs.NewService(repo), nil) })
+	ctx := context.Background()
+	runner := jobs.NewService(env.jobs)
+	running := map[string]string{
+		ci.BulkJobKind:          env.submit(t, "/api/v1/cis/bulk", bulkBody(ci.BulkJobFromIDs)),
+		history.SnapshotJobKind: env.submit(t, "/api/v1/history/snapshots", `{"entity_type":"ci","entity_id":"c0de0503-0000-4000-8000-0000000000c1"}`),
+	}
+	for kind, id := range running {
+		if job, err := runner.ClaimJob(ctx, jobKindsOrg, id); err != nil || job == nil {
+			t.Fatalf("claim %s: %+v %v", kind, job, err)
+		}
+	}
+	for kind, ref := range map[string]string{"export": "export_job", "review.merge": "review_item"} {
+		refID := "c0de0514-0000-4000-8000-0000000000a1"
+		if err := runner.Track(ctx, jobKindsOrg, kind, ref, refID, jobKindsUser); err != nil {
+			t.Fatal(err)
+		}
+		if err := runner.Mirror(ctx, jobKindsOrg, ref, refID, jobs.StatusRunning, ""); err != nil {
+			t.Fatal(err)
+		}
+		job, err := env.jobs.GetByRef(ctx, jobKindsOrg, ref, refID)
+		if err != nil || job.Status != jobs.StatusRunning {
+			t.Fatalf("mirrored %s: %+v %v", kind, job, err)
+		}
+		running[kind] = job.ID
+	}
+	want := map[string]bool{ci.BulkJobKind: true, history.SnapshotJobKind: true, "export": true, "review.merge": false}
+	for kind, id := range running {
+		code, body := env.call(t, http.MethodGet, "/api/v1/jobs/"+id)
+		var job map[string]any
+		if err := json.Unmarshal([]byte(body), &job); err != nil || code != http.StatusOK || job["cancellable"] != want[kind] {
+			t.Errorf("GET running %s: %d %s, want cancellable %v", kind, code, body, want[kind])
+		}
+		code, body = env.call(t, http.MethodDelete, "/api/v1/jobs/"+id)
+		if wantCode := map[bool]int{true: http.StatusOK, false: http.StatusConflict}[want[kind]]; code != wantCode {
+			t.Errorf("DELETE running %s: %d %s, want %d", kind, code, body, wantCode)
 		}
 	}
 }

@@ -33,7 +33,22 @@ type Service struct {
 	mu     sync.RWMutex
 	kinds  map[string]Kind
 	events events.Emitter
+	// cancelPoll is how often the run context of a job asks for a cancel
+	// made by another replica (runContext).
+	cancelPoll time.Duration
 }
+
+// localRuns ends the run context of a job running in this process when a
+// service of this process cancels the job (runContext); the job queue and
+// the job API may hold services of their own.
+var localRuns = struct {
+	sync.Mutex
+	cancel map[string]context.CancelCauseFunc
+}{cancel: map[string]context.CancelCauseFunc{}}
+
+// DefaultCancelPoll is how often the run context of a job asks whether the
+// job was cancelled on another replica.
+const DefaultCancelPoll = 5 * time.Second
 
 // WithEvents reports finally failed jobs as job.failed (NTF-05).
 func (s *Service) WithEvents(e events.Emitter) *Service {
@@ -43,7 +58,15 @@ func (s *Service) WithEvents(e events.Emitter) *Service {
 
 // NewService creates a service on repo.
 func NewService(repo Repository) *Service {
-	return &Service{repo: repo, now: func() time.Time { return time.Now().UTC() }, kinds: map[string]Kind{}}
+	return &Service{repo: repo, now: func() time.Time { return time.Now().UTC() }, kinds: map[string]Kind{},
+		cancelPoll: DefaultCancelPoll}
+}
+
+// WithCancelPoll sets how often the run context of a job asks for a cancel
+// made elsewhere (tests).
+func (s *Service) WithCancelPoll(d time.Duration) *Service {
+	s.cancelPoll = d
+	return s
 }
 
 // WithClock replaces the clock (tests).
@@ -248,15 +271,129 @@ func (s *Service) fail(ctx context.Context, orgID, id string, cause error, retry
 	return failed, err
 }
 
-// Cancel stops a queued or running job.
-func (s *Service) Cancel(ctx context.Context, orgID, id string) (*Job, error) {
-	now := s.now()
-	job, err := s.repo.Transition(ctx, orgID, id, []Status{StatusQueued, StatusRunning},
-		&Update{Status: StatusCancelled, FinishedAt: &now})
-	if err == nil {
-		observeEnd(job)
+// Cancellable reports whether Cancel would cancel the job now: a queued
+// job of every kind, a running job of a kind registered as Cancellable
+// (JOB-03, F-162); a finished job never.
+func (s *Service) Cancellable(job *Job) bool {
+	switch job.Status {
+	case StatusQueued:
+		return true
+	case StatusRunning:
+		k, err := s.kind(job.Kind)
+		return err == nil && k.Cancellable
 	}
-	return job, err
+	return false
+}
+
+// Cancel stops a queued job, or a running job of a cancellable kind: its
+// run context in this process ends at once (runContext), its worker stops
+// at its next checkpoint (IsCancelled) and records no further status. A
+// running job of any other kind is refused with ErrNotCancellable, a
+// finished one with ErrTransition.
+func (s *Service) Cancel(ctx context.Context, orgID, id string) (*Job, error) {
+	job, err := s.repo.Get(ctx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	from := []Status{StatusQueued}
+	if k, kerr := s.kind(job.Kind); kerr == nil && k.Cancellable {
+		from = append(from, StatusRunning)
+	}
+	now := s.now()
+	cancelled, err := s.repo.Transition(ctx, orgID, id, from, &Update{Status: StatusCancelled, FinishedAt: &now})
+	if errors.Is(err, ErrTransition) {
+		// Running already or started meanwhile, and the kind cannot be
+		// cancelled while running.
+		if current, gerr := s.repo.Get(ctx, orgID, id); gerr == nil && current.Status == StatusRunning {
+			return nil, fmt.Errorf("%w: %s", ErrNotCancellable, job.Kind)
+		}
+		return nil, err
+	}
+	if err != nil {
+		return nil, err
+	}
+	observeEnd(cancelled)
+	localRuns.Lock()
+	stop := localRuns.cancel[id]
+	localRuns.Unlock()
+	if stop != nil {
+		stop(ErrCancelled)
+	}
+	return cancelled, nil
+}
+
+// ErrCancelled is the cause of the run context of a job that was
+// cancelled (runContext).
+var ErrCancelled = errors.New("job cancelled")
+
+// IsCancelled reports whether the job was cancelled: the checkpoint of the
+// worker of a cancellable kind, which then stops and records no status.
+func (s *Service) IsCancelled(ctx context.Context, orgID, id string) (bool, error) {
+	job, err := s.repo.Get(ctx, orgID, id)
+	if err != nil {
+		return false, err
+	}
+	return job.Status == StatusCancelled, nil
+}
+
+// SaveCancelledResult stores the result of a job that was cancelled while
+// it ran, e.g. the partial report of a bulk change (BLK-01); the job stays
+// cancelled with its finish time. A job in any other status is
+// ErrTransition.
+func (s *Service) SaveCancelledResult(ctx context.Context, orgID, id string, result any) (*Job, error) {
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("encode job result: %w", err)
+	}
+	job, err := s.repo.Get(ctx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	finished := job.FinishedAt
+	if finished == nil {
+		now := s.now()
+		finished = &now
+	}
+	return s.repo.Transition(ctx, orgID, id, []Status{StatusCancelled},
+		&Update{Status: StatusCancelled, Result: raw, FinishedAt: finished})
+}
+
+// runContext returns the run context of a job that runs in this process:
+// it ends with the cause ErrCancelled when the job is cancelled, at once
+// when a service of this process cancels it (Cancel), within cancelPoll
+// when another replica does. stop releases it once the run ended.
+func (s *Service) runContext(ctx context.Context, orgID, id string) (run context.Context, stop func()) {
+	run, cancel := context.WithCancelCause(ctx)
+	localRuns.Lock()
+	localRuns.cancel[id] = cancel
+	localRuns.Unlock()
+	done := make(chan struct{})
+	if s.cancelPoll > 0 {
+		go func() {
+			ticker := time.NewTicker(s.cancelPoll)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-run.Done():
+					return
+				case <-ticker.C:
+					if cancelled, err := s.IsCancelled(run, orgID, id); err == nil && cancelled {
+						cancel(ErrCancelled)
+						return
+					}
+				}
+			}
+		}()
+	}
+	return run, func() {
+		close(done)
+		localRuns.Lock()
+		delete(localRuns.cancel, id)
+		localRuns.Unlock()
+		cancel(context.Canceled)
+	}
 }
 
 // ErrTimeout is the error of an attempt that exceeded its timeout.
@@ -389,7 +526,9 @@ func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, sta
 // background of this process with the caller's context values (tenant,
 // scope); run's result becomes the job result, its error fails the job. A
 // process ending meanwhile leaves the job running until its timeout reaps
-// it (JOB-01).
+// it (JOB-01). run's context ends when the job is cancelled (runContext);
+// the result or error of a cancelled job is dropped and the job stays
+// cancelled (JOB-03, F-162).
 func (s *Service) RunDetached(ctx context.Context, orgID, kind string, params any, createdBy string,
 	run func(ctx context.Context) (any, error)) (*Job, error) {
 	job, _, err := s.Enqueue(ctx, orgID, kind, params, EnqueueOptions{CreatedBy: createdBy})
@@ -403,7 +542,12 @@ func (s *Service) RunDetached(ctx context.Context, orgID, kind string, params an
 			slog.ErrorContext(detached, "claim detached job", "job", job.ID, "kind", kind, "error", cerr)
 			return
 		}
-		result, rerr := run(detached)
+		runCtx, stop := s.runContext(detached, orgID, job.ID)
+		result, rerr := run(runCtx)
+		stop()
+		if cancelled, gerr := s.IsCancelled(detached, orgID, job.ID); gerr == nil && cancelled {
+			return
+		}
 		if rerr != nil {
 			if _, ferr := s.Fail(detached, orgID, job.ID, rerr); ferr != nil {
 				slog.ErrorContext(detached, "record failed detached job", "job", job.ID, "error", ferr)
