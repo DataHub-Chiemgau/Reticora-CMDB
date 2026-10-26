@@ -702,3 +702,5 @@ COL-06;[B], Air-Gapped [O];D;tests/install-vm-cosign.test.sh;WP-432
 AUT-09;[B];B;tests/keycloak-realm-upgrade.test.sh;WP-428
 INS-03;[B];A;tests/install-acme-pebble.test.sh;WP-440
 INS-01;[Q];A;tests/install-smoke-health.test.sh;WP-440
+NFR-05;[B];A;tests/restore-pitr-config.test.sh;WP-445
+OPS-04;[B], [P5];A;tests/restore-pitr.sh;WP-445

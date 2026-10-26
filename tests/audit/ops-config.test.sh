@@ -17,9 +17,8 @@
 #          deploy/terraform/tests/backup.tftest.hcl (terraform test, CI job
 #          terraform), the bucket versioning is in tests/backup-config.test.sh.
 #   WP-101 (NFR-05) P2 "RPO limit check in restore-pitr.sh cannot fail with
-#          default parameters": the continuous-write window of the RPO
-#          scenario (420 s) is shorter than the RPO limit (900 s), so a data
-#          loss above the limit is not observable.        -> case restore_rpo_window
+#          default parameters": fixed by WP-445; the case restore_rpo_window
+#          is in tests/restore-pitr-config.test.sh (CI job gate).
 #   WP-102 (TEC-15) P2 "No signature verification before installation":
 #          fixed by WP-387; the cases install_signature_* are in
 #          tests/install-signature.test.sh.
@@ -70,18 +69,6 @@ else
         fail "k8s_wal_archive: the prod overlay configures WAL archiving (archive_mode/archive-push)" \
             "0 matches; backup resources: $(python3 -c 'import sys,yaml; print(" ".join(d["kind"]+"/"+d["metadata"]["name"] for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind") in ("CronJob","StatefulSet","Job")))' "$TMP_ROOT/prod.yaml")"
     fi
-fi
-
-# ─── WP-101: the RPO scenario can detect a loss above the limit ─────────────
-rpo_limit="$(sed -nE 's/^RPO_LIMIT="\$\{RETICORA_RPO_LIMIT_SECONDS:-([0-9]+)\}"/\1/p' tests/restore-pitr.sh)"
-write_window="$(sed -nE 's/^WRITE_SECONDS="\$\{RESTORE_WRITE_SECONDS:-([0-9]+)\}"/\1/p' tests/restore-pitr.sh)"
-if [ -z "$rpo_limit" ] || [ -z "$write_window" ]; then
-    fail "restore_rpo_window: restore-pitr.sh defines RPO_LIMIT and WRITE_SECONDS defaults" "limit=${rpo_limit:-?} window=${write_window:-?}"
-elif [ "$write_window" -gt "$rpo_limit" ]; then
-    ok "restore_rpo_window: the write window (${write_window}s) exceeds the RPO limit (${rpo_limit}s)"
-else
-    fail "restore_rpo_window: the write window exceeds the RPO limit, so an RPO violation is observable" \
-        "WRITE_SECONDS=${write_window}s <= RPO_LIMIT=${rpo_limit}s: rpo = last_commit - restored_last stays below the limit whenever the restore succeeds"
 fi
 
 echo

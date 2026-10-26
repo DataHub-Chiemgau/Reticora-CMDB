@@ -167,12 +167,13 @@ repository of pgBackRest:
 6. Rebuild the search index per tenant: `POST /api/v1/search/reindex`.
 7. Verify the audit hash chains: `go run ./cmd/audit-verify -all` (in `backend/`) checks the chain of every organization and names the first violation of each (sequence gap, broken link, hash mismatch; AUD-04); `-org <id>` checks one.
 
-## Restore proof: RPO and RTO (WP-101, NFR-05)
+## Restore proof: RPO and RTO (WP-101, WP-445, NFR-05)
 
 `tests/restore-pitr.sh` proves the chain with the real image. The `pitr`
-job of `.github/workflows/restore-test.yml` runs it every night and on
-changes to the chain. The protocol `restore-pitr-report.md` is kept as an
-artifact for 90 days and shown in the job summary.
+job of `.github/workflows/restore-test.yml` runs it with its defaults every
+night, on changes to the chain and on `workflow_dispatch`. The protocol
+`restore-pitr-report.md` is kept as an artifact for 90 days and shown in
+the job summary.
 
 The test starts `postgres` and `backup` in a throwaway Compose project and
 writes a workload after the first base backup. It then runs two scenarios:
@@ -180,25 +181,88 @@ writes a workload after the first base backup. It then runs two scenarios:
 1. **Logical error:** archive the current WAL, then restore to a target time
    between two workload phases. Every row before the target must be back,
    none after it.
-2. **Loss of the data volume during continuous writes:** writes run 7
-   minutes, longer than `archive_timeout`, so that a full archive cycle is
-   covered. Then a crash and the restore of the latest archived state.
+2. **Loss of the data volume during continuous writes:** writes run 1,050 s
+   (`RESTORE_WRITE_SECONDS`), longer than the RPO limit of 15 minutes and
+   than three archive cycles. Then a crash and the restore of the latest
+   archived state.
    - Measured RPO: last committed row minus last restored row.
    - The restore follows the timeline created by scenario 1.
 
 Both restores measure the RTO: wipe, restore, WAL replay and promotion.
 After the restore, archiving must work again (`pgbackrest check`). The job
-fails above **RPO 900 s (15 min)** or **RTO 14,400 s (4 h)**, or when the
-point in time restore is not exact.
+fails when the point in time restore is not exact, the RTO exceeds
+**14,400 s (4 h)** or the RPO exceeds one of two limits; the protocol line
+`RPO … PASS|FAIL` names both:
 
-Measured on 2026-10-12 with a 50,000 row workload and 30 s of writes:
+- **Archive cycle:** `archive_timeout` of `docker-compose.yml` plus 60 s,
+  **360 s**. The WAL is archived at the latest every `archive_timeout`; a
+  larger loss means the chain archives less often than configured.
+- **NFR-05:** **900 s (15 min)**.
 
-| Check | Result |
+For the run, the daily backup of the backup service is moved 12 hours
+away, so that no backup archives the write window early.
+
+**Negative self-test (job `rpo-negative`, F-130).** The default run with the
+database on `archive_timeout=1200` (`RESTORE_ARCHIVE_TIMEOUT`). The write
+window ends before `archive_timeout` forces an archive, so the latest
+restore lacks all of it. The job expects exit 1 with the line `RPO … FAIL` above both
+limits and no other failed check; if the script passes, the job fails. With
+the former write window of 420 s, shorter than the limit, the RPO check
+could not fail.
+
+**Representative data volume (job `pitr-seeded`, F-292).** The same proof
+with the migrations applied and the demo organization of `cmd/seed` scaled
+to 10,000 CIs (`RESTORE_SEED_OBJECTS=10000`) in the base backup. Its RTO is
+the statement for a realistic database; the protocol names the database
+size at the first base backup. Artifact `restore-pitr-seeded-report`.
+
+What needs no chain runs in the ci.yml job `gate`:
+`tests/restore-pitr-config.test.sh` checks the write window against both
+limits, the RPO line against fixture numbers, the script against stubs,
+this workflow and the expectation of `rpo-negative`.
+
+Locally: `./tests/restore-pitr.sh` (Docker Compose);
+`RESTORE_ARCHIVE_TIMEOUT=1200` for the self-test;
+`RESTORE_SEED_OBJECTS=10000 RESTORE_SEED_BIN=<built cmd/seed>` with
+golang-migrate in `PATH` for the seeded run.
+
+### Measured values
+
+> **Placeholder: the values come from the `restore-test.yml` run
+> (`workflow_dispatch`) on the WP-445 state and are copied from its
+> artifacts; nothing here is estimated.** The earlier values of 2026-10-12
+> (30 s of writes, toy data volume) are withdrawn (F-292).
+
+Default run (job `pitr`, artifact `restore-pitr-report`):
+
+| Field | Value |
 |---|---|
-| Point in time restore | exact (50,000 rows before the target, none after it) |
-| RPO | 52 s |
-| RTO | 5 s per restore |
-| Archiving after the restore | works |
+| Run | _from the run: ID and date_ |
+| Commit | _from the protocol_ |
+| Point in time restore | _rows before / after the target_ |
+| RPO | _measured value and lost rows (limits 360 s and 900 s)_ |
+| RTO point in time restore | _from the protocol_ |
+| RTO latest state | _from the protocol_ |
+| Archiving after the restore | _from the protocol_ |
+| Database size at the first base backup | _from the protocol_ |
+
+Representative data volume (job `pitr-seeded`, artifact
+`restore-pitr-seeded-report`):
+
+| Field | Value |
+|---|---|
+| Database size at the first base backup | _from the protocol_ |
+| RTO point in time restore | _from the protocol_ |
+| RTO latest state | _from the protocol_ |
+| RPO | _from the protocol_ |
+
+Negative self-test (job `rpo-negative`, artifact
+`restore-pitr-negative-report`):
+
+| Field | Value |
+|---|---|
+| Job result | _passed = exit 1 with the line `RPO … FAIL`_ |
+| RPO | _measured value, above 360 s and 900 s_ |
 
 With continuous writes, the RPO is bounded by `archive_timeout` (300 s)
 plus the archive lag. The RTO grows with the database size and with the WAL
@@ -228,7 +292,9 @@ restorability without touching production data:
    via the `audit-verify` binary.
 
 The job fails if the restore or any integrity check fails. It uses only
-generated test data — never real credentials or tenant data.
+generated test data — never real credentials or tenant data. The jobs
+`pitr`, `pitr-seeded` and `rpo-negative` of the same workflow prove the
+pgBackRest chain (see "Restore proof: RPO and RTO" above).
 
 ## Migration 000056: quarantined references (E-26)
 

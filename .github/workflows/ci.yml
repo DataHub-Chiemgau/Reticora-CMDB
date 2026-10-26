@@ -473,6 +473,14 @@ jobs:
       - name: Outage suite configuration and load accounting (OPS-06)
         run: ./tests/outage/config.test.sh
 
+      # NFR-05/OPS-04 (WP-445): the restore proof without the backup chain:
+      # write window against both RPO limits (F-130), the RPO line against
+      # fixture numbers, restore-pitr.sh against stubs, restore-test.yml and
+      # the expectation of its rpo-negative job. The proof itself runs in
+      # restore-test.yml.
+      - name: Restore proof configuration and RPO evaluation (NFR-05, OPS-04)
+        run: ./tests/restore-pitr-config.test.sh
+
   # OPS-05 (WP-446): the Alertmanager configuration loads (amtool
   # check-config), the PrometheusRule groups pass promtool check rules and
   # their unit tests in deploy/monitoring/tests. amtool v0.27.0 and promtool
