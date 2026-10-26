@@ -13,3 +13,18 @@
     --color-surface: 220 13% 10%;
   }
 }
+
+/* Dark mode (class set by stores/theme.ts, also when chosen against the system
+   setting): dark surface and a lighter primary colour, so primary text and
+   links reach WCAG AA (6.5:1 on the surface, F-172). */
+.dark {
+  --color-primary: 217 91% 68%;
+  --color-surface: 220 13% 10%;
+}
+
+/* A white label on the lighter dark-mode primary falls below 4.5:1; filled
+   primary surfaces (primary button, active navigation) get a dark label. */
+.dark .bg-primary.text-white,
+.dark .focus\:bg-primary:focus.focus\:text-white {
+  color: theme('colors.gray.950');
+}

@@ -203,7 +203,14 @@ export function AssetListPage() {
               </Button>
             </div>
           ) : null}
-          <div className="overflow-x-auto">
+          {/* The table scrolls sideways on narrow screens; the region takes the
+              focus so the keyboard can scroll it (WCAG 2.1.1, WP-522). */}
+          <div
+            className="overflow-x-auto"
+            role="region"
+            aria-label={t('asset.title', 'Inventar')}
+            tabIndex={0}
+          >
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -264,7 +271,7 @@ export function AssetListPage() {
                 ))}
                 {assetList.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-4 text-center text-gray-400">
+                    <td colSpan={7} className="py-4 text-center text-gray-600 dark:text-gray-300">
                       {t('common.noData', 'Keine Daten')}
                     </td>
                   </tr>

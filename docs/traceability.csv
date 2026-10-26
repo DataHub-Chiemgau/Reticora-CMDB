@@ -832,3 +832,5 @@ UI-16;[B];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-509
 JOB-03;[B];C;backend/internal/ci/bulk_jobs_integration_test.go;WP-514
 API-08;[B];C;backend/internal/ci/bulk_jobs_integration_test.go;WP-514
 UI-16;[B];C;backend/internal/jobs/handler_test.go;WP-514
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-522
+NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-522

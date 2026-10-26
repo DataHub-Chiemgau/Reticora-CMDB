@@ -129,7 +129,14 @@ export function TicketListPage() {
         <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>
       ) : (
         <Card title={`${t('ticket.title', 'Tickets')} (${data?.total ?? 0})`}>
-          <div className="overflow-x-auto">
+          {/* The table scrolls sideways on narrow screens; the region takes the
+              focus so the keyboard can scroll it (WCAG 2.1.1, WP-522). */}
+          <div
+            className="overflow-x-auto"
+            role="region"
+            aria-label={t('ticket.title', 'Tickets')}
+            tabIndex={0}
+          >
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -184,7 +191,7 @@ export function TicketListPage() {
                 ))}
                 {(!data?.data || data.data.length === 0) && (
                   <tr>
-                    <td colSpan={7} className="py-4 text-center text-gray-400">
+                    <td colSpan={7} className="py-4 text-center text-gray-600 dark:text-gray-300">
                       {t('common.noData', 'Keine Daten')}
                     </td>
                   </tr>

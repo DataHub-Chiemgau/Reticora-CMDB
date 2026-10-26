@@ -175,7 +175,7 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
                         {t('common.edit', 'Bearbeiten')}
                       </button>
                       <button
-                        className="text-xs text-red-600 hover:underline"
+                        className="text-xs text-red-600 hover:underline dark:text-red-400"
                         disabled={deleteRelationship.isPending}
                         title={
                           relationship.source === 'discovery'
@@ -396,7 +396,7 @@ function EditRelationshipModal({
           onSubmit(relationship.id, { verification_state: state, notes: notes.trim() }, onClose);
         }}
       >
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
           {t(
             'relationship.editHint',
             'Endpunkte und Typ sind unveränderlich — zum Umhängen die Beziehung löschen und neu anlegen.',
