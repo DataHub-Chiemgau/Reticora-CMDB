@@ -73,7 +73,7 @@ var edgeRequest = func(ctx context.Context, suffix string, data []byte) ([]byte,
 // postViaEdge delivers a records payload over the edge and returns the
 // number of records the server rejected in the accepted batch. errNoEdge
 // means the HTTP path has to take it; a refusal for good (4xx other than
-// 408/429) is errUploadRejected.
+// 401/408/429) is errUploadRejected.
 func (u *uploader) postViaEdge(ctx context.Context, payload []byte) (lost int, err error) {
 	raw, err := edgeRequest(ctx, edgeIngestSuffix, payload)
 	if err != nil {

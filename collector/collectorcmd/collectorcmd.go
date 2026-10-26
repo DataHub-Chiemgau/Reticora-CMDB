@@ -708,8 +708,8 @@ func (u *uploader) uploadRecordsAt(ctx context.Context, records []plugins.Device
 }
 
 // errUploadRejected marks a batch the server refused for good (a poison
-// batch): a 4xx answer other than 408 and 429. 5xx, 408, 429 and network
-// errors are transient; the batch stays in the spool and is retried.
+// batch): a 4xx answer other than 401, 408 and 429. 5xx, 401, 408, 429 and
+// network errors are transient; the batch stays in the spool and is retried.
 var errUploadRejected = errors.New("upload rejected")
 
 // permanentStatus reports whether an HTTP status refuses a request for
@@ -718,9 +718,12 @@ func permanentStatus(code int) bool {
 	return code >= 400 && code < 500 && code != http.StatusRequestTimeout && code != http.StatusTooManyRequests
 }
 
-// uploadStatusError classifies a refused upload by its status.
+// uploadStatusError classifies a refused upload by its status. A 401 refuses
+// the collector's credential on that path, not the batch: the HTTP path
+// answers 401 until the mTLS edge is connected, so the batch stays in the
+// spool and the edge delivers it.
 func uploadStatusError(code int, detail string) error {
-	if permanentStatus(code) {
+	if permanentStatus(code) && code != http.StatusUnauthorized {
 		return fmt.Errorf("%w with status %d: %s", errUploadRejected, code, detail)
 	}
 	return fmt.Errorf("upload failed with status %d: %s", code, detail)

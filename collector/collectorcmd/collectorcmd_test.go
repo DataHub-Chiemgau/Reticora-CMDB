@@ -1045,11 +1045,11 @@ func TestSpoolPoisonBatchIsQuarantined(t *testing.T) {
 	}
 }
 
-// TestSpoolTransientFailureKeepsBatches covers COL-05: 503, 408, 429 and
-// network errors are transient; every batch stays in the spool in its
+// TestSpoolTransientFailureKeepsBatches covers COL-05: 503, 408, 429, 401
+// (the HTTP path before the mTLS edge is up) and network errors are transient; every batch stays in the spool in its
 // order and nothing is counted as lost.
 func TestSpoolTransientFailureKeepsBatches(t *testing.T) {
-	for _, status := range []int{http.StatusServiceUnavailable, http.StatusRequestTimeout, http.StatusTooManyRequests, 0} {
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusUnauthorized, 0} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			spoolDir := t.TempDir()
 			var requests atomic.Int64
