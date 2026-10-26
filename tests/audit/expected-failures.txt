@@ -10,6 +10,5 @@ sh;tests/audit/g1-gate-evidence.test.sh;pentest_findings;F-039
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_summary;F-039
 sh;tests/audit/g1-gate-evidence.test.sh;subprocessors;F-137
 vitest;frontend/src/pages/CITypeLabels.auditdefect.tsx;CI type labels and ids from the metamodel (audit defect WP-201 / WP-194) shows the localized type label on the CI detail page, not the type UUID;F-175
-e2e-real;chromium:frontend/e2e-real/bulk-jobs-export.spec.ts;Bulk operations, jobs, notifications, saved views, export, webhook egress B04 a malformed id in a bulk request is reported with the status the single change answers (400, not 500);F-327
 e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L08 moving a mounted CI is recorded in ci_change, audit and the unified history shown on the CI page;F-253
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles;F-201

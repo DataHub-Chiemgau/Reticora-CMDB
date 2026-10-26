@@ -29,8 +29,8 @@ import { api, signupTenant, stamp, uiLogin, BASE, SERVER, type Account } from '.
  *      others applied, nothing lost silently ...................... WP-181 (API-08, BLK-01)
  *  B03 bulk limits and validation (0 / 501 ids, unknown status/action, duplicates, CI of
  *      another tenant) ........................... WP-181 (API-08, BLK-01), WP-015 (TEN-06)
- *  B04 a malformed id is reported with the status the single change answers (400, not 500)
- *      ....................................................................... WP-181 (API-08)
+ *  B04 a malformed id is reported with the status the single change answers (400, not 500),
+ *      the other ids are applied ................................ WP-181, WP-517 (API-08)
  *  J01 100 ids run as job: 202 + Location, job center follows it to "Erfolgreich", result
  *      with per-id errors, persistence after reload, history, cancel/revert 409, job
  *      metrics, foreign tenant 404 ....... WP-181 (API-08, BLK-01), WP-182 (API-09, JOB-03),
@@ -599,6 +599,9 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
     expect(item?.code, `per-id status of a malformed id: ${JSON.stringify(item)}`).toBe(
       single.status,
     );
+    // WP-517: the id is checked as a UUID before it reaches the database.
+    expect(item?.error).toBe('invalid CI id');
+    expect(res.body).toMatchObject({ total: 2, succeeded: 1, failed: 1 });
   });
 
   test('J01 100 ids run as a job that the job center follows to the end; the result reports every id and the change persists', async ({

@@ -43,6 +43,9 @@ const (
 	// bulkStatusReason is the reason of the overrides a bulk status
 	// change creates.
 	bulkStatusReason = "bulk set_status"
+	// bulkMalformedID is the report error of an id that is no UUID, a
+	// client error like in the single change (400, F-327).
+	bulkMalformedID = "invalid CI id"
 )
 
 // BulkRequest is the body of POST /cis/bulk.
@@ -51,6 +54,9 @@ type BulkRequest struct {
 	IDs    []string `json:"ids"`
 	// Status is the target of set_status.
 	Status string `json:"status,omitempty"`
+	// malformed holds the ids that are no UUID (validateBulk): each is an
+	// error of its own in the report and never reaches the database.
+	malformed map[string]bool
 }
 
 // BulkItemResult is the outcome of one id.
@@ -115,7 +121,9 @@ func (s *Service) WithBulkQueue(q BulkQueue) *Service {
 }
 
 // validateBulk normalizes and checks a bulk request: known action, 1–500
-// distinct ids, a valid status for set_status.
+// distinct ids, a valid status for set_status. It checks every id as a
+// UUID: a malformed id does not fail the request, it is reported on its own
+// with 400 while the other ids are applied (API-08, F-327).
 func validateBulk(req *BulkRequest) error {
 	if req.Action == "" {
 		req.Action = BulkSetStatus
@@ -138,6 +146,15 @@ func validateBulk(req *BulkRequest) error {
 		return &api.FieldError{Field: "ids", Message: fmt.Sprintf("at most %d ids per request", MaxBulkIDs), Status: http.StatusUnprocessableEntity}
 	}
 	req.IDs = ids
+	req.malformed = nil
+	for _, id := range ids {
+		if !api.IsUUID(id) {
+			if req.malformed == nil {
+				req.malformed = map[string]bool{}
+			}
+			req.malformed[id] = true
+		}
+	}
 	if !IsValidStatus(req.Status) {
 		return &api.FieldError{Field: "status", Message: "must be one of " + strings.Join(Statuses(), ", "), Status: http.StatusUnprocessableEntity}
 	}
@@ -283,6 +300,10 @@ func (s *Service) runBulk(ctx context.Context, orgID, author string, req *BulkRe
 			}
 			break
 		}
+		if req.malformed[id] {
+			result.Items[i] = BulkItemResult{ID: id, Result: bulkResultError, Code: http.StatusBadRequest, Error: bulkMalformedID}
+			continue
+		}
 		wg.Add(1)
 		slots <- struct{}{}
 		go func(i int, id string) {
@@ -318,12 +339,14 @@ func (s *Service) runBulk(ctx context.Context, orgID, author string, req *BulkRe
 }
 
 // bulkError maps the error of one id onto the status and message the
-// single operation would answer; internal errors stay generic.
+// single operation would answer: database errors like the single PATCH
+// (api.ClassifyDBError, sanitized details), an unreachable dependency 503;
+// internal errors stay generic.
 func bulkError(err error) (code int, msg string) {
 	var fe *api.FieldError
 	var ve *ValidationError
 	switch {
-	case err.Error() == "not found":
+	case errors.Is(err, ErrNotFound) || err.Error() == "not found":
 		return http.StatusNotFound, "CI not found"
 	case errors.As(err, &fe):
 		if fe.Status != 0 {
@@ -336,6 +359,12 @@ func bulkError(err error) (code int, msg string) {
 		return http.StatusPreconditionRequired, err.Error()
 	case errors.Is(err, ErrPreconditionFailed):
 		return http.StatusPreconditionFailed, err.Error()
+	}
+	if status, _, detail, ok := api.ClassifyDBError(err); ok {
+		return status, detail
+	}
+	if api.IsUnavailable(err) {
+		return http.StatusServiceUnavailable, "a required service is temporarily unavailable, try again later"
 	}
 	return http.StatusInternalServerError, "the CI could not be updated"
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
@@ -102,12 +104,13 @@ func bulkBody(status string, ids ...string) string {
 // fails alone.
 func TestBulkStatusReportsEachID(t *testing.T) {
 	mux, repo, ids, _ := bulkMux(t, 3)
-	w := postBulk(mux, bulkBody(StatusMaintenance, ids[0], "missing", ids[1], ids[0]))
+	const missing = "99999999-0000-4000-8000-000000000099"
+	w := postBulk(mux, bulkBody(StatusMaintenance, ids[0], missing, ids[1], ids[0]))
 	var res BulkResult
 	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || w.Code != http.StatusOK {
 		t.Fatalf("bulk: %d %s", w.Code, w.Body.String())
 	}
-	if res.Total != 3 || res.Succeeded != 2 || res.Failed != 1 || res.Items[1].ID != "missing" || res.Items[1].Code != http.StatusNotFound {
+	if res.Total != 3 || res.Succeeded != 2 || res.Failed != 1 || res.Items[1].ID != missing || res.Items[1].Code != http.StatusNotFound {
 		t.Errorf("report: %+v", res)
 	}
 	for _, id := range ids[:2] {
@@ -121,6 +124,108 @@ func TestBulkStatusReportsEachID(t *testing.T) {
 	// WP-368 (CI-04, OVR-01, API-07): each change is a manual one of the
 	// requesting user.
 	repo.checkManual(t, "user-1", ids[:2])
+}
+
+// TestBulkReportsAMalformedIDAs400 covers WP-517 (API-08, BLK-01; F-327):
+// an id that is no UUID is reported with 400 "invalid CI id", the status the
+// single change answers, and never reaches the repository; the other ids
+// are applied, synchronously and in the job.
+func TestBulkReportsAMalformedIDAs400(t *testing.T) {
+	malformed := []string{"not-a-uuid", "1", "00000000-0000-0000-0000-00000000000g", "{00000000-0000-0000-0000-000000000001}"}
+	check := func(t *testing.T, res BulkResult, repo *bulkRepo, valid []string) {
+		t.Helper()
+		if res.Total != len(valid)+len(malformed) || res.Succeeded != len(valid) || res.Failed != len(malformed) {
+			t.Errorf("report totals: %+v", res)
+		}
+		bad := map[string]bool{}
+		for _, id := range malformed {
+			bad[id] = true
+		}
+		for _, item := range res.Items {
+			switch {
+			case bad[item.ID] && (item.Result != "error" || item.Code != http.StatusBadRequest || item.Error != "invalid CI id"):
+				t.Errorf("malformed id %q: %+v, want error 400 invalid CI id", item.ID, item)
+			case !bad[item.ID] && (item.Result != "ok" || item.Code != http.StatusOK):
+				t.Errorf("valid id %s: %+v, want ok", item.ID, item)
+			}
+		}
+		repo.mu.Lock()
+		for _, id := range malformed {
+			if _, ok := repo.requests[id]; ok {
+				t.Errorf("malformed id %q reached the repository", id)
+			}
+		}
+		repo.mu.Unlock()
+		repo.checkManual(t, "user-1", valid)
+	}
+
+	t.Run("synchronous", func(t *testing.T) {
+		mux, repo, ids, _ := bulkMux(t, 2)
+		w := postBulk(mux, bulkBody(StatusMaintenance, append([]string{ids[0]}, append(malformed, ids[1])...)...))
+		var res BulkResult
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("bulk: %d %s", w.Code, w.Body.String())
+		}
+		if res.Items[1].ID != malformed[0] {
+			t.Errorf("report order: %+v", res.Items)
+		}
+		check(t, res, repo, ids)
+	})
+
+	t.Run("job", func(t *testing.T) {
+		mux, repo, ids, jobSvc := bulkMux(t, BulkJobFromIDs)
+		w := postBulk(mux, bulkBody(StatusInactive, append(append([]string{}, ids...), malformed...)...))
+		var accepted struct {
+			JobID string `json:"job_id"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &accepted); err != nil || w.Code != http.StatusAccepted {
+			t.Fatalf("bulk job: %d %s", w.Code, w.Body.String())
+		}
+		var job *jobs.Job
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if job, _ = jobSvc.Get(context.Background(), "org-1", accepted.JobID); job != nil && job.Status.Terminal() {
+				break
+			}
+		}
+		if job == nil || job.Status != jobs.StatusSucceeded {
+			t.Fatalf("job: %+v", job)
+		}
+		var res BulkResult
+		if err := json.Unmarshal(job.Result, &res); err != nil {
+			t.Fatal(err)
+		}
+		check(t, res, repo, ids)
+	})
+}
+
+// TestBulkErrorMapsLikeTheSinglePatch covers WP-517 (API-08; F-327): a
+// database error of one id is reported with the status and the sanitized
+// detail of the single PATCH (api.ClassifyDBError), not as 500; an
+// unknown error stays a generic 500.
+func TestBulkErrorMapsLikeTheSinglePatch(t *testing.T) {
+	wrap := func(code string) error {
+		return fmt.Errorf("update ci: %w", &pgconn.PgError{Code: code, Message: "secret detail of table ci", ConstraintName: "ci_pkey"})
+	}
+	for _, tc := range []struct {
+		err  error
+		code int
+	}{
+		{wrap("22P02"), http.StatusBadRequest},
+		{wrap("23505"), http.StatusConflict},
+		{wrap("23514"), http.StatusUnprocessableEntity},
+		{wrap("40001"), http.StatusConflict},
+		{wrap("42501"), http.StatusForbidden},
+		{fmt.Errorf("get: %w", ErrNotFound), http.StatusNotFound},
+		{errors.New("boom"), http.StatusInternalServerError},
+	} {
+		code, msg := bulkError(tc.err)
+		if code != tc.code {
+			t.Errorf("%v: code %d, want %d", tc.err, code, tc.code)
+		}
+		if strings.Contains(msg, "secret") || strings.Contains(msg, "ci_pkey") || strings.Contains(msg, "boom") {
+			t.Errorf("%v: message %q leaks the internal error", tc.err, msg)
+		}
+	}
 }
 
 // TestBulkReportsAStatusNotApplied covers WP-368 (API-08, F-020): an id
