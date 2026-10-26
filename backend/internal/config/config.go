@@ -108,7 +108,8 @@ type Config struct {
 	// collectors reach on 4222 with mutual TLS. PKIDir receives its CA
 	// bundle, server certificate (for the host names in NATSEdgeHosts) and
 	// generated configuration; the authorization callout connects to
-	// NATSEdgeURL. Its keys are derived from the master key.
+	// NATSEdgeURL. Its keys are derived from the derivation root of the
+	// installation (crypto.LoadDerivationRoot), not from the master key.
 	PKIDir        string
 	NATSEdgeHosts string
 	NATSEdgeURL   string

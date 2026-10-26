@@ -108,7 +108,8 @@ Ports auf allen IPv4-Schnittstellen veröffentlicht.
   `GET /api/v1/collectors/pki`); der Callout lässt ihn nicht mehr zu. Bestehende
   Verbindungen trennt der Worker `nats_edge` binnen Sekunden: Er meldet sich im
   Systemkonto `SYS` des Endpunkts an (Nutzer `reticora-edge-sys`, Passwort aus
-  dem Master-Key abgeleitet, internes Client-Zertifikat), sucht die
+  der Ableitungswurzel der Installation abgeleitet, `docs/ops/workers.md`,
+  internes Client-Zertifikat), sucht die
   Verbindungen des Collectors (`CONNZ`) und schließt sie (`KICK`); ein
   Fehlschlag wird als `discovery.collector.kick_failed` protokolliert und
   wiederholt. Spätestens enden sie mit dem Ablauf der NATS-Berechtigung

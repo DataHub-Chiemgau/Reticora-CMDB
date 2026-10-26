@@ -50,6 +50,11 @@ type catalogTable struct {
 	appWrite bool
 	// appAccess: reticora_app holds any privilege on the table.
 	appAccess bool
+	// appDelete: reticora_app holds DELETE or TRUNCATE on the table.
+	appDelete bool
+	// truncateGuard: the table carries the enabled TRUNCATE guard
+	// (database.TruncateGuardTrigger).
+	truncateGuard bool
 	// barrierView: the table's view of rls.ViewProtectedTables passes
 	// rls.RuleViewBarrier.
 	barrierView bool
@@ -194,7 +199,7 @@ func TestKnownGapsList(t *testing.T) {
 		rls.RuleSystemWrite: true, rls.RuleGlobalRows: true, rls.RuleClientScope: true,
 		rls.RuleSiteScope: true, rls.RuleTeamScope: true, rls.RuleOrgColumn: true,
 		rls.RuleReadOnlyCatalog: true, rls.RuleViewBarrier: true, rls.RuleOperatorOnly: true,
-		rls.RuleLocatedScope: true,
+		rls.RuleLocatedScope: true, rls.RuleSystemOnly: true,
 	}
 	plan, err := os.ReadFile(planPath)
 	if err != nil {
@@ -300,6 +305,23 @@ func violations(tbl *catalogTable) []rls.Rule {
 		}
 		if !operatorOnly {
 			return []rls.Rule{rls.RuleOperatorOnly}
+		}
+		return nil
+	}
+	if slices.Contains(rls.SystemTables, tbl.name) {
+		// Documented exception (SEC-06, WP-459): a table of the
+		// installation, reachable only with the system flag, whose rows
+		// are never deleted.
+		systemOnly := tbl.rls && tbl.force && tbl.truncateGuard && !tbl.appDelete && len(tbl.policies) > 0
+		for i := range tbl.policies {
+			p := &tbl.policies[i]
+			if p.appliesTo("DELETE") || (p.cmd != "INSERT" && !usesGUC(p.using, rls.SystemGUC)) ||
+				(p.cmd != "SELECT" && !usesGUC(p.expr("check"), rls.SystemGUC)) {
+				systemOnly = false
+			}
+		}
+		if !systemOnly {
+			return []rls.Rule{rls.RuleSystemOnly}
 		}
 		return nil
 	}
@@ -432,6 +454,12 @@ func loadCatalog(ctx context.Context, t *testing.T, pool *pgxpool.Pool) map[stri
 		       bool_or(a.attname = 'site_id'), bool_or(a.attname = 'team_id'),
 		       has_table_privilege('reticora_app', c.oid, 'INSERT, UPDATE, DELETE'),
 		       has_table_privilege('reticora_app', c.oid, 'SELECT, INSERT, UPDATE, DELETE'),
+		       has_table_privilege('reticora_app', c.oid, 'DELETE, TRUNCATE'),
+		       EXISTS (SELECT 1 FROM pg_trigger tg
+		                WHERE tg.tgrelid = c.oid AND tg.tgname = '`+database.TruncateGuardTrigger+`'
+		                  AND tg.tgfoid = to_regprocedure('public.`+database.TruncateGuardTrigger+`()')
+		                  AND tg.tgtype & 1 = 0 AND tg.tgtype & 2 = 2 AND tg.tgtype & 32 = 32 -- statement, BEFORE, TRUNCATE
+		                  AND tg.tgenabled IN ('O', 'A')),
 		       COALESCE(array_agg(a.attname::text ORDER BY a.attnum)
 		                FILTER (WHERE a.attname ~ '^(\w+_)?(location|room|rack|ci)_id$'), '{}'),
 		       EXISTS (SELECT 1 FROM pg_constraint k
@@ -452,7 +480,7 @@ func loadCatalog(ctx context.Context, t *testing.T, pool *pgxpool.Pool) map[stri
 	for rows.Next() {
 		tbl := &catalogTable{}
 		if scanErr := rows.Scan(&tbl.name, &tbl.rls, &tbl.force, &tbl.org, &tbl.client, &tbl.site, &tbl.team, &tbl.appWrite, &tbl.appAccess,
-			&tbl.refs, &tbl.treeNode, &tbl.clientDim, &tbl.siteDim); scanErr != nil {
+			&tbl.appDelete, &tbl.truncateGuard, &tbl.refs, &tbl.treeNode, &tbl.clientDim, &tbl.siteDim); scanErr != nil {
 			t.Fatalf("scan table: %v", scanErr)
 		}
 		tables[tbl.name] = tbl

@@ -145,7 +145,7 @@ func TestCollectorNATSEndpointAuthorization(t *testing.T) {
 	}
 
 	// The callout service answers with a signed user JWT or a refusal; its
-	// keys come from the master key, the same for every replica.
+	// keys come from the derivation root, the same for every replica.
 	secrets, err := discovery.DeriveEdgeSecrets(enc)
 	if err != nil {
 		t.Fatal(err)
@@ -1244,6 +1244,7 @@ func TestCollectorCARolloverAcrossReplicas(t *testing.T) {
 	clean := func() { _, _ = f.Admin.Exec(bg, `DELETE FROM collector_ca`) }
 	clean()
 	t.Cleanup(clean)
+	cleanDerivationRoot(t, f)
 	serverBin := collectorCAServerBinary(t)
 	masterKey, err := crypto.GenerateMasterKey()
 	if err != nil {
@@ -1251,6 +1252,11 @@ func TestCollectorCARolloverAcrossReplicas(t *testing.T) {
 	}
 	enc, err := crypto.NewEnvelopeEncryptor(masterKey)
 	if err != nil {
+		t.Fatal(err)
+	}
+	// The instances and the command open the one derivation root of the
+	// database (WP-459).
+	if _, err = crypto.LoadDerivationRoot(bg, f.App, enc); err != nil {
 		t.Fatal(err)
 	}
 	instA, instB := discovery.NewCA(f.App, enc), discovery.NewCA(f.App, enc)

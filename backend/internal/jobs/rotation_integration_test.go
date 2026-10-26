@@ -1,7 +1,9 @@
 package jobs_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -30,8 +32,10 @@ func (d dekAdapter) RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.
 // TestKeyRotationAgainstPostgres covers SEC-06 (WP-141) against
 // PostgreSQL:
 //   - master key rotation: after the rewrap run every data key (org DEK,
-//     notification channel key) uses the new master key, so the previous
-//     key can be retired and everything stays readable;
+//     notification channel key) and the derivation root (platform_secret,
+//     WP-459) use the new master key, so the previous key can be retired and
+//     everything stays readable; the secrets derived from the root are the
+//     same before and after, the old key alone no longer opens the root;
 //   - the yearly org DEK rotation re-encrypts the credentials under a new
 //     DEK with the next key version, audited, and leaves younger DEKs alone;
 //   - the overlap of a rotated webhook secret ends after its time.
@@ -40,9 +44,21 @@ func (d dekAdapter) RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.
 func TestKeyRotationAgainstPostgres(t *testing.T) {
 	f := scopetest.Seed(t, "9d")
 	bg := context.Background()
+	// The derivation root goes with the master key this test draws.
+	cleanRoot := func() { _, _ = f.Admin.Exec(bg, `DELETE FROM platform_secret`) }
+	cleanRoot()
+	t.Cleanup(cleanRoot)
 	oldKey, _ := crypto.GenerateMasterKey()
 	newKey, _ := crypto.GenerateMasterKey()
 	oldEnc, _ := crypto.NewEnvelopeEncryptor(oldKey)
+	if created, err := crypto.LoadDerivationRoot(bg, f.App, oldEnc); err != nil || !created {
+		t.Fatalf("derivation root at the first start: created %t, %v", created, err)
+	}
+	derivedBefore := oldEnc.Derive("reticora/nats-edge/issuer")
+	var sealedBefore []byte
+	if err := f.Admin.QueryRow(bg, `SELECT sealed FROM platform_secret`).Scan(&sealedBefore); err != nil {
+		t.Fatal(err)
+	}
 	credRepo := credential.NewPGRepository(f.App)
 	ctx := f.OrgCtx(f.OrgA)
 	cred, err := credential.NewService(credRepo, oldEnc).Create(ctx, credential.CreateRequest{OrganizationID: f.OrgA, Name: "snmp",
@@ -60,9 +76,12 @@ func TestKeyRotationAgainstPostgres(t *testing.T) {
 	// Master key rotation.
 	rotating, _ := crypto.NewEnvelopeEncryptor(newKey, oldKey)
 	hooks := webhook.NewPGRepository(f.App)
+	if _, err = crypto.LoadDerivationRoot(bg, f.App, rotating); err != nil {
+		t.Fatalf("derivation root with the previous key: %v", err)
+	}
 	rot := jobs.NewRotation(f.App, rotating, dekAdapter{repo: credRepo}, hooks)
 	n, err := rot.RewrapMasterKey(bg)
-	if err != nil || n < 2 {
+	if err != nil || n < 3 {
 		t.Fatalf("rewrap: %d %v", n, err)
 	}
 	if again, _ := rot.RewrapMasterKey(bg); again != 0 {
@@ -74,6 +93,23 @@ func TestKeyRotationAgainstPostgres(t *testing.T) {
 	}
 	if got, getErr := notify.NewPGRepository(f.App, notify.NewSealer(retired)).Get(bg, f.OrgA, ch.ID); getErr != nil || got.Config["password"] != "pw" {
 		t.Errorf("channel after retiring the old key: %v", getErr)
+	}
+	// The root is the same one, sealed with the new key: the new key alone
+	// opens it and derives the same secrets, the old key alone no longer.
+	var sealedAfter []byte
+	if err = f.Admin.QueryRow(bg, `SELECT sealed FROM platform_secret`).Scan(&sealedAfter); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(sealedAfter, sealedBefore) || !retired.IsCurrent(sealedAfter) {
+		t.Error("the derivation root was not resealed with the new master key")
+	}
+	if created, rootErr := crypto.LoadDerivationRoot(bg, f.App, retired); rootErr != nil || created ||
+		!bytes.Equal(retired.Derive("reticora/nats-edge/issuer"), derivedBefore) {
+		t.Errorf("derivation root after retiring the old key: created %t, %v, or other derived secrets", created, rootErr)
+	}
+	oldOnly, _ := crypto.NewEnvelopeEncryptor(oldKey)
+	if _, rootErr := crypto.LoadDerivationRoot(bg, f.App, oldOnly); !errors.Is(rootErr, crypto.ErrDerivationRoot) {
+		t.Errorf("derivation root with the retired key alone: %v, want ErrDerivationRoot", rootErr)
 	}
 
 	// The yearly org DEK rotation.

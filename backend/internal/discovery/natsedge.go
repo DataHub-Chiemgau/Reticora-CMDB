@@ -247,9 +247,11 @@ const EdgeAuthUser = "reticora-edge-auth"
 const EdgeSysUser = "reticora-edge-sys"
 
 // EdgeSecrets are the issuer key of the callout and the passwords of its
-// service login and of the system login, derived from the master key: the
-// server and the endpoint configuration it writes agree without a further
-// secret.
+// service login and of the system login, derived from the derivation root of
+// the installation (crypto.LoadDerivationRoot): the server and the endpoint
+// configuration it writes agree without a further secret, and a master-key
+// rotation leaves them unchanged, so a running endpoint keeps accepting the
+// callout of a restarted server (SEC-06, WP-459).
 type EdgeSecrets struct {
 	IssuerSeed  string
 	IssuerKey   string
@@ -257,7 +259,8 @@ type EdgeSecrets struct {
 	SysPassword string
 }
 
-// DeriveEdgeSecrets derives the endpoint's secrets from the master key.
+// DeriveEdgeSecrets derives the endpoint's secrets from the derivation root
+// of enc, which must be open.
 func DeriveEdgeSecrets(enc *platformcrypto.EnvelopeEncryptor) (*EdgeSecrets, error) {
 	seed, err := nkeys.EncodeSeed(nkeys.PrefixByteAccount, enc.Derive("reticora/nats-edge/issuer"))
 	if err != nil {
@@ -934,7 +937,7 @@ func edgeClientTLSFor(st *caState, issuer *caCert, name string, now time.Time) (
 // (COL-04). The internal NATS authenticates nobody and the collectors may
 // publish only below their own subject tree: the announcement carries no
 // state, only the version of collector_ca, a timestamp and a MAC with a key
-// derived from the master key; a receiver checks MAC and age and reads
+// derived from the derivation root; a receiver checks MAC and age and reads
 // collector_ca itself.
 const CollectorCAChangedSubject = "discovery.collector_ca.changed"
 

@@ -504,9 +504,10 @@ func TestCollectorCAChangeLock(t *testing.T) {
 
 // TestCollectorCAChangeAnnouncementAuthenticated covers the announcement of
 // a change of the CA (WP-430): the internal NATS authenticates nobody, so a
-// receiver accepts only an announcement with the MAC of the master key, at
-// most 5 minutes old. A changed version, a MAC of another master key, an
-// old timestamp and garbage are refused.
+// receiver accepts only an announcement with the MAC of the key derived from
+// the derivation root of the installation (WP-459), at most 5 minutes old.
+// A changed version, a MAC of another installation's root, an old timestamp
+// and garbage are refused.
 func TestCollectorCAChangeAnnouncementAuthenticated(t *testing.T) {
 	newEnc := func() *crypto.EnvelopeEncryptor {
 		t.Helper()
@@ -516,6 +517,9 @@ func TestCollectorCAChangeAnnouncementAuthenticated(t *testing.T) {
 		}
 		enc, err := crypto.NewEnvelopeEncryptor(key)
 		if err != nil {
+			t.Fatal(err)
+		}
+		if err = enc.UseEphemeralDerivationRoot(); err != nil {
 			t.Fatal(err)
 		}
 		return enc
@@ -533,7 +537,7 @@ func TestCollectorCAChangeAnnouncementAuthenticated(t *testing.T) {
 	stale, _ := discovery.CAChangeMessage(ca, "v1", now.Add(-6*time.Minute))
 	for name, data := range map[string][]byte{
 		"changed version":     []byte(strings.Replace(string(msg), `"v1"`, `"v2"`, 1)),
-		"another master key":  other,
+		"another root":        other,
 		"older than 5 min":    stale,
 		"no MAC":              []byte(`{"version":"v1","at":"` + now.UTC().Format(time.RFC3339Nano) + `"}`),
 		"no JSON":             []byte("reload"),

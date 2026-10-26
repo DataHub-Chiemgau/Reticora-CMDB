@@ -122,12 +122,6 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("envelope encryption initialized")
-	// Pagination cursors are signed with a key derived from the master key,
-	// so every replica accepts the cursors of the others (API-02).
-	if err = api.SetCursorKey(encryptor.Derive("reticora/pagination-cursor/v1")); err != nil {
-		slog.Error("failed to set the cursor key", "error", err)
-		os.Exit(1)
-	}
 
 	// Initialize OIDC provider. When RETICORA_OIDC_CA_CERT_FILE is set the
 	// provider calls (discovery, JWKS, token exchange) additionally trust that
@@ -197,6 +191,11 @@ func main() {
 
 	if *noDB {
 		slog.Warn("running with --no-db: all state is in-memory and lost on restart")
+		// The derived secrets come from a derivation root of this process.
+		if err = encryptor.UseEphemeralDerivationRoot(); err != nil {
+			slog.Error("failed to draw the derivation root", "error", err)
+			os.Exit(1)
+		}
 		repos = server.MemoryRepositories()
 		// File-backed blob storage keeps asynchronous exports usable in the
 		// development mode; the signed URL is a development-only file: URL.
@@ -224,6 +223,20 @@ func main() {
 			os.Exit(1)
 		}
 		readiness = append(readiness, dbCheck)
+		// The derived secrets (Derive) come from the derivation root of the
+		// installation, not from the master key, so they survive a
+		// master-key rotation (SEC-06, WP-459). The first start draws it;
+		// a root the master keys do not unseal stops the start: a new one
+		// would change every derived secret.
+		rootCreated, rootErr := crypto.LoadDerivationRoot(context.Background(), pool, encryptor)
+		if rootErr != nil {
+			slog.Error("failed to open the derivation root of the derived secrets", "error", rootErr)
+			os.Exit(1)
+		}
+		if rootCreated {
+			slog.Info("created the derivation root of the derived secrets: the keys of the collector NATS endpoint and " +
+				"the pagination cursor key changed once; restart nats-edge if it was running (docs/ops/workers.md, key rotation)")
+		}
 		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
 		auditHandler = audit.NewHandler(pool)
 		auditPool = pool
@@ -256,6 +269,13 @@ func main() {
 		} else {
 			slog.Warn("object storage not configured (RETICORA_S3_*); asynchronous export jobs are disabled")
 		}
+	}
+	// Pagination cursors are signed with a key derived from the derivation
+	// root, so every replica accepts the cursors of the others (API-02),
+	// also after a master-key rotation.
+	if err = api.SetCursorKey(encryptor.Derive("reticora/pagination-cursor/v1")); err != nil {
+		slog.Error("failed to set the cursor key", "error", err)
+		os.Exit(1)
 	}
 	// With NATS the discovery ingest runs over ingest.> (REC-01): HTTP
 	// ingest publishes, the consumer processes. NATS is reported by /readyz.

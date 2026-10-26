@@ -31,6 +31,17 @@ var tenantGuardAllowlist = map[string]string{
 	"internal/citype/ddl_job.go": "index DDL outside a transaction",
 }
 
+// systemWriteCallers lists the files that may call WithSystemWrite, the
+// read-write transaction with the system flag (the system tables,
+// rls.SystemTables). Test files may call it to probe its limits.
+// TestSystemWriteCallersAreListed fails for every other caller and for
+// entries that match no call any more.
+var systemWriteCallers = map[string]string{
+	// The derivation root of the installation (SEC-06, WP-459): created at
+	// the first start, rewrapped by rotation.master_key (platform_secret).
+	"internal/platform/crypto/derivation_store.go": "derivation root in platform_secret",
+}
+
 // adminPoolCallers lists the files that may call NewAdminPool, the pool
 // without the runtime login check (TEN-03, WP-351). Only command-line tools
 // that log in with the migration/admin login belong here; the server and

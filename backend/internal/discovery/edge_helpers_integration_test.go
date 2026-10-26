@@ -21,7 +21,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 )
 
-// auditEdge seeds the fixture and a collector CA (a private CA per test).
+// auditEdge seeds the fixture and a collector CA (a private CA per test);
+// the encryptor derives the endpoint's secrets from a derivation root of
+// its own.
 func auditEdge(t *testing.T, tag string) (*edgeFixture, *crypto.EnvelopeEncryptor) {
 	t.Helper()
 	f := scopetest.Seed(t, tag)
@@ -35,6 +37,9 @@ func auditEdge(t *testing.T, tag string) (*edgeFixture, *crypto.EnvelopeEncrypto
 	}
 	enc, err := crypto.NewEnvelopeEncryptor(key)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err = enc.UseEphemeralDerivationRoot(); err != nil {
 		t.Fatal(err)
 	}
 	return &edgeFixture{f: f, ca: discovery.NewCA(f.App, enc), repo: discovery.NewPGRepository(f.App)}, enc

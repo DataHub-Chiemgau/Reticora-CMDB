@@ -182,7 +182,8 @@ Danach kündigt der Befehl den Wechsel auf dem internen NATS an
 der CA neu, ihr Worker `nats_edge` exportiert die Dateien und lässt
 `nats-edge` geänderte Dateien neu laden. Die Ankündigung trägt keinen
 Zustand, nur die Version von `collector_ca`, einen Zeitstempel und einen MAC
-mit einem aus dem Master-Key abgeleiteten Schlüssel; ohne gültigen MAC oder
+mit einem aus der Ableitungswurzel der Installation abgeleiteten Schlüssel
+(unabhängig vom Master-Key, `docs/ops/workers.md`); ohne gültigen MAC oder
 älter als 5 Minuten wird sie verworfen. Collector können sie nicht senden
 (sie dürfen nur unter `collector.<org>.<id>.>` veröffentlichen). Geht die
 Ankündigung verloren, prüft jede Replik vor jeder Signatur, jedem Export und

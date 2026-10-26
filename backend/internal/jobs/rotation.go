@@ -16,8 +16,11 @@ import (
 
 // Key rotation runs of SEC-06 on the scheduler:
 //   - rotation.master_key rewraps every data key that a previous master key
-//     wrapped (org DEKs, notification channel keys); once none is left the
-//     previous key can be removed from the configuration (retired);
+//     wrapped (org DEKs, notification channel keys, the keys of the
+//     collector CAs) and reseals the derivation root of the derived secrets
+//     (platform_secret, WP-459), which leaves those secrets unchanged; once
+//     none is left the previous key can be removed from the configuration
+//     (retired);
 //   - rotation.org_dek replaces each organization's DEK after a year and
 //     re-encrypts its credentials, atomically, audited;
 //   - rotation.webhook_secrets ends the 24-hour overlap of rotated webhook
@@ -102,8 +105,8 @@ func (r *Rotation) organizations(ctx context.Context) ([]string, error) {
 	return orgs, err
 }
 
-// RewrapMasterKey moves every data key to the current master key and
-// returns how many it rewrapped.
+// RewrapMasterKey moves every data key and the derivation root to the
+// current master key and returns how many it rewrapped.
 func (r *Rotation) RewrapMasterKey(ctx context.Context) (int, error) {
 	orgs, err := r.organizations(ctx)
 	if err != nil {
@@ -129,6 +132,13 @@ func (r *Rotation) RewrapMasterKey(ctx context.Context) (int, error) {
 		return rewrapped, fmt.Errorf("collector CA: %w", caErr)
 	}
 	rewrapped += caKeys
+	rootChanged, rootErr := crypto.RewrapDerivationRoot(ctx, r.pool, r.enc)
+	if rootErr != nil {
+		return rewrapped, fmt.Errorf("derivation root: %w", rootErr)
+	}
+	if rootChanged {
+		rewrapped++
+	}
 	slog.Info("master key rewrap", "key_id", r.enc.KeyID(), "rewrapped", rewrapped,
 		"note", "all data keys use the current master key; previous master keys can be retired")
 	return rewrapped, nil
