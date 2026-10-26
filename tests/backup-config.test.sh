@@ -285,24 +285,32 @@ check "run: versioning Suspended stops the start before the first backup" \
 
 SH_IMAGE="${BACKUP_TEST_SH_IMAGE:-$(sed -n 's/^ARG TIMESCALE_IMAGE=//p' "$PGDIR/Dockerfile")}"
 BUSYBOX="$(command -v busybox || true)"
+# A busybox built to prefer its applets (Ubuntu's busybox-static, present on
+# the GitHub runners) runs its own sleep instead of the stub, and the
+# scheduler then really waits for the backup hour: such a binary is not
+# used, the image's busybox sh is.
+if [ -n "$BUSYBOX" ] && [ "$(PATH="$TMP_ROOT/sched:$PATH" "$BUSYBOX" sh -c 'command -v sleep' 2>/dev/null)" != "$TMP_ROOT/sched/sleep" ]; then
+    BUSYBOX=""
+fi
 # in_shell <shell> <command> [<env assignment> …]: reticora-backup.sh
 # <command> under dash or busybox sh (busybox binary, else the image) with
 # the stubs; @T@ and @S@ in the assignments stand for the stub directory and
-# deploy/docker-compose/postgres. Prints the output.
+# deploy/docker-compose/postgres. Prints the output. A run that does not
+# end within 120 s fails instead of holding the job.
 in_shell() {
     local shell="$1" cmd="$2" a
     local -a envs=() sh=(dash)
     shift 2
     if [ "$shell" = busybox ] && [ -z "$BUSYBOX" ]; then
         for a in "$@"; do a="${a//@T@//t}"; envs+=(-e "${a//@S@//s}"); done
-        docker run --rm --entrypoint /bin/sh -v "$PWD/$PGDIR:/s:ro" -v "$TMP_ROOT:/t:ro" -v "$TMP_ROOT/out:/t/out" \
+        timeout 120 docker run --rm --entrypoint /bin/sh -v "$PWD/$PGDIR:/s:ro" -v "$TMP_ROOT:/t:ro" -v "$TMP_ROOT/out:/t/out" \
             -e PATH=/t/sched:/t/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin -e STUB_DIR=/t/out \
             "${envs[@]}" "$SH_IMAGE" /s/reticora-backup.sh "$cmd" 2>&1
     else
         for a in "$@"; do a="${a//@T@/$TMP_ROOT}"; envs+=("${a//@S@/$PGDIR}"); done
         [ "$shell" = dash ] || sh=("$BUSYBOX" sh)
         env PATH="$TMP_ROOT/sched:$TMP_ROOT/bin:$PATH" STUB_DIR="$TMP_ROOT/out" "${envs[@]}" \
-            "${sh[@]}" "$PGDIR/reticora-backup.sh" "$cmd" 2>&1
+            timeout 120 "${sh[@]}" "$PGDIR/reticora-backup.sh" "$cmd" 2>&1
     fi
 }
 # waits_until <output> <hour>: the scheduler announced the wait until
