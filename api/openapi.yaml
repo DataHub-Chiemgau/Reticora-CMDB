@@ -8215,16 +8215,21 @@ paths:
       description: >-
         Returns credential metadata (never the secret material) for the
         authenticated tenant. The organization is derived from the session and
-        cannot be supplied by the client.
+        cannot be supplied by the client. The list is paged with `limit` and
+        the signed `cursor` (API-02); an empty list is `data: []`.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Credential metadata list
+          description: Paginated credential metadata list
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Credential'
+                $ref: '#/components/schemas/CredentialListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -8943,15 +8948,22 @@ paths:
       operationId: listTeamMembers
       tags: [Teams]
       summary: List members of a team
+      description: >-
+        Paged with `limit` and the signed `cursor` (API-02); a client that
+        needs every member follows `next_cursor` to the end.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Team members
+          description: Paginated team members
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/TeamMember'
+                $ref: '#/components/schemas/TeamMemberListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -9390,15 +9402,20 @@ paths:
       x-successor: '/api/v1/role-assignments'
       tags: [Users]
       summary: List custom role assignments for a user
+      description: Paged with `limit` and the signed `cursor` (API-02).
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Role assignments for the user
+          description: Paginated role assignments for the user
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/RoleAssignment'
+                $ref: '#/components/schemas/RoleAssignmentListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -9410,15 +9427,22 @@ paths:
       operationId: listPermissions
       tags: [Permissions]
       summary: List permission catalogue
+      description: >-
+        Paged with `limit` and the signed `cursor` (API-02); a client that
+        needs the whole catalogue follows `next_cursor` to the end.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Permission catalogue
+          description: Paginated permission catalogue
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Permission'
+                $ref: '#/components/schemas/PermissionListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -9431,15 +9455,22 @@ paths:
       operationId: listRolePermissions
       tags: [Permissions]
       summary: List permissions granted to a role
+      description: >-
+        Paged with `limit` and the signed `cursor` (API-02); a client that
+        needs every grant follows `next_cursor` to the end.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Role permission grants
+          description: Paginated role permission grants
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/RolePermissionGrant'
+                $ref: '#/components/schemas/RolePermissionGrantListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -15917,6 +15948,17 @@ components:
         description:
           type: string
 
+    PermissionListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Permission'
+
     RolePermissionGrant:
       type: object
       required: [organization_id, role_id, permission_key, granted_at]
@@ -15932,6 +15974,17 @@ components:
           format: date-time
         granted_by:
           type: string
+
+    RolePermissionGrantListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/RolePermissionGrant'
 
     ReplaceRolePermissionsRequest:
       type: object
@@ -19361,6 +19414,17 @@ components:
           type: string
           format: date-time
 
+    CredentialListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Credential'
+
     CreateCredentialRequest:
       type: object
       required: [name, secret]
@@ -19477,6 +19541,17 @@ components:
           type: string
           format: date-time
 
+    TeamMemberListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/TeamMember'
+
     AddTeamMemberRequest:
       type: object
       required: [user_id]
@@ -19580,6 +19655,17 @@ components:
           format: date-time
         granted_by:
           type: string
+
+    RoleAssignmentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/RoleAssignment'
 
     AssignRoleRequest:
       type: object

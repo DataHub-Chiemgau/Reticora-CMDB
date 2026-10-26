@@ -219,3 +219,85 @@ describe('impact clients', () => {
     expect(url.searchParams.get('fields')).toBe('name,ci_type,status');
   });
 });
+
+describe('complete lists over several pages (API-02)', () => {
+  function permissions(from: number, count: number) {
+    return Array.from({ length: count }, (_, i) => ({
+      key: `res${from + i}:read`,
+      resource: `res${from + i}`,
+      action: 'read',
+      description: '',
+    }));
+  }
+
+  it('follows next_cursor with limit=200 until the end: two pages with 103 entries', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: permissions(0, 100),
+          total: 103,
+          limit: 200,
+          offset: 0,
+          has_more: true,
+          next_cursor: 'cursor-2',
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: permissions(100, 3),
+          total: 103,
+          limit: 200,
+          offset: 100,
+          has_more: false,
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    await importClientWithSession();
+    const { permissionApi } = await import('./client');
+
+    const catalogue = await permissionApi.list();
+
+    expect(catalogue).toHaveLength(103);
+    expect(new Set(catalogue.map((p) => p.key)).size).toBe(103);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const first = new URL(String(fetchMock.mock.calls[0]?.[0]), 'http://localhost');
+    expect(first.pathname).toBe('/api/v1/permissions');
+    expect(first.searchParams.get('limit')).toBe('200');
+    expect(first.searchParams.has('cursor')).toBe(false);
+    const second = new URL(String(fetchMock.mock.calls[1]?.[0]), 'http://localhost');
+    expect(second.searchParams.get('limit')).toBe('200');
+    expect(second.searchParams.get('cursor')).toBe('cursor-2');
+  });
+
+  it('reads data of the role grants and team members', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === '/api/v1/roles/role-1/permissions') {
+        return Promise.resolve(
+          jsonResponse({
+            data: [{ role_id: 'role-1', permission_key: 'ci:read' }],
+            total: 1,
+            limit: 200,
+            offset: 0,
+            has_more: false,
+          }),
+        );
+      }
+      return Promise.resolve(
+        jsonResponse({ data: [], total: 0, limit: 200, offset: 0, has_more: false }),
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await importClientWithSession();
+    const { permissionApi, teamApi } = await import('./client');
+
+    await expect(permissionApi.listRole('role-1')).resolves.toEqual([
+      { role_id: 'role-1', permission_key: 'ci:read' },
+    ]);
+    await expect(teamApi.listMembers('team-1')).resolves.toEqual([]);
+    const members = new URL(String(fetchMock.mock.calls[1]?.[0]), 'http://localhost');
+    expect(members.pathname).toBe('/api/v1/teams/team-1/members');
+    expect(members.searchParams.get('limit')).toBe('200');
+  });
+});

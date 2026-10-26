@@ -1,9 +1,11 @@
 package user
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -402,6 +404,11 @@ func (r *MemoryRepository) ListTeamMembers(_ context.Context, orgID, teamID stri
 			result = append(result, *m)
 		}
 	}
+	// The order of the PostgreSQL repository: the list is paged by offset
+	// (API-02).
+	slices.SortFunc(result, func(a, b TeamMember) int {
+		return cmp.Or(a.JoinedAt.Compare(b.JoinedAt), cmp.Compare(a.ID, b.ID))
+	})
 	return result, nil
 }
 
@@ -563,5 +570,10 @@ func (r *MemoryRepository) ListUserRoles(_ context.Context, orgID, userID string
 			result = append(result, *a)
 		}
 	}
+	// The order of the PostgreSQL repository: the list is paged by offset
+	// (API-02).
+	slices.SortFunc(result, func(a, b UserRoleAssignment) int {
+		return cmp.Or(b.GrantedAt.Compare(a.GrantedAt), cmp.Compare(b.ID, a.ID))
+	})
 	return result, nil
 }

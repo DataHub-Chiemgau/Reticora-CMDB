@@ -87,12 +87,16 @@ func TestHandlerScopesCredentialsToAuthenticatedTenant(t *testing.T) {
 	req = withTenant(httptest.NewRequest(http.MethodGet, "/api/v1/credentials", nil), "org-2")
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	var listed []Credential
+	// The list is a page {data, next_cursor}; an empty one is "data": []
+	// (API-02, F-214).
+	var listed struct {
+		Data []Credential `json:"data"`
+	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
 		t.Fatalf("decode list: %v", err)
 	}
-	if len(listed) != 0 {
-		t.Errorf("expected org-2 to see no credentials, got %d", len(listed))
+	if listed.Data == nil || len(listed.Data) != 0 {
+		t.Errorf("expected org-2 to see data: [], got %s", rec.Body.String())
 	}
 
 }

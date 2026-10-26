@@ -663,7 +663,7 @@ func (r *PGRepository) ListTeamMembers(ctx context.Context, orgID, teamID string
 		if !exists {
 			return errTeamNotFound
 		}
-		query := fmt.Sprintf("SELECT %s FROM team_member WHERE team_id = $1 ORDER BY joined_at ASC", teamMemberSelectColumns)
+		query := fmt.Sprintf("SELECT %s FROM team_member WHERE team_id = $1 ORDER BY joined_at ASC, id ASC", teamMemberSelectColumns)
 		rows, err := tx.Query(ctx, query, teamID)
 		if err != nil {
 			return fmt.Errorf("list team members: %w", err)
@@ -1187,7 +1187,7 @@ func (r *PGRepository) ListUserRoles(ctx context.Context, orgID, userID string) 
 				   created_at, ''
 			FROM role_assignment
 			WHERE organization_id = $1 AND user_id = $2
-			ORDER BY granted_at DESC
+			ORDER BY granted_at DESC, id DESC
 		`, orgID, userID)
 		if err != nil {
 			return fmt.Errorf("list user roles: %w", err)

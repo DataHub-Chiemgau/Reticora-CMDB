@@ -4090,7 +4090,7 @@ export interface paths {
     };
     /**
      * List credential metadata
-     * @description Returns credential metadata (never the secret material) for the authenticated tenant. The organization is derived from the session and cannot be supplied by the client.
+     * @description Returns credential metadata (never the secret material) for the authenticated tenant. The organization is derived from the session and cannot be supplied by the client. The list is paged with `limit` and the signed `cursor` (API-02); an empty list is `data: []`.
      */
     get: operations['listCredentials'];
     put?: never;
@@ -4408,7 +4408,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List members of a team */
+    /**
+     * List members of a team
+     * @description Paged with `limit` and the signed `cursor` (API-02); a client that needs every member follows `next_cursor` to the end.
+     */
     get: operations['listTeamMembers'];
     put?: never;
     /**
@@ -4611,6 +4614,7 @@ export interface paths {
     /**
      * List custom role assignments for a user
      * @deprecated
+     * @description Paged with `limit` and the signed `cursor` (API-02).
      */
     get: operations['listUserRolesLegacy'];
     put?: never;
@@ -4628,7 +4632,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List permission catalogue */
+    /**
+     * List permission catalogue
+     * @description Paged with `limit` and the signed `cursor` (API-02); a client that needs the whole catalogue follows `next_cursor` to the end.
+     */
     get: operations['listPermissions'];
     put?: never;
     post?: never;
@@ -4648,7 +4655,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List permissions granted to a role */
+    /**
+     * List permissions granted to a role
+     * @description Paged with `limit` and the signed `cursor` (API-02); a client that needs every grant follows `next_cursor` to the end.
+     */
     get: operations['listRolePermissions'];
     /**
      * Replace permissions granted to a role
@@ -8585,6 +8595,9 @@ export interface components {
       action: string;
       description: string;
     };
+    PermissionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Permission'][];
+    };
     RolePermissionGrant: {
       organization_id: string;
       role_id: string;
@@ -8592,6 +8605,9 @@ export interface components {
       /** Format: date-time */
       granted_at: string;
       granted_by?: string;
+    };
+    RolePermissionGrantListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['RolePermissionGrant'][];
     };
     ReplaceRolePermissionsRequest: {
       permission_keys: string[];
@@ -10748,6 +10764,9 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    CredentialListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Credential'][];
+    };
     CreateCredentialRequest: {
       client_id?: string;
       name: string;
@@ -10815,6 +10834,9 @@ export interface components {
       /** Format: date-time */
       joined_at: string;
     };
+    TeamMemberListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['TeamMember'][];
+    };
     AddTeamMemberRequest: {
       user_id: string;
       /** @description Defaults to "member" when omitted. */
@@ -10863,6 +10885,9 @@ export interface components {
       /** Format: date-time */
       granted_at: string;
       granted_by?: string;
+    };
+    RoleAssignmentListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['RoleAssignment'][];
     };
     /** @description Assigns a role to a user. Exactly one of `custom_role_id` (tenant-defined role) or `role_id` (seeded standard role) must be set. */
     AssignRoleRequest: {
@@ -20746,22 +20771,39 @@ export interface operations {
   };
   listCredentials: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Credential metadata list */
+      /** @description Paginated credential metadata list */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['Credential'][];
+          'application/json': components['schemas']['CredentialListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -21558,7 +21600,23 @@ export interface operations {
   };
   listTeamMembers: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -21568,15 +21626,16 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Team members */
+      /** @description Paginated team members */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['TeamMember'][];
+          'application/json': components['schemas']['TeamMemberListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
     };
@@ -21988,7 +22047,23 @@ export interface operations {
   };
   listUserRolesLegacy: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -21998,44 +22073,78 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Role assignments for the user */
+      /** @description Paginated role assignments for the user */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['RoleAssignment'][];
+          'application/json': components['schemas']['RoleAssignmentListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
   };
   listPermissions: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Permission catalogue */
+      /** @description Paginated permission catalogue */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['Permission'][];
+          'application/json': components['schemas']['PermissionListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
   };
   listRolePermissions: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -22045,15 +22154,16 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Role permission grants */
+      /** @description Paginated role permission grants */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['RolePermissionGrant'][];
+          'application/json': components['schemas']['RolePermissionGrantListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       /** @description The role id is no UUID. */
       404: {

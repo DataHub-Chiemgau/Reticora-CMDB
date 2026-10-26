@@ -392,6 +392,10 @@ func (h *Handler) ListUserRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 	userID := chi.URLParam(r, "id")
 	roles, err := h.repo.ListUserRoles(r.Context(), t.OrganizationID, userID)
 	if err != nil {
@@ -399,7 +403,7 @@ func (h *Handler) ListUserRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteJSON(w, http.StatusOK, roles)
+	api.WriteJSON(w, http.StatusOK, api.Page(roles, page))
 }
 
 // ListRoleAssignments handles GET /api/v1/role-assignments?user_id=….
@@ -558,13 +562,17 @@ func (h *Handler) ListTeamMembers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 	members, err := h.repo.ListTeamMembers(r.Context(), t.OrganizationID, teamID)
 	if err != nil {
 		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
-	api.WriteJSON(w, http.StatusOK, members)
+	api.WriteJSON(w, http.StatusOK, api.Page(members, page))
 }
 
 func (h *Handler) AddTeamMember(w http.ResponseWriter, r *http.Request) {

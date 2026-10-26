@@ -475,6 +475,25 @@ export async function bffQuery<T>(query: string, variables?: Record<string, unkn
   return result.data as T;
 }
 
+/**
+ * Reads every page of a cursor-paginated list (API-02): the first page with
+ * the maximum limit of 200, then `next_cursor` until the server sends none.
+ * For callers that need the complete set (permission catalogue, role
+ * grants, team members); a single page would silently cut it short.
+ */
+export async function fetchAllPages<T>(path: string): Promise<T[]> {
+  const items: T[] = [];
+  let cursor: string | undefined;
+  do {
+    const query = new URLSearchParams({ limit: '200' });
+    if (cursor) query.set('cursor', cursor);
+    const page = await fetchAPI<PaginatedResponse<T>>(`${path}?${query.toString()}`);
+    items.push(...(page.data ?? []));
+    cursor = page.next_cursor;
+  } while (cursor);
+  return items;
+}
+
 function buildQuery(params: object) {
   const query = new URLSearchParams();
   Object.entries(params as Record<string, string | number | boolean | undefined>).forEach(
@@ -1353,7 +1372,7 @@ export const teamApi = {
     return fetchAPI(`/teams/${id}`, { method: 'DELETE' });
   },
   listMembers(teamId: string): Promise<TeamMember[]> {
-    return fetchAPI(`/teams/${teamId}/members`);
+    return fetchAllPages(`/teams/${teamId}/members`);
   },
   addMember(teamId: string, data: { user_id: string; role_in_team?: string }): Promise<TeamMember> {
     return fetchAPI(`/teams/${teamId}/members`, { method: 'POST', body: JSON.stringify(data) });
@@ -1476,10 +1495,10 @@ export interface EffectivePermissionsResponse {
 
 export const permissionApi = {
   list(): Promise<Permission[]> {
-    return fetchAPI('/permissions');
+    return fetchAllPages('/permissions');
   },
   listRole(roleId: string): Promise<RolePermissionGrant[]> {
-    return fetchAPI(`/roles/${roleId}/permissions`);
+    return fetchAllPages(`/roles/${roleId}/permissions`);
   },
   replaceRole(roleId: string, permission_keys: string[]): Promise<RolePermissionGrant[]> {
     return fetchAPI(`/roles/${roleId}/permissions`, {
