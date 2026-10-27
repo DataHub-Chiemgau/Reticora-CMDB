@@ -1583,7 +1583,14 @@
     },
     "escalatedOnly": "Escalated only",
     "escalated": "Escalated",
-    "selectAll": "Select all open",
+    "selectAll": "Select all open ({{count}} on this page)",
+    "selectAllMatching": "Select all {{total}} open",
+    "selectAllError": "The open items could not be loaded: {{message}}",
+    "paging": {
+      "range": "{{from}}–{{to}} of {{total}}",
+      "previous": "Previous page",
+      "next": "Next page"
+    },
     "select": "Select “{{name}}”",
     "bulk": {
       "label": "Bulk action",

@@ -1583,7 +1583,14 @@
     },
     "escalatedOnly": "Nur eskalierte",
     "escalated": "Eskaliert",
-    "selectAll": "Alle offenen auswählen",
+    "selectAll": "Alle offenen auswählen ({{count}} auf dieser Seite)",
+    "selectAllMatching": "Alle {{total}} offenen auswählen",
+    "selectAllError": "Die offenen Items konnten nicht geladen werden: {{message}}",
+    "paging": {
+      "range": "{{from}}–{{to}} von {{total}}",
+      "previous": "Vorherige Seite",
+      "next": "Nächste Seite"
+    },
     "select": "„{{name}}“ auswählen",
     "bulk": {
       "label": "Sammelaktion",

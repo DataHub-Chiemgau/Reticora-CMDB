@@ -4,12 +4,15 @@
  * the CI it concerns; resolution of one item (merge, new, dismiss, accept)
  * or of several items with one action. New of a device of an unknown type
  * asks for the type of the CI; for a device recorded as generic_device the
- * inbox shows the next step instead (F-176).
+ * inbox shows the next step instead (F-176). The inbox pages through the
+ * items, shows how many match and selects all of them for a bulk action,
+ * not only the page shown (F-345); merge candidates are named by their CI
+ * (F-346). Without review:resolve it offers no resolution (RBA-01).
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { useCI } from '../api/hooks';
+import { useCI, useHasPermission, useMountedCIs } from '../api/hooks';
 import { useCITypes } from '../api/cmdbHooks';
 import { localizedText } from '../api/cmdb';
 import type { CI } from '../api/client';
@@ -22,6 +25,8 @@ import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
 import {
   REVIEW_KINDS,
+  REVIEW_PAGE_SIZE,
+  fetchAllReviewItems,
   needsCIType,
   reviewActions,
   useBulkResolveReviews,
@@ -85,6 +90,17 @@ function summary(item: ReviewItem): string {
   return display(p.name ?? p.hostname ?? p.field ?? p.management_ip ?? item.object_key ?? item.id);
 }
 
+/**
+ * candidateLabel names a merge candidate by its CI: the name with the
+ * management IP and serial number that tell devices of the same name apart;
+ * the id while the CI is not loaded (or not readable).
+ */
+export function candidateLabel(id: string, ci: CI | undefined): string {
+  if (!ci) return id;
+  const keys = [ci.management_ip, ci.serial_number].filter((value) => !!value);
+  return keys.length > 0 ? `${ci.name} (${keys.join(', ')})` : ci.name;
+}
+
 /** commonActions are the actions every selected item allows. */
 export function commonActions(items: ReviewItem[]): ReviewAction[] {
   if (items.length === 0) return [];
@@ -103,25 +119,70 @@ export function ReviewInboxPage() {
   const [kind, setKind] = useState('');
   const [escalated, setEscalated] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [offset, setOffset] = useState(0);
+  // The selection keeps the items themselves, so it holds across pages.
+  const [checked, setChecked] = useState<Map<string, ReviewItem>>(new Map());
   const [bulkAction, setBulkAction] = useState<ReviewAction | ''>('');
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
+  const [selectingAll, setSelectingAll] = useState(false);
+  const [selectAllError, setSelectAllError] = useState('');
+  // The server decides every resolution; without review:resolve the inbox
+  // offers none (fail closed while the rights load).
+  const canResolve = useHasPermission('review:resolve') === true;
 
-  const { data, isLoading, error, refetch } = useReviewItems({ status, kind, escalated });
+  const filter = useMemo(() => ({ status, kind, escalated }), [status, kind, escalated]);
+  const { data, isLoading, error, refetch } = useReviewItems(filter, offset);
   const bulk = useBulkResolveReviews();
   const items = useMemo(() => data?.data ?? [], [data]);
+  const total = data?.total ?? items.length;
   const selected = items.find((item) => item.id === selectedId) ?? null;
-  const checkedItems = items.filter((item) => checked.has(item.id));
+  const checkedItems = [...checked.values()];
   const bulkActions = commonActions(checkedItems);
   const openItems = items.filter((item) => item.status === 'open');
+  // Open items of the filter beyond this page: only the open filter counts
+  // them in total.
+  const moreOpen = status === 'open' && total > openItems.length;
+  // A page emptied by resolutions falls back to the first page.
+  useEffect(() => {
+    if (data && items.length === 0 && offset > 0) setOffset(0);
+  }, [data, items.length, offset]);
 
-  function toggle(id: string) {
+  function resetSelection() {
+    setChecked(new Map());
+    setOffset(0);
+  }
+
+  function toggle(item: ReviewItem) {
     setChecked((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      const next = new Map(prev);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.set(item.id, item);
       return next;
     });
+  }
+
+  function selectPage(on: boolean) {
+    setChecked((prev) => {
+      const next = new Map(prev);
+      for (const item of openItems) {
+        if (on) next.set(item.id, item);
+        else next.delete(item.id);
+      }
+      return next;
+    });
+  }
+
+  async function selectAllMatching() {
+    setSelectingAll(true);
+    setSelectAllError('');
+    try {
+      const all = await fetchAllReviewItems(filter);
+      setChecked(new Map(all.filter((i) => i.status === 'open').map((i) => [i.id, i])));
+    } catch (err) {
+      setSelectAllError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSelectingAll(false);
+    }
   }
 
   function runBulk() {
@@ -131,7 +192,8 @@ export function ReviewInboxPage() {
       {
         onSuccess: (result) => {
           setBulkResult(result);
-          setChecked(new Set(result.failed.map((f) => f.id)));
+          const failed = new Set(result.failed.map((f) => f.id));
+          setChecked(new Map(checkedItems.filter((i) => failed.has(i.id)).map((i) => [i.id, i])));
           setBulkAction('');
         },
       },
@@ -154,7 +216,7 @@ export function ReviewInboxPage() {
             value={status}
             onChange={(event) => {
               setStatus(event.target.value);
-              setChecked(new Set());
+              resetSelection();
             }}
             options={[
               { value: '', label: t('reviews.allStatuses') },
@@ -166,7 +228,7 @@ export function ReviewInboxPage() {
             value={kind}
             onChange={(event) => {
               setKind(event.target.value);
-              setChecked(new Set());
+              resetSelection();
             }}
             options={[
               { value: '', label: t('reviews.allKinds') },
@@ -177,14 +239,17 @@ export function ReviewInboxPage() {
             <input
               type="checkbox"
               checked={escalated}
-              onChange={(event) => setEscalated(event.target.checked)}
+              onChange={(event) => {
+                setEscalated(event.target.checked);
+                resetSelection();
+              }}
             />
             {t('reviews.escalatedOnly')}
           </label>
         </div>
       </Card>
 
-      {checkedItems.length > 0 ? (
+      {canResolve && checkedItems.length > 0 ? (
         <Card>
           <div
             className="flex flex-wrap items-end gap-3"
@@ -235,30 +300,72 @@ export function ReviewInboxPage() {
       {items.length > 0 ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
-            {openItems.length > 0 ? (
-              <label className="mb-2 flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={openItems.every((item) => checked.has(item.id))}
-                  onChange={(event) =>
-                    setChecked(
-                      event.target.checked ? new Set(openItems.map((item) => item.id)) : new Set(),
-                    )
-                  }
-                />
-                {t('reviews.selectAll')}
-              </label>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+              <p className="text-gray-700 dark:text-gray-300">
+                {t('reviews.paging.range', {
+                  from: offset + 1,
+                  to: offset + items.length,
+                  total,
+                })}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={offset === 0}
+                  onClick={() => setOffset(Math.max(0, offset - REVIEW_PAGE_SIZE))}
+                >
+                  {t('reviews.paging.previous')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={!data?.has_more}
+                  onClick={() => setOffset(offset + items.length)}
+                >
+                  {t('reviews.paging.next')}
+                </Button>
+              </div>
+            </div>
+            {canResolve && openItems.length > 0 ? (
+              <div className="mb-2 flex flex-wrap items-center gap-3 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={openItems.every((item) => checked.has(item.id))}
+                    onChange={(event) => selectPage(event.target.checked)}
+                  />
+                  {t('reviews.selectAll', { count: openItems.length })}
+                </label>
+                {moreOpen ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={selectingAll}
+                    onClick={() => void selectAllMatching()}
+                  >
+                    {t('reviews.selectAllMatching', { total })}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {selectAllError ? (
+              <p role="alert" className="mb-2 text-sm text-danger">
+                {t('reviews.selectAllError', { message: selectAllError })}
+              </p>
             ) : null}
             <ul className="divide-y divide-gray-100 dark:divide-gray-800">
               {items.map((item) => (
                 <li key={item.id} className="flex items-center gap-3 py-2 text-sm">
-                  <input
-                    type="checkbox"
-                    aria-label={t('reviews.select', { name: summary(item) })}
-                    checked={checked.has(item.id)}
-                    disabled={item.status !== 'open'}
-                    onChange={() => toggle(item.id)}
-                  />
+                  {canResolve ? (
+                    <input
+                      type="checkbox"
+                      aria-label={t('reviews.select', { name: summary(item) })}
+                      checked={checked.has(item.id)}
+                      disabled={item.status !== 'open'}
+                      onChange={() => toggle(item)}
+                    />
+                  ) : null}
                   <button
                     type="button"
                     className="flex flex-1 flex-wrap items-center gap-2 text-left hover:underline"
@@ -278,22 +385,26 @@ export function ReviewInboxPage() {
               ))}
             </ul>
           </Card>
-          {selected ? <ReviewDetail key={selected.id} item={selected} /> : null}
+          {selected ? (
+            <ReviewDetail key={selected.id} item={selected} canResolve={canResolve} />
+          ) : null}
         </div>
       ) : null}
     </div>
   );
 }
 
-function ReviewDetail({ item }: { item: ReviewItem }) {
+function ReviewDetail({ item, canResolve }: { item: ReviewItem; canResolve: boolean }) {
   const { t, i18n } = useTranslation();
   const candidates = item.candidate_ci_ids ?? [];
   const [candidate, setCandidate] = useState(candidates[0] ?? '');
+  // The candidates are named by their CIs (F-346).
+  const candidateCIs = useMountedCIs(candidates.length > 1 ? candidates : []);
   const subject = candidate || (typeof item.payload?.ci_id === 'string' ? item.payload.ci_id : '');
   const { data: ci } = useCI(subject);
   const resolve = useResolveReview();
   const rows = reviewDiff(item, subject ? ci : undefined);
-  const actions = reviewActions(item);
+  const actions = canResolve ? reviewActions(item) : [];
   // New of a device of an unknown type names the type (ci_type_id): the
   // active types of /ci-types; the type the device reported is preselected
   // once it exists.
@@ -337,7 +448,10 @@ function ReviewDetail({ item }: { item: ReviewItem }) {
           label={t('reviews.candidate')}
           value={candidate}
           onChange={(event) => setCandidate(event.target.value)}
-          options={candidates.map((id) => ({ value: id, label: id }))}
+          options={candidates.map((id) => ({
+            value: id,
+            label: candidateLabel(id, candidateCIs.get(id)),
+          }))}
         />
       ) : null}
       <table className="mt-3 w-full text-left text-sm">
