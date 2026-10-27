@@ -1586,6 +1586,7 @@
     "selectAll": "Select all open ({{count}} on this page)",
     "selectAllMatching": "Select all {{total}} open",
     "selectAllError": "The open items could not be loaded: {{message}}",
+    "resolveError": "The item could not be resolved: {{message}}",
     "paging": {
       "range": "{{from}}–{{to}} of {{total}}",
       "previous": "Previous page",

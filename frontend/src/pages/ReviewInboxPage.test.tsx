@@ -260,6 +260,28 @@ describe('ReviewInboxPage', () => {
     }
   });
 
+  it('keeps the 409 of a second resolution visible after the item leaves the open list', async () => {
+    // Another session has dismissed the item meanwhile: the server answers
+    // 409 and the refetched open list no longer holds it (WP-557 (c)).
+    const twice: ReviewItem = { ...duplicateIP, id: 'rev-6', payload: { name: 'pv-twice' } };
+    const items = [twice];
+    stubServer(items, () => {
+      items.splice(0, items.length);
+      return json({ title: 'Conflict', status: 409, detail: 'review item already resolved' }, 409);
+    });
+    renderWithProviders(<ReviewInboxPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /pv-twice/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Verwerfen' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /pv-twice/ })).not.toBeInTheDocument(),
+    );
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Das Item konnte nicht aufgelöst werden');
+    expect(alert).toHaveTextContent('review item already resolved');
+  });
+
   it('asks for the type of a device of an unknown type and sends ci_type_id', async () => {
     const fetchMock = stubServer([unknownType]);
     renderWithProviders(<ReviewInboxPage />);

@@ -7,7 +7,10 @@
  * inbox shows the next step instead (F-176). The inbox pages through the
  * items, shows how many match and selects all of them for a bulk action,
  * not only the page shown (F-345); merge candidates are named by their CI
- * (F-346). Without review:resolve it offers no resolution (RBA-01).
+ * (F-346). Without review:resolve it offers no resolution (RBA-01). The
+ * refusal of a single resolution (e.g. the 409 of an item another session
+ * resolved meanwhile) stays visible on the page although the refetched list
+ * no longer holds the item and its detail closes (WP-557).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -133,6 +136,10 @@ export function ReviewInboxPage() {
   const filter = useMemo(() => ({ status, kind, escalated }), [status, kind, escalated]);
   const { data, isLoading, error, refetch } = useReviewItems(filter, offset);
   const bulk = useBulkResolveReviews();
+  // The single resolution lives on the page, not in the detail: a refused
+  // resolution refetches the list, which may drop the item and unmount its
+  // detail; its message must outlive that.
+  const resolve = useResolveReview();
   const items = useMemo(() => data?.data ?? [], [data]);
   const total = data?.total ?? items.length;
   const selected = items.find((item) => item.id === selectedId) ?? null;
@@ -148,6 +155,7 @@ export function ReviewInboxPage() {
   }, [data, items.length, offset]);
 
   function resetSelection() {
+    resolve.reset();
     setChecked(new Map());
     setOffset(0);
   }
@@ -284,6 +292,14 @@ export function ReviewInboxPage() {
         </p>
       ) : null}
 
+      {resolve.error ? (
+        <p role="alert" className="text-sm text-danger">
+          {t('reviews.resolveError', {
+            message: resolve.error instanceof Error ? resolve.error.message : String(resolve.error),
+          })}
+        </p>
+      ) : null}
+
       {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
       {error ? (
         <ErrorState
@@ -370,7 +386,10 @@ export function ReviewInboxPage() {
                     type="button"
                     className="flex flex-1 flex-wrap items-center gap-2 text-left hover:underline"
                     aria-current={selectedId === item.id ? 'true' : undefined}
-                    onClick={() => setSelectedId(item.id)}
+                    onClick={() => {
+                      if (item.id !== selectedId) resolve.reset();
+                      setSelectedId(item.id);
+                    }}
                   >
                     <Badge variant="info">{t(`reviews.kinds.${item.kind}`, item.kind)}</Badge>
                     <span className="font-medium">{summary(item)}</span>
@@ -386,7 +405,12 @@ export function ReviewInboxPage() {
             </ul>
           </Card>
           {selected ? (
-            <ReviewDetail key={selected.id} item={selected} canResolve={canResolve} />
+            <ReviewDetail
+              key={selected.id}
+              item={selected}
+              canResolve={canResolve}
+              resolve={resolve}
+            />
           ) : null}
         </div>
       ) : null}
@@ -394,7 +418,15 @@ export function ReviewInboxPage() {
   );
 }
 
-function ReviewDetail({ item, canResolve }: { item: ReviewItem; canResolve: boolean }) {
+function ReviewDetail({
+  item,
+  canResolve,
+  resolve,
+}: {
+  item: ReviewItem;
+  canResolve: boolean;
+  resolve: ReturnType<typeof useResolveReview>;
+}) {
   const { t, i18n } = useTranslation();
   const candidates = item.candidate_ci_ids ?? [];
   const [candidate, setCandidate] = useState(candidates[0] ?? '');
@@ -402,7 +434,6 @@ function ReviewDetail({ item, canResolve }: { item: ReviewItem; canResolve: bool
   const candidateCIs = useMountedCIs(candidates.length > 1 ? candidates : []);
   const subject = candidate || (typeof item.payload?.ci_id === 'string' ? item.payload.ci_id : '');
   const { data: ci } = useCI(subject);
-  const resolve = useResolveReview();
   const rows = reviewDiff(item, subject ? ci : undefined);
   const actions = canResolve ? reviewActions(item) : [];
   // New of a device of an unknown type names the type (ci_type_id): the
@@ -527,11 +558,6 @@ function ReviewDetail({ item, canResolve }: { item: ReviewItem; canResolve: bool
             </Button>
           ))}
         </div>
-      ) : null}
-      {resolve.error ? (
-        <p role="alert" className="mt-2 text-sm text-danger">
-          {resolve.error instanceof Error ? resolve.error.message : String(resolve.error)}
-        </p>
       ) : null}
     </Card>
   );

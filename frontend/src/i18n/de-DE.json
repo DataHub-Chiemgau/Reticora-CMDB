@@ -1586,6 +1586,7 @@
     "selectAll": "Alle offenen auswählen ({{count}} auf dieser Seite)",
     "selectAllMatching": "Alle {{total}} offenen auswählen",
     "selectAllError": "Die offenen Items konnten nicht geladen werden: {{message}}",
+    "resolveError": "Das Item konnte nicht aufgelöst werden: {{message}}",
     "paging": {
       "range": "{{from}}–{{to}} von {{total}}",
       "previous": "Vorherige Seite",
