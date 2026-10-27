@@ -14858,7 +14858,7 @@ UI-16;[B];C;frontend/e2e-real/review-inbox.spec.ts;WP-557
 
 **Schließt Audit-WPs:** [WP-200](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-200) (TEILWEISE BESTANDEN, schließt)
 
-**Problem:** Das INS-04-Fehlerbild „Localhost-Redirect“ wird nicht diskriminiert (F-352): `setup-onboarding.sh:89` setzt `BASE_URL=http://localhost:<port>`, `onboarding.spec.ts:145` vergleicht den Origin der redirect_uri mit BASE (beide localhost), `:140-142` überspringt die Issuer-Prüfung ohne `E2E_ISSUER_URL`; in der Installation ist auch der Issuer localhost.
+**Problem:** Das INS-04-Fehlerbild „Localhost-Redirect“ wird nicht diskriminiert (F-352): `setup-onboarding.sh:89` setzt `BASE_URL=http://localhost:<port>`, `onboarding.spec.ts:145` vergleicht den Origin der redirect_uri mit BASE (beide localhost), `:140-142` überspringt die Issuer-Prüfung ohne `E2E_ISSUER_URL`; in der Installation ist auch der Issuer localhost. (Korrektur vom 2026-10-27, WP-558: Der Issuer der Loopback-Installation ist die Host-IP aus install-cloud.sh, nicht localhost; das Fehlerbild bleibt, die alte Spec bestand den Fall ohne `E2E_ISSUER_URL`. Der INS-04-Test „insecure origin“ läuft nur im Job install-cloud-smoke; im Job tls-domain-pebble wird stattdessen die 301-Umleitung von http://<Domain> auf https geprüft, weil eine TLS-Installation keinen unsicheren UI-Origin hat. Domain ist der sslip.io-Name des Pebble-Tests.)
 
 **Akzeptanzkriterien:**
 
