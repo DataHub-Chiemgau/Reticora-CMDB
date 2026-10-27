@@ -5,6 +5,10 @@
 # e2e-real: ort = <projekt>:<spec-datei> (WP-532); the server-side findings below
 # are listed for each of the six projects of playwright.real.config.ts.
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
+go;backend/internal/desk;TestAuditDeskBookingStaysInOrganization;F-NEU-538-1
+go;backend/internal/keymgmt;TestAuditKeyIssueStaysInOrganization;F-NEU-538-1
+go;backend/internal/maintenance;TestAuditMaintenanceNotifyHiddenWindowIsNotFound;F-NEU-538-2
+go;backend/internal/training;TestAuditTrainingAssignmentStaysInOrganization;F-NEU-538-1
 sh;tests/audit/g1-gate-evidence.test.sh;abn01_texts;F-138
 sh;tests/audit/g1-gate-evidence.test.sh;install_evidence_current;F-122
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_field;F-039

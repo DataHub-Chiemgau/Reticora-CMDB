@@ -2,7 +2,12 @@ package maintenance_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +15,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // TestMaintenanceRepositoryClientScope runs the maintenance repository with
@@ -57,5 +64,110 @@ func TestMaintenanceRepositoryClientScope(t *testing.T) {
 	}
 	if _, _, err = repo.List(context.Background(), f.OrgA, maintenance.FilterParams{}, api.PaginationParams{Limit: 10}); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)
+	}
+}
+
+// TestMaintenanceNotifyClientScope covers the open evidence of WP-020
+// (MGT-04): announcing a mixed window (a client-1 and a client-2 CI) through
+// POST /maintenance-windows/{id}/notify as a principal restricted to client
+// 1 queues exactly one notification, for client 1, and none for client 2;
+// the client-1 principal lists only that one. An org-wide principal queues
+// one per client, two in all, also for the window client 1 announced before
+// (the client-1 notification is not queued twice).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestMaintenanceNotifyClientScope(t *testing.T) {
+	f := scopetest.Seed(t, "3a")
+	ownCI := f.CI(t, f.OrgA, f.Client1, "maint-n-c1")
+	foreignCI := f.CI(t, f.OrgA, f.Client2, "maint-n-c2")
+	user := f.AppUser(t, f.OrgA, "maint-n-user")
+
+	repo := maintenance.NewPGRepository(f.App)
+	start := time.Now().UTC().Add(24 * time.Hour)
+	mixed := func() string {
+		w := &maintenance.Window{OrganizationID: f.OrgA, Title: "Mixed", StartsAt: start, EndsAt: start.Add(time.Hour), CIIDs: []string{ownCI, foreignCI}}
+		if err := repo.Create(f.OrgCtx(f.OrgA), w); err != nil {
+			t.Fatalf("org-wide mixed window: %v", err)
+		}
+		return w.ID
+	}
+	byClient1, byOrg := mixed(), mixed()
+
+	mux := chi.NewRouter()
+	maintenance.NewHandler(repo).RegisterRoutes(mux)
+	client1 := database.OrgWideScope(f.OrgA, user)
+	client1.Clients = database.ScopeIDs(f.Client1)
+	orgWide := database.OrgWideScope(f.OrgA, user)
+	type result struct {
+		Queued        int                        `json:"queued"`
+		Notifications []maintenance.Notification `json:"notifications"`
+		Data          []maintenance.Notification `json:"data"`
+	}
+	call := func(scope *database.TenantScope, method, path string) result {
+		t.Helper()
+		req := httptest.NewRequest(method, path, nil)
+		ctx := tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: user})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req.WithContext(database.ContextWithTenantScope(ctx, scope)))
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s %s: status %d: %s", method, path, w.Code, w.Body.String())
+		}
+		var out result
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+		return out
+	}
+	clientsOf := func(ns []maintenance.Notification) string {
+		ids := []string{}
+		for _, n := range ns {
+			ids = append(ids, n.ClientID)
+		}
+		sort.Strings(ids)
+		return strings.Join(ids, ",")
+	}
+	stored := func(windowID string) string {
+		t.Helper()
+		var clients string
+		if err := f.Admin.QueryRow(context.Background(),
+			`SELECT COALESCE(string_agg(client_id::text, ',' ORDER BY client_id), '') FROM maintenance_notification WHERE maintenance_window_id = $1`,
+			windowID).Scan(&clients); err != nil {
+			t.Fatalf("stored notifications: %v", err)
+		}
+		return clients
+	}
+	both := f.Client1 + "," + f.Client2
+
+	// Client 1 announces a mixed window: one notification, for client 1.
+	out := call(&client1, http.MethodPost, "/api/v1/maintenance-windows/"+byClient1+"/notify")
+	if out.Queued != 1 || clientsOf(out.Notifications) != f.Client1 {
+		t.Errorf("notify as client 1: queued %d for %q, want 1 for client 1", out.Queued, clientsOf(out.Notifications))
+	}
+	if got := stored(byClient1); got != f.Client1 {
+		t.Errorf("stored after notify as client 1: %q, want only client 1", got)
+	}
+	if got := clientsOf(call(&client1, http.MethodGet, "/api/v1/maintenance-windows/"+byClient1+"/notifications").Data); got != f.Client1 {
+		t.Errorf("notifications listed for client 1: %q, want only client 1", got)
+	}
+
+	// An org-wide principal announces the other mixed window: two.
+	out = call(&orgWide, http.MethodPost, "/api/v1/maintenance-windows/"+byOrg+"/notify")
+	if out.Queued != 2 || clientsOf(out.Notifications) != both {
+		t.Errorf("notify org-wide: queued %d for %q, want 2 for clients 1 and 2", out.Queued, clientsOf(out.Notifications))
+	}
+	if got := stored(byOrg); got != both {
+		t.Errorf("stored after notify org-wide: %q, want clients 1 and 2", got)
+	}
+	// ... and the window client 1 announced: client 2 is added, client 1
+	// is not queued twice.
+	out = call(&orgWide, http.MethodPost, "/api/v1/maintenance-windows/"+byClient1+"/notify")
+	if clientsOf(out.Notifications) != both {
+		t.Errorf("notify org-wide after client 1: %q, want clients 1 and 2", clientsOf(out.Notifications))
+	}
+	if got := stored(byClient1); got != both {
+		t.Errorf("stored after both: %q, want one each for clients 1 and 2", got)
+	}
+	if got := clientsOf(call(&client1, http.MethodGet, "/api/v1/maintenance-windows/"+byOrg+"/notifications").Data); got != f.Client1 {
+		t.Errorf("notifications of the org-wide announcement listed for client 1: %q, want only client 1", got)
 	}
 }

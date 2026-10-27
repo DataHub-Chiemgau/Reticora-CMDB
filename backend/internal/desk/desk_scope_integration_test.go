@@ -2,7 +2,12 @@ package desk_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +15,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // TestDeskRepositoryClientScope runs the desk repository with the
@@ -89,5 +96,154 @@ func TestDeskRepositoryClientScope(t *testing.T) {
 	}
 	if _, _, err = repo.List(context.Background(), f.OrgA, desk.FilterParams{}, api.PaginationParams{Limit: 10}); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)
+	}
+}
+
+// dbLeak matches database internals in a response body: SQLSTATE codes,
+// PostgreSQL error texts, constraint, policy, relation and type names.
+var dbLeak = regexp.MustCompile(`(?i)sqlstate|constraint|policy|violat|row-level|relation|_fkey|_pkey|_key\b|duplicate key|foreign key|syntax for type|invalid input|pgx|pgconn|error:|desk_booking|room_id`)
+
+// TestDeskHandlerErrorsAreSanitized carries the probes TestVerifyB03desk and
+// TestAuditProbeDeskRepoError (WP-019, MGT-03) as regression tests through
+// the desk handler with PostgreSQL: for a principal restricted to client 1 a
+// desk or booking on a client-2 site answers 404, an invalid reference 404 or
+// (as an org-wide principal) 422 and an invalid id 400 or 404, never with an
+// SQLSTATE, constraint or policy text; a new desk outside the client-1 scope
+// is refused with 403. The client-2 rows stay unchanged; the own desk
+// answers 2xx. A booking for a user of another organization is accepted
+// today: TestAuditDeskBookingStaysInOrganization
+// (desk_cross_org_auditdefect_test.go).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestDeskHandlerErrorsAreSanitized(t *testing.T) {
+	f := scopetest.Seed(t, "35")
+	ownRoom := f.Room(t, f.Client1, "desk-h-room-c1")
+	foreignRoom := f.Room(t, f.Client2, "desk-h-room-c2")
+	user := f.AppUser(t, f.OrgA, "desk-h-booker")
+	const unknown = "c0de35a0-0000-4000-8000-00000000dead"
+
+	repo := desk.NewPGRepository(f.App)
+	orgCtx := f.OrgCtx(f.OrgA)
+	ownDesk := &desk.Desk{OrganizationID: f.OrgA, RoomID: ownRoom, Name: "desk-h-c1", Status: "available", Attributes: map[string]any{}}
+	foreignDesk := &desk.Desk{OrganizationID: f.OrgA, RoomID: foreignRoom, Name: "desk-h-c2", Status: "available", Attributes: map[string]any{}}
+	for _, d := range []*desk.Desk{ownDesk, foreignDesk} {
+		if err := repo.Create(orgCtx, d); err != nil {
+			t.Fatalf("org-wide desk %s: %v", d.Name, err)
+		}
+	}
+	start := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
+	foreignBooking, err := repo.Book(orgCtx, &desk.Booking{OrganizationID: f.OrgA, DeskID: foreignDesk.ID, UserID: user, StartsAt: start, EndsAt: start.Add(time.Hour)})
+	if err != nil {
+		t.Fatalf("org-wide booking of the client-2 desk: %v", err)
+	}
+
+	mux := chi.NewRouter()
+	desk.NewHandler(repo).RegisterRoutes(mux)
+	scope := database.OrgWideScope(f.OrgA, user)
+	scope.Clients = database.ScopeIDs(f.Client1)
+	orgWide := database.OrgWideScope(f.OrgA, user)
+	callAs := func(scope *database.TenantScope, method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: user})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req.WithContext(database.ContextWithTenantScope(ctx, scope)))
+		return w
+	}
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		return callAs(&scope, method, path, body)
+	}
+	slot := func(h int) string {
+		s := start.Add(time.Duration(h) * time.Hour)
+		return `{"starts_at":"` + s.Format(time.RFC3339) + `","ends_at":"` + s.Add(time.Hour).Format(time.RFC3339) + `"}`
+	}
+
+	for _, c := range []struct {
+		name, method, path, body string
+		want                     int
+		orgWide                  bool
+	}{
+		// Foreign row: the client-2 desk and booking do not exist for client 1.
+		{"get client-2 desk", http.MethodGet, "/api/v1/desks/" + foreignDesk.ID, "", http.StatusNotFound, false},
+		{"patch client-2 desk", http.MethodPatch, "/api/v1/desks/" + foreignDesk.ID, `{"name":"hijacked"}`, http.StatusNotFound, false},
+		{"delete client-2 desk", http.MethodDelete, "/api/v1/desks/" + foreignDesk.ID, "", http.StatusNotFound, false},
+		{"book client-2 desk", http.MethodPost, "/api/v1/desks/" + foreignDesk.ID + "/bookings", slot(2), http.StatusNotFound, false},
+		{"cancel client-2 booking", http.MethodPost, "/api/v1/desk-bookings/" + foreignBooking.ID + "/cancel", "", http.StatusNotFound, false},
+		{"move own desk into a client-2 room", http.MethodPatch, "/api/v1/desks/" + ownDesk.ID, `{"room_id":"` + foreignRoom + `"}`, http.StatusNotFound, false},
+		// A desk in a client-2 room, and one in an unknown room (it would be
+		// org-wide), is a write outside the client-1 scope: refused without
+		// telling the two apart.
+		{"desk in a client-2 room", http.MethodPost, "/api/v1/desks", `{"name":"ghost","room_id":"` + foreignRoom + `"}`, http.StatusForbidden, false},
+		{"desk in an unknown room (client 1)", http.MethodPost, "/api/v1/desks", `{"name":"ghost","room_id":"` + unknown + `"}`, http.StatusForbidden, false},
+		// Invalid reference.
+		{"desk in an unknown room", http.MethodPost, "/api/v1/desks", `{"name":"ghost","room_id":"` + unknown + `"}`, http.StatusUnprocessableEntity, true},
+		{"booking for an unknown user", http.MethodPost, "/api/v1/desks/" + ownDesk.ID + "/bookings", `{"user_id":"` + unknown + `",` + slot(4)[1:], http.StatusNotFound, false},
+		{"booking of an unknown desk", http.MethodPost, "/api/v1/desks/" + unknown + "/bookings", slot(6), http.StatusNotFound, false},
+		// Invalid id.
+		{"get invalid id", http.MethodGet, "/api/v1/desks/not-a-uuid", "", http.StatusNotFound, false},
+		{"patch invalid id", http.MethodPatch, "/api/v1/desks/not-a-uuid", `{"name":"x"}`, http.StatusNotFound, false},
+		{"bookings of an invalid id", http.MethodGet, "/api/v1/desks/not-a-uuid/bookings", "", http.StatusBadRequest, false},
+		{"cancel invalid booking id", http.MethodPost, "/api/v1/desk-bookings/not-a-uuid/cancel", "", http.StatusNotFound, false},
+		{"desk with an invalid room id", http.MethodPost, "/api/v1/desks", `{"name":"ghost","room_id":"not-a-uuid"}`, http.StatusBadRequest, false},
+	} {
+		as := &scope
+		if c.orgWide {
+			as = &orgWide
+		}
+		w := callAs(as, c.method, c.path, c.body)
+		if w.Code != c.want {
+			t.Errorf("%s: status %d, want %d: %s", c.name, w.Code, c.want, w.Body.String())
+		}
+		if dbLeak.MatchString(w.Body.String()) {
+			t.Errorf("%s: body discloses database internals: %s", c.name, w.Body.String())
+		}
+	}
+
+	// The client-2 rows are unchanged.
+	var name, room, status string
+	if err = f.Admin.QueryRow(context.Background(), `SELECT name, room_id::text FROM desk WHERE id = $1`, foreignDesk.ID).Scan(&name, &room); err != nil || name != "desk-h-c2" || room != foreignRoom {
+		t.Errorf("client-2 desk: name=%q room=%s err=%v, want unchanged", name, room, err)
+	}
+	if err = f.Admin.QueryRow(context.Background(), `SELECT status FROM desk_booking WHERE id = $1`, foreignBooking.ID).Scan(&status); err != nil || status != "active" {
+		t.Errorf("client-2 booking: status=%q err=%v, want active", status, err)
+	}
+	var n int
+	if err = f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM desk_booking WHERE desk_id = $1`, foreignDesk.ID).Scan(&n); err != nil || n != 1 {
+		t.Errorf("bookings of the client-2 desk: %d err=%v, want only the org-wide one", n, err)
+	}
+	if err = f.Admin.QueryRow(context.Background(), `SELECT room_id::text FROM desk WHERE id = $1`, ownDesk.ID).Scan(&room); err != nil || room != ownRoom {
+		t.Errorf("own desk: room=%s err=%v, want the client-1 room", room, err)
+	}
+	if err = f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM desk WHERE organization_id = $1 AND name = 'ghost'`, f.OrgA).Scan(&n); err != nil || n != 0 {
+		t.Errorf("desks with an invalid room: %d err=%v, want none", n, err)
+	}
+
+	// The client-2 bookings are not listed for client 1.
+	if w := call(http.MethodGet, "/api/v1/desks/"+foreignDesk.ID+"/bookings", ""); w.Code != http.StatusOK || strings.Contains(w.Body.String(), foreignBooking.ID) {
+		t.Errorf("bookings of the client-2 desk: %d %s, want 200 without the booking", w.Code, w.Body.String())
+	}
+
+	// Positive control: the own desk.
+	if w := call(http.MethodGet, "/api/v1/desks/"+ownDesk.ID, ""); w.Code != http.StatusOK {
+		t.Errorf("get own desk: %d %s", w.Code, w.Body.String())
+	}
+	if w := call(http.MethodPatch, "/api/v1/desks/"+ownDesk.ID, `{"name":"desk-h-c1-renamed"}`); w.Code != http.StatusOK {
+		t.Errorf("patch own desk: %d %s", w.Code, w.Body.String())
+	}
+	w := call(http.MethodPost, "/api/v1/desks/"+ownDesk.ID+"/bookings", slot(8))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("book own desk: %d %s", w.Code, w.Body.String())
+	}
+	var own desk.Booking
+	if err = json.Unmarshal(w.Body.Bytes(), &own); err != nil {
+		t.Fatalf("decode booking: %v", err)
+	}
+	if w = call(http.MethodPost, "/api/v1/desk-bookings/"+own.ID+"/cancel", ""); w.Code != http.StatusOK {
+		t.Errorf("cancel own booking: %d %s", w.Code, w.Body.String())
+	}
+	if w = call(http.MethodPost, "/api/v1/desks", `{"name":"desk-h-c1-new","room_id":"`+ownRoom+`"}`); w.Code != http.StatusCreated {
+		t.Errorf("create desk in the own room: %d %s", w.Code, w.Body.String())
 	}
 }

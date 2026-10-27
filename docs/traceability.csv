@@ -909,3 +909,6 @@ TEN-06;[B];B;backend/internal/tenant/rls/core_channels_integration_test.go;WP-53
 AUT-04;[B];B;backend/internal/identity/apikey_scope_integration_test.go;WP-536
 REL-03;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-543
 REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-543
+TEN-06;[B];B;backend/internal/ai/ai_scope_integration_test.go;WP-538
+MGT-03;[P4];B;backend/internal/keymgmt/keymgmt_scope_integration_test.go;WP-538
+MGT-04;[P3];B;backend/internal/maintenance/maintenance_scope_integration_test.go;WP-538
