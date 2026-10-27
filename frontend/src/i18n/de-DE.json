@@ -765,8 +765,10 @@
       "impactMany": "Fallen {{failed}} CIs ({{names}}) gemeinsam aus, sind {{count}} weitere CIs betroffen (grau dargestellt).",
       "loading": "Die Auswirkung wird berechnet …",
       "unavailable": "Die Auswirkung konnte nicht berechnet werden.",
-      "provisionalLoading": "Vorläufiges Ergebnis nach der Wirkrichtung der Beziehungstypen; die Analyse des Servers läuft noch.",
-      "provisionalFailed": "Die Analyse des Servers ist nicht verfügbar. Vorläufiges Ergebnis nach der Wirkrichtung der Beziehungstypen, ohne Redundanzprüfung."
+      "preview": "Vorschau",
+      "provisionalLoading": "Vorläufiges Ergebnis nach der Wirkrichtung der Beziehungstypen, ohne Redundanzprüfung; die Analyse des Servers läuft noch.",
+      "failedHint": "Die Analyse des Servers ist nicht verfügbar. Versuchen Sie es erneut.",
+      "tooMany": "Es können höchstens {{max}} CIs je Analyse gemeinsam ausfallen. Nehmen Sie CIs aus der Simulation heraus."
     },
     "filterRelType": "Beziehungstyp",
     "allRelTypes": "Alle Beziehungen",

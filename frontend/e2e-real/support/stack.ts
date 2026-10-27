@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Browser, type Page } from '@playwright/test';
 import { keycloakOtp } from '../../e2e/support/totp';
 
 // Shared helpers of the real-stack specs (Phase-1 acceptance audit). They
@@ -639,6 +639,61 @@ export async function operatorLogin(
     // keep the raw text
   }
   return { status: res.status(), body: body as OperatorSession };
+}
+
+/**
+ * raiseCILimit lets an operator raise the max_cis quota of an organization
+ * (POST /admin/orgs/{id}/entitlements, ENT-04): a trial tenant holds 100 CIs.
+ * The operator is a new Keycloak user of the group operators (Keycloak admin
+ * API) who signs in with operatorLogin; a refused step fails the setup.
+ */
+export async function raiseCILimit(
+  browser: Browser,
+  request: APIRequestContext,
+  orgId: string,
+  maxCIs: number,
+): Promise<void> {
+  const run = stamp();
+  const operator = {
+    email: `ci-limit-operator-${run}@audit-e2e.de`,
+    password: `Audit-op-${run}!aA`,
+  };
+  const admin = await keycloakAdminToken(request);
+  const created = await request.post(`${KEYCLOAK}/admin/realms/reticora/users`, {
+    headers: { Authorization: `Bearer ${admin}` },
+    data: {
+      username: operator.email,
+      email: operator.email,
+      emailVerified: true,
+      enabled: true,
+      firstName: 'Audit',
+      lastName: 'Operator',
+      groups: ['/operators'],
+      credentials: [{ type: 'password', value: operator.password, temporary: false }],
+    },
+    failOnStatusCode: false,
+  });
+  expect(created.status(), `create the operator account: ${await created.text()}`).toBe(201);
+  const context = await browser.newContext({ locale: 'de-DE' });
+  try {
+    const login = await operatorLogin(await context.newPage(), context.request, operator);
+    expect(login.status, `operator callback: ${JSON.stringify(login.body)}`).toBe(200);
+    const granted = await api(
+      request,
+      login.body.token,
+      'POST',
+      `/admin/orgs/${orgId}/entitlements`,
+      {
+        feature_key: 'cmdb_core',
+        plan: 'standard',
+        enabled: true,
+        limits: { max_cis: maxCIs },
+      },
+    );
+    expect(granted.status, `raise max_cis: ${JSON.stringify(granted.body)}`).toBe(200);
+  } finally {
+    await context.close();
+  }
 }
 
 /** A request the SNMP fake received (collector/internal/fakesnmp, Request). */

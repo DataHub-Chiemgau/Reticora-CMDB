@@ -917,3 +917,6 @@ NFR-05;[B];A;backend/cmd/server/objectstorage_integration_test.go;WP-544
 DIS-08;[Q];D;frontend/e2e-real/discovery-errors.spec.ts;WP-542
 API-09;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
 JOB-03;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
+UI-06;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
+IMP-05;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
+IMP-06;[B];C;frontend/e2e-real/topology.spec.ts;WP-552

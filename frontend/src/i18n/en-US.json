@@ -765,8 +765,10 @@
       "impactMany": "If {{failed}} CIs ({{names}}) fail together, {{count}} further CIs are affected (shown in grey).",
       "loading": "Computing the impact …",
       "unavailable": "The impact could not be computed.",
-      "provisionalLoading": "Provisional result along the impact direction of the relationship types; the server analysis is still running.",
-      "provisionalFailed": "The server analysis is unavailable. Provisional result along the impact direction of the relationship types, without the redundancy check."
+      "preview": "Preview",
+      "provisionalLoading": "Provisional result along the impact direction of the relationship types, without the redundancy check; the server analysis is still running.",
+      "failedHint": "The server analysis is unavailable. Please try again.",
+      "tooMany": "At most {{max}} CIs per analysis can fail together. Remove CIs from the simulation."
     },
     "filterRelType": "Relationship type",
     "allRelTypes": "All relationships",

@@ -254,6 +254,14 @@ export function useCIImpact(id: string, relType?: string) {
   });
 }
 
+/** The most CIs one joint impact analysis takes (GET /impact?ci_ids=, 422 beyond). */
+export const MAX_IMPACT_CIS = 100;
+
+/**
+ * useImpactMany runs the joint impact analysis of the failed CIs (IMP-05).
+ * Its error is the page's answer when the analysis fails: there is no
+ * client-side replacement (F-326).
+ */
 export function useImpactMany(ids: string[], relType?: string) {
   return useQuery({
     queryKey: ['topology-impact-many', ids, relType],
