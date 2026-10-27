@@ -211,6 +211,24 @@ case "$1" in
         printf 'fake binary %s GOARCH=%s\n' "$pkg" "${GOARCH:-amd64}" > "$out"
         printf 'go build %s\n' "$pkg" >> "$FAKE_LOG"
         ;;
+    test)
+        # release.yml's real cosign test (WP-545): logs the call with its
+        # directory and parameters; FAKE_GO_TEST picks the outcome (pass,
+        # fail, skip, notests). Missing parameters fail like t.Fatal.
+        shift
+        printf 'go test %s [dir=%s COSIGN_BIN=%s RELEASE_ARTIFACT=%s RELEASE_BUNDLE=%s]\n' "$*" "$(basename "$PWD")" \
+            "${COSIGN_BIN:-}" "${RELEASE_ARTIFACT:-}" "${RELEASE_BUNDLE:-}" >> "$FAKE_LOG"
+        name=TestCosignVerifierWithRealCosign
+        if [ -z "${COSIGN_BIN:-}" ] || [ ! -f "${RELEASE_ARTIFACT:-}" ] || [ ! -f "${RELEASE_BUNDLE:-}" ]; then
+            printf -- '--- FAIL: %s (0.00s)\n    a parameter is missing\nFAIL\n' "$name"; exit 1
+        fi
+        case "${FAKE_GO_TEST:-pass}" in
+            pass) printf '=== RUN   %s\n--- PASS: %s (0.01s)\nPASS\nok  \tupdate\t0.02s\n' "$name" "$name" ;;
+            fail) printf -- '--- FAIL: %s (0.01s)\nFAIL\n' "$name"; exit 1 ;;
+            skip) printf -- '--- SKIP: %s (0.00s)\nPASS\nok  \tupdate\t0.01s\n' "$name" ;;
+            notests) printf 'testing: warning: no tests to run\nPASS\nok  \tupdate\t0.01s [no tests to run]\n' ;;
+        esac
+        ;;
     *) exit 2 ;;
 esac
 STUB
@@ -261,6 +279,8 @@ make_repo() {
     printf 'go 1.26.9\n' > "$dir/go.work"
     printf '%s\n' "$marker" > "$dir/MARKER"
     printf 'package main\n' > "$dir/collector/cmd/collector/main.go"
+    mkdir -p "$dir/edgecore/update"
+    printf 'package update\n' > "$dir/edgecore/update/update.go"
     git -C "$dir" init -q -b main
     git -C "$dir" add -A
     git -C "$dir" -c user.name=t -c user.email=t@example.test -c commit.gpgsign=false commit -q -m "$marker"
@@ -309,6 +329,88 @@ if [ "$release_rc" -eq 0 ] && [ -f "$DIST/SHA256SUMS.sigstore.json" ] \
 else
     fail "release.yml: SOURCE_COMMIT (the tagged commit) and the git-archive tarball are in SHA256SUMS; SHA256SUMS is signed and verified" \
         "$(tail -n 5 "$release_log"; printf '%s ' "$DIST"/*)"
+fi
+
+# WP-545: the updater's CosignVerifier runs against the real cosign and the
+# bundles just signed, for every architecture, before anything is published;
+# a failing, skipped or missing test stops the release.
+missing=""
+for arch in amd64 arm64; do
+    want="go test -tags cosignreal -count=1 -v -run ^TestCosignVerifierWithRealCosign\$ ./update/ [dir=edgecore COSIGN_BIN=$STUB_COSIGN/cosign RELEASE_ARTIFACT=$DIST/reticora-collector-linux-$arch RELEASE_BUNDLE=$DIST/reticora-collector-linux-$arch.sigstore.json]"
+    grep -qxF "$want" "$release_log" || missing="$missing linux/$arch"
+done
+if [ "$release_rc" -eq 0 ] && [ -z "$missing" ]; then
+    ok "release.yml: the cosignreal test runs for linux/amd64 and linux/arm64 with the release cosign, the signed collector and its bundle"
+else
+    fail "release.yml: the cosignreal test runs for linux/amd64 and linux/arm64 with the release cosign, the signed collector and its bundle" \
+        "not run for:${missing:- (release rc $release_rc)}; $(grep '^go test' "$release_log")"
+fi
+order="$(python3 - "$REPO_ROOT/.github/workflows/release.yml" <<'PY'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+names = [s.get("name", "") for s in wf["jobs"]["binaries"]["steps"]]
+runs = [s.get("run", "") for s in wf["jobs"]["binaries"]["steps"]]
+real = [i for i, r in enumerate(runs) if "-tags cosignreal" in r]
+problems = []
+if not real:
+    problems.append("no step runs the cosignreal test")
+else:
+    if real[0] < names.index("Sign binaries and SBOMs (cosign keyless)"):
+        problems.append("the cosignreal test runs before 'Sign binaries and SBOMs'")
+    if real[0] > names.index("Publish the GitHub release"):
+        problems.append("the cosignreal test runs after the publication")
+    if wf["jobs"]["binaries"]["steps"][real[0]].get("continue-on-error"):
+        problems.append("the cosignreal step may fail")
+needs = wf["jobs"]["binaries"].get("needs", [])
+if "images" not in ([needs] if isinstance(needs, str) else needs):
+    problems.append("the publication does not wait for the images job")
+print("; ".join(problems))
+PY
+)"
+if [ -z "$order" ]; then
+    ok "release.yml: the cosignreal test runs after signing and before the publication, which waits for the image checks"
+else
+    fail "release.yml: the cosignreal test runs after signing and before the publication, which waits for the image checks" "$order"
+fi
+real_step="$(grep -l -- '-tags cosignreal' "$TMP_ROOT"/steps/*.sh | head -n 1)"
+for outcome in fail skip notests; do
+    if [ -n "$real_step" ] && ! (cd "$SRC_REPO" && env -i PATH="$STUB_COSIGN:$STUB_GO:$GITBIN:$SYS" HOME="$TMP_ROOT" \
+        FAKE_LOG="$TMP_ROOT/real-$outcome.log" FAKE_GO_TEST="$outcome" \
+        bash --noprofile --norc -eo pipefail "$real_step") >"$TMP_ROOT/real-$outcome.out" 2>&1; then
+        ok "release.yml: a cosignreal test that reports '$outcome' stops the release"
+    else
+        fail "release.yml: a cosignreal test that reports '$outcome' stops the release" \
+            "step: ${real_step:-none}; $(tail -n 3 "$TMP_ROOT/real-$outcome.out" 2>/dev/null)"
+    fi
+done
+images="$(python3 - "$REPO_ROOT/.github/workflows/release.yml" <<'PY'
+import re, sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+job = wf["jobs"]["images"]
+problems = []
+listed = {e["image"] for e in job["strategy"]["matrix"]["include"]}
+for image in ("reticora-server", "reticora-collector", "reticora-frontend", "reticora-postgres"):
+    if image not in listed:
+        problems.append(f"{image} is not in the image matrix")
+steps = job["steps"]
+signed = [i for i, s in enumerate(steps) if re.search(r"cosign attest .*--type spdxjson", s.get("run", ""))]
+signer = r'--certificate-identity-regexp "\$identity" \\\s*\n\s*--certificate-oidc-issuer https://token\.actions\.githubusercontent\.com'
+for label, cmd in (("cosign verify", r'cosign verify "\$IMAGE" \\\s*\n\s*'),
+                   ("cosign verify-attestation --type spdxjson", r'cosign verify-attestation --type spdxjson "\$IMAGE" \\\s*\n\s*')):
+    hits = [i for i, s in enumerate(steps) if re.search(cmd + signer, s.get("run", ""))
+            and "steps.push.outputs.digest" in s.get("env", {}).get("IMAGE", "")
+            and not s.get("continue-on-error") and "if" not in s]
+    if not signed or not [i for i in hits if i >= signed[0]]:
+        problems.append(f"no step after the signature runs {label} on the pushed digest with the release identity")
+if not any("release\\.yml@refs/tags/v.+$" in s.get("run", "") and "identity=" in s.get("run", "") for s in steps):
+    problems.append("the image check does not pin release.yml on a version tag")
+print("; ".join(problems))
+PY
+)"
+if [ -z "$images" ]; then
+    ok "release.yml: every image (reticora-postgres included) passes cosign verify and verify-attestation --type spdxjson after signing"
+else
+    fail "release.yml: every image (reticora-postgres included) passes cosign verify and verify-attestation --type spdxjson after signing" "$images"
 fi
 RELEASES="$TMP_ROOT/releases"
 mkdir -p "$RELEASES/$TAG"

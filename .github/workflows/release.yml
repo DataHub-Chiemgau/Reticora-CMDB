@@ -28,8 +28,10 @@ jobs:
   outage:
     uses: ./.github/workflows/outage.yml
 
+  # Publishes the GitHub release, so it waits for every image to be signed,
+  # attested and verified (WP-545).
   binaries:
-    needs: outage
+    needs: [outage, images]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # attach the files to the GitHub release
@@ -81,6 +83,30 @@ jobs:
           set -euo pipefail
           for file in dist/*; do
             cosign sign-blob --yes --bundle "$file.sigstore.json" "$file"
+          done
+
+      # WP-545 (TEC-15, COL-06): the updater's CosignVerifier runs the real
+      # cosign against the bundles just made, for every architecture
+      # (edgecore/update/cosign_real_test.go): the signed collector passes with
+      # the pinned release identity; the binary changed by one byte, a foreign
+      # bundle of the same dist directory and another identity are refused. A
+      # failing, skipped or missing test stops the release.
+      - name: Updater verifier against the real cosign (per architecture)
+        run: |
+          set -euo pipefail
+          dist="$PWD/dist"
+          cosign_bin="$(command -v cosign)"
+          for arch in amd64 arm64; do
+            log="$(mktemp)"
+            (cd edgecore && COSIGN_BIN="$cosign_bin" \
+              RELEASE_ARTIFACT="$dist/reticora-collector-linux-$arch" \
+              RELEASE_BUNDLE="$dist/reticora-collector-linux-$arch.sigstore.json" \
+              go test -tags cosignreal -count=1 -v -run '^TestCosignVerifierWithRealCosign$' ./update/) 2>&1 | tee "$log"
+            if ! grep -qE '^--- PASS: TestCosignVerifierWithRealCosign ' "$log" \
+              || grep -qE -- '--- SKIP|no tests to run' "$log"; then
+              echo "::error::TestCosignVerifierWithRealCosign did not pass for linux/$arch (skipped or not run)"
+              exit 1
+            fi
           done
 
       - name: Verify the signatures as the updater does
@@ -247,6 +273,21 @@ jobs:
           set -euo pipefail
           cosign sign --yes "$IMAGE"
           cosign attest --yes --type spdxjson --predicate "${{ matrix.image }}.spdx.json" "$IMAGE"
+
+      # WP-545: every image (the matrix, reticora-postgres included) is
+      # checked as an operator checks it (docs/README.md): its signature and
+      # its SPDX SBOM attestation for the release identity. A failure fails
+      # this job, and the binaries job publishes the release only after every
+      # image passed (needs: images).
+      - name: Verify the image signature and SBOM attestation
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ matrix.image }}@${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          identity="^https://github\.com/${GITHUB_REPOSITORY//./\\.}/\.github/workflows/release\.yml@refs/tags/v.+$"
           cosign verify "$IMAGE" \
-            --certificate-identity-regexp "^https://github\.com/${GITHUB_REPOSITORY//./\\.}/\.github/workflows/release\.yml@refs/tags/v.+$" \
+            --certificate-identity-regexp "$identity" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          cosign verify-attestation --type spdxjson "$IMAGE" \
+            --certificate-identity-regexp "$identity" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null

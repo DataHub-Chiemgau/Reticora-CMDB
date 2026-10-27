@@ -877,3 +877,5 @@ NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-631
 JOB-01;[B];B;backend/internal/discovery/job_execution_integration_test.go;WP-632
 API-02;[B];C;frontend/src/api/listLimit.test.ts;WP-635
 API-02;[B];C;frontend/src/api/client.test.ts;WP-635
+TEC-15;[B];A;edgecore/update/cosign_real_test.go;WP-545
+COL-06;[B], Air-Gapped [O];A;edgecore/update/cosign_real_test.go;WP-545
