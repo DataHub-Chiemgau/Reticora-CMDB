@@ -62,7 +62,7 @@ of the JSON and logs that. The user holds `org_admin` and sets up its OTP at the
 
 ```sh
 cd frontend
-npx playwright test -c e2e-real/playwright.real.config.ts            # all specs
+npx playwright test -c e2e-real/playwright.real.config.ts            # all specs of the G1 run
 npx playwright test -c e2e-real/playwright.real.config.ts tenant      # one file
 ```
 
@@ -89,6 +89,35 @@ cd frontend
 PLAYWRIGHT_JSON_OUTPUT_NAME=/tmp/e2e-real.json npx playwright test -c e2e-real/playwright.real.config.ts --reporter=list,json
 ../tests/audit/run-auditdefect.sh playwright --report /tmp/e2e-real.json --results /tmp/e2e-real.txt
 ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --results /tmp/e2e-real.txt
+```
+
+## Module run (`maintenance.spec.ts`, WP-541)
+
+The installed stack runs in the G1 default: the late modules (phase P2 and later, E-03, WP-214) are off and their
+routes answer 404. The specs of such a module therefore do not belong to the G1 run: `playwright.real.config.ts` lists
+them in `MODULE_SPECS` and leaves them out unless `E2E_MODULE_RUN` names the module; with `E2E_MODULE_RUN=<key>` only
+the specs of that module run. All other specs run unchanged against the G1 default. Today this is
+`maintenance.spec.ts` (module `maintenance`, MGT-04, NTF-05, NFR-04): a window planned in the maintenance page for the
+CIs of two clients, „Kunden benachrichtigen“, the stored notifications after a reload ('ausstehend' per client), the
+`maintenance_notification` rows in the database (`dbRows` of `support/locations-racks.ts`: two rows, status pending,
+`sent_at` NULL; a second click adds none), and a principal of a second organization that gets 404 for the window and
+does not find it in the list. The spec checks first that `GET /api/v1/modules` reports the module enabled
+(`expectModuleServed` in `support/stack.ts`); against a G1 default stack it fails there, it never skips.
+
+`install-smoke.yml` runs it after the G1 run on the same installation: the step "Restart the server with
+RETICORA_MODULES=maintenance" applies a one-line overlay (`RETICORA_MODULES: maintenance` for the server) on top of the
+files `fixtures/setup-real-stack.sh` applies, recreates the frontend after the server and checks the variable in the
+running container; the next step runs the suite with `E2E_MODULE_RUN=maintenance` (report
+`e2e-real-maintenance.json`, traces under `e2e-real-maintenance/` of the artifact `e2e-real`). The ratchet compares the
+results of both runs together with the `e2e-real` lines of `tests/audit/expected-failures.txt`, so the module run
+follows the same rules as the G1 run; the step also fails when the module run executed no test of
+`maintenance.spec.ts` or another spec.
+
+Locally, against a server started with `RETICORA_MODULES=maintenance`:
+
+```sh
+cd frontend
+E2E_MODULE_RUN=maintenance npx playwright test -c e2e-real/playwright.real.config.ts
 ```
 
 A failing spec is a product finding, not a flaky test: the assertions encode the requirement (WP and requirement IDs

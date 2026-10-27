@@ -476,7 +476,10 @@ jobs:
           command -v psql >/dev/null || (sudo apt-get update && sudo apt-get install -y postgresql-client)
           ./frontend/e2e-real/fixtures/setup-real-stack.sh deploy/docker-compose .env
 
+      # G1 default (RETICORA_MODULES unset): playwright.real.config.ts leaves
+      # the specs of late modules out (WP-541).
       - name: Run the real-stack E2E suite against the expected-failure list
+        id: e2e-real-g1
         if: matrix.platform == 'ubuntu-24.04'
         working-directory: frontend
         env:
@@ -485,6 +488,74 @@ jobs:
           npx playwright test -c e2e-real/playwright.real.config.ts --reporter=list,json || true
           ../tests/audit/run-auditdefect.sh playwright --report "$RUNNER_TEMP/e2e-real.json" --results "$RUNNER_TEMP/e2e-real-results.txt"
           ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --results "$RUNNER_TEMP/e2e-real-results.txt"
+
+      # WP-541 (MGT-04, NTF-05, NFR-04): module run. The maintenance module is
+      # off in the G1 default (E-03); the server of the same installation is
+      # restarted with RETICORA_MODULES=maintenance (an overlay on top of the
+      # files setup-real-stack.sh applies, with the signup secrets of the
+      # running server) and the frontend recreated after it, as
+      # setup-real-stack.sh does. It runs whenever the G1 run ran, green or red.
+      - name: Restart the server with RETICORA_MODULES=maintenance (module run)
+        if: ${{ !cancelled() && matrix.platform == 'ubuntu-24.04' && steps.e2e-real-g1.outcome != 'skipped' }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_WORKSPACE"
+          cd deploy/docker-compose
+          value() { sed -n "s/^$1=//p" .env | tail -n 1 | tr -d "\"'"; }
+          overlay="$RUNNER_TEMP/docker-compose.e2e-real-maintenance.yml"
+          printf 'services:\n  server:\n    environment:\n      RETICORA_MODULES: maintenance\n' >"$overlay"
+          files=(-f docker-compose.yml)
+          [ -f docker-compose.override.yml ] && files+=(-f docker-compose.override.yml)
+          files+=(-f "$repo/frontend/e2e/fixtures/docker-compose.e2e.yml" -f "$repo/frontend/e2e-real/fixtures/docker-compose.e2e-real.yml" -f "$overlay")
+          server_id="$(docker compose --env-file .env ps -q server)"
+          container_env() { docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$server_id" | sed -n "s/^$1=//p"; }
+          E2E_CAPTCHA_KEY="$(container_env RETICORA_SIGNUP_CAPTCHA_KEY)"
+          E2E_KC_CLIENT_ID="$(container_env RETICORA_KEYCLOAK_ADMIN_CLIENT_ID)"
+          E2E_KC_CLIENT_SECRET="$(container_env RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET)"
+          E2E_NGINX_CONF="$RUNNER_TEMP/nginx-e2e-real.conf"
+          if [ -z "$E2E_CAPTCHA_KEY" ] || [ -z "$E2E_KC_CLIENT_SECRET" ] || [ ! -f "$E2E_NGINX_CONF" ]; then
+            echo "FAIL: the real-stack setup (signup secrets, $E2E_NGINX_CONF) is missing"; exit 1
+          fi
+          export E2E_CAPTCHA_KEY E2E_KC_CLIENT_ID E2E_KC_CLIENT_SECRET E2E_NGINX_CONF
+          docker compose --env-file .env "${files[@]}" up -d server
+          server_port="$(value RETICORA_SERVER_PORT)"; server_port="${server_port:-8080}"
+          for _ in $(seq 1 60); do
+            curl -fsS "http://localhost:${server_port}/api/v1/signup/challenge" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker compose --env-file .env "${files[@]}" up -d --force-recreate frontend
+          frontend_port="$(value RETICORA_FRONTEND_PORT)"; frontend_port="${frontend_port:-3000}"
+          for _ in $(seq 1 60); do
+            curl -fsS "http://localhost:${frontend_port}/api/v1/auth/config" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          curl -fsS "http://localhost:${frontend_port}/api/v1/auth/config" >/dev/null \
+            || { echo "FAIL: the frontend does not reach the restarted server"; exit 1; }
+          modules="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose --env-file .env ps -q server)" | sed -n 's/^RETICORA_MODULES=//p')"
+          [ "$modules" = maintenance ] || { echo "FAIL: the server runs with RETICORA_MODULES='$modules'"; exit 1; }
+          echo "OK: server restarted with RETICORA_MODULES=$modules"
+
+      # Only the specs of the module (E2E_MODULE_RUN, playwright.real.config.ts);
+      # the ratchet compares the results of both runs together with the
+      # e2e-real lines of tests/audit/expected-failures.txt.
+      - name: Run the real-stack module run (maintenance) against the expected-failure list
+        if: ${{ !cancelled() && matrix.platform == 'ubuntu-24.04' && steps.e2e-real-g1.outcome != 'skipped' }}
+        working-directory: frontend
+        env:
+          E2E_MODULE_RUN: maintenance
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-real-maintenance.json
+        run: |
+          set -euo pipefail
+          npx playwright test -c e2e-real/playwright.real.config.ts --reporter=list,json \
+            --output "$RUNNER_TEMP/e2e-real-maintenance/test-results" || true
+          ../tests/audit/run-auditdefect.sh playwright --report "$RUNNER_TEMP/e2e-real-maintenance.json" --results "$RUNNER_TEMP/e2e-real-maintenance-results.txt"
+          grep -q ';chromium:frontend/e2e-real/maintenance.spec.ts;' "$RUNNER_TEMP/e2e-real-maintenance-results.txt" \
+            || { echo "FAIL: the module run executed no test of maintenance.spec.ts"; exit 1; }
+          if grep -v ';chromium:frontend/e2e-real/maintenance.spec.ts;' "$RUNNER_TEMP/e2e-real-maintenance-results.txt"; then
+            echo "FAIL: the module run executed other specs than maintenance.spec.ts"; exit 1
+          fi
+          cat "$RUNNER_TEMP/e2e-real-results.txt" "$RUNNER_TEMP/e2e-real-maintenance-results.txt" >"$RUNNER_TEMP/e2e-real-all-results.txt"
+          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --results "$RUNNER_TEMP/e2e-real-all-results.txt"
 
       - name: Upload the real-stack report
         if: always() && matrix.platform == 'ubuntu-24.04'
@@ -495,6 +566,10 @@ jobs:
             frontend/test-results/
             ${{ runner.temp }}/e2e-real.json
             ${{ runner.temp }}/e2e-real-results.txt
+            ${{ runner.temp }}/e2e-real-maintenance/
+            ${{ runner.temp }}/e2e-real-maintenance.json
+            ${{ runner.temp }}/e2e-real-maintenance-results.txt
+            ${{ runner.temp }}/e2e-real-all-results.txt
           retention-days: 14
 
       - name: Show logs on failure

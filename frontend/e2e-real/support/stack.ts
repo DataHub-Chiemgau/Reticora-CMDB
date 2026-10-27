@@ -85,6 +85,27 @@ export async function api<T = unknown>(
 }
 
 /**
+ * expectModuleServed asserts that the stack serves the late module `key` (WP-541): GET
+ * /modules reports it enabled. Late modules are off in the G1 default (E-03, WP-214) and their
+ * routes answer 404; the specs of such a module run only in the module run of install-smoke.yml
+ * against a server started with RETICORA_MODULES naming it (README.md). A spec never skips
+ * itself: against a G1 default stack it fails here with the reason.
+ */
+export async function expectModuleServed(request: APIRequestContext, token: string, key: string) {
+  const res = await api<{ data?: { key: string; enabled: boolean }[] }>(
+    request,
+    token,
+    'GET',
+    '/modules',
+  );
+  expect(res.status, `GET /modules: ${JSON.stringify(res.body)}`).toBe(200);
+  expect(
+    res.body?.data?.find((m) => m.key === key)?.enabled,
+    `module ${key} served (start the server with RETICORA_MODULES=${key}, e2e-real/README.md)`,
+  ).toBe(true);
+}
+
+/**
  * keycloakLogin fills the Keycloak form, completes the second factor of an
  * account holding mfa_required (OTP setup at the first login, the code at
  * later ones; e2e/support/totp.ts, WP-357) and a required profile step should
