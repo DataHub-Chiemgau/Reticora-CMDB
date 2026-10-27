@@ -384,6 +384,17 @@ throughout: the secrets the server derives do not depend on the master key
 `POST /api/v1/api-keys/{id}/rotate`; session signing keys carry a `kid` and
 rotate in the identity layer.
 
+Where the two keys go on each shipped platform (WP-642):
+
+| Platform | Current key | Previous key(s) | Restart of the server only |
+|---|---|---|---|
+| Docker Compose | `RETICORA_MASTER_KEY` in `deploy/docker-compose/.env` | `RETICORA_MASTER_KEY_PREVIOUS` in the same `.env` (optional; the compose file passes it to the server, empty when unset; a re-run of `install-cloud.sh` keeps it) | `docker compose up -d --no-deps server` |
+| Kubernetes | secret `reticora-secrets`, key `master-key` | secret `reticora-secrets`, key `master-key-previous` (read as `RETICORA_MASTER_KEY_PREVIOUS` with `optional: true`, so the pod also starts without it) | `kubectl rollout restart deployment/reticora-server` |
+
+To retire the old key, delete the `RETICORA_MASTER_KEY_PREVIOUS` line from
+`.env` (or leave it empty), or remove the key `master-key-previous` from
+`reticora-secrets`, and restart the server once more.
+
 Derived secrets (WP-459): the issuer and the logins of the collector NATS
 endpoint (`pki/edge.conf` of nats-edge), the key of the collector CA
 announcements and the pagination cursor key are derived from the derivation

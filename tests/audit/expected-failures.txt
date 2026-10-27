@@ -24,8 +24,6 @@ sh;tests/audit/g1-gate-evidence.test.sh;pentest_field;F-039
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_findings;F-039
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_summary;F-039
 sh;tests/audit/g1-gate-evidence.test.sh;subprocessors;F-137
-sh;tests/audit/master-key-rotation-deploy.test.sh;compose_master_key_previous;F-370
-sh;tests/audit/master-key-rotation-deploy.test.sh;k8s_master_key_previous;F-370
 e2e-real;chromium:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L08 moving a mounted CI is recorded in ci_change, audit and the unified history shown on the CI page;F-253
 e2e-real;chromium:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles;F-201
 e2e-real;edge:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L08 moving a mounted CI is recorded in ci_change, audit and the unified history shown on the CI page;F-253
@@ -44,12 +42,6 @@ e2e-real;firefox:frontend/e2e-real/discovery-errors.spec.ts;Discovery error stat
 e2e-real;webkit:frontend/e2e-real/discovery-errors.spec.ts;Discovery error states from a real run (DIS-08) E2 a host scope on an unreachable address shows unreachable with protocol and target in last_result and on the Discovery page;F-369
 e2e-real;mobile-chrome:frontend/e2e-real/discovery-errors.spec.ts;Discovery error states from a real run (DIS-08) E2 a host scope on an unreachable address shows unreachable with protocol and target in last_result and on the Discovery page;F-369
 e2e-real;mobile-safari:frontend/e2e-real/discovery-errors.spec.ts;Discovery error states from a real run (DIS-08) E2 a host scope on an unreachable address shows unreachable with protocol and target in last_result and on the Discovery page;F-369
-e2e-real;chromium:frontend/e2e-real/key-rotation.spec.ts;master key rotation on the installed stack (SEC-06) K01 master key rotation with a running collector: only the server restarts, the rewrap run moves every key, collector and nats-edge keep running, an earlier cursor stays valid, and the server starts without the old key;F-370
-e2e-real;edge:frontend/e2e-real/key-rotation.spec.ts;master key rotation on the installed stack (SEC-06) K01 master key rotation with a running collector: only the server restarts, the rewrap run moves every key, collector and nats-edge keep running, an earlier cursor stays valid, and the server starts without the old key;F-370
-e2e-real;firefox:frontend/e2e-real/key-rotation.spec.ts;master key rotation on the installed stack (SEC-06) K01 master key rotation with a running collector: only the server restarts, the rewrap run moves every key, collector and nats-edge keep running, an earlier cursor stays valid, and the server starts without the old key;F-370
-e2e-real;webkit:frontend/e2e-real/key-rotation.spec.ts;master key rotation on the installed stack (SEC-06) K01 master key rotation with a running collector: only the server restarts, the rewrap run moves every key, collector and nats-edge keep running, an earlier cursor stays valid, and the server starts without the old key;F-370
-e2e-real;mobile-chrome:frontend/e2e-real/key-rotation.spec.ts;master key rotation on the installed stack (SEC-06) K01 master key rotation with a running collector: only the server restarts, the rewrap run moves every key, collector and nats-edge keep running, an earlier cursor stays valid, and the server starts without the old key;F-370
-e2e-real;mobile-safari:frontend/e2e-real/key-rotation.spec.ts;master key rotation on the installed stack (SEC-06) K01 master key rotation with a running collector: only the server restarts, the rewrap run moves every key, collector and nats-edge keep running, an earlier cursor stays valid, and the server starts without the old key;F-370
 e2e-real;webkit:frontend/e2e-real/roles-authz.spec.ts;07 the viewer cannot raise its own rights through role, user, invitation or key endpoints;F-375
 e2e-real;webkit:frontend/e2e-real/roles-authz.spec.ts;11 an admin role change (viewer → engineer) takes effect at the next refresh and sign-in;F-375
 e2e-real;webkit:frontend/e2e-real/roles-authz.spec.ts;14 the SPA renews an expired access token with the refresh cookie instead of signing the user out;F-375

@@ -937,3 +937,4 @@ INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-558
 ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-558
 UI-18;[B];C;frontend/e2e/mobile-actions.spec.ts;WP-532
 NFR-07;[B];C;frontend/e2e/mobile-actions.spec.ts;WP-532
+SEC-06;[B];A;frontend/e2e-real/key-rotation.spec.ts;WP-642

@@ -185,6 +185,19 @@ installation from before this login switches the server over without touching
 any data; changing `RETICORA_DB_APP_PASSWORD` in `.env` and re-running rotates
 the password.
 
+### Master key rotation (SEC-06)
+
+`RETICORA_MASTER_KEY` in `.env` encrypts the stored credentials (envelope
+encryption, OPS-03). To rotate it, set the new key as `RETICORA_MASTER_KEY`,
+the old one as `RETICORA_MASTER_KEY_PREVIOUS` (comma-separated for several),
+restart the server (`docker compose up -d --no-deps server`) and let the rewrap run
+`rotation.master_key` finish; then remove `RETICORA_MASTER_KEY_PREVIOUS` (or
+leave it empty) and restart the server again. The compose file passes
+`RETICORA_MASTER_KEY_PREVIOUS` to the server, empty when `.env` does not set
+it, and a re-run of the installer keeps it in `.env`. With the new key alone
+the server does not start. Procedure and checks:
+[docs/ops/workers.md](../docs/ops/workers.md#key-rotation-sec-06).
+
 ### HTTPS with Let's Encrypt (nginx + Certbot)
 
 To serve the web UI over HTTPS with a free, auto-renewing Let's Encrypt
@@ -471,14 +484,16 @@ the accept page: without `RETICORA_INVITATION_ACCEPT_URL`, `POST /invitations`
 and `POST /invitations/{id}/renew` answer 503. The base provides all of them,
 `staging` and `prod` inherit them (staging only patches
 `RETICORA_ENVIRONMENT=staging`, replicas and resources and drops the HPA). Every
-reference is mandatory (`optional: false`): a missing secret, ConfigMap or key
-keeps the pod in `CreateContainerConfigError`.
+reference of these is mandatory (`optional: false`): a missing secret, ConfigMap
+or key keeps the pod in `CreateContainerConfigError`. Only the previous master
+key of a rotation (`RETICORA_MASTER_KEY_PREVIOUS`) is optional.
 
 | Variable | Source (base, inherited by `staging` and `prod`) |
 |---|---|
 | `RETICORA_DATABASE_URL` | secret `reticora-db-runtime`, key `database-url` (runtime login, see below) |
 | `RETICORA_REDIS_URL` | literal `redis://redis:6379` in `base/deployment.yaml` |
 | `RETICORA_MASTER_KEY` | secret `reticora-secrets`, key `master-key` |
+| `RETICORA_MASTER_KEY_PREVIOUS` | secret `reticora-secrets`, key `master-key-previous`, optional (`optional: true`; only during a master key rotation) |
 | `RETICORA_OIDC_ISSUER_URL` | ConfigMap `reticora-config`, key `oidc-issuer-url` (Keycloak realm, reachable from the users' browsers) |
 | `RETICORA_OIDC_CLIENT_ID` | ConfigMap `reticora-config`, key `oidc-client-id` |
 | `RETICORA_OIDC_CLIENT_SECRET` | secret `reticora-secrets`, key `oidc-client-secret` |
@@ -602,6 +617,15 @@ mandatory: the deployment references `reticora-secrets/master-key` without
 and the server's start check refuses an empty key. Keep the master key in a
 backup outside the cluster; without it, stored credentials cannot be
 decrypted.
+
+A master key rotation (SEC-06) puts the new key into `master-key` and the old
+one(s), comma-separated, into the key `master-key-previous` of
+`reticora-secrets`, restarts the server
+(`kubectl rollout restart deployment/reticora-server`) and lets
+`rotation.master_key` rewrap the data keys; afterwards it removes
+`master-key-previous` and restarts the server again. This one reference is
+optional (`optional: true`), so the pod starts with or without the key (see
+[docs/ops/workers.md](../docs/ops/workers.md#key-rotation-sec-06)).
 
 **Container logs (NFR-06).** The manifests do not configure log retention:
 the container runtime writes the pod logs to the nodes, where the kubelet
