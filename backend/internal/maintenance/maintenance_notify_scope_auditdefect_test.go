@@ -1,6 +1,6 @@
 //go:build auditdefect
 
-// Defect test found by WP-538 (t1-ev-module-isolation, MGT-04, TEN-06):
+// Defect test found by WP-538 (t1-ev-module-isolation, MGT-04, TEN-06; F-367):
 // POST /maintenance-windows/{id}/notify and GET
 // /maintenance-windows/{id}/notifications answer 200 for a window the
 // caller cannot see (a window of only client-2 CIs for a client-1

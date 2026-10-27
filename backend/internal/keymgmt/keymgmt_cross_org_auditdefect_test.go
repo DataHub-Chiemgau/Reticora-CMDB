@@ -1,6 +1,6 @@
 //go:build auditdefect
 
-// Defect test found by WP-538 (t1-ev-module-isolation, MGT-03, TEN-06):
+// Defect test found by WP-538 (t1-ev-module-isolation, MGT-03, TEN-06; F-366):
 // POST /keys/{id}/issue accepts an assigned_to of another organization. The
 // foreign key key_assignment.assigned_to → app_user(id) does not include the
 // organization, and the repository does not check it: an organization-A

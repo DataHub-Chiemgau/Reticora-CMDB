@@ -1,6 +1,6 @@
 //go:build auditdefect
 
-// Defect test found by WP-538 (t1-ev-module-isolation, MGT-03, TEN-06):
+// Defect test found by WP-538 (t1-ev-module-isolation, MGT-03, TEN-06; F-366):
 // POST /trainings/{id}/assignments accepts a course and a user of another
 // organization. The foreign keys training_assignment.training_id →
 // training(id) and user_id → app_user(id) do not include the organization,
