@@ -903,3 +903,4 @@ AST-01;[P2];B;backend/internal/assignment/assignment_scope_integration_test.go;W
 EVT-02;[B];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
 EVT-01;[B];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
 NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
+COL-02;[B];B;collector/collectorcmd/redfish_tls_integration_test.go;WP-539

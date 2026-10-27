@@ -52,6 +52,14 @@ func WithTLSScopes(scopes ...TLSScope) Option {
 	}
 }
 
+// WithPort sets the HTTPS port of the Redfish service (default 443), e.g.
+// for an emulator on a high port.
+func WithPort(port int) Option {
+	return func(p *Plugin) {
+		p.port = port
+	}
+}
+
 var _ plugins.Plugin = (*Plugin)(nil)
 
 // New creates a Redfish plugin instance.
