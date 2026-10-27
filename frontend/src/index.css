@@ -22,9 +22,32 @@
   --color-surface: 220 13% 10%;
 }
 
+/* The canvas carries the surface as well (WP-630): content wider than a phone
+   screen (de-DE tab labels, deep location trees) reaches past the app
+   container, and in the dark theme it would sit on a white canvas, where the
+   dark variants of text-muted and text-danger fall below 4.5:1. */
+html {
+  background-color: hsl(var(--color-surface));
+}
+
 /* A white label on the lighter dark-mode primary falls below 4.5:1; filled
    primary surfaces (primary button, active navigation) get a dark label. */
 .dark .bg-primary.text-white,
 .dark .focus\:bg-primary:focus.focus\:text-white {
   color: theme('colors.gray.950');
+}
+
+/* Shared text colours that keep WCAG AA (4.5:1) in both themes (WP-630,
+   F-355/F-361): secondary text (hints, counters, table heads, inactive tabs)
+   and text in the danger colour without a filled background (delete actions,
+   error lines). text-gray-500, text-gray-400 and text-red-600 alone have no
+   dark variant; src/test/darkVariant.test.ts reports them. */
+@layer components {
+  .text-muted {
+    @apply text-gray-600 dark:text-gray-400;
+  }
+
+  .text-danger {
+    @apply text-red-600 dark:text-red-400;
+  }
 }

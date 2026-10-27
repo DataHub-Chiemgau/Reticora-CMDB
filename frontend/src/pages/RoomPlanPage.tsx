@@ -335,7 +335,7 @@ export function RoomPlanPage() {
             >
               {t('roomplan.keyboardHint')}
             </p>
-            {saving ? <p className="mt-2 text-xs text-gray-500">{t('app.loading')}</p> : null}
+            {saving ? <p className="mt-2 text-xs text-muted">{t('app.loading')}</p> : null}
             {conflict ? (
               <p role="alert" className="mt-2 text-sm text-amber-800 dark:text-amber-300">
                 {t('roomplan.conflict')}

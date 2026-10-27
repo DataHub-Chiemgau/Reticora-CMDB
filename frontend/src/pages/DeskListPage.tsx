@@ -162,7 +162,7 @@ export function DeskListPage() {
               })
             }
           />
-          {bookingError ? <p className="text-sm text-red-600">{bookingError}</p> : null}
+          {bookingError ? <p className="text-sm text-danger">{bookingError}</p> : null}
           <div className="flex justify-end gap-2">
             <Button
               variant="secondary"

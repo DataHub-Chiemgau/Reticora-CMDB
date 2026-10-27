@@ -342,7 +342,7 @@ function ReviewDetail({ item }: { item: ReviewItem }) {
       ) : null}
       <table className="mt-3 w-full text-left text-sm">
         <caption className="sr-only">{t('reviews.diff')}</caption>
-        <thead className="text-xs uppercase text-gray-500">
+        <thead className="text-xs uppercase text-muted">
           <tr>
             <th className="pb-2">{t('reviews.field')}</th>
             <th className="pb-2">{t('reviews.observed')}</th>
@@ -415,7 +415,7 @@ function ReviewDetail({ item }: { item: ReviewItem }) {
         </div>
       ) : null}
       {resolve.error ? (
-        <p role="alert" className="mt-2 text-sm text-red-600">
+        <p role="alert" className="mt-2 text-sm text-danger">
           {resolve.error instanceof Error ? resolve.error.message : String(resolve.error)}
         </p>
       ) : null}

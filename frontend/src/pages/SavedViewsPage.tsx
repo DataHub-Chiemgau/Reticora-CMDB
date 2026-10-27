@@ -124,7 +124,7 @@ export function SavedViewsPage() {
                     <button
                       onClick={() => deleteView.mutate(v.id)}
                       aria-label={`${t('common.delete')}: ${v.name}`}
-                      className="rounded-md px-2 py-2 text-sm text-gray-400 hover:text-danger"
+                      className="rounded-md px-2 py-2 text-sm text-muted hover:text-danger"
                     >
                       ×
                     </button>
@@ -132,7 +132,7 @@ export function SavedViewsPage() {
                 </li>
               ))}
               {(views.data?.data ?? []).length === 0 && !views.isLoading ? (
-                <li className="px-3 py-2 text-sm text-gray-500">
+                <li className="px-3 py-2 text-sm text-muted">
                   {t('savedviews.none', 'Noch keine eigenen Ansichten.')}
                 </li>
               ) : null}
@@ -177,17 +177,17 @@ export function SavedViewsPage() {
                     >
                       {r.name}
                     </Link>
-                    {r.summary ? <p className="text-xs text-gray-500">{r.summary}</p> : null}
+                    {r.summary ? <p className="text-xs text-muted">{r.summary}</p> : null}
                   </li>
                 ))}
                 {results.length === 0 ? (
-                  <li className="py-4 text-center text-sm text-gray-500">
+                  <li className="py-4 text-center text-sm text-muted">
                     {t('savedviews.noResults', 'Keine Treffer.')}
                   </li>
                 ) : null}
               </ul>
             ) : !activeSpec ? (
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-muted">
                 {t('savedviews.hint', 'Wählen Sie links eine Ansicht aus.')}
               </p>
             ) : null}

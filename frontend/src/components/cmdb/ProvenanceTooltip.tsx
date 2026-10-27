@@ -29,7 +29,7 @@ export function ProvenanceTooltip({ provenance }: { provenance: CIFieldProvenanc
     >
       <button
         type="button"
-        className="rounded-full px-1 text-xs text-gray-500 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        className="rounded-full px-1 text-xs text-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         aria-label={t('provenance.show', { field: provenance.field })}
         aria-describedby={open ? tooltipId : undefined}
         onFocus={() => setOpen(true)}
@@ -50,21 +50,21 @@ export function ProvenanceTooltip({ provenance }: { provenance: CIFieldProvenanc
             {t(`provenance.reasons.${provenance.reason}`)}
           </span>
           <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1">
-            <dt className="text-gray-500">{t('provenance.source')}</dt>
+            <dt className="text-muted">{t('provenance.source')}</dt>
             <dd>{provenance.source}</dd>
-            <dt className="text-gray-500">{t('provenance.rank')}</dt>
+            <dt className="text-muted">{t('provenance.rank')}</dt>
             <dd>{provenance.rank}</dd>
-            <dt className="text-gray-500">{t('provenance.recordedAt')}</dt>
+            <dt className="text-muted">{t('provenance.recordedAt')}</dt>
             <dd>{time(provenance.recorded_at)}</dd>
-            <dt className="text-gray-500">{t('provenance.observedAt')}</dt>
+            <dt className="text-muted">{t('provenance.observedAt')}</dt>
             <dd>{time(provenance.observed_at)}</dd>
             {provenance.reason === 'override' ? (
               <>
-                <dt className="text-gray-500">{t('provenance.overrideReason')}</dt>
+                <dt className="text-muted">{t('provenance.overrideReason')}</dt>
                 <dd>{provenance.override_reason || '—'}</dd>
-                <dt className="text-gray-500">{t('provenance.overrideAuthor')}</dt>
+                <dt className="text-muted">{t('provenance.overrideAuthor')}</dt>
                 <dd>{provenance.override_author || '—'}</dd>
-                <dt className="text-gray-500">{t('provenance.covers')}</dt>
+                <dt className="text-muted">{t('provenance.covers')}</dt>
                 <dd>
                   {display(provenance.discovered_value)}
                   {provenance.discovered_source ? ` (${provenance.discovered_source})` : ''}

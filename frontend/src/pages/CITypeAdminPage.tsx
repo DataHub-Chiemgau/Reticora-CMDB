@@ -236,7 +236,7 @@ export function CITypeAdminPage() {
                   ) : null}
                 </div>
               </div>
-              <p className="mt-0.5 text-xs text-gray-500">
+              <p className="mt-0.5 text-xs text-muted">
                 {ty.key} · v{ty.version} · {t('citypes.schemaVersion', 'Schema')}{' '}
                 {ty.schema_version}
                 {ty.category ? ` · ${ty.category}` : ''}
@@ -276,7 +276,7 @@ export function CITypeAdminPage() {
             />
           ) : (
             <Card>
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-muted">
                 {t('citypes.select', 'Typ auswählen, um Felder zu bearbeiten.')}
               </p>
             </Card>
@@ -298,7 +298,7 @@ export function CITypeAdminPage() {
               className="rounded-lg border border-gray-200 px-3 py-2 text-left hover:border-primary dark:border-gray-700"
             >
               <p className="font-medium">{label(tpl)}</p>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-muted">
                 {/* eslint-disable-next-line no-restricted-syntax -- GLO-10: the template category is free metamodel text (ci_type.category, no enum), not a catalog key */}
                 {tpl.category}
                 {tpl.is_logical ? ` · ${t('citypes.logicalShort')}` : ''} ·{' '}
@@ -598,7 +598,7 @@ function CITypeDetail({
             <li key={f.name} className="flex items-center justify-between py-2 text-sm">
               <div>
                 <span className="font-medium">{f.label || f.name}</span>
-                <span className="ml-2 text-xs text-gray-500">
+                <span className="ml-2 text-xs text-muted">
                   {f.data_type}
                   {f.ui_group ? ` · ${f.ui_group}` : ''}
                 </span>
@@ -640,7 +640,7 @@ function CITypeDetail({
                 ) : null}
                 {!type.is_system ? (
                   <button
-                    className="text-xs text-red-600 hover:underline"
+                    className="text-xs text-danger hover:underline"
                     onClick={() => onDeleteField(f.name)}
                   >
                     {t('common.delete', 'Löschen')}
@@ -651,7 +651,7 @@ function CITypeDetail({
           );
         })}
         {fields.length === 0 ? (
-          <li className="py-2 text-sm text-gray-500">
+          <li className="py-2 text-sm text-muted">
             {t('citypes.noFields', 'Keine Felder definiert.')}
           </li>
         ) : null}

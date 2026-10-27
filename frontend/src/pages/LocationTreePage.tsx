@@ -177,7 +177,7 @@ export function LocationTreePage() {
 
       <Card>
         {roots.length === 0 && !isLoading ? (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted">
             {t('locations.empty', 'Noch keine Standorte. Legen Sie zuerst einen Standort an.')}
           </p>
         ) : (
@@ -396,7 +396,7 @@ function LocationTreeItem({
             onClick={() => setOpen(!open)}
             aria-label={open ? 'collapse' : 'expand'}
             aria-expanded={open}
-            className="w-4 text-gray-400"
+            className="w-4 text-muted"
           >
             {open ? '▾' : '▸'}
           </button>
@@ -418,7 +418,7 @@ function LocationTreeItem({
           <button className="text-xs text-primary hover:underline" onClick={() => onEdit(node)}>
             {t('common.edit', 'Bearbeiten')}
           </button>
-          <button className="text-xs text-red-600 hover:underline" onClick={() => onDelete(node)}>
+          <button className="text-xs text-danger hover:underline" onClick={() => onDelete(node)}>
             {t('common.delete', 'Löschen')}
           </button>
         </span>

@@ -47,7 +47,7 @@ export function CompliancePage() {
         <div className="text-4xl font-bold text-primary">
           {Math.round(score.data?.overall.score ?? 0)}%
         </div>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-muted">
           {t('compliance.scoreHint', {
             passed: score.data?.overall.passed ?? 0,
             failed: score.data?.overall.failed ?? 0,
@@ -88,7 +88,7 @@ export function CompliancePage() {
                 <Badge variant="danger">
                   {t(`compliance.resultStatuses.${result.status}`, result.status)}
                 </Badge>
-                <p className="text-gray-500">{result.details}</p>
+                <p className="text-muted">{result.details}</p>
               </li>
             ))}
           </ul>

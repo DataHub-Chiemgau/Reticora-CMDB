@@ -126,7 +126,7 @@ function DynamicField({ def, state, value, error, options, onChange }: DynamicFi
             rows={3}
             onChange={(e) => onChange(e.target.value)}
           />
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          {error ? <p className="text-sm text-danger">{error}</p> : null}
         </div>
       );
     case 'boolean':
@@ -221,7 +221,7 @@ function DynamicField({ def, state, value, error, options, onChange }: DynamicFi
               }
             }}
           />
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          {error ? <p className="text-sm text-danger">{error}</p> : null}
         </div>
       );
     default:

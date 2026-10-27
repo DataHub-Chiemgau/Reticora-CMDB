@@ -870,3 +870,5 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-531
 RBA-03;[B];B;backend/internal/tenantapi/tenantapi_scope_integration_test.go;WP-633
 RCK-01;[B];B;backend/internal/rack/height_integration_test.go;WP-634
 TEN-06;[B];B;backend/internal/rack/height_integration_test.go;WP-634
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-630
+NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-630

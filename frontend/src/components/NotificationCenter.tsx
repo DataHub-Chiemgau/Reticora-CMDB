@@ -92,9 +92,9 @@ export function NotificationCenter() {
             </div>
           ) : null}
           {all.isError ? null : all.isLoading ? (
-            <p className="text-sm text-gray-500">{t('app.loading')}</p>
+            <p className="text-sm text-muted">{t('app.loading')}</p>
           ) : items.length === 0 ? (
-            <p className="text-sm text-gray-500">{t('notifications.empty')}</p>
+            <p className="text-sm text-muted">{t('notifications.empty')}</p>
           ) : (
             <ul className="max-h-96 space-y-2 overflow-y-auto">
               {items.map((item) => {
@@ -114,7 +114,7 @@ export function NotificationCenter() {
                     {item.body ? (
                       <p className="text-gray-600 dark:text-gray-300">{item.body}</p>
                     ) : null}
-                    <div className="mt-1 flex items-center justify-between text-xs text-gray-500">
+                    <div className="mt-1 flex items-center justify-between text-xs text-muted">
                       <time dateTime={item.created_at}>
                         {new Date(item.created_at).toLocaleString(i18n.language)}
                       </time>

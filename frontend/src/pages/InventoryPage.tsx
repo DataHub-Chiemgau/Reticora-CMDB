@@ -119,7 +119,7 @@ export function InventoryPage() {
           <button
             key={tb.id}
             onClick={() => setTab(tb.id)}
-            className={`px-4 py-2 text-sm font-medium ${tab === tb.id ? 'border-b-2 border-primary text-primary' : 'text-gray-500'}`}
+            className={`px-4 py-2 text-sm font-medium ${tab === tb.id ? 'border-b-2 border-primary text-primary' : 'text-muted'}`}
           >
             {tb.label}
           </button>
@@ -245,16 +245,16 @@ function MovementsTab({
           <li key={m.id} className="flex items-center gap-3 py-2 text-sm">
             <span aria-hidden>{MOVEMENT_ICONS[m.movement_type] ?? '•'}</span>
             <span className="font-medium">{m.movement_type}</span>
-            <span className="text-gray-500">{m.asset_id ?? m.quantity_item_id}</span>
+            <span className="text-muted">{m.asset_id ?? m.quantity_item_id}</span>
             {m.quantity ? <Badge variant="neutral">×{m.quantity}</Badge> : null}
-            {m.reason ? <span className="text-gray-400">{m.reason}</span> : null}
-            <span className="ml-auto text-xs text-gray-400">
+            {m.reason ? <span className="text-muted">{m.reason}</span> : null}
+            <span className="ml-auto text-xs text-muted">
               {new Date(m.created_at).toLocaleString()}
             </span>
           </li>
         ))}
         {(movements.data?.data ?? []).length === 0 && !movements.isLoading ? (
-          <li className="py-4 text-center text-sm text-gray-500">
+          <li className="py-4 text-center text-sm text-muted">
             {t('inventory.noMovements', 'Keine Bewegungen.')}
           </li>
         ) : null}
@@ -282,7 +282,7 @@ function ItemsTab({ items, t }: { items: ReturnType<typeof useQuantityItems>; t:
           <p className="text-sm text-gray-600 dark:text-gray-300">{it.sku || '—'}</p>
           <p className="mt-1 text-lg font-semibold">
             {it.stock_level} {it.unit}{' '}
-            <span className="text-xs font-normal text-gray-500">/ min {it.min_level}</span>
+            <span className="text-xs font-normal text-muted">/ min {it.min_level}</span>
           </p>
         </Card>
       ))}
@@ -310,7 +310,7 @@ function ReservationsTab({
             {r.quantity > 1 ? <Badge variant="neutral">×{r.quantity}</Badge> : null}
             {r.project_ref ? <Badge variant="info">{r.project_ref}</Badge> : null}
             {r.expires_at ? (
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-muted">
                 bis {new Date(r.expires_at).toLocaleDateString()}
               </span>
             ) : null}
@@ -320,7 +320,7 @@ function ReservationsTab({
           </li>
         ))}
         {(reservations.data?.data ?? []).length === 0 && !reservations.isLoading ? (
-          <li className="py-4 text-center text-sm text-gray-500">
+          <li className="py-4 text-center text-sm text-muted">
             {t('inventory.noReservations', 'Keine aktiven Reservierungen.')}
           </li>
         ) : null}
@@ -341,7 +341,7 @@ function AvailabilityTab({
       {availability.isLoading ? <SkeletonList rows={4} label="…" /> : null}
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-xs uppercase text-gray-500">
+          <tr className="text-left text-xs uppercase text-muted">
             <th className="py-2">{t('inventory.item', 'Artikel')}</th>
             <th>{t('inventory.total', 'Gesamt')}</th>
             <th>{t('inventory.available', 'Verfügbar')}</th>

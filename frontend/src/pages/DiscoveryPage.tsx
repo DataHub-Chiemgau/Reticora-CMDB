@@ -98,7 +98,7 @@ function EnrollWizard({ open, onClose }: { open: boolean; onClose: () => void })
             </span>
             <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="site-a" />
           </label>
-          {mint.isError ? <p className="text-sm text-red-600">{t('app.error')}</p> : null}
+          {mint.isError ? <p className="text-sm text-danger">{t('app.error')}</p> : null}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={onClose}>
               {t('common.cancel', 'Abbrechen')}

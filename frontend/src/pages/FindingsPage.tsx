@@ -80,7 +80,7 @@ export function FindingsPage() {
         <div className="flex flex-wrap gap-3">
           {(['critical', 'high', 'medium', 'low'] as const).map((s) => (
             <Card key={s} className="min-w-28">
-              <p className="text-xs uppercase tracking-wide text-gray-500">
+              <p className="text-xs uppercase tracking-wide text-muted">
                 {t(`findings.severities.${s}`, s)}
               </p>
               <p className="text-2xl font-bold">{sev[s] ?? 0}</p>

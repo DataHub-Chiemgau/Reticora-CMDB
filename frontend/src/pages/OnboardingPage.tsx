@@ -79,7 +79,7 @@ function Progress({ current }: { current: OnboardingStep | 'done' }) {
                 ? 'text-green-700 dark:text-green-400'
                 : step === current
                   ? 'font-semibold text-primary'
-                  : 'text-gray-500'
+                  : 'text-muted'
             }
           >
             {i < index ? '✓ ' : `${i + 1}. `}
@@ -139,7 +139,7 @@ function SignupStep() {
         onChange={(e) => setForm({ ...form, display_name: e.target.value })}
       />
       {submit.error ? (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           {errorMessage(submit.error)}
         </p>
       ) : null}
@@ -198,7 +198,7 @@ function VerifyStep({ token }: { token: string }) {
         onChange={(e) => setPassword(e.target.value)}
       />
       {verify.error ? (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           {verify.error instanceof ApiError && verify.error.status === 410
             ? t('onboarding.verify.expired')
             : verify.error instanceof ApiError && verify.error.status === 404
@@ -231,7 +231,7 @@ function CollectorStep() {
           <code className="block rounded bg-gray-100 p-3 font-mono text-base dark:bg-gray-800">
             {code.data.code}
           </code>
-          <p className="mt-2 text-gray-500">{t('onboarding.collector.waiting')}</p>
+          <p className="mt-2 text-muted">{t('onboarding.collector.waiting')}</p>
         </div>
       ) : (
         <Button onClick={() => code.mutate()} loading={code.isPending}>
@@ -239,7 +239,7 @@ function CollectorStep() {
         </Button>
       )}
       {code.error ? (
-        <p role="alert" className="text-red-600">
+        <p role="alert" className="text-danger">
           {errorMessage(code.error)}
         </p>
       ) : null}
@@ -273,12 +273,12 @@ function ScopesStep({ onDone }: { onDone: () => void }) {
     <div className="space-y-3 text-sm">
       <p>{t('onboarding.scopes.hint')}</p>
       {resolve.error ? (
-        <p role="alert" className="text-red-600">
+        <p role="alert" className="text-danger">
           {t('onboarding.scopes.resolveFailed', { message: errorMessage(resolve.error) })}
         </p>
       ) : null}
       {items.length === 0 ? (
-        <p className="text-gray-500">{t('onboarding.scopes.waiting')}</p>
+        <p className="text-muted">{t('onboarding.scopes.waiting')}</p>
       ) : (
         <ul className="space-y-2">
           {items.map((item) => (

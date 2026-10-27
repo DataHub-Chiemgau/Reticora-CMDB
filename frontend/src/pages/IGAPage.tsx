@@ -111,7 +111,7 @@ export function IGAPage() {
               >
                 <div>
                   <p className="font-medium">{item.name}</p>
-                  <p className="text-sm text-gray-500">{item.type}</p>
+                  <p className="text-sm text-muted">{item.type}</p>
                 </div>
                 <Badge variant={statusVariant(item.status)}>
                   {t(`iga.connectorStatuses.${item.status}`, item.status)}

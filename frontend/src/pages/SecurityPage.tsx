@@ -106,7 +106,7 @@ export function SecurityPage() {
               <div className="text-4xl font-bold text-primary">
                 {Math.round(data?.compliance_score.score ?? 0)}%
               </div>
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-muted">
                 {t('compliance.scoreHint', {
                   passed: data?.compliance_score.passed ?? 0,
                   failed: data?.compliance_score.failed ?? 0,
@@ -146,12 +146,12 @@ export function SecurityPage() {
                       <Badge variant="info">
                         {t(`compliance.categories.${finding.category}`, finding.category)}
                       </Badge>
-                      <span className="text-gray-500">
+                      <span className="text-muted">
                         {t('security.affectedCIs', { count: finding.affected_cis.length })}
                       </span>
                     </div>
                     {finding.remediation_hint ? (
-                      <p className="mt-1 text-gray-500">{finding.remediation_hint}</p>
+                      <p className="mt-1 text-muted">{finding.remediation_hint}</p>
                     ) : null}
                   </li>
                 ))}
@@ -202,7 +202,7 @@ export function SecurityPage() {
           </Button>
         </form>
         {retention.data ? (
-          <p className="mt-2 text-sm text-gray-500">
+          <p className="mt-2 text-sm text-muted">
             {t('security.retentionCurrent', {
               days: retention.data.retention_days,
               mode: t(
@@ -211,7 +211,7 @@ export function SecurityPage() {
             })}
           </p>
         ) : (
-          <p className="mt-2 text-sm text-gray-500">{t('security.retentionNone')}</p>
+          <p className="mt-2 text-sm text-muted">{t('security.retentionNone')}</p>
         )}
         {saveRetention.isError ? (
           <p className="mt-2 text-sm text-red-600 dark:text-red-400">

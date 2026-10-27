@@ -148,7 +148,7 @@ export function JobCenterPage() {
       {jobs.length > 0 ? (
         <Card>
           <table className="w-full text-left text-sm">
-            <thead className="text-xs uppercase text-gray-500">
+            <thead className="text-xs uppercase text-muted">
               <tr>
                 <th className="pb-2">{t('jobs.kind')}</th>
                 <th className="pb-2">{t('jobs.status')}</th>
@@ -169,7 +169,7 @@ export function JobCenterPage() {
                       <Badge variant={statusVariant[job.status] ?? 'neutral'}>
                         {t(`jobs.statuses.${job.status}`, job.status)}
                       </Badge>
-                      {job.error ? <p className="mt-1 text-xs text-red-600">{job.error}</p> : null}
+                      {job.error ? <p className="mt-1 text-xs text-danger">{job.error}</p> : null}
                       {counts ? (
                         <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
                           {t('jobs.partialReportSummary', { ...counts })}

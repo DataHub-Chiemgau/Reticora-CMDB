@@ -50,16 +50,13 @@ interface A11yRoute {
 
 // New findings of this check in pages outside WP-522 (IDs from F-355, plan
 // convention 16; each gets its own follow-up WP):
-// F-355 grey secondary text without a dark variant (and text-gray-400 of the
-// inventory in the light theme), F-356 site markers inside the map image,
-// F-357 tables that scroll sideways on a phone without taking the focus,
-// F-361 red delete actions of the location tree without a dark variant
-// (audit/g1-reaudit/FINDINGS.md).
-const F_CONTRAST = 'F-355';
+// F-356 site markers inside the map image,
+// F-357 tables that scroll sideways on a phone without taking the focus
+// (audit/g1-reaudit/FINDINGS.md). F-355 (grey secondary text) and F-361 (red
+// delete actions) are fixed by WP-630 (shared classes text-muted and
+// text-danger, src/index.css; source scan src/test/darkVariant.test.ts).
 const F_MAP_MARKERS = 'F-356';
 const F_SCROLL_REGION = 'F-357';
-const F_DANGER_CONTRAST = 'F-361';
-const DARK_CONTRAST: A11yRoute['known'] = { dark: F_CONTRAST };
 
 const text = (value: string) => (page: Page) => page.getByText(value, { exact: false }).first();
 
@@ -83,7 +80,6 @@ const ROUTES: A11yRoute[] = [
     url: '/onboarding',
     signedIn: false,
     ready: (page) => page.locator('#main-content form, #main-content h2').first(),
-    known: DARK_CONTRAST,
   },
   {
     path: '/invitations/accept',
@@ -140,26 +136,14 @@ const ROUTES: A11yRoute[] = [
   { path: '/racks', url: '/racks', ready: text(M.ci) },
   { path: '/discovery', url: '/discovery', ready: text(M.collector) },
   { path: '/assets', url: '/assets', ready: text(M.asset) },
-  {
-    path: '/inventory',
-    url: '/inventory',
-    ready: text('a11y-move'),
-    known: { light: F_CONTRAST, dark: F_CONTRAST },
-  },
-  {
-    path: '/locations',
-    url: '/locations',
-    ready: text(M.location),
-    known: { dark: F_DANGER_CONTRAST },
-    // On a phone the row actions wrap; axe does not decide their contrast.
-    knownMobile: {},
-  },
-  { path: '/saved-views', url: '/saved-views', ready: text(M.savedView), known: DARK_CONTRAST },
-  { path: '/ci-types', url: '/ci-types', ready: text(M.ciType), known: DARK_CONTRAST },
+  { path: '/inventory', url: '/inventory', ready: text('a11y-move') },
+  { path: '/locations', url: '/locations', ready: text(M.location) },
+  { path: '/saved-views', url: '/saved-views', ready: text(M.savedView) },
+  { path: '/ci-types', url: '/ci-types', ready: text(M.ciType) },
   { path: '/assignments', url: '/assignments', ready: text(M.assignment) },
   { path: '/documents', url: '/documents', ready: text(M.document) },
   { path: '/stocktake', url: '/stocktake', ready: text(M.stocktake) },
-  { path: '/consumables', url: '/consumables', ready: text(M.consumable), known: DARK_CONTRAST },
+  { path: '/consumables', url: '/consumables', ready: text(M.consumable) },
   { path: '/orders', url: '/orders', ready: text(M.order) },
   { path: '/maintenance', url: '/maintenance', ready: text(M.maintenance) },
   { path: '/disposal', url: '/disposal', ready: text(M.disposal) },
@@ -167,9 +151,9 @@ const ROUTES: A11yRoute[] = [
   { path: '/trainings', url: '/trainings', ready: text(M.training) },
   { path: '/desks', url: '/desks', ready: text(M.desk) },
   { path: '/agents', url: '/agents', ready: text(M.agent) },
-  { path: '/findings', url: '/findings', ready: text(M.finding), known: DARK_CONTRAST },
+  { path: '/findings', url: '/findings', ready: text(M.finding) },
   { path: '/reviews', url: '/reviews', ready: text(M.review) },
-  { path: '/jobs', url: '/jobs', ready: text(M.job), known: DARK_CONTRAST },
+  { path: '/jobs', url: '/jobs', ready: text(M.job) },
   { path: '/tickets', url: '/tickets', ready: text(M.ticket) },
   {
     path: '/users',
@@ -184,10 +168,10 @@ const ROUTES: A11yRoute[] = [
     knownMobile: { light: F_SCROLL_REGION, dark: F_SCROLL_REGION },
   },
   { path: '/slas', url: '/slas', ready: text(M.sla) },
-  { path: '/forms', url: '/forms', ready: text(M.form), known: DARK_CONTRAST },
-  { path: '/workflows', url: '/workflows', ready: text(M.workflow), known: DARK_CONTRAST },
-  { path: '/compliance', url: '/compliance', ready: text(M.compliance), known: DARK_CONTRAST },
-  { path: '/iga', url: '/iga', ready: text(M.iga), known: DARK_CONTRAST },
+  { path: '/forms', url: '/forms', ready: text(M.form) },
+  { path: '/workflows', url: '/workflows', ready: text(M.workflow) },
+  { path: '/compliance', url: '/compliance', ready: text(M.compliance) },
+  { path: '/iga', url: '/iga', ready: text(M.iga) },
   { path: '/assistant', url: '/assistant', ready: text(M.conversation) },
   { path: '/webhooks', url: '/webhooks', ready: text(M.webhook) },
   {
@@ -197,7 +181,7 @@ const ROUTES: A11yRoute[] = [
   },
   { path: '/monitoring', url: '/monitoring', ready: text(M.alert) },
   { path: '/audit', url: '/audit', ready: text(M.audit) },
-  { path: '/security', url: '/security', ready: text(M.compliance), known: DARK_CONTRAST },
+  { path: '/security', url: '/security', ready: text(M.compliance) },
   // Unknown paths fall back to the CI list.
   { path: '*', url: '/a11y-unknown-route', ready: text(M.ci) },
 ];
