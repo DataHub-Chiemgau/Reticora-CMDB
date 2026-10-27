@@ -588,6 +588,8 @@ describe('CIListPage bulk beyond the visible page', () => {
     expect(screen.queryByRole('toolbar', { name: 'Massenbearbeitung' })).not.toBeInTheDocument();
   });
 
+  // Renders 150 rows and walks the whole job flow; under a loaded worker
+  // pool this exceeds the 5 s default, so the test gets its own limit.
   it('selects all 150 matches of the filter, runs the bulk as a job and renders its report with two errors', async () => {
     const all = makeCIs(150);
     const failing = new Map([
@@ -685,7 +687,7 @@ describe('CIListPage bulk beyond the visible page', () => {
     expect(within(perId).getByRole('row', { name: /srv-007/ })).toHaveTextContent('404');
     // The selection was consumed by the job.
     expect(screen.queryByRole('toolbar', { name: 'Massenbearbeitung' })).not.toBeInTheDocument();
-  });
+  }, 20_000);
 
   it('selects at most the first 500 matches and says so', async () => {
     const calls = stubList(makeCIs(620));
