@@ -294,3 +294,122 @@ func TestOrganizationAIOptInThroughAPI(t *testing.T) {
 			w.Code, w.Header().Get("Content-Type"), w.Body.String())
 	}
 }
+
+// TestOrganizationFieldsRequireOrgWideUserManage covers WP-633 (RBA-03,
+// TEN-06, LOC-01; F-359): PATCH /api/v1/org requires user:manage, the route
+// authorization accepts any scope of it, so the handler requires it for the
+// whole organization for every field, not only for ai_opt_in. A holder of
+// user:manage bound to client 1 and a client-bound API key get 403
+// problem+json for name, time zone, currency, locale and settings; the row
+// stays and no audit entry is written. They still read the organization
+// (location:read). The org_admin (org-wide) changes the same fields: 200.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestOrganizationFieldsRequireOrgWideUserManage(t *testing.T) {
+	f := scopetest.Seed(t, "21")
+	bg := context.Background()
+	repos := server.PostgresRepositories(f.App, audit.NewPGRecorder())
+	entitlements := entitlement.NewService(repos.Entitlement, entitlement.Options{Enforce: true})
+	if _, err := entitlements.Provision(f.OrgCtx(f.OrgA), f.OrgA, entitlement.PlanEssential); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	clientAdmin := f.AppUser(t, f.OrgA, "k4-org-client-admin")
+	admin := f.AppUser(t, f.OrgA, "k4-org-admin")
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role_assignment (organization_id, user_id, role_id)
+		SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = 'org_admin'`, f.OrgA, admin); err != nil {
+		t.Fatal(err)
+	}
+
+	masterKey, err := crypto.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := crypto.NewEnvelopeEncryptor(masterKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux, _, err := server.NewRouter(repos, server.Options{
+		Version: "k4-org-fields", Entitlements: entitlements, CIService: ci.NewServiceWithLimits(repos.CI, entitlements),
+		Credentials: credential.NewService(repos.Credential, encryptor), OIDC: identity.NewOIDCProvider(identity.OIDCConfig{}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := middleware.Chain(middleware.TenantMiddleware, entitlements.Middleware)(mux)
+	all := identity.ScopeSet{All: true}
+	orgWide := &identity.Scope{Clients: all, Sites: all, Teams: all}
+	client1 := &identity.Scope{Clients: identity.ScopeSet{IDs: []string{f.Client1}}, Sites: all, Teams: all}
+	perms := []identity.Permission{identity.PermUserManage, identity.PermLocationRead}
+	clientBound := identity.Principal{Subject: clientAdmin, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser,
+		Scope: client1, Permissions: perms, Credential: "k4-org-fields-" + clientAdmin}
+	clientKey := identity.Principal{Subject: clientAdmin, OrganizationID: f.OrgA, Type: identity.PrincipalTypeAPIKey,
+		ClientScope: f.Client1, Permissions: perms, Credential: "k4-org-fields-key-" + clientAdmin}
+	orgAdmin := identity.Principal{Subject: admin, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser,
+		Scope: orgWide, Permissions: perms, Credential: "k4-org-fields-" + admin}
+	call := func(method, body string, p identity.Principal) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/api/v1/org", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := identity.WithPermissions(identity.WithPrincipal(req.Context(), p), p.Permissions)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req.WithContext(ctx))
+		return w
+	}
+	type orgRow struct{ name, timezone, currency, locale, settings string }
+	row := func() orgRow {
+		t.Helper()
+		var r orgRow
+		if err := f.Admin.QueryRow(bg, `SELECT name, COALESCE(timezone, ''), COALESCE(currency, ''), COALESCE(locale, ''), COALESCE(settings::text, '')
+			FROM organization WHERE id = $1`, f.OrgA).Scan(&r.name, &r.timezone, &r.currency, &r.locale, &r.settings); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	auditCount := func() int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM audit_log WHERE organization_id = $1`, f.OrgA).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	bodies := []string{
+		`{"name":"k4 renamed by a client admin"}`,
+		`{"timezone":"Pacific/Auckland"}`,
+		`{"currency":"JPY"}`,
+		`{"locale":"ja-JP"}`,
+		`{"settings":{"k4_probe":"set by a client admin"}}`,
+	}
+	for who, p := range map[string]identity.Principal{"user bound to client 1": clientBound, "API key bound to client 1": clientKey} {
+		for _, body := range bodies {
+			before, audits := row(), auditCount()
+			w := call(http.MethodPatch, body, p)
+			after := row()
+			if w.Code != http.StatusForbidden || after != before {
+				t.Errorf("PATCH /api/v1/org %s by a holder of user:manage (%s): %d, organization %+v -> %+v; "+
+					"want 403 and the organization unchanged (only an org-wide holder changes organization-level fields)", body, who, w.Code, before, after)
+			}
+			if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/problem+json") {
+				t.Errorf("PATCH /api/v1/org %s (%s): Content-Type %q; want application/problem+json", body, who, ct)
+			}
+			if n := auditCount(); n != audits {
+				t.Errorf("PATCH /api/v1/org %s (%s) wrote %d audit entries; want none", body, who, n-audits)
+			}
+		}
+		// Reading stays open with location:read.
+		if w := call(http.MethodGet, "", p); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"id":"`+f.OrgA+`"`) {
+			t.Errorf("GET /api/v1/org (%s): %d %s; want 200 with the organization", who, w.Code, w.Body.String())
+		}
+	}
+
+	// Positive control: the org_admin changes every field.
+	w := call(http.MethodPatch, `{"name":"k4 renamed by the org admin","timezone":"Pacific/Auckland","currency":"JPY","locale":"ja-jp",`+
+		`"settings":{"k4_probe":"set by the org admin"}}`, orgAdmin)
+	if w.Code != http.StatusOK {
+		t.Fatalf("org_admin PATCH /api/v1/org: %d %s; want 200", w.Code, w.Body.String())
+	}
+	if got := row(); got.name != "k4 renamed by the org admin" || got.timezone != "Pacific/Auckland" || got.currency != "JPY" ||
+		got.locale != "ja-JP" || !strings.Contains(got.settings, "set by the org admin") {
+		t.Errorf("organization after the org_admin PATCH: %+v; want the new name, time zone, currency, locale and settings", got)
+	}
+}

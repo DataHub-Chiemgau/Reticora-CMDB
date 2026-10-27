@@ -867,3 +867,4 @@ UI-16;[B];C;frontend/e2e-real/job-center.spec.ts;WP-521
 NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-531
 UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-531
 TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-531
+RBA-03;[B];B;backend/internal/tenantapi/tenantapi_scope_integration_test.go;WP-633

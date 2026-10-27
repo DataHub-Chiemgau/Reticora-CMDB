@@ -112,10 +112,17 @@ func (h *Handler) GetOrganization(w http.ResponseWriter, r *http.Request) {
 
 // UpdateOrganization handles PATCH /api/v1/org: name, settings, IANA time
 // zone, ISO 4217 currency and BCP 47 locale (canonicalized), and the AI
-// opt-in (AI-02), which only an org-wide holder of user:manage changes.
+// opt-in (AI-02). Every field belongs to the whole organization and is
+// inherited by all its clients, so only an org-wide holder of user:manage
+// changes any of them (RBA-03, F-359); the route authorization accepts any
+// scope of user:manage, so the check is here, before the body is read.
 func (h *Handler) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := orgOrUnauthorized(w, r)
 	if !ok {
+		return
+	}
+	if !holdsOrgWide(r, identity.PermUserManage) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "only a holder of user:manage for the whole organization may change the organization")
 		return
 	}
 	var req UpdateOrganizationRequest
@@ -125,10 +132,6 @@ func (h *Handler) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateOrganization(&req); err != nil {
 		writeFieldError(w, err)
-		return
-	}
-	if req.AIOptIn != nil && !holdsOrgWide(r, identity.PermUserManage) {
-		api.WriteError(w, http.StatusForbidden, "Forbidden", "only a holder of user:manage for the whole organization may change ai_opt_in")
 		return
 	}
 	o, err := h.repo.UpdateOrganization(r.Context(), orgID, req)

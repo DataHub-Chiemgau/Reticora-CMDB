@@ -2910,7 +2910,7 @@ export interface paths {
     head?: never;
     /**
      * Update name, settings, time zone, currency, locale and AI opt-in of the organization
-     * @description The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217 code (EUR) and the locale a BCP 47 tag, stored in canonical form (de-ch → de-CH). Slug and plan are not changed here. An invalid value answers 400 naming the field. ai_opt_in is the organization's consent to external AI processing (AI-02): only a principal holding user:manage for the whole organization changes it (a client-, site- or team-bound holder gets 403); a change writes the audit entry organization.ai_opt_in_changed with the old and the new value in the same transaction.
+     * @description Every field belongs to the whole organization and is inherited by all its clients, so only a principal holding user:manage for the whole organization changes any of them (name, settings, timezone, currency, locale, ai_opt_in; RBA-03). A holder bound to a client, a site or a team, one holding user:manage only in such a scope, a client-bound API key or a request without principal gets 403 and nothing is changed. The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217 code (EUR) and the locale a BCP 47 tag, stored in canonical form (de-ch → de-CH). Slug and plan are not changed here. An invalid value answers 400 naming the field. ai_opt_in is the organization's consent to external AI processing (AI-02); a change writes the audit entry organization.ai_opt_in_changed with the old and the new value in the same transaction.
      */
     patch: operations['updateOrganization'];
     trace?: never;
