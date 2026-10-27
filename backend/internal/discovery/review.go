@@ -242,6 +242,16 @@ func refused(status int, msg string) error {
 	return &reviews.Error{Status: status, Message: msg}
 }
 
+// ciNotFound refuses a resolution whose CI is gone (deleted meanwhile) or
+// not visible with 404, like an unknown item; the item stays open (F-371).
+// Any other error is returned unchanged.
+func ciNotFound(err error) error {
+	if errors.Is(err, ci.ErrNotFound) || isNotFound(err) {
+		return refused(http.StatusNotFound, "the chosen CI was not found")
+	}
+	return err
+}
+
 // resolveCIReview carries out merge, new and accept of the CI review types.
 func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
 	orgID := item.OrganizationID
@@ -264,7 +274,7 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 				return false, refused(http.StatusNotImplemented, "this repository cannot reactivate CIs")
 			}
 			if _, err := restorer.Restore(ctx, orgID, res.CIID); err != nil {
-				return false, err
+				return false, ciNotFound(err)
 			}
 			res.Note = "reactivated " + res.CIID
 		case ReviewKindProbableDuplicate:
@@ -286,7 +296,7 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 			DiscoverySource: &source,
 			LastSeenAt:      &now,
 		}); err != nil {
-			return false, err
+			return false, ciNotFound(err)
 		}
 		if res.Note == "" {
 			res.Note = "merged into " + res.CIID
@@ -327,7 +337,7 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 			return false, refused(http.StatusUnprocessableEntity, "the item reports no value to accept")
 		}
 		if _, err := h.ciRepo.Update(ctx, orgID, ciID, update); err != nil {
-			return false, err
+			return false, ciNotFound(err)
 		}
 		res.Note = "accepted the observed values on " + ciID
 	}

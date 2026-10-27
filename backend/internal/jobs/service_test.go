@@ -1,11 +1,17 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
@@ -516,5 +522,90 @@ func TestQueueHandlerOfACancelledJob(t *testing.T) {
 		if got, _ := s.Get(ctx, "org-1", job.ID); got.Status != StatusCancelled || len(got.Result) != 0 || got.Error != "" || got.Attempts != 1 {
 			t.Errorf("failing %v: job %+v, want cancelled after one attempt without result or error", fail, got)
 		}
+	}
+}
+
+// publicRefusal is a refusal of a domain (as reviews.Error).
+type publicRefusal struct{ msg string }
+
+func (e *publicRefusal) Error() string         { return "refusal: " + e.msg }
+func (e *publicRefusal) PublicMessage() string { return e.msg }
+
+// messageTracker is a Tracker without MirrorFailure: it keeps the error
+// message Mirror receives.
+type messageTracker struct{ msg string }
+
+func (m *messageTracker) Track(context.Context, string, string, string, string, string) error {
+	return nil
+}
+func (m *messageTracker) Mirror(_ context.Context, _, _, _ string, _ Status, errMsg string) error {
+	m.msg = errMsg
+	return nil
+}
+
+// TestErrorMessageSanitizesJobErrors covers WP-643 (F-372, API-03): the
+// error of a failed job keeps the message of a refusal of a domain, of a
+// validation error and of a sentinel the caller names public; a database,
+// driver or unknown error becomes FailedMessage. MirrorFailed stores that
+// message in the mirrored job and logs the raw error with the id of the job.
+func TestErrorMessageSanitizesJobErrors(t *testing.T) {
+	errTaken := errors.New("the CI is part of another merge")
+	pgErr := &pgconn.PgError{Severity: "ERROR", Code: "22P02", Message: `invalid input syntax for type inet: "10.55.4.317"`}
+	for _, tc := range []struct {
+		name  string
+		cause error
+		want  string
+	}{
+		{"nil", nil, ""},
+		{"database error", fmt.Errorf("update ci: %w", pgErr), FailedMessage},
+		{"driver error", fmt.Errorf("export query: %w", &pgconn.ConnectError{}), FailedMessage},
+		{"unknown error", errors.New("store export object: dial tcp 10.0.0.5:9000: connection refused"), FailedMessage},
+		{"refusal of a domain", &publicRefusal{msg: "the chosen CI was not found"}, "the chosen CI was not found"},
+		{"wrapped refusal", fmt.Errorf("resolve: %w", &publicRefusal{msg: "ci_id is required to merge"}), "ci_id is required to merge"},
+		{"field error", &api.FieldError{Field: "ci_type_id", Message: "is unknown"}, "ci_type_id: is unknown"},
+		{"conflict error", &api.ConflictError{Field: "name", Message: "is taken"}, "name: is taken"},
+		{"public sentinel", fmt.Errorf("merge: %w", errTaken), errTaken.Error()},
+	} {
+		if got := ErrorMessage(tc.cause, errTaken); got != tc.want {
+			t.Errorf("%s: ErrorMessage(%v) = %q, want %q", tc.name, tc.cause, got, tc.want)
+		}
+	}
+	if got := ErrorMessage(errTaken); got != FailedMessage {
+		t.Errorf("sentinel not named public: %q, want %q", got, FailedMessage)
+	}
+
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prev)
+
+	s, _ := newService()
+	ctx := context.Background()
+	if err := s.Track(ctx, "org-1", "review.merge", "review_item", "item-9", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Mirror(ctx, "org-1", "review_item", "item-9", StatusRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := MirrorFailed(ctx, s, "org-1", "review_item", "item-9", fmt.Errorf("update ci: %w", pgErr)); err != nil {
+		t.Fatal(err)
+	}
+	job, err := s.repo.GetByRef(ctx, "org-1", "review_item", "item-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != StatusFailed || job.Error != FailedMessage {
+		t.Errorf("job failed through MirrorFailed: status %q error %q, want failed with %q", job.Status, job.Error, FailedMessage)
+	}
+	if out := logs.String(); !strings.Contains(out, "job="+job.ID) || !strings.Contains(out, "SQLSTATE 22P02") {
+		t.Errorf("log of the failed job: %q, want the job id %s and the raw error", out, job.ID)
+	}
+
+	plain := &messageTracker{}
+	if err := MirrorFailed(ctx, plain, "org-1", "export_job", "exp-1", fmt.Errorf("render: %w", pgErr)); err != nil {
+		t.Fatal(err)
+	}
+	if plain.msg != FailedMessage {
+		t.Errorf("tracker without MirrorFailure received %q, want %q", plain.msg, FailedMessage)
 	}
 }

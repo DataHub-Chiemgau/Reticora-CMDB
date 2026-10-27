@@ -131,7 +131,9 @@ func (s *Service) MergeAs(ctx context.Context, orgID, survivorID, victimID, merg
 	_ = s.jobs.Mirror(ctx, orgID, "ci_merge", mergeID, jobs.StatusRunning, "")
 	result, err := merger.Merge(ctx, orgID, survivorID, victimID, mergeID)
 	if err != nil {
-		_ = s.jobs.Mirror(ctx, orgID, "ci_merge", mergeID, jobs.StatusFailed, err.Error())
+		// The refusals of the merge keep their text, any other error is
+		// sanitized and logged (F-372).
+		_ = jobs.MirrorFailed(ctx, s.jobs, orgID, "ci_merge", mergeID, err, ErrMergeConflict, ErrNotFound)
 		return nil, err
 	}
 	_ = s.jobs.Mirror(ctx, orgID, "ci_merge", mergeID, jobs.StatusSucceeded, "")

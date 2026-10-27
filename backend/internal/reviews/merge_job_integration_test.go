@@ -26,7 +26,8 @@ import (
 // TestLongOperationsRunAsJobsAgainstPostgres covers JOB-04 (WP-183)
 // against PostgreSQL: resolving a review item by merge is a job of kind
 // review.merge with the item as reference (succeeded, or failed with the
-// error of the effect); a state snapshot is a job of kind history.snapshot
+// refusal of the effect; any other error of the effect becomes the fixed
+// jobs.FailedMessage, WP-643, F-372); a state snapshot is a job of kind history.snapshot
 // whose result is the replayed state with the fields of the change trail.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
@@ -39,7 +40,7 @@ func TestLongOperationsRunAsJobsAgainstPostgres(t *testing.T) {
 	svc := reviews.NewService(reviews.NewPGRepository(f.App)).WithJobs(jobSvc).
 		WithEffect(reviews.KindProbableDuplicate, func(context.Context, *reviews.Item, *reviews.Resolution) (bool, error) {
 			if fail {
-				return false, errors.New("the candidate is gone")
+				return false, &reviews.Error{Status: http.StatusNotFound, Message: "the candidate is gone"}
 			}
 			return false, nil
 		})
@@ -132,7 +133,8 @@ func TestLongOperationsRunAsJobsAgainstPostgres(t *testing.T) {
 
 // TestReviewMergeRetryJobStatus covers WP-554 (JOB-04, F-330, E-89) against
 // PostgreSQL, the binding retest of F-330: a merge whose effect fails leaves
-// the item open and its review.merge job failed with the error; the retry
+// the item open and its review.merge job failed with the error (sanitized
+// to jobs.FailedMessage, WP-643); the retry
 // that succeeds resolves the item and ends the same job succeeded with
 // attempts=2 and without the error; there is one job per item and kind. The
 // merge of a probable_duplicate item is the CI-12 merge of the discovery
@@ -196,7 +198,7 @@ func TestReviewMergeRetryJobStatus(t *testing.T) {
 			t.Fatal("the merge with a failing effect resolved")
 		}
 		got := jobOf(reviews.MergeJobKind, "review_item", item.ID)
-		if len(got) != 1 || got[0].Status != jobs.StatusFailed || got[0].Error != "transient failure" || got[0].Attempts != 1 {
+		if len(got) != 1 || got[0].Status != jobs.StatusFailed || got[0].Error != jobs.FailedMessage || got[0].Attempts != 1 {
 			t.Fatalf("job of the failed merge: %+v, want one failed job with the error and attempts 1", got)
 		}
 		if s := status(item.ID); s != reviews.StatusOpen {

@@ -218,12 +218,20 @@ func (w *JobWorker) process(ctx context.Context, job Job) {
 	}
 }
 
+// fail ends an export with err: the export job and its mirrored job carry
+// the sanitized message of jobs.ErrorMessage, the raw error is logged with
+// the job (report, F-372).
 func (w *JobWorker) fail(ctx context.Context, job *Job, err error) {
 	w.report(job.ID, err)
-	if ferr := w.Jobs.FailJob(ctx, job.OrganizationID, job.ID, err.Error(), w.Now()); ferr != nil {
+	if ferr := w.Jobs.FailJob(ctx, job.OrganizationID, job.ID, jobs.ErrorMessage(err), w.Now()); ferr != nil {
 		w.report(job.ID, fmt.Errorf("mark export job failed: %w", ferr))
 	}
-	w.mirror(ctx, job, jobs.StatusFailed, err.Error())
+	if w.Tracker == nil {
+		return
+	}
+	if merr := jobs.MirrorFailed(ctx, w.Tracker, job.OrganizationID, "export_job", job.ID, err); merr != nil {
+		slog.Warn("mirror export job", "job", job.ID, "error", merr)
+	}
 }
 
 // ResumeStale queues the jobs again whose replica died while they ran

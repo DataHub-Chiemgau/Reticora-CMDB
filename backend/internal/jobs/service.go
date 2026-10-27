@@ -512,18 +512,37 @@ func (s *Service) Track(ctx context.Context, orgID, kind, refTable, refID, creat
 // running counts the attempt and clears the error of the failed one
 // (mirrorRetry).
 func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, status Status, errMsg string) error {
+	_, err := s.mirror(ctx, orgID, refTable, refID, status, errMsg)
+	return err
+}
+
+// MirrorFailure implements FailureTracker: the job mirroring the row
+// refTable/refID fails with the error ErrorMessage makes of cause; the raw
+// cause is logged with the id of the job.
+func (s *Service) MirrorFailure(ctx context.Context, orgID, refTable, refID string, cause error, public ...error) error {
+	job, err := s.mirror(ctx, orgID, refTable, refID, StatusFailed, ErrorMessage(cause, public...))
+	jobID := ""
+	if job != nil {
+		jobID = job.ID
+	}
+	logFailure(ctx, jobID, refTable, refID, cause)
+	return err
+}
+
+// mirror is Mirror; it returns the job it found for the row, if any.
+func (s *Service) mirror(ctx context.Context, orgID, refTable, refID string, status Status, errMsg string) (*Job, error) {
 	job, err := s.repo.GetByRef(ctx, orgID, refTable, refID)
 	if errors.Is(err, ErrNotFound) {
 		if terr := s.Track(ctx, orgID, refTable, refTable, refID, ""); terr != nil {
-			return terr
+			return nil, terr
 		}
 		job, err = s.repo.GetByRef(ctx, orgID, refTable, refID)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if job.Status == status {
-		return nil
+		return job, nil
 	}
 	now := s.now()
 	u := &Update{Status: status}
@@ -551,11 +570,11 @@ func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, sta
 		u.Error = &errMsg
 	}
 	if !retry && !CanTransition(job.Status, status) && (job.Status != StatusQueued || !status.Terminal()) {
-		return nil
+		return job, nil
 	}
 	moved, err := s.repo.Transition(ctx, orgID, job.ID, from, u)
 	if errors.Is(err, ErrTransition) {
-		return nil
+		return job, nil
 	}
 	if err == nil {
 		if status == StatusFailed {
@@ -563,7 +582,75 @@ func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, sta
 		}
 		observeEnd(moved)
 	}
-	return err
+	return job, err
+}
+
+// FailedMessage is the error of a job that failed for a reason its readers
+// must not see: a database, driver or unknown error (API-03, F-372).
+const FailedMessage = "the job could not be completed"
+
+// PublicError is a refusal of a domain whose message names no internals
+// (reviews.Error, ci.ValidationError): a failed job keeps it as its error.
+type PublicError interface {
+	error
+	PublicMessage() string
+}
+
+// ErrorMessage makes the error field of a failed job from its cause: the
+// field is an API output every holder of job:read reads (GET /api/v1/jobs),
+// so only a refusal of a domain (PublicError), a validation error of a
+// request field (api.FieldError, api.ConflictError) or one of the sentinel
+// errors in public keeps its message; a database, driver or unknown error
+// becomes FailedMessage (API-03, F-372). The caller logs the raw cause with
+// the job (MirrorFailed, logFailure).
+func ErrorMessage(cause error, public ...error) string {
+	if cause == nil {
+		return ""
+	}
+	var pe PublicError
+	if errors.As(cause, &pe) {
+		return pe.PublicMessage()
+	}
+	var fe *api.FieldError
+	if errors.As(cause, &fe) {
+		return fe.Error()
+	}
+	var ce *api.ConflictError
+	if errors.As(cause, &ce) {
+		return ce.Error()
+	}
+	for _, p := range public {
+		if p != nil && errors.Is(cause, p) {
+			return p.Error()
+		}
+	}
+	return FailedMessage
+}
+
+// FailureTracker is the optional part of a Tracker that fails a mirrored
+// job from the error of its row (ErrorMessage) and logs the raw error with
+// the id of the job.
+type FailureTracker interface {
+	MirrorFailure(ctx context.Context, orgID, refTable, refID string, cause error, public ...error) error
+}
+
+// MirrorFailed fails the job mirroring the row refTable/refID through t with
+// the error ErrorMessage makes of cause (sentinels in public keep their
+// text); the raw cause goes to the log only. Mirrored jobs of review
+// merges, CI merges and exports fail through it (F-372).
+func MirrorFailed(ctx context.Context, t Tracker, orgID, refTable, refID string, cause error, public ...error) error {
+	if ft, ok := t.(FailureTracker); ok {
+		return ft.MirrorFailure(ctx, orgID, refTable, refID, cause, public...)
+	}
+	logFailure(ctx, "", refTable, refID, cause)
+	return t.Mirror(ctx, orgID, refTable, refID, StatusFailed, ErrorMessage(cause, public...))
+}
+
+// logFailure logs the raw cause of a failed job, which its error field does
+// not carry (ErrorMessage).
+func logFailure(ctx context.Context, jobID, refTable, refID string, cause error) {
+	slog.WarnContext(ctx, "job failed", "job", jobID, "ref_table", refTable,
+		"ref_id", refID, "error", cause)
 }
 
 // mirrorRetry reports whether Mirror starts a new attempt of a failed job:
