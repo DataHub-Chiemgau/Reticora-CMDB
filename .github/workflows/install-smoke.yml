@@ -50,6 +50,8 @@ on:
       - 'collector/**'
       - 'edgecore/**'
       - 'tests/audit/**'
+      # WP-546: the collector self-update with two builds (COL-06).
+      - 'tests/collector-selfupdate.test.sh'
       # WP-387: the installers verify what the release workflow publishes.
       - '.github/workflows/release.yml'
   pull_request:
@@ -87,6 +89,8 @@ on:
       - 'collector/**'
       - 'edgecore/**'
       - 'tests/audit/**'
+      # WP-546: the collector self-update with two builds (COL-06).
+      - 'tests/collector-selfupdate.test.sh'
       # WP-387: the installers verify what the release workflow publishes.
       - '.github/workflows/release.yml'
   # Manual runs (e.g. the G1 evidence for GATE-03) are not path filtered.
@@ -179,6 +183,20 @@ jobs:
       # above: RETICORA_TEST_COSIGN), without it nothing.
       - name: install-vm.sh cosign for the signed auto-updates (COL-06)
         run: ./tests/install-vm-cosign.test.sh
+
+      # COL-06 (WP-546, open evidence of WP-148): the self-update of the
+      # running collector with two builds (v0.0.1, v0.0.2), manifests and
+      # artifacts on a local HTTP server and a cosign stub that accepts only
+      # the fixture bundle: update and new version reported, wrong or missing
+      # signature, beta release on the channel stable, rollback after failed
+      # starts. The real cosign check runs in the ci.yml job cosign-verify.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: collector/go.sum
+
+      - name: Collector self-update with two versions (COL-06)
+        run: ./tests/collector-selfupdate.test.sh
 
   # INS-01/TEC-09/GATE-03 (WP-092): the cloud installer on every platform of
   # CH22. Ubuntu runs natively on the GitHub runners; Debian 12 runs the
