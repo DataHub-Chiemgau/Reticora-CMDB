@@ -14996,6 +14996,8 @@ TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_t
 - [ ] Bestehende Tests, die `EnsureRole` bei jedem Login voraussetzen (`identity`, `user`, MFA-Tests von WP-367), sind umgeschrieben (Konvention 13), nicht abgeschwächt.
 - [ ] Retest F-364: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditCallbackWithoutAssignmentIssuesNoSession|TestCallback' ./internal/identity/` → PASS.
 
+**Anmerkung 2026-10-27 (WP-637):** Die `EnsureRole`-Tests lagen in `user/role_assignment_mfa_test.go` und `user/user_scope_integration_test.go` und sind dort umgeschrieben; eine `pg_repository_integration_test.go` gibt es nicht. Umgesetzt ist die 403-Variante (problem+json, Audit-Eintrag `user.login_refused`), nicht die Umleitung. Eine angenommene Einladung erhält nur die eingeladene Rolle; IdP-Gruppenrollen zählen als Rolle.
+
 **Dateien (8 Einträge):**
 
 - backend/internal/identity/handler.go
