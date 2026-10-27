@@ -894,3 +894,7 @@ EVT-01;[B];B;backend/internal/events/emit_tx_integration_test.go;WP-550
 TEC-12;[P5];B;backend/internal/search/opensearch_real_integration_test.go;WP-534
 TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/stack-smoke.spec.ts;WP-532
 TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_test.go;WP-533
+TEN-04;[B];B;frontend/e2e-real/client-scope.spec.ts;WP-535
+TEN-06;[B];B;frontend/e2e-real/client-scope.spec.ts;WP-535
+EXP-01;[B], DATEV [P2];B;frontend/e2e-real/client-scope.spec.ts;WP-535
+TEN-09;[Q];B;frontend/e2e-real/client-scope.spec.ts;WP-535

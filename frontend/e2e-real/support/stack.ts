@@ -105,6 +105,111 @@ export async function expectModuleServed(request: APIRequestContext, token: stri
   ).toBe(true);
 }
 
+/** A user of a tenant holding exactly one role assignment in a client or site scope. */
+export interface ScopedUser {
+  email: string;
+  password: string;
+  userId: string;
+  /** The assignment made with POST /role-assignments. */
+  assignmentId: string;
+}
+
+/**
+ * scopedUser creates a Keycloak user of the administrator's organization holding exactly
+ * one standard role (`role`, e.g. client_technician or viewer) in the scope of one client
+ * or site (WP-535). An invitation carries a standard role, so the user is invited as
+ * viewer of the client `inviteClientId` and accepts it through the API (the server
+ * creates the Keycloak user); the role is then assigned with POST /api/v1/role-assignments
+ * {user_id, role_id, scope_type, scope_id} and the viewer assignment of the invitation is
+ * deleted. GET /role-assignments afterwards lists exactly the new assignment. Every call
+ * goes through the API with the administrator's token; a refused call fails the setup.
+ */
+export async function scopedUser(
+  request: APIRequestContext,
+  adminToken: string,
+  opts: {
+    label: string;
+    role: string;
+    scope_type: 'client' | 'site';
+    scope_id: string;
+    inviteClientId: string;
+  },
+): Promise<ScopedUser> {
+  const call = async <T>(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    data?: unknown,
+  ): Promise<T> => {
+    const res = await api<T>(request, adminToken, method, path, data);
+    expect(res.status, `${method} ${path}: ${JSON.stringify(res.body)}`).toBeGreaterThanOrEqual(
+      200,
+    );
+    expect(res.status, `${method} ${path}: ${JSON.stringify(res.body)}`).toBeLessThan(300);
+    return res.body;
+  };
+  type Assignment = { id: string; role_id?: string; scope_type: string; scope_id?: string };
+  const roles = await call<{ data: { id: string; name: string }[] | null }>(
+    'GET',
+    '/roles?limit=100',
+  );
+  const roleId = (name: string) => {
+    const id = (roles.data ?? []).find((r) => r.name === name)?.id ?? '';
+    expect(id, `system role ${name} (RBA-02)`).not.toBe('');
+    return id;
+  };
+  const viewer = roleId('viewer');
+  const target = roleId(opts.role);
+  // The assignment of the invitation must differ from the target one, or deleting it
+  // would delete the target assignment (the server returns an existing assignment).
+  expect(
+    target === viewer && opts.scope_type === 'client' && opts.scope_id === opts.inviteClientId,
+    'target assignment differs from the viewer assignment of the invitation',
+  ).toBe(false);
+
+  const s = stamp();
+  const email = `${opts.label}-${s}@audit-e2e.de`;
+  const password = `Audit-${opts.label}-${s}!aA`;
+  const invitation = await call<{ token?: string }>('POST', '/invitations', {
+    email,
+    role_id: viewer,
+    scope_type: 'client',
+    scope_id: opts.inviteClientId,
+  });
+  expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+  const accept = await request.post(`${BASE}/api/v1/invitations/accept`, {
+    data: { token: invitation.token, password, display_name: `Audit ${opts.label}` },
+    failOnStatusCode: false,
+  });
+  expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);
+  const userId = ((await accept.json()) as { user_id?: string }).user_id ?? '';
+  expect(userId, 'the accepted user').not.toBe('');
+
+  const assigned = await call<Assignment>('POST', '/role-assignments', {
+    user_id: userId,
+    role_id: target,
+    scope_type: opts.scope_type,
+    scope_id: opts.scope_id,
+  });
+  const listed = async () =>
+    (await call<{ data: Assignment[] | null }>('GET', `/role-assignments?user_id=${userId}`))
+      .data ?? [];
+  const invited = (await listed()).filter(
+    (a) => a.role_id === viewer && a.scope_type === 'client' && a.scope_id === opts.inviteClientId,
+  );
+  expect(invited, 'the viewer assignment of the invitation').toHaveLength(1);
+  await call('DELETE', `/role-assignments/${invited[0]!.id}`);
+  const left = (await listed()).map((a) => ({
+    id: a.id,
+    role_id: a.role_id,
+    scope_type: a.scope_type,
+    scope_id: a.scope_id,
+  }));
+  expect(left, `the only assignment of ${email}`).toEqual([
+    { id: assigned.id, role_id: target, scope_type: opts.scope_type, scope_id: opts.scope_id },
+  ]);
+  return { email, password, userId, assignmentId: assigned.id };
+}
+
 /**
  * keycloakLogin fills the Keycloak form, completes the second factor of an
  * account holding mfa_required (OTP setup at the first login, the code at

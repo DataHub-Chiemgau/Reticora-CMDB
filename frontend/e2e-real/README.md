@@ -31,6 +31,20 @@ overlay `e2e/fixtures/docker-compose.e2e.yml` sets it to `${E2E_BASE_URL:-http:/
 Issue and renewal mail the link to the invitee over the tenant's e-mail channel (`roles-authz.spec.ts` test 05 reads it
 from the mail catcher).
 
+## Client- and site-scoped users (`client-scope.spec.ts`, WP-535)
+
+`tenant-isolation.spec.ts` and `roles-authz.spec.ts` sign in organization-wide principals. `client-scope.spec.ts`
+signs in users whose only role assignment lies in one client or one site. `scopedUser` in `support/stack.ts` creates
+such a user through the API: an invitation as viewer of a client (an invitation carries a standard role, RBA-02),
+the acceptance (the server creates the Keycloak user), the role assignment with `POST /api/v1/role-assignments`
+`{user_id, role_id, scope_type: client|site, scope_id}` and the deletion of the viewer assignment of the invitation;
+`GET /role-assignments` must then list exactly the new assignment. The spec signs in a client_technician of client C1
+(CS01–CS03: CMDB list, CI URL, search and topology of the other client C2, the relationship form with the id of the C2
+CI, an export and the job center of a client_technician of C2) and a viewer of site S1 (CS04: location tree, racks
+page and `GET /racks/{id}`, `/layout` of the rack of site S2). Database probes (`dbRows` of
+`support/locations-racks.ts`, `E2E_DATABASE_URL`) show that the hidden rows exist and that no edge was stored. It runs
+in the G1 run of `install-smoke.yml` like every spec without a module.
+
 ## Real collector and SNMP fake (`onboarding-bundle.spec.ts`, WP-384)
 
 `discovery-override.spec.ts` runs the collector with the simulated fleet (`RETICORA_SIMULATE=true`).
