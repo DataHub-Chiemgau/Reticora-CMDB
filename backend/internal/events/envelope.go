@@ -33,10 +33,12 @@ func (e *Envelope) Subject() string {
 const (
 	StreamName    = "RETICORA_EVENTS"
 	SubjectPrefix = "events."
-	// StreamMaxAge and StreamMaxBytes are the retention of the stream
-	// (30 days, 10 GB; NFR-06).
-	StreamMaxAge   = 30 * 24 * time.Hour
-	StreamMaxBytes = 10 << 30
+	// StreamMaxAge and StreamMaxBytes are the default retention of the
+	// stream (30 days, 10 GB; NFR-06); RETICORA_EVENTS_MAX_AGE and
+	// RETICORA_EVENTS_MAX_BYTES set it per installation (Publisher.MaxAge,
+	// Publisher.MaxBytes).
+	StreamMaxAge         = 30 * 24 * time.Hour
+	StreamMaxBytes int64 = 10 << 30
 )
 
 // Event types of EVT-02, and those NTF-05 notifies of besides.

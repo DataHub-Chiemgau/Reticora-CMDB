@@ -120,6 +120,9 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		// Subscribed events become notifications (NTF-05).
 		publisher := events.NewPublisher(d.pool, d.eventStream, d.dispatcher,
 			notify.NewEventConsumer(notify.NewPGResolver(d.pool, permission.NewPGRepository(d.pool)), d.notifier))
+		// The stream retention of the installation (EVT-01, NFR-06); the
+		// outbox keeps published event data as long.
+		publisher.MaxAge, publisher.MaxBytes = d.cfg.EventsMaxAge, d.cfg.EventsMaxBytes
 		setupCtx, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
 		err := publisher.Setup(setupCtx)
 		cancelSetup()

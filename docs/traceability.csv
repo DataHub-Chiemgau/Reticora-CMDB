@@ -882,3 +882,5 @@ COL-06;[B], Air-Gapped [O];A;edgecore/update/cosign_real_test.go;WP-545
 NFR-04;[B], Teilumfang [P5];D;backend/internal/maintenance/status_test.go;WP-540
 MGT-04;[P3];D;backend/internal/maintenance/status_test.go;WP-540
 NTF-05;[B], Zusätze [P2], [P3];D;frontend/src/pages/MaintenancePage.test.tsx;WP-540
+NFR-06;[B];B;backend/internal/jobs/retention_integration_test.go;WP-548
+EVT-01;[B];B;backend/internal/config/config_test.go;WP-548

@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadDefaults(t *testing.T) {
@@ -37,7 +38,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range append(append([]string{
 		"RETICORA_ENVIRONMENT", "RETICORA_RATE_LIMIT_RPM", "RETICORA_RATE_LIMIT_ORG_RPM", "RETICORA_METRICS_TENANT_LABEL", "RETICORA_NATS_URL",
-		"RETICORA_INGEST_LANES", "RETICORA_INVITATION_ACCEPT_URL",
+		"RETICORA_INGEST_LANES", "RETICORA_INVITATION_ACCEPT_URL", "RETICORA_EVENTS_MAX_AGE", "RETICORA_EVENTS_MAX_BYTES",
 	}, requiredOutsideDevelopment...), s3Keys...) {
 		t.Setenv(key, "")
 	}
@@ -207,6 +208,61 @@ func TestIngestLanesSetting(t *testing.T) {
 		if cfg := Load(); cfg.Validate(true) != nil || cfg.IngestLanes != map[string]int{"1": 1, "16": 16}[v] {
 			t.Errorf("RETICORA_INGEST_LANES=%s: %d, %v", v, cfg.IngestLanes, cfg.Validate(true))
 		}
+	}
+}
+
+// TestEventsStreamRetentionSetting covers WP-548 (EVT-01, NFR-06, F-321):
+// RETICORA_EVENTS_MAX_AGE (Go duration or whole days) and
+// RETICORA_EVENTS_MAX_BYTES configure the retention of the stream
+// RETICORA_EVENTS, by default 30 days and 10 GB. An age below 30 days, a
+// size that is not positive and unparsable values fail the start check.
+func TestEventsStreamRetentionSetting(t *testing.T) {
+	clearEnv(t)
+	cfg := Load()
+	if cfg.EventsMaxAge != 30*24*time.Hour || cfg.EventsMaxBytes != 10<<30 || cfg.Validate(true) != nil {
+		t.Fatalf("defaults: %v, %d bytes, %v; want 30 days and 10 GB", cfg.EventsMaxAge, cfg.EventsMaxBytes, cfg.Validate(true))
+	}
+	for _, c := range []struct {
+		age, bytes string
+		wantAge    time.Duration
+		wantBytes  int64
+	}{
+		{"30d", "", 30 * 24 * time.Hour, 10 << 30},
+		{"720h", "1073741824", 30 * 24 * time.Hour, 1 << 30},
+		{"90d", "53687091200", 90 * 24 * time.Hour, 50 << 30},
+		{"2160h30m", "1", 2160*time.Hour + 30*time.Minute, 1},
+	} {
+		t.Setenv("RETICORA_EVENTS_MAX_AGE", c.age)
+		t.Setenv("RETICORA_EVENTS_MAX_BYTES", c.bytes)
+		cfg := Load()
+		if err := cfg.Validate(true); err != nil || cfg.EventsMaxAge != c.wantAge || cfg.EventsMaxBytes != c.wantBytes {
+			t.Errorf("RETICORA_EVENTS_MAX_AGE=%q RETICORA_EVENTS_MAX_BYTES=%q: %v, %d, %v; want %v, %d",
+				c.age, c.bytes, cfg.EventsMaxAge, cfg.EventsMaxBytes, err, c.wantAge, c.wantBytes)
+		}
+	}
+	for _, c := range []struct{ age, bytes, want string }{
+		{"29d", "", "RETICORA_EVENTS_MAX_AGE must be at least 30d (NFR-06)"},
+		{"719h59m", "", "RETICORA_EVENTS_MAX_AGE must be at least 30d (NFR-06)"},
+		{"0", "", "RETICORA_EVENTS_MAX_AGE must be at least 30d (NFR-06)"},
+		{"-720h", "", "RETICORA_EVENTS_MAX_AGE must be at least 30d (NFR-06)"},
+		{"thirty days", "", "RETICORA_EVENTS_MAX_AGE has an invalid value"},
+		{"-30d", "", "RETICORA_EVENTS_MAX_AGE has an invalid value"},
+		{"", "0", "RETICORA_EVENTS_MAX_BYTES must be positive"},
+		{"", "-1", "RETICORA_EVENTS_MAX_BYTES must be positive"},
+		{"", "10GB", "RETICORA_EVENTS_MAX_BYTES has an invalid value"},
+	} {
+		t.Setenv("RETICORA_EVENTS_MAX_AGE", c.age)
+		t.Setenv("RETICORA_EVENTS_MAX_BYTES", c.bytes)
+		if err := Load().Validate(true); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("RETICORA_EVENTS_MAX_AGE=%q RETICORA_EVENTS_MAX_BYTES=%q: %v, want an error containing %q", c.age, c.bytes, err, c.want)
+		}
+	}
+	// The start check is the same outside development.
+	setAll(t, productionEnv)
+	t.Setenv("RETICORA_EVENTS_MAX_AGE", "7d")
+	t.Setenv("RETICORA_EVENTS_MAX_BYTES", "")
+	if err := Load().Validate(false); err == nil || !strings.Contains(err.Error(), "RETICORA_EVENTS_MAX_AGE must be at least 30d") {
+		t.Errorf("production with 7 days: %v", err)
 	}
 }
 

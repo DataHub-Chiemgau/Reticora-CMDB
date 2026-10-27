@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
@@ -176,5 +177,84 @@ func TestRetentionRunsAgainstPostgres(t *testing.T) {
 	}
 	if result, err := audit.Verify(bg, f.App, f.OrgA); err != nil || !result.Intact {
 		t.Errorf("chain after all runs: %+v %v", result, err)
+	}
+}
+
+// TestRetentionDeletesOldLocationChanges covers NFR-06 for the location
+// history (WP-548, open evidence of WP-135): retention.history deletes the
+// location_change rows older than RETICORA_RETENTION_HISTORY_DAYS (here
+// 1200 days instead of the default 1095, so the setting is what decides),
+// younger rows stay, and organization B, which has no expired row, keeps
+// all of its rows and gets no retention entry.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRetentionDeletesOldLocationChanges(t *testing.T) {
+	f := scopetest.Seed(t, "97")
+	bg := context.Background()
+	now := time.Now().UTC()
+	day := 24 * time.Hour
+
+	t.Setenv("RETICORA_RETENTION_HISTORY_DAYS", "1200")
+	cfg := config.Load()
+	if err := cfg.Validate(true); err != nil || cfg.RetentionHistoryDays != 1200 {
+		t.Fatalf("configured history retention: %d, %v", cfg.RetentionHistoryDays, err)
+	}
+	r := jobs.NewRetention(f.App, jobs.RetentionFromDays(cfg.RetentionAuditYears, cfg.RetentionHistoryDays,
+		cfg.RetentionSoftDeleteDays, cfg.RetentionReviewItemDays))
+
+	// insert writes a move of a location of org that happened age ago and
+	// returns the row id.
+	insert := func(org string, age time.Duration) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO location_change (organization_id, client_id, site_id, location_id, location_name,
+			old_path, new_path, changed_at) VALUES ($1, $2, $3, $4, 'Rack room', 'site.a', 'site.b', $5) RETURNING id::text`,
+			org, f.ID(), f.ID(), f.ID(), now.Add(-age)).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	expired := insert(f.OrgA, 1300*day)
+	keptByTheSetting := insert(f.OrgA, 1150*day) // expired with the default 1095 days
+	youngA := insert(f.OrgA, 10*day)
+	oldB := insert(f.OrgB, 1150*day)
+	youngB := insert(f.OrgB, 10*day)
+
+	if err := r.RunHistory(bg); err != nil {
+		t.Fatal(err)
+	}
+	left := func(org string) []string {
+		t.Helper()
+		var ids []string
+		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(array_agg(id::text ORDER BY changed_at), '{}') FROM location_change
+			WHERE organization_id = $1`, org).Scan(&ids); err != nil {
+			t.Fatal(err)
+		}
+		return ids
+	}
+	if got := left(f.OrgA); len(got) != 2 || got[0] != keptByTheSetting || got[1] != youngA {
+		t.Errorf("location_change of A after the run: %v, want %s and %s (deleted: %s)", got, keptByTheSetting, youngA, expired)
+	}
+	if got := left(f.OrgB); len(got) != 2 || got[0] != oldB || got[1] != youngB {
+		t.Errorf("location_change of B after the run: %v, want both rows %s and %s", got, oldB, youngB)
+	}
+	retentionEntries := func(org string) []map[string]any {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT changes FROM audit_log WHERE organization_id = $1 AND action = $2 ORDER BY seq`,
+			org, jobs.RetentionHistory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := pgx.CollectRows(rows, pgx.RowTo[map[string]any])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if got := retentionEntries(f.OrgA); len(got) != 1 || got[0]["deleted"] != float64(1) {
+		t.Errorf("retention.history entries of A: %v, want one with deleted 1", got)
+	}
+	if got := retentionEntries(f.OrgB); len(got) != 0 {
+		t.Errorf("retention.history entries of B: %v, want none", got)
 	}
 }

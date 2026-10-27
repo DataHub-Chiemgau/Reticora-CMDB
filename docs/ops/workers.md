@@ -41,7 +41,7 @@ stop a single worker during an incident, without touching the API.
 | `monitoring` | `RETICORA_WORKER_MONITORING_ENABLED` | Evaluates the alert rules every minute (MON-04). Part of the module `alerting`: it starts only with `RETICORA_MODULES` naming `alerting` (or `all`), otherwise the server logs `worker disabled` for it. It does not compute `ci.health`; that is the worker `health`. |
 | `health` | `RETICORA_WORKER_HEALTH_ENABLED` | Recomputes `ci.health` of every CI every minute (DB-05, MON-02): per organization, in its tenant transaction, the database function `ci_refresh_health` sets `critical` or `warning` when the latest sample of a metric breaches an enabled alert rule of that severity, `ok` for samples of the last 15 minutes without a breach and `unknown` without such a sample. It belongs to no late module and runs in the G1 default configuration (`RETICORA_MODULES` empty); with the module `alerting` the refresh still runs once per cycle, here and not in `monitoring` (F-087). Run it on one or more instances; a refresh is idempotent. Needs the database. |
 | `scheduler` | `RETICORA_WORKER_SCHEDULER_ENABLED` | Runs the system jobs on their cron schedules (JOB-02). Every replica runs a scheduler; one leads through a PostgreSQL advisory lock, each job kind also runs under a lock of its own, so scaling (HPA) never runs a job twice. When the leader stops or loses its database session, another replica takes over and catches up on missed slots, at most `MaxCatchUp` per kind (state in `scheduler_run`). Registered: `reservation.expire` (every minute) releases expired reservations; the retention runs (nightly, see below); the notice runs `entitlement.notices` and `certificate.notices` (daily, see below); `audit.route_intents` (every minute, see below); `discovery.jobs.reap` (every minute) fails ad-hoc discovery jobs that their collector neither took nor finished within one hour of creation or start with cause `timeout`; `jobs.reap` (every minute, see "Job queue and timeout reaper"); `notify.digest` (every minute, see "Notification digests"). |
-| `events` | `RETICORA_WORKER_EVENTS_ENABLED` | Publishes the domain events of the transactional outbox (`event_outbox`) in sequence order per organization to the NATS stream `RETICORA_EVENTS` (`events.<org_id>.<type>`, 30 days / 10 GB) and to the webhook subscriptions; one instance per organization at a time (EVT-01, EVT-02). Without NATS the webhooks still receive the events. |
+| `events` | `RETICORA_WORKER_EVENTS_ENABLED` | Publishes the domain events of the transactional outbox (`event_outbox`) in sequence order per organization to the NATS stream `RETICORA_EVENTS` (`events.<org_id>.<type>`, by default 30 days / 10 GB, see [Event stream retention](#event-stream-retention-evt-01-nfr-06)) and to the webhook subscriptions; one instance per organization at a time (EVT-01, EVT-02). Without NATS the webhooks still receive the events. |
 | `notifier` | `RETICORA_WORKER_NOTIFIER_ENABLED` | Delivers queued notifications (`notification_delivery`) over their channels — e-mail, in-app, webhook — with retry and exponential backoff (5 attempts), deduplication by key, the recipients' quiet hours and muted categories (critical notifications ignore both), e-mails of the categories a recipient bundles as one digest per window (`notify.digest`, see below); replicas share the queue, a delivery whose instance died is taken over after 10 minutes (NTF-04). |
 | `nats_edge` | `RETICORA_WORKER_NATS_EDGE_ENABLED` | Collector NATS endpoint (COL-08): writes the collector CA bundle, the server certificate of `nats-edge` (host names from `RETICORA_NATS_EDGE_HOSTS`, renewed from 60 % of its lifetime) and the generated `edge.conf` into `RETICORA_PKI_DIR` (daily), and answers the endpoint's authorization callout at `RETICORA_NATS_EDGE_URL`: only certificates of the collector CA that are not revoked, of collectors that are not disabled, each confined to its own subjects, for at most 15 minutes per authorization (docs/betrieb/firewall-matrix.md). A disable, announced on the internal NATS (`discovery.collector.disabled`, also by other replicas), makes one instance cut the collector's open connections through the endpoint's system account within seconds; a failure is logged as `discovery.collector.kick_failed` and retried. The first connection with a renewed certificate revokes its predecessors; hourly it revokes predecessors whose successor was issued 7 days ago (docs/betrieb/collector-ca.md). Run it on one or more server instances; its keys derive from the master key. |
 | `credential_bundles` | `RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED` | Answers the collectors' bundle requests (`collector.<org>.<id>.credentials.request` over the NATS endpoint): verifies the presented certificate (collector CA, not revoked, collector not disabled) and returns the effective credentials of the collector's enabled discovery scopes (a scope with `credential_ids` those, a scope without them the organization-wide ones and those of its client; only credentials that are organization-wide or of the scope's client; without an enabled scope none, E-67), encrypted for the collector's key (ECDH P-256, HKDF, AES-GCM); every delivery is audited (`credential.bundle_delivered`, COL-02). It also renews the collectors' certificates (`collector.<org>.<id>.certificate.renew`, queue group): signed with the current key, from 60 % of the lifetime, audited as `collector.certificate_issued` (COL-04, docs/betrieb/collector-ca.md). Needs `RETICORA_NATS_URL`. |
@@ -97,10 +97,39 @@ and appends an `audit.retention` entry with the sequence number and hash of
 the last removed entry, from which verification continues. The database
 allows the deletion only for entries older than ten years and only inside a
 retention run (migration 000119). A soft-deleted CI that is still referenced
-(asset, assignment, ticket) stays. Events (stream, 30 days), metrics
-(TimescaleDB policy, 400 days), container logs (30 days, see
-[Container logs](#container-logs-nfr-06)) and backups (35 days) expire where
-they are kept.
+(asset, assignment, ticket) stays. Events (stream, see
+[Event stream retention](#event-stream-retention-evt-01-nfr-06)), metrics
+(TimescaleDB policies, see [Metric retention](#metric-retention-nfr-06)),
+container logs (30 days, see [Container logs](#container-logs-nfr-06)) and
+backups (35 days) expire where they are kept.
+
+### Event stream retention (EVT-01, NFR-06)
+
+The worker `events` creates or updates the NATS stream `RETICORA_EVENTS` at
+start with the retention of the installation:
+
+| Setting | Default | Format | Start check |
+|---|---|---|---|
+| `RETICORA_EVENTS_MAX_AGE` | 30 days | Go duration (`720h`) or whole days (`45d`) | below 30 days (NFR-06 minimum) stops the start |
+| `RETICORA_EVENTS_MAX_BYTES` | 10 GB (`10737418240`) | bytes | 0, negative or not a number stops the start |
+
+The stream drops the oldest events once either limit is reached. A changed
+value applies to the existing stream at the next start. The transactional
+outbox (`event_outbox`) keeps published events as long as the stream
+(`RETICORA_EVENTS_MAX_AGE`); its hourly cleanup then deletes them. The
+newest event of each organization and of each entity stays as the anchor
+from which `sequence` and `entity_seq` continue, but without its data
+(`data` is emptied): no event data, e.g. the CI snapshot of `ci.deleted` or
+the acceptance link of `invitation.created`, outlives the retention.
+
+### Metric retention (NFR-06)
+
+TimescaleDB jobs of the owner, not runs of the scheduler: the raw samples
+(`metric_sample`, migration 000020) and the hourly rollups of the continuous
+aggregate `metric_sample_1h` (migration 000174) are each dropped after 400
+days (`policy_retention`, `drop_after` 400 days; for the rollups on the
+aggregate's materialization hypertable). Check with
+`SELECT job_id, hypertable_name, config FROM timescaledb_information.jobs WHERE proc_name = 'policy_retention';`.
 
 ### Re-chaining with migration 000158 (AUD-04)
 
