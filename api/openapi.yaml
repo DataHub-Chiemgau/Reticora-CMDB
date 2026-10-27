@@ -14584,6 +14584,7 @@ components:
       properties:
         ci_type_id:
           type: string
+          format: uuid
           description: >-
             ID (UUID) of an active system type or an active type of the
             organization (GET /api/v1/ci-types; CI-01, TEN-09), not its key.

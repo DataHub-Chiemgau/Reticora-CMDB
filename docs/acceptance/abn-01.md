@@ -205,6 +205,18 @@ unverändert. Die allgemeine Real-Stack-Prüfung von Override und Konflikt mit
 der simulierten Flotte bleibt `frontend/e2e-real/discovery-override.spec.ts`
 (D03–D05); sie ist nicht eingefroren, weil mehrere Korrektur-WPs sie ändern.
 
+Änderung nach dem Einfrieren, 2026-10-27: WP-530 (`t7-e2e-strict-mocks`,
+TST-03, F-178). Der gemockte Lauf nutzt jetzt das strikte Mock-Backend:
+Unbeantwortete Aufrufe schlagen fehl, und jeder Request und jede
+Mock-Antwort wird gegen `api/openapi.yaml` geprüft.
+`frontend/e2e/conflict.spec.ts` importiert dafür `test` aus
+`e2e/support/backend.ts`, und die Mock-Antworten tragen die Pflichtfelder des
+Vertrags: `is_manual` am CI, `organization_id` und `updated_at` an den
+Reviews, die `FieldProvenance` als Antwort des Overrides. Die nicht
+betrachteten Panels der CI-Detailseite stehen in der Allowlist der Spec.
+`artefakte/abn-01-e-konflikt.json`, die Schritte und die Erwartungen bleiben
+unverändert; die Prüfsumme der Spec in `artefakte/SHA256SUMS` ist neu.
+
 **Gemockter Lauf (Regression, Freigabe vom 2026-10-14):**
 `frontend/e2e/conflict.spec.ts` spielt dieselben Daten mit gemocktem Backend
 ab. Der Test läuft in allen Browser-Projekten des CI-Jobs `frontend`:

@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test';
-import { mockBackend, signIn } from './support/backend';
+import { expect, list, mockBackend, signIn, test } from './support/backend';
 
 // TST-03 (WP-201): the command palette opens with Ctrl+K (Meta+K on macOS),
 // filters by keyboard input and navigates with Enter. Runs in every browser
@@ -9,6 +8,9 @@ test.use({ locale: 'de-DE' });
 
 test('navigates with the command palette', async ({ page }) => {
   await mockBackend(page, [
+    { path: '/cis', reply: () => ({ body: list([]) }) },
+    // The palette also searches the CMDB for its input.
+    { path: '/search', reply: () => ({ body: list([]) }) },
     { path: '/topology', reply: () => ({ body: { nodes: [], edges: [] } }) },
   ]);
   await signIn(page);

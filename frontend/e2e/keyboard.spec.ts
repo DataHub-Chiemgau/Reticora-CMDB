@@ -1,6 +1,5 @@
-import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
-import { list, mockBackend, signIn } from './support/backend';
+import { expect, list, mockBackend, signIn, test } from './support/backend';
 
 // UI-01..UI-10 (WP-519): the four shared building blocks — modal, select,
 // CI table and command palette — are operable with the keyboard alone in a
@@ -17,6 +16,7 @@ function ci(n: number) {
     name: `core-sw-0${n}`,
     status: 'active',
     attributes: {},
+    is_manual: true,
     version: 1,
     created_at: '2026-10-14T08:00:00Z',
     updated_at: '2026-10-14T08:00:00Z',
@@ -36,6 +36,8 @@ async function openList(page: Page) {
       path: /^\/cis\/[^/]+$/,
       reply: (_request, url) => ({ body: CIS.find((c) => url.pathname.endsWith(c.id)) }),
     },
+    // The palette also searches the CMDB for its input.
+    { path: '/search', reply: () => ({ body: list([]) }) },
   ]);
   await signIn(page);
   await page.goto('/cmdb');

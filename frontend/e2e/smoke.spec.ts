@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from './support/backend';
 
 test('app loads and shows login or dashboard', async ({ page }) => {
   await page.goto('/');

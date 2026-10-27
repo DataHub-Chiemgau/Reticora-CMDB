@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
-import { list, mockBackend, signIn } from './support/backend';
+import { expect, list, mockBackend, signIn, test } from './support/backend';
 
 // ABN-01 (e), conflict scenario [B] (WP-212): an override is set on a CI,
 // discovery reports a different value, the override_conflict review is
 // visible, one conflict is accepted (the CI takes the observed value) and
 // one dismissed (the override stays). The data is frozen in
 // docs/acceptance/artefakte/abn-01-e-konflikt.json, the protocol is
-// docs/acceptance/abn-01.md. Runs in every browser project.
+// docs/acceptance/abn-01.md. Runs in every browser project. The strict mock
+// checks every request and answer against api/openapi.yaml (WP-530).
 
 test.use({ locale: 'de-DE' });
 
@@ -72,10 +72,12 @@ test('override, deviating discovery, conflict accepted and dismissed', async ({ 
     id: r.id,
     kind: r.kind,
     status: 'open',
+    organization_id: frozen.ci.organization_id,
     payload: r.payload,
     candidate_ci_ids: [CI],
     escalated: false,
     created_at: r.created_at,
+    updated_at: r.created_at,
   }));
   const calls = await mockBackend(page, [
     {
@@ -88,6 +90,7 @@ test('override, deviating discovery, conflict accepted and dismissed', async ({ 
           status: 'active',
           ci_type_id: frozen.ci.ci_type_id,
           attributes: {},
+          is_manual: false,
           version: 1,
           organization_id: frozen.ci.organization_id,
           created_at: '2026-10-14T08:00:00Z',
@@ -106,7 +109,23 @@ test('override, deviating discovery, conflict accepted and dismissed', async ({ 
       path: `/cis/${CI}/fields/${frozen.override.field}/override`,
       reply: (req) => {
         override = req.postDataJSON() as { value: string; reason: string };
-        return { body: { field: 'model', override_value: override.value } };
+        return {
+          body: {
+            id: '22222222-2222-4222-8222-0000000000f1',
+            organization_id: frozen.ci.organization_id,
+            ci_id: CI,
+            field_name: frozen.override.field,
+            discovered_value: frozen.ci.model_discovered,
+            discovered_source: frozen.ci.discovered_source,
+            override_value: override.value,
+            override_reason: override.reason,
+            protected: true,
+            effective_value: override.value,
+            diverged: true,
+            created_at: '2026-10-14T08:00:00Z',
+            updated_at: '2026-10-14T08:00:00Z',
+          },
+        };
       },
     },
     {

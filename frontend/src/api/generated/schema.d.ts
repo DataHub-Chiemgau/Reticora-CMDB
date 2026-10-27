@@ -7726,7 +7726,10 @@ export interface components {
       invoice_number?: string;
     };
     CreateCIRequest: {
-      /** @description ID (UUID) of an active system type or an active type of the organization (GET /api/v1/ci-types; CI-01, TEN-09), not its key. Any other value is rejected (422 on ci_type_id); an unknown ID and a type of another organization get the same answer. */
+      /**
+       * Format: uuid
+       * @description ID (UUID) of an active system type or an active type of the organization (GET /api/v1/ci-types; CI-01, TEN-09), not its key. Any other value is rejected (422 on ci_type_id); an unknown ID and a type of another organization get the same answer.
+       */
       ci_type_id: string;
       client_id?: string;
       /** @description Node of the location tree; site and room of the CI follow from it. */
