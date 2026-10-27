@@ -119,7 +119,7 @@ export function SecurityPage() {
                 {(['critical', 'high', 'medium', 'low'] as const).map((sev) => (
                   <li key={sev} className="flex items-center justify-between">
                     <Badge variant={sev === 'critical' || sev === 'high' ? 'danger' : 'info'}>
-                      {sev}
+                      {t(`compliance.severities.${sev}`, sev)}
                     </Badge>
                     <span className="font-mono text-gray-700 dark:text-gray-300">
                       {data?.failures_by_severity?.[sev] ?? 0}
@@ -140,8 +140,12 @@ export function SecurityPage() {
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium">{finding.rule_name}</span>
-                      <Badge variant="danger">{finding.severity}</Badge>
-                      <Badge variant="info">{finding.category}</Badge>
+                      <Badge variant="danger">
+                        {t(`compliance.severities.${finding.severity}`, finding.severity)}
+                      </Badge>
+                      <Badge variant="info">
+                        {t(`compliance.categories.${finding.category}`, finding.category)}
+                      </Badge>
                       <span className="text-gray-500">
                         {t('security.affectedCIs', { count: finding.affected_cis.length })}
                       </span>

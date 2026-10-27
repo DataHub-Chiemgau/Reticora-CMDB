@@ -63,7 +63,9 @@ export function CompliancePage() {
                 className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-800"
               >
                 <span className="font-medium">{rule.name}</span>{' '}
-                <Badge variant="info">{rule.category}</Badge>
+                <Badge variant="info">
+                  {t(`compliance.categories.${rule.category}`, rule.category)}
+                </Badge>
               </li>
             ))}
           </ul>
@@ -83,7 +85,9 @@ export function CompliancePage() {
                 className="rounded-lg border border-red-200 p-3 text-sm dark:border-red-900"
               >
                 <span className="font-mono">{result.ci_id}</span>{' '}
-                <Badge variant="danger">{result.status}</Badge>
+                <Badge variant="danger">
+                  {t(`compliance.resultStatuses.${result.status}`, result.status)}
+                </Badge>
                 <p className="text-gray-500">{result.details}</p>
               </li>
             ))}

@@ -89,7 +89,11 @@ export function DeskListPage() {
           <Card
             key={d.id}
             title={d.name}
-            actions={<Badge variant={statusVariant(d.status)}>{d.status}</Badge>}
+            actions={
+              <Badge variant={statusVariant(d.status)}>
+                {t(`desks.statuses.${d.status}`, d.status)}
+              </Badge>
+            }
           >
             <div className="mt-3">
               <Button size="sm" onClick={() => setBookFor(d)}>

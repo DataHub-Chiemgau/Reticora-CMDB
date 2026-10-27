@@ -119,7 +119,11 @@ export function MaintenancePage() {
           <Card
             key={w.id}
             title={w.title}
-            actions={<Badge variant={statusVariant(w.status)}>{w.status}</Badge>}
+            actions={
+              <Badge variant={statusVariant(w.status)}>
+                {t(`maintenance.statuses.${w.status}`, w.status)}
+              </Badge>
+            }
           >
             <p className="text-sm text-gray-600 dark:text-gray-300">
               {new Date(w.starts_at).toLocaleString()} → {new Date(w.ends_at).toLocaleString()}

@@ -883,7 +883,22 @@
     "emptyRulesHint": "Compliance-Regeln erscheinen hier.",
     "failures": "Fehlgeschlagene Ergebnisse",
     "noFailures": "Keine Abweichungen",
-    "noFailuresHint": "Aktuell sind keine Fehlschläge gespeichert."
+    "noFailuresHint": "Aktuell sind keine Fehlschläge gespeichert.",
+    "severities": {
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "high": "Hoch",
+      "critical": "Kritisch"
+    },
+    "resultStatuses": {
+      "pass": "Bestanden",
+      "fail": "Nicht bestanden",
+      "not_applicable": "Nicht anwendbar"
+    },
+    "categories": {
+      "security": "Sicherheit",
+      "hygiene": "Datenpflege"
+    }
   },
   "iga": {
     "loading": "Identity Governance wird geladen",
@@ -915,7 +930,37 @@
     "drift": "Drift-Funde",
     "remediate": "Beheben",
     "emptyDrift": "Kein Drift erkannt",
-    "emptyDriftHint": "Konnektor-Abgleiche erfassen verwaiste und fehlende Konten hier."
+    "emptyDriftHint": "Konnektor-Abgleiche erfassen verwaiste und fehlende Konten hier.",
+    "connectorStatuses": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv",
+      "error": "Fehler"
+    },
+    "taskStatuses": {
+      "pending": "Ausstehend",
+      "running": "Läuft",
+      "succeeded": "Erfolgreich",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen"
+    },
+    "requestStatuses": {
+      "pending": "Ausstehend",
+      "approved": "Genehmigt",
+      "rejected": "Abgelehnt",
+      "cancelled": "Zurückgezogen"
+    },
+    "reviewStatuses": {
+      "draft": "Entwurf",
+      "active": "Aktiv",
+      "completed": "Abgeschlossen",
+      "cancelled": "Abgebrochen"
+    },
+    "severities": {
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "high": "Hoch",
+      "critical": "Kritisch"
+    }
   },
   "assistant": {
     "title": "KI-Assistent",
@@ -1107,7 +1152,13 @@
     "startsAt": "Beginn",
     "endsAt": "Ende",
     "queued": "{{count}} Benachrichtigungen vorgemerkt – Versand ausstehend",
-    "noClients": "Keine betroffenen Kunden"
+    "noClients": "Keine betroffenen Kunden",
+    "statuses": {
+      "scheduled": "Geplant",
+      "in_progress": "In Arbeit",
+      "completed": "Abgeschlossen",
+      "cancelled": "Abgebrochen"
+    }
   },
   "disposal": {
     "summary": "Revisionssichere Entsorgungsdokumentation (append-only, BSI/ISO).",
@@ -1153,7 +1204,12 @@
     "book": "Buchen",
     "bookTitle": "Arbeitsplatz buchen",
     "startsAt": "Von",
-    "endsAt": "Bis"
+    "endsAt": "Bis",
+    "statuses": {
+      "available": "Frei",
+      "occupied": "Belegt",
+      "maintenance": "In Wartung"
+    }
   },
   "agents": {
     "summary": "Registrierte Endpoint-Agents mit Policy und Kill-Switch.",
@@ -1164,7 +1220,12 @@
     "enable": "Aktivieren",
     "killSwitch": "Kill-Switch",
     "policyTitle": "Agent-Policy",
-    "intervalSeconds": "Intervall (Sekunden)"
+    "intervalSeconds": "Intervall (Sekunden)",
+    "statuses": {
+      "online": "Online",
+      "offline": "Offline",
+      "disabled": "Deaktiviert"
+    }
   },
   "findings": {
     "summary": "Patch-Posture und Schwachstellen je CI.",
@@ -1175,7 +1236,13 @@
     "falsePositive": "Fehlalarm",
     "acknowledge": "Bestätigen",
     "resolve": "Lösen",
-    "markFalsePositive": "Fehlalarm"
+    "markFalsePositive": "Fehlalarm",
+    "severities": {
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "high": "Hoch",
+      "critical": "Kritisch"
+    }
   },
   "citypes": {
     "create": "Typ anlegen",

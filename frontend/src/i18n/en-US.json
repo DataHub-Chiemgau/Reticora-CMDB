@@ -883,7 +883,22 @@
     "emptyRulesHint": "Compliance rules appear here.",
     "failures": "Failing results",
     "noFailures": "No deviations",
-    "noFailuresHint": "No failing results are currently stored."
+    "noFailuresHint": "No failing results are currently stored.",
+    "severities": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "critical": "Critical"
+    },
+    "resultStatuses": {
+      "pass": "Passed",
+      "fail": "Failed",
+      "not_applicable": "Not applicable"
+    },
+    "categories": {
+      "security": "Security",
+      "hygiene": "Data hygiene"
+    }
   },
   "iga": {
     "loading": "Loading identity governance",
@@ -915,7 +930,37 @@
     "drift": "Drift findings",
     "remediate": "Remediate",
     "emptyDrift": "No drift detected",
-    "emptyDriftHint": "Connector reconciliation records orphan and missing accounts here."
+    "emptyDriftHint": "Connector reconciliation records orphan and missing accounts here.",
+    "connectorStatuses": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "error": "Error"
+    },
+    "taskStatuses": {
+      "pending": "Pending",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "requestStatuses": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "cancelled": "Withdrawn"
+    },
+    "reviewStatuses": {
+      "draft": "Draft",
+      "active": "Active",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "severities": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "critical": "Critical"
+    }
   },
   "assistant": {
     "title": "AI assistant",
@@ -1107,7 +1152,13 @@
     "startsAt": "Starts",
     "endsAt": "Ends",
     "queued": "{{count}} notifications queued – delivery pending",
-    "noClients": "No affected customers"
+    "noClients": "No affected customers",
+    "statuses": {
+      "scheduled": "Scheduled",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    }
   },
   "disposal": {
     "summary": "Revision-safe disposal documentation (append-only, BSI/ISO).",
@@ -1153,7 +1204,12 @@
     "book": "Book",
     "bookTitle": "Book desk",
     "startsAt": "From",
-    "endsAt": "To"
+    "endsAt": "To",
+    "statuses": {
+      "available": "Available",
+      "occupied": "Occupied",
+      "maintenance": "Under maintenance"
+    }
   },
   "agents": {
     "summary": "Registered endpoint agents with policy and kill-switch.",
@@ -1164,7 +1220,12 @@
     "enable": "Enable",
     "killSwitch": "Kill switch",
     "policyTitle": "Agent policy",
-    "intervalSeconds": "Interval (seconds)"
+    "intervalSeconds": "Interval (seconds)",
+    "statuses": {
+      "online": "Online",
+      "offline": "Offline",
+      "disabled": "Disabled"
+    }
   },
   "findings": {
     "summary": "Patch posture and vulnerabilities per CI.",
@@ -1175,7 +1236,13 @@
     "falsePositive": "False positive",
     "acknowledge": "Acknowledge",
     "resolve": "Resolve",
-    "markFalsePositive": "False positive"
+    "markFalsePositive": "False positive",
+    "severities": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "critical": "Critical"
+    }
   },
   "citypes": {
     "create": "Create type",

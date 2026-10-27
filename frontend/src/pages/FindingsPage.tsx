@@ -80,7 +80,9 @@ export function FindingsPage() {
         <div className="flex flex-wrap gap-3">
           {(['critical', 'high', 'medium', 'low'] as const).map((s) => (
             <Card key={s} className="min-w-28">
-              <p className="text-xs uppercase tracking-wide text-gray-500">{s}</p>
+              <p className="text-xs uppercase tracking-wide text-gray-500">
+                {t(`findings.severities.${s}`, s)}
+              </p>
               <p className="text-2xl font-bold">{sev[s] ?? 0}</p>
             </Card>
           ))}
@@ -101,7 +103,11 @@ export function FindingsPage() {
           <Card
             key={f.id}
             title={f.title}
-            actions={<Badge variant={severityVariant(f.severity)}>{f.severity}</Badge>}
+            actions={
+              <Badge variant={severityVariant(f.severity)}>
+                {t(`findings.severities.${f.severity}`, f.severity)}
+              </Badge>
+            }
           >
             <p className="text-sm text-gray-600 dark:text-gray-300">
               {f.package_name ? `${f.package_name} ${f.installed_version || ''}` : ''}

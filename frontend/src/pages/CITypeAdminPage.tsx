@@ -299,6 +299,7 @@ export function CITypeAdminPage() {
             >
               <p className="font-medium">{label(tpl)}</p>
               <p className="text-xs text-gray-500">
+                {/* eslint-disable-next-line no-restricted-syntax -- GLO-10: the template category is free metamodel text (ci_type.category, no enum), not a catalog key */}
                 {tpl.category}
                 {tpl.is_logical ? ` · ${t('citypes.logicalShort')}` : ''} ·{' '}
                 {t('citypes.fieldCount', { count: (tpl.fields ?? []).length })}

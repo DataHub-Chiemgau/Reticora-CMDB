@@ -97,6 +97,14 @@ const BACKEND_ENUMS = {
   // backend/internal/user/pg_repository.go (CASE WHEN is_active THEN 'active'
   // ELSE 'inactive') and internal/user/repository.go (anonymized).
   userStatuses: ['active', 'inactive', 'anonymized'],
+  // backend/migrations/000029_iga.up.sql: iga_connector, iga_provisioning_task
+  // (internal/iga/model.go TaskStatus* constants), iga_access_request,
+  // iga_access_review status checks and iga_drift_finding severity check.
+  igaConnectorStatuses: ['active', 'inactive', 'error'],
+  igaTaskStatuses: ['pending', 'running', 'succeeded', 'failed', 'cancelled'],
+  igaRequestStatuses: ['pending', 'approved', 'rejected', 'cancelled'],
+  igaReviewStatuses: ['draft', 'active', 'completed', 'cancelled'],
+  igaSeverities: ['low', 'medium', 'high', 'critical'],
 };
 
 // WP-525: the enums the inventory, ticket, order and room plan pages show.
@@ -113,6 +121,20 @@ const pageEnumerations: Array<[string, readonly string[]]> = [
   ['workflows.statuses', specEnum('WorkflowRun', 'status')],
   ['workflows.statuses', BACKEND_ENUMS.workflowStepStatuses],
   ['userMgmt.statuses', BACKEND_ENUMS.userStatuses],
+  // WP-527: agent, maintenance, findings, desk, compliance, security and IGA
+  // pages.
+  ['agents.statuses', specEnum('Agent', 'status')],
+  ['maintenance.statuses', specEnum('MaintenanceWindow', 'status')],
+  ['findings.severities', specEnum('PatchFinding', 'severity')],
+  ['desks.statuses', specEnum('Desk', 'status')],
+  ['compliance.resultStatuses', specEnum('ComplianceResult', 'status')],
+  ['compliance.severities', specEnum('ComplianceRule', 'severity')],
+  ['compliance.severities', specEnum('SecurityFinding', 'severity')],
+  ['iga.connectorStatuses', BACKEND_ENUMS.igaConnectorStatuses],
+  ['iga.taskStatuses', BACKEND_ENUMS.igaTaskStatuses],
+  ['iga.requestStatuses', BACKEND_ENUMS.igaRequestStatuses],
+  ['iga.reviewStatuses', BACKEND_ENUMS.igaReviewStatuses],
+  ['iga.severities', BACKEND_ENUMS.igaSeverities],
 ];
 
 const enumerations: Array<[string, readonly string[]]> = [
@@ -168,6 +190,16 @@ describe('i18n catalog', () => {
       'unknown',
     ]);
     expect(specEnum('WorkflowRun', 'status')).toEqual(BACKEND_ENUMS.workflowStepStatuses);
+    expect(specEnum('Agent', 'status')).toEqual(['online', 'offline', 'disabled']);
+    expect(specEnum('MaintenanceWindow', 'status')).toEqual([
+      'scheduled',
+      'in_progress',
+      'completed',
+      'cancelled',
+    ]);
+    expect(specEnum('PatchFinding', 'severity')).toEqual(['low', 'medium', 'high', 'critical']);
+    expect(specEnum('Desk', 'status')).toEqual(['available', 'occupied', 'maintenance']);
+    expect(specEnum('ComplianceResult', 'status')).toEqual(['pass', 'fail', 'not_applicable']);
     // Plain strings in the specification: their values come from the backend.
     for (const [schema, property] of [
       ['Asset', 'status'],
@@ -178,6 +210,11 @@ describe('i18n catalog', () => {
       ['Ticket', 'category'],
       ['WorkflowStep', 'status'],
       ['User', 'status'],
+      // Free tenant text (compliance_rule.category has no CHECK constraint):
+      // shown through t('compliance.categories.<value>', value), labelled
+      // where the catalog knows the value, otherwise as stored.
+      ['ComplianceRule', 'category'],
+      ['SecurityFinding', 'category'],
     ] as const) {
       expect(() => specEnum(schema, property), `${schema}.${property}`).toThrow(
         /not a string enum/,
