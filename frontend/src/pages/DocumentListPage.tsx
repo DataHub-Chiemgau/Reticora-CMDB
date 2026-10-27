@@ -7,6 +7,7 @@ import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
+import { ScrollRegion } from '../components/ScrollRegion';
 
 // Stored document categories (English keys); the labels come from the catalog.
 export const DOCUMENT_CATEGORIES = [
@@ -90,14 +91,7 @@ export function DocumentListPage() {
         <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>
       ) : (
         <Card title={`${t('document.title', 'Dokumente')} (${data?.total ?? 0})`}>
-          {/* The table scrolls sideways on narrow screens; the region takes the
-              focus so the keyboard can scroll it (WCAG 2.1.1, WP-522). */}
-          <div
-            className="overflow-x-auto"
-            role="region"
-            aria-label={t('document.title', 'Dokumente')}
-            tabIndex={0}
-          >
+          <ScrollRegion label={t('document.title', 'Dokumente')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -141,7 +135,7 @@ export function DocumentListPage() {
                 )}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         </Card>
       )}
 

@@ -21,6 +21,7 @@ import { Card } from '../components/ui/Card';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
+import { ScrollRegion } from '../components/ScrollRegion';
 
 type Tab = 'users' | 'teams' | 'roles' | 'invitations';
 
@@ -85,7 +86,7 @@ function UsersTab({ search }: { search: string }) {
 
   return (
     <Card title={`${t('userMgmt.users', 'Benutzer')} (${data?.total ?? 0})`}>
-      <div className="overflow-x-auto">
+      <ScrollRegion label={t('userMgmt.users', 'Benutzer')}>
         <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
           <thead>
             <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -121,7 +122,7 @@ function UsersTab({ search }: { search: string }) {
             )}
           </tbody>
         </table>
-      </div>
+      </ScrollRegion>
     </Card>
   );
 }
@@ -135,7 +136,7 @@ function TeamsTab({ search }: { search: string }) {
 
   return (
     <Card title={`${t('userMgmt.teams', 'Teams')} (${data?.total ?? 0})`}>
-      <div className="overflow-x-auto">
+      <ScrollRegion label={t('userMgmt.teams', 'Teams')}>
         <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
           <thead>
             <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -163,7 +164,7 @@ function TeamsTab({ search }: { search: string }) {
             )}
           </tbody>
         </table>
-      </div>
+      </ScrollRegion>
     </Card>
   );
 }
@@ -177,7 +178,7 @@ function RolesTab() {
 
   return (
     <Card title={`${t('userMgmt.roles', 'Rollen')} (${data?.total ?? 0})`}>
-      <div className="overflow-x-auto">
+      <ScrollRegion label={t('userMgmt.roles', 'Rollen')}>
         <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
           <thead>
             <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -209,7 +210,7 @@ function RolesTab() {
             )}
           </tbody>
         </table>
-      </div>
+      </ScrollRegion>
     </Card>
   );
 }
@@ -461,7 +462,7 @@ function InvitationsTab({ search }: { search: string }) {
               {actionError}
             </p>
           ) : null}
-          <div className="overflow-x-auto">
+          <ScrollRegion label={t('invitations.title')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -518,7 +519,7 @@ function InvitationsTab({ search }: { search: string }) {
                 ) : null}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         </Card>
       )}
     </div>

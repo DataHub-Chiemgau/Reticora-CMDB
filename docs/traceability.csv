@@ -872,3 +872,5 @@ RCK-01;[B];B;backend/internal/rack/height_integration_test.go;WP-634
 TEN-06;[B];B;backend/internal/rack/height_integration_test.go;WP-634
 UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-630
 NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-630
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-631
+NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-631

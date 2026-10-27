@@ -10,6 +10,7 @@ import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import { useUndoableDelete } from '../hooks/useUndoableDelete';
 import { useToastStore } from '../stores/toast';
+import { ScrollRegion } from '../components/ScrollRegion';
 
 // Stored asset values (English keys); the labels come from the catalog.
 export const ASSET_STATUSES = [
@@ -213,14 +214,7 @@ export function AssetListPage() {
               </Button>
             </div>
           ) : null}
-          {/* The table scrolls sideways on narrow screens; the region takes the
-              focus so the keyboard can scroll it (WCAG 2.1.1, WP-522). */}
-          <div
-            className="overflow-x-auto"
-            role="region"
-            aria-label={t('asset.title', 'Inventar')}
-            tabIndex={0}
-          >
+          <ScrollRegion label={t('asset.title', 'Inventar')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -292,7 +286,7 @@ export function AssetListPage() {
                 )}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         </Card>
       )}
 

@@ -19,6 +19,7 @@ import { useCIFilters } from '../stores/ciFilter';
 import { useScopeStore } from '../stores/scope';
 import { useToastStore } from '../stores/toast';
 import { getStatusBadgeVariant, getStatusTranslationKey } from './ciStatus';
+import { ScrollRegion } from '../components/ScrollRegion';
 
 interface CIListPageProps {
   onCreateCI: () => void;
@@ -656,7 +657,7 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
                 ) : null}
               </div>
             ) : null}
-            <div className="overflow-x-auto">
+            <ScrollRegion label={t('ci.title')}>
               <table className="w-full text-left text-sm">
                 <thead className="border-b bg-gray-50 dark:border-gray-800 dark:bg-gray-950">
                   <tr>
@@ -733,7 +734,7 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </ScrollRegion>
           </Card>
         </>
       ) : null}

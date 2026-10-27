@@ -12,6 +12,11 @@ import { ErrorState } from '../components/ui/ErrorState';
  * MapPage renders a dependency-free SVG world map (equirectangular
  * projection) with site markers. Sites without coordinates are listed
  * separately. Clicking a marker opens the site detail.
+ *
+ * The map is a labelled group, not an image: the markers inside it are
+ * buttons, which an element with role="img" must not contain (axe
+ * nested-interactive, F-356). Each marker takes the focus, shows a focus
+ * ring, and opens the site with Enter or Space (WP-631).
  */
 
 // Rough continent outlines as normalized [0..1] polygons for orientation.
@@ -54,12 +59,23 @@ function SiteMarker({ site, onOpen }: { site: Site; onOpen: (id: string) => void
       aria-label={site.name}
       onClick={() => onOpen(site.id)}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') onOpen(site.id);
+        if (e.key === 'Enter' || e.key === ' ') {
+          // Space would scroll the page otherwise.
+          e.preventDefault();
+          onOpen(site.id);
+        }
       }}
-      className="cursor-pointer focus:outline-none"
+      className="group cursor-pointer focus:outline-none"
     >
       <circle cx={x} cy={y} r={1.6} className="fill-primary opacity-90" />
       <circle cx={x} cy={y} r={3.2} className="fill-primary opacity-20" />
+      <circle
+        cx={x}
+        cy={y}
+        r={4.2}
+        strokeWidth={0.6}
+        className="fill-none stroke-gray-900 opacity-0 group-focus-visible:opacity-100 dark:stroke-gray-100"
+      />
       <title>{site.name}</title>
     </g>
   );
@@ -110,7 +126,7 @@ export function MapPage() {
           <Card className="lg:col-span-2">
             <svg
               viewBox="0 0 100 50"
-              role="img"
+              role="group"
               aria-label={t('map.worldAria', 'Weltkarte mit Standortmarkern')}
               className="h-auto w-full rounded-lg bg-blue-50 dark:bg-gray-900"
             >

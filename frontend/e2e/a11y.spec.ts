@@ -12,9 +12,10 @@ import {
 import { EMPTY_LIST, mockBackend, signIn } from './support/backend';
 import type { Handler } from './support/backend';
 
-// UI-18/NFR-07 (WP-193, WP-522): every route of the router (src/App.tsx)
-// passes an automated WCAG 2.1 AA check (axe-core) in every browser project
-// of playwright.config.ts, once in the light and once in the dark theme. The
+// UI-18/NFR-07 (WP-193, WP-522, WP-631): every route of the router
+// (src/App.tsx) passes an automated WCAG 2.1 AA check (axe-core) in every
+// browser project of playwright.config.ts, in both UI languages of E-99
+// (de-DE and en-US) and in the light and the dark theme. The
 // backend is mocked with data (support/a11y-fixtures.ts): every list holds at
 // least one row, and the check waits for that row, so axe sees rows, badges
 // and links instead of an empty page. The empty states of the list pages of
@@ -24,6 +25,12 @@ const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
 
 type Theme = 'light' | 'dark';
 const THEMES: Theme[] = ['light', 'dark'];
+
+// The UI languages of E-99 (WP-523). The interface follows the browser
+// language; each check runs once per language, because the labels change the
+// layout on a phone (F-357: the tables scrolled sideways in de-DE only).
+type Language = 'de-DE' | 'en-US';
+const LANGUAGES: Language[] = ['de-DE', 'en-US'];
 
 interface A11yRoute {
   /** The path pattern exactly as src/App.tsx declares it. */
@@ -38,25 +45,15 @@ interface A11yRoute {
   ready: (page: Page) => Locator;
   /** Steps that bring the page into its data view (selections). */
   prepare?: (page: Page) => Promise<void>;
-  /**
-   * Violations found by this check in files outside WP-522, per theme, as
-   * the ID of their finding. The check is expected to fail (test.fail) until
-   * the follow-up WP fixes them; a marked check that passes fails.
-   */
-  known?: Partial<Record<Theme, string>>;
-  /** The same for the mobile projects (isMobile) where they differ. */
-  knownMobile?: Partial<Record<Theme, string>>;
 }
 
-// New findings of this check in pages outside WP-522 (IDs from F-355, plan
-// convention 16; each gets its own follow-up WP):
-// F-356 site markers inside the map image,
-// F-357 tables that scroll sideways on a phone without taking the focus
-// (audit/g1-reaudit/FINDINGS.md). F-355 (grey secondary text) and F-361 (red
-// delete actions) are fixed by WP-630 (shared classes text-muted and
-// text-danger, src/index.css; source scan src/test/darkVariant.test.ts).
-const F_MAP_MARKERS = 'F-356';
-const F_SCROLL_REGION = 'F-357';
+// Every route passes without exception (WP-531, F-172/F-173). The findings
+// of this check outside WP-522 are fixed: F-355 grey secondary text and F-361
+// red delete actions by WP-630 (shared classes text-muted and text-danger,
+// src/index.css; source scan src/test/darkVariant.test.ts), F-356 site markers
+// inside the map image and F-357 tables that scroll sideways on a phone
+// without taking the focus by WP-631 (audit/g1-reaudit/FINDINGS.md). A new
+// violation is a new finding with its own WP (plan convention 16), not a mark.
 
 const text = (value: string) => (page: Page) => page.getByText(value, { exact: false }).first();
 
@@ -118,8 +115,6 @@ const ROUTES: A11yRoute[] = [
     // The marker of the site opens its details.
     prepare: (page) => page.getByRole('button', { name: M.site }).click(),
     ready: (page) => page.getByRole('heading', { name: M.site }),
-    // Site markers (role=button) inside the map image (role=img).
-    known: { light: F_MAP_MARKERS, dark: F_MAP_MARKERS },
   },
   {
     path: '/roomplan',
@@ -159,13 +154,11 @@ const ROUTES: A11yRoute[] = [
     path: '/users',
     url: '/users',
     ready: text(M.user),
-    knownMobile: { light: F_SCROLL_REGION, dark: F_SCROLL_REGION },
   },
   {
     path: '/permissions',
     url: '/permissions',
     ready: text(M.permission),
-    knownMobile: { light: F_SCROLL_REGION, dark: F_SCROLL_REGION },
   },
   { path: '/slas', url: '/slas', ready: text(M.sla) },
   { path: '/forms', url: '/forms', ready: text(M.form) },
@@ -247,6 +240,11 @@ async function expectVisible(page: Page, locator: Locator, diagnostics: () => st
   }
 }
 
+/** expectLanguage checks that the interface runs in the browser language. */
+async function expectLanguage(page: Page, language: Language) {
+  await expect(page.locator('html')).toHaveAttribute('lang', language);
+}
+
 async function expectTheme(page: Page, theme: Theme) {
   if (theme === 'dark') {
     await expect(page.locator('html')).toHaveClass(/\bdark\b/);
@@ -273,6 +271,7 @@ async function checkPage(
   page: Page,
   route: Pick<A11yRoute, 'url' | 'signedIn' | 'handlers' | 'ready' | 'prepare'>,
   theme: Theme,
+  language: Language,
 ) {
   const diagnostics = pageDiagnostics(page);
   await mockBackend(page, [...(route.handlers ?? []), ...A11Y_HANDLERS]);
@@ -288,17 +287,12 @@ async function checkPage(
   // stand after the requests, without an uncaught error.
   await expectVisible(page, route.ready(page), diagnostics.describe);
   expect(diagnostics.pageErrors, `uncaught errors on ${route.url}`).toEqual([]);
+  await expectLanguage(page, language);
   await expectTheme(page, theme);
   await expectNoViolations(page);
 }
 
 test.describe('accessibility (WCAG 2.1 AA)', () => {
-  // The interface follows the browser language (E-99, WP-523). The check
-  // runs in the default language de-DE, the language the marks above were
-  // found in: in en-US the shorter labels change the layout on a phone (no
-  // sideways scrolling, no wrapped row actions).
-  test.use({ locale: 'de-DE' });
-
   test('every route of the router has a check', () => {
     const covered = ROUTES.map((route) => route.path).sort();
     expect(covered, 'routes of src/App.tsx without an entry in ROUTES (or stale entries)').toEqual(
@@ -306,61 +300,68 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
     );
   });
 
-  for (const route of ROUTES) {
-    for (const theme of THEMES) {
-      test(`page ${route.path} (${theme})`, async ({ page, isMobile }) => {
-        const finding = ((isMobile && route.knownMobile) || route.known)?.[theme];
-        test.fail(finding !== undefined, finding);
-        await checkPage(page, route, theme);
-      });
-    }
-  }
+  // Each check runs once per UI language (E-99): the browser language picks
+  // it (src/i18n), and checkPage asserts the lang attribute it sets.
+  for (const language of LANGUAGES) {
+    test.describe(language, () => {
+      test.use({ locale: language });
 
-  // WP-524 (E-87): the CI detail of a CI outside the client chosen in the
-  // scope control, with the notice, the counter of the hidden relationships
-  // and, after "show all", the outside badge.
-  for (const theme of THEMES) {
-    test(`page /cmdb/:id outside the chosen scope (${theme})`, async ({ page }) => {
-      const otherClient = 'c7000000-0000-4000-8000-0000000000aa';
-      await page.addInitScript((clientId) => {
-        window.localStorage.setItem('reticora-scope', JSON.stringify({ clientId, siteId: '' }));
-      }, otherClient);
-      const clients = [{ id: otherClient, name: 'a11y Other Client', slug: 'a11y-other' }];
-      await checkPage(
-        page,
-        {
-          url: `/cmdb/${CI_ID}`,
-          handlers: [
+      for (const route of ROUTES) {
+        for (const theme of THEMES) {
+          test(`page ${route.path} (${theme})`, async ({ page }) => {
+            await checkPage(page, route, theme, language);
+          });
+        }
+      }
+
+      // WP-524 (E-87): the CI detail of a CI outside the client chosen in the
+      // scope control, with the notice, the counter of the hidden relationships
+      // and, after "show all", the outside badge.
+      for (const theme of THEMES) {
+        test(`page /cmdb/:id outside the chosen scope (${theme})`, async ({ page }) => {
+          const otherClient = 'c7000000-0000-4000-8000-0000000000aa';
+          await page.addInitScript((clientId) => {
+            window.localStorage.setItem('reticora-scope', JSON.stringify({ clientId, siteId: '' }));
+          }, otherClient);
+          const clients = [{ id: otherClient, name: 'a11y Other Client', slug: 'a11y-other' }];
+          await checkPage(
+            page,
             {
-              path: '/clients',
-              reply: () => ({
-                body: { data: clients, total: 1, limit: 200, offset: 0, has_more: false },
-              }),
+              url: `/cmdb/${CI_ID}`,
+              handlers: [
+                {
+                  path: '/clients',
+                  reply: () => ({
+                    body: { data: clients, total: 1, limit: 200, offset: 0, has_more: false },
+                  }),
+                },
+              ],
+              prepare: async (p) => {
+                await p.getByRole('button', { name: /alle anzeigen|show all/i }).click();
+              },
+              ready: (p) => p.getByRole('status', { name: /arbeitsbereich|scope/i }),
             },
-          ],
-          prepare: async (p) => {
-            await p.getByRole('button', { name: /alle anzeigen|show all/i }).click();
-          },
-          ready: (p) => p.getByRole('status', { name: /arbeitsbereich|scope/i }),
-        },
-        theme,
-      );
-    });
-  }
+            theme,
+            language,
+          );
+        });
+      }
 
-  for (const { url, endpoint } of EMPTY_PAGES) {
-    for (const theme of THEMES) {
-      test(`empty state ${url} (${theme})`, async ({ page }) => {
-        await checkPage(
-          page,
-          {
-            url,
-            handlers: [{ path: endpoint, reply: () => ({ body: EMPTY_LIST }) }],
-            ready: (p) => p.locator('#main-content td[colspan]'),
-          },
-          theme,
-        );
-      });
-    }
+      for (const { url, endpoint } of EMPTY_PAGES) {
+        for (const theme of THEMES) {
+          test(`empty state ${url} (${theme})`, async ({ page }) => {
+            await checkPage(
+              page,
+              {
+                url,
+                handlers: [{ path: endpoint, reply: () => ({ body: EMPTY_LIST }) }],
+                ready: (p) => p.locator('#main-content td[colspan]'),
+              },
+              theme,
+            );
+          });
+        }
+      }
+    });
   }
 });
