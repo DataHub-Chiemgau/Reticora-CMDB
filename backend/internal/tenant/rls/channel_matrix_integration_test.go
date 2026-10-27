@@ -1104,7 +1104,9 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 			exp := object{m.exportID, m.exportJob.seen}
 			out := []matrixProbe{list(p, "/api/v1/jobs?kind=export&limit=200", m.exportJob), list(p, "/api/v1/export/jobs?limit=200", exp)}
 			out = append(out, details(p, "/api/v1/jobs/", "", m.exportJob)...)
-			out = append(out, get("/api/v1/jobs/"+m.exportJob.id+"/result", m.exportJob.seen.status(p, http.StatusConflict)))
+			// The mirrored export job carries {export_id, row_count} as its
+			// result (WP-515, F-347).
+			out = append(out, get("/api/v1/jobs/"+m.exportJob.id+"/result", m.exportJob.seen.status(p, http.StatusOK)))
 			return append(out, details(p, "/api/v1/export/jobs/", "", exp)...)
 		},
 		write: func(_ *testing.T, p *channelPrincipal) []matrixProbe {
