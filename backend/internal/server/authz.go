@@ -399,8 +399,13 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 		return identity.PermAgentManage, routeProtected
 	case "me":
 		// /me is the signed-in principal itself and needs no permission;
-		// /me/permissions is read-only self-service.
-		if len(segments) == 1 {
+		// /me/permissions is read-only self-service as well (OpenAPI
+		// getMyPermissions: the caller's own effective permissions, no
+		// 403): every user reads its own user_id and rights, also without
+		// permission:read (custom roles, client_technician), which the UI
+		// needs for the cancel rule of the job center and the saved views.
+		if len(segments) == 1 || (len(segments) == 2 && segments[1] == "permissions" &&
+			(method == http.MethodGet || method == http.MethodHead)) {
 			return "", routeProtected
 		}
 		return identity.PermPermissionRead, routeProtected

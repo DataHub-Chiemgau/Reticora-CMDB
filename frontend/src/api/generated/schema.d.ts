@@ -4713,7 +4713,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get effective permissions for the authenticated caller */
+    /**
+     * Get effective permissions for the authenticated caller
+     * @description Self-service: every authenticated user reads its own user_id and effective permissions; no permission (not even permission:read) is required, like for /api/v1/me.
+     */
     get: operations['getMyPermissions'];
     put?: never;
     post?: never;

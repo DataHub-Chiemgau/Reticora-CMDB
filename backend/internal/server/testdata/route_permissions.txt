@@ -187,7 +187,7 @@ GET /api/v1/maintenance-windows maintenance:read
 GET /api/v1/maintenance-windows/{id} maintenance:read
 GET /api/v1/maintenance-windows/{id}/notifications maintenance:read
 GET /api/v1/me authenticated
-GET /api/v1/me/permissions permission:read
+GET /api/v1/me/permissions authenticated
 GET /api/v1/modules entitlement:read
 GET /api/v1/monitoring/alerts monitoring:read
 GET /api/v1/monitoring/metrics monitoring:read

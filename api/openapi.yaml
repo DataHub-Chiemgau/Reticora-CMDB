@@ -9775,6 +9775,10 @@ paths:
       operationId: getMyPermissions
       tags: [Permissions]
       summary: Get effective permissions for the authenticated caller
+      description: >-
+        Self-service: every authenticated user reads its own user_id and
+        effective permissions; no permission (not even permission:read) is
+        required, like for /api/v1/me.
       responses:
         '200':
           description: Effective permissions
