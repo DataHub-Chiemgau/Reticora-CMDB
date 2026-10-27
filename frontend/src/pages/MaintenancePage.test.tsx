@@ -122,6 +122,10 @@ async function createWindowWithTwoCIs(user: ReturnType<typeof userEvent.setup>) 
   fireEvent.change(within(dialog).getByLabelText('Ende'), {
     target: { value: '2026-11-02T10:00' },
   });
+  // The datetime-local inputs keep their local value (WP-540): an ISO
+  // string with "Z" is not a valid value and a browser empties the field.
+  expect(within(dialog).getByLabelText('Beginn')).toHaveValue('2026-11-02T08:00');
+  expect(within(dialog).getByLabelText('Ende')).toHaveValue('2026-11-02T10:00');
   await user.type(within(dialog).getByLabelText('Betroffene CIs suchen'), 'web');
   await user.click(await within(dialog).findByRole('button', { name: 'web-01 hinzufügen' }));
   await user.click(await within(dialog).findByRole('button', { name: 'web-02 hinzufügen' }));
@@ -147,6 +151,11 @@ describe('MaintenancePage', () => {
 
     expect(backend.posts).toHaveLength(1);
     expect(backend.posts[0]).toMatchObject({ title: 'Kernel-Update', ci_ids: ['ci-1', 'ci-2'] });
+    // The local input values go to the API as ISO instants.
+    expect(backend.posts[0]).toMatchObject({
+      starts_at: new Date('2026-11-02T08:00').toISOString(),
+      ends_at: new Date('2026-11-02T10:00').toISOString(),
+    });
     expect(await screen.findByText('Kernel-Update')).toBeInTheDocument();
     expect(screen.getByText(/^2 betroffene CIs$/)).toBeInTheDocument();
   });

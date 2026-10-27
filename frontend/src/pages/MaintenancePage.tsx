@@ -40,7 +40,16 @@ function notificationVariant(status: string): 'neutral' | 'warning' | 'success' 
   }
 }
 
+// starts_at/ends_at hold the local value of the datetime-local inputs
+// ("YYYY-MM-DDTHH:mm"): the browser rejects any other form (e.g. an ISO
+// string with "Z") and empties the field. They become ISO times only in the
+// request body (WP-540).
 const emptyForm = { title: '', starts_at: '', ends_at: '' };
+
+/** localToISO converts a datetime-local value (local time) to an ISO instant. */
+function localToISO(local: string): string {
+  return new Date(local).toISOString();
+}
 
 /**
  * WindowNotifications lists the stored notifications of a window from
@@ -154,8 +163,8 @@ export function MaintenancePage() {
     mutationFn: () =>
       maintenanceApi.create({
         title: form.title,
-        starts_at: form.starts_at,
-        ends_at: form.ends_at,
+        starts_at: localToISO(form.starts_at),
+        ends_at: localToISO(form.ends_at),
         ci_ids: selectedCIs.map((ci) => ci.id),
       }),
     onSuccess: () => {
@@ -309,23 +318,13 @@ export function MaintenancePage() {
             label={t('maintenance.startsAt', 'Beginn')}
             type="datetime-local"
             value={form.starts_at}
-            onChange={(e) =>
-              setForm({
-                ...form,
-                starts_at: e.target.value ? new Date(e.target.value).toISOString() : '',
-              })
-            }
+            onChange={(e) => setForm({ ...form, starts_at: e.target.value })}
           />
           <Input
             label={t('maintenance.endsAt', 'Ende')}
             type="datetime-local"
             value={form.ends_at}
-            onChange={(e) =>
-              setForm({
-                ...form,
-                ends_at: e.target.value ? new Date(e.target.value).toISOString() : '',
-              })
-            }
+            onChange={(e) => setForm({ ...form, ends_at: e.target.value })}
           />
           <div className="space-y-2">
             <Input
