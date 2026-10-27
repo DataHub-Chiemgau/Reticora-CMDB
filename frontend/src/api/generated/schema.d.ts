@@ -1139,7 +1139,7 @@ export interface paths {
     put?: never;
     /**
      * Revert a succeeded job where the revert is defined (E-25)
-     * @description Phase 1 defines the revert of ci.merge (the unmerge within 30 days, CI-12); every other kind, and a job that did not succeed, is 409. The bulk revert follows with BLK-02.
+     * @description Phase 1 defines the revert of ci.merge (the unmerge within 30 days, CI-12); every other kind, and a job that did not succeed, is 409. The bulk revert follows with BLK-02. A successful revert is recorded on the job (reverted_at, reverted_by); a second revert is 409 "the job is already reverted" (F-329).
      */
     post: operations['revertJob'];
     delete?: never;
@@ -8289,6 +8289,13 @@ export interface components {
       started_at?: string;
       /** Format: date-time */
       finished_at?: string;
+      /**
+       * Format: date-time
+       * @description When the succeeded job was reverted (POST /jobs/{id}/revert); absent while it is not.
+       */
+      reverted_at?: string;
+      /** @description The user who reverted the job; absent while it is not reverted. */
+      reverted_by?: string;
       /** @description Whether DELETE /jobs/{id} cancels the job now: true for a queued job and for a running job of a kind that can be cancelled while running (ci.bulk, history.snapshot, export), false otherwise. */
       cancellable: boolean;
     };
@@ -13533,13 +13540,16 @@ export interface operations {
           'application/json': {
             job_id: string;
             reverted: boolean;
+            /** Format: date-time */
+            reverted_at?: string;
+            reverted_by?: string;
           };
         };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The kind defines no revert, the job did not succeed, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the merge kind has no unmerge, or the merge no longer exists. */
+      /** @description The kind defines no revert, the job did not succeed, the job is already reverted, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the merge kind has no unmerge, or the merge no longer exists. */
       409: {
         headers: {
           [name: string]: unknown;

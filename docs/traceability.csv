@@ -915,3 +915,5 @@ MGT-04;[P3];B;backend/internal/maintenance/maintenance_scope_integration_test.go
 OPS-04;[B], [P5];A;backend/cmd/server/objectstorage_integration_test.go;WP-544
 NFR-05;[B];A;backend/cmd/server/objectstorage_integration_test.go;WP-544
 DIS-08;[Q];D;frontend/e2e-real/discovery-errors.spec.ts;WP-542
+API-09;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
+JOB-03;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553

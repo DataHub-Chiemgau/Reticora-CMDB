@@ -258,6 +258,12 @@ func (s *Service) fail(ctx context.Context, orgID, id string, cause error, retry
 	return failed, err
 }
 
+// MarkReverted records that user by reverted the succeeded job (F-329):
+// ErrAlreadyReverted when its revert is recorded already.
+func (s *Service) MarkReverted(ctx context.Context, orgID, id, by string) (*Job, error) {
+	return s.repo.MarkReverted(ctx, orgID, id, by, s.now())
+}
+
 // Cancellable reports whether Cancel would cancel the job now: a queued
 // job of every kind, a running job of a kind registered as Cancellable
 // (JOB-03, F-162); a finished job never.

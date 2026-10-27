@@ -52,6 +52,10 @@ type Repository interface {
 	// attempt had exceeded its timeout at t, longest running first; jobs
 	// without a timeout (tracked jobs) are not listed.
 	RunningOverdue(ctx context.Context, t time.Time, limit int) ([]Job, error)
+	// MarkReverted records the revert of a succeeded job by user at t;
+	// ErrAlreadyReverted when its revert is recorded already, ErrTransition
+	// when it did not succeed.
+	MarkReverted(ctx context.Context, orgID, id, by string, at time.Time) (*Job, error)
 }
 
 // MemoryRepository keeps jobs in memory (tests and --no-db mode).
@@ -244,6 +248,25 @@ func (r *MemoryRepository) RunningOverdue(_ context.Context, t time.Time, limit 
 		out = out[:limit]
 	}
 	return out, nil
+}
+
+// MarkReverted implements Repository.
+func (r *MemoryRepository) MarkReverted(_ context.Context, orgID, id, by string, at time.Time) (*Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, err := r.get(orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case j.RevertedAt != nil:
+		return nil, ErrAlreadyReverted
+	case j.Status != StatusSucceeded:
+		return nil, fmt.Errorf("%w: %s is not reverted", ErrTransition, j.Status)
+	}
+	j.RevertedAt, j.RevertedBy, j.UpdatedAt = &at, by, time.Now().UTC()
+	cp := *j
+	return &cp, nil
 }
 
 func applyUpdate(j *Job, u *Update) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -231,8 +232,19 @@ func (h *APIHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// revertResponse is the answer of a revert: the job and the revert it
+// records.
+type revertResponse struct {
+	JobID      string     `json:"job_id"`
+	Reverted   bool       `json:"reverted"`
+	RevertedAt *time.Time `json:"reverted_at,omitempty"`
+	RevertedBy string     `json:"reverted_by,omitempty"`
+}
+
 // Revert handles POST /api/v1/jobs/{id}/revert: only for kinds with a
-// defined revert (E-25) and succeeded jobs; otherwise 409.
+// defined revert (E-25) and succeeded jobs; otherwise 409. A successful
+// revert is recorded on the job (reverted_at, reverted_by); a job reverted
+// already is 409 (F-329).
 func (h *APIHandler) Revert(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := orgOf(w, r)
 	if !ok {
@@ -252,6 +264,10 @@ func (h *APIHandler) Revert(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrNotRevertible.Error()+": kind "+job.Kind+", status "+string(job.Status))
 		return
 	}
+	if job.RevertedAt != nil {
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrAlreadyReverted.Error())
+		return
+	}
 	if control == http.StatusForbidden {
 		api.WriteError(w, http.StatusForbidden, "Forbidden", "only the creator or a holder of the permission of the job kind may revert it")
 		return
@@ -268,5 +284,16 @@ func (h *APIHandler) Revert(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"job_id": job.ID, "reverted": true})
+	reverted, err := h.svc.MarkReverted(r.Context(), orgID, job.ID, tenant.FromContext(r.Context()).UserID)
+	switch {
+	case errors.Is(err, ErrAlreadyReverted):
+		// A concurrent revert recorded it first.
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrAlreadyReverted.Error())
+	case err != nil:
+		slog.ErrorContext(r.Context(), "job reverted, recording the revert failed", "job_id", job.ID, "error", err)
+		api.WriteRepoError(w, err)
+	default:
+		api.WriteJSON(w, http.StatusOK, revertResponse{JobID: job.ID, Reverted: true,
+			RevertedAt: reverted.RevertedAt, RevertedBy: reverted.RevertedBy})
+	}
 }

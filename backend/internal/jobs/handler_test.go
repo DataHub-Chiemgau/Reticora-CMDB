@@ -165,11 +165,39 @@ func TestJobAPIRevert(t *testing.T) {
 	if w := f.call("POST", "/api/v1/jobs/"+merge.ID+"/revert", "bob"); w.Code != http.StatusForbidden {
 		t.Errorf("stranger: %d", w.Code)
 	}
-	if w := f.call("POST", "/api/v1/jobs/"+merge.ID+"/revert", "bob", identity.PermCIDelete); w.Code != http.StatusOK {
+	if w := f.call("POST", "/api/v1/jobs/"+merge.ID+"/revert", "bob", identity.PermCIDelete); w.Code != http.StatusOK ||
+		!strings.Contains(w.Body.String(), `"reverted":true`) || !strings.Contains(w.Body.String(), `"reverted_by":"bob"`) ||
+		!strings.Contains(w.Body.String(), `"reverted_at":"`) {
 		t.Errorf("revert: %d %s", w.Code, w.Body.String())
 	}
 	if len(f.reverted) != 1 || f.reverted[0] != merge.ID {
 		t.Errorf("reverted %v", f.reverted)
+	}
+	// The job records the revert (F-329, WP-553) ...
+	var got struct {
+		Status     Status     `json:"status"`
+		RevertedAt *time.Time `json:"reverted_at"`
+		RevertedBy string     `json:"reverted_by"`
+	}
+	w := f.call("GET", "/api/v1/jobs/"+merge.ID, "alice")
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusOK ||
+		got.RevertedAt == nil || got.RevertedBy != "bob" || got.Status != StatusSucceeded {
+		t.Errorf("reverted job: %d %s", w.Code, w.Body.String())
+	}
+	// ... and a second revert, by its creator too, is 409 "already
+	// reverted" without running the reverter again.
+	for _, who := range []string{"alice", "bob"} {
+		w = f.call("POST", "/api/v1/jobs/"+merge.ID+"/revert", who, identity.PermCIDelete)
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "already reverted") {
+			t.Errorf("second revert by %s: %d %s", who, w.Code, w.Body.String())
+		}
+	}
+	if len(f.reverted) != 1 {
+		t.Errorf("the reverter ran again: %v", f.reverted)
+	}
+	// A job that was not reverted carries neither field.
+	if w = f.call("GET", "/api/v1/jobs/"+bulk.ID, "alice"); strings.Contains(w.Body.String(), "reverted_") {
+		t.Errorf("job without revert: %s", w.Body.String())
 	}
 }
 

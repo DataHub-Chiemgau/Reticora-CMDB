@@ -73,6 +73,11 @@ type Job struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 	StartedAt      *time.Time `json:"started_at,omitempty"`
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	// RevertedAt and RevertedBy record the revert of a succeeded job
+	// (POST /jobs/{id}/revert, F-329); RevertedBy is a surrogate of the
+	// user like CreatedBy. Both are empty for a job that was not reverted.
+	RevertedAt *time.Time `json:"reverted_at,omitempty"`
+	RevertedBy string     `json:"reverted_by,omitempty"`
 	// Scope is the scope snapshot of the job; nil for a job without one.
 	Scope *Scope `json:"-"`
 	// Cancellable reports whether DELETE /jobs/{id} would cancel the job
@@ -183,4 +188,6 @@ var (
 	ErrNotCancellable = errors.New("the job kind cannot be cancelled while running")
 	// ErrUnknownKind: no kind of that name is registered.
 	ErrUnknownKind = errors.New("unknown job kind")
+	// ErrAlreadyReverted: the job's revert is recorded already (F-329).
+	ErrAlreadyReverted = errors.New("the job is already reverted")
 )
