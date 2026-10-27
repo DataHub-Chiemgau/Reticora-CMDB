@@ -4,7 +4,8 @@
  * a hint that the audit entries need audit:read.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { screen, within } from '@testing-library/react';
+import { act, screen, within } from '@testing-library/react';
+import i18n from '../../i18n';
 import { renderWithProviders } from '../../test/utils';
 import { CIHistorySection } from './CIDetailSections';
 
@@ -156,6 +157,45 @@ describe('CIHistorySection', () => {
     ]);
     expect(within(entries[1]!).getByText('update · name')).toBeTruthy();
     expect(within(entries[1]!).queryAllByRole('listitem')).toHaveLength(0);
+  });
+
+  it('shows a status change with the catalog labels, not the raw values (WP-523, GLO-10)', async () => {
+    const statusChange = {
+      id: 'c4',
+      organization_id: ORG_ID,
+      entity_type: 'ci',
+      entity_id: CI_ID,
+      change_type: 'status_change',
+      field_name: 'status',
+      old_value: 'active',
+      new_value: 'maintenance',
+      created_at: '2026-10-23T10:00:00Z',
+      source: 'ci_change',
+      change_kind: 'status_changed',
+      change_set_id: '44444444-4444-4444-4444-444444444444',
+      field_changes: [{ field: 'status', old: 'active', new: 'maintenance' }],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async () => json(page([statusChange], true))),
+    );
+
+    const { container } = renderWithProviders(<CIHistorySection ciId={CI_ID} />);
+
+    expect(await screen.findByText('status: Aktiv → Wartung')).toBeTruthy();
+    expect(container.textContent).not.toContain('maintenance');
+    expect(container.textContent).not.toContain('active');
+    await act(async () => {
+      await i18n.changeLanguage('en-US');
+    });
+    try {
+      expect(await screen.findByText('status: Active → Maintenance')).toBeTruthy();
+      expect(container.textContent).not.toContain('maintenance');
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage('de-DE');
+      });
+    }
   });
 
   it('still reports a failed load', async () => {

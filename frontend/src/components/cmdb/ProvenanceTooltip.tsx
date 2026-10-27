@@ -7,6 +7,7 @@
 import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { components } from '../../api/generated/schema';
+import { fieldValueText } from './fieldValue';
 
 export type CIFieldProvenance = components['schemas']['CIFieldProvenance'];
 
@@ -66,7 +67,7 @@ export function ProvenanceTooltip({ provenance }: { provenance: CIFieldProvenanc
                 <dd>{provenance.override_author || '—'}</dd>
                 <dt className="text-muted">{t('provenance.covers')}</dt>
                 <dd>
-                  {display(provenance.discovered_value)}
+                  {fieldValueText(t, provenance.field, provenance.discovered_value, display)}
                   {provenance.discovered_source ? ` (${provenance.discovered_source})` : ''}
                 </dd>
               </>

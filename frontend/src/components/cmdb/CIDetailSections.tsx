@@ -23,6 +23,7 @@ import { ApiError } from '../../api/client';
 import type { MetricPoint } from '../../api/client';
 import { useCIMetrics } from '../../api/hooks';
 import { ProvenanceTooltip } from './ProvenanceTooltip';
+import { fieldValueText } from './fieldValue';
 import type { FieldDefinition, FieldError } from '../../lib/fieldmeta';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -217,6 +218,11 @@ export function InstanceFieldsSection({
 
 // ─── Field provenance / overrides (§13) ──────────────────────────────────────
 
+/** jsonValue renders a provenance value as JSON; no value is "—". */
+function jsonValue(value: unknown): string {
+  return JSON.stringify(value) ?? '—';
+}
+
 export function ProvenanceSection({ ciId }: { ciId: string }) {
   const { t } = useTranslation();
   // Every typed field with its source, time and selection reason (REC-10).
@@ -292,20 +298,29 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
                   {t('ci.discovered', 'Discovery')}
                 </dt>
                 <dd className="font-mono">
-                  {JSON.stringify(fv.reason === 'override' ? fv.discovered_value : fv.value) ?? '—'}
+                  {fieldValueText(
+                    t,
+                    fv.field,
+                    fv.reason === 'override' ? fv.discovered_value : fv.value,
+                    jsonValue,
+                  )}
                 </dd>
               </div>
               <div>
                 <dt className="text-gray-500 dark:text-gray-400">{t('ci.override', 'Override')}</dt>
                 <dd className="font-mono">
-                  {fv.reason === 'override' ? JSON.stringify(fv.value) : '—'}
+                  {fv.reason === 'override'
+                    ? fieldValueText(t, fv.field, fv.value, jsonValue)
+                    : '—'}
                 </dd>
               </div>
               <div>
                 <dt className="text-gray-500 dark:text-gray-400">
                   {t('ci.effective', 'Effektiv')}
                 </dt>
-                <dd className="font-mono font-semibold">{JSON.stringify(fv.value) ?? '—'}</dd>
+                <dd className="font-mono font-semibold">
+                  {fieldValueText(t, fv.field, fv.value, jsonValue)}
+                </dd>
               </div>
             </dl>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -665,7 +680,7 @@ export function CIHistorySection({ ciId }: { ciId: string }) {
                 <ul className="basis-full space-y-0.5 pl-4 text-gray-700 dark:text-gray-300">
                   {entry.field_changes.map((change) => (
                     <li key={change.field} className="break-all">
-                      {`${change.field}: ${historyValue(change.old)} → ${historyValue(change.new)}`}
+                      {`${change.field}: ${fieldValueText(t, change.field, change.old, historyValue)} → ${fieldValueText(t, change.field, change.new, historyValue)}`}
                     </li>
                   ))}
                 </ul>

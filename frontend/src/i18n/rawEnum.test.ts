@@ -13,6 +13,14 @@
  * (no-restricted-syntax in eslint.config.js) for src/pages/** and
  * src/components/**; the negative fixture below goes through ESLint with the
  * project configuration.
+ *
+ * WP-523: the scan above sees `{x.status}` only. Where the field name is data
+ * (the provenance rows, the field changes of the history, the value an
+ * override covers) the CI status reached the page as `"maintenance"` through
+ * JSON.stringify(fv.value) and `${historyValue(change.new)}`; the real-stack
+ * test e2e-real/i18n.spec.ts found it. The second scan below requires such a
+ * field value to go through fieldValueText (components/cmdb/fieldValue.ts),
+ * which shows the catalog label of a catalog-keyed field.
  */
 import { ESLint } from 'eslint';
 import ts from 'typescript';
@@ -93,6 +101,99 @@ export function Fixture({ item, x, form, t }) {
 }
 `;
 
+// Members that hold the value of a field whose name is data: provenance
+// (value, discovered_value), history (old, new, old_value, new_value).
+const FIELD_VALUE_PROPERTIES = new Set([
+  'value',
+  'discovered_value',
+  'old',
+  'new',
+  'old_value',
+  'new_value',
+]);
+
+// fieldValueExpressions returns every JSX child that renders a field value
+// (a FIELD_VALUE_PROPERTIES member or JSON.stringify(...)) that does not go
+// through fieldValueText(...). Nested JSX is checked as its own child, t()
+// is a catalog lookup; neither is searched from the outer child.
+function fieldValueExpressions(fileName: string, source: string): RawEnum[] {
+  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const found: RawEnum[] = [];
+  const isCallTo = (node: ts.Node, name: string) =>
+    ts.isCallExpression(node) && node.expression.getText(sf) === name;
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isJsxExpression(node) &&
+      node.expression &&
+      (ts.isJsxElement(node.parent) || ts.isJsxFragment(node.parent))
+    ) {
+      let property = '';
+      const search = (inner: ts.Node) => {
+        if (property) return;
+        if (
+          ts.isJsxElement(inner) ||
+          ts.isJsxSelfClosingElement(inner) ||
+          ts.isJsxFragment(inner) ||
+          isCallTo(inner, 't') ||
+          isCallTo(inner, 'fieldValueText')
+        ) {
+          return;
+        }
+        if (isCallTo(inner, 'JSON.stringify')) {
+          property = 'JSON.stringify';
+          return;
+        }
+        if (ts.isPropertyAccessExpression(inner) && FIELD_VALUE_PROPERTIES.has(inner.name.text)) {
+          property = inner.name.text;
+          return;
+        }
+        ts.forEachChild(inner, search);
+      };
+      search(node.expression);
+      if (property) {
+        found.push({
+          line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+          property,
+          text: node.getText(sf).replace(/\s+/g, ' '),
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
+
+// Field values shown without the catalog on purpose, by file and JSX child:
+// the attribute JSON of a CI (free metamodel values, no catalog keys), the
+// result payload of a job (technical JSON) and the latest metric sample (a
+// number). An entry that no longer matches fails, so the list only shrinks.
+const FIELD_VALUE_ALLOWLIST: Record<string, readonly string[]> = {
+  '../pages/CIDetailPage.tsx': ['{JSON.stringify(ci.attributes, null, 2)}'],
+  '../pages/JobCenterPage.tsx': ['{JSON.stringify(shown?.result, null, 2)}'],
+  '../components/cmdb/CIDetailSections.tsx': ["{latest ? latest.value : '–'}"],
+};
+
+const FIELD_VALUE_FIXTURE = `
+export function Fixture({ fv, change, entry, rows, t }) {
+  return (
+    <dl>
+      <dd>{JSON.stringify(fv.value) ?? '—'}</dd>
+      <dd>{fv.reason === 'override' ? fv.discovered_value : '—'}</dd>
+      <li>{\`\${change.field}: \${show(change.old)} → \${show(change.new)}\`}</li>
+      <dd>{entry.new_value}</dd>
+      <dd>{fieldValueText(t, fv.field, fv.value, show)}</dd>
+      <li>{\`\${change.field}: \${fieldValueText(t, change.field, change.new, show)}\`}</li>
+      <dd>{t('ci.value', { value: fv.value })}</dd>
+      <Input value={fv.value} />
+      {rows.map((row) => (
+        <span key={row.id}>{row.name}</span>
+      ))}
+    </dl>
+  );
+}
+`;
+
 describe('raw enum values in JSX', () => {
   it('detects raw enum expressions in the negative fixture', () => {
     expect(rawEnumExpressions('Fixture.tsx', NEGATIVE_FIXTURE)).toEqual([
@@ -131,6 +232,54 @@ describe('raw enum values in JSX', () => {
       }
     }
     expect(offenders, 'use t(<domain>.statuses.<value>, value)').toEqual([]);
+    expect(stale, 'remove allowlist entries that no longer match').toEqual([]);
+  });
+});
+
+describe('field values in JSX (WP-523)', () => {
+  it('detects field values without fieldValueText in the negative fixture', () => {
+    expect(
+      fieldValueExpressions('Fixture.tsx', FIELD_VALUE_FIXTURE).map(({ line, property }) => ({
+        line,
+        property,
+      })),
+    ).toEqual([
+      { line: 5, property: 'JSON.stringify' },
+      { line: 6, property: 'discovered_value' },
+      { line: 7, property: 'old' },
+      { line: 8, property: 'new_value' },
+    ]);
+  });
+
+  it('detects the provenance and history values of the CI detail before WP-523', () => {
+    const before = `
+      <dl>
+        <dd className="font-mono font-semibold">{JSON.stringify(fv.value) ?? '—'}</dd>
+        <li>{\`\${change.field}: \${historyValue(change.old)} → \${historyValue(change.new)}\`}</li>
+        <dd>{display(provenance.discovered_value)}</dd>
+      </dl>`;
+    expect(fieldValueExpressions('Before.tsx', before).map((hit) => hit.property)).toEqual([
+      'JSON.stringify',
+      'old',
+      'discovered_value',
+    ]);
+  });
+
+  it('shows no field value without fieldValueText outside the allowlist', () => {
+    const offenders: string[] = [];
+    const stale: string[] = [];
+    for (const [file, source] of Object.entries(sources)) {
+      if (isTestFile(file)) continue;
+      const allowed = FIELD_VALUE_ALLOWLIST[file] ?? [];
+      const hits = fieldValueExpressions(file, source);
+      for (const hit of hits) {
+        if (!allowed.includes(hit.text)) offenders.push(`${file}:${hit.line} ${hit.text}`);
+      }
+      for (const text of allowed) {
+        if (!hits.some((hit) => hit.text === text)) stale.push(`${file} ${text}`);
+      }
+    }
+    expect(offenders, 'use fieldValueText(t, field, value, format)').toEqual([]);
     expect(stale, 'remove allowlist entries that no longer match').toEqual([]);
   });
 });

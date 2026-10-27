@@ -211,8 +211,15 @@ describe('CI type labels on the CI detail page', () => {
 
   const emptyList = { data: [], total: 0, limit: 50, offset: 0, has_more: false };
 
-  /** Answers by exact API path; types are what GET /ci-types lists. */
-  function stubBackend(types: unknown[] = [serverType]) {
+  /**
+   * Answers by exact API path; types are what GET /ci-types lists. routes
+   * answer further paths (before the empty lists of the CI's sections) and
+   * ci replaces the CI record.
+   */
+  function stubBackend(
+    types: unknown[] = [serverType],
+    { ci = serverCI, routes = {} }: { ci?: unknown; routes?: Record<string, unknown> } = {},
+  ) {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const raw = typeof input === 'string' ? input : input.toString();
       const path = new URL(raw, 'http://localhost').pathname.replace(/^\/api\/v1/, '');
@@ -221,7 +228,10 @@ describe('CI type labels on the CI detail page', () => {
         return json({ data: types, total: types.length, limit: 200, offset: 0, has_more: false });
       }
       if (path === `/cis/${CI_ID}`) {
-        return json(serverCI);
+        return json(ci);
+      }
+      if (method === 'GET' && path in routes) {
+        return json(routes[path]);
       }
       if (path === `/topology/cis/${CI_ID}/neighbors`) {
         return json({ nodes: [], edges: [] });
@@ -286,6 +296,75 @@ describe('CI type labels on the CI detail page', () => {
     expect(screen.queryByText('Server (physisch)')).not.toBeInTheDocument();
     expect(screen.getByText('CI Type').closest('div')).toHaveTextContent('Server (physical)');
     expect(document.body.textContent ?? '').not.toContain(SERVER_TYPE_ID);
+  });
+
+  it('shows a CI in status maintenance without the raw status value (WP-523, GLO-10)', async () => {
+    // What the API answers for a CI created with status maintenance (as in
+    // e2e-real/i18n.spec.ts): the provenance lists every typed field of the
+    // record (BuildProvenance, REC-10) including status, the history holds
+    // the create change and the ci.created audit entry with the record.
+    const maintenanceCI = { ...serverCI, status: 'maintenance', health: 'unknown' };
+    const recorded = { source: 'manual', rank: 100, reason: 'record', diverged: false };
+    stubBackend([serverType], {
+      ci: maintenanceCI,
+      routes: {
+        [`/cis/${CI_ID}/provenance`]: {
+          data: [
+            { field: 'name', value: maintenanceCI.name, ...recorded },
+            { field: 'status', value: 'maintenance', ...recorded },
+          ],
+          total: 2,
+          limit: 2,
+          offset: 0,
+          has_more: false,
+        },
+        [`/history/ci/${CI_ID}`]: {
+          data: [
+            {
+              id: 'a-1',
+              entity_type: 'ci',
+              entity_id: CI_ID,
+              change_type: 'ci.created',
+              new_value: { after: maintenanceCI },
+              created_at: '2026-01-01T00:00:01Z',
+              source: 'audit',
+            },
+            {
+              id: 'c-1',
+              entity_type: 'ci',
+              entity_id: CI_ID,
+              change_type: 'create',
+              new_value: maintenanceCI,
+              change_kind: 'created',
+              change_set_id: 'set-1',
+              created_at: '2026-01-01T00:00:00Z',
+              source: 'ci_change',
+            },
+          ],
+          total: 2,
+          limit: 50,
+          offset: 0,
+          has_more: false,
+          audit_included: true,
+        },
+      },
+    });
+    const { container } = renderServer();
+
+    expect(await screen.findByRole('heading', { name: 'srv-label-01' })).toBeInTheDocument();
+    // The provenance row of the status shows the catalog label.
+    expect(
+      await screen.findByRole('button', { name: 'Herkunft von status' }, { timeout: 2000 }),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText('ci.created').length).toBeGreaterThan(0));
+    expect(container.textContent ?? '').toContain('Wartung');
+    expect(container.textContent ?? '').not.toContain('maintenance');
+
+    await act(async () => {
+      await i18n.changeLanguage('en-US');
+    });
+    await waitFor(() => expect(container.textContent ?? '').toContain('Maintenance'));
+    expect(container.textContent ?? '').not.toContain('maintenance');
   });
 
   it('falls back to the type name without a display name', async () => {
