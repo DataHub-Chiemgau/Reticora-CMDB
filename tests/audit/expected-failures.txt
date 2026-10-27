@@ -15,7 +15,6 @@ go;backend/internal/server;TestAuditClientTechnicianListsOwnClients;F-373
 go;backend/internal/server;TestAuditReviewMergeIntoDeletedCandidateIsNotFound;F-371
 go;backend/internal/server;TestAuditReviewMergeJobErrorIsSanitized;F-372
 go;backend/internal/stocktake;TestAuditStocktakeOrgWideWritesNeedOrgWideScope;F-365
-go;backend/internal/tenant/rls;TestAuditCollectorBindingMovesUnmatchedResults;F-363
 sh;tests/audit/g1-gate-evidence.test.sh;abn01_texts;F-138
 sh;tests/audit/g1-gate-evidence.test.sh;install_evidence_current;F-122
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_field;F-039

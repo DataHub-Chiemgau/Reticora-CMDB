@@ -940,3 +940,4 @@ NFR-07;[B];C;frontend/e2e/mobile-actions.spec.ts;WP-532
 SEC-06;[B];A;frontend/e2e-real/key-rotation.spec.ts;WP-642
 DIS-08;[Q];D;collector/collectorcmd/discovery_errors_test.go;WP-641
 COL-02;[B];D;collector/collectorcmd/redfish_tls_integration_test.go;WP-641
+TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_test.go;WP-636
