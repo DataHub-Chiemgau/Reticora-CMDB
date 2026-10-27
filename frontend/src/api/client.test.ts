@@ -345,4 +345,48 @@ describe('complete lists over several pages (API-02)', () => {
     await expect(documentApi.getLinks('doc-1')).resolves.toMatchObject([{ id: 'link-1' }]);
     await expect(aiApi.conversations()).resolves.toMatchObject([{ id: 'conv-1' }]);
   });
+
+  // F-362: /collectors and /sites page by offset only (no next_cursor) and
+  // answer at most 200 rows per page; the complete list follows the offset.
+  it.each([
+    ['collectorApi', '/api/v1/collectors'],
+    ['siteApi', '/api/v1/sites'],
+  ] as const)(
+    '%s.listAll follows the offset when the list has no cursor: 450 rows in three pages',
+    async (api, path) => {
+      const rows = Array.from({ length: 450 }, (_, i) => ({ id: `row-${i}`, name: `row ${i}` }));
+      const fetchMock = vi.fn((input: RequestInfo | URL) => {
+        const url = new URL(String(input), 'http://localhost');
+        if (url.pathname !== path) {
+          return Promise.resolve(jsonResponse({ detail: 'unexpected' }, 404));
+        }
+        // The server caps the limit at 200 (parameter Limit) and sends no cursor.
+        const limit = Math.min(Number(url.searchParams.get('limit') ?? 50), 200);
+        const offset = Number(url.searchParams.get('offset') ?? 0);
+        return Promise.resolve(
+          jsonResponse({
+            data: rows.slice(offset, offset + limit),
+            total: rows.length,
+            limit,
+            offset,
+            has_more: offset + limit < rows.length,
+          }),
+        );
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      await importClientWithSession();
+      const client = await import('./client');
+
+      const all = await client[api].listAll();
+
+      expect(all).toHaveLength(450);
+      expect(new Set(all.map((row) => row.id)).size).toBe(450);
+      const offsets = fetchMock.mock.calls.map((call) => {
+        const url = new URL(String(call[0]), 'http://localhost');
+        expect(url.searchParams.get('limit')).toBe('200');
+        return url.searchParams.get('offset') ?? '0';
+      });
+      expect(offsets).toEqual(['0', '200', '400']);
+    },
+  );
 });

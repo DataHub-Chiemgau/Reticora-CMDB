@@ -87,18 +87,10 @@ interface Deviation {
 
 // KNOWN_DEVIATIONS lists, per spec file, contract violations of the page
 // itself that the server tolerates and that are reported as findings of
-// their own (fixed outside WP-530). They are answered like a conforming
-// request and do not fail the test; any other violation does.
-export const KNOWN_DEVIATIONS: Record<string, Deviation[]> = {
-  'login-roundtrip.spec.ts': [
-    {
-      message: 'GET /api/v1/collectors: query parameter limit: / must be <= 200',
-      why:
-        'DashboardPage asks for limit=1000; the server caps limit at 200 (parameter Limit), ' +
-        'so the collector widget counts at most 200 collectors (finding of WP-530)',
-    },
-  ],
-};
+// their own. They are answered like a conforming request and do not fail
+// the test; any other violation does. Empty since F-362 (the dashboard asked
+// for limit=1000) is fixed.
+export const KNOWN_DEVIATIONS: Record<string, Deviation[]> = {};
 
 // Every product module is licensed in the mocked tenant, so the navigation
 // and the command palette show all pages.

@@ -2,7 +2,7 @@
 
 Gemeinsame Befundliste der Korrektur G1 nach Konvention 16 des Korrekturplans ([`implementierungsplan.md`](../../docs/plan/g1-korrektur/implementierungsplan.md#konventionen-für-alle-wps)): Defekte, die während der Umsetzung der Korrektur-WPs oder in der Wiederholungsprüfung (K7: WP-596 bis WP-599) neu gefunden werden. Die IDs setzen die Nummerierung von [`PHASE1_FINDINGS.md`](../phase1-final/PHASE1_FINDINGS.md) fort (F-354 ist dort vergeben). Format, Prioritäten und Begriffe wie dort: P0 Sicherheitsrisiko, schwerer Datenverlust oder zentraler Prozess blockiert; P1 wesentliche Funktion fehlt/falsch/unzuverlässig; P2 relevante funktionale, Validierungs- oder UX-Einschränkung; P3 geringfügiger Mangel. „Ursache belegt“ heißt: durch einen ausgeführten Test oder eine reproduzierte Probe nachgewiesen.
 
-Die Befunde F-355 bis F-361 sind bei der Umsetzung von K4 (Funktions-, Validierungs- und Bedienmängel) gefunden worden; das Feld „Gefunden in“ nennt das K4-WP. Jeder Befund ist mit einem Defekttest kodiert, der auf dem Stand `d6e768c` rot ist, und erhält ein Korrektur-WP im Abschnitt [K4-Nachträge](../../docs/plan/g1-korrektur/implementierungsplan.md#k4-nachträge) (WP-630 bis WP-634).
+Die Befunde F-355 bis F-362 sind bei der Umsetzung von K4 (Funktions-, Validierungs- und Bedienmängel) gefunden worden; das Feld „Gefunden in“ nennt das K4-WP. Jeder Befund ist mit einem Defekttest kodiert und erhält ein Korrektur-WP im Abschnitt [K4-Nachträge](../../docs/plan/g1-korrektur/implementierungsplan.md#k4-nachträge) (WP-630 bis WP-635). Die Defekttests von F-355 bis F-361 sind auf dem Stand `d6e768c` rot, die von F-362 (nachgetragen am 2026-10-27) auf `1d8c93a`.
 
 Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `tests/audit/expected-failures.txt` (Ratchet, `tests/audit/run-auditdefect.sh`). Die a11y-Befunde sind in `frontend/e2e/a11y.spec.ts` (gemockter Playwright-Lauf, CI-Job `e2e`) mit `test.fail` und der Befund-ID markiert: Der markierte Fall muss scheitern, ein markierter Fall, der besteht, macht den Lauf rot. Diese Marken sind ihr eigener Ratchet; der Ratchet von WP-337 vergleicht nur die Arten `go`, `sh`, `vitest` und `e2e-real`, daher erhalten sie keine Zeile in `expected-failures.txt`.
 
@@ -12,9 +12,9 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 |---|---:|
 | P0 | 0 |
 | P1 | 0 |
-| P2 | 7 |
+| P2 | 8 |
 | P3 | 0 |
-| **Summe** | **7** |
+| **Summe** | **8** |
 
 ## Übersicht
 
@@ -27,6 +27,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-359](#f-359) | P2 | Client-gebundener Inhaber von `user:manage` ändert Name, Zeitzone, Währung, Sprache und Einstellungen der Organisation | WP-463 | belegt | backend/internal/tenantapi/k4_org_fields_auditdefect_test.go TestAuditK4OrgFieldsRequireOrgWideUserManage | WP-633 |
 | [F-360](#f-360) | P2 | Höhenprüfung des Racks übersieht Mounts, die der Aufrufer nicht sieht: gescopter Nutzer verkleinert ein Rack unter belegte HE | WP-500 | belegt | backend/internal/rack/k4_scoped_mounts_auditdefect_test.go TestAuditK4RackHeightCoversInvisibleMounts | WP-634 |
 | [F-361](#f-361) | P2 | Rote Löschaktionen im Standortbaum ohne Dark-Variante unterschreiten den WCAG-AA-Kontrast | WP-522 (Nachprüfung nach WP-523) | belegt | frontend/e2e/a11y.spec.ts (`test.fail` F-361, /locations dunkel) | WP-630 |
+| [F-362](#f-362) | P2 | Dashboard und Karte fragen mehr als 200 Einträge je Seite an und zeigen höchstens 200 Collectors bzw. Standorte | WP-530 | belegt | frontend/src/api/listLimit.test.ts, frontend/src/api/client.test.ts (`listAll`), DashboardPage.test.tsx, MapPage.test.tsx | WP-635 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -118,6 +119,19 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 - **Empfehlung:** `dark:text-red-400` (oder die gemeinsame Gefahr-Klasse) für Textaktionen; Marke F-361 entfernen.
 - **Retest (verbindlich):** `a11y.spec.ts` ohne die Marke F-361 in allen Browser-Projekten grün, in de-DE und en-US.
 - **Kodierender Test:** frontend/e2e/a11y.spec.ts, Marke `F_DANGER_CONTRAST` an /locations (dunkel); lokal ausgeführt: scheitert in chromium.
+
+<a id="f-362"></a>
+### F-362 (P2) – Dashboard und Karte fragen mehr als 200 Einträge je Seite an und zeigen höchstens 200 Collectors bzw. Standorte
+
+- **Gefunden in:** WP-530 (`t7-e2e-strict-mocks`) · **Betroffene Anforderungen:** API-02, UI-01 bis UI-10 (Dashboard; die Standortkarte ist nach LOC-09 [P4]) · **Komponente:** frontend/src/pages/DashboardPage.tsx (`useCollectors({ limit: 1000 })` im Collector-Widget und im Einrichtungsbanner), frontend/src/pages/MapPage.tsx (`siteApi.list({ limit: 500 })`), frontend/src/api/client.ts (`fetchAllPages` folgt nur `next_cursor`) · **Quelle:** Vertragsprüfung des strikten Mock-Backends (`login-roundtrip.spec.ts`: „GET /api/v1/collectors: query parameter limit: / must be <= 200“), dort bis zur Korrektur in `KNOWN_DEVIATIONS` toleriert
+- **Reproduktion:** Organisation mit 250 Collectors (240 aktiv) bzw. 230 Standorten mit Koordinaten; der Server begrenzt `limit` auf 200 (Parameter `Limit`, API-02) und liefert für `/collectors` und `/sites` keinen `next_cursor`. Das Dashboard zeigt „Collectors online“ höchstens 200, die Karte höchstens 200 Marker.
+- **Soll:** API-02: Listen sind paginiert, höchstens 200 Einträge je Seite. Eine Ansicht, die die vollständige Menge braucht (Zählung aktiver Collectors, alle Standorte der Karte), liest alle Seiten.
+- **Ist:** Die Seiten fragen eine einzige Seite mit `limit=1000` bzw. `limit=500` an und werten die auf 200 gekürzte Antwort als vollständig. Der gemeinsame Helfer `fetchAllPages` folgt nur `next_cursor`; Listen ohne Cursor (Collectors, Standorte) liest er ebenfalls nur bis zur ersten Seite.
+- **Nutzerwirkung:** Ab 201 Collectors zählt das Dashboard zu wenig Collectors online; ab 201 Standorten fehlen Standorte auf der Karte, ohne Hinweis.
+- **Ursache (belegt):** Seitengröße über dem API-Maximum ohne Folgeseiten; `fetchAllPages` ohne Offset-Paging für Listen ohne Cursor.
+- **Empfehlung:** `fetchAllPages` folgt bei fehlendem Cursor dem Offset, solange `has_more` gesetzt ist; Dashboard und Karte lesen über `collectorApi.listAll` und `siteApi.listAll`; das Einrichtungsbanner braucht nur `total` (`limit=1`). Ein Source-Scan verbietet Literal-Limits über 200; `KNOWN_DEVIATIONS` wird leer.
+- **Retest (verbindlich):** `cd frontend && npx vitest run src/api/listLimit.test.ts src/api/client.test.ts src/pages/DashboardPage.test.tsx src/pages/MapPage.test.tsx` → grün; gemockter Playwright-Lauf (`login-roundtrip.spec.ts`, `contract.spec.ts`) ohne Eintrag in `KNOWN_DEVIATIONS` grün.
+- **Kodierender Test:** reguläre Tests, mit der Korrektur eingeführt und auf `1d8c93a` (Produktionscode vor WP-635) rot ausgeführt: `src/api/listLimit.test.ts` (findet `DashboardPage.tsx:88`, `DashboardPage.tsx:205`, `MapPage.tsx:91`), `client.test.ts` „collectorApi/siteApi.listAll follows the offset …“ (200 statt 450), `DashboardPage.test.tsx` „counts every active collector, also beyond the 200 of one page“, `MapPage.test.tsx` „shows every site, also beyond the 200 of one page“.
 
 ## Geprüfte Kandidaten ohne neuen Befund
 

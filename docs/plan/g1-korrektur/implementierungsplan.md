@@ -36,11 +36,11 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K3 Installation, Betrieb und Gate-Nachweise](#k3-installation-betrieb-und-gate-nachweise) | WP-427 – WP-459 | 33 | 48,5 | Installer-, Zertifikats-, K8s-, Backup- und Monitoring-Befunde behoben; Gate- und Abnahmedokumente führen jeden betroffenen Punkt mit Zwischenstand (offen mit Korrektur-WP oder belegt PASS); den Endstand stellt K7 her. |
 | [K3-Nachträge](#k3-nachträge) | WP-607 – WP-612 | 6 | 8,5 | Funde aus den Lastläufen von WP-439 behoben: Attribut-Indexe je Schlüssel (E-73), Beziehungsliste, heißer Pfad (`last_used_at`, JIT), Impact-CPU, Wiederentdeckung (F-118); drei Läufe halten jedes Budget im Median (E-58). |
 | [K4 Funktions-, Validierungs- und Bedienmängel](#k4-funktions--validierungs--und-bedienmängel) | WP-460 – WP-531 | 72 | 99,0 | Alle übrigen P2 behoben. |
-| [K4-Nachträge](#k4-nachträge) | WP-630 – WP-634 | 5 | 6,5 | Funde aus der Umsetzung von K4 behoben (F-355 bis F-361): Kontrast im dunklen Thema, Kartenmarker und Scrollbereiche per Tastatur (a11y-Prüfung in de-DE und en-US), Ausführung ad-hoc angelegter Discovery-Jobs, `PATCH /org` nur org-weit, Rackhöhe gegen alle Mounts. |
+| [K4-Nachträge](#k4-nachträge) | WP-630 – WP-635 | 6 | 7,0 | Funde aus der Umsetzung von K4 behoben (F-355 bis F-362): Kontrast im dunklen Thema, Kartenmarker und Scrollbereiche per Tastatur (a11y-Prüfung in de-DE und en-US), Ausführung ad-hoc angelegter Discovery-Jobs, `PATCH /org` nur org-weit, Rackhöhe gegen alle Mounts, vollständige Listen statt Seitengrößen über 200. |
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **282** | **385,0** | |
+| **Summe** | | **283** | **385,5** | |
 
 ```mermaid
 flowchart LR
@@ -51,7 +51,7 @@ flowchart LR
     K3["K3 Installation, Betrieb und Gate-Nachweise<br/>33 WPs · 48,5 PT"]
     K3N["K3-Nachträge<br/>6 WPs · 8,5 PT"]
     K4["K4 Funktions-, Validierungs- und Bedienmängel<br/>72 WPs · 99,0 PT"]
-    K4N["K4-Nachträge<br/>5 WPs · 6,5 PT"]
+    K4N["K4-Nachträge<br/>6 WPs · 7,0 PT"]
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
@@ -417,6 +417,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-632](#wp-632--ad-hoc-angelegte-discovery-jobs-ausführen-oder-die-anlage-zurücknehmen) | `k4n-discovery-job-run` | Ad-hoc angelegte Discovery-Jobs ausführen oder die Anlage zurücknehmen | K4N | 2,0 | F-358 | WP-502 |
 | [WP-633](#wp-633--patch-org-nur-für-org-weite-inhaber-von-usermanage) | `k4n-org-fields-scope` | PATCH /org nur für org-weite Inhaber von user:manage | K4N | 1,0 | F-359 | WP-463 |
 | [WP-634](#wp-634--rackhöhe-gegen-alle-mounts-prüfen-auch-gegen-die-für-den-aufrufer-unsichtbaren) | `k4n-rack-height-scope` | Rackhöhe gegen alle Mounts prüfen, auch gegen die für den Aufrufer unsichtbaren | K4N | 1,0 | F-360 | WP-500 |
+| [WP-635](#wp-635--vollständige-listen-für-dashboard-und-karte-keine-seitengröße-über-200) | `k4n-list-pages` | Vollständige Listen für Dashboard und Karte, keine Seitengröße über 200 | K4N | 0,5 | F-362 | WP-530 |
 
 ## Konventionen für alle WPs
 
@@ -13109,8 +13110,9 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-531
 
 ## K4-Nachträge
 
-Funde aus der Umsetzung von K4, die kein K4-WP abdeckt (Konvention 16). Die Befunde F-355 bis F-361 stehen in der gemeinsamen Befundliste [`audit/g1-reaudit/FINDINGS.md`](../../../audit/g1-reaudit/FINDINGS.md) mit Reproduktion, Soll, Ist, Ursache, Empfehlung und Retest; jeder ist mit einem Defekttest kodiert, der auf dem Stand `d6e768c` rot ist:
+Funde aus der Umsetzung von K4, die kein K4-WP abdeckt (Konvention 16). Die Befunde F-355 bis F-362 stehen in der gemeinsamen Befundliste [`audit/g1-reaudit/FINDINGS.md`](../../../audit/g1-reaudit/FINDINGS.md) mit Reproduktion, Soll, Ist, Ursache, Empfehlung und Retest; jeder ist mit einem Defekttest kodiert, der auf dem Stand `d6e768c` rot ist:
 - **Go-Defekttests** (`auditdefect`, Zeile in `tests/audit/expected-failures.txt`): F-358, F-359, F-360. Das WP überführt den Test und löscht die Zeile (Konvention 13).
+- **Vitest** (Nachtrag vom 2026-10-27): F-362, gefunden von der Vertragsprüfung aus WP-530 (`t7-e2e-strict-mocks`). Die kodierenden Tests kamen mit der Korrektur WP-635 und sind auf `1d8c93a` rot ausgeführt.
 - **a11y-Marken** in `frontend/e2e/a11y.spec.ts` (`test.fail` mit der Befund-ID, CI-Job `e2e`): F-355, F-356, F-357, F-361. Eine Marke, deren Fall besteht, macht den Lauf rot; das WP entfernt die Marke. Diese Marken stehen nicht in `expected-failures.txt`, weil der Ratchet von WP-337 nur `go`, `sh`, `vitest` und `e2e-real` vergleicht.
 
 Die Oberfläche folgt seit WP-523 (`t7-i18n-labels`) der Browsersprache ([E-99](entscheidungen.md#e-99)); Playwright startet mit en-US. Damit lief die a11y-Prüfung ab WP-523 auf Englisch: F-357 trat auf dem Telefon nicht mehr auf (kürzere Beschriftungen, kein seitliches Scrollen), und die rote Löschaktion des Standortbaums (F-361) wurde auch auf dem Telefon bewertet. `a11y.spec.ts` prüft deshalb fest in der Standardsprache de-DE, in der die Marken gefunden wurden; WP-631 nimmt en-US als zweite Sprache auf.
@@ -13375,6 +13377,60 @@ TEN-06;[B];B;backend/internal/rack/height_integration_test.go;WP-634
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Sichtbarkeit fremder Mounts in der Rackansicht gescopter Nutzer; Regeln für Mounts von CIs anderer Clients in einem Rack.
+
+### WP-635 – Vollständige Listen für Dashboard und Karte, keine Seitengröße über 200
+
+**Schlüssel:** `k4n-list-pages` · **Meilenstein:** K4-Nachträge · **Epic (Traceability):** C · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-530 (`t7-e2e-strict-mocks`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-362](../../../audit/g1-reaudit/FINDINGS.md#f-362) | P2 | Dashboard und Karte fragen mehr als 200 Einträge je Seite an und zeigen höchstens 200 Collectors bzw. Standorte | schließt | WP-530 |
+
+**Problem:** Das Collector-Widget und das Einrichtungsbanner des Dashboards fragen `/collectors?limit=1000`, die Karte `/sites?limit=500`. Der Server begrenzt `limit` auf 200 (API-02) und liefert für beide Listen keinen `next_cursor`; die Seiten werten die gekürzte Antwort als vollständig. Der Helfer `fetchAllPages` folgt nur `next_cursor` und liest Listen ohne Cursor ebenfalls nur bis zur ersten Seite. Die Vertragsprüfung aus WP-530 hat die Abweichung gefunden und bis zu dieser Korrektur in `KNOWN_DEVIATIONS` toleriert.
+
+**Akzeptanzkriterien:**
+
+- [x] `fetchAllPages` liest mit `limit=200`, folgt `next_cursor` und ohne Cursor dem Offset, solange `has_more` gesetzt ist (Ende auch bei leerer Seite oder erreichtem `total`); `API_MAX_LIMIT` ist die gemeinsame Konstante.
+- [x] Das Collector-Widget zählt aktive Collectors über alle Seiten (`collectorApi.listAll`, `useAllCollectors`); das Einrichtungsbanner liest nur `total` (`limit=1`); die Karte zeigt alle Standorte (`siteApi.listAll`).
+- [x] Source-Scan `frontend/src/api/listLimit.test.ts`: kein Produktionsquelltext fragt eine Liste mit einem Literal-Limit über 200 an (Objekt-Eigenschaft und Query-String), mit Negativ-Fixture.
+- [x] `KNOWN_DEVIATIONS` in `frontend/e2e/support/backend.ts` ist leer; der gemockte Lauf (`login-roundtrip.spec.ts`, `contract.spec.ts`) ist ohne Toleranz grün.
+- [x] Retest F-362: die Tests aus der Befundliste sind auf `1d8c93a` rot und mit der Korrektur grün.
+
+**Dateien (11 Einträge):**
+
+- frontend/src/api/client.ts
+- frontend/src/api/client.test.ts
+- frontend/src/api/hooks.ts
+- frontend/src/api/listLimit.test.ts (neu)
+- frontend/src/pages/DashboardPage.tsx
+- frontend/src/pages/DashboardPage.test.tsx
+- frontend/src/pages/MapPage.tsx
+- frontend/src/pages/MapPage.test.tsx
+- frontend/e2e/support/backend.ts
+- audit/g1-reaudit/FINDINGS.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- Vitest: `listLimit.test.ts`, `client.test.ts`, `DashboardPage.test.tsx`, `MapPage.test.tsx`.
+- Gemockter Playwright-Lauf mit Vertragsprüfung (CI-Job `e2e`).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-02;[B];C;frontend/src/api/listLimit.test.ts;WP-635
+API-02;[B];C;frontend/src/api/client.test.ts;WP-635
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Auswahllisten mit einer Seite von 100 oder 200 Einträgen (z. B. Clients, Standorte im Bereichswähler, CI-Typen, Rollen); sie fragen nicht mehr an, als die API liefert, kürzen aber bei mehr als einer Seite ebenfalls. Ein Cursor für `/collectors` und `/sites`.
 
 ## K5 Nachweislücken
 
@@ -17042,7 +17098,7 @@ INS-01;[Q];G1;tests/rep01-structure.test.sh;WP-595
 - audit/g1-reaudit/evidence/k-reaudit-1/ (neu)
 - docs/traceability.csv
 - tests/audit/expected-failures.txt (angelegt in WP-337)
-- audit/g1-reaudit/FINDINGS.md (angelegt mit den K4-Nachträgen, F-355 bis F-361; die Prüf-WPs ergänzen)
+- audit/g1-reaudit/FINDINGS.md (angelegt mit den K4-Nachträgen, F-355 bis F-362; die Prüf-WPs ergänzen)
 
 **Migration/RLS:** keine Migration.
 
@@ -17091,7 +17147,7 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-596
 - audit/g1-reaudit/evidence/k-reaudit-2/ (neu)
 - docs/traceability.csv
 - tests/audit/expected-failures.txt (angelegt in WP-337)
-- audit/g1-reaudit/FINDINGS.md (angelegt mit den K4-Nachträgen, F-355 bis F-361; die Prüf-WPs ergänzen)
+- audit/g1-reaudit/FINDINGS.md (angelegt mit den K4-Nachträgen, F-355 bis F-362; die Prüf-WPs ergänzen)
 
 **Migration/RLS:** keine Migration.
 
@@ -17140,7 +17196,7 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-597
 - audit/g1-reaudit/evidence/k-reaudit-3/ (neu)
 - docs/traceability.csv
 - tests/audit/expected-failures.txt (angelegt in WP-337)
-- audit/g1-reaudit/FINDINGS.md (angelegt mit den K4-Nachträgen, F-355 bis F-361; die Prüf-WPs ergänzen)
+- audit/g1-reaudit/FINDINGS.md (angelegt mit den K4-Nachträgen, F-355 bis F-362; die Prüf-WPs ergänzen)
 
 **Migration/RLS:** keine Migration.
 
@@ -17185,7 +17241,7 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-598
 - audit/g1-reaudit/EXT_MATRIX.md (neu)
 - tests/audit/expected-failures.txt (angelegt in WP-337)
 - docs/traceability.csv
-- audit/g1-reaudit/FINDINGS.md (angelegt mit den K4-Nachträgen, F-355 bis F-361; die Prüf-WPs ergänzen)
+- audit/g1-reaudit/FINDINGS.md (angelegt mit den K4-Nachträgen, F-355 bis F-362; die Prüf-WPs ergänzen)
 
 **Migration/RLS:** keine Migration.
 

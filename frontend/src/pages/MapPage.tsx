@@ -88,10 +88,11 @@ export function MapPage() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['sites', 'map'],
-    queryFn: () => siteApi.list({ limit: 500 }),
+    // Every site, page by page: the API answers at most 200 per page (F-362).
+    queryFn: () => siteApi.listAll(),
   });
 
-  const sites = useMemo(() => data?.data ?? [], [data]);
+  const sites = useMemo(() => data ?? [], [data]);
   const withGeo = sites.filter((s) => s.geo_lat != null && s.geo_lon != null);
   const withoutGeo = sites.filter((s) => s.geo_lat == null || s.geo_lon == null);
 

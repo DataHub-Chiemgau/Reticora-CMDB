@@ -875,3 +875,5 @@ NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-630
 UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-631
 NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-631
 JOB-01;[B];B;backend/internal/discovery/job_execution_integration_test.go;WP-632
+API-02;[B];C;frontend/src/api/listLimit.test.ts;WP-635
+API-02;[B];C;frontend/src/api/client.test.ts;WP-635

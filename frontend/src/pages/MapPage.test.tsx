@@ -29,7 +29,7 @@ const NOWHERE = site('site-3', 'Remote Depot', null, null);
 
 function renderMap() {
   stubFetchRoutes({
-    '/sites': { data: [BERLIN, SYDNEY, NOWHERE], total: 3, limit: 500, offset: 0, has_more: false },
+    '/sites': { data: [BERLIN, SYDNEY, NOWHERE], total: 3, limit: 200, offset: 0, has_more: false },
   });
   return renderWithProviders(<MapPage />, { route: '/map' });
 }
@@ -40,6 +40,36 @@ afterEach(() => {
 });
 
 describe('MapPage', () => {
+  it('shows every site, also beyond the 200 of one page (F-362)', async () => {
+    const sites = Array.from({ length: 230 }, (_, i) =>
+      site(`site-${i}`, `Standort ${i}`, 48 + i / 100, 11 + i / 100),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), 'http://localhost');
+        // The server caps the limit at 200 (parameter Limit, API-02).
+        const limit = Math.min(Number(url.searchParams.get('limit') ?? 50), 200);
+        const offset = Number(url.searchParams.get('offset') ?? 0);
+        return new Response(
+          JSON.stringify({
+            data: sites.slice(offset, offset + limit),
+            total: sites.length,
+            limit,
+            offset,
+            has_more: offset + limit < sites.length,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }),
+    );
+    renderWithProviders(<MapPage />, { route: '/map' });
+
+    const map = await screen.findByRole('group', { name: 'Weltkarte mit Standortmarkern' });
+    expect(await within(map).findByRole('button', { name: 'Standort 229' })).toBeInTheDocument();
+    expect(within(map).getAllByRole('button')).toHaveLength(230);
+  });
+
   it('offers the markers as buttons in a labelled group, not inside an image', async () => {
     renderMap();
 

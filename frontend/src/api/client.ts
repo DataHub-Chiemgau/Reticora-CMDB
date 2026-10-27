@@ -521,26 +521,43 @@ export async function bffQuery<T>(query: string, variables?: Record<string, unkn
   return result.data as T;
 }
 
+/** The largest page a list endpoint answers (API-02, parameter Limit). */
+export const API_MAX_LIMIT = 200;
+
 /**
- * Reads every page of a cursor-paginated list (API-02): the first page with
- * the maximum limit of 200, then `next_cursor` until the server sends none.
+ * Reads every page of a paginated list (API-02): the first page with the
+ * maximum limit of 200, then `next_cursor` until the server sends none. A
+ * list without cursor pagination (e.g. collectors, sites) is followed by
+ * offset while `has_more` is set (F-362).
  * For callers that need the complete set (permission catalogue, role
- * grants, team members, the module lists of monitoring, document links and
- * assistant conversations); a single page would silently cut it short.
+ * grants, team members, the module lists of monitoring, document links,
+ * assistant conversations, the collectors of the dashboard and the sites of
+ * the map); a single page would silently cut it short.
  * `params` are the list's filters, sent with every page.
  */
 export async function fetchAllPages<T>(path: string, params: object = {}): Promise<T[]> {
   const items: T[] = [];
   let cursor: string | undefined;
-  do {
+  for (;;) {
     const query = new URLSearchParams(buildQuery(params));
-    query.set('limit', '200');
-    if (cursor) query.set('cursor', cursor);
+    query.set('limit', String(API_MAX_LIMIT));
+    if (cursor) {
+      query.set('cursor', cursor);
+    } else if (items.length > 0) {
+      query.set('offset', String(items.length));
+    }
     const page = await fetchAPI<PaginatedResponse<T>>(`${path}?${query.toString()}`);
-    items.push(...(page.data ?? []));
+    const rows = page.data ?? [];
+    items.push(...rows);
     cursor = page.next_cursor;
-  } while (cursor);
-  return items;
+    if (cursor) {
+      continue;
+    }
+    // Offset paging ends with the last page, an empty page or the total.
+    if (!page.has_more || rows.length === 0 || items.length >= page.total) {
+      return items;
+    }
+  }
 }
 
 function buildQuery(params: object) {
@@ -649,6 +666,10 @@ export const relationshipApi = {
 export const collectorApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<Collector>> {
     return fetchAPI(`/collectors${buildQuery(params)}`);
+  },
+  /** Every collector of the organization, page by page (F-362). */
+  listAll(): Promise<Collector[]> {
+    return fetchAllPages('/collectors');
   },
 };
 
@@ -2321,6 +2342,10 @@ export const vrfApi = {
 export const siteApi = {
   list(params: ListParams & { client_id?: string } = {}): Promise<PaginatedResponse<Site>> {
     return fetchAPI(`/sites${buildQuery(params)}`);
+  },
+  /** Every site the caller may read, page by page (F-362). */
+  listAll(): Promise<Site[]> {
+    return fetchAllPages('/sites');
   },
   get(id: string): Promise<Site> {
     return fetchAPI(`/sites/${id}`);

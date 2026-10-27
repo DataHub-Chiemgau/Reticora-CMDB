@@ -360,3 +360,4 @@ F-358;P2;Ad-hoc angelegte Discovery-Jobs werden nie ausgeführt und bleiben daue
 F-359;P2;Client-gebundener Inhaber von user:manage ändert Name, Zeitzone, Währung, Sprache und Einstellungen der Organisation;–;WP-633(schließt);WP-633;WP-633;K4-Nachträge;geplant;Fund aus K4, audit/g1-reaudit/FINDINGS.md
 F-360;P2;Höhenprüfung des Racks übersieht Mounts, die der Aufrufer nicht sieht: gescopter Nutzer verkleinert ein Rack unter belegte HE;–;WP-634(schließt);WP-634;WP-634;K4-Nachträge;geplant;Fund aus K4, audit/g1-reaudit/FINDINGS.md
 F-361;P2;Rote Löschaktionen im Standortbaum ohne Dark-Variante unterschreiten den WCAG-AA-Kontrast;–;WP-630(schließt);WP-630;WP-630;K4-Nachträge;geplant;Fund aus K4, audit/g1-reaudit/FINDINGS.md
+F-362;P2;Dashboard und Karte fragen mehr als 200 Einträge je Seite an und zeigen höchstens 200 Collectors bzw. Standorte;–;WP-635(schließt);WP-635;WP-635;K4-Nachträge;geplant;Fund aus K4, audit/g1-reaudit/FINDINGS.md

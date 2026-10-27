@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import {
   useAssetList,
   useCIList,
+  useAllCollectors,
   useCollectors,
   useComplianceScore,
   useSLABreaches,
@@ -85,11 +86,10 @@ function CISummaryWidget() {
 
 function CollectorsWidget() {
   const { t } = useTranslation();
-  const collectors = useCollectors({ limit: 1000, offset: 0 });
+  // Every page of the list: the API answers at most 200 per page (F-362).
+  const collectors = useAllCollectors();
 
-  // Guard against a malformed/legacy payload where `data` is null instead of
-  // an array — `.filter` on null throws during render and blanks the page.
-  const collectorList = collectors.data?.data ?? [];
+  const collectorList = collectors.data ?? [];
   const collectorCount = collectorList.filter((collector) => collector.status === 'active').length;
 
   return (
@@ -202,7 +202,7 @@ function TicketsWidget() {
  */
 function SetupBanner() {
   const { t } = useTranslation();
-  const collectors = useCollectors({ limit: 1000, offset: 0 });
+  const collectors = useCollectors({ limit: 1, offset: 0 });
   const cis = useCIList({ limit: 1, offset: 0 });
   if (!collectors.isSuccess || !cis.isSuccess) {
     return null;

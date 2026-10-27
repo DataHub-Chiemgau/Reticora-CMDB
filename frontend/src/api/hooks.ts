@@ -155,6 +155,14 @@ export function useCollectors(params: ListParams = {}) {
   });
 }
 
+/** Every collector of the organization, not only the first page (F-362). */
+export function useAllCollectors() {
+  return useQuery({
+    queryKey: ['collectors', 'all'],
+    queryFn: () => collectorApi.listAll(),
+  });
+}
+
 export function useDiscoveryScopes(collectorId: string) {
   return useQuery({
     queryKey: ['discovery-scopes', collectorId],

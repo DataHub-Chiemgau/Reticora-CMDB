@@ -43,6 +43,51 @@ describe('DashboardPage', () => {
     expect(screen.queryByRole('link', { name: 'Einrichtung fortsetzen' })).toBeNull();
   });
 
+  it('counts every active collector, also beyond the 200 of one page (F-362)', async () => {
+    const collectors = Array.from({ length: 250 }, (_, i) => ({
+      id: `c${i}`,
+      organization_id: 'org-1',
+      name: `collector-${i}`,
+      status: i < 240 ? 'active' : 'offline',
+      config: {},
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    }));
+    const counts = (total: number) => ({ ...paginated([]), total });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), 'http://localhost');
+        const status = url.searchParams.get('status');
+        let body: unknown;
+        if (url.pathname === '/api/v1/collectors') {
+          // The server caps the limit at 200 (parameter Limit, API-02).
+          const limit = Math.min(Number(url.searchParams.get('limit') ?? 50), 200);
+          const offset = Number(url.searchParams.get('offset') ?? 0);
+          body = {
+            data: collectors.slice(offset, offset + limit),
+            total: collectors.length,
+            limit,
+            offset,
+            has_more: offset + limit < collectors.length,
+          };
+        } else if (url.pathname === '/api/v1/cis') {
+          body = counts(status === 'active' ? 3 : status === 'maintenance' ? 2 : 5);
+        } else {
+          return new Response(JSON.stringify({ detail: 'unexpected' }), { status: 404 });
+        }
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+
+    renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+
+    expect(await screen.findByText('240')).toBeInTheDocument(); // online collectors
+  });
+
   it.each([
     ['without a collector', 0, 5],
     ['without CIs', 1, 0],
