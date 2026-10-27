@@ -900,3 +900,6 @@ EXP-01;[B], DATEV [P2];B;frontend/e2e-real/client-scope.spec.ts;WP-535
 TEN-09;[Q];B;frontend/e2e-real/client-scope.spec.ts;WP-535
 TEN-06;[B];B;backend/internal/movement/movement_scope_integration_test.go;WP-537
 AST-01;[P2];B;backend/internal/assignment/assignment_scope_integration_test.go;WP-537
+EVT-02;[B];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
+EVT-01;[B];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
