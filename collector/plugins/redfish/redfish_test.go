@@ -356,7 +356,8 @@ func loopback(t *testing.T, cidr string) *net.IPNet {
 }
 
 // COL-02: an untrusted certificate is rejected by default and no credentials
-// are sent to the endpoint.
+// are sent to the endpoint. The probe returns no hit and reports the target
+// with the certificate error (DIS-08; WP-641, F-368).
 func TestCollectRejectsUntrustedCertificateByDefault(t *testing.T) {
 	sawAuth := false
 	_, port := tlsBMC(t, &sawAuth)
@@ -370,9 +371,18 @@ func TestCollectRejectsUntrustedCertificateByDefault(t *testing.T) {
 	if sawAuth {
 		t.Fatal("credentials must not be sent to an unverified endpoint")
 	}
-	results, _ := p.Probe(context.Background(), []string{"127.0.0.1"}, map[string]string{"username": "admin"})
+	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, map[string]string{"username": "admin", "password": "secret"})
 	if len(results) != 0 || sawAuth {
 		t.Fatalf("discovery must not accept an unverified endpoint: %v (auth sent: %v)", results, sawAuth)
+	}
+	var probeErrs *plugins.ProbeErrors
+	if !errors.As(err, &probeErrs) || len(probeErrs.Targets) != 1 {
+		t.Fatalf("Probe error = %v, want the refused target as plugins.ProbeErrors", err)
+	}
+	f := probeErrs.Targets[0]
+	if f.Target != "127.0.0.1" || !errors.Is(f.Err, plugins.ErrTLSUntrusted) || plugins.ErrorCause(f.Err) != "tls" ||
+		!strings.Contains(f.Err.Error(), "certificate") {
+		t.Errorf("probe error of the target = %+v, want 127.0.0.1 with the certificate error (tls_untrusted, cause tls)", f)
 	}
 }
 

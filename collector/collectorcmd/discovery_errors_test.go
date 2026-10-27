@@ -5,6 +5,13 @@
 // here from discovery_auditdefect_test.go; TestSNMPv3AuthFailureReachesScopeRun
 // is the SNMPv3 counterpart (WP-492, F-105).
 //
+// A host scope on a target that does not answer reports the cause
+// unreachable per protocol, the sweep included; silent addresses of a CIDR
+// or range scope are no error (WP-641, F-369).
+// TestAuditUnreachableHostScopeReportsError moved here from
+// unreachable_scope_auditdefect_test.go; TestHostScopeSilentTargetsOnly
+// covers the sweep, the networks and the probe errors of a target.
+//
 // The scope run reports travel over NATS like in production: TEST_NATS_URL,
 // or a nats-server from TEST_NATS_SERVER_BIN.
 package collectorcmd
@@ -248,5 +255,115 @@ func TestSNMPv3AuthFailureReachesScopeRun(t *testing.T) {
 	}
 	if res.Records != 1 {
 		t.Errorf("scope run records = %d, want the probe hit", res.Records)
+	}
+}
+
+// TestAuditUnreachableHostScopeReportsError: a host scope with the SNMP
+// plugin on 192.0.2.10 (TEST-NET-1, RFC 5737: not routed, nothing answers,
+// the address of case E2) reports its run with a run error of cause
+// unreachable, protocol snmp and the target (DIS-08).
+func TestAuditUnreachableHostScopeReportsError(t *testing.T) {
+	const target = "192.0.2.10"
+	auditUsePlugins(t)
+	runs := auditCaptureScopeRuns(t)
+	up, _ := auditUploadSink(t)
+	auditInstallBundle(bundleCredential{ID: "cred-v3", Kind: "snmp_v3", Secret: map[string]any{"username": "reticora",
+		"auth_protocol": "SHA256", "auth_password": "audit-auth-pw", "priv_protocol": "AES", "priv_password": "audit-priv-pw"}})
+	collectorScopes.set([]collectorScope{{ID: "6f0b6f0e-0000-4000-8000-000000000542", Kind: "host", Target: target, Schedule: "24h",
+		CredentialIDs: []string{"cred-v3"}, Plugins: []string{"snmp"}}}, nil)
+
+	runDueDiscovery(context.Background(), &collectorConfig{}, up, newScheduler(), &hostCache{}, time.Now())
+
+	got := runs()
+	if len(got) != 1 {
+		t.Fatalf("scope runs reported = %d (%+v), want 1", len(got), got)
+	}
+	r := got[0].Result
+	for _, e := range r.Errors {
+		if e.Cause == "unreachable" && e.Protocol == "snmp" && e.Target == target {
+			if r.ErrorCount < 1 {
+				t.Errorf("error_count = %d with errors %+v, want at least 1", r.ErrorCount, r.Errors)
+			}
+			return
+		}
+	}
+	t.Errorf("run of the host scope on the unreachable %s: records=%d error_count=%d errors=%+v; want a run error with cause unreachable, protocol snmp and target %s (DIS-08)",
+		target, r.Records, r.ErrorCount, r.Errors, target)
+}
+
+// silentPlugin answers the probe only for the targets in answer and reports
+// the targets in failed as probe errors of cause tls.
+type silentPlugin struct {
+	name   string
+	answer map[string]bool
+	failed map[string]bool
+}
+
+func (p *silentPlugin) Name() string { return p.name }
+func (p *silentPlugin) Probe(_ context.Context, targets []string, _ map[string]string) ([]plugins.Result, error) {
+	var hits []plugins.Result
+	var failed []plugins.TargetError
+	for _, t := range targets {
+		switch {
+		case p.answer[t]:
+			hits = append(hits, plugins.Result{CIType: "network.device", Name: t, IP: t})
+		case p.failed[t]:
+			failed = append(failed, plugins.TargetError{Target: t, Err: fmt.Errorf("%s: %w: certificate of %s", p.name, plugins.ErrTLSUntrusted, t)})
+		}
+	}
+	if len(failed) > 0 {
+		return hits, &plugins.ProbeErrors{Targets: failed}
+	}
+	return hits, nil
+}
+func (p *silentPlugin) Collect(context.Context, string, map[string]string) (*plugins.DeviceRecord, error) {
+	return nil, nil
+}
+
+// TestHostScopeSilentTargetsOnly (WP-641; DIS-08, F-368, F-369): a host
+// scope reports every protocol its target does not answer, the sweep
+// included, as a run error unreachable with protocol and target; a target
+// with a probe error of its own reports that error only; a target that
+// answers reports none. The silent addresses of a CIDR or range scope are no
+// error, a probe error of one of its addresses is.
+func TestHostScopeSilentTargetsOnly(t *testing.T) {
+	const target = "192.0.2.10"
+	cases := []struct {
+		name   string
+		kind   string
+		target string
+		answer map[string]bool
+		failed map[string]bool
+		want   []runError // protocol, target and cause
+	}{
+		{"host silent", "host", target, nil, nil, []runError{
+			{Protocol: "sweep", Target: target, Cause: "unreachable"}, {Protocol: "snmp", Target: target, Cause: "unreachable"}}},
+		{"host answers", "host", target, map[string]bool{target: true}, nil, nil},
+		{"host probe error", "host", target, nil, map[string]bool{target: true}, []runError{
+			{Protocol: "sweep", Target: target, Cause: "tls"}, {Protocol: "snmp", Target: target, Cause: "tls"}}},
+		{"cidr silent", "cidr", "192.0.2.8/30", nil, nil, nil},
+		{"range silent", "range", "192.0.2.8-192.0.2.11", nil, nil, nil},
+		{"range probe error", "range", "192.0.2.8-192.0.2.11", nil, map[string]bool{target: true}, []runError{
+			{Protocol: "sweep", Target: target, Cause: "tls"}, {Protocol: "snmp", Target: target, Cause: "tls"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			auditUsePlugins(t, &silentPlugin{name: "sweep", answer: tc.answer, failed: tc.failed},
+				&silentPlugin{name: "snmp", answer: tc.answer, failed: tc.failed})
+			collectorScopes.set([]collectorScope{{ID: "6f0b6f0e-0000-4000-8000-000000000641", Kind: tc.kind, Target: tc.target,
+				Schedule: "24h", Plugins: []string{"sweep", "snmp"}}}, nil)
+			passes := discoveryPasses(&collectorConfig{})
+			_, errs := runPass(context.Background(), &collectorConfig{}, nil, &passes[0], []string{"sweep", "snmp"}, &hostCache{})
+			var got []runError
+			for _, e := range errs {
+				if e.Message == "" || !strings.Contains(e.Message, e.Target) {
+					t.Errorf("run error %+v: the message must name the target", e)
+				}
+				got = append(got, runError{Protocol: e.Protocol, Target: e.Target, Cause: e.Cause})
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("run errors = %+v, want %+v", errs, tc.want)
+			}
+		})
 	}
 }

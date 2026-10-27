@@ -513,10 +513,18 @@ func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *disc
 		slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
 		creds := plugins.CredentialsFor(protocol, passCreds)
 		hits, err := plug.Probe(ctx, targets, creds)
-		if err != nil {
+		var probeErrs *plugins.ProbeErrors
+		if errors.As(err, &probeErrs) {
+			// Targets the probe could not check go with protocol, target
+			// and cause into the scope run (DIS-08).
+			errs = append(errs, probeTargetErrors(protocol, probeErrs)...)
+		} else if err != nil {
 			slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
 			errs = append(errs, runError{Protocol: protocol, Cause: plugins.ErrorCause(err), Message: err.Error()})
 			continue
+		}
+		if pass.scope != nil && pass.scope.Kind == "host" && ctx.Err() == nil {
+			errs = append(errs, silentHostTargets(protocol, targets, hits, probeErrs)...)
 		}
 		if protocol == "sweep" {
 			reachable := hitTargets(hits)
@@ -535,6 +543,46 @@ func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *disc
 	}
 	tagRecords(passRecords, pass.scope)
 	return passRecords, errs
+}
+
+// probeTargetErrors returns the run errors of the targets a probe could not
+// check.
+func probeTargetErrors(protocol string, probeErrs *plugins.ProbeErrors) []runError {
+	out := make([]runError, 0, len(probeErrs.Targets))
+	for _, f := range probeErrs.Targets {
+		slog.Warn("discovery target failed in the probe", "event", "discovery.target.failed",
+			"protocol", protocol, "target", f.Target, "error", f.Err)
+		out = append(out, runError{Protocol: protocol, Target: f.Target, Cause: plugins.ErrorCause(f.Err), Message: f.Err.Error()})
+	}
+	return out
+}
+
+// silentHostTargets returns a run error unreachable for each target of a
+// host scope that did not answer the protocol's probe and has no probe
+// error of its own (DIS-08): a host scope names the target it expects to
+// answer. A host scope has one target, so a probe without hits means it did
+// not answer, also when the target is a name the hit carries as address.
+// Silent addresses of a network (CIDR, range) are no error.
+func silentHostTargets(protocol string, targets []string, hits []plugins.Result, probeErrs *plugins.ProbeErrors) []runError {
+	if len(hits) > 0 {
+		return nil
+	}
+	failed := map[string]bool{}
+	if probeErrs != nil {
+		for _, f := range probeErrs.Targets {
+			failed[f.Target] = true
+		}
+	}
+	var out []runError
+	for _, target := range targets {
+		if failed[target] {
+			continue
+		}
+		slog.Warn("discovery target did not answer", "event", "discovery.target.failed", "protocol", protocol, "target", target)
+		out = append(out, runError{Protocol: protocol, Target: target, Cause: "unreachable",
+			Message: fmt.Sprintf("%s: %s did not answer the probe", protocol, target)})
+	}
+	return out
 }
 
 // uploadDiscovered merges the records of a run and uploads them in a
