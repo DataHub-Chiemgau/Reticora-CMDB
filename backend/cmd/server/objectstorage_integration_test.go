@@ -122,8 +122,10 @@ type objectVersion struct {
 func TestSetupObjectStorageEnablesVersioning(t *testing.T) {
 	endpoint := strings.TrimSpace(os.Getenv("TEST_S3_ENDPOINT"))
 	if endpoint == "" {
-		if ci, _ := strconv.ParseBool(os.Getenv("CI")); ci {
-			t.Fatal("TEST_S3_ENDPOINT not set in the CI: the DB job starts MinIO for the bucket versioning of setupObjectStorage (WP-544)")
+		// Only the DB job of the CI starts MinIO; it is the one with a
+		// database (TEST_DATABASE_URL). The unit job runs without both.
+		if ci, _ := strconv.ParseBool(os.Getenv("CI")); ci && os.Getenv("TEST_DATABASE_URL") != "" {
+			t.Fatal("TEST_S3_ENDPOINT not set in the CI DB job: it starts MinIO for the bucket versioning of setupObjectStorage (WP-544)")
 		}
 		t.Skip("TEST_S3_ENDPOINT not set; skipping the object storage integration test")
 	}
