@@ -129,10 +129,31 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # TEC-12 (WP-534): the scope filters of the OpenSearch backend are
+      # tested against a real OpenSearch, the version of deploy/ (single
+      # node, security plugin off; internal/search/
+      # opensearch_real_integration_test.go).
+      opensearch:
+        image: opensearchproject/opensearch:2.13.0
+        env:
+          discovery.type: single-node
+          DISABLE_INSTALL_DEMO_CONFIG: "true"
+          DISABLE_SECURITY_PLUGIN: "true"
+          # The runner's disk fill level must not block the test index.
+          cluster.routing.allocation.disk.threshold_enabled: "false"
+          OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9200/_cluster/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 18
     env:
       PGPASSWORD: reticora
       DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora_migrations?sslmode=disable
       TEST_REDIS_URL: redis://localhost:6379/0
+      TEST_OPENSEARCH_URL: http://localhost:9200
     steps:
       - uses: actions/checkout@v4
 

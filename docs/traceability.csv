@@ -891,3 +891,4 @@ NFR-04;[B], Teilumfang [P5];D;frontend/e2e-real/maintenance.spec.ts;WP-541
 MGT-04;[P3];D;frontend/e2e-real/maintenance.spec.ts;WP-541
 NTF-05;[B], Zusätze [P2], [P3];D;frontend/e2e-real/maintenance.spec.ts;WP-541
 EVT-01;[B];B;backend/internal/events/emit_tx_integration_test.go;WP-550
+TEC-12;[P5];B;backend/internal/search/opensearch_real_integration_test.go;WP-534
