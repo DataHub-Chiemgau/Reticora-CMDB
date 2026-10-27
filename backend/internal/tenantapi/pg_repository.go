@@ -720,9 +720,9 @@ func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req Upd
 			pos++
 		}
 		if req.Layout != nil {
-			layoutJSON, err := json.Marshal(req.Layout)
-			if err != nil {
-				return fmt.Errorf("marshal room layout: %w", err)
+			layoutJSON, marshalErr := json.Marshal(req.Layout)
+			if marshalErr != nil {
+				return fmt.Errorf("marshal room layout: %w", marshalErr)
 			}
 			sets = append(sets, fmt.Sprintf("layout = $%d::jsonb", pos))
 			args = append(args, string(layoutJSON))
