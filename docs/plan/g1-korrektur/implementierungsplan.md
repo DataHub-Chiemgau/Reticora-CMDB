@@ -36,10 +36,11 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K3 Installation, Betrieb und Gate-Nachweise](#k3-installation-betrieb-und-gate-nachweise) | WP-427 – WP-459 | 33 | 48,5 | Installer-, Zertifikats-, K8s-, Backup- und Monitoring-Befunde behoben; Gate- und Abnahmedokumente führen jeden betroffenen Punkt mit Zwischenstand (offen mit Korrektur-WP oder belegt PASS); den Endstand stellt K7 her. |
 | [K3-Nachträge](#k3-nachträge) | WP-607 – WP-612 | 6 | 8,5 | Funde aus den Lastläufen von WP-439 behoben: Attribut-Indexe je Schlüssel (E-73), Beziehungsliste, heißer Pfad (`last_used_at`, JIT), Impact-CPU, Wiederentdeckung (F-118); drei Läufe halten jedes Budget im Median (E-58). |
 | [K4 Funktions-, Validierungs- und Bedienmängel](#k4-funktions--validierungs--und-bedienmängel) | WP-460 – WP-531 | 72 | 99,0 | Alle übrigen P2 behoben. |
+| [K4-Nachträge](#k4-nachträge) | WP-630 – WP-634 | 5 | 6,5 | Funde aus der Umsetzung von K4 behoben (F-355 bis F-361): Kontrast im dunklen Thema, Kartenmarker und Scrollbereiche per Tastatur (a11y-Prüfung in de-DE und en-US), Ausführung ad-hoc angelegter Discovery-Jobs, `PATCH /org` nur org-weit, Rackhöhe gegen alle Mounts. |
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **277** | **378,5** | |
+| **Summe** | | **282** | **385,0** | |
 
 ```mermaid
 flowchart LR
@@ -50,6 +51,7 @@ flowchart LR
     K3["K3 Installation, Betrieb und Gate-Nachweise<br/>33 WPs · 48,5 PT"]
     K3N["K3-Nachträge<br/>6 WPs · 8,5 PT"]
     K4["K4 Funktions-, Validierungs- und Bedienmängel<br/>72 WPs · 99,0 PT"]
+    K4N["K4-Nachträge<br/>5 WPs · 6,5 PT"]
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
@@ -63,8 +65,10 @@ flowchart LR
     K3 --> K5
     K4 --> K5
     K4 --> K6
+    K4 --> K4N
     K5 --> K7
     K3N --> K7
+    K4N --> K7
     K6 --> K7
 ```
 
@@ -408,6 +412,11 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-610](#wp-610--heißer-pfad-last_used_at-gedrosselt-kein-jit-im-app-pool) | `k3n-hot-path` | Heißer Pfad: `last_used_at` gedrosselt, kein JIT im App-Pool | K3N | 1,0 | – | WP-439 |
 | [WP-611](#wp-611--impact-und-topologie-mit-schlanken-kanten-und-internen-ganzzahl-ids) | `k3n-impact-lean` | Impact und Topologie mit schlanken Kanten und internen Ganzzahl-IDs | K3N | 2,0 | – | WP-439 |
 | [WP-612](#wp-612--lastnachweis-nach-e-58-drei-läufe-nach-den-k3-nachträgen) | `k3n-load-evidence` | Lastnachweis nach E-58: drei Läufe nach den K3-Nachträgen | K3N | 0,5 | – | WP-607, WP-608, WP-609, WP-610, WP-611 |
+| [WP-630](#wp-630--kontrast-im-dunklen-thema-graue-sekundärtexte-und-rote-löschaktionen) | `k4n-dark-contrast` | Kontrast im dunklen Thema: graue Sekundärtexte und rote Löschaktionen | K4N | 1,5 | F-355, F-361 | WP-522, WP-523 |
+| [WP-631](#wp-631--karte-und-tabellen-per-tastatur-standortmarker-außerhalb-des-kartenbilds-fokussierbare-scrollbereiche) | `k4n-a11y-structure` | Karte und Tabellen per Tastatur: Standortmarker außerhalb des Kartenbilds, fokussierbare Scrollbereiche | K4N | 1,0 | F-356, F-357 | WP-522, WP-523 |
+| [WP-632](#wp-632--ad-hoc-angelegte-discovery-jobs-ausführen-oder-die-anlage-zurücknehmen) | `k4n-discovery-job-run` | Ad-hoc angelegte Discovery-Jobs ausführen oder die Anlage zurücknehmen | K4N | 2,0 | F-358 | WP-502 |
+| [WP-633](#wp-633--patch-org-nur-für-org-weite-inhaber-von-usermanage) | `k4n-org-fields-scope` | PATCH /org nur für org-weite Inhaber von user:manage | K4N | 1,0 | F-359 | WP-463 |
+| [WP-634](#wp-634--rackhöhe-gegen-alle-mounts-prüfen-auch-gegen-die-für-den-aufrufer-unsichtbaren) | `k4n-rack-height-scope` | Rackhöhe gegen alle Mounts prüfen, auch gegen die für den Aufrufer unsichtbaren | K4N | 1,0 | F-360 | WP-500 |
 
 ## Konventionen für alle WPs
 
@@ -13098,6 +13107,275 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-531
 
 **Nicht Bestandteil:** Real-Stack-Suite in allen Browsern (WP-532 (`k-e2e-real-browsers`)); externer Browser-Grid.
 
+## K4-Nachträge
+
+Funde aus der Umsetzung von K4, die kein K4-WP abdeckt (Konvention 16). Die Befunde F-355 bis F-361 stehen in der gemeinsamen Befundliste [`audit/g1-reaudit/FINDINGS.md`](../../../audit/g1-reaudit/FINDINGS.md) mit Reproduktion, Soll, Ist, Ursache, Empfehlung und Retest; jeder ist mit einem Defekttest kodiert, der auf dem Stand `d6e768c` rot ist:
+- **Go-Defekttests** (`auditdefect`, Zeile in `tests/audit/expected-failures.txt`): F-358, F-359, F-360. Das WP überführt den Test und löscht die Zeile (Konvention 13).
+- **a11y-Marken** in `frontend/e2e/a11y.spec.ts` (`test.fail` mit der Befund-ID, CI-Job `e2e`): F-355, F-356, F-357, F-361. Eine Marke, deren Fall besteht, macht den Lauf rot; das WP entfernt die Marke. Diese Marken stehen nicht in `expected-failures.txt`, weil der Ratchet von WP-337 nur `go`, `sh`, `vitest` und `e2e-real` vergleicht.
+
+Die Oberfläche folgt seit WP-523 (`t7-i18n-labels`) der Browsersprache ([E-99](entscheidungen.md#e-99)); Playwright startet mit en-US. Damit lief die a11y-Prüfung ab WP-523 auf Englisch: F-357 trat auf dem Telefon nicht mehr auf (kürzere Beschriftungen, kein seitliches Scrollen), und die rote Löschaktion des Standortbaums (F-361) wurde auch auf dem Telefon bewertet. `a11y.spec.ts` prüft deshalb fest in der Standardsprache de-DE, in der die Marken gefunden wurden; WP-631 nimmt en-US als zweite Sprache auf.
+
+Geprüft und nicht neu erfasst: Die Idempotenz-Middleware speichert die 503-Antwort eines nicht speicherbaren Audit-Intents (WP-504) und wiederholt sie 24 h lang; das ist [F-206](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-206) und wird mit WP-569 (`t2-hardening-misc`) behoben, dessen Retest den Weg über `AuditRoute` einschließen soll. Die Abbildung der Collector-Ursache `scope_truncated` auf `config_error` (WP-494, WP-496) ist kein Defekt, weil die Ursachen in `api/openapi.yaml` eine feste Aufzählung sind und Protokoll, Ziel und Meldung erhalten bleiben.
+
+### WP-630 – Kontrast im dunklen Thema: graue Sekundärtexte und rote Löschaktionen
+
+**Schlüssel:** `k4n-dark-contrast` · **Meilenstein:** K4-Nachträge · **Epic (Traceability):** C · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-522 (`t7-a11y-contrast`), WP-523 (`t7-i18n-labels`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-355](../../../audit/g1-reaudit/FINDINGS.md#f-355) | P2 | Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast | schließt | WP-522 |
+| [F-361](../../../audit/g1-reaudit/FINDINGS.md#f-361) | P2 | Rote Löschaktionen im Standortbaum ohne Dark-Variante unterschreiten den WCAG-AA-Kontrast | schließt | WP-522 (Nachprüfung nach WP-523) |
+
+**Problem:** WP-522 hat die Kontraste nur in seinen eigenen Dateien korrigiert und die übrigen Verstöße in `a11y.spec.ts` markiert. Im dunklen Thema tragen Sekundärtexte, Tab-Beschriftungen und Tabellenköpfe `text-gray-500` ohne `dark:`-Variante (/onboarding, /inventory, /saved-views, /ci-types, /consumables, /findings, /jobs, /forms, /workflows, /compliance, /iga, /security), im hellen Thema das Inventar `text-gray-400` (F-355). Die Löschaktion des Standortbaums (`LocationTreePage.tsx:421`, `text-red-600`) hat keine Dark-Variante (F-361). axe meldet `color-contrast (serious)`.
+
+**Akzeptanzkriterien:**
+
+- [ ] Sekundärtexte, Tab-Beschriftungen und Tabellenköpfe der genannten Seiten erreichen in beiden Themen mindestens 4,5:1, über eine gemeinsame Klasse oder Komponente statt Einzelkorrekturen; `text-gray-400` auf hellem Grund ist im Inventar ersetzt.
+- [ ] Textaktionen in Gefahrfarbe (`text-red-600` ohne Hintergrund) tragen eine Dark-Variante; ein Source-Scan (Vitest) meldet `text-gray-500`, `text-gray-400` und `text-red-600` ohne `dark:`-Variante in `frontend/src/pages` und `frontend/src/components`, mit begründeter Ausnahmeliste.
+- [ ] Die Marken `F_CONTRAST` (F-355) und `F_DANGER_CONTRAST` (F-361) sind aus `a11y.spec.ts` entfernt; alle betroffenen Routen bestehen in allen Browser-Projekten in beiden Themen (CI-Job `e2e`), lokal mindestens chromium und mobile-chrome.
+- [ ] Retest F-355 und F-361: `cd frontend && npx playwright test e2e/a11y.spec.ts` ohne die beiden Marken grün.
+
+**Dateien (17 Einträge; reine Klassenänderungen je Seite):**
+
+- frontend/src/pages/OnboardingPage.tsx
+- frontend/src/pages/InventoryPage.tsx
+- frontend/src/pages/SavedViewsPage.tsx
+- frontend/src/pages/CITypeAdminPage.tsx
+- frontend/src/pages/ConsumableListPage.tsx
+- frontend/src/pages/FindingsPage.tsx
+- frontend/src/pages/JobCenterPage.tsx
+- frontend/src/pages/FormsPage.tsx
+- frontend/src/pages/WorkflowPage.tsx
+- frontend/src/pages/CompliancePage.tsx
+- frontend/src/pages/IGAPage.tsx
+- frontend/src/pages/SecurityPage.tsx
+- frontend/src/pages/LocationTreePage.tsx
+- frontend/src/index.css (gemeinsame Klasse, falls gewählt)
+- frontend/src/test/darkVariant.test.ts (neu, Source-Scan)
+- frontend/e2e/a11y.spec.ts
+- docs/traceability.csv
+
+**Migration/RLS:** keine
+
+**Tests:**
+
+- `frontend/e2e/a11y.spec.ts` in allen Browser-Projekten (CI-Job `e2e`).
+- `frontend/src/test/darkVariant.test.ts` (Source-Scan).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-630
+NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-630
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Neues Farbsystem oder Design-Token; Seiten ohne Verstoß.
+
+### WP-631 – Karte und Tabellen per Tastatur: Standortmarker außerhalb des Kartenbilds, fokussierbare Scrollbereiche
+
+**Schlüssel:** `k4n-a11y-structure` · **Meilenstein:** K4-Nachträge · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-522 (`t7-a11y-contrast`), WP-523 (`t7-i18n-labels`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-356](../../../audit/g1-reaudit/FINDINGS.md#f-356) | P2 | Standortmarker der Karte sind Schaltflächen innerhalb des Kartenbilds (nested-interactive) | schließt | WP-522 |
+| [F-357](../../../audit/g1-reaudit/FINDINGS.md#f-357) | P2 | Tabellen der Benutzer- und Berechtigungsseite scrollen auf dem Telefon seitlich, ohne fokussierbar zu sein | schließt | WP-522 |
+
+**Problem:** Die Karte (`MapPage.tsx`) ist ein SVG mit `role="img"`, die Standortmarker darin tragen `role="button"`; axe meldet `nested-interactive`, Screenreader bieten die Marker nicht an (F-356). Die Tabellen der Benutzer- und der Berechtigungsseite liegen in `overflow-x-auto`-Containern ohne Fokus, Rolle und Beschriftung; auf dem Telefon scrollen sie in de-DE seitlich, und die rechten Spalten sind per Tastatur nicht erreichbar (`scrollable-region-focusable`, F-357). In en-US passen die Tabellen in die Breite; die a11y-Prüfung läuft daher fest in de-DE und erkennt sprachabhängige Layouts in der zweiten Sprache nicht.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Marker sind per Tastatur erreichbar und liegen nicht in einem Element mit `role="img"` (SVG als beschriftete Gruppe oder Marker zusätzlich als Liste); Enter und Leertaste öffnen die Standortdetails (Vitest `MapPage.test.tsx`).
+- [ ] Jeder seitlich scrollbare Tabellencontainer ist eine fokussierbare, beschriftete Region (`tabIndex={0}`, `role="region"`, `aria-label`), über eine gemeinsame Tabellenhülle; Vitest prüft Fokus und Beschriftung.
+- [ ] `a11y.spec.ts` prüft jede Route zusätzlich in en-US (zweite Sprache nach E-99); die Marken `F_MAP_MARKERS` und `F_SCROLL_REGION` sind entfernt; alle Routen bestehen in allen Browser-Projekten in beiden Sprachen und Themen.
+- [ ] Retest F-356 und F-357: `cd frontend && npx playwright test e2e/a11y.spec.ts --project=mobile-chrome --project=mobile-safari` ohne die Marken grün, in de-DE und en-US.
+
+**Dateien (8 Einträge):**
+
+- frontend/src/pages/MapPage.tsx
+- frontend/src/pages/MapPage.test.tsx
+- frontend/src/pages/UserManagementPage.tsx
+- frontend/src/pages/PermissionsPage.tsx
+- frontend/src/components/ScrollRegion.tsx (neu, gemeinsame Tabellenhülle)
+- frontend/src/components/ScrollRegion.test.tsx (neu)
+- frontend/e2e/a11y.spec.ts
+- docs/traceability.csv
+
+**Migration/RLS:** keine
+
+**Tests:**
+
+- `frontend/e2e/a11y.spec.ts` (de-DE und en-US), `MapPage.test.tsx`, `ScrollRegion.test.tsx`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-631
+NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-631
+```
+
+**Entscheidungsbedarf:** keiner ([E-99](entscheidungen.md#e-99) gilt)
+
+**Nicht Bestandteil:** Neue Kartenbibliothek; Umbau der Tabellen in Karten für das Telefon.
+
+### WP-632 – Ad-hoc angelegte Discovery-Jobs ausführen oder die Anlage zurücknehmen
+
+**Schlüssel:** `k4n-discovery-job-run` · **Meilenstein:** K4-Nachträge · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
+
+**Voraussetzungen (gemergt):** WP-502 (`t6-discovery-job-tracking`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-358](../../../audit/g1-reaudit/FINDINGS.md#f-358) | P2 | Ad-hoc angelegte Discovery-Jobs werden nie ausgeführt und bleiben dauerhaft pending/queued | schließt | WP-502 |
+
+**Problem:** `POST /api/v1/discovery/jobs` antwortet 201 und legt einen Discovery-Job `pending` an, den das Job Center seit WP-502 als `discovery.<job_type>` mit `queued` führt. Kein Collector, Worker oder Edge-Handler liest offene Discovery-Jobs; `PGRepository.UpdateJobStatus` hat außerhalb von Tests keinen Aufrufer, und kein anderer Produktionscode schreibt `discovery_job.status`. Der Job läuft nie.
+
+**Akzeptanzkriterien:**
+
+- [ ] Vor Beginn entscheidet der Auftraggeber zwischen A (Ausführung) und B (Rücknahme); ohne Entscheidung beginnt das WP nicht. Empfehlung: A, weil der Scope-Kanal (`ServeCollectorScopes`) die Zustellung an den Collector bereits trägt.
+- [ ] Option A: Der Server stellt einen offenen Job seinem Collector über dessen NATS-Kanal zu; der Collector führt ihn mit den Plugins des Jobtyps aus und meldet `running` und das Ergebnis; der Server setzt den Status über `UpdateJobStatus` (Spiegelung ins Job Center, Fehlerursache wie DIS-08). Ein Job ohne Rückmeldung wird nach einer festen Frist `failed` mit Ursache `timeout` (Reaper). Nur der Collector des Jobs erhält ihn (Cross-Org- und Cross-Client-Test).
+- [ ] Option B: `POST /discovery/jobs` ist aus `api/openapi.yaml` und dem Router entfernt (spec-first, `npm run generate:api`, Paritätstest), bestehende offene Jobs werden per Migration `failed` mit Begründung; Lesen bleibt.
+- [ ] Defekttest `TestAuditK4DiscoveryJobIsExecuted` grün und aus `discovery/k4_job_execution_auditdefect_test.go` in eine reguläre Testdatei überführt (Datei gelöscht), Zeile aus `tests/audit/expected-failures.txt` entfernt. Option A zusätzlich: Integrationstest `discovery/job_execution_integration_test.go` (PG, NATS) pending → running → completed mit simuliertem Collector und Zeitüberschreitung → failed.
+
+**Dateien (12 Einträge, je nach Option):**
+
+- backend/internal/discovery/jobs.go
+- backend/internal/discovery/pg_repository.go
+- backend/internal/discovery/scope_handler.go (Zustellung über `ServeCollectorScopes`, Option A)
+- collector/collectorcmd/scopes.go (Ausführung, Option A)
+- collector/collectorcmd/discovery_scope_test.go
+- backend/internal/discovery/job_execution_integration_test.go (neu)
+- backend/internal/discovery/k4_job_execution_auditdefect_test.go (entfernt)
+- api/openapi.yaml (Option B)
+- frontend/src/api/generated/schema.d.ts (Option B)
+- backend/migrations/ (Option B, nächste freie Nummer)
+- tests/audit/expected-failures.txt
+- docs/traceability.csv
+
+**Migration/RLS:** Option A keine; Option B eine Datenmigration ohne Schemaänderung. RLS von `discovery_job` unverändert.
+
+**Tests:**
+
+- `discovery/job_execution_integration_test.go`, der überführte `TestAuditK4DiscoveryJobIsExecuted`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+JOB-01;[B];B;backend/internal/discovery/job_execution_integration_test.go;WP-632
+```
+
+**Entscheidungsbedarf:** ja, vor Beginn (Option A Ausführung durch den Collector oder Option B Rücknahme der Anlage-API); Empfehlung A.
+
+**Nicht Bestandteil:** Job-Center-UI für Discovery-Jobs; geplante Scope-Läufe (WP-495).
+
+### WP-633 – PATCH /org nur für org-weite Inhaber von user:manage
+
+**Schlüssel:** `k4n-org-fields-scope` · **Meilenstein:** K4-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-463 (`t2-ai-optin-api`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-359](../../../audit/g1-reaudit/FINDINGS.md#f-359) | P2 | Client-gebundener Inhaber von `user:manage` ändert Name, Zeitzone, Währung, Sprache und Einstellungen der Organisation | schließt | WP-463 |
+
+**Problem:** Die Route `PATCH /api/v1/org` verlangt `user:manage` ohne Scope (`server/authz.go`), und `tenantapi.UpdateOrganization` prüft den org-weiten Scope nur für `ai_opt_in`. Ein auf einen Client, eine Site oder ein Team beschränkter Inhaber ändert Name, Zeitzone, Währung, Sprache und Einstellungen der ganzen Organisation (200). `TestOrganizationAIOptInRequiresOrgWideUserManage` (`tenantapi/handler_test.go:250`) kodiert dieses Verhalten als erwartet.
+
+**Akzeptanzkriterien:**
+
+- [ ] Jeder Schreibzugriff auf `PATCH /api/v1/org` verlangt `user:manage` für die ganze Organisation (`holdsOrgWide`); client-, site- und teamgebundene Inhaber, ein nur eng gescoptes `user:manage`, ein clientgebundener API-Key und Anfragen ohne Principal erhalten 403 problem+json, die Zeile bleibt unverändert, kein Audit-Eintrag. `GET /api/v1/org` bleibt für alle mit `location:read`.
+- [ ] Spec-first: Die Beschreibung von `PATCH /api/v1/org` in `api/openapi.yaml` nennt die Regel für alle Felder; `npm run generate:api` ohne Diff außer der Beschreibung.
+- [ ] `TestOrganizationAIOptInRequiresOrgWideUserManage` umgeschrieben (Konvention 13): gebundene Principals erhalten auch ohne `ai_opt_in` 403; org-weite Inhaber und org-weiter API-Key 200.
+- [ ] Defekttest `TestAuditK4OrgFieldsRequireOrgWideUserManage` grün und aus `tenantapi/k4_org_fields_auditdefect_test.go` nach `tenantapi/tenantapi_scope_integration_test.go` überführt (Datei gelöscht), Zeile aus `tests/audit/expected-failures.txt` entfernt; Positivkontrolle org_admin 200 ergänzt.
+- [ ] Prüfung, ob die Einstellungsoberfläche (Organisationseinstellungen) für gebundene Nutzer Bedienelemente anbietet, die nun 403 erhalten; falls ja, ausblenden (Vitest).
+
+**Dateien (8 Einträge):**
+
+- backend/internal/tenantapi/handler.go
+- backend/internal/tenantapi/handler_test.go
+- backend/internal/tenantapi/tenantapi_scope_integration_test.go
+- backend/internal/tenantapi/k4_org_fields_auditdefect_test.go (entfernt)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- tests/audit/expected-failures.txt
+- docs/traceability.csv
+
+**Migration/RLS:** keine; die Organisationszeile hat nur eine Org-Policy, die Regel liegt im Handler.
+
+**Tests:**
+
+- `tenantapi/tenantapi_scope_integration_test.go` (PG, Produktionsrouter), `tenantapi/handler_test.go`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RBA-03;[B];B;backend/internal/tenantapi/tenantapi_scope_integration_test.go;WP-633
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Eigene Berechtigung für Organisationseinstellungen; Einstellungen je Client.
+
+### WP-634 – Rackhöhe gegen alle Mounts prüfen, auch gegen die für den Aufrufer unsichtbaren
+
+**Schlüssel:** `k4n-rack-height-scope` · **Meilenstein:** K4-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-500 (`t6-location-conflicts`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-360](../../../audit/g1-reaudit/FINDINGS.md#f-360) | P2 | Höhenprüfung des Racks übersieht Mounts, die der Aufrufer nicht sieht: gescopter Nutzer verkleinert ein Rack unter belegte HE | schließt | WP-500 |
+
+**Problem:** `rack.checkHeightCoversMounts` (WP-500) liest `rack_mount` unter der Row-Level-Security des Aufrufers. `rack_mount_isolation` filtert nach dem Client des montierten CI; ein auf Client 1 beschränkter Principal sieht im Rack seines Clients den Mount eines CI von Client 2 nicht und verkleinert das Rack unter dessen belegte HE (200, Mount oberhalb des Racks). Das Montieren in belegte HE bleibt verweigert, weil die Ausschlussbedingung `rack_mount_no_overlap` nicht der Row-Level-Security unterliegt.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die höchste belegte HE eines Racks wird über alle Mounts ermittelt, unabhängig vom Scope des Aufrufers: SECURITY-DEFINER-Funktion mit festem `search_path`, die nur die Zahl liefert und das Rack nur prüft, wenn es für den Aufrufer sichtbar ist, oder ein Constraint-Trigger auf `rack` und `rack_mount`. Die Funktion gibt keine Daten fremder Mounts preis; die 409-Meldung nennt die HE, aber kein CI.
+- [ ] Die Sperre aus WP-500 (`FOR UPDATE` auf der Rack-Zeile) bleibt; `TestRackHeightAndMountsSerialize` grün.
+- [ ] Defekttest `TestAuditK4RackHeightCoversInvisibleMounts` grün und aus `rack/k4_scoped_mounts_auditdefect_test.go` nach `rack/height_integration_test.go` überführt (Datei gelöscht), Zeile aus `tests/audit/expected-failures.txt` entfernt; ergänzt um einen site-gebundenen Principal.
+- [ ] Prüfung als `reticora_app` mit Tenant-GUCs; Migration (falls Funktion oder Trigger) mit up/down, Roundtrip, `docs/schema-baseline.md` mit dem Generator; RLS-Katalogtests grün.
+
+**Dateien (7 Einträge, Migration = 2):**
+
+- backend/internal/rack/pg_repository.go
+- backend/internal/rack/height_integration_test.go
+- backend/internal/rack/k4_scoped_mounts_auditdefect_test.go (entfernt)
+- backend/migrations/ (nächste freie Nummer, up und down)
+- docs/schema-baseline.md
+- tests/audit/expected-failures.txt
+- docs/traceability.csv
+
+**Migration/RLS:** eine Migration für Funktion oder Trigger; Policies von `rack` und `rack_mount` unverändert.
+
+**Tests:**
+
+- `rack/height_integration_test.go` (PG, gescopte Principals).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RCK-01;[B];B;backend/internal/rack/height_integration_test.go;WP-634
+TEN-06;[B];B;backend/internal/rack/height_integration_test.go;WP-634
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Sichtbarkeit fremder Mounts in der Rackansicht gescopter Nutzer; Regeln für Mounts von CIs anderer Clients in einem Rack.
+
 ## K5 Nachweislücken
 
 **Ausstieg:** Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen.
@@ -16764,7 +17042,7 @@ INS-01;[Q];G1;tests/rep01-structure.test.sh;WP-595
 - audit/g1-reaudit/evidence/k-reaudit-1/ (neu)
 - docs/traceability.csv
 - tests/audit/expected-failures.txt (angelegt in WP-337)
-- audit/g1-reaudit/FINDINGS.md (neu; legt das zuerst gemergte der vier Prüf-WPs an)
+- audit/g1-reaudit/FINDINGS.md (angelegt mit den K4-Nachträgen, F-355 bis F-361; die Prüf-WPs ergänzen)
 
 **Migration/RLS:** keine Migration.
 
@@ -16813,7 +17091,7 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-596
 - audit/g1-reaudit/evidence/k-reaudit-2/ (neu)
 - docs/traceability.csv
 - tests/audit/expected-failures.txt (angelegt in WP-337)
-- audit/g1-reaudit/FINDINGS.md (neu; legt das zuerst gemergte der vier Prüf-WPs an)
+- audit/g1-reaudit/FINDINGS.md (angelegt mit den K4-Nachträgen, F-355 bis F-361; die Prüf-WPs ergänzen)
 
 **Migration/RLS:** keine Migration.
 
@@ -16862,7 +17140,7 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-597
 - audit/g1-reaudit/evidence/k-reaudit-3/ (neu)
 - docs/traceability.csv
 - tests/audit/expected-failures.txt (angelegt in WP-337)
-- audit/g1-reaudit/FINDINGS.md (neu; legt das zuerst gemergte der vier Prüf-WPs an)
+- audit/g1-reaudit/FINDINGS.md (angelegt mit den K4-Nachträgen, F-355 bis F-361; die Prüf-WPs ergänzen)
 
 **Migration/RLS:** keine Migration.
 
@@ -16907,7 +17185,7 @@ GATE-02;[Q];G1;tests/audit/run-auditdefect.test.sh;WP-598
 - audit/g1-reaudit/EXT_MATRIX.md (neu)
 - tests/audit/expected-failures.txt (angelegt in WP-337)
 - docs/traceability.csv
-- audit/g1-reaudit/FINDINGS.md (neu; legt das zuerst gemergte der vier Prüf-WPs an)
+- audit/g1-reaudit/FINDINGS.md (angelegt mit den K4-Nachträgen, F-355 bis F-361; die Prüf-WPs ergänzen)
 
 **Migration/RLS:** keine Migration.
 

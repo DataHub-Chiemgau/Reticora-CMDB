@@ -52,10 +52,13 @@ interface A11yRoute {
 // convention 16; each gets its own follow-up WP):
 // F-355 grey secondary text without a dark variant (and text-gray-400 of the
 // inventory in the light theme), F-356 site markers inside the map image,
-// F-357 tables that scroll sideways on a phone without taking the focus.
+// F-357 tables that scroll sideways on a phone without taking the focus,
+// F-361 red delete actions of the location tree without a dark variant
+// (audit/g1-reaudit/FINDINGS.md).
 const F_CONTRAST = 'F-355';
 const F_MAP_MARKERS = 'F-356';
 const F_SCROLL_REGION = 'F-357';
+const F_DANGER_CONTRAST = 'F-361';
 const DARK_CONTRAST: A11yRoute['known'] = { dark: F_CONTRAST };
 
 const text = (value: string) => (page: Page) => page.getByText(value, { exact: false }).first();
@@ -147,7 +150,7 @@ const ROUTES: A11yRoute[] = [
     path: '/locations',
     url: '/locations',
     ready: text(M.location),
-    known: DARK_CONTRAST,
+    known: { dark: F_DANGER_CONTRAST },
     // On a phone the row actions wrap; axe does not decide their contrast.
     knownMobile: {},
   },
@@ -306,6 +309,12 @@ async function checkPage(
 }
 
 test.describe('accessibility (WCAG 2.1 AA)', () => {
+  // The interface follows the browser language (E-99, WP-523). The check
+  // runs in the default language de-DE, the language the marks above were
+  // found in: in en-US the shorter labels change the layout on a phone (no
+  // sideways scrolling, no wrapped row actions).
+  test.use({ locale: 'de-DE' });
+
   test('every route of the router has a check', () => {
     const covered = ROUTES.map((route) => route.path).sort();
     expect(covered, 'routes of src/App.tsx without an entry in ROUTES (or stale entries)').toEqual(

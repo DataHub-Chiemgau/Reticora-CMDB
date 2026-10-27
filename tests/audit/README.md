@@ -26,7 +26,7 @@ art;ort;test;befund
   as one of its lines is `FAIL`.
 - `vitest`: `ort` = file path, `test` = full test name (describe titles and title, separated by blanks).
 - `e2e-real`: `ort` = `<project>:<spec file>` (only `chromium` until WP-532), `test` = full title.
-- `befund` = finding ID from `audit/phase1-final/PHASE1_FINDINGS.md`.
+- `befund` = finding ID from `audit/phase1-final/PHASE1_FINDINGS.md`, from F-355 on from `audit/g1-reaudit/FINDINGS.md`.
 
 `run-auditdefect.sh` runs the defect tests and compares each result with the list. The CI job `auditdefect`
 (`.github/workflows/ci.yml`) compares `go`, `sh` and `vitest`; `install-smoke.yml` compares `e2e-real`
