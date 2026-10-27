@@ -12554,7 +12554,7 @@ GLO-10;[B];C;frontend/src/pages/CIDetailPage.test.tsx;WP-523
 UI-18;[B];C;frontend/e2e-real/i18n.spec.ts;WP-523
 ```
 
-**Entscheidungsbedarf:** keiner
+**Entscheidungsbedarf:** keiner (Stand Planung). Nachtrag 2026-10-27: Der Sprachwechsel setzt eine Sprachauswahl voraus, die die Oberfläche nicht hatte; entschieden in [E-99](entscheidungen.md#e-99) (Auftraggeber 2026-10-27): Sprachumschalter im Benutzermenü der Kopfzeile, Wahl je Browser gespeichert, ohne Wahl die Browsersprache (de* → de-DE, en* → en-US, sonst de-DE). Zusätzlich berührt: `frontend/src/i18n/index.ts`, `frontend/src/components/LanguageSwitch.tsx` (neu), `frontend/src/App.tsx`, `frontend/src/test/setup.ts`, Vitest `src/i18n/language.test.ts` und `src/components/LanguageSwitch.test.tsx` (neu).
 
 **Nicht Bestandteil:** CI-Formular mit Typliste aus der API (F-016, WP-397 (`t6-ci-form-types`), Voraussetzung); rohe Statuswerte in Listen (WP-525 (`t7-i18n-status-a`), WP-527 (`t7-i18n-status-b`)).
 

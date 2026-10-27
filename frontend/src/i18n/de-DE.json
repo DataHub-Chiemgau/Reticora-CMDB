@@ -277,7 +277,29 @@
     "validation": {
       "nameRequired": "Name ist erforderlich.",
       "ciTypeRequired": "CI-Typ ist erforderlich.",
-      "serverRejected": "Bitte korrigieren Sie die markierten Felder."
+      "serverRejected": "Bitte korrigieren Sie die markierten Felder.",
+      "field": {
+        "required": "{{label}} ist erforderlich",
+        "integer": "{{label}} muss eine ganze Zahl sein",
+        "number": "{{label}} muss eine Zahl sein",
+        "boolean": "{{label}} muss ja oder nein sein",
+        "date": "{{label}} muss ein Datum im Format JJJJ-MM-TT sein",
+        "datetime": "{{label}} muss ein Zeitpunkt sein",
+        "ip": "{{label}} muss eine IP-Adresse sein",
+        "mac": "{{label}} muss eine MAC-Adresse sein",
+        "url": "{{label}} muss eine gültige URL sein",
+        "email": "{{label}} muss eine gültige E-Mail-Adresse sein",
+        "singleLine": "{{label}} muss einzeilig sein",
+        "uuid": "{{label}} muss eine UUID sein",
+        "notAllowed": "{{label}}: {{value}} ist kein zulässiger Wert",
+        "pattern": "{{label}} hat ein ungültiges Format",
+        "min": "{{label}} muss mindestens {{limit}} sein",
+        "max": "{{label}} darf höchstens {{limit}} sein",
+        "minLength": "{{label}} muss mindestens {{limit}} Zeichen lang sein",
+        "maxLength": "{{label}} darf höchstens {{limit}} Zeichen lang sein",
+        "textExpected": "{{label}} muss ein Text sein",
+        "invalid": "{{label}} ist ungültig"
+      }
     }
   },
   "discovery": {
@@ -1532,5 +1554,10 @@
       "text": "{{count}} CIs sind bereits in Ihrer CMDB.",
       "open": "Zur CMDB"
     }
+  },
+  "language": {
+    "label": "Sprache",
+    "de-DE": "Deutsch",
+    "en-US": "English"
   }
 }

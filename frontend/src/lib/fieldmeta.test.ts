@@ -6,6 +6,8 @@ import {
   ruleOf,
   type FieldDefinition,
 } from './fieldmeta';
+import deDE from '../i18n/de-DE.json';
+import enUS from '../i18n/en-US.json';
 
 describe('evaluateField', () => {
   const physicalServer: FieldDefinition = {
@@ -81,20 +83,39 @@ describe('matchPredicate', () => {
   });
 });
 
+// validateValue returns a catalog key with its parameters, which the form
+// translates (GLO-10, F-343); every key exists in both catalogs.
 describe('validateValue', () => {
+  const field = (key: string) => `form.validation.field.${key}`;
+
   it('requires values only when required', () => {
-    const def: FieldDefinition = { name: 'x', data_type: 'text', required: true };
-    expect(validateValue(def, '')).toMatch(/required/);
+    const def: FieldDefinition = {
+      name: 'x',
+      label: 'Hostname',
+      data_type: 'text',
+      required: true,
+    };
+    expect(validateValue(def, '')).toEqual({
+      key: field('required'),
+      params: { label: 'Hostname' },
+    });
     expect(validateValue({ ...def, required: false }, '')).toBeNull();
+    // Without a label the field name is named.
+    expect(validateValue({ ...def, label: undefined }, '')).toEqual({
+      key: field('required'),
+      params: { label: 'x' },
+    });
   });
 
   it('validates ip/mac/email/url', () => {
     expect(validateValue({ name: 'ip', data_type: 'ip' }, '10.0.0.1')).toBeNull();
-    expect(validateValue({ name: 'ip', data_type: 'ip' }, 'nope')).toMatch(/IP/);
+    expect(validateValue({ name: 'ip', data_type: 'ip' }, 'nope')?.key).toBe(field('ip'));
     expect(validateValue({ name: 'm', data_type: 'mac' }, 'aa:bb:cc:dd:ee:ff')).toBeNull();
-    expect(validateValue({ name: 'm', data_type: 'mac' }, 'xyz')).toMatch(/MAC/);
+    expect(validateValue({ name: 'm', data_type: 'mac' }, 'xyz')?.key).toBe(field('mac'));
     expect(validateValue({ name: 'e', data_type: 'email' }, 'a@b.io')).toBeNull();
+    expect(validateValue({ name: 'e', data_type: 'email' }, 'a@b')?.key).toBe(field('email'));
     expect(validateValue({ name: 'u', data_type: 'url' }, 'https://x.io/y')).toBeNull();
+    expect(validateValue({ name: 'u', data_type: 'url' }, 'x.io')?.key).toBe(field('url'));
   });
 
   it('validates enum options', () => {
@@ -104,7 +125,10 @@ describe('validateValue', () => {
       enum_values: ['linux', 'windows'],
     };
     expect(validateValue(def, 'linux')).toBeNull();
-    expect(validateValue(def, 'plan9')).toMatch(/not an allowed value/);
+    expect(validateValue(def, 'plan9')).toEqual({
+      key: field('notAllowed'),
+      params: { label: 'os', value: 'plan9' },
+    });
   });
 
   it('validates numeric bounds', () => {
@@ -114,7 +138,71 @@ describe('validateValue', () => {
       validation: { min: 1, max: 64 },
     };
     expect(validateValue(def, 8)).toBeNull();
-    expect(validateValue(def, 128)).toMatch(/at most/);
+    expect(validateValue(def, 128)).toEqual({
+      key: field('max'),
+      params: { label: 'cores', limit: 64 },
+    });
+    expect(validateValue(def, 0)).toEqual({
+      key: field('min'),
+      params: { label: 'cores', limit: 1 },
+    });
+  });
+
+  it('names length bounds and patterns', () => {
+    const def: FieldDefinition = {
+      name: 'tag',
+      data_type: 'text',
+      validation: { min_length: 2, max_length: 4, pattern: '^[a-z]+$' },
+    };
+    expect(validateValue(def, 'abc')).toBeNull();
+    expect(validateValue(def, 'ABC')?.key).toBe(field('pattern'));
+    expect(validateValue(def, 'a')).toEqual({
+      key: field('minLength'),
+      params: { label: 'tag', limit: 2 },
+    });
+    expect(validateValue(def, 'abcde')).toEqual({
+      key: field('maxLength'),
+      params: { label: 'tag', limit: 4 },
+    });
+  });
+
+  it('uses only keys of both catalogs', () => {
+    const cases: Array<[FieldDefinition, unknown]> = [
+      [{ name: 'a', data_type: 'text', required: true }, ''],
+      [{ name: 'a', data_type: 'integer' }, 1.5],
+      [{ name: 'a', data_type: 'number' }, 'x'],
+      [{ name: 'a', data_type: 'boolean' }, 'x'],
+      [{ name: 'a', data_type: 'date' }, '2026-02-30'],
+      [{ name: 'a', data_type: 'datetime' }, 'never'],
+      [{ name: 'a', data_type: 'ip' }, 'x'],
+      [{ name: 'a', data_type: 'mac' }, 'x'],
+      [{ name: 'a', data_type: 'url' }, 'x'],
+      [{ name: 'a', data_type: 'email' }, 'x'],
+      [{ name: 'a', data_type: 'text' }, 'a\nb'],
+      [{ name: 'a', data_type: 'uuid' }, 'x'],
+      [{ name: 'a', data_type: 'enum', enum_values: ['b'] }, 'x'],
+      [{ name: 'a', data_type: 'text', validation: { pattern: '^b$' } }, 'x'],
+      [{ name: 'a', data_type: 'integer', validation: { min: 2 } }, 1],
+      [{ name: 'a', data_type: 'integer', validation: { max: 0 } }, 1],
+      [{ name: 'a', data_type: 'text', validation: { min_length: 2 } }, 'x'],
+      [{ name: 'a', data_type: 'text', validation: { max_length: 0 } }, 'x'],
+      [{ name: 'a', data_type: 'json', validation: { min_length: 2 } }, 5],
+    ];
+    const seen = new Set<string>();
+    for (const [def, value] of cases) {
+      const result = validateValue(def, value);
+      expect(result, `${def.data_type} ${String(value)}`).not.toBeNull();
+      const key = result!.key;
+      seen.add(key);
+      for (const catalog of [deDE, enUS]) {
+        const text = key
+          .split('.')
+          .reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], catalog);
+        expect(typeof text, key).toBe('string');
+        expect(text as string, key).toContain('{{label}}');
+      }
+    }
+    expect(seen.size).toBe(cases.length);
   });
 });
 

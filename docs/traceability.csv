@@ -841,3 +841,5 @@ API-08;[B];C;backend/internal/ci/bulk_integration_test.go;WP-517
 BLK-01;[B];C;backend/internal/ci/bulk_integration_test.go;WP-517
 GLO-10;[B];C;frontend/src/i18n/rawEnum.test.ts;WP-525
 UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-525
+GLO-10;[B];C;frontend/src/pages/CIDetailPage.test.tsx;WP-523
+UI-18;[B];C;frontend/e2e-real/i18n.spec.ts;WP-523

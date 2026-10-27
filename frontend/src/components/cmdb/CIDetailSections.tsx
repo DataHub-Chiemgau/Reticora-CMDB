@@ -23,7 +23,7 @@ import { ApiError } from '../../api/client';
 import type { MetricPoint } from '../../api/client';
 import { useCIMetrics } from '../../api/hooks';
 import { ProvenanceTooltip } from './ProvenanceTooltip';
-import type { FieldDefinition } from '../../lib/fieldmeta';
+import type { FieldDefinition, FieldError } from '../../lib/fieldmeta';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -78,7 +78,7 @@ export function InstanceFieldsSection({
   const remove = useDeleteInstanceField(ciId);
   const [showAdd, setShowAdd] = useState(false);
   const [draft, setDraft] = useState<FieldDefinition>({ name: '', data_type: 'text' });
-  const [localErrors, setLocalErrors] = useState<Record<string, string | null>>({});
+  const [localErrors, setLocalErrors] = useState<Record<string, FieldError | null>>({});
   // Local draft of the attribute values. The saved CI stays the source of
   // truth, but edits are rendered from the draft so in-flight (and invalid)
   // input is not overwritten by the server response mid-typing.

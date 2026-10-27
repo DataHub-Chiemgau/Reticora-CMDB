@@ -5,12 +5,15 @@
  * current values. End users see a plain form; the rule model stays hidden.
  */
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import {
   evaluateField,
   validateValue,
   type FieldDefinition,
+  type FieldError,
+  type FieldMessage,
   type FieldState,
 } from '../../lib/fieldmeta';
 
@@ -18,7 +21,11 @@ export interface DynamicFormProps {
   fields: FieldDefinition[];
   values: Record<string, unknown>;
   onChange: (name: string, value: unknown) => void;
-  errors?: Record<string, string | null>;
+  /**
+   * errors per field: client messages (validateAll) are translated into the
+   * UI language, server texts are shown as sent.
+   */
+  errors?: Record<string, FieldError | null | undefined>;
   /** referenceOptions resolves reference-typed fields to selectable options. */
   referenceOptions?: Record<string, Array<{ value: string; label: string }>>;
 }
@@ -51,7 +58,10 @@ export function DynamicForm({
   errors = {},
   referenceOptions = {},
 }: DynamicFormProps) {
+  const { t } = useTranslation();
   const groups = useMemo(() => groupFields(fields, values), [fields, values]);
+  const errorText = (error: FieldError | null | undefined) =>
+    !error ? undefined : typeof error === 'string' ? error : t(error.key, error.params);
 
   return (
     <div className="space-y-6">
@@ -68,7 +78,7 @@ export function DynamicForm({
               def={def}
               state={state}
               value={values[def.name]}
-              error={errors[def.name] ?? undefined}
+              error={errorText(errors[def.name])}
               options={referenceOptions[def.name]}
               onChange={(v) => onChange(def.name, v)}
             />
@@ -229,13 +239,14 @@ function DynamicField({ def, state, value, error, options, onChange }: DynamicFi
 
 /**
  * validateAll runs client-side validation for all visible fields. Returns a
- * map of field name → error message (null when valid).
+ * map of field name → error message (null when valid); DynamicForm
+ * translates the messages.
  */
 export function validateAll(
   fields: FieldDefinition[],
   values: Record<string, unknown>,
-): Record<string, string | null> {
-  const errors: Record<string, string | null> = {};
+): Record<string, FieldMessage | null> {
+  const errors: Record<string, FieldMessage | null> = {};
   for (const def of fields) {
     const state = evaluateField(def, values);
     if (!state.visible) {

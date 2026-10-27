@@ -17,6 +17,7 @@ import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
 import { useEntitlements, useModules, navFeatureFor } from './hooks/useEntitlements';
 import { useThemeStore } from './stores/theme';
+import { LanguageSwitch } from './components/LanguageSwitch';
 
 // Route-level code splitting: every feature page is a separate chunk so the
 // initial bundle stays small (perceived speed, spec §8.1). Pages use named
@@ -254,6 +255,7 @@ function App() {
                 <span className="max-w-48 truncate">{user?.name || user?.email}</span>
               ) : null}
               <span>{shortcutHint}</span>
+              <LanguageSwitch />
               <Button
                 variant="secondary"
                 size="sm"
