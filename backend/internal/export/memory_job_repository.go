@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
 // MemoryJobRepository is an in-memory JobRepository for tests and the
@@ -19,6 +20,9 @@ type MemoryJobRepository struct {
 	jobs  map[string]*Job
 	order []string
 	next  int
+	// outbox keeps the events CompleteJob records with a completion, as
+	// the PostgreSQL repository appends them to event_outbox (tests).
+	outbox []events.Event
 }
 
 // NewMemoryJobRepository creates an empty in-memory job repository.
@@ -139,6 +143,7 @@ func (r *MemoryJobRepository) CompleteJob(_ context.Context, orgID, id string, o
 	job.CompletedAt = &completedAt
 	job.ExpiresAt = &expiresAt
 	job.UpdatedAt = completedAt
+	r.outbox = append(r.outbox, *completedEvent(orgID, id, job.Format, job.InitiatedBy, rowCount))
 	return nil
 }
 

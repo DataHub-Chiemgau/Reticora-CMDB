@@ -104,7 +104,6 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		exportWorker := export.NewJobWorker(d.repos.ExportJobs, d.repos.CI, d.blobs)
 		if d.repos.Jobs != nil {
 			exportWorker.Tracker = jobs.NewService(d.repos.Jobs)
-			exportWorker.Events = emitterOf(d.pool)
 		}
 		workers = append(workers, server.Worker{
 			Name: config.WorkerExport,
@@ -378,7 +377,7 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// Jobs whose worker was lost (crash, rolling deploy) do not stay
 		// running (JOB-01, TEC-14).
 		if d.repos.Jobs != nil {
-			systemJobs = append(systemJobs, jobs.NewReaper(jobs.NewService(d.repos.Jobs).WithEvents(emitterOf(pool)),
+			systemJobs = append(systemJobs, jobs.NewReaper(jobs.NewService(d.repos.Jobs),
 				jobRequeues(d.jobQueue)).Schedule())
 		}
 		// Digests of the non-critical notification categories (NTF-04,

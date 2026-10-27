@@ -325,7 +325,7 @@ func main() {
 			os.Exit(1)
 		}
 		eventStream = js
-		jobQueue = jobs.NewQueue(jobs.NewService(repos.Jobs).WithEvents(emitterOf(auditPool)), js)
+		jobQueue = jobs.NewQueue(jobs.NewService(repos.Jobs), js)
 		queueCtx, cancelQueue := context.WithTimeout(context.Background(), 30*time.Second)
 		natsErr = jobQueue.Setup(queueCtx)
 		cancelQueue()
@@ -432,8 +432,6 @@ func main() {
 		Deliveries: repos.WebhookDeliveries,
 		// The retry worker runs under its operator switch below (OPS-02).
 		PollInterval: -1,
-		// Dead deliveries are reported (NTF-05).
-		Events: emitterOf(auditPool),
 	})
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -221,8 +221,8 @@ type Options struct {
 	// signup (WP-112); without it signups answer 503.
 	SignupProtection *signup.Protection
 	// Events reports facts after their commit into the event outbox
-	// (export.completed, job.failed; NTF-05); optional. review.created is
-	// written in the transaction that opens the item (WP-549).
+	// (NTF-05); optional. review.created (WP-549), export.completed, job.failed
+	// and webhook.dead (WP-550) are written in the transaction of their change.
 	Events events.Emitter
 	// Notifications are the notification stores (NTF-04); nil keeps them
 	// in memory.
@@ -475,9 +475,6 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	}
 	if opts.CIService != nil {
 		discoveryHandler.WithMerger(opts.CIService)
-	}
-	if opts.Events != nil {
-		exportWorker.Events = opts.Events
 	}
 	topologyHandler := topology.NewHandler(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType)
 	// The Ask path sends the question and the CI context to the provider only

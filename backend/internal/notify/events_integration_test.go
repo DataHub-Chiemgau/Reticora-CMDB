@@ -160,7 +160,7 @@ func TestPhaseOneEventsNotify(t *testing.T) {
 	}
 
 	// A producer: the job that fails for good reports job.failed.
-	svc := jobs.NewService(jobs.NewPGRepository(f.App)).WithEvents(emitter)
+	svc := jobs.NewService(jobs.NewPGRepository(f.App))
 	svc.Register(jobs.Kind{Name: "ntf5.sync", MaxAttempts: 1, Timeout: time.Minute})
 	job, _, err := svc.Enqueue(bg, f.OrgA, "ntf5.sync", nil, jobs.EnqueueOptions{CreatedBy: initiator})
 	if err != nil {

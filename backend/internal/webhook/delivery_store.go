@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
 // Delivery statuses persisted in webhook_delivery.status (WHK-01): pending
@@ -90,9 +91,14 @@ type DeliveryStore interface {
 	ClaimDue(ctx context.Context, now time.Time, limit int, lease time.Duration) ([]DeliveryRecord, error)
 	// ListBySubscription returns the delivery history of one subscription.
 	ListBySubscription(ctx context.Context, orgID, subscriptionID string, page api.PaginationParams) ([]DeliveryRecord, int, error)
-	// MoveToDeadLetter moves a failed delivery to the dead-letter queue and
-	// marks the delivery record as dead. It is idempotent per delivery.
-	MoveToDeadLetter(ctx context.Context, rec DeliveryRecord) error
+	// MoveToDeadLetter moves a failed delivery to the dead-letter queue,
+	// marks the delivery record as dead and records webhook.dead (NTF-05,
+	// deadEvent) in one step (WP-550): either all of it happens or none.
+	// The deadLimit-th dead delivery of the subscription since since
+	// switches the subscription off in the same step (WHK-01); disabled
+	// reports it. It is idempotent per delivery: a repeated move records
+	// nothing.
+	MoveToDeadLetter(ctx context.Context, rec *DeliveryRecord, since time.Time) (disabled bool, err error)
 	// ListDeadLetters returns the dead-letter queue of one tenant.
 	ListDeadLetters(ctx context.Context, orgID string, page api.PaginationParams) ([]DeadLetter, int, error)
 }
@@ -104,6 +110,21 @@ type MemoryDeliveryStore struct {
 	items       map[string]DeliveryRecord
 	deadLetters map[string]DeadLetter
 	seq         int
+	// subscriptions switches subscriptions off (WHK-01); NewDispatcher
+	// sets the memory repository of its subscriptions.
+	subscriptions deactivator
+	// outbox keeps the webhook.dead events MoveToDeadLetter records, as
+	// the PostgreSQL store appends them to event_outbox (tests).
+	outbox []events.Event
+}
+
+// deadEvent is webhook.dead of a delivery moved to the dead-letter queue
+// (NTF-05): the owners of the subscription are notified, also that it was
+// switched off (disabled).
+func deadEvent(rec *DeliveryRecord, disabled bool) *events.Event {
+	return &events.Event{OrgID: rec.OrganizationID, Type: events.WebhookDead, EntityID: rec.SubscriptionID,
+		Data: map[string]any{"delivery_id": rec.ID, "subscription_id": rec.SubscriptionID, "event": rec.Event,
+			"attempts": rec.Attempt, "last_error": rec.Error, "subscription_disabled": disabled}}
 }
 
 // NewMemoryDeliveryStore creates an empty in-memory delivery store.
@@ -210,19 +231,28 @@ func (s *MemoryDeliveryStore) ListBySubscription(_ context.Context, orgID, subsc
 	return all[start:end], total, nil
 }
 
-// MoveToDeadLetter records the delivery in the dead-letter queue and marks it
-// dead. Calling it twice for the same delivery is a no-op.
-func (s *MemoryDeliveryStore) MoveToDeadLetter(_ context.Context, rec DeliveryRecord) error {
+// MoveToDeadLetter implements DeliveryStore under the store's lock.
+// Calling it twice for the same delivery is a no-op.
+func (s *MemoryDeliveryStore) MoveToDeadLetter(ctx context.Context, rec *DeliveryRecord, since time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	existing, ok := s.items[rec.ID]
 	if !ok || existing.OrganizationID != rec.OrganizationID {
-		return fmt.Errorf("delivery not found")
+		return false, fmt.Errorf("delivery not found")
 	}
 	if _, ok := s.deadLetters[rec.ID]; ok {
-		return nil
+		return false, nil
 	}
+	dead := 1
+	for id := range s.deadLetters {
+		if dl := s.deadLetters[id]; dl.OrganizationID == rec.OrganizationID && dl.SubscriptionID == rec.SubscriptionID && !dl.DeadAt.Before(since) {
+			dead++
+		}
+	}
+	// A subscription that is gone is not switched off.
+	disabled := dead >= deadLimit && s.subscriptions != nil &&
+		s.subscriptions.Deactivate(ctx, rec.OrganizationID, rec.SubscriptionID) == nil
 
 	s.deadLetters[rec.ID] = DeadLetter{
 		ID:             fmt.Sprintf("dlq-%s", rec.ID),
@@ -244,7 +274,8 @@ func (s *MemoryDeliveryStore) MoveToDeadLetter(_ context.Context, rec DeliveryRe
 	existing.Error = rec.Error
 	existing.NextRetryAt = nil
 	s.items[rec.ID] = existing
-	return nil
+	s.outbox = append(s.outbox, *deadEvent(rec, disabled))
+	return disabled, nil
 }
 
 // ListDeadLetters returns the dead-letter queue of one tenant, newest first.

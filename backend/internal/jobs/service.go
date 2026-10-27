@@ -11,7 +11,6 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -28,11 +27,10 @@ var DefaultBackoff = ExponentialBackoff(30*time.Second, 15*time.Minute)
 // claim, progress, success, failure with retry and backoff, timeout,
 // cancel.
 type Service struct {
-	repo   Repository
-	now    func() time.Time
-	mu     sync.RWMutex
-	kinds  map[string]Kind
-	events events.Emitter
+	repo  Repository
+	now   func() time.Time
+	mu    sync.RWMutex
+	kinds map[string]Kind
 	// cancelPoll is how often the run context of a job asks for a cancel
 	// made by another replica (runContext).
 	cancelPoll time.Duration
@@ -49,12 +47,6 @@ var localRuns = struct {
 // DefaultCancelPoll is how often the run context of a job asks whether the
 // job was cancelled on another replica.
 const DefaultCancelPoll = 5 * time.Second
-
-// WithEvents reports finally failed jobs as job.failed (NTF-05).
-func (s *Service) WithEvents(e events.Emitter) *Service {
-	s.events = e
-	return s
-}
 
 // NewService creates a service on repo.
 func NewService(repo Repository) *Service {
@@ -256,17 +248,12 @@ func (s *Service) fail(ctx context.Context, orgID, id string, cause error, retry
 		return s.repo.Transition(ctx, orgID, id, []Status{StatusRunning},
 			&Update{Status: StatusQueued, Error: &msg, RunAfter: &next})
 	}
+	// The job fails for good: job.failed (NTF-05) is written with the
+	// change (WP-550).
 	failed, err := s.repo.Transition(ctx, orgID, id, []Status{StatusRunning},
-		&Update{Status: StatusFailed, Error: &msg, FinishedAt: &now})
+		&Update{Status: StatusFailed, Error: &msg, FinishedAt: &now, ReportFailed: true})
 	if err == nil {
 		observeEnd(failed)
-	}
-	if err == nil && s.events != nil {
-		if eerr := s.events.Emit(ctx, &events.Event{OrgID: orgID, Type: events.JobFailed, EntityID: failed.ID,
-			Data: map[string]any{"id": failed.ID, "kind": failed.Kind, "error": msg, "attempts": failed.Attempts,
-				"created_by": failed.CreatedBy}}); eerr != nil {
-			slog.Error("report failed job", "job", failed.ID, "error", eerr)
-		}
 	}
 	return failed, err
 }

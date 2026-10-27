@@ -12,6 +12,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
 // PGRepository stores jobs in PostgreSQL. Jobs belong to the organization
@@ -332,7 +333,9 @@ func (r *PGRepository) QueuedDue(ctx context.Context, now time.Time, limit int) 
 }
 
 // Transition implements Repository; the status check and the change are
-// one statement.
+// one statement. With u.ReportFailed a change to failed appends job.failed
+// to the outbox in its transaction (WP-550): a failed append rolls the
+// change back, the job stays running.
 func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []Status, u *Update) (*Job, error) {
 	if !isUUID(id) {
 		return nil, ErrNotFound
@@ -371,10 +374,22 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []
 		if err != nil {
 			return fmt.Errorf("update job: %w", err)
 		}
+		if u.ReportFailed && j.Status == StatusFailed {
+			if _, err := events.NewOutbox().Append(ctx, tx, failedEvent(j)); err != nil {
+				return fmt.Errorf("update job: %w", err)
+			}
+		}
 		out = j
 		return nil
 	})
 	return out, err
+}
+
+// failedEvent is job.failed of a job that failed for good (NTF-05): its
+// creator is notified.
+func failedEvent(j *Job) *events.Event {
+	return &events.Event{OrgID: j.OrganizationID, Type: events.JobFailed, EntityID: j.ID,
+		Data: map[string]any{"id": j.ID, "kind": j.Kind, "error": j.Error, "attempts": j.Attempts, "created_by": j.CreatedBy}}
 }
 
 // RunningSince implements Repository.

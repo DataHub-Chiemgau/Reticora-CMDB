@@ -23,6 +23,10 @@ type Update struct {
 	FinishedAt *time.Time
 	// IncAttempts counts an attempt (when a job starts).
 	IncAttempts bool
+	// ReportFailed records job.failed (NTF-05) with a change to failed in
+	// the transaction of the change (WP-550); the memory repository has
+	// no outbox and records nothing.
+	ReportFailed bool
 }
 
 // Repository stores jobs; every method works within one organization.

@@ -18,7 +18,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -34,25 +33,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
-
-// cancelEvents records the emitted events.
-type cancelEvents struct {
-	mu  sync.Mutex
-	got []events.Event
-}
-
-func (r *cancelEvents) Emit(_ context.Context, e *events.Event) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.got = append(r.got, *e)
-	return nil
-}
-
-func (r *cancelEvents) count() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.got)
-}
 
 // cancellingStore is a blob store that runs onPut after each stored object:
 // the cancel arrives while the export runs, after its object was written.
@@ -95,8 +75,18 @@ func TestExportCancelViaJobAPI(t *testing.T) {
 	// As registered by the server (server/jobkinds.go).
 	jobSvc.Register(jobs.Kind{Name: "export", MaxAttempts: 1, Cancellable: true})
 	worker.Tracker = jobSvc
-	recorded := &cancelEvents{}
-	worker.Events = recorded
+	// completedEvents counts the export.completed events of the
+	// organization in the outbox: CompleteJob writes them with the
+	// completion (WP-550).
+	completedEvents := func() int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM event_outbox WHERE organization_id = $1 AND type = $2`,
+			f.OrgA, events.ExportCompleted).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
 
 	mux := chi.NewRouter()
 	export.NewJobHandler(exportJobs, worker, store).RegisterRoutes(mux)
@@ -200,7 +190,7 @@ func TestExportCancelViaJobAPI(t *testing.T) {
 
 	t.Run("cancel before the worker runs", func(t *testing.T) {
 		exportID, jobID := start()
-		reported := recorded.count()
+		reported := completedEvents()
 		for _, c := range []struct {
 			name string
 			ctx  context.Context
@@ -228,7 +218,7 @@ func TestExportCancelViaJobAPI(t *testing.T) {
 		if stored(exportID) {
 			t.Error("the cancelled export stored its object")
 		}
-		if n := recorded.count() - reported; n != 0 {
+		if n := completedEvents() - reported; n != 0 {
 			t.Errorf("the cancelled export reported %d events, want none", n)
 		}
 		if j := mirrored(jobID); j.Status != jobs.StatusCancelled || len(j.Result) != 0 {
@@ -241,7 +231,7 @@ func TestExportCancelViaJobAPI(t *testing.T) {
 
 	t.Run("cancel after the object was stored", func(t *testing.T) {
 		exportID, jobID := start()
-		reported := recorded.count()
+		reported := completedEvents()
 		var cancel int
 		store.onPut = func() {
 			cancel = do(creator, http.MethodDelete, "/api/v1/jobs/"+jobID, "").Code
@@ -257,7 +247,7 @@ func TestExportCancelViaJobAPI(t *testing.T) {
 		if stored(exportID) {
 			t.Error("the object of the cancelled export was not deleted")
 		}
-		if n := recorded.count() - reported; n != 0 {
+		if n := completedEvents() - reported; n != 0 {
 			t.Errorf("the cancelled export reported %d events, want none", n)
 		}
 		if j := mirrored(jobID); j.Status != jobs.StatusCancelled {
@@ -267,7 +257,7 @@ func TestExportCancelViaJobAPI(t *testing.T) {
 
 	t.Run("without cancel the mirrored job has a result", func(t *testing.T) {
 		exportID, jobID := start()
-		reported := recorded.count()
+		reported := completedEvents()
 		drain()
 		if s := stateOf(exportID); s.status != export.JobStatusCompleted || !stored(exportID) {
 			t.Fatalf("export job: %+v, want completed with its object", s)
@@ -284,7 +274,7 @@ func TestExportCancelViaJobAPI(t *testing.T) {
 			result.ExportID != exportID || result.RowCount == nil || *result.RowCount != 1 {
 			t.Errorf("result = %d %s, want 200 with export %s and 1 row", w.Code, w.Body.String(), exportID)
 		}
-		if n := recorded.count() - reported; n != 1 {
+		if n := completedEvents() - reported; n != 1 {
 			t.Errorf("the export reported %d events, want export.completed once", n)
 		}
 	})
