@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { api, expectModuleServed, stamp } from './support/stack';
+import { api, expectModuleServed, grantFeature, stamp } from './support/stack';
 import {
   dbRows,
   ok,
@@ -26,7 +26,11 @@ import {
  * served), it does not skip.
  *
  * Organization A (self-signup UI) has the clients 1 and 2 with one CI each; organization B is
- * a second self-signup.
+ * a second self-signup. The API of the module is gated by the feature monitoring
+ * (backend/internal/entitlement/middleware.go), which the trial plan of a self-signup
+ * (standard, ENT-07) does not include: an operator grants it to both organizations
+ * (POST /admin/orgs/{id}/entitlements, ENT-04), so that B's 404 in M2 is the tenant
+ * isolation and not the missing entitlement (403 feature-not-entitled).
  *
  * Test → requirement IDs proven:
  *  M1 A plans a window in the UI with the CI of client 1 and the CI of client 2 and clicks
@@ -126,6 +130,8 @@ test.describe('maintenance announcement (MGT-04, NTF-05, NFR-04)', () => {
       );
     }
     const b = await openTenant(browser, rq, 'maint-b');
+    // The trial plan has no monitoring, which gates /maintenance-windows; the operator grants it.
+    await grantFeature(browser, rq, [a, b], 'monitoring', 'pro');
     w = { rq, a, b, s, clients, cis };
   });
 

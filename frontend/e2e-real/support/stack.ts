@@ -696,6 +696,79 @@ export async function raiseCILimit(
   }
 }
 
+/**
+ * grantFeature lets an operator grant a module feature to organizations
+ * (POST /admin/orgs/{id}/entitlements, ENT-04) that their plan lacks: a
+ * self-signup tenant holds the trial plan standard (ENT-07), which has no
+ * monitoring, so e.g. /maintenance-windows answers 403 feature-not-entitled
+ * (backend/internal/entitlement/middleware.go). The operator is a new Keycloak
+ * user of the group operators who signs in with operatorLogin; a refused step
+ * fails the setup. Afterwards each organization's own check
+ * (GET /entitlements/check/{feature}) must report the feature enabled.
+ */
+export async function grantFeature(
+  browser: Browser,
+  request: APIRequestContext,
+  orgs: { orgId: string; token: string }[],
+  featureKey: string,
+  plan: string,
+): Promise<void> {
+  const run = stamp();
+  const operator = {
+    email: `grant-operator-${run}@audit-e2e.de`,
+    password: `Audit-op-${run}!aA`,
+  };
+  const admin = await keycloakAdminToken(request);
+  const created = await request.post(`${KEYCLOAK}/admin/realms/reticora/users`, {
+    headers: { Authorization: `Bearer ${admin}` },
+    data: {
+      username: operator.email,
+      email: operator.email,
+      emailVerified: true,
+      enabled: true,
+      firstName: 'Audit',
+      lastName: 'Operator',
+      groups: ['/operators'],
+      credentials: [{ type: 'password', value: operator.password, temporary: false }],
+    },
+    failOnStatusCode: false,
+  });
+  expect(created.status(), `create the operator account: ${await created.text()}`).toBe(201);
+  const context = await browser.newContext({ locale: 'de-DE' });
+  try {
+    const login = await operatorLogin(await context.newPage(), context.request, operator);
+    expect(login.status, `operator callback: ${JSON.stringify(login.body)}`).toBe(200);
+    for (const org of orgs) {
+      const granted = await api(
+        request,
+        login.body.token,
+        'POST',
+        `/admin/orgs/${org.orgId}/entitlements`,
+        { feature_key: featureKey, plan, enabled: true },
+      );
+      expect(
+        granted.status,
+        `grant ${featureKey} to ${org.orgId}: ${JSON.stringify(granted.body)}`,
+      ).toBe(200);
+    }
+  } finally {
+    await context.close();
+  }
+  for (const org of orgs) {
+    const check = await api<{ enabled?: boolean }>(
+      request,
+      org.token,
+      'GET',
+      `/entitlements/check/${featureKey}`,
+    );
+    expect(
+      check.status,
+      `GET /entitlements/check/${featureKey}: ${JSON.stringify(check.body)}`,
+    ).toBe(200);
+    expect(check.body?.enabled, `${featureKey} of ${org.orgId} after the grant`).toBe(true);
+  }
+}
+
 /** A request the SNMP fake received (collector/internal/fakesnmp, Request). */
 export interface FakeSnmpRequest {
   at: string;
