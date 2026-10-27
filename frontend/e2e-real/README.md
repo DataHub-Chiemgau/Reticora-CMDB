@@ -67,6 +67,18 @@ its SNMPv3 mode on `127.0.0.163:161` (`startFakeSnmp` with `v3`: one authPriv us
 usmStatsWrongDigests) with an snmp_v3 credential carrying wrong keys, and the unreachable `192.0.2.10` (TEST-NET-1).
 It checks the cause (`auth_failed`, `unreachable`), protocol and target in `last_result` and on the Discovery page.
 
+## Master key rotation (`key-rotation.spec.ts`, WP-547)
+
+`key-rotation.spec.ts` rotates the master key of the installed stack as `docs/ops/workers.md` describes it (SEC-06):
+the new key in `RETICORA_MASTER_KEY`, the old one in `RETICORA_MASTER_KEY_PREVIOUS`, restart the server, let
+`rotation.master_key` run, remove the old key, restart again. `restartServer` in `support/stack.ts` changes the `.env`
+of the installation (`E2E_COMPOSE_DIR`, default `deploy/docker-compose` of the checkout; `E2E_COMPOSE_ENV_FILE`, default
+`.env`) and recreates only the server with the compose files of `fixtures/setup-real-stack.sh` (`docker compose up -d
+--no-deps --force-recreate server`; the signup secrets of the overlays come from the running server, the nginx.conf
+from `E2E_NGINX_CONF` or `$RUNNER_TEMP/nginx-e2e-real.conf`); the frontend is recreated after a server that came up.
+The rewrap run is made due through `scheduler_run` (`E2E_DATABASE_URL`). The spec needs `docker` and write access to
+the `.env`; after each test the server runs again with the last keys it started with.
+
 ## SIM-01 demo seed (`demo-seed.spec.ts`, WP-433)
 
 `support/stack.ts` (`seedDemo`) runs the seed `backend/cmd/seed` against `E2E_DATABASE_URL` (built with the Go

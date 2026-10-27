@@ -1,6 +1,6 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -846,4 +846,199 @@ export async function startFakeSnmp(opts: FakeSnmpOptions): Promise<FakeSnmp> {
       await exited;
     },
   };
+}
+
+// ─── The compose project of the installed stack (WP-547) ────────────────────
+
+/**
+ * The compose project the cloud installer set up: install-smoke.yml installs into
+ * deploy/docker-compose of the checkout with the configuration in .env. E2E_COMPOSE_DIR and
+ * E2E_COMPOSE_ENV_FILE point elsewhere.
+ */
+export const COMPOSE_DIR = process.env.E2E_COMPOSE_DIR || join(REPO, 'deploy', 'docker-compose');
+export const COMPOSE_ENV_FILE = process.env.E2E_COMPOSE_ENV_FILE || '.env';
+
+function composeEnvPath(): string {
+  return join(COMPOSE_DIR, COMPOSE_ENV_FILE);
+}
+
+/** readComposeEnv returns the variables of the installation's .env (last assignment wins). */
+export function readComposeEnv(): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (const line of readFileSync(composeEnvPath(), 'utf8').split('\n')) {
+    const match = /^([A-Z0-9_]+)=(.*)$/.exec(line);
+    if (match) vars[match[1]] = match[2].replace(/^["']|["']$/g, '');
+  }
+  return vars;
+}
+
+/**
+ * writeComposeEnv changes variables of the installation's .env the way an operator does
+ * (docs/ops/workers.md): a value replaces every assignment of the variable, undefined
+ * removes it. Other lines stay as they are.
+ */
+export function writeComposeEnv(changes: Record<string, string | undefined>) {
+  const path = composeEnvPath();
+  const lines = readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((line) => !Object.keys(changes).some((key) => line.startsWith(`${key}=`)));
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  for (const [key, value] of Object.entries(changes)) {
+    if (value !== undefined) lines.push(`${key}=${value}`);
+  }
+  writeFileSync(path, `${lines.join('\n')}\n`);
+}
+
+/** The settings of the test overlays the server was started with (setup-real-stack.sh). */
+let overlayEnv: Record<string, string> | undefined;
+
+function composeFiles(): string[] {
+  const files = ['-f', 'docker-compose.yml'];
+  if (existsSync(join(COMPOSE_DIR, 'docker-compose.override.yml'))) {
+    files.push('-f', 'docker-compose.override.yml');
+  }
+  files.push(
+    '-f',
+    join(REPO, 'frontend', 'e2e', 'fixtures', 'docker-compose.e2e.yml'),
+    '-f',
+    join(REPO, 'frontend', 'e2e-real', 'fixtures', 'docker-compose.e2e-real.yml'),
+  );
+  return files;
+}
+
+function compose(args: string[]): string {
+  return execFileSync(
+    'docker',
+    ['compose', '--env-file', COMPOSE_ENV_FILE, ...composeFiles(), ...args],
+    {
+      cwd: COMPOSE_DIR,
+      env: { ...process.env, ...overlayEnv },
+      encoding: 'utf8',
+      timeout: 5 * 60_000,
+    },
+  );
+}
+
+/** A container of the compose project as docker reports it. */
+export interface ServiceContainer {
+  id: string;
+  startedAt: string;
+  restartCount: number;
+  running: boolean;
+  env: Record<string, string>;
+}
+
+/** serviceContainer inspects the (running or stopped) container of a compose service. */
+export function serviceContainer(service: string): ServiceContainer {
+  const id = execFileSync(
+    'docker',
+    ['compose', '--env-file', COMPOSE_ENV_FILE, 'ps', '-aq', service],
+    { cwd: COMPOSE_DIR, encoding: 'utf8', timeout: 60_000 },
+  )
+    .trim()
+    .split('\n')[0];
+  expect(id, `container of the compose service ${service} in ${COMPOSE_DIR}`).toBeTruthy();
+  const [state] = JSON.parse(
+    execFileSync('docker', ['inspect', id], { encoding: 'utf8', timeout: 60_000 }),
+  ) as {
+    Id: string;
+    RestartCount: number;
+    State: { StartedAt: string; Running: boolean };
+    Config: { Env: string[] };
+  }[];
+  const env: Record<string, string> = {};
+  for (const entry of state.Config.Env) {
+    const at = entry.indexOf('=');
+    env[entry.slice(0, at)] = entry.slice(at + 1);
+  }
+  return {
+    id: state.Id,
+    startedAt: state.State.StartedAt,
+    restartCount: state.RestartCount,
+    running: state.State.Running,
+    env,
+  };
+}
+
+/** serviceLogs returns what the current container of a service logged since `since`. */
+export function serviceLogs(service: string, since: Date): string {
+  const run = spawnSync(
+    'docker',
+    ['logs', '--since', since.toISOString(), serviceContainer(service).id],
+    {
+      encoding: 'utf8',
+      timeout: 60_000,
+    },
+  );
+  return `${run.stdout}${run.stderr}`;
+}
+
+async function waitFor(url: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return true;
+    } catch {
+      // not up yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+  return false;
+}
+
+/** The outcome of restartServer. */
+export interface ServerRestart {
+  /** /readyz of the restarted server answered 200 within the wait. */
+  ready: boolean;
+  /** What the server logged since the restart. */
+  logs: string;
+  /** The restarted server container (its environment as the server got it). */
+  container: ServiceContainer;
+}
+
+/**
+ * restartServer changes the installation's .env as given (writeComposeEnv) and restarts
+ * only the server of the installed stack (k-e2e-real-ci, install-smoke.yml) with the
+ * compose files setup-real-stack.sh applied and the settings of their test overlays
+ * (signup secrets and nginx.conf, taken from the running server like the module run of
+ * install-smoke.yml does): `docker compose up -d --no-deps --force-recreate server` (also when
+ * only a variable changed that compose does not pass to the server). No other service is
+ * restarted; only the frontend container is recreated after a server that came up,
+ * because nginx resolves the server at its start (setup-real-stack.sh). It waits up to
+ * readyWithinMs for /readyz and reports the outcome, it does not assert it: a start that
+ * must fail is a test of its own.
+ */
+export async function restartServer(
+  changes: Record<string, string | undefined>,
+  readyWithinMs = 3 * 60_000,
+): Promise<ServerRestart> {
+  if (!overlayEnv) {
+    const env = serviceContainer('server').env;
+    overlayEnv = {
+      E2E_CAPTCHA_KEY: env.RETICORA_SIGNUP_CAPTCHA_KEY ?? '',
+      E2E_KC_CLIENT_ID: env.RETICORA_KEYCLOAK_ADMIN_CLIENT_ID ?? '',
+      E2E_KC_CLIENT_SECRET: env.RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET ?? '',
+      E2E_NGINX_CONF:
+        process.env.E2E_NGINX_CONF ||
+        join(process.env.RUNNER_TEMP || '/tmp', 'nginx-e2e-real.conf'),
+    };
+    expect(
+      overlayEnv.E2E_CAPTCHA_KEY && overlayEnv.E2E_KC_CLIENT_SECRET,
+      'the server runs with the overlays of setup-real-stack.sh (signup secrets)',
+    ).toBeTruthy();
+    expect(existsSync(overlayEnv.E2E_NGINX_CONF), overlayEnv.E2E_NGINX_CONF).toBe(true);
+  }
+  writeComposeEnv(changes);
+  const since = new Date(Date.now() - 1_000);
+  compose(['up', '-d', '--no-deps', '--force-recreate', 'server']);
+  const ready = await waitFor(`${SERVER}/readyz`, readyWithinMs);
+  if (ready) {
+    compose(['up', '-d', '--no-deps', '--force-recreate', 'frontend']);
+    expect(
+      await waitFor(`${BASE}/api/v1/auth/config`, 2 * 60_000),
+      'the recreated frontend reaches the restarted server',
+    ).toBe(true);
+  }
+  return { ready, logs: serviceLogs('server', since), container: serviceContainer('server') };
 }
