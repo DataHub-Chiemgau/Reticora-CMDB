@@ -780,3 +780,53 @@ export const savedViewApi = {
     });
   },
 };
+
+// ─── CI bulk (API-08, BLK-01) ────────────────────────────────────────────────
+
+/** The report of a bulk change per id, also the result of a ci.bulk job. */
+export type CIBulkReport = components['schemas']['CIBulkResult'];
+
+/** BULK_MAX_IDS is the most ids one bulk change takes (API-08). */
+export const BULK_MAX_IDS = 500;
+
+/** The page size of collectCIs: the largest page the CI list answers (API-02). */
+const COLLECT_PAGE_SIZE = 200;
+
+export interface CollectedCIs {
+  /** The matches in list order, at most `max`. */
+  cis: { id: string; name: string }[];
+  /** All matches of the filter, also those beyond `max`. */
+  total: number;
+}
+
+/**
+ * collectCIs gathers the ids and names of the CIs of the filtered CI list
+ * page by page, up to `max` (WP-520, F-328). It reads the list the CMDB page
+ * shows, with its filters and the selected scope, so it never holds a CI the
+ * list would not show.
+ */
+export async function collectCIs(
+  filter: { search?: string; status?: string; ci_type_id?: string },
+  max = BULK_MAX_IDS,
+): Promise<CollectedCIs> {
+  const seen = new Set<string>();
+  const cis: CollectedCIs['cis'] = [];
+  let total = 0;
+  for (let offset = 0; cis.length < max; offset += COLLECT_PAGE_SIZE) {
+    const page = await fetchAPI<PaginatedResponse<{ id: string; name: string }>>(
+      `/cis${qs({ ...filter, limit: COLLECT_PAGE_SIZE, offset })}`,
+    );
+    const rows = page.data ?? [];
+    total = page.total;
+    for (const ci of rows) {
+      if (cis.length < max && !seen.has(ci.id)) {
+        seen.add(ci.id);
+        cis.push({ id: ci.id, name: ci.name });
+      }
+    }
+    if (!page.has_more || rows.length === 0) {
+      break;
+    }
+  }
+  return { cis, total };
+}

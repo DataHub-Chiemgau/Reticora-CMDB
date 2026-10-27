@@ -17,6 +17,10 @@ export interface Job {
   created_at: string;
   started_at?: string;
   finished_at?: string;
+  /** The result of a finished job (its shape depends on the kind). */
+  result?: unknown;
+  /** Whether DELETE /jobs/{id} cancels the job now. */
+  cancellable?: boolean;
 }
 
 export interface JobFilter {
@@ -42,6 +46,23 @@ export function useJobs(filter: JobFilter) {
       return fetchAPI<PaginatedResponse<Job>>(`/jobs?${params.toString()}`);
     },
     refetchInterval: (query) => (query.state.data?.data.some(isActive) ? 3_000 : false),
+  });
+}
+
+/** JOB_POLL_INTERVAL_MS is the pause between two reads of a followed job. */
+export const JOB_POLL_INTERVAL_MS = 1_000;
+
+/**
+ * useJob follows one job (GET /jobs/{id}): it reads the job again while it
+ * is queued or running and stops once it is finished.
+ */
+export function useJob(id: string | null) {
+  return useQuery({
+    queryKey: [...KEY, id],
+    queryFn: () => fetchAPI<Job>(`/jobs/${id}`),
+    enabled: !!id,
+    refetchInterval: (query) =>
+      query.state.data && !isActive(query.state.data) ? false : JOB_POLL_INTERVAL_MS,
   });
 }
 

@@ -10,7 +10,19 @@ import {
 import { createServer, type Server } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
-import { api, signupTenant, stamp, uiLogin, BASE, SERVER, type Account } from './support/stack';
+import {
+  api,
+  keycloakAdminToken,
+  operatorLogin,
+  signupTenant,
+  stamp,
+  uiLogin,
+  BASE,
+  KEYCLOAK,
+  SERVER,
+  type Account,
+  type OperatorSession,
+} from './support/stack';
 
 /*
  * Phase-1 acceptance audit – bulk operations, jobs, job center, notifications, saved views,
@@ -18,19 +30,25 @@ import { api, signupTenant, stamp, uiLogin, BASE, SERVER, type Account } from '.
  * UI → REST API → PostgreSQL → UI.
  *
  * Tenants are created through the self-signup UI: tenant A (main) and tenant B (foreign data
- * for the isolation checks) in beforeAll, a third tenant inside J01 because a trial tenant
- * holds at most 100 CIs and the job path needs 100 ids. Every test creates its own CIs with
+ * for the isolation checks) in beforeAll, own tenants inside B05 and J01 because a trial
+ * tenant holds at most 100 CIs and the job path needs 100 ids (B05: the operator raises
+ * max_cis). Every test creates its own CIs with
  * unique names; fixtures are created through the REST API the UI uses (POST /api/v1/cis).
  *
  * Test → WP (requirement IDs) proven:
- *  B01 bulk status change in the CMDB list: one request, report, reload, history, audit
- *      ...................................... WP-181 (API-08, BLK-01), WP-171 (AUD-03, CI-06), WP-133 (AUD-05)
+ *  B01 bulk status change in the CMDB list: one request, report, reload, history, audit;
+ *      a CI with a manual status override gets the new status with a new override
+ *      ...................................... WP-181 (API-08, BLK-01), WP-171 (AUD-03, CI-06), WP-133 (AUD-05),
+ *      WP-368 (OVR-01, API-07), WP-520 (API-08, BLK-01)
  *  B02 bulk with one invalid item (CI deleted meanwhile): per-item error in the UI, the
  *      others applied, nothing lost silently ...................... WP-181 (API-08, BLK-01)
  *  B03 bulk limits and validation (0 / 501 ids, unknown status/action, duplicates, CI of
  *      another tenant) ........................... WP-181 (API-08, BLK-01), WP-015 (TEN-06)
  *  B04 a malformed id is reported with the status the single change answers (400, not 500),
  *      the other ids are applied ................................ WP-181, WP-517 (API-08)
+ *  B05 a client-2 technician selects all 150 matches of the filter in the CMDB list: one
+ *      job, its report per id in the list (one error), persistence per API, no client-1 CI
+ *      in the report ............. WP-520 (API-08, BLK-01; F-328), WP-109 (TEN-01, TEN-02)
  *  J01 100 ids run as job: 202 + Location, job center follows it to "Erfolgreich", result
  *      with per-id errors, persistence after reload, history, cancel/revert 409, job
  *      metrics, foreign tenant 404 ....... WP-181 (API-08, BLK-01), WP-182 (API-09, JOB-03),
@@ -53,9 +71,10 @@ import { api, signupTenant, stamp, uiLogin, BASE, SERVER, type Account } from '.
  *      *.internal, non-http scheme refused with an explanation; a public host is accepted
  *      ........................................................................ WP-049 (SEC-08)
  *
- * Notes: the CMDB list selects at most the 25 rows of its visible page, so a bulk job
- * (≥ 100 ids) cannot be started from the UI; J01 starts it through the endpoint the UI uses
- * (POST /api/v1/cis/bulk) and follows it in the job center UI. A fresh tenant gets its
+ * Notes: the CMDB list keeps its selection across pages and selects all matches of the
+ * filter, up to 500 (WP-520); B05 starts a bulk job from the list and reads its report
+ * there, J01 starts one through the endpoint the UI uses (POST /api/v1/cis/bulk) and
+ * follows it in the job center UI. A fresh tenant gets its
  * notification channels when it is created (WP-509): N01 creates none and only checks
  * that they are there.
  *
@@ -75,8 +94,20 @@ interface CI {
   management_ip?: string;
   firmware_version?: string;
   discovery_source?: string;
+  version: number;
   created_at: string;
   updated_at: string;
+}
+
+/** Provenance of one field (REC-10, GET /cis/{id}/provenance). */
+interface Provenance {
+  field: string;
+  value: unknown;
+  source: string;
+  reason: 'override' | 'source_rank' | 'asset' | 'record';
+  override_author?: string;
+  override_reason?: string;
+  protected?: boolean;
 }
 
 interface List<T> {
@@ -264,6 +295,11 @@ async function changesOf(t: Tenant, id: string): Promise<Change[]> {
   return rows(await ok<List<Change>>(t, 'GET', `/cis/${id}/changes?limit=200`));
 }
 
+/** provenanceOf returns the provenance of every field of a CI (REC-10, OVR-01). */
+async function provenanceOf(t: Tenant, id: string): Promise<Provenance[]> {
+  return (await ok<{ data: Provenance[] | null }>(t, 'GET', `/cis/${id}/provenance`)).data ?? [];
+}
+
 /** pollAudit waits for the audit entry `action` about the CI (asynchronous audit runner). */
 async function pollAudit(t: Tenant, ciId: string, action: string): Promise<AuditEntry> {
   let found: AuditEntry | undefined;
@@ -350,6 +386,49 @@ function parseCsv(text: string, sep: string): string[][] {
   return out.filter((r) => r.length > 1 || r[0] !== '');
 }
 
+/**
+ * raiseCILimit lets an operator raise the max_cis quota of an organization
+ * (POST /admin/orgs/{id}/entitlements, ENT-04): a trial tenant holds 100 CIs.
+ */
+async function raiseCILimit(browser: Browser, orgId: string, maxCIs: number) {
+  const run = stamp();
+  const operator = {
+    email: `bulk-operator-${run}@audit-e2e.de`,
+    password: `Audit-op-${run}!aA`,
+  };
+  const admin = await keycloakAdminToken(rq);
+  const created = await rq.post(`${KEYCLOAK}/admin/realms/reticora/users`, {
+    headers: { Authorization: `Bearer ${admin}` },
+    data: {
+      username: operator.email,
+      email: operator.email,
+      emailVerified: true,
+      enabled: true,
+      firstName: 'Audit',
+      lastName: 'Operator',
+      groups: ['/operators'],
+      credentials: [{ type: 'password', value: operator.password, temporary: false }],
+    },
+    failOnStatusCode: false,
+  });
+  expect(created.status(), `create the operator account: ${await created.text()}`).toBe(201);
+  const context = await browser.newContext({ locale: 'de-DE' });
+  try {
+    const login = await operatorLogin(await context.newPage(), context.request, operator);
+    expect(login.status, `operator callback: ${JSON.stringify(login.body)}`).toBe(200);
+    const session = login.body as OperatorSession;
+    const granted = await api(rq, session.token, 'POST', `/admin/orgs/${orgId}/entitlements`, {
+      feature_key: 'cmdb_core',
+      plan: 'standard',
+      enabled: true,
+      limits: { max_cis: maxCIs },
+    });
+    expect(granted.status, `raise max_cis: ${JSON.stringify(granted.body)}`).toBe(200);
+  } finally {
+    await context.close();
+  }
+}
+
 /** metricCount reads a counter sample of the server's Prometheus endpoint. */
 async function metricCount(name: string, labels: string): Promise<number> {
   const res = await rq.get(`${SERVER}/metrics`, { failOnStatusCode: false });
@@ -388,17 +467,29 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
       await newCI(a, { name: `${tag}-c` }),
     ];
     const control = await newCI(a, { name: `${tag}-control` });
+    // WP-520: a CI edited by hand before (status override, OVR-01). The bulk change is a
+    // manual change too (WP-368): it applies the new status with a new override, never
+    // reports "ok" without effect.
+    const manual = await newCI(a, { name: `${tag}-manual` });
+    await ok(a, 'PATCH', `/cis/${manual.id}`, { status: 'inactive' });
+    const manualBefore = await getCI(a, manual.id);
+    expect(manualBefore.status).toBe('inactive');
+    expect(
+      (await provenanceOf(a, manual.id)).find((p) => p.field === 'status'),
+      'precondition: the manual status is an override',
+    ).toMatchObject({ value: 'inactive', reason: 'override' });
+    const targets = [...selected, manual];
 
     await page.goto(`/cmdb?q=${tag}`);
     const main = page.locator('#main-content');
-    for (const ci of [...selected, control]) {
+    for (const ci of [...targets, control]) {
       await expect(main.getByRole('link', { name: ci.name, exact: true })).toBeVisible();
     }
-    for (const ci of selected) {
+    for (const ci of targets) {
       await main.getByRole('checkbox', { name: `${ci.name} auswählen` }).check();
     }
     const toolbar = main.getByRole('toolbar', { name: 'Massenbearbeitung' });
-    await expect(toolbar).toContainText('3 ausgewählt');
+    await expect(toolbar).toContainText('4 ausgewählt');
     await toolbar.getByLabel('Status setzen…').selectOption('maintenance');
 
     // API-08: the UI sends ONE bulk request instead of a fan-out of single updates.
@@ -414,29 +505,53 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
     const res = await responded;
     page.off('request', onRequest);
     const sent = res.request().postDataJSON() as { action?: string; ids: string[]; status: string };
-    expect([...sent.ids].sort()).toEqual(selected.map((c) => c.id).sort());
+    expect([...sent.ids].sort()).toEqual(targets.map((c) => c.id).sort());
     expect(sent.status).toBe('maintenance');
     expect(res.status(), 'below 100 ids the report answers synchronously').toBe(200);
     const report = (await res.json()) as BulkReport;
-    expect(report.total).toBe(3);
-    expect(report.succeeded).toBe(3);
+    expect(report.total).toBe(4);
+    expect(report.succeeded).toBe(4);
     expect(report.failed).toBe(0);
     expect(report.items.map((i) => [i.id, i.result, i.code]).sort()).toEqual(
-      selected.map((c) => [c.id, 'ok', 200]).sort(),
+      targets.map((c) => [c.id, 'ok', 200]).sort(),
     );
     expect(singlePatches, 'no single PATCH requests besides the bulk request').toEqual([]);
-    await expect(page.getByText('Status von 3 CIs aktualisiert')).toBeVisible();
+    await expect(page.getByText('Status von 4 CIs aktualisiert')).toBeVisible();
 
     // Persistence: after a reload the list shows the new status of exactly the selected CIs.
     await page.reload();
-    for (const ci of selected) {
+    for (const ci of targets) {
       await expect(listRow(page, ci.name)).toContainText('Wartung');
     }
     await expect(listRow(page, control.name)).toContainText('Aktiv');
-    for (const ci of selected) {
+    for (const ci of targets) {
       expect((await getCI(a, ci.id)).status, `stored status of ${ci.name}`).toBe('maintenance');
     }
     expect((await getCI(a, control.id)).status, 'the unselected CI is untouched').toBe('active');
+
+    // The manually edited CI: "ok" has an effect – the status is applied over the old
+    // override, which is replaced by a new protected one of the bulk's user (WP-368), and
+    // the version rises (API-07).
+    const manualAfter = await getCI(a, manual.id);
+    expect(manualAfter.status).toBe('maintenance');
+    expect(manualAfter.version, 'the bulk change raises the version').toBeGreaterThan(
+      manualBefore.version,
+    );
+    expect((await provenanceOf(a, manual.id)).find((p) => p.field === 'status')).toMatchObject({
+      value: 'maintenance',
+      reason: 'override',
+      override_author: a.userId,
+      override_reason: 'bulk set_status',
+      protected: true,
+    });
+    const manualChange = (await changesOf(a, manual.id)).find(
+      (c) => c.change_type === 'status_change' && c.new_value === 'maintenance',
+    );
+    expect(manualChange, 'ci_change of the bulk over the override').toMatchObject({
+      field_name: 'status',
+      old_value: 'inactive',
+      actor_id: a.userId,
+    });
 
     // History (ci_change, AUD-03) and audit trail (AUD-05) for every changed CI.
     for (const ci of selected) {
@@ -602,6 +717,153 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
     // WP-517: the id is checked as a UUID before it reaches the database.
     expect(item?.error).toBe('invalid CI id');
     expect(res.body).toMatchObject({ total: 2, succeeded: 1, failed: 1 });
+  });
+
+  test('B05 150 CIs selected in the CMDB list run as one job whose report the list shows; a client-2 user sees no client-1 CI in it', async ({
+    browser,
+  }) => {
+    test.setTimeout(8 * 60_000);
+    // A trial tenant holds 100 CIs (ENT-07): the case gets its own tenant, whose
+    // max_cis the operator raises (ENT-04).
+    const c = await openTenant(browser, 'bulkui');
+    let tech: BrowserContext | undefined;
+    try {
+      await raiseCILimit(browser, c.orgId, 400);
+      const tag = `bk5x${s}`;
+      const client1 = await ok<{ id: string }>(c, 'POST', '/clients', {
+        name: `Bulk C1 ${s}`,
+        slug: `bulk-c1-${s}`,
+      });
+      const client2 = await ok<{ id: string }>(c, 'POST', '/clients', {
+        name: `Bulk C2 ${s}`,
+        slug: `bulk-c2-${s}`,
+      });
+      // CIs of client 1 with the same name prefix: the filter of the list matches them
+      // too, the client-2 user must never see them.
+      const theirs = await Promise.all(
+        Array.from({ length: 5 }, (_, k) =>
+          newCI(c, { name: `${tag}-c1-${k}`, client_id: client1.id }),
+        ),
+      );
+      const ours: CI[] = [];
+      for (let i = 0; i < 150; i += 15) {
+        ours.push(
+          ...(await Promise.all(
+            Array.from({ length: 15 }, (_, k) =>
+              newCI(c, {
+                name: `${tag}-c2-${String(i + k).padStart(3, '0')}`,
+                client_id: client2.id,
+              }),
+            ),
+          )),
+        );
+      }
+
+      // A technician of client 2 (standard role client_technician, scope client).
+      const roles = await ok<List<{ id: string; name: string }>>(c, 'GET', '/roles?limit=100');
+      const techRole = rows(roles).find((r) => r.name === 'client_technician')?.id ?? '';
+      expect(techRole, 'system role client_technician (RBA-02)').not.toBe('');
+      const account = { email: `bulk-c2-${s}@audit-e2e.de`, password: `Audit-c2-${s}!aA` };
+      const invitation = await ok<{ token?: string }>(c, 'POST', '/invitations', {
+        email: account.email,
+        role_id: techRole,
+        scope_type: 'client',
+        scope_id: client2.id,
+      });
+      expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+      const accept = await rq.post(`${BASE}/api/v1/invitations/accept`, {
+        data: { token: invitation.token, password: account.password, display_name: 'Bulk C2' },
+        failOnStatusCode: false,
+      });
+      expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);
+      tech = await browser.newContext({
+        baseURL: BASE,
+        locale: 'de-DE',
+        extraHTTPHeaders: { 'X-Real-IP': realIp() },
+      });
+      const page = await tech.newPage();
+      const token = await uiLogin(page, account);
+
+      // UI: the filtered list holds the 150 CIs of client 2; the visible page 25 of them.
+      await page.goto(`/cmdb?q=${tag}`);
+      const main = page.locator('#main-content');
+      await expect(main.getByText(/^150 Einträge$/)).toBeVisible();
+      await main.getByRole('checkbox', { name: 'Alle sichtbaren CIs auswählen' }).check();
+      const toolbar = main.getByRole('toolbar', { name: 'Massenbearbeitung' });
+      await expect(toolbar).toContainText('25 ausgewählt');
+      // F-328: all matches of the filter, collected over the list page by page.
+      await toolbar.getByRole('button', { name: 'Alle 150 Treffer des Filters auswählen' }).click();
+      await expect(toolbar).toContainText('150 ausgewählt');
+      await expect(toolbar).toContainText('Ab 100 CIs läuft die Änderung als Job');
+      await toolbar.getByLabel('Status setzen…').selectOption('inactive');
+
+      // One selected CI is deleted meanwhile: the report names it with its error.
+      const victim = ours[42];
+      expect((await api(rq, c.token, 'DELETE', `/cis/${victim.id}`)).status).toBe(204);
+
+      const responded = waitForPath(page, '/cis/bulk', 'POST');
+      await toolbar.getByRole('button', { name: 'Anwenden' }).click();
+      const res = await responded;
+      const sent = res.request().postDataJSON() as { ids: string[]; status: string };
+      expect(sent.ids).toHaveLength(150);
+      expect(new Set(sent.ids)).toEqual(new Set(ours.map((ci) => ci.id)));
+      expect(sent.status).toBe('inactive');
+      expect(res.status(), 'from 100 ids on the bulk change runs as a job').toBe(202);
+      const accepted = (await res.json()) as { job_id: string; kind: string };
+      expect(accepted.kind).toBe('ci.bulk');
+
+      // The list follows the job and shows its report per id with the single error.
+      await expect(
+        main.getByText('Job abgeschlossen: 149 von 150 CIs aktualisiert, 1 fehlgeschlagen'),
+      ).toBeVisible({ timeout: 120_000 });
+      const failures = main.getByRole('list', { name: 'Fehlgeschlagene CIs' });
+      await expect(failures.getByRole('listitem')).toHaveCount(1);
+      await expect(failures).toContainText(`${victim.name}: CI not found`);
+      const report = main.getByRole('table', { name: 'Bericht je CI' });
+      await expect(report.getByRole('row')).toHaveCount(151);
+      await expect(report.getByRole('row').filter({ hasText: victim.name })).toContainText('404');
+      // Isolation: no CI of client 1 in the report, the list or the page.
+      const shown = await main.innerText();
+      for (const ci of theirs) {
+        expect(shown, `client-1 CI ${ci.name} in the page`).not.toContain(ci.name);
+        expect(shown, `client-1 CI ${ci.id} in the page`).not.toContain(ci.id);
+      }
+
+      // Persistence per API: the job result of the technician and the stored status.
+      const result = await api<BulkReport>(rq, token, 'GET', `/jobs/${accepted.job_id}/result`);
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ total: 150, succeeded: 149, failed: 1 });
+      expect(new Set(result.body.items.map((i) => i.id))).toEqual(new Set(ours.map((ci) => ci.id)));
+      expect(result.body.items.find((i) => i.id === victim.id)).toMatchObject({
+        result: 'error',
+        code: 404,
+      });
+      const stored = await allCIs(c);
+      for (const ci of ours.filter((o) => o.id !== victim.id)) {
+        expect(stored.find((x) => x.id === ci.id)?.status, `stored status of ${ci.name}`).toBe(
+          'inactive',
+        );
+      }
+      for (const ci of theirs) {
+        expect((await getCI(c, ci.id)).status, `client-1 CI ${ci.name} untouched`).toBe('active');
+        const r = await api(rq, token, 'GET', `/cis/${ci.id}`);
+        expect(r.status, `GET /cis/{client-1 CI} as client 2`).toBe(404);
+      }
+      // The job's changes are the technician's (the job runs as its creator).
+      const techId = ((await accept.json()) as { user_id: string }).user_id;
+      expect(claims(token).sub).toBe(techId);
+      const change = (await changesOf(c, ours[0].id)).find(
+        (ch) => ch.change_type === 'status_change' && ch.new_value === 'inactive',
+      );
+      expect(change, `ci_change of ${ours[0].name}`).toMatchObject({
+        field_name: 'status',
+        old_value: 'active',
+        actor_id: techId,
+      });
+    } finally {
+      await tech?.close();
+      await c.ctx.close();
+    }
   });
 
   test('J01 100 ids run as a job that the job center follows to the end; the result reports every id and the change persists', async ({
