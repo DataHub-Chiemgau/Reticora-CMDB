@@ -297,6 +297,10 @@ const (
 	ScopesRequestSuffix = ".scopes.request"
 	ScopesResultSuffix  = ".scopes.result"
 	SubnetsReportSuffix = ".subnets.report"
+	// The collector's ad-hoc discovery jobs (JOB-01, F-358): its open jobs
+	// and the status it reports for one of them.
+	JobsRequestSuffix = ".jobs.request"
+	JobsStatusSuffix  = ".jobs.status"
 )
 
 // CollectorScope is a scope as the collector receives it; CredentialIDs are
@@ -472,6 +476,25 @@ func (h *Handler) scopeHandlers() map[string]func(ctx context.Context, orgID, co
 			}
 			return map[string]int{"suggested": n}
 		},
+		JobsRequestSuffix: func(ctx context.Context, orgID, collectorID string, _ []byte) any {
+			open, err := h.CollectorJobs(ctx, orgID, collectorID)
+			if err != nil {
+				slog.Warn("collector jobs refused", "collector_id", collectorID, "error", err)
+				return JobsResponse{Jobs: []CollectorJob{}, Error: "not available"}
+			}
+			return JobsResponse{Jobs: open}
+		},
+		JobsStatusSuffix: func(ctx context.Context, orgID, collectorID string, data []byte) any {
+			var rep JobStatusReport
+			if err := json.Unmarshal(data, &rep); err != nil {
+				return map[string]string{"error": "invalid report"}
+			}
+			if _, err := h.RecordCollectorJobStatus(ctx, orgID, collectorID, &rep); err != nil {
+				slog.Warn("job status refused", "collector_id", collectorID, "job_id", rep.JobID, "status", rep.Status, "error", err)
+				return map[string]string{"error": "not recorded"}
+			}
+			return map[string]string{"status": "recorded"}
+		},
 	}
 }
 
@@ -485,7 +508,9 @@ func (h *Handler) WithScopeCycles(cycles *observability.Cycles) *Handler {
 }
 
 // ServeCollectorScopes answers the scope requests, run results and subnet
-// reports of the collectors on nc until ctx ends (DIS-09). A request of an
+// reports of the collectors on nc until ctx ends (DIS-09), and their
+// requests for open discovery jobs and the job statuses they report
+// (JOB-01, F-358). A request of an
 // unknown or disabled collector is refused before its handler runs,
 // whatever the suffix, so nothing of it is persisted (COL-04).
 func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error {

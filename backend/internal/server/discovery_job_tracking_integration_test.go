@@ -74,9 +74,10 @@ func TestAuditDefectDiscoveryJobInGenericJobModel(t *testing.T) {
 	}
 
 	// The status of the discovery job is mirrored once committed:
-	// pending → running → completed is queued → running → succeeded. No
-	// execution path sets the status of an ad-hoc job yet, so the test
-	// calls UpdateJobStatus of the router's discovery repository directly.
+	// pending → running → completed is queued → running → succeeded. The
+	// test calls UpdateJobStatus of the router's discovery repository
+	// directly; the collector's path over the scope channel is tested in
+	// discovery/job_execution_integration_test.go (WP-632).
 	repo, ok := e.Repos.Discovery.(*discovery.PGRepository)
 	if !ok {
 		t.Fatalf("discovery repository %T is not the PG repository", e.Repos.Discovery)

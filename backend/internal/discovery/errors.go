@@ -88,6 +88,15 @@ func truncate(s string, n int) string {
 // ok, partial (errors and records) or failed (errors, no records). It
 // counts the run and its errors in the metrics.
 func NormalizeRunResult(result map[string]any) map[string]any {
+	out, errs := normalizeRunResult(result)
+	scopeRuns.WithLabelValues(out["status"].(string)).Inc()
+	countRunErrors(errs)
+	return out
+}
+
+// normalizeRunResult is NormalizeRunResult without the metrics; it also
+// returns the errors. A discovery job's result is normalized the same way.
+func normalizeRunResult(result map[string]any) (map[string]any, []ErrorState) {
 	out := map[string]any{}
 	for k, v := range result {
 		out[k] = v
@@ -142,7 +151,11 @@ func NormalizeRunResult(result map[string]any) map[string]any {
 	} else {
 		delete(out, "errors")
 	}
-	scopeRuns.WithLabelValues(state).Inc()
+	return out, errs
+}
+
+// countRunErrors counts reported run errors by protocol and cause.
+func countRunErrors(errs []ErrorState) {
 	for _, e := range errs {
 		protocol := e.Protocol
 		if protocol == "" {
@@ -150,7 +163,6 @@ func NormalizeRunResult(result map[string]any) map[string]any {
 		}
 		discoveryErrors.WithLabelValues(protocol, e.Cause).Inc()
 	}
-	return out
 }
 
 // ScopeHealthOf derives the health of a scope from its last run result.

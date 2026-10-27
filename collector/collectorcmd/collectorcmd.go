@@ -436,6 +436,9 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 				"event", "collector.spool.backpressure")
 		default:
 			runDueDiscovery(ctx, &cfg, up, sched, hosts, time.Now())
+			// Jobs created through the API run once, after the due passes
+			// (JOB-01, F-358).
+			runOpenJobs(ctx, &cfg, up, hosts)
 		}
 		select {
 		case <-ctx.Done():
@@ -464,72 +467,14 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 		if len(due) == 0 {
 			continue
 		}
-		slog.Info("discovery started", "pass", pass.key, "protocols", due)
-		// Only the credentials of this pass (COL-02, DIS-09); every plugin
-		// receives the namespace of its protocol.
-		passCreds := credentialsFor(cfg, pass.scope)
-		var passRecords []plugins.DeviceRecord
-		var errs []runError
-		if pass.truncated {
-			slog.Warn("discovery scope truncated", "event", "discovery.scope.truncated", "scope_id", pass.scope.ID,
-				"target", pass.scope.Target, "limit", maxScopeAddresses)
-			errs = append(errs, truncationError(pass.scope))
-		}
-		for _, protocol := range due {
-			if ctx.Err() != nil {
-				break
-			}
-			plug, ok := pluginRegistry[protocol]
-			if !ok {
-				slog.Warn("unknown protocol plugin, skipping", "protocol", protocol)
-				continue
-			}
-			targets := pass.targetsFor(protocol, hosts)
-			slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
-			creds := plugins.CredentialsFor(protocol, passCreds)
-			hits, err := plug.Probe(ctx, targets, creds)
-			if err != nil {
-				slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
-				errs = append(errs, runError{Protocol: protocol, Cause: plugins.ErrorCause(err), Message: err.Error()})
-				continue
-			}
-			if protocol == "sweep" {
-				reachable := hitTargets(hits)
-				// The sweep is the reachability series of the CIs (MON-02).
-				uploadSamples(ctx, up, reachabilitySamples(hosts.get(pass.key), reachable))
-				hosts.set(pass.key, reachable)
-			}
-			collected, failed := collectHits(ctx, protocol, plug, hits, creds)
-			errs = append(errs, failed...)
-			if protocol == "power" {
-				// UPS and PDU readings of the power devices (MON-02).
-				uploadSamples(ctx, up, pollPowerValues(ctx, hits, plugins.CredentialsFor("snmp", passCreds)))
-			}
-			slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
-			passRecords = append(passRecords, collected...)
-		}
-		tagRecords(passRecords, pass.scope)
+		passRecords, errs := runPass(ctx, cfg, up, &pass, due, hosts)
 		records = append(records, passRecords...)
 		outcomes = append(outcomes, scopeOutcome{scope: pass.scope, records: len(passRecords), errs: errs, next: pass.nextRun(sched)})
 	}
 	if len(outcomes) == 0 {
 		return 0
 	}
-	// The sweep record of a target another protocol of its scope classified
-	// is no unclassified device of its own (DIS-02); targets configured by
-	// name have their address by now.
-	records = profiles.MergeByTarget(deliverableRecords(ctx, records))
-	// Upload the records in a compressed batch; the spool flusher delivers
-	// what could not be sent.
-	var uploadErr *runError
-	if len(records) > 0 {
-		if err := up.uploadRecordsAt(ctx, records, now); err != nil {
-			slog.Error("failed to upload discovery records", "event", "discovery.upload.failed", "error", err, "count", len(records))
-			uploadErr = &runError{Protocol: "upload", Cause: "upload_failed", Message: err.Error()}
-		} else {
-			slog.Info("discovery records uploaded", "count", len(records))
-		}
-	}
+	records, uploadErr := uploadDiscovered(ctx, up, records, now)
 	for _, o := range outcomes {
 		errs := o.errs
 		if uploadErr != nil && o.records > 0 {
@@ -539,6 +484,76 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 	}
 	slog.Info("discovery completed", "duration_ms", time.Since(now).Milliseconds(), "total_records", len(records))
 	return len(records)
+}
+
+// runPass runs the protocols of a pass, the sweep first, and returns its
+// records, tagged with its scope, and its run errors (DIS-08).
+func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *discoveryPass, protocols []string, hosts *hostCache) ([]plugins.DeviceRecord, []runError) {
+	slog.Info("discovery started", "pass", pass.key, "protocols", protocols)
+	// Only the credentials of this pass (COL-02, DIS-09); every plugin
+	// receives the namespace of its protocol.
+	passCreds := credentialsFor(cfg, pass.scope)
+	var passRecords []plugins.DeviceRecord
+	var errs []runError
+	if pass.truncated {
+		slog.Warn("discovery scope truncated", "event", "discovery.scope.truncated", "scope_id", pass.scope.ID,
+			"target", pass.scope.Target, "limit", maxScopeAddresses)
+		errs = append(errs, truncationError(pass.scope))
+	}
+	for _, protocol := range protocols {
+		if ctx.Err() != nil {
+			break
+		}
+		plug, ok := pluginRegistry[protocol]
+		if !ok {
+			slog.Warn("unknown protocol plugin, skipping", "protocol", protocol)
+			continue
+		}
+		targets := pass.targetsFor(protocol, hosts)
+		slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
+		creds := plugins.CredentialsFor(protocol, passCreds)
+		hits, err := plug.Probe(ctx, targets, creds)
+		if err != nil {
+			slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
+			errs = append(errs, runError{Protocol: protocol, Cause: plugins.ErrorCause(err), Message: err.Error()})
+			continue
+		}
+		if protocol == "sweep" {
+			reachable := hitTargets(hits)
+			// The sweep is the reachability series of the CIs (MON-02).
+			uploadSamples(ctx, up, reachabilitySamples(hosts.get(pass.key), reachable))
+			hosts.set(pass.key, reachable)
+		}
+		collected, failed := collectHits(ctx, protocol, plug, hits, creds)
+		errs = append(errs, failed...)
+		if protocol == "power" {
+			// UPS and PDU readings of the power devices (MON-02).
+			uploadSamples(ctx, up, pollPowerValues(ctx, hits, plugins.CredentialsFor("snmp", passCreds)))
+		}
+		slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
+		passRecords = append(passRecords, collected...)
+	}
+	tagRecords(passRecords, pass.scope)
+	return passRecords, errs
+}
+
+// uploadDiscovered merges the records of a run and uploads them in a
+// compressed batch; the spool flusher delivers what could not be sent. It
+// returns the merged records and the upload error of the run, if any.
+func uploadDiscovered(ctx context.Context, up *uploader, records []plugins.DeviceRecord, now time.Time) ([]plugins.DeviceRecord, *runError) {
+	// The sweep record of a target another protocol of its scope classified
+	// is no unclassified device of its own (DIS-02); targets configured by
+	// name have their address by now.
+	records = profiles.MergeByTarget(deliverableRecords(ctx, records))
+	if len(records) == 0 {
+		return records, nil
+	}
+	if err := up.uploadRecordsAt(ctx, records, now); err != nil {
+		slog.Error("failed to upload discovery records", "event", "discovery.upload.failed", "error", err, "count", len(records))
+		return records, &runError{Protocol: "upload", Cause: "upload_failed", Message: err.Error()}
+	}
+	slog.Info("discovery records uploaded", "count", len(records))
+	return records, nil
 }
 
 // maxScopeAddresses bounds the addresses of one CIDR or range scope; it

@@ -8,18 +8,178 @@
 // The scope run reports travel over NATS like in production; the expansion
 // test needs TEST_NATS_URL or TEST_NATS_SERVER_BIN.
 //
+// Ad-hoc discovery jobs (WP-632, JOB-01, F-358): the collector takes its
+// open jobs over the scope channel, runs each one the server lets run with
+// the plugins of the job type, uploads the records and reports the result.
+//
 // Retest:
 //
 //	cd collector && TEST_NATS_URL=nats://localhost:54222 go test -count=1 -v \
-//	  -run 'TestAuditScopeExpansionCompleteOrReported|TestAuditScopeScheduleSurvivesRestart' ./collectorcmd/
+//	  -run 'TestAuditScopeExpansionCompleteOrReported|TestAuditScopeScheduleSurvivesRestart|TestDiscoveryJobRunsOnCollector' ./collectorcmd/
 package collectorcmd
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"slices"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/nats-io/nats.go"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 )
+
+// jobReport is a job status as the server receives it.
+type jobReport struct {
+	JobID  string `json:"job_id"`
+	Status string `json:"status"`
+	Error  string `json:"error"`
+	Result struct {
+		Records int        `json:"records"`
+		Scopes  int        `json:"scopes"`
+		Errors  []runError `json:"errors"`
+	} `json:"result"`
+}
+
+// TestDiscoveryJobRunsOnCollector: the collector asks the server for its
+// open jobs over NATS, reports each one running and runs it only once the
+// server recorded that; a sweep job runs the sweep, a full job all plugins
+// of the scope, the records reach the ingest, and the result goes back
+// with the record count. A poll job on a scope without poll plugins fails
+// with cause config_error; a job the server does not let run is skipped.
+func TestDiscoveryJobRunsOnCollector(t *testing.T) {
+	const target = "192.0.2.31"
+	sweepSpy := &auditSpy{name: "sweep", alive: func(targets []string) []plugins.Result {
+		out := make([]plugins.Result, 0, len(targets))
+		for _, tg := range targets {
+			out = append(out, plugins.Result{IP: tg, Name: tg})
+		}
+		return out
+	}}
+	auditUsePlugins(t, sweepSpy)
+	up, uploaded := auditUploadSink(t)
+	collectorScopes.set([]collectorScope{{ID: "6f0b6f0e-0000-4000-8000-0000000000b1", Kind: "host", Target: target,
+		Schedule: "24h", Plugins: []string{"sweep"}}}, nil)
+
+	const (
+		jobSweep   = "7a1c0000-0000-4000-8000-000000000001"
+		jobRefused = "7a1c0000-0000-4000-8000-000000000002"
+		jobPoll    = "7a1c0000-0000-4000-8000-000000000003"
+		jobFull    = "7a1c0000-0000-4000-8000-000000000004"
+	)
+	nc, err := nats.Connect(auditNATSURL(t), nats.Timeout(5*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := fmt.Sprintf("collector.job-%d.c1", time.Now().UnixNano())
+	var mu sync.Mutex
+	var reports []jobReport
+	requests := 0
+	if _, err = nc.Subscribe(subject+".jobs.request", func(m *nats.Msg) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		_ = m.Respond([]byte(`{"jobs":[{"id":"` + jobSweep + `","job_type":"sweep","config":{}},{"id":"` + jobRefused +
+			`","job_type":"full","config":{}},{"id":"` + jobPoll + `","job_type":"poll","config":{}},{"id":"` + jobFull +
+			`","job_type":"full","config":{}}]}`))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = nc.Subscribe(subject+".jobs.status", func(m *nats.Msg) {
+		var r jobReport
+		if json.Unmarshal(m.Data, &r) != nil {
+			_ = m.Respond([]byte(`{"error":"invalid report"}`))
+			return
+		}
+		mu.Lock()
+		reports = append(reports, r)
+		mu.Unlock()
+		if r.JobID == jobRefused {
+			_ = m.Respond([]byte(`{"error":"not recorded"}`)) // another request took it
+			return
+		}
+		_ = m.Respond([]byte(`{"status":"recorded"}`))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = nc.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	scopeChannel.Store(&scopeChannelState{nc: nc, subject: subject})
+	t.Cleanup(func() { scopeChannel.Store(nil); nc.Close() })
+
+	ran := runOpenJobs(context.Background(), &collectorConfig{}, up, &hostCache{})
+
+	mu.Lock()
+	got := slices.Clone(reports)
+	mu.Unlock()
+	if requests != 1 || ran != 3 {
+		t.Errorf("jobs requests = %d, jobs run = %d; want 1 request and 3 jobs run (the refused one skipped)", requests, ran)
+	}
+	var sequence []string
+	final := map[string]jobReport{}
+	for _, r := range got {
+		sequence = append(sequence, r.JobID[len(r.JobID)-1:]+":"+r.Status)
+		if r.Status != jobRunning {
+			final[r.JobID] = r
+		}
+	}
+	if want := []string{"1:running", "1:completed", "2:running", "3:running", "3:failed", "4:running", "4:completed"}; !slices.Equal(sequence, want) {
+		t.Fatalf("reported statuses %v, want %v (running before each run, nothing more for the refused job)", sequence, want)
+	}
+	for _, id := range []string{jobSweep, jobFull} {
+		r := final[id]
+		if r.Result.Records != 1 || r.Result.Scopes != 1 || len(r.Result.Errors) != 0 || r.Error != "" {
+			t.Errorf("result of job %s = %+v, want 1 record from 1 scope without errors", id, r)
+		}
+	}
+	poll := final[jobPoll]
+	if poll.Error == "" || len(poll.Result.Errors) != 1 || poll.Result.Errors[0].Cause != "config_error" || poll.Result.Scopes != 0 {
+		t.Errorf("poll job on a sweep-only scope = %+v, want failed with one config_error and no scope run", poll)
+	}
+	sweepSpy.mu.Lock()
+	probes := slices.Clone(sweepSpy.firsts)
+	sweepSpy.mu.Unlock()
+	if !slices.Equal(probes, []string{target, target}) {
+		t.Errorf("sweep probes %v, want two (sweep job and full job) of %s", probes, target)
+	}
+	recs := uploaded()
+	if len(recs) != 2 {
+		t.Fatalf("uploaded %d records, want 2 (one per job that ran a plugin)", len(recs))
+	}
+	for _, r := range recs {
+		if r.TargetIP != target || r.ScopeID != "6f0b6f0e-0000-4000-8000-0000000000b1" {
+			t.Errorf("uploaded record target %q scope %q, want %s of the scope", r.TargetIP, r.ScopeID, target)
+		}
+	}
+}
+
+// TestDiscoveryJobProtocols: the plugins of each job type.
+func TestDiscoveryJobProtocols(t *testing.T) {
+	scope := []string{"snmp", "sweep", "ssh"}
+	for _, tc := range []struct {
+		jobType string
+		plugins []string
+		want    []string
+	}{
+		{"sweep", scope, []string{"sweep"}},
+		{"poll", scope, []string{"snmp", "ssh"}},
+		{"full", scope, []string{"sweep", "snmp", "ssh"}},
+		{"full", []string{"snmp"}, []string{"snmp"}},
+		{"poll", []string{"sweep"}, []string{}},
+		{"unknown", scope, nil},
+	} {
+		if got := jobProtocols(tc.jobType, tc.plugins); !slices.Equal(got, tc.want) {
+			t.Errorf("jobProtocols(%q, %v) = %v, want %v", tc.jobType, tc.plugins, got, tc.want)
+		}
+	}
+	if !slices.Equal(scope, []string{"snmp", "sweep", "ssh"}) {
+		t.Errorf("jobProtocols changed the scope's plugins: %v", scope)
+	}
+}
 
 // TestAuditScopeExpansionCompleteOrReported: a scope the API accepts
 // (up to 65,536 addresses) is discovered completely without a run error;

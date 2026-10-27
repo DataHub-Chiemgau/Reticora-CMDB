@@ -420,3 +420,157 @@ func reportScopeRun(ctx context.Context, s *collectorScope, started time.Time, r
 		slog.Warn("scope run not reported", "scope_id", s.ID, "error", err)
 	}
 }
+
+// Ad-hoc discovery jobs (JOB-01, F-358): a job created through the API
+// (POST /api/v1/discovery/jobs) waits on the server until its collector
+// asks for it over the scope channel. The collector reports it running,
+// discovers its passes with the plugins of the job type, uploads the
+// records like a scheduled run and reports the result; the server sets the
+// job's status. A job the server does not let run (another request took
+// it, it timed out) is skipped.
+
+// collectorJob is an open discovery job as the server sends it.
+type collectorJob struct {
+	ID      string         `json:"id"`
+	JobType string         `json:"job_type"`
+	Config  map[string]any `json:"config,omitempty"`
+}
+
+// Job statuses the collector reports.
+const (
+	jobRunning   = "running"
+	jobCompleted = "completed"
+	jobFailed    = "failed"
+)
+
+// fetchJobs asks the server for the collector's open discovery jobs.
+func fetchJobs(ctx context.Context, nc *nats.Conn, subject string) ([]collectorJob, error) {
+	var resp struct {
+		Jobs  []collectorJob `json:"jobs"`
+		Error string         `json:"error"`
+	}
+	if err := natsRequest(ctx, nc, subject+".jobs.request", struct{}{}, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Error != "" {
+		return nil, errors.New("jobs refused: " + resp.Error)
+	}
+	return resp.Jobs, nil
+}
+
+// reportJobStatus sends the status of a job, with its error and result
+// once it ended; it reports whether the server recorded it.
+func reportJobStatus(ctx context.Context, nc *nats.Conn, subject, jobID, status, errMsg string, result map[string]any) (bool, error) {
+	body := map[string]any{"job_id": jobID, "status": status}
+	if errMsg != "" {
+		body["error"] = errMsg
+	}
+	if result != nil {
+		body["result"] = result
+	}
+	var resp map[string]any
+	if err := natsRequest(ctx, nc, subject+".jobs.status", body, &resp); err != nil {
+		return false, err
+	}
+	return resp["status"] == "recorded", nil
+}
+
+// jobProtocols returns the plugins a job of jobType runs on a pass with
+// plugins: a sweep job the sweep, a poll job the pass's plugins without the
+// sweep, a full job all of them with the sweep first. An unknown job type
+// runs nothing.
+func jobProtocols(jobType string, plugins []string) []string {
+	polls := slices.DeleteFunc(slices.Clone(plugins), func(p string) bool { return p == "sweep" })
+	switch jobType {
+	case "sweep":
+		return []string{"sweep"}
+	case "poll":
+		return polls
+	case "full":
+		if slices.Contains(plugins, "sweep") {
+			return append([]string{"sweep"}, polls...)
+		}
+		return polls
+	}
+	return nil
+}
+
+// runOpenJobs runs the open jobs of the collector one after the other and
+// returns how many it ran; without the scope channel there are none.
+func runOpenJobs(ctx context.Context, cfg *collectorConfig, up *uploader, hosts *hostCache) int {
+	ch := scopeChannel.Load()
+	if ch == nil {
+		return 0
+	}
+	open, err := fetchJobs(ctx, ch.nc, ch.subject)
+	if err != nil {
+		slog.Warn("discovery jobs not fetched", "error", err)
+		return 0
+	}
+	ran := 0
+	for i := range open {
+		job := &open[i]
+		if ctx.Err() != nil {
+			break
+		}
+		if recorded, rerr := reportJobStatus(ctx, ch.nc, ch.subject, job.ID, jobRunning, "", nil); rerr != nil || !recorded {
+			slog.Warn("discovery job not started", "job_id", job.ID, "error", rerr)
+			continue
+		}
+		status, errMsg, result := runJob(ctx, cfg, up, hosts, job)
+		if recorded, rerr := reportJobStatus(ctx, ch.nc, ch.subject, job.ID, status, errMsg, result); rerr != nil || !recorded {
+			// The server fails the job after its deadline (timeout).
+			slog.Warn("discovery job result not recorded", "job_id", job.ID, "status", status, "error", rerr)
+		}
+		slog.Info("discovery job ended", "event", "discovery.job."+status, "job_id", job.ID, "job_type", job.JobType,
+			"records", result["records"])
+		ran++
+	}
+	return ran
+}
+
+// runJob discovers the passes of the collector (its scopes, or the
+// configured subnets without a scope list) with the plugins of the job
+// type and uploads the records. It returns the status the job ended with,
+// the error of a failed job and the result: records, passes, duration and
+// the run errors (DIS-08). A job that ran no plugin fails with cause
+// config_error.
+func runJob(ctx context.Context, cfg *collectorConfig, up *uploader, hosts *hostCache, job *collectorJob) (status, errMsg string, result map[string]any) {
+	started := time.Now()
+	var records []plugins.DeviceRecord
+	var errs []runError
+	passes := 0
+	for _, pass := range discoveryPasses(cfg) {
+		protocols := jobProtocols(job.JobType, pass.protocols)
+		if len(protocols) == 0 {
+			continue
+		}
+		passRecords, passErrs := runPass(ctx, cfg, up, &pass, protocols, hosts)
+		records = append(records, passRecords...)
+		errs = append(errs, passErrs...)
+		passes++
+	}
+	result = map[string]any{"records": 0, "scopes": passes}
+	status = jobCompleted
+	if passes == 0 {
+		status = jobFailed
+		errMsg = fmt.Sprintf("no discovery scope of the collector has a plugin for job type %q", job.JobType)
+		errs = append(errs, runError{Protocol: "job", Cause: "config_error", Message: errMsg})
+	} else {
+		var uploadErr *runError
+		records, uploadErr = uploadDiscovered(ctx, up, records, started)
+		if uploadErr != nil {
+			errs = append(errs, *uploadErr)
+		}
+		result["records"] = len(records)
+	}
+	result["duration_ms"] = time.Since(started).Milliseconds()
+	if len(errs) > 0 {
+		result["error_count"] = len(errs)
+		if len(errs) > maxReportedErrors {
+			errs = errs[:maxReportedErrors]
+		}
+		result["errors"] = errs
+	}
+	return status, errMsg, result
+}

@@ -76,7 +76,10 @@ func (r *PGRepository) WithDisableAnnouncer(nc *nats.Conn) *PGRepository {
 // a job through its collector, a review item through all its candidate CIs, a
 // suppression through both CIs.
 const (
-	jobVisible         = "(discovery_job.collector_id IS NULL OR EXISTS (SELECT 1 FROM collector WHERE collector.id = discovery_job.collector_id))"
+	jobVisible = "(discovery_job.collector_id IS NULL OR EXISTS (SELECT 1 FROM collector WHERE collector.id = discovery_job.collector_id))"
+	// jobAdHoc matches the discovery jobs the collector runs; a job with a
+	// kind in its config (iga_relay) belongs to another executor.
+	jobAdHoc           = "COALESCE(discovery_job.config->>'kind', '') = ''"
 	suppressionVisible = `EXISTS (SELECT 1 FROM ci WHERE ci.id = relationship_suppression.source_ci_id)
 	AND EXISTS (SELECT 1 FROM ci WHERE ci.id = relationship_suppression.target_ci_id)`
 )
@@ -439,14 +442,24 @@ func (r *PGRepository) setJobTracker(tracker jobs.Tracker) {
 // running stamps started_at, completed and failed stamp completed_at, and a
 // failed job keeps errMsg as its cause (JobErrorOf). Once committed, the
 // generic job of the discovery job takes the status (JOB-01, like the export
-// worker); a failure there is logged and the status stays.
-func (r *PGRepository) UpdateJobStatus(ctx context.Context, orgID, id, status, errMsg string) (*Job, error) {
+// worker); a failure there is logged and the status stays. The options
+// require a status the job has (JobFrom) or its collector (JobOfCollector)
+// and add the result (JobResult); a job that does not match is not found.
+func (r *PGRepository) UpdateJobStatus(ctx context.Context, orgID, id, status, errMsg string, opts ...JobUpdateOption) (*Job, error) {
 	mirrored, ok := jobMirrorStatus[status]
 	if !ok {
 		return nil, &api.FieldError{Field: "status", Message: "invalid discovery job status"}
 	}
 	if status != JobStatusFailed {
 		errMsg = ""
+	}
+	var u jobUpdate
+	for _, opt := range opts {
+		opt(&u)
+	}
+	var result any
+	if u.result != nil {
+		result = u.result
 	}
 	var job *Job
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -455,11 +468,14 @@ func (r *PGRepository) UpdateJobStatus(ctx context.Context, orgID, id, status, e
 				status = $3,
 				started_at = CASE WHEN $3 = 'pending' THEN started_at ELSE COALESCE(started_at, now()) END,
 				completed_at = CASE WHEN $3 IN ('completed', 'failed') THEN now() ELSE NULL END,
-				result_summary = CASE WHEN $4 = '' THEN result_summary
-					ELSE COALESCE(result_summary, '{}'::jsonb) || jsonb_build_object('error', $4::text) END
+				result_summary = CASE WHEN $4 = '' AND $7::jsonb IS NULL THEN result_summary
+					ELSE COALESCE(result_summary, '{}'::jsonb) || COALESCE($7::jsonb, '{}'::jsonb)
+						|| CASE WHEN $4 = '' THEN '{}'::jsonb ELSE jsonb_build_object('error', $4::text) END END
 			WHERE id = $1 AND organization_id = $2 AND %s
+				AND ($5::text[] IS NULL OR status = ANY($5::text[]))
+				AND ($6 = '' OR collector_id::text = $6)
 			RETURNING %s`, jobVisible, jobSelectColumns)
-		scanned, err := scanJob(tx.QueryRow(ctx, query, id, orgID, status, errMsg))
+		scanned, err := scanJob(tx.QueryRow(ctx, query, id, orgID, status, errMsg, u.from, u.collectorID, result))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("not found")
 		}
@@ -478,6 +494,44 @@ func (r *PGRepository) UpdateJobStatus(ctx context.Context, orgID, id, status, e
 		}
 	}
 	return job, nil
+}
+
+// OpenCollectorJobs returns the oldest pending ad-hoc jobs of a collector
+// (JobRunRepository).
+func (r *PGRepository) OpenCollectorJobs(ctx context.Context, orgID, collectorID string, limit int) ([]Job, error) {
+	return r.queryJobs(ctx, orgID, fmt.Sprintf(`SELECT %s FROM discovery_job
+		WHERE organization_id = $1 AND collector_id = $2 AND status = 'pending' AND %s AND %s
+		ORDER BY created_at LIMIT $3`, jobSelectColumns, jobAdHoc, jobVisible), orgID, collectorID, limit)
+}
+
+// OverdueJobs returns the pending or running ad-hoc jobs whose last status
+// change (created_at, started_at) lies before before (JobRunRepository).
+func (r *PGRepository) OverdueJobs(ctx context.Context, orgID string, before time.Time, limit int) ([]Job, error) {
+	return r.queryJobs(ctx, orgID, fmt.Sprintf(`SELECT %s FROM discovery_job
+		WHERE organization_id = $1 AND status IN ('pending', 'running') AND COALESCE(started_at, created_at) < $2
+			AND %s AND %s
+		ORDER BY created_at LIMIT $3`, jobSelectColumns, jobAdHoc, jobVisible), orgID, before, limit)
+}
+
+// queryJobs reads discovery jobs in the tenant scope.
+func (r *PGRepository) queryJobs(ctx context.Context, orgID, query string, args ...any) ([]Job, error) {
+	out := make([]Job, 0)
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list discovery jobs: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			job, err := scanJob(rows)
+			if err != nil {
+				return fmt.Errorf("scan discovery job: %w", err)
+			}
+			out = append(out, *job)
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 func (r *PGRepository) GetJob(ctx context.Context, orgID, id string) (*Job, error) {

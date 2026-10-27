@@ -13243,7 +13243,7 @@ NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-631
 
 **Akzeptanzkriterien:**
 
-- [ ] Vor Beginn entscheidet der Auftraggeber zwischen A (Ausführung) und B (Rücknahme); ohne Entscheidung beginnt das WP nicht. Empfehlung: A, weil der Scope-Kanal (`ServeCollectorScopes`) die Zustellung an den Collector bereits trägt.
+- [x] Vor Beginn entscheidet der Auftraggeber zwischen A (Ausführung) und B (Rücknahme); ohne Entscheidung beginnt das WP nicht. Empfehlung: A, weil der Scope-Kanal (`ServeCollectorScopes`) die Zustellung an den Collector bereits trägt. *Entscheidung des Auftraggebers vom 2026-10-27: Option A (Ausführung durch den Collector über den Scope-Kanal `ServeCollectorScopes`); Option B entfällt.*
 - [ ] Option A: Der Server stellt einen offenen Job seinem Collector über dessen NATS-Kanal zu; der Collector führt ihn mit den Plugins des Jobtyps aus und meldet `running` und das Ergebnis; der Server setzt den Status über `UpdateJobStatus` (Spiegelung ins Job Center, Fehlerursache wie DIS-08). Ein Job ohne Rückmeldung wird nach einer festen Frist `failed` mit Ursache `timeout` (Reaper). Nur der Collector des Jobs erhält ihn (Cross-Org- und Cross-Client-Test).
 - [ ] Option B: `POST /discovery/jobs` ist aus `api/openapi.yaml` und dem Router entfernt (spec-first, `npm run generate:api`, Paritätstest), bestehende offene Jobs werden per Migration `failed` mit Begründung; Lesen bleibt.
 - [ ] Defekttest `TestAuditK4DiscoveryJobIsExecuted` grün und aus `discovery/k4_job_execution_auditdefect_test.go` in eine reguläre Testdatei überführt (Datei gelöscht), Zeile aus `tests/audit/expected-failures.txt` entfernt. Option A zusätzlich: Integrationstest `discovery/job_execution_integration_test.go` (PG, NATS) pending → running → completed mit simuliertem Collector und Zeitüberschreitung → failed.
@@ -13275,7 +13275,7 @@ NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-631
 JOB-01;[B];B;backend/internal/discovery/job_execution_integration_test.go;WP-632
 ```
 
-**Entscheidungsbedarf:** ja, vor Beginn (Option A Ausführung durch den Collector oder Option B Rücknahme der Anlage-API); Empfehlung A.
+**Entscheidungsbedarf:** ja, vor Beginn (Option A Ausführung durch den Collector oder Option B Rücknahme der Anlage-API); Empfehlung A. Entschieden am 2026-10-27 durch den Auftraggeber: Option A (Ausführung).
 
 **Nicht Bestandteil:** Job-Center-UI für Discovery-Jobs; geplante Scope-Läufe (WP-495).
 

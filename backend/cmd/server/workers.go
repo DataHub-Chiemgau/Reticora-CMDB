@@ -185,6 +185,11 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 			cycles.Check("database", d.pool.Ping)
 		}
 		scopeChannel := discovery.NewHandler(d.repos.Discovery, d.repos.CI).WithScopeCycles(cycles)
+		// The collectors run their ad-hoc discovery jobs over the same
+		// channel; the status changes reach the job center (JOB-01, F-358).
+		if d.repos.Jobs != nil {
+			scopeChannel.WithJobTracker(jobs.NewService(d.repos.Jobs))
+		}
 		workers = append(workers, server.Worker{Name: config.WorkerDiscoveryScopes, Run: serving(cycles, d.every(serviceCycle), func(ctx context.Context) {
 			if serr := scopeChannel.ServeCollectorScopes(ctx, d.coreNATS); serr != nil {
 				slog.Error("discovery scopes", "error", serr)
@@ -335,6 +340,14 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			return status == entitlement.StatusActive, serr
 		}
 		systemJobs = append(systemJobs, collectorStatus.Schedule())
+		// Ad-hoc discovery jobs without a report from their collector within
+		// discovery.JobDeadline fail with cause timeout (JOB-01, F-358).
+		if reaper := discovery.NewJobReaper(pool, d.repos.Discovery); reaper != nil {
+			if d.repos.Jobs != nil {
+				reaper.WithJobTracker(jobs.NewService(d.repos.Jobs))
+			}
+			systemJobs = append(systemJobs, reaper.Schedule())
+		}
 		// CIs not seen for three scope intervals become unknown (REC-09,
 		// LCY-05): the worker offline_detector under its switch
 		// RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED (F-289); each run is a
