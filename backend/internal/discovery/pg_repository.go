@@ -1073,6 +1073,32 @@ func (r *PGRepository) IdentityCandidates(ctx context.Context, orgID string, q *
 	return ids, err
 }
 
+// PowerDevices lists the live CIs of the organization whose stored report
+// holds outlets (raw_data.power.outlets, IMP-09), in the tenant scope of
+// ctx, for the feeds of new CIs (derivePowerFeedsOf).
+func (r *PGRepository) PowerDevices(ctx context.Context, orgID string) ([]StoredPowerDevice, error) {
+	var out []StoredPowerDevice
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text, attributes->'raw_data'->'power'->'outlets' FROM ci
+			WHERE organization_id = $1 AND deleted_at IS NULL
+			AND jsonb_typeof(attributes->'raw_data'->'power'->'outlets') = 'array'
+			ORDER BY created_at, id`, orgID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var d StoredPowerDevice
+			if err := rows.Scan(&d.ID, &d.Outlets); err != nil {
+				return err
+			}
+			out = append(out, d)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // DiscoveryEdge finds the edge of a type between two CIs with an index
 // lookup instead of listing every edge of the source (WP-205): a core switch
 // with thousands of neighbours is re-confirmed without a scan or a cap.

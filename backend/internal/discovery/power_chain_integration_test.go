@@ -216,3 +216,114 @@ func TestAuditPowerRedundancyIndependentOfBatchOrder(t *testing.T) {
 	}
 	check("after the outlet states", f.OrgA, true)
 }
+
+// TestPowerChainPowerDeviceBeforeFedCIs covers the first discovery cycle of
+// the real stack (IMP-09, F-112, discovery-power.spec.ts P01): the collector
+// reports the whole fleet in one batch, the server spreads it over the
+// ingest lanes, and a PDU may be processed before the servers its outlets
+// name exist (or the UPS before the PDUs). Only the power device reports
+// the outlet mapping, so the batch that creates a fed CI derives its edges
+// from the outlets stored on the power devices. Before the fix the edges
+// of every server created after its PDU were missing until the next cycle
+// (CI: 13 of 32 server -> PDU edges, 10 redundant).
+//
+//   - org A: the worst order, one delivery after the other: the UPS, then
+//     both PDUs, then the rest of the fleet, each spread over the four
+//     lanes side by side;
+//   - org B: the whole fleet once, the four lanes side by side, as the
+//     ingest lanes of the stack process the collector's first batch.
+//
+// Each time all 32 server -> PDU edges exist with redundant=true and the
+// two PDU -> UPS edges with redundant=false.
+//
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=… go test -count=1 -v -p 1 -run 'TestPowerChainPowerDeviceBeforeFedCIs' ./internal/discovery/
+func TestPowerChainPowerDeviceBeforeFedCIs(t *testing.T) {
+	f := scopetest.Seed(t, "d9")
+	bg := context.Background()
+	h := discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App), relationship.NewPGRepository(f.App)).
+		WithIngestLanes(4)
+	at := time.Now().Add(-time.Hour).Truncate(time.Second)
+	fleet := func(keep func(host string) bool) []plugins.DeviceRecord {
+		at = at.Add(time.Minute)
+		var out []plugins.DeviceRecord
+		for _, r := range simulate.Generate(at) {
+			if keep(r.Identity.Hostname) {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+	// inLanes ingests recs spread over the four lanes, side by side.
+	inLanes := func(org string, recs []plugins.DeviceRecord) {
+		t.Helper()
+		batches := map[int][]plugins.DeviceRecord{}
+		for i, r := range recs {
+			batches[i%4] = append(batches[i%4], r)
+		}
+		ctx := lanesCtx(f, org)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for lane, batch := range batches {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				if _, err := discovery.ProcessInLane(ctx, h, org, lane, batch...); err != nil {
+					t.Errorf("lane %d: %v", lane, err)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+	}
+	type count struct{ total, redundant int }
+	edges := func(org, from string) map[string]count {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT p.name, count(*), count(*) FILTER (WHERE r.attributes->>'redundant' = 'true')
+			FROM ci_relationship r JOIN ci s ON s.id = r.source_ci_id JOIN ci p ON p.id = r.target_ci_id
+			WHERE r.organization_id = $1 AND r.rel_type = 'powered_by' AND r.source = 'discovery' AND s.name LIKE $2
+			GROUP BY 1`, org, from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		out := map[string]count{}
+		for rows.Next() {
+			var pdu string
+			var c count
+			if err := rows.Scan(&pdu, &c.total, &c.redundant); err != nil {
+				t.Fatal(err)
+			}
+			out[pdu] = c
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	check := func(step, org string) {
+		t.Helper()
+		servers := edges(org, "sim-srv-%")
+		for _, pdu := range []string{"sim-pdu-a", "sim-pdu-b"} {
+			if c := servers[pdu]; c.total != 16 || c.redundant != 16 {
+				t.Errorf("%s: server -> %s powered_by edges = %d, redundant=true on %d; want 16/16", step, pdu, c.total, c.redundant)
+			}
+		}
+		if c := edges(org, "sim-pdu-%")["sim-ups-01"]; c.total != 2 || c.redundant != 0 {
+			t.Errorf("%s: PDU -> UPS powered_by edges = %d, redundant=true on %d; want 2/0", step, c.total, c.redundant)
+		}
+	}
+	isPDU := func(host string) bool { return host == "sim-pdu-a" || host == "sim-pdu-b" }
+
+	// Org A: the power devices before what they feed.
+	inLanes(f.OrgA, fleet(func(h string) bool { return h == "sim-ups-01" }))
+	inLanes(f.OrgA, fleet(isPDU))
+	inLanes(f.OrgA, fleet(func(h string) bool { return h != "sim-ups-01" && !isPDU(h) }))
+	check("UPS, then PDUs, then the fleet", f.OrgA)
+
+	// Org B: the collector's first cycle, the lanes side by side.
+	inLanes(f.OrgB, fleet(func(string) bool { return true }))
+	check("first cycle, lanes side by side", f.OrgB)
+}

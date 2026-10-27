@@ -1148,6 +1148,9 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	n := len(frame.items)
 	resolvedCIID := make([]string, n)
 	handled := make([]bool, n)
+	// created[i] reports that record i created its CI (WP-498): the power
+	// chain derives the feeds of new CIs from the stored power devices.
+	created := make([]bool, n)
 	// failed are the records that failed; held the identity keys of those
 	// that failed transiently, which hold back the records after them.
 	var failed []RecordError
@@ -1165,7 +1168,7 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 				}
 			}
 		}
-		h.processWindow(ctx, orgID, frame, start, end, handled, resolvedCIID, &resp)
+		h.processWindow(ctx, orgID, frame, start, end, handled, resolvedCIID, created, &resp)
 		for i := start; i < end; i++ {
 			if handled[i] {
 				continue
@@ -1204,21 +1207,29 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			handled[i] = true
 			if out.created {
 				frame.total++
+				created[i] = true
 			}
 		}
 	}
 
-	var processed []IngestItem
-	var processedCIID []string
+	var processed, createdItems []IngestItem
+	var processedCIID, createdCIID []string
 	for i := range frame.items {
 		if handled[i] {
 			processed = append(processed, frame.items[i])
 			processedCIID = append(processedCIID, resolvedCIID[i])
+			if created[i] && resolvedCIID[i] != "" {
+				createdItems = append(createdItems, frame.items[i])
+				createdCIID = append(createdCIID, resolvedCIID[i])
+			}
 		}
 	}
 	resp.Relationships += h.deriveTopology(ctx, orgID, processed, processedCIID, h.neighborCandidates(ctx, orgID, processed))
 	// Outlet mappings of PDUs and UPS outlet groups (IMP-09).
 	resp.Relationships += h.derivePowerChain(ctx, orgID, processed, processedCIID)
+	// The new CIs of the batch take their feeds from the outlets of power
+	// devices processed before them, in an earlier batch or another lane.
+	resp.Relationships += h.derivePowerFeedsOf(ctx, orgID, createdItems, createdCIID)
 	if err := h.markProcessed(ctx, orgID, processed); err != nil {
 		return resp, &IngestErrors{Records: failed, Rest: err}
 	}
@@ -1716,9 +1727,11 @@ type windowOutcome struct {
 	total      int64
 	unlicensed queuedDevices
 	// done[k] reports that record start+k was handled completely in the
-	// batch, with the CI ciID[k] (held and unlicensed records have none).
+	// batch, with the CI ciID[k] (held and unlicensed records have none);
+	// created[k] that the batch created that CI.
 	done       []bool
 	ciID       []string
+	created    []bool
 	candidates [][]ci.Item
 	prefetched []bool
 }
@@ -1744,7 +1757,7 @@ type pendingCI struct {
 // record of the window is processed on its own, which reports any error
 // for its record.
 func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchFrame, start, end int, handled []bool,
-	resolvedCIID []string, resp *BulkIngestResponse) {
+	resolvedCIID []string, created []bool, resp *BulkIngestResponse) {
 	finder, ok := h.repo.(BatchIdentityFinder)
 	creator, creates := h.ciRepo.(ci.BatchCreator)
 	if !ok || !creates || h.tx == nil {
@@ -1776,7 +1789,7 @@ func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchF
 		return h.inTx(ctx, orgID, func(ctx context.Context) error {
 			w = windowOutcome{
 				total: frame.total, unlicensed: queuedDevices{keys: maps.Clone(frame.unlicensed.keys)},
-				done: make([]bool, n), ciID: make([]string, n), candidates: make([][]ci.Item, n), prefetched: make([]bool, n),
+				done: make([]bool, n), ciID: make([]string, n), created: make([]bool, n), candidates: make([][]ci.Item, n), prefetched: make([]bool, n),
 			}
 			return h.batchWindow(ctx, orgID, frame, start, qs, include, finder, creator, &w)
 		})
@@ -1799,7 +1812,7 @@ func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchF
 		i := start + k
 		frame.candidates[i], frame.prefetched[i] = w.candidates[k], w.prefetched[k]
 		if w.done[k] {
-			handled[i], resolvedCIID[i] = true, w.ciID[k]
+			handled[i], resolvedCIID[i], created[i] = true, w.ciID[k], w.created[k]
 		}
 	}
 }
@@ -1993,7 +2006,7 @@ func (h *Handler) createInWindow(ctx context.Context, orgID string, frame *batch
 			w.resp.ReviewItems++
 		}
 		w.resp.Created++
-		w.done[rec.k], w.ciID[rec.k] = true, rec.ci.ID
+		w.done[rec.k], w.ciID[rec.k], w.created[rec.k] = true, rec.ci.ID, true
 	}
 	return nil
 }

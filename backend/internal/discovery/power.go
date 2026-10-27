@@ -172,16 +172,121 @@ func (h *Handler) derivePowerChain(ctx context.Context, orgID string, items []In
 	if len(names) == 0 {
 		return 0
 	}
+	return h.writePowerFeeds(ctx, orgID, items, resolvedCIID, names, nil)
+}
+
+// StoredPowerDevice is a CI whose stored report holds outlets
+// (raw_data.power.outlets).
+type StoredPowerDevice struct {
+	ID      string
+	Outlets []DeviceOutlet
+}
+
+// PowerDeviceFinder lists the CIs of an organization whose stored report
+// holds outlets (IMP-09).
+type PowerDeviceFinder interface {
+	PowerDevices(ctx context.Context, orgID string) ([]StoredPowerDevice, error)
+}
+
+// derivePowerFeedsOf writes the powered_by edges of the CIs a batch created
+// (fed, with their ids fedCIID) from the outlets stored on the power
+// devices processed before them. Only the power device reports the outlet
+// mapping: when the collector's batch is spread over the ingest lanes, or
+// the PDU came in an earlier batch, the PDU's derivation ran before the CI
+// it feeds existed and found nothing to feed (discovery-power.spec.ts P01:
+// 13 of 32 edges after the first cycle). Each side derives after its own
+// commit, so whichever of the two derives last sees the other and every
+// feed is written in the cycle that reports both. Only the feeds of the new
+// CIs are written, resolved as the power device's own derivation resolves
+// them.
+func (h *Handler) derivePowerFeedsOf(ctx context.Context, orgID string, fed []IngestItem, fedCIID []string) int {
+	if h.relRepo == nil || len(fedCIID) == 0 {
+		return 0
+	}
+	finder, ok := h.repo.(PowerDeviceFinder)
+	if !ok {
+		return 0
+	}
+	fedIDs := map[string]bool{}
+	for _, id := range fedCIID {
+		fedIDs[id] = true
+	}
+	fedNames := map[string]bool{}
+	for i := range fed {
+		for _, n := range []string{fed[i].Name, fed[i].Hostname, fed[i].FQDN} {
+			if n = strings.ToLower(strings.TrimSpace(n)); n != "" {
+				fedNames[n] = true
+			}
+		}
+	}
+	if len(fedNames) == 0 {
+		return 0
+	}
+	devices, err := finder.PowerDevices(ctx, orgID)
+	if err != nil {
+		slog.Warn("power feeds of new CIs not derived: power devices not loaded", "event", "discovery.power.feeds_failed",
+			"organization_id", orgID, "error", err)
+		return 0
+	}
+	var items []IngestItem
+	var powerIDs, names []string
+	for _, d := range devices {
+		// A power device created by this batch was derived with its report.
+		if fedIDs[d.ID] {
+			continue
+		}
+		matched := false
+		for _, o := range d.Outlets {
+			full := strings.ToLower(strings.TrimSpace(o.Name))
+			device, _ := ParseOutletName(o.Name)
+			device = strings.ToLower(device)
+			if !fedNames[full] && (device == "" || !fedNames[device]) {
+				continue
+			}
+			// Both names, so that the outlet resolves as in
+			// derivePowerChain: the whole name first, then the device.
+			names = append(names, full)
+			if device != "" {
+				names = append(names, device)
+			}
+			matched = true
+		}
+		if matched {
+			items = append(items, IngestItem{RawData: map[string]any{"power": &DevicePower{Outlets: d.Outlets}}})
+			powerIDs = append(powerIDs, d.ID)
+		}
+	}
+	if len(items) == 0 {
+		return 0
+	}
+	return h.writePowerFeeds(ctx, orgID, items, powerIDs, names, func(f *OutletFeed) bool { return fedIDs[f.FedCIID] })
+}
+
+// writePowerFeeds writes the powered_by edges of the outlets of items (the
+// power devices powerIDs), resolving the outlet names names; keep, when
+// set, selects the feeds that are written. When the suppressions cannot be
+// loaded no edge is written (fail-closed, REL-03). It returns the number of
+// new edges and recomputes the redundancy of every CI it feeds.
+func (h *Handler) writePowerFeeds(ctx context.Context, orgID string, items []IngestItem, powerIDs, names []string, keep func(*OutletFeed) bool) int {
 	suppressed, err := h.suppressionChecker(ctx, orgID)
 	if err != nil {
 		slog.Error("power chain skipped: suppressions not loaded", "event", "discovery.topology.failed", "organization_id", orgID, "error", err)
 		return 0
 	}
 	byName := h.ciNameIndex(ctx, orgID, names)
-	feeds := PowerFeeds(items, resolvedCIID, func(name string) (string, bool) {
+	feeds := PowerFeeds(items, powerIDs, func(name string) (string, bool) {
 		id, ok := byName[strings.ToLower(name)]
 		return id, ok
 	})
+	if keep != nil {
+		kept := feeds[:0]
+		for i := range feeds {
+			if keep(&feeds[i]) {
+				kept = append(kept, feeds[i])
+			}
+		}
+		feeds = kept
+	}
 	var edges []DerivedRelationship
 	var keys []EdgeKey
 	for _, d := range PowerEdges(feeds) {
