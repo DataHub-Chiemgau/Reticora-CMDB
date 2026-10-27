@@ -17,6 +17,7 @@ import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
 import { useEntitlements, useModules, navFeatureFor } from './hooks/useEntitlements';
 import { useThemeStore } from './stores/theme';
+import { LanguageSwitch } from './components/LanguageSwitch';
 
 // Route-level code splitting: every feature page is a separate chunk so the
 // initial bundle stays small (perceived speed, spec §8.1). Pages use named
@@ -83,6 +84,10 @@ const FindingsPage = lazyPage(() => import('./pages/FindingsPage'), 'FindingsPag
 const ReviewInboxPage = lazyPage(() => import('./pages/ReviewInboxPage'), 'ReviewInboxPage');
 const JobCenterPage = lazyPage(() => import('./pages/JobCenterPage'), 'JobCenterPage');
 const OnboardingPage = lazyPage(() => import('./pages/OnboardingPage'), 'OnboardingPage');
+const InvitationAcceptPage = lazyPage(
+  () => import('./pages/InvitationAcceptPage'),
+  'InvitationAcceptPage',
+);
 const MapPage = lazyPage(() => import('./pages/MapPage'), 'MapPage');
 const RoomPlanPage = lazyPage(() => import('./pages/RoomPlanPage'), 'RoomPlanPage');
 
@@ -250,6 +255,7 @@ function App() {
                 <span className="max-w-48 truncate">{user?.name || user?.email}</span>
               ) : null}
               <span>{shortcutHint}</span>
+              <LanguageSwitch />
               <Button
                 variant="secondary"
                 size="sm"
@@ -297,7 +303,9 @@ function App() {
       </header>
       {/* Expiring entitlements (ENT-07, WP-464). */}
       {isAuthenticated ? <EntitlementExpiryBanner /> : null}
-      <main id="main-content" className="p-6">
+      {/* Focusable by script only: target of the skip link and of the command
+          palette after a navigation (UI-10, WP-519). */}
+      <main id="main-content" tabIndex={-1} className="p-6 outline-none">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/auth/callback" element={<CallbackPage />} />
@@ -307,6 +315,15 @@ function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <OnboardingPage />
+              </Suspense>
+            }
+          />
+          {/* The invitation link opens the acceptance without a session (TLC-03). */}
+          <Route
+            path="/invitations/accept"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <InvitationAcceptPage />
               </Suspense>
             }
           />

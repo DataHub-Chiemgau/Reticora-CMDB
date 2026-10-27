@@ -10,6 +10,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
@@ -184,6 +185,11 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 			cycles.Check("database", d.pool.Ping)
 		}
 		scopeChannel := discovery.NewHandler(d.repos.Discovery, d.repos.CI).WithScopeCycles(cycles)
+		// The collectors run their ad-hoc discovery jobs over the same
+		// channel; the status changes reach the job center (JOB-01, F-358).
+		if d.repos.Jobs != nil {
+			scopeChannel.WithJobTracker(jobs.NewService(d.repos.Jobs))
+		}
 		workers = append(workers, server.Worker{Name: config.WorkerDiscoveryScopes, Run: serving(cycles, d.every(serviceCycle), func(ctx context.Context) {
 			if serr := scopeChannel.ServeCollectorScopes(ctx, d.coreNATS); serr != nil {
 				slog.Error("discovery scopes", "error", serr)
@@ -292,6 +298,10 @@ type systemJobDeps struct {
 	modules      *server.ModuleSet
 	entitlements *entitlement.Service
 	dispatcher   *webhook.Dispatcher
+	// jobQueue is the job queue on NATS; nil without NATS.
+	jobQueue *jobs.Queue
+	// notifier bundles the digests (notify.digest); nil: no digest run.
+	notifier *notify.Notifier
 }
 
 // registerSystemJobs registers the system jobs (systemJobs) with the
@@ -330,6 +340,14 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			return status == entitlement.StatusActive, serr
 		}
 		systemJobs = append(systemJobs, collectorStatus.Schedule())
+		// Ad-hoc discovery jobs without a report from their collector within
+		// discovery.JobDeadline fail with cause timeout (JOB-01, F-358).
+		if reaper := discovery.NewJobReaper(pool, d.repos.Discovery); reaper != nil {
+			if d.repos.Jobs != nil {
+				reaper.WithJobTracker(jobs.NewService(d.repos.Jobs))
+			}
+			systemJobs = append(systemJobs, reaper.Schedule())
+		}
 		// CIs not seen for three scope intervals become unknown (REC-09,
 		// LCY-05): the worker offline_detector under its switch
 		// RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED (F-289); each run is a
@@ -351,8 +369,69 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// collector certificates (COL-04), each notice once (WP-425).
 		systemJobs = append(systemJobs, jobs.NewEntitlementNotices(pool).Schedule(),
 			jobs.NewCertificateNotices(pool).Schedule())
+		// Route audit intents no response completed become audit entries
+		// with outcome unknown (AUD-07, WP-504).
+		systemJobs = append(systemJobs, routeIntentsJob(audit.NewPGRouteAuditor(pool)))
+		// Jobs whose worker was lost (crash, rolling deploy) do not stay
+		// running (JOB-01, TEC-14).
+		if d.repos.Jobs != nil {
+			systemJobs = append(systemJobs, jobs.NewReaper(jobs.NewService(d.repos.Jobs).WithEvents(emitterOf(pool)),
+				jobRequeues(d.jobQueue)).Schedule())
+		}
+		// Digests of the non-critical notification categories (NTF-04,
+		// WP-508).
+		if d.notifier != nil {
+			systemJobs = append(systemJobs, digestJob(d.notifier))
+		}
 	}
 	return systemJobs
+}
+
+// jobRequeues reports the job kinds the reaper puts back into the queue
+// after a lost worker, those with an executor that runs queued jobs again:
+// the kinds of the job queue on NATS and the attribute index jobs of the
+// scheduler. The other kinds fail, among them the in-process jobs without
+// NATS.
+func jobRequeues(queue *jobs.Queue) func(kind string) bool {
+	return func(kind string) bool {
+		switch kind {
+		case citype.IndexJobKind, citype.RebuildJobKind, citype.KeyJobKind:
+			return true
+		}
+		return queue != nil && queue.Handles(kind)
+	}
+}
+
+// digestJob is the scheduler kind notify.digest: every minute, on one
+// instance (the scheduler's advisory lock), it queues one delivery per
+// channel, recipient, category and window for the digest items of the
+// windows that ended; the deliveries go out through the notifier worker.
+func digestJob(notifier *notify.Notifier) jobs.Schedule {
+	return jobs.Schedule{Kind: notify.DigestKind, Spec: "* * * * *", MaxCatchUp: 1, Timeout: 50 * time.Second,
+		Run: func(ctx context.Context) error {
+			queued, err := notifier.RunDigest(ctx)
+			if queued > 0 {
+				slog.Info("notification digests queued", "deliveries", queued)
+			}
+			return err
+		}}
+}
+
+// routeIntentsJob is the scheduler kind audit.route_intents: every minute,
+// on one instance (the scheduler's advisory lock), it turns the route audit
+// intents older than audit.RouteIntentGrace into audit entries with outcome
+// unknown; an organization whose entries fail keeps its intents for the
+// next run. Each run sets reticora_audit_route_intents_pending.
+func routeIntentsJob(auditor *audit.PGRouteAuditor) jobs.Schedule {
+	return jobs.Schedule{Kind: audit.RouteIntentsKind, Spec: "* * * * *", MaxCatchUp: 1, Timeout: 50 * time.Second,
+		Run: func(ctx context.Context) error {
+			written, err := auditor.SweepRouteIntents(ctx)
+			if written > 0 {
+				slog.Warn("route audit entries written from intents no response completed", "entries", written,
+					"outcome", audit.OutcomeUnknown)
+			}
+			return err
+		}}
 }
 
 // workerJob records every run of a system job as a cycle of worker, a

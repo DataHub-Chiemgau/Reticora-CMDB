@@ -2,7 +2,11 @@
 // clients, sites, buildings, and rooms.
 package tenantapi
 
-import "time"
+import (
+	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+)
 
 // Organization is the tenant itself (LOC-01): name, unique slug, plan,
 // settings, IANA time zone, ISO 4217 currency and BCP 47 locale, and the
@@ -165,9 +169,26 @@ type UpdateRoomRequest struct {
 	RoomType *string `json:"room_type,omitempty"`
 	// Layout replaces the room's floor-plan object positions
 	// (object_id → {x, y} normalized 0..1). Nil leaves the layout untouched;
-	// an empty object clears it.
+	// an empty object clears it. Every key is a CI of the organization the
+	// caller sees, x and y lie in 0..1 (422 otherwise, F-341).
 	Layout map[string]LayoutPosition `json:"layout,omitempty"`
+	// IfMatch is the updated_at the editor last read (If-Match, F-342); nil
+	// when the request carries none or "*". A room changed since is 409.
+	IfMatch *time.Time `json:"-"`
 }
+
+// RoomETag is the entity tag of a room: its updated_at in microseconds,
+// the precision PostgreSQL stores (F-342; rooms have no version column).
+func RoomETag(rm *Room) string { return api.ETag(rm.UpdatedAt.UnixMicro()) }
+
+// sameRoomVersion compares updated_at at the precision of the entity tag.
+func sameRoomVersion(updatedAt, ifMatch time.Time) bool {
+	return updatedAt.UnixMicro() == ifMatch.UnixMicro()
+}
+
+// errRoomChanged refuses a PATCH whose If-Match is no longer the room's
+// version: another editor saved in between (409, F-342).
+var errRoomChanged = &ConflictError{Field: "If-Match", Message: "the room was changed since the If-Match version; reload it"}
 
 // LayoutPosition is one object's normalized position on the room floor plan.
 type LayoutPosition struct {

@@ -1,0 +1,63 @@
+# Alert rules for discovery (WP-496, DIS-08, F-267). The server counts the
+# scope runs the collectors report, by state, in
+# reticora_discovery_scope_runs_total{state} and their errors, by protocol
+# and cause, in reticora_discovery_errors_total{protocol,cause}
+# (backend/internal/discovery/errors.go). Metrics, labels, causes and these
+# alerts are described in docs/ops/discovery-metrics.md. Alerts route to the
+# operators through deploy/monitoring/alertmanager.yaml.
+# Unit test: deploy/monitoring/tests/discovery-rules.test.yaml
+# (tests/monitoring-config.test.sh, CI job monitoring-config).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: reticora-discovery
+  labels:
+    app.kubernetes.io/name: reticora-cmdb
+spec:
+  groups:
+    - name: reticora.discovery
+      rules:
+        - alert: ReticoraDiscoveryScopeRunsFailing
+          # More than half of the scope runs of the last hour found nothing
+          # but errors (state failed), for an hour. Without runs the ratio
+          # is not defined and the alert stays silent.
+          expr: |
+            sum(increase(reticora_discovery_scope_runs_total{state="failed"}[1h]))
+              / sum(increase(reticora_discovery_scope_runs_total[1h])) > 0.5
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Most discovery scope runs fail"
+            description: "More than half of the scope runs of the last hour failed. The Discovery page shows the failed scopes with the cause of each error (health); check reachability, credentials and the collectors' logs."
+        - alert: ReticoraDiscoveryAuthFailures
+          # Logins of a protocol keep failing: wrong, expired or rotated
+          # credentials, or a scope without the credential it needs.
+          expr: sum by (protocol) (increase(reticora_discovery_errors_total{cause="auth_failed"}[30m])) > 10
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Discovery logins over {{ $labels.protocol }} keep failing"
+            description: "More than 10 authentication failures over {{ $labels.protocol }} in 30 minutes. Check the credentials bound to the scopes (credential_ids) or those of the client and the organization (E-67)."
+        - alert: ReticoraDiscoveryUploadFailures
+          # The collectors cannot hand their results to the server; they
+          # buffer them in the spool until the upload succeeds.
+          expr: sum(increase(reticora_discovery_errors_total{cause="upload_failed"}[30m])) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Collectors cannot upload discovery results"
+            description: "Collectors have reported failed uploads for 30 minutes; their results wait in the spool. Check the NATS edge and the ingest worker (reticora_worker_* of ingest)."
+        - alert: ReticoraDiscoveryConfigErrors
+          # A scope or plugin is configured wrongly, among them a scope cut
+          # at 65,536 addresses (protocol scope, cause scope_truncated of the
+          # collector, counted as config_error).
+          expr: sum by (protocol) (increase(reticora_discovery_errors_total{cause="config_error"}[1h])) > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Discovery configuration errors over {{ $labels.protocol }}"
+            description: "Scope runs have reported configuration errors over {{ $labels.protocol }} for an hour (for example an SNMPv3 credential without authPriv or a truncated scope). The Discovery page names the scope and the message."

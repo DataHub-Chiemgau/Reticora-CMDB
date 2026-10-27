@@ -7,12 +7,14 @@
  * could not be created. These tests pin the verify/delete wiring and the
  * create dialog: a double click creates one edge and closes the dialog
  * (F-314), an invisible or unknown endpoint is reported at the CI ID field in
- * the UI language (F-145).
+ * the UI language (F-145). With a chosen client or site the card lists only
+ * edges to CIs in that scope and names the hidden ones (E-87, F-169).
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithProviders } from '../../test/utils';
 import { CIRelationshipsCard, verificationBadgeVariant } from './CIRelationshipsCard';
+import { useScopeStore } from '../../stores/scope';
 
 const CI_ID = '11111111-1111-1111-1111-111111111111';
 const OTHER_ID = '22222222-2222-2222-2222-222222222222';
@@ -261,4 +263,125 @@ describe('CIRelationshipsCard create dialog', () => {
       expect(JSON.parse(posts(fetchMock)[0]?.[1]?.body as string)).toMatchObject(ends);
     },
   );
+});
+
+describe('CIRelationshipsCard under a chosen scope (E-87)', () => {
+  const CLIENT_A = 'aaaaaaaa-0000-4000-8000-000000000001';
+  const CLIENT_B = 'aaaaaaaa-0000-4000-8000-000000000002';
+  const SITE_A1 = 'bbbbbbbb-0000-4000-8000-000000000001';
+  const SITE_A2 = 'bbbbbbbb-0000-4000-8000-000000000002';
+  const IN_A = '33333333-3333-3333-3333-333333333331';
+  const IN_A2 = '33333333-3333-3333-3333-333333333332';
+  const IN_B = '33333333-3333-3333-3333-333333333333';
+  const IN_B2 = '33333333-3333-3333-3333-333333333334';
+  const UNREADABLE = '33333333-3333-3333-3333-333333333335';
+
+  const others: Record<string, { client_id?: string; site_id?: string }> = {
+    [IN_A]: { client_id: CLIENT_A, site_id: SITE_A1 },
+    [IN_A2]: { client_id: CLIENT_A, site_id: SITE_A2 },
+    [IN_B]: { client_id: CLIENT_B },
+    [IN_B2]: { client_id: CLIENT_B },
+  };
+
+  function edge(id: string, source: string, target: string, extra: object = {}) {
+    return {
+      id,
+      organization_id: 'org-1',
+      source_ci_id: source,
+      target_ci_id: target,
+      rel_type: 'depends_on',
+      attributes: {},
+      source: 'manual',
+      verification_state: 'verified',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      ...extra,
+    };
+  }
+
+  const edges = [
+    edge('rel-a', CI_ID, IN_A),
+    edge('rel-a2', IN_A2, CI_ID),
+    edge('rel-b', CI_ID, IN_B),
+    edge('rel-b2', IN_B2, CI_ID),
+    edge('rel-x', CI_ID, UNREADABLE),
+    edge('rel-loc', CI_ID, '', { target_location_id: 'loc-1', projected: true }),
+  ];
+
+  function stubServer() {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === `/api/v1/cis/${CI_ID}/relationships`)
+        return json({ data: edges, total: edges.length, limit: 50, offset: 0, has_more: false });
+      const id = url.pathname.replace('/api/v1/cis/', '');
+      const other = others[id];
+      if (other)
+        return json({
+          id,
+          organization_id: 'org-1',
+          ci_type_id: 'server',
+          name: id,
+          status: 'active',
+          attributes: {},
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+          ...other,
+        });
+      return json({ detail: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  const listedIds = () =>
+    screen.queryAllByRole('link').map((link) => link.getAttribute('href')?.replace('/cmdb/', ''));
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    useScopeStore.getState().reset();
+  });
+  afterEach(() => useScopeStore.getState().reset());
+
+  it('lists only edges to CIs of the chosen client and names the hidden ones', async () => {
+    stubServer();
+    useScopeStore.setState({ clientId: CLIENT_A, siteId: '' });
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+
+    expect(await screen.findByText('2 außerhalb des Bereichs ausgeblendet')).toBeInTheDocument();
+    // Both directions count; an edge to a location and one whose other CI
+    // cannot be read are not known to lie outside and stay listed.
+    expect(listedIds().sort()).toEqual([IN_A, IN_A2, UNREADABLE].sort());
+    expect(screen.getByText('loc-1')).toBeInTheDocument();
+    expect(screen.queryByText('Außerhalb des Bereichs')).toBeNull();
+
+    // The toggle shows all edges and marks the outside ones.
+    fireEvent.click(screen.getByRole('button', { name: 'Alle anzeigen' }));
+    expect(listedIds().sort()).toEqual([IN_A, IN_A2, IN_B, IN_B2, UNREADABLE].sort());
+    expect(screen.getAllByText('Außerhalb des Bereichs')).toHaveLength(2);
+    expect(screen.getByText('2 außerhalb des Bereichs ausgeblendet')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Nur Bereich anzeigen' }));
+    expect(listedIds()).not.toContain(IN_B);
+  });
+
+  it('narrows to the chosen site as well', async () => {
+    stubServer();
+    useScopeStore.setState({ clientId: CLIENT_A, siteId: SITE_A1 });
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+
+    expect(await screen.findByText('3 außerhalb des Bereichs ausgeblendet')).toBeInTheDocument();
+    expect(listedIds().sort()).toEqual([IN_A, UNREADABLE].sort());
+  });
+
+  it('lists every edge and reads no CI without a selection', async () => {
+    const fetchMock = stubServer();
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+
+    await waitFor(() => expect(listedIds()).toHaveLength(5));
+    expect(screen.queryByText(/außerhalb des Bereichs/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Alle anzeigen' })).toBeNull();
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      `/api/v1/cis/${CI_ID}/relationships`,
+    ]);
+  });
 });

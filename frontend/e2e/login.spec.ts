@@ -1,4 +1,7 @@
-import { test, expect } from '@playwright/test';
+import { expect, mockBackend, problem, test } from './support/backend';
+
+// The OIDC login start (AUT-01): /api/v1/auth/config is answered by the
+// strict mock and checked against api/openapi.yaml (WP-530).
 
 const AUTH_CONFIG = {
   issuer: 'https://idp.example.com',
@@ -6,18 +9,13 @@ const AUTH_CONFIG = {
   redirect_uri: 'http://localhost:5173/auth/callback',
   scopes: ['openid', 'profile'],
   authorization_endpoint: 'https://idp.example.com/authorize',
+  token_endpoint: 'https://idp.example.com/token',
   pkce_required: true,
 };
 
 test.describe('login flow', () => {
   test('redirects to the identity provider when signing in', async ({ page }) => {
-    await page.route('**/api/v1/auth/config', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(AUTH_CONFIG),
-      }),
-    );
+    await mockBackend(page, [{ path: '/auth/config', reply: () => ({ body: AUTH_CONFIG }) }]);
 
     const redirectRequest = page.waitForRequest((request) =>
       request.url().startsWith(AUTH_CONFIG.authorization_endpoint),
@@ -35,9 +33,12 @@ test.describe('login flow', () => {
   });
 
   test('shows an error state when auth configuration cannot be loaded', async ({ page }) => {
-    await page.route('**/api/v1/auth/config', (route) =>
-      route.fulfill({ status: 500, body: 'Internal Server Error' }),
-    );
+    await mockBackend(page, [
+      {
+        path: '/auth/config',
+        reply: () => ({ status: 500, body: problem(500, 'internal error') }),
+      },
+    ]);
 
     await page.goto('/login');
     await page.getByRole('button', { name: /sign in|log in|anmelden/i }).click();

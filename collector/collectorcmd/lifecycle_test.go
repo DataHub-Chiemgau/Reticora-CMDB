@@ -1,6 +1,8 @@
 // Certificate life cycle of the collector against a real nats-server
 // (TEST_NATS_SERVER_BIN, v2.10+ for handshake_first and the authorization
-// callout), WP-414 (COL-04, F-026).
+// callout), WP-414 (COL-04, F-026), and its unattended enrollment from
+// RETICORA_ENROLL_TOKEN and RETICORA_CLOUD_URL, WP-493 (COL-04, F-101; no
+// nats-server needed).
 //
 // The test starts the real collector entry point Main() in a child process
 // (lifecycle_helpers_test.go) and plays the platform: the endpoint runs
@@ -15,9 +17,11 @@
 //
 //	cd collector && TEST_NATS_SERVER_BIN=<path to nats-server> go test -count=1 -v \
 //	  -run 'TestAuditCollectorRenewsCertificateAt60Percent' ./collectorcmd/
+//	cd collector && go test -count=1 -v -run 'TestAuditCollectorEnrollsFromEnvironment|TestCollectorEnrollFromEnvironment' ./collectorcmd/
 package collectorcmd
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -31,6 +35,8 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -526,5 +532,178 @@ authorization {
 	// admitted; the records reach it over the new session.
 	if platform.ingests == 0 || !delivered(output) {
 		t.Errorf("no ingest delivered over the edge of the new session (%d accepted). Collector log tail:\n%s", platform.ingests, auditTail(output, 15))
+	}
+}
+
+// TestAuditCollectorEnrollsFromEnvironment covers WP-493 (COL-04, F-101):
+// a first start with RETICORA_ENROLL_TOKEN and RETICORA_CLOUD_URL and
+// without a keystore performs the CSR enrollment, persists the identity
+// (0600) and runs on; a second start finds the keystore and sends no
+// enrollment request. The token never appears in the collector log.
+func TestAuditCollectorEnrollsFromEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	ca := newAuditPKI(t)
+	const token = "audit-enroll-token-7f3c"
+	const orgID, colID = "6f0b6f0e-0000-4000-8000-0000000000b3", "6f0b6f0e-0000-4000-8000-0000000000b4"
+	var mu sync.Mutex
+	var enrolls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !bytes.Contains(body, []byte(token)) && !strings.Contains(r.Header.Get("Authorization"), token) {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		mu.Lock()
+		enrolls = append(enrolls, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		// Answer like the server's enrollment endpoint: sign the CSR.
+		var req struct {
+			CSR string `json:"csr"`
+		}
+		_ = json.Unmarshal(body, &req)
+		block, _ := pem.Decode([]byte(req.CSR))
+		if block == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		csr, err := x509.ParseCertificateRequest(block.Bytes)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		cert := ca.issue(t, csr.PublicKey, pkix.Name{CommonName: colID, Organization: []string{orgID}}, time.Now().Add(-time.Minute), time.Now().Add(90*24*time.Hour), false)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": colID, "certificate": map[string]any{
+			"certificate_pem": cert, "ca_bundle_pem": ca.pem, "not_after": time.Now().Add(90 * 24 * time.Hour)}})
+	}))
+	defer srv.Close()
+	requests := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), enrolls...)
+	}
+
+	credPath := filepath.Join(dir, "credentials.json")
+	env := map[string]string{
+		"RETICORA_ENROLL_TOKEN":        token,
+		"RETICORA_CLOUD_URL":           srv.URL,
+		"RETICORA_SERVER_URL":          srv.URL,
+		"RETICORA_NATS_URL":            "tls://127.0.0.1:1",
+		"RETICORA_CREDENTIALS_PATH":    credPath,
+		"RETICORA_SPOOL_DIR":           filepath.Join(dir, "spool"),
+		"RETICORA_AGENT_RELAY_ADDR":    "127.0.0.1:0",
+		"RETICORA_DISCOVERY_PROTOCOLS": "sweep",
+		"RETICORA_ENVIRONMENT":         "development",
+	}
+	// The collector runs on after the enrollment: it logs its normal start.
+	running := func(output func() string) bool {
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			if strings.Contains(output(), "collector configured") {
+				return true
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		return false
+	}
+
+	output, stop := auditStartCollector(t, env)
+	started := running(output)
+	first := stop()
+	got := requests()
+	st, err := os.Stat(credPath)
+	switch {
+	case len(got) == 0:
+		t.Fatalf("COL-04 violated: started with RETICORA_ENROLL_TOKEN and RETICORA_CLOUD_URL and without a keystore, the collector sent no "+
+			"enrollment request carrying the token within 15 s (keystore %s: %v). Collector log tail:\n%s", credPath, err, auditTail(first, 8))
+	case err != nil:
+		t.Fatalf("COL-04 violated: enrollment requests %v were answered, but no identity was stored at %s: %v", got, credPath, err)
+	case st.Mode().Perm() != 0o600:
+		t.Errorf("the enrolled identity %s has mode %o, want 0600", credPath, st.Mode().Perm())
+	}
+	if len(got) != 1 || got[0] != "POST /api/v1/collectors/enroll" {
+		t.Errorf("enrollment requests = %v, want exactly one POST /api/v1/collectors/enroll", got)
+	}
+	if !started {
+		t.Errorf("after the enrollment the collector did not start normally within 15 s. Log tail:\n%s", auditTail(first, 8))
+	}
+	creds, err := (&keystore.FileStore{Path: credPath}).Load(context.Background())
+	if err != nil || creds.DeviceID != colID || creds.ClientPrivateKeyPEM == "" || creds.Metadata["server_url"] != srv.URL {
+		t.Fatalf("stored identity: %+v, %v", creds, err)
+	}
+	if strings.Contains(first, token) {
+		t.Errorf("the enrollment token appears in the collector log:\n%s", first)
+	}
+	keyBefore := creds.ClientPrivateKeyPEM
+
+	// Second start with the same environment: the keystore wins, no
+	// enrollment request (Retest F-101).
+	output, stop = auditStartCollector(t, env)
+	started = running(output)
+	second := stop()
+	if !started {
+		t.Errorf("second start: the collector did not start within 15 s. Log tail:\n%s", auditTail(second, 8))
+	}
+	if again := requests(); len(again) != 1 {
+		t.Errorf("second start with a keystore sent enrollment requests again: %v", again[1:])
+	}
+	if creds, err = (&keystore.FileStore{Path: credPath}).Load(context.Background()); err != nil || creds.ClientPrivateKeyPEM != keyBefore {
+		t.Errorf("second start replaced the stored identity (%v)", err)
+	}
+	if strings.Contains(second, token) {
+		t.Errorf("the enrollment token appears in the collector log of the second start:\n%s", second)
+	}
+}
+
+// TestCollectorEnrollFromEnvironmentFailureExits covers WP-493 (COL-04): a
+// refused unattended enrollment ends the start with exit code != 0 and the
+// cause in the log, without the token and without a stored identity.
+func TestCollectorEnrollFromEnvironmentFailureExits(t *testing.T) {
+	dir := t.TempDir()
+	const token = "audit-enroll-token-refused-91d2"
+	srv := fakeEnrollServer(t, "SOME-OTHER-CODE", "6f0b6f0e-0000-4000-8000-0000000000c1", "6f0b6f0e-0000-4000-8000-0000000000c2")
+	credPath := filepath.Join(dir, "credentials.json")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestAuditHelperCollectorMain$", "-test.count=1")
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "RETICORA_") {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	cmd.Env = append(cmd.Env, auditMainEnv+"=1",
+		"RETICORA_ENROLL_TOKEN="+token,
+		"RETICORA_CLOUD_URL="+srv.URL,
+		"RETICORA_CREDENTIALS_PATH="+credPath,
+		"RETICORA_SPOOL_DIR="+filepath.Join(dir, "spool"),
+		"RETICORA_AGENT_RELAY_ADDR=127.0.0.1:0",
+		"RETICORA_ENVIRONMENT=production")
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(30 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+		t.Fatalf("the collector did not exit after a refused enrollment:\n%s", auditTail(out.String(), 8))
+	}
+	log := out.String()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() == 0 {
+		t.Errorf("refused enrollment: exit %v, want an exit code != 0. Output:\n%s", err, log)
+	}
+	if !strings.Contains(log, "collector.enroll.failed") || !strings.Contains(log, "invalid or expired") {
+		t.Errorf("the log does not name the cause:\n%s", log)
+	}
+	if strings.Contains(log, token) {
+		t.Errorf("the enrollment token appears in the collector log:\n%s", log)
+	}
+	if _, serr := os.Stat(credPath); !os.IsNotExist(serr) {
+		t.Errorf("a refused enrollment stored an identity at %s: %v", credPath, serr)
 	}
 }

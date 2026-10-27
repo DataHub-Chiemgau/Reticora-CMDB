@@ -282,7 +282,7 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 		// The CI, its provenance and the resolution commit together: a
 		// resolution the principal may not write (E-09) leaves no CI.
 		err := h.inTx(ctx, orgID, func(ctx context.Context) error {
-			ciID, err := h.createReviewedDevice(ctx, item)
+			ciID, err := h.createReviewedDevice(ctx, item, res.CITypeID)
 			if err != nil {
 				return err
 			}
@@ -319,11 +319,12 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 
 // createReviewedDevice creates the CI of the device whose record a review
 // item keeps (devicePayload) as the ingest creates a new device (CI-13): the
-// type name resolved, the reported values checked against the field rules,
-// identity values that identify nothing or that another CI holds left out,
-// the provenance of every field recorded. Client and site are those of the
-// item (reviewedDeviceScope), so the next sighting matches the CI.
-func (h *Handler) createReviewedDevice(ctx context.Context, item *ReviewItem) (string, error) {
+// type resolved (reviewedDeviceType), the reported values checked against
+// the field rules, identity values that identify nothing or that another CI
+// holds left out, the provenance of every field recorded. Client and site
+// are those of the item (reviewedDeviceScope), so the next sighting matches
+// the CI.
+func (h *Handler) createReviewedDevice(ctx context.Context, item *ReviewItem, chosenTypeID string) (string, error) {
 	orgID := item.OrganizationID
 	clientID, siteID, err := h.reviewedDeviceScope(ctx, item)
 	if err != nil {
@@ -331,16 +332,9 @@ func (h *Handler) createReviewedDevice(ctx context.Context, item *ReviewItem) (s
 	}
 	device := reviewedDevice(item.Payload)
 	device.ClientID = clientID
-	typeID := strings.TrimSpace(device.CITypeName)
-	if typeID != "" && !isUUID(typeID) {
-		// The type of an unknown_ci_type item may exist by now.
-		types, lookupErr := h.lookupTypes(ctx, orgID, []string{typeID})
-		if lookupErr != nil {
-			return "", lookupErr
-		}
-		if id := types[typeID]; id != "" {
-			typeID = id
-		}
+	typeID, err := h.reviewedDeviceType(ctx, orgID, device.CITypeName, chosenTypeID)
+	if err != nil {
+		return "", err
 	}
 	candidates, err := h.identityCandidates(ctx, orgID, &device)
 	if err != nil {
@@ -360,13 +354,58 @@ func (h *Handler) createReviewedDevice(ctx context.Context, item *ReviewItem) (s
 	// site_id from the location (DB-05).
 	newItem.LocationID = siteID
 	newItem.Attributes["review_item_id"] = item.ID
+	// A type the principal chose is read under its row level security in
+	// the writing transaction: unknown, of another organization or
+	// deactivated is refused (CI-01, TEN-09).
+	newItem.ChosenType = chosenTypeID != ""
 	if err := h.ciRepo.Create(ctx, &newItem); err != nil {
+		if ve, ok := ci.AsValidationError(err); ok && len(ve.Violations) > 0 {
+			return "", &reviews.Error{Status: http.StatusUnprocessableEntity, Field: ve.Violations[0].Field,
+				Message: ve.Violations[0].Detail}
+		}
 		return "", err
 	}
 	if err := h.recordDiscoveredMany(ctx, orgID, newItem.ID, discoveredFields(&device), source, device.ObservedAt); err != nil {
 		return "", err
 	}
 	return newItem.ID, nil
+}
+
+// errChooseType refuses new for a device whose type is not known (UI-16,
+// F-176): the principal names the type with ci_type_id.
+var errChooseType = &reviews.Error{Status: http.StatusUnprocessableEntity, Field: "ci_type_id",
+	Message: "choose a CI type for the new CI"}
+
+// reviewedDeviceType returns the type ID of the CI new creates: the type the
+// principal chose (ci_type_id of the resolution) or else the type the item
+// recorded, a name resolved as the ingest resolves it (lookupTypes,
+// resolveCITypeIDs); the type of an unknown_ci_type item may exist by now.
+// Without a type that resolves new is refused with 422 and the item stays
+// open.
+func (h *Handler) reviewedDeviceType(ctx context.Context, orgID, typeName, chosen string) (string, error) {
+	if chosen = strings.TrimSpace(chosen); chosen != "" {
+		if !isUUID(chosen) {
+			return "", &reviews.Error{Status: http.StatusUnprocessableEntity, Field: "ci_type_id",
+				Message: "ci_type_id must be the UUID of a CI type"}
+		}
+		return chosen, nil
+	}
+	name := strings.TrimSpace(typeName)
+	if name == "" {
+		return "", errChooseType
+	}
+	var types map[string]string
+	if !isUUID(name) {
+		var err error
+		if types, err = h.lookupTypes(ctx, orgID, []string{name}); err != nil {
+			return "", err
+		}
+	}
+	typeID := resolveCITypeIDs([]IngestItem{{CITypeName: name}}, types)[0]
+	if typeID == "" {
+		return "", errChooseType
+	}
+	return typeID, nil
 }
 
 // reviewedDeviceScope returns the client and site of the CI new creates. The

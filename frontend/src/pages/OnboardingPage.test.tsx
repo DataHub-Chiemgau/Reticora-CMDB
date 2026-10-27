@@ -43,6 +43,8 @@ interface ServerState {
   collectors: number;
   scopes: unknown[];
   cis: number;
+  /** resolveFails answers the resolve with a 500 problem (WP-529). */
+  resolveFails?: boolean;
 }
 
 function stubServer(state: ServerState) {
@@ -53,8 +55,19 @@ function stubServer(state: ServerState) {
       return json({ status: 'verification_sent' }, 202);
     if (url.endsWith('/collectors/enrollment-codes'))
       return json({ code: 'ABCD-EFGH', expires_at: '2026-10-15T00:00:00Z' }, 201);
-    if (url.includes('/review-items/') && init?.method === 'POST')
+    if (url.includes('/review-items/') && init?.method === 'POST') {
+      if (state.resolveFails) {
+        return json(
+          { title: 'Internal Server Error', status: 500, detail: 'scope could not be created' },
+          500,
+        );
+      }
+      // A resolved suggestion is no longer open.
+      state.scopes = state.scopes.filter(
+        (item) => !url.includes(`/review-items/${(item as { id: string }).id}/`),
+      );
       return json({ status: 'resolved' });
+    }
     if (url.includes('/review-items')) return json(page(state.scopes));
     if (url.includes('/collectors')) return json(page([], state.collectors));
     if (url.includes('/cis')) return json(page([], state.cis));
@@ -183,6 +196,35 @@ describe('OnboardingPage', () => {
       expect(String(post?.[0])).toBe('/api/v1/review-items/rev-1/resolve');
       expect(JSON.parse(String(post?.[1]?.body))).toEqual({ action: 'accept' });
     });
+    // The confirmed scope completes the step: the first CIs are next (F-177).
+    await waitFor(() =>
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '4'),
+    );
+    expect(screen.getByText(/Die erste Discovery läuft/)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows a failed confirmation and keeps the suggestion (WP-529, F-177)', async () => {
+    signIn();
+    stubServer({
+      collectors: 1,
+      scopes: [
+        { id: 'rev-1', kind: 'scope_suggested', status: 'open', payload: { cidr: '10.0.0.0/24' } },
+      ],
+      cis: 0,
+      resolveFails: true,
+    });
+    renderWithProviders(<OnboardingPage />, { route: '/onboarding' });
+
+    expect(await screen.findByText('10.0.0.0/24')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Bestätigen' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Der Vorschlag wurde nicht übernommen: scope could not be created',
+    );
+    expect(screen.getByText('10.0.0.0/24')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Bestätigen' })).toBeEnabled();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '3');
   });
 
   it('finishes once the first CIs are there', async () => {

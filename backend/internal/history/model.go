@@ -107,10 +107,24 @@ var ChangeKinds = map[string]bool{
 	"relationship_removed": true, "status_changed": true,
 }
 
+// NoRecordedStateError is the answer of a state snapshot whose entity has
+// no recorded change up to the snapshot time: before its creation or
+// before the first recorded change (JOB-04, F-164). The snapshot job fails
+// with it; GET /cis/{id}/state and /assets/{id}/state answer 404.
+type NoRecordedStateError struct {
+	At time.Time
+}
+
+func (e *NoRecordedStateError) Error() string {
+	return "no recorded state before " + e.At.UTC().Format(time.RFC3339Nano)
+}
+
 // Replay reconstructs the field state from an ordered change trail (oldest
 // first). A "create" change seeds the state with its new_value object;
 // subsequent changes overwrite individual fields; "delete" marks the entity
-// as deleted.
+// as deleted and a change of kind restored (CI-05) clears the mark again.
+// Overrides and reconciliation decisions (merge, unmerge) are no field
+// changes of the entity and are not replayed (AUD-08).
 func Replay(changes []Change) StateSnapshot {
 	snapshot := StateSnapshot{Fields: map[string]any{}}
 	for _, change := range changes {
@@ -124,6 +138,7 @@ func Replay(changes []Change) StateSnapshot {
 			snapshot.Deleted = false
 		case "delete":
 			snapshot.Deleted = true
+		case "override", "reconciliation_decision":
 		default:
 			if change.FieldName != "" {
 				if change.NewValue == nil {
@@ -132,6 +147,9 @@ func Replay(changes []Change) StateSnapshot {
 					snapshot.Fields[change.FieldName] = change.NewValue
 				}
 			}
+		}
+		if change.ChangeKind == "restored" {
+			snapshot.Deleted = false
 		}
 	}
 	return snapshot

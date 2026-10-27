@@ -147,13 +147,19 @@ type Filter struct {
 type ResolveRequest struct {
 	Action string `json:"action"`
 	CIID   string `json:"ci_id,omitempty"`
-	Note   string `json:"resolution,omitempty"`
+	// CITypeID is the type of the CI new creates; it takes precedence over
+	// the type name the item recorded.
+	CITypeID string `json:"ci_type_id,omitempty"`
+	Note     string `json:"resolution,omitempty"`
 }
 
 // Resolution is the resolution of an item as the service carries it out.
 type Resolution struct {
 	Action string `json:"action"`
 	CIID   string `json:"ci_id,omitempty"`
+	// CITypeID is the type the principal chose for the CI new creates
+	// (UI-16); empty to take the type the item recorded.
+	CITypeID string `json:"-"`
 	// ResolvedBy is the principal (user or service account) that resolves
 	// the item: the handler takes it from the request, never from the body
 	// (F-091). It is stored as resolved_by and is the audit actor; empty
@@ -186,6 +192,8 @@ type Error struct {
 	Message string
 	// Problem is an RFC 7807 problem type, when the refusal has one.
 	Problem string
+	// Field is the request field the refusal names, when it names one.
+	Field string
 }
 
 func (e *Error) Error() string { return e.Message }

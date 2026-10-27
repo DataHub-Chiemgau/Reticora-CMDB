@@ -8,6 +8,7 @@ import {
   useSaveView,
   useDeleteSavedView,
 } from '../api/cmdbHooks';
+import { useEffectivePermissions } from '../api/hooks';
 import { ApiError } from '../api/client';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -24,6 +25,10 @@ export function SavedViewsPage() {
   const presets = useSavedViewPresets();
   const saveView = useSaveView();
   const deleteView = useDeleteSavedView();
+  // Only the owner changes or deletes a view (E-86): a view shared with the
+  // caller is read-only and the server answers 404 to its DELETE. Until the
+  // caller's id is known no view counts as own (fail closed).
+  const me = useEffectivePermissions().data?.user_id;
   const [activeView, setActiveView] = useState<string>('');
   // Remember what produced the current result set so it can be saved. Without
   // it there is nothing to persist: the page only ever held a display name.
@@ -115,17 +120,19 @@ export function SavedViewsPage() {
                       </Badge>
                     ) : null}
                   </button>
-                  <button
-                    onClick={() => deleteView.mutate(v.id)}
-                    aria-label={`${t('common.delete')}: ${v.name}`}
-                    className="rounded-md px-2 py-2 text-sm text-gray-400 hover:text-danger"
-                  >
-                    ×
-                  </button>
+                  {me && v.owner_id === me ? (
+                    <button
+                      onClick={() => deleteView.mutate(v.id)}
+                      aria-label={`${t('common.delete')}: ${v.name}`}
+                      className="rounded-md px-2 py-2 text-sm text-muted hover:text-danger"
+                    >
+                      ×
+                    </button>
+                  ) : null}
                 </li>
               ))}
               {(views.data?.data ?? []).length === 0 && !views.isLoading ? (
-                <li className="px-3 py-2 text-sm text-gray-500">
+                <li className="px-3 py-2 text-sm text-muted">
                   {t('savedviews.none', 'Noch keine eigenen Ansichten.')}
                 </li>
               ) : null}
@@ -170,17 +177,17 @@ export function SavedViewsPage() {
                     >
                       {r.name}
                     </Link>
-                    {r.summary ? <p className="text-xs text-gray-500">{r.summary}</p> : null}
+                    {r.summary ? <p className="text-xs text-muted">{r.summary}</p> : null}
                   </li>
                 ))}
                 {results.length === 0 ? (
-                  <li className="py-4 text-center text-sm text-gray-500">
+                  <li className="py-4 text-center text-sm text-muted">
                     {t('savedviews.noResults', 'Keine Treffer.')}
                   </li>
                 ) : null}
               </ul>
             ) : !activeSpec ? (
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-muted">
                 {t('savedviews.hint', 'Wählen Sie links eine Ansicht aus.')}
               </p>
             ) : null}

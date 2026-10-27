@@ -1,10 +1,10 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, FormEvent, KeyboardEvent } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { ciApi, roomApi, buildingApi } from '../api/client';
-import type { Room, CI } from '../api/client';
+import { ApiError, ciApi, roomApi, buildingApi } from '../api/client';
+import type { Room, CI, Versioned } from '../api/client';
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -56,6 +56,9 @@ export function keyboardMove(
 
 const percent = (value: number) => Math.round(value * 100);
 
+/** Quiet time after the last arrow key before the moves are saved. */
+export const KEYBOARD_SAVE_DELAY_MS = 300;
+
 /**
  * RoomPlanPage renders a room's floor-plan layer with its CIs positioned by
  * drag & drop, with the arrow keys on a focused object or by entering the
@@ -82,8 +85,9 @@ export function RoomPlanPage() {
     enabled: !!buildingId,
   });
   const [roomId, setRoomId] = useState('');
+  const roomKey = useMemo(() => ['room', roomId], [roomId]);
   const room = useQuery({
-    queryKey: ['room', roomId],
+    queryKey: roomKey,
     queryFn: () => roomApi.get(roomId),
     enabled: !!roomId,
   });
@@ -95,25 +99,102 @@ export function RoomPlanPage() {
     enabled: !!roomId,
   });
 
-  const layout = useMemo(() => room.data?.layout ?? {}, [room.data]);
+  // Positions moved here but not yet confirmed by the server. Arrow keys
+  // accumulate on them and one debounced PATCH sends the result, so no step
+  // is lost while a save is in flight (F-342).
+  const pendingRef = useRef<Record<string, PlanPosition>>({});
+  const [pending, setPending] = useState<Record<string, PlanPosition>>({});
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const inFlightRef = useRef(false);
+  const flushAgainRef = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const [saveError, setSaveError] = useState<string>();
+
+  const serverLayout = useMemo(() => room.data?.data.layout ?? {}, [room.data]);
+  const layout = useMemo(() => ({ ...serverLayout, ...pending }), [serverLayout, pending]);
   const roomCIs = useMemo(() => cis.data?.data ?? [], [cis.data]);
 
-  const saveLayout = useMutation({
-    mutationFn: (next: Record<string, { x: number; y: number }>) =>
-      roomApi.updateLayout(roomId, next),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['room', roomId] });
-    },
-  });
+  function setPendingPositions(next: Record<string, PlanPosition>) {
+    pendingRef.current = next;
+    setPending(next);
+  }
+
+  // A room switch drops the unsaved moves of the previous room.
+  useEffect(() => {
+    clearTimeout(timerRef.current);
+    setPendingPositions({});
+    setConflict(false);
+    setSaveError(undefined);
+  }, [roomId]);
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  /**
+   * flush sends the pending positions on top of the last layout the server
+   * confirmed, with If-Match of its ETag. One PATCH at a time: moves made
+   * meanwhile go out with the next one, based on the new ETag. A 409 (the
+   * room was changed elsewhere) drops the moves, reloads and shows a hint.
+   */
+  function flush() {
+    if (inFlightRef.current) {
+      flushAgainRef.current = true;
+      return;
+    }
+    const sent = pendingRef.current;
+    if (Object.keys(sent).length === 0) return;
+    const base = queryClient.getQueryData<Versioned<Room>>(roomKey);
+    inFlightRef.current = true;
+    setSaving(true);
+    roomApi
+      .updateLayout(roomId, { ...(base?.data.layout ?? {}), ...sent }, base?.etag)
+      .then((saved) => {
+        queryClient.setQueryData(roomKey, saved);
+        // Keep only moves made after this PATCH was sent.
+        const rest = { ...pendingRef.current };
+        for (const [id, pos] of Object.entries(sent)) {
+          if (rest[id] === pos) delete rest[id];
+        }
+        setPendingPositions(rest);
+        setConflict(false);
+        setSaveError(undefined);
+      })
+      .catch((err: unknown) => {
+        setPendingPositions({});
+        flushAgainRef.current = false;
+        if (err instanceof ApiError && err.status === 409) {
+          setConflict(true);
+          setSaveError(undefined);
+          void queryClient.invalidateQueries({ queryKey: roomKey });
+          return;
+        }
+        setSaveError(
+          err instanceof ApiError && err.status === 422 && /\.(x|y)$/.test(err.field ?? '')
+            ? t('roomplan.rangeError')
+            : t('roomplan.saveError', { message: err instanceof Error ? err.message : '' }),
+        );
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+        setSaving(false);
+        if (flushAgainRef.current) {
+          flushAgainRef.current = false;
+          flush();
+        }
+      });
+  }
+
+  /** savePosition records a move and sends it now, or after delay ms of quiet. */
+  function savePosition(ciId: string, pos: PlanPosition, delay = 0) {
+    setPendingPositions({ ...pendingRef.current, [ciId]: pos });
+    clearTimeout(timerRef.current);
+    if (delay > 0) timerRef.current = setTimeout(flush, delay);
+    else flush();
+  }
 
   const selectedBuilding = buildings.data?.data.find((b) => b.id === buildingId);
   const floorplanURL = selectedBuilding?.floorplan_object_key
     ? `/api/v1/documents/content?key=${encodeURIComponent(selectedBuilding.floorplan_object_key)}`
     : undefined;
-
-  function savePosition(ciId: string, pos: PlanPosition) {
-    saveLayout.mutate({ ...layout, [ciId]: pos });
-  }
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -132,10 +213,12 @@ export function RoomPlanPage() {
       navigate(`/cmdb/${ci.id}`);
       return;
     }
-    const next = keyboardMove(ciPosition(ci), e.key, e.shiftKey);
+    // The step starts from the latest local position, not the last render.
+    const current = pendingRef.current[ci.id] ?? ciPosition(ci);
+    const next = keyboardMove(current, e.key, e.shiftKey);
     if (!next) return;
     e.preventDefault();
-    savePosition(ci.id, next);
+    savePosition(ci.id, next, KEYBOARD_SAVE_DELAY_MS);
   }
 
   function onPositionSubmit(e: FormEvent<HTMLFormElement>, ci: CI) {
@@ -144,7 +227,8 @@ export function RoomPlanPage() {
     const x = Number(data.get('x'));
     const y = Number(data.get('y'));
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    savePosition(ci.id, { x: clamp01(x / 100), y: clamp01(y / 100) });
+    // Out-of-range input is sent as typed: the server's 422 is shown.
+    savePosition(ci.id, { x: x / 100, y: y / 100 });
   }
 
   return (
@@ -251,8 +335,16 @@ export function RoomPlanPage() {
             >
               {t('roomplan.keyboardHint')}
             </p>
-            {saveLayout.isPending ? (
-              <p className="mt-2 text-xs text-gray-500">{t('app.loading')}</p>
+            {saving ? <p className="mt-2 text-xs text-muted">{t('app.loading')}</p> : null}
+            {conflict ? (
+              <p role="alert" className="mt-2 text-sm text-amber-800 dark:text-amber-300">
+                {t('roomplan.conflict')}
+              </p>
+            ) : null}
+            {saveError ? (
+              <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-300">
+                {saveError}
+              </p>
             ) : null}
           </Card>
 
@@ -270,13 +362,14 @@ export function RoomPlanPage() {
                       >
                         {ci.name}
                       </span>
-                      <Badge variant="info">{ci.status}</Badge>
+                      <Badge variant="info">{t(`ci.statuses.${ci.status}`, ci.status)}</Badge>
                     </div>
                     {/* Form alternative to dragging: key/value input of the position. */}
                     <form
                       key={`${pos.x}-${pos.y}`}
                       aria-label={t('roomplan.positionFor', { name: ci.name })}
                       onSubmit={(e) => onPositionSubmit(e, ci)}
+                      noValidate
                       className="flex items-end gap-2"
                     >
                       <label className="text-xs text-gray-600 dark:text-gray-300">

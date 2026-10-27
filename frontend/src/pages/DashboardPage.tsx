@@ -1,8 +1,10 @@
 import type * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import {
   useAssetList,
   useCIList,
+  useAllCollectors,
   useCollectors,
   useComplianceScore,
   useSLABreaches,
@@ -84,11 +86,10 @@ function CISummaryWidget() {
 
 function CollectorsWidget() {
   const { t } = useTranslation();
-  const collectors = useCollectors({ limit: 1000, offset: 0 });
+  // Every page of the list: the API answers at most 200 per page (F-362).
+  const collectors = useAllCollectors();
 
-  // Guard against a malformed/legacy payload where `data` is null instead of
-  // an array — `.filter` on null throws during render and blanks the page.
-  const collectorList = collectors.data?.data ?? [];
+  const collectorList = collectors.data ?? [];
   const collectorCount = collectorList.filter((collector) => collector.status === 'active').length;
 
   return (
@@ -195,6 +196,36 @@ function TicketsWidget() {
   );
 }
 
+/**
+ * SetupBanner leads back to the onboarding until it is finished: without a
+ * collector or without CIs (UI-17, F-351). The queries are the widgets' own.
+ */
+function SetupBanner() {
+  const { t } = useTranslation();
+  const collectors = useCollectors({ limit: 1, offset: 0 });
+  const cis = useCIList({ limit: 1, offset: 0 });
+  if (!collectors.isSuccess || !cis.isSuccess) {
+    return null;
+  }
+  if ((collectors.data?.total ?? 0) > 0 && (cis.data?.total ?? 0) > 0) {
+    return null;
+  }
+  return (
+    <section
+      aria-labelledby="dashboard-setup-title"
+      className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+    >
+      <h3 id="dashboard-setup-title" className="font-semibold">
+        {t('dashboard.setup.title')}
+      </h3>
+      <p className="mt-1">{t('dashboard.setup.text')}</p>
+      <Link to="/onboarding" className="mt-2 inline-block font-medium underline">
+        {t('dashboard.setup.continue')}
+      </Link>
+    </section>
+  );
+}
+
 const widgetRenderers: Record<DashboardWidget, () => React.JSX.Element> = {
   ciSummary: CISummaryWidget,
   collectors: CollectorsWidget,
@@ -240,6 +271,8 @@ export function DashboardPage() {
           }))}
         />
       </div>
+
+      <SetupBanner />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {widgets.map((widget) => {

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -65,6 +66,38 @@ type deliveryJob struct {
 	attempt    int
 	maxAttempt int
 	sub        Subscription
+	// origin is the outbox event delivered (WP-506); nil for test sends
+	// and direct dispatches.
+	origin *eventOrigin
+}
+
+// eventOrigin names the outbox event of a delivery: its ID and its
+// sequence numbers, sent as X-Reticora-Event-ID, X-Reticora-Sequence and
+// X-Reticora-Entity-Seq (F-320).
+type eventOrigin struct {
+	id        string
+	sequence  int64
+	entitySeq int64
+}
+
+// originOf is the origin of a stored delivery; nil without an event.
+func originOf(rec *DeliveryRecord) *eventOrigin {
+	if rec.EventID == "" {
+		return nil
+	}
+	return &eventOrigin{id: rec.EventID, sequence: rec.EventSequence, entitySeq: rec.EntitySeq}
+}
+
+// deliveryIDFor is the delivery ID of an event for a subscription: derived
+// from both (a name-based UUID, version 5 layout over SHA-256), so a
+// repeated hand-off of the event and every redelivery carry the same ID
+// (X-Reticora-Delivery, WP-506).
+func deliveryIDFor(eventID, subscriptionID string) string {
+	sum := sha256.Sum256([]byte("reticora-webhook-delivery\x00" + eventID + "\x00" + subscriptionID))
+	b := sum[:16]
+	b[6] = (b[6] & 0x0f) | 0x50
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // DispatcherOptions configures durable delivery behaviour.
@@ -257,9 +290,13 @@ func orgScoped(ctx context.Context, orgID string) context.Context {
 	return database.ContextWithTenantScope(ctx, &scope)
 }
 
-// Dispatch persists and queues webhook deliveries for matching subscriptions.
+// Dispatch persists and queues webhook deliveries for matching
+// subscriptions. A direct dispatch has no outbox to retry it: a failed
+// hand-off is logged.
 func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload any) {
-	d.dispatchAs(ctx, orgID, event, nil, payload)
+	if err := d.dispatchAs(ctx, orgID, event, nil, payload, nil); err != nil {
+		slog.Error("dispatch webhook event failed", "error", err, "organization_id", orgID, "event", event)
+	}
 }
 
 // legacyNames are the former names of the events of EVT-02 that existing
@@ -272,7 +309,11 @@ var legacyNames = map[string][]string{
 // Consume implements events.Consumer: the outbox publisher hands every
 // committed domain event to the subscriptions of its type and of its
 // former names (WP-136). A status-only change also reaches the
-// subscriptions of ci.status_changed.
+// subscriptions of ci.status_changed. A failed subscription lookup or
+// delivery persistence is returned, so the publisher keeps the event
+// pending and hands it over again (at least once, F-151); the deliveries
+// are idempotent per event and subscription, a repeated hand-off adds none
+// (WP-506).
 func (d *Dispatcher) Consume(ctx context.Context, env *events.Envelope) error {
 	aliases := append([]string(nil), legacyNames[env.Type]...)
 	if env.Type == events.CIChanged {
@@ -283,13 +324,20 @@ func (d *Dispatcher) Consume(ctx context.Context, env *events.Envelope) error {
 			aliases = append(aliases, "ci.status_changed")
 		}
 	}
-	d.dispatchAs(ctx, env.OrgID, env.Type, aliases, env.Data)
-	return nil
+	var origin *eventOrigin
+	if env.ID != "" {
+		origin = &eventOrigin{id: env.ID, sequence: env.Sequence, entitySeq: env.EntitySeq}
+	}
+	return d.dispatchAs(ctx, env.OrgID, env.Type, aliases, env.Data, origin)
 }
 
-func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliases []string, payload any) {
+// dispatchAs stores and queues a delivery of the event for every
+// subscription that receives it. origin is the outbox event (nil for a
+// direct dispatch); with it the delivery ID derives from the event and the
+// subscription, and an existing delivery of the event is not repeated.
+func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliases []string, payload any, origin *eventOrigin) error {
 	if d == nil || d.repo == nil {
-		return
+		return nil
 	}
 
 	// The lookup finds every subscription of the organization, independent
@@ -302,8 +350,7 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 	for _, name := range append([]string{event}, aliases...) {
 		named, err := d.repo.ListByEvent(orgScoped(ctx, orgID), orgID, name)
 		if err != nil {
-			slog.Error("list webhook subscriptions failed", "error", err, "organization_id", orgID, "event", name)
-			return
+			return fmt.Errorf("list webhook subscriptions of %s: %w", name, err)
 		}
 		for i := range named {
 			if !seen[named[i].ID] {
@@ -313,19 +360,20 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 		}
 	}
 	if len(subs) == 0 {
-		return
+		return nil
 	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		slog.Error("marshal webhook payload failed", "error", err, "organization_id", orgID, "event", event)
-		return
+		return fmt.Errorf("marshal webhook payload: %w", err)
 	}
-	// Stored and sent without the withheld keys (the invitation link).
+	// Stored and sent without the withheld keys (the invitation link). A
+	// payload that cannot be redacted is never delivered; handing it over
+	// again would not change that.
 	body, ok := redactPayload(event, body)
 	if !ok {
 		slog.Error("webhook payload without its withheld keys could not be built; not delivered", "organization_id", orgID, "event", event)
-		return
+		return nil
 	}
 
 	// The scope of the event objects is resolved once, and only when a
@@ -338,6 +386,7 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 		}
 	}
 
+	var failed []error
 	for _, sub := range subs {
 		if !d.mayDeliver(ctx, orgID, event, objects, &sub) {
 			continue
@@ -349,6 +398,19 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 			payload:    body,
 			maxAttempt: d.opts.MaxAttempts,
 			sub:        sub,
+			origin:     origin,
+		}
+		rec := DeliveryRecord{
+			OrganizationID: orgID,
+			SubscriptionID: sub.ID,
+			Event:          event,
+			Payload:        body,
+			Status:         StatusPending,
+			MaxAttempts:    d.opts.MaxAttempts,
+		}
+		if origin != nil {
+			job.deliveryID = deliveryIDFor(origin.id, sub.ID)
+			rec.ID, rec.EventID, rec.EventSequence, rec.EntitySeq = job.deliveryID, origin.id, origin.sequence, origin.entitySeq
 		}
 
 		if d.store != nil {
@@ -357,27 +419,29 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 			// retry worker of no replica sends it in parallel, and takes it
 			// over only when this process dies before recording the attempt.
 			leased := d.now().Add(defaultClaimLease)
-			rec, err := d.store.Enqueue(ctx, DeliveryRecord{
-				OrganizationID: orgID,
-				SubscriptionID: sub.ID,
-				Event:          event,
-				Payload:        body,
-				Status:         StatusPending,
-				MaxAttempts:    d.opts.MaxAttempts,
-				NextRetryAt:    &leased,
-			})
-			if err != nil {
-				// The delivery could not be persisted; dropping it is safer
-				// than an untracked in-memory retry no operator can observe.
-				slog.Error("persist webhook delivery failed",
-					"error", err, "organization_id", orgID, "event", event, "subscription_id", sub.ID)
+			rec.NextRetryAt = &leased
+			stored, err := d.store.Enqueue(ctx, rec)
+			if errors.Is(err, ErrDeliveryExists) {
+				// An earlier hand-off of the event stored the delivery; it
+				// is sent by that one or by the retry worker (WP-506).
 				continue
 			}
-			job.deliveryID = rec.ID
+			if err != nil {
+				// The delivery could not be persisted: an untracked
+				// in-memory attempt no operator can observe is not made.
+				// The error keeps an outbox event pending, so the
+				// publisher hands it over again (F-151).
+				slog.Error("persist webhook delivery failed",
+					"error", err, "organization_id", orgID, "event", event, "subscription_id", sub.ID)
+				failed = append(failed, fmt.Errorf("persist webhook delivery for subscription %s: %w", sub.ID, err))
+				continue
+			}
+			job.deliveryID = stored.ID
 		}
 
 		d.enqueueJob(job)
 	}
+	return errors.Join(failed...)
 }
 
 func (d *Dispatcher) enqueueJob(job deliveryJob) {
@@ -575,6 +639,7 @@ func (d *Dispatcher) ProcessDue(ctx context.Context) {
 			attempt:    rec.Attempt,
 			maxAttempt: maxAttemptsOrDefault(rec.MaxAttempts),
 			sub:        *sub,
+			origin:     originOf(&rec),
 		})
 	}
 }
@@ -745,6 +810,17 @@ func (d *Dispatcher) send(job deliveryJob) (int, time.Duration, error) {
 	req.Header.Set("X-Webhook-Event", job.event)
 	req.Header.Set("X-Webhook-ID", job.deliveryID)
 	req.Header.Set("X-Webhook-Signature", signature)
+	// The outbox event delivered (F-320): its ID and its sequence numbers
+	// let the receiver drop repeated deliveries and order the events of an
+	// organization and of an entity. An event without an entity carries no
+	// entity sequence.
+	if job.origin != nil {
+		req.Header.Set("X-Reticora-Event-ID", job.origin.id)
+		req.Header.Set("X-Reticora-Sequence", strconv.FormatInt(job.origin.sequence, 10))
+		if job.origin.entitySeq > 0 {
+			req.Header.Set("X-Reticora-Entity-Seq", strconv.FormatInt(job.origin.entitySeq, 10))
+		}
+	}
 	// During the overlap after a rotation the old secret signs as well
 	// (SEC-06).
 	if job.sub.PreviousSecret != "" && job.sub.PreviousSecretExpiresAt != nil && d.now().Before(*job.sub.PreviousSecretExpiresAt) {

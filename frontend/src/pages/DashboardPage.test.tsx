@@ -39,6 +39,83 @@ describe('DashboardPage', () => {
     expect(screen.getByText('3')).toBeInTheDocument(); // active CIs
     expect(screen.getByText('2')).toBeInTheDocument(); // maintenance CIs
     expect(screen.getByText('1')).toBeInTheDocument(); // online collectors
+    // Collector and CIs are there: the onboarding is finished (F-351).
+    expect(screen.queryByRole('link', { name: 'Einrichtung fortsetzen' })).toBeNull();
+  });
+
+  it('counts every active collector, also beyond the 200 of one page (F-362)', async () => {
+    const collectors = Array.from({ length: 250 }, (_, i) => ({
+      id: `c${i}`,
+      organization_id: 'org-1',
+      name: `collector-${i}`,
+      status: i < 240 ? 'active' : 'offline',
+      config: {},
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    }));
+    const counts = (total: number) => ({ ...paginated([]), total });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), 'http://localhost');
+        const status = url.searchParams.get('status');
+        let body: unknown;
+        if (url.pathname === '/api/v1/collectors') {
+          // The server caps the limit at 200 (parameter Limit, API-02).
+          const limit = Math.min(Number(url.searchParams.get('limit') ?? 50), 200);
+          const offset = Number(url.searchParams.get('offset') ?? 0);
+          body = {
+            data: collectors.slice(offset, offset + limit),
+            total: collectors.length,
+            limit,
+            offset,
+            has_more: offset + limit < collectors.length,
+          };
+        } else if (url.pathname === '/api/v1/cis') {
+          body = counts(status === 'active' ? 3 : status === 'maintenance' ? 2 : 5);
+        } else {
+          return new Response(JSON.stringify({ detail: 'unexpected' }), { status: 404 });
+        }
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+
+    renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+
+    expect(await screen.findByText('240')).toBeInTheDocument(); // online collectors
+  });
+
+  it.each([
+    ['without a collector', 0, 5],
+    ['without CIs', 1, 0],
+  ])('leads back to the onboarding %s (UI-17, F-351)', async (_case, collectors, cis) => {
+    stubFetchRoutes({
+      '/cis?limit=1&offset=0&status=active': { ...paginated([]), total: 0 },
+      '/cis?limit=1&offset=0&status=maintenance': { ...paginated([]), total: 0 },
+      '/cis?limit=1&offset=0': { ...paginated([]), total: cis },
+      '/collectors': paginated(
+        Array.from({ length: collectors }, (_, i) => ({
+          id: `c${i}`,
+          organization_id: 'org-1',
+          name: `collector-${i}`,
+          status: 'active',
+          config: {},
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        })),
+      ),
+    });
+
+    renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+
+    expect(await screen.findByRole('link', { name: 'Einrichtung fortsetzen' })).toHaveAttribute(
+      'href',
+      '/onboarding',
+    );
+    expect(screen.getByText('Einrichtung noch nicht abgeschlossen')).toBeInTheDocument();
   });
 
   it('does not crash when a list endpoint returns data:null (legacy/empty backend)', async () => {

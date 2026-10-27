@@ -8,6 +8,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -28,11 +29,22 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// visibleEntity hides the changes of a CI that is not visible under the
-// transaction's tenant scope: the ci policy filters the subquery by client
-// scope, while entity_change carries no client column yet (WP-025). Other
-// entity types follow with their packages' WithTenant migration.
-const visibleEntity = `(entity_type <> 'ci' OR EXISTS (SELECT 1 FROM ci WHERE ci.id = entity_change.entity_id))`
+// visibleEntity hides the changes of a CI or an asset that is not visible
+// under the transaction's tenant scope: the ci and asset policies filter the
+// subqueries by client and site scope, while entity_change carries no
+// client column yet (WP-025). An asset is deleted for good, so the changes
+// of a deleted asset are hidden too (WP-516). Other entity types follow
+// with their packages' WithTenant migration.
+const visibleEntity = `(entity_type <> 'ci' OR EXISTS (SELECT 1 FROM ci WHERE ci.id = entity_change.entity_id))
+	AND (entity_type <> 'asset' OR EXISTS (SELECT 1 FROM asset WHERE asset.id = entity_change.entity_id))`
+
+// visibleSQL is the visibility check ($1: the entity id) of the entity
+// types with a state snapshot (JOB-04): the row under the caller's tenant
+// scope; a deleted CI keeps its row (CI-05).
+var visibleSQL = map[string]string{
+	"ci":    "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid)",
+	"asset": "SELECT EXISTS (SELECT 1 FROM asset WHERE id = $1::uuid)",
+}
 
 // Record appends a change row to the entity_change trail.
 func (r *PGRepository) Record(ctx context.Context, change *Change) error {
@@ -210,7 +222,10 @@ func (r *PGRepository) listUnified(ctx context.Context, orgID, id string, page a
 			c.CollectorID, c.RequestID, c.CorrelationID, c.ActorUserID = deref(collector), deref(request), deref(correlation), deref(actorUser)
 			out = append(out, c)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return reveal(ctx, tx, orgID, out)
 	})
 	return out, total, err
 }
@@ -252,32 +267,139 @@ func (r *PGRepository) List(ctx context.Context, orgID, entityType, entityID str
 			}
 			out = append(out, *c)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return reveal(ctx, tx, orgID, out)
 	})
 	return out, total, err
 }
 
-// TrailUpTo returns changes oldest-first for point-in-time replay.
-func (r *PGRepository) TrailUpTo(ctx context.Context, orgID, entityType, entityID string, at time.Time) ([]Change, error) {
-	var out []Change
+// Visible reports whether the entity of a state snapshot (ci or asset)
+// exists under the caller's tenant scope; an unknown one, one of another
+// organization, client or site, and an id that is no UUID are not.
+func (r *PGRepository) Visible(ctx context.Context, orgID, entityType, entityID string) (bool, error) {
+	query, ok := visibleSQL[entityType]
+	if !ok || !api.IsUUID(entityID) {
+		return false, nil
+	}
+	var visible bool
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM entity_change WHERE organization_id = $1 AND entity_type = $2 AND entity_id = $3 AND created_at <= $4 AND %s ORDER BY created_at ASC",
-			selectColumns, visibleEntity), orgID, entityType, entityID, at)
+		return tx.QueryRow(ctx, query, entityID).Scan(&visible)
+	})
+	return visible, err
+}
+
+// ciTrail is the change trail of a CI for its replay (JOB-04, WP-516): the
+// field rows of its ci_change change sets (AUD-03, the row of its creation
+// included) and its entity_change rows up to $3, with the change kind, both
+// under the caller's tenant scope as in its history (unifiedCIChanges).
+const ciTrail = `
+	SELECT id::text AS id, organization_id::text AS organization_id, 'ci' AS entity_type, ci_id::text AS entity_id,
+	       COALESCE(actor_id::text, '') AS actor_id, change_type, COALESCE(field_name, '') AS field_name, old_value, new_value,
+	       COALESCE(comment, '') AS comment, created_at, change_kind, ci_version
+	FROM ci_change WHERE organization_id = $1 AND ci_id = $2::uuid AND created_at <= $3
+	UNION ALL
+	SELECT id::text, organization_id::text, entity_type, entity_id::text, COALESCE(actor_id::text, ''), change_type,
+	       COALESCE(field_name, ''), old_value, new_value, COALESCE(comment, ''), created_at, '', NULL::bigint
+	FROM entity_change WHERE organization_id = $1 AND entity_type = 'ci' AND entity_id = $2::uuid AND created_at <= $3`
+
+// TrailUpTo returns the changes of an entity up to at, oldest first, for
+// point-in-time replay, with the personal values the surrogates stand for,
+// as its history shows them (SEC-05). For a CI it is its ci_change field
+// rows and its entity_change rows, for another type its entity_change rows
+// (an asset writes them since WP-516). The rows of one write share their
+// time: the creation goes first, then the CI version orders them. An entity
+// the caller cannot see has none.
+func (r *PGRepository) TrailUpTo(ctx context.Context, orgID, entityType, entityID string, at time.Time) ([]Change, error) {
+	out := []Change{}
+	if !api.IsUUID(entityID) {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var rows pgx.Rows
+		var err error
+		if entityType == "ci" {
+			rows, err = tx.Query(ctx, `
+				SELECT id, organization_id, entity_type, entity_id, actor_id, change_type, field_name, old_value, new_value,
+				       comment, created_at, change_kind
+				FROM (`+ciTrail+`) t
+				WHERE EXISTS (SELECT 1 FROM ci WHERE ci.id = $2::uuid)
+				ORDER BY created_at, change_type <> 'create', ci_version NULLS LAST, id`, orgID, entityID, at)
+		} else {
+			rows, err = tx.Query(ctx, fmt.Sprintf(
+				"SELECT %s, '' FROM entity_change WHERE organization_id = $1 AND entity_type = $2 AND entity_id = $3 AND created_at <= $4 AND %s ORDER BY created_at, change_type <> 'create', id",
+				selectColumns, visibleEntity), orgID, entityType, entityID, at)
+		}
 		if err != nil {
 			return fmt.Errorf("list entity trail: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
-			c, err := scan(rows)
-			if err != nil {
+			c := Change{}
+			var oldRaw, newRaw []byte
+			if err := rows.Scan(&c.ID, &c.OrganizationID, &c.EntityType, &c.EntityID, &c.ActorID, &c.ChangeType, &c.FieldName,
+				&oldRaw, &newRaw, &c.Comment, &c.CreatedAt, &c.ChangeKind); err != nil {
 				return err
 			}
-			out = append(out, *c)
+			if err := decodeValues(&c, oldRaw, newRaw); err != nil {
+				return err
+			}
+			out = append(out, c)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return reveal(ctx, tx, orgID, out)
 	})
 	return out, err
+}
+
+// decodeValues decodes the stored old and new value of a trail row.
+func decodeValues(c *Change, oldRaw, newRaw []byte) error {
+	if len(oldRaw) > 0 {
+		if err := json.Unmarshal(oldRaw, &c.OldValue); err != nil {
+			return fmt.Errorf("decode old value: %w", err)
+		}
+	}
+	if len(newRaw) > 0 {
+		if err := json.Unmarshal(newRaw, &c.NewValue); err != nil {
+			return fmt.Errorf("decode new value: %w", err)
+		}
+	}
+	return nil
+}
+
+// reveal replaces the surrogate references in the old and new values and
+// the field changes of changes with the personal values they stand for, as
+// the CI change list and the audit log show them; a deleted one is null
+// (SEC-05).
+func reveal(ctx context.Context, tx pgx.Tx, orgID string, changes []Change) error {
+	values := make([]any, 0, 2*len(changes))
+	for i := range changes {
+		values = append(values, changes[i].OldValue, changes[i].NewValue)
+		for _, fc := range changes[i].FieldChanges {
+			values = append(values, fc.Old, fc.New)
+		}
+	}
+	revealed, err := pii.RevealTx(ctx, tx, orgID, values)
+	if err != nil {
+		return fmt.Errorf("resolve personal values: %w", err)
+	}
+	out, ok := revealed.([]any)
+	if !ok || len(out) != len(values) {
+		return fmt.Errorf("resolve personal values: %d of %d values", len(out), len(values))
+	}
+	n := 0
+	for i := range changes {
+		changes[i].OldValue, changes[i].NewValue = out[n], out[n+1]
+		n += 2
+		for j := range changes[i].FieldChanges {
+			changes[i].FieldChanges[j].Old, changes[i].FieldChanges[j].New = out[n], out[n+1]
+			n += 2
+		}
+	}
+	return nil
 }
 
 type scanner interface {

@@ -10,26 +10,26 @@ import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import { useUndoableDelete } from '../hooks/useUndoableDelete';
 import { useToastStore } from '../stores/toast';
+import { ScrollRegion } from '../components/ScrollRegion';
 
-const statusOptions = [
-  { value: '', label: 'Alle' },
-  { value: 'in_stock', label: 'Auf Lager' },
-  { value: 'assigned', label: 'Zugewiesen' },
-  { value: 'maintenance', label: 'Wartung' },
-  { value: 'retired', label: 'Ausgemustert' },
-  { value: 'disposed', label: 'Entsorgt' },
-  { value: 'lost', label: 'Verloren' },
-];
+// Stored asset values (English keys); the labels come from the catalog.
+export const ASSET_STATUSES = [
+  'in_stock',
+  'assigned',
+  'maintenance',
+  'retired',
+  'disposed',
+  'lost',
+] as const;
 
-const categoryOptions = [
-  { value: '', label: 'Alle' },
-  { value: 'hardware', label: 'Hardware' },
-  { value: 'software', label: 'Software' },
-  { value: 'license', label: 'Lizenz' },
-  { value: 'cloud_resource', label: 'Cloud-Ressource' },
-  { value: 'accessory', label: 'Zubehör' },
-  { value: 'other', label: 'Sonstiges' },
-];
+export const ASSET_CATEGORIES = [
+  'hardware',
+  'software',
+  'license',
+  'cloud_resource',
+  'accessory',
+  'other',
+] as const;
 
 function statusVariant(status: string) {
   switch (status) {
@@ -50,6 +50,17 @@ function statusVariant(status: string) {
 
 export function AssetListPage() {
   const { t } = useTranslation();
+  const statusOptions = [
+    { value: '', label: t('common.all', 'Alle') },
+    ...ASSET_STATUSES.map((value) => ({ value, label: t(`asset.statuses.${value}`, value) })),
+  ];
+  const categoryOptions = [
+    { value: '', label: t('common.all', 'Alle') },
+    ...ASSET_CATEGORIES.map((value) => ({
+      value,
+      label: t(`asset.categories.${value}`, value),
+    })),
+  ];
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [category, setCategory] = useState('');
@@ -203,7 +214,7 @@ export function AssetListPage() {
               </Button>
             </div>
           ) : null}
-          <div className="overflow-x-auto">
+          <ScrollRegion label={t('asset.title', 'Inventar')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -250,9 +261,13 @@ export function AssetListPage() {
                     </td>
                     <td className="py-2 font-mono">{asset.asset_tag}</td>
                     <td className="py-2">{asset.name}</td>
-                    <td className="py-2">{asset.category}</td>
                     <td className="py-2">
-                      <Badge variant={statusVariant(asset.status)}>{asset.status}</Badge>
+                      {t(`asset.categories.${asset.category}`, asset.category)}
+                    </td>
+                    <td className="py-2">
+                      <Badge variant={statusVariant(asset.status)}>
+                        {t(`asset.statuses.${asset.status}`, asset.status)}
+                      </Badge>
                     </td>
                     <td className="py-2">{asset.location || '—'}</td>
                     <td className="py-2">
@@ -264,14 +279,14 @@ export function AssetListPage() {
                 ))}
                 {assetList.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-4 text-center text-gray-400">
+                    <td colSpan={7} className="py-4 text-center text-gray-600 dark:text-gray-300">
                       {t('common.noData', 'Keine Daten')}
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         </Card>
       )}
 

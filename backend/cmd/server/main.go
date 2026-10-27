@@ -417,6 +417,11 @@ func main() {
 		})).
 		// E-mail channels send only with notifications_email (ENT-05).
 		WithEntitlements(entitlementSvc)
+	if auditPool != nil {
+		// E-mails of the categories a user bundles become digest items;
+		// the scheduler kind notify.digest queues them per window (NTF-04).
+		notifier.WithDigest(notify.NewPGDigestStore(auditPool))
+	}
 	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(egressPolicy), webhook.DispatcherOptions{
 		// Subscriptions bound to a service account receive only events whose
 		// object the account may read (RBA-08).
@@ -519,6 +524,7 @@ func main() {
 		Egress:               egressPolicy,
 		Readiness:            readiness,
 		IngestQueue:          ingestQueue,
+		JobQueue:             jobQueue,
 		Signup:               signupService(cfg, auditPool, smtpSender),
 		Notifications:        notifications,
 		Events:               emitterOf(auditPool),
@@ -552,7 +558,8 @@ func main() {
 		systemScheduler = jobs.NewScheduler(jobs.NewMemoryLocker(), jobs.NewMemoryStateStore())
 	}
 	if err = registerSystemJobs(systemScheduler, &systemJobDeps{cfg: cfg, pool: auditPool, encryptor: encryptor,
-		repos: &repos, modules: modules, entitlements: entitlementSvc, dispatcher: webhookDispatcher}); err != nil {
+		repos: &repos, modules: modules, entitlements: entitlementSvc, dispatcher: webhookDispatcher,
+		jobQueue: jobQueue, notifier: notifier}); err != nil {
 		slog.Error("failed to register a system job", "error", err)
 		os.Exit(1)
 	}
@@ -832,7 +839,9 @@ func signupService(cfg *config.Config, pool *pgxpool.Pool, smtpSender *notify.SM
 		accounts signup.Accounts
 	)
 	if pool != nil {
-		repo = signup.NewPGRepository(pool)
+		// New organizations get an e-mail channel over the central SMTP
+		// server when there is one (F-157).
+		repo = signup.NewPGRepository(pool).WithCentralSMTP(smtpSender != nil)
 	}
 	if kc := keycloakAccounts(cfg); kc != nil {
 		accounts = kc

@@ -73,7 +73,11 @@ export function AgentListPage() {
           <Card
             key={a.id}
             title={a.hostname}
-            actions={<Badge variant={statusVariant(a.status)}>{a.status}</Badge>}
+            actions={
+              <Badge variant={statusVariant(a.status)}>
+                {t(`agents.statuses.${a.status}`, a.status)}
+              </Badge>
+            }
           >
             <p className="text-sm text-gray-600 dark:text-gray-300">
               {a.os || '—'} · {a.arch || '—'} · v{a.version || '?'}

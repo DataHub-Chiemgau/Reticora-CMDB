@@ -212,15 +212,29 @@ export interface DiscoveryErrorState {
   target?: string;
 }
 
+/** Discovery plugins a scope can run (DiscoveryScope.plugins in api/openapi.yaml). */
+export type DiscoveryPlugin =
+  'sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas';
+
 export interface DiscoveryScopeInput {
   collector_id: string;
   kind: DiscoveryScopeKind;
   target: string;
   name?: string;
+  site_id?: string;
+  vrf_id?: string;
   schedule?: string;
+  /** Empty: the credentials of the scope's client and the organization-wide ones apply (E-67). */
+  credential_ids?: string[];
   plugins?: string[];
   enabled?: boolean;
 }
+
+/**
+ * DiscoveryScopePatch changes a scope; an empty site_id or vrf_id removes
+ * the site or VRF, credential_ids and plugins replace the lists.
+ */
+export type DiscoveryScopePatch = Partial<Omit<DiscoveryScopeInput, 'collector_id'>>;
 
 export interface CIListParams {
   limit?: number;
@@ -289,6 +303,8 @@ export class ApiError extends Error {
   readonly traceId?: string;
   /** conflictFields are the fields a 409 names as changed since the If-Match version (API-07). */
   readonly conflictFields: string[];
+  /** field is the request field a FieldProblem names (400, 409 or 422 at one input). */
+  readonly field?: string;
 
   constructor(
     status: number,
@@ -300,6 +316,7 @@ export class ApiError extends Error {
       dependencies?: string[];
       traceId?: string;
       conflictFields?: string[];
+      field?: string;
     } = {},
   ) {
     super(message);
@@ -311,6 +328,7 @@ export class ApiError extends Error {
     this.dependencies = options.dependencies ?? [];
     this.traceId = options.traceId;
     this.conflictFields = options.conflictFields ?? [];
+    this.field = options.field;
   }
 
   /** Whether the failure carries per-field violations that a form can render. */
@@ -344,11 +362,14 @@ export class ApiError extends Error {
       dependencies?: unknown;
       trace_id?: unknown;
       fields?: unknown;
+      field?: unknown;
     };
 
     const title = typeof problem.title === 'string' ? problem.title : undefined;
     const traceId = typeof problem.trace_id === 'string' ? problem.trace_id : undefined;
     const detail = typeof problem.detail === 'string' ? problem.detail : undefined;
+    const field =
+      typeof problem.field === 'string' && problem.field !== '' ? problem.field : undefined;
 
     const violations: FieldViolation[] = Array.isArray(problem.violations)
       ? problem.violations.flatMap((entry) => {
@@ -380,6 +401,7 @@ export class ApiError extends Error {
       dependencies,
       traceId,
       conflictFields,
+      field,
     });
   }
 }
@@ -417,7 +439,33 @@ export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<
   return fetchURL<T>(`${API_BASE}${withScope(path, options?.method)}`, options);
 }
 
+/** Versioned is a response body with the ETag the server sent along. */
+export interface Versioned<T> {
+  data: T;
+  /** etag is sent back as If-Match with the next change; undefined without one. */
+  etag?: string;
+}
+
+/** fetchAPIVersioned is fetchAPI that also returns the response's ETag. */
+export async function fetchAPIVersioned<T>(
+  path: string,
+  options?: RequestInit,
+): Promise<Versioned<T>> {
+  const res = await fetchResponse(`${API_BASE}${withScope(path, options?.method)}`, options);
+  const data = (res.status === 204 ? undefined : await res.json()) as T;
+  return { data, etag: res.headers.get('ETag') ?? undefined };
+}
+
 async function fetchURL<T>(url: string, options?: RequestInit): Promise<T> {
+  const res = await fetchResponse(url, options);
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  return res.json();
+}
+
+/** fetchResponse sends the request with the session and throws ApiError for a failure. */
+async function fetchResponse(url: string, options?: RequestInit): Promise<Response> {
   const request = (token: string | null) =>
     fetch(url, {
       ...options,
@@ -447,10 +495,7 @@ async function fetchURL<T>(url: string, options?: RequestInit): Promise<T> {
     const body: unknown = await res.json().catch(() => null);
     throw ApiError.fromProblem(res.status, res.statusText, body);
   }
-  if (res.status === 204) {
-    return undefined as T;
-  }
-  return res.json();
+  return res;
 }
 
 /** BFF_PATH is the GraphQL backend-for-frontend of the UI (GQL-01). */
@@ -476,26 +521,43 @@ export async function bffQuery<T>(query: string, variables?: Record<string, unkn
   return result.data as T;
 }
 
+/** The largest page a list endpoint answers (API-02, parameter Limit). */
+export const API_MAX_LIMIT = 200;
+
 /**
- * Reads every page of a cursor-paginated list (API-02): the first page with
- * the maximum limit of 200, then `next_cursor` until the server sends none.
+ * Reads every page of a paginated list (API-02): the first page with the
+ * maximum limit of 200, then `next_cursor` until the server sends none. A
+ * list without cursor pagination (e.g. collectors, sites) is followed by
+ * offset while `has_more` is set (F-362).
  * For callers that need the complete set (permission catalogue, role
- * grants, team members, the module lists of monitoring, document links and
- * assistant conversations); a single page would silently cut it short.
+ * grants, team members, the module lists of monitoring, document links,
+ * assistant conversations, the collectors of the dashboard and the sites of
+ * the map); a single page would silently cut it short.
  * `params` are the list's filters, sent with every page.
  */
 export async function fetchAllPages<T>(path: string, params: object = {}): Promise<T[]> {
   const items: T[] = [];
   let cursor: string | undefined;
-  do {
+  for (;;) {
     const query = new URLSearchParams(buildQuery(params));
-    query.set('limit', '200');
-    if (cursor) query.set('cursor', cursor);
+    query.set('limit', String(API_MAX_LIMIT));
+    if (cursor) {
+      query.set('cursor', cursor);
+    } else if (items.length > 0) {
+      query.set('offset', String(items.length));
+    }
     const page = await fetchAPI<PaginatedResponse<T>>(`${path}?${query.toString()}`);
-    items.push(...(page.data ?? []));
+    const rows = page.data ?? [];
+    items.push(...rows);
     cursor = page.next_cursor;
-  } while (cursor);
-  return items;
+    if (cursor) {
+      continue;
+    }
+    // Offset paging ends with the last page, an empty page or the total.
+    if (!page.has_more || rows.length === 0 || items.length >= page.total) {
+      return items;
+    }
+  }
 }
 
 function buildQuery(params: object) {
@@ -605,6 +667,10 @@ export const collectorApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<Collector>> {
     return fetchAPI(`/collectors${buildQuery(params)}`);
   },
+  /** Every collector of the organization, page by page (F-362). */
+  listAll(): Promise<Collector[]> {
+    return fetchAllPages('/collectors');
+  },
 };
 
 /** A subnet a collector reported after enrollment (scope_suggested, INS-06). */
@@ -640,7 +706,10 @@ export const discoveryScopeApi = {
   create(input: DiscoveryScopeInput): Promise<DiscoveryScope> {
     return fetchAPI('/discovery-scopes', { method: 'POST', body: JSON.stringify(input) });
   },
-  update(id: string, patch: Partial<DiscoveryScopeInput>): Promise<DiscoveryScope> {
+  get(id: string): Promise<DiscoveryScope> {
+    return fetchAPI(`/discovery-scopes/${id}`);
+  },
+  update(id: string, patch: DiscoveryScopePatch): Promise<DiscoveryScope> {
     return fetchAPI(`/discovery-scopes/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
   },
   delete(id: string): Promise<void> {
@@ -1319,6 +1388,8 @@ export interface CustomRole {
   name: string;
   description?: string;
   is_system: boolean;
+  /** is_builtin marks the seeded standard roles (RBA-02); only they can be invited (TLC-03). */
+  is_builtin?: boolean;
   permissions: string[];
   created_at: string;
   updated_at: string;
@@ -1376,6 +1447,33 @@ export const teamApi = {
   },
   addMember(teamId: string, data: { user_id: string; role_in_team?: string }): Promise<TeamMember> {
     return fetchAPI(`/teams/${teamId}/members`, { method: 'POST', body: JSON.stringify(data) });
+  },
+};
+
+export type Invitation = components['schemas']['Invitation'];
+export type InvitationRequest = components['schemas']['InvitationRequest'];
+export type InvitationAcceptance = components['schemas']['InvitationAcceptance'];
+export type AcceptedInvitation = components['schemas']['AcceptedInvitation'];
+
+/**
+ * invitationApi issues, renews and revokes the organization's invitations
+ * (TLC-03, user:manage); accept is public, the token is the credential.
+ */
+export const invitationApi = {
+  list(): Promise<Invitation[]> {
+    return fetchAllPages('/invitations');
+  },
+  issue(data: InvitationRequest): Promise<Invitation> {
+    return fetchAPI('/invitations', { method: 'POST', body: JSON.stringify(data) });
+  },
+  renew(id: string): Promise<Invitation> {
+    return fetchAPI(`/invitations/${id}/renew`, { method: 'POST' });
+  },
+  revoke(id: string): Promise<void> {
+    return fetchAPI(`/invitations/${id}`, { method: 'DELETE' });
+  },
+  accept(data: InvitationAcceptance): Promise<AcceptedInvitation> {
+    return fetchAPI('/invitations/accept', { method: 'POST', body: JSON.stringify(data) });
   },
 };
 
@@ -1807,7 +1905,24 @@ export const privacyApi = {
   },
 };
 
+/** Credential metadata; the secret material is never returned. */
+export interface Credential {
+  id: string;
+  organization_id: string;
+  /** Unset: organization-wide. */
+  client_id?: string;
+  name: string;
+  kind: string;
+  scope?: string;
+  key_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export const credentialApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<Credential>> {
+    return fetchAPI(`/credentials${buildQuery(params)}`);
+  },
   rotateKeys(): Promise<{ key_version: number; rotated: number }> {
     return fetchAPI('/credentials/rotate-keys', { method: 'POST' });
   },
@@ -2207,9 +2322,30 @@ export interface Site {
   updated_at: string;
 }
 
+/** VRF of the organization (TEN-10); every organization has the default VRF. */
+export interface VRF {
+  id: string;
+  organization_id: string;
+  name: string;
+  description?: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const vrfApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<VRF>> {
+    return fetchAPI(`/vrfs${buildQuery(params)}`);
+  },
+};
+
 export const siteApi = {
   list(params: ListParams & { client_id?: string } = {}): Promise<PaginatedResponse<Site>> {
     return fetchAPI(`/sites${buildQuery(params)}`);
+  },
+  /** Every site the caller may read, page by page (F-362). */
+  listAll(): Promise<Site[]> {
+    return fetchAllPages('/sites');
   },
   get(id: string): Promise<Site> {
     return fetchAPI(`/sites/${id}`);
@@ -2259,11 +2395,24 @@ export const roomApi = {
   list(params: ListParams & { building_id?: string } = {}): Promise<PaginatedResponse<Room>> {
     return fetchAPI(`/rooms${buildQuery(params)}`);
   },
-  get(id: string): Promise<Room> {
-    return fetchAPI(`/rooms/${id}`);
+  /** get returns the room with its ETag, the version a layout change names as If-Match. */
+  get(id: string): Promise<Versioned<Room>> {
+    return fetchAPIVersioned(`/rooms/${id}`);
   },
-  updateLayout(id: string, layout: Record<string, RoomLayoutPosition>): Promise<Room> {
-    return fetchAPI(`/rooms/${id}`, { method: 'PATCH', body: JSON.stringify({ layout }) });
+  /**
+   * updateLayout replaces the room's layout. With an ETag the change is sent
+   * with If-Match: a room changed since is refused with 409 (F-342).
+   */
+  updateLayout(
+    id: string,
+    layout: Record<string, RoomLayoutPosition>,
+    etag?: string,
+  ): Promise<Versioned<Room>> {
+    return fetchAPIVersioned(`/rooms/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ layout }),
+      headers: etag ? { 'If-Match': etag } : undefined,
+    });
   },
 };
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -868,7 +869,8 @@ func (g *walkGraph) selectWalk(maxDepth, maxNodes int) *Walk {
 
 	// Beyond the node limit only the nodes closest to the root are kept.
 	kept := order
-	if len(order) > maxNodes {
+	walk.Truncated = len(order) > maxNodes
+	if walk.Truncated {
 		kept = slices.Clone(order)
 		slices.SortFunc(kept, func(a, b int32) int {
 			if depth[a] != depth[b] {
@@ -951,6 +953,37 @@ func (r *PGRepository) EdgesAmong(ctx context.Context, orgID string, ids []strin
 			return err
 		}
 		for _, e := range visibleEdges(edges, edgeRowEnds, visible) {
+			result = append(result, Relationship{ID: e.id, SourceCIID: e.sourceCIID, TargetCIID: e.targetCIID, RelType: e.relType, Source: e.source})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// EdgesOf implements IncidentEdgeReader under the caller's full tenant
+// scope (RLS on ci and ci_relationship): one statement reads the stored
+// relationships of relTypes with an end among ciIDs whose source and
+// target are visible, not deleted CIs (IMP-04, IMP-07). A client-scoped
+// principal thus never learns of an edge to a CI of another client.
+func (r *PGRepository) EdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error) {
+	result := make([]Relationship, 0)
+	if len(ciIDs) == 0 || len(relTypes) == 0 {
+		return result, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		edges, err := readEdges(ctx, tx, `SELECT `+traversalSelectColumns+` FROM ci_relationship r
+			WHERE r.organization_id = $1 AND r.rel_type = ANY($3::text[])
+				AND (r.source_ci_id = ANY($2::uuid[]) OR r.target_ci_id = ANY($2::uuid[]))
+				AND EXISTS (SELECT 1 FROM ci WHERE ci.id = r.source_ci_id AND ci.deleted_at IS NULL)
+				AND EXISTS (SELECT 1 FROM ci WHERE ci.id = r.target_ci_id AND ci.deleted_at IS NULL)
+			ORDER BY r.id`, orgID, ciIDs, relTypes)
+		if err != nil {
+			return err
+		}
+		for _, e := range edges {
 			result = append(result, Relationship{ID: e.id, SourceCIID: e.sourceCIID, TargetCIID: e.targetCIID, RelType: e.relType, Source: e.source})
 		}
 		return nil
@@ -1089,28 +1122,109 @@ func (r *PGRepository) Confirm(ctx context.Context, orgID, id string, confidence
 // of an edge apply as one Confirm after the other would (the last reported
 // confidence wins), and the rows are taken in the order of their ids. An
 // edge that is gone or no discovery edge is not changed, as Confirm does
-// not change it.
+// not change it. The attributes of a confirmation are merged into the
+// stored ones, a null removes one (WP-498); several confirmations of an
+// edge merge in their order.
 func (r *PGRepository) ConfirmMany(ctx context.Context, orgID string, confirmations []Confirmation) error {
-	confidence := make(map[string]*float64, len(confirmations))
-	for _, c := range confirmations {
-		if _, seen := confidence[c.ID]; seen && c.Confidence == nil {
-			continue
-		}
-		confidence[c.ID] = c.Confidence
+	type confirmation struct {
+		confidence *float64
+		attributes map[string]any
+		patched    bool
 	}
-	if len(confidence) == 0 {
+	byID := make(map[string]*confirmation, len(confirmations))
+	for _, c := range confirmations {
+		cur := byID[c.ID]
+		if cur == nil {
+			cur = &confirmation{}
+			byID[c.ID] = cur
+		}
+		if c.Confidence != nil {
+			cur.confidence = c.Confidence
+		}
+		if c.Attributes != nil {
+			cur.attributes = mergePatch(cur.attributes, c.Attributes)
+			cur.patched = true
+		}
+	}
+	if len(byID) == 0 {
 		return nil
 	}
-	ids := slices.Sorted(maps.Keys(confidence))
+	ids := slices.Sorted(maps.Keys(byID))
 	values := make([]*float64, len(ids))
+	patches := make([]*string, len(ids))
 	for i, id := range ids {
-		values[i] = confidence[id]
+		values[i] = byID[id].confidence
+		if byID[id].patched {
+			b, err := json.Marshal(byID[id].attributes)
+			if err != nil {
+				return fmt.Errorf("confirm relationships: attributes: %w", err)
+			}
+			patch := string(b)
+			patches[i] = &patch
+		}
 	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE ci_relationship r
-			SET last_seen_at = now(), last_confirmed_at = now(), confidence = COALESCE(c.confidence, r.confidence)
-			FROM unnest($2::uuid[], $3::numeric[]) AS c(id, confidence)
-			WHERE r.id = c.id AND r.organization_id = $1 AND r.source = 'discovery'`, orgID, ids, values)
+			SET last_seen_at = now(), last_confirmed_at = now(), confidence = COALESCE(c.confidence, r.confidence),
+			    attributes = CASE WHEN c.patch IS NULL THEN r.attributes
+			        ELSE (COALESCE(r.attributes, '{}'::jsonb) - ARRAY(SELECT key FROM jsonb_each(c.patch::jsonb) WHERE value = 'null'::jsonb))
+			             || jsonb_strip_nulls(c.patch::jsonb) END
+			FROM unnest($2::uuid[], $3::numeric[], $4::text[]) AS c(id, confidence, patch)
+			WHERE r.id = c.id AND r.organization_id = $1 AND r.source = 'discovery'`, orgID, ids, values, patches)
 		return err
+	})
+}
+
+// mergePatch merges the attribute patch b over a, keeping the nulls of b
+// (they remove the attribute when the patch is applied).
+func mergePatch(a, b map[string]any) map[string]any {
+	out := make(map[string]any, len(a)+len(b))
+	maps.Copy(out, a)
+	maps.Copy(out, b)
+	return out
+}
+
+// redundancyLockClass is the class of the advisory lock under which the
+// redundancy of an organization's feeds is recomputed (MarkRedundant). It
+// uses the two-argument form, pg_advisory_xact_lock(class, key), like the
+// ingest locks, and differs from their classes, from those of the audit
+// chain (0x52657469), the event outbox (0x45766e74) and its publisher
+// (0x45766e75).
+const redundancyLockClass int32 = 0x52526564 // "RRed"
+
+// MarkRedundant implements RedundancyMarker with one UPDATE under the
+// organization's redundancy lock: parallel ingest lanes write the edges of
+// the two PDUs of a server at the same time, and each recomputes after its
+// edges have committed. Under the lock the statement of the lane that comes
+// last sees the edges of all others, so the last value written is the one
+// of every stored edge, whatever order the lanes take (WP-498, F-112).
+// Only edges with visible endpoints are counted and changed.
+func (r *PGRepository) MarkRedundant(ctx context.Context, orgID, relType string, sourceCIIDs []string) error {
+	if len(sourceCIIDs) == 0 {
+		return nil
+	}
+	ids := slices.Sorted(slices.Values(sourceCIIDs))
+	ids = slices.Compact(ids)
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2::text))`, redundancyLockClass, orgID); err != nil {
+			return fmt.Errorf("mark redundant feeds: lock: %w", err)
+		}
+		_, err := tx.Exec(ctx, `WITH edge AS (
+				SELECT id, source_ci_id, target_ci_id, attributes FROM ci_relationship
+				WHERE organization_id = $1 AND rel_type = $2 AND source = 'discovery' AND source_ci_id = ANY($3::uuid[])
+				  AND `+visibleEndpoints+`
+			), feeds AS (
+				SELECT source_ci_id, count(DISTINCT target_ci_id) FILTER (WHERE (attributes->>'outlet_state') IS DISTINCT FROM 'off') > 1 AS redundant
+				FROM edge GROUP BY source_ci_id
+			)
+			UPDATE ci_relationship r
+			SET attributes = jsonb_set(COALESCE(r.attributes, '{}'::jsonb), '{redundant}', to_jsonb(f.redundant)), updated_at = now()
+			FROM edge e JOIN feeds f ON f.source_ci_id = e.source_ci_id
+			WHERE r.id = e.id AND r.organization_id = $1
+			  AND (r.attributes->'redundant') IS DISTINCT FROM to_jsonb(f.redundant)`, orgID, relType, ids)
+		if err != nil {
+			return fmt.Errorf("mark redundant feeds: %w", err)
+		}
+		return nil
 	})
 }

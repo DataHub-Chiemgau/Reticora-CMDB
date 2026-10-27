@@ -543,3 +543,90 @@ func TestRelationshipEventsCommitWithTheEdge(t *testing.T) {
 	}
 	check("repository without outbox")
 }
+
+// TestEdgesOfStaysInsideScope covers IMP-04 and IMP-07 (WP-513, F-160)
+// for the read of the providers of a redundant type beyond the depth of a
+// walk: EdgesOf returns the stored edges of the given types with an end
+// among the given CIs, ordered by id, under the caller's scope only. An
+// edge to a CI of another client is missing for a client-1 principal, an
+// edge to a deleted CI for everyone; another organization reads nothing;
+// without a tenant scope the read fails. WalkFrom reports when the node
+// limit cut the walk (Walk.Truncated).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestEdgesOfStaysInsideScope(t *testing.T) {
+	f := scopetest.Seed(t, "06")
+	bg := context.Background()
+	server := f.CI(t, f.OrgA, f.Client1, "edges-of-server")
+	pduA := f.CI(t, f.OrgA, f.Client1, "edges-of-pdu-a")
+	pduB := f.CI(t, f.OrgA, f.Client1, "edges-of-pdu-b")
+	foreign := f.CI(t, f.OrgA, f.Client2, "edges-of-pdu-client2")
+	deleted := f.CI(t, f.OrgA, f.Client1, "edges-of-pdu-deleted")
+	other := f.CI(t, f.OrgA, f.Client1, "edges-of-other")
+	edge := map[string]string{}
+	for name, e := range map[string][3]string{
+		"a":       {server, pduA, "powered_by"},
+		"b":       {server, pduB, "powered_by"},
+		"foreign": {server, foreign, "powered_by"},
+		"deleted": {server, deleted, "powered_by"},
+		"hosted":  {server, other, "hosted_on"},
+		"unrel":   {other, pduA, "powered_by"},
+	} {
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+			VALUES ($1, $2, $3, $4) RETURNING id::text`, f.OrgA, e[0], e[1], e[2]).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		edge[name] = id
+	}
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET deleted_at = now() WHERE id = $1`, deleted); err != nil {
+		t.Fatal(err)
+	}
+	repo := relationship.NewPGRepository(f.App)
+	read := func(ctx context.Context, org string) []string {
+		t.Helper()
+		rels, err := repo.EdgesOf(ctx, org, []string{server}, []string{"powered_by", "member_of_cluster"})
+		if err != nil {
+			t.Fatalf("edges of: %v", err)
+		}
+		out := make([]string, 0, len(rels))
+		for i := range rels {
+			if rels[i].SourceCIID != server || rels[i].RelType != "powered_by" {
+				t.Errorf("edge %+v", rels[i])
+			}
+			out = append(out, rels[i].ID)
+		}
+		return out
+	}
+	want := func(names ...string) []string {
+		ids := make([]string, 0, len(names))
+		for _, n := range names {
+			ids = append(ids, edge[n])
+		}
+		slices.Sort(ids)
+		return ids
+	}
+	if got := read(f.OrgCtx(f.OrgA), f.OrgA); !slices.Equal(got, want("a", "b", "foreign")) {
+		t.Errorf("org-wide: %v, want %v", got, want("a", "b", "foreign"))
+	}
+	if got := read(f.ClientCtx(f.Client1), f.OrgA); !slices.Equal(got, want("a", "b")) {
+		t.Errorf("client 1: %v, want %v (no edge to client 2)", got, want("a", "b"))
+	}
+	if got := read(f.OrgCtx(f.OrgB), f.OrgB); len(got) != 0 {
+		t.Errorf("organization B: %v", got)
+	}
+	// The walk reports whether the node limit cut it: the impact then
+	// reads the feeds of every dependent.
+	for maxNodes, want := range map[int]bool{2: true, relationship.MaxTraversalNodes: false} {
+		walk, err := repo.WalkFrom(f.ClientCtx(f.Client1), f.OrgA, server, 2, maxNodes)
+		if err != nil || walk.Truncated != want {
+			t.Errorf("walk of at most %d CIs: truncated %v (%v), want %v", maxNodes, walk != nil && walk.Truncated, err, want)
+		}
+	}
+	if rels, err := repo.EdgesOf(f.OrgCtx(f.OrgA), f.OrgA, nil, []string{"powered_by"}); err != nil || len(rels) != 0 {
+		t.Errorf("no CIs: %v %v", rels, err)
+	}
+	if _, err := repo.EdgesOf(bg, f.OrgA, []string{server}, []string{"powered_by"}); !errors.Is(err, database.ErrNoTenantScope) {
+		t.Errorf("without scope: %v, want ErrNoTenantScope", err)
+	}
+}

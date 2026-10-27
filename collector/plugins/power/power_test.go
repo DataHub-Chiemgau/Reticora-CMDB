@@ -34,7 +34,7 @@ func TestClassifyPowerDevice(t *testing.T) {
 }
 
 func TestIsPowerDeviceSilent(t *testing.T) {
-	if (&Plugin{}).isPowerDevice(context.Background(), "192.0.2.1", "public", 150*time.Millisecond) {
+	if _, ok := (&Plugin{}).isPowerDevice(context.Background(), "192.0.2.1", "public", 150*time.Millisecond); ok {
 		t.Error("isPowerDevice = true, want false for silent target")
 	}
 }
@@ -214,5 +214,63 @@ func TestNewDefaults(t *testing.T) {
 	}
 	if p.Name() != "power" {
 		t.Errorf("Name() = %q, want power", p.Name())
+	}
+}
+
+// TestProbeHitCarriesDeviceTypeAndVendorFamily covers WP-512 (MON-02): the
+// probe hit names the device type and the vendor family of the outlet
+// table the device answers, so the power poll picks the OID set of the
+// device (UPS-MIB or the vendor's metering table). PDUs without a UPS
+// identity (Raritan PX, APC sPDU) are found by their outlet table; the
+// collected record names the same device type.
+func TestProbeHitCarriesDeviceTypeAndVendorFamily(t *testing.T) {
+	rpdu2 := map[string]gosnmp.SnmpPDU{}
+	for _, pdu := range []gosnmp.SnmpPDU{
+		octets("1.3.6.1.2.1.1.1.0", "APC Web/SNMP Management Card (MN:AP8959)"),
+		octets("1.3.6.1.4.1.318.1.1.26.9.2.3.1.3.1", "web01 PSU1"),
+	} {
+		rpdu2[strings.TrimPrefix(pdu.Name, ".")] = pdu
+	}
+	switchMIB := map[string]gosnmp.SnmpPDU{"1.3.6.1.2.1.1.1.0": octets("1.3.6.1.2.1.1.1.0", "Cisco IOS")}
+	for _, tc := range []struct {
+		name               string
+		mib                map[string]gosnmp.SnmpPDU
+		power              bool
+		deviceType, family string
+	}{
+		{"apc-rpdu2", rpdu2, true, "pdu", "apc-rpdu2"},
+		{"apc-spdu.walk", loadWalk(t, "apc-spdu.walk"), true, "pdu", "apc-spdu"},
+		{"raritan-px.walk", loadWalk(t, "raritan-px.walk"), true, "pdu", "raritan"},
+		{"apc-ups.walk", loadWalk(t, "apc-ups.walk"), true, "ups", "apc-ups"},
+		{"ups-no-outlets.walk", loadWalk(t, "ups-no-outlets.walk"), true, "ups", ""},
+		{"switch", switchMIB, false, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &Plugin{Timeout: time.Second, Concurrency: 1, Port: startV2cAgent(t, tc.mib)}
+			creds := map[string]string{"community": "public"}
+			hits, err := p.Probe(context.Background(), []string{"127.0.0.1"}, creds)
+			if err != nil {
+				t.Fatalf("Probe: %v", err)
+			}
+			if !tc.power {
+				if len(hits) != 0 {
+					t.Fatalf("Probe = %+v, want no power device", hits)
+				}
+				return
+			}
+			if len(hits) != 1 {
+				t.Fatalf("Probe = %d hits, want 1", len(hits))
+			}
+			if deviceType, family := HitDevice(&hits[0]); deviceType != tc.deviceType || family != tc.family {
+				t.Errorf("HitDevice = %q, %q, want %q, %q", deviceType, family, tc.deviceType, tc.family)
+			}
+			rec, err := p.Collect(context.Background(), "127.0.0.1", creds)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rec.Power == nil || rec.Power.DeviceType != tc.deviceType {
+				t.Errorf("collected power = %+v, want device type %s like the hit", rec.Power, tc.deviceType)
+			}
+		})
 	}
 }

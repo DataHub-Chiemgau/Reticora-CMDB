@@ -64,37 +64,197 @@ func (s *PGDeliveryStore) Enqueue(ctx context.Context, orgID string, rows []Queu
 	created := 0
 	err := inOrg(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		for i := range rows {
-			r := &rows[i]
-			recipients, err := json.Marshal(r.Recipients)
+			id, err := insertDelivery(ctx, tx, orgID, &rows[i])
 			if err != nil {
 				return err
 			}
-			if r.Recipients == nil {
-				recipients = []byte("[]")
+			if id != "" {
+				created++
 			}
-			data, err := json.Marshal(r.Data)
+		}
+		return nil
+	})
+	return created, err
+}
+
+// insertDelivery queues r in tx and returns its id; empty when its dedup
+// key is taken.
+func insertDelivery(ctx context.Context, tx pgx.Tx, orgID string, r *QueuedDelivery) (string, error) {
+	recipients, err := json.Marshal(r.Recipients)
+	if err != nil {
+		return "", err
+	}
+	if r.Recipients == nil {
+		recipients = []byte("[]")
+	}
+	data, err := json.Marshal(r.Data)
+	if err != nil {
+		return "", err
+	}
+	if r.Data == nil {
+		data = []byte("{}")
+	}
+	var id string
+	err = tx.QueryRow(ctx, `INSERT INTO notification_delivery (organization_id, channel_id, recipient_user_id,
+			recipient_email, recipient_name, recipient_key, recipients, category, critical, subject, body, data,
+			dedup_key, max_attempts, next_attempt_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		ON CONFLICT (organization_id, channel_id, recipient_key, dedup_key) WHERE dedup_key IS NOT NULL DO NOTHING
+		RETURNING id::text`,
+		orgID, r.ChannelID, nullable(r.Recipient.UserID), nullable(r.Recipient.Email), nullable(r.Recipient.Name),
+		r.RecipientKey, recipients, r.Category, r.Critical, r.Subject, r.Body, data, nullable(r.DedupKey),
+		r.MaxAttempts, r.NextAttemptAt).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("queue notification: %w", err)
+	}
+	return id, nil
+}
+
+// PGDigestStore keeps the digest items in notification_digest_item
+// (NTF-04, WP-508).
+type PGDigestStore struct{ pool *pgxpool.Pool }
+
+// NewPGDigestStore creates the store.
+func NewPGDigestStore(pool *pgxpool.Pool) *PGDigestStore { return &PGDigestStore{pool: pool} }
+
+// AddItems implements DigestStore.
+func (s *PGDigestStore) AddItems(ctx context.Context, orgID string, items []DigestItem) (int, error) {
+	created := 0
+	err := inOrg(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		for i := range items {
+			it := &items[i]
+			data, err := json.Marshal(it.Data)
 			if err != nil {
 				return err
 			}
-			if r.Data == nil {
+			if it.Data == nil {
 				data = []byte("{}")
 			}
-			tag, err := tx.Exec(ctx, `INSERT INTO notification_delivery (organization_id, channel_id, recipient_user_id,
-					recipient_email, recipient_name, recipient_key, recipients, category, critical, subject, body, data,
-					dedup_key, max_attempts, next_attempt_at)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			tag, err := tx.Exec(ctx, `INSERT INTO notification_digest_item (organization_id, channel_id, recipient_user_id,
+					recipient_email, recipient_name, recipient_key, category, digest_window, window_end, subject, body, data,
+					dedup_key, created_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 				ON CONFLICT (organization_id, channel_id, recipient_key, dedup_key) WHERE dedup_key IS NOT NULL DO NOTHING`,
-				orgID, r.ChannelID, nullable(r.Recipient.UserID), nullable(r.Recipient.Email), nullable(r.Recipient.Name),
-				r.RecipientKey, recipients, r.Category, r.Critical, r.Subject, r.Body, data, nullable(r.DedupKey),
-				r.MaxAttempts, r.NextAttemptAt)
+				orgID, it.ChannelID, it.Recipient.UserID, it.Recipient.Email, nullable(it.Recipient.Name), it.RecipientKey,
+				it.Category, it.Window, it.WindowEnd, it.Subject, it.Body, data, nullable(it.DedupKey), it.CreatedAt)
 			if err != nil {
-				return fmt.Errorf("queue notification: %w", err)
+				return fmt.Errorf("queue digest item: %w", err)
 			}
 			created += int(tag.RowsAffected())
 		}
 		return nil
 	})
 	return created, err
+}
+
+// Bundle implements DigestStore: the system flag only finds the
+// organizations with ended windows; each organization's items are bundled
+// in its own transaction (FOR UPDATE SKIP LOCKED). A failing organization
+// does not stop the others; its items stay for the next run.
+func (s *PGDigestStore) Bundle(ctx context.Context, now time.Time, build func(items []DigestItem) QueuedDelivery) (int, error) {
+	var orgs []string
+	err := database.WithSystem(ctx, s.pool, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT organization_id::text FROM notification_digest_item
+			WHERE delivery_id IS NULL AND window_end <= $1`, now)
+		if err != nil {
+			return err
+		}
+		orgs, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("find due digests: %w", err)
+	}
+	queued := 0
+	var firstErr error
+	for _, orgID := range orgs {
+		n := 0
+		err = inOrg(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+			var berr error
+			n, berr = bundleOrganization(ctx, tx, orgID, now, build)
+			return berr
+		})
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("bundle digests of %s: %w", orgID, err)
+			}
+			continue
+		}
+		queued += n
+	}
+	return queued, firstErr
+}
+
+// bundleOrganization queues one delivery per channel, recipient, category
+// and window of the organization's due items and marks the items with it.
+func bundleOrganization(ctx context.Context, tx pgx.Tx, orgID string, now time.Time,
+	build func(items []DigestItem) QueuedDelivery) (int, error) {
+	rows, err := tx.Query(ctx, `SELECT id::text, organization_id::text, channel_id::text, recipient_user_id::text,
+			recipient_email, COALESCE(recipient_name, ''), recipient_key, category, digest_window, window_end, subject, body,
+			data, COALESCE(dedup_key, ''), created_at
+		FROM notification_digest_item
+		WHERE organization_id = $1 AND delivery_id IS NULL AND window_end <= $2
+		ORDER BY channel_id, recipient_key, category, digest_window, window_end, created_at, id
+		FOR UPDATE SKIP LOCKED`, orgID, now)
+	if err != nil {
+		return 0, err
+	}
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (DigestItem, error) {
+		var it DigestItem
+		var data []byte
+		scanErr := row.Scan(&it.ID, &it.OrganizationID, &it.ChannelID, &it.Recipient.UserID, &it.Recipient.Email,
+			&it.Recipient.Name, &it.RecipientKey, &it.Category, &it.Window, &it.WindowEnd, &it.Subject, &it.Body, &data,
+			&it.DedupKey, &it.CreatedAt)
+		if scanErr == nil && len(data) > 0 {
+			scanErr = json.Unmarshal(data, &it.Data)
+		}
+		return it, scanErr
+	})
+	if err != nil {
+		return 0, fmt.Errorf("list digest items: %w", err)
+	}
+	queued := 0
+	for start := 0; start < len(items); {
+		end := start + 1
+		for end < len(items) && sameDigest(&items[start], &items[end]) {
+			end++
+		}
+		group := items[start:end]
+		ids := make([]string, len(group))
+		for i := range group {
+			ids[i] = group[i].ID
+		}
+		d := build(group)
+		id, err := insertDelivery(ctx, tx, orgID, &d)
+		if err == nil && id == "" {
+			// An item that arrived after its window was bundled: its own
+			// delivery, keyed by its first item.
+			d.DedupKey += ":" + ids[0]
+			id, err = insertDelivery(ctx, tx, orgID, &d)
+		}
+		if err != nil {
+			return queued, err
+		}
+		if id == "" {
+			return queued, fmt.Errorf("digest %s: dedup key taken", d.DedupKey)
+		}
+		if _, err = tx.Exec(ctx, `UPDATE notification_digest_item SET delivery_id = $2
+			WHERE organization_id = $1 AND id = ANY($3::uuid[])`, orgID, id, ids); err != nil {
+			return queued, fmt.Errorf("mark digest items: %w", err)
+		}
+		queued++
+		start = end
+	}
+	return queued, nil
+}
+
+// sameDigest reports whether two items go into the same delivery.
+func sameDigest(a, b *DigestItem) bool {
+	return a.ChannelID == b.ChannelID && a.RecipientKey == b.RecipientKey && a.Category == b.Category &&
+		a.Window == b.Window && a.WindowEnd.Equal(b.WindowEnd)
 }
 
 // ClaimDue implements DeliveryStore: the system flag only finds the
@@ -280,9 +440,10 @@ func (s *PGPreferences) Preference(ctx context.Context, orgID, userID string) (*
 	err := inOrg(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var p Preference
 		var start, end *string
-		err := tx.QueryRow(ctx, `SELECT to_char(quiet_start, 'HH24:MI'), to_char(quiet_end, 'HH24:MI'), time_zone, muted_categories
+		err := tx.QueryRow(ctx, `SELECT to_char(quiet_start, 'HH24:MI'), to_char(quiet_end, 'HH24:MI'), time_zone, muted_categories,
+				digest
 			FROM notification_preference WHERE organization_id = $1 AND user_id::text = $2`, orgID, userID).
-			Scan(&start, &end, &p.TimeZone, &p.MutedCategories)
+			Scan(&start, &end, &p.TimeZone, &p.MutedCategories, &p.Digest)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -304,11 +465,12 @@ func (s *PGPreferences) SetPreference(ctx context.Context, orgID, userID string,
 		return err
 	}
 	return inOrg(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO notification_preference (organization_id, user_id, quiet_start, quiet_end, time_zone, muted_categories)
-			VALUES ($1, $2, $3::time, $4::time, $5, $6)
+		_, err := tx.Exec(ctx, `INSERT INTO notification_preference (organization_id, user_id, quiet_start, quiet_end, time_zone,
+				muted_categories, digest)
+			VALUES ($1, $2, $3::time, $4::time, $5, $6, $7)
 			ON CONFLICT (organization_id, user_id) DO UPDATE SET quiet_start = EXCLUDED.quiet_start, quiet_end = EXCLUDED.quiet_end,
-				time_zone = EXCLUDED.time_zone, muted_categories = EXCLUDED.muted_categories`,
-			orgID, userID, nullable(p.QuietStart), nullable(p.QuietEnd), p.TimeZone, p.MutedCategories)
+				time_zone = EXCLUDED.time_zone, muted_categories = EXCLUDED.muted_categories, digest = EXCLUDED.digest`,
+			orgID, userID, nullable(p.QuietStart), nullable(p.QuietEnd), p.TimeZone, p.MutedCategories, p.Digest)
 		if err != nil {
 			return fmt.Errorf("store notification preference: %w", err)
 		}

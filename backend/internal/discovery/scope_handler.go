@@ -297,10 +297,18 @@ const (
 	ScopesRequestSuffix = ".scopes.request"
 	ScopesResultSuffix  = ".scopes.result"
 	SubnetsReportSuffix = ".subnets.report"
+	// The collector's ad-hoc discovery jobs (JOB-01, F-358): its open jobs
+	// and the status it reports for one of them.
+	JobsRequestSuffix = ".jobs.request"
+	JobsStatusSuffix  = ".jobs.status"
 )
 
 // CollectorScope is a scope as the collector receives it; CredentialIDs are
-// its effective credentials (E-67), not the stored list.
+// its effective credentials (E-67), not the stored list. LastRunAt and
+// NextRunAt are the run state the server holds (RFC 3339; a new scope has
+// no last run and is due at its creation): a (re)started collector
+// schedules the sweep from them instead of at once (DIS-10, F-109). Timezone is the organization's time zone, in
+// which the collector evaluates a cron schedule (E-84 option A).
 type CollectorScope struct {
 	ID            string   `json:"id"`
 	Kind          string   `json:"kind"`
@@ -311,6 +319,9 @@ type CollectorScope struct {
 	Schedule      string   `json:"schedule"`
 	CredentialIDs []string `json:"credential_ids"`
 	Plugins       []string `json:"plugins"`
+	LastRunAt     string   `json:"last_run_at,omitempty"`
+	NextRunAt     string   `json:"next_run_at,omitempty"`
+	Timezone      string   `json:"timezone"`
 }
 
 // ScopesResponse answers a scopes request.
@@ -377,6 +388,10 @@ func (h *Handler) CollectorScopes(ctx context.Context, orgID, collectorID string
 	if err != nil {
 		return nil, err
 	}
+	tz, err := repo.OrganizationTimezone(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]CollectorScope, 0, len(scopes))
 	for i := range scopes {
 		s := &scopes[i]
@@ -385,7 +400,8 @@ func (h *Handler) CollectorScopes(ctx context.Context, orgID, collectorID string
 			ids = []string{}
 		}
 		out = append(out, CollectorScope{ID: s.ID, Kind: s.Kind, Target: s.Target, ClientID: s.ClientID, SiteID: s.SiteID,
-			VRFID: s.VRFID, Schedule: s.Schedule, CredentialIDs: ids, Plugins: s.Plugins})
+			VRFID: s.VRFID, Schedule: s.Schedule, CredentialIDs: ids, Plugins: s.Plugins,
+			LastRunAt: s.LastRunAt, NextRunAt: s.NextRunAt, Timezone: tz})
 	}
 	return out, nil
 }
@@ -460,6 +476,25 @@ func (h *Handler) scopeHandlers() map[string]func(ctx context.Context, orgID, co
 			}
 			return map[string]int{"suggested": n}
 		},
+		JobsRequestSuffix: func(ctx context.Context, orgID, collectorID string, _ []byte) any {
+			open, err := h.CollectorJobs(ctx, orgID, collectorID)
+			if err != nil {
+				slog.Warn("collector jobs refused", "collector_id", collectorID, "error", err)
+				return JobsResponse{Jobs: []CollectorJob{}, Error: "not available"}
+			}
+			return JobsResponse{Jobs: open}
+		},
+		JobsStatusSuffix: func(ctx context.Context, orgID, collectorID string, data []byte) any {
+			var rep JobStatusReport
+			if err := json.Unmarshal(data, &rep); err != nil {
+				return map[string]string{"error": "invalid report"}
+			}
+			if _, err := h.RecordCollectorJobStatus(ctx, orgID, collectorID, &rep); err != nil {
+				slog.Warn("job status refused", "collector_id", collectorID, "job_id", rep.JobID, "status", rep.Status, "error", err)
+				return map[string]string{"error": "not recorded"}
+			}
+			return map[string]string{"status": "recorded"}
+		},
 	}
 }
 
@@ -473,7 +508,9 @@ func (h *Handler) WithScopeCycles(cycles *observability.Cycles) *Handler {
 }
 
 // ServeCollectorScopes answers the scope requests, run results and subnet
-// reports of the collectors on nc until ctx ends (DIS-09). A request of an
+// reports of the collectors on nc until ctx ends (DIS-09), and their
+// requests for open discovery jobs and the job statuses they report
+// (JOB-01, F-358). A request of an
 // unknown or disabled collector is refused before its handler runs,
 // whatever the suffix, so nothing of it is persisted (COL-04).
 func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error {

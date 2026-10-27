@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // indexingRepository decorates a Repository with best-effort search-index
@@ -182,6 +183,36 @@ func (r *indexingRepository) ChangeType(ctx context.Context, orgID, ciID, typeID
 	if result.Changed {
 		r.index(ctx, result.CI)
 	}
+	return result, nil
+}
+
+// UpdateRecord forwards the record update of the ingest (RecordUpdater,
+// AUD-03) with its transaction and indexes the changed CI after the commit,
+// together with the other CIs the transaction changed this way; a rollback
+// indexes nothing. A sighting changes no field of the document and is not
+// indexed. The decorator always offers it, so the outermost of several
+// decorators keeps it.
+func (r *indexingRepository) UpdateRecord(ctx context.Context, orgID, id string, rec *RecordUpdate) (*RecordUpdateResult, error) {
+	result, err := UpdateRecord(ctx, r.Repository, orgID, id, rec)
+	if err != nil || !result.Changed {
+		return result, err
+	}
+	// The CIs of the transaction (a window of the ingest) are indexed
+	// together, each in its last state.
+	database.AfterCommitBatch(ctx, r, snapshot(result.CI), func(ctx context.Context, batch []any) {
+		latest := map[string]int{}
+		items := make([]*Item, 0, len(batch))
+		for _, v := range batch {
+			item := v.(*Item)
+			if k, seen := latest[item.ID]; seen {
+				items[k] = item
+				continue
+			}
+			latest[item.ID] = len(items)
+			items = append(items, item)
+		}
+		r.indexMany(ctx, items)
+	})
 	return result, nil
 }
 

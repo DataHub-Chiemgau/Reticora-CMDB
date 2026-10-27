@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ApiError, type TopologyGraphData } from '../api/client';
-import { localizedText } from '../api/cmdb';
-import { useCITypes } from '../api/cmdbHooks';
+import { localizedText, type RelationshipType } from '../api/cmdb';
+import { useCITypes, useRelationshipTypes } from '../api/cmdbHooks';
 import { useTopology, useImpactMany, useSites } from '../api/hooks';
 import { TopologyGraph } from '../components/graph/TopologyGraph';
 import type { GraphEdge, GraphNode } from '../components/graph/TopologyGraph';
@@ -71,23 +71,64 @@ export function buildGraphModel(graph: TopologyGraphData): GraphModel {
   };
 }
 
+/** The impact direction of a relationship type (REL-01, CH27, E-18). */
+export type ImpactDirection = RelationshipType['impact_direction'];
+
+/** impactDirections maps each relationship type key onto its impact direction. */
+export function impactDirections(types: RelationshipType[]): Map<string, ImpactDirection> {
+  return new Map(types.map((type) => [type.key, type.impact_direction]));
+}
+
 /**
- * Computes the outage-impact set of failed nodes: every node reachable from
- * a failure via outbound edges (things that depend on a failed CI). Nodes
- * reachable only over an already-impacted path are impacted as well; the
- * failed nodes themselves are not part of the set (IMP-05).
+ * Computes the outage-impact set of failed nodes along the impact direction
+ * of each relationship type, as the server does (IMP-01, F-254): over a
+ * source_depends_on_target edge (powered_by, hosted_on, depends_on) the
+ * failure of the target reaches the source, over target_depends_on_source
+ * (powers, contains) the failure of the source reaches the target, an
+ * undirected edge (connected_to, the network heuristic of IMP-03) carries it
+ * both ways and a type with direction none never. A type without a known
+ * direction counts as source_depends_on_target, the server's reading. Edges
+ * carry their relationship types in the label of buildGraphModel; relType
+ * narrows the walk to one type (the facet filter). The failed nodes are not
+ * part of the set (IMP-05). The page shows this set only, marked as
+ * provisional, while the server analysis (/impact, with redundancy) loads
+ * or fails.
  */
-export function computeOutageImpact(failed: string | string[], edges: GraphEdge[]): Set<string> {
+export function computeOutageImpact(
+  failed: string | string[],
+  edges: GraphEdge[],
+  directions: ReadonlyMap<string, ImpactDirection>,
+  relType = '',
+): Set<string> {
   const failedIds = new Set(Array.isArray(failed) ? failed : [failed]);
   const impacted = new Set<string>();
   const queue = [...failedIds];
+  const reach = (to: string) => {
+    if (!failedIds.has(to) && !impacted.has(to)) {
+      impacted.add(to);
+      queue.push(to);
+    }
+  };
   while (queue.length > 0) {
     const current = queue.pop() as string;
     edges.forEach((edge) => {
-      if (edge.source === current && !failedIds.has(edge.target) && !impacted.has(edge.target)) {
-        impacted.add(edge.target);
-        queue.push(edge.target);
-      }
+      if (edge.source !== current && edge.target !== current) return;
+      (edge.label ?? '').split(', ').forEach((type) => {
+        if (relType && type !== relType) return;
+        switch (directions.get(type) ?? 'source_depends_on_target') {
+          case 'source_depends_on_target':
+            if (edge.target === current) reach(edge.source);
+            break;
+          case 'target_depends_on_source':
+            if (edge.source === current) reach(edge.target);
+            break;
+          case 'undirected':
+            reach(edge.source === current ? edge.target : edge.source);
+            break;
+          case 'none':
+            break;
+        }
+      });
     });
   }
   return impacted;
@@ -143,18 +184,30 @@ export function TopologyPage() {
 
   // Server-side impact analysis (spec §4): the backend computes the impacted
   // set authoritatively, faceted by the selected relationship class. The
-  // client-side BFS below remains as the instant feedback while it loads.
-  // Several CIs can fail together (IMP-05, maintenance windows and
-  // redundancy): the server evaluates them jointly.
-  const { data: impact } = useImpactMany(simulated, relTypeFacet);
+  // client-side walk along the impact direction of the relationship types
+  // (F-254) is the provisional answer, marked as such, while it loads or
+  // when it fails; without the types the page shows the loading or error
+  // state only. Several CIs can fail together (IMP-05, maintenance windows
+  // and redundancy): the server evaluates them jointly.
+  const { data: impact, isError: impactFailed } = useImpactMany(simulated, relTypeFacet);
+  const { data: relationshipTypes } = useRelationshipTypes(simulated.length > 0);
+  const directions = useMemo(
+    () => (relationshipTypes ? impactDirections(relationshipTypes.data) : undefined),
+    [relationshipTypes],
+  );
 
-  const outageImpact = useMemo(() => {
+  const outage = useMemo(() => {
     if (simulated.length === 0) return undefined;
     if (impact && Array.isArray(impact.impacted)) {
-      return new Set(impact.impacted.map((n) => n.id));
+      return { impacted: new Set(impact.impacted.map((n) => n.id)), provisional: false };
     }
-    return computeOutageImpact(simulated, model.edges);
-  }, [simulated, impact, model.edges]);
+    if (!directions) return undefined;
+    return {
+      impacted: computeOutageImpact(simulated, model.edges, directions, relTypeFacet),
+      provisional: true,
+    };
+  }, [simulated, impact, directions, model.edges, relTypeFacet]);
+  const outageImpact = outage?.impacted;
 
   // The facet filter also narrows the rendered edges to the selected
   // relationship class so the simulated dependency path is visible.
@@ -290,11 +343,30 @@ export function TopologyPage() {
 
       {data && model.nodes.length > 0 ? (
         <>
+          {simulated.length > 0 && !outageImpact ? (
+            <Card
+              className="border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950"
+              title={t('topology.simulation.active')}
+            >
+              <p className="text-sm text-red-900 dark:text-red-100">
+                {impactFailed
+                  ? t('topology.simulation.unavailable')
+                  : t('topology.simulation.loading')}
+              </p>
+            </Card>
+          ) : null}
           {simulated.length > 0 && outageImpact ? (
             <Card
               className="border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950"
               title={t('topology.simulation.active')}
             >
+              {outage?.provisional ? (
+                <p className="mb-2 text-xs text-gray-700 dark:text-gray-300">
+                  {impactFailed
+                    ? t('topology.simulation.provisionalFailed')
+                    : t('topology.simulation.provisionalLoading')}
+                </p>
+              ) : null}
               <p className="text-sm text-red-900 dark:text-red-100">
                 {simulated.length === 1
                   ? t('topology.simulation.impact', {

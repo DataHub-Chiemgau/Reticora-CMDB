@@ -7,15 +7,13 @@ import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
+import { ScrollRegion } from '../components/ScrollRegion';
 
-const statusOptions = [
-  { value: '', label: 'Alle' },
-  { value: 'open', label: 'Offen' },
-  { value: 'in_progress', label: 'In Bearbeitung' },
-  { value: 'waiting', label: 'Wartend' },
-  { value: 'resolved', label: 'Gelöst' },
-  { value: 'closed', label: 'Geschlossen' },
-];
+// Stored ticket statuses and categories (English keys); the labels come
+// from the catalog.
+export const TICKET_STATUSES = ['open', 'in_progress', 'waiting', 'resolved', 'closed'] as const;
+
+export const TICKET_CATEGORIES = ['incident', 'request', 'problem', 'change', 'task'] as const;
 
 const priorityOptions = [
   { value: '', label: 'Alle' },
@@ -23,14 +21,6 @@ const priorityOptions = [
   { value: 'medium', label: 'Mittel' },
   { value: 'high', label: 'Hoch' },
   { value: 'critical', label: 'Kritisch' },
-];
-
-const categoryOptions = [
-  { value: 'incident', label: 'Störung' },
-  { value: 'request', label: 'Anfrage' },
-  { value: 'problem', label: 'Problem' },
-  { value: 'change', label: 'Änderung' },
-  { value: 'task', label: 'Aufgabe' },
 ];
 
 function statusVariant(status: string) {
@@ -67,6 +57,14 @@ function priorityVariant(priority: string) {
 
 export function TicketListPage() {
   const { t } = useTranslation();
+  const statusOptions = [
+    { value: '', label: t('common.all', 'Alle') },
+    ...TICKET_STATUSES.map((value) => ({ value, label: t(`ticket.statuses.${value}`, value) })),
+  ];
+  const categoryOptions = TICKET_CATEGORIES.map((value) => ({
+    value,
+    label: t(`ticket.categories.${value}`, value),
+  }));
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [priority, setPriority] = useState('');
@@ -129,7 +127,7 @@ export function TicketListPage() {
         <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>
       ) : (
         <Card title={`${t('ticket.title', 'Tickets')} (${data?.total ?? 0})`}>
-          <div className="overflow-x-auto">
+          <ScrollRegion label={t('ticket.title', 'Tickets')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -148,12 +146,16 @@ export function TicketListPage() {
                     <td className="py-2 font-mono text-xs">#{ticket.ticket_number}</td>
                     <td className="py-2 font-medium">{ticket.title}</td>
                     <td className="py-2">
-                      <Badge variant={statusVariant(ticket.status)}>{ticket.status}</Badge>
+                      <Badge variant={statusVariant(ticket.status)}>
+                        {t(`ticket.statuses.${ticket.status}`, ticket.status)}
+                      </Badge>
                     </td>
                     <td className="py-2">
                       <Badge variant={priorityVariant(ticket.priority)}>{ticket.priority}</Badge>
                     </td>
-                    <td className="py-2">{ticket.category}</td>
+                    <td className="py-2">
+                      {t(`ticket.categories.${ticket.category}`, ticket.category)}
+                    </td>
                     <td className="py-2">
                       {new Date(ticket.created_at).toLocaleDateString('de-DE')}
                     </td>
@@ -184,14 +186,14 @@ export function TicketListPage() {
                 ))}
                 {(!data?.data || data.data.length === 0) && (
                   <tr>
-                    <td colSpan={7} className="py-4 text-center text-gray-400">
+                    <td colSpan={7} className="py-4 text-center text-gray-600 dark:text-gray-300">
                       {t('common.noData', 'Keine Daten')}
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         </Card>
       )}
 

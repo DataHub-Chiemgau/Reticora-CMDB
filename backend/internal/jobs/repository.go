@@ -44,6 +44,10 @@ type Repository interface {
 	ClaimID(ctx context.Context, orgID, id string, now time.Time) (*Job, error)
 	// QueuedDue lists due queued jobs of all organizations, oldest first.
 	QueuedDue(ctx context.Context, now time.Time, limit int) ([]Job, error)
+	// RunningOverdue lists the running jobs of all organizations whose
+	// attempt had exceeded its timeout at t, longest running first; jobs
+	// without a timeout (tracked jobs) are not listed.
+	RunningOverdue(ctx context.Context, t time.Time, limit int) ([]Job, error)
 }
 
 // MemoryRepository keeps jobs in memory (tests and --no-db mode).
@@ -214,6 +218,24 @@ func (r *MemoryRepository) QueuedDue(_ context.Context, now time.Time, limit int
 		}
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].RunAfter.Before(out[b].RunAfter) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// RunningOverdue implements Repository.
+func (r *MemoryRepository) RunningOverdue(_ context.Context, t time.Time, limit int) ([]Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []Job
+	for _, j := range r.jobs {
+		if j.Status == StatusRunning && j.TimeoutSeconds > 0 && j.StartedAt != nil &&
+			j.StartedAt.Add(time.Duration(j.TimeoutSeconds)*time.Second).Before(t) {
+			out = append(out, *j)
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].StartedAt.Before(*out[b].StartedAt) })
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}

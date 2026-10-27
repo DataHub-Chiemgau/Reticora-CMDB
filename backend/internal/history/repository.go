@@ -21,6 +21,9 @@ type Repository interface {
 	// TrailUpTo returns the changes of one entity up to a point in time,
 	// oldest first, for point-in-time reconstruction.
 	TrailUpTo(ctx context.Context, orgID, entityType, entityID string, at time.Time) ([]Change, error)
+	// Visible reports whether the entity of a state snapshot exists under
+	// the caller's tenant scope (JOB-04).
+	Visible(ctx context.Context, orgID, entityType, entityID string) (bool, error)
 }
 
 // MemoryRepository is an in-memory implementation (tests, --no-db).
@@ -86,4 +89,17 @@ func (r *MemoryRepository) TrailUpTo(_ context.Context, orgID, entityType, entit
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
+}
+
+// Visible reports whether a change of the entity was recorded: the
+// in-memory trail knows no entity rows.
+func (r *MemoryRepository) Visible(_ context.Context, orgID, entityType, entityID string) (bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for i := range r.changes {
+		if c := &r.changes[i]; c.OrganizationID == orgID && c.EntityType == entityType && c.EntityID == entityID {
+			return true, nil
+		}
+	}
+	return false, nil
 }

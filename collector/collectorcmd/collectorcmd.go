@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strconv"
@@ -95,12 +96,16 @@ type collectorConfig struct {
 	// Traps are normalized into metric events and sent to the monitoring
 	// ingest so existing alert rules can fire on them (spec §9).
 	TrapListenAddr string
-	// MetricsInterval enables metric polling when > 0: the configured SNMP
-	// poll metrics are collected from the discovered targets every interval
-	// and uploaded to the monitoring ingest (Epic E: Collector-Polling).
+	// MetricsInterval enables metric polling when > 0: the SNMP poll
+	// metrics are collected from the scan targets every interval and
+	// uploaded to the monitoring ingest (Epic E: Collector-Polling, MON-02).
+	// Default defaultMetricsInterval; RETICORA_METRICS_INTERVAL=0 turns it
+	// off.
 	MetricsInterval time.Duration
-	// PollMetrics lists the numeric OIDs polled on every SNMP target. The
-	// default covers the standard IF-MIB interface counters of ifIndex 1.
+	// PollMetrics lists numeric OIDs polled on every SNMP target instead of
+	// the standard poll (RETICORA_SNMP_POLL_METRICS). Empty selects the
+	// standard poll: the interface counters of all interfaces
+	// (snmp.PollInterfaces).
 	PollMetrics []snmp.PollMetric
 	// TLS identity material. When CertPEM/KeyPEM are set (directly, via
 	// CertFile/KeyFile, or via the keystore at CredentialsPath) the upload
@@ -148,19 +153,30 @@ func Main() {
 	if handled, code := runCommand(context.Background(), os.Args[1:], os.Stdout, os.Stderr); handled {
 		os.Exit(code)
 	}
-	collectorCfg := loadCollectorConfig()
-	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
-	pluginRegistry["wmi"] = wmi.New(wmi.WithTLSScopes(collectorCfg.WMITLSScopes...))
-	pluginRegistry["nas"] = nas.New(nas.WithTLSScopes(collectorCfg.NASTLSScopes...))
-	pluginRegistry["sweep"] = newSweep(&collectorCfg)
-	loadProfileDir(os.Getenv("RETICORA_PROFILES_DIR"))
-
 	environment := envOrDefault("RETICORA_ENVIRONMENT", "development")
 	logLevel := slog.LevelInfo
 	if environment == "development" {
 		logLevel = slog.LevelDebug
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
+
+	// Unattended enrollment from RETICORA_ENROLL_TOKEN and
+	// RETICORA_CLOUD_URL before the configuration reads the keystore
+	// (COL-04).
+	if enrolled, err := bootstrapEnrollment(context.Background(), os.Getenv); err != nil {
+		slog.Error("collector enrollment failed", "event", "collector.enroll.failed", "error", err)
+		os.Exit(1)
+	} else if enrolled {
+		slog.Info("collector enrolled from the environment", "event", "collector.enroll.completed",
+			"credentials_path", credentialsPath())
+	}
+
+	collectorCfg := loadCollectorConfig()
+	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
+	pluginRegistry["wmi"] = wmi.New(wmi.WithTLSScopes(collectorCfg.WMITLSScopes...))
+	pluginRegistry["nas"] = nas.New(nas.WithTLSScopes(collectorCfg.NASTLSScopes...))
+	pluginRegistry["sweep"] = newSweep(&collectorCfg)
+	loadProfileDir(os.Getenv("RETICORA_PROFILES_DIR"))
 
 	slog.Info("starting collector", "environment", environment, "version", Version)
 	if err := applySimulation(&collectorCfg, environment); err != nil {
@@ -225,7 +241,7 @@ func Main() {
 	if collectorCfg.TrapListenAddr != "" {
 		go runTrapReceiver(ctx, collectorCfg, uploader)
 	}
-	if collectorCfg.MetricsInterval > 0 && len(collectorCfg.PollMetrics) > 0 {
+	if collectorCfg.MetricsInterval > 0 {
 		go runMetricsLoop(ctx, collectorCfg, uploader)
 	}
 
@@ -406,6 +422,8 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 	}
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
+	// Every start has a new scheduler: the sweep of a scope starts from the
+	// run state the server sends with it, not at once (F-109).
 	sched, hosts := newScheduler(), &hostCache{}
 
 	for {
@@ -418,6 +436,9 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 				"event", "collector.spool.backpressure")
 		default:
 			runDueDiscovery(ctx, &cfg, up, sched, hosts, time.Now())
+			// Jobs created through the API run once, after the due passes
+			// (JOB-01, F-358).
+			runOpenJobs(ctx, &cfg, up, hosts)
 		}
 		select {
 		case <-ctx.Done():
@@ -446,67 +467,14 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 		if len(due) == 0 {
 			continue
 		}
-		slog.Info("discovery started", "pass", pass.key, "protocols", due)
-		// Only the credentials of this pass (COL-02, DIS-09); every plugin
-		// receives the namespace of its protocol.
-		passCreds := credentialsFor(cfg, pass.scope)
-		var passRecords []plugins.DeviceRecord
-		var errs []runError
-		for _, protocol := range due {
-			if ctx.Err() != nil {
-				break
-			}
-			plug, ok := pluginRegistry[protocol]
-			if !ok {
-				slog.Warn("unknown protocol plugin, skipping", "protocol", protocol)
-				continue
-			}
-			targets := pass.targetsFor(protocol, hosts)
-			slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
-			creds := plugins.CredentialsFor(protocol, passCreds)
-			hits, err := plug.Probe(ctx, targets, creds)
-			if err != nil {
-				slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
-				errs = append(errs, runError{Protocol: protocol, Cause: plugins.ErrorCause(err), Message: err.Error()})
-				continue
-			}
-			if protocol == "sweep" {
-				reachable := hitTargets(hits)
-				// The sweep is the reachability series of the CIs (MON-02).
-				uploadSamples(ctx, up, reachabilitySamples(hosts.get(pass.key), reachable))
-				hosts.set(pass.key, reachable)
-			}
-			collected, failed := collectHits(ctx, protocol, plug, hits, creds)
-			errs = append(errs, failed...)
-			if protocol == "power" {
-				// UPS and PDU readings of the power devices (MON-02).
-				uploadSamples(ctx, up, pollPowerValues(ctx, hits, plugins.CredentialsFor("snmp", passCreds)))
-			}
-			slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
-			passRecords = append(passRecords, collected...)
-		}
-		tagRecords(passRecords, pass.scope)
+		passRecords, errs := runPass(ctx, cfg, up, &pass, due, hosts)
 		records = append(records, passRecords...)
 		outcomes = append(outcomes, scopeOutcome{scope: pass.scope, records: len(passRecords), errs: errs, next: pass.nextRun(sched)})
 	}
 	if len(outcomes) == 0 {
 		return 0
 	}
-	// The sweep record of a target another protocol of its scope classified
-	// is no unclassified device of its own (DIS-02); targets configured by
-	// name have their address by now.
-	records = profiles.MergeByTarget(deliverableRecords(ctx, records))
-	// Upload the records in a compressed batch; the spool flusher delivers
-	// what could not be sent.
-	var uploadErr *runError
-	if len(records) > 0 {
-		if err := up.uploadRecordsAt(ctx, records, now); err != nil {
-			slog.Error("failed to upload discovery records", "event", "discovery.upload.failed", "error", err, "count", len(records))
-			uploadErr = &runError{Protocol: "upload", Cause: "upload_failed", Message: err.Error()}
-		} else {
-			slog.Info("discovery records uploaded", "count", len(records))
-		}
-	}
+	records, uploadErr := uploadDiscovered(ctx, up, records, now)
 	for _, o := range outcomes {
 		errs := o.errs
 		if uploadErr != nil && o.records > 0 {
@@ -518,48 +486,122 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 	return len(records)
 }
 
-// expandSubnets converts CIDR notations to individual IP targets.
-const maxSubnetExpansionTargets = 4096
+// runPass runs the protocols of a pass, the sweep first, and returns its
+// records, tagged with its scope, and its run errors (DIS-08).
+func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *discoveryPass, protocols []string, hosts *hostCache) ([]plugins.DeviceRecord, []runError) {
+	slog.Info("discovery started", "pass", pass.key, "protocols", protocols)
+	// Only the credentials of this pass (COL-02, DIS-09); every plugin
+	// receives the namespace of its protocol.
+	passCreds := credentialsFor(cfg, pass.scope)
+	var passRecords []plugins.DeviceRecord
+	var errs []runError
+	if pass.truncated {
+		slog.Warn("discovery scope truncated", "event", "discovery.scope.truncated", "scope_id", pass.scope.ID,
+			"target", pass.scope.Target, "limit", maxScopeAddresses)
+		errs = append(errs, truncationError(pass.scope))
+	}
+	for _, protocol := range protocols {
+		if ctx.Err() != nil {
+			break
+		}
+		plug, ok := pluginRegistry[protocol]
+		if !ok {
+			slog.Warn("unknown protocol plugin, skipping", "protocol", protocol)
+			continue
+		}
+		targets := pass.targetsFor(protocol, hosts)
+		slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
+		creds := plugins.CredentialsFor(protocol, passCreds)
+		hits, err := plug.Probe(ctx, targets, creds)
+		if err != nil {
+			slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
+			errs = append(errs, runError{Protocol: protocol, Cause: plugins.ErrorCause(err), Message: err.Error()})
+			continue
+		}
+		if protocol == "sweep" {
+			reachable := hitTargets(hits)
+			// The sweep is the reachability series of the CIs (MON-02).
+			uploadSamples(ctx, up, reachabilitySamples(hosts.get(pass.key), reachable))
+			hosts.set(pass.key, reachable)
+		}
+		collected, failed := collectHits(ctx, protocol, plug, hits, creds)
+		errs = append(errs, failed...)
+		if protocol == "power" {
+			// UPS and PDU readings of the power devices (MON-02).
+			uploadSamples(ctx, up, pollPowerValues(ctx, hits, plugins.CredentialsFor("snmp", passCreds)))
+		}
+		slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
+		passRecords = append(passRecords, collected...)
+	}
+	tagRecords(passRecords, pass.scope)
+	return passRecords, errs
+}
 
+// uploadDiscovered merges the records of a run and uploads them in a
+// compressed batch; the spool flusher delivers what could not be sent. It
+// returns the merged records and the upload error of the run, if any.
+func uploadDiscovered(ctx context.Context, up *uploader, records []plugins.DeviceRecord, now time.Time) ([]plugins.DeviceRecord, *runError) {
+	// The sweep record of a target another protocol of its scope classified
+	// is no unclassified device of its own (DIS-02); targets configured by
+	// name have their address by now.
+	records = profiles.MergeByTarget(deliverableRecords(ctx, records))
+	if len(records) == 0 {
+		return records, nil
+	}
+	if err := up.uploadRecordsAt(ctx, records, now); err != nil {
+		slog.Error("failed to upload discovery records", "event", "discovery.upload.failed", "error", err, "count", len(records))
+		return records, &runError{Protocol: "upload", Cause: "upload_failed", Message: err.Error()}
+	}
+	slog.Info("discovery records uploaded", "count", len(records))
+	return records, nil
+}
+
+// maxScopeAddresses bounds the addresses of one CIDR or range scope; it
+// equals discovery.MaxScopeAddresses of the server, so every scope the API
+// accepts is expanded completely (DIS-09). testdata/scope-limits.json is
+// the contract both modules test against.
+const maxScopeAddresses = 65536
+
+// expandSubnets converts CIDR notations to individual IP targets; a
+// subnet larger than maxScopeAddresses is cut and logged.
 func expandSubnets(subnets []string) []string {
 	var targets []string
 	for _, subnet := range subnets {
-		_, ipNet, err := net.ParseCIDR(subnet)
-		if err != nil {
-			// Treat as single host
-			targets = append(targets, subnet)
-			continue
+		subnetTargets, truncated := expandCIDR(subnet)
+		if truncated {
+			slog.Warn("subnet expansion limit reached", "subnet", subnet, "limit", maxScopeAddresses)
 		}
-
-		maskOnes, _ := ipNet.Mask.Size()
-		var subnetTargets []string
-		for ip := ipNet.IP.Mask(ipNet.Mask); ipNet.Contains(ip); incrementIP(ip) {
-			subnetTargets = append(subnetTargets, ip.String())
-			// Safety limit to avoid expanding huge ranges
-			if len(subnetTargets) > maxSubnetExpansionTargets {
-				slog.Warn("subnet expansion limit reached", "subnet", subnet, "limit", maxSubnetExpansionTargets)
-				break
-			}
-		}
-
-		// Remove network and broadcast addresses for /30 and larger prefixes
-		// For /31 and /32 all addresses are usable (point-to-point or host routes)
-		if maskOnes <= 30 && len(subnetTargets) > 2 {
-			subnetTargets = subnetTargets[1 : len(subnetTargets)-1]
-		}
-
 		targets = append(targets, subnetTargets...)
 	}
 	return targets
 }
 
-func incrementIP(ip net.IP) {
-	for j := len(ip) - 1; j >= 0; j-- {
-		ip[j]++
-		if ip[j] > 0 {
+// expandCIDR returns the addresses of a CIDR (a non-CIDR target is a
+// single host) and whether it had more than maxScopeAddresses.
+func expandCIDR(subnet string) (targets []string, truncated bool) {
+	prefix, err := netip.ParsePrefix(subnet)
+	if err != nil {
+		return []string{subnet}, false
+	}
+	prefix = prefix.Masked()
+	// Network and broadcast addresses are skipped for /30 and larger
+	// prefixes; for /31 and /32 all addresses are usable (point-to-point
+	// or host routes).
+	inner := prefix.Bits() <= 30
+	ip := prefix.Addr()
+	if inner {
+		ip = ip.Next()
+	}
+	for ; prefix.Contains(ip); ip = ip.Next() {
+		if inner && !prefix.Contains(ip.Next()) {
 			break
 		}
+		if len(targets) == maxScopeAddresses {
+			return targets, true
+		}
+		targets = append(targets, ip.String())
 	}
+	return targets, false
 }
 
 // collectParallelism bounds the parallel Collect calls of one plugin.
@@ -1201,8 +1243,27 @@ type metricPoller interface {
 	Poll(ctx context.Context, target string, creds map[string]string, metrics []snmp.PollMetric) ([]plugins.MetricSample, error)
 }
 
-// runMetricsLoop polls the configured numeric SNMP metrics on every scan
-// target and uploads the samples to the monitoring ingest (Epic E:
+// interfacePoller walks the interface counters of a target, the standard
+// poll (snmp.Plugin).
+type interfacePoller interface {
+	PollInterfaces(ctx context.Context, target string, creds map[string]string) ([]plugins.MetricSample, error)
+}
+
+// pduPoller reads the load of a PDU from the metering table of its vendor
+// family (power.Plugin).
+type pduPoller interface {
+	PDUValues(ctx context.Context, target string, creds map[string]string, family string) ([]plugins.MetricSample, error)
+}
+
+// defaultMetricsInterval is the interval of the standard poll (MON-02).
+const defaultMetricsInterval = 5 * time.Minute
+
+// metricPollParallelism bounds the targets polled at the same time, so
+// silent hosts of a subnet (one timeout each) do not stretch a cycle.
+const metricPollParallelism = 16
+
+// runMetricsLoop polls the SNMP metrics (metricPollFunc: the standard
+// interface poll or the configured OIDs) on every scan target and uploads the samples to the monitoring ingest (Epic E:
 // Collector-Polling). Polling runs independently of discovery so metric
 // intervals can be much shorter than discovery cycles. The scan targets are
 // the configured subnets, so only the locally configured credentials apply,
@@ -1211,7 +1272,7 @@ func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 	ticker := time.NewTicker(cfg.MetricsInterval)
 	defer ticker.Stop()
 
-	poller, ok := pluginRegistry["snmp"].(metricPoller)
+	poll, ok := metricPollFunc(cfg)
 	if !ok {
 		slog.Error("snmp plugin unavailable; metric polling disabled")
 		return
@@ -1219,19 +1280,7 @@ func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 
 	creds := plugins.CredentialsFor("snmp", cfg.Credentials)
 	for {
-		targets := expandSubnets(cfg.ScanSubnets)
-		samples := make([]plugins.MetricSample, 0, len(targets)*len(cfg.PollMetrics))
-		for _, target := range targets {
-			if ctx.Err() != nil {
-				break
-			}
-			polled, err := poller.Poll(ctx, target, creds, cfg.PollMetrics)
-			if err != nil {
-				slog.Debug("metric poll failed", "target", target, "error", err)
-				continue
-			}
-			samples = append(samples, polled...)
-		}
+		samples := pollTargets(ctx, expandSubnets(cfg.ScanSubnets), creds, poll)
 		if len(samples) > 0 {
 			if err := up.uploadMetricSamples(ctx, samples); err != nil {
 				slog.Error("metric sample upload failed", "count", len(samples), "error", err)
@@ -1245,6 +1294,59 @@ func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// metricPollFunc is the poll of one target: the configured OIDs
+// (RETICORA_SNMP_POLL_METRICS) or, without them, the interface counters
+// of all interfaces (MON-02).
+func metricPollFunc(cfg collectorConfig) (func(ctx context.Context, target string, creds map[string]string) ([]plugins.MetricSample, error), bool) {
+	if len(cfg.PollMetrics) > 0 {
+		poller, ok := pluginRegistry["snmp"].(metricPoller)
+		if !ok {
+			return nil, false
+		}
+		return func(ctx context.Context, target string, creds map[string]string) ([]plugins.MetricSample, error) {
+			return poller.Poll(ctx, target, creds, cfg.PollMetrics)
+		}, true
+	}
+	poller, ok := pluginRegistry["snmp"].(interfacePoller)
+	if !ok {
+		return nil, false
+	}
+	return poller.PollInterfaces, true
+}
+
+// pollTargets polls every target, at most metricPollParallelism at the
+// same time, and returns the samples in target order; a failing target
+// is skipped.
+func pollTargets(ctx context.Context, targets []string, creds map[string]string,
+	poll func(ctx context.Context, target string, creds map[string]string) ([]plugins.MetricSample, error)) []plugins.MetricSample {
+	polled := make([][]plugins.MetricSample, len(targets))
+	sem := make(chan struct{}, metricPollParallelism)
+	var wg sync.WaitGroup
+	for i, target := range targets {
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			samples, err := poll(ctx, target, creds)
+			if err != nil {
+				slog.Debug("metric poll failed", "target", target, "error", err)
+				return
+			}
+			polled[i] = samples
+		}()
+	}
+	wg.Wait()
+	var samples []plugins.MetricSample
+	for _, s := range polled {
+		samples = append(samples, s...)
+	}
+	return samples
 }
 
 // uploadMetricSamples converts collector metric samples into monitoring
@@ -1451,7 +1553,7 @@ func loadCollectorConfig() collectorConfig {
 		SpoolMaxBytes:      int64EnvOrDefault("RETICORA_SPOOL_MAX_BYTES", 1<<30), // 1 GiB default cap
 		SpoolMaxAge:        durationEnvOrDefault("RETICORA_SPOOL_MAX_AGE", 72*time.Hour),
 		TrapListenAddr:     os.Getenv("RETICORA_SNMP_TRAP_LISTEN"),
-		MetricsInterval:    durationEnvOrDefault("RETICORA_METRICS_INTERVAL", 0),
+		MetricsInterval:    durationEnvOrDefault("RETICORA_METRICS_INTERVAL", defaultMetricsInterval),
 		PollMetrics:        pollMetricsFromEnv(os.Getenv("RETICORA_SNMP_POLL_METRICS")),
 		TLSCertPEM:         []byte(os.Getenv("RETICORA_TLS_CLIENT_CERT")),
 		TLSKeyPEM:          []byte(os.Getenv("RETICORA_TLS_CLIENT_KEY")),
@@ -1631,22 +1733,14 @@ func parseTLSScopes(value string, readFile func(string) ([]byte, error)) ([]plug
 	return scopes, nil
 }
 
-// defaultPollMetrics polls the IF-MIB interface counters of ifIndex 1 when
-// no explicit list is configured.
-var defaultPollMetrics = []snmp.PollMetric{
-	{Name: "if_in_octets", OID: "1.3.6.1.2.1.2.2.1.10.1"},
-	{Name: "if_out_octets", OID: "1.3.6.1.2.1.2.2.1.16.1"},
-	{Name: "if_oper_status", OID: "1.3.6.1.2.1.2.2.1.8.1"},
-}
-
 // pollMetricsFromEnv parses RETICORA_SNMP_POLL_METRICS entries in the form
-// "name=oid,name=oid" (e.g. "ifInOctets=1.3.6.1.2.1.2.2.1.10.1"). An empty
-// value selects the defaults so metric polling works out of the box once
-// RETICORA_METRICS_INTERVAL is set.
+// "name=oid,name=oid" (e.g. "ifInOctets=1.3.6.1.2.1.2.2.1.10.1"); they
+// replace the standard poll. An empty or entirely invalid value selects
+// the standard poll (nil): the interface counters of all interfaces.
 func pollMetricsFromEnv(value string) []snmp.PollMetric {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return defaultPollMetrics
+		return nil
 	}
 	metrics := make([]snmp.PollMetric, 0)
 	for _, entry := range strings.Split(value, ",") {
@@ -1658,7 +1752,7 @@ func pollMetricsFromEnv(value string) []snmp.PollMetric {
 		metrics = append(metrics, snmp.PollMetric{Name: strings.TrimSpace(name), OID: strings.TrimSpace(oid)})
 	}
 	if len(metrics) == 0 {
-		return defaultPollMetrics
+		return nil
 	}
 	return metrics
 }
@@ -1755,29 +1849,49 @@ var upsPollMetrics = []snmp.PollMetric{
 	{Name: "ups_output_load_percent", OID: "1.3.6.1.2.1.33.1.4.4.1.5.1"},
 }
 
-// pollPowerValues reads the UPS-MIB values of the power devices the power
-// plugin found with the SNMP credentials of their pass; the runtime is
-// reported in minutes and converted.
+// pollPowerValues reads the values of the power devices the power plugin
+// found with the SNMP credentials of their pass, by the device type and
+// vendor family of the hit (power.HitDevice): a PDU the load per phase or
+// inlet from the metering table of its family (power.Plugin.PDUValues), a
+// PDU of another family nothing; every other power device the UPS-MIB,
+// whose runtime is reported in minutes and converted. Every sample carries
+// kind=power, target and device=pdu|ups.
 func pollPowerValues(ctx context.Context, hits []plugins.Result, creds map[string]string) []plugins.MetricSample {
-	poller, ok := pluginRegistry["snmp"].(metricPoller)
-	if !ok {
-		return nil
-	}
 	var samples []plugins.MetricSample
 	for i := range hits {
 		if hits[i].IP == "" || ctx.Err() != nil {
 			continue
 		}
-		polled, err := poller.Poll(ctx, hits[i].IP, creds, upsPollMetrics)
+		var (
+			polled []plugins.MetricSample
+			err    error
+		)
+		deviceType, family := power.HitDevice(&hits[i])
+		if deviceType == "pdu" {
+			poller, ok := pluginRegistry["power"].(pduPoller)
+			if !ok {
+				continue
+			}
+			polled, err = poller.PDUValues(ctx, hits[i].IP, creds, family)
+		} else {
+			poller, ok := pluginRegistry["snmp"].(metricPoller)
+			if !ok {
+				continue
+			}
+			polled, err = poller.Poll(ctx, hits[i].IP, creds, upsPollMetrics)
+			for j := range polled {
+				polled[j].Labels["device"] = "ups"
+				if polled[j].Name == "ups_battery_runtime_seconds" {
+					polled[j].Value *= 60
+				}
+			}
+		}
 		if err != nil {
 			slog.Debug("power value poll failed", "target", hits[i].IP, "error", err)
 			continue
 		}
 		for j := range polled {
 			polled[j].Labels["kind"] = "power"
-			if polled[j].Name == "ups_battery_runtime_seconds" {
-				polled[j].Value *= 60
-			}
 		}
 		samples = append(samples, polled...)
 	}

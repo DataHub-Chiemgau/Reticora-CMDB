@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -264,6 +265,46 @@ func TestDiscoverCapsParallelProbesAt256(t *testing.T) {
 	}
 	if got := (&Plugin{Concurrency: 16}).effectiveConcurrency(); got != 16 {
 		t.Errorf("effective concurrency = %d, want 16", got)
+	}
+}
+
+// goroutinePinger records the peak number of goroutines while the probes
+// run.
+type goroutinePinger struct {
+	peak atomic.Int64
+}
+
+func (g *goroutinePinger) Ping(_ context.Context, _ string, _ time.Duration) (time.Duration, error) {
+	n := int64(runtime.NumGoroutine())
+	for {
+		p := g.peak.Load()
+		if n <= p || g.peak.CompareAndSwap(p, n) {
+			break
+		}
+	}
+	time.Sleep(time.Millisecond)
+	return 0, errors.New("timeout")
+}
+
+// TestSweepGoroutinePeakBounded: a /16-sized sweep (65,536 targets) starts
+// no goroutine per target ahead of the semaphore; the goroutines of the
+// probes stay at MaxConcurrency plus a small margin (F-262, DIS-01).
+func TestSweepGoroutinePeakBounded(t *testing.T) {
+	targets := make([]string, 65536)
+	for i := range targets {
+		targets[i] = fmt.Sprintf("127.0.%d.%d", i/256, i%256)
+	}
+	pinger := &goroutinePinger{}
+	// Port 70000 is out of range: the dial fails before any socket is
+	// opened, so the test opens no connections.
+	p := &Plugin{Timeout: 50 * time.Millisecond, TCPPorts: []int{70000}, Pinger: pinger}
+	base := int64(runtime.NumGoroutine())
+	if _, err := p.Probe(context.Background(), targets, nil); err != nil {
+		t.Fatal(err)
+	}
+	if extra := pinger.peak.Load() - base; extra > MaxConcurrency+50 {
+		t.Fatalf("goroutine peak = %d above the %d before the sweep, want at most MaxConcurrency+50 = %d",
+			extra, base, MaxConcurrency+50)
 	}
 }
 

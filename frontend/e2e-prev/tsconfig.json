@@ -1,0 +1,22 @@
+{
+  "//": "WP-531: the specs of ../e2e import their packages from this directory's node_modules (the pinned previous @playwright/test), not from ../node_modules; see playwright.prev.config.ts.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@playwright/test": ["./node_modules/@playwright/test/index.mjs"],
+      "@axe-core/playwright": ["./node_modules/@axe-core/playwright/dist/index.mjs"],
+      "ajv": ["./node_modules/ajv/dist/ajv.js"],
+      "ajv/*": ["./node_modules/ajv/*"],
+      "ajv-formats": ["./node_modules/ajv-formats/dist/index.js"],
+      "yaml": ["./node_modules/yaml/dist/index.js"]
+    }
+  },
+  "include": ["playwright.prev.config.ts", "../e2e/**/*.ts"],
+  "exclude": ["../e2e/onboarding.spec.ts"]
+}

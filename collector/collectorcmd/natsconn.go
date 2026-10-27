@@ -137,7 +137,7 @@ func runNATSSession(ctx context.Context, cfg collectorConfig) (renewed bool) {
 		// scope suggestions (DIS-09).
 		wg.Add(2)
 		go func() { defer wg.Done(); syncScopes(sctx, nc, subject) }()
-		go func() { defer wg.Done(); reportSubnets(sctx, nc, subject, localSubnets(net.InterfaceAddrs)) }()
+		go func() { defer wg.Done(); reportSubnets(sctx, nc, subject, localSubnets(systemInterfaces)) }()
 	}
 	wg.Add(1)
 	go func() {

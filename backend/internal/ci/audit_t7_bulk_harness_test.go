@@ -5,18 +5,21 @@ package ci_test
 // (ci.NewHandler + jobs.NewAPIHandler on the PG repositories). Used by
 // bulk_integration_test.go (TestAuditT7BulkReportMatchesStoredStatus,
 // WP-368), bulk_jobs_integration_test.go (TestAuditT7JobAPIHonoursClientScope,
-// WP-404) and audit_t7_bulk_jobs_auditdefect_test.go (WP-181 defect).
+// WP-404, and TestAuditT7BulkJobCancelStopsWork, WP-514).
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -40,6 +43,14 @@ type auditT7BulkEnv struct {
 
 func newAuditT7BulkEnv(t *testing.T, tag string) *auditT7BulkEnv {
 	t.Helper()
+	return newAuditT7BulkEnvOn(t, tag, "")
+}
+
+// newAuditT7BulkEnvOn is newAuditT7BulkEnv; with natsURL the bulk jobs run
+// on a job queue over NATS JetStream (TEC-14, own stream per test) instead
+// of in the process of the request.
+func newAuditT7BulkEnvOn(t *testing.T, tag, natsURL string) *auditT7BulkEnv {
+	t.Helper()
 	f := scopetest.Seed(t, tag)
 	user := f.AppUser(t, f.OrgA, "audit-t7-bulk")
 	scope := database.OrgWideScope(f.OrgA, user)
@@ -49,9 +60,40 @@ func newAuditT7BulkEnv(t *testing.T, tag string) *auditT7BulkEnv {
 	ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: user, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser,
 		Permissions: []identity.Permission{identity.PermJobRead, identity.PermCIRead, identity.PermCIWrite}})
 	jobSvc := jobs.NewService(jobs.NewPGRepository(f.App))
-	jobSvc.Register(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1})
+	// As registered by the server (server/jobkinds.go).
+	kind := jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Cancellable: true}
+	jobSvc.Register(kind)
+	svc := ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()))
+	if natsURL == "" {
+		svc.WithBulkJobs(jobSvc)
+	} else {
+		nc, err := nats.Connect(natsURL)
+		if err != nil {
+			t.Fatalf("connect NATS: %v", err)
+		}
+		js, err := jetstream.New(nc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The queue's own job service, as in cmd/server.
+		queue := jobs.NewQueue(jobs.NewService(jobs.NewPGRepository(f.App)), js)
+		suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+		queue.Stream, queue.SubjectPrefix = "JOBS_T7_"+suffix, "t7_"+suffix+"."
+		if err = queue.Setup(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		queue.Handle(kind, svc.RunBulkJob)
+		svc.WithBulkQueue(queue)
+		runCtx, stop := context.WithCancel(context.Background())
+		go queue.Run(runCtx)
+		t.Cleanup(func() {
+			stop()
+			_ = js.DeleteStream(context.Background(), queue.Stream)
+			nc.Close()
+		})
+	}
 	mux := chi.NewRouter()
-	ci.NewHandler(ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder())).WithBulkJobs(jobSvc)).RegisterRoutes(mux)
+	ci.NewHandler(svc).RegisterRoutes(mux)
 	jobs.NewAPIHandler(jobSvc).WithKind(ci.BulkJobKind, identity.PermCIWrite, nil).RegisterRoutes(mux)
 	return &auditT7BulkEnv{t: t, f: f, mux: mux, jobSvc: jobSvc, user: user, ctx: ctx}
 }

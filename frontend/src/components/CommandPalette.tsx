@@ -116,6 +116,27 @@ interface CommandItem {
   action: () => void;
 }
 
+/**
+ * Where focus goes when the palette closes: back to the element that had it
+ * before the palette opened, to the main content of the page a navigation
+ * command opened, or nowhere (a dialog the command opened takes focus).
+ */
+type FocusAfterClose = 'restore' | 'main' | 'none';
+
+/** The page's main landmark (App.tsx); a navigation command lands there. */
+const MAIN_CONTENT_ID = 'main-content';
+
+/** focusAfterCommand: navigation lands on the new page, create-ci opens a dialog. */
+function focusAfterCommand(id: string): FocusAfterClose {
+  if (id.startsWith('nav-')) {
+    return 'main';
+  }
+  if (id === 'create-ci') {
+    return 'none';
+  }
+  return 'restore';
+}
+
 function fuzzyMatch(value: string, query: string) {
   if (!query) {
     return true;
@@ -155,6 +176,12 @@ export function CommandPalette({
   const search = useSearch({ q: open ? query : '', limit: 5 });
   const listboxId = useId();
   const listRef = useRef<HTMLDivElement>(null);
+  // Radix returns focus only to a Dialog.Trigger, and the palette has none:
+  // it remembers the focused element itself when it opens and decides on
+  // close where focus goes (UI-10, F-171).
+  const openRef = useRef(false);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const focusAfterCloseRef = useRef<FocusAfterClose>('restore');
 
   const commands = useMemo<CommandItem[]>(
     () =>
@@ -351,6 +378,15 @@ export function CommandPalette({
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
+        if (!openRef.current) {
+          // Taken before the search field's autoFocus moves focus.
+          returnFocusRef.current =
+            document.activeElement instanceof HTMLElement &&
+            document.activeElement !== document.body
+              ? document.activeElement
+              : null;
+          focusAfterCloseRef.current = 'restore';
+        }
         setOpen((current) => !current);
       }
     };
@@ -360,6 +396,7 @@ export function CommandPalette({
   }, []);
 
   useEffect(() => {
+    openRef.current = open;
     if (open) {
       setQuery('');
       setSelectedIndex(0);
@@ -385,8 +422,26 @@ export function CommandPalette({
       return;
     }
 
+    focusAfterCloseRef.current = focusAfterCommand(command.id);
     command.action();
     setOpen(false);
+  }
+
+  function handleCloseAutoFocus(event: Event) {
+    const mode = focusAfterCloseRef.current;
+    const previous = returnFocusRef.current;
+    focusAfterCloseRef.current = 'restore';
+    returnFocusRef.current = null;
+    if (mode === 'none') {
+      event.preventDefault();
+      return;
+    }
+    const main = mode === 'main' ? document.getElementById(MAIN_CONTENT_ID) : null;
+    const target = main ?? (previous && previous.isConnected ? previous : null);
+    if (target) {
+      event.preventDefault();
+      target.focus();
+    }
   }
 
   function handleListNavigation(event: ReactKeyboardEvent<HTMLInputElement>) {
@@ -433,7 +488,10 @@ export function CommandPalette({
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-gray-950/50 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-[18vh] z-50 w-[min(92vw,36rem)] -translate-x-1/2 rounded-2xl border border-gray-200 bg-white shadow-2xl outline-none dark:border-gray-800 dark:bg-gray-900">
+        <Dialog.Content
+          onCloseAutoFocus={handleCloseAutoFocus}
+          className="fixed left-1/2 top-[18vh] z-50 w-[min(92vw,36rem)] -translate-x-1/2 rounded-2xl border border-gray-200 bg-white shadow-2xl outline-none dark:border-gray-800 dark:bg-gray-900"
+        >
           <Dialog.Title className="sr-only">{t('commandPalette.title')}</Dialog.Title>
           <div className="border-b border-gray-200 p-3 dark:border-gray-800">
             <input

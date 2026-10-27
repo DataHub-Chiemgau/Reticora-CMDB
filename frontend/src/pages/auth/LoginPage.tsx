@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
 import { startAuthorizationCodeFlow, InsecureContextError } from '../../auth/oidc';
@@ -7,6 +7,8 @@ import { startAuthorizationCodeFlow, InsecureContextError } from '../../auth/oid
 type LoginLocationState = {
   from?: string;
   expired?: boolean;
+  /** invitationAccepted is the address of an account the invitation page just created (TLC-03). */
+  invitationAccepted?: string;
 };
 
 export function LoginPage() {
@@ -51,6 +53,14 @@ export function LoginPage() {
             {t('auth.sessionExpired')}
           </p>
         ) : null}
+        {state?.invitationAccepted ? (
+          <p
+            role="status"
+            className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-950/40 dark:text-green-200"
+          >
+            {t('auth.invitationAccepted', { email: state.invitationAccepted })}
+          </p>
+        ) : null}
         {error ? (
           <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
             {error}
@@ -59,6 +69,14 @@ export function LoginPage() {
         <Button className="mt-6 w-full" onClick={handleLogin} loading={loading}>
           {t('auth.loginButton')}
         </Button>
+        {/* Self-signup has no switch (config.go), so the entry is always
+            shown (UI-17, F-351). */}
+        <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
+          {t('auth.signupPrompt')}{' '}
+          <Link to="/onboarding" className="font-medium text-primary underline">
+            {t('auth.signupLink')}
+          </Link>
+        </p>
       </div>
     </section>
   );

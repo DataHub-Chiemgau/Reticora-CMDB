@@ -513,3 +513,62 @@ func TestNotifierEmailNeedsNotificationsEmail(t *testing.T) {
 		})
 	}
 }
+
+// TestDigestWindowsAndCategories covers the digest rules of NTF-04
+// (WP-508): an hourly window ends at the next full hour, a daily one at the
+// next midnight in the recipient's time zone; only the categories with a
+// non-critical event can be bundled; a request marked critical, an in-app
+// or a webhook channel and an address without a user are never bundled.
+func TestDigestWindowsAndCategories(t *testing.T) {
+	at := time.Date(2026, 3, 28, 23, 30, 0, 0, time.UTC) // 00:30 on the 29th in Berlin (CET)
+	if got := windowEnd(DigestHourly, "Europe/Berlin", at); !got.Equal(time.Date(2026, 3, 29, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("hourly window end: %v", got)
+	}
+	// Midnight of the 30th in Berlin is 22:00 UTC (CEST from the 29th).
+	if got := windowEnd(DigestDaily, "Europe/Berlin", at); !got.Equal(time.Date(2026, 3, 29, 22, 0, 0, 0, time.UTC)) {
+		t.Errorf("daily window end in Berlin: %v", got)
+	}
+	if got := windowEnd(DigestDaily, "", at); !got.Equal(time.Date(2026, 3, 29, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("daily window end without a time zone: %v", got)
+	}
+	if got := strings.Join(DigestCategories(), ","); got != "entitlement,export,job,review,webhook" {
+		t.Errorf("digest categories: %s", got)
+	}
+	if digestWindow(nil, "review") != DigestHourly || digestWindow(nil, "export") != "" ||
+		digestWindow(&Preference{Digest: map[string]string{}}, "review") != "" {
+		t.Error("default digest: review hourly only; an empty digest bundles nothing")
+	}
+
+	ctx := context.Background()
+	n := &Notifier{digest: digestRecorder{}}
+	user := Recipient{UserID: "u-1", Email: "a@x.example"}
+	for _, tc := range []struct {
+		name string
+		req  Request
+		kind string
+		r    Recipient
+	}{
+		{"critical", Request{Category: "review", Critical: true}, KindEmail, user},
+		{"in-app", Request{Category: "review"}, KindInApp, user},
+		{"webhook", Request{Category: "review"}, KindWebhook, user},
+		{"address without a user", Request{Category: "review"}, KindEmail, Recipient{Email: "a@x.example"}},
+	} {
+		if window, _, err := n.bundled(ctx, "org-1", &tc.req, tc.kind, tc.r, map[string]*Preference{}); err != nil || window != "" {
+			t.Errorf("%s: bundled %q (%v), want delivered on its own", tc.name, window, err)
+		}
+	}
+	if window, _, _ := n.bundled(ctx, "org-1", &Request{Category: "review"}, KindEmail, user, map[string]*Preference{}); window != DigestHourly {
+		t.Errorf("review e-mail with the default preference: %q, want hourly", window)
+	}
+}
+
+// digestRecorder is a DigestStore that keeps nothing.
+type digestRecorder struct{}
+
+func (digestRecorder) AddItems(_ context.Context, _ string, items []DigestItem) (int, error) {
+	return len(items), nil
+}
+
+func (digestRecorder) Bundle(context.Context, time.Time, func([]DigestItem) QueuedDelivery) (int, error) {
+	return 0, nil
+}

@@ -111,9 +111,11 @@ export function IGAPage() {
               >
                 <div>
                   <p className="font-medium">{item.name}</p>
-                  <p className="text-sm text-gray-500">{item.type}</p>
+                  <p className="text-sm text-muted">{item.type}</p>
                 </div>
-                <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
+                <Badge variant={statusVariant(item.status)}>
+                  {t(`iga.connectorStatuses.${item.status}`, item.status)}
+                </Badge>
                 <div className="flex gap-2">
                   <Button
                     size="sm"
@@ -143,7 +145,9 @@ export function IGAPage() {
                   className="flex items-center justify-between rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-800"
                 >
                   <span>{task.action}</span>
-                  <Badge variant={statusVariant(task.status)}>{task.status}</Badge>
+                  <Badge variant={statusVariant(task.status)}>
+                    {t(`iga.taskStatuses.${task.status}`, task.status)}
+                  </Badge>
                   <Button size="sm" variant="secondary" onClick={() => retryTask.mutate(task.id)}>
                     {t('iga.retry')}
                   </Button>
@@ -163,7 +167,9 @@ export function IGAPage() {
                   className="flex items-center justify-between rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-800"
                 >
                   <span>{request.entitlement}</span>
-                  <Badge variant={statusVariant(request.status)}>{request.status}</Badge>
+                  <Badge variant={statusVariant(request.status)}>
+                    {t(`iga.requestStatuses.${request.status}`, request.status)}
+                  </Badge>
                   <div className="flex gap-2">
                     <Button size="sm" onClick={() => approve.mutate(request.id)}>
                       {t('iga.approve')}
@@ -190,7 +196,9 @@ export function IGAPage() {
                   className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-800"
                 >
                   <span className="font-medium">{review.name}</span>{' '}
-                  <Badge variant={statusVariant(review.status)}>{review.status}</Badge>
+                  <Badge variant={statusVariant(review.status)}>
+                    {t(`iga.reviewStatuses.${review.status}`, review.status)}
+                  </Badge>
                 </li>
               ))}
             </ul>
@@ -207,7 +215,9 @@ export function IGAPage() {
                   className="flex items-center justify-between rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-800"
                 >
                   <span>{finding.drift_type}</span>
-                  <Badge variant={statusVariant(finding.status)}>{finding.severity}</Badge>
+                  <Badge variant={statusVariant(finding.status)}>
+                    {t(`iga.severities.${finding.severity}`, finding.severity)}
+                  </Badge>
                   <Button size="sm" onClick={() => remediate.mutate(finding.id)}>
                     {t('iga.remediate')}
                   </Button>

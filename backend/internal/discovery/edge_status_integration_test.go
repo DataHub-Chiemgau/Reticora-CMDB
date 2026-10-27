@@ -14,7 +14,8 @@
 //     subject the dispatchers of ServeCollectorEdge and ServeCollectorScopes
 //     register is refused for a disabled and an unknown collector before its
 //     handler runs, and nothing is persisted (no CI, no heartbeat, no scope
-//     run, no suggestion); the active collector gets the unchanged answers.
+//     run, no suggestion, no job status); the active collector gets the
+//     unchanged answers.
 //     The table must cover every registered suffix, so a later one gets a
 //     case too.
 //   - TestUpdateCollectorUnknownOrForeignIs404: PATCH on a random UUID, a
@@ -180,11 +181,12 @@ func TestCollectorEdgeRefusesUnknownOrDisabledCollector(t *testing.T) {
 	disabled := CollectorDisabled
 
 	// sender is a collector of the table: the scope it reports a run of, the
-	// device and the subnet it reports, and the edge status of its refusal
-	// (0 for the active control).
+	// discovery job it asks for and reports running (WP-632), the device and
+	// the subnet it reports, and the edge status of its refusal (0 for the
+	// active control).
 	type sender struct {
-		name, id, scopeID, ip, cidr string
-		status                      int
+		name, id, scopeID, jobID, ip, cidr string
+		status                             int
 	}
 	register := func(name, host string, disable bool) *sender {
 		t.Helper()
@@ -196,6 +198,10 @@ func TestCollectorEdgeRefusesUnknownOrDisabledCollector(t *testing.T) {
 		if err := repo.CreateScope(org, s); err != nil {
 			t.Fatal(err)
 		}
+		job := &Job{OrganizationID: f.OrgA, CollectorID: c.ID, JobType: JobTypeSweep}
+		if err := repo.CreateJob(org, job); err != nil {
+			t.Fatal(err)
+		}
 		if disable {
 			if _, err := repo.UpdateCollector(org, f.OrgA, c.ID, &CollectorPatch{Status: &disabled}); err != nil {
 				t.Fatal(err)
@@ -205,15 +211,15 @@ func TestCollectorEdgeRefusesUnknownOrDisabledCollector(t *testing.T) {
 		if _, err := f.Admin.Exec(bg, `UPDATE collector SET last_heartbeat_at = now() - interval '1 hour' WHERE id = $1`, c.ID); err != nil {
 			t.Fatal(err)
 		}
-		return &sender{name: name, id: c.ID, scopeID: s.ID}
+		return &sender{name: name, id: c.ID, scopeID: s.ID, jobID: job.ID}
 	}
 	active := register("active", "10.96.0.1", false)
 	active.ip, active.cidr = "192.0.2.91", "10.96.1.0/24"
 	off := register("disabled", "10.96.0.2", true)
 	off.ip, off.cidr, off.status = "192.0.2.92", "10.96.2.0/24", http.StatusForbidden
-	// The unknown collector reports a run of the disabled collector's scope:
-	// the dispatcher refuses it before the scope's owner is compared.
-	unknown := &sender{name: "unknown", id: f.ID(), scopeID: off.scopeID, ip: "192.0.2.93", cidr: "10.96.3.0/24", status: http.StatusNotFound}
+	// The unknown collector reports a run of the disabled collector's scope
+	// and its job: the dispatcher refuses it before the owner is compared.
+	unknown := &sender{name: "unknown", id: f.ID(), scopeID: off.scopeID, jobID: off.jobID, ip: "192.0.2.93", cidr: "10.96.3.0/24", status: http.StatusNotFound}
 
 	count := func(t *testing.T, query string, args ...any) int {
 		t.Helper()
@@ -305,6 +311,29 @@ func TestCollectorEdgeRefusesUnknownOrDisabledCollector(t *testing.T) {
 				t.Errorf("COL-04 violated: subnets.report of the %s collector = %s, suggestions %d; want the dispatcher's refusal and none", s.name, raw, n)
 			}
 		}},
+		{JobsRequestSuffix, func(*sender) any { return map[string]any{} }, func(t *testing.T, s *sender, raw []byte) {
+			var r JobsResponse
+			decode(t, raw, &r)
+			if s.status == 0 {
+				if r.Error != "" || len(r.Jobs) != 1 || r.Jobs[0].ID != s.jobID {
+					t.Errorf("control: jobs.request = %s; want the collector's job", raw)
+				}
+			} else if r.Error != "not available" || len(r.Jobs) != 0 {
+				t.Errorf("COL-04 violated: jobs.request of the %s collector = %s; want error not available, no jobs", s.name, raw)
+			}
+		}},
+		{JobsStatusSuffix, func(s *sender) any { return JobStatusReport{JobID: s.jobID, Status: JobStatusRunning} }, func(t *testing.T, s *sender, raw []byte) {
+			var r map[string]string
+			decode(t, raw, &r)
+			running := count(t, `SELECT count(*) FROM discovery_job WHERE id = $1 AND status = 'running'`, s.jobID)
+			if s.status == 0 {
+				if r["status"] != "recorded" || running != 1 {
+					t.Errorf("control: jobs.status = %s, job running %d; want recorded", raw, running)
+				}
+			} else if r["error"] != "not available" || running != 0 {
+				t.Errorf("COL-04 violated: jobs.status of the %s collector = %s, job running %d; want the dispatcher's refusal and no change", s.name, raw, running)
+			}
+		}},
 	}
 	covered := make([]string, 0, len(cases))
 	for _, tc := range cases {
@@ -368,6 +397,9 @@ func TestCollectorEdgeRefusesUnknownOrDisabledCollector(t *testing.T) {
 	}
 	if n := count(t, `SELECT count(*) FROM discovery_scope WHERE organization_id = $1 AND last_run_at IS NOT NULL`, f.OrgA); n != 1 {
 		t.Errorf("scopes with a stored run: %d, want only the control's", n)
+	}
+	if n := count(t, `SELECT count(*) FROM discovery_job WHERE organization_id = $1 AND status <> 'pending'`, f.OrgA); n != 1 {
+		t.Errorf("discovery jobs moved on: %d, want only the control's", n)
 	}
 }
 

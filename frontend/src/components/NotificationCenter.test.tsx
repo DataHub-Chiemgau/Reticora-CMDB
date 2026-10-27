@@ -1,6 +1,7 @@
 /**
  * Tests for the notification center (UI-16): unread count, read and unread
- * entries, marking one or all as read.
+ * entries, marking one or all as read, and a failed load shown as such with
+ * a retry (F-348).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
@@ -27,6 +28,13 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function serverError() {
+  return new Response(JSON.stringify({ title: 'Internal Server Error', status: 500 }), {
+    status: 500,
+    headers: { 'Content-Type': 'application/problem+json' },
   });
 }
 
@@ -96,5 +104,57 @@ describe('NotificationCenter', () => {
         ),
       ).toBe(true),
     );
+  });
+
+  it('shows a failed load with a retry instead of "no notifications" and hides the count (F-348)', async () => {
+    let failing = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (failing) return serverError();
+        if (url.includes('unread=true')) return json(page([unread]));
+        return json(page([unread, read]));
+      }),
+    );
+    renderWithProviders(<NotificationCenter />);
+
+    // The unread count is unknown: no number, not "0 ungelesen".
+    const bell = await screen.findByRole('button', {
+      name: 'Benachrichtigungen öffnen (Anzahl ungelesener nicht verfügbar)',
+    });
+    expect(bell).not.toHaveTextContent(/\d/);
+    expect(screen.queryByRole('button', { name: /0 ungelesen/ })).toBeNull();
+    fireEvent.click(bell);
+
+    const panel = await screen.findByRole('dialog', { name: 'Benachrichtigungen' });
+    const alert = await within(panel).findByRole('alert');
+    expect(alert).toHaveTextContent('Die Benachrichtigungen konnten nicht geladen werden.');
+    await waitFor(() => expect(within(panel).queryByText('Wird geladen…')).toBeNull());
+    expect(within(panel).queryByText('Keine Benachrichtigungen.')).toBeNull();
+
+    // Retry reads both lists again; the panel then shows them and the count.
+    failing = false;
+    fireEvent.click(within(alert).getByRole('button', { name: 'Erneut versuchen' }));
+    await within(panel).findByText('Export fertig');
+    expect(within(panel).queryByRole('alert')).toBeNull();
+    expect(await screen.findByRole('button', { name: /1 ungelesen/ })).toHaveTextContent('1');
+  });
+
+  it('shows the error of the list although the unread count loaded', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).includes('unread=true') ? json(page([])) : serverError(),
+      ),
+    );
+    renderWithProviders(<NotificationCenter />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /0 ungelesen/ }));
+    const panel = await screen.findByRole('dialog', { name: 'Benachrichtigungen' });
+    const alert = await within(panel).findByRole('alert');
+    expect(alert).toHaveTextContent('Die Benachrichtigungen konnten nicht geladen werden.');
+    expect(within(alert).getByRole('button', { name: 'Erneut versuchen' })).toBeInTheDocument();
+    expect(within(panel).queryByText('Keine Benachrichtigungen.')).toBeNull();
   });
 });

@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
@@ -27,7 +26,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
@@ -78,7 +76,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -217,6 +214,9 @@ type Options struct {
 	// IngestQueue carries discovery records over ingest.> (REC-01); nil
 	// processes them in the request.
 	IngestQueue *discovery.NATSIngestQueue
+	// JobQueue runs the submitted job kinds on the JOBS work queue on NATS
+	// (TEC-14, jobkinds.go); nil runs them in the accepting process.
+	JobQueue *jobs.Queue
 	// Signup is the self-signup flow (TLC-01); nil answers 503.
 	Signup *signup.Service
 	// SignupProtection is the captcha, blocklist and per-IP limit of the
@@ -390,7 +390,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// Export and discovery jobs register in the generic job model (JOB-01).
 	var jobTracker jobs.Tracker
 	var bffJobs graphqlbff.JobSource
-	var historyJobs history.SnapshotJobs
+	historyHandler := history.NewHandler(repos.History)
 	// The generic job API (API-09) serves in both profiles; without a
 	// database it has an empty in-memory job table.
 	jobAPI := jobs.NewAPIHandler(jobs.NewService(jobs.NewMemoryRepository()))
@@ -423,13 +423,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 				return err
 			})
 		// A CI merge is a job (CI-12, JOB-01); bulk operations from 100
-		// ids on as well (API-08, JOB-04).
-		jobService.Register(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute})
-		jobService.Register(jobs.Kind{Name: history.SnapshotJobKind, MaxAttempts: 1, Timeout: 15 * time.Minute})
-		historyJobs = jobService
+		// ids on (API-08, JOB-04) and state snapshots as well, on the job
+		// queue when there is one (jobkinds.go, TEC-14).
 		if opts.CIService != nil {
-			opts.CIService.WithJobs(jobTracker).WithBulkJobs(jobService)
+			opts.CIService.WithJobs(jobTracker)
 		}
+		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -471,6 +470,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// duplicate is the CI-12 merge, a ci.merge job of its own (CH29).
 	if jobTracker != nil {
 		discoveryHandler.WithReviewJobs(jobTracker)
+		// Discovery jobs are generic jobs discovery.<job_type> whose
+		// status follows discovery_job (JOB-01, F-146).
+		discoveryHandler.WithJobTracker(jobTracker)
 	}
 	if opts.CIService != nil {
 		discoveryHandler.WithMerger(opts.CIService)
@@ -553,7 +555,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		composition.NewHandler(repos.Composition, opts.Dispatcher).
 			WithAssets(parentAssetLookup{repo: repos.Asset}),
 		override.NewHandler(repos.Override, opts.Dispatcher),
-		historyHandler(repos.History, historyJobs),
+		historyHandler,
 		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission),
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider,
@@ -712,6 +714,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	registry.MustRegister(collectors.NewGoCollector())
 	observability.RegisterWorkerMetrics(registry)
 	jobs.RegisterMetrics(registry)
+	audit.RegisterMetrics(registry)
 	override.RegisterMetrics(registry)
 	operator.RegisterMetrics(registry)
 	entitlement.RegisterMetrics(registry)
@@ -733,23 +736,16 @@ func routeAuditor(opts *Options) middleware.RouteAuditor {
 	if opts.AuditPool == nil {
 		return nil
 	}
-	return pgRouteAuditor{pool: opts.AuditPool, recorder: audit.NewPGRecorder()}
+	// Intents, entries and the scheduler's entries belong to the
+	// organization's chain (E-08, WP-504); the auditor reads the rows of
+	// the snapshot register in the principal's scope, so the entries of
+	// routes without a domain recorder hold old and new values (AUD-07,
+	// WP-505).
+	return audit.NewPGRouteAuditor(opts.AuditPool)
 }
 
-// pgRouteAuditor writes a route's audit entry org-wide on behalf of the
-// organization: the entry belongs to the organization's chain (E-08).
-type pgRouteAuditor struct {
-	pool     *pgxpool.Pool
-	recorder *audit.PGRecorder
-}
-
-func (a pgRouteAuditor) RecordRoute(ctx context.Context, entry *audit.Entry) error {
-	scope := database.OrgWideScope(entry.OrganizationID, "")
-	return database.WithTenant(ctx, a.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := a.recorder.Record(ctx, tx, *entry)
-		return err
-	})
-}
+// The production route auditor reads route snapshots (WP-505).
+var _ middleware.RouteSnapshotter = (*audit.PGRouteAuditor)(nil)
 
 // ciHandler builds the CI handler; without the event outbox it hands CI
 // events to the webhook dispatcher directly.
@@ -795,14 +791,4 @@ func (r reviewEvents) ReviewOpened(ctx context.Context, item *reviews.Item) {
 		Data: map[string]any{"id": item.ID, "kind": item.Kind, "object_key": item.ObjectKey}}); err != nil {
 		slog.Error("report opened review item", "item", item.ID, "error", err)
 	}
-}
-
-// historyHandler serves the history; with the job model the state snapshot
-// runs as a job (JOB-04).
-func historyHandler(repo history.Repository, snapshotJobs history.SnapshotJobs) *history.Handler {
-	h := history.NewHandler(repo)
-	if snapshotJobs != nil {
-		h.WithJobs(snapshotJobs)
-	}
-	return h
 }

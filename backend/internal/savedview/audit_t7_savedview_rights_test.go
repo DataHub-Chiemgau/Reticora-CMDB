@@ -1,20 +1,19 @@
 package savedview_test
 
-// Phase-1 acceptance audit, group T7-ui: REGRESSION test (passes today) for
-// the high test gap of WP-188 (VIE-01) "edit/delete rights": on PostgreSQL
-// through the production handler, following the documented contract
-// (api/openapi.yaml PATCH /saved-views/{id}: "a view shared org-wide is
-// editable by everybody, a role-shared one only by its owner"): an org
-// member edits an org-shared view (200, stored), a role member reads but can
-// neither PATCH nor DELETE a role-shared view (404, the database row
-// unchanged), another organization can neither read nor change it, and the
-// owner's DELETE answers 204 with a later GET 404. The finding "PATCH
-// without 'shared' silently unshares an org-shared view" is not codified
-// here.
+// Phase-1 acceptance audit, group T7-ui: REGRESSION test for the high test
+// gap of WP-188 (VIE-01) "edit/delete rights", on PostgreSQL through the
+// production handler. WP-518 adapts it to decision E-86 (transitional rule
+// option 1, F-335): only the owner changes or deletes a view; for everybody
+// else a shared view, org-wide or by role, is read-only. An org member reads
+// the org-shared view but its PATCH and DELETE answer 404 with the database
+// row unchanged, a role member reads but can neither PATCH nor DELETE a
+// role-shared view, another organization can neither read nor change it,
+// the owner's PATCH answers 200 and keeps the sharing, and the owner's DELETE
+// answers 204 with a later GET 404.
 //
 // Retest:
-//   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_04?sslmode=disable \
-//     go test -count=1 -v -run 'TestAuditT7SavedViewEditDeleteRights' ./internal/savedview/
+//   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/ratchet?sslmode=disable \
+//     go test -count=1 -v -run '^TestAuditT7SavedViewEditDeleteRights$' ./internal/savedview/
 
 import (
 	"bytes"
@@ -123,32 +122,44 @@ func TestAuditT7SavedViewEditDeleteRights(t *testing.T) {
 		}
 	}
 
-	// Documented contract: a view shared org-wide is editable by everybody.
-	if code, _, raw := v.call(v.f.OrgA, other, http.MethodPatch, "/api/v1/saved-views/"+orgShared, `{"name":"T7 org shared edited","shared":true}`); code != http.StatusOK {
-		t.Errorf("org member PATCH org-shared = %d, want 200 (%s)", code, raw)
-	}
-	if name, shared, exists := v.row(orgShared); !exists || name != "T7 org shared edited" || !shared {
-		t.Errorf("org member PATCH org-shared stored exists=%v name=%q shared=%v", exists, name, shared)
-	}
-
-	// Writers refused: a role-shared view only by its owner; never across
-	// organizations.
+	// Writers refused (E-86 option 1): every shared view only by its owner;
+	// never across organizations. The refusal is the 404 of a view the
+	// caller cannot see, before any validation of the body.
 	for _, tc := range []struct {
 		name, org, user, method, id, body string
 	}{
+		{"org member PATCH org-shared", v.f.OrgA, other, http.MethodPatch, orgShared, `{"name":"hijacked","shared":true}`},
+		{"org member PATCH org-shared unsharing", v.f.OrgA, other, http.MethodPatch, orgShared, `{"shared":false}`},
+		{"org member PATCH org-shared invalid body", v.f.OrgA, other, http.MethodPatch, orgShared, `{"name":"hijacked","columns":["secret"]}`},
+		{"org member DELETE org-shared", v.f.OrgA, other, http.MethodDelete, orgShared, ""},
 		{"role member PATCH role-shared", v.f.OrgA, member, http.MethodPatch, roleShared, `{"name":"hijacked","shared_with_roles":["` + role + `"]}`},
 		{"role member DELETE role-shared", v.f.OrgA, member, http.MethodDelete, roleShared, ""},
 		{"non-member PATCH role-shared", v.f.OrgA, other, http.MethodPatch, roleShared, `{"name":"hijacked"}`},
 		{"other organization PATCH org-shared", v.f.OrgB, orgB, http.MethodPatch, orgShared, `{"name":"hijacked","shared":true}`},
 		{"other organization DELETE org-shared", v.f.OrgB, orgB, http.MethodDelete, orgShared, ""},
 	} {
+		beforeName, beforeShared, _ := v.row(tc.id)
 		code, _, raw := v.call(tc.org, tc.user, tc.method, "/api/v1/saved-views/"+tc.id, tc.body)
-		if code != http.StatusNotFound && code != http.StatusForbidden {
-			t.Errorf("%s = %d, want 404/403 (%s)", tc.name, code, raw)
+		if code != http.StatusNotFound {
+			t.Errorf("%s = %d, want 404 (%s)", tc.name, code, raw)
 		}
-		if name, _, exists := v.row(tc.id); !exists || name == "hijacked" {
-			t.Errorf("%s changed the database row: exists=%v name=%q", tc.name, exists, name)
+		if name, shared, exists := v.row(tc.id); !exists || name != beforeName || shared != beforeShared {
+			t.Errorf("%s changed the database row: exists=%v name=%q shared=%v", tc.name, exists, name, shared)
 		}
+	}
+	if name, shared, _ := v.row(orgShared); name != "T7 org shared" || !shared {
+		t.Errorf("org-shared view after refused writes: name=%q shared=%v", name, shared)
+	}
+
+	// The owner edits the view; a PATCH without shared keeps the sharing.
+	if code, out, raw := v.call(v.f.OrgA, owner, http.MethodPatch, "/api/v1/saved-views/"+orgShared, `{"name":"T7 org shared edited"}`); code != http.StatusOK || out["shared"] != true {
+		t.Errorf("owner PATCH org-shared = %d, want 200 with shared=true (%s)", code, raw)
+	}
+	if name, shared, exists := v.row(orgShared); !exists || name != "T7 org shared edited" || !shared {
+		t.Errorf("owner PATCH org-shared stored exists=%v name=%q shared=%v", exists, name, shared)
+	}
+	if code, _, raw := v.call(v.f.OrgA, other, http.MethodGet, "/api/v1/saved-views/"+orgShared, ""); code != http.StatusOK {
+		t.Errorf("org member reads the edited org-shared view = %d, want 200 (%s)", code, raw)
 	}
 
 	// Owner delete: 204, then 404 for everyone.

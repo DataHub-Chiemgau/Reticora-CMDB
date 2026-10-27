@@ -437,6 +437,8 @@ var migrationDataChecks = map[string]dataCheck{
 	"attr_text_leakproof": {seedAttrText, attrTextDownQueuesJobs, attrTextUpQueuesRebuilds},
 	"attr_index_per_key":  {seedAttrIndexPerKey, attrIndexPerKeyDownQueuesJobs, attrIndexPerKeyUpQueuesKeyJobs},
 	"ci_change_aud03":     {seedCIChangeAUD03, ciChangeAUD03Down, ciChangeAUD03Up},
+	// The backfill of 000171 (WP-509) writes rows; its down keeps them.
+	"notification_default_channels": {seedDefaultChannels, defaultChannelsDown, defaultChannelsUp},
 }
 
 // The fixture of attr_text_leakproof (000162, WP-435): an organization with
@@ -739,6 +741,91 @@ func ciChangeAUD03Up(ctx context.Context, t *testing.T, conn *pgx.Conn) {
 		`DELETE FROM ci WHERE id = '`+rt167CI+`'`,
 		`DELETE FROM ci_type WHERE id = '`+rt167Type+`'`,
 		`DELETE FROM organization WHERE id = '`+rt167Org+`'`)
+}
+
+// The fixture of notification_default_channels (000171, WP-509, F-157):
+// organizations as they exist before the backfill. rt171Bare has no
+// channel; rt171Disabled a disabled in-app channel of its own name;
+// rt171Named a webhook channel named "In-App"; rt171Both also an e-mail
+// channel named "In-App (Standard)".
+const (
+	rt171Bare     = "c0de0171-0000-4000-8000-000000000001"
+	rt171Disabled = "c0de0171-0000-4000-8000-000000000002"
+	rt171Named    = "c0de0171-0000-4000-8000-000000000003"
+	rt171Both     = "c0de0171-0000-4000-8000-000000000004"
+	// The organization of migration 000054.
+	rt171Default = "00000000-0000-0000-0000-000000000001"
+)
+
+func seedDefaultChannels(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+	for i, org := range []string{rt171Bare, rt171Disabled, rt171Named, rt171Both} {
+		execAll(ctx, t, conn, fmt.Sprintf(`INSERT INTO organization (id, name, slug) VALUES ('%s', 'roundtrip 000171 %d', 'roundtrip-000171-%d')`,
+			org, i, i))
+	}
+	execAll(ctx, t, conn,
+		`INSERT INTO notification_channel (organization_id, name, kind, provider, enabled)
+			VALUES ('`+rt171Disabled+`', 'Mitteilungen', 'inapp', 'inapp', false),
+			       ('`+rt171Named+`', 'In-App', 'webhook', 'webhook', true),
+			       ('`+rt171Both+`', 'In-App', 'webhook', 'webhook', true),
+			       ('`+rt171Both+`', 'In-App (Standard)', 'email', 'central_smtp', true)`)
+}
+
+// defaultChannelsRows lists the channels of the fixture organizations and
+// of the default organization as org kind/provider/name/enabled; a unique
+// name suffix is cut to "…".
+func defaultChannelsRows(ctx context.Context, t *testing.T, conn *pgx.Conn) []string {
+	t.Helper()
+	rows, err := conn.Query(ctx, `SELECT CASE WHEN organization_id = $2 THEN 'default' ELSE right(organization_id::text, 1) END || ' ' || kind || '/' || provider || '/' ||
+			regexp_replace(name, '^In-App \(Standard [0-9a-f-]{36}\)$', 'In-App (Standard …)') || '/' || enabled
+		FROM notification_channel WHERE organization_id = ANY($1::uuid[]) ORDER BY 1`,
+		[]string{rt171Bare, rt171Disabled, rt171Named, rt171Both, rt171Default}, rt171Default)
+	if err != nil {
+		t.Fatalf("list notification_channel: %v", err)
+	}
+	got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("list notification_channel: %v", err)
+	}
+	return got
+}
+
+// defaultChannelsDown: the down removes nothing; the fixture is unchanged
+// and the default organization keeps the channel of the first up.
+func defaultChannelsDown(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+	want := []string{
+		"2 inapp/inapp/Mitteilungen/false",
+		"3 webhook/webhook/In-App/true",
+		"4 email/central_smtp/In-App (Standard)/true",
+		"4 webhook/webhook/In-App/true",
+		"default inapp/inapp/In-App/true",
+	}
+	if got := defaultChannelsRows(ctx, t, conn); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("down 000171 notification channels:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// defaultChannelsUp: the up gives every organization without an in-app
+// channel exactly one, enabled, under the first free name; a disabled
+// in-app channel stays the only one; no e-mail channel is created; the
+// default organization gets no second one.
+func defaultChannelsUp(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+	want := []string{
+		"1 inapp/inapp/In-App/true",
+		"2 inapp/inapp/Mitteilungen/false",
+		"3 inapp/inapp/In-App (Standard)/true",
+		"3 webhook/webhook/In-App/true",
+		"4 email/central_smtp/In-App (Standard)/true",
+		"4 inapp/inapp/In-App (Standard …)/true",
+		"4 webhook/webhook/In-App/true",
+		"default inapp/inapp/In-App/true",
+	}
+	if got := defaultChannelsRows(ctx, t, conn); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("up 000171 notification channels:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	execAll(ctx, t, conn, `DELETE FROM organization WHERE id IN ('`+rt171Bare+`', '`+rt171Disabled+`', '`+rt171Named+`', '`+rt171Both+`')`)
 }
 
 // TestAttrTextMigrationNeedsSuperuser covers the guard of migration 000162

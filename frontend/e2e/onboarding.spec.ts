@@ -20,6 +20,14 @@ import { keycloakOtp } from './support/totp';
 // resolved, an impact query and an export. The impact step sets a dependency
 // between two simulated CIs and expects it in the impact; a CI without any
 // relationship impacts nothing (WP-456, F-299).
+// WP-529: the registration starts at the link "Konto anlegen" of the login
+// page and the onboarding is reached over "Einrichtung fortsetzen" of the
+// dashboard (F-351). The scope confirmation is a mandatory step: the spec
+// waits for a suggestion, confirms it, checks the scope, the resolved item
+// and the progress 3 → 4 → 5; a resolve broken with page.route keeps the
+// progress at 3 and shows the error (F-177). The export file is loaded in
+// the browser over the signed download_url of the job; a tampered signature
+// is refused with 403 and fails the step (F-353).
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
 const SERVER = process.env.E2E_SERVER_URL || 'http://localhost:8080';
@@ -53,6 +61,29 @@ async function apiGet<T>(request: APIRequestContext, token: string, path: string
   });
   expect(res.ok(), `GET ${path}: ${res.status()}`).toBe(true);
   return (await res.json()) as T;
+}
+
+/**
+ * exportRows is the step "Export laden" (F-353): the browser loads the file
+ * of the export job over its signed download_url, without the bearer token,
+ * as the CI list does (WP-468); it returns the data rows and fails on any
+ * other answer than 200. The page fetches from the object store's own origin
+ * so that the answer does not depend on its CORS settings.
+ */
+async function exportRows(page: Page, downloadURL: string): Promise<string[]> {
+  const store = new URL(downloadURL).origin;
+  if (new URL(page.url()).origin !== store) {
+    await page.goto(`${store}/minio/health/live`);
+  }
+  const file = await page.evaluate(async (url) => {
+    const res = await fetch(url);
+    return { status: res.status, text: await res.text() };
+  }, downloadURL);
+  if (file.status !== 200) {
+    throw new Error(`GET download_url: ${file.status} ${file.text.slice(0, 200)}`);
+  }
+  // The first line is the header.
+  return file.text.trim().split('\n').slice(1);
 }
 
 /** verificationLink waits for the signup e-mail and returns its link. */
@@ -167,7 +198,10 @@ test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)'
   });
 
   test('self-signup, verification, trial, login and dashboard', async ({ page, request }) => {
-    await page.goto('/onboarding');
+    // The registration starts at the entry of the login page (F-351).
+    await page.goto('/login');
+    await page.getByRole('link', { name: 'Konto anlegen' }).click();
+    await page.waitForURL(/\/onboarding$/);
     await expect(
       page.getByRole('progressbar', { name: 'Fortschritt der Einrichtung' }),
     ).toHaveAttribute('aria-valuenow', '0');
@@ -191,6 +225,11 @@ test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)'
 
     await page.goto('/dashboard');
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
+    // Without a collector the dashboard leads back to the onboarding (F-351).
+    await expect(page.getByRole('link', { name: 'Einrichtung fortsetzen' })).toHaveAttribute(
+      'href',
+      '/onboarding',
+    );
     const token = await sessionToken(page);
     const org = await apiGet<{ name: string }>(request, token, '/org');
     expect(org.name).toBe(`Muster E2E ${stamp}`);
@@ -207,8 +246,25 @@ test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)'
     await keycloakLogin(page, /\/dashboard|\/onboarding/);
     const token = await sessionToken(page);
 
-    // Collector enrollment with the code the onboarding shows.
-    await page.goto('/onboarding');
+    // The CI count of the onboarding (GET /cis?limit=1) is held at 0 in this
+    // browser until the scope step is confirmed: the simulated fleet may
+    // arrive before the confirmation, and the progress has to show the step
+    // "Erste CIs" (4) before the real count completes it (5).
+    const onboardingCICount = (url: URL) =>
+      url.pathname === '/api/v1/cis' && url.search === '?limit=1';
+    await page.route(onboardingCICount, (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({
+            json: { data: [], total: 0, limit: 1, offset: 0, has_more: false },
+          })
+        : route.continue(),
+    );
+
+    // Collector enrollment with the code the onboarding shows; the onboarding
+    // is reached over the entry of the dashboard (F-351).
+    await page.goto('/dashboard');
+    await page.getByRole('link', { name: 'Einrichtung fortsetzen' }).click();
+    await page.waitForURL(/\/onboarding$/);
     await page.getByRole('button', { name: 'Enrollment-Code erzeugen' }).click();
     const code = (await page.locator('code').first().textContent())?.trim() ?? '';
     expect(code).not.toBe('');
@@ -241,24 +297,80 @@ test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)'
       stdio: 'inherit',
     });
 
-    // The flow advances by itself once the collector reports.
+    // Scope confirmation, a mandatory step (ABN-01 d, F-177): the collector
+    // reports its networks, the server offers them as scope_suggested.
+    type Suggestion = { id: string; payload: { cidr: string; collector_id: string } };
+    let suggestion: Suggestion | undefined;
+    await expect
+      .poll(
+        async () => {
+          const open = await apiGet<{ data: Suggestion[] }>(
+            request,
+            token,
+            '/review-items?kind=scope_suggested&status=open&limit=100',
+          );
+          suggestion = open.data[0];
+          return open.data.length;
+        },
+        { message: 'a scope suggestion of the collector', timeout: 120_000, intervals: [2_000] },
+      )
+      .toBeGreaterThan(0);
+    const { id: suggestionId, payload } = suggestion!;
+    const progress = page.getByRole('progressbar', { name: 'Fortschritt der Einrichtung' });
+    await expect(progress).toHaveAttribute('aria-valuenow', '3');
+    const row = page.getByRole('listitem').filter({ hasText: payload.cidr });
+    const confirm = row.getByRole('button', { name: 'Bestätigen' });
+    await expect(confirm).toBeVisible();
+
+    // Negative case: a broken resolve keeps the step and says so; the
+    // suggestion stays open.
+    const resolvePath = `**/api/v1/review-items/${suggestionId}/resolve`;
+    await page.route(resolvePath, (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          title: 'Internal Server Error',
+          status: 500,
+          detail: 'resolve broken by the onboarding suite',
+        }),
+      }),
+    );
+    await confirm.click();
     await expect(
-      page.getByRole('progressbar', { name: 'Fortschritt der Einrichtung' }),
-    ).not.toHaveAttribute('aria-valuenow', '2', { timeout: 120_000 });
-    // Confirm the reported networks, then continue.
-    const confirm = page.getByRole('button', { name: 'Bestätigen' });
-    if (
-      await confirm
-        .first()
-        .isVisible()
-        .catch(() => false)
-    ) {
-      await confirm.first().click();
-    }
-    const next = page.getByRole('button', { name: 'Weiter' });
-    if (await next.isVisible().catch(() => false)) {
-      await next.click();
-    }
+      page.getByRole('alert').filter({ hasText: 'Der Vorschlag wurde nicht übernommen' }),
+    ).toContainText('resolve broken by the onboarding suite');
+    await expect(progress).toHaveAttribute('aria-valuenow', '3');
+    await expect(row).toBeVisible();
+    expect(
+      (await apiGet<{ status: string }>(request, token, `/review-items/${suggestionId}`)).status,
+    ).toBe('open');
+    await page.unroute(resolvePath);
+
+    // Positive case: the confirmation creates the scope of the collector,
+    // resolves the item with accept and completes the step.
+    const resolved = page.waitForResponse(
+      (r) =>
+        r.url().endsWith(`/review-items/${suggestionId}/resolve`) &&
+        r.request().method() === 'POST',
+    );
+    await confirm.click();
+    expect((await resolved).status()).toBe(200);
+    await expect(progress).toHaveAttribute('aria-valuenow', '4');
+    const item = await apiGet<{ status: string; action?: string }>(
+      request,
+      token,
+      `/review-items/${suggestionId}`,
+    );
+    expect(item.status).toBe('resolved');
+    expect(item.action).toBe('accept');
+    const scopes = await apiGet<{ data: { target: string; collector_id: string }[] }>(
+      request,
+      token,
+      `/discovery-scopes?collector_id=${encodeURIComponent(payload.collector_id)}&limit=100`,
+    );
+    expect(scopes.data.map((s) => s.target)).toContain(payload.cidr);
+    await page.unroute(onboardingCICount);
 
     // The simulated fleet arrives as CIs.
     await expect
@@ -269,6 +381,7 @@ test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)'
       })
       .toBeGreaterThanOrEqual(SIMULATED_DEVICES);
     await expect(page.getByText(/CIs sind bereits in Ihrer CMDB/)).toBeVisible({ timeout: 30_000 });
+    await expect(progress).toHaveAttribute('aria-valuenow', '5');
 
     // A review item of the discovery is resolved in the inbox.
     await page.goto('/reviews');
@@ -381,9 +494,29 @@ test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)'
     // The file of the job, over its signed URL and without the bearer token
     // (WP-468, F-077); /api/v1/export/cis is deprecated.
     expect(done.download_url, 'signed download URL of the completed job').toBeTruthy();
-    const file = await request.get(done.download_url!);
-    expect(file.ok(), `GET download_url: ${file.status()}`).toBe(true);
-    const lines = (await file.text()).trim().split('\n');
-    expect(lines.length).toBeGreaterThan(SIMULATED_DEVICES);
+    const downloadURL = done.download_url!;
+    expect(new URL(downloadURL).searchParams.get('X-Amz-Signature')).toBeTruthy();
+
+    // Negative case (F-353): with a tampered signature the object store
+    // answers 403 and the step fails.
+    const signedDownload = (url: URL) => url.searchParams.has('X-Amz-Signature');
+    let tampered = 0;
+    await page.route(signedDownload, (route) => {
+      const url = new URL(route.request().url());
+      const signature = url.searchParams.get('X-Amz-Signature')!;
+      url.searchParams.set(
+        'X-Amz-Signature',
+        signature.slice(0, -1) + (signature.endsWith('0') ? '1' : '0'),
+      );
+      tampered++;
+      return route.continue({ url: url.toString() });
+    });
+    await expect(exportRows(page, downloadURL)).rejects.toThrow(/^GET download_url: 403\b/);
+    expect(tampered, 'the download went through the tampering route').toBe(1);
+    await page.unroute(signedDownload);
+
+    // Positive case: at least one data row per simulated device.
+    const rows = await exportRows(page, downloadURL);
+    expect(rows.length).toBeGreaterThanOrEqual(SIMULATED_DEVICES);
   });
 });

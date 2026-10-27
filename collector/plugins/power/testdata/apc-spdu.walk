@@ -1,0 +1,27 @@
+# APC MasterSwitch AP7900 (PowerNet-MIB sPDU), snmpwalk -On of
+# sPDUOutletControlTable (Index, Pending, Ctl, CtlName) and
+# sPDUOutletConfigTable (Index, PowerOnTime, Name, PowerOffTime).
+# sPDUOutletCtl: outletOn(1), outletOff(2), outletReboot(3).
+.1.3.6.1.2.1.1.1.0 = STRING: "APC Web/SNMP Management Card (MB:v3.9.2 PF:v3.9.4 MN:AP7900 HR:B2)"
+.1.3.6.1.4.1.318.1.1.4.4.2.1.1.1 = INTEGER: 1
+.1.3.6.1.4.1.318.1.1.4.4.2.1.1.2 = INTEGER: 2
+.1.3.6.1.4.1.318.1.1.4.4.2.1.1.3 = INTEGER: 3
+.1.3.6.1.4.1.318.1.1.4.4.2.1.2.1 = INTEGER: 2
+.1.3.6.1.4.1.318.1.1.4.4.2.1.2.2 = INTEGER: 2
+.1.3.6.1.4.1.318.1.1.4.4.2.1.2.3 = INTEGER: 2
+.1.3.6.1.4.1.318.1.1.4.4.2.1.3.1 = INTEGER: 1
+.1.3.6.1.4.1.318.1.1.4.4.2.1.3.2 = INTEGER: 2
+.1.3.6.1.4.1.318.1.1.4.4.2.1.3.3 = INTEGER: 1
+.1.3.6.1.4.1.318.1.1.4.4.2.1.4.1 = STRING: "fw01-A"
+.1.3.6.1.4.1.318.1.1.4.4.2.1.4.2 = STRING: "nas01 #2"
+.1.3.6.1.4.1.318.1.1.4.4.2.1.4.3 = STRING: "Outlet 3"
+.1.3.6.1.4.1.318.1.1.4.5.2.1.1.1 = INTEGER: 1
+.1.3.6.1.4.1.318.1.1.4.5.2.1.1.2 = INTEGER: 2
+.1.3.6.1.4.1.318.1.1.4.5.2.1.1.3 = INTEGER: 3
+.1.3.6.1.4.1.318.1.1.4.5.2.1.2.1 = INTEGER: 0
+.1.3.6.1.4.1.318.1.1.4.5.2.1.2.2 = INTEGER: 0
+.1.3.6.1.4.1.318.1.1.4.5.2.1.2.3 = INTEGER: 0
+.1.3.6.1.4.1.318.1.1.4.5.2.1.3.1 = STRING: "fw01-A"
+.1.3.6.1.4.1.318.1.1.4.5.2.1.3.2 = STRING: "nas01 #2"
+.1.3.6.1.4.1.318.1.1.4.5.2.1.3.3 = STRING: "Outlet 3"
+.1.3.6.1.4.1.318.1.1.4.5.2.1.4.1 = INTEGER: 0

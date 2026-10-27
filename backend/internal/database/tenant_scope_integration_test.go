@@ -273,7 +273,8 @@ func tracedPool(t *testing.T, app *pgxpool.Pool) (*pgxpool.Pool, *sqlLog) {
 //   - a failed statement whose error was swallowed rolls everything back
 //     (ErrTxAborted); a savepoint keeps the transaction usable after a
 //     unique violation;
-//   - AfterCommit runs after the commit only, detached from the transaction.
+//   - AfterCommit runs after the commit only, detached from the transaction;
+//     AfterCommitBatch drops the items of a savepoint that rolled back.
 func TestContextTxJoin(t *testing.T) {
 	ctx, app := seedScopeFixture(t)
 	pool, log := tracedPool(t, app)
@@ -461,6 +462,43 @@ func TestContextTxJoin(t *testing.T) {
 	if clients("join-swallowed-inside") != 0 || clients("join-swallowed-after") != 1 {
 		t.Errorf("after the savepoint with a swallowed error: clients %d inside (want 0), %d after (want 1)",
 			clients("join-swallowed-inside"), clients("join-swallowed-after"))
+	}
+
+	// AfterCommitBatch (WP-489): the items of a savepoint that rolled back
+	// leave the batch, a batch opened under it goes with it; the others
+	// reach fn once after the commit.
+	var batches []string
+	collect := func(_ context.Context, items []any) {
+		parts := make([]string, 0, len(items))
+		for _, item := range items {
+			parts = append(parts, item.(string))
+		}
+		batches = append(batches, strings.Join(parts, "+"))
+	}
+	batchErr := database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
+		database.AfterCommitBatch(ctx, "kept", "before", collect)
+		spErr := database.Savepoint(ctx, func(ctx context.Context) error {
+			database.AfterCommitBatch(ctx, "kept", "undone", collect)
+			database.AfterCommitBatch(ctx, "opened", "undone", collect)
+			return insertClient(ctx, scopeClient1, "join-batch-duplicate")
+		})
+		if spErr == nil {
+			t.Error("savepoint with a duplicate client did not fail")
+		}
+		if spErr = database.Savepoint(ctx, func(ctx context.Context) error {
+			database.AfterCommitBatch(ctx, "opened", "released", collect)
+			return nil
+		}); spErr != nil {
+			t.Errorf("released savepoint: %v", spErr)
+		}
+		database.AfterCommitBatch(ctx, "kept", "after", collect)
+		return nil
+	})
+	if batchErr != nil {
+		t.Fatalf("batch transaction: %v", batchErr)
+	}
+	if strings.Join(batches, ",") != "before+after,released" {
+		t.Errorf("batches after the savepoints: %v, want before+after,released", batches)
 	}
 
 	// A rollback drops the callbacks.

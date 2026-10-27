@@ -78,6 +78,13 @@ func readIngestItems(w http.ResponseWriter, r *http.Request) ([]IngestItem, bool
 	return items, true
 }
 
+// typedValueFields are the DeviceRecord fields that only carry a value of a
+// typed CI column. A malformed value there does not refuse the batch: like
+// every typed value, reconciliation drops it and counts it in
+// invalid_values, and the rest of the record is stored (CI-03, MET-11,
+// WP-501).
+var typedValueFields = map[string]bool{"identity.hardware_uuid": true, "identity.primary_mac": true}
+
 // ingestItems validates a body and maps it onto ingest items; a refusal
 // returns its HTTP status and message. The HTTP ingest and the collectors'
 // edge channel share it.
@@ -106,6 +113,9 @@ func (body *ingestBody) ingestItems() (items []IngestItem, status int, msg strin
 		items = make([]IngestItem, 0, len(body.Records))
 		for i := range body.Records {
 			for _, v := range body.Records[i].Validate() {
+				if typedValueFields[v.Field] {
+					continue
+				}
 				violations = append(violations, fmt.Sprintf("records[%d].%s", i, v))
 			}
 			items = append(items, itemFromRecord(&body.Records[i]))

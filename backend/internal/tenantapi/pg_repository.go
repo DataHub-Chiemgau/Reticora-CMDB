@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
@@ -683,6 +684,23 @@ func (r *PGRepository) CreateRoom(ctx context.Context, rm *Room) error {
 func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req UpdateRoomRequest) (*Room, error) {
 	var rm *Room
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// The row lock orders concurrent editors: the second one reads the
+		// first one's updated_at and fails its If-Match (F-342). A room
+		// outside the scope is "not found" before any other check.
+		var current time.Time
+		err := tx.QueryRow(ctx, "SELECT updated_at FROM room WHERE organization_id = $1 AND id = $2 AND "+roomVisible+" FOR UPDATE", orgID, id).Scan(&current)
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("not found")
+		}
+		if err != nil {
+			return err
+		}
+		if req.IfMatch != nil && !sameRoomVersion(current, *req.IfMatch) {
+			return errRoomChanged
+		}
+		if invalid := checkLayoutCIs(ctx, tx, orgID, req.Layout); invalid != nil {
+			return invalid
+		}
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -702,15 +720,14 @@ func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req Upd
 			pos++
 		}
 		if req.Layout != nil {
-			layoutJSON, err := json.Marshal(req.Layout)
-			if err != nil {
-				return fmt.Errorf("marshal room layout: %w", err)
+			layoutJSON, marshalErr := json.Marshal(req.Layout)
+			if marshalErr != nil {
+				return fmt.Errorf("marshal room layout: %w", marshalErr)
 			}
 			sets = append(sets, fmt.Sprintf("layout = $%d::jsonb", pos))
 			args = append(args, string(layoutJSON))
 			pos++
 		}
-		var err error
 		if len(sets) == 0 {
 			rm, err = scanRoom(tx.QueryRow(ctx, "SELECT "+roomCols+" FROM room WHERE organization_id = $1 AND id = $2 AND "+roomVisible, orgID, id))
 		} else {
@@ -728,6 +745,41 @@ func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req Upd
 		return requireVisible(ctx, tx, "room", roomVisible, id)
 	})
 	return rm, err
+}
+
+// checkLayoutCIs refuses a layout key that is not a CI of the organization
+// visible in the transaction's tenant scope (422, F-341): the CI policies
+// filter the lookup, so a CI of another client counts as unknown.
+func checkLayoutCIs(ctx context.Context, tx pgx.Tx, orgID string, layout map[string]LayoutPosition) error {
+	if len(layout) == 0 {
+		return nil
+	}
+	keys := layoutKeys(layout)
+	ids := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if !audit.IsUUID(k) {
+			return unknownLayoutCI(k)
+		}
+		ids = append(ids, k)
+	}
+	rows, err := tx.Query(ctx, "SELECT id::text FROM ci WHERE organization_id = $1 AND id = ANY($2::uuid[])", orgID, ids)
+	if err != nil {
+		return fmt.Errorf("check layout CIs: %w", err)
+	}
+	known, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("check layout CIs: %w", err)
+	}
+	seen := make(map[string]bool, len(known))
+	for _, id := range known {
+		seen[id] = true
+	}
+	for _, k := range keys {
+		if !seen[k] {
+			return unknownLayoutCI(k)
+		}
+	}
+	return nil
 }
 
 func (r *PGRepository) DeleteRoom(ctx context.Context, orgID, id string) error {

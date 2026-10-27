@@ -79,7 +79,7 @@ function Progress({ current }: { current: OnboardingStep | 'done' }) {
                 ? 'text-green-700 dark:text-green-400'
                 : step === current
                   ? 'font-semibold text-primary'
-                  : 'text-gray-500'
+                  : 'text-muted'
             }
           >
             {i < index ? '✓ ' : `${i + 1}. `}
@@ -139,7 +139,7 @@ function SignupStep() {
         onChange={(e) => setForm({ ...form, display_name: e.target.value })}
       />
       {submit.error ? (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           {errorMessage(submit.error)}
         </p>
       ) : null}
@@ -198,7 +198,7 @@ function VerifyStep({ token }: { token: string }) {
         onChange={(e) => setPassword(e.target.value)}
       />
       {verify.error ? (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           {verify.error instanceof ApiError && verify.error.status === 410
             ? t('onboarding.verify.expired')
             : verify.error instanceof ApiError && verify.error.status === 404
@@ -231,7 +231,7 @@ function CollectorStep() {
           <code className="block rounded bg-gray-100 p-3 font-mono text-base dark:bg-gray-800">
             {code.data.code}
           </code>
-          <p className="mt-2 text-gray-500">{t('onboarding.collector.waiting')}</p>
+          <p className="mt-2 text-muted">{t('onboarding.collector.waiting')}</p>
         </div>
       ) : (
         <Button onClick={() => code.mutate()} loading={code.isPending}>
@@ -239,7 +239,7 @@ function CollectorStep() {
         </Button>
       )}
       {code.error ? (
-        <p role="alert" className="text-red-600">
+        <p role="alert" className="text-danger">
           {errorMessage(code.error)}
         </p>
       ) : null}
@@ -247,7 +247,13 @@ function CollectorStep() {
   );
 }
 
-function ScopesStep({ onSkip }: { onSkip: () => void }) {
+/**
+ * ScopesStep lists the networks the collector reported. A confirmed network
+ * completes the step (ABN-01 d, F-177); further suggestions stay open in the
+ * review inbox. A failed resolve shows the server's message and keeps the
+ * suggestion.
+ */
+function ScopesStep({ onDone }: { onDone: () => void }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const suggestions = useQuery({
@@ -257,14 +263,22 @@ function ScopesStep({ onSkip }: { onSkip: () => void }) {
   const resolve = useMutation({
     mutationFn: ({ id, action }: { id: string; action: 'accept' | 'dismiss' }) =>
       scopeSuggestionApi.resolve(id, action),
+    onSuccess: (_data, { action }) => {
+      if (action === 'accept') onDone();
+    },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['onboarding'] }),
   });
   const items = suggestions.data?.data ?? [];
   return (
     <div className="space-y-3 text-sm">
       <p>{t('onboarding.scopes.hint')}</p>
+      {resolve.error ? (
+        <p role="alert" className="text-danger">
+          {t('onboarding.scopes.resolveFailed', { message: errorMessage(resolve.error) })}
+        </p>
+      ) : null}
       {items.length === 0 ? (
-        <p className="text-gray-500">{t('onboarding.scopes.waiting')}</p>
+        <p className="text-muted">{t('onboarding.scopes.waiting')}</p>
       ) : (
         <ul className="space-y-2">
           {items.map((item) => (
@@ -291,7 +305,7 @@ function ScopesStep({ onSkip }: { onSkip: () => void }) {
           ))}
         </ul>
       )}
-      <Button variant="ghost" size="sm" onClick={onSkip}>
+      <Button variant="ghost" size="sm" onClick={onDone}>
         {t('onboarding.scopes.continue')}
       </Button>
     </div>
@@ -327,7 +341,8 @@ export function OnboardingPage() {
 
   const step = currentStep(authenticated, token !== '', {
     collectorDone: (collectors.data?.total ?? 0) > 0,
-    // The scopes are confirmed once none is open any more (or skipped).
+    // The scopes are confirmed once one is accepted (or the step skipped),
+    // or none is open any more and the first CIs are there.
     scopesDone:
       scopesConfirmed ||
       (scopes.isSuccess && (scopes.data?.data.length ?? 0) === 0 && (cis.data?.total ?? 0) > 0),
@@ -347,7 +362,7 @@ export function OnboardingPage() {
         {step === 'signup' ? <SignupStep /> : null}
         {step === 'verify' ? <VerifyStep token={token} /> : null}
         {step === 'collector' ? <CollectorStep /> : null}
-        {step === 'scopes' ? <ScopesStep onSkip={() => setScopesConfirmed(true)} /> : null}
+        {step === 'scopes' ? <ScopesStep onDone={() => setScopesConfirmed(true)} /> : null}
         {step === 'cis' ? <p className="text-sm">{t('onboarding.cis.waiting')}</p> : null}
         {step === 'done' ? (
           <div className="space-y-3 text-sm">

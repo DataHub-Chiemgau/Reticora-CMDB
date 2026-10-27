@@ -36,6 +36,9 @@ type DerivedRelationship struct {
 	Confidence float64 `json:"confidence"`
 	// Attributes describe the edge (outlet, feed, redundancy).
 	Attributes map[string]any `json:"attributes,omitempty"`
+	// Refresh are the attributes a re-confirmation of the stored edge
+	// sets; a nil value removes one (WP-498). Nil leaves them unchanged.
+	Refresh map[string]any `json:"-"`
 }
 
 // NeighborIndex resolves discovered neighbor identifiers to existing CI ids.
@@ -403,10 +406,8 @@ func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d Derive
 	if finder, ok := h.repo.(edgeFinder); ok {
 		id, source, found, err := finder.DiscoveryEdge(ctx, orgID, d.SourceCIID, d.TargetCIID, d.RelType)
 		if err == nil && found {
-			if confirmer, ok := h.relRepo.(relationship.Confirmer); ok && relationship.MayChange(RelationshipSource, source) {
-				if cerr := confirmer.Confirm(ctx, orgID, id, &confidence); cerr != nil {
-					slog.Warn("re-confirm discovery edge", "relationship_id", id, "error", cerr)
-				}
+			if relationship.MayChange(RelationshipSource, source) {
+				h.reconfirm(ctx, orgID, id, &confidence, d.Refresh)
 			}
 			return false
 		}
@@ -416,10 +417,8 @@ func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d Derive
 			if rel.SourceCIID != d.SourceCIID || rel.TargetCIID != d.TargetCIID || rel.RelType != d.RelType {
 				continue
 			}
-			if confirmer, ok := h.relRepo.(relationship.Confirmer); ok && relationship.MayChange(RelationshipSource, rel.Source) {
-				if cerr := confirmer.Confirm(ctx, orgID, rel.ID, &confidence); cerr != nil {
-					slog.Warn("re-confirm discovery edge", "relationship_id", rel.ID, "error", cerr)
-				}
+			if relationship.MayChange(RelationshipSource, rel.Source) {
+				h.reconfirm(ctx, orgID, rel.ID, &confidence, d.Refresh)
 			}
 			return false
 		}
@@ -437,6 +436,20 @@ func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d Derive
 		return false
 	}
 	return true
+}
+
+// reconfirm re-confirms one discovery edge; with refresh its attributes
+// too, which only a BatchConfirmer can (WP-498).
+func (h *Handler) reconfirm(ctx context.Context, orgID, id string, confidence *float64, refresh map[string]any) {
+	if refresh != nil {
+		h.confirmEdges(ctx, orgID, []relationship.Confirmation{{ID: id, Confidence: confidence, Attributes: refresh}})
+		return
+	}
+	if confirmer, ok := h.relRepo.(relationship.Confirmer); ok {
+		if err := confirmer.Confirm(ctx, orgID, id, confidence); err != nil {
+			slog.Warn("re-confirm discovery edge", "relationship_id", id, "error", err)
+		}
+	}
 }
 
 // ReviewKindUnknownRelationship is the review of a neighbor reported with

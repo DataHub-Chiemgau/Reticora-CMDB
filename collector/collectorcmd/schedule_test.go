@@ -98,6 +98,50 @@ func TestCronSchedule(t *testing.T) {
 	}
 }
 
+// TestCronInOrganizationTimezone covers WP-495 (DIS-10, E-84 option A,
+// F-266): a cron schedule is evaluated in the organization's time zone;
+// '0 2 * * *' in Europe/Berlin is due at 02:00 local time in summer (CEST,
+// 00:00 UTC) and winter time (CET, 01:00 UTC), the night the clocks go back
+// runs once, and the scope a discovery pass builds carries the zone.
+func TestCronInOrganizationTimezone(t *testing.T) {
+	berlin := scheduleLocation("Europe/Berlin")
+	if berlin.String() != "Europe/Berlin" {
+		t.Errorf("location %s, want Europe/Berlin", berlin)
+	}
+	sched := parseSchedule("0 2 * * *", 24*time.Hour)
+	sched.loc = berlin
+	for _, tc := range []struct{ name, after, want string }{
+		{"summer time (CEST)", "2026-07-14T10:07:00Z", "2026-07-15T00:00:00Z"},
+		{"winter time (CET)", "2026-01-14T10:07:00Z", "2026-01-15T01:00:00Z"},
+		{"night the clocks go back runs once", "2026-10-25T00:00:00Z", "2026-10-26T01:00:00Z"},
+		{"night the clocks go forward", "2026-03-28T10:00:00Z", "2026-03-30T00:00:00Z"},
+	} {
+		after, _ := time.Parse(time.RFC3339, tc.after)
+		next := sched.next(after)
+		if got := next.UTC().Format(time.RFC3339); got != tc.want {
+			t.Errorf("%s: next after %s = %s, want %s", tc.name, tc.after, got, tc.want)
+		}
+		if local := next.In(berlin); tc.name != "night the clocks go forward" && (local.Hour() != 2 || local.Minute() != 0) {
+			t.Errorf("%s: due at %s local time, want 02:00", tc.name, local.Format(time.RFC3339))
+		}
+	}
+	// Without a zone (or with an unknown one) cron stays UTC.
+	for _, name := range []string{"", "Mars/Olympus"} {
+		s := parseSchedule("0 2 * * *", 24*time.Hour)
+		s.loc = scheduleLocation(name)
+		if got := s.next(time.Date(2026, 7, 14, 10, 7, 0, 0, time.UTC)).UTC().Format(time.RFC3339); got != "2026-07-15T02:00:00Z" {
+			t.Errorf("zone %q: next %s, want 2026-07-15T02:00:00Z", name, got)
+		}
+	}
+	t.Cleanup(func() { collectorScopes = &scopeCache{} })
+	collectorScopes.set([]collectorScope{{ID: "s-1", Kind: "host", Target: "192.0.2.1", Schedule: "0 2 * * *", Plugins: []string{"sweep"},
+		Timezone: "Europe/Berlin"}}, nil)
+	pass := discoveryPasses(&collectorConfig{})[0]
+	if got := pass.protocolSchedule("sweep").next(time.Date(2026, 1, 14, 10, 7, 0, 0, time.UTC)).UTC().Format(time.RFC3339); got != "2026-01-15T01:00:00Z" {
+		t.Errorf("scope pass in Europe/Berlin: next sweep %s, want 2026-01-15T01:00:00Z", got)
+	}
+}
+
 // recordingPlugin answers the probe for the listed hosts and records the
 // targets it was given.
 type recordingPlugin struct {

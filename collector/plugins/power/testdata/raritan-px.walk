@@ -1,0 +1,21 @@
+# Raritan PX3 (PDU2-MIB), snmpwalk -On of outletConfigurationTable and
+# outletSwitchControlTable of PDU 1, shortened to the columns the plugin
+# reads and their neighbours. Index: pduId.outletId. outletSwitchingState:
+# on(7), off(8).
+.1.3.6.1.2.1.1.1.0 = STRING: "Raritan PX3-5190R"
+.1.3.6.1.4.1.13742.6.3.5.3.1.2.1.1 = STRING: "1"
+.1.3.6.1.4.1.13742.6.3.5.3.1.2.1.2 = STRING: "2"
+.1.3.6.1.4.1.13742.6.3.5.3.1.2.1.3 = STRING: "3"
+.1.3.6.1.4.1.13742.6.3.5.3.1.2.1.4 = STRING: "4"
+.1.3.6.1.4.1.13742.6.3.5.3.1.3.1.1 = STRING: "esx01 PSU1"
+.1.3.6.1.4.1.13742.6.3.5.3.1.3.1.2 = STRING: ""
+.1.3.6.1.4.1.13742.6.3.5.3.1.3.1.3 = STRING: "esx02 PSU1"
+.1.3.6.1.4.1.13742.6.3.5.3.1.3.1.4 = STRING: "Outlet 4"
+.1.3.6.1.4.1.13742.6.3.5.3.1.4.1.1 = INTEGER: 1
+.1.3.6.1.4.1.13742.6.4.1.2.1.2.1.1 = INTEGER: 1
+.1.3.6.1.4.1.13742.6.4.1.2.1.2.1.3 = INTEGER: 1
+.1.3.6.1.4.1.13742.6.4.1.2.1.3.1.1 = INTEGER: 7
+.1.3.6.1.4.1.13742.6.4.1.2.1.3.1.2 = INTEGER: 7
+.1.3.6.1.4.1.13742.6.4.1.2.1.3.1.3 = INTEGER: 8
+.1.3.6.1.4.1.13742.6.4.1.2.1.3.1.4 = INTEGER: 7
+.1.3.6.1.4.1.13742.6.4.1.2.1.4.1.1 = INTEGER: 0

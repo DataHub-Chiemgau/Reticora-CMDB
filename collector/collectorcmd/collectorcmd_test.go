@@ -818,13 +818,69 @@ type fakeAddr string
 func (a fakeAddr) Network() string { return "ip+net" }
 func (a fakeAddr) String() string  { return string(a) }
 
+// TestLocalSubnetsForScopeSuggestions covers INS-06: the subnets of the
+// host's interfaces become scope suggestions; loopback, link-local, host
+// routes and the networks of container and bridge interfaces (Docker,
+// bridges, veth, CNI, Flannel, Calico) do not (F-265).
 func TestLocalSubnetsForScopeSuggestions(t *testing.T) {
-	addrs := func() ([]net.Addr, error) {
-		return []net.Addr{fakeAddr("127.0.0.1/8"), fakeAddr("192.168.10.23/24"), fakeAddr("192.168.10.24/24"),
-			fakeAddr("169.254.1.2/16"), fakeAddr("fe80::1/64"), fakeAddr("10.8.0.1/32"), fakeAddr("172.16.4.9/22")}, nil
+	interfaces := func() ([]localInterface, error) {
+		return []localInterface{
+			{Name: "lo", Addrs: []net.Addr{fakeAddr("127.0.0.1/8")}},
+			{Name: "eth0", Addrs: []net.Addr{fakeAddr("192.168.10.23/24"), fakeAddr("192.168.10.24/24"),
+				fakeAddr("169.254.1.2/16"), fakeAddr("fe80::1/64")}},
+			{Name: "docker0", Addrs: []net.Addr{fakeAddr("172.17.0.1/16")}},
+			{Name: "br-x", Addrs: []net.Addr{fakeAddr("172.18.0.1/16")}},
+			{Name: "veth1a2b3c", Addrs: []net.Addr{fakeAddr("172.19.0.1/16")}},
+			{Name: "cni0", Addrs: []net.Addr{fakeAddr("10.244.0.1/24")}},
+			{Name: "flannel.1", Addrs: []net.Addr{fakeAddr("10.244.1.0/24")}},
+			{Name: "cali12ab", Addrs: []net.Addr{fakeAddr("10.245.0.1/24")}},
+			{Name: "wg0", Addrs: []net.Addr{fakeAddr("10.8.0.1/32")}},
+			{Name: "ens192", Addrs: []net.Addr{fakeAddr("172.16.4.9/22")}},
+		}, nil
 	}
-	if got := strings.Join(localSubnets(addrs), ","); got != "192.168.10.0/24,172.16.4.0/22" {
-		t.Errorf("local subnets = %s", got)
+	if got := strings.Join(localSubnets(interfaces), ","); got != "192.168.10.0/24,172.16.4.0/22" {
+		t.Errorf("local subnets = %s, want 192.168.10.0/24,172.16.4.0/22 (no container or bridge networks)", got)
+	}
+	failing := func() ([]localInterface, error) { return nil, errors.New("no interfaces") }
+	if got := localSubnets(failing); len(got) != 0 {
+		t.Errorf("local subnets without interfaces = %v", got)
+	}
+}
+
+// TestScopeLimitContract: the collector expands as many addresses per
+// scope as the server accepts (testdata/scope-limits.json, checked
+// against discovery.MaxScopeAddresses by the backend's test; F-106).
+func TestScopeLimitContract(t *testing.T) {
+	raw, err := os.ReadFile("testdata/scope-limits.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var limits struct {
+		MaxScopeAddresses int `json:"max_scope_addresses"`
+	}
+	if err := json.Unmarshal(raw, &limits); err != nil {
+		t.Fatal(err)
+	}
+	if limits.MaxScopeAddresses != maxScopeAddresses {
+		t.Fatalf("maxScopeAddresses = %d, scope-limits.json = %d: the collector cuts scopes the server accepts",
+			maxScopeAddresses, limits.MaxScopeAddresses)
+	}
+	// The expansion holds exactly the limit: a /16 without network and
+	// broadcast address, a full /16 range, and a cut larger CIDR.
+	if got, cut := expandCIDR("10.1.0.0/16"); len(got) != 65534 || cut || got[0] != "10.1.0.1" || got[len(got)-1] != "10.1.255.254" {
+		t.Errorf("expand /16 = %d addresses (truncated %v)", len(got), cut)
+	}
+	if got, cut := scopeTargets(&collectorScope{Kind: "range", Target: "10.2.0.0-10.2.255.255"}); len(got) != maxScopeAddresses || cut {
+		t.Errorf("expand range of %d addresses = %d (truncated %v)", maxScopeAddresses, len(got), cut)
+	}
+	if got, cut := expandCIDR("10.4.0.0/14"); len(got) != maxScopeAddresses || !cut {
+		t.Errorf("expand /14 = %d addresses (truncated %v), want %d and truncated", len(got), cut, maxScopeAddresses)
+	}
+	if got, cut := expandCIDR("192.0.2.8/31"); strings.Join(got, ",") != "192.0.2.8,192.0.2.9" || cut {
+		t.Errorf("expand /31 = %v", got)
+	}
+	if got, cut := expandCIDR("192.0.2.9"); strings.Join(got, ",") != "192.0.2.9" || cut {
+		t.Errorf("expand host = %v", got)
 	}
 }
 
@@ -1347,5 +1403,84 @@ func TestBackpressurePausesCollectionUntilTheSpoolDrains(t *testing.T) {
 	}
 	if stats, _ = up.spool.Stats(ctx); stats.DroppedMessages != 0 {
 		t.Fatalf("backpressure lost data: %+v", stats)
+	}
+}
+
+// TestBootstrapEnrollmentFromEnvironment covers WP-493 (COL-04, F-101):
+// RETICORA_ENROLL_TOKEN and RETICORA_CLOUD_URL only together; an existing
+// keystore suppresses the enrollment; errors never carry the token.
+func TestBootstrapEnrollmentFromEnvironment(t *testing.T) {
+	ctx := context.Background()
+	envOf := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	unexpected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected enrollment request %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer unexpected.Close()
+
+	t.Setenv("RETICORA_CREDENTIALS_PATH", filepath.Join(t.TempDir(), "credentials.json"))
+	if enrolled, err := bootstrapEnrollment(ctx, envOf(nil)); enrolled || err != nil {
+		t.Errorf("without the variables: enrolled %v, %v", enrolled, err)
+	}
+	// Only one of the two variables: start error with a hint.
+	for _, m := range []map[string]string{
+		{"RETICORA_ENROLL_TOKEN": "TOKEN-ONLY-1234"},
+		{"RETICORA_CLOUD_URL": unexpected.URL},
+		{"RETICORA_ENROLL_TOKEN": "TOKEN-ONLY-1234", "RETICORA_CLOUD_URL": "  "},
+	} {
+		_, err := bootstrapEnrollment(ctx, envOf(m))
+		if !errors.Is(err, errEnrollEnvIncomplete) || !strings.Contains(err.Error(), "RETICORA_ENROLL_TOKEN") ||
+			!strings.Contains(err.Error(), "RETICORA_CLOUD_URL") || !strings.Contains(err.Error(), "together") {
+			t.Errorf("%v: err = %v, want a hint that both variables are needed", m, err)
+		}
+		if err != nil && strings.Contains(err.Error(), "TOKEN-ONLY-1234") {
+			t.Errorf("%v: the error carries the token: %v", m, err)
+		}
+	}
+
+	// First start: enrollment, identity stored with mode 0600.
+	orgID, colID := "6f0b6f0e-0000-4000-8000-0000000000d1", "6f0b6f0e-0000-4000-8000-0000000000d2"
+	srv := fakeEnrollServer(t, "GOOD-CODE-5678", orgID, colID)
+	path := filepath.Join(t.TempDir(), "sub", "credentials.json")
+	t.Setenv("RETICORA_CREDENTIALS_PATH", path)
+	enrolled, err := bootstrapEnrollment(ctx, envOf(map[string]string{"RETICORA_ENROLL_TOKEN": "GOOD-CODE-5678", "RETICORA_CLOUD_URL": srv.URL + "/"}))
+	if !enrolled || err != nil {
+		t.Fatalf("first enrollment: enrolled %v, %v", enrolled, err)
+	}
+	st, err := os.Stat(path)
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("keystore %s: %v %v", path, st, err)
+	}
+	creds, err := (&keystore.FileStore{Path: path}).Load(ctx)
+	if err != nil || creds.DeviceID != colID || creds.Metadata["server_url"] != srv.URL {
+		t.Errorf("stored identity %+v, %v", creds, err)
+	}
+	// An existing keystore wins: no enrollment request.
+	if enrolled, err = bootstrapEnrollment(ctx, envOf(map[string]string{"RETICORA_ENROLL_TOKEN": "GOOD-CODE-5678", "RETICORA_CLOUD_URL": unexpected.URL})); enrolled || err != nil {
+		t.Errorf("with a keystore: enrolled %v, %v", enrolled, err)
+	}
+
+	// A damaged keystore is not replaced.
+	damaged := filepath.Join(t.TempDir(), "credentials.json")
+	if err = os.WriteFile(damaged, []byte("{corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RETICORA_CREDENTIALS_PATH", damaged)
+	if _, err = bootstrapEnrollment(ctx, envOf(map[string]string{"RETICORA_ENROLL_TOKEN": "GOOD-CODE-5678", "RETICORA_CLOUD_URL": unexpected.URL})); err == nil {
+		t.Error("a damaged keystore was accepted")
+	}
+	if data, _ := os.ReadFile(damaged); string(data) != "{corrupt" {
+		t.Errorf("the damaged keystore was overwritten: %q", data)
+	}
+
+	// A refused token: error with the cause, without the token, no keystore.
+	refused := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("RETICORA_CREDENTIALS_PATH", refused)
+	_, err = bootstrapEnrollment(ctx, envOf(map[string]string{"RETICORA_ENROLL_TOKEN": "WRONG-CODE-0000", "RETICORA_CLOUD_URL": srv.URL}))
+	if err == nil || !strings.Contains(err.Error(), "invalid or expired") || strings.Contains(err.Error(), "WRONG-CODE-0000") {
+		t.Errorf("refused token: err = %v", err)
+	}
+	if _, serr := os.Stat(refused); !os.IsNotExist(serr) {
+		t.Errorf("a refused enrollment stored %s: %v", refused, serr)
 	}
 }

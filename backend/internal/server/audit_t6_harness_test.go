@@ -8,7 +8,8 @@
 //
 // Used by audit_t6_*_test.go (regression, no build tag) and
 // audit_t6_*_auditdefect_test.go (defect, build tag auditdefect).
-// WP-116, WP-120, WP-128, WP-129, WP-133, WP-136, WP-137, WP-139.
+// WP-116, WP-120, WP-128, WP-129, WP-133, WP-136, WP-137, WP-139; also
+// discovery_job_tracking_integration_test.go (WP-502).
 //
 // Retest (regression tests using it):
 //
@@ -42,7 +43,9 @@ import (
 
 // t6Env is a production-like router on the scopetest fixture.
 type t6Env struct {
-	F       *scopetest.Fixture
+	F *scopetest.Fixture
+	// Repos are the repositories the router was built with.
+	Repos   server.Repositories
 	handler http.Handler
 }
 
@@ -100,7 +103,7 @@ func t6NewEnv(t *testing.T, tag string, ra middleware.RouteAuditor) *t6Env {
 	if err != nil {
 		t.Fatalf("build router: %v", err)
 	}
-	return &t6Env{F: f, handler: middleware.RequestID(middleware.TenantMiddleware(mux))}
+	return &t6Env{F: f, Repos: repos, handler: middleware.RequestID(middleware.TenantMiddleware(mux))}
 }
 
 // Call sends one request as the given caller.

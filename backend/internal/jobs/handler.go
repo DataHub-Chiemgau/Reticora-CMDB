@@ -98,6 +98,9 @@ func (h *APIHandler) List(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	for i := range items {
+		items[i].Cancellable = h.svc.Cancellable(&items[i])
+	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Job]{
 		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+len(items) < total,
 	})
@@ -147,12 +150,14 @@ func (h *APIHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if job, found := h.job(w, r, orgID); found {
+		job.Cancellable = h.svc.Cancellable(job)
 		api.WriteJSON(w, http.StatusOK, job)
 	}
 }
 
 // Result handles GET /api/v1/jobs/{id}/result: the result of a succeeded
-// job; 409 while it has none.
+// job, or the partial result a job cancelled while running kept (the
+// report of a bulk change, BLK-01); 409 while it has none.
 func (h *APIHandler) Result(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := orgOf(w, r)
 	if !ok {
@@ -162,7 +167,7 @@ func (h *APIHandler) Result(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		return
 	}
-	if job.Status != StatusSucceeded || len(job.Result) == 0 {
+	if (job.Status != StatusSucceeded && job.Status != StatusCancelled) || len(job.Result) == 0 {
 		api.WriteError(w, http.StatusConflict, "Conflict", "the job has no result (status "+string(job.Status)+")")
 		return
 	}
@@ -190,8 +195,10 @@ func (h *APIHandler) mayControl(r *http.Request, job *Job) int {
 	return http.StatusForbidden
 }
 
-// Cancel handles DELETE /api/v1/jobs/{id}: a queued or running job is
-// cancelled; a finished one is 409.
+// Cancel handles DELETE /api/v1/jobs/{id}: a queued job, or a running job
+// of a kind that can be cancelled while running (Kind.Cancellable), is
+// cancelled; a running job of another kind and a finished job are 409
+// (JOB-03, F-162).
 func (h *APIHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := orgOf(w, r)
 	if !ok {
@@ -211,6 +218,8 @@ func (h *APIHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	}
 	cancelled, err := h.svc.Cancel(r.Context(), orgID, job.ID)
 	switch {
+	case errors.Is(err, ErrNotCancellable):
+		api.WriteError(w, http.StatusConflict, "Conflict", "the job kind "+job.Kind+" cannot be cancelled while running")
 	case errors.Is(err, ErrTransition):
 		api.WriteError(w, http.StatusConflict, "Conflict", "the job is "+string(job.Status)+" and cannot be cancelled")
 	case errors.Is(err, ErrNotFound):

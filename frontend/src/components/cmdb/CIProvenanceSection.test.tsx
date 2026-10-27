@@ -4,7 +4,8 @@
  * "no provenance data yet" that tells the user no provenance exists.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import i18n from '../../i18n';
 import { renderWithProviders } from '../../test/utils';
 import { ProvenanceSection } from './CIDetailSections';
 import type { CIFieldProvenance } from './ProvenanceTooltip';
@@ -62,5 +63,62 @@ describe('ProvenanceSection', () => {
     expect(String(fetchMock.mock.calls[1]?.[0])).toBe(`/api/v1/cis/${CI_ID}/provenance`);
     expect(screen.queryByRole('alert')).toBeNull();
     expect(summary).toHaveTextContent(/^Herkunft & Overrides0$/);
+  });
+
+  it('shows the status through the catalog, not the raw value (WP-523, GLO-10)', async () => {
+    const status: CIFieldProvenance = { ...record, field: 'status', value: 'maintenance' };
+    const override: CIFieldProvenance = {
+      ...record,
+      field: 'status',
+      value: 'maintenance',
+      reason: 'override',
+      override_author: 'admin',
+      override_reason: 'Wartungsfenster',
+      discovered_value: 'active',
+      discovered_source: 'snmp',
+      diverged: true,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async () => json({ data: [status], total: 1 })),
+    );
+
+    const first = renderWithProviders(<ProvenanceSection ciId={CI_ID} />);
+    const button = await screen.findByRole('button', { name: 'Herkunft von status' });
+    const row = button.closest('li')!;
+    expect(within(row).getByText('Discovery').nextElementSibling).toHaveTextContent(/^Wartung$/);
+    expect(within(row).getByText('Effektiv').nextElementSibling).toHaveTextContent(/^Wartung$/);
+    expect(first.container.textContent).not.toContain('maintenance');
+    first.unmount();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async () => json({ data: [override], total: 1 })),
+    );
+    const { container } = renderWithProviders(<ProvenanceSection ciId={CI_ID} />);
+    const overridden = await screen.findByRole('button', { name: 'Herkunft von status' });
+    const overriddenRow = overridden.closest('li')!;
+    expect(within(overriddenRow).getByText('Discovery').nextElementSibling).toHaveTextContent(
+      /^Aktiv$/,
+    );
+    expect(within(overriddenRow).getByText('Override').nextElementSibling).toHaveTextContent(
+      /^Wartung$/,
+    );
+    fireEvent.focus(overridden);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Aktiv (snmp)');
+    expect(container.textContent).not.toMatch(/maintenance|active/);
+
+    await act(async () => {
+      await i18n.changeLanguage('en-US');
+    });
+    try {
+      await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('Active (snmp)'));
+      expect(container.textContent).toContain('Maintenance');
+      expect(container.textContent).not.toMatch(/maintenance|active/);
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage('de-DE');
+      });
+    }
   });
 });

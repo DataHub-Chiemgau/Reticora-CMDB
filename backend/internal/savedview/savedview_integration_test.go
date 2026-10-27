@@ -98,3 +98,130 @@ func TestSavedViewsVIE01AgainstPostgres(t *testing.T) {
 		}
 	}
 }
+
+// viewCaller serves the saved-view routes on PostgreSQL and calls them as a
+// user of org (an org-wide principal under the tenant GUCs).
+func viewCaller(t *testing.T, f *scopetest.Fixture) func(org, user, method, path, body string) (int, map[string]any) {
+	t.Helper()
+	mux := chi.NewRouter()
+	savedview.NewHandler(savedview.NewPGRepository(f.App)).RegisterRoutes(mux)
+	return func(org, user, method, path, body string) (int, map[string]any) {
+		t.Helper()
+		ctx := tenant.WithTenant(f.OrgCtx(org), tenant.TenantInfo{OrganizationID: org, UserID: user})
+		ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: user, OrganizationID: org, Type: identity.PrincipalTypeUser})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(method, path, bytes.NewBufferString(body)).WithContext(ctx))
+		var out map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+}
+
+// TestSavedViewPartialUpdateKeepsSharing is the binding retest of F-166
+// (WP-518, VIE-01): a PATCH that sends only the name keeps the org-wide
+// sharing, so another member still reads the view; only a PATCH with
+// shared=false withdraws it.
+func TestSavedViewPartialUpdateKeepsSharing(t *testing.T) {
+	f := scopetest.Seed(t, "bd")
+	call := viewCaller(t, f)
+	owner := f.AppUser(t, f.OrgA, "partial-owner")
+	other := f.AppUser(t, f.OrgA, "partial-other")
+
+	code, view := call(f.OrgA, owner, http.MethodPost, "/api/v1/saved-views",
+		`{"name": "Geteilt", "entity_kind": "ci", "shared": true, "columns": ["name"]}`)
+	id, _ := view["id"].(string)
+	if code != http.StatusCreated || id == "" || view["shared"] != true {
+		t.Fatalf("create shared view: %d %v", code, view)
+	}
+	if code, got := call(f.OrgA, owner, http.MethodPatch, "/api/v1/saved-views/"+id, `{"name": "Umbenannt"}`); code != http.StatusOK || got["shared"] != true || got["name"] != "Umbenannt" {
+		t.Fatalf("PATCH with only name: %d %v, want 200 with shared=true", code, got)
+	}
+	var shared bool
+	var columns []string
+	if err := f.Admin.QueryRow(context.Background(), `SELECT shared, columns FROM saved_view WHERE id = $1`, id).Scan(&shared, &columns); err != nil || !shared || len(columns) != 1 {
+		t.Errorf("stored after PATCH with only name: shared=%v columns=%v err=%v", shared, columns, err)
+	}
+	if code, got := call(f.OrgA, other, http.MethodGet, "/api/v1/saved-views/"+id, ""); code != http.StatusOK || got["shared"] != true || got["name"] != "Umbenannt" {
+		t.Errorf("other member GET after PATCH with only name: %d %v, want 200 with shared=true", code, got)
+	}
+	if code, got := call(f.OrgA, owner, http.MethodPatch, "/api/v1/saved-views/"+id, `{}`); code != http.StatusOK || got["shared"] != true {
+		t.Errorf("empty PATCH: %d %v, want 200 with shared=true", code, got)
+	}
+
+	if code, got := call(f.OrgA, owner, http.MethodPatch, "/api/v1/saved-views/"+id, `{"shared": false}`); code != http.StatusOK || got["shared"] != false || got["name"] != "Umbenannt" {
+		t.Fatalf("PATCH shared=false: %d %v, want 200 with shared=false", code, got)
+	}
+	if code, got := call(f.OrgA, other, http.MethodGet, "/api/v1/saved-views/"+id, ""); code != http.StatusNotFound {
+		t.Errorf("other member GET after unsharing: %d %v, want 404", code, got)
+	}
+	if code, _ := call(f.OrgA, owner, http.MethodGet, "/api/v1/saved-views/"+id, ""); code != http.StatusOK {
+		t.Errorf("owner GET after unsharing: %d, want 200", code)
+	}
+}
+
+// TestSavedViewRolesMustExist is the retest of F-337 (WP-518, VIE-01):
+// shared_with_roles takes only roles and custom roles of the caller's
+// organization; an unknown id or a role of another organization is 422 on
+// shared_with_roles[i] for create and update, and nothing is stored.
+func TestSavedViewRolesMustExist(t *testing.T) {
+	f := scopetest.Seed(t, "bd")
+	bg := context.Background()
+	call := viewCaller(t, f)
+	owner := f.AppUser(t, f.OrgA, "roles-owner")
+	role, customRole, foreignRole, foreignCustom := f.ID(), f.ID(), f.ID(), f.ID()
+	for _, seed := range []struct{ sql, id, org, name string }{
+		{`INSERT INTO role (id, organization_id, name) VALUES ($1, $2, $3)`, role, f.OrgA, "view-role"},
+		{`INSERT INTO custom_role (id, organization_id, name) VALUES ($1, $2, $3)`, customRole, f.OrgA, "view-custom"},
+		{`INSERT INTO role (id, organization_id, name) VALUES ($1, $2, $3)`, foreignRole, f.OrgB, "view-role-b"},
+		{`INSERT INTO custom_role (id, organization_id, name) VALUES ($1, $2, $3)`, foreignCustom, f.OrgB, "view-custom-b"},
+	} {
+		if _, err := f.Admin.Exec(bg, seed.sql, seed.id, seed.org, seed.name); err != nil {
+			t.Fatalf("seed %s: %v", seed.name, err)
+		}
+	}
+	count := func() int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT COUNT(*) FROM saved_view WHERE organization_id = $1`, f.OrgA).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	code, view := call(f.OrgA, owner, http.MethodPost, "/api/v1/saved-views",
+		`{"name": "Rollen", "entity_kind": "ci", "shared_with_roles": ["`+role+`", "`+customRole+`"]}`)
+	id, _ := view["id"].(string)
+	if roles, _ := view["shared_with_roles"].([]any); code != http.StatusCreated || id == "" || len(roles) != 2 {
+		t.Fatalf("create with a role and a custom role of the organization: %d %v", code, view)
+	}
+	before := count()
+
+	for _, tc := range []struct{ name, roles, field string }{
+		{"unknown id", `["` + f.ID() + `"]`, "shared_with_roles[0]"},
+		{"role of another organization", `["` + foreignRole + `"]`, "shared_with_roles[0]"},
+		{"custom role of another organization", `["` + role + `", "` + foreignCustom + `"]`, "shared_with_roles[1]"},
+	} {
+		code, out := call(f.OrgA, owner, http.MethodPost, "/api/v1/saved-views",
+			`{"name": "Neu `+tc.name+`", "entity_kind": "ci", "shared_with_roles": `+tc.roles+`}`)
+		if code != http.StatusUnprocessableEntity || out["field"] != tc.field {
+			t.Errorf("create, %s: %d %v, want 422 on %s", tc.name, code, out, tc.field)
+		}
+		code, out = call(f.OrgA, owner, http.MethodPatch, "/api/v1/saved-views/"+id,
+			`{"name": "Geändert", "shared_with_roles": `+tc.roles+`}`)
+		if code != http.StatusUnprocessableEntity || out["field"] != tc.field {
+			t.Errorf("update, %s: %d %v, want 422 on %s", tc.name, code, out, tc.field)
+		}
+	}
+	if n := count(); n != before {
+		t.Errorf("refused creates stored views: %d, want %d", n, before)
+	}
+	var name string
+	var roles []string
+	if err := f.Admin.QueryRow(bg, `SELECT name, shared_with_roles::text[] FROM saved_view WHERE id = $1`, id).Scan(&name, &roles); err != nil ||
+		name != "Rollen" || len(roles) != 2 {
+		t.Errorf("refused updates changed the view: name=%q roles=%v err=%v", name, roles, err)
+	}
+	if code, out := call(f.OrgA, owner, http.MethodPatch, "/api/v1/saved-views/"+id, `{"shared_with_roles": ["`+customRole+`"]}`); code != http.StatusOK {
+		t.Errorf("update to a custom role of the organization: %d %v", code, out)
+	}
+}

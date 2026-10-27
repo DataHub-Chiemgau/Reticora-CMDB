@@ -7,18 +7,19 @@ import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
+import { ScrollRegion } from '../components/ScrollRegion';
 
-const categoryOptions = [
-  { value: '', label: 'Alle' },
-  { value: 'general', label: 'Allgemein' },
-  { value: 'contract', label: 'Vertrag' },
-  { value: 'invoice', label: 'Rechnung' },
-  { value: 'manual', label: 'Handbuch' },
-  { value: 'diagram', label: 'Diagramm' },
-  { value: 'certificate', label: 'Zertifikat' },
-  { value: 'policy', label: 'Richtlinie' },
-  { value: 'other', label: 'Sonstiges' },
-];
+// Stored document categories (English keys); the labels come from the catalog.
+export const DOCUMENT_CATEGORIES = [
+  'general',
+  'contract',
+  'invoice',
+  'manual',
+  'diagram',
+  'certificate',
+  'policy',
+  'other',
+] as const;
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -28,6 +29,13 @@ function formatFileSize(bytes: number): string {
 
 export function DocumentListPage() {
   const { t } = useTranslation();
+  const categoryOptions = [
+    { value: '', label: t('common.all', 'Alle') },
+    ...DOCUMENT_CATEGORIES.map((value) => ({
+      value,
+      label: t(`document.categories.${value}`, value),
+    })),
+  ];
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -83,7 +91,7 @@ export function DocumentListPage() {
         <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>
       ) : (
         <Card title={`${t('document.title', 'Dokumente')} (${data?.total ?? 0})`}>
-          <div className="overflow-x-auto">
+          <ScrollRegion label={t('document.title', 'Dokumente')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -101,7 +109,9 @@ export function DocumentListPage() {
                     <td className="py-2 font-medium">{doc.title}</td>
                     <td className="py-2 font-mono text-xs">{doc.file_name}</td>
                     <td className="py-2">
-                      <Badge variant="neutral">{doc.category}</Badge>
+                      <Badge variant="neutral">
+                        {t(`document.categories.${doc.category}`, doc.category)}
+                      </Badge>
                     </td>
                     <td className="py-2">{formatFileSize(doc.file_size)}</td>
                     <td className="py-2">v{doc.version}</td>
@@ -118,14 +128,14 @@ export function DocumentListPage() {
                 ))}
                 {(!data?.data || data.data.length === 0) && (
                   <tr>
-                    <td colSpan={6} className="py-4 text-center text-gray-400">
+                    <td colSpan={6} className="py-4 text-center text-gray-600 dark:text-gray-300">
                       {t('common.noData', 'Keine Daten')}
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         </Card>
       )}
 

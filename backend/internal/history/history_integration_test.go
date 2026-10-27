@@ -350,7 +350,7 @@ func TestHistoryChangeSetsAUD03(t *testing.T) {
 	// The request chain of the server: request and correlation id, then the
 	// request context of the audit (source, AUD-07).
 	mux := chi.NewRouter()
-	mux.Use(middleware.RequestID, middleware.AuditRoute(http.MethodPatch, "/api/v1/cis/{id}", nil, false, ""))
+	mux.Use(middleware.RequestID, middleware.AuditRoute(http.MethodPatch, "/api/v1/cis/{id}", nil, middleware.AuditNone, ""))
 	ci.NewHandler(ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()))).RegisterRoutes(mux)
 	history.NewHandler(history.NewPGRepository(f.App)).RegisterRoutes(mux)
 	call := func(method, path, body string, header ...string) *httptest.ResponseRecorder {

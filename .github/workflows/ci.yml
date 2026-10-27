@@ -231,49 +231,17 @@ jobs:
           TEST_APP_DATABASE_URL: postgres://reticora_test_runtime:reticora_test_runtime@localhost:5432/reticora_migrations?sslmode=disable
         run: go test -count=10 -run TestCIQueryBudget ./internal/ci/
 
-      - name: Summarize PostgreSQL test run
+      # F-283/TST-04 (WP-499): the only evaluation of test-db.json. Every
+      # skipped test or subtest fails the job unless it is in the allow-list
+      # of the script; the job provides PostgreSQL, Redis, NATS, the
+      # nats-server binary and kustomize. This replaces the grep for
+      # "TEST_DATABASE_URL not set" and the natsedge-specific skip check of
+      # WP-374 (COL-08/PRI-07). Synthetic cases: tests/ci-db-summary.test.sh
+      # in the job gate.
+      - name: Summarize PostgreSQL test run, fail on skipped tests
         if: always()
         working-directory: backend
-        run: |
-          set -euo pipefail
-          test -s test-db.json || { echo "::error::no test output recorded"; exit 1; }
-          pkgs=$(go list $(grep -rl --include='*_test.go' 'TEST_DATABASE_URL' . | xargs -n1 dirname | sort -u) | jq -R . | jq -sc .)
-          jq -r --argjson pkgs "$pkgs" '
-            select(.Test != null and (.Test | contains("/") | not))
-            | select(.Action == "pass" or .Action == "fail" or .Action == "skip")
-            | select(.Package as $p | $pkgs | index($p))
-            | "\(.Action)\t\(.Package | sub(".*/backend/"; ""))\t\(.Test)"' test-db.json | sort -k2 > db-tests.txt
-          cat db-tests.txt
-          echo "Tests in $(echo "$pkgs" | jq length) PostgreSQL-backed packages: passed=$(grep -c '^pass' db-tests.txt || true) failed=$(grep -c '^fail' db-tests.txt || true) skipped=$(grep -c '^skip' db-tests.txt || true)"
-          if grep -q 'TEST_DATABASE_URL not set' test-db.json; then
-            echo "::error::PostgreSQL integration tests were skipped although TEST_DATABASE_URL is set"
-            exit 1
-          fi
-
-      # COL-08/PRI-07 (WP-374): every test of natsedge_integration_test.go
-      # (and its subtests) ran against the nats-server, none was skipped.
-      # Transitional: WP-499 replaces this step by the general skip rule of
-      # scripts/ci/db-test-summary.sh.
-      - name: Assert no edge integration test was skipped
-        if: always()
-        working-directory: backend
-        run: |
-          set -euo pipefail
-          test -s test-db.json || { echo "::error::no test output recorded"; exit 1; }
-          names=$(sed -nE 's/^func (Test[A-Za-z0-9_]+)\(t \*testing\.T\).*/\1/p' internal/discovery/natsedge_integration_test.go | jq -R . | jq -sc .)
-          [ "$(jq length <<<"$names")" -gt 0 ] || { echo "::error::no tests found in natsedge_integration_test.go"; exit 1; }
-          jq -r --arg pkg "$(go list ./internal/discovery)" --argjson names "$names" '
-            select(.Package == $pkg and .Test != null)
-            | select(.Action == "pass" or .Action == "fail" or .Action == "skip")
-            | select((.Test | split("/")[0]) as $top | $names | index($top))
-            | "\(.Action)\t\(.Test)"' test-db.json | sort -k2 > natsedge-tests.txt
-          cat natsedge-tests.txt
-          skipped=$(awk -F'\t' '$1 == "skip" { print $2 }' natsedge-tests.txt)
-          missing=$(jq -r '.[]' <<<"$names" | while read -r n; do awk -F'\t' -v n="$n" '$2 == n { f = 1 } END { exit !f }' natsedge-tests.txt || echo "$n"; done)
-          if [ -n "$skipped" ] || [ -n "$missing" ]; then
-            echo "::error::natsedge tests skipped: $(tr '\n' ' ' <<<"$skipped"); not run: $(tr '\n' ' ' <<<"$missing")"
-            exit 1
-          fi
+        run: ../scripts/ci/db-test-summary.sh test-db.json
 
       - name: Assert every tenant policy uses app.org_id
         run: |
@@ -450,6 +418,11 @@ jobs:
       - name: CI configuration of the scans (SEC-11, TST-04)
         run: ./tests/ci-config.test.sh
 
+      # F-283/TST-04 (WP-499): the skip rule of the job migrations on
+      # synthetic test2json output.
+      - name: Skip rule of the DB job (TST-04)
+        run: ./tests/ci-db-summary.test.sh
+
       # SEC-07 (WP-362): every break-glass use alarms. promtool pinned to the
       # Prometheus 3.5 LTS release, checksum from its sha256sums.txt.
       - name: Install promtool
@@ -542,15 +515,34 @@ jobs:
         with:
           go-version: "1.26.10"
 
-      - name: Check golangci-lint pin matches the Makefile
-        run: grep -qx "GOLANGCI_LINT_VERSION := ${GOLANGCI_LINT_VERSION}" Makefile
-
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: ${{ matrix.module }}
           args: --config=${{ github.workspace }}/backend/.golangci.yml
+
+      # TST-04 (WP-499, retest WP-001): v2 schema (golangci-lint config
+      # verify with the binary installed above), linters a superset of the
+      # v1 set, the pin of this job equals the Makefile, every go.work module
+      # in the matrix, with negative fixtures; scripts/ci/lint-debt.sh
+      # against a stub. Replaces the grep for the Makefile pin.
+      - name: Lint toolchain contract (TST-04)
+        if: ${{ !cancelled() }}
+        env:
+          REQUIRE_GOLANGCI_LINT: "1"
+        run: |
+          python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+          ./tests/lint-toolchain.test.sh
+
+      # F-123 (WP-499): the backlog hidden by issues.new-from-rev, counted
+      # for this module without the baseline; fails when it rises above
+      # tests/lint-debt-baseline.txt, the numbers go to the job summary.
+      - name: Lint debt without new-from-rev (F-123)
+        if: ${{ !cancelled() }}
+        run: |
+          command -v golangci-lint || { echo "::error::golangci-lint not on PATH"; exit 1; }
+          ./scripts/ci/lint-debt.sh "${{ matrix.module }}"
 
   frontend:
     runs-on: ubuntu-latest
@@ -597,7 +589,9 @@ jobs:
   # and mobile Safari. TST-03 (WP-201): so do the browser flows CI, review,
   # drag/undo, topology, export and command palette (e2e/*.spec.ts, mocked
   # backend in e2e/support/backend.ts); the onboarding suite against a real
-  # installation runs in install-smoke.yml.
+  # installation runs in install-smoke.yml. WP-531: one job and one report
+  # artifact per project (playwright-report-<project>, also when green); the
+  # previous browser versions run in e2e-prev.yml (E-88).
   e2e:
     runs-on: ubuntu-latest
     needs: [frontend]
@@ -646,17 +640,20 @@ jobs:
         env:
           BASE_URL: http://localhost:4173
 
+      # NFR-07/UI-18 (WP-531, F-173): the evidence of every project, also
+      # when it is green: the HTML report (playwright-report/) and the
+      # screenshots, traces and error-context.md of failed tests
+      # (test-results/).
       - name: Upload test results
-        if: failure()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ matrix.project }}
-          # The github reporter writes no HTML report in CI; screenshots,
-          # traces and error-context.md are in test-results/.
           path: |
             frontend/playwright-report/
             frontend/test-results/
-          retention-days: 7
+          if-no-files-found: error
+          retention-days: 30
 
   # SEC-11/TST-04 (WP-004): dependency and container scans on every PR.
   # Critical and High findings block; accepted findings need an entry with an

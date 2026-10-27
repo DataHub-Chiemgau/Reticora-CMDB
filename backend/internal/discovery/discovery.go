@@ -130,8 +130,9 @@ type BulkIngestResponse struct {
 	// ProtectedInstanceFields counts matched CIs where discovered values for
 	// instance attributes were not written (MET-14).
 	ProtectedInstanceFields int `json:"protected_instance_fields,omitempty"`
-	// InvalidValues counts discovered values the field metadata rejected;
-	// they are not stored (CI-03, MET-11).
+	// InvalidValues counts discovered values the field metadata or the data
+	// type of their typed column rejected; they are not stored, the rest of
+	// their record is (CI-03, MET-11, WP-501).
 	InvalidValues int `json:"invalid_values,omitempty"`
 	// Duplicates counts records whose record_id was processed within the
 	// last 48 hours; they change nothing (REC-01).
@@ -225,6 +226,7 @@ type MemoryRepository struct {
 	records      map[string]time.Time
 	scopes       map[string]*Scope
 	orgSettings  map[string]map[string]any
+	orgTimezone  map[string]string
 	seq          int
 }
 
@@ -1146,6 +1148,9 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	n := len(frame.items)
 	resolvedCIID := make([]string, n)
 	handled := make([]bool, n)
+	// created[i] reports that record i created its CI (WP-498): the power
+	// chain derives the feeds of new CIs from the stored power devices.
+	created := make([]bool, n)
 	// failed are the records that failed; held the identity keys of those
 	// that failed transiently, which hold back the records after them.
 	var failed []RecordError
@@ -1163,7 +1168,7 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 				}
 			}
 		}
-		h.processWindow(ctx, orgID, frame, start, end, handled, resolvedCIID, &resp)
+		h.processWindow(ctx, orgID, frame, start, end, handled, resolvedCIID, created, &resp)
 		for i := start; i < end; i++ {
 			if handled[i] {
 				continue
@@ -1202,21 +1207,29 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			handled[i] = true
 			if out.created {
 				frame.total++
+				created[i] = true
 			}
 		}
 	}
 
-	var processed []IngestItem
-	var processedCIID []string
+	var processed, createdItems []IngestItem
+	var processedCIID, createdCIID []string
 	for i := range frame.items {
 		if handled[i] {
 			processed = append(processed, frame.items[i])
 			processedCIID = append(processedCIID, resolvedCIID[i])
+			if created[i] && resolvedCIID[i] != "" {
+				createdItems = append(createdItems, frame.items[i])
+				createdCIID = append(createdCIID, resolvedCIID[i])
+			}
 		}
 	}
 	resp.Relationships += h.deriveTopology(ctx, orgID, processed, processedCIID, h.neighborCandidates(ctx, orgID, processed))
 	// Outlet mappings of PDUs and UPS outlet groups (IMP-09).
 	resp.Relationships += h.derivePowerChain(ctx, orgID, processed, processedCIID)
+	// The new CIs of the batch take their feeds from the outlets of power
+	// devices processed before them, in an earlier batch or another lane.
+	resp.Relationships += h.derivePowerFeedsOf(ctx, orgID, createdItems, createdCIID)
 	if err := h.markProcessed(ctx, orgID, processed); err != nil {
 		return resp, &IngestErrors{Records: failed, Rest: err}
 	}
@@ -1279,6 +1292,13 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 	frame.resp.Duplicates = duplicates
 	if len(items) == 0 {
 		return frame, nil
+	}
+	// Typed values a manual write refuses are dropped and counted before
+	// anything resolves identities with them (WP-501). The items are copied:
+	// a frame that starts again checks the values of the caller again.
+	items = slices.Clone(items)
+	for i := range items {
+		frame.resp.InvalidValues += dropInvalidTyped(ctx, &items[i])
 	}
 
 	// Resolve ci_type_name to the canonical ci_type UUID before
@@ -1613,17 +1633,27 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			resp.ProtectedInstanceFields++
 		}
 		update.Attributes = writes
-		updated, err := h.ciRepo.Update(ctx, orgID, result.MatchedCIID, update)
+		// The fields, the status and the reclassification of a
+		// generic_device classified now (CI-11) are one change of the
+		// record in one transaction: one change set with the record's
+		// origin and one event ci.changed (AUD-03, EVT-02).
+		changed, err := ci.UpdateRecord(ctx, h.ciRepo, orgID, result.MatchedCIID, &ci.RecordUpdate{
+			Update: update, TypeID: raisedType(matched, typeID, identity),
+			Origin: ci.RecordOrigin{CollectorID: item.CollectorID, ObservedAt: item.ObservedAt, RecordID: item.RecordID},
+		})
 		if err != nil {
 			return err
 		}
+		updated := changed.CI
 		if conflict {
 			resp.ProtectedOverrides++
 		}
-		// A generic_device classified now becomes the specific type
-		// through the type change service (CI-11).
-		if typeErr := h.raiseGenericType(ctx, orgID, updated, typeID, identity); typeErr != nil {
-			return typeErr
+		// The CI is classified now: its unclassified_device item closes
+		// as reclassified (DIS-02).
+		if changed.TypeChanged && updated.CITypeID != identity.GenericDeviceTypeID {
+			if resolveErr := h.resolveReclassified(ctx, orgID, updated.ID); resolveErr != nil {
+				return resolveErr
+			}
 		}
 		if reviewErr := openUnclassified(updated); reviewErr != nil {
 			return reviewErr
@@ -1697,9 +1727,11 @@ type windowOutcome struct {
 	total      int64
 	unlicensed queuedDevices
 	// done[k] reports that record start+k was handled completely in the
-	// batch, with the CI ciID[k] (held and unlicensed records have none).
+	// batch, with the CI ciID[k] (held and unlicensed records have none);
+	// created[k] that the batch created that CI.
 	done       []bool
 	ciID       []string
+	created    []bool
 	candidates [][]ci.Item
 	prefetched []bool
 }
@@ -1725,7 +1757,7 @@ type pendingCI struct {
 // record of the window is processed on its own, which reports any error
 // for its record.
 func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchFrame, start, end int, handled []bool,
-	resolvedCIID []string, resp *BulkIngestResponse) {
+	resolvedCIID []string, created []bool, resp *BulkIngestResponse) {
 	finder, ok := h.repo.(BatchIdentityFinder)
 	creator, creates := h.ciRepo.(ci.BatchCreator)
 	if !ok || !creates || h.tx == nil {
@@ -1757,7 +1789,7 @@ func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchF
 		return h.inTx(ctx, orgID, func(ctx context.Context) error {
 			w = windowOutcome{
 				total: frame.total, unlicensed: queuedDevices{keys: maps.Clone(frame.unlicensed.keys)},
-				done: make([]bool, n), ciID: make([]string, n), candidates: make([][]ci.Item, n), prefetched: make([]bool, n),
+				done: make([]bool, n), ciID: make([]string, n), created: make([]bool, n), candidates: make([][]ci.Item, n), prefetched: make([]bool, n),
 			}
 			return h.batchWindow(ctx, orgID, frame, start, qs, include, finder, creator, &w)
 		})
@@ -1780,7 +1812,7 @@ func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchF
 		i := start + k
 		frame.candidates[i], frame.prefetched[i] = w.candidates[k], w.prefetched[k]
 		if w.done[k] {
-			handled[i], resolvedCIID[i] = true, w.ciID[k]
+			handled[i], resolvedCIID[i], created[i] = true, w.ciID[k], w.created[k]
 		}
 	}
 }
@@ -1974,7 +2006,7 @@ func (h *Handler) createInWindow(ctx context.Context, orgID string, frame *batch
 			w.resp.ReviewItems++
 		}
 		w.resp.Created++
-		w.done[rec.k], w.ciID[rec.k] = true, rec.ci.ID
+		w.done[rec.k], w.ciID[rec.k], w.created[rec.k] = true, rec.ci.ID, true
 	}
 	return nil
 }
@@ -2080,29 +2112,14 @@ func firstNonEmpty(preferred, fallback string) string {
 	return fallback
 }
 
-// raiseGenericType reclassifies a matched generic_device CI to the specific
-// type the device reported (CI-11) and closes the CI's open
-// unclassified_device item as reclassified (DIS-02); discovery never
-// changes other types.
-func (h *Handler) raiseGenericType(ctx context.Context, orgID string, matched *ci.Item, typeID string, ic *IdentityContext) error {
-	if ic == nil || ic.GenericDeviceTypeID == "" || matched.CITypeID != ic.GenericDeviceTypeID ||
-		typeID == "" || typeID == ic.GenericDeviceTypeID {
-		return nil
+// raisedType returns the specific type typeID a matched generic_device CI
+// is raised to (CI-11), or "": discovery never changes other types. A
+// matched CI the candidates did not carry has no type here; the repository
+// checks the types again in the record's transaction.
+func raisedType(matched *ci.Item, typeID string, ic *IdentityContext) string {
+	if ic == nil || ic.GenericDeviceTypeID == "" || typeID == "" || typeID == ic.GenericDeviceTypeID ||
+		(matched.CITypeID != "" && matched.CITypeID != ic.GenericDeviceTypeID) {
+		return ""
 	}
-	changer, ok := h.ciRepo.(ci.TypeChanger)
-	if !ok {
-		return nil
-	}
-	result, err := changer.ChangeType(ctx, orgID, matched.ID, typeID, ci.TypeChangeDiscovery)
-	switch {
-	case errors.Is(err, ci.ErrReclassificationRefused), errors.Is(err, ci.ErrUnknownType):
-		return nil
-	case err != nil:
-		return fmt.Errorf("reclassify generic device: %w", err)
-	}
-	*matched = *result.CI
-	if matched.CITypeID == ic.GenericDeviceTypeID {
-		return nil
-	}
-	return h.resolveReclassified(ctx, orgID, matched.ID)
+	return typeID
 }

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router-dom';
 import { CIListPage } from './CIListPage';
 import { ToastViewport } from '../components/ui/Toast';
@@ -380,5 +381,337 @@ describe('CIListPage filter persistence', () => {
       const urls = listUrls(fetchMock);
       expect(urls[urls.length - 1]).not.toContain('search=stale');
     });
+  });
+});
+
+function PathProbe() {
+  const location = useLocation();
+  return <span data-testid="location-path">{location.pathname}</span>;
+}
+
+// UI-04 / UI-10 (WP-519, F-170): the CI table follows the row keyboard pattern.
+describe('CIListPage keyboard', () => {
+  const second = { ...ci, id: 'ci-2', name: 'core-sw-02' };
+  const third = { ...ci, id: 'ci-3', name: 'core-sw-03' };
+
+  function renderList() {
+    stubFetchRoutes({
+      '/cis': { data: [ci, second, third], total: 3, limit: 25, offset: 0, has_more: false },
+    });
+    return renderWithProviders(
+      <>
+        <CIListPage onCreateCI={() => {}} />
+        <PathProbe />
+      </>,
+      { route: '/cmdb' },
+    );
+  }
+
+  function row(name: string) {
+    return screen.getByRole('link', { name }).closest('tr') as HTMLTableRowElement;
+  }
+
+  it('has one row in the Tab order instead of a link and a checkbox per row', async () => {
+    const user = userEvent.setup();
+    renderList();
+    await screen.findByRole('link', { name: 'core-sw-01' });
+
+    const bodyRows = [row('core-sw-01'), row('core-sw-02'), row('core-sw-03')];
+    expect(bodyRows.map((r) => r.tabIndex)).toEqual([0, -1, -1]);
+    for (const name of ['core-sw-01', 'core-sw-02', 'core-sw-03']) {
+      expect(screen.getByRole('link', { name }).tabIndex).toBe(-1);
+      expect(screen.getByRole('checkbox', { name: `${name} auswählen` }).tabIndex).toBe(-1);
+    }
+
+    // Tab from the select-all box lands on the first row, the next Tab
+    // leaves the table for the paging buttons.
+    act(() => screen.getByRole('checkbox', { name: 'Alle sichtbaren CIs auswählen' }).focus());
+    await user.tab();
+    expect(document.activeElement).toBe(row('core-sw-01'));
+    await user.tab();
+    expect(document.activeElement).not.toBe(row('core-sw-02'));
+    expect(row('core-sw-01').contains(document.activeElement)).toBe(false);
+  });
+
+  it('moves with ArrowDown, toggles the selection with Space and opens with Enter', async () => {
+    const user = userEvent.setup();
+    renderList();
+    await screen.findByRole('link', { name: 'core-sw-01' });
+    act(() => screen.getByRole('checkbox', { name: 'Alle sichtbaren CIs auswählen' }).focus());
+    await user.tab();
+    expect(document.activeElement).toBe(row('core-sw-01'));
+
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(row('core-sw-02'));
+    expect(row('core-sw-02').tabIndex).toBe(0);
+    expect(row('core-sw-01').tabIndex).toBe(-1);
+
+    // Space selects the focused row only; the bulk toolbar appears.
+    await user.keyboard(' ');
+    expect(screen.getByRole('checkbox', { name: 'core-sw-02 auswählen' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'core-sw-01 auswählen' })).not.toBeChecked();
+    expect(await screen.findByText('1 ausgewählt')).toBeInTheDocument();
+    expect(document.activeElement).toBe(row('core-sw-02'));
+    await user.keyboard(' ');
+    expect(screen.getByRole('checkbox', { name: 'core-sw-02 auswählen' })).not.toBeChecked();
+
+    await user.keyboard('{End}');
+    expect(document.activeElement).toBe(row('core-sw-03'));
+    await user.keyboard('{Home}{ArrowDown}');
+    expect(screen.getByTestId('location-path')).toHaveTextContent('/cmdb');
+    await user.keyboard('{Enter}');
+    await waitFor(() =>
+      expect(screen.getByTestId('location-path')).toHaveTextContent('/cmdb/ci-2'),
+    );
+  });
+});
+
+/**
+ * WP-520 (F-328, API-08, BLK-01): the selection was limited to the 25 rows of
+ * the visible page; a change of page dropped it, so the job path from 100 ids
+ * on could not be reached from the list. The selection now survives paging,
+ * "select all matches of the filter" collects up to 500 ids page by page, and
+ * from 100 ids on the page follows the job and renders its report per id.
+ */
+describe('CIListPage bulk beyond the visible page', () => {
+  function makeCIs(count: number) {
+    return Array.from({ length: count }, (_, i) => {
+      const n = String(i + 1).padStart(3, '0');
+      return { ...ci, id: `ci-${n}`, name: `srv-${n}` };
+    });
+  }
+
+  function json(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  interface Call {
+    url: string;
+    init?: RequestInit;
+  }
+
+  /**
+   * stubList answers GET /cis with the page of `all` that limit and offset
+   * name, after `other` had the chance to answer the request.
+   */
+  function stubList(
+    all: (typeof ci)[],
+    other: (call: Call) => Response | undefined = () => undefined,
+  ) {
+    const calls: Call[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        calls.push({ url, init });
+        const answer = other({ url, init });
+        if (answer) {
+          return answer;
+        }
+        const parsed = new URL(url, 'http://localhost');
+        if (parsed.pathname === '/api/v1/cis' && (init?.method ?? 'GET') === 'GET') {
+          const limit = Number(parsed.searchParams.get('limit') ?? 50);
+          const offset = Number(parsed.searchParams.get('offset') ?? 0);
+          const data = all.slice(offset, offset + limit);
+          return json({
+            data,
+            total: all.length,
+            limit,
+            offset,
+            has_more: offset + limit < all.length,
+          });
+        }
+        return json({ detail: `unexpected request: ${url}` }, 404);
+      }),
+    );
+    return calls;
+  }
+
+  function bulkBody(calls: Call[]) {
+    const call = calls.find((c) => c.url.endsWith('/api/v1/cis/bulk') && c.init?.method === 'POST');
+    return call
+      ? (JSON.parse(call.init!.body as string) as { ids: string[]; status: string })
+      : null;
+  }
+
+  function renderPage(route = '/cmdb') {
+    return renderWithProviders(
+      <>
+        <CIListPage onCreateCI={() => {}} />
+        <ToastViewport />
+      </>,
+      { route },
+    );
+  }
+
+  it('keeps the selection of a row when the page changes (F-328 root cause)', async () => {
+    const all = makeCIs(30);
+    const calls = stubList(all, ({ url, init }) =>
+      url.endsWith('/cis/bulk') && init?.method === 'POST'
+        ? json({ action: 'set_status', total: 2, succeeded: 2, failed: 0, items: [] })
+        : undefined,
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'srv-001 auswählen' }));
+    expect(await screen.findByText('1 ausgewählt')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Weiter/ }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'srv-027 auswählen' }));
+
+    // The row of page 1 stays selected while page 2 is shown.
+    expect(await screen.findByText('2 ausgewählt')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status setzen…' }), {
+      target: { value: 'inactive' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Anwenden' }));
+    await waitFor(() => expect(bulkBody(calls)).not.toBeNull());
+    expect(bulkBody(calls)).toEqual({
+      action: 'set_status',
+      ids: ['ci-001', 'ci-027'],
+      status: 'inactive',
+    });
+  });
+
+  it('drops the selection when the filter changes', async () => {
+    stubList(makeCIs(30));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'srv-001 auswählen' }));
+    expect(await screen.findByText('1 ausgewählt')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'CI-Status filtern' }), {
+      target: { value: 'inactive' },
+    });
+    await waitFor(() => expect(screen.queryByText('1 ausgewählt')).not.toBeInTheDocument());
+    expect(screen.queryByRole('toolbar', { name: 'Massenbearbeitung' })).not.toBeInTheDocument();
+  });
+
+  // Renders 150 rows and walks the whole job flow; under a loaded worker
+  // pool this exceeds the 5 s default, so the test gets its own limit.
+  it('selects all 150 matches of the filter, runs the bulk as a job and renders its report with two errors', async () => {
+    const all = makeCIs(150);
+    const failing = new Map([
+      ['ci-007', { code: 404, error: 'CI not found' }],
+      ['ci-142', { code: 409, error: 'the status was not applied, the CI keeps status active' }],
+    ]);
+    const report = {
+      action: 'set_status',
+      total: 150,
+      succeeded: 148,
+      failed: 2,
+      items: all.map((c) =>
+        failing.has(c.id)
+          ? { id: c.id, result: 'error', ...failing.get(c.id)! }
+          : { id: c.id, result: 'ok', code: 200 },
+      ),
+    };
+    const job = (status: string, progress: number, extra: Record<string, unknown> = {}) => ({
+      id: 'job-150',
+      kind: 'ci.bulk',
+      status,
+      progress,
+      attempts: 1,
+      max_attempts: 3,
+      cancellable: status === 'queued' || status === 'running',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      ...extra,
+    });
+    const reads = [job('running', 40), job('succeeded', 100, { result: report })];
+    const calls = stubList(all, ({ url, init }) => {
+      if (url.endsWith('/api/v1/cis/bulk') && init?.method === 'POST') {
+        return json({ job_id: 'job-150', status: 'queued', kind: 'ci.bulk' }, 202);
+      }
+      if (url.endsWith('/api/v1/jobs/job-150/result')) {
+        return json(report);
+      }
+      if (url.endsWith('/api/v1/jobs/job-150')) {
+        return json(reads.length > 1 ? reads.shift() : reads[0]);
+      }
+      return undefined;
+    });
+    renderPage('/cmdb?q=srv&status=active');
+
+    // The visible page holds 25 rows; the page's own box selects those.
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Alle sichtbaren CIs auswählen' }));
+    expect(await screen.findByText('25 ausgewählt')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Alle 150 Treffer des Filters auswählen' }));
+    expect(await screen.findByText('150 ausgewählt')).toBeInTheDocument();
+
+    // The ids were collected over the filtered list, page by page.
+    const collected = calls
+      .map((c) => new URL(c.url, 'http://localhost'))
+      .filter((u) => u.pathname === '/api/v1/cis' && u.searchParams.get('limit') === '200');
+    expect(collected.length).toBeGreaterThan(0);
+    for (const u of collected) {
+      expect(u.searchParams.get('search')).toBe('srv');
+      expect(u.searchParams.get('status')).toBe('active');
+    }
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status setzen…' }), {
+      target: { value: 'inactive' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Anwenden' }));
+    await waitFor(() => expect(bulkBody(calls)).not.toBeNull());
+    const sent = bulkBody(calls)!;
+    expect(sent.ids).toHaveLength(150);
+    expect(new Set(sent.ids)).toEqual(new Set(all.map((c) => c.id)));
+    expect(sent.status).toBe('inactive');
+
+    // 202: the page follows the job with its progress ...
+    const progress = await screen.findByRole('progressbar', {
+      name: 'Fortschritt der Massenänderung',
+    });
+    expect(progress).toHaveAttribute('aria-valuemax', '100');
+    expect(await screen.findByText('Statusänderung für 150 CIs läuft als Job')).toBeInTheDocument();
+
+    // ... and renders its report per id when it is done.
+    expect(
+      await screen.findByText(
+        'Job abgeschlossen: 148 von 150 CIs aktualisiert, 2 fehlgeschlagen',
+        undefined,
+        { timeout: 4000 },
+      ),
+    ).toBeInTheDocument();
+    const failures = screen.getByRole('list', { name: 'Fehlgeschlagene CIs' });
+    expect(within(failures).getAllByRole('listitem')).toHaveLength(2);
+    expect(failures).toHaveTextContent('srv-007: CI not found');
+    expect(failures).toHaveTextContent(
+      'srv-142: the status was not applied, the CI keeps status active',
+    );
+    const perId = screen.getByRole('table', { name: 'Bericht je CI' });
+    // Header row plus one row per id.
+    expect(within(perId).getAllByRole('row')).toHaveLength(151);
+    expect(within(perId).getByRole('row', { name: /srv-007/ })).toHaveTextContent('404');
+    // The selection was consumed by the job.
+    expect(screen.queryByRole('toolbar', { name: 'Massenbearbeitung' })).not.toBeInTheDocument();
+  }, 20_000);
+
+  it('selects at most the first 500 matches and says so', async () => {
+    const calls = stubList(makeCIs(620));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Alle sichtbaren CIs auswählen' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Die ersten 500 Treffer des Filters auswählen' }),
+    );
+    expect(await screen.findByText('500 ausgewählt')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Eine Massenänderung umfasst höchstens 500 CIs: der Filter hat 620 Treffer, die ersten 500 sind ausgewählt.',
+      ),
+    ).toBeInTheDocument();
+    // Three pages of 200 hold the first 500; the list is not read further.
+    const offsets = calls
+      .map((c) => new URL(c.url, 'http://localhost'))
+      .filter((u) => u.pathname === '/api/v1/cis' && u.searchParams.get('limit') === '200')
+      .map((u) => u.searchParams.get('offset'));
+    expect(offsets).toEqual(['0', '200', '400']);
+    expect(screen.getByRole('button', { name: 'Anwenden' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Treffer des Filters auswählen/ }),
+    ).not.toBeInTheDocument();
   });
 });

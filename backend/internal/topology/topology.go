@@ -346,6 +346,9 @@ func (h *Handler) graphFrom(ctx context.Context, orgID string, root *ci.Item, de
 		return nil, err
 	}
 	g, _ := graphOf(root.ID, nodes, edges)
+	// These walks do not report the node limit; at the limit the walk may
+	// have been cut.
+	g.truncated = len(nodes) >= relationship.MaxTraversalNodes
 	return g, nil
 }
 
@@ -357,7 +360,7 @@ func (h *Handler) walkedGraph(ctx context.Context, orgID string, root *ci.Item, 
 		return nil, err
 	}
 	g := &ciGraph{ids: walk.CIs, nodes: make([]Node, len(walk.CIs)), known: make([]bool, len(walk.CIs)),
-		edges: make([]ciEdge, len(walk.Edges))}
+		edges: make([]ciEdge, len(walk.Edges)), truncated: walk.Truncated}
 	g.nodes[0], g.known[0] = nodeFromItem(*root), true
 	types := map[string]int32{}
 	for i := range walk.Edges {
@@ -548,6 +551,12 @@ type ciGraph struct {
 	// their type as a number of relTypes.
 	edges    []ciEdge
 	relTypes []string
+	// feeds are the edges of a redundant type from a dependent of g to a
+	// provider beyond the walk (readFeeds, IMP-04): that end is outside.
+	feeds []ciEdge
+	// truncated is set when the node limit may have cut the walk: then a
+	// CI within the depth may lack edges as well (readFeeds).
+	truncated bool
 	// first and incident list the edges of each CI in graph order: those
 	// of CI n are incident[first[n]:first[n+1]] (indexIncidence).
 	first, incident []int32

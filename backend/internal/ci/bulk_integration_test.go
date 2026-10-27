@@ -16,7 +16,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -372,6 +374,260 @@ func TestAuditT7BulkReportMatchesStoredStatus(t *testing.T) {
 		pw := e.do(e.ctx, http.MethodPatch, "/api/v1/cis/"+c, stale, map[string]any{"status": "active"})
 		if pw.Code != http.StatusConflict && pw.Code != http.StatusPreconditionFailed {
 			t.Errorf("PATCH with the pre-bulk If-Match %s = %d, want 409/412 (the stale edit silently reverts the bulk change)", stale, pw.Code)
+		}
+	})
+}
+
+// queuedDelivery is a job message handed to Queue.Process.
+type queuedDelivery struct {
+	data  []byte
+	acked bool
+}
+
+func (d *queuedDelivery) Data() []byte                     { return d.data }
+func (d *queuedDelivery) Ack() error                       { d.acked = true; return nil }
+func (d *queuedDelivery) NakWithDelay(time.Duration) error { return nil }
+
+// TestBulkJobOnQueueRunsWithCreatorScope covers WP-503 (TEC-14, JOB-01,
+// TEN-09) against PostgreSQL: with the job queue a bulk change from 100 ids
+// is submitted (queued, no goroutine of the request runs it); the queue's
+// worker runs it outside the request with the scope of its creator, a
+// client-scoped principal: its CIs change with it as the author, the CI of
+// another client is 404 in the report and keeps its status.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestBulkJobOnQueueRunsWithCreatorScope(t *testing.T) {
+	f := scopetest.Seed(t, "b9")
+	bg := context.Background()
+	ctx := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User, ClientID: f.Client1})
+	repo := jobs.NewPGRepository(f.App)
+	queue := jobs.NewQueue(jobs.NewService(repo), nil)
+	svc := ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder())).WithBulkQueue(queue)
+	queue.Handle(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1}, svc.RunBulkJob)
+
+	var ids []string
+	rows, err := f.Admin.Query(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status)
+		SELECT $1, $2, (SELECT id FROM ci_type WHERE key = 'server' AND organization_id IS NULL), 'bulk-queue-' || g, 'active'
+		FROM generate_series(1, 99) g RETURNING id::text`, f.OrgA, f.Client1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	foreign := f.CI(t, f.OrgA, f.Client2, "bulk-queue-foreign")
+	ids = append(ids, foreign)
+
+	res, job, err := svc.Bulk(ctx, f.OrgA, &ci.BulkRequest{Action: ci.BulkSetStatus, IDs: ids, Status: ci.StatusInactive})
+	if err != nil || res != nil || job == nil {
+		t.Fatalf("bulk: %+v %+v %v", res, job, err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got, _ := repo.Get(bg, f.OrgA, job.ID); got.Status != jobs.StatusQueued || got.Scope == nil {
+		t.Fatalf("job after the request: %+v; want queued with the creator's scope", got)
+	}
+
+	data, _ := json.Marshal(jobs.Message{OrganizationID: f.OrgA, JobID: job.ID, Kind: ci.BulkJobKind})
+	d := &queuedDelivery{data: data}
+	if out := queue.Process(bg, d); !out.Ran || !d.acked {
+		t.Fatalf("queue: %+v", out)
+	}
+	done, err := repo.Get(bg, f.OrgA, job.ID)
+	if err != nil || done.Status != jobs.StatusSucceeded {
+		t.Fatalf("job: %+v %v", done, err)
+	}
+	var report ci.BulkResult
+	if err = json.Unmarshal(done.Result, &report); err != nil || report.Succeeded != 99 || report.Failed != 1 {
+		t.Fatalf("report: %+v %v", report, err)
+	}
+	if last := report.Items[len(report.Items)-1]; last.ID != foreign || last.Code != http.StatusNotFound {
+		t.Errorf("CI of another client in the report: %+v, want 404", last)
+	}
+	var inactive, authored int
+	var foreignStatus string
+	if err = f.Admin.QueryRow(bg, `SELECT
+		(SELECT count(*) FROM ci WHERE id = ANY($1::uuid[]) AND status = 'inactive'),
+		(SELECT count(*) FROM ci_change WHERE ci_id = ANY($1::uuid[]) AND field_name = 'status' AND actor_id = $2),
+		(SELECT status FROM ci WHERE id = $3)`, ids, f.User, foreign).Scan(&inactive, &authored, &foreignStatus); err != nil {
+		t.Fatal(err)
+	}
+	if inactive != 99 || authored != 99 || foreignStatus != "active" {
+		t.Errorf("inactive %d, changes by the creator %d, foreign status %s; want 99, 99, active", inactive, authored, foreignStatus)
+	}
+}
+
+// TestBulkAPIBoundariesAndIsolation covers WP-517 (API-08, BLK-01; F-327,
+// audit WP-181) against PostgreSQL, through the route authorization
+// (server.AuthorizeRoute) and the production CI and job handlers: 99 ids
+// answer 200 with the report, 100 and 500 ids 202 with a job whose result
+// reports every id, 501 ids 422 without a change; a CI of another client
+// and one of another organization are 404 in the report and keep status
+// and version while the own ids are applied; a malformed id is 400
+// "invalid CI id" (the single PATCH answers 400); without ci:write the
+// request is 403 and changes nothing. Harness: audit_t7_bulk_harness_test.go.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestBulkAPIBoundariesAndIsolation(t *testing.T) {
+	e := newAuditT7BulkEnv(t, "b9")
+	authorized := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server.AuthorizeRoute(r.Method, r.URL.Path)(e.mux).ServeHTTP(w, r)
+	})
+	do := func(ctx context.Context, method, path string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		req := httptest.NewRequest(method, path, bytes.NewReader(raw)).WithContext(ctx)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		authorized.ServeHTTP(w, req)
+		return w
+	}
+	bulk := func(ctx context.Context, ids []string, status string) *httptest.ResponseRecorder {
+		t.Helper()
+		return do(ctx, http.MethodPost, "/api/v1/cis/bulk", map[string]any{"action": ci.BulkSetStatus, "ids": ids, "status": status})
+	}
+	// job waits for the job of a 202 and returns its report.
+	job := func(w *httptest.ResponseRecorder) ci.BulkResult {
+		t.Helper()
+		var acc struct {
+			JobID string `json:"job_id"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &acc); err != nil || w.Code != http.StatusAccepted || acc.JobID == "" ||
+			w.Header().Get("Location") != "/api/v1/jobs/"+acc.JobID {
+			t.Fatalf("bulk job: %d %s (Location %q), want 202 with the job", w.Code, w.Body.String(), w.Header().Get("Location"))
+		}
+		j := e.waitTerminal(acc.JobID, 90*time.Second)
+		if j.Status != jobs.StatusSucceeded {
+			t.Fatalf("bulk job ended %s (%s)", j.Status, j.Error)
+		}
+		var res ci.BulkResult
+		if err := json.Unmarshal(j.Result, &res); err != nil {
+			t.Fatalf("job result: %v", err)
+		}
+		return res
+	}
+	// report checks one item per id in the order of ids: ok for the own,
+	// want[id] for the others.
+	report := func(t *testing.T, res ci.BulkResult, ids []string, want map[string]ci.BulkItemResult) {
+		t.Helper()
+		if res.Total != len(ids) || len(res.Items) != len(ids) || res.Succeeded != len(ids)-len(want) || res.Failed != len(want) || res.Skipped != 0 {
+			t.Fatalf("report: total %d, items %d, ok %d, failed %d, skipped %d; want %d ids, %d errors",
+				res.Total, len(res.Items), res.Succeeded, res.Failed, res.Skipped, len(ids), len(want))
+		}
+		for i, item := range res.Items {
+			exp, isErr := want[ids[i]]
+			switch {
+			case item.ID != ids[i]:
+				t.Errorf("item %d: id %s, want %s", i, item.ID, ids[i])
+			case isErr && (item.Result != "error" || item.Code != exp.Code || item.Error != exp.Error):
+				t.Errorf("item %s: %+v, want error %d %q", item.ID, item, exp.Code, exp.Error)
+			case !isErr && (item.Result != "ok" || item.Code != http.StatusOK):
+				t.Errorf("item %s: %+v, want ok", item.ID, item)
+			}
+		}
+	}
+	type snapshot struct {
+		status  string
+		version int64
+	}
+	snap := func(ids ...string) map[string]snapshot {
+		out := map[string]snapshot{}
+		for _, id := range ids {
+			s, v, _ := e.state(id)
+			out[id] = snapshot{s, v}
+		}
+		return out
+	}
+	unchanged := func(t *testing.T, before map[string]snapshot) {
+		t.Helper()
+		for id, b := range before {
+			if s, v, _ := e.state(id); s != b.status || v != b.version {
+				t.Errorf("%s changed: status %s version %d, want %s version %d", id, s, v, b.status, b.version)
+			}
+		}
+	}
+
+	own := e.seedCIs("bulk-api-", ci.MaxBulkIDs)
+	otherClient := e.f.CI(t, e.f.OrgA, e.f.Client2, "bulk-api-client2")
+	otherOrg := e.f.CI(t, e.f.OrgB, "", "bulk-api-org-b")
+	foreign := []string{otherClient, otherOrg}
+	notFound := ci.BulkItemResult{Code: http.StatusNotFound, Error: "CI not found"}
+	foreignWant := map[string]ci.BulkItemResult{otherClient: notFound, otherOrg: notFound}
+
+	t.Run("99 ids answer 200 with the report; foreign CIs 404 and unchanged", func(t *testing.T) {
+		before := snap(foreign...)
+		ids := append([]string{otherClient}, own[:97]...)
+		ids = append(ids, otherOrg)
+		w := bulk(e.ctx, ids, ci.StatusMaintenance)
+		var res ci.BulkResult
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("bulk with 99 ids: %d %s, want 200 with the report", w.Code, w.Body.String())
+		}
+		report(t, res, ids, foreignWant)
+		if n := e.countStatus(own[:97], ci.StatusMaintenance); n != 97 {
+			t.Errorf("%d of 97 own CIs in maintenance", n)
+		}
+		unchanged(t, before)
+	})
+
+	t.Run("a malformed id is 400 like the single PATCH, the others are applied", func(t *testing.T) {
+		if w := do(e.ctx, http.MethodPatch, "/api/v1/cis/not-a-uuid", map[string]any{"status": ci.StatusInactive}); w.Code != http.StatusBadRequest {
+			t.Fatalf("single PATCH of a malformed id: %d %s, want 400", w.Code, w.Body.String())
+		}
+		ids := []string{"not-a-uuid", own[97]}
+		w := bulk(e.ctx, ids, ci.StatusInactive)
+		var res ci.BulkResult
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("bulk: %d %s", w.Code, w.Body.String())
+		}
+		report(t, res, ids, map[string]ci.BulkItemResult{"not-a-uuid": {Code: http.StatusBadRequest, Error: "invalid CI id"}})
+		if s, _, _ := e.state(own[97]); s != ci.StatusInactive {
+			t.Errorf("own CI next to the malformed id: status %s, want inactive", s)
+		}
+	})
+
+	t.Run("100 ids answer 202 with a job whose result reports every id", func(t *testing.T) {
+		ids := own[:ci.BulkJobFromIDs]
+		res := job(bulk(e.ctx, ids, ci.StatusInactive))
+		report(t, res, ids, nil)
+		if n := e.countStatus(ids, ci.StatusInactive); n != len(ids) {
+			t.Errorf("%d of %d CIs inactive after the job", n, len(ids))
+		}
+	})
+
+	t.Run("500 ids answer 202 with a job; foreign CIs 404 and unchanged, own applied", func(t *testing.T) {
+		before := snap(foreign...)
+		ids := append(append([]string{}, own[:ci.MaxBulkIDs-2]...), foreign...)
+		res := job(bulk(e.ctx, ids, ci.StatusDecommissioned))
+		report(t, res, ids, foreignWant)
+		if n := e.countStatus(own[:ci.MaxBulkIDs-2], ci.StatusDecommissioned); n != ci.MaxBulkIDs-2 {
+			t.Errorf("%d of %d own CIs decommissioned after the job", n, ci.MaxBulkIDs-2)
+		}
+		unchanged(t, before)
+	})
+
+	t.Run("501 ids are 422 and change nothing", func(t *testing.T) {
+		before := snap(append(append([]string{}, own...), foreign...)...)
+		w := bulk(e.ctx, append(append([]string{}, own...), otherClient), ci.StatusActive)
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("bulk with 501 ids: %d %s, want 422", w.Code, w.Body.String())
+		}
+		unchanged(t, before)
+	})
+
+	t.Run("without ci:write the request is 403 and changes nothing", func(t *testing.T) {
+		readOnly := identity.WithPrincipal(e.ctx, identity.Principal{Subject: e.user, OrganizationID: e.f.OrgA, Type: identity.PrincipalTypeUser,
+			Permissions: []identity.Permission{identity.PermJobRead, identity.PermCIRead}})
+		for _, n := range []int{1, ci.BulkJobFromIDs} {
+			before := snap(own[:n]...)
+			if w := bulk(readOnly, own[:n], ci.StatusActive); w.Code != http.StatusForbidden {
+				t.Errorf("bulk of %d ids without ci:write: %d %s, want 403", n, w.Code, w.Body.String())
+			}
+			unchanged(t, before)
 		}
 	})
 }

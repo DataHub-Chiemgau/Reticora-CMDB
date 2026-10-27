@@ -75,6 +75,9 @@ type Job struct {
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
 	// Scope is the scope snapshot of the job; nil for a job without one.
 	Scope *Scope `json:"-"`
+	// Cancellable reports whether DELETE /jobs/{id} would cancel the job
+	// now (Service.Cancellable); the job API sets it, it is not stored.
+	Cancellable bool `json:"cancellable"`
 }
 
 // Scope is the scope snapshot of a job (TEN-09, F-163): the client, site
@@ -146,6 +149,11 @@ type Kind struct {
 	Timeout     time.Duration
 	// Backoff returns the delay before attempt n+1 after n failed attempts.
 	Backoff func(attempts int) time.Duration
+	// Cancellable: a running job of the kind can be cancelled, its worker
+	// stops at its next checkpoint (JOB-03, F-162). A running job of any
+	// other kind runs to its end and a cancel is refused
+	// (ErrNotCancellable); a queued job of every kind can be cancelled.
+	Cancellable bool
 }
 
 // ExponentialBackoff doubles base per failed attempt up to limit.
@@ -170,6 +178,9 @@ var (
 	ErrNotFound = errors.New("job not found")
 	// ErrTransition: the job is not in a status that allows the change.
 	ErrTransition = errors.New("job status does not allow this change")
+	// ErrNotCancellable: the job runs and its kind cannot be cancelled
+	// while running (Kind.Cancellable).
+	ErrNotCancellable = errors.New("the job kind cannot be cancelled while running")
 	// ErrUnknownKind: no kind of that name is registered.
 	ErrUnknownKind = errors.New("unknown job kind")
 )

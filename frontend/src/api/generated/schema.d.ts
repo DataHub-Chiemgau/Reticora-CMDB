@@ -804,6 +804,7 @@ export interface paths {
     /**
      * Create a webhook subscription
      * @description The subscription takes the client, site and team scope of its creator (TEN-09, E-98): only callers whose scope covers it see and manage it, and it receives only events whose objects lie in that scope; events of unknown scope and events about objects of the whole organization reach subscriptions of creators without restriction only. A service account in `service_account_id` must be visible to the creator (422 otherwise); the subscription then receives only the events both the creator's scope and the account's read rights cover. invitation.created is delivered without its link: the acceptance token reaches the invitee by mail only.
+     *     Every delivery is a POST with the event data as JSON body and the headers X-Reticora-Event (event type), X-Reticora-Delivery (delivery ID) and X-Reticora-Signature (`sha256=` HMAC-SHA256 of the body with the subscription secret). A delivery of a domain event also carries X-Reticora-Event-ID (the event ID), X-Reticora-Sequence (the sequence of the event in the organization) and X-Reticora-Entity-Seq (the sequence of the event among those of its entity; absent for an event without an entity). Delivery is at least once: the delivery ID derives from the event and the subscription, and every retry of a delivery keeps it and the headers, so receivers drop repeats by X-Reticora-Delivery or X-Reticora-Event-ID and order the events of an entity by X-Reticora-Entity-Seq.
      */
     post: operations['createWebhook'];
     delete?: never;
@@ -1093,7 +1094,7 @@ export interface paths {
     post?: never;
     /**
      * Cancel a queued or running job
-     * @description Allowed for the creator of the job and for holders of the permission of its kind (ci.bulk ci:write, ci.merge ci:delete, export export:run). A finished job is 409.
+     * @description Allowed for the creator of the job and for holders of the permission of its kind (ci.bulk ci:write, ci.merge ci:delete, export export:run). A queued job of every kind is cancelled. A running job is cancelled only when its kind can be cancelled while running (ci.bulk, history.snapshot, export; the job's cancellable field): its worker stops at the next checkpoint and records no further status, a bulk change keeps its partial report as the result (processed ids with their result, the others skipped). A running job of any other kind (e.g. review.merge, the discovery jobs) and a finished job are 409.
      */
     delete: operations['cancelJob'];
     options?: never;
@@ -1111,7 +1112,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** The result of a succeeded job */
+    /**
+     * The result of a succeeded job
+     * @description Also the partial result a job cancelled while running kept, e.g. the report of a bulk change (status cancelled).
+     */
     get: operations['getJobResult'];
     put?: never;
     post?: never;
@@ -2717,7 +2721,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -2906,7 +2910,7 @@ export interface paths {
     head?: never;
     /**
      * Update name, settings, time zone, currency, locale and AI opt-in of the organization
-     * @description The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217 code (EUR) and the locale a BCP 47 tag, stored in canonical form (de-ch → de-CH). Slug and plan are not changed here. An invalid value answers 400 naming the field. ai_opt_in is the organization's consent to external AI processing (AI-02): only a principal holding user:manage for the whole organization changes it (a client-, site- or team-bound holder gets 403); a change writes the audit entry organization.ai_opt_in_changed with the old and the new value in the same transaction.
+     * @description Every field belongs to the whole organization and is inherited by all its clients, so only a principal holding user:manage for the whole organization changes any of them (name, settings, timezone, currency, locale, ai_opt_in; RBA-03). A holder bound to a client, a site or a team, one holding user:manage only in such a scope, a client-bound API key or a request without principal gets 403 and nothing is changed. The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217 code (EUR) and the locale a BCP 47 tag, stored in canonical form (de-ch → de-CH). Slug and plan are not changed here. An invalid value answers 400 naming the field. ai_opt_in is the organization's consent to external AI processing (AI-02); a change writes the audit entry organization.ai_opt_in_changed with the old and the new value in the same transaction.
      */
     patch: operations['updateOrganization'];
     trace?: never;
@@ -3067,7 +3071,10 @@ export interface paths {
     delete: operations['deleteRoom'];
     options?: never;
     head?: never;
-    /** Update a room */
+    /**
+     * Update a room
+     * @description Changes name, floor, room type or the floor-plan layout. Every layout key must be a CI of the organization the caller sees and x and y must lie in 0..1, otherwise 422 naming `layout.<ci>` or `layout.<ci>.x|y`. Optimistic concurrency: If-Match names the ETag of the room the editor read; a room changed since is refused with 409 (field `If-Match`) and stays unchanged. Without If-Match (or with "*") the PATCH is applied.
+     */
     patch: operations['updateRoom'];
     trace?: never;
   };
@@ -3453,11 +3460,14 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The signed-in user's quiet hours and muted categories */
+    /**
+     * The signed-in user's quiet hours, muted categories and digest
+     * @description Without stored preferences the defaults (Europe/Berlin, nothing muted, digest `{"review":"hourly"}`).
+     */
     get: operations['getNotificationPreferences'];
     /**
-     * Set quiet hours and muted categories
-     * @description Critical notifications ignore both (NTF-04).
+     * Set quiet hours, muted categories and digest
+     * @description Critical notifications ignore quiet hours and muted categories and are never bundled (NTF-04). A digest naming an unknown or critical category or a window other than hourly or daily is refused with 400.
      */
     put: operations['setNotificationPreferences'];
     post?: never;
@@ -4703,7 +4713,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get effective permissions for the authenticated caller */
+    /**
+     * Get effective permissions for the authenticated caller
+     * @description Self-service: every authenticated user reads its own user_id and effective permissions; no permission (not even permission:read) is required, like for /api/v1/me.
+     */
     get: operations['getMyPermissions'];
     put?: never;
     post?: never;
@@ -5695,7 +5708,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Reconstruct asset state at a point in time */
+    /**
+     * Reconstruct asset state at a point in time
+     * @description Replays the changes of the asset (creation, updates, deletion) up to at (default now). An asset the caller cannot see (unknown, deleted, or of another organization, client or site) and one without a recorded change up to at are 404 (JOB-04, F-164).
+     */
     get: operations['listAssetsIdState'];
     put?: never;
     post?: never;
@@ -6140,7 +6156,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Reconstruct CI state at a point in time */
+    /**
+     * Reconstruct CI state at a point in time
+     * @description Replays the change trail of the CI (its ci_change field rows from the creation on and its entity_change rows) up to at (default now), with the values its history shows. A CI the caller cannot see (unknown, or of another organization, client or site) and one without a recorded change up to at are 404 (JOB-04, F-164).
+     */
     get: operations['listCisIdState'];
     put?: never;
     post?: never;
@@ -6198,7 +6217,7 @@ export interface paths {
     put?: never;
     /**
      * State snapshot of a CI or asset as a job (JOB-04)
-     * @description Replays the history of the entity up to at (default now) as a job of kind history.snapshot; 202 with the job, whose result is the state (GET /api/v1/jobs/{id}/result). Without the job model (no database) the state is answered at once (200). GET /cis/{id}/state stays the direct read.
+     * @description Replays the history of the entity up to at (default now) as a job of kind history.snapshot; 202 with the job, whose result is the state (GET /api/v1/jobs/{id}/result). Without the job model (no database) the state is answered at once (200). GET /cis/{id}/state stays the direct read. An entity the caller cannot see (unknown, or of another organization, client or site) is 404 and no job is created; without a recorded change up to at (before the creation) the job fails with "no recorded state before <at>" (404 without the job model).
      */
     post: operations['createStateSnapshot'];
     delete?: never;
@@ -6575,13 +6594,16 @@ export interface paths {
     get: operations['getSavedViewsId'];
     put?: never;
     post?: never;
-    /** Delete a saved view */
+    /**
+     * Delete a saved view
+     * @description Only the owner deletes the view (E-86, option 1). A view shared with the caller, org-wide or with a role, answers 404 and stays.
+     */
     delete: operations['deleteSavedViewsId'];
     options?: never;
     head?: never;
     /**
      * Update a saved view
-     * @description The owner changes the view; a view shared org-wide is editable by everybody, a role-shared one only by its owner.
+     * @description Only the owner changes the view (E-86, option 1). For everybody else a view shared org-wide or with a role is read-only, and its PATCH answers 404 like a view the caller cannot see; the view stays unchanged. Only the fields sent change: a request without shared keeps the sharing. Every id in shared_with_roles must be a role or custom role of the organization.
      */
     patch: operations['updateSavedViewsId'];
     trace?: never;
@@ -6787,6 +6809,15 @@ export interface components {
       /** @example Europe/Berlin */
       time_zone: string;
       muted_categories: string[];
+      /**
+       * @description Categories whose e-mails are bundled into one digest per window (NTF-04): category → hourly (ends at the full hour) or daily (ends at midnight in time_zone). Allowed are the categories with a non-critical event (entitlement, export, job, review, webhook); critical notifications, the in-app center and webhooks are never bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every e-mail on its own.
+       * @example {
+       *       "review": "hourly"
+       *     }
+       */
+      digest?: {
+        [key: string]: 'hourly' | 'daily';
+      };
     };
     NotificationChannel: {
       id: string;
@@ -7207,7 +7238,9 @@ export interface components {
       };
       sort?: components['schemas']['SavedViewSortKey'][];
       columns?: string[];
+      /** @description Shares the view org-wide. A PATCH without it keeps the current sharing. */
       shared?: boolean;
+      /** @description Role or custom role ids of the organization whose holders may read the view. */
       shared_with_roles?: string[];
     };
     ImpactAnalysis: {
@@ -7319,10 +7352,15 @@ export interface components {
       total: number;
       succeeded: number;
       failed: number;
+      /** @description Ids not processed because the bulk job was cancelled. */
+      skipped?: number;
+      /** @description The bulk job was cancelled while running and stopped before the skipped ids. */
+      cancelled?: boolean;
       items: {
         id: string;
         /** @enum {string} */
-        result: 'ok' | 'error';
+        result: 'ok' | 'error' | 'skipped';
+        /** @description The HTTP status the single operation would have answered; 0 for a skipped id. */
         code: number;
         error?: string;
       }[];
@@ -7438,7 +7476,7 @@ export interface components {
       instance?: string;
       /** @description Request id of the failed request (equals the X-Request-ID response header). */
       trace_id: string;
-      /** @description Request field a 400 or 409 refers to (e.g. the unique `name` of a client). */
+      /** @description Request field a 400, 409 or 422 refers to (e.g. the unique `name` of a client). */
       field?: string;
     };
     PaginationEnvelope: {
@@ -7691,7 +7729,10 @@ export interface components {
       invoice_number?: string;
     };
     CreateCIRequest: {
-      /** @description ID (UUID) of an active system type or an active type of the organization (GET /api/v1/ci-types; CI-01, TEN-09), not its key. Any other value is rejected (422 on ci_type_id); an unknown ID and a type of another organization get the same answer. */
+      /**
+       * Format: uuid
+       * @description ID (UUID) of an active system type or an active type of the organization (GET /api/v1/ci-types; CI-01, TEN-09), not its key. Any other value is rejected (422 on ci_type_id); an unknown ID and a type of another organization get the same answer.
+       */
       ci_type_id: string;
       client_id?: string;
       /** @description Node of the location tree; site and room of the CI follow from it. */
@@ -7797,7 +7838,7 @@ export interface components {
       action: string;
       resource_type: string;
       resource_id?: string;
-      /** @description What changed. Domain entries carry old and new values; the entry of a write request names the route, the response status, the written fields and, for resources without a UUID, resource_key. */
+      /** @description What changed. Domain entries carry old and new values; the entry of a write request names the route, the response status, the written fields and, for resources without a UUID, resource_key, and in `values` one `{field, old, new}` per changed column of the row the route changed (a create only new, a delete only old values; AUD-07). Secrets never appear; a personal value appears only as `{"$surrogate": "<id of its row>"}` (CH16). `values_unavailable: true` marks an entry whose row could not be read after the request. */
       changes?: {
         [key: string]: unknown;
       };
@@ -8179,6 +8220,8 @@ export interface components {
       rejected_future?: number;
       /** @description New devices held as unlicensed_ci review items because max_cis is reached (ENT-03, CH21). */
       unlicensed?: number;
+      /** @description Sum over the processed records of the discovered values dropped because a manual write would refuse them: the data type of a typed CI column (MET-11; a multi-line hostname, a hardware_uuid that is no UUID, a malformed MAC or IP) or the field definitions of the CI type (CI-03). The rest of each record is stored; no value fails a record or the batch (WP-501). Absent when no value was dropped; with the queue the records are processed asynchronously and it stays absent. */
+      invalid_values?: number;
       job_id?: string;
       /** @description Records processed, deduplicated or queued (REC-01). A record that fails does not take the others of the request down (WP-481). */
       accepted: number;
@@ -8246,6 +8289,8 @@ export interface components {
       started_at?: string;
       /** Format: date-time */
       finished_at?: string;
+      /** @description Whether DELETE /jobs/{id} cancels the job now: true for a queued job and for a running job of a kind that can be cancelled while running (ci.bulk, history.snapshot, export), false otherwise. */
+      cancellable: boolean;
     };
     JobListResponse: {
       data: components['schemas']['Job'][];
@@ -10097,6 +10142,11 @@ export interface components {
       action: 'merge' | 'new' | 'dismiss' | 'accept' | 'create';
       /** @description Target candidate CI id, required when action is merge. */
       ci_id?: string;
+      /**
+       * Format: uuid
+       * @description Type of the CI new creates (UI-16), the id of an active system type or of a type of the organization (GET /ci-types). It takes precedence over the type name the item recorded; without it that name is resolved as the ingest resolves it. A value that is no UUID or names no such type is 422 with field ci_type_id.
+       */
+      ci_type_id?: string;
       /** @description Optional human-readable resolution note. */
       resolution?: string;
     };
@@ -10314,7 +10364,7 @@ export interface components {
       name?: string;
       floor?: number;
       room_type?: string;
-      /** @description Replaces the room's floor-plan object positions. Map of object_id → {x, y} in normalized 0..1 coordinates; an empty object clears the layout. */
+      /** @description Replaces the room's floor-plan object positions. Map of CI id → {x, y} in normalized 0..1 coordinates; an empty object clears the layout. Each key must be a CI of the organization the caller sees (422 otherwise). */
       layout?: {
         [key: string]: {
           x?: number;
@@ -11224,6 +11274,15 @@ export interface components {
       };
       content: {
         'application/problem+json': components['schemas']['DependencyProblem'];
+      };
+    };
+    /** @description The name is taken below the same parent: a site per client, a building per site, a room per building, a rack per room (LOC-03..06). `field` is `name`; nothing was stored. */
+    LocationNameTaken: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
     /** @description The request violates the parent matrix or a field rule; violations name the field */
@@ -13092,7 +13151,15 @@ export interface operations {
           'application/json': components['schemas']['DiscoveryIngestResponse'];
         };
       };
-      400: components['responses']['BadRequest'];
+      /** @description The body is unusable: no valid JSON or gzip, no records, records and items mixed, or a reserved attribute namespace. A malformed value of a typed CI column (e.g. hardware_uuid, primary_mac, management_ip, a multi-line hostname) refuses nothing: it is dropped, counted in invalid_values, and the rest of its record and the other records are processed (WP-501). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       /** @description Decompressed body larger than 64 MiB */
@@ -13104,7 +13171,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field) */
+      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field). identity.hardware_uuid and identity.primary_mac are values of typed CI columns: a malformed one is dropped and counted in invalid_values instead (WP-501). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -13400,7 +13467,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The job is finished already. */
+      /** @description The job is finished already, or it runs and its kind cannot be cancelled while running. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -17218,7 +17285,7 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      /** @description The action does not resolve items of this type, or new cannot tell the client of the device */
+      /** @description The action does not resolve items of this type, new cannot tell the client of the device, or new has no CI type (field ci_type_id) */
       422: {
         headers: {
           [name: string]: unknown;
@@ -18122,6 +18189,8 @@ export interface operations {
       /** @description Room details */
       200: {
         headers: {
+          /** @description The room's version, derived from updated_at; send it as If-Match with a PATCH. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -18159,7 +18228,10 @@ export interface operations {
   updateRoom: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the room version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
@@ -18175,6 +18247,8 @@ export interface operations {
       /** @description Room updated */
       200: {
         headers: {
+          /** @description The room's new version. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -18184,7 +18258,33 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
+      /** @description The room was changed since the If-Match version (field `If-Match`), or the name is already taken in the building (field `name`). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description If-Match is not an ETag of the room. */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A layout coordinate lies outside 0..1 (field `layout.<ci>.x` or `layout.<ci>.y`), or a layout key is not a CI of the organization visible to the caller (field `layout.<ci>`). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listRacks: {
@@ -18337,7 +18437,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
+      /** @description The name is taken in the room (`field` name), or height_units is below the highest unit occupied by a mount, max(position_u + height_u − 1) (RCK-01): `field` is height_units and `detail` names that unit. The rack is unchanged. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -20955,7 +21063,15 @@ export interface operations {
           'application/json': components['schemas']['DiscoveryIngestResponse'];
         };
       };
-      400: components['responses']['BadRequest'];
+      /** @description The body is unusable: no valid JSON or gzip, no records, records and items mixed, or a reserved attribute namespace. A malformed value of a typed CI column (e.g. hardware_uuid, primary_mac, management_ip, a multi-line hostname) refuses nothing: it is dropped, counted in invalid_values, and the rest of its record and the other records are processed (WP-501). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       /** @description Decompressed body larger than 64 MiB */
@@ -20967,7 +21083,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field) */
+      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field). identity.hardware_uuid and identity.primary_mac are values of typed CI columns: a malformed one is dropped and counted in invalid_values instead (WP-501). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -25863,6 +25979,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   listCiFieldsGlobal: {
@@ -26785,6 +26902,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   listCompositions: {
@@ -26957,7 +27075,8 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      /** @description Unknown entity type. */
+      404: components['responses']['NotFound'];
+      /** @description Unknown entity type, or an entity_id that is no UUID. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -27417,6 +27536,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['LocationNameTaken'];
       422: components['responses']['LocationViolation'];
     };
   };
@@ -27515,6 +27635,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['LocationNameTaken'];
       422: components['responses']['LocationViolation'];
     };
   };
@@ -27957,7 +28078,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column or role id. */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -28086,7 +28207,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column or role id. */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;

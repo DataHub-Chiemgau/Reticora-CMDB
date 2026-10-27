@@ -1,0 +1,7 @@
+# A UPS without switched outlet groups (UPS-MIB identity only): no outlet
+# table of the plugin answers.
+.1.3.6.1.2.1.1.1.0 = STRING: "Eaton 5PX 1500"
+.1.3.6.1.2.1.33.1.1.1.0 = STRING: "EATON"
+.1.3.6.1.2.1.33.1.1.2.0 = STRING: "Eaton 5PX 1500"
+.1.3.6.1.2.1.33.1.1.5.0 = STRING: "G123A45678"
+.1.3.6.1.2.1.33.1.2.1.0 = INTEGER: 2

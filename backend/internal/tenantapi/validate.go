@@ -2,6 +2,9 @@ package tenantapi
 
 import (
 	"fmt"
+	"math"
+	"net/http"
+	"sort"
 	"strings"
 	"time"
 	_ "time/tzdata" // IANA zone names validate without the host's zoneinfo
@@ -53,6 +56,42 @@ func canonicalLocale(tag string) (string, error) {
 		return "", &FieldError{Field: "locale", Message: fmt.Sprintf("%q is not a BCP 47 language tag (e.g. de-DE)", tag)}
 	}
 	return t.String(), nil
+}
+
+// layoutKeys returns the object ids of a room layout in a fixed order, so
+// the first refused entry is the same on every request.
+func layoutKeys(layout map[string]LayoutPosition) []string {
+	keys := make([]string, 0, len(layout))
+	for k := range layout {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// validateLayoutRange checks the normalized coordinates of a room layout:
+// 0 ≤ x, y ≤ 1, otherwise 422 naming layout.<ci>.x|y (F-341).
+func validateLayoutRange(layout map[string]LayoutPosition) error {
+	for _, k := range layoutKeys(layout) {
+		p := layout[k]
+		for _, c := range []struct {
+			axis string
+			v    float64
+		}{{"x", p.X}, {"y", p.Y}} {
+			if math.IsNaN(c.v) || c.v < 0 || c.v > 1 {
+				return &FieldError{Field: "layout." + k + "." + c.axis, Status: http.StatusUnprocessableEntity,
+					Message: "the coordinate must lie between 0 and 1"}
+			}
+		}
+	}
+	return nil
+}
+
+// unknownLayoutCI refuses a layout key that is no CI of the organization
+// visible to the caller (422 naming layout.<ci>, F-341).
+func unknownLayoutCI(key string) error {
+	return &FieldError{Field: "layout." + key, Status: http.StatusUnprocessableEntity,
+		Message: "the key is not a configuration item of the organization"}
 }
 
 // iso4217 lists the active alphabetic codes of ISO 4217 (list one,

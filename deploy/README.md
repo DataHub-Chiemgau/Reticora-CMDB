@@ -356,6 +356,34 @@ docker compose -f /opt/reticora-collector/docker-compose.yml run --rm collector 
 docker compose -f /opt/reticora-collector/docker-compose.yml restart collector
 ```
 
+**Unattended enrollment** (containers, automated deployments, COL-04): start
+the collector with both variables set instead of running `enroll`:
+
+| Variable | Meaning |
+|---|---|
+| `RETICORA_ENROLL_TOKEN` | one-time enrollment code from the Discovery page (valid 24 h) |
+| `RETICORA_CLOUD_URL` | URL of the Reticora server (`https://cmdb.example.com`) |
+
+When no keystore exists at `RETICORA_CREDENTIALS_PATH`, the first start
+generates the key locally, sends the CSR with the code, stores the identity
+(mode `600`, the server URL as with `enroll`) and then starts normally. Later
+starts find the keystore and do not enroll again, so the variables may stay
+set; the code is single-use anyway. A private CA for the server certificate
+comes from `RETICORA_TLS_CA_FILE` (or `RETICORA_TLS_CA`). A refused or failed
+enrollment ends the start with exit code `1` and the cause in the log
+(`collector.enroll.failed`); the token itself is never logged. Setting only one
+of the two variables is a start error. Keep the volume of
+`RETICORA_CREDENTIALS_PATH` persistent (writable for the image user `nobody`,
+65534), otherwise every new container needs a fresh code. Example:
+
+```bash
+docker run -d --name reticora-collector \
+  -e RETICORA_ENROLL_TOKEN=<code> -e RETICORA_CLOUD_URL=https://cmdb.example.com \
+  -e RETICORA_CREDENTIALS_PATH=/var/lib/reticora-collector/credentials.json \
+  -v /var/lib/reticora-collector:/var/lib/reticora-collector \
+  ghcr.io/datahub-chiemgau/reticora-collector:<version>
+```
+
 ### ICMP sweep
 
 The sweep pings over an unprivileged ICMP socket where

@@ -204,6 +204,99 @@ type BatchConfirmer interface {
 type Confirmation struct {
 	ID         string
 	Confidence *float64
+	// Attributes are merged into the stored attributes of the edge, so
+	// that what discovery reports again (an outlet switched off) does not
+	// stay at its first value (WP-498); a nil value removes the attribute.
+	// Nil leaves the attributes unchanged.
+	Attributes map[string]any
+}
+
+// mergeAttributes merges patch into attrs as a confirmation does: a nil
+// value removes the attribute.
+func mergeAttributes(attrs, patch map[string]any) map[string]any {
+	if patch == nil {
+		return attrs
+	}
+	out := make(map[string]any, len(attrs)+len(patch))
+	for k, v := range attrs {
+		out[k] = v
+	}
+	for k, v := range patch {
+		if v == nil {
+			delete(out, k)
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// ConfirmMany implements BatchConfirmer.
+func (r *MemoryRepository) ConfirmMany(ctx context.Context, orgID string, confirmations []Confirmation) error {
+	for _, c := range confirmations {
+		r.mu.Lock()
+		rel, ok := r.items[c.ID]
+		if ok && rel.OrganizationID == orgID && rel.Source == "discovery" {
+			rel.Attributes = mergeAttributes(rel.Attributes, c.Attributes)
+		}
+		r.mu.Unlock()
+		if ok {
+			// Gone edges and edges of other sources stay unchanged, as in
+			// the PostgreSQL repository.
+			_ = r.Confirm(ctx, orgID, c.ID, c.Confidence)
+		}
+	}
+	return nil
+}
+
+// RedundancyMarker recomputes attributes.redundant of the discovery edges
+// of a type (powered_by, IMP-09) per source CI from every stored discovery
+// edge of that type, not only from those a batch reported (WP-498, F-112):
+// a source fed by more than one target has redundant feeds. An edge whose
+// attributes.outlet_state is "off" stays an edge but feeds nothing (E-85
+// option A). Edges of other sources are neither counted nor changed
+// (REL-08).
+type RedundancyMarker interface {
+	MarkRedundant(ctx context.Context, orgID, relType string, sourceCIIDs []string) error
+}
+
+// liveFeed reports whether a stored edge counts as a feed (E-85 option A).
+func liveFeed(attrs map[string]any) bool {
+	state, _ := attrs["outlet_state"].(string)
+	return state != "off"
+}
+
+// MarkRedundant implements RedundancyMarker.
+func (r *MemoryRepository) MarkRedundant(_ context.Context, orgID, relType string, sourceCIIDs []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	sources := map[string]bool{}
+	for _, id := range sourceCIIDs {
+		sources[id] = true
+	}
+	feeds := map[string]map[string]bool{}
+	var edges []*Relationship
+	for _, rel := range r.items {
+		if rel.OrganizationID != orgID || rel.RelType != relType || rel.Source != "discovery" || !sources[rel.SourceCIID] {
+			continue
+		}
+		edges = append(edges, rel)
+		if feeds[rel.SourceCIID] == nil {
+			feeds[rel.SourceCIID] = map[string]bool{}
+		}
+		if liveFeed(rel.Attributes) {
+			feeds[rel.SourceCIID][rel.TargetCIID] = true
+		}
+	}
+	for _, rel := range edges {
+		redundant := len(feeds[rel.SourceCIID]) > 1
+		if rel.Attributes["redundant"] == redundant {
+			continue
+		}
+		rel.Attributes = mergeAttributes(rel.Attributes, map[string]any{"redundant": redundant})
+		rel.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	return nil
 }
 
 // Repository defines persistence operations for relationships.
@@ -238,6 +331,9 @@ type Walk struct {
 	CIs []string
 	// Edges are the kept edges, ordered by id.
 	Edges []WalkEdge
+	// Truncated is set when the node limit cut the walk: a kept CI may
+	// then lack edges to CIs within the depth (IMP-04 reads them again).
+	Truncated bool
 }
 
 // WalkEdge is an edge of a Walk; SourceCI and TargetCI are numbers of
@@ -260,6 +356,19 @@ type EdgeReader interface {
 	// are both among ids and are visible, not deleted CIs under the
 	// caller's scope, ordered by id.
 	EdgesAmong(ctx context.Context, orgID string, ids []string) ([]Relationship, error)
+}
+
+// IncidentEdgeReader reads the stored edges of some types that touch a set
+// of CIs, whatever the depth of a walk (IMP-04, F-160): the impact reads
+// every provider of a redundant type of the dependents it reached, also
+// those beyond its depth, in one statement. Both the PostgreSQL and the
+// memory repository implement it.
+type IncidentEdgeReader interface {
+	// EdgesOf returns the stored relationships of one of relTypes whose
+	// source or target is among ciIDs and whose source and target are
+	// both visible, not deleted CIs under the caller's scope, ordered by
+	// id.
+	EdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error)
 }
 
 // MemoryRepository is an in-memory relationship store.
@@ -416,6 +525,39 @@ func (r *MemoryRepository) TraverseFrom(ctx context.Context, orgID, rootCIID str
 		edges = visibleEdges(edges, relationshipEnds, visible)
 	}
 	return SelectTraversal(rootCIID, edges, maxDepth, maxNodes), nil
+}
+
+// EdgesOf implements IncidentEdgeReader on the in-memory edges; with a
+// NodeVisibility only edges between visible, not deleted CIs count, as in
+// TraverseFrom.
+func (r *MemoryRepository) EdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error) {
+	edges := make([]Relationship, 0)
+	if len(ciIDs) == 0 || len(relTypes) == 0 {
+		return edges, nil
+	}
+	r.mu.RLock()
+	for _, rel := range r.items {
+		if rel.OrganizationID == orgID && slices.Contains(relTypes, rel.RelType) &&
+			(slices.Contains(ciIDs, rel.SourceCIID) || slices.Contains(ciIDs, rel.TargetCIID)) {
+			edges = append(edges, *rel)
+		}
+	}
+	visibility := r.visible
+	r.mu.RUnlock()
+
+	if visibility != nil && len(edges) > 0 {
+		var ids []string
+		for i := range edges {
+			ids = append(ids, edges[i].SourceCIID, edges[i].TargetCIID)
+		}
+		visible, err := visibility(ctx, orgID, ids)
+		if err != nil {
+			return nil, err
+		}
+		edges = visibleEdges(edges, relationshipEnds, visible)
+	}
+	slices.SortFunc(edges, func(a, b Relationship) int { return strings.Compare(a.ID, b.ID) })
+	return edges, nil
 }
 
 func relationshipEnds(rel *Relationship) (source, target string) {

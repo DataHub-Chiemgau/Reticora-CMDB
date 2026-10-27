@@ -88,19 +88,20 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 	found := map[string]bool{}
 	icmpOff := false
 
+	// A probe takes its slot before its goroutine starts, so a large scope
+	// holds at most MaxConcurrency probe goroutines at a time (F-262).
 	var wg sync.WaitGroup
 	for _, target := range targets {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+		}
 		if ctx.Err() != nil {
 			break
 		}
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				return
-			}
 			defer func() { <-sem }()
 
 			method, openPort := "", 0

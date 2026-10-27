@@ -11,7 +11,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
-import { evaluateField } from '../lib/fieldmeta';
+import { evaluateField, type FieldError } from '../lib/fieldmeta';
 
 interface CIFormModalProps {
   open: boolean;
@@ -72,7 +72,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
   const [values, setValues] = useState<CIFormValues>(() => toFormValues(ci));
   const [errors, setErrors] = useState<Partial<Record<keyof CIFormValues, string>>>({});
   const [attributes, setAttributes] = useState<Record<string, unknown>>(() => ci?.attributes ?? {});
-  const [attributeErrors, setAttributeErrors] = useState<Record<string, string | null>>({});
+  const [attributeErrors, setAttributeErrors] = useState<Record<string, FieldError | null>>({});
 
   useEffect(() => {
     if (open) {
@@ -140,7 +140,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
       : ({} as Record<string, string>);
 
   const fieldErrors: Partial<Record<keyof CIFormValues, string>> = { ...errors };
-  const attributeFieldErrors: Record<string, string | null> = { ...attributeErrors };
+  const attributeFieldErrors: Record<string, FieldError | null> = { ...attributeErrors };
   const attributeNames = new Set(typeFields.map((field) => field.name));
   const unmappedViolations: string[] = [];
   for (const [field, detail] of Object.entries(serverViolations)) {

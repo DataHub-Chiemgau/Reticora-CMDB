@@ -1,0 +1,4 @@
+{
+  "description": "Contract between the scope limit of the backend (backend/internal/discovery MaxScopeAddresses, the largest CIDR or range scope the API accepts) and the collector (collectorcmd maxScopeAddresses, the addresses it expands per scope): both are equal, so every accepted scope is discovered completely (WP-494, DIS-09). A change in one module fails the tests of both.",
+  "max_scope_addresses": 65536
+}

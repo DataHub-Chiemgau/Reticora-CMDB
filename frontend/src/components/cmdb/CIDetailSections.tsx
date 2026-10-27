@@ -23,7 +23,8 @@ import { ApiError } from '../../api/client';
 import type { MetricPoint } from '../../api/client';
 import { useCIMetrics } from '../../api/hooks';
 import { ProvenanceTooltip } from './ProvenanceTooltip';
-import type { FieldDefinition } from '../../lib/fieldmeta';
+import { fieldValueText } from './fieldValue';
+import type { FieldDefinition, FieldError } from '../../lib/fieldmeta';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -78,7 +79,7 @@ export function InstanceFieldsSection({
   const remove = useDeleteInstanceField(ciId);
   const [showAdd, setShowAdd] = useState(false);
   const [draft, setDraft] = useState<FieldDefinition>({ name: '', data_type: 'text' });
-  const [localErrors, setLocalErrors] = useState<Record<string, string | null>>({});
+  const [localErrors, setLocalErrors] = useState<Record<string, FieldError | null>>({});
   // Local draft of the attribute values. The saved CI stays the source of
   // truth, but edits are rendered from the draft so in-flight (and invalid)
   // input is not overwritten by the server response mid-typing.
@@ -93,7 +94,7 @@ export function InstanceFieldsSection({
   const defs = fields.data?.data ?? [];
   return (
     <Section title={t('ci.instanceFields', 'Instanzfelder')} count={defs.length}>
-      <p className="mb-3 text-xs text-gray-500">
+      <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
         {t(
           'ci.instanceFieldsHint',
           'Felder nur für dieses Gerät (z. B. iLO-IP, SAP-SID) — ohne den Typ zu ändern.',
@@ -105,10 +106,10 @@ export function InstanceFieldsSection({
           <li key={f.name} className="flex items-center justify-between">
             <span>
               <span className="font-medium">{f.label || f.name}</span>
-              <span className="ml-2 text-xs text-gray-400">{f.data_type}</span>
+              <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">{f.data_type}</span>
             </span>
             <button
-              className="text-xs text-red-600 hover:underline"
+              className="text-xs text-red-600 dark:text-red-400 hover:underline"
               onClick={() => remove.mutate(f.name)}
             >
               {t('common.delete', 'Löschen')}
@@ -116,7 +117,7 @@ export function InstanceFieldsSection({
           </li>
         ))}
         {defs.length === 0 ? (
-          <li className="text-sm text-gray-500">
+          <li className="text-sm text-gray-500 dark:text-gray-400">
             {t('ci.noInstanceFields', 'Keine Instanzfelder.')}
           </li>
         ) : null}
@@ -217,6 +218,11 @@ export function InstanceFieldsSection({
 
 // ─── Field provenance / overrides (§13) ──────────────────────────────────────
 
+/** jsonValue renders a provenance value as JSON; no value is "—". */
+function jsonValue(value: unknown): string {
+  return JSON.stringify(value) ?? '—';
+}
+
 export function ProvenanceSection({ ciId }: { ciId: string }) {
   const { t } = useTranslation();
   // Every typed field with its source, time and selection reason (REC-10).
@@ -233,7 +239,7 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
       title={t('ci.provenance', 'Herkunft & Overrides')}
       count={values.data ? diverged.length : undefined}
     >
-      <p className="mb-3 text-xs text-gray-500">
+      <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
         {t(
           'ci.provenanceHint',
           'Discovery-Wert vs. effektiver Wert. Geschützte manuelle Overrides werden nie von Discovery überschrieben.',
@@ -268,7 +274,7 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
                 ) : null}
                 {fv.reason === 'override' ? (
                   <button
-                    className="text-xs text-red-600 hover:underline"
+                    className="text-xs text-red-600 dark:text-red-400 hover:underline"
                     onClick={() => clearOverride.mutate(fv.field)}
                   >
                     {t('ci.clearOverride', 'Override aufheben')}
@@ -288,29 +294,42 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
             </div>
             <dl className="mt-1 grid grid-cols-3 gap-2 text-xs">
               <div>
-                <dt className="text-gray-400">{t('ci.discovered', 'Discovery')}</dt>
+                <dt className="text-gray-500 dark:text-gray-400">
+                  {t('ci.discovered', 'Discovery')}
+                </dt>
                 <dd className="font-mono">
-                  {JSON.stringify(fv.reason === 'override' ? fv.discovered_value : fv.value) ?? '—'}
+                  {fieldValueText(
+                    t,
+                    fv.field,
+                    fv.reason === 'override' ? fv.discovered_value : fv.value,
+                    jsonValue,
+                  )}
                 </dd>
               </div>
               <div>
-                <dt className="text-gray-400">{t('ci.override', 'Override')}</dt>
+                <dt className="text-gray-500 dark:text-gray-400">{t('ci.override', 'Override')}</dt>
                 <dd className="font-mono">
-                  {fv.reason === 'override' ? JSON.stringify(fv.value) : '—'}
+                  {fv.reason === 'override'
+                    ? fieldValueText(t, fv.field, fv.value, jsonValue)
+                    : '—'}
                 </dd>
               </div>
               <div>
-                <dt className="text-gray-400">{t('ci.effective', 'Effektiv')}</dt>
-                <dd className="font-mono font-semibold">{JSON.stringify(fv.value) ?? '—'}</dd>
+                <dt className="text-gray-500 dark:text-gray-400">
+                  {t('ci.effective', 'Effektiv')}
+                </dt>
+                <dd className="font-mono font-semibold">
+                  {fieldValueText(t, fv.field, fv.value, jsonValue)}
+                </dd>
               </div>
             </dl>
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {t('ci.source', 'Quelle')}: {fv.source}
             </p>
           </li>
         ))}
         {rows.length === 0 && !values.isLoading && !values.isError ? (
-          <li className="text-sm text-gray-500">
+          <li className="text-sm text-gray-500 dark:text-gray-400">
             {t(
               'ci.noProvenance',
               'Noch keine Provenienz-Daten (erstellt bei der nächsten Discovery).',
@@ -387,7 +406,9 @@ export function LifecycleSection({
   return (
     <Section title={t('lifecycle.title', 'Lebenszyklus')}>
       <div className="mb-3 flex items-center gap-2">
-        <span className="text-sm text-gray-500">{t('lifecycle.current', 'Aktuell')}:</span>
+        <span className="text-sm text-gray-500 dark:text-gray-400">
+          {t('lifecycle.current', 'Aktuell')}:
+        </span>
         <Badge variant="info">{current || '—'}</Badge>
       </div>
       <div className="flex flex-wrap items-end gap-2">
@@ -418,7 +439,7 @@ export function LifecycleSection({
         </Button>
       </div>
       {transition.error ? (
-        <p className="mt-2 text-sm text-red-600">{String(transition.error)}</p>
+        <p className="mt-2 text-sm text-red-600 dark:text-red-400">{String(transition.error)}</p>
       ) : null}
     </Section>
   );
@@ -430,6 +451,11 @@ export function ImpactSection({ ciId }: { ciId: string }) {
   const { t } = useTranslation();
   const [enabled, setEnabled] = useState(false);
   const blast = useBlastRadius(ciId, enabled);
+  // Certain hits and CIs reached only over connected_to (the network
+  // heuristic, IMP-03) are listed apart; affected_count counts the former.
+  const affected = blast.data?.affected_cis ?? [];
+  const certain = affected.filter((n) => !n.heuristic);
+  const heuristic = affected.filter((n) => n.heuristic);
 
   return (
     <Section title={t('impact.title', 'Auswirkungsanalyse')}>
@@ -441,9 +467,12 @@ export function ImpactSection({ ciId }: { ciId: string }) {
         <SkeletonList rows={3} label="…" />
       ) : blast.data ? (
         <div className="space-y-3">
-          <div className="flex gap-4 text-sm">
+          <div className="flex flex-wrap gap-4 text-sm">
             <span>
               {t('impact.affected', 'Betroffene CIs')}: <strong>{blast.data.affected_count}</strong>
+            </span>
+            <span>
+              {t('impact.heuristic')}: <strong>{blast.data.heuristic_count}</strong>
             </span>
             <span>
               {t('impact.clients', 'Kunden')}: <strong>{blast.data.client_ids?.length ?? 0}</strong>
@@ -451,14 +480,14 @@ export function ImpactSection({ ciId }: { ciId: string }) {
             <span>
               {t('impact.sites', 'Standorte')}: <strong>{blast.data.site_ids?.length ?? 0}</strong>
             </span>
-            <span className="text-red-600">
+            <span className="text-red-600 dark:text-red-400">
               {t('impact.spof', 'SPOF')}:{' '}
               <strong>{blast.data.single_points_of_failure?.length ?? 0}</strong>
             </span>
           </div>
           {(blast.data.single_points_of_failure?.length ?? 0) > 0 ? (
             <div>
-              <p className="text-xs font-semibold text-red-600">
+              <p className="text-xs font-semibold text-red-600 dark:text-red-400">
                 {t('impact.spofList', 'Single Points of Failure:')}
               </p>
               <ul className="text-sm">
@@ -469,17 +498,41 @@ export function ImpactSection({ ciId }: { ciId: string }) {
             </div>
           ) : null}
           <div>
-            <p className="text-xs font-semibold text-gray-500">
+            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
               {t('impact.affectedList', 'Betroffen:')}
             </p>
-            <ul className="max-h-40 overflow-y-auto text-sm">
-              {(blast.data.affected_cis ?? []).map((n) => (
-                <li key={n.id}>
-                  • {n.name} <span className="text-xs text-gray-400">({n.ci_type})</span>
-                </li>
-              ))}
-            </ul>
+            {certain.length > 0 ? (
+              <ul className="max-h-40 overflow-y-auto text-sm">
+                {certain.map((n) => (
+                  <li key={n.id}>
+                    • {n.name}{' '}
+                    <span className="text-xs text-gray-500 dark:text-gray-400">({n.ci_type})</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t('impact.noneAffected')}</p>
+            )}
           </div>
+          {heuristic.length > 0 ? (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                {t('impact.heuristicList')}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {t('impact.heuristicHint')}
+              </p>
+              <ul className="max-h-40 overflow-y-auto text-sm">
+                {heuristic.map((n) => (
+                  <li key={n.id}>
+                    • {n.name}{' '}
+                    <span className="text-xs text-gray-500 dark:text-gray-400">({n.ci_type})</span>{' '}
+                    <Badge variant="warning">{t('impact.heuristicMarker')}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </Section>
@@ -524,16 +577,16 @@ export function CIMetricsSection({ ciId }: { ciId: string }) {
       ) : metrics.isLoading ? (
         <SkeletonList rows={2} label="…" />
       ) : forbidden ? (
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
           {t(
             'monitoring.ciNotLicensed',
             'Monitoring ist für diese Organisation nicht freigeschaltet.',
           )}
         </p>
       ) : metrics.error ? (
-        <p className="text-sm text-red-600">{(metrics.error as Error).message}</p>
+        <p className="text-sm text-red-600 dark:text-red-400">{(metrics.error as Error).message}</p>
       ) : (metrics.data?.series.length ?? 0) === 0 ? (
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
           {t('monitoring.ciNone', 'Keine Messwerte in den letzten 24 Stunden.')}
         </p>
       ) : (
@@ -557,7 +610,7 @@ export function CIMetricsSection({ ciId }: { ciId: string }) {
                     strokeWidth={1.5}
                   />
                 </svg>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-gray-500 dark:text-gray-400">
                   {t('monitoring.ciLatest', 'Aktuell')}:{' '}
                   <strong>{latest ? latest.value : '–'}</strong>
                 </span>
@@ -598,9 +651,9 @@ export function CIHistorySection({ ciId }: { ciId: string }) {
       {history.isLoading ? (
         <SkeletonList rows={3} label={t('app.loading')} />
       ) : history.error ? (
-        <p className="text-sm text-red-600">{t('ci.historyLoadError')}</p>
+        <p className="text-sm text-red-600 dark:text-red-400">{t('ci.historyLoadError')}</p>
       ) : entries.length === 0 ? (
-        <p className="text-sm text-gray-500">{t('ci.historyEmpty')}</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('ci.historyEmpty')}</p>
       ) : (
         <ol className="space-y-2 text-sm" aria-label={t('ci.history')}>
           {entries.map((entry) => (
@@ -627,7 +680,7 @@ export function CIHistorySection({ ciId }: { ciId: string }) {
                 <ul className="basis-full space-y-0.5 pl-4 text-gray-700 dark:text-gray-300">
                   {entry.field_changes.map((change) => (
                     <li key={change.field} className="break-all">
-                      {`${change.field}: ${historyValue(change.old)} → ${historyValue(change.new)}`}
+                      {`${change.field}: ${fieldValueText(t, change.field, change.old, historyValue)} → ${fieldValueText(t, change.field, change.new, historyValue)}`}
                     </li>
                   ))}
                 </ul>

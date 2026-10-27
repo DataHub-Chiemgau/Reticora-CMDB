@@ -142,6 +142,12 @@ func (r noBatch) GetByIDs(ctx context.Context, orgID string, ids []string) ([]ci
 	return r.Repository.(ci.BatchReader).GetByIDs(ctx, orgID, ids)
 }
 
+// UpdateRecord keeps the record update of the repository (WP-489): a known
+// device is updated as one change of its record on both paths.
+func (r noBatch) UpdateRecord(ctx context.Context, orgID, id string, rec *ci.RecordUpdate) (*ci.RecordUpdateResult, error) {
+	return ci.UpdateRecord(ctx, r.Repository, orgID, id, rec)
+}
+
 // ingestBatch is the outcome of one ingest: the response and the record and
 // frame transactions it sent.
 type ingestBatch struct {
@@ -784,12 +790,14 @@ func TestIngestBatchMatchesRecordPath(t *testing.T) {
 }
 
 // ingestVarying are the keys whose values differ between two ingests of
-// the same device: ids, organizations, change sets (AUD-03), times and the
-// hashes over them.
+// the same device: ids, organizations, change sets and record ids (AUD-03),
+// times and the hashes over them.
 var ingestVarying = map[string]bool{
 	"id": true, "organization_id": true, "ci_id": true, "entity_id": true, "resource_id": true, "change_set_id": true,
 	"created_at": true, "updated_at": true, "first_seen_at": true, "last_seen_at": true, "discovered_at": true,
 	"timestamp": true, "occurred_at": true, "hash": true, "previous_hash": true, "record_id": true,
+	// The record id is the correlation id of the change (AUD-03, WP-489).
+	"correlation_id": true,
 }
 
 // ingested reads what the ingest of a new device wrote, per table, with
@@ -861,9 +869,11 @@ func withoutVarying(v any, ids ...string) any {
 // topology and the ledger), BEGIN with the tenant GUCs counted once. The
 // window updates the known devices under its identity locks: per device
 // the observed-value check (3), the row lock, the instance fields, the
-// update with its reads (4), history, search index, interfaces and
-// addresses (6) and audit and outbox under their locks (3); about 21.5 on
-// the first re-discovery of the load test (eth1 new), 17.5 after it. Before
+// update with its reads (4), history, interfaces and addresses (5) and
+// audit and outbox under their locks (3); the changed devices of a window
+// are indexed together after its commit (WP-489), a sighting is not
+// indexed. About 20.7 on the first re-discovery of the load test (eth1
+// new), 16.6 after it. Before
 // WP-608 every known device had a transaction of its own that took its
 // identity locks and read its candidates again, and its neighbor and its
 // edge three transactions more: 36 statements per device.

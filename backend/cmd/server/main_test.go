@@ -32,6 +32,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
@@ -392,8 +393,9 @@ func TestHTTPHandlerSetsRateLimitHeadersBeforeTheLimiter(t *testing.T) {
 // retention runs (AUD-09), index DDL (DB-04), certificate renewal (the
 // certificate.notices run of COL-04) and entitlement warnings (ENT-07). The
 // audit runner (AUD-04) is not a scheduled job: the audit chain is written
-// synchronously with each change (E-56, F-316 deferred). Without a database
-// the notice runs are not registered.
+// synchronously with each change (E-56, F-316 deferred). The digest run
+// notify.digest (NTF-04, WP-508) is registered with them. Without a
+// database the notice and digest runs are not registered.
 func TestSystemJobsCoverJOB02(t *testing.T) {
 	t.Setenv(config.WorkerEnvKey(config.WorkerOfflineDetector), "true")
 	t.Setenv(config.OfflineDetectorAlias, "")
@@ -408,6 +410,9 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 		{"index DDL (DB-04)", citype.IndexJobKind},
 		{"certificate renewal (COL-04)", jobs.CertificateNoticesKind},
 		{"entitlement warnings (ENT-07)", jobs.EntitlementNoticesKind},
+		{"route audit intents (AUD-07, WP-504)", audit.RouteIntentsKind},
+		{"timeout reaper of the jobs (JOB-01, WP-503)", jobs.ReapKind},
+		{"notification digests (NTF-04, WP-508)", notify.DigestKind},
 	} {
 		if !registered[job.kind] {
 			t.Errorf("JOB-02 %s: kind %s is not registered (registered: %v)", job.requirement, job.kind, registered)
@@ -416,7 +421,8 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 
 	// --no-db: the notice runs need the database and are not registered.
 	for kind := range registeredSystemJobs(t, systemJobTestDeps(t, cfg, false)) {
-		if kind == jobs.EntitlementNoticesKind || kind == jobs.CertificateNoticesKind {
+		if kind == jobs.EntitlementNoticesKind || kind == jobs.CertificateNoticesKind || kind == audit.RouteIntentsKind ||
+			kind == jobs.ReapKind || kind == notify.DigestKind {
 			t.Errorf("without a database %s is registered", kind)
 		}
 	}
@@ -487,8 +493,11 @@ func systemJobTestDeps(t *testing.T, cfg *config.Config, withDB bool) *systemJob
 	}
 	dispatcher := webhook.NewDispatcher(repos.Webhook, nil, webhook.DispatcherOptions{PollInterval: -1})
 	t.Cleanup(func() { _ = dispatcher.Shutdown(context.Background()) })
+	center := notify.NewMemoryCenter()
+	notifier := notify.NewNotifier(center.Channels, center.Deliveries, center.Preferences, notify.NewSender(nil))
 	return &systemJobDeps{cfg: cfg, pool: pool, encryptor: encryptor, repos: &repos, modules: modules,
-		entitlements: entitlement.NewService(repos.Entitlement, entitlement.Options{}), dispatcher: dispatcher}
+		entitlements: entitlement.NewService(repos.Entitlement, entitlement.Options{}), dispatcher: dispatcher,
+		notifier: notifier}
 }
 
 // registeredSystemJobs registers the system jobs as main does and returns

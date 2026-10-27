@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -173,5 +174,244 @@ func TestTrackerMirrorsSpecialisedJobs(t *testing.T) {
 	}
 	if job, _ = s.repo.GetByRef(ctx, "org-1", "discovery_job", "ref-2"); job.Status != StatusSucceeded || job.Progress != 100 {
 		t.Errorf("late tracked job: %+v", job)
+	}
+}
+
+// TestMirrorResult covers WP-515 (JOB-03, F-347): MirrorResult stores the
+// result only at the succeeded job mirroring the given row — not at the job
+// of another row, of another table or of another organization —, keeps its
+// status and finish time and refuses a job that did not succeed;
+// IsMirrorCancelled reports the cancel of the mirrored job.
+func TestMirrorResult(t *testing.T) {
+	s, c := newService()
+	ctx := context.Background()
+	for _, ref := range []struct{ org, table, id string }{
+		{"org-1", "export_job", "ref-1"}, {"org-1", "export_job", "ref-2"},
+		{"org-1", "discovery_job", "ref-1"}, {"org-2", "export_job", "ref-1"},
+	} {
+		if err := s.Mirror(ctx, ref.org, ref.table, ref.id, StatusSucceeded, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, _ := s.repo.GetByRef(ctx, "org-1", "export_job", "ref-1")
+	c.advance(time.Minute)
+	if err := s.MirrorResult(ctx, "org-1", "export_job", "ref-1", map[string]any{"export_id": "ref-1", "row_count": 3}); err != nil {
+		t.Fatal(err)
+	}
+	job, _ := s.repo.GetByRef(ctx, "org-1", "export_job", "ref-1")
+	var result struct {
+		ExportID string `json:"export_id"`
+		RowCount int    `json:"row_count"`
+	}
+	if err := json.Unmarshal(job.Result, &result); err != nil || result.ExportID != "ref-1" || result.RowCount != 3 {
+		t.Errorf("result %s (%v), want export ref-1 with 3 rows", job.Result, err)
+	}
+	if job.Status != StatusSucceeded || job.FinishedAt == nil || !job.FinishedAt.Equal(*before.FinishedAt) {
+		t.Errorf("job after the result: %+v, want succeeded with its finish time %v", job, before.FinishedAt)
+	}
+	for _, ref := range []struct{ org, table, id string }{
+		{"org-1", "export_job", "ref-2"}, {"org-1", "discovery_job", "ref-1"}, {"org-2", "export_job", "ref-1"},
+	} {
+		if other, _ := s.repo.GetByRef(ctx, ref.org, ref.table, ref.id); len(other.Result) != 0 {
+			t.Errorf("job of %v got the result %s", ref, other.Result)
+		}
+	}
+	if err := s.MirrorResult(ctx, "org-1", "export_job", "unknown", 1); !errors.Is(err, ErrNotFound) {
+		t.Errorf("result of an untracked row: %v, want ErrNotFound", err)
+	}
+
+	// A cancelled mirrored job takes no result and reports its cancel.
+	if err := s.Track(ctx, "org-1", "export", "export_job", "ref-3", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled, err := s.IsMirrorCancelled(ctx, "org-1", "export_job", "ref-3"); err != nil || cancelled {
+		t.Errorf("queued job: cancelled %v (%v), want false", cancelled, err)
+	}
+	queued, _ := s.repo.GetByRef(ctx, "org-1", "export_job", "ref-3")
+	if _, err := s.Cancel(ctx, "org-1", queued.ID); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled, err := s.IsMirrorCancelled(ctx, "org-1", "export_job", "ref-3"); err != nil || !cancelled {
+		t.Errorf("cancelled job: cancelled %v (%v), want true", cancelled, err)
+	}
+	if cancelled, err := s.IsMirrorCancelled(ctx, "org-1", "export_job", "untracked"); err != nil || cancelled {
+		t.Errorf("untracked row: cancelled %v (%v), want false", cancelled, err)
+	}
+	if err := s.MirrorResult(ctx, "org-1", "export_job", "ref-3", 1); !errors.Is(err, ErrTransition) {
+		t.Errorf("result of a cancelled job: %v, want ErrTransition", err)
+	}
+	if job, _ := s.repo.GetByRef(ctx, "org-1", "export_job", "ref-3"); job.Status != StatusCancelled || len(job.Result) != 0 {
+		t.Errorf("cancelled job: %+v, want cancelled without result", job)
+	}
+}
+
+// TestCancelEndsTheRunContext covers WP-514 (JOB-03, F-162) on the
+// in-process path: the context RunDetached hands to the run ends with
+// ErrCancelled when the job is cancelled, at once in this process and
+// within the poll interval when the cancel comes from another replica (the
+// table changes under it); a result or an error arriving after the cancel
+// does not overwrite the status. A running job of a kind that cannot be
+// cancelled is refused and keeps running.
+func TestCancelEndsTheRunContext(t *testing.T) {
+	s := NewService(NewMemoryRepository()).WithCancelPoll(10 * time.Millisecond)
+	s.Register(Kind{Name: "snap", MaxAttempts: 1, Cancellable: true})
+	s.Register(Kind{Name: "merge", MaxAttempts: 1})
+	ctx := context.Background()
+	waitRunning := func(id string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			if j, _ := s.Get(ctx, "org-1", id); j != nil && j.Status == StatusRunning {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("job %s did not start", id)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	// keeps checks that the job stays cancelled without result or error
+	// after its run returned.
+	keeps := func(name, id string, returned <-chan struct{}) {
+		t.Helper()
+		select {
+		case <-returned:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: the run did not end after the cancel", name)
+		}
+		time.Sleep(50 * time.Millisecond) // let RunDetached record what it would
+		if j, _ := s.Get(ctx, "org-1", id); j.Status != StatusCancelled || len(j.Result) != 0 || j.Error != "" {
+			t.Errorf("%s: job after the late end: %+v, want cancelled without result or error", name, j)
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		cancel func(id string)
+		fail   bool
+	}{
+		{"cancel in this process", func(id string) {
+			if _, err := s.Cancel(ctx, "org-1", id); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"cancel on another replica", func(id string) {
+			now := time.Now()
+			if _, err := s.repo.Transition(ctx, "org-1", id, []Status{StatusRunning}, &Update{Status: StatusCancelled, FinishedAt: &now}); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+	} {
+		returned := make(chan struct{})
+		var cause error
+		job, err := s.RunDetached(ctx, "org-1", "snap", nil, "u1", func(run context.Context) (any, error) {
+			defer close(returned)
+			<-run.Done()
+			cause = context.Cause(run)
+			if tc.fail {
+				return nil, run.Err()
+			}
+			return map[string]int{"late": 1}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitRunning(job.ID)
+		tc.cancel(job.ID)
+		keeps(tc.name, job.ID, returned)
+		if !errors.Is(cause, ErrCancelled) {
+			t.Errorf("%s: cause of the run context = %v, want ErrCancelled", tc.name, cause)
+		}
+	}
+
+	// A run that ignores its context: its result after the cancel is
+	// dropped.
+	release, returned := make(chan struct{}), make(chan struct{})
+	job, err := s.RunDetached(ctx, "org-1", "snap", nil, "u1", func(context.Context) (any, error) {
+		defer close(returned)
+		<-release
+		return map[string]int{"late": 1}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitRunning(job.ID)
+	if _, err = s.Cancel(ctx, "org-1", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	keeps("late result", job.ID, returned)
+	if _, err = s.Succeed(ctx, "org-1", job.ID, "late"); !errors.Is(err, ErrTransition) {
+		t.Errorf("succeed a cancelled job: %v, want ErrTransition", err)
+	}
+
+	// Not cancellable while running: refused, the run goes on and ends.
+	release, returned = make(chan struct{}), make(chan struct{})
+	merge, err := s.RunDetached(ctx, "org-1", "merge", nil, "u1", func(run context.Context) (any, error) {
+		defer close(returned)
+		select {
+		case <-release:
+		case <-run.Done():
+			return nil, run.Err()
+		}
+		return "merged", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitRunning(merge.ID)
+	if _, err = s.Cancel(ctx, "org-1", merge.ID); !errors.Is(err, ErrNotCancellable) {
+		t.Errorf("cancel a running merge: %v, want ErrNotCancellable", err)
+	}
+	close(release)
+	<-returned
+	deadline := time.Now().Add(5 * time.Second)
+	for j, _ := s.Get(ctx, "org-1", merge.ID); j.Status != StatusSucceeded; j, _ = s.Get(ctx, "org-1", merge.ID) {
+		if time.Now().After(deadline) {
+			t.Fatalf("merge after the refused cancel: %+v, want succeeded", j)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, err = s.SaveCancelledResult(ctx, "org-1", merge.ID, "x"); !errors.Is(err, ErrTransition) {
+		t.Errorf("keep a result on a succeeded job: %v, want ErrTransition", err)
+	}
+}
+
+// TestQueueHandlerOfACancelledJob covers WP-514 (JOB-03, F-162) on the job
+// queue: the handler's context ends when the job is cancelled; whatever the
+// handler returns then, the message is acknowledged without redelivery and
+// the job keeps its status cancelled without result or error.
+func TestQueueHandlerOfACancelledJob(t *testing.T) {
+	s := NewService(NewMemoryRepository()).WithCancelPoll(10 * time.Millisecond)
+	q := NewQueue(s, nil)
+	ctx := context.Background()
+	fail := false
+	running := make(chan string, 1)
+	q.Handle(Kind{Name: "history.snapshot", MaxAttempts: 3, Timeout: time.Minute, Cancellable: true},
+		func(run context.Context, job *Job) (any, error) {
+			running <- job.ID
+			<-run.Done()
+			if fail {
+				return nil, run.Err()
+			}
+			return map[string]string{"state": "late"}, nil
+		})
+	for _, fail = range []bool{false, true} {
+		job, _, err := q.Submit(ctx, "org-1", "history.snapshot", nil, EnqueueOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := deliveryOf(t, job)
+		out := make(chan Outcome)
+		go func() { out <- q.Process(ctx, d) }()
+		if _, err = s.Cancel(ctx, "org-1", <-running); err != nil {
+			t.Fatal(err)
+		}
+		if o := <-out; !o.Ran || !o.Acked || d.acks != 1 || len(d.naks) != 0 {
+			t.Errorf("failing %v: outcome %+v, acks %d, naks %v; want acknowledged once", fail, o, d.acks, d.naks)
+		}
+		if got, _ := s.Get(ctx, "org-1", job.ID); got.Status != StatusCancelled || len(got.Result) != 0 || got.Error != "" || got.Attempts != 1 {
+			t.Errorf("failing %v: job %+v, want cancelled after one attempt without result or error", fail, got)
+		}
 	}
 }

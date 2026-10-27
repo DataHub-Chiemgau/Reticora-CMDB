@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
 import type { TopologyGraphData } from '../api/client';
 import { useCI, useCINeighbors, useUpdateCI } from '../api/hooks';
+import { localizedText } from '../api/cmdb';
+import { useCIType, useCITypes } from '../api/cmdbHooks';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -22,6 +24,7 @@ import {
 } from '../components/cmdb/CIDetailSections';
 import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
 import { CIParentAssetCard } from '../components/cmdb/CIParentAssetCard';
+import { ScopeBanner } from '../components/ScopeBanner';
 
 export interface NeighborEntry {
   id: string;
@@ -67,12 +70,21 @@ export function buildNeighborList(graph: TopologyGraphData, ciId: string): Neigh
 }
 
 export function CIDetailPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { id = '' } = useParams<{ id: string }>();
   const [isEditOpen, setIsEditOpen] = useState(false);
 
   const ciQuery = useCI(id);
+  // The type is shown by its label in the UI language (GLO-10, UI-18); the
+  // list includes deactivated types, which a CI can still carry. A type
+  // beyond the first page of the list is read on its own.
+  const ciTypes = useCITypes({ include_inactive: true, limit: 200 });
+  const typeId = ciQuery.data?.ci_type_id;
+  const listedType = ciTypes.data?.data.find((type) => type.id === typeId);
+  const singleType = useCIType(typeId, {
+    enabled: !!ciTypes.data && !listedType && !!ciTypes.data.has_more,
+  });
   const neighborsQuery = useCINeighbors(id);
   const updateCI = useUpdateCI();
   // Instance attribute saves (API-07, F-082): every save carries If-Match with
@@ -103,6 +115,13 @@ export function CIDetailPage() {
 
   const ci = ciQuery.data;
   const neighbors = neighborsQuery.data ? buildNeighborList(neighborsQuery.data, ci.id) : [];
+  // The type id is shown only while the type is unknown (not loaded, not
+  // visible to the user or deleted).
+  const ciType =
+    listedType ?? (singleType.data?.id === ci.ci_type_id ? singleType.data : undefined);
+  const typeLabel = ciType
+    ? localizedText(ciType.display_name, i18n.language) || ciType.name
+    : ci.ci_type_id;
 
   function saveAttributes(attrs: Record<string, unknown>) {
     const queue = attributeSaves.current;
@@ -166,6 +185,10 @@ export function CIDetailPage() {
         </Link>
       </nav>
 
+      {/* A CI outside the chosen client or site is shown with a notice
+          (E-87 option 1); access stays with the server (row-level security). */}
+      <ScopeBanner object={ci} />
+
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{ci.name}</h2>
@@ -173,7 +196,7 @@ export function CIDetailPage() {
             <Badge variant={getStatusBadgeVariant(ci.status)}>
               {t(getStatusTranslationKey(ci.status))}
             </Badge>
-            <Badge variant="info">{ci.ci_type_id}</Badge>
+            <Badge variant="info">{typeLabel}</Badge>
             {ci.health ? (
               <Badge variant={healthBadgeVariant(ci.health)}>
                 {t(`ci.healthState.${ci.health}`)}
@@ -195,7 +218,7 @@ export function CIDetailPage() {
         <Card title={t('ci.overview')}>
           <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
             <DetailRow label="ID" value={ci.id} />
-            <DetailRow label={t('form.fields.ciType')} value={ci.ci_type_id} />
+            <DetailRow label={t('form.fields.ciType')} value={typeLabel} />
             <DetailRow label={t('ci.manufacturer')} value={ci.manufacturer} />
             <DetailRow label={t('ci.model')} value={ci.model} />
             <DetailRow

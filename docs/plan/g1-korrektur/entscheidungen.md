@@ -46,6 +46,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-96](#e-96) | TimescaleDB-Version des Datenbank-Images und Funde seines Basisimages | entschieden: Option 2 (Auftraggeber, 2026-10-21) | WP-389 |
 | [E-97](#e-97) | Obergrenze der Dauer von Alarmregeln (MON-01) | entschieden: 9600 h (Auftraggeber, 2026-10-25) | WP-406 |
 | [E-98](#e-98) | Webhook-Abos und der Scope ihres Erzeugers (TEN-09) | entschieden: Option B (Auftraggeber, 2026-10-25) | WP-601 |
+| [E-99](#e-99) | Auswahl der Oberflächensprache (GLO-10, UI-18) | entschieden (Auftraggeber 2026-10-27): Option 1 | WP-523 |
 
 ## E-59
 
@@ -683,6 +684,8 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Übergangsregel:** WP-518 (`t7-saved-views-api`) setzt Option 1 um; bei Option 2 oder 3 werden nur das Prädikat in `savedview/pg_repository.go`, die OpenAPI-Beschreibung und `TestAuditT7SavedViewEditDeleteRights` angepasst.
 
+**Umsetzung (2026-10-26):** WP-518 setzt Option 1 um: PATCH und DELETE nur durch den Owner (Prädikat `owner_id` in `savedview/pg_repository.go`, Owner-Prüfung vor der Validierung in `savedview/handler.go`), sonst 404 bei unveränderter Zeile; `SavedViewsPage` bietet „Löschen“ nur für eigene Sichten an. Eingetragen in [`../entscheidungen.md`](../entscheidungen.md) (Nachtrag vom 2026-10-26).
+
 **Betroffene IDs:** VIE-01
 
 **Betroffene WPs:** WP-518, WP-555
@@ -947,3 +950,25 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Betroffene WPs:** WP-601
 
+## E-99
+
+**Thema:** Auswahl der Oberflächensprache (GLO-10, UI-18)
+
+**Status:** entschieden (Auftraggeber 2026-10-27): Option 1
+
+**Frage:** WP-523 (`t7-i18n-labels`) soll einen Sprachwechsel gegen reale API-Daten belegen. Die Oberfläche startete fest in de-DE (`frontend/src/i18n/index.ts`, `lng: 'de-DE'`) und bot keinen Weg, die Sprache zu wechseln; der Plan nannte für WP-523 keinen Entscheidungsbedarf. Wie wählt der Nutzer die Oberflächensprache?
+
+**Optionen:**
+
+1. Sprachumschalter im Benutzermenü (Kopfzeile); die Wahl wird je Browser gespeichert (localStorage). Ohne gespeicherte Wahl entscheidet die Browsersprache (de* → de-DE, en* → en-US), jede andere ergibt de-DE.
+2. Nur die Browsersprache, ohne Umschalter.
+3. Nur ein Umschalter, ohne Auswertung der Browsersprache (Start immer in de-DE).
+4. Sprache des Nutzerkontos mit Rückfall auf die Org-Locale (`app_user.locale`, Org-Locale nach LOC-01, wie für Benachrichtigungen in WP-588 (`t6-ntf-templates`)), serverseitig gespeichert.
+
+**Entscheidung:** Option 1.
+
+**Umsetzung:** WP-523 (`t7-i18n-labels`): `frontend/src/i18n/index.ts` ermittelt die Sprache beim Start (gespeicherte Wahl unter `reticora-language`, sonst die primäre Browsersprache `navigator.language`, sonst de-DE) und speichert die Wahl des Umschalters; `document.documentElement.lang` folgt der Sprache. `frontend/src/components/LanguageSwitch.tsx` ist ein benanntes natives Auswahlfeld („Sprache“/„Language“, Optionen „Deutsch“/„English“) in der Kopfzeile neben dem Benutzernamen, per Tastatur bedienbar (Pfeiltasten wie die übrigen Auswahlfelder nach WP-519), auch auf der Anmeldeseite. Ohne verfügbaren Speicher gilt die Wahl nur für die geöffnete Seite. Keine neue npm-Abhängigkeit, keine Server- oder Schemaänderung. Tests: Vitest `src/i18n/language.test.ts`, `src/components/LanguageSwitch.test.tsx`; Real-Stack `frontend/e2e-real/i18n.spec.ts` I2 (Umschalter, Speicherung über Reload) und I3 (englischer Browser ohne gespeicherte Wahl). Eine kontobezogene Sprache (Option 4) bleibt möglich; sie ersetzte dann die Browserspeicherung als erste Quelle.
+
+**Betroffene IDs:** GLO-10, UI-18
+
+**Betroffene WPs:** WP-523

@@ -56,11 +56,14 @@ linters:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  # Baseline (WP-001): the v2 rule set reports ~580 pre-existing findings in
-  # ~200 files across backend, collector and edgecore. Only findings in code
-  # changed since this commit (main at the time of the migration) fail the
-  # build; the backlog is cleared in a follow-up work package, which then
-  # removes this line. Requires full git history (fetch-depth: 0 in CI).
+  # Baseline (WP-001): only findings in code changed since this commit (main
+  # at the time of the v2 migration) fail the build. Requires full git
+  # history (fetch-depth: 0 in CI). The backlog behind it (WP-499, F-123) is
+  # counted per module by scripts/ci/lint-debt.sh in the job lint and may
+  # not rise above tests/lint-debt-baseline.txt ("make lint-debt"). It is
+  # cleared by the follow-up work packages WP-613 to WP-629 (milestone
+  # M2.11 Lint-Altlast in docs/plan/phase2/implementierungsplan.md); the
+  # last of them, WP-629, removes this line.
   new-from-rev: 257e6fa0b74fd0a789490b48436b6cecf5cb3d24
 
 formatters:

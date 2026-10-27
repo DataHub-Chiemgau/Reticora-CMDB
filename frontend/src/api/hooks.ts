@@ -17,6 +17,7 @@ import {
   userApi,
   teamApi,
   roleApi,
+  invitationApi,
   permissionApi,
   slaApi,
   formApi,
@@ -31,9 +32,11 @@ import {
   auditApi,
   privacyApi,
   credentialApi,
+  vrfApi,
 } from '../api/client';
 import type {
   DiscoveryScopeInput,
+  DiscoveryScopePatch,
   CICreateRequest,
   CIListParams,
   CIUpdateRequest,
@@ -53,6 +56,8 @@ import type {
   TicketUpdateRequest,
   TicketListParams,
   UserListParams,
+  InvitationRequest,
+  InvitationAcceptance,
   TopologyParams,
   RackListParams,
   SLAListParams,
@@ -150,6 +155,14 @@ export function useCollectors(params: ListParams = {}) {
   });
 }
 
+/** Every collector of the organization, not only the first page (F-362). */
+export function useAllCollectors() {
+  return useQuery({
+    queryKey: ['collectors', 'all'],
+    queryFn: () => collectorApi.listAll(),
+  });
+}
+
 export function useDiscoveryScopes(collectorId: string) {
   return useQuery({
     queryKey: ['discovery-scopes', collectorId],
@@ -167,7 +180,7 @@ export function useDiscoveryScopeMutations(collectorId: string) {
       onSuccess: invalidate,
     }),
     update: useMutation({
-      mutationFn: ({ id, patch }: { id: string; patch: Partial<DiscoveryScopeInput> }) =>
+      mutationFn: ({ id, patch }: { id: string; patch: DiscoveryScopePatch }) =>
         discoveryScopeApi.update(id, patch),
       onSuccess: invalidate,
     }),
@@ -176,6 +189,25 @@ export function useDiscoveryScopeMutations(collectorId: string) {
       onSuccess: invalidate,
     }),
   };
+}
+
+/** The credentials (metadata only) a scope form offers; needs credential:read. */
+export function useCredentials(enabled = true) {
+  return useQuery({
+    queryKey: ['credentials', 'options'],
+    queryFn: () => credentialApi.list({ limit: 200 }),
+    enabled,
+    retry: false,
+  });
+}
+
+/** The VRFs of the organization, the default first (TEN-10). */
+export function useVrfs(enabled = true) {
+  return useQuery({
+    queryKey: ['vrfs', 'options'],
+    queryFn: () => vrfApi.list({ limit: 200 }),
+    enabled,
+  });
 }
 
 export function useScopeSuggestions() {
@@ -555,6 +587,48 @@ export function useRoleList(params: ListParams = {}) {
   return useQuery({
     queryKey: ['roles', params],
     queryFn: () => roleApi.list(params),
+  });
+}
+
+// --- Invitations (TLC-03) ---
+
+/** useInvitations lists the organization's invitations; enabled only for user:manage holders. */
+export function useInvitations(enabled = true) {
+  return useQuery({
+    queryKey: ['invitations'],
+    queryFn: () => invitationApi.list(),
+    enabled,
+  });
+}
+
+export function useIssueInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: InvitationRequest) => invitationApi.issue(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invitations'] }),
+  });
+}
+
+export function useRenewInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => invitationApi.renew(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invitations'] }),
+  });
+}
+
+export function useRevokeInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => invitationApi.revoke(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invitations'] }),
+  });
+}
+
+/** useAcceptInvitation is the public acceptance; it touches no cached list. */
+export function useAcceptInvitation() {
+  return useMutation({
+    mutationFn: (data: InvitationAcceptance) => invitationApi.accept(data),
   });
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/gosnmp/gosnmp"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/internal/fakesnmp"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/profiles"
 )
 
@@ -258,33 +259,66 @@ func TestNewDefaults(t *testing.T) {
 	}
 }
 
-func TestExtractNumericValueParsesCounter(t *testing.T) {
-	// SEQUENCE { INTEGER 1, OCTETSTRING "public", ... varbind with
-	// Counter32 (0x41) value 123456 }.
-	resp := []byte{0x30, 0x30, 0x02, 0x01, 0x01}
-	resp = append(resp, 0x04, 0x06, 'p', 'u', 'b', 'l', 'i', 'c')
-	resp = append(resp, make([]byte, 10)...)
-	resp = append(resp, 0x41, 0x03, 0x01, 0xE2, 0x40) // Counter32 123456
-
-	got, ok := extractNumericValue(resp)
-	if !ok || got != 123456 {
-		t.Errorf("extractNumericValue = %v, %v; want 123456, true", got, ok)
+// TestPollReadsDecodedVarbinds covers WP-512 (MON-02): Poll takes the
+// values from the decoded varbinds of one GET, Counter32, Counter64,
+// INTEGER and numeric strings alike. What the device does not answer
+// (noSuchObject) or answers with text gives no sample; the former
+// hand-made parser read the last INTEGER-looking bytes of the response
+// instead, for an unanswered UPS-MIB OID 33 from the OID itself.
+func TestPollReadsDecodedVarbinds(t *testing.T) {
+	const community = "poll-community"
+	agent, err := fakesnmp.Listen("127.0.0.1:0", fakesnmp.Config{Community: community, SysName: "ups-01",
+		SysDescr: "Reticora SNMP fake", SysObjectID: ".1.3.6.1.4.1.8072.3.2.10"},
+		gosnmp.SnmpPDU{Name: ".1.3.6.1.2.1.2.2.1.10.1", Type: gosnmp.Counter32, Value: uint(123456)},
+		gosnmp.SnmpPDU{Name: ".1.3.6.1.2.1.31.1.1.1.6.1", Type: gosnmp.Counter64, Value: uint64(9_000_000_000)},
+		gosnmp.SnmpPDU{Name: ".1.3.6.1.2.1.33.1.2.1.0", Type: gosnmp.Integer, Value: 2},
+		gosnmp.SnmpPDU{Name: ".1.3.6.1.4.1.99.1.0", Type: gosnmp.OctetString, Value: []byte("42.5")},
+		gosnmp.SnmpPDU{Name: ".1.3.6.1.4.1.99.2.0", Type: gosnmp.OctetString, Value: []byte("n/a")})
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestExtractNumericValueParsesNumericString(t *testing.T) {
-	resp := []byte{0x30, 0x10, 0x02, 0x01, 0x01, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00}
-	resp = append(resp, 0x04, 0x04, '4', '2', '.', '5')
-
-	got, ok := extractNumericValue(resp)
-	if !ok || got != 42.5 {
-		t.Errorf("extractNumericValue = %v, %v; want 42.5, true", got, ok)
+	done := make(chan error, 1)
+	go func() { done <- agent.Serve() }()
+	t.Cleanup(func() {
+		_ = agent.Close()
+		<-done
+	})
+	p := &Plugin{Timeout: time.Second, Port: agent.Addr().Port}
+	samples, err := p.Poll(context.Background(), "127.0.0.1", map[string]string{"community": community}, []PollMetric{
+		{Name: "in32", OID: "1.3.6.1.2.1.2.2.1.10.1"},
+		{Name: "in64", OID: "1.3.6.1.2.1.31.1.1.1.6.1"},
+		{Name: "battery_status", OID: "1.3.6.1.2.1.33.1.2.1.0", Labels: map[string]string{"device": "ups"}},
+		{Name: "battery_runtime", OID: "1.3.6.1.2.1.33.1.2.3.0"},
+		{Name: "numeric_text", OID: "1.3.6.1.4.1.99.1.0"},
+		{Name: "text", OID: "1.3.6.1.4.1.99.2.0"},
+	})
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
 	}
-}
+	got := map[string]float64{}
+	for _, s := range samples {
+		got[s.Name] = s.Value
+		if s.Labels["target"] != "127.0.0.1" || s.Labels["oid"] == "" {
+			t.Errorf("sample %s labels = %v", s.Name, s.Labels)
+		}
+	}
+	want := map[string]float64{"in32": 123456, "in64": 9e9, "battery_status": 2, "numeric_text": 42.5}
+	if len(got) != len(want) {
+		t.Errorf("samples = %v, want %v", got, want)
+	}
+	for name, v := range want {
+		if got[name] != v {
+			t.Errorf("%s = %v, want %v", name, got[name], v)
+		}
+	}
+	if requests := agent.Requests(); len(requests) != 1 || requests[0].PDU != gosnmp.GetRequest.String() {
+		t.Errorf("requests = %+v, want one GET", requests)
+	}
 
-func TestExtractNumericValueRejectsGarbage(t *testing.T) {
-	if _, ok := extractNumericValue([]byte{0x30, 0x03, 0x05, 0x00}); ok {
-		t.Error("expected no numeric value in truncated packet")
+	// A silent target is an error, no sample.
+	silent := &Plugin{Timeout: 150 * time.Millisecond}
+	if s, err := silent.Poll(context.Background(), "192.0.2.1", nil, []PollMetric{{Name: "x", OID: "1.3.6.1.2.1.1.3.0"}}); err == nil || len(s) != 0 {
+		t.Errorf("Poll of a silent target = %v, %v; want an error", s, err)
 	}
 }
 
@@ -337,7 +371,7 @@ func v3TestMIB() []gosnmp.SnmpPDU {
 
 // TestSNMPv3AuthPrivRoundTrip covers WP-152 (DIS-04): probe and collect a
 // device over SNMPv3 authPriv (SHA-256/AES) including the interface table;
-// wrong credentials find nothing.
+// credentials the agent refuses are reported as auth_failed (WP-492).
 func TestSNMPv3AuthPrivRoundTrip(t *testing.T) {
 	agent := startV3Agent(t, "reticora", "auth-secret-1", "priv-secret-1", v3TestMIB())
 	creds := map[string]string{"username": "reticora", "auth_protocol": "SHA256", "auth_password": "auth-secret-1",
@@ -371,10 +405,22 @@ func TestSNMPv3AuthPrivRoundTrip(t *testing.T) {
 		t.Errorf("record breaks the contract: %v", v)
 	}
 
-	wrong := map[string]string{"username": "reticora", "auth_password": "wrong-auth-pw", "priv_password": "priv-secret-1"}
+	// Wrong credentials (WP-492, DIS-08): an agent that refuses them with a
+	// usmStatsWrongDigests report (RFC 3414 3.2) is found, and its
+	// collection fails with auth_failed and the target; an agent that leaves
+	// the request unanswered stays a silent target without error.
+	rfc := startRFC3414Agent(t, oidUsmStatsWrongDigests, 0)
+	refused := &Plugin{Timeout: time.Second, Port: rfc.port}
+	if hits, err = refused.Probe(context.Background(), []string{"127.0.0.1"}, v3Bad); err != nil || len(hits) != 1 {
+		t.Errorf("refused credentials: probe found %d devices, %v; want the answering agent", len(hits), err)
+	}
+	if _, err = refused.Collect(context.Background(), "127.0.0.1", v3Bad); !errors.Is(err, plugins.ErrAuthFailed) ||
+		!strings.Contains(err.Error(), "127.0.0.1") || !strings.Contains(err.Error(), "usmStatsWrongDigests") {
+		t.Errorf("refused credentials: collect err = %v, want auth_failed with target and report", err)
+	}
 	quick := &Plugin{Timeout: 200 * time.Millisecond, Port: agent.port()}
-	if hits, err = quick.Probe(context.Background(), []string{"127.0.0.1"}, wrong); err != nil || len(hits) != 0 {
-		t.Errorf("wrong credentials found %d devices, %v", len(hits), err)
+	if hits, err = quick.Probe(context.Background(), []string{"127.0.0.1"}, v3Bad); err != nil || len(hits) != 0 {
+		t.Errorf("unanswered request found %d devices, %v", len(hits), err)
 	}
 }
 
@@ -402,4 +448,123 @@ func TestSNMPv3RequiresAuthPriv(t *testing.T) {
 	if _, ok, _ = v3FromCreds(map[string]string{"community": "public"}); ok {
 		t.Error("a community configures SNMPv2c")
 	}
+}
+
+// startIfFake serves n interfaces (ifIndex 1..n, ifOperStatus up for odd
+// indexes) with the 64-bit counters and ifName of the ifXTable, or with
+// the 32-bit counters of the ifTable only (hc false).
+func startIfFake(t *testing.T, community string, n int, hc bool) *fakesnmp.Agent {
+	t.Helper()
+	var mib []gosnmp.SnmpPDU
+	for i := 1; i <= n; i++ {
+		idx := fmt.Sprintf(".%d", i)
+		mib = append(mib, gosnmp.SnmpPDU{Name: "." + oidIfOperSt + idx, Type: gosnmp.Integer, Value: 2 - i%2})
+		if hc {
+			mib = append(mib,
+				gosnmp.SnmpPDU{Name: "." + oidIfName + idx, Type: gosnmp.OctetString, Value: []byte(fmt.Sprintf("Gi1/0/%d", i))},
+				gosnmp.SnmpPDU{Name: "." + oidIfHCInOctets + idx, Type: gosnmp.Counter64, Value: uint64(i) * 5_000_000_000},
+				gosnmp.SnmpPDU{Name: "." + oidIfHCOutOctets + idx, Type: gosnmp.Counter64, Value: uint64(i) * 7_000_000_000})
+		} else {
+			mib = append(mib,
+				gosnmp.SnmpPDU{Name: "." + oidIfInOctets + idx, Type: gosnmp.Counter32, Value: uint(i * 1000)},
+				gosnmp.SnmpPDU{Name: "." + oidIfOutOctets + idx, Type: gosnmp.Counter32, Value: uint(i * 2000)})
+		}
+	}
+	agent, err := fakesnmp.Listen("127.0.0.1:0", fakesnmp.Config{Community: community, SysName: "access-sw",
+		SysDescr: "Reticora SNMP fake", SysObjectID: ".1.3.6.1.4.1.8072.3.2.10"}, mib...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- agent.Serve() }()
+	t.Cleanup(func() {
+		_ = agent.Close()
+		<-done
+	})
+	return agent
+}
+
+// TestPollInterfacesWalksTableWithLimit covers WP-512 (MON-02, F-339): the
+// standard poll walks ifTable/ifXTable for every interface, at most
+// MaxPollInterfaces (the first by ifIndex) per device, with the ifIndex
+// and ifName labels and the 64-bit counters; a device without ifXTable
+// gives the 32-bit counters; one without ifTable no samples and no error.
+func TestPollInterfacesWalksTableWithLimit(t *testing.T) {
+	const community = "poll-community"
+	creds := map[string]string{"community": community}
+	type key struct {
+		name string
+		idx  int
+	}
+	collect := func(t *testing.T, agent *fakesnmp.Agent) map[key]plugins.MetricSample {
+		t.Helper()
+		p := &Plugin{Timeout: time.Second, Port: agent.Addr().Port}
+		samples, err := p.PollInterfaces(context.Background(), "127.0.0.1", creds)
+		if err != nil {
+			t.Fatalf("PollInterfaces: %v", err)
+		}
+		out := map[key]plugins.MetricSample{}
+		for _, s := range samples {
+			var idx int
+			if _, err := fmt.Sscan(s.Labels["ifIndex"], &idx); err != nil || s.Labels["target"] != "127.0.0.1" {
+				t.Fatalf("sample %+v: want the labels target and ifIndex", s)
+			}
+			k := key{s.Name, idx}
+			if _, dup := out[k]; dup {
+				t.Fatalf("sample %+v twice", s)
+			}
+			out[k] = s
+		}
+		return out
+	}
+
+	t.Run("300 interfaces, limit 256", func(t *testing.T) {
+		agent := startIfFake(t, community, 300, true)
+		got := collect(t, agent)
+		if len(got) != 3*MaxPollInterfaces {
+			t.Fatalf("samples = %d, want %d (3 per interface, %d interfaces)", len(got), 3*MaxPollInterfaces, MaxPollInterfaces)
+		}
+		for _, idx := range []int{1, 2, MaxPollInterfaces} {
+			in, out, st := got[key{MetricIfInOctets, idx}], got[key{MetricIfOutOctets, idx}], got[key{MetricIfOperState, idx}]
+			if in.Value != float64(idx)*5e9 || out.Value != float64(idx)*7e9 || st.Value != float64(2-idx%2) {
+				t.Errorf("ifIndex %d: in %v, out %v, status %v", idx, in.Value, out.Value, st.Value)
+			}
+			if name := fmt.Sprintf("Gi1/0/%d", idx); in.Labels["ifName"] != name || st.Labels["ifName"] != name {
+				t.Errorf("ifIndex %d: ifName %q/%q, want %q", idx, in.Labels["ifName"], st.Labels["ifName"], name)
+			}
+		}
+		if _, ok := got[key{MetricIfOperState, MaxPollInterfaces + 1}]; ok {
+			t.Errorf("interface %d polled beyond the limit", MaxPollInterfaces+1)
+		}
+		// Bounded load: GETBULK requests only, at most 6 per column
+		// (ceil(256/50)) for status, name and the two counters.
+		requests := agent.Requests()
+		if len(requests) > 4*6 {
+			t.Errorf("requests = %d, want at most 24", len(requests))
+		}
+		for _, r := range requests {
+			if r.PDU != gosnmp.GetBulkRequest.String() || r.Community != community || !r.Answered {
+				t.Errorf("request %+v: want an answered GETBULK with the community", r)
+			}
+		}
+	})
+
+	t.Run("no ifXTable", func(t *testing.T) {
+		got := collect(t, startIfFake(t, community, 2, false))
+		if len(got) != 6 {
+			t.Fatalf("samples = %v, want 6", got)
+		}
+		if got[key{MetricIfInOctets, 2}].Value != 2000 || got[key{MetricIfOutOctets, 2}].Value != 4000 {
+			t.Errorf("32-bit counters of ifIndex 2 = %v, %v", got[key{MetricIfInOctets, 2}].Value, got[key{MetricIfOutOctets, 2}].Value)
+		}
+		if _, named := got[key{MetricIfInOctets, 1}].Labels["ifName"]; named {
+			t.Error("ifName label without ifXTable")
+		}
+	})
+
+	t.Run("no ifTable", func(t *testing.T) {
+		if got := collect(t, startIfFake(t, community, 0, true)); len(got) != 0 {
+			t.Errorf("samples = %v, want none", got)
+		}
+	})
 }

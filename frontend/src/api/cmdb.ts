@@ -130,8 +130,26 @@ export interface AttributeIndexFlags {
   unique_scope: 'org' | 'client';
 }
 
+export type AttributeDefinition = components['schemas']['AttributeDefinition'];
+export type AttributeIndexJob = components['schemas']['Job'];
+
+// The job that brings the index of a definition in line with its flags.
+export const ATTRIBUTE_INDEX_JOB_KIND = 'attribute.index';
+
 export const attributeDefinitionApi = {
-  setIndexFlags(id: string, flags: AttributeIndexFlags): Promise<unknown> {
+  list(params: { ci_type_id?: string; scope?: 'type' | 'global' }): Promise<{
+    data: AttributeDefinition[];
+  }> {
+    const query = new URLSearchParams();
+    if (params.ci_type_id) query.set('ci_type_id', params.ci_type_id);
+    if (params.scope) query.set('scope', params.scope);
+    return fetchAPI(`/attribute-definitions?${query.toString()}`);
+  },
+  // The index jobs of the organization, newest first (JOB-03, job:read).
+  indexJobs(): Promise<PaginatedResponse<AttributeIndexJob>> {
+    return fetchAPI(`/jobs?kind=${ATTRIBUTE_INDEX_JOB_KIND}&limit=100`);
+  },
+  setIndexFlags(id: string, flags: AttributeIndexFlags): Promise<AttributeDefinition> {
     return fetchAPI(`/attribute-definitions/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(flags),
@@ -669,14 +687,11 @@ export interface ImpactResult {
   count: number;
 }
 
-export interface BlastRadius {
-  ci_id: string;
-  affected_cis: Array<{ id: string; name: string; ci_type: string }>;
-  affected_count: number;
-  client_ids?: string[];
-  site_ids?: string[];
-  single_points_of_failure?: Array<{ id: string; name: string }>;
-}
+/**
+ * The blast radius of a CI failure: affected_count counts the certain hits,
+ * heuristic_count the CIs reached only over connected_to (IMP-03, WP-490).
+ */
+export type BlastRadius = components['schemas']['BlastRadius'];
 
 /**
  * The fields of an impacted CI that ImpactResult declares (API-02): without
@@ -765,3 +780,53 @@ export const savedViewApi = {
     });
   },
 };
+
+// ─── CI bulk (API-08, BLK-01) ────────────────────────────────────────────────
+
+/** The report of a bulk change per id, also the result of a ci.bulk job. */
+export type CIBulkReport = components['schemas']['CIBulkResult'];
+
+/** BULK_MAX_IDS is the most ids one bulk change takes (API-08). */
+export const BULK_MAX_IDS = 500;
+
+/** The page size of collectCIs: the largest page the CI list answers (API-02). */
+const COLLECT_PAGE_SIZE = 200;
+
+export interface CollectedCIs {
+  /** The matches in list order, at most `max`. */
+  cis: { id: string; name: string }[];
+  /** All matches of the filter, also those beyond `max`. */
+  total: number;
+}
+
+/**
+ * collectCIs gathers the ids and names of the CIs of the filtered CI list
+ * page by page, up to `max` (WP-520, F-328). It reads the list the CMDB page
+ * shows, with its filters and the selected scope, so it never holds a CI the
+ * list would not show.
+ */
+export async function collectCIs(
+  filter: { search?: string; status?: string; ci_type_id?: string },
+  max = BULK_MAX_IDS,
+): Promise<CollectedCIs> {
+  const seen = new Set<string>();
+  const cis: CollectedCIs['cis'] = [];
+  let total = 0;
+  for (let offset = 0; cis.length < max; offset += COLLECT_PAGE_SIZE) {
+    const page = await fetchAPI<PaginatedResponse<{ id: string; name: string }>>(
+      `/cis${qs({ ...filter, limit: COLLECT_PAGE_SIZE, offset })}`,
+    );
+    const rows = page.data ?? [];
+    total = page.total;
+    for (const ci of rows) {
+      if (cis.length < max && !seen.has(ci.id)) {
+        seen.add(ci.id);
+        cis.push({ id: ci.id, name: ci.name });
+      }
+    }
+    if (!page.has_more || rows.length === 0) {
+      break;
+    }
+  }
+  return { cis, total };
+}

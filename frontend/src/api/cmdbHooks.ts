@@ -18,7 +18,10 @@ import {
   historyApi,
   impactApi,
   savedViewApi,
+  ATTRIBUTE_INDEX_JOB_KIND,
+  type AttributeDefinition,
   type AttributeIndexFlags,
+  type AttributeIndexJob,
   type CITypeCreateRequest,
   type LocationUpdateRequest,
 } from './cmdb';
@@ -83,6 +86,34 @@ export function useSetCITypeActive() {
   });
 }
 
+/** The index jobs of the attribute definitions (one shared query). */
+const INDEX_JOBS_KEY = ['jobs', ATTRIBUTE_INDEX_JOB_KIND];
+
+/**
+ * FlagUpdateError is a partial success of useUpsertCITypeField: the field
+ * is saved, its index flags are not (e.g. 409 while CIs share a value,
+ * MET-15). refusal is the answer of PATCH /attribute-definitions/{id}.
+ */
+export class FlagUpdateError extends Error {
+  readonly field: FieldDefinition;
+  readonly refusal: unknown;
+
+  constructor(field: FieldDefinition, refusal: unknown) {
+    super(refusal instanceof Error ? refusal.message : String(refusal));
+    this.name = 'FlagUpdateError';
+    this.field = field;
+    this.refusal = refusal;
+  }
+}
+
+/** The changes of an attribute definition: the type, its definitions and the index jobs. */
+function invalidateAttributes(qc: QueryClient, typeId: string) {
+  qc.invalidateQueries({ queryKey: ['ci-types', typeId] });
+  qc.invalidateQueries({ queryKey: ['ci-types'] });
+  qc.invalidateQueries({ queryKey: ['attribute-definitions'] });
+  qc.invalidateQueries({ queryKey: INDEX_JOBS_KEY });
+}
+
 export function useUpsertCITypeField() {
   const qc = useQueryClient();
   return useMutation({
@@ -94,18 +125,69 @@ export function useUpsertCITypeField() {
       typeId: string;
       field: FieldDefinition;
       index?: AttributeIndexFlags;
-    }) => {
+    }): Promise<{ field: FieldDefinition; definition?: AttributeDefinition }> => {
       const saved = await ciTypeApi.upsertField(typeId, field);
       const id = (saved as FieldDefinition & { id?: string }).id;
-      if (index && id) {
-        await attributeDefinitionApi.setIndexFlags(id, index);
+      if (!index || !id) return { field: saved };
+      try {
+        return { field: saved, definition: await attributeDefinitionApi.setIndexFlags(id, index) };
+      } catch (err) {
+        throw new FlagUpdateError(saved, err);
       }
-      return saved;
     },
-    onSuccess: (_d, v) => {
-      qc.invalidateQueries({ queryKey: ['ci-types', v.typeId] });
-      qc.invalidateQueries({ queryKey: ['ci-types'] });
-    },
+    // A refused flag update leaves the field saved: the list reloads either way.
+    onSettled: (_d, _e, v) => invalidateAttributes(qc, v.typeId),
+  });
+}
+
+/** The attribute definitions of a CI type with their index flags (MET-10, MET-15). */
+export function useAttributeDefinitions(ciTypeId: string | undefined) {
+  return useQuery({
+    queryKey: ['attribute-definitions', { ci_type_id: ciTypeId }],
+    queryFn: () => attributeDefinitionApi.list({ ci_type_id: ciTypeId, scope: 'type' }),
+    enabled: !!ciTypeId,
+  });
+}
+
+/** PATCH of the index flags of an existing definition; it queues the index job (DB-04). */
+export function useSetAttributeIndexFlags() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, flags }: { id: string; typeId: string; flags: AttributeIndexFlags }) =>
+      attributeDefinitionApi.setIndexFlags(id, flags),
+    onSettled: (_d, _e, v) => invalidateAttributes(qc, v.typeId),
+  });
+}
+
+function isActiveJob(job: AttributeIndexJob) {
+  return job.status === 'queued' || job.status === 'running';
+}
+
+function definitionOf(job: AttributeIndexJob): string {
+  const params = job.params as { definition_id?: unknown } | null | undefined;
+  return typeof params?.definition_id === 'string' ? params.definition_id.toLowerCase() : '';
+}
+
+/**
+ * useAttributeIndexJob follows the newest index job of a definition: the
+ * server queues it before it answers the flag change, the list is newest
+ * first. It refreshes while the job is queued or running. The jobs of all
+ * definitions share one request.
+ */
+export function useAttributeIndexJob(definitionId: string | undefined) {
+  return useQuery({
+    queryKey: INDEX_JOBS_KEY,
+    queryFn: () => attributeDefinitionApi.indexJobs(),
+    enabled: !!definitionId,
+    retry: false,
+    select: (page) =>
+      (page.data ?? []).find((job) => definitionOf(job) === definitionId?.toLowerCase()) ?? null,
+    refetchInterval: (query) =>
+      (query.state.data?.data ?? []).some(
+        (job) => definitionOf(job) === definitionId?.toLowerCase() && isActiveJob(job),
+      )
+        ? 2_000
+        : false,
   });
 }
 
@@ -147,10 +229,11 @@ export function useDeleteInstanceField(ciId: string) {
 }
 
 // Relationship types
-export function useRelationshipTypes() {
+export function useRelationshipTypes(enabled = true) {
   return useQuery({
     queryKey: ['relationship-types'],
     queryFn: () => relationshipTypeApi.list({ limit: 100 }),
+    enabled,
   });
 }
 

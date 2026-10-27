@@ -581,3 +581,160 @@ func TestRotatedSecretSignsDuringOverlap(t *testing.T) {
 		t.Errorf("previous signature after the overlap: %v", headers)
 	}
 }
+
+// TestDispatcherDeliversOutboxEventsIdempotently covers WP-506 (EVT-01,
+// F-151, F-320): a delivery of an outbox event carries the event ID and
+// its sequence numbers; its delivery ID derives from the event and the
+// subscription, so a repeated hand-off of the event stores and sends no
+// second delivery and a redelivery keeps the ID and the headers.
+func TestDispatcherDeliversOutboxEventsIdempotently(t *testing.T) {
+	repo := NewMemoryRepository()
+	store := NewMemoryDeliveryStore()
+	var mu sync.Mutex
+	var received []http.Header
+	status := atomic.Int32{}
+	status.Store(http.StatusServiceUnavailable)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		received = append(received, r.Header.Clone())
+		mu.Unlock()
+		w.WriteHeader(int(status.Load()))
+	}))
+	defer server.Close()
+	sub := &Subscription{OrganizationID: "org-1", Name: "hook", URL: server.URL, Secret: "secret", Events: []string{events.CICreated}, IsActive: true}
+	if err := repo.Create(context.Background(), sub); err != nil {
+		t.Fatal(err)
+	}
+	d := NewDispatcher(repo, server.Client(), DispatcherOptions{Deliveries: store, PollInterval: -1})
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = d.Shutdown(ctx)
+	}()
+	env := &events.Envelope{ID: "7a1c0de0-0000-4000-8000-000000000001", Type: events.CICreated, OrgID: "org-1",
+		Sequence: 42, EntityID: "ci-1", EntitySeq: 3, Data: json.RawMessage(`{"id":"ci-1"}`)}
+	headersOf := func(n int) []http.Header {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			mu.Lock()
+			got := append([]http.Header(nil), received...)
+			mu.Unlock()
+			if len(got) >= n || time.Now().After(deadline) {
+				return got
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	waitStatus := func(want string) DeliveryRecord {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			recs, _, err := store.ListBySubscription(context.Background(), "org-1", sub.ID, api.PaginationParams{Limit: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(recs) == 1 && recs[0].Status == want {
+				return recs[0]
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("deliveries = %+v, want one %s", recs, want)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	for i := 0; i < 2; i++ {
+		if err := d.Consume(context.Background(), env); err != nil {
+			t.Fatalf("hand-off %d: %v", i+1, err)
+		}
+	}
+	rec := waitStatus(StatusFailed)
+	if want := deliveryIDFor(env.ID, sub.ID); rec.ID != want {
+		t.Errorf("delivery ID = %s, want %s (derived from event and subscription)", rec.ID, want)
+	}
+	if rec.EventID != env.ID {
+		t.Errorf("stored event ID = %q, want %q", rec.EventID, env.ID)
+	}
+	if deliveryIDFor(env.ID, sub.ID) != rec.ID || deliveryIDFor(env.ID, "other") == rec.ID {
+		t.Errorf("delivery ID is not deterministic per event and subscription")
+	}
+	first := headersOf(1)
+	if len(first) != 1 {
+		t.Fatalf("HTTP attempts after two hand-offs of one event = %d, want 1", len(first))
+	}
+	for name, want := range map[string]string{
+		"X-Reticora-Event-ID":   env.ID,
+		"X-Reticora-Sequence":   "42",
+		"X-Reticora-Entity-Seq": "3",
+		"X-Reticora-Delivery":   rec.ID,
+		"X-Reticora-Event":      events.CICreated,
+	} {
+		if got := first[0].Get(name); got != want {
+			t.Errorf("header %s = %q, want %q", name, got, want)
+		}
+	}
+
+	// The redelivery by the retry worker keeps delivery ID and event.
+	status.Store(http.StatusNoContent)
+	d.now = func() time.Time { return time.Now().UTC().Add(time.Hour) }
+	d.ProcessDue(context.Background())
+	waitStatus(StatusDelivered)
+	all := headersOf(2)
+	if len(all) != 2 {
+		t.Fatalf("HTTP attempts = %d, want 2", len(all))
+	}
+	for _, name := range []string{"X-Reticora-Delivery", "X-Reticora-Event-ID", "X-Reticora-Sequence", "X-Reticora-Entity-Seq"} {
+		if all[1].Get(name) != all[0].Get(name) {
+			t.Errorf("redelivery header %s = %q, first attempt %q", name, all[1].Get(name), all[0].Get(name))
+		}
+	}
+
+	// An event without an entity carries no entity sequence.
+	orgEvent := &events.Envelope{ID: "7a1c0de0-0000-4000-8000-000000000002", Type: events.CICreated, OrgID: "org-1",
+		Sequence: 43, Data: json.RawMessage(`{"id":"ci-2"}`)}
+	if err := d.Consume(context.Background(), orgEvent); err != nil {
+		t.Fatal(err)
+	}
+	if h := headersOf(3); len(h) != 3 || h[2].Get("X-Reticora-Sequence") != "43" || h[2].Values("X-Reticora-Entity-Seq") != nil {
+		t.Errorf("headers of an event without entity: %v", h)
+	}
+}
+
+// failingDeliveries fails every Enqueue.
+type failingDeliveries struct{ *MemoryDeliveryStore }
+
+func (failingDeliveries) Enqueue(context.Context, DeliveryRecord) (DeliveryRecord, error) {
+	return DeliveryRecord{}, fmt.Errorf("delivery store down")
+}
+
+// failingSubscriptions fails the subscription lookup.
+type failingSubscriptions struct{ *MemoryRepository }
+
+func (failingSubscriptions) ListByEvent(context.Context, string, string) ([]Subscription, error) {
+	return nil, fmt.Errorf("subscription store down")
+}
+
+// TestDispatcherConsumeReturnsHandOffErrors covers F-151 (WP-506): a
+// failed subscription lookup or delivery persistence reaches the outbox
+// publisher, which keeps the event pending.
+func TestDispatcherConsumeReturnsHandOffErrors(t *testing.T) {
+	repo := NewMemoryRepository()
+	if err := repo.Create(context.Background(), &Subscription{OrganizationID: "org-1", Name: "hook", URL: "https://hook.example.invalid",
+		Secret: "secret", Events: []string{events.CICreated}, IsActive: true}); err != nil {
+		t.Fatal(err)
+	}
+	env := &events.Envelope{ID: "7a1c0de0-0000-4000-8000-000000000003", Type: events.CICreated, OrgID: "org-1", Sequence: 1,
+		Data: json.RawMessage(`{"id":"ci-1"}`)}
+	for name, d := range map[string]*Dispatcher{
+		"subscription lookup": NewDispatcher(failingSubscriptions{repo}, nil, DispatcherOptions{
+			Deliveries: NewMemoryDeliveryStore(), PollInterval: -1}),
+		"delivery persistence": NewDispatcher(repo, nil, DispatcherOptions{
+			Deliveries: failingDeliveries{NewMemoryDeliveryStore()}, PollInterval: -1}),
+	} {
+		if err := d.Consume(context.Background(), env); err == nil || !strings.Contains(err.Error(), "down") {
+			t.Errorf("%s fails: Consume returned %v, want the error", name, err)
+		}
+		_ = d.Shutdown(context.Background())
+	}
+}

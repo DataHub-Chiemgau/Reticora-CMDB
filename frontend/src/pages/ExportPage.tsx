@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ExportJob } from '../api/client';
 import { useCreateExportJob, useExportJobs } from '../api/hooks';
@@ -9,6 +9,8 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
+import { ScrollRegion } from '../components/ScrollRegion';
+import { downloadExport } from '../lib/exportDownload';
 
 const statusVariants: Record<
   ExportJob['status'],
@@ -26,6 +28,18 @@ export function ExportPage() {
   const jobs = useExportJobs();
   const createJob = useCreateExportJob();
   const [format, setFormat] = useState<ExportJob['format']>('csv');
+  const [downloadFailed, setDownloadFailed] = useState(false);
+
+  // The file is fetched and saved as a same-origin blob: browsers ignore the
+  // download attribute of a link to the object store's origin (WebKit then
+  // navigates away from the page instead of saving the file).
+  const download = (event: MouseEvent<HTMLAnchorElement>, job: ExportJob) => {
+    event.preventDefault();
+    setDownloadFailed(false);
+    downloadExport(event.currentTarget.href, `export_${job.id}.${job.format}`).catch(() =>
+      setDownloadFailed(true),
+    );
+  };
 
   const submit = () => {
     createJob.mutate({ format });
@@ -75,8 +89,13 @@ export function ExportPage() {
       </Card>
 
       <Card title={`${t('export.jobs')} (${jobs.data?.total ?? 0})`}>
+        {downloadFailed ? (
+          <p role="alert" className="mb-2 text-sm text-red-600 dark:text-red-400">
+            {t('export.downloadFailed')}
+          </p>
+        ) : null}
         {jobs.data?.data.length ? (
-          <div className="overflow-x-auto">
+          <ScrollRegion label={t('export.jobs')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -118,6 +137,7 @@ export function ExportPage() {
                         <a
                           href={job.download_url}
                           download
+                          onClick={(event) => download(event, job)}
                           className="text-sm font-medium text-primary hover:underline"
                         >
                           {t('export.download')}
@@ -128,7 +148,7 @@ export function ExportPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         ) : (
           <EmptyState title={t('export.emptyTitle')} description={t('export.emptyHint')} />
         )}

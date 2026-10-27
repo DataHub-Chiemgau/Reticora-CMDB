@@ -90,15 +90,22 @@ func TestNotificationAPI(t *testing.T) {
 		method, path, body string
 		status             int
 	}{
-		"invalid":           {http.MethodPost, "/api/v1/notification-channels", `{"name":"x","provider":"smtp","config":{}}`, http.StatusBadRequest},
-		"duplicate":         {http.MethodPost, "/api/v1/notification-channels", `{"name":"own-2","provider":"inapp"}`, http.StatusConflict},
-		"placeholder":       {http.MethodPost, "/api/v1/notification-channels", `{"name":"y","provider":"webhook","config":{"url":"https://h","secret":"********"}}`, http.StatusBadRequest},
-		"provider change":   {http.MethodPatch, "/api/v1/notification-channels/" + id, `{"provider":"inapp"}`, http.StatusBadRequest},
-		"unknown":           {http.MethodGet, "/api/v1/notification-channels/nope", "", http.StatusNotFound},
-		"list":              {http.MethodGet, "/api/v1/notification-channels", "", http.StatusOK},
-		"deliveries":        {http.MethodGet, "/api/v1/notification-deliveries", "", http.StatusOK},
-		"bad preference":    {http.MethodPut, "/api/v1/notifications/preferences", `{"quiet_start":"25:00","quiet_end":"06:00"}`, http.StatusBadRequest},
-		"unknown read mark": {http.MethodPost, "/api/v1/notifications/nope/read", "", http.StatusNotFound},
+		"invalid":         {http.MethodPost, "/api/v1/notification-channels", `{"name":"x","provider":"smtp","config":{}}`, http.StatusBadRequest},
+		"duplicate":       {http.MethodPost, "/api/v1/notification-channels", `{"name":"own-2","provider":"inapp"}`, http.StatusConflict},
+		"placeholder":     {http.MethodPost, "/api/v1/notification-channels", `{"name":"y","provider":"webhook","config":{"url":"https://h","secret":"********"}}`, http.StatusBadRequest},
+		"provider change": {http.MethodPatch, "/api/v1/notification-channels/" + id, `{"provider":"inapp"}`, http.StatusBadRequest},
+		"unknown":         {http.MethodGet, "/api/v1/notification-channels/nope", "", http.StatusNotFound},
+		"list":            {http.MethodGet, "/api/v1/notification-channels", "", http.StatusOK},
+		"deliveries":      {http.MethodGet, "/api/v1/notification-deliveries", "", http.StatusOK},
+		"bad preference":  {http.MethodPut, "/api/v1/notifications/preferences", `{"quiet_start":"25:00","quiet_end":"06:00"}`, http.StatusBadRequest},
+		// The digest (NTF-04, WP-508): known non-critical categories,
+		// windows hourly or daily.
+		"digest of an unknown category":   {http.MethodPut, "/api/v1/notifications/preferences", `{"digest":{"reviews":"hourly"}}`, http.StatusBadRequest},
+		"digest of a critical category":   {http.MethodPut, "/api/v1/notifications/preferences", `{"digest":{"collector":"hourly"}}`, http.StatusBadRequest},
+		"digest with an unknown window":   {http.MethodPut, "/api/v1/notifications/preferences", `{"digest":{"review":"weekly"}}`, http.StatusBadRequest},
+		"digest that is not a map":        {http.MethodPut, "/api/v1/notifications/preferences", `{"digest":["review"]}`, http.StatusBadRequest},
+		"digest window that is no string": {http.MethodPut, "/api/v1/notifications/preferences", `{"digest":{"review":1}}`, http.StatusBadRequest},
+		"unknown read mark":               {http.MethodPost, "/api/v1/notifications/nope/read", "", http.StatusNotFound},
 	} {
 		if w = call("u-1", tc.method, tc.path, tc.body); w.Code != tc.status {
 			t.Errorf("%s: %d %s, want %d", name, w.Code, w.Body.String(), tc.status)
@@ -148,6 +155,35 @@ func TestNotificationAPI(t *testing.T) {
 	}
 	if body = decode(call("u-2", http.MethodGet, "/api/v1/notifications/preferences", "")); body["time_zone"] != "Europe/Berlin" || body["quiet_start"] != nil {
 		t.Errorf("default preference: %v", body)
+	}
+	// The digest: reviews hourly by default, also after a PUT without it;
+	// a given digest is stored, an empty one bundles nothing; a refused
+	// one changes nothing.
+	for _, user := range []string{"u-1", "u-2"} {
+		if digest, _ := decode(call(user, http.MethodGet, "/api/v1/notifications/preferences", ""))["digest"].(map[string]any); len(digest) != 1 || digest["review"] != "hourly" {
+			t.Errorf("default digest of %s: %v, want review hourly", user, digest)
+		}
+	}
+	if w = call("u-1", http.MethodPut, "/api/v1/notifications/preferences",
+		`{"time_zone":"Europe/Berlin","muted_categories":[],"digest":{"review":"daily","job":"hourly","entitlement":"daily"}}`); w.Code != http.StatusOK {
+		t.Fatalf("set digest: %d %s", w.Code, w.Body.String())
+	}
+	digest, _ := decode(call("u-1", http.MethodGet, "/api/v1/notifications/preferences", ""))["digest"].(map[string]any)
+	if len(digest) != 3 || digest["review"] != "daily" || digest["job"] != "hourly" || digest["entitlement"] != "daily" {
+		t.Errorf("stored digest: %v", digest)
+	}
+	if w = call("u-1", http.MethodPut, "/api/v1/notifications/preferences", `{"digest":{"review":"daily","apikey":"daily"}}`); w.Code != http.StatusBadRequest ||
+		!strings.Contains(w.Body.String(), "apikey") {
+		t.Errorf("digest with a critical category: %d %s, want 400 naming it", w.Code, w.Body.String())
+	}
+	if digest, _ = decode(call("u-1", http.MethodGet, "/api/v1/notifications/preferences", ""))["digest"].(map[string]any); len(digest) != 3 {
+		t.Errorf("digest after a refused update: %v", digest)
+	}
+	if w = call("u-1", http.MethodPut, "/api/v1/notifications/preferences", `{"digest":{}}`); w.Code != http.StatusOK {
+		t.Fatalf("empty digest: %d %s", w.Code, w.Body.String())
+	}
+	if digest, _ = decode(call("u-1", http.MethodGet, "/api/v1/notifications/preferences", ""))["digest"].(map[string]any); digest == nil || len(digest) != 0 {
+		t.Errorf("empty digest stored as %v", digest)
 	}
 	if w = call("u-1", http.MethodDelete, "/api/v1/notification-channels/"+id, ""); w.Code != http.StatusNoContent {
 		t.Errorf("delete: %d", w.Code)

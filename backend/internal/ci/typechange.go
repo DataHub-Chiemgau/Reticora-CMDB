@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
@@ -111,4 +112,69 @@ func (s *Service) ChangeType(ctx context.Context, orgID, ciID, typeID string) (*
 		return nil, err
 	}
 	return changer.ChangeType(ctx, orgID, ciID, typeID, TypeChangeManual)
+}
+
+// RecordOrigin is the ingest record a change comes from (AUD-03): the
+// collector that sent it, the time of the observation and the record id,
+// which becomes the correlation id of the change.
+type RecordOrigin struct {
+	CollectorID string
+	ObservedAt  time.Time
+	RecordID    string
+}
+
+// RecordUpdate is everything one ingest record changes on a known CI: the
+// field update and, with TypeID, the reclassification of a generic_device
+// to that specific type (CI-11, discovery mode).
+type RecordUpdate struct {
+	Update UpdateRequest
+	TypeID string
+	Origin RecordOrigin
+}
+
+// RecordUpdateResult is the CI after a record update. Changed reports a
+// historized change (a sighting that only moves last_seen_at has none),
+// TypeChanged the reclassification.
+type RecordUpdateResult struct {
+	CI          *Item
+	Changed     bool
+	TypeChanged bool
+}
+
+// RecordUpdater is the transaction variant of the update for the ingest
+// (AUD-03, CI-11): the field update and the reclassification of a record in
+// one transaction, one change set with the record's collector, source,
+// observation time and correlation id, and one event ci.changed. A failure
+// after the field update also rolls back the type change.
+type RecordUpdater interface {
+	UpdateRecord(ctx context.Context, orgID, id string, rec *RecordUpdate) (*RecordUpdateResult, error)
+}
+
+// UpdateRecord applies rec to CI id through repo: in one transaction where
+// repo is a RecordUpdater, else as an update followed by the type change
+// (TypeChanger), each with its own change set and event. A reclassification
+// discovery may not make leaves the type as it is.
+func UpdateRecord(ctx context.Context, repo Repository, orgID, id string, rec *RecordUpdate) (*RecordUpdateResult, error) {
+	if updater, ok := repo.(RecordUpdater); ok {
+		return updater.UpdateRecord(ctx, orgID, id, rec)
+	}
+	item, err := repo.Update(ctx, orgID, id, rec.Update)
+	if err != nil {
+		return nil, err
+	}
+	// Without the change set the update cannot tell a sighting from a change.
+	result := &RecordUpdateResult{CI: item, Changed: true}
+	changer, ok := repo.(TypeChanger)
+	if rec.TypeID == "" || rec.TypeID == item.CITypeID || !ok {
+		return result, nil
+	}
+	changed, err := changer.ChangeType(ctx, orgID, id, rec.TypeID, TypeChangeDiscovery)
+	switch {
+	case errors.Is(err, ErrReclassificationRefused), errors.Is(err, ErrUnknownType):
+		return result, nil
+	case err != nil:
+		return nil, err
+	}
+	result.CI, result.TypeChanged = changed.CI, changed.Changed
+	return result, nil
 }

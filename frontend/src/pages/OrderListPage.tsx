@@ -84,7 +84,11 @@ export function OrderListPage() {
           <Card
             key={o.id}
             title={`${o.order_number} — ${o.title}`}
-            actions={<Badge variant={statusVariant(o.status)}>{o.status}</Badge>}
+            actions={
+              <Badge variant={statusVariant(o.status)}>
+                {t(`orders.statuses.${o.status}`, o.status)}
+              </Badge>
+            }
           >
             <p className="text-sm text-gray-600 dark:text-gray-300">{o.supplier || '—'}</p>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">

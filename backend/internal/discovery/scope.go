@@ -175,6 +175,9 @@ type ScopeRepository interface {
 	ScopeCollector(ctx context.Context, orgID, collectorID string) (*Collector, error)
 	// DiscoveryIntervals returns the organization's intervals (DIS-10).
 	DiscoveryIntervals(ctx context.Context, orgID string) (DiscoveryIntervals, error)
+	// OrganizationTimezone returns the organization's IANA time zone, in
+	// which the collector evaluates cron schedules (DIS-10, E-84).
+	OrganizationTimezone(ctx context.Context, orgID string) (string, error)
 	// ScopeCredentialIDs returns the effective credentials of the
 	// collector's enabled scopes by scope id (E-67).
 	ScopeCredentialIDs(ctx context.Context, orgID, collectorID string) (map[string][]string, error)
@@ -649,6 +652,15 @@ func (r *PGRepository) DiscoveryIntervals(ctx context.Context, orgID string) (Di
 	return IntervalsFromSettings(settings), nil
 }
 
+// OrganizationTimezone implements ScopeRepository.
+func (r *PGRepository) OrganizationTimezone(ctx context.Context, orgID string) (string, error) {
+	var tz string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT timezone FROM organization WHERE id = $1`, orgID).Scan(&tz)
+	})
+	return tz, err
+}
+
 // ScopeCredentialIDs implements ScopeRepository.
 func (r *PGRepository) ScopeCredentialIDs(ctx context.Context, orgID, collectorID string) (map[string][]string, error) {
 	if !audit.IsUUID(collectorID) {
@@ -823,6 +835,27 @@ func (r *MemoryRepository) DiscoveryIntervals(_ context.Context, orgID string) (
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return IntervalsFromSettings(r.orgSettings[orgID]), nil
+}
+
+// SetOrgTimezone stores the organization's time zone (tests, --no-db).
+func (r *MemoryRepository) SetOrgTimezone(orgID, tz string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.orgTimezone == nil {
+		r.orgTimezone = map[string]string{}
+	}
+	r.orgTimezone[orgID] = tz
+}
+
+// OrganizationTimezone implements ScopeRepository; like the column
+// organization.timezone it defaults to UTC.
+func (r *MemoryRepository) OrganizationTimezone(_ context.Context, orgID string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if tz := r.orgTimezone[orgID]; tz != "" {
+		return tz, nil
+	}
+	return "UTC", nil
 }
 
 // ScopeCredentialIDs implements ScopeRepository. The memory repository holds

@@ -1,6 +1,7 @@
 /**
  * Tests for the review inbox (UI-16): filter, diff, single and bulk
- * resolution.
+ * resolution; new of a device of an unknown type asks for the type, a
+ * device recorded as generic_device is not offered new (WP-528, F-176).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
@@ -38,6 +39,40 @@ const duplicateIP: ReviewItem = {
   created_at: '2026-10-11T10:00:00Z',
 };
 
+const SERVER_TYPE = '33333333-3333-4333-8333-333333333333';
+const WIDGET_TYPE = '44444444-4444-4444-8444-444444444444';
+const ciTypes = [
+  { id: SERVER_TYPE, key: 'server', name: 'server', display_name: { de: 'Server', en: 'Server' } },
+  {
+    id: WIDGET_TYPE,
+    key: 'pv-widget',
+    name: 'pv-widget',
+    display_name: { de: 'Widget', en: 'Widget' },
+  },
+];
+const unknownType: ReviewItem = {
+  id: 'rev-4',
+  kind: 'unclassified_device',
+  status: 'open',
+  payload: { reason: 'unknown_ci_type', ci_type_name: 'pv-unknown-type', name: 'pv-gadget-01' },
+  escalated: false,
+  created_at: '2026-10-12T10:00:00Z',
+};
+const noProfile: ReviewItem = {
+  id: 'rev-5',
+  kind: 'unclassified_device',
+  status: 'open',
+  payload: {
+    reason: 'no_profile_match',
+    ci_id: CI_A,
+    ci_type_name: 'generic_device',
+    name: 'mystery-box',
+  },
+  candidate_ci_ids: [CI_A],
+  escalated: false,
+  created_at: '2026-10-13T10:00:00Z',
+};
+
 const ciA = {
   id: CI_A,
   name: 'sw-core-01',
@@ -70,6 +105,7 @@ function stubServer(items: ReviewItem[], resolve?: (id: string, body: unknown) =
         : json({ id: match[1], status: 'resolved' });
     }
     if (url.includes('/review-items')) return json(page(items));
+    if (url.includes('/ci-types')) return json(page(ciTypes));
     if (url.includes(`/cis/${CI_A}`)) return json(ciA);
     if (url.includes(`/cis/${CI_B}`)) return json({ ...ciA, id: CI_B, name: 'sw-core-02' });
     return json({ detail: 'unexpected' }, 404);
@@ -105,6 +141,11 @@ describe('commonActions', () => {
     expect(commonActions([ambiguous])).toEqual(['new', 'dismiss']);
     expect(commonActions([ambiguous, conflict])).toEqual(['dismiss']);
     expect(commonActions([])).toEqual([]);
+  });
+
+  it('never offers new for an unclassified device in bulk', () => {
+    expect(commonActions([unknownType])).toEqual(['dismiss']);
+    expect(commonActions([noProfile])).toEqual(['dismiss']);
   });
 });
 
@@ -185,5 +226,98 @@ describe('ReviewInboxPage', () => {
     for (const post of posts) {
       expect(JSON.parse(String(post[1]?.body))).toEqual({ action: 'dismiss' });
     }
+  });
+
+  it('asks for the type of a device of an unknown type and sends ci_type_id', async () => {
+    const fetchMock = stubServer([unknownType]);
+    renderWithProviders(<ReviewInboxPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /pv-gadget-01/ }));
+    const create = await screen.findByRole('button', { name: 'Neu anlegen' });
+    // Without a type new cannot succeed: the button waits for the choice.
+    expect(create).toBeDisabled();
+    expect(screen.getByText(/meldete den Typ „pv-unknown-type“/)).toBeInTheDocument();
+    const select = screen.getByLabelText('CI-Typ des neuen CIs');
+    await waitFor(() =>
+      expect(
+        within(select)
+          .getAllByRole('option')
+          .map((o) => o.textContent),
+      ).toEqual(['CI-Typ wählen', 'Server', 'Widget']),
+    );
+    fireEvent.change(select, { target: { value: WIDGET_TYPE } });
+    expect(create).toBeEnabled();
+    fireEvent.click(create);
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find((call) => call[1]?.method === 'POST');
+      expect(String(post?.[0])).toBe('/api/v1/review-items/rev-4/resolve');
+      expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+        action: 'new',
+        ci_type_id: WIDGET_TYPE,
+      });
+    });
+  });
+
+  it('preselects the reported type once it exists', async () => {
+    const fetchMock = stubServer([
+      { ...unknownType, payload: { ...unknownType.payload, ci_type_name: 'pv-widget' } },
+    ]);
+    renderWithProviders(<ReviewInboxPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /pv-gadget-01/ }));
+    const create = await screen.findByRole('button', { name: 'Neu anlegen' });
+    await waitFor(() => expect(create).toBeEnabled());
+    expect(screen.getByLabelText('CI-Typ des neuen CIs')).toHaveValue(WIDGET_TYPE);
+    fireEvent.click(create);
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find((call) => call[1]?.method === 'POST');
+      expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+        action: 'new',
+        ci_type_id: WIDGET_TYPE,
+      });
+    });
+  });
+
+  it('shows the 4xx message of the server', async () => {
+    stubServer([unknownType], () =>
+      json(
+        {
+          type: 'urn:reticora:problem:invalid-field',
+          title: 'Unprocessable Entity',
+          status: 422,
+          detail: 'ci_type_id: choose a CI type for the new CI',
+          field: 'ci_type_id',
+        },
+        422,
+      ),
+    );
+    renderWithProviders(<ReviewInboxPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /pv-gadget-01/ }));
+    const select = await screen.findByLabelText('CI-Typ des neuen CIs');
+    await waitFor(() => expect(within(select).getAllByRole('option')).toHaveLength(3));
+    fireEvent.change(select, { target: { value: SERVER_TYPE } });
+    fireEvent.click(screen.getByRole('button', { name: 'Neu anlegen' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'ci_type_id: choose a CI type for the new CI',
+    );
+  });
+
+  it('does not offer new for a device recorded as generic_device and shows the next step', async () => {
+    stubServer([noProfile]);
+    renderWithProviders(<ReviewInboxPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /mystery-box/ }));
+    expect(await screen.findByRole('button', { name: 'Verwerfen' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Neu anlegen' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Setzen Sie den Typ am CI/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'CI öffnen' })).toHaveAttribute(
+      'href',
+      `/cmdb/${CI_A}`,
+    );
+    expect(screen.queryByLabelText('CI-Typ des neuen CIs')).not.toBeInTheDocument();
   });
 });

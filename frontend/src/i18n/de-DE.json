@@ -111,6 +111,11 @@
     "activeCIs": "Aktive CIs",
     "maintenanceCIs": "CIs in Wartung",
     "collectorsOnline": "Collector online",
+    "setup": {
+      "title": "Einrichtung noch nicht abgeschlossen",
+      "text": "Verbinden Sie einen Collector, damit die ersten CIs in Ihre CMDB kommen.",
+      "continue": "Einrichtung fortsetzen"
+    },
     "roleLabel": "Dashboard-Rolle",
     "roleHint": "Die Widget-Auswahl richtet sich nach der gewählten Rolle.",
     "roles": {
@@ -198,7 +203,31 @@
       "partial": "{{succeeded}} CIs aktualisiert, {{failed}} fehlgeschlagen",
       "failures": "Fehlgeschlagene CIs",
       "success": "Status von {{count}} CIs aktualisiert",
-      "error": "Die Massenänderung konnte nicht vollständig angewendet werden"
+      "error": "Die Massenänderung konnte nicht vollständig angewendet werden",
+      "selectAllMatches": "Alle {{count}} Treffer des Filters auswählen",
+      "selectFirstMatches": "Die ersten {{count}} Treffer des Filters auswählen",
+      "collectError": "Die Treffer des Filters konnten nicht geladen werden",
+      "capped": "Eine Massenänderung umfasst höchstens {{max}} CIs: der Filter hat {{total}} Treffer, die ersten {{max}} sind ausgewählt.",
+      "tooMany": "Eine Massenänderung umfasst höchstens {{max}} CIs; {{count}} sind ausgewählt.",
+      "jobHint": "Ab {{count}} CIs läuft die Änderung als Job; sein Bericht erscheint hier.",
+      "jobTitle": "Massenänderung als Job",
+      "jobProgress": "Fortschritt der Massenänderung",
+      "jobState": "Job: {{status}} ({{progress}} %)",
+      "jobDone": "Job abgeschlossen: {{succeeded}} von {{total}} CIs aktualisiert, {{failed}} fehlgeschlagen",
+      "jobCancelled": "Job abgebrochen: {{succeeded}} von {{total}} CIs aktualisiert, {{failed}} fehlgeschlagen, {{skipped}} übersprungen",
+      "jobFailed": "Der Job ist fehlgeschlagen: {{error}}",
+      "jobLoadError": "Der Job konnte nicht gelesen werden",
+      "report": "Bericht je CI",
+      "reportCI": "CI",
+      "reportResult": "Ergebnis",
+      "reportCode": "HTTP-Status",
+      "reportError": "Fehler",
+      "results": {
+        "ok": "OK",
+        "error": "Fehler",
+        "skipped": "Übersprungen"
+      },
+      "closeReport": "Bericht schließen"
     },
     "overrideReason": "Begründung",
     "addInstanceField": "Instanzfeld hinzufügen",
@@ -247,6 +276,13 @@
       "entity_change": "Historie",
       "audit": "Audit",
       "location_change": "Standortänderung"
+    },
+    "statuses": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv",
+      "maintenance": "Wartung",
+      "decommissioned": "Außer Betrieb",
+      "unknown": "Unbekannt"
     }
   },
   "form": {
@@ -270,7 +306,29 @@
     "validation": {
       "nameRequired": "Name ist erforderlich.",
       "ciTypeRequired": "CI-Typ ist erforderlich.",
-      "serverRejected": "Bitte korrigieren Sie die markierten Felder."
+      "serverRejected": "Bitte korrigieren Sie die markierten Felder.",
+      "field": {
+        "required": "{{label}} ist erforderlich",
+        "integer": "{{label}} muss eine ganze Zahl sein",
+        "number": "{{label}} muss eine Zahl sein",
+        "boolean": "{{label}} muss ja oder nein sein",
+        "date": "{{label}} muss ein Datum im Format JJJJ-MM-TT sein",
+        "datetime": "{{label}} muss ein Zeitpunkt sein",
+        "ip": "{{label}} muss eine IP-Adresse sein",
+        "mac": "{{label}} muss eine MAC-Adresse sein",
+        "url": "{{label}} muss eine gültige URL sein",
+        "email": "{{label}} muss eine gültige E-Mail-Adresse sein",
+        "singleLine": "{{label}} muss einzeilig sein",
+        "uuid": "{{label}} muss eine UUID sein",
+        "notAllowed": "{{label}}: {{value}} ist kein zulässiger Wert",
+        "pattern": "{{label}} hat ein ungültiges Format",
+        "min": "{{label}} muss mindestens {{limit}} sein",
+        "max": "{{label}} darf höchstens {{limit}} sein",
+        "minLength": "{{label}} muss mindestens {{limit}} Zeichen lang sein",
+        "maxLength": "{{label}} darf höchstens {{limit}} Zeichen lang sein",
+        "textExpected": "{{label}} muss ein Text sein",
+        "invalid": "{{label}} ist ungültig"
+      }
     }
   },
   "discovery": {
@@ -310,13 +368,12 @@
       "target": "Ziel",
       "targetPlaceholder": "z. B. 10.0.0.0/24",
       "schedule": "Zeitplan (Intervall oder Cron)",
-      "add": "Scope hinzufügen",
+      "add": "Scope anlegen",
       "enabled": "Aktiv",
       "disabled": "Inaktiv",
       "enable": "Aktivieren",
       "disable": "Deaktivieren",
       "delete": "Löschen",
-      "invalid": "Der Scope wurde abgelehnt. Prüfen Sie Ziel und Zeitplan (mindestens 5 Minuten).",
       "health": {
         "ok": "Letzter Lauf ok",
         "partial": "Teilweise fehlgeschlagen",
@@ -333,6 +390,56 @@
         "config_error": "Konfigurationsfehler",
         "upload_failed": "Upload fehlgeschlagen (gepuffert)",
         "unknown": "Unbekannter Fehler"
+      },
+      "edit": "Bearbeiten",
+      "editNamed": "Scope {{name}} bearbeiten",
+      "enableNamed": "Scope {{name}} aktivieren",
+      "disableNamed": "Scope {{name}} deaktivieren",
+      "deleteNamed": "Scope {{name}} löschen",
+      "credentialCount": "Credentials: {{count}}",
+      "form": {
+        "createTitle": "Scope anlegen für {{collector}}",
+        "editTitle": "Scope {{name}} bearbeiten",
+        "name": "Name",
+        "namePlaceholder": "Ohne Angabe: das Ziel",
+        "site": "Site",
+        "siteNone": "Site des Collectors",
+        "vrf": "VRF",
+        "vrfNone": "Keine (globales Routing)",
+        "scheduleHint": "Intervall (z. B. 24h, mindestens 5m) oder Cron-Ausdruck mit fünf Feldern. Cron in der Zeitzone der Organisation.",
+        "plugins": "Plugins",
+        "pluginsRequired": "Wählen Sie mindestens ein Plugin.",
+        "targetRequired": "Geben Sie ein Ziel an.",
+        "credentials": "Credentials",
+        "credentialsHint": "Ohne Auswahl gelten die Credentials des Clients und der Organisation.",
+        "credentialsNone": "Keine passenden Credentials vorhanden.",
+        "credentialsUnavailable": "Die Credentials konnten nicht geladen werden (Recht credential:read fehlt?). Ohne Auswahl gelten die Credentials des Clients und der Organisation."
+      },
+      "plugin": {
+        "sweep": "Ping-Sweep",
+        "snmp": "SNMP",
+        "ssh": "SSH",
+        "wmi": "WMI",
+        "ipmi": "IPMI",
+        "redfish": "Redfish",
+        "power": "USV/PDU",
+        "nas": "NAS"
+      },
+      "confirmDelete": {
+        "title": "Scope löschen?",
+        "text": "Der Scope {{name}} ({{target}}) wird gelöscht; der Collector durchsucht dieses Ziel danach nicht mehr.",
+        "confirm": "Endgültig löschen"
+      },
+      "errors": {
+        "notSaved": "Der Scope wurde nicht gespeichert. Prüfen Sie die markierten Felder.",
+        "invalidValue": "Ungültiger Wert: {{detail}}",
+        "rejected": "Der Scope wurde abgelehnt: {{detail}}",
+        "saveFailed": "Der Scope konnte nicht gespeichert werden: {{reason}}",
+        "toggleFailed": "Scope {{name}} konnte nicht umgeschaltet werden: {{reason}}",
+        "deleteFailed": "Scope {{name}} konnte nicht gelöscht werden: {{reason}}",
+        "forbidden": "Ihnen fehlt das Recht dazu (discovery:manage).",
+        "notFound": "Der Scope existiert nicht mehr.",
+        "reason": "{{detail}}"
       }
     },
     "suggestions": {
@@ -340,7 +447,8 @@
       "intro": "Diese Subnetze haben Ihre Collectors nach dem Enrollment gemeldet. Bestätigen Sie sie, damit sie inventarisiert werden.",
       "from": "gemeldet von {{collector}}",
       "accept": "Als Scope übernehmen",
-      "dismiss": "Verwerfen"
+      "dismiss": "Verwerfen",
+      "failed": "Der Vorschlag konnte nicht bearbeitet werden: {{reason}}"
     }
   },
   "webhook": {
@@ -425,7 +533,23 @@
     "purchaseCost": "Kaufpreis",
     "invoiceNumber": "Rechnungsnummer",
     "warrantyEnd": "Garantie bis",
-    "status": "Status"
+    "status": "Status",
+    "statuses": {
+      "in_stock": "Auf Lager",
+      "assigned": "Zugewiesen",
+      "maintenance": "Wartung",
+      "retired": "Ausgemustert",
+      "disposed": "Entsorgt",
+      "lost": "Verloren"
+    },
+    "categories": {
+      "hardware": "Hardware",
+      "software": "Software",
+      "license": "Lizenz",
+      "cloud_resource": "Cloud-Ressource",
+      "accessory": "Zubehör",
+      "other": "Sonstiges"
+    }
   },
   "assignment": {
     "title": "Zuweisungen",
@@ -435,7 +559,14 @@
     "type": "Typ",
     "assignedTo": "Zugewiesen an",
     "assignedAt": "Zugewiesen am",
-    "assetId": "Asset-ID"
+    "assetId": "Asset-ID",
+    "statuses": {
+      "active": "Aktiv",
+      "returned": "Zurückgegeben",
+      "transferred": "Transferiert",
+      "overdue": "Überfällig",
+      "cancelled": "Storniert"
+    }
   },
   "document": {
     "title": "Dokumente",
@@ -445,7 +576,17 @@
     "size": "Größe",
     "version": "Version",
     "upload": "Dokument erstellen",
-    "storageKey": "Storage-Key"
+    "storageKey": "Storage-Key",
+    "categories": {
+      "general": "Allgemein",
+      "contract": "Vertrag",
+      "invoice": "Rechnung",
+      "manual": "Handbuch",
+      "diagram": "Diagramm",
+      "certificate": "Zertifikat",
+      "policy": "Richtlinie",
+      "other": "Sonstiges"
+    }
   },
   "stocktake": {
     "title": "Inventur",
@@ -477,7 +618,21 @@
     "priority": "Priorität",
     "category": "Kategorie",
     "createdAt": "Erstellt",
-    "startWork": "Bearbeiten"
+    "startWork": "Bearbeiten",
+    "statuses": {
+      "open": "Offen",
+      "in_progress": "In Bearbeitung",
+      "waiting": "Wartend",
+      "resolved": "Gelöst",
+      "closed": "Geschlossen"
+    },
+    "categories": {
+      "incident": "Störung",
+      "request": "Anfrage",
+      "problem": "Problem",
+      "change": "Änderung",
+      "task": "Aufgabe"
+    }
   },
   "userMgmt": {
     "title": "Benutzer & Teams",
@@ -489,7 +644,78 @@
     "lastLogin": "Letzter Login",
     "memberCount": "Mitglieder",
     "permissions": "Berechtigungen",
-    "type": "Typ"
+    "type": "Typ",
+    "statuses": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv",
+      "anonymized": "Anonymisiert"
+    }
+  },
+  "invitations": {
+    "title": "Einladungen",
+    "invite": "Benutzer einladen",
+    "send": "Einladung senden",
+    "email": "E-Mail",
+    "role": "Rolle",
+    "chooseRole": "Rolle wählen",
+    "scope": "Scope",
+    "scopeType": "Scope-Typ",
+    "scopeTarget": "Scope-Ziel",
+    "chooseTarget": "Kunde oder Standort wählen",
+    "scopeTypes": {
+      "org": "Organisation",
+      "client": "Kunde",
+      "site": "Standort"
+    },
+    "expires": "Gültig bis",
+    "status": "Status",
+    "statuses": {
+      "pending": "Offen",
+      "accepted": "Angenommen",
+      "expired": "Abgelaufen"
+    },
+    "renew": "Erneuern",
+    "revoke": "Widerrufen",
+    "sent": "Einladung an {{email}} gesendet, gültig bis {{expires}}.",
+    "link": "Einladungslink (wird nur jetzt angezeigt)",
+    "errorTitle": "Einladungen konnten nicht geladen werden",
+    "errors": {
+      "notSaved": "Die Einladung wurde nicht gesendet. Bitte prüfen Sie die markierten Felder.",
+      "emailInvalid": "Bitte geben Sie eine einzelne E-Mail-Adresse ohne Namen ein.",
+      "emailPending": "Für diese Adresse gibt es bereits eine offene Einladung. Erneuern Sie diese in der Liste.",
+      "roleInvalid": "Diese Rolle gibt es in der Organisation nicht. Wählen Sie eine Standardrolle.",
+      "scopeTypeMismatch": "Die Rolle passt nicht zum Scope-Typ: Kundenrollen werden für einen Kunden, Standortrollen für einen Standort vergeben.",
+      "scopeInvalid": "Wählen Sie einen vorhandenen Kunden bzw. Standort.",
+      "scopeRequired": "Bitte wählen Sie das Scope-Ziel.",
+      "forbidden": "Keine Berechtigung für diese Einladung.",
+      "ceiling": "Sie können nur Rollen vergeben, deren Rechte Sie im gewählten Scope selbst besitzen.",
+      "notFound": "Die Einladung gibt es nicht mehr. Die Liste wurde aktualisiert.",
+      "accepted": "Die Einladung wurde bereits angenommen und kann nicht mehr geändert werden.",
+      "unavailable": "Einladungen sind auf diesem Server nicht eingerichtet. Wenden Sie sich an den Betrieb.",
+      "rejected": "Der Server hat die Einladung abgelehnt: {{detail}}",
+      "failed": "Die Aktion ist fehlgeschlagen: {{detail}}"
+    }
+  },
+  "invitationAccept": {
+    "title": "Einladung annehmen",
+    "description": "Legen Sie Ihr Konto an. Rolle und Zugriffsbereich hat die einladende Person festgelegt.",
+    "displayName": "Anzeigename",
+    "password": "Passwort (mindestens {{min}} Zeichen)",
+    "submit": "Konto anlegen",
+    "toLogin": "Zur Anmeldung",
+    "errors": {
+      "notAccepted": "Das Konto wurde nicht angelegt. Bitte prüfen Sie die markierten Felder.",
+      "passwordTooShort": "Das Passwort muss mindestens {{min}} Zeichen haben.",
+      "displayNameTooLong": "Der Anzeigename darf höchstens {{max}} Zeichen haben.",
+      "missingToken": "Der Einladungslink ist unvollständig. Öffnen Sie den Link aus der E-Mail vollständig.",
+      "expired": "Dieser Einladungslink ist abgelaufen. Bitten Sie die Person, die Sie eingeladen hat, die Einladung zu erneuern.",
+      "invalid": "Dieser Einladungslink ist ungültig oder wurde bereits verwendet. Bitten Sie um eine neue Einladung.",
+      "userExists": "Für diese Adresse gibt es in der Organisation bereits ein Konto. Melden Sie sich damit an.",
+      "rateLimited": "Zu viele Versuche. Bitte warten Sie einige Minuten und versuchen Sie es dann erneut.",
+      "userLimit": "Die Organisation hat ihre Höchstzahl an Benutzern erreicht. Wenden Sie sich an die Person, die Sie eingeladen hat.",
+      "unavailable": "Die Annahme ist gerade nicht möglich. Bitte versuchen Sie es später erneut.",
+      "failed": "Die Annahme ist fehlgeschlagen: {{detail}}"
+    }
   },
   "auth": {
     "loginTitle": "Anmelden",
@@ -502,7 +728,10 @@
     "callbackProgress": "Bitte warten Sie, während Ihre Sitzung geprüft wird.",
     "callbackError": "Die Anmeldung konnte nicht abgeschlossen werden.",
     "sessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
-    "backendUnreachable": "Der Server ist nicht erreichbar. Prüfen Sie, ob Reticora läuft und die Adresse stimmt, und versuchen Sie es erneut."
+    "invitationAccepted": "Ihr Konto für {{email}} ist angelegt. Melden Sie sich jetzt an.",
+    "backendUnreachable": "Der Server ist nicht erreichbar. Prüfen Sie, ob Reticora läuft und die Adresse stimmt, und versuchen Sie es erneut.",
+    "signupPrompt": "Noch kein Konto?",
+    "signupLink": "Konto anlegen"
   },
   "topology": {
     "subtitle": "Beziehungen zwischen Configuration Items als Graph.",
@@ -533,7 +762,11 @@
       "noImpact": "Dieses CI hat keine abhängigen CIs — ein Ausfall hätte keine Folgen im Graphen.",
       "add": "Ausfall hinzufügen",
       "remove": "Aus Simulation entfernen",
-      "impactMany": "Fallen {{failed}} CIs ({{names}}) gemeinsam aus, sind {{count}} weitere CIs betroffen (grau dargestellt)."
+      "impactMany": "Fallen {{failed}} CIs ({{names}}) gemeinsam aus, sind {{count}} weitere CIs betroffen (grau dargestellt).",
+      "loading": "Die Auswirkung wird berechnet …",
+      "unavailable": "Die Auswirkung konnte nicht berechnet werden.",
+      "provisionalLoading": "Vorläufiges Ergebnis nach der Wirkrichtung der Beziehungstypen; die Analyse des Servers läuft noch.",
+      "provisionalFailed": "Die Analyse des Servers ist nicht verfügbar. Vorläufiges Ergebnis nach der Wirkrichtung der Beziehungstypen, ohne Redundanzprüfung."
     },
     "filterRelType": "Beziehungstyp",
     "allRelTypes": "Alle Beziehungen",
@@ -627,7 +860,15 @@
     "noRuns": "Keine Läufe",
     "noRunsHint": "Gestartete Workflows erscheinen hier.",
     "approve": "Freigeben",
-    "reject": "Ablehnen"
+    "reject": "Ablehnen",
+    "statuses": {
+      "pending": "Ausstehend",
+      "running": "Läuft",
+      "waiting_approval": "Wartet auf Freigabe",
+      "succeeded": "Erfolgreich",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen"
+    }
   },
   "compliance": {
     "title": "Compliance",
@@ -642,7 +883,22 @@
     "emptyRulesHint": "Compliance-Regeln erscheinen hier.",
     "failures": "Fehlgeschlagene Ergebnisse",
     "noFailures": "Keine Abweichungen",
-    "noFailuresHint": "Aktuell sind keine Fehlschläge gespeichert."
+    "noFailuresHint": "Aktuell sind keine Fehlschläge gespeichert.",
+    "severities": {
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "high": "Hoch",
+      "critical": "Kritisch"
+    },
+    "resultStatuses": {
+      "pass": "Bestanden",
+      "fail": "Nicht bestanden",
+      "not_applicable": "Nicht anwendbar"
+    },
+    "categories": {
+      "security": "Sicherheit",
+      "hygiene": "Datenpflege"
+    }
   },
   "iga": {
     "loading": "Identity Governance wird geladen",
@@ -674,7 +930,37 @@
     "drift": "Drift-Funde",
     "remediate": "Beheben",
     "emptyDrift": "Kein Drift erkannt",
-    "emptyDriftHint": "Konnektor-Abgleiche erfassen verwaiste und fehlende Konten hier."
+    "emptyDriftHint": "Konnektor-Abgleiche erfassen verwaiste und fehlende Konten hier.",
+    "connectorStatuses": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv",
+      "error": "Fehler"
+    },
+    "taskStatuses": {
+      "pending": "Ausstehend",
+      "running": "Läuft",
+      "succeeded": "Erfolgreich",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen"
+    },
+    "requestStatuses": {
+      "pending": "Ausstehend",
+      "approved": "Genehmigt",
+      "rejected": "Abgelehnt",
+      "cancelled": "Zurückgezogen"
+    },
+    "reviewStatuses": {
+      "draft": "Entwurf",
+      "active": "Aktiv",
+      "completed": "Abgeschlossen",
+      "cancelled": "Abgebrochen"
+    },
+    "severities": {
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "high": "Hoch",
+      "critical": "Kritisch"
+    }
   },
   "assistant": {
     "title": "KI-Assistent",
@@ -705,6 +991,7 @@
     "rows": "Zeilen",
     "createdAt": "Erstellt",
     "download": "Herunterladen",
+    "downloadFailed": "Die Datei konnte nicht heruntergeladen werden.",
     "emptyTitle": "Keine Exportaufträge",
     "emptyHint": "Starten Sie einen Export, um die CI-Daten als CSV, DATEV oder JSON herunterzuladen.",
     "status_pending": "Ausstehend",
@@ -824,7 +1111,10 @@
     "positionX": "X (% von links)",
     "positionY": "Y (% von oben)",
     "applyPosition": "Position übernehmen",
-    "positionFor": "Position von {{name}}"
+    "positionFor": "Position von {{name}}",
+    "conflict": "Der Raumplan wurde zwischenzeitlich von anderer Seite geändert und neu geladen. Bitte prüfen Sie die Position und verschieben Sie das Objekt erneut.",
+    "rangeError": "Position nicht gespeichert: Die Koordinaten müssen zwischen 0 und 100 % liegen.",
+    "saveError": "Position nicht gespeichert: {{message}}"
   },
   "consumables": {
     "summary": "Verbrauchsmaterial mit Bestand und Mindestbestand.",
@@ -841,7 +1131,16 @@
     "submit": "Einreichen",
     "approve": "Genehmigen",
     "reject": "Ablehnen",
-    "supplier": "Lieferant"
+    "supplier": "Lieferant",
+    "statuses": {
+      "draft": "Entwurf",
+      "submitted": "Eingereicht",
+      "approved": "Genehmigt",
+      "rejected": "Abgelehnt",
+      "ordered": "Bestellt",
+      "received": "Geliefert",
+      "cancelled": "Storniert"
+    }
   },
   "maintenance": {
     "summary": "Wartungen planen und betroffene Kunden benachrichtigen.",
@@ -854,7 +1153,13 @@
     "startsAt": "Beginn",
     "endsAt": "Ende",
     "queued": "{{count}} Benachrichtigungen vorgemerkt – Versand ausstehend",
-    "noClients": "Keine betroffenen Kunden"
+    "noClients": "Keine betroffenen Kunden",
+    "statuses": {
+      "scheduled": "Geplant",
+      "in_progress": "In Arbeit",
+      "completed": "Abgeschlossen",
+      "cancelled": "Abgebrochen"
+    }
   },
   "disposal": {
     "summary": "Revisionssichere Entsorgungsdokumentation (append-only, BSI/ISO).",
@@ -877,7 +1182,13 @@
     "identifier": "Kennung",
     "issueTitle": "Schlüssel ausgeben",
     "assignTo": "Ausgeben an",
-    "selectUser": "Nutzer wählen"
+    "selectUser": "Nutzer wählen",
+    "statuses": {
+      "available": "Verfügbar",
+      "issued": "Ausgegeben",
+      "lost": "Verloren",
+      "retired": "Ausgemustert"
+    }
   },
   "trainings": {
     "summary": "Kurse mit Zuweisung, Fälligkeit und Nachweis.",
@@ -894,7 +1205,12 @@
     "book": "Buchen",
     "bookTitle": "Arbeitsplatz buchen",
     "startsAt": "Von",
-    "endsAt": "Bis"
+    "endsAt": "Bis",
+    "statuses": {
+      "available": "Frei",
+      "occupied": "Belegt",
+      "maintenance": "In Wartung"
+    }
   },
   "agents": {
     "summary": "Registrierte Endpoint-Agents mit Policy und Kill-Switch.",
@@ -905,7 +1221,12 @@
     "enable": "Aktivieren",
     "killSwitch": "Kill-Switch",
     "policyTitle": "Agent-Policy",
-    "intervalSeconds": "Intervall (Sekunden)"
+    "intervalSeconds": "Intervall (Sekunden)",
+    "statuses": {
+      "online": "Online",
+      "offline": "Offline",
+      "disabled": "Deaktiviert"
+    }
   },
   "findings": {
     "summary": "Patch-Posture und Schwachstellen je CI.",
@@ -916,7 +1237,13 @@
     "falsePositive": "Fehlalarm",
     "acknowledge": "Bestätigen",
     "resolve": "Lösen",
-    "markFalsePositive": "Fehlalarm"
+    "markFalsePositive": "Fehlalarm",
+    "severities": {
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "high": "Hoch",
+      "critical": "Kritisch"
+    }
   },
   "citypes": {
     "create": "Typ anlegen",
@@ -975,7 +1302,33 @@
     },
     "system": "System",
     "logicalShort": "logisch",
-    "fieldCount": "Felder: {{count}}"
+    "fieldCount": "Felder: {{count}}",
+    "editField": "Feld „{{name}}“ bearbeiten",
+    "editFieldAction": "Bearbeiten: {{name}}",
+    "editFlagsHint": "Speichern ändert die Index-Einstellungen des Felds; ein Index-Job baut den Index im Hintergrund.",
+    "flagSearchable": "durchsuchbar",
+    "flagUnique": "eindeutig",
+    "flagUniqueClient": "eindeutig je Kunde",
+    "flagErrors": {
+      "duplicates": "Eindeutigkeit nicht aktiviert: Es gibt bereits CIs mit gleichem Wert. Bereinigen Sie die Duplikate zuerst. Grund: {{detail}}",
+      "forbidden": "Keine Berechtigung, Attribute zu verwalten.",
+      "notFound": "Das Attribut existiert nicht mehr.",
+      "reason": "Grund: {{detail}}",
+      "partial": "Das Feld „{{name}}“ wurde gespeichert, die Index-Einstellungen aber nicht. {{reason}}",
+      "flagsNotSaved": "Index-Einstellungen nicht gespeichert. {{reason}}",
+      "fieldNotSaved": "Feld nicht gespeichert. {{reason}}"
+    },
+    "indexJob": {
+      "scheduled": "Index-Job eingeplant",
+      "label": "Index-Job: {{status}}",
+      "status": {
+        "queued": "wartet",
+        "running": "läuft",
+        "succeeded": "abgeschlossen",
+        "failed": "fehlgeschlagen",
+        "cancelled": "abgebrochen"
+      }
+    }
   },
   "inventory": {
     "assigned": "Zugewiesen",
@@ -1010,7 +1363,12 @@
     "spofList": "Single Points of Failure:",
     "clients": "Kunden",
     "title": "Auswirkungsanalyse",
-    "compute": "Blast Radius berechnen"
+    "compute": "Blast Radius berechnen",
+    "heuristic": "Netzheuristik",
+    "heuristicList": "Möglicherweise betroffen:",
+    "heuristicHint": "Nur über eine ungerichtete Netzverbindung (connected_to) erreicht; ob der Ausfall diese CIs trifft, ist nicht sicher. Sie zählen nicht zu den betroffenen CIs, Kunden und Standorten.",
+    "heuristicMarker": "Netzheuristik",
+    "noneAffected": "Keine sicher betroffenen CIs."
   },
   "composition": {
     "inheritedHint": "Geteilte Inventardaten (Seriennummer, Kauf, Garantie, Standort) stammen vom Parent-Asset.",
@@ -1111,7 +1469,11 @@
   },
   "relationshipCard": {
     "suppress": "Entfernen und unterdrücken",
-    "suppressHint": "Discovery-Kante: wird entfernt und von der Discovery nicht wieder angelegt."
+    "suppressHint": "Discovery-Kante: wird entfernt und von der Discovery nicht wieder angelegt.",
+    "hiddenOutside": "{{count}} außerhalb des Bereichs ausgeblendet",
+    "showAll": "Alle anzeigen",
+    "showInScope": "Nur Bereich anzeigen",
+    "outsideScope": "Außerhalb des Bereichs"
   },
   "scope": {
     "label": "Arbeitsbereich",
@@ -1119,7 +1481,9 @@
     "client": "Kunde",
     "site": "Standort",
     "allClients": "Alle Kunden",
-    "allSites": "Alle Standorte"
+    "allSites": "Alle Standorte",
+    "outsideCI": "Dieses CI liegt außerhalb des gewählten Bereichs ({{scope}}).",
+    "switchToObject": "Bereich wechseln"
   },
   "reviews": {
     "title": "Review-Inbox",
@@ -1170,6 +1534,12 @@
     "observed": "Beobachtet",
     "current": "Im CI",
     "differs": "abweichend",
+    "ciType": "CI-Typ des neuen CIs",
+    "chooseCIType": "CI-Typ wählen",
+    "ciTypeHint": "Das Gerät meldete den Typ „{{name}}“, den die Organisation bei der Erfassung nicht kannte. Wählen Sie den Typ des neuen CIs.",
+    "ciTypesLoadError": "Die CI-Typen konnten nicht geladen werden.",
+    "noProfileMatch": "Das Gerät ist bereits als generisches Gerät (generic_device) erfasst. Setzen Sie den Typ am CI und verwerfen Sie dann dieses Item.",
+    "openCI": "CI öffnen",
     "loadError": "Die Review-Items konnten nicht geladen werden",
     "empty": "Keine Review-Items",
     "emptyHint": "Der Abgleich hat nichts zu entscheiden."
@@ -1180,7 +1550,9 @@
     "markRead": "Als gelesen markieren",
     "markAllRead": "Alle gelesen",
     "unread": "Ungelesen",
-    "empty": "Keine Benachrichtigungen."
+    "empty": "Keine Benachrichtigungen.",
+    "openUnknown": "Benachrichtigungen öffnen (Anzahl ungelesener nicht verfügbar)",
+    "loadError": "Die Benachrichtigungen konnten nicht geladen werden."
   },
   "entitlementExpiry": {
     "title": "Ablaufende Funktionen",
@@ -1225,7 +1597,14 @@
     "cancel": "Abbrechen",
     "result": "Ergebnis",
     "loadError": "Die Jobs konnten nicht geladen werden",
-    "empty": "Keine Jobs"
+    "empty": "Keine Jobs",
+    "cancelDone": "Der Job wurde abgebrochen.",
+    "cancelForbidden": "Sie dürfen diesen Job nicht abbrechen: nur sein Ersteller oder ein Benutzer mit dem Recht seiner Art.",
+    "cancelConflict": "Der Job lässt sich nicht mehr abbrechen: er ist bereits beendet oder seine Art kann im Lauf nicht abgebrochen werden.",
+    "cancelNotFound": "Der Job wurde nicht gefunden.",
+    "cancelFailed": "Der Job konnte nicht abgebrochen werden: {{error}}",
+    "partialReport": "Teilbericht",
+    "partialReportSummary": "Teilbericht: {{succeeded}} von {{total}} erfolgreich, {{failed}} fehlgeschlagen, {{skipped}} übersprungen"
   },
   "provenance": {
     "show": "Herkunft von {{field}}",
@@ -1282,7 +1661,8 @@
       "waiting": "Noch keine Netze gemeldet.",
       "accept": "Bestätigen",
       "dismiss": "Verwerfen",
-      "continue": "Weiter"
+      "continue": "Weiter",
+      "resolveFailed": "Der Vorschlag wurde nicht übernommen: {{message}}"
     },
     "cis": {
       "waiting": "Die erste Discovery läuft. Sobald CIs gefunden sind, geht es weiter."
@@ -1292,5 +1672,10 @@
       "text": "{{count}} CIs sind bereits in Ihrer CMDB.",
       "open": "Zur CMDB"
     }
+  },
+  "language": {
+    "label": "Sprache",
+    "de-DE": "Deutsch",
+    "en-US": "English"
   }
 }

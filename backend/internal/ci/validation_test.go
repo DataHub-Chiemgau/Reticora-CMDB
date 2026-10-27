@@ -1,7 +1,9 @@
 package ci
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -327,3 +329,96 @@ func TestTypedColumnsTakePartInValidation(t *testing.T) {
 }
 
 func updateErr(_ *Item, err error) error { return err }
+
+// TestObservedTypedValuesFollowManualWrites covers WP-501 (MET-11, CI-03,
+// F-143): a typed column is an implicit definition of the observed-value
+// check, with or without field definitions of the CI type and in both
+// forms (InvalidObserved, ObservedRules), so discovery drops exactly the
+// values a manual write refuses. The same value answers 422 on POST /cis,
+// a valid one 201 there and passes the observed check.
+func TestObservedTypedValuesFollowManualWrites(t *testing.T) {
+	ctx := context.Background()
+	defs := []fieldmeta.FieldDefinition{
+		// A definition of the same name adds its rules to the column's type.
+		{Name: "hostname", DataType: fieldmeta.TypeText, Validation: &fieldmeta.ValidationRules{Pattern: `^[a-z0-9-]+$`}},
+		{Name: "rack_unit", DataType: fieldmeta.TypeInteger},
+	}
+	services := map[string]*Service{
+		"without definitions": NewService(NewMemoryRepository()),
+		"with definitions":    NewService(NewMemoryRepository()).WithFieldResolver(stubResolver{defs: defs}),
+	}
+	invalid := map[string]string{
+		"hostname":      "line1\nline2",
+		"hardware_uuid": "not-a-uuid",
+		"primary_mac":   "zz:zz",
+		"management_ip": "999.1.1.1",
+		"name":          "two\nlines",
+		"os_name":       "linux\r",
+	}
+	valid := map[string]string{
+		"hostname": "valid-host", "hardware_uuid": "c0de0501-0000-4000-8000-000000000002",
+		"primary_mac": "00:1a:2b:3c:4d:5f", "management_ip": "192.0.2.10", "name": "srv-501", "os_name": "linux",
+	}
+	for label, svc := range services {
+		rules, err := svc.ObservedRules(ctx, "org-1", testServerType)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for field, value := range invalid {
+			values := map[string]any{field: value, "serial_number": "SN-501"}
+			got, err := svc.InvalidObserved(ctx, "org-1", testServerType, "", values)
+			if err != nil || strings.Join(got, ",") != field {
+				t.Errorf("%s: InvalidObserved(%s=%q) = %v, %v; want only %s", label, field, value, got, err, field)
+			}
+			if got := rules(values); strings.Join(got, ",") != field {
+				t.Errorf("%s: ObservedRules(%s=%q) = %v; want only %s", label, field, value, got, field)
+			}
+		}
+		values := map[string]any{}
+		for field, value := range valid {
+			values[field] = value
+		}
+		if got, err := svc.InvalidObserved(ctx, "org-1", testServerType, "", values); err != nil || len(got) != 0 {
+			t.Errorf("%s: valid values reported: %v, %v", label, got, err)
+		}
+		if got := rules(values); len(got) != 0 {
+			t.Errorf("%s: valid values reported by ObservedRules: %v", label, got)
+		}
+	}
+	// A value violating the column type and a definition is reported once.
+	got, _ := services["with definitions"].InvalidObserved(ctx, "org-1", testServerType, "", map[string]any{"hostname": "Bad\nHost", "rack_unit": "x"})
+	if strings.Join(got, ",") != "hostname,rack_unit" {
+		t.Errorf("InvalidObserved = %v, want hostname,rack_unit each once", got)
+	}
+	if got := InvalidTypedColumns(map[string]any{"hardware_uuid": "1234", "rack_unit": "x", "fqdn": "a.example"}); strings.Join(got, ",") != "hardware_uuid" {
+		t.Errorf("InvalidTypedColumns = %v, want hardware_uuid (definitions do not apply)", got)
+	}
+
+	// The manual write: the same values answer 422 with the field, valid
+	// ones 201.
+	mux := chi.NewRouter()
+	NewHandler(NewService(NewMemoryRepository())).RegisterRoutes(mux)
+	create := func(field, value string) *httptest.ResponseRecorder {
+		body := map[string]any{"ci_type_id": testServerType, "name": "srv-501-" + field}
+		body[field] = value
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/cis", bytes.NewReader(raw))
+		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	for field, value := range invalid {
+		if w := create(field, value); w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), field) {
+			t.Errorf("POST /cis with %s=%q: %d %s, want 422 naming %s", field, value, w.Code, w.Body.String(), field)
+		}
+	}
+	for field, value := range valid {
+		if w := create(field, value); w.Code != http.StatusCreated {
+			t.Errorf("POST /cis with %s=%q: %d %s, want 201", field, value, w.Code, w.Body.String())
+		}
+	}
+}

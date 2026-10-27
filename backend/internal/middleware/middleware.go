@@ -19,6 +19,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -65,10 +66,48 @@ func CorrelationIDFromContext(ctx context.Context) string {
 	return id
 }
 
-// RouteAuditor stores the audit entry of a successful write request.
+// RouteAuditor stores the route audit of write requests (AUD-07, WP-504).
 type RouteAuditor interface {
+	// Intend stores the intent of a write request in a committed
+	// transaction of its own, before the handler runs, and sets its id.
+	Intend(ctx context.Context, intent *audit.RouteIntent) error
+	// Complete takes the intent (DELETE ... RETURNING) and appends entry in
+	// one transaction; an intent already taken by the scheduler gets no
+	// entry. On an error the intent stays for the scheduler.
+	Complete(ctx context.Context, intent *audit.RouteIntent, entry *audit.Entry) error
+	// Discard deletes the intent without an entry.
+	Discard(ctx context.Context, intent *audit.RouteIntent) error
+	// RecordRoute stores the entry of a successful write request of a route
+	// with a domain recorder that wrote none.
 	RecordRoute(ctx context.Context, entry *audit.Entry) error
 }
+
+// RouteSnapshotter reads the row a write route changes (AUD-07, WP-505):
+// the row of spec with the key values, in the tenant scope of the request,
+// and its table; nil when there is none. A route auditor that implements
+// it gets the old and new values into the entries of routes without a
+// domain recorder.
+type RouteSnapshotter interface {
+	RouteSnapshot(ctx context.Context, orgID string, spec *audit.RouteSnapshot, keys []any) (map[string]any, string, error)
+}
+
+// AuditMode is how AuditRoute audits a write route.
+type AuditMode int
+
+const (
+	// AuditNone writes no entry (exempt routes); the request context still
+	// reaches the domain recorders.
+	AuditNone AuditMode = iota
+	// AuditIntent stores an intent before the handler runs and the entry
+	// after a successful response; the scheduler writes the entry of an
+	// intent no response completed (gap-free, WP-504).
+	AuditIntent
+	// AuditDomain leaves the entry to the domain recorder, which writes it
+	// in the transaction of the change: no transaction of the route audit
+	// (NFR-10, E-17). Only when the recorder wrote none for a successful
+	// request does the route audit write one after the response.
+	AuditDomain
+)
 
 // maxAuditBody bounds how much of a request body AuditRoute reads for the
 // names of the written fields.
@@ -76,17 +115,26 @@ const maxAuditBody = 1 << 20
 
 // AuditRoute is the audit middleware of one route (AUD-07): it attaches the
 // request, correlation id and source of the change to the context, so the
-// domain recorders write them; for a write route with record set it stores
-// one entry after a successful response unless a domain recorder already
-// wrote one for the request (with old and new values). The entry names who
-// (actor), when, what (action, resource, the names of the written fields),
-// the source and the request; values stay with the domain history, so the
-// append-only log holds no personal data (CH16).
+// domain recorders write them. For a write route in mode AuditIntent it
+// stores the intent before the handler runs (no intent, no change: 503) and,
+// after a successful response, deletes the intent and writes one entry in
+// one transaction, unless a domain recorder already wrote one for the
+// request (with old and new values); a refused request deletes the intent
+// without an entry. The entry names who (actor), when, what (action,
+// resource, the names of the written fields), the source and the request.
+// For a route of the snapshot register (audit.RouteSnapshotFor) and an
+// auditor that reads snapshots, it reads the row before the handler and
+// after a successful response in the principal's scope and adds the old
+// and new value per changed column ("values", AUD-07, WP-505); excluded
+// columns never appear, personal ones only as a surrogate (CH16). A row
+// that cannot be read before the handler refuses the request (503) like a
+// missing intent.
 //
 // source overrides the source derived from the principal (ingest routes of
 // collectors and agents).
-func AuditRoute(method, pattern string, auditor RouteAuditor, record bool, source string) func(http.Handler) http.Handler {
+func AuditRoute(method, pattern string, auditor RouteAuditor, mode AuditMode, source string) func(http.Handler) http.Handler {
 	resourceType, action := RouteAction(method, pattern)
+	route := method + " " + pattern
 	fixedSource := source
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -94,51 +142,171 @@ func AuditRoute(method, pattern string, auditor RouteAuditor, record bool, sourc
 			if fixedSource != "" {
 				source = fixedSource
 			}
-			ctx := audit.WithRequestInfo(r.Context(), audit.RequestInfo{
+			info := audit.RequestInfo{
 				RequestID: RequestIDFromContext(r.Context()), CorrelationID: CorrelationIDFromContext(r.Context()), Source: source,
-			})
+			}
+			ctx := audit.WithRequestInfo(r.Context(), info)
 			r = r.WithContext(ctx)
-			if !record || auditor == nil {
+			orgID := tenant.FromContext(ctx).OrganizationID
+			if mode == AuditNone || auditor == nil || orgID == "" {
 				next.ServeHTTP(w, r)
 				return
 			}
 			fields := writtenFields(r)
+			var intent *audit.RouteIntent
+			if mode == AuditIntent {
+				intent = &audit.RouteIntent{
+					OrganizationID: orgID, RequestID: info.RequestID, CorrelationID: info.CorrelationID, Route: route,
+					Action: action, ResourceType: resourceType, ResourceKey: routeResourceID(r),
+					ActorID: actorID, ActorType: actorType, Source: source, Fields: fields,
+				}
+				if err := auditor.Intend(ctx, intent); err != nil {
+					slog.Error("audit intent of a write request failed; request refused", "error", err, "action", action,
+						"organization_id", orgID, "request_id", info.RequestID)
+					api.WriteUnavailable(w, "the audit trail is unavailable")
+					return
+				}
+			}
+			snap := routeSnapshots(r, route, mode, auditor)
+			if snap != nil && !snap.spec.FromResponse() {
+				var err error
+				if snap.before, err = snap.read(ctx, orgID, nil); err != nil {
+					slog.Error("audit snapshot of a write request failed; request refused", "error", err, "action", action,
+						"organization_id", orgID, "request_id", info.RequestID)
+					if derr := auditor.Discard(context.WithoutCancel(ctx), intent); derr != nil {
+						slog.Error("discarding the audit intent of a write request failed", "error", derr, "action", action,
+							"organization_id", orgID, "request_id", info.RequestID)
+					}
+					api.WriteUnavailable(w, "the audit trail is unavailable")
+					return
+				}
+			}
 			rw := &auditResponseWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rw, r)
-			orgID := tenant.FromContext(ctx).OrganizationID
-			if rw.status < 200 || rw.status >= 300 || orgID == "" || audit.Recorded(ctx) {
+			// The response is out: the audit runs even when the client has
+			// gone.
+			bg := context.WithoutCancel(ctx)
+			if rw.status < 200 || rw.status >= 300 || audit.Recorded(ctx) {
+				if intent != nil {
+					if err := auditor.Discard(bg, intent); err != nil {
+						slog.Error("discarding the audit intent of a write request failed", "error", err, "action", action,
+							"organization_id", orgID, "request_id", info.RequestID)
+					}
+				}
 				return
 			}
-			resourceID := routeResourceID(r)
-			if resourceID == "" {
-				resourceID = responseID(rw.body.Bytes())
+			entry := routeEntry(r, rw, route, fields)
+			if snap != nil {
+				snap.addValues(bg, orgID, rw.body.Bytes(), &entry)
 			}
-			changes := map[string]interface{}{"status": rw.status, "route": method + " " + pattern}
-			// Resources addressed by a key or name, or with ids that are no
-			// UUID, keep it in the changes.
-			if !audit.IsUUID(resourceID) {
-				if resourceID != "" {
-					changes["resource_key"] = resourceID
-				}
-				resourceID = ""
+			entry.OrganizationID, entry.ActorID, entry.ActorType, entry.Action = orgID, actorID, actorType, action
+			entry.ResourceType, entry.Source, entry.RequestID, entry.CorrelationID = resourceType, source, info.RequestID, info.CorrelationID
+			var err error
+			if intent != nil {
+				// On failure the intent stays: the scheduler writes the
+				// entry with outcome unknown.
+				err = auditor.Complete(bg, intent, &entry)
+			} else {
+				err = auditor.RecordRoute(bg, &entry)
 			}
-			if len(fields) > 0 {
-				changes["fields"] = fields
-			}
-			info, _ := audit.RequestInfoFrom(ctx)
-			entry := audit.Entry{
-				OrganizationID: orgID, ActorID: actorID, ActorType: actorType, Action: action,
-				ResourceType: resourceType, ResourceID: resourceID, Changes: changes,
-				Source: info.Source, RequestID: info.RequestID, CorrelationID: info.CorrelationID,
-			}
-			// The response is out: the entry is written even when the
-			// client has gone.
-			if err := auditor.RecordRoute(context.WithoutCancel(ctx), &entry); err != nil {
+			if err != nil {
 				slog.Error("audit entry of a write request failed", "error", err, "action", action,
-					"organization_id", orgID, "request_id", info.RequestID)
+					"organization_id", orgID, "request_id", info.RequestID, "intent_kept", intent != nil)
 			}
 		})
 	}
+}
+
+// routeEntry is the entry of a successful write request: status, route,
+// the addressed or created resource and the written fields.
+func routeEntry(r *http.Request, rw *auditResponseWriter, route string, fields []string) audit.Entry {
+	resourceID := routeResourceID(r)
+	if resourceID == "" {
+		resourceID = responseID(rw.body.Bytes())
+	}
+	changes := map[string]interface{}{"status": rw.status, "route": route}
+	// Resources addressed by a key or name, or with ids that are no UUID,
+	// keep it in the changes.
+	if !audit.IsUUID(resourceID) {
+		if resourceID != "" {
+			changes["resource_key"] = resourceID
+		}
+		resourceID = ""
+	}
+	if len(fields) > 0 {
+		changes["fields"] = fields
+	}
+	return audit.Entry{ResourceID: resourceID, Changes: changes}
+}
+
+// routeSnapshot is the snapshot of the row a write route changes.
+type routeSnapshot struct {
+	spec        *audit.RouteSnapshot
+	snapshotter RouteSnapshotter
+	r           *http.Request
+	before      map[string]any
+	table       string
+}
+
+// routeSnapshots returns the snapshot of a route without a domain recorder
+// whose register entry names a table, when the auditor reads snapshots and
+// the request carries the principal's tenant scope; else nil.
+func routeSnapshots(r *http.Request, route string, mode AuditMode, auditor RouteAuditor) *routeSnapshot {
+	if mode != AuditIntent {
+		return nil
+	}
+	spec, ok := audit.RouteSnapshotFor(route)
+	snapshotter, reads := auditor.(RouteSnapshotter)
+	if !ok || !reads || spec.Table == "" {
+		return nil
+	}
+	if _, scoped := database.TenantScopeFromContext(r.Context()); !scoped {
+		return nil
+	}
+	return &routeSnapshot{spec: &spec, snapshotter: snapshotter, r: r}
+}
+
+// read reads the row; without key values there is none.
+func (s *routeSnapshot) read(ctx context.Context, orgID string, response []byte) (map[string]any, error) {
+	keys, ok := s.spec.KeyValues(func(from string) string {
+		switch {
+		case from == "$org":
+			return orgID
+		case from == "$user":
+			return tenant.FromContext(s.r.Context()).UserID
+		case strings.HasPrefix(from, "@"):
+			return responseField(response, from[1:])
+		}
+		return chi.URLParam(s.r, from)
+	})
+	if !ok {
+		return nil, nil
+	}
+	row, table, err := s.snapshotter.RouteSnapshot(ctx, orgID, s.spec, keys)
+	if err != nil {
+		return nil, err
+	}
+	if row != nil {
+		s.table = table
+	}
+	return row, nil
+}
+
+// addValues reads the row after a successful request and adds the old and
+// new value per changed column to the entry; a failed read marks the
+// values unavailable.
+func (s *routeSnapshot) addValues(ctx context.Context, orgID string, response []byte, entry *audit.Entry) {
+	after, err := s.read(ctx, orgID, response)
+	if err != nil {
+		slog.Error("audit snapshot after a write request failed", "error", err, "organization_id", orgID,
+			"request_id", RequestIDFromContext(s.r.Context()))
+		entry.Changes["values_unavailable"] = true
+		return
+	}
+	if s.before == nil && after == nil {
+		return
+	}
+	entry.Changes["values"] = s.spec.ValueChanges(s.table, s.before, after)
 }
 
 // RouteAction derives the audited resource type and action of a route:
@@ -220,12 +388,17 @@ func routeResourceID(r *http.Request) string {
 }
 
 // responseID is the id of a created resource in the response body.
-func responseID(body []byte) string {
-	var obj struct {
-		ID string `json:"id"`
+func responseID(body []byte) string { return responseField(body, "id") }
+
+// responseField is a string field of the JSON object in the response body.
+func responseField(body []byte, name string) string {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(body, &obj) != nil {
+		return ""
 	}
-	if json.Unmarshal(body, &obj) == nil {
-		return obj.ID
+	var v string
+	if json.Unmarshal(obj[name], &v) == nil {
+		return v
 	}
 	return ""
 }

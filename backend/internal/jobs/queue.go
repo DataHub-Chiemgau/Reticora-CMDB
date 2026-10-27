@@ -99,6 +99,18 @@ func (q *Queue) Handle(k Kind, h Handler) {
 	q.handlers[k.Name] = h
 }
 
+// IsCancelled reports whether the job was cancelled, the checkpoint of a
+// handler of a cancellable kind (Service.IsCancelled).
+func (q *Queue) IsCancelled(ctx context.Context, orgID, id string) (bool, error) {
+	return q.svc.IsCancelled(ctx, orgID, id)
+}
+
+// SaveCancelledResult stores the result of a job cancelled while it ran
+// (Service.SaveCancelledResult).
+func (q *Queue) SaveCancelledResult(ctx context.Context, orgID, id string, result any) (*Job, error) {
+	return q.svc.SaveCancelledResult(ctx, orgID, id, result)
+}
+
 func (q *Queue) handler(kind string) (Handler, bool) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
@@ -129,8 +141,12 @@ func (q *Queue) Setup(ctx context.Context) error {
 // Submit stores a job and announces it. A job that exists already (same
 // idempotency key) is announced again while it is queued; the claim keeps
 // it from running twice. A failed announcement leaves the job queued for
-// the sweep.
+// the sweep. A kind without a handler (Handle) is refused (ErrUnknownKind):
+// its job would stay queued, since no worker consumes it.
 func (q *Queue) Submit(ctx context.Context, orgID, kind string, params any, opts EnqueueOptions) (*Job, bool, error) {
+	if !q.Handles(kind) {
+		return nil, false, fmt.Errorf("%w: %s has no handler on the job queue", ErrUnknownKind, kind)
+	}
 	job, created, err := q.svc.Enqueue(ctx, orgID, kind, params, opts)
 	if err != nil {
 		return nil, false, err
@@ -193,13 +209,20 @@ func (q *Queue) process(ctx context.Context, d Delivery, m *Message, mayReclaim 
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	timed, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, stop := q.svc.runContext(timed, job.OrganizationID, job.ID)
 	result, herr := h(runCtx, job)
+	stop()
 	cancel()
 	if ctx.Err() != nil {
 		// Shutdown: the job stays running and the message unacknowledged;
 		// after the timeout another worker takes the job over.
 		return Outcome{Ran: true}
+	}
+	// Cancelled while it ran (JOB-03, F-162): its result is not stored
+	// and its status stays; the message needs no further delivery.
+	if cancelled, cerr := q.svc.IsCancelled(ctx, job.OrganizationID, job.ID); cerr == nil && cancelled {
+		return q.ack(d, true)
 	}
 	if herr == nil {
 		if _, err = q.svc.Succeed(ctx, job.OrganizationID, job.ID, result); err != nil && !errors.Is(err, ErrTransition) {
@@ -259,7 +282,7 @@ func (q *Queue) notClaimed(ctx context.Context, d Delivery, m *Message, mayRecla
 		}
 		return q.nak(d, max(retryDelay, started.Add(timeout).Sub(now)))
 	}
-	failed, err := q.svc.Fail(ctx, job.OrganizationID, job.ID, fmt.Errorf("%w after %s (worker lost)", ErrTimeout, timeout))
+	failed, err := q.svc.Fail(ctx, job.OrganizationID, job.ID, errWorkerLost(timeout))
 	if err != nil {
 		// Taken over or ended meanwhile (ErrTransition) or a storage error.
 		if !errors.Is(err, ErrTransition) {

@@ -609,7 +609,14 @@ path into `collector.env` and puts the command of the Discovery page's enroll
 instruction on PATH as `/usr/local/bin/reticora-collector`, the command its
 systemd unit starts; the image ships the binary under the same name as its
 entrypoint. `reticora-collector enroll --server <url> --code <code>` thus
-stores the identity where the service reads it. The mTLS HTTP client is built
+stores the identity where the service reads it. Unattended deployments
+(containers, automation) set `RETICORA_ENROLL_TOKEN` (the one-time code) and
+`RETICORA_CLOUD_URL` (the server URL) instead (COL-04): without a keystore the
+first start enrolls with a locally generated key and a CSR, stores the identity
+(mode `600`) and starts normally; with a keystore it does not enroll again.
+Only one of the two variables set, a damaged keystore or a refused code end the
+start with exit code `1` and the cause in the log; the token is never logged
+(details in `deploy/README.md`, "Enrollment"). The mTLS HTTP client is built
 by `edgecore/transport.NewMTLS` (TLS 1.3 minimum). Without certificate
 material the collector logs a warning and falls back to plain HTTPS/HTTP so
 local development keeps working. Discovery results are uploaded as
@@ -662,13 +669,45 @@ delayed alert is usually worse than a lost one. Trap storms are bounded by a
 64-events-in-flight cap. The BER parser is deliberately tolerant: malformed
 varbinds are skipped, never fatal.
 
-**Metric polling (Epic E):** when `RETICORA_METRICS_INTERVAL` is set (e.g.
-`1m`), the collector polls numeric SNMP OIDs on every scan target and uploads
-the samples to the monitoring ingest. The OID list comes from
-`RETICORA_SNMP_POLL_METRICS` (`name=oid,name=oid`, …); when unset, the IF-MIB
-counters of ifIndex 1 (`if_in_octets`, `if_out_octets`, `if_oper_status`)
-are polled. Unreachable targets and non-numeric values are skipped so one
-failing device never stalls a cycle.
+**Metric polling (Epic E, MON-02):** the collector polls base metrics over
+SNMP and uploads them to the monitoring ingest (labels `collector_id` and
+`kind` are added on upload):
+
+- *Interface counters (standard poll, `kind=snmp_poll`):* on by default every
+  300 s on every scan target (`RETICORA_SCAN_SUBNETS`), 16 targets at a time.
+  `RETICORA_METRICS_INTERVAL` sets the interval (e.g. `1m`), `0` turns the
+  poll off. Per interface — at most 256 per device, the first by ifIndex —
+  `if_in_octets` and `if_out_octets` (64-bit `ifHCInOctets`/`ifHCOutOctets`
+  of the ifXTable; without ifXTable the 32-bit ifTable counters) and
+  `if_oper_status` (1 up, 2 down, …), labelled `target`, `ifIndex` and
+  `ifName` when the device reports it. `RETICORA_SNMP_POLL_METRICS`
+  (`name=oid,name=oid`, …) replaces the standard poll with one GET of the
+  listed OIDs.
+- *Power readings (`kind=power`):* after every discovery pass with the
+  `power` protocol, per power device found, labelled `target` and
+  `device=ups|pdu`. A UPS gives the UPS-MIB values `ups_battery_status`,
+  `ups_battery_runtime_seconds`, `ups_battery_charge_percent` and
+  `ups_output_load_percent`. A PDU gives `pdu_current_amps` and, where the
+  device reports it, `pdu_active_power_watts` from the metering table of its
+  vendor family, which the probe recognises by the outlet table: APC Rack
+  PDU 2 (rPDU2PhaseStatusTable, current and power per `phase`, plus
+  `module`), APC Rack PDU/MasterSwitch (rPDULoadStatusTable, current per
+  `phase`; bank rows are left out) and Raritan PX2/PX3 (PDU2-MIB inlet
+  sensors, current and active power per `inlet`). PDUs of other vendors give
+  no readings.
+
+Values a device does not answer (noSuchObject) or answers non-numerically are
+skipped, an unreachable target is skipped for the cycle, so one failing
+device never stalls it. SNMP load of the interface poll per device and
+interval: one GETBULK walk (max-repetitions 50) per column — ifOperStatus,
+ifName, ifHCInOctets, ifHCOutOctets — that is `ceil((n+1)/50)` requests per
+column for n interfaces, at most 6 at the 256-interface cap: up to 24 GETBULK
+requests of up to 50 varbinds each every 300 s (a device without ifXTable:
+two more 32-bit counter walks, the ifXTable walks end after one request
+each). A silent host costs one timeout (5 s) per cycle. The power poll adds
+one GET of four OIDs per UPS or one walk of two to four short columns per
+PDU per discovery pass; the probe asks every SNMP-answering host one GETNEXT
+for the outlet tables.
 
 **Alert evaluation (Epic E):** the server evaluates enabled alert rules once
 per minute against the metric store (`monitoring.Evaluator`). A rule fires
@@ -793,6 +832,27 @@ runtime 404. The generated files are committed so that the build does not depend
 on generation order; CI runs `npm run generate:api:check`, which regenerates
 them and fails on any diff. Regenerate with `make generate-api-client` (or
 `npm run generate:api`) after every specification change.
+
+**Browser-Unterstützung (UI-18, NFR-07):** Supported are the current and the
+previous version of Chrome, Edge, Firefox and Safari, plus mobile Chrome and
+Safari (E-88). The evidence is automated, without an external browser grid:
+
+| Job | Versions | Projects | Artifacts |
+|-----|----------|----------|-----------|
+| `e2e` (`ci.yml`, every push and PR) | current: the builds of the `@playwright/test` in `frontend/package.json` | `chromium`, `edge` (installed Microsoft Edge), `firefox`, `webkit`, `mobile-chrome` (Pixel 7), `mobile-safari` (iPhone 14) | `playwright-report-<project>`, also when green, kept 30 days |
+| `e2e-prev` (`e2e-prev.yml`, nightly and manual) | previous: `frontend/e2e-prev` pins the previous minor of `@playwright/test` (Chromium, Firefox, WebKit n-1); Chrome n-1 from Chrome for Testing | `chromium`, `chrome-prev`, `firefox`, `webkit`, `mobile-chrome`, `mobile-safari` | `e2e-prev-report-<project>`, kept 30 days |
+
+Both jobs run the same specs of `frontend/e2e/` (smoke, the axe WCAG 2.1 AA
+check `a11y.spec.ts`, keyboard and the core flows against the strict,
+contract-checked mock backend); no test is skipped per browser. Limitations:
+Edge n-1 is approximated by Chromium n-1 and Safari n-1 by WebKit n-1, since
+no previous Edge or Safari build is available on the Linux runners; the
+mobile projects are the desktop engines with a device profile (viewport,
+touch, user agent), so `mobile-safari` is WebKit, not iOS Safari. A local run
+of `e2e-prev`: `cd frontend/e2e-prev && npm ci && npx playwright install`,
+serve a build on port 4173, then
+`CI=1 npx playwright test --config playwright.prev.config.ts --project=<name>`
+(`chrome-prev` needs `PW_CHROME_PREV_EXECUTABLE`).
 
 **Production serving:** The built SPA is served via Nginx (`nginx.conf`) in a Docker container with proper SPA fallback routing. For HTTPS, `install-cloud.sh` can provision a free Let's Encrypt certificate automatically (nginx + Certbot, ACME http-01 challenge): when a public domain is entered, it writes `RETICORA_TLS_DOMAIN` into `.env`, bootstraps a self-signed certificate, issues the real one via the `certbot` compose service and reloads nginx. The TLS configuration lives in `deploy/docker-compose/nginx-tls.conf.template` (rendered by the nginx entrypoint into `/etc/nginx/conf.d/reticora-tls.conf`, included by the image's `nginx.conf`); with TLS enabled the UI is served at `https://<domain>` on port 443 and port 80 handles the ACME challenge plus the HTTP→HTTPS redirect. Certificates are stored under `deploy/docker-compose/letsencrypt/` and renewed automatically.
 

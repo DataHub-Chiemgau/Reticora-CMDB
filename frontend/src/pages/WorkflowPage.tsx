@@ -45,7 +45,7 @@ export function WorkflowPage() {
               >
                 <div>
                   <p className="font-medium">{def.name}</p>
-                  <p className="text-sm text-gray-500">
+                  <p className="text-sm text-muted">
                     {String(def.trigger.event || def.trigger.type || 'manual')}
                   </p>
                 </div>
@@ -78,12 +78,13 @@ export function WorkflowPage() {
                           : 'info'
                     }
                   >
-                    {run.status}
+                    {t(`workflows.statuses.${run.status}`, run.status)}
                   </Badge>
                 </div>
                 {run.steps?.map((step) => (
-                  <p key={step.id} className="mt-1 text-sm text-gray-500">
-                    #{step.step_index + 1} {step.action_type}: {step.status}
+                  <p key={step.id} className="mt-1 text-sm text-muted">
+                    #{step.step_index + 1} {step.action_type}:{' '}
+                    {t(`workflows.statuses.${step.status}`, step.status)}
                   </p>
                 ))}
                 {run.status === 'waiting_approval' ? (

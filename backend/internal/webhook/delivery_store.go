@@ -26,6 +26,10 @@ const (
 	StatusDead = "dead"
 )
 
+// ErrDeliveryExists reports an Enqueue of an event a subscription already
+// has a delivery of (WP-506): the stored delivery is sent, no second one.
+var ErrDeliveryExists = errors.New("webhook: delivery of the event exists")
+
 // ErrNoDeliveryStore is returned when a durable operation is requested but no
 // delivery store is configured.
 var ErrNoDeliveryStore = errors.New("webhook: no delivery store configured")
@@ -34,10 +38,17 @@ var ErrNoDeliveryStore = errors.New("webhook: no delivery store configured")
 // queued event is persisted before the first HTTP attempt, so deliveries
 // survive a restart and can be retried with exponential backoff.
 type DeliveryRecord struct {
-	ID             string     `json:"id"`
-	OrganizationID string     `json:"organization_id"`
-	SubscriptionID string     `json:"subscription_id"`
-	Event          string     `json:"event"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	SubscriptionID string `json:"subscription_id"`
+	Event          string `json:"event"`
+	// EventID, EventSequence and EntitySeq name the outbox event the
+	// delivery delivers (WP-506): sent as X-Reticora-Event-ID,
+	// X-Reticora-Sequence and X-Reticora-Entity-Seq; empty for test sends
+	// and direct dispatches.
+	EventID        string     `json:"-"`
+	EventSequence  int64      `json:"-"`
+	EntitySeq      int64      `json:"-"`
 	Payload        []byte     `json:"-"`
 	Status         string     `json:"status"`
 	Attempt        int        `json:"attempt"`
@@ -67,7 +78,10 @@ type DeadLetter struct {
 
 // DeliveryStore persists webhook deliveries and their retry schedule.
 type DeliveryStore interface {
-	// Enqueue stores a new delivery in the pending state.
+	// Enqueue stores a new delivery in the pending state; a preset ID is
+	// kept. It is idempotent per event and subscription: a delivery of an
+	// event (EventID) the subscription already has is not stored again,
+	// Enqueue returns ErrDeliveryExists.
 	Enqueue(ctx context.Context, rec DeliveryRecord) (DeliveryRecord, error)
 	// Update persists the outcome of one delivery attempt.
 	Update(ctx context.Context, rec DeliveryRecord) error
@@ -105,8 +119,17 @@ func (s *MemoryDeliveryStore) Enqueue(_ context.Context, rec DeliveryRecord) (De
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.seq++
-	rec.ID = fmt.Sprintf("%08d-0000-0000-0000-%012d", s.seq, s.seq)
+	if rec.EventID != "" {
+		for id := range s.items {
+			if s.items[id].EventID == rec.EventID && s.items[id].SubscriptionID == rec.SubscriptionID {
+				return s.items[id], ErrDeliveryExists
+			}
+		}
+	}
+	if rec.ID == "" {
+		s.seq++
+		rec.ID = fmt.Sprintf("%08d-0000-0000-0000-%012d", s.seq, s.seq)
+	}
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = time.Now().UTC()
 	}
@@ -128,6 +151,7 @@ func (s *MemoryDeliveryStore) Update(_ context.Context, rec DeliveryRecord) erro
 	}
 	rec.Payload = existing.Payload
 	rec.CreatedAt = existing.CreatedAt
+	rec.EventID, rec.EventSequence, rec.EntitySeq = existing.EventID, existing.EventSequence, existing.EntitySeq
 	s.items[rec.ID] = rec
 	return nil
 }

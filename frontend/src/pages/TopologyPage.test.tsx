@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import type { TopologyGraphData } from '../api/client';
-import { TopologyPage, buildGraphModel, computeOutageImpact, parseSimulated } from './TopologyPage';
+import type { RelationshipType } from '../api/cmdb';
+import {
+  TopologyPage,
+  buildGraphModel,
+  computeOutageImpact,
+  impactDirections,
+  parseSimulated,
+} from './TopologyPage';
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
 
 vi.mock('../components/graph/TopologyGraph', () => ({
@@ -67,31 +74,95 @@ describe('buildGraphModel', () => {
   });
 });
 
-describe('computeOutageImpact', () => {
-  const edges = [
-    { source: 'ups-1', target: 'sw-1' },
-    { source: 'sw-1', target: 'srv-1' },
-    { source: 'sw-1', target: 'srv-2' },
-    { source: 'srv-1', target: 'vm-1' },
-  ];
+// The impact directions of the built-in catalogue (CH27, E-18) the tests use.
+const directions = impactDirections([
+  relType('connected_to', 'undirected'),
+  relType('powered_by', 'source_depends_on_target'),
+  relType('powers', 'target_depends_on_source'),
+  relType('hosted_on', 'source_depends_on_target'),
+  relType('depends_on', 'source_depends_on_target'),
+  relType('contains', 'target_depends_on_source'),
+  relType('monitors', 'none'),
+]);
 
-  it('marks all transitively dependent nodes as impacted', () => {
-    expect(computeOutageImpact('ups-1', edges)).toEqual(
-      new Set(['sw-1', 'srv-1', 'srv-2', 'vm-1']),
-    );
-    expect(computeOutageImpact('sw-1', edges)).toEqual(new Set(['srv-1', 'srv-2', 'vm-1']));
+function relType(key: string, impact: RelationshipType['impact_direction']): RelationshipType {
+  return {
+    id: `rt-${key}`,
+    key,
+    display_name: key,
+    reverse_name: key,
+    directed: impact !== 'undirected',
+    category: 'logical',
+    impact_direction: impact,
+    redundant: false,
+    allowed_source_types: [],
+    allowed_target_types: [],
+    cardinality: 'many_to_many',
+    is_system: true,
+  };
+}
+
+// F-254 retest: the edges as they are stored (server powered_by pdu,
+// vm hosted_on server), source -> target. The failure runs against the
+// stored direction: a PDU failure reaches the server and the VM on it, a
+// VM failure reaches nothing. The old walk along source -> target gave
+// pdu -> {} and vm -> {pdu, server}.
+const stored = [
+  { source: 'server', target: 'pdu', label: 'powered_by' },
+  { source: 'vm', target: 'server', label: 'hosted_on' },
+];
+
+describe('computeOutageImpact', () => {
+  it('follows the impact direction of the relationship types (F-254)', () => {
+    expect(computeOutageImpact('pdu', stored, directions)).toEqual(new Set(['server', 'vm']));
+    expect(computeOutageImpact('vm', stored, directions)).toEqual(new Set());
+    expect(computeOutageImpact('server', stored, directions)).toEqual(new Set(['vm']));
   });
 
-  it('returns an empty set for leaf nodes', () => {
-    expect(computeOutageImpact('vm-1', edges)).toEqual(new Set());
+  it('follows a target_depends_on_source type along the edge', () => {
+    const edges = [
+      { source: 'pdu', target: 'server', label: 'powers' },
+      { source: 'rack', target: 'pdu', label: 'contains' },
+    ];
+    expect(computeOutageImpact('rack', edges, directions)).toEqual(new Set(['pdu', 'server']));
+    expect(computeOutageImpact('server', edges, directions)).toEqual(new Set());
+  });
+
+  it('carries a failure over connected_to both ways and never over a type without impact', () => {
+    const edges = [
+      { source: 'sw-1', target: 'srv-1', label: 'connected_to' },
+      { source: 'mon-1', target: 'srv-2', label: 'monitors' },
+    ];
+    expect(computeOutageImpact('sw-1', edges, directions)).toEqual(new Set(['srv-1']));
+    expect(computeOutageImpact('srv-1', edges, directions)).toEqual(new Set(['sw-1']));
+    expect(computeOutageImpact('srv-2', edges, directions)).toEqual(new Set());
+    expect(computeOutageImpact('mon-1', edges, directions)).toEqual(new Set());
+  });
+
+  it('reads every type of a collapsed edge and narrows the walk to the facet', () => {
+    const edges = [
+      { source: 'server', target: 'pdu', label: 'connected_to, powered_by' },
+      { source: 'vm', target: 'server', label: 'hosted_on' },
+    ];
+    expect(computeOutageImpact('pdu', edges, directions)).toEqual(new Set(['server', 'vm']));
+    expect(computeOutageImpact('pdu', edges, directions, 'powered_by')).toEqual(
+      new Set(['server']),
+    );
+    expect(computeOutageImpact('pdu', edges, directions, 'depends_on')).toEqual(new Set());
+  });
+
+  it('reads a type without a known direction as source_depends_on_target, as the server', () => {
+    const edges = [{ source: 'app', target: 'db', label: 'custom_link' }];
+    expect(computeOutageImpact('db', edges, directions)).toEqual(new Set(['app']));
+    expect(computeOutageImpact('app', edges, directions)).toEqual(new Set());
   });
 
   it('terminates on cyclic graphs', () => {
     const cyclic = [
-      { source: 'a', target: 'b' },
-      { source: 'b', target: 'a' },
+      { source: 'a', target: 'b', label: 'depends_on' },
+      { source: 'b', target: 'a', label: 'depends_on' },
     ];
-    expect(computeOutageImpact('a', cyclic)).toEqual(new Set(['b']));
+    expect(computeOutageImpact('a', cyclic, directions)).toEqual(new Set(['b']));
   });
 });
 
@@ -115,6 +186,39 @@ const ciTypes = {
   offset: 0,
   has_more: false,
 };
+
+// A PDU feeds a server that hosts a VM, stored as server powered_by pdu and
+// vm hosted_on server (source -> target).
+const powerGraph: TopologyGraphData = {
+  nodes: [
+    { id: 'ci-pdu', name: 'pdu-01', ci_type: 'pdu', status: 'active' },
+    { id: 'ci-server', name: 'srv-01', ci_type: 'server', status: 'active' },
+    { id: 'ci-vm', name: 'vm-01', ci_type: 'vm', status: 'active' },
+  ],
+  edges: [
+    { id: 'e-1', source_ci_id: 'ci-server', target_ci_id: 'ci-pdu', rel_type: 'powered_by' },
+    { id: 'e-2', source_ci_id: 'ci-vm', target_ci_id: 'ci-server', rel_type: 'hosted_on' },
+  ],
+};
+
+const relationshipTypes = {
+  data: [
+    relType('connected_to', 'undirected'),
+    relType('powered_by', 'source_depends_on_target'),
+    relType('hosted_on', 'source_depends_on_target'),
+  ],
+  total: 3,
+  limit: 100,
+  offset: 0,
+  has_more: false,
+};
+
+function problem(status: number) {
+  return new Response(JSON.stringify({ title: 'Error', status, detail: 'failed' }), {
+    status,
+    headers: { 'Content-Type': 'application/problem+json' },
+  });
+}
 
 describe('TopologyPage', () => {
   it('renders the graph and an accessible node list', async () => {
@@ -150,15 +254,101 @@ describe('TopologyPage', () => {
     expect(url).toContain('depth=3');
   });
 
-  it('shows the outage impact panel when a failure is simulated', async () => {
-    stubFetchRoutes({ '/topology': graph, '/ci-types': ciTypes });
+  it('shows the server analysis of a simulated failure without a provisional note', async () => {
+    stubFetchRoutes({
+      '/impact?ci_ids=': {
+        failed_cis: [powerGraph.nodes[0]],
+        impacted: [powerGraph.nodes[1], powerGraph.nodes[2]],
+        count: 2,
+      },
+      '/topology': powerGraph,
+      '/ci-types': ciTypes,
+      '/relationship-types': relationshipTypes,
+    });
 
-    renderWithProviders(<TopologyPage />, { route: '/topology?simulate=ci-1' });
+    renderWithProviders(<TopologyPage />, { route: '/topology?simulate=ci-pdu' });
 
-    expect(await screen.findByText('Ausfallsimulation')).toBeInTheDocument();
     expect(
-      screen.getByText(/Fällt „core-sw-01“ aus, sind 1 weitere CIs betroffen/),
+      await screen.findByText(/Fällt „pdu-01“ aus, sind 2 weitere CIs betroffen/),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/Vorläufiges Ergebnis/)).not.toBeInTheDocument();
+  });
+
+  it('falls back to the impact direction of the relationship types when /impact fails (F-254)', async () => {
+    stubFetchRoutes({
+      '/impact?ci_ids=': problem(500),
+      '/topology': powerGraph,
+      '/ci-types': ciTypes,
+      '/relationship-types': relationshipTypes,
+    });
+
+    const { unmount } = renderWithProviders(<TopologyPage />, {
+      route: '/topology?simulate=ci-pdu',
+    });
+
+    expect(
+      await screen.findByText(/Fällt „pdu-01“ aus, sind 2 weitere CIs betroffen/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Die Analyse des Servers ist nicht verfügbar/)).toBeInTheDocument();
+    const panel = screen
+      .getByRole('heading', { name: 'Ausfallsimulation' })
+      .closest('section') as HTMLElement;
+    const impacted = within(panel)
+      .getAllByRole('listitem')
+      .map((item) => item.textContent);
+    expect(impacted.sort()).toEqual(['srv-01', 'vm-01']);
+    unmount();
+
+    // The VM has no dependents: its failure impacts nothing, not its host.
+    renderWithProviders(<TopologyPage />, { route: '/topology?simulate=ci-vm' });
+    expect(
+      await screen.findByText(/Fällt „vm-01“ aus, sind 0 weitere CIs betroffen/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Dieses CI hat keine abhängigen CIs/)).toBeInTheDocument();
+  });
+
+  it('marks the result as provisional while the server analysis loads', async () => {
+    const pending = new Promise<Response>(() => {});
+    const respond = (body: unknown) =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/impact?ci_ids=')) return pending;
+        if (url.includes('/topology')) return respond(powerGraph);
+        if (url.includes('/relationship-types')) return respond(relationshipTypes);
+        if (url.includes('/ci-types')) return respond(ciTypes);
+        return new Response('{}', { status: 404 });
+      }),
+    );
+
+    renderWithProviders(<TopologyPage />, { route: '/topology?simulate=ci-server' });
+
+    expect(
+      await screen.findByText(/Fällt „srv-01“ aus, sind 1 weitere CIs betroffen/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/die Analyse des Servers läuft noch/)).toBeInTheDocument();
+  });
+
+  it('says that the impact cannot be computed without /impact and relationship types', async () => {
+    stubFetchRoutes({
+      '/impact?ci_ids=': problem(500),
+      '/relationship-types': problem(403),
+      '/topology': powerGraph,
+      '/ci-types': ciTypes,
+    });
+
+    renderWithProviders(<TopologyPage />, { route: '/topology?simulate=ci-pdu' });
+
+    expect(
+      await screen.findByText('Die Auswirkung konnte nicht berechnet werden.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Ausfallsimulation')).toBeInTheDocument();
+    expect(screen.queryByText(/weitere CIs betroffen/)).not.toBeInTheDocument();
   });
 
   it('filters by CI type id', async () => {
@@ -351,12 +541,13 @@ describe('multiple failures', () => {
   });
 
   it('unites the impact of several failures without the failed CIs', () => {
+    // b depends on a, c on b, e on d.
     const edges = [
-      { source: 'a', target: 'b' },
-      { source: 'b', target: 'c' },
-      { source: 'd', target: 'e' },
+      { source: 'b', target: 'a', label: 'depends_on' },
+      { source: 'c', target: 'b', label: 'depends_on' },
+      { source: 'e', target: 'd', label: 'depends_on' },
     ];
-    expect([...computeOutageImpact(['a', 'd'], edges)].sort()).toEqual(['b', 'c', 'e']);
-    expect([...computeOutageImpact(['a', 'b'], edges)]).toEqual(['c']);
+    expect([...computeOutageImpact(['a', 'd'], edges, directions)].sort()).toEqual(['b', 'c', 'e']);
+    expect([...computeOutageImpact(['a', 'b'], edges, directions)]).toEqual(['c']);
   });
 });

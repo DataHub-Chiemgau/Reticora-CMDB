@@ -399,8 +399,13 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 		return identity.PermAgentManage, routeProtected
 	case "me":
 		// /me is the signed-in principal itself and needs no permission;
-		// /me/permissions is read-only self-service.
-		if len(segments) == 1 {
+		// /me/permissions is read-only self-service as well (OpenAPI
+		// getMyPermissions: the caller's own effective permissions, no
+		// 403): every user reads its own user_id and rights, also without
+		// permission:read (custom roles, client_technician), which the UI
+		// needs for the cancel rule of the job center and the saved views.
+		if len(segments) == 1 || (len(segments) == 2 && segments[1] == "permissions" &&
+			(method == http.MethodGet || method == http.MethodHead)) {
 			return "", routeProtected
 		}
 		return identity.PermPermissionRead, routeProtected
@@ -539,6 +544,60 @@ var collectorRoutes = map[string]bool{
 	"POST /api/v1/ingest/bulk": true,
 }
 
+// domainRecordedRoutes are the audited write routes whose domain recorder
+// writes the audit entry of every successful request in the transaction of
+// the change, with old and new values (AUD-07), with the recorder. They get
+// no audit intent and so no transaction of the route audit (NFR-10, E-17,
+// WP-504); every other audited write route stores an intent before the
+// handler runs. TestEveryWriteRouteAuditedOnPostgreSQL
+// (audit_coverage_test.go) keeps this list and the recorders in step.
+var domainRecordedRoutes = map[string]string{
+	// CI writes (AUD-03 history with old and new values).
+	"POST /api/v1/cis":                               "ci.PGRepository.Create",
+	"PATCH /api/v1/cis/{id}":                         "ci.PGRepository.Update",
+	"DELETE /api/v1/cis/{id}":                        "ci.PGRepository.Delete",
+	"POST /api/v1/cis/bulk":                          "ci.PGRepository.Update per CI",
+	"POST /api/v1/cis/{id}/merge":                    "ci.PGRepository (merge)",
+	"POST /api/v1/cis/{id}/restore":                  "ci.PGRepository.RestoreDeleted",
+	"POST /api/v1/cis/{id}/type":                     "ci.PGRepository.ChangeType",
+	"PUT /api/v1/cis/{id}/fields/{name}/override":    "override.PGRepository",
+	"DELETE /api/v1/cis/{id}/fields/{name}/override": "override.PGRepository",
+	// Metamodel (MET-15).
+	"POST /api/v1/ci-types":                            "citype.PGRepository",
+	"POST /api/v1/ci-types/{id}/activate":              "citype.PGRepository",
+	"POST /api/v1/ci-types/{id}/clone":                 "citype.PGRepository",
+	"POST /api/v1/ci-types/{id}/deactivate":            "citype.PGRepository",
+	"PUT /api/v1/ci-types/{id}/fields":                 "citype.PGRepository",
+	"DELETE /api/v1/ci-types/{id}/fields/{name}":       "citype.PGRepository",
+	"PUT /api/v1/ci-fields/global":                     "citype.PGRepository",
+	"DELETE /api/v1/ci-fields/global/{name}":           "citype.PGRepository",
+	"PUT /api/v1/cis/{id}/field-definitions":           "citype.PGRepository",
+	"DELETE /api/v1/cis/{id}/field-definitions/{name}": "citype.PGRepository",
+	"POST /api/v1/attribute-definitions":               "citype.PGRepository",
+	"PATCH /api/v1/attribute-definitions/{id}":         "citype.PGRepository",
+	"DELETE /api/v1/attribute-definitions/{id}":        "citype.PGRepository",
+	// Locations and rack placement (DOD-01).
+	"POST /api/v1/locations":                   "locations.PGRepository",
+	"DELETE /api/v1/locations/{id}":            "locations.PGRepository",
+	"POST /api/v1/mounts":                      "rack placement",
+	"PATCH /api/v1/mounts/{id}":                "rack placement",
+	"DELETE /api/v1/mounts/{id}":               "rack placement",
+	"POST /api/v1/racks/{id}/mounts":           "rack placement",
+	"PUT /api/v1/racks/{id}/mounts/{ci_id}":    "rack placement",
+	"DELETE /api/v1/racks/{id}/mounts/{ci_id}": "rack placement",
+	// Access: API keys, service accounts, users (RBA-05, AUT-08).
+	"POST /api/v1/api-keys":                   "identity.PGAPIKeyStore",
+	"POST /api/v1/api-keys/{id}/rotate":       "identity.PGAPIKeyStore",
+	"DELETE /api/v1/api-keys/{id}":            "identity.PGAPIKeyStore",
+	"POST /api/v1/service-accounts":           "user service accounts",
+	"PATCH /api/v1/service-accounts/{id}":     "user service accounts",
+	"PUT /api/v1/service-accounts/{id}/roles": "user service accounts",
+	"DELETE /api/v1/service-accounts/{id}":    "user service accounts",
+	"DELETE /api/v1/role-assignments/{id}":    "user.PGRepository (revocation)",
+	"POST /api/v1/users/{id}/anonymize":       "user.PGRepository",
+	"DELETE /scim/v2/Users/{id}":              "user.PGRepository (deactivation)",
+}
+
 // auditedRoutes records, per write route registered through an
 // authorizingRouter, whether it writes an audit entry (coverage test).
 var auditedRoutes sync.Map
@@ -573,7 +632,14 @@ func (a authorizingRouter) handle(method, pattern string, h http.Handler) {
 		if collectorRoutes[key] {
 			source = audit.SourceCollector
 		}
-		chain = append(chain, middleware.AuditRoute(method, full, a.auditor, !exempt, source))
+		mode := middleware.AuditIntent
+		switch {
+		case exempt:
+			mode = middleware.AuditNone
+		case domainRecordedRoutes[key] != "":
+			mode = middleware.AuditDomain
+		}
+		chain = append(chain, middleware.AuditRoute(method, full, a.auditor, mode, source))
 		auditedRoutes.Store(key, !exempt)
 	}
 	a.Router.With(chain...).Method(method, pattern, h)

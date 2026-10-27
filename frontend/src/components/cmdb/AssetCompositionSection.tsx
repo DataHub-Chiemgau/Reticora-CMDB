@@ -21,7 +21,7 @@ export function AssetCompositionSection({ assetId }: { assetId: string }) {
       </h4>
       {children.isLoading ? <SkeletonList rows={2} label="…" /> : null}
       {rows.length === 0 && !children.isLoading ? (
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-muted">
           {t(
             'composition.none',
             'Keine Komponenten. Dieses Asset ist eigenständig (1:1 mit CI oder rein inventarisch).',
@@ -42,7 +42,7 @@ export function AssetCompositionSection({ assetId }: { assetId: string }) {
                 <span className="font-medium">Asset {c.child_asset_id?.slice(0, 8)}…</span>
               )}
               {c.role ? <Badge variant="neutral">{c.role}</Badge> : null}
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-muted">
                 {c.configuration_only ? t('composition.configOnly', 'nur Konfiguration') : ''}
                 {c.independently_serialized
                   ? ` · ${t('composition.serialized', 'eigen serialisiert')}`
@@ -55,7 +55,7 @@ export function AssetCompositionSection({ assetId }: { assetId: string }) {
           ))}
         </ul>
       )}
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-muted">
         {t(
           'composition.inheritedHint',
           'Geteilte Inventardaten (Seriennummer, Kauf, Garantie, Standort) stammen vom Parent-Asset.',

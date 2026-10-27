@@ -110,8 +110,8 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			// Probe the UPS identity via SNMP
-			if p.isPowerDevice(ctx, t, community, timeout) {
+			// Probe the UPS identity and the vendor outlet tables via SNMP
+			if kind, ok := p.isPowerDevice(ctx, t, community, timeout); ok {
 				result := plugins.Result{
 					CIType: "power-device",
 					Name:   t,
@@ -120,7 +120,13 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 						"category":   "power",
 						"protocol":   "snmp",
 						"upsCapable": true,
+						// Device type and vendor family select the OID set
+						// of the power readings (MON-02, HitDevice).
+						attrDeviceType: kind.deviceType,
 					},
+				}
+				if kind.family != "" {
+					result.Attributes[attrVendorFamily] = kind.family
 				}
 				mu.Lock()
 				results = append(results, result)
@@ -194,27 +200,55 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 			"upsCapable": true,
 		},
 	}
-	// The outlet mapping (IMP-09).
-	if outlets, pdu := walkOutlets(g); len(outlets) > 0 {
+	// The outlet mapping (IMP-09). A device that answers a PDU outlet
+	// table is a PDU, also when no outlet carries a name (as in Probe).
+	outlets, pdu := walkOutlets(g)
+	if len(outlets) > 0 {
 		result.Attributes["outlets"] = outlets
-		if pdu {
-			result.Attributes["deviceType"] = "pdu"
-		}
+	}
+	if pdu {
+		result.Attributes["deviceType"] = "pdu"
 	}
 
 	return result, nil
 }
 
+// powerKind is what Probe learns about a power device: the device type
+// ("ups", "pdu", "ats") and the vendor family of the outlet table it
+// answers ("" without one).
+type powerKind struct {
+	deviceType string
+	family     string
+}
+
 // isPowerDevice reports whether target answers the UPS identity model of
-// the UPS-MIB or the APC PowerNet-MIB with a value.
-func (p *Plugin) isPowerDevice(ctx context.Context, target, community string, timeout time.Duration) bool {
+// the UPS-MIB or the APC PowerNet-MIB with a value, or a PDU outlet table
+// of a known vendor (APC rPDU2, APC rPDU/sPDU, Raritan PX). The outlet
+// tables are checked with one GETNEXT, and only when the agent answered
+// the identity GET, so a silent host costs no further timeout.
+func (p *Plugin) isPowerDevice(ctx context.Context, target, community string, timeout time.Duration) (powerKind, bool) {
 	g := p.v2cSession(ctx, target, community, timeout)
 	if err := g.Connect(); err != nil {
-		return false
+		return powerKind{}, false
 	}
 	defer g.Conn.Close()
-	values := getStrings(g, probeOIDs)
-	return values[oidUPSIdentModel] != "" || values[oidAPCModel] != ""
+	pkt, err := g.Get(probeOIDs)
+	if err != nil {
+		return powerKind{}, false
+	}
+	values := stringValues(pkt)
+	model := cmp.Or(values[oidUPSIdentModel], values[oidAPCModel])
+	table, found := detectOutletTable(g)
+	switch {
+	case found && table.pdu:
+		return powerKind{deviceType: "pdu", family: table.vendor}, true
+	case model == "":
+		return powerKind{}, false
+	case found:
+		return powerKind{deviceType: classifyPowerDevice("", model), family: table.vendor}, true
+	default:
+		return powerKind{deviceType: classifyPowerDevice("", model)}, true
+	}
 }
 
 // v2cSession builds an SNMPv2c session to target (identity GET and outlet
@@ -229,11 +263,16 @@ func (p *Plugin) v2cSession(ctx context.Context, target, community string, timeo
 // header (which echoes the community); what the device does not answer
 // (noSuchObject, no response) stays empty.
 func getStrings(g *gosnmp.GoSNMP, oids []string) map[string]string {
-	values := map[string]string{}
 	pkt, err := g.Get(oids)
 	if err != nil {
-		return values
+		return map[string]string{}
 	}
+	return stringValues(pkt)
+}
+
+// stringValues returns the OctetString values of a response by OID.
+func stringValues(pkt *gosnmp.SnmpPacket) map[string]string {
+	values := map[string]string{}
 	for _, v := range pkt.Variables {
 		if b, ok := v.Value.([]byte); ok && v.Type == gosnmp.OctetString {
 			values[strings.TrimPrefix(v.Name, ".")] = plugins.OctetText(b)

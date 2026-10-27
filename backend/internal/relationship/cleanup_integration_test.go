@@ -271,6 +271,99 @@ func TestDiscoveryEdgeCleanupOrgIsolation(t *testing.T) {
 	checkWarnings("Run")
 }
 
+// TestAuditCleanupCronScopeDeadline covers WP-497 (TOP-02; F-111) against
+// PostgreSQL: the deadline of a discovery edge is max(7 days, 5 × the scope
+// interval), and the interval of a cron scope is the gap between its runs
+// (next_run_at − last_run_at), without a run the gap between its next two
+// cron slots – not the 24 h default. A weekly cron scope keeps an edge for
+// 35 days, a monthly one for at least 140 days. The 168h duration scope is
+// the control: same weekly interval, written as a duration.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+//
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/<db>?sslmode=disable \
+//	  go test -count=1 -v -p 1 -run 'TestAuditCleanupCronScopeDeadline' ./internal/relationship/
+func TestAuditCleanupCronScopeDeadline(t *testing.T) {
+	f := scopetest.Seed(t, "d8")
+	bg := context.Background()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	day := 24 * time.Hour
+	collector := f.ID()
+	exec(`INSERT INTO collector (id, organization_id, name, status) VALUES ($1, $2, 'audit-cron', 'active')`, collector, f.OrgA)
+	// The server holds the run state of each scope: weekly scopes ran 3 days
+	// ago and run again in 4 days, the monthly scope ran 10 days ago; the
+	// "-new" scopes never ran.
+	exec(`INSERT INTO discovery_scope (organization_id, collector_id, name, kind, target, schedule, last_run_at, next_run_at) VALUES
+		($1, $2, 'weekly-duration',  'cidr', '10.96.1.0/24', '168h',      $3, $4),
+		($1, $2, 'weekly-cron',      'cidr', '10.96.2.0/24', '0 3 * * 0', $3, $4),
+		($1, $2, 'monthly-cron',     'cidr', '10.96.3.0/24', '0 3 1 * *', $5, $6),
+		($1, $2, 'weekly-cron-new',  'cidr', '10.96.4.0/24', '0 3 * * 0', NULL, NULL),
+		($1, $2, 'monthly-cron-new', 'cidr', '10.96.5.0/24', '0 3 1 * *', NULL, NULL)`,
+		f.OrgA, collector, now.Add(-3*day), now.Add(4*day), now.Add(-10*day), now.Add(21*day))
+	source := func(name, ip string) string {
+		id := f.CI(t, f.OrgA, "", "audit-cron-"+name)
+		exec(`UPDATE ci SET management_ip = $2::inet WHERE id = $1`, id, ip)
+		return id
+	}
+	weeklyDuration, weeklyCron, monthlyCron := source("dur", "10.96.1.1"), source("cron", "10.96.2.1"), source("monthly", "10.96.3.1")
+	weeklyNew, monthlyNew := source("cron-new", "10.96.4.1"), source("monthly-new", "10.96.5.1")
+
+	cases := []struct {
+		name       string
+		src        string
+		confirmed  time.Duration
+		kept       bool
+		staleAfter string
+	}{
+		{"control: 168h duration scope, edge confirmed 10 d ago kept (deadline 35 d)", weeklyDuration, 10 * day, true, ""},
+		{"control: 168h duration scope, edge confirmed 36 d ago removed with stale_after=840h0m0s", weeklyDuration, 36 * day, false, "840h0m0s"},
+		{"weekly cron '0 3 * * 0', edge confirmed 10 d ago kept (deadline 35 d)", weeklyCron, 10 * day, true, ""},
+		{"weekly cron '0 3 * * 0', edge confirmed 34 d ago kept (deadline 35 d)", weeklyCron, 34 * day, true, ""},
+		{"weekly cron '0 3 * * 0', edge confirmed 36 d ago removed with stale_after=840h0m0s", weeklyCron, 36 * day, false, "840h0m0s"},
+		{"monthly cron '0 3 1 * *', edge confirmed 36 d ago kept (deadline 5 x 31 d)", monthlyCron, 36 * day, true, ""},
+		{"monthly cron '0 3 1 * *', edge confirmed 156 d ago removed with stale_after=3720h0m0s", monthlyCron, 156 * day, false, "3720h0m0s"},
+		{"weekly cron never run, edge confirmed 10 d ago kept (next two slots: 7 d)", weeklyNew, 10 * day, true, ""},
+		{"monthly cron never run, edge confirmed 139 d ago kept (next two slots: >= 28 d)", monthlyNew, 139 * day, true, ""},
+	}
+	ids := make([]string, len(cases))
+	for i, tc := range cases {
+		peer := f.CI(t, f.OrgA, "", "audit-cron-peer-"+string(rune('a'+i)))
+		if err := f.Admin.QueryRow(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type, source,
+				verification_state, last_seen_at, last_confirmed_at, confidence)
+			VALUES ($1, $2, $3, 'connected_to', 'discovery', 'unverified', $4, $4, 1.0) RETURNING id::text`,
+			f.OrgA, tc.src, peer, now.Add(-tc.confirmed)).Scan(&ids[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := relationship.NewCleanup(f.App).WithClock(func() time.Time { return now }).RunOrg(bg, f.OrgA); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	for i, tc := range cases {
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci_relationship WHERE id = $1`, ids[i]).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		var staleAfter string
+		_ = f.Admin.QueryRow(bg, `SELECT COALESCE(max(data->>'stale_after'), '') FROM event_outbox
+			WHERE organization_id = $1 AND type = 'relationship.removed' AND entity_id = $2`, f.OrgA, ids[i]).Scan(&staleAfter)
+		if kept := n == 1; kept != tc.kept {
+			t.Errorf("TOP-02 violated: %s: kept = %v (relationship.removed stale_after=%q)", tc.name, kept, staleAfter)
+			continue
+		}
+		if !tc.kept && staleAfter != tc.staleAfter {
+			t.Errorf("TOP-02 violated: %s: relationship.removed stale_after=%q, want %q", tc.name, staleAfter, tc.staleAfter)
+		}
+	}
+}
+
 // logCapture collects the JSON log records of slog's default logger.
 type logCapture struct {
 	mu  sync.Mutex

@@ -9,6 +9,7 @@ import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { SkeletonList } from '../components/ui/Skeleton';
+import { ScrollRegion } from '../components/ScrollRegion';
 
 /**
  * AuditPage lists the tenant's hash-chained audit trail and lets an
@@ -90,7 +91,7 @@ export function AuditPage() {
         {entries.length === 0 ? (
           <EmptyState title={t('audit.empty')} description={t('audit.emptyHint')} />
         ) : (
-          <div className="overflow-x-auto">
+          <ScrollRegion label={t('audit.entries')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -123,7 +124,7 @@ export function AuditPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         )}
         {total > limit ? (
           <div className="mt-4 flex items-center justify-between">

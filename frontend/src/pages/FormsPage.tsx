@@ -52,7 +52,7 @@ export function FormsPage() {
                 onClick={() => setSelectedId(form.id)}
               >
                 <span className="font-medium">{form.name}</span>
-                <p className="text-gray-500">{form.description || t('forms.noDescription')}</p>
+                <p className="text-muted">{form.description || t('forms.noDescription')}</p>
               </button>
             ))}
           </div>

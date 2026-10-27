@@ -7,7 +7,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -95,6 +97,72 @@ func TestDiscoveryIntervalsFromSettings(t *testing.T) {
 	}
 }
 
+// TestScopeChannelCarriesRunStateAndTimezone covers WP-495 (DIS-10, F-109,
+// F-266, E-84 option A): scopes.request hands the collector each scope's
+// last_run_at and next_run_at as the server holds them (absent before the
+// first run) and the organization's time zone, so a (re)started collector
+// schedules the sweeps from them and evaluates cron in that zone.
+func TestScopeChannelCarriesRunStateAndTimezone(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	col := &Collector{OrganizationID: "org-1", Name: "col", Status: CollectorActive, Config: map[string]any{}}
+	if err := repo.RegisterCollector(ctx, col); err != nil {
+		t.Fatal(err)
+	}
+	ran := NewScope("org-1", &ScopeInput{CollectorID: col.ID, Kind: ScopeKindHost, Target: "192.0.2.21", Schedule: "0 2 * * *"})
+	fresh := NewScope("org-1", &ScopeInput{CollectorID: col.ID, Kind: ScopeKindHost, Target: "192.0.2.22"})
+	for _, s := range []*Scope{ran, fresh} {
+		if err := repo.CreateScope(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := NewHandler(repo, nil)
+	if err := h.RecordCollectorScopeRun(ctx, "org-1", col.ID, &ScopeResultReport{ScopeID: ran.ID,
+		At: time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), NextRun: time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC),
+		Result: map[string]any{"records": 1}}); err != nil {
+		t.Fatal(err)
+	}
+	request := func() map[string]map[string]any {
+		t.Helper()
+		resp := h.scopeHandlers()[ScopesRequestSuffix](ctx, "org-1", col.ID, []byte(`{}`))
+		raw, err := json.Marshal(resp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			Scopes []map[string]any `json:"scopes"`
+			Error  string           `json:"error"`
+		}
+		if err = json.Unmarshal(raw, &body); err != nil || body.Error != "" {
+			t.Fatalf("scopes.request = %s (%v)", raw, err)
+		}
+		out := map[string]map[string]any{}
+		for _, s := range body.Scopes {
+			id, _ := s["id"].(string)
+			out[id] = s
+		}
+		return out
+	}
+
+	got := request()
+	if s := got[ran.ID]; s["last_run_at"] != "2026-10-15T00:00:00Z" || s["next_run_at"] != "2026-10-16T00:00:00Z" || s["timezone"] != "UTC" {
+		t.Errorf("scope that ran: %v, want last_run_at, next_run_at and timezone UTC (the default)", s)
+	}
+	// A new scope is due at its creation (next_run_at = created), it has no
+	// last run.
+	if s := got[fresh.ID]; s == nil || s["timezone"] != "UTC" || s["next_run_at"] != fresh.NextRunAt {
+		t.Errorf("scope that never ran: %v, want next_run_at %s (its creation)", s, fresh.NextRunAt)
+	} else if _, has := s["last_run_at"]; has {
+		t.Errorf("scope that never ran carries last_run_at: %v", s)
+	}
+	repo.SetOrgTimezone("org-1", "Europe/Berlin")
+	for id, s := range request() {
+		if s["timezone"] != "Europe/Berlin" {
+			t.Errorf("scope %s: timezone %v, want the organization's Europe/Berlin", id, s["timezone"])
+		}
+	}
+}
+
 // TestScopeTargetWithoutZone covers WP-383 (DIS-09, API-05; F-108): a host
 // or range target with an IPv6 zone (fe80::1%eth0) is refused with 422 on
 // the field target, on create and on change, because PostgreSQL inet cannot
@@ -172,5 +240,40 @@ func TestScopeTargetWithoutZone(t *testing.T) {
 	}
 	if s, err := repo.GetScope(context.Background(), "org-1", id); err != nil || s.Kind != ScopeKindHost || s.Target != "fe80::1" {
 		t.Errorf("scope after the refused changes = %+v, %v", s, err)
+	}
+}
+
+// TestScopeLimitContract: the largest scope the API accepts is the one the
+// collector expands completely (collector/collectorcmd/testdata/
+// scope-limits.json, checked against maxScopeAddresses by the collector's
+// test; WP-494, F-106).
+func TestScopeLimitContract(t *testing.T) {
+	raw, err := os.ReadFile("../../../collector/collectorcmd/testdata/scope-limits.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var limits struct {
+		MaxScopeAddresses int `json:"max_scope_addresses"`
+	}
+	if err := json.Unmarshal(raw, &limits); err != nil {
+		t.Fatal(err)
+	}
+	if limits.MaxScopeAddresses != MaxScopeAddresses {
+		t.Fatalf("MaxScopeAddresses = %d, scope-limits.json = %d: the collector would cut scopes the API accepts",
+			MaxScopeAddresses, limits.MaxScopeAddresses)
+	}
+	// The API accepts a /16 and a range of exactly the limit, nothing larger.
+	for _, tc := range []struct {
+		kind, target string
+		ok           bool
+	}{
+		{ScopeKindCIDR, "10.0.0.0/16", true},
+		{ScopeKindRange, "10.0.0.0-10.0.255.255", true},
+		{ScopeKindCIDR, "10.0.0.0/15", false},
+		{ScopeKindRange, "10.0.0.0-10.1.0.0", false},
+	} {
+		if _, err := NormalizeScopeTarget(tc.kind, tc.target); (err == nil) != tc.ok {
+			t.Errorf("NormalizeScopeTarget(%s, %s) = %v, want accepted %v", tc.kind, tc.target, err, tc.ok)
+		}
 	}
 }

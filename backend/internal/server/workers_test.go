@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -236,6 +237,121 @@ func TestWorkerAlertRulesCoverTheWorkerMetrics(t *testing.T) {
 	for name := range alerts {
 		if !fires[name] || !silent[name] {
 			t.Errorf("worker-rules.test.yaml: %s needs a case where it fires (%v) and one where it does not (%v)", name, fires[name], silent[name])
+		}
+	}
+}
+
+// TestDiscoveryAlertRulesCoverTheDiscoveryMetrics covers WP-496 (DIS-08,
+// F-267): deploy/monitoring/discovery-rules.yaml alerts on failing scope
+// runs, failed logins, failed uploads and configuration errors, each on the
+// discovery metrics with its severity and hold time; every alert has a
+// promtool case where it fires and one where it does not in
+// deploy/monitoring/tests/discovery-rules.test.yaml (run by
+// tests/monitoring-config.test.sh). docs/ops/discovery-metrics.md describes
+// both metrics with their labels, every state and cause, and every alert.
+func TestDiscoveryAlertRulesCoverTheDiscoveryMetrics(t *testing.T) {
+	const runs, errs = "reticora_discovery_scope_runs_total", "reticora_discovery_errors_total"
+	var rule struct {
+		Kind string
+		Spec struct {
+			Groups []struct {
+				Rules []struct {
+					Alert  string
+					Expr   string
+					For    string
+					Labels map[string]string
+				}
+			}
+		}
+	}
+	readYAML(t, "../../../deploy/monitoring/discovery-rules.yaml", &rule)
+	if rule.Kind != "PrometheusRule" {
+		t.Fatalf("discovery-rules.yaml: kind %q", rule.Kind)
+	}
+	type alert struct{ expr, hold, severity string }
+	alerts := map[string]alert{}
+	for _, g := range rule.Spec.Groups {
+		for _, r := range g.Rules {
+			if r.Alert == "" {
+				continue
+			}
+			if _, dup := alerts[r.Alert]; dup {
+				t.Errorf("discovery-rules.yaml defines %s twice", r.Alert)
+			}
+			alerts[r.Alert] = alert{r.Expr, r.For, r.Labels["severity"]}
+		}
+	}
+	for _, want := range []struct {
+		alert, severity, hold string
+		parts                 []string
+	}{
+		{"ReticoraDiscoveryScopeRunsFailing", "warning", "1h", []string{runs, `state="failed"`}},
+		{"ReticoraDiscoveryAuthFailures", "warning", "30m", []string{errs, `cause="` + discovery.CauseAuthFailed + `"`, "by (protocol)"}},
+		{"ReticoraDiscoveryUploadFailures", "warning", "30m", []string{errs, `cause="` + discovery.CauseUpload + `"`}},
+		{"ReticoraDiscoveryConfigErrors", "warning", "1h", []string{errs, `cause="` + discovery.CauseConfig + `"`, "by (protocol)"}},
+	} {
+		got, ok := alerts[want.alert]
+		if !ok {
+			t.Errorf("discovery-rules.yaml lacks alert %s", want.alert)
+			continue
+		}
+		for _, p := range want.parts {
+			if !strings.Contains(got.expr, p) {
+				t.Errorf("%s: expression does not use %s: %s", want.alert, p, got.expr)
+			}
+		}
+		if got.severity != want.severity || got.hold != want.hold {
+			t.Errorf("%s: severity %q, for %q; want %q, %q", want.alert, got.severity, got.hold, want.severity, want.hold)
+		}
+	}
+
+	var unit struct {
+		RuleFiles []string `yaml:"rule_files"`
+		Tests     []struct {
+			AlertRuleTest []struct {
+				Alertname string           `yaml:"alertname"`
+				ExpAlerts []map[string]any `yaml:"exp_alerts"`
+			} `yaml:"alert_rule_test"`
+		}
+	}
+	readYAML(t, "../../../deploy/monitoring/tests/discovery-rules.test.yaml", &unit)
+	if !slices.Equal(unit.RuleFiles, []string{"discovery-rules.groups.yaml"}) {
+		t.Errorf("discovery-rules.test.yaml: rule_files %v, want the extracted groups of discovery-rules.yaml", unit.RuleFiles)
+	}
+	fires, silent := map[string]bool{}, map[string]bool{}
+	for _, tc := range unit.Tests {
+		for _, a := range tc.AlertRuleTest {
+			if len(a.ExpAlerts) > 0 {
+				fires[a.Alertname] = true
+			} else {
+				silent[a.Alertname] = true
+			}
+		}
+	}
+	for name := range alerts {
+		if !fires[name] || !silent[name] {
+			t.Errorf("discovery-rules.test.yaml: %s needs a case where it fires (%v) and one where it does not (%v)", name, fires[name], silent[name])
+		}
+	}
+
+	raw, err := os.ReadFile("../../../docs/ops/discovery-metrics.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(raw)
+	mentions := []string{runs, errs, "`state`", "`protocol`", "`cause`", "deploy/monitoring/discovery-rules.yaml",
+		"`" + discovery.ScopeStateOK + "`", "`" + discovery.ScopeStatePartial + "`", "`" + discovery.ScopeStateFailed + "`"}
+	for _, cause := range []string{discovery.CauseUnreachable, discovery.CauseTimeout, discovery.CauseRefused,
+		discovery.CauseAuthFailed, discovery.CauseTLS, discovery.CauseProtocol, discovery.CauseConfig,
+		discovery.CauseUpload, discovery.CauseUnknown} {
+		mentions = append(mentions, "`"+cause+"`")
+	}
+	for name := range alerts {
+		mentions = append(mentions, "`"+name+"`")
+	}
+	for _, m := range mentions {
+		if !strings.Contains(doc, m) {
+			t.Errorf("docs/ops/discovery-metrics.md does not describe %s", m)
 		}
 	}
 }

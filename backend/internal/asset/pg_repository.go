@@ -3,12 +3,18 @@ package asset
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -234,7 +240,11 @@ func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 		}
 		a.CreatedAt = a.CreatedAt.UTC()
 		a.UpdatedAt = a.UpdatedAt.UTC()
-		return nil
+		created, err := r.getForChange(ctx, tx, a.OrganizationID, a.ID)
+		if err != nil {
+			return err
+		}
+		return recordChange(ctx, tx, a.OrganizationID, a.ID, "create", "", nil, created)
 	})
 }
 
@@ -307,11 +317,16 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			return nil
 		}
 
+		// The row before the update, locked, for the changed fields of the
+		// history (WP-516).
+		before, err := r.getForChange(ctx, tx, orgID, id, "FOR UPDATE")
+		if err != nil {
+			return err
+		}
 		setClauses = append(setClauses, "updated_at = NOW()")
 		// Redundant with row-level security, kept as defense in depth.
 		query := fmt.Sprintf("UPDATE asset SET %s WHERE id = $1 AND organization_id = $%d RETURNING %s", strings.Join(setClauses, ", "), argPos, assetSelectColumns)
 		args = append(args, orgID)
-		var err error
 		asset, err = scanAsset(tx.QueryRow(ctx, query, args...))
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -319,15 +334,24 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			}
 			return fmt.Errorf("update asset: %w", err)
 		}
-		return nil
+		after, err := pii.Generic(asset)
+		if err != nil {
+			return fmt.Errorf("encode asset change: %w", err)
+		}
+		return recordFieldChanges(ctx, tx, orgID, id, before, after)
 	})
 
 	return asset, err
 }
 
 // Delete deletes an asset. The asset table has no deleted_at column, so this is a hard delete.
+// The history keeps the deletion with the asset as it was (WP-516).
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		before, err := r.getForChange(ctx, tx, orgID, id, "FOR UPDATE")
+		if err != nil {
+			return err
+		}
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM asset WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete asset: %w", err)
@@ -335,8 +359,89 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		if cmdTag.RowsAffected() == 0 {
 			return ErrNotFound
 		}
-		return nil
+		return recordChange(ctx, tx, orgID, id, "delete", "", before, nil)
 	})
+}
+
+// getForChange reads the asset id in the JSON form of the API for its
+// history; lock is the locking clause of the read (FOR UPDATE), if any.
+func (r *PGRepository) getForChange(ctx context.Context, tx pgx.Tx, orgID, id string, lock ...string) (map[string]any, error) {
+	query := fmt.Sprintf("SELECT %s FROM asset WHERE id = $1 AND organization_id = $2 %s", assetSelectColumns, strings.Join(lock, " "))
+	item, err := scanAsset(tx.QueryRow(ctx, query, id, orgID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get asset for history: %w", err)
+	}
+	generic, err := pii.Generic(item)
+	if err != nil {
+		return nil, fmt.Errorf("encode asset change: %w", err)
+	}
+	obj, _ := generic.(map[string]any)
+	return obj, nil
+}
+
+// untracked are the fields of an asset that are no change of their own.
+var untracked = map[string]bool{"updated_at": true}
+
+// recordFieldChanges writes one update row per field that differs between
+// before and after (JSON forms of the asset), in the order of the field
+// names.
+func recordFieldChanges(ctx context.Context, tx pgx.Tx, orgID, id string, before map[string]any, afterValue any) error {
+	after, _ := afterValue.(map[string]any)
+	names := make([]string, 0, len(after))
+	seen := map[string]bool{}
+	for _, m := range []map[string]any{before, after} {
+		for k := range m {
+			if !seen[k] && !untracked[k] {
+				seen[k] = true
+				names = append(names, k)
+			}
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if reflect.DeepEqual(before[name], after[name]) {
+			continue
+		}
+		if err := recordChange(ctx, tx, orgID, id, "update", name, before[name], after[name]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// recordChange appends a change of the asset to the entity_change trail in
+// the transaction of the write (WP-516), with the acting user; personal
+// values are stored as vault surrogates (SEC-05), as in the CI history.
+func recordChange(ctx context.Context, tx pgx.Tx, orgID, id, changeType, field string, oldValue, newValue any) error {
+	values := make([]any, 2)
+	for i, v := range []any{oldValue, newValue} {
+		if v == nil {
+			continue
+		}
+		sealed, _, err := pii.SealFieldTx(ctx, tx, orgID, field, v)
+		if err != nil {
+			return fmt.Errorf("seal asset change value: %w", err)
+		}
+		raw, err := json.Marshal(sealed)
+		if err != nil {
+			return fmt.Errorf("encode asset change value: %w", err)
+		}
+		values[i] = string(raw)
+	}
+	var actor any
+	if user := tenant.FromContext(ctx).UserID; api.IsUUID(user) {
+		actor = user
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO entity_change (organization_id, entity_type, entity_id, actor_id, change_type, field_name, old_value, new_value)
+		VALUES ($1, 'asset', $2, $3, $4, $5, $6::jsonb, $7::jsonb)`,
+		orgID, id, actor, changeType, nilIfEmpty(field), values[0], values[1]); err != nil {
+		return fmt.Errorf("record asset change: %w", err)
+	}
+	return nil
 }
 
 type assetScanner interface {

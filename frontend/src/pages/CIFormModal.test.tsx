@@ -420,12 +420,12 @@ describe('CIFormModal type attributes', () => {
     expect((units as HTMLInputElement).validity.valueMissing).toBe(true);
     // ... and the dialog's check marks the field.
     fireEvent.submit(typeSelect().form!);
-    expect(await screen.findByText('Höheneinheiten is required')).toBeInTheDocument();
+    expect(await screen.findByText('Höheneinheiten ist erforderlich')).toBeInTheDocument();
     expect(units).toHaveAttribute('aria-invalid', 'true');
     // A fraction is no integer.
     fireEvent.change(units, { target: { value: '1.5' } });
     fireEvent.submit(typeSelect().form!);
-    expect(await screen.findByText('Höheneinheiten must be an integer')).toBeInTheDocument();
+    expect(await screen.findByText('Höheneinheiten muss eine ganze Zahl sein')).toBeInTheDocument();
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });

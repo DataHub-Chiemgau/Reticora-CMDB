@@ -342,13 +342,31 @@ jobs:
           getent hosts minio >/dev/null || echo "127.0.0.1 minio" | sudo tee -a /etc/hosts >/dev/null
           curl -sS -o /dev/null "http://minio:9000/minio/health/live" || { echo "FAIL: http://minio:9000 is not reachable from the host"; exit 1; }
 
+      # WP-529: the report of the onboarding suite (JSON report, traces and
+      # screenshots in its own directory, which the real-stack suite below
+      # does not clear) is uploaded after every run, green or red; the
+      # suite keeps retries: 0 (playwright.install.config.ts).
       - name: Run the onboarding E2E suite
         if: matrix.platform == 'ubuntu-24.04'
         working-directory: frontend
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/onboarding-e2e/report.json
         run: |
           npm ci
           npx playwright install --with-deps chromium
-          npx playwright test -c e2e/fixtures/playwright.install.config.ts
+          grep -qE '^\s*retries: 0,' e2e/fixtures/playwright.install.config.ts \
+            || { echo "FAIL: the onboarding suite must run with retries: 0"; exit 1; }
+          npx playwright test -c e2e/fixtures/playwright.install.config.ts \
+            --reporter=github,list,json --output "$RUNNER_TEMP/onboarding-e2e/test-results"
+
+      - name: Upload the onboarding report
+        if: always() && matrix.platform == 'ubuntu-24.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: onboarding-e2e
+          path: ${{ runner.temp }}/onboarding-e2e/
+          if-no-files-found: warn
+          retention-days: 14
 
       # INS-06 (WP-432, retest F-110): the enroll command of the UI on a
       # collector installed by install-vm.sh. Its functions (systemd mode, the
@@ -460,14 +478,6 @@ jobs:
             ${{ runner.temp }}/e2e-real.json
             ${{ runner.temp }}/e2e-real-results.txt
           retention-days: 14
-
-      - name: Upload the onboarding report
-        if: failure() && matrix.platform == 'ubuntu-24.04'
-        uses: actions/upload-artifact@v4
-        with:
-          name: onboarding-e2e
-          path: frontend/test-results/
-          retention-days: 7
 
       - name: Show logs on failure
         if: failure()

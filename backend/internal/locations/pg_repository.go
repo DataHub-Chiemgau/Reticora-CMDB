@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -256,13 +257,28 @@ func scan(row pgx.Row) (*Location, error) {
 	return &l, nil
 }
 
+// nameConstraintFields maps the unique name constraints of the specialist
+// tables onto the request field: a name is unique per client (site), site
+// (building), building (room) and room (rack), LOC-03..06. A duplicate is a
+// 409 naming the field, as on POST /sites.
+var nameConstraintFields = map[string]string{
+	"site_org_client_name_key": "name",
+	"building_site_name_key":   "name",
+	"room_building_name_key":   "name",
+	"rack_room_name_key":       "name",
+}
+
 // mapError translates the errors of the location triggers and policies into
 // the repository errors. A parent outside the caller's scope is reported as
-// an invalid parent, like one that does not exist.
+// an invalid parent, like one that does not exist; a duplicate name is an
+// *api.ConflictError on name.
 func mapError(err error) error {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
 		return err
+	}
+	if conflict := api.FieldDBError(err, nameConstraintFields); conflict != err {
+		return conflict
 	}
 	switch {
 	case pgErr.ConstraintName == "location_no_cycle":
