@@ -13963,7 +13963,7 @@ NTF-05;[B], Zusätze [P2], [P3];D;frontend/e2e-real/maintenance.spec.ts;WP-541
 **Akzeptanzkriterien:**
 
 - [ ] Real-Stack-Spec `frontend/e2e-real/discovery-errors.spec.ts`: nicht simulierter Collector, ein Host-Scope auf den SNMP-Fake aus WP-384 (`t4-e2e-onboarding-bundle`) (`collector/internal/fakesnmp`, erweitert um einen SNMPv3-Modus: Engine-Discovery und Report `usmStatsWrongDigests` bei falschem Schlüssel nach dem Agenten `startRFC3414Agent` in `v3_agent_test.go`, WP-492 (`t4-snmpv3-auth`)) mit falschem SNMPv3-Credential und ein Host-Scope auf eine nicht erreichbare Adresse (192.0.2.x); nach dem Lauf zeigt die Discovery-Seite je Scope das Fehler-Badge mit Ursache `auth_failed` bzw. `unreachable`, Protokoll und Ziel; `GET /discovery-scopes/{id}` liefert dieselbe Ursache in `last_result`. `fakesnmp_test.go`: falscher v3-Schlüssel → Report usmStatsWrongDigests, richtiger → Antwort.
-- [ ] `backend/internal/server/metrics_exposition_test.go`: nach einem gemeldeten Lauf mit Fehler enthält `GET /metrics` `reticora_discovery_scope_runs_total` mit Ergebnis error und `reticora_discovery_errors_total` mit `cause="auth_failed"` und `protocol="snmp"`; ohne Lauf keine Fehlerserie (Negativfall).
+- [ ] `backend/internal/server/metrics_exposition_test.go`: nach einem gemeldeten Lauf mit Fehler enthält `GET /metrics` `reticora_discovery_scope_runs_total` mit Ergebnis error (Korrektur vom 2026-10-27, WP-542: das Label heißt `state`, der Wert für einen Fehlerlauf ist `failed`) und `reticora_discovery_errors_total` mit `cause="auth_failed"` und `protocol="snmp"`; ohne Lauf keine Fehlerserie (Negativfall).
 - [ ] Nachweis: Lauf-ID des Real-Stack-Jobs im PR.
 
 **Dateien (6 Einträge, Migration = 2):**
