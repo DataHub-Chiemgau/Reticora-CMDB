@@ -991,6 +991,7 @@
     "rows": "Zeilen",
     "createdAt": "Erstellt",
     "download": "Herunterladen",
+    "downloadFailed": "Die Datei konnte nicht heruntergeladen werden.",
     "emptyTitle": "Keine Exportaufträge",
     "emptyHint": "Starten Sie einen Export, um die CI-Daten als CSV, DATEV oder JSON herunterzuladen.",
     "status_pending": "Ausstehend",

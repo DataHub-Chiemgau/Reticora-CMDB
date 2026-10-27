@@ -991,6 +991,7 @@
     "rows": "Rows",
     "createdAt": "Created",
     "download": "Download",
+    "downloadFailed": "The file could not be downloaded.",
     "emptyTitle": "No export jobs",
     "emptyHint": "Start an export to download CI data as CSV, DATEV or JSON.",
     "status_pending": "Pending",
