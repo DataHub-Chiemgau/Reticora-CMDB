@@ -609,14 +609,49 @@ new results once the connection is back (COL-05).
   collector pauses discovery (`"event":"collector.spool.backpressure"` in the
   collector log) instead of overwriting data. Discovery resumes as soon as the
   spool drains.
-- **Loss reporting:** every unavoidable loss (age limit beyond 24 h, size limit,
-  full spool) is logged as `"event":"collector.spool.data_lost"` with reason and
-  size, counted, and reported with the next heartbeat. The server logs
+- **Transient and permanent failures:** network errors and the answers 5xx,
+  408 and 429 are transient. The batch stays in the spool, the delivery stops
+  there and is retried on the next flush (every `RETICORA_SPOOL_FLUSH_INTERVAL`,
+  default 30 s, and after every accepted heartbeat); nothing counts as lost. Any
+  other 4xx answer refuses the batch for good (a "poison" batch, e.g. 400 or
+  422 for a record the server can never accept): the collector moves it to
+  `RETICORA_SPOOL_DIR/quarantine/`, counts it as lost (reason `rejected`,
+  `"event":"collector.spool.quarantined"`) and continues with the next batch, so
+  one bad batch no longer blocks the delivery. A fresh batch refused for good is
+  quarantined directly instead of being spooled. A spool file that cannot be
+  read or decoded is quarantined as well (reason `corrupt`). An expired
+  discovery license is not a poison answer: the batches stay until the license
+  is renewed.
+- **Quarantine:** quarantined files are never delivered or deleted by the
+  collector. Inspect them (`*.json`, the batch is in `payload`, base64), fix
+  the cause on the server side and remove them; they count against the disk,
+  not against `RETICORA_SPOOL_MAX_BYTES`.
+- **Loss reporting:** every loss is logged as
+  `"event":"collector.spool.data_lost"` with reason and size and counted:
+  - `dropped_messages`/`dropped_bytes`: spool batches dropped by the age limit
+    beyond 24 h, the size limit, a full spool, corruption or a poison answer;
+    records the server rejected one by one in an accepted batch (202 with
+    `rejected`, `"event":"collector.records.rejected"`); spooled agent
+    telemetry that is unreadable or refused with 4xx.
+  - `dropped_samples`: metric samples and SNMP traps dropped because the server
+    refused them or the bounded metric buffer overflowed. Samples and traps are
+    counted, not spooled (decision E-79).
+
+  These counters are persisted in `RETICORA_SPOOL_DIR/loss.state` (samples:
+  in memory) and reported with every heartbeat until the server answers it
+  with 204; only then does the collector reduce them by the reported amounts,
+  so a loss is neither forgotten on a failed heartbeat nor reported twice.
+- **Server side:** an accepted heartbeat with losses or backpressure is logged as
   `"event":"collector.spool.degraded"` with organization, collector and the
-  dropped counters.
+  counters, over HTTP and over the NATS edge alike, and raises the metrics
+  `reticora_collector_spool_dropped_total{kind="messages"|"samples"}` and
+  `reticora_collector_spool_backpressure_total` (heartbeats reporting
+  backpressure). Alert on `increase(reticora_collector_spool_dropped_total[1h]) > 0`.
 
 If the collector reports backpressure: check connectivity to `RETICORA_SERVER_URL`,
-free disk space for the spool, or raise `RETICORA_SPOOL_MAX_BYTES`.
+free disk space for the spool, or raise `RETICORA_SPOOL_MAX_BYTES`. If losses
+with reason `rejected` grow, look at the quarantined batches and the server's
+ingest errors (`errors[]` of the 202 answer, `reticora_ingest_dead_letters_total`).
 
 ---
 

@@ -362,17 +362,222 @@ func TestEnqueueFailsWhenDirNotCreatable(t *testing.T) {
 	}
 }
 
-func TestPeekBatchCorruptFileReturnsError(t *testing.T) {
+// F-085: an undecodable entry, or one whose id does not match its file name
+// (Ack could never remove it), is moved to quarantine/, counted as a loss and
+// skipped; the batch is filled from the following entries.
+func TestPeekBatchQuarantinesCorruptFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{not json"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "0-bad.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "1-wrongid.json"), []byte(`{"id":"other","topic":"t"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var losses []Loss
+	b := &DiskBuffer{Dir: dir, OnDrop: func(l Loss) { losses = append(losses, l) }}
+	ctx := testCtx(t)
+	for _, id := range []string{"2-a", "3-b"} {
+		if _, err := b.Enqueue(ctx, Message{ID: id, Topic: "t"}); err != nil {
+			t.Fatalf("Enqueue: %v", err)
+		}
+	}
+
+	msgs, err := b.PeekBatch(ctx, 1)
+	if err != nil {
+		t.Fatalf("PeekBatch: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].ID != "2-a" {
+		t.Fatalf("PeekBatch(1) = %+v, want the first intact message", msgs)
+	}
+	for _, name := range []string{"0-bad.json", "1-wrongid.json"} {
+		if _, statErr := os.Stat(filepath.Join(dir, QuarantineDir, name)); statErr != nil {
+			t.Errorf("%s not in quarantine: %v", name, statErr)
+		}
+		if _, statErr := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(statErr) {
+			t.Errorf("%s still in the spool: %v", name, statErr)
+		}
+	}
+	if len(losses) != 1 || losses[0].Reason != LossCorrupt || losses[0].Messages != 2 || losses[0].Bytes == 0 {
+		t.Fatalf("losses = %+v, want one corrupt loss of 2 messages", losses)
+	}
+	if n, _ := b.Len(ctx); n != 2 {
+		t.Fatalf("Len = %d, want the 2 intact messages", n)
+	}
+	stats, err := b.Stats(ctx)
+	if err != nil || stats.DroppedMessages != 2 || stats.Messages != 2 {
+		t.Fatalf("stats = %+v (%v), want 2 messages and 2 dropped", stats, err)
+	}
+}
+
+// F-084: the loss totals live in the spool directory, survive a restart and
+// are reduced only by what the server acknowledged; a loss recorded after the
+// report stays pending.
+func TestAckLossReducesOnlyAcknowledgedTotals(t *testing.T) {
+	dir := t.TempDir()
+	ctx := testCtx(t)
+	b := &DiskBuffer{Dir: dir}
+	if _, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("aaaa")}); err != nil {
+		t.Fatal(err)
+	}
+	b.MaxBytes = spoolSize(t, dir)
+	if _, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("bbbb")}); !errors.Is(err, ErrSpoolFull) {
+		t.Fatalf("expected ErrSpoolFull, got %v", err)
+	}
+	reported, err := b.Stats(ctx)
+	if err != nil || reported.DroppedMessages != 1 || reported.DroppedBytes == 0 {
+		t.Fatalf("stats = %+v (%v), want one loss", reported, err)
+	}
+	// A further loss after the heartbeat was sent but before it was acked.
+	if _, err = b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("cccc")}); !errors.Is(err, ErrSpoolFull) {
+		t.Fatalf("expected ErrSpoolFull, got %v", err)
+	}
+
+	restarted := &DiskBuffer{Dir: dir, MaxBytes: b.MaxBytes}
+	if err = restarted.AckLoss(ctx, reported.DroppedMessages, reported.DroppedBytes); err != nil {
+		t.Fatalf("AckLoss: %v", err)
+	}
+	st, err := restarted.Stats(ctx)
+	if err != nil || st.DroppedMessages != 1 || st.DroppedBytes == 0 {
+		t.Fatalf("after ack stats = %+v (%v), want the later loss still pending", st, err)
+	}
+	if err = restarted.AckLoss(ctx, st.DroppedMessages, st.DroppedBytes); err != nil {
+		t.Fatalf("AckLoss: %v", err)
+	}
+	again := &DiskBuffer{Dir: dir}
+	if st, err = again.Stats(ctx); err != nil || st.DroppedMessages != 0 || st.DroppedBytes != 0 {
+		t.Fatalf("after full ack and restart stats = %+v (%v), want zero", st, err)
+	}
+	// Acknowledging more than is pending never goes negative.
+	if err = again.AckLoss(ctx, 5, 500); err != nil {
+		t.Fatalf("AckLoss: %v", err)
+	}
+	if st, _ = again.Stats(ctx); st.DroppedMessages != 0 || st.DroppedBytes != 0 {
+		t.Fatalf("over-ack stats = %+v, want zero", st)
+	}
+}
+
+// WP-483: a spooled batch the server refused for good is moved to the
+// quarantine and counted; a refused batch that was never spooled is written
+// to the quarantine and counted; RecordLoss counts a loss the caller saw.
+// All three are persisted and reported to OnDrop as LossRejected.
+func TestRejectQuarantineAndRecordLossCount(t *testing.T) {
+	dir := t.TempDir()
+	ctx := testCtx(t)
+	var reasons []string
+	b := &DiskBuffer{Dir: dir, OnDrop: func(l Loss) { reasons = append(reasons, l.Reason) }}
+	poison, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("poison")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("next")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := spoolSize(t, dir)
+	if err = b.Reject(ctx, poison); err != nil {
+		t.Fatalf("Reject: %v", err)
+	}
+	if err = b.Reject(ctx, poison); err != nil {
+		t.Fatalf("second Reject: %v", err)
+	}
+	if err = b.Reject(ctx, "../loss"); err == nil {
+		t.Fatal("Reject accepted an id outside the spool")
+	}
+	msgs, err := b.PeekBatch(ctx, 10)
+	if err != nil || len(msgs) != 1 || msgs[0].ID != next {
+		t.Fatalf("spool after Reject = %+v (%v), want only the next message", msgs, err)
+	}
+	if _, err = os.Stat(filepath.Join(dir, QuarantineDir, poison+".json")); err != nil {
+		t.Fatalf("rejected message not quarantined: %v", err)
+	}
+
+	if err = b.Quarantine(ctx, &Message{Topic: "t", Payload: []byte("fresh")}); err != nil {
+		t.Fatalf("Quarantine: %v", err)
+	}
+	if spoolSize(t, dir) >= size {
+		t.Fatalf("spool grew by the quarantined message")
+	}
+	if err = b.RecordLoss(ctx, Loss{Messages: 2, Reason: LossRejected}); err != nil {
+		t.Fatalf("RecordLoss: %v", err)
+	}
+	if err = b.RecordLoss(ctx, Loss{}); err != nil {
+		t.Fatalf("empty RecordLoss: %v", err)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(dir, QuarantineDir))
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("quarantine = %d entries (%v), want 2", len(entries), err)
+	}
+	st, err := (&DiskBuffer{Dir: dir}).Stats(ctx)
+	if err != nil || st.Messages != 1 || st.DroppedMessages != 4 || st.DroppedBytes == 0 {
+		t.Fatalf("stats after restart = %+v (%v), want 1 message and 4 losses", st, err)
+	}
+	if len(reasons) != 3 || reasons[0] != LossRejected || reasons[1] != LossRejected || reasons[2] != LossRejected {
+		t.Fatalf("OnDrop reasons = %v, want 3x %s", reasons, LossRejected)
+	}
+}
+
+// Entries and loss totals are written through a temp file and renamed into
+// place: no temp file remains, and every file in the spool is complete.
+func TestEnqueueWritesAtomically(t *testing.T) {
+	dir := t.TempDir()
+	ctx := testCtx(t)
+	b := &DiskBuffer{Dir: dir}
+	id, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("payload")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.MaxBytes = 1
+	if _, err = b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("x")}); !errors.Is(err, ErrSpoolFull) {
+		t.Fatalf("expected ErrSpoolFull, got %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+		if strings.HasPrefix(e.Name(), tempPrefix) {
+			t.Errorf("temp file %s left in the spool", e.Name())
+		}
+	}
+	if len(names) != 2 || names[0] != id+".json" || names[1] != lossFile {
+		t.Fatalf("spool files = %v, want the message and the loss totals", names)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, lossFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st lossState
+	if err = json.Unmarshal(data, &st); err != nil || st.Messages != 1 || st.Bytes == 0 {
+		t.Fatalf("loss totals = %s (%v), want one message", data, err)
+	}
+	// A failing write leaves neither the target nor a temp file behind.
+	if err = os.Mkdir(filepath.Join(dir, "blocked.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = b.writeFileAtomic(filepath.Join(dir, "blocked.json"), []byte("x")); err == nil {
+		t.Fatal("rename onto a directory should fail")
+	}
+	if matches, _ := filepath.Glob(filepath.Join(dir, tempPrefix+"*")); len(matches) != 0 {
+		t.Fatalf("temp files left after a failed write: %v", matches)
+	}
+}
+
+// A torn loss file is quarantined instead of blocking the spool.
+func TestCorruptLossFileIsQuarantined(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, lossFile), []byte(`{"messages":`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	b := &DiskBuffer{Dir: dir}
-
-	if _, err := b.PeekBatch(testCtx(t), 10); err == nil {
-		t.Fatal("expected decode error for corrupt message file, got nil")
-	} else if !strings.Contains(err.Error(), "bad.json") {
-		t.Errorf("error should name the corrupt file, got: %v", err)
+	st, err := b.Stats(testCtx(t))
+	if err != nil || st.DroppedMessages != 0 {
+		t.Fatalf("stats = %+v (%v), want zero totals", st, err)
+	}
+	if _, err = os.Stat(filepath.Join(dir, QuarantineDir, lossFile)); err != nil {
+		t.Fatalf("loss file not quarantined: %v", err)
 	}
 }
 
@@ -393,6 +598,11 @@ func spoolSize(t *testing.T, dir string) int64 {
 	}
 	var total int64
 	for _, e := range entries {
+		// Only message files count towards the spool size; the loss totals
+		// and the quarantine directory are bookkeeping.
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
 		info, err := e.Info()
 		if err != nil {
 			t.Fatalf("info: %v", err)
@@ -587,5 +797,121 @@ func TestStatsContextCancelled(t *testing.T) {
 	cancel()
 	if _, err := b.Stats(ctx); err == nil {
 		t.Error("Stats with cancelled context should fail")
+	}
+}
+
+// NFR-04/F-085: the age limit also runs in the flusher (PeekBatch), so expired
+// data is dropped and counted even when nothing new is spooled and no flush
+// succeeds; messages younger than 24 h are kept.
+func TestPeekBatchExpiresWithoutEnqueue(t *testing.T) {
+	dir := t.TempDir()
+	ctx := testCtx(t)
+	var losses []Loss
+	b := &DiskBuffer{Dir: dir, MaxAge: time.Hour, OnDrop: func(l Loss) { losses = append(losses, l) }}
+	youngID, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("23h")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldID, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("25h")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdate(t, dir, youngID, 23*time.Hour)
+	backdate(t, dir, oldID, 25*time.Hour)
+
+	for attempt := 0; attempt < 2; attempt++ {
+		msgs, err := b.PeekBatch(ctx, 10)
+		if err != nil {
+			t.Fatalf("peek: %v", err)
+		}
+		if len(msgs) != 1 || msgs[0].ID != youngID {
+			t.Fatalf("attempt %d: PeekBatch = %+v, want only the 23 h old message", attempt, msgs)
+		}
+	}
+	if len(losses) != 1 || losses[0].Reason != LossMaxAge || losses[0].Messages != 1 {
+		t.Fatalf("losses = %+v, want one max_age loss", losses)
+	}
+}
+
+// F-084 (moved from audit_t3_spool_loss_auditdefect_test.go): an unavoidable
+// loss (spool_full) is still reported after a restart on the same spool
+// directory, until the server has acknowledged it.
+func TestAuditT3SpoolLossSurvivesRestart(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	b := &DiskBuffer{Dir: dir}
+	if _, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("aaaa")}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := b.Stats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.MaxBytes = st.Bytes
+	if _, err = b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("bbbb")}); err == nil {
+		t.Fatalf("precondition: enqueue at the cap succeeded")
+	}
+	if st, err = b.Stats(ctx); err != nil || st.DroppedMessages != 1 {
+		t.Fatalf("precondition: dropped before restart = %d (%v), want 1", st.DroppedMessages, err)
+	}
+
+	restarted := &DiskBuffer{Dir: dir, MaxBytes: b.MaxBytes}
+	st2, err := restarted.Stats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st2.DroppedMessages < 1 {
+		t.Errorf("after a restart on the same spool directory DroppedMessages = %d, want >= 1: the loss is never reported to the server", st2.DroppedMessages)
+	}
+}
+
+// F-085 (moved from audit_t3_spool_loss_auditdefect_test.go): a torn head
+// file is quarantined and counted as a loss; the remaining backlog is
+// delivered.
+func TestAuditT3CorruptHeadDoesNotBlockSpool(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	b := &DiskBuffer{Dir: dir}
+	first, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("first")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("second")}); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(filepath.Join(dir, "*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	torn := 0
+	for _, path := range files {
+		if strings.HasPrefix(filepath.Base(path), first) {
+			if err = os.WriteFile(path, []byte(`{"id":"`+first+`","topic":"disc`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			torn++
+		}
+	}
+	if torn != 1 {
+		t.Fatalf("precondition: torn %d spool files for %s, want 1", torn, first)
+	}
+
+	// The corrupt head may cost one attempt (quarantine), not the backlog.
+	var delivered bool
+	var lastErr error
+	for attempt := 0; attempt < 3 && !delivered; attempt++ {
+		msgs, peekErr := b.PeekBatch(ctx, 64)
+		lastErr = peekErr
+		for _, m := range msgs {
+			if string(m.Payload) == "second" {
+				delivered = true
+			}
+		}
+	}
+	if !delivered {
+		t.Errorf("intact spooled message behind a corrupt head file is never returned by PeekBatch (last error: %v): head-of-line blocking", lastErr)
+	}
+	if st, statErr := b.Stats(ctx); statErr != nil || st.DroppedMessages < 1 {
+		t.Errorf("corrupt spool entry not counted as a loss: DroppedMessages=%d (%v), want >= 1", st.DroppedMessages, statErr)
 	}
 }

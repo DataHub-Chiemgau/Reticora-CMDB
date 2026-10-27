@@ -431,6 +431,31 @@ func (r *PGRepository) DecideAccessRequest(ctx context.Context, orgID, id, statu
 	return out, err
 }
 
+// ApproveAccessRequest approves the request and stores its provisioning task
+// in one transaction of the request's tenant scope: a task that cannot be
+// written (connector gone, database error) rolls the approval back, the
+// request stays pending and the caller gets the error (F-056).
+func (r *PGRepository) ApproveAccessRequest(ctx context.Context, orgID, id, actor, comment string) (*AccessRequest, error) {
+	var out *AccessRequest
+	err := r.RunInTx(ctx, orgID, func(ctx context.Context) error {
+		ar, err := r.DecideAccessRequest(ctx, orgID, id, "approved", actor, comment)
+		if err != nil {
+			return err
+		}
+		if task := ApprovalTask(ar); task != nil {
+			if err := r.CreateTask(ctx, task); err != nil {
+				return fmt.Errorf("provisioning task of access request: %w", err)
+			}
+		}
+		out = ar
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 const reviewCols = `id::text,organization_id::text,name,COALESCE(description,''),status,due_at,created_at,updated_at`
 
 func scanReview(s interface{ Scan(...any) error }) (*AccessReview, error) {
@@ -464,7 +489,9 @@ func (r *PGRepository) ListReviews(ctx context.Context, orgID, status string, p 
 			where += " AND status=$2"
 			args = append(args, status)
 		}
-		_ = tx.QueryRow(ctx, "SELECT count(*) FROM iga_access_review WHERE "+where, args...).Scan(&total)
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM iga_access_review WHERE "+where, args...).Scan(&total); err != nil {
+			return err
+		}
 		args = append(args, p.Limit, p.Offset)
 		rows, err := tx.Query(ctx, fmt.Sprintf("SELECT %s FROM iga_access_review WHERE %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d", reviewCols, where, len(args)-1, len(args)), args...)
 		if err != nil {
@@ -511,7 +538,9 @@ func (r *PGRepository) ListReviewItems(ctx context.Context, orgID, reviewID stri
 	out := []AccessReviewItem{}
 	total := 0
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		_ = tx.QueryRow(ctx, "SELECT count(*) FROM iga_access_review_item WHERE organization_id=$1 AND review_id=$2", orgID, reviewID).Scan(&total)
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM iga_access_review_item WHERE organization_id=$1 AND review_id=$2", orgID, reviewID).Scan(&total); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, "SELECT "+itemCols+" FROM iga_access_review_item WHERE organization_id=$1 AND review_id=$2 ORDER BY created_at LIMIT $3 OFFSET $4", orgID, reviewID, p.Limit, p.Offset)
 		if err != nil {
 			return err
@@ -565,7 +594,9 @@ func (r *PGRepository) ListDrift(ctx context.Context, orgID, status string, p ap
 			where += " AND status=$2"
 			args = append(args, status)
 		}
-		_ = tx.QueryRow(ctx, "SELECT count(*) FROM iga_drift_finding WHERE "+where, args...).Scan(&total)
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM iga_drift_finding WHERE "+where, args...).Scan(&total); err != nil {
+			return err
+		}
 		args = append(args, p.Limit, p.Offset)
 		rows, err := tx.Query(ctx, fmt.Sprintf("SELECT %s FROM iga_drift_finding WHERE %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d", driftCols, where, len(args)-1, len(args)), args...)
 		if err != nil {

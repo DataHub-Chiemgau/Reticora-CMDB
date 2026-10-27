@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
+import { ApiError } from '../api/client';
 import {
   useCreateWebhook,
   useDeleteWebhook,
+  useHasPermission,
   useRetryWebhookDelivery,
   useTestWebhook,
   useWebhookDeadLetters,
@@ -27,6 +30,78 @@ const availableEvents = [
   'discovery.completed',
 ];
 
+type FormField = 'name' | 'url' | 'secret' | 'events';
+
+const formFields: readonly FormField[] = ['name', 'url', 'secret', 'events'];
+
+/** A refusal of the server as the page shows it: a summary and per-field messages. */
+interface RefusalView {
+  message: string;
+  fields: Partial<Record<FormField, string>>;
+}
+
+// The egress check (SEC-08) refuses a destination with this prefix and the
+// reason after it, e.g. "egress: destination is not allowed: 127.0.0.1".
+const egressRefusal = /^egress: destination is not allowed:?\s*(.*)$/i;
+const invalidEvent = /^invalid event:\s*(.+)$/i;
+
+/**
+ * describeRefusal turns a failed webhook request into a localized message
+ * (F-062): a refused destination names the reason at the URL field, a
+ * validation error goes to its field, a 403 says that the right is missing.
+ * The user sees why nothing was saved instead of an unchanged form.
+ */
+function describeRefusal(error: unknown, t: TFunction): RefusalView {
+  if (!(error instanceof ApiError)) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { message: t('webhook.errors.failed', { detail }), fields: {} };
+  }
+  if (error.status === 403) {
+    return { message: t('webhook.errors.forbidden'), fields: {} };
+  }
+  if (error.status === 404) {
+    return { message: t('webhook.errors.notFound'), fields: {} };
+  }
+  if (error.status !== 400 && error.status !== 422) {
+    return { message: t('webhook.errors.failed', { detail: error.message }), fields: {} };
+  }
+
+  const detail = error.detail ?? error.message;
+  const egress = egressRefusal.exec(detail);
+  if (egress || detail.toLowerCase().startsWith('egress:')) {
+    const reason = egress?.[1] || detail;
+    return {
+      message: t('webhook.errors.notSaved'),
+      fields: { url: t('webhook.errors.egress', { reason }) },
+    };
+  }
+  const event = invalidEvent.exec(detail);
+  if (event) {
+    return {
+      message: t('webhook.errors.notSaved'),
+      fields: { events: t('webhook.errors.invalidEvent', { event: event[1] }) },
+    };
+  }
+  if (error.hasViolations) {
+    const fields: Partial<Record<FormField, string>> = {};
+    const others: string[] = [];
+    for (const [field, message] of Object.entries(error.violationsByField())) {
+      if ((formFields as readonly string[]).includes(field)) {
+        fields[field as FormField] = t('webhook.errors.invalidValue', { detail: message || field });
+      } else {
+        others.push(`${field}: ${message}`);
+      }
+    }
+    return {
+      message: others.length
+        ? t('webhook.errors.rejected', { detail: others.join('; ') })
+        : t('webhook.errors.notSaved'),
+      fields,
+    };
+  }
+  return { message: t('webhook.errors.rejected', { detail }), fields: {} };
+}
+
 export function WebhooksPage() {
   const { t } = useTranslation();
   const subscriptions = useWebhookList();
@@ -37,7 +112,14 @@ export function WebhooksPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const deliveries = useWebhookDeliveries(selectedId);
   const retryDelivery = useRetryWebhookDelivery();
+  // Creating, deleting, testing and retrying need webhook:manage (RBA-02);
+  // without it the page stays a read-only list (F-062). Unknown rights
+  // (still loading) offer no action either.
+  const managePermission = useHasPermission('webhook:manage');
+  const canManage = managePermission === true;
   const [form, setForm] = useState({ name: '', url: '', secret: '', events: [] as string[] });
+  const [createError, setCreateError] = useState<RefusalView | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const toggleEvent = (event: string) => {
     setForm((current) => ({
@@ -50,9 +132,29 @@ export function WebhooksPage() {
 
   const submit = () => {
     if (!form.name || !form.url || !form.secret || form.events.length === 0) return;
+    setCreateError(null);
+    // On a refusal the inputs stay as they are, so the user can correct them.
     createWebhook.mutate(form, {
       onSuccess: () => setForm({ name: '', url: '', secret: '', events: [] }),
+      onError: (error) => setCreateError(describeRefusal(error, t)),
     });
+  };
+
+  const actionCallbacks = {
+    onSuccess: () => setActionError(null),
+    onError: (error: unknown) => setActionError(describeRefusal(error, t).message),
+  };
+  const runTest = (id: string) => {
+    setActionError(null);
+    testWebhook.mutate(id, actionCallbacks);
+  };
+  const runDelete = (id: string) => {
+    setActionError(null);
+    deleteWebhook.mutate(id, actionCallbacks);
+  };
+  const runRetry = (id: string, deliveryId: string) => {
+    setActionError(null);
+    retryDelivery.mutate({ id, deliveryId }, actionCallbacks);
   };
 
   if (subscriptions.isLoading || deadLetters.isLoading) {
@@ -88,64 +190,88 @@ export function WebhooksPage() {
         <p className="text-sm text-gray-600 dark:text-gray-300">{t('webhook.subtitle')}</p>
       </div>
 
-      <Card title={t('webhook.createSubscription')}>
-        <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-3 md:items-end">
-            <Input
-              label={t('webhook.name')}
-              value={form.name}
-              onChange={(event) => setForm({ ...form, name: event.target.value })}
-            />
-            <Input
-              label={t('webhook.url')}
-              type="url"
-              value={form.url}
-              onChange={(event) => setForm({ ...form, url: event.target.value })}
-            />
-            <Input
-              label={t('webhook.secret')}
-              type="password"
-              value={form.secret}
-              onChange={(event) => setForm({ ...form, secret: event.target.value })}
-            />
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{t('webhook.secretWriteOnly')}</p>
-          <fieldset>
-            <legend className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t('webhook.events')}
-            </legend>
-            <div className="flex flex-wrap gap-3">
-              {availableEvents.map((event) => (
-                <label
-                  key={event}
-                  className="flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300"
-                >
-                  <input
-                    type="checkbox"
-                    checked={form.events.includes(event)}
-                    onChange={() => toggleEvent(event)}
-                  />
-                  {event}
-                </label>
-              ))}
+      {canManage ? (
+        <Card title={t('webhook.createSubscription')}>
+          <div className="space-y-4">
+            {createError ? (
+              <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+                {createError.message}
+              </p>
+            ) : null}
+            <div className="grid gap-4 md:grid-cols-3 md:items-end">
+              <Input
+                label={t('webhook.name')}
+                value={form.name}
+                error={createError?.fields.name}
+                onChange={(event) => setForm({ ...form, name: event.target.value })}
+              />
+              <Input
+                label={t('webhook.url')}
+                type="url"
+                value={form.url}
+                error={createError?.fields.url}
+                onChange={(event) => setForm({ ...form, url: event.target.value })}
+              />
+              <Input
+                label={t('webhook.secret')}
+                type="password"
+                value={form.secret}
+                error={createError?.fields.secret}
+                onChange={(event) => setForm({ ...form, secret: event.target.value })}
+              />
             </div>
-          </fieldset>
-          <Button
-            onClick={submit}
-            disabled={
-              createWebhook.isPending ||
-              !form.name ||
-              !form.url ||
-              !form.secret ||
-              form.events.length === 0
-            }
-          >
-            {t('common.save')}
-          </Button>
-        </div>
-      </Card>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {t('webhook.secretWriteOnly')}
+            </p>
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                {t('webhook.events')}
+              </legend>
+              <div className="flex flex-wrap gap-3">
+                {availableEvents.map((event) => (
+                  <label
+                    key={event}
+                    className="flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.events.includes(event)}
+                      onChange={() => toggleEvent(event)}
+                    />
+                    {event}
+                  </label>
+                ))}
+              </div>
+              {createError?.fields.events ? (
+                <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+                  {createError.fields.events}
+                </p>
+              ) : null}
+            </fieldset>
+            <Button
+              onClick={submit}
+              disabled={
+                createWebhook.isPending ||
+                !form.name ||
+                !form.url ||
+                !form.secret ||
+                form.events.length === 0
+              }
+            >
+              {t('common.save')}
+            </Button>
+          </div>
+        </Card>
+      ) : managePermission === false ? (
+        <p className="text-sm text-gray-600 dark:text-gray-300">{t('webhook.readOnly')}</p>
+      ) : null}
 
       <Card title={`${t('webhook.subscriptions')} (${subscriptions.data?.total ?? 0})`}>
+        {actionError ? (
+          <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">
+            {actionError}
+          </p>
+        ) : null}
         {subscriptions.data?.data.length ? (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -178,22 +304,26 @@ export function WebhooksPage() {
                         >
                           {t('webhook.deliveries')}
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => testWebhook.mutate(sub.id)}
-                          disabled={testWebhook.isPending}
-                        >
-                          {t('webhook.test')}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => deleteWebhook.mutate(sub.id)}
-                          disabled={deleteWebhook.isPending}
-                        >
-                          {t('common.delete')}
-                        </Button>
+                        {canManage ? (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => runTest(sub.id)}
+                              disabled={testWebhook.isPending}
+                            >
+                              {t('webhook.test')}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => runDelete(sub.id)}
+                              disabled={deleteWebhook.isPending}
+                            >
+                              {t('common.delete')}
+                            </Button>
+                          </>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -237,14 +367,11 @@ export function WebhooksPage() {
                       max: delivery.max_attempts,
                     })}
                   </span>
-                  {delivery.status === 'failed' || delivery.status === 'dead' ? (
+                  {canManage && (delivery.status === 'failed' || delivery.status === 'dead') ? (
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() =>
-                        selectedId &&
-                        retryDelivery.mutate({ id: selectedId, deliveryId: delivery.id })
-                      }
+                      onClick={() => selectedId && runRetry(selectedId, delivery.id)}
                       disabled={retryDelivery.isPending}
                     >
                       {t('webhook.retry')}

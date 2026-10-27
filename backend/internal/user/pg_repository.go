@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -76,8 +77,9 @@ const userRoleAssignmentSelectColumns = `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
-	pool *pgxpool.Pool
-	mfa  MFAEnforcer
+	pool  *pgxpool.Pool
+	mfa   MFAEnforcer
+	quota QuotaGuard
 }
 
 // NewPGRepository creates a new PostgreSQL-backed user repository.
@@ -91,6 +93,49 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 func (r *PGRepository) WithMFA(m MFAEnforcer) *PGRepository {
 	r.mfa = m
 	return r
+}
+
+// WithQuota checks max_users before a first login with an invitation
+// creates the user (ENT-03); over the limit the login fails with the
+// guard's error and the invitation stays open. Without it nothing is
+// checked.
+func (r *PGRepository) WithQuota(q QuotaGuard) *PGRepository {
+	r.quota = q
+	return r
+}
+
+// CountActiveUsers implements Repository.
+func (r *PGRepository) CountActiveUsers(ctx context.Context, orgID string) (int64, error) {
+	var n int64
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		n, err = countActiveUsers(ctx, tx, orgID)
+		return err
+	})
+	return n, err
+}
+
+func countActiveUsers(ctx context.Context, tx pgx.Tx, orgID string) (int64, error) {
+	var n int64
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM app_user WHERE organization_id = $1 AND is_active`, orgID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count active users: %w", err)
+	}
+	return n, nil
+}
+
+// allowUserTx checks max_users in the tenant transaction tx of scope before
+// a user is created without a principal (invitation, first login): the
+// guard reads the entitlements in tx, and its refusal rolls tx back. A nil
+// guard allows.
+func allowUserTx(ctx context.Context, tx pgx.Tx, scope *database.TenantScope, quota QuotaGuard, orgID string) error {
+	if quota == nil {
+		return nil
+	}
+	n, err := countActiveUsers(ctx, tx, orgID)
+	if err != nil {
+		return err
+	}
+	return quota.AllowCreate(database.ContextWithTx(database.ContextWithTenantScope(ctx, scope), tx), orgID, entitlement.LimitMaxUsers, n)
 }
 
 func (r *PGRepository) ListUsers(ctx context.Context, orgID, search string, page api.PaginationParams) ([]User, int, error) {
@@ -663,7 +708,7 @@ func (r *PGRepository) ListTeamMembers(ctx context.Context, orgID, teamID string
 		if !exists {
 			return errTeamNotFound
 		}
-		query := fmt.Sprintf("SELECT %s FROM team_member WHERE team_id = $1 ORDER BY joined_at ASC", teamMemberSelectColumns)
+		query := fmt.Sprintf("SELECT %s FROM team_member WHERE team_id = $1 ORDER BY joined_at ASC, id ASC", teamMemberSelectColumns)
 		rows, err := tx.Query(ctx, query, teamID)
 		if err != nil {
 			return fmt.Errorf("list team members: %w", err)
@@ -1187,7 +1232,7 @@ func (r *PGRepository) ListUserRoles(ctx context.Context, orgID, userID string) 
 				   created_at, ''
 			FROM role_assignment
 			WHERE organization_id = $1 AND user_id = $2
-			ORDER BY granted_at DESC
+			ORDER BY granted_at DESC, id DESC
 		`, orgID, userID)
 		if err != nil {
 			return fmt.Errorf("list user roles: %w", err)
@@ -1360,10 +1405,13 @@ func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email
 	var id string
 	err := database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		id, err = resolveLogin(ctx, tx, r.mfa, orgID, oidcSubject, email, displayName)
+		id, err = resolveLogin(ctx, tx, r.mfa, r.quota, orgID, oidcSubject, email, displayName)
 		return err
 	})
 	if errors.Is(err, identity.ErrUserInactive) || errors.Is(err, identity.ErrFirstLoginNotPermitted) || errors.Is(err, ErrMFAUnavailable) {
+		return "", err
+	}
+	if quotaRefused(err) {
 		return "", err
 	}
 	var pgErr *pgconn.PgError
@@ -1378,7 +1426,7 @@ func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email
 }
 
 // resolveLogin implements EnsureUser inside the login transaction.
-func resolveLogin(ctx context.Context, tx pgx.Tx, mfa MFAEnforcer, orgID, subject, email, displayName string) (string, error) {
+func resolveLogin(ctx context.Context, tx pgx.Tx, mfa MFAEnforcer, quota QuotaGuard, orgID, subject, email, displayName string) (string, error) {
 	var (
 		id     string
 		active bool
@@ -1463,6 +1511,10 @@ func resolveLogin(ctx context.Context, tx pgx.Tx, mfa MFAEnforcer, orgID, subjec
 		if users > 0 {
 			return "", identity.ErrFirstLoginNotPermitted
 		}
+	} else if quotaErr := allowUserTx(ctx, tx, loginScope(orgID), quota, orgID); quotaErr != nil {
+		// max_users is reached: the login fails and rolls back, the
+		// invitation stays open (ENT-03, ENT-08).
+		return "", quotaErr
 	}
 
 	if insertErr := tx.QueryRow(ctx, `
@@ -1524,8 +1576,10 @@ func (r *PGRepository) UserActive(ctx context.Context, orgID, userID string) (bo
 }
 
 // EnsureRole assigns the named standard role to the user when they hold no
-// standard role yet, so first login lands on a sensible least-privilege
-// baseline instead of an empty permission set. It reports whether the user
+// role yet, standard or custom, so first login lands on a sensible
+// least-privilege baseline instead of an empty permission set. A user an
+// administrator gave only a custom role keeps exactly that role: the login
+// does not add the default role back (RBA-03). It reports whether the user
 // holds the role afterwards, assigned now or before: the login binds a
 // default role org_admin to MFA (WP-367).
 //
@@ -1537,7 +1591,10 @@ func (r *PGRepository) EnsureRole(ctx context.Context, orgID, userID, roleName s
 	var held bool
 	err := database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		var existing int
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM role_assignment WHERE organization_id = $1 AND user_id = $2`, orgID, userID).Scan(&existing); err != nil {
+		if err := tx.QueryRow(ctx, `
+			SELECT (SELECT COUNT(*) FROM role_assignment WHERE organization_id = $1 AND user_id = $2)
+			     + (SELECT COUNT(*) FROM user_custom_role ucr JOIN custom_role cr ON cr.id = ucr.custom_role_id
+			         WHERE cr.organization_id = $1 AND ucr.user_id = $2)`, orgID, userID).Scan(&existing); err != nil {
 			return fmt.Errorf("check role assignments: %w", err)
 		}
 		if existing == 0 {

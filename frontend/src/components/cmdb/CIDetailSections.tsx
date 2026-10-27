@@ -572,10 +572,20 @@ export function CIMetricsSection({ ciId }: { ciId: string }) {
 
 // ─── History (CI-06) ─────────────────────────────────────────────────────────
 
+/** historyValue renders an old or new value of a field change; empty is "—". */
+function historyValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
 /**
  * CIHistorySection lists the unified history of a CI (CI-06): changes,
- * history rows and audit entries, newest first, each with its time and the
- * site of the CI at that time.
+ * history rows, location changes and audit entries, newest first, each with
+ * its time and the site of the CI at that time. A CI change is one entry per
+ * change set (AUD-03) with a line per changed field: name, old and new
+ * value; a row written before the change sets is shown as before. Without
+ * audit:read the server leaves the audit entries out (E-78); the section
+ * then says so.
  */
 export function CIHistorySection({ ciId }: { ciId: string }) {
   const { t, i18n } = useTranslation();
@@ -613,10 +623,22 @@ export function CIHistorySection({ ciId }: { ciId: string }) {
                   {t('ci.historySite', { site: entry.site_id })}
                 </span>
               ) : null}
+              {entry.change_set_id && entry.field_changes?.length ? (
+                <ul className="basis-full space-y-0.5 pl-4 text-gray-700 dark:text-gray-300">
+                  {entry.field_changes.map((change) => (
+                    <li key={change.field} className="break-all">
+                      {`${change.field}: ${historyValue(change.old)} → ${historyValue(change.new)}`}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </li>
           ))}
         </ol>
       )}
+      {history.data?.audit_included === false ? (
+        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{t('ci.historyAuditHint')}</p>
+      ) : null}
     </Section>
   );
 }

@@ -377,8 +377,8 @@ func main() {
 		Cache:   cacheStore,
 		Enforce: cfg.EntitlementEnforcement,
 	})
-	// A missing entitlement row means not entitled (ENT-05): organizations
-	// without rows get the rows of their plan once.
+	// A missing entitlement row means not entitled (ENT-05): every
+	// organization gets the missing rows of its plan at each start (F-210).
 	if err = provisionEntitlements(context.Background(), entitlementSvc, auditPool, cfg.DefaultPlan); err != nil {
 		slog.Error("entitlement provisioning failed", "error", err)
 		os.Exit(1)
@@ -414,7 +414,9 @@ func main() {
 			notify.ProviderSMTP:        notify.NewEmailProvider(smtpSender).WithEgress(egressPolicy),
 			notify.ProviderInApp:       notify.NewInAppProvider(notifications.Inbox),
 			notify.ProviderWebhook:     notify.NewWebhookProvider(egress.NewClient(egressPolicy)),
-		}))
+		})).
+		// E-mail channels send only with notifications_email (ENT-05).
+		WithEntitlements(entitlementSvc)
 	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(egressPolicy), webhook.DispatcherOptions{
 		// Subscriptions bound to a service account receive only events whose
 		// object the account may read (RBA-08).
@@ -454,9 +456,7 @@ func main() {
 	repos.CI = bootstrap.NewCIRepository(repos.CI, repos.Search, repos.AI, aiProvider,
 		ai.NewOrgConsent(repos.AI, entitlementSvc), modules)
 	// A worker of a switched-off module does not start (WP-214).
-	workerEnabled := func(name string) bool {
-		return cfg.WorkerEnabled(name) && modules.WorkerAllowed(name)
-	}
+	workerEnabled := workerSwitch(cfg, modules)
 	// The backlog per lane as the ingest worker's 30-s sampler read it last,
 	// informational: it never takes the instance out of the load balancer,
 	// and a request never asks NATS (WP-334, OPS-05). Only the ingest worker
@@ -657,9 +657,10 @@ func newHTTPHandler(repos server.Repositories, opts server.Options, stages httpS
 	)(mux), nil
 }
 
-// provisionEntitlements stores the plan's entitlement rows for every
-// organization without rows. Without a database (--no-db) the demo
-// organization gets the default plan.
+// provisionEntitlements stores the missing entitlement rows of its plan for
+// every organization (F-210); existing rows stay unchanged and the added
+// feature keys are logged per organization. Without a database (--no-db)
+// the demo organization gets the default plan.
 func provisionEntitlements(ctx context.Context, svc *entitlement.Service, pool *pgxpool.Pool, defaultPlan string) error {
 	plans := map[string]entitlement.Plan{}
 	if pool == nil {

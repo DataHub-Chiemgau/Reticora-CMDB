@@ -50,6 +50,23 @@ func (r *RedisStore) Increment(ctx context.Context, key string, ttl time.Duratio
 	return incr.Val(), nil
 }
 
+// decrementExisting decrements KEYS[1] only when it exists, so a release
+// after the window's key expired does not create a counter without TTL.
+var decrementExisting = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  return redis.call('DECR', KEYS[1])
+end
+return 0
+`)
+
+func (r *RedisStore) Decrement(ctx context.Context, key string) (int64, error) {
+	n, err := decrementExisting.Run(ctx, r.client, []string{key}).Int64()
+	if err != nil {
+		return 0, fmt.Errorf("cache: redis decr: %w", err)
+	}
+	return n, nil
+}
+
 func (r *RedisStore) Delete(ctx context.Context, key string) error {
 	if err := r.client.Del(ctx, key).Err(); err != nil {
 		return fmt.Errorf("cache: redis del: %w", err)

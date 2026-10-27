@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
 import { ScopeSwitcher } from './components/ScopeSwitcher';
 import { NotificationCenter } from './components/NotificationCenter';
+import { EntitlementExpiryBanner } from './components/EntitlementExpiryBanner';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
 import { Button } from './components/ui/Button';
@@ -294,6 +295,8 @@ function App() {
           </div>
         </div>
       </header>
+      {/* Expiring entitlements (ENT-07, WP-464). */}
+      {isAuthenticated ? <EntitlementExpiryBanner /> : null}
       <main id="main-content" className="p-6">
         <Routes>
           <Route path="/login" element={<LoginPage />} />

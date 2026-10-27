@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/http"
 	"slices"
 	"sort"
 	"strconv"
@@ -22,6 +23,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Ingest pipeline (REC-01): every record is published on
@@ -173,32 +175,288 @@ func (h *Handler) dispatch(ctx context.Context, msgs []IngestMessage) (BulkInges
 // messages by observed_at and processes them per organization and ingest
 // lane, serially per organization and lane within this process (per
 // organization when its lanes do not run side by side, see serialLane),
-// each in the tenant scope it carries.
+// each in the tenant scope it carries. A record or group that fails does
+// not stop the others (WP-481): the error is an *IngestErrors that names
+// each message not processed, by its position in msgs.
 func (h *Handler) ProcessMessages(ctx context.Context, msgs []IngestMessage) (BulkIngestResponse, error) {
-	ordered := append([]IngestMessage(nil), msgs...)
-	sortByObservedAt(ordered)
+	ordered := make([]int, len(msgs))
+	for i := range ordered {
+		ordered[i] = i
+	}
+	sort.SliceStable(ordered, func(a, b int) bool { return msgs[ordered[a]].ObservedAt.Before(msgs[ordered[b]].ObservedAt) })
 	var total BulkIngestResponse
+	var failed []RecordError
 	for len(ordered) > 0 {
-		head := ordered[0]
+		head := msgs[ordered[0]]
 		lane := h.serialLane(head.lane(h.ingestLanes))
 		var group []IngestItem
-		var rest []IngestMessage
-		for i := range ordered {
-			if ordered[i].OrganizationID == head.OrganizationID && sameScope(ordered[i].Scope, head.Scope) &&
-				h.serialLane(ordered[i].lane(h.ingestLanes)) == lane {
-				group = append(group, ordered[i].item())
+		var members, rest []int
+		for _, i := range ordered {
+			if msgs[i].OrganizationID == head.OrganizationID && sameScope(msgs[i].Scope, head.Scope) &&
+				h.serialLane(msgs[i].lane(h.ingestLanes)) == lane {
+				item := msgs[i].item()
+				item.seq = i + 1
+				group = append(group, item)
+				members = append(members, i)
 			} else {
-				rest = append(rest, ordered[i])
+				rest = append(rest, i)
 			}
 		}
 		ordered = rest
 		resp, err := h.processSerially(head.context(ctx), head.OrganizationID, lane, group)
 		total.add(&resp)
-		if err != nil {
-			return total, err
-		}
+		failed = append(failed, groupFailures(msgs, members, err)...)
+	}
+	if len(failed) > 0 {
+		return total, &IngestErrors{Records: failed}
 	}
 	return total, nil
+}
+
+// groupFailures returns a failure for each message of a group (members,
+// positions in msgs) that processing the group with the result err did not
+// process: the records err names, every other record when it failed as a
+// whole (the frame or the ledger), and the repeats of a failed record_id,
+// which share its fate (skipProcessed).
+func groupFailures(msgs []IngestMessage, members []int, err error) []RecordError {
+	if err == nil {
+		return nil
+	}
+	rest := err
+	bySeq := map[int]RecordError{}
+	var failedIDs map[string]RecordError
+	var ie *IngestErrors
+	if errors.As(err, &ie) {
+		rest = ie.Rest
+		failedIDs = map[string]RecordError{}
+		for _, f := range ie.Records {
+			bySeq[f.seq] = f
+			if id := ledgerKey(f.RecordID); id != "" {
+				if _, seen := failedIDs[id]; !seen {
+					failedIDs[id] = f
+				}
+			}
+		}
+	}
+	var out []RecordError
+	for _, i := range members {
+		item := msgs[i].item()
+		item.seq = i + 1
+		f, ok := bySeq[i+1]
+		if !ok {
+			first, repeat := failedIDs[ledgerKey(item.RecordID)]
+			switch {
+			case item.RecordID != "" && repeat:
+				f = newRecordError(&item, first.Err)
+			case rest != nil:
+				f = newRecordError(&item, rest)
+			default:
+				continue
+			}
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// IngestErrors is the error of an ingest some of whose records were not
+// processed (REC-01, WP-481). Records failed each on its own; every other
+// record was processed, unless Rest is set: then the batch failed as a
+// whole besides (its frame or its ledger entries) and no other record
+// counts as processed.
+type IngestErrors struct {
+	Records []RecordError
+	Rest    error
+}
+
+func (e *IngestErrors) Error() string {
+	switch {
+	case len(e.Records) == 0 && e.Rest != nil:
+		return e.Rest.Error()
+	case e.Rest != nil:
+		return fmt.Sprintf("%d ingest records failed, first: %v; the others: %v", len(e.Records), e.Records[0].Err, e.Rest)
+	case len(e.Records) == 1:
+		return "ingest record failed: " + e.Records[0].Err.Error()
+	case len(e.Records) > 1:
+		return fmt.Sprintf("%d ingest records failed, first: %v", len(e.Records), e.Records[0].Err)
+	}
+	return "ingest failed"
+}
+
+// Unwrap returns the errors of the failed records and Rest.
+func (e *IngestErrors) Unwrap() []error {
+	out := make([]error, 0, len(e.Records)+1)
+	for _, f := range e.Records {
+		out = append(out, f.Err)
+	}
+	if e.Rest != nil {
+		out = append(out, e.Rest)
+	}
+	return out
+}
+
+// RecordError is a record an ingest did not process.
+type RecordError struct {
+	RecordID string
+	Err      error
+	// Permanent: the record can never succeed (outside the sender's scope,
+	// invalid, another refusal of the 4xx class); the queue gives it up at
+	// once. Otherwise the failure is transient (database, network) and the
+	// record is delivered again.
+	Permanent bool
+	// seq is IngestItem.seq of the record.
+	seq int
+	// status and detail are what the HTTP answer reports, without internals.
+	status int
+	detail string
+}
+
+// IngestRecordError is a record the ingest rejected, as the answer lists it
+// (WP-481).
+type IngestRecordError struct {
+	RecordID string `json:"record_id,omitempty"`
+	// Status is the HTTP status the record alone would have been answered
+	// with.
+	Status int    `json:"status"`
+	Detail string `json:"detail"`
+	// Retryable: the failure is transient; sent again, the record may
+	// succeed.
+	Retryable bool `json:"retryable"`
+}
+
+// errHeldBack fails a record that was not processed because an earlier
+// record of its batch sharing one of its identity keys failed transiently
+// (WP-481, E-56): processed after it, the device's records would lose their
+// order.
+var errHeldBack = errors.New("not processed: an earlier record sharing an identity key failed transiently")
+
+// recordErrorClass is how a record failure is reported and handled.
+type recordErrorClass struct {
+	status    int
+	detail    string
+	permanent bool
+}
+
+// classifyRecordError classifies the failure of a record like
+// api.WriteRepoError answers it: a refusal of the 4xx class (outside the
+// sender's scope, a value the data model rejects, a unique value another CI
+// holds) is permanent, except a lost race against another lane (deadlock,
+// serialization, an identity index; retryReason), which is transient like a
+// database or network failure.
+func classifyRecordError(err error) recordErrorClass {
+	switch {
+	case errors.Is(err, errHeldBack):
+		return recordErrorClass{status: http.StatusServiceUnavailable,
+			detail: "not processed after an earlier record of the same device failed; send it again"}
+	case errors.Is(err, database.ErrNoTenantScope), errors.Is(err, database.ErrIncompleteScope),
+		errors.Is(err, database.ErrTenantMismatch):
+		return recordErrorClass{status: http.StatusForbidden, detail: "the operation is not permitted", permanent: true}
+	case errors.Is(err, api.ErrNotFound):
+		return recordErrorClass{status: http.StatusNotFound, detail: "the requested resource was not found", permanent: true}
+	}
+	if status, _, detail, ok := api.ClassifyDBError(err); ok {
+		return recordErrorClass{status: status, detail: detail,
+			permanent: status >= 400 && status < 500 && retryReason(err) == ""}
+	}
+	if api.IsUnavailable(err) {
+		return recordErrorClass{status: http.StatusServiceUnavailable,
+			detail: "a required service is temporarily unavailable, try again later"}
+	}
+	return recordErrorClass{status: http.StatusInternalServerError, detail: "the record could not be processed, send it again"}
+}
+
+// newRecordError is the failure err of item.
+func newRecordError(item *IngestItem, err error) RecordError {
+	c := classifyRecordError(err)
+	return RecordError{RecordID: item.RecordID, Err: err, Permanent: c.permanent, seq: item.seq, status: c.status, detail: c.detail}
+}
+
+// heldKeys are the identity lock keys (identityLockKeys) of the records of
+// a batch that failed transiently or were held back.
+type heldKeys map[int32]struct{}
+
+func (h heldKeys) add(keys []int32) {
+	for _, k := range keys {
+		h[k] = struct{}{}
+	}
+}
+
+// holds reports whether a record with keys shares one of them.
+func (h heldKeys) holds(keys []int32) bool {
+	for _, k := range keys {
+		if _, ok := h[k]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// processEach processes the items one by one, each in a batch of its own,
+// in their order; a record that failed transiently holds back the records
+// after it that share one of its identity keys, as in processItems.
+func (h *Handler) processEach(ctx context.Context, orgID string, items []IngestItem) (BulkIngestResponse, error) {
+	var resp BulkIngestResponse
+	var failed []RecordError
+	held := heldKeys{}
+	for i := range items {
+		keys := identityLockKeys(orgID, nil, &items[i])
+		if held.holds(keys) {
+			failed = append(failed, newRecordError(&items[i], errHeldBack))
+			held.add(keys)
+			continue
+		}
+		one, err := h.processItems(ctx, orgID, items[i:i+1])
+		resp.add(&one)
+		if err == nil {
+			continue
+		}
+		var f RecordError
+		var ie *IngestErrors
+		switch {
+		case errors.As(err, &ie) && len(ie.Records) > 0:
+			f = ie.Records[0]
+		case ie != nil && ie.Rest != nil:
+			f = newRecordError(&items[i], ie.Rest)
+		default:
+			f = newRecordError(&items[i], err)
+		}
+		failed = append(failed, f)
+		if !f.Permanent {
+			held.add(keys)
+		}
+	}
+	if len(failed) > 0 {
+		return resp, &IngestErrors{Records: failed}
+	}
+	return resp, nil
+}
+
+// finish completes the answer to an ingest of received records, future of
+// them rejected for their observed_at, from the error of its dispatch: the
+// records that failed are listed and counted as rejected, the others as
+// accepted. It returns the error to answer with instead: err when it is no
+// failure of single records, or the first record's error when no record was
+// accepted (the status of the request as before WP-481).
+func (r *BulkIngestResponse) finish(received, future int, err error) error {
+	r.Received, r.RejectedFuture = received, future
+	var ie *IngestErrors
+	if err != nil && !errors.As(err, &ie) {
+		return err
+	}
+	if ie != nil {
+		if len(ie.Records) == 0 {
+			return err
+		}
+		for _, f := range ie.Records {
+			r.Errors = append(r.Errors, IngestRecordError{RecordID: f.RecordID, Status: f.status, Detail: f.detail, Retryable: !f.Permanent})
+		}
+	}
+	r.Rejected = len(r.Errors)
+	r.Accepted = max(0, received-future-r.Rejected)
+	if r.Rejected > 0 && r.Accepted == 0 {
+		return ie.Records[0].Err
+	}
+	return nil
 }
 
 func sameScope(a, b *MessageScope) bool {
@@ -449,8 +707,22 @@ func ingestConsumerConfig(name string, lane int) jetstream.ConsumerConfig {
 var ingestDeadLetters atomic.Int64
 
 // IngestDeadLetters is the number of ingest messages given up since start:
-// undecodable, or failed ingestMaxDeliver times.
+// undecodable, failed for good, or failed ingestMaxDeliver times.
 func IngestDeadLetters() int64 { return ingestDeadLetters.Load() }
+
+// deadLetters counts the ingest messages given up, by reason: undecodable,
+// permanent (the record can never succeed, WP-481) or max_deliver.
+var deadLetters = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Namespace: "reticora",
+	Name:      "ingest_dead_letters_total",
+	Help:      "Ingest messages given up (terminated), by reason: undecodable, permanent (the record can never succeed) or max_deliver.",
+}, []string{"reason"})
+
+// deadLetter counts an ingest message given up for reason.
+func deadLetter(reason string) {
+	ingestDeadLetters.Add(1)
+	deadLetters.WithLabelValues(reason).Inc()
+}
 
 // processingSlots bounds the batches the lanes of a process work on at the
 // same time to a quarter of the database pool, so that the ingest leaves
@@ -936,11 +1208,15 @@ func (q *NATSIngestQueue) ReadinessDetail(context.Context) (any, error) {
 
 // consumeBatch processes one fetched batch. Undecodable messages are
 // terminated; the messages of a group (organization, scope, lane) are
-// acknowledged when it was processed, and so are its records processed
-// before or within it when it failed; the others are redelivered, and given
-// up after ingestMaxDeliver attempts. Other consumers may process records
-// of the same organization at the same time, so the transactions take the
-// ingest locks whatever the lane count (Handler.locking).
+// decided each for its record (WP-481): acknowledged when it was processed
+// or was before; terminated and counted as a dead letter when it failed for
+// good (outside the sender's scope, invalid, see classifyRecordError);
+// redelivered when it failed transiently or an earlier record sharing one
+// of its identity keys did (E-56), and given up after ingestMaxDeliver
+// attempts. When the group failed as a whole, every record not processed
+// before is redelivered. Other consumers may process records of the same
+// organization at the same time, so the transactions take the ingest locks
+// whatever the lane count (Handler.locking).
 func consumeBatch(ctx context.Context, h *Handler, deliveries []ingestDelivery) {
 	ctx = withQueued(ctx)
 	type entry struct {
@@ -951,7 +1227,7 @@ func consumeBatch(ctx context.Context, h *Handler, deliveries []ingestDelivery) 
 	for _, d := range deliveries {
 		var msg IngestMessage
 		if err := json.Unmarshal(d.Data(), &msg); err != nil || msg.OrganizationID == "" {
-			ingestDeadLetters.Add(1)
+			deadLetter("undecodable")
 			slog.Error("ingest message dropped: undecodable", "event", "ingest.message.invalid", "error", err)
 			_ = d.Term()
 			continue
@@ -982,24 +1258,54 @@ func consumeBatch(ctx context.Context, h *Handler, deliveries []ingestDelivery) 
 		}
 		groupCtx, settled := withSettled(ctx)
 		_, err := h.ProcessMessages(groupCtx, msgs)
+		failures := messageFailures(err, len(group))
 		for i := range group {
 			e := &group[i]
+			f := failures[i]
 			switch {
-			case err == nil, settled.has(e.msg.RecordID):
+			case f == nil, settled.has(e.msg.RecordID):
 				_ = e.d.Ack()
 				laneRecords.WithLabelValues(strconv.Itoa(lane)).Inc()
+			case f.Permanent:
+				deadLetter("permanent")
+				slog.Error("ingest message given up: the record can never succeed", "event", "ingest.message.failed",
+					"organization_id", e.msg.OrganizationID, "record_id", e.msg.RecordID, "permanent", true, "error", f.Err)
+				_ = e.d.Term()
 			case e.d.Delivered() >= ingestMaxDeliver:
-				ingestDeadLetters.Add(1)
+				deadLetter("max_deliver")
 				slog.Error("ingest message given up", "event", "ingest.message.failed",
-					"organization_id", e.msg.OrganizationID, "record_id", e.msg.RecordID, "error", err)
+					"organization_id", e.msg.OrganizationID, "record_id", e.msg.RecordID, "permanent", false, "error", f.Err)
 				_ = e.d.Term()
 			default:
 				slog.Warn("ingest message redelivered", "organization_id", e.msg.OrganizationID,
-					"record_id", e.msg.RecordID, "error", err)
+					"record_id", e.msg.RecordID, "error", f.Err)
 				_ = e.d.Nak()
 			}
 		}
 	}
+}
+
+// messageFailures maps the error of ProcessMessages for n messages onto the
+// failure of each message, nil for a message processed.
+func messageFailures(err error, n int) []*RecordError {
+	out := make([]*RecordError, n)
+	if err == nil {
+		return out
+	}
+	var ie *IngestErrors
+	if !errors.As(err, &ie) {
+		// Not expected from ProcessMessages: every message failed with err.
+		for i := range out {
+			out[i] = &RecordError{Err: err}
+		}
+		return out
+	}
+	for k := range ie.Records {
+		if i := ie.Records[k].seq - 1; i >= 0 && i < n {
+			out[i] = &ie.Records[k]
+		}
+	}
+	return out
 }
 
 // ProcessedRecords implements RecordLedger in memory.

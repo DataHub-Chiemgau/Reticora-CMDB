@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -229,6 +232,111 @@ func TestHandler_Update(t *testing.T) {
 	}
 	if updated.Status != "maintenance" {
 		t.Errorf("expected maintenance, got %s", updated.Status)
+	}
+}
+
+// TestHandler_UpdateMergePatchNull covers WP-476 (CI-04, F-080) through the
+// OpenAPI validation middleware of the server: PATCH /cis/{id} with a null
+// member passes the middleware, clears the typed field and leaves absent
+// members; null on name or status is 422 naming the field; an unknown member
+// stays 400.
+func TestHandler_UpdateMergePatchNull(t *testing.T) {
+	repo := NewMemoryRepository()
+	mux := chi.NewRouter()
+	NewHandler(NewService(repo)).RegisterRoutes(mux)
+	validated := middleware.NewOpenAPIValidator().Middleware(mux)
+	item := &Item{OrganizationID: "org-1", CITypeID: "type-server", Name: "null-ci", Status: "active",
+		Model: "M1", FirmwareVersion: "1.2.3", Attributes: map[string]any{}}
+	if err := repo.Create(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
+	patch := func(body, contentType string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/cis/"+item.ID, strings.NewReader(body))
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		w := httptest.NewRecorder()
+		validated.ServeHTTP(w, tenantCtx(req))
+		return w
+	}
+	// The middleware validates this route: a body without JSON type is 400.
+	if w := patch(`{"firmware_version":null}`, ""); w.Code != http.StatusBadRequest {
+		t.Fatalf("PATCH without Content-Type = %d, want 400 from the validation middleware", w.Code)
+	}
+
+	w := patch(`{"firmware_version":null}`, "application/json")
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH {firmware_version:null} = %d %s, want 200", w.Code, w.Body.String())
+	}
+	var updated Item
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.FirmwareVersion != "" || updated.Model != "M1" || updated.Name != "null-ci" {
+		t.Errorf("after the null patch: firmware_version %q model %q name %q, want cleared, M1, null-ci",
+			updated.FirmwareVersion, updated.Model, updated.Name)
+	}
+
+	for _, field := range []string{"name", "status"} {
+		w := patch(`{"`+field+`":null}`, "application/json")
+		var problem struct {
+			Violations []Violation `json:"violations"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil || w.Code != http.StatusUnprocessableEntity ||
+			len(problem.Violations) != 1 || problem.Violations[0].Field != field {
+			t.Errorf("PATCH {%q:null} = %d %s, want 422 naming %s", field, w.Code, w.Body.String(), field)
+		}
+	}
+	if got, _ := repo.GetByID(context.Background(), "org-1", item.ID); got.Name != "null-ci" || got.Status != "active" {
+		t.Errorf("required fields after the refused null: %q %q", got.Name, got.Status)
+	}
+	if w := patch(`{"hostnme":null}`, "application/json"); w.Code != http.StatusBadRequest {
+		t.Errorf("PATCH with an unknown member = %d, want 400", w.Code)
+	}
+}
+
+// failingUpdateRepo is a repository whose update fails like a broken
+// database connection.
+type failingUpdateRepo struct {
+	*MemoryRepository
+	err error
+}
+
+func (r failingUpdateRepo) Update(context.Context, string, string, UpdateRequest) (*Item, error) {
+	return nil, r.err
+}
+
+// TestHandler_UpdateErrorIsNotNotFound covers WP-476 (F-229): only
+// ErrNotFound of the repository is 404 "CI not found"; any other failure,
+// such as a reset database connection, is 500 without internals.
+func TestHandler_UpdateErrorIsNotNotFound(t *testing.T) {
+	for _, c := range []struct {
+		err    error
+		status int
+	}{
+		{errors.New("read tcp 10.0.0.1:5432: connection reset by peer"), http.StatusInternalServerError},
+		{ErrNotFound, http.StatusNotFound},
+	} {
+		mux := chi.NewRouter()
+		NewHandler(NewService(failingUpdateRepo{NewMemoryRepository(), c.err})).RegisterRoutes(mux)
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/cis/c2000000-0000-4000-8000-000000000001", strings.NewReader(`{"name":"x"}`))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantCtx(req))
+		if w.Code != c.status {
+			t.Errorf("repository error %q: %d %s, want %d", c.err, w.Code, w.Body.String(), c.status)
+		}
+		if c.status == http.StatusInternalServerError && (strings.Contains(w.Body.String(), "connection reset") || strings.Contains(w.Body.String(), "not found")) {
+			t.Errorf("500 body %s leaks the cause or claims not found", w.Body.String())
+		}
+	}
+
+	// An unknown CI of the memory repository is still 404.
+	mux := chi.NewRouter()
+	NewHandler(NewService(NewMemoryRepository())).RegisterRoutes(mux)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, tenantCtx(httptest.NewRequest(http.MethodPatch, "/api/v1/cis/unknown", strings.NewReader(`{"name":"x"}`))))
+	if w.Code != http.StatusNotFound {
+		t.Errorf("PATCH of an unknown CI = %d, want 404", w.Code)
 	}
 }
 

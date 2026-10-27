@@ -169,6 +169,15 @@
     "allStatus": "Alle Status",
     "exportCsv": "CSV exportieren",
     "exportJson": "JSON exportieren",
+    "exportJob": {
+      "progress": "{{format}}-Export: {{status}}",
+      "done": "{{format}}-Export heruntergeladen ({{rows}} Zeilen)",
+      "filtersIgnored": "Suche und Standort werden beim Export nicht angewendet; exportiert werden alle CIs mit dem gewählten Status, Typ und Kunden.",
+      "forbidden": "Export nicht erlaubt: Ihnen fehlt das Recht oder Ihr Tarif enthält den Export nicht.",
+      "unavailable": "Der Export ist derzeit nicht verfügbar. Bitte versuchen Sie es später erneut.",
+      "failed": "Der Export ist fehlgeschlagen. Bitte versuchen Sie es erneut.",
+      "timeout": "Der Export dauert länger als erwartet. Sobald er fertig ist, steht er unter „Export“ zum Download bereit."
+    },
     "overview": "Übersicht",
     "noAttributes": "Keine Attribute hinterlegt",
     "noRelationships": "Keine Beziehungen vorhanden",
@@ -206,6 +215,8 @@
     "setOverride": "Override setzen",
     "protected": "geschützt",
     "instanceFields": "Instanzfelder",
+    "instanceFieldsConflict": "Speichern abgelehnt: {{fields}} wurde inzwischen von jemand anderem geändert. Bitte die Seite neu laden und die Änderung wiederholen.",
+    "instanceFieldsPrecondition": "Speichern abgelehnt: Die Version dieses CIs ist veraltet oder unbekannt. Bitte die Seite neu laden.",
     "provenanceHint": "Discovery-Wert vs. effektiver Wert. Geschützte manuelle Overrides werden nie von Discovery überschrieben.",
     "discovered": "Discovery",
     "assetCanonical": "Asset (kanonische Daten)",
@@ -229,11 +240,13 @@
     "history": "Historie",
     "historyEmpty": "Noch keine Änderungen.",
     "historyLoadError": "Die Historie konnte nicht geladen werden.",
+    "historyAuditHint": "Audit-Einträge sind nicht enthalten; sie erfordern die Berechtigung audit:read.",
     "historySite": "Site {{site}}",
     "historySource": {
       "ci_change": "Änderung",
       "entity_change": "Historie",
-      "audit": "Audit"
+      "audit": "Audit",
+      "location_change": "Standortänderung"
     }
   },
   "form": {
@@ -358,6 +371,17 @@
     "noDeadLetters": "Keine Dead Letters",
     "noDeadLettersHint": "Aktuell gibt es keine endgültig fehlgeschlagenen Zustellungen.",
     "retry": "Erneut senden",
+    "readOnly": "Sie können Webhooks einsehen; Anlegen, Löschen und Testen erfordern das Recht webhook:manage.",
+    "errors": {
+      "notSaved": "Der Webhook wurde nicht gespeichert. Bitte prüfen Sie die markierten Eingaben.",
+      "egress": "Ziel vom Egress-Schutz blockiert, nicht erlaubt: {{reason}}",
+      "invalidEvent": "Unbekanntes Event: {{event}}",
+      "invalidValue": "Ungültiger Wert: {{detail}}",
+      "forbidden": "Keine Berechtigung: Für diese Aktion fehlt Ihnen das Recht webhook:manage.",
+      "notFound": "Der Webhook existiert nicht mehr. Bitte laden Sie die Seite neu.",
+      "rejected": "Vom Server abgelehnt: {{detail}}",
+      "failed": "Die Aktion ist fehlgeschlagen: {{detail}}"
+    },
     "status": {
       "pending": "wartend",
       "delivering": "wird zugestellt",
@@ -1018,6 +1042,27 @@
       "zone": "Zone",
       "shelf": "Regal",
       "bin": "Fach"
+    },
+    "editTitle": "{{name}} bearbeiten",
+    "parent": "Übergeordneter Knoten",
+    "forbidden": "Keine Berechtigung für diese Aktion.",
+    "deleteTitle": "„{{name}}“ löschen?",
+    "deleteConfirm": "Der Knoten wird endgültig gelöscht. Solange Unterpunkte oder andere Objekte auf ihn verweisen, lehnt der Server das Löschen ab.",
+    "inUse": "noch verwendet von {{kinds}}",
+    "dependencies": {
+      "location": "Unterstandorte",
+      "ci": "CIs",
+      "asset": "Assets",
+      "quantity_item": "Mengenartikel",
+      "asset_movement": "Bewegungen",
+      "rack_mount": "Rack-Montagen",
+      "role_assignment": "Rollenzuweisungen",
+      "vlan": "VLANs",
+      "subnet": "Subnetze",
+      "collector": "Collectors",
+      "discovery_scope": "Discovery-Scopes",
+      "agent_enrollment_token": "gültige Agent-Enrollment-Tokens",
+      "ci_merge": "CI-Zusammenführungen (Tombstones)"
     }
   },
   "savedviews": {
@@ -1032,7 +1077,9 @@
     "shared": "geteilt",
     "mine": "Meine Ansichten",
     "save": "Als Ansicht speichern",
-    "namePrompt": "Name der Ansicht"
+    "namePrompt": "Name der Ansicht",
+    "forbidden": "Keine Berechtigung für diese Ansicht",
+    "forbiddenHint": "Ihnen fehlt das Leserecht für die Objekte, die diese Ansicht abfragt. Wenden Sie sich an Ihre Administration."
   },
   "lifecycle": {
     "transitionTo": "Übergang nach",
@@ -1134,6 +1181,30 @@
     "markAllRead": "Alle gelesen",
     "unread": "Ungelesen",
     "empty": "Keine Benachrichtigungen."
+  },
+  "entitlementExpiry": {
+    "title": "Ablaufende Funktionen",
+    "message": "Die Funktion „{{feature}}“ läuft am {{date}} ab (in {{days}} Tagen).",
+    "messageOneDay": "Die Funktion „{{feature}}“ läuft am {{date}} ab (in 1 Tag).",
+    "features": {
+      "discovery": "Discovery",
+      "topology": "Topologie",
+      "rack_view": "Rackansicht",
+      "export_csv": "CSV-Export",
+      "webhooks": "Webhooks",
+      "api_access": "API-Zugriff",
+      "notifications_email": "E-Mail-Benachrichtigungen",
+      "inventory": "Inventar",
+      "documents": "Dokumente",
+      "stocktake": "Inventur",
+      "ticketing": "Tickets",
+      "monitoring": "Monitoring",
+      "endpoint_agent": "Endpoint-Agent",
+      "workflow_forms": "Workflows und Formulare",
+      "compliance": "Compliance",
+      "iga": "IGA",
+      "ai": "KI-Assistent"
+    }
   },
   "jobs": {
     "title": "Jobcenter",

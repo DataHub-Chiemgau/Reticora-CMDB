@@ -16,6 +16,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/jackc/pgx/v5"
@@ -123,6 +124,28 @@ func (r *PGRepository) ListCollectors(ctx context.Context, orgID string, page ap
 	})
 
 	return items, total, err
+}
+
+// CountCollectors implements Repository. It counts in an org-wide
+// transaction: max_collectors is a quota of the organization, and a client-
+// or site-scoped caller must not stay below it by seeing fewer collectors.
+func (r *PGRepository) CountCollectors(ctx context.Context, orgID string) (int64, error) {
+	scope := database.OrgWideScope(orgID, "")
+	var n int64
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		n, err = countCollectors(ctx, tx, orgID)
+		return err
+	})
+	return n, err
+}
+
+func countCollectors(ctx context.Context, tx pgx.Tx, orgID string) (int64, error) {
+	var n int64
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM collector WHERE organization_id = $1 AND status <> 'disabled'`, orgID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count collectors: %w", err)
+	}
+	return n, nil
 }
 
 func (r *PGRepository) RegisterCollector(ctx context.Context, c *Collector) error {
@@ -666,6 +689,13 @@ func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *Enrollmen
 // with one code succeed exactly once; a failed registration leaves the
 // code unused and writes no collector.enrolled.
 func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *Collector, issue CertIssuer) (*IssuedCert, error) {
+	return r.EnrollCollectorWithQuota(ctx, rawCode, c, issue, nil)
+}
+
+// EnrollCollectorWithQuota implements Repository: max_collectors is
+// counted and checked in the enrollment transaction before the code is
+// consumed, so a refusal rolls back and leaves the code unused.
+func (r *PGRepository) EnrollCollectorWithQuota(ctx context.Context, rawCode string, c *Collector, issue CertIssuer, quota QuotaGuard) (*IssuedCert, error) {
 	hash := enrollmentCodeHash(rawCode)
 	var orgID string
 	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
@@ -689,6 +719,17 @@ func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *C
 	scope := database.OrgWideScope(orgID, "")
 	var cert *IssuedCert
 	err = database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		if quota != nil {
+			current, countErr := countCollectors(ctx, tx, orgID)
+			if countErr != nil {
+				return countErr
+			}
+			// The guard reads the entitlements in this transaction.
+			qctx := database.ContextWithTx(database.ContextWithTenantScope(ctx, &scope), tx)
+			if qerr := quota.AllowCreate(qctx, orgID, entitlement.LimitMaxCollectors, current); qerr != nil {
+				return qerr
+			}
+		}
 		var codeID string
 		consumeErr := tx.QueryRow(ctx, `
 			UPDATE collector_enrollment_code SET used_at = now()

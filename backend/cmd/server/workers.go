@@ -201,22 +201,37 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 	if d.ingestQueue != nil {
 		workers = append(workers, server.Worker{Name: config.WorkerIngest, Run: d.ingestQueue.Run, Backlog: d.ingestQueue.Backlog})
 	}
-	// Evaluate monitoring alert rules against the metric store. Fired alerts
-	// are logged via the default notifier; evaluation state is persisted in
-	// the alert store so restarts neither re-notify nor lose pending
-	// durations.
+	// Evaluate monitoring alert rules against the metric store (module
+	// alerting, MON-04). Fired alerts are logged via the default notifier;
+	// evaluation state is persisted in the alert store so restarts neither
+	// re-notify nor lose pending durations.
 	if alertStore, ok := d.repos.Metrics.(monitoring.EvaluatingStore); ok {
 		evaluator := monitoring.NewEvaluator(d.repos.Metrics, alertStore.AlertStore(), nil)
-		// The health of the CIs follows the monitoring state (DB-05).
-		if refresher, ok := d.repos.Metrics.(monitoring.HealthRefreshingStore); ok {
-			evaluator.WithHealth(refresher.HealthRefresher())
-		}
 		workers = append(workers, server.Worker{
 			Name: config.WorkerMonitoring,
 			Run:  func(ctx context.Context) { evaluator.Run(ctx, d.every(time.Minute)) },
 		})
 	}
+	// The health of the CIs follows the monitoring state every minute
+	// (DB-05, MON-02): a worker of its own, so it runs in the G1 default
+	// configuration without the module alerting (F-087).
+	if refresher, ok := d.repos.Metrics.(monitoring.HealthRefreshingStore); ok {
+		health := monitoring.NewHealthWorker(refresher.HealthRefresher())
+		workers = append(workers, server.Worker{
+			Name: config.WorkerHealth,
+			Run:  func(ctx context.Context) { health.Run(ctx, d.every(time.Minute)) },
+		})
+	}
 	return workers, nil
+}
+
+// workerSwitch reports whether a worker starts on this instance: its
+// operator switch is on (OPS-02) and its module, if it belongs to a late
+// module, is enabled (WP-214).
+func workerSwitch(cfg *config.Config, modules *server.ModuleSet) func(name string) bool {
+	return func(name string) bool {
+		return cfg.WorkerEnabled(name) && modules.WorkerAllowed(name)
+	}
 }
 
 // serving runs serve, a worker that answers requests: its cycles make a

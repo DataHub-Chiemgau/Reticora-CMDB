@@ -152,7 +152,7 @@ GET /api/v1/form-submissions/{id} form:read
 GET /api/v1/forms form:read
 GET /api/v1/forms/{id} form:read
 GET /api/v1/forms/{id}/submissions form:read
-GET /api/v1/history/{entityType}/{id} audit:read
+GET /api/v1/history/{entityType}/{id} ci:read
 GET /api/v1/iga/access-requests iga:read
 GET /api/v1/iga/access-reviews iga:read
 GET /api/v1/iga/access-reviews/{id}/items iga:read
@@ -456,7 +456,7 @@ POST /api/v1/roles role:manage
 POST /api/v1/roles/assign role:manage
 POST /api/v1/rooms location:write
 POST /api/v1/saved-views saved_view:write
-POST /api/v1/search/query search:write
+POST /api/v1/search/query search:read
 POST /api/v1/search/reindex search:write
 POST /api/v1/security/findings security:write
 POST /api/v1/service-accounts user:manage

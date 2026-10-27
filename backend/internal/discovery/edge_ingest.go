@@ -165,11 +165,12 @@ func (h *Handler) edgeIngest(ctx context.Context, orgID, collectorID string, dat
 	t := tenant.TenantInfo{OrganizationID: orgID}
 	ctx = tenant.WithTenant(ctx, t)
 	resp, err := h.dispatch(ctx, newIngestMessages(ctx, t, collectorID, items))
-	if err != nil {
+	// Records that fail are listed in the reply; only when no record was
+	// accepted does the request fail as a whole (WP-481).
+	if err = resp.finish(received, rejected, err); err != nil {
 		slog.Error("edge ingest failed", "organization_id", orgID, "collector_id", collectorID, "error", err)
 		return EdgeReply{Status: http.StatusInternalServerError, Error: "ingest failed"}
 	}
-	resp.Received, resp.RejectedFuture = received, rejected
 	return EdgeReply{Status: http.StatusAccepted, LicenseStatus: state, Result: &resp}
 }
 
@@ -191,11 +192,7 @@ func (h *Handler) EdgeHeartbeat(ctx context.Context, orgID, collectorID string, 
 		}
 		return EdgeReply{Status: code, Error: err.Error()}
 	}
-	if s := req.Spool; s != nil && (s.DroppedMessages > 0 || s.Backpressure) {
-		slog.WarnContext(ctx, "collector reported spool data loss or backpressure", "event", "collector.spool.degraded",
-			"organization_id", orgID, "collector_id", collectorID, "spool_messages", s.Messages,
-			"dropped_messages", s.DroppedMessages, "backpressure", s.Backpressure)
-	}
+	recordSpoolReport(ctx, orgID, collectorID, req.Spool)
 	reply := EdgeReply{Status: http.StatusNoContent, CollectorStatus: status}
 	if state, _, lerr := h.edgeLicense(ctx, orgID); lerr == nil && state != LicenseNotEntitled {
 		reply.LicenseStatus = state

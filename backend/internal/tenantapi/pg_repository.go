@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -58,11 +60,11 @@ func nullable(v *string) any {
 	return *v
 }
 
-const orgCols = `id::text, name, slug, plan, settings, timezone, currency, locale, created_at, updated_at`
+const orgCols = `id::text, name, slug, plan, settings, timezone, currency, locale, ai_opt_in, created_at, updated_at`
 
 func scanOrganization(s scanner) (*Organization, error) {
 	o := &Organization{}
-	if err := s.Scan(&o.ID, &o.Name, &o.Slug, &o.Plan, &o.Settings, &o.Timezone, &o.Currency, &o.Locale, &o.CreatedAt, &o.UpdatedAt); err != nil {
+	if err := s.Scan(&o.ID, &o.Name, &o.Slug, &o.Plan, &o.Settings, &o.Timezone, &o.Currency, &o.Locale, &o.AIOptIn, &o.CreatedAt, &o.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if o.Settings == nil {
@@ -88,14 +90,31 @@ func (r *PGRepository) GetOrganization(ctx context.Context, orgID string) (*Orga
 	return o, err
 }
 
+// UpdateOrganization writes the given fields of the organization. A change
+// of the AI opt-in (AI-02) writes the audit entry
+// organization.ai_opt_in_changed with the old and the new value in the same
+// transaction; the old value is read under a row lock, so concurrent changes
+// are audited in order. Who may change the opt-in is checked by the handler.
 func (r *PGRepository) UpdateOrganization(ctx context.Context, orgID string, req UpdateOrganizationRequest) (*Organization, error) {
 	var o *Organization
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID}
+		var fields []string
 		add := func(column string, value any) {
 			args = append(args, value)
 			sets = append(sets, fmt.Sprintf("%s = $%d", column, len(args)))
+			fields = append(fields, column)
+		}
+		var oldOptIn bool
+		if req.AIOptIn != nil {
+			err := tx.QueryRow(ctx, "SELECT ai_opt_in FROM organization WHERE id = $1 FOR UPDATE", orgID).Scan(&oldOptIn)
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("not found")
+			}
+			if err != nil {
+				return err
+			}
 		}
 		if req.Name != nil {
 			add("name", *req.Name)
@@ -112,6 +131,9 @@ func (r *PGRepository) UpdateOrganization(ctx context.Context, orgID string, req
 		if req.Locale != nil {
 			add("locale", *req.Locale)
 		}
+		if req.AIOptIn != nil {
+			add("ai_opt_in", *req.AIOptIn)
+		}
 		var err error
 		if len(sets) == 0 {
 			o, err = scanOrganization(tx.QueryRow(ctx, "SELECT "+orgCols+" FROM organization WHERE id = $1", orgID))
@@ -123,9 +145,43 @@ func (r *PGRepository) UpdateOrganization(ctx context.Context, orgID string, req
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("not found")
 		}
-		return fieldDBError(err)
+		if err != nil {
+			return fieldDBError(err)
+		}
+		if req.AIOptIn != nil && oldOptIn != o.AIOptIn {
+			return recordAIOptInChange(ctx, tx, orgID, oldOptIn, o.AIOptIn, fields)
+		}
+		return nil
 	})
 	return o, err
+}
+
+// recordAIOptInChange writes the audit entry of a change of the AI opt-in
+// (AI-02), attributed to the acting principal. fields names every column the
+// request wrote: the entry replaces the route's own audit entry (AUD-07).
+func recordAIOptInChange(ctx context.Context, tx pgx.Tx, orgID string, oldValue, newValue bool, fields []string) error {
+	actorID, actorType := "", "system"
+	if p, ok := identity.PrincipalFromContext(ctx); ok {
+		actorType = "user"
+		if p.Type == identity.PrincipalTypeAPIKey {
+			actorType = "api_key"
+		}
+		if audit.IsUUID(p.Subject) {
+			actorID = p.Subject
+		}
+	}
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+		OrganizationID: orgID,
+		ActorID:        actorID,
+		ActorType:      actorType,
+		Action:         "organization.ai_opt_in_changed",
+		ResourceType:   "organization",
+		ResourceID:     orgID,
+		Changes:        map[string]any{"ai_opt_in": map[string]any{"old": oldValue, "new": newValue}, "fields": fields},
+	}); err != nil {
+		return fmt.Errorf("audit ai opt-in change: %w", err)
+	}
+	return nil
 }
 
 func scanClient(s scanner) (*Client, error) {

@@ -722,3 +722,55 @@ NFR-01;[B], Teilumfang [P5];LT;backend/internal/ci/indexes_integration_test.go;W
 NFR-10;[Q];LT;tests/load/evaluate-runs.sh;WP-612
 NFR-02;[B];LT;backend/internal/topology/impact_bench_integration_test.go;WP-611
 NFR-03;[B], Teilumfang [P5];LT;backend/internal/discovery/ingest_budget_integration_test.go;WP-608
+ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-470
+CI-06;[B];C;backend/internal/history/history_integration_test.go;WP-473
+LOC-10;B/G1;C;backend/internal/history/history_integration_test.go;WP-473
+LOC-11;B/G1;C;backend/internal/history/history_integration_test.go;WP-473
+SRC-03;[P2], Textsyntax [O];B;backend/internal/savedview/scope_integration_test.go;WP-460
+CI-04;[B];D;backend/internal/ci/manual_override_integration_test.go;WP-476
+REC-01;[B];D;backend/internal/discovery/consumer_integration_test.go;WP-481
+NFR-03;[B], Teilumfang [P5];D;backend/internal/discovery/consumer_test.go;WP-481
+LOC-07;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-474
+LOC-11;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-474
+ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-471
+API-04;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-471
+CI-04;[B];D;frontend/src/pages/CIFormModal.test.tsx;WP-477
+API-07;[B];D;frontend/src/pages/CIDetailPage.instance-fields.test.tsx;WP-477
+API-03;[B];D;frontend/src/pages/CIDetailPage.instance-fields.test.tsx;WP-477
+COL-05;[B];D;edgecore/buffer/buffer_test.go;WP-482
+OPS-06;[Q];D;edgecore/buffer/buffer_test.go;WP-482
+NFR-04;[B], Teilumfang [P5];D;edgecore/buffer/buffer_test.go;WP-482
+CI-06;[B];C;backend/internal/history/history_scope_integration_test.go;WP-475
+API-02;[B];C;backend/internal/server/pagination_test.go;WP-466
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/asset_canonical_integration_test.go;WP-486
+AST-04;[P2];B;backend/internal/server/ci_asset_routes_integration_test.go;WP-486
+COL-05;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-483
+OPS-06;[Q];D;collector/collectorcmd/collectorcmd_test.go;WP-483
+NFR-04;[B], Teilumfang [P5];D;collector/collectorcmd/collectorcmd_test.go;WP-483
+API-02;[B];C;backend/internal/server/pagination_test.go;WP-467
+GLO-13;[B];D;backend/internal/server/override_routes_integration_test.go;WP-478
+CI-10;[B];D;backend/internal/ci/namespace_integration_test.go;WP-478
+REC-03;[B];D;backend/internal/override/decide_test.go;WP-478
+OVR-02;[B];D;backend/internal/agent/agent_merge_integration_test.go;WP-484
+AGT-05;[P4];D;backend/internal/agent/agent_merge_integration_test.go;WP-484
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-472
+ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-472
+TEN-06;[B];B;backend/internal/iga/approve_task_integration_test.go;WP-461
+API-05;[B];C;frontend/src/api/deprecatedPaths.test.ts;WP-468
+CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-485
+AUT-10;[B];B;backend/internal/middleware/ratelimit_test.go;WP-462
+API-04;[B];B;backend/cmd/server/main_test.go;WP-462
+AUD-03;[B];C;backend/internal/ci/change_record_integration_test.go;WP-487
+CI-11;[B];C;backend/internal/ci/change_record_integration_test.go;WP-487
+AI-02;[A];B;backend/internal/tenantapi/tenantapi_scope_integration_test.go;WP-463
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/health_integration_test.go;WP-480
+CI-12;[B];C;backend/internal/discovery/review_resolution_integration_test.go;WP-479
+SEC-08;[B];B;frontend/src/pages/WebhooksPage.test.tsx;WP-465
+IMP-01;[B];C;backend/internal/topology/impact_test.go;WP-490
+IMP-03;[B];C;backend/internal/topology/impact_integration_test.go;WP-490
+IMP-07;[B];C;backend/internal/topology/impact_integration_test.go;WP-490
+IMP-02;[B];C;backend/internal/topology/topology_test.go;WP-490
+AUD-03;[B];C;backend/internal/history/history_integration_test.go;WP-488
+AUD-05;[B];C;frontend/src/pages/AuditPage.test.tsx;WP-469
+API-05;[B];C;frontend/src/pages/AuditPage.test.tsx;WP-469
+ENT-07;[B];B;frontend/src/components/EntitlementExpiryBanner.test.tsx;WP-464

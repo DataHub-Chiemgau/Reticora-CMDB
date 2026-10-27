@@ -12,6 +12,16 @@ info:
     `X-RateLimit-Reset` (seconds until the window ends) for the budget
     closest to exhaustion; a refused request gets 429 with `Retry-After`.
 
+    Pre-auth limit (AUT-10): 20 authentication attempts per minute and
+    client IP (configurable), checked before any credential. Login
+    callback, signup, signup verification, invitation acceptance,
+    collector enrollment and operator callback count every request; the
+    session refresh counts only answers outside 2xx; authenticated
+    endpoints count only failed authentications (401). Answers refused
+    before the rate limit above (401, pre-auth 429) carry the
+    `X-RateLimit-*` headers of the pre-auth budget, a pre-auth 429 also
+    `Retry-After`.
+
     Dependency outages (OPS-06): a request that needs an unreachable
     dependency is refused before anything is stored, with 503 and
     `Retry-After`: every request with a well-formed API key while the key
@@ -589,6 +599,10 @@ paths:
         invitation, or an account an administrator made org_admin) binds the
         IdP account to MFA (Keycloak realm role mfa_required, AUT-09); when
         that fails, the login answers 503 and changes nothing.
+        A first login with a pending invitation creates the user only within
+        max_users (active users, ENT-03); at the limit it answers 403
+        entitlement-limit, creates no user and leaves the invitation open.
+        A deactivated user, and a first login without an admission, get 403.
       requestBody:
         required: true
         content:
@@ -611,6 +625,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
         '500':
           $ref: '#/components/responses/InternalServerError'
         '503':
@@ -839,9 +855,11 @@ paths:
       tags: [CIs]
       summary: Update a configuration item
       description: >-
-        Optimistic concurrency (API-07): If-Match names the version the editor
-        read. A stale version is refused with 409 only when a field of the
-        request was changed since by a write of rank >= 92 (manual, import,
+        JSON merge patch (RFC 7396, CI-04): null clears a nullable field,
+        absent members stay. 404 only for a CI that does not exist or is not
+        visible; any other failure is 500. Optimistic concurrency (API-07):
+        If-Match names the version the editor read. A stale version is
+        refused with 409 only when a field of the request was changed since by a write of rank >= 92 (manual, import,
         workflow); observed discovery updates do not change the version.
         An organization can require If-Match (settings.require_if_match);
         then a request without it is 412, like an unknown version.
@@ -890,6 +908,16 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: >-
+            A field value is not allowed; `violations` names the field, e.g.
+            null on a required field such as name or status ("must not be
+            null").
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     delete:
       operationId: deleteCI
       tags: [CIs]
@@ -949,7 +977,7 @@ paths:
         Manual reclassification. The CI keeps its id, relationships, mounts,
         asset link and history; required attributes of the target type the
         CI does not carry are returned as findings and do not block. The
-        change is recorded as ci_change type_change, audit ci.type_changed
+        change is recorded as ci_change type_changed, audit ci.type_changed
         and event ci.changed (changed_fields ci_type_id). Discovery uses the
         same service but may only raise generic_device to a specific type.
       requestBody:
@@ -1054,9 +1082,25 @@ paths:
       description: >-
         Restores the merged CI of the path and its survivor from the merge
         snapshot: both CI rows, the moved relationships, interfaces,
-        contacts, history, document links, field values and the asset link,
-        and the rows the merge removed. After 30 days the snapshot is gone
-        (410). Requires ci:delete.
+        contacts, history, document links, field values, the asset link and
+        the CI link of endpoint agents, and the rows the merge removed. After 30 days the snapshot is gone
+        (410). A survivor changed after the merge (its version is above the
+        version the merge recorded) is not overwritten silently: the unmerge
+        answers 409 with the fields of the later history entries and changes
+        nothing; force=true restores the snapshot over those changes, and
+        the audit entry ci.unmerged names force and the overwritten fields
+        (E-80). The revert of the merge job behaves like an unmerge without
+        force. Requires ci:delete.
+      parameters:
+        - name: force
+          in: query
+          required: false
+          description: >-
+            Restore the snapshot although the survivor changed after the
+            merge; the later changes of the survivor are overwritten.
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Both CIs after the unmerge
@@ -1064,6 +1108,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CIUnmergeResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1071,10 +1117,17 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: One of the CIs is locked by another write.
+          description: >-
+            The survivor changed after the merge (VersionConflictProblem:
+            `fields` names the changed fields, `current_version` the version
+            of the survivor; retry with force=true to overwrite them), or one
+            of the CIs is locked by another write.
           content:
             application/problem+json:
-              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/VersionConflictProblem' }
+                  - { $ref: '#/components/schemas/ProblemDetail' }
         '410':
           description: The merge snapshot is older than 30 days.
           content:
@@ -2210,8 +2263,10 @@ paths:
           description: >-
             The kind defines no revert, the job did not succeed, or the
             reverter refused it: the merge snapshot expired, the merge
-            conflicts with later changes, the merge kind has no unmerge, or
-            the merge no longer exists.
+            conflicts with later changes (one of the CIs is locked, or the
+            survivor changed after the merge: the revert is an unmerge
+            without force, E-80), the merge kind has no unmerge, or the
+            merge no longer exists.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -3756,7 +3811,9 @@ paths:
         Reconciles the endpoint into a CI (source "agent") and writes health
         metrics into the time-series store. The software inventory lands in the
         CI attributes for patch posture (spec §9.4). Disabled agents (kill-switch)
-        are rejected.
+        are rejected. The CI linked to the agent is the anchor, a merged one
+        through its survivor; only a deleted linked CI is reconciled afresh.
+        A linked CI that cannot be read is 503 and nothing is stored.
       requestBody:
         required: true
         content:
@@ -3774,6 +3831,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
 
   /api/v1/agents/{id}/heartbeat:
     x-phase: P4
@@ -4545,7 +4604,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
@@ -4566,6 +4625,11 @@ paths:
         it, the requested permissions within the account's grants, must lie
         within the caller's own scope; otherwise 403. A deactivated account's
         permissions are then required organization-wide.
+
+        A new key counts against max_api_keys (ENT-03): at the limit of the
+        active keys (neither revoked nor expired) the request gets 403
+        entitlement-limit and no key is created. A rotation replaces a key
+        and is not checked.
       requestBody:
         required: true
         content:
@@ -4584,7 +4648,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -4614,7 +4678,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -4654,7 +4718,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -4690,6 +4754,10 @@ paths:
       operationId: createUser
       tags: [Users]
       summary: Create a user
+      description: >-
+        The new user counts against max_users (ENT-03): at the limit of the
+        organization's active users the request gets 403 entitlement-limit
+        and no user is created.
       requestBody:
         required: true
         content:
@@ -4707,6 +4775,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -4788,6 +4858,10 @@ paths:
       operationId: queryMetrics
       tags: [Monitoring]
       summary: Query metric points
+      description: >-
+        The series is paged in chronological order with `limit` and the signed
+        `cursor` (API-02); a client that needs the whole series follows
+        `next_cursor` to the end.
       parameters:
         - name: ci_id
           in: query
@@ -4812,15 +4886,16 @@ paths:
           schema:
             type: string
           description: Go duration string used for aggregation, for example 5m or 1h.
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Metric point series
+          description: Paginated metric point series
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/MetricPoint'
+                $ref: '#/components/schemas/MetricPointListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4912,15 +4987,22 @@ paths:
       operationId: listAlerts
       tags: [Monitoring]
       summary: List alert rules
+      description: >-
+        Ordered by name, paged with `limit` and the signed `cursor` (API-02); a
+        client that needs every rule follows `next_cursor` to the end.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Alert rules
+          description: Paginated alert rules
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/AlertRule'
+                $ref: '#/components/schemas/AlertRuleListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
     post:
@@ -5067,7 +5149,11 @@ paths:
         Requires review:resolve. The actions per type (REC-08):
         unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss;
         conflicting_values accept|dismiss; probable_duplicate merge|dismiss
-        (merge removes the new CI); override_conflict accept|dismiss (accept
+        (merge is the CI-12 merge, a ci.merge job, of the new CI into the
+        chosen candidate: its references move, GET on it answers 301 and
+        POST /cis/{id}/unmerge restores it within 30 days; 409 when another
+        merge holds or has merged either CI, the item stays open);
+        override_conflict accept|dismiss (accept
         removes the override and the CI takes the observed value; dismiss
         keeps the override and suppresses the value until the source reports
         another); conflicting_values accept applies the reported serial
@@ -5219,11 +5305,13 @@ paths:
             type: string
         - name: depth
           in: query
-          description: Traversal depth from root_ci_id (default 2, max 20).
+          description: >-
+            Traversal depth from root_ci_id (default 2); a larger value than
+            20 is capped at 20. A value that is no integer or below 1 is 400
+            with field depth.
           schema:
             type: integer
             minimum: 1
-            maximum: 20
       responses:
         '200':
           description: Topology graph
@@ -5234,7 +5322,8 @@ paths:
         '400':
           description: >-
             root_ci_id, client_id, site_id or ci_type is no UUID (for
-            root_ci_id with field root_ci_id).
+            root_ci_id with field root_ci_id), or depth is no integer or
+            below 1 (field depth).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -5286,8 +5375,11 @@ paths:
       - $ref: '#/components/parameters/ResourceID'
       - name: depth
         in: query
-        schema: { type: integer, default: 20, maximum: 20 }
-        description: Maximum hops of the impact paths (IMP-02); defaults to 20.
+        schema: { type: integer, default: 20, minimum: 1 }
+        description: >-
+          Maximum hops of the impact paths (IMP-02); defaults to 20, a
+          larger value is capped at 20. A value that is no integer or below
+          1 is 400 with field depth.
       - name: rel_type
         in: query
         schema: { type: string }
@@ -5323,6 +5415,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ImpactAnalysis'
+        '400':
+          description: depth is no integer or below 1 (field depth).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -5362,8 +5459,11 @@ paths:
           description: Restrict the analysis to one relationship type.
         - name: depth
           in: query
-          schema: { type: integer, default: 20, maximum: 20 }
-          description: Maximum hops of the impact paths.
+          schema: { type: integer, default: 20, minimum: 1 }
+          description: >-
+            Maximum hops of the impact paths; defaults to 20, a larger value
+            is capped at 20. A value that is no integer or below 1 is 400
+            with field depth.
         - $ref: '#/components/parameters/ImpactFields'
       responses:
         '200':
@@ -5397,8 +5497,11 @@ paths:
         description: The CI whose outage is simulated.
       - name: depth
         in: query
-        schema: { type: integer, default: 20, maximum: 20 }
-        description: Maximum hops of the impact paths (IMP-02); defaults to 20.
+        schema: { type: integer, default: 20, minimum: 1 }
+        description: >-
+          Maximum hops of the impact paths (IMP-02); defaults to 20, a
+          larger value is capped at 20. A value that is no integer or below
+          1 is 400 with field depth.
       - name: rel_type
         in: query
         schema: { type: string }
@@ -5433,6 +5536,11 @@ paths:
                 anyOf:
                   - { $ref: '#/components/schemas/ImpactAnalysis' }
                   - { $ref: '#/components/schemas/ImpactAnalysisFields' }
+        '400':
+          description: depth is no integer or below 1 (field depth).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -5464,12 +5572,17 @@ paths:
     patch:
       operationId: updateOrganization
       tags: [Organization]
-      summary: Update name, settings, time zone, currency and locale of the organization
+      summary: Update name, settings, time zone, currency, locale and AI opt-in of the organization
       description: >
         The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217
         code (EUR) and the locale a BCP 47 tag, stored in canonical form
         (de-ch → de-CH). Slug and plan are not changed here. An invalid value
-        answers 400 naming the field.
+        answers 400 naming the field. ai_opt_in is the organization's consent
+        to external AI processing (AI-02): only a principal holding user:manage
+        for the whole organization changes it (a client-, site- or team-bound
+        holder gets 403); a change writes the audit entry
+        organization.ai_opt_in_changed with the old and the new value in the
+        same transaction.
       requestBody:
         required: true
         content:
@@ -5487,6 +5600,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -5939,6 +6054,8 @@ paths:
                 $ref: '#/components/schemas/RackListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
@@ -5966,6 +6083,8 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -5985,6 +6104,8 @@ paths:
                 $ref: '#/components/schemas/Rack'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
@@ -6012,6 +6133,8 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
@@ -6023,6 +6146,8 @@ paths:
           description: Rack deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -6047,6 +6172,8 @@ paths:
                 $ref: '#/components/schemas/RackLayout'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -6089,6 +6216,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -6116,6 +6245,8 @@ paths:
           description: The CI was unmounted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -6143,6 +6274,8 @@ paths:
                 $ref: '#/components/schemas/RackMountListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
     post:
@@ -6173,6 +6306,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -6216,6 +6351,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
     post:
@@ -6242,6 +6379,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -6278,6 +6417,8 @@ paths:
                 $ref: '#/components/schemas/RackMount'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
@@ -6309,6 +6450,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -6335,6 +6478,8 @@ paths:
           description: Rack mount deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -6354,6 +6499,8 @@ paths:
                 $ref: '#/components/schemas/RackMount'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
@@ -6381,6 +6528,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -6403,6 +6552,8 @@ paths:
           description: Rack mount deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -7751,6 +7902,11 @@ paths:
       operationId: registerCollector
       tags: [Collectors]
       summary: Register a discovery collector
+      description: >-
+        The new collector counts against max_collectors (ENT-03): at the
+        limit of the organization's collectors that are not disabled,
+        counted organization-wide, the request gets 403 entitlement-limit
+        and no collector is registered.
       requestBody:
         required: true
         content:
@@ -7768,6 +7924,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -7821,6 +7979,9 @@ paths:
         returned with its id. With `csr` (PEM certificate signing request of
         the collector's locally generated key) the internal CA issues the
         collector's client certificate (CN = collector id, 90 days, COL-04).
+        The enrollment counts against max_collectors of the code's
+        organization (ENT-03): at the limit it answers 403 entitlement-limit,
+        registers nothing and leaves the code unused and valid.
       requestBody:
         required: true
         content:
@@ -7850,6 +8011,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '503':
@@ -8103,7 +8266,10 @@ paths:
         queue (NATS) is unreachable both answer 503 at once and queue
         nothing, not even after the reconnect (OPS-06, WP-449); records of
         the batch queued before a failure are deduplicated by record_id when
-        the batch is sent again.
+        the batch is sent again. Without the queue the records are processed
+        in the request; a record that fails is rejected alone and listed in
+        errors, the others are processed (WP-481). Only when every record is
+        rejected does the request answer with the error status of the first.
       parameters:
         - name: Content-Encoding
           in: header
@@ -8164,16 +8330,21 @@ paths:
       description: >-
         Returns credential metadata (never the secret material) for the
         authenticated tenant. The organization is derived from the session and
-        cannot be supplied by the client.
+        cannot be supplied by the client. The list is paged with `limit` and
+        the signed `cursor` (API-02); an empty list is `data: []`.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Credential metadata list
+          description: Paginated credential metadata list
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Credential'
+                $ref: '#/components/schemas/CredentialListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -8370,15 +8541,22 @@ paths:
       operationId: getDocumentLinks
       tags: [Documents]
       summary: List entities linked to a document
+      description: >-
+        Newest first, paged with `limit` and the signed `cursor` (API-02); a
+        client that needs every link follows `next_cursor` to the end.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Document links
+          description: Paginated document links
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/DocumentLink'
+                $ref: '#/components/schemas/DocumentLinkListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -8496,6 +8674,9 @@ paths:
         already has a user with the address. An org_admin account is bound
         to MFA (Keycloak realm role mfa_required, AUT-09); when that fails,
         the account is deleted again, the acceptance answers 503 and the
+        invitation stays open. The new user counts against max_users
+        (active users, ENT-03): at the limit the acceptance answers 403
+        entitlement-limit, creates neither user nor IdP account and the
         invitation stays open.
       requestBody:
         required: true
@@ -8512,6 +8693,8 @@ paths:
                 $ref: '#/components/schemas/AcceptedInvitation'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -8892,15 +9075,22 @@ paths:
       operationId: listTeamMembers
       tags: [Teams]
       summary: List members of a team
+      description: >-
+        Paged with `limit` and the signed `cursor` (API-02); a client that
+        needs every member follows `next_cursor` to the end.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Team members
+          description: Paginated team members
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/TeamMember'
+                $ref: '#/components/schemas/TeamMemberListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -9339,15 +9529,20 @@ paths:
       x-successor: '/api/v1/role-assignments'
       tags: [Users]
       summary: List custom role assignments for a user
+      description: Paged with `limit` and the signed `cursor` (API-02).
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Role assignments for the user
+          description: Paginated role assignments for the user
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/RoleAssignment'
+                $ref: '#/components/schemas/RoleAssignmentListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -9359,15 +9554,22 @@ paths:
       operationId: listPermissions
       tags: [Permissions]
       summary: List permission catalogue
+      description: >-
+        Paged with `limit` and the signed `cursor` (API-02); a client that
+        needs the whole catalogue follows `next_cursor` to the end.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Permission catalogue
+          description: Paginated permission catalogue
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Permission'
+                $ref: '#/components/schemas/PermissionListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -9380,15 +9582,22 @@ paths:
       operationId: listRolePermissions
       tags: [Permissions]
       summary: List permissions granted to a role
+      description: >-
+        Paged with `limit` and the signed `cursor` (API-02); a client that
+        needs every grant follows `next_cursor` to the end.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Role permission grants
+          description: Paginated role permission grants
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/RolePermissionGrant'
+                $ref: '#/components/schemas/RolePermissionGrantListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -10781,14 +10990,21 @@ paths:
       operationId: listAIConversations
       tags: [AI]
       summary: List assistant conversations
+      description: >-
+        Most recently updated first, paged with `limit` and the signed `cursor`
+        (API-02); a client that needs every conversation follows `next_cursor`
+        to the end.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Conversations
+          description: Paginated conversations
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/AIConversation' }
+              schema: { $ref: '#/components/schemas/AIConversationListResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
     post:
@@ -11268,22 +11484,66 @@ paths:
         redundant type (powered_by, member_of_cluster) a CI is affected only
         when all its providers failed. single_points_of_failure lists the
         direct dependents without an alternative provider,
-        protected_by_redundancy those that keep one.
+        protected_by_redundancy those that keep one. As in
+        /api/v1/impact/{ci_id}, a CI reached only over an undirected network
+        edge (connected_to) is a heuristic hit (IMP-03): listed in
+        affected_cis with heuristic true and counted in heuristic_count,
+        but not in affected_count, client_ids or site_ids.
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
       responses:
         '200':
           description: Compute the blast radius of a CI failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlastRadius'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/cis/{id}/dependencies:
     get:
       operationId: listCisIdDependencies
       summary: List upstream/downstream dependencies of a CI
+      description: >-
+        Upstream are the CIs this CI depends on, downstream the CIs that
+        depend on it, both read from the impact_direction of each
+        relationship type (IMP-01), the way /api/v1/impact/{ci_id} lets a
+        failure travel: for vm hosted_on server the server is upstream of
+        the vm and the vm downstream of the server; powered_by and the
+        containment projected from parent_ci_id alike. Undirected types
+        (connected_to, a heuristic) and types without impact direction are
+        no dependency. Only CIs the caller sees and that are not deleted are
+        listed or passed (IMP-07).
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - name: direction
+          in: query
+          schema: { type: string, enum: [upstream, downstream], default: downstream }
+        - name: depth
+          in: query
+          schema: { type: integer, default: 20, minimum: 1 }
+          description: >-
+            Maximum hops; defaults to 20, a larger value is capped at 20. A
+            value that is no integer or below 1 is 400 with field depth.
       responses:
         '200':
           description: List upstream/downstream dependencies of a CI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DependencyResult'
+        '400':
+          description: direction is neither upstream nor downstream, or depth is no integer or below 1 (field depth).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/cis/{id}/field-definitions:
     get:
@@ -11351,7 +11611,16 @@ paths:
   /api/v1/cis/{id}/fields/{name}/override:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string } }
-      - { name: name, in: path, required: true, schema: { type: string }, description: CI column or attribute name }
+      - name: name
+        in: path
+        required: true
+        description: >-
+          CI column or attribute name. The attribute namespaces _overrides,
+          _observed, _provenance and _instance are no fields (GLO-13): 400
+          with the field name.
+        schema:
+          type: string
+          pattern: '^(?!(_overrides|_observed|_provenance|_instance)$).+$'
     put:
       operationId: putCisIdFieldsNameOverride
       tags: [CIs]
@@ -11359,7 +11628,8 @@ paths:
       description: >-
         The CI takes the value at once; automation sources never overwrite it
         (REC-03). Structural columns (client_id, location_id, ci_type_id, ...)
-        cannot be overridden. The override is a manual write (API-07): in the
+        cannot be overridden; a reserved namespace (_overrides, _observed,
+        _provenance, _instance) as name is 400 with the field name (GLO-13). The override is a manual write (API-07): in the
         same transaction the CI version rises by one and the CI history
         records the change (change_type override; an attribute counts as the
         field attributes, as for PATCH), so a PATCH of the field with an
@@ -11397,7 +11667,7 @@ paths:
         the same transaction; the change is audited. Clearing an override is
         a manual write (API-07): the CI version rises by one and the CI
         history records the change, as for PUT. A field without an override
-        keeps the version.
+        keeps the version. A reserved namespace as name is 400 (GLO-13).
       responses:
         '200':
           description: Field provenance after the change
@@ -11408,6 +11678,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/FieldProvenance' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
           description: Unknown or invisible CI, or the CI has no value of the field
@@ -11559,27 +11830,86 @@ paths:
     get:
       operationId: getHistoryEntitytypeId
       summary: List the unified change history of an entity
+      description: >-
+        Needs ci:read and the read permission of the entity type: ci:read for
+        ci, relationship:read for relationship, location:read for location,
+        asset:read for asset, reservation and composition (CI-06, E-78). The
+        history is read in the caller's client and site scope. The audit
+        entries of a CI are part of its history only when the caller holds
+        audit:read; audit_included says whether they are.
       parameters:
         - name: entityType
           in: path
           required: true
-          schema: { type: string }
+          description: >-
+            The entity type. Locations of the common tree (site to bin) are
+            type location; the retired type location_node is refused with 400.
+          schema:
+            type: string
+            enum: [ci, asset, relationship, location, reservation, composition]
         - $ref: '#/components/parameters/ResourceID'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
+        - name: change_kind
+          in: query
+          required: false
+          description: >-
+            Keeps only the CI changes of this kind (AUD-03); entries without a
+            change kind (entity_change, location_change, audit) are left out.
+            Only for entity type ci; an unknown kind or another entity type
+            is 400 naming the field change_kind.
+          schema:
+            type: string
+            enum: [created, updated, deleted, restored, merged, type_changed, relationship_added, relationship_removed, status_changed]
       responses:
         '200':
           description: >-
             The change history of an entity, newest first. For a CI it is the
-            unified history of CI-06: its ci_change rows (with the site at the
-            time), entity_change rows and audit entries.
+            unified history of CI-06: its ci_change changes with the site at
+            the time, one entry per change set with change_kind and
+            field_changes (AUD-03; a row written before the change sets is an
+            entry of its own), entity_change rows, audit entries and the
+            location_change rows of its location and the location's
+            ancestors. For a location
+            it is its entity_change rows and the location_change rows of the
+            location (also after its deletion) and of its ancestors. A
+            location_change entry has change_type location_change, field_name
+            parent_id, and old_value/new_value objects with location_id,
+            location_name, parent_id and path. Without audit:read the audit
+            entries are left out (audit_included false).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HistoryListResponse'
+        '400':
+          description: >-
+            The entity type is not one of the listed types, the id is no UUID,
+            or change_kind is no known kind or is given for another entity
+            type than ci (field change_kind).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '401':
           description: Unauthorized
+        '403':
+          description: >-
+            The caller lacks ci:read or the read permission of the entity
+            type.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: >-
+            The CI is unknown or outside the caller's scope; the location is
+            unknown or outside the caller's scope: neither the location nor a
+            location_change of it is visible to the caller.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/inventory/availability:
     x-phase: P2
@@ -11836,6 +12166,10 @@ paths:
     get:
       operationId: listReconciliationSourcePolicy
       summary: Read or update the source-priority policy
+      description: >-
+        The organization's default policy; without one the built-in
+        priorities: the sources of the REC-03 rank table by descending rank,
+        sources of the same rank by name.
       responses:
         '200':
           description: Read or update the source-priority policy
@@ -12196,7 +12530,11 @@ paths:
         comparison and, like a missing key, matches ne. The ids in
         client_id, location_id, upstream_of and downstream_of are UUIDs. A
         violation is 422 with field naming it (where.<path>, e.g.
-        where.and[1].value or where.value[0], or the flat field).
+        where.and[1].value or where.value[0], or the flat field). Requires
+        search:read and the read permission of the entity kind (ci:read for
+        ci, asset:read for asset); the results follow the caller's client,
+        site and team scope. Rebuilding the index (/api/v1/search/reindex)
+        requires search:write.
       requestBody:
         required: true
         content:
@@ -12218,6 +12556,13 @@ paths:
             carries database text.
         '401':
           description: Unauthorized
+        '403':
+          description: >-
+            The caller lacks search:read or the read permission of the
+            queried entity kind (ci:read or asset:read).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
           description: >-
             Invalid filter AST or filter value; field names it (where.<path>
@@ -12241,7 +12586,10 @@ components:
       description: >-
         API key of AUT-04. While the key store (database) is unreachable, a
         request with a well-formed key is refused with 503 and Retry-After,
-        not with 401 (OPS-06).
+        not with 401 (OPS-06). Every request with an API key needs the
+        api_access feature of the organization; without it the request is
+        refused with 403 feature-not-entitled on every operation (ENT-05).
+        Session requests do not need api_access.
     OperatorAuth:
       type: http
       scheme: bearer
@@ -12408,13 +12756,47 @@ components:
           schema:
             $ref: '#/components/schemas/ProblemDetail'
     Unauthorized:
-      description: Unauthorized
+      description: >-
+        Unauthorized: the credential is missing or invalid. A failed
+        authentication counts against the pre-auth budget of the client IP
+        (AUT-10); the X-RateLimit headers describe that budget.
+      headers:
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/X-RateLimit-Limit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/X-RateLimit-Remaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/X-RateLimit-Reset'
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/ProblemDetail'
     Forbidden:
       description: Forbidden
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    FeatureNotEntitled:
+      description: >-
+        Forbidden: a missing permission, or the organization's plan does not
+        include the feature of this operation (rack_view for racks and
+        mounts, api_access for API keys; type
+        https://reticora.io/problems/feature-not-entitled, ENT-05).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    EntitlementLimit:
+      description: >-
+        Forbidden: a missing permission, the organization's plan does not
+        include the feature (type
+        https://reticora.io/problems/feature-not-entitled, ENT-05), or the
+        quota of the operation is reached (type
+        https://reticora.io/problems/entitlement-limit, ENT-03): max_users
+        for users, max_api_keys for API keys, max_collectors for collectors.
+        Nothing is created; after a downgrade below the stock the existing
+        objects stay usable and readable (ENT-08).
       content:
         application/problem+json:
           schema:
@@ -12447,7 +12829,8 @@ components:
       description: >-
         A rate limit is spent: the pre-auth budget of the client IP (AUT-10),
         the budget of the API key or session, or the organization budget
-        (API-04).
+        (API-04). The X-RateLimit headers describe the budget that refused
+        the request.
       headers:
         Retry-After:
           schema: { type: integer }
@@ -13034,13 +13417,24 @@ components:
     CollectorSpoolReport:
       type: object
       additionalProperties: false
-      description: Offline spool state of a collector; dropped counters only grow while the collector runs.
+      description: >-
+        Offline spool state of a collector. The dropped counters are the losses not yet acknowledged:
+        the collector reduces them by the reported amounts once the heartbeat was answered with 204.
+        Reported losses raise reticora_collector_spool_dropped_total (kind messages or samples),
+        backpressure raises reticora_collector_spool_backpressure_total.
       properties:
         messages: { type: integer }
         bytes: { type: integer, format: int64 }
         oldest_age_seconds: { type: integer, format: int64 }
-        dropped_messages: { type: integer, format: int64 }
+        dropped_messages:
+          type: integer
+          format: int64
+          description: Lost spool batches (expired, size limit, corrupt, refused with 4xx and quarantined), records rejected in an accepted batch and rejected or unreadable agent telemetry.
         dropped_bytes: { type: integer, format: int64 }
+        dropped_samples:
+          type: integer
+          format: int64
+          description: Metric samples and traps dropped on upload failures; they are counted, not spooled (E-79).
         backpressure: { type: boolean }
     IGAObject:
       type: object
@@ -13255,6 +13649,60 @@ components:
         count: { type: integer }
         summary:
           $ref: '#/components/schemas/ImpactSummary'
+    BlastRadius:
+      type: object
+      required: [ci_id, affected_cis, affected_count, heuristic_count]
+      properties:
+        ci_id: { type: string }
+        affected_cis:
+          type: array
+          description: >-
+            The CIs the failure reaches, certain ones first, then by name;
+            heuristic hits (IMP-03) carry heuristic true.
+          items: { $ref: '#/components/schemas/BlastRadiusCI' }
+        affected_count:
+          type: integer
+          description: The CIs reached over directed impact rules only, without heuristic hits.
+        heuristic_count:
+          type: integer
+          description: The CIs reached only over an undirected network edge (connected_to).
+        affected_services:
+          type: array
+          items: { $ref: '#/components/schemas/TopologyNode' }
+        client_ids:
+          type: array
+          description: Clients of the affected CIs (heuristic hits not included).
+          items: { type: string }
+        site_ids:
+          type: array
+          description: Sites of the affected CIs (heuristic hits not included).
+          items: { type: string }
+        single_points_of_failure:
+          type: array
+          items: { $ref: '#/components/schemas/TopologyNode' }
+        protected_by_redundancy:
+          type: array
+          items: { $ref: '#/components/schemas/TopologyNode' }
+    BlastRadiusCI:
+      allOf:
+        - $ref: '#/components/schemas/TopologyNode'
+        - type: object
+          required: [heuristic]
+          properties:
+            heuristic:
+              type: boolean
+              description: Reached only over an undirected network edge (connected_to), a second-class path (IMP-03).
+    DependencyResult:
+      type: object
+      required: [ci_id, direction, depth, nodes, count]
+      properties:
+        ci_id: { type: string }
+        direction: { type: string, enum: [upstream, downstream] }
+        depth: { type: integer }
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/TopologyNode' }
+        count: { type: integer }
     ImpactSummary:
       type: object
       required: [failed, impacted, certain, heuristic, by_category]
@@ -13396,12 +13844,67 @@ components:
         created_at: { type: string, format: date-time }
         source:
           type: string
-          enum: [ci_change, entity_change, audit]
-          description: The trail of the entry (CI history only).
+          enum: [ci_change, entity_change, audit, location_change]
+          description: The trail of the entry (CI and location history only).
         site_id:
           type: string
           format: uuid
-          description: The site of the CI when the change was made.
+          description: >-
+            The site of the CI when the change was made (ci_change), or the
+            site of the moved location (location_change).
+        change_kind:
+          type: string
+          enum: [created, updated, deleted, restored, merged, type_changed, relationship_added, relationship_removed, status_changed]
+          description: >-
+            The kind of a CI change (AUD-03); only ci_change entries carry it
+            and the fields below. A ci_change entry is one change set, the
+            field rows of one write; one of several rows has no field_name,
+            old_value and new_value, field_changes holds them.
+        change_set_id:
+          type: string
+          format: uuid
+          description: >-
+            The change set of the entry; absent for a row written before the
+            change sets, which is an entry of its own.
+        field_changes:
+          type: array
+          description: >-
+            The changed fields of the change set, ordered by field name; a
+            row without a field (create, delete) is none.
+          items: { $ref: '#/components/schemas/HistoryFieldChange' }
+        change_source:
+          type: string
+          enum: [ui, api, collector, import, system]
+          description: >-
+            The source of the CI change as in the audit log (AUD-03); source
+            names the trail of the entry.
+        collector_id:
+          type: string
+          format: uuid
+          description: The collector of a discovery change.
+        request_id:
+          type: string
+          description: The X-Request-ID of the request that made the change (AUD-07).
+        correlation_id:
+          type: string
+          description: The correlation id of the change (X-Correlation-ID, or the record of a discovery change).
+        observed_at:
+          type: string
+          format: date-time
+          description: The time of the observation of a discovery change.
+        actor_user_id:
+          type: string
+          format: uuid
+          description: The user who made the change; absent for an API key or the system.
+    HistoryFieldChange:
+      type: object
+      required: [field, old, new]
+      properties:
+        field: { type: string }
+        old:
+          description: The value before the change; null when the field was empty.
+        new:
+          description: The value after the change; null when the field was cleared.
     HistoryListResponse:
       type: object
       required: [data]
@@ -13416,6 +13919,12 @@ components:
         next_cursor:
           type: string
           description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        audit_included:
+          type: boolean
+          description: >-
+            True when the audit entries of the entity are part of the history:
+            a CI's history read with audit:read (E-78). False for a caller
+            without audit:read and for the other entity types.
     ProblemDetail:
       type: object
       description: >-
@@ -13952,8 +14461,12 @@ components:
 
     UpdateCIRequest:
       description: >-
-        A manual change. attributes is an RFC 7396 merge patch (nested objects
-        merge, null removes a member). Every changed field gets a protected
+        A manual change as an RFC 7396 merge patch (CI-04): an absent member
+        stays unchanged; null clears a nullable field (the stored value
+        becomes empty and its protected override holds null); null on name,
+        status, attributes, discovery_source, last_seen_at or change_reason
+        is refused with 422 naming the field. attributes merges nested
+        objects, null removes a member. Every changed field gets a protected
         override that discovery does not overwrite.
       type: object
       properties:
@@ -13965,22 +14478,22 @@ components:
         status:
           $ref: '#/components/schemas/CIStatus'
         client_id:
-          type: string
+          type: [string, 'null']
           description: >-
             A CI that moves to a client cannot contain CIs of another client
             or org-wide CIs (422 on client_id, TEN-05); an org-wide CI (empty
             string) can.
         location_id:
-          type: string
+          type: [string, 'null']
           description: Node of the location tree; site and room of the CI follow from it.
         asset_id:
-          type: string
+          type: [string, 'null']
           description: >-
             Links the CI to an asset (empty string unlinks on update); the CI
             then takes the asset's location, a location in the same request
             is rejected (422).
         parent_ci_id:
-          type: string
+          type: [string, 'null']
           description: >-
             Containing CI (empty string clears it): a visible CI of the CI's
             client or an org-wide CI (TEN-05). A CI the principal cannot see,
@@ -13988,29 +14501,29 @@ components:
             so is a CI of another client (422) and a cycle (422); the parent
             is checked again when client_id changes.
         manufacturer:
-          type: string
+          type: [string, 'null']
         model:
-          type: string
+          type: [string, 'null']
         serial_number:
-          type: string
+          type: [string, 'null']
         hardware_uuid:
-          type: string
+          type: [string, 'null']
         management_ip:
-          type: string
+          type: [string, 'null']
         primary_mac:
-          type: string
+          type: [string, 'null']
         hostname:
-          type: string
+          type: [string, 'null']
         fqdn:
-          type: string
+          type: [string, 'null']
         os_name:
-          type: string
+          type: [string, 'null']
         os_version:
-          type: string
+          type: [string, 'null']
         firmware_version:
-          type: string
+          type: [string, 'null']
         sys_object_id:
-          type: string
+          type: [string, 'null']
         attributes:
           type: object
           additionalProperties: true
@@ -14695,7 +15208,7 @@ components:
 
     DiscoveryIngestResponse:
       type: object
-      required: [received, created, updated, conflicts]
+      required: [received, created, updated, conflicts, accepted, rejected]
       properties:
         received:
           type: integer
@@ -14730,6 +15243,44 @@ components:
             reached (ENT-03, CH21).
         job_id:
           type: string
+        accepted:
+          type: integer
+          description: >-
+            Records processed, deduplicated or queued (REC-01). A record that
+            fails does not take the others of the request down (WP-481).
+        rejected:
+          type: integer
+          description: >-
+            Records refused with an error, each listed in errors. When every
+            record is rejected the request answers with the error status of
+            the first one instead of 202.
+        errors:
+          type: array
+          description: The records refused with an error, one entry each.
+          items:
+            $ref: '#/components/schemas/DiscoveryIngestRecordError'
+
+    DiscoveryIngestRecordError:
+      type: object
+      required: [status, detail, retryable]
+      properties:
+        record_id:
+          type: string
+          description: The record_id of the record; absent for items of the deprecated collector_id/items request.
+        status:
+          type: integer
+          description: >-
+            The HTTP status the record alone would have been answered with,
+            e.g. 403 for a record outside the sender's scope.
+        detail:
+          type: string
+          description: Why the record was refused, without internals.
+        retryable:
+          type: boolean
+          description: >-
+            The failure is transient (database, network, or an earlier record
+            of the same device failed transiently); sent again, the record may
+            succeed. False for a record that can never succeed.
 
     DiscoveryJobStatus:
       type: string
@@ -15750,6 +16301,17 @@ components:
         description:
           type: string
 
+    PermissionListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Permission'
+
     RolePermissionGrant:
       type: object
       required: [organization_id, role_id, permission_key, granted_at]
@@ -15765,6 +16327,17 @@ components:
           format: date-time
         granted_by:
           type: string
+
+    RolePermissionGrantListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/RolePermissionGrant'
 
     ReplaceRolePermissionsRequest:
       type: object
@@ -17479,6 +18052,17 @@ components:
         value:
           type: number
 
+    MetricPointListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/MetricPoint'
+
     UpdateAlertRuleRequest:
       type: object
       description: Partial alert rule update; every field is optional and only set fields are applied.
@@ -17532,6 +18116,17 @@ components:
           type: string
           format: date-time
           description: Timestamp of the last notification for the current firing.
+
+    AlertRuleListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/AlertRule'
 
     CreateAlertRuleRequest:
       type: object
@@ -17743,7 +18338,7 @@ components:
     Organization:
       type: object
       description: The tenant (LOC-01).
-      required: [id, name, slug, plan, settings, timezone, currency, locale, created_at, updated_at]
+      required: [id, name, slug, plan, settings, timezone, currency, locale, ai_opt_in, created_at, updated_at]
       properties:
         id:
           type: string
@@ -17768,6 +18363,11 @@ components:
           type: string
           description: BCP 47 language tag.
           example: de-DE
+        ai_opt_in:
+          type: boolean
+          description: >
+            The organization's consent to external AI processing (AI-02);
+            together with the ai add-on it enables the AI assistant.
         created_at:
           type: string
           format: date-time
@@ -17791,6 +18391,11 @@ components:
           type: string
         locale:
           type: string
+        ai_opt_in:
+          type: boolean
+          description: >
+            Organization AI opt-in (AI-02); only a holder of user:manage for the
+            whole organization may set it, the change is audited.
 
     Client:
       type: object
@@ -19194,6 +19799,17 @@ components:
           type: string
           format: date-time
 
+    CredentialListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Credential'
+
     CreateCredentialRequest:
       type: object
       required: [name, secret]
@@ -19229,6 +19845,17 @@ components:
         created_at:
           type: string
           format: date-time
+
+    DocumentLinkListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/DocumentLink'
 
     CreateDocumentLinkRequest:
       type: object
@@ -19309,6 +19936,17 @@ components:
         joined_at:
           type: string
           format: date-time
+
+    TeamMemberListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/TeamMember'
 
     AddTeamMemberRequest:
       type: object
@@ -19414,6 +20052,17 @@ components:
         granted_by:
           type: string
 
+    RoleAssignmentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/RoleAssignment'
+
     AssignRoleRequest:
       type: object
       required: [user_id]
@@ -19499,6 +20148,17 @@ components:
         title: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    AIConversationListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/AIConversation'
 
     AICitation:
       type: object

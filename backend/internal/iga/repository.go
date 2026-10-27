@@ -42,6 +42,11 @@ type Repository interface {
 	ListAccessRequests(ctx context.Context, orgID, status string, page api.PaginationParams) ([]AccessRequest, int, error)
 	CreateAccessRequest(ctx context.Context, req *AccessRequest) error
 	DecideAccessRequest(ctx context.Context, orgID, id, status, actorID, comment string) (*AccessRequest, error)
+	// ApproveAccessRequest approves the request and stores the provisioning
+	// task of its entitlement (ApprovalTask) as one unit: when the task
+	// cannot be written the approval is undone and the request stays
+	// pending (F-056).
+	ApproveAccessRequest(ctx context.Context, orgID, id, actorID, comment string) (*AccessRequest, error)
 
 	ListReviews(ctx context.Context, orgID, status string, page api.PaginationParams) ([]AccessReview, int, error)
 	CreateReview(ctx context.Context, r *AccessReview, items []AccessReviewItem) error
@@ -52,6 +57,16 @@ type Repository interface {
 	CreateDrift(ctx context.Context, f *DriftFinding) error
 	UpdateDrift(ctx context.Context, f *DriftFinding) error
 	GetDrift(ctx context.Context, orgID, id string) (*DriftFinding, error)
+}
+
+// ApprovalTask is the provisioning task an approved access request needs:
+// its subject joins the entitlement's group on the request's connector. A
+// request without a connector needs none (nil).
+func ApprovalTask(ar *AccessRequest) *ProvisioningTask {
+	if ar.ConnectorID == "" {
+		return nil
+	}
+	return &ProvisioningTask{OrganizationID: ar.OrganizationID, ConnectorID: ar.ConnectorID, UserID: ar.SubjectUserID, Action: TaskActionAddGroupMember, Payload: JSONMap{"entitlement": ar.Entitlement, "group_id": ar.Entitlement, "account_id": ar.SubjectUserID}}
 }
 
 type MemoryRepository struct {
@@ -313,6 +328,21 @@ func (r *MemoryRepository) DecideAccessRequest(_ context.Context, orgID, id, sta
 	a.UpdatedAt = now
 	cp := *a
 	return &cp, nil
+}
+
+// ApproveAccessRequest decides and stores the task; the memory CreateTask
+// does not fail, so no decision has to be undone.
+func (r *MemoryRepository) ApproveAccessRequest(ctx context.Context, orgID, id, actor, comment string) (*AccessRequest, error) {
+	ar, err := r.DecideAccessRequest(ctx, orgID, id, "approved", actor, comment)
+	if err != nil {
+		return nil, err
+	}
+	if task := ApprovalTask(ar); task != nil {
+		if err := r.CreateTask(ctx, task); err != nil {
+			return nil, err
+		}
+	}
+	return ar, nil
 }
 
 func (r *MemoryRepository) ListReviews(_ context.Context, orgID, status string, p api.PaginationParams) ([]AccessReview, int, error) {

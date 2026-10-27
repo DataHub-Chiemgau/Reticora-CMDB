@@ -5,7 +5,8 @@
 // (ENT-01): one row per feature with enabled, limits (named quotas),
 // valid_until and source. An organization is entitled exactly to its rows
 // (ENT-05): a missing row means not entitled, only cmdb_core is always
-// active. Every organization is provisioned with the rows of its plan once.
+// active. Every organization is provisioned with the missing rows of its
+// plan.
 package entitlement
 
 import (
@@ -365,41 +366,52 @@ func (s *Service) Check(ctx context.Context, orgID, featureKey string) (Entitlem
 	return ent, status == StatusActive, nil
 }
 
-// Provision stores the features of the plan (no add-ons, no quotas) for an
-// organization that has no entitlement rows yet. Since a missing row means
-// not entitled, every organization is provisioned once (at startup and on
-// creation). It reports whether rows were written.
-func (s *Service) Provision(ctx context.Context, orgID string, plan Plan) (bool, error) {
-	stored, err := s.repo.List(ctx, orgID)
-	if err != nil {
-		return false, err
-	}
-	if len(stored) > 0 {
-		return false, nil
-	}
+// Provision stores the features of the plan (no add-ons, no quotas) that
+// the organization has no row for yet (ENT-05, F-210): an organization that
+// holds only some rows, e.g. only cmdb_core from before the plan fallback
+// was removed, gets the rest of its plan. An existing row is never changed,
+// a disabled or expired one included. It runs for every organization at
+// startup; a new organization gets the rows of its plan when it is created.
+// It returns and logs the added feature keys.
+func (s *Service) Provision(ctx context.Context, orgID string, plan Plan) ([]string, error) {
 	plan = normalizePlan(plan)
-	for _, feature := range PlanFeatures(plan) {
+	features := PlanFeatures(plan)
+	ents := make([]Entitlement, 0, len(features))
+	for _, feature := range features {
 		ent := Entitlement{OrganizationID: orgID, FeatureKey: feature, Plan: plan, Enabled: true,
-			Limits: map[string]int64{}, Source: "manual"}
-		if _, err = s.Grant(ctx, ent); err != nil {
-			return false, fmt.Errorf("provision %s for %s: %w", feature, orgID, err)
+			Limits: map[string]int64{}, Source: "manual", UpdatedAt: s.now()}
+		if err := ent.Validate(); err != nil {
+			return nil, fmt.Errorf("provision %s for %s: %w", feature, orgID, err)
 		}
+		ents = append(ents, ent)
 	}
-	return true, nil
+	added, err := s.repo.InsertMissing(ctx, orgID, ents)
+	if err != nil {
+		return nil, fmt.Errorf("provision %s: %w", orgID, err)
+	}
+	if len(added) == 0 {
+		return nil, nil
+	}
+	s.invalidate(ctx, orgID)
+	if slices.Contains(added, FeatureCMDBCore) {
+		s.adoptAfterGrant(ctx, &Entitlement{OrganizationID: orgID, FeatureKey: FeatureCMDBCore})
+	}
+	slog.InfoContext(ctx, "entitlements provisioned", "organization_id", orgID, "plan", string(plan), "features", added)
+	return added, nil
 }
 
-// ProvisionOrganizations provisions every listed organization (id to plan)
-// that has no entitlement rows yet, each in its own tenant context, and
-// returns how many were provisioned.
+// ProvisionOrganizations provisions the missing plan features of every
+// listed organization (id to plan), each in its own tenant context, and
+// returns how many organizations got rows.
 func (s *Service) ProvisionOrganizations(ctx context.Context, plans map[string]Plan) (int, error) {
 	n := 0
 	for orgID, plan := range plans {
 		scope := database.OrgWideScope(orgID, "")
-		done, err := s.Provision(database.ContextWithTenantScope(ctx, &scope), orgID, plan)
+		added, err := s.Provision(database.ContextWithTenantScope(ctx, &scope), orgID, plan)
 		if err != nil {
 			return n, err
 		}
-		if done {
+		if len(added) > 0 {
 			n++
 		}
 	}

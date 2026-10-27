@@ -103,6 +103,145 @@ func TestComputeImpactConnectedToIsHeuristic(t *testing.T) {
 	}
 }
 
+// TestDependenciesFollowImpactDirection covers IMP-01 and IMP-07 for GET
+// /cis/{id}/dependencies (WP-490, F-099): upstream and downstream follow
+// the impact direction of each type, not the raw edge direction. vm
+// hosted_on server puts the server upstream of the vm and the vm
+// downstream of the server; powered_by, powers and the projected contains
+// alike; connected_to (heuristic) and a type without impact direction are
+// no dependency; depth bounds the hops.
+func TestDependenciesFollowImpactDirection(t *testing.T) {
+	edges := []Edge{
+		{ID: "e1", SourceCIID: "vm", TargetCIID: "server", RelType: "hosted_on"},
+		{ID: "e2", SourceCIID: "server", TargetCIID: "pdu", RelType: "powered_by"},
+		{ID: "e3", SourceCIID: "app", TargetCIID: "vm", RelType: "runs_on"},
+		{ID: "e4", SourceCIID: "chassis", TargetCIID: "server", RelType: "contains"},
+		{ID: "e5", SourceCIID: "ups", TargetCIID: "pdu", RelType: "powers"},
+		{ID: "e6", SourceCIID: "switch", TargetCIID: "server", RelType: "connected_to"},
+		{ID: "e7", SourceCIID: "monitor", TargetCIID: "server", RelType: "monitors"},
+	}
+	deps := func(root string, upstream bool, depth int) []string {
+		t.Helper()
+		g, _ := edgeGraph([]string{root}, edges)
+		reached := dependenciesOf(g, g.stepRules(testRules, impactQuery{}), upstream, depth)
+		var out []string
+		for n := range reached {
+			if reached[n] {
+				out = append(out, g.ids[n])
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+	for _, c := range []struct {
+		root     string
+		upstream bool
+		depth    int
+		want     []string
+	}{
+		{"vm", true, 1, []string{"server"}},
+		{"vm", true, maxDepth, []string{"chassis", "pdu", "server", "ups"}},
+		{"vm", false, maxDepth, []string{"app"}},
+		{"server", false, 1, []string{"vm"}},
+		{"server", false, maxDepth, []string{"app", "vm"}},
+		{"server", true, 1, []string{"chassis", "pdu"}},
+		{"pdu", false, maxDepth, []string{"app", "server", "vm"}},
+		{"pdu", true, maxDepth, []string{"ups"}},
+		{"chassis", false, 1, []string{"server"}},
+		{"chassis", true, maxDepth, nil},
+		{"app", true, 2, []string{"server", "vm"}},
+		{"switch", false, maxDepth, nil},
+		{"switch", true, maxDepth, nil},
+		{"monitor", true, maxDepth, nil},
+	} {
+		if got := deps(c.root, c.upstream, c.depth); !slices.Equal(got, c.want) {
+			t.Errorf("%s upstream=%v depth %d: %v, want %v", c.root, c.upstream, c.depth, got, c.want)
+		}
+	}
+}
+
+// TestDependenciesSkipDeletedCIs covers IMP-07 and CI-05 over HTTP: the
+// dependencies of the pdu are the server (powered_by) as long as it exists;
+// a deleted CI is neither listed nor passed.
+func TestDependenciesSkipDeletedCIs(t *testing.T) {
+	ciRepo, relRepo, ids := seed(t)
+	mux := chi.NewRouter()
+	NewHandler(ciRepo, relRepo).RegisterRoutes(mux)
+	deps := func(id, direction string) []string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantReq("GET", "/api/v1/cis/"+id+"/dependencies?direction="+direction))
+		var body DependencyResult
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil {
+			t.Fatalf("dependencies: %d %s", w.Code, w.Body.String())
+		}
+		out := []string{}
+		for _, n := range body.Nodes {
+			out = append(out, n.ID)
+		}
+		if body.Count != len(out) {
+			t.Errorf("count %d, %d nodes", body.Count, len(out))
+		}
+		return out
+	}
+	// srv1 powered_by pdu1; sw1 connected_to srv1 is no dependency.
+	if got := deps(ids["pdu1"], "downstream"); !slices.Equal(got, []string{ids["srv1"]}) {
+		t.Errorf("downstream of pdu1: %v", got)
+	}
+	if got := deps(ids["srv1"], "upstream"); !slices.Equal(got, []string{ids["pdu1"]}) {
+		t.Errorf("upstream of srv1: %v", got)
+	}
+	if got := deps(ids["sw1"], "upstream"); len(got) != 0 {
+		t.Errorf("upstream of sw1 over connected_to: %v", got)
+	}
+	if err := ciRepo.Delete(context.Background(), "org-1", ids["srv1"]); err != nil {
+		t.Fatal(err)
+	}
+	if got := deps(ids["pdu1"], "downstream"); len(got) != 0 {
+		t.Errorf("downstream of pdu1 lists a deleted CI: %v", got)
+	}
+}
+
+// TestBlastRadiusSeparatesHeuristicHits covers IMP-03 for the blast
+// radius (WP-490, F-098): a CI reached only over connected_to is listed
+// with heuristic=true and counted in heuristic_count, not in
+// affected_count, as /impact marks it.
+func TestBlastRadiusSeparatesHeuristicHits(t *testing.T) {
+	ciRepo, relRepo, ids := seed(t)
+	mux := chi.NewRouter()
+	NewHandler(ciRepo, relRepo).RegisterRoutes(mux)
+	blast := func(id string) BlastRadius {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantReq("GET", "/api/v1/cis/"+id+"/blast-radius"))
+		var body BlastRadius
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil {
+			t.Fatalf("blast radius: %d %s", w.Code, w.Body.String())
+		}
+		return body
+	}
+	// pdu1 fails: srv1 certain (powered_by), sw1 only over connected_to.
+	got := blast(ids["pdu1"])
+	want := []BlastRadiusCI{{Node: Node{ID: ids["srv1"]}}, {Node: Node{ID: ids["sw1"]}, Heuristic: true}}
+	if len(got.AffectedCIs) != len(want) || got.AffectedCount != 1 || got.HeuristicCount != 1 {
+		t.Fatalf("blast radius of pdu1: %+v", got)
+	}
+	for i := range want {
+		if got.AffectedCIs[i].ID != want[i].ID || got.AffectedCIs[i].Heuristic != want[i].Heuristic {
+			t.Errorf("affected %d: %+v, want %+v", i, got.AffectedCIs[i], want[i])
+		}
+	}
+	if !slices.Equal(got.ClientIDs, []string{"client-a"}) {
+		t.Errorf("clients: %v", got.ClientIDs)
+	}
+	// sw1 fails: srv1 is only a heuristic hit, nothing is affected.
+	got = blast(ids["sw1"])
+	if got.AffectedCount != 0 || got.HeuristicCount != 1 || len(got.AffectedCIs) != 1 || !got.AffectedCIs[0].Heuristic ||
+		len(got.ClientIDs) != 0 || len(got.SinglePointsOfFailure) != 0 {
+		t.Errorf("blast radius of sw1: %+v", got)
+	}
+}
+
 // TestImpactRulesUseOrganizationTypes: a custom type follows its own
 // impact_direction; none does not propagate.
 func TestImpactRulesUseOrganizationTypes(t *testing.T) {

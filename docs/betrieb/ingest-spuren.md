@@ -127,6 +127,39 @@ nebeneinander arbeiten.
   Die Queue sieht diese Wiederholungen nicht; sie zählen nicht gegen
   `MaxDeliver`.
 
+## Fehler je Record (WP-481)
+
+Ein Record, der scheitert, nimmt die übrigen Records seiner Gruppe nicht
+mit (REC-01). Die Verarbeitung setzt mit dem nächsten Record fort; jede
+Nachricht wird für ihren Record entschieden:
+
+- **Verarbeitet** (auch als Duplikat übersprungen): Ack.
+- **Dauerhafter Fehler** (Klasse 4xx: Record außerhalb des Scopes des
+  Absenders, vom Datenmodell abgewiesener Wert, eindeutiger Wert, den ein
+  anderes CI hält): sofort Term, Log `ingest.message.failed` mit
+  `permanent=true`, Metrik
+  `reticora_ingest_dead_letters_total{reason="permanent"}`. Er hält keinen
+  anderen Record auf.
+- **Transienter Fehler** (Datenbank, Netz, Deadlock oder Wartegrenze nach
+  den Wiederholungen oben): Nak, nach `MaxDeliver` (5) Term
+  (`reason="max_deliver"`). Die folgenden Records der Gruppe, die einen
+  Identitätsschlüssel der Identitätssperre mit ihm teilen (Seriennummer,
+  Hardware-UUID, MAC, Management-IP je VRF), werden nicht verarbeitet,
+  sondern ebenfalls Nak, damit die Reihenfolge je Gerät erhalten bleibt
+  (E-56); Records anderer Geräte werden verarbeitet und bestätigt. Ein
+  Record ohne Identitätsschlüssel hält keinen anderen auf.
+- Scheitert ein Record in der Batch-Transaktion seines Fensters, rollt das
+  Fenster zurück und seine Records laufen einzeln (`ingest.batch.fallback`,
+  siehe „Kosten je Transaktion“). Scheitert der Rahmen eines Batches
+  dauerhaft (etwa die Prüfung eines unbekannten Typs außerhalb des Scopes),
+  läuft jeder Record in einem eigenen Rahmen (`ingest.frame.fallback`).
+
+Ohne NATS (Ingest in der Anfrage) antwortet der Ingest mit 202 und den
+Zählern `accepted` und `rejected` sowie je abgewiesenem Record einem Eintrag
+in `errors` (`record_id`, `status`, `detail`, `retryable`); nur wenn kein
+Record angenommen wurde, bleibt der Fehlerstatus des ersten Records
+(z. B. 403).
+
 ## Upgrade und Altconsumer
 
 Der Consumer der Releases vor WP-334 (`reticora-ingest`, bisher ohne Filter)
@@ -242,6 +275,7 @@ geht es so:
   | `reticora_ingest_lane_backlog{lane}` | Rückstand je Spur (`legacy` = Altconsumer) |
   | `reticora_ingest_lane_records_total{lane}` | bestätigte Nachrichten je Spur |
   | `reticora_ingest_record_retries_total{reason}` | Wiederholungen im Prozess (`deadlock`, `serialization`, `identity`, `near_limit`, `out_of_memory`, `lock_timeout`) |
+  | `reticora_ingest_dead_letters_total{reason}` | aufgegebene Nachrichten (`undecodable`, `permanent`, `max_deliver`; siehe „Fehler je Record“) |
   | `reticora_worker_backlog{worker="ingest"}` | Summe aller Spuren (bestehende Alerts) |
 
 - Eine einzelne hängende Spur fällt in der Summe kaum auf: steigt

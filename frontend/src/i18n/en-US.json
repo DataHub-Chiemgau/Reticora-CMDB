@@ -169,6 +169,15 @@
     "allStatus": "All Statuses",
     "exportCsv": "Export CSV",
     "exportJson": "Export JSON",
+    "exportJob": {
+      "progress": "{{format}} export: {{status}}",
+      "done": "{{format}} export downloaded ({{rows}} rows)",
+      "filtersIgnored": "Search and site are not applied to the export; it contains all CIs with the selected status, type and client.",
+      "forbidden": "Export not allowed: you lack the permission or your plan does not include exports.",
+      "unavailable": "Export is currently unavailable. Please try again later.",
+      "failed": "The export failed. Please try again.",
+      "timeout": "The export is taking longer than expected. Once it is done, it is available for download under \"Export\"."
+    },
     "overview": "Overview",
     "noAttributes": "No attributes recorded",
     "noRelationships": "No relationships",
@@ -206,6 +215,8 @@
     "setOverride": "Set override",
     "protected": "protected",
     "instanceFields": "Instance fields",
+    "instanceFieldsConflict": "Save refused: {{fields}} was changed by someone else in the meantime. Please reload the page and repeat the change.",
+    "instanceFieldsPrecondition": "Save refused: the version of this CI is outdated or unknown. Please reload the page.",
     "provenanceHint": "Discovered vs. effective value. Protected manual overrides are never overwritten by discovery.",
     "discovered": "Discovered",
     "assetCanonical": "Asset (canonical data)",
@@ -229,11 +240,13 @@
     "history": "History",
     "historyEmpty": "No changes yet.",
     "historyLoadError": "The history could not be loaded.",
+    "historyAuditHint": "Audit entries are not included; they require the audit:read permission.",
     "historySite": "Site {{site}}",
     "historySource": {
       "ci_change": "Change",
       "entity_change": "History",
-      "audit": "Audit"
+      "audit": "Audit",
+      "location_change": "Location change"
     }
   },
   "form": {
@@ -358,6 +371,17 @@
     "noDeadLetters": "No dead letters",
     "noDeadLettersHint": "There are currently no permanently failed deliveries.",
     "retry": "Retry",
+    "readOnly": "You can view webhooks; creating, deleting and testing require the webhook:manage permission.",
+    "errors": {
+      "notSaved": "The webhook was not saved. Please check the marked inputs.",
+      "egress": "Destination blocked by the egress protection, not allowed: {{reason}}",
+      "invalidEvent": "Unknown event: {{event}}",
+      "invalidValue": "Invalid value: {{detail}}",
+      "forbidden": "No permission: this action requires the webhook:manage permission.",
+      "notFound": "The webhook no longer exists. Please reload the page.",
+      "rejected": "Refused by the server: {{detail}}",
+      "failed": "The action failed: {{detail}}"
+    },
     "status": {
       "pending": "pending",
       "delivering": "delivering",
@@ -1018,6 +1042,27 @@
       "zone": "Zone",
       "shelf": "Shelf",
       "bin": "Bin"
+    },
+    "editTitle": "Edit {{name}}",
+    "parent": "Parent node",
+    "forbidden": "You do not have permission for this action.",
+    "deleteTitle": "Delete “{{name}}”?",
+    "deleteConfirm": "The node is deleted permanently. As long as child locations or other objects reference it, the server refuses the deletion.",
+    "inUse": "still referenced by {{kinds}}",
+    "dependencies": {
+      "location": "child locations",
+      "ci": "CIs",
+      "asset": "assets",
+      "quantity_item": "stock items",
+      "asset_movement": "movements",
+      "rack_mount": "rack mounts",
+      "role_assignment": "role assignments",
+      "vlan": "VLANs",
+      "subnet": "subnets",
+      "collector": "collectors",
+      "discovery_scope": "discovery scopes",
+      "agent_enrollment_token": "valid agent enrollment tokens",
+      "ci_merge": "CI merges (tombstones)"
     }
   },
   "savedviews": {
@@ -1032,7 +1077,9 @@
     "shared": "shared",
     "mine": "My views",
     "save": "Save as view",
-    "namePrompt": "View name"
+    "namePrompt": "View name",
+    "forbidden": "No permission for this view",
+    "forbiddenHint": "You lack the read permission for the objects this view queries. Contact your administrator."
   },
   "lifecycle": {
     "transitionTo": "Transition to",
@@ -1134,6 +1181,30 @@
     "markAllRead": "Mark all read",
     "unread": "Unread",
     "empty": "No notifications."
+  },
+  "entitlementExpiry": {
+    "title": "Expiring features",
+    "message": "The feature “{{feature}}” expires on {{date}} (in {{days}} days).",
+    "messageOneDay": "The feature “{{feature}}” expires on {{date}} (in 1 day).",
+    "features": {
+      "discovery": "Discovery",
+      "topology": "Topology",
+      "rack_view": "Rack view",
+      "export_csv": "CSV export",
+      "webhooks": "Webhooks",
+      "api_access": "API access",
+      "notifications_email": "E-mail notifications",
+      "inventory": "Inventory",
+      "documents": "Documents",
+      "stocktake": "Stocktake",
+      "ticketing": "Tickets",
+      "monitoring": "Monitoring",
+      "endpoint_agent": "Endpoint agent",
+      "workflow_forms": "Workflows and forms",
+      "compliance": "Compliance",
+      "iga": "IGA",
+      "ai": "AI assistant"
+    }
   },
   "jobs": {
     "title": "Job center",

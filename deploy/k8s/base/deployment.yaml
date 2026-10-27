@@ -111,6 +111,8 @@ spec:
               value: "true"
             - name: RETICORA_WORKER_MONITORING_ENABLED
               value: "true"
+            - name: RETICORA_WORKER_HEALTH_ENABLED
+              value: "true"
             - name: RETICORA_WORKER_SCHEDULER_ENABLED
               value: "true"
             - name: RETICORA_WORKER_JOBS_ENABLED

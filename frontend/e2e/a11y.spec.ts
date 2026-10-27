@@ -36,8 +36,8 @@ const MAIN_PAGES = [
 ];
 
 // The empty answers of the endpoints the main pages read that are no list:
-// the compliance score of the dashboard (ComplianceEvaluationResponse), the
-// topology graph and the permission catalogue (an array).
+// the compliance score of the dashboard (ComplianceEvaluationResponse) and
+// the topology graph.
 const EMPTY_OBJECTS: Record<string, unknown> = {
   '/api/v1/compliance/score': {
     overall: { passed: 0, failed: 0, not_applicable: 0, score: 0 },
@@ -45,7 +45,6 @@ const EMPTY_OBJECTS: Record<string, unknown> = {
     results: [],
   },
   '/api/v1/topology': { nodes: [], edges: [] },
-  '/api/v1/permissions': [],
 };
 
 async function mockBackend(page: Page) {

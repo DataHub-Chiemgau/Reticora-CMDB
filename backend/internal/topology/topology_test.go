@@ -3,6 +3,7 @@ package topology
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -467,11 +468,68 @@ func TestTraversalDepthLimit(t *testing.T) {
 	}
 }
 
+// TestParseDepth covers IMP-02 and F-255 (WP-490): an empty depth takes
+// the fallback, a depth above 20 is capped at 20, a depth that is no
+// integer or below 1 is a 400 field error on depth instead of a silent
+// default.
 func TestParseDepth(t *testing.T) {
-	cases := map[string]int{"": defaultDepth, "0": defaultDepth, "-1": defaultDepth, "abc": defaultDepth, "3": 3, "999": maxDepth}
+	cases := map[string]int{"": defaultDepth, "1": 1, "3": 3, "20": maxDepth, "21": maxDepth, "999": maxDepth,
+		"99999999999999999999": maxDepth}
 	for in, want := range cases {
-		if got := parseDepth(in); got != want {
-			t.Errorf("parseDepth(%q)=%d want %d", in, got, want)
+		if got, err := parseDepth(in, defaultDepth); err != nil || got != want {
+			t.Errorf("parseDepth(%q)=%d, %v want %d", in, got, err, want)
+		}
+	}
+	if got, err := parseDepth("", maxDepth); err != nil || got != maxDepth {
+		t.Errorf("parseDepth(\"\", maxDepth)=%d, %v", got, err)
+	}
+	for _, in := range []string{"0", "-1", "abc", "2.5", " 3", "-99999999999999999999"} {
+		got, err := parseDepth(in, defaultDepth)
+		var fe *api.FieldError
+		if !errors.As(err, &fe) || fe.Field != "depth" || fe.Status != 0 {
+			t.Errorf("parseDepth(%q)=%d, %v: want a 400 field error on depth", in, got, err)
+		}
+	}
+}
+
+// TestDepthValidationOverHTTP covers F-255 (WP-490): every endpoint with
+// a depth parameter answers an invalid depth with 400 naming the field
+// depth and caps a depth above 20.
+func TestDepthValidationOverHTTP(t *testing.T) {
+	ciRepo, relRepo, ids := seed(t)
+	mux := chi.NewRouter()
+	NewHandler(ciRepo, relRepo).RegisterRoutes(mux)
+	paths := []string{
+		"/api/v1/topology?root_ci_id=" + ids["pdu1"] + "&",
+		"/api/v1/topology/cis/" + ids["pdu1"] + "/impact?",
+		"/api/v1/impact/" + ids["pdu1"] + "?",
+		"/api/v1/impact?ci_ids=" + ids["pdu1"] + "&",
+		"/api/v1/cis/" + ids["pdu1"] + "/dependencies?",
+	}
+	for _, path := range paths {
+		for _, depth := range []string{"abc", "0", "-1"} {
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, tenantReq("GET", path+"depth="+depth))
+			var problem struct {
+				Field string `json:"field"`
+			}
+			if w.Code != http.StatusBadRequest || json.Unmarshal(w.Body.Bytes(), &problem) != nil || problem.Field != "depth" {
+				t.Errorf("%sdepth=%s: %d %s, want 400 on field depth", path, depth, w.Code, w.Body.String())
+			}
+		}
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantReq("GET", path+"depth=999"))
+		if w.Code != http.StatusOK {
+			t.Errorf("%sdepth=999: %d %s", path, w.Code, w.Body.String())
+		}
+		var body struct {
+			Depth *int `json:"depth"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Depth != nil && *body.Depth != maxDepth {
+			t.Errorf("%sdepth=999: depth %d, want capped at %d", path, *body.Depth, maxDepth)
 		}
 	}
 }

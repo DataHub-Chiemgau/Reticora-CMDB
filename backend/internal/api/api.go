@@ -67,8 +67,29 @@ func ParsePagination(r *http.Request) PaginationParams {
 	return p
 }
 
+// errKeysetCursorOnOffsetList refuses a keyset cursor on a list that pages
+// by offset only.
+var errKeysetCursorOnOffsetList = fmt.Errorf("%w: not issued for this list", ErrInvalidCursor)
+
+// ParseOffsetPage is ParsePagination for a list that pages by offset only
+// (Page). A malformed or forged cursor, or a keyset cursor, which such a
+// list never issues, is answered with 400 and ok false.
+func ParseOffsetPage(w http.ResponseWriter, r *http.Request) (page PaginationParams, ok bool) {
+	page = ParsePagination(r)
+	err := page.CursorError
+	if err == nil && page.Cursor != nil {
+		err = errKeysetCursorOnOffsetList
+	}
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return page, false
+	}
+	return page, true
+}
+
 // ListResponse is a generic paginated response wrapper. NextCursor is only set
 // for endpoints that support keyset pagination and when more rows follow.
+// Data is always encoded as an array, never as null (API-02, F-214).
 type ListResponse[T any] struct {
 	Data       []T    `json:"data"`
 	Total      int    `json:"total"`
@@ -76,6 +97,20 @@ type ListResponse[T any] struct {
 	Offset     int    `json:"offset"`
 	HasMore    bool   `json:"has_more"`
 	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+// listResponseJSON is ListResponse without its MarshalJSON method.
+type listResponseJSON[T any] ListResponse[T]
+
+// MarshalJSON encodes a nil Data as an empty array, so an empty list
+// answers "data": [] whatever slice the repository returned (API-02,
+// F-214). ListResponse must not be embedded in another struct: the method
+// would be promoted and replace the encoding of the outer struct.
+func (l ListResponse[T]) MarshalJSON() ([]byte, error) {
+	if l.Data == nil {
+		l.Data = []T{}
+	}
+	return json.Marshal(listResponseJSON[T](l))
 }
 
 // ProblemDetail implements RFC 7807. TraceID is filled by WriteProblemBody
@@ -104,6 +139,24 @@ func CompleteList[T any](items []T) ListResponse[T] {
 		items = []T{}
 	}
 	return ListResponse[T]{Data: items, Total: len(items), Limit: len(items)}
+}
+
+// Page returns the page of items that the pagination parameters select
+// (offset from limit/offset or an offset cursor) as a ListResponse; the
+// next_cursor follows from HasMore. It serves lists that the repository
+// reads in full and in a stable order (API-02). Such a list issues offset
+// cursors only; the handler reads the parameters with ParseOffsetPage.
+func Page[T any](items []T, page PaginationParams) ListResponse[T] {
+	total := len(items)
+	start := min(page.Offset, total)
+	end := min(start+page.Limit, total)
+	return ListResponse[T]{
+		Data:    items[start:end],
+		Total:   total,
+		Limit:   page.Limit,
+		Offset:  page.Offset,
+		HasMore: end < total,
+	}
 }
 
 // pagedList is implemented by ListResponse: it fills next_cursor when the
@@ -224,6 +277,18 @@ func WriteTypedProblem(w http.ResponseWriter, status int, err error) bool {
 	}
 	WriteProblem(w, status, typed.ProblemType(), http.StatusText(status), typed.Error())
 	return true
+}
+
+// WriteEntitlementError writes a refusal of the entitlement service (an
+// exhausted quota or a feature outside the plan) as 403 with its problem
+// type (entitlement-limit, feature-not-entitled) and reports whether err
+// was one.
+func WriteEntitlementError(w http.ResponseWriter, err error) bool {
+	var refusal interface{ LimitExceeded() bool }
+	if !errors.As(err, &refusal) || !refusal.LimitExceeded() {
+		return false
+	}
+	return WriteTypedProblem(w, http.StatusForbidden, err)
 }
 
 // ReadJSON decodes JSON from request body.

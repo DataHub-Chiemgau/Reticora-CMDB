@@ -169,7 +169,7 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, entityType 
 	}
 	defKey, err := h.resolver.LifecycleKeyFor(r, t.OrganizationID, entityType, entityID)
 	if errors.Is(err, ErrNoLifecycleModel) {
-		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", ErrNoLifecycleModel.Error())
+		writeNoLifecycleModel(w)
 		return
 	}
 	if err != nil {
@@ -196,10 +196,18 @@ func writeTransitionError(w http.ResponseWriter, err error) {
 	switch {
 	case api.WriteFieldError(w, err):
 	case errors.Is(err, ErrNoLifecycleModel):
-		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", ErrNoLifecycleModel.Error())
+		writeNoLifecycleModel(w)
 	case err.Error() == "not found":
 		api.WriteError(w, http.StatusNotFound, "Not Found", "entity not found")
 	default:
 		api.WriteRepoError(w, err)
 	}
+}
+
+// writeNoLifecycleModel answers a transition of an entity whose type has no
+// lifecycle model: 422 on the field to_state, since such an entity has no
+// lifecycle state to set (DB-05).
+func writeNoLifecycleModel(w http.ResponseWriter) {
+	api.WriteFieldError(w, &api.FieldError{Field: "to_state", Message: ErrNoLifecycleModel.Error(),
+		Status: http.StatusUnprocessableEntity})
 }

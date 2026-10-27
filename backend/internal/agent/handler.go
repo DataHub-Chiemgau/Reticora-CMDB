@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"reflect"
@@ -344,6 +345,12 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 
 	ciID, err := h.reconcileCI(r.Context(), t.OrganizationID, ag, payload)
 	if err != nil {
+		if errors.Is(err, errLinkedCIUnreadable) {
+			// Nothing was written: the collector sends the telemetry again.
+			slog.WarnContext(r.Context(), "agent telemetry refused: linked CI unreadable", "agent", ag.AgentID, "error", err)
+			api.WriteUnavailable(w, "the linked CI of the agent cannot be read, try again later")
+			return
+		}
 		api.WriteRepoError(w, err)
 		return
 	}
@@ -393,9 +400,11 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 
 // reconcileCI finds or creates the endpoint CI for the agent (source "agent")
 // and stores the software inventory in the CI attributes. The CI linked to
-// the agent is the anchor; only an unlinked agent is matched by hostname,
-// and only when exactly one CI carries it (AGT-05). Every attribute of an
-// existing CI goes through the central write decision with rank 85.
+// the agent is the anchor (a merged one through its survivor); only an
+// unlinked agent, or one whose linked CI was deleted, is matched by
+// hostname, and only when exactly one CI carries it (AGT-05, E-20). Every
+// attribute of an existing CI goes through the central write decision with
+// rank 85.
 func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payload TelemetryPayload) (string, error) {
 	if h.cis == nil {
 		return "", nil
@@ -419,17 +428,15 @@ func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payl
 	if target != nil {
 		return target.ID, h.updateCI(ctx, orgID, target, attrs, payload.CollectedAt)
 	}
-	if ag.CIID == "" {
-		ambiguous, err := h.hostnameMatches(ctx, orgID, ag.Hostname)
-		if err != nil {
-			return "", err
-		}
-		if ambiguous > 1 {
-			// Several CIs carry the hostname: linking one would be a guess
-			// (CH29); the agent stays unlinked until an operator links it.
-			slog.WarnContext(ctx, "agent not linked: hostname matches several CIs", "agent", ag.AgentID, "hostname", ag.Hostname)
-			return "", nil
-		}
+	ambiguous, err := h.hostnameMatches(ctx, orgID, ag.Hostname)
+	if err != nil {
+		return "", err
+	}
+	if ambiguous > 1 {
+		// Several CIs carry the hostname: linking one would be a guess
+		// (CH29); the agent stays unlinked until an operator links it.
+		slog.WarnContext(ctx, "agent not linked: hostname matches several CIs", "agent", ag.AgentID, "hostname", ag.Hostname)
+		return "", nil
 	}
 	// No match: create the endpoint CI in the agent's client (the scope of
 	// its credential). The ci_type key resolves to the UUID via the
@@ -460,23 +467,59 @@ func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payl
 	return item.ID, nil
 }
 
+// errLinkedCIUnreadable: the CI linked to the agent could not be read for
+// another reason than its absence (database unreachable, timeout). The
+// telemetry is refused with 503 instead of creating a second CI (F-083).
+var errLinkedCIUnreadable = errors.New("the linked CI of the agent cannot be read")
+
+// maxMergeHops bounds the merged_into chain anchorCI follows.
+const maxMergeHops = 8
+
 // anchorCI returns the CI linked to the agent, or for an unlinked agent the
-// only CI carrying its hostname; nil when there is none.
+// only CI carrying its hostname; nil when there is none. A merged linked CI
+// leads to its survivor (tombstone, CI-12); only a linked CI that is gone
+// without tombstone (deleted) reconciles the agent afresh like an unlinked
+// one (E-20). Every other read error is returned (errLinkedCIUnreadable).
 func (h *Handler) anchorCI(ctx context.Context, orgID string, ag *Agent) (*ci.Item, error) {
 	if ag.CIID != "" {
-		item, err := h.cis.GetByID(ctx, orgID, ag.CIID)
-		if err == nil {
-			return item, nil
+		item, err := h.linkedCI(ctx, orgID, ag.CIID)
+		if err != nil || item != nil {
+			return item, err
 		}
-		// The linked CI is gone: the agent is reconciled afresh.
-		slog.WarnContext(ctx, "linked CI of the agent not found", "agent", ag.AgentID, "ci_id", ag.CIID, "error", err)
-		return nil, nil
+		slog.WarnContext(ctx, "linked CI of the agent deleted: reconciled afresh", "agent", ag.AgentID, "ci_id", ag.CIID)
 	}
 	matches, err := h.exactHostname(ctx, orgID, ag.Hostname)
 	if err != nil || len(matches) != 1 {
 		return nil, err
 	}
 	return &matches[0], nil
+}
+
+// linkedCI reads the linked CI and follows merged_into to the survivor;
+// nil when the CI is gone without tombstone.
+func (h *Handler) linkedCI(ctx context.Context, orgID, id string) (*ci.Item, error) {
+	tombstones, _ := h.cis.(ci.TombstoneReader)
+	for hop := 0; hop <= maxMergeHops; hop++ {
+		item, err := h.cis.GetByID(ctx, orgID, id)
+		if err == nil {
+			return item, nil
+		}
+		if !errors.Is(err, ci.ErrNotFound) {
+			return nil, fmt.Errorf("%w: %w", errLinkedCIUnreadable, err)
+		}
+		if tombstones == nil {
+			return nil, nil
+		}
+		survivor, found, err := tombstones.MergedInto(ctx, orgID, id)
+		if err != nil {
+			return nil, fmt.Errorf("%w: tombstone: %w", errLinkedCIUnreadable, err)
+		}
+		if !found {
+			return nil, nil
+		}
+		id = survivor
+	}
+	return nil, fmt.Errorf("merge chain of the linked CI longer than %d", maxMergeHops)
 }
 
 func (h *Handler) hostnameMatches(ctx context.Context, orgID, hostname string) (int, error) {

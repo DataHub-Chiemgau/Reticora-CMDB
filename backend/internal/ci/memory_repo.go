@@ -118,7 +118,7 @@ func (r *MemoryRepository) GetByID(ctx context.Context, orgID, id string) (*Item
 
 	item, ok := r.items[id]
 	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 	return item, nil
 }
@@ -172,7 +172,7 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 
 	item, ok := r.items[id]
 	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 
 	if req.Name != nil {
@@ -231,7 +231,7 @@ func (r *MemoryRepository) Delete(ctx context.Context, orgID, id string) error {
 
 	item, ok := r.items[id]
 	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
-		return fmt.Errorf("not found")
+		return ErrNotFound
 	}
 	// A deleted CI is kept for the retention like in PostgreSQL (CI-05):
 	// decommissioned, without its asset link.
@@ -249,7 +249,7 @@ func (r *MemoryRepository) RestoreDeleted(_ context.Context, orgID, id string, r
 	defer r.mu.Unlock()
 	item, ok := r.items[id]
 	if !ok || item.OrganizationID != orgID || item.DeletedAt == nil {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 	if time.Since(*item.DeletedAt) > retention {
 		return nil, ErrRetentionExpired
@@ -334,7 +334,7 @@ func (r *MemoryRepository) ChangeType(_ context.Context, orgID, ciID, typeID, mo
 	defer r.mu.Unlock()
 	item, ok := r.items[ciID]
 	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 	to, ok := r.types[typeID]
 	if !ok {

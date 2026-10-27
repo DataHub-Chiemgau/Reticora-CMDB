@@ -8,8 +8,17 @@ import {
   type Response,
   type Route,
 } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { api, signupTenant, stamp, uiLogin, BASE, type Account } from './support/stack';
+import {
+  api,
+  signupTenant,
+  stamp,
+  uiLogin,
+  BASE,
+  DATABASE_URL,
+  type Account,
+} from './support/stack';
 
 /*
  * Phase-1 acceptance audit – the core CMDB process of a user, end to end on the real
@@ -30,20 +39,24 @@ import { api, signupTenant, stamp, uiLogin, BASE, type Account } from './support
  *  L04  edit on the detail page, reload, persisted, If-Match .. WP-061 (API-07), WP-057 (CI-04, OVR-01), WP-201 (TST-03)
  *  L05  clearing a field in the edit form is persisted ........ WP-057 (CI-04), WP-201 (TST-03)
  *  L05b merge patch: null removes a typed field (RFC 7396) .... WP-057 (CI-04)
- *  L06  history and audit trail of the edit with the actor .... WP-171 (CI-06, AUD-03), WP-133 (AUD-05), WP-134 (AUD-07), WP-132 (AUD-04)
+ *  L06  history and audit trail of the edit with the actor .... WP-171 (CI-06, AUD-03), WP-133 (AUD-05), WP-134 (AUD-07), WP-132 (AUD-04), WP-488 (AUD-03 change sets)
  *  L07  audit viewer UI shows the entry; chain verifies ....... WP-171 (CI-06), WP-133 (AUD-05), WP-132 (AUD-04), WP-191/WP-192 (UI-01..10 audit viewer)
  *  L08  relationship in the UI (double click), neighbours, impact WP-128 (REL-02), WP-127 (REL-01), WP-176 (IMP-01), WP-177 (IMP-02), WP-201 (TST-03)
  *  L09  list filter, full-text search, command palette ........ WP-032 (SRC-01), WP-165 (API-02), WP-191/WP-192 (UI-01..10 palette), WP-201 (TST-03)
  *  L10  export job in the UI, download contains the CI ........ WP-189 (EXP-01), WP-035 (EXP-01), WP-201 (TST-03)
- *  L10b CSV export button of the CMDB list .................... WP-189 (EXP-01), WP-191/WP-192 (UI-01..10 CI list), WP-201 (TST-03)
+ *  L10b CSV export button of the CMDB list (export job) ....... WP-189 (EXP-01), WP-191/WP-192 (UI-01..10 CI list), WP-201 (TST-03), WP-468 (API-05)
  *  L11  delete and restore: status, traversal, search, history  WP-170 (CI-05, LCY-01), WP-169 (API-05, CI-05), WP-031 (CI-05), WP-171 (AUD-03), WP-133 (AUD-05)
  *  L12  concurrent edit in two browser sessions, no lost update WP-061 (API-07, API-03)
  *  L12b two sessions, different fields: no loss, field merge .. WP-061 (API-07), WP-057 (CI-04)
  *  L13  ETag / If-Match contract and the org If-Match setting . WP-061 (API-07, API-03), WP-163 (API-03)
+ *  L13b instance attributes save with require_if_match ........ WP-061 (API-07, API-03), WP-477 (F-082)
  *  L14  quotes / backslashes in names and fields are stored ... WP-117 (CI-03, MET-11), WP-120 (CI-01), WP-132 (AUD-04)
  *
  * The UI offers no action to delete or restore a CI (useDeleteCI is not used by any page);
  * L11 therefore drives DELETE and restore through the REST API and checks the effect in the UI.
+ *
+ * L05 reads the stored column with one read-only psql query (E2E_DATABASE_URL), since the
+ * API renders NULL and an empty string alike.
  *
  * A failing test is a product finding: the assertions encode the requirement texts in
  * docs/spec/katalog-v3 and the WP acceptance criteria, not the observed behaviour.
@@ -63,6 +76,7 @@ interface CI {
   serial_number?: string;
   management_ip?: string;
   firmware_version?: string;
+  attributes?: Record<string, unknown>;
   deleted_at?: string;
 }
 
@@ -81,6 +95,11 @@ interface HistoryEntry {
   new_value?: unknown;
   source?: string;
   created_at: string;
+  /** AUD-03 (WP-488): a ci_change entry is one change set with its field changes. */
+  change_kind?: string;
+  change_set_id?: string;
+  field_changes?: { field: string; old: unknown; new: unknown }[];
+  request_id?: string;
 }
 
 interface AuditEntry {
@@ -145,7 +164,7 @@ function realIp(): string {
 
 /** ok asserts a 2xx answer of a setup call and returns its body. */
 async function ok<T>(
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   data?: unknown,
   headers: Record<string, string> = {},
@@ -257,6 +276,23 @@ async function pollAudit(ciId: string, action: string): Promise<AuditEntry> {
     )
     .toBe(true);
   return found!;
+}
+
+/**
+ * db runs ONE read-only query against the stack database with psql variables
+ * (:'name') and returns its rows as JSON objects.
+ */
+function db<T>(select: string, vars: Record<string, string>): T[] {
+  expect(/^\s*select\b/i.test(select), 'read-only query').toBe(true);
+  const args = [DATABASE_URL, '-X', '-At', '-v', 'ON_ERROR_STOP=1'];
+  for (const [name, value] of Object.entries(vars)) args.push('-v', `${name}=${value}`);
+  args.push('-f', '-');
+  const out = execFileSync('psql', args, {
+    input: `SELECT COALESCE(json_agg(q), '[]'::json) FROM (${select}) q;`,
+    encoding: 'utf8',
+    timeout: 15_000,
+  }).trim();
+  return JSON.parse(out) as T[];
 }
 
 /** parseCsv splits a CSV text (RFC 4180 quoting) into rows of fields. */
@@ -750,17 +786,43 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     await dialog.getByLabel('Firmware-Version').fill('');
     const patched = waitForPath(page, `/cis/${ci.id}`, 'PATCH');
     await dialog.getByRole('button', { name: 'Speichern' }).click();
-    expect((await patched).status()).toBe(200);
+    const res = await patched;
+    expect(res.status(), `PATCH from the edit form: ${await res.text()}`).toBe(200);
+    // The form sends only the change, the cleared field as null (RFC 7396).
+    expect(res.request().postDataJSON(), 'PATCH body of the edit form').toEqual({
+      firmware_version: null,
+    });
+    expect(res.request().headers()['if-match']).toBe(`"${ci.version}"`);
     await expect(dialog).toBeHidden();
     await page.reload();
     await expect(page.getByRole('heading', { name: ci.name, exact: true })).toBeVisible();
     await expect(detailValue(page, 'Hersteller')).toHaveText('Vendor To Keep');
-    await expect
-      .soft(detailValue(page, 'Firmware'), 'the cleared value is gone after a reload')
-      .toHaveText('—', { timeout: 10_000 });
+    await expect(
+      detailValue(page, 'Firmware'),
+      'the cleared value is gone after a reload',
+    ).toHaveText('—', { timeout: 10_000 });
     const stored = await getCI(ci.id);
-    expect(stored.firmware_version ?? '', 'cleared in the database').toBe('');
+    expect(stored.firmware_version, 'cleared through the API').toBeUndefined();
     expect(stored.manufacturer).toBe('Vendor To Keep');
+    expect(stored.version, 'one change, one version').toBe(ci.version + 1);
+
+    // DB: the column is NULL, not an empty string; the other field is kept.
+    expect(
+      db<{ firmware_is_null: boolean; manufacturer: string }>(
+        `SELECT firmware_version IS NULL AS firmware_is_null, manufacturer
+           FROM ci WHERE id = :'id' AND organization_id = :'org'`,
+        { id: ci.id, org: w.orgId },
+      ),
+    ).toEqual([{ firmware_is_null: true, manufacturer: 'Vendor To Keep' }]);
+
+    // CI-06: the clearing is a ci_change of the editor with the old value.
+    const change = await pollHistory(
+      ci.id,
+      (e) => e.field_name === 'firmware_version' && e.old_value === '9.9.9',
+      'history entry of the cleared firmware version',
+    );
+    expect([null, undefined, ''], 'new value of the clearing').toContain(change.new_value);
+    expect(change.actor_id, 'the acting user').toBe(w.userId);
   });
 
   test('L05b PATCH is a JSON merge patch: null removes a typed field, absent members stay', async () => {
@@ -780,46 +842,70 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     await expect(page.getByRole('heading', { name: ci.name, exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Bearbeiten', exact: true }).click();
     const dialog = page.getByRole('dialog');
+    // Name and model in one save: one write, one change set (AUD-03, WP-488).
     const renamed = `lc-hist-new-${w.s}`;
     await dialog.getByLabel('Name', { exact: true }).fill(renamed);
+    await dialog.getByLabel('Modell').fill('H2');
     const patched = waitForPath(page, `/cis/${ci.id}`, 'PATCH');
     await dialog.getByRole('button', { name: 'Speichern' }).click();
     const res = await patched;
     expect(res.status()).toBe(200);
     const requestId = res.headers()['x-request-id'] ?? '';
+    expect(requestId, 'X-Request-ID of the PATCH').not.toBe('');
     await expect(dialog).toBeHidden();
 
-    // API: the unified history holds the creation and the field change with
-    // who, when, what, old and new (CI-06, AUD-03, AUD-07).
+    // API: the unified history holds the creation and the change with who,
+    // when, what, old and new (CI-06, AUD-03, AUD-07): exactly one entry with
+    // the two field changes and the request id of the PATCH.
     const created = await pollHistory(
       ci.id,
       (e) => /creat/i.test(e.change_type),
       'history entry of the creation',
     );
     expect(created.actor_id).toBe(w.userId);
-    const change = await pollHistory(
-      ci.id,
-      (e) => e.field_name === 'name' && e.new_value === renamed,
-      'history entry of the rename',
-    );
-    expect(change.old_value).toBe(ci.name);
+    const isEdit = (e: HistoryEntry) =>
+      (e.field_changes ?? []).some((f) => f.field === 'name' && f.new === renamed);
+    const change = await pollHistory(ci.id, isEdit, 'history entry of the edit');
+    expect(change.change_kind).toBe('updated');
+    expect(change.change_set_id, 'the edit is a change set').toBeTruthy();
+    expect(change.field_changes, 'one entry with both fields').toEqual([
+      { field: 'model', old: 'H1', new: 'H2' },
+      { field: 'name', old: ci.name, new: renamed },
+    ]);
+    expect(change.request_id, 'request id of the PATCH').toBe(requestId);
     expect(change.actor_id, 'the acting user').toBe(w.userId);
     expect(Number.isNaN(Date.parse(change.created_at))).toBe(false);
+    const history200 = await ok<List<HistoryEntry>>('GET', `/history/ci/${ci.id}?limit=200`);
+    expect(
+      rows(history200).filter(
+        (e) =>
+          isEdit(e) ||
+          (e.source === 'ci_change' && (e.field_name === 'name' || e.field_name === 'model')),
+      ),
+      'exactly one history entry of the edit',
+    ).toHaveLength(1);
     const changes = await ok<List<HistoryEntry>>('GET', `/cis/${ci.id}/changes`);
     expect(
       rows(changes).some((e) => e.field_name === 'name' && e.actor_id === w.userId),
       'GET /cis/{id}/changes lists the rename with its actor',
     ).toBe(true);
 
-    // UI: the history section of the detail page lists the rename.
+    // UI: after a reload the history section of the detail page shows the
+    // edit as one entry with a line per field: name, old and new value.
     await page.reload();
     await expect(page.getByRole('heading', { name: renamed, exact: true })).toBeVisible();
     await page.locator('summary', { hasText: 'Historie' }).click();
     const history = page.getByRole('list', { name: 'Historie' });
     await expect(history).toBeVisible();
-    await expect(history.getByRole('listitem').filter({ hasText: /·\s*name\b/ })).not.toHaveCount(
-      0,
-    );
+    const editEntry = history
+      .locator(':scope > li')
+      .filter({ hasText: `name: ${ci.name} → ${renamed}` })
+      .filter({ hasText: 'model: H1 → H2' });
+    await expect(editEntry, 'one history entry with both fields').toHaveCount(1);
+    await expect(editEntry.getByRole('listitem')).toHaveText([
+      'model: H1 → H2',
+      `name: ${ci.name} → ${renamed}`,
+    ]);
     await expect(history.locator('time').first()).toHaveAttribute('datetime', /\d{4}-\d{2}-\d{2}T/);
 
     // Audit trail (AUD-04/05/07): the change with actor, old/new, request id.
@@ -1101,23 +1187,26 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     const name = `lc-listexport-${w.s}`;
     const ci = await newCI({ name, serial_number: `SN-LEXP-${w.s}` });
     await page.goto('/cmdb');
-    const link = page.locator('#main-content').getByRole('link', { name: 'CSV exportieren' });
-    await expect(link).toBeVisible();
-    const download = page.waitForEvent('download', { timeout: 15_000 }).catch(() => null);
-    const response = page
-      .waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/export/cis', {
-        timeout: 15_000,
-      })
-      .catch(() => null);
-    await link.click();
-    const [file, res] = await Promise.all([download, response]);
+    // WP-468 (F-077): the button queues an export job (POST /exports) with the
+    // list filters, follows it and downloads the file over its signed URL.
+    const button = page.locator('#main-content').getByRole('button', { name: 'CSV exportieren' });
+    await expect(button).toBeVisible();
+    const download = page.waitForEvent('download', { timeout: 120_000 }).catch(() => null);
+    const created = waitForPath(page, '/exports', 'POST');
+    await button.click();
+    const res = await created;
+    expect(res.status(), `POST /exports: ${await res.text()}`).toBe(202);
+    expect((res.request().postDataJSON() as { format?: string }).format).toBe('csv');
+    const file = await download;
     if (!file) {
-      // No download: the browser navigated to the export URL itself.
-      const status = res ? res.status() : 0;
-      const body = res ? (await res.text().catch(() => '')).slice(0, 300) : '';
-      expect(status, `the export button answered ${status}: ${body}`).toBe(200);
+      const alert = await page
+        .getByRole('alert')
+        .textContent()
+        .catch(() => null);
+      expect(alert, 'the export button shows no error').toBeNull();
     }
     expect(file, 'the export button downloads a file').toBeTruthy();
+    expect(file!.suggestedFilename()).toMatch(/\.csv$/);
     const bytes = await readFile(await file!.path());
     expect([...bytes.subarray(0, 3)], 'UTF-8 BOM').toEqual([0xef, 0xbb, 0xbf]);
     const rowsOfFile = parseCsv(bytes.subarray(3).toString('utf8'), ';');
@@ -1309,26 +1398,34 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
       await d2.getByLabel('Modell').fill('M-session2');
       const p2 = waitForPath(s2.page, `/cis/${ci.id}`, 'PATCH');
       await d2.getByRole('button', { name: 'Speichern' }).click();
-      expect((await p2).status()).toBe(200);
+      const r2 = await p2;
+      expect(r2.status()).toBe(200);
+      expect(r2.request().postDataJSON(), 'session 2 sends only its change').toEqual({
+        model: 'M-session2',
+      });
 
       // Session 1 changes only the manufacturer on its stale editor.
       await d1.getByLabel('Hersteller').fill('Vendor-session1');
       const p1 = waitForPath(s1, `/cis/${ci.id}`, 'PATCH');
       await d1.getByRole('button', { name: 'Speichern' }).click();
       const r1 = await p1;
+      expect(r1.request().headers()['if-match'], 'session 1 read version 1').toBe('"1"');
+      expect(r1.request().postDataJSON(), 'session 1 sends only its change (F-228)').toEqual({
+        manufacturer: 'Vendor-session1',
+      });
 
       // Never a lost update: session 2's model survives whatever happens.
       const stored = await getCI(ci.id);
       expect(stored.model, "session 2's model is kept").toBe('M-session2');
       // API-07: PATCH is field-granular, 409 only when a field of the change
       // was changed in between – the manufacturer was not, so it is saved.
-      expect
-        .soft(
-          r1.status(),
-          `stale save of an untouched field answered ${r1.status()}: ${await r1.text()}`,
-        )
-        .toBe(200);
-      expect.soft(stored.manufacturer, "session 1's manufacturer is saved").toBe('Vendor-session1');
+      expect(
+        r1.status(),
+        `stale save of an untouched field answered ${r1.status()}: ${await r1.text()}`,
+      ).toBe(200);
+      expect(stored.manufacturer, "session 1's manufacturer is saved").toBe('Vendor-session1');
+      expect(stored.version, 'two changes, two versions').toBe(3);
+      await expect(d1, 'the editor closes after saving').toBeHidden();
     } finally {
       await s2.ctx.close();
     }
@@ -1402,6 +1499,50 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
       expect((await patched).status()).toBe(200);
       await expect(dialog).toBeHidden();
       expect((await getCI(ci.id)).model).toBe('E3');
+    } finally {
+      await ok('PATCH', '/org', { settings: { ...settings, require_if_match: false } });
+    }
+  });
+
+  test('L13b with require_if_match the instance attribute edit on the detail page saves with If-Match', async () => {
+    const page = w.page;
+    const ci = await newCI({ name: `lc-inst-${w.s}`, model: 'I0' });
+    await ok('PUT', `/cis/${ci.id}/field-definitions`, {
+      name: 'ilo_ip',
+      label: 'iLO-IP',
+      data_type: 'text',
+    });
+    const before = await getCI(ci.id);
+
+    const org = await ok<{ settings?: Record<string, unknown> }>('GET', '/org');
+    const settings = org.settings ?? {};
+    await ok('PATCH', '/org', { settings: { ...settings, require_if_match: true } });
+    try {
+      await page.goto(`/cmdb/${ci.id}`);
+      await expect(page.getByRole('heading', { name: ci.name, exact: true })).toBeVisible();
+      await page.locator('summary', { hasText: 'Instanzfelder' }).click();
+      const field = page.getByLabel('iLO-IP', { exact: true });
+      await expect(field).toBeVisible();
+
+      // F-082: the inline save carries If-Match with the shown version.
+      const first = waitForPath(page, `/cis/${ci.id}`, 'PATCH');
+      await field.fill('10.9.9.1');
+      const r1 = await first;
+      expect(r1.status(), `instance attribute save: ${await r1.text()}`).toBe(200);
+      expect(r1.request().headers()['if-match']).toBe(`"${before.version}"`);
+      expect(r1.request().postDataJSON()).toMatchObject({ attributes: { ilo_ip: '10.9.9.1' } });
+      await expect.poll(async () => (await getCI(ci.id)).attributes?.ilo_ip).toBe('10.9.9.1');
+
+      // A further change saves on the version the first save produced.
+      const second = waitForPath(page, `/cis/${ci.id}`, 'PATCH');
+      await field.fill('10.9.9.2');
+      const r2 = await second;
+      expect(r2.status(), `second instance attribute save: ${await r2.text()}`).toBe(200);
+      expect(r2.request().headers()['if-match']).toBe(`"${before.version + 1}"`);
+      const stored = await getCI(ci.id);
+      expect(stored.attributes?.ilo_ip).toBe('10.9.9.2');
+      expect(stored.version).toBe(before.version + 2);
+      await expect(page.getByText(/Speichern abgelehnt/)).toHaveCount(0);
     } finally {
       await ok('PATCH', '/org', { settings: { ...settings, require_if_match: false } });
     }

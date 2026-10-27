@@ -42,7 +42,7 @@ func (unknownInvitations) RevokeInvitation(context.Context, string, string) erro
 	return user.ErrInvitationNotFound
 }
 
-func (unknownInvitations) AcceptInvitation(context.Context, string, string, string,
+func (unknownInvitations) AcceptInvitation(context.Context, string, string, string, user.QuotaGuard,
 	func(context.Context, *user.Invitation, string) error) (*user.AcceptedInvitation, error) {
 	return nil, user.ErrInvitationInvalid
 }

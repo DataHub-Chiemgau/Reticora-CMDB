@@ -1,9 +1,11 @@
 package user
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -44,12 +46,30 @@ var errMemberNotFound = fmt.Errorf("team member %w", ErrNotFound)
 // repository passes a nil transaction.
 type DeactivationHook func(ctx context.Context, tx pgx.Tx) error
 
+// QuotaGuard enforces a licensed quota before a resource is created
+// (ENT-03): current is the number of resources the organization holds; over
+// the limit it returns an error with LimitExceeded (403 entitlement-limit).
+// The entitlement service implements it.
+type QuotaGuard interface {
+	AllowCreate(ctx context.Context, orgID, quota string, current int64) error
+}
+
+// quotaRefused reports whether err is a refusal of the quota guard (an
+// exhausted quota or a feature outside the plan).
+func quotaRefused(err error) bool {
+	var refusal interface{ LimitExceeded() bool }
+	return errors.As(err, &refusal) && refusal.LimitExceeded()
+}
+
 // Repository defines persistence operations for users, teams, and roles.
 type Repository interface {
 	// Users
 	ListUsers(ctx context.Context, orgID, search string, page api.PaginationParams) ([]User, int, error)
 	GetUser(ctx context.Context, orgID, id string) (*User, error)
 	CreateUser(ctx context.Context, u *User) error
+	// CountActiveUsers counts the active users of the organization, the
+	// stock max_users is checked against (ENT-03).
+	CountActiveUsers(ctx context.Context, orgID string) (int64, error)
 	UpdateUser(ctx context.Context, orgID, id string, req UpdateUserRequest) (*User, error)
 	// UpdateUserTx is UpdateUser that calls onDeactivate (may be nil) when
 	// the request sets a non-active status on a user of the organization.
@@ -173,6 +193,19 @@ func (r *MemoryRepository) GetUser(_ context.Context, orgID, id string) (*User, 
 		return nil, fmt.Errorf("user not found")
 	}
 	return u, nil
+}
+
+// CountActiveUsers implements Repository.
+func (r *MemoryRepository) CountActiveUsers(_ context.Context, orgID string) (int64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var n int64
+	for _, u := range r.users {
+		if u.OrganizationID == orgID && statusIsActive(u.Status) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (r *MemoryRepository) CreateUser(_ context.Context, u *User) error {
@@ -402,6 +435,11 @@ func (r *MemoryRepository) ListTeamMembers(_ context.Context, orgID, teamID stri
 			result = append(result, *m)
 		}
 	}
+	// The order of the PostgreSQL repository: the list is paged by offset
+	// (API-02).
+	slices.SortFunc(result, func(a, b TeamMember) int {
+		return cmp.Or(a.JoinedAt.Compare(b.JoinedAt), cmp.Compare(a.ID, b.ID))
+	})
 	return result, nil
 }
 
@@ -563,5 +601,10 @@ func (r *MemoryRepository) ListUserRoles(_ context.Context, orgID, userID string
 			result = append(result, *a)
 		}
 	}
+	// The order of the PostgreSQL repository: the list is paged by offset
+	// (API-02).
+	slices.SortFunc(result, func(a, b UserRoleAssignment) int {
+		return cmp.Or(b.GrantedAt.Compare(a.GrantedAt), cmp.Compare(b.ID, a.ID))
+	})
 	return result, nil
 }

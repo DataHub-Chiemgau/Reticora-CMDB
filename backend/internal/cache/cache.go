@@ -19,6 +19,12 @@ type Store interface {
 	// If the key does not exist, it is created with value 1 and the given TTL.
 	Increment(ctx context.Context, key string, ttl time.Duration) (int64, error)
 
+	// Decrement atomically decrements an existing counter and returns the
+	// new value; the TTL stays unchanged. A missing or expired key is not
+	// created (a released reservation must not outlive its window): the
+	// result is 0.
+	Decrement(ctx context.Context, key string) (int64, error)
+
 	// Delete removes a key; a missing key is not an error.
 	Delete(ctx context.Context, key string) error
 

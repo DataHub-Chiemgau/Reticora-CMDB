@@ -125,7 +125,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"override":              identity.PermCIRead,
 	"reconciliation":        identity.PermDiscoveryRead,
 	"source-policy":         identity.PermDiscoveryRead,
-	"history":               identity.PermAuditRead,
+	"history":               identity.PermCIRead, // minimum; the handler checks the entity type and audit:read (CI-06, E-78)
 	"saved-views":           identity.PermSavedViewRead,
 	"dependencies":          identity.PermTopologyRead,
 	"blast-radius":          identity.PermTopologyRead,
@@ -206,7 +206,8 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"source-policy":         identity.PermReconciliationManage,
 	"saved-views":           identity.PermSavedViewWrite,
 	// Read-only surfaces: writes (if any) stay on the read permission so no
-	// non-existent derived write permission is required.
+	// non-existent derived write permission is required. The state snapshot
+	// job (POST /history/snapshots) stays on audit:read.
 	"history":      identity.PermAuditRead,
 	"dependencies": identity.PermTopologyRead,
 	"blast-radius": identity.PermTopologyRead,
@@ -275,6 +276,10 @@ var routeRules = []routeRule{
 	// Assigning roles to a service account is managing roles, as for users
 	// (RBA-08, RBA-01); the account itself stays user:manage.
 	{http.MethodPut, "service-accounts/*/roles", identity.PermRoleManage},
+	// The structured search reads (F-055, SRC-03); the handler also
+	// requires the read right of the queried entity kind. Rebuilding the
+	// index (search/reindex) stays search:write.
+	{http.MethodPost, "search/query", identity.PermSearchRead},
 }
 
 // matchRouteRule returns the permission of the first rule matching the

@@ -610,6 +610,29 @@ func TestEnsureRoleReportsHeldDefaultRole(t *testing.T) {
 	if held, err := m.repo.EnsureRole(ctx, m.OrgA, plain, "viewer"); err != nil || !held {
 		t.Errorf("default role viewer: held %v, err %v; want held", held, err)
 	}
+	// A user an administrator gave only a custom role keeps exactly that
+	// role: the login adds no default role back (the custom role carries no
+	// asset:read, the default role viewer would).
+	custom := m.AppUser(t, m.OrgA, "custom")
+	var customRole string
+	if err := m.Admin.QueryRow(ctx, `INSERT INTO custom_role (organization_id, name, permissions)
+		VALUES ($1, 'ensure-role-custom', '["ci:read"]') RETURNING id::text`, m.OrgA).Scan(&customRole); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		// custom_role has no ON DELETE CASCADE to organization.
+		_, _ = m.Admin.Exec(context.Background(), `DELETE FROM user_custom_role WHERE custom_role_id = $1`, customRole)
+		_, _ = m.Admin.Exec(context.Background(), `DELETE FROM custom_role WHERE id = $1`, customRole)
+	})
+	if _, err := m.Admin.Exec(ctx, `INSERT INTO user_custom_role (user_id, custom_role_id) VALUES ($1, $2)`, custom, customRole); err != nil {
+		t.Fatal(err)
+	}
+	if held, err := m.repo.EnsureRole(ctx, m.OrgA, custom, "viewer"); err != nil || held {
+		t.Errorf("user with only a custom role: held %v, err %v; want the default role not held", held, err)
+	}
+	if n := m.assignments(custom, viewer); n != 0 {
+		t.Errorf("user with only a custom role got the default role viewer (%d)", n)
+	}
 	none := m.AppUser(t, m.OrgA, "none")
 	if held, err := m.repo.EnsureRole(ctx, m.OrgA, none, "no-such-role"); err != nil || held {
 		t.Errorf("unknown default role: held %v, err %v; want not held", held, err)

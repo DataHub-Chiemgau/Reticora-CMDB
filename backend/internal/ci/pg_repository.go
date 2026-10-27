@@ -2,6 +2,7 @@ package ci
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -386,7 +388,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, er
 		item, err = scanCI(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ci by id: %w", err)
 		}
@@ -646,7 +648,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 		if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
 			return err
 		}
-		if err := r.recordCIChange(ctx, tx, item.OrganizationID, item.ID, item.Version, "create", "", nil, item); err != nil {
+		if err := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindCreated), item.OrganizationID, item.ID, item.Version, "create", "", nil, item); err != nil {
 			return err
 		}
 		if err := r.recordAudit(ctx, tx, "ci.created", item, map[string]interface{}{"after": item}); err != nil {
@@ -804,9 +806,10 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 }
 
 // recordCreates writes the history entry of each new CI, as Create does,
-// with one statement.
+// with one statement; each is a change set of its own (AUD-03).
 func (r *PGRepository) recordCreates(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) error {
 	ids, values, versions := make([]string, len(items)), make([]string, len(items)), make([]int64, len(items))
+	sets := make([]string, len(items))
 	for i, item := range items {
 		sealed, err := sealChangeValue(ctx, tx, orgID, "", item)
 		if err != nil {
@@ -815,13 +818,17 @@ func (r *PGRepository) recordCreates(ctx context.Context, tx pgx.Tx, orgID strin
 		if values[i], err = marshalJSONValue(sealed); err != nil {
 			return fmt.Errorf("marshal new ci change value: %w", err)
 		}
-		ids[i], versions[i] = item.ID, item.Version
+		ids[i], versions[i], sets[i] = item.ID, item.Version, newChangeSet(ChangeKindCreated).id
 	}
+	who := changeOrigin(ctx)
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO ci_change (organization_id, ci_id, actor_id, change_type, field_name, old_value, new_value, ci_version)
-		SELECT $1, c.ci_id::uuid, $2::uuid, 'create', NULL, 'null'::jsonb, c.new_value::jsonb, c.ci_version
-		FROM unnest($3::text[], $4::text[], $5::bigint[]) WITH ORDINALITY AS c(ci_id, new_value, ci_version, ord)
-		ORDER BY c.ord`, orgID, nilIfEmpty(tenant.FromContext(ctx).UserID), ids, values, versions); err != nil {
+		INSERT INTO ci_change (organization_id, ci_id, actor_id, change_type, field_name, old_value, new_value, ci_version,
+			change_kind, change_set_id, actor_user_id, source, request_id, correlation_id)
+		SELECT $1, c.ci_id::uuid, $2::uuid, 'create', NULL, 'null'::jsonb, c.new_value::jsonb, c.ci_version,
+			$7, c.change_set_id::uuid, $8::uuid, $9, $10, $11
+		FROM unnest($3::text[], $4::text[], $5::bigint[], $6::text[]) WITH ORDINALITY AS c(ci_id, new_value, ci_version, change_set_id, ord)
+		ORDER BY c.ord`, orgID, who.actorID, ids, values, versions, sets, ChangeKindCreated,
+		who.actorUserID, who.source, who.requestID, who.correlationID); err != nil {
 		return fmt.Errorf("record ci changes: %w", err)
 	}
 	return nil
@@ -893,7 +900,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		before, err := scanCI(tx.QueryRow(ctx, beforeQuery, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ci before update: %w", err)
 		}
@@ -906,6 +913,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		}
 		if scopeErr := checkContainmentScope(ctx, tx, orgID, before, &req); scopeErr != nil {
 			return scopeErr
+		}
+		if adoptErr := r.adoptCILocation(ctx, tx, orgID, before, &req); adoptErr != nil {
+			return adoptErr
 		}
 
 		setClauses := make([]string, 0, 18)
@@ -957,7 +967,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if req.LastSeenAt != nil {
 			parsed, err := time.Parse(time.RFC3339, *req.LastSeenAt)
 			if err != nil {
-				return fmt.Errorf("parse last_seen_at: %w", err)
+				// A malformed value is the client's error, not a 500 (F-229).
+				return &ValidationError{Violations: []Violation{{Field: "last_seen_at", Detail: "must be an RFC 3339 date-time"}}}
 			}
 			setClauses = append(setClauses, fmt.Sprintf("last_seen_at = $%d", argPos))
 			args = append(args, parsed)
@@ -988,7 +999,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		item, err = scanCI(tx.QueryRow(ctx, query, args...))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return locationError(fmt.Errorf("update ci: %w", err))
 		}
@@ -1007,16 +1018,18 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		}
 		changeType := "update"
 		action := "ci.updated"
+		set := newChangeSet(ChangeKindUpdated)
 		if len(changes) == 1 && changes[0].Field == "status" {
 			changeType = "status_change"
 			action = "ci.status_changed"
+			set.kind = ChangeKindStatusChanged
 		}
 		for _, change := range changes {
 			fieldChangeType := changeType
 			if change.Field == "status" {
 				fieldChangeType = "status_change"
 			}
-			if err := r.recordCIChange(ctx, tx, orgID, id, item.Version, fieldChangeType, change.Field, change.Old, change.New); err != nil {
+			if err := r.recordCIChange(ctx, tx, set, orgID, id, item.Version, fieldChangeType, change.Field, change.Old, change.New); err != nil {
 				return err
 			}
 		}
@@ -1172,6 +1185,102 @@ func checkContainmentScope(ctx context.Context, tx pgx.Tx, orgID string, before 
 	return nil
 }
 
+// adoptCILocation keeps the location of a CI that is linked to an asset
+// without location (DB-05, E-81 option 1; F-239): the mirror trigger
+// ci_mirror_asset_location would set the CI's location to the asset's NULL
+// and so drop location, site and room and with them the scope of the CI.
+// The asset takes the location the CI has after the update instead, in the
+// writing transaction under the principal's row level security, with an
+// audit entry on the asset; the trigger then mirrors it back. An asset with
+// a location keeps it and the CI takes it as before. An asset without
+// location the principal may read but not update is refused with 422 on
+// asset_id rather than losing the location silently.
+func (r *PGRepository) adoptCILocation(ctx context.Context, tx pgx.Tx, orgID string, before *Item, req *UpdateRequest) error {
+	if req.AssetID == nil {
+		return nil
+	}
+	assetID := strings.TrimSpace(*req.AssetID)
+	if assetID == "" || assetID == before.AssetID || !api.IsUUID(assetID) {
+		// Unlinking, no new link, or an ID the update itself refuses.
+		return nil
+	}
+	location := before.LocationID
+	if req.LocationID != nil {
+		location = strings.TrimSpace(*req.LocationID)
+	}
+	if location == "" {
+		return nil
+	}
+	tag, err := tx.Exec(ctx, `UPDATE asset SET location_id = $3
+		WHERE id = $1 AND organization_id = $2 AND location_id IS NULL`, assetID, orgID, location)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "42501":
+				return &ValidationError{Violations: []Violation{{Field: "asset_id", Detail: assetCannotTakeLocation}}}
+			case "23503":
+				return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: "location not found"}}}
+			}
+		}
+		return fmt.Errorf("asset takes the location of the CI: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// The asset has a location (mirrored as before), is not visible
+		// (the update refuses the link), or may not be updated here.
+		var unlocated bool
+		err = tx.QueryRow(ctx, `SELECT location_id IS NULL FROM asset WHERE id = $1 AND organization_id = $2`,
+			assetID, orgID).Scan(&unlocated)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return nil
+		case err != nil:
+			return fmt.Errorf("read asset location: %w", err)
+		case unlocated:
+			return &ValidationError{Violations: []Violation{{Field: "asset_id", Detail: assetCannotTakeLocation}}}
+		}
+		return nil
+	}
+	return r.recordAssetLocationAudit(ctx, tx, orgID, assetID, before.ID, location)
+}
+
+// assetCannotTakeLocation refuses a link that would drop the CI's location.
+const assetCannotTakeLocation = "the asset has no location and cannot take the location of the CI"
+
+// recordAssetLocationAudit audits the location an asset took from the CI
+// linked to it (adoptCILocation).
+func (r *PGRepository) recordAssetLocationAudit(ctx context.Context, tx pgx.Tx, orgID, assetID, ciID, location string) error {
+	if r.recorder == nil {
+		return nil
+	}
+	t := tenant.FromContext(ctx)
+	actorType := "system"
+	if strings.TrimSpace(t.UserID) != "" {
+		actorType = "user"
+	}
+	entry := audit.Entry{
+		OrganizationID: orgID,
+		ActorID:        strings.TrimSpace(t.UserID),
+		ActorType:      actorType,
+		Action:         "asset.updated",
+		ResourceType:   "asset",
+		ResourceID:     assetID,
+		Changes: map[string]interface{}{
+			"before": map[string]any{"location_id": nil},
+			"after":  map[string]any{"location_id": location},
+			"fields": []ciFieldChange{{Field: "location_id", Old: nil, New: location}},
+			"reason": "location taken from the CI linked to the asset",
+			"ci_id":  ciID,
+		},
+	}
+	return lastInTx(ctx, func() error {
+		if _, err := r.recorder.Record(ctx, tx, entry); err != nil {
+			return fmt.Errorf("record audit: %w", err)
+		}
+		return nil
+	})
+}
+
 // instanceFieldNames lists the names of the instance attributes of a CI.
 func instanceFieldNames(ctx context.Context, tx pgx.Tx, ciID string) ([]string, error) {
 	rows, err := tx.Query(ctx, `SELECT name FROM ci_instance_field_definition WHERE ci_id = $1`, ciID)
@@ -1197,7 +1306,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		before, err := scanCI(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ci for delete: %w", err)
 		}
@@ -1219,14 +1328,14 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 			return fmt.Errorf("delete ci: %w", err)
 		}
 		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
+			return ErrNotFound
 		}
 		released := map[string]any{"status": StatusDecommissioned}
 		if before.AssetID != "" {
 			released["unlinked_asset_id"] = before.AssetID
 			released["asset_primary"] = assetPrimary
 		}
-		if err := r.recordCIChange(ctx, tx, orgID, id, before.Version, "delete", "", before, released); err != nil {
+		if err := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindDeleted), orgID, id, before.Version, "delete", "", before, released); err != nil {
 			return err
 		}
 		if err := r.recordAudit(ctx, tx, "ci.deleted", before, map[string]interface{}{"before": before}); err != nil {
@@ -1259,12 +1368,12 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 		if err := tx.QueryRow(ctx, "SELECT deleted_at, COALESCE(merged_into_id::text, '') FROM ci WHERE id = $1 AND organization_id = $2",
 			id, orgID).Scan(&deletedAt, &mergedInto); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ci for restore: %w", err)
 		}
 		if deletedAt == nil {
-			return fmt.Errorf("not found")
+			return ErrNotFound
 		}
 		// A merged CI comes back only through the unmerge (CI-12).
 		if mergedInto != "" {
@@ -1295,7 +1404,7 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 			return locationError(fmt.Errorf("restore ci: %w", err))
 		}
 		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
+			return ErrNotFound
 		}
 		if primary && assetID != "" {
 			if _, err = tx.Exec(ctx, "UPDATE asset SET ci_id = $1 WHERE id = $2 AND ci_id IS NULL", id, assetID); err != nil {
@@ -1306,7 +1415,7 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 		if restored, err = scanCI(tx.QueryRow(ctx, query, id, orgID)); err != nil {
 			return fmt.Errorf("get restored ci: %w", err)
 		}
-		if changeErr := r.recordCIChange(ctx, tx, orgID, id, restored.Version, changeType, "deleted_at", "deleted", nil); changeErr != nil {
+		if changeErr := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindRestored), orgID, id, restored.Version, changeType, "deleted_at", "deleted", nil); changeErr != nil {
 			return changeErr
 		}
 		if err := r.recordAudit(ctx, tx, "ci.restored", restored, map[string]interface{}{"reason": reason}); err != nil {
@@ -1513,7 +1622,62 @@ func (r *PGRepository) recordAudit(ctx context.Context, tx pgx.Tx, action string
 	})
 }
 
-func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciID string, version int64, changeType, fieldName string, oldValue, newValue any) error {
+// Kinds of a CI change (AUD-03, CI-11); ci_change.change_kind holds for the
+// change set (000167).
+const (
+	ChangeKindCreated             = "created"
+	ChangeKindUpdated             = "updated"
+	ChangeKindDeleted             = "deleted"
+	ChangeKindRestored            = "restored"
+	ChangeKindMerged              = "merged"
+	ChangeKindTypeChanged         = "type_changed"
+	ChangeKindRelationshipAdded   = "relationship_added"
+	ChangeKindRelationshipRemoved = "relationship_removed"
+	ChangeKindStatusChanged       = "status_changed"
+)
+
+// changeSet is one write of a CI (AUD-03, E-82 option 2): its field rows in
+// ci_change share the id and the kind.
+type changeSet struct {
+	id, kind string
+}
+
+// newChangeSet returns a change set of kind with a new id.
+func newChangeSet(kind string) changeSet {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return changeSet{id: fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:]), kind: kind}
+}
+
+// origin is who made a CI change and the request it came with (AUD-03,
+// AUD-07); nil values are stored as NULL.
+type origin struct {
+	actorID, actorUserID, source, requestID, correlationID any
+}
+
+// changeOrigin returns the origin of a change made with ctx: the subject as
+// actor_id, the user (not an API key) as actor_user_id, and the source,
+// request and correlation id the audit middleware attached to the request.
+// Without a request the source is system, as in the audit log.
+func changeOrigin(ctx context.Context) origin {
+	userID := tenant.FromContext(ctx).UserID
+	o := origin{actorID: nilIfEmpty(userID), source: audit.SourceSystem}
+	if p, ok := identity.PrincipalFromContext(ctx); (!ok || p.Type != identity.PrincipalTypeAPIKey) && audit.IsUUID(userID) {
+		o.actorUserID = userID
+	}
+	if info, ok := audit.RequestInfoFrom(ctx); ok {
+		if info.Source != "" {
+			o.source = info.Source
+		}
+		o.requestID, o.correlationID = nilIfEmpty(info.RequestID), nilIfEmpty(info.CorrelationID)
+	}
+	return o
+}
+
+// recordCIChange writes one field row of the change set set.
+func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, set changeSet, orgID, ciID string, version int64, changeType, fieldName string, oldValue, newValue any) error {
 	// Personal values are stored as vault surrogates (SEC-05).
 	oldValue, err := sealChangeValue(ctx, tx, orgID, fieldName, oldValue)
 	if err != nil {
@@ -1530,7 +1694,7 @@ func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciI
 	if err != nil {
 		return fmt.Errorf("marshal new ci change value: %w", err)
 	}
-	actorID := nilIfEmpty(tenant.FromContext(ctx).UserID)
+	who := changeOrigin(ctx)
 	_, err = tx.Exec(ctx, `
 		INSERT INTO ci_change (
 			organization_id,
@@ -1540,9 +1704,16 @@ func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciI
 			field_name,
 			old_value,
 			new_value,
-			ci_version
-		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)
-	`, orgID, ciID, actorID, changeType, nilIfEmpty(fieldName), oldJSON, newJSON, version)
+			ci_version,
+			change_kind,
+			change_set_id,
+			actor_user_id,
+			source,
+			request_id,
+			correlation_id
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12, $13, $14)
+	`, orgID, ciID, who.actorID, changeType, nilIfEmpty(fieldName), oldJSON, newJSON, version,
+		set.kind, set.id, who.actorUserID, who.source, who.requestID, who.correlationID)
 	if err != nil {
 		return fmt.Errorf("record ci change: %w", err)
 	}
@@ -1726,7 +1897,12 @@ func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before,
 			// The location of a linked CI is the asset's (DB-05).
 			continue
 		}
-		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, change.Field, change.New, req.Manual.Author, reason, true); err != nil {
+		value := change.New
+		if req.isNull(change.Field) {
+			// A field the patch set to null is overridden with null (CH9).
+			value = nil
+		}
+		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, change.Field, value, req.Manual.Author, reason, true); err != nil {
 			return err
 		}
 	}
@@ -1996,7 +2172,7 @@ func (r *PGRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode
 		before, err := scanCI(tx.QueryRow(ctx, query, ciID, orgID))
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ci for type change: %w", err)
 		}
@@ -2041,7 +2217,7 @@ func (r *PGRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode
 		}
 		result.CI, result.Changed = after, true
 		change := map[string]any{"ci_type_id": typeID, "type": toKey, "mode": mode, "findings": result.Findings}
-		if changeErr := r.recordCIChange(ctx, tx, orgID, ciID, after.Version, "type_change", "ci_type_id",
+		if changeErr := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindTypeChanged), orgID, ciID, after.Version, "type_changed", "ci_type_id",
 			map[string]any{"ci_type_id": before.CITypeID, "type": fromKey}, change); changeErr != nil {
 			return changeErr
 		}

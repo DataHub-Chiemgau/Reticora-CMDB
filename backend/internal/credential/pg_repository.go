@@ -139,7 +139,7 @@ func (r *PGRepository) Get(ctx context.Context, orgID, id string) (*StoredCreden
 func (r *PGRepository) List(ctx context.Context, orgID string) ([]Credential, error) {
 	items := make([]Credential, 0)
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM credential WHERE organization_id = $1 ORDER BY created_at DESC", credentialSelectColumns)
+		query := fmt.Sprintf("SELECT %s FROM credential WHERE organization_id = $1 ORDER BY created_at DESC, id DESC", credentialSelectColumns)
 		rows, err := tx.Query(ctx, query, orgID)
 		if err != nil {
 			return fmt.Errorf("list credentials: %w", err)

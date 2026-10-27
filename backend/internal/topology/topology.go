@@ -30,6 +30,9 @@ const (
 	maxDepth         = 20
 )
 
+// DefaultDepth is the depth of a walk from a root without a depth.
+const DefaultDepth = defaultDepth
+
 // ErrCINotFound reports a root_ci_id the caller does not see: an unknown or
 // deleted CI, a CI of another organization or outside the client or site
 // scope. GET /topology answers 404 "ci not found" for each alike, like
@@ -142,7 +145,11 @@ func (h *Handler) GetTopology(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	ciType := q.Get("ci_type")
 	rootCIID := q.Get("root_ci_id")
-	depth := parseDepth(q.Get("depth"))
+	depth, err := parseDepth(q.Get("depth"), defaultDepth)
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 
 	graph, err := h.Graph(r.Context(), t.OrganizationID, rootCIID, depth, &ci.FilterParams{
 		ClientID: q.Get("client_id"),
@@ -229,8 +236,9 @@ func (h *Handler) Graph(ctx context.Context, orgID, rootCIID string, depth int, 
 	return h.buildFull(ctx, orgID, *filter)
 }
 
-// ParseDepth reads a depth parameter: 1–20, the default for "".
-func ParseDepth(raw string) int { return parseDepth(raw) }
+// ParseDepth reads a depth parameter: the default 2 for "", an integer
+// of at least 1 capped at 20; anything else is a 400 *api.FieldError.
+func ParseDepth(raw string) (int, error) { return parseDepth(raw, defaultDepth) }
 
 // buildFull lists all CIs matching the filter and every edge whose endpoints are
 // both in the resulting node set, ordered by id. GET /topology without a root
@@ -675,18 +683,23 @@ func edgeFromRel(rel *relationship.Relationship) Edge {
 	}
 }
 
-func parseDepth(raw string) int {
+// parseDepth reads the depth parameter of a walk (IMP-02, F-255): fallback
+// for "", an integer of at least 1, capped at maxDepth (20, documented in
+// the OpenAPI). A value that is no integer or below 1 is a 400 field error
+// on depth instead of a silent default.
+func parseDepth(raw string, fallback int) (int, error) {
 	if raw == "" {
-		return defaultDepth
+		return fallback, nil
 	}
 	n, err := strconv.Atoi(raw)
+	if errors.Is(err, strconv.ErrRange) && !strings.HasPrefix(raw, "-") {
+		// A positive integer beyond int is capped like any other.
+		return maxDepth, nil
+	}
 	if err != nil || n < 1 {
-		return defaultDepth
+		return 0, &api.FieldError{Field: "depth", Message: fmt.Sprintf("must be an integer of at least 1 (at most %d are walked)", maxDepth)}
 	}
-	if n > maxDepth {
-		return maxDepth
-	}
-	return n
+	return min(n, maxDepth), nil
 }
 
 func sortedKeys(set map[string]bool) []string {

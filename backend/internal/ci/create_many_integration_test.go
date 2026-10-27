@@ -401,9 +401,10 @@ func tracingPool(t *testing.T, app *pgxpool.Pool) (*pgxpool.Pool, *sqlTrace) {
 }
 
 // varying are the keys whose values differ between two creations of the
-// same CI: ids, organizations, times and the hashes over them.
+// same CI: ids, organizations, change sets (AUD-03), times and the hashes
+// over them.
 var varying = map[string]bool{
-	"id": true, "organization_id": true, "ci_id": true, "entity_id": true, "resource_id": true,
+	"id": true, "organization_id": true, "ci_id": true, "entity_id": true, "resource_id": true, "change_set_id": true,
 	"created_at": true, "updated_at": true, "first_seen_at": true, "last_seen_at": true, "discovered_at": true,
 	"timestamp": true, "occurred_at": true, "hash": true, "previous_hash": true,
 }

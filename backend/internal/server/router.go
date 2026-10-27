@@ -310,9 +310,10 @@ func alertBridge(repos *Repositories, opts *Options) *operator.AlertBridge {
 // apiKeyHandler builds the api-keys resource with the same owner and
 // service-account resolvers as the API key service in cmd/server, so that
 // rotation, revocation and service-account binding are checked against the
-// key holder's rights (AUT-04, RBA-08).
-func apiKeyHandler(repos *Repositories) *identity.APIKeyHandler {
-	h := identity.NewAPIKeyHandler(repos.APIKeys).WithOwnerAccess(repos.Permission)
+// key holder's rights (AUT-04, RBA-08); a new key counts against
+// max_api_keys (ENT-03).
+func apiKeyHandler(repos *Repositories, opts *Options) *identity.APIKeyHandler {
+	h := identity.NewAPIKeyHandler(repos.APIKeys).WithOwnerAccess(repos.Permission).WithQuota(opts.Entitlements)
 	if repos.ServiceAccounts != nil {
 		h.WithServiceAccountAccess(user.ServiceAccountAccess{Repo: repos.ServiceAccounts})
 	}
@@ -321,9 +322,9 @@ func apiKeyHandler(repos *Repositories) *identity.APIKeyHandler {
 
 // invitationHandler builds the invitations (TLC-03); the accept URL makes
 // the link of the invitation mail, with an IdP admin client the acceptance
-// creates the account.
+// creates the account; the acceptance counts against max_users (ENT-03).
 func invitationHandler(repos *Repositories, opts *Options) *user.InvitationHandler {
-	h := user.NewInvitationHandler(repos.Invitations).WithAcceptURL(opts.InvitationAcceptURL)
+	h := user.NewInvitationHandler(repos.Invitations).WithAcceptURL(opts.InvitationAcceptURL).WithQuota(opts.Entitlements)
 	if opts.InvitationAccounts != nil {
 		h.WithAccounts(opts.InvitationAccounts)
 	}
@@ -331,10 +332,11 @@ func invitationHandler(repos *Repositories, opts *Options) *user.InvitationHandl
 }
 
 // userHandler builds the user handler; with a session blacklist, deactivation
-// ends the user's sessions immediately (TLC-04).
-func userHandler(repos *Repositories, sessions *identity.SessionIssuer) *user.Handler {
-	h := user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment)
-	if revocations := sessions.Revocations(); revocations != nil {
+// ends the user's sessions immediately (TLC-04); POST /users counts against
+// max_users (ENT-03).
+func userHandler(repos *Repositories, opts *Options) *user.Handler {
+	h := user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment).WithQuota(opts.Entitlements)
+	if revocations := opts.Sessions.Revocations(); revocations != nil {
 		h.WithSessionRevoker(revocations)
 	}
 	return h
@@ -346,6 +348,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	}
 	if pg, ok := repos.User.(*user.PGRepository); ok && opts.MFA != nil {
 		pg.WithMFA(opts.MFA)
+	}
+	if pg, ok := repos.User.(*user.PGRepository); ok {
+		// A first login with an invitation counts against max_users
+		// (ENT-03).
+		pg.WithQuota(opts.Entitlements)
 	}
 
 	mux := chi.NewRouter()
@@ -401,10 +408,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 					return &jobs.RevertRefusedError{Reason: ci.ErrMergeUnsupported}
 				}
 				// The refusals of the unmerge answer with the sentinel's text
-				// (409); a repository error reaches the client sanitized
-				// (API-03).
+				// (409); like an unmerge without force, a survivor changed
+				// after the merge refuses the revert (E-80). A repository
+				// error reaches the client sanitized (API-03).
 				_, err := opts.CIService.RevertMerge(ctx, job.OrganizationID, job.RefID)
-				for _, refusal := range []error{ci.ErrSnapshotExpired, ci.ErrMergeConflict, ci.ErrMergeUnsupported} {
+				for _, refusal := range []error{ci.ErrSnapshotExpired, ci.ErrMergeConflict, ci.ErrUnmergeConflict, ci.ErrMergeUnsupported} {
 					if errors.Is(err, refusal) {
 						return &jobs.RevertRefusedError{Reason: refusal}
 					}
@@ -459,9 +467,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.IngestQueue != nil {
 		opts.IngestQueue.Attach(discoveryHandler)
 	}
-	// Review merges run as jobs (JOB-04).
+	// Review merges run as jobs (JOB-04); the merge of a probable
+	// duplicate is the CI-12 merge, a ci.merge job of its own (CH29).
 	if jobTracker != nil {
 		discoveryHandler.WithReviewJobs(jobTracker)
+	}
+	if opts.CIService != nil {
+		discoveryHandler.WithMerger(opts.CIService)
 	}
 	if opts.Events != nil {
 		discoveryHandler.WithReviewNotifier(reviewEvents{emitter: opts.Events})
@@ -484,7 +496,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		identityHandler,
 		operatorHandler(&opts),
 		alertBridge(&repos, &opts),
-		apiKeyHandler(&repos),
+		apiKeyHandler(&repos, &opts),
 		user.NewServiceAccountHandler(repos.ServiceAccounts),
 		invitationHandler(&repos, &opts),
 		entitlement.NewHandler(opts.Entitlements),
@@ -514,7 +526,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		agentHandler(&repos, opts.Sessions),
 		security.NewHandler(repos.Security),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
-		userHandler(&repos, opts.Sessions),
+		userHandler(&repos, &opts),
 		permission.NewHandler(repos.Permission),
 		search.NewHandler(repos.Search, repos.Permission),
 		sla.NewHandler(repos.SLA, repos.Ticket),
@@ -705,6 +717,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	entitlement.RegisterMetrics(registry)
 	discovery.RegisterMetrics(registry)
 	rack.RegisterMetrics(registry)
+	iga.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

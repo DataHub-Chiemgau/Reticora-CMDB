@@ -27,6 +27,18 @@ type APIKeyManager interface {
 	Rotate(ctx context.Context, orgID, id string, overlapUntil time.Time) (*RotatedAPIKey, error)
 }
 
+// QuotaGuard enforces a licensed quota before a resource is created
+// (ENT-03): current is the number of resources the organization holds; over
+// the limit it returns an error with LimitExceeded (403 entitlement-limit).
+// The entitlement service implements it.
+type QuotaGuard interface {
+	AllowCreate(ctx context.Context, orgID, quota string, current int64) error
+}
+
+// QuotaMaxAPIKeys is the quota of the active API keys of an organization
+// (entitlement.LimitMaxAPIKeys; the entitlement package imports this one).
+const QuotaMaxAPIKeys = "max_api_keys"
+
 // ServiceAccountKeyResolver resolves the service account a key is bound to
 // (RBA-08): its grants and whether it exists in the organization and is
 // active.
@@ -45,6 +57,7 @@ type APIKeyHandler struct {
 	keys            APIKeyManager
 	owners          OwnerAccessResolver
 	serviceAccounts ServiceAccountKeyResolver
+	quota           QuotaGuard
 }
 
 // NewAPIKeyHandler creates the handler.
@@ -62,6 +75,40 @@ func (h *APIKeyHandler) WithOwnerAccess(owners OwnerAccessResolver) *APIKeyHandl
 func (h *APIKeyHandler) WithServiceAccountAccess(r ServiceAccountKeyResolver) *APIKeyHandler {
 	h.serviceAccounts = r
 	return h
+}
+
+// WithQuota enforces max_api_keys on create (ENT-03); a rotation replaces
+// a key and is no new one.
+func (h *APIKeyHandler) WithQuota(q QuotaGuard) *APIKeyHandler {
+	h.quota = q
+	return h
+}
+
+// allowNewKey checks max_api_keys against the organization's active keys
+// (not revoked, not expired) and writes the refusal.
+func (h *APIKeyHandler) allowNewKey(w http.ResponseWriter, r *http.Request, orgID string) bool {
+	if h.quota == nil {
+		return true
+	}
+	keys, err := h.keys.List(r.Context(), orgID)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return false
+	}
+	now := time.Now()
+	var active int64
+	for i := range keys {
+		if keys[i].RevokedAt == nil && (keys[i].ExpiresAt == nil || keys[i].ExpiresAt.After(now)) {
+			active++
+		}
+	}
+	if err = h.quota.AllowCreate(r.Context(), orgID, QuotaMaxAPIKeys, active); err != nil {
+		if !api.WriteEntitlementError(w, err) {
+			api.WriteRepoError(w, err)
+		}
+		return false
+	}
+	return true
 }
 
 // RegisterRoutes registers the api-keys routes.
@@ -172,6 +219,9 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.ServiceAccountID = nil
 	}
 	if req.ServiceAccountID != nil && !h.authorizeBinding(w, r, &p, *req.ServiceAccountID, req.Permissions) {
+		return
+	}
+	if !h.allowNewKey(w, r, p.OrganizationID) {
 		return
 	}
 	generated, err := GenerateAPIKey(req.Environment)

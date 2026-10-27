@@ -91,18 +91,17 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// {data, next_cursor} with limit and the signed cursor (API-02, F-075).
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 	creds, err := h.svc.List(r.Context(), orgID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list credentials")
 		return
 	}
-
-	if creds == nil {
-		creds = []Credential{}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(creds)
+	api.WriteJSON(w, http.StatusOK, api.Page(creds, page))
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {

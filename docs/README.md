@@ -332,8 +332,9 @@ containment rows into `parent_ci_id` and moved the structural rows to
 `migration_quarantine`.
 `ci.lifecycle_state` (software lifecycle) exists only for CI types with a
 lifecycle model and must be a state of it (trigger; a transition of a CI
-without a model is 422). `ci.health` is read-only: after every alert
-evaluation `ci_refresh_health` sets critical or warning when the latest
+without a model is 422 with the field `to_state`). `ci.health` is
+read-only: every minute the worker `health` (also without the module
+alerting) runs `ci_refresh_health`, which sets critical or warning when the latest
 sample of a metric breaches an enabled rule of that severity, ok for samples
 without a breach and unknown without a sample in the last 15 minutes
 (migration 0090; health findings are not G1 scope, E-36).

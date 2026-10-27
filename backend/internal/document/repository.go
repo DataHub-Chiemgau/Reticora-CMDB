@@ -222,6 +222,14 @@ func (r *MemoryRepository) GetLinks(_ context.Context, orgID, docID string) ([]D
 			result = append(result, *l)
 		}
 	}
+	// Newest first, then id, like PGRepository: the offset pages of
+	// GET /documents/{id}/links need a stable order (API-02).
+	sort.Slice(result, func(i, j int) bool {
+		if !result[i].CreatedAt.Equal(result[j].CreatedAt) {
+			return result[i].CreatedAt.After(result[j].CreatedAt)
+		}
+		return result[i].ID > result[j].ID
+	})
 	return result, nil
 }
 

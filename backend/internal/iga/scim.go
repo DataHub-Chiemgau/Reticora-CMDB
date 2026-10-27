@@ -2,6 +2,7 @@ package iga
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -288,11 +289,17 @@ func (h *Handler) SCIMCreateGroup(w http.ResponseWriter, r *http.Request) {
 		scimErr(w, 400, "invalidValue", "displayName is required")
 		return
 	}
-	if err := h.users.CreateTeam(r.Context(), g); err != nil {
-		scimRepoErr(w, r, err)
+	// The group and its members are stored in one transaction (F-056).
+	err = h.inTx(r.Context(), t.OrganizationID, func(ctx context.Context) error {
+		if createErr := h.users.CreateTeam(ctx, g); createErr != nil {
+			return createErr
+		}
+		return applyMembers(ctx, h, t.OrganizationID, g.ID, body)
+	})
+	if err != nil {
+		scimGroupErr(w, r, err)
 		return
 	}
-	applyMembers(r.Context(), h, t.OrganizationID, g.ID, body)
 	members, _ := h.users.ListTeamMembers(r.Context(), t.OrganizationID, g.ID)
 	api.WriteJSON(w, 201, scimGroup(*g, members))
 }
@@ -307,12 +314,24 @@ func (h *Handler) SCIMPutGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := fmt.Sprint(body["displayName"])
-	g, err := h.users.UpdateTeam(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), user.UpdateTeamRequest{Name: &name})
-	if err != nil {
+	// The name and the members are replaced in one transaction (F-056).
+	var g *user.Team
+	err = h.inTx(r.Context(), t.OrganizationID, func(ctx context.Context) error {
+		var updateErr error
+		g, updateErr = h.users.UpdateTeam(ctx, t.OrganizationID, chi.URLParam(r, "id"), user.UpdateTeamRequest{Name: &name})
+		if updateErr != nil {
+			return errSCIMGroupNotFound
+		}
+		return applyMembers(ctx, h, t.OrganizationID, g.ID, body)
+	})
+	if errors.Is(err, errSCIMGroupNotFound) {
 		scimErr(w, 404, "", "group not found")
 		return
 	}
-	applyMembers(r.Context(), h, t.OrganizationID, g.ID, body)
+	if err != nil {
+		scimGroupErr(w, r, err)
+		return
+	}
 	members, _ := h.users.ListTeamMembers(r.Context(), t.OrganizationID, g.ID)
 	api.WriteJSON(w, 200, scimGroup(*g, members))
 }
@@ -328,20 +347,58 @@ func (h *Handler) SCIMDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
-func applyMembers(ctx context.Context, h *Handler, orgID, groupID string, body map[string]any) {
-	arr, ok := body["members"].([]any)
-	if !ok {
+
+// errSCIMGroupNotFound is a group to update that is unknown or of another
+// organization.
+var errSCIMGroupNotFound = errors.New("group not found")
+
+// scimGroupErr answers a failed group write: a member that is no user of
+// the organization is 400 invalidValue, anything else goes through
+// scimRepoErr.
+func scimGroupErr(w http.ResponseWriter, r *http.Request, err error) {
+	var fe *api.FieldError
+	if errors.As(err, &fe) {
+		scimErr(w, 400, "invalidValue", "members: "+fe.Message)
 		return
 	}
-	existing, _ := h.users.ListTeamMembers(ctx, orgID, groupID)
-	for _, m := range existing {
-		_ = h.users.RemoveTeamMember(ctx, orgID, groupID, m.UserID)
+	scimRepoErr(w, r, err)
+}
+
+// applyMembers replaces the members of the group by the body's members, if
+// it names any. The first failing write is returned, not dropped (F-056);
+// the caller runs it in the transaction of the group write.
+func applyMembers(ctx context.Context, h *Handler, orgID, groupID string, body map[string]any) error {
+	arr, ok := body["members"].([]any)
+	if !ok {
+		return nil
 	}
+	existing, err := h.users.ListTeamMembers(ctx, orgID, groupID)
+	if err != nil {
+		return err
+	}
+	fail := func(err error) error {
+		if !isClientError(err) {
+			WriteFailures.WithLabelValues("scim_group_members").Inc()
+		}
+		return err
+	}
+	for _, m := range existing {
+		if err := h.users.RemoveTeamMember(ctx, orgID, groupID, m.UserID); err != nil {
+			return fail(err)
+		}
+	}
+	// A member named twice is added once, as before, when the second add
+	// failed unnoticed.
+	seen := map[string]bool{}
 	for _, v := range arr {
 		m, _ := v.(map[string]any)
 		uid := fmt.Sprint(m["value"])
-		if uid != "" {
-			_ = h.users.AddTeamMember(ctx, orgID, &user.TeamMember{TeamID: groupID, UserID: uid, RoleInTeam: "member"})
+		if uid != "" && !seen[uid] {
+			seen[uid] = true
+			if err := h.users.AddTeamMember(ctx, orgID, &user.TeamMember{TeamID: groupID, UserID: uid, RoleInTeam: "member"}); err != nil {
+				return fail(err)
+			}
 		}
 	}
+	return nil
 }

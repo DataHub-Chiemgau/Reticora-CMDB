@@ -2,8 +2,11 @@
 package ci
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -162,6 +165,85 @@ type UpdateRequest struct {
 	// override in the same transaction (OVR-01). Set by the API paths only
 	// (PATCH, bulk status change).
 	Manual *ManualChange `json:"-"`
+	// Nulls lists the members the JSON body set to null (RFC 7396, CI-04).
+	// UnmarshalJSON collects them: a nullable field is cleared (its pointer
+	// is set to "", its override holds null), any other member is refused by
+	// the service with 422 on the field.
+	Nulls []string `json:"-"`
+}
+
+// nullableFields are the members of UpdateRequest a JSON null clears (RFC
+// 7396): the typed columns and the references that "" already clears.
+// name and status are required; null on them, on attributes,
+// discovery_source, last_seen_at and change_reason is refused.
+var nullableFields = map[string]bool{
+	"client_id": true, "location_id": true, "asset_id": true, "parent_ci_id": true,
+	"manufacturer": true, "model": true, "serial_number": true, "hardware_uuid": true,
+	"management_ip": true, "primary_mac": true, "hostname": true, "fqdn": true,
+	"os_name": true, "os_version": true, "firmware_version": true, "sys_object_id": true,
+}
+
+// UnmarshalJSON decodes a merge patch presence-aware (RFC 7396, CI-04): an
+// absent member stays nil (unchanged), a null member is recorded in Nulls
+// and a nullable one is set to "" (cleared). Unknown members are refused
+// as by api.ReadJSON.
+func (r *UpdateRequest) UnmarshalJSON(data []byte) error {
+	type plain UpdateRequest
+	var req plain
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		return err
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	*r = UpdateRequest(req)
+	r.Nulls = nil
+	for name, raw := range members {
+		if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			continue
+		}
+		r.Nulls = append(r.Nulls, name)
+		if nullableFields[name] {
+			*r.field(name) = new(string)
+		}
+	}
+	slices.Sort(r.Nulls)
+	return nil
+}
+
+// field is the pointer field of a nullable member.
+func (r *UpdateRequest) field(name string) **string {
+	return map[string]**string{
+		"client_id": &r.ClientID, "location_id": &r.LocationID, "asset_id": &r.AssetID,
+		"parent_ci_id": &r.ParentCIID, "manufacturer": &r.Manufacturer, "model": &r.Model,
+		"serial_number": &r.SerialNumber, "hardware_uuid": &r.HardwareUUID,
+		"management_ip": &r.ManagementIP, "primary_mac": &r.PrimaryMAC, "hostname": &r.Hostname,
+		"fqdn": &r.FQDN, "os_name": &r.OSName, "os_version": &r.OSVersion,
+		"firmware_version": &r.FirmwareVersion, "sys_object_id": &r.SysObjectID,
+	}[name]
+}
+
+// isNull reports whether the request set the member to null.
+func (r *UpdateRequest) isNull(name string) bool {
+	return slices.Contains(r.Nulls, name)
+}
+
+// nullViolations refuses null on the members that cannot be cleared: the
+// required fields name and status and the members outside nullableFields.
+func (r *UpdateRequest) nullViolations() error {
+	var violations []Violation
+	for _, name := range r.Nulls {
+		if !nullableFields[name] {
+			violations = append(violations, Violation{Field: name, Detail: "must not be null"})
+		}
+	}
+	if len(violations) > 0 {
+		return &ValidationError{Violations: violations}
+	}
+	return nil
 }
 
 // ManualChange identifies the author of a manual CI change.
@@ -199,6 +281,11 @@ type Change struct {
 	Comment        string    `json:"comment,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 }
+
+// ErrNotFound is the error of the repositories for a CI that does not exist,
+// is deleted or is not visible to the principal. Only it is answered with
+// 404; its text stays "not found" for the callers that compare it.
+var ErrNotFound = errors.New("not found")
 
 // Errors of the optimistic concurrency check (API-07, API-03).
 var (

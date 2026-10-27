@@ -52,7 +52,12 @@ const leanAllocBudget = 400000
 // their keys (the database assigns them), and the orders that were the
 // order of a Go map sorted (the nodes of a topology, the affected CIs,
 // clients and sites of a blast radius). Every other byte is compared as it
-// is.
+// is. The two blast radius answers are recorded again in WP-490 (F-098):
+// each affected CI carries heuristic, heuristic_count is new, and
+// affected_count, client_ids and site_ids leave out the heuristic hits.
+// Without the marks, with affected_count + heuristic_count as
+// affected_count and the clients and sites of all affected CIs, they give
+// the hashes before WP-490 again (0d13f80b… and d5529651…).
 var leanGolden = map[string]string{
 	"impact compact":             "d1308a57df2a8dbe01beb12d5aaa704d73f4d19fee38abd47868f8cedc7f6e1d", // 2,130,112 bytes
 	"impact full":                "c67e32b9e66d6c80f079c7a2c143afbf8c5811fc4653fe55492bda5c5b83904f", // 5,984,782 bytes
@@ -67,8 +72,8 @@ var leanGolden = map[string]string{
 	"topology server depth 1":    "c94386587a36c775bfbf54e5b1d7e2d8ac0033eb1386a80d5fe3bd9547e48a39", // 8,053 bytes
 	"topology client 1 depth 3":  "ac9cb8008c007ab51765cafe0545db4dc285767712a71f3962b26c4b647814ac", // 7,139,847 bytes
 	"neighbors":                  "6358e081469093fe06d8404ce339947ff3dc843ea295871bd02ef0c9a9129f74", // 2,192,196 bytes
-	"blast radius pdu":           "0d13f80bae2fdbcb3fe7c412213510857a16be4bafeabcd2e2f7c3c7ab07debe", // 3,805,489 bytes
-	"blast radius core":          "d5529651ee069155c387f83b613a0208a01adeccdecbb9aa44480dfe192d6c0b", // 2,378,430 bytes
+	"blast radius pdu":           "3a63037781eef70d440e91f1c60acabc811d74f14a4a1ffc0fabbd79028a24ac", // 3,985,111 bytes (WP-490)
+	"blast radius core":          "aca3a74034a0ad795f84536e5dc97a43a19a83f109e2531a1344a75028cf6684", // 2,547,875 bytes (WP-490)
 }
 
 // TestImpactLeanAgainstPostgres covers NFR-02 and IMP-07 (WP-611) on the
@@ -428,6 +433,7 @@ func sortedBlastRadius(t *testing.T, body []byte) []byte {
 		CIID                  json.RawMessage   `json:"ci_id"`
 		AffectedCIs           []json.RawMessage `json:"affected_cis"`
 		AffectedCount         json.RawMessage   `json:"affected_count"`
+		HeuristicCount        json.RawMessage   `json:"heuristic_count"`
 		AffectedServices      []json.RawMessage `json:"affected_services,omitempty"`
 		ClientIDs             []string          `json:"client_ids,omitempty"`
 		SiteIDs               []string          `json:"site_ids,omitempty"`

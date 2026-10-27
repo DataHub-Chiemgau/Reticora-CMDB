@@ -16,6 +16,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type Handler struct {
@@ -153,6 +154,46 @@ func writeIGAError(w http.ResponseWriter, r *http.Request, err error) {
 	api.WriteRepoError(w, err)
 }
 
+// WriteFailures counts the IGA writes that failed and were answered with an
+// error, by operation (F-056). Before, these errors were dropped: an approval
+// answered 200 without its provisioning task.
+var WriteFailures = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Namespace: "reticora",
+	Name:      "iga_write_failures_total",
+	Help:      "IGA writes (access approvals, review decisions, provisioning tasks, drift findings, connector sync state, SCIM group members) that failed; the request was answered with an error and nothing of it was kept.",
+}, []string{"operation"})
+
+// RegisterMetrics registers the IGA metrics on reg.
+func RegisterMetrics(reg prometheus.Registerer) {
+	reg.MustRegister(WriteFailures)
+}
+
+// isClientError reports whether err names an object or field of the request
+// that is unknown or of another organization; such a refusal is no failed
+// write.
+func isClientError(err error) bool {
+	for _, missing := range notFoundErrors {
+		if errors.Is(err, missing) {
+			return true
+		}
+	}
+	var fe *api.FieldError
+	return errors.As(err, &fe)
+}
+
+// writeFailed answers a failed write of operation like writeIGAError; a
+// failure that is not the client's is logged with the operation and counted
+// in WriteFailures.
+func writeFailed(w http.ResponseWriter, r *http.Request, operation string, err error) {
+	if isClientError(err) {
+		writeIGAError(w, r, err)
+		return
+	}
+	WriteFailures.WithLabelValues(operation).Inc()
+	slog.ErrorContext(r.Context(), "iga write failed", "operation", operation, "error", err)
+	api.WriteRepoError(w, err)
+}
+
 func (h *Handler) ListConnectors(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
 	if !ok {
@@ -284,12 +325,27 @@ func (h *Handler) SyncConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	_ = h.repo.MarkConnectorSynced(r.Context(), t.OrganizationID, id, now)
 	findings, err := h.drift.Reconcile(r.Context(), t.OrganizationID, id, nil)
-	if err == nil {
-		for i := range findings {
-			_ = h.repo.CreateDrift(r.Context(), &findings[i])
+	if err != nil {
+		slog.WarnContext(r.Context(), "iga connector sync: reconciliation failed", "connector_id", id, "error", err)
+		findings = nil
+	}
+	// The sync time and the findings are stored in one transaction; a
+	// failing write is answered, not dropped (F-056).
+	err = h.inTx(r.Context(), t.OrganizationID, func(ctx context.Context) error {
+		if markErr := h.repo.MarkConnectorSynced(ctx, t.OrganizationID, id, now); markErr != nil {
+			return markErr
 		}
+		for i := range findings {
+			if driftErr := h.repo.CreateDrift(ctx, &findings[i]); driftErr != nil {
+				return driftErr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		writeFailed(w, r, "connector_sync", err)
+		return
 	}
 	api.WriteJSON(w, 202, JSONMap{"status": "queued", "findings": len(findings)})
 }
@@ -331,7 +387,10 @@ func (h *Handler) RetryTask(w http.ResponseWriter, r *http.Request) {
 	task.Status = TaskStatusPending
 	task.NextRunAt = time.Now().UTC()
 	task.Error = ""
-	_ = h.repo.UpdateTask(r.Context(), task)
+	if err := h.repo.UpdateTask(r.Context(), task); err != nil {
+		writeFailed(w, r, "task_retry", err)
+		return
+	}
 	api.WriteJSON(w, 200, task)
 }
 func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
@@ -513,13 +572,22 @@ func (h *Handler) decideAccess(w http.ResponseWriter, r *http.Request, status st
 	}
 	var req DecisionRequest
 	_ = api.ReadJSON(r, &req)
+	if status == "approved" {
+		// The approval and its provisioning task are one unit: when the
+		// task cannot be written the request stays pending and the client
+		// gets the error (F-056).
+		ar, err := h.repo.ApproveAccessRequest(r.Context(), t.OrganizationID, id, t.UserID, req.Comment)
+		if err != nil {
+			writeFailed(w, r, "access_approval", err)
+			return
+		}
+		api.WriteJSON(w, 200, ar)
+		return
+	}
 	ar, err := h.repo.DecideAccessRequest(r.Context(), t.OrganizationID, id, status, t.UserID, req.Comment)
 	if err != nil {
 		writeIGAError(w, r, err)
 		return
-	}
-	if status == "approved" && ar.ConnectorID != "" {
-		_ = h.repo.CreateTask(r.Context(), &ProvisioningTask{OrganizationID: t.OrganizationID, ConnectorID: ar.ConnectorID, UserID: ar.SubjectUserID, Action: TaskActionAddGroupMember, Payload: JSONMap{"entitlement": ar.Entitlement, "group_id": ar.Entitlement, "account_id": ar.SubjectUserID}})
 	}
 	api.WriteJSON(w, 200, ar)
 }
@@ -579,13 +647,23 @@ func (h *Handler) DecideReviewItem(w http.ResponseWriter, r *http.Request) {
 	if req.Decision == "" {
 		req.Decision = ReviewDecisionApprove
 	}
-	it, err := h.repo.DecideReviewItem(r.Context(), t.OrganizationID, itemID, req.Decision, t.UserID)
+	// A revocation and its deprovisioning task are stored in one
+	// transaction, like an approval (F-056).
+	var it *AccessReviewItem
+	err := h.inTx(r.Context(), t.OrganizationID, func(ctx context.Context) error {
+		var err error
+		it, err = h.repo.DecideReviewItem(ctx, t.OrganizationID, itemID, req.Decision, t.UserID)
+		if err != nil {
+			return err
+		}
+		if req.Decision == ReviewDecisionRevoke && it.ConnectorID != "" {
+			return h.repo.CreateTask(ctx, &ProvisioningTask{OrganizationID: t.OrganizationID, ConnectorID: it.ConnectorID, UserID: it.UserID, Action: TaskActionRemoveGroupMember, Payload: JSONMap{"entitlement": it.Entitlement, "group_id": it.Entitlement, "account_id": it.UserID}})
+		}
+		return nil
+	})
 	if err != nil {
-		writeIGAError(w, r, err)
+		writeFailed(w, r, "review_decision", err)
 		return
-	}
-	if req.Decision == ReviewDecisionRevoke && it.ConnectorID != "" {
-		_ = h.repo.CreateTask(r.Context(), &ProvisioningTask{OrganizationID: t.OrganizationID, ConnectorID: it.ConnectorID, UserID: it.UserID, Action: TaskActionRemoveGroupMember, Payload: JSONMap{"entitlement": it.Entitlement, "group_id": it.Entitlement, "account_id": it.UserID}})
 	}
 	api.WriteJSON(w, 200, it)
 }
@@ -629,8 +707,18 @@ func (h *Handler) ReconcileDrift(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", "the connector could not be reconciled")
 		return
 	}
-	for i := range findings {
-		_ = h.repo.CreateDrift(r.Context(), &findings[i])
+	// The findings are stored all or none (F-056).
+	err = h.inTx(r.Context(), t.OrganizationID, func(ctx context.Context) error {
+		for i := range findings {
+			if driftErr := h.repo.CreateDrift(ctx, &findings[i]); driftErr != nil {
+				return driftErr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		writeFailed(w, r, "drift_findings", err)
+		return
 	}
 	api.WriteJSON(w, 202, findings)
 }
@@ -653,10 +741,20 @@ func (h *Handler) RemediateDrift(w http.ResponseWriter, r *http.Request) {
 		action = TaskActionDisableAccount
 	}
 	task := &ProvisioningTask{OrganizationID: t.OrganizationID, ConnectorID: f.ConnectorID, UserID: f.UserID, ExternalID: f.ExternalID, Action: action, Payload: JSONMap{"drift_id": f.ID}}
-	_ = h.repo.CreateTask(r.Context(), task)
-	f.Status = "remediating"
-	f.RemediationTaskID = task.ID
-	_ = h.repo.UpdateDrift(r.Context(), f)
+	// The remediation task and the finding that names it are stored in one
+	// transaction (F-056).
+	err = h.inTx(r.Context(), t.OrganizationID, func(ctx context.Context) error {
+		if taskErr := h.repo.CreateTask(ctx, task); taskErr != nil {
+			return taskErr
+		}
+		f.Status = "remediating"
+		f.RemediationTaskID = task.ID
+		return h.repo.UpdateDrift(ctx, f)
+	})
+	if err != nil {
+		writeFailed(w, r, "drift_remediation", err)
+		return
+	}
 	api.WriteJSON(w, 202, task)
 }
 func respondList[T any](w http.ResponseWriter, r *http.Request, items []T, total int, p api.PaginationParams, err error) {

@@ -1,13 +1,18 @@
 package discovery
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -91,6 +96,63 @@ func TestEdgeHeartbeat(t *testing.T) {
 	}
 	if reply = h.EdgeHeartbeat(ctx, "org-1", c.ID, []byte(`{`)); reply.Status != http.StatusBadRequest {
 		t.Errorf("invalid body: %+v", reply)
+	}
+}
+
+// spoolMetrics reads the collector loss and backpressure counters.
+func spoolMetrics() (messages, samples, backpressure float64) {
+	return testutil.ToFloat64(collectorSpoolDropped.WithLabelValues(DroppedKindMessages)),
+		testutil.ToFloat64(collectorSpoolDropped.WithLabelValues(DroppedKindSamples)),
+		testutil.ToFloat64(collectorSpoolBackpressure)
+}
+
+// TestHeartbeatSpoolLossMetrics covers F-234 (NFR-04, OPS-06): the losses
+// and the backpressure a collector reports with its heartbeat raise
+// reticora_collector_spool_dropped_total (by kind) and
+// reticora_collector_spool_backpressure_total, over the edge (NATS) and
+// over HTTP alike; a refused heartbeat (unknown collector) counts nothing.
+func TestHeartbeatSpoolLossMetrics(t *testing.T) {
+	repo := NewMemoryRepository()
+	h := NewHandler(repo, ci.NewMemoryRepository())
+	ctx := context.Background()
+	c := &Collector{OrganizationID: "org-1", Name: "lossy"}
+	if err := repo.RegisterCollector(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+
+	report := []byte(`{"spool":{"messages":2,"dropped_messages":3,"dropped_bytes":300,"dropped_samples":5,"backpressure":true}}`)
+	for _, transport := range []string{"edge", "http"} {
+		messages, samples, backpressure := spoolMetrics()
+		switch transport {
+		case "edge":
+			if reply := h.EdgeHeartbeat(ctx, "org-1", c.ID, report); reply.Status != http.StatusNoContent {
+				t.Fatalf("edge heartbeat: %+v", reply)
+			}
+		case "http":
+			req := tenantCtx(httptest.NewRequest(http.MethodPost, "/api/v1/collectors/"+c.ID+"/heartbeat", bytes.NewReader(report)))
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if w.Code != http.StatusNoContent {
+				t.Fatalf("http heartbeat: %d %s", w.Code, w.Body.String())
+			}
+		}
+		m, s, b := spoolMetrics()
+		if m-messages != 3 || s-samples != 5 || b-backpressure != 1 {
+			t.Fatalf("%s: metrics rose by messages %v, samples %v, backpressure %v; want 3, 5, 1",
+				transport, m-messages, s-samples, b-backpressure)
+		}
+	}
+
+	// Nothing to report, a refused heartbeat and negative values count
+	// nothing.
+	messages, samples, backpressure := spoolMetrics()
+	h.EdgeHeartbeat(ctx, "org-1", c.ID, []byte(`{"spool":{"messages":2}}`))
+	h.EdgeHeartbeat(ctx, "org-1", "unknown", report)
+	h.EdgeHeartbeat(ctx, "org-1", c.ID, []byte(`{"spool":{"dropped_messages":-4,"dropped_samples":-1}}`))
+	if m, s, b := spoolMetrics(); m != messages || s != samples || b != backpressure {
+		t.Fatalf("metrics changed without a loss: %v/%v/%v -> %v/%v/%v", messages, samples, backpressure, m, s, b)
 	}
 }
 

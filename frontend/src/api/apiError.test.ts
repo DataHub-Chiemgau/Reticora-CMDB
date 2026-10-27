@@ -95,6 +95,54 @@ describe('ApiError', () => {
     expect(error.violationsByField()).toEqual({});
   });
 
+  it('keeps the dependency kinds of a 409 DependencyProblem (LOC-11, F-225)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            type: 'urn:reticora:problem:conflict',
+            title: 'Conflict',
+            status: 409,
+            detail: 'location is still referenced',
+            dependencies: ['location', 'ci', 'agent_enrollment_token', 7, null, ''],
+          },
+          409,
+        ),
+      ),
+    );
+    const { fetchAPI, ApiError } = await importClientWithSession();
+
+    const error = (await fetchAPI('/locations/loc-1', { method: 'DELETE' }).catch(
+      (e: unknown) => e,
+    )) as InstanceType<typeof ApiError>;
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(409);
+    // Only the string kinds survive; malformed entries are dropped.
+    expect(error.dependencies).toEqual(['location', 'ci', 'agent_enrollment_token']);
+    expect(error.message).toBe('location is still referenced');
+  });
+
+  it('has no dependencies when the problem carries none', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ status: 409, detail: 'conflict', dependencies: 'location' }, 409),
+        ),
+    );
+    const { fetchAPI, ApiError } = await importClientWithSession();
+
+    const error = (await fetchAPI('/cis').catch((e: unknown) => e)) as InstanceType<
+      typeof ApiError
+    >;
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.dependencies).toEqual([]);
+  });
+
   it('falls back to the status text when the body is not JSON', async () => {
     vi.stubGlobal(
       'fetch',

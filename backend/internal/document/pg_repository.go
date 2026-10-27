@@ -400,7 +400,7 @@ func (r *PGRepository) GetLinks(ctx context.Context, orgID, docID string) ([]Doc
 	var links []DocumentLink
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM document_link WHERE "+linkVisible+" AND document_id = $1 ORDER BY created_at DESC", documentLinkSelectColumns)
+		query := fmt.Sprintf("SELECT %s FROM document_link WHERE "+linkVisible+" AND document_id = $1 ORDER BY created_at DESC, id DESC", documentLinkSelectColumns)
 		rows, err := tx.Query(ctx, query, docID)
 		if err != nil {
 			return fmt.Errorf("get document links: %w", err)

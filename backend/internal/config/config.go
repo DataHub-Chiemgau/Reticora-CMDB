@@ -399,6 +399,10 @@ const (
 	WorkerExport            = "export"
 	WorkerIngest            = "ingest"
 	WorkerMonitoring        = "monitoring"
+	// WorkerHealth recomputes ci.health from the monitoring samples every
+	// minute (DB-05, MON-02); unlike the alert evaluator (monitoring, module
+	// alerting) it runs in the G1 default configuration (F-087).
+	WorkerHealth            = "health"
 	WorkerScheduler         = "scheduler"
 	WorkerJobs              = "jobs"
 	WorkerEvents            = "events"
@@ -417,6 +421,7 @@ var WorkerNames = []string{
 	WorkerExport,
 	WorkerIngest,
 	WorkerMonitoring,
+	WorkerHealth,
 	WorkerScheduler,
 	WorkerJobs,
 	WorkerEvents,

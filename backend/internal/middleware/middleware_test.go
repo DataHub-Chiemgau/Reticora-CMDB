@@ -265,33 +265,49 @@ func TestTenantMiddlewareIgnoresHeaderWhenTokenCarriesOrganization(t *testing.T)
 	}
 }
 
-// TestPreAuthLimitCountsFailedAuthentication covers WP-050 (AUT-10, API-04):
-// the pre-auth limit sits in front of authentication, counts pre-auth
-// endpoints and failed authentications (invalid API keys) per client IP, and
-// once the budget is spent even a valid key from that IP is refused; other
-// IPs keep their own budget.
+// TestPreAuthLimitCountsFailedAuthentication covers WP-050 and WP-462
+// (AUT-10, API-04): the pre-auth limit sits in front of authentication,
+// counts pre-auth endpoints, failed refreshes and failed authentications
+// (invalid API keys) per client IP, and once the budget is spent even a
+// valid key from that IP is refused; other IPs keep their own budget.
+// Successful refreshes do not count (F-063).
 func TestPreAuthLimitCountsFailedAuthentication(t *testing.T) {
 	store := cache.NewMemoryStore()
 	keys := fakeAPIKeys{keys: map[string]*identity.APIKeyInfo{
 		"valid": {ID: "key-1", OrganizationID: "org-1", Scopes: []identity.Permission{identity.PermCIRead}},
 	}}
+	// The handler answers 401 for a refresh with an invalid cookie.
 	handler := Chain(
 		PreAuthRateLimiter(5, store),
 		AuthMiddlewareWithAPIKeys(nil, keys),
 		TenantMiddleware,
-	)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Test-Refresh") == "invalid" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
 
-	call := func(ip, path, apiKey string) int {
+	callWith := func(ip, path, apiKey, refresh string) int {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.RemoteAddr = ip + ":40000"
 		if apiKey != "" {
 			req.Header.Set("X-API-Key", apiKey)
 		}
+		if refresh != "" {
+			req.Header.Set("X-Test-Refresh", refresh)
+		}
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		return w.Code
 	}
+	call := func(ip, path, apiKey string) int {
+		t.Helper()
+		return callWith(ip, path, apiKey, "")
+	}
+	awaitFreshWindow()
 
 	if code := call("203.0.113.1", "/api/v1/cis", "valid"); code != http.StatusOK {
 		t.Fatalf("valid key: %d", code)
@@ -316,12 +332,34 @@ func TestPreAuthLimitCountsFailedAuthentication(t *testing.T) {
 			t.Fatalf("valid request %d: %d", i, code)
 		}
 	}
-	// Pre-auth endpoints count every request; public configuration none.
+	// Failed refreshes (handler 401) count: the sixth pre-auth request of
+	// the IP is refused.
 	for i := 0; i < 5; i++ {
-		call("203.0.113.4", "/api/v1/auth/refresh", "")
+		if code := callWith("203.0.113.4", "/api/v1/auth/refresh", "", "invalid"); code != http.StatusUnauthorized {
+			t.Fatalf("failed refresh %d: %d, want 401", i, code)
+		}
 	}
 	if code := call("203.0.113.4", "/api/v1/auth/callback", ""); code != http.StatusTooManyRequests {
-		t.Errorf("sixth pre-auth request: %d, want 429", code)
+		t.Errorf("sixth pre-auth request after 5 failed refreshes: %d, want 429", code)
+	}
+	// Successful refreshes (200) do not count: the sixth request passes,
+	// and so do the next ones.
+	for i := 0; i < 5; i++ {
+		if code := call("203.0.113.5", "/api/v1/auth/refresh", ""); code != http.StatusOK {
+			t.Fatalf("successful refresh %d: %d, want 200", i, code)
+		}
+	}
+	if code := call("203.0.113.5", "/api/v1/auth/refresh", ""); code != http.StatusOK {
+		t.Errorf("sixth request after 5 successful refreshes: %d, want 200", code)
+	}
+	// The login callback still counts every request.
+	for i := 0; i < 5; i++ {
+		if code := call("203.0.113.5", "/api/v1/auth/callback", ""); code != http.StatusOK {
+			t.Fatalf("login callback %d: %d, want 200", i, code)
+		}
+	}
+	if code := call("203.0.113.5", "/api/v1/auth/refresh", ""); code != http.StatusTooManyRequests {
+		t.Errorf("refresh after 5 login callbacks: %d, want 429", code)
 	}
 	if code := call("203.0.113.4", "/api/v1/auth/config", ""); code == http.StatusTooManyRequests {
 		t.Error("public configuration endpoint was limited")

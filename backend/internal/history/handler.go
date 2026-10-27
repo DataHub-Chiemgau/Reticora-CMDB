@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -108,7 +109,27 @@ func (h *Handler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusAccepted, map[string]any{"job_id": job.ID, "status": job.Status, "kind": job.Kind})
 }
 
-// List handles GET /api/v1/history/{entityType}/{id}
+// ListResponse is a page of a history, api.ListResponse plus
+// AuditIncluded: whether the audit entries of the entity are part of it
+// (E-78). It sets next_cursor itself, since WriteJSON fills it only for an
+// api.ListResponse.
+type ListResponse struct {
+	Data          []Change `json:"data"`
+	Total         int      `json:"total"`
+	Limit         int      `json:"limit"`
+	Offset        int      `json:"offset"`
+	HasMore       bool     `json:"has_more"`
+	NextCursor    string   `json:"next_cursor,omitempty"`
+	AuditIncluded bool     `json:"audit_included"`
+}
+
+// List handles GET /api/v1/history/{entityType}/{id}. The route needs
+// ci:read; the history of an entity type needs its read permission, and the
+// audit entries of a CI are part of it only with audit:read (CI-06, E-78).
+// The trail is read under the caller's tenant scope. A CI change is one
+// entry per change set with its field_changes; change_kind keeps the CI
+// changes of one kind, an unknown kind or another entity type is 400
+// (AUD-03).
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -116,20 +137,43 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entityType := chi.URLParam(r, "entityType")
-	if !validEntityType(entityType) {
+	required, ok := readPermissions[entityType]
+	if !ok {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "unsupported entity type")
 		return
 	}
+	principal, ok := identity.PrincipalFromContext(r.Context())
+	if !ok || !principal.Has(required) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "missing required permission: "+string(required))
+		return
+	}
+	opts := ListOptions{IncludeAudit: entityType == "ci" && principal.Has(identity.PermAuditRead)}
+	if q := r.URL.Query(); q.Has("change_kind") {
+		opts.ChangeKind = q.Get("change_kind")
+		if !ChangeKinds[opts.ChangeKind] {
+			api.WriteFieldError(w, &api.FieldError{Field: "change_kind",
+				Message: "must be one of created, updated, deleted, restored, merged, type_changed, relationship_added, relationship_removed, status_changed"})
+			return
+		}
+		if entityType != "ci" {
+			api.WriteFieldError(w, &api.FieldError{Field: "change_kind", Message: "filters the history of a ci only"})
+			return
+		}
+	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.List(r.Context(), t.OrganizationID, entityType, chi.URLParam(r, "id"), page)
+	items, total, err := h.repo.List(r.Context(), t.OrganizationID, entityType, chi.URLParam(r, "id"), page, opts)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[Change]{
+	resp := ListResponse{
 		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
-		HasMore: page.Offset+page.Limit < total,
-	})
+		HasMore: page.Offset+page.Limit < total, AuditIncluded: opts.IncludeAudit,
+	}
+	if resp.HasMore && len(items) > 0 {
+		resp.NextCursor = api.EncodeOffsetCursor(page.Offset + len(items))
+	}
+	api.WriteJSON(w, http.StatusOK, resp)
 }
 
 // AssetState handles GET /api/v1/assets/{id}/state?at=...
@@ -173,10 +217,14 @@ func (h *Handler) state(w http.ResponseWriter, r *http.Request, entityType strin
 	api.WriteJSON(w, http.StatusOK, snapshot)
 }
 
-func validEntityType(entityType string) bool {
-	switch entityType {
-	case "ci", "asset", "relationship", "location_node", "reservation", "composition":
-		return true
-	}
-	return false
+// readPermissions lists the entity types with a history and the read
+// permission each one's history needs (E-78); the locations are the common
+// tree of type location (E-19), the retired location_node has none (F-226).
+var readPermissions = map[string]identity.Permission{
+	"ci":           identity.PermCIRead,
+	"relationship": identity.PermRelationshipRead,
+	"location":     identity.PermLocationRead,
+	"asset":        identity.PermAssetRead,
+	"reservation":  identity.PermAssetRead,
+	"composition":  identity.PermAssetRead,
 }

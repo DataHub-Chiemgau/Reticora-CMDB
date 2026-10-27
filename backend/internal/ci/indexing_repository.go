@@ -203,13 +203,14 @@ func (r *indexingRepository) Merge(ctx context.Context, orgID, survivorID, victi
 	return result, nil
 }
 
-// Unmerge forwards the unmerge (CI-12) and indexes both CIs again.
-func (r *indexingRepository) Unmerge(ctx context.Context, orgID, victimID string) (*UnmergeResult, error) {
+// Unmerge forwards the unmerge (CI-12) with its force (E-80) and indexes
+// both CIs again.
+func (r *indexingRepository) Unmerge(ctx context.Context, orgID, victimID string, force bool) (*UnmergeResult, error) {
 	unmerger, ok := r.Repository.(Unmerger)
 	if !ok {
 		return nil, ErrMergeUnsupported
 	}
-	result, err := unmerger.Unmerge(ctx, orgID, victimID)
+	result, err := unmerger.Unmerge(ctx, orgID, victimID, force)
 	if err != nil {
 		return nil, err
 	}

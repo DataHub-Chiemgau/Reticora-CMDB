@@ -25,14 +25,19 @@ import (
 // lost; raising the limit adopts it as a CI, dismissing discards it.
 const ReviewKindUnlicensedCI = reviews.KindUnlicensedCI
 
-// LimitGuard enforces licensed quotas before a discovered device becomes a
-// CI. The entitlement service implements it.
-type LimitGuard interface {
+// QuotaGuard enforces licensed quotas before a resource is created
+// (ENT-03): max_cis before a discovered device becomes a CI, max_collectors
+// before a collector is registered or enrolled. current is the number of
+// resources the organization holds; over the limit it returns an error with
+// LimitExceeded (403 entitlement-limit). The entitlement service implements
+// it.
+type QuotaGuard interface {
 	AllowCreate(ctx context.Context, orgID, quota string, current int64) error
 }
 
-// WithLimits enforces max_cis on new discovered CIs.
-func (h *Handler) WithLimits(guard LimitGuard) *Handler {
+// WithLimits enforces max_cis on new discovered CIs and max_collectors on
+// POST /collectors and POST /collectors/enroll.
+func (h *Handler) WithLimits(guard QuotaGuard) *Handler {
 	h.limits = guard
 	return h
 }
@@ -59,7 +64,9 @@ func RegisterMetrics(reg prometheus.Registerer) {
 	}, func() float64 { return float64(UnlicensedQueued()) }))
 	// Discovery error states (DIS-08).
 	reg.MustRegister(scopeRuns, discoveryErrors)
-	reg.MustRegister(ingestLanesGauge, laneBacklog, laneRecords, recordRetries)
+	// Losses and backpressure reported by the collectors (NFR-04, F-234).
+	reg.MustRegister(collectorSpoolDropped, collectorSpoolBackpressure)
+	reg.MustRegister(ingestLanesGauge, laneBacklog, laneRecords, recordRetries, deadLetters)
 }
 
 // discoveredAttributes are the attributes a discovered device stores on its

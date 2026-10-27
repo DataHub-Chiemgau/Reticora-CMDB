@@ -62,12 +62,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if _, ok := tenantInfo(w, r); !ok {
 		return
 	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 	items, err := h.repo.ListPermissions(r.Context())
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, items)
+	api.WriteJSON(w, http.StatusOK, api.Page(items, page))
 }
 
 func (h *Handler) ListRole(w http.ResponseWriter, r *http.Request) {
@@ -79,12 +83,16 @@ func (h *Handler) ListRole(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 	items, err := h.repo.ListRolePermissions(r.Context(), t.OrganizationID, roleID)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, items)
+	api.WriteJSON(w, http.StatusOK, api.Page(items, page))
 }
 
 // ReplaceRole handles PUT /api/v1/roles/{id}/permissions. The route is gated

@@ -23,6 +23,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
@@ -105,6 +106,9 @@ type IngestItem struct {
 	ScopeID     string    `json:"-"`
 	SiteID      string    `json:"-"`
 	ClientID    string    `json:"-"`
+	// seq is the position of the record among the messages ProcessMessages
+	// processes, plus one; 0 elsewhere. A record failure names it (WP-481).
+	seq int
 
 	// Attributes carries dynamic discovery attributes (spec §1 hybrid model).
 	// They feed per-field provenance records (spec §13) without being forced
@@ -145,6 +149,13 @@ type BulkIngestResponse struct {
 	// reached (ENT-03, CH21); already queued devices count again.
 	Unlicensed int    `json:"unlicensed,omitempty"`
 	JobID      string `json:"job_id,omitempty"`
+	// Accepted counts the records processed, deduplicated or queued;
+	// Rejected those refused with an error, each listed in Errors. A record
+	// that fails does not take the others of its request down (REC-01,
+	// WP-481).
+	Accepted int                 `json:"accepted"`
+	Rejected int                 `json:"rejected"`
+	Errors   []IngestRecordError `json:"errors,omitempty"`
 }
 
 // Repository defines persistence operations for collectors, discovery jobs and
@@ -152,6 +163,11 @@ type BulkIngestResponse struct {
 type Repository interface {
 	ListCollectors(ctx context.Context, orgID string, page api.PaginationParams) ([]Collector, int, error)
 	RegisterCollector(ctx context.Context, c *Collector) error
+	// CountCollectors counts the collectors of the organization that are
+	// not disabled, the stock max_collectors is checked against (ENT-03).
+	// It counts organization-wide, whatever the caller's client or site
+	// scope.
+	CountCollectors(ctx context.Context, orgID string) (int64, error)
 	// Heartbeat records a heartbeat and returns the collector's status: a
 	// pending or offline collector becomes active, a paused one stays
 	// paused, a disabled one is refused (ErrCollectorDisabled).
@@ -175,6 +191,12 @@ type Repository interface {
 	// With issue, the collector's first certificate is issued (CN =
 	// collector id) and recorded in the same transaction (COL-04).
 	EnrollCollector(ctx context.Context, rawCode string, c *Collector, issue CertIssuer) (*IssuedCert, error)
+	// EnrollCollectorWithQuota is EnrollCollector that first checks
+	// max_collectors of the code's organization with quota (nil: no
+	// check), in the same transaction and before the code is consumed: a
+	// refused enrollment returns the guard's error, registers nothing and
+	// leaves the code valid (ENT-03).
+	EnrollCollectorWithQuota(ctx context.Context, rawCode string, c *Collector, issue CertIssuer, quota QuotaGuard) (*IssuedCert, error)
 	// Renewal is no repository call of the API: the collector renews over
 	// its NATS channel with proof of its current key (CertificateRenewal,
 	// PGRepository.RenewEdgeCertificate, F-012).
@@ -258,6 +280,23 @@ func (r *MemoryRepository) ListCollectors(_ context.Context, orgID string, page 
 	return result[start:end], total, nil
 }
 
+// CountCollectors implements Repository.
+func (r *MemoryRepository) CountCollectors(_ context.Context, orgID string) (int64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.countCollectors(orgID), nil
+}
+
+func (r *MemoryRepository) countCollectors(orgID string) int64 {
+	var n int64
+	for _, c := range r.collectors {
+		if c.OrganizationID == orgID && c.Status != CollectorDisabled {
+			n++
+		}
+	}
+	return n
+}
+
 func (r *MemoryRepository) RegisterCollector(_ context.Context, c *Collector) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -329,12 +368,23 @@ func (r *MemoryRepository) CreateEnrollmentCode(_ context.Context, code *Enrollm
 }
 
 func (r *MemoryRepository) EnrollCollector(ctx context.Context, rawCode string, c *Collector, issue CertIssuer) (*IssuedCert, error) {
+	return r.EnrollCollectorWithQuota(ctx, rawCode, c, issue, nil)
+}
+
+// EnrollCollectorWithQuota implements Repository.
+func (r *MemoryRepository) EnrollCollectorWithQuota(ctx context.Context, rawCode string, c *Collector, issue CertIssuer, quota QuotaGuard) (*IssuedCert, error) {
 	r.mu.Lock()
 	id, ok := r.enrollHashes[enrollmentCodeHash(rawCode)]
 	code := r.enrollCodes[id]
 	if !ok || code == nil || code.UsedAt != nil || time.Now().UTC().After(code.ExpiresAt) {
 		r.mu.Unlock()
 		return nil, fmt.Errorf("enrollment code invalid, expired or already used")
+	}
+	if quota != nil {
+		if err := quota.AllowCreate(ctx, code.OrganizationID, entitlement.LimitMaxCollectors, r.countCollectors(code.OrganizationID)); err != nil {
+			r.mu.Unlock()
+			return nil, err
+		}
 	}
 	now := time.Now().UTC()
 	code.UsedAt = &now
@@ -424,7 +474,7 @@ type FieldProvenance struct {
 
 // Handler provides HTTP handlers for discovery endpoints.
 type Handler struct {
-	limits     LimitGuard
+	limits     QuotaGuard
 	license    EdgeLicense
 	repo       Repository
 	ciRepo     ci.Repository
@@ -449,6 +499,9 @@ type Handler struct {
 	// (REC-01, WP-334).
 	serial     sync.Map
 	reviewJobs jobs.Tracker
+	// merger carries out the resolution merge of probable_duplicate items
+	// as the CI-12 merge (WithMerger).
+	merger CIMerger
 	// tx runs the frame of a batch and each record in one transaction
 	// (NFR-03); without one every repository call is its own transaction.
 	tx TxRunner
@@ -777,6 +830,18 @@ func (h *Handler) RegisterCollector(w http.ResponseWriter, r *http.Request) {
 		c.Config = make(map[string]any)
 	}
 
+	if h.limits != nil {
+		current, err := h.repo.CountCollectors(r.Context(), t.OrganizationID)
+		if err == nil {
+			err = h.limits.AllowCreate(r.Context(), t.OrganizationID, entitlement.LimitMaxCollectors, current)
+		}
+		if err != nil {
+			if !api.WriteEntitlementError(w, err) {
+				api.WriteRepoError(w, err)
+			}
+			return
+		}
+	}
 	if err := h.repo.RegisterCollector(r.Context(), &c); err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -876,10 +941,14 @@ func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
 		}
 		issue = h.issuer(req.CSR)
 	}
-	cert, err := h.repo.EnrollCollector(r.Context(), req.Code, c, issue)
+	// max_collectors of the code's organization is checked before the code
+	// is consumed: at the limit the answer is 403 entitlement-limit and the
+	// code stays valid (ENT-03).
+	cert, err := h.repo.EnrollCollectorWithQuota(r.Context(), req.Code, c, issue, h.limits)
 	if err != nil {
 		var fe *api.FieldError
 		switch {
+		case api.WriteEntitlementError(w, err):
 		case errors.As(err, &fe):
 			api.WriteRepoError(w, err)
 		case errors.Is(err, ErrInvalidCSR):
@@ -913,15 +982,19 @@ func generateEnrollmentCode() (string, error) {
 }
 
 // CollectorSpoolReport is the offline spool state a collector sends with its
-// heartbeat (NFR-04, COL-05, OPS-06). Dropped counters only grow while the
-// collector runs.
+// heartbeat (NFR-04, COL-05, OPS-06). The dropped counters are the losses
+// since the last heartbeat the server accepted: the collector acknowledges
+// them after that heartbeat's 204.
 type CollectorSpoolReport struct {
 	Messages         int   `json:"messages"`
 	Bytes            int64 `json:"bytes"`
 	OldestAgeSeconds int64 `json:"oldest_age_seconds"`
 	DroppedMessages  int64 `json:"dropped_messages"`
 	DroppedBytes     int64 `json:"dropped_bytes"`
-	Backpressure     bool  `json:"backpressure"`
+	// DroppedSamples counts metric samples and traps the collector dropped
+	// on upload failures (E-79: counted, not spooled).
+	DroppedSamples int64 `json:"dropped_samples"`
+	Backpressure   bool  `json:"backpressure"`
 }
 
 // CollectorHeartbeatRequest is the optional body of a collector heartbeat.
@@ -959,15 +1032,7 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	// A paused collector stops scanning until the license is active again
 	// (ENT-07).
 	w.Header().Set(CollectorStatusHeader, status)
-	if s := req.Spool; s != nil && (s.DroppedMessages > 0 || s.Backpressure) {
-		slog.WarnContext(r.Context(), "collector reported spool data loss or backpressure",
-			"event", "collector.spool.degraded",
-			"organization_id", t.OrganizationID, "collector_id", id,
-			"spool_messages", s.Messages, "spool_bytes", s.Bytes,
-			"spool_oldest_age_seconds", s.OldestAgeSeconds,
-			"dropped_messages", s.DroppedMessages, "dropped_bytes", s.DroppedBytes,
-			"backpressure", s.Backpressure)
-	}
+	recordSpoolReport(r.Context(), t.OrganizationID, id, req.Spool)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -995,11 +1060,12 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	// processed in this request.
 	msgs := newIngestMessages(r.Context(), t, r.Header.Get("X-Collector-ID"), items)
 	resp, err := h.dispatch(r.Context(), msgs)
-	if err != nil {
+	// Records that fail are listed in the answer; only when no record was
+	// accepted does the request fail as a whole (WP-481).
+	if err = resp.finish(received, rejected, err); err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	resp.Received, resp.RejectedFuture = received, rejected
 	api.WriteJSON(w, http.StatusAccepted, resp)
 }
 
@@ -1009,10 +1075,15 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 //
 // With a transaction runner (the PostgreSQL repository) the frame of the
 // batch runs in one short transaction and every record in exactly one more
-// (NFR-03). A failing record rolls back completely and stops the batch: the
-// records before it stay committed, get their topology and are entered in
-// the ledger, and the error makes the queue deliver the batch again, which
-// skips them as duplicates.
+// (NFR-03). A failing record rolls back completely and the batch goes on
+// with the next record (WP-481): the records processed get their topology
+// and are entered in the ledger, and the error, an *IngestErrors, names each
+// failed record. A record that failed transiently holds back the records
+// after it that share one of its identity keys (the keys of the identity
+// lock, E-56): they fail with it and keep their order when the batch is
+// delivered again; a record that failed for good holds back nothing. A
+// frame that fails for good runs each record in a frame of its own, so
+// that only the records that cause it fail.
 //
 // With the batch queries of the repository and the batch creation of the
 // CI repository (WP-333), each window of up to ingestBatch records (with
@@ -1023,9 +1094,8 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 // identity locks (WP-608). Every record the batch leaves follows one by one
 // in the order of the records; without the ingest locks the updates of
 // known devices do as well. The records of one device keep their order.
-// When a record fails, the devices its window created or updated in the
-// batch stay committed like the records before it and are entered in the
-// ledger.
+// When a record fails in the batch of its window, the window rolls back and
+// its records follow one by one (processWindow).
 func (h *Handler) processItems(ctx context.Context, orgID string, items []IngestItem) (BulkIngestResponse, error) {
 	var resp BulkIngestResponse
 	if h.ciRepo == nil {
@@ -1051,6 +1121,14 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 		reason := retryReason(err)
 		if !locking || attempt >= maxRecordRetries ||
 			(reason != "deadlock" && reason != "serialization" && reason != "out_of_memory") || !retryPause(ctx, reason, attempt) {
+			if len(items) > 1 && classifyRecordError(err).permanent {
+				// A record makes the frame fail for good, e.g. the review of
+				// an unknown type outside the sender's scope: each record
+				// runs on its own, so that only it fails (WP-481).
+				slog.WarnContext(ctx, "ingest frame failed for good; its records are processed one by one",
+					"event", "ingest.frame.fallback", "organization_id", orgID, "records", len(items), "error", err)
+				return h.processEach(ctx, orgID, items)
+			}
 			return resp, err
 		}
 		recordRetries.WithLabelValues(reason).Inc()
@@ -1068,10 +1146,23 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	n := len(frame.items)
 	resolvedCIID := make([]string, n)
 	handled := make([]bool, n)
-	var recordErr error
-windows:
+	// failed are the records that failed; held the identity keys of those
+	// that failed transiently, which hold back the records after them.
+	var failed []RecordError
+	held := heldKeys{}
+	frame.blocked = make([]bool, n)
 	for start, end := 0, 0; start < n; start = end {
 		end = h.windowEnd(orgID, frame, start)
+		if len(held) > 0 {
+			// The batch of the window leaves the records held back, and those
+			// after them that share a key with them.
+			for i := start; i < end; i++ {
+				if keys := identityLockKeys(orgID, frame.identity, &frame.items[i]); frame.typeIDs[i] != "" && held.holds(keys) {
+					frame.blocked[i] = true
+					held.add(keys)
+				}
+			}
+		}
 		h.processWindow(ctx, orgID, frame, start, end, handled, resolvedCIID, &resp)
 		for i := start; i < end; i++ {
 			if handled[i] {
@@ -1082,10 +1173,28 @@ windows:
 				handled[i] = true
 				continue
 			}
+			var keys []int32
+			if len(held) > 0 {
+				keys = identityLockKeys(orgID, frame.identity, &frame.items[i])
+				if frame.blocked[i] || held.holds(keys) {
+					failed = append(failed, newRecordError(&frame.items[i], errHeldBack))
+					held.add(keys)
+					continue
+				}
+			}
 			out, err := h.runRecord(ctx, orgID, frame, i)
 			if err != nil {
-				recordErr = err
-				break windows
+				f := newRecordError(&frame.items[i], err)
+				failed = append(failed, f)
+				slog.WarnContext(ctx, "ingest record failed; the batch goes on with the next record", "event", "ingest.record.failed",
+					"organization_id", orgID, "record_id", f.RecordID, "permanent", f.Permanent, "error", err)
+				if !f.Permanent {
+					if keys == nil {
+						keys = identityLockKeys(orgID, frame.identity, &frame.items[i])
+					}
+					held.add(keys)
+				}
+				continue
 			}
 			// Counted once the record's transaction has committed.
 			resp.add(&out.resp)
@@ -1109,10 +1218,13 @@ windows:
 	// Outlet mappings of PDUs and UPS outlet groups (IMP-09).
 	resp.Relationships += h.derivePowerChain(ctx, orgID, processed, processedCIID)
 	if err := h.markProcessed(ctx, orgID, processed); err != nil {
-		return resp, errors.Join(recordErr, err)
+		return resp, &IngestErrors{Records: failed, Rest: err}
 	}
 	settle(ctx, processed)
-	return resp, recordErr
+	if len(failed) > 0 {
+		return resp, &IngestErrors{Records: failed}
+	}
+	return resp, nil
 }
 
 // batchFrame is what the frame of a batch prepares for its records: the
@@ -1142,6 +1254,9 @@ type batchFrame struct {
 	// locking makes the transactions of the records take the identity and
 	// max_cis locks and retry a lost race (Handler.locking, WP-334).
 	locking bool
+	// blocked marks the records an earlier transient record failure holds
+	// back (WP-481); the batch of their window leaves them.
+	blocked []bool
 }
 
 // recordOutcome is what processing one record changed.
@@ -1620,7 +1735,7 @@ func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchF
 	qs, include := make([]IdentityQuery, n), make([]bool, n)
 	records := 0
 	for k := range n {
-		if frame.typeIDs[start+k] == "" {
+		if frame.typeIDs[start+k] == "" || (start+k < len(frame.blocked) && frame.blocked[start+k]) {
 			continue
 		}
 		qs[k] = identityQuery(&frame.items[start+k])

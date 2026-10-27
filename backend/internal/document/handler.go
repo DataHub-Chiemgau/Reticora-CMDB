@@ -395,6 +395,11 @@ func (h *Handler) GetLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// {data, next_cursor} with limit and the signed cursor (API-02, F-075).
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 	docID := chi.URLParam(r, "id")
 	links, err := h.repo.GetLinks(r.Context(), t.OrganizationID, docID)
 	if err != nil {
@@ -402,7 +407,7 @@ func (h *Handler) GetLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteJSON(w, http.StatusOK, links)
+	api.WriteJSON(w, http.StatusOK, api.Page(links, page))
 }
 
 // ownsStorageKey reports whether key is an object of document docID of

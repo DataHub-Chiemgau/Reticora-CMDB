@@ -5,7 +5,8 @@ package tenantapi
 import "time"
 
 // Organization is the tenant itself (LOC-01): name, unique slug, plan,
-// settings, IANA time zone, ISO 4217 currency and BCP 47 locale.
+// settings, IANA time zone, ISO 4217 currency and BCP 47 locale, and the
+// organization's consent to external AI processing (AI-02).
 type Organization struct {
 	ID        string         `json:"id"`
 	Name      string         `json:"name"`
@@ -15,19 +16,23 @@ type Organization struct {
 	Timezone  string         `json:"timezone"`
 	Currency  string         `json:"currency"`
 	Locale    string         `json:"locale"`
+	AIOptIn   bool           `json:"ai_opt_in"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 // UpdateOrganizationRequest is the payload of PATCH /api/v1/org. Slug and
 // plan are not changed here: the slug identifies the tenant, the plan is
-// set by the operator (ENT-04).
+// set by the operator (ENT-04). AIOptIn is the organization's AI opt-in
+// (AI-02): only an org-wide holder of user:manage changes it (the handler
+// checks), and the change is audited.
 type UpdateOrganizationRequest struct {
 	Name     *string        `json:"name,omitempty"`
 	Settings map[string]any `json:"settings,omitempty"`
 	Timezone *string        `json:"timezone,omitempty"`
 	Currency *string        `json:"currency,omitempty"`
 	Locale   *string        `json:"locale,omitempty"`
+	AIOptIn  *bool          `json:"ai_opt_in,omitempty"`
 }
 
 // Client represents a tenant's customer (mandant sub-scope, LOC-02): the

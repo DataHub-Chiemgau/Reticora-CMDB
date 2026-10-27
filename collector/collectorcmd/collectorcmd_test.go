@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/snmp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/update"
@@ -241,7 +242,7 @@ func TestPostPayload_SendsCompressedJSON(t *testing.T) {
 		t.Fatalf("newUploader: %v", err)
 	}
 	payload, _ := json.Marshal(plugins.DeviceRecordBatch{Records: testRecords("r")})
-	if err := up.postPayload(context.Background(), payload); err != nil {
+	if _, err := up.postPayload(context.Background(), payload); err != nil {
 		t.Fatalf("postPayload: %v", err)
 	}
 	var decoded plugins.DeviceRecordBatch
@@ -935,5 +936,416 @@ func TestReachabilitySamplesReportLostHosts(t *testing.T) {
 		if got[host] != v {
 			t.Fatalf("sample of %s = %v, want %v", host, got[host], v)
 		}
+	}
+}
+
+// ingestBatchName decodes a gzip ingest request and returns the name of its
+// first record.
+func ingestBatchName(t *testing.T, r *http.Request) string {
+	t.Helper()
+	gz, err := gzip.NewReader(r.Body)
+	if err != nil {
+		t.Errorf("gzip: %v", err)
+		return ""
+	}
+	var batch plugins.DeviceRecordBatch
+	if err := json.NewDecoder(gz).Decode(&batch); err != nil || len(batch.Records) == 0 {
+		t.Errorf("decode batch: %v", err)
+		return ""
+	}
+	return batch.Records[0].System.Name
+}
+
+// spoolBatches spools one discovery batch per name, oldest first.
+func spoolBatches(t *testing.T, up *uploader, names ...string) {
+	t.Helper()
+	base := time.Now().Add(-time.Hour)
+	for i, name := range names {
+		payload, err := json.Marshal(plugins.DeviceRecordBatch{Records: testRecords(name)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := up.spoolResults(context.Background(), payload, base.Add(time.Duration(i)*time.Second)); err != nil {
+			t.Fatalf("spool %s: %v", name, err)
+		}
+	}
+}
+
+// quarantined counts the files in the spool's quarantine directory.
+func quarantined(t *testing.T, spoolDir string) int {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(spoolDir, buffer.QuarantineDir))
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(entries)
+}
+
+// TestSpoolPoisonBatchIsQuarantined covers F-085 (COL-05): a batch the
+// server refuses for good (400) is quarantined and counted as lost, and the
+// delivery continues with the next batch (202). A fresh batch refused for
+// good is not spooled but quarantined and counted as well.
+func TestSpoolPoisonBatchIsQuarantined(t *testing.T) {
+	spoolDir := t.TempDir()
+	var mu sync.Mutex
+	var delivered []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := ingestBatchName(t, r)
+		if strings.HasPrefix(name, "poison") {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"title":"Bad Request","status":400,"detail":"records[0]: invalid"}`))
+			return
+		}
+		mu.Lock()
+		delivered = append(delivered, name)
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	up, err := newUploader(ctx, testConfig(srv.URL, spoolDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spoolBatches(t, up, "poison-1", "good-2")
+	up.flushSpool(ctx)
+
+	if len(delivered) != 1 || delivered[0] != "good-2" {
+		t.Fatalf("delivered = %v, want the batch behind the poison batch", delivered)
+	}
+	if n, _ := up.spool.Len(ctx); n != 0 {
+		t.Fatalf("spool still holds %d batches", n)
+	}
+	if q := quarantined(t, spoolDir); q != 1 {
+		t.Fatalf("quarantine holds %d files, want the poison batch", q)
+	}
+	stats, err := up.spool.Stats(ctx)
+	if err != nil || stats.DroppedMessages != 1 || stats.DroppedBytes == 0 {
+		t.Fatalf("loss after the poison batch: %+v, %v; want 1 message counted", stats, err)
+	}
+
+	// A fresh batch refused for good: an error for the scope run, no spool
+	// entry, quarantined and counted.
+	if err := up.uploadRecords(ctx, testRecords("poison-3")); !errors.Is(err, errUploadRejected) {
+		t.Fatalf("upload of a poison batch: %v, want errUploadRejected", err)
+	}
+	if n, _ := up.spool.Len(ctx); n != 0 {
+		t.Fatalf("poison batch spooled: %d", n)
+	}
+	if q := quarantined(t, spoolDir); q != 2 {
+		t.Fatalf("quarantine holds %d files, want 2", q)
+	}
+	if stats, _ = up.spool.Stats(ctx); stats.DroppedMessages != 2 {
+		t.Fatalf("dropped messages = %d, want 2", stats.DroppedMessages)
+	}
+}
+
+// TestSpoolTransientFailureKeepsBatches covers COL-05: 503, 408, 429, 401
+// (the HTTP path before the mTLS edge is up) and network errors are transient; every batch stays in the spool in its
+// order and nothing is counted as lost.
+func TestSpoolTransientFailureKeepsBatches(t *testing.T) {
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusUnauthorized, 0} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			spoolDir := t.TempDir()
+			var requests atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				w.WriteHeader(status)
+			}))
+			url := srv.URL
+			if status == 0 {
+				srv.Close() // network error
+			} else {
+				defer srv.Close()
+			}
+
+			ctx := context.Background()
+			up, err := newUploader(ctx, testConfig(url, spoolDir))
+			if err != nil {
+				t.Fatal(err)
+			}
+			spoolBatches(t, up, "first", "second")
+			up.flushSpool(ctx)
+
+			if n, _ := up.spool.Len(ctx); n != 2 {
+				t.Fatalf("spool holds %d batches, want both", n)
+			}
+			if status != 0 && requests.Load() != 1 {
+				t.Fatalf("%d requests, want the delivery to stop at the first batch", requests.Load())
+			}
+			stats, _ := up.spool.Stats(ctx)
+			if stats.DroppedMessages != 0 || quarantined(t, spoolDir) != 0 {
+				t.Fatalf("transient failure counted as loss: %+v", stats)
+			}
+			// A fresh batch queues behind them, not quarantined.
+			if err := up.uploadRecords(ctx, testRecords("third")); err != nil {
+				t.Fatalf("queueing behind the backlog: %v", err)
+			}
+			if n, _ := up.spool.Len(ctx); n != 3 {
+				t.Fatalf("spool holds %d batches, want 3", n)
+			}
+		})
+	}
+}
+
+// TestRecordsRejectedInAcceptedBatchAreCounted: a 202 that names rejected
+// records (WP-481) acknowledges the batch and counts the rejected records
+// as lost.
+func TestRecordsRejectedInAcceptedBatchAreCounted(t *testing.T) {
+	spoolDir := t.TempDir()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"received":3,"accepted":1,"rejected":2,"errors":[{"record_id":"a","status":403},{"record_id":"b","status":422}]}`))
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	up, err := newUploader(ctx, testConfig(srv.URL, spoolDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spoolBatches(t, up, "spooled")
+	up.flushSpool(ctx)
+	if n, _ := up.spool.Len(ctx); n != 0 {
+		t.Fatalf("accepted batch not acknowledged: %d", n)
+	}
+	if stats, _ := up.spool.Stats(ctx); stats.DroppedMessages != 2 {
+		t.Fatalf("dropped messages = %d, want the 2 rejected records", stats.DroppedMessages)
+	}
+	if err := up.uploadRecords(ctx, testRecords("fresh")); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if stats, _ := up.spool.Stats(ctx); stats.DroppedMessages != 4 {
+		t.Fatalf("dropped messages = %d, want 4", stats.DroppedMessages)
+	}
+}
+
+// TestSpooledAgentTelemetryLossIsCounted covers F-233: spooled agent
+// telemetry the backend rejects (403) or that is unreadable is dropped and
+// counted as lost before it is acknowledged; 429 is transient.
+func TestSpooledAgentTelemetryLossIsCounted(t *testing.T) {
+	spoolDir := t.TempDir()
+	backend := &relayBackend{status: http.StatusForbidden}
+	srv := httptest.NewServer(backend)
+	defer srv.Close()
+
+	ctx := context.Background()
+	up, err := newUploader(ctx, testConfig(srv.URL, spoolDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := up.spoolAgentTelemetry(ctx, []byte(`{"token":"agent-token","telemetry":{"hostname":"h1"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	up.flushSpool(ctx)
+	if n, _ := up.spool.Len(ctx); n != 0 {
+		t.Fatalf("rejected telemetry still spooled: %d", n)
+	}
+	stats, _ := up.spool.Stats(ctx)
+	if stats.DroppedMessages != 1 {
+		t.Fatalf("dropped_messages = %d after a 403, want 1", stats.DroppedMessages)
+	}
+	backend.mu.Lock()
+	requests := len(backend.requests)
+	backend.mu.Unlock()
+	if requests != 1 {
+		t.Fatalf("telemetry requests = %d, want 1", requests)
+	}
+
+	if err := up.spoolAgentTelemetry(ctx, []byte(`not json`)); err != nil {
+		t.Fatal(err)
+	}
+	up.flushSpool(ctx)
+	if stats, _ = up.spool.Stats(ctx); stats.DroppedMessages != 2 {
+		t.Fatalf("dropped_messages = %d after unreadable telemetry, want 2", stats.DroppedMessages)
+	}
+
+	// 429 is transient: the telemetry stays for the next flush.
+	backend.mu.Lock()
+	backend.status = http.StatusTooManyRequests
+	backend.mu.Unlock()
+	if err := up.spoolAgentTelemetry(ctx, []byte(`{"token":"agent-token","telemetry":{"hostname":"h2"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	up.flushSpool(ctx)
+	if n, _ := up.spool.Len(ctx); n != 1 {
+		t.Fatalf("telemetry after 429 spooled: %d, want 1", n)
+	}
+	if stats, _ = up.spool.Stats(ctx); stats.DroppedMessages != 2 {
+		t.Fatalf("dropped_messages = %d after a 429, want still 2", stats.DroppedMessages)
+	}
+}
+
+// TestDroppedSamplesAreReportedInTheHeartbeat covers E-79 (option 1) and
+// F-234: metric samples and traps dropped on upload failures are counted
+// (dropped_samples) and reported with the heartbeat; an accepted heartbeat
+// acknowledges them.
+func TestDroppedSamplesAreReportedInTheHeartbeat(t *testing.T) {
+	withEdge(t, func(_ context.Context, suffix string, _ []byte) ([]byte, error) {
+		if suffix == edgeMetricsSuffix {
+			return []byte(`{"status":400,"error":"invalid metrics"}`), nil
+		}
+		return nil, errNoEdge
+	})
+	var mu sync.Mutex
+	var bodies []heartbeatBody
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body heartbeatBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode heartbeat: %v", err)
+		}
+		mu.Lock()
+		bodies = append(bodies, body)
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	cfg := testConfig(srv.URL, "")
+	up, err := newUploader(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := up.uploadMetricSamples(ctx, []plugins.MetricSample{sample("10.0.0.1"), sample("10.0.0.2")}); err == nil {
+		t.Fatal("refused samples reported as delivered")
+	}
+	if err := up.uploadTrapEvent(ctx, snmp.TrapEvent{SourceIP: "10.0.0.3", TrapOID: "1.3.6.1.6.3.1.1.5.3", Received: time.Now()}); err == nil {
+		t.Fatal("refused trap reported as delivered")
+	}
+
+	if _, ok := up.heartbeat(ctx, cfg); !ok {
+		t.Fatal("heartbeat not accepted")
+	}
+	if _, ok := up.heartbeat(ctx, cfg); !ok {
+		t.Fatal("heartbeat not accepted")
+	}
+	if len(bodies) != 2 || bodies[0].Spool == nil || bodies[0].Spool.DroppedSamples != 3 {
+		t.Fatalf("first heartbeat spool report = %+v, want dropped_samples=3", bodies[0].Spool)
+	}
+	if bodies[1].Spool != nil {
+		t.Fatalf("second heartbeat reports %+v, want the samples acknowledged", bodies[1].Spool)
+	}
+}
+
+// TestHeartbeatAcknowledgesReportedLossOnly covers WP-482/483: the
+// persisted loss totals shrink only after the server accepted the
+// heartbeat (204), and only by the reported amounts; a loss recorded while
+// the heartbeat is under way goes with the next one.
+func TestHeartbeatAcknowledgesReportedLossOnly(t *testing.T) {
+	spoolDir := t.TempDir()
+	var status atomic.Int64
+	status.Store(http.StatusServiceUnavailable)
+	var up *uploader
+	var mu sync.Mutex
+	var reports []*spoolReport
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body heartbeatBody
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		reports = append(reports, body.Spool)
+		mu.Unlock()
+		if status.Load() == http.StatusNoContent {
+			// A loss recorded while the heartbeat is under way.
+			if err := up.spool.RecordLoss(r.Context(), buffer.Loss{Messages: 1, Bytes: 7, Reason: buffer.LossRejected}); err != nil {
+				t.Errorf("record loss: %v", err)
+			}
+		}
+		w.WriteHeader(int(status.Load()))
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	cfg := testConfig(srv.URL, spoolDir)
+	var err error
+	if up, err = newUploader(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err = up.spool.RecordLoss(ctx, buffer.Loss{Messages: 3, Bytes: 300, Reason: buffer.LossRejected}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := up.heartbeat(ctx, cfg); ok {
+		t.Fatal("503 heartbeat counted as accepted")
+	}
+	if stats, _ := up.spool.Stats(ctx); stats.DroppedMessages != 3 || stats.DroppedBytes != 300 {
+		t.Fatalf("loss after a failed heartbeat = %d/%d, want 3/300 kept", stats.DroppedMessages, stats.DroppedBytes)
+	}
+
+	status.Store(http.StatusNoContent)
+	if _, ok := up.heartbeat(ctx, cfg); !ok {
+		t.Fatal("heartbeat not accepted")
+	}
+	// A new instance on the same spool sees the persisted state.
+	stats, err := (&buffer.DiskBuffer{Dir: spoolDir}).Stats(ctx)
+	if err != nil || stats.DroppedMessages != 1 || stats.DroppedBytes != 7 {
+		t.Fatalf("loss after the accepted heartbeat = %+v, %v; want only the new 1/7", stats, err)
+	}
+	if len(reports) != 2 || reports[0].DroppedMessages != 3 || reports[1].DroppedMessages != 3 {
+		t.Fatalf("reports = %+v, want 3 lost messages in both", reports)
+	}
+}
+
+// TestBackpressurePausesCollectionUntilTheSpoolDrains covers COL-05 and
+// NFR-04: while the spool is saturated the discovery loop scans nothing;
+// once the flush has drained the spool, collection resumes.
+func TestBackpressurePausesCollectionUntilTheSpoolDrains(t *testing.T) {
+	spoolDir := t.TempDir()
+	var reachable atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !reachable.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	cfg := testConfig(srv.URL, spoolDir)
+	up, err := newUploader(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spoolBatches(t, up, "backlog")
+	stats, _ := up.spool.Stats(ctx)
+	up.spool.MaxBytes = stats.Bytes // saturated
+	if !up.backpressure(ctx) {
+		t.Fatal("saturated spool applies no backpressure")
+	}
+
+	plugin := &countingPlugin{}
+	pluginRegistry["counting"] = plugin
+	defer delete(pluginRegistry, "counting")
+	loopCfg := cfg
+	loopCfg.Protocols = []string{"counting"}
+	loopCfg.DiscoveryInterval = 10 * time.Millisecond
+	loopCtx, cancel := context.WithTimeout(ctx, 60*time.Millisecond)
+	runDiscoveryLoop(loopCtx, loopCfg, up)
+	cancel()
+	if plugin.runs.Load() != 0 {
+		t.Fatalf("collection ran %d times on a saturated spool", plugin.runs.Load())
+	}
+
+	// The backend is back: the flush drains the spool, collection resumes.
+	reachable.Store(true)
+	up.flushSpool(ctx)
+	if n, _ := up.spool.Len(ctx); n != 0 || up.backpressure(ctx) {
+		t.Fatalf("spool not drained: %d messages, backpressure %v", n, up.backpressure(ctx))
+	}
+	loopCtx, cancel = context.WithTimeout(ctx, 60*time.Millisecond)
+	runDiscoveryLoop(loopCtx, loopCfg, up)
+	cancel()
+	if plugin.runs.Load() == 0 {
+		t.Fatal("collection did not resume after the spool drained")
+	}
+	if stats, _ = up.spool.Stats(ctx); stats.DroppedMessages != 0 {
+		t.Fatalf("backpressure lost data: %+v", stats)
 	}
 }

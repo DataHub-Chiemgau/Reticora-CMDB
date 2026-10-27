@@ -3,12 +3,14 @@ package monitoring
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -273,5 +275,105 @@ func TestIngestWithoutResolverDropsSamplesWithoutCI(t *testing.T) {
 	})
 	if len(assigned) != 1 || assigned[0].CIID != "ci-1" || unassigned != 1 {
 		t.Fatalf("assigned = %+v, unassigned = %d", assigned, unassigned)
+	}
+}
+
+// walkMonitoringPages follows next_cursor from path?limit=1 and returns the
+// raw rows in page order; every page is {data: [one entry], next_cursor}
+// until the last (API-02, F-075).
+func walkMonitoringPages(t *testing.T, r http.Handler, path string) []string {
+	t.Helper()
+	var rows []string
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	for next, pages := path+sep+"limit=1", 0; next != ""; pages++ {
+		if pages > 10 {
+			t.Fatalf("GET %s: paging did not terminate", path)
+		}
+		req := httptest.NewRequest(http.MethodGet, next, nil)
+		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		var page api.ListResponse[json.RawMessage]
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &page) != nil || len(page.Data) != 1 {
+			t.Fatalf("GET %s: %d %s; want {data: [one entry], next_cursor}", next, w.Code, w.Body.String())
+		}
+		if page.Total != 3 || page.Limit != 1 {
+			t.Fatalf("GET %s: total %d, limit %d; want 3 and 1", next, page.Total, page.Limit)
+		}
+		rows = append(rows, string(page.Data[0]))
+		next = ""
+		if page.NextCursor != "" {
+			next = path + sep + "limit=1&cursor=" + page.NextCursor
+		}
+	}
+	return rows
+}
+
+// TestListAlertsAndMetricsAreCursorPages: with three alert rules and three
+// samples, GET /monitoring/alerts?limit=1 and /monitoring/metrics?limit=1
+// answer one entry and a next_cursor; following it returns every row once
+// in order; a forged cursor is 400 (WP-467, API-02, F-075).
+func TestListAlertsAndMetricsAreCursorPages(t *testing.T) {
+	store := NewMemoryMetricStore()
+	alerts := NewAlertManager()
+	r := chi.NewRouter()
+	NewHandler(store, alerts).RegisterRoutes(r)
+
+	for i, name := range []string{"rule-c", "rule-a", "rule-b", "rule-other"} {
+		org := "org-1"
+		if name == "rule-other" {
+			org = "org-2"
+		}
+		rule := AlertRule{ID: fmt.Sprintf("alert-%d", i), OrgID: org, Name: name, MetricName: "cpu_usage", Condition: "gt", Threshold: 90, Severity: "critical"}
+		if _, err := alerts.CreateRule(t.Context(), rule); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := time.Date(2026, 7, 8, 13, 0, 0, 0, time.UTC)
+	if err := store.Ingest(t.Context(), []Metric{
+		{OrgID: "org-1", CIID: "ci-1", Name: "cpu_usage", Value: 3, Timestamp: base.Add(3 * time.Second)},
+		{OrgID: "org-1", CIID: "ci-1", Name: "cpu_usage", Value: 1, Timestamp: base.Add(time.Second)},
+		{OrgID: "org-1", CIID: "ci-1", Name: "cpu_usage", Value: 2, Timestamp: base.Add(2 * time.Second)},
+		{OrgID: "org-1", CIID: "ci-1", Name: "mem_usage", Value: 9, Timestamp: base},
+		{OrgID: "org-2", CIID: "ci-9", Name: "cpu_usage", Value: 7, Timestamp: base},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var names []string
+	for _, row := range walkMonitoringPages(t, r, "/api/v1/monitoring/alerts") {
+		var rule AlertRule
+		if err := json.Unmarshal([]byte(row), &rule); err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, rule.Name)
+	}
+	if strings.Join(names, ",") != "rule-a,rule-b,rule-c" {
+		t.Errorf("alert rules over the pages: %v; want rule-a,rule-b,rule-c once each", names)
+	}
+
+	var values []float64
+	for _, row := range walkMonitoringPages(t, r, "/api/v1/monitoring/metrics?ci_id=ci-1&name=cpu_usage") {
+		var point MetricPoint
+		if err := json.Unmarshal([]byte(row), &point); err != nil {
+			t.Fatal(err)
+		}
+		values = append(values, point.Value)
+	}
+	if len(values) != 3 || values[0] != 1 || values[1] != 2 || values[2] != 3 {
+		t.Errorf("metric points over the pages: %v; want 1, 2, 3 in chronological order", values)
+	}
+
+	for _, path := range []string{"/api/v1/monitoring/alerts", "/api/v1/monitoring/metrics"} {
+		req := httptest.NewRequest(http.MethodGet, path+"?cursor=eyJvIjoxfQ.AAAAAAAAAAAAAAAAAAAAAA", nil)
+		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("GET %s with a forged cursor: %d %s, want 400", path, w.Code, w.Body.String())
+		}
 	}
 }

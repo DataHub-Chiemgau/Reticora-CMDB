@@ -78,6 +78,41 @@ func (h *Handler) WithReviewJobs(tracker jobs.Tracker) *Handler {
 	return h
 }
 
+// CIMerger merges a victim CI into a survivor as the CI-12 merge, a job of
+// kind ci.merge with a tombstone and a snapshot; ci.Service implements it.
+type CIMerger interface {
+	Merge(ctx context.Context, orgID, survivorID, victimID string) (*ci.MergeResult, error)
+}
+
+// WithMerger attaches the CI-12 merge the resolution merge of a
+// probable_duplicate item runs (CH29). Without one that resolution is
+// refused (501).
+func (h *Handler) WithMerger(m CIMerger) *Handler {
+	h.merger = m
+	return h
+}
+
+// mergeDuplicate merges the duplicate of a probable_duplicate item into the
+// chosen CI (CI-12). A refused merge leaves the item open: a CI another
+// merge holds is 409, a CI that is gone 404.
+func (h *Handler) mergeDuplicate(ctx context.Context, orgID, survivorID, dupID string) error {
+	if h.merger == nil {
+		return refused(http.StatusNotImplemented, "this server cannot merge CIs")
+	}
+	_, err := h.merger.Merge(ctx, orgID, survivorID, dupID)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ci.ErrMergeConflict):
+		return refused(http.StatusConflict, err.Error())
+	case errors.Is(err, ci.ErrMergeUnsupported):
+		return refused(http.StatusNotImplemented, err.Error())
+	case isNotFound(err):
+		return refused(http.StatusNotFound, "the duplicate or the chosen CI was not found")
+	}
+	return err
+}
+
 // WithReviewNotifier attaches the notification of opened review items
 // (REC-08, NTF-05).
 func (h *Handler) WithReviewNotifier(n reviews.Notifier) *Handler {
@@ -216,9 +251,11 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 			}
 			res.Note = "reactivated " + res.CIID
 		case ReviewKindProbableDuplicate:
-			// The new CI is the existing one: it is removed (CH29).
+			// The new CI is the existing one: the CI-12 merge moves its
+			// references to the chosen CI and leaves the duplicate as a
+			// tombstone with a snapshot for the unmerge (CH29, F-096).
 			if dup := payloadString(item.Payload, "ci_id"); dup != "" && dup != res.CIID {
-				if err := h.ciRepo.Delete(ctx, orgID, dup); err != nil && !isNotFound(err) {
+				if err := h.mergeDuplicate(ctx, orgID, res.CIID, dup); err != nil {
 					return false, err
 				}
 				res.Note = "merged " + dup + " into " + res.CIID

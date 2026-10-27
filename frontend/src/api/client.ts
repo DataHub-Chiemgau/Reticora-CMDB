@@ -1,5 +1,6 @@
 import { clearSession, getSessionToken, refreshSession } from '../auth/session';
 import { useScopeStore } from '../stores/scope';
+import type { components } from './generated/schema';
 
 const API_BASE = '/api/v1';
 
@@ -84,14 +85,18 @@ export interface CICreateRequest {
   discovery_source?: string;
 }
 
+/**
+ * CIUpdateRequest is a JSON merge patch (RFC 7396, CI-04): an absent member
+ * stays, null clears a nullable field.
+ */
 export interface CIUpdateRequest {
   name?: string;
   status?: string;
-  manufacturer?: string;
-  model?: string;
-  serial_number?: string;
-  management_ip?: string;
-  firmware_version?: string;
+  manufacturer?: string | null;
+  model?: string | null;
+  serial_number?: string | null;
+  management_ip?: string | null;
+  firmware_version?: string | null;
   attributes?: Record<string, unknown>;
   discovery_source?: string;
   last_seen_at?: string;
@@ -275,8 +280,15 @@ export class ApiError extends Error {
   readonly title?: string;
   readonly detail?: string;
   readonly violations: FieldViolation[];
+  /**
+   * dependencies are the kinds of objects that keep a resource from being
+   * deleted (DependencyProblem of a 409, LOC-11), e.g. `location` or `ci`.
+   */
+  readonly dependencies: string[];
   /** traceId is the request id of the failed request (API-03), for support. */
   readonly traceId?: string;
+  /** conflictFields are the fields a 409 names as changed since the If-Match version (API-07). */
+  readonly conflictFields: string[];
 
   constructor(
     status: number,
@@ -285,7 +297,9 @@ export class ApiError extends Error {
       title?: string;
       detail?: string;
       violations?: FieldViolation[];
+      dependencies?: string[];
       traceId?: string;
+      conflictFields?: string[];
     } = {},
   ) {
     super(message);
@@ -294,7 +308,9 @@ export class ApiError extends Error {
     this.title = options.title;
     this.detail = options.detail;
     this.violations = options.violations ?? [];
+    this.dependencies = options.dependencies ?? [];
     this.traceId = options.traceId;
+    this.conflictFields = options.conflictFields ?? [];
   }
 
   /** Whether the failure carries per-field violations that a form can render. */
@@ -325,7 +341,9 @@ export class ApiError extends Error {
       title?: unknown;
       detail?: unknown;
       violations?: unknown;
+      dependencies?: unknown;
       trace_id?: unknown;
+      fields?: unknown;
     };
 
     const title = typeof problem.title === 'string' ? problem.title : undefined;
@@ -346,11 +364,22 @@ export class ApiError extends Error {
         })
       : [];
 
+    const dependencies: string[] = Array.isArray(problem.dependencies)
+      ? problem.dependencies.filter(
+          (entry): entry is string => typeof entry === 'string' && entry !== '',
+        )
+      : [];
+    const conflictFields = Array.isArray(problem.fields)
+      ? problem.fields.filter((field): field is string => typeof field === 'string')
+      : [];
+
     return new ApiError(status, detail || title || statusText, {
       title,
       detail,
       violations,
+      dependencies,
       traceId,
+      conflictFields,
     });
   }
 }
@@ -447,6 +476,28 @@ export async function bffQuery<T>(query: string, variables?: Record<string, unkn
   return result.data as T;
 }
 
+/**
+ * Reads every page of a cursor-paginated list (API-02): the first page with
+ * the maximum limit of 200, then `next_cursor` until the server sends none.
+ * For callers that need the complete set (permission catalogue, role
+ * grants, team members, the module lists of monitoring, document links and
+ * assistant conversations); a single page would silently cut it short.
+ * `params` are the list's filters, sent with every page.
+ */
+export async function fetchAllPages<T>(path: string, params: object = {}): Promise<T[]> {
+  const items: T[] = [];
+  let cursor: string | undefined;
+  do {
+    const query = new URLSearchParams(buildQuery(params));
+    query.set('limit', '200');
+    if (cursor) query.set('cursor', cursor);
+    const page = await fetchAPI<PaginatedResponse<T>>(`${path}?${query.toString()}`);
+    items.push(...(page.data ?? []));
+    cursor = page.next_cursor;
+  } while (cursor);
+  return items;
+}
+
 function buildQuery(params: object) {
   const query = new URLSearchParams();
   Object.entries(params as Record<string, string | number | boolean | undefined>).forEach(
@@ -527,10 +578,6 @@ export const ciApi = {
 
   relationships(id: string): Promise<PaginatedResponse<Relationship>> {
     return fetchAPI(`/cis/${id}/relationships`);
-  },
-
-  exportCIs(format: 'json' | 'csv' = 'json'): string {
-    return `${API_BASE}/export/cis?format=${format}`;
   },
 };
 
@@ -992,7 +1039,7 @@ export const documentApi = {
     return fetchAPI(`/documents/${id}/links`, { method: 'POST', body: JSON.stringify(data) });
   },
   getLinks(id: string): Promise<DocumentLink[]> {
-    return fetchAPI(`/documents/${id}/links`);
+    return fetchAllPages(`/documents/${id}/links`);
   },
 };
 
@@ -1325,7 +1372,7 @@ export const teamApi = {
     return fetchAPI(`/teams/${id}`, { method: 'DELETE' });
   },
   listMembers(teamId: string): Promise<TeamMember[]> {
-    return fetchAPI(`/teams/${teamId}/members`);
+    return fetchAllPages(`/teams/${teamId}/members`);
   },
   addMember(teamId: string, data: { user_id: string; role_in_team?: string }): Promise<TeamMember> {
     return fetchAPI(`/teams/${teamId}/members`, { method: 'POST', body: JSON.stringify(data) });
@@ -1414,7 +1461,7 @@ export interface AIAskResponse {
 }
 export const aiApi = {
   conversations(): Promise<AIConversation[]> {
-    return fetchAPI('/ai/conversations');
+    return fetchAllPages('/ai/conversations');
   },
   createConversation(title?: string): Promise<AIConversation> {
     return fetchAPI('/ai/conversations', { method: 'POST', body: JSON.stringify({ title }) });
@@ -1448,10 +1495,10 @@ export interface EffectivePermissionsResponse {
 
 export const permissionApi = {
   list(): Promise<Permission[]> {
-    return fetchAPI('/permissions');
+    return fetchAllPages('/permissions');
   },
   listRole(roleId: string): Promise<RolePermissionGrant[]> {
-    return fetchAPI(`/roles/${roleId}/permissions`);
+    return fetchAllPages(`/roles/${roleId}/permissions`);
   },
   replaceRole(roleId: string, permission_keys: string[]): Promise<RolePermissionGrant[]> {
     return fetchAPI(`/roles/${roleId}/permissions`, {
@@ -2070,10 +2117,10 @@ export const monitoringApi = {
     return fetchAPI(`/cis/${ciId}/metrics${buildQuery(params)}`);
   },
   queryMetrics(params: MetricQueryParams = {}): Promise<MetricPoint[]> {
-    return fetchAPI(`/monitoring/metrics${buildQuery(params)}`);
+    return fetchAllPages('/monitoring/metrics', params);
   },
   listAlerts(): Promise<AlertRule[]> {
-    return fetchAPI('/monitoring/alerts');
+    return fetchAllPages('/monitoring/alerts');
   },
   createAlert(data: AlertRuleCreateRequest): Promise<AlertRule> {
     return fetchAPI('/monitoring/alerts', { method: 'POST', body: JSON.stringify(data) });
@@ -2085,23 +2132,11 @@ export const monitoringApi = {
 
 // --- Audit (hash chain verification) ---
 
-export interface AuditEntry {
-  id: string;
-  organization_id: string;
-  actor_id?: string;
-  actor_email?: string;
-  action: string;
-  entity_type?: string;
-  entity_id?: string;
-  details?: Record<string, unknown>;
-  seq?: number;
-  source?: 'ui' | 'api' | 'collector' | 'import' | 'system';
-  request_id?: string;
-  correlation_id?: string;
-  hash?: string;
-  previous_hash?: string;
-  created_at: string;
-}
+/**
+ * AuditEntry is the generated OpenAPI type, so the viewer reads exactly the
+ * fields the API returns (timestamp, resource_type, resource_id; F-078).
+ */
+export type AuditEntry = components['schemas']['AuditEntry'];
 
 export interface AuditVerifyResult {
   intact: boolean;

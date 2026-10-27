@@ -36,13 +36,19 @@ const ownView = {
   shared: false,
 };
 
-/** Routes each request by URL/method so a single mock serves the whole page. */
-function mockApi(overrides: { views?: unknown[] } = {}) {
+/**
+ * Routes each request by URL/method so a single mock serves the whole page.
+ * search answers the n-th POST /search/query (0-based); by default it is an
+ * empty result.
+ */
+function mockApi(overrides: { views?: unknown[]; search?: (n: number) => Response } = {}) {
+  let searches = 0;
   return vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
     if (url.includes('/saved-views/presets')) return json({ data: [preset] });
-    if (url.includes('/search/query')) return json({ data: [], total: 0 });
+    if (url.includes('/search/query'))
+      return overrides.search ? overrides.search(searches++) : json({ data: [], total: 0 });
     if (url.includes('/saved-views') && method === 'POST') return json({ id: 'new' }, 201);
     if (url.includes('/saved-views') && method === 'DELETE')
       return new Response(null, { status: 204 });
@@ -129,6 +135,64 @@ describe('SavedViewsPage', () => {
       expect(call).toBeTruthy();
       expect(String(call![0])).toContain(`/saved-views/${ownView.id}`);
     });
+  });
+
+  // F-055 (WP-460): the retry of a failed search was a no-op, and a missing
+  // read right looked like a generic error.
+  it('retries a failed search with a second request', async () => {
+    const fetchMock = mockApi({
+      search: (n) =>
+        n === 0
+          ? json({ title: 'Internal Server Error', status: 500 }, 500)
+          : json({ data: [{ id: 'a1', name: 'Asset one', entity_kind: 'asset' }], total: 1 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const searches = () =>
+      fetchMock.mock.calls.filter((call) => String(call[0]).includes('/search/query')).length;
+
+    renderWithProviders(<SavedViewsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(preset.name, 'i') }));
+
+    fireEvent.click(await screen.findByRole('button', { name: /erneut versuchen|retry/i }));
+
+    expect(await screen.findByRole('link', { name: 'Asset one' })).toBeInTheDocument();
+    expect(searches()).toBe(2);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows a permission hint when the search answers 403', async () => {
+    const fetchMock = mockApi({
+      search: () =>
+        json({ title: 'Forbidden', status: 403, detail: 'missing permission asset:read' }, 403),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<SavedViewsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(preset.name, 'i') }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Keine Berechtigung für diese Ansicht');
+    expect(alert).toHaveTextContent(/Leserecht/);
+    // A missing right is not repeated: no retry, no automatic second request.
+    expect(screen.queryByRole('button', { name: /erneut versuchen|retry/i })).toBeNull();
+    expect(
+      fetchMock.mock.calls.filter((call) => String(call[0]).includes('/search/query')),
+    ).toHaveLength(1);
+  });
+
+  it('runs the same view again on a second click', async () => {
+    const fetchMock = mockApi();
+    vi.stubGlobal('fetch', fetchMock);
+    const searches = () =>
+      fetchMock.mock.calls.filter((call) => String(call[0]).includes('/search/query')).length;
+
+    renderWithProviders(<SavedViewsPage />);
+    const button = await screen.findByRole('button', { name: new RegExp(preset.name, 'i') });
+    fireEvent.click(button);
+    await waitFor(() => expect(searches()).toBe(1));
+    await screen.findByText('Keine Treffer.');
+    fireEvent.click(button);
+    await waitFor(() => expect(searches()).toBe(2));
   });
 
   it('marks a view shared with roles', async () => {

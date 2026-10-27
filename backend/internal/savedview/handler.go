@@ -272,9 +272,14 @@ var readPermissions = map[string]string{
 }
 
 // mayRead reports whether the caller holds key; errors and a missing checker
-// or user deny.
+// or user deny. The route needs only search:read (F-055), so the request's
+// own permissions must hold key as well when the authentication set them: a
+// token narrowed below its holder's roles reads no other entity kind.
 func (h *Handler) mayRead(ctx context.Context, t tenant.TenantInfo, key string) bool {
 	if h.permissions == nil || t.UserID == "" {
+		return false
+	}
+	if perms, ok := identity.PermissionsFromContext(ctx); ok && !identity.HasPermission(perms, identity.Permission(key)) {
 		return false
 	}
 	ok, err := h.permissions.HasPermission(ctx, t.OrganizationID, t.UserID, key)

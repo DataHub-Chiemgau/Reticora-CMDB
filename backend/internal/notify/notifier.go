@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 )
 
@@ -151,12 +153,23 @@ type PreferenceStore interface {
 	SetPreference(ctx context.Context, orgID, userID string, p *Preference) error
 }
 
+// FeatureChecker reports whether an organization holds a feature; an error
+// is a failed lookup, not a missing feature (entitlement.Service).
+type FeatureChecker interface {
+	Check(ctx context.Context, orgID, featureKey string) (entitlement.Entitlement, bool, error)
+}
+
+// ReasonFeatureNotEntitled is the reason of an e-mail delivery skipped
+// because the organization lacks notifications_email (ENT-05, F-070).
+const ReasonFeatureNotEntitled = "feature-not-entitled"
+
 // Notifier turns requests into deliveries and works them off (NTF-04).
 type Notifier struct {
 	channels    Repository
 	store       DeliveryStore
 	prefs       PreferenceStore
 	sender      *Sender
+	features    FeatureChecker
 	MaxAttempts int
 	// Backoff is the delay after the n-th failed attempt.
 	Backoff func(n int) time.Duration
@@ -170,6 +183,14 @@ func NewNotifier(channels Repository, store DeliveryStore, prefs PreferenceStore
 	return &Notifier{channels: channels, store: store, prefs: prefs, sender: sender, MaxAttempts: 5,
 		Backoff: func(n int) time.Duration { return time.Minute * time.Duration(1<<min(n, 10)) },
 		Batch:   50, Lease: 10 * time.Minute, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// WithEntitlements makes e-mail channels (smtp, central_smtp) send only for
+// organizations holding notifications_email (ENT-05); other channels are
+// not affected. Without a checker every e-mail is sent.
+func (n *Notifier) WithEntitlements(features FeatureChecker) *Notifier {
+	n.features = features
+	return n
 }
 
 // WithClock replaces the clock (tests).
@@ -260,6 +281,22 @@ func (n *Notifier) attempt(ctx context.Context, d *QueuedDelivery) (bool, error)
 	}
 	if err != nil {
 		return false, n.retry(ctx, d, err)
+	}
+	if ch.Kind == KindEmail && n.features != nil {
+		// Checked at sending, so a delivery queued before the feature was
+		// withdrawn is not sent either. The worker has no request scope:
+		// the lookup runs in the delivery's organization.
+		scope := database.OrgWideScope(d.OrganizationID, "")
+		_, entitled, ferr := n.features.Check(database.ContextWithTenantScope(ctx, &scope), d.OrganizationID, entitlement.FeatureNotificationsEmail)
+		if ferr != nil {
+			return false, n.retry(ctx, d, ferr)
+		}
+		if !entitled {
+			d.Status, d.LastError = StatusSuppressed, ReasonFeatureNotEntitled
+			slog.Info("notification delivery skipped: notifications_email not entitled",
+				"delivery", d.ID, "organization_id", d.OrganizationID, "channel", d.ChannelID, "reason", ReasonFeatureNotEntitled)
+			return false, n.store.Finish(ctx, d)
+		}
 	}
 	if d.Recipient.UserID != "" && !d.Critical && n.prefs != nil {
 		pref, perr := n.prefs.Preference(ctx, d.OrganizationID, d.Recipient.UserID)

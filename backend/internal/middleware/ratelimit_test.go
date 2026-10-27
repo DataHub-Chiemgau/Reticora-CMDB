@@ -498,3 +498,173 @@ func TestRateLimitBudgetsHoldUnderConcurrency(t *testing.T) {
 		}
 	})
 }
+
+// preAuthTestIP is a client address of its own per test run (group names
+// the client within the test), so the pre-auth windows of the shared Redis
+// store start empty.
+func preAuthTestIP(group string) string {
+	n := time.Now().UnixNano()
+	return "[2001:db8:" + group + "::" + strconv.FormatInt(n>>16&0xffff, 16) + ":" + strconv.FormatInt(n&0xffff, 16) + "]"
+}
+
+// TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget covers WP-462
+// (AUT-10, F-063): AUT-10 limits login, signup, invitation acceptance and
+// API-key checks per IP (20/min). Legitimate token renewals of the users
+// behind one IP (NAT) must not use up that budget, otherwise the SPA logs
+// users out with 429.
+//
+// Retest:
+//
+//	cd backend && go test -count=1 -v -run '^TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget$' ./internal/middleware/
+func TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget(t *testing.T) {
+	h := PreAuthRateLimiter(DefaultPreAuthPerMinute, cache.NewMemoryStore())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/auth/callback" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK) // a valid refresh cookie
+	}))
+	serve := func(path, ip string) int {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.RemoteAddr = ip + ":40000"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w.Code
+	}
+	awaitFreshWindow()
+	var refused []int
+	for i := 1; i <= 30; i++ {
+		if code := serve("/api/v1/auth/refresh", "198.51.100.20"); code != http.StatusOK {
+			refused = append(refused, i)
+		}
+	}
+	if len(refused) > 0 {
+		t.Errorf("30 successful refreshes from one IP: requests %v were refused with 429; a successful refresh must not consume the AUT-10 pre-auth budget", refused)
+	}
+
+	// Control: failed logins from another IP are still limited at 20/min.
+	codes := make([]int, 0, DefaultPreAuthPerMinute+1)
+	for range DefaultPreAuthPerMinute + 1 {
+		codes = append(codes, serve("/api/v1/auth/callback", "198.51.100.21"))
+	}
+	if codes[len(codes)-1] != http.StatusTooManyRequests {
+		t.Errorf("control: 21st failed login from one IP -> %d, want 429 (AUT-10)", codes[len(codes)-1])
+	}
+}
+
+// TestPreAuthAdmissionIsAtomic covers WP-462 (AUT-10): the pre-auth limit
+// counts with an atomic increment before the handler and decides on the
+// value it returns. 50 concurrent failed refreshes of one IP: exactly 20
+// reach the handler, the other 30 get 429 with Retry-After and the
+// X-RateLimit headers of the IP budget. Successful refreshes give their unit
+// back, and a valid API key gives it back once it is authenticated: 50
+// requests with a valid key of one IP pass while all their handlers are
+// still running. Afterwards that IP still has its whole budget for failed
+// attempts. On the memory store and on the Redis store all replicas share
+// (Decrement of both stores).
+func TestPreAuthAdmissionIsAtomic(t *testing.T) {
+	forEachBudgetStore(t, func(t *testing.T, store cache.Store) {
+		awaitFreshWindow()
+		keys := fakeAPIKeys{keys: map[string]*identity.APIKeyInfo{
+			"valid": {ID: "key-1", OrganizationID: "org-1", Scopes: []identity.Permission{identity.PermCIRead}},
+		}}
+		var mu sync.Mutex
+		reached := map[string]int{}
+		entered, hold := make(chan struct{}, 50), make(chan struct{})
+		handler := Chain(
+			PreAuthRateLimiter(DefaultPreAuthPerMinute, store),
+			AuthMiddlewareWithAPIKeys(nil, keys),
+		)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			reached[r.RemoteAddr]++
+			mu.Unlock()
+			switch r.Header.Get("X-Test-Outcome") {
+			case "fail":
+				// The failed attempts overlap while their handlers run.
+				time.Sleep(20 * time.Millisecond)
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			case "hold":
+				entered <- struct{}{}
+				<-hold
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		codes := map[int]int{}
+		serve := func(ip, path, apiKey, outcome string, start <-chan struct{}) {
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			req.RemoteAddr = ip + ":40000"
+			req.Header.Set("X-Test-Outcome", outcome)
+			if apiKey != "" {
+				req.Header.Set("X-API-Key", apiKey)
+			}
+			<-start
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			h := w.Header()
+			if h.Get("X-RateLimit-Limit") != "20" || h.Get("X-RateLimit-Remaining") == "" || h.Get("X-RateLimit-Reset") == "" ||
+				(w.Code == http.StatusTooManyRequests && (h.Get("Retry-After") == "" || h.Get("X-RateLimit-Remaining") != "0")) {
+				t.Errorf("%s %d without the documented pre-auth headers: %v", path, w.Code, h)
+			}
+			mu.Lock()
+			codes[w.Code]++
+			mu.Unlock()
+		}
+		fire := func(ip, outcome string) map[int]int {
+			codes = map[int]int{}
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			for range 50 {
+				wg.Go(func() { serve(ip, "/api/v1/auth/refresh", "", outcome, start) })
+			}
+			close(start)
+			wg.Wait()
+			return codes
+		}
+
+		failing := preAuthTestIP("4620")
+		if got, want := fire(failing, "fail"), map[int]int{401: 20, 429: 30}; !maps.Equal(got, want) {
+			t.Errorf("50 concurrent failed refreshes of one IP: %v, want %v", got, want)
+		}
+		if n := reached[failing+":40000"]; n != DefaultPreAuthPerMinute {
+			t.Errorf("50 concurrent failed refreshes of one IP: %d reached the handler, want exactly %d", n, DefaultPreAuthPerMinute)
+		}
+
+		nat := preAuthTestIP("4621")
+		codes = map[int]int{}
+		for range 50 {
+			serve(nat, "/api/v1/auth/refresh", "", "ok", closedChan)
+		}
+		if want := map[int]int{200: 50}; !maps.Equal(codes, want) {
+			t.Errorf("50 successful refreshes of one IP: %v, want %v", codes, want)
+		}
+		// 50 requests with a valid key; each wave of 10 is let in only
+		// while the earlier ones still run their handlers.
+		codes = map[int]int{}
+		var wg sync.WaitGroup
+		for range 5 {
+			for range 10 {
+				wg.Go(func() { serve(nat, "/api/v1/cis", "valid", "hold", closedChan) })
+			}
+			for range 10 {
+				select {
+				case <-entered:
+				case <-time.After(5 * time.Second):
+					close(hold)
+					t.Fatalf("requests with a valid key did not reach their handlers while others ran: %v", codes)
+				}
+			}
+		}
+		close(hold)
+		wg.Wait()
+		if want := map[int]int{200: 50}; !maps.Equal(codes, want) {
+			t.Errorf("50 overlapping requests with a valid API key from one IP: %v, want %v", codes, want)
+		}
+		if got, want := fire(nat, "fail"), map[int]int{401: 20, 429: 30}; !maps.Equal(got, want) {
+			t.Errorf("failed refreshes after 100 successful requests of the IP: %v, want %v (the successful ones gave their units back)", got, want)
+		}
+	})
+}
+
+// closedChan lets a request start at once.
+var closedChan = func() chan struct{} { c := make(chan struct{}); close(c); return c }()

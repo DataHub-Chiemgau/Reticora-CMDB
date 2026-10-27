@@ -17,6 +17,7 @@ UI → API → PostgreSQL → UI on a running stack. They are not part of the CI
 | `E2E_FAKESNMP_BIN`                                   | built from `collector/cmd/fakesnmp`                | SNMPv2c fake of `onboarding-bundle.spec.ts` (below); without it `support/stack.ts` builds it with `go build`        |
 | `E2E_DATABASE_URL`                                   | `postgres://reticora:reticora@localhost:55432/e2e` | PostgreSQL of the stack (owner role), read with `psql` by `support/roles-authz.ts` and `support/locations-racks.ts` |
 | `E2E_SEED_BIN`                                       | built from `backend/cmd/seed`                      | SIM-01 seed of `demo-seed.spec.ts` into `E2E_DATABASE_URL` (below); `support/stack.ts` builds it otherwise          |
+| `E2E_OPERATOR_TOKEN`                                 | –                                                  | break-glass token `RETICORA_OPERATOR_TOKEN` for `entitlement-expiry.spec.ts`; unset: personal operator login        |
 
 The server needs self-signup enabled (`RETICORA_SIGNUP_VERIFY_URL`, `RETICORA_SIGNUP_CAPTCHA_KEY`, Keycloak admin
 client, SMTP) exactly as `e2e/fixtures/setup-onboarding.sh` configures it. Every spec creates its own tenants through

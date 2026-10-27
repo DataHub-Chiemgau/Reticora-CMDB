@@ -11,7 +11,7 @@ import (
 // Reclassification of CIs (CI-11): discovery may raise generic_device to a
 // specific type, never the other way round and never between specific
 // types; every other type change is manual. A change records ci_change
-// type_change, the audit entry ci.type_changed and the event ci.changed
+// type_changed, the audit entry ci.type_changed and the event ci.changed
 // (changed field ci_type_id), checks the required attributes of the target
 // type as findings instead of blocking, and keeps relationships, mounts,
 // the asset link and the history (the CI row stays the same).

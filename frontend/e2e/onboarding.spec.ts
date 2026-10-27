@@ -372,12 +372,17 @@ test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)'
         { message: 'export job', timeout: 120_000, intervals: [2_000] },
       )
       .toBe('completed');
-    const done = await apiGet<{ row_count?: number }>(request, token, `/exports/${job.id}`);
+    const done = await apiGet<{ row_count?: number; download_url?: string }>(
+      request,
+      token,
+      `/exports/${job.id}`,
+    );
     expect(done.row_count ?? 0).toBeGreaterThanOrEqual(SIMULATED_DEVICES);
-    const file = await request.get(`${BASE}/api/v1/export/cis?format=csv`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(file.ok()).toBe(true);
+    // The file of the job, over its signed URL and without the bearer token
+    // (WP-468, F-077); /api/v1/export/cis is deprecated.
+    expect(done.download_url, 'signed download URL of the completed job').toBeTruthy();
+    const file = await request.get(done.download_url!);
+    expect(file.ok(), `GET download_url: ${file.status()}`).toBe(true);
     const lines = (await file.text()).trim().split('\n');
     expect(lines.length).toBeGreaterThan(SIMULATED_DEVICES);
   });

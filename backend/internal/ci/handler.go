@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -327,15 +328,41 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 
 // Unmerge handles POST /api/v1/cis/{id}/unmerge: the merged CI of the path
 // and its survivor return to their state before the merge, within 30 days
-// (CI-12); afterwards 410.
+// (CI-12); afterwards 410. A survivor changed after the merge answers 409
+// with the changed fields; ?force=true restores the snapshot over them
+// (E-80).
 func (h *Handler) Unmerge(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	result, err := h.svc.Unmerge(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	force := false
+	if raw := r.URL.Query().Get("force"); raw != "" {
+		parsed, perr := strconv.ParseBool(raw)
+		if perr != nil {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", "force must be true or false")
+			return
+		}
+		force = parsed
+	}
+	result, err := h.svc.Unmerge(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), force)
+	var changed *UnmergeConflictError
 	switch {
+	case errors.As(err, &changed):
+		w.Header().Set("ETag", api.ETag(changed.Current))
+		api.WriteProblemBody(w, http.StatusConflict, struct {
+			api.ProblemDetail
+			Fields         []string `json:"fields"`
+			CurrentVersion int64    `json:"current_version"`
+		}{
+			ProblemDetail: api.ProblemDetail{
+				Type: "urn:reticora:problem:conflict", Title: "Conflict", Status: http.StatusConflict,
+				Detail: changed.Error(),
+			},
+			Fields: changed.Fields, CurrentVersion: changed.Current,
+		})
+		return
 	case errors.Is(err, ErrSnapshotExpired):
 		api.WriteError(w, http.StatusGone, "Gone", err.Error())
 		return
@@ -504,10 +531,13 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		if writeValidationError(w, err) {
 			return
 		}
-		if api.WriteDBError(w, err) {
+		// Only a missing CI is 404; any other failure is not hidden as one
+		// (F-229).
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 			return
 		}
-		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
+		api.WriteRepoError(w, err)
 		return
 	}
 	if h.dispatcher != nil {

@@ -251,9 +251,12 @@ func (q *queryResolver) Topology(ctx context.Context, rootCiID *string, depth *i
 	if q.sources.Topology == nil {
 		return nil, errUnavailable
 	}
-	d := topology.ParseDepth("")
+	d := topology.DefaultDepth
 	if depth != nil {
-		d = topology.ParseDepth(strconv.Itoa(*depth))
+		// A depth below 1 is bad input as on GET /topology (F-255).
+		if d, err = topology.ParseDepth(strconv.Itoa(*depth)); err != nil {
+			return nil, gqlError(codeBadInput, err.Error())
+		}
 	}
 	graph, err := q.sources.Topology.Graph(ctx, orgID, value(rootCiID), d, &ci.FilterParams{TypeID: value(ciTypeID), SiteID: value(siteID)})
 	if err != nil {
@@ -272,7 +275,8 @@ func (q *queryResolver) Topology(ctx context.Context, rootCiID *string, depth *i
 }
 
 func (q *queryResolver) RackLayout(ctx context.Context, rackID string) (*generated.RackLayout, error) {
-	orgID, err := q.authorize(ctx, identity.PermRackRead, FeatureCMDBCore)
+	// Racks are the rack_view feature, not the core (ENT-05, F-070).
+	orgID, err := q.authorize(ctx, identity.PermRackRead, entitlement.FeatureRackView)
 	if err != nil {
 		return nil, err
 	}
@@ -373,6 +377,10 @@ func (j *jobResolver) Status(_ context.Context, obj *jobs.Job) (string, error) {
 }
 
 func (m *rackMountResolver) Ci(ctx context.Context, obj *rack.RackMount) (*ci.Item, error) {
+	// A rack field: it checks rack_view like rackLayout (F-070).
+	if _, err := m.authorize(ctx, identity.PermRackRead, entitlement.FeatureRackView); err != nil {
+		return nil, err
+	}
 	return m.loadCI(ctx, obj.CIID)
 }
 

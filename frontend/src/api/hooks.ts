@@ -574,6 +574,21 @@ export function useEffectivePermissions() {
   });
 }
 
+/**
+ * useHasPermission tells whether the signed-in user holds a permission in the
+ * effective rights of /me/permissions. It fails closed: while the rights load
+ * or when they cannot be read, the permission counts as missing, so a page
+ * offers an action only once the server confirmed the right. The server still
+ * decides every request; this only keeps refused actions out of the UI.
+ * The result is undefined while the rights load, so a page can tell a
+ * missing right from one not yet known.
+ */
+export function useHasPermission(permission: string): boolean | undefined {
+  const effective = useEffectivePermissions();
+  if (effective.isPending) return undefined;
+  return effective.data?.permissions?.includes(permission) ?? false;
+}
+
 export function useSLAList(params: SLAListParams = {}) {
   return useQuery({
     queryKey: ['slas', params],

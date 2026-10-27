@@ -216,8 +216,13 @@ func (m *AlertManager) ListRules(_ context.Context, orgID string) ([]AlertRule, 
 		}
 		result = append(result, rule)
 	}
+	// Name, then id, like PGAlertStore: the offset pages of
+	// GET /monitoring/alerts need a stable order (API-02).
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].Name < result[j].Name
+		if result[i].Name != result[j].Name {
+			return result[i].Name < result[j].Name
+		}
+		return result[i].ID < result[j].ID
 	})
 	return result, nil
 }
@@ -404,7 +409,9 @@ func (s *MemoryMetricStore) Query(ctx context.Context, q MetricQuery) ([]MetricP
 		points = append(points, MetricPoint{Timestamp: metric.Timestamp.UTC(), Value: metric.Value})
 	}
 
-	sort.Slice(points, func(i, j int) bool {
+	// Stable, so samples of the same instant keep their order across the
+	// offset pages of GET /monitoring/metrics (API-02).
+	sort.SliceStable(points, func(i, j int) bool {
 		return points[i].Timestamp.Before(points[j].Timestamp)
 	})
 	if q.Step <= 0 {
@@ -517,13 +524,18 @@ func (h *Handler) QueryMetrics(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	// {data, next_cursor} with limit and the signed cursor (API-02, F-075).
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 
 	points, err := h.store.Query(r.Context(), query)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, points)
+	api.WriteJSON(w, http.StatusOK, api.Page(points, page))
 }
 
 // IngestMetrics handles POST /api/v1/monitoring/metrics.
@@ -611,12 +623,17 @@ func (h *Handler) ListAlerts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// {data, next_cursor} with limit and the signed cursor (API-02, F-075).
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 	rules, err := h.alerts.ListRules(r.Context(), orgID)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, rules)
+	api.WriteJSON(w, http.StatusOK, api.Page(rules, page))
 }
 
 // CreateAlert handles POST /api/v1/monitoring/alerts.

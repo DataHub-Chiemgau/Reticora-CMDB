@@ -6,6 +6,7 @@ package override
 
 import (
 	"encoding/json"
+	"sort"
 	"time"
 )
 
@@ -66,11 +67,27 @@ type SourcePolicy struct {
 	IsDefault      bool     `json:"is_default"`
 }
 
-// DefaultPriorities is the built-in source-priority ordering (highest first),
-// mirroring the discovery sourceTrust ranking with manual_override on top.
-var DefaultPriorities = []string{
-	"manual_override", "ipmi", "redfish", "api", "agent",
-	"wmi", "ssh", "snmp", "sweep", "manual", "import",
+// DefaultPriorities is the built-in source-priority ordering (highest
+// first): the sources of the REC-03 rank table SourceRanks by descending
+// rank, sources of the same rank by name (F-230). GET
+// /reconciliation/source-policy shows it while the organization keeps no
+// policy of its own.
+var DefaultPriorities = prioritiesByRank(SourceRanks)
+
+// prioritiesByRank orders the sources of ranks by descending rank, sources
+// of the same rank by name.
+func prioritiesByRank(ranks map[string]int) []string {
+	out := make([]string, 0, len(ranks))
+	for source := range ranks {
+		out = append(out, source)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if ranks[out[i]] != ranks[out[j]] {
+			return ranks[out[i]] > ranks[out[j]]
+		}
+		return out[i] < out[j]
+	})
+	return out
 }
 
 // ResolveEffective computes the effective value of a field: a manual

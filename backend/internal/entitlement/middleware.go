@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -41,6 +42,14 @@ var gatedRoutes = []struct {
 	{"/api/v1/desk-bookings", FeatureInventory},
 	{"/api/v1/tickets", FeatureTicketing},
 	{"/api/v1/webhooks", FeatureWebhooks},
+	// Racks, their layout and the mounts are the rack_view feature (ENT-02,
+	// ENT-05, F-070).
+	{"/api/v1/racks", FeatureRackView},
+	{"/api/v1/mounts", FeatureRackView},
+	{"/api/v1/rack-mounts", FeatureRackView},
+	// Managing API keys is the api_access feature; requests authenticated
+	// with a key need it as well (Middleware).
+	{"/api/v1/api-keys", FeatureAPIAccess},
 	{"/api/v1/exports", FeatureExportCSV},
 	{"/api/v1/export", FeatureExportCSV},
 	{"/api/v1/topology", FeatureTopology},
@@ -122,12 +131,16 @@ func RequiredFeature(path string) (string, bool) {
 // Middleware blocks requests to features the organization is not entitled
 // to (ENT-03, ENT-05). After the discovery license expired only ingest and
 // new scans are refused (CH21, ENT-07); the collector heartbeat keeps
-// working so the collector learns that it is paused. It must run after the
-// tenant middleware so the organization is known.
+// working so the collector learns that it is paused. A request
+// authenticated with an API key needs api_access on every path; a session
+// does not (F-070). It must run after the auth and tenant middleware so the
+// principal and the organization are known.
 func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		feature, gated := RequiredFeature(r.URL.Path)
-		if !gated {
+		principal, _ := identity.PrincipalFromContext(r.Context())
+		apiKey := principal.Type == identity.PrincipalTypeAPIKey
+		if !gated && !apiKey {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -135,6 +148,23 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 		orgID := tenant.FromContext(r.Context()).OrganizationID
 		if orgID == "" {
 			api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+			return
+		}
+
+		if apiKey && feature != FeatureAPIAccess {
+			_, ok, err := s.Check(r.Context(), orgID, FeatureAPIAccess)
+			if err != nil {
+				api.WriteError(w, http.StatusInternalServerError, "Internal Error", "entitlement lookup failed")
+				return
+			}
+			if !ok {
+				notEntitled := &FeatureNotEntitledError{FeatureKey: FeatureAPIAccess}
+				api.WriteProblem(w, http.StatusForbidden, notEntitled.ProblemType(), "Forbidden", notEntitled.Error())
+				return
+			}
+		}
+		if !gated {
+			next.ServeHTTP(w, r)
 			return
 		}
 

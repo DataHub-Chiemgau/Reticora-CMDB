@@ -13,10 +13,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
@@ -29,6 +31,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
@@ -329,6 +333,57 @@ func TestHTTPHandlerServesCookieOnlyRefreshAndLogout(t *testing.T) {
 	}
 }
 
+// TestHTTPHandlerSetsRateLimitHeadersBeforeTheLimiter covers WP-462 (API-04,
+// AUT-10, F-217) through the handler the server serves: answers refused
+// before the rate limit stage carry the X-RateLimit headers of the pre-auth
+// budget of the client IP (401 for an invalid bearer, 429 of the pre-auth
+// limit with Retry-After); an authenticated answer, here 403 of the route
+// authorization, carries those of the credential budget, which overwrite
+// them. A successful refresh and an authenticated request leave the
+// pre-auth budget untouched.
+func TestHTTPHandlerSetsRateLimitHeadersBeforeTheLimiter(t *testing.T) {
+	if left := 60 - time.Now().UTC().Unix()%60; left < 5 {
+		// All requests of the test share one minute window.
+		time.Sleep(time.Duration(left)*time.Second + 100*time.Millisecond)
+	}
+	cs := newChainStack(t)
+	token, cookie := cs.login(t, identity.PermPermissionRead)
+	type headers struct{ limit, remaining, reset, retry string }
+	headersOf := func(w *httptest.ResponseRecorder) headers {
+		h := w.Header()
+		return headers{h.Get("X-RateLimit-Limit"), h.Get("X-RateLimit-Remaining"), h.Get("X-RateLimit-Reset"), h.Get("Retry-After")}
+	}
+	check := func(what string, w *httptest.ResponseRecorder, code int, limit, remaining string, retry bool) {
+		t.Helper()
+		got := headersOf(w)
+		reset, err := strconv.Atoi(got.reset)
+		if w.Code != code || got.limit != limit || got.remaining != remaining || err != nil || reset < 1 || reset > 60 || (got.retry != "") != retry {
+			t.Errorf("%s: %d %+v; want %d with X-RateLimit-Limit %s, -Remaining %s, -Reset 1..60, Retry-After %v",
+				what, w.Code, got, code, limit, remaining, retry)
+		}
+		if retry && got.retry != got.reset {
+			t.Errorf("%s: Retry-After %s, want the seconds until the window ends (%s)", what, got.retry, got.reset)
+		}
+	}
+
+	// A successful refresh passes the rate limit stage too (counted per IP
+	// there) and does not count against the pre-auth budget: the first
+	// failed attempt below leaves 19.
+	w := cs.do(http.MethodPost, "/api/v1/auth/refresh", "", cookie, "", "")
+	check("successful refresh", w, http.StatusOK, "600", "599", false)
+	w = cs.do(http.MethodGet, "/api/v1/cis", token, "", "", "")
+	check("403 of the route authorization", w, http.StatusForbidden, "600", "599", false)
+	for i := 1; i <= middleware.DefaultPreAuthPerMinute; i++ {
+		w = cs.do(http.MethodGet, "/api/v1/me", "not-a-token", "", "", "")
+		check("401 for an invalid bearer, attempt "+strconv.Itoa(i), w, http.StatusUnauthorized, "20", strconv.Itoa(middleware.DefaultPreAuthPerMinute-i), false)
+	}
+	w = cs.do(http.MethodGet, "/api/v1/me", token, "", "", "")
+	check("pre-auth 429 after 20 failed attempts", w, http.StatusTooManyRequests, "20", "0", true)
+	if strings.Join(cs.trace, ",") != "pre-auth" {
+		t.Errorf("pre-auth 429: stages %v, want only pre-auth", cs.trace)
+	}
+}
+
 // TestSystemJobsCoverJOB02 covers the scheduler wiring of JOB-02 and OPS-03
 // (WP-425, F-044): registerSystemJobs, which main runs, registers on a
 // database every system job of the JOB-02 [B] list — offline detector (with
@@ -449,4 +504,91 @@ func registeredSystemJobs(t *testing.T, d *systemJobDeps) map[string]bool {
 		registered[kind] = true
 	}
 	return registered
+}
+
+// TestHealthWorkerIsWiredInG1 covers WP-480 (DB-05, MON-02, F-087): the
+// workers main builds (buildWorkers) and starts (workerSwitch) include the
+// worker health under the G1 default module set (RETICORA_MODULES unset),
+// while the alert evaluator (monitoring) stays off there. With
+// RETICORA_MODULES=alerting both run and ci.health is refreshed exactly once
+// per cycle of the worker health: the evaluator no longer refreshes it a
+// second time.
+func TestHealthWorkerIsWiredInG1(t *testing.T) {
+	t.Setenv(config.WorkerEnvKey(config.WorkerMonitoring), "true")
+	t.Setenv(config.WorkerEnvKey(config.WorkerHealth), "true")
+	cfg := config.Load()
+	refresher, alerts := &countingHealth{}, &countingAlerts{}
+	repos := server.MemoryRepositories()
+	repos.Metrics = evaluatingMetrics{MetricStore: repos.Metrics, alerts: alerts, health: refresher}
+	built, err := buildWorkers(&workerDeps{cfg: cfg, repos: &repos, cycle: testCycle})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pair []server.Worker
+	for _, w := range built {
+		if w.Name == config.WorkerHealth || w.Name == config.WorkerMonitoring {
+			pair = append(pair, w)
+		}
+	}
+	if len(pair) != 2 {
+		t.Fatalf("buildWorkers: %d of the workers health and monitoring, want both", len(pair))
+	}
+
+	g1, err := server.ParseModules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled := workerSwitch(cfg, g1); !enabled(config.WorkerHealth) || enabled(config.WorkerMonitoring) {
+		t.Errorf("RETICORA_MODULES unset: health starts %v, monitoring starts %v; want true, false",
+			enabled(config.WorkerHealth), enabled(config.WorkerMonitoring))
+	}
+
+	alerting, err := server.ParseModules("alerting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runsBefore := testutil.ToFloat64(observability.WorkerRuns.WithLabelValues(config.WorkerHealth))
+	set, err := server.StartWorkers(workerSwitch(cfg, alerting), pair...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for (refresher.calls.Load() < 3 || alerts.calls.Load() < 3) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err = set.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if started := set.Started(); len(started) != 2 {
+		t.Errorf("RETICORA_MODULES=alerting: started %v, want monitoring and health", started)
+	}
+	cycles := testutil.ToFloat64(observability.WorkerRuns.WithLabelValues(config.WorkerHealth)) - runsBefore
+	if alerts.calls.Load() < 3 || cycles < 3 {
+		t.Fatalf("evaluations %d, health cycles %v; want at least 3 each", alerts.calls.Load(), cycles)
+	}
+	if got := float64(refresher.calls.Load()); got != cycles {
+		t.Errorf("ci.health refreshed %v times in %v cycles of the worker health (%d evaluations); want exactly once per cycle",
+			got, cycles, alerts.calls.Load())
+	}
+}
+
+// countingHealth counts the refreshes of ci.health.
+type countingHealth struct{ calls atomic.Int64 }
+
+func (h *countingHealth) RefreshHealth(context.Context) error {
+	h.calls.Add(1)
+	return nil
+}
+
+// countingAlerts holds no alert rule and counts the evaluations.
+type countingAlerts struct {
+	monitoring.AlertStore
+	calls atomic.Int64
+}
+
+func (a *countingAlerts) ListEnabled(context.Context) ([]monitoring.AlertRule, error) {
+	a.calls.Add(1)
+	return nil, nil
 }

@@ -24,6 +24,8 @@ const minInvitedPasswordLength = 12
 type InvitationHandler struct {
 	repo     InvitationRepository
 	accounts InvitationAccounts
+	// quota checks max_users before an acceptance creates the user.
+	quota QuotaGuard
 	// acceptURL is the page the link of the invitation mail opens
 	// (RETICORA_INVITATION_ACCEPT_URL); nil: issue and renew answer 503.
 	acceptURL *url.URL
@@ -53,6 +55,14 @@ func (h *InvitationHandler) WithAcceptURL(raw string) *InvitationHandler {
 // password (Keycloak admin client).
 func (h *InvitationHandler) WithAccounts(a InvitationAccounts) *InvitationHandler {
 	h.accounts = a
+	return h
+}
+
+// WithQuota enforces max_users on the acceptance (ENT-03): at the limit it
+// answers 403 entitlement-limit, creates neither user nor IdP account and
+// leaves the invitation open.
+func (h *InvitationHandler) WithQuota(q QuotaGuard) *InvitationHandler {
+	h.quota = q
 	return h
 }
 
@@ -94,6 +104,7 @@ func writeInvitationError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.As(err, &ceiling):
 		api.WriteError(w, http.StatusForbidden, "Forbidden", ceiling.Error())
+	case api.WriteEntitlementError(w, err):
 	case errors.Is(err, ErrInvitationNotFound), errors.Is(err, ErrInvitationInvalid):
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 	case errors.Is(err, ErrInvitationExpired):
@@ -269,7 +280,7 @@ func (h *InvitationHandler) Accept(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 	}
-	accepted, err := h.repo.AcceptInvitation(r.Context(), orgID, HashInvitationToken(req.Token), req.DisplayName, createAccount)
+	accepted, err := h.repo.AcceptInvitation(r.Context(), orgID, HashInvitationToken(req.Token), req.DisplayName, h.quota, createAccount)
 	if err != nil {
 		if accountID != "" {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)

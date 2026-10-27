@@ -14,6 +14,11 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -187,4 +192,135 @@ func TestUnlicensedCIs(t *testing.T) {
 	if resp := ingest(device(1, "m3"), device(4, "m3")); resp.Updated != 1 || resp.Unlicensed != 1 || resp.Created != 0 {
 		t.Errorf("ingest after the downgrade: %+v", resp)
 	}
+}
+
+// reviewOutbox reports opened review items as review.created into the
+// outbox, as the router's review notifier does (NTF-05).
+type reviewOutbox struct{ emitter events.Emitter }
+
+func (r reviewOutbox) ReviewOpened(ctx context.Context, item *reviews.Item) {
+	_ = r.emitter.Emit(ctx, &events.Event{OrgID: item.OrganizationID, Type: events.ReviewCreated, EntityID: item.ID,
+		Data: map[string]any{"id": item.ID, "kind": item.Kind, "object_key": item.ObjectKey}})
+}
+
+// TestUnlicensedCINotifiesOrgAdmins covers WP-472 (ENT-03, CH21, E-22)
+// against PostgreSQL: a discovered device over max_cis becomes an
+// unlicensed_ci review item, and review.created reaches every org_admin of
+// the organization with exactly one in-app notification; an engineer (who
+// holds review:resolve), a viewer and the org_admin of another
+// organization get none. A repeated delivery of the event notifies nobody
+// twice.
+func TestUnlicensedCINotifiesOrgAdmins(t *testing.T) {
+	f := scopetest.Seed(t, "64")
+	bg := context.Background()
+	ctx := f.OrgCtx(f.OrgA)
+	member := func(org, name, role string) string {
+		t.Helper()
+		id := f.AppUser(t, org, name)
+		if _, err := f.Admin.Exec(bg, `INSERT INTO role_assignment (organization_id, user_id, role_id)
+			SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = $3`, org, id, role); err != nil {
+			t.Fatalf("assign %s: %v", role, err)
+		}
+		return id
+	}
+	admins := []string{member(f.OrgA, "admin-1", "org_admin"), member(f.OrgA, "admin-2", "org_admin")}
+	others := map[string]string{
+		"engineer":                         member(f.OrgA, "engineer", "engineer"),
+		"viewer":                           member(f.OrgA, "viewer", "viewer"),
+		"org_admin of organization B":      member(f.OrgB, "admin-b", "org_admin"),
+		"user without role (fixture user)": f.AppUser(t, f.OrgA, "plain"),
+	}
+
+	key, _ := crypto.GenerateMasterKey()
+	enc, _ := crypto.NewEnvelopeEncryptor(key)
+	center := &notify.Center{Channels: notify.NewPGRepository(f.App, notify.NewSealer(enc)), Inbox: notify.NewPGInbox(f.App),
+		Preferences: notify.NewPGPreferences(f.App), Deliveries: notify.NewPGDeliveryStore(f.App)}
+	for _, org := range []string{f.OrgA, f.OrgB} {
+		if err := center.Channels.Create(bg, &notify.Channel{OrganizationID: org, Name: "center", Provider: notify.ProviderInApp, Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	notifier := notify.NewNotifier(center.Channels, center.Deliveries, center.Preferences, notify.NewSender(map[string]notify.Provider{
+		notify.ProviderInApp: notify.NewInAppProvider(center.Inbox),
+	}))
+	publisher := events.NewPublisher(f.App, nil, notify.NewEventConsumer(notify.NewPGResolver(f.App, permission.NewPGRepository(f.App)), notifier))
+	deliver := func() {
+		t.Helper()
+		if _, err := publisher.PublishPending(bg); err != nil {
+			t.Fatal(err)
+		}
+		for range 3 {
+			if _, err := notifier.ProcessDue(bg); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	ciRepo := ci.NewPGRepository(f.App)
+	svc := entitlement.NewService(entitlement.NewPGRepository(f.App), entitlement.Options{Enforce: true})
+	h := discovery.NewHandler(discovery.NewPGRepository(f.App), ciRepo).WithLimits(svc).
+		WithReviewNotifier(reviewOutbox{emitter: events.NewPGEmitter(f.App)})
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+	_, total, err := ciRepo.List(ctx, f.OrgA, ci.FilterParams{}, api.PaginationParams{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.Grant(ctx, entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
+		Plan: entitlement.PlanEssential, Enabled: true, Limits: map[string]int64{entitlement.LimitMaxCIs: int64(total)}}); err != nil {
+		t.Fatal(err)
+	}
+	// Events written before the ingest (none expected) are delivered first.
+	deliver()
+
+	body, _ := json.Marshal(map[string]any{"items": []map[string]any{{"ci_type_name": "server", "name": "unlic-notify-" + f.ID(),
+		"manufacturer": "Acme", "model": "n1", "serial_number": "UNLIC-64-1", "fingerprint": map[string]any{}, "raw_data": map[string]any{}}}})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/bulk", strings.NewReader(string(body)))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req.WithContext(tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})))
+	var resp discovery.BulkIngestResponse
+	if w.Code != http.StatusAccepted || json.Unmarshal(w.Body.Bytes(), &resp) != nil || resp.Unlicensed != 1 || resp.Created != 0 {
+		t.Fatalf("ingest over max_cis: %d %s, want one unlicensed device", w.Code, w.Body.String())
+	}
+	var items int
+	if err = f.Admin.QueryRow(bg, `SELECT count(*) FROM review_item WHERE organization_id = $1 AND kind = 'unlicensed_ci' AND status = 'open'`,
+		f.OrgA).Scan(&items); err != nil || items != 1 {
+		t.Fatalf("open unlicensed_ci items: %d, %v; want 1", items, err)
+	}
+	deliver()
+
+	inbox := func(org, userID string) []notify.InAppNotification {
+		t.Helper()
+		list, _, listErr := center.Inbox.List(bg, org, userID, false, 20, 0)
+		if listErr != nil {
+			t.Fatal(listErr)
+		}
+		return list
+	}
+	check := func() {
+		t.Helper()
+		for i, id := range admins {
+			got := inbox(f.OrgA, id)
+			if len(got) != 1 || got[0].Category != "review" || !strings.Contains(got[0].Subject, "unlicensed_ci") {
+				t.Errorf("org_admin %d: %d notifications %+v, want exactly one about the unlicensed_ci item", i+1, len(got), got)
+			}
+		}
+		for who, id := range others {
+			org := f.OrgA
+			if strings.Contains(who, "organization B") {
+				org = f.OrgB
+			}
+			if got := inbox(org, id); len(got) != 0 {
+				t.Errorf("%s: %d notifications %+v, want none", who, len(got), got)
+			}
+		}
+	}
+	check()
+
+	// A repeated delivery of the event notifies nobody twice.
+	if _, err = f.Admin.Exec(bg, `UPDATE event_outbox SET published_at = NULL WHERE organization_id = $1`, f.OrgA); err != nil {
+		t.Fatal(err)
+	}
+	deliver()
+	check()
 }

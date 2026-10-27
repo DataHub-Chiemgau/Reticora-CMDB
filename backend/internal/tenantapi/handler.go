@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -109,7 +110,8 @@ func (h *Handler) GetOrganization(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateOrganization handles PATCH /api/v1/org: name, settings, IANA time
-// zone, ISO 4217 currency and BCP 47 locale (canonicalized).
+// zone, ISO 4217 currency and BCP 47 locale (canonicalized), and the AI
+// opt-in (AI-02), which only an org-wide holder of user:manage changes.
 func (h *Handler) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := orgOrUnauthorized(w, r)
 	if !ok {
@@ -124,12 +126,24 @@ func (h *Handler) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
 		writeFieldError(w, err)
 		return
 	}
+	if req.AIOptIn != nil && !holdsOrgWide(r, identity.PermUserManage) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "only a holder of user:manage for the whole organization may change ai_opt_in")
+		return
+	}
 	o, err := h.repo.UpdateOrganization(r.Context(), orgID, req)
 	if err != nil {
 		writeWriteError(w, err, "organization not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, o)
+}
+
+// holdsOrgWide reports whether the request's principal holds perm for the
+// whole organization, not only for some clients, sites or teams (RBA-03).
+// Without a principal it is false (fail-closed).
+func holdsOrgWide(r *http.Request, perm identity.Permission) bool {
+	p, ok := identity.PrincipalFromContext(r.Context())
+	return ok && len(identity.GrantCeiling(&p, []identity.Grant{identity.OrgWideGrant([]identity.Permission{perm})})) == 0
 }
 
 func validateOrganization(req *UpdateOrganizationRequest) error {

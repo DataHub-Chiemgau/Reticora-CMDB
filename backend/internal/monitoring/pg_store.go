@@ -142,7 +142,7 @@ func (s *PGMetricStore) Query(ctx context.Context, q MetricQuery) ([]MetricPoint
 func queryRaw(ctx context.Context, tx pgx.Tx, q *MetricQuery) ([]MetricPoint, error) {
 	where, args := metricWhere(*q)
 	rows, err := tx.Query(ctx,
-		`SELECT time, value FROM metric_sample_v WHERE `+where+` ORDER BY time ASC`, args...)
+		`SELECT time, value FROM metric_sample_v WHERE `+where+` ORDER BY time ASC, value ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query metric samples: %w", err)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -323,9 +324,14 @@ func (r *PGRepository) RecordDiscoveredBatch(ctx context.Context, orgID string, 
 // SetOverride sets or replaces the manual override of a field. The override
 // is a manual write: in the same transaction the CI takes the value, its
 // version rises and its history records the change (raiseVersion, API-07).
+// A reserved namespace is ErrReservedName, a structural column
+// ErrNotOverridable.
 func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName string, value any, author, reason string, protected bool) (*FieldValue, error) {
 	if reason == "" {
 		return nil, fmt.Errorf("override reason is required")
+	}
+	if IsReservedName(fieldName) {
+		return nil, ErrReservedName
 	}
 	if structuralFields[fieldName] {
 		return nil, ErrNotOverridable
@@ -384,6 +390,9 @@ func SetOverrideTx(ctx context.Context, tx pgx.Tx, orgID, ciID, fieldName string
 	if reason == "" {
 		return fmt.Errorf("override reason is required")
 	}
+	if IsReservedName(fieldName) {
+		return ErrReservedName
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO ci_field_value (
 			organization_id, ci_id, field_name, override_value,
@@ -424,9 +433,12 @@ func userID(author string) any {
 // transaction the CI returns to the observed value, when there is one, its
 // version rises and its history records the change (raiseVersion, API-07),
 // and the change is audited (OVR-01). An unknown or invisible CI and a field
-// without a value are ErrNotFound; a field without an override keeps the
-// version.
+// without a value are ErrNotFound, a reserved namespace ErrReservedName; a
+// field without an override keeps the version.
 func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error) {
+	if IsReservedName(fieldName) {
+		return nil, ErrReservedName
+	}
 	var out *FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		// The CI row first (lockCI).
@@ -631,6 +643,20 @@ func nilIfEmpty(value string) any {
 
 // ErrNotOverridable rejects an override of a structural CI column.
 var ErrNotOverridable = errors.New("field cannot be overridden")
+
+// ErrReservedName rejects a reserved attribute namespace (_overrides,
+// _observed, _provenance, _instance) as the field of an override: the
+// namespaces are no fields (GLO-13, CI-10, E-23); the handler answers 400
+// with the field "name". The CHECK constraint
+// ci_field_value_field_name_not_reserved (migration 000166) holds the rule
+// in the database as well.
+var ErrReservedName = errors.New("reserved attribute namespace, not a field name (GLO-13)")
+
+// IsReservedName reports whether fieldName is a reserved attribute
+// namespace (GLO-13).
+func IsReservedName(fieldName string) bool {
+	return fieldmeta.ReservedNames[fieldName]
+}
 
 // overrideColumns maps the CI columns an override sets to their SQL type;
 // structuralFields are columns no override touches. Every other field is an

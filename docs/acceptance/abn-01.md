@@ -90,6 +90,18 @@ PR #94: „Expected: 0, Received: 58“). Die Spec fragt jetzt
 bleiben unverändert; die Prüfsumme der Datei in `artefakte/SHA256SUMS` ist
 neu.
 
+Änderung nach dem Einfrieren, 2026-10-26: WP-468 (`t2-ci-export`, API-05,
+F-077). Der Export-Schritt lud die Datei über den veralteten Pfad
+`GET /api/v1/export/cis` (deprecated, Sunset 2027-10-15), nicht über den
+Exportauftrag. `frontend/e2e/onboarding.spec.ts` lädt die Datei jetzt über die
+signierte `download_url` des abgeschlossenen Auftrags (`GET /api/v1/exports/<id>`)
+ohne Bearer-Token; die Prüfung (mehr Zeilen als simulierte Geräte) bleibt
+gleich. Die URL nennt den Objektspeicher `minio:9000`; der Workflow
+`install-smoke.yml` trägt `minio` vor dem Onboarding-Lauf in `/etc/hosts` ein
+(`setup-onboarding.sh` bleibt unverändert). Eingaben und übrige Schritte
+bleiben unverändert; die Prüfsumme der Datei in `artefakte/SHA256SUMS` ist
+neu.
+
 | # | Schritt | Erwartung | Ergebnis |
 |---|---|---|---|
 | 1 | Self-Signup | Bestätigungs-Mail, Organisation mit Trial | bestanden |
@@ -99,7 +111,7 @@ neu.
 | 5 | 30 simulierte Geräte | 30 CIs sichtbar | bestanden |
 | 6 | Review auflösen | Review geschlossen, Ergebnis am CI | bestanden |
 | 7 | Impact abfragen | betroffene CIs zum gewählten CI: nach der Beziehung `sim-srv-01` → `sim-nas-01` nennt der Impact von `sim-nas-01` `sim-srv-01` (API und Ausfallsimulation); ein CI ohne Beziehung hat keinen Impact, mit Hinweis in der UI | bestanden (install-smoke Run 40258372749; frühere Fassung in Lauf #122 bestanden) |
-| 8 | Export laden | Exportdatei mit den CIs | bestanden |
+| 8 | Export laden | Exportdatei mit den CIs, geladen über die signierte `download_url` des Exportauftrags | frühere Fassung (Download über `/api/v1/export/cis`) in Lauf #122 bestanden; Fassung WP-468 steht aus (install-smoke) |
 
 Lauf: [Install Smoke Test #122](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38512314064),
 Job `install-cloud-smoke (ubuntu-24.04)`, Schritt „Run the onboarding E2E

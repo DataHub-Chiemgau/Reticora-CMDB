@@ -231,7 +231,7 @@ func (r *optionalRepository) Merge(_ context.Context, orgID, survivorID, victimI
 	return &MergeResult{MergeID: mergeID, Survivor: &Item{ID: survivorID, OrganizationID: orgID}, VictimID: victimID}, nil
 }
 
-func (r *optionalRepository) Unmerge(_ context.Context, orgID, victimID string) (*UnmergeResult, error) {
+func (r *optionalRepository) Unmerge(_ context.Context, orgID, victimID string, _ bool) (*UnmergeResult, error) {
 	r.calls["Unmerge"]++
 	return &UnmergeResult{Survivor: &Item{ID: "survivor", OrganizationID: orgID}, Victim: &Item{ID: victimID, OrganizationID: orgID}}, nil
 }
@@ -343,7 +343,7 @@ func TestIndexingRepositoryForwardsOptionalInterfaces(t *testing.T) {
 			if !ok {
 				return false, nil
 			}
-			_, err := x.Unmerge(ctx, "org-1", "victim")
+			_, err := x.Unmerge(ctx, "org-1", "victim", false)
 			return true, err
 		}},
 		{"TombstoneReader (Service.GetByID of a merged CI)", "MergedInto", func(r Repository) (bool, error) {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -54,9 +55,45 @@ func TestPermissionCatalogueAndRoleGrants(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("list catalogue: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var catalogue []Permission
-	if err := json.Unmarshal(w.Body.Bytes(), &catalogue); err != nil || len(catalogue) == 0 {
+	var catalogue struct {
+		Data       []Permission `json:"data"`
+		Total      int          `json:"total"`
+		NextCursor string       `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &catalogue); err != nil || len(catalogue.Data) == 0 {
 		t.Fatalf("expected permission catalogue, err=%v", err)
+	}
+	// The catalogue is a cursor page (API-02, F-075): limit=1 answers one
+	// entry and next_cursor, and the cursors lead through every entry once.
+	seen := map[string]bool{}
+	for path := "/api/v1/permissions?limit=1"; ; {
+		w = request(mux, http.MethodGet, path, "", "org-1", "user-1")
+		var page struct {
+			Data       []Permission `json:"data"`
+			NextCursor string       `json:"next_cursor"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil || w.Code != http.StatusOK || len(page.Data) != 1 {
+			t.Fatalf("GET %s: %d %s", path, w.Code, w.Body.String())
+		}
+		if seen[page.Data[0].Key] {
+			t.Fatalf("GET %s: %s returned twice", path, page.Data[0].Key)
+		}
+		seen[page.Data[0].Key] = true
+		if page.NextCursor == "" {
+			break
+		}
+		path = "/api/v1/permissions?limit=1&cursor=" + page.NextCursor
+	}
+	if len(seen) != catalogue.Total || catalogue.Total < 2 {
+		t.Fatalf("paged through %d of %d permissions", len(seen), catalogue.Total)
+	}
+	// A forged cursor and a keyset cursor, which this list never issues,
+	// are 400.
+	keyset := api.EncodeCursor(api.Cursor{Sort: "key", Dir: "asc", Value: "ci:read", ID: "x"})
+	for _, cursor := range []string{"eyJvIjoxfQ.AAAAAAAAAAAAAAAAAAAAAA", keyset} {
+		if w = request(mux, http.MethodGet, "/api/v1/permissions?cursor="+cursor, "", "org-1", "user-1"); w.Code != http.StatusBadRequest {
+			t.Fatalf("cursor %s: expected 400, got %d %s", cursor, w.Code, w.Body.String())
+		}
 	}
 
 	w = request(mux, http.MethodPut, "/api/v1/roles/"+roleID+"/permissions", `{"permission_keys":["ci:read","ticket:write"]}`, "org-1", "admin")
