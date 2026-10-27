@@ -300,8 +300,9 @@ jobs:
       # backup itself (retried while the scheduler's first backup holds the
       # stanza lock). Then a WAL switch must reach the repository
       # (pg_stat_archiver.archived_count rises within 120 s), 'pgbackrest
-      # info' must list one full backup more than before, and health and
-      # verify-repo must pass. The
+      # info' must list one full backup more than before, health and
+      # verify-repo must pass, and the repository must not open with a wrong
+      # cipher passphrase. The
       # pgBackRest commands run through reticora-pgbackrest-env.sh, which
       # derives PGBACKREST_REPO1_CIPHER_PASS from RETICORA_BACKUP_CIPHER_PASS
       # like the entrypoints of the postgres and backup containers.
@@ -358,6 +359,36 @@ jobs:
 
           backrest reticora-backup.sh health
           backrest reticora-backup.sh verify-repo
+
+          # Negative case: the repository is encrypted; with a wrong
+          # passphrase pgBackRest cannot read it (exec bypasses the entrypoint,
+          # so the variable is set directly). 'pgbackrest info' exits 0 even
+          # for a repository it cannot read and reports the error in the
+          # status of the stanza and the repository instead (code 99, the
+          # backup.info does not decrypt), so the step derives the result
+          # from rc and status: unreadable means rc != 0, or a status code
+          # != 0 for both with no backup listed. The JSON can carry the
+          # undecrypted bytes, hence the non-strict parser.
+          set +e
+          wrong="$(dc exec -T -e PGBACKREST_REPO1_CIPHER_PASS=wp544-wrong-passphrase backup pgbackrest --stanza=reticora --output=json info 2>&1)"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            status="$(python3 -c '
+          import json, sys
+          s = [x for x in json.loads(sys.stdin.read(), strict=False) if x.get("name") == "reticora"][0]
+          repo = [r["status"]["code"] for r in s.get("repo", [])]
+          print(s["status"]["code"], min(repo) if repo else 0, len(s.get("backup", [])))' <<<"$wrong")" \
+              || { echo "FAIL: pgbackrest info with a wrong cipher passphrase printed no stanza status"; exit 1; }
+            read -r stanza_code repo_code backups <<<"$status"
+            if [ "$stanza_code" -eq 0 ] || [ "$repo_code" -eq 0 ] || [ "$backups" -ne 0 ]; then
+              echo "FAIL: pgbackrest info read the repository with a wrong cipher passphrase (rc 0, stanza status $stanza_code, repository status $repo_code, $backups backups)"
+              exit 1
+            fi
+            echo "OK: with a wrong cipher passphrase the repository is unreadable (rc 0, stanza status $stanza_code, repository status $repo_code, no backup listed)"
+          else
+            echo "OK: pgbackrest info with a wrong cipher passphrase returned rc $rc"
+          fi
 
       - name: Verify backend health endpoint
         run: |
