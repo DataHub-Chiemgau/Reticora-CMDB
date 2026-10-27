@@ -744,7 +744,57 @@ export interface QueryResult {
   name: string;
   summary?: string;
   attributes?: Record<string, unknown>;
+  /** The values of the columns the run asked for, by field (VIE-01). */
+  columns?: Record<string, unknown>;
 }
+
+/**
+ * The fields a view sorts by or shows, per entity kind: the whitelist of the
+ * query engine (backend savedview astFields, VIE-01). attributes.<key> and
+ * id are accepted as well, the page offers these.
+ */
+export const VIEW_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  ci: [
+    'name',
+    'status',
+    'hostname',
+    'fqdn',
+    'serial_number',
+    'manufacturer',
+    'model',
+    'os_name',
+    'os_version',
+    'management_ip',
+    'lifecycle_state',
+    'discovery_source',
+    'health',
+    'ci_type',
+    'client_id',
+    'site_id',
+    'location_id',
+    'is_manual',
+    'created_at',
+    'updated_at',
+    'last_seen_at',
+  ],
+  asset: [
+    'name',
+    'asset_tag',
+    'category',
+    'status',
+    'serial_number',
+    'supplier',
+    'lifecycle_state',
+    'barcode',
+    'rfid_tag',
+    'purchase_cost',
+    'purchase_date',
+    'warranty_end',
+    'client_id',
+    'location_id',
+    'created_at',
+  ],
+};
 
 export const savedViewApi = {
   list(params: { limit?: number; offset?: number } = {}) {
@@ -770,8 +820,16 @@ export const savedViewApi = {
   delete(id: string): Promise<void> {
     return fetchAPI(`/saved-views/${id}`, { method: 'DELETE' });
   },
+  /**
+   * Runs a filter spec; sort and columns are those of the view being run
+   * and order the rows and select the columns of each row.
+   */
   query(
-    spec: Record<string, unknown> & { entity_kind?: string },
+    spec: Record<string, unknown> & {
+      entity_kind?: string;
+      sort?: SavedViewSortKey[];
+      columns?: string[];
+    },
     params: { limit?: number; offset?: number } = {},
   ) {
     return fetchAPI<PaginatedResponse<QueryResult>>(`/search/query${qs(params)}`, {

@@ -194,10 +194,14 @@ func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (stri
 
 // Validate checks the values of the spec that SQL would cast before any
 // query runs (SRC-03, API-03): the ids of client_id, location_id,
-// upstream_of and downstream_of are UUIDs, and the AST in where is valid
-// for the entity kind. A violation is a 422 *api.FieldError naming the
+// upstream_of and downstream_of are UUIDs, the AST in where is valid for
+// the entity kind, and so are the sort keys and columns of the run
+// (validatePresentation). A violation is a 422 *api.FieldError naming the
 // field, for the AST where.<path> (e.g. where.and[1].value).
 func (f *FilterSpec) Validate(entityKind string) error {
+	if err := validatePresentation(entityKind, f.Sort, f.Columns); err != nil {
+		return err
+	}
 	for _, id := range []struct{ field, value string }{
 		{"client_id", f.ClientID}, {"location_id", f.LocationID},
 		{"upstream_of", f.UpstreamOf}, {"downstream_of", f.DownstreamOf},
@@ -227,6 +231,9 @@ type QueryResult struct {
 	Name       string         `json:"name"`
 	Summary    string         `json:"summary,omitempty"`
 	Attributes map[string]any `json:"attributes,omitempty"`
+	// Columns holds the value of each requested column (FilterSpec.Columns)
+	// by field name; absent when the run asked for no columns.
+	Columns map[string]any `json:"columns,omitempty"`
 }
 
 // Filter AST (SRC-03, MET-45): Where combines comparisons with and, or and

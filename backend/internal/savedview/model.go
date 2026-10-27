@@ -82,6 +82,13 @@ type FilterSpec struct {
 	// Where is the filter AST with and, or and not (SRC-03); it is AND-ed
 	// with the fields above.
 	Where *Expr `json:"where,omitempty"`
+	// Sort and Columns present the result of a run, they select no rows:
+	// the client sends those of the saved view it runs (VIE-01, F-336).
+	// Sort orders the rows (default: by name), Columns adds the values of
+	// these fields to each row (QueryResult.Columns). A saved view keeps
+	// them in its own sort and columns, never in its filter_spec.
+	Sort    []SortKey `json:"sort,omitempty"`
+	Columns []string  `json:"columns,omitempty"`
 }
 
 // Presets returns the standard saved views (spec §17 examples). They are

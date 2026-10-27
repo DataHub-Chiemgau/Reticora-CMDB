@@ -922,3 +922,4 @@ IMP-05;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
 IMP-06;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
 JOB-04;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-554
 SEC-06;[B];B;backend/internal/jobs/rotation_integration_test.go;WP-547
+VIE-01;[B];C;frontend/e2e-real/saved-views.spec.ts;WP-555
