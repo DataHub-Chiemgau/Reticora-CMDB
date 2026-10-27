@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { Route, Routes } from 'react-router-dom';
 import i18n from '../i18n';
 import { CIDetailPage, buildNeighborList } from './CIDetailPage';
 import type { TopologyGraphData } from '../api/client';
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
+import { useScopeStore } from '../stores/scope';
 
 const ci = {
   id: 'ci-1',
@@ -301,5 +302,142 @@ describe('CI type labels on the CI detail page', () => {
 
     expect(await screen.findByRole('heading', { name: 'srv-label-01' })).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText(SERVER_TYPE_ID)).toHaveLength(2));
+  });
+});
+
+describe('CIDetailPage under a chosen scope (E-87, F-169)', () => {
+  const CLIENT_A = 'aaaaaaaa-0000-4000-8000-000000000001';
+  const CLIENT_B = 'aaaaaaaa-0000-4000-8000-000000000002';
+  const CI_B = 'cccccccc-0000-4000-8000-00000000000b';
+  const OTHER_B = 'cccccccc-0000-4000-8000-0000000000b2';
+  const OTHER_A = 'cccccccc-0000-4000-8000-0000000000a1';
+
+  function ciOf(id: string, clientId: string) {
+    return {
+      id,
+      organization_id: 'org-1',
+      client_id: clientId,
+      ci_type_id: 'switch',
+      name: `ci-${id.slice(-3)}`,
+      status: 'active',
+      attributes: {},
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-02T00:00:00Z',
+    };
+  }
+
+  function edge(id: string, target: string) {
+    return {
+      id,
+      organization_id: 'org-1',
+      source_ci_id: CI_B,
+      target_ci_id: target,
+      rel_type: 'connected_to',
+      attributes: {},
+      source: 'manual',
+      verification_state: 'verified',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+  }
+
+  function stubBackend() {
+    const cis: Record<string, unknown> = {
+      [CI_B]: ciOf(CI_B, CLIENT_B),
+      [OTHER_B]: ciOf(OTHER_B, CLIENT_B),
+      [OTHER_A]: ciOf(OTHER_A, CLIENT_A),
+    };
+    const page = (data: unknown[]) => ({
+      data,
+      total: data.length,
+      limit: 200,
+      offset: 0,
+      has_more: false,
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input), 'http://localhost').pathname.replace(/^\/api\/v1/, '');
+      let body: unknown = page([]);
+      if (path === '/clients')
+        body = page([
+          { id: CLIENT_A, name: 'Kunde A' },
+          { id: CLIENT_B, name: 'Kunde B' },
+        ]);
+      else if (path === `/cis/${CI_B}/relationships`)
+        body = page([edge('rel-b', OTHER_B), edge('rel-a', OTHER_A)]);
+      else if (path === `/topology/cis/${CI_B}/neighbors`) body = { nodes: [], edges: [] };
+      else if (path.startsWith('/cis/') && cis[path.slice(5)]) body = cis[path.slice(5)];
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  function renderB() {
+    return renderWithProviders(
+      <Routes>
+        <Route path="/cmdb/:id" element={<CIDetailPage />} />
+      </Routes>,
+      { route: `/cmdb/${CI_B}` },
+    );
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    useScopeStore.getState().reset();
+  });
+  afterEach(() => useScopeStore.getState().reset());
+
+  it('shows the notice and scoped relationships for a CI of another client', async () => {
+    stubBackend();
+    useScopeStore.setState({ clientId: CLIENT_A, siteId: '' });
+    renderB();
+
+    // The CI loads (deep link): access is the server's decision.
+    expect(await screen.findByRole('heading', { name: 'ci-00b' })).toBeInTheDocument();
+    const banner = screen.getByRole('status', { name: 'Arbeitsbereich' });
+    await waitFor(() =>
+      expect(banner).toHaveTextContent(
+        'Dieses CI liegt außerhalb des gewählten Bereichs (Kunde A).',
+      ),
+    );
+    // The relationship to the client-B CI is hidden and counted.
+    expect(await screen.findByText('1 außerhalb des Bereichs ausgeblendet')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: OTHER_A })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: OTHER_B })).toBeNull();
+
+    fireEvent.click(within(banner).getByRole('button', { name: 'Bereich wechseln' }));
+
+    expect(useScopeStore.getState().clientId).toBe(CLIENT_B);
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: 'Arbeitsbereich' })).toBeNull(),
+    );
+    // Now the client-A CI lies outside and the client-B CI is listed.
+    expect(await screen.findByRole('link', { name: OTHER_B })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: OTHER_A })).toBeNull();
+  });
+
+  it('shows no notice for a CI inside the scope', async () => {
+    stubBackend();
+    useScopeStore.setState({ clientId: CLIENT_B, siteId: '' });
+    renderB();
+
+    expect(await screen.findByRole('heading', { name: 'ci-00b' })).toBeInTheDocument();
+    expect(await screen.findByText('1 außerhalb des Bereichs ausgeblendet')).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Arbeitsbereich' })).toBeNull();
+    expect(screen.queryByText(/Dieses CI liegt außerhalb/)).toBeNull();
+  });
+
+  it('shows no notice and every relationship without a selection', async () => {
+    stubBackend();
+    renderB();
+
+    expect(await screen.findByRole('heading', { name: 'ci-00b' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: OTHER_A })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: OTHER_B })).toBeInTheDocument();
+    expect(screen.queryByText(/Dieses CI liegt außerhalb/)).toBeNull();
+    expect(screen.queryByText(/ausgeblendet/)).toBeNull();
   });
 });

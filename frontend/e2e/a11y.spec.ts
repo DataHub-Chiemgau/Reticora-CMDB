@@ -323,6 +323,38 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
     }
   }
 
+  // WP-524 (E-87): the CI detail of a CI outside the client chosen in the
+  // scope control, with the notice, the counter of the hidden relationships
+  // and, after "show all", the outside badge.
+  for (const theme of THEMES) {
+    test(`page /cmdb/:id outside the chosen scope (${theme})`, async ({ page }) => {
+      const otherClient = 'c7000000-0000-4000-8000-0000000000aa';
+      await page.addInitScript((clientId) => {
+        window.localStorage.setItem('reticora-scope', JSON.stringify({ clientId, siteId: '' }));
+      }, otherClient);
+      const clients = [{ id: otherClient, name: 'a11y Other Client', slug: 'a11y-other' }];
+      await checkPage(
+        page,
+        {
+          url: `/cmdb/${CI_ID}`,
+          handlers: [
+            {
+              path: '/clients',
+              reply: () => ({
+                body: { data: clients, total: 1, limit: 200, offset: 0, has_more: false },
+              }),
+            },
+          ],
+          prepare: async (p) => {
+            await p.getByRole('button', { name: /alle anzeigen|show all/i }).click();
+          },
+          ready: (p) => p.getByRole('status', { name: /arbeitsbereich|scope/i }),
+        },
+        theme,
+      );
+    });
+  }
+
   for (const { url, endpoint } of EMPTY_PAGES) {
     for (const theme of THEMES) {
       test(`empty state ${url} (${theme})`, async ({ page }) => {

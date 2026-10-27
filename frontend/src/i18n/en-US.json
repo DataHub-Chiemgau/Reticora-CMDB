@@ -1468,7 +1468,11 @@
   },
   "relationshipCard": {
     "suppress": "Remove and suppress",
-    "suppressHint": "Discovery edge: removed and not recreated by discovery."
+    "suppressHint": "Discovery edge: removed and not recreated by discovery.",
+    "hiddenOutside": "{{count}} hidden (outside the scope)",
+    "showAll": "Show all",
+    "showInScope": "Show scope only",
+    "outsideScope": "Outside the scope"
   },
   "scope": {
     "label": "Scope",
@@ -1476,7 +1480,9 @@
     "client": "Client",
     "site": "Site",
     "allClients": "All clients",
-    "allSites": "All sites"
+    "allSites": "All sites",
+    "outsideCI": "This CI lies outside the selected scope ({{scope}}).",
+    "switchToObject": "Switch scope"
   },
   "reviews": {
     "title": "Review inbox",

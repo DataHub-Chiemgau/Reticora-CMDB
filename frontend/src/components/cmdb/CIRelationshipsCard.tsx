@@ -8,11 +8,17 @@
  * created at all. This card exposes the full lifecycle and shows the
  * provenance that makes an edge trustworthy: where it came from and whether a
  * human has verified it.
+ *
+ * With a client or site chosen in the scope control (E-87 option 1), the card
+ * lists only the edges whose other CI lies in that scope and names how many
+ * it hides; a toggle shows them all. The scope is a view filter: the server
+ * decides which edges and CIs the user may see.
  */
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useQueries } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ApiError, verificationStates } from '../../api/client';
+import { ApiError, ciApi, verificationStates } from '../../api/client';
 import type { Relationship } from '../../api/client';
 import {
   useCIRelationships,
@@ -20,6 +26,8 @@ import {
   useDeleteRelationship,
   useUpdateRelationship,
 } from '../../api/hooks';
+import { useScopeStore } from '../../stores/scope';
+import { inScope } from '../ScopeBanner';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -84,7 +92,42 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
   // A failed create is shown in its dialog.
   const mutationError = (updateRelationship.error || deleteRelationship.error) as Error | null;
 
-  const relationships = relationshipsQuery.data?.data ?? [];
+  const allRelationships = relationshipsQuery.data?.data ?? [];
+
+  // Scope filter (E-87): the other CI of each edge is read (the same query as
+  // its detail page) to learn its client and site. Edges to a location and
+  // edges whose other CI cannot be read stay listed: they are not known to
+  // lie outside.
+  const scope = useScopeStore();
+  const scoped = !!(scope.clientId || scope.siteId);
+  const [showAll, setShowAll] = useState(false);
+  const otherIds = scoped
+    ? [
+        ...new Set(
+          allRelationships
+            .filter((r) => !r.target_location_id)
+            .map((r) => (r.source_ci_id === ciId ? r.target_ci_id : r.source_ci_id))
+            .filter((id) => id && id !== ciId),
+        ),
+      ]
+    : [];
+  const others = useQueries({
+    queries: otherIds.map((id) => ({
+      queryKey: ['ci', id],
+      queryFn: () => ciApi.get(id),
+      retry: false,
+    })),
+  });
+  const othersPending = others.some((q) => q.isPending && q.fetchStatus !== 'idle');
+  const outsideIds = new Set(
+    others.flatMap((q, i) => (q.data && !inScope(scope, q.data) ? [otherIds[i]] : [])),
+  );
+  const isOutside = (relationship: Relationship) =>
+    outsideIds.has(
+      relationship.source_ci_id === ciId ? relationship.target_ci_id : relationship.source_ci_id,
+    );
+  const hiddenCount = allRelationships.filter(isOutside).length;
+  const relationships = showAll ? allRelationships : allRelationships.filter((r) => !isOutside(r));
 
   return (
     <Card title={t('ci.relationships')}>
@@ -107,7 +150,20 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
         </p>
       ) : null}
 
-      {relationshipsQuery.isLoading ? (
+      {hiddenCount > 0 ? (
+        <p className="mb-3 flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+          <span>{t('relationshipCard.hiddenOutside', { count: hiddenCount })}</span>
+          <button
+            type="button"
+            className="text-primary hover:underline"
+            onClick={() => setShowAll((v) => !v)}
+          >
+            {showAll ? t('relationshipCard.showInScope') : t('relationshipCard.showAll')}
+          </button>
+        </p>
+      ) : null}
+
+      {relationshipsQuery.isLoading || othersPending ? (
         <SkeletonList rows={3} label={t('app.loading')} />
       ) : relationshipsQuery.error ? (
         <ErrorState
@@ -144,6 +200,9 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
                   <Badge variant={verificationBadgeVariant(state)}>
                     {t(`relationship.state.${state}`, state)}
                   </Badge>
+                  {isOutside(relationship) ? (
+                    <Badge variant="warning">{t('relationshipCard.outsideScope')}</Badge>
+                  ) : null}
                 </span>
                 <span className="flex items-center gap-2">
                   <span className="text-xs text-gray-500 dark:text-gray-400">

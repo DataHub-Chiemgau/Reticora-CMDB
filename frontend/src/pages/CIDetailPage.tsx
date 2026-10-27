@@ -24,6 +24,7 @@ import {
 } from '../components/cmdb/CIDetailSections';
 import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
 import { CIParentAssetCard } from '../components/cmdb/CIParentAssetCard';
+import { ScopeBanner } from '../components/ScopeBanner';
 
 export interface NeighborEntry {
   id: string;
@@ -183,6 +184,10 @@ export function CIDetailPage() {
           ← {t('nav.cmdb')}
         </Link>
       </nav>
+
+      {/* A CI outside the chosen client or site is shown with a notice
+          (E-87 option 1); access stays with the server (row-level security). */}
+      <ScopeBanner object={ci} />
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>

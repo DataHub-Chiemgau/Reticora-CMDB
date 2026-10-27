@@ -72,7 +72,11 @@ describe('withScope', () => {
     expect(withScope(`/cis?client_id=${CLIENT_B}`)).toBe(
       `/cis?client_id=${CLIENT_B}&site_id=${SITE_A1}`,
     );
-    // Detail reads, writes and unscoped lists stay as they are.
+    // Detail reads, writes and unscoped lists stay as they are. This stays
+    // valid under E-87 (option 1, docs/plan/entscheidungen.md): the CI detail
+    // loads unscoped, and the page shows a notice for a CI outside the chosen
+    // scope (ScopeBanner) and filters its relationships in the browser
+    // (CIRelationshipsCard). The server's row-level security decides access.
     expect(withScope('/cis/abc')).toBe('/cis/abc');
     expect(withScope('/cis', 'POST')).toBe('/cis');
     expect(withScope('/users')).toBe('/users');

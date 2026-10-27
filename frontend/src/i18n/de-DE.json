@@ -1468,7 +1468,11 @@
   },
   "relationshipCard": {
     "suppress": "Entfernen und unterdrücken",
-    "suppressHint": "Discovery-Kante: wird entfernt und von der Discovery nicht wieder angelegt."
+    "suppressHint": "Discovery-Kante: wird entfernt und von der Discovery nicht wieder angelegt.",
+    "hiddenOutside": "{{count}} außerhalb des Bereichs ausgeblendet",
+    "showAll": "Alle anzeigen",
+    "showInScope": "Nur Bereich anzeigen",
+    "outsideScope": "Außerhalb des Bereichs"
   },
   "scope": {
     "label": "Arbeitsbereich",
@@ -1476,7 +1480,9 @@
     "client": "Kunde",
     "site": "Standort",
     "allClients": "Alle Kunden",
-    "allSites": "Alle Standorte"
+    "allSites": "Alle Standorte",
+    "outsideCI": "Dieses CI liegt außerhalb des gewählten Bereichs ({{scope}}).",
+    "switchToObject": "Bereich wechseln"
   },
   "reviews": {
     "title": "Review-Inbox",
