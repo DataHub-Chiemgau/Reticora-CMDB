@@ -2928,7 +2928,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List clients */
+    /**
+     * List clients
+     * @description Requires location:read, which every standard role with a client reference holds (RBA-02); the list contains only the clients of the caller's scope (RLS). Creating, updating and deleting a client requires user:manage.
+     */
     get: operations['listClients'];
     put?: never;
     /** Create a client */
@@ -2949,7 +2952,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get a client */
+    /**
+     * Get a client
+     * @description Requires location:read; a client outside the caller's scope answers 404 (RLS).
+     */
     get: operations['getClient'];
     put?: never;
     post?: never;

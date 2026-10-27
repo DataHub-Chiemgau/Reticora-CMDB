@@ -108,8 +108,8 @@ GET /api/v1/cis/{id}/parent ci:read
 GET /api/v1/cis/{id}/provenance ci:read
 GET /api/v1/cis/{id}/relationships relationship:read
 GET /api/v1/cis/{id}/state ci:read
-GET /api/v1/clients user:read
-GET /api/v1/clients/{id} user:read
+GET /api/v1/clients location:read
+GET /api/v1/clients/{id} location:read
 GET /api/v1/collectors discovery:read
 GET /api/v1/collectors/pki discovery:read
 GET /api/v1/compliance/report compliance:read

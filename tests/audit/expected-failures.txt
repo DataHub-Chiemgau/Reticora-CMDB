@@ -6,7 +6,6 @@
 # are listed for each of the six projects of playwright.real.config.ts.
 go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
 go;backend/internal/discovery;TestAuditLLDPEdgesOfFirstCycleIndependentOfLaneOrder;F-374
-go;backend/internal/server;TestAuditClientTechnicianListsOwnClients;F-373
 go;backend/internal/server;TestAuditReviewMergeIntoDeletedCandidateIsNotFound;F-371
 go;backend/internal/server;TestAuditReviewMergeJobErrorIsSanitized;F-372
 go;backend/internal/stocktake;TestAuditStocktakeOrgWideWritesNeedOrgWideScope;F-365

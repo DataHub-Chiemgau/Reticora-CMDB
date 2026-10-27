@@ -5679,6 +5679,11 @@ paths:
       operationId: listClients
       tags: [Clients]
       summary: List clients
+      description: >-
+        Requires location:read, which every standard role with a client
+        reference holds (RBA-02); the list contains only the clients of the
+        caller's scope (RLS). Creating, updating and deleting a client
+        requires user:manage.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -5727,6 +5732,9 @@ paths:
       operationId: getClient
       tags: [Clients]
       summary: Get a client
+      description: >-
+        Requires location:read; a client outside the caller's scope answers
+        404 (RLS).
       responses:
         '200':
           description: Client details
