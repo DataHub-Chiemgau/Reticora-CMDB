@@ -904,3 +904,6 @@ EVT-02;[B];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
 EVT-01;[B];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
 NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
 COL-02;[B];B;collector/collectorcmd/redfish_tls_integration_test.go;WP-539
+TEN-04;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-536
+TEN-06;[B];B;backend/internal/tenant/rls/core_channels_integration_test.go;WP-536
+AUT-04;[B];B;backend/internal/identity/apikey_scope_integration_test.go;WP-536
