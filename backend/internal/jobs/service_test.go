@@ -177,6 +177,109 @@ func TestTrackerMirrorsSpecialisedJobs(t *testing.T) {
 	}
 }
 
+// TestMirrorRetriesOnlyMirroredJobs covers WP-554 (JOB-04, F-330): a
+// mirrored job that failed runs again when its row is tried again (failed →
+// running with one more attempt, without the error and the finish time of
+// the failed attempt) and ends with the retry; tracking the row again keeps
+// the one job. failed → running is a change for mirrored jobs with a
+// reference only: a job of the queue that failed for good stays failed and
+// is not claimed again, and a succeeded or cancelled mirrored job does not
+// start again.
+func TestMirrorRetriesOnlyMirroredJobs(t *testing.T) {
+	s, c := newService()
+	ctx := context.Background()
+	var tracker Tracker = s
+	mirror := func(ref string, status Status, msg string) *Job {
+		t.Helper()
+		if err := tracker.Mirror(ctx, "org-1", "review_item", ref, status, msg); err != nil {
+			t.Fatal(err)
+		}
+		job, err := s.repo.GetByRef(ctx, "org-1", "review_item", ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return job
+	}
+
+	if err := tracker.Track(ctx, "org-1", "review.merge", "review_item", "item-1", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	mirror("item-1", StatusRunning, "")
+	if job := mirror("item-1", StatusFailed, "the candidate is gone"); job.Status != StatusFailed || job.Attempts != 1 ||
+		job.Error != "the candidate is gone" || job.FinishedAt == nil {
+		t.Fatalf("failed attempt: %+v", job)
+	}
+	c.advance(time.Minute)
+	if err := tracker.Track(ctx, "org-1", "review.merge", "review_item", "item-1", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	retry := mirror("item-1", StatusRunning, "")
+	if retry.Status != StatusRunning || retry.Attempts != 2 || retry.Error != "" || retry.FinishedAt != nil ||
+		retry.StartedAt == nil || !retry.StartedAt.Equal(c.now()) || retry.Progress != 0 {
+		t.Errorf("retry of the failed mirrored job: %+v, want running, attempts 2, no error, no finish time", retry)
+	}
+	done := mirror("item-1", StatusSucceeded, "")
+	if done.Status != StatusSucceeded || done.Attempts != 2 || done.Error != "" || done.FinishedAt == nil || done.Progress != 100 {
+		t.Errorf("succeeded retry: %+v, want succeeded with attempts 2 and no error", done)
+	}
+	if _, total, _ := s.List(ctx, "org-1", Filter{Kind: "review.merge"}, api.PaginationParams{Limit: 10}); total != 1 {
+		t.Errorf("the retry left %d jobs, want the one job of the row", total)
+	}
+	// A retry that fails again fails the job again, with its own error.
+	if err := tracker.Track(ctx, "org-1", "review.merge", "review_item", "item-2", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	mirror("item-2", StatusFailed, "first")
+	mirror("item-2", StatusRunning, "")
+	if job := mirror("item-2", StatusFailed, "second"); job.Status != StatusFailed || job.Attempts != 2 || job.Error != "second" {
+		t.Errorf("failed retry: %+v, want failed with attempts 2 and the error of the retry", job)
+	}
+
+	// A succeeded or cancelled mirrored job does not start again.
+	if job := mirror("item-1", StatusRunning, ""); job.Status != StatusSucceeded || job.Attempts != 2 {
+		t.Errorf("succeeded mirrored job after running: %+v, want it unchanged", job)
+	}
+	if err := tracker.Track(ctx, "org-1", "review.merge", "review_item", "item-3", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	cancelled := mirror("item-3", StatusRunning, "")
+	if _, err := s.repo.Transition(ctx, "org-1", cancelled.ID, []Status{StatusRunning},
+		&Update{Status: StatusCancelled, FinishedAt: &c.t}); err != nil {
+		t.Fatal(err)
+	}
+	if job := mirror("item-3", StatusRunning, ""); job.Status != StatusCancelled || job.Attempts != 1 {
+		t.Errorf("cancelled mirrored job after running: %+v, want it unchanged", job)
+	}
+
+	// A job of the queue without reference that failed for good stays
+	// failed: the status model keeps failed terminal and no worker claims
+	// it again.
+	s.Register(Kind{Name: "once", MaxAttempts: 1})
+	queued, _, err := s.Enqueue(ctx, "org-1", "once", nil, EnqueueOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Claim(ctx, "org-1", "once"); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := s.Fail(ctx, "org-1", queued.ID, errors.New("disk full"))
+	if err != nil || failed.Status != StatusFailed || failed.RefTable != "" {
+		t.Fatalf("queue job: %+v %v", failed, err)
+	}
+	if CanTransition(StatusFailed, StatusRunning) || mirrorRetry(failed, StatusRunning) {
+		t.Error("failed → running is allowed for a job without reference")
+	}
+	if again, _ := s.Claim(ctx, "org-1", "once"); again != nil {
+		t.Errorf("a failed job of the queue was claimed again: %+v", again)
+	}
+	if again, _ := s.ClaimJob(ctx, "org-1", queued.ID); again != nil {
+		t.Errorf("a failed job of the queue was claimed by id: %+v", again)
+	}
+	if got, _ := s.Get(ctx, "org-1", queued.ID); got.Status != StatusFailed || got.Attempts != 1 || got.Error != "disk full" {
+		t.Errorf("failed job of the queue: %+v, want it unchanged", got)
+	}
+}
+
 // TestMirrorResult covers WP-515 (JOB-03, F-347): MirrorResult stores the
 // result only at the succeeded job mirroring the given row — not at the job
 // of another row, of another table or of another organization —, keeps its

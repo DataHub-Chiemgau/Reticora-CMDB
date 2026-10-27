@@ -507,7 +507,10 @@ func (s *Service) Track(ctx context.Context, orgID, kind, refTable, refID, creat
 
 // Mirror implements Tracker: the tracked job takes the status of its row.
 // Unknown rows (created before tracking) are tracked first; a change the
-// status model does not allow is ignored.
+// status model does not allow is ignored. A failed job whose row is tried
+// again (the retried merge of a review item, F-330) runs again: failed →
+// running counts the attempt and clears the error of the failed one
+// (mirrorRetry).
 func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, status Status, errMsg string) error {
 	job, err := s.repo.GetByRef(ctx, orgID, refTable, refID)
 	if errors.Is(err, ErrNotFound) {
@@ -525,7 +528,12 @@ func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, sta
 	now := s.now()
 	u := &Update{Status: status}
 	from := []Status{job.Status}
+	retry := mirrorRetry(job, status)
 	switch {
+	case retry:
+		// A new attempt: no error and no progress of the failed one.
+		none, zero := "", 0
+		u.StartedAt, u.IncAttempts, u.Error, u.Progress = &now, true, &none, &zero
 	case status == StatusRunning:
 		u.StartedAt, u.IncAttempts = &now, true
 	case status.Terminal():
@@ -542,7 +550,7 @@ func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, sta
 	if errMsg != "" {
 		u.Error = &errMsg
 	}
-	if !CanTransition(job.Status, status) && (job.Status != StatusQueued || !status.Terminal()) {
+	if !retry && !CanTransition(job.Status, status) && (job.Status != StatusQueued || !status.Terminal()) {
 		return nil
 	}
 	moved, err := s.repo.Transition(ctx, orgID, job.ID, from, u)
@@ -556,6 +564,15 @@ func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, sta
 		observeEnd(moved)
 	}
 	return err
+}
+
+// mirrorRetry reports whether Mirror starts a new attempt of a failed job:
+// only a mirrored job, which follows a row of its reference, goes from
+// failed back to running, when its row is tried again (F-330). The status
+// model keeps failed terminal for every other job (CanTransition): a job
+// of the queue that failed for good is never run again.
+func mirrorRetry(job *Job, to Status) bool {
+	return job.Status == StatusFailed && to == StatusRunning && job.RefTable != "" && job.RefID != ""
 }
 
 // RunDetached enqueues a job of kind and runs it right away in the

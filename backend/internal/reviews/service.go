@@ -173,7 +173,13 @@ func (s *Service) Resolve(ctx context.Context, orgID, id string, res *Resolution
 }
 
 // runEffect runs the effect of a resolution; a merge runs as a job whose
-// status follows the effect (JOB-04).
+// status follows the effect (JOB-04). The merge runs in the request and the
+// review.merge job mirrors it (E-89, transitional rule: option 1); the
+// merge of a probable_duplicate item is the ci.merge job of the CI-12
+// merge, whose status the review.merge job takes. There is one job per item:
+// a retry after a failed merge runs that job again, failed → running with
+// one more attempt and without the old error, and it ends succeeded or
+// failed with the retry (F-330).
 func (s *Service) runEffect(ctx context.Context, effect Effect, item *Item, res *Resolution) (bool, error) {
 	if s.jobs == nil || res.Action != ActionMerge {
 		return effect(ctx, item, res)

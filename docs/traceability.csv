@@ -920,3 +920,4 @@ JOB-03;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
 UI-06;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
 IMP-05;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
 IMP-06;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
+JOB-04;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-554

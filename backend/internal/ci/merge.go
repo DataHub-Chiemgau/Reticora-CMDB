@@ -105,6 +105,15 @@ func (s *Service) WithJobs(tracker jobs.Tracker) *Service {
 // merge is a job: queued, running and finished with the merge row as its
 // reference.
 func (s *Service) Merge(ctx context.Context, orgID, survivorID, victimID string) (*MergeResult, error) {
+	return s.MergeAs(ctx, orgID, survivorID, victimID, newMergeID())
+}
+
+// MergeAs is Merge under the id mergeID of the merge row and its job: a
+// merge that failed and is tried again under the same id runs again in the
+// one ci.merge job of that id instead of leaving a failed job beside a
+// succeeded one (the merge of a review item, F-330). A failed merge leaves
+// no merge row, so the id stays free until a merge under it succeeds.
+func (s *Service) MergeAs(ctx context.Context, orgID, survivorID, victimID, mergeID string) (*MergeResult, error) {
 	merger, ok := s.repo.(Merger)
 	if !ok {
 		return nil, ErrMergeUnsupported
@@ -113,9 +122,8 @@ func (s *Service) Merge(ctx context.Context, orgID, survivorID, victimID string)
 		return nil, ErrMergeSelf
 	}
 	if s.jobs == nil {
-		return merger.Merge(ctx, orgID, survivorID, victimID, "")
+		return merger.Merge(ctx, orgID, survivorID, victimID, mergeID)
 	}
-	mergeID := newMergeID()
 	actor := tenant.FromContext(ctx).UserID
 	if err := s.jobs.Track(ctx, orgID, MergeJobKind, "ci_merge", mergeID, actor); err != nil {
 		return nil, fmt.Errorf("track merge job: %w", err)
