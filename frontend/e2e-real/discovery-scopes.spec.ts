@@ -18,8 +18,10 @@ import { api, signupTenant, stamp, uiLogin, BASE } from './support/stack';
  *
  * One organization is created through the self-signup UI. Its administrator creates two
  * clients A and B, two sites of A, a VRF, an organization-wide credential and one of A, a
- * credential of B, a collector of A and one of B with a scope of B, and invites a user with
- * the client scope B and a role holding only discovery:read.
+ * credential of B, a collector of A and one of B with a scope of B, and invites a user as
+ * viewer of client B; after the acceptance the user gets a custom role holding only
+ * discovery:read in the scope of client B instead (an invitation carries standard roles only,
+ * RBA-02).
  *
  * Test → requirement IDs proven:
  *  D1 the administrator creates a scope of collector A in the scope form with name, site,
@@ -194,10 +196,17 @@ test.describe('Discovery scopes: the scope form sets every field of DIS-09', () 
       name: `discovery-read-${s}`,
       permissions: ['discovery:read'],
     });
+    const roles = await ok<List<{ id: string; name: string }>>('GET', '/roles?limit=100');
+    const viewerRole = (roles.data ?? []).find((r) => r.name === 'viewer')?.id ?? '';
+    expect(viewerRole, 'system role viewer (RBA-02)').not.toBe('');
+    // An invitation carries a standard role only (RBA-02): the user is invited as viewer of
+    // client B, gets the custom role with discovery:read in the scope of client B after the
+    // acceptance, and the viewer assignment is removed. He holds exactly discovery:read for
+    // client B, as D4 requires.
     w.foreign = { email: `scopes-b-${s}@audit-e2e.de`, password: `Audit-b-${s}!aA` };
     const invitation = await ok<{ token?: string }>('POST', '/invitations', {
       email: w.foreign.email,
-      role_id: role.id,
+      role_id: viewerRole,
       scope_type: 'client',
       scope_id: w.clientB.id,
     });
@@ -207,6 +216,21 @@ test.describe('Discovery scopes: the scope form sets every field of DIS-09', () 
       failOnStatusCode: false,
     });
     expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);
+    const foreignID = ((await accept.json()) as { user_id?: string }).user_id ?? '';
+    expect(foreignID, 'the accepted user').not.toBe('');
+    await ok('POST', '/role-assignments', {
+      user_id: foreignID,
+      custom_role_id: role.id,
+      scope_type: 'client',
+      scope_id: w.clientB.id,
+    });
+    const assignments = await ok<List<{ id: string; role_id?: string }>>(
+      'GET',
+      `/role-assignments?user_id=${foreignID}`,
+    );
+    const standard = (assignments.data ?? []).filter((a) => a.role_id === viewerRole);
+    expect(standard, 'the viewer assignment of the invitation').toHaveLength(1);
+    await ok('DELETE', `/role-assignments/${standard[0].id}`);
   });
 
   test.afterAll(async () => {
