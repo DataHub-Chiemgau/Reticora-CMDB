@@ -38,10 +38,10 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K4 Funktions-, Validierungs- und Bedienmängel](#k4-funktions--validierungs--und-bedienmängel) | WP-460 – WP-531 | 72 | 99,0 | Alle übrigen P2 behoben. |
 | [K4-Nachträge](#k4-nachträge) | WP-630 – WP-635 | 6 | 7,0 | Funde aus der Umsetzung von K4 behoben (F-355 bis F-362): Kontrast im dunklen Thema, Kartenmarker und Scrollbereiche per Tastatur (a11y-Prüfung in de-DE und en-US), Ausführung ad-hoc angelegter Discovery-Jobs, `PATCH /org` nur org-weit, Rackhöhe gegen alle Mounts, vollständige Listen statt Seitengrößen über 200. |
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
-| [K5-Nachträge](#k5-nachträge) | WP-636 – WP-644 | 9 | 8,5 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-373): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`. |
+| [K5-Nachträge](#k5-nachträge) | WP-636 – WP-646 | 11 | 10,5 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-375): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **292** | **394,0** | |
+| **Summe** | | **294** | **396,0** | |
 
 ```mermaid
 flowchart LR
@@ -54,7 +54,7 @@ flowchart LR
     K4["K4 Funktions-, Validierungs- und Bedienmängel<br/>72 WPs · 99,0 PT"]
     K4N["K4-Nachträge<br/>6 WPs · 7,0 PT"]
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
-    K5N["K5-Nachträge<br/>9 WPs · 8,5 PT"]
+    K5N["K5-Nachträge<br/>11 WPs · 10,5 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
@@ -434,6 +434,8 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-642](#wp-642--reticora_master_key_previous-in-compose-und-kubernetes) | `k5n-master-key-previous` | RETICORA_MASTER_KEY_PREVIOUS in Compose und Kubernetes | K5N | 0,5 | F-370 | WP-547 |
 | [WP-643](#wp-643--review-merge-mit-404-für-gelöschte-kandidaten-und-bereinigten-jobfehlern) | `k5n-review-merge-errors` | Review-Merge mit 404 für gelöschte Kandidaten und bereinigten Jobfehlern | K5N | 1,0 | F-372 | WP-554 |
 | [WP-644](#wp-644--clientliste-für-client-gescopte-rollen-ohne-userread) | `k5n-clients-read` | Clientliste für client-gescopte Rollen ohne user:read | K5N | 0,5 | F-373 | WP-556 |
+| [WP-645](#wp-645--lldp-kanten-des-ersten-zyklus-unabhängig-von-der-reihenfolge-der-ingest-lanes) | `k5n-lldp-lane-order` | LLDP-Kanten des ersten Zyklus unabhängig von der Reihenfolge der Ingest-Lanes | K5N | 1,0 | F-374 | WP-498, WP-543 |
+| [WP-646](#wp-646--real-stack-e2e-für-webkit-und-mobile-safari-über-einen-tls-origin) | `k5n-e2e-webkit-tls` | Real-Stack-E2E für WebKit und Mobile Safari über einen TLS-Origin | K5N | 1,0 | F-375 | WP-532, WP-558 |
 
 ## Konventionen für alle WPs
 
@@ -14922,6 +14924,8 @@ Funde aus der Umsetzung von K5, die kein K5-WP abdeckt (Konvention 16). Ein Nach
 
 Geprüft und nicht ohne Befund geschlossen: Alle fünf Kandidaten waren Defekte. F-363 ist einer, weil das Akzeptanzkriterium von WP-533 für jede Kindtabelle auch die Verschiebung des Elternobjekts verlangt; F-365, weil eine Inventur keinen Client hat und [E-09](../entscheidungen.md#e-09) das Schreiben solcher Zeilen org-weiten Principals vorbehält. Die Prioritäten folgen der Befundliste: F-364 ist P0 (Cross-Client-Exposition nach TEN-09), F-366 P1 (Cross-Org-Referenzen; die Module desk, key und training sind in G1 abgeschaltet, E-03), F-370 P1 (dokumentiertes Betriebsverfahren legt den Server lahm).
 
+Nachtrag aus der CI von PR #102 (K5, Konvention 16): F-374 (Real-Stack-Fall R01 von `relationships-suppression.spec.ts`, WP-543) ist mit dem Go-Defekttest `TestAuditLLDPEdgesOfFirstCycleIndependentOfLaneOrder` kodiert, der auf `c883c19` rot ausgeführt wurde; WP-645 überführt ihn (Konvention 13). F-375 (Browsermatrix von WP-532) ist geprüft: Der Verdacht, eine Plain-HTTP-Installation auf einem anderen Host verliere die Sitzung, weil das Refresh-Cookie immer `Secure` ist, trifft nicht zu, denn auf einem unsicheren Origin beginnt keine Anmeldung (SPA `InsecureContextError`, INS-04) und SEC-01 verlangt TLS. Es bleibt ein Artefakt der Testumgebung (P3): WebKit speichert das Secure-Cookie über `http://localhost` nicht. F-375 ist mit zwölf e2e-real-Zeilen kodiert (Fälle 07, 11, 14, 14a, 14b, 15 von `roles-authz.spec.ts`, Projekte webkit und mobile-safari); WP-646 löscht sie erst nach einem grünen CI-Lauf von `install-smoke.yml` und nennt dessen Lauf-ID.
+
 ### WP-636 – Nicht zugeordnete Discovery-Ergebnisse folgen der Client-Bindung ihres Collectors
 
 **Schlüssel:** `k5n-collector-result-scope` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
@@ -15376,6 +15380,106 @@ UI-01;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-644
 **Entscheidungsbedarf:** keiner (RBA-02 bleibt unverändert; nur die Routenberechtigung ändert sich)
 
 **Nicht Bestandteil:** Nutzerliste für `client_technician`; Clientnamen in anderen Ansichten.
+
+### WP-645 – LLDP-Kanten des ersten Zyklus unabhängig von der Reihenfolge der Ingest-Lanes
+
+**Schlüssel:** `k5n-lldp-lane-order` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-498 (`t4-power-redundancy`), WP-543 (`t4-rel-suppress-nachweis`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-374](../../../audit/g1-reaudit/FINDINGS.md#f-374) | P2 | LLDP-Kanten des ersten Discovery-Zyklus hängen von der Reihenfolge der Ingest-Lanes ab: Kanten zu Nachbarn aus einer späteren Lane fehlen bis zum nächsten Bericht | schließt | WP-543 |
+
+**Problem:** `deriveTopology` (`discovery/topology.go`) schreibt die Kante „meldendes Gerät → Nachbar“ nur, wenn der Nachbar zu einem vorhandenen CI auflöst. Die Records eines Zyklus verteilen sich über die Ingest-Lanes (`IngestLane`, FNV-1a von `serial:<Seriennummer>` modulo `RETICORA_INGEST_LANES`); wird das meldende Gerät vor seinem Nachbarn verarbeitet, fehlt die Kante bis zu seinem nächsten Bericht (5 bis 15 Minuten). Die gemeldeten Nachbarn werden nicht gespeichert, und beim Anlegen eines CI leitet nichts die Kanten ab, die andere Geräte zu ihm gemeldet haben. Für `powered_by` schließt `derivePowerFeedsOf` (WP-498, F-112) dieselbe Lücke. Lokal fehlen nach dem ersten Zyklus 9 von 30 Kanten der simulierten Flotte; in CI hatte `sim-access-01` 4 von 7 (R01).
+
+**Akzeptanzkriterien:**
+
+- [ ] Die gemeldeten LLDP/CDP-Nachbarn eines Records (Ziel-IP, -MAC, -Hostname, lokaler Port, Protokoll) werden am meldenden CI gespeichert (z. B. `raw_data.neighbors`), ohne dass eine unveränderte Meldung eine Attributänderung oder Historie erzeugt (AUD-03).
+- [ ] Nach dem Anlegen neuer CIs eines Batches werden die gespeicherten Nachbarn anderer CIs, die auf eines davon verweisen (IP, MAC, Hostname wie `BuildNeighborIndex`), aufgelöst und die Kanten mit `DeriveTopology` geschrieben: Confidence nach TOP-01, Suppressionen nach REL-03 (fail-closed wie `deriveTopology`), unbekannte Typschlüssel als Review wie bisher, keine doppelte Kante. Analog zu `derivePowerFeedsOf`: jede Seite leitet nach ihrem Commit ab, wer zuletzt ableitet, sieht die andere; das gilt auch für Lanes, die nebeneinander laufen.
+- [ ] Defekttest `TestAuditLLDPEdgesOfFirstCycleIndependentOfLaneOrder` grün und aus `discovery/k5_lldp_lane_order_auditdefect_test.go` nach `discovery/topology_integration_test.go` überführt (Datei gelöscht), Zeile aus `tests/audit/expected-failures.txt` entfernt; ergänzt um die Lanes nebeneinander (mehrere Runden) und eine unterdrückte Kante, die auch über den neuen Weg nicht entsteht.
+- [ ] Real-Stack-Fall R01 von `frontend/e2e-real/relationships-suppression.spec.ts` prüft die sieben Kanten von `sim-access-01` wieder nach dem ersten Zyklus (Vorbedingung aus Commit `51a68f9` zurückgenommen); grün in allen sechs Projekten (CI-Lauf von `install-smoke.yml`, Lauf-ID im PR).
+- [ ] Prüfung als `reticora_app` mit Tenant-GUCs; `TestAuditPowerRedundancyIndependentOfBatchOrder`, `TestSimulatedFleetIngest` und die Topologietests unverändert grün; Ingest-Budget (NFR-03, `ingest_budget_integration_test.go`) ohne Regression.
+- [ ] Retest F-374: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditLLDPEdgesOfFirstCycleIndependentOfLaneOrder|TestTopology' ./internal/discovery/` → PASS.
+
+**Dateien (8 Einträge):**
+
+- backend/internal/discovery/topology.go
+- backend/internal/discovery/discovery.go
+- backend/internal/discovery/devicerecord.go (Nachbarn im `raw_data`)
+- backend/internal/discovery/pg_repository.go (gespeicherte Nachbarn lesen)
+- backend/internal/discovery/topology_integration_test.go
+- backend/internal/discovery/k5_lldp_lane_order_auditdefect_test.go (entfernt)
+- frontend/e2e-real/relationships-suppression.spec.ts
+- tests/audit/expected-failures.txt
+
+**Migration/RLS:** keine (Speicherung im bestehenden `attributes` des CI); braucht die Suche nach verweisenden Nachbarn einen Index, eine Migration mit der nächsten freien Nummer (up/down, Roundtrip, Schema-Baseline mit dem Generator).
+
+**Tests:**
+
+- `discovery/topology_integration_test.go` (PG, App-Rolle, vier Lanes nacheinander in zwei Reihenfolgen und nebeneinander).
+- Real-Stack `relationships-suppression.spec.ts` R01 (CI).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-645
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** FDB-Kanten (Confidence 0.6), die nur ohne LLDP am Port entstehen; Entfernen gespeicherter Nachbarn, die ein Gerät nicht mehr meldet (TOP-02 unverändert).
+
+### WP-646 – Real-Stack-E2E für WebKit und Mobile Safari über einen TLS-Origin
+
+**Schlüssel:** `k5n-e2e-webkit-tls` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-532 (`k-e2e-real-browsers`), WP-558 (`t7-onboarding-tls-origin`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-375](../../../audit/g1-reaudit/FINDINGS.md#f-375) | P3 | Real-Stack-E2E in WebKit und Mobile Safari über den Plain-HTTP-Origin `http://localhost`: der Browser verwirft das Secure-Refresh-Cookie, die Refresh-Fälle von `roles-authz` scheitern (Testumgebung) | schließt | WP-532 |
+
+**Problem:** Der Job `e2e-real` von `install-smoke.yml` führt alle sechs Browserprojekte gegen die Loopback-Installation `http://localhost:3000` aus. Der Server setzt das Refresh-Cookie `reticora_refresh` mit `Secure` (richtig nach SEC-01); Chromium und Firefox speichern es auf `http://localhost`, WebKit nicht. In webkit und mobile-safari sind deshalb die Fälle 07, 11, 14, 14a, 14b und 15 von `roles-authz.spec.ts` rot, und AUT-02 (Refresh) und RBA-03 (Rollenänderung beim Refresh) sind in WebKit nicht belegt. Ein Produktdefekt liegt nicht vor: Auf einem unsicheren Origin beginnt keine Anmeldung (`InsecureContextError`, INS-04).
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Projekte webkit und mobile-safari des Jobs `e2e-real` laufen gegen einen TLS-Origin `https://<Name>`, der nicht localhost ist: eine Installation mit `RETICORA_TLS_DOMAIN` und Zertifikat einer Test-CA (Pebble wie in `tls-domain-pebble`, sslip.io-Name des Runners), `BASE_URL` und Issuer auf diesem Origin. Die Test-CA ist im Trust-Store von Runner und Browser eingetragen; kein `ignoreHTTPSErrors`. Chromium, Edge, Firefox und mobile-chrome bleiben auf der Loopback-Installation (INS-04 `@plain-http` unverändert).
+- [ ] Der Job prüft vor der Suite, dass `BASE_URL` mit `https://` beginnt und nicht localhost nennt, und dass die Anmeldung in WebKit das Cookie `reticora_refresh` setzt (Abbruch mit klarer Meldung sonst).
+- [ ] Lauf von `install-smoke.yml` mit allen sechs Projekten grün gegen `tests/audit/expected-failures.txt` (Ratchet `e2e-real-ratchet`); `roles-authz.spec.ts` 07, 11, 14, 14a, 14b und 15 grün in webkit und mobile-safari (Lauf-ID im PR); danach die zwölf e2e-real-Zeilen von F-375 entfernt.
+- [ ] deploy/README.md (Abschnitt HTTPS) und docs/troubleshooting-installation.md: Plain HTTP erlaubt eine Anmeldung nur auf Loopback (sicherer Kontext); Safari erneuert dort keine Sitzung (Secure-Cookie); für den Betrieb HTTPS (SEC-01).
+- [ ] actionlint für `install-smoke.yml`; Shell-Hilfsskripte mit shellcheck und dem Shell-Harness geprüft, der Installer nicht ausgeführt.
+- [ ] Retest F-375: CI-Lauf von `install-smoke.yml`, Jobs `e2e-real (webkit)` und `e2e-real (mobile-safari)` → die sechs Fälle grün, `e2e-real-ratchet` 0 Fehler.
+
+**Dateien (6 Einträge):**
+
+- .github/workflows/install-smoke.yml (TLS-Origin für webkit und mobile-safari)
+- frontend/e2e/fixtures/setup-onboarding.sh oder ein eigenes Setup-Skript des TLS-Origins
+- frontend/e2e-real/playwright.real.config.ts (falls die Projekte einen eigenen `baseURL` brauchen)
+- deploy/README.md
+- docs/troubleshooting-installation.md
+- tests/audit/expected-failures.txt
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- Real-Stack `roles-authz.spec.ts` in webkit und mobile-safari über den TLS-Origin (CI).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+AUT-02;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-646
+TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
+```
+
+**Entscheidungsbedarf:** keiner (SEC-01 gilt; das Refresh-Cookie bleibt `Secure`)
+
+**Nicht Bestandteil:** `Secure` des Refresh-Cookies nach Schema der Anfrage oder der öffentlichen URL (von den Anforderungen nicht verlangt); Plain-HTTP-Betrieb auf anderen Hosts als Loopback; die übrigen in WebKit roten Fälle anderer Befunde.
 
 ## K6 Geringfügige Mängel
 
