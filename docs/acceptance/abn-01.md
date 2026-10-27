@@ -140,6 +140,40 @@ darunter „self-signup, verification, trial, login and dashboard“ (Schritte 1
 und 2) und „collector, scopes, 30 simulated devices, review, impact and
 export“ (Schritte 3 bis 8).
 
+Änderung nach dem Einfrieren, 2026-10-27: WP-558 (`t7-onboarding-tls-origin`,
+INS-04, F-352). Grund: Das INS-04-Fehlerbild „Localhost-Redirect“ wurde nicht
+erkannt. Die Suite lief nur über `http://localhost:<port>`, verglich den
+Origin der `redirect_uri` mit diesem localhost-Origin und übersprang die
+Issuer-Prüfung ohne `E2E_ISSUER_URL`. Änderungen:
+
+- `frontend/e2e/onboarding.spec.ts`: Die Prüfung der Authorize-Weiterleitung
+  verlangt `E2E_ISSUER_URL` und schlägt ohne die Variable fehl, statt zu
+  überspringen. Ist `BASE_URL` kein Loopback-Origin, nennen Authorize-URL,
+  `redirect_uri` und Issuer weder localhost noch eine Loopback-Adresse und
+  haben den Origin von `BASE_URL`. Neu ist ein Selbsttest: `page.route`
+  schreibt die `redirect_uri` der Authorize-Weiterleitung auf
+  `http://localhost:1/auth/callback` um, und die Prüfung muss fehlschlagen.
+  Die INS-04-Tests tragen das Tag `@ins-04`. Der Test zum unsicheren Origin
+  trägt zusätzlich `@plain-http`, weil eine TLS-Installation HTTP auf HTTPS
+  umleitet.
+- `frontend/e2e/fixtures/setup-onboarding.sh`: Bei `RETICORA_TLS_DOMAIN` in
+  der Env-Datei ist `BASE_URL` `https://<Domain>`. Das Skript prüft das
+  Frontend dort und vertraut dabei der Wurzel aus `E2E_CA_CERT`. Es setzt
+  `E2E_ISSUER_URL` auf den Issuer der Installation und bricht ab, wenn
+  dieser fehlt. Ohne TLS-Domain bleibt `BASE_URL`
+  `http://localhost:<RETICORA_FRONTEND_PORT>`.
+
+Eingaben und die Schritte 1 bis 8 bleiben unverändert. Die Prüfsummen beider
+Dateien in `artefakte/SHA256SUMS` sind neu. Der Job `tls-domain-pebble` in
+`install-smoke.yml` behält die Installation von
+`tests/install-acme-pebble.test.sh` mit dem Pebble-Zertifikat. Danach laufen
+dort die INS-04-Tests (`--grep @ins-04 --grep-invert @plain-http`) über
+`https://<Domain>`. Die Suite vertraut der Pebble-Wurzel über
+`playwright.install.config.ts` (NSS-Datenbank, `NODE_EXTRA_CA_CERTS`) statt
+über `ignoreHTTPSErrors`. Lauf-ID des Jobs `tls-domain-pebble`: ausstehend.
+Der Lauf hat noch nicht stattgefunden und wird nach dem ersten CI-Lauf mit
+dieser Fassung nachgetragen. Bis dahin ist der Retest von F-352 offen.
+
 | # | Schritt | Erwartung | Ergebnis |
 |---|---|---|---|
 | 1 | Self-Signup | über den Link „Konto anlegen“ der Anmeldeseite; Bestätigungs-Mail, Organisation mit Trial | bestanden (Lauf #219, Fassung WP-529; frühere Fassung in Lauf #122) |

@@ -872,25 +872,88 @@ jobs:
   # the renewed certificate is served without a frontend restart within the
   # reload interval (10 s here; the test waits up to 10 min), and an
   # unchanged certificate causes no reload.
+  # WP-558 (INS-04, F-352): the test keeps its installation with the Pebble
+  # certificate (RETICORA_PEBBLE_KEEP_STACK), and the INS-04 tests of the
+  # onboarding suite (tag @ins-04) run over its TLS origin https://<domain>:
+  # authorize URL, redirect_uri and issuer must not name localhost, and the
+  # self-test with a localhost redirect_uri must be recognised. The suite
+  # trusts the Pebble root (E2E_CA_CERT: NSS database, NODE_EXTRA_CA_CERTS)
+  # instead of ignoring certificate errors. The insecure-origin test
+  # (@plain-http) needs a plain-HTTP UI, which a TLS installation redirects
+  # to HTTPS; that redirect is checked instead.
   tls-domain-pebble:
     needs: installer-script-tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
       - name: Make installer scripts executable
         run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
 
-      - name: Installer against Pebble (issuance, re-run, uid 101 after issuance and renewal, renewal served without restart, issuer checks, failed challenge)
+      - name: Hand-off of the kept installation (WP-558)
+        run: |
+          echo "RETICORA_PEBBLE_KEEP_STACK=$RUNNER_TEMP/tls-origin" >>"$GITHUB_ENV"
+          echo "E2E_CA_CERT=$RUNNER_TEMP/tls-origin/pebble-root.pem" >>"$GITHUB_ENV"
+
+      - name: Installer against Pebble (issuance, re-run, uid 101 after issuance and renewal, renewal served without restart, issuer checks, failed challenge, installation kept)
         run: ./tests/install-acme-pebble.test.sh "$RUNNER_TEMP/tls-domain-pebble"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: collector/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Prepare the onboarding suite on the TLS origin
+        run: |
+          [ -s "$E2E_CA_CERT" ] || { echo "FAIL: no kept installation ($E2E_CA_CERT missing)"; exit 1; }
+          ./frontend/e2e/fixtures/setup-onboarding.sh deploy/docker-compose .env
+          domain="$(sed -n 's/^RETICORA_TLS_DOMAIN=//p' deploy/docker-compose/.env | tail -n 1 | tr -d "\"'")"
+          base="$(sed -n 's/^BASE_URL=//p' "$GITHUB_ENV" | tail -n 1)"
+          issuer="$(sed -n 's/^E2E_ISSUER_URL=//p' "$GITHUB_ENV" | tail -n 1)"
+          echo "BASE_URL=$base E2E_ISSUER_URL=$issuer"
+          [ -n "$domain" ] && [ "$base" = "https://$domain" ] \
+            || { echo "FAIL: BASE_URL '$base' is not the TLS origin https://$domain"; exit 1; }
+          case "$base $issuer" in
+            *localhost*|*127.0.0.1*) echo "FAIL: BASE_URL or E2E_ISSUER_URL names localhost"; exit 1 ;;
+          esac
+          # The plain-HTTP origin redirects to the TLS origin.
+          location="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' "http://$domain/login")"
+          [ "$location" = "301 https://$domain/login" ] \
+            || { echo "FAIL: http://$domain/login answers '$location', expected '301 https://$domain/login'"; exit 1; }
+
+      - name: Run the INS-04 tests of the onboarding suite over the TLS origin
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/tls-origin-e2e/report.json
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          command -v certutil >/dev/null || sudo apt-get install -y --no-install-recommends libnss3-tools
+          npx playwright test -c e2e/fixtures/playwright.install.config.ts \
+            --grep @ins-04 --grep-invert @plain-http \
+            --reporter=github,list,json --output "$RUNNER_TEMP/tls-origin-e2e/test-results"
+          # The authorize check and its self-test ran and passed.
+          for t in 'the authorization redirect targets the configured issuer with PKCE' \
+            'self-test: a localhost redirect_uri fails the redirect check'; do
+            jq -e --arg t "$t" '[.. | objects | select(.title? == $t) | .tests[]?.results[]?.status] | length > 0 and all(. == "passed")' \
+              "$PLAYWRIGHT_JSON_OUTPUT_NAME" >/dev/null || { echo "FAIL: '$t' did not pass"; exit 1; }
+          done
 
       - name: Upload the installer, Pebble and stack logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: tls-domain-pebble
-          path: ${{ runner.temp }}/tls-domain-pebble/
+          path: |
+            ${{ runner.temp }}/tls-domain-pebble/
+            ${{ runner.temp }}/tls-origin-e2e/
           retention-days: 14
 
   # INS-05 (WP-386, F-125): a re-run of the installer applies rotated
