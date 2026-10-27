@@ -228,6 +228,20 @@ jobs:
           for i in $(seq 1 30); do nc -z localhost 4222 && exit 0; sleep 1; done
           docker logs nats; exit 1
 
+      # OPS-04/NFR-05 (WP-544): setupObjectStorage creates the buckets and
+      # switches on their versioning against a real MinIO, the image of
+      # deploy/docker-compose (cmd/server/objectstorage_integration_test.go).
+      # Service containers cannot pass arguments ("server /data"), so MinIO
+      # is started here.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=reticora -e MINIO_ROOT_PASSWORD=reticora_dev \
+            pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372 \
+            server /data
+          for _ in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:9000/minio/health/live && exit 0; sleep 1; done
+          docker logs minio; exit 1
+
       # Every PostgreSQL test activates itself through TEST_DATABASE_URL, so the
       # whole module runs without a name filter. -p 1 runs packages one after
       # another: they share this database and some fixtures are not isolated.
@@ -239,6 +253,9 @@ jobs:
           TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
           TEST_APP_DATABASE_URL: postgres://reticora_test_runtime:reticora_test_runtime@localhost:5432/reticora_migrations?sslmode=disable
           TEST_NATS_URL: nats://localhost:4222
+          TEST_S3_ENDPOINT: http://localhost:9000
+          TEST_S3_ACCESS_KEY: reticora
+          TEST_S3_SECRET_KEY: reticora_dev
         run: gotestsum --format testname --jsonfile test-db.json -- -count=1 -p 1 ./...
 
       # ABN-02/NFR-10 (WP-436, retest of F-115 and F-280): the plan budget of

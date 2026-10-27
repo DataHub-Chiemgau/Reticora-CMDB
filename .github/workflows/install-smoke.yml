@@ -295,12 +295,69 @@ jobs:
           [ "$lines" -gt 0 ] || { echo "FAIL: docker compose logs server read nothing ($driver)"; exit 1; }
           echo "OK: the server logs with $driver; docker compose logs read $lines lines"
 
-      # WP-100 (OPS-04): WAL archiving works and a base backup exists.
+      # WP-100 (OPS-04, NFR-05), executed evidence of WP-544: the scheduler
+      # backs up only at RETICORA_BACKUP_HOUR, so the step triggers a full
+      # backup itself (retried while the scheduler's first backup holds the
+      # stanza lock). Then a WAL switch must reach the repository
+      # (pg_stat_archiver.archived_count rises within 120 s), 'pgbackrest
+      # info' must list one full backup more than before, and health and
+      # verify-repo must pass. The
+      # pgBackRest commands run through reticora-pgbackrest-env.sh, which
+      # derives PGBACKREST_REPO1_CIPHER_PASS from RETICORA_BACKUP_CIPHER_PASS
+      # like the entrypoints of the postgres and backup containers.
       - name: Verify the backup chain
         run: |
+          set -euo pipefail
           cd deploy/docker-compose
-          docker compose --env-file .env exec -T backup reticora-pgbackrest-env.sh pgbackrest --stanza=reticora check
-          docker compose --env-file .env exec -T backup reticora-pgbackrest-env.sh reticora-backup.sh health
+          dc() { docker compose --env-file .env "$@"; }
+          backrest() { dc exec -T backup reticora-pgbackrest-env.sh "$@"; }
+          sql() { dc exec -T postgres psql -U reticora -d reticora -XAtv ON_ERROR_STOP=1 -c "$1"; }
+          full_backups() {
+            backrest pgbackrest --stanza=reticora --output=json info \
+              | jq '[.[] | select(.name == "reticora") | .backup[]? | select(.type == "full")] | length'
+          }
+
+          # The scheduler may already have taken its first backup; the
+          # triggered one must add a full backup of its own.
+          before_fulls="$(full_backups)"
+          for attempt in $(seq 1 30); do
+            if out="$(backrest pgbackrest --stanza=reticora --type=full backup 2>&1)"; then
+              printf '%s\n' "$out" | tail -n 3
+              break
+            fi
+            printf '%s\n' "$out" | tail -n 5
+            if ! grep -qE 'LockAcquireError|unable to acquire lock' <<<"$out" || [ "$attempt" -eq 30 ]; then
+              echo "FAIL: the triggered full backup failed (attempt $attempt)"; exit 1
+            fi
+            echo "the stanza is locked by a running backup, retrying in 10 s"; sleep 10
+          done
+
+          backrest pgbackrest --stanza=reticora check
+
+          before="$(sql 'SELECT archived_count FROM pg_stat_archiver')"
+          # A committed transaction id puts a record into the current segment,
+          # so pg_switch_wal() closes a segment that has to be archived.
+          sql 'SELECT txid_current()' >/dev/null
+          segment="$(sql 'SELECT pg_walfile_name(pg_switch_wal())')"
+          deadline=$((SECONDS + 120))
+          until after="$(sql 'SELECT archived_count FROM pg_stat_archiver')"; [ "$after" -gt "$before" ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "FAIL: archived_count stayed at $after (before $before) for 120 s after the switch of $segment"
+              sql 'SELECT * FROM pg_stat_archiver'; exit 1
+            fi
+            sleep 2
+          done
+          echo "OK: archived_count $before -> $after after the switch of $segment"
+
+          fulls="$(full_backups)"
+          if [ "$fulls" -lt 1 ] || [ "$fulls" -le "$before_fulls" ]; then
+            echo "FAIL: pgbackrest info lists $fulls full backup(s), $before_fulls before the triggered backup"
+            backrest pgbackrest --stanza=reticora info; exit 1
+          fi
+          echo "OK: pgbackrest info lists $fulls full backup(s), $before_fulls before the triggered backup"
+
+          backrest reticora-backup.sh health
+          backrest reticora-backup.sh verify-repo
 
       - name: Verify backend health endpoint
         run: |
