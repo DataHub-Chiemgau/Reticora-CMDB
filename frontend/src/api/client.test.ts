@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import spec from './generated/schema.d.ts?raw';
 
 const futureExpiry = '2999-01-01T00:00:00Z';
 
@@ -389,4 +390,73 @@ describe('complete lists over several pages (API-02)', () => {
       expect(offsets).toEqual(['0', '200', '400']);
     },
   );
+});
+
+// scopedListsOfSpec reads, from the types generated from api/openapi.yaml
+// (src/api/generated/schema.d.ts, kept in sync by generate:api:check), every
+// GET route with the query parameter client_id or site_id: path without
+// /api/v1 → its scope parameters, sorted.
+function scopedListsOfSpec(schema: string): Record<string, string[]> {
+  const getOf = new Map<string, string>();
+  const params = new Map<string, Set<string>>();
+  let path = '';
+  let operation = '';
+  let inOperations = false;
+  let inQuery = false;
+  for (const line of schema.split('\n')) {
+    if (/^export interface operations \{/.test(line)) {
+      inOperations = true;
+      continue;
+    }
+    if (!inOperations) {
+      const p = /^ {2}'(\/api\/v1\/[^']+)': \{\s*$/.exec(line);
+      if (p?.[1]) path = p[1];
+      const g = /^ {4}get: operations\['([^']+)'\];/.exec(line);
+      if (g?.[1] && path) getOf.set(path, g[1]);
+      continue;
+    }
+    const o = /^ {2}([A-Za-z0-9_]+): \{\s*$/.exec(line);
+    if (o?.[1]) {
+      operation = o[1];
+      inQuery = false;
+      params.set(operation, new Set());
+      continue;
+    }
+    if (/^ {6}query\??: \{\s*$/.test(line)) {
+      inQuery = true;
+      continue;
+    }
+    if (inQuery && /^ {6}\};/.test(line)) {
+      inQuery = false;
+      continue;
+    }
+    const k = inQuery ? /^ {8}(client_id|site_id)\??: /.exec(line) : null;
+    if (k?.[1]) params.get(operation)?.add(k[1]);
+  }
+  const out: Record<string, string[]> = {};
+  for (const [p, op] of getOf) {
+    const keys = [...(params.get(op) ?? [])].sort();
+    if (keys.length > 0) out[p.replace(/^\/api\/v1/, '')] = keys;
+  }
+  return out;
+}
+
+describe('scoped lists match the API (WP-556, UI-01/UI-02)', () => {
+  it('reads the scope parameters of known routes from the generated schema', () => {
+    // Guards the parser: a format change of the generator must not turn the
+    // parity check below into a comparison of two empty sets.
+    const fromSpec = scopedListsOfSpec(spec);
+    expect(fromSpec['/cis']).toEqual(['client_id', 'site_id']);
+    expect(fromSpec['/sites']).toEqual(['client_id']);
+    expect(fromSpec['/clients']).toBeUndefined();
+    expect(fromSpec['/cis/{id}']).toBeUndefined();
+  });
+
+  it('SCOPED_LISTS holds every GET list with client_id/site_id and nothing else', async () => {
+    const { SCOPED_LISTS } = await import('./client');
+    const fromClient = Object.fromEntries(
+      Object.entries(SCOPED_LISTS).map(([p, keys]) => [p, [...keys].sort()]),
+    );
+    expect(fromClient).toEqual(scopedListsOfSpec(spec));
+  });
 });

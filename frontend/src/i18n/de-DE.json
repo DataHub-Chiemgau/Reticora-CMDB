@@ -1551,6 +1551,8 @@
     "site": "Standort",
     "allClients": "Alle Kunden",
     "allSites": "Alle Standorte",
+    "moreClients": "Weitere Kunden laden",
+    "moreSites": "Weitere Standorte laden",
     "outsideCI": "Dieses CI liegt außerhalb des gewählten Bereichs ({{scope}}).",
     "switchToObject": "Bereich wechseln"
   },

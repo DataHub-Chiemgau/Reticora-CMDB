@@ -326,8 +326,14 @@ export const LOCATION_CHILD_KINDS: Record<LocationKind, LocationKind[]> = {
 
 /** clientApi lists the clients a site can belong to. */
 export const clientApi = {
-  list() {
-    return fetchAPI<components['schemas']['ClientListResponse']>('/clients?limit=200');
+  /** One page of 200 clients; `offset` reads the following pages (F-340). */
+  list({ offset = 0 }: { offset?: number } = {}) {
+    return fetchAPI<components['schemas']['ClientListResponse']>(
+      `/clients?limit=200${offset > 0 ? `&offset=${offset}` : ''}`,
+    );
+  },
+  get(id: string) {
+    return fetchAPI<components['schemas']['Client']>(`/clients/${encodeURIComponent(id)}`);
   },
 };
 

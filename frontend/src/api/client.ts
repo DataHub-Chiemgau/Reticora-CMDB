@@ -409,14 +409,24 @@ export class ApiError extends Error {
 /**
  * SCOPED_LISTS are the list endpoints that filter by client and site; the
  * scope chosen in the layout (UI-01/UI-02) is added to their GET requests
- * unless the caller set the parameter itself.
+ * unless the caller set the parameter itself. They are exactly the GET routes
+ * of the API with the query parameter client_id or site_id (WP-556; checked
+ * against the generated schema in client.test.ts).
  */
-const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> = {
+export const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> = {
   '/cis': ['client_id', 'site_id'],
+  '/export/cis': ['client_id'],
   '/topology': ['client_id', 'site_id'],
   '/assets': ['client_id'],
+  '/orders': ['client_id'],
+  '/consumables': ['client_id'],
   '/contacts': ['client_id'],
   '/sites': ['client_id'],
+  '/buildings': ['site_id'],
+  '/vlans': ['site_id'],
+  '/subnets': ['client_id', 'site_id'],
+  '/slas': ['client_id'],
+  '/forms': ['client_id'],
 };
 
 /** withScope adds the selected scope to a GET of a scoped list. */

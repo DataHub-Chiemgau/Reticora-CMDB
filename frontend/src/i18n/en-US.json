@@ -1551,6 +1551,8 @@
     "site": "Site",
     "allClients": "All clients",
     "allSites": "All sites",
+    "moreClients": "Load more clients",
+    "moreSites": "Load more sites",
     "outsideCI": "This CI lies outside the selected scope ({{scope}}).",
     "switchToObject": "Switch scope"
   },

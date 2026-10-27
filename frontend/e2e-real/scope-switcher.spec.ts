@@ -3,9 +3,18 @@ import {
   expect,
   type APIRequestContext,
   type BrowserContext,
+  type Locator,
   type Page,
 } from '@playwright/test';
-import { api, signupTenant, stamp, uiLogin, BASE } from './support/stack';
+import {
+  api,
+  scopedUser,
+  signupTenant,
+  stamp,
+  uiLogin,
+  BASE,
+  type ScopedUser,
+} from './support/stack';
 
 /*
  * The scope control and the CI detail against real API data (WP-524, binding retest of
@@ -30,8 +39,26 @@ import { api, signupTenant, stamp, uiLogin, BASE } from './support/stack';
  *     client B, and the relationship list now hides the edge to a1 ... UI-01, UI-02
  *  S3 "Alle Kunden" drops the selection: no notice, every edge listed ... UI-01, UI-02
  *
+ * The list part (WP-556, open evidence of WP-191) uses a second organization: its
+ * administrator creates the clients A, B and C, the sites sA (client A) and sB (client B)
+ * and the CIs a1, a2 (client A), b1 (client B) and c1 (client C). A user is invited
+ * (support/stack.ts, scopedUser) and holds the standard role viewer in the scopes of
+ * client A and client B only (POST /role-assignments), so the server's row-level
+ * security hides client C from him.
+ *
+ *  L1 the scope control of the client-restricted user offers exactly "Alle Kunden",
+ *     client A and client B, as GET /clients of his session ... UI-01, UI-02 (WP-191)
+ *  L2 choosing client A narrows /cmdb through the real API: the list request carries
+ *     client_id of A, its answer holds a1 and a2 only, the page lists them and not b1,
+ *     and the counter equals the total of GET /cis?client_id=A ... UI-01 … UI-05
+ *  L3 choosing client B after client A and site sA resets the site: the next list
+ *     request carries client_id of B and no site_id, the site control shows "Alle
+ *     Standorte" and offers sB only ... UI-01, UI-02
+ *  L4 client B and site sB hold after a reload; the list request after the reload
+ *     carries both ... UI-01, UI-02, UI-07 … UI-10
+ *
  * A failing test is a product finding: the assertions encode the acceptance criteria
- * of WP-524 and decision E-87 (docs/plan/g1-korrektur/entscheidungen.md).
+ * of WP-524, WP-556 and decision E-87 (docs/plan/g1-korrektur/entscheidungen.md).
  */
 
 interface Named {
@@ -202,5 +229,266 @@ test.describe('CI detail under the chosen client scope (F-169)', () => {
     await expect(card.getByRole('link', { name: w.a1.id })).toBeVisible();
     await expect(card.getByRole('link', { name: w.b2.id })).toBeVisible();
     await expect(card.getByText(/außerhalb des Bereichs ausgeblendet/)).toHaveCount(0);
+  });
+});
+
+interface ListOf<T> {
+  data: T[] | null;
+  total: number;
+}
+
+interface CIRow {
+  id: string;
+  name: string;
+  client_id?: string | null;
+}
+
+interface ListWorld {
+  rq: APIRequestContext;
+  adminCtx: BrowserContext;
+  adminToken: string;
+  clientA: Named;
+  clientB: Named;
+  clientC: Named;
+  siteA: Named;
+  siteB: Named;
+  a1: Named;
+  a2: Named;
+  b1: Named;
+  c1: Named;
+  user: ScopedUser;
+  ctx: BrowserContext;
+  page: Page;
+  token: string;
+}
+
+let l: ListWorld;
+
+/** adminOk asserts a 2xx answer of a setup call of the list part and returns its body. */
+async function adminOk<T>(method: 'GET' | 'POST', path: string, data?: unknown): Promise<T> {
+  const res = await api<T>(l.rq, l.adminToken, method, path, data);
+  expect(res.status, `${method} ${path}: ${JSON.stringify(res.body)}`).toBeGreaterThanOrEqual(200);
+  expect(res.status, `${method} ${path}: ${JSON.stringify(res.body)}`).toBeLessThan(300);
+  return res.body;
+}
+
+function siteSelect(page: Page) {
+  return page
+    .getByRole('group', { name: 'Arbeitsbereich' })
+    .getByRole('combobox', { name: 'Standort' });
+}
+
+/** optionValues reads the values of the options of a select, sorted. */
+async function optionValues(select: Locator): Promise<string[]> {
+  const values = await select
+    .locator('option')
+    .evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));
+  return values.sort();
+}
+
+/** cisRequest waits for the CMDB list request whose query matches `match`. */
+function cisRequest(page: Page, match: (query: URLSearchParams) => boolean) {
+  return page.waitForResponse((r) => {
+    const url = new URL(r.url());
+    return (
+      url.pathname === '/api/v1/cis' && r.request().method() === 'GET' && match(url.searchParams)
+    );
+  });
+}
+
+/** openList opens /cmdb with the scope control loaded for the user. */
+async function openList(page: Page): Promise<void> {
+  await page.goto('/cmdb');
+  await expect(clientSelect(page)).toBeEnabled();
+  await expect(clientSelect(page).getByRole('option', { name: l.clientA.name })).toBeAttached();
+}
+
+test.describe('scope control lists of a client-restricted user (WP-556, WP-191)', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  test.beforeAll(async ({ browser, playwright }) => {
+    test.setTimeout(5 * 60_000);
+    const rq = await playwright.request.newContext();
+    const adminCtx = await browser.newContext({
+      baseURL: BASE,
+      locale: 'de-DE',
+      extraHTTPHeaders: { 'X-Real-IP': realIp() },
+    });
+    const adminPage = await adminCtx.newPage();
+    const account = await signupTenant(adminPage, rq, 'scopelist');
+    const adminToken = await uiLogin(adminPage, account);
+    const s = stamp();
+    l = { rq, adminCtx, adminToken } as ListWorld;
+
+    const client = (key: string) =>
+      adminOk<Named>('POST', '/clients', {
+        name: `Liste Kunde ${key} ${s}`,
+        slug: `liste-kunde-${key.toLowerCase()}-${s}`,
+      });
+    l.clientA = await client('A');
+    l.clientB = await client('B');
+    l.clientC = await client('C');
+    l.siteA = await adminOk<Named>('POST', '/sites', {
+      client_id: l.clientA.id,
+      name: `Liste Standort A ${s}`,
+    });
+    l.siteB = await adminOk<Named>('POST', '/sites', {
+      client_id: l.clientB.id,
+      name: `Liste Standort B ${s}`,
+    });
+    const types = await adminOk<ListOf<{ id: string; key: string }>>('GET', '/ci-types?limit=200');
+    const server = (types.data ?? []).find((t) => t.key === 'server')?.id ?? '';
+    expect(server, 'catalog type server').not.toBe('');
+    const ci = (name: string, clientId: string) =>
+      adminOk<Named>('POST', '/cis', { ci_type_id: server, name, client_id: clientId });
+    l.a1 = await ci(`liste-a1-${s}`, l.clientA.id);
+    l.a2 = await ci(`liste-a2-${s}`, l.clientA.id);
+    l.b1 = await ci(`liste-b1-${s}`, l.clientB.id);
+    l.c1 = await ci(`liste-c1-${s}`, l.clientC.id);
+
+    // Positive control: the organization-wide administrator reads all three clients.
+    const adminClients = await adminOk<ListOf<Named>>('GET', '/clients?limit=200');
+    expect((adminClients.data ?? []).map((c) => c.id).sort()).toEqual(
+      [l.clientA.id, l.clientB.id, l.clientC.id].sort(),
+    );
+
+    // The user: viewer in the scope of client A (scopedUser) and of client B.
+    l.user = await scopedUser(rq, adminToken, {
+      label: 'scope-list',
+      role: 'viewer',
+      scope_type: 'client',
+      scope_id: l.clientA.id,
+      inviteClientId: l.clientB.id,
+    });
+    const roles = await adminOk<ListOf<{ id: string; name: string }>>('GET', '/roles?limit=100');
+    const viewer = (roles.data ?? []).find((r) => r.name === 'viewer')?.id ?? '';
+    expect(viewer, 'system role viewer').not.toBe('');
+    await adminOk('POST', '/role-assignments', {
+      user_id: l.user.userId,
+      role_id: viewer,
+      scope_type: 'client',
+      scope_id: l.clientB.id,
+    });
+    const assignments = await adminOk<
+      ListOf<{ role_id?: string; scope_type: string; scope_id?: string }>
+    >('GET', `/role-assignments?user_id=${l.user.userId}`);
+    expect(
+      (assignments.data ?? []).map((a) => `${a.role_id}/${a.scope_type}/${a.scope_id}`).sort(),
+      'the user holds viewer in client A and client B only',
+    ).toEqual([`${viewer}/client/${l.clientA.id}`, `${viewer}/client/${l.clientB.id}`].sort());
+
+    l.ctx = await browser.newContext({
+      baseURL: BASE,
+      locale: 'de-DE',
+      extraHTTPHeaders: { 'X-Real-IP': realIp() },
+    });
+    l.page = await l.ctx.newPage();
+    l.token = await uiLogin(l.page, l.user);
+  });
+
+  test.afterAll(async () => {
+    await l?.ctx?.close();
+    await l?.adminCtx?.close();
+    await l?.rq.dispose();
+  });
+
+  test('L1 the scope control offers only the clients of the user', async () => {
+    const page = l.page;
+    await openList(page);
+
+    const expected = ['', l.clientA.id, l.clientB.id].sort();
+    await expect.poll(() => optionValues(clientSelect(page))).toEqual(expected);
+    await expect(clientSelect(page).getByRole('option', { name: l.clientC.name })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Weitere Kunden laden' })).toHaveCount(0);
+
+    // The same clients as the API returns to his session.
+    const own = await api<ListOf<Named>>(l.rq, l.token, 'GET', '/clients?limit=200');
+    expect(own.status, 'GET /clients as the client-restricted user').toBe(200);
+    expect(['', ...(own.body.data ?? []).map((c) => c.id)].sort()).toEqual(expected);
+  });
+
+  test('L2 client A narrows /cmdb through the real API', async () => {
+    const page = l.page;
+    await openList(page);
+
+    const listed = cisRequest(page, (q) => q.get('client_id') === l.clientA.id);
+    await clientSelect(page).selectOption(l.clientA.id);
+    const res = await listed;
+    expect(res.status(), 'CMDB list under client A').toBe(200);
+    const body = (await res.json()) as ListOf<CIRow>;
+    const rows = body.data ?? [];
+    expect(rows.map((c) => c.id).sort()).toEqual([l.a1.id, l.a2.id].sort());
+    expect(rows.every((c) => c.client_id === l.clientA.id)).toBe(true);
+
+    const main = page.locator('#main-content');
+    await expect(main.getByText(l.a1.name, { exact: true })).toBeVisible();
+    await expect(main.getByText(l.a2.name, { exact: true })).toBeVisible();
+    await expect(main.getByText(l.b1.name, { exact: true })).toHaveCount(0);
+    await expect(main.getByText(l.c1.name, { exact: true })).toHaveCount(0);
+
+    // The counter is the total of the API for the same scope and session.
+    const fromApi = await api<ListOf<CIRow>>(
+      l.rq,
+      l.token,
+      'GET',
+      `/cis?client_id=${l.clientA.id}&limit=200`,
+    );
+    expect(fromApi.status).toBe(200);
+    expect(fromApi.body.total).toBe(2);
+    expect(body.total).toBe(fromApi.body.total);
+    expect((fromApi.body.data ?? []).map((c) => c.id).sort()).toEqual(rows.map((c) => c.id).sort());
+    await expect(main.getByText(`${fromApi.body.total} Einträge`, { exact: true })).toBeVisible();
+  });
+
+  test('L3 changing the client resets the site', async () => {
+    const page = l.page;
+    await openList(page);
+    await clientSelect(page).selectOption(l.clientA.id);
+    await expect(siteSelect(page).getByRole('option', { name: l.siteA.name })).toBeAttached();
+    await expect.poll(() => optionValues(siteSelect(page))).toEqual(['', l.siteA.id].sort());
+
+    const withSite = cisRequest(
+      page,
+      (q) => q.get('client_id') === l.clientA.id && q.get('site_id') === l.siteA.id,
+    );
+    await siteSelect(page).selectOption(l.siteA.id);
+    expect((await withSite).status()).toBe(200);
+
+    const afterChange = cisRequest(page, (q) => q.get('client_id') === l.clientB.id);
+    await clientSelect(page).selectOption(l.clientB.id);
+    const res = await afterChange;
+    expect(res.status()).toBe(200);
+    expect(new URL(res.url()).searchParams.get('site_id'), 'no site after the change').toBeNull();
+    await expect(siteSelect(page)).toHaveValue('');
+    await expect(siteSelect(page).locator('option:checked')).toHaveText('Alle Standorte');
+    await expect.poll(() => optionValues(siteSelect(page))).toEqual(['', l.siteB.id].sort());
+    const body = (await res.json()) as ListOf<CIRow>;
+    expect((body.data ?? []).map((c) => c.id)).toEqual([l.b1.id]);
+  });
+
+  test('L4 the selection holds after a reload', async () => {
+    const page = l.page;
+    await openList(page);
+    await clientSelect(page).selectOption(l.clientB.id);
+    await expect(siteSelect(page).getByRole('option', { name: l.siteB.name })).toBeAttached();
+    const withSite = cisRequest(
+      page,
+      (q) => q.get('client_id') === l.clientB.id && q.get('site_id') === l.siteB.id,
+    );
+    await siteSelect(page).selectOption(l.siteB.id);
+    expect((await withSite).status()).toBe(200);
+    await expect(siteSelect(page)).toHaveValue(l.siteB.id);
+
+    // Registered after the answer above, so only a request of the reloaded page matches.
+    const afterReload = cisRequest(
+      page,
+      (q) => q.get('client_id') === l.clientB.id && q.get('site_id') === l.siteB.id,
+    );
+    await page.reload();
+    expect((await afterReload).status()).toBe(200);
+    await expect(clientSelect(page)).toHaveValue(l.clientB.id);
+    await expect(clientSelect(page).locator('option:checked')).toHaveText(l.clientB.name);
+    await expect(siteSelect(page)).toHaveValue(l.siteB.id);
+    await expect(siteSelect(page).locator('option:checked')).toHaveText(l.siteB.name);
   });
 });
