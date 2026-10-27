@@ -18,7 +18,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -194,20 +193,12 @@ func TestUnlicensedCIs(t *testing.T) {
 	}
 }
 
-// reviewOutbox reports opened review items as review.created into the
-// outbox, as the router's review notifier does (NTF-05).
-type reviewOutbox struct{ emitter events.Emitter }
-
-func (r reviewOutbox) ReviewOpened(ctx context.Context, item *reviews.Item) {
-	_ = r.emitter.Emit(ctx, &events.Event{OrgID: item.OrganizationID, Type: events.ReviewCreated, EntityID: item.ID,
-		Data: map[string]any{"id": item.ID, "kind": item.Kind, "object_key": item.ObjectKey}})
-}
-
 // TestUnlicensedCINotifiesOrgAdmins covers WP-472 (ENT-03, CH21, E-22)
 // against PostgreSQL: a discovered device over max_cis becomes an
-// unlicensed_ci review item, and review.created reaches every org_admin of
-// the organization with exactly one in-app notification; an engineer (who
-// holds review:resolve), a viewer and the org_admin of another
+// unlicensed_ci review item, and review.created (written by the review
+// repository in the transaction that opens the item, WP-549) reaches every
+// org_admin of the organization with exactly one in-app notification; an
+// engineer (who holds review:resolve), a viewer and the org_admin of another
 // organization get none. A repeated delivery of the event notifies nobody
 // twice.
 func TestUnlicensedCINotifiesOrgAdmins(t *testing.T) {
@@ -258,8 +249,7 @@ func TestUnlicensedCINotifiesOrgAdmins(t *testing.T) {
 
 	ciRepo := ci.NewPGRepository(f.App)
 	svc := entitlement.NewService(entitlement.NewPGRepository(f.App), entitlement.Options{Enforce: true})
-	h := discovery.NewHandler(discovery.NewPGRepository(f.App), ciRepo).WithLimits(svc).
-		WithReviewNotifier(reviewOutbox{emitter: events.NewPGEmitter(f.App)})
+	h := discovery.NewHandler(discovery.NewPGRepository(f.App), ciRepo).WithLimits(svc)
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 	_, total, err := ciRepo.List(ctx, f.OrgA, ci.FilterParams{}, api.PaginationParams{Limit: 1})

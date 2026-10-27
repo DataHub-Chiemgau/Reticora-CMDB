@@ -17,8 +17,10 @@ import (
 // transaction) it returns resolved = true.
 type Effect func(ctx context.Context, item *Item, res *Resolution) (resolved bool, err error)
 
-// Notifier is told about every newly opened item (NTF-05). The notification
-// module attaches here once it exists (WP-140).
+// Notifier is told about every newly opened item. It is an in-process hook
+// only: review.created (NTF-05, EVT-01) is written by the repository in the
+// transaction that inserts the item (PGRepository.CreateReviewItem, WP-549),
+// so a notifier must not write the event a second time.
 type Notifier interface {
 	ReviewOpened(ctx context.Context, item *Item)
 }
@@ -60,7 +62,8 @@ func (s *Service) WithNotifier(n Notifier) *Service {
 }
 
 // Open opens an item; an open item of the same object and type is reused
-// (REC-08). It reports whether a new item was opened.
+// (REC-08). It reports whether a new item was opened; the PostgreSQL
+// repository has then written review.created with it.
 func (s *Service) Open(ctx context.Context, item *Item) (bool, error) {
 	if err := s.repo.CreateReviewItem(ctx, item); err != nil {
 		return false, err

@@ -174,10 +174,11 @@ func TestDiscoveryConcurrency(t *testing.T) {
 
 	// Rollback: the interfaces are synchronized last; the first sync of
 	// each round fails after its writes. The devices are unclassified, so
-	// each record opens a review, announced through the event outbox as on
-	// the server.
+	// each record opens a review, announced as on the server: review.created
+	// in the record's transaction (WP-549); the notifier counts the opened
+	// items it is told about after the commit.
 	syncer := &failOnce{next: ipam.NewPGRepository(f.App)}
-	notifier := &outboxNotifier{emitter: events.NewPGEmitter(f.App)}
+	notifier := &countingNotifier{}
 	full := chi.NewRouter()
 	discovery.NewHandler(discovery.NewPGRepository(f.App),
 		ci.NewIndexingRepository(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()).WithEvents(events.NewOutbox()),
@@ -220,9 +221,9 @@ func TestDiscoveryConcurrency(t *testing.T) {
 		if after := rows(); !maps.Equal(after, before) {
 			t.Errorf("round %d: the failed record left rows behind: before %v, after %v", round, before, after)
 		}
-		if notified, inTx, errs := notifier.state(); notified != round || inTx != 0 || len(errs) > 0 {
-			t.Errorf("round %d: %d reviews announced after the failed record (%d inside a transaction, errors %v), want %d",
-				round, notified, inTx, errs, round)
+		if notified, inTx := notifier.state(); notified != round || inTx != 0 {
+			t.Errorf("round %d: %d reviews announced after the failed record (%d inside a transaction), want %d",
+				round, notified, inTx, round)
 		}
 		// The queue delivers the record again: the CI is created once.
 		if code := ingest(full, rec); code != http.StatusAccepted {
@@ -246,9 +247,9 @@ func TestDiscoveryConcurrency(t *testing.T) {
 			WHERE r.organization_id = $1 AND r.kind = 'unclassified_device' AND r.payload->>'serial_number' = $2`, f.OrgA, serial).Scan(&announced); err != nil {
 			t.Fatal(err)
 		}
-		if notified, inTx, errs := notifier.state(); notified != round+1 || inTx != 0 || len(errs) > 0 || announced != 1 {
-			t.Errorf("round %d: %d reviews announced (%d inside a transaction, errors %v, %d review.created events), want %d after the commit",
-				round, notified, inTx, errs, announced, round+1)
+		if notified, inTx := notifier.state(); notified != round+1 || inTx != 0 || announced != 1 {
+			t.Errorf("round %d: %d reviews announced (%d inside a transaction, %d review.created events), want %d after the commit",
+				round, notified, inTx, announced, round+1)
 		}
 	}
 
@@ -308,7 +309,7 @@ func TestDiscoveryConcurrency(t *testing.T) {
 		Manufacturer: "Reticora Labs", Model: "M1", Serial: "ABN03-BROLL-1"}, time.Now().Add(-time.Second))
 	failing.Interfaces = []plugins.DeviceInterface{{Name: "eth0", MAC: "00:1b:21:aa:02:01",
 		IPs: []plugins.DeviceIP{{Address: "198.51.100.202", PrefixLength: 24}}}}
-	notifiedBefore, _, _ := notifier.state()
+	notifiedBefore, _ := notifier.state()
 	syncer.arm()
 	if code := ingest(full, duplicate, failing); code != http.StatusAccepted || syncer.armed.Load() {
 		t.Fatalf("batch rollback: ingest %d, failure injected %v; want 202 after the records one by one", code, !syncer.armed.Load())
@@ -337,9 +338,9 @@ func TestDiscoveryConcurrency(t *testing.T) {
 				"want 1, 1, 1, %d, %d, %d", serial, n, created, audited, interfaces, reviews, announced, wantInterfaces, wantReviews, wantReviews)
 		}
 	}
-	if notified, inTx, errs := notifier.state(); notified != notifiedBefore+1 || inTx != 0 || len(errs) > 0 {
-		t.Errorf("batch rollback: %d reviews announced (%d inside a transaction, errors %v), want 1 after the commit",
-			notified-notifiedBefore, inTx, errs)
+	if notified, inTx := notifier.state(); notified != notifiedBefore+1 || inTx != 0 {
+		t.Errorf("batch rollback: %d reviews announced (%d inside a transaction), want 1 after the commit",
+			notified-notifiedBefore, inTx)
 	}
 
 	// Double ingest across lanes (WP-334): each pair of records of one new
@@ -479,34 +480,29 @@ func (b *pairBarrier) wait(timeout time.Duration) {
 	}
 }
 
-// outboxNotifier announces opened review items in the event outbox like the
-// server's notifier (a transaction of its own, org-wide scope).
-type outboxNotifier struct {
-	emitter  *events.PGEmitter
+// countingNotifier counts the opened review items it is told about and how
+// many of them inside a transaction. review.created itself is written by
+// the review repository in the item's transaction (WP-549), so it does not
+// write the event a second time.
+type countingNotifier struct {
 	mu       sync.Mutex
 	notified int
 	inTx     int
-	errs     []error
 }
 
-func (n *outboxNotifier) ReviewOpened(ctx context.Context, item *reviews.Item) {
-	err := n.emitter.Emit(ctx, &events.Event{OrgID: item.OrganizationID, Type: events.ReviewCreated, EntityID: item.ID,
-		Data: map[string]any{"id": item.ID, "kind": item.Kind}})
+func (n *countingNotifier) ReviewOpened(ctx context.Context, _ *reviews.Item) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.notified++
 	if database.InTx(ctx) {
 		n.inTx++
 	}
-	if err != nil {
-		n.errs = append(n.errs, err)
-	}
 }
 
-func (n *outboxNotifier) state() (notified, inTx int, errs []error) {
+func (n *countingNotifier) state() (notified, inTx int) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return n.notified, n.inTx, append([]error(nil), n.errs...)
+	return n.notified, n.inTx
 }
 
 // failOnce fails the first interface sync after arm, after its writes, as a

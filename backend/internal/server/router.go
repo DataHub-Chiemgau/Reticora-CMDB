@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
@@ -61,7 +60,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
@@ -223,7 +221,8 @@ type Options struct {
 	// signup (WP-112); without it signups answer 503.
 	SignupProtection *signup.Protection
 	// Events reports facts after their commit into the event outbox
-	// (review.created, export.completed, job.failed; NTF-05); optional.
+	// (export.completed, job.failed; NTF-05); optional. review.created is
+	// written in the transaction that opens the item (WP-549).
 	Events events.Emitter
 	// Notifications are the notification stores (NTF-04); nil keeps them
 	// in memory.
@@ -478,7 +477,6 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		discoveryHandler.WithMerger(opts.CIService)
 	}
 	if opts.Events != nil {
-		discoveryHandler.WithReviewNotifier(reviewEvents{emitter: opts.Events})
 		exportWorker.Events = opts.Events
 	}
 	topologyHandler := topology.NewHandler(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType)
@@ -781,14 +779,4 @@ func notifyHandler(opts *Options) *notify.Handler {
 		opts.Notifications = notify.NewMemoryCenter()
 	}
 	return notify.NewHandler(opts.Notifications).WithEgress(opts.Egress)
-}
-
-// reviewEvents reports opened review items as review.created (NTF-05).
-type reviewEvents struct{ emitter events.Emitter }
-
-func (r reviewEvents) ReviewOpened(ctx context.Context, item *reviews.Item) {
-	if err := r.emitter.Emit(ctx, &events.Event{OrgID: item.OrganizationID, Type: events.ReviewCreated, EntityID: item.ID,
-		Data: map[string]any{"id": item.ID, "kind": item.Kind, "object_key": item.ObjectKey}}); err != nil {
-		slog.Error("report opened review item", "item", item.ID, "error", err)
-	}
 }

@@ -884,3 +884,5 @@ MGT-04;[P3];D;backend/internal/maintenance/status_test.go;WP-540
 NTF-05;[B], Zusätze [P2], [P3];D;frontend/src/pages/MaintenancePage.test.tsx;WP-540
 NFR-06;[B];B;backend/internal/jobs/retention_integration_test.go;WP-548
 EVT-01;[B];B;backend/internal/config/config_test.go;WP-548
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/notify/events_integration_test.go;WP-549
+EVT-01;[B];B;backend/internal/notify/events_integration_test.go;WP-549
