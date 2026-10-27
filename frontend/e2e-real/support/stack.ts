@@ -648,16 +648,36 @@ export interface FakeSnmpRequest {
   /** "1", "2c" or "3"; empty for a packet that is no SNMP message. */
   version: string;
   community: string;
+  /** USM user name of an SNMPv3 message (empty for the engine discovery). */
+  user?: string;
   pdu?: string;
   oids?: string[];
+  /** usmStats report the SNMPv3 mode answered with, e.g. usmStatsWrongDigests. */
+  report?: string;
   answered: boolean;
+}
+
+/** The one SNMPv3 user (authPriv) of the fake's SNMPv3 mode (WP-542). */
+export interface FakeSnmpV3User {
+  user: string;
+  /** SHA, SHA224, SHA256, SHA384 or SHA512 (default SHA256). */
+  authProtocol?: string;
+  authPassword: string;
+  /** AES, AES192 or AES256 (default AES). */
+  privProtocol?: string;
+  privPassword: string;
 }
 
 export interface FakeSnmpOptions {
   /** Address the fake listens on; the collector's SNMP plugin queries port 161. */
   ip: string;
-  /** The only community the fake answers. */
-  community: string;
+  /** The only community the fake answers (SNMPv2c); omit for the SNMPv3 mode. */
+  community?: string;
+  /**
+   * SNMPv3 mode: the fake answers only this user with its keys, reports a wrong key with
+   * usmStatsWrongDigests and an unknown user with usmStatsUnknownUserNames (RFC 3414 3.2).
+   */
+  v3?: FakeSnmpV3User;
   sysName: string;
   sysDescr: string;
   sysObjectId: string;
@@ -691,26 +711,45 @@ function fakeSnmpBinary(): string {
 }
 
 /**
- * startFakeSnmp builds and starts the SNMPv2c fake of collector/cmd/fakesnmp (WP-384) on
- * <ip>:161. It answers sysDescr, sysObjectID and sysName only to requests with its
- * community and records every request it receives with the community it carried, so a
+ * startFakeSnmp builds and starts the SNMP fake of collector/cmd/fakesnmp on <ip>:161. As
+ * SNMPv2c fake (WP-384) it answers sysDescr, sysObjectID and sysName only to requests with
+ * its community; in the SNMPv3 mode (`v3`, WP-542) only to the authPriv requests of its user
+ * with the right keys, a wrong key gets the report usmStatsWrongDigests. It records every
+ * request it receives with the community or user it carried and the report it got, so a
  * test can prove which secret the collector sent. Port 161 needs
  * net.ipv4.ip_unprivileged_port_start <= 161 (fixtures/setup-real-stack.sh sets it on
  * GitHub Actions).
  */
 export async function startFakeSnmp(opts: FakeSnmpOptions): Promise<FakeSnmp> {
+  expect(
+    Boolean(opts.community) !== Boolean(opts.v3),
+    'the SNMP fake answers either a community (v2c) or an SNMPv3 user',
+  ).toBe(true);
   const bin = fakeSnmpBinary();
   const requestsFile = join(
     mkdtempSync(join(tmpdir(), 'reticora-fakesnmp-run-')),
     'requests.jsonl',
   );
+  const identity = opts.v3
+    ? [
+        '-v3-user',
+        opts.v3.user,
+        '-v3-auth-protocol',
+        opts.v3.authProtocol ?? 'SHA256',
+        '-v3-auth-password',
+        opts.v3.authPassword,
+        '-v3-priv-protocol',
+        opts.v3.privProtocol ?? 'AES',
+        '-v3-priv-password',
+        opts.v3.privPassword,
+      ]
+    : ['-community', opts.community!];
   const proc = spawn(
     bin,
     [
       '-listen',
       `${opts.ip}:161`,
-      '-community',
-      opts.community,
+      ...identity,
       '-sysname',
       opts.sysName,
       '-sysdescr',

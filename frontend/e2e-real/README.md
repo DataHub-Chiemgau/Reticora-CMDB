@@ -6,18 +6,18 @@ UI → API → PostgreSQL → UI on a running stack. They are not part of the CI
 
 ## Expected stack
 
-| Variable                                             | Default                                            | Component                                                                                                           |
-| ---------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `BASE_URL`                                           | `http://localhost:5173`                            | frontend (production build) that proxies `/api` and `/bff` to the server                                            |
-| `E2E_SERVER_URL`                                     | `http://localhost:8080`                            | Reticora server (`RETICORA_ENVIRONMENT=production`)                                                                 |
-| `E2E_KEYCLOAK_URL`                                   | `http://localhost:8180`                            | Keycloak with the realm `reticora` (`deploy/keycloak/realm-reticora-dev.json`)                                      |
-| `E2E_KEYCLOAK_ADMIN` / `E2E_KEYCLOAK_ADMIN_PASSWORD` | `admin` / `admin`                                  | Keycloak master administrator                                                                                       |
-| `E2E_MAILPIT_URL`                                    | `http://localhost:8025`                            | mail catcher receiving the signup and invitation mails (server SMTP)                                                |
-| `E2E_COLLECTOR_BIN`                                  | –                                                  | collector binary (`collector/cmd/collector`) for discovery flows                                                    |
-| `E2E_FAKESNMP_BIN`                                   | built from `collector/cmd/fakesnmp`                | SNMPv2c fake of `onboarding-bundle.spec.ts` (below); without it `support/stack.ts` builds it with `go build`        |
-| `E2E_DATABASE_URL`                                   | `postgres://reticora:reticora@localhost:55432/e2e` | PostgreSQL of the stack (owner role), read with `psql` by `support/roles-authz.ts` and `support/locations-racks.ts` |
-| `E2E_SEED_BIN`                                       | built from `backend/cmd/seed`                      | SIM-01 seed of `demo-seed.spec.ts` into `E2E_DATABASE_URL` (below); `support/stack.ts` builds it otherwise          |
-| `E2E_OPERATOR_TOKEN`                                 | –                                                  | break-glass token `RETICORA_OPERATOR_TOKEN` for `entitlement-expiry.spec.ts`; unset: personal operator login        |
+| Variable                                             | Default                                            | Component                                                                                                                                |
+| ---------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `BASE_URL`                                           | `http://localhost:5173`                            | frontend (production build) that proxies `/api` and `/bff` to the server                                                                 |
+| `E2E_SERVER_URL`                                     | `http://localhost:8080`                            | Reticora server (`RETICORA_ENVIRONMENT=production`)                                                                                      |
+| `E2E_KEYCLOAK_URL`                                   | `http://localhost:8180`                            | Keycloak with the realm `reticora` (`deploy/keycloak/realm-reticora-dev.json`)                                                           |
+| `E2E_KEYCLOAK_ADMIN` / `E2E_KEYCLOAK_ADMIN_PASSWORD` | `admin` / `admin`                                  | Keycloak master administrator                                                                                                            |
+| `E2E_MAILPIT_URL`                                    | `http://localhost:8025`                            | mail catcher receiving the signup and invitation mails (server SMTP)                                                                     |
+| `E2E_COLLECTOR_BIN`                                  | –                                                  | collector binary (`collector/cmd/collector`) for discovery flows                                                                         |
+| `E2E_FAKESNMP_BIN`                                   | built from `collector/cmd/fakesnmp`                | SNMP fake of `onboarding-bundle.spec.ts` and `discovery-errors.spec.ts` (below); without it `support/stack.ts` builds it with `go build` |
+| `E2E_DATABASE_URL`                                   | `postgres://reticora:reticora@localhost:55432/e2e` | PostgreSQL of the stack (owner role), read with `psql` by `support/roles-authz.ts` and `support/locations-racks.ts`                      |
+| `E2E_SEED_BIN`                                       | built from `backend/cmd/seed`                      | SIM-01 seed of `demo-seed.spec.ts` into `E2E_DATABASE_URL` (below); `support/stack.ts` builds it otherwise                               |
+| `E2E_OPERATOR_TOKEN`                                 | –                                                  | break-glass token `RETICORA_OPERATOR_TOKEN` for `entitlement-expiry.spec.ts`; unset: personal operator login                             |
 
 The server needs self-signup enabled (`RETICORA_SIGNUP_VERIFY_URL`, `RETICORA_SIGNUP_CAPTCHA_KEY`, Keycloak admin
 client, SMTP) exactly as `e2e/fixtures/setup-onboarding.sh` configures it. Every spec creates its own tenants through
@@ -61,6 +61,11 @@ The collector's SNMP plugin queries port 161, so the user running Playwright mus
 and fails locally while it is higher (`sudo sysctl -w net.ipv4.ip_unprivileged_port_start=0`). The suggested subnet is
 a real network of the host; the spec stops the collector before its first scope pass and disables that scope before
 it starts the collector again, so the host's networks are not scanned.
+
+`discovery-errors.spec.ts` (WP-542, DIS-08) runs the same installed collector against two host scopes: the fake in
+its SNMPv3 mode on `127.0.0.163:161` (`startFakeSnmp` with `v3`: one authPriv user; a wrong key gets the report
+usmStatsWrongDigests) with an snmp_v3 credential carrying wrong keys, and the unreachable `192.0.2.10` (TEST-NET-1).
+It checks the cause (`auth_failed`, `unreachable`), protocol and target in `last_result` and on the Discovery page.
 
 ## SIM-01 demo seed (`demo-seed.spec.ts`, WP-433)
 
