@@ -132,23 +132,29 @@ Die Eingriffe per `page.route` betreffen nur die Sicht des Browsers bzw. die
 Negativfälle; Daten und Prüfungen der Positivfälle kommen vom installierten
 Stack. Eingaben bleiben unverändert; die Prüfsumme der Datei in
 `artefakte/SHA256SUMS` ist neu. `install-smoke.yml` lädt den Bericht der Suite
-jetzt nach jedem Lauf hoch (Artefakt `onboarding-e2e`, `retries: 0`). Lauf-ID
-des grünen install-smoke-Laufs: steht aus (wartet auf CI).
+jetzt nach jedem Lauf hoch (Artefakt `onboarding-e2e`, `retries: 0`). Grüner
+install-smoke-Lauf mit dieser Fassung: [Install Smoke Test #219](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40537085229)
+(Commit `0d0f176`, PR #101), Job `install-cloud-smoke (ubuntu-24.04)`, Schritt
+„Run the onboarding E2E suite“, success, 2026-10-27: 6 von 6 Tests bestanden,
+darunter „self-signup, verification, trial, login and dashboard“ (Schritte 1
+und 2) und „collector, scopes, 30 simulated devices, review, impact and
+export“ (Schritte 3 bis 8).
 
 | # | Schritt | Erwartung | Ergebnis |
 |---|---|---|---|
-| 1 | Self-Signup | über den Link „Konto anlegen“ der Anmeldeseite; Bestätigungs-Mail, Organisation mit Trial | bestanden (Lauf #122); Einstieg über den Link (WP-529) steht aus (install-smoke) |
-| 2 | Login, Dashboard | Dashboard der neuen Organisation mit „Einrichtung fortsetzen“ | bestanden (Lauf #122); Einstieg „Einrichtung fortsetzen“ (WP-529) steht aus (install-smoke) |
+| 1 | Self-Signup | über den Link „Konto anlegen“ der Anmeldeseite; Bestätigungs-Mail, Organisation mit Trial | bestanden (Lauf #219, Fassung WP-529; frühere Fassung in Lauf #122) |
+| 2 | Login, Dashboard | Dashboard der neuen Organisation mit „Einrichtung fortsetzen“ | bestanden (Lauf #219, Fassung WP-529; frühere Fassung in Lauf #122) |
 | 3 | Collector-Enrollment | Einmal-Code, Zertifikat, Collector online | bestanden |
-| 4 | Scope bestätigen | Pflichtschritt: Vorschlag bestätigt, Item `resolved`/`accept`, Scope des Collectors angelegt, Fortschritt 3 → 4 → 5; gebrochener Resolve hält den Fortschritt bei 3 mit Meldung | frühere Fassung (bedingt, ohne Prüfung) in Lauf #122; Fassung WP-529 steht aus (install-smoke) |
+| 4 | Scope bestätigen | Pflichtschritt: Vorschlag bestätigt, Item `resolved`/`accept`, Scope des Collectors angelegt, Fortschritt 3 → 4 → 5; gebrochener Resolve hält den Fortschritt bei 3 mit Meldung | bestanden (Lauf #219, Fassung WP-529 mit Negativfall; frühere bedingte Fassung in Lauf #122) |
 | 5 | 30 simulierte Geräte | 30 CIs sichtbar | bestanden |
 | 6 | Review auflösen | Review geschlossen, Ergebnis am CI | bestanden |
 | 7 | Impact abfragen | betroffene CIs zum gewählten CI: nach der Beziehung `sim-srv-01` → `sim-nas-01` nennt der Impact von `sim-nas-01` `sim-srv-01` (API und Ausfallsimulation); ein CI ohne Beziehung hat keinen Impact, mit Hinweis in der UI | bestanden (install-smoke Run 40258372749; frühere Fassung in Lauf #122 bestanden) |
-| 8 | Export laden | Exportdatei mit mindestens 30 Datenzeilen, im Browser geladen über die signierte `download_url` des Exportauftrags; manipulierte Signatur → 403, Schritt schlägt fehl | frühere Fassung (Download über `/api/v1/export/cis`) in Lauf #122 bestanden; Fassungen WP-468 und WP-529 stehen aus (install-smoke) |
+| 8 | Export laden | Exportdatei mit mindestens 30 Datenzeilen, im Browser geladen über die signierte `download_url` des Exportauftrags; manipulierte Signatur → 403, Schritt schlägt fehl | bestanden (Lauf #219, Fassungen WP-468 und WP-529 mit Negativfall; frühere Fassung über `/api/v1/export/cis` in Lauf #122) |
 
-Lauf: [Install Smoke Test #122](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38512314064),
-Job `install-cloud-smoke (ubuntu-24.04)`, Schritt „Run the onboarding E2E
-suite“, success, 2026-10-14.
+Läufe: [Install Smoke Test #219](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40537085229) (aktuelle Fassung, 2026-10-27) und
+[Install Smoke Test #122](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38512314064)
+(Fassung vom 2026-10-14), jeweils Job `install-cloud-smoke (ubuntu-24.04)`,
+Schritt „Run the onboarding E2E suite“, success.
 
 ## (e) Konflikt-Szenario
 
