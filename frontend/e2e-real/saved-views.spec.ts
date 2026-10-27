@@ -19,10 +19,13 @@ import { api, signupTenant, stamp, uiLogin, BASE, type Account } from './support
  *
  * One organization is created through the self-signup UI. Its administrator (the owner)
  * creates three CIs with a common name part and serial numbers, a private base view selecting
- * them and a custom role with ci:read, saved_view:read and search:read; then invites two users
- * with the organization scope: the member gets the custom role (and loses the viewer role of
- * the invitation), the outsider keeps the system role viewer, which may read views but holds
- * neither the custom role nor an org-wide sharing.
+ * them and a custom role with ci:read, saved_view:read, saved_view:write and search:read; then
+ * invites two users with the organization scope: the member gets the custom role (and loses the
+ * viewer role of the invitation), the outsider keeps the system role viewer, which may read views
+ * but holds neither the custom role nor an org-wide sharing. The role holds saved_view:write so
+ * that the member passes the permission check of PATCH and DELETE (without it they answer 403
+ * before the view is looked at) and R2 proves the owner rule of E-86: a view shared with the
+ * member's role stays read-only for the member although the member may write saved views.
  *
  * Test → requirement IDs proven:
  *  R1 the owner runs the base view, sets sort name descending, the columns name and serial
@@ -215,7 +218,9 @@ test.describe('Saved views: sort, columns and role sharing set in the UI (VIE-01
 
     const role = await ok<{ id: string }>('POST', '/roles', {
       name: w.roleName,
-      permissions: ['ci:read', 'saved_view:read', 'search:read'],
+      // saved_view:write: the member may write own views, so R2's 404 on PATCH and DELETE is
+      // the owner rule (E-86), not the 403 of a missing permission.
+      permissions: ['ci:read', 'saved_view:read', 'saved_view:write', 'search:read'],
     });
     w.roleId = role.id;
     const roles = await ok<List<{ id: string; name: string }>>('GET', '/roles?limit=100');
@@ -326,7 +331,9 @@ test.describe('Saved views: sort, columns and role sharing set in the UI (VIE-01
       });
       await expectSavedResults(page);
 
-      // Only the owner changes or deletes a view (E-86): no delete, no update in the UI.
+      // Only the owner changes or deletes a view (E-86): no delete, no update in the UI, and
+      // although the member holds saved_view:write, DELETE and PATCH of the shared view answer
+      // 404 (the view is not the member's) and leave it unchanged.
       await expect(
         main.getByRole('button', { name: `Löschen: ${w.viewName}`, exact: true }),
       ).toHaveCount(0);
