@@ -3071,7 +3071,10 @@ export interface paths {
     delete: operations['deleteRoom'];
     options?: never;
     head?: never;
-    /** Update a room */
+    /**
+     * Update a room
+     * @description Changes name, floor, room type or the floor-plan layout. Every layout key must be a CI of the organization the caller sees and x and y must lie in 0..1, otherwise 422 naming `layout.<ci>` or `layout.<ci>.x|y`. Optimistic concurrency: If-Match names the ETag of the room the editor read; a room changed since is refused with 409 (field `If-Match`) and stays unchanged. Without If-Match (or with "*") the PATCH is applied.
+     */
     patch: operations['updateRoom'];
     trace?: never;
   };
@@ -10355,7 +10358,7 @@ export interface components {
       name?: string;
       floor?: number;
       room_type?: string;
-      /** @description Replaces the room's floor-plan object positions. Map of object_id → {x, y} in normalized 0..1 coordinates; an empty object clears the layout. */
+      /** @description Replaces the room's floor-plan object positions. Map of CI id → {x, y} in normalized 0..1 coordinates; an empty object clears the layout. Each key must be a CI of the organization the caller sees (422 otherwise). */
       layout?: {
         [key: string]: {
           x?: number;
@@ -18180,6 +18183,8 @@ export interface operations {
       /** @description Room details */
       200: {
         headers: {
+          /** @description The room's version, derived from updated_at; send it as If-Match with a PATCH. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -18217,7 +18222,10 @@ export interface operations {
   updateRoom: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the room version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
@@ -18233,6 +18241,8 @@ export interface operations {
       /** @description Room updated */
       200: {
         headers: {
+          /** @description The room's new version. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -18242,7 +18252,33 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
+      /** @description The room was changed since the If-Match version (field `If-Match`), or the name is already taken in the building (field `name`). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description If-Match is not an ETag of the room. */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A layout coordinate lies outside 0..1 (field `layout.<ci>.x` or `layout.<ci>.y`), or a layout key is not a CI of the organization visible to the caller (field `layout.<ci>`). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listRacks: {

@@ -49,6 +49,11 @@ import {
  *      plan show it after reload; CI location and scope
  *      fields derived ....................................... WP-175, WP-078, WP-054, WP-025
  *                                                              (RCK-02, RCK-03, DB-05, LOC-10, TEN-02)
+ *  L06b room plan: a marker moved with the keyboard and one set
+ *      in the coordinate form persist after reload (GET
+ *      /rooms/{id}); the PATCH sends If-Match; out-of-range
+ *      form input shows the error of the 422; API: range,
+ *      CI keys and stale If-Match (409) ................... WP-526 (UI-18, NFR-07; F-341, F-342)
  *  L07 overlapping, face-aware, out-of-range and composition
  *      child mounts are refused ............................ WP-126, WP-175 (RCK-01, RCK-02)
  *  L08 move/unmount: ci_change, audit, unified history and
@@ -840,6 +845,99 @@ test.describe('locations and racks (LOC-*, RCK-*)', () => {
     await page.reload();
     await pickRoom();
     await expect(plan.getByRole('button', { name: new RegExp(`^${ci.name},`) })).toBeVisible();
+  });
+
+  test('L06b room plan: keyboard and form positions persist; out-of-range input shows the 422; stale If-Match is 409', async () => {
+    const page = w.t.page;
+    const h = await hierarchy('L06b');
+    const ci = await newCI('lr-plan', { location_id: h.room.id });
+    type RoomLayout = { layout?: Record<string, { x: number; y: number }> };
+    const position = async () =>
+      (await ok<RoomLayout>(w.rq, w.t.token, 'GET', `/rooms/${h.room.id}`)).layout?.[ci.id];
+
+    const pickRoom = async () => {
+      await page
+        .getByRole('combobox', { name: 'Gebäude' })
+        .selectOption({ label: h.building.name });
+      const loaded = waitForApi(page, `/rooms/${h.room.id}`);
+      await page.getByRole('combobox', { name: 'Raum' }).selectOption({ label: h.room.name });
+      return loaded;
+    };
+    const marker = () =>
+      page.getByTestId('room-plan').getByRole('button', { name: new RegExp(`^${ci.name},`) });
+    await page.goto('/roomplan');
+    const get = await pickRoom();
+    const etag = get.headers()['etag'];
+    expect(etag, 'GET /rooms/{id} answers an ETag').toBeTruthy();
+
+    // Keyboard: five steps of 1 % to the right from the default centre; the
+    // debounced PATCH carries the ETag of the GET as If-Match (F-342).
+    await expect(marker()).toHaveAccessibleName(/50 % von links, 50 % von oben/);
+    const patched = waitForApi(page, `/rooms/${h.room.id}`, 'PATCH');
+    await marker().focus();
+    for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight');
+    const firstPatch = await patched;
+    expect(firstPatch.request().headers()['if-match']).toBe(etag);
+    expect(firstPatch.status()).toBe(200);
+    await expect.poll(position).toEqual({ x: 0.55, y: 0.5 });
+    await page.reload();
+    await pickRoom();
+    await expect(marker()).toHaveAccessibleName(/55 % von links, 50 % von oben/);
+
+    // Coordinate form: X 25 %, Y 75 % → persisted and shown after reload.
+    const form = page.getByRole('form', { name: `Position von ${ci.name}` });
+    await form.getByRole('spinbutton', { name: /^X/ }).fill('25');
+    await form.getByRole('spinbutton', { name: /^Y/ }).fill('75');
+    await form.getByRole('button', { name: 'Position übernehmen' }).click();
+    await expect.poll(position).toEqual({ x: 0.25, y: 0.75 });
+    await page.reload();
+    await pickRoom();
+    await expect(marker()).toHaveAccessibleName(/25 % von links, 75 % von oben/);
+
+    // Invalid input: X 150 % is refused by the server (422) and the page
+    // shows the error; the stored position stays.
+    const refused = waitForApi(page, `/rooms/${h.room.id}`, 'PATCH');
+    await form.getByRole('spinbutton', { name: /^X/ }).fill('150');
+    await form.getByRole('button', { name: 'Position übernehmen' }).click();
+    expect((await refused).status()).toBe(422);
+    await expect(
+      page
+        .getByRole('alert')
+        .filter({ hasText: 'Die Koordinaten müssen zwischen 0 und 100 % liegen' }),
+    ).toBeVisible();
+    expect(await position()).toEqual({ x: 0.25, y: 0.75 });
+
+    // API (F-341, F-342): range and CI keys are checked, a stale If-Match
+    // is 409 without change.
+    const outOfRange = await api<Problem & { field?: string }>(
+      w.rq,
+      w.t.token,
+      'PATCH',
+      `/rooms/${h.room.id}`,
+      { layout: { [ci.id]: { x: 1.5, y: 0.5 } } },
+    );
+    expect(outOfRange.status).toBe(422);
+    expect(outOfRange.body.field).toBe(`layout.${ci.id}.x`);
+    const unknownKey = await api<Problem & { field?: string }>(
+      w.rq,
+      w.t.token,
+      'PATCH',
+      `/rooms/${h.room.id}`,
+      { layout: { 'not-a-ci': { x: 0.5, y: 0.5 } } },
+    );
+    expect(unknownKey.status).toBe(422);
+    expect(unknownKey.body.field).toBe('layout.not-a-ci');
+    const stale = await api<Problem & { field?: string }>(
+      w.rq,
+      w.t.token,
+      'PATCH',
+      `/rooms/${h.room.id}`,
+      { layout: { [ci.id]: { x: 0.9, y: 0.9 } } },
+      { 'If-Match': etag },
+    );
+    expect(stale.status, JSON.stringify(stale.body)).toBe(409);
+    expect(stale.body.field).toBe('If-Match');
+    expect(await position()).toEqual({ x: 0.25, y: 0.75 });
   });
 
   test('L07 overlapping, face-colliding, out-of-range and composition-child mounts are refused', async () => {

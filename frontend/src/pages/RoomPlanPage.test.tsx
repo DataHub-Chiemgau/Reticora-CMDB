@@ -118,3 +118,140 @@ describe('RoomPlanPage without drag and drop', () => {
     );
   });
 });
+
+interface PatchCall {
+  layout: Record<string, { x: number; y: number }>;
+  ifMatch: string | null;
+}
+
+/**
+ * stubRoomServer answers like the room API: GET and PATCH /rooms/room-1 carry
+ * an ETag from a version counter; a PATCH answers after patchDelay ms with
+ * the stored layout, or with the problem `respond` returns instead.
+ */
+function stubRoomServer(
+  options: {
+    patchDelay?: number;
+    respond?: (call: PatchCall) => Response | undefined;
+  } = {},
+) {
+  let version = 7;
+  let stored: Record<string, { x: number; y: number }> = { 'ci-1': { x: 0.5, y: 0.5 } };
+  const patches: PatchCall[] = [];
+  let roomGets = 0;
+  const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json', ...headers },
+    });
+  const roomBody = () => ({ id: 'room-1', name: 'Serverraum', layout: stored });
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.includes('/rooms/room-1')) {
+      if (init?.method === 'PATCH') {
+        const call: PatchCall = {
+          layout: (JSON.parse(String(init.body)) as PatchCall).layout,
+          ifMatch: new Headers(init.headers).get('If-Match'),
+        };
+        patches.push(call);
+        await new Promise((resolve) => setTimeout(resolve, options.patchDelay ?? 0));
+        const refused = options.respond?.(call);
+        if (refused) return refused;
+        stored = call.layout;
+        version += 1;
+        return json(roomBody(), 200, { ETag: `"${version}"` });
+      }
+      roomGets += 1;
+      return json(roomBody(), 200, { ETag: `"${version}"` });
+    }
+    if (url.includes('/buildings')) {
+      return json({ data: [{ id: 'b-1', name: 'Haus A' }], total: 1, limit: 100, offset: 0 });
+    }
+    if (url.includes('/rooms')) {
+      return json({ data: [roomBody()], total: 1, limit: 100, offset: 0 });
+    }
+    if (url.includes('/cis')) {
+      return json({
+        data: [{ id: 'ci-1', name: 'Switch 1', status: 'active' }],
+        total: 1,
+        limit: 200,
+        offset: 0,
+      });
+    }
+    return json({ detail: `unexpected request: ${url}` }, 404);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  renderWithProviders(<RoomPlanPage />);
+  return { patches, roomGets: () => roomGets };
+}
+
+function problem(status: number, field: string, detail: string) {
+  return new Response(JSON.stringify({ title: 'Problem', status, detail, field }), {
+    status,
+    headers: { 'Content-Type': 'application/problem+json' },
+  });
+}
+
+describe('RoomPlanPage saving (F-342)', () => {
+  it('accumulates arrow steps while a save is in flight and sends the last ETag', async () => {
+    // Retest F-342: the slow server keeps the first PATCH in flight while the
+    // remaining steps are pressed; no step is lost.
+    const server = stubRoomServer({ patchDelay: 400 });
+    const marker = await openRoom();
+    marker.focus();
+    fireEvent.keyDown(marker, { key: 'ArrowRight' });
+    fireEvent.keyDown(marker, { key: 'ArrowRight' });
+    await waitFor(() => expect(server.patches.length).toBeGreaterThanOrEqual(1));
+    fireEvent.keyDown(marker, { key: 'ArrowRight' });
+    fireEvent.keyDown(marker, { key: 'ArrowRight' });
+    fireEvent.keyDown(marker, { key: 'ArrowRight' });
+    await waitFor(() => expect(server.patches.length).toBeGreaterThanOrEqual(2), {
+      timeout: 3000,
+    });
+    // Before the fix every step patched the layout last loaded: x = 0.51.
+    expect(server.patches[server.patches.length - 1]!.layout).toEqual({
+      'ci-1': { x: 0.55, y: 0.5 },
+    });
+    expect(marker).toHaveAccessibleName(/55 %.*50 %/);
+    // Two steps went out debounced in the first PATCH, three in the second;
+    // each names the version it builds on: the GET's, then the first PATCH's.
+    expect(server.patches[0]!.layout).toEqual({ 'ci-1': { x: 0.52, y: 0.5 } });
+    expect(server.patches.map((p) => p.ifMatch)).toEqual(['"7"', '"8"']);
+    await waitFor(() => expect(marker).toHaveAccessibleName(/55 %.*50 %/));
+  });
+
+  it('shows a hint and reloads the room when it changed elsewhere (409)', async () => {
+    const server = stubRoomServer({
+      respond: () =>
+        problem(409, 'If-Match', 'If-Match: the room was changed since the If-Match version'),
+    });
+    const marker = await openRoom();
+    expect(server.roomGets()).toBe(1);
+    marker.focus();
+    fireEvent.keyDown(marker, { key: 'ArrowRight', shiftKey: true });
+    expect(
+      await screen.findByText(/zwischenzeitlich|changed elsewhere/, {}, { timeout: 3000 }),
+    ).toHaveAttribute('role', 'alert');
+    expect(server.patches[0]!.ifMatch).toBe('"7"');
+    await waitFor(() => expect(server.roomGets()).toBe(2));
+    // The refused move is dropped: the marker shows the reloaded position.
+    await waitFor(() => expect(marker).toHaveAccessibleName(/50 %.*50 %/));
+  });
+
+  it('shows the 422 of an out-of-range coordinate entered in the form', async () => {
+    const server = stubRoomServer({
+      respond: (call) =>
+        (call.layout['ci-1']?.x ?? 0) > 1
+          ? problem(422, 'layout.ci-1.x', 'layout.ci-1.x: the coordinate must lie between 0 and 1')
+          : undefined,
+    });
+    await openRoom();
+    const form = screen.getByRole('form', { name: /Switch 1/ });
+    fireEvent.change(within(form).getByRole('spinbutton', { name: /X/ }), {
+      target: { value: '150' },
+    });
+    fireEvent.submit(form);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/0 (und|and) 100 %/);
+    expect(server.patches[0]!.layout).toEqual({ 'ci-1': { x: 1.5, y: 0.5 } });
+  });
+});

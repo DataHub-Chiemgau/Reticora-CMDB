@@ -1065,7 +1065,10 @@
     "positionX": "X (% von links)",
     "positionY": "Y (% von oben)",
     "applyPosition": "Position übernehmen",
-    "positionFor": "Position von {{name}}"
+    "positionFor": "Position von {{name}}",
+    "conflict": "Der Raumplan wurde zwischenzeitlich von anderer Seite geändert und neu geladen. Bitte prüfen Sie die Position und verschieben Sie das Objekt erneut.",
+    "rangeError": "Position nicht gespeichert: Die Koordinaten müssen zwischen 0 und 100 % liegen.",
+    "saveError": "Position nicht gespeichert: {{message}}"
   },
   "consumables": {
     "summary": "Verbrauchsmaterial mit Bestand und Mindestbestand.",

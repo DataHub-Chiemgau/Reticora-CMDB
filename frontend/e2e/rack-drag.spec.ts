@@ -62,7 +62,8 @@ test('drags a rack in the room plan and moves it by keyboard', async ({ page }) 
   await expect(
     page.getByRole('button', { name: 'Rack A1, Position 25 % von links, 75 % von oben' }),
   ).toBeVisible();
-  expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(1);
+  // The marker moves at once; the PATCH follows (WP-526: local position).
+  await expect.poll(() => calls.filter((c) => c.method === 'PATCH').length).toBe(1);
   expect(layout[CI.id]?.x).toBeCloseTo(0.25, 1);
   expect(layout[CI.id]?.y).toBeCloseTo(0.75, 1);
 
@@ -73,6 +74,8 @@ test('drags a rack in the room plan and moves it by keyboard', async ({ page }) 
   await expect(
     page.getByRole('button', { name: 'Rack A1, Position 35 % von links, 75 % von oben' }),
   ).toBeVisible();
+  // The debounced PATCH stores the step.
+  await expect.poll(() => layout[CI.id]?.x).toBeCloseTo(0.35, 2);
 });
 
 test('undoes a delete within the undo window', async ({ page }) => {

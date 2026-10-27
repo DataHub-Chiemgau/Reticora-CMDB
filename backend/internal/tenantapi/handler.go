@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -545,10 +546,14 @@ func (h *Handler) GetRoom(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "room not found")
 		return
 	}
+	w.Header().Set("ETag", RoomETag(rm))
 	api.WriteJSON(w, http.StatusOK, rm)
 }
 
-// UpdateRoom handles PATCH /api/v1/rooms/{id}
+// UpdateRoom handles PATCH /api/v1/rooms/{id}. The layout is checked for
+// range and CI keys (422, F-341); If-Match with the room's ETag refuses a
+// room changed since with 409, a PATCH without If-Match stays allowed
+// (F-342). The answer carries the new ETag.
 func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := orgOrUnauthorized(w, r)
 	if !ok {
@@ -559,11 +564,25 @@ func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	version, present, err := api.ParseIfMatch(r)
+	if err != nil {
+		api.WritePreconditionFailed(w, "If-Match is not an ETag of the room")
+		return
+	}
+	if present && version != api.IfMatchAny {
+		at := time.UnixMicro(version).UTC()
+		req.IfMatch = &at
+	}
+	if err = validateLayoutRange(req.Layout); err != nil {
+		writeFieldError(w, err)
+		return
+	}
 	rm, err := h.repo.UpdateRoom(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		writeWriteError(w, err, "room not found")
 		return
 	}
+	w.Header().Set("ETag", RoomETag(rm))
 	api.WriteJSON(w, http.StatusOK, rm)
 }
 

@@ -6038,6 +6038,12 @@ paths:
       responses:
         '200':
           description: Room details
+          headers:
+            ETag:
+              description: >-
+                The room's version, derived from updated_at; send it as
+                If-Match with a PATCH.
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -6050,6 +6056,20 @@ paths:
       operationId: updateRoom
       tags: [Rooms]
       summary: Update a room
+      description: >-
+        Changes name, floor, room type or the floor-plan layout. Every layout
+        key must be a CI of the organization the caller sees and x and y must
+        lie in 0..1, otherwise 422 naming `layout.<ci>` or `layout.<ci>.x|y`.
+        Optimistic concurrency: If-Match names the ETag of the room the
+        editor read; a room changed since is refused with 409 (field
+        `If-Match`) and stays unchanged. Without If-Match (or with "*") the
+        PATCH is applied.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the room version the change is based on, or "*".
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -6059,6 +6079,10 @@ paths:
       responses:
         '200':
           description: Room updated
+          headers:
+            ETag:
+              description: The room's new version.
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -6066,7 +6090,26 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >-
+            The room was changed since the If-Match version (field
+            `If-Match`), or the name is already taken in the building (field
+            `name`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '412':
+          description: If-Match is not an ETag of the room.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: >-
+            A layout coordinate lies outside 0..1 (field `layout.<ci>.x` or
+            `layout.<ci>.y`), or a layout key is not a CI of the organization
+            visible to the caller (field `layout.<ci>`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -18847,13 +18890,14 @@ components:
           type: object
           description: >-
             Replaces the room's floor-plan object positions. Map of
-            object_id → {x, y} in normalized 0..1 coordinates; an empty object
-            clears the layout.
+            CI id → {x, y} in normalized 0..1 coordinates; an empty object
+            clears the layout. Each key must be a CI of the organization the
+            caller sees (422 otherwise).
           additionalProperties:
             type: object
             properties:
-              x: { type: number }
-              y: { type: number }
+              x: { type: number, minimum: 0, maximum: 1 }
+              y: { type: number, minimum: 0, maximum: 1 }
 
     RoomListResponse:
       allOf:

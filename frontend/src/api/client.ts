@@ -439,7 +439,33 @@ export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<
   return fetchURL<T>(`${API_BASE}${withScope(path, options?.method)}`, options);
 }
 
+/** Versioned is a response body with the ETag the server sent along. */
+export interface Versioned<T> {
+  data: T;
+  /** etag is sent back as If-Match with the next change; undefined without one. */
+  etag?: string;
+}
+
+/** fetchAPIVersioned is fetchAPI that also returns the response's ETag. */
+export async function fetchAPIVersioned<T>(
+  path: string,
+  options?: RequestInit,
+): Promise<Versioned<T>> {
+  const res = await fetchResponse(`${API_BASE}${withScope(path, options?.method)}`, options);
+  const data = (res.status === 204 ? undefined : await res.json()) as T;
+  return { data, etag: res.headers.get('ETag') ?? undefined };
+}
+
 async function fetchURL<T>(url: string, options?: RequestInit): Promise<T> {
+  const res = await fetchResponse(url, options);
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  return res.json();
+}
+
+/** fetchResponse sends the request with the session and throws ApiError for a failure. */
+async function fetchResponse(url: string, options?: RequestInit): Promise<Response> {
   const request = (token: string | null) =>
     fetch(url, {
       ...options,
@@ -469,10 +495,7 @@ async function fetchURL<T>(url: string, options?: RequestInit): Promise<T> {
     const body: unknown = await res.json().catch(() => null);
     throw ApiError.fromProblem(res.status, res.statusText, body);
   }
-  if (res.status === 204) {
-    return undefined as T;
-  }
-  return res.json();
+  return res;
 }
 
 /** BFF_PATH is the GraphQL backend-for-frontend of the UI (GQL-01). */
@@ -2347,11 +2370,24 @@ export const roomApi = {
   list(params: ListParams & { building_id?: string } = {}): Promise<PaginatedResponse<Room>> {
     return fetchAPI(`/rooms${buildQuery(params)}`);
   },
-  get(id: string): Promise<Room> {
-    return fetchAPI(`/rooms/${id}`);
+  /** get returns the room with its ETag, the version a layout change names as If-Match. */
+  get(id: string): Promise<Versioned<Room>> {
+    return fetchAPIVersioned(`/rooms/${id}`);
   },
-  updateLayout(id: string, layout: Record<string, RoomLayoutPosition>): Promise<Room> {
-    return fetchAPI(`/rooms/${id}`, { method: 'PATCH', body: JSON.stringify({ layout }) });
+  /**
+   * updateLayout replaces the room's layout. With an ETag the change is sent
+   * with If-Match: a room changed since is refused with 409 (F-342).
+   */
+  updateLayout(
+    id: string,
+    layout: Record<string, RoomLayoutPosition>,
+    etag?: string,
+  ): Promise<Versioned<Room>> {
+    return fetchAPIVersioned(`/rooms/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ layout }),
+      headers: etag ? { 'If-Match': etag } : undefined,
+    });
   },
 };
 

@@ -849,3 +849,5 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e/onboarding.spec.ts;WP-529
 INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-529
 API-08;[B];C;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-520
 BLK-01;[B];C;frontend/src/pages/CIListPage.test.tsx;WP-520
+UI-18;[B];C;frontend/e2e-real/locations-racks.spec.ts;WP-526
+NFR-07;[B];C;frontend/src/pages/RoomPlanPage.test.tsx;WP-526
