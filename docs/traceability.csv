@@ -843,3 +843,7 @@ GLO-10;[B];C;frontend/src/i18n/rawEnum.test.ts;WP-525
 UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-525
 GLO-10;[B];C;frontend/src/pages/CIDetailPage.test.tsx;WP-523
 UI-18;[B];C;frontend/e2e-real/i18n.spec.ts;WP-523
+UI-17;[B];C;frontend/e2e/onboarding.spec.ts;WP-529
+ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-529
+TST-03;[B], Teilumfang [P2];C;frontend/e2e/onboarding.spec.ts;WP-529
+INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-529

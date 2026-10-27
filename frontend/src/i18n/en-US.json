@@ -111,6 +111,11 @@
     "activeCIs": "Active CIs",
     "maintenanceCIs": "CIs in Maintenance",
     "collectorsOnline": "Collectors Online",
+    "setup": {
+      "title": "Setup not finished yet",
+      "text": "Connect a collector so that the first CIs arrive in your CMDB.",
+      "continue": "Continue setup"
+    },
     "roleLabel": "Dashboard role",
     "roleHint": "The widget selection follows the chosen role.",
     "roles": {
@@ -700,7 +705,9 @@
     "callbackError": "Sign-in could not be completed.",
     "sessionExpired": "Your session has expired. Please sign in again.",
     "invitationAccepted": "Your account for {{email}} has been created. Sign in now.",
-    "backendUnreachable": "The server cannot be reached. Check that Reticora is running and the address is correct, then try again."
+    "backendUnreachable": "The server cannot be reached. Check that Reticora is running and the address is correct, then try again.",
+    "signupPrompt": "No account yet?",
+    "signupLink": "Create account"
   },
   "topology": {
     "subtitle": "Relationships between configuration items as a graph.",
@@ -1544,7 +1551,8 @@
       "waiting": "No networks reported yet.",
       "accept": "Confirm",
       "dismiss": "Dismiss",
-      "continue": "Continue"
+      "continue": "Continue",
+      "resolveFailed": "The suggestion was not applied: {{message}}"
     },
     "cis": {
       "waiting": "The first discovery is running. As soon as CIs are found, the flow continues."

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
 import { startAuthorizationCodeFlow, InsecureContextError } from '../../auth/oidc';
@@ -69,6 +69,14 @@ export function LoginPage() {
         <Button className="mt-6 w-full" onClick={handleLogin} loading={loading}>
           {t('auth.loginButton')}
         </Button>
+        {/* Self-signup has no switch (config.go), so the entry is always
+            shown (UI-17, F-351). */}
+        <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
+          {t('auth.signupPrompt')}{' '}
+          <Link to="/onboarding" className="font-medium text-primary underline">
+            {t('auth.signupLink')}
+          </Link>
+        </p>
       </div>
     </section>
   );
