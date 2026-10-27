@@ -2507,6 +2507,19 @@ export interface MaintenanceWindow {
   created_at: string;
 }
 
+/** Stored customer notification of a maintenance window (WP-540). */
+export interface MaintenanceNotification {
+  id: string;
+  organization_id: string;
+  maintenance_window_id: string;
+  client_id?: string;
+  channel: string;
+  /** pending until a channel has delivered it; then sent or failed. */
+  status: 'pending' | 'sent' | 'failed' | string;
+  sent_at?: string;
+  created_at: string;
+}
+
 export const maintenanceApi = {
   list(
     params: ListParams & { status?: string } = {},
@@ -2532,9 +2545,13 @@ export const maintenanceApi = {
   notify(id: string): Promise<{
     notified: number;
     queued: number;
-    notifications: { client_id?: string; status: string; sent_at?: string }[];
+    notifications: MaintenanceNotification[];
   }> {
     return fetchAPI(`/maintenance-windows/${id}/notify`, { method: 'POST', body: '{}' });
+  },
+  /** notifications lists the stored notifications of a window (one per client and channel). */
+  notifications(id: string): Promise<{ data: MaintenanceNotification[] }> {
+    return fetchAPI(`/maintenance-windows/${id}/notifications`);
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/maintenance-windows/${id}`, { method: 'DELETE' });

@@ -1159,6 +1159,26 @@
       "in_progress": "In Arbeit",
       "completed": "Abgeschlossen",
       "cancelled": "Abgebrochen"
+    },
+    "notifications": "Benachrichtigungen",
+    "noNotifications": "Keine Benachrichtigungen gespeichert",
+    "client": "Kunde",
+    "channel": "Kanal",
+    "status": "Status",
+    "time": "Zeit",
+    "searchCIs": "Betroffene CIs suchen",
+    "ciResults": "Gefundene CIs",
+    "selectedCIs": "Ausgewählte CIs",
+    "addCI": "{{name}} hinzufügen",
+    "removeCI": "{{name}} entfernen",
+    "noCIsSelected": "Ohne CI gilt die Wartung für die ganze Organisation.",
+    "channels": {
+      "webhook": "Webhook"
+    },
+    "notificationStatuses": {
+      "pending": "ausstehend",
+      "sent": "versendet",
+      "failed": "fehlgeschlagen"
     }
   },
   "disposal": {

@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { maintenanceApi } from '../api/client';
-import type { MaintenanceWindow } from '../api/client';
+import { ciApi, maintenanceApi } from '../api/client';
+import type { MaintenanceNotification, MaintenanceWindow } from '../api/client';
+import { clientApi } from '../api/cmdb';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -26,30 +27,141 @@ function statusVariant(status: string): 'neutral' | 'warning' | 'success' | 'dan
   }
 }
 
+function notificationVariant(status: string): 'neutral' | 'warning' | 'success' | 'danger' {
+  switch (status) {
+    case 'pending':
+      return 'warning';
+    case 'sent':
+      return 'success';
+    case 'failed':
+      return 'danger';
+    default:
+      return 'neutral';
+  }
+}
+
+const emptyForm = { title: '', starts_at: '', ends_at: '' };
+
+/**
+ * WindowNotifications lists the stored notifications of a window from
+ * GET /maintenance-windows/{id}/notifications (WP-540, F-236): one row per
+ * client and channel with the status the server keeps, so a pending
+ * notification stays visible after a reload and is never shown as delivered.
+ */
+function WindowNotifications({ windowId }: { windowId: string }) {
+  const { t } = useTranslation();
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['maintenance-notifications', windowId],
+    queryFn: () => maintenanceApi.notifications(windowId),
+  });
+  const clients = useQuery({
+    queryKey: ['scope', 'clients'],
+    queryFn: () => clientApi.list(),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const clientName = (id?: string) =>
+    (id && clients.data?.data.find((c) => c.id === id)?.name) || id || '–';
+
+  if (isLoading) {
+    return <SkeletonList rows={2} label={t('app.loading')} />;
+  }
+  if (error) {
+    return (
+      <ErrorState
+        title={t('app.error')}
+        retryLabel={t('common.retry')}
+        onRetry={() => void refetch()}
+      />
+    );
+  }
+  const rows: MaintenanceNotification[] = data?.data ?? [];
+  if (rows.length === 0) {
+    return (
+      <p className="text-sm text-gray-500 dark:text-gray-400">
+        {t('maintenance.noNotifications', 'Keine Benachrichtigungen gespeichert')}
+      </p>
+    );
+  }
+  return (
+    <table className="w-full text-left text-sm">
+      <caption className="sr-only">{t('maintenance.notifications', 'Benachrichtigungen')}</caption>
+      <thead className="text-gray-500 dark:text-gray-400">
+        <tr>
+          <th scope="col" className="py-1 pr-3 font-medium">
+            {t('maintenance.client', 'Kunde')}
+          </th>
+          <th scope="col" className="py-1 pr-3 font-medium">
+            {t('maintenance.channel', 'Kanal')}
+          </th>
+          <th scope="col" className="py-1 pr-3 font-medium">
+            {t('maintenance.status', 'Status')}
+          </th>
+          <th scope="col" className="py-1 font-medium">
+            {t('maintenance.time', 'Zeit')}
+          </th>
+        </tr>
+      </thead>
+      <tbody className="text-gray-700 dark:text-gray-200">
+        {rows.map((n) => (
+          <tr key={n.id} data-testid="maintenance-notification">
+            <td className="py-1 pr-3">{clientName(n.client_id)}</td>
+            <td className="py-1 pr-3">{t(`maintenance.channels.${n.channel}`, n.channel)}</td>
+            <td className="py-1 pr-3">
+              <Badge variant={notificationVariant(n.status)}>
+                {t(`maintenance.notificationStatuses.${n.status}`, n.status)}
+              </Badge>
+            </td>
+            <td className="py-1">
+              {/* sent_at only exists once a channel has delivered it. */}
+              {new Date(n.sent_at ?? n.created_at).toLocaleString()}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 export function MaintenancePage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ title: '', starts_at: '', ends_at: '' });
+  const [form, setForm] = useState(emptyForm);
+  const [ciSearch, setCISearch] = useState('');
+  const [selectedCIs, setSelectedCIs] = useState<{ id: string; name: string }[]>([]);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [notifyResult, setNotifyResult] = useState<string | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['maintenance-windows'],
     queryFn: () => maintenanceApi.list({ limit: 100 }),
   });
+  const term = ciSearch.trim();
+  const ciResults = useQuery({
+    queryKey: ['maintenance-ci-search', term],
+    queryFn: () => ciApi.list({ search: term, limit: 20 }),
+    enabled: showCreate && term.length > 0,
+  });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['maintenance-windows'] });
+  const resetForm = () => {
+    setForm(emptyForm);
+    setCISearch('');
+    setSelectedCIs([]);
+  };
   const createMutation = useMutation({
     mutationFn: () =>
       maintenanceApi.create({
         title: form.title,
         starts_at: form.starts_at,
         ends_at: form.ends_at,
+        ci_ids: selectedCIs.map((ci) => ci.id),
       }),
     onSuccess: () => {
       invalidate();
       setShowCreate(false);
-      setForm({ title: '', starts_at: '', ends_at: '' });
+      resetForm();
     },
   });
   const statusMutation = useMutation({
@@ -60,8 +172,11 @@ export function MaintenancePage() {
   const notifyMutation = useMutation({
     mutationFn: (id: string) => maintenanceApi.notify(id),
     // Show the real delivery status: notifications stay pending until the
-    // notification chain has delivered them (WP-063).
-    onSuccess: (res) =>
+    // notification chain has delivered them (WP-063); the stored list of the
+    // window shows them per client (WP-540).
+    onSuccess: (res, id) => {
+      setExpanded((prev) => ({ ...prev, [id]: true }));
+      void queryClient.invalidateQueries({ queryKey: ['maintenance-notifications', id] });
       setNotifyResult(
         [
           res.notified > 0
@@ -79,8 +194,11 @@ export function MaintenancePage() {
         ]
           .filter(Boolean)
           .join(' · ') || t('maintenance.noClients', 'Keine betroffenen Kunden'),
-      ),
+      );
+    },
   });
+
+  const selectedIDs = new Set(selectedCIs.map((ci) => ci.id));
 
   return (
     <div className="space-y-4">
@@ -132,6 +250,14 @@ export function MaintenancePage() {
               {(w.ci_ids ?? []).length} {t('maintenance.affectedCIs', 'betroffene CIs')}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                aria-expanded={!!expanded[w.id]}
+                onClick={() => setExpanded((prev) => ({ ...prev, [w.id]: !prev[w.id] }))}
+              >
+                {t('maintenance.notifications', 'Benachrichtigungen')}
+              </Button>
               {w.status === 'scheduled' ? (
                 <>
                   <Button
@@ -159,6 +285,11 @@ export function MaintenancePage() {
                 </Button>
               ) : null}
             </div>
+            {expanded[w.id] ? (
+              <div className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-700">
+                <WindowNotifications windowId={w.id} />
+              </div>
+            ) : null}
           </Card>
         ))}
       </div>
@@ -196,6 +327,70 @@ export function MaintenancePage() {
               })
             }
           />
+          <div className="space-y-2">
+            <Input
+              label={t('maintenance.searchCIs', 'Betroffene CIs suchen')}
+              type="search"
+              value={ciSearch}
+              onChange={(e) => setCISearch(e.target.value)}
+            />
+            {term && ciResults.data ? (
+              <ul
+                aria-label={t('maintenance.ciResults', 'Gefundene CIs')}
+                className="max-h-40 space-y-1 overflow-y-auto"
+              >
+                {ciResults.data.data
+                  .filter((ci) => !selectedIDs.has(ci.id))
+                  .map((ci) => (
+                    <li key={ci.id}>
+                      <button
+                        type="button"
+                        className="w-full rounded px-2 py-1 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
+                        onClick={() =>
+                          setSelectedCIs((prev) => [...prev, { id: ci.id, name: ci.name }])
+                        }
+                      >
+                        {t('maintenance.addCI', '{{name}} hinzufügen', { name: ci.name })}
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            ) : null}
+            {selectedCIs.length > 0 ? (
+              <ul
+                aria-label={t('maintenance.selectedCIs', 'Ausgewählte CIs')}
+                className="flex flex-wrap gap-2"
+              >
+                {selectedCIs.map((ci) => (
+                  <li
+                    key={ci.id}
+                    className="flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-sm dark:bg-gray-800"
+                  >
+                    {ci.name}
+                    <button
+                      type="button"
+                      aria-label={t('maintenance.removeCI', '{{name}} entfernen', {
+                        name: ci.name,
+                      })}
+                      className="px-1 text-muted hover:text-gray-900 dark:hover:text-gray-100"
+                      onClick={() =>
+                        setSelectedCIs((prev) => prev.filter((other) => other.id !== ci.id))
+                      }
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {t(
+                  'maintenance.noCIsSelected',
+                  'Ohne CI gilt die Wartung für die ganze Organisation.',
+                )}
+              </p>
+            )}
+          </div>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowCreate(false)}>
               {t('common.cancel', 'Abbrechen')}

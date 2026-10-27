@@ -1159,6 +1159,26 @@
       "in_progress": "In progress",
       "completed": "Completed",
       "cancelled": "Cancelled"
+    },
+    "notifications": "Notifications",
+    "noNotifications": "No notifications stored",
+    "client": "Customer",
+    "channel": "Channel",
+    "status": "Status",
+    "time": "Time",
+    "searchCIs": "Search affected CIs",
+    "ciResults": "Matching CIs",
+    "selectedCIs": "Selected CIs",
+    "addCI": "Add {{name}}",
+    "removeCI": "Remove {{name}}",
+    "noCIsSelected": "Without a CI the maintenance applies to the whole organization.",
+    "channels": {
+      "webhook": "Webhook"
+    },
+    "notificationStatuses": {
+      "pending": "pending",
+      "sent": "sent",
+      "failed": "failed"
     }
   },
   "disposal": {

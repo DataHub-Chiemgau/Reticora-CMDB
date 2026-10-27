@@ -13856,7 +13856,7 @@ COL-02;[B];B;collector/collectorcmd/redfish_tls_integration_test.go;WP-539
 **Akzeptanzkriterien:**
 
 - [ ] Migration: Duplikate je (maintenance_window_id, client_id, channel) werden auf die älteste Zeile reduziert, danach UNIQUE-Index; Notify nutzt ON CONFLICT DO NOTHING und liefert die bestehenden Zeilen. PG-Test `maintenance/status_test.go` (Retest F-235, vor dem Fix rot): zweimal notify → eine pending-Zeile je Client, sent_at NULL.
-- [ ] Formular mit CI-Auswahl (Suche über /cis, mehrere CIs); POST und PATCH senden ci_ids; die Detailansicht des Fensters listet die gespeicherten Benachrichtigungen (Client, Kanal, Status, Zeit) aus GET /maintenance-windows/{id}/notifications, auch nach Reload.
+- [ ] Formular mit CI-Auswahl (Suche über /cis, mehrere CIs); POST und PATCH senden ci_ids (Korrektur vom 2026-10-27, WP-540: `PATCH /maintenance-windows/{id}` hat in API, Spezifikation und Backend kein Feld `ci_ids`, die Zuordnung der CIs geschieht bei der Anlage; das nachträgliche Ändern der CIs eines Fensters ist eine neue Funktion mit eigener Scope-Regel (E-09) und nicht Teil dieses Nachweis-WPs, daher sendet nur POST ci_ids); die Detailansicht des Fensters listet die gespeicherten Benachrichtigungen (Client, Kanal, Status, Zeit) aus GET /maintenance-windows/{id}/notifications, auch nach Reload.
 - [ ] Vitest `MaintenancePage.test.tsx` (neu, Retest F-236): ci_ids im POST; nach Notify und erneutem Laden zeigt die Liste 'ausstehend' je Client; kein Text behauptet eine Zustellung.
 - [ ] Texte de-DE/en-US; TestNotifyQueuesWithoutClaimingDelivery, TestNotifyQueuesInPostgres, Roundtrip und Vitest-Suite grün.
 
