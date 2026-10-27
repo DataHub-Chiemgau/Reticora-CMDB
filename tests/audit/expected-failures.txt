@@ -8,7 +8,6 @@ go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
 go;backend/internal/desk;TestAuditDeskBookingStaysInOrganization;F-366
 go;backend/internal/discovery;TestAuditLLDPEdgesOfFirstCycleIndependentOfLaneOrder;F-374
 go;backend/internal/keymgmt;TestAuditKeyIssueStaysInOrganization;F-366
-go;backend/internal/maintenance;TestAuditMaintenanceNotifyHiddenWindowIsNotFound;F-367
 go;backend/internal/training;TestAuditTrainingAssignmentStaysInOrganization;F-366
 go;backend/internal/server;TestAuditClientTechnicianListsOwnClients;F-373
 go;backend/internal/server;TestAuditReviewMergeIntoDeletedCandidateIsNotFound;F-371

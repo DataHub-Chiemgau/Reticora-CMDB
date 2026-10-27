@@ -14651,6 +14651,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listDisposalRecords: {

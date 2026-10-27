@@ -171,3 +171,60 @@ func TestMaintenanceNotifyClientScope(t *testing.T) {
 		t.Errorf("notifications of the org-wide announcement listed for client 1: %q, want only client 1", got)
 	}
 }
+
+// TestAuditMaintenanceNotifyHiddenWindowIsNotFound (WP-538, MGT-04, TEN-06;
+// F-367, fixed by WP-640): POST /maintenance-windows/{id}/notify and GET
+// /maintenance-windows/{id}/notifications answer 404 problem+json for a
+// window the caller cannot see (a window of only client-2 CIs for a
+// client-1 principal, a window of another organization) and for an unknown
+// window, like GET, PATCH and DELETE of the window; nothing is queued.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAuditMaintenanceNotifyHiddenWindowIsNotFound(t *testing.T) {
+	f := scopetest.Seed(t, "3a")
+	foreignCI := f.CI(t, f.OrgA, f.Client2, "maint-x-c2")
+	ciB := f.CI(t, f.OrgB, "", "maint-x-b")
+	user := f.AppUser(t, f.OrgA, "maint-x-user")
+	repo := maintenance.NewPGRepository(f.App)
+	start := time.Now().UTC().Add(24 * time.Hour)
+	window := func(orgID, ciID string) string {
+		w := &maintenance.Window{OrganizationID: orgID, Title: "Hidden", StartsAt: start, EndsAt: start.Add(time.Hour), CIIDs: []string{ciID}}
+		if err := repo.Create(f.OrgCtx(orgID), w); err != nil {
+			t.Fatalf("window: %v", err)
+		}
+		return w.ID
+	}
+	client2Only, orgB := window(f.OrgA, foreignCI), window(f.OrgB, ciB)
+	const unknown = "00000000-0000-4000-8000-000000000640"
+
+	mux := chi.NewRouter()
+	maintenance.NewHandler(repo).RegisterRoutes(mux)
+	client1 := database.OrgWideScope(f.OrgA, user)
+	client1.Clients = database.ScopeIDs(f.Client1)
+	orgWide := database.OrgWideScope(f.OrgA, user)
+	for _, c := range []struct {
+		name, window string
+		scope        *database.TenantScope
+	}{
+		{"client-2 window as client 1", client2Only, &client1},
+		{"organization-B window", orgB, &orgWide},
+		{"unknown window", unknown, &orgWide},
+	} {
+		for _, r := range []struct{ method, suffix string }{{http.MethodPost, "/notify"}, {http.MethodGet, "/notifications"}} {
+			req := httptest.NewRequest(r.method, "/api/v1/maintenance-windows/"+c.window+r.suffix, nil)
+			ctx := tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: user})
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req.WithContext(database.ContextWithTenantScope(ctx, c.scope)))
+			if w.Code != http.StatusNotFound {
+				t.Errorf("%s: %s %s: status %d, want 404: %s", c.name, r.method, r.suffix, w.Code, w.Body.String())
+			}
+			if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, api.ProblemContentType) {
+				t.Errorf("%s: %s %s: content type %q, want %s", c.name, r.method, r.suffix, ct, api.ProblemContentType)
+			}
+		}
+	}
+	var n int
+	if err := f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM maintenance_notification WHERE maintenance_window_id IN ($1, $2)`, client2Only, orgB).Scan(&n); err != nil || n != 0 {
+		t.Errorf("notifications of the hidden windows: %d err=%v, want none", n, err)
+	}
+}

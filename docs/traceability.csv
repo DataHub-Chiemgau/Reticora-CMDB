@@ -943,3 +943,4 @@ COL-02;[B];D;collector/collectorcmd/redfish_tls_integration_test.go;WP-641
 TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_test.go;WP-636
 TEN-04;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-637
 RBA-03;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-637
+MGT-04;[P3];B;backend/internal/maintenance/maintenance_scope_integration_test.go;WP-640

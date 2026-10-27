@@ -218,11 +218,29 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	})
 }
 
+// visibleWindowTx reports api.ErrNotFound for a window the transaction's
+// tenant scope does not see, like GetByID (F-367): announcing a hidden or
+// unknown window, or listing its notifications, answers 404 instead of an
+// empty success.
+func visibleWindowTx(ctx context.Context, tx pgx.Tx, orgID, windowID string) error {
+	var visible bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM maintenance_window WHERE "+windowVisible+" AND organization_id = $1 AND id = $2)", orgID, windowID).Scan(&visible); err != nil {
+		return err
+	}
+	if !visible {
+		return fmt.Errorf("maintenance window not found: %w", api.ErrNotFound)
+	}
+	return nil
+}
+
 // NotifyClients derives affected clients from the window's CIs and records
 // one sent notification per client.
 func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string) ([]Notification, error) {
 	out := []Notification{}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := visibleWindowTx(ctx, tx, orgID, windowID); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, `
 			SELECT DISTINCT ci.client_id::text
 			FROM maintenance_window_ci mwc
@@ -276,6 +294,9 @@ func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string
 func (r *PGRepository) ListNotifications(ctx context.Context, orgID, windowID string) ([]Notification, error) {
 	out := []Notification{}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := visibleWindowTx(ctx, tx, orgID, windowID); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, "SELECT "+notificationCols+" FROM maintenance_notification WHERE organization_id = $1 AND maintenance_window_id = $2 ORDER BY created_at ASC", orgID, windowID)
 		if err != nil {
 			return err

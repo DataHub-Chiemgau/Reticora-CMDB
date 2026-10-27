@@ -3156,6 +3156,8 @@ paths:
           description: Notifications
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/disposal-records:
     x-phase: P4
