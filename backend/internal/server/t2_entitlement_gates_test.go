@@ -473,7 +473,7 @@ func TestT2EntitlementQuotaFirstLoginWithInvitation(t *testing.T) {
 
 	// First login with an invitation at the limit.
 	loginInvitation := invite("quota-login@a.invalid", "quota-login-hash")
-	if _, err := users.EnsureUser(bg, f.OrgA, "scopetest-ed-quota-login", "quota-login@a.invalid", "Quota Login"); !limitRefusal(err) {
+	if _, _, err := users.EnsureUser(bg, f.OrgA, "scopetest-ed-quota-login", "quota-login@a.invalid", "Quota Login", ""); !limitRefusal(err) {
 		t.Errorf("first login with an invitation at max_users: %v, want entitlement-limit", err)
 	}
 	if !open(loginInvitation) || usersOf("quota-login@a.invalid") != 0 {
@@ -502,13 +502,13 @@ func TestT2EntitlementQuotaFirstLoginWithInvitation(t *testing.T) {
 	}
 
 	// The stock stays usable: a returning user logs in at the limit.
-	if _, err = users.EnsureUser(bg, f.OrgA, "scopetest-ed-quota-member", "", ""); err != nil {
+	if _, _, err = users.EnsureUser(bg, f.OrgA, "scopetest-ed-quota-member", "", "", ""); err != nil {
 		t.Errorf("returning user at max_users: %v, want admitted", err)
 	}
 
 	// Raised by one: the login is admitted, the next acceptance refused.
 	setLimit(active + 1)
-	if _, err = users.EnsureUser(bg, f.OrgA, "scopetest-ed-quota-login", "quota-login@a.invalid", "Quota Login"); err != nil {
+	if _, _, err = users.EnsureUser(bg, f.OrgA, "scopetest-ed-quota-login", "quota-login@a.invalid", "Quota Login", ""); err != nil {
 		t.Fatalf("first login with an invitation below max_users: %v", err)
 	}
 	if open(loginInvitation) || usersOf("quota-login@a.invalid") != 1 {

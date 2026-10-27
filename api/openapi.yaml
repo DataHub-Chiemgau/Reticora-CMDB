@@ -608,6 +608,12 @@ paths:
         max_users (active users, ENT-03); at the limit it answers 403
         entitlement-limit, creates no user and leaves the invitation open.
         A deactivated user, and a first login without an admission, get 403.
+        Only the first login (an account an administrator created, or the
+        first user of the organization) assigns the configured default role,
+        when the user holds no role yet; a later login assigns none. A login
+        that resolves no role (no role assignment, no custom role, no IdP
+        role) gets 403 without session and refresh cookie, and the refusal
+        is audited (user.login_refused, TEN-04, RBA-03).
       requestBody:
         required: true
         content:

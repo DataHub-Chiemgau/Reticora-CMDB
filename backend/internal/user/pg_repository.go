@@ -1393,46 +1393,50 @@ func loginScope(orgID string) *database.TenantScope {
 // MFA before the commit (WP-358); when that fails, the login fails with
 // ErrMFAUnavailable and changes nothing: the invitation stays open.
 //
+// The first login without invitation (the account an administrator created,
+// or the first user of the organization) assigns the standard role
+// defaultRole org-wide in the same transaction when the user then holds no
+// role, standard or custom (assignDefaultRole); assigned reports it. A later
+// login of a known subject assigns nothing: a user whose assignments an
+// administrator revoked stays without role and gets no session (RBA-03,
+// TEN-04, F-364). An accepted invitation grants the invited role only.
+//
 // Every other first login fails with identity.ErrFirstLoginNotPermitted; an
 // empty e-mail (not verified by the IdP) admits nothing. A login never
 // reactivates a deactivated user (TLC-04): it fails with
 // identity.ErrUserInactive.
-func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName string) (string, error) {
+func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName, defaultRole string) (userID string, assigned bool, err error) {
 	email = strings.TrimSpace(email)
 	if displayName == "" {
 		displayName = email
 	}
-	var id string
-	err := database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		id, err = resolveLogin(ctx, tx, r.mfa, r.quota, orgID, oidcSubject, email, displayName)
-		return err
+	err = database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
+		var loginErr error
+		userID, assigned, loginErr = resolveLogin(ctx, tx, r.mfa, r.quota, orgID, oidcSubject, email, displayName, defaultRole)
+		return loginErr
 	})
 	if errors.Is(err, identity.ErrUserInactive) || errors.Is(err, identity.ErrFirstLoginNotPermitted) || errors.Is(err, ErrMFAUnavailable) {
-		return "", err
+		return "", false, err
 	}
 	if quotaRefused(err) {
-		return "", err
+		return "", false, err
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		// The subject belongs to a user of another organization.
-		return "", identity.ErrFirstLoginNotPermitted
+		return "", false, identity.ErrFirstLoginNotPermitted
 	}
 	if err != nil {
-		return "", fmt.Errorf("ensure oidc user: %w", err)
+		return "", false, fmt.Errorf("ensure oidc user: %w", err)
 	}
-	return id, nil
+	return userID, assigned, nil
 }
 
 // resolveLogin implements EnsureUser inside the login transaction.
-func resolveLogin(ctx context.Context, tx pgx.Tx, mfa MFAEnforcer, quota QuotaGuard, orgID, subject, email, displayName string) (string, error) {
-	var (
-		id     string
-		active bool
-	)
+func resolveLogin(ctx context.Context, tx pgx.Tx, mfa MFAEnforcer, quota QuotaGuard, orgID, subject, email, displayName, defaultRole string) (id string, assigned bool, err error) {
+	var active bool
 	// Returning user: refresh the profile; the status never changes on login.
-	err := tx.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		UPDATE app_user SET
 			email = COALESCE(NULLIF($3, ''), email),
 			display_name = COALESCE(NULLIF($4, ''), display_name),
@@ -1443,15 +1447,16 @@ func resolveLogin(ctx context.Context, tx pgx.Tx, mfa MFAEnforcer, quota QuotaGu
 	`, orgID, subject, email, displayName).Scan(&id, &active)
 	if err == nil {
 		if !active {
-			return "", identity.ErrUserInactive
+			return "", false, identity.ErrUserInactive
 		}
-		return id, nil
+		// A later login assigns no role (F-364).
+		return id, false, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return "", fmt.Errorf("read user of subject: %w", err)
+		return "", false, fmt.Errorf("read user of subject: %w", err)
 	}
 	if email == "" {
-		return "", identity.ErrFirstLoginNotPermitted
+		return "", false, identity.ErrFirstLoginNotPermitted
 	}
 
 	// An account created by an administrator or SCIM: link the subject. An
@@ -1465,28 +1470,32 @@ func resolveLogin(ctx context.Context, tx pgx.Tx, mfa MFAEnforcer, quota QuotaGu
 	`, orgID, email).Scan(&id, &active, &linked)
 	switch {
 	case err == nil && linked:
-		return "", identity.ErrFirstLoginNotPermitted
+		return "", false, identity.ErrFirstLoginNotPermitted
 	case err == nil && !active:
-		return "", identity.ErrUserInactive
+		return "", false, identity.ErrUserInactive
 	case err == nil:
 		if _, err = tx.Exec(ctx, `UPDATE app_user SET oidc_subject = $2, display_name = $3, last_login = now(), updated_at = now() WHERE id = $1`,
 			id, subject, displayName); err != nil {
-			return "", fmt.Errorf("link subject: %w", err)
+			return "", false, fmt.Errorf("link subject: %w", err)
+		}
+		var aerr error
+		if assigned, aerr = assignDefaultRole(ctx, tx, orgID, id, defaultRole); aerr != nil {
+			return "", false, aerr
 		}
 		// An org_admin whose account did not exist when the role was
-		// assigned is bound now.
+		// assigned, or who got the default role org_admin now, is bound.
 		admin, aerr := holdsOrgAdmin(ctx, tx, orgID, id)
 		if aerr != nil {
-			return "", aerr
+			return "", false, aerr
 		}
 		if admin {
 			if berr := bindMFA(ctx, mfa, subject, email); berr != nil {
-				return "", berr
+				return "", false, berr
 			}
 		}
-		return id, nil
+		return id, assigned, nil
 	case !errors.Is(err, pgx.ErrNoRows):
-		return "", fmt.Errorf("read user of e-mail: %w", err)
+		return "", false, fmt.Errorf("read user of e-mail: %w", err)
 	}
 
 	// A pending invitation: accept it and grant the invited role.
@@ -1501,20 +1510,20 @@ func resolveLogin(ctx context.Context, tx pgx.Tx, mfa MFAEnforcer, quota QuotaGu
 	`, orgID, email).Scan(&invitationID, &roleID, &scopeType, &scopeID)
 	invited := err == nil
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", fmt.Errorf("read invitation: %w", err)
+		return "", false, fmt.Errorf("read invitation: %w", err)
 	}
 	if !invited {
 		var users int
 		if err = tx.QueryRow(ctx, `SELECT count(*) FROM app_user WHERE organization_id = $1`, orgID).Scan(&users); err != nil {
-			return "", fmt.Errorf("count users: %w", err)
+			return "", false, fmt.Errorf("count users: %w", err)
 		}
 		if users > 0 {
-			return "", identity.ErrFirstLoginNotPermitted
+			return "", false, identity.ErrFirstLoginNotPermitted
 		}
 	} else if quotaErr := allowUserTx(ctx, tx, loginScope(orgID), quota, orgID); quotaErr != nil {
 		// max_users is reached: the login fails and rolls back, the
 		// invitation stays open (ENT-03, ENT-08).
-		return "", quotaErr
+		return "", false, quotaErr
 	}
 
 	if insertErr := tx.QueryRow(ctx, `
@@ -1522,13 +1531,23 @@ func resolveLogin(ctx context.Context, tx pgx.Tx, mfa MFAEnforcer, quota QuotaGu
 		VALUES ($1, $2, $3, $4, true, now())
 		RETURNING id::text
 	`, orgID, subject, email, displayName).Scan(&id); insertErr != nil {
-		return "", insertErr
+		return "", false, insertErr
 	}
 	if !invited {
-		return id, nil
+		// The first user of the organization.
+		var aerr error
+		if assigned, aerr = assignDefaultRole(ctx, tx, orgID, id, defaultRole); aerr != nil {
+			return "", false, aerr
+		}
+		if assigned && defaultRole == OrgAdminRole {
+			if berr := bindMFA(ctx, mfa, subject, email); berr != nil {
+				return "", false, berr
+			}
+		}
+		return id, assigned, nil
 	}
 	if _, err = tx.Exec(ctx, `UPDATE user_invitation SET accepted_at = now() WHERE id = $1`, invitationID); err != nil {
-		return "", fmt.Errorf("accept invitation: %w", err)
+		return "", false, fmt.Errorf("accept invitation: %w", err)
 	}
 	var clientScope, siteScope *string
 	switch scopeType {
@@ -1538,25 +1557,26 @@ func resolveLogin(ctx context.Context, tx pgx.Tx, mfa MFAEnforcer, quota QuotaGu
 		siteScope = scopeID
 	}
 	if (scopeType == "client" || scopeType == "site") && scopeID == nil {
-		// A scoped invitation without scope grants nothing (fail closed).
-		return id, nil
+		// A scoped invitation without scope grants nothing (fail closed),
+		// the default role neither.
+		return id, false, nil
 	}
 	if _, err = tx.Exec(ctx, `
 		INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id, scope_site_id)
 		VALUES ($1, $2, $3, $4, $5)
 	`, orgID, id, roleID, clientScope, siteScope); err != nil {
-		return "", fmt.Errorf("assign invited role: %w", err)
+		return "", false, fmt.Errorf("assign invited role: %w", err)
 	}
 	admin, err := holdsOrgAdmin(ctx, tx, orgID, id)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if admin {
 		if berr := bindMFA(ctx, mfa, subject, email); berr != nil {
-			return "", berr
+			return "", false, berr
 		}
 	}
-	return id, nil
+	return id, false, nil
 }
 
 // UserActive reports whether the user exists in the organization and is
@@ -1575,58 +1595,54 @@ func (r *PGRepository) UserActive(ctx context.Context, orgID, userID string) (bo
 	return active, nil
 }
 
-// EnsureRole assigns the named standard role to the user when they hold no
-// role yet, standard or custom, so first login lands on a sensible
-// least-privilege baseline instead of an empty permission set. A user an
-// administrator gave only a custom role keeps exactly that role: the login
-// does not add the default role back (RBA-03). It reports whether the user
-// holds the role afterwards, assigned now or before: the login binds a
-// default role org_admin to MFA (WP-367).
-//
-// Assigning org_admin binds the IdP account to MFA before the commit, like
-// every other grant of org_admin (WP-358): a session of the user that
-// refreshes meanwhile never holds org_admin without the binding. When the
-// binding fails, nothing is assigned and the error wraps ErrMFAUnavailable.
-func (r *PGRepository) EnsureRole(ctx context.Context, orgID, userID, roleName string) (bool, error) {
-	var held bool
-	err := database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
-		var existing int
-		if err := tx.QueryRow(ctx, `
-			SELECT (SELECT COUNT(*) FROM role_assignment WHERE organization_id = $1 AND user_id = $2)
-			     + (SELECT COUNT(*) FROM user_custom_role ucr JOIN custom_role cr ON cr.id = ucr.custom_role_id
-			         WHERE cr.organization_id = $1 AND ucr.user_id = $2)`, orgID, userID).Scan(&existing); err != nil {
-			return fmt.Errorf("check role assignments: %w", err)
-		}
-		if existing == 0 {
-			tag, err := tx.Exec(ctx, `
-				INSERT INTO role_assignment (organization_id, user_id, role_id)
-				SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = $3
-				ON CONFLICT DO NOTHING
-			`, orgID, userID, roleName)
-			if err != nil {
-				return fmt.Errorf("assign default role: %w", err)
-			}
-			if tag.RowsAffected() > 0 && roleName == OrgAdminRole {
-				var subject, email string
-				if err = tx.QueryRow(ctx, `SELECT COALESCE(oidc_subject, ''), email FROM app_user WHERE id::text = $1 AND organization_id = $2`,
-					userID, orgID).Scan(&subject, &email); err != nil {
-					return fmt.Errorf("read user of default role: %w", err)
-				}
-				if berr := bindMFA(ctx, r.mfa, subject, email); berr != nil {
-					return berr
-				}
-			}
-		}
-		// Read after the insert: a concurrent first login that assigned the
-		// role is seen as well.
-		err := tx.QueryRow(ctx, `
-			SELECT EXISTS (SELECT 1 FROM role_assignment ra JOIN role ro ON ro.id = ra.role_id AND ro.organization_id = ra.organization_id
-				WHERE ra.organization_id = $1 AND ra.user_id = $2 AND ro.name = $3)
-		`, orgID, userID, roleName).Scan(&held)
-		if err != nil {
-			return fmt.Errorf("read default role assignment: %w", err)
+// assignDefaultRole assigns the standard role roleName (empty: none) org-wide
+// to the user of a first login in the login transaction when the user holds
+// no role yet, standard or custom, so the first login lands on a sensible
+// least-privilege baseline. An account an administrator gave a role, or only
+// a custom role, keeps exactly that (RBA-03). It reports whether it assigned
+// the role; the caller binds a default role org_admin to MFA before the
+// commit (WP-358, WP-367).
+func assignDefaultRole(ctx context.Context, tx pgx.Tx, orgID, userID, roleName string) (bool, error) {
+	if roleName == "" {
+		return false, nil
+	}
+	var existing int
+	if err := tx.QueryRow(ctx, `
+		SELECT (SELECT COUNT(*) FROM role_assignment WHERE organization_id = $1 AND user_id = $2)
+		     + (SELECT COUNT(*) FROM user_custom_role ucr JOIN custom_role cr ON cr.id = ucr.custom_role_id
+		         WHERE cr.organization_id = $1 AND ucr.user_id = $2)`, orgID, userID).Scan(&existing); err != nil {
+		return false, fmt.Errorf("check role assignments: %w", err)
+	}
+	if existing > 0 {
+		return false, nil
+	}
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO role_assignment (organization_id, user_id, role_id)
+		SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = $3
+		ON CONFLICT DO NOTHING
+	`, orgID, userID, roleName)
+	if err != nil {
+		return false, fmt.Errorf("assign default role: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// RecordLoginRefused records the audit entry user.login_refused of a login
+// the identity handler refused because the user holds no role (F-364). The
+// user is the actor; nothing else changes.
+func (r *PGRepository) RecordLoginRefused(ctx context.Context, orgID, userID string) error {
+	return database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+			OrganizationID: orgID,
+			ActorID:        userID,
+			ActorType:      "user",
+			Action:         ActionLoginRefused,
+			ResourceType:   "user",
+			ResourceID:     userID,
+			Changes:        map[string]interface{}{"reason": "no_role_assignment"},
+		}); err != nil {
+			return fmt.Errorf("audit %s: %w", ActionLoginRefused, err)
 		}
 		return nil
 	})
-	return held, err
 }

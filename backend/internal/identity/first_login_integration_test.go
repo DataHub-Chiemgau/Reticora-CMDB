@@ -30,13 +30,13 @@ func TestFirstLoginRequiresAdmission(t *testing.T) {
 
 	// Organization B has no user: its first login bootstraps it; the second
 	// unknown user needs an admission. The returning user is recognized.
-	first, err := users.EnsureUser(bg, f.OrgB, "fl54-b-first", "first@b.invalid", "First")
+	first, _, err := users.EnsureUser(bg, f.OrgB, "fl54-b-first", "first@b.invalid", "First", "")
 	if err != nil {
 		t.Fatalf("bootstrap login: %v", err)
 	}
-	_, err = users.EnsureUser(bg, f.OrgB, "fl54-b-second", "second@b.invalid", "Second")
+	_, _, err = users.EnsureUser(bg, f.OrgB, "fl54-b-second", "second@b.invalid", "Second", "")
 	notPermitted("second user without admission", err)
-	if again, againErr := users.EnsureUser(bg, f.OrgB, "fl54-b-first", "first@b.invalid", "First"); againErr != nil || again != first {
+	if again, _, againErr := users.EnsureUser(bg, f.OrgB, "fl54-b-first", "first@b.invalid", "First", ""); againErr != nil || again != first {
 		t.Errorf("returning user: %s, %v; want %s", again, againErr, first)
 	}
 
@@ -44,7 +44,7 @@ func TestFirstLoginRequiresAdmission(t *testing.T) {
 	inviter := f.AppUser(t, f.OrgA, "fl54-inviter")
 
 	// An unverified address (empty) admits nothing.
-	_, err = users.EnsureUser(bg, f.OrgA, "fl54-unverified", "", "Unverified")
+	_, _, err = users.EnsureUser(bg, f.OrgA, "fl54-unverified", "", "Unverified", "")
 	notPermitted("unverified e-mail", err)
 
 	// An account created by an administrator is linked on first login.
@@ -52,11 +52,11 @@ func TestFirstLoginRequiresAdmission(t *testing.T) {
 	if err = f.Admin.QueryRow(bg, `INSERT INTO app_user (organization_id, email, display_name) VALUES ($1, 'Pre@A.invalid', 'Pre') RETURNING id::text`, f.OrgA).Scan(&precreated); err != nil {
 		t.Fatalf("seed account: %v", err)
 	}
-	if id, linkErr := users.EnsureUser(bg, f.OrgA, "fl54-pre", "pre@a.invalid", "Pre"); linkErr != nil || id != precreated {
+	if id, _, linkErr := users.EnsureUser(bg, f.OrgA, "fl54-pre", "pre@a.invalid", "Pre", ""); linkErr != nil || id != precreated {
 		t.Errorf("login of a created account: %s, %v; want %s", id, linkErr, precreated)
 	}
 	// The linked account is not taken over by another subject with the address.
-	_, err = users.EnsureUser(bg, f.OrgA, "fl54-pre-other", "pre@a.invalid", "Pre")
+	_, _, err = users.EnsureUser(bg, f.OrgA, "fl54-pre-other", "pre@a.invalid", "Pre", "")
 	notPermitted("second subject for a linked address", err)
 
 	// A pending invitation with client scope: the user gets the role in the
@@ -77,7 +77,7 @@ func TestFirstLoginRequiresAdmission(t *testing.T) {
 		return id
 	}
 	invitation := invite("invited@a.invalid", "7 days")
-	invited, err := users.EnsureUser(bg, f.OrgA, "fl54-invited", "Invited@A.invalid", "Invited")
+	invited, _, err := users.EnsureUser(bg, f.OrgA, "fl54-invited", "Invited@A.invalid", "Invited", "")
 	if err != nil {
 		t.Fatalf("login with invitation: %v", err)
 	}
@@ -93,14 +93,14 @@ func TestFirstLoginRequiresAdmission(t *testing.T) {
 	// An expired invitation admits nothing; neither does an invitation of
 	// another organization's address.
 	invite("late@a.invalid", "-1 minute")
-	_, err = users.EnsureUser(bg, f.OrgA, "fl54-late", "late@a.invalid", "Late")
+	_, _, err = users.EnsureUser(bg, f.OrgA, "fl54-late", "late@a.invalid", "Late", "")
 	notPermitted("expired invitation", err)
-	_, err = users.EnsureUser(bg, f.OrgA, "fl54-stranger", "second@b.invalid", "Stranger")
+	_, _, err = users.EnsureUser(bg, f.OrgA, "fl54-stranger", "second@b.invalid", "Stranger", "")
 	notPermitted("address without invitation", err)
 
 	// The subject of an organization B user cannot enter organization A, even
 	// with an invitation for its address.
 	invite("first@b.invalid", "7 days")
-	_, err = users.EnsureUser(bg, f.OrgA, "fl54-b-first", "first@b.invalid", "First")
+	_, _, err = users.EnsureUser(bg, f.OrgA, "fl54-b-first", "first@b.invalid", "First", "")
 	notPermitted("subject of another organization", err)
 }

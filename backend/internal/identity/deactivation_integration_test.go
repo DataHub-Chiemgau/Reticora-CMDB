@@ -43,7 +43,7 @@ func TestDeactivationEndsAccess(t *testing.T) {
 
 	// First login provisions the user (first user of the organization).
 	subject := "deact-oidc-subject-53"
-	userID, err := users.EnsureUser(bg, f.OrgA, subject, "deact@example.invalid", "Deact")
+	userID, _, err := users.EnsureUser(bg, f.OrgA, subject, "deact@example.invalid", "Deact", "")
 	if err != nil {
 		t.Fatalf("first login: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestDeactivationEndsAccess(t *testing.T) {
 	}
 
 	// A new login neither succeeds nor reactivates the user.
-	if _, err = users.EnsureUser(bg, f.OrgA, subject, "deact@example.invalid", "Deact"); !errors.Is(err, identity.ErrUserInactive) {
+	if _, _, err = users.EnsureUser(bg, f.OrgA, subject, "deact@example.invalid", "Deact", ""); !errors.Is(err, identity.ErrUserInactive) {
 		t.Errorf("login of a deactivated user: %v, want ErrUserInactive", err)
 	}
 	if active, statusErr := users.UserActive(bg, f.OrgA, userID); statusErr != nil || active {
@@ -190,7 +190,7 @@ func TestDeactivationEndsAccess(t *testing.T) {
 	if w := call(http.MethodPatch, "/api/v1/users/"+userID, `{"status":"active"}`); w.Code != http.StatusOK {
 		t.Fatalf("reactivate: status %d: %s", w.Code, w.Body.String())
 	}
-	if _, err = users.EnsureUser(bg, f.OrgA, subject, "deact@example.invalid", "Deact"); err != nil {
+	if _, _, err = users.EnsureUser(bg, f.OrgA, subject, "deact@example.invalid", "Deact", ""); err != nil {
 		t.Errorf("login after reactivation: %v", err)
 	}
 	// iat has the second resolution of a JWT NumericDate; a token from the

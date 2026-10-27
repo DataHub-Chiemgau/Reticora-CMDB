@@ -464,15 +464,11 @@ type statusProvisioner struct {
 	deactivated map[string]bool
 }
 
-func (p statusProvisioner) EnsureUser(_ context.Context, _, oidcSubject, _, _ string) (string, error) {
+func (p statusProvisioner) EnsureUser(_ context.Context, _, oidcSubject, _, _, _ string) (string, bool, error) {
 	if p.deactivated[oidcSubject] {
-		return "", ErrUserInactive
+		return "", false, ErrUserInactive
 	}
-	return oidcSubject, nil
-}
-
-func (p statusProvisioner) EnsureRole(context.Context, string, string, string) (bool, error) {
-	return false, nil
+	return oidcSubject, false, nil
 }
 
 func (p statusProvisioner) UserActive(_ context.Context, _, userID string) (bool, error) {
@@ -509,8 +505,8 @@ func TestCallbackRejectsDeactivatedUser(t *testing.T) {
 // org_admin whose account cannot be bound to MFA (WP-358).
 type mfaFailingProvisioner struct{ statusProvisioner }
 
-func (mfaFailingProvisioner) EnsureUser(context.Context, string, string, string, string) (string, error) {
-	return "", fmt.Errorf("%w: keycloak: role mapping: status 403", ErrMFAUnavailable)
+func (mfaFailingProvisioner) EnsureUser(context.Context, string, string, string, string, string) (string, bool, error) {
+	return "", false, fmt.Errorf("%w: keycloak: role mapping: status 403", ErrMFAUnavailable)
 }
 
 // TestCallbackFailsWhenMFACannotBeEnforced covers WP-358 (AUT-09): a login
@@ -557,8 +553,8 @@ func (quotaLimitError) ProblemType() string { return api.ProblemEntitlementLimit
 // invitation while max_users is reached (WP-472).
 type quotaFailingProvisioner struct{ statusProvisioner }
 
-func (quotaFailingProvisioner) EnsureUser(context.Context, string, string, string, string) (string, error) {
-	return "", fmt.Errorf("ensure oidc user: %w", quotaLimitError{})
+func (quotaFailingProvisioner) EnsureUser(context.Context, string, string, string, string, string) (string, bool, error) {
+	return "", false, fmt.Errorf("ensure oidc user: %w", quotaLimitError{})
 }
 
 // TestCallbackRefusesFirstLoginOverUserQuota covers WP-472 (ENT-03): a
@@ -594,8 +590,8 @@ func TestCallbackRefusesFirstLoginOverUserQuota(t *testing.T) {
 // dbFailingProvisioner fails every login with the text of a database error.
 type dbFailingProvisioner struct{ statusProvisioner }
 
-func (dbFailingProvisioner) EnsureUser(context.Context, string, string, string, string) (string, error) {
-	return "", errors.New(`ERROR: new row violates row-level security policy for table "app_user" (SQLSTATE 42501)`)
+func (dbFailingProvisioner) EnsureUser(context.Context, string, string, string, string, string) (string, bool, error) {
+	return "", false, errors.New(`ERROR: new row violates row-level security policy for table "app_user" (SQLSTATE 42501)`)
 }
 
 // TestCallbackHidesProvisioningErrors covers API-03 (WP-408): a login whose
@@ -645,34 +641,42 @@ func (m *fakeMFA) RequireMFA(_ context.Context, subject string) error {
 }
 
 // loginProvisioner provisions every login as the app_user app-user-1, so
-// the session subject differs from the OIDC subject; holds reports the
-// default role as held after EnsureRole, roleErr fails EnsureRole.
+// the session subject differs from the OIDC subject. assigned reports a
+// first login that assigned the default role; holds names a standard role
+// the user holds in the database (assigned at this or an earlier login);
+// err fails the provisioning.
 type loginProvisioner struct {
-	holds   bool
-	roleErr error
+	assigned bool
+	holds    string
+	err      error
 }
 
-func (loginProvisioner) EnsureUser(context.Context, string, string, string, string) (string, error) {
-	return "app-user-1", nil
-}
-
-func (p loginProvisioner) EnsureRole(context.Context, string, string, string) (bool, error) {
-	return p.holds, p.roleErr
+func (p loginProvisioner) EnsureUser(context.Context, string, string, string, string, string) (string, bool, error) {
+	if p.err != nil {
+		return "", false, p.err
+	}
+	return "app-user-1", p.assigned, nil
 }
 
 // mfaLogin runs the login callback of the OIDC subject user-123 with the
 // IdP groups through a handler with the enforcer (nil: none), the
-// provisioner (nil: none) and the default role.
+// provisioner (nil: none) and the default role. The role a loginProvisioner
+// holds is the stored org-wide assignment the resolver returns.
 func mfaLogin(t *testing.T, groups []string, mfa *fakeMFA, provisioner UserProvisioner, defaultRole string) *httptest.ResponseRecorder {
 	t.Helper()
 	fake := newFakeOIDCServer(t)
 	fake.mutateClaims = func(claims map[string]any) { claims["groups"] = groups }
+	roles := standardRoleResolver{"org_admin": allPermissions(), "viewer": {PermCIRead}}
+	resolver := storedRoleResolver{standardRoleResolver: roles}
+	if p, ok := provisioner.(loginProvisioner); ok && p.holds != "" {
+		resolver.stored = []Grant{OrgWideGrant(roles[p.holds])}
+	}
 	handler := NewHandler(NewOIDCProvider(OIDCConfig{
 		IssuerURL:    fake.issuer(),
 		ClientID:     "reticora-app",
 		ClientSecret: "top-secret",
 		RedirectURL:  "https://app.example.com/callback",
-	}), testSessionIssuer(t)).WithAccessResolver(standardRoleResolver{"org_admin": allPermissions(), "viewer": {PermCIRead}})
+	}), testSessionIssuer(t)).WithAccessResolver(resolver)
 	if provisioner != nil {
 		handler.WithProvisioning(provisioner, defaultRole)
 	}
@@ -698,14 +702,29 @@ func hasSession(w *httptest.ResponseRecorder) bool {
 	return false
 }
 
+// storedRoleResolver is a standardRoleResolver whose user holds the stored
+// grants.
+type storedRoleResolver struct {
+	standardRoleResolver
+	stored []Grant
+}
+
+func (r storedRoleResolver) AccessGrants(context.Context, string, string) ([]Grant, error) {
+	return r.stored, nil
+}
+
 // TestLoginBindsOrgAdminOfGroupAndDefaultRoleToMFA covers WP-367 (AUT-09,
-// CH26, E-14, finding F-005): a login that grants org_admin through the IdP
-// group org_admin (no database assignment needed) or through the default
-// role org_admin binds the account of the ID token's subject (not the
-// app_user id) exactly once before the session is issued. Other groups, a
-// default role the user does not hold and other default roles bind
-// nothing; a failing binding answers 503 without session; a handler
-// without enforcer binds nothing; refresh never binds.
+// CH26, E-14, finding F-005) with WP-637 (F-364): a login that grants
+// org_admin through the IdP group org_admin (no database assignment needed)
+// or a first login that assigns the default role org_admin binds the
+// account of the ID token's subject (not the app_user id) exactly once
+// before the session is issued. Other groups, a default role the first
+// login did not assign (another role assigned before, or a later login,
+// which assigns no role) and other default roles bind nothing; a failing
+// provisioning (the default role is assigned in the login transaction)
+// answers without session and binds nothing; a failing binding answers 503
+// without session; a handler without enforcer binds nothing; refresh never
+// binds.
 func TestLoginBindsOrgAdminOfGroupAndDefaultRoleToMFA(t *testing.T) {
 	for _, c := range []struct {
 		name        string
@@ -718,11 +737,12 @@ func TestLoginBindsOrgAdminOfGroupAndDefaultRoleToMFA(t *testing.T) {
 		{"IdP group org_admin (name without path)", []string{"org_admin"}, nil, "", 1},
 		{"IdP group /org_admin of a provisioned user", []string{"/org_admin"}, loginProvisioner{}, "viewer", 1},
 		{"IdP group /reticora-viewer", []string{"/reticora-viewer"}, loginProvisioner{}, "viewer", 0},
-		{"default role org_admin at the first login", []string{"/reticora-viewer"}, loginProvisioner{holds: true}, "org_admin", 1},
-		{"default role org_admin and IdP group /org_admin", []string{"/org_admin"}, loginProvisioner{holds: true}, "org_admin", 1},
-		{"default role org_admin not held (another role assigned before)", []string{"/reticora-viewer"}, loginProvisioner{}, "org_admin", 0},
-		{"default role org_admin, assignment check failed", []string{"/reticora-viewer"}, loginProvisioner{roleErr: errors.New("check role assignments: timeout")}, "org_admin", 1},
-		{"default role viewer", nil, loginProvisioner{holds: true}, "viewer", 0},
+		{"default role org_admin at the first login", []string{"/reticora-viewer"}, loginProvisioner{assigned: true, holds: "org_admin"}, "org_admin", 1},
+		{"default role org_admin at the first login, no IdP role", nil, loginProvisioner{assigned: true, holds: "org_admin"}, "org_admin", 1},
+		{"default role org_admin and IdP group /org_admin", []string{"/org_admin"}, loginProvisioner{assigned: true, holds: "org_admin"}, "org_admin", 1},
+		{"default role org_admin not assigned (another role assigned before)", nil, loginProvisioner{holds: "viewer"}, "org_admin", 0},
+		{"default role org_admin of an earlier login (a later login assigns nothing)", nil, loginProvisioner{holds: "org_admin"}, "org_admin", 0},
+		{"default role viewer", nil, loginProvisioner{assigned: true, holds: "viewer"}, "viewer", 0},
 	} {
 		mfa := &fakeMFA{}
 		w := mfaLogin(t, c.groups, mfa, c.provisioner, c.defaultRole)
@@ -735,8 +755,17 @@ func TestLoginBindsOrgAdminOfGroupAndDefaultRoleToMFA(t *testing.T) {
 		}
 	}
 
-	mfa := &fakeMFA{err: fmt.Errorf("%w: keycloak: role mapping: status 403", ErrMFAUnavailable)}
-	w := mfaLogin(t, []string{"/org_admin"}, mfa, loginProvisioner{}, "viewer")
+	// The default role is assigned in the login transaction: when that
+	// fails, the login fails without session and binds nothing.
+	mfa := &fakeMFA{}
+	w := mfaLogin(t, []string{"/reticora-viewer"}, mfa, loginProvisioner{err: errors.New("check role assignments: timeout")}, "org_admin")
+	if w.Code != http.StatusBadGateway || hasSession(w) || len(w.Result().Cookies()) != 0 || len(mfa.subjects) != 0 {
+		t.Errorf("failing provisioning: status %d, session %v, %d cookies, bound %v; want 502 without session and binding",
+			w.Code, hasSession(w), len(w.Result().Cookies()), mfa.subjects)
+	}
+
+	mfa = &fakeMFA{err: fmt.Errorf("%w: keycloak: role mapping: status 403", ErrMFAUnavailable)}
+	w = mfaLogin(t, []string{"/org_admin"}, mfa, loginProvisioner{}, "viewer")
 	if w.Code != http.StatusServiceUnavailable || hasSession(w) || len(w.Result().Cookies()) != 0 {
 		t.Errorf("failing binding: status %d, session %v, %d cookies; want 503 without session", w.Code, hasSession(w), len(w.Result().Cookies()))
 	}
@@ -744,11 +773,11 @@ func TestLoginBindsOrgAdminOfGroupAndDefaultRoleToMFA(t *testing.T) {
 		t.Errorf("failing binding names the cause: %s", w.Body.String())
 	}
 	mfa = &fakeMFA{err: errors.New("keycloak: status 500")}
-	if w = mfaLogin(t, []string{"/reticora-viewer"}, mfa, loginProvisioner{holds: true}, "org_admin"); w.Code != http.StatusServiceUnavailable || hasSession(w) {
+	if w = mfaLogin(t, []string{"/reticora-viewer"}, mfa, loginProvisioner{assigned: true, holds: "org_admin"}, "org_admin"); w.Code != http.StatusServiceUnavailable || hasSession(w) {
 		t.Errorf("failing binding of the default role: status %d, session %v; want 503 without session", w.Code, hasSession(w))
 	}
 
-	if w = mfaLogin(t, []string{"/org_admin"}, nil, loginProvisioner{holds: true}, "org_admin"); w.Code != http.StatusOK || !hasSession(w) {
+	if w = mfaLogin(t, []string{"/org_admin"}, nil, loginProvisioner{assigned: true, holds: "org_admin"}, "org_admin"); w.Code != http.StatusOK || !hasSession(w) {
 		t.Errorf("handler without enforcer: status %d, session %v; want 200 with session", w.Code, hasSession(w))
 	}
 
@@ -758,7 +787,7 @@ func TestLoginBindsOrgAdminOfGroupAndDefaultRoleToMFA(t *testing.T) {
 	mfa = &fakeMFA{}
 	handler := NewHandler(nil, sessionIssuer).
 		WithAccessResolver(standardRoleResolver{"org_admin": allPermissions()}).
-		WithProvisioning(loginProvisioner{holds: true}, "org_admin").
+		WithProvisioning(loginProvisioner{assigned: true, holds: "org_admin"}, "org_admin").
 		WithMFA(mfa)
 	token, err := sessionIssuer.Issue(SessionClaims{
 		Subject:        "app-user-1",
@@ -883,13 +912,9 @@ func TestValidateRejectsRevokedSessions(t *testing.T) {
 // recordingProvisioner records the e-mail it is asked to resolve.
 type recordingProvisioner struct{ email *string }
 
-func (p recordingProvisioner) EnsureUser(_ context.Context, _, subject, email, _ string) (string, error) {
+func (p recordingProvisioner) EnsureUser(_ context.Context, _, subject, email, _, _ string) (string, bool, error) {
 	*p.email = email
-	return subject, nil
-}
-
-func (p recordingProvisioner) EnsureRole(context.Context, string, string, string) (bool, error) {
-	return false, nil
+	return subject, false, nil
 }
 
 // TestCallbackTakesOrganizationFromAttribute covers WP-043 (AUT-01, AUT-09):

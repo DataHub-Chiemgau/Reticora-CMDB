@@ -29,8 +29,8 @@ type Handler struct {
 	// foreign keys (ticket reporter, assignment, ...) resolve without manual
 	// user setup. Nil disables provisioning (tests, --no-db without users).
 	provisioner UserProvisioner
-	// defaultRole is the standard role assigned on auto-provisioning
-	// (e.g. "viewer"); empty assigns no role.
+	// defaultRole is the standard role the first login of a user assigns
+	// (e.g. "viewer"); empty assigns no role. A later login assigns none.
 	defaultRole string
 	// access resolves the role grants of the user from the database at login
 	// and refresh (RBA-03). Nil keeps the IdP groups as the only grant
@@ -80,6 +80,11 @@ var ErrFirstLoginNotPermitted = errors.New("identity: first login requires an in
 // acceptance answer 503.
 var ErrMFAUnavailable = errors.New("identity: the second factor of the account could not be enforced")
 
+// ErrNoRoleAssignment is returned when a login resolves no role of the user:
+// no role assignment, no custom role and no IdP role. The login issues no
+// session (TEN-04, RBA-03, F-364); an administrator assigns a role.
+var ErrNoRoleAssignment = errors.New("identity: no role is assigned to the user in this organization; ask an administrator for access")
+
 // UserStatusChecker reports whether an app_user may hold a session. A
 // provisioner implementing it makes refresh check the user status; a user
 // that no longer exists is not active.
@@ -93,11 +98,18 @@ type UserProvisioner interface {
 	// organization, or on first login by organization and verified e-mail
 	// (empty when unverified). It creates or links a user only with an
 	// admission and returns ErrFirstLoginNotPermitted otherwise, and
-	// ErrUserInactive for a deactivated user.
-	EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName string) (string, error)
-	// EnsureRole assigns the named standard role when the user has none yet
-	// and reports whether the user holds that role afterwards.
-	EnsureRole(ctx context.Context, orgID, userID, roleName string) (bool, error)
+	// ErrUserInactive for a deactivated user. Only the first login, which
+	// creates the user or links an account by e-mail, assigns the standard
+	// role defaultRole (empty: none) in the same transaction, when the user
+	// then holds no role; assigned reports that it did. A later login
+	// assigns nothing, so a revoked assignment stays revoked (RBA-03).
+	EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName, defaultRole string) (userID string, assigned bool, err error)
+}
+
+// LoginRefusalRecorder records a login refused because the user holds no
+// role (audit entry user.login_refused); user.PGRepository implements it.
+type LoginRefusalRecorder interface {
+	RecordLoginRefused(ctx context.Context, orgID, userID string) error
 }
 
 // NewHandler constructs a new identity handler. Refresh tokens live in a
@@ -274,7 +286,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	refreshedClaims.SessionID = grant.Family
 	// Roles and scopes are re-read on every refresh so revoked or narrowed
 	// assignments take effect without a new login.
-	if err = h.applyAccess(r.Context(), &refreshedClaims); err != nil {
+	if _, err = h.applyAccess(r.Context(), &refreshedClaims); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "resolve role assignments")
 		return
 	}
@@ -464,20 +476,16 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 		if idToken.EmailVerified {
 			email = idToken.Email
 		}
-		userID, provisionErr := h.provisioner.EnsureUser(ctx, orgID, idToken.Subject, email, idToken.Name)
+		userID, assigned, provisionErr := h.provisioner.EnsureUser(ctx, orgID, idToken.Subject, email, idToken.Name, h.defaultRole)
 		if errors.Is(provisionErr, ErrUserInactive) || errors.Is(provisionErr, ErrFirstLoginNotPermitted) {
 			return "", time.Time{}, authResult{}, provisionErr
 		}
 		if provisionErr != nil {
 			return "", time.Time{}, authResult{}, fmt.Errorf("identity: provision user: %w", provisionErr)
 		}
-		if h.defaultRole != "" {
-			// Best effort: role assignment must not block login. A default
-			// role org_admin the user holds, or may hold when the check
-			// failed, is bound to MFA below.
-			held, roleErr := h.provisioner.EnsureRole(ctx, orgID, userID, h.defaultRole)
-			defaultOrgAdmin = h.defaultRole == orgAdminRole && (held || roleErr != nil)
-		}
+		// The first login assigned the default role org_admin: it is bound
+		// to MFA below (WP-367).
+		defaultOrgAdmin = assigned && h.defaultRole == orgAdminRole
 		subject = userID
 	}
 
@@ -488,8 +496,20 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 		Name:           idToken.Name,
 		Email:          idToken.Email,
 	}
-	if err = h.applyAccess(ctx, &claims); err != nil {
+	granted, err := h.applyAccess(ctx, &claims)
+	if err != nil {
 		return "", time.Time{}, authResult{}, fmt.Errorf("identity: resolve role assignments: %w", err)
+	}
+	// A user without any role gets no session (TEN-04, RBA-03, F-364),
+	// e.g. after an administrator revoked every assignment: a later login
+	// assigns no default role. The refusal is audited.
+	if h.access != nil && !granted {
+		if recorder, ok := h.provisioner.(LoginRefusalRecorder); ok {
+			if auditErr := recorder.RecordLoginRefused(ctx, orgID, subject); auditErr != nil {
+				slog.ErrorContext(ctx, "login: audit refused login", "error", auditErr)
+			}
+		}
+		return "", time.Time{}, authResult{}, ErrNoRoleAssignment
 	}
 	// A login that grants org_admin through the IdP group org_admin or the
 	// default role binds the account of the ID token's subject to MFA before
@@ -531,22 +551,22 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 // organization. IdP roles are org-wide grants; database assignments carry
 // their client and site scope. A failing lookup fails the login or refresh
 // instead of issuing an unscoped session. Without a resolver (tests) the
-// token's access stays unchanged.
-func (h *Handler) applyAccess(ctx context.Context, claims *SessionClaims) error {
+// token's access stays unchanged. It reports whether any role granted access.
+func (h *Handler) applyAccess(ctx context.Context, claims *SessionClaims) (bool, error) {
 	if h.access == nil {
-		return nil
+		return false, nil
 	}
 	grants := make([]Grant, 0, 4)
 	if roles := StandardRolesForGroups(claims.Groups); len(roles) > 0 {
 		mapped, err := h.access.RoleGrants(ctx, claims.OrganizationID, roles)
 		if err != nil {
-			return err
+			return false, err
 		}
 		grants = append(grants, mapped...)
 	}
 	stored, err := h.access.AccessGrants(ctx, claims.OrganizationID, claims.Subject)
 	if err != nil {
-		return err
+		return false, err
 	}
 	grants = append(grants, stored...)
 	access := ResolveAccess(grants)
@@ -555,7 +575,7 @@ func (h *Handler) applyAccess(ctx context.Context, claims *SessionClaims) error 
 	claims.Scope = &scope
 	claims.PermissionScopes = access.PermissionScopes
 	claims.ClientScope = scope.LegacyClientScope()
-	return nil
+	return len(grants) > 0, nil
 }
 
 // bearerTokenFromRequest reads the bearer token of the Authorization header.
@@ -616,7 +636,7 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		return
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		writeContextError(w, err)
-	case errors.Is(err, ErrUserInactive), errors.Is(err, ErrFirstLoginNotPermitted):
+	case errors.Is(err, ErrUserInactive), errors.Is(err, ErrFirstLoginNotPermitted), errors.Is(err, ErrNoRoleAssignment):
 		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
 	case api.WriteEntitlementError(w, err):
 		// A first login with an invitation while max_users is reached
