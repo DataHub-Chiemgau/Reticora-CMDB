@@ -43,6 +43,8 @@ on:
       - 'backend/**'
       - 'frontend/src/**'
       - 'frontend/e2e-real/**'
+      # WP-532: playwright.real.config.ts takes its browser projects from here.
+      - 'frontend/playwright.config.ts'
       - 'frontend/e2e/support/**'
       - 'frontend/package.json'
       - 'frontend/package-lock.json'
@@ -82,6 +84,8 @@ on:
       - 'backend/**'
       - 'frontend/src/**'
       - 'frontend/e2e-real/**'
+      # WP-532: playwright.real.config.ts takes its browser projects from here.
+      - 'frontend/playwright.config.ts'
       - 'frontend/e2e/support/**'
       - 'frontend/package.json'
       - 'frontend/package-lock.json'
@@ -206,9 +210,8 @@ jobs:
   install-cloud-smoke:
     needs: installer-script-tests
     runs-on: ${{ matrix.runner }}
-    # The real-stack suite (ubuntu-24.04) takes about 20 minutes: D08 of
-    # discovery-override.spec.ts watches a disabled, still running collector
-    # over two discovery cycles of 5 minutes (WP-381).
+    # The real-stack suite runs in the job e2e-real, one job per browser
+    # project (WP-532).
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -361,9 +364,8 @@ jobs:
           curl -sS -o /dev/null "http://minio:9000/minio/health/live" || { echo "FAIL: http://minio:9000 is not reachable from the host"; exit 1; }
 
       # WP-529: the report of the onboarding suite (JSON report, traces and
-      # screenshots in its own directory, which the real-stack suite below
-      # does not clear) is uploaded after every run, green or red; the
-      # suite keeps retries: 0 (playwright.install.config.ts).
+      # screenshots in its own directory) is uploaded after every run, green
+      # or red; the suite keeps retries: 0 (playwright.install.config.ts).
       - name: Run the onboarding E2E suite
         if: matrix.platform == 'ubuntu-24.04'
         working-directory: frontend
@@ -466,28 +468,119 @@ jobs:
             || { echo "FAIL: collector $id is not registered with a certificate in organization $org"; exit 1; }
           echo "OK: collector $id enrolled with the command of the UI over PATH"
 
-      # WP-338 (TST-03, TST-04): the real-stack suite frontend/e2e-real/ against
-      # the same installation, compared with the e2e-real lines of
-      # tests/audit/expected-failures.txt: a listed test that turned green, an
-      # unlisted red test, a skipped or missing test fail the job.
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          cd deploy/docker-compose
+          echo "=== docker compose ps ==="
+          docker compose --env-file .env ps || true
+          echo "=== server logs ==="
+          docker compose --env-file .env logs --tail 80 server || true
+          echo "=== keycloak logs ==="
+          docker compose --env-file .env logs --tail 80 keycloak || true
+          echo "=== frontend logs ==="
+          docker compose --env-file .env logs --tail 80 frontend || true
+          echo "=== mailpit logs ==="
+          docker ps -aq --filter name=mailpit | xargs -r docker logs --tail 40 || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd deploy/docker-compose
+          docker compose --env-file .env down -v --remove-orphans || true
+
+  # TST-03, TST-04 (WP-338, WP-532): the real-stack suite frontend/e2e-real/
+  # on the reference platform (ubuntu-24.04) in all six Playwright projects of
+  # playwright.real.config.ts, which takes them from frontend/playwright.config.ts
+  # (chromium, edge, firefox, webkit, mobile-chrome, mobile-safari). Every
+  # project runs in its own job with its own installation: the suite takes
+  # about 20 minutes per project (D08 of discovery-override.spec.ts watches a
+  # disabled, still running collector over two discovery cycles of 5 minutes,
+  # WP-381). Each job compares the results of its project with the e2e-real
+  # lines of tests/audit/expected-failures.txt for that project
+  # (<project>:<spec file>): a listed test that turned green, an unlisted red
+  # test, a skipped or missing test fail the job. The job e2e-real-ratchet
+  # compares the results of all projects together.
+  e2e-real:
+    needs: installer-script-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chromium
+            browser: chromium
+          - project: edge
+            browser: msedge
+          - project: firefox
+            browser: firefox
+          - project: webkit
+            browser: webkit
+          - project: mobile-chrome
+            browser: chromium
+          - project: mobile-safari
+            browser: webkit
+    env:
+      PROJECT: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make installer scripts executable
+        run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
+
+      # The checked-out state is not published: local build, not
+      # signature-verified (E-69; the default path runs in release-mode).
+      - name: Run the cloud installer non-interactively (ubuntu-24.04)
+        run: ./install.sh --cloud --non-interactive --build-from-source
+        env:
+          RETICORA_SOURCE_DIR: ${{ github.workspace }}
+
+      - name: Verify all expected services are running and healthy
+        run: |
+          sleep 5
+          ./tests/install-smoke-health.sh deploy/docker-compose .env
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: collector/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      # Self-signup, mail catcher and collector as for the onboarding suite of
+      # install-cloud-smoke; the real-stack suite creates its own tenants.
+      - name: Prepare the onboarding fixtures (signup configuration, mail catcher, collector)
+        run: ./frontend/e2e/fixtures/setup-onboarding.sh deploy/docker-compose .env
+
       - name: Prepare the real-stack suite (X-Real-IP passthrough, database, Keycloak admin)
-        if: matrix.platform == 'ubuntu-24.04'
         run: |
           command -v psql >/dev/null || (sudo apt-get update && sudo apt-get install -y postgresql-client)
           ./frontend/e2e-real/fixtures/setup-real-stack.sh deploy/docker-compose .env
 
+      - name: Install the frontend dependencies and the browser of ${{ matrix.project }}
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps ${{ matrix.browser }}
+
       # G1 default (RETICORA_MODULES unset): playwright.real.config.ts leaves
       # the specs of late modules out (WP-541).
-      - name: Run the real-stack E2E suite against the expected-failure list
+      - name: Run the real-stack E2E suite (${{ matrix.project }}) against the expected-failure list
         id: e2e-real-g1
-        if: matrix.platform == 'ubuntu-24.04'
         working-directory: frontend
         env:
-          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-real.json
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-real/e2e-real.json
         run: |
-          npx playwright test -c e2e-real/playwright.real.config.ts --reporter=list,json || true
-          ../tests/audit/run-auditdefect.sh playwright --report "$RUNNER_TEMP/e2e-real.json" --results "$RUNNER_TEMP/e2e-real-results.txt"
-          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --results "$RUNNER_TEMP/e2e-real-results.txt"
+          mkdir -p "$RUNNER_TEMP/e2e-real"
+          npx playwright test -c e2e-real/playwright.real.config.ts --project="$PROJECT" --reporter=list,json \
+            --output "$RUNNER_TEMP/e2e-real/test-results" || true
+          ../tests/audit/run-auditdefect.sh playwright --report "$RUNNER_TEMP/e2e-real/e2e-real.json" --results "$RUNNER_TEMP/e2e-real/e2e-real-results.txt"
+          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --projects "$PROJECT" --results "$RUNNER_TEMP/e2e-real/e2e-real-results.txt"
 
       # WP-541 (MGT-04, NTF-05, NFR-04): module run. The maintenance module is
       # off in the G1 default (E-03); the server of the same installation is
@@ -496,7 +589,7 @@ jobs:
       # running server) and the frontend recreated after it, as
       # setup-real-stack.sh does. It runs whenever the G1 run ran, green or red.
       - name: Restart the server with RETICORA_MODULES=maintenance (module run)
-        if: ${{ !cancelled() && matrix.platform == 'ubuntu-24.04' && steps.e2e-real-g1.outcome != 'skipped' }}
+        if: ${{ !cancelled() && steps.e2e-real-g1.outcome != 'skipped' }}
         run: |
           set -euo pipefail
           repo="$GITHUB_WORKSPACE"
@@ -535,41 +628,48 @@ jobs:
           [ "$modules" = maintenance ] || { echo "FAIL: the server runs with RETICORA_MODULES='$modules'"; exit 1; }
           echo "OK: server restarted with RETICORA_MODULES=$modules"
 
-      # Only the specs of the module (E2E_MODULE_RUN, playwright.real.config.ts);
-      # the ratchet compares the results of both runs together with the
-      # e2e-real lines of tests/audit/expected-failures.txt.
-      - name: Run the real-stack module run (maintenance) against the expected-failure list
-        if: ${{ !cancelled() && matrix.platform == 'ubuntu-24.04' && steps.e2e-real-g1.outcome != 'skipped' }}
+      # Only the specs of the module (E2E_MODULE_RUN, playwright.real.config.ts)
+      # in the project of this job; the ratchet compares the results of both
+      # runs together with the e2e-real lines of that project.
+      - name: Run the real-stack module run (maintenance, ${{ matrix.project }}) against the expected-failure list
+        if: ${{ !cancelled() && steps.e2e-real-g1.outcome != 'skipped' }}
         working-directory: frontend
         env:
           E2E_MODULE_RUN: maintenance
-          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-real-maintenance.json
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-real/e2e-real-maintenance.json
         run: |
           set -euo pipefail
-          npx playwright test -c e2e-real/playwright.real.config.ts --reporter=list,json \
-            --output "$RUNNER_TEMP/e2e-real-maintenance/test-results" || true
-          ../tests/audit/run-auditdefect.sh playwright --report "$RUNNER_TEMP/e2e-real-maintenance.json" --results "$RUNNER_TEMP/e2e-real-maintenance-results.txt"
-          grep -q ';chromium:frontend/e2e-real/maintenance.spec.ts;' "$RUNNER_TEMP/e2e-real-maintenance-results.txt" \
-            || { echo "FAIL: the module run executed no test of maintenance.spec.ts"; exit 1; }
-          if grep -v ';chromium:frontend/e2e-real/maintenance.spec.ts;' "$RUNNER_TEMP/e2e-real-maintenance-results.txt"; then
-            echo "FAIL: the module run executed other specs than maintenance.spec.ts"; exit 1
+          npx playwright test -c e2e-real/playwright.real.config.ts --project="$PROJECT" --reporter=list,json \
+            --output "$RUNNER_TEMP/e2e-real/maintenance-test-results" || true
+          res="$RUNNER_TEMP/e2e-real/e2e-real-maintenance-results.txt"
+          ../tests/audit/run-auditdefect.sh playwright --report "$RUNNER_TEMP/e2e-real/e2e-real-maintenance.json" --results "$res"
+          grep -q ";$PROJECT:frontend/e2e-real/maintenance.spec.ts;" "$res" \
+            || { echo "FAIL: the module run executed no test of maintenance.spec.ts in $PROJECT"; exit 1; }
+          if grep -v ";$PROJECT:frontend/e2e-real/maintenance.spec.ts;" "$res"; then
+            echo "FAIL: the module run executed other specs than maintenance.spec.ts or another project than $PROJECT"; exit 1
           fi
-          cat "$RUNNER_TEMP/e2e-real-results.txt" "$RUNNER_TEMP/e2e-real-maintenance-results.txt" >"$RUNNER_TEMP/e2e-real-all-results.txt"
-          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --results "$RUNNER_TEMP/e2e-real-all-results.txt"
+          cat "$RUNNER_TEMP/e2e-real/e2e-real-results.txt" "$res" >"$RUNNER_TEMP/e2e-real/e2e-real-all-results.txt"
+          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --projects "$PROJECT" --results "$RUNNER_TEMP/e2e-real/e2e-real-all-results.txt"
 
-      - name: Upload the real-stack report
-        if: always() && matrix.platform == 'ubuntu-24.04'
+      # Report, traces and comparison of the project, green or red.
+      - name: Upload the real-stack report (${{ matrix.project }})
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-real
-          path: |
-            frontend/test-results/
-            ${{ runner.temp }}/e2e-real.json
-            ${{ runner.temp }}/e2e-real-results.txt
-            ${{ runner.temp }}/e2e-real-maintenance/
-            ${{ runner.temp }}/e2e-real-maintenance.json
-            ${{ runner.temp }}/e2e-real-maintenance-results.txt
-            ${{ runner.temp }}/e2e-real-all-results.txt
+          name: e2e-real-${{ matrix.project }}
+          path: ${{ runner.temp }}/e2e-real/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # The result lines of both runs for e2e-real-ratchet; a project without
+      # them counts as not run there.
+      - name: Upload the real-stack results (${{ matrix.project }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-real-results-${{ matrix.project }}
+          path: ${{ runner.temp }}/e2e-real/e2e-real-all-results.txt
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Show logs on failure
@@ -592,6 +692,86 @@ jobs:
         run: |
           cd deploy/docker-compose
           docker compose --env-file .env down -v --remove-orphans || true
+
+  # TST-03 (WP-532): the ratchet over the whole browser matrix. Every project
+  # of playwright.real.config.ts must have delivered its results (a project
+  # missing in the matrix or a job that ended before its runs fails here),
+  # every project lists the same tests (no project leaves a test out), no
+  # spec or support file decides by browser (no browser-dependent skip), and
+  # the results of all projects together are compared with every e2e-real
+  # line of tests/audit/expected-failures.txt: a line for a project that did
+  # not run is "verwaist".
+  e2e-real-ratchet:
+    needs: e2e-real
+    if: ${{ !cancelled() && needs.e2e-real.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Same tests in every project, no browser-dependent skip
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npx playwright test -c e2e-real/playwright.real.config.ts --list --reporter=json >"$RUNNER_TEMP/e2e-real-list.json"
+          python3 - "$RUNNER_TEMP/e2e-real-list.json" <<'PY'
+          import json, sys
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          projects = [p["name"] for p in report["config"]["projects"]]
+          tests = {p: set() for p in projects}
+          def walk(suite, titles):
+              for s in suite.get("suites", []) or []:
+                  yield from walk(s, titles + [s["title"]])
+              for spec in suite.get("specs", []) or []:
+                  for t in spec.get("tests", []):
+                      yield " › ".join(titles + [spec["title"]]), t["projectName"]
+          for top in report["suites"]:
+              for name, project in walk(top, [top["title"]]):
+                  tests[project].add(name)
+          ref = tests[projects[0]]
+          bad = [p for p in projects if tests[p] != ref]
+          for p in bad:
+              print(f"FAIL: project {p} lists other tests than {projects[0]}: missing {sorted(ref - tests[p])[:5]}, extra {sorted(tests[p] - ref)[:5]}")
+          if bad or not ref:
+              sys.exit(1)
+          print(f"OK: {len(projects)} projects ({', '.join(projects)}), {len(ref)} tests each")
+          PY
+          if grep -rnE 'browserName|isMobile|defaultBrowserType|projectName|project\.name' e2e-real --include='*.ts' \
+              --exclude=playwright.real.config.ts; then
+            echo "FAIL: the real-stack suite decides by browser (above); no test may be skipped per browser"; exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-real-results-*
+          path: ${{ runner.temp }}/e2e-real-results
+
+      - name: Compare the results of all projects with the expected-failure list
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/e2e-real-results"
+          all="$RUNNER_TEMP/e2e-real-matrix-results.txt"
+          : >"$all"
+          missing=0
+          for p in $(jq -r '.config.projects[].name' "$RUNNER_TEMP/e2e-real-list.json"); do
+            f="$dir/e2e-real-results-$p/e2e-real-all-results.txt"
+            if [ ! -s "$f" ] || ! grep -q "^e2e-real;$p:" "$f"; then
+              echo "FAIL: no results of project $p (job e2e-real ($p))"; missing=1; continue
+            fi
+            cat "$f" >>"$all"
+          done
+          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --results "$all"
+          exit "$missing"
 
   # INS-02/TEC-09 (WP-420, F-033/F-034/F-035): the TLS-domain path against a
   # real ACME server. Pebble with challtestsrv (tests/fixtures/pebble/)

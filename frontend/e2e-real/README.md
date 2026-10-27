@@ -62,16 +62,21 @@ of the JSON and logs that. The user holds `org_admin` and sets up its OTP at the
 
 ```sh
 cd frontend
-npx playwright test -c e2e-real/playwright.real.config.ts            # all specs of the G1 run
-npx playwright test -c e2e-real/playwright.real.config.ts tenant      # one file
+npx playwright test -c e2e-real/playwright.real.config.ts --project=chromium          # all specs of the G1 run
+npx playwright test -c e2e-real/playwright.real.config.ts --project=chromium tenant   # one file
 ```
 
-Set `PW_CHROMIUM_EXECUTABLE` to use a preinstalled Chromium build.
+The config defines the six browser projects of `frontend/playwright.config.ts` (`chromium`, `edge`, `firefox`,
+`webkit`, `mobile-chrome`, `mobile-safari`; it imports them, so both suites run the same matrix, WP-532) with
+`locale: de-DE`. Without `--project` every project runs one after the other on the same stack. Set
+`PW_CHROMIUM_EXECUTABLE` to use a preinstalled Chromium build for `chromium` and `mobile-chrome`; the other projects
+need their browser (`npx playwright install --with-deps <browser>`, `msedge` for `edge`).
 
-## CI (WP-338)
+## CI (WP-338, WP-532)
 
 `install-smoke.yml` runs the suite on the reference platform (ubuntu-24.04) against the stack the cloud installer
-has just installed. `frontend/e2e/fixtures/setup-onboarding.sh` prepares self-signup, the mail catcher and the
+has just installed, as the matrix job `e2e-real` with one job per browser project (`--project=<project>`, the
+browser from `npx playwright install --with-deps`) and its own installation. `frontend/e2e/fixtures/setup-onboarding.sh` prepares self-signup, the mail catcher and the
 collector; `fixtures/setup-real-stack.sh` then applies `fixtures/docker-compose.e2e-real.yml` (an nginx.conf that
 passes a client `X-Real-IP` through, so that each tenant of a spec signs up from its own address; raised rate
 limits like the local audit stack), exports `E2E_DATABASE_URL` and the Keycloak administrator and lets the SNMP fake
@@ -79,16 +84,25 @@ bind UDP 161 (above). Presigned export URLs name the endpoint the server uses (`
 `minio` to the published port `127.0.0.1:9000`; the script adds that `/etc/hosts` entry on GitHub Actions and fails
 locally without it. The Playwright JSON report is compared with the `e2e-real` lines of
 `tests/audit/expected-failures.txt` (`tests/audit/run-auditdefect.sh`, see `tests/audit/README.md`): a listed test
-that turned green, an unlisted red test and a skipped or missing test fail the job. Report, traces and the comparison
-are uploaded as artifact `e2e-real`.
+that turned green, an unlisted red test and a skipped or missing test fail the job. The lines name the project
+(`<project>:frontend/e2e-real/<spec file>`, from `projectName` of the report), and each job compares only the lines of
+its project (`compare --projects <project>`): a test that is red in firefox but listed only for chromium fails the
+firefox job. Report, traces and the comparison are uploaded per project as artifact `e2e-real-<project>`, the result
+lines as `e2e-real-results-<project>`.
+
+The job `e2e-real-ratchet` runs after the matrix: every project of the config must have delivered results, every
+project lists the same tests (`--list`), no spec or support file decides by browser (`browserName`, `isMobile`,
+`projectName`, …; no test is skipped per browser), and the results of all projects together are compared with every
+`e2e-real` line, so a line for a project that did not run is `verwaist`. A deviation that only one browser shows is
+fixed or listed as a finding of its own with the project in `ort`.
 
 Locally, after the two setup scripts (or against a hand-built stack with the variables above):
 
 ```sh
 cd frontend
-PLAYWRIGHT_JSON_OUTPUT_NAME=/tmp/e2e-real.json npx playwright test -c e2e-real/playwright.real.config.ts --reporter=list,json
+PLAYWRIGHT_JSON_OUTPUT_NAME=/tmp/e2e-real.json npx playwright test -c e2e-real/playwright.real.config.ts --project=chromium --reporter=list,json
 ../tests/audit/run-auditdefect.sh playwright --report /tmp/e2e-real.json --results /tmp/e2e-real.txt
-../tests/audit/run-auditdefect.sh compare --kinds e2e-real --results /tmp/e2e-real.txt
+../tests/audit/run-auditdefect.sh compare --kinds e2e-real --projects chromium --results /tmp/e2e-real.txt
 ```
 
 ## Module run (`maintenance.spec.ts`, WP-541)
@@ -104,20 +118,20 @@ CIs of two clients, „Kunden benachrichtigen“, the stored notifications after
 does not find it in the list. The spec checks first that `GET /api/v1/modules` reports the module enabled
 (`expectModuleServed` in `support/stack.ts`); against a G1 default stack it fails there, it never skips.
 
-`install-smoke.yml` runs it after the G1 run on the same installation: the step "Restart the server with
-RETICORA_MODULES=maintenance" applies a one-line overlay (`RETICORA_MODULES: maintenance` for the server) on top of the
-files `fixtures/setup-real-stack.sh` applies, recreates the frontend after the server and checks the variable in the
-running container; the next step runs the suite with `E2E_MODULE_RUN=maintenance` (report
-`e2e-real-maintenance.json`, traces under `e2e-real-maintenance/` of the artifact `e2e-real`). The ratchet compares the
-results of both runs together with the `e2e-real` lines of `tests/audit/expected-failures.txt`, so the module run
-follows the same rules as the G1 run; the step also fails when the module run executed no test of
-`maintenance.spec.ts` or another spec.
+`install-smoke.yml` runs it after the G1 run on the same installation, in every job of the matrix `e2e-real`: the
+step "Restart the server with RETICORA_MODULES=maintenance" applies a one-line overlay (`RETICORA_MODULES: maintenance`
+for the server) on top of the files `fixtures/setup-real-stack.sh` applies, recreates the frontend after the server
+and checks the variable in the running container; the next step runs the suite with `E2E_MODULE_RUN=maintenance` in
+the project of the job (report `e2e-real-maintenance.json`, traces under `maintenance-test-results/` of the artifact
+`e2e-real-<project>`). The ratchet compares the results of both runs together with the `e2e-real` lines of that
+project in `tests/audit/expected-failures.txt`, so the module run follows the same rules as the G1 run; the step also
+fails when the module run executed no test of `maintenance.spec.ts` in the project or another spec or project.
 
 Locally, against a server started with `RETICORA_MODULES=maintenance`:
 
 ```sh
 cd frontend
-E2E_MODULE_RUN=maintenance npx playwright test -c e2e-real/playwright.real.config.ts
+E2E_MODULE_RUN=maintenance npx playwright test -c e2e-real/playwright.real.config.ts --project=chromium
 ```
 
 A failing spec is a product finding, not a flaky test: the assertions encode the requirement (WP and requirement IDs

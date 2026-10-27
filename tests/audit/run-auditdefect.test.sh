@@ -77,6 +77,47 @@ check "a run compares only its kinds (go only)" 0 go "$TMP/r-go.txt" "1 erwartet
 
 check "e2e-real line is compared by an e2e-real run (missing -> verwaist)" 1 e2e-real "$TMP/r-go.txt" "verwaist     e2e-real;chromium:frontend/e2e-real/a.spec.ts;A01 red"
 
+# WP-532: e2e-real results are compared per Playwright project (ort
+# "<project>:<spec file>"), so a listing for one project does not cover
+# another one.
+cat >"$TMP/r-browsers.txt" <<'EOF'
+e2e-real;chromium:frontend/e2e-real/b.spec.ts;B01 red;fail;
+e2e-real;chromium:frontend/e2e-real/b.spec.ts;B02 green;pass;
+e2e-real;firefox:frontend/e2e-real/b.spec.ts;B01 red;fail;
+e2e-real;firefox:frontend/e2e-real/b.spec.ts;B02 green;pass;
+EOF
+# checkx NAME WANT_RC EXPECTED KINDS RESULTS PATTERN [compare arguments]
+checkx() {
+    local name="$1" want="$2" exp="$3" kinds="$4" results="$5" pattern="$6" out rc
+    shift 6
+    out=$(EXPECTED="$exp" bash "$RUN" compare --kinds "$kinds" --results "$results" "$@" 2>&1); rc=$?
+    if { [ "$want" = 0 ] && [ "$rc" = 0 ]; } || { [ "$want" != 0 ] && [ "$rc" != 0 ]; }; then
+        if printf '%s\n' "$out" | grep -q "$pattern"; then ok "$name"; else fail "$name: rc $rc, but no line matches '$pattern'" "$out"; fi
+    else
+        fail "$name: rc $rc, want $([ "$want" = 0 ] && echo 0 || echo '!= 0')" "$out"
+    fi
+}
+printf 'e2e-real;chromium:frontend/e2e-real/b.spec.ts;B01 red;F-005\n' >"$TMP/exp-chromium.txt"
+checkx "browser matrix: red in firefox but listed for chromium only -> Rückfall" 1 "$TMP/exp-chromium.txt" e2e-real "$TMP/r-browsers.txt" \
+    "Rückfall     e2e-real;firefox:frontend/e2e-real/b.spec.ts;B01 red"
+printf 'e2e-real;chromium:frontend/e2e-real/b.spec.ts;B01 red;F-005\ne2e-real;firefox:frontend/e2e-real/b.spec.ts;B01 red;F-005\n' >"$TMP/exp-both.txt"
+checkx "browser matrix: red in both projects and listed for both -> passes" 0 "$TMP/exp-both.txt" e2e-real "$TMP/r-browsers.txt" \
+    "4 Ergebnisse, 2 erwartet rot, 0 Fehler"
+{ cat "$TMP/exp-both.txt"; printf 'e2e-real;webkit:frontend/e2e-real/b.spec.ts;B01 red;F-005\n'; } >"$TMP/exp-webkit.txt"
+checkx "browser matrix: line for a project that did not run -> verwaist" 1 "$TMP/exp-webkit.txt" e2e-real "$TMP/r-browsers.txt" \
+    "verwaist     e2e-real;webkit:frontend/e2e-real/b.spec.ts;B01 red"
+grep '^e2e-real;chromium:' "$TMP/r-browsers.txt" >"$TMP/r-chromium.txt"
+checkx "one job of the matrix (--projects chromium) ignores the lines of the other projects" 0 "$TMP/exp-webkit.txt" e2e-real "$TMP/r-chromium.txt" \
+    "Projekte chromium): 2 Ergebnisse, 1 erwartet rot, 0 Fehler" --projects chromium
+grep '^e2e-real;firefox:' "$TMP/r-browsers.txt" >"$TMP/r-firefox.txt"
+checkx "one job of the matrix (--projects firefox): red, listed for chromium only -> Rückfall" 1 "$TMP/exp-chromium.txt" e2e-real "$TMP/r-firefox.txt" \
+    "Rückfall     e2e-real;firefox:frontend/e2e-real/b.spec.ts;B01 red" --projects firefox
+checkx "one job of the matrix (--projects webkit): its listed test missing -> verwaist" 1 "$TMP/exp-webkit.txt" e2e-real "$TMP/r-chromium.txt" \
+    "verwaist     e2e-real;webkit:frontend/e2e-real/b.spec.ts;B01 red" --projects webkit
+printf 'e2e-real;frontend/e2e-real/b.spec.ts;B01 red;F-005\n' >"$TMP/exp-noproject.txt"
+checkx "e2e-real line without a project in ort is rejected" 1 "$TMP/exp-noproject.txt" e2e-real "$TMP/r-browsers.txt" \
+    "e2e-real braucht ort <projekt>:frontend/e2e-real/<datei>.spec.ts"
+
 printf 'go;backend/internal/x;TestRed;F-001\ngo;backend/internal/x;TestRed;F-001\n' >"$TMP/dup.txt"
 out=$(EXPECTED="$TMP/dup.txt" bash "$RUN" compare --kinds go --results "$TMP/r-go.txt" 2>&1); rc=$?
 if [ "$rc" != 0 ] && printf '%s' "$out" | grep -q 'doppelte Zeile'; then ok "duplicate line in the expected list is rejected"; else fail "duplicate line in the expected list is rejected (rc $rc)" "$out"; fi
@@ -112,6 +153,20 @@ EOF
 got=$(bash "$RUN" playwright --report "$TMP/pw.json")
 want=$'e2e-real;chromium:frontend/e2e-real/a.spec.ts;Group A01 red;fail;\ne2e-real;chromium:frontend/e2e-real/a.spec.ts;Group A02 green;pass;\ne2e-real;chromium:frontend/e2e-real/a.spec.ts;Group A03 skipped;skip;'
 if [ "$got" = "$want" ]; then ok "Playwright report becomes e2e-real result lines"; else fail "Playwright report becomes e2e-real result lines" "$got"; fi
+
+# WP-532: one spec in two projects gives one line per project (projectName);
+# a test without a project is an abort, not silently chromium.
+cat >"$TMP/pw-projects.json" <<'EOF'
+{"suites":[{"title":"b.spec.ts","file":"b.spec.ts","specs":[
+ {"title":"B01 red","file":"b.spec.ts","tests":[
+  {"projectName":"chromium","status":"expected","results":[{"status":"passed"}]},
+  {"projectName":"firefox","status":"unexpected","results":[{"status":"failed"}]},
+  {"projectName":"mobile-safari","status":"unexpected","results":[{"status":"timedOut"}]},
+  {"projectName":"","status":"expected","results":[{"status":"passed"}]}]}]}]}
+EOF
+got=$(bash "$RUN" playwright --report "$TMP/pw-projects.json")
+want=$'e2e-real;chromium:frontend/e2e-real/b.spec.ts;B01 red;pass;\ne2e-real;firefox:frontend/e2e-real/b.spec.ts;B01 red;fail;\ne2e-real;mobile-safari:frontend/e2e-real/b.spec.ts;B01 red;fail;\ne2e-real;ohne-projekt:frontend/e2e-real/b.spec.ts;B01 red;error;kein projectName im Playwright-Bericht'
+if [ "$got" = "$want" ]; then ok "Playwright report: one result line per project, a test without project aborts"; else fail "Playwright report: one result line per project, a test without project aborts" "$got"; fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
