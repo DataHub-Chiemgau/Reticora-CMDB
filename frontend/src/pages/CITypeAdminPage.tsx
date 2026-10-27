@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import {
+  useCIType,
   useCITypes,
   useCITypeTemplates,
   useCreateCIType,
@@ -555,7 +556,10 @@ function CITypeDetail({
   t: TFunction;
 }) {
   const { i18n } = useTranslation();
-  const fields = type.fields ?? [];
+  // GET /ci-types lists the types without their fields; the fields come with the
+  // single type (GET /ci-types/{id}), which a field or flag change invalidates.
+  const detail = useCIType(type.id);
+  const fields = detail.data?.fields ?? [];
   // The definitions carry the id and the index flags of the fields (MET-15).
   const definitions = useAttributeDefinitions(type.id);
   const definitionOf = (name: string) =>
@@ -591,6 +595,14 @@ function CITypeDetail({
           {t('citypes.addField', 'Feld hinzufügen')}
         </Button>
       </div>
+      {detail.isLoading ? <SkeletonList rows={3} label={t('app.loading')} /> : null}
+      {detail.error ? (
+        <ErrorState
+          title={t('app.error')}
+          retryLabel={t('common.retry')}
+          onRetry={() => void detail.refetch()}
+        />
+      ) : null}
       <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
         {fields.map((f) => {
           const def = definitionOf(f.name);
@@ -650,7 +662,7 @@ function CITypeDetail({
             </li>
           );
         })}
-        {fields.length === 0 ? (
+        {detail.isSuccess && fields.length === 0 ? (
           <li className="py-2 text-sm text-muted">
             {t('citypes.noFields', 'Keine Felder definiert.')}
           </li>

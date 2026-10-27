@@ -58,6 +58,9 @@ const EXISTING = {
   },
 };
 
+/** The CI type t1 as GET /ci-types lists it: without its fields. */
+const TYPE = { id: 't1', key: 'server', name: 'Server', is_active: true, is_system: false };
+
 interface Backend {
   /** Answer of PATCH /attribute-definitions/ad-1; default: the patched definition. */
   patch?: (body: unknown) => Response;
@@ -69,6 +72,9 @@ interface Backend {
 
 function stubBackend({ patch, existing = false, jobStatus = 'queued' }: Backend = {}): Call[] {
   const calls: Call[] = [];
+  // The stored state: a saved field and its accepted flags show in later reads.
+  let stored = existing;
+  let accepted: object = {};
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -77,15 +83,16 @@ function stubBackend({ patch, existing = false, jobStatus = 'queued' }: Backend 
       const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined;
       calls.push({ method, url, body });
       if (method === 'PUT' && url.includes('/ci-types/t1/fields')) {
+        stored = true;
         return json({ id: 'ad-1', name: 'inventory_no', data_type: 'text' });
       }
       if (method === 'PATCH' && url.includes('/attribute-definitions/ad-1')) {
-        return patch
-          ? patch(body)
-          : json({ ...EXISTING.definition, ...(body as object), updated_at: 'now' });
+        if (patch) return patch(body);
+        accepted = body as object;
+        return json({ ...EXISTING.definition, ...accepted, updated_at: 'now' });
       }
       if (url.includes('/attribute-definitions')) {
-        return json({ data: existing ? [EXISTING.definition] : [] });
+        return json({ data: stored ? [{ ...EXISTING.definition, ...accepted }] : [] });
       }
       if (url.includes('/jobs')) {
         return json({
@@ -109,18 +116,14 @@ function stubBackend({ patch, existing = false, jobStatus = 'queued' }: Backend 
           has_more: false,
         });
       }
+      // As on the real stack: GET /ci-types/{id} carries the fields, the list does not
+      // (citype.PGRepository.List leaves Type.Fields empty, WP-511 real-stack F1/F2).
+      if (method === 'GET' && /\/ci-types\/t1(\?|$)/.test(url)) {
+        return json({ ...TYPE, fields: stored ? [EXISTING.field] : [] });
+      }
       if (url.includes('/ci-types')) {
         return json({
-          data: [
-            {
-              id: 't1',
-              key: 'server',
-              name: 'Server',
-              is_active: true,
-              is_system: false,
-              fields: existing ? [EXISTING.field] : [],
-            },
-          ],
+          data: [TYPE],
           total: 1,
           limit: 50,
           offset: 0,
@@ -181,6 +184,24 @@ describe('CITypeAdminPage index flags', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
     const patch = calls.find((c) => c.method === 'PATCH');
     expect(patch?.body).toEqual({ searchable: false, unique: true, unique_scope: 'client' });
+  });
+
+  // Real-stack F1 (e2e-real/metamodel-flags.spec.ts): the list of the type has no fields;
+  // the field list follows GET /ci-types/{id} and shows the new field with its flag.
+  it('shows a field saved with a unique flag in the field list of the type', async () => {
+    const calls = stubBackend();
+    await openFieldEditor();
+    fireEvent.click(screen.getByLabelText('Eindeutig'));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    const row = (await screen.findByText('inventory_no')).closest('li');
+    expect(row).not.toBeNull();
+    expect(await within(row!).findByText('eindeutig')).toBeInTheDocument();
+    expect(
+      within(row!).getByRole('button', { name: 'Bearbeiten: inventory_no' }),
+    ).toBeInTheDocument();
+    expect(calls.some((c) => c.method === 'GET' && /\/ci-types\/t1$/.test(c.url))).toBe(true);
   });
 
   it('sends no flag update for a field without flags', async () => {
@@ -251,8 +272,9 @@ describe('CITypeAdminPage index flags', () => {
         return problem(400, { title: 'Bad Request', detail: 'invalid field name' });
       }
       if (url.includes('/attribute-definitions')) return json({ data: [] });
+      if (/\/ci-types\/t1(\?|$)/.test(url)) return json({ ...TYPE, fields: [] });
       return json({
-        data: [{ id: 't1', key: 'server', name: 'Server', is_active: true, fields: [] }],
+        data: [TYPE],
         total: 1,
         limit: 50,
         offset: 0,
