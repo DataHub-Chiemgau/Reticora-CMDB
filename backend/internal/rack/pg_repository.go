@@ -158,15 +158,21 @@ func lockRackHeight(ctx context.Context, tx pgx.Tx, orgID, id string) (int, erro
 // by a mount of the rack (RCK-01: position_u + height_u − 1 ≤ height_units)
 // with 409 on height_units; the message names that unit. The caller holds
 // the lock of lockRackHeight.
-func checkHeightCoversMounts(ctx context.Context, tx pgx.Tx, orgID, id string, height int) error {
-	var top int
-	if err := tx.QueryRow(ctx,
-		"SELECT COALESCE(MAX(position_u + height_u - 1), 0) FROM rack_mount WHERE organization_id = $1 AND rack_id = $2",
-		orgID, id).Scan(&top); err != nil {
+//
+// The unit counts every mount of the rack, also those of CIs outside the
+// caller's client or site scope (F-360): rack_highest_mounted_unit
+// (migration 000172) reads it with the scope widened to the organization and
+// returns only the number, NULL for a rack the caller cannot see.
+func checkHeightCoversMounts(ctx context.Context, tx pgx.Tx, id string, height int) error {
+	var top *int
+	if err := tx.QueryRow(ctx, "SELECT rack_highest_mounted_unit($1)", id).Scan(&top); err != nil {
 		return fmt.Errorf("highest mounted unit: %w", err)
 	}
-	if height < top {
-		return heightBelowMountsError(top)
+	if top == nil {
+		return ErrNotFound
+	}
+	if height < *top {
+		return heightBelowMountsError(*top)
 	}
 	return nil
 }
@@ -181,7 +187,7 @@ func (r *PGRepository) UpdateRack(ctx context.Context, orgID, id string, req Upd
 			return err
 		}
 		if req.HeightUnits != nil {
-			if err := checkHeightCoversMounts(ctx, tx, orgID, id, *req.HeightUnits); err != nil {
+			if err := checkHeightCoversMounts(ctx, tx, id, *req.HeightUnits); err != nil {
 				return err
 			}
 		}
