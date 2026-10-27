@@ -4329,6 +4329,15 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            The principal is restricted in the client or site scope: a
+            stocktake belongs to the whole organization, so only a principal
+            with an organization-wide scope may change it (E-09).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
@@ -4340,6 +4349,15 @@ paths:
           description: Stocktake deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            The principal is restricted in the client or site scope: a
+            stocktake belongs to the whole organization, so only a principal
+            with an organization-wide scope may delete it (E-09).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -4445,6 +4463,15 @@ paths:
                 $ref: '#/components/schemas/StocktakeCompletion'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            The principal is restricted in the client or site scope: a
+            stocktake belongs to the whole organization, so only a principal
+            with an organization-wide scope may complete it (E-09).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':

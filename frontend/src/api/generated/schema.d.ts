@@ -16258,6 +16258,15 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may delete it (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
     };
   };
@@ -16288,6 +16297,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may change it (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
     };
   };
@@ -16429,6 +16447,15 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may complete it (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description Stocktake is already completed or cancelled */
       409: {

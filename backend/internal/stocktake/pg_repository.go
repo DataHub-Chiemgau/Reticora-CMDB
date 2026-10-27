@@ -65,6 +65,14 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 const scanVisible = `(stock_scan.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = stock_scan.asset_id))
 	AND (stock_scan.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = stock_scan.ci_id))`
 
+// stocktakeWritable admits a stocktake for UPDATE and DELETE and for its
+// completion (F-365): a stocktake has no client column and is a row of the
+// whole organization (migration 000012), so only an org-wide principal
+// changes, completes or deletes it (E-09). A principal restricted in the
+// client or site scope records scans of its own assets (AddScan) but gets
+// ErrNotFound for the stocktake itself.
+const stocktakeWritable = database.OrgWideScopeSQL
+
 // requireVisible fails with ErrNotFound when the written row of table does not
 // satisfy visible, i.e. when a write pointed it at an object outside the
 // tenant scope; the transaction is then rolled back.
@@ -220,7 +228,8 @@ func (r *PGRepository) Create(ctx context.Context, s *Stocktake) error {
 	})
 }
 
-// Update modifies an existing stocktake.
+// Update modifies an existing stocktake; only an org-wide principal may
+// (stocktakeWritable), any other gets ErrNotFound.
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Stocktake, error) {
 	var stocktake *Stocktake
 
@@ -262,7 +271,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		}
 
 		if len(setClauses) == 0 {
-			query := fmt.Sprintf("SELECT %s FROM stocktake WHERE id = $1", stocktakeSelectColumns)
+			query := fmt.Sprintf("SELECT %s FROM stocktake WHERE id = $1 AND %s", stocktakeSelectColumns, stocktakeWritable)
 			var err error
 			stocktake, err = scanStocktake(tx.QueryRow(ctx, query, id))
 			if err != nil {
@@ -275,7 +284,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		}
 
 		setClauses = append(setClauses, "updated_at = NOW()")
-		query := fmt.Sprintf("UPDATE stocktake SET %s WHERE id = $1 RETURNING %s", strings.Join(setClauses, ", "), stocktakeSelectColumns)
+		query := fmt.Sprintf("UPDATE stocktake SET %s WHERE id = $1 AND %s RETURNING %s", strings.Join(setClauses, ", "), stocktakeWritable, stocktakeSelectColumns)
 		var err error
 		stocktake, err = scanStocktake(tx.QueryRow(ctx, query, args...))
 		if err != nil {
@@ -290,10 +299,11 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	return stocktake, err
 }
 
-// Delete deletes a stocktake. The stocktake table has no deleted_at column, so this is a hard delete.
+// Delete deletes a stocktake. The stocktake table has no deleted_at column, so this is a hard delete
+// that cascades to the scans of all clients; only an org-wide principal may (stocktakeWritable).
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmdTag, err := tx.Exec(ctx, "DELETE FROM stocktake WHERE id = $1", id)
+		cmdTag, err := tx.Exec(ctx, "DELETE FROM stocktake WHERE id = $1 AND "+stocktakeWritable, id)
 		if err != nil {
 			return fmt.Errorf("delete stocktake: %w", err)
 		}
@@ -466,13 +476,15 @@ func (r *PGRepository) Difference(ctx context.Context, orgID, stocktakeID string
 
 // Complete finalizes a stocktake and applies the recorded inventory
 // corrections atomically: the stocktake transition and all asset updates run
-// in a single transaction, so a failure rolls everything back.
+// in a single transaction, so a failure rolls everything back. Only an
+// org-wide principal completes a stocktake (stocktakeWritable): a scoped one
+// would close it for the differences of other clients too.
 func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorrections bool) (*Completion, error) {
 	completion := &Completion{Corrections: []Correction{}}
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var status string
-		err := tx.QueryRow(ctx, "SELECT status FROM stocktake WHERE id = $1 FOR UPDATE", id).Scan(&status)
+		err := tx.QueryRow(ctx, "SELECT status FROM stocktake WHERE id = $1 AND "+stocktakeWritable+" FOR UPDATE", id).Scan(&status)
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
@@ -562,7 +574,7 @@ func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorr
 		}
 
 		st, err := scanStocktake(tx.QueryRow(ctx,
-			"UPDATE stocktake SET status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE id = $1 RETURNING "+stocktakeSelectColumns, id))
+			"UPDATE stocktake SET status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE id = $1 AND "+stocktakeWritable+" RETURNING "+stocktakeSelectColumns, id))
 		if err != nil {
 			return fmt.Errorf("complete stocktake: %w", err)
 		}
