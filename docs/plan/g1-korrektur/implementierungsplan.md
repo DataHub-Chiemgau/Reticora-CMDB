@@ -14622,6 +14622,8 @@ JOB-03;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
 - [ ] Router-Test `TestReviewMergeJobThroughRouter` (`backend/internal/server/review_merge_job_integration_test.go`): `POST /api/v1/review-items/{id}/resolve {action:'merge', ci_id}` über den echten Router mit Discovery-Effekt und PG-Repositories → 200, Kandidat aktualisiert (Management-IP), `GET /api/v1/jobs?kind=review.merge` zeigt den Job `succeeded`; fremder Client → 404; Principal ohne Auflösungsrecht → 403.
 - [ ] Regression: bestehende Tests der berührten Pakete grün, `go vet`/golangci-lint bzw. `npm run lint` und `npm run typecheck` ohne neue Befunde.
 
+**Anmerkung 2026-10-27 (WP-554):** Dateiliste um `backend/internal/ci/merge.go` (`MergeAs`) und `backend/internal/discovery/review.go` (aus dem Item abgeleitete Merge-ID) ergänzt; ohne sie bleibt bei probable_duplicate je Fehlversuch ein failed ci.merge-Job neben dem gelungenen Merge. Für den Router-Test schlägt der Effekt über eine von der Datenbank abgewiesene IP-Adresse fehl (400), weil ein gelöschter Kandidat 500 liefert (neuer Fund).
+
 **Dateien (7 Einträge, Migration = 2):**
 
 - backend/internal/jobs/service.go
