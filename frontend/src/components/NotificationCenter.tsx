@@ -1,7 +1,9 @@
 /**
  * NotificationCenter — the bell of the layout (UI-16, NTF-04): the number
  * of unread notifications and a panel with the latest ones; each can be
- * marked as read, or all at once.
+ * marked as read, or all at once. A failed read is shown as such with a
+ * retry, never as "no notifications"; while the unread count is unknown the
+ * bell shows no number (F-348).
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -19,8 +21,11 @@ export function NotificationCenter() {
   const all = useNotifications(false, open);
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
-  const unreadCount = unread.data?.total ?? 0;
+  // undefined while the count is not known (loading or failed, also a
+  // failed refresh of an earlier count).
+  const unreadCount = unread.isError ? undefined : unread.data?.total;
   const items = all.data?.data ?? [];
+  const failed = [unread, all].filter((query) => query.isError);
 
   return (
     <div className="relative">
@@ -29,7 +34,11 @@ export function NotificationCenter() {
         size="sm"
         aria-expanded={open}
         aria-haspopup="dialog"
-        aria-label={t('notifications.open', { count: unreadCount })}
+        aria-label={
+          unreadCount === undefined
+            ? t('notifications.openUnknown')
+            : t('notifications.open', { count: unreadCount })
+        }
         onClick={() => setOpen((value) => !value)}
       >
         <svg
@@ -43,7 +52,7 @@ export function NotificationCenter() {
           <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
           <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
         </svg>
-        {unreadCount > 0 ? (
+        {unreadCount !== undefined && unreadCount > 0 ? (
           <span className="ml-1 rounded-full bg-red-600 px-1.5 text-xs font-semibold text-white">
             {unreadCount}
           </span>
@@ -69,7 +78,20 @@ export function NotificationCenter() {
               {t('notifications.markAllRead')}
             </Button>
           </div>
-          {all.isLoading ? (
+          {failed.length > 0 ? (
+            <div role="alert" className="mb-2 text-sm text-red-600 dark:text-red-400">
+              <p>{t('notifications.loadError')}</p>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-1"
+                onClick={() => failed.forEach((query) => void query.refetch())}
+              >
+                {t('common.retry')}
+              </Button>
+            </div>
+          ) : null}
+          {all.isError ? null : all.isLoading ? (
             <p className="text-sm text-gray-500">{t('app.loading')}</p>
           ) : items.length === 0 ? (
             <p className="text-sm text-gray-500">{t('notifications.empty')}</p>

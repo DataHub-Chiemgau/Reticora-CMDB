@@ -1549,7 +1549,9 @@
     "markRead": "Mark as read",
     "markAllRead": "Mark all read",
     "unread": "Unread",
-    "empty": "No notifications."
+    "empty": "No notifications.",
+    "openUnknown": "Open notifications (unread count unavailable)",
+    "loadError": "The notifications could not be loaded."
   },
   "entitlementExpiry": {
     "title": "Expiring features",
@@ -1594,7 +1596,14 @@
     "cancel": "Cancel",
     "result": "Result",
     "loadError": "The jobs could not be loaded",
-    "empty": "No jobs"
+    "empty": "No jobs",
+    "cancelDone": "The job was cancelled.",
+    "cancelForbidden": "You may not cancel this job: only its creator or a user with the permission of its kind may.",
+    "cancelConflict": "The job can no longer be cancelled: it has finished, or its kind cannot be cancelled while running.",
+    "cancelNotFound": "The job was not found.",
+    "cancelFailed": "The job could not be cancelled: {{error}}",
+    "partialReport": "Partial report",
+    "partialReportSummary": "Partial report: {{succeeded}} of {{total}} succeeded, {{failed}} failed, {{skipped}} skipped"
   },
   "provenance": {
     "show": "Provenance of {{field}}",

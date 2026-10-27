@@ -1549,7 +1549,9 @@
     "markRead": "Als gelesen markieren",
     "markAllRead": "Alle gelesen",
     "unread": "Ungelesen",
-    "empty": "Keine Benachrichtigungen."
+    "empty": "Keine Benachrichtigungen.",
+    "openUnknown": "Benachrichtigungen öffnen (Anzahl ungelesener nicht verfügbar)",
+    "loadError": "Die Benachrichtigungen konnten nicht geladen werden."
   },
   "entitlementExpiry": {
     "title": "Ablaufende Funktionen",
@@ -1594,7 +1596,14 @@
     "cancel": "Abbrechen",
     "result": "Ergebnis",
     "loadError": "Die Jobs konnten nicht geladen werden",
-    "empty": "Keine Jobs"
+    "empty": "Keine Jobs",
+    "cancelDone": "Der Job wurde abgebrochen.",
+    "cancelForbidden": "Sie dürfen diesen Job nicht abbrechen: nur sein Ersteller oder ein Benutzer mit dem Recht seiner Art.",
+    "cancelConflict": "Der Job lässt sich nicht mehr abbrechen: er ist bereits beendet oder seine Art kann im Lauf nicht abgebrochen werden.",
+    "cancelNotFound": "Der Job wurde nicht gefunden.",
+    "cancelFailed": "Der Job konnte nicht abgebrochen werden: {{error}}",
+    "partialReport": "Teilbericht",
+    "partialReportSummary": "Teilbericht: {{succeeded}} von {{total}} erfolgreich, {{failed}} fehlgeschlagen, {{skipped}} übersprungen"
   },
   "provenance": {
     "show": "Herkunft von {{field}}",
