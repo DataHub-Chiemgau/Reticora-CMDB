@@ -32,6 +32,14 @@ import {
  * sim-access-01 → sim-core-01 and → sim-core-02 (its uplinks), sim-srv-01/05/09/13 and
  * sim-nas-01 → sim-access-01 (their uplinks).
  *
+ * The topology is read after the second cycle: an LLDP edge is derived when its reporting
+ * device is processed and its neighbor is already a CI (discovery/topology.go, deriveTopology).
+ * The first report of the fleet runs through four ingest lanes side by side
+ * (RETICORA_INGEST_LANES), so a neighbor processed in another lane later gives its edge only
+ * with the next report of the reporting device (CI run of PR #102: sim-access-01 → sim-core-02,
+ * sim-srv-01/05 → sim-access-01 were missing after cycle 1). From the second cycle on every CI
+ * of the fleet exists before its neighbors report it. The REL-03 check runs in the third cycle.
+ *
  * Test → WP (requirement IDs) proven:
  *  R01 the edge sim-access-01 → sim-core-01 is removed in the CI detail with "Entfernen und
  *      unterdrücken" (CIRelationshipsCard, DELETE /relationships/{id}?force=true → 204); GET
@@ -173,6 +181,37 @@ async function fleet(): Promise<Map<string, CI>> {
   return new Map(rows(list).map((ci) => [ci.name, ci]));
 }
 
+/**
+ * waitSeen waits until every CI of `names` was seen by the cycle that started at `since`
+ * (last_seen_at at or after it and above the value in `seenBefore`).
+ */
+async function waitSeen(
+  names: string[],
+  since: number,
+  seenBefore: Map<string, number>,
+  message: string,
+) {
+  await expect
+    .poll(
+      async () => {
+        const now = await fleet();
+        return names
+          .filter((name) => {
+            const seen = Date.parse(now.get(name)?.last_seen_at ?? '') || 0;
+            return seen >= since && seen > (seenBefore.get(name) ?? 0);
+          })
+          .sort();
+      },
+      { message, timeout: 120_000, intervals: [2_000] },
+    )
+    .toEqual([...names].sort());
+}
+
+/** lastSeen maps the CI names of the fleet to their last_seen_at. */
+function lastSeen(cis: Map<string, CI>): Map<string, number> {
+  return new Map([...cis.values()].map((ci) => [ci.name, Date.parse(ci.last_seen_at ?? '') || 0]));
+}
+
 /** lldpEdges are the connected_to edges of source discovery of a CI (GET /cis/{id}/relationships). */
 async function lldpEdges(ciId: string): Promise<Relationship[]> {
   const list = await get<List<Relationship>>(`/cis/${ciId}/relationships?limit=100`);
@@ -210,7 +249,7 @@ async function openCI(page: Page, ci: CI) {
 
 test.describe('Relationships: remove and suppress a discovery edge (REL-03, REL-04)', () => {
   test.beforeAll(async ({ browser, playwright }) => {
-    test.setTimeout(5 * 60_000);
+    test.setTimeout(8 * 60_000);
     expect(COLLECTOR_BIN, 'E2E_COLLECTOR_BIN (collector binary)').toBeTruthy();
     rq = await playwright.request.newContext();
     t = await openTenant(browser, rq, 'suppress');
@@ -245,6 +284,17 @@ test.describe('Relationships: remove and suppress a discovery edge (REL-03, REL-
         intervals: [3_000],
       })
       .toBeGreaterThanOrEqual(SIMULATED_DEVICES);
+
+    // Second cycle: every CI exists, so every device reports its LLDP neighbors as edges
+    // whichever lane it and its neighbors went through in the first cycle.
+    const first = await fleet();
+    const second = await nextCycle();
+    await waitSeen(
+      [...first.keys()],
+      second,
+      lastSeen(first),
+      'second discovery cycle: every simulated CI seen again (last_seen_at)',
+    );
   });
 
   test.afterAll(async () => {
@@ -268,10 +318,10 @@ test.describe('Relationships: remove and suppress a discovery edge (REL-03, REL-
     const core = byName(REMOVED_PEER);
     const expected = LLDP_EDGES.map(([s, d]) => `${s} → ${d}`).sort();
 
-    // Precondition: the topology of the first cycle holds the seven LLDP edges of the CI.
+    // Precondition: the topology of the second cycle holds the seven LLDP edges of the CI.
     await expect
       .poll(async () => edgeKeys(await lldpEdges(access.id), names), {
-        message: `LLDP edges of ${CI_NAME} after the first discovery cycle`,
+        message: `LLDP edges of ${CI_NAME} after the second discovery cycle`,
         timeout: 120_000,
         intervals: [2_000],
       })
@@ -338,32 +388,16 @@ test.describe('Relationships: remove and suppress a discovery edge (REL-03, REL-
     });
 
     await test.step('REL-03: the next discovery cycle does not create the edge again', async () => {
-      const seenBefore = new Map(
-        [...all.values()].map((ci) => [ci.id, Date.parse(ci.last_seen_at ?? '') || 0]),
-      );
-      const reported = [...new Set(LLDP_EDGES.flat())].map(byName);
+      const seenBefore = lastSeen(await fleet());
       const cycle = await nextCycle();
 
       // The cycle ran: every CI of the edges was seen again (last_seen_at risen).
-      await expect
-        .poll(
-          async () => {
-            const now = await fleet();
-            return reported
-              .filter((ci) => {
-                const seen = Date.parse(now.get(ci.name)?.last_seen_at ?? '') || 0;
-                return seen >= cycle && seen > (seenBefore.get(ci.id) ?? 0);
-              })
-              .map((ci) => ci.name)
-              .sort();
-          },
-          {
-            message: 'CIs seen again by the next discovery cycle (last_seen_at)',
-            timeout: 120_000,
-            intervals: [2_000],
-          },
-        )
-        .toEqual(reported.map((ci) => ci.name).sort());
+      await waitSeen(
+        [...new Set(LLDP_EDGES.flat())],
+        cycle,
+        seenBefore,
+        'CIs seen again by the next discovery cycle (last_seen_at)',
+      );
 
       // Positive control: the cycle derived the topology of the CI – the six other LLDP
       // edges are the same edges, re-confirmed in this cycle.
