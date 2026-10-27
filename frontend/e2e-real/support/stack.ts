@@ -567,7 +567,9 @@ export interface OperatorSession {
  * SPA callback, which would redeem the code as a tenant login. It is taken
  * from Keycloak's answer instead: every form post to Keycloak goes through
  * route.fetch without following redirects, and the answer that redirects to
- * the redirect URI is replaced by a placeholder page. A redirect target is
+ * the redirect URI is replaced by a placeholder page; any other redirect
+ * answer becomes a page that loads the redirect target (WebKit cannot fulfill
+ * a route with a redirect status). A redirect target is
  * not intercepted reliably (Chromium does not hand Playwright the redirect
  * from the Keycloak host to the loopback SPA of an installed stack). It
  * returns the server's answer without asserting the status.
@@ -599,6 +601,22 @@ export async function operatorLogin(
           status: 200,
           contentType: 'text/html',
           body: '<p id="operator-login-done">operator login</p>',
+        });
+        return;
+      }
+      if (response.status() >= 300 && response.status() < 400 && target) {
+        // Any other Keycloak redirect (e.g. to the OTP step) is followed by
+        // the browser itself: WebKit cannot fulfill a route with a 3xx status
+        // ("Cannot fulfill with redirect status"), and route.continue() would
+        // post the consumed form a second time. A placeholder page sends the
+        // browser to the same target with a GET, as a 302/303 after a POST
+        // does; route.fetch shares the cookie jar of the browser context, so
+        // the cookies of the redirect answer are already set.
+        const next = new URL(target, route.request().url()).href;
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/html',
+          body: `<script>location.replace(${JSON.stringify(next)});</script>`,
         });
         return;
       }
