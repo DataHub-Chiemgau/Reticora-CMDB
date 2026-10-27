@@ -589,7 +589,9 @@ jobs:
   # and mobile Safari. TST-03 (WP-201): so do the browser flows CI, review,
   # drag/undo, topology, export and command palette (e2e/*.spec.ts, mocked
   # backend in e2e/support/backend.ts); the onboarding suite against a real
-  # installation runs in install-smoke.yml.
+  # installation runs in install-smoke.yml. WP-531: one job and one report
+  # artifact per project (playwright-report-<project>, also when green); the
+  # previous browser versions run in e2e-prev.yml (E-88).
   e2e:
     runs-on: ubuntu-latest
     needs: [frontend]
@@ -638,17 +640,20 @@ jobs:
         env:
           BASE_URL: http://localhost:4173
 
+      # NFR-07/UI-18 (WP-531, F-173): the evidence of every project, also
+      # when it is green: the HTML report (playwright-report/) and the
+      # screenshots, traces and error-context.md of failed tests
+      # (test-results/).
       - name: Upload test results
-        if: failure()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ matrix.project }}
-          # The github reporter writes no HTML report in CI; screenshots,
-          # traces and error-context.md are in test-results/.
           path: |
             frontend/playwright-report/
             frontend/test-results/
-          retention-days: 7
+          if-no-files-found: error
+          retention-days: 30
 
   # SEC-11/TST-04 (WP-004): dependency and container scans on every PR.
   # Critical and High findings block; accepted findings need an entry with an

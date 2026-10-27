@@ -833,6 +833,27 @@ on generation order; CI runs `npm run generate:api:check`, which regenerates
 them and fails on any diff. Regenerate with `make generate-api-client` (or
 `npm run generate:api`) after every specification change.
 
+**Browser-Unterstützung (UI-18, NFR-07):** Supported are the current and the
+previous version of Chrome, Edge, Firefox and Safari, plus mobile Chrome and
+Safari (E-88). The evidence is automated, without an external browser grid:
+
+| Job | Versions | Projects | Artifacts |
+|-----|----------|----------|-----------|
+| `e2e` (`ci.yml`, every push and PR) | current: the builds of the `@playwright/test` in `frontend/package.json` | `chromium`, `edge` (installed Microsoft Edge), `firefox`, `webkit`, `mobile-chrome` (Pixel 7), `mobile-safari` (iPhone 14) | `playwright-report-<project>`, also when green, kept 30 days |
+| `e2e-prev` (`e2e-prev.yml`, nightly and manual) | previous: `frontend/e2e-prev` pins the previous minor of `@playwright/test` (Chromium, Firefox, WebKit n-1); Chrome n-1 from Chrome for Testing | `chromium`, `chrome-prev`, `firefox`, `webkit`, `mobile-chrome`, `mobile-safari` | `e2e-prev-report-<project>`, kept 30 days |
+
+Both jobs run the same specs of `frontend/e2e/` (smoke, the axe WCAG 2.1 AA
+check `a11y.spec.ts`, keyboard and the core flows against the strict,
+contract-checked mock backend); no test is skipped per browser. Limitations:
+Edge n-1 is approximated by Chromium n-1 and Safari n-1 by WebKit n-1, since
+no previous Edge or Safari build is available on the Linux runners; the
+mobile projects are the desktop engines with a device profile (viewport,
+touch, user agent), so `mobile-safari` is WebKit, not iOS Safari. A local run
+of `e2e-prev`: `cd frontend/e2e-prev && npm ci && npx playwright install`,
+serve a build on port 4173, then
+`CI=1 npx playwright test --config playwright.prev.config.ts --project=<name>`
+(`chrome-prev` needs `PW_CHROME_PREV_EXECUTABLE`).
+
 **Production serving:** The built SPA is served via Nginx (`nginx.conf`) in a Docker container with proper SPA fallback routing. For HTTPS, `install-cloud.sh` can provision a free Let's Encrypt certificate automatically (nginx + Certbot, ACME http-01 challenge): when a public domain is entered, it writes `RETICORA_TLS_DOMAIN` into `.env`, bootstraps a self-signed certificate, issues the real one via the `certbot` compose service and reloads nginx. The TLS configuration lives in `deploy/docker-compose/nginx-tls.conf.template` (rendered by the nginx entrypoint into `/etc/nginx/conf.d/reticora-tls.conf`, included by the image's `nginx.conf`); with TLS enabled the UI is served at `https://<domain>` on port 443 and port 80 handles the ACME challenge plus the HTTP→HTTPS redirect. Certificates are stored under `deploy/docker-compose/letsencrypt/` and renewed automatically.
 
 ### Deployment
