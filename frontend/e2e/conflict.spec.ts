@@ -152,7 +152,9 @@ test('override, deviating discovery, conflict accepted and dismissed', async ({ 
   await dialog.getByLabel('Wert').fill(frozen.override.value);
   await dialog.getByLabel('Begründung').fill(frozen.override.reason);
   await dialog.getByRole('button', { name: 'Speichern' }).click();
-  await expect(page.getByText('geschützt')).toBeVisible();
+  // Exact: the hint of the section ("Geschützte manuelle Overrides …") also
+  // contains the word and is visible before the override is saved.
+  await expect(page.getByText('geschützt', { exact: true })).toBeVisible();
   expect(override).toEqual(
     expect.objectContaining({ value: frozen.override.value, reason: frozen.override.reason }),
   );

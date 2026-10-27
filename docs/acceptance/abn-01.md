@@ -217,6 +217,16 @@ betrachteten Panels der CI-Detailseite stehen in der Allowlist der Spec.
 `artefakte/abn-01-e-konflikt.json`, die Schritte und die Erwartungen bleiben
 unverändert; die Prüfsumme der Spec in `artefakte/SHA256SUMS` ist neu.
 
+Änderung nach dem Einfrieren, 2026-10-27 (Integration K4): Die Prüfung
+„geschützt“ nach dem Speichern des Overrides sucht den Text jetzt exakt
+(`getByText('geschützt', { exact: true })`). Ohne `exact` traf der Locator
+auch den Hinweis des Abschnitts („Geschützte manuelle Overrides …“), der vor
+dem Speichern sichtbar ist. Der Schritt galt dann als erledigt, bevor der
+PUT ankam, oder schlug nach dem Speichern mit zwei Treffern fehl
+(Strict Mode). Unter Last wurde das sichtbar. Daten, Schritte und
+Erwartungen bleiben unverändert; die Prüfsumme der Spec in
+`artefakte/SHA256SUMS` ist neu.
+
 **Gemockter Lauf (Regression, Freigabe vom 2026-10-14):**
 `frontend/e2e/conflict.spec.ts` spielt dieselben Daten mit gemocktem Backend
 ab. Der Test läuft in allen Browser-Projekten des CI-Jobs `frontend`:
