@@ -893,3 +893,4 @@ NTF-05;[B], Zusätze [P2], [P3];D;frontend/e2e-real/maintenance.spec.ts;WP-541
 EVT-01;[B];B;backend/internal/events/emit_tx_integration_test.go;WP-550
 TEC-12;[P5];B;backend/internal/search/opensearch_real_integration_test.go;WP-534
 TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/stack-smoke.spec.ts;WP-532
+TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_test.go;WP-533
