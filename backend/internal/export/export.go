@@ -182,7 +182,7 @@ func (rw *rowWriter) begin() {
 func (rw *rowWriter) row(item ci.Item) {
 	switch rw.format {
 	case "csv":
-		_ = rw.csv.Write([]string{
+		rw.writeCells([]string{
 			item.ID,
 			item.Name,
 			item.Status,
@@ -197,7 +197,7 @@ func (rw *rowWriter) row(item ci.Item) {
 			item.UpdatedAt,
 		})
 	case "datev":
-		_ = rw.csv.Write([]string{
+		rw.writeCells([]string{
 			item.ID,
 			item.Name,
 			item.Manufacturer,
@@ -215,6 +215,29 @@ func (rw *rowWriter) row(item ci.Item) {
 		_ = rw.json.Encode(item)
 	}
 	rw.written++
+}
+
+// writeCells writes one CSV row (csv and datev) with every cell
+// neutralised against spreadsheet formulas (F-338).
+func (rw *rowWriter) writeCells(cells []string) {
+	for i, cell := range cells {
+		cells[i] = neutralizeFormula(cell)
+	}
+	_ = rw.csv.Write(cells)
+}
+
+// formulaTriggers are the leading characters that make Excel or LibreOffice
+// read a cell as a formula (OWASP CSV injection): =, +, -, @, tab and CR.
+const formulaTriggers = "=+-@\t\r"
+
+// neutralizeFormula prefixes a cell that starts with a formula trigger with
+// ', so the spreadsheet shows it as text; discovered values such as an SNMP
+// sysName are attacker-controlled (F-338).
+func neutralizeFormula(cell string) string {
+	if cell != "" && strings.IndexByte(formulaTriggers, cell[0]) >= 0 {
+		return "'" + cell
+	}
+	return cell
 }
 
 func (rw *rowWriter) end() {

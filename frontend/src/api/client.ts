@@ -525,6 +525,10 @@ interface GraphQLResult<T> {
 /**
  * bffQuery runs a read query against the GraphQL BFF with the session of
  * the UI; mutations go through REST (GQL-02). GraphQL errors are thrown.
+ *
+ * The BFF is API-only for now (GQL-01, F-332): no page uses it in phase 1,
+ * every UI read goes through REST; the first aggregate view starts to use
+ * this client. See docs/README.md, section "GraphQL-BFF".
  */
 export async function bffQuery<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
   const result = await fetchURL<GraphQLResult<T>>(BFF_PATH, {

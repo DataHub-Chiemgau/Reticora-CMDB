@@ -6,6 +6,7 @@ package graphqlbff
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"time"
 
@@ -107,7 +108,10 @@ func NewHandler(ciRepo ci.Repository, relRepo relationship.Repository) *Handler 
 	cfg.Complexity.Query.Relationships = func(child int, _ string, first *int) int {
 		return child * pageSize(first, maxRelationships, maxRelationships)
 	}
-	cfg.Complexity.Query.Topology = func(child int, _ *string, _ *int, _ *string, _ *string) int { return child * maxPage }
+	// A topology costs its selection per node it may hold (F-333).
+	cfg.Complexity.Query.Topology = func(child int, rootCiID *string, depth *int, _ *string, _ *string) int {
+		return saturatingMul(child, topologyNodeEstimate(value(rootCiID), depth))
+	}
 	cfg.Complexity.Query.RackLayout = func(child int, _ string) int { return child * maxPage }
 	cfg.Complexity.Query.SearchEverything = func(child int, _ string, _ []string, first *int) int {
 		return child * pageSize(first, defaultPage, maxPage)
@@ -127,6 +131,47 @@ func NewHandler(ciRepo ci.Repository, relRepo relationship.Repository) *Handler 
 	// never anonymous (SEC-10).
 	srv.Use(extension.Introspection{})
 	return &Handler{resolver: r, server: srv, deadline: Deadline}
+}
+
+// topologyFanOut is the assumed number of edges per CI when the nodes of
+// a walk are estimated: the NFR-01 volumes, 100,000 relationships for
+// 10,000 objects of an organization.
+const topologyFanOut = 10
+
+// topologyNodeEstimate is the number of nodes a topology may hold (F-333):
+// without a root MaxTopologyNodes (2,000), from a root the CIs a walk of
+// depth hops reaches at topologyFanOut edges per CI (1 + 10 + 100 + ...,
+// the default depth without one, depth below 1 as 1), at most
+// MaxTopologyNodes.
+func topologyNodeEstimate(rootCIID string, depth *int) int {
+	if rootCIID == "" {
+		return topology.MaxTopologyNodes
+	}
+	d := topology.DefaultDepth
+	if depth != nil {
+		d = max(*depth, 1)
+	}
+	nodes, level := 1, 1
+	for range d {
+		if nodes >= topology.MaxTopologyNodes {
+			break
+		}
+		level *= topologyFanOut
+		nodes += level
+	}
+	return min(nodes, topology.MaxTopologyNodes)
+}
+
+// saturatingMul is a*b for non-negative operands, the largest int instead
+// of an overflow, so a huge selection never wraps below the budget.
+func saturatingMul(a, b int) int {
+	if a <= 0 || b <= 0 {
+		return 0
+	}
+	if a > math.MaxInt/b {
+		return math.MaxInt
+	}
+	return a * b
 }
 
 // WithSources attaches the read models of topology, rack layout, search,

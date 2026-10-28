@@ -1001,3 +1001,6 @@ AGT-05;[P4];D;backend/internal/agent/audit_t3_agent_rank_integration_test.go;WP-
 RCK-03;[B];B;backend/internal/rack/mount_location_integration_test.go;WP-578
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/rack/mount_location_integration_test.go;WP-578
 TLC-01;[B];B;backend/internal/signup/signup_integration_test.go;WP-591
+SEC-10;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-593
+GQL-01;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-593
+EXP-01;[B], DATEV [P2];C;backend/internal/export/export_test.go;WP-593

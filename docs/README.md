@@ -758,6 +758,34 @@ by `POST /api/v1/search/reindex`, which rebuilds the tenant's search index
 - `collector` — On-premise discovery collector.
 - `agent` — Endpoint agent for server/client telemetry.
 
+#### GraphQL-BFF
+
+`POST /bff/graphql` (`backend/internal/graphqlbff`, GQL-01/GQL-02) is a
+read-only GraphQL backend-for-frontend: it answers session principals only
+(API keys and service tokens use the REST API), is not part of the public
+REST contract, and every resolver checks its read permission and
+entitlement and reads through the tenant-scoped repositories (RLS).
+
+**API-only for now (GQL-01, F-332):** in phase 1 no page of the web UI uses
+the BFF; every UI read goes through the REST API. The client
+`bffQuery` (`frontend/src/api/client.ts`) is the prepared entry point and
+stays covered by `client.test.ts`. The UI starts to use the BFF with its
+first aggregate view (e.g. the CI detail with relationships and topology,
+phase 2); until then the BFF serves API clients with a session.
+
+**Limits (SEC-10, E-16 provisional):** depth 10, a complexity budget of
+5,000 and a deadline of 10 s per request. A list costs its selection times
+the size it may reach: `cis`, `searchEverything`, `reviewInbox` and `jobs`
+their page (`first`, default 50, at most 100), `relationships` its page
+(at most 100), `rackLayout` 100.
+`topology` costs its selection per node it may hold (F-333): without a root
+2,000 (`MaxTopologyNodes`), from a root the CIs a walk of `depth` hops
+reaches at 10 edges per CI (the NFR-01 volumes: 100,000 relationships for
+10,000 objects), i.e. 11 at depth 1, 111 at the default depth 2, 1,111 at
+depth 3 and 2,000 from depth 4. A topology without a root therefore selects
+about one field per node or edge (`{ topology { nodes { id } } }`); larger
+selections need a root or the REST endpoint `GET /api/v1/topology`.
+
 ### Frontend Tech-Stack
 
 The frontend is a **React 19 SPA** built with TypeScript and Vite.

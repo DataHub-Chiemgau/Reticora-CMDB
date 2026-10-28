@@ -340,7 +340,10 @@ func TestCIChildEdgeToOrgWideCI(t *testing.T) {
 		{"REST topology", http.MethodGet, "/api/v1/topology?root_ci_id=" + orgWideCI, nil},
 		{"REST impact", http.MethodGet, "/api/v1/impact/" + orgWideCI, nil},
 		{"GraphQL relationships", http.MethodPost, "/bff/graphql", map[string]any{"query": fmt.Sprintf(`{ relationships(ciId: %q) { id sourceCiId targetCiId } }`, orgWideCI)}},
-		{"GraphQL topology", http.MethodPost, "/bff/graphql", map[string]any{"query": fmt.Sprintf(`{ topology(rootCiId: %q, depth: 3) { nodes { id name } edges { sourceCiId targetCiId } } }`, orgWideCI)}},
+		// Nodes and edges apart: from a root of depth 3 a topology may hold
+		// 1,111 nodes, both together exceed the complexity budget (F-333).
+		{"GraphQL topology nodes", http.MethodPost, "/bff/graphql", map[string]any{"query": fmt.Sprintf(`{ topology(rootCiId: %q, depth: 3) { nodes { id name } } }`, orgWideCI)}},
+		{"GraphQL topology edges", http.MethodPost, "/bff/graphql", map[string]any{"query": fmt.Sprintf(`{ topology(rootCiId: %q, depth: 3) { edges { sourceCiId targetCiId } } }`, orgWideCI)}},
 	} {
 		for _, p := range []*channelPrincipal{scoped1, scoped2} {
 			code, body := w.do(p, ch.method, ch.path, ch.body)

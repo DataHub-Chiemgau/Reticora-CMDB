@@ -1268,14 +1268,30 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 		return []matrixProbe{gql("currentUser", `{ currentUser { id organizationId clientId } }`, []string{p.user, p.org}, []string{other, `"errors"`})}
 	}}
 	rows["graphql-topology"] = matrixRow{read: func(p *channelPrincipal) []matrixProbe {
-		show, hide := listed(p, cis...)
-		out := []matrixProbe{gql("topology", `{ topology { nodes { id name } edges { sourceCiId targetCiId } } }`, show, append(hide, `"errors"`))}
+		show, _ := listed(p, cis...)
+		var shownNames []string
+		for _, id := range show {
+			shownNames = append(shownNames, nameOf(id)...)
+		}
+		hide := append(hiddenCIs(p), `"errors"`)
+		// The complexity of a topology grows with the nodes it may hold
+		// (F-333, WP-593): without a root 2,000, so each probe selects
+		// one field per node or edge; from a root of depth 3 1,111, so
+		// nodes and edges are probed apart.
+		out := []matrixProbe{
+			gql("topology", `{ topology { nodes { id } } }`, show, hide),
+			gql("topology", `{ topology { nodes { name } } }`, shownNames, hide),
+			gql("topology", `{ topology { edges { sourceCiId } } }`, nil, hide),
+			gql("topology", `{ topology { edges { targetCiId } } }`, nil, hide),
+		}
 		for _, r := range roots {
-			q := fmt.Sprintf(`{ topology(rootCiId: %q, depth: 3) { nodes { id name } edges { sourceCiId targetCiId } } }`, r.id)
+			nodes := fmt.Sprintf(`{ topology(rootCiId: %q, depth: 3) { nodes { id name } } }`, r.id)
+			edges := fmt.Sprintf(`{ topology(rootCiId: %q, depth: 3) { edges { sourceCiId targetCiId } } }`, r.id)
 			if r.seen[p.kind] {
-				out = append(out, gql("topology", q, []string{r.id}, append(hiddenCIs(p), `"errors"`)))
+				out = append(out, gql("topology", nodes, []string{r.id}, hide), gql("topology", edges, nil, hide))
 			} else {
-				out = append(out, gql("topology", q, []string{`"message":"ci not found"`}, nameOf(r.id)))
+				out = append(out, gql("topology", nodes, []string{`"message":"ci not found"`}, nameOf(r.id)),
+					gql("topology", edges, []string{`"message":"ci not found"`}, nameOf(r.id)))
 			}
 		}
 		return out
