@@ -19,7 +19,6 @@ import { useCI, useHasPermission, useMountedCIs } from '../api/hooks';
 import { useCITypes } from '../api/cmdbHooks';
 import { localizedText } from '../api/cmdb';
 import type { CI } from '../api/client';
-import { ScrollRegion } from '../components/ScrollRegion';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -486,38 +485,39 @@ function ReviewDetail({
           }))}
         />
       ) : null}
-      <ScrollRegion label={t('reviews.diff')} className="mt-3">
-        <table className="w-full text-left text-sm">
-          <caption className="sr-only">{t('reviews.diff')}</caption>
-          <thead className="text-xs uppercase text-muted">
-            <tr>
-              <th className="pb-2">{t('reviews.field')}</th>
-              <th className="pb-2">{t('reviews.observed')}</th>
-              <th className="pb-2">{ci ? ci.name : t('reviews.current')}</th>
+      {/* Fixed columns that wrap long names, serials and addresses keep the
+          table inside a phone-wide viewport (UI-18 reflow); the table stays a
+          direct child of the detail so its actions remain its siblings. */}
+      <table className="mt-3 w-full table-fixed text-left text-sm [overflow-wrap:anywhere]">
+        <caption className="sr-only">{t('reviews.diff')}</caption>
+        <thead className="text-xs uppercase text-muted">
+          <tr>
+            <th className="pb-2">{t('reviews.field')}</th>
+            <th className="pb-2">{t('reviews.observed')}</th>
+            <th className="pb-2">{ci ? ci.name : t('reviews.current')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr
+              key={row.field}
+              className={row.differs ? 'bg-amber-50 dark:bg-amber-950' : undefined}
+              data-differs={row.differs ? 'true' : undefined}
+            >
+              <td className="py-1 font-mono text-xs">{row.field}</td>
+              <td className="py-1">{row.observed || '—'}</td>
+              <td className="py-1">
+                {row.current || '—'}
+                {row.differs ? (
+                  <span className="ml-2">
+                    <Badge variant="warning">{t('reviews.differs')}</Badge>
+                  </span>
+                ) : null}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr
-                key={row.field}
-                className={row.differs ? 'bg-amber-50 dark:bg-amber-950' : undefined}
-                data-differs={row.differs ? 'true' : undefined}
-              >
-                <td className="py-1 font-mono text-xs">{row.field}</td>
-                <td className="py-1">{row.observed || '—'}</td>
-                <td className="py-1">
-                  {row.current || '—'}
-                  {row.differs ? (
-                    <span className="ml-2">
-                      <Badge variant="warning">{t('reviews.differs')}</Badge>
-                    </span>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </ScrollRegion>
+          ))}
+        </tbody>
+      </table>
       {genericCI ? (
         <p className="mt-4 text-sm text-gray-700 dark:text-gray-300">
           {t('reviews.noProfileMatch')}{' '}
