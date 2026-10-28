@@ -57,6 +57,7 @@ var productionEnv = map[string]string{
 	"RETICORA_REDIS_URL":       "redis://redis:6379",
 	"RETICORA_MASTER_KEY":      "key",
 	"RETICORA_OIDC_ISSUER_URL": "https://id.example/realms/reticora",
+	"RETICORA_NATS_URL":        "nats://nats:4222",
 }
 
 func TestValidateDevelopmentDefaults(t *testing.T) {
@@ -96,8 +97,47 @@ func TestValidateProductionComplete(t *testing.T) {
 	if cfg.S3Configured() || cfg.S3AccessKey != "" || cfg.S3SecretKey != "" {
 		t.Fatal("production must not use the development object storage defaults")
 	}
-	if cfg.IsSet("RETICORA_NATS_URL") {
-		t.Fatal("NATS was not configured")
+	if !cfg.IsSet("RETICORA_NATS_URL") || strings.Contains(strings.Join(cfg.Warnings(), "\n"), "RETICORA_NATS_URL") {
+		t.Fatalf("production with NATS: set %v, warnings %v", cfg.IsSet("RETICORA_NATS_URL"), cfg.Warnings())
+	}
+}
+
+// TestValidateProductionRequiresNATS covers F-282 (ABN-03): the identity
+// locks of the ingest exist only on the NATS queue path, so production
+// without RETICORA_NATS_URL does not start and names the operating guide;
+// development and staging start without it but warn.
+func TestValidateProductionRequiresNATS(t *testing.T) {
+	clearEnv(t)
+	setAll(t, productionEnv)
+	t.Setenv("RETICORA_NATS_URL", "")
+	cfg := Load()
+	err := cfg.Validate(false)
+	if err == nil || !strings.Contains(err.Error(), "RETICORA_ENVIRONMENT=production requires RETICORA_NATS_URL") ||
+		!strings.Contains(err.Error(), "docs/betrieb/ingest-spuren.md") {
+		t.Fatalf("production without RETICORA_NATS_URL: err = %v, want a start error naming docs/betrieb/ingest-spuren.md", err)
+	}
+	for _, env := range []string{EnvDevelopment, EnvStaging} {
+		clearEnv(t)
+		setAll(t, productionEnv)
+		t.Setenv("RETICORA_NATS_URL", "")
+		t.Setenv("RETICORA_ENVIRONMENT", env)
+		cfg := Load()
+		if err := cfg.Validate(false); err != nil {
+			t.Errorf("%s without RETICORA_NATS_URL: %v, want a start with a warning", env, err)
+		}
+		warnings := strings.Join(cfg.Warnings(), "\n")
+		if !strings.Contains(warnings, "RETICORA_NATS_URL is not set") || !strings.Contains(warnings, "docs/betrieb/ingest-spuren.md") {
+			t.Errorf("%s without RETICORA_NATS_URL: warnings %q, want the identity-lock warning", env, warnings)
+		}
+		t.Setenv("RETICORA_NATS_URL", "nats://nats:4222")
+		if warnings := strings.Join(Load().Warnings(), "\n"); strings.Contains(warnings, "RETICORA_NATS_URL") {
+			t.Errorf("%s with RETICORA_NATS_URL: warnings %q", env, warnings)
+		}
+	}
+	// The unset development defaults (no RETICORA_* variable) warn as well.
+	clearEnv(t)
+	if warnings := strings.Join(Load().Warnings(), "\n"); !strings.Contains(warnings, "RETICORA_NATS_URL is not set") {
+		t.Errorf("development defaults: warnings %q, want the identity-lock warning", warnings)
 	}
 }
 

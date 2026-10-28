@@ -5,8 +5,8 @@ package main
 //
 // WP-097 (OPS-01) test gap high "The fail-closed startup in main.go has no
 // repository test; only audit probes": the real server binary is built and
-// started with a production configuration against the test PostgreSQL and
-// Redis. The server logs in with the runtime login of the tests
+// started with a production configuration against the test PostgreSQL,
+// Redis and a private nats-server (TEST_NATS_SERVER_BIN). The server logs in with the runtime login of the tests
 // (scopetest.AppDSN, no SUPERUSER/BYPASSRLS, TEN-03, WP-351), as in the
 // packaged installation; TEST_DATABASE_URL is only the admin login AppDSN
 // derives it from. Every missing or unusable mandatory dependency must stop the start
@@ -22,7 +22,7 @@ package main
 //
 // Retest:
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_08?sslmode=disable \
-//     TEST_REDIS_URL=redis://localhost:56379/0 \
+//     TEST_REDIS_URL=redis://localhost:56379/0 TEST_NATS_SERVER_BIN=<nats-server> \
 //     go test -count=1 -v -run 'TestAuditT5ServerStartupFailClosed' ./cmd/server/
 
 import (
@@ -136,15 +136,51 @@ func auditFakeS3(t *testing.T) *httptest.Server {
 	return srv
 }
 
+// auditPrivateNATS starts a nats-server with JetStream (TEST_NATS_SERVER_BIN)
+// for one test and returns its URL: production requires RETICORA_NATS_URL
+// (F-282), and the shared NATS of TEST_NATS_URL is not isolated per test.
+func auditPrivateNATS(t *testing.T) string {
+	t.Helper()
+	bin := os.Getenv("TEST_NATS_SERVER_BIN")
+	if bin == "" {
+		if ci, _ := strconv.ParseBool(os.Getenv("CI")); ci {
+			t.Fatal("TEST_NATS_SERVER_BIN not set in the CI: the production start requires RETICORA_NATS_URL")
+		}
+		t.Skip("TEST_NATS_SERVER_BIN not set; the production start requires RETICORA_NATS_URL (private nats-server)")
+	}
+	addr := auditClosedAddress(t)
+	host, port, _ := net.SplitHostPort(addr)
+	cmd := exec.Command(bin, "-a", host, "-p", port, "-js", "-sd", t.TempDir())
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if conn, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
+			_ = conn.Close()
+			return "nats://" + addr
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("nats-server did not listen on %s:\n%s", addr, out.String())
+		}
+	}
+}
+
 // auditProductionEnv is a complete production configuration against the
-// test database (runtime login, scopetest.AppDSN) and Redis, without NATS (the shared NATS server is not
-// isolated per test) and with every worker disabled.
+// test database (runtime login, scopetest.AppDSN), Redis and a private NATS
+// (auditPrivateNATS), with every worker disabled.
 func auditProductionEnv(t *testing.T) map[string]string {
 	t.Helper()
 	redis := os.Getenv("TEST_REDIS_URL")
 	if os.Getenv("TEST_DATABASE_URL") == "" || redis == "" {
 		t.Skip("TEST_DATABASE_URL and TEST_REDIS_URL are required for the server startup test")
 	}
+	natsURL := auditPrivateNATS(t)
 	db := scopetest.AppDSN(t)
 	// Every start is a fresh installation: the derivation root of the
 	// database goes with the master key drawn here (WP-459).
@@ -155,10 +191,14 @@ func auditProductionEnv(t *testing.T) map[string]string {
 		t.Fatal(err)
 	}
 	env := map[string]string{
-		"RETICORA_ENVIRONMENT":      "production",
-		"RETICORA_PORT":             auditFreePort(t),
-		"RETICORA_DATABASE_URL":     db,
-		"RETICORA_REDIS_URL":        redis,
+		"RETICORA_ENVIRONMENT":  "production",
+		"RETICORA_PORT":         auditFreePort(t),
+		"RETICORA_DATABASE_URL": db,
+		"RETICORA_REDIS_URL":    redis,
+		"RETICORA_NATS_URL":     natsURL,
+		// The event stream reserves its limit in the store of the private
+		// nats-server; the default (NFR-06) may exceed the free disk space.
+		"RETICORA_EVENTS_MAX_BYTES": "67108864",
 		"RETICORA_MASTER_KEY":       key,
 		"RETICORA_OIDC_ISSUER_URL":  auditFakeOIDC(t),
 		"RETICORA_SESSION_KEY_PATH": testSessionKeyPath(t),
@@ -353,6 +393,10 @@ func TestAuditT5ServerStartupFailClosed(t *testing.T) {
 			"requires RETICORA_OIDC_ISSUER_URL"},
 		{"missing master key", func(_ *testing.T, env map[string]string) { delete(env, "RETICORA_MASTER_KEY") },
 			"requires RETICORA_MASTER_KEY"},
+		// Production ingests only over the NATS queue with its identity
+		// locks (WP-586, F-282).
+		{"missing NATS URL", func(_ *testing.T, env map[string]string) { delete(env, "RETICORA_NATS_URL") },
+			"requires RETICORA_NATS_URL"},
 		// Kubernetes passes an empty key of a secret or ConfigMap as an empty
 		// variable. The loader treats it as unset, so the start check of the
 		// staging overlay names it: tests/k8s/kind-smoke.sh asserts these

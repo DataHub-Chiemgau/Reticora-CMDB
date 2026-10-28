@@ -179,7 +179,10 @@ func Main() {
 	loadProfileDir(os.Getenv("RETICORA_PROFILES_DIR"))
 
 	slog.Info("starting collector", "environment", environment, "version", Version)
-	if err := applySimulation(&collectorCfg, environment); err != nil {
+	// The simulation check reads the variable itself: the "development"
+	// default above must not allow it when RETICORA_ENVIRONMENT is unset
+	// (F-276).
+	if err := applySimulation(&collectorCfg, os.Getenv("RETICORA_ENVIRONMENT")); err != nil {
 		slog.Error("collector simulation refused", "event", "collector.simulate.refused", "error", err)
 		os.Exit(1)
 	}
@@ -1627,19 +1630,23 @@ func loadCollectorConfig() collectorConfig {
 	return cfg
 }
 
-// errSimulateInProduction: RETICORA_SIMULATE is refused in production.
-var errSimulateInProduction = errors.New("RETICORA_SIMULATE cannot be enabled in production")
+// errSimulateRefused: RETICORA_SIMULATE outside development and test.
+var errSimulateRefused = errors.New("RETICORA_SIMULATE is only allowed with RETICORA_ENVIRONMENT=development or test")
 
 // applySimulation switches the collector to the simulated fleet when
 // RETICORA_SIMULATE is set (SIM-02): the only protocol is "simulate" on the
 // fleet's subnet, and the records take the real upload and ingest path.
-// Production refuses it.
+// Only an explicit development or test environment (case-insensitive)
+// allows it; an empty, unknown, staging or production value refuses it
+// (fail-closed, F-276).
 func applySimulation(cfg *collectorConfig, environment string) error {
 	if !cfg.Simulate {
 		return nil
 	}
-	if strings.EqualFold(strings.TrimSpace(environment), "production") {
-		return errSimulateInProduction
+	switch strings.ToLower(strings.TrimSpace(environment)) {
+	case "development", "test":
+	default:
+		return fmt.Errorf("%w, not RETICORA_ENVIRONMENT=%q", errSimulateRefused, environment)
 	}
 	pluginRegistry["simulate"] = simulate.New()
 	cfg.Protocols = []string{"simulate"}

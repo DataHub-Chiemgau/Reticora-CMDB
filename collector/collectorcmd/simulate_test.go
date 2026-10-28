@@ -15,16 +15,35 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/simulate"
 )
 
-// TestSimulationRefusedInProduction covers SIM-02: RETICORA_SIMULATE cannot
-// be enabled in production, and without it nothing changes.
+// TestSimulationRefusedInProduction covers SIM-02 and F-276: RETICORA_SIMULATE
+// is only allowed with an explicit development or test environment
+// (case-insensitive); an empty, unknown, staging or production value refuses
+// it without changing the configuration, and without RETICORA_SIMULATE
+// nothing changes.
 func TestSimulationRefusedInProduction(t *testing.T) {
 	t.Cleanup(func() { delete(pluginRegistry, "simulate") })
-	cfg := collectorConfig{Simulate: true, Protocols: []string{"snmp"}}
-	if err := applySimulation(&cfg, " Production "); !errors.Is(err, errSimulateInProduction) {
-		t.Fatalf("production: %v", err)
+	for _, env := range []string{"", " ", "prod", "staging", "production", " Production ", "PRODUCTION", "dev", "testing", "development-prod"} {
+		delete(pluginRegistry, "simulate")
+		cfg := collectorConfig{Simulate: true, Protocols: []string{"snmp"}}
+		err := applySimulation(&cfg, env)
+		if !errors.Is(err, errSimulateRefused) {
+			t.Errorf("RETICORA_ENVIRONMENT=%q: err = %v, want the simulation refused", env, err)
+		}
+		if _, ok := pluginRegistry["simulate"]; ok || cfg.Protocols[0] != "snmp" || cfg.ScanSubnets != nil {
+			t.Errorf("RETICORA_ENVIRONMENT=%q: refused simulation changed the configuration: %v %v", env, cfg.Protocols, cfg.ScanSubnets)
+		}
 	}
-	if _, ok := pluginRegistry["simulate"]; ok || cfg.Protocols[0] != "snmp" {
-		t.Fatal("refused simulation changed the configuration")
+	for _, env := range []string{"development", "test", "Development", "TEST", " development "} {
+		delete(pluginRegistry, "simulate")
+		cfg := collectorConfig{Simulate: true, Protocols: []string{"snmp"}}
+		if err := applySimulation(&cfg, env); err != nil {
+			t.Errorf("RETICORA_ENVIRONMENT=%q: %v", env, err)
+			continue
+		}
+		if _, ok := pluginRegistry["simulate"]; !ok || len(cfg.Protocols) != 1 || cfg.Protocols[0] != "simulate" ||
+			len(cfg.ScanSubnets) != 1 || cfg.ScanSubnets[0] != simulate.Subnet {
+			t.Errorf("RETICORA_ENVIRONMENT=%q: simulation not applied: %v %v", env, cfg.Protocols, cfg.ScanSubnets)
+		}
 	}
 	off := collectorConfig{Protocols: []string{"snmp"}}
 	if err := applySimulation(&off, "development"); err != nil || off.Protocols[0] != "snmp" {

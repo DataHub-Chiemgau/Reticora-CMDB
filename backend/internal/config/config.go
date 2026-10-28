@@ -347,6 +347,12 @@ func Load() *Config {
 		cfg.warnings = append(cfg.warnings, "RETICORA_OPS_ALERT_TOKEN is set without RETICORA_OPS_ALERT_ORG_ID: "+
 			"the Alertmanager bridge answers 404 (E-75)")
 	}
+	// Outside production the server may run without the NATS ingest queue,
+	// but then it ingests in the request without identity locks (F-282);
+	// production refuses that in Validate.
+	if !l.set["RETICORA_NATS_URL"] && cfg.Environment != EnvProduction {
+		cfg.warnings = append(cfg.warnings, natsIngestWarning)
+	}
 
 	cfg.explicit = l.set
 	cfg.invalid = l.invalid
@@ -505,6 +511,13 @@ var requiredOutsideDevelopment = []string{
 
 var s3Keys = []string{"RETICORA_S3_ENDPOINT", "RETICORA_S3_ACCESS_KEY", "RETICORA_S3_SECRET_KEY"}
 
+// natsIngestWarning is the start warning without RETICORA_NATS_URL outside
+// production: the identity locks of the ingest (E-56) exist only on the NATS
+// queue path, so several instances without NATS can duplicate devices with a
+// weak identity (F-282).
+const natsIngestWarning = "RETICORA_NATS_URL is not set: the discovery ingest runs in the request without identity locks; " +
+	"several instances can duplicate devices with a weak identity, so run one instance or configure NATS (docs/betrieb/ingest-spuren.md)"
+
 // IsDevelopment reports whether the local development defaults apply.
 func (c *Config) IsDevelopment() bool { return c.Environment == EnvDevelopment }
 
@@ -635,6 +648,13 @@ func (c *Config) Validate(noDB bool) error {
 		if len(missing) > 0 {
 			errs = append(errs, fmt.Errorf("RETICORA_ENVIRONMENT=%s requires %s", c.Environment, strings.Join(missing, ", ")))
 		}
+	}
+	// Production runs the ingest only over the NATS queue, the path with the
+	// identity locks (E-56); without it two instances could duplicate devices
+	// with a weak identity (F-282).
+	if c.Environment == EnvProduction && !c.explicit["RETICORA_NATS_URL"] {
+		errs = append(errs, fmt.Errorf("RETICORA_ENVIRONMENT=%s requires RETICORA_NATS_URL: without the NATS ingest queue "+
+			"the HTTP ingest takes no identity locks and several instances can duplicate devices (docs/betrieb/ingest-spuren.md)", EnvProduction))
 	}
 	return errors.Join(errs...)
 }

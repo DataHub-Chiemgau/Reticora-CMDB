@@ -958,10 +958,10 @@ The server is configured via environment variables:
   serving any request and **refuses to start** if the effective role can still
   bypass RLS. Set this only when the login role is already restricted; setting it
   to an empty value disables the role switch but not the startup check.
-- `RETICORA_NATS_URL` — NATS server URL.
+- `RETICORA_NATS_URL` — NATS server URL. Required with `RETICORA_ENVIRONMENT=production`: the server refuses to start without it, because only the NATS ingest queue takes the identity locks that keep several instances from duplicating devices with a weak identity (F-282). Development and staging start without it (ingest in the request, without identity locks) and log a configuration warning. See [`docs/betrieb/ingest-spuren.md`](betrieb/ingest-spuren.md).
 - `RETICORA_INGEST_LANES` — parallel ingest lanes per organization (default `4`, `1`–`16`, the same on every instance; `1` is the serial ingest of the releases before WP-334). See [`docs/betrieb/ingest-spuren.md`](betrieb/ingest-spuren.md).
 - `RETICORA_REDIS_URL` — Redis connection string.
-- `RETICORA_ENVIRONMENT` — Environment name (development/staging/production).
+- `RETICORA_ENVIRONMENT` — Environment name (development/staging/production). The collector reads the same variable: it accepts `RETICORA_SIMULATE=true` (simulated device fleet, SIM-02) only with `development` or `test` (case-insensitive) and exits with code 1 and `collector.simulate.refused` for any other value, including an unset or empty one (F-276).
 - `RETICORA_DEFAULT_PLAN` — Plan provisioned for the `--no-db` demo organization (default `essential`); organizations in the database are provisioned with their own plan.
 - `RETICORA_SIGNUP_VERIFY_URL` — page the self-signup verification link opens; the token is appended as `?token=` (TLC-01). Self-signup also needs `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` / `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET` (a confidential client of the realm in `RETICORA_OIDC_ISSUER_URL` whose service account holds `realm-management/manage-users`) and the central SMTP server (`RETICORA_SMTP_*`); until all exist, `POST /api/v1/signup` answers 503.
 - `RETICORA_KEYCLOAK_INTERNAL_URL` — optional base URL (`http(s)://host[:port]`) under which the server reaches Keycloak directly; the Keycloak admin client (signup, invitations, MFA binding) then sends its requests there with the public issuer host in `Host`/`X-Forwarded-*`, because the public reverse proxy does not expose `/admin/`. The compose stack sets `http://keycloak:8080`; empty means the issuer host.
