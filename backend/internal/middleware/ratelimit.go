@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/netip"
@@ -267,12 +268,24 @@ var preAuthPaths = map[string]bool{
 // otherwise spend the budget and log them out (F-063).
 const refreshPath = "/api/v1/auth/refresh"
 
+// preAuthMaxWait bounds how long a request waits for a unit of its IP's
+// budget that credential checks in flight hold (F-387). After it the
+// request gets 429.
+var preAuthMaxWait = 10 * time.Second
+
+// The waiting request looks again after these intervals (doubling, with
+// jitter), and at once when a unit is given back on this replica.
+const (
+	preAuthPollMin = 2 * time.Millisecond
+	preAuthPollMax = 50 * time.Millisecond
+)
+
 // PreAuthRateLimiter limits authentication attempts per client IP before any
 // credential is checked (AUT-10, API-04). Each request to a pre-auth
 // endpoint or to an authenticated endpoint takes one unit of the budget of
 // the current minute with an atomic increment before it is served; the
 // value the increment returns decides, so concurrent requests on all
-// replicas never admit more than the budget. What counts:
+// replicas never have more than the budget checked. What counts:
 //   - login callback, signup, signup verification, invitation acceptance,
 //     enrollment and operator callback: every request;
 //   - the session refresh: only answers outside 2xx, a successful refresh
@@ -282,15 +295,22 @@ const refreshPath = "/api/v1/auth/refresh"
 //     its authentication succeeds (or, on the operator path, when it is
 //     answered with anything but 401).
 //
-// Once the budget is spent, pre-auth requests and requests to authenticated
-// endpoints get 429 with Retry-After until the minute is over. Every
-// response of a limited path carries X-RateLimit-Limit, -Remaining and
-// -Reset of the IP budget; the rate limit after authentication overwrites
-// them with the credential budget (API-04). A store error fails closed.
+// A unit that is not given back is spent: the budget counts it until the
+// minute is over. A request that finds all units taken waits while some
+// of them are only held by checks in flight (F-387: concurrent requests
+// with valid credentials, e.g. of many users behind one NAT address, are
+// not refused) and takes the first unit given back, at most
+// preAuthMaxWait. Once the spent units fill the budget, pre-auth requests
+// and requests to authenticated endpoints get 429 with Retry-After at once
+// until the minute is over. Every response of a limited path carries
+// X-RateLimit-Limit, -Remaining and -Reset of the IP budget; the rate limit
+// after authentication overwrites them with the credential budget (API-04).
+// A store error fails closed.
 func PreAuthRateLimiter(perMinute int, store cache.Store) func(http.Handler) http.Handler {
 	if perMinute <= 0 {
 		perMinute = DefaultPreAuthPerMinute
 	}
+	l := &preAuthLimiter{store: store, limit: int64(perMinute), freed: make(chan struct{})}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			preAuth := preAuthPaths[r.URL.Path]
@@ -300,10 +320,7 @@ func PreAuthRateLimiter(perMinute int, store cache.Store) func(http.Handler) htt
 				next.ServeHTTP(w, r)
 				return
 			}
-			now := time.Now().UTC().Unix()
-			reset := 60 - now%60
-			windowKey := fmt.Sprintf("preauth:%s:%d", clientIP(r), now/60)
-			count, err := store.Increment(r.Context(), windowKey, 2*time.Minute)
+			a, err := l.admit(r.Context(), clientIP(r))
 			if err != nil {
 				slog.Warn("pre-auth rate limiter backend error, rejecting request", "error", err)
 				httpx.RateLimited(w, r, "rate limiter unavailable, try again later")
@@ -311,27 +328,27 @@ func PreAuthRateLimiter(perMinute int, store cache.Store) func(http.Handler) htt
 			}
 			h := w.Header()
 			h.Set("X-RateLimit-Limit", strconv.Itoa(perMinute))
-			h.Set("X-RateLimit-Remaining", strconv.FormatInt(max(int64(perMinute)-count, 0), 10))
-			h.Set("X-RateLimit-Reset", strconv.FormatInt(reset, 10))
-			if count > int64(perMinute) {
-				// A refused request is no attempt: its unit is given back,
-				// so the counter holds only the admitted ones. The budget
-				// renews with the next minute window.
-				(&preAuthSlot{store: store, key: windowKey, held: true}).release(r.Context())
-				h.Set("Retry-After", strconv.FormatInt(reset, 10))
+			h.Set("X-RateLimit-Remaining", strconv.FormatInt(max(int64(perMinute)-a.count, 0), 10))
+			h.Set("X-RateLimit-Reset", strconv.FormatInt(a.win.reset, 10))
+			if !a.admitted {
+				h.Set("Retry-After", strconv.FormatInt(a.win.reset, 10))
 				httpx.RateLimited(w, r, "too many authentication attempts, try again later")
 				return
 			}
+			slot := &preAuthSlot{limiter: l, win: a.win, held: true}
 			if preAuth && r.URL.Path != refreshPath {
+				// Every request is an attempt.
+				slot.spend(r.Context())
 				next.ServeHTTP(w, r)
 				return
 			}
-			slot := &preAuthSlot{store: store, key: windowKey, held: true}
 			rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 			if preAuth {
 				next.ServeHTTP(rw, r)
 				if rw.status >= 200 && rw.status < 300 {
 					slot.release(r.Context())
+				} else {
+					slot.spend(r.Context())
 				}
 				return
 			}
@@ -342,38 +359,208 @@ func PreAuthRateLimiter(perMinute int, store cache.Store) func(http.Handler) htt
 			case slot.released():
 				// Authenticated, but answered 401 after all: a failed
 				// authentication counts.
-				if _, err = store.Increment(context.WithoutCancel(r.Context()), windowKey, 2*time.Minute); err != nil {
-					slog.Warn("pre-auth rate limiter: failed attempt not counted", "error", err)
-				}
+				l.countFailure(r.Context(), a.win)
+			default:
+				slot.spend(r.Context())
 			}
 		})
 	}
 }
 
+// preAuthLimiter is the state of one PreAuthRateLimiter: the shared store
+// and the signal that wakes the requests of this replica waiting for a
+// unit.
+type preAuthLimiter struct {
+	store cache.Store
+	limit int64
+	mu    sync.Mutex
+	freed chan struct{} // closed and replaced when a unit is given back or spent
+}
+
+// preAuthWindow names the counters of one client IP in one minute window:
+// taken counts the admitted units (held by requests in flight or spent),
+// spent the units that are never given back.
+type preAuthWindow struct {
+	taken, spent string
+	reset        int64 // seconds until the window ends
+}
+
+func newPreAuthWindow(ip string, now time.Time) preAuthWindow {
+	sec := now.UTC().Unix()
+	return preAuthWindow{
+		taken: fmt.Sprintf("preauth:%s:%d", ip, sec/60),
+		spent: fmt.Sprintf("preauth-spent:%s:%d", ip, sec/60),
+		reset: 60 - sec%60,
+	}
+}
+
+// preAuthAdmission is the outcome of admit: the window, the value of its
+// taken counter that decided, and whether the request holds a unit.
+type preAuthAdmission struct {
+	win      preAuthWindow
+	count    int64
+	admitted bool
+}
+
+// admit takes one unit of the IP's budget. Only the atomic increment of
+// taken admits, so the budget bounds the credentials checked at the same
+// time and the failed attempts of the window together. When all units are
+// taken but not all spent, the rest are held by checks in flight that give
+// them back on success: the request waits for one instead of being refused
+// (F-387). It is refused when the spent units fill the budget, when
+// preAuthMaxWait is over or when the client is gone.
+func (l *preAuthLimiter) admit(ctx context.Context, ip string) (preAuthAdmission, error) {
+	deadline := time.Now().Add(preAuthMaxWait)
+	poll := preAuthPollMin
+	for attempt := 0; ; attempt++ {
+		freed := l.freedSignal()
+		win := newPreAuthWindow(ip, time.Now())
+		refused := func(count int64) (preAuthAdmission, error) {
+			return preAuthAdmission{win: win, count: count}, nil
+		}
+		// A store error of a client that is gone is no outage.
+		fail := func(err error) (preAuthAdmission, error) {
+			if ctx.Err() != nil {
+				return refused(l.limit + 1)
+			}
+			return preAuthAdmission{win: win}, err
+		}
+		// A waiting request increments only when a unit looks free, so
+		// the waiters' tries do not crowd out each other.
+		tryTake := attempt == 0
+		if !tryTake {
+			taken, err := l.value(ctx, win.taken)
+			if err != nil {
+				return fail(err)
+			}
+			tryTake = taken < l.limit
+		}
+		count := l.limit + 1
+		if tryTake {
+			var err error
+			if count, err = l.store.Increment(ctx, win.taken, 2*time.Minute); err != nil {
+				return fail(err)
+			}
+			if count <= l.limit {
+				return preAuthAdmission{win: win, count: count, admitted: true}, nil
+			}
+			// A refused request is no attempt: its unit is given back, so
+			// the counter holds only the admitted ones. The budget renews
+			// with the next minute window.
+			if _, err = l.store.Decrement(context.WithoutCancel(ctx), win.taken); err != nil {
+				slog.Warn("pre-auth rate limiter: refused unit not given back", "error", err)
+			}
+		}
+		spent, err := l.value(ctx, win.spent)
+		if err != nil {
+			return fail(err)
+		}
+		if spent >= l.limit || !time.Now().Before(deadline) {
+			return refused(count)
+		}
+		wait := min(poll/2+rand.N(poll/2+1), time.Until(deadline))
+		poll = min(2*poll, preAuthPollMax)
+		timer := time.NewTimer(wait)
+		select {
+		case <-freed:
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return refused(count)
+		}
+		timer.Stop()
+	}
+}
+
+// value reads a counter of the store; a missing one is 0.
+func (l *preAuthLimiter) value(ctx context.Context, key string) (int64, error) {
+	raw, ok, err := l.store.Get(ctx, key)
+	if err != nil || !ok {
+		return 0, err
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("pre-auth counter %q: %w", key, err)
+	}
+	return n, nil
+}
+
+// freedSignal returns the channel that is closed when the next unit is
+// given back or spent on this replica.
+func (l *preAuthLimiter) freedSignal() <-chan struct{} {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.freed
+}
+
+// signal wakes the waiting requests of this replica; those of the other
+// replicas look again after their poll interval.
+func (l *preAuthLimiter) signal() {
+	l.mu.Lock()
+	close(l.freed)
+	l.freed = make(chan struct{})
+	l.mu.Unlock()
+}
+
+// countFailure counts a failed authentication of a request that had given
+// its unit back already: a new unit, spent at once.
+func (l *preAuthLimiter) countFailure(ctx context.Context, win preAuthWindow) {
+	ctx = context.WithoutCancel(ctx)
+	if _, err := l.store.Increment(ctx, win.taken, 2*time.Minute); err != nil {
+		slog.Warn("pre-auth rate limiter: failed attempt not counted", "error", err)
+		return
+	}
+	if _, err := l.store.Increment(ctx, win.spent, 2*time.Minute); err != nil {
+		slog.Warn("pre-auth rate limiter: failed attempt not marked as spent", "error", err)
+	}
+	l.signal()
+}
+
 // preAuthSlot is the unit of the pre-auth budget a request holds while it
 // is served.
 type preAuthSlot struct {
-	store cache.Store
-	key   string
-	mu    sync.Mutex
-	held  bool
+	limiter *preAuthLimiter
+	win     preAuthWindow
+	mu      sync.Mutex
+	held    bool
 }
 
 type preAuthSlotKey struct{}
 
-// release gives the unit back once; a store error leaves it counted.
-func (s *preAuthSlot) release(ctx context.Context) {
+// take ends the hold once and reports whether the slot was held.
+func (s *preAuthSlot) take() bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	held := s.held
 	s.held = false
-	s.mu.Unlock()
-	if !held {
+	return held
+}
+
+// release gives the unit back once; a store error leaves it counted.
+func (s *preAuthSlot) release(ctx context.Context) {
+	if !s.take() {
 		return
 	}
 	// The client may be gone by now; the unit is given back regardless.
-	if _, err := s.store.Decrement(context.WithoutCancel(ctx), s.key); err != nil {
+	if _, err := s.limiter.store.Decrement(context.WithoutCancel(ctx), s.win.taken); err != nil {
 		slog.Warn("pre-auth rate limiter: unit not given back", "error", err)
 	}
+	s.limiter.signal()
+}
+
+// spend keeps the unit counted until the window ends: an attempt that is
+// not given back. Waiting requests of the IP are refused once the spent
+// units fill the budget. A store error leaves the unit taken but not marked
+// spent: waiting requests are then refused after preAuthMaxWait, the
+// budget still holds.
+func (s *preAuthSlot) spend(ctx context.Context) {
+	if !s.take() {
+		return
+	}
+	if _, err := s.limiter.store.Increment(context.WithoutCancel(ctx), s.win.spent, 2*time.Minute); err != nil {
+		slog.Warn("pre-auth rate limiter: attempt not marked as spent", "error", err)
+	}
+	s.limiter.signal()
 }
 
 func (s *preAuthSlot) released() bool {

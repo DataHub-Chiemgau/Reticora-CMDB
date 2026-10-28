@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-656 | 2 | 1,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-658 | 3 | 2,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **304** | **402,5** | |
+| **Summe** | | **305** | **403,5** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>2 WPs · 1,5 PT"]
+    K7N["K7-Nachträge<br/>3 WPs · 2,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -423,6 +423,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-600](#wp-600--gate-g1-nach-der-korrektur-checkliste-sicherheitsreview-und-freigabeentscheidung) | `k-gate` | Gate G1 nach der Korrektur: Checkliste, Sicherheitsreview und Freigabeentscheidung | K7 | 1,5 | – | WP-532, WP-595, WP-596, WP-597, WP-598, WP-599 |
 | [WP-655](#wp-655--sweep-fester-worker-pool-statt-goroutine-je-ziel-goroutinen-spitze-auch-unter-last-begrenzt) | `k7n-sweep-pool` | Sweep: fester Worker-Pool statt Goroutine je Ziel; Goroutinen-Spitze auch unter Last begrenzt | K7N | 0,5 | F-384 | WP-494 |
 | [WP-656](#wp-656--unterzeichner-von-zuweisungen-als-pii-surrogat-bestandsnamen-über-den-backfill-in-den-vault) | `k7n-assignment-signature-surrogate` | Unterzeichner von Zuweisungen als PII-Surrogat; Bestandsnamen über den Backfill in den Vault | K7N | 1,0 | F-385 | WP-241, WP-242 |
+| [WP-658](#wp-658--pre-auth-limit-gleichzeitige-anfragen-mit-gültigen-anmeldedaten-warten-statt-429-fehlversuche-bleiben-begrenzt) | `k7n-preauth-concurrency` | Pre-Auth-Limit: gleichzeitige Anfragen mit gültigen Anmeldedaten warten statt 429; Fehlversuche bleiben begrenzt | K7N | 1,0 | F-387 | WP-462 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -18452,6 +18453,60 @@ AUD-04;[B];B;backend/internal/assignment/pii_integration_test.go;WP-656
 **Entscheidungsbedarf:** keiner.
 
 **Nicht Bestandteil:** das Unterschriftsbild selbst (`image_base64`/`object_key`) als Personendatum im Vault und die Ablage als Dokument mit `signature_hash` in `stock_movement` (Phase-2-WP-276 `ast-signature`); Zuweisungen im Löschworkflow der Aufbewahrungsrichtlinie (`internal/privacy`); die Versiegelung verschachtelter Personenfelder in Objekten unter `checkout_signature`/`return_signature` durch `pii.SealTx` (als neuer Kandidat gemeldet; Audit und Events speichern Unterschriften derzeit nicht); weitere Befunde der Wiederholungsprüfung (eigene WPs ab WP-657).
+
+### WP-658 – Pre-Auth-Limit: gleichzeitige Anfragen mit gültigen Anmeldedaten warten statt 429; Fehlversuche bleiben begrenzt
+
+**Schlüssel:** `k7n-preauth-concurrency` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-462 (`t2-preauth-budget`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-387](../../../audit/g1-reaudit/FINDINGS.md#f-387) | P2 | Pre-Auth-Limit weist gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP mit 429 ab (Lastlauf: 19 bzw. 23 fehlgeschlagene Anfragen, alle Bulk-Anfragen) | schließt | Lastlauf `load.yml` 40713089267 (K7) auf `e5c2d86` |
+
+**Problem:** `PreAuthRateLimiter` (`backend/internal/middleware/ratelimit.go:290-351` auf `e5c2d86`) nimmt seit WP-462 für jede Anfrage an einen authentifizierten Pfad vor der Prüfung eine Einheit des IP-Budgets (20/min) und gibt sie erst nach gelungener Authentifizierung zurück (`releasePreAuthSlot`, `auth.go:121`); erfolgreiche Refreshes halten sie bis zum Ende des Handlers. Laufen mehr als 20 Prüfungen einer IP gleichzeitig, erhält jede weitere Anfrage sofort 429, auch mit gültigem Key oder Token und ohne Fehlversuch. Folge: Lauf 40713089267 auf `e5c2d86` mit 19 von 17.879 (`api`) und 23 von 13.920 (`nfr01-volume`) fehlgeschlagenen Anfragen, darunter alle 3 Bulk-Anfragen; lokal 60 gleichzeitige Anfragen mit gültigem API-Key einer IP → 29 × 429. Der Retest von F-063 prüfte nur sequentielle Refreshes. Der Schutzzweck des Limits (AUT-10: Erraten von Anmeldedaten begrenzen; F-063/WP-462: nur Fehlversuche zählen, atomare Zulassung) muss erhalten bleiben.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Zulassung bleibt atomar (Increment des Zählers `preauth:<ip>:<minute>` vor dem Handler, Entscheidung auf dem zurückgegebenen Wert): je IP und Minute werden höchstens 20 Anmeldedaten gleichzeitig geprüft und höchstens 20 Fehlversuche zugelassen, auf allen Replikaten. Ein zweiter Zähler `preauth-spent:<ip>:<minute>` zählt die verbrauchten Einheiten (Fehlversuche: 401 authentifizierter Pfade, auch nach gelungener Authentifizierung, `/auth/refresh` außerhalb 2xx; jede Anfrage an Login-Callback, Signup, Signup-Verify, Einladungsannahme, Enrollment und Operator-Callback).
+- [ ] Findet eine Anfrage alle Einheiten belegt, aber nicht alle verbraucht, wartet sie auf eine frei werdende Einheit (Weckruf auf demselben Replikat, sonst Abfrage mit wachsendem Intervall bis 50 ms) statt 429 zu erhalten, höchstens 10 s; danach oder wenn der Client weg ist 429 mit `Retry-After`. Füllen die verbrauchten Einheiten das Budget, erhält die IP sofort 429 mit `Retry-After` bis zum Ende der Minute (wie bisher, auch für gültige Anmeldedaten). Header X-RateLimit-* und Store-Fehler (fail closed) wie bisher.
+- [ ] `TestValidCredentialsNeverHit429UnderConcurrency` (`middleware/ratelimit_test.go`): 60 gleichzeitige Anfragen mit gültigem API-Key, 60 mit gültigem Bearer-Token und 30 erfolgreiche Refreshes einer IP über zwei Replikate, jede Prüfung 25 ms, Memory- und Redis-Store → 0 × 429, alle erreichen den Handler; danach hat die IP ihr volles Budget (20 ungültige Keys 401, der 21. 429). Auf `e5c2d86` rot (130 × 429).
+- [ ] `TestPreAuthBruteForceStillTripsUnderConcurrency`: 60 gleichzeitige ungültige Keys einer IP über zwei Replikate → genau 20 geprüft und 401, 40 × 429 mit `Retry-After` und `X-RateLimit-Remaining: 0`, ohne die Wartegrenze abzuwarten; danach gültiger Key derselben IP 429, einer anderen IP 200. `TestPreAuthWaitIsBounded`: eine wartende Anfrage erhält die erste frei werdende Einheit, ohne frei werdende Einheit nach der Wartegrenze 429, ein abgebrochener Client wartet nicht weiter. Unverändert grün: `TestPreAuthAdmissionIsAtomic`, `TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget`, `TestPreAuthLimitCountsFailedAuthentication`, die Kettentests in `cmd/server/main_test.go` und `internal/server`.
+- [ ] `api/openapi.yaml` (`info.description`, Pre-Auth-Limit) und `docs/README.md` (`RETICORA_PREAUTH_RATE_LIMIT_RPM`) beschreiben das Warten; `npm run generate:api` ohne Änderung. `docs/acceptance/lasttest-g1.md` nennt Ursache und lokale Messung.
+- [ ] Lastnachweis: lokal mit den Servereinstellungen aus `load.yml` und Seed 10.000 Objekte `api.js` 60 s ohne fehlgeschlagene Anfrage und ohne 429; Wiederholung von `load.yml` auf GitHub mit `http_req_failed` 0 in `api` und `nfr01-volume` und Check `bulk 200/202` 3 von 3 (CI).
+- [ ] golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neue Tests auch als Nicht-Root-Nutzer grün.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/middleware/ratelimit.go
+- backend/internal/middleware/ratelimit_test.go
+- api/openapi.yaml
+- docs/README.md
+- docs/acceptance/lasttest-g1.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -race ./internal/middleware/` mit `TEST_REDIS_URL` (Memory- und Redis-Store); `go test ./internal/cache/ ./internal/server/ ./cmd/server/ ./internal/operator/ ./internal/signup/ ./internal/identity/`.
+- Lokal: Server von WP-658 mit den Einstellungen aus `load.yml`, Seed 10.000 Objekte, 60 gleichzeitige Anfragen mit gültigem API-Key einer IP (zweimal) und `k6 run tests/load/api.js` 60 s; CI: `load.yml`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+AUT-10;[B];B;backend/internal/middleware/ratelimit_test.go;WP-658
+API-04;[B];B;backend/internal/middleware/ratelimit_test.go;WP-658
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Höhe des Pre-Auth-Budgets (`RETICORA_PREAUTH_RATE_LIMIT_RPM`, Standard 20); Weckruf über Replikate hinweg (andere Replikate fragen den Zähler ab); Lockout-Signal aus Keycloak (AUT-10 zweiter Teil); weitere Befunde der Wiederholungsprüfung.
 
 ## Zurückgestellte Befunde
 

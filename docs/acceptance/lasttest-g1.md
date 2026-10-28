@@ -14,6 +14,20 @@ kein Job in zwei Läufen rot (Abschnitt „Nachweisläufe nach den
 K3-Nachträgen“). Damit sind AK 3 von WP-439 und die Offenen Punkte 1 und 11
 erledigt.
 
+Nachtrag 2026-10-28 (WP-658, `k7n-preauth-concurrency`, F-387): Lauf
+40713089267 auf `e5c2d86` hatte im Job `api` 19 von 17.879 und im Job
+`nfr01-volume` 23 von 13.920 fehlgeschlagene Anfragen, darunter alle drei
+Bulk-Anfragen (429 des Pre-Auth-Limiters, `tests/load` und `load.yml`
+unverändert seit `3910aae`). Ursache: Seit WP-462 hielt jede Anfrage mit
+gültigem API-Key während der Schlüsselprüfung eine Einheit des
+Pre-Auth-Budgets ihrer IP (20/min); mehr als 20 gleichzeitige Prüfungen von
+k6 (eine IP) erhielten 429. Seit WP-658 wartet eine solche Anfrage auf eine
+frei werdende Einheit; 429 gibt es erst, wenn Fehlversuche das Budget
+verbraucht haben. Lokal (Server von WP-658, `load.yml`-Einstellungen, Seed
+10.000 Objekte, `api.js` 60 s): 0 von 4.542 Anfragen fehlgeschlagen, kein
+429 (vorher auf demselben Bestand 32 fehlgeschlagene Checks, 26 × 429). Der
+Wiederholungslauf von `load.yml` auf GitHub **steht aus**.
+
 **Quelle der Werte:** Die Werte der Läufe 1 bis 3 stammen aus den
 k6-Zusammenfassungen und Protokollzeilen in den Job-Logs der Läufe
 40269518264, 40270929166 und 40271818796 (Abschnitt „Läufe“). Das Archiv je

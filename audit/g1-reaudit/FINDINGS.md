@@ -32,9 +32,9 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 |---|---:|
 | P0 | 1 |
 | P1 | 3 |
-| P2 | 16 |
+| P2 | 17 |
 | P3 | 11 |
-| **Summe** | **31** |
+| **Summe** | **32** |
 
 ## Übersicht
 
@@ -71,6 +71,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-383](#f-383) | P3 | Benachrichtigungssprache je Empfänger nicht erreichbar: nichts setzt `app_user.locale` (kein API-Weg; OIDC-Login, Einladung und Signup behalten den Spaltenstandard `de`) | WP-588 (K6) | belegt | backend/internal/identity/login_locale_integration_test.go TestLoginTakesLocaleClaim; backend/internal/notify/locale_integration_test.go TestNotificationLanguageSelfService | WP-653 |
 | [F-384](#f-384) | P3 | Sweep: Goroutinen-Spitze unter CPU-Last über MaxConcurrency + 50 (`TestSweepGoroutinePeakBounded` schlägt zeitweise fehl) | Basislauf K7 | belegt | collector/plugins/sweep/sweep_test.go TestSweepGoroutinePeakBounded | WP-655 |
 | [F-385](#f-385) | P3 | Unterschriften von Zuweisungen speichern den Namen des Unterzeichners im Klartext statt als PII-Surrogat | WP-241 (K7) | belegt | backend/internal/assignment/pii_integration_test.go | WP-656 |
+| [F-387](#f-387) | P2 | Pre-Auth-Limit weist gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP mit 429 ab (Lastlauf: 19 bzw. 23 fehlgeschlagene Anfragen, alle Bulk-Anfragen) | Lastlauf K7 (40713089267) | belegt | backend/internal/middleware/ratelimit_test.go | WP-658 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -481,6 +482,31 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
       pii_integration_test.go:128: assignment.checkout_signature holds the signer name in plaintext: {"method": "typed", "signed_at": "2026-10-28T10:00:00Z", "signer_name": "Max Verifier"}
       pii_integration_test.go:131: assignment.return_signature holds the signer name in plaintext: {"method": "typed", "signed_at": "2026-10-28T11:00:00Z", "signer_name": "Rita Rueckgabe"}
   --- FAIL: TestAssignmentSignatureKeepsSurrogate (0.49s)
+  FAIL
+  ```
+
+<a id="f-387"></a>
+### F-387 (P2) – Pre-Auth-Limit weist gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP mit 429 ab (Lastlauf: 19 bzw. 23 fehlgeschlagene Anfragen, alle Bulk-Anfragen)
+
+- **Gefunden in:** Lastlauf `load.yml` 40713089267 der Wiederholungsprüfung (K7) auf dem RC-Commit `e5c2d86`, von zwei unabhängigen Prüfagenten bestätigt · **Betroffene Anforderungen:** AUT-10, API-04 · **Komponente:** backend/internal/middleware/ratelimit.go (`PreAuthRateLimiter`, Zeilen 290-351 auf `e5c2d86`; `releasePreAuthSlot`, aufgerufen in backend/internal/middleware/auth.go:121) · **Quelle:** Job-Logs der Jobs `api` und `nfr01-volume` von Lauf 40713089267, lokale Reproduktion mit dem RC-Server und den Servereinstellungen aus `load.yml`; Evidenzordner `k-audit-ext/WP-335` (`verify-ci-40713089267-load-api-nfr01-excerpt.txt`, `verify-k3-local-k6-api.log`, `verify-k3-preauth-burst.log`, `verify-k3-start-load-server.sh.txt`)
+- **Reproduktion:** (1) Lauf 40713089267 (`load.yml` auf `e5c2d86`): Job `api` 19 von 17.879 Anfragen fehlgeschlagen, alle 3 Bulk-Anfragen (je < 1 ms); Job `nfr01-volume` 23 von 13.920. Der anerkannte Lauf 40316485305 auf `3910aae` hatte 0 Fehlschläge; `tests/load` und `load.yml` sind seitdem unverändert. Die Fehlschläge beginnen mit WP-462 (`2b5437c`), der in `21831b8` und `e5c2d86` enthalten ist, nicht in `3910aae`. (2) Lokal, RC-Server mit `RETICORA_RATE_LIMIT_RPM=1000000`, `RETICORA_RATE_LIMIT_ORG_RPM=1000000`, `RETICORA_INGEST_LANES=4`, Pre-Auth-Limit Standard (20/min), Seed 10.000 Objekte: `k6 run api.js` 60 s → 31 von 6.272 Anfragen fehlgeschlagen, alle 429 vor der Authentifizierung (`organization_id` leer), darunter eine Bulk-Anfrage. (3) 60 gleichzeitige `GET /api/v1/cis?limit=1` mit dem GÜLTIGEN API-Key des Seeds von einer IP → 29 × 429 direkt nach dem Start, 14 × 429 in einer zweiten Welle; Antwort `too many authentication attempts, try again later`, `X-RateLimit-Limit: 20`, `X-RateLimit-Remaining: 0`. Kein einziger Fehlversuch ging voraus. (4) Unittest `TestValidCredentialsNeverHit429UnderConcurrency` (siehe unten): 150 gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP → 130 × 429.
+- **Soll:** AUT-10: Das Pre-Auth-Limit begrenzt Authentifizierungsversuche je IP (Login, Signup, Einladungsannahme, API-Key-Prüfung; 20/min) gegen Erraten von Anmeldedaten; nach F-063/WP-462 zählen nur fehlgeschlagene Versuche. Gleichzeitige Anfragen mit gültigen Anmeldedaten (eine Integration mit parallelen Workern, viele Benutzer hinter einer NAT- oder Proxy-Adresse) erhalten von ihm nie 429. API-04: Die Budgets je API-Key/Session (600/min) und je Organisation entscheiden über authentifizierte Last.
+- **Ist:** `PreAuthRateLimiter` nimmt für jede Anfrage an einen authentifizierten Pfad vor der Prüfung eine Einheit des IP-Budgets (atomares `Increment`) und gibt sie erst zurück, wenn die Authentifizierung gelungen ist (`releasePreAuthSlot`). Solange mehr als 20 Prüfungen einer IP gleichzeitig laufen, erhält jede weitere Anfrage sofort 429, auch mit gültigem Key oder Token und ohne einen einzigen Fehlversuch. Dasselbe gilt für gleichzeitige erfolgreiche Refreshes (Einheit bis zum Ende des Handlers gehalten) und für den Operator-Pfad.
+- **Nutzerwirkung:** API-Clients mit paralleler Last (Integrationen, Skripte, k6) und viele Benutzer hinter einer gemeinsamen NAT- oder Proxy-Adresse erhalten sporadisch 429 „too many authentication attempts“ trotz gültiger Anmeldedaten; Bulk-Aufträge scheitern, die SPA kann bei 429 auf Refresh-Anfragen abmelden. Der Lastnachweis (NFR-02, NFR-10) ist auf `e5c2d86` nicht mehr fehlerfrei.
+- **Ursache (belegt):** WP-462 hat die Zulassung atomar gemacht (Increment vor dem Handler, Entscheidung auf dem zurückgegebenen Wert) und gibt die Einheit bei Erfolg zurück. Der Zähler misst damit gleichzeitig laufende Prüfungen plus Fehlversuche; das Limit von 20 wirkt auch als Obergrenze für parallele Prüfungen gültiger Anmeldedaten. Der Retest von F-063 deckte nur sequentielle Refreshes ab, der Paralleltest von WP-462 nur Wellen von 10 Anfragen mit sofortiger Schlüsselprüfung.
+- **Empfehlung:** Die Zulassung bleibt atomar (höchstens 20 gleichzeitig geprüfte Anmeldedaten und höchstens 20 Fehlversuche je IP und Minute), aber eine Anfrage, die alle Einheiten nur von laufenden Prüfungen belegt findet, wartet (begrenzt) auf eine frei werdende Einheit statt 429 zu erhalten. Ein zweiter Zähler je IP und Minute zählt die verbrauchten Einheiten (Fehlversuche und die Pre-Auth-Pfade, die jede Anfrage zählen); füllen sie das Budget, erhält die IP sofort 429.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^(TestValidCredentialsNeverHit429UnderConcurrency|TestPreAuthBruteForceStillTripsUnderConcurrency|TestPreAuthWaitIsBounded|TestPreAuthAdmissionIsAtomic)$' ./internal/middleware/` mit `TEST_REDIS_URL` (Memory- und Redis-Store) PASS; Wiederholung von `load.yml` auf GitHub: `http_req_failed` 0 in den Jobs `api` und `nfr01-volume`, Check `bulk 200/202` 3 von 3.
+- **Kodierender Test:** backend/internal/middleware/ratelimit_test.go (`TestValidCredentialsNeverHit429UnderConcurrency`; Regressionsschutz der Brute-Force-Sperre: `TestPreAuthBruteForceStillTripsUnderConcurrency`); auf `e5c2d86` rot (Produktionscode von `internal/middleware` und `internal/cache` identisch mit `f3cad0d`):
+
+  ```text
+  === RUN   TestValidCredentialsNeverHit429UnderConcurrency/memory_store
+      ratelimit_test.go:812: 150 concurrent requests with valid credentials from one IP: map[200:20 429:130], want map[200:150] (no failed attempt, so no 429); a refused one: X-RateLimit-Limit 20, {"detail":"too many authentication attempts, try again later","instance":"/api/v1/cis","status":429,"title":"Rate Limited",...}
+      ratelimit_test.go:815: 20 of 150 requests with valid credentials reached the handler
+  === RUN   TestValidCredentialsNeverHit429UnderConcurrency/redis_store
+      ratelimit_test.go:812: 150 concurrent requests with valid credentials from one IP: map[200:20 429:130], want map[200:150] (no failed attempt, so no 429); a refused one: X-RateLimit-Limit 20, {"detail":"too many authentication attempts, try again later","instance":"/api/v1/auth/refresh","status":429,"title":"Rate Limited",...}
+      ratelimit_test.go:815: 20 of 150 requests with valid credentials reached the handler
+  --- FAIL: TestValidCredentialsNeverHit429UnderConcurrency (1.34s)
+  --- PASS: TestPreAuthBruteForceStillTripsUnderConcurrency (0.26s)
   FAIL
   ```
 

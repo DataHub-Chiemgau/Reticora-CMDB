@@ -17,7 +17,14 @@ info:
     callback, signup, signup verification, invitation acceptance,
     collector enrollment and operator callback count every request; the
     session refresh counts only answers outside 2xx; authenticated
-    endpoints count only failed authentications (401). Answers refused
+    endpoints count only failed authentications (401). Concurrency is no
+    attempt: a credential check in flight holds a unit of the budget only
+    until it succeeds, and a request that finds every unit held by such
+    checks waits for one (at most 10 s) instead of getting 429, so
+    concurrent requests with valid credentials from one IP (users behind
+    one NAT or proxy address, parallel API clients) are served. Once failed
+    attempts have spent the budget, the IP gets 429 at once until the
+    minute is over. Answers refused
     before the rate limit above (401, pre-auth 429) carry the
     `X-RateLimit-*` headers of the pre-auth budget, a pre-auth 429 also
     `Retry-After`.
