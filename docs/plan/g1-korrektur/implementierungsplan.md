@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-658 | 3 | 2,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-657 | 4 | 3,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **305** | **403,5** | |
+| **Summe** | | **306** | **404,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>3 WPs · 2,5 PT"]
+    K7N["K7-Nachträge<br/>4 WPs · 3,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -424,6 +424,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-655](#wp-655--sweep-fester-worker-pool-statt-goroutine-je-ziel-goroutinen-spitze-auch-unter-last-begrenzt) | `k7n-sweep-pool` | Sweep: fester Worker-Pool statt Goroutine je Ziel; Goroutinen-Spitze auch unter Last begrenzt | K7N | 0,5 | F-384 | WP-494 |
 | [WP-656](#wp-656--unterzeichner-von-zuweisungen-als-pii-surrogat-bestandsnamen-über-den-backfill-in-den-vault) | `k7n-assignment-signature-surrogate` | Unterzeichner von Zuweisungen als PII-Surrogat; Bestandsnamen über den Backfill in den Vault | K7N | 1,0 | F-385 | WP-241, WP-242 |
 | [WP-658](#wp-658--pre-auth-limit-gleichzeitige-anfragen-mit-gültigen-anmeldedaten-warten-statt-429-fehlversuche-bleiben-begrenzt) | `k7n-preauth-concurrency` | Pre-Auth-Limit: gleichzeitige Anfragen mit gültigen Anmeldedaten warten statt 429; Fehlversuche bleiben begrenzt | K7N | 1,0 | F-387 | WP-462 |
+| [WP-657](#wp-657--ingest-rahmen-und-ledger-eines-batches-wp-332-ak-3-mit-dem-gebauten-entwurf-abgleichen) | `k7n-ingest-frame-ledger-tx` | Ingest: Rahmen und Ledger eines Batches (WP-332 AK 3) mit dem gebauten Entwurf abgleichen | K7N | 0,5 | F-386 | WP-332, WP-333, WP-334, WP-481 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -18507,6 +18508,50 @@ API-04;[B];B;backend/internal/middleware/ratelimit_test.go;WP-658
 **Entscheidungsbedarf:** keiner.
 
 **Nicht Bestandteil:** Höhe des Pre-Auth-Budgets (`RETICORA_PREAUTH_RATE_LIMIT_RPM`, Standard 20); Weckruf über Replikate hinweg (andere Replikate fragen den Zähler ab); Lockout-Signal aus Keycloak (AUT-10 zweiter Teil); weitere Befunde der Wiederholungsprüfung.
+
+### WP-657 – Ingest: Rahmen und Ledger eines Batches (WP-332 AK 3) mit dem gebauten Entwurf abgleichen
+
+**Schlüssel:** `k7n-ingest-frame-ledger-tx` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** G1 · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-332 (`nfr03-tx`), WP-333 (`nfr03-batch`), WP-334 (`nfr03-lanes`), WP-481 (`t3-ingest-poison`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-386](../../../audit/g1-reaudit/FINDINGS.md#f-386) | P3 | Ingest: Rahmen und Ledger eines Batches laufen in zwei Transaktionen statt in einer (WP-332 AK 3) | schließt (nach Entscheidung) | Erweiterte Prüfung von WP-332 (K7) auf `e5c2d86` |
+
+**Problem:** WP-332 AK 3 verlangt: „Rahmen und Ledger eines Batches laufen in einer Transaktion“. Gebaut und gemessen sind zwei Transaktionen: Der Rahmen (Ledger lesen, Typ-Lookup, VRF, Reviews unbekannter Typen) läuft vor den Records, der Ledger (`MarkRecordsProcessed`, ein `unnest`-INSERT) nach den Records und der Topologie. `TestIngestStatementBudget` meldet „frame 8 statements in 2 transactions“ und verlangt selbst zwei Transaktionen; `docs/acceptance/lasttest-g1.md` nennt denselben Wert. Die Trennung folgt aus der Ledger-Semantik: Der Ledger darf nur Records nennen, deren Transaktion committet hat, und der Rahmen muss den Ledger vor den Records lesen. Eine gemeinsame Transaktion müsste deshalb über den ganzen Batch auf einer zweiten Pool-Verbindung offen bleiben. Im Prototyp hängt damit ein Ingest über einen Pool mit einer Verbindung, und zwei Organisationen über einen Pool mit zwei Verbindungen hängen bis zum Timeout (5 von 5 Runden). Im Betrieb ohne NATS blockieren 25 gleichzeitig ingestierende Organisationen den Pool. Mit Queue verdoppelt sich der Verbindungsbedarf des Ingest gegenüber `processingSlots` (WP-334). Savepoints (alle Records in der Batch-Transaktion) widersprächen WP-332 AK 2 und AK 4 und der deadlockfreien Sperrreihenfolge von WP-334. Funktional wirkt die Abweichung nicht; die Budgets halten, und ein verlorener Ledger-Schreibvorgang führt zu idempotenter Neuanwendung.
+
+**Akzeptanzkriterien:**
+
+- [ ] Kundenentscheidung [E-101](entscheidungen.md#e-101) zur Formulierung von WP-332 AK 3 liegt vor. Empfehlung: Der Plantext folgt dem gebauten Entwurf: „Der Rahmen eines Batches läuft in einer kurzen Transaktion vor den Records, der Ledger nach den Records in einer zweiten mit einem `unnest`-INSERT; zusammen höchstens 8 Statements in 2 Transaktionen je Batch, unabhängig von der Batchgröße.“
+- [ ] Mit der Empfehlung: docs/plan/implementierungsplan.md (WP-332 AK 3) mit Verweis auf die Entscheidung angepasst; `TestIngestStatementBudget` bleibt unverändert grün („frame 8 statements in 2 transactions“), `docs/acceptance/lasttest-g1.md` bleibt beim gemessenen Wert und verweist auf die Entscheidung.
+- [ ] Nur falls stattdessen die Zusammenlegung entschieden wird: Rahmen und Ledger in einer Transaktion, ohne dass ein Batch zwei Pool-Verbindungen gleichzeitig belegt. Ein Ingest über einen Pool mit einer Verbindung läuft durch (kodierender Test, auf `e5c2d86` mit einer Rahmentransaktion über den Batch rot). `TestIngestStatementBudget` verlangt `len(frame) == 1`. Kein Record steht im Ledger, dessen Transaktion nicht committet hat; eine Neuzustellung nach verlorenem Ledger wendet idempotent an. `TestPoisonRecordDoesNotTakeValidRecordsDown`, `TestDiscoveryConcurrency`, `TestIngestBatchMatchesRecordPath` und `TestRediscoverStatementBudget` bleiben grün; `docs/acceptance/lasttest-g1.md` nennt den neuen Wert.
+
+**Dateien (5 Einträge):**
+
+- docs/plan/implementierungsplan.md (WP-332 AK 3, nach Entscheidung)
+- docs/plan/g1-korrektur/entscheidungen.md (neue Entscheidung)
+- docs/acceptance/lasttest-g1.md (Verweis auf die Entscheidung)
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/abdeckung-befunde.csv, docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Mit der Empfehlung keine Codeänderung; Tenant-Transaktionen, RLS und Ledger bleiben unverändert.
+
+**Tests:**
+
+- `cd backend && go test -p 1 -count=1 -v -run '^(TestIngestStatementBudget|TestIngestBatchMatchesRecordPath|TestRediscoverStatementBudget|TestPoisonRecordDoesNotTakeValidRecordsDown|TestDiscoveryConcurrency|TestIngestKeepsPrefixOfFailedBatch)$' ./internal/discovery/` gegen PostgreSQL (`TEST_DATABASE_URL`).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/ingest_budget_integration_test.go;WP-657
+```
+
+**Entscheidungsbedarf:** [E-101](entscheidungen.md#e-101) „WP-332 AK 3: Rahmen und Ledger eines Batches in einer oder in zwei Transaktionen“. Option 1 (empfohlen): Plantext an den Entwurf angleichen, zwei Transaktionen je Batch, keine Codeänderung. Option 2: Zusammenlegung mit eigener Verbindungsbegrenzung, sodass ein Batch nur eine Verbindung belegt; Aufwand rund 2 PT, Gewinn 2 Statements je Batch. Option 3: Savepoints statt Record-Transaktionen; widerspricht WP-332 AK 2 und AK 4 sowie WP-334 und wird nicht empfohlen.
+
+**Nicht Bestandteil:** Änderungen an Ledger-Semantik, Dedupe-Fenster (REC-01), Spuren und Sperren (WP-334) oder Poison-Record-Isolierung (WP-481); weitere Befunde der Wiederholungsprüfung.
 
 ## Zurückgestellte Befunde
 

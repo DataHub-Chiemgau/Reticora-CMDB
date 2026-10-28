@@ -1037,3 +1037,4 @@ TEN-06;[B];B;backend/internal/document/document_scope_integration_test.go;WP-560
 AGT-06;[P4];B;frontend/src/api/client.test.ts;WP-560
 AUT-10;[B];B;backend/internal/middleware/ratelimit_test.go;WP-658
 API-04;[B];B;backend/internal/middleware/ratelimit_test.go;WP-658
+NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/ingest_budget_integration_test.go;WP-657

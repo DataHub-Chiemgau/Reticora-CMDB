@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 3 |
 | P2 | 17 |
-| P3 | 11 |
-| **Summe** | **32** |
+| P3 | 12 |
+| **Summe** | **33** |
 
 ## Übersicht
 
@@ -72,6 +72,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-384](#f-384) | P3 | Sweep: Goroutinen-Spitze unter CPU-Last über MaxConcurrency + 50 (`TestSweepGoroutinePeakBounded` schlägt zeitweise fehl) | Basislauf K7 | belegt | collector/plugins/sweep/sweep_test.go TestSweepGoroutinePeakBounded | WP-655 |
 | [F-385](#f-385) | P3 | Unterschriften von Zuweisungen speichern den Namen des Unterzeichners im Klartext statt als PII-Surrogat | WP-241 (K7) | belegt | backend/internal/assignment/pii_integration_test.go | WP-656 |
 | [F-387](#f-387) | P2 | Pre-Auth-Limit weist gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP mit 429 ab (Lastlauf: 19 bzw. 23 fehlgeschlagene Anfragen, alle Bulk-Anfragen) | Lastlauf K7 (40713089267) | belegt | backend/internal/middleware/ratelimit_test.go | WP-658 |
+| [F-386](#f-386) | P3 | Ingest: Rahmen und Ledger eines Batches laufen in zwei Transaktionen statt in einer (WP-332 AK 3) | WP-332 (K7) | belegt | keiner eingecheckt | WP-657 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -508,6 +509,41 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
   --- FAIL: TestValidCredentialsNeverHit429UnderConcurrency (1.34s)
   --- PASS: TestPreAuthBruteForceStillTripsUnderConcurrency (0.26s)
   FAIL
+  ```
+
+<a id="f-386"></a>
+### F-386 (P3) – Ingest: Rahmen und Ledger eines Batches laufen in zwei Transaktionen statt in einer (WP-332 AK 3)
+
+- **Gefunden in:** Erweiterte Prüfung von WP-332 (`nfr03-tx`) in der Wiederholungsprüfung (K7) auf dem RC-Commit `e5c2d86`, von einem zweiten Prüfagenten unabhängig bestätigt · **Betroffene Anforderungen:** NFR-03 · **Komponente:** backend/internal/discovery/discovery.go (`processItems`, `openFrame`), backend/internal/discovery/consumer.go (`skipProcessed`, `markProcessed`), backend/internal/discovery/pg_repository.go (`MarkRecordsProcessed`); Plantext docs/plan/implementierungsplan.md (WP-332 AK 3) · **Quelle:** Codeprüfung und ausgeführter Budgettest; Protokolle im Evidenzordner `k-audit-ext/WP-332` (`go-discovery-ingest-budget-concurrency.log`, `verify-go-discovery-budget-concurrency.log`), Analyse und Experiment von WP-657 unter `scratchpad/k7/wp657/`
+- **Reproduktion:** `cd backend && go test -p 1 -count=1 -v -run '^TestIngestStatementBudget$' ./internal/discovery/` gegen PostgreSQL → `batch of 20 new records: 12 statements per record transaction (largest 12), frame 8 statements in 2 transactions`; der Test verlangt selbst `len(b.frame) == 2` (ingest_budget_integration_test.go, Teiltest `record transaction`). `docs/acceptance/lasttest-g1.md` (Tabelle „Ingest (WP-332 bis WP-334)“) nennt denselben Messwert („Rahmen 8 Statements in 2 Transaktionen je Batch“).
+- **Soll:** WP-332 AK 3: „Rahmen und Ledger eines Batches laufen in einer Transaktion; der Ledger schreibt mit einem `unnest`-INSERT.“ Keine Entscheidung hat das Kriterium geändert.
+- **Ist:** Der Rahmen (Ledger lesen, ein Typ-Lookup, Default-VRF, Reviews unbekannter Typen) läuft in einer kurzen Transaktion vor den Records und committet, bevor die erste Record-Transaktion beginnt. Der Ledger wird nach den Record-Transaktionen und der Topologie in einer eigenen Transaktion geschrieben (`MarkRecordsProcessed`, ein `unnest`-INSERT unter `WithRequestTenant`). Gemessen: Rahmen 8 Statements in 2 Transaktionen je Batch (5 Statements Rahmen, 3 Statements Ledger); der zweite Teil des Kriteriums (ein `unnest`-INSERT) ist erfüllt.
+- **Nutzerwirkung:** keine. Die Budgets von WP-332 bis WP-334 halten (12 bzw. 15 Statements je Record-Transaktion, 10 bzw. 13 je Batch-Transaktion, NFR-03 im Lastlauf erfüllt). Die zusätzliche Transaktion kostet 2 Statements je Batch (bei 20 Records 0,10 Statements je Record). Die Ledger-Semantik ist korrekt: Der Ledger nennt nur Records, deren Transaktion committet hat; fällt der Ledger-Schreibvorgang aus (Absturz, Fehler), wendet die Neuzustellung die Records idempotent erneut an (gemessen: kein neues CI, kein neuer `ci_change`, danach `duplicates` 3).
+- **Ursache (belegt):** Der Plantext ist mit dem Entwurf von WP-332 nicht vereinbar. Der Rahmen muss vor den Records laufen (er liest den Ledger), der Ledger-Eintrag darf erst nach dem Commit der Records geschrieben werden (sonst markiert er Records als verarbeitet, die nie committet haben, und die Neuzustellung überspringt sie: Datenverlust, REC-01). Eine Transaktion für beides müsste deshalb während aller Record-Transaktionen auf einer zweiten Verbindung offen bleiben. Commit `d2daeed` (WP-332) hat den Rahmen bewusst als kurze Transaktion gebaut („damit keine Transaktion … auf eine zweite Transaktion derselben Organisation wartet“). WP-334 begrenzt den Ingest auf ein Viertel des Pools, unter der Annahme einer Verbindung je Batch (`processingSlots`, `database.PoolMaxConns/4`). Die Alternative mit Savepoints (alle Records in der Batch-Transaktion) widerspräche WP-332 AK 2 und AK 4 (eine Transaktion je Record). Sie hielte außerdem die Identitätssperren aller Records bis zum Batch-Ende und höbe die aufsteigende, deadlockfreie Sperrreihenfolge von WP-334 auf.
+- **Empfehlung:** Keine Codeänderung; den Plantext von WP-332 AK 3 per Kundenentscheidung an den gebauten und gemessenen Entwurf angleichen: „Der Rahmen eines Batches läuft in einer kurzen Transaktion vor den Records, der Ledger nach den Records in einer zweiten mit einem `unnest`-INSERT (höchstens 8 Statements in 2 Transaktionen je Batch).“ Der Prototyp „Rahmentransaktion über den ganzen Batch“ (Ledger am Ende der Rahmentransaktion) wurde gemessen und verworfen: Er erreicht 1 Transaktion mit 6 Statements, belegt aber zwei Pool-Verbindungen je Batch. Ein Ingest über einen Pool mit einer Verbindung hängt, ebenso zwei Organisationen über einen Pool mit zwei Verbindungen, je bis zum Kontext-Timeout (10 s, HTTP 500, 5 von 5 Runden). Mit dem RC-Code laufen beide Fälle in 20–160 ms durch. Im Betrieb ohne NATS (Ingest in der Anfrage) blockieren damit 25 gleichzeitig ingestierende Organisationen den Pool der Instanz (`PoolMaxConns` = 25) vollständig; über die Queue verdoppelt sich der Verbindungsbedarf des Ingest auf die Hälfte des Pools. Die bestehenden Suiten (`TestDiscoveryConcurrency`, `TestPoisonRecordDoesNotTakeValidRecordsDown`, `TestIngestBatchMatchesRecordPath`, `TestRediscoverStatementBudget`, `TestIngestKeepsPrefixOfFailedBatch`) bleiben mit dem Prototyp grün und erkennen die Gefahr nicht.
+- **Retest (verbindlich):** nach der Entscheidung. Bei Angleichung des Plantexts: `cd backend && go test -p 1 -count=1 -v -run '^TestIngestStatementBudget$' ./internal/discovery/` grün, Log `frame 8 statements in 2 transactions`; Plantext von WP-332 AK 3 und `docs/acceptance/lasttest-g1.md` stimmen damit überein. Wird stattdessen eine Zusammenlegung entschieden, muss sie zusätzlich ohne zweite gleichzeitige Pool-Verbindung je Batch auskommen (Ingest über einen Pool mit einer Verbindung läuft durch). Außerdem bleiben `TestPoisonRecordDoesNotTakeValidRecordsDown`, `TestDiscoveryConcurrency`, `TestIngestBatchMatchesRecordPath` und `TestRediscoverStatementBudget` grün.
+- **Kodierender Test:** keiner eingecheckt (keine Codeänderung, Entscheidung offen). Die Abweichung zeigt `TestIngestStatementBudget` auf `e5c2d86` (Basis `bb4b6ae`, Produktionscode des Ingest identisch):
+
+  ```text
+  === RUN   TestIngestStatementBudget/record_transaction
+      ingest_budget_integration_test.go:367: batch of 20 new records: 12 statements per record transaction (largest 12), frame 8 statements in 2 transactions; amortized 12.40 statements and 1.10 transactions per record
+  ```
+
+  Experiment zur Machbarkeit (`scratchpad/k7/wp657/wp657_experiment_integration_test.go`, nicht eingecheckt). Mit dem Prototyp `spanning-frame-prototype.diff` (Rahmentransaktion über den Batch):
+
+  ```text
+  ingest_budget_integration_test.go:367: batch of 20 new records: 12 statements per record transaction (largest 12), frame 6 statements in 1 transactions; amortized 12.30 statements and 1.05 transactions per record
+  wp657_experiment_integration_test.go:70: pool 1, one batch of 3 records: 500 after 10.007s
+  wp657_experiment_integration_test.go:90: round 0: [500 500] after [10.009431354s 10.009545477s]
+  wp657_experiment_integration_test.go:96: 5 of 5 rounds of two concurrent ingests on a pool of two did not finish
+  ```
+
+  Mit dem RC-Code:
+
+  ```text
+  wp657_experiment_integration_test.go:70: pool 1, one batch of 3 records: 202 after 107ms
+  wp657_experiment_integration_test.go:90: round 0: [202 202] after [121.596173ms 159.289917ms]
+  --- PASS: TestWP657PoolExperiment (0.87s)
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund
