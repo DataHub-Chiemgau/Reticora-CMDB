@@ -98,6 +98,9 @@ type DigestItem struct {
 	Data           map[string]any `json:"data,omitempty"`
 	DedupKey       string         `json:"dedup_key,omitempty"`
 	CreatedAt      time.Time      `json:"created_at"`
+	// Branding is the organization's when the item is bundled; with
+	// Recipient.Locale it sets language and branding of the digest.
+	Branding *Branding `json:"-"`
 }
 
 // DigestStore keeps the digest items.
@@ -152,8 +155,8 @@ func (n *Notifier) bundled(ctx context.Context, orgID string, req *Request, kind
 }
 
 // buildDigest renders the delivery of one group of digest items: a list of
-// the subjects (German, then English), the entries with their texts and
-// data in the delivery's data.
+// the subjects in the recipient's language, branded (NTF-03), the entries
+// with their texts and data in the delivery's data.
 func (n *Notifier) buildDigest(items []DigestItem) QueuedDelivery {
 	first := items[0]
 	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.Before(items[j].CreatedAt) })
@@ -165,15 +168,11 @@ func (n *Notifier) buildDigest(items []DigestItem) QueuedDelivery {
 		entries[i] = map[string]any{"subject": it.Subject, "body": it.Body, "data": it.Data,
 			"created_at": it.CreatedAt.UTC().Format(time.RFC3339)}
 	}
-	list := strings.Join(lines, "\n")
-	period := map[string][2]string{DigestHourly: {"der letzten Stunde", "of the last hour"},
-		DigestDaily: {"des letzten Tages", "of the last day"}}[first.Window]
+	locale := TemplateLocale(first.Recipient.Locale, first.Branding.locale())
+	text := first.Branding.Mail(locale, digestText(locale, first.Category, first.Window, len(items), strings.Join(lines, "\n")))
 	end := first.WindowEnd.UTC().Format(time.RFC3339)
 	return QueuedDelivery{OrganizationID: first.OrganizationID, ChannelID: first.ChannelID, Recipient: first.Recipient,
-		RecipientKey: first.RecipientKey, Category: first.Category,
-		Subject: fmt.Sprintf("Zusammenfassung %s: %d Benachrichtigungen", first.Category, len(items)),
-		Body: text(fmt.Sprintf("%d Benachrichtigungen (%s) %s:\n%s", len(items), first.Category, period[0], list),
-			fmt.Sprintf("%d notifications (%s) %s:\n%s", len(items), first.Category, period[1], list)),
+		RecipientKey: first.RecipientKey, Category: first.Category, Subject: text.Subject, Body: text.Body,
 		Data: map[string]any{"digest": true, "category": first.Category, "window": first.Window, "window_end": end,
 			"count": len(items), "entries": entries},
 		DedupKey: "digest:" + first.Category + ":" + first.Window + ":" + end, Status: StatusPending,

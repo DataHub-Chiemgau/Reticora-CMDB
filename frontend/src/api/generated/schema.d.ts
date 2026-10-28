@@ -3529,13 +3529,13 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * The signed-in user's quiet hours, muted categories and digest
-     * @description Without stored preferences the defaults (Europe/Berlin, nothing muted, digest `{"review":"hourly"}`).
+     * The signed-in user's quiet hours, category subscriptions and digest
+     * @description Without stored preferences the defaults (Europe/Berlin, nothing muted, every category subscribed, digest `{"review":"hourly"}`). `subscriptions` lists every notification category as subscribed or muted (NTF-03, E-91 option 2). Notifications are written in the user's language (app_user.locale, else the organization's locale, else de-DE; de-DE and en-US).
      */
     get: operations['getNotificationPreferences'];
     /**
-     * Set quiet hours, muted categories and digest
-     * @description Critical notifications ignore quiet hours and muted categories and are never bundled (NTF-04). A digest naming an unknown or critical category or a window other than hourly or daily is refused with 400.
+     * Set quiet hours, category subscriptions and digest
+     * @description Critical notifications ignore quiet hours and muted categories and are never bundled (NTF-04). A digest naming an unknown or critical category or a window other than hourly or daily is refused with 400. A category named in `subscriptions` is muted or subscribed as stated there, whatever `muted_categories` says (NTF-03, E-91 option 2); an unknown category or a state other than subscribed or muted is refused with 400.
      */
     put: operations['setNotificationPreferences'];
     post?: never;
@@ -6888,7 +6888,18 @@ export interface components {
       quiet_end?: string;
       /** @example Europe/Berlin */
       time_zone: string;
+      /** @description Categories the user unsubscribed; critical notifications reach the user anyway. */
       muted_categories: string[];
+      /**
+       * @description Category subscriptions (NTF-03, E-91 option 2): every notification category → subscribed or muted, the view of `muted_categories`. Every category is subscribed by default; a muted one reaches the user only with a critical notification (collector, invitation, certificate, apikey and expired licences are critical). In a PUT the named categories win over `muted_categories`; the response lists every category.
+       * @example {
+       *       "review": "muted",
+       *       "export": "subscribed"
+       *     }
+       */
+      subscriptions?: {
+        [key: string]: 'subscribed' | 'muted';
+      };
       /**
        * @description Categories whose e-mails are bundled into one digest per window (NTF-04): category → hourly (ends at the full hour) or daily (ends at midnight in time_zone). Allowed are the categories with a non-critical event (entitlement, export, job, review, webhook); critical notifications, the in-app center and webhooks are never bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every e-mail on its own.
        * @example {
@@ -10353,6 +10364,14 @@ export interface components {
       name: string;
       slug: string;
       plan: string;
+      /**
+       * @description Free settings of the organization. `branding.sender_name` is the sender name and subject prefix of its notification e-mails (NTF-03); without it the organization's name. An e-mail channel's own sender name, and the display name of an own SMTP server's sender address, take precedence.
+       * @example {
+       *       "branding": {
+       *         "sender_name": "ACME Service Desk"
+       *       }
+       *     }
+       */
       settings: {
         [key: string]: unknown;
       };
@@ -10367,7 +10386,7 @@ export interface components {
        */
       currency: string;
       /**
-       * @description BCP 47 language tag.
+       * @description BCP 47 language tag. Notifications to users who kept the account default locale and to addresses without an account are written in it (de-DE or en-US; another language gets de-DE, NTF-03).
        * @example de-DE
        */
       locale: string;
@@ -10380,6 +10399,7 @@ export interface components {
     };
     UpdateOrganizationRequest: {
       name?: string;
+      /** @description Free settings; `branding.sender_name` brands the notification e-mails (see Organization.settings). */
       settings?: {
         [key: string]: unknown;
       };

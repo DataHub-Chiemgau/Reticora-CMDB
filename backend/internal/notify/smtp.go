@@ -364,7 +364,11 @@ func (p *EmailProvider) Send(ctx context.Context, ch *Channel, msg *Message) (*D
 			return nil, fmt.Errorf("no central SMTP server is configured")
 		}
 		sender = p.central
+		// The channel's sender name, else the organization's (NTF-03).
 		m.FromName, _ = ch.Config["sender_name"].(string)
+		if m.FromName == "" {
+			m.FromName = msg.SenderName
+		}
 		m.ReplyTo, _ = ch.Config["reply_to"].(string)
 	case ProviderSMTP:
 		cfg, err := SMTPConfigFrom(ch.Config)
@@ -381,6 +385,11 @@ func (p *EmailProvider) Send(ctx context.Context, ch *Channel, msg *Message) (*D
 		}
 		sender.TLSConfig = p.TLSConfig
 		sender.connect = p.dialer.DialContext
+		// A sender address without a display name gets the
+		// organization's sender name (NTF-03).
+		if from, _ := parseAddress(cfg.From); from != nil && from.Name == "" {
+			m.FromName = msg.SenderName
+		}
 	default:
 		return nil, fmt.Errorf("provider %s is no e-mail provider", ch.Provider)
 	}

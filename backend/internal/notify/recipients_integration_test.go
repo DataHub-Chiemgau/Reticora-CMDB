@@ -2,11 +2,14 @@ package notify_test
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
@@ -233,5 +236,158 @@ func TestRecipientsRespectSiteScope(t *testing.T) {
 				t.Errorf("%s (all users: %v): %q, want %q", name, a.AllWithPermission, got, tc.want)
 			}
 		}
+	}
+}
+
+// TestNotificationLocaleAndSubscription covers NTF-03 (WP-588, F-322)
+// against PostgreSQL: each recipient reads an event in their language —
+// app_user.locale (en-US English, de-DE German), else the organization's
+// locale (the account default and an invitee without an account) — with
+// the organization's branding in e-mails: settings.branding.sender_name as
+// sender and subject prefix, the organization's name in the footer; the
+// in-app center gets the plain text. A user who unsubscribed a
+// non-critical category (E-91 option 2) receives nothing of it, neither
+// e-mail nor in-app (negative); a critical notification of an
+// unsubscribed category still reaches them.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestNotificationLocaleAndSubscription(t *testing.T) {
+	f := scopetest.Seed(t, "9a")
+	bg := context.Background()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	exec(`UPDATE organization SET name = 'ACME GmbH', locale = 'en-US',
+		settings = settings || '{"branding": {"sender_name": "ACME Service Desk"}}'::jsonb WHERE id = $1`, f.OrgA)
+	role := f.ID()
+	exec(`INSERT INTO role (id, organization_id, name, scope, permissions)
+		VALUES ($1, $2, 'ntf3-ops', 'org', '["review:resolve", "discovery:manage"]'::jsonb)`, role, f.OrgA)
+	users := map[string]string{}
+	for name, locale := range map[string]string{"en": "en-US", "de": "de-DE", "default": "", "muted": "de-DE"} {
+		users[name] = f.AppUser(t, f.OrgA, name)
+		if locale != "" {
+			exec(`UPDATE app_user SET locale = $2 WHERE id = $1`, users[name], locale)
+		}
+		exec(`INSERT INTO role_assignment (organization_id, user_id, role_id) VALUES ($1, $2, $3)`, f.OrgA, users[name], role)
+	}
+	mailOf := func(name string) string { return "scopetest-9a-" + name + "@scopetest.invalid" }
+
+	key, _ := crypto.GenerateMasterKey()
+	enc, _ := crypto.NewEnvelopeEncryptor(key)
+	center := &notify.Center{Channels: notify.NewPGRepository(f.App, notify.NewSealer(enc)), Inbox: notify.NewPGInbox(f.App),
+		Preferences: notify.NewPGPreferences(f.App), Deliveries: notify.NewPGDeliveryStore(f.App)}
+	for _, ch := range []*notify.Channel{
+		{OrganizationID: f.OrgA, Name: "mail", Provider: notify.ProviderCentralSMTP, Enabled: true},
+		{OrganizationID: f.OrgA, Name: "center", Provider: notify.ProviderInApp, Enabled: true},
+	} {
+		if err := center.Channels.Create(bg, ch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The muted user unsubscribes reviews and collectors.
+	if err := center.Preferences.SetPreference(bg, f.OrgA, users["muted"], &notify.Preference{
+		Subscriptions: map[string]string{"review": notify.SubscriptionMuted, "collector": notify.SubscriptionMuted}}); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := center.Preferences.Preference(bg, f.OrgA, users["muted"]); err != nil || p == nil ||
+		strings.Join(p.MutedCategories, ",") != "collector,review" {
+		t.Fatalf("stored subscriptions: %+v %v", p, err)
+	}
+
+	// A clock in the past: the run never claims deliveries of other tests.
+	now := time.Date(2020, 1, 7, 10, 0, 0, 0, time.UTC)
+	mail := &recordingProvider{}
+	notifier := notify.NewNotifier(center.Channels, center.Deliveries, center.Preferences, notify.NewSender(map[string]notify.Provider{
+		notify.ProviderCentralSMTP: mail, notify.ProviderInApp: notify.NewInAppProvider(center.Inbox),
+	})).WithClock(func() time.Time { return now })
+	consumer := notify.NewEventConsumer(notify.NewPGResolver(f.App, permission.NewPGRepository(f.App)), notifier)
+	for typ, data := range map[string]map[string]any{
+		events.ReviewCreated:    {"id": "r-1", "kind": "probable_duplicate"},
+		events.CollectorOffline: {"id": "c-1", "name": "dc1-collector", "last_seen_at": "2020-01-07T09:00:00Z"},
+		events.InvitationCreated: {"email": "invitee@acme.example", "organization_name": "ACME GmbH",
+			"expires_at": "2020-01-14T10:00:00Z", "link": "https://cmdb.example/i"},
+	} {
+		raw, _ := json.Marshal(data)
+		if err := consumer.Consume(bg, &events.Envelope{ID: f.ID(), Type: typ, OrgID: f.OrgA, OccurredAt: now, Data: raw}); err != nil {
+			t.Fatalf("%s: %v", typ, err)
+		}
+	}
+	for range 3 {
+		if _, err := notifier.ProcessDue(bg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sentTo := func(address, category string) []notify.Message {
+		var out []notify.Message
+		for _, m := range mail.sent {
+			if m.Category == category && len(m.To) == 1 && m.To[0].Email == address {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
+	const (
+		enReview = "A new review item (probable_duplicate) awaits a decision."
+		enFooter = "\n\n-- \nThis notification was sent by Reticora on behalf of ACME GmbH."
+		deFooter = "\n\n-- \nDiese Benachrichtigung wurde von Reticora im Auftrag von ACME GmbH versendet."
+	)
+	for _, tc := range []struct{ address, category, subject, body, footer string }{
+		{mailOf("en"), "review", "New review item: probable_duplicate", enReview, enFooter},
+		{mailOf("de"), "review", "Neues Review-Item: probable_duplicate",
+			"Ein neues Review-Item (probable_duplicate) wartet auf eine Entscheidung.", deFooter},
+		{mailOf("default"), "review", "New review item: probable_duplicate", enReview, enFooter},
+		{mailOf("en"), "collector", "Collector offline: dc1-collector",
+			"Collector dc1-collector has not reported since 2020-01-07T09:00:00Z.", enFooter},
+		{mailOf("muted"), "collector", "Collector offline: dc1-collector",
+			"Der Collector dc1-collector meldet sich seit 2020-01-07T09:00:00Z nicht mehr.", deFooter},
+		{"invitee@acme.example", "invitation", "Invitation to Reticora",
+			"You have been invited to ACME GmbH. The invitation is valid until 2020-01-14T10:00:00Z:\nhttps://cmdb.example/i", enFooter},
+	} {
+		got := sentTo(tc.address, tc.category)
+		if len(got) != 1 {
+			t.Errorf("%s mails to %s: %d, want 1", tc.category, tc.address, len(got))
+			continue
+		}
+		if m := got[0]; m.Subject != "[ACME Service Desk] "+tc.subject || m.Body != tc.body+tc.footer || m.SenderName != "ACME Service Desk" {
+			t.Errorf("%s mail to %s: subject %q, body %q, sender %q; want %q, %q, ACME Service Desk",
+				tc.category, tc.address, m.Subject, m.Body, m.SenderName, "[ACME Service Desk] "+tc.subject, tc.body+tc.footer)
+		}
+	}
+	for name, subject := range map[string]string{"en": "New review item: probable_duplicate", "de": "Neues Review-Item: probable_duplicate"} {
+		items, _, err := center.Inbox.List(bg, f.OrgA, users[name], false, 50, 0)
+		if err != nil || countCategory(items, "review") != 1 {
+			t.Fatalf("in-app reviews of %s: %d (%v), want 1", name, countCategory(items, "review"), err)
+		}
+		for _, it := range items {
+			if it.Category == "review" && (it.Subject != subject || strings.Contains(it.Body, "ACME")) {
+				t.Errorf("in-app review of %s: %q %q, want %q without branding", name, it.Subject, it.Body, subject)
+			}
+		}
+	}
+
+	// Negative: the unsubscribed non-critical category reaches the muted
+	// user neither by e-mail nor in-app; its deliveries are suppressed.
+	if got := sentTo(mailOf("muted"), "review"); len(got) != 0 {
+		t.Errorf("review mails to the user who unsubscribed reviews: %d, want 0", len(got))
+	}
+	items, _, err := center.Inbox.List(bg, f.OrgA, users["muted"], false, 50, 0)
+	if err != nil || countCategory(items, "review") != 0 || countCategory(items, "collector") != 1 {
+		t.Errorf("in-app of the muted user: %d reviews, %d collector (%v), want 0 and 1", countCategory(items, "review"),
+			countCategory(items, "collector"), err)
+	}
+	var sent, suppressed int
+	if err = f.Admin.QueryRow(bg, `SELECT count(*) FILTER (WHERE status = 'sent'), count(*) FILTER (WHERE status = 'suppressed')
+		FROM notification_delivery WHERE organization_id = $1 AND recipient_user_id = $2 AND category = 'review'`,
+		f.OrgA, users["muted"]).Scan(&sent, &suppressed); err != nil || sent != 0 || suppressed != 2 {
+		t.Errorf("review deliveries of the muted user: %d sent, %d suppressed (%v), want 0 and 2", sent, suppressed, err)
+	}
+
+	// The branding of each organization is its own.
+	resolver := notify.NewPGResolver(f.App, permission.NewPGRepository(f.App))
+	if b, err := resolver.Branding(bg, f.OrgB); err != nil || b == nil || b.SenderName != "scopetest-9a-b" || b.Locale != "de-DE" {
+		t.Errorf("branding of B: %+v %v, want its own name and locale", b, err)
 	}
 }

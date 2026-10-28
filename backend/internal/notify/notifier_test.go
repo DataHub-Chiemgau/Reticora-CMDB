@@ -280,26 +280,22 @@ func noticeData(t *testing.T, notice any) map[string]any {
 	return data
 }
 
-// renderProblems lists what is wrong with a rendered notice: the subject
-// does not name subjectWant, the German or the English text does not name
-// every value of bodyWant, or a placeholder of a missing or mistyped value
-// ("<nil>", "%!") appears.
-func renderProblems(subject, body, subjectWant string, bodyWant ...string) []string {
+// renderProblems lists what is wrong with a notice rendered in German (de)
+// and English (en): a subject does not name subjectWant, a text does not
+// name every value of bodyWant, or a placeholder of a missing or mistyped
+// value ("<nil>", "%!") appears.
+func renderProblems(de, en Text, subjectWant string, bodyWant ...string) []string {
 	var problems []string
 	for _, bad := range []string{"<nil>", "%!"} {
-		if strings.Contains(subject+body, bad) {
+		if strings.Contains(de.Subject+de.Body+en.Subject+en.Body, bad) {
 			problems = append(problems, "contains "+bad)
 		}
 	}
-	if !strings.Contains(subject, subjectWant) {
-		problems = append(problems, "subject does not name "+subjectWant)
-	}
-	de, en, ok := strings.Cut(body, "\n\n")
-	if !ok {
-		problems = append(problems, "body has no German and English part")
+	if !strings.Contains(de.Subject, subjectWant) || !strings.Contains(en.Subject, subjectWant) {
+		problems = append(problems, "subject does not name "+subjectWant+" in German and English")
 	}
 	for _, want := range bodyWant {
-		if !strings.Contains(de, want) || !strings.Contains(en, want) {
+		if !strings.Contains(de.Body, want) || !strings.Contains(en.Body, want) {
 			problems = append(problems, "text does not name "+want+" in German and English")
 		}
 	}
@@ -312,7 +308,7 @@ func renderProblems(subject, body, subjectWant string, bodyWant ...string) []str
 // TestEntitlementNotices and TestCertificateNotices) subject and text of
 // entitlement.warning name feature, valid_until and days_left,
 // entitlement.expired feature and expired_at, certificate.expiring the
-// certificate's name and end — in German and English, without "<nil>" or
+// certificate's name and end — in German and in English (NTF-03), without "<nil>" or
 // "%!". The check reports a warning without valid_until or days_left
 // (negative cases). Collector certificates and the collector CA reach
 // discovery:manage in the collector's client and site, a CI certificate
@@ -339,17 +335,17 @@ func TestNoticesOfTheJOB02RunsRender(t *testing.T) {
 			&jobs.CertificateNotice{Name: "Reticora Collector CA 2019-10-25 0a1b2c3d", ExpiresAt: ended, Fingerprint: "60303ae22b998861"},
 			[]string{"Reticora Collector CA 2019-10-25 0a1b2c3d", ended}},
 	} {
-		subject, body := Subscriptions[tc.typ].Render(noticeData(t, tc.notice))
-		if problems := renderProblems(subject, body, tc.subject, tc.body...); len(problems) > 0 {
-			t.Errorf("%s: %v\nsubject %q\nbody %q", tc.name, problems, subject, body)
+		data := noticeData(t, tc.notice)
+		de, en := Render(tc.typ, LocaleDE, data), Render(tc.typ, LocaleEN, data)
+		if problems := renderProblems(de, en, tc.subject, tc.body...); len(problems) > 0 {
+			t.Errorf("%s: %v\nGerman %+v\nEnglish %+v", tc.name, problems, de, en)
 		}
 	}
-	for days, want := range map[int][]string{1: {"noch 1 Tag)", "(1 day left)"}, 7: {"noch 7 Tage)", "(7 days left)"}} {
-		_, body := Subscriptions[events.EntitlementWarning].Render(noticeData(t,
-			&jobs.EntitlementNotice{Feature: "discovery", ValidUntil: validUntil, DaysLeft: days}))
-		for _, w := range want {
-			if !strings.Contains(body, w) {
-				t.Errorf("warning with days_left %d: %q does not contain %q", days, body, w)
+	for days, want := range map[int][2]string{1: {"noch 1 Tag)", "(1 day left)"}, 7: {"noch 7 Tage)", "(7 days left)"}} {
+		data := noticeData(t, &jobs.EntitlementNotice{Feature: "discovery", ValidUntil: validUntil, DaysLeft: days})
+		for i, locale := range []string{LocaleDE, LocaleEN} {
+			if body := Render(events.EntitlementWarning, locale, data).Body; !strings.Contains(body, want[i]) {
+				t.Errorf("warning with days_left %d in %s: %q does not contain %q", days, locale, body, want[i])
 			}
 		}
 	}
@@ -360,9 +356,9 @@ func TestNoticesOfTheJOB02RunsRender(t *testing.T) {
 		"without valid_until": noticeData(t, &jobs.EntitlementNotice{Feature: "discovery", DaysLeft: 7}),
 		"without days_left":   {"feature": "discovery", "valid_until": validUntil},
 	} {
-		subject, body := Subscriptions[events.EntitlementWarning].Render(data)
-		if problems := renderProblems(subject, body, "discovery", "discovery", validUntil, "7"); len(problems) == 0 {
-			t.Errorf("a warning %s passes the check: %q %q", name, subject, body)
+		de, en := Render(events.EntitlementWarning, LocaleDE, data), Render(events.EntitlementWarning, LocaleEN, data)
+		if problems := renderProblems(de, en, "discovery", "discovery", validUntil, "7"); len(problems) == 0 {
+			t.Errorf("a warning %s passes the check: %+v %+v", name, de, en)
 		}
 	}
 

@@ -1013,3 +1013,4 @@ REL-01;[B];B;backend/internal/relationship/pg_repository_integration_test.go;WP-
 TEC-14;[B];B;backend/internal/export/stale_reclaim_integration_test.go;WP-592
 DIS-02;[B], Profilliste (V);D;backend/internal/discovery/system_template_test.go;WP-581
 TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-582
+NTF-03;[B];B;backend/internal/notify/templates_test.go;WP-588

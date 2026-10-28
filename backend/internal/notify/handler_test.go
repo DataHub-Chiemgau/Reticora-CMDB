@@ -106,7 +106,10 @@ func TestNotificationAPI(t *testing.T) {
 		"digest with an unknown window":   {http.MethodPut, "/api/v1/notifications/preferences", `{"digest":{"review":"weekly"}}`, http.StatusBadRequest},
 		"digest that is not a map":        {http.MethodPut, "/api/v1/notifications/preferences", `{"digest":["review"]}`, http.StatusBadRequest},
 		"digest window that is no string": {http.MethodPut, "/api/v1/notifications/preferences", `{"digest":{"review":1}}`, http.StatusBadRequest},
-		"unknown read mark":               {http.MethodPost, "/api/v1/notifications/nope/read", "", http.StatusNotFound},
+		// Category subscriptions (NTF-03, E-91 option 2).
+		"subscription of an unknown category": {http.MethodPut, "/api/v1/notifications/preferences", `{"subscriptions":{"newsletter":"muted"}}`, http.StatusBadRequest},
+		"subscription in an unknown state":    {http.MethodPut, "/api/v1/notifications/preferences", `{"subscriptions":{"review":"maybe"}}`, http.StatusBadRequest},
+		"unknown read mark":                   {http.MethodPost, "/api/v1/notifications/nope/read", "", http.StatusNotFound},
 	} {
 		if w = call("u-1", tc.method, tc.path, tc.body); w.Code != tc.status {
 			t.Errorf("%s: %d %s, want %d", name, w.Code, w.Body.String(), tc.status)
@@ -156,6 +159,29 @@ func TestNotificationAPI(t *testing.T) {
 	}
 	if body = decode(call("u-2", http.MethodGet, "/api/v1/notifications/preferences", "")); body["time_zone"] != "Europe/Berlin" || body["quiet_start"] != nil {
 		t.Errorf("default preference: %v", body)
+	}
+	// The category subscriptions show the muted categories; every category
+	// is subscribed by default; a PUT of subscriptions changes the muted
+	// categories.
+	subscriptions := func(user string) map[string]any {
+		t.Helper()
+		subs, _ := decode(call(user, http.MethodGet, "/api/v1/notifications/preferences", ""))["subscriptions"].(map[string]any)
+		return subs
+	}
+	if subs := subscriptions("u-1"); len(subs) != len(Categories()) || subs["review"] != "muted" || subs["export"] != "subscribed" {
+		t.Errorf("subscriptions of u-1: %v, want review muted, the others subscribed", subs)
+	}
+	if subs := subscriptions("u-2"); len(subs) != len(Categories()) || subs["review"] != "subscribed" {
+		t.Errorf("default subscriptions: %v, want every category subscribed", subs)
+	}
+	if w = call("u-2", http.MethodPut, "/api/v1/notifications/preferences", `{"subscriptions":{"job":"muted"}}`); w.Code != http.StatusOK {
+		t.Fatalf("set subscriptions: %d %s", w.Code, w.Body.String())
+	}
+	if p, _ := center.Preferences.Preference(context.Background(), "org-1", "u-2"); p == nil || strings.Join(p.MutedCategories, ",") != "job" {
+		t.Errorf("stored after subscriptions: %+v, want job muted", p)
+	}
+	if subs := subscriptions("u-2"); subs["job"] != "muted" || subs["review"] != "subscribed" {
+		t.Errorf("subscriptions of u-2 after the PUT: %v", subs)
 	}
 	// The digest: reviews hourly by default, also after a PUT without it;
 	// a given digest is stored, an empty one bundles nothing; a refused

@@ -165,6 +165,7 @@ func (h *Handler) GetPreferences(w http.ResponseWriter, r *http.Request) {
 		p = &Preference{}
 		_ = p.Validate()
 	}
+	p.FillSubscriptions()
 	api.WriteJSON(w, http.StatusOK, p)
 }
 
