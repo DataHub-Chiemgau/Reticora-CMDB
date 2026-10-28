@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 | 1 | 0,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-656 | 2 | 1,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **303** | **401,5** | |
+| **Summe** | | **304** | **402,5** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>1 WP · 0,5 PT"]
+    K7N["K7-Nachträge<br/>2 WPs · 1,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -422,6 +422,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-599](#wp-599--abnahmeprüfung-der-nicht-auditierten-g1-pflicht-wps-wp-214-wp-240--wp-242-wp-332--wp-335) | `k-audit-ext` | Abnahmeprüfung der nicht auditierten G1-Pflicht-WPs (WP-214, WP-240 – WP-242, WP-332 – WP-335) | K7 | 2,0 | – | WP-338, WP-595 |
 | [WP-600](#wp-600--gate-g1-nach-der-korrektur-checkliste-sicherheitsreview-und-freigabeentscheidung) | `k-gate` | Gate G1 nach der Korrektur: Checkliste, Sicherheitsreview und Freigabeentscheidung | K7 | 1,5 | – | WP-532, WP-595, WP-596, WP-597, WP-598, WP-599 |
 | [WP-655](#wp-655--sweep-fester-worker-pool-statt-goroutine-je-ziel-goroutinen-spitze-auch-unter-last-begrenzt) | `k7n-sweep-pool` | Sweep: fester Worker-Pool statt Goroutine je Ziel; Goroutinen-Spitze auch unter Last begrenzt | K7N | 0,5 | F-384 | WP-494 |
+| [WP-656](#wp-656--unterzeichner-von-zuweisungen-als-pii-surrogat-bestandsnamen-über-den-backfill-in-den-vault) | `k7n-assignment-signature-surrogate` | Unterzeichner von Zuweisungen als PII-Surrogat; Bestandsnamen über den Backfill in den Vault | K7N | 1,0 | F-385 | WP-241, WP-242 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -18399,6 +18400,58 @@ DIS-01;[B];D;collector/plugins/sweep/sweep_test.go;WP-655
 **Entscheidungsbedarf:** keiner.
 
 **Nicht Bestandteil:** weitere Befunde der Wiederholungsprüfung (eigene WPs ab WP-656).
+
+### WP-656 – Unterzeichner von Zuweisungen als PII-Surrogat; Bestandsnamen über den Backfill in den Vault
+
+**Schlüssel:** `k7n-assignment-signature-surrogate` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-241 (`b-pii-surrogates`), WP-242 (`b-pii-contacts`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-385](../../../audit/g1-reaudit/FINDINGS.md#f-385) | P3 | Unterschriften von Zuweisungen speichern den Namen des Unterzeichners im Klartext statt als PII-Surrogat | schließt | Erweiterte Prüfung von WP-241 (K7) auf `e5c2d86` |
+
+**Problem:** WP-241 AK 1 verlangt, dass Assignments für Personen nur Surrogat-IDs speichern. `PGRepository.Create` und `Update` (backend/internal/assignment/pg_repository.go) schreiben `Signature{SignerName}` aber im Klartext nach `assignment.checkout_signature` bzw. `return_signature`. Belegt ist das über den echten Handler mit dem Vault wie in `cmd/server/main.go`: Nach `POST /assignments` und `POST /assignments/{id}/return` hält die Tabelle `"signer_name": "Max Verifier"` bzw. `"Rita Rueckgabe"`, und `pii_subject` ist leer. Audit und Events versiegeln die Felder (`pii.personalKeys`), die Tabelle nicht, und der Backfill `pii.backfill` erfasst keine Bestandszeilen. Der Commit von WP-241 (`d880b54`) hat die Zuweisungen fälschlich als erledigt beschrieben. Im G1-Release ist das Inventarmodul nach E-03 abgeschaltet; der Klartext entsteht nur mit `RETICORA_MODULES=inventory`.
+
+**Akzeptanzkriterien:**
+
+- [ ] Mit gesetztem Vault legt das Repository den Namen des Unterzeichners als Vault-Eintrag ab (`pii_subject`: verschlüsselter Payload unter dem Datenschlüssel der Organisation, `dek_ref`). Die Signatur-JSON in `checkout_signature`/`return_signature` hält nur die Surrogat-Referenz `{"$pii": "<surrogate_id>"}`; Bild, Objektschlüssel, Zeitpunkt und Methode bleiben unverändert. Ohne Vault (Entwicklung ohne Hauptschlüssel) bleibt der Name wie bei den Kontakten im Klartext.
+- [ ] Der REST-Vertrag bleibt unverändert: `POST /assignments`, `POST /assignments/{id}/return`, `GET /assignments/{id}` und `GET /assignments` liefern `signer_name` aus dem Vault aufgelöst; `api/openapi.yaml` ändert sich nicht. Ist der Vault-Eintrag gelöscht, fehlt der Name (Crypto-Shredding), die übrigen Felder bleiben. Eine andere Organisation löst das Surrogat nicht auf.
+- [ ] Ein Transfer oder eine Rückgabe ohne neue Unterschrift behält die gespeicherte Unterschrift und legt keinen Vault-Eintrag an. Eine neue Rückgabe-Unterschrift ersetzt die alte, deren Vault-Eintrag gelöscht wird. Das Löschen einer Zuweisung löscht die Vault-Einträge ihrer Unterzeichner.
+- [ ] Bestandszeilen mit Klartextnamen verschiebt der Lauf `pii.backfill` (`jobs.PIIBackfill.RunOrg`, neuer Zähler `assignments` im Ergebnis und im Audit-Eintrag des Laufs) je Organisation in den Vault; ein zweiter Lauf findet nichts mehr. Eine Migration ist nicht nötig: Das Schema ändert sich nicht (JSONB), und der Hauptschlüssel ist in SQL nicht verfügbar (wie bei WP-241/WP-242, Migrationen 000125/000126).
+- [ ] `TestAssignmentSignatureKeepsSurrogate` ist auf `e5c2d86` rot (Klartextnamen in `checkout_signature`/`return_signature`) und mit der Korrektur grün, auch als Nicht-Root-Nutzer; `go test ./internal/assignment/ ./internal/jobs/ ./internal/pii/ ./internal/contact/` grün; golangci-lint ohne neue Befunde.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/assignment/model.go
+- backend/internal/assignment/pg_repository.go
+- backend/internal/assignment/signature.go (neu)
+- backend/internal/assignment/pii_integration_test.go (neu)
+- backend/internal/jobs/pii_backfill.go
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Die Unterschriften bleiben JSONB-Spalten von `assignment`; Vault-Zugriffe laufen in der Tenant-Transaktion des Repositorys bzw. des Backfill-Laufs (RLS auf `assignment` und `pii_subject`, `ResolveTx`/`DeleteTx` mit Organisationsprüfung).
+
+**Tests:**
+
+- `cd backend && go test -count=1 -run TestAssignmentSignatureKeepsSurrogate ./internal/assignment/` gegen PostgreSQL (`TEST_DATABASE_URL`), außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/assignment/ ./internal/jobs/ ./internal/pii/ ./internal/contact/ ./internal/privacy/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+SEC-05;[B];B;backend/internal/assignment/pii_integration_test.go;WP-656
+AUD-04;[B];B;backend/internal/assignment/pii_integration_test.go;WP-656
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** das Unterschriftsbild selbst (`image_base64`/`object_key`) als Personendatum im Vault und die Ablage als Dokument mit `signature_hash` in `stock_movement` (Phase-2-WP-276 `ast-signature`); Zuweisungen im Löschworkflow der Aufbewahrungsrichtlinie (`internal/privacy`); die Versiegelung verschachtelter Personenfelder in Objekten unter `checkout_signature`/`return_signature` durch `pii.SealTx` (als neuer Kandidat gemeldet; Audit und Events speichern Unterschriften derzeit nicht); weitere Befunde der Wiederholungsprüfung (eigene WPs ab WP-657).
 
 ## Zurückgestellte Befunde
 

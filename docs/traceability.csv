@@ -1030,3 +1030,5 @@ SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-654
 DIS-01;[B];D;collector/plugins/sweep/sweep_test.go;WP-655
 REL-01;[B];B;frontend/src/components/cmdb/CIRelationshipsCard.test.tsx;WP-573
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/savedview/savedview_integration_test.go;WP-573
+SEC-05;[B];B;backend/internal/assignment/pii_integration_test.go;WP-656
+AUD-04;[B];B;backend/internal/assignment/pii_integration_test.go;WP-656

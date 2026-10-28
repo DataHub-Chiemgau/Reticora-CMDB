@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 3 |
 | P2 | 16 |
-| P3 | 10 |
-| **Summe** | **30** |
+| P3 | 11 |
+| **Summe** | **31** |
 
 ## Übersicht
 
@@ -70,6 +70,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-382](#f-382) | P3 | `unknown_relationship`: nach accept öffnet der nächste Ingest desselben unbekannten Schlüssels ein neues Review für dasselbe Paar, obwohl die angenommene Kante besteht | WP-582 (K6) | belegt | backend/internal/discovery/topology_integration_test.go TestUnknownRelationshipReviewLifecycle, TestUnknownRelationshipReviewAfterAcceptedEdgeDeleted | WP-652 |
 | [F-383](#f-383) | P3 | Benachrichtigungssprache je Empfänger nicht erreichbar: nichts setzt `app_user.locale` (kein API-Weg; OIDC-Login, Einladung und Signup behalten den Spaltenstandard `de`) | WP-588 (K6) | belegt | backend/internal/identity/login_locale_integration_test.go TestLoginTakesLocaleClaim; backend/internal/notify/locale_integration_test.go TestNotificationLanguageSelfService | WP-653 |
 | [F-384](#f-384) | P3 | Sweep: Goroutinen-Spitze unter CPU-Last über MaxConcurrency + 50 (`TestSweepGoroutinePeakBounded` schlägt zeitweise fehl) | Basislauf K7 | belegt | collector/plugins/sweep/sweep_test.go TestSweepGoroutinePeakBounded | WP-655 |
+| [F-385](#f-385) | P3 | Unterschriften von Zuweisungen speichern den Namen des Unterzeichners im Klartext statt als PII-Surrogat | WP-241 (K7) | belegt | backend/internal/assignment/pii_integration_test.go | WP-656 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -461,6 +462,27 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 - **Empfehlung:** Fester Worker-Pool mit höchstens `min(Concurrency, Anzahl Ziele)` Goroutinen, die die Ziele aus einem Kanal nehmen (im Plan von WP-494 als Alternative genannt); die Schranke des Tests bleibt unverändert.
 - **Retest (verbindlich):** `cd collector && go test -count=1 -race ./plugins/sweep/` grün und `go test -count=30 -run TestSweepGoroutinePeakBounded ./plugins/sweep/` 30 von 30 grün bei paralleler Last.
 - **Kodierender Test:** collector/plugins/sweep/sweep_test.go (`TestSweepGoroutinePeakBounded`, unverändert bis auf den Kommentar); auf `e5c2d86` zeitweise rot (Basislauf: Spitze 321; 2 von 10 und 1 von 30 Läufen rot mit Spitze 322).
+
+<a id="f-385"></a>
+### F-385 (P3) – Unterschriften von Zuweisungen speichern den Namen des Unterzeichners im Klartext statt als PII-Surrogat
+
+- **Gefunden in:** Erweiterte Prüfung von WP-241 (`b-pii-surrogates`) in der Wiederholungsprüfung (K7) auf dem RC-Commit `e5c2d86`, von einem zweiten Prüfagenten unabhängig bestätigt · **Betroffene Anforderungen:** SEC-05, AUD-04 · **Komponente:** backend/internal/assignment/pg_repository.go (`Create`, `Update`), Tabelle `assignment` (`checkout_signature`, `return_signature`) · **Quelle:** Probe über den echten Handler und das PG-Repository mit dem Vault wie in `cmd/server/main.go` (`pii.SetDefault(pii.NewVault(pool, encryptor))`); Probe-Quelltext und Protokoll im Evidenzordner `k-audit-ext/WP-241` (`verify-k1-probe_test.go.txt`, `verify-k1-assignment-signature-handler.log`, `probe-assignment-signature.log`)
+- **Reproduktion:** Mit gesetztem Vault `POST /api/v1/assignments` mit `{"asset_id": …, "assigned_to": …, "signature": {"signer_name": "Max Verifier", "method": "typed", "signed_at": "2026-10-28T10:00:00Z"}}` → 201, danach `POST /api/v1/assignments/{id}/return` mit `{"return_condition": "good", "signature": {"signer_name": "Rita Rueckgabe", …}}` → 200. Danach `SELECT checkout_signature, return_signature FROM assignment WHERE id = …` → `{"method": "typed", "signed_at": "2026-10-28T10:00:00Z", "signer_name": "Max Verifier"}` und `{"method": "typed", "signed_at": "2026-10-28T11:00:00Z", "signer_name": "Rita Rueckgabe"}`; `pii_subject` der Organisation: 0 Zeilen. Audit-Log und Event-Outbox enthalten die Namen nicht.
+- **Soll:** WP-241 AK 1: „Audit, `ci_change`, `stock_movement`, Assignments und Events speichern für Personen nur Surrogat-IDs; Anzeige und API lösen sie zur Laufzeit auf." Der Name des Unterzeichners liegt verschlüsselt im PII-Vault (`pii_subject`, `encrypted_payload` unter dem Datenschlüssel der Organisation, `dek_ref`), die Tabelle `assignment` hält nur das Surrogat; das Löschen des Vault-Eintrags macht den Namen unlesbar (Crypto-Shredding). Der Phase-2-Plan (WP-276) verlangt ebenso „Unterzeichner als Surrogat". Die REST-Antworten zeigen berechtigten Aufrufern den Namen unverändert.
+- **Ist:** `Create` und `Update` marshallen `Signature{SignerName}` unverändert nach `assignment.checkout_signature` bzw. `return_signature`; das Repository kennt den Vault nicht. `pii.personalKeys` führt `checkout_signature`/`return_signature`, deshalb versiegeln Audit und Events diese Felder, die Tabelle selbst aber nicht. Der Commit von WP-241 (`d880b54`) behauptet: „Assignments, stock_movement und ci_change.actor_id referenzieren Personen bereits nur über IDs." Das gilt für `assigned_to`/`assigned_by`, nicht für die Unterschriften. Bestandszeilen mit Klartextnamen erfasst der Backfill-Lauf `pii.backfill` nicht.
+- **Nutzerwirkung:** Im G1-Release keine: Das Inventarmodul ist nach E-03 abgeschaltet, die Routen antworten 404. Der Klartext entsteht nur mit `RETICORA_MODULES=inventory`. Dann liegen Namen natürlicher Personen unverschlüsselt in der Datenbank und in Backups, und Crypto-Shredding (Löschen des Vault-Eintrags) erreicht sie nicht (SEC-05, DSGVO Art. 17).
+- **Ursache (belegt):** WP-241 hat die Historie (Audit, `ci_change`, Events) und WP-242 die Kontakte auf den Vault umgestellt. Die Unterschriften in `assignment` hat keines der beiden WPs angefasst; der Commit-Text von WP-241 hat die Lücke als erledigt beschrieben.
+- **Empfehlung:** Den Namen des Unterzeichners wie bei den Kontakten (WP-242) in einem Vault-Eintrag ablegen und in der Signatur-JSON nur die Surrogat-Referenz `{"$pii": "<surrogate_id>"}` speichern. Das Repository löst die Referenz beim Lesen auf (Detail, Liste, Rückgabe-Antwort). Ein ersetzter Name und die Namen einer gelöschten Zuweisung werden geschreddert. Bestandszeilen verschiebt der Lauf `pii.backfill` in den Vault; der Hauptschlüssel ist in SQL nicht verfügbar, eine SQL-Migration kann das also nicht leisten, und das Schema ändert sich nicht.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -run TestAssignmentSignatureKeepsSurrogate ./internal/assignment/` gegen PostgreSQL: Nach Übergabe und Rückgabe über die REST-Ressource enthalten `checkout_signature`/`return_signature` keinen Klartextnamen, sondern je eine Surrogat-Referenz auf einen `pii_subject`-Eintrag der Organisation, und der verschlüsselte Payload enthält den Namen nicht. Detail, Liste und die Antworten von Anlage und Rückgabe liefern die Namen unverändert. Ein Transfer legt keinen neuen Vault-Eintrag an. Eine Klartext-Bestandszeile wird durch `pii.backfill` verschoben, ein zweiter Lauf findet nichts mehr. Eine andere Organisation löst das Surrogat nicht auf. Nach dem Löschen des Vault-Eintrags liefert die API die Unterschrift ohne Namen, und das Löschen der Zuweisung löscht ihre Vault-Einträge.
+- **Kodierender Test:** backend/internal/assignment/pii_integration_test.go (`TestAssignmentSignatureKeepsSurrogate`); auf `e5c2d86` rot (Produktionscode von `internal/assignment` und `internal/jobs` identisch mit `337d422`):
+
+  ```text
+  === RUN   TestAssignmentSignatureKeepsSurrogate
+      pii_integration_test.go:128: assignment.checkout_signature holds the signer name in plaintext: {"method": "typed", "signed_at": "2026-10-28T10:00:00Z", "signer_name": "Max Verifier"}
+      pii_integration_test.go:131: assignment.return_signature holds the signer name in plaintext: {"method": "typed", "signed_at": "2026-10-28T11:00:00Z", "signer_name": "Rita Rueckgabe"}
+  --- FAIL: TestAssignmentSignatureKeepsSurrogate (0.49s)
+  FAIL
+  ```
 
 ## Geprüfte Kandidaten ohne neuen Befund
 
