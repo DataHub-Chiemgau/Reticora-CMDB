@@ -1105,7 +1105,13 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 			// A malformed value is the client's error, not a 500 (F-229).
 			return nil, &ValidationError{Violations: []Violation{{Field: "last_seen_at", Detail: "must be an RFC 3339 date-time"}}}
 		}
-		setClauses = append(setClauses, fmt.Sprintf("last_seen_at = $%d", argPos))
+		// A sighting (discovery, agent) keeps the later time: a record
+		// observed before the last sighting does not move it back (GLO-12).
+		if req.Manual == nil {
+			setClauses = append(setClauses, fmt.Sprintf("last_seen_at = GREATEST(last_seen_at, $%d)", argPos))
+		} else {
+			setClauses = append(setClauses, fmt.Sprintf("last_seen_at = $%d", argPos))
+		}
 		args = append(args, parsed)
 		argPos++
 	}

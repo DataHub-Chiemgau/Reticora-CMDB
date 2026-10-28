@@ -999,8 +999,10 @@ func TestRediscoverStatementBudget(t *testing.T) {
 	var addressStatements []string
 	for pass := 1; pass <= 2; pass++ {
 		t.Run(fmt.Sprintf("re-discovery %d", pass), func(t *testing.T) {
+			// The records are observed at the start of the pass: a sighting
+			// sets last_seen_at to the record's observed_at (GLO-12, WP-580).
 			start := time.Now().UTC().Truncate(time.Second)
-			observed := time.Now().UTC().Add(-time.Second)
+			observed := start
 			for _, org := range []string{f.OrgA, f.OrgB} {
 				var records []plugins.DeviceRecord
 				for n := 3; n <= servers+2; n++ {

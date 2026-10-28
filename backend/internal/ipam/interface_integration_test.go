@@ -427,3 +427,136 @@ func TestInterfaceCreateOnForeignCI(t *testing.T) {
 		t.Errorf("organization B POST interface on its own CI: %d %s, want 201", w.Code, w.Body.String())
 	}
 }
+
+// TestDiscoverySyncKeepsManualAddressesAndInterfaces is the retest of F-249
+// (WP-580, REC-07, REC-03; E-90 option 1) against PostgreSQL: only what
+// discovery brought counts the misses of REC-07. An interface that existed
+// before (origin manual, also one created through the API) and is never
+// reported stays after three observations with miss_count 0; an existing
+// interface the sync reports becomes discovered and is removed after three
+// observations without it, with an entry in the CI's history. Reserved,
+// static and dhcp addresses stay after three observations; a discovered
+// address is removed after three, like before.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestDiscoverySyncKeepsManualAddressesAndInterfaces(t *testing.T) {
+	f := scopetest.Seed(t, "8d")
+	bg := context.Background()
+	ciID := f.CI(t, f.OrgA, "", "rec07-580")
+	repo := ipam.NewPGRepository(f.App)
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	nic := func(name string) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO network_interface (organization_id, ci_id, name) VALUES ($1, $2, $3) RETURNING id::text`,
+			f.OrgA, ciID, name).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	// Interfaces of the CI before the first sync: manual.
+	legacy, reported := nic("legacy0"), nic("eth1")
+	if w := newIfaceAPI(f, f.OrgCtx(f.OrgA), f.OrgA).call(http.MethodPost, "/api/v1/cis/"+ciID+"/interfaces", `{"name":"console"}`); w.Code != http.StatusCreated {
+		t.Fatalf("POST interface: %d %s", w.Code, w.Body.String())
+	}
+	sync := func(observed ...ipam.ObservedInterface) {
+		t.Helper()
+		if _, err := repo.SyncDiscoveredInterfaces(ctx, f.OrgA, ciID, observed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// kind is the origin of an interface or the type of an address.
+	type row struct {
+		kind   string
+		misses int
+	}
+	read := func(q string) map[string]row {
+		t.Helper()
+		out := map[string]row{}
+		rows, err := f.Admin.Query(bg, q, ciID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			var r row
+			if err = rows.Scan(&name, &r.kind, &r.misses); err != nil {
+				t.Fatal(err)
+			}
+			out[name] = r
+		}
+		return out
+	}
+	interfaces := func() map[string]row {
+		return read(`SELECT name, origin, miss_count FROM network_interface WHERE ci_id = $1`)
+	}
+	addresses := func() map[string]row {
+		return read(`SELECT host(a.address), a.type, a.miss_count FROM ip_address a
+			JOIN network_interface n ON n.id = a.interface_id WHERE n.ci_id = $1`)
+	}
+	if got := interfaces(); len(got) != 3 || got["legacy0"].kind != ipam.InterfaceOriginManual || got["eth1"].kind != ipam.InterfaceOriginManual ||
+		got["console"].kind != ipam.InterfaceOriginManual {
+		t.Fatalf("interfaces before the first sync: %v, want legacy0, eth1 and console manual", got)
+	}
+
+	// The first observation reports eth0 (new, with a discovered address)
+	// and eth1 (existing); manual addresses are added on eth0.
+	sync(ipam.ObservedInterface{Name: "eth0", IfIndex: 1, IPs: []string{"192.0.2.58/24"}}, ipam.ObservedInterface{Name: "eth1", IfIndex: 2})
+	var eth0ID string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM network_interface WHERE ci_id = $1 AND name = 'eth0'`, ciID).Scan(&eth0ID); err != nil {
+		t.Fatal(err)
+	}
+	for address, typ := range map[string]string{"192.0.2.60": "reserved", "192.0.2.61": "static", "192.0.2.62": "dhcp"} {
+		if _, err := f.Admin.Exec(bg, `INSERT INTO ip_address (organization_id, interface_id, address, type) VALUES ($1, $2, $3::inet, $4)`,
+			f.OrgA, eth0ID, address, typ); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := interfaces()
+	if got["eth0"].kind != ipam.InterfaceOriginDiscovered || got["eth1"].kind != ipam.InterfaceOriginDiscovered ||
+		got["legacy0"].kind != ipam.InterfaceOriginManual || got["console"].kind != ipam.InterfaceOriginManual {
+		t.Fatalf("after the first sync: %v, want eth0 and eth1 discovered, legacy0 and console manual", got)
+	}
+
+	// Three observations report eth0 without addresses and nothing else.
+	for miss := 1; miss <= 3; miss++ {
+		sync(ipam.ObservedInterface{Name: "eth0", IfIndex: 1})
+		got = interfaces()
+		for _, name := range []string{"legacy0", "console"} {
+			if r, ok := got[name]; !ok || r.misses != 0 {
+				t.Errorf("observation %d: manual interface %s: %+v (present %v), want kept with miss_count 0", miss, name, r, ok)
+			}
+		}
+		ips := addresses()
+		for _, address := range []string{"192.0.2.60", "192.0.2.61", "192.0.2.62"} {
+			if r, ok := ips[address]; !ok || r.misses != 0 {
+				t.Errorf("observation %d: address %s: %+v (present %v), want kept with miss_count 0", miss, address, r, ok)
+			}
+		}
+		if miss < 3 && (got["eth1"].misses != miss || ips["192.0.2.58"].misses != miss) {
+			t.Errorf("observation %d: eth1 %+v, discovered address %+v, want %d misses", miss, got["eth1"], ips["192.0.2.58"], miss)
+		}
+		if miss == 3 {
+			if _, ok := got["eth1"]; ok {
+				t.Errorf("eth1 (discovered) kept after three observations without it: %v", got)
+			}
+			if _, ok := ips["192.0.2.58"]; ok {
+				t.Errorf("discovered address kept after three observations without it: %v", ips)
+			}
+		}
+	}
+	var removed []string
+	if err := f.Admin.QueryRow(bg, `SELECT COALESCE(array_agg(n ORDER BY n), '{}') FROM ci_change c, jsonb_array_elements_text(c.old_value) n
+		WHERE c.ci_id = $1 AND c.field_name IN ('interfaces', 'ip_addresses')`, ciID).Scan(&removed); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(removed, ",") != "192.0.2.58,eth1" {
+		t.Errorf("history of the removal: %v, want 192.0.2.58 and eth1 only", removed)
+	}
+	var kept bool
+	if err := f.Admin.QueryRow(bg, `SELECT EXISTS (SELECT 1 FROM network_interface WHERE id = $1)
+		AND NOT EXISTS (SELECT 1 FROM network_interface WHERE id = $2)`, legacy, reported).Scan(&kept); err != nil || !kept {
+		t.Errorf("legacy0 kept and eth1 removed: %v, %v", kept, err)
+	}
+}

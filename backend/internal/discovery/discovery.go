@@ -1449,7 +1449,6 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			return nil
 		}
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
 	source := item.Source
 	if source == "" {
 		source = ci.SourceSweep
@@ -1575,9 +1574,14 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			return d.Write
 		}
 		// A sighting updates last_seen_at without history and brings an
-		// unknown CI back to active (REC-07, AUD-03).
-		update := ci.UpdateRequest{LastSeenAt: &now}
-		if matched.Status == "unknown" {
+		// unknown CI back to active (REC-07, AUD-03). It is dated by the
+		// record's observed_at (GLO-12): the repository keeps the later of
+		// the two times, and a record not newer than the last sighting
+		// brings no CI back.
+		seen := seenAt(&item)
+		lastSeen := seen.Format(time.RFC3339Nano)
+		update := ci.UpdateRequest{LastSeenAt: &lastSeen}
+		if matched.Status == "unknown" && (matched.LastSeenAt == nil || seen.After(*matched.LastSeenAt)) {
 			active := "active"
 			update.Status = &active
 		}
@@ -1594,6 +1598,11 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			{"management_ip", item.ManagementIP, matched.ManagementIP, &update.ManagementIP},
 		} {
 			if f.value == "" || f.value == f.current {
+				continue
+			}
+			// The serial number identifies case-insensitively (F-246): one in
+			// other case is the same value, no change and no conflict.
+			if f.name == "serial_number" && normalizedEqual(f.value, f.current) {
 				continue
 			}
 			if decide(f.name, f.value, f.current) {

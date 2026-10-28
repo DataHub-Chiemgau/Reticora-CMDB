@@ -111,7 +111,8 @@ type NetworkInterface struct {
 	OperStatus   string `json:"oper_status"`
 	Description  string `json:"description,omitempty"`
 	// MissCount counts the discovery runs that no longer saw the
-	// interface (REC-09); read-only.
+	// interface (REC-09); read-only. Only discovered interfaces count
+	// (E-90).
 	MissCount int       `json:"miss_count"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -161,6 +162,16 @@ const (
 	IPTypeReserved   = "reserved"
 	IPTypeStatic     = "static"
 	IPTypeDHCP       = "dhcp"
+)
+
+// Origins of a network interface (network_interface.origin, E-90): the
+// discovery sync makes every interface it reports discovered; interfaces
+// created otherwise, and those that existed before WP-580, are manual. Only
+// discovered interfaces and addresses of type discovered count the misses
+// of REC-07 and are removed by them.
+const (
+	InterfaceOriginDiscovered = "discovered"
+	InterfaceOriginManual     = "manual"
 )
 
 // ValidIPTypes lists the IP address types (NET-03).

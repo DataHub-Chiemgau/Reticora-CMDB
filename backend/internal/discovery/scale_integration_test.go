@@ -118,11 +118,14 @@ func TestReconciliationBeyondTenThousandCIs(t *testing.T) {
 		// Every 50th device: even records with the primary MAC and both
 		// interfaces, odd ones with an interface MAC as primary MAC (found
 		// only through the fingerprint) and the other interface.
+		// The records are observed at start: a sighting sets last_seen_at to
+		// the record's observed_at (GLO-12, WP-580).
+		start := time.Now().UTC().Truncate(time.Second)
 		var records []plugins.DeviceRecord
 		var serials []string
 		for n := 50; n <= inventory; n += 50 {
 			rec := plugins.DeviceRecord{
-				RecordID: plugins.NewRecordID(), ObservedAt: time.Now().UTC().Add(-time.Second), Source: "snmp",
+				RecordID: plugins.NewRecordID(), ObservedAt: start, Source: "snmp",
 				TargetIP:       fmt.Sprintf("10.250.%d.%d", n/250, n%250+1),
 				Identity:       plugins.DeviceIdentity{PrimaryMAC: mac("00:1b:31:", n)},
 				Classification: plugins.DeviceClassification{CIType: "server"},
@@ -138,7 +141,6 @@ func TestReconciliationBeyondTenThousandCIs(t *testing.T) {
 			records = append(records, rec)
 			serials = append(serials, fmt.Sprintf("SCALE-%d", n))
 		}
-		start := time.Now().UTC().Truncate(time.Second)
 		capture.take()
 		for from := 0; from < len(records); from += 100 {
 			batch := records[from:min(from+100, len(records))]
@@ -169,7 +171,7 @@ func TestReconciliationBeyondTenThousandCIs(t *testing.T) {
 		// No statement reads the organization: every read of ci and
 		// ci_identity_mac goes through the primary key or an identity index.
 		allowed := map[string][]string{
-			"ci": {"ci_pkey", "ci_id_organization_key", "idx_ci_serial", "uq_ci_org_serial", "idx_ci_hardware_uuid", "uq_ci_org_hardware_uuid",
+			"ci": {"ci_pkey", "ci_id_organization_key", "idx_ci_serial_number_lc", "idx_ci_serial", "uq_ci_org_serial", "idx_ci_hardware_uuid", "uq_ci_org_hardware_uuid",
 				"idx_ci_primary_mac", "uq_ci_org_primary_mac", "idx_ci_mgmt_ip", "idx_ci_mgmt_ip_sys_object", "idx_ci_hostname_lc", "idx_ci_fqdn_lc"},
 			"ci_identity_mac": {"ci_identity_mac_pkey", "idx_ci_identity_mac"},
 		}

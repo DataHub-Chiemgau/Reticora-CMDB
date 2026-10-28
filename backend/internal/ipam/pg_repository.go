@@ -740,11 +740,13 @@ const MaxMissedObservations = 3
 
 // SyncDiscoveredInterfaces applies one discovery observation of the
 // interfaces of a CI (REC-07, NET-01): reported interfaces and addresses are
-// created or updated and their miss_count is reset; those of the CI the
-// observation did not report count one miss and are removed at the third
-// consecutive miss, with an entry in the CI's history. An interface that a
-// manual or verified edge names is not removed and keeps counting misses
-// (REL-05, removeInterfaces). The caller syncs only observations that report
+// created or updated and their miss_count is reset; a reported interface
+// becomes of origin discovered. Discovered interfaces and addresses of type
+// discovered the observation did not report count one miss and are removed
+// at the third consecutive miss, with an entry in the CI's history; manual
+// interfaces and reserved, static and dhcp addresses are kept (E-90). An
+// interface that a manual or verified edge names is not removed and keeps
+// counting misses (REL-05, removeInterfaces). The caller syncs only observations that report
 // interfaces at all.
 func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID string, observed []ObservedInterface) (SyncResult, error) {
 	var res SyncResult
@@ -775,18 +777,19 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 			if ok {
 				if _, err = tx.Exec(ctx, `UPDATE network_interface SET if_index = NULLIF($2, 0), mac = NULLIF($3, '')::macaddr,
 					speed_mbps = NULLIF($4, 0), mtu = NULLIF($5, 0), admin_status = COALESCE(NULLIF($6, ''), admin_status),
-					oper_status = COALESCE(NULLIF($7, ''), oper_status), is_management = $8, miss_count = 0, updated_at = now()
-					WHERE id = $1`, id, ifc.IfIndex, ifc.MAC, ifc.SpeedMbps, ifc.MTU, ifc.AdminStatus, ifc.OperStatus, ifc.IsManagement); err != nil {
+					oper_status = COALESCE(NULLIF($7, ''), oper_status), is_management = $8, miss_count = 0, origin = $9, updated_at = now()
+					WHERE id = $1`, id, ifc.IfIndex, ifc.MAC, ifc.SpeedMbps, ifc.MTU, ifc.AdminStatus, ifc.OperStatus, ifc.IsManagement,
+					InterfaceOriginDiscovered); err != nil {
 					return fmt.Errorf("update interface %s: %w", ifc.Name, err)
 				}
 				res.Updated++
 			} else {
 				if err = tx.QueryRow(ctx, `INSERT INTO network_interface (organization_id, ci_id, name, if_index, mac, speed_mbps, mtu,
-					admin_status, oper_status, is_management)
+					admin_status, oper_status, is_management, origin)
 					VALUES ($1, $2, $3, NULLIF($4, 0), NULLIF($5, '')::macaddr, NULLIF($6, 0), NULLIF($7, 0),
-						COALESCE(NULLIF($8, ''), 'up'), COALESCE(NULLIF($9, ''), 'unknown'), $10)
+						COALESCE(NULLIF($8, ''), 'up'), COALESCE(NULLIF($9, ''), 'unknown'), $10, $11)
 					RETURNING id::text`, orgID, ciID, ifc.Name, ifc.IfIndex, ifc.MAC, ifc.SpeedMbps, ifc.MTU,
-					ifc.AdminStatus, ifc.OperStatus, ifc.IsManagement).Scan(&id); err != nil {
+					ifc.AdminStatus, ifc.OperStatus, ifc.IsManagement, InterfaceOriginDiscovered).Scan(&id); err != nil {
 					return fmt.Errorf("create interface %s: %w", ifc.Name, err)
 				}
 				res.Added++
@@ -807,10 +810,11 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 			}
 		}
 
-		// Addresses of the CI's interfaces the observation did not report.
+		// Discovered addresses of the CI's interfaces the observation did not
+		// report; reserved, static and dhcp addresses are kept (E-90).
 		removedIPs, err := missAndRemove(ctx, tx, `UPDATE ip_address a SET miss_count = a.miss_count + 1
 			FROM network_interface n
-			WHERE a.interface_id = n.id AND n.ci_id = $1 AND NOT (a.id::text = ANY($2::text[]))
+			WHERE a.interface_id = n.id AND n.ci_id = $1 AND a.type = 'discovered' AND NOT (a.id::text = ANY($2::text[]))
 			RETURNING a.id::text, host(a.address), a.miss_count`, ciID, seenIPs, "ip_address", nil)
 		if err != nil {
 			return err
@@ -819,8 +823,9 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 		for id := range seenInterfaces {
 			seenIDs = append(seenIDs, id)
 		}
+		// Discovered interfaces likewise; manual ones are kept (E-90).
 		removedInterfaces, err := missAndRemove(ctx, tx, `UPDATE network_interface SET miss_count = miss_count + 1
-			WHERE ci_id = $1 AND NOT (id::text = ANY($2::text[]))
+			WHERE ci_id = $1 AND origin = 'discovered' AND NOT (id::text = ANY($2::text[]))
 			RETURNING id::text, name, miss_count`, ciID, seenIDs, "network_interface", func(ids []string) ([]string, error) {
 			return removeInterfaces(ctx, tx, orgID, ciID, ids,
 				fmt.Sprintf(" after %d observations without it (REC-07)", MaxMissedObservations))

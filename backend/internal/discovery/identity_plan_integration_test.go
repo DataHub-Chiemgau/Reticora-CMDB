@@ -158,7 +158,7 @@ func TestAuditIdentitySearchWithMACsUsesIndexes(t *testing.T) {
 	// The side table is read through its index with the MACs in the index
 	// condition, not only the organization.
 	macIndex := regexp.MustCompile(`using idx_ci_identity_mac on ci_identity_mac\n\s+Index Cond: \(.*\bmac = ANY\b`)
-	identityIndexes := []string{"idx_ci_serial", "uq_ci_org_serial", "idx_ci_primary_mac", "uq_ci_org_primary_mac", "idx_ci_mgmt_ip",
+	identityIndexes := []string{"idx_ci_serial_number_lc", "idx_ci_serial", "uq_ci_org_serial", "idx_ci_primary_mac", "uq_ci_org_primary_mac", "idx_ci_mgmt_ip",
 		"idx_ci_mgmt_ip_sys_object", "idx_ci_hardware_uuid", "uq_ci_org_hardware_uuid", "idx_ci_hostname_lc", "idx_ci_fqdn_lc",
 		"ci_pkey", "ci_id_organization_key", "idx_ci_identity_mac"}
 	orgWide := database.OrgWideScope(f.OrgA, f.User)

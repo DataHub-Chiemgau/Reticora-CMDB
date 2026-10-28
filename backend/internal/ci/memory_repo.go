@@ -214,7 +214,8 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 	}
 	if req.LastSeenAt != nil {
 		t, err := time.Parse(time.RFC3339, *req.LastSeenAt)
-		if err == nil {
+		// A sighting keeps the later time, like the PostgreSQL repository.
+		if err == nil && (req.Manual != nil || item.LastSeenAt == nil || t.After(*item.LastSeenAt)) {
 			item.LastSeenAt = &t
 		}
 	}

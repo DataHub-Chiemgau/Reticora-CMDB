@@ -50,11 +50,12 @@ func TestAuditDefectManualEdgeSurvivesInterfaceSync(t *testing.T) {
 	admin := t6As{f.OrgA, f.AppUser(t, f.OrgA, "audit-d4-admin"), identity.AllPermissions()}
 	sw1, sw2 := f.CI(t, f.OrgA, f.Client1, "audit-d4-sw1"), f.CI(t, f.OrgA, f.Client1, "audit-d4-sw2")
 	sw3 := f.CI(t, f.OrgA, f.Client1, "audit-d4-sw3")
+	// Ports discovery brought: only they count the misses of REC-07 (E-90).
 	port := func(name string) string {
 		t.Helper()
 		var id string
-		if err := f.Admin.QueryRow(bg, `INSERT INTO network_interface (organization_id, ci_id, name) VALUES ($1, $2, $3) RETURNING id::text`,
-			f.OrgA, sw1, name).Scan(&id); err != nil {
+		if err := f.Admin.QueryRow(bg, `INSERT INTO network_interface (organization_id, ci_id, name, origin) VALUES ($1, $2, $3, 'discovered')
+			RETURNING id::text`, f.OrgA, sw1, name).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
 		return id
