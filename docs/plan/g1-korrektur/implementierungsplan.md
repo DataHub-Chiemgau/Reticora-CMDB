@@ -15461,6 +15461,8 @@ TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-645
 
 **Anmerkung vom 2026-10-28 (CI-Lauf 40625054870, Head 5b28d52):** Nach dem CA-Fix erreichte der Admin-Token-Abruf Keycloak; `POST /admin/realms/reticora/users` beantwortete das Frontend-nginx aber mit 405, weil es `/admin/` absichtlich nicht weiterleitet (COL-08). Der Admin-Client geht deshalb mit `RETICORA_KEYCLOAK_INTERNAL_URL` (Compose-Standard `http://keycloak:8080`) direkt zu Keycloak und setzt `Host`/`X-Forwarded-*` des öffentlichen Issuers, damit Token-Issuer und Mail-Links unverändert bleiben (`backend/internal/signup/keycloak_route.go`, Tests `TestRouteThroughInternalURL*`). Derselbe Defekt betraf jede Compose-Installation mit TLS-Domäne; kein Abschwächen der Prüfung.
 
+**Anmerkung vom 2026-10-28 (CI-Lauf 40623470172, Job `e2e-real (mobile-chrome)`, Head 1f316fc):** D02, D03, D07 und D09 aus `discovery-override.spec.ts` liefen in mobile-chrome in den Timeout: Klicks und Hover auf die Aktionen in „Herkunft & Overrides“ landeten auf Nachbarzeilen. Ursache: Die drei Wertspalten einer Herkunftszeile brechen einen JSON-Wert ohne Umbruchstelle (Identitätsfeld `{"mac_addresses":[…]}`) nicht um; die Seite war auf dem Telefon 688 px statt 412 px breit. Behoben in `frontend/src/components/cmdb/CIDetailSections.tsx` (Spalten unter `sm` gestapelt, Werte umbrechen überall); Defekttest `CI detail: the provenance actions are clickable next to long values` in `frontend/e2e/mobile-actions.spec.ts` (vorher rot mit „page width 688 > viewport 412“).
+
 **Dateien (6 Einträge):**
 
 - .github/workflows/install-smoke.yml (TLS-Origin für webkit und mobile-safari)
