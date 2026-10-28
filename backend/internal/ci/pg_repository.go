@@ -2407,8 +2407,9 @@ func (r *PGRepository) recordTypeChangeAudit(ctx context.Context, tx pgx.Tx, tc 
 // UpdateRecord implements RecordUpdater (AUD-03, CI-11): the field update
 // and the reclassification of one ingest record run in one transaction (the
 // context's, else its own) and are recorded as one change set with the
-// record's origin, one event ci.changed and the audit entries of the update
-// and of the type change. A reclassification discovery may not make
+// record's origin, one event ci.changed (and ci.online for a CI it brings
+// back from unknown to active) and the audit entries of the update and of
+// the type change. A reclassification discovery may not make
 // (ErrReclassificationRefused, ErrUnknownType) leaves the type as it is.
 func (r *PGRepository) UpdateRecord(ctx context.Context, orgID, id string, rec *RecordUpdate) (*RecordUpdateResult, error) {
 	result := &RecordUpdateResult{}
@@ -2469,10 +2470,38 @@ func (r *PGRepository) UpdateRecord(ctx context.Context, orgID, id string, rec *
 		}
 		// One event per record (EVT-02): ci.changed names every changed
 		// field, ci_type_id included.
-		return r.recordEvent(ctx, tx, events.CIChanged, item, changed)
+		if eventErr := r.recordEvent(ctx, tx, events.CIChanged, item, changed); eventErr != nil {
+			return eventErr
+		}
+		// A record that brings an unknown CI back to active raises ci.online
+		// after it (REC-09, LCY-05, F-268); the status before is the one of
+		// the locked row, so a CI that was active already raises none.
+		if w.before.Status == StatusUnknown && item.Status == StatusActive {
+			return r.recordOnline(ctx, tx, item)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, r.uniqueField(ctx, orgID, err)
 	}
 	return result, nil
+}
+
+// recordOnline writes the event ci.online of a CI the ingest brought back
+// from unknown to active, like recordEvent; its data are those of the
+// offline detector's ci.online (lifecycle.OfflineDetector) without the
+// scope interval, which only the detector knows.
+func (r *PGRepository) recordOnline(ctx context.Context, tx pgx.Tx, item *Item) error {
+	if r.outbox == nil {
+		return nil
+	}
+	data := map[string]any{"id": item.ID, "name": item.Name, "client_id": item.ClientID, "site_id": item.SiteID, "status": item.Status}
+	if item.LastSeenAt != nil {
+		data["last_seen_at"] = item.LastSeenAt.UTC().Format(time.RFC3339)
+	}
+	orgID, id := item.OrganizationID, item.ID
+	return lastInTx(ctx, func() error {
+		_, err := r.outbox.Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.CIOnline, EntityID: id, Data: data})
+		return err
+	})
 }
