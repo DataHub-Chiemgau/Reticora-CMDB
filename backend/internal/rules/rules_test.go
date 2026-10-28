@@ -113,3 +113,28 @@ func TestSchemaMatchesOperators(t *testing.T) {
 		t.Errorf("schema operators %v, Go operators %v", ops, want)
 	}
 }
+
+// TestMarshalAll covers WP-589: a stored rule keeps the form of
+// api/rules.schema.json, all always with its rules.
+func TestMarshalAll(t *testing.T) {
+	for _, tc := range []struct {
+		rule Rule
+		want string
+	}{
+		{Rule{Op: OpAll}, `{"op":"all","rules":[]}`},
+		{Rule{Op: OpAll, Rules: []Rule{{Op: OpRequired}}}, `{"op":"all","rules":[{"op":"required"}]}`},
+		{Rule{Op: OpRange, Of: OfLength, Min: new(float64)}, `{"op":"range","of":"length","min":0}`},
+	} {
+		got, err := json.Marshal(tc.rule)
+		if err != nil || string(got) != tc.want {
+			t.Errorf("%+v = %s (%v), want %s", tc.rule, got, err, tc.want)
+		}
+		parsed, err := Parse(got)
+		if err != nil {
+			t.Errorf("%s: %v", got, err)
+		}
+		if again, _ := json.Marshal(parsed); string(again) != tc.want {
+			t.Errorf("round trip %s, want %s", again, tc.want)
+		}
+	}
+}

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000183_ci_schema_version_typed
+Stand: Migration 000184_attribute_validation_ast
 
 ## Prüfung
 
@@ -374,6 +374,29 @@ keine neue Typversion, und `ci.schema_version` referenziert nur System-Basis
 und Typ. Systemtypen sind organisationsübergreifend materialisiert und tragen
 deshalb keine Schicht einer einzelnen Organisation. Eine Org-Schemarevision je
 (Organisation, Typ) (Option 1) wäre ein eigenes WP mit Migration.
+
+## Attributdefinitionen (DB-03, MET-10, MET-16, WP-589)
+
+Nach Entscheidung E-92 (`docs/plan/g1-korrektur/entscheidungen.md`, offen;
+Übergangsregel Option 2) ist `attribute_definition` die einzige Quelle der
+System-, Organisations- und Typdefinitionen (DB-03); `ci_type.attribute_schema`
+wird daraus erzeugt. Die Definitionen der Instanzattribute bleiben in
+`ci_instance_field_definition` (MET-14 [P2], WP-256), der letzten Schicht der
+Komposition System → Organisation → Typ → Instanz (MET-16, `ResolveFields` in
+`backend/internal/citype/resolver.go`). Weitere Tabellen mit
+Attributdefinitionen gibt es nicht (`TestResolverLayerOrder`). Entscheidet
+der Auftraggeber Option 1, übernimmt ein Folge-WP zusammen mit WP-256 die
+Instanzdefinitionen.
+
+`attribute_definition.validation` speichert seit WP-589 die Regel als AST nach
+MET-45 (`api/rules.schema.json`); `backend/internal/rules` wertet sie bei jedem
+CI-Schreibvorgang verbindlich aus. Die frühere Struktur (`min`, `max`,
+`min_length`, `max_length`, `pattern`, `patterns`, `options`) bleibt in
+Bestandszeilen stehen (keine Datenmigration) und wird beim Lesen in den AST
+übersetzt. Für die Komposition des materialisierten Schemas übersetzt die
+Funktion `reticora_validation_legacy` (Migration 000184) einen AST in diese
+Struktur, wie `fieldmeta.ValidationFromRule`; die Down-Migration schreibt
+AST-Zeilen in die frühere Struktur zurück.
 
 ## Tabellen, RLS und Policies
 

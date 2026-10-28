@@ -476,7 +476,8 @@ func upsertFieldTx(ctx context.Context, tx pgx.Tx, orgID, typeID string, req *Up
 		d.Default = raw
 	}
 	d.EnumValues, d.Group, d.Order = req.EnumValues, req.UIGroup, req.SortOrder
-	d.Validation, d.Conditional, d.ReferenceTarget = req.Validation, req.Conditional, req.ReferenceTarget
+	// The legacy structure is stored as its rule AST (WP-589).
+	d.Validation, d.Conditional, d.ReferenceTarget = req.Validation.AST(), req.Conditional, req.ReferenceTarget
 	if err := d.Validate(); err != nil {
 		return nil, err
 	}

@@ -6773,9 +6773,7 @@ export interface components {
        */
       unique_scope: 'org' | 'client';
       inheritable: boolean;
-      validation?: {
-        [key: string]: unknown;
-      };
+      validation?: components['schemas']['AttributeValidation'];
       conditional?: {
         [key: string]: unknown;
       };
@@ -6788,6 +6786,21 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /** @description The validation of an attribute definition (MET-10): a rule AST of MET-45 or the legacy structure. Requests may send either; the server checks the rule with backend/internal/rules (an invalid rule is 400 on the field validation), stores it as the AST and answers the AST, also for definitions stored in the legacy structure. A required rule makes the definition required. CI writes are validated against it (422). */
+    AttributeValidation:
+      components['schemas']['rule'] | components['schemas']['AttributeValidationLegacy'];
+    /** @description A rule of the JSON rule language of the metamodel (MET-45, phase 1: required, pattern, range and enum, combined with all), defined by api/rules.schema.json. */
+    RuleAST: components['schemas']['rule'];
+    /** @description The former validation structure, translated into the AST: options → enum, pattern and patterns → pattern, min/max → range, min_length/max_length → range of length; several rules are combined with all. {} is no rule. */
+    AttributeValidationLegacy: {
+      min?: number;
+      max?: number;
+      min_length?: number;
+      max_length?: number;
+      pattern?: string;
+      patterns?: string[];
+      options?: (string | number | boolean)[];
     };
     AttributeDefinitionListResponse: {
       /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
@@ -6816,9 +6829,7 @@ export interface components {
       /** @enum {string} */
       unique_scope?: 'org' | 'client';
       inheritable?: boolean;
-      validation?: {
-        [key: string]: unknown;
-      };
+      validation?: components['schemas']['AttributeValidation'];
       conditional?: {
         [key: string]: unknown;
       };
@@ -6842,9 +6853,8 @@ export interface components {
       /** @enum {string} */
       unique_scope?: 'org' | 'client';
       inheritable?: boolean;
-      validation?: {
-        [key: string]: unknown;
-      };
+      /** @description The new rules; null or {} removes them. */
+      validation?: components['schemas']['AttributeValidation'] | null;
       conditional?: {
         [key: string]: unknown;
       };
@@ -11352,6 +11362,50 @@ export interface components {
       citations: components['schemas']['AICitation'][];
       prompt_tokens: number;
       completion_tokens: number;
+    };
+    rule:
+      | components['schemas']['all']
+      | components['schemas']['required']
+      | components['schemas']['pattern']
+      | components['schemas']['range']
+      | components['schemas']['enum'];
+    /** @description Every rule must hold; violations are reported in order. */
+    all: {
+      /** @constant */
+      op: 'all';
+      rules: components['schemas']['rule'][];
+    };
+    /** @description The value must not be empty (code required). */
+    required: {
+      /** @constant */
+      op: 'required';
+    };
+    /** @description A string value must match the regular expression (code pattern; a non-string value: pattern.type). */
+    pattern: {
+      /** @constant */
+      op: 'pattern';
+      pattern: string;
+    };
+    /** @description The number (of: value) or the length of a string (of: length) lies within min and max, inclusive (codes range.min, range.max; a value of another kind: range.type). */
+    range:
+      | {
+          /** @constant */
+          op: 'range';
+          /**
+           * @default value
+           * @enum {unknown}
+           */
+          of: 'value' | 'length';
+          min?: number;
+          max?: number;
+        }
+      | unknown
+      | unknown;
+    /** @description The value is one of the values; strings, numbers and booleans compare by type and value (code enum). */
+    enum: {
+      /** @constant */
+      op: 'enum';
+      values: (string | number | boolean)[];
     };
   };
   responses: {

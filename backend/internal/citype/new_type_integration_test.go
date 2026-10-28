@@ -304,6 +304,64 @@ func TestOrgGlobalDefinitionsAreRuntimeLayer(t *testing.T) {
 	}
 }
 
+// TestAttributeDefinitionASTValidationCIWrites covers WP-589 (MET-10,
+// MET-45, F-307) against PostgreSQL over HTTP: a definition whose
+// validation is the rule AST range 1–5 (POST /attribute-definitions)
+// applies to CI writes, evaluated bindingly in Go: POST /cis with the
+// value 7 is 422 naming the attribute, with 3 it is 201; PATCH to 7 is
+// 422 and leaves the value. TestAttributeDefinitionASTValidation
+// (attrdef_integration_test.go) covers the definition API.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAttributeDefinitionASTValidationCIWrites(t *testing.T) {
+	f := scopetest.Seed(t, "8a")
+	repo := citype.NewPGRepository(f.App)
+	mux := chi.NewRouter()
+	citype.NewHandler(repo).RegisterRoutes(mux)
+	ci.NewHandler(ci.NewService(ci.NewPGRepository(f.App)).WithFieldResolver(repo)).RegisterRoutes(mux)
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+
+	typ := &citype.Type{OrganizationID: f.OrgA, Key: "wp589-sensor", Name: "wp589-sensor", IsObservable: true}
+	if err := repo.Create(ctx, typ); err != nil {
+		t.Fatalf("create type: %v", err)
+	}
+	if w := call(http.MethodPost, "/api/v1/attribute-definitions", `{"ci_type_id":"`+typ.ID+`","key":"wp589_level",
+		"data_type":"integer","validation":{"op":"range","min":1,"max":5}}`); w.Code != http.StatusCreated {
+		t.Fatalf("definition with a rule AST: %d %s, want 201", w.Code, w.Body.String())
+	}
+
+	w := call(http.MethodPost, "/api/v1/cis", `{"name":"wp589-out","ci_type_id":"`+typ.ID+`","client_id":"`+f.Client1+`",
+		"attributes":{"wp589_level":7}}`)
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "wp589_level") {
+		t.Errorf("CI with 7 outside the range 1..5: %d %s, want 422 naming wp589_level", w.Code, w.Body.String())
+	}
+	w = call(http.MethodPost, "/api/v1/cis", `{"name":"wp589-in","ci_type_id":"`+typ.ID+`","client_id":"`+f.Client1+`",
+		"attributes":{"wp589_level":3}}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CI with 3 inside the range 1..5: %d %s, want 201", w.Code, w.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if w = call(http.MethodPatch, "/api/v1/cis/"+created.ID, `{"attributes":{"wp589_level":7}}`); w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("PATCH to 7: %d %s, want 422", w.Code, w.Body.String())
+	}
+	var level float64
+	if err := f.Admin.QueryRow(context.Background(), `SELECT (attributes ->> 'wp589_level')::numeric FROM ci WHERE id = $1`,
+		created.ID).Scan(&level); err != nil || level != 3 {
+		t.Errorf("stored level = %v (%v), want 3", level, err)
+	}
+}
+
 // nullJSON returns the value of key in the JSON object extra, or nil.
 func nullJSON(extra, key string) any {
 	if extra == "" {

@@ -157,7 +157,10 @@ func (h *Handler) CreateAttributeDefinition(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	d := &AttributeDefinition{CITypeID: req.CITypeID, Key: req.Key, UniqueScope: "org", Inheritable: true}
-	req.apply(d)
+	if err := req.apply(d); err != nil {
+		writeAttributeError(w, err)
+		return
+	}
 	if err := store.CreateAttributeDefinition(r.Context(), t.OrganizationID, d); err != nil {
 		writeAttributeError(w, err)
 		return

@@ -2,8 +2,11 @@ package fieldmeta
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
 func TestValidateDefinition(t *testing.T) {
@@ -310,3 +313,118 @@ func TestRuleOfDefinition(t *testing.T) {
 
 func f64ptr(v float64) *float64 { return &v }
 func intPtr(v int) *int         { return &v }
+
+// TestValidationFromRuleConformance covers WP-589 (MET-10, MET-45): the
+// rules of api/rules.conformance.json, stored as the validation of a
+// definition and translated into the structure composition reads
+// (ValidationFromRule), accept and refuse every case as the AST itself; the
+// invalid rules of the file are refused by ParseValidation.
+func TestValidationFromRuleConformance(t *testing.T) {
+	raw, err := os.ReadFile("../../../api/rules.conformance.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c struct {
+		Cases []struct {
+			Name   string          `json:"name"`
+			Rule   json.RawMessage `json:"rule"`
+			Value  json.RawMessage `json:"value"`
+			Absent bool            `json:"absent"`
+		} `json:"cases"`
+		InvalidRules []struct {
+			Name string          `json:"name"`
+			Rule json.RawMessage `json:"rule"`
+		} `json:"invalid_rules"`
+	}
+	if err = json.Unmarshal(raw, &c); err != nil || len(c.Cases) == 0 {
+		t.Fatalf("conformance file: %v", err)
+	}
+	for _, tc := range c.Cases {
+		rule, err := ParseValidation(tc.Rule)
+		if err != nil || rule == nil {
+			t.Errorf("%s: rule refused: %v", tc.Name, err)
+			continue
+		}
+		v, required, err := ValidationFromRule(rule)
+		if err != nil {
+			t.Errorf("%s: %v", tc.Name, err)
+			continue
+		}
+		var value any
+		if len(tc.Value) > 0 {
+			if err := json.Unmarshal(tc.Value, &value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		def := FieldDefinition{Name: "x", Required: required, Validation: v}
+		translated := def.Rule(true)
+		want := len(rules.Evaluate(rule, value, !tc.Absent)) == 0
+		if got := len(rules.Evaluate(&translated, value, !tc.Absent)) == 0; got != want {
+			t.Errorf("%s: translated rule %+v passes %v, the AST %v", tc.Name, translated, got, want)
+		}
+	}
+	for _, tc := range c.InvalidRules {
+		if _, err := ParseValidation(tc.Rule); err == nil {
+			t.Errorf("%s: invalid rule accepted", tc.Name)
+		}
+	}
+}
+
+// TestParseValidation covers WP-589: the legacy structure is translated
+// into the AST and back unchanged; several rules of one kind combine
+// (narrowest range, common values); unknown fields, invalid rules and
+// rules no value satisfies are refused.
+func TestParseValidation(t *testing.T) {
+	legacy := `{"min":1,"max":5,"min_length":2,"max_length":8,"pattern":"^a","patterns":["b$"],"options":["ab",1,true]}`
+	rule, err := ParseValidation([]byte(legacy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ast, _ := json.Marshal(rule)
+	const wantAST = `{"op":"all","rules":[{"op":"enum","values":["ab",1,true]},{"op":"pattern","pattern":"^a"},` +
+		`{"op":"pattern","pattern":"b$"},{"op":"range","min":1,"max":5},{"op":"range","of":"length","min":2,"max":8}]}`
+	if string(ast) != wantAST {
+		t.Errorf("AST of the legacy structure = %s, want %s", ast, wantAST)
+	}
+	back, required, err := ValidationFromRule(rule)
+	if err != nil || required {
+		t.Fatalf("back: %v %v", err, required)
+	}
+	if roundTrip, _ := json.Marshal(back); string(roundTrip) != legacy {
+		t.Errorf("legacy round trip = %s, want %s", roundTrip, legacy)
+	}
+
+	combined, err := ParseValidation([]byte(`{"op":"all","rules":[{"op":"required"},{"op":"range","min":1},
+		{"op":"all","rules":[{"op":"range","min":3,"max":9},{"op":"range","max":7}]},{"op":"range","of":"length","min":1.5,"max":4.5},
+		{"op":"enum","values":["a","b",2]},{"op":"enum","values":[2.0,"b","c"]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, required, err := ValidationFromRule(combined)
+	if got, _ := json.Marshal(v); err != nil || !required || string(got) != `{"min":3,"max":7,"min_length":2,"max_length":4,"options":["b",2]}` {
+		t.Errorf("combined = %s required %v (%v)", got, required, err)
+	}
+	for _, raw := range []string{`null`, `{}`, `{"op":"all","rules":[]}`} {
+		rule, err := ParseValidation([]byte(raw))
+		if v, _, _ := ValidationFromRule(rule); err != nil || v != nil {
+			t.Errorf("%s: %+v %v, want no validation", raw, v, err)
+		}
+	}
+	for _, raw := range []string{`{"minimum":1}`, `{"min":5,"max":1}`, `{"options":[{"a":1}]}`, `{"pattern":"("}`, `[1]`, `"x"`,
+		`{"op":"range","min":1,"x":2}`, `{"op":"enum"}`} {
+		if _, err := ParseValidation([]byte(raw)); err == nil {
+			t.Errorf("%s accepted", raw)
+		}
+	}
+	for _, raw := range []string{`{"op":"all","rules":[{"op":"enum","values":["a"]},{"op":"enum","values":["b"]}]}`,
+		`{"op":"all","rules":[{"op":"range","max":1},{"op":"range","min":2}]}`,
+		`{"op":"all","rules":[{"op":"range","of":"length","min":2.2,"max":2.8}]}`} {
+		rule, err := ParseValidation([]byte(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := ValidationFromRule(rule); err == nil {
+			t.Errorf("%s: no value satisfies it, accepted", raw)
+		}
+	}
+}

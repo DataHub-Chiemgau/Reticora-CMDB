@@ -13487,7 +13487,8 @@ components:
           enum: [org, client]
           description: Unique per organization or per client (CIs without a client count as one client).
         inheritable: { type: boolean }
-        validation: { type: object, additionalProperties: true }
+        validation:
+          $ref: '#/components/schemas/AttributeValidation'
         conditional: { type: object, additionalProperties: true }
         reference_target: { type: string }
         group: { type: string }
@@ -13496,6 +13497,44 @@ components:
         is_system: { type: boolean }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AttributeValidation:
+      description: >-
+        The validation of an attribute definition (MET-10): a rule AST of
+        MET-45 or the legacy structure. Requests may send either; the server
+        checks the rule with backend/internal/rules (an invalid rule is 400
+        on the field validation), stores it as the AST and answers the AST,
+        also for definitions stored in the legacy structure. A required rule
+        makes the definition required. CI writes are validated against it
+        (422).
+      oneOf:
+        - $ref: '#/components/schemas/RuleAST'
+        - $ref: '#/components/schemas/AttributeValidationLegacy'
+    RuleAST:
+      description: >-
+        A rule of the JSON rule language of the metamodel (MET-45, phase 1:
+        required, pattern, range and enum, combined with all), defined by
+        api/rules.schema.json.
+      $ref: './rules.schema.json'
+    AttributeValidationLegacy:
+      type: object
+      additionalProperties: false
+      description: >-
+        The former validation structure, translated into the AST: options
+        → enum, pattern and patterns → pattern, min/max → range,
+        min_length/max_length → range of length; several rules are combined
+        with all. {} is no rule.
+      properties:
+        min: { type: number }
+        max: { type: number }
+        min_length: { type: integer }
+        max_length: { type: integer }
+        pattern: { type: string }
+        patterns:
+          type: array
+          items: { type: string }
+        options:
+          type: array
+          items: { type: [string, number, boolean] }
     AttributeDefinitionListResponse:
       type: object
       required: [data]
@@ -13534,7 +13573,8 @@ components:
         unique: { type: boolean }
         unique_scope: { type: string, enum: [org, client] }
         inheritable: { type: boolean }
-        validation: { type: object, additionalProperties: true }
+        validation:
+          $ref: '#/components/schemas/AttributeValidation'
         conditional: { type: object, additionalProperties: true }
         reference_target: { type: string }
         group: { type: string }
@@ -13560,7 +13600,11 @@ components:
         unique: { type: boolean }
         unique_scope: { type: string, enum: [org, client] }
         inheritable: { type: boolean }
-        validation: { type: object, additionalProperties: true }
+        validation:
+          oneOf:
+            - $ref: '#/components/schemas/AttributeValidation'
+            - type: 'null'
+          description: The new rules; null or {} removes them.
         conditional: { type: object, additionalProperties: true }
         reference_target: { type: string }
         group: { type: string }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -428,5 +430,243 @@ func TestAttributeDefinitionListPages(t *testing.T) {
 	}
 	if w := call(orgA, http.MethodGet, "/api/v1/attribute-definitions?cursor=eyJpIjoiY2ktOSJ9.AAAAAAAAAAAAAAAAAAAAAA", ""); w.Code != http.StatusBadRequest {
 		t.Errorf("forged cursor: %d %.200s, want 400", w.Code, w.Body.String())
+	}
+}
+
+// TestAttributeDefinitionASTValidation covers WP-589 (MET-10, MET-45,
+// API-05, F-307) against PostgreSQL over HTTP: POST and PATCH
+// /attribute-definitions accept validation as a rule AST of
+// api/rules.schema.json, check it with internal/rules (an invalid rule is
+// 400 on the field validation, nothing stored) and store the AST; the
+// legacy structure stays valid input and is stored as its AST, and a
+// definition stored in the legacy structure before is answered as its AST.
+// The materialized schema reads the AST (migration 000184, the same
+// translation as fieldmeta.ValidationFromRule), and the resolved
+// definition the CI service validates against applies the rule.
+// TestAttributeDefinitionASTValidationCIWrites (new_type_integration_test.go)
+// proves the CI writes over HTTP (7 → 422, 3 → 201).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAttributeDefinitionASTValidation(t *testing.T) {
+	f := scopetest.Seed(t, "89")
+	bg := context.Background()
+	repo := NewPGRepository(f.App)
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	normalized := func(s string) any {
+		t.Helper()
+		var v any
+		if err := json.Unmarshal([]byte(s), &v); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+		return v
+	}
+	// stored is the validation column of a definition.
+	stored := func(id string) any {
+		t.Helper()
+		var raw []byte
+		if err := f.Admin.QueryRow(bg, `SELECT validation FROM attribute_definition WHERE id = $1`, id).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		return normalized(string(raw))
+	}
+	answered := func(w *httptest.ResponseRecorder) (id string, validation any) {
+		t.Helper()
+		var d struct {
+			ID         string `json:"id"`
+			Validation any    `json:"validation"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &d); err != nil {
+			t.Fatal(err)
+		}
+		return d.ID, d.Validation
+	}
+
+	typ := &Type{OrganizationID: f.OrgA, Key: "wp589-switch", Name: "wp589-switch", IsObservable: true}
+	if err := repo.Create(ctx, typ); err != nil {
+		t.Fatalf("create type: %v", err)
+	}
+
+	// A rule AST: 201, answered and stored as sent; the materialized
+	// schema carries the range.
+	const levelAST = `{"op":"range","min":1,"max":5}`
+	w := call(http.MethodPost, "/api/v1/attribute-definitions", `{"ci_type_id":"`+typ.ID+`","key":"wp589_level",
+		"data_type":"integer","validation":`+levelAST+`}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST with a rule AST: %d %s, want 201", w.Code, w.Body.String())
+	}
+	levelID, got := answered(w)
+	if !reflect.DeepEqual(got, normalized(levelAST)) || !reflect.DeepEqual(stored(levelID), normalized(levelAST)) {
+		t.Errorf("rule AST answered %v, stored %v, want %s", got, stored(levelID), levelAST)
+	}
+	typeNow, err := repo.GetByID(ctx, f.OrgA, typ.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	props, _ := typeNow.AttributeSchema["properties"].(map[string]any)
+	level, _ := props["wp589_level"].(map[string]any)
+	if level["minimum"] != float64(1) || level["maximum"] != float64(5) {
+		t.Errorf("materialized schema of the AST = %v, want minimum 1 and maximum 5", level)
+	}
+
+	// The rule applies to the resolved definition the CI service checks
+	// values against (Go evaluation, internal/rules).
+	resolved, err := ResolveFields(ctx, repo, f.OrgA, typ.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := false
+	for _, d := range resolved {
+		if d.Name != "wp589_level" {
+			continue
+		}
+		checked = true
+		if verr := fieldmeta.ValidateValue(d, float64(7)); verr == nil {
+			t.Error("value 7 accepted by the resolved range 1..5")
+		}
+		if verr := fieldmeta.ValidateValue(d, float64(3)); verr != nil {
+			t.Errorf("value 3 refused by the resolved range 1..5: %v", verr)
+		}
+	}
+	if !checked {
+		t.Error("wp589_level is not resolved")
+	}
+
+	// Invalid rules: 400 on the field validation, nothing stored.
+	for name, validation := range map[string]string{
+		"unknown operator":       `{"op":"between","min":1}`,
+		"range without bounds":   `{"op":"range"}`,
+		"range min above max":    `{"op":"range","min":5,"max":1}`,
+		"unknown property":       `{"op":"range","min":1,"minimum":1}`,
+		"property of another op": `{"op":"pattern","pattern":"^a","min":1}`,
+		"lookaround":             `{"op":"pattern","pattern":"(?=a)"}`,
+		"empty enum":             `{"op":"enum","values":[]}`,
+		"object in enum":         `{"op":"enum","values":[{"a":1}]}`,
+		"nested invalid":         `{"op":"all","rules":[{"op":"required"},{"op":"range","of":"size","max":3}]}`,
+		"no value left":          `{"op":"all","rules":[{"op":"enum","values":["a"]},{"op":"enum","values":["b"]}]}`,
+		"empty range":            `{"op":"all","rules":[{"op":"range","max":2},{"op":"range","min":3}]}`,
+		"not an object":          `"min 1"`,
+		"unknown legacy field":   `{"minimum":1}`,
+	} {
+		rec := call(http.MethodPost, "/api/v1/attribute-definitions", `{"ci_type_id":"`+typ.ID+`","key":"wp589_invalid",
+			"data_type":"integer","validation":`+validation+`}`)
+		var problem struct {
+			Field string `json:"field"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &problem)
+		if rec.Code != http.StatusBadRequest || problem.Field != "validation" {
+			t.Errorf("%s: %d %s, want 400 on the field validation", name, rec.Code, rec.Body.String())
+		}
+	}
+	var invalid int
+	if err = f.Admin.QueryRow(bg, `SELECT count(*) FROM attribute_definition WHERE key = 'wp589_invalid'`).Scan(&invalid); err != nil || invalid != 0 {
+		t.Errorf("%d definitions stored from invalid rules (%v)", invalid, err)
+	}
+
+	// The legacy structure: accepted, answered and stored as its AST.
+	w = call(http.MethodPost, "/api/v1/attribute-definitions", `{"ci_type_id":"`+typ.ID+`","key":"wp589_name",
+		"data_type":"text","validation":{"min_length":2,"max_length":8,"pattern":"^[a-z]","patterns":["[0-9]$"],"options":["ab1","cd2"]}}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST with the legacy structure: %d %s, want 201", w.Code, w.Body.String())
+	}
+	const nameAST = `{"op":"all","rules":[{"op":"enum","values":["ab1","cd2"]},{"op":"pattern","pattern":"^[a-z]"},
+		{"op":"pattern","pattern":"[0-9]$"},{"op":"range","of":"length","min":2,"max":8}]}`
+	nameID, got := answered(w)
+	if !reflect.DeepEqual(got, normalized(nameAST)) || !reflect.DeepEqual(stored(nameID), normalized(nameAST)) {
+		t.Errorf("legacy structure answered %v, stored %v, want the AST %s", got, stored(nameID), nameAST)
+	}
+	// The materialized schema reads the stored AST (all of enum, patterns
+	// and a length range).
+	if typeNow, err = repo.GetByID(ctx, f.OrgA, typ.ID); err != nil {
+		t.Fatal(err)
+	}
+	props, _ = typeNow.AttributeSchema["properties"].(map[string]any)
+	name, _ := props["wp589_name"].(map[string]any)
+	if name["minLength"] != float64(2) || name["maxLength"] != float64(8) || name["pattern"] != "^[a-z]" ||
+		!reflect.DeepEqual(name["enum"], []any{"ab1", "cd2"}) || !reflect.DeepEqual(name["allOf"], []any{map[string]any{"pattern": "[0-9]$"}}) {
+		t.Errorf("materialized schema of the stored AST = %v", name)
+	}
+
+	// PATCH with a rule AST; a required rule makes the definition required.
+	const patchAST = `{"op":"all","rules":[{"op":"required"},{"op":"pattern","pattern":"^[a-z]+$"},
+		{"op":"all","rules":[{"op":"range","of":"length","max":3},{"op":"enum","values":["ab","abc","abcd"]}]}]}`
+	w = call(http.MethodPatch, "/api/v1/attribute-definitions/"+nameID, `{"validation":`+patchAST+`}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH with a rule AST: %d %s, want 200", w.Code, w.Body.String())
+	}
+	if _, got = answered(w); !reflect.DeepEqual(got, normalized(patchAST)) || !reflect.DeepEqual(stored(nameID), normalized(patchAST)) {
+		t.Errorf("patched AST answered %v, stored %v, want %s", got, stored(nameID), patchAST)
+	}
+	patched, err := repo.GetAttributeDefinition(ctx, f.OrgA, nameID)
+	if err != nil || !patched.Required {
+		t.Errorf("definition with a required rule = %+v %v, want required", patched, err)
+	}
+	if w = call(http.MethodPatch, "/api/v1/attribute-definitions/"+nameID, `{"validation":{"op":"range","min":3,"max":1}}`); w.Code != http.StatusBadRequest {
+		t.Errorf("PATCH with an invalid rule: %d %s, want 400", w.Code, w.Body.String())
+	}
+	if !reflect.DeepEqual(stored(nameID), normalized(patchAST)) {
+		t.Errorf("refused PATCH changed the rule: %v", stored(nameID))
+	}
+	if w = call(http.MethodPatch, "/api/v1/attribute-definitions/"+nameID, `{"validation":null}`); w.Code != http.StatusOK {
+		t.Fatalf("PATCH validation null: %d %s", w.Code, w.Body.String())
+	}
+	if _, got = answered(w); got != nil || !reflect.DeepEqual(stored(nameID), map[string]any{}) {
+		t.Errorf("after PATCH null: answered %v, stored %v, want no rule", got, stored(nameID))
+	}
+
+	// A definition stored in the legacy structure before is answered as
+	// its AST; the legacy field view keeps the structure.
+	var legacyID string
+	if err = f.Admin.QueryRow(bg, `INSERT INTO attribute_definition (organization_id, ci_type_id, scope, key, data_type, validation)
+		VALUES ($1, $2, 'type', 'wp589_legacy', 'decimal', '{"min": 0.5, "max": 9}') RETURNING id::text`,
+		f.OrgA, typ.ID).Scan(&legacyID); err != nil {
+		t.Fatal(err)
+	}
+	w = call(http.MethodGet, "/api/v1/attribute-definitions/"+legacyID, "")
+	if _, got = answered(w); w.Code != http.StatusOK || !reflect.DeepEqual(got, normalized(`{"op":"range","min":0.5,"max":9}`)) {
+		t.Errorf("stored legacy structure answered %d %v, want its AST", w.Code, got)
+	}
+	fields, err := repo.ListFields(ctx, f.OrgA, typ.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range fields {
+		if field.Name == "wp589_legacy" && (field.Validation == nil || field.Validation.Min == nil || *field.Validation.Min != 0.5 ||
+			field.Validation.Max == nil || *field.Validation.Max != 9) {
+			t.Errorf("legacy field view = %+v", field.Validation)
+		}
+	}
+
+	// The database translates an AST like the Go evaluation.
+	for _, ast := range []string{levelAST, nameAST, patchAST,
+		`{"op":"all","rules":[{"op":"range","min":0},{"op":"range","min":2,"max":8},{"op":"range","of":"length","min":1.5,"max":9.7},
+			{"op":"enum","values":[1,"a",true,3]},{"op":"enum","values":[3.0,1,"x"]}]}`,
+		`{"op":"all","rules":[]}`, `{"op":"required"}`} {
+		rule, err := fieldmeta.ParseValidation([]byte(ast))
+		if err != nil {
+			t.Fatalf("%s: %v", ast, err)
+		}
+		v, _, err := fieldmeta.ValidationFromRule(rule)
+		if err != nil {
+			t.Fatalf("%s: %v", ast, err)
+		}
+		goJSON := []byte(`{}`)
+		if v != nil {
+			goJSON, _ = json.Marshal(v)
+		}
+		var sqlJSON []byte
+		if err := f.Admin.QueryRow(bg, `SELECT reticora_validation_legacy($1::jsonb)`, ast).Scan(&sqlJSON); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(normalized(string(goJSON)), normalized(string(sqlJSON))) {
+			t.Errorf("%s: Go %s, database %s", ast, goJSON, sqlJSON)
+		}
 	}
 }
