@@ -727,6 +727,13 @@
     "callbackTitle": "Completing sign-in",
     "callbackProgress": "Please wait while we verify your session.",
     "callbackError": "Sign-in could not be completed.",
+    "callbackRefused": {
+      "notAdmitted": "Your first sign-in requires an invitation from your organization. Ask your organization's administrators for an invitation.",
+      "noOrganization": "Your account is not assigned to an organization. Contact your organization's administrators.",
+      "userInactive": "Your account is deactivated. Contact your organization's administrators.",
+      "noRole": "Your account has no role in this organization. Ask your organization's administrators for access.",
+      "userLimit": "The organization has reached its maximum number of users. Contact your organization's administrators."
+    },
     "sessionExpired": "Your session has expired. Please sign in again.",
     "invitationAccepted": "Your account for {{email}} has been created. Sign in now.",
     "backendUnreachable": "The server cannot be reached. Check that Reticora is running and the address is correct, then try again.",

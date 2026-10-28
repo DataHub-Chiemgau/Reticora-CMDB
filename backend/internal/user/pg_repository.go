@@ -1379,6 +1379,15 @@ func loginScope(orgID string) *database.TenantScope {
 	return &scope
 }
 
+// admissionLockClass is the class of the advisory lock under which a first
+// login creates a user: the bootstrap of an organization without any user
+// or an accepted invitation (resolveLogin). It uses the two-argument form,
+// pg_advisory_xact_lock(class, key), like the ingest locks, and differs from
+// their classes, from those of the audit chain (0x52657469), the event
+// outbox (0x45766e74) and its publisher (0x45766e75) and from the redundancy
+// lock (0x52526564).
+const admissionLockClass int32 = 0x52426f6f // "RBoo"
+
 // EnsureUser resolves the app_user of an OIDC login (AUT-01). A known
 // subject of the organization is the returning user; otherwise the user is
 // resolved by organization and e-mail and admitted only
@@ -1389,6 +1398,10 @@ func loginScope(orgID string) *database.TenantScope {
 //     is created with the invited role and scope, or
 //   - as the first user of an organization without any user (bootstrap of a
 //     new installation).
+//
+// First logins that create a user are serialized per organization, so of
+// parallel first logins into an organization without any user exactly one
+// is admitted (F-198).
 //
 // A login that makes the user org_admin (an invitation with that role) or
 // links an account an administrator made org_admin binds the IdP account to
@@ -1513,6 +1526,16 @@ func resolveLogin(ctx context.Context, tx pgx.Tx, mfa MFAEnforcer, quota QuotaGu
 	invited := err == nil
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return "", false, fmt.Errorf("read invitation: %w", err)
+	}
+	// Parallel first logins into an organization without any user would
+	// each count no user and all be admitted (F-198). The organization's
+	// admission lock serializes them up to the commit. The count runs in its
+	// own statement after the lock, so in READ COMMITTED it sees the user a
+	// login that held the lock before committed: exactly one bootstrap. A
+	// login with an invitation takes the lock too, so a bootstrap never
+	// counts past an invited user that is not committed yet.
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2::text))`, admissionLockClass, orgID); err != nil {
+		return "", false, fmt.Errorf("lock first-login admission: %w", err)
 	}
 	if !invited {
 		var users int

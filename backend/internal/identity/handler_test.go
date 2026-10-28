@@ -501,6 +501,35 @@ func TestCallbackRejectsDeactivatedUser(t *testing.T) {
 	}
 }
 
+// TestLoginRefusalsCarryProblemTypes covers WP-570 (AUT-01, AUT-09, F-197):
+// every refused login names its own problem type, which the SPA maps to a
+// localized text; the detail stays the fixed text of the refusal.
+func TestLoginRefusalsCarryProblemTypes(t *testing.T) {
+	for _, tc := range []struct {
+		err         error
+		status      int
+		problemType string
+	}{
+		{ErrFirstLoginNotPermitted, http.StatusForbidden, ProblemLoginNotAdmitted},
+		{ErrUserInactive, http.StatusForbidden, ProblemLoginUserInactive},
+		{ErrNoRoleAssignment, http.StatusForbidden, ProblemLoginNoRole},
+		{errors.New("identity: no organization attribute in ID token"), http.StatusUnauthorized, ProblemLoginNoOrganization},
+		{errors.New("identity: organization attribute is not a UUID"), http.StatusUnauthorized, ProblemLoginNoOrganization},
+	} {
+		w := httptest.NewRecorder()
+		writeIdentityError(w, tc.err)
+		var problem api.ProblemDetail
+		if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil {
+			t.Fatalf("%v: decode %s: %v", tc.err, w.Body.String(), err)
+		}
+		if w.Code != tc.status || w.Header().Get("Content-Type") != "application/problem+json" ||
+			problem.Type != tc.problemType || problem.Detail != tc.err.Error() {
+			t.Errorf("%v: %d %s %+v; want %d problem+json of type %s with the error as detail",
+				tc.err, w.Code, w.Header().Get("Content-Type"), problem, tc.status, tc.problemType)
+		}
+	}
+}
+
 // mfaFailingProvisioner fails every login like a first login of an
 // org_admin whose account cannot be bound to MFA (WP-358).
 type mfaFailingProvisioner struct{ statusProvisioner }

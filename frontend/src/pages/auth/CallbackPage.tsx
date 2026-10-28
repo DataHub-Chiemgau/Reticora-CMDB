@@ -1,7 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { clearAuthTransaction, completeAuthorizationCodeFlow } from '../../auth/oidc';
+import {
+  AuthCallbackError,
+  clearAuthTransaction,
+  completeAuthorizationCodeFlow,
+} from '../../auth/oidc';
+
+// The refused logins the server names by problem type (F-197): each has its
+// own localized text instead of the server's detail.
+const REFUSAL_KEYS: Record<string, string> = {
+  'https://reticora.io/problems/login-not-admitted': 'auth.callbackRefused.notAdmitted',
+  'https://reticora.io/problems/login-no-organization': 'auth.callbackRefused.noOrganization',
+  'https://reticora.io/problems/login-user-inactive': 'auth.callbackRefused.userInactive',
+  'https://reticora.io/problems/login-no-role': 'auth.callbackRefused.noRole',
+  'https://reticora.io/problems/entitlement-limit': 'auth.callbackRefused.userLimit',
+};
 
 export function CallbackPage() {
   const { t } = useTranslation();
@@ -20,6 +34,13 @@ export function CallbackPage() {
       .then(({ returnTo }) => navigate(returnTo || '/dashboard', { replace: true }))
       .catch((err) => {
         clearAuthTransaction();
+        if (err instanceof AuthCallbackError) {
+          // Any other answer of the server is shown as the general error;
+          // its detail is technical.
+          const key = err.problemType ? REFUSAL_KEYS[err.problemType] : undefined;
+          setError(t(key ?? 'auth.callbackError'));
+          return;
+        }
         setError(err instanceof Error ? err.message : t('auth.callbackError'));
       });
   }, [location.search, navigate, t]);

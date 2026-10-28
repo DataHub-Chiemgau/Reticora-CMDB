@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import {
   BASE,
@@ -41,7 +42,9 @@ import {
  *  09b roles tab labels system roles .......... RBA-02 ("Systemrollen")       → WP-046
  *  09c viewer UI: webhook save refused visibly . RBA-02, RBA-04               → WP-046, WP-045
  *  10 Keycloak user without invitation ........ AUT-01, AUT-09 (CH26)        → WP-043, WP-042
+ *     incl. the localized refusal text ......... AUT-01 (F-197)               → WP-570
  *  10b Keycloak user without org attribute ..... AUT-09 (CH26, E-14)          → WP-043
+ *  10c org attribute not changeable by the user  AUT-09 (CH26, E-14)          → WP-570
  *  11 role upgrade effective at refresh/login . AUT-02, RBA-03, RBA-02       → WP-066, WP-009, WP-046
  *     incl. engineer reads the CI history ...... CI-06 (E-78)                → WP-475
  *  12 upgraded user creates a CI in the UI .... RBA-02, CI-01 (UI-04)        → WP-046, WP-120, WP-191
@@ -1140,7 +1143,19 @@ test('10 a Keycloak account of the organization without invitation is refused (4
   const page = await context.newPage();
   const response = await loginExpectingRefusal(page, { email: address, password: pw });
   expect(response.status(), 'AUT-01: first login without admission').toBe(403);
-  await expect(page.getByText(/invitation|einladung/i)).toBeVisible();
+  expect(
+    ((await response.json()) as { type?: string }).type,
+    'problem type of the refused first login',
+  ).toBe('https://reticora.io/problems/login-not-admitted');
+  // F-197: the localized text of the refusal, not the server's detail.
+  await expect(
+    page.getByText(
+      'Für die erste Anmeldung ist eine Einladung Ihrer Organisation erforderlich. ' +
+        'Bitten Sie die Administration Ihrer Organisation um eine Einladung.',
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(page.getByText(/identity:|first login requires/i)).toHaveCount(0);
   await expect(page).not.toHaveURL(/\/dashboard/);
   const session = await page.evaluate(() => window.sessionStorage.getItem('reticora-auth-session'));
   expect(session, 'no session after the refusal').toBeNull();
@@ -1185,6 +1200,128 @@ test('10b a Keycloak account without organization attribute is refused and gets 
   expect(session).toBeNull();
   await context.close();
   expect((await listUsers(request)).some((u) => u.email === address)).toBe(false);
+});
+
+/**
+ * changeOwnOrganization signs the account in to the Keycloak account console
+ * of the realm the SPA uses, takes the console's access token from its own
+ * requests and sends the account's representation with organizationId as
+ * organization_id to the Account REST API, as any user can. The same update
+ * sets the last name `Moved`, which the user may change: an accepted update
+ * shows that the request reached the API. It returns the answer of that
+ * update.
+ */
+async function changeOwnOrganization(
+  page: Page,
+  request: Parameters<typeof api>[0],
+  account: { email: string; password: string },
+  organizationId: string,
+): Promise<{ status: number; body: string }> {
+  const res = await request.get(`${BASE}/api/v1/auth/config`);
+  expect(res.ok(), `GET /api/v1/auth/config: ${res.status()}`).toBe(true);
+  const { authorization_endpoint: authorize } = (await res.json()) as {
+    authorization_endpoint: string;
+  };
+  // The realm URL as the browser reaches it, e.g. https://host/realms/reticora.
+  const realm = authorize.replace(/\/protocol\/openid-connect\/auth$/, '');
+  expect(realm, 'realm URL of the authorization endpoint').toMatch(/\/realms\/[^/]+$/);
+  const accountPath = `${new URL(realm).pathname}/account`;
+  // The Account REST API as the console calls it, and the console's token.
+  let token = '';
+  let accountUrl = '';
+  page.on('request', (req) => {
+    const auth = req.headers()['authorization'] ?? '';
+    const url = new URL(req.url());
+    if (!token && url.pathname.startsWith(accountPath) && auth.startsWith('Bearer ')) {
+      token = auth.slice('Bearer '.length);
+      accountUrl = `${url.origin}${accountPath}`;
+    }
+  });
+  await page.goto(`${realm}/account/`);
+  await keycloakLogin(page, account, /\/realms\/[^/]+\/account\/?(?:[#?]|$)/);
+  await expect
+    .poll(() => token, { message: 'access token of the account console', timeout: 30_000 })
+    .not.toBe('');
+  return page.evaluate(
+    async ({ url, bearer, org }) => {
+      const headers = {
+        Authorization: `Bearer ${bearer}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      };
+      const current = await fetch(url, { headers });
+      if (!current.ok) return { status: current.status, body: await current.text() };
+      const user = (await current.json()) as { attributes?: Record<string, string[]> };
+      const updated = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...user,
+          lastName: 'Moved',
+          attributes: { ...(user.attributes ?? {}), organization_id: [org] },
+        }),
+      });
+      return { status: updated.status, body: await updated.text() };
+    },
+    { url: accountUrl, bearer: token, org: organizationId },
+  );
+}
+
+test('10c the user cannot move itself to another organization through the Keycloak account API', async ({
+  browser,
+  request,
+}) => {
+  const address = email('orgattr');
+  const pw = password('orgattr');
+  const account = { email: address, password: pw };
+  const keycloakId = await createKeycloakUser(request, { ...account, orgId: state().orgId! });
+  await issue(request, address, 'viewer');
+  const first = await signIn(browser, account);
+  const org = await api<{ id: string }>(request, first.token, 'GET', '/org');
+  const me = await api<{ sub: string }>(request, first.token, 'GET', '/me');
+  expect(org.body.id, 'the first login lands in the organization of the attribute').toBe(
+    state().orgId,
+  );
+  await first.context.close();
+
+  // AUT-09/CH26 (E-14): organization_id is editable by the administrator
+  // only; the user's own update is refused or has no effect.
+  const context = await browser.newContext({ locale: 'de-DE' });
+  const page = await context.newPage();
+  const attempt = await changeOwnOrganization(page, request, account, randomUUID());
+  await context.close();
+  const accepted = attempt.status >= 200 && attempt.status < 300;
+  const answer = `account API update of organization_id → ${attempt.status} ${attempt.body}`;
+  // Refused: 400 names the attribute (read-only), 403 refuses the account
+  // update as a whole. Otherwise the update went through without the attribute.
+  expect(accepted || attempt.status === 400 || attempt.status === 403, answer).toBe(true);
+  if (attempt.status === 400) {
+    expect(attempt.body, answer).toMatch(/organization_id|read-?only/i);
+  }
+
+  const token = await keycloakAdminToken(request);
+  const read = await request.get(`${KEYCLOAK}/admin/realms/reticora/users/${keycloakId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(read.ok(), `Keycloak admin read of the user: ${read.status()}`).toBe(true);
+  const stored = (await read.json()) as {
+    lastName?: string;
+    attributes?: Record<string, string[]>;
+  };
+  expect(stored.attributes?.organization_id, 'organization_id after the attempt').toEqual([
+    state().orgId,
+  ]);
+  if (accepted) {
+    expect(stored.lastName, 'the accepted update reached the account').toBe('Moved');
+  }
+
+  // The next login lands in the same organization as the same user.
+  const next = await signIn(browser, account);
+  const orgAfter = await api<{ id: string }>(request, next.token, 'GET', '/org');
+  const meAfter = await api<{ sub: string }>(request, next.token, 'GET', '/me');
+  await next.context.close();
+  expect(orgAfter.body.id, 'organization of the next login').toBe(state().orgId);
+  expect(meAfter.body.sub, 'user of the next login').toBe(me.body.sub);
 });
 
 test('11 an admin role change (viewer → engineer) takes effect at the next refresh and sign-in', async ({

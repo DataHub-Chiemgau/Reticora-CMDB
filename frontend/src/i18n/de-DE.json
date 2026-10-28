@@ -727,6 +727,13 @@
     "callbackTitle": "Anmeldung wird abgeschlossen",
     "callbackProgress": "Bitte warten Sie, während Ihre Sitzung geprüft wird.",
     "callbackError": "Die Anmeldung konnte nicht abgeschlossen werden.",
+    "callbackRefused": {
+      "notAdmitted": "Für die erste Anmeldung ist eine Einladung Ihrer Organisation erforderlich. Bitten Sie die Administration Ihrer Organisation um eine Einladung.",
+      "noOrganization": "Ihr Konto ist keiner Organisation zugeordnet. Wenden Sie sich an die Administration Ihrer Organisation.",
+      "userInactive": "Ihr Konto ist deaktiviert. Wenden Sie sich an die Administration Ihrer Organisation.",
+      "noRole": "Ihrem Konto ist in dieser Organisation keine Rolle zugewiesen. Bitten Sie die Administration Ihrer Organisation um Zugriff.",
+      "userLimit": "Die Organisation hat ihre Höchstzahl an Benutzern erreicht. Wenden Sie sich an die Administration Ihrer Organisation."
+    },
     "sessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
     "invitationAccepted": "Ihr Konto für {{email}} ist angelegt. Melden Sie sich jetzt an.",
     "backendUnreachable": "Der Server ist nicht erreichbar. Prüfen Sie, ob Reticora läuft und die Adresse stimmt, und versuchen Sie es erneut.",

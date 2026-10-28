@@ -299,6 +299,8 @@ export interface paths {
      *     max_users (active users, ENT-03); at the limit it answers 403
      *     entitlement-limit, creates no user and leaves the invitation open.
      *     A deactivated user, and a first login without an admission, get 403.
+     *     Parallel first logins into an organization without any user admit
+     *     exactly one of them as its first user (F-198).
      *     Only the first login (an account an administrator created, or the
      *     first user of the organization) assigns the configured default role,
      *     when the user holds no role yet; a later login assigns none. A login
@@ -11857,8 +11859,24 @@ export interface operations {
         };
       };
       400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['EntitlementLimit'];
+      /** @description The ID token is invalid, or it carries no valid organization attribute (type https://reticora.io/problems/login-no-organization, AUT-09, CH26). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The login is refused, no session and no refresh cookie are issued. The type names the reason, the client shows its own text for it (F-197): a first login without admission (https://reticora.io/problems/login-not-admitted, AUT-01), a deactivated user (https://reticora.io/problems/login-user-inactive, TLC-04), a user without any role (https://reticora.io/problems/login-no-role, TEN-04, RBA-03), or a first login with an invitation while max_users is reached (https://reticora.io/problems/entitlement-limit, ENT-03). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
       503: components['responses']['ServiceUnavailable'];
     };

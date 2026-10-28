@@ -3,6 +3,8 @@ package identity_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
@@ -103,4 +105,125 @@ func TestFirstLoginRequiresAdmission(t *testing.T) {
 	invite("first@b.invalid", "7 days")
 	_, _, err = users.EnsureUser(bg, f.OrgA, "fl54-b-first", "first@b.invalid", "First", "")
 	notPermitted("subject of another organization", err)
+}
+
+// TestFirstLoginBootstrapIsSerialized covers WP-570 (AUT-01, F-198): parallel
+// first logins of different subjects into an organization without any user
+// admit exactly one of them as its first user; every other one fails with
+// ErrFirstLoginNotPermitted. The check runs 20 times on an emptied
+// organization. Logins with a pending invitation that run in parallel with
+// uninvited ones are still admitted.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestFirstLoginBootstrapIsSerialized(t *testing.T) {
+	const (
+		logins = 8
+		rounds = 20
+	)
+	f := scopetest.Seed(t, "54")
+	bg := context.Background()
+	users := user.NewPGRepository(f.App)
+	var viewer string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM role WHERE organization_id = $1 AND name = 'viewer'`, f.OrgB).Scan(&viewer); err != nil {
+		t.Fatalf("standard role viewer of organization B: %v", err)
+	}
+	count := func(sql string) int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, sql, f.OrgB).Scan(&n); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return n
+	}
+	// race starts the logins at the same time and returns how many were
+	// admitted and how many refused with ErrFirstLoginNotPermitted.
+	race := func(round int, logins []func() error) (admitted, refused int) {
+		t.Helper()
+		start := make(chan struct{})
+		errs := make([]error, len(logins))
+		var wg sync.WaitGroup
+		for i, login := range logins {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				errs[i] = login()
+			}()
+		}
+		close(start)
+		wg.Wait()
+		for i, err := range errs {
+			switch {
+			case err == nil:
+				admitted++
+			case errors.Is(err, identity.ErrFirstLoginNotPermitted):
+				refused++
+			default:
+				t.Fatalf("round %d, login %d: %v", round, i, err)
+			}
+		}
+		return admitted, refused
+	}
+	uninvited := func(round, i int) func() error {
+		return func() error {
+			_, _, err := users.EnsureUser(bg, f.OrgB, fmt.Sprintf("fl570-r%d-u%d", round, i),
+				fmt.Sprintf("u%d-r%d@b.invalid", i, round), "Parallel", "viewer")
+			return err
+		}
+	}
+
+	for round := range rounds {
+		// Organization B is empty again: no user, no invitation.
+		for _, sql := range []string{
+			`DELETE FROM user_invitation WHERE organization_id = $1`,
+			`DELETE FROM role_assignment WHERE organization_id = $1`,
+			`DELETE FROM app_user WHERE organization_id = $1`,
+		} {
+			if _, err := f.Admin.Exec(bg, sql, f.OrgB); err != nil {
+				t.Fatalf("round %d: %s: %v", round, sql, err)
+			}
+		}
+
+		bootstrap := make([]func() error, logins)
+		for i := range bootstrap {
+			bootstrap[i] = uninvited(round, i)
+		}
+		admitted, refused := race(round, bootstrap)
+		if admitted != 1 || refused != logins-1 {
+			t.Errorf("round %d: %d parallel first logins into an empty organization: %d admitted, %d refused; want 1 and %d",
+				round, logins, admitted, refused, logins-1)
+		}
+		if n := count(`SELECT count(*) FROM app_user WHERE organization_id = $1`); n != 1 {
+			t.Errorf("round %d: %d users after the bootstrap, want 1", round, n)
+		}
+		if n := count(`SELECT count(*) FROM role_assignment WHERE organization_id = $1`); n != 1 {
+			t.Errorf("round %d: %d role assignments after the bootstrap, want the default role of the first user only", round, n)
+		}
+
+		// The organization has its first user now: logins with a pending
+		// invitation are admitted, uninvited logins at the same time are not.
+		mixed := []func() error{uninvited(round, logins), uninvited(round, logins+1)}
+		for i := range 2 {
+			address := fmt.Sprintf("invited%d-r%d@b.invalid", i, round)
+			if _, err := f.Admin.Exec(bg, `
+				INSERT INTO user_invitation (organization_id, email, role_id, invited_by, token_hash, expires_at)
+				VALUES ($1, $2, $3, $4, 'hash', now() + interval '7 days')`, f.OrgB, address, viewer, f.ID()); err != nil {
+				t.Fatalf("round %d: seed invitation: %v", round, err)
+			}
+			subject := fmt.Sprintf("fl570-r%d-i%d", round, i)
+			mixed = append(mixed, func() error {
+				_, _, err := users.EnsureUser(bg, f.OrgB, subject, address, "Invited", "viewer")
+				return err
+			})
+		}
+		admitted, refused = race(round, mixed)
+		invitedIn := count(`SELECT count(*) FROM app_user WHERE organization_id = $1 AND oidc_subject LIKE 'fl570-r%-i_'`)
+		if admitted != 2 || refused != 2 || invitedIn != 2 {
+			t.Errorf("round %d: invited and uninvited logins: %d admitted (%d invited users), %d refused; want both invited admitted, both uninvited refused",
+				round, admitted, invitedIn, refused)
+		}
+		if n := count(`SELECT count(*) FROM user_invitation WHERE organization_id = $1 AND accepted_at IS NULL`); n != 0 {
+			t.Errorf("round %d: %d invitations still open, want both accepted", round, n)
+		}
+	}
 }
