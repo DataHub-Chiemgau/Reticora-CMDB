@@ -354,8 +354,11 @@ const SystemGUC = "app.system"
 // webhook_dead_letter, export_job, alert_rule, collector_enrollment_code,
 // api_key) and the system tables (platform_secret, WithSystemWrite)
 // return rows. Workers use it to find due work and then change rows per
-// organization in WithTenant (E-08). Every caller is listed in the
-// allow-list of the architecture test (WP-041).
+// organization in WithTenant (E-08). Every file outside this package that
+// calls it is listed with its reason in withSystemCallers
+// (tenantguard_allowlist.go); TestWithSystemCallersAreListed fails for an
+// unlisted file, a stale entry and an empty reason (WP-561). Test files
+// may call it.
 func WithSystem(ctx context.Context, pool *pgxpool.Pool, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
