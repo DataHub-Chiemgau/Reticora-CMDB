@@ -10,8 +10,13 @@ package database_test
 // expects a clean upgrade with the quarantined row and a migration_quarantine
 // that is defined exactly as on a fresh installation: columns, indexes, RLS
 // ENABLE and FORCE, policy, owner and grants. The whole schema must match the
-// fresh one. The shared database of TEST_DATABASE_URL is not changed; both
+// fresh one. The shared database of TEST_DATABASE_URL is not changed; all
 // scratch databases are dropped.
+//
+// Since WP-560 000066 writes to the table first and creates it as well. The
+// state is therefore set up twice: table dropped at version 56 (000066
+// creates it) and at version 66 (a database that applied 000066 before
+// WP-560; 000089 creates it).
 //
 // Retest:
 //   cd backend && TEST_DATABASE_URL=… go test -count=1 -v -run 'TestUpgradeFromPreQuarantine56' ./internal/database/
@@ -19,6 +24,7 @@ package database_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -47,11 +53,24 @@ func TestUpgradeFromPreQuarantine56(t *testing.T) {
 	fresh := scratchDatabase(ctx, t, dsn, "fresh649")
 	(&migrator{t: t, conn: fresh, files: files}).upTo(ctx, latest)
 
-	conn := scratchDatabase(ctx, t, dsn, "prequar649")
-	m := &migrator{t: t, conn: conn, files: files}
-	m.upTo(ctx, version56)
+	for _, dropAt := range []int{version56, 66} {
+		t.Run(fmt.Sprintf("table dropped at %06d", dropAt), func(t *testing.T) {
+			upgradeFromPreQuarantine(ctx, t, dsn, files, fresh, dropAt)
+		})
+	}
+}
 
-	// The state before E-26: 000056 applied without migration_quarantine.
+// upgradeFromPreQuarantine migrates a database of its own to dropAt, drops
+// migration_quarantine, migrates to the newest version and compares with
+// fresh.
+func upgradeFromPreQuarantine(ctx context.Context, t *testing.T, dsn string, files []migrationFiles, fresh *pgx.Conn, dropAt int) {
+	latest := len(files)
+	conn := scratchDatabase(ctx, t, dsn, fmt.Sprintf("prequar649_%d", dropAt))
+	m := &migrator{t: t, conn: conn, files: files}
+	m.upTo(ctx, dropAt)
+
+	// The state before E-26: 000056 applied without migration_quarantine
+	// (and, for dropAt 66, 000066 before WP-560).
 	const (
 		org    = "c0de0649-0000-4000-8000-00000000000a"
 		other  = "c0de0649-0000-4000-8000-00000000000b"

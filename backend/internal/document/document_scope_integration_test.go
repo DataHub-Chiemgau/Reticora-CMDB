@@ -2,9 +2,12 @@ package document_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -13,6 +16,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -218,5 +222,125 @@ func TestDocumentHandlerErrorsAreSanitized(t *testing.T) {
 	}
 	if w := call(http.MethodGet, "/api/v1/documents/"+ownDoc.ID+"/links", ""); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), ownCI2) {
 		t.Errorf("links of the own document: %d %s, want the new link", w.Code, w.Body.String())
+	}
+}
+
+// TestDocumentContentClientScope closes the open evidence of WP-030 (TEN-06,
+// MGT-01; WP-560) through the document handler with PostgreSQL and a blob
+// store: a principal restricted to client 1 uploads content to a document of
+// a client-1 CI and downloads it again (200, the stored bytes); a principal
+// restricted to client 2 neither downloads nor overwrites it (404). A
+// document whose storage key names another document's object (here the
+// client-2 document of the same organization, which the CHECK constraint of
+// 000066 still admits) answers 409 without a download URL.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestDocumentContentClientScope(t *testing.T) {
+	f := scopetest.Seed(t, "34")
+	ownCI := f.CI(t, f.OrgA, f.Client1, "doc-blob-c1")
+	foreignCI := f.CI(t, f.OrgA, f.Client2, "doc-blob-c2")
+	user := f.AppUser(t, f.OrgA, "doc-blob-author")
+
+	repo := document.NewPGRepository(f.App)
+	orgCtx := f.OrgCtx(f.OrgA)
+	docs := map[string]*document.Document{}
+	for title, ci := range map[string]string{"doc-blob-own": ownCI, "doc-blob-foreign": foreignCI, "doc-blob-stray": ownCI} {
+		d := &document.Document{OrganizationID: f.OrgA, Title: title, FileName: title + ".txt", UploadedBy: user, Category: "general"}
+		if err := repo.Create(orgCtx, d); err != nil {
+			t.Fatalf("org-wide document %s: %v", title, err)
+		}
+		if err := repo.LinkDocument(orgCtx, &document.DocumentLink{OrganizationID: f.OrgA, DocumentID: d.ID, EntityType: "ci", EntityID: ci}); err != nil {
+			t.Fatalf("link %s: %v", title, err)
+		}
+		docs[title] = d
+	}
+	ownDoc, foreignDoc, strayDoc := docs["doc-blob-own"], docs["doc-blob-foreign"], docs["doc-blob-stray"]
+
+	mux := chi.NewRouter()
+	document.NewHandler(repo, blob.NewFileStore(t.TempDir())).RegisterRoutes(mux)
+	scopeOf := func(client string) *database.TenantScope {
+		scope := database.OrgWideScope(f.OrgA, user)
+		scope.Clients = database.ScopeIDs(client)
+		return &scope
+	}
+	client1, client2 := scopeOf(f.Client1), scopeOf(f.Client2)
+	callAs := func(scope *database.TenantScope, method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "text/plain")
+		ctx := tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: user})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req.WithContext(database.ContextWithTenantScope(ctx, scope)))
+		return w
+	}
+	content := func(id string) string { return "/api/v1/documents/" + id + "/content" }
+	// download returns the bytes behind the download URL of a 200 answer.
+	download := func(w *httptest.ResponseRecorder) string {
+		t.Helper()
+		var body struct {
+			DownloadURL string `json:"download_url"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("download answer %s: %v", w.Body.String(), err)
+		}
+		u, err := url.Parse(body.DownloadURL)
+		if err != nil || u.Scheme != "file" {
+			t.Fatalf("download URL %q: %v", body.DownloadURL, err)
+		}
+		data, err := os.ReadFile(u.Path)
+		if err != nil {
+			t.Fatalf("read downloaded object: %v", err)
+		}
+		return string(data)
+	}
+	storedKey := func(id string) string {
+		t.Helper()
+		var key string
+		if err := f.Admin.QueryRow(context.Background(), `SELECT storage_key FROM document WHERE id = $1`, id).Scan(&key); err != nil {
+			t.Fatalf("storage key of %s: %v", id, err)
+		}
+		return key
+	}
+
+	// Client 1 uploads and downloads its content.
+	const ownContent = "wp560 content of client 1"
+	if w := callAs(client1, http.MethodPut, content(ownDoc.ID), ownContent); w.Code != http.StatusOK {
+		t.Fatalf("client-1 upload: %d %s", w.Code, w.Body.String())
+	}
+	ownKey := blob.OrgKey(f.OrgA, "documents", ownDoc.ID, "1")
+	if got := storedKey(ownDoc.ID); got != ownKey {
+		t.Fatalf("storage key after the upload: %q, want %q", got, ownKey)
+	}
+	dl := callAs(client1, http.MethodGet, content(ownDoc.ID), "")
+	if dl.Code != http.StatusOK {
+		t.Fatalf("client-1 download: %d %s", dl.Code, dl.Body.String())
+	}
+	if got := download(dl); got != ownContent {
+		t.Errorf("client-1 download: %q, want %q", got, ownContent)
+	}
+
+	// Client 2 neither reads nor overwrites it.
+	if w := callAs(client2, http.MethodGet, content(ownDoc.ID), ""); w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), "download_url") {
+		t.Errorf("client-2 download of the client-1 document: %d %s, want 404 without a URL", w.Code, w.Body.String())
+	}
+	if w := callAs(client2, http.MethodPut, content(ownDoc.ID), "overwritten by client 2"); w.Code != http.StatusNotFound {
+		t.Errorf("client-2 upload to the client-1 document: %d %s, want 404", w.Code, w.Body.String())
+	}
+	if got := download(callAs(client1, http.MethodGet, content(ownDoc.ID), "")); got != ownContent {
+		t.Errorf("client-1 content after the client-2 upload: %q, want %q", got, ownContent)
+	}
+
+	// A key of another document: the client-2 content behind a client-1
+	// document.
+	if w := callAs(client2, http.MethodPut, content(foreignDoc.ID), "wp560 content of client 2"); w.Code != http.StatusOK {
+		t.Fatalf("client-2 upload: %d %s", w.Code, w.Body.String())
+	}
+	foreignKey := storedKey(foreignDoc.ID)
+	if _, err := f.Admin.Exec(context.Background(), `UPDATE document SET storage_key = $2 WHERE id = $1`, strayDoc.ID, foreignKey); err != nil {
+		t.Fatalf("set the key of the client-2 document on a client-1 document: %v", err)
+	}
+	if w := callAs(client1, http.MethodGet, content(strayDoc.ID), ""); w.Code != http.StatusConflict ||
+		strings.Contains(w.Body.String(), "download_url") || strings.Contains(w.Body.String(), foreignDoc.ID) {
+		t.Errorf("client-1 download of a document with a foreign key: %d %s, want 409 without URL or key", w.Code, w.Body.String())
 	}
 }

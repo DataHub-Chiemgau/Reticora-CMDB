@@ -1032,3 +1032,6 @@ REL-01;[B];B;frontend/src/components/cmdb/CIRelationshipsCard.test.tsx;WP-573
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/savedview/savedview_integration_test.go;WP-573
 SEC-05;[B];B;backend/internal/assignment/pii_integration_test.go;WP-656
 AUD-04;[B];B;backend/internal/assignment/pii_integration_test.go;WP-656
+MGT-01;[P2];B;frontend/src/pages/DocumentListPage.test.tsx;WP-560
+TEN-06;[B];B;backend/internal/document/document_scope_integration_test.go;WP-560
+AGT-06;[P4];B;frontend/src/api/client.test.ts;WP-560

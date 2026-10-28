@@ -1083,7 +1083,6 @@ export interface DocumentCreateRequest {
   file_name: string;
   file_size: number;
   mime_type?: string;
-  storage_key: string;
   category?: string;
   tags?: string[];
 }
@@ -2750,15 +2749,6 @@ export interface EndpointAgent {
 export const agentApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<EndpointAgent>> {
     return fetchAPI(`/agents${buildQuery(params)}`);
-  },
-  enroll(data: {
-    agent_id: string;
-    hostname: string;
-    version?: string;
-    os?: string;
-    arch?: string;
-  }): Promise<EndpointAgent> {
-    return fetchAPI('/agents/enroll', { method: 'POST', body: JSON.stringify(data) });
   },
   updatePolicy(id: string, data: Partial<AgentPolicy>): Promise<EndpointAgent> {
     return fetchAPI(`/agents/${id}/policy`, { method: 'PATCH', body: JSON.stringify(data) });

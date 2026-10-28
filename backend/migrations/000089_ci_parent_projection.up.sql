@@ -12,8 +12,10 @@
 --   and located_in (CI → location).
 
 -- Databases that applied 000056 before E-26 have no migration_quarantine,
--- and this is the first migration that writes to it (F-378, E-100). Create
--- it here exactly as 000056 does; on every other database nothing happens.
+-- and this is the first migration that writes to it (F-378, E-100), unless
+-- they applied 000066 in its form since WP-560, which creates it as well.
+-- Create it here exactly as 000056 does; on every other database nothing
+-- happens.
 -- The event trigger of 000078 hands the table to reticora_owner; the grants
 -- are those the default privileges of 000056 give a table created there.
 DO $$

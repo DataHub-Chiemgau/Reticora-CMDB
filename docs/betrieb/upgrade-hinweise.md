@@ -221,6 +221,89 @@ direkt bis 179.
 prüft das Upgrade samt der von 000089 abgelegten Zeile und vergleicht das
 Schema mit einer frischen Installation.
 
+Seit WP-560 schreibt bereits 000066 in die Tabelle und legt sie ebenso an,
+wenn sie fehlt (nächster Abschnitt). 000089 legt sie dann nur noch auf
+Datenbanken an, die 000066 in der früheren Fassung angewendet haben. Der
+Test prüft beide Fälle (Tabelle auf Version 56 bzw. 66 entfernt).
+
+## Release-Hinweis: Bericht der von 000066 geleerten Storage-Keys (F-187, E-72)
+
+Stand: 2026-10-28. Umsetzung: WP-560. Entscheidung: E-72 (Option 1,
+entschieden 2026-10-26, nach dem Präzedenzfall E-26).
+
+Migration 000066 (WP-030) leert Storage-Keys von Dokumenten, die nicht unter
+dem Präfix der eigenen Organisation liegen (`org/<organization_id>/…` oder
+das Altformat `documents/<organization_id>/<Dokument-ID>/…`, jeweils ohne
+`..`), und legt danach die CHECK-Constraint
+`document_storage_key_org_prefix` an. Frühere Builds meldeten nur die Anzahl
+(`NOTICE: cleared 1 document storage keys outside the organization prefix`;
+golang-migrate zeigt NOTICEs nicht an). Welche Dokumente ihren
+Inhaltsverweis verloren haben, ließ sich danach nicht mehr feststellen.
+
+- 000066 schreibt jetzt vor dem Leeren je betroffenem Dokument eine Zeile in
+  `migration_quarantine`: `source_table = 'document'`,
+  `migration = '000066'`, `row_data` mit `id`, `organization_id` und dem
+  alten `storage_key`. Die Zeile gehört der Organisation des Dokuments
+  (RLS `migration_quarantine_isolation`).
+- Abfrage für Betreiber (Wartungsverbindung, wie für 000056 in
+  `docs/backup-dr.md`):
+
+  ```sql
+  SELECT organization_id,
+         row_data->>'id'          AS document_id,
+         row_data->>'storage_key' AS old_storage_key,
+         quarantined_at
+    FROM migration_quarantine
+   WHERE migration = '000066' AND source_table = 'document'
+   ORDER BY organization_id, document_id;
+  ```
+
+  Keine Zeile: Kein Key wurde geleert. Sonst hat das Dokument keinen Inhalt
+  mehr; der Inhalt wird mit `PUT /api/v1/documents/{id}/content` neu
+  hochgeladen. Der alte Key wird bewusst nicht wiederhergestellt, weil er auf
+  ein Objekt einer anderen Organisation zeigen kann. Erledigte Zeilen dürfen
+  gelöscht werden.
+- Die Down-Migration 000066 löscht die Berichtszeilen von 000066; die
+  geleerten Keys bleiben leer.
+- Datenbanken, die 000056 vor E-26 angewendet haben, besitzen keine
+  `migration_quarantine` (F-378, E-100). 000066 ist für sie jetzt die erste
+  Migration, die hineinschreibt, und legt die Tabelle wie 000089 an, wenn
+  `to_regclass('public.migration_quarantine')` leer ist (Definition von
+  000056; Eigentümer `reticora_owner` setzt 000078). Die Down-Migration
+  prüft die Tabelle ebenso. Das Upgrade solcher Datenbanken bricht dadurch
+  nicht ab; auf allen anderen Datenbanken und bei Neuinstallationen ist das
+  Schema unverändert.
+- Die Änderung wirkt nur für Installationen, die 000066 noch nicht
+  angewendet haben. Installationen über Version 65 haben keinen Bericht;
+  welche Keys geleert wurden, zeigt nur ein Backup von vor dem Upgrade auf
+  66, isoliert wiederhergestellt (`docs/backup-dr.md`, nie über die
+  Produktion), mit `SELECT version FROM schema_migrations` unter 66:
+
+  ```sql
+  SELECT id, organization_id, storage_key
+    FROM document
+   WHERE storage_key <> ''
+     AND NOT ((storage_key LIKE 'org/' || organization_id::text || '/%'
+               OR storage_key LIKE 'documents/' || organization_id::text || '/' || id::text || '/%')
+              AND position('..' IN storage_key) = 0);
+  ```
+
+Nachgestellt mit golang-migrate auf eigenen Datenbanken: Migrationen 1 bis
+65, zwei Organisationen, ein Dokument mit dem Key einer fremden Organisation
+und eines mit eigenem Key, dann `up`. Mit der alten Datei läuft `up` bis 184
+durch, der fremde Key ist leer, `migration_quarantine` enthält keine Zeile
+von 000066. Mit der neuen Datei enthält sie genau eine Zeile mit Dokument-ID
+und altem Key; der eigene Key bleibt. Dasselbe nach
+`DROP TABLE migration_quarantine` auf Version 65: `up` läuft bis 184 durch
+(nicht dirty), die Tabelle hat RLS ENABLE und FORCE, Eigentümer
+`reticora_owner` und die Rechte `reticora_app=arwd`.
+`TestMigration000066ReportsClearedStorageKeys` und
+`TestMigration000066WithoutMigrationQuarantine`
+(`backend/internal/database/migration_000066_report_integration_test.go`)
+prüfen den Bericht (Migration 65 → 66), die Sichtbarkeit je Organisation als
+`reticora_app`, die Down-Migration mit und ohne Tabelle und die angelegte
+Tabelle.
+
 ## Release-Hinweis: Upgrade mit vorhandenen Interface-Suffixnamen (F-310, E-94)
 
 Stand: 2026-10-28. Umsetzung: WP-592. Entscheidung: E-94 (Empfehlung

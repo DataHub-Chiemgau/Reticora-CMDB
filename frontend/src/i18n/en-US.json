@@ -595,7 +595,6 @@
     "size": "Size",
     "version": "Version",
     "upload": "Create Document",
-    "storageKey": "Storage Key",
     "categories": {
       "general": "General",
       "contract": "Contract",

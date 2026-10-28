@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import spec from './generated/schema.d.ts?raw';
+import clientSource from './client.ts?raw';
 
 const futureExpiry = '2999-01-01T00:00:00Z';
 
@@ -508,5 +509,17 @@ describe('scoped lists match the API (WP-556, UI-01/UI-02)', () => {
       Object.entries(SCOPED_LISTS).map(([p, keys]) => [p, [...keys].sort()]),
     );
     expect(fromClient).toEqual(scopedListsOfSpec(spec));
+  });
+});
+
+describe('agentApi and the enrollment contract (WP-560, F-189, AGT-06)', () => {
+  it('offers no enroll function without enrollment_token', async () => {
+    const { agentApi } = await import('./client');
+    // The agent enrolls itself (POST /agents/enroll) with a single-use
+    // enrollment_token; the server answers 400 without it. The handwritten
+    // client had an unused enroll without the token.
+    expect(spec).toMatch(/AgentEnrollRequest: \{[^}]*\benrollment_token: string;/);
+    expect(Object.keys(agentApi)).not.toContain('enroll');
+    expect(clientSource).not.toMatch(/\/agents\/enroll['"`]/);
   });
 });
