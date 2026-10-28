@@ -552,9 +552,15 @@ func (h *Handler) IngestMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.IngestPayload(r.Context(), orgID, data)
 	var invalid *InvalidMetricsError
+	var unknown *UnknownCIError
 	switch {
 	case errors.As(err, &invalid):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", invalid.Error())
+		return
+	case errors.As(err, &unknown):
+		// All or nothing: one sample naming a CI the caller does not see
+		// refuses the batch, like GET /cis/{id}/metrics (404, F-394).
+		api.WriteFieldError(w, &api.FieldError{Field: "ci_id", Message: unknown.Error(), Status: http.StatusNotFound})
 		return
 	case err != nil:
 		api.WriteRepoError(w, err)
@@ -570,6 +576,19 @@ type InvalidMetricsError struct{ Detail string }
 // validation: the fixed texts of decodeMetrics and IngestPayload.
 func (e *InvalidMetricsError) Error() string { return e.Detail }
 
+// UnknownCIError is an ingest sample whose ci_id names no CI the caller
+// sees: unknown, of another organization or outside its client/site scope,
+// which the caller must not tell apart (TEN-06). The whole batch is refused,
+// nothing is stored; POST /monitoring/metrics answers 404 naming the field
+// and the ci_id the caller sent (F-394). It is an api.ErrNotFound.
+type UnknownCIError struct{ CIID string }
+
+// validation: the fixed text with the ci_id of the request body.
+func (e *UnknownCIError) Error() string { return "ci " + e.CIID + " not found" }
+
+// Unwrap makes the error an api.ErrNotFound for api.WriteRepoError.
+func (e *UnknownCIError) Unwrap() error { return api.ErrNotFound }
+
 // IngestResult counts the samples of an ingest (MON-02): those stored with
 // their CI and those without a CI, which are not stored.
 type IngestResult struct {
@@ -583,7 +602,9 @@ type IngestResult struct {
 // CI: they are assigned by it among the CIs the scope of ctx sees, so a
 // client- or site-scoped caller assigns only to its own CIs. A sample
 // without a CI is not stored (metric_sample.ci_id is required) and counted
-// as unassigned. A body without valid metrics is an *InvalidMetricsError.
+// as unassigned. A body without valid metrics is an *InvalidMetricsError; a
+// sample naming a CI the scope does not see refuses the whole body with an
+// *UnknownCIError (nothing stored).
 func (h *Handler) IngestPayload(ctx context.Context, orgID string, data []byte) (IngestResult, error) {
 	metrics, err := decodeMetrics(data)
 	if err != nil {

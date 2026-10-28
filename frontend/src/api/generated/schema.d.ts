@@ -2659,7 +2659,10 @@ export interface paths {
      */
     get: operations['queryMetrics'];
     put?: never;
-    /** Ingest one or more metrics */
+    /**
+     * Ingest one or more metrics
+     * @description Stores the samples for the caller's organization (MON-02). A sample with `ci_id` is stored for that CI; a sample without `ci_id` is assigned by its `target` label among the CIs the caller sees, or counted as unassigned and not stored. The body is accepted whole or not at all: when one sample names a CI that the caller does not see (unknown, of another organization or outside the caller's client/site scope, TEN-06), the request answers 404 with `field` `ci_id` and the offending ci_id in `detail`, like GET /api/v1/cis/{id}/metrics, and no sample of the body is stored (F-394). A malformed `ci_id` answers 400. The collectors' edge subject `.metrics` answers the same statuses.
+     */
     post: operations['ingestMetrics'];
     delete?: never;
     options?: never;
@@ -17499,6 +17502,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description A sample names a CI the caller does not see (`field` ci_id, the ci_id in `detail`); nothing of the body is stored. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };

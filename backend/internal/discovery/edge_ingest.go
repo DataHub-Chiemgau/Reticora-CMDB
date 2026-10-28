@@ -202,10 +202,11 @@ func (h *Handler) EdgeHeartbeat(ctx context.Context, orgID, collectorID string, 
 
 // EdgeMetrics stores the metric samples a collector sent over the edge like
 // POST /api/v1/monitoring/metrics (MON-02): 403 with the problem type of
-// the entitlement middleware without the monitoring feature, otherwise 202
-// with the stored and the unassigned samples. The samples are assigned in
-// the collector's scope; the samples of an unknown or disabled collector
-// are refused.
+// the entitlement middleware without the monitoring feature, 404 for a
+// sample whose ci_id names a CI outside the collector's scope (nothing of
+// the batch is stored), otherwise 202 with the stored and the unassigned
+// samples. The samples are assigned in the collector's scope; the samples
+// of an unknown or disabled collector are refused.
 func (h *Handler) EdgeMetrics(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply {
 	if err := h.checkCollector(ctx, orgID, collectorID); err != nil {
 		return edgeRefusal(err)
@@ -235,9 +236,14 @@ func (h *Handler) edgeMetrics(ctx context.Context, orgID, collectorID string, da
 	}
 	result, err := h.metrics.IngestPayload(ctx, orgID, data)
 	var invalid *monitoring.InvalidMetricsError
+	var unknown *monitoring.UnknownCIError
 	switch {
 	case errors.As(err, &invalid):
 		return EdgeReply{Status: http.StatusBadRequest, Error: invalid.Error()}
+	case errors.As(err, &unknown):
+		// A sample naming a CI outside the collector's scope refuses the
+		// batch as on the API (404, nothing stored, F-394).
+		return EdgeReply{Status: http.StatusNotFound, Error: "ci_id: " + unknown.Error()}
 	case err != nil:
 		slog.Error("edge metrics ingest failed", "organization_id", orgID, "collector_id", collectorID, "error", err)
 		return EdgeReply{Status: http.StatusInternalServerError, Error: "metrics ingest failed"}
