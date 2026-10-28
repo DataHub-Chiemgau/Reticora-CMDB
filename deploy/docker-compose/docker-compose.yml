@@ -340,6 +340,12 @@ services:
       # while only the self-signed bootstrap certificate is installed. Empty
       # (the default) means "system trust store only".
       RETICORA_OIDC_CA_CERT_FILE: "${RETICORA_OIDC_CA_CERT_FILE:-}"
+      # The Keycloak admin client (signup, invitations, MFA binding) talks to
+      # Keycloak inside the compose network: the frontend proxies only
+      # /realms/ and /resources/, so the admin REST API under the public
+      # issuer host answers 405 (WP-646). Keycloak still builds the public
+      # URLs from the forwarded host the server sends along.
+      RETICORA_KEYCLOAK_INTERNAL_URL: "${RETICORA_KEYCLOAK_INTERNAL_URL:-http://keycloak:8080}"
       # Page the link of the invitation mail opens (TLC-03, NTF-05), on the
       # public base URL install-cloud.sh writes into .env (same default).
       RETICORA_INVITATION_ACCEPT_URL: "${RETICORA_PUBLIC_BASE_URL:-http://localhost:3000}/invitations/accept"

@@ -15459,6 +15459,8 @@ TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-645
 
 **Anmerkung vom 2026-10-28 (CI-Lauf 40623470172, Head 1f316fc):** Die TLS-Prüfung brach in beiden WebKit-Jobs beim Signup ab (`signup failed … keycloak: token: Post "https://<Name>/realms/reticora/protocol/openid-connect/token": … x509: certificate signed by unknown authority`). WebKit vertraute dem Origin (Seiten und Formulare geladen); der Defekt lag im Server: der Keycloak-Admin-Client (Signup, Einladungen, MFA-Bindung) nutzte nur den System-Trust-Store und nicht `RETICORA_OIDC_CA_CERT_FILE` wie der OIDC-Provider. Behoben in `backend/cmd/server/main.go` (`keycloakAccounts`) mit Test `TestKeycloakAccountsTrustTheOIDCCABundle`; kein Abschwächen der Prüfung.
 
+**Anmerkung vom 2026-10-28 (CI-Lauf 40625054870, Head 5b28d52):** Nach dem CA-Fix erreichte der Admin-Token-Abruf Keycloak; `POST /admin/realms/reticora/users` beantwortete das Frontend-nginx aber mit 405, weil es `/admin/` absichtlich nicht weiterleitet (COL-08). Der Admin-Client geht deshalb mit `RETICORA_KEYCLOAK_INTERNAL_URL` (Compose-Standard `http://keycloak:8080`) direkt zu Keycloak und setzt `Host`/`X-Forwarded-*` des öffentlichen Issuers, damit Token-Issuer und Mail-Links unverändert bleiben (`backend/internal/signup/keycloak_route.go`, Tests `TestRouteThroughInternalURL*`). Derselbe Defekt betraf jede Compose-Installation mit TLS-Domäne; kein Abschwächen der Prüfung.
+
 **Dateien (6 Einträge):**
 
 - .github/workflows/install-smoke.yml (TLS-Origin für webkit und mobile-safari)

@@ -143,6 +143,12 @@ type Config struct {
 	SignupVerifyURL           string
 	KeycloakAdminClientID     string
 	KeycloakAdminClientSecret string
+	// KeycloakInternalURL optionally is the base URL (http(s)://host[:port])
+	// under which the server reaches Keycloak directly, e.g.
+	// http://keycloak:8080 in the compose network. The Keycloak admin client
+	// then sends its requests there instead of to the public issuer host,
+	// whose reverse proxy does not expose /admin/ (WP-646).
+	KeycloakInternalURL string
 	// SignupCaptchaKey signs the ALTCHA challenges (at least 32 bytes, the
 	// same on every instance); SignupBlockedDomains/SignupAllowedDomains
 	// extend the disposable-domain lists (E-33).
@@ -267,6 +273,7 @@ func Load() *Config {
 		SignupVerifyURL:           l.str("RETICORA_SIGNUP_VERIFY_URL", ""),
 		KeycloakAdminClientID:     l.str("RETICORA_KEYCLOAK_ADMIN_CLIENT_ID", ""),
 		KeycloakAdminClientSecret: l.str("RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
+		KeycloakInternalURL:       l.str("RETICORA_KEYCLOAK_INTERNAL_URL", ""),
 		SignupCaptchaKey:          l.str("RETICORA_SIGNUP_CAPTCHA_KEY", ""),
 		SignupBlockedDomains:      l.str("RETICORA_SIGNUP_BLOCKED_DOMAINS", ""),
 		SignupAllowedDomains:      l.str("RETICORA_SIGNUP_ALLOWED_DOMAINS", ""),

@@ -294,6 +294,19 @@ MFA binding of org_admins).
 system store, for the OIDC provider and the Keycloak admin client alike.
 Re-run the installer if the variable is missing.
 
+### `signup failed … keycloak: create user: status 405` in server logs
+
+**Cause:** The Keycloak admin client (signup, accepted invitations, MFA
+binding of org_admins) sent the admin REST API (`/admin/realms/…`) to the
+public issuer host. The frontend proxies only `/realms/` and `/resources/`;
+`/admin/` is deliberately not exposed (COL-08), so nginx answers 405.
+
+**Fix:** Already handled in the compose stack: `RETICORA_KEYCLOAK_INTERNAL_URL`
+defaults to `http://keycloak:8080`, and the admin client sends its requests
+there with the public host in `Host` and `X-Forwarded-*`, so Keycloak keeps
+issuing tokens and mail links for the public issuer. Other deployments set
+the variable to an address under which the server reaches Keycloak directly.
+
 ### How the Let's Encrypt certificate is issued
 
 With a domain (`RETICORA_TLS_DOMAIN`) the installer first creates a
