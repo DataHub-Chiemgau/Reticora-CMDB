@@ -964,3 +964,4 @@ REL-04;[B];D;backend/internal/relationship/provenance_integration_test.go;WP-583
 TEN-06;[B];B;backend/internal/webhook/webhook_scope_integration_test.go;WP-562
 OPS-05;[B];B;backend/internal/webhook/delivery_claim_integration_test.go;WP-562
 TEN-06;[B];B;backend/internal/database/tenantguard_test.go;WP-561
+API-02;[B];C;backend/internal/identity/apikey_integration_test.go;WP-565

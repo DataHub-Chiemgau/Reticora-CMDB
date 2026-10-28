@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -162,6 +163,39 @@ func (s *PGAPIKeyStore) List(ctx context.Context, orgID string) ([]StoredAPIKey,
 		return rows.Err()
 	})
 	return keys, err
+}
+
+// ListPage returns a page of the organization's keys without hashes,
+// newest first on (created_at, id): at most one more than the limit (see
+// api.NewestFirstSQL) and the number of keys (API-02, F-215).
+func (s *PGAPIKeyStore) ListPage(ctx context.Context, orgID string, page api.PaginationParams) ([]StoredAPIKey, int, error) {
+	var keys []StoredAPIKey
+	var total int
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM api_key WHERE organization_id = $1`, orgID).Scan(&total); err != nil {
+			return fmt.Errorf("count api_key: %w", err)
+		}
+		where, tail, args, err := api.NewestFirstSQL(page, 2)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT `+apiKeyColumns+` FROM api_key WHERE organization_id = $1 AND `+where+` `+tail,
+			append([]any{orgID}, args...)...)
+		if err != nil {
+			return fmt.Errorf("list api_key: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			key, scanErr := scanAPIKey(rows)
+			if scanErr != nil {
+				return fmt.Errorf("scan api_key: %w", scanErr)
+			}
+			key.KeyHash = ""
+			keys = append(keys, *key)
+		}
+		return rows.Err()
+	})
+	return keys, total, err
 }
 
 // Get returns a key of the organization without its hash; an unknown or
@@ -413,6 +447,15 @@ func (m *MemoryAPIKeyStore) List(_ context.Context, orgID string) ([]StoredAPIKe
 	}
 	return out, nil
 }
+
+// ListPage implements APIKeyManager.
+func (m *MemoryAPIKeyStore) ListPage(ctx context.Context, orgID string, page api.PaginationParams) ([]StoredAPIKey, int, error) {
+	keys, _ := m.List(ctx, orgID)
+	return api.NewestFirstSlice(keys, page, apiKeyPosition)
+}
+
+// apiKeyPosition is the (created_at, id) position of a key in its list.
+func apiKeyPosition(k *StoredAPIKey) (createdAt time.Time, id string) { return k.CreatedAt, k.ID }
 
 func (m *MemoryAPIKeyStore) find(orgID, id string) *StoredAPIKey {
 	for _, k := range m.keys {

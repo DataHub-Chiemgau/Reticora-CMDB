@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -205,5 +209,115 @@ func TestAPIKeyLifecycle(t *testing.T) {
 	want := "api_key.created,api_key.created,api_key.rotated,api_key.rotated,api_key.revoked"
 	if strings.Join(actions, ",") != want {
 		t.Errorf("audit %v, want %s", actions, want)
+	}
+}
+
+// TestAPIKeyListPagesAtMost200 is the retest of F-215 (WP-565, API-02):
+// with 250 keys GET /api-keys answers at most 200 entries and a signed
+// next_cursor; the second page returns the remaining 50, none twice, newest
+// first on (created_at, id) also across keys created at the same instant.
+// Without limit the page holds 50 entries, a larger limit is capped to 200;
+// a forged cursor or a keyset cursor of another order is 400; the keys of
+// another organization never show.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAPIKeyListPagesAtMost200(t *testing.T) {
+	f := scopetest.Seed(t, "61")
+	bg := context.Background()
+	owner := f.AppUser(t, f.OrgA, "page-owner")
+	// 250 keys of organization A in 125 instants (two keys share each
+	// created_at, so the order needs the id), 3 keys of organization B.
+	if _, err := f.Admin.Exec(bg, `INSERT INTO api_key (organization_id, name, key_hash, key_prefix, permissions, created_by, created_at)
+		SELECT $1, 'page-' || n, md5('page-' || n), 'PAGE' || lpad(n::text, 8, '0'), '{ci:read}', $2,
+			timestamptz '2026-01-01 00:00:00.123456Z' + (n / 2) * interval '1 second'
+		FROM generate_series(1, 250) AS n`, f.OrgA, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Admin.Exec(bg, `INSERT INTO api_key (organization_id, name, key_hash, key_prefix, permissions, created_by)
+		SELECT $1, 'foreign-' || n, md5('foreign-' || n), 'FOREIGN' || lpad(n::text, 5, '0'), '{ci:read}', $2
+		FROM generate_series(1, 3) AS n`, f.OrgB, owner); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := chi.NewRouter()
+	identity.NewAPIKeyHandler(identity.NewPGAPIKeyStore(f.App)).RegisterRoutes(mux)
+	user := identity.Principal{Subject: owner, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser,
+		Permissions: []identity.Permission{identity.PermAPIKeyManage, identity.PermCIRead}}
+	type page struct {
+		Data []struct {
+			ID        string    `json:"id"`
+			Name      string    `json:"name"`
+			CreatedAt time.Time `json:"created_at"`
+		} `json:"data"`
+		Total      int    `json:"total"`
+		Limit      int    `json:"limit"`
+		HasMore    bool   `json:"has_more"`
+		NextCursor string `json:"next_cursor"`
+	}
+	list := func(query string) (int, page, string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/api-keys"+query, nil)
+		scope := database.OrgWideScope(f.OrgA, owner)
+		ctx := identity.WithPrincipal(req.Context(), user)
+		ctx = tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: owner})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req.WithContext(database.ContextWithTenantScope(ctx, &scope)))
+		var p page
+		_ = json.Unmarshal(w.Body.Bytes(), &p)
+		return w.Code, p, w.Body.String()
+	}
+
+	code, first, body := list("?limit=200")
+	if code != http.StatusOK {
+		t.Fatalf("first page: %d %.300s", code, body)
+	}
+	if len(first.Data) > 200 || first.NextCursor == "" || !first.HasMore {
+		t.Fatalf("first page of 250 keys: %d entries, next_cursor %q, has_more %v; want at most 200 and a next_cursor (API-02, F-215)",
+			len(first.Data), first.NextCursor, first.HasMore)
+	}
+	if len(first.Data) != 200 || first.Total != 250 || first.Limit != 200 {
+		t.Errorf("first page: %d entries, total %d, limit %d; want 200 of 250", len(first.Data), first.Total, first.Limit)
+	}
+	code, second, body := list("?limit=200&cursor=" + url.QueryEscape(first.NextCursor))
+	if code != http.StatusOK {
+		t.Fatalf("second page: %d %.300s", code, body)
+	}
+	if len(second.Data) != 50 || second.NextCursor != "" || second.HasMore {
+		t.Errorf("second page: %d entries, next_cursor %q, has_more %v; want the remaining 50 and no cursor",
+			len(second.Data), second.NextCursor, second.HasMore)
+	}
+	seen := map[string]bool{}
+	all := slices.Concat(first.Data, second.Data)
+	for i, k := range all {
+		if seen[k.ID] {
+			t.Errorf("key %s (%s) returned twice", k.ID, k.Name)
+		}
+		seen[k.ID] = true
+		if !strings.HasPrefix(k.Name, "page-") {
+			t.Errorf("foreign key %s listed", k.Name)
+		}
+		if i > 0 {
+			prev := all[i-1]
+			if k.CreatedAt.After(prev.CreatedAt) || (k.CreatedAt.Equal(prev.CreatedAt) && k.ID > prev.ID) {
+				t.Errorf("entry %d (%s %s) does not follow %s %s in the order created_at desc, id desc", i, k.CreatedAt, k.ID, prev.CreatedAt, prev.ID)
+			}
+		}
+	}
+	if len(seen) != 250 {
+		t.Errorf("two pages returned %d distinct keys, want 250", len(seen))
+	}
+
+	if code, p, body := list(""); code != http.StatusOK || len(p.Data) != 50 || p.Limit != 50 || p.NextCursor == "" {
+		t.Errorf("default page: %d, %d entries, limit %d, next_cursor %q; want 50 and a cursor (%.200s)", code, len(p.Data), p.Limit, p.NextCursor, body)
+	}
+	if code, p, _ := list("?limit=1000"); code != http.StatusOK || len(p.Data) != 200 || p.Limit != 200 {
+		t.Errorf("limit=1000: %d, %d entries, limit %d; want capped to 200", code, len(p.Data), p.Limit)
+	}
+	if code, _, body := list("?cursor=eyJpIjoiY2ktOSJ9.AAAAAAAAAAAAAAAAAAAAAA"); code != http.StatusBadRequest {
+		t.Errorf("forged cursor: %d %.200s, want 400", code, body)
+	}
+	other := api.EncodeCursor(api.Cursor{Sort: "name", Dir: "asc", Value: "page-1", ID: all[0].ID})
+	if code, _, body := list("?cursor=" + url.QueryEscape(other)); code != http.StatusBadRequest {
+		t.Errorf("cursor of another order: %d %.200s, want 400", code, body)
 	}
 }

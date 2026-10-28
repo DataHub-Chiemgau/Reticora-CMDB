@@ -390,6 +390,56 @@ describe('complete lists over several pages (API-02)', () => {
       expect(offsets).toEqual(['0', '200', '400']);
     },
   );
+
+  // F-215: attribute definitions and invitations page at 200 with a keyset
+  // cursor; the field editor and the user administration read every page.
+  it.each([
+    ['attribute definitions', '/api/v1/attribute-definitions'],
+    ['invitations', '/api/v1/invitations'],
+  ] as const)('the %s list follows next_cursor: 230 rows in two pages', async (_name, path) => {
+    const rows = Array.from({ length: 230 }, (_, i) => ({ id: `row-${i}`, key: `k${i}` }));
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname !== path) {
+        return Promise.resolve(jsonResponse({ detail: 'unexpected' }, 404));
+      }
+      // The server answers 50 rows without limit and at most 200 (parameter Limit).
+      const limit = Math.min(Number(url.searchParams.get('limit') ?? 50), 200);
+      const start = url.searchParams.get('cursor') === 'after-200' ? 200 : 0;
+      const end = Math.min(start + limit, rows.length);
+      return Promise.resolve(
+        jsonResponse({
+          data: rows.slice(start, end),
+          total: rows.length,
+          limit,
+          offset: 0,
+          has_more: end < rows.length,
+          ...(end < rows.length ? { next_cursor: `after-${end}` } : {}),
+        }),
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await importClientWithSession();
+    const { invitationApi } = await import('./client');
+    const { attributeDefinitionApi } = await import('./cmdb');
+
+    const all =
+      path === '/api/v1/invitations'
+        ? await invitationApi.list()
+        : (await attributeDefinitionApi.list({ ci_type_id: 'type-1', scope: 'type' })).data;
+
+    expect(all).toHaveLength(230);
+    expect(new Set(all.map((row) => row.id)).size).toBe(230);
+    const urls = fetchMock.mock.calls.map((call) => new URL(String(call[0]), 'http://localhost'));
+    expect(urls.map((url) => url.searchParams.get('limit'))).toEqual(['200', '200']);
+    expect(urls.map((url) => url.searchParams.get('cursor'))).toEqual([null, 'after-200']);
+    if (path === '/api/v1/attribute-definitions') {
+      for (const url of urls) {
+        expect(url.searchParams.get('ci_type_id')).toBe('type-1');
+        expect(url.searchParams.get('scope')).toBe('type');
+      }
+    }
+  });
 });
 
 // scopedListsOfSpec reads, from the types generated from api/openapi.yaml

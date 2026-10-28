@@ -239,13 +239,23 @@ paths:
         - OperatorAuth: []
         - BreakGlassAuth: []
       summary: List every organization
+      description: >-
+        Pages newest first on (created_at, id) (API-02, F-215): `limit`
+        (default 50, at most 200) and the signed keyset `cursor` from
+        `next_cursor`.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: Organizations
+          description: Organizations, newest first
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperatorOrgListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4724,6 +4734,14 @@ paths:
       operationId: listAPIKeys
       tags: [API Keys]
       summary: List the organization's API keys (without secrets)
+      description: >-
+        Pages newest first on (created_at, id) (API-02, F-215): `limit`
+        (default 50, at most 200) and the signed keyset `cursor` from
+        `next_cursor`.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
           description: API keys of the organization, newest first
@@ -4731,6 +4749,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIKeyListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -8818,7 +8838,15 @@ paths:
       operationId: listInvitations
       tags: [Users]
       summary: List the organization's invitations (TLC-03)
-      description: Status is derived from acceptance and expiry (pending, accepted, expired). Requires user:manage.
+      description: >-
+        Status is derived from acceptance and expiry (pending, accepted,
+        expired). Requires user:manage. Pages newest first on (created_at,
+        id) (API-02, F-215): `limit` (default 50, at most 200) and the signed
+        keyset `cursor` from `next_cursor`.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
           description: Invitations, newest first
@@ -8826,6 +8854,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InvitationListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -8996,13 +9026,23 @@ paths:
       operationId: listServiceAccounts
       tags: [Service Accounts]
       summary: List the organization's service accounts
+      description: >-
+        Pages newest first on (created_at, id) (API-02, F-215): `limit`
+        (default 50, at most 200) and the signed keyset `cursor` from
+        `next_cursor`.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: Service accounts with their role assignments
+          description: Service accounts with their role assignments, newest first
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceAccountListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -11399,17 +11439,24 @@ paths:
       description: >-
         The single source of attribute validation and indexing (DB-03): the
         organization's definitions and the read-only system definitions
-        (`is_system`). Filters: `ci_type_id`, `scope` (type, global).
+        (`is_system`). Filters: `ci_type_id`, `scope` (type, global). Pages
+        newest first on (created_at, id) (API-02, F-215): `limit` (default
+        50, at most 200) and the signed keyset `cursor` from `next_cursor`.
       parameters:
         - { name: ci_type_id, in: query, schema: { type: string } }
         - { name: scope, in: query, schema: { type: string, enum: [type, global] } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: Attribute definitions
+          description: Attribute definitions, newest first
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AttributeDefinitionListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '503':

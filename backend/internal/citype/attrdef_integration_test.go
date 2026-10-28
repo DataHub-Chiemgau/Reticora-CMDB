@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -313,5 +316,117 @@ func TestAttributeUniqueFlagConflict(t *testing.T) {
 	}
 	if got := readIndex(t, f.Admin, IndexName(def.ID, true)); !got.valid || !got.unique {
 		t.Errorf("unique index = %+v", got)
+	}
+}
+
+// TestAttributeDefinitionListPages covers WP-565 (API-02, F-215): GET
+// /attribute-definitions pages newest first on (created_at, id) with its
+// filters. ?limit=1 answers one entry and a next_cursor; following the
+// cursors returns every definition of the type once. Without filter the
+// pages of 200 hold the organization's and the system's definitions, none
+// of another organization, each once. A forged cursor is 400.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAttributeDefinitionListPages(t *testing.T) {
+	f := scopetest.Seed(t, "89")
+	bg := context.Background()
+	repo := NewPGRepository(f.App)
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+	ctxFor := func(orgID string) context.Context {
+		return tenant.WithTenant(f.OrgCtx(orgID), tenant.TenantInfo{OrganizationID: orgID, UserID: f.User})
+	}
+	orgA := ctxFor(f.OrgA)
+	call := func(ctx context.Context, method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	for _, org := range []string{f.OrgA, f.OrgB} {
+		typ := &Type{OrganizationID: org, Key: "wp565-switch", Name: "wp565-switch"}
+		if err := repo.Create(ctxFor(org), typ); err != nil {
+			t.Fatalf("create type: %v", err)
+		}
+		for _, key := range []string{"ports", "uplinks", "firmware"} {
+			if w := call(ctxFor(org), http.MethodPost, "/api/v1/attribute-definitions",
+				`{"ci_type_id":"`+typ.ID+`","key":"`+key+`","display_name":{"en":"`+key+`"},"data_type":"string"}`); w.Code != http.StatusCreated {
+				t.Fatalf("create %s: %d %s", key, w.Code, w.Body.String())
+			}
+		}
+	}
+	var typeA string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE organization_id = $1 AND key = 'wp565-switch'`, f.OrgA).Scan(&typeA); err != nil {
+		t.Fatal(err)
+	}
+	ids := func(query string, args ...any) []string {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, query, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, id)
+		}
+		return out
+	}
+	// pages reads the list along next_cursor with the given limit.
+	pages := func(path string, limit int) (got []string, total int) {
+		t.Helper()
+		sep := "?"
+		if strings.Contains(path, "?") {
+			sep = "&"
+		}
+		base := path + sep + "limit=" + strconv.Itoa(limit)
+		for next := base; next != ""; {
+			w := call(orgA, http.MethodGet, next, "")
+			var page struct {
+				Data []struct {
+					ID string `json:"id"`
+				} `json:"data"`
+				Total      int    `json:"total"`
+				Limit      int    `json:"limit"`
+				NextCursor string `json:"next_cursor"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &page); w.Code != http.StatusOK || err != nil || len(page.Data) == 0 ||
+				len(page.Data) > limit || page.Limit != limit {
+				t.Fatalf("GET %s: %d %.300s; want 1 to %d entries", next, w.Code, w.Body.String(), limit)
+			}
+			for _, d := range page.Data {
+				got = append(got, d.ID)
+			}
+			total = page.Total
+			if len(got) < total && page.NextCursor == "" {
+				t.Fatalf("GET %s: %d of %d entries without next_cursor", next, len(got), total)
+			}
+			if len(got) > total {
+				t.Fatalf("GET %s: more entries than the total %d", next, total)
+			}
+			next = ""
+			if page.NextCursor != "" {
+				next = base + "&cursor=" + url.QueryEscape(page.NextCursor)
+			}
+		}
+		return got, total
+	}
+
+	want := ids(`SELECT id::text FROM attribute_definition WHERE ci_type_id = $1 ORDER BY created_at DESC, id DESC`, typeA)
+	if got, total := pages("/api/v1/attribute-definitions?ci_type_id="+typeA, 1); len(want) != 3 || !slices.Equal(got, want) || total != 3 {
+		t.Errorf("definitions of the type with limit=1: %v (total %d), want %v newest first", got, total, want)
+	}
+	want = ids(`SELECT id::text FROM attribute_definition WHERE organization_id = $1 OR organization_id IS NULL
+		ORDER BY created_at DESC, id DESC`, f.OrgA)
+	if got, total := pages("/api/v1/attribute-definitions", 200); !slices.Equal(got, want) || total != len(want) {
+		t.Errorf("every definition in pages of 200: %d rows (total %d), want the %d of the organization and the system newest first",
+			len(got), total, len(want))
+	}
+	if w := call(orgA, http.MethodGet, "/api/v1/attribute-definitions?cursor=eyJpIjoiY2ktOSJ9.AAAAAAAAAAAAAAAAAAAAAA", ""); w.Code != http.StatusBadRequest {
+		t.Errorf("forged cursor: %d %.200s, want 400", w.Code, w.Body.String())
 	}
 }

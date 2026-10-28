@@ -125,17 +125,29 @@ func writeInvitationError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
-// List returns the organization's invitations with their status.
+// List returns a page of the organization's invitations with their status,
+// newest first on (created_at, id): limit (default 50, at most 200) and the
+// signed cursor of API-02 (F-215).
 func (h *InvitationHandler) List(w http.ResponseWriter, r *http.Request) {
 	if h.unavailable(w) {
 		return
 	}
-	items, err := h.repo.ListInvitations(r.Context(), tenant.FromContext(r.Context()).OrganizationID)
+	page, ok := api.ParseNewestFirstPage(w, r)
+	if !ok {
+		return
+	}
+	items, total, err := h.repo.ListInvitations(r.Context(), tenant.FromContext(r.Context()).OrganizationID, page)
 	if err != nil {
 		writeInvitationError(w, r, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[Invitation]{Data: items, Total: len(items), Limit: len(items)})
+	api.WriteJSON(w, http.StatusOK, api.NewestFirstPage(items, total, page, invitationPosition))
+}
+
+// invitationPosition is the (created_at, id) position of an invitation in
+// its list.
+func invitationPosition(inv *Invitation) (createdAt time.Time, id string) {
+	return inv.CreatedAt, inv.ID
 }
 
 // invitingPrincipal is the principal whose rights bound an issued or renewed

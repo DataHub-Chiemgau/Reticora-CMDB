@@ -90,7 +90,9 @@ func writeAttributeError(w http.ResponseWriter, err error) {
 }
 
 // ListAttributeDefinitions handles GET /api/v1/attribute-definitions
-// (?ci_type_id=, ?scope=type|global).
+// (?ci_type_id=, ?scope=type|global): a page newest first on (created_at,
+// id) with limit (default 50, at most 200) and the signed cursor of API-02
+// (F-215).
 func (h *Handler) ListAttributeDefinitions(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantOr401(w, r)
 	if !ok {
@@ -100,14 +102,20 @@ func (h *Handler) ListAttributeDefinitions(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	page, ok := api.ParseNewestFirstPage(w, r)
+	if !ok {
+		return
+	}
 	q := r.URL.Query()
-	items, err := store.ListAttributeDefinitions(r.Context(), t.OrganizationID,
-		AttributeFilter{CITypeID: q.Get("ci_type_id"), Scope: q.Get("scope")})
+	items, total, err := store.ListAttributeDefinitionPage(r.Context(), t.OrganizationID,
+		AttributeFilter{CITypeID: q.Get("ci_type_id"), Scope: q.Get("scope")}, page)
 	if err != nil {
 		writeAttributeError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[AttributeDefinition]{Data: items, Total: len(items), Limit: len(items)})
+	api.WriteJSON(w, http.StatusOK, api.NewestFirstPage(items, total, page, func(d *AttributeDefinition) (time.Time, string) {
+		return d.CreatedAt, d.ID
+	}))
 }
 
 // GetAttributeDefinition handles GET /api/v1/attribute-definitions/{id}.

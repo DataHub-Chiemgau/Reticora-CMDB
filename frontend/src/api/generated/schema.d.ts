@@ -89,7 +89,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List every organization */
+    /**
+     * List every organization
+     * @description Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+     */
     get: operations['listOrganizationsAsOperator'];
     put?: never;
     /**
@@ -2459,7 +2462,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the organization's API keys (without secrets) */
+    /**
+     * List the organization's API keys (without secrets)
+     * @description Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+     */
     get: operations['listAPIKeys'];
     put?: never;
     /**
@@ -4254,7 +4260,7 @@ export interface paths {
     };
     /**
      * List the organization's invitations (TLC-03)
-     * @description Status is derived from acceptance and expiry (pending, accepted, expired). Requires user:manage.
+     * @description Status is derived from acceptance and expiry (pending, accepted, expired). Requires user:manage. Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
      */
     get: operations['listInvitations'];
     put?: never;
@@ -4342,7 +4348,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the organization's service accounts */
+    /**
+     * List the organization's service accounts
+     * @description Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+     */
     get: operations['listServiceAccounts'];
     put?: never;
     /** Create a service account (RBA-08) */
@@ -5782,7 +5791,7 @@ export interface paths {
     };
     /**
      * List attribute definitions (MET-10)
-     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `scope` (type, global).
+     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `scope` (type, global). Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
      */
     get: operations['listAttributeDefinitions'];
     put?: never;
@@ -11498,14 +11507,30 @@ export interface operations {
   };
   listOrganizationsAsOperator: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Organizations */
+      /** @description Organizations, newest first */
       200: {
         headers: {
           [name: string]: unknown;
@@ -11514,6 +11539,7 @@ export interface operations {
           'application/json': components['schemas']['OperatorOrgListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -16760,7 +16786,23 @@ export interface operations {
   };
   listAPIKeys: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -16776,6 +16818,7 @@ export interface operations {
           'application/json': components['schemas']['APIKeyListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       500: components['responses']['InternalServerError'];
@@ -21509,7 +21552,23 @@ export interface operations {
   };
   listInvitations: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -21525,6 +21584,7 @@ export interface operations {
           'application/json': components['schemas']['InvitationListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       503: components['responses']['ServiceUnavailable'];
@@ -21656,14 +21716,30 @@ export interface operations {
   };
   listServiceAccounts: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Service accounts with their role assignments */
+      /** @description Service accounts with their role assignments, newest first */
       200: {
         headers: {
           [name: string]: unknown;
@@ -21672,6 +21748,7 @@ export interface operations {
           'application/json': components['schemas']['ServiceAccountListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
@@ -26162,6 +26239,21 @@ export interface operations {
       query?: {
         ci_type_id?: string;
         scope?: 'type' | 'global';
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
       };
       header?: never;
       path?: never;
@@ -26169,7 +26261,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Attribute definitions */
+      /** @description Attribute definitions, newest first */
       200: {
         headers: {
           [name: string]: unknown;
@@ -26178,6 +26270,7 @@ export interface operations {
           'application/json': components['schemas']['AttributeDefinitionListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       503: components['responses']['ServiceUnavailable'];
     };
