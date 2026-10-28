@@ -1044,3 +1044,6 @@ AUD-05;[B];B;backend/internal/server/audit_log_scope_integration_test.go;WP-660
 AUD-05;[B];B;backend/internal/audit/scope_test.go;WP-660
 API-03;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-661
 TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-661
+API-03;[B];B;backend/internal/server/route_audit_integration_test.go;WP-662
+AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-662
+AUD-07;[B];B;backend/internal/middleware/middleware_test.go;WP-662

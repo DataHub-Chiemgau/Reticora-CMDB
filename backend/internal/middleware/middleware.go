@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -128,7 +129,8 @@ const maxAuditBody = 1 << 20
 // and new value per changed column ("values", AUD-07, WP-505); excluded
 // columns never appear, personal ones only as a surrogate (CH16). A row
 // that cannot be read before the handler refuses the request (503) like a
-// missing intent.
+// missing intent. A path parameter that is no storable text (NUL byte,
+// invalid UTF-8) addresses no resource: 404 before the intent (F-391).
 //
 // source overrides the source derived from the principal (ingest routes of
 // collectors and agents).
@@ -150,6 +152,16 @@ func AuditRoute(method, pattern string, auditor RouteAuditor, mode AuditMode, so
 			orgID := tenant.FromContext(ctx).OrganizationID
 			if mode == AuditNone || auditor == nil || orgID == "" {
 				next.ServeHTTP(w, r)
+				return
+			}
+			if mode == AuditIntent && !validPathParams(r) {
+				// No stored text holds a NUL byte or invalid UTF-8, so such
+				// an id, key or name addresses no resource; as the resource
+				// key of the intent it would fail in PostgreSQL (SQLSTATE
+				// 22021) and refuse the request as an audit outage (503,
+				// F-391). Answered like an unknown id before the intent and
+				// the handler: nothing changes, so nothing needs an entry.
+				api.WriteError(w, http.StatusNotFound, "Not Found", "the requested resource was not found")
 				return
 			}
 			fields := writtenFields(r)
@@ -385,6 +397,19 @@ func routeResourceID(r *http.Request) string {
 		}
 	}
 	return ""
+}
+
+// validPathParams reports whether every path parameter of the route is
+// valid UTF-8 without a NUL byte, i.e. storable as PostgreSQL text.
+func validPathParams(r *http.Request) bool {
+	if rctx := chi.RouteContext(r.Context()); rctx != nil {
+		for _, v := range rctx.URLParams.Values {
+			if strings.IndexByte(v, 0) >= 0 || !utf8.ValidString(v) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // responseID is the id of a created resource in the response body.

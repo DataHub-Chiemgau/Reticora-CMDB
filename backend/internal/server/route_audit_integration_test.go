@@ -20,17 +20,23 @@
 //   - TestRouteAuditPIIIsSurrogate (WP-505): name, e-mail and phone of a
 //     contact appear only as the contact id; webhook secrets and the
 //     channel configuration never.
+//   - TestRouteAuditNulPathIDIsClientError (WP-662, F-391): a path id with a
+//     NUL byte or invalid UTF-8 is answered 404 before the audit intent,
+//     not 503 with an ERROR log; an intent that cannot be stored still
+//     refuses the write (503).
 //
 // Retest:
 //
-//	cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditDefectRouteAuditFailure|TestRouteIntentCompletionRacesScheduler|TestAuditDefectRouteAuditStores|TestRouteAuditPIIIsSurrogate' ./internal/server/
+//	cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditDefectRouteAuditFailure|TestRouteIntentCompletionRacesScheduler|TestAuditDefectRouteAuditStores|TestRouteAuditPIIIsSurrogate|TestRouteAuditNulPathIDIsClientError' ./internal/server/
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -482,5 +488,74 @@ func TestRouteAuditPIIIsSurrogate(t *testing.T) {
 	}
 	if rotated.Secret == "" || strings.Contains(all, rotated.Secret) {
 		t.Errorf("rotated webhook secret %q missing from the answer or in the audit", rotated.Secret)
+	}
+}
+
+// TestRouteAuditNulPathIDIsClientError (F-391, WP-662): a write route
+// without a domain recorder answers a path id with a NUL byte or invalid
+// UTF-8 like an unknown id (404) before the audit intent, instead of 503
+// "the audit trail is unavailable" (SQLSTATE 22021 from the intent's
+// resource key) with an ERROR log: core routes (assets, racks), module
+// routes (tickets, orders, inventory items, saved views, IGA) and a second
+// path parameter. Nothing is stored (no intent, no audit entry). AUD-07
+// stays intact: with a valid id a write whose intent cannot be stored is
+// still refused with 503.
+func TestRouteAuditNulPathIDIsClientError(t *testing.T) {
+	ra := &t6FailingAuditor{}
+	e := t6NewEnv(t, "d9", ra)
+	f := e.F
+	// Delegates to the production auditor on the router's pool (AuditPool).
+	ra.PGRouteAuditor = audit.NewPGRouteAuditor(f.App)
+	admin := t6As{f.OrgA, f.AppUser(t, f.OrgA, "audit-d9-admin"), identity.AllPermissions()}
+	reader := t6As{f.OrgA, f.AppUser(t, f.OrgA, "audit-d9-reader"), []identity.Permission{identity.PermAuditRead}}
+	intents := func() int {
+		return e.Count(t, `SELECT count(*) FROM audit_route_intent WHERE organization_id = $1`, f.OrgA)
+	}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	const unknown = "00000000-0000-4000-8000-0000000000ff"
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodPatch, "/api/v1/assets/%00", `{"name":"x"}`},
+		{http.MethodDelete, "/api/v1/racks/%00", ``},
+		{http.MethodPatch, "/api/v1/tickets/%00", `{"title":"x"}`},
+		{http.MethodDelete, "/api/v1/tickets/%00", ``},
+		{http.MethodPost, "/api/v1/orders/%00/submit", ``},
+		{http.MethodPatch, "/api/v1/inventory/items/%00", `{"name":"x"}`},
+		{http.MethodDelete, "/api/v1/saved-views/%00", ``},
+		{http.MethodPost, "/api/v1/iga/access-reviews/" + unknown + "/items/%00/decision", `{"decision":"keep"}`},
+		{http.MethodPatch, "/api/v1/assets/x%00y", `{"name":"x"}`},
+		{http.MethodPatch, "/api/v1/assets/%FF", `{"name":"x"}`},
+		{http.MethodDelete, "/api/v1/racks/%C3%28", ``},
+	} {
+		r := e.Call(t, admin, c.method, c.path, c.body)
+		if r.Code != http.StatusNotFound && r.Code != http.StatusBadRequest {
+			t.Errorf("%s %s = %d %s; want 404 or 400 (an id that is no text names no resource)", c.method, c.path, r.Code, t6Short(r.Body))
+		}
+	}
+	if n := intents(); n != 0 {
+		t.Errorf("%d audit intents left after refused writes", n)
+	}
+	if strings.Contains(logs.String(), "level=ERROR") {
+		t.Errorf("refused writes with an invalid path id logged an error:\n%s", logs.String())
+	}
+
+	// A valid unknown id still passes the intent; the handler's 404
+	// discards it.
+	if r := e.Call(t, admin, http.MethodPatch, "/api/v1/assets/"+unknown, `{"name":"x"}`); r.Code != http.StatusNotFound || intents() != 0 {
+		t.Errorf("PATCH /assets/<unknown> = %d %s, intents %d; want 404 and none", r.Code, t6Short(r.Body), intents())
+	}
+	// AUD-07: a write whose intent cannot be stored is still refused.
+	ra.failIntend = true
+	r := e.Call(t, admin, http.MethodPost, "/api/v1/vrfs", `{"name":"audit-d9-vrf"}`)
+	vrfs := e.Count(t, `SELECT count(*) FROM vrf WHERE organization_id = $1 AND name = 'audit-d9-vrf'`, f.OrgA)
+	if r.Code != http.StatusServiceUnavailable || vrfs != 0 {
+		t.Errorf("POST /vrfs with the audit store down = %d %s, vrf rows %d; want 503 and none", r.Code, t6Short(r.Body), vrfs)
+	}
+	ra.failIntend = false
+	if got := t6AuditList(t, e, reader, "assets"); len(got) != 0 {
+		t.Errorf("audit entries after refused writes: %s", t6JSON(got))
 	}
 }

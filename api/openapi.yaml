@@ -40,7 +40,10 @@ info:
     values (AUD-07: write routes without a domain recorder store the intent
     and read the row they change before they change anything; the audit
     entry follows the response or, at the latest, the scheduler run two
-    minutes later). While Redis is unreachable
+    minutes later). A path parameter of such a write route (id, key or
+    name) that contains a NUL byte or is not valid UTF-8 addresses no
+    resource: the request is answered 404 before the intent, not 503.
+    While Redis is unreachable
     the rate limits refuse with 429. A 2xx answer means stored or durably
     queued.
   contact:

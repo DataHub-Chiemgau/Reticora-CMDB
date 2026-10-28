@@ -771,3 +771,37 @@ func TestAuditRouteStoresOldAndNewValues(t *testing.T) {
 		}
 	}
 }
+
+// TestAuditRouteAnswersInvalidPathParamsBeforeTheIntent (F-391, WP-662): a
+// path parameter with a NUL byte or invalid UTF-8 addresses no resource;
+// an intent route answers it 404 before the intent and the handler, even
+// with the audit store down (no 503). Valid parameters still need the
+// intent (503 with the store down).
+func TestAuditRouteAnswersInvalidPathParamsBeforeTheIntent(t *testing.T) {
+	const org, user = "11111111-2222-4333-8444-555555555555", "66666666-7777-4888-8999-aaaaaaaaaaaa"
+	store := &intentStore{open: map[string]audit.RouteIntent{}, failIntend: true}
+	ran := 0
+	r := chi.NewRouter()
+	r.With(AuditRoute(http.MethodPost, "/api/v1/racks/{id}/mounts/{ci_id}", store, AuditIntent, "")).
+		Post("/api/v1/racks/{id}/mounts/{ci_id}", func(w http.ResponseWriter, _ *http.Request) {
+			ran++
+			w.WriteHeader(http.StatusNoContent)
+		})
+	serve := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		ctx := identity.WithPrincipal(req.Context(), identity.Principal{Subject: user, OrganizationID: org, Type: identity.PrincipalTypeUser})
+		ctx = tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: org, UserID: user})
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req.WithContext(ctx))
+		return w
+	}
+	for _, path := range []string{"/api/v1/racks/%00/mounts/a", "/api/v1/racks/a/mounts/x%00", "/api/v1/racks/%FF/mounts/a",
+		"/api/v1/racks/a/mounts/%C3%28"} {
+		if w := serve(path); w.Code != http.StatusNotFound || ran != 0 || len(store.open) != 0 {
+			t.Errorf("POST %s = %d %s, handler ran %d times; want 404 before the intent", path, w.Code, w.Body.String(), ran)
+		}
+	}
+	if w := serve("/api/v1/racks/a/mounts/%C3%A4"); w.Code != http.StatusServiceUnavailable || ran != 0 {
+		t.Errorf("valid UTF-8 with the audit store down = %d, handler ran %d times; want 503", w.Code, ran)
+	}
+}
