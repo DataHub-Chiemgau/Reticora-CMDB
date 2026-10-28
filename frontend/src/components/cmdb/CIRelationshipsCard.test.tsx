@@ -283,6 +283,58 @@ describe('CIRelationshipsCard', () => {
   });
 });
 
+describe('CIRelationshipsCard location edges (F-237)', () => {
+  it('names a located_in target by its path in the location tree, not by its id', async () => {
+    const node = (id: string, name: string, parent: string | null, children: unknown[] = []) => ({
+      id,
+      organization_id: 'org-1',
+      kind: 'site',
+      name,
+      parent_id: parent,
+      children,
+    });
+    const tree = [
+      node('loc-site', 'HQ', null, [
+        node('loc-room', 'Raum 1', 'loc-site', [node('loc-rack', 'Rack A', 'loc-room')]),
+      ]),
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), 'http://localhost');
+        if (url.pathname === '/api/v1/locations/tree') return json({ data: tree });
+        return json({
+          data: [
+            {
+              id: 'rel-loc',
+              organization_id: 'org-1',
+              source_ci_id: CI_ID,
+              target_ci_id: '',
+              target_location_id: 'loc-rack',
+              rel_type: 'located_in',
+              attributes: {},
+              source: 'projection',
+              projected: true,
+              verification_state: 'verified',
+              created_at: '2026-01-01T00:00:00Z',
+              updated_at: '2026-01-01T00:00:00Z',
+            },
+          ],
+          total: 1,
+          limit: 50,
+          offset: 0,
+          has_more: false,
+        });
+      }),
+    );
+
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+
+    expect(await screen.findByText('HQ › Raum 1 › Rack A')).toBeInTheDocument();
+    expect(screen.queryByText('loc-rack')).not.toBeInTheDocument();
+  });
+});
+
 describe('CIRelationshipsCard create dialog', () => {
   const emptyList = { data: [], total: 0, limit: 50, offset: 0, has_more: false };
 
@@ -520,8 +572,11 @@ describe('CIRelationshipsCard under a chosen scope (E-87)', () => {
     await waitFor(() => expect(listedIds()).toHaveLength(5));
     expect(screen.queryByText(/außerhalb des Bereichs/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Alle anzeigen' })).toBeNull();
-    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
-      `/api/v1/cis/${CI_ID}/relationships`,
-    ]);
+    // The location edge reads the location tree for its name (F-237), no CI.
+    expect(
+      fetchMock.mock.calls
+        .map((call) => String(call[0]))
+        .filter((u) => u.startsWith('/api/v1/cis')),
+    ).toEqual([`/api/v1/cis/${CI_ID}/relationships`]);
   });
 });

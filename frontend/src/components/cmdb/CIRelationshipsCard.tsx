@@ -34,6 +34,7 @@ import {
   useUpdateRelationship,
 } from '../../api/hooks';
 import { useScopeStore } from '../../stores/scope';
+import { useLocationNames } from './CIDetailSections';
 import { inScope } from '../ScopeBanner';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -105,6 +106,9 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
   const mutationError = (updateRelationship.error || deleteRelationship.error) as Error | null;
 
   const allRelationships = relationshipsQuery.data?.data ?? [];
+  // An edge to a location (located_in) names the node by its path in the
+  // location tree, which is read only when there is such an edge (F-237).
+  const locations = useLocationNames(allRelationships.some((r) => !!r.target_location_id));
 
   // Scope filter (E-87): the other CI of each edge is read (the same query as
   // its detail page) to learn its client and site. Edges to a location and
@@ -200,7 +204,9 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
                   <Badge variant="neutral">{relationship.rel_type}</Badge>
                   <span aria-hidden="true">{isOutgoing ? '→' : '←'}</span>
                   {relationship.target_location_id ? (
-                    <span className="font-mono text-xs">{relationship.target_location_id}</span>
+                    <span className="text-xs">
+                      {locations.path(relationship.target_location_id)}
+                    </span>
                   ) : (
                     <Link
                       to={`/cmdb/${otherId}`}
