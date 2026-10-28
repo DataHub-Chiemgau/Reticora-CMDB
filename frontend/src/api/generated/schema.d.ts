@@ -6535,7 +6535,10 @@ export interface paths {
     /** List the relationship types (system catalogue and the organization's) */
     get: operations['listRelationshipTypes'];
     put?: never;
-    /** Create a relationship type of the organization */
+    /**
+     * Create a relationship type of the organization
+     * @description allowed_source_types and allowed_target_types name CI type keys the organization sees (system types and its own); an unknown key is refused with 400 and `field` allowed_source_types or allowed_target_types, nothing is stored (REL-01, E-95, F-313).
+     */
     post: operations['createRelationshipTypes'];
     delete?: never;
     options?: never;
@@ -6560,7 +6563,10 @@ export interface paths {
     delete: operations['deleteRelationshipTypesKey'];
     options?: never;
     head?: never;
-    /** Update a relationship type of the organization (system types are read-only) */
+    /**
+     * Update a relationship type of the organization (system types are read-only)
+     * @description A given allowed_source_types or allowed_target_types with a key that names no CI type the organization sees is refused with 400 and `field` allowed_source_types or allowed_target_types; the type stays unchanged (REL-01, E-95, F-313).
+     */
     patch: operations['updateRelationshipTypesKey'];
     trace?: never;
   };
@@ -7978,8 +7984,11 @@ export interface components {
       impact_direction: components['schemas']['RelationshipImpactDirection'];
       /** @description Edges of the type are redundant feeds (powered_by, member_of_cluster); impact needs all of them to fail. */
       redundant: boolean;
+      /** @description CI type keys an edge of the type may start at; POST /relationships refuses a source CI of another type (422, source_ci_id). Empty allows every type (REL-01, E-95). */
       allowed_source_types: string[];
+      /** @description CI type keys an edge of the type may end at; POST /relationships refuses a target CI of another type (422, target_ci_id). Empty allows every type (REL-01, E-95). */
       allowed_target_types: string[];
+      /** @description Informative until REL-06 [P2]; not enforced (E-95). */
       cardinality: string;
       readonly is_system: boolean;
       description?: string;
@@ -7997,8 +8006,11 @@ export interface components {
       category?: components['schemas']['RelationshipTypeCategory'];
       impact_direction?: components['schemas']['RelationshipImpactDirection'];
       redundant?: boolean;
+      /** @description CI type keys the organization sees (system types and its own); an unknown key is 400. Empty allows every type. */
       allowed_source_types?: string[];
+      /** @description CI type keys the organization sees (system types and its own); an unknown key is 400. Empty allows every type. */
       allowed_target_types?: string[];
+      /** @description Informative until REL-06 [P2]; not enforced (E-95). */
       cardinality?: string;
       description?: string;
     };
@@ -8453,7 +8465,10 @@ export interface components {
       /** Format: int64 */
       file_size_bytes?: number;
       error_message?: string;
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description Start of the current run; while the job runs, the worker renews it as heartbeat (every 5 minutes). A running job without heartbeat for 15 minutes is queued again (TEC-14, F-315).
+       */
       started_at?: string;
       /** Format: date-time */
       completed_at?: string;
@@ -13007,7 +13022,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, or an unknown ID. `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). A source reserved to the system (discovery, agent) names `source`: those edges come only from the discovery and agent paths, nothing is stored (F-271). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
+      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, or an unknown ID. `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). A source reserved to the system (discovery, agent) names `source`: those edges come only from the discovery and agent paths, nothing is stored (F-271). A visible source or target CI whose type is not in allowed_source_types or allowed_target_types of the relationship type names source_ci_id, target_ci_id or both ("the type of the source CI is not in allowed_source_types of the relationship type"); an empty list allows every type, nothing is stored (REL-01, E-95, F-313). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
       422: {
         headers: {
           [name: string]: unknown;

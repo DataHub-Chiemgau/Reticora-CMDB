@@ -228,11 +228,24 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 		// The endpoints are checked under the caller's scope in the same
 		// statement as the insert: a CI the caller cannot see (another
 		// organization, a client or site outside the scope, an unknown id)
-		// inserts nothing and is named by its sentinel (F-145).
+		// inserts nothing and is named by its sentinel (F-145). With
+		// checkTypeLists the type of a visible end must be in the allowed
+		// list of the relationship type the caller sees (the organization's
+		// shadows the system one); an empty list allows every type (E-95,
+		// F-313).
 		query := `
-			WITH ends AS (
+			WITH rel_type AS (
+				SELECT allowed_source_types, allowed_target_types FROM relationship_type
+				WHERE key = $4 AND $16::boolean ORDER BY organization_id NULLS LAST LIMIT 1
+			), ends AS (
 				SELECT EXISTS (SELECT 1 FROM ci WHERE ci.id = $2::uuid) AS source_visible,
-				       EXISTS (SELECT 1 FROM ci WHERE ci.id = $3::uuid) AS target_visible
+				       EXISTS (SELECT 1 FROM ci WHERE ci.id = $3::uuid) AS target_visible,
+				       NOT EXISTS (SELECT 1 FROM rel_type JOIN ci ON ci.id = $2::uuid LEFT JOIN ci_type t ON t.id = ci.ci_type_id
+				                   WHERE jsonb_array_length(rel_type.allowed_source_types) > 0
+				                     AND NOT COALESCE(rel_type.allowed_source_types ? t.key, false)) AS source_allowed,
+				       NOT EXISTS (SELECT 1 FROM rel_type JOIN ci ON ci.id = $3::uuid LEFT JOIN ci_type t ON t.id = ci.ci_type_id
+				                   WHERE jsonb_array_length(rel_type.allowed_target_types) > 0
+				                     AND NOT COALESCE(rel_type.allowed_target_types ? t.key, false)) AS target_allowed
 			), created AS (
 				INSERT INTO ci_relationship (
 					organization_id,
@@ -258,14 +271,14 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 					$13::uuid, $14::uuid, now(),
 					(SELECT id FROM app_user WHERE id::text = $15::text),
 					CASE WHEN $10::text = 'verified' THEN now() END
-				FROM ends WHERE ends.source_visible AND ends.target_visible
+				FROM ends WHERE ends.source_visible AND ends.target_visible AND ends.source_allowed AND ends.target_allowed
 				RETURNING id::text AS id, created_at, updated_at, last_confirmed_at,
 					COALESCE(verified_by::text, '') AS verified_by, verified_at
 			)
-			SELECT ends.source_visible, ends.target_visible, created.*
+			SELECT ends.source_visible, ends.target_visible, ends.source_allowed, ends.target_allowed, created.*
 			FROM ends LEFT JOIN created ON true
 		`
-		var sourceVisible, targetVisible bool
+		var sourceVisible, targetVisible, sourceAllowed, targetAllowed bool
 		var id, verifiedBy *string
 		var createdAt, updatedAt, confirmedAt, verifiedAt *time.Time
 		firstSeen := any(nil)
@@ -292,18 +305,26 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 			nilIfEmptyStr(rel.SourceInterfaceID),
 			nilIfEmptyStr(rel.TargetInterfaceID),
 			rel.VerifiedBy,
-		).Scan(&sourceVisible, &targetVisible, &id, &createdAt, &updatedAt, &confirmedAt, &verifiedBy, &verifiedAt); err != nil {
+			rel.checkTypeLists,
+		).Scan(&sourceVisible, &targetVisible, &sourceAllowed, &targetAllowed,
+			&id, &createdAt, &updatedAt, &confirmedAt, &verifiedBy, &verifiedAt); err != nil {
 			return fmt.Errorf("create relationship: %w", err)
 		}
-		var invisible []error
-		if !sourceVisible {
-			invisible = append(invisible, ErrSourceCINotFound)
+		var refused []error
+		switch {
+		case !sourceVisible:
+			refused = append(refused, ErrSourceCINotFound)
+		case !sourceAllowed:
+			refused = append(refused, ErrSourceCITypeNotAllowed)
 		}
-		if !targetVisible {
-			invisible = append(invisible, ErrTargetCINotFound)
+		switch {
+		case !targetVisible:
+			refused = append(refused, ErrTargetCINotFound)
+		case !targetAllowed:
+			refused = append(refused, ErrTargetCITypeNotAllowed)
 		}
-		if len(invisible) > 0 {
-			return errors.Join(invisible...)
+		if len(refused) > 0 {
+			return errors.Join(refused...)
 		}
 		if id == nil {
 			return fmt.Errorf("create relationship: no row inserted")

@@ -56,6 +56,11 @@ type Relationship struct {
 	// TargetLocationID is the target of mounted_in (the rack) and located_in
 	// (the location); TargetCIID is empty for them.
 	TargetLocationID string `json:"target_location_id,omitempty"`
+	// checkTypeLists makes the PostgreSQL repository check the CI types of
+	// the ends against allowed_source_types and allowed_target_types of the
+	// relationship type (ErrSourceCITypeNotAllowed, ErrTargetCITypeNotAllowed).
+	// POST /relationships sets it (E-95); the discovery ingest does not.
+	checkTypeLists bool
 }
 
 // StructuralRelTypes are projected, never stored (REL-01, CH27).
@@ -179,6 +184,16 @@ var ErrSuppressionType = errors.New("the relationship type has no catalogue entr
 var (
 	ErrSourceCINotFound = errors.New("source CI not found")
 	ErrTargetCINotFound = errors.New("target CI not found")
+)
+
+// ErrSourceCITypeNotAllowed and ErrTargetCITypeNotAllowed refuse an edge
+// whose visible source or target CI has a type outside allowed_source_types
+// or allowed_target_types of the relationship type; an empty list allows
+// every type (REL-01, E-95, F-313). Create answers 422 on source_ci_id or
+// target_ci_id, a repository joins both.
+var (
+	ErrSourceCITypeNotAllowed = errors.New("the type of the source CI is not in allowed_source_types of the relationship type")
+	ErrTargetCITypeNotAllowed = errors.New("the type of the target CI is not in allowed_target_types of the relationship type")
 )
 
 // PolicyDeleter deletes an edge by the source policy (REL-03, REL-04): a
@@ -927,6 +942,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 		SourceInterfaceID: req.SourceInterfaceID,
 		TargetInterfaceID: req.TargetInterfaceID,
+
+		checkTypeLists: true,
 	}
 	if rel.Attributes == nil {
 		rel.Attributes = make(map[string]any)
@@ -978,14 +995,19 @@ type violation struct {
 }
 
 // writeEndpointError answers an edge with an endpoint the caller cannot see
-// (ErrSourceCINotFound, ErrTargetCINotFound) with 422 and a violation per
-// such endpoint (F-145). It reports whether err was one.
+// (ErrSourceCINotFound, ErrTargetCINotFound, F-145) or of a type the
+// relationship type does not allow (ErrSourceCITypeNotAllowed,
+// ErrTargetCITypeNotAllowed, F-313) with 422 and a violation per such
+// endpoint. It reports whether err was one.
 func writeEndpointError(w http.ResponseWriter, err error) bool {
 	var violations []violation
 	for _, end := range []struct {
 		field string
 		err   error
-	}{{"source_ci_id", ErrSourceCINotFound}, {"target_ci_id", ErrTargetCINotFound}} {
+	}{
+		{"source_ci_id", ErrSourceCINotFound}, {"source_ci_id", ErrSourceCITypeNotAllowed},
+		{"target_ci_id", ErrTargetCINotFound}, {"target_ci_id", ErrTargetCITypeNotAllowed},
+	} {
 		if errors.Is(err, end.err) {
 			violations = append(violations, violation{Field: end.field, Detail: end.err.Error()})
 		}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -17,8 +18,8 @@ import (
 // DefaultJobTTL is how long a completed export remains downloadable.
 const DefaultJobTTL = 24 * time.Hour
 
-// DefaultStaleAfter is how long an export may run before the worker
-// assumes its replica died and queues it again (TEC-14).
+// DefaultStaleAfter is how long a running export may go without heartbeat
+// before the worker assumes its replica died and queues it again (TEC-14).
 const DefaultStaleAfter = 15 * time.Minute
 
 // ExportBucket is the blob bucket export objects are written to.
@@ -48,8 +49,10 @@ func ObjectKey(job *Job) string {
 // JobWorker processes pending export jobs: it renders the CI set into blob
 // storage and marks the job completed with the object key and expiry. All
 // replicas share the queue through ClaimPending (FOR UPDATE SKIP LOCKED), so
-// jobs survive restarts and are never processed twice. A job whose replica
-// died while it ran is queued again after StaleAfter and resumed; only a
+// jobs survive restarts and are never processed twice. While a job runs,
+// its worker renews the heartbeat (started_at) every HeartbeatEvery; a job
+// whose replica died, and so has no heartbeat for StaleAfter, is queued
+// again and resumed, a long export of a live replica is not (F-315). Only a
 // running job can be completed, so a late original run cannot complete it
 // a second time. A job whose mirrored job was cancelled (DELETE
 // /api/v1/jobs/{id}) stops before rendering or before completing (cancelled).
@@ -59,10 +62,14 @@ type JobWorker struct {
 	Blobs  blob.Store
 	Bucket string
 	JobTTL time.Duration
-	// StaleAfter is how long a job may run before it is queued again.
+	// StaleAfter is how long a running job may go without heartbeat before
+	// it is queued again.
 	StaleAfter time.Duration
-	Now        func() time.Time
-	onError    func(jobID string, err error)
+	// HeartbeatEvery is how often the worker renews the heartbeat of the
+	// job it runs; zero means StaleAfter/3.
+	HeartbeatEvery time.Duration
+	Now            func() time.Time
+	onError        func(jobID string, err error)
 	// failures counts the errors of the current cycle (OPS-05).
 	failures int
 	// Tracker mirrors the export job into the generic job model (JOB-01);
@@ -165,7 +172,46 @@ func (w *JobWorker) ProcessOne(ctx context.Context) bool {
 	return true
 }
 
+// keepAlive renews the heartbeat of job until the returned stop is called
+// or ctx ends (TEC-14, F-315). A failed renewal is logged; the next one
+// tries again.
+func (w *JobWorker) keepAlive(ctx context.Context, job *Job) (stop func()) {
+	every := w.HeartbeatEvery
+	if every <= 0 {
+		every = w.StaleAfter / 3
+	}
+	if every <= 0 {
+		return func() {}
+	}
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := w.Jobs.Heartbeat(ctx, job.OrganizationID, job.ID, w.Now()); err != nil {
+					slog.Warn("renew export job heartbeat", "job", job.ID, "error", err)
+				}
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		wg.Wait()
+	}
+}
+
 func (w *JobWorker) process(ctx context.Context, job Job) {
+	// The heartbeat runs until the job is completed or failed.
+	defer w.keepAlive(ctx, &job)()
 	w.mirror(ctx, &job, jobs.StatusRunning, "")
 	// The export runs with the scope its creator had when queueing it
 	// (EXP-01, TEN-06): the CI repository reads through database.WithTenant
@@ -235,7 +281,7 @@ func (w *JobWorker) fail(ctx context.Context, job *Job, err error) {
 }
 
 // ResumeStale queues the jobs again whose replica died while they ran
-// (status running for longer than StaleAfter); it returns how many.
+// (status running without heartbeat for StaleAfter); it returns how many.
 func (w *JobWorker) ResumeStale(ctx context.Context) int {
 	if !w.Enabled() || w.StaleAfter <= 0 {
 		return 0

@@ -1008,3 +1008,6 @@ RCK-02;[B];C;backend/internal/rack/layout_integration_test.go;WP-579
 REC-09;[B];D;backend/internal/discovery/ci_online_integration_test.go;WP-585
 LCY-05;[B];D;backend/cmd/server/main_test.go;WP-585
 RCK-03;[B];B;backend/internal/rack/placement_scope_integration_test.go;WP-650
+NET-01;[B];B;backend/internal/ipam/net01_migration_integration_test.go;WP-592
+REL-01;[B];B;backend/internal/relationship/pg_repository_integration_test.go;WP-592
+TEC-14;[B];B;backend/internal/export/stale_reclaim_integration_test.go;WP-592
