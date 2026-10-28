@@ -4963,7 +4963,12 @@ paths:
         notification to rotate them. The sessions are revoked only after the user was found in the
         caller's organization; an unknown user or a user of another
         organization answers 404 without any effect. If the sessions cannot
-        be revoked, nothing is changed and the answer is 503.
+        be revoked, nothing is changed and the answer is 503. The caller
+        cannot deactivate their own account: a non-active status for the
+        caller's own user answers 400 ("you cannot deactivate your own
+        account") before anything is written, revoked or audited (F-377).
+        Other fields of the own account (e.g. display_name) and status
+        active stay allowed.
       requestBody:
         required: true
         content:
@@ -4993,9 +4998,14 @@ paths:
         A user who owns open objects (open tickets, active assignments, keys
         not returned) or is referenced by closed records cannot be deleted;
         hand the objects over, or deactivate or anonymize the user (TLC-04).
+        The caller cannot delete their own account: the request answers 400
+        ("you cannot delete your own account") and nothing is changed
+        (F-377).
       responses:
         '204':
           description: User deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':

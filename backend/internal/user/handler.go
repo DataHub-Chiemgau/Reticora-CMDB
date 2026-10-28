@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -108,6 +109,24 @@ type sessionRevocation struct {
 func (s *sessionRevocation) hook(ctx context.Context, _ pgx.Tx) error {
 	s.err = s.h.revokeSessions(ctx, s.userID)
 	return s.err
+}
+
+// uuidSpelling strips the characters PostgreSQL ignores in a uuid literal
+// (braces, hyphens between digit groups).
+var uuidSpelling = strings.NewReplacer("-", "", "{", "", "}", "")
+
+// isOwnAccount reports whether the path id names the caller's own app_user
+// (the user id of the tenant context, as a session or a user's own API key
+// carries it). The comparison ignores case, braces and hyphens, the
+// spellings PostgreSQL accepts for the same uuid, so a differently written
+// id cannot pass the self-lockout guards. A principal without a user id
+// never matches, and a service account or a key without owner has no
+// app_user to match.
+func isOwnAccount(id, callerID string) bool {
+	if callerID == "" {
+		return false
+	}
+	return strings.EqualFold(uuidSpelling.Replace(id), uuidSpelling.Replace(callerID))
 }
 
 // RegisterRoutes registers user/team/role routes on the given mux.
@@ -257,6 +276,14 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deactivate := req.Status != nil && !statusIsActive(*req.Status)
+	// Self-deactivation would revoke the caller's own sessions and can lock
+	// the organization out when the caller is its last admin; it is refused
+	// before any write, revocation or audit entry (F-377). Other fields of
+	// the own account and status active stay allowed.
+	if deactivate && isOwnAccount(id, t.UserID) {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "you cannot deactivate your own account")
+		return
+	}
 	revocation := &sessionRevocation{h: h, userID: id}
 	item, err := h.repo.UpdateUserTx(r.Context(), t.OrganizationID, id, req, revocation.hook)
 	if revocation.err != nil {
@@ -286,6 +313,12 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
+	// Deleting the own account would lock the caller out like a
+	// self-deactivation; it is refused before the repository runs (F-377).
+	if isOwnAccount(id, t.UserID) {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "you cannot delete your own account")
+		return
+	}
 	if err := h.repo.DeleteUser(r.Context(), t.OrganizationID, id); err != nil {
 		switch {
 		case errors.Is(err, ErrUserOwnsOpenObjects), errors.Is(err, ErrUserReferenced):
@@ -387,7 +420,7 @@ func (h *Handler) Anonymize(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	// Self-anonymization would lock the operator out mid-request and orphan
 	// the session; require a second account to do it.
-	if id == t.UserID {
+	if isOwnAccount(id, t.UserID) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "you cannot anonymize your own account")
 		return
 	}
