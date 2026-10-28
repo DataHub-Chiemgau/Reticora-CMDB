@@ -127,6 +127,33 @@ type LoginRefusalRecorder interface {
 	RecordLoginRefused(ctx context.Context, orgID, userID string) error
 }
 
+// LoginLocaleRecorder stores the language of a login's locale claim as the
+// user's notification language (app_user.locale, NTF-03, F-383) while the
+// user has chosen none; user.PGRepository implements it.
+type LoginLocaleRecorder interface {
+	RecordLoginLocale(ctx context.Context, orgID, userID, locale string) error
+}
+
+// Template locales of the notifications (notify.LocaleDE, notify.LocaleEN).
+const (
+	notificationLocaleDE = "de-DE"
+	notificationLocaleEN = "en-US"
+)
+
+// notificationLocale maps a locale claim (BCP 47 as Keycloak sends it, e.g.
+// de, en, en-GB, also with an underscore) to the template locale of its
+// language, de-DE or en-US; any other language gives empty.
+func notificationLocale(claim string) string {
+	lang, _, _ := strings.Cut(strings.ToLower(strings.ReplaceAll(strings.TrimSpace(claim), "_", "-")), "-")
+	switch lang {
+	case "de":
+		return notificationLocaleDE
+	case "en":
+		return notificationLocaleEN
+	}
+	return ""
+}
+
 // NewHandler constructs a new identity handler. Refresh tokens live in a
 // per-process store until WithRefreshSessions sets the shared one.
 func NewHandler(oidc *OIDCProvider, sessions *SessionIssuer) *Handler {
@@ -538,6 +565,17 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 				mfaErr = fmt.Errorf("%w: %w", ErrMFAUnavailable, mfaErr)
 			}
 			return "", time.Time{}, authResult{}, mfaErr
+		}
+	}
+	// The language of the IdP account (locale claim) becomes the user's
+	// notification language unless the user chose one (NTF-03, F-383); the
+	// UI language stays the browser's (E-99). A failure does not fail the
+	// login: the next login tries again.
+	if recorder, ok := h.provisioner.(LoginLocaleRecorder); ok {
+		if locale := notificationLocale(idToken.Locale); locale != "" {
+			if localeErr := recorder.RecordLoginLocale(ctx, orgID, subject, locale); localeErr != nil {
+				slog.WarnContext(ctx, "login: store the language of the locale claim", "error", localeErr)
+			}
 		}
 	}
 	// The login starts the session: its id (sid) names the refresh family

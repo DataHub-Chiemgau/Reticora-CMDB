@@ -20,28 +20,49 @@ const (
 	LocaleEN = "en-US"
 )
 
-// legacyUserLocale is the column default of app_user.locale: every account
-// carries it, nothing sets it on purpose, so it counts as no choice and the
-// organization's locale applies.
+// legacyUserLocale is the column default of app_user.locale: no language
+// chosen, so the organization's locale applies. A user chooses a language
+// (de-DE, en-US) or explicitly the organization's locale (empty) in the
+// preferences (PUT /notifications/preferences); while the column holds the
+// default, a login takes the language of the IdP's locale claim
+// (user.PGRepository.RecordLoginLocale, F-383).
 const legacyUserLocale = "de"
 
 // TemplateLocale returns the template locale of a recipient: the first of
 // the user's locale and the organization's (LOC-01) whose language has
 // templates, else de-DE.
 func TemplateLocale(userLocale, orgLocale string) string {
-	if strings.EqualFold(strings.TrimSpace(userLocale), legacyUserLocale) {
-		userLocale = ""
+	if l := UserLocaleChoice(userLocale); l != "" {
+		return l
 	}
-	for _, l := range []string{userLocale, orgLocale} {
-		lang, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(strings.ReplaceAll(l, "_", "-"))), "-")
-		switch lang {
-		case "de":
-			return LocaleDE
-		case "en":
-			return LocaleEN
-		}
+	if l := templateLanguage(orgLocale); l != "" {
+		return l
 	}
 	return LocaleDE
+}
+
+// templateLanguage returns the template locale of a locale's language (de
+// → de-DE, en → en-US), empty for any other language.
+func templateLanguage(locale string) string {
+	lang, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(strings.ReplaceAll(locale, "_", "-"))), "-")
+	switch lang {
+	case "de":
+		return LocaleDE
+	case "en":
+		return LocaleEN
+	}
+	return ""
+}
+
+// UserLocaleChoice returns the notification language a user chose from the
+// stored app_user.locale, as the preferences name it: de-DE or en-US, or
+// empty for the organization's locale (the column default de, an explicit
+// empty choice, a language without templates).
+func UserLocaleChoice(stored string) string {
+	if strings.EqualFold(strings.TrimSpace(stored), legacyUserLocale) {
+		return ""
+	}
+	return templateLanguage(stored)
 }
 
 // Text is a notification rendered in one language.

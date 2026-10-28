@@ -3530,12 +3530,12 @@ export interface paths {
     };
     /**
      * The signed-in user's quiet hours, category subscriptions and digest
-     * @description Without stored preferences the defaults (Europe/Berlin, nothing muted, every category subscribed, digest `{"review":"hourly"}`). `subscriptions` lists every notification category as subscribed or muted (NTF-03, E-91 option 2). Notifications are written in the user's language (app_user.locale, else the organization's locale, else de-DE; de-DE and en-US).
+     * @description Without stored preferences the defaults (Europe/Berlin, nothing muted, every category subscribed, digest `{"review":"hourly"}`). `subscriptions` lists every notification category as subscribed or muted (NTF-03, E-91 option 2). Notifications are written in the user's language (`locale`, else the organization's locale, else de-DE; de-DE and en-US); `locale` is always returned, empty when the user has chosen no language.
      */
     get: operations['getNotificationPreferences'];
     /**
      * Set quiet hours, category subscriptions and digest
-     * @description Critical notifications ignore quiet hours and muted categories and are never bundled (NTF-04). A digest naming an unknown or critical category or a window other than hourly or daily is refused with 400. A category named in `subscriptions` is muted or subscribed as stated there, whatever `muted_categories` says (NTF-03, E-91 option 2); an unknown category or a state other than subscribed or muted is refused with 400.
+     * @description Critical notifications ignore quiet hours and muted categories and are never bundled (NTF-04). A digest naming an unknown or critical category or a window other than hourly or daily is refused with 400. A category named in `subscriptions` is muted or subscribed as stated there, whatever `muted_categories` says (NTF-03, E-91 option 2); an unknown category or a state other than subscribed or muted is refused with 400. `locale` sets the language of the user's notifications (de-DE, en-US, or empty for the organization's locale); omitted, the stored language stays; any other value is refused with 400 (F-383).
      */
     put: operations['setNotificationPreferences'];
     post?: never;
@@ -6919,6 +6919,12 @@ export interface components {
       digest?: {
         [key: string]: 'hourly' | 'daily';
       };
+      /**
+       * @description Language of the user's notifications (NTF-03, F-383): de-DE or en-US; empty: the organization's locale (LOC-01), else de-DE. As long as the user has chosen no language, a login takes the language of the IdP's `locale` claim (de* → de-DE, en* → en-US; Keycloak sends it with internationalization enabled); a choice made here, including the empty one after a language, is never replaced by a login. The language of the user interface follows the browser (E-99).
+       * @example en-US
+       * @enum {string}
+       */
+      locale?: '' | 'de-DE' | 'en-US';
     };
     NotificationChannel: {
       id: string;

@@ -7277,8 +7277,9 @@ paths:
         every category subscribed, digest `{"review":"hourly"}`).
         `subscriptions` lists every notification category as subscribed or
         muted (NTF-03, E-91 option 2). Notifications are written in the
-        user's language (app_user.locale, else the organization's locale,
-        else de-DE; de-DE and en-US).
+        user's language (`locale`, else the organization's locale, else
+        de-DE; de-DE and en-US); `locale` is always returned, empty when the
+        user has chosen no language.
       responses:
         '200':
           description: Preferences
@@ -7299,7 +7300,9 @@ paths:
         named in `subscriptions` is muted or subscribed as stated there,
         whatever `muted_categories` says (NTF-03, E-91 option 2); an unknown
         category or a state other than subscribed or muted is refused with
-        400.
+        400. `locale` sets the language of the user's notifications (de-DE,
+        en-US, or empty for the organization's locale); omitted, the stored
+        language stays; any other value is refused with 400 (F-383).
       requestBody:
         required: true
         content:
@@ -13695,6 +13698,19 @@ components:
             type: string
             enum: [hourly, daily]
           example: {review: hourly}
+        locale:
+          type: string
+          enum: ['', de-DE, en-US]
+          description: >-
+            Language of the user's notifications (NTF-03, F-383): de-DE or
+            en-US; empty: the organization's locale (LOC-01), else de-DE. As
+            long as the user has chosen no language, a login takes the
+            language of the IdP's `locale` claim (de* → de-DE, en* → en-US;
+            Keycloak sends it with internationalization enabled); a choice
+            made here, including the empty one after a language, is never
+            replaced by a login. The language of the user interface follows
+            the browser (E-99).
+          example: en-US
 
     NotificationChannel:
       type: object

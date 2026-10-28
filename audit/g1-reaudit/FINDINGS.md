@@ -20,6 +20,8 @@ Der Befund F-381 ist bei der Umsetzung von K6 gefunden worden (Konvention 16, WP
 
 Der Befund F-382 ist bei der Umsetzung von K6 gefunden worden (Konvention 16, WP-582): Nach dem Annehmen eines `unknown_relationship`-Reviews öffnet der nächste Ingest desselben unbekannten Schlüssels ein neues Review für dasselbe Paar, obwohl die angenommene Kante besteht. Er ist mit `backend/internal/discovery/topology_integration_test.go` kodiert (auf `f0781b6` rot) und wird von WP-652 im Abschnitt K6-Nachträge geschlossen.
 
+Der Befund F-383 ist bei der Umsetzung von K6 gefunden worden (Konvention 16, WP-588): WP-588 schreibt Benachrichtigungen in der Sprache des Empfängers (`app_user.locale`), doch nichts setzt diese Spalte; die Sprache je Empfänger (NTF-03) ist für keinen Benutzer erreichbar. Er ist mit `backend/internal/identity/login_locale_integration_test.go` und `backend/internal/notify/locale_integration_test.go` kodiert (auf `eb5a51e` rot) und wird von WP-653 im Abschnitt K6-Nachträge geschlossen.
+
 Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `tests/audit/expected-failures.txt` (Ratchet, `tests/audit/run-auditdefect.sh`). Die a11y-Befunde sind in `frontend/e2e/a11y.spec.ts` (gemockter Playwright-Lauf, CI-Job `e2e`) mit `test.fail` und der Befund-ID markiert: Der markierte Fall muss scheitern, ein markierter Fall, der besteht, macht den Lauf rot. Diese Marken sind ihr eigener Ratchet; der Ratchet von WP-337 vergleicht nur die Arten `go`, `sh`, `vitest` und `e2e-real`, daher erhalten sie keine Zeile in `expected-failures.txt`. Shell-Defekttests (`tests/audit/*.test.sh`, Art `sh`) und Real-Stack-Fälle (`frontend/e2e-real/`, Art `e2e-real`, je Browserprojekt eine Zeile, nur in CI ausführbar) stehen ebenfalls in `expected-failures.txt` (F-369, F-370, F-375).
 
 ## Zählung
@@ -29,8 +31,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 3 |
 | P2 | 16 |
-| P3 | 8 |
-| **Summe** | **28** |
+| P3 | 9 |
+| **Summe** | **29** |
 
 ## Übersicht
 
@@ -64,6 +66,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-380](#f-380) | P3 | Rack-Platzierung durch einen client-beschränkten Principal: CIs des Assets außerhalb des Scopes behalten ihren Standort, `asset.location_id` und `ci.location_id` weichen ab | WP-578 (K6) | belegt | backend/internal/rack/placement_scope_integration_test.go TestRackPlacementRefusesAssetWithCIsOutsideScope | WP-650 |
 | [F-381](#f-381) | P3 | Rack-Seite: ein Einbau auf beiden Seiten (`face` = `both`) erscheint auf keiner Rackseite, weder in der Zeichnung noch in der Liste | WP-579 (K6) | belegt | frontend/src/pages/RackPage.test.tsx (zwei Fälle „both faces“) | WP-651 |
 | [F-382](#f-382) | P3 | `unknown_relationship`: nach accept öffnet der nächste Ingest desselben unbekannten Schlüssels ein neues Review für dasselbe Paar, obwohl die angenommene Kante besteht | WP-582 (K6) | belegt | backend/internal/discovery/topology_integration_test.go TestUnknownRelationshipReviewLifecycle, TestUnknownRelationshipReviewAfterAcceptedEdgeDeleted | WP-652 |
+| [F-383](#f-383) | P3 | Benachrichtigungssprache je Empfänger nicht erreichbar: nichts setzt `app_user.locale` (kein API-Weg; OIDC-Login, Einladung und Signup behalten den Spaltenstandard `de`) | WP-588 (K6) | belegt | backend/internal/identity/login_locale_integration_test.go TestLoginTakesLocaleClaim; backend/internal/notify/locale_integration_test.go TestNotificationLanguageSelfService | WP-653 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -429,6 +432,19 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 - **Empfehlung:** `reviews.Service.OpenUnlessSettled`: kein neues Review, solange das zuletzt angenommene Review desselben Objekts und Typs noch gilt; für `unknown_relationship` gilt es, solange die Kante `connected_to` Quelle → Ziel (jeder Quelle) besteht oder für das Paar unterdrückt ist. Sonst entscheidet die Verwerfungsregel wie bisher.
 - **Retest (verbindlich):** `go test -count=1 -run 'TestUnknownRelationshipReview|TestTopology' ./internal/discovery/` und `go test -count=1 ./internal/reviews/` grün.
 - **Kodierender Test:** backend/internal/discovery/topology_integration_test.go (`TestUnknownRelationshipReviewLifecycle`, erweitert; `TestUnknownRelationshipReviewAfterAcceptedEdgeDeleted`); auf `f0781b6` rot (`accepted: reviews after two more ingests = map[open:[…] resolved:[…]], want only the resolved one (F-382)`; `reviews while the accepted edge exists = [resolved open]`; `reviews after the user deleted the accepted edge = [resolved open]`).
+
+<a id="f-383"></a>
+### F-383 (P3) – Benachrichtigungssprache je Empfänger nicht erreichbar: nichts setzt `app_user.locale` (kein API-Weg; OIDC-Login, Einladung und Signup behalten den Spaltenstandard `de`)
+
+- **Gefunden in:** WP-588 (`t6-ntf-templates`, K6) · **Betroffene Anforderungen:** NTF-03, NTF-04 · **Komponente:** backend/internal/identity/handler.go (Callback), backend/internal/user/pg_repository.go (`EnsureUser`), backend/internal/notify/handler.go (`/api/v1/notifications/preferences`); `app_user.locale` (Migration 000005, Standard `de`) · **Quelle:** Meldung bei der Umsetzung von WP-588, bestätigt durch Codesuche und ausgeführte Tests
+- **Reproduktion:** Ein Benutzer, dessen ID-Token den Claim `locale` = `en` trägt (Keycloak mit Internationalisierung), meldet sich erstmals an (Einladung angenommen) → `app_user.locale` bleibt `de`. `PUT /api/v1/notifications/preferences` mit `{"locale":"en-US"}` → 200, das Feld wird ignoriert; `GET` nennt keine Sprache. Ein `review.created` oder `collector.offline` erreicht den Benutzer in einer de-DE-Organisation auf Deutsch. Codesuche: außerhalb von Tests schreibt nichts `app_user.locale` (die `INSERT INTO app_user` von OIDC-JIT-Login, Einladungsannahme, Signup und Seed setzen keine Sprache, kein `UPDATE` der Spalte); `/me`, `/users` und die Präferenzen führen keine Sprache.
+- **Soll:** NTF-03 (WP-588): Jeder Empfänger erhält Benachrichtigungen in seiner Sprache (de-DE oder en-US), sonst in der Org-Locale (LOC-01), sonst de-DE. Der Benutzer wählt seine Sprache selbst; solange er keine gewählt hat, übernimmt der Login die Sprache des IdP-Kontos. Die Oberflächensprache folgt weiter dem Browser (E-99).
+- **Ist:** WP-588 wertet `app_user.locale` aus und behandelt den Spaltenstandard `de` als „nicht gewählt“; da nichts die Spalte setzt, gilt für jeden Benutzer die Org-Locale. Einen en-US-Empfänger in einer de-DE-Organisation gibt es nur per SQL.
+- **Nutzerwirkung:** Benutzer, die eine andere Sprache als die Organisation sprechen, erhalten E-Mails und In-App-Benachrichtigungen in der Sprache der Organisation. Umgehung: die Org-Locale umstellen (gilt für alle Benutzer). Keine Datenabweichung, keine Offenlegung.
+- **Ursache (belegt):** WP-588 hat die Auswertung geliefert, aber keinen Weg, die Sprache zu setzen (dort „Nicht Bestandteil: Präferenz-UI“).
+- **Empfehlung:** Der Login übernimmt einen gültigen `locale`-Claim des ID-Tokens (de* → de-DE, en* → en-US), solange `app_user.locale` den Spaltenstandard `de` hat; Selbstbedienung über die bestehende NTF-04-Präferenz (`locale`: de-DE, en-US oder leer für die Org-Locale), spec-first.
+- **Retest (verbindlich):** `go test -count=1 -run 'TestLoginTakesLocaleClaim|TestLoginStoresLocaleClaim' ./internal/identity/` und `go test -count=1 -run 'TestNotificationLanguage|TestNotificationAPI|TestTemplates' ./internal/notify/` grün (PG-Tests mit `TEST_DATABASE_URL`).
+- **Kodierender Test:** backend/internal/identity/login_locale_integration_test.go (`TestLoginTakesLocaleClaim`), backend/internal/identity/handler_test.go (`TestLoginStoresLocaleClaim`), backend/internal/notify/locale_integration_test.go (`TestNotificationLanguageSelfService`), backend/internal/notify/handler_test.go (`TestNotificationLanguagePreference`, drei Fälle in `TestNotificationAPI`); auf `eb5a51e` rot (`user created by the login (invitation): app_user.locale "de" after the login with locale claim en, want "en-US" (F-383)`; `locale claim "en": stored "", want "…/app-user-1/en-US" (F-383)`; `app_user.locale after PUT en-US: "de", want en-US (F-383)`; `in-app review of en: "Neues Review-Item: probable_duplicate", want "New review item: probable_duplicate" (F-383)`; `language without templates: 200 …, want 400`).
 
 ## Geprüfte Kandidaten ohne neuen Befund
 

@@ -40,9 +40,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
-| [K6-Nachträge](#k6-nachträge) | WP-648 – WP-652 | 5 | 2,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-382): eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar. |
+| [K6-Nachträge](#k6-nachträge) | WP-648 – WP-653 | 6 | 3,0 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383): eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **300** | **400,0** | |
+| **Summe** | | **301** | **400,5** | |
 
 ```mermaid
 flowchart LR
@@ -57,7 +57,7 @@ flowchart LR
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
-    K6N["K6-Nachträge<br/>5 WPs · 2,5 PT"]
+    K6N["K6-Nachträge<br/>6 WPs · 3,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -410,6 +410,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-650](#wp-650--rack-platzierung-ablehnung-statt-stiller-standortabweichung-außerhalb-des-scopes) | `k6n-rack-scope-location` | Rack-Platzierung: Ablehnung statt stiller Standortabweichung außerhalb des Scopes | K6N | 0,5 | F-379, F-380 | WP-578 |
 | [WP-651](#wp-651--rack-seite-einbau-auf-beiden-seiten-vorn-und-hinten-anzeigen) | `k6n-rack-face-both` | Rack-Seite: Einbau auf beiden Seiten vorn und hinten anzeigen | K6N | 0,5 | F-381 | WP-579 |
 | [WP-652](#wp-652--unknown_relationship-kein-neues-review-für-ein-angenommenes-paar) | `k6n-unknown-rel-review-accepted` | unknown_relationship: kein neues Review für ein angenommenes Paar | K6N | 0,5 | F-382 | WP-582 |
+| [WP-653](#wp-653--benachrichtigungssprache-je-empfänger-login-claim-und-eigene-präferenz) | `k6n-user-locale` | Benachrichtigungssprache je Empfänger: Login-Claim und eigene Präferenz | K6N | 0,5 | F-383 | WP-588 |
 | [WP-595](#wp-595--nachweisläufe-auf-dem-g1-release-kandidaten-endgültige-statuspflege-und-finaler-gate-check) | `t5-rc-evidence` | Nachweisläufe auf dem G1-Release-Kandidaten, endgültige Statuspflege und finaler Gate-Check | K7 | 1,5 | F-122 | 253 WPs (siehe Block) |
 | [WP-596](#wp-596--wiederholungsprüfung-mandantentrennung-authentisierung-und-autorisierung) | `k-reaudit-1` | Wiederholungsprüfung Mandantentrennung, Authentisierung und Autorisierung | K7 | 2,0 | – | 80 WPs (siehe Block) |
 | [WP-597](#wp-597--wiederholungsprüfung-datenmodell-ingest-collector-und-last) | `k-reaudit-2` | Wiederholungsprüfung Datenmodell, Ingest, Collector und Last | K7 | 2,0 | – | 86 WPs (siehe Block) |
@@ -17914,6 +17915,68 @@ TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-652
 **Entscheidungsbedarf:** keiner (Regel oben).
 
 **Nicht Bestandteil:** Reviews unbekannter Schlüssel für Paare, die ohne Review bereits eine Kante `connected_to` haben (z. B. aus LLDP); Zusammenführen der Gegenrichtung; Bereinigung bereits offener Wiederholungs-Reviews aus der Zeit vor WP-652 (sie werden wie bisher aufgelöst).
+
+### WP-653 – Benachrichtigungssprache je Empfänger: Login-Claim und eigene Präferenz
+
+**Schlüssel:** `k6n-user-locale` · **Meilenstein:** K6-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-588 (`t6-ntf-templates`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-383](../../../audit/g1-reaudit/FINDINGS.md#f-383) | P3 | Benachrichtigungssprache je Empfänger nicht erreichbar: nichts setzt `app_user.locale` (kein API-Weg; OIDC-Login, Einladung und Signup behalten den Spaltenstandard `de`) | schließt | WP-588 |
+
+**Problem:** WP-588 schreibt Benachrichtigungen in der Sprache des Empfängers (`app_user.locale`, Rückfall Org-Locale nach LOC-01, dann de-DE) und behandelt den Spaltenstandard `de` als „nicht gewählt“. Nichts setzt die Spalte: Es gibt keinen API-Weg, und OIDC-JIT-Login, Einladungsannahme und Signup legen Konten mit dem Standard an. Die Sprache je Empfänger (NTF-03) ist für keinen Benutzer erreichbar (F-383). Priorität P3: Die Benachrichtigungen kommen an, nur in der Sprache der Organisation; Umgehung über die Org-Locale (für alle Benutzer).
+
+**Regel (in diesem WP festgelegt, ohne Migration):** `app_user.locale` unterscheidet drei Zustände. `de` (Spaltenstandard, die Regel von WP-588): keine Wahl, es gilt die Org-Locale; ein Login übernimmt die Sprache seines `locale`-Claims. `de-DE` oder `en-US`: gewählte Sprache, aus der eigenen Präferenz oder aus dem ersten Login mit Claim; kein Login ersetzt sie. Leer: die Org-Locale ausdrücklich gewählt; kein Login ersetzt sie. Wer ohne vorherige Wahl „Org-Locale“ speichert, behält den Spaltenstandard (beide bedeuten die Org-Locale; der nächste Login darf den Claim noch übernehmen); erst nach einer Sprache wird die leere Wahl gespeichert. Eine spätere Änderung der Sprache im IdP-Konto ändert eine übernommene Sprache nicht mehr; der Benutzer ändert sie in den Präferenzen. Eine Migration ist dafür nicht nötig: Der WP-588-Standard `de` trägt „nicht gewählt“, ein leerer Wert „ausdrücklich Org-Locale“. Die Oberflächensprache bleibt die des Browsers (E-99).
+
+**Akzeptanzkriterien:**
+
+- [ ] Login: `IDTokenClaims.Locale` aus dem Claim `locale` des validierten ID-Tokens (kein String: keiner, der Login scheitert nicht); der Callback reicht die Template-Locale des Claims (de* → de-DE, en* → en-US, auch mit Unterstrich; andere Sprachen nichts) über `identity.LoginLocaleRecorder` weiter, erst wenn der Login eine Sitzung erhält; ein Fehler beim Speichern lässt den Login gelingen (Warnung im Log, der nächste Login versucht es erneut). `user.PGRepository.RecordLoginLocale` schreibt nur de-DE oder en-US und nur bei `locale = 'de'`, unter der Org-RLS des Logins.
+- [ ] Selbstbedienung spec-first (`api/openapi.yaml`, `NotificationPreference.locale`, Enum `''`, `de-DE`, `en-US`; `schema.d.ts` neu erzeugt): `GET /api/v1/notifications/preferences` nennt `locale` immer (leer: Org-Locale); `PUT` speichert sie in derselben Transaktion wie die Präferenz in `app_user.locale` des angemeldeten Benutzers; ohne `locale` bleibt sie; jeder andere Wert → 400 ohne Änderung. Der Audit-Schnappschuss der Route enthält `locale`.
+- [ ] PG-Tests als `reticora_app`, auf `eb5a51e` rot: `TestLoginTakesLocaleClaim` (Einladung, vom Administrator angelegtes Konto und wiederkehrender Benutzer ohne Wahl übernehmen den Claim; gewählte Sprache, ausdrücklich leere Wahl und eine aus einem früheren Login übernommene Sprache bleiben; eine andere Sprache, ein Claim ohne String und ein Token ohne Claim ändern nichts); `TestNotificationLanguageSelfService` (PUT/GET, gespeicherte Spaltenwerte, 400 ohne Änderung, Benachrichtigungen in-app und per E-Mail in der gewählten Sprache bzw. der Org-Locale). Unit-Tests `TestLoginStoresLocaleClaim`, `TestNotificationLanguagePreference`, drei Fälle in `TestNotificationAPI`.
+- [ ] Regression grün: `internal/identity`, `internal/notify`, `internal/user`, `internal/audit`, `internal/server`; Lint-Schuld des Backends nicht gestiegen.
+
+**Dateien (19 Einträge):**
+
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- backend/internal/identity/oidc.go
+- backend/internal/identity/handler.go
+- backend/internal/identity/handler_test.go
+- backend/internal/identity/callback_scope_integration_test.go
+- backend/internal/identity/login_locale_integration_test.go (neu)
+- backend/internal/user/pg_repository.go
+- backend/internal/notify/templates.go
+- backend/internal/notify/notifier.go
+- backend/internal/notify/pg_notification.go
+- backend/internal/notify/handler.go
+- backend/internal/notify/handler_test.go
+- backend/internal/notify/locale_integration_test.go (neu)
+- backend/internal/audit/route_snapshot.go
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration. Beide Schreibwege ändern nur die Zeile des angemeldeten bzw. sich anmeldenden Benutzers unter der Org-RLS (`reticora_app`); die Sprache ist auf zwei Werte und den leeren Wert begrenzt.
+
+**Tests:**
+
+- `TestLoginTakesLocaleClaim` (PG, neu), `TestLoginStoresLocaleClaim` (Unit, neu).
+- `TestNotificationLanguageSelfService` (PG, neu), `TestNotificationLanguagePreference` (Unit, neu), `TestNotificationAPI` (drei Fälle ergänzt).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NTF-03;[B];B;backend/internal/notify/locale_integration_test.go;WP-653
+```
+
+**Entscheidungsbedarf:** keiner (Regel oben; E-99 bleibt unberührt).
+
+**Nicht Bestandteil:** Präferenz-Oberfläche (es gibt keine Seite für die Benachrichtigungspräferenzen; nur Backend und API); Sprache eines Benutzers durch einen Org-Administrator; Übernahme aus dem Access-Token oder dem Userinfo-Endpunkt; Aktivieren der Internationalisierung in den mitgelieferten Keycloak-Realms; Nachführen einer späteren Sprachänderung im IdP-Konto nach einer übernommenen Sprache; SCIM-Attribut `preferredLanguage`.
 
 ## K7 Wiederholungsprüfung und Gate G1
 

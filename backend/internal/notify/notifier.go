@@ -95,6 +95,21 @@ type Preference struct {
 	// MutedCategories. Categories named here when storing win over
 	// MutedCategories.
 	Subscriptions map[string]string `json:"subscriptions,omitempty"`
+	// Locale is the language of the user's notifications (NTF-03, F-383):
+	// de-DE or en-US, empty for the organization's locale. It is stored in
+	// app_user.locale, not with the preference row; nil when storing keeps
+	// the stored language.
+	Locale *string `json:"locale,omitempty"`
+}
+
+// validateLocale checks a notification language of the preferences: de-DE,
+// en-US or empty (the organization's locale).
+func validateLocale(locale string) error {
+	switch locale {
+	case "", LocaleDE, LocaleEN:
+		return nil
+	}
+	return fmt.Errorf("%w: unknown notification language %q (de-DE, en-US or empty for the organization's)", ErrValidation, locale)
 }
 
 // Validate checks the preference.
@@ -118,6 +133,11 @@ func (p *Preference) Validate() error {
 	}
 	if p.MutedCategories == nil {
 		p.MutedCategories = []string{}
+	}
+	if p.Locale != nil {
+		if err := validateLocale(*p.Locale); err != nil {
+			return err
+		}
 	}
 	if err := p.applySubscriptions(); err != nil {
 		return err
@@ -175,10 +195,26 @@ type DeliveryStore interface {
 	List(ctx context.Context, orgID string, limit, offset int) ([]QueuedDelivery, error)
 }
 
-// PreferenceStore reads and writes user preferences.
+// PreferenceStore reads and writes user preferences. SetPreference also
+// stores a Locale that is not nil; Locale returns the user's notification
+// language as UserLocaleChoice names it.
 type PreferenceStore interface {
 	Preference(ctx context.Context, orgID, userID string) (*Preference, error)
 	SetPreference(ctx context.Context, orgID, userID string, p *Preference) error
+	Locale(ctx context.Context, orgID, userID string) (string, error)
+}
+
+// storedLocale returns the new app_user.locale when the user chooses a
+// notification language over the stored one: the language, or empty for
+// the organization's locale. Choosing the organization's locale without a
+// language chosen before keeps the column default (legacyUserLocale), so
+// a later login still takes the IdP's locale claim; after a language it
+// is stored as empty, which no login replaces.
+func storedLocale(stored, chosen string) string {
+	if chosen == "" && strings.EqualFold(strings.TrimSpace(stored), legacyUserLocale) {
+		return stored
+	}
+	return chosen
 }
 
 // FeatureChecker reports whether an organization holds a feature; an error
@@ -437,11 +473,16 @@ type MemoryStore struct {
 	mu    sync.Mutex
 	rows  []*QueuedDelivery
 	prefs map[string]Preference
-	seq   int
+	// locales are the stored app_user.locale by organization/user; a
+	// missing one is the column default.
+	locales map[string]string
+	seq     int
 }
 
 // NewMemoryStore creates an empty store.
-func NewMemoryStore() *MemoryStore { return &MemoryStore{prefs: map[string]Preference{}} }
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{prefs: map[string]Preference{}, locales: map[string]string{}}
+}
 
 // Enqueue implements DeliveryStore.
 func (s *MemoryStore) Enqueue(_ context.Context, orgID string, rows []QueuedDelivery) (int, error) {
@@ -536,7 +577,25 @@ func (s *MemoryStore) SetPreference(_ context.Context, orgID, userID string, p *
 	cp.MutedCategories = append([]string(nil), p.MutedCategories...)
 	sort.Strings(cp.MutedCategories)
 	cp.Digest = maps.Clone(p.Digest)
-	cp.Subscriptions = nil
+	cp.Subscriptions, cp.Locale = nil, nil
 	s.prefs[orgID+"/"+userID] = cp
+	if p.Locale != nil {
+		stored, ok := s.locales[orgID+"/"+userID]
+		if !ok {
+			stored = legacyUserLocale
+		}
+		s.locales[orgID+"/"+userID] = storedLocale(stored, *p.Locale)
+	}
 	return nil
+}
+
+// Locale implements PreferenceStore.
+func (s *MemoryStore) Locale(_ context.Context, orgID, userID string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored, ok := s.locales[orgID+"/"+userID]
+	if !ok {
+		return "", nil
+	}
+	return UserLocaleChoice(stored), nil
 }
