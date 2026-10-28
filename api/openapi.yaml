@@ -832,6 +832,8 @@ paths:
       operationId: createCI
       tags: [CIs]
       summary: Create a configuration item
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -13063,6 +13065,29 @@ components:
       description: RETICORA_OPS_ALERT_TOKEN of the Alertmanager bridge (OPS-05), sent by Alertmanager from a credentials file.
 
   parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+      description: |
+        Deduplicates a POST for 24 hours (API-04); every POST endpoint
+        accepts it. The key is bound to the caller (organization and
+        principal), the method and the path. The first request reserves
+        it: a concurrent request with the same key gets 409, a later one
+        with the same body gets the stored answer with
+        `Idempotency-Replayed: true` without running the request again,
+        one with a different body 409.
+
+        2xx, 3xx and 4xx answers are stored. A 5xx answer is not stored
+        and releases the key: a retry with the same key runs the request
+        again, e.g. after a 503 with `Retry-After` during a dependency or
+        audit outage.
+
+        A replayed answer is the stored one verbatim: the `trace_id` of a
+        replayed problem is that of the first request, while the
+        `X-Request-ID` header always names the current request.
     ResourceID:
       name: id
       in: path
@@ -15461,6 +15486,10 @@ components:
         url:
           type: string
           format: uri
+          description: >-
+            Subscriber URL. It often carries a token in path, query or
+            userinfo: a caller without webhook:manage gets only scheme and
+            host (SEC-01).
         events:
           type: array
           items:
@@ -15578,6 +15607,9 @@ components:
           type: integer
         error:
           type: string
+          description: >-
+            Error of the last attempt. For a caller without webhook:manage
+            every URL in it is reduced to scheme and host (SEC-01).
         next_retry_at:
           type: string
           format: date-time
@@ -15619,6 +15651,9 @@ components:
           type: integer
         last_error:
           type: string
+          description: >-
+            Error of the last attempt. For a caller without webhook:manage
+            every URL in it is reduced to scheme and host (SEC-01).
         first_attempt_at:
           type: string
           format: date-time

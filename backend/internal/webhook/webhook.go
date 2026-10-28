@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -17,6 +19,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -150,7 +153,9 @@ const MaskedHeaderValue = "***"
 // redacted returns the subscription as the API shows it: custom header values
 // often carry authentication (Authorization, API keys), so they are
 // write-only and masked; only the header names are returned (SEC-01).
-func (s *Subscription) redacted() Subscription {
+// Subscriber URLs often carry a token in path, query or userinfo, so a
+// caller without webhook:manage sees only scheme and host (F-202).
+func (s *Subscription) redacted(ctx context.Context) Subscription {
 	out := *s
 	if len(s.Headers) > 0 {
 		out.Headers = make(map[string]string, len(s.Headers))
@@ -158,7 +163,40 @@ func (s *Subscription) redacted() Subscription {
 			out.Headers[name] = MaskedHeaderValue
 		}
 	}
+	if !mayManage(ctx) {
+		out.URL = urlOrigin(s.URL)
+	}
 	return out
+}
+
+// mayManage reports whether the caller holds webhook:manage; a request
+// without an authenticated principal does not.
+func mayManage(ctx context.Context) bool {
+	principal, ok := identity.PrincipalFromContext(ctx)
+	return ok && principal.Has(identity.PermWebhookManage)
+}
+
+// urlOrigin returns scheme and host of raw, without userinfo, path, query
+// and fragment; a value that is no absolute URL is shown empty.
+func urlOrigin(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host}).String()
+}
+
+// urlInText finds the URLs in a delivery error: the HTTP client names the
+// full subscriber URL (`Post "https://…": …`).
+var urlInText = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+`)
+
+// redactError reduces every URL in a delivery error to scheme and host for
+// a caller without webhook:manage (F-202).
+func redactError(ctx context.Context, text string) string {
+	if text == "" || mayManage(ctx) {
+		return text
+	}
+	return urlInText.ReplaceAllStringFunc(text, urlOrigin)
 }
 
 // CreateRequest is the payload for creating a webhook subscription.
@@ -593,6 +631,9 @@ func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	for i := range records {
+		records[i].Error = redactError(r.Context(), records[i].Error)
+	}
 
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[DeliveryRecord]{
 		Data:    records,
@@ -626,6 +667,9 @@ func (h *Handler) ListDeadLetters(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	for i := range letters {
+		letters[i].LastError = redactError(r.Context(), letters[i].LastError)
+	}
 
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[DeadLetter]{
 		Data:    letters,
@@ -653,7 +697,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	shown := make([]Subscription, 0, len(subs))
 	for i := range subs {
-		shown = append(shown, subs[i].redacted())
+		shown = append(shown, subs[i].redacted(r.Context()))
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Subscription]{
 		Data:    shown,
@@ -676,7 +720,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteJSON(w, http.StatusOK, sub.redacted())
+	api.WriteJSON(w, http.StatusOK, sub.redacted(r.Context()))
 }
 
 // errServiceAccountNotFound refuses binding a subscription to a service
@@ -744,7 +788,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteJSON(w, http.StatusCreated, sub.redacted())
+	api.WriteJSON(w, http.StatusCreated, sub.redacted(r.Context()))
 }
 
 // Delete handles DELETE /api/v1/webhooks/{id}

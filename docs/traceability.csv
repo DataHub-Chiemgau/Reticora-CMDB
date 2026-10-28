@@ -978,3 +978,6 @@ REL-03;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-58
 REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-584
 API-01;[B];C;backend/internal/middleware/openapi_test.go;WP-568
 API-03;[B];C;backend/internal/server/openapi_contract_test.go;WP-568
+SEC-01;[B];B;backend/internal/platform/httpx/redact_test.go;WP-569
+API-04;[B];B;backend/internal/middleware/idempotency_integration_test.go;WP-569
+API-03;[B];B;backend/internal/middleware/idempotency_integration_test.go;WP-569

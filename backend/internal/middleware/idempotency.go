@@ -36,7 +36,8 @@ const idempotencyLockTTL = 2 * time.Minute
 // reaches a stored response. The key is bound to the principal, the method
 // and the path; the first request reserves it atomically (an INCR in the
 // shared store, the cache equivalent of INSERT … ON CONFLICT), and a
-// concurrent duplicate gets 409 instead of executing twice.
+// concurrent duplicate gets 409 instead of executing twice. A 5xx response
+// is not stored (executeAndStore).
 func IdempotencyWithStore(store cache.Store) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -138,9 +139,24 @@ func replayIdempotent(w http.ResponseWriter, r *http.Request, entry idempotencyE
 	}
 }
 
+// executeAndStore runs the request and stores its response for replay. A
+// 5xx response is not stored and the reservation is released (F-206): the
+// failure is transient (a dependency outage, the 503 of AuditRoute without
+// a stored audit intent), so a retry with the same key reaches the handler
+// again instead of replaying the error for 24 hours. Any other response is
+// replayed verbatim, a 4xx body with the trace_id of the first request.
 func executeAndStore(ctx context.Context, store cache.Store, storeKey, bodyHash string, w http.ResponseWriter, r *http.Request, next http.Handler) {
 	rec := newResponseRecorder(w)
 	next.ServeHTTP(rec, r)
+
+	if rec.status >= http.StatusInternalServerError {
+		if err := store.Delete(context.WithoutCancel(ctx), storeKey+":lock"); err != nil {
+			// The reservation expires after idempotencyLockTTL; until then
+			// a retry gets 409.
+			slog.Warn("idempotency: failed to release reservation", "key", storeKey, "error", err)
+		}
+		return
+	}
 
 	entry := idempotencyEntry{
 		StatusCode:  rec.status,

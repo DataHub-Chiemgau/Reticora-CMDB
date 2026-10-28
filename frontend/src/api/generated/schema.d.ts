@@ -8121,7 +8121,10 @@ export interface components {
       id: string;
       organization_id: string;
       name: string;
-      /** Format: uri */
+      /**
+       * Format: uri
+       * @description Subscriber URL. It often carries a token in path, query or userinfo: a caller without webhook:manage gets only scheme and host (SEC-01).
+       */
       url: string;
       events: components['schemas']['WebhookEvent'][];
       is_active: boolean;
@@ -8178,6 +8181,7 @@ export interface components {
       max_attempts: number;
       response_status?: number;
       duration_ms?: number;
+      /** @description Error of the last attempt. For a caller without webhook:manage every URL in it is reduced to scheme and host (SEC-01). */
       error?: string;
       /** Format: date-time */
       next_retry_at?: string;
@@ -8197,6 +8201,7 @@ export interface components {
       event: string;
       attempts: number;
       last_status_code?: number;
+      /** @description Error of the last attempt. For a caller without webhook:manage every URL in it is reduced to scheme and host (SEC-01). */
       last_error?: string;
       /** Format: date-time */
       first_attempt_at?: string;
@@ -11451,6 +11456,25 @@ export interface components {
     };
   };
   parameters: {
+    /**
+     * @description Deduplicates a POST for 24 hours (API-04); every POST endpoint
+     *     accepts it. The key is bound to the caller (organization and
+     *     principal), the method and the path. The first request reserves
+     *     it: a concurrent request with the same key gets 409, a later one
+     *     with the same body gets the stored answer with
+     *     `Idempotency-Replayed: true` without running the request again,
+     *     one with a different body 409.
+     *
+     *     2xx, 3xx and 4xx answers are stored. A 5xx answer is not stored
+     *     and releases the key: a retry with the same key runs the request
+     *     again, e.g. after a 503 with `Retry-After` during a dependency or
+     *     audit outage.
+     *
+     *     A replayed answer is the stored one verbatim: the `trace_id` of a
+     *     replayed problem is that of the first request, while the
+     *     `X-Request-ID` header always names the current request.
+     */
+    IdempotencyKey: string;
     /** @description Resource identifier. */
     ResourceID: string;
     /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
@@ -12187,7 +12211,27 @@ export interface operations {
   createCI: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /**
+         * @description Deduplicates a POST for 24 hours (API-04); every POST endpoint
+         *     accepts it. The key is bound to the caller (organization and
+         *     principal), the method and the path. The first request reserves
+         *     it: a concurrent request with the same key gets 409, a later one
+         *     with the same body gets the stored answer with
+         *     `Idempotency-Replayed: true` without running the request again,
+         *     one with a different body 409.
+         *
+         *     2xx, 3xx and 4xx answers are stored. A 5xx answer is not stored
+         *     and releases the key: a retry with the same key runs the request
+         *     again, e.g. after a 503 with `Retry-After` during a dependency or
+         *     audit outage.
+         *
+         *     A replayed answer is the stored one verbatim: the `trace_id` of a
+         *     replayed problem is that of the first request, while the
+         *     `X-Request-ID` header always names the current request.
+         */
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      };
       path?: never;
       cookie?: never;
     };
