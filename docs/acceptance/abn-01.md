@@ -170,9 +170,10 @@ Dateien in `artefakte/SHA256SUMS` sind neu. Der Job `tls-domain-pebble` in
 dort die INS-04-Tests (`--grep @ins-04 --grep-invert @plain-http`) über
 `https://<Domain>`. Die Suite vertraut der Pebble-Wurzel über
 `playwright.install.config.ts` (NSS-Datenbank, `NODE_EXTRA_CA_CERTS`) statt
-über `ignoreHTTPSErrors`. Lauf-ID des Jobs `tls-domain-pebble`: ausstehend.
-Der Lauf hat noch nicht stattgefunden und wird nach dem ersten CI-Lauf mit
-dieser Fassung nachgetragen. Bis dahin ist der Retest von F-352 offen.
+über `ignoreHTTPSErrors`. Lauf-ID des Jobs `tls-domain-pebble`:
+[Install Smoke Test 40613604691](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40613604691)
+(Job 122571465336, Stand `372d442`, PR #102), grün; Nachtrag vom 2026-10-28.
+Damit ist der Retest von F-352 bestanden.
 
 | # | Schritt | Erwartung | Ergebnis |
 |---|---|---|---|
