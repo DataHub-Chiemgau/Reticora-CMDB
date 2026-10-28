@@ -256,6 +256,9 @@
     "location": "Location",
     "barcode": "Barcode",
     "warrantyEnd": "Warranty end",
+    "rfidTag": "RFID tag",
+    "purchaseDate": "Purchase date",
+    "invoiceNumber": "Invoice number",
     "supplier": "Supplier",
     "healthState": {
       "ok": "Health: OK",
@@ -293,6 +296,7 @@
     "typeAttributes": "Type attributes",
     "typesLoadFailed": "The CI types could not be loaded.",
     "typeSchemaLoadFailed": "The attributes of the CI type could not be loaded.",
+    "assetManaged": "Managed by the asset",
     "fields": {
       "name": "Name",
       "ciType": "CI Type",
@@ -301,7 +305,8 @@
       "model": "Model",
       "serialNumber": "Serial Number",
       "managementIp": "Management IP",
-      "firmwareVersion": "Firmware Version"
+      "firmwareVersion": "Firmware Version",
+      "location": "Location"
     },
     "validation": {
       "nameRequired": "Name is required.",

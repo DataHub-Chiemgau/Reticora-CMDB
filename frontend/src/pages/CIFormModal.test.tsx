@@ -18,6 +18,10 @@
  *   WP-477 the dialog sent every form value and dropped cleared fields
  *   (optionalValue('') → undefined): the save reported success, the value
  *   stayed, and a stale editor got 409 for a field it had not touched.
+ * - DB-05, AST-04 (WP-577, F-238): a CI linked to an asset takes serial
+ *   number and location from the asset; the dialog shows both disabled with
+ *   the hint "Vom Asset geführt" and never sends them. Before WP-577 the
+ *   serial number was editable and the save failed with 422.
  * - Server-side validation: the backend validates CI attributes against the
  *   CI type's field metadata and answers with per-field `violations`; before
  *   the regression test the client discarded that array, so the user saw one
@@ -134,10 +138,12 @@ interface BackendOptions {
   hidden?: TypeFixture[];
   /** Answer of POST /cis; the default stores the body and answers 201. */
   post?: (body: Record<string, unknown>) => Response;
+  /** Answer of GET /locations/tree; without it the request is unexpected. */
+  tree?: unknown[];
 }
 
 /** Answers by exact API path; records the requests and the POST/PATCH bodies. */
-function stubBackend({ types = [serverType], hidden = [], post }: BackendOptions = {}) {
+function stubBackend({ types = [serverType], hidden = [], post, tree }: BackendOptions = {}) {
   const posted: Array<Record<string, unknown>> = [];
   const patched: Array<Record<string, unknown>> = [];
   const requests: string[] = [];
@@ -153,6 +159,9 @@ function stubBackend({ types = [serverType], hidden = [], post }: BackendOptions
     const known = [...types, ...hidden].find((ty) => path === `/ci-types/${ty.id}`);
     if (method === 'GET' && known) {
       return json(known);
+    }
+    if (method === 'GET' && path === '/locations/tree' && tree) {
+      return json({ data: tree });
     }
     if (method === 'POST' && path === '/cis') {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
@@ -632,5 +641,119 @@ describe('CIFormModal server-side validation', () => {
       await screen.findByText('Die CI-Typen konnten nicht geladen werden.'),
     ).toBeInTheDocument();
     expect(typeSelect()).toHaveAttribute('aria-invalid', 'true');
+  });
+});
+
+describe('CIFormModal for a CI linked to an asset (DB-05, AST-04, F-238)', () => {
+  const SITE = '10c00000-0000-4000-8000-000000000001';
+  const ROOM = '10c00000-0000-4000-8000-000000000003';
+  const ASSET = 'a55e7000-0000-4000-8000-000000000001';
+  const node = (
+    id: string,
+    kind: string,
+    name: string,
+    parent: string | undefined,
+    children: unknown[],
+  ) => ({
+    id,
+    organization_id: 'org-1',
+    client_id: 'client-1',
+    site_id: SITE,
+    ...(parent ? { parent_id: parent } : {}),
+    kind,
+    name,
+    path: id,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    children,
+  });
+  const tree = [
+    node(SITE, 'site', 'RZ Nord', undefined, [node(ROOM, 'room', 'Raum 1.01', SITE, [])]),
+  ];
+
+  const linkedCI: CI = {
+    ...storedCI,
+    ci_type_id: SERVER_TYPE_ID,
+    name: 'srv-linked-01',
+    version: 4,
+    manufacturer: 'Old Vendor',
+    serial_number: 'SN-OBSERVED',
+    location_id: ROOM,
+    site_id: SITE,
+    room_id: ROOM,
+    asset_id: ASSET,
+    asset: {
+      id: ASSET,
+      asset_tag: 'INV-0042',
+      name: 'srv-linked-01 hardware',
+      status: 'assigned',
+      serial_number: 'SN-ASSET-42',
+      location_id: ROOM,
+    },
+    attributes: {},
+  };
+
+  async function openEditor(ci: CI) {
+    const onOpenChange = vi.fn();
+    const backend = stubBackend({ types: [serverType], tree });
+    renderWithProviders(<CIFormModal open onOpenChange={onOpenChange} ci={ci} />);
+    await waitFor(() => expect(typeSelect().value).toBe(ci.ci_type_id));
+    return { ...backend, onOpenChange };
+  }
+
+  it('shows serial number and location disabled with the hint and sends neither', async () => {
+    const { patched, requests } = await openEditor(linkedCI);
+
+    const serial = screen.getByLabelText('Seriennummer');
+    expect(serial).toBeDisabled();
+    expect(serial).toHaveValue('SN-ASSET-42');
+    expect(serial).toHaveAccessibleDescription('Vom Asset geführt');
+    const location = screen.getByLabelText('Standort');
+    expect(location).toBeDisabled();
+    await waitFor(() => expect(location).toHaveValue('RZ Nord › Raum 1.01'));
+    expect(location).toHaveAccessibleDescription('Vom Asset geführt');
+    expect(screen.getAllByText('Vom Asset geführt')).toHaveLength(2);
+    expect(requests).toContain('GET /locations/tree');
+
+    fireEvent.change(screen.getByLabelText('Hersteller'), { target: { value: 'New Vendor' } });
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(patched).toHaveLength(1));
+    expect(patched[0]).toEqual({ manufacturer: 'New Vendor' });
+    expect(patched[0]).not.toHaveProperty('serial_number');
+    expect(patched[0]).not.toHaveProperty('location_id');
+  });
+
+  it('labels the hint in English', async () => {
+    await act(async () => {
+      await i18n.changeLanguage('en-US');
+    });
+    await openEditor(linkedCI);
+
+    expect(screen.getByLabelText('Serial Number')).toHaveAccessibleDescription(
+      'Managed by the asset',
+    );
+    expect(screen.getByLabelText('Location')).toBeDisabled();
+  });
+
+  it('keeps the serial number editable and shows no location field without an asset', async () => {
+    const { patched, requests } = await openEditor({
+      ...linkedCI,
+      asset_id: undefined,
+      asset: undefined,
+    });
+
+    const serial = screen.getByLabelText('Seriennummer');
+    expect(serial).toBeEnabled();
+    expect(serial).toHaveValue('SN-OBSERVED');
+    expect(screen.queryByLabelText('Standort')).toBeNull();
+    expect(screen.queryByText('Vom Asset geführt')).toBeNull();
+    expect(requests).not.toContain('GET /locations/tree');
+
+    fireEvent.change(serial, { target: { value: 'SN-NEW' } });
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(patched).toHaveLength(1));
+    expect(patched[0]).toEqual({ serial_number: 'SN-NEW' });
   });
 });

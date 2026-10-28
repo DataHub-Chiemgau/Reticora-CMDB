@@ -987,3 +987,6 @@ CI-12;[B];C;backend/internal/ci/merge_integration_test.go;WP-572
 TST-02;[B];SR;backend/internal/server/e2e_scenarios_integration_test.go;WP-559
 AST-05;[P2];B;backend/internal/relationship/projection_integration_test.go;WP-574
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/relationship/projection_integration_test.go;WP-574
+CI-06;[B];B;frontend/src/pages/CIDetailPage.test.tsx;WP-577
+DB-05;nicht geliefert, CH12/PRI-10;B;frontend/src/pages/CIDetailPage.test.tsx;WP-577
+AST-04;[P2];B;frontend/src/pages/CIFormModal.test.tsx;WP-577

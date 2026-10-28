@@ -391,3 +391,94 @@ test('CI detail: the provenance actions are clickable next to long values', asyn
   await expect(page.getByRole('dialog')).toBeVisible();
   expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
 });
+
+test('CI detail: the location path, the asset card and the edit dialog fit the phone', async ({
+  page,
+}) => {
+  // WP-577 (CI-06, DB-05, F-237/F-238): the location is shown as its path of
+  // names and the asset card with every canonical field; with the names of
+  // the real stack neither may widen the page, nor may the edit dialog with
+  // its fields managed by the asset.
+  const CI = 'c1000000-0000-4000-8000-0000000000c1';
+  const ASSET = 'a5000000-0000-4000-8000-0000000000c1';
+  const rack = node(
+    RACK,
+    'rack',
+    `Rack-${RUN}-Reihe-07`,
+    ROOM,
+    `${SITE}.${BUILDING}.${ROOM}.${RACK}`,
+  );
+  const room = node(
+    ROOM,
+    'room',
+    `Serverraum-${RUN}-Nord`,
+    BUILDING,
+    `${SITE}.${BUILDING}.${ROOM}`,
+    [rack],
+  );
+  const building = node(BUILDING, 'building', `Gebaeude-${RUN}-A`, SITE, `${SITE}.${BUILDING}`, [
+    room,
+  ]);
+  const site = node(SITE, 'site', `Rechenzentrum-${RUN}-Muenchen`, undefined, SITE, [building]);
+  const calls = await mockBackend(page, [
+    {
+      path: `/cis/${CI}`,
+      reply: () => ({
+        body: {
+          id: CI,
+          name: `sim-access-${RUN}`,
+          status: 'active',
+          ci_type_id: '5e1b0c3a-7d2f-4a10-9c01-000000000001',
+          serial_number: `SN-${RUN}-OBSERVED`,
+          location_id: RACK,
+          site_id: SITE,
+          room_id: ROOM,
+          asset_id: ASSET,
+          asset: {
+            id: ASSET,
+            asset_tag: `INV-${RUN}`,
+            name: `sim-access-${RUN} hardware`,
+            status: 'assigned',
+            serial_number: `SN-${RUN}-ASSET`,
+            location_id: RACK,
+            lifecycle_state: 'in_use',
+            rfid_tag: `RFID-E200-${RUN}`,
+            barcode: `BC-${RUN}`,
+            purchase_date: '2025-03-15',
+            warranty_end: '2028-03-14',
+            supplier: `Lieferant-${RUN}-GmbH`,
+            invoice_number: `RE-${RUN}`,
+          },
+          attributes: {},
+          is_manual: true,
+          version: 1,
+          organization_id: ORG_ID,
+          first_seen_at: AT,
+          created_at: AT,
+          updated_at: AT,
+        },
+      }),
+    },
+    { path: '/locations/tree', reply: () => ({ body: { data: [site] } }) },
+    { path: `/cis/${CI}/provenance`, reply: () => ({ body: list([]) }) },
+    {
+      path: /^\/topology\/cis\/[^/]+\/neighbors$/,
+      reply: () => ({ body: { nodes: [], edges: [] } }),
+    },
+  ]);
+  await signIn(page);
+  await page.goto(`/cmdb/${CI}`);
+  const path = [site.name, building.name, room.name, rack.name].join(' › ');
+  await expect(page.getByText(path).first()).toBeVisible();
+  await expect(page.getByText(`RE-${RUN}`)).toBeVisible();
+  await expectNoSidewaysScroll(page);
+
+  await page.getByRole('button', { name: 'Bearbeiten', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByLabel('Standort')).toHaveValue(path);
+  await expect(dialog.getByLabel('Seriennummer')).toBeDisabled();
+  await expectNoSidewaysScroll(page);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
+});
