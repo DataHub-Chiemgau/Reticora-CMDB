@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-661 | 6 | 5,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-662 | 8 | 6,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **308** | **406,0** | |
+| **Summe** | | **310** | **407,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>6 WPs · 5,0 PT"]
+    K7N["K7-Nachträge<br/>8 WPs · 6,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -427,6 +427,8 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-657](#wp-657--ingest-rahmen-und-ledger-eines-batches-wp-332-ak-3-mit-dem-gebauten-entwurf-abgleichen) | `k7n-ingest-frame-ledger-tx` | Ingest: Rahmen und Ledger eines Batches (WP-332 AK 3) mit dem gebauten Entwurf abgleichen | K7N | 0,5 | F-386 | WP-332, WP-333, WP-334, WP-481 |
 | [WP-660](#wp-660--audit-liste-scope-regel-für-jeden-typ-der-auditoren-domänentypen-und-routensegmente-unbekannte-typen-fail-closed) | `k7n-audit-log-scope` | Audit-Liste: Scope-Regel für jeden Typ der Auditoren (Domänentypen und Routensegmente), unbekannte Typen fail-closed | K7N | 1,5 | F-389 | WP-504, WP-505 |
 | [WP-661](#wp-661--credentials-ungültige-id-wie-unbekannte-404-repository-fehler-über-den-fehlervertrag-api-03) | `k7n-credential-invalid-id` | Credentials: ungültige ID wie unbekannte (404), Repository-Fehler über den Fehlervertrag API-03 | K7N | 0,5 | F-390 | WP-343 |
+| [WP-659](#wp-659--lastskripte-keine-fehlgeschlagene-anfrage-je-szenario-schwelle-für-gelungene-bulk-jobs-statuscodes-in-der-job-zusammenfassung) | `k7n-load-thresholds` | Lastskripte: keine fehlgeschlagene Anfrage je Szenario, Schwelle für gelungene Bulk-Jobs, Statuscodes in der Job-Zusammenfassung | K7N | 0,5 | F-388 | WP-204, WP-206, WP-439, WP-658 |
+| [WP-662](#wp-662--routen-audit-pfad-ids-mit-nul-byte-oder-ungültigem-utf-8-erhalten-404-vor-der-audit-absicht-statt-503) | `k7n-route-audit-nul-id` | Routen-Audit: Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 vor der Audit-Absicht statt 503 | K7N | 0,5 | F-391 | WP-504, WP-505 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -18660,6 +18662,118 @@ TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;
 **Entscheidungsbedarf:** keiner.
 
 **Nicht Bestandteil:** die übrigen 5xx des ID-Sweeps (`/api/v1/admin/orgs/{id}/entitlements` ohne konfiguriertes Operator-Audit, `/api/v1/documents/{id}/content` 503 ohne Blob-Speicher – Testaufbau ohne diese Dienste, kein Befund dieses WPs); die 503 von `api.WriteRepoError` bei nicht erreichbarer Datenbank (allgemeiner Vertrag, nicht je Route in der Spezifikation); F-389 (WP-660, `k7n-audit-log-scope`); weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-659 – Lastskripte: keine fehlgeschlagene Anfrage je Szenario, Schwelle für gelungene Bulk-Jobs, Statuscodes in der Job-Zusammenfassung
+
+**Schlüssel:** `k7n-load-thresholds` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** LT · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-204 (`lt-harness`), WP-206 (`lt-run`), WP-439 (`t4-load-report`); der grüne `load.yml`-Lauf braucht zusätzlich WP-658 (`k7n-preauth-concurrency`, F-387, parallel in Arbeit)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-388](../../../audit/g1-reaudit/FINDINGS.md#f-388) | P3 | Lastskripte ohne Schwelle auf fehlgeschlagene Anfragen: Lauf bleibt grün, obwohl alle Bulk-Anfragen scheitern; `bulk_500_duration` zählt abgewiesene Bulk-Anfragen | schließt | Lastlauf `load.yml` 40713089267 (K7) auf `e5c2d86` |
+
+**Problem:** `tests/load/api.js` bewertet Fehlschläge nur über `checks: rate>0.99` und hat keine Schwelle auf `http_req_failed`; `bulk()` trägt die Dauer auch für abgewiesene Bulk-Anfragen und gescheiterte Jobs in `bulk_500_duration` ein. Lauf 40713089267 auf `e5c2d86` blieb so im Job `api` grün, obwohl 19 von 17.879 Anfragen und alle 3 Bulk-Anfragen fehlschlugen (429, F-387; `bulk_500_duration` 1 bis 15 ms), und im Job `nfr01-volume` mit 23 von 13.920 fehlgeschlagenen Anfragen. `tests/load/ingest.js` prüft `http_req_failed` nur für die Anfragen namens `ingest` bzw. `spool`, nicht für Setup, Sichtbarkeitsabfragen und `/readyz`. Statuscodes fehlgeschlagener Anfragen stehen weder in der Zusammenfassung des Jobs noch im Archiv. E-58 sieht keine Toleranz vor.
+
+**Akzeptanzkriterien:**
+
+- [ ] `api.js` und `ingest.js` (alle drei `SCENARIO`) haben `http_req_failed: rate==0` für den ganzen Lauf und je k6-Szenario (`http_req_failed{scenario:<name>}`); die bisherigen Schwellen bleiben unverändert, `checks: rate>0.99` gilt weiter für die inhaltlichen Prüfungen. Keine Toleranz (E-58).
+- [ ] `api.js`: Jeder der drei Bulk-Jobs muss gelingen (`bulk_jobs_succeeded: count==3`, `checks{scenario:bulk}: rate==1`); `bulk_500_duration` erfasst nur gelungene Bulk-Jobs; ein abgewiesener, gescheiterter oder nach der Wartezeit noch laufender Job ergibt den fehlgeschlagenen Check `bulk job succeeded` und eine Konsolenzeile mit seinem Zustand.
+- [ ] Jede fehlgeschlagene Anfrage (Status 0, < 200, ≥ 400) steht mit Name, Status, Methode, Pfad und Anfang der Antwort auf der k6-Konsole (`tests/load/lib.js` `failed`); `load.yml` schreibt die Konsole nach `console-<job>.log`, `tests/load/failed-requests.sh` zählt die Anfragen je Name und Status für die Zusammenfassung des Jobs und `failed-<job>.txt`; `archive-run.sh` übernimmt `failed-<job>.txt` und nennt die Anzahl je Name und Status in `ergebnis.md`.
+- [ ] `tests/load/thresholds.test.sh` (im Job `prepare` von `load.yml`, k6 0.54.0): `k6 inspect` aller Skripte; `api.js` gegen eine Attrappe der API: alles gelingt → keine Schwelle außer Latenz verletzt, drei Bulk-Dauern; jede `POST /cis/bulk` 429 → exit 99, `http_req_failed{scenario:bulk}` verletzt, keine Bulk-Dauer, Zusammenfassung „`bulk` 429 3“; gescheiterte Bulk-Jobs → exit 99; eine einzelne 503 → exit 99. Auf `e5c2d86` rot (25 von 26 Fällen, u. a. `bulk429: k6 exit 0, want 99`). `tests/load/archive-run.test.sh` deckt `failed-<job>.txt` ab.
+- [ ] `docs/acceptance/lasttest-g1.md` (Messumgebung und Bewertung nach E-58) und `tests/load/README.md` beschreiben die Regel; shellcheck und actionlint ohne Befund.
+- [ ] Nächster `load.yml`-Lauf nach WP-658 (CI): Jobs `api` und `nfr01-volume` mit `http_req_failed` 0 je Szenario, `bulk_jobs_succeeded` 3, `bulk_500_duration` im Sekundenbereich, „Fehlgeschlagene Anfragen: keine.“ in jeder Job-Zusammenfassung.
+
+**Dateien (14 Einträge):**
+
+- tests/load/api.js
+- tests/load/ingest.js
+- tests/load/lib.js
+- tests/load/failed-requests.sh (neu)
+- tests/load/thresholds.test.sh (neu)
+- tests/load/archive-run.sh
+- tests/load/archive-run.test.sh
+- tests/load/README.md
+- .github/workflows/load.yml
+- docs/acceptance/lasttest-g1.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `K6=<k6 0.54.0> ./tests/load/thresholds.test.sh`, `./tests/load/archive-run.test.sh`, `./tests/load/evaluate-runs.test.sh`, `k6 inspect` der Skripte, shellcheck, actionlint `.github/workflows/load.yml`.
+- CI: `load.yml` (Job `prepare` mit dem Selbsttest; nächster vollständiger Lauf nach WP-658).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NFR-10;[Q];LT;tests/load/thresholds.test.sh;WP-659
+NFR-02;[B];LT;tests/load/api.js;WP-659
+NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-659
+```
+
+**Entscheidungsbedarf:** keiner (E-58 sieht keine Toleranz für fehlgeschlagene Anfragen vor; die Schwelle ist 0).
+
+**Nicht Bestandteil:** die Ursache der 429 im Lauf 40713089267 (F-387, WP-658); Übernahme der Archive nach `docs/acceptance/artefakte/lasttest/`; inhaltliche Prüfung der Bulk-Berichte je ID; weitere Befunde der Wiederholungsprüfung.
+
+### WP-662 – Routen-Audit: Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 vor der Audit-Absicht statt 503
+
+**Schlüssel:** `k7n-route-audit-nul-id` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-504 (Audit-Absicht vor dem Handler), WP-505 (alte und neue Werte im Routen-Audit)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-391](../../../audit/g1-reaudit/FINDINGS.md#f-391) | P3 | Schreibanfragen mit NUL-Byte in der Pfad-ID antworten 503 „the audit trail is unavailable“ mit ERROR-Log statt 404/400 | schließt | Gegenprüfung r1-b2 der Wiederholungsprüfung (K7) auf `e5c2d86` |
+
+**Problem:** `AuditRoute` (`backend/internal/middleware/middleware.go:135-170` auf `e5c2d86`) speichert für Schreibrouten ohne Domänen-Recorder die Audit-Absicht vor dem Handler und übernimmt dabei den Pfadparameter (`routeResourceID`) ungeprüft als `resource_key`. Ein NUL-Byte (`%00`) oder ungültiges UTF-8 (`%FF`) lässt `PGRouteAuditor.Intend` mit SQLSTATE 22021 scheitern; `AuditRoute` behandelt das als Ausfall des Audit-Speichers: 503 „the audit trail is unavailable“ mit `Retry-After` und ERROR-Log. Betroffen sind die G1-Kernrouten (`PATCH /api/v1/assets/%00`, `DELETE /api/v1/racks/%00`) und 65 Schreiboperationen der Module. Jeder angemeldete Schreiber kann so falsche 5xx und ERROR-Logs auslösen. Leserouten, IDs ohne UUID-Format und Routen mit Domänen-Recorder antworten bereits 404/400.
+
+**Akzeptanzkriterien:**
+
+- [ ] `AuditRoute` prüft bei Routen mit Audit-Absicht vor der Absicht alle Pfadparameter der Route; enthält einer ein NUL-Byte oder ist er kein gültiges UTF-8, antwortet die Route 404 (`the requested resource was not found`, wie eine unbekannte ID) ohne Absicht, ohne Schnappschuss, ohne Handler und ohne ERROR-Log.
+- [ ] AUD-07 bleibt unverändert: Bei gültigen Parametern wird die Absicht vor dem Handler gespeichert; scheitert das, bleibt es bei 503 mit `Retry-After` und ohne Änderung. Routen mit Domänen-Recorder und ausgenommene Routen verhalten sich wie bisher.
+- [ ] `TestRouteAuditNulPathIDIsClientError` (`internal/server/route_audit_integration_test.go`, Produktionsrouter mit `AuditPool` und PG-Routen-Auditor): `PATCH /assets/%00`, `DELETE /racks/%00`, `PATCH`/`DELETE /tickets/%00`, `POST /orders/%00/submit`, `PATCH /inventory/items/%00`, `DELETE /saved-views/%00`, NUL im zweiten Pfadparameter, `x%00y`, `%FF`, `%C3%28` → 404/400, keine Absicht übrig, kein ERROR-Log, kein Audit-Eintrag; gültige unbekannte ID weiter 404 über die Absicht; `POST /vrfs` mit nicht speicherbarer Absicht weiter 503 ohne Zeile. Auf `e5c2d86` rot (10 × 503, 10 ERROR-Logs mit SQLSTATE 22021).
+- [ ] Unittest `TestAuditRouteAnswersInvalidPathParamsBeforeTheIntent` (`internal/middleware/middleware_test.go`): ungültiger erster oder zweiter Parameter → 404 auch bei ausgefallenem Audit-Speicher, Handler läuft nicht; gültiges UTF-8 (`%C3%A4`) bei ausgefallenem Speicher weiter 503. Auf `e5c2d86` rot.
+- [ ] `api/openapi.yaml` (`info.description`, Absatz OPS-06/AUD-07) beschreibt die 404-Antwort; `npm run generate:api` ohne Änderung.
+- [ ] golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neue Tests auch als Nicht-Root-Nutzer grün.
+
+**Dateien (8 Einträge):**
+
+- backend/internal/middleware/middleware.go
+- backend/internal/middleware/middleware_test.go
+- backend/internal/server/route_audit_integration_test.go
+- api/openapi.yaml
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Die Prüfung liegt vor jedem Datenbankzugriff der Route; Absicht, Schnappschuss und Eintrag laufen unverändert in der Tenant-Transaktion.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/middleware/ ./internal/server/ ./internal/audit/` mit `TEST_DATABASE_URL`, `TEST_REDIS_URL`.
+- `go test -count=1 -v -run '^TestRouteAuditNulPathIDIsClientError$' ./internal/server/` und `-run '^TestAuditRoute' ./internal/middleware/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-03;[B];B;backend/internal/server/route_audit_integration_test.go;WP-662
+AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-662
+AUD-07;[B];B;backend/internal/middleware/middleware_test.go;WP-662
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Pfadparameter mit NUL-Byte auf Routen mit Domänen-Recorder (antworten bereits 400/404 über den Handler bzw. `api.WriteDBError`); ungültige Werte in Query-Parametern und im Anfragekörper; weitere Befunde der Wiederholungsprüfung.
 
 ## Zurückgestellte Befunde
 

@@ -29,6 +29,26 @@ Laufs wächst damit um etwa ein Fünftel (32 auf 38 VUs).
 Der Job `nfr01-volume` von `load.yml` führt `api.js` mit denselben
 Schwellen auf den Volumina von NFR-01 aus (Abschnitt „NFR-01-Volumina“).
 
+**Fehlgeschlagene Anfragen (F-388, WP-659):** Kein Lauf ist mit einer
+fehlgeschlagenen Anfrage grün. Jedes Skript hat `http_req_failed: rate==0`
+für den ganzen Lauf (mit `setup`) und je Szenario
+(`http_req_failed{scenario:<name>}`; `api.js` alle zwölf Szenarien,
+`ingest.js` `ingest` und `probe` bzw. `spool`). Als fehlgeschlagen zählt
+k6 jede Antwort außerhalb 200–399 und jede Anfrage ohne Antwort (Status 0),
+auch die Abfragen der Sichtbarkeit und `/readyz`. `api.js` verlangt
+zusätzlich, dass jeder der drei Bulk-Jobs gelingt (`bulk_jobs_succeeded:
+count==3`, `checks{scenario:bulk}: rate==1`); `bulk_500_duration` erfasst
+nur gelungene Bulk-Jobs, eine abgewiesene Bulk-Anfrage (wenige ms) zählt
+also nicht als schneller Bulk. `checks: rate>0.99` bleibt für die
+inhaltlichen Prüfungen der Antworten. `tests/load/lib.js` (`failed`)
+schreibt jede fehlgeschlagene Anfrage mit Name, Status, Methode, Pfad und
+Anfang der Antwort auf die k6-Konsole; `load.yml` legt sie als
+`console-<job>.log` ab, `tests/load/failed-requests.sh` zählt sie je Name
+und Status für die Zusammenfassung des Jobs und `failed-<job>.txt`.
+Selbsttest: `tests/load/thresholds.test.sh` (k6 `inspect` aller Skripte und
+`api.js` gegen eine Attrappe der API: abgewiesene oder gescheiterte
+Bulk-Jobs und eine einzelne 503 machen den Lauf rot), im Job `prepare`.
+
 ## Ablauf
 
 ```sh
@@ -142,7 +162,9 @@ Server-Commit, Lauf-URL, Skript, Szenario,
 `objects`, `duration`, Seed-Optionen, Spurzahl, Rate-Limits, Versionen von
 k6, Go, PostgreSQL und TimescaleDB, Container-Images, vollständiges `lscpu`,
 `/proc/meminfo` und `free -h`), das Ergebnis des Jobs und seiner Schritte
-(`result-<job>.txt`), `/readyz` und das Server-Log; die `api.js`-Jobs
+(`result-<job>.txt`), `/readyz`, das Server-Log, die k6-Konsole
+(`console-<job>.log`) und die fehlgeschlagenen Anfragen je Name und Status
+(`failed-<job>.txt`, auch in der Zusammenfassung des Jobs); die `api.js`-Jobs
 zusätzlich die Pläne langsamer Statements und das CPU-Profil des Servers
 (siehe Ursachenanalyse NFR-02). Das Ergebnis des G1-Laufs steht in
 `docs/acceptance/lasttest-g1.md`.
@@ -160,14 +182,16 @@ wird:
   `--summary-export`), `<job>.txt` (k6-Ausgabe ohne die Fortschrittszeilen),
   `run-<job>.txt`, `result-<job>.txt`, `seed-<job>.txt`, `volumes-<job>.txt`,
   `integrity-<job>.txt`, `statements-<job>.txt` und, soweit vorhanden,
-  `slow-plans-<job>.txt`, `cpu-<job>.txt` und `readyz-<job>.json`. Server-
+  `slow-plans-<job>.txt`, `cpu-<job>.txt`, `readyz-<job>.json` und
+  `failed-<job>.txt`. Server-
   und PostgreSQL-Logs und das binäre CPU-Profil bleiben in den
   Job-Artefakten des Laufs.
 - `<Lauf-ID>/ergebnis.md`: Lauf (Link, Versuch, Ereignis, Branch), Lauf- und
   Server-Commit, Eingaben, ob jeder ausgewählte Job ein Artefakt hat
   („Vollständig“) und ob alle grün sind, je Job Status (Seed, Volumina, k6,
-  Integritätsprüfung), CPU, RAM, Konfiguration, Datenbestand und jede
-  k6-Schwelle mit Messwert und Ergebnis. Dieselbe Übersicht steht in der
+  Integritätsprüfung), CPU, RAM, Konfiguration, Datenbestand, die
+  fehlgeschlagenen Anfragen je Name und Status und jede k6-Schwelle mit
+  Messwert und Ergebnis. Dieselbe Übersicht steht in der
   Zusammenfassung des Laufs auf GitHub.
 - `<Lauf-ID>/SHA256SUMS`: Prüfsummen aller Dateien des Verzeichnisses.
 

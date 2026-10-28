@@ -84,6 +84,15 @@ jobs:
       - name: Test the evaluation over three runs
         run: ./tests/load/evaluate-runs.test.sh
 
+      # F-388 (WP-659): a failed request or a bulk job that did not succeed
+      # makes the run red; k6 against a stub of the API.
+      - uses: grafana/setup-k6-action@v1
+        with:
+          k6-version: "0.54.0"
+
+      - name: Test the failure thresholds of the load scripts
+        run: ./tests/load/thresholds.test.sh
+
       - name: Resolve server_ref
         id: ref
         env:
@@ -331,10 +340,24 @@ jobs:
             fi
           fi
           status=0
-          k6 run "${args[@]}" --summary-export "load-results/$SCENARIO_NAME.json" "tests/load/$K6_SCRIPT" \
+          k6 run "${args[@]}" --summary-export "load-results/$SCENARIO_NAME.json" \
+            --console-output "load-results/console-$SCENARIO_NAME.log" "tests/load/$K6_SCRIPT" \
             | tee "load-results/$SCENARIO_NAME.txt" || status=$?
           wait
           exit "$status"
+
+      # F-388 (WP-659): every failed request by name and status (k6 console,
+      # tests/load/lib.js) in the job summary and for the archive.
+      - name: Failed requests
+        if: always() && steps.k6.outcome != 'skipped'
+        run: |
+          mkdir -p load-results
+          tests/load/failed-requests.sh "load-results/console-$SCENARIO_NAME.log" | tee "load-results/failed-$SCENARIO_NAME.txt"
+          {
+            echo "### Job $SCENARIO_NAME"
+            echo
+            cat "load-results/failed-$SCENARIO_NAME.txt"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # F-117 (WP-438): auto_explain off again, so the checks below do not
       # add plans; the PostgreSQL log, the plans of the statements over

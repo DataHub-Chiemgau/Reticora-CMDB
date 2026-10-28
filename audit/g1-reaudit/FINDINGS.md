@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 3 |
 | P2 | 18 |
-| P3 | 13 |
-| **Summe** | **35** |
+| P3 | 15 |
+| **Summe** | **37** |
 
 ## Übersicht
 
@@ -75,6 +75,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-386](#f-386) | P3 | Ingest: Rahmen und Ledger eines Batches laufen in zwei Transaktionen statt in einer (WP-332 AK 3) | WP-332 (K7) | belegt | keiner eingecheckt | WP-657 |
 | [F-389](#f-389) | P2 | Audit-Liste zeigt client- und site-beschränkten Principals die Einträge des Routen-Audits über Objekte fremder Clients und Sites (Namen, alte und neue Werte) | WP-016 (K7) | belegt | backend/internal/server/audit_log_scope_integration_test.go | WP-660 |
 | [F-390](#f-390) | P3 | Credentials: `GET`/`DELETE /api/v1/credentials/{id}` mit einer ID, die keine UUID ist, antworten 500; Datenbankfehler beim Anlegen ebenso | WP-011 (K7) | belegt | backend/internal/tenant/rls/error_sanitization_integration_test.go | WP-661 |
+| [F-388](#f-388) | P3 | Lastskripte ohne Schwelle auf fehlgeschlagene Anfragen: Lauf bleibt grün, obwohl alle Bulk-Anfragen scheitern; `bulk_500_duration` zählt abgewiesene Bulk-Anfragen | Lastlauf K7 (40713089267) | belegt | tests/load/thresholds.test.sh | WP-659 |
+| [F-391](#f-391) | P3 | Schreibanfragen mit NUL-Byte in der Pfad-ID antworten 503 „the audit trail is unavailable“ mit ERROR-Log statt 404/400 | WP-018 bis WP-021 (K7) | belegt | backend/internal/server/route_audit_integration_test.go | WP-662 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -573,6 +575,74 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 - **Empfehlung:** `PGRepository.Get`/`Delete` liefern für eine ID, die keine UUID ist, `ErrNotFound` (wie eine unbekannte ID); der Handler bildet `ErrNotFound` (per `errors.Is`) auf 404 „credential not found“ ab und alle übrigen Repository-Fehler über `api.WriteRepoError`. Spec-first: `api/openapi.yaml` nennt die 404 für ungültige IDs und die 403 beim Anlegen.
 - **Retest (verbindlich):** `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestRepositoryErrorsAreSanitized$' ./internal/tenant/rls/` grün, einschließlich der Fälle „WP-011 credential …“; der ID-Sweep `verify-probe-invalid-id-sweep` meldet für `/credentials/not-a-uuid` keinen 5xx.
 - **Kodierender Test:** backend/internal/tenant/rls/error_sanitization_integration_test.go (`TestRepositoryErrorsAreSanitized`, Fälle „WP-011 credential of an invalid id“, „… credential deletion of an invalid id“, „… credential with a NUL byte“, „… credential of an unknown client“, „… credential with an invalid client_id“, „… credential for client 2 by client 1“; Kontrolle „… credential of an unknown id“); auf `e5c2d86` rot (`GET /api/v1/credentials/not-a-uuid answered 500, want one of [404]: {"detail":"failed to get credential",…}`, `DELETE /api/v1/credentials/not-a-uuid answered 500, want one of [404]`, `POST /api/v1/credentials/ answered 500, want one of [400]` bzw. `[422]`, `[400]`, `[403]`; die Kontrolle grün).
+
+<a id="f-388"></a>
+### F-388 (P3) – Lastskripte ohne Schwelle auf fehlgeschlagene Anfragen: Lauf bleibt grün, obwohl alle Bulk-Anfragen scheitern; `bulk_500_duration` zählt abgewiesene Bulk-Anfragen
+
+- **Gefunden in:** Auswertung des Lastlaufs `load.yml` 40713089267 der Wiederholungsprüfung (K7) auf dem RC-Commit `e5c2d86`, von zwei unabhängigen Prüfagenten bestätigt (zusammen mit F-387) · **Betroffene Anforderungen:** NFR-10, NFR-02, NFR-03 · **Komponente:** tests/load/api.js (Schwellen Zeilen 49-63 auf `e5c2d86`: nur `checks: ['rate>0.99']`, keine Schwelle auf `http_req_failed`; `bulk` Zeilen 186-202: `bulkDuration.add` auch ohne Job), tests/load/ingest.js (Zeilen 112-130: `http_req_failed` nur für `name:ingest` bzw. `name:spool`), tests/load/lib.js, .github/workflows/load.yml; Eigner des Lastnachweises WP-204, WP-206 · **Quelle:** Job-Logs der Jobs `api` und `nfr01-volume` von Lauf 40713089267 (Evidenzordner `k-audit-ext/WP-335`, `verify-ci-40713089267-load-api-nfr01-excerpt.txt`), Quelltext der Skripte auf `e5c2d86`, Lauf der Skripte mit k6 0.54.0 gegen eine Attrappe der API
+- **Reproduktion:** (1) Lauf 40713089267 auf `e5c2d86`: Job `api` grün (k6 exit 0), obwohl 19 von 17.879 Anfragen fehlschlugen (`http_req_failed` 0,10 %), darunter alle 3 Bulk-Anfragen (Check `bulk 200/202` 0 von 3; 429 des Pre-Auth-Limits, F-387); `checks` 99,88 % (21.740 von 21.764) hält `rate>0.99`, und `bulk_500_duration` meldet für die drei abgewiesenen Anfragen 1 bis 15 ms (p95 14,6 ms) und hält damit die Schwelle `p(95)<30000`; der Check `bulk job succeeded` fehlt, weil kein Job abgefragt wurde. Job `nfr01-volume`: grün mit 23 von 13.920 fehlgeschlagenen Anfragen (`checks` 99,82 %). Die Fehlschläge stehen nur als `http_req_failed` ohne Schwelle in der k6-Zusammenfassung, ihre Statuscodes nirgends. (2) `api.js` von `e5c2d86` gegen eine Attrappe der API, die jede `POST /cis/bulk` mit 429 beantwortet: k6 exit 0, `http_req_failed` 0,89 %, `bulk_500_duration` count 3 mit max 7 ms. Ebenso exit 0, wenn alle drei Bulk-Jobs mit Status `failed` enden (der Check zählt in `checks` mit, 3 von über 300) und wenn eine einzelne Leseanfrage 503 erhält. (3) `k6 inspect`: `api.js` hat keine Schwelle auf `http_req_failed`; `ingest.js` nur auf `http_req_failed{name:ingest}` bzw. `{name:spool}`, nicht auf Setup, Sichtbarkeitsabfragen und `/readyz`.
+- **Soll:** NFR-10 und E-58 („Alle Schwellen sind im Nachweislauf eingehalten“): Ein grüner Lastlauf belegt, dass jede gemessene Operation gelang; ein Lauf mit fehlgeschlagener Anfrage oder nicht gelungenem Bulk-Job ist rot. NFR-02 (Bulk 500 IDs < 30 s) misst die Dauer gelungener Bulk-Jobs. Die Zusammenfassung des Jobs nennt fehlgeschlagene Anfragen mit Statuscode, damit eine Ursache wie F-387 ohne Nachstellen sichtbar ist.
+- **Ist:** `api.js` bewertet Fehlschläge nur über `checks: rate>0.99`; bis zu 1 % fehlgeschlagener Checks und beliebig viele fehlgeschlagene Anfragen ohne Check (z. B. Bulk-Abfragen) lassen den Lauf grün. `bulk()` trägt die Dauer immer ein, auch wenn die Bulk-Anfrage abgewiesen wurde oder der Job scheiterte oder nach der Wartezeit noch lief; ein abgewiesener Bulk zählt als besonders schneller Bulk. `ingest.js` prüft nur die Anfragen mit dem Namen `ingest` bzw. `spool`. `load.yml` und das Archiv nennen keine Statuscodes.
+- **Nutzerwirkung:** Der Lastnachweis (GATE-03, NFR-10) kann grün sein, obwohl Funktionen unter Last scheitern; im RC-Lauf blieb so verborgen, dass jeder Bulk-Auftrag mit 429 abgewiesen wurde (F-387). Die Bulk-Dauer im Bericht ist für solche Läufe falsch (Millisekunden statt Sekunden).
+- **Ursache (belegt):** WP-204/WP-206 haben die Budgets als p95-Schwellen und `checks: rate>0.99` angelegt; eine Schwelle auf `http_req_failed` erhielten in WP-334 nur die Ingest- und Spool-Anfragen. Die Bulk-Dauer wurde unabhängig vom Ergebnis des Jobs erfasst. Bis `e5c2d86` scheiterte in den Läufen keine Anfrage (0 von 12.893 bis 16.889), sodass die Lücke nicht auffiel.
+- **Empfehlung:** In allen Lastskripten `http_req_failed: rate==0` für den Lauf und je Szenario (E-58 sieht keine Toleranz vor); in `api.js` eine eigene Schwelle für gelungene Bulk-Jobs (`bulk_jobs_succeeded: count==3`, `checks{scenario:bulk}: rate==1`) und `bulk_500_duration` nur für gelungene Bulk-Jobs; jede fehlgeschlagene Anfrage mit Name, Status, Pfad und Anfang der Antwort auf der k6-Konsole, in `load.yml` je Name und Status in der Zusammenfassung des Jobs und im Archiv (`failed-<job>.txt`, `ergebnis.md`). Bewertungsregel in `docs/acceptance/lasttest-g1.md` und `tests/load/README.md`.
+- **Retest (verbindlich):** `K6=<k6 0.54.0> ./tests/load/thresholds.test.sh` PASS (lokal und im Job `prepare` von `load.yml`); `./tests/load/archive-run.test.sh` PASS; nächster `load.yml`-Lauf (nach WP-658): Jobs `api` und `nfr01-volume` mit `http_req_failed` 0 je Szenario, `bulk_jobs_succeeded` 3, `bulk_500_duration` im Sekundenbereich und „Fehlgeschlagene Anfragen: keine.“ in der Zusammenfassung jedes Jobs.
+- **Kodierender Test:** tests/load/thresholds.test.sh (`k6 inspect` der Skripte, `api.js` gegen eine Attrappe der API mit abgewiesenen und gescheiterten Bulk-Jobs und einer einzelnen 503, Verdrahtung in `load.yml` und `archive-run.sh`); auf `e5c2d86` rot (Skripte, `load.yml` und `archive-run.sh` dort identisch mit der Basis `bb4b6ae`; k6 v0.54.0):
+
+  ```text
+  FAIL k6 inspect tests/load/api.js: http_req_failed rate==0 for the run and every scenario
+       {"thresholds":{},"scenarios":["attr_filter","bulk","detail",...,"topology"]}
+  FAIL k6 inspect -e SCENARIO=load tests/load/ingest.js: http_req_failed rate==0 for the run and every scenario
+       {"thresholds":{"http_req_failed{name:ingest}":["rate==0"]},"scenarios":["ingest","probe"]}
+  FAIL api.js: every bulk job succeeds (bulk_jobs_succeeded count==3, checks{scenario:bulk} rate==1)
+  FAIL bulk429: k6 exit 0, want 99
+  FAIL bulk429: http_req_failed of the run and of the scenario bulk crossed
+       {"http_req_failed":{"passes":3,"fails":333,"value":0.008928571428571428}}
+  FAIL bulk429: a refused bulk request records no bulk_500_duration
+       {"min":1,"med":6,"p(90)":6.8,"p(95)":6.9,"max":7,"count":3,"avg":4.666666666666667,"thresholds":{"p(95)<30000":false}}
+  FAIL bulk429: the job summary lists bulk 429 three times: no line matches ^\| `bulk` \| 429 \| 3 \|$
+  FAIL bulkfailed: k6 exit 0, want 99
+  FAIL rack503: k6 exit 0, want 99
+       {"http_req_failed":{"passes":1,"fails":338,"value":0.0029498525073746312},"http_req_failed{scenario:rack}":null,...}
+  FAIL load.yml: k6 writes its console to console-<job>.log
+  FAIL archive-run.sh keeps failed-<job>.txt
+  1 passed, 25 failed
+  ```
+
+<a id="f-391"></a>
+### F-391 (P3) – Schreibanfragen mit NUL-Byte in der Pfad-ID antworten 503 „the audit trail is unavailable“ mit ERROR-Log statt 404/400
+
+- **Gefunden in:** Gegenprüfung (adversarialer Prüfagent r1-b2) der Wiederholungsprüfung (K7) auf dem RC-Commit `e5c2d86`, Sweep ungültiger IDs über alle Operationen der Module und die G1-Kernrouten · **Betroffene Anforderungen:** API-03, AUD-07 · **Komponente:** backend/internal/middleware/middleware.go (`AuditRoute`, Zeilen 135-170 auf `e5c2d86`: `ResourceKey: routeResourceID(r)`, `auditor.Intend` Zeile 163, `api.WriteUnavailable` Zeile 166), backend/internal/audit/route_intent.go (`PGRouteAuditor.Intend`, Zeile 97) · **Quelle:** Probe über den Produktionsrouter mit `AuditPool` (`server.NewRouter`, PG-Repositories, Tenant-Middleware, RLS); Evidenzordner `k-reaudit-1/WP-021` (`verify-probe-invalid-id-sweep.log`, `verify-probe-nul-path-id-core.log`) und Probe-Quelltext `k-reaudit-1/WP-020/verify-probe-source-k7v_probe_test.go.txt` (`TestK7VInvalidIDSweep`, `TestK7VNulPathIDCore`)
+- **Reproduktion:** Als angemeldeter Benutzer mit Schreibrecht `PATCH /api/v1/assets/%00` mit `{"name":"x"}` → 503 `{"detail":"the audit trail is unavailable",…}` und `ERROR audit intent of a write request failed; request refused error="ERROR: invalid byte sequence for encoding \"UTF8\": 0x00 (SQLSTATE 22021)" action=assets.update`. Ebenso `DELETE /api/v1/racks/%00`, `PATCH`/`DELETE /api/v1/tickets/%00` und 65 Schreiboperationen der Module (u. a. tickets, documents, orders, maintenance-windows, keys, desks, slas, forms, workflows, iga/*, saved-views, inventory/items, stocktakes, consumables). Ungültiges UTF-8 wirkt gleich (`PATCH /api/v1/assets/%FF` → 503, `0xff`; `DELETE /api/v1/racks/%C3%28` → 503, `0xc3 0x28`). Nicht betroffen: Leserouten (`GET /api/v1/tickets/%00` → 404), IDs ohne UUID-Format (`PATCH /api/v1/tickets/not-a-uuid` → 404) und Routen mit Domänen-Recorder (`PATCH /api/v1/cis/%00` → 400, `DELETE /api/v1/cis/%00` → 404).
+- **Soll:** API-03: Eine Anfrage mit einer ID, die keine Ressource bezeichnen kann, erhält eine Client-Antwort (404 wie eine unbekannte ID oder 400), keinen 5xx und keinen ERROR-Log. AUD-07 (WP-504/WP-505): Eine Schreibanfrage, deren Audit-Absicht nicht gespeichert werden kann, wird weiterhin mit 503 abgewiesen; eine abgewiesene Anfrage ändert nichts und braucht keinen Eintrag.
+- **Ist:** `AuditRoute` übernimmt den Pfadparameter (`routeResourceID`) ungeprüft als `resource_key` der Absicht. PostgreSQL weist Text mit NUL-Byte oder ungültigem UTF-8 mit SQLSTATE 22021 ab; `AuditRoute` behandelt jeden Fehler von `Intend` als Ausfall des Audit-Speichers: 503 mit `Retry-After`, ERROR-Log, der Handler läuft nicht.
+- **Nutzerwirkung:** Jeder angemeldete Benutzer mit Schreibrecht kann beliebig viele falsche Meldungen „audit trail unavailable“ (5xx) und ERROR-Logs auslösen; Alarme auf 5xx-Rate oder Audit-Fehler werden ohne Ausfall ausgelöst, und Clients wiederholen die Anfrage wegen `Retry-After` vergeblich. Daten werden nicht verändert, der Audit-Trail bleibt lückenlos.
+- **Ursache (belegt):** WP-504 speichert die Absicht vor dem Handler, also vor jeder Prüfung der ID durch den Handler oder das Repository; `routeResourceID` liefert den dekodierten Pfadparameter (chi, `%00` → Byte 0). Die Unterscheidung „Speicher nicht erreichbar“ gegenüber „Wert nicht speicherbar“ fehlt. Routen mit Domänen-Recorder speichern keine Absicht; dort prüft der Handler bzw. `api.WriteDBError` (22021 → 400).
+- **Empfehlung:** `AuditRoute` prüft vor der Absicht alle Pfadparameter der Route; einer mit NUL-Byte oder ungültigem UTF-8 bezeichnet keine Ressource (kein gespeicherter Text kann ihn enthalten) und wird wie eine unbekannte ID mit 404 beantwortet, ohne Absicht, ohne Handler, ohne ERROR-Log. Ein Fehler von `Intend` bei gültigen Parametern bleibt 503 (AUD-07). `api/openapi.yaml` (`info.description`, AUD-07) beschreibt das.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestRouteAuditNulPathIDIsClientError$' ./internal/server/` mit `TEST_DATABASE_URL` und `go test -count=1 -run '^TestAuditRoute' ./internal/middleware/` PASS: alle Fälle 404/400, keine Absicht übrig, kein ERROR-Log; gültige unbekannte ID weiter 404 über die Absicht; `POST /api/v1/vrfs` mit nicht speicherbarer Absicht weiter 503 ohne Zeile.
+- **Kodierender Test:** backend/internal/server/route_audit_integration_test.go (`TestRouteAuditNulPathIDIsClientError`, Produktionsrouter mit `AuditPool` und dem PG-Routen-Auditor); Unittest backend/internal/middleware/middleware_test.go (`TestAuditRouteAnswersInvalidPathParamsBeforeTheIntent`); auf `e5c2d86` rot (ausgeführt auf der Basis `bb4b6ae`; `internal/middleware`, `internal/audit` und `internal/server/authz.go` dort identisch mit `e5c2d86`):
+
+  ```text
+  === RUN   TestRouteAuditNulPathIDIsClientError
+      route_audit_integration_test.go:535: PATCH /api/v1/assets/%00 = 503 {"detail":"the audit trail is unavailable","status":503,"title":"Service Unavailable",...}; want 404 or 400 (an id that is no text names no resource)
+      route_audit_integration_test.go:535: DELETE /api/v1/racks/%00 = 503 {"detail":"the audit trail is unavailable",...}; want 404 or 400 (an id that is no text names no resource)
+      route_audit_integration_test.go:535: PATCH /api/v1/tickets/%00 = 503 ...
+      route_audit_integration_test.go:535: DELETE /api/v1/tickets/%00 = 503 ...
+      route_audit_integration_test.go:535: POST /api/v1/orders/%00/submit = 503 ...
+      route_audit_integration_test.go:535: PATCH /api/v1/inventory/items/%00 = 503 ...
+      route_audit_integration_test.go:535: DELETE /api/v1/saved-views/%00 = 503 ...
+      route_audit_integration_test.go:535: PATCH /api/v1/assets/x%00y = 503 ...
+      route_audit_integration_test.go:535: PATCH /api/v1/assets/%FF = 503 ...
+      route_audit_integration_test.go:535: DELETE /api/v1/racks/%C3%28 = 503 ...
+      route_audit_integration_test.go:542: refused writes with an invalid path id logged an error:
+          level=ERROR msg="audit intent of a write request failed; request refused" error="ERROR: invalid byte sequence for encoding \"UTF8\": 0x00 (SQLSTATE 22021)" action=assets.update ...
+          level=ERROR msg="audit intent of a write request failed; request refused" error="ERROR: invalid byte sequence for encoding \"UTF8\": 0xff (SQLSTATE 22021)" action=assets.update ...
+          level=ERROR msg="audit intent of a write request failed; request refused" error="ERROR: invalid byte sequence for encoding \"UTF8\": 0xc3 0x28 (SQLSTATE 22021)" action=racks.delete ...
+  --- FAIL: TestRouteAuditNulPathIDIsClientError (0.44s)
+  --- FAIL: TestAuditRouteAnswersInvalidPathParamsBeforeTheIntent (0.00s)
+      middleware_test.go:801: POST /api/v1/racks/%00/mounts/a = 503 {"detail":"the audit trail is unavailable",...}, handler ran 0 times; want 404 before the intent
+  FAIL
+  ```
 
 ## Geprüfte Kandidaten ohne neuen Befund
 

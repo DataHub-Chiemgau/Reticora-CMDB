@@ -17,14 +17,30 @@ export function params(name, extra = {}) {
   };
 }
 
+// failed logs a request k6 counts as failed in http_req_failed (status 0,
+// below 200 or from 400 on) on the console, with its name tag, status,
+// method, path and the start of the body: load.yml writes the console to
+// console-<job>.log and lists the failed requests per name and status in
+// the job summary (tests/load/failed-requests.sh, F-388). It returns res.
+export function failed(res, name) {
+  if (res.status >= 200 && res.status < 400) {
+    return res;
+  }
+  // One line without quotes or backslashes, which the log format escapes.
+  const body = String(res.body || res.error || '').slice(0, 160).replace(/\s+/g, ' ').replace(/["\\]/g, "'");
+  const path = String(res.url || '').replace(BASE_URL, '');
+  console.warn(`failed request name=${name} status=${res.status} ${res.request ? res.request.method : ''} ${path} ${body}`);
+  return res;
+}
+
 export function get(path, name) {
-  const res = http.get(`${BASE_URL}/api/v1${path}`, params(name));
+  const res = failed(http.get(`${BASE_URL}/api/v1${path}`, params(name)), name);
   check(res, { [`${name} 200`]: (r) => r.status === 200 });
   return res;
 }
 
 export function post(path, body, name, okStatus = [200, 202]) {
-  const res = http.post(`${BASE_URL}/api/v1${path}`, JSON.stringify(body), params(name));
+  const res = failed(http.post(`${BASE_URL}/api/v1${path}`, JSON.stringify(body), params(name)), name);
   check(res, { [`${name} ${okStatus.join('/')}`]: (r) => okStatus.includes(r.status) });
   return res;
 }
@@ -41,7 +57,7 @@ export function firstID(query) {
 
 // total returns the total of a CI list query (-1 on an error).
 export function total(query, name = 'count') {
-  const res = http.get(`${BASE_URL}/api/v1/cis?limit=1${query ? `&${query}` : ''}`, params(name));
+  const res = failed(http.get(`${BASE_URL}/api/v1/cis?limit=1${query ? `&${query}` : ''}`, params(name)), name);
   return res.status === 200 ? Number(res.json('total')) : -1;
 }
 

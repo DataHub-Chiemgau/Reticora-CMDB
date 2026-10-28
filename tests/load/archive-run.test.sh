@@ -6,8 +6,9 @@
 # and reports of every job but no logs or binary profiles; ergebnis.md
 # names the run, every k6 threshold with its measured value and result
 # (time, rate, counter and gauge thresholds), the measures without a
-# threshold, a red and a missing job; SHA256SUMS verifies; a complete green
-# run says so; wrong arguments fail before anything is written.
+# threshold, the failed requests by name and status (F-388), a red and a
+# missing job; SHA256SUMS verifies; a complete green run says so; wrong
+# arguments fail before anything is written.
 #
 # Usage: ./tests/load/archive-run.test.sh
 # shellcheck disable=SC2016 # the backticks of the Markdown code spans are literal
@@ -122,7 +123,18 @@ cat >"$ART/load-results-api/api.json" <<'EOF'
 EOF
 printf 'demo CIs|10000\norganizations|3\n' >"$ART/load-results-api/volumes-api.txt"
 printf 'seed seconds: 17\n' >"$ART/load-results-api/seed-api.txt"
+cat >"$ART/load-results-api/failed-api.txt" <<'EOF'
+Fehlgeschlagene Anfragen: 4
+
+| Anfrage (`name`) | Status | Anzahl |
+|---|---:|---:|
+| `bulk` | 429 | 3 |
+| `list` | 0 | 1 |
+
+Erstes Beispiel je Anfrage und Status:
+EOF
 job "$ART" ingest-spool success
+printf 'Fehlgeschlagene Anfragen: keine.\n' >"$ART/load-results-ingest-spool/failed-ingest-spool.txt"
 cat >"$ART/load-results-ingest-spool/ingest-spool.json" <<'EOF'
 {"metrics": {
   "ingest_drain_records_per_s": {"value": 798.04, "min": 798.04, "max": 798.04, "thresholds": {"value>=200": false}},
@@ -178,6 +190,9 @@ check "configuration" "$res" '^\| Konfiguration \| Skript api\.js \(Szenario def
 check "seeded volumes" "$res" '^\| Datenbestand \| demo CIs 10000, organizations 3 \|$'
 check "seed duration" "$res" '^\| Seed-Dauer \| 17 s \|$'
 check "integrity check" "$res" '^\| Integritätsprüfung \| 0 Verletzungen in 2 Prüfungen \|$'
+check "failed requests by name and status" "$res" '^\| Fehlgeschlagene Anfragen \| 4 \(`bulk` 429: 3, `list` 0: 1\) \|$'
+check "no failed request" "$res" '^\| Fehlgeschlagene Anfragen \| keine\. \|$'
+check "failed requests archived" "$(cd "$OUT" && find . -type f | sort)" '^\./api/failed-api\.txt$'
 check "the missing job" "$res" '^Kein Artefakt `load-results-nfr01-volume`\.$'
 files="$(cd "$OUT" && find . -type f | sort)"
 check "k6 summary archived" "$files" '^\./api/api\.json$'
