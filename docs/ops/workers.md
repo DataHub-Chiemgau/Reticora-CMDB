@@ -90,6 +90,7 @@ audit entry (`retention.*`).
 | `retention.history` (03:27) | `ci_change`, `entity_change`, `location_change` | 3 years | `RETICORA_RETENTION_HISTORY_DAYS` (1095) |
 | `retention.soft_deleted` (03:37) | soft-deleted CIs | 90 days | `RETICORA_RETENTION_SOFT_DELETE_DAYS` (90) |
 | `retention.review_items` (03:47) | resolved review items | 1 year | `RETICORA_RETENTION_REVIEW_ITEM_DAYS` (365) |
+| `retention.merge_snapshots` (03:57) | CI merges (`ci_merge`): snapshot, then the row with its tombstone | snapshot 30 days, tombstone 12 months | none: the periods the merge recorded (`snapshot_until`, `tombstone_until`) |
 
 A value below the minimum stops the start. The audit log keeps its chain
 verifiable: the run removes the oldest entries of a chain (never the newest)
@@ -97,7 +98,13 @@ and appends an `audit.retention` entry with the sequence number and hash of
 the last removed entry, from which verification continues. The database
 allows the deletion only for entries older than ten years and only inside a
 retention run (migration 000119). A soft-deleted CI that is still referenced
-(asset, assignment, ticket) stays. Events (stream, see
+(asset, assignment, ticket) stays. A CI merge (CI-12) keeps a snapshot of
+both CIs and of the moved rows (contacts among them) for the unmerge:
+`retention.merge_snapshots` empties it once the unmerge period passed, and
+deletes the merge row once its tombstone expired; GET on the merged CI is
+then 404 instead of 301 to the survivor. Every merge is a job of kind
+`ci.merge`, and its merge row names that job (`ci_merge.job_id`). Events
+(stream, see
 [Event stream retention](#event-stream-retention-evt-01-nfr-06)), metrics
 (TimescaleDB policies, see [Metric retention](#metric-retention-nfr-06)),
 container logs (30 days, see [Container logs](#container-logs-nfr-06)) and

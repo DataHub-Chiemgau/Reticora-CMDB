@@ -11,14 +11,22 @@ ALTER TABLE ci DROP CONSTRAINT IF EXISTS ci_id_organization_key;
 
 -- Move the quarantined rows back unchanged; without the composite foreign keys
 -- they are accepted again, so the down migration loses no data.
-INSERT INTO ci_relationship
-SELECT (jsonb_populate_record(NULL::ci_relationship, q.row_data)).*
-FROM migration_quarantine q
-WHERE q.source_table = 'ci_relationship' AND q.migration = '000056';
-INSERT INTO composition
-SELECT (jsonb_populate_record(NULL::composition, q.row_data)).*
-FROM migration_quarantine q
-WHERE q.source_table = 'composition' AND q.migration = '000056';
+-- Installations that applied 000056 before E-26 have no migration_quarantine:
+-- their 000056 deleted the rows, there is nothing to move back (F-224, E-72).
+DO $$
+BEGIN
+    IF to_regclass('migration_quarantine') IS NOT NULL THEN
+        INSERT INTO ci_relationship
+        SELECT (jsonb_populate_record(NULL::ci_relationship, q.row_data)).*
+        FROM migration_quarantine q
+        WHERE q.source_table = 'ci_relationship' AND q.migration = '000056';
+        INSERT INTO composition
+        SELECT (jsonb_populate_record(NULL::composition, q.row_data)).*
+        FROM migration_quarantine q
+        WHERE q.source_table = 'composition' AND q.migration = '000056';
+    END IF;
+END
+$$;
 DROP TABLE IF EXISTS migration_quarantine;
 
 DROP TRIGGER IF EXISTS trg_audit_log_no_update ON audit_log;

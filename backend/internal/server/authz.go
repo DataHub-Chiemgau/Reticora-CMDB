@@ -133,6 +133,11 @@ var readPermissionFor = map[string]identity.Permission{
 	"dependencies":          identity.PermTopologyRead,
 	"blast-radius":          identity.PermTopologyRead,
 	"state":                 identity.PermCIRead,
+
+	// Suppressions of removed discovery edges (F-273): listing reads
+	// relationships; lifting one derives relationship:write, the right of
+	// the forced DELETE /relationships/{id} that creates it.
+	"relationship-suppressions": identity.PermRelationshipRead,
 }
 
 // writePermissionOverrides covers resources whose write permission does not
@@ -599,6 +604,14 @@ var domainRecordedRoutes = map[string]string{
 	"DELETE /api/v1/role-assignments/{id}":    "user.PGRepository (revocation)",
 	"POST /api/v1/users/{id}/anonymize":       "user.PGRepository",
 	"DELETE /scim/v2/Users/{id}":              "user.PGRepository (deactivation)",
+
+	// Lifting a suppression (F-273): relationship.suppression_lifted with
+	// the values of the suppression. The forced DELETE
+	// /relationships/{id} of a discovery edge writes
+	// relationship.suppression_created in its transaction in the same way,
+	// which takes the place of its route entry; every other deletion keeps
+	// the route entry, so that route stays a route-audited one.
+	"DELETE /api/v1/relationship-suppressions/{id}": "relationship.PGRepository.LiftSuppression",
 }
 
 // auditedRoutes records, per write route registered through an

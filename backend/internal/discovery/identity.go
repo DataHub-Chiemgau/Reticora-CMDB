@@ -336,8 +336,10 @@ type IdentityCandidateFinder interface {
 
 func identityQuery(item *IngestItem) IdentityQuery {
 	q := IdentityQuery{ManagementIP: item.ManagementIP}
+	// The serial number compares case-insensitively, as ResolveIdentity
+	// does (F-246).
 	if usableSerial(item.SerialNumber) {
-		q.SerialNumber = strings.TrimSpace(item.SerialNumber)
+		q.SerialNumber = strings.ToLower(strings.TrimSpace(item.SerialNumber))
 	}
 	if uuid := incomingUUID(item); usableUUID(uuid) {
 		q.HardwareUUID = strings.ToLower(uuid)
@@ -356,7 +358,7 @@ func identityQuery(item *IngestItem) IdentityQuery {
 // IdentityKeys are the identity values of the records of a batch, each
 // once per kind, in the form identityFilter binds them (NFR-03, WP-333).
 type IdentityKeys struct {
-	Serials   []string // serial_number = v
+	Serials   []string // serial_number_lc = v, lower case
 	UUIDs     []string // hardware_uuid = v, canonical lower case
 	MACs      []string // primary_mac = v or a fingerprint MAC, canonical
 	IPs       []string // management_ip = v, host address only

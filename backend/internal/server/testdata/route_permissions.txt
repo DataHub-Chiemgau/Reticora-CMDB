@@ -38,6 +38,7 @@ DELETE /api/v1/orders/{id} order:write
 DELETE /api/v1/rack-mounts/{id} rack:write
 DELETE /api/v1/racks/{id} rack:write
 DELETE /api/v1/racks/{id}/mounts/{ci_id} rack:write
+DELETE /api/v1/relationship-suppressions/{id} relationship:write
 DELETE /api/v1/relationship-types/{key} relationship_type:manage
 DELETE /api/v1/relationships/{id} relationship:write
 DELETE /api/v1/role-assignments/{id} role:manage
@@ -211,6 +212,7 @@ GET /api/v1/racks/{id}/layout rack:read
 GET /api/v1/racks/{id}/mounts rack:read
 GET /api/v1/reconciliation/conflicts discovery:read
 GET /api/v1/reconciliation/source-policy discovery:read
+GET /api/v1/relationship-suppressions relationship:read
 GET /api/v1/relationship-types relationship:read
 GET /api/v1/relationship-types/{key} relationship:read
 GET /api/v1/relationships relationship:read

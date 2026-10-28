@@ -268,6 +268,21 @@ func (h *Handler) UpdateConnector(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
+	// A changed base URL is held to the rules of create (https, egress
+	// policy, SEC-08, F-203) before anything is stored, also a credential.
+	if req.BaseURL != nil {
+		current, err := h.repo.GetConnector(r.Context(), t.OrganizationID, id)
+		if err != nil {
+			writeIGAError(w, r, err)
+			return
+		}
+		if *req.BaseURL != current.BaseURL {
+			if err = h.registry.ValidateBaseURL(current.Type, *req.BaseURL); err != nil {
+				writeIGAError(w, r, &api.FieldError{Field: "base_url", Message: err.Error()})
+				return
+			}
+		}
+	}
 	if req.Secret != nil && h.credentials != nil {
 		c, err := h.credentials.Create(r.Context(), credential.CreateRequest{OrganizationID: t.OrganizationID, Name: "IGA connector token", Kind: credential.KindAPIToken, Scope: "iga", Secret: req.Secret})
 		if err != nil {

@@ -124,6 +124,12 @@ export interface Relationship {
   target_location_id?: string;
 }
 
+/**
+ * A discovery edge removed with force that discovery does not create again
+ * (REL-03): who removed it, why and when (F-273).
+ */
+export type RelationshipSuppression = components['schemas']['RelationshipSuppression'];
+
 /** Verification vocabulary accepted by the relationships API. */
 export const verificationStates = ['unverified', 'verified', 'disputed', 'stale'] as const;
 
@@ -519,6 +525,10 @@ interface GraphQLResult<T> {
 /**
  * bffQuery runs a read query against the GraphQL BFF with the session of
  * the UI; mutations go through REST (GQL-02). GraphQL errors are thrown.
+ *
+ * The BFF is API-only for now (GQL-01, F-332): no page uses it in phase 1,
+ * every UI read goes through REST; the first aggregate view starts to use
+ * this client. See docs/README.md, section "GraphQL-BFF".
  */
 export async function bffQuery<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
   const result = await fetchURL<GraphQLResult<T>>(BFF_PATH, {
@@ -668,8 +678,27 @@ export const relationshipApi = {
     });
   },
 
-  delete(id: string, force = false): Promise<void> {
-    return fetchAPI(`/relationships/${id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
+  /**
+   * A discovery edge is deleted with force and then suppressed (REL-04);
+   * reason is stored with the suppression (F-273).
+   */
+  delete(id: string, force = false, reason?: string): Promise<void> {
+    const query = new URLSearchParams();
+    if (force) query.set('force', 'true');
+    if (reason) query.set('reason', reason);
+    const search = query.toString();
+    return fetchAPI(`/relationships/${id}${search ? `?${search}` : ''}`, { method: 'DELETE' });
+  },
+};
+
+/** Suppressions of removed discovery edges: listed per CI and lifted (F-273). */
+export const relationshipSuppressionApi = {
+  list(ciId: string): Promise<PaginatedResponse<RelationshipSuppression>> {
+    return fetchAPI(`/relationship-suppressions?ci_id=${encodeURIComponent(ciId)}&limit=100`);
+  },
+
+  lift(id: string): Promise<void> {
+    return fetchAPI(`/relationship-suppressions/${id}`, { method: 'DELETE' });
   },
 };
 
@@ -1405,6 +1434,12 @@ export interface CustomRole {
   updated_at: string;
 }
 
+/**
+ * UserStatus is the status PATCH /users/{id} sets: inactive deactivates the
+ * user and revokes the sessions, active reactivates it (TLC-04).
+ */
+export type UserStatus = 'active' | 'inactive';
+
 export interface UserListParams {
   limit?: number;
   offset?: number;
@@ -1424,10 +1459,14 @@ export const userApi = {
   },
   update(
     id: string,
-    data: { display_name?: string; status?: string; avatar_url?: string },
+    data: { display_name?: string; status?: UserStatus; avatar_url?: string },
   ): Promise<AppUser> {
     return fetchAPI(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
+  /**
+   * delete removes the user (TLC-04); a user owning open objects or still
+   * referenced by records answers 409 and stays.
+   */
   delete(id: string): Promise<void> {
     return fetchAPI(`/users/${id}`, { method: 'DELETE' });
   },

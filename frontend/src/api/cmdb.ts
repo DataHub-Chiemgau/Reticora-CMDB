@@ -4,7 +4,7 @@
  * existing client.ts. All calls flow through the same fetchAPI (auth, RFC
  * 7807 errors, idempotency).
  */
-import { fetchAPI, type PaginatedResponse } from './client';
+import { fetchAllPages, fetchAPI, type PaginatedResponse } from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
 import type { components } from './generated/schema';
 
@@ -137,13 +137,12 @@ export type AttributeIndexJob = components['schemas']['Job'];
 export const ATTRIBUTE_INDEX_JOB_KIND = 'attribute.index';
 
 export const attributeDefinitionApi = {
-  list(params: { ci_type_id?: string; scope?: 'type' | 'global' }): Promise<{
+  // Every definition of the filter: the list pages at 200 (API-02, F-215),
+  // so the field editor follows next_cursor instead of reading one page.
+  async list(params: { ci_type_id?: string; scope?: 'type' | 'global' }): Promise<{
     data: AttributeDefinition[];
   }> {
-    const query = new URLSearchParams();
-    if (params.ci_type_id) query.set('ci_type_id', params.ci_type_id);
-    if (params.scope) query.set('scope', params.scope);
-    return fetchAPI(`/attribute-definitions?${query.toString()}`);
+    return { data: await fetchAllPages<AttributeDefinition>('/attribute-definitions', params) };
   },
   // The index jobs of the organization, newest first (JOB-03, job:read).
   indexJobs(): Promise<PaginatedResponse<AttributeIndexJob>> {

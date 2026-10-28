@@ -616,13 +616,16 @@ func (d *Dispatcher) ProcessDue(ctx context.Context) {
 		return
 	}
 
+	// A failed claim still returns the deliveries leased before or beside
+	// it (one organization's error does not stop the others): they are sent
+	// now instead of waiting for their lease to run out (F-184).
 	records, err := d.store.ClaimDue(ctx, d.now(), defaultClaimBatch, defaultClaimLease)
 	if err != nil {
-		observability.ObserveWorkerRun("webhook_dispatcher", 1)
-		slog.Error("claim due webhook deliveries failed", "error", err)
-		return
+		observability.ObserveWorkerRun("webhook_dispatcher", claimFailures(err))
+		slog.Error("claim due webhook deliveries failed", "error", err, "claimed", len(records))
+	} else {
+		observability.ObserveWorkerRun("webhook_dispatcher", 0)
 	}
-	observability.ObserveWorkerRun("webhook_dispatcher", 0)
 
 	for _, rec := range records {
 		sub, err := d.repo.GetByID(orgScoped(ctx, rec.OrganizationID), rec.OrganizationID, rec.SubscriptionID)
@@ -648,6 +651,15 @@ func (d *Dispatcher) ProcessDue(ctx context.Context) {
 			origin:     originOf(&rec),
 		})
 	}
+}
+
+// claimFailures counts the failures of a claim error: one per organization
+// of the joined errors of ClaimDue (OPS-05), one otherwise.
+func claimFailures(err error) int {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		return max(len(joined.Unwrap()), 1)
+	}
+	return 1
 }
 
 // attempt performs a single delivery attempt and schedules the next one.

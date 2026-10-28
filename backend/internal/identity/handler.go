@@ -85,6 +85,21 @@ var ErrMFAUnavailable = errors.New("identity: the second factor of the account c
 // session (TEN-04, RBA-03, F-364); an administrator assigns a role.
 var ErrNoRoleAssignment = errors.New("identity: no role is assigned to the user in this organization; ask an administrator for access")
 
+// Problem types of a refused login (F-197): the SPA shows a localized text
+// for each instead of the detail.
+const (
+	// ProblemLoginNotAdmitted: a first login without admission
+	// (ErrFirstLoginNotPermitted, 403).
+	ProblemLoginNotAdmitted = "https://reticora.io/problems/login-not-admitted"
+	// ProblemLoginUserInactive: the user is deactivated (ErrUserInactive, 403).
+	ProblemLoginUserInactive = "https://reticora.io/problems/login-user-inactive"
+	// ProblemLoginNoRole: the user holds no role (ErrNoRoleAssignment, 403).
+	ProblemLoginNoRole = "https://reticora.io/problems/login-no-role"
+	// ProblemLoginNoOrganization: the ID token carries no valid organization
+	// attribute (401).
+	ProblemLoginNoOrganization = "https://reticora.io/problems/login-no-organization"
+)
+
 // UserStatusChecker reports whether an app_user may hold a session. A
 // provisioner implementing it makes refresh check the user status; a user
 // that no longer exists is not active.
@@ -636,8 +651,12 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		return
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		writeContextError(w, err)
-	case errors.Is(err, ErrUserInactive), errors.Is(err, ErrFirstLoginNotPermitted), errors.Is(err, ErrNoRoleAssignment):
-		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
+	case errors.Is(err, ErrFirstLoginNotPermitted):
+		api.WriteProblem(w, http.StatusForbidden, ProblemLoginNotAdmitted, "Forbidden", ErrFirstLoginNotPermitted.Error())
+	case errors.Is(err, ErrUserInactive):
+		api.WriteProblem(w, http.StatusForbidden, ProblemLoginUserInactive, "Forbidden", ErrUserInactive.Error())
+	case errors.Is(err, ErrNoRoleAssignment):
+		api.WriteProblem(w, http.StatusForbidden, ProblemLoginNoRole, "Forbidden", ErrNoRoleAssignment.Error())
 	case api.WriteEntitlementError(w, err):
 		// A first login with an invitation while max_users is reached
 		// (ENT-03): 403 entitlement-limit, the invitation stays open.
@@ -650,8 +669,10 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		strings.Contains(err.Error(), "ID token is required"),
 		strings.Contains(err.Error(), "groups claim"):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
-	case strings.Contains(err.Error(), "organization attribute"),
-		strings.Contains(err.Error(), "unexpected ID token issuer"),
+	case strings.Contains(err.Error(), "organization attribute"):
+		// The ID token names no organization, or no valid one (CH26).
+		api.WriteProblem(w, http.StatusUnauthorized, ProblemLoginNoOrganization, "Unauthorized", err.Error())
+	case strings.Contains(err.Error(), "unexpected ID token issuer"),
 		strings.Contains(err.Error(), "ID token is expired"),
 		strings.Contains(err.Error(), "ID token subject is required"),
 		strings.Contains(err.Error(), "verify ID token signature"),

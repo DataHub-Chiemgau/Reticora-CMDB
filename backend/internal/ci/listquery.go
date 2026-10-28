@@ -2,6 +2,7 @@ package ci
 
 import (
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -58,6 +59,32 @@ var ListFields = func() api.ListFields {
 	}
 	return spec
 }()
+
+// namedTypes returns the CI types a list query restricts to (WP-566): the
+// parameter ci_type_id and filter[ci_type_id] with exact or in, in lower
+// case; several of them intersect. named is false when none names a type;
+// the attribute filters then follow the definitions of every type.
+func (p *FilterParams) namedTypes() (types []string, named bool) {
+	restrict := func(values []string) {
+		set := make([]string, 0, len(values))
+		for _, v := range values {
+			v = strings.ToLower(strings.TrimSpace(v))
+			if !slices.Contains(set, v) && (!named || slices.Contains(types, v)) {
+				set = append(set, v)
+			}
+		}
+		types, named = set, true
+	}
+	if p.TypeID != "" {
+		restrict([]string{p.TypeID})
+	}
+	for _, f := range p.Filters {
+		if f.Field == "ci_type_id" && (f.Op == api.OpExact || f.Op == api.OpIn) {
+			restrict(f.Values)
+		}
+	}
+	return types, named
+}
 
 // fieldValue returns the value of a filterable field (or an attribute) of
 // an item as the memory repository compares it.

@@ -28,6 +28,41 @@ type Store interface {
 	// Delete removes a key; a missing key is not an error.
 	Delete(ctx context.Context, key string) error
 
+	// WindowAdd keeps a sliding window of events under key: it drops the
+	// events at or before now-window and records one at now when fewer
+	// than limit remain (never for limit <= 0), atomically for all clients
+	// of the store, so a window holds at most limit events. The result
+	// counts the events in (now-window, now] afterwards.
+	WindowAdd(ctx context.Context, key string, now time.Time, window time.Duration, limit int64) (Window, error)
+
+	// WindowCount returns the events of key in (now-window, now] without
+	// recording one.
+	WindowCount(ctx context.Context, key string, now time.Time, window time.Duration) (Window, error)
+
 	// Close releases any resources held by the store.
 	Close() error
+}
+
+// Window is the state of a sliding window (WindowAdd, WindowCount).
+type Window struct {
+	// Added reports whether WindowAdd recorded the event.
+	Added bool
+	// Count is the number of events in the window.
+	Count int64
+	// Oldest is the time of the oldest event in the window; zero when the
+	// window is empty. It leaves the window at Oldest+window.
+	Oldest time.Time
+}
+
+// RetryAfter is the time from now until the oldest event leaves the
+// window, at least a second; zero for an empty window.
+func (w Window) RetryAfter(now time.Time, window time.Duration) time.Duration {
+	if w.Oldest.IsZero() {
+		return 0
+	}
+	d := w.Oldest.Add(window).Sub(now)
+	if d < time.Second {
+		return time.Second
+	}
+	return d
 }

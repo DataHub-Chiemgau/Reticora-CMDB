@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import {
   appendFileSync,
   existsSync,
@@ -26,6 +26,7 @@ import {
   uiLogin,
   BASE,
   COLLECTOR_BIN,
+  DATABASE_URL,
   SERVER,
   type Account,
 } from './support/stack';
@@ -84,6 +85,15 @@ import {
  *      same user sets an override on model ("Override setzen", the version rises); saving
  *      the form with a changed model is refused with 409, the form shows the conflict and
  *      the override stays (value, provenance, version, UI) ............. WP-061 (API-07, OVR-01), WP-412/WP-413 (F-021)
+ *  D10 escalation of open reviews (Retest F-247): of two open override_conflict items, one
+ *      backdated with psql to 15 days and one to 13 days (E2E_DATABASE_URL; no API ages an
+ *      item), only the first is escalated: it is counted in the dashboard widget "Eskalierte
+ *      Reviews", whose link opens the review inbox filtered on the escalated items
+ *      (?escalated=true), which lists it; the 13-day item is neither counted nor listed
+ *      ................................................................. WP-575 (REC-08, F-247), WP-088 (REC-08)
+ *
+ * D10 needs a discovery run of its own; D08 disables the collector for the rest of the run,
+ * so D10 is declared (and runs) before D08.
  *
  * The Discovery UI has no control to disable a collector (CollectorCard shows only the
  * status); D08 therefore disables it through PATCH /collectors/{id} (collector:manage, the
@@ -155,6 +165,7 @@ interface ReviewItem {
   action?: string;
   resolved_by?: string;
   resolved_at?: string;
+  escalated?: boolean;
   created_at: string;
 }
 
@@ -406,6 +417,54 @@ async function pollAudit(ciId: string, action: string): Promise<AuditEntry> {
     )
     .toBe(true);
   return found!;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * backdate moves the creation time of ONE open review item of this run's organization `days`
+ * into the past (psql, E2E_DATABASE_URL, under the organization's RLS setting). No API can
+ * age an item; the escalation after 14 days (REC-08) needs the passing of time. Nothing else
+ * is written.
+ */
+function backdate(orgId: string, itemId: string, days: number) {
+  expect(UUID.test(orgId) && UUID.test(itemId), 'organization and item are UUIDs').toBe(true);
+  expect(Number.isInteger(days), 'whole days').toBe(true);
+  const sql = `BEGIN;
+SET LOCAL app.org_id = :'org';
+UPDATE review_item SET created_at = now() - make_interval(days => :days)
+  WHERE organization_id = :'org' AND id = :'item' AND status = 'open'
+  RETURNING id;
+COMMIT;`;
+  const out = execFileSync(
+    'psql',
+    [
+      DATABASE_URL,
+      '-X',
+      '-q',
+      '-At',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      `org=${orgId}`,
+      '-v',
+      `item=${itemId}`,
+      '-v',
+      `days=${days}`,
+      '-f',
+      '-',
+    ],
+    { input: sql, encoding: 'utf8', timeout: 15_000 },
+  ).trim();
+  expect(
+    out.split('\n').filter((line) => UUID.test(line)),
+    `review item ${itemId} backdated by ${days} days`,
+  ).toEqual([itemId]);
+}
+
+/** escalatedReviews are the open items the API reports as escalated (REC-08), newest first. */
+async function escalatedReviews(): Promise<List<ReviewItem>> {
+  return ok<List<ReviewItem>>('GET', '/review-items?status=open&escalated=true&limit=100');
 }
 
 async function setOverrideApi(ciId: string, field: string, value: string, reason: string) {
@@ -1117,6 +1176,74 @@ test.describe('Discovery → reconciliation → override protection → review',
     // WP-060: the clear is audited with the acting user.
     const audit = await pollAudit(ci.id, 'ci.override_cleared');
     expect(audit.actor_id, 'audit actor of the clear').toBe(w.me);
+  });
+
+  test('D10 an open review older than 14 days is escalated: the dashboard counts it and its link opens the filtered inbox that lists it; one 13 days old is not (F-247)', async () => {
+    const { page } = w;
+    // Two CIs of the fleet no other test uses; each gets an override_conflict item.
+    const old = await ciByName('sim-rtr-01');
+    const recent = await ciByName('sim-ups-01');
+    await setOverrideApi(old.id, 'model', `Audit-Escalated-${stamp()}`, 'audit escalation');
+    await setOverrideApi(recent.id, 'model', `Audit-Recent-${stamp()}`, 'audit escalation');
+    const since = await restartCollector();
+    await waitSeen([old.id, recent.id], since, 'both CIs seen by the run');
+    await expect
+      .poll(
+        async () =>
+          (await conflicts(old.id, 'model', 'open')).length +
+          (await conflicts(recent.id, 'model', 'open')).length,
+        { message: 'two override_conflict items (precondition)', timeout: 60_000 },
+      )
+      .toBe(2);
+    const [oldItem] = await conflicts(old.id, 'model', 'open');
+    const [recentItem] = await conflicts(recent.id, 'model', 'open');
+    // Precondition: new items are not escalated.
+    const before = await escalatedReviews();
+    const beforeIds = (before.data ?? []).map((i) => i.id);
+    expect(beforeIds, 'a new item is not escalated').not.toContain(oldItem.id);
+    expect(beforeIds, 'a new item is not escalated').not.toContain(recentItem.id);
+
+    // The passing of time: 15 and 13 days since the items were opened.
+    const org = await ok<{ id: string }>('GET', '/org');
+    backdate(org.id, oldItem.id, 15);
+    backdate(org.id, recentItem.id, 13);
+
+    // API (REC-08): escalated after 14 days, not before.
+    const after = await escalatedReviews();
+    const afterIds = (after.data ?? []).map((i) => i.id);
+    expect(afterIds, '15 days open: escalated').toContain(oldItem.id);
+    expect(afterIds, '13 days open: not escalated').not.toContain(recentItem.id);
+    expect(after.total, 'exactly the 15-day item is added').toBe(before.total + 1);
+    expect((await ok<ReviewItem>('GET', `/review-items/${oldItem.id}`)).escalated).toBe(true);
+    expect((await ok<ReviewItem>('GET', `/review-items/${recentItem.id}`)).escalated).toBe(false);
+
+    // Dashboard: the widget counts the escalated open items and links to the filtered inbox.
+    await page.goto('/dashboard');
+    const widget = page.locator('section').filter({
+      has: page.getByRole('heading', { level: 3, name: 'Eskalierte Reviews', exact: true }),
+    });
+    await expect(widget, 'the escalation widget on the dashboard').toHaveCount(1);
+    await expect(widget.locator('p').first(), 'count of escalated open reviews').toHaveText(
+      String(after.total),
+    );
+    const link = widget.getByRole('link', { name: 'Eskalierte Reviews anzeigen' });
+    await expect(link).toHaveAttribute('href', '/reviews?escalated=true');
+    await link.click();
+
+    // The inbox takes the filter from the URL and lists the escalated items only.
+    await expect(page).toHaveURL(/\/reviews\?escalated=true$/);
+    await expect(page.getByLabel('Nur eskalierte')).toBeChecked();
+    const shown = (after.data ?? []).filter((i) => i.payload?.field === 'model');
+    const buttons = page.locator('main ul li button', { hasText: 'model' });
+    await expect(buttons, 'the inbox lists the escalated items of the API').toHaveCount(
+      shown.length,
+    );
+    expect(
+      shown.map((i) => i.id),
+      'the 13-day item is not in the filtered inbox',
+    ).not.toContain(recentItem.id);
+    await buttons.nth(shown.findIndex((i) => i.id === oldItem.id)).click();
+    await expect(page.locator('main table thead th').nth(2)).toHaveText(old.name);
   });
 
   test('D08 a disabled collector can no longer deliver: cut off within 10 s without a restart, refused after a restart, nothing new is persisted', async () => {

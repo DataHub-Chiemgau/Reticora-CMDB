@@ -1101,7 +1101,7 @@ test.describe('locations and racks (LOC-*, RCK-*)', () => {
     await expect(entry.first()).toBeVisible();
     await expect(
       list
-        .locator('li', { hasText: `Site ${h.site.id}` })
+        .locator('li', { hasText: `Site ${h.site.name}` })
         .filter({ hasText: histMove!.change_type }),
     ).not.toHaveCount(0);
     // UI: the racks page shows the new position after reload.

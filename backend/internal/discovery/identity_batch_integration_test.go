@@ -136,7 +136,7 @@ func TestIdentityHitsMatchSingle(t *testing.T) {
 		return out
 	}
 	byIndex := map[string][]string{
-		"serial": {"idx_ci_serial", "uq_ci_org_serial"}, "uuid": {"idx_ci_hardware_uuid", "uq_ci_org_hardware_uuid"},
+		"serial": {"idx_ci_serial_number_lc"}, "uuid": {"idx_ci_hardware_uuid", "uq_ci_org_hardware_uuid"},
 		"mac": {}, "ip": {"idx_ci_mgmt_ip", "idx_ci_mgmt_ip_sys_object"},
 		"hostname": {"idx_ci_hostname_lc"}, "fqdn": {"idx_ci_fqdn_lc"}, "host": {"idx_ci_hostname_lc", "idx_ci_fqdn_lc"},
 	}

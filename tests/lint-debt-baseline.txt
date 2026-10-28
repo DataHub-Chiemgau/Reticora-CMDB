@@ -4,6 +4,6 @@
 # change clears findings. The follow-up work packages "Lint-Altlast" in
 # docs/plan/phase2/implementierungsplan.md bring every number to 0.
 # <module> <findings>
-backend 426
+backend 424
 collector 28
 edgecore 6

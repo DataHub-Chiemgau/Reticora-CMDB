@@ -81,6 +81,44 @@ type Item struct {
 	// resolved without it; a type of another organization is refused on
 	// every path by the trigger ci_type_organization (migration 000153).
 	ChosenType bool `json:"-"`
+	// Overridden are the fields under a manual override with the value the
+	// sources reported last for each, nil before the first report: the
+	// projected _overrides and _observed as read with the CI (REC-12).
+	// Read-only, not part of the API.
+	Overridden map[string]*Observation `json:"-"`
+}
+
+// Observation is a value a source reported for a field.
+type Observation struct {
+	Value any
+}
+
+// ObservedUnderOverride returns the value reported last for a field under a
+// manual override; ok is false without override or report.
+func (i *Item) ObservedUnderOverride(field string) (value any, ok bool) {
+	if o := i.Overridden[field]; o != nil {
+		return o.Value, true
+	}
+	return nil, false
+}
+
+// ObservationChanged reports whether value, reported for a field under a
+// manual override, differs from the value reported last (or is the first
+// one). The report is then recorded even when it equals the CI's value, so
+// that a dismissed override_conflict value is suppressed only until the
+// source reports another one (REC-12, F-248). False for a field without
+// override.
+func (i *Item) ObservationChanged(field string, value any) bool {
+	if _, overridden := i.Overridden[field]; !overridden {
+		return false
+	}
+	last, ok := i.ObservedUnderOverride(field)
+	if !ok {
+		return true
+	}
+	a, errA := json.Marshal(last)
+	b, errB := json.Marshal(value)
+	return errA != nil || errB != nil || !bytes.Equal(a, b)
 }
 
 // AssetFacts are the canonical data of the asset a CI is linked to, shown

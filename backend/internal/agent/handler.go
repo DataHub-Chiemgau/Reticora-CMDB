@@ -19,6 +19,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -56,6 +57,13 @@ type Handler struct {
 	findings    FindingRecorder
 	tokens      TokenIssuer
 	guard       *override.Guard
+	conflicts   ConflictReviews
+}
+
+// ConflictReviews opens the override_conflict review of a field
+// (reviews.Service, the call of discovery as well, REC-12).
+type ConflictReviews interface {
+	OpenOverrideConflict(ctx context.Context, c *reviews.OverrideConflict) (bool, error)
 }
 
 // TokenIssuer signs the agent credential (implemented by
@@ -117,6 +125,13 @@ func NewHandler(repo Repository, metrics MetricStore, cis CIUpserter, typeResolv
 // (AGT-05). Without one the rank table alone decides.
 func (h *Handler) WithFieldGuard(g *override.Guard) *Handler {
 	h.guard = g
+	return h
+}
+
+// WithConflictReviews makes telemetry open an override_conflict review for
+// a value that differs from a manual override (REC-12).
+func (h *Handler) WithConflictReviews(r ConflictReviews) *Handler {
+	h.conflicts = r
 	return h
 }
 
@@ -549,9 +564,12 @@ func (h *Handler) updateCI(ctx context.Context, orgID string, item *ci.Item, att
 		observedAt = time.Now().UTC()
 	}
 	writes := map[string]any{}
-	var written []*override.Write
+	var written, conflicts []*override.Write
 	for k, v := range attrs {
-		if current, ok := item.Attributes[k]; ok && reflect.DeepEqual(current, v) {
+		// An unchanged value is decided only when it changes the
+		// observation of an overridden field (F-248).
+		if current, ok := item.Attributes[k]; ok && reflect.DeepEqual(current, v) &&
+			!item.ObservationChanged(k, v) {
 			continue
 		}
 		w := &override.Write{
@@ -564,6 +582,9 @@ func (h *Handler) updateCI(ctx context.Context, orgID string, item *ci.Item, att
 		}
 		if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
 			written = append(written, w)
+		}
+		if d.Conflict {
+			conflicts = append(conflicts, w)
 		}
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -579,7 +600,28 @@ func (h *Handler) updateCI(ctx context.Context, orgID string, item *ci.Item, att
 			slog.WarnContext(ctx, "agent provenance not recorded", "ci_id", item.ID, "field", w.Field, "error", err)
 		}
 	}
+	h.queueOverrideConflicts(ctx, item, conflicts)
 	return nil
+}
+
+// queueOverrideConflicts opens an override_conflict review for each value
+// that differs from a manual override, like discovery does (REC-12): one
+// open item per field, a dismissed value suppressed until the agent reports
+// another one. A failed review does not refuse the telemetry; the override
+// stays either way.
+func (h *Handler) queueOverrideConflicts(ctx context.Context, item *ci.Item, conflicts []*override.Write) {
+	if h.conflicts == nil {
+		return
+	}
+	for _, w := range conflicts {
+		previous, hasPrevious := item.ObservedUnderOverride(w.Field)
+		if _, err := h.conflicts.OpenOverrideConflict(ctx, &reviews.OverrideConflict{
+			OrganizationID: w.OrganizationID, CIID: w.CIID, Field: w.Field, Value: w.Value, Source: w.Source,
+			Rank: override.SourceRank(w.Source), Previous: previous, HasPrevious: hasPrevious,
+		}); err != nil {
+			slog.WarnContext(ctx, "override conflict review not created", "ci_id", w.CIID, "field", w.Field, "error", err)
+		}
+	}
 }
 
 // recordFindings turns software inventory entries that are marked vulnerable

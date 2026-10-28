@@ -48,15 +48,21 @@ func writeServiceAccountError(w http.ResponseWriter, err error) {
 	}
 }
 
-// List returns the organization's service accounts with their roles.
+// List returns a page of the organization's service accounts with their
+// roles, newest first on (created_at, id): limit (default 50, at most 200)
+// and the signed cursor of API-02 (F-215).
 func (h *ServiceAccountHandler) List(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
-	items, err := h.repo.ListServiceAccounts(r.Context(), t.OrganizationID)
+	page, ok := api.ParseNewestFirstPage(w, r)
+	if !ok {
+		return
+	}
+	items, total, err := h.repo.ListServiceAccounts(r.Context(), t.OrganizationID, page)
 	if err != nil {
 		writeServiceAccountError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[ServiceAccount]{Data: items, Total: len(items), Limit: len(items)})
+	api.WriteJSON(w, http.StatusOK, api.NewestFirstPage(items, total, page, serviceAccountPosition))
 }
 
 // Create adds a service account without roles.

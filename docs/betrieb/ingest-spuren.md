@@ -27,7 +27,15 @@ nebeneinander arbeiten.
 - Ohne NATS (`RETICORA_NATS_URL` leer) verarbeitet der Server den Ingest in
   der Anfrage, seriell je Organisation und Prozess, wie vor WP-334 ohne
   Sperren. Mehrere Instanzen ohne NATS sperren sich dabei nicht gegenseitig
-  (vorbestehend); in der Produktion deshalb mit NATS betreiben.
+  und können Geräte mit schwacher Identität doppelt anlegen (F-282). Deshalb
+  gilt (WP-586):
+  - `RETICORA_ENVIRONMENT=production` ohne `RETICORA_NATS_URL` startet
+    nicht: Die Startprüfung meldet „RETICORA_ENVIRONMENT=production requires
+    RETICORA_NATS_URL …“ mit Verweis auf dieses Dokument (Exit 1). Das
+    ausgelieferte Compose und die Kubernetes-Manifeste setzen die Variable.
+  - `development` und `staging` starten ohne NATS, protokollieren aber beim
+    Start die Konfigurationswarnung „RETICORA_NATS_URL is not set …“. Ohne
+    NATS nur eine Instanz betreiben.
 - Im Speicherbetrieb (`--no-db` mit NATS) kann das Repository nicht sperren.
   Ein Prozess verarbeitet dann jede Organisation seriell, unabhängig von
   `RETICORA_INGEST_LANES`; die Subjects bleiben je Spur.

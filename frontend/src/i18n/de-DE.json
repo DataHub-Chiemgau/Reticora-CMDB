@@ -116,6 +116,12 @@
       "text": "Verbinden Sie einen Collector, damit die ersten CIs in Ihre CMDB kommen.",
       "continue": "Einrichtung fortsetzen"
     },
+    "reviewEscalation": {
+      "hint": "Offen seit mehr als 14 Tagen.",
+      "none": "Keine offenen Reviews älter als 14 Tage.",
+      "open": "Eskalierte Reviews anzeigen",
+      "loadError": "Die eskalierten Reviews konnten nicht geladen werden"
+    },
     "roleLabel": "Dashboard-Rolle",
     "roleHint": "Die Widget-Auswahl richtet sich nach der gewählten Rolle.",
     "roles": {
@@ -126,6 +132,7 @@
     "widgets": {
       "ciSummary": "CI-Übersicht",
       "collectors": "Collector-Status",
+      "reviewEscalation": "Eskalierte Reviews",
       "slaBreaches": "SLA-Verletzungen",
       "compliance": "Compliance-Score",
       "assets": "Inventar",
@@ -256,6 +263,9 @@
     "location": "Standort",
     "barcode": "Barcode",
     "warrantyEnd": "Garantieende",
+    "rfidTag": "RFID-Tag",
+    "purchaseDate": "Kaufdatum",
+    "invoiceNumber": "Rechnungsnummer",
     "supplier": "Lieferant",
     "healthState": {
       "ok": "Zustand: OK",
@@ -293,6 +303,7 @@
     "typeAttributes": "Typattribute",
     "typesLoadFailed": "Die CI-Typen konnten nicht geladen werden.",
     "typeSchemaLoadFailed": "Die Attribute des CI-Typs konnten nicht geladen werden.",
+    "assetManaged": "Vom Asset geführt",
     "fields": {
       "name": "Name",
       "ciType": "CI-Typ",
@@ -301,7 +312,8 @@
       "model": "Modell",
       "serialNumber": "Seriennummer",
       "managementIp": "Management-IP",
-      "firmwareVersion": "Firmware-Version"
+      "firmwareVersion": "Firmware-Version",
+      "location": "Standort"
     },
     "validation": {
       "nameRequired": "Name ist erforderlich.",
@@ -649,6 +661,27 @@
       "active": "Aktiv",
       "inactive": "Inaktiv",
       "anonymized": "Anonymisiert"
+    },
+    "deactivate": "Deaktivieren",
+    "reactivate": "Reaktivieren",
+    "delete": "Löschen",
+    "ownAccount": "Ihr Konto",
+    "confirm": {
+      "deactivateTitle": "Benutzer deaktivieren?",
+      "deactivateText": "{{name}} ({{email}}) kann sich danach nicht mehr anmelden. Laufende Sitzungen und die eigenen API-Schlüssel des Benutzers werden sofort widerrufen.",
+      "reactivateTitle": "Benutzer reaktivieren?",
+      "reactivateText": "{{name}} ({{email}}) kann sich danach wieder anmelden.",
+      "deleteTitle": "Benutzer löschen?",
+      "deleteText": "{{name}} ({{email}}) wird endgültig gelöscht. Offene Objekte des Benutzers müssen vorher an einen anderen Benutzer übergeben sein.",
+      "deleteConfirm": "Endgültig löschen"
+    },
+    "errors": {
+      "ownsOpenObjects": "{{name}} kann nicht gelöscht werden: Der Benutzer ist Owner offener Objekte (offene Tickets, aktive Zuweisungen, nicht zurückgegebene Schlüssel). Übergeben Sie diese zuerst an einen anderen Benutzer oder deaktivieren Sie den Benutzer stattdessen.",
+      "referenced": "{{name}} kann nicht gelöscht werden: Bestehende Datensätze verweisen auf den Benutzer. Deaktivieren oder anonymisieren Sie den Benutzer stattdessen.",
+      "notFound": "{{name}} gibt es nicht mehr. Laden Sie die Seite neu.",
+      "forbidden": "Sie haben keine Berechtigung, {{name}} zu ändern.",
+      "unavailable": "{{name}} wurde nicht geändert: Die Sitzungen des Benutzers konnten nicht widerrufen werden. Versuchen Sie es später erneut.",
+      "failed": "Die Aktion für {{name}} ist fehlgeschlagen (HTTP {{status}})."
     }
   },
   "invitations": {
@@ -727,6 +760,13 @@
     "callbackTitle": "Anmeldung wird abgeschlossen",
     "callbackProgress": "Bitte warten Sie, während Ihre Sitzung geprüft wird.",
     "callbackError": "Die Anmeldung konnte nicht abgeschlossen werden.",
+    "callbackRefused": {
+      "notAdmitted": "Für die erste Anmeldung ist eine Einladung Ihrer Organisation erforderlich. Bitten Sie die Administration Ihrer Organisation um eine Einladung.",
+      "noOrganization": "Ihr Konto ist keiner Organisation zugeordnet. Wenden Sie sich an die Administration Ihrer Organisation.",
+      "userInactive": "Ihr Konto ist deaktiviert. Wenden Sie sich an die Administration Ihrer Organisation.",
+      "noRole": "Ihrem Konto ist in dieser Organisation keine Rolle zugewiesen. Bitten Sie die Administration Ihrer Organisation um Zugriff.",
+      "userLimit": "Die Organisation hat ihre Höchstzahl an Benutzern erreicht. Wenden Sie sich an die Administration Ihrer Organisation."
+    },
     "sessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
     "invitationAccepted": "Ihr Konto für {{email}} ist angelegt. Melden Sie sich jetzt an.",
     "backendUnreachable": "Der Server ist nicht erreichbar. Prüfen Sie, ob Reticora läuft und die Adresse stimmt, und versuchen Sie es erneut.",
@@ -1542,7 +1582,22 @@
     "hiddenOutside": "{{count}} außerhalb des Bereichs ausgeblendet",
     "showAll": "Alle anzeigen",
     "showInScope": "Nur Bereich anzeigen",
-    "outsideScope": "Außerhalb des Bereichs"
+    "outsideScope": "Außerhalb des Bereichs",
+    "suppressTitle": "Beziehung entfernen und unterdrücken",
+    "suppressConfirm": "Die Discovery-Kante {{relType}} zu {{other}} wird entfernt. Die Discovery legt sie nicht wieder an, bis die Unterdrückung aufgehoben wird.",
+    "suppressReason": "Grund",
+    "suppressReasonInvalid": "Der Grund hat höchstens 1000 Zeichen.",
+    "suppressions": "Unterdrückte Beziehungen",
+    "showSuppressions": "Unterdrückte Beziehungen anzeigen",
+    "hideSuppressions": "Unterdrückte Beziehungen ausblenden",
+    "noSuppressions": "Keine unterdrückten Beziehungen.",
+    "suppressionsLoadError": "Die unterdrückten Beziehungen konnten nicht geladen werden.",
+    "suppressedBy": "Unterdrückt von {{actor}} am {{date}}",
+    "unknownActor": "unbekannt",
+    "suppressionReason": "Grund: {{reason}}",
+    "noReason": "Kein Grund angegeben",
+    "lift": "Aufheben",
+    "liftHint": "Die Discovery legt die Kante im nächsten Zyklus wieder an."
   },
   "scope": {
     "label": "Arbeitsbereich",

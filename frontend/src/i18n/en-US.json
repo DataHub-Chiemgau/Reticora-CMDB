@@ -116,6 +116,12 @@
       "text": "Connect a collector so that the first CIs arrive in your CMDB.",
       "continue": "Continue setup"
     },
+    "reviewEscalation": {
+      "hint": "Open for more than 14 days.",
+      "none": "No open reviews older than 14 days.",
+      "open": "Show escalated reviews",
+      "loadError": "The escalated reviews could not be loaded"
+    },
     "roleLabel": "Dashboard role",
     "roleHint": "The widget selection follows the chosen role.",
     "roles": {
@@ -126,6 +132,7 @@
     "widgets": {
       "ciSummary": "CI overview",
       "collectors": "Collector status",
+      "reviewEscalation": "Escalated reviews",
       "slaBreaches": "SLA breaches",
       "compliance": "Compliance score",
       "assets": "Assets",
@@ -256,6 +263,9 @@
     "location": "Location",
     "barcode": "Barcode",
     "warrantyEnd": "Warranty end",
+    "rfidTag": "RFID tag",
+    "purchaseDate": "Purchase date",
+    "invoiceNumber": "Invoice number",
     "supplier": "Supplier",
     "healthState": {
       "ok": "Health: OK",
@@ -293,6 +303,7 @@
     "typeAttributes": "Type attributes",
     "typesLoadFailed": "The CI types could not be loaded.",
     "typeSchemaLoadFailed": "The attributes of the CI type could not be loaded.",
+    "assetManaged": "Managed by the asset",
     "fields": {
       "name": "Name",
       "ciType": "CI Type",
@@ -301,7 +312,8 @@
       "model": "Model",
       "serialNumber": "Serial Number",
       "managementIp": "Management IP",
-      "firmwareVersion": "Firmware Version"
+      "firmwareVersion": "Firmware Version",
+      "location": "Location"
     },
     "validation": {
       "nameRequired": "Name is required.",
@@ -649,6 +661,27 @@
       "active": "Active",
       "inactive": "Inactive",
       "anonymized": "Anonymized"
+    },
+    "deactivate": "Deactivate",
+    "reactivate": "Reactivate",
+    "delete": "Delete",
+    "ownAccount": "Your account",
+    "confirm": {
+      "deactivateTitle": "Deactivate user?",
+      "deactivateText": "{{name}} ({{email}}) can no longer sign in. Running sessions and the user's own API keys are revoked at once.",
+      "reactivateTitle": "Reactivate user?",
+      "reactivateText": "{{name}} ({{email}}) can sign in again.",
+      "deleteTitle": "Delete user?",
+      "deleteText": "{{name}} ({{email}}) is deleted permanently. Open objects of the user must be handed over to another user first.",
+      "deleteConfirm": "Delete permanently"
+    },
+    "errors": {
+      "ownsOpenObjects": "{{name}} cannot be deleted: the user owns open objects (open tickets, active assignments, keys not returned). Hand them over to another user first, or deactivate the user instead.",
+      "referenced": "{{name}} cannot be deleted: existing records refer to the user. Deactivate or anonymize the user instead.",
+      "notFound": "{{name}} no longer exists. Reload the page.",
+      "forbidden": "You are not allowed to change {{name}}.",
+      "unavailable": "{{name}} was not changed: the user's sessions could not be revoked. Try again later.",
+      "failed": "The action for {{name}} failed (HTTP {{status}})."
     }
   },
   "invitations": {
@@ -727,6 +760,13 @@
     "callbackTitle": "Completing sign-in",
     "callbackProgress": "Please wait while we verify your session.",
     "callbackError": "Sign-in could not be completed.",
+    "callbackRefused": {
+      "notAdmitted": "Your first sign-in requires an invitation from your organization. Ask your organization's administrators for an invitation.",
+      "noOrganization": "Your account is not assigned to an organization. Contact your organization's administrators.",
+      "userInactive": "Your account is deactivated. Contact your organization's administrators.",
+      "noRole": "Your account has no role in this organization. Ask your organization's administrators for access.",
+      "userLimit": "The organization has reached its maximum number of users. Contact your organization's administrators."
+    },
     "sessionExpired": "Your session has expired. Please sign in again.",
     "invitationAccepted": "Your account for {{email}} has been created. Sign in now.",
     "backendUnreachable": "The server cannot be reached. Check that Reticora is running and the address is correct, then try again.",
@@ -1542,7 +1582,22 @@
     "hiddenOutside": "{{count}} hidden (outside the scope)",
     "showAll": "Show all",
     "showInScope": "Show scope only",
-    "outsideScope": "Outside the scope"
+    "outsideScope": "Outside the scope",
+    "suppressTitle": "Remove and suppress relationship",
+    "suppressConfirm": "The discovery edge {{relType}} to {{other}} is removed. Discovery does not create it again until the suppression is lifted.",
+    "suppressReason": "Reason",
+    "suppressReasonInvalid": "The reason has at most 1000 characters.",
+    "suppressions": "Suppressed relationships",
+    "showSuppressions": "Show suppressed relationships",
+    "hideSuppressions": "Hide suppressed relationships",
+    "noSuppressions": "No suppressed relationships.",
+    "suppressionsLoadError": "The suppressed relationships could not be loaded.",
+    "suppressedBy": "Suppressed by {{actor}} on {{date}}",
+    "unknownActor": "unknown",
+    "suppressionReason": "Reason: {{reason}}",
+    "noReason": "No reason given",
+    "lift": "Lift",
+    "liftHint": "Discovery creates the edge again in its next cycle."
   },
   "scope": {
     "label": "Scope",

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
@@ -201,8 +202,9 @@ type Options struct {
 	// creation (the streaming export endpoint stays available).
 	Blobs blob.Store
 	// Egress is the destination policy of webhook and connector URLs and
-	// of own SMTP servers (SEC-08); the zero value blocks every internal
-	// destination.
+	// of own SMTP servers (SEC-08), when they are stored (webhooks, IGA
+	// connectors, notification channels) and called; the zero value
+	// blocks every internal destination.
 	Egress egress.Options
 	// RouteMiddleware runs on every API route after its authorization, in
 	// order (API-04: validation, then idempotency).
@@ -246,6 +248,10 @@ type Options struct {
 	// Modules are the enabled late modules (WP-214, E-03); nil enables all
 	// (tests). The server passes the set from RETICORA_MODULES.
 	Modules *ModuleSet
+	// RetentionSoftDeleteDays is the configured soft-delete retention
+	// (RETICORA_RETENTION_SOFT_DELETE_DAYS): the window of POST
+	// /cis/{id}/restore (CI-05); 0 keeps the default of 90 days.
+	RetentionSoftDeleteDays int
 }
 
 // registrar is implemented by every domain handler.
@@ -273,10 +279,12 @@ func agentTypeResolver(repos Repositories) agent.CITypeResolver {
 }
 
 // agentHandler builds the agent handler; with a session issuer, enrollment
-// returns the agent's signed credential (AGT-03).
-func agentHandler(repos *Repositories, sessions *identity.SessionIssuer) *agent.Handler {
+// returns the agent's signed credential (AGT-03). Values that differ from a
+// manual override open an override_conflict review in the review queue of
+// discovery (REC-12).
+func agentHandler(repos *Repositories, sessions *identity.SessionIssuer, conflicts agent.ConflictReviews) *agent.Handler {
 	h := agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(*repos)).WithFindings(repos.Security).
-		WithFieldGuard(override.NewGuard(repos.Override))
+		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflicts)
 	if sessions != nil {
 		h.WithAgentTokens(sessions)
 	}
@@ -485,10 +493,15 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		aiEntitlements = opts.Entitlements
 	}
 	aiConsent := ai.NewOrgConsent(repos.AI, aiEntitlements)
+	// Workflow and agent open override_conflict reviews through the review
+	// queue of discovery, deduplicated with its items (REC-12). Both modules
+	// stay switched off in G1 (E-03); the protection holds once they are on.
+	// The queue is built here, after the last option of the handler.
+	conflictReviews := discoveryHandler.ReviewService()
 	// One executor runs the runs of the workflow API and the run an IGA
 	// access request starts (WFL-04).
 	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
-		WithFieldGuard(override.NewGuard(repos.Override))
+		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -520,7 +533,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		training.NewHandler(repos.Training),
 		desk.NewHandler(repos.Desk),
 		location.NewHandler(repos.Location),
-		agentHandler(&repos, opts.Sessions),
+		agentHandler(&repos, opts.Sessions, conflictReviews),
 		security.NewHandler(repos.Security),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
 		userHandler(&repos, &opts),
@@ -751,21 +764,29 @@ func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
 	} else {
 		h = ci.NewHandler(opts.CIService, opts.Dispatcher)
 	}
+	// The restore window is the configured soft-delete retention (CI-05).
+	if opts.RetentionSoftDeleteDays > 0 {
+		opts.CIService.WithRestoreRetention(time.Duration(opts.RetentionSoftDeleteDays) * 24 * time.Hour)
+	}
 	// GET /cis/{id}?include= (API-05) embeds up to includeLimit related
-	// rows of each kind.
+	// rows of each kind; a kind with more rows the caller may see is marked
+	// as truncated (F-223).
 	const includeLimit = 200
 	page := api.PaginationParams{Limit: includeLimit}
 	if repos.Override != nil {
 		h.WithProvenance(repos.Override)
 	}
 	return h.WithIncludes(map[string]ci.IncludeFunc{
-		"relationships": func(ctx context.Context, orgID, ciID string) (any, error) {
-			rels, _, err := repos.Relationship.List(ctx, orgID, ciID, page)
-			return rels, err
+		"relationships": func(ctx context.Context, orgID, ciID string) (any, bool, error) {
+			rels, total, err := repos.Relationship.List(ctx, orgID, ciID, page)
+			return rels, total > len(rels), err
 		},
-		"contacts": func(ctx context.Context, orgID, ciID string) (any, error) {
-			contacts, _, err := repos.Contact.ListForCI(ctx, orgID, ciID, page)
-			return contacts, err
+		"contacts": func(ctx context.Context, orgID, ciID string) (any, bool, error) {
+			contacts, total, err := repos.Contact.ListForCI(ctx, orgID, ciID, page)
+			if contacts == nil {
+				contacts = []contact.CIContact{}
+			}
+			return contacts, total > len(contacts), err
 		},
 	})
 }

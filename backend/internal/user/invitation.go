@@ -100,7 +100,10 @@ type InvitationRepository interface {
 	// transaction the event invitation.created with link, the acceptance
 	// link of the token.
 	IssueInvitation(ctx context.Context, caller *identity.Principal, inv *Invitation, tokenHash, link string) error
-	ListInvitations(ctx context.Context, orgID string) ([]Invitation, error)
+	// ListInvitations returns a page newest first on (created_at, id), at
+	// most one invitation more than the limit, and the number of
+	// invitations (API-02, see api.NewestFirstSQL).
+	ListInvitations(ctx context.Context, orgID string, page api.PaginationParams) ([]Invitation, int, error)
 	// RenewInvitation checks the grant ceiling against caller, the renewing
 	// principal, not against the original issuer; like IssueInvitation it
 	// appends invitation.created with the link of the new token.
@@ -302,11 +305,19 @@ func checkInvitationTargets(ctx context.Context, tx pgx.Tx, caller *identity.Pri
 }
 
 // ListInvitations implements InvitationRepository (newest first).
-func (r *PGInvitations) ListInvitations(ctx context.Context, orgID string) ([]Invitation, error) {
+func (r *PGInvitations) ListInvitations(ctx context.Context, orgID string, page api.PaginationParams) ([]Invitation, int, error) {
 	items := []Invitation{}
+	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM user_invitation WHERE organization_id = $1`, orgID).Scan(&total); err != nil {
+			return fmt.Errorf("count invitations: %w", err)
+		}
+		where, tail, args, err := api.NewestFirstSQL(page, 2)
+		if err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, `SELECT `+invitationColumns+` FROM user_invitation
-			WHERE organization_id = $1 ORDER BY created_at DESC, id`, orgID)
+			WHERE organization_id = $1 AND `+where+` `+tail, append([]any{orgID}, args...)...)
 		if err != nil {
 			return fmt.Errorf("list invitations: %w", err)
 		}
@@ -320,7 +331,7 @@ func (r *PGInvitations) ListInvitations(ctx context.Context, orgID string) ([]In
 		}
 		return rows.Err()
 	})
-	return items, err
+	return items, total, err
 }
 
 // RenewInvitation implements InvitationRepository: a pending or expired

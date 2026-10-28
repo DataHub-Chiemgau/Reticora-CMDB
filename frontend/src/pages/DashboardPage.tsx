@@ -7,6 +7,7 @@ import {
   useAllCollectors,
   useCollectors,
   useComplianceScore,
+  useHasPermission,
   useSLABreaches,
   useStocktakeList,
   useTicketList,
@@ -14,14 +15,17 @@ import {
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { ErrorState } from '../components/ui/ErrorState';
 import { Select } from '../components/ui/Select';
 import { useModules } from '../hooks/useEntitlements';
+import { useEscalatedReviewCount } from '../hooks/useReviews';
 import { DASHBOARD_ROLES, useDashboardStore } from '../stores/dashboard';
 import type { DashboardRole, DashboardWidget } from '../stores/dashboard';
 
 const allWidgets: DashboardWidget[] = [
   'ciSummary',
   'collectors',
+  'reviewEscalation',
   'slaBreaches',
   'compliance',
   'assets',
@@ -98,6 +102,66 @@ function CollectorsWidget() {
       value={collectorCount}
       isLoading={collectors.isLoading}
     />
+  );
+}
+
+/**
+ * ReviewEscalationWidget counts the review items open longer than 14 days
+ * (REC-08, F-247) and leads to the inbox filtered on them. Without
+ * discovery:read (GET /review-items) it is not shown and asks nothing.
+ */
+function ReviewEscalationWidget() {
+  const { t } = useTranslation();
+  const canRead = useHasPermission('discovery:read');
+  const escalated = useEscalatedReviewCount(canRead === true);
+  if (canRead === false) {
+    return null;
+  }
+  const count = escalated.data;
+  return (
+    <Card title={t('dashboard.widgets.reviewEscalation')}>
+      {escalated.error ? (
+        <ErrorState
+          title={t('dashboard.reviewEscalation.loadError')}
+          description={escalated.error instanceof Error ? escalated.error.message : undefined}
+          retryLabel={t('common.retry')}
+          onRetry={() => void escalated.refetch()}
+        />
+      ) : count === undefined ? (
+        <p className="text-3xl font-semibold text-gray-900 dark:text-gray-100">
+          {t('app.loading')}
+        </p>
+      ) : (
+        <>
+          <p
+            className={
+              count > 0
+                ? 'text-3xl font-semibold text-amber-700 dark:text-amber-300'
+                : 'text-3xl font-semibold text-gray-900 dark:text-gray-100'
+            }
+          >
+            {count}
+          </p>
+          {count > 0 ? (
+            <>
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                {t('dashboard.reviewEscalation.hint')}
+              </p>
+              <Link
+                to="/reviews?escalated=true"
+                className="mt-2 inline-block text-sm font-medium text-primary underline"
+              >
+                {t('dashboard.reviewEscalation.open')}
+              </Link>
+            </>
+          ) : (
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+              {t('dashboard.reviewEscalation.none')}
+            </p>
+          )}
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -226,9 +290,10 @@ function SetupBanner() {
   );
 }
 
-const widgetRenderers: Record<DashboardWidget, () => React.JSX.Element> = {
+const widgetRenderers: Record<DashboardWidget, () => React.JSX.Element | null> = {
   ciSummary: CISummaryWidget,
   collectors: CollectorsWidget,
+  reviewEscalation: ReviewEscalationWidget,
   slaBreaches: SLABreachesWidget,
   compliance: ComplianceWidget,
   assets: AssetsWidget,

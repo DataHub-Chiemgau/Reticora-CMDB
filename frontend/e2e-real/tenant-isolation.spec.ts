@@ -643,7 +643,11 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
         'query($id: ID!) { relationships(ciId: $id) { id sourceCiId targetCiId } }',
         { id: w.ci1.id },
       ],
-      ['topology', '{ topology { nodes { id name } edges { id } } }', {}],
+      // Without a root a topology may hold 2,000 nodes: one field per
+      // probe stays within the complexity budget (F-333, WP-593).
+      ['topology(nodes.id)', '{ topology { nodes { id } } }', {}],
+      ['topology(nodes.name)', '{ topology { nodes { name } } }', {}],
+      ['topology(edges.id)', '{ topology { edges { id } } }', {}],
       [
         'topology(root)',
         'query($id: ID) { topology(rootCiId: $id) { nodes { id name } } }',

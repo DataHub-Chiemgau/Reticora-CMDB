@@ -103,6 +103,64 @@ func (s *Service) OpenUnlessDismissed(ctx context.Context, item *Item, valueKey 
 	return s.Open(ctx, item)
 }
 
+// OverrideConflict is a value an automation source reported for a field
+// under a manual override (REC-12).
+type OverrideConflict struct {
+	OrganizationID string
+	CIID           string
+	Field          string
+	// Value is the reported value, Source its source and Rank the REC-03
+	// rank of the source.
+	Value  any
+	Source string
+	Rank   int
+	// Previous is the value reported for the field before this report (the
+	// CI's _observed as read before the report was recorded); HasPrevious
+	// is false when none is known.
+	Previous    any
+	HasPrevious bool
+}
+
+// OpenOverrideConflict opens the override_conflict item of a field for
+// every automation source, discovery, workflow and agent alike (REC-12): one
+// open item per CI and field, the payload carries the source, its rank and
+// the reported value. A dismissal suppresses its value only until the source
+// reports another one (F-248): no item is opened when the newest item of the
+// field was dismissed with this value and the report before this one had
+// the same value; after another value in between (or an accepted item) the
+// value opens a new item. Inside a transaction it runs under a savepoint, so
+// a failed item leaves the caller's transaction usable. It reports whether a
+// new item was opened.
+func (s *Service) OpenOverrideConflict(ctx context.Context, c *OverrideConflict) (bool, error) {
+	item := &Item{
+		OrganizationID: c.OrganizationID,
+		Kind:           KindOverrideConflict,
+		Status:         StatusOpen,
+		Payload: map[string]any{"ci_id": c.CIID, "field": c.Field, "observed_value": c.Value,
+			"source": c.Source, "rank": c.Rank},
+		CandidateCIIDs: []string{c.CIID},
+		ObjectKey:      "ci:" + c.CIID + "/" + c.Field,
+	}
+	var opened bool
+	err := database.Savepoint(ctx, func(ctx context.Context) error {
+		newest, _, err := s.repo.ListReviewItems(ctx, item.OrganizationID,
+			Filter{Kind: item.Kind, ObjectKey: item.ObjectKey}, api.PaginationParams{Limit: 1})
+		if err != nil {
+			return err
+		}
+		if len(newest) > 0 && newest[0].Status == StatusDismissed && sameValue(newest[0].Payload["observed_value"], c.Value) &&
+			(!c.HasPrevious || sameValue(c.Previous, c.Value)) {
+			return nil
+		}
+		opened, err = s.Open(ctx, item)
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	return opened, nil
+}
+
 func sameValue(a, b any) bool {
 	ja, errA := json.Marshal(a)
 	jb, errB := json.Marshal(b)

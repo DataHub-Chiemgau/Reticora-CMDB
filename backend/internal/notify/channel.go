@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -99,21 +100,37 @@ func (c *Channel) Validate() error {
 }
 
 // CheckEgress checks the destination of the channel against the egress
-// policy when it is stored (SEC-08): the server of an organization's own
-// SMTP channel (SMTPConfig.CheckEgress); the central server is the
-// operator's configuration.
+// policy of the installation when it is stored (SEC-08): the server of an
+// organization's own SMTP channel (SMTPConfig.CheckEgress) and the url of a
+// webhook channel (egress.Options.ValidateURL, 400 on the field url,
+// F-204); the central server is the operator's configuration. The address
+// a name resolves to is checked again on every connection.
 func (c *Channel) CheckEgress(opts egress.Options) error {
-	if c.Provider != ProviderSMTP {
-		return nil
+	switch c.Provider {
+	case ProviderSMTP:
+		cfg, err := SMTPConfigFrom(c.Config)
+		if err != nil {
+			return err
+		}
+		if err := cfg.Validate(); err != nil {
+			return err
+		}
+		return cfg.CheckEgress(opts)
+	case ProviderWebhook:
+		u, _ := c.Config["url"].(string)
+		if u == "" {
+			// Validate refuses the channel without url.
+			return nil
+		}
+		if err := opts.ValidateURL(u); err != nil {
+			// Metadata endpoints stay blocked with the setting as well.
+			if (egress.Options{AllowPrivate: true}).ValidateURL(u) == nil {
+				err = fmt.Errorf("%w; a webhook in the internal network needs %s", err, allowPrivate)
+			}
+			return &DestinationError{Field: "url", Err: err, Status: http.StatusBadRequest}
+		}
 	}
-	cfg, err := SMTPConfigFrom(c.Config)
-	if err != nil {
-		return err
-	}
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
-	return cfg.CheckEgress(opts)
+	return nil
 }
 
 // Recipient is one addressee of a message.

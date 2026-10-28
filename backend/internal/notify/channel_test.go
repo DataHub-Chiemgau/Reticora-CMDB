@@ -440,6 +440,94 @@ func TestOwnSMTPServerEgressPolicy(t *testing.T) {
 	})
 }
 
+// TestWebhookChannelEgressPolicy covers WP-563 (SEC-08, F-204): the url of
+// a webhook channel is held to the egress policy of the installation when
+// it is created and changed (egress.Options.ValidateURL): metadata,
+// private, loopback, unique-local and 6to4 destinations, internal names
+// and credentials in the url are refused with 400 on the field url and
+// nothing is stored; a public https url is accepted. AllowPrivate admits
+// internal webhooks but not the metadata service.
+func TestWebhookChannelEgressPolicy(t *testing.T) {
+	ctx := context.Background()
+	hook := func(name, url string) string {
+		return fmt.Sprintf(`{"name":%q,"provider":"webhook","config":{"url":%q,"secret":"hmac"}}`, name, url)
+	}
+	refused := []string{
+		"http://169.254.169.254/", "https://10.0.0.5", "http://127.0.0.1:8080/hook", "https://[fd00:ec2::254]/",
+		"https://[fd12:3456::1]/hook", "https://[2002:a9fe:a9fe::1]/", "http://localhost/hook", "https://chat.corp.internal/hook",
+		"https://user:pw@hooks.example.org/hook", "ftp://hooks.example.org/hook",
+	}
+
+	t.Run("SaaS mode refuses internal urls on create and update", func(t *testing.T) {
+		center := NewMemoryCenter()
+		call := channelAPIWith(center, egress.Options{})
+		for i, url := range refused {
+			w := call(http.MethodPost, "/api/v1/notification-channels", hook(fmt.Sprintf("hook-%d", i), url))
+			if w.Code != http.StatusBadRequest || problemField(w) != "url" {
+				t.Errorf("create with %s = %d %s, want 400 field url", url, w.Code, w.Body.String())
+			}
+		}
+		if list, _ := center.Channels.List(ctx, "org-1"); len(list) != 0 {
+			t.Errorf("%d refused channels stored", len(list))
+		}
+		w := call(http.MethodPost, "/api/v1/notification-channels", hook("public", "https://hooks.example.org/services/T0"))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create with a public https url = %d %s, want 201", w.Code, w.Body.String())
+		}
+		var ch Channel
+		_ = json.Unmarshal(w.Body.Bytes(), &ch)
+		for _, url := range refused {
+			w = call(http.MethodPatch, "/api/v1/notification-channels/"+ch.ID, `{"config":{"url":"`+url+`","secret":"hmac-2"}}`)
+			if w.Code != http.StatusBadRequest || problemField(w) != "url" {
+				t.Errorf("update to %s = %d %s, want 400 field url", url, w.Code, w.Body.String())
+			}
+		}
+		if stored, _ := center.Channels.Get(ctx, "org-1", ch.ID); stored == nil || stored.Config["url"] != "https://hooks.example.org/services/T0" {
+			t.Errorf("stored channel after the refused updates: %+v", stored)
+		}
+		w = call(http.MethodPatch, "/api/v1/notification-channels/"+ch.ID, `{"config":{"url":"https://hooks.example.net/x","secret":"hmac-2"}}`)
+		if w.Code != http.StatusOK {
+			t.Errorf("update to a public https url = %d %s, want 200", w.Code, w.Body.String())
+		}
+		// The refusal of an internal destination names the setting.
+		w = call(http.MethodPost, "/api/v1/notification-channels", hook("internal", "https://10.0.0.5"))
+		if !strings.Contains(w.Body.String(), "RETICORA_EGRESS_ALLOW_PRIVATE=true") {
+			t.Errorf("the refusal does not name RETICORA_EGRESS_ALLOW_PRIVATE: %s", w.Body.String())
+		}
+	})
+
+	t.Run("AllowPrivate admits internal urls but not the metadata service", func(t *testing.T) {
+		center := NewMemoryCenter()
+		call := channelAPIWith(center, egress.Options{AllowPrivate: true})
+		for url, want := range map[string]int{
+			"https://10.0.0.5":                 http.StatusCreated,
+			"http://127.0.0.1:8080/hook":       http.StatusCreated,
+			"https://chat.corp.internal/hook":  http.StatusCreated,
+			"http://169.254.169.254/":          http.StatusBadRequest,
+			"https://[fd00:ec2::254]/":         http.StatusBadRequest,
+			"https://[2002:a9fe:a9fe::1]/":     http.StatusBadRequest,
+			"https://user:pw@10.0.0.5/hook":    http.StatusBadRequest,
+			"https://hooks.example.org/public": http.StatusCreated,
+		} {
+			if w := call(http.MethodPost, "/api/v1/notification-channels", hook("hook "+url, url)); w.Code != want {
+				t.Errorf("AllowPrivate: create with %s = %d %s, want %d", url, w.Code, w.Body.String(), want)
+			}
+		}
+	})
+
+	t.Run("CheckEgress", func(t *testing.T) {
+		ch := &Channel{Name: "hook", Provider: ProviderWebhook, Config: map[string]any{"url": "https://10.0.0.5/hook"}}
+		var blocked *DestinationError
+		if err := ch.CheckEgress(egress.Options{}); !errors.As(err, &blocked) || blocked.Field != "url" ||
+			blocked.Status != http.StatusBadRequest || !errors.Is(err, egress.ErrBlockedDestination) {
+			t.Errorf("CheckEgress(https://10.0.0.5/hook) = %v, want a DestinationError on url with 400", err)
+		}
+		if err := ch.CheckEgress(egress.Options{AllowPrivate: true}); err != nil {
+			t.Errorf("AllowPrivate: CheckEgress(https://10.0.0.5/hook) = %v", err)
+		}
+	})
+}
+
 // TestInAppAndWebhookChannels covers the in-app and webhook providers and
 // the routing of the sender.
 func TestInAppAndWebhookChannels(t *testing.T) {

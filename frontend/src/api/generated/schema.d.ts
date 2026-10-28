@@ -56,7 +56,9 @@ export interface paths {
      *     session. Only members of the operator group (RETICORA_OPERATOR_GROUP,
      *     default "operators") who logged in with a second factor (amr, or acr
      *     in RETICORA_OPERATOR_MFA_ACR) get one. Every attempt is recorded in
-     *     operator_audit. Operator sessions are refused by the tenant API.
+     *     operator_audit; when the entry cannot be written the answer is 500
+     *     and no session is issued (F-208). Operator sessions are refused by
+     *     the tenant API.
      */
     post: operations['operatorLogin'];
     delete?: never;
@@ -72,7 +74,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The authenticated operator */
+    /**
+     * The authenticated operator
+     * @description Like every request under /api/v1/admin, refused ones included, it is recorded in operator_audit; when the entry cannot be written the answer is 500 instead of the response (F-208).
+     */
     get: operations['getOperator'];
     put?: never;
     post?: never;
@@ -89,7 +94,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List every organization */
+    /**
+     * List every organization
+     * @description Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+     */
     get: operations['listOrganizationsAsOperator'];
     put?: never;
     /**
@@ -118,7 +126,7 @@ export interface paths {
     put?: never;
     /**
      * Grant or update an entitlement of an organization
-     * @description The only path that writes entitlements (ENT-04, E-12). The change is recorded in operator_audit with the previous and the new state.
+     * @description The only path that writes entitlements (ENT-04, E-12). The change is recorded in operator_audit with the previous and the new state, in the same transaction: when the entry cannot be written the change is rolled back and the answer is 500 (F-208).
      */
     post: operations['grantEntitlementAsOperator'];
     delete?: never;
@@ -249,7 +257,7 @@ export interface paths {
     put?: never;
     /**
      * Request a self-signup (TLC-01)
-     * @description Stores a signup request and sends a verification link to the address. The answer is 202 whether or not the address already has an account. The request passes the pre-auth limit (AUT-10), at most five signups per client IP and hour (429), the ALTCHA solution (400, `field` = `altcha`) and the disposable-domain blocklist (422, `field` = `email`). 503 while no e-mail channel, IdP administration or protection store is available.
+     * @description Stores a signup request and sends a verification link to the address. The answer is 202 whether or not the address already has an account. The request passes the pre-auth limit (AUT-10), at most five signups per client IP in any span of 3600 seconds (429; Retry-After is the time until the oldest of them leaves the span), the ALTCHA solution (400, `field` = `altcha`) and the disposable-domain blocklist (422, `field` = `email`). 503 while no e-mail channel, IdP administration or protection store is available.
      */
     post: operations['submitSignup'];
     delete?: never;
@@ -269,7 +277,7 @@ export interface paths {
     put?: never;
     /**
      * Verify a self-signup and create the organization (TLC-01)
-     * @description The token of the verification link is the credential. Creates, in one transaction, the organization with a slug derived from its name, the default VRF, the first user as org_admin and the trial entitlements (ENT-07), sets the password in the IdP (it is never stored by Reticora) and records the signup in operator_audit. 404 for an unknown or used token, 410 for an expired one, 409 when the address already has an IdP account, 422 when the IdP rejects the password.
+     * @description The token of the verification link is the credential. Creates, in one transaction, the organization with a slug derived from its name, the default VRF, the first user as org_admin and the trial entitlements (ENT-07), sets the password in the IdP (it is never stored by Reticora) and records the signup in operator_audit. The slug is the first free one of the name's slug, slug-2 … slug-20 and slug with a random suffix of six characters a-z0-9; Greek and Cyrillic names are transliterated, a name without such letters gets org-<suffix>. 404 for an unknown or used token, 410 for an expired one, 409 when the address already has an IdP account (`field` = `email`) or no slug candidate is free (`field` = `organization_name`; the request stays pending), 422 when the IdP rejects the password.
      */
     post: operations['verifySignup'];
     delete?: never;
@@ -299,6 +307,8 @@ export interface paths {
      *     max_users (active users, ENT-03); at the limit it answers 403
      *     entitlement-limit, creates no user and leaves the invitation open.
      *     A deactivated user, and a first login without an admission, get 403.
+     *     Parallel first logins into an organization without any user admit
+     *     exactly one of them as its first user (F-198).
      *     Only the first login (an account an administrator created, or the
      *     first user of the organization) assigns the configured default role,
      *     when the user holds no role yet; a later login assigns none. A login
@@ -429,7 +439,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a configuration item
-     * @description Soft delete (CI-05): sets deleted_at and the operative status decommissioned (the lifecycle state stays, LCY-01) and releases the asset link; relationships stay, traversal and impact skip the CI. POST /cis/{id}/restore brings it back within 90 days, afterwards the retention run deletes it with its interfaces and IP addresses.
+     * @description Soft delete (CI-05): sets deleted_at and the operative status decommissioned (the lifecycle state stays, LCY-01) and releases the asset link; relationships stay, traversal and impact skip the CI. POST /cis/{id}/restore brings it back within the soft-delete retention (RETICORA_RETENTION_SOFT_DELETE_DAYS, default and minimum 90 days), afterwards the retention run deletes it with its interfaces and IP addresses.
      */
     delete: operations['deleteCI'];
     options?: never;
@@ -455,7 +465,7 @@ export interface paths {
     put?: never;
     /**
      * Restore a deleted CI within the retention (CI-05, API-05)
-     * @description Clears the deletion of a CI deleted less than 90 days ago; the change history and the audit trail record the restore (ci.restored). Requires ci:delete.
+     * @description Clears the deletion of a CI deleted within the soft-delete retention (RETICORA_RETENTION_SOFT_DELETE_DAYS, default and minimum 90 days); the status and the asset link of the deletion come back, the change history and the audit trail record the restore (ci.restored). Requires ci:delete. A CI of another organization, outside the caller's scope or unknown is 404.
      */
     post: operations['restoreCI'];
     delete?: never;
@@ -782,16 +792,59 @@ export interface paths {
     post?: never;
     /**
      * Delete a relationship
-     * @description Manual and other edges are deleted as asked. A discovery edge is deleted only with force=true (409 otherwise) and is then recorded as suppression for its CIs and type, so discovery does not recreate it (REL-03, REL-04). Discovery never changes or removes manual edges (REL-05).
+     * @description Manual and other edges are deleted as asked. A discovery edge is deleted only with force=true (409 otherwise) and is then recorded as suppression for its CIs and type, so discovery does not recreate it (REL-03, REL-04). Discovery never changes or removes manual edges (REL-05). 404 only for an edge the caller does not find (unknown, another organization, outside the scope, malformed id); other failures are not reported as 404 (F-272). The suppression records the acting user (created_by) and the reason; it is audited as relationship.suppression_created with actor and reason, listed by GET /api/v1/relationship-suppressions and lifted by DELETE /api/v1/relationship-suppressions/{id} (F-273).
      */
     delete: operations['deleteRelationship'];
     options?: never;
     head?: never;
     /**
      * Edit or verify a relationship
-     * @description Updates the provenance and verification metadata of an existing relationship. The edge endpoints and rel_type are immutable; rewiring is expressed by deleting and recreating the relationship so the graph history stays truthful.
+     * @description Updates the provenance and verification metadata of an existing relationship. The edge endpoints and rel_type are immutable; rewiring is expressed by deleting and recreating the relationship so the graph history stays truthful. attributes.provenance (actor, actor type, source and time of the edge) is recorded by the system and cannot be changed (422, REL-08, F-270).
      */
     patch: operations['updateRelationship'];
+    trace?: never;
+  };
+  '/api/v1/relationship-suppressions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List suppressions of removed discovery edges
+     * @description The suppressions of the organization whose source and target CI the caller sees (organization, client and site scope), newest first: each names the CIs and type of a discovery edge removed with force, who removed it, why and when (REL-03, F-273). Discovery does not create these edges again until the suppression is lifted.
+     */
+    get: operations['listRelationshipSuppressions'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/relationship-suppressions/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Lift a suppression
+     * @description Deletes the suppression, so the next discovery cycle that reports the edge creates it again (REL-03, F-273). Needs relationship:write, the permission of the forced DELETE /api/v1/relationships/{id} that created it. Audited as relationship.suppression_lifted with the actor and the reason and creator of the suppression. 404 for a suppression the caller does not find (unknown, another organization, a CI outside the scope, malformed id).
+     */
+    delete: operations['liftRelationshipSuppression'];
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/v1/webhooks': {
@@ -2457,7 +2510,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the organization's API keys (without secrets) */
+    /**
+     * List the organization's API keys (without secrets)
+     * @description Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+     */
     get: operations['listAPIKeys'];
     put?: never;
     /**
@@ -2578,14 +2634,14 @@ export interface paths {
     post?: never;
     /**
      * Delete a user
-     * @description A user who owns open objects (open tickets, active assignments, keys not returned) or is referenced by closed records cannot be deleted; hand the objects over, or deactivate or anonymize the user (TLC-04).
+     * @description A user who owns open objects (open tickets, active assignments, keys not returned) or is referenced by closed records cannot be deleted; hand the objects over, or deactivate or anonymize the user (TLC-04). The caller cannot delete their own account: the request answers 400 ("you cannot delete your own account") and nothing is changed (F-377).
      */
     delete: operations['deleteUser'];
     options?: never;
     head?: never;
     /**
      * Update a user
-     * @description A non-active status deactivates the user (TLC-04): in the same transaction the user's sessions and refresh cookies are revoked and every active API key the user created for themself is revoked. Keys the user created for service accounts belong to the service account and stay valid (decision E-64, option 2): the audit entry of the deactivation lists them (id, prefix, name, service account; never the secret), and the org_admins of the organization receive a notification to rotate them. The sessions are revoked only after the user was found in the caller's organization; an unknown user or a user of another organization answers 404 without any effect. If the sessions cannot be revoked, nothing is changed and the answer is 503.
+     * @description A non-active status deactivates the user (TLC-04): in the same transaction the user's sessions and refresh cookies are revoked and every active API key the user created for themself is revoked. Keys the user created for service accounts belong to the service account and stay valid (decision E-64, option 2): the audit entry of the deactivation lists them (id, prefix, name, service account; never the secret), and the org_admins of the organization receive a notification to rotate them. The sessions are revoked only after the user was found in the caller's organization; an unknown user or a user of another organization answers 404 without any effect. If the sessions cannot be revoked, nothing is changed and the answer is 503. The caller cannot deactivate their own account: a non-active status for the caller's own user answers 400 ("you cannot deactivate your own account") before anything is written, revoked or audited (F-377). Other fields of the own account (e.g. display_name) and status active stay allowed.
      */
     patch: operations['updateUser'];
     trace?: never;
@@ -2727,7 +2783,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -3504,7 +3560,7 @@ export interface paths {
     put?: never;
     /**
      * Create a notification channel
-     * @description Requires notification:manage. The response is redacted like the list. The server of an own SMTP channel (provider smtp) is held to the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true an IP literal or name of a private, loopback, link-local or unique-local network and a port other than 25, 465 or 587 are refused with 422 (field host or port, the detail names the setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254) are refused in every mode. The address a name resolves to is checked again on every connection. central_smtp is the operator's server and exempt.
+     * @description Requires notification:manage. The response is redacted like the list. The server of an own SMTP channel (provider smtp) is held to the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true an IP literal or name of a private, loopback, link-local or unique-local network and a port other than 25, 465 or 587 are refused with 422 (field host or port, the detail names the setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254) are refused in every mode. The url of a webhook channel (provider webhook) is held to the same policy: http or https, no credentials in the url, and no IP literal or name of the internal network unless RETICORA_EGRESS_ALLOW_PRIVATE=true, metadata endpoints in no mode; a refused url answers 400 (field url). The address a name resolves to is checked again on every connection. central_smtp is the operator's server and exempt.
      */
     post: operations['createNotificationChannel'];
     delete?: never;
@@ -3538,7 +3594,7 @@ export interface paths {
     head?: never;
     /**
      * Update name, configuration or enabled flag
-     * @description Requires notification:manage. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. A secret sent back as `********` while the configuration changes its destination (smtp: host, port, tls or username; webhook: url) is refused with 400 (field password or secret): it must be entered again. A configuration is held to the egress policy like on create (422, field host or port). Kind and provider cannot change.
+     * @description Requires notification:manage. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. A secret sent back as `********` while the configuration changes its destination (smtp: host, port, tls or username; webhook: url) is refused with 400 (field password or secret): it must be entered again. A configuration is held to the egress policy like on create (422, field host or port; webhook: 400, field url). Kind and provider cannot change.
      */
     patch: operations['updateNotificationChannel'];
     trace?: never;
@@ -4252,7 +4308,7 @@ export interface paths {
     };
     /**
      * List the organization's invitations (TLC-03)
-     * @description Status is derived from acceptance and expiry (pending, accepted, expired). Requires user:manage.
+     * @description Status is derived from acceptance and expiry (pending, accepted, expired). Requires user:manage. Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
      */
     get: operations['listInvitations'];
     put?: never;
@@ -4340,7 +4396,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the organization's service accounts */
+    /**
+     * List the organization's service accounts
+     * @description Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+     */
     get: operations['listServiceAccounts'];
     put?: never;
     /** Create a service account (RBA-08) */
@@ -5181,7 +5240,10 @@ export interface paths {
     delete: operations['deleteIGAConnector'];
     options?: never;
     head?: never;
-    /** Update an IGA connector */
+    /**
+     * Update an IGA connector
+     * @description A changed base_url of a SCIM connector is held to the rules of create (SEC-08): https, and without RETICORA_EGRESS_ALLOW_PRIVATE=true no IP literal or name of a private, loopback, link-local or unique-local network (also embedded in a NAT64, 6to4, Teredo or IPv4-compatible IPv6 address); cloud metadata endpoints are refused in every mode. A refused URL answers 400 with the field base_url and changes nothing.
+     */
     patch: operations['updateIGAConnector'];
     trace?: never;
   };
@@ -5777,7 +5839,7 @@ export interface paths {
     };
     /**
      * List attribute definitions (MET-10)
-     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `scope` (type, global).
+     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `scope` (type, global). Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
      */
     get: operations['listAttributeDefinitions'];
     put?: never;
@@ -7724,6 +7786,17 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description A CI with the collections requested by include (API-05). Without include it is the CI alone. */
+    CIWithIncludes: components['schemas']['CI'] & {
+      /** @description At most 200 relationships of the CI the caller may see. */
+      relationships?: components['schemas']['Relationship'][];
+      /** @description At most 200 contact links of the CI the caller may see. */
+      contacts?: components['schemas']['CIContact'][];
+      /** @description The embedded collections the server capped: the collection has more rows the caller may see than it embeds, e.g. relationships true. Absent when every embedded collection is complete. */
+      truncated?: {
+        [key: string]: true;
+      };
+    };
     /** @description Canonical data of the linked asset, shown read-only on the CI (DB-05). */
     CIAssetFacts: {
       id: string;
@@ -7983,7 +8056,10 @@ export interface components {
       attributes?: {
         [key: string]: unknown;
       };
-      /** @default manual */
+      /**
+       * @description manual, api, import, integration or workflow ("rule" is accepted as workflow). discovery and agent are reserved to the discovery and agent paths (422 on source, REL-08, F-271).
+       * @default manual
+       */
       source: string;
       confidence?: number;
       /** @description An interface of the source CI; the edge is unique per (source, target, type, interfaces), a taken one is 409. */
@@ -7993,7 +8069,7 @@ export interface components {
     };
     /** @description All properties are optional; only the supplied ones are changed. */
     UpdateRelationshipRequest: {
-      /** @description Merged into the existing attributes. */
+      /** @description Merged into the existing attributes. The key provenance is reserved to the system (422, F-270). */
       attributes?: {
         [key: string]: unknown;
       };
@@ -8006,6 +8082,31 @@ export interface components {
     };
     RelationshipListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Relationship'][];
+    };
+    /** @description A discovery edge removed with force that discovery does not create again (REL-03, F-273). */
+    RelationshipSuppression: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      source_ci_id: string;
+      /** Format: uuid */
+      target_ci_id: string;
+      /** @description Key of the relationship type; empty when the type no longer exists. */
+      rel_type: string;
+      /** @description Reason given when the edge was removed; absent when none was given. */
+      reason?: string;
+      /**
+       * Format: uuid
+       * @description The user who removed the edge; absent for a principal without user or after the user was deleted.
+       */
+      created_by?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    RelationshipSuppressionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['RelationshipSuppression'][];
     };
     /** @enum {string} */
     WebhookEvent:
@@ -8020,7 +8121,10 @@ export interface components {
       id: string;
       organization_id: string;
       name: string;
-      /** Format: uri */
+      /**
+       * Format: uri
+       * @description Subscriber URL. It often carries a token in path, query or userinfo: a caller without webhook:manage gets only scheme and host (SEC-01).
+       */
       url: string;
       events: components['schemas']['WebhookEvent'][];
       is_active: boolean;
@@ -8077,6 +8181,7 @@ export interface components {
       max_attempts: number;
       response_status?: number;
       duration_ms?: number;
+      /** @description Error of the last attempt. For a caller without webhook:manage every URL in it is reduced to scheme and host (SEC-01). */
       error?: string;
       /** Format: date-time */
       next_retry_at?: string;
@@ -8096,6 +8201,7 @@ export interface components {
       event: string;
       attempts: number;
       last_status_code?: number;
+      /** @description Error of the last attempt. For a caller without webhook:manage every URL in it is reduced to scheme and host (SEC-01). */
       last_error?: string;
       /** Format: date-time */
       first_attempt_at?: string;
@@ -8402,11 +8508,33 @@ export interface components {
       };
     };
     GrantEntitlementRequest: {
-      feature_key: string;
+      /**
+       * @description A feature key of ENT-02, a module key or an add-on; any other key is 422 with `field` feature_key (F-209).
+       * @enum {string}
+       */
+      feature_key:
+        | 'cmdb_core'
+        | 'discovery'
+        | 'topology'
+        | 'rack_view'
+        | 'export_csv'
+        | 'webhooks'
+        | 'api_access'
+        | 'notifications_email'
+        | 'inventory'
+        | 'documents'
+        | 'stocktake'
+        | 'ticketing'
+        | 'monitoring'
+        | 'endpoint_agent'
+        | 'workflow_forms'
+        | 'compliance'
+        | 'iga'
+        | 'ai';
       plan?: components['schemas']['EntitlementPlan'];
       /** @description cmdb_core cannot be disabled (422). */
       enabled?: boolean;
-      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. A missing quota uses the plan default. */
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys; any other key is 422 with `field` limits (F-209). A missing quota is unlimited (E-34). */
       limits?: {
         [key: string]: number;
       };
@@ -11328,6 +11456,25 @@ export interface components {
     };
   };
   parameters: {
+    /**
+     * @description Deduplicates a POST for 24 hours (API-04); every POST endpoint
+     *     accepts it. The key is bound to the caller (organization and
+     *     principal), the method and the path. The first request reserves
+     *     it: a concurrent request with the same key gets 409, a later one
+     *     with the same body gets the stored answer with
+     *     `Idempotency-Replayed: true` without running the request again,
+     *     one with a different body 409.
+     *
+     *     2xx, 3xx and 4xx answers are stored. A 5xx answer is not stored
+     *     and releases the key: a retry with the same key runs the request
+     *     again, e.g. after a 503 with `Retry-After` during a dependency or
+     *     audit outage.
+     *
+     *     A replayed answer is the stored one verbatim: the `trace_id` of a
+     *     replayed problem is that of the first request, while the
+     *     `X-Request-ID` header always names the current request.
+     */
+    IdempotencyKey: string;
     /** @description Resource identifier. */
     ResourceID: string;
     /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
@@ -11464,6 +11611,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      500: components['responses']['InternalServerError'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -11486,18 +11634,35 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
     };
   };
   listOrganizationsAsOperator: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Organizations */
+      /** @description Organizations, newest first */
       200: {
         headers: {
           [name: string]: unknown;
@@ -11506,6 +11671,7 @@ export interface operations {
           'application/json': components['schemas']['OperatorOrgListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -11593,7 +11759,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description cmdb_core disabled or limited in time, unknown source or negative limit */
+      /** @description Unknown feature key (`field` feature_key), unknown quota key or negative limit (`field` limits), cmdb_core disabled (`field` enabled) or limited in time (`field` valid_until), unknown source (`field` source); nothing is stored. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11854,8 +12020,24 @@ export interface operations {
         };
       };
       400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['EntitlementLimit'];
+      /** @description The ID token is invalid, or it carries no valid organization attribute (type https://reticora.io/problems/login-no-organization, AUT-09, CH26). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The login is refused, no session and no refresh cookie are issued. The type names the reason, the client shows its own text for it (F-197): a first login without admission (https://reticora.io/problems/login-not-admitted, AUT-01), a deactivated user (https://reticora.io/problems/login-user-inactive, TLC-04), a user without any role (https://reticora.io/problems/login-no-role, TEN-04, RBA-03), or a first login with an invitation while max_users is reached (https://reticora.io/problems/entitlement-limit, ENT-03). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
       503: components['responses']['ServiceUnavailable'];
     };
@@ -12029,7 +12211,27 @@ export interface operations {
   createCI: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /**
+         * @description Deduplicates a POST for 24 hours (API-04); every POST endpoint
+         *     accepts it. The key is bound to the caller (organization and
+         *     principal), the method and the path. The first request reserves
+         *     it: a concurrent request with the same key gets 409, a later one
+         *     with the same body gets the stored answer with
+         *     `Idempotency-Replayed: true` without running the request again,
+         *     one with a different body 409.
+         *
+         *     2xx, 3xx and 4xx answers are stored. A 5xx answer is not stored
+         *     and releases the key: a retry with the same key runs the request
+         *     again, e.g. after a 503 with `Retry-After` during a dependency or
+         *     audit outage.
+         *
+         *     A replayed answer is the stored one verbatim: the `trace_id` of a
+         *     replayed problem is that of the first request, while the
+         *     `X-Request-ID` header always names the current request.
+         */
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      };
       path?: never;
       cookie?: never;
     };
@@ -12074,7 +12276,7 @@ export interface operations {
   getCI: {
     parameters: {
       query?: {
-        /** @description Comma-separated related collections to embed (API-05): `relationships`, `contacts`, `asset`. An unknown name yields 422. */
+        /** @description Comma-separated related collections to embed (API-05): `relationships`, `contacts`, `asset`. An unknown name yields 422. A collection embeds at most 200 rows; one with more rows the caller may see is named in `truncated` (CIWithIncludes). */
         include?: string;
       };
       header?: never;
@@ -12094,7 +12296,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['CI'];
+          'application/json': components['schemas']['CIWithIncludes'];
         };
       };
       /** @description The CI was merged into another; Location names the survivor (12 months, CI-12). */
@@ -12230,6 +12432,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description The CI was deleted longer ago than the retention. */
       410: {
         headers: {
@@ -12786,7 +12997,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, or an unknown ID. `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
+      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, or an unknown ID. `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). A source reserved to the system (discovery, agent) names `source`: those edges come only from the discovery and agent paths, nothing is stored (F-271). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12804,6 +13015,8 @@ export interface operations {
       query?: {
         /** @description Required to delete a discovery edge; creates its suppression. */
         force?: boolean;
+        /** @description Why the discovery edge is removed, stored with its suppression (trimmed, at most 1000 characters). The UI asks for it in the confirmation of "Entfernen und unterdrücken"; other edges ignore it. */
+        reason?: string;
       };
       header?: never;
       path: {
@@ -12822,8 +13035,19 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      /** @description The suppression of a discovery edge is refused because its type has no relationship type entry; without the suppression discovery would recreate the edge, so it is not deleted. `violations` names rel_type (F-272). A reason longer than 1000 characters or with a NUL character names reason; nothing is deleted. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
     };
   };
   updateRelationship: {
@@ -12854,6 +13078,82 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description attributes carries the reserved key provenance; `violations` names attributes.provenance and nothing is changed (F-270). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
+    };
+  };
+  listRelationshipSuppressions: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Only the suppressions whose source or target is this CI. */
+        ci_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of suppressions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelationshipSuppressionListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  liftRelationshipSuppression: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Suppression lifted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
     };
   };
   listWebhooks: {
@@ -16717,7 +17017,23 @@ export interface operations {
   };
   listAPIKeys: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -16733,6 +17049,7 @@ export interface operations {
           'application/json': components['schemas']['APIKeyListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       500: components['responses']['InternalServerError'];
@@ -16953,6 +17270,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
@@ -21466,7 +21784,23 @@ export interface operations {
   };
   listInvitations: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -21482,6 +21816,7 @@ export interface operations {
           'application/json': components['schemas']['InvitationListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       503: components['responses']['ServiceUnavailable'];
@@ -21613,14 +21948,30 @@ export interface operations {
   };
   listServiceAccounts: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Service accounts with their role assignments */
+      /** @description Service accounts with their role assignments, newest first */
       200: {
         headers: {
           [name: string]: unknown;
@@ -21629,6 +21980,7 @@ export interface operations {
           'application/json': components['schemas']['ServiceAccountListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
@@ -23186,7 +23538,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['ValidationProblem'];
+          'application/problem+json': components['schemas']['ValidationProblem'];
         };
       };
       401: components['responses']['Unauthorized'];
@@ -26119,6 +26471,21 @@ export interface operations {
       query?: {
         ci_type_id?: string;
         scope?: 'type' | 'global';
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
       };
       header?: never;
       path?: never;
@@ -26126,7 +26493,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Attribute definitions */
+      /** @description Attribute definitions, newest first */
       200: {
         headers: {
           [name: string]: unknown;
@@ -26135,6 +26502,7 @@ export interface operations {
           'application/json': components['schemas']['AttributeDefinitionListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       503: components['responses']['ServiceUnavailable'];
     };

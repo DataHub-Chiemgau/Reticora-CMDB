@@ -92,7 +92,13 @@ var (
 // AttributeDefinitionStore is the attribute-definitions resource
 // (API-05); the PostgreSQL repository implements it.
 type AttributeDefinitionStore interface {
+	// ListAttributeDefinitions returns every definition the filter selects
+	// (export).
 	ListAttributeDefinitions(ctx context.Context, orgID string, filter AttributeFilter) ([]AttributeDefinition, error)
+	// ListAttributeDefinitionPage returns a page newest first on
+	// (created_at, id), at most one definition more than the limit, and
+	// the number the filter selects (API-02, see api.NewestFirstSQL).
+	ListAttributeDefinitionPage(ctx context.Context, orgID string, filter AttributeFilter, page api.PaginationParams) ([]AttributeDefinition, int, error)
 	GetAttributeDefinition(ctx context.Context, orgID, id string) (*AttributeDefinition, error)
 	CreateAttributeDefinition(ctx context.Context, orgID string, def *AttributeDefinition) error
 	UpdateAttributeDefinition(ctx context.Context, orgID, id string, patch *AttributeDefinitionPatch) (*AttributeDefinition, error)
@@ -391,33 +397,71 @@ func checkAttributeType(ctx context.Context, tx pgx.Tx, typeID string) error {
 // ListAttributeDefinitions implements AttributeDefinitionStore: the
 // organization's and the system's definitions.
 func (r *PGRepository) ListAttributeDefinitions(ctx context.Context, orgID string, filter AttributeFilter) ([]AttributeDefinition, error) {
-	out := []AttributeDefinition{}
+	var out []AttributeDefinition
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where, args := []string{"TRUE"}, []any{}
-		if filter.CITypeID != "" {
-			args = append(args, filter.CITypeID)
-			where = append(where, fmt.Sprintf("ci_type_id::text = $%d", len(args)))
-		}
-		if filter.Scope != "" {
-			args = append(args, filter.Scope)
-			where = append(where, fmt.Sprintf("scope = $%d", len(args)))
-		}
-		rows, err := tx.Query(ctx, `SELECT `+attributeColumns+` FROM attribute_definition WHERE `+
-			strings.Join(where, " AND ")+` ORDER BY ci_type_id NULLS FIRST, sort_order, key`, args...)
-		if err != nil {
-			return fmt.Errorf("list attribute definitions: %w", err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			d, err := scanAttribute(rows)
-			if err != nil {
-				return fmt.Errorf("scan attribute definition: %w", err)
-			}
-			out = append(out, *d)
-		}
-		return rows.Err()
+		where, args := attributeFilterSQL(filter)
+		var err error
+		out, err = queryAttributes(ctx, tx, `SELECT `+attributeColumns+` FROM attribute_definition WHERE `+
+			where+` ORDER BY ci_type_id NULLS FIRST, sort_order, key`, args)
+		return err
 	})
 	return out, err
+}
+
+// ListAttributeDefinitionPage implements AttributeDefinitionStore: a page of
+// the organization's and the system's definitions newest first on
+// (created_at, id), at most one more than the limit, and their number
+// (API-02, F-215).
+func (r *PGRepository) ListAttributeDefinitionPage(ctx context.Context, orgID string, filter AttributeFilter, page api.PaginationParams) ([]AttributeDefinition, int, error) {
+	var out []AttributeDefinition
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		where, args := attributeFilterSQL(filter)
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM attribute_definition WHERE `+where, args...).Scan(&total); err != nil {
+			return fmt.Errorf("count attribute definitions: %w", err)
+		}
+		keyset, tail, pageArgs, err := api.NewestFirstSQL(page, len(args)+1)
+		if err != nil {
+			return err
+		}
+		out, err = queryAttributes(ctx, tx, `SELECT `+attributeColumns+` FROM attribute_definition WHERE `+
+			where+` AND `+keyset+` `+tail, append(args, pageArgs...))
+		return err
+	})
+	return out, total, err
+}
+
+// attributeFilterSQL renders the conditions of the definition filters.
+func attributeFilterSQL(filter AttributeFilter) (where string, args []any) {
+	conditions := []string{"TRUE"}
+	args = []any{}
+	if filter.CITypeID != "" {
+		args = append(args, filter.CITypeID)
+		conditions = append(conditions, fmt.Sprintf("ci_type_id::text = $%d", len(args)))
+	}
+	if filter.Scope != "" {
+		args = append(args, filter.Scope)
+		conditions = append(conditions, fmt.Sprintf("scope = $%d", len(args)))
+	}
+	return strings.Join(conditions, " AND "), args
+}
+
+// queryAttributes reads the definitions a query selects.
+func queryAttributes(ctx context.Context, tx pgx.Tx, query string, args []any) ([]AttributeDefinition, error) {
+	out := []AttributeDefinition{}
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list attribute definitions: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		d, err := scanAttribute(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan attribute definition: %w", err)
+		}
+		out = append(out, *d)
+	}
+	return out, rows.Err()
 }
 
 func getAttributeTx(ctx context.Context, tx pgx.Tx, id string, lock bool) (*AttributeDefinition, error) {

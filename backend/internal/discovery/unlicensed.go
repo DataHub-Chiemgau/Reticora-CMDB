@@ -103,7 +103,8 @@ func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *In
 // discoveredCI is the CI of a discovered device, before it is created; the
 // batch of WP-333 and createDiscoveredCI build it alike.
 func discoveredCI(orgID string, item *IngestItem, typeID, source string) ci.Item {
-	now := time.Now().UTC()
+	// First and last seen when the record observed the device (GLO-12).
+	seen := seenAt(item)
 	return ci.Item{
 		OrganizationID: orgID,
 		// The client of the discovery scope (REC-02).
@@ -122,8 +123,8 @@ func discoveredCI(orgID string, item *IngestItem, typeID, source string) ci.Item
 		SysObjectID:     item.SysObjectID,
 		Attributes:      discoveredAttributes(item),
 		DiscoverySource: source,
-		FirstSeenAt:     &now,
-		LastSeenAt:      &now,
+		FirstSeenAt:     &seen,
+		LastSeenAt:      &seen,
 	}
 }
 
@@ -243,6 +244,9 @@ func (h *Handler) admitNewCI(ctx context.Context, orgID string, current int64, i
 			"source":       source,
 			"limit":        exceeded.Limit,
 			"current":      exceeded.Current,
+			// The CI created later is first seen at the record's time
+			// (GLO-12); the device record carries no observed_at.
+			"observed_at": seenAt(item).Format(time.RFC3339Nano),
 		},
 		ObjectKey: key,
 	}
@@ -341,6 +345,14 @@ func (h *Handler) adoptUnlicensed(ctx context.Context, orgID, actorID string, it
 	}
 	if err = json.Unmarshal(raw, &device); err != nil {
 		return "", fmt.Errorf("unlicensed_ci %s: device record unreadable: %w", item.ID, err)
+	}
+	// Seen when the record observed it (GLO-12); an item held before the
+	// payload carried observed_at was held when it was created.
+	for _, at := range []string{payloadString(item.Payload, "observed_at"), item.CreatedAt} {
+		if t, parseErr := time.Parse(time.RFC3339Nano, at); parseErr == nil {
+			device.ObservedAt = t
+			break
+		}
 	}
 	typeID := payloadString(item.Payload, "ci_type_id")
 	// The held values pass the field rules like a direct ingest.

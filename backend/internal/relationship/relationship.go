@@ -2,6 +2,7 @@
 package relationship
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,8 +13,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -138,10 +141,34 @@ var ValidSources = map[string]bool{
 	"api": true, "integration": true, "workflow": true, "rule": true,
 }
 
+// SystemSources are the sources reserved to their system paths (REL-08,
+// F-271): discovery edges come from the discovery ingest, agent edges from
+// the agent path. POST /relationships refuses them with 422 on source; a
+// user edge stored as discovery would need force to be deleted and would be
+// removed by the cleanup of unconfirmed discovery edges.
+var SystemSources = map[string]bool{"discovery": true, "agent": true}
+
+// ErrSystemSource refuses a system source on POST /relationships (F-271).
+var ErrSystemSource = errors.New("discovery and agent are reserved to the discovery and agent paths")
+
+// ProvenanceAttribute is the attribute that records actor, actor type,
+// source and time of an edge (REL-08). Create sets it; PATCH refuses it
+// (ErrProvenanceReserved, F-270) and the repositories keep the stored one.
+const ProvenanceAttribute = "provenance"
+
+// ErrProvenanceReserved refuses attributes.provenance on PATCH (F-270).
+var ErrProvenanceReserved = errors.New("provenance is recorded by the system and cannot be changed")
+
 // ErrForceRequired refuses deleting a discovery edge without force=true
 // (REL-04): discovery would find it again, so the deletion also records a
 // suppression.
 var ErrForceRequired = errors.New("a discovery edge is deleted only with force=true; discovery then no longer recreates it")
+
+// ErrSuppressionType refuses the forced deletion of a discovery edge whose
+// type has no relationship_type row (REL-03, F-272): without the row no
+// suppression can be stored and discovery would recreate the edge, so it
+// stays. Delete answers 422 on rel_type.
+var ErrSuppressionType = errors.New("the relationship type has no catalogue entry, so the deletion cannot be recorded as suppression")
 
 // ErrSourceCINotFound and ErrTargetCINotFound refuse an edge whose source or
 // target CI the caller cannot see: a CI of another organization, of a client
@@ -157,18 +184,128 @@ var (
 // PolicyDeleter deletes an edge by the source policy (REL-03, REL-04): a
 // discovery edge only with force, then suppressed for its CIs and type.
 type PolicyDeleter interface {
-	DeleteWithPolicy(ctx context.Context, orgID, id string, force bool) error
+	DeleteWithPolicy(ctx context.Context, orgID, id string, opts DeleteOptions) error
 }
 
-// DeleteWithPolicy implements PolicyDeleter (without suppression storage).
-func (r *MemoryRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, force bool) error {
+// DeleteOptions are the options of DeleteWithPolicy: Force deletes a
+// discovery edge; its suppression records the actor and the reason
+// (F-273).
+type DeleteOptions struct {
+	Force bool
+	// Reason is the reason given in the confirmation; empty stores none.
+	Reason string
+	// Actor names who deletes the edge (created_by of the suppression and
+	// actor of its audit entry).
+	Actor Actor
+}
+
+// Actor is who changes a suppression: the user id (empty for a principal
+// without user) and the actor type of the audit entry (user, api_key).
+type Actor struct {
+	ID   string
+	Type string
+}
+
+// MaxSuppressionReason is the longest reason a suppression stores, in
+// characters (migration 000178).
+const MaxSuppressionReason = 1000
+
+// Audit actions of the suppression lifecycle (F-273): the forced deletion of
+// a discovery edge creates a suppression, DELETE
+// /relationship-suppressions/{id} lifts it.
+const (
+	ActionSuppressionCreated = "relationship.suppression_created"
+	ActionSuppressionLifted  = "relationship.suppression_lifted"
+)
+
+// Suppression is a removed discovery edge that discovery does not create
+// again (REL-03): its CIs and type, who removed it, why and when (F-273).
+type Suppression struct {
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	SourceCIID     string `json:"source_ci_id"`
+	TargetCIID     string `json:"target_ci_id"`
+	RelType        string `json:"rel_type"`
+	Reason         string `json:"reason,omitempty"`
+	CreatedBy      string `json:"created_by,omitempty"`
+	CreatedAt      string `json:"created_at"`
+}
+
+// SuppressionStore lists and lifts suppressions (F-273). Both see only the
+// suppressions whose source and target CI the caller sees.
+type SuppressionStore interface {
+	// ListSuppressions returns the suppressions of the organization, with
+	// ciID set those whose source or target is that CI, newest first.
+	ListSuppressions(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Suppression, int, error)
+	// LiftSuppression deletes a suppression, so the next discovery cycle
+	// creates its edge again; api.ErrNotFound when the caller does not
+	// find it.
+	LiftSuppression(ctx context.Context, orgID, id string, actor Actor) error
+}
+
+// DeleteWithPolicy implements PolicyDeleter; a forced deletion of a
+// discovery edge stores its suppression in memory.
+func (r *MemoryRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, opts DeleteOptions) error {
 	r.mu.RLock()
 	rel, ok := r.items[id]
+	var edge Relationship
+	if ok {
+		edge = *rel
+	}
 	r.mu.RUnlock()
-	if ok && rel.OrganizationID == orgID && rel.Source == "discovery" && !force {
+	if ok && edge.OrganizationID == orgID && edge.Source == "discovery" && !opts.Force {
 		return ErrForceRequired
 	}
-	return r.Delete(ctx, orgID, id)
+	if err := r.Delete(ctx, orgID, id); err != nil {
+		return err
+	}
+	if edge.Source != "discovery" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.suppressions {
+		if s.OrganizationID == orgID && s.SourceCIID == edge.SourceCIID && s.TargetCIID == edge.TargetCIID && s.RelType == edge.RelType {
+			return nil
+		}
+	}
+	r.seq++
+	s := &Suppression{ID: fmt.Sprintf("%08d-0000-4000-8000-%012d", r.seq, r.seq), OrganizationID: orgID,
+		SourceCIID: edge.SourceCIID, TargetCIID: edge.TargetCIID, RelType: edge.RelType, Reason: opts.Reason,
+		CreatedBy: opts.Actor.ID, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	r.suppressions[s.ID] = s
+	return nil
+}
+
+// ListSuppressions implements SuppressionStore.
+func (r *MemoryRepository) ListSuppressions(_ context.Context, orgID, ciID string, page api.PaginationParams) ([]Suppression, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := make([]Suppression, 0)
+	for _, s := range r.suppressions {
+		if s.OrganizationID == orgID && (ciID == "" || s.SourceCIID == ciID || s.TargetCIID == ciID) {
+			items = append(items, *s)
+		}
+	}
+	slices.SortFunc(items, func(a, b Suppression) int {
+		return cmp.Or(strings.Compare(b.CreatedAt, a.CreatedAt), strings.Compare(a.ID, b.ID))
+	})
+	total := len(items)
+	start := min(page.Offset, total)
+	end := min(start+page.Limit, total)
+	return items[start:end], total, nil
+}
+
+// LiftSuppression implements SuppressionStore.
+func (r *MemoryRepository) LiftSuppression(_ context.Context, orgID, id string, _ Actor) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.suppressions[id]
+	if !ok || s.OrganizationID != orgID {
+		return api.ErrNotFound
+	}
+	delete(r.suppressions, id)
+	return nil
 }
 
 // Confirmer re-confirms a discovery edge seen again (TOP-02).
@@ -375,7 +512,9 @@ type IncidentEdgeReader interface {
 type MemoryRepository struct {
 	mu    sync.RWMutex
 	items map[string]*Relationship
-	seq   int
+	// suppressions are the suppressions of forced deletions (REL-03).
+	suppressions map[string]*Suppression
+	seq          int
 	// visible decides which CIs a traversal may pass through (IMP-07).
 	visible NodeVisibility
 }
@@ -396,7 +535,7 @@ func (r *MemoryRepository) WithNodeVisibility(visible NodeVisibility) *MemoryRep
 
 // NewMemoryRepository creates a new in-memory relationship repository.
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{items: make(map[string]*Relationship)}
+	return &MemoryRepository{items: make(map[string]*Relationship), suppressions: make(map[string]*Suppression)}
 }
 
 func (r *MemoryRepository) List(_ context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
@@ -456,7 +595,10 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 			rel.Attributes = make(map[string]any)
 		}
 		for k, v := range req.Attributes {
-			rel.Attributes[k] = v
+			// The stored provenance stays (F-270).
+			if k != ProvenanceAttribute {
+				rel.Attributes[k] = v
+			}
 		}
 	}
 	if req.Confidence != nil {
@@ -486,7 +628,7 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 
 	rel, ok := r.items[id]
 	if !ok || rel.OrganizationID != orgID {
-		return fmt.Errorf("not found")
+		return api.ErrNotFound
 	}
 	delete(r.items, id)
 	return nil
@@ -697,6 +839,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/relationships", h.Create)
 	r.Patch("/api/v1/relationships/{id}", h.Update)
 	r.Delete("/api/v1/relationships/{id}", h.Delete)
+	r.Get("/api/v1/relationship-suppressions", h.ListSuppressions)
+	r.Delete("/api/v1/relationship-suppressions/{id}", h.LiftSuppression)
 }
 
 // List handles GET /api/v1/cis/{id}/relationships
@@ -757,6 +901,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	source, validSource := CanonicalSource(req.Source)
 	if !validSource {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid source")
+		return
+	}
+	if SystemSources[source] {
+		// Discovery and agent edges come only from their paths (F-271).
+		writeViolations(w, violation{Field: "source", Detail: ErrSystemSource.Error()})
 		return
 	}
 	req.Source = source
@@ -833,18 +982,26 @@ type violation struct {
 // such endpoint (F-145). It reports whether err was one.
 func writeEndpointError(w http.ResponseWriter, err error) bool {
 	var violations []violation
-	var details []string
 	for _, end := range []struct {
 		field string
 		err   error
 	}{{"source_ci_id", ErrSourceCINotFound}, {"target_ci_id", ErrTargetCINotFound}} {
 		if errors.Is(err, end.err) {
 			violations = append(violations, violation{Field: end.field, Detail: end.err.Error()})
-			details = append(details, end.field+": "+end.err.Error())
 		}
 	}
 	if len(violations) == 0 {
 		return false
+	}
+	writeViolations(w, violations...)
+	return true
+}
+
+// writeViolations answers 422 with the rejected fields (ViolationProblem).
+func writeViolations(w http.ResponseWriter, violations ...violation) {
+	details := make([]string, 0, len(violations))
+	for _, v := range violations {
+		details = append(details, v.Field+": "+v.Detail)
 	}
 	api.WriteProblemBody(w, http.StatusUnprocessableEntity, struct {
 		api.ProblemDetail
@@ -854,7 +1011,6 @@ func writeEndpointError(w http.ResponseWriter, err error) bool {
 			Status: http.StatusUnprocessableEntity, Detail: strings.Join(details, "; ")},
 		Violations: violations,
 	})
-	return true
 }
 
 // validRelType resolves the rel_type against the metadata catalogue when
@@ -891,6 +1047,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid verification_state")
 		return
 	}
+	if _, reserved := req.Attributes[ProvenanceAttribute]; reserved {
+		// Actor and time of the edge are recorded by the system (F-270).
+		writeViolations(w, violation{Field: "attributes." + ProvenanceAttribute, Detail: ErrProvenanceReserved.Error()})
+		return
+	}
 
 	req.ActorID = t.UserID
 	rel, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
@@ -917,23 +1078,117 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	// A malformed id names no edge (404) and never reaches SQL.
+	id, ok := api.ParseUUIDParam(w, r, "id", "relationship not found")
+	if !ok {
+		return
+	}
+	// The reason of a suppression (F-273): optional for the API, the UI
+	// asks for it in its confirmation.
+	reason := strings.TrimSpace(r.URL.Query().Get("reason"))
+	if utf8.RuneCountInString(reason) > MaxSuppressionReason || strings.ContainsRune(reason, 0) {
+		writeViolations(w, violation{Field: "reason", Detail: errReason.Error()})
+		return
+	}
 	var err error
 	if deleter, ok := h.repo.(PolicyDeleter); ok {
 		// A discovery edge goes only with force and is then suppressed
 		// (REL-03, REL-04); manual edges are deleted as asked.
-		err = deleter.DeleteWithPolicy(r.Context(), t.OrganizationID, id, r.URL.Query().Get("force") == "true")
+		err = deleter.DeleteWithPolicy(r.Context(), t.OrganizationID, id, DeleteOptions{
+			Force: r.URL.Query().Get("force") == "true", Reason: reason, Actor: requestActor(r)})
 	} else {
 		err = h.repo.Delete(r.Context(), t.OrganizationID, id)
 	}
-	if errors.Is(err, ErrForceRequired) {
+	// Only an unknown or invisible edge is 404; a refused suppression names
+	// the type, other failures go through WriteRepoError (F-272).
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrForceRequired):
 		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
-		return
-	}
-	if err != nil {
+	case errors.Is(err, ErrSuppressionType):
+		writeViolations(w, violation{Field: "rel_type", Detail: ErrSuppressionType.Error()})
+	case errors.Is(err, api.ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", "relationship not found")
+	default:
+		api.WriteRepoError(w, err)
+	}
+}
+
+// errReason refuses a suppression reason that is too long or holds a NUL
+// character (422 on reason).
+var errReason = fmt.Errorf("the reason has at most %d characters and no NUL character", MaxSuppressionReason)
+
+// requestActor names the principal of the request as the actor of a
+// suppression change: its user id (none when the subject is no UUID) and
+// whether it is a user session or an API key.
+func requestActor(r *http.Request) Actor {
+	actor := Actor{ID: tenant.FromContext(r.Context()).UserID, Type: "user"}
+	if p, ok := identity.PrincipalFromContext(r.Context()); ok && p.Type == identity.PrincipalTypeAPIKey {
+		actor.Type = "api_key"
+	}
+	if !api.IsUUID(actor.ID) {
+		actor.ID = ""
+	}
+	return actor
+}
+
+// ListSuppressions handles GET /api/v1/relationship-suppressions: the
+// suppressions the caller sees (both CIs visible), with ci_id those of one
+// CI, newest first (F-273).
+func (h *Handler) ListSuppressions(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
+	ciID := r.URL.Query().Get("ci_id")
+	if ciID != "" && !api.IsUUID(ciID) {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "ci_id must be a UUID")
+		return
+	}
+	items, total := []Suppression{}, 0
+	if store, ok := h.repo.(SuppressionStore); ok {
+		var err error
+		if items, total, err = store.ListSuppressions(r.Context(), t.OrganizationID, ciID, page); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[Suppression]{
+		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total,
+	})
+}
 
-	w.WriteHeader(http.StatusNoContent)
+// LiftSuppression handles DELETE /api/v1/relationship-suppressions/{id}: the
+// suppression is deleted and audited (relationship.suppression_lifted), so
+// the next discovery cycle creates the edge again (F-273). 404 for a
+// suppression the caller does not find (unknown, another organization, a CI
+// outside the scope, malformed id).
+func (h *Handler) LiftSuppression(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", "suppression not found")
+	if !ok {
+		return
+	}
+	err := api.ErrNotFound
+	if store, ok := h.repo.(SuppressionStore); ok {
+		err = store.LiftSuppression(r.Context(), t.OrganizationID, id, requestActor(r))
+	}
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, api.ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "suppression not found")
+	default:
+		api.WriteRepoError(w, err)
+	}
 }

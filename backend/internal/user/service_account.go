@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -98,7 +99,10 @@ type ServiceAccountUpdate struct {
 // ServiceAccountRepository persists service accounts and resolves their
 // rights.
 type ServiceAccountRepository interface {
-	ListServiceAccounts(ctx context.Context, orgID string) ([]ServiceAccount, error)
+	// ListServiceAccounts returns a page newest first on (created_at, id),
+	// at most one account more than the limit, and the number of accounts
+	// (API-02, see api.NewestFirstSQL).
+	ListServiceAccounts(ctx context.Context, orgID string, page api.PaginationParams) ([]ServiceAccount, int, error)
 	GetServiceAccount(ctx context.Context, orgID, id string) (*ServiceAccount, error)
 	CreateServiceAccount(ctx context.Context, sa *ServiceAccount) error
 	UpdateServiceAccount(ctx context.Context, orgID, id string, req ServiceAccountUpdate) (*ServiceAccount, error)
@@ -261,10 +265,19 @@ func getServiceAccountTx(ctx context.Context, tx pgx.Tx, orgID, id string, lock 
 }
 
 // ListServiceAccounts implements ServiceAccountRepository.
-func (r *PGServiceAccounts) ListServiceAccounts(ctx context.Context, orgID string) ([]ServiceAccount, error) {
+func (r *PGServiceAccounts) ListServiceAccounts(ctx context.Context, orgID string, page api.PaginationParams) ([]ServiceAccount, int, error) {
 	out := []ServiceAccount{}
+	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT `+serviceAccountColumns+` FROM service_account WHERE organization_id = $1 ORDER BY name`, orgID)
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM service_account WHERE organization_id = $1`, orgID).Scan(&total); err != nil {
+			return fmt.Errorf("count service accounts: %w", err)
+		}
+		where, tail, args, err := api.NewestFirstSQL(page, 2)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT `+serviceAccountColumns+` FROM service_account WHERE organization_id = $1 AND `+where+` `+tail,
+			append([]any{orgID}, args...)...)
 		if err != nil {
 			return fmt.Errorf("list service accounts: %w", err)
 		}
@@ -289,7 +302,7 @@ func (r *PGServiceAccounts) ListServiceAccounts(ctx context.Context, orgID strin
 		}
 		return nil
 	})
-	return out, err
+	return out, total, err
 }
 
 // GetServiceAccount implements ServiceAccountRepository.
@@ -556,7 +569,7 @@ func (m *MemoryServiceAccounts) find(orgID, id string) *ServiceAccount {
 }
 
 // ListServiceAccounts implements ServiceAccountRepository.
-func (m *MemoryServiceAccounts) ListServiceAccounts(_ context.Context, orgID string) ([]ServiceAccount, error) {
+func (m *MemoryServiceAccounts) ListServiceAccounts(_ context.Context, orgID string, page api.PaginationParams) ([]ServiceAccount, int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := []ServiceAccount{}
@@ -565,7 +578,13 @@ func (m *MemoryServiceAccounts) ListServiceAccounts(_ context.Context, orgID str
 			out = append(out, *sa)
 		}
 	}
-	return out, nil
+	return api.NewestFirstSlice(out, page, serviceAccountPosition)
+}
+
+// serviceAccountPosition is the (created_at, id) position of a service
+// account in its list.
+func serviceAccountPosition(sa *ServiceAccount) (createdAt time.Time, id string) {
+	return sa.CreatedAt, sa.ID
 }
 
 // GetServiceAccount implements ServiceAccountRepository.

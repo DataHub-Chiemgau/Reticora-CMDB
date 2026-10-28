@@ -27,9 +27,13 @@ package server_test
 //     review.merge job and of a failed export job, readable with job:read,
 //     carries no database internals (jobs.ErrorMessage).
 //
+// WP-567 (CI-05, residual point of WP-643): TestReviewReactivationOfMergedCI
+// IsConflict, the reactivation of a CI merged into another answers 409
+// instead of 500.
+//
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed):
 //
-//	cd backend && TEST_DATABASE_URL=... go test -count=1 -run 'TestAuditReviewMerge|TestReviewMergeJobThroughRouter' ./internal/server/
+//	cd backend && TEST_DATABASE_URL=... go test -count=1 -run 'TestAuditReviewMerge|TestReviewMergeJobThroughRouter|TestReviewReactivation' ./internal/server/
 
 import (
 	"bytes"
@@ -292,6 +296,37 @@ func TestAuditReviewMergeIntoDeletedCandidateIsNotFound(t *testing.T) {
 		t.Errorf("review.merge job of the refused reactivation: status %q error %q, want failed with an error", job.Status, job.Error)
 	}
 	assertNoLeak(t, "error of the review.merge job", job.Error)
+}
+
+// TestReviewReactivationOfMergedCIIsConflict: merge of a resurrected_device
+// item whose CI was merged into another CI meanwhile answers 409
+// problem+json (the CI comes back only through the unmerge, CI-12) without
+// internals; the item stays open and the CI stays merged and deleted. Before
+// WP-567 the ci.ErrMergeConflict of the restore reached the client as 500.
+func TestReviewReactivationOfMergedCIIsConflict(t *testing.T) {
+	r := newAuditT3Router(t, "f6")
+	f := r.f
+	survivor := f.CI(t, f.OrgA, f.Client1, "wp567-review-survivor")
+	merged := f.CI(t, f.OrgA, f.Client1, "wp567-review-merged")
+	r.str(`UPDATE ci SET merged_into_id = $2, deleted_at = now(), status = 'decommissioned' WHERE id = $1 RETURNING id::text`, merged, survivor)
+	item := r.str(`INSERT INTO review_item (organization_id, kind, status, payload, candidate_ci_ids)
+		VALUES ($1, 'resurrected_device', 'open', jsonb_build_object('name', 'wp567-resurrected', 'management_ip', '10.55.4.20'), ARRAY[$2::uuid])
+		RETURNING id::text`, f.OrgA, merged)
+
+	w := r.call(identity.AllPermissions(), http.MethodPost, "/api/v1/review-items/"+item+"/resolve", `{"action":"merge","ci_id":"`+merged+`"}`)
+	if w.Code != http.StatusConflict {
+		t.Errorf("reactivation of a merged CI: %d %s, want 409", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/problem+json") {
+		t.Errorf("Content-Type %q, want application/problem+json", ct)
+	}
+	assertNoLeak(t, "response of the reactivation of a merged CI", w.Body.String())
+	if got := r.str(`SELECT status FROM review_item WHERE id = $1`, item); got != "open" {
+		t.Errorf("item after the refused reactivation: %s, want open", got)
+	}
+	if got := r.str(`SELECT (deleted_at IS NOT NULL AND merged_into_id IS NOT NULL)::text FROM ci WHERE id = $1`, merged); got != "true" {
+		t.Errorf("merged CI deleted and merged after the refused reactivation: %s, want true", got)
+	}
 }
 
 // TestAuditReviewMergeJobErrorIsSanitized: a merge whose effect the database

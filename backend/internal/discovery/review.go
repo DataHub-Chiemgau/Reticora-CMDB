@@ -252,6 +252,20 @@ func ciNotFound(err error) error {
 	return err
 }
 
+// restoreRefused refuses the reactivation of a resurrected_device item:
+// a CI merged into another comes back only through the unmerge (409, CI-12),
+// a CI that is not deleted (any more) or not visible is 404 like in
+// ciNotFound; the item stays open.
+func restoreRefused(err error) error {
+	switch {
+	case errors.Is(err, ci.ErrMergeConflict):
+		return refused(http.StatusConflict, "the chosen CI was merged into another; use the unmerge")
+	case errors.Is(err, ci.ErrNotDeleted):
+		return refused(http.StatusNotFound, "the chosen CI was not found")
+	}
+	return ciNotFound(err)
+}
+
 // resolveCIReview carries out merge, new and accept of the CI review types.
 func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
 	orgID := item.OrganizationID
@@ -274,7 +288,7 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 				return false, refused(http.StatusNotImplemented, "this repository cannot reactivate CIs")
 			}
 			if _, err := restorer.Restore(ctx, orgID, res.CIID); err != nil {
-				return false, ciNotFound(err)
+				return false, restoreRefused(err)
 			}
 			res.Note = "reactivated " + res.CIID
 		case ReviewKindProbableDuplicate:

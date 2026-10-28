@@ -20,6 +20,53 @@ const ci = {
   updated_at: '2026-01-02T00:00:00Z',
 };
 
+// The location tree of the CI (GET /locations/tree): site › building › room › rack.
+const SITE = '10c00000-0000-4000-8000-000000000001';
+const BUILDING = '10c00000-0000-4000-8000-000000000002';
+const ROOM = '10c00000-0000-4000-8000-000000000003';
+const RACK = '10c00000-0000-4000-8000-000000000004';
+const ASSET = 'a55e7000-0000-4000-8000-000000000001';
+
+function node(
+  id: string,
+  kind: string,
+  name: string,
+  parent: string | undefined,
+  children: unknown[],
+) {
+  return {
+    id,
+    organization_id: 'org-1',
+    client_id: 'client-1',
+    site_id: SITE,
+    ...(parent ? { parent_id: parent } : {}),
+    kind,
+    name,
+    path: id,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    children,
+  };
+}
+
+const locationTree = node(SITE, 'site', 'RZ Nord', undefined, [
+  node(BUILDING, 'building', 'Gebäude A', SITE, [
+    node(ROOM, 'room', 'Raum 1.01', BUILDING, [node(RACK, 'rack', 'Rack 07', ROOM, [])]),
+  ]),
+]);
+
+/** detailValue is the value cell next to the first label of the CI overview. */
+function detailValue(label: string): HTMLElement {
+  return screen.getAllByText(label, { selector: 'dt' })[0]!.nextElementSibling as HTMLElement;
+}
+
+/** assetCard is the card around the title of the asset card. */
+function assetCard(title: HTMLElement): HTMLElement {
+  let el: HTMLElement | null = title;
+  while (el && !el.querySelector('dl')) el = el.parentElement;
+  return el!;
+}
+
 function renderDetail() {
   return renderWithProviders(
     <Routes>
@@ -110,8 +157,8 @@ describe('CIDetailPage', () => {
     expect(screen.getByText(/"ports": 48/)).toBeInTheDocument();
   });
 
-  it('shows time and location and the unified history (CI-06)', async () => {
-    stubFetchRoutes({
+  it('shows time and location by name and the unified history (CI-06, DB-05, F-237)', async () => {
+    const fetchMock = stubFetchRoutes({
       '/history/ci/ci-1': {
         data: [
           {
@@ -119,7 +166,7 @@ describe('CIDetailPage', () => {
             entity_type: 'ci',
             entity_id: 'ci-1',
             change_type: 'ci.updated',
-            created_at: '2026-01-03T10:00:00Z',
+            created_at: '2026-01-03T12:00:00Z',
             source: 'audit',
           },
           {
@@ -128,36 +175,162 @@ describe('CIDetailPage', () => {
             entity_id: 'ci-1',
             change_type: 'update',
             field_name: 'name',
-            created_at: '2026-01-02T10:00:00Z',
+            created_at: '2026-01-02T12:00:00Z',
             source: 'ci_change',
-            site_id: 'site-1',
+            site_id: SITE,
+          },
+          {
+            id: 'c-2',
+            entity_type: 'ci',
+            entity_id: 'ci-1',
+            change_type: 'update',
+            change_kind: 'updated',
+            change_set_id: '5e700000-0000-4000-8000-000000000001',
+            field_changes: [{ field: 'location_id', old: ROOM, new: RACK }],
+            created_at: '2026-01-02T11:00:00Z',
+            source: 'ci_change',
+            site_id: SITE,
           },
         ],
-        total: 2,
+        total: 3,
         limit: 50,
         offset: 0,
         has_more: false,
       },
+      '/locations/tree': { data: [locationTree] },
       '/cis/ci-1/relationships': { data: [], total: 0, limit: 25, offset: 0, has_more: false },
       '/topology/cis/ci-1/neighbors': { nodes: [], edges: [] },
       '/cis/ci-1': {
         ...ci,
-        location_id: 'loc-1',
-        site_id: 'site-1',
-        first_seen_at: '2026-01-01T08:00:00Z',
+        location_id: RACK,
+        site_id: SITE,
+        room_id: ROOM,
+        first_seen_at: '2026-01-01T12:00:00Z',
       },
     });
 
     renderDetail();
 
     expect(await screen.findByRole('heading', { name: 'core-sw-01' })).toBeInTheDocument();
-    expect(screen.getByText('Site')).toBeInTheDocument();
-    expect(screen.getAllByText('site-1').length).toBeGreaterThan(0);
-    expect(screen.getByText('2026-01-01T08:00:00Z')).toBeInTheDocument();
+    // The location as its path from the site, site and room by name.
+    await waitFor(() =>
+      expect(detailValue('Standort')).toHaveTextContent(
+        'RZ Nord › Gebäude A › Raum 1.01 › Rack 07',
+      ),
+    );
+    expect(detailValue('Site')).toHaveTextContent(/^RZ Nord$/);
+    expect(detailValue('Raum')).toHaveTextContent(/^Raum 1\.01$/);
+    // Times in the locale format, not as ISO strings.
+    expect(detailValue('Zuerst gesehen')).toHaveTextContent(/^01\.01\.2026, \d{2}:\d{2}$/);
+    expect(detailValue('Erstellt')).toHaveTextContent(/^\d{2}\.\d{2}\.20\d{2}, \d{2}:\d{2}$/);
     const history = await screen.findByRole('list', { name: 'Historie' });
     expect(history).toHaveTextContent('update · name');
     expect(history).toHaveTextContent('Audit');
-    expect(history).toHaveTextContent('Site site-1');
+    await waitFor(() => expect(history).toHaveTextContent('Site RZ Nord'));
+    expect(history).toHaveTextContent(
+      'location_id: RZ Nord › Gebäude A › Raum 1.01 → RZ Nord › Gebäude A › Raum 1.01 › Rack 07',
+    );
+    const text = document.body.textContent ?? '';
+    for (const id of [SITE, BUILDING, ROOM, RACK]) expect(text).not.toContain(id);
+    expect(text).not.toContain('2026-01-01T12:00:00Z');
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/locations/tree'))).toBe(
+      true,
+    );
+
+    await act(async () => {
+      await i18n.changeLanguage('en-US');
+    });
+    await waitFor(() =>
+      expect(detailValue('First seen')).toHaveTextContent(/^Jan 1, 2026, \d{1,2}:\d{2}\s?[AP]M$/),
+    );
+    expect(detailValue('Location')).toHaveTextContent('RZ Nord › Gebäude A › Raum 1.01 › Rack 07');
+    await act(async () => {
+      await i18n.changeLanguage('de-DE');
+    });
+  });
+
+  it('shows the full asset card read-only with names and formatted dates (DB-05, AST-04, F-238)', async () => {
+    stubFetchRoutes({
+      '/locations/tree': { data: [locationTree] },
+      '/cis/ci-1/relationships': { data: [], total: 0, limit: 25, offset: 0, has_more: false },
+      '/topology/cis/ci-1/neighbors': { nodes: [], edges: [] },
+      '/cis/ci-1': {
+        ...ci,
+        serial_number: 'SN-OBSERVED',
+        location_id: RACK,
+        site_id: SITE,
+        room_id: ROOM,
+        asset_id: ASSET,
+        asset: {
+          id: ASSET,
+          asset_tag: 'INV-0042',
+          name: 'core-sw-01 hardware',
+          status: 'assigned',
+          serial_number: 'SN-ASSET-42',
+          location_id: RACK,
+          lifecycle_state: 'in_use',
+          rfid_tag: 'RFID-E200-42',
+          barcode: 'BC-4711',
+          purchase_date: '2025-03-15',
+          warranty_end: '2028-03-14',
+          supplier: 'Acme Distribution',
+          invoice_number: 'RE-2025-0815',
+        },
+      },
+    });
+
+    renderDetail();
+
+    const card = assetCard(await screen.findByText('Asset (kanonische Daten)'));
+    const value = (label: string) =>
+      within(card).getByText(label, { selector: 'dt' }).nextElementSibling as HTMLElement;
+    await waitFor(() =>
+      expect(value('Standort')).toHaveTextContent('RZ Nord › Gebäude A › Raum 1.01 › Rack 07'),
+    );
+    expect(value('Inventarnummer')).toHaveTextContent('INV-0042');
+    expect(value('Seriennummer')).toHaveTextContent('SN-ASSET-42');
+    expect(value('Physischer Lebenszyklus')).toHaveTextContent('in_use');
+    expect(value('RFID-Tag')).toHaveTextContent('RFID-E200-42');
+    expect(value('Barcode')).toHaveTextContent('BC-4711');
+    expect(value('Kaufdatum')).toHaveTextContent(/^15\.03\.2025$/);
+    expect(value('Garantieende')).toHaveTextContent(/^14\.03\.2028$/);
+    expect(value('Lieferant')).toHaveTextContent('Acme Distribution');
+    expect(value('Rechnungsnummer')).toHaveTextContent('RE-2025-0815');
+    // Read-only: the card has no input and no action.
+    expect(within(card).queryAllByRole('textbox')).toHaveLength(0);
+    expect(within(card).queryAllByRole('button')).toHaveLength(0);
+    // The overview names the observed serial number apart from the asset's.
+    expect(detailValue('Beobachtete Seriennummer')).toHaveTextContent('SN-OBSERVED');
+
+    await act(async () => {
+      await i18n.changeLanguage('en-US');
+    });
+    await waitFor(() => expect(value('Purchase date')).toHaveTextContent(/^Mar 15, 2025$/));
+    expect(value('Warranty end')).toHaveTextContent(/^Mar 14, 2028$/);
+    expect(value('RFID tag')).toHaveTextContent('RFID-E200-42');
+    expect(value('Invoice number')).toHaveTextContent('RE-2025-0815');
+    await act(async () => {
+      await i18n.changeLanguage('de-DE');
+    });
+  });
+
+  it('does not read the location tree for a CI without a location', async () => {
+    const fetchMock = stubFetchRoutes({
+      '/cis/ci-1/relationships': { data: [], total: 0, limit: 25, offset: 0, has_more: false },
+      '/topology/cis/ci-1/neighbors': { nodes: [], edges: [] },
+      '/cis/ci-1': ci,
+    });
+
+    renderDetail();
+
+    expect(await screen.findByRole('heading', { name: 'core-sw-01' })).toBeInTheDocument();
+    expect(detailValue('Standort')).toHaveTextContent(/^—$/);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/locations/tree'))).toBe(
+      false,
+    );
   });
 
   it('shows an error state with a retry action when the CI cannot be loaded', async () => {

@@ -417,14 +417,19 @@ func TestHandler_ListFilter(t *testing.T) {
 }
 
 // TestHandler_IncludeAndRestore covers API-05 and CI-05: GET /cis/{id}
-// embeds the requested related collections (unknown names are 422), and a
-// deleted CI is restored within the retention (later: 410; not deleted:
+// embeds the requested related collections (unknown names are 422; a
+// capped one is named in truncated, F-223), and a deleted CI is restored
+// within the retention (later: 410; not deleted: 409, WP-567; unknown:
 // 404).
 func TestHandler_IncludeAndRestore(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(NewService(repo)).WithIncludes(map[string]IncludeFunc{
-		"relationships": func(_ context.Context, orgID, ciID string) (any, error) {
-			return []map[string]string{{"source_ci_id": ciID, "organization_id": orgID}}, nil
+		"relationships": func(_ context.Context, orgID, ciID string) (any, bool, error) {
+			return []map[string]string{{"source_ci_id": ciID, "organization_id": orgID}}, false, nil
+		},
+		// contacts stands for a collection the server capped (F-223).
+		"contacts": func(_ context.Context, _, ciID string) (any, bool, error) {
+			return []map[string]string{{"ci_id": ciID}}, true, nil
 		},
 	})
 	mux := chi.NewRouter()
@@ -446,12 +451,27 @@ func TestHandler_IncludeAndRestore(t *testing.T) {
 	if !bytes.Contains(got["relationships"], []byte(item.ID)) || string(got["asset"]) != "null" || string(got["name"]) != `"inc-1"` {
 		t.Errorf("include body %s", w.Body.String())
 	}
+	if capped, ok := got[IncludeTruncated]; ok {
+		t.Errorf("include of complete collections: truncated %s, want absent", capped)
+	}
+	// A capped collection is named in truncated, the complete one not.
+	w = call("GET", "/api/v1/cis/"+item.ID+"?include=relationships,contacts", "")
+	got = nil
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("include with a capped collection: %d %s", w.Code, w.Body.String())
+	}
+	if string(got[IncludeTruncated]) != `{"contacts":true}` || !bytes.Contains(got["contacts"], []byte(item.ID)) {
+		t.Errorf("include with a capped collection: %s, want truncated {\"contacts\":true}", w.Body.String())
+	}
 	if w = call("GET", "/api/v1/cis/"+item.ID+"?include=secrets", ""); w.Code != http.StatusUnprocessableEntity {
 		t.Errorf("unknown include: %d", w.Code)
 	}
 
-	if w = call("POST", "/api/v1/cis/"+item.ID+"/restore", ""); w.Code != http.StatusNotFound {
-		t.Errorf("restore of a live CI: %d", w.Code)
+	if w = call("POST", "/api/v1/cis/"+item.ID+"/restore", ""); w.Code != http.StatusConflict {
+		t.Errorf("restore of a live CI: %d, want 409", w.Code)
+	}
+	if w = call("POST", "/api/v1/cis/00000000-0000-4000-8000-0000000005a7/restore", ""); w.Code != http.StatusNotFound {
+		t.Errorf("restore of an unknown CI: %d, want 404", w.Code)
 	}
 	if w = call("DELETE", "/api/v1/cis/"+item.ID, ""); w.Code != http.StatusNoContent && w.Code != http.StatusOK {
 		t.Fatalf("delete: %d", w.Code)

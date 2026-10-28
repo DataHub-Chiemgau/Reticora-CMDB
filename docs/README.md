@@ -380,7 +380,11 @@ no data: only new CIs are blocked (REST) or held (ingest). Repository errors
 deny access (fail-closed). The tenant API is read-only (`GET
 /api/v1/entitlements`); entitlements are written by the operator only,
 `POST /api/v1/admin/orgs/{id}/entitlements`, and every change is recorded
-in `operator_audit` with the previous and the new state (ENT-04, E-12).
+in `operator_audit` with the previous and the new state, in the same
+transaction: without its entry the change is rolled back (500) (ENT-04,
+E-12). Only the feature keys of ENT-02, the module keys and the add-ons and
+the quotas `max_cis`, `max_collectors`, `max_users`, `max_api_keys` are
+accepted; any other key is 422 with the field.
 Attribute rules use the JSON rule AST of `api/rules.schema.json` (MET-45,
 phase 1: required, pattern, range, enum, combined with all).
 `backend/internal/rules` evaluates them bindingly, `frontend/src/rules` for
@@ -754,6 +758,34 @@ by `POST /api/v1/search/reindex`, which rebuilds the tenant's search index
 - `collector` — On-premise discovery collector.
 - `agent` — Endpoint agent for server/client telemetry.
 
+#### GraphQL-BFF
+
+`POST /bff/graphql` (`backend/internal/graphqlbff`, GQL-01/GQL-02) is a
+read-only GraphQL backend-for-frontend: it answers session principals only
+(API keys and service tokens use the REST API), is not part of the public
+REST contract, and every resolver checks its read permission and
+entitlement and reads through the tenant-scoped repositories (RLS).
+
+**API-only for now (GQL-01, F-332):** in phase 1 no page of the web UI uses
+the BFF; every UI read goes through the REST API. The client
+`bffQuery` (`frontend/src/api/client.ts`) is the prepared entry point and
+stays covered by `client.test.ts`. The UI starts to use the BFF with its
+first aggregate view (e.g. the CI detail with relationships and topology,
+phase 2); until then the BFF serves API clients with a session.
+
+**Limits (SEC-10, E-16 provisional):** depth 10, a complexity budget of
+5,000 and a deadline of 10 s per request. A list costs its selection times
+the size it may reach: `cis`, `searchEverything`, `reviewInbox` and `jobs`
+their page (`first`, default 50, at most 100), `relationships` its page
+(at most 100), `rackLayout` 100.
+`topology` costs its selection per node it may hold (F-333): without a root
+2,000 (`MaxTopologyNodes`), from a root the CIs a walk of `depth` hops
+reaches at 10 edges per CI (the NFR-01 volumes: 100,000 relationships for
+10,000 objects), i.e. 11 at depth 1, 111 at the default depth 2, 1,111 at
+depth 3 and 2,000 from depth 4. A topology without a root therefore selects
+about one field per node or edge (`{ topology { nodes { id } } }`); larger
+selections need a root or the REST endpoint `GET /api/v1/topology`.
+
 ### Frontend Tech-Stack
 
 The frontend is a **React 19 SPA** built with TypeScript and Vite.
@@ -954,17 +986,17 @@ The server is configured via environment variables:
   serving any request and **refuses to start** if the effective role can still
   bypass RLS. Set this only when the login role is already restricted; setting it
   to an empty value disables the role switch but not the startup check.
-- `RETICORA_NATS_URL` — NATS server URL.
+- `RETICORA_NATS_URL` — NATS server URL. Required with `RETICORA_ENVIRONMENT=production`: the server refuses to start without it, because only the NATS ingest queue takes the identity locks that keep several instances from duplicating devices with a weak identity (F-282). Development and staging start without it (ingest in the request, without identity locks) and log a configuration warning. See [`docs/betrieb/ingest-spuren.md`](betrieb/ingest-spuren.md).
 - `RETICORA_INGEST_LANES` — parallel ingest lanes per organization (default `4`, `1`–`16`, the same on every instance; `1` is the serial ingest of the releases before WP-334). See [`docs/betrieb/ingest-spuren.md`](betrieb/ingest-spuren.md).
 - `RETICORA_REDIS_URL` — Redis connection string.
-- `RETICORA_ENVIRONMENT` — Environment name (development/staging/production).
+- `RETICORA_ENVIRONMENT` — Environment name (development/staging/production). The collector reads the same variable: it accepts `RETICORA_SIMULATE=true` (simulated device fleet, SIM-02) only with `development` or `test` (case-insensitive) and exits with code 1 and `collector.simulate.refused` for any other value, including an unset or empty one (F-276).
 - `RETICORA_DEFAULT_PLAN` — Plan provisioned for the `--no-db` demo organization (default `essential`); organizations in the database are provisioned with their own plan.
 - `RETICORA_SIGNUP_VERIFY_URL` — page the self-signup verification link opens; the token is appended as `?token=` (TLC-01). Self-signup also needs `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` / `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET` (a confidential client of the realm in `RETICORA_OIDC_ISSUER_URL` whose service account holds `realm-management/manage-users`) and the central SMTP server (`RETICORA_SMTP_*`); until all exist, `POST /api/v1/signup` answers 503.
 - `RETICORA_KEYCLOAK_INTERNAL_URL` — optional base URL (`http(s)://host[:port]`) under which the server reaches Keycloak directly; the Keycloak admin client (signup, invitations, MFA binding) then sends its requests there with the public issuer host in `Host`/`X-Forwarded-*`, because the public reverse proxy does not expose `/admin/`. The compose stack sets `http://keycloak:8080`; empty means the issuer host.
 - `RETICORA_INVITATION_ACCEPT_URL` — page the link of the invitation mail opens; the token is appended as `?token=` (TLC-03, NTF-05). An absolute `http` or `https` URL (`http` is accepted in production for the HTTP default path); development defaults to `http://localhost:5173/invitations/accept`, Docker Compose derives it from `RETICORA_PUBLIC_BASE_URL`. Without it `POST /api/v1/invitations` and `/invitations/{id}/renew` answer 503. The mail goes over the organization's e-mail channels only; webhook deliveries of `invitation.created` leave out the link.
 - `RETICORA_MASTER_KEY_PREVIOUS` — master keys being rotated out (comma-separated, SEC-06): their data keys stay readable until the nightly `rotation.master_key` run has rewrapped them with `RETICORA_MASTER_KEY`; then remove them (see [`docs/ops/workers.md`](ops/workers.md)).
 - `RETICORA_SMTP_HOST`, `RETICORA_SMTP_PORT` (587), `RETICORA_SMTP_USERNAME`, `RETICORA_SMTP_PASSWORD`, `RETICORA_SMTP_FROM`, `RETICORA_SMTP_TLS` (`starttls` default, `tls`, `none`) — the central SMTP server of the installation (TEC-13): verification e-mails of the self-signup and the `central_smtp` notification channels, which send with the organization as sender name; DKIM and SPF are set up for the sender domain at the relay. Organizations of dedicated, on-premises and air-gapped installations configure their own server as an `smtp` channel; its credentials are stored encrypted (NTF-01).
-- `RETICORA_SIGNUP_CAPTCHA_KEY` — HMAC key (at least 32 characters, the same on every instance) that signs the self-hosted ALTCHA challenges of `GET /api/v1/signup/challenge` (E-33); without it each instance draws a random key, so challenges verify only where they were issued. Signups additionally pass the pre-auth limit, at most 5 signups per client IP and hour (shared cache) and the disposable-domain blocklist (`backend/internal/signup/disposable/`, updated monthly by the *Disposable domains* workflow).
+- `RETICORA_SIGNUP_CAPTCHA_KEY` — HMAC key (at least 32 characters, the same on every instance) that signs the self-hosted ALTCHA challenges of `GET /api/v1/signup/challenge` (E-33); without it each instance draws a random key, so challenges verify only where they were issued. Signups additionally pass the pre-auth limit, at most 5 signups per client IP in any hour (sliding window in the shared cache, so it holds across replicas; Retry-After names the time until the oldest of them leaves the hour) and the disposable-domain blocklist (`backend/internal/signup/disposable/`, updated monthly by the *Disposable domains* workflow).
 - `RETICORA_SIGNUP_BLOCKED_DOMAINS`, `RETICORA_SIGNUP_ALLOWED_DOMAINS` — comma-separated operator entries that extend the disposable-domain blocklist and allowlist; a domain covers its subdomains, the allowlist wins.
 - `RETICORA_TRIAL_PLAN`, `RETICORA_TRIAL_DAYS`, `RETICORA_TRIAL_MAX_CIS` — trial of a self-signed-up organization (ENT-07, defaults `standard`, `30`, `100`); features the `essential` plan lacks expire at the trial's end.
 - `RETICORA_ENTITLEMENT_ENFORCEMENT` — Set to `false` to disable feature/limit enforcement (default `true`).

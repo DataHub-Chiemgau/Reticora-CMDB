@@ -96,11 +96,14 @@ var smtpPorts = map[int]bool{25: true, 465: true, 587: true}
 const allowPrivate = "RETICORA_EGRESS_ALLOW_PRIVATE=true"
 
 // DestinationError rejects the server of an organization's own SMTP
-// channel under the egress policy (SEC-08): the request field and the
-// reason, which wraps egress.ErrBlockedDestination.
+// channel or the url of a webhook channel under the egress policy
+// (SEC-08): the request field and the reason, which wraps
+// egress.ErrBlockedDestination.
 type DestinationError struct {
 	Field string
 	Err   error
+	// Status is the HTTP status; zero means 422.
+	Status int
 }
 
 func (e *DestinationError) Error() string { return e.Err.Error() }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
@@ -6,6 +6,7 @@ import type { CI, CICreateRequest, CIUpdateRequest } from '../api/client';
 import { localizedText } from '../api/cmdb';
 import { useCIType, useCITypes } from '../api/cmdbHooks';
 import { useCreateCI, useUpdateCI } from '../api/hooks';
+import { useLocationNames } from '../components/cmdb/CIDetailSections';
 import { DynamicForm, validateAll } from '../components/form/DynamicForm';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -69,6 +70,13 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
   const createMutation = useCreateCI();
   const updateMutation = useUpdateCI();
   const isEditMode = Boolean(ci);
+  // A CI linked to an asset takes serial number and location from the asset
+  // (DB-05, AST-04): the dialog shows them read-only and never sends them,
+  // the server would refuse them with 422 (F-238).
+  const assetManaged = isEditMode && !!ci?.asset_id;
+  const assetLocation = ci?.asset?.location_id || ci?.location_id;
+  const locations = useLocationNames(open && assetManaged && !!assetLocation);
+  const assetHintId = useId();
   const [values, setValues] = useState<CIFormValues>(() => toFormValues(ci));
   const [errors, setErrors] = useState<Partial<Record<keyof CIFormValues, string>>>({});
   const [attributes, setAttributes] = useState<Record<string, unknown>>(() => ci?.attributes ?? {});
@@ -206,6 +214,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
     if (name !== (ci?.name ?? '')) payload.name = name;
     if (values.status !== (ci?.status ?? '')) payload.status = values.status;
     for (const key of optionalFields) {
+      if (assetManaged && key === 'serial_number') continue;
       const next = optionalValue(values[key]);
       if (next !== optionalValue(ci?.[key] ?? '')) payload[key] = next ?? null;
     }
@@ -326,12 +335,26 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
             onChange={(event) => setValue('model', event.target.value)}
             error={fieldErrors.model}
           />
-          <Input
-            label={t('form.fields.serialNumber')}
-            value={values.serial_number}
-            onChange={(event) => setValue('serial_number', event.target.value)}
-            error={fieldErrors.serial_number}
-          />
+          {assetManaged ? (
+            <div className="space-y-1">
+              <Input
+                label={t('form.fields.serialNumber')}
+                value={ci?.asset ? (ci.asset.serial_number ?? '') : values.serial_number}
+                disabled
+                aria-describedby={`${assetHintId}-serial`}
+              />
+              <p id={`${assetHintId}-serial`} className="text-xs text-gray-500 dark:text-gray-400">
+                {t('form.assetManaged')}
+              </p>
+            </div>
+          ) : (
+            <Input
+              label={t('form.fields.serialNumber')}
+              value={values.serial_number}
+              onChange={(event) => setValue('serial_number', event.target.value)}
+              error={fieldErrors.serial_number}
+            />
+          )}
           <Input
             label={t('form.fields.managementIp')}
             value={values.management_ip}
@@ -345,6 +368,22 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
             error={fieldErrors.firmware_version}
             className="sm:col-span-2"
           />
+          {assetManaged ? (
+            <div className="space-y-1 sm:col-span-2">
+              <Input
+                label={t('form.fields.location')}
+                value={locations.path(assetLocation) ?? ''}
+                disabled
+                aria-describedby={`${assetHintId}-location`}
+              />
+              <p
+                id={`${assetHintId}-location`}
+                className="text-xs text-gray-500 dark:text-gray-400"
+              >
+                {t('form.assetManaged')}
+              </p>
+            </div>
+          ) : null}
         </div>
 
         {typeFields.length > 0 ? (

@@ -354,8 +354,11 @@ const SystemGUC = "app.system"
 // webhook_dead_letter, export_job, alert_rule, collector_enrollment_code,
 // api_key) and the system tables (platform_secret, WithSystemWrite)
 // return rows. Workers use it to find due work and then change rows per
-// organization in WithTenant (E-08). Every caller is listed in the
-// allow-list of the architecture test (WP-041).
+// organization in WithTenant (E-08). Every file outside this package that
+// calls it is listed with its reason in withSystemCallers
+// (tenantguard_allowlist.go); TestWithSystemCallersAreListed fails for an
+// unlisted file, a stale entry and an empty reason (WP-561). Test files
+// may call it.
 func WithSystem(ctx context.Context, pool *pgxpool.Pool, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
@@ -467,6 +470,26 @@ func WithOrganizationSetup(ctx context.Context, pool *pgxpool.Pool, orgID string
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// WithOperatorTenant runs fn in a new transaction of the context's tenant
+// scope (WithRequestTenant, orgID its organization) in which the operator
+// flag is set as well: an operator's change to the organization and its
+// operator_audit entry commit or roll back together (SEC-07, WP-564). The
+// repositories fn calls with its context join the transaction
+// (ContextWithTx). Like WithOrganizationSetup it reaches the operator tables
+// and this one organization, no other. A transaction in ctx is never
+// joined: the flag is set only in a transaction opened here.
+func WithOperatorTenant(ctx context.Context, pool *pgxpool.Pool, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	if ctx.Value(txKey{}) != nil {
+		return ErrTxNotJoinable
+	}
+	return WithRequestTenant(ctx, pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('`+OperatorGUC+`', 'on', true)`); err != nil {
+			return fmt.Errorf("set operator context: %w", err)
+		}
+		return fn(ContextWithTx(ctx, tx), tx)
+	})
 }
 
 // OrganizationIDs lists the ids of all organizations for workers that iterate

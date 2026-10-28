@@ -214,7 +214,8 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 	}
 	if req.LastSeenAt != nil {
 		t, err := time.Parse(time.RFC3339, *req.LastSeenAt)
-		if err == nil {
+		// A sighting keeps the later time, like the PostgreSQL repository.
+		if err == nil && (req.Manual != nil || item.LastSeenAt == nil || t.After(*item.LastSeenAt)) {
 			item.LastSeenAt = &t
 		}
 	}
@@ -248,8 +249,11 @@ func (r *MemoryRepository) RestoreDeleted(_ context.Context, orgID, id string, r
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	item, ok := r.items[id]
-	if !ok || item.OrganizationID != orgID || item.DeletedAt == nil {
+	if !ok || item.OrganizationID != orgID {
 		return nil, ErrNotFound
+	}
+	if item.DeletedAt == nil {
+		return nil, ErrNotDeleted
 	}
 	if time.Since(*item.DeletedAt) > retention {
 		return nil, ErrRetentionExpired

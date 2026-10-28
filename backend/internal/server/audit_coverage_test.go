@@ -450,6 +450,7 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"POST /api/v1/cis/{id}/unmerge":                    {"/api/v1/cis/<ci4>/unmerge", `{}`},
 	"PATCH /api/v1/relationship-types/{key}":           {"/api/v1/relationship-types/a5_rel", `{"display_name":"a5 rel renamed"}`},
 	"DELETE /api/v1/relationship-types/{key}":          {"/api/v1/relationship-types/a5_rel", ""},
+	"DELETE /api/v1/relationship-suppressions/{id}":    {"/api/v1/relationship-suppressions/<suppression>", ""},
 	"POST /api/v1/workflows/{id}/runs":                 {"", `{"trigger":{"event":"ci.created"},"context":{}}`},
 	"PATCH /api/v1/cis/{id}":                           {"", `{"name":"a5-ci-renamed"}`},
 	"POST /api/v1/cis/bulk":                            {"", `{"ids":["<ci2>"],"status":"maintenance"}`},
@@ -557,6 +558,14 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	if _, err = f.Admin.Exec(bg, `UPDATE ci SET deleted_at = now() WHERE id = $1`, fixed["<ci5>"]); err != nil {
 		t.Fatal(err)
 	}
+	// A suppression for DELETE /relationship-suppressions/{id} (F-273).
+	var suppression string
+	if err = f.Admin.QueryRow(bg, `INSERT INTO relationship_suppression (organization_id, source_ci_id, target_ci_id, relationship_type_id)
+		SELECT $1, $2, $3, id FROM relationship_type WHERE key = 'connected_to' AND organization_id IS NULL RETURNING id::text`,
+		f.OrgA, f.CI(t, f.OrgA, f.Client1, "a5-suppressed-src"), f.CI(t, f.OrgA, f.Client1, "a5-suppressed-dst")).Scan(&suppression); err != nil {
+		t.Fatal(err)
+	}
+	fixed["<suppression>"] = suppression
 	ids := map[string]string{}
 	fill := func(s string) string {
 		for k, v := range fixed {

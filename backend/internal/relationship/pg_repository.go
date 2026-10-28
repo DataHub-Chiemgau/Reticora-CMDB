@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
@@ -325,7 +326,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		args := []any{id, orgID}
 		pos := 3
 		if req.Attributes != nil {
-			sets = append(sets, fmt.Sprintf("attributes = COALESCE(attributes, '{}'::jsonb) || $%d", pos))
+			// The stored provenance stays: actor and time of the edge are
+			// recorded by the system (REL-08, F-270).
+			sets = append(sets, fmt.Sprintf("attributes = COALESCE(attributes, '{}'::jsonb) || ($%d::jsonb - '%s')", pos, ProvenanceAttribute))
 			args = append(args, req.Attributes)
 			pos++
 		}
@@ -379,7 +382,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		deleted, err := scanRelationship(tx.QueryRow(ctx, "DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2 AND "+
 			visibleEndpoints+" RETURNING "+relationshipSelectColumns, id, orgID))
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("not found")
+			return api.ErrNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("delete relationship: %w", err)
@@ -390,20 +393,22 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 
 // DeleteWithPolicy implements PolicyDeleter: a discovery edge is deleted
 // only with force and then recorded in relationship_suppression for its
-// CIs and type, so discovery does not recreate it (REL-03, REL-04); other
+// CIs and type, with the actor and the reason, so discovery does not
+// recreate it (REL-03, REL-04); the new suppression is audited
+// (relationship.suppression_created, F-273) in the same transaction. Other
 // edges are deleted as asked.
-func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, force bool) error {
+func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, opts DeleteOptions) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		edge, err := scanRelationship(tx.QueryRow(ctx, `SELECT `+relationshipSelectColumns+` FROM ci_relationship
 			WHERE id = $1 AND organization_id = $2 AND `+visibleEndpoints+` FOR UPDATE`, id, orgID))
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("not found")
+			return api.ErrNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("delete relationship: %w", err)
 		}
 		source, relType, src, dst := edge.Source, edge.RelType, edge.SourceCIID, edge.TargetCIID
-		if source == "discovery" && !force {
+		if source == "discovery" && !opts.Force {
 			return ErrForceRequired
 		}
 		if _, err = tx.Exec(ctx, `DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2`, id, orgID); err != nil {
@@ -412,28 +417,142 @@ func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, f
 		if source != "discovery" {
 			return r.recordEvent(ctx, tx, events.RelationshipRemoved, edge)
 		}
-		tag, err := tx.Exec(ctx, `INSERT INTO relationship_suppression (organization_id, source_ci_id, target_ci_id, relationship_type_id)
-			SELECT $1, $2, $3, rt.id FROM relationship_type rt
+		// created_by is the acting user of the organization (none for a
+		// principal without user, read under RLS like verified_by).
+		var suppressionID, createdBy string
+		err = tx.QueryRow(ctx, `INSERT INTO relationship_suppression (organization_id, source_ci_id, target_ci_id, relationship_type_id,
+				created_by, reason)
+			SELECT $1, $2, $3, rt.id, (SELECT u.id FROM app_user u WHERE u.id::text = $5::text AND u.organization_id = $1), NULLIF($6::text, '')
+			FROM relationship_type rt
 			WHERE rt.key = $4 AND (rt.organization_id = $1 OR rt.organization_id IS NULL)
 			ORDER BY rt.organization_id NULLS LAST LIMIT 1
-			ON CONFLICT (organization_id, source_ci_id, target_ci_id, relationship_type_id) DO NOTHING`, orgID, src, dst, relType)
-		if err != nil {
-			return fmt.Errorf("suppress relationship: %w", err)
-		}
-		if tag.RowsAffected() == 0 {
+			ON CONFLICT (organization_id, source_ci_id, target_ci_id, relationship_type_id) DO NOTHING
+			RETURNING id::text, COALESCE(created_by::text, '')`, orgID, src, dst, relType, opts.Actor.ID, opts.Reason).
+			Scan(&suppressionID, &createdBy)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
 			// The type has no relationship_type row, or the edge was
 			// suppressed already; without a row the deletion would not
-			// stick, so it is refused.
+			// stick, so it is refused (ErrSuppressionType, 422).
 			var exists bool
 			if qerr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM relationship_suppression s JOIN relationship_type rt ON rt.id = s.relationship_type_id
 				WHERE s.organization_id = $1 AND s.source_ci_id = $2 AND s.target_ci_id = $3 AND rt.key = $4)`, orgID, src, dst, relType).Scan(&exists); qerr != nil {
-				return qerr
+				return fmt.Errorf("suppress relationship: %w", qerr)
 			}
 			if !exists {
-				return fmt.Errorf("suppress relationship: unknown relationship type %q", relType)
+				return fmt.Errorf("suppress relationship %q: %w", relType, ErrSuppressionType)
+			}
+		case err != nil:
+			return fmt.Errorf("suppress relationship: %w", err)
+		default:
+			changes := map[string]any{"relationship_id": edge.ID, "source_ci_id": src, "target_ci_id": dst, "rel_type": relType,
+				"relationship_source": source}
+			if opts.Reason != "" {
+				changes["reason"] = opts.Reason
+			}
+			if createdBy != "" {
+				changes["created_by"] = createdBy
+			}
+			if auditErr := recordSuppressionAudit(ctx, tx, orgID, ActionSuppressionCreated, suppressionID, opts.Actor, changes); auditErr != nil {
+				return auditErr
 			}
 		}
 		return r.recordEvent(ctx, tx, events.RelationshipRemoved, edge)
+	})
+}
+
+// recordSuppressionAudit appends the audit entry of a suppression change
+// (F-273) in tx: who (the actor), what (action, the suppression) and its
+// values. The entry of the request makes the route audit write none of its
+// own; for the forced deletion it names the deleted edge as well.
+func recordSuppressionAudit(ctx context.Context, tx pgx.Tx, orgID, action, suppressionID string, actor Actor, changes map[string]any) error {
+	actorType := actor.Type
+	if actorType == "" {
+		actorType = "user"
+	}
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+		OrganizationID: orgID, ActorID: actor.ID, ActorType: actorType, Action: action,
+		ResourceType: "relationship_suppression", ResourceID: suppressionID, Changes: changes,
+	}); err != nil {
+		return fmt.Errorf("audit %s: %w", action, err)
+	}
+	return nil
+}
+
+// suppressionVisible restricts relationship_suppression rows (alias s) to
+// those whose source and target CI are both visible under the transaction's
+// tenant scope, like visibleEndpoints for edges.
+const suppressionVisible = `EXISTS (SELECT 1 FROM ci WHERE ci.id = s.source_ci_id)
+	AND EXISTS (SELECT 1 FROM ci WHERE ci.id = s.target_ci_id)`
+
+// ListSuppressions implements SuppressionStore under the caller's full
+// tenant scope (RLS on relationship_suppression and ci).
+func (r *PGRepository) ListSuppressions(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Suppression, int, error) {
+	items := make([]Suppression, 0)
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		where := `s.organization_id = $1 AND ` + suppressionVisible
+		args := []any{orgID}
+		if ciID != "" {
+			where += ` AND (s.source_ci_id = $2::uuid OR s.target_ci_id = $2::uuid)`
+			args = append(args, ciID)
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM relationship_suppression s WHERE `+where, args...).Scan(&total); err != nil {
+			return fmt.Errorf("count suppressions: %w", err)
+		}
+		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT s.id::text, s.organization_id::text, s.source_ci_id::text, s.target_ci_id::text,
+				COALESCE(rt.key, ''), COALESCE(s.reason, ''), COALESCE(s.created_by::text, ''), s.created_at
+			FROM relationship_suppression s LEFT JOIN relationship_type rt ON rt.id = s.relationship_type_id
+			WHERE %s ORDER BY s.created_at DESC, s.id LIMIT $%d OFFSET $%d`, where, len(args)+1, len(args)+2),
+			append(args, page.Limit, page.Offset)...)
+		if err != nil {
+			return fmt.Errorf("list suppressions: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var s Suppression
+			var createdAt time.Time
+			if err := rows.Scan(&s.ID, &s.OrganizationID, &s.SourceCIID, &s.TargetCIID, &s.RelType, &s.Reason, &s.CreatedBy, &createdAt); err != nil {
+				return fmt.Errorf("scan suppression: %w", err)
+			}
+			s.CreatedAt = formatTime(&createdAt)
+			items = append(items, s)
+		}
+		return rows.Err()
+	})
+	return items, total, err
+}
+
+// LiftSuppression implements SuppressionStore: the suppression is deleted
+// under the caller's full tenant scope and audited
+// (relationship.suppression_lifted) in the same transaction.
+func (r *PGRepository) LiftSuppression(ctx context.Context, orgID, id string, actor Actor) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var src, dst, relType, reason, createdBy string
+		var createdAt time.Time
+		err := tx.QueryRow(ctx, `WITH lifted AS (
+				DELETE FROM relationship_suppression s WHERE s.id = $1 AND s.organization_id = $2 AND `+suppressionVisible+`
+				RETURNING s.source_ci_id, s.target_ci_id, s.relationship_type_id, s.reason, s.created_by, s.created_at
+			)
+			SELECT l.source_ci_id::text, l.target_ci_id::text, COALESCE(rt.key, ''), COALESCE(l.reason, ''),
+				COALESCE(l.created_by::text, ''), l.created_at
+			FROM lifted l LEFT JOIN relationship_type rt ON rt.id = l.relationship_type_id`, id, orgID).
+			Scan(&src, &dst, &relType, &reason, &createdBy, &createdAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("lift suppression: %w", err)
+		}
+		changes := map[string]any{"source_ci_id": src, "target_ci_id": dst, "rel_type": relType,
+			"suppressed_at": formatTime(&createdAt)}
+		if reason != "" {
+			changes["reason"] = reason
+		}
+		if createdBy != "" {
+			changes["created_by"] = createdBy
+		}
+		return recordSuppressionAudit(ctx, tx, orgID, ActionSuppressionLifted, id, actor, changes)
 	})
 }
 

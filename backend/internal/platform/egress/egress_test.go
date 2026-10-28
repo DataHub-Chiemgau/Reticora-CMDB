@@ -79,6 +79,59 @@ func TestAllowed(t *testing.T) {
 	}
 }
 
+// TestAllowedIPv6TransitionAddresses covers WP-563 (SEC-08, F-205): 6to4
+// (2002::/16), Teredo (2001::/32) and IPv4-compatible (::/96) addresses
+// are judged by the IPv4 address they embed (Teredo: server and inverted
+// client), like NAT64 and IPv4-mapped ones; a resolved name with such an
+// address is refused when dialed. Public IPv6 addresses stay allowed.
+func TestAllowedIPv6TransitionAddresses(t *testing.T) {
+	strict, onPrem := Options{}, Options{AllowPrivate: true}
+	for _, c := range []struct {
+		ip, what       string
+		strict, onPrem bool
+	}{
+		{"2002:7f00:1::1", "6to4 of 127.0.0.1", false, true},
+		{"2002:a9fe:a9fe::1", "6to4 of the metadata service", false, false},
+		{"2002:a00:5::1", "6to4 of 10.0.0.5", false, true},
+		{"2002:5db8:d822::1", "6to4 of 93.184.216.34", true, true},
+		{"2001:0:4136:e378:8000:63bf:80ff:fffe", "Teredo, client 127.0.0.1", false, true},
+		{"2001:0:4136:e378:8000:63bf:5601:5601", "Teredo, client 169.254.169.254", false, false},
+		{"2001:0:7f00:1:8000:63bf:a247:27dd", "Teredo, server 127.0.0.1", false, true},
+		{"2001:0:4136:e378:8000:63bf:a247:27dd", "Teredo, server 65.54.227.120, client 93.184.216.34", true, true},
+		{"::127.0.0.1", "IPv4-compatible 127.0.0.1", false, true},
+		{"::a9fe:a9fe", "IPv4-compatible metadata service", false, false},
+		{"::c0a8:101", "IPv4-compatible 192.168.1.1", false, true},
+		{"::5db8:d822", "IPv4-compatible 93.184.216.34", true, true},
+		{"::", "unspecified", false, false},
+		{"::1", "loopback", false, true},
+		{"2606:4700::1111", "public", true, true},
+		{"2a00:1450:4001:80b::200e", "public", true, true},
+		{"2001:4860:4860::8888", "public in 2001::/16, not Teredo", true, true},
+	} {
+		ip := netip.MustParseAddr(c.ip)
+		if got := strict.Allowed(ip); got != c.strict {
+			t.Errorf("strict Allowed(%s) (%s) = %v, want %v", c.ip, c.what, got, c.strict)
+		}
+		if got := onPrem.Allowed(ip); got != c.onPrem {
+			t.Errorf("on-prem Allowed(%s) (%s) = %v, want %v", c.ip, c.what, got, c.onPrem)
+		}
+	}
+	for _, raw := range []string{"http://[2002:7f00:1::1]/", "https://[2002:a9fe:a9fe::1]/latest/",
+		"https://[2001:0:4136:e378:8000:63bf:80ff:fffe]/", "http://[::127.0.0.1]:8080/"} {
+		if err := strict.ValidateURL(raw); !errors.Is(err, ErrBlockedDestination) {
+			t.Errorf("ValidateURL(%q) = %v, want ErrBlockedDestination", raw, err)
+		}
+	}
+	dialer := NewDialer(Options{Resolver: &staticResolver{answers: map[string][]string{"sixtofour.test": {"2002:7f00:1::1"}}}})
+	dialer.dial = func(context.Context, string, string) (net.Conn, error) {
+		t.Error("a 6to4 address of 127.0.0.1 was dialed")
+		return nil, errors.New("dialed")
+	}
+	if _, err := dialer.DialContext(context.Background(), "tcp", "sixtofour.test:443"); !errors.Is(err, ErrBlockedDestination) {
+		t.Errorf("dial sixtofour.test: %v, want ErrBlockedDestination", err)
+	}
+}
+
 func TestValidateURL(t *testing.T) {
 	for raw, ok := range map[string]bool{
 		"https://hooks.example.com/x":         true,

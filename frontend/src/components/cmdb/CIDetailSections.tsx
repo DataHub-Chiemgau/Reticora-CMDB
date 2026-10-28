@@ -4,7 +4,7 @@
  * manual overrides, lifecycle, impact analysis and metrics. Each is an expandable
  * <details> so normal users never see the metadata model.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useInstanceFields,
@@ -17,7 +17,9 @@ import {
   useLifecycleDefinitions,
   useLifecycleTransition,
   useEntityHistory,
+  useLocationTree,
 } from '../../api/cmdbHooks';
+import type { LocationTreeNode } from '../../api/cmdb';
 import { DynamicForm, validateAll } from '../form/DynamicForm';
 import { ApiError } from '../../api/client';
 import type { MetricPoint } from '../../api/client';
@@ -32,6 +34,75 @@ import { Select } from '../ui/Select';
 import { Modal } from '../ui/Modal';
 import { SkeletonList } from '../ui/Skeleton';
 import { ErrorState } from '../ui/ErrorState';
+
+// ─── Location names and times (CI-06, DB-05) ────────────────────────────────
+
+/** formatDateTime shows a timestamp in the UI language; no value is undefined. */
+export function formatDateTime(value: string | undefined, language: string): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(language, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+/**
+ * formatDate shows a calendar date (YYYY-MM-DD, e.g. a purchase date) in the
+ * UI language. The date has no time zone, so it is formatted as UTC and
+ * shows the same day everywhere.
+ */
+export function formatDate(value: string | undefined, language: string): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00Z` : value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(language, { dateStyle: 'medium', timeZone: 'UTC' });
+}
+
+export interface LocationNames {
+  /** The name of a node of the location tree (site, room, …). */
+  name: (id?: string) => string | undefined;
+  /** The path of a node from its site: Site › Gebäude › Raum › Rack. */
+  path: (id?: string) => string | undefined;
+}
+
+/**
+ * useLocationNames names the nodes of the location tree (GET /locations/tree,
+ * the nodes visible to the user). The tree is read only when enabled, i.e.
+ * when there is a location to name. A node the tree does not hold (not
+ * loaded, outside the user's scope or deleted) keeps its id.
+ */
+export function useLocationNames(enabled: boolean): LocationNames {
+  const tree = useLocationTree({ enabled });
+  return useMemo(() => {
+    const nodes = new Map<string, LocationTreeNode>();
+    const walk = (list: LocationTreeNode[] | undefined) => {
+      for (const node of list ?? []) {
+        nodes.set(node.id, node);
+        walk(node.children);
+      }
+    };
+    walk(tree.data?.data);
+    return {
+      name: (id) => (id ? (nodes.get(id)?.name ?? id) : undefined),
+      path: (id) => {
+        if (!id) return undefined;
+        const names: string[] = [];
+        // A node whose parent is outside the scope is a root of the tree.
+        for (
+          let node = nodes.get(id);
+          node;
+          node = node.parent_id ? nodes.get(node.parent_id) : undefined
+        ) {
+          names.unshift(node.name);
+          if (names.length > nodes.size) break;
+        }
+        return names.length > 0 ? names.join(' › ') : id;
+      },
+    };
+  }, [tree.data]);
+}
+
+/** The location fields of a CI whose values are nodes of the location tree. */
+const LOCATION_FIELDS = new Set(['location_id', 'site_id', 'room_id']);
 
 function Section({
   title,
@@ -648,8 +719,21 @@ export function CIHistorySection({ ciId }: { ciId: string }) {
   const { t, i18n } = useTranslation();
   const history = useEntityHistory('ci', ciId);
   const entries = history.data?.data ?? [];
-  const format = (value: string) =>
-    new Date(value).toLocaleString(i18n.language, { dateStyle: 'medium', timeStyle: 'short' });
+  // Sites and location changes are shown with the names of the location
+  // tree (CI-06), the location as its path.
+  const locations = useLocationNames(
+    entries.some(
+      (entry) =>
+        !!entry.site_id ||
+        !!entry.field_changes?.some((change) => LOCATION_FIELDS.has(change.field)),
+    ),
+  );
+  const changeText =
+    (field: string) =>
+    (value: unknown): string =>
+      LOCATION_FIELDS.has(field) && typeof value === 'string' && value !== ''
+        ? ((field === 'location_id' ? locations.path(value) : locations.name(value)) ?? value)
+        : historyValue(value);
   return (
     <Section title={t('ci.history')} count={history.data?.total}>
       {history.isLoading ? (
@@ -666,7 +750,7 @@ export function CIHistorySection({ ciId }: { ciId: string }) {
               className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
             >
               <time dateTime={entry.created_at} className="text-gray-500 dark:text-gray-400">
-                {format(entry.created_at)}
+                {formatDateTime(entry.created_at, i18n.language)}
               </time>
               <span className="font-medium">
                 {entry.change_type}
@@ -677,14 +761,14 @@ export function CIHistorySection({ ciId }: { ciId: string }) {
               ) : null}
               {entry.site_id ? (
                 <span className="text-gray-500 dark:text-gray-400">
-                  {t('ci.historySite', { site: entry.site_id })}
+                  {t('ci.historySite', { site: locations.name(entry.site_id) })}
                 </span>
               ) : null}
               {entry.change_set_id && entry.field_changes?.length ? (
                 <ul className="basis-full space-y-0.5 pl-4 text-gray-700 dark:text-gray-300">
                   {entry.field_changes.map((change) => (
                     <li key={change.field} className="break-all">
-                      {`${change.field}: ${fieldValueText(t, change.field, change.old, historyValue)} → ${fieldValueText(t, change.field, change.new, historyValue)}`}
+                      {`${change.field}: ${fieldValueText(t, change.field, change.old, changeText(change.field))} → ${fieldValueText(t, change.field, change.new, changeText(change.field))}`}
                     </li>
                   ))}
                 </ul>

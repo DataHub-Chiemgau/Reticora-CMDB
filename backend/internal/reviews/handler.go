@@ -3,7 +3,9 @@ package reviews
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -35,10 +37,16 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/discovery/review-items/{id}/resolve", deprecated("/api/v1/review-items/{id}/resolve", h.Resolve))
 }
 
+// deprecated marks a legacy path; the successor link names the item of the
+// request, not the template (F-219).
 func deprecated(successor string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Deprecation", legacyDeprecation)
-		w.Header().Set("Link", "<"+successor+`>; rel="successor-version"`)
+		link := successor
+		if id, err := url.PathUnescape(chi.URLParam(r, "id")); err == nil && id != "" {
+			link = strings.ReplaceAll(link, "{id}", url.PathEscape(id))
+		}
+		w.Header().Set("Link", "<"+link+`>; rel="successor-version"`)
 		next(w, r)
 	}
 }

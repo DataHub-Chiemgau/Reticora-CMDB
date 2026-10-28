@@ -215,7 +215,7 @@ func TestCIQueryBudget(t *testing.T) {
 		listPage      = " ORDER BY ci."
 		candidatePage = "SELECT id::text, created_at FROM ci"
 	)
-	serial := []string{"uq_ci_org_serial", "idx_ci_serial"}
+	serial := []string{"idx_ci_serial_number_lc"}
 	ip := []string{"idx_ci_mgmt_ip_sys_object", "idx_ci_mgmt_ip"}
 	byID := []string{"ci_pkey", "ci_id_organization_key"}
 	calls := []budgetCall{

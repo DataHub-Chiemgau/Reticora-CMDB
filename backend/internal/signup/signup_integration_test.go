@@ -1,12 +1,17 @@
 package signup
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -370,5 +375,149 @@ func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
 	}
 	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM notification_channel WHERE organization_id = $1`, created.ID); n != 2 {
 		t.Errorf("notification channels of the organization after a conflict = %d, want 2", n)
+	}
+}
+
+// TestSignupSlugExhaustion covers WP-591 (TLC-01, F-303) against
+// PostgreSQL with the application role: when the name's slug and slug-2 …
+// slug-20 are taken, the verification answers 201 with slug-<6 random
+// characters a-z0-9> instead of 500; Cyrillic names are transliterated;
+// names without transliterable letters get org-<suffix> each instead of
+// sharing "org"; only when every candidate is taken the verification
+// answers 409 (field organization_name), creates nothing and leaves the
+// request pending.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL).
+func TestSignupSlugExhaustion(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
+	}
+	ctx := context.Background()
+	appPool, err := database.NewPool(ctx, scopetest.AppDSN(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(appPool.Close)
+	adminPool, err := database.NewMaintenancePool(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Closed after the cleanups below, which delete through it.
+	t.Cleanup(adminPool.Close)
+
+	suffix := make([]byte, 4)
+	_, _ = rand.Read(suffix)
+	tag := hex.EncodeToString(suffix)
+	orgName := "Slug Exhaustion " + tag
+	base := Slugify(orgName)
+	cyrillic := "Ромашка " + tag
+	// No letter or digit that transliterates to ASCII.
+	cjk := "東京商事"
+	var created []string
+	t.Cleanup(func() {
+		for _, id := range created {
+			_, _ = adminPool.Exec(context.Background(), `DELETE FROM organization WHERE id = $1`, id)
+		}
+		_, _ = adminPool.Exec(context.Background(), `DELETE FROM signup_request WHERE email LIKE $1`, "%@"+tag+".example")
+	})
+	occupy := func(slug string) {
+		t.Helper()
+		var id string
+		if err := adminPool.QueryRow(ctx, `INSERT INTO organization (id, name, slug) VALUES (gen_random_uuid(), $1, $2) RETURNING id::text`,
+			"occupied "+slug, slug).Scan(&id); err != nil {
+			t.Fatalf("occupy %s: %v", slug, err)
+		}
+		created = append(created, id)
+	}
+	occupy(base)
+	for n := 2; n <= 20; n++ {
+		occupy(base + "-" + strconv.Itoa(n))
+	}
+
+	mailer, accounts := &stubMailer{}, &stubAccounts{}
+	cfg := DefaultConfig()
+	cfg.VerifyURL = "https://app.example/signup/verify"
+	svc := NewService(NewPGRepository(appPool), mailer, accounts, cfg)
+	h := NewHandler(svc)
+	verify := func(name, user string) (*httptest.ResponseRecorder, string) {
+		t.Helper()
+		if err := svc.Submit(ctx, Request{OrganizationName: name, Email: user + "@" + tag + ".example", DisplayName: "Ada"}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		token := tokenOf(t, mailer.link)
+		body, _ := json.Marshal(Verification{Token: token, Password: "correct horse battery"})
+		w := httptest.NewRecorder()
+		h.Verify(w, httptest.NewRequest(http.MethodPost, "/api/v1/signup/verify", bytes.NewReader(body)))
+		return w, token
+	}
+	verified := func(name string, w *httptest.ResponseRecorder) Result {
+		t.Helper()
+		var res Result
+		if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &res) != nil {
+			t.Fatalf("%s: verify = %d %s, want 201", name, w.Code, w.Body.String())
+		}
+		created = append(created, res.OrganizationID)
+		var slug string
+		if err := adminPool.QueryRow(ctx, `SELECT slug FROM organization WHERE id = $1`, res.OrganizationID).Scan(&slug); err != nil || slug != res.OrganizationSlug {
+			t.Errorf("%s: stored slug %q (%v), answered %q", name, slug, err, res.OrganizationSlug)
+		}
+		return res
+	}
+	randomSlug := func(prefix string) *regexp.Regexp {
+		return regexp.MustCompile(`^` + regexp.QuoteMeta(prefix) + `-[a-z0-9]{6}$`)
+	}
+
+	// 20 taken candidates: 201 with base-<random>.
+	w, _ := verify(orgName, "ada")
+	if res := verified(orgName, w); !randomSlug(base).MatchString(res.OrganizationSlug) {
+		t.Errorf("slug after 20 taken candidates = %q, want %s-<6 characters a-z0-9>", res.OrganizationSlug, base)
+	}
+
+	// Cyrillic is transliterated.
+	w, _ = verify(cyrillic, "boris")
+	if res := verified(cyrillic, w); res.OrganizationSlug != "romashka-"+tag {
+		t.Errorf("Cyrillic slug = %q, want %q", res.OrganizationSlug, "romashka-"+tag)
+	}
+
+	// Without transliterable letters: org-<random>, distinct each time.
+	var cjkSlugs []string
+	for _, user := range []string{"chen", "li"} {
+		w, _ = verify(cjk, user)
+		res := verified(cjk, w)
+		if !randomSlug("org").MatchString(res.OrganizationSlug) {
+			t.Errorf("slug of %q = %q, want org-<6 characters a-z0-9>", cjk, res.OrganizationSlug)
+		}
+		cjkSlugs = append(cjkSlugs, res.OrganizationSlug)
+	}
+	if len(cjkSlugs) == 2 && cjkSlugs[0] == cjkSlugs[1] {
+		t.Errorf("two organizations share the slug %q", cjkSlugs[0])
+	}
+
+	// Real exhaustion: every random candidate is taken too → 409, nothing
+	// is created, the request stays pending.
+	orig := slugSuffix
+	t.Cleanup(func() { slugSuffix = orig })
+	taken := "zz" + tag[:4]
+	slugSuffix = func() (string, error) { return taken, nil }
+	occupy(base + "-" + taken)
+	accountsBefore := len(accounts.created)
+	orgsBefore := countRows(ctx, t, adminPool, `SELECT count(*) FROM organization WHERE name = $1`, orgName)
+	w, token := verify(orgName, "eve")
+	var problem struct {
+		Status int    `json:"status"`
+		Field  string `json:"field"`
+	}
+	if w.Code != http.StatusConflict || json.Unmarshal(w.Body.Bytes(), &problem) != nil || problem.Field != "organization_name" {
+		t.Errorf("exhausted slugs: %d %s, want 409 with field organization_name", w.Code, w.Body.String())
+	}
+	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM organization WHERE name = $1`, orgName); n != orgsBefore {
+		t.Errorf("organizations after 409 = %d, want %d", n, orgsBefore)
+	}
+	if len(accounts.created) != accountsBefore {
+		t.Errorf("IdP accounts created despite 409: %+v", accounts.created[accountsBefore:])
+	}
+	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM signup_request WHERE token_hash = $1 AND status = 'pending'`, hashToken(token)); n != 1 {
+		t.Error("request is no longer pending after 409")
 	}
 }

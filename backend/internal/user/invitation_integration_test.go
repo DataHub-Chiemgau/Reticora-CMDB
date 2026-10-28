@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1083,4 +1085,106 @@ func TestRoleAssignmentScopeIsNeverWidened(t *testing.T) {
 	if n := c.count(`SELECT count(*)::int FROM role_assignment WHERE user_id = $1 AND scope_client_id IS NULL AND scope_site_id IS NULL AND scope_team_id IS NULL`, target); n != 0 {
 		t.Errorf("%d org-wide assignments of the target, want none", n)
 	}
+}
+
+// TestInvitationAndServiceAccountListsPage covers WP-565 (API-02, F-215):
+// GET /invitations and GET /service-accounts page newest first on
+// (created_at, id). ?limit=1 answers one entry and a next_cursor; following
+// the cursors returns every row of the organization once, in that order,
+// also across rows created at the same instant, and none of another
+// organization. A forged cursor is 400.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestInvitationAndServiceAccountListsPage(t *testing.T) {
+	f := scopetest.Seed(t, "87")
+	ctx := context.Background()
+	// Three rows of each list in organization A, two of them created at
+	// the same instant; one row in organization B.
+	for _, org := range []struct {
+		id string
+		n  int
+	}{{f.OrgA, 3}, {f.OrgB, 1}} {
+		if _, err := f.Admin.Exec(ctx, `INSERT INTO user_invitation (organization_id, email, role_id, scope_type, invited_by, token_hash, expires_at, created_at)
+			SELECT $1, 'page' || n || '@invite.example', (SELECT id FROM role WHERE organization_id = $1 AND name = 'viewer'), 'org', $2,
+				md5($1::text || n), now() + interval '7 days', timestamptz '2026-03-01 08:00:00.5Z' + (n / 2) * interval '1 minute'
+			FROM generate_series(1, $3::int) AS n`, org.id, f.User, org.n); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Admin.Exec(ctx, `INSERT INTO service_account (organization_id, name, created_at)
+			SELECT $1, 'page-sa-' || n, timestamptz '2026-03-01 08:00:00.5Z' + (n / 2) * interval '1 minute'
+			FROM generate_series(1, $2::int) AS n`, org.id, org.n); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mux := chi.NewRouter()
+	NewInvitationHandler(NewPGInvitations(f.App)).RegisterRoutes(mux)
+	NewServiceAccountHandler(NewPGServiceAccounts(f.App)).RegisterRoutes(mux)
+	all := identity.ScopeSet{All: true}
+	caller := withCaller(f.OrgCtx(f.OrgA), f.OrgA, f.User, identity.Scope{Clients: all, Sites: all, Teams: all})
+	get := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil).WithContext(caller))
+		return w
+	}
+
+	for path, table := range map[string]string{
+		"/api/v1/invitations":      "user_invitation",
+		"/api/v1/service-accounts": "service_account",
+	} {
+		var want []string
+		rows, err := f.Admin.Query(ctx, `SELECT id::text FROM `+table+` WHERE organization_id = $1 ORDER BY created_at DESC, id DESC`, f.OrgA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			want = append(want, id)
+		}
+		rows.Close()
+		got, total := pageThrough(t, get, path)
+		if !slices.Equal(got, want) || total != len(want) {
+			t.Errorf("GET %s with limit=1: rows %v (total %d), want %v newest first", path, got, total, want)
+		}
+		if w := get(path + "?cursor=eyJpIjoiY2ktOSJ9.AAAAAAAAAAAAAAAAAAAAAA"); w.Code != http.StatusBadRequest {
+			t.Errorf("GET %s with a forged cursor: %d %.200s, want 400", path, w.Code, w.Body.String())
+		}
+	}
+}
+
+// pageThrough reads a list with limit=1 along its next_cursor (API-02):
+// every page holds one row, every page but the last a next_cursor. It
+// returns the ids in the order read and the total of the last page.
+func pageThrough(t *testing.T, get func(path string) *httptest.ResponseRecorder, path string) (ids []string, total int) {
+	t.Helper()
+	for next := path + "?limit=1"; next != ""; {
+		w := get(next)
+		var page struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+			Total      int    `json:"total"`
+			Limit      int    `json:"limit"`
+			NextCursor string `json:"next_cursor"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &page); w.Code != http.StatusOK || err != nil || len(page.Data) != 1 || page.Limit != 1 {
+			t.Fatalf("GET %s: %d %.300s; want one entry with limit 1", next, w.Code, w.Body.String())
+		}
+		ids = append(ids, page.Data[0].ID)
+		total = page.Total
+		if len(ids) < total && page.NextCursor == "" {
+			t.Fatalf("GET %s: entry %d of %d without next_cursor", next, len(ids), total)
+		}
+		if len(ids) > total {
+			t.Fatalf("GET %s: more entries than the total %d", next, total)
+		}
+		next = ""
+		if page.NextCursor != "" {
+			next = path + "?limit=1&cursor=" + url.QueryEscape(page.NextCursor)
+		}
+	}
+	return ids, total
 }

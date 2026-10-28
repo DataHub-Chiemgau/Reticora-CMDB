@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -58,6 +59,23 @@ func entryHash(e *AuditEntry) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// auditLog is operator_audit as the handler writes and reads it: the
+// Auditor, in tests a stand-in without a database.
+type auditLog interface {
+	Record(ctx context.Context, e *AuditEntry) error
+	RecordChange(ctx context.Context, orgID string, change func(ctx context.Context) (*AuditEntry, error)) error
+	List(ctx context.Context, limit, offset int) ([]AuditEntry, int, error)
+	Verify(ctx context.Context) (VerifyResult, error)
+}
+
+// errAuditNotConfigured is returned by an Auditor without a database
+// (tests, --no-db): no operator action succeeds without its entry.
+var errAuditNotConfigured = errors.New("operator audit is not configured")
+
+// ErrAuditFailed marks a failed operator_audit write; the action it should
+// have recorded did not take effect (F-208).
+var ErrAuditFailed = errors.New("operator audit failed")
+
 // Auditor writes and verifies operator_audit.
 type Auditor struct {
 	pool *pgxpool.Pool
@@ -70,10 +88,39 @@ func NewAuditor(pool *pgxpool.Pool) *Auditor { return &Auditor{pool: pool} }
 // writers so that the chain has no forks.
 func (a *Auditor) Record(ctx context.Context, e *AuditEntry) error {
 	if a == nil || a.pool == nil {
-		return fmt.Errorf("operator audit is not configured")
+		return fmt.Errorf("%w: %w", ErrAuditFailed, errAuditNotConfigured)
 	}
-	return database.WithOperator(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithOperator(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		return RecordTx(ctx, tx, e)
+	})
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrAuditFailed, err)
+	}
+	return nil
+}
+
+// RecordChange runs change and appends the entry it returns in one
+// transaction of the organization orgID (database.WithOperatorTenant, ctx
+// carries its tenant scope): the repositories change calls with its
+// context join the transaction, so the change takes effect only together
+// with its entry (F-208). A failed entry is ErrAuditFailed; an error of
+// change is returned as it is. Both roll the change back.
+func (a *Auditor) RecordChange(ctx context.Context, orgID string, change func(ctx context.Context) (*AuditEntry, error)) error {
+	if a == nil || a.pool == nil {
+		return fmt.Errorf("%w: %w", ErrAuditFailed, errAuditNotConfigured)
+	}
+	return database.WithOperatorTenant(ctx, a.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		e, err := change(ctx)
+		if err != nil {
+			return err
+		}
+		if e == nil {
+			return fmt.Errorf("%w: the change returned no entry", ErrAuditFailed)
+		}
+		if err = RecordTx(ctx, tx, e); err != nil {
+			return fmt.Errorf("%w: %w", ErrAuditFailed, err)
+		}
+		return nil
 	})
 }
 
@@ -146,6 +193,9 @@ func scanEntry(row pgx.Row) (AuditEntry, error) {
 
 // List returns entries, newest first.
 func (a *Auditor) List(ctx context.Context, limit, offset int) ([]AuditEntry, int, error) {
+	if a == nil || a.pool == nil {
+		return nil, 0, errAuditNotConfigured
+	}
 	var entries []AuditEntry
 	var total int
 	err := database.WithOperator(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
@@ -179,6 +229,9 @@ type VerifyResult struct {
 
 // Verify recomputes the whole chain.
 func (a *Auditor) Verify(ctx context.Context) (VerifyResult, error) {
+	if a == nil || a.pool == nil {
+		return VerifyResult{}, errAuditNotConfigured
+	}
 	result := VerifyResult{Valid: true}
 	err := database.WithOperator(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+auditColumns+` FROM operator_audit ORDER BY id`)

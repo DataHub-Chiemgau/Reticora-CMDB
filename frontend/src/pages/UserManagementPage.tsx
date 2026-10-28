@@ -2,14 +2,17 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { ApiError } from '../api/client';
-import type { Invitation, InvitationRequest } from '../api/client';
+import type { AppUser, Invitation, InvitationRequest } from '../api/client';
 import {
+  useDeleteUser,
+  useEffectivePermissions,
   useHasPermission,
   useInvitations,
   useIssueInvitation,
   useRenewInvitation,
   useRevokeInvitation,
   useRoleList,
+  useSetUserStatus,
   useSites,
   useTeamList,
   useUserList,
@@ -20,6 +23,7 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
+import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import { ScrollRegion } from '../components/ScrollRegion';
 
@@ -32,6 +36,9 @@ export function UserManagementPage() {
   // Invitations need user:manage (TLC-03); without it, or while the rights
   // load, the page offers neither the tab nor an action (fail closed).
   const canManage = useHasPermission('user:manage') === true;
+  // The own account is never offered for deactivation or deletion (TLC-04):
+  // /me/permissions names the caller's user id.
+  const ownUserId = useEffectivePermissions().data?.user_id;
   const tabClass = (current: Tab) =>
     `px-4 py-2 text-sm font-medium border-b-2 ${tab === current ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'}`;
 
@@ -69,7 +76,7 @@ export function UserManagementPage() {
         onChange={(e) => setSearch(e.target.value)}
       />
 
-      {tab === 'users' && <UsersTab search={search} />}
+      {tab === 'users' && <UsersTab search={search} canManage={canManage} ownUserId={ownUserId} />}
       {tab === 'teams' && <TeamsTab search={search} />}
       {tab === 'roles' && <RolesTab />}
       {tab === 'invitations' && canManage && <InvitationsTab search={search} />}
@@ -77,15 +84,112 @@ export function UserManagementPage() {
   );
 }
 
-function UsersTab({ search }: { search: string }) {
+type UserAction = 'deactivate' | 'reactivate' | 'delete';
+
+/**
+ * describeUserRefusal words a refused deactivation, reactivation or deletion
+ * in UI language (TLC-04, F-196): a 409 of the deletion names the handover
+ * of open objects, or, for a user closed records refer to, deactivation or
+ * anonymization instead; the server's detail is never shown.
+ */
+function describeUserRefusal(error: unknown, name: string, t: TFunction): string {
+  if (!(error instanceof ApiError)) {
+    return t('userMgmt.errors.failed', { name, status: '–' });
+  }
+  switch (error.status) {
+    case 409:
+      return /referenced/i.test(error.detail ?? '')
+        ? t('userMgmt.errors.referenced', { name })
+        : t('userMgmt.errors.ownsOpenObjects', { name });
+    case 403:
+      return t('userMgmt.errors.forbidden', { name });
+    case 404:
+      return t('userMgmt.errors.notFound', { name });
+    case 503:
+      return t('userMgmt.errors.unavailable', { name });
+    default:
+      return t('userMgmt.errors.failed', { name, status: error.status });
+  }
+}
+
+/**
+ * UsersTab lists the users; user:manage holders deactivate, reactivate and
+ * delete them after a confirmation (TLC-04, F-196). The own account offers
+ * no action, and without user:manage, or while the caller's id is unknown,
+ * no row offers one (fail closed). The server still decides every request.
+ */
+function UsersTab({
+  search,
+  canManage,
+  ownUserId,
+}: {
+  search: string;
+  canManage: boolean;
+  ownUserId?: string;
+}) {
   const { t } = useTranslation();
   const { data, isLoading } = useUserList({ search });
+  const setStatus = useSetUserStatus();
+  const deleteUser = useDeleteUser();
+  const [pending, setPending] = useState<{ user: AppUser; action: UserAction } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const withActions = canManage && !!ownUserId;
+  const busy = setStatus.isPending || deleteUser.isPending;
 
   if (isLoading)
     return <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>;
 
+  const confirm = () => {
+    if (!pending) return;
+    const { user, action } = pending;
+    const callbacks = {
+      onSettled: () => setPending(null),
+      onError: (error: unknown) =>
+        setActionError(describeUserRefusal(error, user.display_name || user.email, t)),
+    };
+    setActionError(null);
+    if (action === 'delete') {
+      deleteUser.mutate(user.id, callbacks);
+    } else {
+      setStatus.mutate(
+        { id: user.id, status: action === 'deactivate' ? 'inactive' : 'active' },
+        callbacks,
+      );
+    }
+  };
+  const confirmText = (action: UserAction, user: AppUser) => {
+    const values = { name: user.display_name || user.email, email: user.email };
+    switch (action) {
+      case 'deactivate':
+        return {
+          title: t('userMgmt.confirm.deactivateTitle'),
+          text: t('userMgmt.confirm.deactivateText', values),
+          button: t('userMgmt.deactivate'),
+        };
+      case 'reactivate':
+        return {
+          title: t('userMgmt.confirm.reactivateTitle'),
+          text: t('userMgmt.confirm.reactivateText', values),
+          button: t('userMgmt.reactivate'),
+        };
+      case 'delete':
+        return {
+          title: t('userMgmt.confirm.deleteTitle'),
+          text: t('userMgmt.confirm.deleteText', values),
+          button: t('userMgmt.confirm.deleteConfirm'),
+        };
+    }
+  };
+  const dialog = pending ? confirmText(pending.action, pending.user) : null;
+  const columns = withActions ? 5 : 4;
+
   return (
     <Card title={`${t('userMgmt.users', 'Benutzer')} (${data?.total ?? 0})`}>
+      {actionError ? (
+        <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">
+          {actionError}
+        </p>
+      ) : null}
       <ScrollRegion label={t('userMgmt.users', 'Benutzer')}>
         <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
           <thead>
@@ -94,6 +198,7 @@ function UsersTab({ search }: { search: string }) {
               <th className="pb-2">{t('userMgmt.email', 'E-Mail')}</th>
               <th className="pb-2">{t('ci.status', 'Status')}</th>
               <th className="pb-2">{t('userMgmt.lastLogin', 'Letzter Login')}</th>
+              {withActions ? <th className="pb-2">{t('common.actions')}</th> : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -111,11 +216,46 @@ function UsersTab({ search }: { search: string }) {
                     ? new Date(user.last_login_at).toLocaleDateString('de-DE')
                     : '—'}
                 </td>
+                {withActions ? (
+                  <td className="py-2">
+                    {user.id === ownUserId ? (
+                      <span className="text-gray-500 dark:text-gray-400">
+                        {t('userMgmt.ownAccount')}
+                      </span>
+                    ) : (
+                      <div className="flex gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() =>
+                            setPending({
+                              user,
+                              action: user.status === 'active' ? 'deactivate' : 'reactivate',
+                            })
+                          }
+                        >
+                          {user.status === 'active'
+                            ? t('userMgmt.deactivate')
+                            : t('userMgmt.reactivate')}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => setPending({ user, action: 'delete' })}
+                        >
+                          {t('userMgmt.delete')}
+                        </Button>
+                      </div>
+                    )}
+                  </td>
+                ) : null}
               </tr>
             ))}
             {(!data?.data || data.data.length === 0) && (
               <tr>
-                <td colSpan={4} className="py-4 text-center text-gray-600 dark:text-gray-400">
+                <td colSpan={columns} className="py-4 text-center text-gray-600 dark:text-gray-400">
                   {t('common.noData', 'Keine Daten')}
                 </td>
               </tr>
@@ -123,6 +263,29 @@ function UsersTab({ search }: { search: string }) {
           </tbody>
         </table>
       </ScrollRegion>
+      {withActions ? (
+        <Modal
+          open={pending !== null}
+          onOpenChange={(open) => {
+            if (!open && !busy) setPending(null);
+          }}
+          title={dialog?.title ?? ''}
+          description={dialog?.text}
+        >
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" disabled={busy} onClick={() => setPending(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant={pending?.action === 'reactivate' ? 'primary' : 'danger'}
+              disabled={busy}
+              onClick={confirm}
+            >
+              {dialog?.button ?? ''}
+            </Button>
+          </div>
+        </Modal>
+      ) : null}
     </Card>
   );
 }

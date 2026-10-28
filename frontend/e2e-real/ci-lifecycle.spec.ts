@@ -51,12 +51,18 @@ import {
  *  L13  ETag / If-Match contract and the org If-Match setting . WP-061 (API-07, API-03), WP-163 (API-03)
  *  L13b instance attributes save with require_if_match ........ WP-061 (API-07, API-03), WP-477 (F-082)
  *  L14  quotes / backslashes in names and fields are stored ... WP-117 (CI-03, MET-11), WP-120 (CI-01), WP-132 (AUD-04)
+ *  L15  location by name, formatted times, read-only asset card  WP-577 (CI-06, DB-05, AST-04; F-237, F-238)
  *
  * The UI offers no action to delete or restore a CI (useDeleteCI is not used by any page);
  * L11 therefore drives DELETE and restore through the REST API and checks the effect in the UI.
  *
  * L05 reads the stored column with one read-only psql query (E2E_DATABASE_URL), since the
  * API renders NULL and an empty string alike.
+ *
+ * L15 writes its asset as a fixture with psql (E2E_DATABASE_URL, the migration login, under
+ * the organization's RLS setting): the asset routes belong to the late module inventory,
+ * which is off in the G1 default (E-03, WP-214), while the canonical asset data of a CI is
+ * G1 (DB-05, E-36). Location, client and CI are created through the REST API.
  *
  * A failing test is a product finding: the assertions encode the requirement texts in
  * docs/spec/katalog-v3 and the WP acceptance criteria, not the observed behaviour.
@@ -293,6 +299,31 @@ function db<T>(select: string, vars: Record<string, string>): T[] {
     timeout: 15_000,
   }).trim();
   return JSON.parse(out) as T[];
+}
+
+/**
+ * insertAsset writes one asset of the organization with every canonical field (DB-05) as a
+ * fixture under the organization's RLS setting and returns its id.
+ */
+function insertAsset(vars: Record<string, string>): string {
+  for (const key of ['org', 'client', 'location']) {
+    expect(/^[0-9a-f-]{36}$/i.test(vars[key] ?? ''), `${key} is a UUID`).toBe(true);
+  }
+  const sql = `BEGIN;
+SET LOCAL app.org_id = :'org';
+INSERT INTO asset (organization_id, client_id, asset_tag, name, serial_number, rfid_tag, barcode,
+                   purchase_date, warranty_end, supplier, invoice_number, lifecycle_state, location_id)
+VALUES (:'org', :'client', :'tag', :'name', :'serial', :'rfid', :'barcode',
+        :'purchase'::date, :'warranty'::date, :'supplier', :'invoice', :'lifecycle', :'location')
+RETURNING id;
+COMMIT;`;
+  const args = [DATABASE_URL, '-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1'];
+  for (const [name, value] of Object.entries(vars)) args.push('-v', `${name}=${value}`);
+  args.push('-f', '-');
+  const out = execFileSync('psql', args, { input: sql, encoding: 'utf8', timeout: 15_000 }).trim();
+  const id = out.split('\n').find((line: string) => /^[0-9a-f-]{36}$/i.test(line)) ?? '';
+  expect(id, `asset fixture written: ${out}`).not.toBe('');
+  return id;
 }
 
 /** parseCsv splits a CSV text (RFC 4180 quoting) into rows of fields. */
@@ -1579,5 +1610,109 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     await expect(page.getByRole('heading', { name: ci.name, exact: true })).toBeVisible();
     await expect.soft(detailValue(page, 'Modell')).toHaveText('R740 "XL"', { timeout: 5_000 });
     expect((await getCI(ci.id)).model, 'stored model').toBe('R740 "XL"');
+  });
+
+  test('L15 a CI with a location and a linked asset shows site and room by name, formatted times and every asset field read-only after a reload', async () => {
+    const page = w.page;
+    const tag = `lc-loc-${w.s}`;
+    // Location tree and client through the REST API (LOC-10).
+    const client = await ok<{ id: string }>('POST', '/clients', {
+      name: `LC Client ${w.s}`,
+      slug: `lc-client-${w.s}`,
+    });
+    const post = (body: Record<string, unknown>) =>
+      ok<{ id: string; name: string }>('POST', '/locations', body);
+    const site = await post({ kind: 'site', name: `LC Site ${w.s}`, client_id: client.id });
+    const building = await post({
+      kind: 'building',
+      name: `LC Building ${w.s}`,
+      parent_id: site.id,
+    });
+    const room = await post({ kind: 'room', name: `LC Room ${w.s}`, parent_id: building.id });
+    const rack = await post({ kind: 'rack', name: `LC Rack ${w.s}`, parent_id: room.id });
+    const asset = insertAsset({
+      org: w.orgId,
+      client: client.id,
+      location: rack.id,
+      tag: `INV-${tag}`,
+      name: `${tag} hardware`,
+      serial: `SN-ASSET-${w.s}`,
+      rfid: `RFID-${w.s}`,
+      barcode: `BC-${w.s}`,
+      purchase: '2025-03-15',
+      warranty: '2028-03-14',
+      supplier: `Supplier ${w.s}`,
+      invoice: `RE-${w.s}`,
+      lifecycle: 'in_use',
+    });
+    // The CI linked to the asset takes the asset's location (DB-05).
+    const ci = await newCI({ name: tag, client_id: client.id, asset_id: asset });
+    const stored = await ok<CI & { location_id?: string; site_id?: string; room_id?: string }>(
+      'GET',
+      `/cis/${ci.id}`,
+    );
+    expect(stored, 'the CI mirrors the location of its asset').toMatchObject({
+      location_id: rack.id,
+      site_id: site.id,
+      room_id: room.id,
+    });
+
+    await page.goto(`/cmdb/${ci.id}`);
+    await expect(page.getByRole('heading', { name: tag, exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('heading', { name: tag, exact: true })).toBeVisible();
+
+    // CI-06, DB-05 (F-237): the location as its path, site and room by name.
+    const path = `${site.name} › ${building.name} › ${room.name} › ${rack.name}`;
+    await expect(detailValue(page, 'Standort')).toHaveText(path);
+    await expect(detailValue(page, 'Site')).toHaveText(site.name);
+    await expect(detailValue(page, 'Raum')).toHaveText(room.name);
+    // Times in the de-DE format of the browser locale, not as ISO strings.
+    await expect(detailValue(page, 'Erstellt')).toHaveText(/^\d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/);
+    await expect(detailValue(page, 'Aktualisiert')).toHaveText(
+      /^\d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/,
+    );
+    const main = page.locator('#main-content');
+    for (const id of [site.id, building.id, room.id, rack.id]) {
+      await expect(main, `no raw location id ${id}`).not.toContainText(id);
+    }
+
+    // DB-05, AST-04 (F-238): the asset card shows every canonical field read-only.
+    const card = main
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Asset (kanonische Daten)' }) });
+    const assetValue = (label: string) =>
+      card
+        .locator('dt')
+        .filter({ hasText: new RegExp(`^${escapeRe(label)}$`) })
+        .locator('xpath=following-sibling::dd[1]');
+    await expect(assetValue('Inventarnummer')).toHaveText(`INV-${tag}`);
+    await expect(assetValue('Seriennummer')).toHaveText(`SN-ASSET-${w.s}`);
+    await expect(assetValue('Standort')).toHaveText(path);
+    await expect(assetValue('Physischer Lebenszyklus')).toHaveText('in_use');
+    await expect(assetValue('RFID-Tag')).toHaveText(`RFID-${w.s}`);
+    await expect(assetValue('Barcode')).toHaveText(`BC-${w.s}`);
+    await expect(assetValue('Kaufdatum')).toHaveText('15.03.2025');
+    await expect(assetValue('Garantieende')).toHaveText('14.03.2028');
+    await expect(assetValue('Lieferant')).toHaveText(`Supplier ${w.s}`);
+    await expect(assetValue('Rechnungsnummer')).toHaveText(`RE-${w.s}`);
+    await expect(card.getByRole('textbox')).toHaveCount(0);
+
+    // The edit dialog shows serial number and location as managed by the asset and
+    // saves another field without sending them (no 422).
+    await page.getByRole('button', { name: 'Bearbeiten', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByLabel('Seriennummer')).toBeDisabled();
+    await expect(dialog.getByLabel('Seriennummer')).toHaveValue(`SN-ASSET-${w.s}`);
+    await expect(dialog.getByLabel('Standort')).toBeDisabled();
+    await expect(dialog.getByLabel('Standort')).toHaveValue(path);
+    await expect(dialog.getByText('Vom Asset geführt')).toHaveCount(2);
+    await dialog.getByLabel('Hersteller').fill(`Vendor ${w.s}`);
+    const patched = waitForPath(page, `/cis/${ci.id}`, 'PATCH');
+    await dialog.getByRole('button', { name: 'Speichern' }).click();
+    const res = await patched;
+    expect(res.status(), `PATCH from the edit form: ${await res.text()}`).toBe(200);
+    expect(res.request().postDataJSON()).toEqual({ manufacturer: `Vendor ${w.s}` });
+    await expect(dialog).toBeHidden();
   });
 });

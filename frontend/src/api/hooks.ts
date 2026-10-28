@@ -2,6 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import {
   ciApi,
   relationshipApi,
+  relationshipSuppressionApi,
   collectorApi,
   discoveryScopeApi,
   scopeSuggestionApi,
@@ -56,6 +57,9 @@ import type {
   TicketUpdateRequest,
   TicketListParams,
   UserListParams,
+  UserStatus,
+  AppUser,
+  PaginatedResponse,
   InvitationRequest,
   InvitationAcceptance,
   TopologyParams,
@@ -138,13 +142,38 @@ export function useUpdateRelationship(ciId: string) {
 
 export function useDeleteRelationship(ciId: string) {
   const invalidate = useRelationshipInvalidation(ciId);
+  const queryClient = useQueryClient();
   return useMutation({
-    // A discovery edge is deleted with force and then suppressed (REL-04).
-    mutationFn: (arg: string | { id: string; force?: boolean }) =>
+    // A discovery edge is deleted with force and then suppressed with the
+    // reason of the confirmation (REL-04, F-273).
+    mutationFn: (arg: string | { id: string; force?: boolean; reason?: string }) =>
       typeof arg === 'string'
         ? relationshipApi.delete(arg)
-        : relationshipApi.delete(arg.id, arg.force ?? false),
-    onSuccess: invalidate,
+        : relationshipApi.delete(arg.id, arg.force ?? false, arg.reason),
+    onSuccess: () => {
+      invalidate();
+      void queryClient.invalidateQueries({ queryKey: ['relationship-suppressions', ciId] });
+    },
+  });
+}
+
+/** The suppressions of a CI's removed discovery edges (F-273); enabled when shown. */
+export function useRelationshipSuppressions(ciId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['relationship-suppressions', ciId],
+    queryFn: () => relationshipSuppressionApi.list(ciId),
+    enabled: !!ciId && enabled,
+  });
+}
+
+/** Lifting a suppression lets the next discovery cycle create the edge again (F-273). */
+export function useLiftSuppression(ciId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => relationshipSuppressionApi.lift(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['relationship-suppressions', ciId] });
+    },
   });
 }
 
@@ -581,6 +610,34 @@ export function useUserList(params: UserListParams) {
   return useQuery({
     queryKey: ['users', params],
     queryFn: () => userApi.list(params),
+  });
+}
+
+/**
+ * useSetUserStatus deactivates or reactivates a user (TLC-04). The answer
+ * replaces the user in every cached list at once, so the status badge
+ * follows the server's answer; the lists are refetched afterwards.
+ */
+export function useSetUserStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: UserStatus }) =>
+      userApi.update(id, { status }),
+    onSuccess: (user) => {
+      queryClient.setQueriesData<PaginatedResponse<AppUser>>({ queryKey: ['users'] }, (list) =>
+        list ? { ...list, data: list.data.map((u) => (u.id === user.id ? user : u)) } : list,
+      );
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    },
+  });
+}
+
+/** useDeleteUser deletes a user; a 409 (open objects, references) leaves the lists as they are. */
+export function useDeleteUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => userApi.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
   });
 }
 

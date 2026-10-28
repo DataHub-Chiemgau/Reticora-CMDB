@@ -39,6 +39,8 @@ const DASHBOARD = [
   // Totals of the CI widgets (limit=1, per status).
   { path: '/cis', reply: () => ({ body: list([]) }) },
   { path: '/collectors', reply: () => ({ body: list([]) }) },
+  // Escalated open review items (REC-08, F-247): the total is the count.
+  { path: '/review-items', reply: () => ({ body: list([]) }) },
   { path: '/slas/breaches', reply: () => ({ body: list([]) }) },
   {
     path: '/compliance/score',

@@ -203,6 +203,33 @@ describe('ReviewInboxPage', () => {
     });
   });
 
+  it('takes escalated=true from the URL into the filter (REC-08, F-247)', async () => {
+    const fetchMock = stubServer([ambiguous]);
+    renderWithProviders(<ReviewInboxPage />, { route: '/reviews?escalated=true' });
+
+    await screen.findByText('sw-core-01');
+    expect(screen.getByLabelText('Nur eskalierte')).toBeChecked();
+    const reviewCalls = () =>
+      fetchMock.mock.calls
+        .map((call) => new URL(String(call[0]), 'http://localhost'))
+        .filter((url) => url.pathname === '/api/v1/review-items');
+    // Every request of the inbox opened from the dashboard link asks for the
+    // escalated open items only.
+    expect(reviewCalls().length).toBeGreaterThan(0);
+    for (const url of reviewCalls()) {
+      expect(url.searchParams.get('escalated')).toBe('true');
+      expect(url.searchParams.get('status')).toBe('open');
+    }
+
+    // The checkbox still switches the filter off.
+    const before = reviewCalls().length;
+    fireEvent.click(screen.getByLabelText('Nur eskalierte'));
+    expect(screen.getByLabelText('Nur eskalierte')).not.toBeChecked();
+    await waitFor(() => expect(reviewCalls().length).toBeGreaterThan(before));
+    const calls = reviewCalls();
+    expect(calls[calls.length - 1]?.searchParams.has('escalated')).toBe(false);
+  });
+
   it('shows the diff and merges into the chosen candidate', async () => {
     const fetchMock = stubServer([ambiguous]);
     renderWithProviders(<ReviewInboxPage />);

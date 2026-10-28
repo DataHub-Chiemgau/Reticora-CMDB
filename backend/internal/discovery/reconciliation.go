@@ -48,6 +48,16 @@ func admitObservedAt(items []IngestItem, arrival time.Time) (admitted []IngestIt
 	return admitted, rejected
 }
 
+// seenAt is the time a record saw its device (GLO-12): its observed_at, so
+// that a spooled record does not make the device look freshly seen; the
+// current time only for a device without one (created from a review).
+func seenAt(item *IngestItem) time.Time {
+	if item.ObservedAt.IsZero() {
+		return time.Now().UTC()
+	}
+	return item.ObservedAt.UTC()
+}
+
 // InterfaceSyncer applies the interfaces a record reports to its CI and
 // removes those missed three times in a row (REC-07). The IPAM repository
 // implements it.

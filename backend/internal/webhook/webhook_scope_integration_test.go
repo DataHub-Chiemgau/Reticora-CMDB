@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -109,5 +110,124 @@ func TestWebhookRepositoryScope(t *testing.T) {
 	}
 	if _, err = repo.ListByEvent(context.Background(), f.OrgA, "ci.created"); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("lookup without scope: got %v, want ErrNoTenantScope", err)
+	}
+}
+
+// TestWebhookRotateSecretRequestScope is the retest of F-183 (TEN-06,
+// WP-016, WP-562): RotateSecret and the request paths of the delivery view
+// run with the principal's scope (database.WithRequestTenant). Without a
+// scope they fail closed, for another organization they are refused, the
+// secret stays unchanged in both cases, a client-1 principal cannot rotate
+// the secret of a client-2 subscription, and the rotation that runs carries
+// the principal's user in app.user_id: a trigger of the test writes
+// app.user_id into the name of the rotated subscription.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestWebhookRotateSecretRequestScope(t *testing.T) {
+	f := scopetest.Seed(t, "29")
+	bg := context.Background()
+	repo := webhook.NewPGRepository(f.App)
+	store := webhook.NewPGDeliveryStore(f.App)
+	orgA, orgB := f.OrgCtx(f.OrgA), f.OrgCtx(f.OrgB)
+	client1, client2 := f.ClientCtx(f.Client1), f.ClientCtx(f.Client2)
+	create := func(ctx context.Context, name string) *webhook.Subscription {
+		t.Helper()
+		scope, _ := database.TenantScopeFromContext(ctx)
+		sub := &webhook.Subscription{OrganizationID: f.OrgA, Name: name, URL: "https://" + name + ".example.invalid/hook",
+			Secret: "old-secret-" + name, Events: []string{"ci.created"}, IsActive: true, Scope: webhook.ScopeOf(&scope)}
+		if err := repo.Create(ctx, sub); err != nil {
+			t.Fatalf("create subscription %s: %v", name, err)
+		}
+		return sub
+	}
+	subOrg := create(orgA, "rotate-orgwide")
+	subClient2 := create(client2, "rotate-client2")
+
+	const fn = "wp562_rotate_actor"
+	if _, err := f.Admin.Exec(bg, `CREATE OR REPLACE FUNCTION `+fn+`() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	IF NEW.secret IS DISTINCT FROM OLD.secret THEN
+		NEW.name := 'rotated by ' || COALESCE(NULLIF(current_setting('app.user_id', true), ''), '<unset>');
+	END IF;
+	RETURN NEW;
+END $$`); err != nil {
+		t.Fatalf("trigger function: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := f.Admin.Exec(context.Background(), `DROP FUNCTION IF EXISTS `+fn+`() CASCADE`); err != nil {
+			t.Errorf("drop trigger function: %v", err)
+		}
+	})
+	if _, err := f.Admin.Exec(bg, `CREATE TRIGGER `+fn+` BEFORE UPDATE ON webhook_subscription FOR EACH ROW
+		WHEN (NEW.organization_id = '`+f.OrgA+`'::uuid) EXECUTE FUNCTION `+fn+`()`); err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+
+	secretOf := func(id string) string {
+		t.Helper()
+		var secret string
+		if err := f.Admin.QueryRow(bg, `SELECT secret FROM webhook_subscription WHERE id = $1`, id).Scan(&secret); err != nil {
+			t.Fatalf("read secret: %v", err)
+		}
+		return secret
+	}
+	validUntil := time.Now().Add(webhook.SecretOverlap)
+
+	if _, err := repo.RotateSecret(bg, f.OrgA, subOrg.ID, "rotated-no-scope", validUntil); !errors.Is(err, database.ErrNoTenantScope) {
+		t.Errorf("rotate without scope: got %v, want ErrNoTenantScope", err)
+	}
+	if _, err := repo.RotateSecret(orgB, f.OrgA, subOrg.ID, "rotated-org-b", validUntil); !errors.Is(err, database.ErrTenantMismatch) {
+		t.Errorf("rotate an organization A subscription with the organization B scope: got %v, want ErrTenantMismatch", err)
+	}
+	if got := secretOf(subOrg.ID); got != subOrg.Secret {
+		t.Fatalf("secret after the refused rotations: %q, want %q unchanged", got, subOrg.Secret)
+	}
+	if _, err := repo.RotateSecret(client1, f.OrgA, subClient2.ID, "rotated-client1", validUntil); err == nil {
+		t.Errorf("client 1 rotates the secret of a client-2 subscription")
+	}
+	if got := secretOf(subClient2.ID); got != subClient2.Secret {
+		t.Fatalf("client-2 secret after the refused rotation: %q, want %q unchanged", got, subClient2.Secret)
+	}
+
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		sub  *webhook.Subscription
+	}{
+		{"org-wide principal", orgA, subOrg},
+		{"client-2 principal", client2, subClient2},
+	} {
+		rotated, err := repo.RotateSecret(c.ctx, f.OrgA, c.sub.ID, "new-secret-"+c.sub.Name, validUntil)
+		if err != nil {
+			t.Fatalf("rotate as %s: %v", c.name, err)
+		}
+		if rotated.Secret != "new-secret-"+c.sub.Name || rotated.PreviousSecret != c.sub.Secret || rotated.PreviousSecretExpiresAt == nil {
+			t.Errorf("rotated as %s: secret %q, previous %q (until %v); want the new secret and the old one as previous",
+				c.name, rotated.Secret, rotated.PreviousSecret, rotated.PreviousSecretExpiresAt)
+		}
+		if want := "rotated by " + f.User; rotated.Name != want {
+			t.Errorf("rotation as %s ran as %q, want %q (app.user_id of the principal)", c.name, rotated.Name, want)
+		}
+	}
+
+	// The request paths of the delivery view fail closed the same way.
+	page := api.PaginationParams{Limit: 10}
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		want error
+	}{
+		{"without scope", bg, database.ErrNoTenantScope},
+		{"with the organization B scope", orgB, database.ErrTenantMismatch},
+	} {
+		if _, _, err := store.ListBySubscription(c.ctx, f.OrgA, subOrg.ID, page); !errors.Is(err, c.want) {
+			t.Errorf("delivery history %s: got %v, want %v", c.name, err, c.want)
+		}
+		if _, _, err := store.ListDeadLetters(c.ctx, f.OrgA, page); !errors.Is(err, c.want) {
+			t.Errorf("dead letters %s: got %v, want %v", c.name, err, c.want)
+		}
+		if _, err := store.Requeue(c.ctx, f.OrgA, subOrg.ID, f.ID(), time.Now()); !errors.Is(err, c.want) {
+			t.Errorf("requeue %s: got %v, want %v", c.name, err, c.want)
+		}
 	}
 }

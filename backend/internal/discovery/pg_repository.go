@@ -1235,13 +1235,13 @@ func (r *PGRepository) DeletedIdentityCandidates(ctx context.Context, orgID stri
 // the parts q carries become terms, so the planner combines the indexes on
 // serial number, hardware UUID, management IP, hostname/FQDN and the primary
 // key (BitmapOr) instead of scanning the inventory (NFR-01, NFR-03).
-// Hostnames compare with the stored lower-case columns (migration 000134):
-// lower() is not leakproof and keeps an index unused under RLS. Primary and
-// interface MACs come from ci_identity_mac (migration 000161, WP-434) with
-// leakproof equality only; the ids are an array of an InitPlan, because an
-// IN sub-select within the OR would be a filter on every CI of the
-// organization. The arguments start at $2 after the organization; ok is
-// false when q carries no identity.
+// Serial numbers, hostnames and FQDNs compare with the stored lower-case
+// columns (migrations 000134 and 000180, F-246): lower() is not leakproof
+// and keeps an index unused under RLS. Primary and interface MACs come from
+// ci_identity_mac (migration 000161, WP-434) with leakproof equality only;
+// the ids are an array of an InitPlan, because an IN sub-select within the
+// OR would be a filter on every CI of the organization. The arguments start
+// at $2 after the organization; ok is false when q carries no identity.
 func identityFilter(orgID string, q *IdentityQuery) (predicate string, args []any, ok bool) {
 	args = []any{orgID}
 	var terms []string
@@ -1250,7 +1250,7 @@ func identityFilter(orgID string, q *IdentityQuery) (predicate string, args []an
 		terms = append(terms, fmt.Sprintf(term, len(args)))
 	}
 	if q.SerialNumber != "" {
-		add("serial_number = $%d", q.SerialNumber)
+		add("serial_number_lc = $%d", strings.ToLower(q.SerialNumber))
 	}
 	if q.HardwareUUID != "" {
 		add("hardware_uuid = $%d::uuid", q.HardwareUUID)
@@ -1310,7 +1310,11 @@ func identityBranches(keys *IdentityKeys, deleted bool) (branches []identityBran
 		}
 	}
 	if len(keys.Serials) > 0 {
-		branch("serial", "serial", fmt.Sprintf("$%d::text[]", add(keys.Serials)), "c.serial_number = k.v", "c.serial_number = k.v")
+		serials := make([]string, len(keys.Serials))
+		for i, v := range keys.Serials {
+			serials[i] = strings.ToLower(v)
+		}
+		branch("serial", "serial", fmt.Sprintf("$%d::text[]", add(serials)), "c.serial_number_lc = k.v", "c.serial_number_lc = k.v")
 	}
 	if len(keys.UUIDs) > 0 {
 		branch("uuid", "uuid", fmt.Sprintf("$%d::text[]::uuid[]", add(keys.UUIDs)), "c.hardware_uuid = k.v", "c.hardware_uuid = k.v")

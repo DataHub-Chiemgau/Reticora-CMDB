@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -10,6 +11,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -17,9 +19,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/go-chi/chi/v5"
@@ -40,12 +44,68 @@ func testIssuer(t *testing.T) *identity.SessionIssuer {
 	return issuer
 }
 
-// testRouter serves the operator routes without a database: the audit
-// fails and is logged, the organization listing is not used.
+// testRouter serves the operator routes. Without a database the handler
+// needs an audit stand-in (withAudit): an Auditor without a pool fails, and
+// with it every operator request (F-208).
 func testRouter(h *Handler) *chi.Mux {
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 	return mux
+}
+
+// memoryAudit is operator_audit without a database: it keeps the entries
+// and runs a change without a transaction. With fail set every write fails;
+// a change already made then stays (no rollback without a database), so
+// the atomicity is proven against PostgreSQL (audit_integration_test.go).
+type memoryAudit struct {
+	mu      sync.Mutex
+	entries []AuditEntry
+	fail    error
+}
+
+func (m *memoryAudit) Record(_ context.Context, e *AuditEntry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.fail != nil {
+		return fmt.Errorf("%w: %w", ErrAuditFailed, m.fail)
+	}
+	m.entries = append(m.entries, *e)
+	return nil
+}
+
+func (m *memoryAudit) RecordChange(ctx context.Context, _ string, change func(ctx context.Context) (*AuditEntry, error)) error {
+	e, err := change(ctx)
+	if err != nil {
+		return err
+	}
+	return m.Record(ctx, e)
+}
+
+func (m *memoryAudit) List(context.Context, int, int) ([]AuditEntry, int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.entries), len(m.entries), nil
+}
+
+func (m *memoryAudit) Verify(context.Context) (VerifyResult, error) {
+	return VerifyResult{Valid: true, Checked: len(m.entries)}, nil
+}
+
+// actions lists the actions of the recorded entries.
+func (m *memoryAudit) actions() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []string
+	for _, e := range m.entries {
+		out = append(out, e.Action)
+	}
+	return out
+}
+
+// withAudit replaces the audit of h.
+func withAudit(h *Handler, a auditLog) *Handler {
+	h.audit = a
+	return h
 }
 
 func get(mux http.Handler, path string, header map[string]string) *httptest.ResponseRecorder {
@@ -114,7 +174,7 @@ func TestOperatorLoginRequiresGroupAndMFA(t *testing.T) {
 // The tenant API refuses operator sessions.
 func TestOperatorPathAdmitsOperatorsOnly(t *testing.T) {
 	issuer := testIssuer(t)
-	mux := testRouter(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, issuer, NewAuditor(nil), nil))
+	mux := testRouter(withAudit(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, issuer, nil, nil), &memoryAudit{}))
 	now := time.Now().UTC()
 	sign := func(c identity.SessionClaims) string {
 		t.Helper()
@@ -154,7 +214,7 @@ func TestOperatorPathAdmitsOperatorsOnly(t *testing.T) {
 		t.Errorf("break-glass use not counted: %d -> %d", before, BreakGlassUses())
 	}
 
-	disabled := testRouter(NewHandler(Config{}, nil, issuer, NewAuditor(nil), nil))
+	disabled := testRouter(withAudit(NewHandler(Config{}, nil, issuer, nil, nil), &memoryAudit{}))
 	if w := get(disabled, "/api/v1/admin/me", map[string]string{BreakGlassHeader: ""}); w.Code != http.StatusUnauthorized {
 		t.Errorf("empty break-glass header without configured token: %d", w.Code)
 	}
@@ -264,8 +324,8 @@ func TestOperatorCallbackRequiresGroupAndACR2(t *testing.T) {
 	issuer := testIssuer(t)
 	oidc := identity.NewOIDCProvider(identity.OIDCConfig{IssuerURL: idp.server.URL, ClientID: "reticora-app",
 		ClientSecret: "secret", RedirectURL: "https://app.example.com/auth/callback"})
-	mux := testRouter(NewHandler(Config{BreakGlassToken: testBreakGlass, Group: "operators", MFAACRValues: []string{"2"}},
-		oidc, issuer, NewAuditor(nil), nil))
+	mux := testRouter(withAudit(NewHandler(Config{BreakGlassToken: testBreakGlass, Group: "operators", MFAACRValues: []string{"2"}},
+		oidc, issuer, nil, nil), &memoryAudit{}))
 	callback := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/auth/callback",
 			strings.NewReader(`{"code":"c","state":"s","code_verifier":"v"}`))
@@ -315,6 +375,76 @@ func TestOperatorCallbackRequiresGroupAndACR2(t *testing.T) {
 	if bg := get(mux, "/api/v1/admin/me", map[string]string{BreakGlassHeader: testBreakGlass}); bg.Code != http.StatusOK ||
 		!strings.Contains(bg.Body.String(), `"kind":"break_glass"`) {
 		t.Errorf("break-glass: %d %s", bg.Code, bg.Body.String())
+	}
+}
+
+// TestOperatorActionsFailWithoutTheirAuditEntry covers WP-564 (SEC-07,
+// F-208) without a database: when the operator_audit entry cannot be
+// written (an Auditor without a database, a failing audit), operator
+// actions without a data change (login, /admin/me, a refused request)
+// answer 500 instead of their response, the login hands out no session,
+// and a grant is not carried out.
+func TestOperatorActionsFailWithoutTheirAuditEntry(t *testing.T) {
+	idp := newFakeIdP(t)
+	issuer := testIssuer(t)
+	oidc := identity.NewOIDCProvider(identity.OIDCConfig{IssuerURL: idp.server.URL, ClientID: "reticora-app",
+		ClientSecret: "secret", RedirectURL: "https://app.example.com/auth/callback"})
+	now := time.Now().UTC()
+	operatorToken, err := issuer.Issue(identity.SessionClaims{Subject: "op-1", Operator: true, IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const org = "11111111-1111-4111-8111-111111111111"
+
+	for name, audit := range map[string]auditLog{
+		"auditor without a database": NewAuditor(nil),
+		"failing audit":              &memoryAudit{fail: errors.New("insert operator audit: disk full")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := entitlement.NewService(entitlement.NewMemoryRepository(), entitlement.Options{Enforce: true})
+			mux := testRouter(withAudit(NewHandler(Config{BreakGlassToken: testBreakGlass, Group: "operators", MFAACRValues: []string{"2"}},
+				oidc, issuer, nil, nil), audit).WithEntitlements(svc))
+			for what, header := range map[string]map[string]string{
+				"operator session": {"Authorization": "Bearer " + operatorToken},
+				"break-glass":      {BreakGlassHeader: testBreakGlass},
+				"no credentials":   nil,
+			} {
+				w := get(mux, "/api/v1/admin/me", header)
+				if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), `"kind"`) {
+					t.Errorf("/admin/me, %s: %d %s, want 500 without the identity", what, w.Code, w.Body.String())
+				}
+			}
+			for login, claims := range map[string]map[string]any{
+				"operator, acr 2": {"groups": []string{"operators"}, "acr": "2"},
+				"operator, acr 1": {"groups": []string{"operators"}, "acr": "1"},
+			} {
+				idp.claims = claims
+				req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/auth/callback",
+					strings.NewReader(`{"code":"c","state":"s","code_verifier":"v"}`))
+				req.Header.Set("Content-Type", "application/json")
+				w := httptest.NewRecorder()
+				mux.ServeHTTP(w, req)
+				if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), "token") {
+					t.Errorf("login %s: %d %s, want 500 without a session", login, w.Code, w.Body.String())
+				}
+			}
+			w := post(mux, "/api/v1/admin/orgs/"+org+"/entitlements", `{"feature_key":"ticketing"}`,
+				map[string]string{"Authorization": "Bearer " + operatorToken})
+			if w.Code != http.StatusInternalServerError {
+				t.Errorf("grant: %d %s, want 500", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	// An Auditor without a database refuses before the change.
+	svc := entitlement.NewService(entitlement.NewMemoryRepository(), entitlement.Options{Enforce: true})
+	mux := testRouter(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, issuer, NewAuditor(nil), nil).WithEntitlements(svc))
+	if w := post(mux, "/api/v1/admin/orgs/"+org+"/entitlements", `{"feature_key":"ticketing"}`,
+		map[string]string{BreakGlassHeader: testBreakGlass}); w.Code != http.StatusInternalServerError {
+		t.Errorf("grant without audit: %d %s, want 500", w.Code, w.Body.String())
+	}
+	if svc.IsEnabled(context.Background(), org, entitlement.FeatureTicketing) {
+		t.Error("grant without audit entry took effect")
 	}
 }
 

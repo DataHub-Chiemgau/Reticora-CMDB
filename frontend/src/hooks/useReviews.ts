@@ -119,6 +119,23 @@ export function useReviewItems(filter: ReviewFilter, offset = 0) {
 }
 
 /**
+ * useEscalatedReviewCount reads how many open items are escalated, i.e. open
+ * longer than 14 days (REC-08): the total of GET
+ * /review-items?escalated=true&status=open with one row. enabled holds the
+ * request back, e.g. while the right to read the items is not confirmed.
+ * The key starts with review-items, so a resolution refreshes it.
+ */
+export function useEscalatedReviewCount(enabled = true) {
+  return useQuery({
+    queryKey: ['review-items', 'escalated-count'],
+    queryFn: () =>
+      fetchAPI<PaginatedResponse<ReviewItem>>('/review-items?escalated=true&status=open&limit=1'),
+    select: (page) => page.total ?? 0,
+    enabled,
+  });
+}
+
+/**
  * fetchAllReviewItems loads every item that matches the filter page by page,
  * following has_more with the next offset, so a bulk resolution can cover
  * all of them, not only the page shown (F-345).

@@ -266,8 +266,10 @@ export function useLifecycleTransition(entityType: 'assets' | 'cis', id: string)
 }
 
 // Locations
-export function useLocationTree() {
-  return useQuery({ queryKey: ['locations', 'tree'], queryFn: () => locationApi.tree() });
+// The tree is read where a page needs it: the CI detail page names the
+// location, site and room of a CI only when it has one (CI-06, DB-05).
+export function useLocationTree({ enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery({ queryKey: ['locations', 'tree'], queryFn: () => locationApi.tree(), enabled });
 }
 
 export function useCreateLocation() {

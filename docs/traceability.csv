@@ -956,3 +956,51 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
 TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-645
 EXP-01;[B], DATEV [P2];B;backend/internal/platform/blob/public_url_test.go;WP-647
 EXP-01;[B], DATEV [P2];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-647
+SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-563
+AUT-01;[B];B;backend/internal/identity/first_login_integration_test.go;WP-570
+AUT-09;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-570
+REL-08;[B];D;backend/internal/relationship/provenance_integration_test.go;WP-583
+REL-04;[B];D;backend/internal/relationship/provenance_integration_test.go;WP-583
+TEN-06;[B];B;backend/internal/webhook/webhook_scope_integration_test.go;WP-562
+OPS-05;[B];B;backend/internal/webhook/delivery_claim_integration_test.go;WP-562
+TEN-06;[B];B;backend/internal/database/tenantguard_test.go;WP-561
+API-02;[B];C;backend/internal/identity/apikey_integration_test.go;WP-565
+TLC-04;[B];B;frontend/e2e-real/user-lifecycle.spec.ts;WP-571
+RBA-02;[B];B;frontend/src/pages/UserManagementPage.lifecycle.test.tsx;WP-571
+TLC-04;[B];B;backend/internal/user/self_lockout_integration_test.go;WP-648
+API-02;[B];C;backend/internal/ci/listquery_integration_test.go;WP-566
+SEC-07;[B];B;backend/internal/operator/audit_integration_test.go;WP-564
+ENT-04;[B];B;backend/internal/operator/entitlements_test.go;WP-564
+ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-564
+CI-05;[B];C;backend/internal/ci/restore_integration_test.go;WP-567
+API-05;[B];C;backend/internal/server/t2_ci_include_integration_test.go;WP-567
+REL-03;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-584
+REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-584
+API-01;[B];C;backend/internal/middleware/openapi_test.go;WP-568
+API-03;[B];C;backend/internal/server/openapi_contract_test.go;WP-568
+SEC-01;[B];B;backend/internal/platform/httpx/redact_test.go;WP-569
+API-04;[B];B;backend/internal/middleware/idempotency_integration_test.go;WP-569
+API-03;[B];B;backend/internal/middleware/idempotency_integration_test.go;WP-569
+SIM-02;[B];D;collector/collectorcmd/simulate_test.go;WP-586
+ABN-03;[Q], jeweilige Phase;D;backend/internal/config/config_test.go;WP-586
+CI-12;[B];C;backend/internal/ci/merge_integration_test.go;WP-572
+TST-02;[B];SR;backend/internal/server/e2e_scenarios_integration_test.go;WP-559
+AST-05;[P2];B;backend/internal/relationship/projection_integration_test.go;WP-574
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/relationship/projection_integration_test.go;WP-574
+CI-06;[B];B;frontend/src/pages/CIDetailPage.test.tsx;WP-577
+DB-05;nicht geliefert, CH12/PRI-10;B;frontend/src/pages/CIDetailPage.test.tsx;WP-577
+AST-04;[P2];B;frontend/src/pages/CIFormModal.test.tsx;WP-577
+REC-08;[B];D;frontend/src/pages/DashboardPage.test.tsx;WP-575
+DB-02;nicht geliefert;B;backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go;WP-649
+GLO-12;[B];D;backend/internal/discovery/observed_seen_integration_test.go;WP-580
+REC-02;[B];D;backend/internal/discovery/observed_seen_integration_test.go;WP-580
+REC-07;[B];D;backend/internal/ipam/interface_integration_test.go;WP-580
+REC-12;[B];D;backend/internal/reviews/conflict_integration_test.go;WP-576
+WFL-02;[P3];D;backend/internal/workflow/set_ci_field_integration_test.go;WP-576
+AGT-05;[P4];D;backend/internal/agent/audit_t3_agent_rank_integration_test.go;WP-576
+RCK-03;[B];B;backend/internal/rack/mount_location_integration_test.go;WP-578
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/rack/mount_location_integration_test.go;WP-578
+TLC-01;[B];B;backend/internal/signup/signup_integration_test.go;WP-591
+SEC-10;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-593
+GQL-01;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-593
+EXP-01;[B], DATEV [P2];C;backend/internal/export/export_test.go;WP-593

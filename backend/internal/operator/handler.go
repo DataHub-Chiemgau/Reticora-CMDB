@@ -23,7 +23,7 @@ type Handler struct {
 	cfg      Config
 	oidc     *identity.OIDCProvider
 	sessions *identity.SessionIssuer
-	audit    *Auditor
+	audit    auditLog
 	pool     *pgxpool.Pool
 	// entitlements is written here only (ENT-04).
 	entitlements *entitlement.Service
@@ -54,7 +54,8 @@ var errNotOperator = errors.New("operator: login is not an operator with MFA")
 
 // Callback exchanges an OIDC authorization code (PKCE) for an operator
 // session. Only members of the operator group who logged in with a second
-// factor get one (SEC-07, CH26); every attempt is audited.
+// factor get one (SEC-07, CH26); every attempt is audited, and an attempt
+// whose entry cannot be written is answered 500 without a session.
 func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Code         string `json:"code"`
@@ -91,13 +92,18 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		}
 		// The audit names the failed condition and the acr of the login;
 		// the response stays generic.
-		h.record(r.Context(), &AuditEntry{OperatorID: id.Subject, OperatorKind: KindOIDC, Action: "login",
-			Status: status, Details: map[string]any{"reason": err.Error(), "acr": id.ACR, "remote": r.RemoteAddr}})
+		if !h.record(w, r, &AuditEntry{OperatorID: id.Subject, OperatorKind: KindOIDC, Action: "login",
+			Status: status, Details: map[string]any{"reason": err.Error(), "acr": id.ACR, "remote": r.RemoteAddr}}) {
+			return
+		}
 		api.WriteError(w, status, http.StatusText(status), detail)
 		return
 	}
-	h.record(r.Context(), &AuditEntry{OperatorID: id.Subject, OperatorKind: KindOIDC, Action: "login",
-		Status: http.StatusOK, Details: map[string]any{"remote": r.RemoteAddr, "email": id.Email, "acr": id.ACR}})
+	// No session without its audit entry (F-208).
+	if !h.record(w, r, &AuditEntry{OperatorID: id.Subject, OperatorKind: KindOIDC, Action: "login",
+		Status: http.StatusOK, Details: map[string]any{"remote": r.RemoteAddr, "email": id.Email, "acr": id.ACR}}) {
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{
 		"token":      token,
 		"expires_at": expires.Format(time.RFC3339),
@@ -145,11 +151,25 @@ type OrgSummary struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// ListOrgs lists every organization (system read, E-08).
+// ListOrgs lists the organizations (system read, E-08) page by page, newest
+// first on (created_at, id): limit (default 50, at most 200) and the signed
+// cursor of API-02 (F-215).
 func (h *Handler) ListOrgs(w http.ResponseWriter, r *http.Request) {
+	page, ok := api.ParseNewestFirstPage(w, r)
+	if !ok {
+		return
+	}
 	orgs := []OrgSummary{}
+	var total int
 	err := database.WithSystem(r.Context(), h.pool, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT id::text, name, slug, plan, created_at FROM organization ORDER BY name`)
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM organization`).Scan(&total); err != nil {
+			return err
+		}
+		where, tail, args, err := api.NewestFirstSQL(page, 1)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT id::text, name, slug, plan, created_at FROM organization WHERE `+where+` `+tail, args...)
 		if err != nil {
 			return err
 		}
@@ -167,7 +187,9 @@ func (h *Handler) ListOrgs(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[OrgSummary]{Data: orgs, Total: len(orgs), Limit: len(orgs)})
+	api.WriteJSON(w, http.StatusOK, api.NewestFirstPage(orgs, total, page, func(o *OrgSummary) (time.Time, string) {
+		return o.CreatedAt, o.ID
+	}))
 }
 
 // ListAudit lists operator_audit, newest first.

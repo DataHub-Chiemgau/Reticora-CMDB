@@ -12,7 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -486,6 +489,142 @@ func TestSubscriptionVisibleTo(t *testing.T) {
 		sub := &Subscription{OrganizationID: "o1", Scope: c.snapshot}
 		if got := sub.VisibleTo(c.scope); got != c.want {
 			t.Errorf("%s: visible %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// rolePrincipalCtx attaches an org-wide principal holding the permissions
+// of a standard role, as the authentication middleware does.
+func rolePrincipalCtx(t *testing.T, ctx context.Context, role string) context.Context {
+	t.Helper()
+	keys, ok := permission.StandardRolePermissions(role)
+	if !ok {
+		t.Fatalf("unknown standard role %q", role)
+	}
+	perms := identity.AllPermissions()
+	if keys != nil {
+		perms = perms[:0:0]
+		for _, k := range keys {
+			perms = append(perms, identity.Permission(k))
+		}
+	}
+	ctx = orgWideCtx(ctx, "org-1", "user-"+role)
+	ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: "user-" + role, OrganizationID: "org-1",
+		Type: identity.PrincipalTypeUser, Permissions: perms})
+	return identity.WithPermissions(ctx, perms)
+}
+
+// recordLister serves fixed delivery records and dead letters.
+type recordLister struct {
+	records []DeliveryRecord
+	letters []DeadLetter
+}
+
+func (l *recordLister) DeliverOnce(Subscription, string, any) (Delivery, error) {
+	return Delivery{}, nil
+}
+
+func (l *recordLister) ListDeliveries(context.Context, string, string, api.PaginationParams) ([]DeliveryRecord, int, error) {
+	return append([]DeliveryRecord(nil), l.records...), len(l.records), nil
+}
+
+func (l *recordLister) ListDeadLetters(context.Context, string, api.PaginationParams) ([]DeadLetter, int, error) {
+	return append([]DeadLetter(nil), l.letters...), len(l.letters), nil
+}
+
+// TestWebhookURLOnlyForManagers covers F-202 (SEC-01, WP-569): subscriber
+// URLs carry tokens in path, query or userinfo. GET /webhooks and
+// /webhooks/{id} show a caller without webhook:manage (viewer, or a
+// request without principal) only scheme and host; the URLs in delivery
+// errors are reduced the same way. A caller with webhook:manage
+// (org_admin) sees the full URL.
+func TestWebhookURLOnlyForManagers(t *testing.T) {
+	repo := NewMemoryRepository()
+	subs := []*Subscription{
+		{OrganizationID: "org-1", Name: "slack", URL: "https://hooks.example.com/services/T000/B000/pathsecret?token=querysecret#frag",
+			Secret: "secret", Events: []string{"ci.created"}, IsActive: true},
+		{OrganizationID: "org-1", Name: "basic", URL: "https://hookuser:infosecret@hooks.example.net:8443/in",
+			Secret: "secret", Events: []string{"ci.created"}, IsActive: true},
+	}
+	for _, sub := range subs {
+		if err := repo.Create(context.Background(), sub); err != nil {
+			t.Fatal(err)
+		}
+	}
+	origin := map[string]string{"slack": "https://hooks.example.com", "basic": "https://hooks.example.net:8443"}
+	lister := &recordLister{
+		records: []DeliveryRecord{{ID: "d-1", OrganizationID: "org-1", SubscriptionID: subs[0].ID, Event: "ci.created",
+			Status: StatusFailed, Error: `Post "` + subs[0].URL + `": dial tcp: connection refused`}},
+		letters: []DeadLetter{{ID: "dl-1", OrganizationID: "org-1", SubscriptionID: subs[1].ID, Event: "ci.created",
+			LastError: `Post "` + subs[1].URL + `": context deadline exceeded`}},
+	}
+	mux := chi.NewRouter()
+	NewHandler(repo, lister).RegisterRoutes(mux)
+	secrets := []string{"pathsecret", "querysecret", "frag", "hookuser", "infosecret", "/services", "/in"}
+
+	get := func(ctx context.Context, path string) string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d %s", path, w.Code, w.Body.String())
+		}
+		return w.Body.String()
+	}
+	callers := map[string]context.Context{
+		"viewer":       rolePrincipalCtx(t, context.Background(), "viewer"),
+		"no principal": orgWideCtx(context.Background(), "org-1", "user-x"),
+		"org_admin":    rolePrincipalCtx(t, context.Background(), "org_admin"),
+	}
+	for name, ctx := range callers {
+		manager := name == "org_admin"
+		var list struct {
+			Data []Subscription `json:"data"`
+		}
+		body := get(ctx, "/api/v1/webhooks")
+		if err := json.Unmarshal([]byte(body), &list); err != nil || len(list.Data) != 2 {
+			t.Fatalf("%s: list %s (%v)", name, body, err)
+		}
+		bodies := []string{body}
+		for _, sub := range subs {
+			detail := get(ctx, "/api/v1/webhooks/"+sub.ID)
+			var got Subscription
+			if err := json.Unmarshal([]byte(detail), &got); err != nil {
+				t.Fatal(err)
+			}
+			listed := ""
+			for _, l := range list.Data {
+				if l.ID == sub.ID {
+					listed = l.URL
+				}
+			}
+			want := origin[sub.Name]
+			if manager {
+				want = sub.URL
+			}
+			if got.URL != want || listed != want {
+				t.Errorf("%s: %s url detail %q list %q, want %q", name, sub.Name, got.URL, listed, want)
+			}
+			bodies = append(bodies, detail)
+		}
+		deliveries := get(ctx, "/api/v1/webhooks/"+subs[0].ID+"/deliveries")
+		letters := get(ctx, "/api/v1/webhooks/dead-letters")
+		if manager {
+			if !strings.Contains(deliveries, "querysecret") || !strings.Contains(letters, "infosecret") {
+				t.Errorf("org_admin lost the delivery error: %s %s", deliveries, letters)
+			}
+			continue
+		}
+		if !strings.Contains(deliveries, `Post \"https://hooks.example.com\": dial tcp`) ||
+			!strings.Contains(letters, `Post \"https://hooks.example.net:8443\": context deadline exceeded`) {
+			t.Errorf("%s: delivery errors not reduced to the origin: %s %s", name, deliveries, letters)
+		}
+		for _, b := range append(bodies, deliveries, letters) {
+			for _, secret := range secrets {
+				if strings.Contains(b, secret) {
+					t.Errorf("%s: response contains %q: %s", name, secret, b)
+				}
+			}
 		}
 	}
 }

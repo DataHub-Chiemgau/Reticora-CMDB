@@ -19,7 +19,10 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
@@ -491,20 +494,27 @@ func newUUID() string {
 
 // Slugify derives an organization slug from its name: lower-case ASCII
 // letters and digits separated by single hyphens, at most 48 characters;
-// "org" when nothing remains.
+// "org" when nothing remains. Latin letters lose their diacritics, Greek
+// and Cyrillic are transliterated (F-303); other scripts give nothing.
 func Slugify(name string) string {
+	if slug := slugBase(name); slug != "" {
+		return slug
+	}
+	return "org"
+}
+
+// slugBase is Slugify without the fallback: "" when the name has no
+// letters or digits that transliterate to ASCII.
+func slugBase(name string) string {
 	var b strings.Builder
 	dash := false
-	for _, r := range strings.ToLower(name) {
-		switch r {
-		case 'ä':
-			r = 'a'
-		case 'ö':
-			r = 'o'
-		case 'ü':
-			r = 'u'
-		case 'ß':
-			b.WriteString("ss")
+	for _, r := range norm.NFD.String(strings.ToLower(name)) {
+		if unicode.Is(unicode.Mn, r) {
+			// Diacritics of the decomposed letter (ä → a, é → e, й → и).
+			continue
+		}
+		if t, ok := transliteration[r]; ok {
+			b.WriteString(t)
 			dash = false
 			continue
 		}
@@ -522,8 +532,20 @@ func Slugify(name string) string {
 	if len(slug) > 48 {
 		slug = strings.Trim(slug[:48], "-")
 	}
-	if slug == "" {
-		return "org"
-	}
 	return slug
+}
+
+// transliteration maps the lower-case letters without a decomposition to
+// ASCII: Latin ligatures and stroked letters, Greek (ELOT 743) and
+// Cyrillic (ICAO). An empty string drops the letter.
+var transliteration = map[rune]string{
+	'ß': "ss", 'æ': "ae", 'œ': "oe", 'ø': "o", 'ł': "l", 'đ': "d", 'ð': "d", 'þ': "th", 'ı': "i", 'ħ': "h",
+	'α': "a", 'β': "v", 'γ': "g", 'δ': "d", 'ε': "e", 'ζ': "z", 'η': "i", 'θ': "th", 'ι': "i", 'κ': "k",
+	'λ': "l", 'μ': "m", 'ν': "n", 'ξ': "x", 'ο': "o", 'π': "p", 'ρ': "r", 'σ': "s", 'ς': "s", 'τ': "t",
+	'υ': "y", 'φ': "f", 'χ': "ch", 'ψ': "ps", 'ω': "o",
+	'а': "a", 'б': "b", 'в': "v", 'г': "g", 'д': "d", 'е': "e", 'ж': "zh", 'з': "z", 'и': "i", 'к': "k",
+	'л': "l", 'м': "m", 'н': "n", 'о': "o", 'п': "p", 'р': "r", 'с': "s", 'т': "t", 'у': "u", 'ф': "f",
+	'х': "kh", 'ц': "ts", 'ч': "ch", 'ш': "sh", 'щ': "shch", 'ъ': "ie", 'ы': "y", 'ь': "", 'э': "e",
+	'ю': "iu", 'я': "ia", 'і': "i", 'є': "ie", 'ґ': "g", 'ђ': "d", 'ј': "j", 'љ': "lj", 'њ': "nj",
+	'ћ': "c", 'џ': "dz", 'ѕ': "dz",
 }

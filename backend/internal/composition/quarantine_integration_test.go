@@ -60,6 +60,15 @@ func migrationSection(t *testing.T, file, begin, end string) string {
 	return text
 }
 
+// dropLaterReferences drops the foreign keys of later migrations that depend
+// on the keys 000056 adds: ci_asset_id_fkey (000088), ci_parent_ci_fkey
+// (000089), ci_merged_into_fkey (000108) and ci_identity_mac_ci_fkey (000161).
+const dropLaterReferences = `
+	ALTER TABLE ci DROP CONSTRAINT ci_asset_id_fkey;
+	ALTER TABLE ci DROP CONSTRAINT ci_parent_ci_fkey;
+	ALTER TABLE ci DROP CONSTRAINT ci_merged_into_fkey;
+	ALTER TABLE ci_identity_mac DROP CONSTRAINT ci_identity_mac_ci_fkey;`
+
 func TestMigration56QuarantinesInconsistentRows(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
@@ -85,17 +94,12 @@ func TestMigration56QuarantinesInconsistentRows(t *testing.T) {
 		}
 	}
 
-	// Schema state just before the tenant-reference section of 000056.
-	// ci_asset_id_fkey (000088), ci_parent_ci_fkey (000089),
-	// ci_merged_into_fkey (000108) and ci_identity_mac_ci_fkey (000161)
-	// depend on the keys 000056 adds; the edge scope trigger (000061, since
-	// 000142 refusing endpoints of another organization) did not exist yet.
+	// Schema state just before the tenant-reference section of 000056. The
+	// edge scope trigger (000061, since 000142 refusing endpoints of another
+	// organization) did not exist yet.
+	exec("undo later references", dropLaterReferences)
 	exec("undo 000056 references", `
 		ALTER TABLE ci_relationship DISABLE TRIGGER ci_relationship_scope;
-		ALTER TABLE ci DROP CONSTRAINT ci_asset_id_fkey;
-		ALTER TABLE ci DROP CONSTRAINT ci_parent_ci_fkey;
-		ALTER TABLE ci DROP CONSTRAINT ci_merged_into_fkey;
-		ALTER TABLE ci_identity_mac DROP CONSTRAINT ci_identity_mac_ci_fkey;
 		ALTER TABLE composition DROP CONSTRAINT composition_child_asset_tenant_fkey;
 		ALTER TABLE composition DROP CONSTRAINT composition_child_ci_tenant_fkey;
 		ALTER TABLE composition DROP CONSTRAINT composition_parent_tenant_fkey;
@@ -173,5 +177,75 @@ func TestMigration56QuarantinesInconsistentRows(t *testing.T) {
 	}
 	if n := count(`SELECT count(*) FROM pg_tables WHERE tablename = 'migration_quarantine'`); n != 0 {
 		t.Fatal("down migration left migration_quarantine behind")
+	}
+}
+
+// TestMigration56DownWithoutQuarantineTable covers WP-574 (F-224, E-72
+// Option 1): installations that applied 000056 before E-26 have its
+// composite keys but no migration_quarantine. The down migration used to
+// read the table unconditionally and stopped with "relation does not exist"
+// and a dirty version. It now skips moving rows back when the table is
+// missing and drops everything else as before. The case with the table is
+// TestMigration56QuarantinesInconsistentRows.
+func TestMigration56DownWithoutQuarantineTable(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
+	}
+	ctx := context.Background()
+	admin, err := database.NewMaintenancePool(ctx, dsn)
+	if err != nil {
+		t.Fatalf("maintenance pool: %v", err)
+	}
+	t.Cleanup(admin.Close)
+
+	tx, err := admin.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	count := func(sql string, args ...any) int {
+		t.Helper()
+		var n int
+		if scanErr := tx.QueryRow(ctx, sql, args...).Scan(&n); scanErr != nil {
+			t.Fatalf("%s: %v", sql, scanErr)
+		}
+		return n
+	}
+
+	// Legacy schema state at version 56: the composite keys of 000056
+	// exist, migration_quarantine does not, and the foreign keys of later
+	// migrations that depend on those keys do not exist yet either.
+	if _, err = tx.Exec(ctx, dropLaterReferences+`
+		DROP TABLE migration_quarantine;`); err != nil {
+		t.Fatalf("legacy schema state: %v", err)
+	}
+	const keys000056 = `SELECT count(*) FROM pg_constraint WHERE conname IN (
+		'composition_child_asset_tenant_fkey', 'composition_child_ci_tenant_fkey',
+		'composition_parent_tenant_fkey', 'ci_relationship_target_tenant_fkey',
+		'ci_relationship_source_tenant_fkey', 'asset_id_organization_key', 'ci_id_organization_key')`
+	if n := count(keys000056); n != 7 {
+		t.Fatalf("composite keys of 000056 before down = %d, want 7", n)
+	}
+	relationships := count(`SELECT count(*) FROM ci_relationship`)
+	compositions := count(`SELECT count(*) FROM composition`)
+
+	if _, err = tx.Exec(ctx, migrationSection(t, "000056_rls_enforcement.down.sql",
+		"ALTER TABLE composition DROP CONSTRAINT IF EXISTS composition_child_asset_tenant_fkey;",
+		"DROP TRIGGER IF EXISTS trg_audit_log_no_update")); err != nil {
+		t.Fatalf("000056 down without migration_quarantine: %v", err)
+	}
+	if n := count(keys000056); n != 0 {
+		t.Errorf("composite keys of 000056 after down = %d, want 0", n)
+	}
+	if n := count(`SELECT count(*) FROM pg_tables WHERE tablename = 'migration_quarantine'`); n != 0 {
+		t.Error("down migration created migration_quarantine")
+	}
+	if n := count(`SELECT count(*) FROM ci_relationship`); n != relationships {
+		t.Errorf("ci_relationship rows after down = %d, want %d", n, relationships)
+	}
+	if n := count(`SELECT count(*) FROM composition`); n != compositions {
+		t.Errorf("composition rows after down = %d, want %d", n, compositions)
 	}
 }

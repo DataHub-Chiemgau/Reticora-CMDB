@@ -10,11 +10,13 @@
  * (F-346). Without review:resolve it offers no resolution (RBA-01). The
  * refusal of a single resolution (e.g. the 409 of an item another session
  * resolved meanwhile) stays visible on the page although the refetched list
- * no longer holds the item and its detail closes (WP-557).
+ * no longer holds the item and its detail closes (WP-557). The escalation
+ * filter lives in the URL (?escalated=true), so the link of the dashboard
+ * widget opens the inbox on the escalated items (REC-08, F-247).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useCI, useHasPermission, useMountedCIs } from '../api/hooks';
 import { useCITypes } from '../api/cmdbHooks';
 import { localizedText } from '../api/cmdb';
@@ -120,7 +122,8 @@ export function ReviewInboxPage() {
   const { t } = useTranslation();
   const [status, setStatus] = useState('open');
   const [kind, setKind] = useState('');
-  const [escalated, setEscalated] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const escalated = searchParams.get('escalated') === 'true';
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   // The selection keeps the items themselves, so it holds across pages.
@@ -248,7 +251,16 @@ export function ReviewInboxPage() {
               type="checkbox"
               checked={escalated}
               onChange={(event) => {
-                setEscalated(event.target.checked);
+                const on = event.target.checked;
+                setSearchParams(
+                  (prev) => {
+                    const next = new URLSearchParams(prev);
+                    if (on) next.set('escalated', 'true');
+                    else next.delete('escalated');
+                    return next;
+                  },
+                  { replace: true },
+                );
                 resetSelection();
               }}
             />

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
@@ -30,8 +31,8 @@ func (unknownInvitations) IssueInvitation(context.Context, *identity.Principal, 
 	return user.ErrInvitationInvalid
 }
 
-func (unknownInvitations) ListInvitations(context.Context, string) ([]user.Invitation, error) {
-	return nil, nil
+func (unknownInvitations) ListInvitations(context.Context, string, api.PaginationParams) ([]user.Invitation, int, error) {
+	return nil, 0, nil
 }
 
 func (unknownInvitations) RenewInvitation(context.Context, string, string, *identity.Principal, string, string, time.Time) (*user.Invitation, error) {

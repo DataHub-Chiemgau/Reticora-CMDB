@@ -21,6 +21,9 @@ import {
   ImpactSection,
   CIMetricsSection,
   CIHistorySection,
+  formatDate,
+  formatDateTime,
+  useLocationNames,
 } from '../components/cmdb/CIDetailSections';
 import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
 import { CIParentAssetCard } from '../components/cmdb/CIParentAssetCard';
@@ -86,6 +89,16 @@ export function CIDetailPage() {
     enabled: !!ciTypes.data && !listedType && !!ciTypes.data.has_more,
   });
   const neighborsQuery = useCINeighbors(id);
+  // Location, site and room are shown by name from the location tree (CI-06,
+  // DB-05, F-237); the tree is read only for a CI that has a location.
+  const locations = useLocationNames(
+    !!(
+      ciQuery.data?.location_id ||
+      ciQuery.data?.site_id ||
+      ciQuery.data?.room_id ||
+      ciQuery.data?.asset?.location_id
+    ),
+  );
   const updateCI = useUpdateCI();
   // Instance attribute saves (API-07, F-082): every save carries If-Match with
   // the CI version the page shows. The fields save on every valid change, so
@@ -228,13 +241,25 @@ export function CIDetailPage() {
             <DetailRow label={t('ci.managementIp')} value={ci.management_ip} />
             <DetailRow label={t('ci.firmware')} value={ci.firmware_version} />
             <DetailRow label={t('ci.source')} value={ci.discovery_source} />
-            <DetailRow label={t('ci.location')} value={ci.location_id} />
-            <DetailRow label={t('ci.site')} value={ci.site_id} />
-            <DetailRow label={t('ci.room')} value={ci.room_id} />
-            <DetailRow label={t('ci.firstSeen')} value={ci.first_seen_at} />
-            <DetailRow label={t('ci.lastSeen')} value={ci.last_seen_at} />
-            <DetailRow label={t('ci.created')} value={ci.created_at} />
-            <DetailRow label={t('ci.updated')} value={ci.updated_at} />
+            <DetailRow label={t('ci.location')} value={locations.path(ci.location_id)} />
+            <DetailRow label={t('ci.site')} value={locations.name(ci.site_id)} />
+            <DetailRow label={t('ci.room')} value={locations.name(ci.room_id)} />
+            <DetailRow
+              label={t('ci.firstSeen')}
+              value={formatDateTime(ci.first_seen_at, i18n.language)}
+            />
+            <DetailRow
+              label={t('ci.lastSeen')}
+              value={formatDateTime(ci.last_seen_at, i18n.language)}
+            />
+            <DetailRow
+              label={t('ci.created')}
+              value={formatDateTime(ci.created_at, i18n.language)}
+            />
+            <DetailRow
+              label={t('ci.updated')}
+              value={formatDateTime(ci.updated_at, i18n.language)}
+            />
           </dl>
         </Card>
 
@@ -254,13 +279,23 @@ export function CIDetailPage() {
               {t('ci.assetCanonicalHint')}
             </p>
             <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+              {/* Every canonical field of the asset, read-only (DB-05, AST-04, F-238). */}
               <DetailRow label={t('ci.assetTag')} value={ci.asset.asset_tag} />
               <DetailRow label={t('ci.serialNumber')} value={ci.asset.serial_number} />
-              <DetailRow label={t('ci.location')} value={ci.asset.location_id} />
+              <DetailRow label={t('ci.location')} value={locations.path(ci.asset.location_id)} />
               <DetailRow label={t('ci.physicalLifecycle')} value={ci.asset.lifecycle_state} />
+              <DetailRow label={t('ci.rfidTag')} value={ci.asset.rfid_tag} />
               <DetailRow label={t('ci.barcode')} value={ci.asset.barcode} />
+              <DetailRow
+                label={t('ci.purchaseDate')}
+                value={formatDate(ci.asset.purchase_date, i18n.language)}
+              />
+              <DetailRow
+                label={t('ci.warrantyEnd')}
+                value={formatDate(ci.asset.warranty_end, i18n.language)}
+              />
               <DetailRow label={t('ci.supplier')} value={ci.asset.supplier} />
-              <DetailRow label={t('ci.warrantyEnd')} value={ci.asset.warranty_end} />
+              <DetailRow label={t('ci.invoiceNumber')} value={ci.asset.invoice_number} />
             </dl>
           </Card>
         )}

@@ -47,6 +47,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-97](#e-97) | Obergrenze der Dauer von Alarmregeln (MON-01) | entschieden: 9600 h (Auftraggeber, 2026-10-25) | WP-406 |
 | [E-98](#e-98) | Webhook-Abos und der Scope ihres Erzeugers (TEN-09) | entschieden: Option B (Auftraggeber, 2026-10-25) | WP-601 |
 | [E-99](#e-99) | Auswahl der Oberflächensprache (GLO-10, UI-18) | entschieden (Auftraggeber 2026-10-27): Option 1 | WP-523 |
+| [E-100](#e-100) | Upgrade von Datenbanken mit 000056 vor E-26 (fehlende `migration_quarantine`, Migration 000089) | offen (Empfehlung als Übergangsregel) | WP-649 |
 
 ## E-59
 
@@ -972,3 +973,25 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 **Betroffene IDs:** GLO-10, UI-18
 
 **Betroffene WPs:** WP-523
+
+## E-100
+
+**Thema:** Upgrade von Datenbanken mit 000056 vor E-26 (fehlende `migration_quarantine`, Migration 000089)
+
+**Status:** offen (Empfehlung als Übergangsregel)
+
+**Frage:** E-26 hat die Migration 000056 am 2026-10-01 so geändert, dass sie die Tabelle `migration_quarantine` anlegt. Datenbanken, die 000056 zwischen 2026-09-02 und 2026-10-01 in der früheren Fassung angewendet haben, besitzen die Tabelle nicht. Ihr Upgrade bricht bei 000089 ab, der ersten Migration, die in die Tabelle schreibt (000090, 000091 und 000166 schreiben ebenfalls hinein), mit `relation "migration_quarantine" does not exist`; `schema_migrations` steht danach auf 89 dirty (F-378). Darf die bestehende Migration 000089 angepasst werden, obwohl die Konvention Änderungen bestehender Migrationen ausschließt (Präzedenz E-26, E-94)? Es gibt noch kein ausgeliefertes Release (keine Release-Tags).
+
+**Optionen:**
+
+- 1) 000089 legt `migration_quarantine` an, wenn sie fehlt, mit genau der DDL von 000056 (Spalten, Index, RLS ENABLE und FORCE, Policy, Rechte); idempotente Prüfung über `to_regclass('public.migration_quarantine')`, auf jeder anderen Datenbank ohne Wirkung.
+- 2) 000089 unverändert; eine Vorprüfung von Installer und Kubernetes-Job vor `migrate up` legt die Tabelle an.
+- 3) Nur Dokumentation eines manuellen Schritts (Tabelle vor dem Upgrade von Hand anlegen).
+
+**Empfehlung:** Option 1 analog E-26 und E-94: ohne ausgeliefertes Release wirkt die Änderung auf alle künftigen Upgrades, gilt für jeden Weg zu `migrate up` (Installer, Kubernetes, golang-migrate von Hand) und lässt das Schema frischer Installationen unverändert. Option 2 deckt manuelle Upgrades nicht ab, Option 3 hängt an der Sorgfalt des Betreibers.
+
+**Übergangsregel:** WP-649 (`k6n-quarantine-upgrade`) setzt Option 1 um, mit Release-Hinweis in `docs/betrieb/upgrade-hinweise.md`. Bei Option 2 oder 3 ersetzt die Vorprüfung bzw. die Anleitung die Änderung an 000089; der Test `TestUpgradeFromPreQuarantine56` bleibt.
+
+**Betroffene IDs:** DB-02
+
+**Betroffene WPs:** WP-649

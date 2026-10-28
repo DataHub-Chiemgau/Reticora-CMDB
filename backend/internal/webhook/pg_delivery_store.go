@@ -30,7 +30,12 @@ func NewPGDeliveryStore(pool *pgxpool.Pool) *PGDeliveryStore {
 
 // orgScope is the scope of delivery bookkeeping: deliveries belong to the
 // organization, not to the principal whose action raised the event, so they
-// are written org-wide on behalf of the organization (E-08).
+// are written org-wide on behalf of the organization (E-08). Only the
+// dispatcher paths use it (Enqueue, Update, the retry claim,
+// MoveToDeadLetter, CountDeadSince, PGRepository.Deactivate); the request
+// paths of the delivery view (ListBySubscription, ListDeadLetters, Requeue)
+// and of the subscriptions, RotateSecret included, run with the
+// principal's scope (database.WithRequestTenant, F-183).
 func orgScope(orgID string) *database.TenantScope {
 	scope := database.OrgWideScope(orgID, "")
 	return &scope
@@ -146,44 +151,71 @@ func (s *PGDeliveryStore) CountDue(ctx context.Context, now time.Time) (int, err
 // The system flag only finds the organizations with due deliveries; each
 // organization's deliveries are then leased in its own tenant transaction,
 // because the system flag cannot write (WP-022).
+//
+// The organizations are served in the order of their oldest due delivery,
+// each first up to an equal share of limit, so the backlog of one
+// organization cannot crowd the others out of the batch; what the share
+// leaves of limit goes to the organizations that filled their share, in the
+// same order. A failing organization does not stop the others: ClaimDue
+// returns the deliveries it leased together with the joined errors, and the
+// caller must process them (F-184).
 func (s *PGDeliveryStore) ClaimDue(ctx context.Context, now time.Time, limit int, lease time.Duration) ([]DeliveryRecord, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
 	var orgIDs []string
 	err := database.WithSystem(ctx, s.pool, func(ctx context.Context, tx pgx.Tx) error {
+		// At most limit organizations: each one claims at least one.
 		rows, err := tx.Query(ctx, `
-			SELECT DISTINCT organization_id::text
+			SELECT organization_id::text
 			FROM webhook_delivery
 			WHERE status IN ('pending', 'failed', 'delivering')
 			  AND next_retry_at IS NOT NULL
-			  AND next_retry_at <= $1`, now)
+			  AND next_retry_at <= $1
+			GROUP BY organization_id
+			ORDER BY min(next_retry_at), organization_id
+			LIMIT $2`, now, limit)
 		if err != nil {
 			return fmt.Errorf("find due webhook deliveries: %w", err)
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				return fmt.Errorf("scan organization: %w", err)
-			}
-			orgIDs = append(orgIDs, id)
+		orgIDs, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return fmt.Errorf("scan organization: %w", err)
 		}
-		return rows.Err()
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	if len(orgIDs) == 0 {
+		return nil, nil
+	}
 
 	records := make([]DeliveryRecord, 0, limit)
+	var errs []error
+	claim := func(orgID string, n int) int {
+		claimed, err := s.claimDueForOrg(ctx, orgID, now, n, lease)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("organization %s: %w", orgID, err))
+			return 0
+		}
+		records = append(records, claimed...)
+		return len(claimed)
+	}
+	share := limit / len(orgIDs)
+	var more []string
 	for _, orgID := range orgIDs {
+		if claim(orgID, share) == share {
+			more = append(more, orgID)
+		}
+	}
+	for _, orgID := range more {
 		if len(records) >= limit {
 			break
 		}
-		claimed, err := s.claimDueForOrg(ctx, orgID, now, limit-len(records), lease)
-		if err != nil {
-			return records, err
-		}
-		records = append(records, claimed...)
+		claim(orgID, limit-len(records))
 	}
-	return records, nil
+	return records, errors.Join(errs...)
 }
 
 func (s *PGDeliveryStore) claimDueForOrg(ctx context.Context, orgID string, now time.Time, limit int, lease time.Duration) ([]DeliveryRecord, error) {

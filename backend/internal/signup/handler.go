@@ -106,6 +106,10 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WriteError(w, http.StatusGone, "Gone", err.Error())
 	case errors.Is(err, ErrAccountExists):
 		api.WriteFieldError(w, &api.ConflictError{Field: "email", Message: ErrAccountExists.Error()})
+	case errors.Is(err, ErrSlugTaken):
+		// Every slug candidate of the name is taken (F-303); the request
+		// stays pending.
+		api.WriteFieldError(w, &api.ConflictError{Field: "organization_name", Message: ErrSlugTaken.Error()})
 	case api.WriteFieldError(w, err):
 	default:
 		slog.ErrorContext(r.Context(), "signup failed", "error", err)

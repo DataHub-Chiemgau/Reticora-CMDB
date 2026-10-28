@@ -185,12 +185,6 @@ func ciFilter(f *generated.CIFilter) ci.FilterParams {
 	if f == nil {
 		return out
 	}
-	value := func(p *string) string {
-		if p == nil {
-			return ""
-		}
-		return strings.TrimSpace(*p)
-	}
 	out.Status, out.TypeID, out.ClientID, out.SiteID, out.Search =
 		value(f.Status), value(f.TypeID), value(f.ClientID), value(f.SiteID), value(f.Search)
 	return out

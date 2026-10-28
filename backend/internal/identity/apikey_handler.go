@@ -21,7 +21,11 @@ const (
 // APIKeyManager is the persistence of the api-keys resource.
 type APIKeyManager interface {
 	Create(ctx context.Context, key *StoredAPIKey) (*StoredAPIKey, error)
+	// List returns every key of the organization (quota count).
 	List(ctx context.Context, orgID string) ([]StoredAPIKey, error)
+	// ListPage returns a page newest first on (created_at, id), at most
+	// one key more than the limit, and the number of keys (API-02).
+	ListPage(ctx context.Context, orgID string, page api.PaginationParams) ([]StoredAPIKey, int, error)
 	Get(ctx context.Context, orgID, id string) (*StoredAPIKey, error)
 	Revoke(ctx context.Context, orgID, id string) error
 	Rotate(ctx context.Context, orgID, id string, overlapUntil time.Time) (*RotatedAPIKey, error)
@@ -241,14 +245,20 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusCreated, CreatedAPIKey{APIKeyView: viewOf(created), Key: generated.Plaintext})
 }
 
-// List returns the organization's keys without secrets.
+// List returns a page of the organization's keys without secrets, newest
+// first on (created_at, id): limit (default 50, at most 200) and the signed
+// cursor of API-02 (F-215).
 func (h *APIKeyHandler) List(w http.ResponseWriter, r *http.Request) {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok || p.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "authentication required")
 		return
 	}
-	keys, err := h.keys.List(r.Context(), p.OrganizationID)
+	page, ok := api.ParseNewestFirstPage(w, r)
+	if !ok {
+		return
+	}
+	keys, total, err := h.keys.ListPage(r.Context(), p.OrganizationID, page)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -257,7 +267,9 @@ func (h *APIKeyHandler) List(w http.ResponseWriter, r *http.Request) {
 	for i := range keys {
 		views[i] = viewOf(&keys[i])
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[APIKeyView]{Data: views, Total: len(views), Limit: len(views)})
+	api.WriteJSON(w, http.StatusOK, api.NewestFirstPage(views, total, page, func(v *APIKeyView) (time.Time, string) {
+		return v.CreatedAt, v.ID
+	}))
 }
 
 // Revoke ends a key at once.

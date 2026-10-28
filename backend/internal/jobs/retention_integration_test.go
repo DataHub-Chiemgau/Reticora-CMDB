@@ -2,6 +2,7 @@ package jobs_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -256,5 +257,95 @@ func TestRetentionDeletesOldLocationChanges(t *testing.T) {
 	}
 	if got := retentionEntries(f.OrgB); len(got) != 0 {
 		t.Errorf("retention.history entries of B: %v, want none", got)
+	}
+}
+
+// TestRetentionEndsMergeSnapshotsAndTombstones is the retest of F-251
+// (WP-572, CI-12): retention.merge_snapshots empties the snapshot of a merge
+// 31 days old (the unmerge period of 30 days passed) and keeps its row (the
+// tombstone lasts), deletes the merge row 13 months old (the tombstone of 12
+// months passed) and leaves the merge 29 days old with its snapshot. The run
+// of A writes one retention entry; organization B, whose merges have not
+// expired, keeps its rows unchanged and gets no entry.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRetentionEndsMergeSnapshotsAndTombstones(t *testing.T) {
+	f := scopetest.Seed(t, "97")
+	bg := context.Background()
+	now := time.Now().UTC()
+	const snapshot = `{"changed": [{"row": {"email": "merge@example.org"}, "table": "contact"}], "victim": {"name": "v"}, "survivor": {"name": "s"}}`
+
+	// insert records a merge of org at merged with the periods of a merge
+	// (snapshot 30 days, tombstone 12 months) and returns its id.
+	insert := func(org, client string, merged time.Time) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO ci_merge (organization_id, client_id, survivor_id, victim_id, snapshot,
+			merged_at, snapshot_until, tombstone_until)
+			VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5::jsonb, $6, $6::timestamptz + interval '30 days', $6::timestamptz + interval '12 months')
+			RETURNING id::text`, org, client, f.ID(), f.ID(), snapshot, merged).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	snapshotExpired := insert(f.OrgA, f.Client1, now.AddDate(0, 0, -31))
+	tombstoneExpired := insert(f.OrgA, f.Client1, now.AddDate(0, -13, 0))
+	young := insert(f.OrgA, f.Client1, now.AddDate(0, 0, -29))
+	youngB := insert(f.OrgB, "", now.AddDate(0, 0, -29))
+	recentB := insert(f.OrgB, "", now.AddDate(0, 0, -1))
+
+	r := jobs.NewRetention(f.App, jobs.RetentionFromDays(10, 3*365, 90, 365))
+	if err := r.RunMergeSnapshots(bg); err != nil {
+		t.Fatal(err)
+	}
+	// state returns whether the merge row exists and its snapshot.
+	state := func(id string) (bool, string) {
+		t.Helper()
+		var snap string
+		err := f.Admin.QueryRow(bg, `SELECT snapshot::text FROM ci_merge WHERE id = $1`, id).Scan(&snap)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, ""
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return true, snap
+	}
+	var kept string
+	if err := f.Admin.QueryRow(bg, `SELECT $1::jsonb::text`, snapshot).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if exists, snap := state(snapshotExpired); !exists || snap != "{}" {
+		t.Errorf("merge 31 days old: row %v, snapshot %s, want the row with an empty snapshot", exists, snap)
+	}
+	if exists, _ := state(tombstoneExpired); exists {
+		t.Error("merge 13 months old: the row with the expired tombstone stays")
+	}
+	for name, id := range map[string]string{"merge 29 days old": young, "merge of B 29 days old": youngB, "merge of B 1 day old": recentB} {
+		if exists, snap := state(id); !exists || snap != kept {
+			t.Errorf("%s: row %v, snapshot %s, want it unchanged", name, exists, snap)
+		}
+	}
+	entries := func(org string) []map[string]any {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT changes FROM audit_log WHERE organization_id = $1 AND action = $2 ORDER BY seq`,
+			org, jobs.RetentionMergeSnapshots)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := pgx.CollectRows(rows, pgx.RowTo[map[string]any])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if got := entries(f.OrgA); len(got) != 1 || got[0]["deleted"] != float64(2) {
+		t.Errorf("retention.merge_snapshots entries of A: %v, want one with deleted 2", got)
+	}
+	if got := entries(f.OrgB); len(got) != 0 {
+		t.Errorf("retention.merge_snapshots entries of B: %v, want none", got)
+	}
+	if result, err := audit.Verify(bg, f.App, f.OrgA); err != nil || !result.Intact {
+		t.Errorf("chain of A after the run: %+v %v", result, err)
 	}
 }

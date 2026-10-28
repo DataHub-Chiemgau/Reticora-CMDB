@@ -92,6 +92,18 @@ func main() {
 	// readiness collects the dependencies /readyz verifies.
 	var readiness []server.ReadinessCheck
 
+	// Without the OpenAPI document deprecated operations lose their
+	// lifecycle headers (API-01, F-218): production refuses to start,
+	// elsewhere the warning is logged and /readyz names it.
+	specLoaded, err := middleware.CheckOpenAPISpec(cfg.Environment == config.EnvProduction)
+	if err != nil {
+		slog.Error("invalid configuration", "error", err)
+		os.Exit(1)
+	}
+	if !specLoaded {
+		readiness = append(readiness, openAPINotLoadedReadiness())
+	}
+
 	shutdown, err := observability.Init(cfg.OTelEndpoint, "reticora-server", cfg.Environment)
 	if err != nil {
 		slog.Error("failed to init observability", "error", err)
@@ -387,8 +399,9 @@ func main() {
 		"default_plan", cfg.DefaultPlan, "enforced", cfg.EntitlementEnforcement)
 
 	// Webhook and connector destinations and own SMTP servers are user
-	// input: every outbound call goes through the egress client or dialer
-	// (SEC-08).
+	// input: every outbound call goes through the egress client or dialer,
+	// and the handlers check them against the same policy when they are
+	// stored (Options.Egress, SEC-08).
 	egressPolicy := egress.Options{AllowPrivate: cfg.EgressAllowPrivate}
 	// Notifications (NTF-01, NTF-04): channels with encrypted provider
 	// settings, the in-app center and the delivery queue of the notifier.
@@ -532,6 +545,8 @@ func main() {
 		InvitationAcceptURL: invitationAcceptURL(cfg),
 		MFA:                 mfa,
 		CollectorCA:         collectorPKI,
+		// The restore window of a deleted CI is its retention (CI-05).
+		RetentionSoftDeleteDays: cfg.RetentionSoftDeleteDays,
 	}, httpStages{
 		preAuth:     middleware.PreAuthRateLimiter(cfg.PreAuthRateLimitRPM, cacheStore),
 		auth:        authMiddleware,
@@ -633,10 +648,20 @@ type httpStages struct {
 	validation, idempotency func(http.Handler) http.Handler
 }
 
+// openAPINotLoadedReadiness is the informational /readyz detail
+// details.openapi of a server without the OpenAPI document (F-218).
+func openAPINotLoadedReadiness() server.ReadinessCheck {
+	return server.ReadinessCheck{Name: "openapi", Detail: func(context.Context) (any, error) {
+		return middleware.OpenAPISpecNotLoaded, nil
+	}}
+}
+
 // newHTTPHandler builds the API router and the middleware chain the server
 // serves (API-04):
-// RequestID/Tracing -> Recovery -> Security-Headers -> Pre-Auth-Limit
-// (per IP, AUT-10) -> Auth -> Tenant -> Entitlement -> Rate-Limit ->
+// RequestID/Tracing -> Recovery -> Security-Headers -> Lifecycle headers
+// (API-01, before Auth so that 401/403/429 carry them, F-220) ->
+// Pre-Auth-Limit (per IP, AUT-10) -> Auth -> Tenant -> Entitlement ->
+// Rate-Limit ->
 // [per route: Authz -> Validation -> Idempotency] -> Handler.
 // Validation and idempotency are route middleware (server.Options), so
 // they run after the route's authorization. The HTTP metrics middleware
@@ -653,6 +678,7 @@ func newHTTPHandler(repos server.Repositories, opts server.Options, stages httpS
 		middleware.Recovery,
 		middleware.Logger,
 		middleware.SecurityHeaders,
+		middleware.DeprecationHeaders,
 		stages.preAuth,
 		stages.auth,
 		stages.tenant,

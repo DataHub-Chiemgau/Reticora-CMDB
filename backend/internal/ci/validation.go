@@ -237,6 +237,24 @@ func presentAttributes(stored map[string]any) map[string]any {
 	return out
 }
 
+// overridden reads the fields under a manual override and the value reported
+// last for each from the projected namespaces of stored attributes (REC-12).
+func overridden(stored map[string]any) map[string]*Observation {
+	overrides, _ := stored[NamespaceOverrides].(map[string]any)
+	if len(overrides) == 0 {
+		return nil
+	}
+	observed, _ := stored[NamespaceObserved].(map[string]any)
+	out := make(map[string]*Observation, len(overrides))
+	for field := range overrides {
+		out[field] = nil
+		if entry, ok := observed[field].(map[string]any); ok {
+			out[field] = &Observation{Value: entry["value"]}
+		}
+	}
+	return out
+}
+
 // storedAttributes is the write form of attributes: the values of the
 // instance attributes named in instance move into _instance. The projected
 // namespaces are kept by the statement that writes the row.

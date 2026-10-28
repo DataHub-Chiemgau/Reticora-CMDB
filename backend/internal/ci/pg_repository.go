@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -171,28 +172,75 @@ func withoutSort(ctx context.Context, tx pgx.Tx, restore bool, fn func() error) 
 	return ferr
 }
 
-// List returns paginated CIs filtered by the given parameters.
-// attributeFilterKind checks that an attribute may be filtered (API-02):
-// it must be defined (else 422) and searchable (else 400 with a hint), and
-// its data type gives the filter kind.
-func attributeFilterKind(ctx context.Context, tx pgx.Tx, f api.Filter, key string) (string, error) {
-	var dataType string
-	var searchable bool
-	err := tx.QueryRow(ctx, `SELECT data_type, bool_or(searchable) FROM attribute_definition
-		WHERE key = $1 GROUP BY data_type ORDER BY bool_or(searchable) DESC LIMIT 1`, key).Scan(&dataType, &searchable)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", &api.FieldError{Field: "filter[" + f.Field + "]", Status: http.StatusUnprocessableEntity, Message: fmt.Sprintf("unknown attribute %q", key)}
+// attributeFilterOf checks that an attribute may be filtered (API-02) and
+// returns its filter kind and the CI types the filter is restricted to (nil
+// for none). The definitions of a CI's type decide (WP-566, F-216): a
+// definition of the type and the global ones (of the organization and the
+// system; row level security hides those of other organizations) apply to
+// it, and the attribute is searchable for the type when one of them is.
+// types are the CI types the query names (named), else every type
+// counts. The attribute must be defined for one of them (else 422) and
+// searchable for one (else 400 with a hint); the searchable definitions
+// give the kind, and when they compare differently (integer in one type,
+// text in another) the filter is 400 with the hint to name the type. The
+// hits are restricted to the types the attribute is searchable for unless
+// a searchable global definition covers every type or every named type is
+// one of them, so a filter on a type definition keeps the query shape that
+// its index (partial on the type, WP-435) serves.
+func attributeFilterOf(ctx context.Context, tx pgx.Tx, f api.Filter, key string, types []string, named bool) (kind string, restrict []string, err error) {
+	query, args := `SELECT COALESCE(ci_type_id::text, ''), data_type, searchable FROM attribute_definition WHERE key = $1`, []any{key}
+	if named {
+		query += ` AND (ci_type_id IS NULL OR ci_type_id::text = ANY($2::text[]))`
+		args = append(args, types)
 	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
-		return "", fmt.Errorf("attribute definition %s: %w", key, err)
+		return "", nil, fmt.Errorf("attribute definition %s: %w", key, err)
 	}
-	if !searchable {
-		return "", &api.FieldError{Field: "filter[" + f.Field + "]",
+	var (
+		typeID, dataType string
+		searchable       bool
+		defined, global  bool
+		kinds, typed     []string
+	)
+	if _, err = pgx.ForEachRow(rows, []any{&typeID, &dataType, &searchable}, func() error {
+		defined = true
+		if !searchable {
+			return nil
+		}
+		if k := fieldmeta.FilterKind(dataType); !slices.Contains(kinds, k) {
+			kinds = append(kinds, k)
+		}
+		if typeID == "" {
+			global = true
+		} else {
+			typed = append(typed, typeID)
+		}
+		return nil
+	}); err != nil {
+		return "", nil, fmt.Errorf("attribute definition %s: %w", key, err)
+	}
+	field := "filter[" + f.Field + "]"
+	switch {
+	case !defined && named:
+		return "", nil, &api.FieldError{Field: field, Status: http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("unknown attribute %q for the given ci_type_id", key)}
+	case !defined:
+		return "", nil, &api.FieldError{Field: field, Status: http.StatusUnprocessableEntity, Message: fmt.Sprintf("unknown attribute %q", key)}
+	case len(kinds) == 0:
+		return "", nil, &api.FieldError{Field: field,
 			Message: fmt.Sprintf("attribute %q is not searchable; mark it searchable in its attribute definition to filter on it", key)}
+	case len(kinds) > 1:
+		return "", nil, &api.FieldError{Field: field,
+			Message: fmt.Sprintf("attribute %q has different data types in the CI types that make it searchable; give ci_type_id to filter on it", key)}
 	}
-	return fieldmeta.FilterKind(dataType), nil
+	if global || (named && len(typed) == len(types)) {
+		return kinds[0], nil, nil
+	}
+	return kinds[0], typed, nil
 }
 
+// List returns paginated CIs filtered by the given parameters.
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
 	items := make([]Item, 0)
 	var total int
@@ -235,16 +283,25 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			argPos++
 		}
 		orgNamed := false
+		types, typesNamed := filter.namedTypes()
 		for _, f := range filter.Filters {
 			expr := filterColumns[f.Field].expr
 			if key, ok := f.Attribute(); ok {
-				kind, err := attributeFilterKind(ctx, tx, f, key)
+				kind, restrict, err := attributeFilterOf(ctx, tx, f, key, types, typesNamed)
 				if err != nil {
 					return err
 				}
 				f.Kind = kind
 				if cerr := f.Check(); cerr != nil {
 					return cerr
+				}
+				// Only CIs whose type makes the attribute searchable
+				// (WP-566). A parameter: with one type the custom plan
+				// proves the predicate of the type definition's index.
+				if restrict != nil {
+					whereParts = append(whereParts, fmt.Sprintf("ci_type_id = ANY($%d::uuid[])", argPos))
+					args = append(args, restrict)
+					argPos++
 				}
 				// The expression of the attribute indexes (WP-435, E-73):
 				// reticora_attr_text is leakproof, so the comparison is an
@@ -1048,7 +1105,13 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 			// A malformed value is the client's error, not a 500 (F-229).
 			return nil, &ValidationError{Violations: []Violation{{Field: "last_seen_at", Detail: "must be an RFC 3339 date-time"}}}
 		}
-		setClauses = append(setClauses, fmt.Sprintf("last_seen_at = $%d", argPos))
+		// A sighting (discovery, agent) keeps the later time: a record
+		// observed before the last sighting does not move it back (GLO-12).
+		if req.Manual == nil {
+			setClauses = append(setClauses, fmt.Sprintf("last_seen_at = GREATEST(last_seen_at, $%d)", argPos))
+		} else {
+			setClauses = append(setClauses, fmt.Sprintf("last_seen_at = $%d", argPos))
+		}
 		args = append(args, parsed)
 		argPos++
 	}
@@ -1397,13 +1460,15 @@ func (r *PGRepository) Restore(ctx context.Context, orgID, id string) (*Item, er
 }
 
 // RestoreDeleted implements Restorer: POST /cis/{id}/restore within the
-// retention (CI-05); an older deletion is ErrRetentionExpired.
+// retention (CI-05); an older deletion is ErrRetentionExpired, a CI that is
+// not deleted ErrNotDeleted.
 func (r *PGRepository) RestoreDeleted(ctx context.Context, orgID, id string, retention time.Duration) (*Item, error) {
 	return r.restore(ctx, orgID, id, retention, "update", "api")
 }
 
 // restore clears deleted_at of a deleted CI (retention 0: no limit) and
-// records the change, the audit entry and the ci.restored event.
+// records the change, the audit entry and the ci.restored event. A CI that
+// is not deleted is ErrNotDeleted, a merged one ErrMergeConflict.
 func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention time.Duration, changeType, reason string) (*Item, error) {
 	var restored *Item
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -1417,7 +1482,7 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 			return fmt.Errorf("get ci for restore: %w", err)
 		}
 		if deletedAt == nil {
-			return ErrNotFound
+			return ErrNotDeleted
 		}
 		// A merged CI comes back only through the unmerge (CI-12).
 		if mergedInto != "" {
@@ -1611,6 +1676,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		return nil, err
 	}
 
+	item.Overridden = overridden(item.Attributes)
 	item.Attributes = presentAttributes(item.Attributes)
 	if firstSeen.Valid {
 		t := firstSeen.Time.UTC()
