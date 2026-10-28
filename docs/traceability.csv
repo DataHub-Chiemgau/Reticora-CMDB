@@ -985,3 +985,5 @@ SIM-02;[B];D;collector/collectorcmd/simulate_test.go;WP-586
 ABN-03;[Q], jeweilige Phase;D;backend/internal/config/config_test.go;WP-586
 CI-12;[B];C;backend/internal/ci/merge_integration_test.go;WP-572
 TST-02;[B];SR;backend/internal/server/e2e_scenarios_integration_test.go;WP-559
+AST-05;[P2];B;backend/internal/relationship/projection_integration_test.go;WP-574
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/relationship/projection_integration_test.go;WP-574

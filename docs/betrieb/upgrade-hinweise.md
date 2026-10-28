@@ -128,6 +128,37 @@ neuen Datei `force 56` und `up` bzw. `down -all` und `up`: Version 163 nicht
 dirty, 95 Berechtigungen, 23 globale CI-Typen, Demo-Organisation vorhanden;
 die zweite Datenbank arbeitet weiter mit `SET ROLE reticora_app`.
 
+## Release-Hinweis: Down-Migration 000056 ohne `migration_quarantine` (F-224, E-72)
+
+Umsetzung: WP-574. Installationen, die 000056 vor E-26 angewendet haben,
+besitzen keine Tabelle `migration_quarantine` (`docs/backup-dr.md`, Abschnitt
+„Migration 000056“). Frühere Builds der Down-Migration lasen die Tabelle ohne
+Prüfung und brachen dort mit `relation "migration_quarantine" does not exist`
+ab; `schema_migrations` stand danach auf 55 dirty, das Schema auf 56.
+
+- Die Down-Migration prüft jetzt `to_regclass('migration_quarantine')`. Ohne
+  Tabelle entfällt das Zurückspielen, alles andere läuft wie bisher. Mit
+  Tabelle ändert sich nichts.
+- Die up-Migration 000056 ist unverändert. Installationen, die nur
+  aktualisieren, sind nicht betroffen.
+- Ein mit einem früheren Build gescheiterter Rollback: `migrate … force 56`,
+  dann `migrate … down 1` mit den Migrationsdateien dieses Releases. Wer bei
+  den älteren Dateien bleibt, legt vorher eine leere Tabelle an
+  (`docs/backup-dr.md`).
+
+Nachgestellt mit golang-migrate auf einer eigenen Datenbank: Migrationen 1
+bis 56, danach `DROP TABLE migration_quarantine`. Mit der alten Datei endet
+`down 1` mit dem Fehler oben und 55 dirty; nach `force 56` läuft `down 1` mit
+der neuen Datei durch (55, nicht dirty). Mit der alten Datei und einer zuvor
+angelegten leeren Tabelle läuft es ebenfalls durch.
+
+Migration 000179 (WP-574, F-243) ist eine neue Datenmigration: Sie bricht
+Enthaltensein-Zyklen in `ci.parent_ci_id`, die 000089 aus zyklischen
+Alt-`contains`-Zeilen übernommen hat, am jüngsten CI auf und legt dessen
+bisherigen Parent in `migration_quarantine` ab (`migration = '000179'`). Ihre
+Down-Migration nimmt die Reparatur nicht zurück. Prüfung und Nacharbeit:
+`docs/backup-dr.md`, Abschnitt „Migration 000179“.
+
 ## Prüfung
 
 `TestMigrationsRoundtrip` (`backend/internal/database/migrations_roundtrip_integration_test.go`)

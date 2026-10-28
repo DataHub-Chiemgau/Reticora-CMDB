@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // TestStructureIsProjected covers WP-079 (DB-05, REL-01, AST-05, CH27)
@@ -221,5 +224,157 @@ func TestMigration89MovesContainment(t *testing.T) {
 	}
 	if stored != 0 || quarantined != 2 {
 		t.Errorf("structural rows: %d stored, %d quarantined; want 0 and 2", stored, quarantined)
+	}
+}
+
+// TestMigration179RepairsParentCycles covers WP-574 (AST-05, DB-05; F-243)
+// inside a rolled-back transaction. Migration 000089 moved stored contains
+// rows into ci.parent_ci_id before it created the cycle trigger, so cyclic
+// legacy rows became a parent_ci_id cycle. Migration 000179 breaks every
+// cycle at its youngest CI: the parent_ci_id moves to migration_quarantine
+// and is cleared. Acyclic containment, also below a cycle, stays unchanged.
+func TestMigration179RepairsParentCycles(t *testing.T) {
+	if os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
+	}
+	f := scopetest.Seed(t, "71")
+	bg := context.Background()
+	// A 2-cycle and a CI below it in org A, a 3-cycle in org B and an
+	// acyclic chain in org A.
+	names := map[string]string{}
+	newCI := func(org, name string) string {
+		id := f.CI(t, org, "", name)
+		names[id] = name
+		return id
+	}
+	a1, a2, tail := newCI(f.OrgA, "mig179-a1"), newCI(f.OrgA, "mig179-a2"), newCI(f.OrgA, "mig179-tail")
+	b1, b2, b3 := newCI(f.OrgB, "mig179-b1"), newCI(f.OrgB, "mig179-b2"), newCI(f.OrgB, "mig179-b3")
+	p, q, r := newCI(f.OrgA, "mig179-p"), newCI(f.OrgA, "mig179-q"), newCI(f.OrgA, "mig179-r")
+
+	read := func(file string) string {
+		t.Helper()
+		raw, err := os.ReadFile("../../migrations/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	text89 := read("000089_ci_parent_projection.up.sql")
+	start := strings.Index(text89, "WITH structural AS")
+	end := strings.Index(text89, "ALTER TABLE ci_relationship ADD CONSTRAINT ci_relationship_not_structural")
+	if start < 0 || end < start {
+		t.Fatal("data section of 000089 not found")
+	}
+	tx, err := f.Admin.Begin(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(bg) }()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, execErr := tx.Exec(bg, sql, args...); execErr != nil {
+			t.Fatalf("%.60s: %v", sql, execErr)
+		}
+	}
+	// a2 and b2 are the youngest CIs of their cycles.
+	for i, id := range []string{a1, b1, b3, tail, p, q, r, a2, b2} {
+		exec(`UPDATE ci SET created_at = now() - make_interval(days => 10 - $2::int) WHERE id = $1`, id, i)
+	}
+
+	// Legacy rows as 000089 found them: its UPDATE ran before the trigger
+	// existed.
+	exec(`ALTER TABLE ci_relationship DROP CONSTRAINT ci_relationship_not_structural`)
+	exec(`ALTER TABLE ci DISABLE TRIGGER trg_ci_parent_cycle`)
+	exec(`INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type) VALUES
+		($1, $2, $3, 'contains'), ($1, $3, $2, 'contains'), ($1, $2, $4, 'contains'),
+		($1, $5, $6, 'contains'), ($1, $6, $7, 'contains')`, f.OrgA, a1, a2, tail, p, q, r)
+	exec(`INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type) VALUES
+		($1, $2, $3, 'contains'), ($1, $4, $3, 'child_of'), ($1, $4, $2, 'contains')`, f.OrgB, b1, b2, b3)
+	exec(text89[start:end])
+	exec(`ALTER TABLE ci ENABLE TRIGGER trg_ci_parent_cycle`)
+
+	ids := []string{a1, a2, tail, b1, b2, b3, p, q, r}
+	parents := func() map[string]string {
+		t.Helper()
+		out := map[string]string{}
+		for _, id := range ids {
+			var parent string
+			if scanErr := tx.QueryRow(bg, `SELECT COALESCE(parent_ci_id::text, '') FROM ci WHERE id = $1`, id).Scan(&parent); scanErr != nil {
+				t.Fatal(scanErr)
+			}
+			out[names[id]] = names[parent]
+		}
+		return out
+	}
+	// F-243: the legacy rows became parent_ci_id cycles.
+	legacy := map[string]string{
+		"mig179-a1": "mig179-a2", "mig179-a2": "mig179-a1", "mig179-tail": "mig179-a1",
+		"mig179-b1": "mig179-b3", "mig179-b2": "mig179-b1", "mig179-b3": "mig179-b2",
+		"mig179-p": "", "mig179-q": "mig179-p", "mig179-r": "mig179-q",
+	}
+	if got := parents(); !maps.Equal(got, legacy) {
+		t.Fatalf("parents after 000089 = %v, want %v", got, legacy)
+	}
+
+	repairUp := read("000179_ci_parent_cycle_repair.up.sql")
+	repairDown := read("000179_ci_parent_cycle_repair.down.sql")
+	exec(repairUp)
+
+	repaired := maps.Clone(legacy)
+	repaired["mig179-a2"], repaired["mig179-b2"] = "", ""
+	if got := parents(); !maps.Equal(got, repaired) {
+		t.Errorf("parents after 000179 = %v, want %v", got, repaired)
+	}
+	// No CI reaches itself through its parents any more.
+	var onCycle int
+	if err = tx.QueryRow(bg, `
+		WITH RECURSIVE up (start_id, id, depth) AS (
+			SELECT id, parent_ci_id, 1 FROM ci WHERE id = ANY ($1::uuid[]) AND parent_ci_id IS NOT NULL
+			UNION ALL
+			SELECT up.start_id, c.parent_ci_id, up.depth + 1 FROM up JOIN ci c ON c.id = up.id
+			WHERE c.parent_ci_id IS NOT NULL AND up.id <> up.start_id AND up.depth < 20
+		)
+		SELECT count(DISTINCT start_id) FROM up WHERE id = start_id`, ids).Scan(&onCycle); err != nil {
+		t.Fatal(err)
+	}
+	if onCycle != 0 {
+		t.Errorf("%d CIs still on a parent_ci_id cycle after 000179", onCycle)
+	}
+
+	quarantine := func() []string {
+		t.Helper()
+		rows, qErr := tx.Query(bg, `
+			SELECT organization_id::text || ' ' || (row_data->>'id') || ' ' || (row_data->>'parent_ci_id')
+			       || ' ' || jsonb_array_length(row_data->'cycle') || ' ' || (row_data->'cycle'->>0)
+			FROM migration_quarantine
+			WHERE migration = '000179' AND source_table = 'ci' AND organization_id IN ($1, $2)
+			ORDER BY 1`, f.OrgA, f.OrgB)
+		if qErr != nil {
+			t.Fatal(qErr)
+		}
+		got, qErr := pgx.CollectRows(rows, pgx.RowTo[string])
+		if qErr != nil {
+			t.Fatal(qErr)
+		}
+		return got
+	}
+	wantQuarantine := []string{
+		f.OrgA + " " + a2 + " " + a1 + " 2 " + a2,
+		f.OrgB + " " + b2 + " " + b1 + " 3 " + b2,
+	}
+	slices.Sort(wantQuarantine)
+	if got := quarantine(); !slices.Equal(got, wantQuarantine) {
+		t.Errorf("quarantine of 000179 = %v, want %v", got, wantQuarantine)
+	}
+
+	// The down migration keeps the repair and the quarantined rows; a
+	// second up finds no cycle.
+	exec(repairDown)
+	exec(repairUp)
+	if got := parents(); !maps.Equal(got, repaired) {
+		t.Errorf("parents after down and up again = %v, want %v", got, repaired)
+	}
+	if got := quarantine(); !slices.Equal(got, wantQuarantine) {
+		t.Errorf("quarantine after down and up again = %v, want %v", got, wantQuarantine)
 	}
 }

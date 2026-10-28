@@ -401,7 +401,45 @@ ORDER BY organization_id, source_table;
 
 Repair a row by re-creating the relationship or composition with valid
 references through the API, then delete the quarantine entry. `migrate down`
-past 000056 moves all quarantined rows back into their tables.
+past 000056 moves the rows that 000056 quarantined back into their tables and
+then drops `migration_quarantine`. The down migrations of later migrations run
+before it; entries they keep (for example those of 000166 and 000179, or the
+review rows that 000095 to 000097 and 000130 park there) are dropped with the
+table, so export it before such a rollback if they are still needed.
+
+**Rollback on installations migrated before this change.** Such an
+installation has no `migration_quarantine` (see the release note below).
+Since WP-574 (F-224, E-72 Option 1) the down migration of 000056 checks
+`to_regclass('migration_quarantine')`: without the table there is nothing to
+move back, and it drops the composite keys and the rest as usual. Use the
+migration files of a release that contains this change:
+
+```bash
+migrate -path backend/migrations -database "$DATABASE_URL" down 1   # from version 56
+```
+
+With the migration files of an older release the down migration stops with
+`relation "migration_quarantine" does not exist` and leaves version 55 dirty
+(the transaction is rolled back, the schema is still at version 56). Either
+run `migrate … force 56` and repeat the rollback with the files of a current
+release, or, staying with the older files, create an empty table first and
+then roll back; the down migration drops it again:
+
+```sql
+SELECT to_regclass('public.migration_quarantine');  -- NULL on such an installation
+CREATE TABLE migration_quarantine (source_table text NOT NULL, migration text NOT NULL, row_data jsonb NOT NULL);
+```
+
+```bash
+migrate -path backend/migrations -database "$DATABASE_URL" force 56   # only if the failed attempt left 55 dirty
+migrate -path backend/migrations -database "$DATABASE_URL" down 1
+```
+
+Both ways are covered: `TestMigration56DownWithoutQuarantineTable`
+(`backend/internal/composition/quarantine_integration_test.go`) runs the
+down section on a schema with the composite keys and without the table;
+`TestMigration56QuarantinesInconsistentRows` checks that with the table the
+rows come back as before.
 
 **Release note for installations migrated before this change.** Earlier
 builds of 000056 deleted those rows without a copy. An installation is
@@ -431,6 +469,30 @@ it is missing there). Check from backup whether rows were lost:
    'lost-000056.csv' CSV HEADER`), clarify each row with the affected tenant
    and re-create the valid ones through the API. Record the check in the
    operations log.
+
+## Migration 000179: containment cycles (AST-05)
+
+Migration 000089 turned stored `contains` rows into `ci.parent_ci_id` before
+it created the cycle trigger, so cyclic legacy rows (A contains B, B contains
+A) became a containment cycle (F-243). Migration 000179 breaks every
+`parent_ci_id` cycle at its youngest CI (`created_at`): it moves that CI's
+`parent_ci_id` into `migration_quarantine` (`source_table = 'ci'`,
+`migration = '000179'`; `row_data` holds `id`, `parent_ci_id` and `cycle`,
+the CIs from this one along their parents) and clears it. All other parents
+stay. Review the entries with a maintenance connection:
+
+```sql
+SELECT organization_id, row_data->>'id' AS ci_id, row_data->>'parent_ci_id' AS old_parent,
+       row_data->'cycle' AS cycle, quarantined_at
+FROM migration_quarantine
+WHERE migration = '000179'
+ORDER BY organization_id, quarantined_at;
+```
+
+Set the correct parent through the API (the cycle trigger refuses a parent
+that closes the cycle again), then delete the entry. `migrate down` past
+000179 keeps the repair and the entries: a restored parent would close the
+cycle again.
 
 ## Outage and backpressure suite (OPS-06)
 

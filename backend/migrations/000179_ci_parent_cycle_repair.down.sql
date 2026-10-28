@@ -1,0 +1,4 @@
+-- Migration 000179 down: nothing to undo. The repair is not reverted: a
+-- restored parent_ci_id would close the containment cycle again (AST-05),
+-- and trg_ci_parent_cycle refuses it. The quarantined rows stay in
+-- migration_quarantine for the operator; a following up finds no cycle.
