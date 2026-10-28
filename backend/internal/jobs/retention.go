@@ -48,6 +48,8 @@ const (
 	RetentionHistory     = "retention.history"
 	RetentionSoftDeleted = "retention.soft_deleted"
 	RetentionReviewItems = "retention.review_items"
+	// RetentionMergeSnapshots ends what a CI merge keeps (CI-12, F-251).
+	RetentionMergeSnapshots = "retention.merge_snapshots"
 )
 
 // Retention deletes expired data.
@@ -77,6 +79,7 @@ func (r *Retention) Schedules() []Schedule {
 		{Kind: RetentionHistory, Spec: "27 3 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunHistory},
 		{Kind: RetentionSoftDeleted, Spec: "37 3 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunSoftDeleted},
 		{Kind: RetentionReviewItems, Spec: "47 3 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunReviewItems},
+		{Kind: RetentionMergeSnapshots, Spec: "57 3 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunMergeSnapshots},
 	}
 }
 
@@ -155,6 +158,32 @@ func (r *Retention) RunReviewItems(ctx context.Context) error {
 			return 0, fmt.Errorf("delete review items: %w", err)
 		}
 		return int(tag.RowsAffected()), nil
+	})
+}
+
+// RunMergeSnapshots ends what a CI merge keeps (CI-12, F-251): the
+// snapshot of a merge, with copies of both CIs and of the moved rows
+// (contacts among them), is emptied once its unmerge period passed
+// (snapshot_until, 30 days); the merge row with its tombstone is deleted
+// once tombstone_until (12 months) passed, so GET on the victim no longer
+// redirects to the survivor. The periods are those the merge recorded in
+// its row. The cutoff is never later than the database clock, by which the
+// unmerge decides whether a snapshot expired (an emptied snapshot it took
+// for valid would restore nothing). The count is the emptied snapshots
+// plus the deleted rows.
+func (r *Retention) RunMergeSnapshots(ctx context.Context) error {
+	now := r.now()
+	return r.eachOrganization(ctx, RetentionMergeSnapshots, true, func(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
+		deleted, err := tx.Exec(ctx, `DELETE FROM ci_merge WHERE organization_id = $1 AND tombstone_until < LEAST($2::timestamptz, now())`, orgID, now)
+		if err != nil {
+			return 0, fmt.Errorf("delete expired merge tombstones: %w", err)
+		}
+		emptied, err := tx.Exec(ctx, `UPDATE ci_merge SET snapshot = '{}'::jsonb
+			WHERE organization_id = $1 AND snapshot_until < LEAST($2::timestamptz, now()) AND snapshot <> '{}'::jsonb`, orgID, now)
+		if err != nil {
+			return int(deleted.RowsAffected()), fmt.Errorf("empty expired merge snapshots: %w", err)
+		}
+		return int(deleted.RowsAffected() + emptied.RowsAffected()), nil
 	})
 }
 

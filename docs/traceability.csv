@@ -983,3 +983,4 @@ API-04;[B];B;backend/internal/middleware/idempotency_integration_test.go;WP-569
 API-03;[B];B;backend/internal/middleware/idempotency_integration_test.go;WP-569
 SIM-02;[B];D;collector/collectorcmd/simulate_test.go;WP-586
 ABN-03;[Q], jeweilige Phase;D;backend/internal/config/config_test.go;WP-586
+CI-12;[B];C;backend/internal/ci/merge_integration_test.go;WP-572

@@ -14,6 +14,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -229,5 +230,185 @@ func TestMergeMovesEndpointAgentLink(t *testing.T) {
 	}
 	if got, _ := link(agentO); got != other {
 		t.Errorf("after the unmerge the other agent is linked to %s, want %s", got, other)
+	}
+}
+
+// mergeJobTrail is the job tracker of a merge that notes the status of the
+// ci.merge job in the database after every step of the merge.
+type mergeJobTrail struct {
+	svc      *jobs.Service
+	repo     *jobs.PGRepository
+	statuses map[string][]jobs.Status
+}
+
+func (m *mergeJobTrail) note(ctx context.Context, orgID, refID string) {
+	if job, err := m.repo.GetByRef(ctx, orgID, "ci_merge", refID); err == nil {
+		m.statuses[refID] = append(m.statuses[refID], job.Status)
+	}
+}
+
+func (m *mergeJobTrail) Track(ctx context.Context, orgID, kind, refTable, refID, createdBy string) error {
+	err := m.svc.Track(ctx, orgID, kind, refTable, refID, createdBy)
+	m.note(ctx, orgID, refID)
+	return err
+}
+
+func (m *mergeJobTrail) Mirror(ctx context.Context, orgID, refTable, refID string, status jobs.Status, errMsg string) error {
+	err := m.svc.Mirror(ctx, orgID, refTable, refID, status, errMsg)
+	m.note(ctx, orgID, refID)
+	return err
+}
+
+func (m *mergeJobTrail) MirrorFailure(ctx context.Context, orgID, refTable, refID string, cause error, public ...error) error {
+	err := m.svc.MirrorFailure(ctx, orgID, refTable, refID, cause, public...)
+	m.note(ctx, orgID, refID)
+	return err
+}
+
+// TestMergeRecordsItsJob covers F-251 (WP-572, CI-12) against PostgreSQL:
+// POST /cis/{survivor}/merge runs as a job of kind ci.merge, queued →
+// running → succeeded, and the merge row names it (ci_merge.job_id), also
+// for a principal restricted to a client; a failing merge (the victim is
+// locked by another merge) leaves its job failed with the error text and
+// no ci_merge row. After the retention run retention.merge_snapshots the
+// merge row of an expired tombstone is gone and GET on the victim is 404.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestMergeRecordsItsJob(t *testing.T) {
+	f := scopetest.Seed(t, "b3")
+	bg := context.Background()
+	jobRepo := jobs.NewPGRepository(f.App)
+	trail := &mergeJobTrail{svc: jobs.NewService(jobRepo), repo: jobRepo, statuses: map[string][]jobs.Status{}}
+	mux := chi.NewRouter()
+	ci.NewHandler(ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder())).WithJobs(trail)).RegisterRoutes(mux)
+	orgCtx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	clientCtx := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	call := func(ctx context.Context, method, path, body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(method, path, bytes.NewBufferString(body)).WithContext(ctx))
+		return w
+	}
+	survivor := f.CI(t, f.OrgA, f.Client1, "merge-job-survivor")
+	victim := f.CI(t, f.OrgA, f.Client1, "merge-job-victim")
+	merge := func(ctx context.Context, survivor, victim string) *httptest.ResponseRecorder {
+		return call(ctx, http.MethodPost, "/api/v1/cis/"+survivor+"/merge", `{"victim_id":"`+victim+`"}`)
+	}
+	// jobsOf returns the ci.merge jobs tracked since the last call.
+	seen := map[string]bool{}
+	newJobs := func() []string {
+		var out []string
+		for ref := range trail.statuses {
+			if !seen[ref] {
+				seen[ref] = true
+				out = append(out, ref)
+			}
+		}
+		return out
+	}
+	type jobRow struct {
+		id, kind, status, errText string
+		attempts                  int
+		started, finished         bool
+	}
+	jobOf := func(ref string) jobRow {
+		t.Helper()
+		var j jobRow
+		if err := f.Admin.QueryRow(bg, `SELECT id::text, kind, status, COALESCE(error, ''), attempts, started_at IS NOT NULL,
+			finished_at IS NOT NULL FROM job WHERE ref_table = 'ci_merge' AND ref_id = $1`, ref).
+			Scan(&j.id, &j.kind, &j.status, &j.errText, &j.attempts, &j.started, &j.finished); err != nil {
+			t.Fatalf("job of merge %s: %v", ref, err)
+		}
+		return j
+	}
+	mergeRows := func(ref string) (rows int, jobID string) {
+		t.Helper()
+		if err := f.Admin.QueryRow(bg, `SELECT count(*), COALESCE(max(job_id::text), '') FROM ci_merge WHERE id = $1`, ref).
+			Scan(&rows, &jobID); err != nil {
+			t.Fatal(err)
+		}
+		return rows, jobID
+	}
+
+	// A failing merge: another transaction holds the victim.
+	lock, err := f.Admin.Begin(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = lock.Exec(bg, "SELECT id FROM ci WHERE id = $1 FOR UPDATE", victim); err != nil {
+		t.Fatal(err)
+	}
+	if w := merge(orgCtx, survivor, victim); w.Code != http.StatusConflict {
+		t.Errorf("merge of a locked CI: %d %s", w.Code, w.Body.String())
+	}
+	_ = lock.Rollback(bg)
+	failed := newJobs()
+	if len(failed) != 1 {
+		t.Fatalf("jobs of the failing merge: %v", failed)
+	}
+	if got := trail.statuses[failed[0]]; len(got) != 3 || got[0] != jobs.StatusQueued || got[1] != jobs.StatusRunning || got[2] != jobs.StatusFailed {
+		t.Errorf("status of the failing merge job: %v, want queued, running, failed", got)
+	}
+	if j := jobOf(failed[0]); j.kind != ci.MergeJobKind || j.status != string(jobs.StatusFailed) || j.errText != ci.ErrMergeConflict.Error() || !j.finished {
+		t.Errorf("failed merge job: %+v", j)
+	}
+	if rows, _ := mergeRows(failed[0]); rows != 0 {
+		t.Errorf("the failing merge left %d ci_merge rows", rows)
+	}
+
+	// The merge succeeds: its row names its job.
+	w := merge(orgCtx, survivor, victim)
+	if w.Code != http.StatusOK {
+		t.Fatalf("merge: %d %s", w.Code, w.Body.String())
+	}
+	var res ci.MergeResult
+	if err = json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if got := newJobs(); len(got) != 1 || got[0] != res.MergeID {
+		t.Fatalf("jobs of the merge %s: %v", res.MergeID, got)
+	}
+	if got := trail.statuses[res.MergeID]; len(got) != 3 || got[0] != jobs.StatusQueued || got[1] != jobs.StatusRunning || got[2] != jobs.StatusSucceeded {
+		t.Errorf("status of the merge job: %v, want queued, running, succeeded", got)
+	}
+	j := jobOf(res.MergeID)
+	if j.kind != ci.MergeJobKind || j.status != string(jobs.StatusSucceeded) || j.errText != "" || j.attempts != 1 || !j.started || !j.finished {
+		t.Errorf("merge job: %+v", j)
+	}
+	if rows, jobID := mergeRows(res.MergeID); rows != 1 || jobID != j.id {
+		t.Errorf("ci_merge %s: %d rows, job_id %q, want the job %s", res.MergeID, rows, jobID, j.id)
+	}
+
+	// A principal restricted to the client sees its job: the row names it.
+	survivor2 := f.CI(t, f.OrgA, f.Client1, "merge-job-survivor-2")
+	victim2 := f.CI(t, f.OrgA, f.Client1, "merge-job-victim-2")
+	if w = merge(clientCtx, survivor2, victim2); w.Code != http.StatusOK {
+		t.Fatalf("merge of the client principal: %d %s", w.Code, w.Body.String())
+	}
+	if err = json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	newJobs()
+	if rows, jobID := mergeRows(res.MergeID); rows != 1 || jobID == "" || jobID != jobOf(res.MergeID).id {
+		t.Errorf("ci_merge of the client principal: %d rows, job_id %q", rows, jobID)
+	}
+
+	// The tombstone of the first merge expired: the retention run deletes
+	// the merge row, GET on the victim is 404.
+	if _, err = f.Admin.Exec(bg, `UPDATE ci_merge SET merged_at = now() - interval '13 months',
+		tombstone_until = now() - interval '1 month', snapshot_until = now() - interval '12 months' WHERE victim_id = $1`, victim); err != nil {
+		t.Fatal(err)
+	}
+	if err = jobs.NewRetention(f.App, jobs.RetentionFromDays(10, 1095, 90, 365)).RunMergeSnapshots(bg); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err = f.Admin.QueryRow(bg, `SELECT count(*) FROM ci_merge WHERE victim_id = $1`, victim).Scan(&left); err != nil || left != 0 {
+		t.Errorf("merge rows of the expired tombstone: %d %v", left, err)
+	}
+	if w = call(orgCtx, http.MethodGet, "/api/v1/cis/"+victim, ""); w.Code != http.StatusNotFound {
+		t.Errorf("GET victim after the tombstone: %d %s", w.Code, w.Header().Get("Location"))
+	}
+	if w = call(orgCtx, http.MethodGet, "/api/v1/cis/"+victim2, ""); w.Code != http.StatusMovedPermanently {
+		t.Errorf("GET victim of the young merge: %d", w.Code)
 	}
 }

@@ -30,6 +30,8 @@ import (
 // The victim is soft-deleted with merged_into_id; GET on it answers 301 to
 // the survivor for 12 months (tombstone). The snapshot of the merge allows
 // an unmerge within 30 days. A merge of a CI another merge holds is 409.
+// The retention run retention.merge_snapshots empties expired snapshots and
+// deletes the merge row once its tombstone expired (jobs.Retention).
 
 // Retention of the tombstone and of the snapshot.
 const (
@@ -103,7 +105,7 @@ func (s *Service) WithJobs(tracker jobs.Tracker) *Service {
 
 // Merge merges victimID into survivorID (CI-12). With a job tracker the
 // merge is a job: queued, running and finished with the merge row as its
-// reference.
+// reference; the merge row names the job (ci_merge.job_id, F-251).
 func (s *Service) Merge(ctx context.Context, orgID, survivorID, victimID string) (*MergeResult, error) {
 	return s.MergeAs(ctx, orgID, survivorID, victimID, newMergeID())
 }
@@ -396,13 +398,16 @@ func (r *PGRepository) Merge(ctx context.Context, orgID, survivorID, victimID, m
 			return fmt.Errorf("encode merge snapshot: %w", err)
 		}
 		actor := nilIfEmpty(tenant.FromContext(ctx).UserID)
-		err = tx.QueryRow(ctx, `INSERT INTO ci_merge (id, organization_id, client_id, site_id, survivor_id, victim_id, actor_id, snapshot,
+		// The merge row names the ci.merge job tracked under its id (F-251);
+		// a merge without job tracker has none.
+		err = tx.QueryRow(ctx, `INSERT INTO ci_merge (id, organization_id, client_id, site_id, survivor_id, victim_id, job_id, actor_id, snapshot,
 				tombstone_until, snapshot_until)
-			VALUES (COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()), $2, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, $5, $6, $7, $8::jsonb,
-				now() + $9 * interval '1 second', now() + $10 * interval '1 second')
+			VALUES (COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()), $2, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, $5, $6,
+				(SELECT j.id FROM job j WHERE j.organization_id = $2 AND j.kind = $11 AND j.ref_table = 'ci_merge' AND j.ref_id = NULLIF($1, '')::uuid),
+				$7, $8::jsonb, now() + $9 * interval '1 second', now() + $10 * interval '1 second')
 			RETURNING id::text, tombstone_until, snapshot_until`,
 			mergeID, orgID, merged.ClientID, merged.SiteID, survivorID, victimID, actor, rawSnap,
-			int64(MergeTombstoneRetention/time.Second), int64(MergeSnapshotRetention/time.Second)).
+			int64(MergeTombstoneRetention/time.Second), int64(MergeSnapshotRetention/time.Second), MergeJobKind).
 			Scan(&result.MergeID, &result.TombstoneUntil, &result.SnapshotUntil)
 		if err != nil {
 			var pgErr *pgconn.PgError
