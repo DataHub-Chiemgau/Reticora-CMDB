@@ -632,7 +632,7 @@ export interface paths {
     /**
      * List audit log entries
      * @deprecated
-     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05).
+     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05). A principal restricted to clients, sites or teams lists only the entries about objects it may read, for domain and route entries alike (`resource_type` `ci` or `racks`); entries of an unknown type and about deleted objects are hidden from it, `total` counts only the visible entries (TEN-06, TEN-09, F-389).
      */
     get: operations['listAuditEntriesLegacy'];
     put?: never;
@@ -660,7 +660,7 @@ export interface paths {
     };
     /**
      * List audit log entries
-     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05).
+     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05). A principal restricted to clients, sites or teams lists only the entries about objects it may read, for domain and route entries alike (`resource_type` `ci` or `racks`); entries of an unknown type and about deleted objects are hidden from it, `total` counts only the visible entries (TEN-06, TEN-09, F-389).
      */
     get: operations['listAuditEntries'];
     put?: never;

@@ -1038,3 +1038,7 @@ AGT-06;[P4];B;frontend/src/api/client.test.ts;WP-560
 AUT-10;[B];B;backend/internal/middleware/ratelimit_test.go;WP-658
 API-04;[B];B;backend/internal/middleware/ratelimit_test.go;WP-658
 NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/ingest_budget_integration_test.go;WP-657
+TEN-06;[B];B;backend/internal/server/audit_log_scope_integration_test.go;WP-660
+TEN-09;[Q];B;backend/internal/server/audit_log_scope_integration_test.go;WP-660
+AUD-05;[B];B;backend/internal/server/audit_log_scope_integration_test.go;WP-660
+AUD-05;[B];B;backend/internal/audit/scope_test.go;WP-660

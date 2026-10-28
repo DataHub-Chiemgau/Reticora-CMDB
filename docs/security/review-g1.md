@@ -342,6 +342,18 @@ Fehlende Kombinationen:
   (SR-14), Dokumente und Wartungsfenster (SR-15) und die Scope-Kette des
   Site-Grants (SR-25). Einen HTTP-Lauf je Scope-Art hat die Matrix für diese
   Ressourcen nicht.
+- Audit-Log (F-389, WP-660): Die Audit-Liste filterte für eingeschränkte
+  Principals nur die Domänentypen `ci`, `asset`, `contact`, `credential`,
+  `document` und `ticket`; die Einträge des Routen-Audits (`racks`,
+  `relationships`, `assets` …) zeigte sie mit Namen und alten und neuen
+  Werten auch für Objekte fremder Clients und Sites. Seit WP-660 hat jeder
+  Typ, den ein Auditor schreibt, eine Scope-Regel (`audit/scope.go`): sichtbar
+  ist ein Eintrag nur, wenn der Principal die genannte Zeile lesen darf;
+  unbekannte Typen sind verborgen. HTTP-Lauf für Client- und Site-Scope mit
+  org-weiter Kontrolle: `TestAuditLogHidesForeignClientRouteEntries`
+  (`backend/internal/server/audit_log_scope_integration_test.go`);
+  Architekturtests `TestEveryAuditedRouteHasAScopeRule` und
+  `TestEveryRecordedResourceTypeHasAScopeRule`.
 - Die endgültige Formulierung nach WP-409 auf dem Release-Kandidaten
   übernimmt WP-595 (`t5-rc-evidence`).
 

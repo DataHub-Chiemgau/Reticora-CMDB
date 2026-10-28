@@ -734,20 +734,6 @@ func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
-// restrictedResource hides entries about resources outside a restricted
-// principal's scope: the resource tables' policies filter the subqueries,
-// while audit_log carries no client column. Entries about deleted resources
-// are hidden from restricted principals as well (fail-closed); org-wide
-// principals see the whole log.
-const restrictedResource = `CASE audit_log.resource_type
-	WHEN 'ci' THEN EXISTS (SELECT 1 FROM ci WHERE ci.id = audit_log.resource_id)
-	WHEN 'asset' THEN EXISTS (SELECT 1 FROM asset WHERE asset.id = audit_log.resource_id)
-	WHEN 'contact' THEN EXISTS (SELECT 1 FROM contact WHERE contact.id = audit_log.resource_id)
-	WHEN 'credential' THEN EXISTS (SELECT 1 FROM credential WHERE credential.id = audit_log.resource_id)
-	WHEN 'document' THEN EXISTS (SELECT 1 FROM document WHERE document.id = audit_log.resource_id)
-	WHEN 'ticket' THEN EXISTS (SELECT 1 FROM ticket WHERE ticket.id = audit_log.resource_id)
-	ELSE true END`
-
 func (h *Handler) list(ctx context.Context, orgID string, filter *ListFilter, page api.PaginationParams) ([]Entry, int, error) {
 	var entries []Entry
 	var total int
@@ -762,6 +748,9 @@ func (h *Handler) list(ctx context.Context, orgID string, filter *ListFilter, pa
 func listTx(ctx context.Context, tx pgx.Tx, orgID string, filter *ListFilter, page api.PaginationParams) ([]Entry, int, error) {
 	where := "organization_id = $1"
 	args := []any{orgID}
+	// A restricted principal sees only the entries about objects it may
+	// read (restrictedResource, scope.go); audit_log carries no client
+	// column.
 	if scope, ok := database.TenantScopeFromContext(ctx); ok &&
 		(!scope.Clients.IsAll() || !scope.Sites.IsAll() || !scope.Teams.IsAll()) {
 		where += " AND " + restrictedResource

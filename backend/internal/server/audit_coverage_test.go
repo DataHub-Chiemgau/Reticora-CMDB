@@ -193,6 +193,41 @@ func TestEveryWriteRouteHasASnapshotEntry(t *testing.T) {
 	}
 }
 
+// TestEveryAuditedRouteHasAScopeRule is the architecture test of the audit
+// list scope (TEN-06, AUD-05, WP-660, F-389): the route audit writes the
+// first route segment as resource_type, and the audit list shows a
+// restricted principal only entries of a type with a scope rule
+// (audit/scope.go). Every audited write route has one, so a new route's
+// entries are filtered by the row they name instead of being hidden.
+func TestEveryAuditedRouteHasAScopeRule(t *testing.T) {
+	table, err := os.ReadFile(routePermissionsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(table)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !isWriteMethod(fields[0]) {
+			continue
+		}
+		key := fields[0] + " " + fields[1]
+		if _, exempt := auditExemptions[key]; exempt {
+			continue
+		}
+		resourceType, _ := middleware.RouteAction(fields[0], fields[1])
+		if !audit.HasScopeRule(resourceType) {
+			t.Errorf("%s writes resource_type %q, which has no scope rule in audit/scope.go", key, resourceType)
+		}
+		checked++
+	}
+	if checked < 200 {
+		t.Fatalf("only %d audited write routes checked", checked)
+	}
+	if audit.HasScopeRule("zz-new-segment") {
+		t.Error("an unknown resource type has a scope rule")
+	}
+}
+
 // TestWriteRequestsWriteAuditEntries runs write requests through the real
 // router: a successful write stores who, what, which fields, the source,
 // the request and the correlation id; a refused write and a read store
