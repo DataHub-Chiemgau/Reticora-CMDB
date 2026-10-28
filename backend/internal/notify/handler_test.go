@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -190,10 +191,17 @@ func TestNotificationAPI(t *testing.T) {
 	}
 }
 
-// channelAPI serves the notification handler of center for org-1.
+// channelAPI serves the notification handler of center for org-1 under the
+// default egress policy.
 func channelAPI(center *Center) func(method, path, body string) *httptest.ResponseRecorder {
+	return channelAPIWith(center, egress.Options{})
+}
+
+// channelAPIWith serves the notification handler of center for org-1 under
+// the egress policy policy.
+func channelAPIWith(center *Center, policy egress.Options) func(method, path, body string) *httptest.ResponseRecorder {
 	mux := chi.NewRouter()
-	NewHandler(center).RegisterRoutes(mux)
+	NewHandler(center).WithEgress(policy).RegisterRoutes(mux)
 	return func(method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "u-1"}))
@@ -207,34 +215,50 @@ func channelAPI(center *Center) func(method, path, body string) *httptest.Respon
 // F-154 (WP-398): create, read, list and update answer smtp with the
 // password and webhook with the secret as the placeholder, and the webhook
 // url as scheme and host only: path, query and user info carry the token
-// of an incoming webhook. central_smtp and inapp keep their settings.
+// of an incoming webhook. central_smtp and inapp keep their settings. A url
+// with user info is refused since WP-563 (egress policy, F-204); a channel
+// stored with one before (stored) is redacted the same way.
 func TestChannelResponsesRedactSecretsPerProvider(t *testing.T) {
-	call := channelAPI(NewMemoryCenter())
+	center := NewMemoryCenter()
+	call := channelAPI(center)
 	const token, queryToken, userInfo = "T0KENPATH", "T0KENQUERY", "T0KENUSER"
 	for _, tc := range []struct {
 		name, body string
 		secrets    []string
 		want       map[string]any
+		stored     bool
 	}{
 		{"smtp", `{"name":"smtp","provider":"smtp","config":{"host":"mail.example.org","port":587,"from":"cmdb@example.org",
 			"username":"cmdb","password":"pw-` + token + `"}}`, []string{"pw-" + token},
-			map[string]any{"host": "mail.example.org", "username": "cmdb", "password": secretPlaceholder}},
+			map[string]any{"host": "mail.example.org", "username": "cmdb", "password": secretPlaceholder}, false},
 		{"webhook", `{"name":"chat","provider":"webhook","config":{"url":"https://hooks.example.org/services/T0/B0/` + token +
 			`?key=` + queryToken + `#frag","secret":"hmac-` + token + `"}}`, []string{token, queryToken, "hmac-"},
-			map[string]any{"url": "https://hooks.example.org/" + secretPlaceholder, "secret": secretPlaceholder}},
+			map[string]any{"url": "https://hooks.example.org/" + secretPlaceholder, "secret": secretPlaceholder}, false},
 		{"webhook with port and user info", `{"name":"chat-2","provider":"webhook","config":{"url":"https://svc:` + userInfo +
 			`@hooks.example.org:8443/` + token + `"}}`, []string{token, userInfo, "svc:"},
-			map[string]any{"url": "https://hooks.example.org:8443/" + secretPlaceholder}},
+			map[string]any{"url": "https://hooks.example.org:8443/" + secretPlaceholder}, true},
 		{"central_smtp", `{"name":"central","provider":"central_smtp","config":{"sender_name":"CMDB","reply_to":"ops@example.org"}}`, nil,
-			map[string]any{"sender_name": "CMDB", "reply_to": "ops@example.org"}},
-		{"inapp", `{"name":"center","provider":"inapp","config":{}}`, nil, map[string]any{}},
+			map[string]any{"sender_name": "CMDB", "reply_to": "ops@example.org"}, false},
+		{"inapp", `{"name":"center","provider":"inapp","config":{}}`, nil, map[string]any{}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := call(http.MethodPost, "/api/v1/notification-channels", tc.body)
-			if w.Code != http.StatusCreated {
+			var created Channel
+			if tc.stored {
+				if w.Code != http.StatusBadRequest {
+					t.Errorf("create: %d %s, want 400 (egress policy)", w.Code, w.Body.String())
+				}
+				if err := json.Unmarshal([]byte(tc.body), &created); err != nil {
+					t.Fatal(err)
+				}
+				created.OrganizationID, created.Enabled = "org-1", true
+				if err := center.Channels.Create(context.Background(), &created); err != nil {
+					t.Fatal(err)
+				}
+				w = call(http.MethodGet, "/api/v1/notification-channels/"+created.ID, "")
+			} else if w.Code != http.StatusCreated {
 				t.Fatalf("create: %d %s", w.Code, w.Body.String())
 			}
-			var created Channel
 			_ = json.Unmarshal(w.Body.Bytes(), &created)
 			responses := map[string]*httptest.ResponseRecorder{
 				"create": w,
@@ -318,7 +342,8 @@ func TestWebhookURLPlaceholderKeepsTheStoredURL(t *testing.T) {
 func TestDeliveryListShowsNoContent(t *testing.T) {
 	ctx := context.Background()
 	center := NewMemoryCenter()
-	call := channelAPI(center)
+	// The webhook on the loopback interface needs AllowPrivate (WP-563).
+	call := channelAPIWith(center, egress.Options{AllowPrivate: true})
 	const hookToken, inviteToken = "H00KT0KEN", "INV1TET0KEN"
 	for _, body := range []string{
 		// Port 1 refuses the connection: the send fails with the url in its error.

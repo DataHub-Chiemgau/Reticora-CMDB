@@ -1,9 +1,10 @@
 // Package egress provides the outbound HTTP client for user-configured
 // destinations (webhooks, SCIM connectors) and the dialer for other
 // protocols (an organization's own SMTP server). It blocks private,
-// loopback, link-local, cloud-metadata and IPv6 unique-local targets,
-// connects to the address it checked (DNS pinning against rebinding) and
-// re-checks every one of at most three redirects (SEC-08).
+// loopback, link-local, cloud-metadata and IPv6 unique-local targets and
+// IPv6 transition addresses that embed such an IPv4 address, connects to
+// the address it checked (DNS pinning against rebinding) and re-checks
+// every one of at most three redirects (SEC-08).
 package egress
 
 import (
@@ -83,18 +84,54 @@ func mustPrefixes(cidrs ...string) []netip.Prefix {
 	return out
 }
 
+// IPv6 transition prefixes whose addresses embed an IPv4 address (F-205).
+var (
+	nat64Prefix        = netip.MustParsePrefix("64:ff9b::/96")
+	sixToFourPrefix    = netip.MustParsePrefix("2002::/16")
+	teredoPrefix       = netip.MustParsePrefix("2001::/32")
+	ipv4CompatPrefix   = netip.MustParsePrefix("::/96")
+	ipv6ReservedPrefix = netip.MustParsePrefix("::/127") // :: and ::1, no IPv4-compatible addresses
+)
+
+// embeddedIPv4 returns the IPv4 addresses an IPv6 transition address
+// carries and is routed to: NAT64 (64:ff9b::/96) and IPv4-compatible
+// addresses (::/96) the last 32 bits, 6to4 (2002::/16) bits 16 to 47,
+// Teredo (2001::/32) its server (bits 32 to 63) and its client (the last
+// 32 bits, inverted). Other addresses return nil.
+func embeddedIPv4(ip netip.Addr) []netip.Addr {
+	if !ip.Is6() {
+		return nil
+	}
+	b := ip.As16()
+	switch {
+	case nat64Prefix.Contains(ip), ipv4CompatPrefix.Contains(ip) && !ipv6ReservedPrefix.Contains(ip):
+		return []netip.Addr{netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]})}
+	case sixToFourPrefix.Contains(ip):
+		return []netip.Addr{netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]})}
+	case teredoPrefix.Contains(ip):
+		return []netip.Addr{netip.AddrFrom4([4]byte{b[4], b[5], b[6], b[7]}),
+			netip.AddrFrom4([4]byte{^b[12], ^b[13], ^b[14], ^b[15]})}
+	}
+	return nil
+}
+
 // Allowed reports whether a connection to ip is permitted.
 func (o Options) Allowed(ip netip.Addr) bool {
 	// A prefix never contains an address with a zone (fe80::1%eth0): judge
 	// the address without it.
 	ip = ip.WithZone("").Unmap()
-	// NAT64 (64:ff9b::/96) embeds an IPv4 address: judge that address.
-	if ip.Is6() && netip.MustParsePrefix("64:ff9b::/96").Contains(ip) {
-		b := ip.As16()
-		ip = netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]})
-	}
 	if !ip.IsValid() {
 		return false
+	}
+	// NAT64, 6to4, Teredo and IPv4-compatible addresses reach an IPv4
+	// address: judge every one they embed (F-205).
+	if embedded := embeddedIPv4(ip); embedded != nil {
+		for _, v4 := range embedded {
+			if !o.Allowed(v4) {
+				return false
+			}
+		}
+		return true
 	}
 	for _, p := range metadataPrefixes {
 		if p.Contains(ip) {

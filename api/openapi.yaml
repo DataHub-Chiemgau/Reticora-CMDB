@@ -7106,9 +7106,13 @@ paths:
         unique-local network and a port other than 25, 465 or 587 are
         refused with 422 (field host or port, the detail names the
         setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254)
-        are refused in every mode. The address a name resolves to is checked
-        again on every connection. central_smtp is the operator's server and
-        exempt.
+        are refused in every mode. The url of a webhook channel (provider
+        webhook) is held to the same policy: http or https, no credentials
+        in the url, and no IP literal or name of the internal network
+        unless RETICORA_EGRESS_ALLOW_PRIVATE=true, metadata endpoints in no
+        mode; a refused url answers 400 (field url). The address a name
+        resolves to is checked again on every connection. central_smtp is
+        the operator's server and exempt.
       requestBody:
         required: true
         content:
@@ -7165,8 +7169,8 @@ paths:
         while the configuration changes its destination (smtp: host, port,
         tls or username; webhook: url) is refused with 400 (field password
         or secret): it must be entered again. A configuration is held to the
-        egress policy like on create (422, field host or port). Kind and
-        provider cannot change.
+        egress policy like on create (422, field host or port; webhook: 400,
+        field url). Kind and provider cannot change.
       requestBody:
         required: true
         content:
@@ -10499,6 +10503,14 @@ paths:
       operationId: updateIGAConnector
       tags: [IGA]
       summary: Update an IGA connector
+      description: >-
+        A changed base_url of a SCIM connector is held to the rules of
+        create (SEC-08): https, and without RETICORA_EGRESS_ALLOW_PRIVATE=true
+        no IP literal or name of a private, loopback, link-local or
+        unique-local network (also embedded in a NAT64, 6to4, Teredo or
+        IPv4-compatible IPv6 address); cloud metadata endpoints are refused
+        in every mode. A refused URL answers 400 with the field base_url and
+        changes nothing.
       requestBody:
         required: true
         content:

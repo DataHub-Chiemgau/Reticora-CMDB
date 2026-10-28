@@ -201,8 +201,9 @@ type Options struct {
 	// creation (the streaming export endpoint stays available).
 	Blobs blob.Store
 	// Egress is the destination policy of webhook and connector URLs and
-	// of own SMTP servers (SEC-08); the zero value blocks every internal
-	// destination.
+	// of own SMTP servers (SEC-08), when they are stored (webhooks, IGA
+	// connectors, notification channels) and called; the zero value
+	// blocks every internal destination.
 	Egress egress.Options
 	// RouteMiddleware runs on every API route after its authorization, in
 	// order (API-04: validation, then idempotency).

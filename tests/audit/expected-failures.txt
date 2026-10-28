@@ -4,7 +4,6 @@
 # Baseline: main at edccd2d (2026-10-19): 116 go, 34 sh, 11 vitest, 26 e2e-real.
 # e2e-real: ort = <projekt>:<spec-datei> (WP-532); the server-side findings below
 # are listed for each of the six projects of playwright.real.config.ts.
-go;backend/internal/iga;TestAuditT2IGAUpdateValidatesBaseURL;F-203
 sh;tests/audit/g1-gate-evidence.test.sh;abn01_texts;F-138
 sh;tests/audit/g1-gate-evidence.test.sh;install_evidence_current;F-122
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_field;F-039

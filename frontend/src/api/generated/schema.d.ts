@@ -3504,7 +3504,7 @@ export interface paths {
     put?: never;
     /**
      * Create a notification channel
-     * @description Requires notification:manage. The response is redacted like the list. The server of an own SMTP channel (provider smtp) is held to the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true an IP literal or name of a private, loopback, link-local or unique-local network and a port other than 25, 465 or 587 are refused with 422 (field host or port, the detail names the setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254) are refused in every mode. The address a name resolves to is checked again on every connection. central_smtp is the operator's server and exempt.
+     * @description Requires notification:manage. The response is redacted like the list. The server of an own SMTP channel (provider smtp) is held to the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true an IP literal or name of a private, loopback, link-local or unique-local network and a port other than 25, 465 or 587 are refused with 422 (field host or port, the detail names the setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254) are refused in every mode. The url of a webhook channel (provider webhook) is held to the same policy: http or https, no credentials in the url, and no IP literal or name of the internal network unless RETICORA_EGRESS_ALLOW_PRIVATE=true, metadata endpoints in no mode; a refused url answers 400 (field url). The address a name resolves to is checked again on every connection. central_smtp is the operator's server and exempt.
      */
     post: operations['createNotificationChannel'];
     delete?: never;
@@ -3538,7 +3538,7 @@ export interface paths {
     head?: never;
     /**
      * Update name, configuration or enabled flag
-     * @description Requires notification:manage. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. A secret sent back as `********` while the configuration changes its destination (smtp: host, port, tls or username; webhook: url) is refused with 400 (field password or secret): it must be entered again. A configuration is held to the egress policy like on create (422, field host or port). Kind and provider cannot change.
+     * @description Requires notification:manage. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. A secret sent back as `********` while the configuration changes its destination (smtp: host, port, tls or username; webhook: url) is refused with 400 (field password or secret): it must be entered again. A configuration is held to the egress policy like on create (422, field host or port; webhook: 400, field url). Kind and provider cannot change.
      */
     patch: operations['updateNotificationChannel'];
     trace?: never;
@@ -5181,7 +5181,10 @@ export interface paths {
     delete: operations['deleteIGAConnector'];
     options?: never;
     head?: never;
-    /** Update an IGA connector */
+    /**
+     * Update an IGA connector
+     * @description A changed base_url of a SCIM connector is held to the rules of create (SEC-08): https, and without RETICORA_EGRESS_ALLOW_PRIVATE=true no IP literal or name of a private, loopback, link-local or unique-local network (also embedded in a NAT64, 6to4, Teredo or IPv4-compatible IPv6 address); cloud metadata endpoints are refused in every mode. A refused URL answers 400 with the field base_url and changes nothing.
+     */
     patch: operations['updateIGAConnector'];
     trace?: never;
   };

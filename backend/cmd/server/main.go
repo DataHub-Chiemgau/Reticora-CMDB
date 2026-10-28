@@ -387,8 +387,9 @@ func main() {
 		"default_plan", cfg.DefaultPlan, "enforced", cfg.EntitlementEnforcement)
 
 	// Webhook and connector destinations and own SMTP servers are user
-	// input: every outbound call goes through the egress client or dialer
-	// (SEC-08).
+	// input: every outbound call goes through the egress client or dialer,
+	// and the handlers check them against the same policy when they are
+	// stored (Options.Egress, SEC-08).
 	egressPolicy := egress.Options{AllowPrivate: cfg.EgressAllowPrivate}
 	// Notifications (NTF-01, NTF-04): channels with encrypted provider
 	// settings, the in-app center and the delivery queue of the notifier.

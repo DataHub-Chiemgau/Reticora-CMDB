@@ -34,16 +34,17 @@ func NewMemoryCenter() *Center {
 // channel administration (NTF-04, API-05).
 type Handler struct {
 	c *Center
-	// egress validates the servers of own SMTP channels when they are
-	// stored (SEC-08).
+	// egress validates the servers of own SMTP channels and the urls of
+	// webhook channels when they are stored (SEC-08).
 	egress egress.Options
 }
 
 // NewHandler creates the handler.
 func NewHandler(c *Center) *Handler { return &Handler{c: c} }
 
-// WithEgress sets the destination policy own SMTP servers are validated
-// against; the default blocks every internal destination.
+// WithEgress sets the destination policy own SMTP servers and webhook
+// urls are validated against; the default blocks every internal
+// destination.
 func (h *Handler) WithEgress(opts egress.Options) *Handler {
 	h.egress = opts
 	return h
@@ -86,7 +87,11 @@ func writeError(w http.ResponseWriter, err error) {
 	var blocked *DestinationError
 	switch {
 	case errors.As(err, &blocked):
-		api.WriteFieldError(w, &api.FieldError{Field: blocked.Field, Message: blocked.Err.Error(), Status: http.StatusUnprocessableEntity})
+		status := blocked.Status
+		if status == 0 {
+			status = http.StatusUnprocessableEntity
+		}
+		api.WriteFieldError(w, &api.FieldError{Field: blocked.Field, Message: blocked.Err.Error(), Status: status})
 	case errors.Is(err, ErrValidation):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 	case errors.Is(err, ErrNotFound):
