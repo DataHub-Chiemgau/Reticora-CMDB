@@ -755,6 +755,10 @@ func setupObjectStorage(cfg *config.Config) (*blob.S3Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Signed download URLs name the public origin, not minio:9000 (F-376).
+	if err := store.SetPublicURL(cfg.S3PublicURL); err != nil {
+		return nil, err
+	}
 	for _, bucket := range []string{export.ExportBucket, "reticora-documents", cfg.S3Bucket} {
 		if bucket == "" {
 			continue

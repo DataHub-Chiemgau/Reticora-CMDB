@@ -162,6 +162,36 @@ type S3Store struct {
 	secretKey string
 	useSSL    bool
 	client    *http.Client
+	// public, when set, is the base URL under which browsers reach the
+	// object store (SetPublicURL); signed GET URLs name it instead of the
+	// internal endpoint.
+	public *url.URL
+}
+
+// SetPublicURL sets the base URL (http(s)://host[:port][/path]) under which
+// browsers reach the object store, e.g. <public base URL>/objects behind the
+// frontend's reverse proxy. Signed GET URLs keep the signature over the
+// internal endpoint (the proxy forwards with that Host) but name this base:
+// the internal name (minio:9000) is not resolvable for browsers and, from an
+// HTTPS page, would be mixed content (F-376). An empty raw keeps the
+// internal endpoint.
+func (s *S3Store) SetPublicURL(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		s.public = nil
+		return nil
+	}
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		return fmt.Errorf("blob: public URL %q must be of the form http(s)://host[:port][/path]", raw)
+	}
+	trimmed := strings.Trim(parsed.Path, "/")
+	parsed.Path = ""
+	if trimmed != "" {
+		parsed.Path = "/" + trimmed
+	}
+	s.public = parsed
+	return nil
 }
 
 // NewS3Store creates a minimal S3-compatible blob store.
@@ -360,6 +390,11 @@ func (s *S3Store) PresignedGetURL(_ context.Context, bucket, key string) (string
 	signature := hex.EncodeToString(hmacSHA256(s.signingKey(dateStamp), stringToSign))
 	queryValues.Set("X-Amz-Signature", signature)
 	objectURL.RawQuery = canonicalQueryString(queryValues)
+	if s.public != nil {
+		objectURL.Scheme = s.public.Scheme
+		objectURL.Host = s.public.Host
+		objectURL.Path = s.public.Path + objectURL.Path
+	}
 	return objectURL.String(), nil
 }
 

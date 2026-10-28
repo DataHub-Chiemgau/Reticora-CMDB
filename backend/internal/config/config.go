@@ -54,6 +54,11 @@ type Config struct {
 	S3AccessKey string
 	S3SecretKey string
 	S3UseSSL    bool
+	// S3PublicURL is the base URL under which browsers reach the object
+	// store for signed downloads (exports, documents), e.g.
+	// https://cmdb.example.com/objects behind the frontend nginx. Empty
+	// keeps the internal endpoint in the URLs (F-376).
+	S3PublicURL string
 	// BlobDir backs export storage in --no-db development mode.
 	BlobDir string
 
@@ -250,6 +255,7 @@ func Load() *Config {
 		S3AccessKey: l.str("RETICORA_S3_ACCESS_KEY", "reticora"),
 		S3SecretKey: l.str("RETICORA_S3_SECRET_KEY", "reticora_dev"),
 		S3UseSSL:    l.str("RETICORA_S3_USE_SSL", "false") == "true",
+		S3PublicURL: l.str("RETICORA_S3_PUBLIC_URL", ""),
 		// BlobDir backs export storage in --no-db development mode; in
 		// database mode the S3 settings above are used instead.
 		BlobDir: l.str("RETICORA_BLOB_DIR", ""),

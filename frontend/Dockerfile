@@ -17,6 +17,7 @@ COPY nginx.conf /etc/nginx/nginx.conf
 # Shared proxy settings for the Keycloak locations, included by the server
 # blocks in nginx.conf and in the compose-mounted TLS template.
 COPY keycloak-proxy.conf /etc/nginx/reticora-keycloak-proxy.conf
+COPY objects-proxy.conf /etc/nginx/reticora-objects-proxy.conf
 
 # When TLS is enabled, the nginx image entrypoint renders the compose-mounted
 # /etc/nginx/templates/reticora-tls.conf.template into /etc/nginx/conf.d/

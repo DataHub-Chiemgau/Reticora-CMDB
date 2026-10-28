@@ -95,4 +95,8 @@ server {
         proxy_pass http://keycloak:8080;
         include /etc/nginx/reticora-keycloak-proxy.conf;
     }
+
+    # Signed downloads of exports and documents: read-only forwarding of
+    # the two download buckets to MinIO (F-376, frontend/objects-proxy.conf).
+    include /etc/nginx/reticora-objects-proxy.conf;
 }

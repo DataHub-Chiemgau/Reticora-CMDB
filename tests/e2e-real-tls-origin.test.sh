@@ -14,7 +14,7 @@
 #   (c) the Pebble helpers setup-tls-origin.sh sources from
 #       tests/install-acme-pebble.test.sh exist;
 #   (d) frontend/e2e-real/fixtures/setup-real-stack.sh with stubbed docker,
-#       curl, psql, getent and sysctl: an installation with
+#       curl, psql and sysctl: an installation with
 #       RETICORA_TLS_DOMAIN gets the TLS template of the installation with
 #       the X-Real-IP passthrough (no $remote_addr line left) and the overlay
 #       docker-compose.e2e-real-tls.yml, and is checked over
@@ -156,7 +156,7 @@ check "pebble: tests/install-acme-pebble.test.sh provides the helpers setup-tls-
 # ─── (d) setup-real-stack.sh with stubs ──────────────────────────────────────
 
 # Stubs: docker (compose ps -q → container id, inspect → $STUB_SERVER_ENV,
-# everything else logged), curl (logged, succeeds), psql, getent, sysctl.
+# everything else logged), curl (logged, succeeds), psql, sysctl.
 RS_BIN="$TMP_ROOT/rs-bin"
 mkdir -p "$RS_BIN"
 cat >"$RS_BIN/docker" <<'STUBEOF'
@@ -171,10 +171,12 @@ STUBEOF
 cat >"$RS_BIN/curl" <<'STUBEOF'
 #!/usr/bin/env bash
 printf 'curl %s\n' "$*" >>"$STUB_LOG"
+# The read-only object path answers like the object store without a
+# signature (setup-real-stack.sh, F-376).
+case "$*" in *"%{http_code}"*"/objects/exports/"*) printf 403 ;; esac
 exit 0
 STUBEOF
 printf '#!/bin/sh\nexit 0\n' >"$RS_BIN/psql"
-printf '#!/bin/sh\necho "127.0.0.1 minio"\n' >"$RS_BIN/getent"
 printf '#!/bin/sh\necho 0\n' >"$RS_BIN/sysctl"
 chmod +x "$RS_BIN"/*
 

@@ -954,3 +954,5 @@ JOB-04;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-643
 AUT-02;[B];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
 TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
 TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-645
+EXP-01;[B], DATEV [P2];B;backend/internal/platform/blob/public_url_test.go;WP-647
+EXP-01;[B], DATEV [P2];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-647

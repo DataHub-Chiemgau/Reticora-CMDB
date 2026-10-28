@@ -307,6 +307,19 @@ there with the public host in `Host` and `X-Forwarded-*`, so Keycloak keeps
 issuing tokens and mail links for the public issuer. Other deployments set
 the variable to an address under which the server reaches Keycloak directly.
 
+### Export download does nothing or fails (`download_url` names `minio:9000`)
+
+**Cause:** The signed download URL named the internal object store
+(`http://minio:9000/…`): a browser on another machine cannot resolve `minio`,
+and from an HTTPS page the `http://` URL is blocked as mixed content (F-376).
+
+**Fix:** Already handled in the compose stack: `RETICORA_S3_PUBLIC_URL`
+defaults to `<RETICORA_PUBLIC_BASE_URL>/objects`, and the frontend nginx
+forwards `/objects/exports/…` and `/objects/reticora-documents/…` read-only to
+MinIO. Check that `RETICORA_PUBLIC_BASE_URL` in `.env` is the address users
+open; `curl -s -o /dev/null -w '%{http_code}' <base URL>/objects/exports/`
+answers 403 (object store, no signature), not 200 (web UI).
+
 ### How the Let's Encrypt certificate is issued
 
 With a domain (`RETICORA_TLS_DOMAIN`) the installer first creates a

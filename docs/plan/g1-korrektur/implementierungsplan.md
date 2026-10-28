@@ -15534,12 +15534,15 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
 **Traceability (`docs/traceability.csv`):**
 
 ```text
+EXP-01;[B], DATEV [P2];B;backend/internal/platform/blob/public_url_test.go;WP-647
 EXP-01;[B], DATEV [P2];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-647
 ```
 
-**Entscheidungsbedarf:** Variante des öffentlichen Wegs: öffentlicher Basis-URL für signierte URLs mit nur-GET-Weiterleitung im Frontend-nginx (Signatur über den internen Host) oder Download-Endpunkt der API, der die Datei aus dem Objektspeicher streamt.
+**Entscheidungsbedarf:** keiner mehr. Anmerkung vom 2026-10-28, WP-647: gewählt ist der öffentliche Basis-URL mit nur-lesender Weiterleitung im Frontend-nginx. Der Vertrag von `download_url` bleibt unverändert (signierte URL, `X-Amz-Expires=900`, ohne Bearer-Token nutzbar; `onboarding.spec.ts` und E01 prüfen das). Ein Download-Endpunkt der API hätte den Vertrag geändert.
 
-**Nicht Bestandteil:** Dokumentanhänge und andere Blobs (eigene Befunde); Wechsel des Objektspeichers.
+**Umsetzung (2026-10-28):** `blob.S3Store.SetPublicURL` (`RETICORA_S3_PUBLIC_URL`) setzt Schema, Host und Pfadpräfix der signierten GET-URL; die Signatur bleibt die über den internen Endpunkt (`minio:9000`). Compose setzt `<RETICORA_PUBLIC_BASE_URL>/objects`. `frontend/objects-proxy.conf` (in `nginx.conf` und `nginx-tls.conf.template` eingebunden) leitet nur GET/HEAD auf `/objects/(exports|reticora-documents)/` mit `Host: minio:9000` und ohne Cookie und Authorization an MinIO weiter. Lokal gegen MinIO (Image aus `docker-compose.yml`) und `nginx:alpine` mit `frontend/nginx.conf` geprüft: signierter GET über `/objects` 200 mit identischem Inhalt; manipulierte Signatur, unsignierter GET, PUT, DELETE und Bucket-Listing 403; andere Buckets und `/objects/minio/…` erreichen MinIO nicht (SPA); App-Cookie und -Authorization stören nicht; `nginx -t` auch mit der TLS-Vorlage. Die `/etc/hosts`-Einträge für `minio` sind aus `setup-real-stack.sh` und `install-smoke.yml` entfernt (Anmerkung in `docs/acceptance/abn-01.md`); `setup-real-stack.sh` prüft stattdessen, dass `/objects/exports/` mit 403 antwortet. Die sechs e2e-real-Zeilen von F-376 sind entfernt; der folgende CI-Lauf ist der Nachweis.
+
+**Nicht Bestandteil:** Wechsel des Objektspeichers; Kubernetes (die Basis enthält keinen Objektspeicher, `RETICORA_S3_PUBLIC_URL` ist dort mit dem eigenen Ingress zu setzen). Dokumentanhänge nutzen dieselbe signierte URL und sind mit abgedeckt.
 
 ## K6 Geringfügige Mängel
 

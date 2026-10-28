@@ -111,9 +111,10 @@ browser from `npx playwright install --with-deps`) and its own installation. `fr
 collector; `fixtures/setup-real-stack.sh` then applies `fixtures/docker-compose.e2e-real.yml` (an nginx.conf that
 passes a client `X-Real-IP` through, so that each tenant of a spec signs up from its own address; raised rate
 limits like the local audit stack), exports `E2E_DATABASE_URL` and the Keycloak administrator and lets the SNMP fake
-bind UDP 161 (above). Presigned export URLs name the endpoint the server uses (`minio:9000`), so the host must resolve
-`minio` to the published port `127.0.0.1:9000`; the script adds that `/etc/hosts` entry on GitHub Actions and fails
-locally without it. The Playwright JSON report is compared with the `e2e-real` lines of
+bind UDP 161 (above). Presigned export and document URLs name the public origin
+(`<base URL>/objects/…`, `RETICORA_S3_PUBLIC_URL`, F-376); the frontend nginx forwards that path read-only to the
+object store, so no host entry for `minio` is needed; the script checks that the path answers 403 without a
+signature. The Playwright JSON report is compared with the `e2e-real` lines of
 `tests/audit/expected-failures.txt` (`tests/audit/run-auditdefect.sh`, see `tests/audit/README.md`): a listed test
 that turned green, an unlisted red test and a skipped or missing test fail the job. The lines name the project
 (`<project>:frontend/e2e-real/<spec file>`, from `projectName` of the report), and each job compares only the lines of

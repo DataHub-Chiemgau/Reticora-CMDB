@@ -448,15 +448,10 @@ jobs:
         if: matrix.platform == 'ubuntu-24.04'
         run: ./frontend/e2e/fixtures/setup-onboarding.sh deploy/docker-compose .env
 
-      # WP-468 (F-077): the onboarding suite downloads its export over the
-      # signed download_url of the job, which names the endpoint the server
-      # uses (minio:9000, published on 127.0.0.1:9000). setup-onboarding.sh is
-      # a frozen ABN-01 artefact, so the host entry is made here.
-      - name: Resolve the object store of signed export URLs (minio)
-        if: matrix.platform == 'ubuntu-24.04'
-        run: |
-          getent hosts minio >/dev/null || echo "127.0.0.1 minio" | sudo tee -a /etc/hosts >/dev/null
-          curl -sS -o /dev/null "http://minio:9000/minio/health/live" || { echo "FAIL: http://minio:9000 is not reachable from the host"; exit 1; }
+      # The onboarding suite downloads its export over the signed download_url
+      # of the job (WP-468, F-077). Since WP-647 (F-376) it names the public
+      # origin (<base URL>/objects/…, forwarded read-only to the object store
+      # by the frontend nginx); the former /etc/hosts entry for minio is gone.
 
       # WP-529: the report of the onboarding suite (JSON report, traces and
       # screenshots in its own directory) is uploaded after every run, green

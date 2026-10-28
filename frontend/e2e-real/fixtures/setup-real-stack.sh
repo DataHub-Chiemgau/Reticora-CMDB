@@ -12,10 +12,7 @@
 #   3. exports the variables of frontend/e2e-real/README.md that the
 #      onboarding setup does not set: E2E_DATABASE_URL (PostgreSQL of the
 #      installation on 127.0.0.1:5432) and the Keycloak administrator,
-#   4. checks that the host resolves "minio": presigned export URLs name the
-#      endpoint the server uses (minio:9000), which the stack publishes on
-#      127.0.0.1:9000. On GitHub Actions the script adds the /etc/hosts entry,
-#   5. checks that an unprivileged process may bind UDP 161: the SNMP fake of
+#   4. checks that an unprivileged process may bind UDP 161: the SNMP fake of
 #      onboarding-bundle.spec.ts (collector/cmd/fakesnmp, WP-384) listens on
 #      127.0.0.161:161, the port the collector's SNMP plugin queries. On
 #      GitHub Actions the script sets net.ipv4.ip_unprivileged_port_start=0.
@@ -147,15 +144,17 @@ for v in "${vars[@]}"; do
     if [ -n "${GITHUB_ENV:-}" ]; then echo "$v" >>"$GITHUB_ENV"; else echo "export $v"; fi
 done
 
-if ! getent hosts minio >/dev/null; then
-    if [ -n "${GITHUB_ACTIONS:-}" ]; then
-        echo "127.0.0.1 minio" | sudo tee -a /etc/hosts >/dev/null
-    else
-        echo "FAIL: the host does not resolve minio; add '127.0.0.1 minio' to /etc/hosts (presigned export URLs)"
-        exit 1
-    fi
-fi
-curl -sS -o /dev/null "http://minio:9000/minio/health/live" || { echo "FAIL: http://minio:9000 is not reachable from the host"; exit 1; }
+# Signed export and document URLs name the public origin
+# (<base URL>/objects/…, RETICORA_S3_PUBLIC_URL, F-376): no host entry for the
+# object store; the read-only proxy path must answer like MinIO (403 without
+# a signature), not with the SPA.
+objects_curl=(curl -sS -o /dev/null -w '%{http_code}')
+[ -z "${E2E_CA_CERT:-}" ] || objects_curl+=(--cacert "$E2E_CA_CERT")
+objects_status="$("${objects_curl[@]}" "${base_url}/objects/exports/")"
+[ "$objects_status" = 403 ] || {
+    echo "FAIL: ${base_url}/objects/exports/ answers $objects_status, not 403 of the object store (frontend/objects-proxy.conf)"
+    exit 1
+}
 
 if [ "$(id -u)" -ne 0 ] && [ "$(sysctl -n net.ipv4.ip_unprivileged_port_start)" -gt 161 ]; then
     if [ -n "${GITHUB_ACTIONS:-}" ]; then
