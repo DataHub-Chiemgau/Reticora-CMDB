@@ -19,6 +19,7 @@ import { useCI, useHasPermission, useMountedCIs } from '../api/hooks';
 import { useCITypes } from '../api/cmdbHooks';
 import { localizedText } from '../api/cmdb';
 import type { CI } from '../api/client';
+import { ScrollRegion } from '../components/ScrollRegion';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -314,7 +315,7 @@ export function ReviewInboxPage() {
       ) : null}
 
       {items.length > 0 ? (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
               <p className="text-gray-700 dark:text-gray-300">
@@ -485,36 +486,38 @@ function ReviewDetail({
           }))}
         />
       ) : null}
-      <table className="mt-3 w-full text-left text-sm">
-        <caption className="sr-only">{t('reviews.diff')}</caption>
-        <thead className="text-xs uppercase text-muted">
-          <tr>
-            <th className="pb-2">{t('reviews.field')}</th>
-            <th className="pb-2">{t('reviews.observed')}</th>
-            <th className="pb-2">{ci ? ci.name : t('reviews.current')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr
-              key={row.field}
-              className={row.differs ? 'bg-amber-50 dark:bg-amber-950' : undefined}
-              data-differs={row.differs ? 'true' : undefined}
-            >
-              <td className="py-1 font-mono text-xs">{row.field}</td>
-              <td className="py-1">{row.observed || '—'}</td>
-              <td className="py-1">
-                {row.current || '—'}
-                {row.differs ? (
-                  <span className="ml-2">
-                    <Badge variant="warning">{t('reviews.differs')}</Badge>
-                  </span>
-                ) : null}
-              </td>
+      <ScrollRegion label={t('reviews.diff')} className="mt-3">
+        <table className="w-full text-left text-sm">
+          <caption className="sr-only">{t('reviews.diff')}</caption>
+          <thead className="text-xs uppercase text-muted">
+            <tr>
+              <th className="pb-2">{t('reviews.field')}</th>
+              <th className="pb-2">{t('reviews.observed')}</th>
+              <th className="pb-2">{ci ? ci.name : t('reviews.current')}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr
+                key={row.field}
+                className={row.differs ? 'bg-amber-50 dark:bg-amber-950' : undefined}
+                data-differs={row.differs ? 'true' : undefined}
+              >
+                <td className="py-1 font-mono text-xs">{row.field}</td>
+                <td className="py-1">{row.observed || '—'}</td>
+                <td className="py-1">
+                  {row.current || '—'}
+                  {row.differs ? (
+                    <span className="ml-2">
+                      <Badge variant="warning">{t('reviews.differs')}</Badge>
+                    </span>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ScrollRegion>
       {genericCI ? (
         <p className="mt-4 text-sm text-gray-700 dark:text-gray-300">
           {t('reviews.noProfileMatch')}{' '}

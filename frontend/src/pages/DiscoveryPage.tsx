@@ -691,7 +691,7 @@ function ScopeList({ collector, canManage }: { collector: Collector; canManage: 
         <ul className="mt-2 space-y-2 text-sm">
           {data.data.map((scope) => (
             <li key={scope.id} className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-gray-900 dark:text-gray-100">
+              <span className="min-w-0 text-gray-900 [overflow-wrap:anywhere] dark:text-gray-100">
                 {scope.name && scope.name !== scope.target ? (
                   <span className="font-medium">{scope.name} </span>
                 ) : null}
@@ -705,7 +705,7 @@ function ScopeList({ collector, canManage }: { collector: Collector; canManage: 
                   )
                 </span>
               </span>
-              <span className="flex items-center gap-2">
+              <span className="flex flex-wrap items-center gap-2">
                 <ScopeHealthBadge health={scope.health} />
                 <Badge variant={scope.enabled ? 'success' : 'neutral'}>
                   {scope.enabled ? t('discovery.scopes.enabled') : t('discovery.scopes.disabled')}

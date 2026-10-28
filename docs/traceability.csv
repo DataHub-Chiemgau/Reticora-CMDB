@@ -935,3 +935,5 @@ UI-10;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
 UI-16;[B];C;frontend/e2e-real/review-inbox.spec.ts;WP-557
 INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-558
 ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-558
+UI-18;[B];C;frontend/e2e/mobile-actions.spec.ts;WP-532
+NFR-07;[B];C;frontend/e2e/mobile-actions.spec.ts;WP-532
