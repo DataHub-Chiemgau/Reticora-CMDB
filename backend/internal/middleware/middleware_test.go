@@ -805,3 +805,55 @@ func TestAuditRouteAnswersInvalidPathParamsBeforeTheIntent(t *testing.T) {
 		t.Errorf("valid UTF-8 with the audit store down = %d, handler ran %d times; want 503", w.Code, ran)
 	}
 }
+
+// TestAuditRouteAnswersInvalidBodyKeysBeforeTheIntent (F-392, WP-663): a
+// top-level key of a JSON request body with a NUL byte names no field and
+// fits neither the intent nor the entry; an intent route (even with the
+// audit store down) and a domain route (whose handler would accept it)
+// answer it 400 before the intent and the handler. NUL in a value or a
+// nested key is the handler's; a valid body still needs the intent (503
+// with the store down) and names its fields in the entry.
+func TestAuditRouteAnswersInvalidBodyKeysBeforeTheIntent(t *testing.T) {
+	const org, user = "11111111-2222-4333-8444-555555555555", "66666666-7777-4888-8999-aaaaaaaaaaaa"
+	store := &intentStore{open: map[string]audit.RouteIntent{}}
+	ran := 0
+	r := chi.NewRouter()
+	lenient := func(w http.ResponseWriter, _ *http.Request) {
+		ran++
+		w.WriteHeader(http.StatusNoContent)
+	}
+	r.With(AuditRoute(http.MethodPut, "/api/v1/prefs", store, AuditIntent, "")).Put("/api/v1/prefs", lenient)
+	r.With(AuditRoute(http.MethodPut, "/api/v1/cis", store, AuditDomain, "")).Put("/api/v1/cis", lenient)
+	serve := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := identity.WithPrincipal(req.Context(), identity.Principal{Subject: user, OrganizationID: org, Type: identity.PrincipalTypeUser})
+		ctx = tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: org, UserID: user})
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req.WithContext(ctx))
+		return w
+	}
+	for _, failIntend := range []bool{true, false} {
+		store.failIntend = failIntend
+		for _, c := range []struct{ path, body string }{
+			{"/api/v1/prefs", `{"\u0000":1}`},
+			{"/api/v1/prefs", `{"a":1,"b\u0000c":2}`},
+			{"/api/v1/cis", `{"name":"x","\u0000":1}`},
+		} {
+			if w := serve(c.path, c.body); w.Code != http.StatusBadRequest || ran != 0 || len(store.open) != 0 || len(store.entries) != 0 ||
+				!strings.Contains(w.Body.String(), "NUL") {
+				t.Errorf("PUT %s %s (store down %v) = %d %s, handler ran %d times, entries %+v; want 400 before the intent",
+					c.path, c.body, failIntend, w.Code, w.Body.String(), ran, store.entries)
+			}
+		}
+	}
+	store.failIntend = true
+	if w := serve("/api/v1/prefs", `{"a":"x\u0000","n":{"\u0000":1}}`); w.Code != http.StatusServiceUnavailable || ran != 0 {
+		t.Errorf("NUL in a value or nested key with the audit store down = %d, handler ran %d times; want 503", w.Code, ran)
+	}
+	store.failIntend = false
+	if w := serve("/api/v1/prefs", `{"b":1,"ä":2}`); w.Code != http.StatusNoContent || ran != 1 || len(store.entries) != 1 ||
+		fmt.Sprint(store.entries[0].Changes["fields"]) != "[b ä]" {
+		t.Errorf("valid body = %d, handler ran %d times, entries %+v; want 204 and the fields [b ä]", w.Code, ran, store.entries)
+	}
+}

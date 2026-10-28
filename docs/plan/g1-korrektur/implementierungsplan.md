@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-662 | 8 | 6,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-663 | 9 | 6,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **310** | **407,0** | |
+| **Summe** | | **311** | **407,5** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>8 WPs · 6,0 PT"]
+    K7N["K7-Nachträge<br/>9 WPs · 6,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -429,6 +429,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-661](#wp-661--credentials-ungültige-id-wie-unbekannte-404-repository-fehler-über-den-fehlervertrag-api-03) | `k7n-credential-invalid-id` | Credentials: ungültige ID wie unbekannte (404), Repository-Fehler über den Fehlervertrag API-03 | K7N | 0,5 | F-390 | WP-343 |
 | [WP-659](#wp-659--lastskripte-keine-fehlgeschlagene-anfrage-je-szenario-schwelle-für-gelungene-bulk-jobs-statuscodes-in-der-job-zusammenfassung) | `k7n-load-thresholds` | Lastskripte: keine fehlgeschlagene Anfrage je Szenario, Schwelle für gelungene Bulk-Jobs, Statuscodes in der Job-Zusammenfassung | K7N | 0,5 | F-388 | WP-204, WP-206, WP-439, WP-658 |
 | [WP-662](#wp-662--routen-audit-pfad-ids-mit-nul-byte-oder-ungültigem-utf-8-erhalten-404-vor-der-audit-absicht-statt-503) | `k7n-route-audit-nul-id` | Routen-Audit: Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 vor der Audit-Absicht statt 503 | K7N | 0,5 | F-391 | WP-504, WP-505 |
+| [WP-663](#wp-663--routen--und-operator-audit-nul-byte-im-schlüssel-des-json-körpers-erhält-400-vor-der-audit-absicht-statt-503-admin-pfade-werden-kodiert-protokolliert-statt-500) | `k7n-route-audit-body-keys` | Routen- und Operator-Audit: NUL-Byte im Schlüssel des JSON-Körpers erhält 400 vor der Audit-Absicht statt 503, /admin-Pfade werden kodiert protokolliert statt 500 | K7N | 0,5 | F-392 | WP-504, WP-505, WP-564, WP-662 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -18789,6 +18790,66 @@ AUD-07;[B];B;backend/internal/middleware/middleware_test.go;WP-662
 **Entscheidungsbedarf:** keiner.
 
 **Nicht Bestandteil:** Pfadparameter mit NUL-Byte auf Routen mit Domänen-Recorder (antworten bereits 400/404 über den Handler bzw. `api.WriteDBError`); ungültige Werte in Query-Parametern und im Anfragekörper; weitere Befunde der Wiederholungsprüfung.
+
+### WP-663 – Routen- und Operator-Audit: NUL-Byte im Schlüssel des JSON-Körpers erhält 400 vor der Audit-Absicht statt 503, /admin-Pfade werden kodiert protokolliert statt 500
+
+**Schlüssel:** `k7n-route-audit-body-keys` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-504 (Audit-Absicht vor dem Handler), WP-505 (alte und neue Werte im Routen-Audit), WP-564 (Operator-Audit atomar, F-208), WP-662 (Pfad-IDs mit NUL-Byte erhalten 404 vor der Absicht)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-392](../../../audit/g1-reaudit/FINDINGS.md#f-392) | P3 | NUL-Byte in einem Schlüssel des JSON-Körpers einer Schreibanfrage antwortet 503 „the audit trail is unavailable“, NUL-Byte im /admin-Pfad 500 „the operator audit entry could not be written“, jeweils mit ERROR-Log | schließt | Bearbeitung von WP-662 (K7-Nachträge) auf `e5c2d86` |
+
+**Problem:** `AuditRoute` (`backend/internal/middleware/middleware.go:155-167` auf `e5c2d86`) übernimmt die Schlüssel der obersten Ebene eines JSON-Körpers (`writtenFields`) ungeprüft als `fields` der Audit-Absicht (`TEXT[]`) und des Eintrags (`changes.fields`, jsonb). Ein Schlüssel mit `\u0000` lässt `PGRouteAuditor.Intend` mit SQLSTATE 22021 scheitern; `AuditRoute` behandelt das als Ausfall des Audit-Speichers: 503 „the audit trail is unavailable“ mit `Retry-After` und ERROR-Log (`POST /api/v1/vrfs` mit `{"name":"zz-a","\u0000":1}`, `PATCH /api/v1/assets/{id}`, `PUT /api/v1/notifications/preferences`). Auf Routen mit Domänen-Recorder fiele der Ersatzeintrag nach einer erfolgreichen Antwort aus. Dieselbe Ursache im Operator-Pfad (`backend/internal/operator/auth.go:179/190`, `audit.go:270`): `actionFor(r.Method, r.URL.Path)` schreibt den dekodierten Pfad in `operator_audit.action`; `%00`, `%FF` oder `%C3%28` unter `/api/v1/admin/…` lassen den Eintrag scheitern, und die Anfrage wird – auch anonym – mit 500 „the operator audit entry could not be written“ und ERROR-Log beantwortet und fehlt im Operator-Audit. `targetOrg` übernimmt jedes 36 Zeichen lange Segment nach `/admin/orgs/` in die UUID-Spalte `target_org` (SQLSTATE 22P02 → 500); eine großgeschriebene UUID wird gespeichert, aber über die Eingabe statt über den kleingeschriebenen Spaltenwert gehasht, sodass `GET /api/v1/admin/audit/verify` die Kette danach als gebrochen meldet. Andere vom Client bestimmte Werte (Korrelations-ID, Query-Parameter, Header) erreichen den Audit nicht ungeprüft.
+
+**Akzeptanzkriterien:**
+
+- [ ] `AuditRoute` prüft bei auditierten Schreibrouten (Absicht und Domänen-Recorder) nach den Pfadparametern die Schlüssel der obersten Ebene eines JSON-Körpers; enthält einer ein NUL-Byte oder ist er kein gültiges UTF-8, antwortet die Route 400 (problem+json, `invalid request body: a field name must not contain NUL characters`) ohne Absicht, ohne Schnappschuss, ohne Handler und ohne ERROR-Log. Keine maskierte Feldliste: Ein solcher Schlüssel bezeichnet kein Feld der API, und der Eintrag nennt nur geschriebene Felder (AUD-07).
+- [ ] NUL in einem Wert oder in einem verschachtelten Schlüssel erreicht wie bisher den Handler (4xx dort); ein gültiger Körper nennt seine Felder im Eintrag. AUD-07 bleibt unverändert: Bei gültigen Eingaben wird die Absicht vor dem Handler gespeichert; scheitert das, bleibt es bei 503 mit `Retry-After` und ohne Änderung.
+- [ ] Der Operator-Audit nennt den Pfad in `action` prozentkodiert (RFC 3986, `(&url.URL{Path: p}).EscapedPath()`; gewöhnliche Pfade unverändert, z. B. `GET /orgs`) und setzt `target_org` nur für eine UUID, kleingeschrieben wie die Spalte sie zurückgibt. /admin-Anfragen mit `%00`, `%FF`, `%C3%28` oder einer Nicht-UUID werden wie jede andere beantwortet (401 anonym, 4xx mit Operator) und protokolliert; die Kette verifiziert. Ein Ausfall von `operator_audit` bleibt 500 (F-208).
+- [ ] `TestRouteAuditInvalidBodyKeyIsClientError` (`internal/server/route_audit_integration_test.go`, Produktionsrouter mit `AuditPool` und PG-Routen-Auditor): `POST /vrfs` (`"\u0000"`, `"x\u0000y"`), `PATCH /assets/{id}`, `PUT /notifications/preferences`, `POST /cis` → 400 problem+json; NUL im Wert und im verschachtelten Schlüssel → 4xx; keine Absicht, keine VRF, kein Eintrag, kein ERROR-Log; gültiger Körper → 201 mit `fields` `["description","name"]`; `POST /vrfs` mit nicht speicherbarer Absicht weiter 503 ohne Zeile. Auf `e5c2d86` rot (4 × 503, 4 ERROR-Logs mit SQLSTATE 22021).
+- [ ] `TestOperatorAuditRecordsAnyRequestPath` (`internal/operator/audit_integration_test.go`, PostgreSQL): acht /admin-Anfragen (anonym `%00`, `%FF`; Break-Glass `x%00y`, `%C3%28`, `%2500`, Nicht-UUID, unbekannte UUID klein und groß) → 4xx, acht Einträge mit kodierter `action` und `target_org` nur für die UUID (kleingeschrieben), kein „operator audit failed“, Kette gültig. Auf `e5c2d86` rot (5 × 500, 2 von 7 Einträgen; mit großgeschriebener UUID `verify` ungültig).
+- [ ] Unittest `TestAuditRouteAnswersInvalidBodyKeysBeforeTheIntent` (`internal/middleware/middleware_test.go`): Absichtsroute und Domänenroute → 400 vor dem Handler, mit und ohne ausgefallenen Audit-Speicher; NUL im Wert bei ausgefallenem Speicher weiter 503; gültiger Körper mit `fields`. Auf `e5c2d86` rot.
+- [ ] `api/openapi.yaml` (`info.description`, Absatz OPS-06/AUD-07; `OperatorAuditEntry.action` und `target_org`) beschreibt das; `npm run generate:api` übernimmt die Beschreibungen in `frontend/src/api/generated/schema.d.ts`.
+- [ ] golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neue Tests auch als Nicht-Root-Nutzer grün.
+
+**Dateien (12 Einträge):**
+
+- backend/internal/middleware/middleware.go
+- backend/internal/middleware/middleware_test.go
+- backend/internal/operator/audit.go
+- backend/internal/operator/auth.go
+- backend/internal/operator/audit_integration_test.go
+- backend/internal/server/route_audit_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Die Prüfung des Körpers liegt vor jedem Datenbankzugriff der Route; Absicht, Schnappschuss und Eintrag laufen unverändert in der Tenant-Transaktion. `operator_audit` bleibt unverändert (Hash-Kette über `action` und `target_org` wie bisher, nur mit kodiertem Pfad).
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/middleware/ ./internal/operator/ ./internal/server/ ./internal/audit/` mit `TEST_DATABASE_URL`, `TEST_REDIS_URL`.
+- `go test -count=1 -v -run '^TestRouteAuditInvalidBodyKeyIsClientError$' ./internal/server/`, `-run '^TestOperatorAuditRecordsAnyRequestPath$' ./internal/operator/` und `-run '^TestAuditRouteAnswersInvalidBodyKeysBeforeTheIntent$' ./internal/middleware/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-03;[B];B;backend/internal/server/route_audit_integration_test.go;WP-663
+AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-663
+AUD-07;[B];B;backend/internal/middleware/middleware_test.go;WP-663
+SEC-07;[B];B;backend/internal/operator/audit_integration_test.go;WP-663
+```
+
+**Entscheidungsbedarf:** keiner. (400 statt maskierter Feldliste ist durch API-03 und AUD-07 gedeckt, siehe F-392 Empfehlung.)
+
+**Nicht Bestandteil:** Pfadparameter mit NUL-Byte (WP-662); ungültige Werte in Feldern, die der Handler bzw. `api.WriteDBError` bereits mit 400 beantwortet; die übrigen Kandidaten der Prüfrunde, aus der K-3 stammt (K-3 selbst wird durch dieses WP mit abgedeckt, sofern die Verifikation dieselbe Ursache bestätigt); weitere Befunde der Wiederholungsprüfung.
 
 ## Zurückgestellte Befunde
 

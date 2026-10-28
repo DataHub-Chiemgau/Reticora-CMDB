@@ -10039,7 +10039,9 @@ export interface components {
       operator_id: string;
       /** @enum {string} */
       operator_kind: 'oidc' | 'break_glass';
+      /** @description "login", a named change (e.g. entitlement.grant, org.create) or the method and the percent-encoded path below /api/v1/admin of the request (e.g. "GET /orgs"); a NUL byte or invalid UTF-8 in the path appears encoded (%00, %FF), never as a failed entry. */
       action: string;
+      /** @description The organization of /admin/orgs/{id}/... when {id} is a UUID. */
       target_org?: string;
       status: number;
       details: {

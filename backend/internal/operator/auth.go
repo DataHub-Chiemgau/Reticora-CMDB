@@ -222,17 +222,21 @@ func writeAuditFailure(w http.ResponseWriter, e *AuditEntry, err error) {
 		"the operator audit entry could not be written; the request was not carried out")
 }
 
-// targetOrg extracts the organization of /admin/orgs/{id}/... requests.
+// targetOrg extracts the organization of /admin/orgs/{id}/... requests. An
+// id that is no UUID names none (the action names the path): it would fail
+// the uuid column (SQLSTATE 22P02) and with it the request (500, F-392).
+// The id is lower-cased as the uuid column returns it, so the entry hashes
+// as it is read back (an upper-case id would break the chain).
 func targetOrg(r *http.Request) string {
 	rest, ok := strings.CutPrefix(r.URL.Path, "/api/v1/admin/orgs/")
 	if !ok {
 		return ""
 	}
 	id, _, _ := strings.Cut(rest, "/")
-	if len(id) != 36 {
+	if !api.IsUUID(id) {
 		return ""
 	}
-	return id
+	return strings.ToLower(id)
 }
 
 // newTokenID returns a random token id (jti).

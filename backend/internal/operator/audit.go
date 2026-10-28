@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -266,7 +267,10 @@ func (a *Auditor) Verify(ctx context.Context) (VerifyResult, error) {
 }
 
 // actionFor names an /admin request in the audit: method and path below
-// /api/v1/admin.
+// /api/v1/admin, percent-encoded (RFC 3986). The path is the client's: a
+// NUL byte or invalid UTF-8 in it would fail the text column (SQLSTATE
+// 22021) and with it the request (500, F-392); encoded it is always text,
+// and %00 stays apart from a literal "%00" (%2500).
 func actionFor(method, path string) string {
-	return method + " " + strings.TrimPrefix(path, "/api/v1/admin")
+	return method + " " + strings.TrimPrefix((&url.URL{Path: path}).EscapedPath(), "/api/v1/admin")
 }

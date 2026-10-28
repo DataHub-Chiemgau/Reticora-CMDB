@@ -1,10 +1,14 @@
 package operator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -261,5 +265,115 @@ func TestOperatorGrantIsAtomicWithItsAuditEntry(t *testing.T) {
 	}
 	if result, err := auditor.Verify(bg); err != nil || !result.Valid {
 		t.Errorf("verify: %+v, %v", result, err)
+	}
+}
+
+// TestOperatorAuditRecordsAnyRequestPath covers WP-663 (F-392, SEC-07,
+// API-03) against PostgreSQL: an /admin request whose path holds a NUL
+// byte or invalid UTF-8 (%00, %FF, %C3%28) is answered like any other
+// (401 anonymously, 4xx for an operator) and recorded, instead of 500 "the
+// operator audit entry could not be written" (SQLSTATE 22021 from the
+// action) with an ERROR log. The action names the path percent-encoded,
+// so it stays text and tells %00 from a literal "%00" (%2500); a target
+// organization that is no UUID is not recorded (the action names it)
+// instead of failing the uuid column (SQLSTATE 22P02), and an upper-case
+// one is recorded lower-case, as the column returns it, so the entry
+// verifies. The chain verifies.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL).
+func TestOperatorAuditRecordsAnyRequestPath(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
+	}
+	ctx := context.Background()
+	app, err := database.NewPool(ctx, scopetest.AppDSN(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	admin, err := database.NewMaintenancePool(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	auditor := NewAuditor(app)
+	svc := entitlement.NewService(entitlement.NewPGRepository(app), entitlement.Options{Enforce: true})
+	mux := testRouter(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, testIssuer(t), auditor, app).WithEntitlements(svc))
+	var mark int64
+	if err = admin.QueryRow(ctx, `SELECT COALESCE(max(id), 0) FROM operator_audit`).Scan(&mark); err != nil {
+		t.Fatal(err)
+	}
+
+	const unknown = "00000000-0000-4000-8000-0000000000fd"
+	const noUUID = "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz"
+	glass := map[string]string{BreakGlassHeader: testBreakGlass}
+	type row struct {
+		operator, action, target string
+		status                   int
+	}
+	var want []row
+	for _, c := range []struct {
+		method, path string
+		header       map[string]string
+		status       int
+		action       string
+		target       string
+	}{
+		{http.MethodGet, "/api/v1/admin/orgs/%00/entitlements", nil, http.StatusUnauthorized, "GET /orgs/%00/entitlements", ""},
+		{http.MethodPost, "/api/v1/admin/orgs/%FF/entitlements", nil, http.StatusUnauthorized, "POST /orgs/%FF/entitlements", ""},
+		{http.MethodGet, "/api/v1/admin/orgs/x%00y/entitlements", glass, 0, "GET /orgs/x%00y/entitlements", ""},
+		{http.MethodGet, "/api/v1/admin/orgs/%C3%28/entitlements", glass, 0, "GET /orgs/%C3%28/entitlements", ""},
+		{http.MethodGet, "/api/v1/admin/orgs/%2500/entitlements", glass, http.StatusNotFound, "GET /orgs/%2500/entitlements", ""},
+		{http.MethodGet, "/api/v1/admin/orgs/" + noUUID + "/entitlements", glass, http.StatusNotFound, "GET /orgs/" + noUUID + "/entitlements", ""},
+		{http.MethodGet, "/api/v1/admin/orgs/" + unknown + "/entitlements", glass, http.StatusNotFound, "GET /orgs/" + unknown + "/entitlements", unknown},
+		// An upper-case id is stored lower-case; the entry hashes so.
+		{http.MethodGet, "/api/v1/admin/orgs/" + strings.ToUpper(unknown) + "/entitlements", glass, http.StatusNotFound,
+			"GET /orgs/" + strings.ToUpper(unknown) + "/entitlements", unknown},
+	} {
+		req := httptest.NewRequest(c.method, c.path, strings.NewReader(`{}`))
+		for k, v := range c.header {
+			req.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if c.status != 0 && w.Code != c.status || w.Code < 400 || w.Code >= 500 {
+			t.Errorf("%s %s = %d %s; want a client error (%d), not a failed operator audit", c.method, c.path, w.Code,
+				strings.TrimSpace(w.Body.String()), c.status)
+		}
+		operator := "anonymous"
+		if c.header != nil {
+			operator = "break-glass"
+		}
+		want = append(want, row{operator, c.action, c.target, w.Code})
+	}
+	if strings.Contains(logs.String(), "operator audit failed") {
+		t.Errorf("an /admin request with an invalid path failed its operator audit:\n%s", logs.String())
+	}
+
+	var rows []row
+	r, err := admin.Query(ctx, `SELECT operator_id, action, COALESCE(target_org::text, ''), status
+		FROM operator_audit WHERE id > $1 ORDER BY id`, mark)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for r.Next() {
+		var x row
+		if err = r.Scan(&x.operator, &x.action, &x.target, &x.status); err != nil {
+			t.Fatal(err)
+		}
+		rows = append(rows, x)
+	}
+	r.Close()
+	if !slices.Equal(rows, want) {
+		t.Errorf("operator audit rows\n%+v\nwant\n%+v", rows, want)
+	}
+	if result, verr := auditor.Verify(ctx); verr != nil || !result.Valid {
+		t.Errorf("verify: %+v, %v", result, verr)
 	}
 }

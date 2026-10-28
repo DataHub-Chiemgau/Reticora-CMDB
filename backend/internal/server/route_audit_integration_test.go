@@ -24,10 +24,16 @@
 //     NUL byte or invalid UTF-8 is answered 404 before the audit intent,
 //     not 503 with an ERROR log; an intent that cannot be stored still
 //     refuses the write (503).
+//   - TestRouteAuditInvalidBodyKeyIsClientError (WP-663, F-392): a
+//     top-level key of a JSON request body with a NUL byte is answered 400
+//     before the audit intent, not 503 with an ERROR log; NUL in a value or
+//     a nested key reaches the handler (400 there); a valid write still
+//     names its fields, and an intent that cannot be stored still refuses
+//     the write (503).
 //
 // Retest:
 //
-//	cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditDefectRouteAuditFailure|TestRouteIntentCompletionRacesScheduler|TestAuditDefectRouteAuditStores|TestRouteAuditPIIIsSurrogate|TestRouteAuditNulPathIDIsClientError' ./internal/server/
+//	cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditDefectRouteAuditFailure|TestRouteIntentCompletionRacesScheduler|TestAuditDefectRouteAuditStores|TestRouteAuditPIIIsSurrogate|TestRouteAuditNulPathIDIsClientError|TestRouteAuditInvalidBodyKeyIsClientError' ./internal/server/
 package server_test
 
 import (
@@ -557,5 +563,88 @@ func TestRouteAuditNulPathIDIsClientError(t *testing.T) {
 	ra.failIntend = false
 	if got := t6AuditList(t, e, reader, "assets"); len(got) != 0 {
 		t.Errorf("audit entries after refused writes: %s", t6JSON(got))
+	}
+}
+
+// TestRouteAuditInvalidBodyKeyIsClientError covers WP-663 (F-392, API-03,
+// AUD-07): a write route answers a JSON request body whose top-level key
+// holds a NUL byte (\u0000) with 400 (problem+json) before the audit
+// intent, instead of 503 "the audit trail is unavailable" (SQLSTATE 22021
+// from the intent's fields) with an ERROR log: routes with an intent
+// (vrfs, assets, the lenient notification preferences) and with a domain
+// recorder (cis). No such key names a field of the API, and no audit entry
+// can hold it. A NUL in a value or in a nested key never reaches the
+// intent: the handler answers it (4xx). Nothing is stored (no intent, no
+// row, no entry). AUD-07 stays intact: a valid write names its fields in
+// the entry, and a valid write whose intent cannot be stored is still
+// refused with 503.
+func TestRouteAuditInvalidBodyKeyIsClientError(t *testing.T) {
+	ra := &t6FailingAuditor{}
+	e := t6NewEnv(t, "da", ra)
+	f := e.F
+	// Delegates to the production auditor on the router's pool (AuditPool).
+	ra.PGRouteAuditor = audit.NewPGRouteAuditor(f.App)
+	admin := t6As{f.OrgA, f.AppUser(t, f.OrgA, "audit-da-admin"), identity.AllPermissions()}
+	reader := t6As{f.OrgA, f.AppUser(t, f.OrgA, "audit-da-reader"), []identity.Permission{identity.PermAuditRead}}
+	intents := func() int {
+		return e.Count(t, `SELECT count(*) FROM audit_route_intent WHERE organization_id = $1`, f.OrgA)
+	}
+	vrfs := func() int {
+		return e.Count(t, `SELECT count(*) FROM vrf WHERE organization_id = $1 AND name LIKE 'audit-da-%'`, f.OrgA)
+	}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	const unknown = "00000000-0000-4000-8000-0000000000fe"
+	for _, c := range []struct {
+		method, path, body string
+		want               int
+	}{
+		// A NUL byte in a top-level key: refused before the intent.
+		{http.MethodPost, "/api/v1/vrfs", `{"name":"audit-da-1","\u0000":1}`, http.StatusBadRequest},
+		{http.MethodPost, "/api/v1/vrfs", `{"name":"audit-da-2","x\u0000y":"z"}`, http.StatusBadRequest},
+		{http.MethodPatch, "/api/v1/assets/" + unknown, `{"\u0000name":"x"}`, http.StatusBadRequest},
+		{http.MethodPut, "/api/v1/notifications/preferences", `{"time_zone":"UTC","\u0000":true}`, http.StatusBadRequest},
+		{http.MethodPost, "/api/v1/cis", `{"name":"audit-da-ci","\u0000":1}`, http.StatusBadRequest},
+		// NUL in a value or a nested key: the handler answers (4xx).
+		{http.MethodPost, "/api/v1/vrfs", `{"name":"audit-da-\u0000"}`, 0},
+		{http.MethodPost, "/api/v1/vrfs", `{"name":"audit-da-3","x":{"\u0000":1}}`, 0},
+	} {
+		r := e.Call(t, admin, c.method, c.path, c.body)
+		if c.want != 0 && r.Code != c.want || r.Code < 400 || r.Code >= 500 {
+			t.Errorf("%s %s %s = %d %s; want a client error (400 for a key with NUL)", c.method, c.path, c.body, r.Code, t6Short(r.Body))
+		}
+		if c.want == http.StatusBadRequest && !strings.Contains(string(r.Body), `"status":400`) {
+			t.Errorf("%s %s %s: body %s; want problem+json 400", c.method, c.path, c.body, t6Short(r.Body))
+		}
+	}
+	if n, v := intents(), vrfs(); n != 0 || v != 0 {
+		t.Errorf("%d audit intents and %d VRFs left after refused writes", n, v)
+	}
+	if strings.Contains(logs.String(), "level=ERROR") {
+		t.Errorf("refused writes with an invalid body key logged an error:\n%s", logs.String())
+	}
+	for _, rt := range []string{"vrfs", "assets", "notifications", "cis"} {
+		if got := t6AuditList(t, e, reader, rt); len(got) != 0 {
+			t.Errorf("audit entries of %s after refused writes: %s", rt, t6JSON(got))
+		}
+	}
+
+	// A valid write names its written fields in the entry.
+	r := e.Call(t, admin, http.MethodPost, "/api/v1/vrfs", `{"name":"audit-da-ok","description":"ä"}`)
+	if r.Code != http.StatusCreated || intents() != 0 {
+		t.Fatalf("POST /vrfs = %d %s, intents %d; want 201 and none", r.Code, t6Short(r.Body), intents())
+	}
+	en := t6Entry(t, t6AuditList(t, e, reader, "vrfs"), "vrfs.create", t6ID(r.Body))
+	if got := t6JSON(en.Changes["fields"]); got != `["description","name"]` {
+		t.Errorf("fields of the entry = %s; want [\"description\",\"name\"]", got)
+	}
+	// AUD-07: a valid write whose intent cannot be stored is still refused.
+	ra.failIntend = true
+	r = e.Call(t, admin, http.MethodPost, "/api/v1/vrfs", `{"name":"audit-da-down"}`)
+	if r.Code != http.StatusServiceUnavailable || vrfs() != 1 {
+		t.Errorf("POST /vrfs with the audit store down = %d %s, VRFs %d; want 503 and only the earlier one", r.Code, t6Short(r.Body), vrfs())
 	}
 }

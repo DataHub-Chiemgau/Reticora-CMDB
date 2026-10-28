@@ -1052,3 +1052,7 @@ NFR-02;[B];LT;tests/load/api.js;WP-659
 NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-659
 AUT-10;[B];B;backend/internal/cache/window_test.go;WP-658
 AUT-10;[B];B;backend/internal/operator/operator_test.go;WP-658
+API-03;[B];B;backend/internal/server/route_audit_integration_test.go;WP-663
+AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-663
+AUD-07;[B];B;backend/internal/middleware/middleware_test.go;WP-663
+SEC-07;[B];B;backend/internal/operator/audit_integration_test.go;WP-663

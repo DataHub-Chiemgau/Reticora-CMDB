@@ -45,6 +45,10 @@ info:
     minutes later). A path parameter of such a write route (id, key or
     name) that contains a NUL byte or is not valid UTF-8 addresses no
     resource: the request is answered 404 before the intent, not 503.
+    A top-level key of the JSON request body of a write route that
+    contains a NUL byte names no field: the request is answered 400
+    (invalid request body) before the intent, not 503; the audit entry of
+    a write names the top-level keys of its JSON body as its fields.
     While Redis is unreachable
     the rate limits refuse with 429. A 2xx answer means stored or durably
     queued.
@@ -18651,8 +18655,14 @@ components:
           enum: [oidc, break_glass]
         action:
           type: string
+          description: >-
+            "login", a named change (e.g. entitlement.grant, org.create) or
+            the method and the percent-encoded path below /api/v1/admin of
+            the request (e.g. "GET /orgs"); a NUL byte or invalid UTF-8 in
+            the path appears encoded (%00, %FF), never as a failed entry.
         target_org:
           type: string
+          description: The organization of /admin/orgs/{id}/... when {id} is a UUID.
         status:
           type: integer
         details:
