@@ -972,3 +972,5 @@ API-02;[B];C;backend/internal/ci/listquery_integration_test.go;WP-566
 SEC-07;[B];B;backend/internal/operator/audit_integration_test.go;WP-564
 ENT-04;[B];B;backend/internal/operator/entitlements_test.go;WP-564
 ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-564
+CI-05;[B];C;backend/internal/ci/restore_integration_test.go;WP-567
+API-05;[B];C;backend/internal/server/t2_ci_include_integration_test.go;WP-567

@@ -35,8 +35,14 @@ type Handler struct {
 	provenance ProvenanceSource
 }
 
-// IncludeFunc loads one related collection of a CI for ?include= (API-05).
-type IncludeFunc func(ctx context.Context, orgID, ciID string) (any, error)
+// IncludeFunc loads one related collection of a CI for ?include= (API-05);
+// truncated reports that the collection holds more rows the caller may see
+// than it returns.
+type IncludeFunc func(ctx context.Context, orgID, ciID string) (items any, truncated bool, err error)
+
+// IncludeTruncated is the member of a CI with includes that names the
+// embedded collections capped by the server (truncated.<name> = true).
+const IncludeTruncated = "truncated"
 
 // IncludeAsset is always available: the canonical asset facts of the CI.
 const IncludeAsset = "asset"
@@ -184,6 +190,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 
 // withIncludes embeds the requested related collections into the CI
 // (API-05): include=relationships,contacts,asset. An unknown name is 422.
+// A collection the server capped is named in truncated (F-223).
 func (h *Handler) withIncludes(ctx context.Context, orgID string, item *Item, raw string) (map[string]json.RawMessage, error) {
 	encoded, err := json.Marshal(item)
 	if err != nil {
@@ -193,6 +200,7 @@ func (h *Handler) withIncludes(ctx context.Context, orgID string, item *Item, ra
 	if uerr := json.Unmarshal(encoded, &body); uerr != nil {
 		return nil, uerr
 	}
+	truncated := map[string]bool{}
 	for _, name := range strings.Split(raw, ",") {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -203,8 +211,12 @@ func (h *Handler) withIncludes(ctx context.Context, orgID string, item *Item, ra
 		case name == IncludeAsset:
 			value = item.Asset
 		case ok:
-			if value, err = load(ctx, orgID, item.ID); err != nil {
+			var capped bool
+			if value, capped, err = load(ctx, orgID, item.ID); err != nil {
 				return nil, err
+			}
+			if capped {
+				truncated[name] = true
 			}
 		default:
 			known := []string{IncludeAsset}
@@ -219,11 +231,17 @@ func (h *Handler) withIncludes(ctx context.Context, orgID string, item *Item, ra
 			return nil, err
 		}
 	}
+	if len(truncated) > 0 {
+		if body[IncludeTruncated], err = json.Marshal(truncated); err != nil {
+			return nil, err
+		}
+	}
 	return body, nil
 }
 
 // Restore handles POST /api/v1/cis/{id}/restore: a deleted CI comes back
-// within the retention (CI-05); after it the answer is 410.
+// within the retention (CI-05); after it the answer is 410. A CI that is not
+// deleted or was merged is 409.
 func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -237,6 +255,9 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, ErrMergeConflict):
 		api.WriteError(w, http.StatusConflict, "Conflict", "the CI was merged; use the unmerge")
+		return
+	case errors.Is(err, ErrNotDeleted):
+		api.WriteError(w, http.StatusConflict, "Conflict", "the CI is not deleted")
 		return
 	case err != nil && err.Error() == "not found":
 		api.WriteError(w, http.StatusNotFound, "Not Found", "no deleted CI with this id")

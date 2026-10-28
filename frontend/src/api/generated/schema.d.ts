@@ -439,7 +439,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a configuration item
-     * @description Soft delete (CI-05): sets deleted_at and the operative status decommissioned (the lifecycle state stays, LCY-01) and releases the asset link; relationships stay, traversal and impact skip the CI. POST /cis/{id}/restore brings it back within 90 days, afterwards the retention run deletes it with its interfaces and IP addresses.
+     * @description Soft delete (CI-05): sets deleted_at and the operative status decommissioned (the lifecycle state stays, LCY-01) and releases the asset link; relationships stay, traversal and impact skip the CI. POST /cis/{id}/restore brings it back within the soft-delete retention (RETICORA_RETENTION_SOFT_DELETE_DAYS, default and minimum 90 days), afterwards the retention run deletes it with its interfaces and IP addresses.
      */
     delete: operations['deleteCI'];
     options?: never;
@@ -465,7 +465,7 @@ export interface paths {
     put?: never;
     /**
      * Restore a deleted CI within the retention (CI-05, API-05)
-     * @description Clears the deletion of a CI deleted less than 90 days ago; the change history and the audit trail record the restore (ci.restored). Requires ci:delete.
+     * @description Clears the deletion of a CI deleted within the soft-delete retention (RETICORA_RETENTION_SOFT_DELETE_DAYS, default and minimum 90 days); the status and the asset link of the deletion come back, the change history and the audit trail record the restore (ci.restored). Requires ci:delete. A CI of another organization, outside the caller's scope or unknown is 404.
      */
     post: operations['restoreCI'];
     delete?: never;
@@ -2740,7 +2740,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -7743,6 +7743,17 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description A CI with the collections requested by include (API-05). Without include it is the CI alone. */
+    CIWithIncludes: components['schemas']['CI'] & {
+      /** @description At most 200 relationships of the CI the caller may see. */
+      relationships?: components['schemas']['Relationship'][];
+      /** @description At most 200 contact links of the CI the caller may see. */
+      contacts?: components['schemas']['CIContact'][];
+      /** @description The embedded collections the server capped: the collection has more rows the caller may see than it embeds, e.g. relationships true. Absent when every embedded collection is complete. */
+      truncated?: {
+        [key: string]: true;
+      };
+    };
     /** @description Canonical data of the linked asset, shown read-only on the CI (DB-05). */
     CIAssetFacts: {
       id: string;
@@ -12153,7 +12164,7 @@ export interface operations {
   getCI: {
     parameters: {
       query?: {
-        /** @description Comma-separated related collections to embed (API-05): `relationships`, `contacts`, `asset`. An unknown name yields 422. */
+        /** @description Comma-separated related collections to embed (API-05): `relationships`, `contacts`, `asset`. An unknown name yields 422. A collection embeds at most 200 rows; one with more rows the caller may see is named in `truncated` (CIWithIncludes). */
         include?: string;
       };
       header?: never;
@@ -12173,7 +12184,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['CI'];
+          'application/json': components['schemas']['CIWithIncludes'];
         };
       };
       /** @description The CI was merged into another; Location names the survivor (12 months, CI-12). */
@@ -12309,6 +12320,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description The CI was deleted longer ago than the retention. */
       410: {
         headers: {

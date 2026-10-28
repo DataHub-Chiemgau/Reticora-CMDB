@@ -248,8 +248,11 @@ func (r *MemoryRepository) RestoreDeleted(_ context.Context, orgID, id string, r
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	item, ok := r.items[id]
-	if !ok || item.OrganizationID != orgID || item.DeletedAt == nil {
+	if !ok || item.OrganizationID != orgID {
 		return nil, ErrNotFound
+	}
+	if item.DeletedAt == nil {
+		return nil, ErrNotDeleted
 	}
 	if time.Since(*item.DeletedAt) > retention {
 		return nil, ErrRetentionExpired

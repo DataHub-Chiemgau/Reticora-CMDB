@@ -884,6 +884,8 @@ paths:
           description: >-
             Comma-separated related collections to embed (API-05):
             `relationships`, `contacts`, `asset`. An unknown name yields 422.
+            A collection embeds at most 200 rows; one with more rows the
+            caller may see is named in `truncated` (CIWithIncludes).
       responses:
         '200':
           description: Configuration item details
@@ -894,7 +896,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CI'
+                $ref: '#/components/schemas/CIWithIncludes'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '301':
@@ -985,8 +987,10 @@ paths:
         Soft delete (CI-05): sets deleted_at and the operative status
         decommissioned (the lifecycle state stays, LCY-01) and releases the
         asset link; relationships stay, traversal and impact skip the CI.
-        POST /cis/{id}/restore brings it back within 90 days, afterwards the
-        retention run deletes it with its interfaces and IP addresses.
+        POST /cis/{id}/restore brings it back within the soft-delete
+        retention (RETICORA_RETENTION_SOFT_DELETE_DAYS, default and minimum
+        90 days), afterwards the retention run deletes it with its
+        interfaces and IP addresses.
       responses:
         '204':
           description: Configuration item deleted
@@ -1003,9 +1007,12 @@ paths:
       tags: [CIs]
       summary: Restore a deleted CI within the retention (CI-05, API-05)
       description: >-
-        Clears the deletion of a CI deleted less than 90 days ago; the change
+        Clears the deletion of a CI deleted within the soft-delete retention
+        (RETICORA_RETENTION_SOFT_DELETE_DAYS, default and minimum 90 days);
+        the status and the asset link of the deletion come back, the change
         history and the audit trail record the restore (ci.restored).
-        Requires ci:delete.
+        Requires ci:delete. A CI of another organization, outside the
+        caller's scope or unknown is 404.
       responses:
         '200':
           description: The restored CI
@@ -1019,6 +1026,15 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The CI is not deleted, it was merged into another CI (it comes
+            back only through POST /cis/{id}/unmerge, CI-12), or another
+            active CI holds one of its unique values meanwhile, such as the
+            serial number (MET-15).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '410':
           description: The CI was deleted longer ago than the retention.
           content:
@@ -5335,7 +5351,7 @@ paths:
         another); conflicting_values accept applies the reported serial
         number or hardware UUID kept in payload.incoming;
         resurrected_device merge|new|dismiss (merge reactivates the deleted
-        CI); new of unclassified_device, ambiguous_identity and
+        CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and
         resurrected_device creates the CI as the ingest of the device kept
         in the payload would, with the client and site of the item (CI-13),
         and 422 when the item records no client and its candidate CIs share
@@ -14776,6 +14792,33 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    CIWithIncludes:
+      description: >-
+        A CI with the collections requested by include (API-05). Without
+        include it is the CI alone.
+      allOf:
+        - $ref: '#/components/schemas/CI'
+        - type: object
+          properties:
+            relationships:
+              type: array
+              description: At most 200 relationships of the CI the caller may see.
+              items: { $ref: '#/components/schemas/Relationship' }
+            contacts:
+              type: array
+              description: At most 200 contact links of the CI the caller may see.
+              items: { $ref: '#/components/schemas/CIContact' }
+            truncated:
+              type: object
+              description: >-
+                The embedded collections the server capped: the collection
+                has more rows the caller may see than it embeds, e.g.
+                relationships true. Absent when every embedded collection is
+                complete.
+              additionalProperties:
+                type: boolean
+                enum: [true]
 
     CIAssetFacts:
       type: object

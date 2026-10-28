@@ -533,6 +533,8 @@ func main() {
 		InvitationAcceptURL: invitationAcceptURL(cfg),
 		MFA:                 mfa,
 		CollectorCA:         collectorPKI,
+		// The restore window of a deleted CI is its retention (CI-05).
+		RetentionSoftDeleteDays: cfg.RetentionSoftDeleteDays,
 	}, httpStages{
 		preAuth:     middleware.PreAuthRateLimiter(cfg.PreAuthRateLimitRPM, cacheStore),
 		auth:        authMiddleware,

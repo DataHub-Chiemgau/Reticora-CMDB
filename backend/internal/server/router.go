@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
@@ -247,6 +248,10 @@ type Options struct {
 	// Modules are the enabled late modules (WP-214, E-03); nil enables all
 	// (tests). The server passes the set from RETICORA_MODULES.
 	Modules *ModuleSet
+	// RetentionSoftDeleteDays is the configured soft-delete retention
+	// (RETICORA_RETENTION_SOFT_DELETE_DAYS): the window of POST
+	// /cis/{id}/restore (CI-05); 0 keeps the default of 90 days.
+	RetentionSoftDeleteDays int
 }
 
 // registrar is implemented by every domain handler.
@@ -752,21 +757,29 @@ func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
 	} else {
 		h = ci.NewHandler(opts.CIService, opts.Dispatcher)
 	}
+	// The restore window is the configured soft-delete retention (CI-05).
+	if opts.RetentionSoftDeleteDays > 0 {
+		opts.CIService.WithRestoreRetention(time.Duration(opts.RetentionSoftDeleteDays) * 24 * time.Hour)
+	}
 	// GET /cis/{id}?include= (API-05) embeds up to includeLimit related
-	// rows of each kind.
+	// rows of each kind; a kind with more rows the caller may see is marked
+	// as truncated (F-223).
 	const includeLimit = 200
 	page := api.PaginationParams{Limit: includeLimit}
 	if repos.Override != nil {
 		h.WithProvenance(repos.Override)
 	}
 	return h.WithIncludes(map[string]ci.IncludeFunc{
-		"relationships": func(ctx context.Context, orgID, ciID string) (any, error) {
-			rels, _, err := repos.Relationship.List(ctx, orgID, ciID, page)
-			return rels, err
+		"relationships": func(ctx context.Context, orgID, ciID string) (any, bool, error) {
+			rels, total, err := repos.Relationship.List(ctx, orgID, ciID, page)
+			return rels, total > len(rels), err
 		},
-		"contacts": func(ctx context.Context, orgID, ciID string) (any, error) {
-			contacts, _, err := repos.Contact.ListForCI(ctx, orgID, ciID, page)
-			return contacts, err
+		"contacts": func(ctx context.Context, orgID, ciID string) (any, bool, error) {
+			contacts, total, err := repos.Contact.ListForCI(ctx, orgID, ciID, page)
+			if contacts == nil {
+				contacts = []contact.CIContact{}
+			}
+			return contacts, total > len(contacts), err
 		},
 	})
 }

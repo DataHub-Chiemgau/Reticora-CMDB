@@ -93,13 +93,17 @@ type Repository interface {
 	Delete(ctx context.Context, orgID, id string) error
 }
 
-// RestoreRetention is how long a deleted CI can be restored (CI-05); after
-// it the hard-delete job removes it.
+// RestoreRetention is the default of how long a deleted CI can be restored
+// (CI-05); the server sets the configured soft-delete retention
+// (WithRestoreRetention), after which the hard-delete job removes the CI.
 const RestoreRetention = 90 * 24 * time.Hour
 
 // ErrRetentionExpired: the CI was deleted longer ago than the retention and
 // can no longer be restored (410).
 var ErrRetentionExpired = errors.New("the CI was deleted longer ago than the restore retention")
+
+// ErrNotDeleted: the CI to restore is not deleted (409).
+var ErrNotDeleted = errors.New("the CI is not deleted")
 
 // Restorer restores soft-deleted CIs within the retention (CI-05).
 type Restorer interface {
@@ -224,6 +228,8 @@ type Service struct {
 	// bulkQueue they run on the job queue (TEC-14).
 	bulkJobs  BulkJobs
 	bulkQueue BulkQueue
+	// restoreRetention is the restore window (CI-05); 0 is RestoreRetention.
+	restoreRetention time.Duration
 }
 
 // NewService creates a CI service.
@@ -375,16 +381,30 @@ func checkAssetOwnedFields(before *Item, req *UpdateRequest) error {
 	return nil
 }
 
-// Delete removes a CI after loading its prior state.
+// WithRestoreRetention sets the restore window to the configured
+// soft-delete retention (RETICORA_RETENTION_SOFT_DELETE_DAYS, CI-05); a
+// value that is not positive keeps the default RestoreRetention.
+func (s *Service) WithRestoreRetention(retention time.Duration) *Service {
+	if retention > 0 {
+		s.restoreRetention = retention
+	}
+	return s
+}
+
 // Restore brings a deleted CI back within the retention (CI-05, API-05).
 func (s *Service) Restore(ctx context.Context, orgID, id string) (*Item, error) {
 	restorer, ok := s.repo.(Restorer)
 	if !ok {
 		return nil, errors.New("restore is not supported by this repository")
 	}
-	return restorer.RestoreDeleted(ctx, orgID, id, RestoreRetention)
+	retention := s.restoreRetention
+	if retention <= 0 {
+		retention = RestoreRetention
+	}
+	return restorer.RestoreDeleted(ctx, orgID, id, retention)
 }
 
+// Delete removes a CI after loading its prior state.
 func (s *Service) Delete(ctx context.Context, orgID, id string) (*Item, error) {
 	item, err := s.repo.GetByID(ctx, orgID, id)
 	if err != nil {

@@ -1454,13 +1454,15 @@ func (r *PGRepository) Restore(ctx context.Context, orgID, id string) (*Item, er
 }
 
 // RestoreDeleted implements Restorer: POST /cis/{id}/restore within the
-// retention (CI-05); an older deletion is ErrRetentionExpired.
+// retention (CI-05); an older deletion is ErrRetentionExpired, a CI that is
+// not deleted ErrNotDeleted.
 func (r *PGRepository) RestoreDeleted(ctx context.Context, orgID, id string, retention time.Duration) (*Item, error) {
 	return r.restore(ctx, orgID, id, retention, "update", "api")
 }
 
 // restore clears deleted_at of a deleted CI (retention 0: no limit) and
-// records the change, the audit entry and the ci.restored event.
+// records the change, the audit entry and the ci.restored event. A CI that
+// is not deleted is ErrNotDeleted, a merged one ErrMergeConflict.
 func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention time.Duration, changeType, reason string) (*Item, error) {
 	var restored *Item
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -1474,7 +1476,7 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 			return fmt.Errorf("get ci for restore: %w", err)
 		}
 		if deletedAt == nil {
-			return ErrNotFound
+			return ErrNotDeleted
 		}
 		// A merged CI comes back only through the unmerge (CI-12).
 		if mergedInto != "" {
