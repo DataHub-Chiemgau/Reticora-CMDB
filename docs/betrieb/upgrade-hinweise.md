@@ -159,6 +159,68 @@ bisherigen Parent in `migration_quarantine` ab (`migration = '000179'`). Ihre
 Down-Migration nimmt die Reparatur nicht zurück. Prüfung und Nacharbeit:
 `docs/backup-dr.md`, Abschnitt „Migration 000179“.
 
+## Release-Hinweis: Upgrade von Datenbanken ohne `migration_quarantine` (F-378, E-100)
+
+Stand: 2026-10-28. Umsetzung: WP-649. Entscheidung: E-100 (Empfehlung
+Option 1 als Übergangsregel, nach dem Präzedenzfall E-26 und E-94).
+
+Datenbanken, die 000056 vor E-26 angewendet haben (zwischen 2026-09-02 und
+2026-10-01), besitzen keine Tabelle `migration_quarantine`. Frühere Builds
+von 000089 schrieben ohne Prüfung in diese Tabelle; das Upgrade solcher
+Datenbanken brach dort ab:
+
+```text
+error: migration failed: relation "migration_quarantine" does not exist (column 13) in line 38: -- WP-079 (DB-05, REL-01, AST-05, CH27): …
+…
+ (details: pq: relation "migration_quarantine" does not exist)
+```
+
+Danach meldete jeder weitere Aufruf
+`error: Dirty database version 89. Fix and force version.` golang-migrate
+führt jede Datei in einer Transaktion aus, das Schema stand also weiter auf
+Version 88.
+
+- 000089 legt die Tabelle jetzt an, wenn `to_regclass('public.migration_quarantine')`
+  leer ist, mit genau der Definition von 000056: Spalten, Index, RLS ENABLE
+  und FORCE, Policy `migration_quarantine_isolation`, Eigentümer
+  `reticora_owner` und die Rechte von `reticora_app`. Danach läuft das
+  Upgrade bis zur neuesten Version durch.
+- Auf jeder anderen Datenbank, auch bei Neuinstallationen, bewirkt die
+  Prüfung nichts; das Schema ist unverändert.
+- Installationen, die bereits über 89 hinaus migriert sind, sind nicht
+  betroffen und müssen nichts tun.
+- Ein mit einem früheren Build bei 000089 gescheitertes Upgrade wird mit den
+  Migrationsdateien dieses Releases fortgesetzt:
+
+  ```sql
+  SELECT version, dirty FROM schema_migrations;                  -- 89 | t
+  SELECT to_regclass('public.migration_quarantine') IS NULL,     -- t
+         to_regclass('public.ci_structure_edge') IS NULL;        -- t (Schema auf 88)
+  ```
+
+  Zeigen die Abfragen etwas anderes, nicht weitermachen, sondern aus dem
+  Backup wiederherstellen. Sonst:
+
+  ```bash
+  migrate -path backend/migrations -database "$DATABASE_URL" force 88
+  migrate -path backend/migrations -database "$DATABASE_URL" up
+  ```
+
+Ein Rollback unter 56 entfernt die von 000089 angelegte Tabelle wie bisher
+mit der Down-Migration 000056; die Down-Migration 000089 lässt sie stehen.
+
+Nachgestellt mit golang-migrate auf eigenen Datenbanken: Migrationen 1 bis
+56, danach `DROP TABLE migration_quarantine`. Mit der alten Datei endet `up`
+mit dem Fehler oben und 89 dirty; nach `force 88` läuft `up` mit der neuen
+Datei bis 179 durch, die Tabelle hat RLS ENABLE und FORCE, Eigentümer
+`reticora_owner` und die Rechte `reticora_app=arwd`. Eine Datenbank im
+selben Zustand ohne gescheiterten Versuch migriert mit der neuen Datei
+direkt bis 179.
+`TestUpgradeFromPreQuarantine56`
+(`backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go`)
+prüft das Upgrade samt der von 000089 abgelegten Zeile und vergleicht das
+Schema mit einer frischen Installation.
+
 ## Prüfung
 
 `TestMigrationsRoundtrip` (`backend/internal/database/migrations_roundtrip_integration_test.go`)

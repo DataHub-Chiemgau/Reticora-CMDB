@@ -11,6 +11,35 @@
 -- * ci_structure_edge projects contains (CI → CI), mounted_in (CI → rack)
 --   and located_in (CI → location).
 
+-- Databases that applied 000056 before E-26 have no migration_quarantine,
+-- and this is the first migration that writes to it (F-378, E-100). Create
+-- it here exactly as 000056 does; on every other database nothing happens.
+-- The event trigger of 000078 hands the table to reticora_owner; the grants
+-- are those the default privileges of 000056 give a table created there.
+DO $$
+BEGIN
+    IF to_regclass('public.migration_quarantine') IS NULL THEN
+        CREATE TABLE migration_quarantine (
+            id              BIGSERIAL PRIMARY KEY,
+            organization_id UUID NOT NULL,
+            source_table    TEXT NOT NULL,
+            row_data        JSONB NOT NULL,
+            reason          TEXT NOT NULL,
+            migration       TEXT NOT NULL,
+            quarantined_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        CREATE INDEX idx_migration_quarantine_org ON migration_quarantine (organization_id, source_table);
+        ALTER TABLE migration_quarantine ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE migration_quarantine FORCE ROW LEVEL SECURITY;
+        CREATE POLICY migration_quarantine_isolation ON migration_quarantine
+            USING (organization_id = current_setting('app.org_id')::UUID)
+            WITH CHECK (organization_id = current_setting('app.org_id')::UUID);
+        GRANT SELECT, INSERT, UPDATE, DELETE ON migration_quarantine TO reticora_app;
+        GRANT USAGE, SELECT ON SEQUENCE migration_quarantine_id_seq TO reticora_app;
+    END IF;
+END
+$$;
+
 ALTER TABLE ci ADD COLUMN parent_ci_id uuid;
 ALTER TABLE ci ADD CONSTRAINT ci_parent_ci_fkey FOREIGN KEY (parent_ci_id, organization_id)
     REFERENCES ci (id, organization_id) ON DELETE SET NULL (parent_ci_id);

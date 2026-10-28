@@ -12,6 +12,8 @@ Der Befund F-376 ist beim Grünziehen von PR #103 (K5-Nachträge) gefunden worde
 
 Der Befund F-377 ist bei der Umsetzung von K6 gefunden worden (Konvention 16, WP-571): Die UI blendet die Aktionen für das eigene Konto aus, das Backend verweigerte sie nicht. Er ist mit `backend/internal/user/self_lockout_integration_test.go` kodiert (auf `dff97a4` rot) und wird von WP-648 im Abschnitt K6-Nachträge geschlossen.
 
+Der Befund F-378 ist bei der Umsetzung von K6 gefunden worden (Konvention 16, WP-574): Beim Nachstellen des Rollbacks über 000056 auf einer Altinstallation ohne `migration_quarantine` scheiterte auch das Upgrade, bei 000089. Er ist mit `backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go` kodiert (auf `ea3dd6d` rot) und wird von WP-649 im Abschnitt K6-Nachträge geschlossen.
+
 Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `tests/audit/expected-failures.txt` (Ratchet, `tests/audit/run-auditdefect.sh`). Die a11y-Befunde sind in `frontend/e2e/a11y.spec.ts` (gemockter Playwright-Lauf, CI-Job `e2e`) mit `test.fail` und der Befund-ID markiert: Der markierte Fall muss scheitern, ein markierter Fall, der besteht, macht den Lauf rot. Diese Marken sind ihr eigener Ratchet; der Ratchet von WP-337 vergleicht nur die Arten `go`, `sh`, `vitest` und `e2e-real`, daher erhalten sie keine Zeile in `expected-failures.txt`. Shell-Defekttests (`tests/audit/*.test.sh`, Art `sh`) und Real-Stack-Fälle (`frontend/e2e-real/`, Art `e2e-real`, je Browserprojekt eine Zeile, nur in CI ausführbar) stehen ebenfalls in `expected-failures.txt` (F-369, F-370, F-375).
 
 ## Zählung
@@ -21,8 +23,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 3 |
 | P2 | 16 |
-| P3 | 3 |
-| **Summe** | **23** |
+| P3 | 4 |
+| **Summe** | **24** |
 
 ## Übersicht
 
@@ -51,6 +53,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-375](#f-375) | P3 | Real-Stack-E2E in WebKit und Mobile Safari über den Plain-HTTP-Origin `http://localhost`: der Browser verwirft das Secure-Refresh-Cookie, die Refresh-Fälle von `roles-authz` scheitern (Testumgebung) | WP-532 (CI von PR #102) | belegt | frontend/e2e-real/roles-authz.spec.ts 07, 11, 14, 14a, 14b, 15 (Projekte webkit, mobile-safari) | WP-646 |
 | [F-376](#f-376) | P1 | Die signierte Download-URL eines Exports nennt den internen Objektspeicher `http://minio:9000`: im Browser einer Installation nicht auflösbar, über einen HTTPS-Origin zusätzlich gemischter Inhalt; der Export lässt sich im Browser nicht laden | WP-646 (CI von PR #103) | belegt (URL), wahrscheinlich (Mixed Content in WebKit) | frontend/e2e-real/bulk-jobs-export.spec.ts E01, ci-lifecycle.spec.ts L10b, client-scope.spec.ts CS03 (Projekte webkit, mobile-safari) | WP-647 |
 | [F-377](#f-377) | P2 | Eigenes Konto per API deaktivierbar und löschbar: der letzte Administrator kann die Organisation aussperren | WP-571 (K6) | belegt | backend/internal/user/self_lockout_integration_test.go | WP-648 |
+| [F-378](#f-378) | P3 | Upgrade von Datenbanken mit 000056 vor E-26 scheitert bei 000089: `migration_quarantine` fehlt, Version 89 bleibt dirty | WP-574 (K6) | belegt | backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go TestUpgradeFromPreQuarantine56 | WP-649 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -351,6 +354,19 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 - **Empfehlung:** Prüfung vor jedem Schreibzugriff, Sitzungswiderruf und Audit, 400 mit festem Text; Vergleich unabhängig von der Schreibweise der UUID.
 - **Retest (verbindlich):** `go test -run 'TestOwnAccountDeactivationRefused|TestOwnAccountDeletionRefused' ./internal/user/` grün.
 - **Kodierender Test:** backend/internal/user/self_lockout_integration_test.go (`TestOwnAccountDeactivationRefused`, `TestOwnAccountDeletionRefused`); auf `dff97a4` rot (eigenes PATCH 200 mit Status inactive, eigenes DELETE 204).
+
+<a id="f-378"></a>
+### F-378 (P3) – Upgrade von Datenbanken mit 000056 vor E-26 scheitert bei 000089: `migration_quarantine` fehlt, Version 89 bleibt dirty
+
+- **Gefunden in:** WP-574 (`t3-migration-guards`, K6) · **Betroffene Anforderungen:** DB-02 · **Komponente:** backend/migrations/000089_ci_parent_projection.up.sql (auch 000090, 000091, 000166 schreiben in `migration_quarantine`); docs/betrieb/upgrade-hinweise.md, docs/backup-dr.md · **Quelle:** Probe mit golang-migrate bei der Umsetzung von WP-574, bestätigt durch einen ausgeführten Test
+- **Reproduktion:** eigene Datenbank, `migrate goto 56`, `DROP TABLE migration_quarantine` (Stand einer Datenbank, die 000056 zwischen 2026-09-02 und 2026-10-01 vor E-26 angewendet hat), `migrate up` → `error: migration failed: relation "migration_quarantine" does not exist … in line 38: -- WP-079 …`; `migrate version` → `89 (dirty)`, das Schema bleibt auf 88.
+- **Soll:** Das Upgrade solcher Datenbanken läuft bis zur neuesten Version durch; danach ist `migration_quarantine` definiert wie bei einer Neuinstallation (Spalten, Index, RLS ENABLE und FORCE, Policy, Eigentümer, Rechte).
+- **Ist:** 000089 schreibt ohne Prüfung in `migration_quarantine`; die Tabelle legt seit E-26 (WP-052, 2026-10-01) nur die geänderte 000056 an. Der Release-Hinweis zu E-26 (`docs/backup-dr.md`) und `docs/betrieb/upgrade-hinweise.md` behandeln nur den Rollback (F-224), nicht das Upgrade.
+- **Nutzerwirkung:** Betroffene Installationen können nicht aktualisieren; jeder weitere Aufruf meldet `Dirty database version 89`. Ein ausgeliefertes Release gibt es noch nicht (keine Release-Tags), betroffen sind nur frühe Test- und Pilotinstallationen.
+- **Ursache (belegt):** Änderung der bestehenden Migration 000056 durch E-26 ohne Übergang für bereits migrierte Datenbanken; die späteren Migrationen setzen die Tabelle voraus.
+- **Empfehlung:** E-100 Option 1 (analog E-26/E-94): 000089 legt die Tabelle an, wenn `to_regclass('public.migration_quarantine')` leer ist, mit genau der DDL von 000056; auf jeder anderen Datenbank ohne Wirkung. Release-Hinweis mit dem Weg aus 89 dirty (`force 88`, `up`).
+- **Retest (verbindlich):** `go test -count=1 -run 'TestUpgradeFromPreQuarantine56' ./internal/database/` grün; `TestMigrationsRoundtrip` und `TestSchemaBaselineMatchesMigratedSchema` grün.
+- **Kodierender Test:** backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go (`TestUpgradeFromPreQuarantine56`); auf `ea3dd6d` rot (`apply 000089_ci_parent_projection.up.sql: ERROR: relation "migration_quarantine" does not exist (SQLSTATE 42P01) (database left dirty at version 89)`).
 
 ## Geprüfte Kandidaten ohne neuen Befund
 

@@ -441,6 +441,17 @@ down section on a schema with the composite keys and without the table;
 `TestMigration56QuarantinesInconsistentRows` checks that with the table the
 rows come back as before.
 
+**Upgrade on installations migrated before this change.** Migration 000089
+is the first one that writes to `migration_quarantine`. Earlier builds of it
+stopped on such an installation with `relation "migration_quarantine" does
+not exist` and left version 89 dirty (schema still at 88). Since WP-649
+(F-378, E-100 Option 1 as transitional rule) 000089 creates the table when
+it is missing, exactly as 000056 defines it, and the upgrade runs through.
+A failed attempt continues with `migrate … force 88` and `migrate … up`
+using the files of a current release; checks and details in
+`docs/betrieb/upgrade-hinweise.md`. Covered by `TestUpgradeFromPreQuarantine56`
+(`backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go`).
+
 **Release note for installations migrated before this change.** Earlier
 builds of 000056 deleted those rows without a copy. An installation is
 affected if it reached schema version 56 or later while `migration_quarantine`
