@@ -546,6 +546,24 @@ plain-HTTP LAN IP (e.g. `http://192.168.x.x:3000`) breaks this.
 **Fix:** Access the UI via `localhost`, or enable HTTPS (enter a public domain
 in the installer). The UI now shows a readable error instead of crashing.
 
+Plain HTTP allows a sign-in only on loopback (`http://localhost:<port>`, a
+browser on the server or an SSH port forward); for operation use HTTPS
+(SEC-01). See [deploy/README.md](../deploy/README.md#https-with-lets-encrypt-nginx--certbot),
+"Limits of plain HTTP".
+
+### Safari signs out after 15 minutes on `http://localhost`
+
+**Cause:** The refresh cookie `reticora_refresh` is always `Secure` (SEC-01).
+Chromium, Edge and Firefox store it on `http://localhost`; Safari (WebKit)
+drops a `Secure` cookie on a plain-HTTP origin, so the SPA cannot renew the
+session and sends the user to the login once the access token expires
+(15 minutes). `POST /api/v1/auth/refresh` answers `401 refresh cookie is
+required`.
+
+**Fix:** Serve the UI over HTTPS (enter a public domain in the installer,
+"HTTPS with Let's Encrypt" in deploy/README.md), or use another browser for
+a plain-HTTP loopback installation.
+
 ---
 
 ## 6. Idempotency: safe re-runs

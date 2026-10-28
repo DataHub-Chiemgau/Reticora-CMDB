@@ -43,6 +43,8 @@ on:
       - 'backend/**'
       - 'frontend/src/**'
       - 'frontend/e2e-real/**'
+      # WP-646: shell harness of the TLS origin of the WebKit projects.
+      - 'tests/e2e-real-tls-origin.test.sh'
       # WP-532: playwright.real.config.ts takes its browser projects from here.
       - 'frontend/playwright.config.ts'
       - 'frontend/e2e/support/**'
@@ -84,6 +86,8 @@ on:
       - 'backend/**'
       - 'frontend/src/**'
       - 'frontend/e2e-real/**'
+      # WP-646: shell harness of the TLS origin of the WebKit projects.
+      - 'tests/e2e-real-tls-origin.test.sh'
       # WP-532: playwright.real.config.ts takes its browser projects from here.
       - 'frontend/playwright.config.ts'
       - 'frontend/e2e/support/**'
@@ -156,6 +160,9 @@ jobs:
 
       # WP-440 (F-288): besides the stubs, a real compose project (redis:7-alpine)
       # with a scaled service and a one-off container; fails without Docker.
+      - name: TLS origin of the WebKit real-stack projects (setup-tls-origin.sh, stubs, WP-646)
+        run: ./tests/e2e-real-tls-origin.test.sh
+
       - name: install-smoke-health.sh (stubs, scaled service and one-off container)
         run: ./tests/install-smoke-health.test.sh
 
@@ -589,40 +596,63 @@ jobs:
   # (<project>:<spec file>): a listed test that turned green, an unlisted red
   # test, a skipped or missing test fail the job. The job e2e-real-ratchet
   # compares the results of all projects together.
+  # WP-646 (F-375): WebKit does not store the Secure refresh cookie over
+  # http://localhost. The projects webkit and mobile-safari (origin: tls) run
+  # against an installation on the TLS origin https://<sslip.io name of the
+  # runner> with the certificate of Pebble (setup-tls-origin.sh, the Pebble
+  # helpers of tests/install-acme-pebble.test.sh as in tls-domain-pebble);
+  # the Pebble root is in the system trust store of the runner, which the
+  # WebKit build of Playwright reads, and in NODE_EXTRA_CA_CERTS; certificate
+  # errors are not ignored. Before the suite the job checks that BASE_URL is
+  # https:// without localhost and that the sign-in in the project sets the
+  # cookie reticora_refresh. The other projects (origin: loopback) keep the
+  # loopback installation http://localhost:3000 (INS-04 @plain-http
+  # unchanged).
   e2e-real:
     needs: installer-script-tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
           - project: chromium
             browser: chromium
+            origin: loopback
           - project: edge
             browser: msedge
+            origin: loopback
           - project: firefox
             browser: firefox
+            origin: loopback
           - project: webkit
             browser: webkit
+            origin: tls
           - project: mobile-chrome
             browser: chromium
+            origin: loopback
           - project: mobile-safari
             browser: webkit
+            origin: tls
     env:
       PROJECT: ${{ matrix.project }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Make installer scripts executable
-        run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
+        run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh frontend/e2e-real/fixtures/*.sh
 
       # The checked-out state is not published: local build, not
       # signature-verified (E-69; the default path runs in release-mode).
       - name: Run the cloud installer non-interactively (ubuntu-24.04)
+        if: matrix.origin == 'loopback'
         run: ./install.sh --cloud --non-interactive --build-from-source
         env:
           RETICORA_SOURCE_DIR: ${{ github.workspace }}
+
+      - name: Install on the TLS origin with the Pebble certificate, test CA in the trust store (WP-646)
+        if: matrix.origin == 'tls'
+        run: ./frontend/e2e-real/fixtures/setup-tls-origin.sh "$RUNNER_TEMP/tls-origin"
 
       - name: Verify all expected services are running and healthy
         run: |
@@ -656,6 +686,21 @@ jobs:
           npm ci
           npx playwright install --with-deps ${{ matrix.browser }}
 
+      # WP-646: stops the job before the suite unless the WebKit project runs
+      # over the TLS origin and keeps the refresh cookie there.
+      - name: TLS origin of ${{ matrix.project }} (BASE_URL https:// without localhost, refresh cookie after the sign-in)
+        if: matrix.origin == 'tls'
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          ./e2e-real/fixtures/setup-tls-origin.sh --check-base-url "$BASE_URL"
+          ./e2e-real/fixtures/setup-tls-origin.sh --check-base-url "${E2E_ISSUER_URL%%/realms/*}"
+          if ! npx playwright test -c e2e-real/fixtures/playwright.tls-origin.config.ts --project="$PROJECT" --reporter=list \
+              --output "$RUNNER_TEMP/e2e-real/tls-origin-test-results"; then
+            echo "FAIL: the sign-in in $PROJECT over $BASE_URL does not set the refresh cookie reticora_refresh (F-375); the suite does not run"
+            exit 1
+          fi
+
       # G1 default (RETICORA_MODULES unset): playwright.real.config.ts leaves
       # the specs of late modules out (WP-541).
       - name: Run the real-stack E2E suite (${{ matrix.project }}) against the expected-failure list
@@ -687,17 +732,25 @@ jobs:
           printf 'services:\n  server:\n    environment:\n      RETICORA_MODULES: maintenance\n' >"$overlay"
           files=(-f docker-compose.yml)
           [ -f docker-compose.override.yml ] && files+=(-f docker-compose.override.yml)
-          files+=(-f "$repo/frontend/e2e/fixtures/docker-compose.e2e.yml" -f "$repo/frontend/e2e-real/fixtures/docker-compose.e2e-real.yml" -f "$overlay")
+          files+=(-f "$repo/frontend/e2e/fixtures/docker-compose.e2e.yml" -f "$repo/frontend/e2e-real/fixtures/docker-compose.e2e-real.yml")
+          # WP-646: the TLS template with the X-Real-IP passthrough of setup-real-stack.sh.
+          E2E_NGINX_TLS_TEMPLATE="$RUNNER_TEMP/nginx-e2e-real-tls.conf.template"
+          if [ -n "$(value RETICORA_TLS_DOMAIN)" ]; then
+            [ -f "$E2E_NGINX_TLS_TEMPLATE" ] || { echo "FAIL: the real-stack setup ($E2E_NGINX_TLS_TEMPLATE) is missing"; exit 1; }
+            files+=(-f "$repo/frontend/e2e-real/fixtures/docker-compose.e2e-real-tls.yml")
+          fi
+          files+=(-f "$overlay")
           server_id="$(docker compose --env-file .env ps -q server)"
           container_env() { docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$server_id" | sed -n "s/^$1=//p"; }
           E2E_CAPTCHA_KEY="$(container_env RETICORA_SIGNUP_CAPTCHA_KEY)"
           E2E_KC_CLIENT_ID="$(container_env RETICORA_KEYCLOAK_ADMIN_CLIENT_ID)"
           E2E_KC_CLIENT_SECRET="$(container_env RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET)"
+          E2E_BASE_URL="$(container_env RETICORA_SIGNUP_VERIFY_URL)"; E2E_BASE_URL="${E2E_BASE_URL%/onboarding}"
           E2E_NGINX_CONF="$RUNNER_TEMP/nginx-e2e-real.conf"
-          if [ -z "$E2E_CAPTCHA_KEY" ] || [ -z "$E2E_KC_CLIENT_SECRET" ] || [ ! -f "$E2E_NGINX_CONF" ]; then
-            echo "FAIL: the real-stack setup (signup secrets, $E2E_NGINX_CONF) is missing"; exit 1
+          if [ -z "$E2E_CAPTCHA_KEY" ] || [ -z "$E2E_KC_CLIENT_SECRET" ] || [ ! -f "$E2E_NGINX_CONF" ] || [ "$E2E_BASE_URL" != "$BASE_URL" ]; then
+            echo "FAIL: the real-stack setup (signup secrets, $E2E_NGINX_CONF, links to '$E2E_BASE_URL' for $BASE_URL) is missing"; exit 1
           fi
-          export E2E_CAPTCHA_KEY E2E_KC_CLIENT_ID E2E_KC_CLIENT_SECRET E2E_NGINX_CONF
+          export E2E_CAPTCHA_KEY E2E_KC_CLIENT_ID E2E_KC_CLIENT_SECRET E2E_NGINX_CONF E2E_NGINX_TLS_TEMPLATE E2E_BASE_URL
           docker compose --env-file .env "${files[@]}" up -d server
           server_port="$(value RETICORA_SERVER_PORT)"; server_port="${server_port:-8080}"
           for _ in $(seq 1 60); do
@@ -705,13 +758,12 @@ jobs:
             sleep 2
           done
           docker compose --env-file .env "${files[@]}" up -d --force-recreate frontend
-          frontend_port="$(value RETICORA_FRONTEND_PORT)"; frontend_port="${frontend_port:-3000}"
           for _ in $(seq 1 60); do
-            curl -fsS "http://localhost:${frontend_port}/api/v1/auth/config" >/dev/null 2>&1 && break
+            curl -fsS "$BASE_URL/api/v1/auth/config" >/dev/null 2>&1 && break
             sleep 2
           done
-          curl -fsS "http://localhost:${frontend_port}/api/v1/auth/config" >/dev/null \
-            || { echo "FAIL: the frontend does not reach the restarted server"; exit 1; }
+          curl -fsS "$BASE_URL/api/v1/auth/config" >/dev/null \
+            || { echo "FAIL: the frontend at $BASE_URL does not reach the restarted server"; exit 1; }
           modules="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose --env-file .env ps -q server)" | sed -n 's/^RETICORA_MODULES=//p')"
           [ "$modules" = maintenance ] || { echo "FAIL: the server runs with RETICORA_MODULES='$modules'"; exit 1; }
           echo "OK: server restarted with RETICORA_MODULES=$modules"
@@ -745,7 +797,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-real-${{ matrix.project }}
-          path: ${{ runner.temp }}/e2e-real/
+          path: |
+            ${{ runner.temp }}/e2e-real/
+            ${{ runner.temp }}/tls-origin/logs/
           if-no-files-found: warn
           retention-days: 14
 

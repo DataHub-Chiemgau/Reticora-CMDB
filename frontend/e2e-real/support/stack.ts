@@ -994,6 +994,14 @@ function composeFiles(): string[] {
     '-f',
     join(REPO, 'frontend', 'e2e-real', 'fixtures', 'docker-compose.e2e-real.yml'),
   );
+  // WP-646: an installation on a TLS origin (setup-tls-origin.sh) also gets the TLS template
+  // with the X-Real-IP passthrough (setup-real-stack.sh).
+  if (readComposeEnv().RETICORA_TLS_DOMAIN) {
+    files.push(
+      '-f',
+      join(REPO, 'frontend', 'e2e-real', 'fixtures', 'docker-compose.e2e-real-tls.yml'),
+    );
+  }
   return files;
 }
 
@@ -1113,12 +1121,25 @@ export async function restartServer(
       E2E_NGINX_CONF:
         process.env.E2E_NGINX_CONF ||
         join(process.env.RUNNER_TEMP || '/tmp', 'nginx-e2e-real.conf'),
+      // The origin of the verification and invitation links (WP-646: the TLS origin).
+      E2E_BASE_URL: (env.RETICORA_SIGNUP_VERIFY_URL ?? '').replace(/\/onboarding$/, ''),
+      E2E_NGINX_TLS_TEMPLATE:
+        process.env.E2E_NGINX_TLS_TEMPLATE ||
+        join(process.env.RUNNER_TEMP || '/tmp', 'nginx-e2e-real-tls.conf.template'),
     };
     expect(
       overlayEnv.E2E_CAPTCHA_KEY && overlayEnv.E2E_KC_CLIENT_SECRET,
       'the server runs with the overlays of setup-real-stack.sh (signup secrets)',
     ).toBeTruthy();
     expect(existsSync(overlayEnv.E2E_NGINX_CONF), overlayEnv.E2E_NGINX_CONF).toBe(true);
+    expect(overlayEnv.E2E_BASE_URL, 'the origin of the verification links').toMatch(
+      /^https?:\/\/[^/]+$/,
+    );
+    if (readComposeEnv().RETICORA_TLS_DOMAIN) {
+      expect(existsSync(overlayEnv.E2E_NGINX_TLS_TEMPLATE), overlayEnv.E2E_NGINX_TLS_TEMPLATE).toBe(
+        true,
+      );
+    }
   }
   writeComposeEnv(changes);
   const since = new Date(Date.now() - 1_000);

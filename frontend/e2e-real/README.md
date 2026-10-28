@@ -127,6 +127,23 @@ project lists the same tests (`--list`), no spec or support file decides by brow
 `e2e-real` line, so a line for a project that did not run is `verwaist`. A deviation that only one browser shows is
 fixed or listed as a finding of its own with the project in `ort`.
 
+### WebKit over a TLS origin (WP-646, F-375)
+
+WebKit does not store the `Secure` refresh cookie `reticora_refresh` over `http://localhost` (Chromium and Firefox
+do), so the jobs of the projects `webkit` and `mobile-safari` (matrix `origin: tls`) do not use the loopback
+installation. `fixtures/setup-tls-origin.sh` installs with `RETICORA_TLS_DOMAIN` on `https://cmdb.<runner IP with
+dashes>.sslip.io` with a certificate of Pebble (the helpers of `tests/install-acme-pebble.test.sh`, as in the job
+`tls-domain-pebble`), puts the Pebble root into the system trust store of the runner (`update-ca-certificates`;
+Playwright's WebKit on Linux reads `/etc/ssl/certs/ca-certificates.crt`) and sets `NODE_EXTRA_CA_CERTS` for the
+request contexts; no `ignoreHTTPSErrors`. `setup-onboarding.sh` then sets `BASE_URL` and the issuer to that origin,
+and `setup-real-stack.sh` also rewrites the TLS template of the installation (server block on 443) with the
+`X-Real-IP` passthrough (`fixtures/docker-compose.e2e-real-tls.yml`). Before the suite the job checks that `BASE_URL`
+starts with `https://` without localhost (`setup-tls-origin.sh --check-base-url`) and runs
+`fixtures/tls-origin.check.ts` (`fixtures/playwright.tls-origin.config.ts`): the sign-in in the project must set the
+`Secure`, `HttpOnly` cookie `reticora_refresh`, else the job stops there. The other four projects stay on
+`http://localhost:3000`. `tests/e2e-real-tls-origin.test.sh` tests the scripts with stubs (job
+`installer-script-tests`).
+
 Locally, after the two setup scripts (or against a hand-built stack with the variables above):
 
 ```sh

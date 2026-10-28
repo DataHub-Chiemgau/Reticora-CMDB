@@ -951,3 +951,5 @@ UI-01;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-644
 TEN-05;[B];B;backend/internal/stocktake/stocktake_scope_integration_test.go;WP-638
 API-03;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-643
 JOB-04;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-643
+AUT-02;[B];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
+TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/roles-authz.spec.ts;WP-646

@@ -246,6 +246,28 @@ Also set the **public URLs** to the HTTPS address during installation:
 `RETICORA_PUBLIC_BASE_URL=https://cmdb.example.com` (the installer suggests
 the domain accordingly) and the matching OIDC issuer/redirect URLs.
 
+**Limits of plain HTTP (no domain entered).** Operation requires HTTPS
+(SEC-01); plain HTTP is meant for a first look on the server itself:
+
+- A sign-in only starts in a *secure context*: over HTTPS or on loopback
+  (`http://localhost:<port>`, a browser on the server or an SSH port
+  forward to `localhost`). Over a LAN address or host name
+  (`http://192.168.x.x:3000`, `http://cmdb.lan:3000`) the login page refuses
+  the sign-in with "Die Anmeldung erfordert eine sichere Verbindung" (PKCE
+  needs the Web Crypto API; INS-04), see
+  [docs/troubleshooting-installation.md](../docs/troubleshooting-installation.md#5-web-crypto--insecure-origin).
+- The refresh cookie `reticora_refresh` is always `Secure` (SEC-01, AUT-02).
+  Chromium, Edge and Firefox keep it on `http://localhost`; **Safari (WebKit)
+  does not**, so on a plain-HTTP loopback installation Safari does not renew
+  the session and signs the user out when the access token expires
+  (15 minutes). Use HTTPS for Safari users.
+
+The real-stack E2E suite follows the same rule: its WebKit projects
+(webkit, mobile-safari) run against an installation on a TLS origin with the
+certificate of a test CA (`frontend/e2e-real/fixtures/setup-tls-origin.sh`,
+job `e2e-real` of `install-smoke.yml`), the other browser projects against
+`http://localhost:3000`.
+
 ### Troubleshooting: `container docker-compose-server-1 is unhealthy`
 
 The API server refuses to start without a readable RS256 session signing key.
