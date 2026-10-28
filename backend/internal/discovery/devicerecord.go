@@ -201,6 +201,12 @@ func itemFromRecord(rec *DeviceRecord) IngestItem {
 	if rec.Power != nil {
 		raw["power"] = rec.Power
 	}
+	// The LLDP/CDP neighbors the device reports: a CI created after it
+	// takes the edges this device reported to it (deriveNeighborsOf,
+	// F-374).
+	if neighbors := storedNeighbors(rec.Neighbors); len(neighbors) > 0 {
+		raw["neighbors"] = neighbors
+	}
 	item.RawData = raw
 
 	attributes := map[string]any{}

@@ -1099,6 +1099,47 @@ func (r *PGRepository) PowerDevices(ctx context.Context, orgID string) ([]Stored
 	return out, err
 }
 
+// NeighborReporters lists the live CIs of the organization whose stored
+// report holds an LLDP/CDP neighbor naming one of the keys
+// (raw_data.neighbors, F-374), in the tenant scope of ctx, for the edges
+// to new CIs (deriveNeighborsOf). The stored values are trimmed; the IP and
+// hostname compare in lower case, the MAC without separators, as
+// normalizeKey and normalizeMAC do.
+func (r *PGRepository) NeighborReporters(ctx context.Context, orgID string, keys *NeighborKeys) ([]NeighborReporter, error) {
+	var out []NeighborReporter
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT c.id::text, c.attributes->'raw_data'->'neighbors' FROM ci c
+			WHERE c.organization_id = $1 AND c.deleted_at IS NULL
+			AND jsonb_typeof(c.attributes->'raw_data'->'neighbors') = 'array'
+			AND EXISTS (SELECT 1 FROM jsonb_array_elements(c.attributes->'raw_data'->'neighbors') n
+				WHERE lower(n->>'remote_ip') = ANY($2::text[])
+				OR translate(lower(n->>'remote_mac'), ':-.', '') = ANY($3::text[])
+				OR lower(n->>'remote_hostname') = ANY($4::text[]))
+			ORDER BY c.created_at, c.id`, orgID, nonNil(keys.IPs), nonNil(keys.MACs), nonNil(keys.Hostnames))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var n NeighborReporter
+			if err := rows.Scan(&n.ID, &n.Neighbors); err != nil {
+				return err
+			}
+			out = append(out, n)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// nonNil is list, or an empty list for nil (an empty array, not NULL).
+func nonNil(list []string) []string {
+	if list == nil {
+		return []string{}
+	}
+	return list
+}
+
 // DiscoveryEdge finds the edge of a type between two CIs with an index
 // lookup instead of listing every edge of the source (WP-205): a core switch
 // with thousands of neighbours is re-confirmed without a scan or a cap.

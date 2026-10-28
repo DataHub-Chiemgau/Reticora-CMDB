@@ -1230,6 +1230,9 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	// The new CIs of the batch take their feeds from the outlets of power
 	// devices processed before them, in an earlier batch or another lane.
 	resp.Relationships += h.derivePowerFeedsOf(ctx, orgID, createdItems, createdCIID)
+	// Likewise the LLDP/CDP edges that devices processed before them
+	// reported to the new CIs (F-374).
+	resp.Relationships += h.deriveNeighborsOf(ctx, orgID, createdItems, createdCIID, processedCIID)
 	if err := h.markProcessed(ctx, orgID, processed); err != nil {
 		return resp, &IngestErrors{Records: failed, Rest: err}
 	}
