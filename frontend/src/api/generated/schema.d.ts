@@ -2634,7 +2634,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a user
-     * @description A user who owns open objects (open tickets, active assignments, keys not returned) or is referenced by closed records cannot be deleted; hand the objects over, or deactivate or anonymize the user (TLC-04). The caller cannot delete their own account: the request answers 400 ("you cannot delete your own account") and nothing is changed (F-377).
+     * @description A user who owns open objects (open tickets, active assignments, keys not returned) or is referenced by closed records cannot be deleted; hand the objects over, or deactivate or anonymize the user (TLC-04). The caller cannot delete their own account: the request answers 400 ("you cannot delete your own account") and nothing is changed (F-377). The deletion ends every access of the user at once, like a deactivation and in the transaction of the deletion (TLC-04, AUT-02, F-393): the user's sessions and refresh cookies are revoked, every active API key the user created for themself is revoked, and the audit entry user.deleted records it. Keys the user created for service accounts stay valid (decision E-64, option 2): the audit entry lists them (id, prefix, name, service account; never the secret), and the org_admins receive a notification to rotate them. An unknown user or a user of another organization answers 404, a refused deletion (400, 409) ends nothing. If the sessions cannot be revoked, nothing is deleted and the answer is 503.
      */
     delete: operations['deleteUser'];
     options?: never;
@@ -17394,6 +17394,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   updateUser: {

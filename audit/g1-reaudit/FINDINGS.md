@@ -32,9 +32,9 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 |---|---:|
 | P0 | 1 |
 | P1 | 3 |
-| P2 | 18 |
+| P2 | 19 |
 | P3 | 16 |
-| **Summe** | **38** |
+| **Summe** | **39** |
 
 ## Übersicht
 
@@ -78,6 +78,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-388](#f-388) | P3 | Lastskripte ohne Schwelle auf fehlgeschlagene Anfragen: Lauf bleibt grün, obwohl alle Bulk-Anfragen scheitern; `bulk_500_duration` zählt abgewiesene Bulk-Anfragen | Lastlauf K7 (40713089267) | belegt | tests/load/thresholds.test.sh | WP-659 |
 | [F-391](#f-391) | P3 | Schreibanfragen mit NUL-Byte in der Pfad-ID antworten 503 „the audit trail is unavailable“ mit ERROR-Log statt 404/400 | WP-018 bis WP-021 (K7) | belegt | backend/internal/server/route_audit_integration_test.go | WP-662 |
 | [F-392](#f-392) | P3 | NUL-Byte in einem Schlüssel des JSON-Körpers einer Schreibanfrage antwortet 503 „the audit trail is unavailable“, NUL-Byte im /admin-Pfad 500 „the operator audit entry could not be written“, jeweils mit ERROR-Log | WP-662 (K7-Nachträge) | belegt | backend/internal/server/route_audit_integration_test.go | WP-663 |
+| [F-393](#f-393) | P2 | Gelöschter Benutzer behält bis zum Ablauf seines Tokens Lese- und Schreibzugriff; API-Keys bleiben unwiderrufen, kein Audit-Eintrag `user.deleted` | WP-042 (K7) | belegt | backend/internal/identity/user_deletion_integration_test.go | WP-664 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -710,6 +711,45 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
   --- FAIL: TestAuditRouteAnswersInvalidBodyKeysBeforeTheIntent (0.00s)
       middleware_test.go:845: PUT /api/v1/prefs {"\u0000":1} (store down true) = 503 {"detail":"the audit trail is unavailable",...}
       middleware_test.go:845: PUT /api/v1/cis {"name":"x","\u0000":1} (store down true) = 204 , handler ran 1 times, entries [{... Changes:map[fields:[<NUL-Byte> name] route:PUT /api/v1/cis status:204] ...}]
+  FAIL
+  ```
+
+<a id="f-393"></a>
+### F-393 (P2) – Gelöschter Benutzer behält bis zum Ablauf seines Tokens Lese- und Schreibzugriff; API-Keys bleiben unwiderrufen, kein Audit-Eintrag `user.deleted`
+
+- **Gefunden in:** Wiederholungsprüfung (K7) auf dem RC-Commit `e5c2d86`, von zwei unabhängigen Prüfagenten bestätigt (Auditor und Gegenprüfung r1-b3, Gruppe K2) über die Produktionskette von `cmd/server` · **Betroffene Anforderungen:** TLC-04, AUT-02, AUT-04 · **Komponente:** backend/internal/user/handler.go (`DeleteUser`, Zeilen 308-333 auf `e5c2d86`: kein `revokeSessions`, kein Key-Widerruf, kein Audit), backend/internal/user/pg_repository.go (`DeleteUser`, Zeilen 389-411: keine Sperre der Zeile, kein `deactivateInTx`; `api_key.created_by` und `service_account.created_by` ohne Fremdschlüssel), frontend/src/pages/UserManagementPage.tsx (WP-571, Zeilen 242-249: „Löschen“ in jeder Zeile unabhängig vom Status) · **Quelle:** Probe über den Produktionsrouter (`server.NewRouter` mit PG-Repositories) hinter `AuthMiddlewareWithAPIKeys` (PG-API-Keys mit Owner-Rechten) und `TenantMiddleware`, Session-Blacklist und Refresh-Familien in Redis; Evidenzordner `k7/ver/r1-b3/evidence/k-reaudit-1/WP-042` (`verify-probe-k2-user-delete.log`, Probe-Quelltext `verify-probe-src-vk2_user_delete_probe_test.go.txt`, `TestVerifyK2UserDeletionEndsAccess`)
+- **Reproduktion:** Benutzer B mit Rolle `ci:read`/`ci:write`, Bearer-Token (15 min), Refresh-Cookie und eigenem API-Key. Ein Administrator sendet `DELETE /api/v1/users/{B}` → 204, die Zeile in `app_user` ist weg. Danach mit Bs Bearer-Token: `GET /api/v1/cis` → 200 mit Daten, `POST /api/v1/cis` → 201 (CI angelegt, Audit `ci.created` mit Akteur B). Mit Bs `X-API-Key`: `GET /api/v1/cis` → 403 „missing required permission: ci:read“ (authentifiziert, nur ohne Rechte, weil `role_assignment` kaskadiert); `api_key.revoked_at` bleibt NULL. Refresh → 401. Kein Audit-Eintrag `user.deleted`. Kontrolle im selben Lauf: Deaktivierung eines zweiten Benutzers per `PATCH /api/v1/users/{C}` `{"status":"inactive"}` → Bearer 401, `X-API-Key` 401, Key widerrufen, `user.deactivated`.
+- **Soll:** TLC-04/AUT-02: Das Entfernen eines Benutzers beendet jeden Zugang mindestens so sofort wie die Deaktivierung: Sessions und Refresh-Tokens gesperrt, eigene API-Keys widerrufen, in derselben Transaktion wie die Löschung; scheitert der Widerruf, wird nicht gelöscht. AUT-04/E-64 (Option 2): Keys, die der Benutzer für Service-Accounts angelegt hat, bleiben gültig, werden im Audit-Eintrag genannt und den org_admins zur Rotation gemeldet. AUD: Die Löschung schreibt einen Eintrag `user.deleted` mit Akteur, widerrufenen und behaltenen Keys. F-377 (eigenes Konto 400) und 409 für Benutzer mit offenen Objekten bleiben.
+- **Ist:** `Handler.DeleteUser` ruft nur `repo.DeleteUser`; dieses prüft offene Objekte und führt `DELETE FROM app_user` aus. Weder Session-Blacklist noch Key-Widerruf noch Audit-Eintrag. Das Bearer-Token wird bis zum Ablauf (≤ 15 min) angenommen, weil die Authentifizierung Signatur, Ablauf und Session-Blacklist prüft und für den gelöschten Benutzer kein Blacklist-Eintrag entsteht; Lesen und Schreiben im vollen Umfang der Token-Rechte. Der API-Key bleibt aktiv (kein FK von `api_key.created_by`) und scheitert nur an den kaskadierten Rollen (403 statt 401): eine verwaiste, nicht widerrufene Credential. Mit `AuditPool` (wie `cmd/server`) schreibt nur das Routen-Audit nach der Antwort einen generischen Eintrag `users.delete` ohne widerrufene oder behaltene Keys; ohne `AuditPool` (Probe) gar keinen.
+- **Nutzerwirkung:** Ein Administrator, der einen ausgeschiedenen oder kompromittierten Benutzer löscht statt ihn zu deaktivieren (die UI aus WP-571 bietet „Löschen“ in jeder Zeile, auch bei aktiven Benutzern), sperrt ihn nicht aus: Der Benutzer liest und ändert bis zu 15 Minuten weiter Daten der Organisation, ohne dass der Audit-Trail die Löschung mit ihren Folgen zeigt. Service-Account-Keys, die er gesehen hat, werden niemandem zur Rotation gemeldet.
+- **Ursache (belegt):** WP-042/WP-359 haben den Zugangsentzug (Session-Blacklist im `DeactivationHook`, `deactivateInTx` mit Key-Widerruf, Audit und Rotationshinweis) nur an die Deaktivierung (`UpdateUserTx`) und die Anonymisierung (`AnonymizeUserTx`) gehängt. Die Löschung (TLC-04, Übergabe offener Objekte) wurde getrennt gebaut und nutzt keinen der beiden Pfade. F-377/WP-648 hat nur das eigene Konto abgesichert.
+- **Empfehlung:** Die Löschung nutzt denselben Pfad wie die Deaktivierung in ihrer Transaktion: Zeile der Organisation sperren, offene Objekte prüfen (409), `deactivateInTx(…, "user.deleted")` (eigene Keys widerrufen, Service-Account-Keys nach E-64 behalten und melden, Audit-Eintrag), `DELETE`, danach im selben Transaktionsschritt den Session-Widerruf als Hook (schlägt er fehl: Rollback, 503) und nach dem Commit ein zweites Mal. Der Hook läuft erst nach der erfolgreichen `DELETE`-Anweisung, damit eine abgelehnte Löschung (409 wegen Fremdschlüssel) keine Sessions beendet. `DELETE /api/v1/users/{id}` wird Route mit Domänen-Recorder (kein zusätzlicher Routen-Eintrag). `api/openapi.yaml` beschreibt Zugangsentzug und 503.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestUserDeletionEndsAccess$' ./internal/identity/` und `go test -count=1 -v -run '^TestUserDeletion|^TestOwnAccountDeletionRefused$' ./internal/user/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL` und `TEST_REDIS_URL` PASS: nach `DELETE` Bearer `GET`/`POST /cis` 401, `X-API-Key` 401, Refresh 401, `revoked_at` gesetzt, Service-Account-Key behalten, genau ein Eintrag `user.deleted` (Akteur Administrator, `api_keys_revoked` 1, Key in `service_account_keys_kept`) und kein `users.delete`; eigenes Konto 400 und offene Objekte 409 ohne Widerruf; Blacklist-Ausfall → 503, Benutzer, Key und Audit unverändert; fremde Organisation und unbekannte ID 404 ohne Widerruf.
+- **Kodierender Test:** backend/internal/identity/user_deletion_integration_test.go (`TestUserDeletionEndsAccess`, Produktionsrouter mit `AuditPool`, `AuthMiddlewareWithAPIKeys`, `TenantMiddleware`, Redis); backend/internal/user/user_deletion_revocation_integration_test.go (`TestUserDeletionRevocationFailureRollsBack`, `TestUserDeletionRevokesOnlyOnDeletion`); auf `e5c2d86` rot (ausgeführt auf der Basis `ab48c78`; `internal/user`, `internal/identity` und `internal/server/authz.go` dort identisch mit `e5c2d86`):
+
+  ```text
+  === RUN   TestUserDeletionEndsAccess
+  === RUN   TestUserDeletionEndsAccess/refused_deletions_end_nothing
+  === NAME  TestUserDeletionEndsAccess
+      user_deletion_integration_test.go:242: after the deletion: bearer GET /api/v1/cis of the deleted user -> 200, want 401
+      user_deletion_integration_test.go:242: after the deletion: bearer POST /api/v1/cis of the deleted user -> 201, want 401
+      user_deletion_integration_test.go:242: after the deletion: X-API-Key GET /api/v1/cis of the deleted user -> 403, want 401
+      user_deletion_integration_test.go:250: CIs the deleted user created after the deletion: 1, want 0
+      user_deletion_integration_test.go:253: after the deletion: API key of the deleted user has revoked_at NULL, want set
+      user_deletion_integration_test.go:291: audit entries of the deletion request: [users.delete], want exactly [user.deleted]
+  --- FAIL: TestUserDeletionEndsAccess (2.27s)
+      --- PASS: TestUserDeletionEndsAccess/refused_deletions_end_nothing (0.10s)
+  FAIL
+  === RUN   TestUserDeletionRevocationFailureRollsBack
+      user_deletion_revocation_integration_test.go:54: DELETE with an unavailable blacklist: 204 , want 503
+      user_deletion_revocation_integration_test.go:57: session revocation attempts: 0, want 1 (inside the transaction)
+      user_deletion_revocation_integration_test.go:60: user after the failed DELETE: exists=false key revoked=false user.deleted entries=0; want unchanged
+  --- FAIL: TestUserDeletionRevocationFailureRollsBack (0.75s)
+  === RUN   TestUserDeletionRevokesOnlyOnDeletion/control:_same_organization
+      user_deletion_revocation_integration_test.go:136: session of the deleted user: <nil>, want ErrSessionRevoked
+      user_deletion_revocation_integration_test.go:139: session revocations for the deleted user: 0, want 2 (in the transaction and after the commit)
+      user_deletion_revocation_integration_test.go:142: user after the DELETE: exists=false key revoked=false user.deleted entries=0; want deleted, key revoked, 1 entry
+  --- FAIL: TestUserDeletionRevokesOnlyOnDeletion (1.04s)
   FAIL
   ```
 

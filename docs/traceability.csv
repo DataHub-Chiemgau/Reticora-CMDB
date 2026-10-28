@@ -1056,3 +1056,7 @@ API-03;[B];B;backend/internal/server/route_audit_integration_test.go;WP-663
 AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-663
 AUD-07;[B];B;backend/internal/middleware/middleware_test.go;WP-663
 SEC-07;[B];B;backend/internal/operator/audit_integration_test.go;WP-663
+TLC-04;[B];B;backend/internal/identity/user_deletion_integration_test.go;WP-664
+AUT-02;[B];B;backend/internal/identity/user_deletion_integration_test.go;WP-664
+AUT-04;[B];B;backend/internal/identity/user_deletion_integration_test.go;WP-664
+TLC-04;[B];B;backend/internal/user/user_deletion_revocation_integration_test.go;WP-664

@@ -38,9 +38,9 @@ var ErrSystemRole = errors.New("system roles cannot be changed or deleted")
 
 var errMemberNotFound = fmt.Errorf("team member %w", ErrNotFound)
 
-// DeactivationHook runs inside the transaction of a deactivation or
-// anonymization, after the user was found and locked in the organization and
-// before the commit; an error rolls the change back. The handler revokes the
+// DeactivationHook runs inside the transaction of a deactivation,
+// anonymization or deletion, after the user was found and locked in the
+// organization and before the commit; an error rolls the change back. The handler revokes the
 // sessions here, so a request for an unknown user or a user of another
 // organization never touches the blacklist (TLC-04, TEN-04). The memory
 // repository passes a nil transaction.
@@ -75,6 +75,10 @@ type Repository interface {
 	// the request sets a non-active status on a user of the organization.
 	UpdateUserTx(ctx context.Context, orgID, id string, req UpdateUserRequest, onDeactivate DeactivationHook) (*User, error)
 	DeleteUser(ctx context.Context, orgID, id string) error
+	// DeleteUserTx is DeleteUser that ends the access of the user like a
+	// deactivation and calls onDelete (may be nil) once the user of the
+	// organization is deleted, before the commit.
+	DeleteUserTx(ctx context.Context, orgID, id string, onDelete DeactivationHook) error
 	// AnonymizeUser replaces all personal data with surrogate values and
 	// deactivates the account, keeping the row for referential integrity and
 	// the audit chain (GDPR right to erasure).
@@ -250,13 +254,22 @@ func (r *MemoryRepository) UpdateUserTx(ctx context.Context, orgID, id string, r
 	return u, nil
 }
 
-func (r *MemoryRepository) DeleteUser(_ context.Context, orgID, id string) error {
+func (r *MemoryRepository) DeleteUser(ctx context.Context, orgID, id string) error {
+	return r.DeleteUserTx(ctx, orgID, id, nil)
+}
+
+func (r *MemoryRepository) DeleteUserTx(ctx context.Context, orgID, id string, onDelete DeactivationHook) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	u, ok := r.users[id]
 	if !ok || u.OrganizationID != orgID {
 		return fmt.Errorf("user not found")
+	}
+	if onDelete != nil {
+		if err := onDelete(ctx, nil); err != nil {
+			return err
+		}
 	}
 	delete(r.users, id)
 	return nil

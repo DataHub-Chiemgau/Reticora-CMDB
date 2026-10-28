@@ -603,6 +603,7 @@ var domainRecordedRoutes = map[string]string{
 	"DELETE /api/v1/service-accounts/{id}":    "user service accounts",
 	"DELETE /api/v1/role-assignments/{id}":    "user.PGRepository (revocation)",
 	"POST /api/v1/users/{id}/anonymize":       "user.PGRepository",
+	"DELETE /api/v1/users/{id}":               "user.PGRepository (user.deleted, F-393)",
 	"DELETE /scim/v2/Users/{id}":              "user.PGRepository (deactivation)",
 
 	// Lifting a suppression (F-273): relationship.suppression_lifted with

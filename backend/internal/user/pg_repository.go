@@ -314,8 +314,9 @@ func (r *PGRepository) UpdateUserTx(ctx context.Context, orgID, id string, req U
 	return item, err
 }
 
-// deactivateInTx revokes the API keys of a user that was just deactivated and
-// records the deactivation, in the transaction of the status change (TLC-04).
+// deactivateInTx revokes the API keys of a user that was just deactivated (or
+// is deleted, F-393) and records the change, in the transaction of the status
+// change or the deletion (TLC-04).
 // The keys the user created for service accounts stay valid (decision E-64,
 // option 2): the audit entry lists them, and an apikey.creator_deactivated
 // event in the same transaction asks the org_admins to rotate them. Sessions
@@ -387,13 +388,37 @@ const openOwnershipQuery = `
 // removed either; they are deactivated or anonymized instead, so the
 // references stay intact.
 func (r *PGRepository) DeleteUser(ctx context.Context, orgID, id string) error {
+	return r.DeleteUserTx(ctx, orgID, id, nil)
+}
+
+// DeleteUserTx deletes the user and ends its access like a deactivation, in
+// one transaction (TLC-04, AUT-02, F-393): it locks the row of the
+// organization, refuses a user with open objects, revokes the API keys the
+// user created for themself, records user.deleted with the revoked and the
+// kept service-account keys (E-64, option 2) and deletes the row. onDelete
+// (may be nil) runs after the row is deleted and before the commit: a
+// refused deletion (409) leaves the sessions alone, and a failing revocation
+// rolls the deletion back.
+func (r *PGRepository) DeleteUserTx(ctx context.Context, orgID, id string, onDelete DeactivationHook) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var locked string
+		if err := tx.QueryRow(ctx, `SELECT id FROM app_user WHERE id = $1 AND organization_id = $2 FOR UPDATE`, id, orgID).Scan(&locked); err != nil {
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("user not found")
+			}
+			return fmt.Errorf("lock user for deletion: %w", err)
+		}
 		var open int
 		if err := tx.QueryRow(ctx, openOwnershipQuery, id).Scan(&open); err != nil {
 			return fmt.Errorf("check open objects of user: %w", err)
 		}
 		if open > 0 {
 			return fmt.Errorf("%w: %d open objects", ErrUserOwnsOpenObjects, open)
+		}
+		// api_key.created_by has no foreign key: without the revocation the
+		// keys of the user would outlive it (F-393).
+		if err := deactivateInTx(ctx, tx, orgID, id, "user.deleted"); err != nil {
+			return err
 		}
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM app_user WHERE id = $1 AND organization_id = $2", id, orgID)
 		var pgErr *pgconn.PgError
@@ -405,6 +430,9 @@ func (r *PGRepository) DeleteUser(ctx context.Context, orgID, id string) error {
 		}
 		if cmdTag.RowsAffected() == 0 {
 			return fmt.Errorf("user not found")
+		}
+		if onDelete != nil {
+			return onDelete(ctx, tx)
 		}
 		return nil
 	})

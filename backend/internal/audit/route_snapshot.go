@@ -362,11 +362,13 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"monitoring/alerts": "alert_rule", "notification-channels": "notification_channel", "orders": "internal_order",
 		"racks": "rack", "relationships": "ci_relationship", "roles": "custom_role", "rooms": "room",
 		"saved-views": "saved_view", "sites": "site", "slas": "sla", "stocktakes": "stocktake", "subnets": "subnet",
-		"teams": "team", "tickets": "ticket", "trainings": "training", "users": "app_user", "vlans": "vlan", "vrfs": "vrf",
+		"teams": "team", "tickets": "ticket", "trainings": "training", "vlans": "vlan", "vrfs": "vrf",
 		"workflows": "workflow_def",
 	} {
 		crud(m, v1+collection, table, all...)
 	}
+	// DELETE /users/{id} records user.deleted in its transaction (F-393).
+	crud(m, v1+"users", "app_user", "POST", "PATCH")
 	crud(m, v1+"collectors", "collector", "POST", "PATCH")
 	crud(m, v1+"credentials", "credential", "DELETE")
 	m["POST "+v1+"credentials/"] = created("credential")

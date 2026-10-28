@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-663 | 9 | 6,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-664 | 10 | 7,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **311** | **407,5** | |
+| **Summe** | | **312** | **408,5** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>9 WPs · 6,5 PT"]
+    K7N["K7-Nachträge<br/>10 WPs · 7,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -430,6 +430,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-659](#wp-659--lastskripte-keine-fehlgeschlagene-anfrage-je-szenario-schwelle-für-gelungene-bulk-jobs-statuscodes-in-der-job-zusammenfassung) | `k7n-load-thresholds` | Lastskripte: keine fehlgeschlagene Anfrage je Szenario, Schwelle für gelungene Bulk-Jobs, Statuscodes in der Job-Zusammenfassung | K7N | 0,5 | F-388 | WP-204, WP-206, WP-439, WP-658 |
 | [WP-662](#wp-662--routen-audit-pfad-ids-mit-nul-byte-oder-ungültigem-utf-8-erhalten-404-vor-der-audit-absicht-statt-503) | `k7n-route-audit-nul-id` | Routen-Audit: Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 vor der Audit-Absicht statt 503 | K7N | 0,5 | F-391 | WP-504, WP-505 |
 | [WP-663](#wp-663--routen--und-operator-audit-nul-byte-im-schlüssel-des-json-körpers-erhält-400-vor-der-audit-absicht-statt-503-admin-pfade-werden-kodiert-protokolliert-statt-500) | `k7n-route-audit-body-keys` | Routen- und Operator-Audit: NUL-Byte im Schlüssel des JSON-Körpers erhält 400 vor der Audit-Absicht statt 503, /admin-Pfade werden kodiert protokolliert statt 500 | K7N | 0,5 | F-392 | WP-504, WP-505, WP-564, WP-662 |
+| [WP-664](#wp-664--benutzerlöschung-beendet-jeden-zugang-wie-die-deaktivierung-in-der-transaktion-der-löschung-audit-userdeleted) | `k7n-user-delete-ends-access` | Benutzerlöschung beendet jeden Zugang wie die Deaktivierung, in der Transaktion der Löschung; Audit `user.deleted` | K7N | 1 | F-393 | WP-042, WP-359, WP-571, WP-648 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -18850,6 +18851,66 @@ SEC-07;[B];B;backend/internal/operator/audit_integration_test.go;WP-663
 **Entscheidungsbedarf:** keiner. (400 statt maskierter Feldliste ist durch API-03 und AUD-07 gedeckt, siehe F-392 Empfehlung.)
 
 **Nicht Bestandteil:** Pfadparameter mit NUL-Byte (WP-662); ungültige Werte in Feldern, die der Handler bzw. `api.WriteDBError` bereits mit 400 beantwortet; die übrigen Kandidaten der Prüfrunde, aus der K-3 stammt (K-3 selbst wird durch dieses WP mit abgedeckt, sofern die Verifikation dieselbe Ursache bestätigt); weitere Befunde der Wiederholungsprüfung.
+
+### WP-664 – Benutzerlöschung beendet jeden Zugang wie die Deaktivierung, in der Transaktion der Löschung; Audit `user.deleted`
+
+**Schlüssel:** `k7n-user-delete-ends-access` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-042 (Deaktivierung beendet Sessions, Refresh und API-Keys), WP-359 (Session-Widerruf in der Transaktion, Rollback bei Ausfall), WP-571 (Benutzerverwaltung in der UI), WP-648 (eigenes Konto nicht löschbar, F-377)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-393](../../../audit/g1-reaudit/FINDINGS.md#f-393) | P2 | Gelöschter Benutzer behält bis zum Ablauf seines Tokens Lese- und Schreibzugriff; API-Keys bleiben unwiderrufen, kein Audit-Eintrag `user.deleted` | schließt | Wiederholungsprüfung (K7) auf `e5c2d86`, Auditor und Gegenprüfung r1-b3 (K2) |
+
+**Problem:** `DELETE /api/v1/users/{id}` (`Handler.DeleteUser`, `backend/internal/user/handler.go:308-333` auf `e5c2d86`; `PGRepository.DeleteUser`, `pg_repository.go:389-411`) prüft offene Objekte und löscht die Zeile, beendet aber keinen Zugang: Das Bearer-Token des gelöschten Benutzers liest und schreibt bis zum Ablauf weiter (`GET /cis` 200, `POST /cis` 201), sein API-Key bleibt unwiderrufen (`revoked_at` NULL; 403 statt 401, nur weil die Rollen kaskadieren), es gibt keinen Eintrag `user.deleted` (mit `AuditPool` nur den generischen Routen-Eintrag `users.delete`). Die Deaktivierung per `PATCH` macht all das in ihrer Transaktion (WP-042/WP-359). Die UI aus WP-571 bietet „Löschen“ in jeder Zeile, auch für aktive Benutzer.
+
+**Akzeptanzkriterien:**
+
+- [ ] `PGRepository.DeleteUserTx` (und `DeleteUser` als Aufruf ohne Hook) sperrt die Zeile des Benutzers in der Organisation (`FOR UPDATE`), prüft offene Objekte (409 unverändert), ruft in derselben Transaktion `deactivateInTx(…, "user.deleted")` (eigene API-Keys widerrufen, Service-Account-Keys nach E-64 Option 2 behalten, in `service_account_keys_kept` nennen und per `apikey.creator_deactivated` zur Rotation melden), löscht die Zeile und ruft danach, vor dem Commit, den `DeactivationHook`. Ein Fehler in einem dieser Schritte rollt die Löschung zurück.
+- [ ] `Handler.DeleteUser` widerruft die Sessions und Refresh-Familien des Benutzers im Hook (wie `PATCH` und Anonymisierung) und nach dem Commit ein zweites Mal; scheitert der Widerruf im Hook, antwortet die Route 503 „sessions could not be revoked; the user was not deleted“ und nichts ist geändert. F-377 (eigenes Konto 400 vor jedem Schreiben) und 409 bei offenen Objekten oder Referenzen bleiben; eine abgelehnte Löschung (400, 404, 409) beendet keine Session.
+- [ ] `DELETE /api/v1/users/{id}` ist Route mit Domänen-Recorder (`domainRecordedRoutes`, kein Eintrag mehr im Schnappschuss-Register): je Löschung genau ein Audit-Eintrag `user.deleted` (Akteur, `api_keys_revoked`, `service_account_keys_kept`, `sessions_revoked`), kein zusätzlicher `users.delete`.
+- [ ] `TestUserDeletionEndsAccess` (`internal/identity/user_deletion_integration_test.go`, Produktionsrouter mit `AuditPool`, `AuthMiddlewareWithAPIKeys`, `TenantMiddleware`, Redis): nach `DELETE` → 204 Bearer `GET`/`POST /api/v1/cis` 401 (kein CI angelegt), `X-API-Key` 401, Refresh 401, `revoked_at` gesetzt, Service-Account-Key behalten, genau ein `user.deleted`; ein anderer Benutzer der Organisation 200/201; eigenes Konto 400 und Benutzer mit offenem Ticket 409 ohne Widerruf, Blacklist-Eintrag oder Audit. Auf `e5c2d86` rot (200, 201, 403, NULL, `[users.delete]`).
+- [ ] `TestUserDeletionRevocationFailureRollsBack` und `TestUserDeletionRevokesOnlyOnDeletion` (`internal/user/user_deletion_revocation_integration_test.go`): Blacklist-Ausfall → 503, ein Widerrufsversuch, Benutzer, Key und Audit unverändert; Benutzer einer fremden Organisation und unbekannte/ungültige ID 404, offene Objekte 409, jeweils ohne Widerruf; Löschung in der eigenen Organisation widerruft zweimal und die Session ist gesperrt. Auf `e5c2d86` rot.
+- [ ] `api/openapi.yaml` (`deleteUser`) beschreibt Zugangsentzug, E-64 und 503 (spec-first); `npm run generate:api` nachgeführt.
+- [ ] Bestehende Tests grün (`TestOwnAccountDeletionRefused`, `TestDeactivationRevocationFailureRollsBack`, `TestEveryWriteRouteAuditedOnPostgreSQL`, `TestEveryWriteRouteHasASnapshotEntry`, Datenschutz-Aufbewahrung mit `mode=delete`); golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neue Tests auch als Nicht-Root-Nutzer grün.
+
+**Dateien (13 Einträge):**
+
+- backend/internal/user/handler.go
+- backend/internal/user/pg_repository.go
+- backend/internal/user/repository.go
+- backend/internal/user/user_deletion_revocation_integration_test.go
+- backend/internal/identity/user_deletion_integration_test.go
+- backend/internal/server/authz.go
+- backend/internal/audit/route_snapshot.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Sperre, Key-Widerruf, Audit, Outbox und `DELETE` laufen als `reticora_app` in der Tenant-Transaktion (`database.WithRequestTenant`); der Session-Widerruf wird erst erreicht, wenn die Zeile der Organisation des Aufrufers gelöscht ist, eine Anfrage für eine fremde Organisation schreibt nichts in die Blacklist (TEN-04).
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/user/ ./internal/identity/ ./internal/server/ ./internal/audit/ ./internal/privacy/ ./internal/iga/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`.
+- `go test -count=1 -v -run '^TestUserDeletionEndsAccess$' ./internal/identity/` und `-run '^TestUserDeletion' ./internal/user/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TLC-04;[B];B;backend/internal/identity/user_deletion_integration_test.go;WP-664
+AUT-02;[B];B;backend/internal/identity/user_deletion_integration_test.go;WP-664
+AUT-04;[B];B;backend/internal/identity/user_deletion_integration_test.go;WP-664
+TLC-04;[B];B;backend/internal/user/user_deletion_revocation_integration_test.go;WP-664
+```
+
+**Entscheidungsbedarf:** keiner für die Umsetzung; E-64 (Option 2) wird auf die Löschung so angewandt wie auf Deaktivierung und Anonymisierung (Service-Account-Keys des Erstellers bleiben gültig, Rotationshinweis an die org_admins). Hinweis für die Leitung: Der Text der Benachrichtigung `apikey.creator_deactivated` sagt „deaktiviert“ auch bei einer Löschung (`action` im Ereignis ist `user.deleted`).
+
+**Nicht Bestandteil:** Änderungen an der UI (die Aktion „Löschen“ bleibt in jeder Zeile; sie beendet jetzt jeden Zugang); SCIM `DELETE /scim/v2/Users/{id}` (deaktiviert bereits über `UpdateUser`); die Zuordnung interner Fehler der Löschung auf 404 (wie bei `PATCH` und Anonymisierung); weitere Befunde der Wiederholungsprüfung.
 
 ## Zurückgestellte Befunde
 
