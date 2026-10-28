@@ -15452,7 +15452,7 @@ TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-645
 
 - [ ] Die Projekte webkit und mobile-safari des Jobs `e2e-real` laufen gegen einen TLS-Origin `https://<Name>`, der nicht localhost ist: eine Installation mit `RETICORA_TLS_DOMAIN` und Zertifikat einer Test-CA (Pebble wie in `tls-domain-pebble`, sslip.io-Name des Runners), `BASE_URL` und Issuer auf diesem Origin. Die Test-CA ist im Trust-Store von Runner und Browser eingetragen; kein `ignoreHTTPSErrors`. Chromium, Edge, Firefox und mobile-chrome bleiben auf der Loopback-Installation (INS-04 `@plain-http` unverändert).
 - [ ] Der Job prüft vor der Suite, dass `BASE_URL` mit `https://` beginnt und nicht localhost nennt, und dass die Anmeldung in WebKit das Cookie `reticora_refresh` setzt (Abbruch mit klarer Meldung sonst).
-- [ ] Lauf von `install-smoke.yml` mit allen sechs Projekten grün gegen `tests/audit/expected-failures.txt` (Ratchet `e2e-real-ratchet`); `roles-authz.spec.ts` 07, 11, 14, 14a, 14b und 15 grün in webkit und mobile-safari (Lauf-ID im PR); danach die zwölf e2e-real-Zeilen von F-375 entfernt.
+- [ ] Lauf von `install-smoke.yml` mit allen sechs Projekten grün gegen `tests/audit/expected-failures.txt` (Ratchet `e2e-real-ratchet`); `roles-authz.spec.ts` 07, 11, 14, 14a, 14b und 15 grün in webkit und mobile-safari (Lauf-ID im PR); danach die zwölf e2e-real-Zeilen von F-375 entfernt. (Anmerkung vom 2026-10-28, WP-646: Solange die zwölf Zeilen stehen, meldet der Ratchet grüne Fälle als „überführen“ und der Lauf ist rot; die Zeilen werden deshalb im Commit der Umsetzung entfernt, wie bei F-369/F-370, und der folgende grüne Lauf ist der Nachweis. Die Traceability-Zeile trägt Epic C wie das WP, nicht B.)
 - [ ] deploy/README.md (Abschnitt HTTPS) und docs/troubleshooting-installation.md: Plain HTTP erlaubt eine Anmeldung nur auf Loopback (sicherer Kontext); Safari erneuert dort keine Sitzung (Secure-Cookie); für den Betrieb HTTPS (SEC-01).
 - [ ] actionlint für `install-smoke.yml`; Shell-Hilfsskripte mit shellcheck und dem Shell-Harness geprüft, der Installer nicht ausgeführt.
 - [ ] Retest F-375: CI-Lauf von `install-smoke.yml`, Jobs `e2e-real (webkit)` und `e2e-real (mobile-safari)` → die sechs Fälle grün, `e2e-real-ratchet` 0 Fehler.
@@ -15475,7 +15475,7 @@ TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-645
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUT-02;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-646
+AUT-02;[B];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
 TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
 ```
 

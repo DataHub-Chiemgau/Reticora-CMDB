@@ -24,15 +24,3 @@ e2e-real;mobile-chrome:frontend/e2e-real/locations-racks.spec.ts;locations and r
 e2e-real;mobile-chrome:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles;F-201
 e2e-real;mobile-safari:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L08 moving a mounted CI is recorded in ci_change, audit and the unified history shown on the CI page;F-253
 e2e-real;mobile-safari:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles;F-201
-e2e-real;webkit:frontend/e2e-real/roles-authz.spec.ts;07 the viewer cannot raise its own rights through role, user, invitation or key endpoints;F-375
-e2e-real;webkit:frontend/e2e-real/roles-authz.spec.ts;11 an admin role change (viewer → engineer) takes effect at the next refresh and sign-in;F-375
-e2e-real;webkit:frontend/e2e-real/roles-authz.spec.ts;14 the SPA renews an expired access token with the refresh cookie instead of signing the user out;F-375
-e2e-real;webkit:frontend/e2e-real/roles-authz.spec.ts;14a the cookie-only refresh (no body, no Content-Type) renews the session and rotates the cookie;F-375
-e2e-real;webkit:frontend/e2e-real/roles-authz.spec.ts;14b the SPA renews the session when the access token lifetime has run out instead of sending the user to the login;F-375
-e2e-real;webkit:frontend/e2e-real/roles-authz.spec.ts;15 a member of the IdP group reticora-viewer created through the Keycloak admin API holds exactly the viewer rights;F-375
-e2e-real;mobile-safari:frontend/e2e-real/roles-authz.spec.ts;07 the viewer cannot raise its own rights through role, user, invitation or key endpoints;F-375
-e2e-real;mobile-safari:frontend/e2e-real/roles-authz.spec.ts;11 an admin role change (viewer → engineer) takes effect at the next refresh and sign-in;F-375
-e2e-real;mobile-safari:frontend/e2e-real/roles-authz.spec.ts;14 the SPA renews an expired access token with the refresh cookie instead of signing the user out;F-375
-e2e-real;mobile-safari:frontend/e2e-real/roles-authz.spec.ts;14a the cookie-only refresh (no body, no Content-Type) renews the session and rotates the cookie;F-375
-e2e-real;mobile-safari:frontend/e2e-real/roles-authz.spec.ts;14b the SPA renews the session when the access token lifetime has run out instead of sending the user to the login;F-375
-e2e-real;mobile-safari:frontend/e2e-real/roles-authz.spec.ts;15 a member of the IdP group reticora-viewer created through the Keycloak admin API holds exactly the viewer rights;F-375
