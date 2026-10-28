@@ -45,11 +45,15 @@ type OpenAPIValidator struct {
 	// deprecated holds the lifecycle of the operations the specification
 	// marks deprecated (API-01), keyed like routes.
 	deprecated map[string]Deprecation
+	// loadErr says why the document was not loaded (F-218); nil when it
+	// was read and parsed without error.
+	loadErr error
 }
 
 // Deprecation is the lifecycle of a deprecated operation (API-01): when it
 // was deprecated, when it is switched off (at least 12 months later) and
-// its successor.
+// its successor, a path template whose placeholders name path parameters
+// of the deprecated operation.
 type Deprecation struct {
 	DeprecatedAt time.Time
 	Sunset       time.Time
@@ -91,7 +95,6 @@ func (v *OpenAPIValidator) Middleware(next http.Handler) http.Handler {
 			httpx.ValidationError(w, r, err.Error())
 			return
 		}
-		v.writeDeprecation(w, r)
 		spec, ok := v.lookup(r.Method, r.URL.Path)
 		if !ok {
 			next.ServeHTTP(w, r)
@@ -154,9 +157,13 @@ func (v *OpenAPIValidator) Middleware(next http.Handler) http.Handler {
 }
 
 func (v *OpenAPIValidator) loadSpec() {
+	var readErr error
 	for _, candidate := range resolveSpecCandidates(v.specPath) {
 		data, err := os.ReadFile(candidate)
 		if err != nil {
+			if readErr == nil {
+				readErr = err
+			}
 			continue
 		}
 		v.specPath = candidate
@@ -167,6 +174,9 @@ func (v *OpenAPIValidator) loadSpec() {
 		}
 		v.deprecated = deprecated
 		routes, rerr := ParseRouteSpecs(data)
+		if err := errors.Join(perr, rerr); err != nil {
+			v.loadErr = fmt.Errorf("parse %s: %w", candidate, err)
+		}
 		if rerr != nil {
 			slog.Warn("openapi: validation rules not loaded, using the built-in registry", "path", candidate, "error", rerr)
 			return
@@ -174,6 +184,56 @@ func (v *OpenAPIValidator) loadSpec() {
 		v.routes = routes
 		return
 	}
+	if readErr == nil {
+		readErr = errors.New("no path configured")
+	}
+	v.loadErr = fmt.Errorf("read %s (RETICORA_OPENAPI_SPEC_PATH): %w", v.specPath, readErr)
+}
+
+// OpenAPISpecNotLoaded is the /readyz detail "openapi" of a server that
+// runs without the OpenAPI document (F-218).
+const OpenAPISpecNotLoaded = "not loaded"
+
+// CheckSpec reports whether the OpenAPI document was loaded (F-218).
+// Without it the lifecycle headers of deprecated operations (API-01) and
+// the validation rules of the document are missing. In production that is
+// an error that stops the start; elsewhere it is logged as a warning, and
+// the server reports OpenAPISpecNotLoaded under details.openapi of /readyz.
+func (v *OpenAPIValidator) CheckSpec(production bool) (loaded bool, err error) {
+	if v.loadErr == nil {
+		return true, nil
+	}
+	if production {
+		return false, fmt.Errorf("openapi: specification not loaded: %w", v.loadErr)
+	}
+	slog.Warn("openapi: specification not loaded; deprecated operations carry no Deprecation and Sunset headers, "+
+		"requests are validated against the built-in registry", "error", v.loadErr)
+	return false, nil
+}
+
+// CheckOpenAPISpec is CheckSpec of the validator the server uses.
+func CheckOpenAPISpec(production bool) (loaded bool, err error) {
+	return defaultOpenAPIValidator.CheckSpec(production)
+}
+
+// DeprecationHeaders sets the lifecycle headers of deprecated operations
+// (API-01) with the validator the server uses. It runs early in the chain,
+// before authentication, so that the 401, 403 and 429 answers of a
+// deprecated operation carry them too (F-220).
+func DeprecationHeaders(next http.Handler) http.Handler {
+	return defaultOpenAPIValidator.DeprecationHeaders(next)
+}
+
+// DeprecationHeaders sets the lifecycle headers of a deprecated operation
+// before the request reaches next.
+func (v *OpenAPIValidator) DeprecationHeaders(next http.Handler) http.Handler {
+	if v == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		v.writeDeprecation(w, r)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // specMethods are the operations of an OpenAPI path item.
@@ -294,7 +354,8 @@ func ParseRouteSpecs(spec []byte) (map[string]RouteSpec, error) {
 
 // ParseDeprecations reads the operations marked deprecated in an OpenAPI
 // document with their lifecycle: x-deprecated-at and x-sunset (dates),
-// x-successor (path). A deprecated operation without x-sunset is an error,
+// x-successor (path template; writeDeprecation fills its placeholders with
+// the path parameters of the same name of the request). A deprecated operation without x-sunset is an error,
 // as is a sunset less than 12 months after the deprecation (API-01).
 func ParseDeprecations(spec []byte) (map[string]Deprecation, error) {
 	var doc struct {
@@ -347,17 +408,22 @@ func ParseDeprecations(spec []byte) (map[string]Deprecation, error) {
 
 // writeDeprecation sets the lifecycle headers of a deprecated operation
 // (API-01): Deprecation (RFC 9745, the deprecation date), Sunset (RFC 8594)
-// and a successor-version link.
+// and a successor-version link (RFC 8288). The link names a URI: the
+// placeholders of the successor are filled with the path parameters of the
+// request (F-219); a successor with a placeholder the operation's path does
+// not have (an ID from the body) gets no link.
 func (v *OpenAPIValidator) writeDeprecation(w http.ResponseWriter, r *http.Request) {
 	if len(v.deprecated) == 0 {
 		return
 	}
-	d, ok := v.deprecated[routeKey(r.Method, cleanRoutePath(r.URL.Path))]
+	path := cleanRoutePath(r.URL.Path)
+	template := path
+	d, ok := v.deprecated[routeKey(r.Method, path)]
 	if !ok {
 		for key, candidate := range v.deprecated {
 			parts := strings.SplitN(key, " ", 2)
-			if parts[0] == r.Method && routePatternMatches(parts[1], cleanRoutePath(r.URL.Path)) {
-				d, ok = candidate, true
+			if parts[0] == r.Method && routePatternMatches(parts[1], path) {
+				d, template, ok = candidate, parts[1], true
 				break
 			}
 		}
@@ -367,9 +433,43 @@ func (v *OpenAPIValidator) writeDeprecation(w http.ResponseWriter, r *http.Reque
 	}
 	w.Header().Set("Deprecation", "@"+strconv.FormatInt(d.DeprecatedAt.Unix(), 10))
 	w.Header().Set("Sunset", d.Sunset.UTC().Format(http.TimeFormat))
-	if d.Successor != "" {
-		w.Header().Set("Link", "<"+d.Successor+">; rel=\"successor-version\"")
+	if successor, ok := expandSuccessor(d.Successor, template, r.URL.EscapedPath()); ok {
+		w.Header().Set("Link", "<"+successor+">; rel=\"successor-version\"")
 	}
+}
+
+// expandSuccessor fills the placeholders of the successor template with the
+// segments of the escaped request path that stand at the placeholders of
+// the same name in the operation's template. It reports false for an empty
+// successor and for one with a placeholder the template does not fill.
+func expandSuccessor(successor, template, escapedPath string) (string, bool) {
+	if successor == "" {
+		return "", false
+	}
+	params := map[string]string{}
+	templateParts := strings.Split(strings.Trim(template, "/"), "/")
+	pathParts := strings.Split(strings.Trim(cleanRoutePath(escapedPath), "/"), "/")
+	// An encoded slash in a parameter changes the segment count; such a
+	// request fills no placeholder.
+	if len(templateParts) == len(pathParts) {
+		for i, segment := range templateParts {
+			if isPathPlaceholder(segment) && pathParts[i] != "" {
+				params[strings.Trim(segment, "{}")] = pathParts[i]
+			}
+		}
+	}
+	parts := strings.Split(successor, "/")
+	for i, segment := range parts {
+		if !isPathPlaceholder(segment) {
+			continue
+		}
+		value, ok := params[strings.Trim(segment, "{}")]
+		if !ok {
+			return "", false
+		}
+		parts[i] = value
+	}
+	return strings.Join(parts, "/"), true
 }
 
 // registerKnownRoutes is the fallback registry for a server without the

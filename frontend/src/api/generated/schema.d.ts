@@ -23494,7 +23494,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['ValidationProblem'];
+          'application/problem+json': components['schemas']['ValidationProblem'];
         };
       };
       401: components['responses']['Unauthorized'];

@@ -5679,7 +5679,7 @@ paths:
       deprecated: true
       x-deprecated-at: '2026-10-13'
       x-sunset: '2027-10-14'
-      x-successor: '/api/v1/impact/{ci_id}'
+      x-successor: '/api/v1/impact/{id}'
       tags: [Topology]
       summary: Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
       description: >-
@@ -10359,7 +10359,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateFormSubmissionRequest' } } }
       responses:
         '201': { description: Form submission created, content: { application/json: { schema: { $ref: '#/components/schemas/FormSubmission' } } } }
-        '400': { description: Bad request or validation problem, content: { application/json: { schema: { $ref: '#/components/schemas/ValidationProblem' } } } }
+        '400': { description: Bad request or validation problem, content: { application/problem+json: { schema: { $ref: '#/components/schemas/ValidationProblem' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { description: "ci_id or ticket_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }

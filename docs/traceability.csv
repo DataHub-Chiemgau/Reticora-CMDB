@@ -976,3 +976,5 @@ CI-05;[B];C;backend/internal/ci/restore_integration_test.go;WP-567
 API-05;[B];C;backend/internal/server/t2_ci_include_integration_test.go;WP-567
 REL-03;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-584
 REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-584
+API-01;[B];C;backend/internal/middleware/openapi_test.go;WP-568
+API-03;[B];C;backend/internal/server/openapi_contract_test.go;WP-568

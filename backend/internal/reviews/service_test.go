@@ -161,6 +161,10 @@ func TestReviewModel(t *testing.T) {
 		item.ResolvedBy != "u2" || item.Status != StatusDismissed {
 		t.Errorf("deprecated resolve: %d %s (Deprecation %q)", w.Code, w.Body.String(), w.Header().Get("Deprecation"))
 	}
+	// The successor link names the item, not the template (F-219).
+	if got, want := w.Header().Get("Link"), "</api/v1/review-items/"+young.ID+`/resolve>; rel="successor-version"`; got != want {
+		t.Errorf("deprecated resolve: Link %q, want %q", got, want)
+	}
 	if w = call(http.MethodPost, "/api/v1/review-items/"+young.ID+"/resolve", `{"action":"dismiss"}`); w.Code != http.StatusConflict {
 		t.Errorf("resolve twice: %d", w.Code)
 	}

@@ -149,6 +149,12 @@ type chainStack struct {
 
 func newChainStack(t *testing.T) *chainStack {
 	t.Helper()
+	return newChainStackWith(t, nil)
+}
+
+// newChainStackWith builds the chain stack with the given /readyz checks.
+func newChainStackWith(t *testing.T, readiness []server.ReadinessCheck) *chainStack {
+	t.Helper()
 	cs := &chainStack{}
 	repos := server.MemoryRepositories()
 	store := cache.NewMemoryStore()
@@ -192,6 +198,7 @@ func newChainStack(t *testing.T) *chainStack {
 		Credentials: credential.NewService(repos.Credential, encryptor),
 		OIDC:        identity.NewOIDCProvider(identity.OIDCConfig{}),
 		Sessions:    issuer, RefreshSessions: cs.refresh,
+		Readiness: readiness,
 	}, httpStages{
 		preAuth:     mark("pre-auth", middleware.PreAuthRateLimiter(middleware.DefaultPreAuthPerMinute, store), false),
 		auth:        mark("auth", middleware.AuthMiddlewareWithAPIKeys(issuer, identity.NewAPIKeyServiceWithStore(repos.APIKeys)), false),
@@ -382,6 +389,59 @@ func TestHTTPHandlerSetsRateLimitHeadersBeforeTheLimiter(t *testing.T) {
 	check("pre-auth 429 after 20 failed attempts", w, http.StatusTooManyRequests, "20", "0", true)
 	if strings.Join(cs.trace, ",") != "pre-auth" {
 		t.Errorf("pre-auth 429: stages %v, want only pre-auth", cs.trace)
+	}
+}
+
+// TestHTTPHandlerSetsLifecycleHeadersBeforeAuth covers WP-568 (API-01,
+// F-220) through the handler the server serves: a deprecated operation
+// (/ip-addresses, successor /ips) answers 401 without credentials and 403
+// from the route authorization with Deprecation, Sunset and the successor
+// link, which an early stage of the chain sets before the auth stage; the
+// link names the requested item. A current operation carries none.
+func TestHTTPHandlerSetsLifecycleHeadersBeforeAuth(t *testing.T) {
+	cs := newChainStack(t)
+	token, _ := cs.login(t, identity.PermPermissionRead)
+	const ip = "7a2a0000-0000-4000-8000-0000000005a8"
+	deprecation := "@" + strconv.FormatInt(time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC).Unix(), 10)
+	for _, tc := range []struct {
+		name, path, bearer string
+		code               int
+		trace, link        string
+	}{
+		{"401 without credentials", "/api/v1/ip-addresses", "", http.StatusUnauthorized, "pre-auth,auth", "</api/v1/ips>"},
+		{"401 for an invalid bearer", "/api/v1/ip-addresses/" + ip, "not-a-token", http.StatusUnauthorized, "pre-auth,auth", "</api/v1/ips/" + ip + ">"},
+		{"403 of the route authorization", "/api/v1/ip-addresses", token, http.StatusForbidden, "pre-auth,auth,tenant,entitlement,rate-limit", "</api/v1/ips>"},
+		{"403 of the route authorization, one item", "/api/v1/ip-addresses/" + ip, token, http.StatusForbidden, "pre-auth,auth,tenant,entitlement,rate-limit", "</api/v1/ips/" + ip + ">"},
+	} {
+		w := cs.do(http.MethodGet, tc.path, tc.bearer, "", "", "")
+		h := w.Header()
+		if w.Code != tc.code || strings.Join(cs.trace, ",") != tc.trace {
+			t.Errorf("%s: GET %s -> %d, stages %v; want %d after %s", tc.name, tc.path, w.Code, cs.trace, tc.code, tc.trace)
+		}
+		if h.Get("Deprecation") != deprecation || h.Get("Sunset") != "Thu, 14 Oct 2027 00:00:00 GMT" ||
+			h.Get("Link") != tc.link+`; rel="successor-version"` {
+			t.Errorf("%s: GET %s -> Deprecation %q, Sunset %q, Link %q; want %s, Thu, 14 Oct 2027 00:00:00 GMT, %s",
+				tc.name, tc.path, h.Get("Deprecation"), h.Get("Sunset"), h.Get("Link"), deprecation, tc.link)
+		}
+	}
+	w := cs.do(http.MethodGet, "/api/v1/ips", "", "", "", "")
+	if w.Code != http.StatusUnauthorized || w.Header().Get("Deprecation") != "" || w.Header().Get("Sunset") != "" {
+		t.Errorf("GET /api/v1/ips: %d, lifecycle headers %v; want 401 without them", w.Code, w.Header())
+	}
+}
+
+// TestReadyzNamesAMissingOpenAPISpec covers WP-568 (F-218): a server that
+// runs outside production without the OpenAPI document reports it under
+// details.openapi of /readyz, without changing the status.
+func TestReadyzNamesAMissingOpenAPISpec(t *testing.T) {
+	cs := newChainStackWith(t, []server.ReadinessCheck{openAPINotLoadedReadiness()})
+	w := cs.do(http.MethodGet, "/readyz", "", "", "", "")
+	var body struct {
+		Status  string            `json:"status"`
+		Details map[string]string `json:"details"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusOK || body.Status != "ready" || body.Details["openapi"] != "not loaded" {
+		t.Errorf("GET /readyz: %d %s (%v); want 200, ready, details.openapi \"not loaded\"", w.Code, strings.TrimSpace(w.Body.String()), err)
 	}
 }
 

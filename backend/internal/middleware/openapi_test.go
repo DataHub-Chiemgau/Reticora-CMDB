@@ -1,13 +1,17 @@
 package middleware
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"gopkg.in/yaml.v3"
@@ -98,9 +102,9 @@ func TestOpenAPIValidationLeavesCompressedBodiesToTheHandler(t *testing.T) {
 
 // TestDeprecatedOperationsCarryLifecycleHeaders covers API-01: an operation
 // the specification marks deprecated answers with Deprecation, Sunset and
-// a successor link; other operations carry none.
+// a successor link to the same item (F-219); other operations carry none.
 func TestDeprecatedOperationsCarryLifecycleHeaders(t *testing.T) {
-	h := OpenAPIValidation(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	h := DeprecationHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/discovery/review-items/7b0c6e1a-0000-4000-8000-000000000001/resolve", nil))
 	if got := w.Header().Get("Sunset"); got != "Wed, 13 Oct 2027 00:00:00 GMT" {
@@ -109,7 +113,7 @@ func TestDeprecatedOperationsCarryLifecycleHeaders(t *testing.T) {
 	if got := w.Header().Get("Deprecation"); got != "@1791763200" {
 		t.Errorf("Deprecation %q", got)
 	}
-	if got := w.Header().Get("Link"); got != `</api/v1/review-items/{id}/resolve>; rel="successor-version"` {
+	if got := w.Header().Get("Link"); got != `</api/v1/review-items/7b0c6e1a-0000-4000-8000-000000000001/resolve>; rel="successor-version"` {
 		t.Errorf("Link %q", got)
 	}
 	w = httptest.NewRecorder()
@@ -138,6 +142,140 @@ func TestDeprecationsNeedTwelveMonthsNotice(t *testing.T) {
 		if _, perr := ParseDeprecations([]byte(doc)); perr == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// TestOpenAPISpecRequiredInProduction covers WP-568 (API-01, F-218): a
+// production server whose OpenAPI document cannot be loaded (missing file,
+// unparseable document) refuses to start instead of silently serving
+// deprecated operations without Deprecation and Sunset; the shipped
+// document loads.
+func TestOpenAPISpecRequiredInProduction(t *testing.T) {
+	dir := t.TempDir()
+	broken := filepath.Join(dir, "broken.yaml")
+	if err := os.WriteFile(broken, []byte("paths: [unclosed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, path := range map[string]string{
+		"missing file":         filepath.Join(dir, "missing.yaml"),
+		"unparseable document": broken,
+	} {
+		t.Setenv("RETICORA_OPENAPI_SPEC_PATH", path)
+		loaded, err := NewOpenAPIValidator().CheckSpec(true)
+		if err == nil || loaded || !strings.Contains(err.Error(), path) {
+			t.Errorf("production, %s: loaded %v, error %v; want a start error naming %s", name, loaded, err, path)
+		}
+	}
+	shipped, err := filepath.Abs("../../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RETICORA_OPENAPI_SPEC_PATH", shipped)
+	if loaded, err := NewOpenAPIValidator().CheckSpec(true); err != nil || !loaded {
+		t.Errorf("production, shipped document: loaded %v, error %v; want it loaded", loaded, err)
+	}
+}
+
+// TestOpenAPISpecMissingOutsideProductionWarns covers WP-568 (F-218):
+// outside production a server without the OpenAPI document starts, logs a
+// warning and reports "not loaded" (the /readyz detail openapi, see
+// cmd/server).
+func TestOpenAPISpecMissingOutsideProductionWarns(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.yaml")
+	t.Setenv("RETICORA_OPENAPI_SPEC_PATH", missing)
+	v := NewOpenAPIValidator()
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	loaded, err := v.CheckSpec(false)
+	if err != nil || loaded {
+		t.Fatalf("outside production: loaded %v, error %v; want a start without the document", loaded, err)
+	}
+	if out := logged.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "openapi: specification not loaded") || !strings.Contains(out, missing) {
+		t.Errorf("outside production: log %q; want a warning naming %s", out, missing)
+	}
+	if OpenAPISpecNotLoaded != "not loaded" {
+		t.Errorf("readiness detail %q, want %q", OpenAPISpecNotLoaded, "not loaded")
+	}
+}
+
+// TestSuccessorLinkExpandsPathParameters covers WP-568 (API-01, F-219): the
+// successor-version link names a URI with the path parameters of the
+// request filled in (/x/42 -> </y/42>), escaped as in the request; a
+// successor with a placeholder the request does not fill gets no link,
+// while Deprecation and Sunset stay.
+func TestSuccessorLinkExpandsPathParameters(t *testing.T) {
+	life := func(successor string) Deprecation {
+		return Deprecation{DeprecatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Sunset: time.Date(2027, 1, 2, 0, 0, 0, 0, time.UTC), Successor: successor}
+	}
+	v := &OpenAPIValidator{deprecated: map[string]Deprecation{
+		"GET /x/{id}":       life("/y/{id}"),
+		"GET /x/{id}/z":     life("/y/{ci_id}"),
+		"GET /x":            life("/y/{id}"),
+		"GET /p/{a}/q/{b}":  life("/r/{b}/s/{a}"),
+		"POST /plain/{id}":  life("/plain2"),
+		"DELETE /none/{id}": life(""),
+	}}
+	for _, tc := range []struct{ method, path, link string }{
+		{http.MethodGet, "/x/42", `</y/42>; rel="successor-version"`},
+		{http.MethodGet, "/x/a%3Eb", `</y/a%3Eb>; rel="successor-version"`},
+		{http.MethodGet, "/p/1/q/2", `</r/2/s/1>; rel="successor-version"`},
+		{http.MethodPost, "/plain/7", `</plain2>; rel="successor-version"`},
+		{http.MethodGet, "/x/42/z", ""},
+		{http.MethodGet, "/x", ""},
+		{http.MethodDelete, "/none/7", ""},
+	} {
+		w := httptest.NewRecorder()
+		v.writeDeprecation(w, httptest.NewRequest(tc.method, tc.path, nil))
+		if got := w.Header().Get("Link"); got != tc.link {
+			t.Errorf("%s %s: Link %q, want %q", tc.method, tc.path, got, tc.link)
+		}
+		if w.Header().Get("Deprecation") == "" || w.Header().Get("Sunset") == "" {
+			t.Errorf("%s %s: lifecycle headers %v, want Deprecation and Sunset", tc.method, tc.path, w.Header())
+		}
+	}
+}
+
+// TestShippedSuccessorLinksExpand: every deprecated operation of the
+// shipped document links a URI without placeholders that names a path of
+// the document; only the mount of a CI into a rack, whose successor needs
+// the CI ID from the body, has no link (F-219).
+func TestShippedSuccessorLinksExpand(t *testing.T) {
+	var doc struct {
+		Paths map[string]yaml.Node `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(defaultOpenAPIValidator.specBytes, &doc); err != nil || len(doc.Paths) == 0 {
+		t.Fatalf("shipped document: %d paths, %v", len(doc.Paths), err)
+	}
+	var unlinked []string
+	for key := range defaultOpenAPIValidator.deprecated {
+		method, template, _ := strings.Cut(key, " ")
+		segments := strings.Split(template, "/")
+		for i, s := range segments {
+			if isPathPlaceholder(s) {
+				segments[i] = "v-" + strings.Trim(s, "{}")
+			}
+		}
+		w := httptest.NewRecorder()
+		defaultOpenAPIValidator.writeDeprecation(w, httptest.NewRequest(method, strings.Join(segments, "/"), nil))
+		link := w.Header().Get("Link")
+		if link == "" {
+			unlinked = append(unlinked, key)
+			continue
+		}
+		target := strings.TrimSuffix(strings.TrimPrefix(link, "<"), `>; rel="successor-version"`)
+		known := false
+		for path := range doc.Paths {
+			known = known || routePatternMatches(path, target)
+		}
+		if strings.ContainsAny(target, "{}") || !known {
+			t.Errorf("%s: Link %q names no path of the document", key, link)
+		}
+	}
+	if want := []string{"POST /api/v1/racks/{id}/mounts"}; !slices.Equal(unlinked, want) {
+		t.Errorf("deprecated operations without successor link: %v, want %v", unlinked, want)
 	}
 }
 
