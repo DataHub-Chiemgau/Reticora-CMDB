@@ -1012,3 +1012,4 @@ NET-01;[B];B;backend/internal/ipam/net01_migration_integration_test.go;WP-592
 REL-01;[B];B;backend/internal/relationship/pg_repository_integration_test.go;WP-592
 TEC-14;[B];B;backend/internal/export/stale_reclaim_integration_test.go;WP-592
 DIS-02;[B], Profilliste (V);D;backend/internal/discovery/system_template_test.go;WP-581
+TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-582

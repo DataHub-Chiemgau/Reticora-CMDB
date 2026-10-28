@@ -126,6 +126,244 @@ func TestTopologyConfidence(t *testing.T) {
 	}
 }
 
+// TestTopologyConfidenceIndependentOfOrder covers WP-582 (TOP-01, F-269)
+// against PostgreSQL through POST /api/v1/discovery/ingest: two switches
+// report the same peer as LLDP neighbor and its MAC in the FDB of an access
+// port, sw1 the FDB entry first, sw2 the LLDP neighbor first. Both edges
+// get confidence 1.0, once each; a re-ingest of both, sw1 again with the
+// FDB entry first and sw2 now with it first too, re-confirms them and
+// leaves 1.0 (before the fix sw1 -> peer was 0.6 and a re-ingest with the
+// FDB entry first set it back to 0.6).
+//
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=... go test -count=1 -v \
+//	  -run 'TestTopologyConfidence|TestUnknownRelationshipReviewLifecycle' ./internal/discovery/
+func TestTopologyConfidenceIndependentOfOrder(t *testing.T) {
+	f := scopetest.Seed(t, "a9")
+	bg := context.Background()
+	const peerMAC = "00:1b:21:58:20:01"
+	peer := f.CI(t, f.OrgA, "", "wp582-peer")
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET primary_mac = $2, hostname = 'wp582-peer' WHERE id = $1`, peer, peerMAC); err != nil {
+		t.Fatal(err)
+	}
+	mux := chi.NewRouter()
+	discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App), relationship.NewPGRepository(f.App)).RegisterRoutes(mux)
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+
+	fdbEntry := plugins.DeviceNeighbor{Protocol: "fdb", LocalInterface: "Gi1/0/5", RemoteMAC: peerMAC}
+	lldpNeighbor := plugins.DeviceNeighbor{Protocol: "lldp", LocalInterface: "GigabitEthernet1/0/1", RemoteHostname: "wp582-peer"}
+	ips := map[string]string{"sw1": "192.0.2.181", "sw2": "192.0.2.183"}
+	record := func(sw string, at time.Time, fdbFirst bool) plugins.DeviceRecord {
+		rec := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "switch", Name: "wp582-" + sw, IP: ips[sw], Serial: "WP582" + strings.ToUpper(sw)}, at)
+		rec.Neighbors = []plugins.DeviceNeighbor{lldpNeighbor, fdbEntry}
+		if fdbFirst {
+			rec.Neighbors = []plugins.DeviceNeighbor{fdbEntry, lldpNeighbor}
+		}
+		return rec
+	}
+	ingest := func(recs ...plugins.DeviceRecord) {
+		t.Helper()
+		body, err := json.Marshal(plugins.DeviceRecordBatch{Records: recs})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/discovery/ingest", bytes.NewReader(body)).WithContext(ctx))
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+		}
+	}
+	type edge struct {
+		confidence float64
+		confirmed  time.Time
+	}
+	edges := func() map[string]edge {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT s.name, d.name, r.confidence::float8, COALESCE(r.last_confirmed_at, 'epoch') FROM ci_relationship r
+			JOIN ci s ON s.id = r.source_ci_id JOIN ci d ON d.id = r.target_ci_id
+			WHERE r.organization_id = $1 AND r.source = 'discovery' AND r.rel_type = 'connected_to'`, f.OrgA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		out := map[string]edge{}
+		for rows.Next() {
+			var s, d string
+			var e edge
+			if err := rows.Scan(&s, &d, &e.confidence, &e.confirmed); err != nil {
+				t.Fatal(err)
+			}
+			if _, dup := out[s+" -> "+d]; dup {
+				t.Errorf("edge %s -> %s twice", s, d)
+			}
+			out[s+" -> "+d] = e
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	check := func(stage string, confirmedAfter time.Time) {
+		t.Helper()
+		got := edges()
+		if len(got) != 2 {
+			t.Errorf("%s: edges = %v, want wp582-sw1 -> wp582-peer and wp582-sw2 -> wp582-peer", stage, got)
+		}
+		for _, sw := range []string{"wp582-sw1", "wp582-sw2"} {
+			e, ok := got[sw+" -> wp582-peer"]
+			if !ok || e.confidence != 1.0 {
+				t.Errorf("%s: %s -> wp582-peer confidence %v (present %v), want 1.0 (LLDP, F-269)", stage, sw, e.confidence, ok)
+			}
+			if ok && !e.confirmed.After(confirmedAfter) {
+				t.Errorf("%s: %s -> wp582-peer last confirmed %v, not re-confirmed after %v", stage, sw, e.confirmed, confirmedAfter)
+			}
+		}
+	}
+
+	start := time.Now()
+	ingest(record("sw1", start.Add(-2*time.Minute), true), record("sw2", start.Add(-2*time.Minute), false))
+	check("first ingest (sw1 FDB first, sw2 LLDP first)", time.Time{})
+
+	// Set the confirmation back a day, so the re-ingest must re-confirm.
+	if _, err := f.Admin.Exec(bg, `UPDATE ci_relationship SET last_confirmed_at = now() - interval '1 day'
+		WHERE organization_id = $1 AND source = 'discovery'`, f.OrgA); err != nil {
+		t.Fatal(err)
+	}
+	reconfirmed := time.Now().Add(-time.Hour)
+	ingest(record("sw1", start.Add(-time.Minute), true), record("sw2", start.Add(-time.Minute), true))
+	check("re-ingest (both FDB first)", reconfirmed)
+}
+
+// TestUnknownRelationshipReviewLifecycle covers WP-582 (TOP-01, open
+// evidence of WP-158) against PostgreSQL through the legacy ingest and the
+// review API: a neighbor reported with an unknown relationship key opens
+// an unknown_relationship review and gives no edge; accept records the
+// neighbor as connected_to edge of source discovery; dismiss keeps the edge
+// away, and the next ingest of the same key opens no new review.
+func TestUnknownRelationshipReviewLifecycle(t *testing.T) {
+	f := scopetest.Seed(t, "a9")
+	bg := context.Background()
+	macs := map[string]string{"accepted": "00:1b:21:58:21:01", "dismissed": "00:1b:21:58:21:02"}
+	peers := map[string]string{}
+	for name, mac := range macs {
+		peers[name] = f.CI(t, f.OrgA, "", "wp582-"+name)
+		if _, err := f.Admin.Exec(bg, `UPDATE ci SET primary_mac = $2 WHERE id = $1`, peers[name], mac); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mux := chi.NewRouter()
+	discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App), relationship.NewPGRepository(f.App)).RegisterRoutes(mux)
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	do := func(path string, body []byte) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body)).WithContext(ctx))
+		return w
+	}
+	ingest := func() {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{"collector_id": "c", "items": []map[string]any{{"ci_type_name": "switch",
+			"name": "wp582-leaf", "serial_number": "WP582LEAF", "management_ip": "192.0.2.182",
+			"relationships": []map[string]any{
+				{"target_mac": macs["accepted"], "type_key": "vxlan_peer"},
+				{"target_mac": macs["dismissed"], "type_key": "vxlan_peer"},
+			}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w := do("/api/v1/ingest/bulk", body); w.Code != http.StatusAccepted {
+			t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+		}
+	}
+	// reviews returns the ids of the unknown_relationship reviews of a
+	// peer by status.
+	reviews := func(peer string) map[string][]string {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT id::text, status FROM review_item WHERE organization_id = $1
+			AND kind = 'unknown_relationship' AND payload->>'target_ci_id' = $2 ORDER BY created_at`, f.OrgA, peers[peer])
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		out := map[string][]string{}
+		for rows.Next() {
+			var id, status string
+			if err := rows.Scan(&id, &status); err != nil {
+				t.Fatal(err)
+			}
+			out[status] = append(out[status], id)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	// edges returns the source and type of the edges between the leaf and
+	// a peer, in either direction.
+	edges := func(peer string) []string {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT r.source || ' ' || r.rel_type FROM ci_relationship r JOIN ci l ON l.name = 'wp582-leaf' AND l.organization_id = r.organization_id
+			WHERE r.organization_id = $1 AND ((r.source_ci_id = l.id AND r.target_ci_id = $2) OR (r.source_ci_id = $2 AND r.target_ci_id = l.id))`,
+			f.OrgA, peers[peer])
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var e string
+			if err := rows.Scan(&e); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, e)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	// An unknown key: an open review per peer, no edge.
+	ingest()
+	open := map[string]string{}
+	for name := range peers {
+		r := reviews(name)
+		if len(r["open"]) != 1 || len(r) != 1 {
+			t.Fatalf("%s: unknown_relationship reviews after the ingest = %v, want one open", name, r)
+		}
+		open[name] = r["open"][0]
+		if e := edges(name); len(e) != 0 {
+			t.Errorf("%s: edges before the review is resolved = %v, want none", name, e)
+		}
+	}
+
+	// accept: the neighbor becomes a connected_to edge of source discovery.
+	if w := do("/api/v1/review-items/"+open["accepted"]+"/resolve", []byte(`{"action":"accept"}`)); w.Code != http.StatusOK {
+		t.Fatalf("accept: %d %s", w.Code, w.Body.String())
+	}
+	if r := reviews("accepted"); len(r["resolved"]) != 1 || len(r["open"]) != 0 {
+		t.Errorf("accepted: reviews after accept = %v, want one resolved", r)
+	}
+	if e := edges("accepted"); !slices.Equal(e, []string{"discovery connected_to"}) {
+		t.Errorf("accepted: edges after accept = %v, want one connected_to of source discovery", e)
+	}
+
+	// dismiss: no edge, and the next ingest of the key opens no new review.
+	if w := do("/api/v1/review-items/"+open["dismissed"]+"/resolve", []byte(`{"action":"dismiss"}`)); w.Code != http.StatusOK {
+		t.Fatalf("dismiss: %d %s", w.Code, w.Body.String())
+	}
+	ingest()
+	if r := reviews("dismissed"); len(r["dismissed"]) != 1 || len(r) != 1 {
+		t.Errorf("dismissed: reviews after the next ingest = %v, want only the dismissed one", r)
+	}
+	if e := edges("dismissed"); len(e) != 0 {
+		t.Errorf("dismissed: edges after the next ingest = %v, want none", e)
+	}
+	if e := edges("accepted"); !slices.Equal(e, []string{"discovery connected_to"}) {
+		t.Errorf("accepted: edges after the next ingest = %v, want the one connected_to of source discovery", e)
+	}
+}
+
 // TestAuditLLDPEdgesOfFirstCycleIndependentOfLaneOrder covers WP-645
 // (TOP-01, NFR-03, REL-03, AUD-03; F-374) against PostgreSQL as the
 // application role with the tenant GUCs: the first discovery cycle of the
