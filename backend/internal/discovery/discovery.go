@@ -666,28 +666,21 @@ func (h *Handler) decide(ctx context.Context, w *override.Write) override.Decisi
 
 // queueOverrideConflict opens an override_conflict review for a field unless
 // one is open already or the value was dismissed (REC-12, deduplicated per
-// field). A failure does not fail the ingest: the override stays in place
-// either way.
-func (h *Handler) queueOverrideConflict(ctx context.Context, orgID, ciID, field string, value any, source string) bool {
-	item := &ReviewItem{
-		OrganizationID: orgID,
-		Kind:           ReviewKindOverrideConflict,
-		Status:         ReviewStatusOpen,
-		Payload:        map[string]any{"ci_id": ciID, "field": field, "observed_value": value, "source": source},
-		CandidateCIIDs: []string{ciID},
-		ObjectKey:      "ci:" + ciID + "/" + field,
-	}
+// field; the call of workflow and agent as well). device is the CI as read
+// before the report: it holds the value reported before this one. A failure
+// does not fail the ingest: the override stays in place either way.
+func (h *Handler) queueOverrideConflict(ctx context.Context, orgID string, device *ci.Item, field string, value any, source string) bool {
+	previous, hasPrevious := device.ObservedUnderOverride(field)
 	// One open item per field; a dismissed value stays suppressed until the
-	// source reports another one (REC-12). The savepoint undoes a review
-	// that failed after its insert, so the record's transaction goes on.
-	var opened bool
-	err := database.Savepoint(ctx, func(ctx context.Context) error {
-		var openErr error
-		opened, openErr = h.ReviewService().OpenUnlessDismissed(ctx, item, "observed_value")
-		return openErr
+	// source reports another one (REC-12, F-248). The service's savepoint
+	// undoes a review that failed after its insert, so the record's
+	// transaction goes on.
+	opened, err := h.ReviewService().OpenOverrideConflict(ctx, &reviews.OverrideConflict{
+		OrganizationID: orgID, CIID: device.ID, Field: field, Value: value, Source: source, Rank: override.SourceRank(source),
+		Previous: previous, HasPrevious: hasPrevious,
 	})
 	if err != nil {
-		slog.WarnContext(ctx, "override conflict review not created", "ci_id", ciID, "field", field, "error", err)
+		slog.WarnContext(ctx, "override conflict review not created", "ci_id", device.ID, "field", field, "error", err)
 		return false
 	}
 	return opened
@@ -1567,7 +1560,7 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			}
 			if d.Conflict {
 				conflict = true
-				if h.queueOverrideConflict(ctx, orgID, matched.ID, field, value, source) {
+				if h.queueOverrideConflict(ctx, orgID, matched, field, value, source) {
 					resp.ReviewItems++
 				}
 			}
@@ -1597,7 +1590,9 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			{"hardware_uuid", strings.ToLower(incomingUUID(&item)), strings.ToLower(matched.HardwareUUID), &update.HardwareUUID},
 			{"management_ip", item.ManagementIP, matched.ManagementIP, &update.ManagementIP},
 		} {
-			if f.value == "" || f.value == f.current {
+			// An unchanged value is decided only when it changes the
+			// observation of an overridden field (F-248).
+			if f.value == "" || (f.value == f.current && !matched.ObservationChanged(f.name, f.value)) {
 				continue
 			}
 			// The serial number identifies case-insensitively (F-246): one in
@@ -1621,7 +1616,8 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			if k == "fingerprint" || k == "raw_data" {
 				continue
 			}
-			if current, ok := matched.Attributes[k]; ok && reflect.DeepEqual(current, v) {
+			if current, ok := matched.Attributes[k]; ok && reflect.DeepEqual(current, v) &&
+				!matched.ObservationChanged(k, v) {
 				continue
 			}
 			if decide(k, v, matched.Attributes[k]) {

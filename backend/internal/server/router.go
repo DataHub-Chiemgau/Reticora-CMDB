@@ -279,10 +279,12 @@ func agentTypeResolver(repos Repositories) agent.CITypeResolver {
 }
 
 // agentHandler builds the agent handler; with a session issuer, enrollment
-// returns the agent's signed credential (AGT-03).
-func agentHandler(repos *Repositories, sessions *identity.SessionIssuer) *agent.Handler {
+// returns the agent's signed credential (AGT-03). Values that differ from a
+// manual override open an override_conflict review in the review queue of
+// discovery (REC-12).
+func agentHandler(repos *Repositories, sessions *identity.SessionIssuer, conflicts agent.ConflictReviews) *agent.Handler {
 	h := agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(*repos)).WithFindings(repos.Security).
-		WithFieldGuard(override.NewGuard(repos.Override))
+		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflicts)
 	if sessions != nil {
 		h.WithAgentTokens(sessions)
 	}
@@ -491,10 +493,15 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		aiEntitlements = opts.Entitlements
 	}
 	aiConsent := ai.NewOrgConsent(repos.AI, aiEntitlements)
+	// Workflow and agent open override_conflict reviews through the review
+	// queue of discovery, deduplicated with its items (REC-12). Both modules
+	// stay switched off in G1 (E-03); the protection holds once they are on.
+	// The queue is built here, after the last option of the handler.
+	conflictReviews := discoveryHandler.ReviewService()
 	// One executor runs the runs of the workflow API and the run an IGA
 	// access request starts (WFL-04).
 	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
-		WithFieldGuard(override.NewGuard(repos.Override))
+		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -526,7 +533,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		training.NewHandler(repos.Training),
 		desk.NewHandler(repos.Desk),
 		location.NewHandler(repos.Location),
-		agentHandler(&repos, opts.Sessions),
+		agentHandler(&repos, opts.Sessions, conflictReviews),
 		security.NewHandler(repos.Security),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
 		userHandler(&repos, &opts),

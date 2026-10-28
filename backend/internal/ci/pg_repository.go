@@ -1676,6 +1676,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		return nil, err
 	}
 
+	item.Overridden = overridden(item.Attributes)
 	item.Attributes = presentAttributes(item.Attributes)
 	if firstSeen.Valid {
 		t := firstSeen.Time.UTC()

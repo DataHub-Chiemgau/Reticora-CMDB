@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
@@ -40,6 +41,13 @@ type Executor struct {
 	forms      form.Repository
 	dispatcher *webhook.Dispatcher
 	guard      *override.Guard
+	conflicts  ConflictReviews
+}
+
+// ConflictReviews opens the override_conflict review of a field
+// (reviews.Service, the call of discovery as well, REC-12).
+type ConflictReviews interface {
+	OpenOverrideConflict(ctx context.Context, c *reviews.OverrideConflict) (bool, error)
 }
 
 func NewExecutor(repo Repository, tickets ticket.Repository, cis ci.Repository, forms form.Repository, dispatcher *webhook.Dispatcher) *Executor {
@@ -50,6 +58,13 @@ func NewExecutor(repo Repository, tickets ticket.Repository, cis ci.Repository, 
 // (OVR-02). Without one the rank table alone decides.
 func (e *Executor) WithFieldGuard(g *override.Guard) *Executor {
 	e.guard = g
+	return e
+}
+
+// WithConflictReviews makes set_ci_field open an override_conflict review
+// when its value differs from a manual override (REC-12).
+func (e *Executor) WithConflictReviews(r ConflictReviews) *Executor {
+	e.conflicts = r
 	return e
 }
 
@@ -426,6 +441,17 @@ func (e *Executor) setCIField(ctx context.Context, orgID string, action JSONMap)
 	if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
 		if err = e.guard.Record(ctx, w); err != nil {
 			return nil, false, fmt.Errorf("record provenance: %w", err)
+		}
+	}
+	if d.Conflict && e.conflicts != nil {
+		// The override stays; the value goes to the review queue like a
+		// discovered one (REC-12). A failed review does not fail the step.
+		previous, hasPrevious := item.ObservedUnderOverride(field)
+		if _, err = e.conflicts.OpenOverrideConflict(ctx, &reviews.OverrideConflict{
+			OrganizationID: orgID, CIID: item.ID, Field: field, Value: value, Source: sourceWorkflow,
+			Rank: override.SourceRank(sourceWorkflow), Previous: previous, HasPrevious: hasPrevious,
+		}); err != nil {
+			slog.WarnContext(ctx, "override conflict review not created", "ci_id", item.ID, "field", field, "error", err)
 		}
 	}
 	return JSONMap{"ci_id": item.ID, "field": field, "written": d.Write, "reason": d.Reason}, false, nil

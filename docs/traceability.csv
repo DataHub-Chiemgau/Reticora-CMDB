@@ -995,3 +995,6 @@ DB-02;nicht geliefert;B;backend/internal/database/migration_000089_prequarantine
 GLO-12;[B];D;backend/internal/discovery/observed_seen_integration_test.go;WP-580
 REC-02;[B];D;backend/internal/discovery/observed_seen_integration_test.go;WP-580
 REC-07;[B];D;backend/internal/ipam/interface_integration_test.go;WP-580
+REC-12;[B];D;backend/internal/reviews/conflict_integration_test.go;WP-576
+WFL-02;[P3];D;backend/internal/workflow/set_ci_field_integration_test.go;WP-576
+AGT-05;[P4];D;backend/internal/agent/audit_t3_agent_rank_integration_test.go;WP-576
