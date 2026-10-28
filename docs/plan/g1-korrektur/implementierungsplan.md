@@ -38,10 +38,10 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K4 Funktions-, Validierungs- und Bedienmängel](#k4-funktions--validierungs--und-bedienmängel) | WP-460 – WP-531 | 72 | 99,0 | Alle übrigen P2 behoben. |
 | [K4-Nachträge](#k4-nachträge) | WP-630 – WP-635 | 6 | 7,0 | Funde aus der Umsetzung von K4 behoben (F-355 bis F-362): Kontrast im dunklen Thema, Kartenmarker und Scrollbereiche per Tastatur (a11y-Prüfung in de-DE und en-US), Ausführung ad-hoc angelegter Discovery-Jobs, `PATCH /org` nur org-weit, Rackhöhe gegen alle Mounts, vollständige Listen statt Seitengrößen über 200. |
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
-| [K5-Nachträge](#k5-nachträge) | WP-636 – WP-646 | 11 | 10,5 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-375): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin. |
+| [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **294** | **396,0** | |
+| **Summe** | | **295** | **397,5** | |
 
 ```mermaid
 flowchart LR
@@ -54,7 +54,7 @@ flowchart LR
     K4["K4 Funktions-, Validierungs- und Bedienmängel<br/>72 WPs · 99,0 PT"]
     K4N["K4-Nachträge<br/>6 WPs · 7,0 PT"]
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
-    K5N["K5-Nachträge<br/>11 WPs · 10,5 PT"]
+    K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
@@ -436,6 +436,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-644](#wp-644--clientliste-für-client-gescopte-rollen-ohne-userread) | `k5n-clients-read` | Clientliste für client-gescopte Rollen ohne user:read | K5N | 0,5 | F-373 | WP-556 |
 | [WP-645](#wp-645--lldp-kanten-des-ersten-zyklus-unabhängig-von-der-reihenfolge-der-ingest-lanes) | `k5n-lldp-lane-order` | LLDP-Kanten des ersten Zyklus unabhängig von der Reihenfolge der Ingest-Lanes | K5N | 1,0 | F-374 | WP-498, WP-543 |
 | [WP-646](#wp-646--real-stack-e2e-für-webkit-und-mobile-safari-über-einen-tls-origin) | `k5n-e2e-webkit-tls` | Real-Stack-E2E für WebKit und Mobile Safari über einen TLS-Origin | K5N | 1,0 | F-375 | WP-532, WP-558 |
+| [WP-647](#wp-647--exportdateien-über-den-öffentlichen-origin-herunterladen) | `k5n-export-public-url` | Exportdateien über den öffentlichen Origin herunterladen | K5N | 1,5 | F-376 | WP-646 |
 
 ## Konventionen für alle WPs
 
@@ -14926,6 +14927,8 @@ Geprüft und nicht ohne Befund geschlossen: Alle fünf Kandidaten waren Defekte.
 
 Nachtrag aus der CI von PR #102 (K5, Konvention 16): F-374 (Real-Stack-Fall R01 von `relationships-suppression.spec.ts`, WP-543) ist mit dem Go-Defekttest `TestAuditLLDPEdgesOfFirstCycleIndependentOfLaneOrder` kodiert, der auf `c883c19` rot ausgeführt wurde; WP-645 überführt ihn (Konvention 13). F-375 (Browsermatrix von WP-532) ist geprüft: Der Verdacht, eine Plain-HTTP-Installation auf einem anderen Host verliere die Sitzung, weil das Refresh-Cookie immer `Secure` ist, trifft nicht zu, denn auf einem unsicheren Origin beginnt keine Anmeldung (SPA `InsecureContextError`, INS-04) und SEC-01 verlangt TLS. Es bleibt ein Artefakt der Testumgebung (P3): WebKit speichert das Secure-Cookie über `http://localhost` nicht. F-375 ist mit zwölf e2e-real-Zeilen kodiert (Fälle 07, 11, 14, 14a, 14b, 15 von `roles-authz.spec.ts`, Projekte webkit und mobile-safari); WP-646 löscht sie erst nach einem grünen CI-Lauf von `install-smoke.yml` und nennt dessen Lauf-ID.
 
+Nachtrag aus der CI von PR #103 (K5-Nachträge, Konvention 16, 2026-10-28): F-376 (P1) ist mit den e2e-real-Zeilen der Fälle E01 (`bulk-jobs-export.spec.ts`), L10b (`ci-lifecycle.spec.ts`) und CS03 (`client-scope.spec.ts`) im Projekt mobile-safari kodiert, rot im Lauf 40627970461 auf `541c3c2`: Erst der TLS-Origin von WP-646 macht sichtbar, dass die signierte Download-URL den internen Objektspeicher `http://minio:9000` nennt, den nur `/etc/hosts` des CI-Runners auflöst. Korrektur-WP ist WP-647.
+
 ### WP-636 – Nicht zugeordnete Discovery-Ergebnisse folgen der Client-Bindung ihres Collectors
 
 **Schlüssel:** `k5n-collector-result-scope` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
@@ -15488,6 +15491,55 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
 **Entscheidungsbedarf:** keiner (SEC-01 gilt; das Refresh-Cookie bleibt `Secure`)
 
 **Nicht Bestandteil:** `Secure` des Refresh-Cookies nach Schema der Anfrage oder der öffentlichen URL (von den Anforderungen nicht verlangt); Plain-HTTP-Betrieb auf anderen Hosts als Loopback; die übrigen in WebKit roten Fälle anderer Befunde.
+
+
+### WP-647 – Exportdateien über den öffentlichen Origin herunterladen
+
+**Schlüssel:** `k5n-export-public-url` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-646 (`k5n-e2e-webkit-tls`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-376](../../../audit/g1-reaudit/FINDINGS.md#f-376) | P1 | Die signierte Download-URL eines Exports nennt den internen Objektspeicher `http://minio:9000`: im Browser einer Installation nicht auflösbar, über einen HTTPS-Origin zusätzlich gemischter Inhalt | schließt | WP-646 |
+
+**Problem:** `GET /api/v1/exports/{id}` liefert für einen abgeschlossenen Auftrag `download_url` = `http://minio:9000/<bucket>/<key>?X-Amz-…`, signiert für den Endpunkt, den der Server nutzt (`RETICORA_S3_ENDPOINT`). Den Namen `minio` kennt nur das Compose-Netz; MinIO ist nur auf `127.0.0.1:9000` veröffentlicht, das Frontend-nginx leitet keinen Pfad dorthin. Die Real-Stack-Suite lädt Exporte nur, weil ihre Fixtures `127.0.0.1 minio` in `/etc/hosts` des Runners eintragen; über den TLS-Origin von WP-646 scheitern E01, L10b und CS03 in WebKit (kein Download, gemischter Inhalt).
+
+**Akzeptanzkriterien:**
+
+- [ ] Ein Browser lädt die Exportdatei eines abgeschlossenen Auftrags über den öffentlichen Origin der Installation (HTTPS bei `RETICORA_TLS_DOMAIN`), ohne Namensauflösung des internen Objektspeichers; die URL bleibt zeitlich begrenzt (15 Minuten, `X-Amz-Expires=900` oder gleichwertig) und ist ohne Bearer-Token nutzbar oder wird von der SPA mit dem Token geladen.
+- [ ] Der öffentliche Weg erlaubt nur das Lesen der signierten Exportobjekte (kein Listen, kein Schreiben, keine anderen Buckets); ein Test belegt die Abweisung eines unsignierten oder abgelaufenen Zugriffs.
+- [ ] Compose (Standard), Kubernetes (Ingress) und die Doku (deploy/README.md, docs/README.md) beschreiben die Einstellung.
+- [ ] Die `/etc/hosts`-Einträge für `minio` in `frontend/e2e-real/fixtures/setup-real-stack.sh` und `install-smoke.yml` entfallen (Änderung des eingefrorenen ABN-01-Ablaufs nur mit Anmerkung in `docs/acceptance/abn-01.md`).
+- [ ] Retest F-376: Lauf von `install-smoke.yml`, E01, L10b und CS03 grün in allen sechs Projekten; die e2e-real-Zeilen von F-376 entfernt.
+
+**Dateien (6 Einträge):**
+
+- backend/internal/platform/blob/blob.go oder backend/internal/export/job_handler.go
+- frontend/nginx.conf, deploy/docker-compose/nginx-tls.conf.template (falls ein Weiterleitungspfad gewählt wird)
+- deploy/docker-compose/docker-compose.yml, deploy/k8s/
+- frontend/e2e-real/fixtures/setup-real-stack.sh, .github/workflows/install-smoke.yml
+- deploy/README.md, docs/README.md
+- tests/audit/expected-failures.txt
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- Go-Test der öffentlichen URL (Host, Schema, Signatur, Ablauf).
+- Real-Stack E01, L10b und CS03 in allen Projekten (CI).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+EXP-01;[B], DATEV [P2];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-647
+```
+
+**Entscheidungsbedarf:** Variante des öffentlichen Wegs: öffentlicher Basis-URL für signierte URLs mit nur-GET-Weiterleitung im Frontend-nginx (Signatur über den internen Host) oder Download-Endpunkt der API, der die Datei aus dem Objektspeicher streamt.
+
+**Nicht Bestandteil:** Dokumentanhänge und andere Blobs (eigene Befunde); Wechsel des Objektspeichers.
 
 ## K6 Geringfügige Mängel
 

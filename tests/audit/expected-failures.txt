@@ -23,3 +23,6 @@ e2e-real;mobile-chrome:frontend/e2e-real/locations-racks.spec.ts;locations and r
 e2e-real;mobile-chrome:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles;F-201
 e2e-real;mobile-safari:frontend/e2e-real/locations-racks.spec.ts;locations and racks (LOC-*, RCK-*) L08 moving a mounted CI is recorded in ci_change, audit and the unified history shown on the CI page;F-253
 e2e-real;mobile-safari:frontend/e2e-real/roles-authz.spec.ts;09b the roles tab presents the four RBA-02 roles as system roles, not as custom roles;F-201
+e2e-real;mobile-safari:frontend/e2e-real/bulk-jobs-export.spec.ts;Bulk operations, jobs, notifications, saved views, export, webhook egress E01 a CSV export started on the export page downloads exactly the API data of the own tenant;F-376
+e2e-real;mobile-safari:frontend/e2e-real/ci-lifecycle.spec.ts;CI lifecycle: create, edit, history, audit, relations, search, export, delete L10b the CSV export button of the CMDB list downloads the CIs of the list;F-376
+e2e-real;mobile-safari:frontend/e2e-real/client-scope.spec.ts;client- and site-scoped users (TEN-04, TEN-06, TEN-09, EXP-01) CS03 the export of the C1 user holds only C1 rows, the job center of the C2 user does not show it;F-376
