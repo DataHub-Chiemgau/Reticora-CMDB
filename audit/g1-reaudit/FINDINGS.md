@@ -16,6 +16,8 @@ Der Befund F-378 ist bei der Umsetzung von K6 gefunden worden (Konvention 16, WP
 
 Die Befunde F-379 und F-380 sind bei der Umsetzung von K6 gefunden worden (Konvention 16, WP-578): Eine Probe mit einem auf Client 1 beschränkten Principal zeigte vor und nach WP-578, dass die Rack-Platzierung den Standort eines Assets ohne Client nicht setzt und dass `trg_asset_propagate_location` CIs des Assets außerhalb des Scopes überspringt, während der Mount gespeichert wird. Beide sind mit `backend/internal/rack/placement_scope_integration_test.go` kodiert (auf `af7e2ab` rot) und werden von WP-650 im Abschnitt K6-Nachträge geschlossen.
 
+Der Befund F-381 ist bei der Umsetzung von K6 gefunden worden (Konvention 16, WP-579): Ein Einbau mit der Seite `both`, den die API annimmt (RCK-01), erscheint auf der Rack-Seite weder auf der Vorder- noch auf der Rückseite. Er ist mit `frontend/src/pages/RackPage.test.tsx` kodiert (auf `f0781b6` rot) und wird von WP-651 im Abschnitt K6-Nachträge geschlossen.
+
 Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `tests/audit/expected-failures.txt` (Ratchet, `tests/audit/run-auditdefect.sh`). Die a11y-Befunde sind in `frontend/e2e/a11y.spec.ts` (gemockter Playwright-Lauf, CI-Job `e2e`) mit `test.fail` und der Befund-ID markiert: Der markierte Fall muss scheitern, ein markierter Fall, der besteht, macht den Lauf rot. Diese Marken sind ihr eigener Ratchet; der Ratchet von WP-337 vergleicht nur die Arten `go`, `sh`, `vitest` und `e2e-real`, daher erhalten sie keine Zeile in `expected-failures.txt`. Shell-Defekttests (`tests/audit/*.test.sh`, Art `sh`) und Real-Stack-Fälle (`frontend/e2e-real/`, Art `e2e-real`, je Browserprojekt eine Zeile, nur in CI ausführbar) stehen ebenfalls in `expected-failures.txt` (F-369, F-370, F-375).
 
 ## Zählung
@@ -25,8 +27,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 3 |
 | P2 | 16 |
-| P3 | 6 |
-| **Summe** | **26** |
+| P3 | 7 |
+| **Summe** | **27** |
 
 ## Übersicht
 
@@ -58,6 +60,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-378](#f-378) | P3 | Upgrade von Datenbanken mit 000056 vor E-26 scheitert bei 000089: `migration_quarantine` fehlt, Version 89 bleibt dirty | WP-574 (K6) | belegt | backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go TestUpgradeFromPreQuarantine56 | WP-649 |
 | [F-379](#f-379) | P3 | Rack-Platzierung durch einen client-beschränkten Principal: das Asset ohne Client erhält den Standort stumm nicht, der Mount wird trotzdem gespeichert | WP-578 (K6) | belegt | backend/internal/rack/placement_scope_integration_test.go TestRackPlacementRefusesAssetOutsideScope | WP-650 |
 | [F-380](#f-380) | P3 | Rack-Platzierung durch einen client-beschränkten Principal: CIs des Assets außerhalb des Scopes behalten ihren Standort, `asset.location_id` und `ci.location_id` weichen ab | WP-578 (K6) | belegt | backend/internal/rack/placement_scope_integration_test.go TestRackPlacementRefusesAssetWithCIsOutsideScope | WP-650 |
+| [F-381](#f-381) | P3 | Rack-Seite: ein Einbau auf beiden Seiten (`face` = `both`) erscheint auf keiner Rackseite, weder in der Zeichnung noch in der Liste | WP-579 (K6) | belegt | frontend/src/pages/RackPage.test.tsx (zwei Fälle „both faces“) | WP-651 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -397,6 +400,19 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 - **Empfehlung:** `asset_propagate_location` aktualisiert die CIs weiter unter der RLS des Schreibenden und prüft danach mit erweitertem Client- und Site-Scope (`app_scope_widen`, wie 000139/000151; kein SECURITY DEFINER, `search_path` fest), ob ein CI des Assets einen anderen Standort behält; dann 42501 (`asset_location_ci_scope`), die Transaktion scheitert. Die Platzierung bildet das auf 409 mit demselben festen Text wie F-379 ab. Org-weite Principals sind nicht betroffen.
 - **Retest (verbindlich):** `go test -count=1 -run 'TestRackPlacement|TestMountSetsLocationWithHistory|TestRackRepositoryClientScope' ./internal/rack/` grün; `TestMigrationsRoundtrip` und `TestSchemaBaselineMatchesMigratedSchema` grün.
 - **Kodierender Test:** backend/internal/rack/placement_scope_integration_test.go (`TestRackPlacementRefusesAssetWithCIsOutsideScope`); auf `af7e2ab` rot (`invisible CI of client 2: … asset "<Rack>", Z "<Rack>", other CI "" disagree`, ebenso `visible CI without client`; direktes Asset-Update ohne 42501).
+
+<a id="f-381"></a>
+### F-381 (P3) – Rack-Seite: ein Einbau auf beiden Seiten (`face` = `both`) erscheint auf keiner Rackseite, weder in der Zeichnung noch in der Liste
+
+- **Gefunden in:** WP-579 (`t3-rack-layout`, K6) · **Betroffene Anforderungen:** RCK-01, RCK-02 · **Komponente:** frontend/src/pages/RackPage.tsx (`buildRackUnits`, `visibleMounts`) · **Quelle:** Probe bei der Umsetzung von WP-579 (vor und nach WP-579 gleiches Verhalten), bestätigt durch einen ausgeführten Test
+- **Reproduktion:** `PUT /api/v1/racks/{id}/mounts/{ci_id}` mit `{"position_u":1,"face":"both"}` → 201 (RCK-01 erlaubt `both`; `GET /racks/{id}/layout` liefert den Einbau mit `face: "both"`); `/racks` öffnen → das CI fehlt auf „Vorderseite“ und auf „Rückseite“, in der Zeichnung und in der Liste „Einbauten“; ein Rack mit nur solchen Einbauten zeigt „Keine Einbauten in diesem Rack“.
+- **Soll:** Ein Einbau auf beiden Seiten belegt seine Höheneinheiten vorn und hinten (RCK-01: `face_range` both = [1,3)). Die Rack-Seite zeigt ihn auf beiden Seiten in Zeichnung und Liste und nennt die Seiten als Text (zugänglicher Name, nicht nur Farbe); die Seite scrollt auf einem Telefon (412 px) nicht seitwärts.
+- **Ist:** `buildRackUnits` und `visibleMounts` filtern auf `(mount.face || 'front') === face`; `both` ist weder `front` noch `rear`, der Einbau fällt auf beiden Seiten heraus.
+- **Nutzerwirkung:** Die Belegung wirkt unvollständig: belegte Höheneinheiten erscheinen frei, eine Platzierung dort scheitert mit 409 (Überlappung) ohne sichtbare Ursache. Keine Datenabweichung (API und Layout liefern den Einbau), keine Offenlegung; seltene Einbauart (durchgehende Geräte, z. B. PDU oder Kabelführung).
+- **Ursache (belegt):** Der Seitenfilter der Rack-Seite kennt den Wert `both` nicht.
+- **Empfehlung:** Ein Einbau mit `both` gilt auf beiden Seiten. Die Zeichnung trägt den SVG-Titel „<Name> · Vorder- und Rückseite“, die Liste nennt „Vorder- und Rückseite“ (i18n `rack.faceBoth`) statt des Rohwerts `both`.
+- **Retest (verbindlich):** `npx vitest run src/pages/RackPage.test.tsx` grün; gemockter Playwright-Lauf `e2e/mobile-actions.spec.ts` (Fall „racks: a mount on both faces …“, kein Seitwärtsscrollen), `e2e/a11y.spec.ts` (/racks) und `e2e/rack-drag.spec.ts` grün.
+- **Kodierender Test:** frontend/src/pages/RackPage.test.tsx (`draws a mount on both faces on the front and on the rear`, `shows a mount on both faces on the front and on the rear (F-381)`); auf `f0781b6` rot (`expected [] to deeply equal [ { id: 'mount-3', … } ]`; `Unable to find role="button" and name "pdu-01"`).
 
 ## Geprüfte Kandidaten ohne neuen Befund
 

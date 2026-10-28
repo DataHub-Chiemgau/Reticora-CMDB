@@ -22,18 +22,34 @@ function mountLabel(mount: RackLayoutMount): string {
 }
 
 /**
- * Maps rack mounts onto the units drawn by `RackSVG`, labelled with the CI
- * name of the layout. Mounts without an explicit face are treated as
- * front-mounted (the backend default).
+ * onFace reports whether a mount shows on a face: a mount on both faces
+ * occupies its units on the front and on the rear (RCK-01, F-381). Mounts
+ * without an explicit face are treated as front-mounted (the backend
+ * default).
  */
-export function buildRackUnits(mounts: RackLayoutMount[], face: RackFace = 'front'): RackUnit[] {
+function onFace(mount: RackLayoutMount, face: RackFace): boolean {
+  const mounted = mount.face || 'front';
+  return mounted === face || mounted === 'both';
+}
+
+/**
+ * Maps the mounts of a face onto the units drawn by `RackSVG`, labelled with
+ * the CI name of the layout. A mount on both faces carries the title
+ * "<name> · <bothLabel>", so the drawing names both faces.
+ */
+export function buildRackUnits(
+  mounts: RackLayoutMount[],
+  face: RackFace = 'front',
+  bothLabel = 'front and rear',
+): RackUnit[] {
   return mounts
-    .filter((mount) => (mount.face || 'front') === face)
+    .filter((mount) => onFace(mount, face))
     .map((mount) => ({
       id: mount.id,
       position: mount.position_u,
       height: Math.max(1, mount.height_u),
       label: mountLabel(mount),
+      ...(mount.face === 'both' ? { title: `${mountLabel(mount)} · ${bothLabel}` } : {}),
     }));
 }
 
@@ -59,10 +75,11 @@ export function RackPage() {
 
   const mounts = useMemo(() => mountsQuery.data?.mounts ?? [], [mountsQuery.data]);
   const visibleMounts = useMemo(
-    () => mounts.filter((mount) => (mount.face || 'front') === face),
+    () => mounts.filter((mount) => onFace(mount, face)),
     [mounts, face],
   );
-  const units = useMemo(() => buildRackUnits(mounts, face), [mounts, face]);
+  const bothLabel = t('rack.faceBoth');
+  const units = useMemo(() => buildRackUnits(mounts, face, bothLabel), [mounts, face, bothLabel]);
 
   return (
     <div className="space-y-4">
@@ -172,7 +189,8 @@ export function RackPage() {
                       </span>
                     </span>
                     <span className="text-xs text-gray-500 dark:text-gray-400">
-                      {t('rack.position')} {mount.position_u} · {mount.height_u} HE · {mount.face}
+                      {t('rack.position')} {mount.position_u} · {mount.height_u} HE ·{' '}
+                      {mount.face === 'both' ? bothLabel : mount.face}
                     </span>
                   </li>
                 ))}

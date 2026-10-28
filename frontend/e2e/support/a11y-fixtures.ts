@@ -526,8 +526,23 @@ export const A11Y_HANDLERS: Handler[] = [
           created_at: AT,
           updated_at: AT,
         },
+        // A mount on both faces (RCK-01) shows on the front and the rear
+        // with its faces as SVG title (F-381).
+        {
+          id: 'd7000000-0000-4000-8000-000000000002',
+          organization_id: ORG,
+          rack_id: RACK,
+          ci_id: 'd7000000-0000-4000-8000-0000000000c2',
+          position_u: 1,
+          height_u: 1,
+          face: 'both',
+          ci_name: 'a11y-pdu',
+          ci_type: 'pdu',
+          created_at: AT,
+          updated_at: AT,
+        },
       ],
-      free: { front: [1, 2, 3], rear: [1, 2, 3] },
+      free: { front: [2, 3], rear: [2, 3] },
     }),
   },
   // Discovery, reviews and jobs.

@@ -850,7 +850,8 @@
     "mountsLoadError": "Die Einbauten konnten nicht geladen werden",
     "faceLabel": "Rackseite wählen",
     "faceFront": "Vorderseite",
-    "faceRear": "Rückseite"
+    "faceRear": "Rückseite",
+    "faceBoth": "Vorder- und Rückseite"
   },
   "permissions": {
     "title": "Berechtigungen",

@@ -482,3 +482,73 @@ test('CI detail: the location path, the asset card and the edit dialog fit the p
   await expect(dialog).toBeHidden();
   expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
 });
+
+test('racks: a mount on both faces shows on the front and the rear and fits the phone', async ({
+  page,
+}) => {
+  // WP-651 (RCK-01, F-381): PUT /racks/{id}/mounts/{ci} accepts face "both";
+  // such a mount occupies its units on both faces, so the page shows it in
+  // the drawing and in the list of the front and of the rear, with both
+  // faces named (list text, SVG title). With the names of the real stack the
+  // page does not scroll sideways.
+  const rack = {
+    id: RACK,
+    organization_id: ORG_ID,
+    room_id: ROOM,
+    name: `Rack-${RUN}-Reihe-07`,
+    height_units: 42,
+    width_mm: 600,
+    depth_mm: 1000,
+    created_at: AT,
+    updated_at: AT,
+  };
+  const mount = (id: string, name: string, position: number, face: string) => ({
+    id,
+    organization_id: ORG_ID,
+    rack_id: RACK,
+    ci_id: id.replace(/^d7/, 'c1'),
+    position_u: position,
+    height_u: 2,
+    face,
+    ci_name: name,
+    ci_type: 'server',
+    created_at: AT,
+    updated_at: AT,
+  });
+  const both = `sim-pdu-${RUN}-A`;
+  const front = `sim-access-${RUN}`;
+  const calls = await mockBackend(page, [
+    { path: '/racks', reply: () => ({ body: list([rack]) }) },
+    {
+      path: `/racks/${RACK}/layout`,
+      reply: () => ({
+        body: {
+          rack,
+          mounts: [
+            mount('d7000000-0000-4000-8000-0000000000b1', both, 1, 'both'),
+            mount('d7000000-0000-4000-8000-0000000000b2', front, 10, 'front'),
+          ],
+          free: { front: [], rear: [] },
+        },
+      }),
+    },
+  ]);
+  await signIn(page);
+  await page.goto('/racks');
+
+  const main = page.locator('#main-content');
+  const line = (name: string) =>
+    main.locator('li').filter({ has: page.getByRole('button', { name, exact: true }) });
+  for (const face of ['Vorderseite', 'Rückseite']) {
+    if (face === 'Rückseite') {
+      await page.getByRole('button', { name: 'Rückseite', exact: true }).click();
+    }
+    await expect(page.getByRole('heading', { name: `${rack.name} · ${face}` })).toBeVisible();
+    await expect(line(both)).toContainText('Position 1 · 2 HE · Vorder- und Rückseite');
+    await expect(main.locator('svg text', { hasText: both })).toHaveCount(1);
+    await expect(main.locator('svg g title')).toHaveText([`${both} · Vorder- und Rückseite`]);
+    await expect(line(front)).toHaveCount(face === 'Vorderseite' ? 1 : 0);
+    await expectNoSidewaysScroll(page);
+  }
+  expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
+});

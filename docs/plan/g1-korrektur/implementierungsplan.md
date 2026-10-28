@@ -40,9 +40,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
-| [K6-Nachträge](#k6-nachträge) | WP-648 – WP-650 | 3 | 1,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-380): eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung. |
+| [K6-Nachträge](#k6-nachträge) | WP-648 – WP-651 | 4 | 2,0 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-381): eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **298** | **399,0** | |
+| **Summe** | | **299** | **399,5** | |
 
 ```mermaid
 flowchart LR
@@ -57,7 +57,7 @@ flowchart LR
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
-    K6N["K6-Nachträge<br/>3 WPs · 1,5 PT"]
+    K6N["K6-Nachträge<br/>4 WPs · 2,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -408,6 +408,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-648](#wp-648--eigenes-konto-nicht-deaktivierbar-oder-löschbar-api) | `k6n-user-self-lockout` | Eigenes Konto nicht deaktivierbar oder löschbar (API) | K6N | 0,5 | F-377 | WP-571 |
 | [WP-649](#wp-649--upgrade-von-datenbanken-ohne-migration_quarantine-000089) | `k6n-quarantine-upgrade` | Upgrade von Datenbanken ohne migration_quarantine (000089) | K6N | 0,5 | F-378 | WP-574 |
 | [WP-650](#wp-650--rack-platzierung-ablehnung-statt-stiller-standortabweichung-außerhalb-des-scopes) | `k6n-rack-scope-location` | Rack-Platzierung: Ablehnung statt stiller Standortabweichung außerhalb des Scopes | K6N | 0,5 | F-379, F-380 | WP-578 |
+| [WP-651](#wp-651--rack-seite-einbau-auf-beiden-seiten-vorn-und-hinten-anzeigen) | `k6n-rack-face-both` | Rack-Seite: Einbau auf beiden Seiten vorn und hinten anzeigen | K6N | 0,5 | F-381 | WP-579 |
 | [WP-595](#wp-595--nachweisläufe-auf-dem-g1-release-kandidaten-endgültige-statuspflege-und-finaler-gate-check) | `t5-rc-evidence` | Nachweisläufe auf dem G1-Release-Kandidaten, endgültige Statuspflege und finaler Gate-Check | K7 | 1,5 | F-122 | 253 WPs (siehe Block) |
 | [WP-596](#wp-596--wiederholungsprüfung-mandantentrennung-authentisierung-und-autorisierung) | `k-reaudit-1` | Wiederholungsprüfung Mandantentrennung, Authentisierung und Autorisierung | K7 | 2,0 | – | 80 WPs (siehe Block) |
 | [WP-597](#wp-597--wiederholungsprüfung-datenmodell-ingest-collector-und-last) | `k-reaudit-2` | Wiederholungsprüfung Datenmodell, Ingest, Collector und Last | K7 | 2,0 | – | 86 WPs (siehe Block) |
@@ -17809,6 +17810,58 @@ RCK-03;[B];B;backend/internal/rack/placement_scope_integration_test.go;WP-650
 **Entscheidungsbedarf:** keiner; Grundlage [E-09](../entscheidungen.md#e-09) (entschieden: Zeilen ohne Client schreiben nur org-weite Principals).
 
 **Nicht Bestandteil:** Weitergabe des Standorts an CIs außerhalb des Scopes (Schreiben fremder Zeilen); Platzierung im Namen eines org-weiten Principals; Bereinigung bereits abweichender Standorte aus der Zeit vor WP-650 (ein org-weiter Schreibzugriff auf den Standort des Assets gleicht sie an).
+
+### WP-651 – Rack-Seite: Einbau auf beiden Seiten vorn und hinten anzeigen
+
+**Schlüssel:** `k6n-rack-face-both` · **Meilenstein:** K6-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-579 (`t3-rack-layout`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-381](../../../audit/g1-reaudit/FINDINGS.md#f-381) | P3 | Rack-Seite: ein Einbau auf beiden Seiten (`face` = `both`) erscheint auf keiner Rackseite, weder in der Zeichnung noch in der Liste | schließt | WP-579 |
+
+**Problem:** Die API nimmt für einen Einbau die Seite `both` an (RCK-01: belegt die Höheneinheiten vorn und hinten), das Layout liefert ihn. `buildRackUnits` und `visibleMounts` in `RackPage.tsx` filtern auf `(mount.face || 'front') === face`; ein Einbau mit `both` erscheint deshalb auf keiner Seite, weder in der Zeichnung noch in der Liste (F-381). Priorität P3: reine Anzeige, die Daten stimmen; belegte Höheneinheiten wirken frei, eine Platzierung dort scheitert mit 409 ohne sichtbare Ursache; seltene Einbauart.
+
+**Akzeptanzkriterien:**
+
+- [ ] Vitest-Defekttest in `frontend/src/pages/RackPage.test.tsx`, auf dem alten Code rot: `buildRackUnits` liefert einen Einbau mit `both` für die Vorder- und die Rückseite; die Rack-Seite zeigt ihn auf „Vorderseite“ und „Rückseite“ in Zeichnung und Liste.
+- [ ] Ein Einbau mit `both` belegt in der Zeichnung beider Seiten seine Höheneinheiten; die Seiten werden als Text genannt: SVG-Titel „<Name> · Vorder- und Rückseite“, in der Liste „Vorder- und Rückseite“ statt des Rohwerts (i18n `rack.faceBoth` in de-DE und en-US). Einbauten mit `front`, `rear` oder ohne Seite verhalten sich wie bisher.
+- [ ] Gemockter Playwright-Lauf grün: `e2e/a11y.spec.ts` für `/racks` (Fixture mit einem Einbau auf beiden Seiten), `e2e/rack-drag.spec.ts`, `e2e/mobile-actions.spec.ts` mit dem neuen Fall „racks: a mount on both faces …“ (Vorder- und Rückseite, Namen in der Länge des Real-Stacks, kein Seitwärtsscrollen bei 412 px).
+- [ ] tsc, prettier, eslint und die Vitest-Dateien von Rack-Seite, Komponenten und i18n grün.
+
+**Dateien (11 Einträge):**
+
+- frontend/src/pages/RackPage.tsx
+- frontend/src/pages/RackPage.test.tsx
+- frontend/src/components/rack/RackSVG.tsx
+- frontend/src/i18n/de-DE.json
+- frontend/src/i18n/en-US.json
+- frontend/e2e/mobile-actions.spec.ts
+- frontend/e2e/support/a11y-fixtures.ts
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine; keine API-Änderung.
+
+**Tests:**
+
+- Vitest `RackPage.test.tsx`: `draws a mount on both faces on the front and on the rear`, `shows a mount on both faces on the front and on the rear (F-381)`.
+- Playwright (gemockt) `mobile-actions.spec.ts`: `racks: a mount on both faces shows on the front and the rear and fits the phone`; `a11y.spec.ts` (/racks), `rack-drag.spec.ts`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RCK-01;[B];B;frontend/src/pages/RackPage.test.tsx;WP-651
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Montieren und Verschieben über die Rack-Seite (Mount-UI); Anzeige der freien Höheneinheiten (`free`); Übersetzung der Rohwerte `front` und `rear` in der Liste (der Real-Stack-Fall L08 prüft sie).
 
 ## K7 Wiederholungsprüfung und Gate G1
 

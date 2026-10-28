@@ -850,7 +850,8 @@
     "mountsLoadError": "The mounts could not be loaded",
     "faceLabel": "Select rack face",
     "faceFront": "Front",
-    "faceRear": "Rear"
+    "faceRear": "Rear",
+    "faceBoth": "Front and rear"
   },
   "permissions": {
     "title": "Permissions",
