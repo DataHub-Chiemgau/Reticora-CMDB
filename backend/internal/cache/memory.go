@@ -11,6 +11,8 @@ import (
 type MemoryStore struct {
 	mu      sync.RWMutex
 	entries map[string]memEntry
+	// windows holds the event times of the sliding windows, oldest first.
+	windows map[string][]time.Time
 }
 
 type memEntry struct {
@@ -22,6 +24,7 @@ type memEntry struct {
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		entries: make(map[string]memEntry),
+		windows: make(map[string][]time.Time),
 	}
 }
 
@@ -107,8 +110,59 @@ func (m *MemoryStore) Decrement(_ context.Context, key string) (int64, error) {
 func (m *MemoryStore) Delete(_ context.Context, key string) error {
 	m.mu.Lock()
 	delete(m.entries, key)
+	delete(m.windows, key)
 	m.mu.Unlock()
 	return nil
+}
+
+func (m *MemoryStore) WindowAdd(_ context.Context, key string, now time.Time, window time.Duration, limit int64) (Window, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	events := m.pruneWindow(key, now, window)
+	added := limit > 0 && int64(len(events)) < limit
+	if added {
+		// Kept in time order, like the scores of the Redis set.
+		i := len(events)
+		for i > 0 && events[i-1].After(now) {
+			i--
+		}
+		events = append(events, time.Time{})
+		copy(events[i+1:], events[i:])
+		events[i] = now
+		m.windows[key] = events
+	}
+	return windowOf(events, added), nil
+}
+
+func (m *MemoryStore) WindowCount(_ context.Context, key string, now time.Time, window time.Duration) (Window, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return windowOf(m.pruneWindow(key, now, window), false), nil
+}
+
+// pruneWindow drops the events of key at or before now-window.
+func (m *MemoryStore) pruneWindow(key string, now time.Time, window time.Duration) []time.Time {
+	events := m.windows[key]
+	cut := now.Add(-window)
+	i := 0
+	for i < len(events) && !events[i].After(cut) {
+		i++
+	}
+	events = events[i:]
+	if len(events) == 0 {
+		delete(m.windows, key)
+		return nil
+	}
+	m.windows[key] = events
+	return events
+}
+
+func windowOf(events []time.Time, added bool) Window {
+	w := Window{Added: added, Count: int64(len(events))}
+	if len(events) > 0 {
+		w.Oldest = events[0]
+	}
+	return w
 }
 
 func (m *MemoryStore) Close() error {

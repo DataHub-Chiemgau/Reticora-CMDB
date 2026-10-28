@@ -257,7 +257,7 @@ export interface paths {
     put?: never;
     /**
      * Request a self-signup (TLC-01)
-     * @description Stores a signup request and sends a verification link to the address. The answer is 202 whether or not the address already has an account. The request passes the pre-auth limit (AUT-10), at most five signups per client IP and hour (429), the ALTCHA solution (400, `field` = `altcha`) and the disposable-domain blocklist (422, `field` = `email`). 503 while no e-mail channel, IdP administration or protection store is available.
+     * @description Stores a signup request and sends a verification link to the address. The answer is 202 whether or not the address already has an account. The request passes the pre-auth limit (AUT-10), at most five signups per client IP in any span of 3600 seconds (429; Retry-After is the time until the oldest of them leaves the span), the ALTCHA solution (400, `field` = `altcha`) and the disposable-domain blocklist (422, `field` = `email`). 503 while no e-mail channel, IdP administration or protection store is available.
      */
     post: operations['submitSignup'];
     delete?: never;
@@ -277,7 +277,7 @@ export interface paths {
     put?: never;
     /**
      * Verify a self-signup and create the organization (TLC-01)
-     * @description The token of the verification link is the credential. Creates, in one transaction, the organization with a slug derived from its name, the default VRF, the first user as org_admin and the trial entitlements (ENT-07), sets the password in the IdP (it is never stored by Reticora) and records the signup in operator_audit. 404 for an unknown or used token, 410 for an expired one, 409 when the address already has an IdP account, 422 when the IdP rejects the password.
+     * @description The token of the verification link is the credential. Creates, in one transaction, the organization with a slug derived from its name, the default VRF, the first user as org_admin and the trial entitlements (ENT-07), sets the password in the IdP (it is never stored by Reticora) and records the signup in operator_audit. The slug is the first free one of the name's slug, slug-2 … slug-20 and slug with a random suffix of six characters a-z0-9; Greek and Cyrillic names are transliterated, a name without such letters gets org-<suffix>. 404 for an unknown or used token, 410 for an expired one, 409 when the address already has an IdP account (`field` = `email`) or no slug candidate is free (`field` = `organization_name`; the request stays pending), 422 when the IdP rejects the password.
      */
     post: operations['verifySignup'];
     delete?: never;

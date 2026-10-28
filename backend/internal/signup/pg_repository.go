@@ -2,9 +2,12 @@ package signup
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -182,16 +185,27 @@ func lockRequest(ctx context.Context, tx pgx.Tx, tokenHash string, now time.Time
 	return &req, nil
 }
 
+// Candidates of a slug derived from the name (F-303): the base, base-2 …
+// base-20, then up to randomSlugAttempts times the base with a random
+// suffix of slugSuffixLength characters a-z0-9 (about 2·10⁹ values).
+const (
+	sequentialSlugs    = 20
+	randomSlugAttempts = 10
+	slugSuffixLength   = 6
+	slugSuffixAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+)
+
+// slugSuffix draws the random suffix of a slug candidate.
+var slugSuffix = randomSlugSuffix
+
 // insertOrganization creates the organization. A given slug is used as is
-// (ErrSlugTaken when taken); otherwise the first free slug derived from the
-// name (slug, slug-2 … slug-20). The slug is unique across organizations; a
-// taken slug is detected by the unique violation inside a savepoint, since
-// other organizations are invisible here.
+// (ErrSlugTaken when taken); otherwise the first free candidate derived
+// from the name (slug, slug-2 … slug-20, then slug-<random>; a name
+// without transliterable letters gets org-<random> only). ErrSlugTaken
+// (409) only when every candidate is taken. The slug is unique across
+// organizations; a taken slug is detected by the unique violation inside a
+// savepoint, since other organizations are invisible here.
 func insertOrganization(ctx context.Context, tx pgx.Tx, name, fixedSlug string, setup *Setup) (string, error) {
-	base, attempts := Slugify(name), 20
-	if fixedSlug != "" {
-		base, attempts = fixedSlug, 1
-	}
 	settings := map[string]any{}
 	if !setup.TrialEndsAt.IsZero() {
 		settings["trial"] = map[string]any{
@@ -199,35 +213,88 @@ func insertOrganization(ctx context.Context, tx pgx.Tx, name, fixedSlug string, 
 			"fallback_plan": string(setup.FallbackPlan),
 		}
 	}
-	for n := 1; n <= attempts; n++ {
-		slug := base
-		if n > 1 {
-			slug = base + "-" + strconv.Itoa(n)
-		}
+	insert := func(slug string) (bool, error) {
 		sp, err := tx.Begin(ctx)
 		if err != nil {
-			return "", fmt.Errorf("savepoint: %w", err)
+			return false, fmt.Errorf("savepoint: %w", err)
 		}
 		_, err = sp.Exec(ctx, `INSERT INTO organization (id, name, slug, plan, settings) VALUES ($1, $2, $3, $4, $5)`,
 			setup.OrganizationID, name, slug, string(setup.Plan), settings)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "organization_slug_key" {
 			if rerr := sp.Rollback(ctx); rerr != nil {
-				return "", fmt.Errorf("rollback savepoint: %w", rerr)
+				return false, fmt.Errorf("rollback savepoint: %w", rerr)
 			}
-			continue
+			return false, nil
 		}
 		if err != nil {
 			_ = sp.Rollback(ctx)
-			return "", fmt.Errorf("insert organization: %w", err)
+			return false, fmt.Errorf("insert organization: %w", err)
 		}
 		if err := sp.Commit(ctx); err != nil {
-			return "", fmt.Errorf("release savepoint: %w", err)
+			return false, fmt.Errorf("release savepoint: %w", err)
 		}
-		return slug, nil
+		return true, nil
 	}
+
 	if fixedSlug != "" {
-		return "", ErrSlugTaken
+		ok, err := insert(fixedSlug)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", ErrSlugTaken
+		}
+		return fixedSlug, nil
 	}
-	return "", fmt.Errorf("no free organization slug for %q", base)
+	base, sequential := slugBase(name), sequentialSlugs
+	if base == "" {
+		// No shared base "org" for all such names: random suffixes only.
+		base, sequential = "org", 0
+	}
+	for n := 1; n <= sequential; n++ {
+		slug := base
+		if n > 1 {
+			slug = base + "-" + strconv.Itoa(n)
+		}
+		ok, err := insert(slug)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return slug, nil
+		}
+	}
+	// The random candidates keep the 48 characters of a slug.
+	if limit := 48 - 1 - slugSuffixLength; len(base) > limit {
+		base = strings.TrimRight(base[:limit], "-")
+	}
+	for range randomSlugAttempts {
+		suffix, err := slugSuffix()
+		if err != nil {
+			return "", err
+		}
+		slug := base + "-" + suffix
+		ok, err := insert(slug)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return slug, nil
+		}
+	}
+	return "", ErrSlugTaken
+}
+
+// randomSlugSuffix draws slugSuffixLength characters of slugSuffixAlphabet.
+func randomSlugSuffix() (string, error) {
+	b := make([]byte, slugSuffixLength)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(slugSuffixAlphabet))))
+		if err != nil {
+			return "", fmt.Errorf("slug suffix: %w", err)
+		}
+		b[i] = slugSuffixAlphabet[n.Int64()]
+	}
+	return string(b), nil
 }

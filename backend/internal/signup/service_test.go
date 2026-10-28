@@ -296,6 +296,14 @@ func TestSlugify(t *testing.T) {
 		"!!!":                            "org",
 		"a--b__c":                        "a-b-c",
 		strings.Repeat("abcdefghij", 10): "abcdefghijabcdefghijabcdefghijabcdefghijabcdefgh",
+		// F-303: diacritics, ligatures, Greek and Cyrillic transliterate;
+		// other scripts leave nothing.
+		"Café Ñandú":        "cafe-nandu",
+		"Øresund Æble Łódź": "oresund-aeble-lodz",
+		"ООО Ромашка-Юг":    "ooo-romashka-iug",
+		"Ελληνική Εταιρεία": "elliniki-etaireia",
+		"東京商事":              "org",
+		"東京 Tokyo":          "tokyo",
 	} {
 		if got := Slugify(in); got != want {
 			t.Errorf("Slugify(%q) = %q, want %q", in, got, want)

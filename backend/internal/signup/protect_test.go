@@ -2,16 +2,21 @@ package signup
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
+	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
 )
 
 var testCaptchaKey = []byte("0123456789abcdef0123456789abcdef")
@@ -160,6 +165,107 @@ func TestProtectionLimitsSignupsPerIP(t *testing.T) {
 	}
 }
 
+// TestSignupIPLimitSlidingWindow covers WP-591 (TLC-01, F-304): the IP
+// budget is a sliding window, not a clock hour. With an injected clock,
+// six signups at 10:59:30 and six at 11:00:31 from one address admit five
+// in total; every refusal carries a Retry-After of the time until the
+// oldest signup leaves the hour (11:59:30), not a constant 3600. At
+// 11:59:29 the address is still refused, at 11:59:30 it has a new budget.
+// The window lives in the shared store: on Redis two replicas, each with
+// its own connection, count the same window.
+func TestSignupIPLimitSlidingWindow(t *testing.T) {
+	t.Run("memory store", func(t *testing.T) {
+		store := cache.NewMemoryStore()
+		testSignupIPLimitSlidingWindow(t, store, store)
+	})
+	t.Run("redis store", func(t *testing.T) {
+		testSignupIPLimitSlidingWindow(t, redisStore(t), redisStore(t))
+	})
+}
+
+func testSignupIPLimitSlidingWindow(t *testing.T, storeA, storeB cache.Store) {
+	day := time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC)
+	clock := day.Add(10*time.Hour + 59*time.Minute + 30*time.Second)
+	replicas := []*Protection{newTestProtection(t, storeA), newTestProtection(t, storeB)}
+	for _, p := range replicas {
+		p.now = func() time.Time { return clock }
+	}
+	// An address of its own per run: the Redis window outlives the test.
+	nonce := make([]byte, 4)
+	_, _ = rand.Read(nonce)
+	ip := "2001:db8::" + hex.EncodeToString(nonce[:2]) + ":" + hex.EncodeToString(nonce[2:])
+	t.Cleanup(func() { _ = storeA.Delete(context.Background(), "signup:ipwindow:"+ip) })
+
+	ctx := context.Background()
+	accepted := 0
+	// burst submits n signups alternately through both replicas; each
+	// refusal must name the remaining time until the oldest accepted
+	// signup (10:59:30) leaves the window.
+	burst := func(n int, at time.Time) {
+		t.Helper()
+		clock = at
+		remaining := day.Add(11*time.Hour + 59*time.Minute + 30*time.Second).Sub(at)
+		for i := 0; i < n; i++ {
+			p := replicas[i%len(replicas)]
+			err := p.Check(ctx, ip, solve(t, p), "a@example.com")
+			switch {
+			case err == nil:
+				accepted++
+			case errors.Is(err, ErrSignupRateLimit):
+				w := httptest.NewRecorder()
+				writeProtectionError(w, httptest.NewRequest(http.MethodPost, "/api/v1/signup", nil), err)
+				retry, perr := strconv.Atoi(w.Header().Get("Retry-After"))
+				if perr != nil || time.Duration(retry)*time.Second > remaining || time.Duration(retry)*time.Second < remaining-time.Second {
+					t.Errorf("%s: Retry-After = %q, want the remaining %v until the oldest signup leaves the window",
+						at.Format("15:04:05"), w.Header().Get("Retry-After"), remaining)
+				}
+			default:
+				t.Fatalf("%s: signup %d: %v", at.Format("15:04:05"), i+1, err)
+			}
+		}
+	}
+
+	burst(6, clock)
+	if accepted != SignupsPerIPHour {
+		t.Fatalf("10:59:30: %d signups accepted, want %d", accepted, SignupsPerIPHour)
+	}
+	burst(6, day.Add(11*time.Hour+31*time.Second))
+	if accepted != SignupsPerIPHour {
+		t.Errorf("10:59:30 and 11:00:31: %d signups accepted within one hour, want at most %d", accepted, SignupsPerIPHour)
+	}
+	burst(1, day.Add(11*time.Hour+59*time.Minute+29*time.Second))
+	if accepted != SignupsPerIPHour {
+		t.Errorf("11:59:29: %d signups accepted, the 10:59:30 signups are still in the window", accepted)
+	}
+	// 11:59:30: the five signups of 10:59:30 left the window.
+	clock = day.Add(11*time.Hour + 59*time.Minute + 30*time.Second)
+	for i := 0; i < SignupsPerIPHour; i++ {
+		p := replicas[i%len(replicas)]
+		if err := p.Check(ctx, ip, solve(t, p), "a@example.com"); err != nil {
+			t.Errorf("11:59:30: signup %d: %v", i+1, err)
+		}
+	}
+	if used, err := replicas[0].UsedByIP(ctx, ip); err != nil || used != SignupsPerIPHour {
+		t.Errorf("11:59:30: used = %d (%v), want %d", used, err, SignupsPerIPHour)
+	}
+}
+
+// redisStore connects to TEST_REDIS_URL with a connection of its own (a
+// replica); without it the test is skipped.
+func redisStore(t *testing.T) cache.Store {
+	t.Helper()
+	url := os.Getenv("TEST_REDIS_URL")
+	if url == "" {
+		t.Skip("TEST_REDIS_URL not set; skipping Redis signup window test (e.g. redis://localhost:56379/0)")
+	}
+	client, err := redisx.Connect(context.Background(), url)
+	if err != nil {
+		t.Fatalf("connect Redis: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	return cache.NewRedisStore(client.Unwrap())
+}
+
 func TestProtectionRejectsWithoutCountingFailedChecks(t *testing.T) {
 	p := newTestProtection(t, cache.NewMemoryStore())
 	ctx := context.Background()
@@ -183,6 +289,14 @@ func (failingStore) Get(context.Context, string) (string, bool, error) {
 
 func (failingStore) Increment(context.Context, string, time.Duration) (int64, error) {
 	return 0, errors.New("down")
+}
+
+func (failingStore) WindowAdd(context.Context, string, time.Time, time.Duration, int64) (cache.Window, error) {
+	return cache.Window{}, errors.New("down")
+}
+
+func (failingStore) WindowCount(context.Context, string, time.Time, time.Duration) (cache.Window, error) {
+	return cache.Window{}, errors.New("down")
 }
 
 func TestSignupHandlerProtectionAnswersRFC7807(t *testing.T) {
@@ -237,8 +351,10 @@ func TestSignupHandlerProtectionAnswersRFC7807(t *testing.T) {
 	}
 	limited := submit(h, body("a@example.com", solve(t, p)))
 	problem("rate limit", limited, http.StatusTooManyRequests, "")
-	if limited.Header().Get("Retry-After") == "" {
-		t.Error("429 without Retry-After")
+	// The five signups just happened: the oldest leaves the window in
+	// (almost) an hour.
+	if retry, err := strconv.Atoi(limited.Header().Get("Retry-After")); err != nil || retry < 3500 || retry > 3600 {
+		t.Errorf("429 Retry-After = %q, want the seconds until the oldest signup leaves the hour", limited.Header().Get("Retry-After"))
 	}
 
 	// A failing store fails closed.

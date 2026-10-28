@@ -27,11 +27,16 @@ import (
 
 // Signup protection (TLC-01, E-33): a self-hosted ALTCHA proof of work, the
 // disposable-email-domains blocklist with allowlist and operator entries,
-// and at most SignupsPerIPHour signups per client IP and hour in addition to
-// the pre-auth limit (AUT-10, middleware.PreAuthRateLimiter).
+// and at most SignupsPerIPHour signups per client IP in any span of
+// signupIPWindow in addition to the pre-auth limit (AUT-10,
+// middleware.PreAuthRateLimiter).
 
 // SignupsPerIPHour is the signup budget of a client IP (E-33).
 const SignupsPerIPHour = 5
+
+// signupIPWindow is the sliding window of the IP budget (F-304): a signup
+// counts until an hour after it, not until the end of a clock hour.
+const signupIPWindow = time.Hour
 
 // Proof-of-work parameters of the ALTCHA challenge. maxNumber bounds the
 // search space (about a second in a browser); challenges expire after
@@ -48,6 +53,17 @@ var (
 	ErrDomainBlocked   = errors.New("e-mail addresses of disposable domains are not accepted")
 	ErrSignupRateLimit = errors.New("too many signups from this address, try again later")
 )
+
+// RateLimitError is ErrSignupRateLimit with the time until the oldest
+// signup of the address leaves the window (Retry-After).
+type RateLimitError struct {
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitError) Error() string { return ErrSignupRateLimit.Error() }
+
+// Unwrap makes errors.Is(err, ErrSignupRateLimit) hold.
+func (e *RateLimitError) Unwrap() error { return ErrSignupRateLimit }
 
 //go:embed disposable/blocklist.conf disposable/allowlist.conf
 var disposableLists embed.FS
@@ -80,7 +96,7 @@ type Protection struct {
 
 // NewProtection creates the protection. hmacKey signs the challenges (all
 // instances need the same key); store holds the used challenges and the
-// per-IP counters (shared, e.g. Redis).
+// per-IP windows (shared, e.g. Redis, so the window holds across replicas).
 func NewProtection(hmacKey []byte, store cache.Store, domains *DomainPolicy) (*Protection, error) {
 	if len(hmacKey) < 32 {
 		return nil, errors.New("signup protection: the captcha HMAC key needs at least 32 bytes")
@@ -139,28 +155,26 @@ func (p *Protection) VerifySolution(ctx context.Context, payload string) error {
 	return nil
 }
 
-// UsedByIP returns the signups of the client IP in the current hour.
+// UsedByIP returns the signups of the client IP in the last hour.
 func (p *Protection) UsedByIP(ctx context.Context, ip string) (int64, error) {
-	value, found, err := p.store.Get(ctx, p.ipKey(ip))
-	if err != nil || !found {
+	w, err := p.store.WindowCount(ctx, ipKey(ip), p.now(), signupIPWindow)
+	if err != nil {
 		return 0, err
 	}
-	n, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		return 0, nil
-	}
-	return n, nil
+	return w.Count, nil
 }
 
-// CountIP counts a signup of the client IP; ErrSignupRateLimit when it
-// exceeds the budget.
+// CountIP counts a signup of the client IP; a *RateLimitError when the
+// last hour already holds SignupsPerIPHour signups. The store records the
+// signup only within the budget, atomically for all replicas.
 func (p *Protection) CountIP(ctx context.Context, ip string) error {
-	n, err := p.store.Increment(ctx, p.ipKey(ip), 2*time.Hour)
+	now := p.now()
+	w, err := p.store.WindowAdd(ctx, ipKey(ip), now, signupIPWindow, SignupsPerIPHour)
 	if err != nil {
 		return fmt.Errorf("signup rate limit store: %w", err)
 	}
-	if n > SignupsPerIPHour {
-		return ErrSignupRateLimit
+	if !w.Added {
+		return &RateLimitError{RetryAfter: w.RetryAfter(now, signupIPWindow)}
 	}
 	return nil
 }
@@ -168,12 +182,13 @@ func (p *Protection) CountIP(ctx context.Context, ip string) error {
 // Check runs the protection of one signup request in order: IP budget,
 // captcha, disposable domain; then it counts the signup against the IP.
 func (p *Protection) Check(ctx context.Context, ip, captcha, email string) error {
-	used, err := p.UsedByIP(ctx, ip)
+	now := p.now()
+	w, err := p.store.WindowCount(ctx, ipKey(ip), now, signupIPWindow)
 	if err != nil {
 		return fmt.Errorf("signup rate limit store: %w", err)
 	}
-	if used >= SignupsPerIPHour {
-		return ErrSignupRateLimit
+	if w.Count >= SignupsPerIPHour {
+		return &RateLimitError{RetryAfter: w.RetryAfter(now, signupIPWindow)}
 	}
 	if verr := p.VerifySolution(ctx, captcha); verr != nil {
 		return verr
@@ -184,8 +199,11 @@ func (p *Protection) Check(ctx context.Context, ip, captcha, email string) error
 	return p.CountIP(ctx, ip)
 }
 
-func (p *Protection) ipKey(ip string) string {
-	return fmt.Sprintf("signup:ip:%s:%d", ip, p.now().UTC().Unix()/3600)
+// ipKey names the sliding window of ip. Its prefix differs from the
+// counters of the former clock hours (signup:ip:<ip>:<hour>), which expire
+// on their own, so no key changes its type.
+func ipKey(ip string) string {
+	return "signup:ipwindow:" + ip
 }
 
 func (p *Protection) sign(challenge string) string {
@@ -291,7 +309,14 @@ func (p *DomainPolicy) Blocked(domain string) bool {
 func writeProtectionError(w http.ResponseWriter, r *http.Request, err error) bool {
 	switch {
 	case errors.Is(err, ErrSignupRateLimit):
-		w.Header().Set("Retry-After", "3600")
+		// Seconds until the oldest signup of the address leaves the
+		// window, rounded up.
+		retry := signupIPWindow
+		var limited *RateLimitError
+		if errors.As(err, &limited) && limited.RetryAfter > 0 {
+			retry = limited.RetryAfter
+		}
+		w.Header().Set("Retry-After", strconv.FormatInt(int64((retry+time.Second-1)/time.Second), 10))
 		httpx.RateLimited(w, r, err.Error())
 	case errors.Is(err, ErrCaptchaInvalid):
 		api.WriteFieldError(w, &api.FieldError{Field: "altcha", Message: err.Error()})

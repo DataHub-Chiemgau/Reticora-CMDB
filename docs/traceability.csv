@@ -1000,3 +1000,4 @@ WFL-02;[P3];D;backend/internal/workflow/set_ci_field_integration_test.go;WP-576
 AGT-05;[P4];D;backend/internal/agent/audit_t3_agent_rank_integration_test.go;WP-576
 RCK-03;[B];B;backend/internal/rack/mount_location_integration_test.go;WP-578
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/rack/mount_location_integration_test.go;WP-578
+TLC-01;[B];B;backend/internal/signup/signup_integration_test.go;WP-591

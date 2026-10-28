@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 )
 
 // downStore is a cache store whose backend is unreachable.
@@ -25,7 +27,13 @@ func (downStore) Decrement(context.Context, string) (int64, error) {
 	return 0, errors.New("redis down")
 }
 func (downStore) Delete(context.Context, string) error { return errors.New("redis down") }
-func (downStore) Close() error                         { return nil }
+func (downStore) WindowAdd(context.Context, string, time.Time, time.Duration, int64) (cache.Window, error) {
+	return cache.Window{}, errors.New("redis down")
+}
+func (downStore) WindowCount(context.Context, string, time.Time, time.Duration) (cache.Window, error) {
+	return cache.Window{}, errors.New("redis down")
+}
+func (downStore) Close() error { return nil }
 
 // TestRateLimiterExemptsOperationalProbesDuringARedisOutage covers WP-104
 // (OPS-06): with Redis down the limiter fails closed for the API (429),
