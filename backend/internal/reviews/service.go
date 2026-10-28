@@ -103,6 +103,34 @@ func (s *Service) OpenUnlessDismissed(ctx context.Context, item *Item, valueKey 
 	return s.Open(ctx, item)
 }
 
+// OpenUnlessSettled opens an item like OpenUnlessDismissed, but not while
+// the latest accepted item of the same object and type still holds: holds
+// reports whether the outcome of that acceptance is still in place (F-382;
+// for unknown_relationship: the accepted edge exists, or a user deleted it
+// and its suppression keeps it away). Without an accepted item, or when it
+// no longer holds, the dismissal rule decides. It reports whether a new
+// item was opened.
+func (s *Service) OpenUnlessSettled(ctx context.Context, item *Item, valueKey string,
+	holds func(ctx context.Context, accepted *Item) (bool, error)) (bool, error) {
+	if item.ObjectKey != "" && holds != nil {
+		resolved, _, err := s.repo.ListReviewItems(ctx, item.OrganizationID,
+			Filter{Kind: item.Kind, ObjectKey: item.ObjectKey, Status: StatusResolved}, api.PaginationParams{Limit: 1})
+		if err != nil {
+			return false, err
+		}
+		if len(resolved) > 0 && resolved[0].Action == ActionAccept {
+			held, err := holds(ctx, &resolved[0])
+			if err != nil {
+				return false, err
+			}
+			if held {
+				return false, nil
+			}
+		}
+	}
+	return s.OpenUnlessDismissed(ctx, item, valueKey)
+}
+
 // OverrideConflict is a value an automation source reported for a field
 // under a manual override (REC-12).
 type OverrideConflict struct {

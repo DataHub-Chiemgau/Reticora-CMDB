@@ -40,9 +40,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
-| [K6-Nachträge](#k6-nachträge) | WP-648 – WP-649 | 2 | 1,0 | Funde aus der Umsetzung von K6 behoben (F-377, F-378): eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`. |
+| [K6-Nachträge](#k6-nachträge) | WP-648 – WP-653 | 6 | 3,0 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383): eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **297** | **398,5** | |
+| **Summe** | | **301** | **400,5** | |
 
 ```mermaid
 flowchart LR
@@ -57,7 +57,7 @@ flowchart LR
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
-    K6N["K6-Nachträge<br/>2 WPs · 1,0 PT"]
+    K6N["K6-Nachträge<br/>6 WPs · 3,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -140,7 +140,7 @@ Die Kanten zeigen die Priorität, keine harte Sperre: Ein WP darf beginnen, soba
 
 ### Stand der Entscheidungen
 
-Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-59) bis [E-95](entscheidungen.md#e-95)). Alle tragen eine Empfehlung als Übergangsregel, sodass kein WP gesperrt ist; widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst. Die WP-Blöcke nennen die Entscheidung im Feld „Entscheidungsbedarf“. Ausnahme war WP-388 (`t5-install-default`), das erst nach der Entscheidung von E-69 für Option 1 beginnen durfte; E-69 ist am 2026-10-21 mit Option 1 entschieden, WP-388 ist umgesetzt. Unabhängig von Entscheidungen warten WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-455 (`t5-v2-ids`) auf die externen Lieferungen A-02, A-07 und A-11.
+Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-59) bis [E-95](entscheidungen.md#e-95)). Alle tragen eine Empfehlung als Übergangsregel, sodass kein WP gesperrt ist; widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst. Nachtrag vom 2026-10-28: Der Auftraggeber hat alle bis dahin offenen Entscheidungen (E-59 bis E-95 ohne die bereits entschiedenen, dazu E-100) nach der Empfehlung entschieden; die Übergangsregeln gelten als Festlegung. Die WP-Blöcke nennen die Entscheidung im Feld „Entscheidungsbedarf“. Ausnahme war WP-388 (`t5-install-default`), das erst nach der Entscheidung von E-69 für Option 1 beginnen durfte; E-69 ist am 2026-10-21 mit Option 1 entschieden, WP-388 ist umgesetzt. Unabhängig von Entscheidungen warten WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-455 (`t5-v2-ids`) auf die externen Lieferungen A-02, A-07 und A-11.
 
 ### Alle Arbeitspakete
 
@@ -407,6 +407,10 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-594](#wp-594--such-treffer-für-locations-und-kontakte-führen-zur-entität) | `t7-search-deeplinks` | Such-Treffer für Locations und Kontakte führen zur Entität | K6 | 1,0 | F-334 | WP-338, WP-519 |
 | [WP-648](#wp-648--eigenes-konto-nicht-deaktivierbar-oder-löschbar-api) | `k6n-user-self-lockout` | Eigenes Konto nicht deaktivierbar oder löschbar (API) | K6N | 0,5 | F-377 | WP-571 |
 | [WP-649](#wp-649--upgrade-von-datenbanken-ohne-migration_quarantine-000089) | `k6n-quarantine-upgrade` | Upgrade von Datenbanken ohne migration_quarantine (000089) | K6N | 0,5 | F-378 | WP-574 |
+| [WP-650](#wp-650--rack-platzierung-ablehnung-statt-stiller-standortabweichung-außerhalb-des-scopes) | `k6n-rack-scope-location` | Rack-Platzierung: Ablehnung statt stiller Standortabweichung außerhalb des Scopes | K6N | 0,5 | F-379, F-380 | WP-578 |
+| [WP-651](#wp-651--rack-seite-einbau-auf-beiden-seiten-vorn-und-hinten-anzeigen) | `k6n-rack-face-both` | Rack-Seite: Einbau auf beiden Seiten vorn und hinten anzeigen | K6N | 0,5 | F-381 | WP-579 |
+| [WP-652](#wp-652--unknown_relationship-kein-neues-review-für-ein-angenommenes-paar) | `k6n-unknown-rel-review-accepted` | unknown_relationship: kein neues Review für ein angenommenes Paar | K6N | 0,5 | F-382 | WP-582 |
+| [WP-653](#wp-653--benachrichtigungssprache-je-empfänger-login-claim-und-eigene-präferenz) | `k6n-user-locale` | Benachrichtigungssprache je Empfänger: Login-Claim und eigene Präferenz | K6N | 0,5 | F-383 | WP-588 |
 | [WP-595](#wp-595--nachweisläufe-auf-dem-g1-release-kandidaten-endgültige-statuspflege-und-finaler-gate-check) | `t5-rc-evidence` | Nachweisläufe auf dem G1-Release-Kandidaten, endgültige Statuspflege und finaler Gate-Check | K7 | 1,5 | F-122 | 253 WPs (siehe Block) |
 | [WP-596](#wp-596--wiederholungsprüfung-mandantentrennung-authentisierung-und-autorisierung) | `k-reaudit-1` | Wiederholungsprüfung Mandantentrennung, Authentisierung und Autorisierung | K7 | 2,0 | – | 80 WPs (siehe Block) |
 | [WP-597](#wp-597--wiederholungsprüfung-datenmodell-ingest-collector-und-last) | `k-reaudit-2` | Wiederholungsprüfung Datenmodell, Ingest, Collector und Last | K7 | 2,0 | – | 86 WPs (siehe Block) |
@@ -788,7 +792,7 @@ TEN-09;[Q];B;backend/internal/tenant/rls/rack_channel_scope_integration_test.go;
 - [ ] `require_visible_parent` lehnt für gescopte Principals Links auf Zeilen mit `link_count = 0` ab (kein Kapern org-weiter Dokumente/Fenster).
 - [ ] Zählerintegrität (F-185): Die Zählerfunktionen aktualisieren `link_count`/`ci_count` unabhängig vom Scope des Aufrufers über die Hilfsfunktionen `app_scope_widen()`/`app_scope_restore()` (neu; setzen Client-/Site-Scope für die Dauer der Aktualisierung auf NULL, `app.org_id` bleibt, fester `search_path`); ein BEFORE-UPDATE-Trigger weist direkte Änderungen an `link_count`/`ci_count` mit 42501 ab. Probe `probe_doc_link_count.sql` als Testfall: A2 `link_count` 0, A3 = 1, Teil B abgewiesen. Der Schutz-Trigger lässt Zähleränderungen nur bei `pg_trigger_depth() > 1` zu, also nur aus den Zählertriggern (kein setzbarer GUC).
 - [ ] Go: `documentWritable`/`windowWritable` ersetzen die Lese-Prädikate in Update/Delete (`document/pg_repository.go:326-337`, `maintenance/pg_repository.go:181`, `:200`); fremde oder geteilte Zeilen liefern 404, eigene 200/204. `UploadContent` (`document/handler.go:236-292`) prüft vor `blobs.Put` die Schreibbarkeit über eine Repository-Methode mit `documentWritable`; `SetStorage` (`document/pg_repository.go:304-323`) nutzt `documentWritable`.
-- [ ] Gescopte Principals: `POST /api/v1/documents` und `POST /api/v1/maintenance-windows` ohne Link bzw. ohne `ci_ids` → 403 (E-09, fail-closed, generische Meldung; Übergangsregel der Entscheidung E-61, kein `links`-Feld im Create); org-weite Principals unverändert. 403 in `api/openapi.yaml` dokumentiert, `npm run generate:api` aktualisiert `frontend/src/api/generated/schema.d.ts`, `TestRoutesAndSpecificationAreInParity` grün.
+- [ ] Gescopte Principals: `POST /api/v1/documents` und `POST /api/v1/maintenance-windows` ohne Link bzw. ohne `ci_ids` → 403 (E-09, fail-closed, generische Meldung; Entscheidung E-61 (entschieden: Option 1), kein `links`-Feld im Create); org-weite Principals unverändert. 403 in `api/openapi.yaml` dokumentiert, `npm run generate:api` aktualisiert `frontend/src/api/generated/schema.d.ts`, `TestRoutesAndSpecificationAreInParity` grün.
 - [ ] Retest F-004/F-048: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run '^(TestDocumentWritesOutsideScope|TestMaintenanceWindowWritesOutsideScope)$' ./internal/tenant/rls/` grün – geteilte und org-weite Zeilen: PATCH/DELETE durch Client 1 403/404, Titel/Status unverändert, Client-2-Links 1; POST ohne Link verweigert; Link auf org-weites Dokument verweigert, Client 2 sieht es weiter (200); Positivkontrollen eigenes Dokument/Fenster 200/204, Org-Admin 200. Probes `probe_doc_shared_delete.sql`, `probe_window_shared_delete.sql` ohne Fremdlöschung. Upload im selben Test: Client 1 `PUT /api/v1/documents/{geteilt|org-weit}/content` → 404, Objekt im Blob-Store, `storage_key` und `file_size` unverändert; eigenes Dokument → 200.
 - [ ] Ratchet: `TestAuditT1DocumentWritesOutsideScope` und `TestAuditT1MaintenanceWindowWritesOutsideScope` in die reguläre Datei `tenant/rls/module_object_writes_integration_test.go` überführt; `audit_t1_cross_client_writes_auditdefect_test.go` enthält danach keine Testfunktion mehr und wird gelöscht; beide Zeilen in `tests/audit/expected-failures.txt` gelöscht.
 - [ ] `TestModuleTablesInheritObjectScope` erhält Negativtests für UPDATE/DELETE geteilter und unverlinkter Zeilen sowie die Zählerfälle; Migration up/down und Roundtrip grün.
@@ -825,7 +829,7 @@ MGT-04;[P3];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-3
 TEN-06;[B];B;backend/internal/tenant/rls/module_object_writes_integration_test.go;WP-341
 ```
 
-**Entscheidungsbedarf:** [E-09](../entscheidungen.md#e-09); [E-03](../entscheidungen.md#e-03); [E-61](entscheidungen.md#e-61) Anlage von Dokumenten durch client- oder site-gescopte Principals (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-09](../entscheidungen.md#e-09); [E-03](../entscheidungen.md#e-03); [E-61](entscheidungen.md#e-61) Anlage von Dokumenten durch client- oder site-gescopte Principals (entschieden: Option 1, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Unlink-Endpunkt; `links` im POST /api/v1/documents (Option 1 der Entscheidung E-61, Folge-WP nach Freigabe); Frontend-Formular für Dokumente (WP-560 (`t1-doc-blob-cleanup`)); disposal_record und Matrix der vererbten Tabellen (WP-353 (`t1-module-rls-hardening`)).
 
@@ -2411,7 +2415,7 @@ AUT-10;[B];B;frontend/src/auth/session.test.ts;WP-366
 
 - [ ] Login-Pfad: Ergibt die Rechteauflösung beim Login (`exchangeAndIssue`, `identity/handler.go:381-445`, nach `applyAccess`) die Standardrolle org_admin über die IdP-Gruppe `org_admin` (`identity/rbac.go:75`; der Realm liefert `groups` über `oidc-group-membership-mapper`) oder über die Erstlogin-Provisionierung (`EnsureRole` mit `RETICORA_DEFAULT_PROVISION_ROLE=org_admin`, `identity/handler.go:431-434`), ruft der Handler über eine Schnittstelle im Paket identity `RequireMFA` mit `idToken.Subject` auf (idempotent). Bei einem Fehler antwortet der Login mit 503 (Sentinel, abgebildet in `writeIdentityError`, `identity/handler.go:546`) und stellt keine Sitzung aus. Die Gruppe `reticora-admin` löst nach Option 1 der Entscheidung E-65 keinen Aufruf aus (drittes Kriterium). Der Refresh (`Handler.Refresh`, `identity/handler.go:200-268`) ruft den Enforcer nicht auf: Er hat kein ID-Token, `mfa_required` wirkt erst beim nächsten Keycloak-Login, und Gruppenänderungen kommen nur mit einem neuen ID-Token. Test in `identity/handler_test.go` mit Fake-Enforcer: Login mit der Gruppe `/org_admin` ohne DB-Zuweisung → Enforcer genau einmal mit dem OIDC-Subject (Negativfall vor dem Fix: kein Aufruf); Gruppe `/reticora-viewer` → kein Aufruf; Default-Rolle org_admin beim Erstlogin → genau ein Aufruf; Enforcer-Fehler → 503; Refresh eines org_admin aus Gruppe `/org_admin` → kein Aufruf. Bestehende Tests von `./internal/identity/` bleiben grün.
 - [ ] Subject des Aufrufs ist das OIDC-Subject des ID-Tokens (`idToken.Subject`), das nur beim Login vorliegt; `claims.Subject` ist nach der Provisionierung die app_user-ID (`identity/handler.go:415-435`). Die Schnittstelle im Paket identity verlangt nur `RequireMFA(ctx, oidcSubject) error`, sodass der Enforcer aus WP-358 (`t2-mfa-role-sync`) (`signup.KeycloakAccounts`, Verdrahtung über `server.Options`) sie erfüllt; `server/router.go` übergibt ihn an den Identity-Handler, ohne Enforcer (Handler- und Server-Tests) ruft der Handler nichts auf.
-- [ ] Ohne Admin-Client nach Option 1 der Entscheidung E-65 (Übergangsregel): Die Gruppe `reticora-admin`, die `mfa_required` nach WP-357 (`t2-mfa-accounts`) über den Realm trägt, löst im Login-Pfad keinen Aufruf aus. `config.Validate` (`config/config.go:413`) meldet außerhalb von `development` `RETICORA_DEFAULT_PROVISION_ROLE=org_admin` ohne `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` als Startfehler. Tests: `identity/handler_test.go` mit fail-closed-Enforcer – Login eines Mitglieds von `/reticora-admin` → 200 mit Sitzung und kein Aufruf (Positivfall), Login mit der Gruppe `/org_admin` → 503 ohne Sitzung (Negativfall); `config/config_test.go` – production mit Default-Rolle org_admin ohne Admin-Client → Fehler, der beide Schlüssel nennt; mit Admin-Client, mit Default-Rolle viewer bzw. in development → fehlerfrei. Der Lauf der Onboarding-Suite (`install-smoke.yml`; Installer-Admin in `reticora-admin`, Standard-Compose ohne Admin-Client) bleibt grün (Lauf-ID im PR).
+- [ ] Ohne Admin-Client nach Option 1 der Entscheidung E-65 (entschieden): Die Gruppe `reticora-admin`, die `mfa_required` nach WP-357 (`t2-mfa-accounts`) über den Realm trägt, löst im Login-Pfad keinen Aufruf aus. `config.Validate` (`config/config.go:413`) meldet außerhalb von `development` `RETICORA_DEFAULT_PROVISION_ROLE=org_admin` ohne `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` als Startfehler. Tests: `identity/handler_test.go` mit fail-closed-Enforcer – Login eines Mitglieds von `/reticora-admin` → 200 mit Sitzung und kein Aufruf (Positivfall), Login mit der Gruppe `/org_admin` → 503 ohne Sitzung (Negativfall); `config/config_test.go` – production mit Default-Rolle org_admin ohne Admin-Client → Fehler, der beide Schlüssel nennt; mit Admin-Client, mit Default-Rolle viewer bzw. in development → fehlerfrei. Der Lauf der Onboarding-Suite (`install-smoke.yml`; Installer-Admin in `reticora-admin`, Standard-Compose ohne Admin-Client) bleibt grün (Lauf-ID im PR).
 - [ ] Regression: `go test ./internal/identity/ ./internal/server/ ./internal/config/` grün; `go vet` und `golangci-lint` ohne neue Meldungen; `docs/traceability.csv` enthält die Zeile dieses WPs.
 - [ ] Abschluss F-005: Der verbindliche Retest aus PHASE1_FINDINGS.md ist vollständig grün, einschließlich der in WP-357 (`t2-mfa-accounts`) und WP-358 (`t2-mfa-role-sync`) überführten Teile (MFA-Defekttests in `backend/internal/signup/`, Real-Stack `frontend/e2e-real/mfa-admin.spec.ts`); Lauf-IDs im PR.
 
@@ -2439,7 +2443,7 @@ AUT-10;[B];B;frontend/src/auth/session.test.ts;WP-366
 AUT-09;[B];B;backend/internal/identity/handler_test.go;WP-367
 ```
 
-**Entscheidungsbedarf:** [E-14](../entscheidungen.md#e-14); [E-65](entscheidungen.md#e-65) MFA-Pflicht im Login-Pfad ohne Keycloak-Admin-Client (AUT-09) (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-14](../entscheidungen.md#e-14); [E-65](entscheidungen.md#e-65) MFA-Pflicht im Login-Pfad ohne Keycloak-Admin-Client (AUT-09) (entschieden: Option 1, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Rollenzuweisung, Einladungsannahme, Erstlogin mit offener Einladung, Bestandsabgleich und Enforcer-Implementierung (WP-358 (`t2-mfa-role-sync`)); Realm-Rolle der Gruppe `reticora-admin` (WP-357 (`t2-mfa-accounts`)); Konfiguration des Admin-Clients durch Installer und Compose (Option 2 der Entscheidung E-65); AMR-Prüfung im Backend (unverändert, siehe WP-358 (`t2-mfa-role-sync`), F-069).
 
@@ -2503,7 +2507,7 @@ OVR-01;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
 API-07;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
 ```
 
-**Entscheidungsbedarf:** [E-66](entscheidungen.md#e-66) API-07/API-08: Bulk-Statusänderung bei erzwungenem If-Match (offen, Empfehlung als Übergangsregel); [E-25](../entscheidungen.md#e-25)
+**Entscheidungsbedarf:** [E-66](entscheidungen.md#e-66) API-07/API-08: Bulk-Statusänderung bei erzwungenem If-Match (entschieden: Option 1, Auftraggeber 2026-10-28); [E-25](../entscheidungen.md#e-25)
 
 **Nicht Bestandteil:** Job-Abbruch, Job-Scope und weitere Bulk-Befunde (F-162: WP-514 (`t7-job-cancel`), WP-515 (`t7-export-cancel`), WP-521 (`t7-jobcenter-ui`); F-327: WP-517 (`t7-bulk-validation`); F-147: WP-503 (`t6-jobqueue-kinds`)) in `bulk.go` – Reihenfolge abstimmen; die T7-Tests in `audit_t7_bulk_jobs_auditdefect_test.go` nutzen danach `audit_t7_bulk_harness_test.go`.
 
@@ -2935,7 +2939,7 @@ COL-02;[B];D;backend/internal/discovery/renew_edge_integration_test.go;WP-375
 
 **Akzeptanzkriterien:**
 
-- [ ] Auswahlregel nach E-67 (Übergangsregel Option A): `VerifyBundleTarget` (`natsedge.go:446-458`) setzt `CredentialIDs` immer (nie nil) als Vereinigung der effektiven Listen der aktiven Scopes: Scope mit `credential_ids` → genau diese, ebenfalls gefiltert auf `client_id IS NULL OR = scope.client_id` (Altbestände vor dem F-264-Fix); Scope ohne `credential_ids` → Credentials mit `client_id IS NULL` oder `= scope.client_id`. Ohne aktiven Scope bleibt die Liste leer. Der nil-Zweig in `BundleTarget.relevant()` (`credential/bundle.go:161-171`) entfällt; `credential/bundle_test.go` prüft leere Liste und explizite IDs.
+- [ ] Auswahlregel nach E-67 (entschieden: Option A): `VerifyBundleTarget` (`natsedge.go:446-458`) setzt `CredentialIDs` immer (nie nil) als Vereinigung der effektiven Listen der aktiven Scopes: Scope mit `credential_ids` → genau diese, ebenfalls gefiltert auf `client_id IS NULL OR = scope.client_id` (Altbestände vor dem F-264-Fix); Scope ohne `credential_ids` → Credentials mit `client_id IS NULL` oder `= scope.client_id`. Ohne aktiven Scope bleibt die Liste leer. Der nil-Zweig in `BundleTarget.relevant()` (`credential/bundle.go:161-171`) entfällt; `credential/bundle_test.go` prüft leere Liste und explizite IDs.
 - [ ] `CollectorScopes` (`scope_handler.go:342`) sendet je Scope die effektive Liste `credential_ids` nach dieser Regel, damit der Collector je Scope auflöst (WP-378 (`t4-cred-scope`)); Test in `bundle_selection_integration_test.go`.
 - [ ] `checkCredentials` verlangt `credential.client_id IS NULL OR = scope.client_id`; PG-Test in `scope_integration_test.go`: Org-Principal bindet das SSH-Credential von Client 2 an einen Scope des Collectors von Client 1 → 422 mit Feld `credential_ids`; org-weites Credential → 201 (Retest F-264).
 - [ ] `TestAuditBundleCredentialSelection` wird nach `bundle_selection_integration_test.go` (ohne Tag, Hilfen aus `edge_helpers_integration_test.go` von WP-374 (`t4-natsedge-ci`)) überführt und besteht in allen vier Fällen (kein Scope → [], nur deaktivierter Scope → [], Scope ohne IDs → Org-Credential, Scope mit IDs → genau diese); zusätzliche Fälle: Scope ohne IDs mit Client 1 erhält kein Credential von Client 2; Scope von Client 1 mit explizitem Credential von Client 2 (direkt in der DB angelegt) → nicht im Bundle. Retest F-027 (Teil e2e-real in WP-384 (`t4-e2e-onboarding-bundle`)). Das WP entfernt nur seine eigene Testfunktion aus `collector_pki_auditdefect_test.go`.
@@ -2971,7 +2975,7 @@ DIS-09;[B];D;backend/internal/discovery/scope_integration_test.go;WP-376
 INS-06;[B];D;backend/internal/discovery/bundle_selection_integration_test.go;WP-376
 ```
 
-**Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (entschieden: Option A, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Auflösung je Scope im Collector (WP-378 (`t4-cred-scope`)); Credential-Auswahl im UI (WP-496 (`t4-scope-form-ui`)); Real-Stack-Nachweis (WP-384 (`t4-e2e-onboarding-bundle`)).
 
@@ -3104,7 +3108,7 @@ DIS-09;[B];D;collector/collectorcmd/discovery_credentials_test.go;WP-378
 COL-02;[B];D;collector/collectorcmd/bundle_test.go;WP-378
 ```
 
-**Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (entschieden: Option A, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Transportsicherheit von WMI und NAS (WP-377 (`t4-wmi-tls`), WP-379 (`t4-nas-tls`)); neue Credential-Art für NAS (WP-379 (`t4-nas-tls`)).
 
@@ -3131,7 +3135,7 @@ COL-02;[B];D;collector/collectorcmd/bundle_test.go;WP-378
 **Akzeptanzkriterien:**
 
 - [ ] Login über `POST /webapi/auth.cgi` (Konto und Passwort nur im Body) ausschließlich über HTTPS 5001 mit Zertifikatsprüfung über `plugins.TLSScope` (`RETICORA_NAS_TLS_SCOPES`); kein Request mit Credentials auf Port 5000; Session-ID und Passwort erscheinen in keinem Log.
-- [ ] Credential-Art `nas` (Benutzer/Passwort) nach E-68 (Übergangsregel Option A): Migration erweitert die CHECK-Constraint von `credential.kind`; `validKinds` (`credential.go`), OpenAPI-Enum (`openapi.yaml:18123`, `:18145`) und `schema.d.ts` ergänzt; der Collector bildet `nas` auf den Namespace `nas` ab; `testdata/credential-kinds.json` ergänzt, Vertragstest aus WP-378 (`t4-cred-scope`) grün.
+- [ ] Credential-Art `nas` (Benutzer/Passwort) nach E-68 (entschieden: Option A): Migration erweitert die CHECK-Constraint von `credential.kind`; `validKinds` (`credential.go`), OpenAPI-Enum (`openapi.yaml:18123`, `:18145`) und `schema.d.ts` ergänzt; der Collector bildet `nas` auf den Namespace `nas` ab; `testdata/credential-kinds.json` ergänzt, Vertragstest aus WP-378 (`t4-cred-scope`) grün.
 - [ ] `TestAuditNASCredentialTransport` wird nach `nas_test.go` überführt und besteht (kein Passwort in der URL, nichts auf 5000; ungeprüftes Zertifikat abgewiesen; mit Pin Login per POST); `TestCollectSynologyEndToEnd` bleibt grün (Fixture auf POST und TLS umgestellt). Retest F-011.
 - [ ] Migration-Roundtrip grün; Credential-Anlage mit `kind: nas` → 201, unbekannte Art → 422 (`credential/handler_test.go`).
 - [ ] Zeile aus `expected-failures.txt` entfernt; `go test ./plugins/nas/ ./collectorcmd/` und `go test ./internal/credential/` grün. `nas_auditdefect_test.go` gelöscht (Hilfe `auditNASListen` in `nas_test.go` übernommen).
@@ -3167,7 +3171,7 @@ COL-02;[B];D;collector/collectorcmd/bundle_test.go;WP-378
 DIS-04;[B];D;collector/plugins/nas/nas_test.go;WP-379
 ```
 
-**Entscheidungsbedarf:** [E-68](entscheidungen.md#e-68) Credential-Art für das NAS-Plugin (Synology DSM) (offen, Empfehlung als Übergangsregel); [E-02](../entscheidungen.md#e-02)
+**Entscheidungsbedarf:** [E-68](entscheidungen.md#e-68) Credential-Art für das NAS-Plugin (Synology DSM) (entschieden: Option A, Auftraggeber 2026-10-28); [E-02](../entscheidungen.md#e-02)
 
 **Nicht Bestandteil:** Credential-Verwaltungsseite im Frontend; weitere Arten aus den v2-Texten (E-02).
 
@@ -3473,7 +3477,7 @@ DIS-09;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
 INS-06;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
 ```
 
-**Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (entschieden: Option A, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Produktivcode (der SNMP-Fake ist Testinfrastruktur, nicht im Release-Build `./cmd/collector`); Onboarding-Abnahmesuite `frontend/e2e/onboarding.spec.ts` (T7, F-177).
 
@@ -3910,7 +3914,7 @@ RBA-03;[B];B;backend/internal/permission/scope_integration_test.go;WP-391
 TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-391
 ```
 
-**Entscheidungsbedarf:** [E-11](../entscheidungen.md#e-11); [E-70](entscheidungen.md#e-70) Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03) (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-11](../entscheidungen.md#e-11); [E-70](entscheidungen.md#e-70) Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03) (entschieden: Option 1, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Team-Scope für Service-Accounts und Einladungen; Rollen-UI; Grant-Obergrenze und Rolle/Scope-Abgleich für scope_type team (WP-394 (`t6-invite-ceiling`), übernimmt team nach diesem WP); Rollenentzug (D3, WP-395 (`t2-role-assignment-revoke`)); beide ändern ebenfalls `user/pg_repository.go` und setzen dieses WP voraus.
 
@@ -6927,7 +6931,7 @@ NFR-01;[B], Teilumfang [P5];LT;backend/internal/discovery/scale_integration_test
 
 **Akzeptanzkriterien:**
 
-- [ ] Nach E-73 (Übergangsregel Option A): Migration legt `reticora_attr_text(jsonb, text)` als nicht inlinebare Funktion an (LANGUAGE plpgsql oder SQL mit `SET search_path = pg_catalog`), IMMUTABLE LEAKPROOF PARALLEL SAFE, wirft für keine Eingabe; der Plan-Test belegt als `reticora_app` „Index Scan using idx_attr_<id>“ (bei einer inlinebaren Variante wäre er rot, weil der Planer sie zu `->>` auflöst); Sicherheitsreview im PR; ohne Superuser bricht die Migration mit Hinweis auf die Entscheidung E-73 ab.
+- [ ] Nach E-73 (entschieden: Option A): Migration legt `reticora_attr_text(jsonb, text)` als nicht inlinebare Funktion an (LANGUAGE plpgsql oder SQL mit `SET search_path = pg_catalog`), IMMUTABLE LEAKPROOF PARALLEL SAFE, wirft für keine Eingabe; der Plan-Test belegt als `reticora_app` „Index Scan using idx_attr_<id>“ (bei einer inlinebaren Variante wäre er rot, weil der Planer sie zu `->>` auflöst); Sicherheitsreview im PR; ohne Superuser bricht die Migration mit Hinweis auf die Entscheidung E-73 ab.
 - [ ] `IndexStatement` erzeugt die Indizes über `reticora_attr_text(attributes, '<key>')`; der DDL-Job baut bestehende `idx_attr_*` einmalig neu (CONCURRENTLY, alter Index erst nach Erfolg gelöscht); Unique-Indizes behalten ihre Semantik (`ddl_job_integration_test.go`).
 - [ ] Der Attributfilter in `ci/pg_repository.go` nutzt denselben Ausdruck; Filterergebnisse unverändert (bestehende Filtertests grün).
 - [ ] `attr_filter_plan_integration_test.go`: Produkt-SQL des Attributfilters (über pgx-Tracer erfasst) als `reticora_app` → „Index Scan using idx_attr_<id>“; Negativfall nach `DROP INDEX` → Test meldet fehlende Indexnutzung. Retest F-114 (Attribut).
@@ -6957,7 +6961,7 @@ NFR-01;[B], Teilumfang [P5];LT;backend/internal/discovery/scale_integration_test
 ABN-02;[Q];LT;backend/internal/ci/attr_filter_plan_integration_test.go;WP-435
 ```
 
-**Entscheidungsbedarf:** [E-73](entscheidungen.md#e-73) Indizierte Attributfilter unter Row-Level-Security (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-73](entscheidungen.md#e-73) Indizierte Attributfilter unter Row-Level-Security (entschieden: Option A, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Globale Volltextsuche unter RLS; MAC-Identität (WP-434 (`t4-identity-mac-index`)).
 
@@ -7472,7 +7476,7 @@ NFR-09;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-443
 
 **Akzeptanzkriterien:**
 
-- [ ] Nach E-74 (Übergangsregel Option 1): Komponente deploy/k8s/base/components/postgres mit StatefulSet (Image reticora-postgres, PVC), Service reticora-db und ConfigMap (archive_mode=on, archive_command='pgbackrest --stanza=reticora archive-push %p', archive_timeout=300, pgBackRest-TLS-Server mit Zertifikat aus Secret reticora-pgbackrest); overlays/prod bindet sie ein; staging bleibt dokumentiert ohne Backup.
+- [ ] Nach E-74 (entschieden: Option 1): Komponente deploy/k8s/base/components/postgres mit StatefulSet (Image reticora-postgres, PVC), Service reticora-db und ConfigMap (archive_mode=on, archive_command='pgbackrest --stanza=reticora archive-push %p', archive_timeout=300, pgBackRest-TLS-Server mit Zertifikat aus Secret reticora-pgbackrest); overlays/prod bindet sie ein; staging bleibt dokumentiert ohne Backup.
 - [ ] Retest F-128 statisch: Fall k8s_wal_archive als Schritt 'Assert WAL archiving' in den Job k8s-manifests übernommen und grün (kustomize build overlays/prod enthält archive_mode und archive-push); Negativfall: Fixture-Overlay ohne Komponente → Assertion scheitert.
 - [ ] Retest F-128 Laufzeit: tests/k8s/kind-smoke.sh um Fall wal_archive erweitert, der das Test-Overlay tests/k8s/fixtures/overlay-wal anwendet (base plus Komponenten postgres und backup, 1 Replik, MinIO als Repository): 'pgbackrest --stanza=reticora check' rc 0, pg_stat_archiver.archived_count steigt nach SELECT pg_switch_wal() innerhalb von 120 s, ein manuell aus dem CronJob ausgelöster Job erzeugt ein Full-Backup; Negativfall falscher cipher-pass am Repository-Host → backup rc != 0.
 - [ ] Ratchet: Fall aus tests/audit/ops-config.test.sh entfernt (ist es der letzte, wird die Datei gelöscht), Eintrag aus tests/audit/expected-failures.txt entfernt.
@@ -7509,7 +7513,7 @@ OPS-04;[B], [P5];A;tests/k8s/kind-smoke.sh;WP-444
 NFR-05;[B];A;tests/k8s/kind-smoke.sh;WP-444
 ```
 
-**Entscheidungsbedarf:** [E-29](../entscheidungen.md#e-29); [E-74](entscheidungen.md#e-74) OPS-04 in Kubernetes: Datenbankseite der WAL-Archivierung (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-29](../entscheidungen.md#e-29); [E-74](entscheidungen.md#e-74) OPS-04 in Kubernetes: Datenbankseite der WAL-Archivierung (entschieden: Option 1, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Postgres-HA, Read-Replicas, nächtlicher PITR-Test in Kubernetes ([P5]).
 
@@ -7721,7 +7725,7 @@ OPS-02;[B], [P3], [A];A;backend/internal/config/config_test.go;WP-447
 
 **Akzeptanzkriterien:**
 
-- [ ] Nach E-75 (Übergangsregel Option 1): Endpunkt POST /api/v1/admin/alerts/alertmanager spec-first (api/openapi.yaml → authz.go → TestRoutesAndSpecificationAreInParity → npm run generate:api); Authentifizierung per Bearer-Token RETICORA_OPS_ALERT_TOKEN (mindestens 32 Zeichen, Vergleich in konstanter Zeit); ohne RETICORA_OPS_ALERT_ORG_ID antwortet der Endpunkt 404; Fehler über api.WriteRepoError.
+- [ ] Nach E-75 (entschieden: Option 1): Endpunkt POST /api/v1/admin/alerts/alertmanager spec-first (api/openapi.yaml → authz.go → TestRoutesAndSpecificationAreInParity → npm run generate:api); Authentifizierung per Bearer-Token RETICORA_OPS_ALERT_TOKEN (mindestens 32 Zeichen, Vergleich in konstanter Zeit); ohne RETICORA_OPS_ALERT_ORG_ID antwortet der Endpunkt 404; Fehler über api.WriteRepoError.
 - [ ] Die Brücke erzeugt je Alert-Gruppe und Statuswechsel (firing, resolved) ein NTF-Ereignis der Betreiber-Organisation und stellt es über deren NTF-Kanäle zu; Dedup-Schlüssel aus groupKey, Status und startsAt; Audit-Eintrag ohne Geheimwerte (DoD-01).
 - [ ] Integrationstest backend/internal/operator/alerts_integration_test.go (TEST_DATABASE_URL): firing → genau eine notification_delivery auf dem Betreiberkanal und Zustellung durch den Notifier; identischer Payload erneut → keine zweite Zustellung; resolved → weitere Zustellung; fehlendes oder falsches Token → 401; eine Kunden-Organisation sieht die Benachrichtigung nicht (RLS) und erhält mit eigenem Token keinen Zugriff auf den Endpunkt (401/403).
 - [ ] deploy/monitoring/alertmanager.yaml enthält einen webhook-Receiver auf die Brücke (Token per credentials_file); tests/monitoring-config.test.sh (amtool check-config) bleibt grün; docs/ops/workers.md beschreibt die Kette Prometheus → Alertmanager → NTF.
@@ -7757,7 +7761,7 @@ OPS-02;[B], [P3], [A];A;backend/internal/config/config_test.go;WP-447
 OPS-05;[B];A;backend/internal/operator/alerts_integration_test.go;WP-448
 ```
 
-**Entscheidungsbedarf:** [E-75](entscheidungen.md#e-75) OPS-05: Alarmierung des Betriebs über NTF-Kanäle (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-75](entscheidungen.md#e-75) OPS-05: Alarmierung des Betriebs über NTF-Kanäle (entschieden: Option 1, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Oberfläche für Betreiberalarme; neue NTF-Kanaltypen.
 
@@ -8327,7 +8331,7 @@ ABN-01;[Q];G1;tests/rep01-structure.test.sh;WP-457
 
 **Akzeptanzkriterien:**
 
-- [ ] Jeder Dienst in deploy/docker-compose/docker-compose.yml loggt über einen gemeinsamen x-logging-Anker mit driver journald (ohne Interpolation; log-retention.test.sh liest die Datei mit unveränderter Prüflogik). Nach Entscheidung E-77 (Übergangsregel: Option 1) legt install.sh auf Hosts mit laufendem systemd-journald den Drop-in /etc/systemd/journald.conf.d/reticora.conf mit MaxRetentionSec=30day an und weist auf die hostweite Wirkung hin; ohne systemd-journald aktiviert install.sh über COMPOSE_FILE in .env die Override-Datei deploy/docker-compose/docker-compose.logging-json.yml (json-file mit max-size/max-file für jeden Dienst; der journald-Treiber akzeptiert keine max-size-Optionen) als dokumentierten Fallback. docker compose config ist mit und ohne Override gültig.
+- [ ] Jeder Dienst in deploy/docker-compose/docker-compose.yml loggt über einen gemeinsamen x-logging-Anker mit driver journald (ohne Interpolation; log-retention.test.sh liest die Datei mit unveränderter Prüflogik). Nach Entscheidung E-77 (entschieden: Option 1) legt install.sh auf Hosts mit laufendem systemd-journald den Drop-in /etc/systemd/journald.conf.d/reticora.conf mit MaxRetentionSec=30day an und weist auf die hostweite Wirkung hin; ohne systemd-journald aktiviert install.sh über COMPOSE_FILE in .env die Override-Datei deploy/docker-compose/docker-compose.logging-json.yml (json-file mit max-size/max-file für jeden Dienst; der journald-Treiber akzeptiert keine max-size-Optionen) als dokumentierten Fallback. docker compose config ist mit und ohne Override gültig.
 - [ ] Installer-Test tests/install-log-retention.test.sh (neu, systemctl und docker gestubbt): mit laufendem journald → Drop-in mit MaxRetentionSec=30day geschrieben, kein Override in COMPOSE_FILE; ohne journald → Override in COMPOSE_FILE, kein Drop-in.
 - [ ] tests/audit/log-retention.test.sh ist grün (3 passed, 0 failed) und zusammen mit tests/install-log-retention.test.sh in den regulären CI-Job (.github/workflows/ci.yml) aufgenommen; sein Eintrag aus tests/audit/expected-failures.txt ist entfernt.
 - [ ] docs/ops/workers.md (Aufbewahrung, hostweite Wirkung des Drop-ins) und deploy/README.md beschreiben die 30-Tage-Regel je Auslieferung; für K8s die Betreiberanforderung (kubelet containerLogMaxSize/containerLogMaxFiles bzw. Log-Backend mit 30 Tagen Retention).
@@ -8360,7 +8364,7 @@ ABN-01;[Q];G1;tests/rep01-structure.test.sh;WP-457
 NFR-06;[B];B;tests/audit/log-retention.test.sh;WP-458
 ```
 
-**Entscheidungsbedarf:** [E-77](entscheidungen.md#e-77) NFR-06 „Logs 30 Tage“ in den Auslieferungen (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-77](entscheidungen.md#e-77) NFR-06 „Logs 30 Tage“ in den Auslieferungen (entschieden: Option 1, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Datenbank-Retention (WP-548 (`t6-retention-data`)); Betrieb eines Log-Stores (nur bei Option 2 der Entscheidung, dann Folge-WP).
 
@@ -9671,7 +9675,7 @@ LOC-11;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-474
 CI-06;[B];C;backend/internal/history/history_scope_integration_test.go;WP-475
 ```
 
-**Entscheidungsbedarf:** [E-78](entscheidungen.md#e-78) CI-06: Berechtigung der einheitlichen CI-Historie (offen, Empfehlung als Übergangsregel); [E-13](../entscheidungen.md#e-13)
+**Entscheidungsbedarf:** [E-78](entscheidungen.md#e-78) CI-06: Berechtigung der einheitlichen CI-Historie (entschieden: Option 1, Auftraggeber 2026-10-28); [E-13](../entscheidungen.md#e-13)
 
 **Nicht Bestandteil:** Audit-Viewer /audit (F-078, WP-469 (`t2-audit-viewer`)); RBA-02-Matrix; lesbare Standortnamen in der Historie (WP-577 (`t3-ci-detail-readable`)).
 
@@ -10159,7 +10163,7 @@ OPS-06;[Q];D;collector/collectorcmd/collectorcmd_test.go;WP-483
 NFR-04;[B], Teilumfang [P5];D;collector/collectorcmd/collectorcmd_test.go;WP-483
 ```
 
-**Entscheidungsbedarf:** [E-79](entscheidungen.md#e-79) NFR-04: Verlust von Metrik-Samples und Traps bei Upload-Fehlern (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-79](entscheidungen.md#e-79) NFR-04: Verlust von Metrik-Samples und Traps bei Upload-Fehlern (entschieden: Option 1, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Weitere Befunde in `collectorcmd.go` (F-013 WP-378 (`t4-cred-scope`), F-106 WP-494 (`t4-scope-expansion`), F-109 WP-495 (`t4-scope-schedule`), F-276 WP-586 (`t4-p3-fail-closed`); F-046 WP-426 (`t7-metrics-edge`), F-168 und F-339 WP-512 (`t7-power-metrics`)) – Reihenfolge abstimmen; Spooling von Metrik-Samples und Traps (Option 2 von E-79, eigenes WP); weitere Änderungen in `discovery/discovery.go` (WP-369 (`t3-resurrect-new`), WP-479 (`t3-review-merge`), WP-580 (`t3-discovery-p3`)) – Reihenfolge abstimmen.
 
@@ -10273,7 +10277,7 @@ AGT-05;[P4];D;backend/internal/agent/agent_merge_integration_test.go;WP-484
 CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-485
 ```
 
-**Entscheidungsbedarf:** [E-80](entscheidungen.md#e-80) CI-12: Unmerge nach späteren Änderungen am Survivor (offen, Empfehlung als Übergangsregel); [E-25](../entscheidungen.md#e-25)
+**Entscheidungsbedarf:** [E-80](entscheidungen.md#e-80) CI-12: Unmerge nach späteren Änderungen am Survivor (entschieden: Option 1, Auftraggeber 2026-10-28); [E-25](../entscheidungen.md#e-25)
 
 **Nicht Bestandteil:** Job-Verweis und Retention (WP-572 (`t3-merge-job-retention`)); Merge-Events (F-324, WP-549 (`t6-review-events`)) in `merge.go`.
 
@@ -10328,7 +10332,7 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/asset_canonical_integra
 AST-04;[P2];B;backend/internal/server/ci_asset_routes_integration_test.go;WP-486
 ```
 
-**Entscheidungsbedarf:** [E-81](entscheidungen.md#e-81) DB-05: Verknüpfung eines CI mit einem Asset ohne Standort (offen, Empfehlung als Übergangsregel); [E-36](../entscheidungen.md#e-36)
+**Entscheidungsbedarf:** [E-81](entscheidungen.md#e-81) DB-05: Verknüpfung eines CI mit einem Asset ohne Standort (entschieden: Option 1, Auftraggeber 2026-10-28); [E-36](../entscheidungen.md#e-36)
 
 **Nicht Bestandteil:** Darstellung der Asset-Karte und des Formulars (WP-577 (`t3-ci-detail-readable`)).
 
@@ -10383,7 +10387,7 @@ AUD-03;[B];C;backend/internal/ci/change_record_integration_test.go;WP-487
 CI-11;[B];C;backend/internal/ci/change_record_integration_test.go;WP-487
 ```
 
-**Entscheidungsbedarf:** [E-82](entscheidungen.md#e-82) AUD-03: Datenmodell der ci_change-Zeilen (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-82](entscheidungen.md#e-82) AUD-03: Datenmodell der ci_change-Zeilen (entschieden: Option 2, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Lesesicht der Historie je change_set mit field_changes und Filter (WP-488 (`t3-aud03-history`)); Ingest-Pfad (eine Änderung und ein Event je Record, WP-489 (`t3-aud03-ingest`)); weitergehende UI-Darstellung von field_changes.
 
@@ -10441,7 +10445,7 @@ CI-11;[B];C;backend/internal/ci/change_record_integration_test.go;WP-487
 AUD-03;[B];C;backend/internal/history/history_integration_test.go;WP-488
 ```
 
-**Entscheidungsbedarf:** [E-82](entscheidungen.md#e-82) AUD-03: Datenmodell der ci_change-Zeilen (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-82](entscheidungen.md#e-82) AUD-03: Datenmodell der ci_change-Zeilen (entschieden: Option 2, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Schreibpfad und Migration (WP-487 (`t3-aud03-schema`)); Ingest (WP-489 (`t3-aud03-ingest`)).
 
@@ -10497,7 +10501,7 @@ AUD-03;[B];C;backend/internal/discovery/ingest_change_integration_test.go;WP-489
 CI-11;[B];C;backend/internal/discovery/ingest_change_integration_test.go;WP-489
 ```
 
-**Entscheidungsbedarf:** [E-82](entscheidungen.md#e-82) AUD-03: Datenmodell der ci_change-Zeilen (offen, Empfehlung als Übergangsregel); [E-56](../entscheidungen.md#e-56)
+**Entscheidungsbedarf:** [E-82](entscheidungen.md#e-82) AUD-03: Datenmodell der ci_change-Zeilen (entschieden: Option 2, Auftraggeber 2026-10-28); [E-56](../entscheidungen.md#e-56)
 
 **Nicht Bestandteil:** last_seen_at aus observed_at (WP-580 (`t3-discovery-p3`)); Fehlerisolation je Record (WP-481 (`t3-ingest-poison`)); weitere Änderungen in `discovery/discovery.go` (WP-479 (`t3-review-merge`), WP-483 (`t3-spool-poison`), WP-369 (`t3-resurrect-new`), WP-580 (`t3-discovery-p3`)) – Reihenfolge abstimmen.
 
@@ -10563,7 +10567,7 @@ IMP-07;[B];C;backend/internal/topology/impact_integration_test.go;WP-490
 IMP-02;[B];C;backend/internal/topology/topology_test.go;WP-490
 ```
 
-**Entscheidungsbedarf:** [E-18](../entscheidungen.md#e-18); [E-57](../entscheidungen.md#e-57); [E-83](entscheidungen.md#e-83) IMP-02: Traversierung per Ebenen-BFS statt rekursivem CTE (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-18](../entscheidungen.md#e-18); [E-57](../entscheidungen.md#e-57); [E-83](entscheidungen.md#e-83) IMP-02: Traversierung per Ebenen-BFS statt rekursivem CTE (entschieden: Option 1, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** UI-Darstellung (WP-491 (`t3-impact-ui`)); Redundanzanalyse (F-160, WP-513 (`t7-impact-redundancy`)) in `impact.go` – Reihenfolge abstimmen.
 
@@ -10827,7 +10831,7 @@ INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-494
 **Akzeptanzkriterien:**
 
 - [ ] `CollectorScope` enthält `last_run_at`, `next_run_at` und die Zeitzone der Org (`organization.timezone`); der Collector initialisiert je Scope den Sweep-Schlüssel aus `next_run_at`; fehlt er: Cron → erste Fälligkeit `cron.next(now)`, Intervall → `last_run_at + Intervall`, nie gelaufen → sofort.
-- [ ] Cron wird in der Zeitzone der Org ausgewertet (E-84, Übergangsregel Option A); Poll-Intervalle bleiben je Org und Protokoll mit Mindestwert 5 min.
+- [ ] Cron wird in der Zeitzone der Org ausgewertet (E-84, entschieden: Option A); Poll-Intervalle bleiben je Org und Protokoll mit Mindestwert 5 min.
 - [ ] `TestAuditScopeScheduleSurvivesRestart` wird nach `collectorcmd/discovery_scope_test.go` überführt und besteht (Cron-Scope um 10:07 nicht fällig; 24-h-Scope, der vor 1 h lief, nach Neustart nicht fällig; Kontrolle nie gelaufen → fällig). Retest F-109.
 - [ ] `schedule_test.go`: '0 2 * * *' mit `Europe/Berlin` fällig um 02:00 Ortszeit in Sommer- und Winterzeit; `scope_handler_test.go`: der Scope-Kanal liefert `next_run_at`, `last_run_at`, `timezone` (Retest F-266 nach Entscheidung).
 - [ ] Regression: `TestAuditScopeChannelOverNATS`, `TestIntervalsHaveDefaultsAndMinimums`, `TestCronSchedule`, `TestSchedulerRunsSweepAndPollsSeparately` grün; Zeile aus `expected-failures.txt` entfernt. `discovery_auditdefect_test.go` gelöscht (alle Tests überführt: WP-378 (`t4-cred-scope`), WP-417 (`t4-classify-review`), WP-494 (`t4-scope-expansion`), WP-415 (`t4-wmi-errors`) und dieses WP).
@@ -10859,7 +10863,7 @@ INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-494
 DIS-10;[B];D;collector/collectorcmd/schedule_test.go;WP-495
 ```
 
-**Entscheidungsbedarf:** [E-84](entscheidungen.md#e-84) DIS-10: Poll-Intervalle je Scope und Zeitzone von Cron-Zeitplänen (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-84](entscheidungen.md#e-84) DIS-10: Poll-Intervalle je Scope und Zeitzone von Cron-Zeitplänen (entschieden: Option A, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Poll-Intervalle je Scope (nur bei Option B der Entscheidung, dann Folge-WP); Hinweis im Formular (WP-496 (`t4-scope-form-ui`)).
 
@@ -10922,7 +10926,7 @@ DIS-09;[B];D;frontend/e2e-real/discovery-scopes.spec.ts;WP-496
 DIS-08;[Q];D;frontend/src/pages/DiscoveryPage.test.tsx;WP-496
 ```
 
-**Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (offen, Empfehlung als Übergangsregel); [E-84](entscheidungen.md#e-84) DIS-10: Poll-Intervalle je Scope und Zeitzone von Cron-Zeitplänen (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-67](entscheidungen.md#e-67) Credentials eines Discovery-Scopes ohne credential_ids (entschieden: Option A, Auftraggeber 2026-10-28); [E-84](entscheidungen.md#e-84) DIS-10: Poll-Intervalle je Scope und Zeitzone von Cron-Zeitplänen (entschieden: Option A, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Credential-Verwaltungsseite; Real-Stack-Nachweis eines realen Fehlerlaufs (WP-542 (`t4-dis08-nachweis`)).
 
@@ -11007,7 +11011,7 @@ TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-497
 **Akzeptanzkriterien:**
 
 - [ ] Nach jedem Ableiten wird `redundant` je gespeister CI aus allen gespeicherten powered_by-Kanten der Quelle discovery neu berechnet und auf allen Geschwisterkanten aktualisiert (Attribut-Update beim Bestätigen über `relationship/pg_repository.go`); Ergebnis unabhängig von Batch- und Lane-Reihenfolge.
-- [ ] F-275 nach E-85 (Übergangsregel Option A): Outlets mit `outlet_state=off` erzeugen die Kante, zählen aber nicht für `redundant`; Unit-Test in `power_test.go` für beide Zustände.
+- [ ] F-275 nach E-85 (entschieden: Option A): Outlets mit `outlet_state=off` erzeugen die Kante, zählen aber nicht für `redundant`; Unit-Test in `power_test.go` für beide Zustände.
 - [ ] `TestAuditPowerRedundancyIndependentOfBatchOrder` wird nach `power_chain_integration_test.go` überführt und besteht (redundant=true auf 32/32 Kanten der 16 doppelt gespeisten Server in beiden Reihenfolgen, mit 4 Lanes). Retest F-112.
 - [ ] Fail-closed: `power_test.go` prüft, dass bei einem Ladefehler der Suppressions keine powered_by-Kante geschrieben wird und `discovery.topology.failed` geloggt wird.
 - [ ] Hersteller-Tabellen: `collector/plugins/power/outlets_test.go` prüft Raritan PX, APC sPDU (PowerNet-MIB) und USV-Ausgänge mit Fixture-Walks; fehlende Tabelle → keine Outlets, kein Fehler.
@@ -11044,7 +11048,7 @@ IMP-09;[B];D;backend/internal/discovery/power_chain_integration_test.go;WP-498
 REL-03;[B];D;backend/internal/discovery/power_test.go;WP-498
 ```
 
-**Entscheidungsbedarf:** [E-85](entscheidungen.md#e-85) IMP-09: ausgeschaltete Outlets in der Redundanzkennung (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-85](entscheidungen.md#e-85) IMP-09: ausgeschaltete Outlets in der Redundanzkennung (entschieden: Option A, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** PDU-Messwerte (T7, F-168); Impact-Typregel IMP-04.
 
@@ -12236,7 +12240,7 @@ BLK-01;[B];C;backend/internal/ci/bulk_integration_test.go;WP-517
 
 - [ ] `Shared` (und jedes weitere PATCH-Feld ohne nil-Prüfung) wird `*bool`/Zeiger; `Update` setzt `shared` nur, wenn gesendet.
 - [ ] PG-Test `TestSavedViewPartialUpdateKeepsSharing` (`savedview_integration_test.go`): Sicht mit `shared:true` → PATCH nur `name` → anderes Mitglied GET 200 mit `shared=true`; PATCH `{shared:false}` → anderes Mitglied 404 (verbindlicher Retest F-166).
-- [ ] Rechte nach Entscheidung E-86 (Übergangsregel Option 1, nur Owner): PATCH/DELETE einer fremden geteilten Sicht → 404, DB unverändert; Owner → 200/204; `TestAuditT7SavedViewEditDeleteRights` (`audit_t7_savedview_rights_test.go:91`) an die Regel angepasst und PASS (`cd backend && TEST_DATABASE_URL=… go test -count=1 -v -run '^TestAuditT7SavedViewEditDeleteRights$' ./internal/savedview/`); Beschreibung von `PATCH /saved-views/{id}` in `api/openapi.yaml` angepasst; `SavedViewsPage` blendet „Löschen“ für fremde Sichten aus (Vitest).
+- [ ] Rechte nach Entscheidung E-86 (entschieden: Option 1, nur Owner): PATCH/DELETE einer fremden geteilten Sicht → 404, DB unverändert; Owner → 200/204; `TestAuditT7SavedViewEditDeleteRights` (`audit_t7_savedview_rights_test.go:91`) an die Regel angepasst und PASS (`cd backend && TEST_DATABASE_URL=… go test -count=1 -v -run '^TestAuditT7SavedViewEditDeleteRights$' ./internal/savedview/`); Beschreibung von `PATCH /saved-views/{id}` in `api/openapi.yaml` angepasst; `SavedViewsPage` blendet „Löschen“ für fremde Sichten aus (Vitest).
 - [ ] `shared_with_roles` wird gegen `role`/`custom_role` der Organisation geprüft; unbekannte oder fremde Rollen-ID → 422 `shared_with_roles[0]`; PG-Test `TestSavedViewRolesMustExist` (Retest F-337).
 - [ ] Entscheidung E-86 in `docs/plan/entscheidungen.md` eingetragen.
 - [ ] Regression: bestehende Tests der berührten Pakete grün, `go vet`/golangci-lint bzw. `npm run lint` und `npm run typecheck` ohne neue Befunde.
@@ -12270,7 +12274,7 @@ BLK-01;[B];C;backend/internal/ci/bulk_integration_test.go;WP-517
 VIE-01;[B];C;backend/internal/savedview/savedview_integration_test.go;WP-518
 ```
 
-**Entscheidungsbedarf:** [E-86](entscheidungen.md#e-86) Bearbeitungs- und Löschrechte org-weit geteilter Sichten (VIE-01) (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-86](entscheidungen.md#e-86) Bearbeitungs- und Löschrechte org-weit geteilter Sichten (VIE-01) (entschieden: Option 1, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Anwendung von sort/columns und Freigabe-UI (WP-555 (`t7-saved-views-ui`)); vordefinierte Views (VIE-02 [P2]).
 
@@ -12623,7 +12627,7 @@ UI-18;[B];C;frontend/e2e-real/i18n.spec.ts;WP-523
 
 **Akzeptanzkriterien:**
 
-- [ ] Entscheidung E-87 (Übergangsregel Option 1) in `docs/plan/entscheidungen.md` eingetragen.
+- [ ] Entscheidung E-87 (entschieden: Option 1) in `docs/plan/entscheidungen.md` eingetragen.
 - [ ] CI-Detail (`/cmdb/:id`): liegt das CI außerhalb des gewählten Clients/Standorts, zeigt `ScopeBanner` „Dieses CI liegt außerhalb des gewählten Bereichs (<Client/Standort>)“ mit „Bereich wechseln“ (setzt Client/Standort des CIs im Scope-Store) und „Alle Kunden“; innerhalb des Scopes oder ohne Auswahl kein Banner. Die Berechtigung bleibt serverseitig (RLS).
 - [ ] `CIRelationshipsCard` zeigt bei gewähltem Scope standardmäßig nur Gegen-CIs im Scope und nennt „n außerhalb des Bereichs ausgeblendet“ mit Umschalter.
 - [ ] `ScopeSwitcher.test.tsx`: die Erwartung „Detail-Requests bleiben ungescoped“ (`withScope('/cis/abc')`) wird mit Verweis auf die Entscheidung kommentiert und bleibt gültig.
@@ -12667,7 +12671,7 @@ UI-09;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
 UI-10;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
 ```
 
-**Entscheidungsbedarf:** [E-87](entscheidungen.md#e-87) CI-Detail unter gewähltem Client-/Site-Scope (WP-191) (offen, Empfehlung als Übergangsregel); [E-02](../entscheidungen.md#e-02)
+**Entscheidungsbedarf:** [E-87](entscheidungen.md#e-87) CI-Detail unter gewähltem Client-/Site-Scope (WP-191) (entschieden: Option 1, Auftraggeber 2026-10-28); [E-02](../entscheidungen.md#e-02)
 
 **Nicht Bestandteil:** Listen-Scope und Umschalter-Grenze (WP-556 (`t7-ui-scope-lists`)); Audit-, Webhook- und Export-Seite (F-078, F-062, F-077 anderer Gruppen).
 
@@ -13094,7 +13098,7 @@ TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-530
 
 **Akzeptanzkriterien:**
 
-- [ ] Entscheidung E-88 (Übergangsregel Option 1) in `docs/plan/entscheidungen.md` eingetragen.
+- [ ] Entscheidung E-88 (entschieden: Option 1) in `docs/plan/entscheidungen.md` eingetragen.
 - [ ] Der CI-Job `e2e` lädt für jedes der sechs Projekte den Playwright-Report als Artefakt hoch (auch bei Erfolg, Aufbewahrung ≥ 30 Tage); Nachweis: ein CI-Lauf mit allen sechs Projekten grün (a11y, keyboard, Kernabläufe mit Vertragsprüfung), Lauf-ID im PR.
 - [ ] Vorversions-Job `.github/workflows/e2e-prev.yml` (neu, nächtlich und manuell): `frontend/e2e-prev/` pinnt die Vorgängerversion von `@playwright/test` (Engines Chromium, Firefox, WebKit n-1) und Chrome n-1 aus Chrome for Testing (`executablePath`); er führt `smoke`, `a11y`, `keyboard` und die Kernablauf-Specs aus `frontend/e2e/` aus und lädt je Projekt ein Artefakt hoch; Nachweis: ein grüner Lauf.
 - [ ] Browserbedingte Fehler aus dem vollen Lauf sind behoben oder als neuer Befund erfasst; kein Test wird browserabhängig übersprungen.
@@ -13129,7 +13133,7 @@ UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-531
 TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-531
 ```
 
-**Entscheidungsbedarf:** [E-88](entscheidungen.md#e-88) Nachweis der Browser-Vorversionen (UI-18, NFR-07) (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-88](entscheidungen.md#e-88) Nachweis der Browser-Vorversionen (UI-18, NFR-07) (entschieden: Option 1, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Real-Stack-Suite in allen Browsern (WP-532 (`k-e2e-real-browsers`)); externer Browser-Grid.
 
@@ -14641,7 +14645,7 @@ JOB-03;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
 
 **Akzeptanzkriterien:**
 
-- [ ] Entscheidung E-89 (Übergangsregel Option 1: synchroner Effekt mit gespiegeltem Job für merge bei ambiguous_identity; merge bei probable_duplicate über den `ci.merge`-Job aus WP-479 (`t3-review-merge`), dessen Status der `review.merge`-Spiegel übernimmt) als Nachtrag zu E-25 in `docs/plan/entscheidungen.md` dokumentiert (F-331).
+- [ ] Entscheidung E-89 (entschieden: Option 1: synchroner Effekt mit gespiegeltem Job für merge bei ambiguous_identity; merge bei probable_duplicate über den `ci.merge`-Job aus WP-479 (`t3-review-merge`), dessen Status der `review.merge`-Spiegel übernimmt) als Nachtrag zu E-25 in `docs/plan/entscheidungen.md` dokumentiert (F-331).
 - [ ] Ein erneuter Merge-Versuch eines Items, dessen Job `failed` ist, setzt den Job auf `running` mit `attempts+1`; Erfolg → `succeeded`, Fehlertext geleert; die Transition failed → running ist nur für gespiegelte Jobs mit Referenz zulässig.
 - [ ] PG-Test `TestReviewMergeRetryJobStatus` (`reviews/merge_job_integration_test.go`): Effekt schlägt fehl → Job `failed`; Retry mit Erfolg → Item resolved, Job `succeeded`, `attempts=2`; ein Job je Item und Art; probable_duplicate: der `review.merge`-Spiegel übernimmt den Status des `ci.merge`-Jobs (`failed` → `failed`, nach Retry beide `succeeded`), kein zweiter widersprüchlicher Job (verbindlicher Retest F-330).
 - [ ] Router-Test `TestReviewMergeJobThroughRouter` (`backend/internal/server/review_merge_job_integration_test.go`): `POST /api/v1/review-items/{id}/resolve {action:'merge', ci_id}` über den echten Router mit Discovery-Effekt und PG-Repositories → 200, Kandidat aktualisiert (Management-IP), `GET /api/v1/jobs?kind=review.merge` zeigt den Job `succeeded`; fremder Client → 404; Principal ohne Auflösungsrecht → 403.
@@ -14673,7 +14677,7 @@ JOB-03;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
 JOB-04;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-554
 ```
 
-**Entscheidungsbedarf:** [E-89](entscheidungen.md#e-89) Review-Merge bei ambiguous_identity: synchroner Effekt mit gespiegeltem Job (JOB-04, Folge zu E-25) (offen, Empfehlung als Übergangsregel); [E-25](../entscheidungen.md#e-25)
+**Entscheidungsbedarf:** [E-89](entscheidungen.md#e-89) Review-Merge bei ambiguous_identity: synchroner Effekt mit gespiegeltem Job (JOB-04, Folge zu E-25) (entschieden: Option 1, Auftraggeber 2026-10-28); [E-25](../entscheidungen.md#e-25)
 
 **Nicht Bestandteil:** Asynchroner Merge über die Queue (nur bei Option 2, eigenes WP); CI-12-Merge-Semantik von probable_duplicate (WP-479 (`t3-review-merge`), Voraussetzung).
 
@@ -14732,7 +14736,7 @@ JOB-04;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-554
 VIE-01;[B];C;frontend/e2e-real/saved-views.spec.ts;WP-555
 ```
 
-**Entscheidungsbedarf:** [E-86](entscheidungen.md#e-86) Bearbeitungs- und Löschrechte org-weit geteilter Sichten (VIE-01) (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-86](entscheidungen.md#e-86) Bearbeitungs- und Löschrechte org-weit geteilter Sichten (VIE-01) (entschieden: Option 1, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Klick-Builder und vordefinierte Views ([P2]).
 
@@ -16849,7 +16853,7 @@ REC-02;[B];D;backend/internal/discovery/observed_seen_integration_test.go;WP-580
 REC-07;[B];D;backend/internal/ipam/interface_integration_test.go;WP-580
 ```
 
-**Entscheidungsbedarf:** [E-90](entscheidungen.md#e-90) REC-07: Entfernen manuell gepflegter IPs und Interfaces (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-90](entscheidungen.md#e-90) REC-07: Entfernen manuell gepflegter IPs und Interfaces (entschieden: Option 1, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** Relationship-Befund F-042 (WP-424 (`t6-manual-edge-keep`)) in `ipam/pg_repository.go:630-686` – Reihenfolge abstimmen; weitere Änderungen in `discovery/discovery.go` (WP-369 (`t3-resurrect-new`), WP-479 (`t3-review-merge`), WP-483 (`t3-spool-poison`)) – Reihenfolge abstimmen.
 
@@ -17270,7 +17274,7 @@ OPS-06;[Q];A;tests/outage/collector.sh;WP-587
 
 - [ ] Render je Empfänger in dessen Sprache (app_user.locale, Fallback Org-Locale nach LOC-01, dann de-DE) mit Vorlagen je Ereignistyp in de-DE und en-US (templates.go); der zweisprachige Sammeltext entfällt; Direct-Empfänger ohne Konto erhalten die Org-Locale.
 - [ ] Org-Branding: Absendername und Betreff-Präfix aus dem Organisationsnamen (bzw. settings.branding.sender_name), Fußzeile mit Organisationsname; Test je Sprache.
-- [ ] Abonnements nach Entscheidung E-91 (Übergangsregel Option 2): Kategorie-Abonnement über die NTF-04-Präferenz (subscribed/muted je Kategorie, Default abonniert für Rollen-Audiences); bei Option 1 Tabelle notification_subscription (RLS) mit GET/PUT /notifications/subscriptions als Folge-WP.
+- [ ] Abonnements nach Entscheidung E-91 (entschieden: Option 2): Kategorie-Abonnement über die NTF-04-Präferenz (subscribed/muted je Kategorie, Default abonniert für Rollen-Audiences); bei Option 1 Tabelle notification_subscription (RLS) mit GET/PUT /notifications/subscriptions als Folge-WP.
 - [ ] Integrationstest TestNotificationLocaleAndSubscription: en-US-Nutzer erhält englischen, de-DE-Nutzer deutschen Betreff; abbestellte nicht kritische Kategorie → keine Zustellung (Negativ); kritische Kategorie trotzdem zugestellt.
 - [ ] Retest: cd backend && go test -count=1 -run 'TestTemplates' ./internal/notify/ und TEST_DATABASE_URL=… go test -run 'TestNotificationLocaleAndSubscription' ./internal/notify/ → PASS; Regression notify grün; e2e-real N01 lokal gegen den Real-Stack nach frontend/e2e-real/README.md ausgeführt, nach WP-338 (`k-e2e-real-ci`) im CI-Job.
 
@@ -17299,7 +17303,7 @@ OPS-06;[Q];A;tests/outage/collector.sh;WP-587
 NTF-03;[B];B;backend/internal/notify/templates_test.go;WP-588
 ```
 
-**Entscheidungsbedarf:** [E-91](entscheidungen.md#e-91) NTF-03: Ausprägung von Abonnements und Org-Branding in Phase 1 (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-91](entscheidungen.md#e-91) NTF-03: Ausprägung von Abonnements und Org-Branding in Phase 1 (entschieden: Option 2, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** HTML-Mails mit Logo/Farben (nur bei Option 1); Präferenz-UI; Adressierung von Client-Kontakten durch Subscriptions (nur bei Option 1 der Entscheidung E-91 als Folge-WP).
 
@@ -17332,7 +17336,7 @@ NTF-03;[B];B;backend/internal/notify/templates_test.go;WP-588
 - [ ] POST/PATCH /attribute-definitions akzeptiert validation als Regel-AST nach api/rules.schema.json (Phase-1-Operatoren required, pattern, range, enum), prüft ihn serverseitig mit internal/rules (ungültiger AST → 400 field validation) und speichert den AST; die Legacy-Struktur {min,max,pattern} bleibt als Eingabe zulässig und wird beim Speichern bzw. Lesen in den AST übersetzt.
 - [ ] Die Regel wirkt bei CI-Writes (Go-Auswertung verbindlich): AST range 1–5 → Wert 7 ergibt 422, Wert 3 ergibt 201 (Integrationstest TestAttributeDefinitionASTValidation).
 - [ ] OpenAPI: AttributeDefinition.validation als oneOf (Regel-AST per $ref auf rules.schema.json, Legacy-Struktur) statt additionalProperties:true; Parität und generate:api:check grün.
-- [ ] Instanzdefinitionen nach Entscheidung E-92 (Übergangsregel Option 2): Resolver-Test TestResolverLayerOrder belegt die Schichtfolge System → Org → Typ → Instanz (MET-16) und dass System-, Org- und Typdefinitionen ausschließlich aus attribute_definition gelesen werden; docs/schema-baseline.md verweist auf die Entscheidung.
+- [ ] Instanzdefinitionen nach Entscheidung E-92 (entschieden: Option 2): Resolver-Test TestResolverLayerOrder belegt die Schichtfolge System → Org → Typ → Instanz (MET-16) und dass System-, Org- und Typdefinitionen ausschließlich aus attribute_definition gelesen werden; docs/schema-baseline.md verweist auf die Entscheidung.
 - [ ] Retest: cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAttributeDefinitionASTValidation' ./internal/citype/ und go test -run 'TestResolverLayerOrder' ./internal/citype/ → PASS; MET-45-Konformanzfälle (rules) und Regression citype, fieldmeta grün.
 
 **Dateien (10 Einträge, Migration = 2):**
@@ -17365,7 +17369,7 @@ API-05;[B];B;backend/internal/citype/attrdef_integration_test.go;WP-589
 MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/citype/attrdef_integration_test.go;WP-589
 ```
 
-**Entscheidungsbedarf:** [E-92](entscheidungen.md#e-92) Instanzattributdefinitionen und DB-03 („attribute_definition einzige Quelle“) (offen, Empfehlung als Übergangsregel); [E-23](../entscheidungen.md#e-23)
+**Entscheidungsbedarf:** [E-92](entscheidungen.md#e-92) Instanzattributdefinitionen und DB-03 („attribute_definition einzige Quelle“) (entschieden: Option 2, Auftraggeber 2026-10-28); [E-23](../entscheidungen.md#e-23)
 
 **Nicht Bestandteil:** Instanzattribute nach MET-14 [P2] (WP-256, Phase 2); Regel-Editor in der UI.
 
@@ -17393,7 +17397,7 @@ MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/citype/attrdef_inte
 **Akzeptanzkriterien:**
 
 - [ ] Neue Migration ersetzt ci_schema_version(): jedes UPDATE, das eine typisierte Spalte oder attributes ändert, setzt schema_version auf die aktuelle Typversion; reine Systemfelder (last_seen_at, miss_count) lassen sie unverändert. PG-Test TestSchemaVersionFollowsTypedWrites: CI v2, Typ-Bump auf v4, PATCH hostname → v4; last_seen_at-Update → unverändert.
-- [ ] Org-globale Definitionen nach Entscheidung E-93 (Übergangsregel Option 2): Integrationstest TestOrgGlobalDefinitionsAreRuntimeLayer belegt, dass eine org-globale Pflichtdefinition bei CI-Writes erzwungen wird (422 ohne Wert, 201 mit Wert) und nicht in schema_version eingeht; docs/schema-baseline.md dokumentiert die Laufzeitschicht. Bei Option 1 folgt die Org-Schemarevision als Folge-WP.
+- [ ] Org-globale Definitionen nach Entscheidung E-93 (entschieden: Option 2): Integrationstest TestOrgGlobalDefinitionsAreRuntimeLayer belegt, dass eine org-globale Pflichtdefinition bei CI-Writes erzwungen wird (422 ohne Wert, 201 mit Wert) und nicht in schema_version eingeht; docs/schema-baseline.md dokumentiert die Laufzeitschicht. Bei Option 1 folgt die Org-Schemarevision als Folge-WP.
 - [ ] Retest: cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestSchemaVersionFollowsTypedWrites' ./internal/ci/ und -run 'TestOrgGlobalDefinitionsAreRuntimeLayer|TestNewTypeWithoutReleaseAgainstPostgres' ./internal/citype/ → PASS; Migrations-Roundtrip grün.
 
 **Dateien (6 Einträge, Migration = 2):**
@@ -17418,7 +17422,7 @@ MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/citype/attrdef_inte
 MET-16;B/G1, Teil P2/G2;B;backend/internal/ci/schema_version_integration_test.go;WP-590
 ```
 
-**Entscheidungsbedarf:** [E-93](entscheidungen.md#e-93) Materialisierung org-globaler Attributdefinitionen (MET-16) (offen, Empfehlung als Übergangsregel)
+**Entscheidungsbedarf:** [E-93](entscheidungen.md#e-93) Materialisierung org-globaler Attributdefinitionen (MET-16) (entschieden: Option 2, Auftraggeber 2026-10-28)
 
 **Nicht Bestandteil:** CI-Dialog und MET-04 (WP-397 (`t6-ci-form-types`)); Attribute Sets und Templates [P2].
 
@@ -17499,8 +17503,8 @@ TLC-01;[B];B;backend/internal/signup/signup_integration_test.go;WP-591
 
 **Akzeptanzkriterien:**
 
-- [ ] F-310 nach Entscheidung E-94 (Übergangsregel Option 1): 000110 vergibt kollisionsfreie Suffixe (nächste freie Nummer je ci_id und Basisname). Migrationsdatentest TestNet01DedupeAvoidsExistingSuffix (Probe net01-dup.sql: 'vfy-eth0' ×2 und vorhandenes 'vfy-eth0 (1)') → Upgrade erfolgreich, Namen eindeutig; Release-Hinweis. Bei Option 2 ersetzt eine Upgrade-Vorprüfung mit klarer Meldung die Änderung.
-- [ ] F-313 nach Entscheidung E-95 (Übergangsregel Option 1): Anlage/Änderung eines Beziehungstyps mit unbekanntem Typ-Key in allowed_source_types/allowed_target_types → 400 mit Feld; POST /relationships mit unzulässigem Quell- oder Zieltyp → 422 field source_ci_id bzw. target_ci_id; leere Listen bedeuten keine Einschränkung; cardinality ist in der OpenAPI als informativ bis REL-06 [P2] beschrieben. PG-Tests je Fall (TestRelationshipTypeConstraintsEnforced).
+- [ ] F-310 nach Entscheidung E-94 (entschieden: Option 1): 000110 vergibt kollisionsfreie Suffixe (nächste freie Nummer je ci_id und Basisname). Migrationsdatentest TestNet01DedupeAvoidsExistingSuffix (Probe net01-dup.sql: 'vfy-eth0' ×2 und vorhandenes 'vfy-eth0 (1)') → Upgrade erfolgreich, Namen eindeutig; Release-Hinweis. Bei Option 2 ersetzt eine Upgrade-Vorprüfung mit klarer Meldung die Änderung.
+- [ ] F-313 nach Entscheidung E-95 (entschieden: Option 1): Anlage/Änderung eines Beziehungstyps mit unbekanntem Typ-Key in allowed_source_types/allowed_target_types → 400 mit Feld; POST /relationships mit unzulässigem Quell- oder Zieltyp → 422 field source_ci_id bzw. target_ci_id; leere Listen bedeuten keine Einschränkung; cardinality ist in der OpenAPI als informativ bis REL-06 [P2] beschrieben. PG-Tests je Fall (TestRelationshipTypeConstraintsEnforced).
 - [ ] F-315: Ursachenbestätigung per PG-Test mit langsamem Renderer und Fake-Uhr (Doppelausführung vor dem Fix reproduziert, Ergebnis im PR); danach erneuert der Export-Worker während des Renderns einen Heartbeat, ReclaimStale nimmt nur Jobs ohne Heartbeat seit 15 min zurück. Test TestExportReclaimOnlyDeadWorkers: zweiter Worker ResumeStale → 0, solange der erste läuft; nach dessen Absturz → 1.
 - [ ] Retest: cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestNet01DedupeAvoidsExistingSuffix' ./internal/ipam/, -run 'TestRelationshipTypeConstraintsEnforced' ./internal/relationship/, -run 'TestExportReclaimOnlyDeadWorkers' ./internal/export/ → PASS; Migrations-Roundtrip und Regression ipam, relationship, relationshiptype, export grün.
 
@@ -17535,7 +17539,7 @@ REL-01;[B];B;backend/internal/relationship/pg_repository_integration_test.go;WP-
 TEC-14;[B];B;backend/internal/export/stale_reclaim_integration_test.go;WP-592
 ```
 
-**Entscheidungsbedarf:** [E-94](entscheidungen.md#e-94) Korrektur der Migration 000110 (Duplikat-Suffixe der Interfaces) (offen, Empfehlung als Übergangsregel); [E-95](entscheidungen.md#e-95) Durchsetzung von allowed_source_types, allowed_target_types und cardinality (REL-01) (offen, Empfehlung als Übergangsregel); [E-26](../entscheidungen.md#e-26); [E-18](../entscheidungen.md#e-18)
+**Entscheidungsbedarf:** [E-94](entscheidungen.md#e-94) Korrektur der Migration 000110 (Duplikat-Suffixe der Interfaces) (entschieden: Option 1, Auftraggeber 2026-10-28); [E-95](entscheidungen.md#e-95) Durchsetzung von allowed_source_types, allowed_target_types und cardinality (REL-01) (entschieden: Option 1, Auftraggeber 2026-10-28); [E-26](../entscheidungen.md#e-26); [E-18](../entscheidungen.md#e-18)
 
 **Nicht Bestandteil:** Eigene Beziehungstypen je Org (REL-06 [P2]); Umstellung des Exports auf die NATS-Queue.
 
@@ -17722,7 +17726,7 @@ TLC-04;[B];B;backend/internal/user/self_lockout_integration_test.go;WP-648
 **Akzeptanzkriterien:**
 
 - [ ] Ursache durch einen Test belegt, der auf dem alten Code rot ist: eigene Datenbank auf 56, `migration_quarantine` entfernt, Upgrade bis zur neuesten Version scheitert bei 000089.
-- [ ] Nach Option 1 der Entscheidung E-100 (Übergangsregel) legt 000089 am Anfang die Tabelle an, nur wenn `to_regclass('public.migration_quarantine')` leer ist, mit genau der DDL von 000056 (Spalten, Index, RLS ENABLE und FORCE, Policy, Rechte von `reticora_app`). Danach läuft das Upgrade bis zur neuesten Version, nicht dirty; die Tabelle ist definiert wie bei einer Neuinstallation (Eigentümer und Rechte eingeschlossen), die Strukturzeile von 000089 liegt in der Quarantäne, und als `reticora_app` sieht und schreibt jede Organisation nur ihre eigenen Einträge.
+- [ ] Nach Option 1 der Entscheidung E-100 (entschieden) legt 000089 am Anfang die Tabelle an, nur wenn `to_regclass('public.migration_quarantine')` leer ist, mit genau der DDL von 000056 (Spalten, Index, RLS ENABLE und FORCE, Policy, Rechte von `reticora_app`). Danach läuft das Upgrade bis zur neuesten Version, nicht dirty; die Tabelle ist definiert wie bei einer Neuinstallation (Eigentümer und Rechte eingeschlossen), die Strukturzeile von 000089 liegt in der Quarantäne, und als `reticora_app` sieht und schreibt jede Organisation nur ihre eigenen Einträge.
 - [ ] Neuinstallationen unverändert: `TestMigrationsRoundtrip` und `TestSchemaBaselineMatchesMigratedSchema` grün, `docs/schema-baseline.md` nur neu erzeugt, wenn der Generator es verlangt.
 - [ ] Release-Hinweis in `docs/betrieb/upgrade-hinweise.md` (2026-10-28, F-378, E-100) mit dem Weg aus 89 dirty (`force 88`, `up`), mit golang-migrate nachgestellt; Verweis in `docs/backup-dr.md`.
 
@@ -17750,9 +17754,229 @@ TLC-04;[B];B;backend/internal/user/self_lockout_integration_test.go;WP-648
 DB-02;nicht geliefert;B;backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go;WP-649
 ```
 
-**Entscheidungsbedarf:** [E-100](entscheidungen.md#e-100) Upgrade von Datenbanken mit 000056 vor E-26 (offen, Empfehlung Option 1 als Übergangsregel); Präzedenz [E-26](../entscheidungen.md#e-26), [E-94](entscheidungen.md#e-94)
+**Entscheidungsbedarf:** [E-100](entscheidungen.md#e-100) Upgrade von Datenbanken mit 000056 vor E-26 (entschieden: Option 1, Auftraggeber 2026-10-28); Präzedenz [E-26](../entscheidungen.md#e-26), [E-94](entscheidungen.md#e-94)
 
 **Nicht Bestandteil:** Vorprüfung in Installer oder Kubernetes-Job (E-100 Option 2); Rollback über 000056 auf Altinstallationen (WP-574, F-224).
+
+### WP-650 – Rack-Platzierung: Ablehnung statt stiller Standortabweichung außerhalb des Scopes
+
+**Schlüssel:** `k6n-rack-scope-location` · **Meilenstein:** K6-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-578 (`t3-rack-placement-history`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-379](../../../audit/g1-reaudit/FINDINGS.md#f-379) | P3 | Rack-Platzierung durch einen client-beschränkten Principal: das Asset ohne Client erhält den Standort stumm nicht, der Mount wird trotzdem gespeichert | schließt | WP-578 |
+| [F-380](../../../audit/g1-reaudit/FINDINGS.md#f-380) | P3 | Rack-Platzierung durch einen client-beschränkten Principal: CIs des Assets außerhalb des Scopes behalten ihren Standort, `asset.location_id` und `ci.location_id` weichen ab | schließt | WP-578 |
+
+**Problem:** `recordPlacement` (`rack/placement.go`) setzt den Standort unter der RLS des Principals. Bei einem Asset ohne Client trifft das Update wegen `asset_scoped_update` keine Zeile; die Platzierung speichert Mount, Bewegung und Audit trotzdem (F-379). `trg_asset_propagate_location` (000088) überspringt CIs des Assets, die der Principal nicht sieht (anderer Client) oder nicht schreiben darf (ohne Client); Asset und platziertes CI stehen im Rack, das andere CI am alten Ort (F-380). Priorität P3: Datenabweichung in seltenen Konstellationen (Asset ohne Client oder mit CIs mehrerer Clients, Platzierung durch einen Principal mit eingeschränktem Scope), keine Offenlegung, kein Verlust, durch eine org-weite Platzierung behebbar.
+
+**Akzeptanzkriterien:**
+
+- [ ] Ursache durch PG-Tests als `reticora_app` mit einem auf Client 1 beschränkten Principal belegt, die auf dem alten Code rot sind: Mount eines CIs, dessen Asset keinen Client hat (F-379); Mount eines CIs, dessen Asset ein CI von Client 2 (unsichtbar) oder ein CI ohne Client (sichtbar, nicht schreibbar) trägt (F-380).
+- [ ] Ein Principal mit eingeschränktem Scope ändert keine Zeile außerhalb seines Scopes (E-09). Würde Mount, Verschieben oder Unmount den Standort ändern und kann das Asset, ein anderes CI des Assets oder das CI selbst dem nicht folgen, wird die Platzierung mit 409 problem+json und festem Text abgelehnt (Repository: `RuleError` mit `ErrConflict`); Mount, Standort, Version, ci_change und Audit bleiben unverändert. Umpositionieren im selben Rack und Colocation (WP-578) bleiben erlaubt; ein Principal, der alle CIs sieht (Clients 1 und 2), erhält für ein Rack von Client 1 die Colocation-Behandlung.
+- [ ] `asset_propagate_location` (Migration 000181) aktualisiert die CIs weiter unter der RLS des Schreibenden und lehnt danach mit 42501 (`asset_location_ci_scope`) ab, wenn ein CI des Assets – geprüft mit erweitertem Client- und Site-Scope (`app_scope_widen`) – einen anderen Standort behält; kein SECURITY DEFINER, `search_path` fest. Org-weite Schreiber sind nicht betroffen; ein direktes `UPDATE asset` eines eingeschränkten Principals wird ebenso abgelehnt.
+- [ ] Spec-first: 409 für Mount (PUT, beide POST), Verschieben (beide PATCH) und Unmount (DELETE über CI und beide DELETE über die Mount-ID) in `api/openapi.yaml`, `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression grün: rack (TestRackPlacement*, TestMountSetsLocationWithHistory, TestRackRepositoryClientScope, TestRackTenantIsolation), tenant/rls, ci, locations, asset, movement, server; `TestMigrationsRoundtrip`, `TestSchemaBaselineMatchesMigratedSchema`.
+
+**Dateien (11 Einträge, Migration = 2):**
+
+- backend/internal/rack/placement.go
+- backend/internal/rack/placement_scope_integration_test.go (neu)
+- backend/migrations/000181_asset_location_ci_scope.up.sql (neu)
+- backend/migrations/000181_asset_location_ci_scope.down.sql (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/schema-baseline.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** Migration 000181 ersetzt nur die Funktion `asset_propagate_location` (Trigger, Policies und Rechte unverändert; down stellt die Fassung von 000088 her). Die erweiterte Prüfung liest nur, ob ein CI des Assets abweicht, und gibt dem Aufrufer keine Zeile und keinen Wert zurück (Präzedenz 000139, 000141, 000151). Offengelegt wird allein, dass ein Asset, das der Principal schreiben darf, ein CI außerhalb seines Scopes trägt (wie bei Dokumenten mit Links außerhalb des Scopes, WP-341).
+
+**Tests:**
+
+- `TestRackPlacementRefusesAssetOutsideScope` (PG): Mount über Repository und `PUT /api/v1/racks/{id}/mounts/{ci_id}` → 409, nichts gespeichert; org-weiter Mount setzt den Standort; Umpositionieren erlaubt, Verschieben und Unmount → 409, Mount und Standort bleiben.
+- `TestRackPlacementRefusesAssetWithCIsOutsideScope` (PG): CI von Client 2 und CI ohne Client am Asset → 409, nichts gespeichert, Asset und CIs mit einem Standort; direktes Asset-Update → 42501 `asset_location_ci_scope`; Principal der Clients 1 und 2 → Colocation.
+- `TestRackPlacement*`, `TestMountSetsLocationWithHistory`, `TestRackRepositoryClientScope`, `TestRackTenantIsolation`, `TestMigrationsRoundtrip`, `TestSchemaBaselineMatchesMigratedSchema`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RCK-03;[B];B;backend/internal/rack/placement_scope_integration_test.go;WP-650
+```
+
+**Entscheidungsbedarf:** keiner; Grundlage [E-09](../entscheidungen.md#e-09) (entschieden: Zeilen ohne Client schreiben nur org-weite Principals).
+
+**Nicht Bestandteil:** Weitergabe des Standorts an CIs außerhalb des Scopes (Schreiben fremder Zeilen); Platzierung im Namen eines org-weiten Principals; Bereinigung bereits abweichender Standorte aus der Zeit vor WP-650 (ein org-weiter Schreibzugriff auf den Standort des Assets gleicht sie an).
+
+### WP-651 – Rack-Seite: Einbau auf beiden Seiten vorn und hinten anzeigen
+
+**Schlüssel:** `k6n-rack-face-both` · **Meilenstein:** K6-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-579 (`t3-rack-layout`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-381](../../../audit/g1-reaudit/FINDINGS.md#f-381) | P3 | Rack-Seite: ein Einbau auf beiden Seiten (`face` = `both`) erscheint auf keiner Rackseite, weder in der Zeichnung noch in der Liste | schließt | WP-579 |
+
+**Problem:** Die API nimmt für einen Einbau die Seite `both` an (RCK-01: belegt die Höheneinheiten vorn und hinten), das Layout liefert ihn. `buildRackUnits` und `visibleMounts` in `RackPage.tsx` filtern auf `(mount.face || 'front') === face`; ein Einbau mit `both` erscheint deshalb auf keiner Seite, weder in der Zeichnung noch in der Liste (F-381). Priorität P3: reine Anzeige, die Daten stimmen; belegte Höheneinheiten wirken frei, eine Platzierung dort scheitert mit 409 ohne sichtbare Ursache; seltene Einbauart.
+
+**Akzeptanzkriterien:**
+
+- [ ] Vitest-Defekttest in `frontend/src/pages/RackPage.test.tsx`, auf dem alten Code rot: `buildRackUnits` liefert einen Einbau mit `both` für die Vorder- und die Rückseite; die Rack-Seite zeigt ihn auf „Vorderseite“ und „Rückseite“ in Zeichnung und Liste.
+- [ ] Ein Einbau mit `both` belegt in der Zeichnung beider Seiten seine Höheneinheiten; die Seiten werden als Text genannt: SVG-Titel „<Name> · Vorder- und Rückseite“, in der Liste „Vorder- und Rückseite“ statt des Rohwerts (i18n `rack.faceBoth` in de-DE und en-US). Einbauten mit `front`, `rear` oder ohne Seite verhalten sich wie bisher.
+- [ ] Gemockter Playwright-Lauf grün: `e2e/a11y.spec.ts` für `/racks` (Fixture mit einem Einbau auf beiden Seiten), `e2e/rack-drag.spec.ts`, `e2e/mobile-actions.spec.ts` mit dem neuen Fall „racks: a mount on both faces …“ (Vorder- und Rückseite, Namen in der Länge des Real-Stacks, kein Seitwärtsscrollen bei 412 px).
+- [ ] tsc, prettier, eslint und die Vitest-Dateien von Rack-Seite, Komponenten und i18n grün.
+
+**Dateien (11 Einträge):**
+
+- frontend/src/pages/RackPage.tsx
+- frontend/src/pages/RackPage.test.tsx
+- frontend/src/components/rack/RackSVG.tsx
+- frontend/src/i18n/de-DE.json
+- frontend/src/i18n/en-US.json
+- frontend/e2e/mobile-actions.spec.ts
+- frontend/e2e/support/a11y-fixtures.ts
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine; keine API-Änderung.
+
+**Tests:**
+
+- Vitest `RackPage.test.tsx`: `draws a mount on both faces on the front and on the rear`, `shows a mount on both faces on the front and on the rear (F-381)`.
+- Playwright (gemockt) `mobile-actions.spec.ts`: `racks: a mount on both faces shows on the front and the rear and fits the phone`; `a11y.spec.ts` (/racks), `rack-drag.spec.ts`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RCK-01;[B];B;frontend/src/pages/RackPage.test.tsx;WP-651
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Montieren und Verschieben über die Rack-Seite (Mount-UI); Anzeige der freien Höheneinheiten (`free`); Übersetzung der Rohwerte `front` und `rear` in der Liste (der Real-Stack-Fall L08 prüft sie).
+
+### WP-652 – unknown_relationship: kein neues Review für ein angenommenes Paar
+
+**Schlüssel:** `k6n-unknown-rel-review-accepted` · **Meilenstein:** K6-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-582 (`t4-topo-confidence`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-382](../../../audit/g1-reaudit/FINDINGS.md#f-382) | P3 | `unknown_relationship`: nach accept öffnet der nächste Ingest desselben unbekannten Schlüssels ein neues Review für dasselbe Paar, obwohl die angenommene Kante besteht | schließt | WP-582 |
+
+**Problem:** `reviewUnknownRelationship` (`discovery/topology.go`) öffnet das Review eines unbekannten Nachbarschlüssels über `OpenUnlessDismissed` (`reviews/service.go`). Diese Regel unterdrückt nur nach einem verworfenen Review mit demselben `type_key`; die Deduplizierung offener Reviews (REC-08) endet mit der Auflösung. Nach einem accept (Kante `connected_to`, Quelle `discovery`) öffnet deshalb der nächste Ingest desselben Schlüssels ein neues Review für dasselbe Paar, nach jedem weiteren accept wieder (F-382). Priorität P3: Rauschen in der Review-Inbox mit Benachrichtigung, keine Datenabweichung; Umgehung durch Verwerfen des neuen Reviews.
+
+**Regel (in diesem WP festgelegt):** Ein angenommenes Paar öffnet kein neues Review, solange die Frage beantwortet bleibt: Die Kante `connected_to` Quelle → Ziel besteht (jeder Quelle; dieselbe Kante, die accept über `upsertRelationship` bestätigen würde), oder sie ist für das Paar unterdrückt. Eine Unterdrückung entsteht, wenn ein Benutzer die Discovery-Kante mit force löscht (REL-03); die Löschung beantwortet die Frage wie ein dismiss, ein neues Review würde sie erneut stellen und ein accept die unterdrückte Kante wieder anlegen. Wird die Unterdrückung aufgehoben, hat das Paar weder Kante noch Unterdrückung: Die Frage ist wieder offen, der nächste Bericht öffnet ein neues Review. Ohne angenommenes Review und nach einem dismiss gilt `OpenUnlessDismissed` unverändert; `OpenOverrideConflict` (WP-576) und `scope_suggested` bleiben unberührt. Die Gegenrichtung (der Nachbar meldet das Gerät unter einem unbekannten Schlüssel) ist ein eigenes Objekt (`rel:<Ziel>:<Quelle>`) mit eigener Kante, wie bei LLDP-Kanten je meldendem Gerät.
+
+**Akzeptanzkriterien:**
+
+- [ ] PG-Tests als `reticora_app`, auf dem alten Code rot: `TestUnknownRelationshipReviewLifecycle` erweitert (nach accept öffnet der nächste Ingest kein neues Review); `TestUnknownRelationshipReviewAfterAcceptedEdgeDeleted` (neu): kein neues Review, solange die angenommene Kante besteht (zwei Ingests); nach Löschen der Kante durch einen Benutzer (force, Unterdrückung) weder Review noch Kante; nach Aufheben der Unterdrückung genau ein neues offenes Review ohne Kante.
+- [ ] `reviews.Service.OpenUnlessSettled(ctx, item, valueKey, holds)`: liest das zuletzt aufgelöste Review desselben Objekts und Typs; ist es mit accept aufgelöst und meldet `holds` true, wird kein Review geöffnet; ein Fehler von `holds` öffnet keines und wird gemeldet; sonst `OpenUnlessDismissed`. Unit-Test `TestOpenUnlessSettled` (Memory-Repository).
+- [ ] `discovery.Handler.acceptedEdgeHolds`: Kante über `DiscoveryEdge` (PostgreSQL) bzw. die Kantenliste der Quelle (andere Repositories), Unterdrückung über `suppressionChecker`; alles unter der RLS des Aufrufers, dem Aufrufer wird nichts zurückgegeben.
+- [ ] Regression grün: `internal/discovery` (u. a. `TestTopologyConfidence`, `TestTopologyConfidenceIndependentOfOrder`, `TestAuditDiscoveryResightingThroughIngest`), `internal/reviews`, Review-, Topologie- und Unterdrückungstests von `internal/server` und `internal/relationship`.
+
+**Dateien (8 Einträge):**
+
+- backend/internal/reviews/service.go
+- backend/internal/reviews/service_test.go
+- backend/internal/discovery/topology.go
+- backend/internal/discovery/topology_integration_test.go
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration, keine API-Änderung. Die zusätzlichen Lesezugriffe (aufgelöstes Review, Kante, Unterdrückungen) laufen unter der RLS des Ingest-Principals; sieht er das angenommene Review nicht, gilt die bisherige Regel.
+
+**Tests:**
+
+- `TestUnknownRelationshipReviewLifecycle` (PG, erweitert), `TestUnknownRelationshipReviewAfterAcceptedEdgeDeleted` (PG, neu).
+- `TestOpenUnlessSettled` (Unit, `reviews/service_test.go`).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-652
+```
+
+**Entscheidungsbedarf:** keiner (Regel oben).
+
+**Nicht Bestandteil:** Reviews unbekannter Schlüssel für Paare, die ohne Review bereits eine Kante `connected_to` haben (z. B. aus LLDP); Zusammenführen der Gegenrichtung; Bereinigung bereits offener Wiederholungs-Reviews aus der Zeit vor WP-652 (sie werden wie bisher aufgelöst).
+
+### WP-653 – Benachrichtigungssprache je Empfänger: Login-Claim und eigene Präferenz
+
+**Schlüssel:** `k6n-user-locale` · **Meilenstein:** K6-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-588 (`t6-ntf-templates`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-383](../../../audit/g1-reaudit/FINDINGS.md#f-383) | P3 | Benachrichtigungssprache je Empfänger nicht erreichbar: nichts setzt `app_user.locale` (kein API-Weg; OIDC-Login, Einladung und Signup behalten den Spaltenstandard `de`) | schließt | WP-588 |
+
+**Problem:** WP-588 schreibt Benachrichtigungen in der Sprache des Empfängers (`app_user.locale`, Rückfall Org-Locale nach LOC-01, dann de-DE) und behandelt den Spaltenstandard `de` als „nicht gewählt“. Nichts setzt die Spalte: Es gibt keinen API-Weg, und OIDC-JIT-Login, Einladungsannahme und Signup legen Konten mit dem Standard an. Die Sprache je Empfänger (NTF-03) ist für keinen Benutzer erreichbar (F-383). Priorität P3: Die Benachrichtigungen kommen an, nur in der Sprache der Organisation; Umgehung über die Org-Locale (für alle Benutzer).
+
+**Regel (in diesem WP festgelegt, ohne Migration):** `app_user.locale` unterscheidet drei Zustände. `de` (Spaltenstandard, die Regel von WP-588): keine Wahl, es gilt die Org-Locale; ein Login übernimmt die Sprache seines `locale`-Claims. `de-DE` oder `en-US`: gewählte Sprache, aus der eigenen Präferenz oder aus dem ersten Login mit Claim; kein Login ersetzt sie. Leer: die Org-Locale ausdrücklich gewählt; kein Login ersetzt sie. Wer ohne vorherige Wahl „Org-Locale“ speichert, behält den Spaltenstandard (beide bedeuten die Org-Locale; der nächste Login darf den Claim noch übernehmen); erst nach einer Sprache wird die leere Wahl gespeichert. Eine spätere Änderung der Sprache im IdP-Konto ändert eine übernommene Sprache nicht mehr; der Benutzer ändert sie in den Präferenzen. Eine Migration ist dafür nicht nötig: Der WP-588-Standard `de` trägt „nicht gewählt“, ein leerer Wert „ausdrücklich Org-Locale“. Die Oberflächensprache bleibt die des Browsers (E-99).
+
+**Akzeptanzkriterien:**
+
+- [ ] Login: `IDTokenClaims.Locale` aus dem Claim `locale` des validierten ID-Tokens (kein String: keiner, der Login scheitert nicht); der Callback reicht die Template-Locale des Claims (de* → de-DE, en* → en-US, auch mit Unterstrich; andere Sprachen nichts) über `identity.LoginLocaleRecorder` weiter, erst wenn der Login eine Sitzung erhält; ein Fehler beim Speichern lässt den Login gelingen (Warnung im Log, der nächste Login versucht es erneut). `user.PGRepository.RecordLoginLocale` schreibt nur de-DE oder en-US und nur bei `locale = 'de'`, unter der Org-RLS des Logins.
+- [ ] Selbstbedienung spec-first (`api/openapi.yaml`, `NotificationPreference.locale`, Enum `''`, `de-DE`, `en-US`; `schema.d.ts` neu erzeugt): `GET /api/v1/notifications/preferences` nennt `locale` immer (leer: Org-Locale); `PUT` speichert sie in derselben Transaktion wie die Präferenz in `app_user.locale` des angemeldeten Benutzers; ohne `locale` bleibt sie; jeder andere Wert → 400 ohne Änderung. Der Audit-Schnappschuss der Route enthält `locale`.
+- [ ] PG-Tests als `reticora_app`, auf `eb5a51e` rot: `TestLoginTakesLocaleClaim` (Einladung, vom Administrator angelegtes Konto und wiederkehrender Benutzer ohne Wahl übernehmen den Claim; gewählte Sprache, ausdrücklich leere Wahl und eine aus einem früheren Login übernommene Sprache bleiben; eine andere Sprache, ein Claim ohne String und ein Token ohne Claim ändern nichts); `TestNotificationLanguageSelfService` (PUT/GET, gespeicherte Spaltenwerte, 400 ohne Änderung, Benachrichtigungen in-app und per E-Mail in der gewählten Sprache bzw. der Org-Locale). Unit-Tests `TestLoginStoresLocaleClaim`, `TestNotificationLanguagePreference`, drei Fälle in `TestNotificationAPI`.
+- [ ] Regression grün: `internal/identity`, `internal/notify`, `internal/user`, `internal/audit`, `internal/server`; Lint-Schuld des Backends nicht gestiegen.
+
+**Dateien (19 Einträge):**
+
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- backend/internal/identity/oidc.go
+- backend/internal/identity/handler.go
+- backend/internal/identity/handler_test.go
+- backend/internal/identity/callback_scope_integration_test.go
+- backend/internal/identity/login_locale_integration_test.go (neu)
+- backend/internal/user/pg_repository.go
+- backend/internal/notify/templates.go
+- backend/internal/notify/notifier.go
+- backend/internal/notify/pg_notification.go
+- backend/internal/notify/handler.go
+- backend/internal/notify/handler_test.go
+- backend/internal/notify/locale_integration_test.go (neu)
+- backend/internal/audit/route_snapshot.go
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration. Beide Schreibwege ändern nur die Zeile des angemeldeten bzw. sich anmeldenden Benutzers unter der Org-RLS (`reticora_app`); die Sprache ist auf zwei Werte und den leeren Wert begrenzt.
+
+**Tests:**
+
+- `TestLoginTakesLocaleClaim` (PG, neu), `TestLoginStoresLocaleClaim` (Unit, neu).
+- `TestNotificationLanguageSelfService` (PG, neu), `TestNotificationLanguagePreference` (Unit, neu), `TestNotificationAPI` (drei Fälle ergänzt).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NTF-03;[B];B;backend/internal/notify/locale_integration_test.go;WP-653
+```
+
+**Entscheidungsbedarf:** keiner (Regel oben; E-99 bleibt unberührt).
+
+**Nicht Bestandteil:** Präferenz-Oberfläche (es gibt keine Seite für die Benachrichtigungspräferenzen; nur Backend und API); Sprache eines Benutzers durch einen Org-Administrator; Übernahme aus dem Access-Token oder dem Userinfo-Endpunkt; Aktivieren der Internationalisierung in den mitgelieferten Keycloak-Realms; Nachführen einer späteren Sprachänderung im IdP-Konto nach einer übernommenen Sprache; SCIM-Attribut `preferredLanguage`.
 
 ## K7 Wiederholungsprüfung und Gate G1
 

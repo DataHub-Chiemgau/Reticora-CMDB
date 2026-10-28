@@ -103,6 +103,13 @@
       "security": "Open security & privacy",
       "map": "Open map",
       "roomplan": "Open room plan"
+    },
+    "contact": {
+      "label": "Contact",
+      "email": "E-mail",
+      "phone": "Phone",
+      "role": "Role",
+      "back": "Back to search"
     }
   },
   "dashboard": {
@@ -843,7 +850,8 @@
     "mountsLoadError": "The mounts could not be loaded",
     "faceLabel": "Select rack face",
     "faceFront": "Front",
-    "faceRear": "Rear"
+    "faceRear": "Rear",
+    "faceBoth": "Front and rear"
   },
   "permissions": {
     "title": "Permissions",
@@ -1450,6 +1458,7 @@
     "addChild": "child",
     "createRoot": "Create site",
     "empty": "No locations yet. Create a site first.",
+    "nodeNotFound": "The linked node does not exist or is not visible to you.",
     "client": "Client",
     "deleteFailed": "Cannot delete",
     "title": "Sites & Warehouses",

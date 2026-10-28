@@ -92,6 +92,9 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 		return fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	return database.WithRequestTenant(ctx, r.pool, typ.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := checkCITypeKeys(ctx, tx, ciTypeLists(typ.AllowedSourceTypes, typ.AllowedTargetTypes)); err != nil {
+			return err
+		}
 		source, _ := json.Marshal(nonNil(typ.AllowedSourceTypes))
 		target, _ := json.Marshal(nonNil(typ.AllowedTargetTypes))
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
@@ -129,6 +132,10 @@ func (r *PGRepository) Update(ctx context.Context, orgID, key string, req Upsert
 		req.apply(current)
 		if verr := current.Validate(); verr != nil {
 			return fmt.Errorf("%w: %v", ErrInvalid, verr)
+		}
+		// Only the lists of the request: a stored list stays as it is.
+		if cerr := checkCITypeKeys(ctx, tx, ciTypeLists(req.AllowedSourceTypes, req.AllowedTargetTypes)); cerr != nil {
+			return cerr
 		}
 		source, _ := json.Marshal(nonNil(current.AllowedSourceTypes))
 		target, _ := json.Marshal(nonNil(current.AllowedTargetTypes))
@@ -172,6 +179,28 @@ func (r *PGRepository) Exists(ctx context.Context, orgID, key string) (bool, err
 		return false, err
 	}
 	return true, nil
+}
+
+// checkCITypeKeys refuses a key of the lists that names no CI type the
+// organization sees (an unknown key, a type of another organization) with
+// a field error, 400 on the list (REL-01, E-95, F-313). ci_type is read
+// under RLS: system types and the organization's own.
+func checkCITypeKeys(ctx context.Context, tx pgx.Tx, lists []ciTypeList) error {
+	for _, list := range lists {
+		if len(list.keys) == 0 {
+			continue
+		}
+		var unknown []string
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE(array_agg(k.key ORDER BY k.pos), '{}') FROM unnest($1::text[]) WITH ORDINALITY AS k(key, pos)
+			WHERE NOT EXISTS (SELECT 1 FROM ci_type WHERE ci_type.key = k.key)`, list.keys).Scan(&unknown); err != nil {
+			return fmt.Errorf("check CI types of %s: %w", list.field, err)
+		}
+		if len(unknown) > 0 {
+			return &api.FieldError{Field: list.field, Message: "unknown CI type: " + strings.Join(unknown, ", ")}
+		}
+	}
+	return nil
 }
 
 type scanner interface {

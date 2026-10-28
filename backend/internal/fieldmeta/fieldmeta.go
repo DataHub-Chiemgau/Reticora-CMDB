@@ -10,11 +10,15 @@
 package fieldmeta
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"net/mail"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -151,7 +155,9 @@ type ValidationRules struct {
 	// Patterns are further patterns that apply as well (allOf); composing
 	// layers that each set a pattern produces them (MET-16).
 	Patterns []string `json:"patterns,omitempty"`
-	Options  []string `json:"options,omitempty"`
+	// Options are the allowed values: strings, numbers or booleans (the
+	// values of an enum rule of MET-45).
+	Options []any `json:"options,omitempty"`
 }
 
 // AllPatterns returns Pattern and Patterns, the empty ones left out.
@@ -220,6 +226,12 @@ func ValidateDefinition(def FieldDefinition) error {
 	for _, p := range def.Validation.AllPatterns() {
 		if _, err := regexp.Compile(p); err != nil {
 			return fmt.Errorf("invalid validation pattern: %w", err)
+		}
+	}
+	if def.Validation != nil && len(def.Validation.Options) > 0 {
+		options := rules.Rule{Op: rules.OpEnum, Values: def.Validation.Options}
+		if err := options.Validate(); err != nil {
+			return fmt.Errorf("invalid validation options: %w", err)
 		}
 	}
 	for _, p := range def.allPredicates() {
@@ -469,17 +481,13 @@ func (def *FieldDefinition) Rule(withRequired bool) rules.Rule {
 	if withRequired && def.Required {
 		list = append(list, rules.Rule{Op: rules.OpRequired})
 	}
-	allowed := def.EnumValues
+	allowed := AnyValues(def.EnumValues)
 	v := def.Validation
 	if v != nil && len(v.Options) > 0 {
 		allowed = v.Options
 	}
 	if len(allowed) > 0 {
-		values := make([]any, len(allowed))
-		for i, a := range allowed {
-			values[i] = a
-		}
-		list = append(list, rules.Rule{Op: rules.OpEnum, Values: values})
+		list = append(list, rules.Rule{Op: rules.OpEnum, Values: allowed})
 	}
 	if v != nil {
 		for _, p := range v.AllPatterns() {
@@ -502,6 +510,215 @@ func (def *FieldDefinition) Rule(withRequired bool) rules.Rule {
 		}
 	}
 	return rules.Rule{Op: rules.OpAll, Rules: list}
+}
+
+// AnyValues returns strings as the values of an enum rule.
+func AnyValues(values []string) []any {
+	if values == nil {
+		return nil
+	}
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = v
+	}
+	return out
+}
+
+// AST is the rule AST (MET-45) of a validation in the order of Rule: the
+// allowed values, the patterns, the value range and the length range; one
+// rule stands alone, several are combined with all; nil without rules.
+// It translates the legacy structure of a stored or requested validation
+// (MET-10, WP-589).
+func (v *ValidationRules) AST() *rules.Rule {
+	if v == nil {
+		return nil
+	}
+	var list []rules.Rule
+	if len(v.Options) > 0 {
+		list = append(list, rules.Rule{Op: rules.OpEnum, Values: v.Options})
+	}
+	for _, p := range v.AllPatterns() {
+		list = append(list, rules.Rule{Op: rules.OpPattern, Pattern: p})
+	}
+	if v.Min != nil || v.Max != nil {
+		list = append(list, rules.Rule{Op: rules.OpRange, Min: v.Min, Max: v.Max})
+	}
+	if v.MinLength != nil || v.MaxLength != nil {
+		r := rules.Rule{Op: rules.OpRange, Of: rules.OfLength}
+		if v.MinLength != nil {
+			f := float64(*v.MinLength)
+			r.Min = &f
+		}
+		if v.MaxLength != nil {
+			f := float64(*v.MaxLength)
+			r.Max = &f
+		}
+		list = append(list, r)
+	}
+	switch len(list) {
+	case 0:
+		return nil
+	case 1:
+		return &list[0]
+	}
+	return &rules.Rule{Op: rules.OpAll, Rules: list}
+}
+
+// ValidationFromRule translates a rule AST (MET-45) into the validation
+// structure that composition (MET-16) and the materialized schema read;
+// migration 000184 (reticora_validation_legacy) translates alike. all is
+// flattened, the patterns apply in order, several value or length ranges
+// give the narrowest (a length bound rounded inwards), several enum rules
+// the values common to all; required reports a required rule. A rule no
+// value can satisfy is an error; v is returned nevertheless.
+// validation: fixed texts naming the rule no value satisfies.
+func ValidationFromRule(r *rules.Rule) (v *ValidationRules, required bool, err error) {
+	if r == nil {
+		return nil, false, nil
+	}
+	out := ValidationRules{}
+	var allowed []any
+	enum := false
+	var walk func(n *rules.Rule)
+	walk = func(n *rules.Rule) {
+		switch n.Op {
+		case rules.OpAll:
+			for i := range n.Rules {
+				walk(&n.Rules[i])
+			}
+		case rules.OpRequired:
+			required = true
+		case rules.OpPattern:
+			if out.Pattern == "" {
+				out.Pattern = n.Pattern
+			} else {
+				out.Patterns = append(out.Patterns, n.Pattern)
+			}
+		case rules.OpRange:
+			if n.Of == rules.OfLength {
+				out.MinLength = tighter(out.MinLength, lengthBound(n.Min, math.Ceil), true)
+				out.MaxLength = tighter(out.MaxLength, lengthBound(n.Max, math.Floor), false)
+				return
+			}
+			out.Min = tighter(out.Min, n.Min, true)
+			out.Max = tighter(out.Max, n.Max, false)
+		case rules.OpEnum:
+			if !enum {
+				enum, allowed = true, append([]any{}, n.Values...)
+				return
+			}
+			common := allowed[:0:0]
+			for _, a := range allowed {
+				if slices.ContainsFunc(n.Values, func(b any) bool { return rules.Equal(a, b) }) {
+					common = append(common, a)
+				}
+			}
+			allowed = common
+		}
+	}
+	walk(r)
+	switch {
+	case enum && len(allowed) == 0:
+		err = fmt.Errorf("enum: no value is allowed by every enum rule")
+	case out.Min != nil && out.Max != nil && *out.Min > *out.Max:
+		err = fmt.Errorf("range: the value range is empty")
+	case out.MinLength != nil && out.MaxLength != nil && *out.MinLength > *out.MaxLength:
+		err = fmt.Errorf("range: the length range is empty")
+	}
+	out.Options = allowed
+	if out.Min == nil && out.Max == nil && out.MinLength == nil && out.MaxLength == nil && out.Pattern == "" && !enum {
+		return nil, required, err
+	}
+	return &out, required, err
+}
+
+// tighter combines two optional bounds: the one that is set, or the
+// stricter of both (lower: the greater).
+func tighter[T int | float64](a, b *T, lower bool) *T {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	case lower == (*b > *a):
+		return b
+	}
+	return a
+}
+
+// lengthBound is a length bound of a range as a whole number of
+// characters, rounded by round and kept within int32.
+func lengthBound(f *float64, round func(float64) float64) *int {
+	if f == nil {
+		return nil
+	}
+	n := int(max(min(round(*f), math.MaxInt32), math.MinInt32))
+	return &n
+}
+
+// ParseValidation reads the validation of a definition (MET-10): the rule
+// AST of MET-45 (api/rules.schema.json), recognized by its op, or the
+// legacy structure (min, max, min_length, max_length, pattern, patterns,
+// options), which is translated into the AST. Both are decoded strictly and
+// checked with internal/rules; null or an empty structure is no rule (nil).
+// validation: fixed texts naming the rule that fails.
+func ParseValidation(raw []byte) (*rules.Rule, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil, nil
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &probe); err != nil || probe == nil {
+		return nil, fmt.Errorf("validation must be a rule (MET-45) or an object of min, max, min_length, max_length, pattern, patterns and options")
+	}
+	if _, ok := probe["op"]; ok {
+		r, err := rules.Parse(trimmed)
+		if err != nil {
+			return nil, err
+		}
+		return &r, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.DisallowUnknownFields()
+	var legacy ValidationRules
+	if err := dec.Decode(&legacy); err != nil {
+		return nil, fmt.Errorf("validation: %w", err)
+	}
+	r := legacy.AST()
+	if r == nil {
+		return nil, nil
+	}
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// StoredValidation reads a stored validation into the AST like
+// ParseValidation, without its checks: a rule stored before them keeps
+// applying as far as it can be read.
+func StoredValidation(raw []byte) *rules.Rule {
+	if r, err := ParseValidation(raw); err == nil {
+		return r
+	}
+	var probe struct {
+		Op *string `json:"op"`
+	}
+	if json.Unmarshal(raw, &probe) != nil {
+		return nil
+	}
+	if probe.Op != nil {
+		var r rules.Rule
+		if json.Unmarshal(raw, &r) != nil {
+			return nil
+		}
+		return &r
+	}
+	var legacy ValidationRules
+	if json.Unmarshal(raw, &legacy) != nil {
+		return nil
+	}
+	return legacy.AST()
 }
 
 // uuidPattern is the textual form of a UUID (any version).

@@ -6,6 +6,8 @@ export interface RackUnit {
   label: string;
   color?: string;
   id?: string;
+  /** title is the accessible name of the item (SVG title), e.g. its faces. */
+  title?: string;
 }
 
 export interface RackSVGProps {
@@ -81,6 +83,7 @@ export const RackSVG: FC<RackSVGProps> = ({
             onClick={() => onItemClick?.(item)}
             style={{ cursor: onItemClick ? 'pointer' : 'default' }}
           >
+            {item.title ? <title>{item.title}</title> : null}
             <rect
               x={LABEL_WIDTH + 2}
               y={y + 1}

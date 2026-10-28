@@ -3,9 +3,12 @@
 # outage of PostgreSQL, NATS, Redis, object storage and SMTP, each under
 # load (tests/outage/load.sh: every answer accepted or visibly refused, then
 # accepted == persisted counted in the database, ingest queue empty, event
-# outbox published), plus the component scenarios (collector with the
-# server unreachable, spool limits, webhook target down) and the negative
-# self-test (one record dropped on purpose must fail). Runs nightly, before
+# outbox published), the collector scenario (WP-587: an enrolled collector
+# container with the simulated fleet while server and nats-edge are down;
+# spool, backpressure, every record ingested, loss counter 0), the
+# component scenarios (collector with the server unreachable, spool limits,
+# webhook target down) and the negative self-tests (one record dropped on
+# purpose, a collector spool of one record: both must fail). Runs nightly, before
 # every release (called by release.yml), on changes to the suite and by
 # hand (workflow_dispatch).
 name: Outage Suite
@@ -26,7 +29,9 @@ permissions:
 jobs:
   outage:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # The collector scenario waits for a discovery pass of the collector
+    # (every 5 min) in the suite and in its self-test.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -55,11 +60,17 @@ jobs:
         working-directory: backend
         run: go build -o "$RUNNER_TEMP/seed" ./cmd/seed
 
+      # The collector container of the collector scenario (WP-587), the
+      # image release.yml publishes.
+      - name: Build the collector image
+        run: docker build -t reticora-collector:outage -f collector/Dockerfile .
+
       - name: Run the outage scenarios
         run: ./tests/outage/run.sh
         env:
           OUTAGE_REPORT: ${{ github.workspace }}/outage-report.md
           OUTAGE_SEED_BIN: ${{ runner.temp }}/seed
+          COLLECTOR_IMAGE: reticora-collector:outage
 
       # F-136: the accounting must catch a lost record. The self-test drops
       # the last ingest record of the load on purpose; the run has to fail
@@ -84,10 +95,35 @@ jobs:
           OUTAGE_REPORT: ${{ github.workspace }}/outage-selftest-report.md
           OUTAGE_SEED_BIN: ${{ runner.temp }}/seed
 
+      # WP-587: the collector's spool takes one record, so a pass of 30 does
+      # not fit and is lost. The scenario has to fail with the records lost
+      # and the loss counter above 0, reported by the collector's heartbeats
+      # and logged by the collector.
+      - name: Negative self-test of the collector scenario (spool limit of one record)
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          ./tests/outage/run.sh collector
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the collector self-test passed although its spool takes one record"
+            exit 1
+          fi
+          grep -qE '^\| collector outage \| FAIL \| records: sent [0-9]+ in [0-9]+ passes != ingested [0-9]+ \(lost [1-9][0-9]*\); loss counter: [1-9][0-9]* reported by the heartbeats, [1-9][0-9]* logged by the collector' outage-collector-selftest-report.md || {
+            echo "::error::the collector self-test did not fail with the records lost and the loss counter above 0"
+            exit 1
+          }
+        env:
+          COLLECTOR_SPOOL_RECORDS: "1"
+          COLLECTOR_IMAGE: reticora-collector:outage
+          OUTAGE_REPORT: ${{ github.workspace }}/outage-collector-selftest-report.md
+          OUTAGE_SEED_BIN: ${{ runner.temp }}/seed
+
       - name: Publish the protocol
         if: always()
         run: |
-          for f in outage-report.md outage-selftest-report.md; do
+          for f in outage-report.md outage-selftest-report.md outage-collector-selftest-report.md; do
             [ -f "$f" ] && cat "$f" >> "$GITHUB_STEP_SUMMARY"
           done
           true
@@ -100,6 +136,7 @@ jobs:
           path: |
             outage-report.md
             outage-selftest-report.md
+            outage-collector-selftest-report.md
           retention-days: 90
 
       - name: Show logs on failure
@@ -109,6 +146,7 @@ jobs:
           docker compose --env-file .env ps || true
           docker compose --env-file .env logs --tail 100 server || true
           docker compose --env-file .env logs --tail 40 mailpit || true
+          docker compose --env-file .env logs --tail 40 nats-edge || true
 
       - name: Cleanup
         if: always()

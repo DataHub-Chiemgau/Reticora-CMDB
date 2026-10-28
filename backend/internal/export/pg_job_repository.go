@@ -291,9 +291,25 @@ func (r *PGJobRepository) claimPendingForOrg(ctx context.Context, orgID string, 
 	return out, err
 }
 
+// Heartbeat implements JobRepository: the worker renews started_at of the
+// job it runs (JobWorker.HeartbeatEvery), so ReclaimStale takes back only
+// jobs whose worker stopped renewing it (F-315).
+func (r *PGJobRepository) Heartbeat(ctx context.Context, orgID, id string, at time.Time) error {
+	return database.WithTenant(ctx, r.pool, workerScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			UPDATE export_job SET started_at = $1
+			WHERE organization_id = current_setting('app.org_id')::uuid AND id = $2 AND status = $3`,
+			at.UTC(), id, JobStatusRunning); err != nil {
+			return fmt.Errorf("renew export job heartbeat: %w", err)
+		}
+		return nil
+	})
+}
+
 // ReclaimStale implements JobRepository: the system flag only finds the
 // organizations with stale jobs; each organization's jobs are put back in
 // its own tenant transaction, because the system flag cannot write.
+// started_at is the heartbeat of the running worker (Heartbeat).
 func (r *PGJobRepository) ReclaimStale(ctx context.Context, startedBefore time.Time) (int, error) {
 	var orgIDs []string
 	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {

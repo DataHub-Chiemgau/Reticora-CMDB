@@ -193,9 +193,12 @@ func TestDigestBundlesReviews(t *testing.T) {
 	}
 	d := digests[0]
 	entries, _ := d.Data["entries"].([]any)
+	// The reviewer reads German, the organization's locale (NTF-03): the
+	// digest lists the five subjects once, without an English text.
 	if len(entries) != 5 || d.Data["digest"] != true || d.Data["window"] != notify.DigestHourly ||
-		strings.Count(d.Body, "Neues Review-Item") != 10 || !strings.Contains(d.Subject, "5") {
-		t.Errorf("digest: subject %q, %d entries, data %v, body %q; want 5 entries listed in German and English",
+		strings.Count(d.Body, "Neues Review-Item") != 5 || strings.Contains(d.Body, "notifications") ||
+		d.Subject != "[scopetest-9b-a] Zusammenfassung review: 5 Benachrichtigungen" {
+		t.Errorf("digest: subject %q, %d entries, data %v, body %q; want 5 entries listed in German",
 			d.Subject, len(entries), d.Data, d.Body)
 	}
 	if got := sentTo(mailOf("muted"), "review"); len(got) != 0 {

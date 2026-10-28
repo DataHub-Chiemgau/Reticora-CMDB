@@ -48,6 +48,12 @@ type RackMount struct {
 	Face           string    `json:"face"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+
+	// CIName and CIType are the names of the mounted CI and of its type.
+	// ListMounts fills them, so the layout shows a rack without reading
+	// each CI (RCK-02, F-252); the answer of a single mount has neither.
+	CIName string `json:"ci_name,omitempty"`
+	CIType string `json:"ci_type,omitempty"`
 }
 
 // CreateMountRequest is the payload for mounting a CI into a rack.

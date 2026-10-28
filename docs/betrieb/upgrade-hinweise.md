@@ -161,8 +161,8 @@ Down-Migration nimmt die Reparatur nicht zurück. Prüfung und Nacharbeit:
 
 ## Release-Hinweis: Upgrade von Datenbanken ohne `migration_quarantine` (F-378, E-100)
 
-Stand: 2026-10-28. Umsetzung: WP-649. Entscheidung: E-100 (Empfehlung
-Option 1 als Übergangsregel, nach dem Präzedenzfall E-26 und E-94).
+Stand: 2026-10-28. Umsetzung: WP-649. Entscheidung: E-100 (Option 1,
+entschieden 2026-10-28, nach dem Präzedenzfall E-26 und E-94).
 
 Datenbanken, die 000056 vor E-26 angewendet haben (zwischen 2026-09-02 und
 2026-10-01), besitzen keine Tabelle `migration_quarantine`. Frühere Builds
@@ -220,6 +220,58 @@ direkt bis 179.
 (`backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go`)
 prüft das Upgrade samt der von 000089 abgelegten Zeile und vergleicht das
 Schema mit einer frischen Installation.
+
+## Release-Hinweis: Upgrade mit vorhandenen Interface-Suffixnamen (F-310, E-94)
+
+Stand: 2026-10-28. Umsetzung: WP-592. Entscheidung: E-94 (Empfehlung
+Option 1 als Übergangsregel, nach dem Präzedenzfall E-26).
+
+Migration 000110 macht den Namen eines Interfaces je CI eindeutig und
+benennt vorhandene Duplikate vorher um. Frühere Builds hängten an jedes
+Duplikat nach dem ältesten seine Rangnummer an, ohne vorhandene Namen zu
+prüfen. Hatte ein CI zweimal `eth0` und schon ein `eth0 (1)`, entstand ein
+zweites `eth0 (1)`, und das Upgrade brach ab:
+
+```text
+error: migration failed: could not create unique index "network_interface_ci_name_key", Duplicate keys exist. in line 0: -- Migration 000110: network_interface after NET-01 (WP-123).
+```
+
+Danach meldete jeder weitere Aufruf
+`error: Dirty database version 110. Fix and force version.` golang-migrate
+führt jede Datei in einer Transaktion aus, das Schema stand also weiter auf
+Version 109.
+
+- 000110 vergibt jetzt je CI und Basisname die nächste freie Nummer: Das
+  älteste `eth0` behält seinen Namen, ein vorhandenes `eth0 (1)` ebenfalls,
+  das zweite `eth0` wird `eth0 (2)`. Ohne vorhandene Suffixnamen entstehen
+  dieselben Namen wie bisher.
+- Installationen, die bereits über 110 hinaus migriert sind, sind nicht
+  betroffen und müssen nichts tun. Das Schema frischer Installationen ist
+  unverändert.
+- Ein mit einem früheren Build bei 000110 gescheitertes Upgrade wird mit den
+  Migrationsdateien dieses Releases fortgesetzt:
+
+  ```sql
+  SELECT version, dirty FROM schema_migrations;                 -- 110 | t
+  SELECT count(*) FROM information_schema.columns
+   WHERE table_name = 'network_interface' AND column_name = 'mac_address'; -- 1 (Schema auf 109)
+  ```
+
+  Zeigen die Abfragen etwas anderes, nicht weitermachen, sondern aus dem
+  Backup wiederherstellen. Sonst:
+
+  ```bash
+  migrate -path backend/migrations -database "$DATABASE_URL" force 109
+  migrate -path backend/migrations -database "$DATABASE_URL" up
+  ```
+
+Nachgestellt mit golang-migrate auf einer eigenen Datenbank: Migrationen 1
+bis 109, ein CI mit `vfy-eth0` (zweimal) und `vfy-eth0 (1)`. Mit der alten
+Datei endet `up` mit dem Fehler oben und 110 dirty; nach `force 109` läuft
+`up` mit der neuen Datei bis 180 durch, die Interfaces heißen `vfy-eth0`,
+`vfy-eth0 (2)` und `vfy-eth0 (1)`. `TestNet01DedupeAvoidsExistingSuffix`
+(`backend/internal/ipam/net01_migration_integration_test.go`) prüft die
+Umbenennung samt doppelt vorhandener Suffixnamen.
 
 ## Prüfung
 

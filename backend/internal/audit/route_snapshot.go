@@ -489,8 +489,12 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	m["PUT /api/v1/privacy/retention"] = RouteSnapshot{Table: "privacy_retention_policy", Keys: []SnapshotKey{{"organization_id", "$org"}}}
 	m["PUT /api/v1/reconciliation/source-policy"] = RouteSnapshot{Table: "source_priority_policy",
 		Keys: []SnapshotKey{{"organization_id", "$org"}}, Where: "t.is_default"}
+	// The notification language of the preferences lives in app_user.locale
+	// (NTF-03, F-383).
 	m["PUT /api/v1/notifications/preferences"] = RouteSnapshot{Table: "notification_preference",
-		Keys: []SnapshotKey{{"organization_id", "$org"}, {"user_id", "$user"}}}
+		Keys: []SnapshotKey{{"organization_id", "$org"}, {"user_id", "$user"}},
+		Select: `to_jsonb(t) || jsonb_build_object('locale',
+			(SELECT u.locale FROM app_user u WHERE u.organization_id = t.organization_id AND u.id = t.user_id))`}
 
 	// Routes that change no single row whose values the audit could show.
 	for route, reason := range map[string]string{

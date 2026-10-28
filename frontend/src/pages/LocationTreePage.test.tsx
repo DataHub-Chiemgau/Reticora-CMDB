@@ -428,4 +428,50 @@ describe('LocationTreePage', () => {
       }
     });
   });
+
+  // F-334 (WP-594): a search hit of a location links to /locations?node=<id>;
+  // the page opens the path to that node, marks it and moves focus to it.
+  describe('deep link ?node=<id>', () => {
+    it('opens the path to a collapsed node, marks it and focuses it', async () => {
+      stubApi(() => json({}, 500));
+      renderWithProviders(<LocationTreePage />, { route: '/locations?node=k-1' });
+
+      // Rack A1 sits below the room at depth 2, which starts collapsed.
+      const rack = await row('Rack A1');
+      expect(rack).toHaveAttribute('aria-current', 'true');
+      await waitFor(() => expect(document.activeElement).toBe(rack));
+      const room = await row('Server room');
+      expect(within(room).getByRole('button', { name: 'collapse' })).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      );
+      // Exactly the linked node is marked; the other branches keep their state.
+      expect(document.querySelectorAll('[aria-current]')).toHaveLength(1);
+      expect(screen.getByText('Lab')).toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('marks a node of another site', async () => {
+      stubApi(() => json({}, 500));
+      renderWithProviders(<LocationTreePage />, { route: '/locations?node=r-2' });
+
+      const lab = await row('Lab');
+      expect(lab).toHaveAttribute('aria-current', 'true');
+      await waitFor(() => expect(document.activeElement).toBe(lab));
+      expect(await row('Server room')).not.toHaveAttribute('aria-current');
+    });
+
+    it('says so when the linked node is not in the visible tree', async () => {
+      stubApi(() => json({}, 500));
+      renderWithProviders(<LocationTreePage />, { route: '/locations?node=gone' });
+
+      expect(await screen.findByText('HQ')).toBeInTheDocument();
+      expect(await screen.findByRole('status')).toHaveTextContent(
+        'Der verlinkte Knoten ist nicht vorhanden oder für Sie nicht sichtbar.',
+      );
+      expect(document.querySelectorAll('[aria-current]')).toHaveLength(0);
+      // Without the link the tree starts as before: the rack stays collapsed.
+      expect(screen.queryByText('Rack A1')).not.toBeInTheDocument();
+    });
+  });
 });

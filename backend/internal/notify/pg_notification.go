@@ -216,6 +216,26 @@ func bundleOrganization(ctx context.Context, tx pgx.Tx, orgID string, now time.T
 	if err != nil {
 		return 0, fmt.Errorf("list digest items: %w", err)
 	}
+	if len(items) == 0 {
+		return 0, nil
+	}
+	// The digest is written in the recipient's language and branded
+	// (NTF-03).
+	brand, err := loadBranding(ctx, tx, orgID)
+	if err != nil {
+		return 0, err
+	}
+	ids := make([]string, 0, len(items))
+	for i := range items {
+		ids = append(ids, items[i].Recipient.UserID)
+	}
+	locales, err := userLocales(ctx, tx, orgID, ids)
+	if err != nil {
+		return 0, err
+	}
+	for i := range items {
+		items[i].Recipient.Locale, items[i].Branding = locales[items[i].Recipient.UserID], brand
+	}
 	queued := 0
 	for start := 0; start < len(items); {
 		end := start + 1
@@ -290,8 +310,19 @@ func (s *PGDeliveryStore) ClaimDue(ctx context.Context, now time.Time, limit int
 				return qErr
 			}
 			claimed, cErr := pgx.CollectRows(rows, func(row pgx.CollectableRow) (QueuedDelivery, error) { return scanDelivery(row) })
+			if cErr != nil || len(claimed) == 0 {
+				return cErr
+			}
+			// E-mails carry the organization's sender name (NTF-03).
+			brand, bErr := loadBranding(ctx, tx, orgID)
+			if bErr != nil {
+				return bErr
+			}
+			for i := range claimed {
+				claimed[i].SenderName = brand.senderName()
+			}
 			out = append(out, claimed...)
-			return cErr
+			return nil
 		})
 		if err != nil {
 			return out, fmt.Errorf("claim notifications: %w", err)
@@ -474,6 +505,40 @@ func (s *PGPreferences) SetPreference(ctx context.Context, orgID, userID string,
 		if err != nil {
 			return fmt.Errorf("store notification preference: %w", err)
 		}
+		if p.Locale == nil {
+			return nil
+		}
+		// The notification language lives in app_user.locale (NTF-03,
+		// F-383), in the same transaction; storedLocale decides what an
+		// empty choice stores.
+		var stored string
+		if err = tx.QueryRow(ctx, `SELECT locale FROM app_user WHERE organization_id = $1 AND id::text = $2 FOR UPDATE`,
+			orgID, userID).Scan(&stored); err != nil {
+			return fmt.Errorf("read notification language: %w", err)
+		}
+		if next := storedLocale(stored, *p.Locale); next != stored {
+			if _, err = tx.Exec(ctx, `UPDATE app_user SET locale = $3, updated_at = now() WHERE organization_id = $1 AND id::text = $2`,
+				orgID, userID, next); err != nil {
+				return fmt.Errorf("store notification language: %w", err)
+			}
+		}
 		return nil
 	})
+}
+
+// Locale implements PreferenceStore: the user's notification language from
+// app_user.locale.
+func (s *PGPreferences) Locale(ctx context.Context, orgID, userID string) (string, error) {
+	var stored string
+	err := inOrg(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT locale FROM app_user WHERE organization_id = $1 AND id::text = $2`, orgID, userID).Scan(&stored)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	})
+	if err != nil {
+		return "", fmt.Errorf("read notification language: %w", err)
+	}
+	return UserLocaleChoice(stored), nil
 }

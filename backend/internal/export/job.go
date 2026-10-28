@@ -100,8 +100,11 @@ type JobRepository interface {
 	CompleteJob(ctx context.Context, orgID, id string, objectKey string, rowCount int, fileSize int64, completedAt, expiresAt time.Time) error
 	FailJob(ctx context.Context, orgID, id, message string, at time.Time) error
 	ClaimPending(ctx context.Context, limit int) ([]Job, error)
-	// ReclaimStale puts running jobs started before the given time back to
-	// pending: their worker died (TEC-14).
+	// Heartbeat renews the heartbeat (started_at) of a running job to at;
+	// a job that no longer runs is left as it is (TEC-14, F-315).
+	Heartbeat(ctx context.Context, orgID, id string, at time.Time) error
+	// ReclaimStale puts running jobs whose heartbeat (started_at) lies
+	// before the given time back to pending: their worker died (TEC-14).
 	ReclaimStale(ctx context.Context, startedBefore time.Time) (int, error)
 }
 

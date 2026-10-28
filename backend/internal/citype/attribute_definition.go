@@ -17,6 +17,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
 // AttributeDefinition is one row of attribute_definition (MET-10, DB-03):
@@ -24,7 +25,10 @@ import (
 // belongs to a CI type (scope "type") or applies to every type of the
 // organization (scope "global", no CI type); organization_id NULL marks a
 // read-only system definition. ci_type.attribute_schema is generated from
-// the type's definitions by the database.
+// the type's definitions by the database. Validation is the rule AST of
+// MET-45 (api/rules.schema.json), evaluated bindingly by internal/rules; a
+// legacy structure in a request or a stored row is translated into it
+// (WP-589), and a required rule makes the definition required.
 type AttributeDefinition struct {
 	ID             string        `json:"id"`
 	OrganizationID string        `json:"organization_id,omitempty"`
@@ -43,7 +47,7 @@ type AttributeDefinition struct {
 	Unique          bool                        `json:"unique"`
 	UniqueScope     string                      `json:"unique_scope"`
 	Inheritable     bool                        `json:"inheritable"`
-	Validation      *fieldmeta.ValidationRules  `json:"validation,omitempty"`
+	Validation      *rules.Rule                 `json:"validation,omitempty"`
 	Conditional     *fieldmeta.ConditionalRules `json:"conditional,omitempty"`
 	ReferenceTarget string                      `json:"reference_target,omitempty"`
 	Group           string                      `json:"group,omitempty"`
@@ -55,7 +59,8 @@ type AttributeDefinition struct {
 }
 
 // AttributeDefinitionPatch changes a definition; key, CI type and scope
-// are immutable.
+// are immutable. Validation is a rule AST or the legacy structure (see
+// fieldmeta.ParseValidation); null or {} removes the rules.
 type AttributeDefinitionPatch struct {
 	DisplayName     LocalizedText               `json:"display_name,omitempty"`
 	Description     *string                     `json:"description,omitempty"`
@@ -68,7 +73,7 @@ type AttributeDefinitionPatch struct {
 	Unique          *bool                       `json:"unique,omitempty"`
 	UniqueScope     *string                     `json:"unique_scope,omitempty"`
 	Inheritable     *bool                       `json:"inheritable,omitempty"`
-	Validation      *fieldmeta.ValidationRules  `json:"validation,omitempty"`
+	Validation      json.RawMessage             `json:"validation,omitempty"`
 	Conditional     *fieldmeta.ConditionalRules `json:"conditional,omitempty"`
 	ReferenceTarget *string                     `json:"reference_target,omitempty"`
 	Group           *string                     `json:"group,omitempty"`
@@ -112,9 +117,16 @@ func (d *AttributeDefinition) Field() Field {
 		Label: d.DisplayName.WithFallback(d.Key)["en"], Description: d.Description,
 		DataType: d.DataType, Required: d.Required, DefaultValue: defaultString(d.Default),
 		EnumValues: d.EnumValues, UIGroup: d.Group, SortOrder: d.Order,
-		Validation: d.Validation, Conditional: d.Conditional, ReferenceTarget: d.ReferenceTarget,
+		Validation: d.legacyValidation(), Conditional: d.Conditional, ReferenceTarget: d.ReferenceTarget,
 		IsSystem: d.IsSystem,
 	}
+}
+
+// legacyValidation is the validation in the structure composition and the
+// legacy field view read; Validate rejects a rule no value can satisfy.
+func (d *AttributeDefinition) legacyValidation() *fieldmeta.ValidationRules {
+	v, _, _ := fieldmeta.ValidationFromRule(d.Validation)
+	return v
 }
 
 // definition is the shared fieldmeta shape used for validation.
@@ -151,6 +163,16 @@ func (d *AttributeDefinition) Validate() error {
 	if d.UniqueScope != "org" && d.UniqueScope != "client" {
 		return &api.FieldError{Field: "unique_scope", Message: "unique_scope must be org or client"}
 	}
+	if d.Validation != nil {
+		if err := d.Validation.Validate(); err != nil {
+			return &api.FieldError{Field: "validation", Message: err.Error()}
+		}
+		_, required, err := fieldmeta.ValidationFromRule(d.Validation)
+		if err != nil {
+			return &api.FieldError{Field: "validation", Message: err.Error()}
+		}
+		d.Required = d.Required || required
+	}
 	if err := fieldmeta.ValidateDefinition(d.definition()); err != nil {
 		return &api.FieldError{Field: "data_type", Message: err.Error()}
 	}
@@ -172,7 +194,15 @@ func (d *AttributeDefinition) Validate() error {
 	return nil
 }
 
-func (p *AttributeDefinitionPatch) apply(d *AttributeDefinition) {
+// apply changes d; a validation that is no valid rule is a *api.FieldError.
+func (p *AttributeDefinitionPatch) apply(d *AttributeDefinition) error {
+	if p.Validation != nil {
+		rule, err := fieldmeta.ParseValidation(p.Validation)
+		if err != nil {
+			return &api.FieldError{Field: "validation", Message: err.Error()}
+		}
+		d.Validation = rule
+	}
 	if p.DisplayName != nil {
 		d.DisplayName = p.DisplayName
 	}
@@ -190,9 +220,6 @@ func (p *AttributeDefinitionPatch) apply(d *AttributeDefinition) {
 	setBool(&d.Unique, p.Unique)
 	setString(&d.UniqueScope, p.UniqueScope)
 	setBool(&d.Inheritable, p.Inheritable)
-	if p.Validation != nil {
-		d.Validation = p.Validation
-	}
 	if p.Conditional != nil {
 		d.Conditional = p.Conditional
 	}
@@ -202,6 +229,7 @@ func (p *AttributeDefinitionPatch) apply(d *AttributeDefinition) {
 		d.Order = *p.Order
 	}
 	setString(&d.Unit, p.Unit)
+	return nil
 }
 
 func setString(dst, v *string) {
@@ -255,12 +283,8 @@ func scanAttribute(row pgx.Row) (*AttributeDefinition, error) {
 	if len(enumRaw) > 0 {
 		_ = json.Unmarshal(enumRaw, &d.EnumValues)
 	}
-	if len(validationRaw) > 0 && string(validationRaw) != "{}" {
-		var v fieldmeta.ValidationRules
-		if json.Unmarshal(validationRaw, &v) == nil {
-			d.Validation = &v
-		}
-	}
+	// A legacy structure stored before WP-589 is read as its AST.
+	d.Validation = fieldmeta.StoredValidation(validationRaw)
 	if len(conditionRaw) > 0 && string(conditionRaw) != "null" {
 		var c fieldmeta.ConditionalRules
 		if json.Unmarshal(conditionRaw, &c) == nil {
@@ -545,7 +569,9 @@ func (r *PGRepository) UpdateAttributeDefinition(ctx context.Context, orgID, id 
 			return err
 		}
 		before := *d
-		patch.apply(d)
+		if perr := patch.apply(d); perr != nil {
+			return perr
+		}
 		if verr := d.Validate(); verr != nil {
 			return verr
 		}

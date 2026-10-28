@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
 // CompositionError reports definitions of one key that cannot be composed
@@ -75,12 +76,12 @@ func referenceTarget(def *fieldmeta.FieldDefinition) string {
 
 // allowedValues are the values a definition permits; nil means any. The
 // options of the validation take precedence, as in fieldmeta.Rule.
-func allowedValues(def *fieldmeta.FieldDefinition) []string {
+func allowedValues(def *fieldmeta.FieldDefinition) []any {
 	if def.Validation != nil && len(def.Validation.Options) > 0 {
 		return def.Validation.Options
 	}
 	if len(def.EnumValues) > 0 {
-		return def.EnumValues
+		return fieldmeta.AnyValues(def.EnumValues)
 	}
 	return nil
 }
@@ -116,9 +117,9 @@ func composeField(base, top *fieldmeta.FieldDefinition) (fieldmeta.FieldDefiniti
 		if allowed == nil {
 			allowed = more
 		} else {
-			var both []string
+			var both []any
 			for _, v := range allowed {
-				if slices.Contains(more, v) {
+				if slices.ContainsFunc(more, func(m any) bool { return rules.Equal(v, m) }) {
 					both = append(both, v)
 				}
 			}
@@ -158,7 +159,10 @@ func composeField(base, top *fieldmeta.FieldDefinition) (fieldmeta.FieldDefiniti
 	if allowed != nil {
 		switch fieldmeta.CanonicalType(out.DataType) {
 		case fieldmeta.TypeEnum, fieldmeta.TypeMultiselect:
-			out.EnumValues = allowed
+			out.EnumValues = make([]string, len(allowed))
+			for i, a := range allowed {
+				out.EnumValues[i] = fmt.Sprint(a)
+			}
 		default:
 			v.Options = allowed
 		}

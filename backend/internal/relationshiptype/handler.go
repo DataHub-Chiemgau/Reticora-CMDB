@@ -125,10 +125,14 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeError maps repository errors: an invalid type is 400 (the REL-01
-// rule as text), a missing or system type 404, a taken key 409; database
-// errors go through api.WriteRepoError (23505 is 409 without the constraint
-// name, F-047).
+// rule as text), an unknown CI type key 400 on allowed_source_types or
+// allowed_target_types (E-95, F-313), a missing or system type 404, a taken
+// key 409; database errors go through api.WriteRepoError (23505 is 409
+// without the constraint name, F-047).
 func writeError(w http.ResponseWriter, err error) {
+	if api.WriteFieldError(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, ErrInvalid):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())

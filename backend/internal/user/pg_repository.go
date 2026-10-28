@@ -1671,3 +1671,27 @@ func (r *PGRepository) RecordLoginRefused(ctx context.Context, orgID, userID str
 		return nil
 	})
 }
+
+// unchosenLocale is the column default of app_user.locale: no language
+// chosen, the organization's locale applies (notify.TemplateLocale).
+const unchosenLocale = "de"
+
+// RecordLoginLocale implements identity.LoginLocaleRecorder: it stores the
+// language of the login's locale claim (de-DE or en-US) as the user's
+// notification language (NTF-03, F-383) while app_user.locale holds the
+// column default de, i.e. the user has chosen none. A language the user
+// chose (de-DE, en-US) and an explicit choice of the organization's locale
+// (empty) stay; so does a language taken from an earlier login. Other
+// values are refused.
+func (r *PGRepository) RecordLoginLocale(ctx context.Context, orgID, userID, locale string) error {
+	if locale != "de-DE" && locale != "en-US" {
+		return fmt.Errorf("store login locale: unsupported locale %q", locale)
+	}
+	return database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE app_user SET locale = $3, updated_at = now()
+			WHERE organization_id = $1 AND id::text = $2 AND locale = $4`, orgID, userID, locale, unchosenLocale); err != nil {
+			return fmt.Errorf("store login locale: %w", err)
+		}
+		return nil
+	})
+}

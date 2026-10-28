@@ -3,8 +3,10 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearch } from '../api/hooks';
+import type { SearchHit } from '../api/client';
 import { navFeatureFor } from '../hooks/useEntitlements';
 import { Badge } from './ui/Badge';
+import { Button } from './ui/Button';
 import { cn } from './ui/utils';
 
 export type AppPage =
@@ -114,6 +116,76 @@ interface CommandItem {
   label: string;
   keywords: string[];
   action: () => void;
+  /** A contact hit: selecting it shows the contact card instead of running action. */
+  contact?: SearchHit;
+}
+
+/** The details of a contact hit the card shows below the name (metadata keys). */
+const CONTACT_FIELDS = ['email', 'phone', 'role'] as const;
+
+/**
+ * ContactCard shows a contact search hit: contacts have no page of their own
+ * in phase 1 (F-334), so the palette shows the name, e-mail, phone and role
+ * the hit carries. It takes focus when it opens; "back" returns to the list.
+ */
+function ContactCard({ hit, onBack }: { hit: SearchHit; onBack: () => void }) {
+  const { t } = useTranslation();
+  const headingId = useId();
+  const cardRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    cardRef.current?.focus();
+  }, []);
+  const link = (key: (typeof CONTACT_FIELDS)[number], value: string) => {
+    const linkClass = 'text-primary underline-offset-2 hover:underline';
+    if (key === 'email') {
+      return (
+        <a className={linkClass} href={`mailto:${value}`}>
+          {value}
+        </a>
+      );
+    }
+    if (key === 'phone') {
+      return (
+        <a className={linkClass} href={`tel:${value.replace(/[^+\d]/g, '')}`}>
+          {value}
+        </a>
+      );
+    }
+    return value;
+  };
+  return (
+    <section ref={cardRef} tabIndex={-1} aria-labelledby={headingId} className="p-4 outline-none">
+      <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {t('commandPalette.contact.label')}
+      </p>
+      <h3
+        id={headingId}
+        className="mt-1 text-lg font-semibold text-gray-900 [overflow-wrap:anywhere] dark:text-gray-100"
+      >
+        {hit.title || '—'}
+      </h3>
+      <dl className="mt-3 space-y-2 text-sm">
+        {CONTACT_FIELDS.map((key) => {
+          const value = hit.metadata?.[key];
+          return (
+            <div key={key} className="grid grid-cols-[6rem_minmax(0,1fr)] gap-2">
+              <dt className="text-gray-500 dark:text-gray-400">
+                {t(`commandPalette.contact.${key}`)}
+              </dt>
+              <dd className="min-w-0 text-gray-900 [overflow-wrap:anywhere] dark:text-gray-100">
+                {value ? link(key, value) : '—'}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+      <div className="mt-4 flex justify-end">
+        <Button variant="secondary" size="sm" onClick={onBack}>
+          {t('commandPalette.contact.back')}
+        </Button>
+      </div>
+    </section>
+  );
 }
 
 /**
@@ -173,6 +245,8 @@ export function CommandPalette({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  // The contact hit whose card the palette shows instead of the list.
+  const [contact, setContact] = useState<SearchHit | null>(null);
   const search = useSearch({ q: open ? query : '', limit: 5 });
   const listboxId = useId();
   const listRef = useRef<HTMLDivElement>(null);
@@ -367,8 +441,10 @@ export function CommandPalette({
         id: `search-${hit.entity_type}-${hit.entity_id}`,
         label: `${hit.title} · ${hit.entity_type}`,
         keywords: [hit.summary ?? '', hit.entity_type],
+        // A contact has no page (empty url, F-334): it opens the card.
+        contact: hit.entity_type === 'contact' ? hit : undefined,
         action: () => {
-          window.location.assign(hit.url);
+          if (hit.url) window.location.assign(hit.url);
         },
       })) ?? [];
     return [...remote, ...local];
@@ -400,6 +476,7 @@ export function CommandPalette({
     if (open) {
       setQuery('');
       setSelectedIndex(0);
+      setContact(null);
     }
   }, [open]);
 
@@ -419,6 +496,11 @@ export function CommandPalette({
 
   function handleSelect(command: CommandItem | undefined) {
     if (!command) {
+      return;
+    }
+    if (command.contact) {
+      // The palette stays open and shows the contact.
+      setContact(command.contact);
       return;
     }
 
@@ -493,64 +575,70 @@ export function CommandPalette({
           className="fixed left-1/2 top-[18vh] z-50 w-[min(92vw,36rem)] -translate-x-1/2 rounded-2xl border border-gray-200 bg-white shadow-2xl outline-none dark:border-gray-800 dark:bg-gray-900"
         >
           <Dialog.Title className="sr-only">{t('commandPalette.title')}</Dialog.Title>
-          <div className="border-b border-gray-200 p-3 dark:border-gray-800">
-            <input
-              autoFocus
-              role="combobox"
-              aria-expanded={filteredCommands.length > 0}
-              aria-controls={listboxId}
-              aria-autocomplete="list"
-              aria-activedescendant={
-                filteredCommands.length > 0 ? optionId(selectedIndex) : undefined
-              }
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={handleListNavigation}
-              placeholder={t('commandPalette.searchPlaceholder')}
-              aria-label={t('accessibility.commandPaletteSearch')}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
-            />
-          </div>
-          <div
-            ref={listRef}
-            id={listboxId}
-            // Without options the container only shows the "no results" note.
-            role={filteredCommands.length > 0 ? 'listbox' : undefined}
-            aria-label={filteredCommands.length > 0 ? t('commandPalette.title') : undefined}
-            className="max-h-80 overflow-y-auto p-2"
-          >
-            {filteredCommands.length === 0 ? (
-              <p className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">
-                {t('common.noResults')}
-              </p>
-            ) : (
-              filteredCommands.map((command, index) => (
-                // Options stay out of the Tab order: focus remains in the
-                // search field and the arrow keys move the active option
-                // (aria-activedescendant), so Tab only cycles between the
-                // dialog's controls.
-                <button
-                  key={command.id}
-                  id={optionId(index)}
-                  type="button"
-                  role="option"
-                  aria-selected={index === selectedIndex}
-                  tabIndex={-1}
-                  onMouseEnter={() => setSelectedIndex(index)}
-                  onClick={() => handleSelect(command)}
-                  className={cn(
-                    'flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors',
-                    index === selectedIndex
-                      ? 'bg-primary/10 text-primary dark:bg-primary/20'
-                      : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800',
-                  )}
-                >
-                  <span>{command.label}</span>
-                  <Badge variant="neutral">↵</Badge>
-                </button>
-              ))
-            )}
-          </div>
+          {contact ? (
+            <ContactCard hit={contact} onBack={() => setContact(null)} />
+          ) : (
+            <>
+              <div className="border-b border-gray-200 p-3 dark:border-gray-800">
+                <input
+                  autoFocus
+                  role="combobox"
+                  aria-expanded={filteredCommands.length > 0}
+                  aria-controls={listboxId}
+                  aria-autocomplete="list"
+                  aria-activedescendant={
+                    filteredCommands.length > 0 ? optionId(selectedIndex) : undefined
+                  }
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={handleListNavigation}
+                  placeholder={t('commandPalette.searchPlaceholder')}
+                  aria-label={t('accessibility.commandPaletteSearch')}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                />
+              </div>
+              <div
+                ref={listRef}
+                id={listboxId}
+                // Without options the container only shows the "no results" note.
+                role={filteredCommands.length > 0 ? 'listbox' : undefined}
+                aria-label={filteredCommands.length > 0 ? t('commandPalette.title') : undefined}
+                className="max-h-80 overflow-y-auto p-2"
+              >
+                {filteredCommands.length === 0 ? (
+                  <p className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">
+                    {t('common.noResults')}
+                  </p>
+                ) : (
+                  filteredCommands.map((command, index) => (
+                    // Options stay out of the Tab order: focus remains in the
+                    // search field and the arrow keys move the active option
+                    // (aria-activedescendant), so Tab only cycles between the
+                    // dialog's controls.
+                    <button
+                      key={command.id}
+                      id={optionId(index)}
+                      type="button"
+                      role="option"
+                      aria-selected={index === selectedIndex}
+                      tabIndex={-1}
+                      onMouseEnter={() => setSelectedIndex(index)}
+                      onClick={() => handleSelect(command)}
+                      className={cn(
+                        'flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors',
+                        index === selectedIndex
+                          ? 'bg-primary/10 text-primary dark:bg-primary/20'
+                          : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800',
+                      )}
+                    >
+                      <span>{command.label}</span>
+                      <Badge variant="neutral">↵</Badge>
+                    </button>
+                  ))
+                )}
+              </div>
+            </>
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

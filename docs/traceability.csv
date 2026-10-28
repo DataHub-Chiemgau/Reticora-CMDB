@@ -1004,3 +1004,23 @@ TLC-01;[B];B;backend/internal/signup/signup_integration_test.go;WP-591
 SEC-10;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-593
 GQL-01;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-593
 EXP-01;[B], DATEV [P2];C;backend/internal/export/export_test.go;WP-593
+RCK-02;[B];C;backend/internal/rack/layout_integration_test.go;WP-579
+REC-09;[B];D;backend/internal/discovery/ci_online_integration_test.go;WP-585
+LCY-05;[B];D;backend/cmd/server/main_test.go;WP-585
+RCK-03;[B];B;backend/internal/rack/placement_scope_integration_test.go;WP-650
+NET-01;[B];B;backend/internal/ipam/net01_migration_integration_test.go;WP-592
+REL-01;[B];B;backend/internal/relationship/pg_repository_integration_test.go;WP-592
+TEC-14;[B];B;backend/internal/export/stale_reclaim_integration_test.go;WP-592
+DIS-02;[B], Profilliste (V);D;backend/internal/discovery/system_template_test.go;WP-581
+TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-582
+NTF-03;[B];B;backend/internal/notify/templates_test.go;WP-588
+SRC-01;[B];C;frontend/e2e-real/search-palette.spec.ts;WP-594
+RCK-01;[B];B;frontend/src/pages/RackPage.test.tsx;WP-651
+TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-652
+MET-16;B/G1, Teil P2/G2;B;backend/internal/ci/schema_version_integration_test.go;WP-590
+MET-10;B/G1, Teil P2/G2;B;backend/internal/citype/attrdef_integration_test.go;WP-589
+DB-03;nicht geliefert;B;backend/internal/citype/resolver_layers_test.go;WP-589
+API-05;[B];B;backend/internal/citype/attrdef_integration_test.go;WP-589
+MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/citype/attrdef_integration_test.go;WP-589
+OPS-06;[Q];A;tests/outage/collector.sh;WP-587
+NTF-03;[B];B;backend/internal/notify/locale_integration_test.go;WP-653

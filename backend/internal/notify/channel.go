@@ -138,6 +138,9 @@ type Recipient struct {
 	UserID string `json:"user_id,omitempty"`
 	Email  string `json:"email,omitempty"`
 	Name   string `json:"name,omitempty"`
+	// Locale is the user's locale (app_user.locale); empty for an address
+	// without an account, which reads the organization's (NTF-03).
+	Locale string `json:"-"`
 }
 
 // Message is what a channel delivers.
@@ -147,6 +150,8 @@ type Message struct {
 	Body     string         `json:"body"`
 	To       []Recipient    `json:"to"`
 	Data     map[string]any `json:"data,omitempty"`
+	// SenderName is the organization's sender name of an e-mail (NTF-03).
+	SenderName string `json:"-"`
 }
 
 // Delivery is the result of a send.

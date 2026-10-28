@@ -165,7 +165,23 @@ func (h *Handler) GetPreferences(w http.ResponseWriter, r *http.Request) {
 		p = &Preference{}
 		_ = p.Validate()
 	}
+	p.FillSubscriptions()
+	if !h.withLocale(w, r, t, p) {
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, p)
+}
+
+// withLocale sets the user's notification language (NTF-03, F-383) in p;
+// on a failure it answers and returns false.
+func (h *Handler) withLocale(w http.ResponseWriter, r *http.Request, t tenant.TenantInfo, p *Preference) bool {
+	locale, err := h.c.Preferences.Locale(r.Context(), t.OrganizationID, t.UserID)
+	if err != nil {
+		writeError(w, err)
+		return false
+	}
+	p.Locale = &locale
+	return true
 }
 
 // PutPreferences handles PUT /api/v1/notifications/preferences.
@@ -185,6 +201,9 @@ func (h *Handler) PutPreferences(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.c.Preferences.SetPreference(r.Context(), t.OrganizationID, t.UserID, &p); err != nil {
 		writeError(w, err)
+		return
+	}
+	if !h.withLocale(w, r, t, &p) {
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, p)

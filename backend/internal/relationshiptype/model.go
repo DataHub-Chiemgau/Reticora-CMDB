@@ -30,7 +30,10 @@ var ImpactDirections = []string{ImpactSourceDependsOnTarget, ImpactTargetDepends
 // (CH27): they are listed but never stored.
 var StructuralKeys = []string{"contains", "contained_by", "parent_of", "child_of", "mounted_in", "located_in"}
 
-// Type is a relationship type definition (REL-01).
+// Type is a relationship type definition (REL-01). AllowedSourceTypes and
+// AllowedTargetTypes are CI type keys: POST /relationships takes a source
+// and a target CI of these types only, an empty list allows every type
+// (E-95, F-313). Cardinality is informative until REL-06 [P2].
 type Type struct {
 	ID                 string    `json:"id"`
 	OrganizationID     string    `json:"organization_id,omitempty"`
@@ -63,6 +66,18 @@ type UpsertRequest struct {
 	AllowedTargetTypes []string `json:"allowed_target_types,omitempty"`
 	Cardinality        string   `json:"cardinality,omitempty"`
 	Description        string   `json:"description,omitempty"`
+}
+
+// ciTypeList is a request field that names CI type keys (REL-01, E-95).
+type ciTypeList struct {
+	field string
+	keys  []string
+}
+
+// ciTypeLists returns the CI type lists of a type; a nil list is not set
+// (a change without it keeps the stored list).
+func ciTypeLists(source, target []string) []ciTypeList {
+	return []ciTypeList{{"allowed_source_types", source}, {"allowed_target_types", target}}
 }
 
 func contains(list []string, v string) bool {

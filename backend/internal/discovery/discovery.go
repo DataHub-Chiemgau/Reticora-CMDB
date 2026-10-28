@@ -1096,6 +1096,8 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	if h.ciRepo == nil {
 		return resp, nil
 	}
+	// The CI stores the catalog key of the profile's system template.
+	mapSystemTemplates(ctx, orgID, items)
 	// Whether the transactions take the ingest locks (WP-334): records
 	// consumed from the queue and parallel lanes do.
 	locking := h.locking(ctx)
@@ -1567,10 +1569,12 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			return d.Write
 		}
 		// A sighting updates last_seen_at without history and brings an
-		// unknown CI back to active (REC-07, AUD-03). It is dated by the
-		// record's observed_at (GLO-12): the repository keeps the later of
-		// the two times, and a record not newer than the last sighting
-		// brings no CI back.
+		// unknown CI back to active (REC-07, AUD-03) with the event
+		// ci.online in the record's transaction (REC-09, LCY-05, F-268;
+		// ci.RecordUpdater). It is dated by the record's observed_at
+		// (GLO-12): the repository keeps the later of the two times, and a
+		// record not newer than the last sighting brings no CI back and
+		// raises no ci.online.
 		seen := seenAt(&item)
 		lastSeen := seen.Format(time.RFC3339Nano)
 		update := ci.UpdateRequest{LastSeenAt: &lastSeen}

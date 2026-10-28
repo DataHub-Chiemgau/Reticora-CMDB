@@ -26,8 +26,16 @@ type Request struct {
 	// inboxes only: webhook channels, which post to a URL of the
 	// organization, do not get them (Subscription.Personal).
 	Personal bool
-	Subject  string
-	Body     string
+	// Subject and Body are the text in the organization's language: that
+	// of the webhook channels and of the recipients without a text in
+	// Texts.
+	Subject string
+	Body    string
+	// Texts holds the text per template locale (NTF-03): a recipient gets
+	// the one of TemplateLocale(Recipient.Locale, Branding.Locale).
+	Texts map[string]Text
+	// Branding brands the e-mails (subject prefix, footer); nil: none.
+	Branding *Branding
 	Data     map[string]any
 	// DedupKey identifies the fact: the same key reaches a recipient over
 	// a channel once.
@@ -67,6 +75,9 @@ type QueuedDelivery struct {
 	LastError      string         `json:"last_error,omitempty"`
 	ProviderID     string         `json:"provider_id,omitempty"`
 	SentAt         *time.Time     `json:"sent_at,omitempty"`
+	// SenderName is the organization's sender name of an e-mail (NTF-03),
+	// read when the delivery is claimed.
+	SenderName string `json:"-"`
 }
 
 // Preference is a user's quiet hours, muted categories and digest.
@@ -79,6 +90,26 @@ type Preference struct {
 	// bundled in (hourly or daily, NTF-04); missing: DefaultDigest, empty:
 	// every e-mail on its own.
 	Digest map[string]string `json:"digest"`
+	// Subscriptions are the category subscriptions (NTF-03, E-91 option
+	// 2): every category, subscribed or muted, the view of
+	// MutedCategories. Categories named here when storing win over
+	// MutedCategories.
+	Subscriptions map[string]string `json:"subscriptions,omitempty"`
+	// Locale is the language of the user's notifications (NTF-03, F-383):
+	// de-DE or en-US, empty for the organization's locale. It is stored in
+	// app_user.locale, not with the preference row; nil when storing keeps
+	// the stored language.
+	Locale *string `json:"locale,omitempty"`
+}
+
+// validateLocale checks a notification language of the preferences: de-DE,
+// en-US or empty (the organization's locale).
+func validateLocale(locale string) error {
+	switch locale {
+	case "", LocaleDE, LocaleEN:
+		return nil
+	}
+	return fmt.Errorf("%w: unknown notification language %q (de-DE, en-US or empty for the organization's)", ErrValidation, locale)
 }
 
 // Validate checks the preference.
@@ -103,6 +134,15 @@ func (p *Preference) Validate() error {
 	if p.MutedCategories == nil {
 		p.MutedCategories = []string{}
 	}
+	if p.Locale != nil {
+		if err := validateLocale(*p.Locale); err != nil {
+			return err
+		}
+	}
+	if err := p.applySubscriptions(); err != nil {
+		return err
+	}
+	p.FillSubscriptions()
 	if p.Digest == nil {
 		p.Digest = DefaultDigest()
 	}
@@ -155,10 +195,26 @@ type DeliveryStore interface {
 	List(ctx context.Context, orgID string, limit, offset int) ([]QueuedDelivery, error)
 }
 
-// PreferenceStore reads and writes user preferences.
+// PreferenceStore reads and writes user preferences. SetPreference also
+// stores a Locale that is not nil; Locale returns the user's notification
+// language as UserLocaleChoice names it.
 type PreferenceStore interface {
 	Preference(ctx context.Context, orgID, userID string) (*Preference, error)
 	SetPreference(ctx context.Context, orgID, userID string, p *Preference) error
+	Locale(ctx context.Context, orgID, userID string) (string, error)
+}
+
+// storedLocale returns the new app_user.locale when the user chooses a
+// notification language over the stored one: the language, or empty for
+// the organization's locale. Choosing the organization's locale without a
+// language chosen before keeps the column default (legacyUserLocale), so
+// a later login still takes the IdP's locale claim; after a language it
+// is stored as empty, which no login replaces.
+func storedLocale(stored, chosen string) string {
+	if chosen == "" && strings.EqualFold(strings.TrimSpace(stored), legacyUserLocale) {
+		return stored
+	}
+	return chosen
 }
 
 // FeatureChecker reports whether an organization holds a feature; an error
@@ -257,14 +313,19 @@ func (n *Notifier) Notify(ctx context.Context, orgID string, req *Request) (int,
 				if perr != nil {
 					return 0, perr
 				}
+				locale, text := req.textOf(&r)
 				if window != "" {
+					// The digest brands its e-mail (buildDigest).
 					items = append(items, DigestItem{OrganizationID: orgID, ChannelID: ch.ID, Recipient: r, RecipientKey: key,
-						Category: req.Category, Window: window, WindowEnd: windowEnd(window, timeZone, now), Subject: req.Subject,
-						Body: req.Body, Data: req.Data, DedupKey: req.DedupKey, CreatedAt: now})
+						Category: req.Category, Window: window, WindowEnd: windowEnd(window, timeZone, now), Subject: text.Subject,
+						Body: text.Body, Data: req.Data, DedupKey: req.DedupKey, CreatedAt: now})
 					continue
 				}
+				if ch.Kind == KindEmail {
+					text = req.Branding.Mail(locale, text)
+				}
 				row := base
-				row.Recipient, row.RecipientKey = r, key
+				row.Recipient, row.RecipientKey, row.Subject, row.Body = r, key, text.Subject, text.Body
 				rows = append(rows, row)
 			}
 		}
@@ -280,6 +341,16 @@ func (n *Notifier) Notify(ctx context.Context, orgID string, req *Request) (int,
 	}
 	queued, err := n.store.Enqueue(ctx, orgID, rows)
 	return created + queued, err
+}
+
+// textOf returns the template locale of r and the text of the request in
+// it: the one in Texts, else Subject and Body.
+func (req *Request) textOf(r *Recipient) (string, Text) {
+	locale := TemplateLocale(r.Locale, req.Branding.locale())
+	if t, ok := req.Texts[locale]; ok {
+		return locale, t
+	}
+	return locale, Text{Subject: req.Subject, Body: req.Body}
 }
 
 // ProcessDue works off the due deliveries and returns how many it sent.
@@ -351,7 +422,8 @@ func (n *Notifier) attempt(ctx context.Context, d *QueuedDelivery) (bool, error)
 	if d.RecipientKey == "*" {
 		to = d.Recipients
 	}
-	delivery, err := n.sender.Send(ctx, ch, &Message{Category: d.Category, Subject: d.Subject, Body: d.Body, To: to, Data: d.Data})
+	delivery, err := n.sender.Send(ctx, ch, &Message{Category: d.Category, Subject: d.Subject, Body: d.Body, To: to, Data: d.Data,
+		SenderName: d.SenderName})
 	if err != nil {
 		return false, n.retry(ctx, d, err)
 	}
@@ -401,11 +473,16 @@ type MemoryStore struct {
 	mu    sync.Mutex
 	rows  []*QueuedDelivery
 	prefs map[string]Preference
-	seq   int
+	// locales are the stored app_user.locale by organization/user; a
+	// missing one is the column default.
+	locales map[string]string
+	seq     int
 }
 
 // NewMemoryStore creates an empty store.
-func NewMemoryStore() *MemoryStore { return &MemoryStore{prefs: map[string]Preference{}} }
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{prefs: map[string]Preference{}, locales: map[string]string{}}
+}
 
 // Enqueue implements DeliveryStore.
 func (s *MemoryStore) Enqueue(_ context.Context, orgID string, rows []QueuedDelivery) (int, error) {
@@ -500,6 +577,25 @@ func (s *MemoryStore) SetPreference(_ context.Context, orgID, userID string, p *
 	cp.MutedCategories = append([]string(nil), p.MutedCategories...)
 	sort.Strings(cp.MutedCategories)
 	cp.Digest = maps.Clone(p.Digest)
+	cp.Subscriptions, cp.Locale = nil, nil
 	s.prefs[orgID+"/"+userID] = cp
+	if p.Locale != nil {
+		stored, ok := s.locales[orgID+"/"+userID]
+		if !ok {
+			stored = legacyUserLocale
+		}
+		s.locales[orgID+"/"+userID] = storedLocale(stored, *p.Locale)
+	}
 	return nil
+}
+
+// Locale implements PreferenceStore.
+func (s *MemoryStore) Locale(_ context.Context, orgID, userID string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored, ok := s.locales[orgID+"/"+userID]
+	if !ok {
+		return "", nil
+	}
+	return UserLocaleChoice(stored), nil
 }

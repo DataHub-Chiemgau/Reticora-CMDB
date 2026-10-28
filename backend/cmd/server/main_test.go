@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -493,7 +494,9 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 // worker offline_detector is on. RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED
 // is the switch; the former RETICORA_OFFLINE_DETECTOR_ENABLED still
 // applies without it and is reported as deprecated, next to it it is
-// ignored.
+// ignored. The system job list main registers (systemJobs) holds
+// ci.offline_detector every five minutes exactly while the switch is on
+// (WP-585, REC-09, LCY-05; the registration proof of WP-157).
 func TestOfflineDetectorRunsUnderItsWorkerSwitch(t *testing.T) {
 	for _, tc := range []struct {
 		name, convention, alias string
@@ -514,6 +517,15 @@ func TestOfflineDetectorRunsUnderItsWorkerSwitch(t *testing.T) {
 			cfg := config.Load()
 			if got := registeredSystemJobs(t, systemJobTestDeps(t, cfg, true))[lifecycle.OfflineDetectorKind]; got != tc.registered {
 				t.Errorf("%s registered: %v, want %v", lifecycle.OfflineDetectorKind, got, tc.registered)
+			}
+			var specs []string
+			for _, job := range systemJobs(systemJobTestDeps(t, cfg, true)) {
+				if job.Kind == lifecycle.OfflineDetectorKind {
+					specs = append(specs, job.Spec)
+				}
+			}
+			if want := map[bool][]string{true: {"@every 5m"}, false: nil}[tc.registered]; !slices.Equal(specs, want) {
+				t.Errorf("system jobs %s: schedules %q, want %q", lifecycle.OfflineDetectorKind, specs, want)
 			}
 			warnings := strings.Join(cfg.Warnings(), "\n")
 			if tc.warning == "" && strings.Contains(warnings, config.OfflineDetectorAlias) ||

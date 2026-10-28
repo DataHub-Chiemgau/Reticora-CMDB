@@ -305,6 +305,8 @@ type scopeIdP struct {
 	key    *rsa.PrivateKey
 	org    string
 	codes  map[string][2]string // code -> subject, e-mail
+	// claims are further claims of a subject's ID token (WP-653: locale).
+	claims map[string]map[string]any
 }
 
 func newScopeIdP(t *testing.T, org string) *scopeIdP {
@@ -313,7 +315,7 @@ func newScopeIdP(t *testing.T, org string) *scopeIdP {
 	if err != nil {
 		t.Fatal(err)
 	}
-	idp := &scopeIdP{t: t, key: key, org: org, codes: map[string][2]string{}}
+	idp := &scopeIdP{t: t, key: key, org: org, codes: map[string][2]string{}, claims: map[string]map[string]any{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
 		writeIdPJSON(w, map[string]any{"issuer": idp.server.URL, "jwks_uri": idp.server.URL + "/jwks"})
@@ -356,11 +358,15 @@ func (p *scopeIdP) idToken(subject, email string) string {
 	if err != nil {
 		p.t.Fatal(err)
 	}
-	payload, err := json.Marshal(map[string]any{
+	claims := map[string]any{
 		"iss": p.server.URL, "sub": subject, "aud": "reticora-app", "email": email, "email_verified": true,
 		"name": subject, "organization_id": p.org, "groups": []string{},
 		"iat": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix(),
-	})
+	}
+	for k, v := range p.claims[subject] {
+		claims[k] = v
+	}
+	payload, err := json.Marshal(claims)
 	if err != nil {
 		p.t.Fatal(err)
 	}

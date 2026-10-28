@@ -22,6 +22,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 )
 
 // These tests run against the migrated CI PostgreSQL (see the migrations CI
@@ -628,5 +629,151 @@ func TestEdgesOfStaysInsideScope(t *testing.T) {
 	}
 	if _, err := repo.EdgesOf(bg, f.OrgA, []string{server}, []string{"powered_by"}); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Errorf("without scope: %v, want ErrNoTenantScope", err)
+	}
+}
+
+// TestRelationshipTypeConstraintsEnforced covers WP-592 (REL-01; F-313,
+// E-95 option 1): allowed_source_types and allowed_target_types of a
+// relationship type are CI type keys and are enforced. A key that is no CI
+// type visible to the organization (unknown, or a type of another
+// organization) is refused on create and change of the type with 400 and the
+// field; nothing is stored. POST /relationships refuses a source or target
+// CI of a type outside the list with 422 and a violation on source_ci_id or
+// target_ci_id; nothing is stored. An empty list allows every type, and
+// cardinality is informative until REL-06 [P2].
+//
+// Retest: cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestRelationshipTypeConstraintsEnforced' ./internal/relationship/
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRelationshipTypeConstraintsEnforced(t *testing.T) {
+	f := scopetest.Seed(t, "92")
+	bg := context.Background()
+	user := f.AppUser(t, f.OrgA, "rel01-admin")
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: user})
+	customType := func(orgID, key string) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, `INSERT INTO ci_type (organization_id, name, key) VALUES ($1, $2, $2)`, orgID, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	customType(f.OrgA, "rel01-own-type")
+	customType(f.OrgB, "rel01-foreign-type")
+	ciOfType := func(typeKey, name string) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO ci (organization_id, ci_type_id, name, status)
+			SELECT $1, id, $3, 'active' FROM ci_type WHERE key = $2 AND (organization_id IS NULL OR organization_id = $1)
+			RETURNING id::text`, f.OrgA, typeKey, name).Scan(&id); err != nil {
+			t.Fatalf("CI %s of type %s: %v", name, typeKey, err)
+		}
+		return id
+	}
+	server1, server2 := ciOfType("server", "rel01-server-1"), ciOfType("server", "rel01-server-2")
+	switch1, switch2 := ciOfType("switch", "rel01-switch-1"), ciOfType("switch", "rel01-switch-2")
+	own := ciOfType("rel01-own-type", "rel01-own")
+
+	types := relationshiptype.NewPGRepository(f.App)
+	mux := chi.NewRouter()
+	relationshiptype.NewHandler(types).RegisterRoutes(mux)
+	// As in the server (router.go): the type catalogue checks rel_type.
+	relationship.NewHandler(relationship.NewPGRepository(f.App), types).RegisterRoutes(mux)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, bytes.NewBufferString(body)).WithContext(ctx)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	var problem struct {
+		Field      string `json:"field"`
+		Violations []struct {
+			Field string `json:"field"`
+		} `json:"violations"`
+	}
+	decode := func(w *httptest.ResponseRecorder) {
+		t.Helper()
+		problem.Field, problem.Violations = "", nil
+		_ = json.Unmarshal(w.Body.Bytes(), &problem)
+	}
+
+	// Type create and change: unknown keys are 400 with the field.
+	for _, c := range []struct {
+		name, body, field string
+	}{
+		{"unknown source type", `{"key":"rel01-bad","display_name":"bad","reverse_name":"bad","allowed_source_types":["b16v-nonexistent-type"]}`,
+			"allowed_source_types"},
+		{"unknown target type", `{"key":"rel01-bad","display_name":"bad","reverse_name":"bad","allowed_source_types":["server"],"allowed_target_types":["switch","b16v-nonexistent-type"]}`,
+			"allowed_target_types"},
+		{"type of another organization", `{"key":"rel01-bad","display_name":"bad","reverse_name":"bad","allowed_source_types":["rel01-foreign-type"]}`,
+			"allowed_source_types"},
+	} {
+		w := call(http.MethodPost, "/api/v1/relationship-types", c.body)
+		decode(w)
+		if w.Code != http.StatusBadRequest || problem.Field != c.field {
+			t.Errorf("create, %s: %d %s, want 400 on %s", c.name, w.Code, w.Body.String(), c.field)
+		}
+	}
+	if w := call(http.MethodGet, "/api/v1/relationship-types/rel01-bad", ""); w.Code != http.StatusNotFound {
+		t.Errorf("a refused type was stored: %d %s", w.Code, w.Body.String())
+	}
+	if w := call(http.MethodPost, "/api/v1/relationship-types", `{"key":"rel01-feeds","display_name":"feeds","reverse_name":"fed by",
+		"allowed_source_types":["server","rel01-own-type"],"allowed_target_types":["switch"],"cardinality":"one_to_one"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create with known types: %d %s", w.Code, w.Body.String())
+	}
+	w := call(http.MethodPatch, "/api/v1/relationship-types/rel01-feeds", `{"allowed_target_types":["switch","b16v-nonexistent-type"]}`)
+	decode(w)
+	if w.Code != http.StatusBadRequest || problem.Field != "allowed_target_types" {
+		t.Errorf("change to an unknown target type: %d %s, want 400 on allowed_target_types", w.Code, w.Body.String())
+	}
+	var stored relationshiptype.Type
+	if w = call(http.MethodGet, "/api/v1/relationship-types/rel01-feeds", ""); json.Unmarshal(w.Body.Bytes(), &stored) != nil ||
+		!slices.Equal(stored.AllowedTargetTypes, []string{"switch"}) {
+		t.Errorf("type after the refused change: %s", w.Body.String())
+	}
+	if w = call(http.MethodPatch, "/api/v1/relationship-types/rel01-feeds", `{"description":"power feeds"}`); w.Code != http.StatusOK {
+		t.Errorf("change without type lists: %d %s", w.Code, w.Body.String())
+	}
+	if w = call(http.MethodPost, "/api/v1/relationship-types", `{"key":"rel01-free","display_name":"free","reverse_name":"free"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create without type lists: %d %s", w.Code, w.Body.String())
+	}
+
+	// Edges: a source or target of a type outside the list is 422 on the
+	// field; nothing is stored.
+	edge := func(relType, source, target string) string {
+		return `{"source_ci_id":"` + source + `","target_ci_id":"` + target + `","rel_type":"` + relType + `"}`
+	}
+	for _, c := range []struct {
+		name, body string
+		status     int
+		fields     []string
+	}{
+		{"server to switch", edge("rel01-feeds", server1, switch1), http.StatusCreated, nil},
+		{"own type to switch", edge("rel01-feeds", own, switch1), http.StatusCreated, nil},
+		{"switch as source", edge("rel01-feeds", switch2, switch1), http.StatusUnprocessableEntity, []string{"source_ci_id"}},
+		{"server as target", edge("rel01-feeds", server1, server2), http.StatusUnprocessableEntity, []string{"target_ci_id"}},
+		{"both ends", edge("rel01-feeds", switch1, server1), http.StatusUnprocessableEntity, []string{"source_ci_id", "target_ci_id"}},
+		// cardinality one_to_one is informative: a second edge of the source.
+		{"second edge of the source", edge("rel01-feeds", server1, switch2), http.StatusCreated, nil},
+		// Empty lists: no restriction.
+		{"type without lists", edge("rel01-free", switch1, server1), http.StatusCreated, nil},
+		{"system type", edge("depends_on", switch1, server2), http.StatusCreated, nil},
+	} {
+		w := call(http.MethodPost, "/api/v1/relationships", c.body)
+		decode(w)
+		var fields []string
+		for _, v := range problem.Violations {
+			fields = append(fields, v.Field)
+		}
+		if w.Code != c.status || !slices.Equal(fields, c.fields) {
+			t.Errorf("%s: %d %s, want %d with violations %v", c.name, w.Code, w.Body.String(), c.status, c.fields)
+		}
+	}
+	var refused int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci_relationship WHERE organization_id = $1 AND rel_type = 'rel01-feeds'
+		AND (source_ci_id IN ($2, $3) OR target_ci_id = $4)`, f.OrgA, switch1, switch2, server2).Scan(&refused); err != nil || refused != 0 {
+		t.Errorf("refused edges stored: %d %v", refused, err)
+	}
+	var total int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci_relationship WHERE organization_id = $1`, f.OrgA).Scan(&total); err != nil || total != 5 {
+		t.Errorf("stored edges: %d %v, want 5", total, err)
 	}
 }

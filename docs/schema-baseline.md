@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000180_discovery_serial_interface_origin
+Stand: Migration 000184_attribute_validation_ast
 
 ## Prüfung
 
@@ -234,6 +234,13 @@ Zeilen an ihr neu ab. Die Policies prüfen `app.site_scope` wie bei `ci`
 (Migration 000063): Zeilen ohne Standort bleiben lesbar, schreiben dürfen
 sie nur org-weite Prinzipale (E-09).
 
+Ein neuer `location_id` eines Assets geht über `asset_propagate_location`
+unter der RLS des Schreibenden an seine CIs. Behält danach ein CI des Assets
+– geprüft mit erweitertem Client- und Site-Scope – einen anderen Standort,
+weil der Schreibende es nicht sieht oder nicht ändern darf, lehnt der
+Trigger die Änderung mit 42501 (`asset_location_ci_scope`) ab (Migration
+000181, F-380); Asset und CIs weichen nicht still voneinander ab.
+
 ### Standort von Räumen und Racks (WP-393)
 
 `room` und `rack` tragen `client_id` und `site_id` ihrer 1:1-Location-Zeile
@@ -337,6 +344,59 @@ OR UPDATE`) setzt `change_kind` für Schreiber, die es nicht setzen (ipam,
 rack, override), und speichert `type_change` als `type_changed`, auch wenn
 der Unmerge Zeilen aus einem älteren Merge-Snapshot zurückschreibt. Die
 Policies und `ENABLE` + `FORCE ROW LEVEL SECURITY` sind unverändert.
+
+## Schemaversion und Laufzeitschicht der Attribute (MET-16, WP-590)
+
+`ci_type.attribute_schema` ist das materialisierte Schema eines Typs:
+`generate_attribute_schema` komponiert die System-Basis
+(`attribute_definition` mit `organization_id` und `ci_type_id` `NULL`) mit
+den Definitionen des Typs; jede Änderung ergibt eine neue
+`ci_type.schema_version` (000105, 000107). `ci.schema_version` nennt die
+Version, gegen die ein CI zuletzt geschrieben wurde. Der Trigger
+`ci_schema_version` (`BEFORE INSERT OR UPDATE`, Fassung 000183) setzt sie
+bei jedem `INSERT` und bei jedem `UPDATE`, das `ci_type_id`, `attributes`
+oder eine typisierte Spalte nach CI-01 ändert (`name`, `manufacturer`,
+`model`, `serial_number`, `hardware_uuid`, `management_ip`, `primary_mac`,
+`hostname`, `fqdn`, `os_name`, `os_version`, `firmware_version`,
+`sys_object_id`), auf die aktuelle Version des Typs. Ein `UPDATE`, das nur
+andere Felder ändert (Systemfelder wie `last_seen_at`, `first_seen_at`,
+`health`, `version`, `updated_at`, `deleted_at`; Zuordnung und Status),
+lässt sie unverändert; ein direktes Schreiben von `schema_version` wird
+ignoriert.
+
+Org-globale Attributdefinitionen (`organization_id` gesetzt, `ci_type_id`
+`NULL`, MET-13) sind nach Entscheidung E-93 (entschieden: Option 2) eine
+validierte, nicht materialisierte **Laufzeitschicht**: Der CI-Service
+komponiert sie bei jedem Schreibvorgang der Organisation zwischen System-Basis
+und Typ (`citype.ResolveFields`) und erzwingt sie (Pflichtdefinition ohne Wert
+→ 422). `generate_attribute_schema` nimmt sie nicht auf, ihre Änderung erzeugt
+keine neue Typversion, und `ci.schema_version` referenziert nur System-Basis
+und Typ. Systemtypen sind organisationsübergreifend materialisiert und tragen
+deshalb keine Schicht einer einzelnen Organisation. Eine Org-Schemarevision je
+(Organisation, Typ) (Option 1) wäre ein eigenes WP mit Migration.
+
+## Attributdefinitionen (DB-03, MET-10, MET-16, WP-589)
+
+Nach Entscheidung E-92 (`docs/plan/g1-korrektur/entscheidungen.md`,
+entschieden: Option 2) ist `attribute_definition` die einzige Quelle der
+System-, Organisations- und Typdefinitionen (DB-03); `ci_type.attribute_schema`
+wird daraus erzeugt. Die Definitionen der Instanzattribute bleiben in
+`ci_instance_field_definition` (MET-14 [P2], WP-256), der letzten Schicht der
+Komposition System → Organisation → Typ → Instanz (MET-16, `ResolveFields` in
+`backend/internal/citype/resolver.go`). Weitere Tabellen mit
+Attributdefinitionen gibt es nicht (`TestResolverLayerOrder`). Entscheidet
+der Auftraggeber Option 1, übernimmt ein Folge-WP zusammen mit WP-256 die
+Instanzdefinitionen.
+
+`attribute_definition.validation` speichert seit WP-589 die Regel als AST nach
+MET-45 (`api/rules.schema.json`); `backend/internal/rules` wertet sie bei jedem
+CI-Schreibvorgang verbindlich aus. Die frühere Struktur (`min`, `max`,
+`min_length`, `max_length`, `pattern`, `patterns`, `options`) bleibt in
+Bestandszeilen stehen (keine Datenmigration) und wird beim Lesen in den AST
+übersetzt. Für die Komposition des materialisierten Schemas übersetzt die
+Funktion `reticora_validation_legacy` (Migration 000184) einen AST in diese
+Struktur, wie `fieldmeta.ValidationFromRule`; die Down-Migration schreibt
+AST-Zeilen in die frühere Struktur zurück.
 
 ## Tabellen, RLS und Policies
 

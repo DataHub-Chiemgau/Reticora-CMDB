@@ -184,6 +184,17 @@ func (r *MemoryJobRepository) ClaimPending(_ context.Context, limit int) ([]Job,
 	return out, nil
 }
 
+// Heartbeat implements JobRepository.
+func (r *MemoryJobRepository) Heartbeat(_ context.Context, orgID, id string, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if job, ok := r.jobs[id]; ok && job.OrganizationID == orgID && job.Status == JobStatusRunning {
+		at = at.UTC()
+		job.StartedAt = &at
+	}
+	return nil
+}
+
 // ReclaimStale implements JobRepository.
 func (r *MemoryJobRepository) ReclaimStale(_ context.Context, startedBefore time.Time) (int, error) {
 	r.mu.Lock()

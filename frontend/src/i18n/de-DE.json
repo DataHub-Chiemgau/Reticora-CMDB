@@ -103,6 +103,13 @@
       "security": "Sicherheit & Datenschutz öffnen",
       "map": "Karte öffnen",
       "roomplan": "Raumplan öffnen"
+    },
+    "contact": {
+      "label": "Kontakt",
+      "email": "E-Mail",
+      "phone": "Telefon",
+      "role": "Rolle",
+      "back": "Zurück zur Suche"
     }
   },
   "dashboard": {
@@ -843,7 +850,8 @@
     "mountsLoadError": "Die Einbauten konnten nicht geladen werden",
     "faceLabel": "Rackseite wählen",
     "faceFront": "Vorderseite",
-    "faceRear": "Rückseite"
+    "faceRear": "Rückseite",
+    "faceBoth": "Vorder- und Rückseite"
   },
   "permissions": {
     "title": "Berechtigungen",
@@ -1450,6 +1458,7 @@
     "addChild": "Unterpunkt",
     "createRoot": "Standort anlegen",
     "empty": "Noch keine Standorte. Legen Sie zuerst einen Standort an.",
+    "nodeNotFound": "Der verlinkte Knoten ist nicht vorhanden oder für Sie nicht sichtbar.",
     "client": "Mandant",
     "deleteFailed": "Löschen nicht möglich",
     "title": "Standorte & Lager",

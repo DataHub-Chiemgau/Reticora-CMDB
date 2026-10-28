@@ -514,11 +514,14 @@ changes to the suite and by hand (`workflow_dispatch`). Before the
 installation it merges Mailpit and the central SMTP server of the
 installation (`RETICORA_SMTP_HOST=mailpit`) into the source-build override
 (`tests/outage/smtp.sh overlay`), so `/readyz` has the `smtp` check from the
-first start. The protocol `outage-report.md` and the protocol of the
-negative self-test (`outage-selftest-report.md`) are kept as the workflow
-artifact `outage-report` for 90 days. `tests/outage/config.test.sh` (CI job
-`gate`) checks the suite without a stack: the SMTP scenario, the accounting
-and the self-test against stubs, the overlay and outage.yml.
+first start. It also builds the collector image (`collector/Dockerfile`,
+`reticora-collector:outage`) for the collector scenario. The protocol
+`outage-report.md` and the protocols of the negative self-tests
+(`outage-selftest-report.md`, `outage-collector-selftest-report.md`) are
+kept as the workflow artifact `outage-report` for 90 days.
+`tests/outage/config.test.sh` (CI job `gate`) checks the suite without a
+stack: the SMTP scenario, the accounting, the collector scenario and both
+self-tests against stubs, the overlay and outage.yml.
 
 During every dependency outage `tests/outage/load.sh` sends 50 API writes
 (`POST /api/v1/cis`) and 50 ingest records (`POST /api/v1/ingest/bulk`, one
@@ -538,10 +541,12 @@ protocol.
 |---|---|---|
 | PostgreSQL, NATS, Redis, object storage (MinIO) | `docker compose stop <service>` for at least 30 s, with the load | `/readyz` answers 503 and reports exactly that dependency as `unavailable`, so load balancers stop routing (backpressure). The server process keeps running without restarts and is ready again after the restart. A marker row written before the outage is still there. The load: PostgreSQL down → every request 503 (the API key cannot be checked: not 401, so the pre-auth limit does not lock the client out); NATS down → CI writes accepted (the event outbox keeps their events until NATS is back), ingest refused with 503 at once and never queued later; Redis down → 429 (the rate limiter fails closed); MinIO down → accepted. Then accepted == persisted, the ingest queue is empty and the outbox published. |
 | SMTP (`RETICORA_SMTP_HOST`, Mailpit) | `docker compose stop mailpit`, with the load; an invitation (a notification over the e-mail channel `central_smtp`) during the outage | `/readyz` answers 503 with `"smtp":"unavailable"`, so **a mail-server outage takes every instance out of the load balancer** (Compose healthcheck, Kubernetes readinessProbe) although the API itself still works (the load is accepted). The delivery stays `pending` with `attempts` ≥ 1 and the cause in `last_error`. The notifier retries 2 minutes after the first failure (doubling, at most 5 attempts), so Mailpit stays down at least 25 s after the failed attempt; once it is back the delivery is `sent` within 120 s and Mailpit holds exactly one message to the invitee. The server logs `readiness check failed` with `check=smtp` and the address once. Without `RETICORA_SMTP_HOST` there is no `smtp` check. |
-| Collector, server unreachable | `TestUploadRecords_FailureSpoolsAndFlushDelivers`, `TestHeartbeatReportsSpoolBackpressureAndLoss` | Records go to the spool and are delivered once the server is reachable. The spool level and every loss are reported. |
+| Collector, server unreachable (Compose, `tests/outage/collector.sh`) | An enrolled collector container (the image of `collector/Dockerfile` with the simulated fleet, `RETICORA_SIMULATE`, 30 devices per pass every 5 min) on the stack's network, enrolled with a one-time code (`RETICORA_ENROLL_TOKEN`), delivering over `nats-edge`. Its first pass is delivered and ingested; shortly before the next pass `docker compose stop server nats-edge` for at least 60 s and until that pass ran. The spool limit is one pass plus 5 % (measured by a collector without network that spools one pass) | The spool counter (messages in the collector's spool directory) rises during the outage; the spool is saturated, so the collector pauses discovery. After `docker compose start server nats-edge` the first heartbeat the server accepts reports backpressure (server log `collector.spool.degraded` of the collector), then the spool is delivered. Every record of every pass (collector log `discovery completed`) is ingested (rows of the collector in `ingest_record`), and the loss counter is 0: no dropped message or sample in the heartbeats (`reticora_collector_spool_dropped_total`) and no `collector.spool.data_lost` in the collector log. Runs last, because it restarts the server. |
+| Collector, server unreachable (component) | `TestUploadRecords_FailureSpoolsAndFlushDelivers`, `TestHeartbeatReportsSpoolBackpressureAndLoss` | Records go to the spool and are delivered once the server is reachable. The spool level and every loss are reported. |
 | Collector spool limits | `TestDiskBufferSizeLimitAppliesBackpressure`, `TestDiskBufferMaxAgeKeepsMessagesFor24Hours`, `TestPersistenceAcrossBufferInstances` | A full spool refuses new data instead of dropping old data silently. The spool survives restarts. |
 | Webhook target down | `TestDispatcherPersistsAndRetriesFailedDelivery`, `TestDispatcherMarksDeliveryFailedAfterMaxAttempts` | Deliveries are persisted and retried. After the last attempt they go to the dead-letter queue. |
 | Negative self-test | `OUTAGE_SELFTEST_DROP=1 ./tests/outage/run.sh minio`: the last ingest record of the load counts as accepted but is never sent | The run fails with exactly that record lost; outage.yml fails if it passes or fails for another reason. |
+| Negative self-test of the collector | `COLLECTOR_SPOOL_RECORDS=1 ./tests/outage/run.sh collector`: the collector's spool takes one record, a pass of 30 does not fit | The collector counts the pass as lost; the run fails with the records lost (sent != ingested) and the loss counter above 0, reported by the heartbeats and logged by the collector; outage.yml fails if it passes or fails without them. |
 
 A refusal for an unreachable dependency is 503 with `Retry-After`: a
 request with an API key while PostgreSQL is down, an ingest while NATS is
@@ -570,6 +575,10 @@ install the checkout (`./install.sh --cloud --non-interactive
 ./tests/outage/run.sh nats redis              # selected scenarios
 OUTAGE_SELFTEST_DROP=1 OUTAGE_REPORT=outage-selftest-report.md \
   ./tests/outage/run.sh minio                 # must fail: one record lost
+docker build -t reticora-collector:outage -f collector/Dockerfile .
+./tests/outage/run.sh collector               # about 8 min (one discovery interval)
+COLLECTOR_SPOOL_RECORDS=1 OUTAGE_REPORT=outage-collector-selftest-report.md \
+  ./tests/outage/run.sh collector             # must fail: records lost
 ./tests/outage/config.test.sh                 # without a stack (CI job gate)
 ```
 

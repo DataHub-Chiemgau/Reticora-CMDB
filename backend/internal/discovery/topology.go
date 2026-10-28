@@ -129,11 +129,14 @@ func DeriveRelationships(
 // the edges to upsert and the neighbors with an unknown relationship key
 // (TOP-01): LLDP/CDP neighbors are connected_to with confidence 1.0; FDB
 // entries give connected_to with 0.6 only on ports without an LLDP/CDP
-// neighbor and with at most four MACs (more is a trunk); ARP entries only
-// enrich, they give no edge. resolve maps (ip, mac, hostname) to a CI id;
-// suppressed skips (source, target, type) edges a user removed (REL-03).
-// The result is deduplicated and
-// free of self-loops.
+// neighbor, with at most four MACs (more is a trunk) and to CIs no LLDP/CDP
+// neighbor of the device names; ARP entries only enrich, they give no edge.
+// resolve maps (ip, mac, hostname) to a CI id; suppressed skips (source,
+// target, type) edges a user removed (REL-03). The result is deduplicated,
+// keeping the highest confidence of an edge, and free of self-loops. It does
+// not depend on the order of rels: the FDB entries are derived after every
+// other neighbor (F-269: an FDB entry listed before the LLDP neighbor of the
+// same CI gave that edge 0.6, and the stored value flipped between ingests).
 func DeriveTopology(
 	sourceCIID string,
 	rels []wire.IngestRelationship,
@@ -162,10 +165,26 @@ func DeriveTopology(
 		}
 	}
 
-	seen := make(map[string]struct{})
+	// Every other neighbor first, the FDB entries last.
+	order := make([]int, 0, len(rels))
+	for i := range rels {
+		if neighborProtocol(&rels[i]) != "fdb" {
+			order = append(order, i)
+		}
+	}
+	for i := range rels {
+		if neighborProtocol(&rels[i]) == "fdb" {
+			order = append(order, i)
+		}
+	}
+
+	// edgeAt is the index of an edge in derived; lldpPeers are the CIs an
+	// LLDP/CDP neighbor of the device names.
+	edgeAt := make(map[string]int)
+	lldpPeers := make(map[string]bool)
 	var derived []DerivedRelationship
 	var unknown []UnknownRelationship
-	for i := range rels {
+	for _, i := range order {
 		rel := &rels[i]
 		protocol := neighborProtocol(rel)
 		port := normalizeKey(rel.LocalInterface)
@@ -186,6 +205,14 @@ func DeriveTopology(
 		if !ok || targetID == "" || targetID == sourceCIID {
 			continue
 		}
+		switch protocol {
+		case "lldp", "cdp":
+			lldpPeers[targetID] = true
+		case "fdb":
+			if lldpPeers[targetID] {
+				continue // the LLDP/CDP neighbor is the edge of the pair
+			}
+		}
 		if suppressed != nil && known && suppressed(sourceCIID, targetID, relType) {
 			continue
 		}
@@ -193,14 +220,15 @@ func DeriveTopology(
 			unknown = append(unknown, UnknownRelationship{SourceCIID: sourceCIID, TargetCIID: targetID, TypeKey: rel.TypeKey, Neighbor: *rel})
 			continue
 		}
-		key := sourceCIID + "|" + targetID + "|" + relType
-		if _, dup := seen[key]; dup {
-			continue
-		}
-		seen[key] = struct{}{}
 		if confidence == 0 {
 			confidence = defaultConfidence
 		}
+		key := sourceCIID + "|" + targetID + "|" + relType
+		if at, dup := edgeAt[key]; dup {
+			derived[at].Confidence = max(derived[at].Confidence, confidence)
+			continue
+		}
+		edgeAt[key] = len(derived)
 		derived = append(derived, DerivedRelationship{
 			SourceCIID: sourceCIID,
 			TargetCIID: targetID,
@@ -626,9 +654,11 @@ func (h *Handler) reconfirm(ctx context.Context, orgID, id string, confidence *f
 const ReviewKindUnknownRelationship = reviews.KindUnknownRelationship
 
 // reviewUnknownRelationship opens the review of an unknown key; a
-// dismissed key of the pair stays dismissed.
+// dismissed key of the pair stays dismissed, and an accepted pair opens no
+// new review while its edge exists or its suppression keeps it away
+// (acceptedEdgeHolds, F-382).
 func (h *Handler) reviewUnknownRelationship(ctx context.Context, orgID string, u *UnknownRelationship) {
-	_, err := h.ReviewService().OpenUnlessDismissed(ctx, &ReviewItem{
+	_, err := h.ReviewService().OpenUnlessSettled(ctx, &ReviewItem{
 		OrganizationID: orgID,
 		Kind:           ReviewKindUnknownRelationship,
 		Status:         ReviewStatusOpen,
@@ -643,10 +673,45 @@ func (h *Handler) reviewUnknownRelationship(ctx context.Context, orgID string, u
 			"target_ip":       u.Neighbor.TargetIP,
 			"target_mac":      u.Neighbor.TargetMAC,
 		},
-	}, "type_key")
+	}, "type_key", h.acceptedEdgeHolds)
 	if err != nil {
 		slog.Error("open unknown_relationship review", "organization_id", orgID, "error", err)
 	}
+}
+
+// acceptedEdgeHolds reports whether an accepted unknown_relationship review
+// still holds (F-382): the pair has the connected_to edge accept records
+// (source -> target, of any source, as upsertRelationship finds it), or
+// that edge is suppressed: a user deleted it (force, REL-03), which answers
+// the question as a dismissal would. Once the suppression is lifted the
+// pair has neither and the next report opens a new review.
+func (h *Handler) acceptedEdgeHolds(ctx context.Context, item *ReviewItem) (bool, error) {
+	sourceID, targetID := payloadString(item.Payload, "source_ci_id"), payloadString(item.Payload, "target_ci_id")
+	if sourceID == "" || targetID == "" || h.relRepo == nil {
+		return false, nil
+	}
+	const relType = "connected_to"
+	if finder, ok := h.repo.(edgeFinder); ok {
+		_, _, found, err := finder.DiscoveryEdge(ctx, item.OrganizationID, sourceID, targetID, relType)
+		if err != nil || found {
+			return found, err
+		}
+	} else {
+		existing, _, err := h.relRepo.List(ctx, item.OrganizationID, sourceID, api.PaginationParams{Limit: 10000, Offset: 0})
+		if err != nil {
+			return false, err
+		}
+		for i := range existing {
+			if existing[i].SourceCIID == sourceID && existing[i].TargetCIID == targetID && existing[i].RelType == relType {
+				return true, nil
+			}
+		}
+	}
+	suppressed, err := h.suppressionChecker(ctx, item.OrganizationID)
+	if err != nil {
+		return false, err
+	}
+	return suppressed != nil && suppressed(sourceID, targetID, relType), nil
 }
 
 // resolveUnknownRelationship: accept records the neighbor as connected_to

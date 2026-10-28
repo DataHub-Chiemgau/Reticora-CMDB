@@ -1070,3 +1070,91 @@ func TestSessionPermissionsComeFromDatabaseRoles(t *testing.T) {
 		t.Errorf("session permissions %v, want exactly the viewer role's ci:read and site:read", claims.Permissions)
 	}
 }
+
+// localeProvisioner provisions every login as app-user-1 and records the
+// notification languages the login stores; err fails storing.
+type localeProvisioner struct {
+	recorded *[]string
+	err      error
+}
+
+func (localeProvisioner) EnsureUser(context.Context, string, string, string, string, string) (string, bool, error) {
+	return "app-user-1", false, nil
+}
+
+func (p localeProvisioner) RecordLoginLocale(_ context.Context, orgID, userID, locale string) error {
+	*p.recorded = append(*p.recorded, orgID+"/"+userID+"/"+locale)
+	return p.err
+}
+
+// TestLoginStoresLocaleClaim covers NTF-03 (WP-653, F-383): a login whose
+// ID token carries a locale claim of a language with notification
+// templates hands its template locale (de* → de-DE, en* → en-US, also with
+// an underscore) with the app_user id to the provisioner's
+// LoginLocaleRecorder; a claim of another language, one that is no string
+// and a token without the claim hand nothing. A failure to store does not
+// fail the login; a login refused for want of a role stores nothing.
+func TestLoginStoresLocaleClaim(t *testing.T) {
+	orgID := "123e4567-e89b-12d3-a456-426614174000"
+	login := func(claim any, provisioner localeProvisioner, holds bool) *httptest.ResponseRecorder {
+		t.Helper()
+		fake := newFakeOIDCServer(t)
+		fake.mutateClaims = func(c map[string]any) {
+			// No IdP role group: the stored assignment decides.
+			c["groups"] = []string{}
+			if claim != nil {
+				c["locale"] = claim
+			}
+		}
+		resolver := storedRoleResolver{standardRoleResolver: standardRoleResolver{"viewer": {PermCIRead}}}
+		if holds {
+			resolver.stored = []Grant{OrgWideGrant([]Permission{PermCIRead})}
+		}
+		handler := NewHandler(NewOIDCProvider(OIDCConfig{
+			IssuerURL:    fake.issuer(),
+			ClientID:     "reticora-app",
+			ClientSecret: "top-secret",
+			RedirectURL:  "https://app.example.com/callback",
+		}), testSessionIssuer(t)).WithProvisioning(provisioner, "").WithAccessResolver(resolver)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/callback",
+			strings.NewReader(`{"code":"auth-code","state":"nonce","code_verifier":"verifier-123"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.Callback(w, req)
+		return w
+	}
+	for _, tc := range []struct {
+		claim any
+		want  string
+	}{
+		{"en", orgID + "/app-user-1/en-US"},
+		{"en-GB", orgID + "/app-user-1/en-US"},
+		{"EN_us", orgID + "/app-user-1/en-US"},
+		{"de", orgID + "/app-user-1/de-DE"},
+		{" de-AT ", orgID + "/app-user-1/de-DE"},
+		{"fr-FR", ""},
+		{"english", ""},
+		{"", ""},
+		{42, ""},
+		{nil, ""},
+	} {
+		var recorded []string
+		w := login(tc.claim, localeProvisioner{recorded: &recorded}, true)
+		if w.Code != http.StatusOK || !hasSession(w) {
+			t.Errorf("locale claim %#v: status %d, session %v; want 200 with session", tc.claim, w.Code, hasSession(w))
+			continue
+		}
+		if got := strings.Join(recorded, ","); got != tc.want {
+			t.Errorf("locale claim %#v: stored %q, want %q (F-383)", tc.claim, got, tc.want)
+		}
+	}
+
+	var recorded []string
+	if w := login("en", localeProvisioner{recorded: &recorded, err: errors.New("database unavailable")}, true); w.Code != http.StatusOK || !hasSession(w) {
+		t.Errorf("failing store: status %d, session %v; want 200 with session", w.Code, hasSession(w))
+	}
+	recorded = nil
+	if w := login("en", localeProvisioner{recorded: &recorded}, false); w.Code != http.StatusForbidden || len(recorded) != 0 {
+		t.Errorf("login without role: status %d, stored %v; want 403 and nothing stored", w.Code, recorded)
+	}
+}

@@ -31,7 +31,15 @@
 #     last_error, then sent and exactly one mail → PASS; two mails, no failed
 #     attempt, never sent, no smtp check → FAIL;
 #   - load_setup_db_url: load_setup hands cmd/seed the bootstrap password of
-#     the installation's .env, also though the seed runs in backend/.
+#     the installation's .env, also though the seed runs in backend/;
+#   - collector_scenario_*: collector_outage (collector.sh, WP-587) against
+#     a stub of the collector containers, the stack and the database: spool
+#     rises during the outage of server and nats-edge, backpressure in the
+#     heartbeat after the restart, every record ingested, loss counter 0 →
+#     PASS; spool limit of one record (the self-test of outage.yml), no
+#     backpressure, records lost on delivery, no collector image → FAIL;
+#     outage.yml builds the collector image and runs the collector
+#     self-test (outage_workflow).
 #
 # Tools: python3 with PyYAML, jq, shellcheck (SHELLCHECK=<path> or PATH) and
 # docker compose. A missing tool is a FAIL of its case.
@@ -60,10 +68,14 @@ tool() { # tool <ENVVAR> <name>
     command -v "$2" 2>/dev/null
 }
 
-SUITE=(tests/outage/run.sh tests/outage/lib.sh tests/outage/load.sh tests/outage/smtp.sh tests/outage/config.test.sh)
+SUITE=(tests/outage/run.sh tests/outage/lib.sh tests/outage/load.sh tests/outage/smtp.sh tests/outage/collector.sh
+    tests/outage/config.test.sh)
 # The line of the self-test that outage.yml expects (grep -E), here with the
 # default load of 50 ingest records.
 SELFTEST_LINE='^\| minio outage \| FAIL \| ingest: accepted [0-9]+ != persisted [0-9]+ \(lost 1: OUTAGE-[0-9]+-minio-I50, late 0\) \|$'
+# The line of the collector self-test (COLLECTOR_SPOOL_RECORDS=1) that
+# outage.yml expects (grep -E).
+COLLECTOR_SELFTEST_LINE='^\| collector outage \| FAIL \| records: sent [0-9]+ in [0-9]+ passes != ingested [0-9]+ \(lost [1-9][0-9]*\); loss counter: [1-9][0-9]* reported by the heartbeats, [1-9][0-9]* logged by the collector'
 
 # ─── WP-104/WP-449: the SMTP outage scenario is exercised (F-135) ───────────
 smtp_case="$(grep -nE '^ *smtp\)' tests/outage/run.sh || true)"
@@ -98,16 +110,23 @@ for s in $scenarios; do
             printf '%s' "$line" | grep -q "load_scenario $s && dependency_outage $s " || problems="$problems $s without load;" ;;
         smtp) printf '%s' "$line" | grep -q 'load_scenario smtp && smtp_outage' || problems="$problems smtp without load;" ;;
         component) printf '%s' "$line" | grep -q 'component_scenarios' || problems="$problems component;" ;;
+        collector) printf '%s' "$line" | grep -q 'load_scenario collector && collector_outage' || problems="$problems collector;" ;;
         *) problems="$problems unknown $s;" ;;
     esac
 done
-for s in postgres nats redis minio smtp component; do
+for s in postgres nats redis minio smtp component collector; do
     case " $scenarios " in *" $s "*) ;; *) problems="$problems $s not in ALL_SCENARIOS;" ;; esac
 done
 grep -q 'LOAD_API_WRITES="${LOAD_API_WRITES:-50}"' tests/outage/load.sh || problems="$problems LOAD_API_WRITES default not 50;"
 grep -q 'LOAD_INGEST_RECORDS="${LOAD_INGEST_RECORDS:-50}"' tests/outage/load.sh || problems="$problems LOAD_INGEST_RECORDS default not 50;"
+# WP-587: server and nats-edge down for 60 s, a spool of one pass (30
+# records of the simulated fleet).
+for needle in 'COLLECTOR_OUTAGE_SECONDS="${COLLECTOR_OUTAGE_SECONDS:-60}"' 'COLLECTOR_SPOOL_RECORDS="${COLLECTOR_SPOOL_RECORDS:-30}"' \
+    'compose stop server nats-edge' '-e RETICORA_SIMULATE=true' '-e RETICORA_ENROLL_TOKEN '; do
+    grep -qF -- "$needle" tests/outage/collector.sh || problems="$problems collector.sh without [$needle];"
+done
 if [ -z "$problems" ]; then
-    ok "outage_scenarios: postgres, nats, redis, minio and smtp run under load (50 API writes, 50 ingest records), component as before"
+    ok "outage_scenarios: postgres, nats, redis, minio and smtp run under load (50 API writes, 50 ingest records), collector stops server and nats-edge for 60 s, component as before"
 else
     fail "outage_scenarios: every scenario has its case and the outages run under load" "$problems"
 fi
@@ -130,9 +149,9 @@ fi
 # ─── Workflows ──────────────────────────────────────────────────────────────
 if ! python3 -c 'import yaml' 2>/dev/null; then
     fail "outage_workflow: python3 with PyYAML available" "import yaml failed"
-elif out="$(python3 - "$SELFTEST_LINE" <<'PY'
+elif out="$(python3 - "$SELFTEST_LINE" "$COLLECTOR_SELFTEST_LINE" <<'PY'
 import sys, yaml
-selftest_line = sys.argv[1]
+selftest_line, collector_line = sys.argv[1], sys.argv[2]
 problems = []
 wf = yaml.safe_load(open(".github/workflows/outage.yml"))
 steps = wf["jobs"]["outage"]["steps"]
@@ -169,9 +188,31 @@ if selftest != -1:
         problems.append("self-test must run after a failed suite too (if: !cancelled())")
     if (s.get("env") or {}).get("OUTAGE_REPORT", "").endswith("outage-report.md"):
         problems.append("self-test overwrites the protocol of the suite")
+# WP-587: the collector image before the suite, the collector self-test.
+image = index(lambda s: "docker build -t reticora-collector:outage -f collector/Dockerfile ." in run(s), "collector image build")
+if -1 not in (image, suite) and not image < suite:
+    problems.append("the collector image must be built before the suite")
+if suite != -1 and (steps[suite].get("env") or {}).get("COLLECTOR_IMAGE") != "reticora-collector:outage":
+    problems.append("suite step without COLLECTOR_IMAGE=reticora-collector:outage")
+colself = index(lambda s: (s.get("env") or {}).get("COLLECTOR_SPOOL_RECORDS") == "1", "collector self-test")
+if colself != -1:
+    s = steps[colself]
+    env = s.get("env") or {}
+    if "./tests/outage/run.sh collector" not in run(s):
+        problems.append("collector self-test does not run the collector scenario")
+    if collector_line not in run(s):
+        problems.append("collector self-test does not expect the records lost and the loss counter: " + collector_line)
+    if "rc" not in run(s) or "exit 1" not in run(s):
+        problems.append("collector self-test does not fail when the run passes")
+    if s.get("if") != "${{ !cancelled() }}":
+        problems.append("collector self-test must run after a failed suite too (if: !cancelled())")
+    if env.get("OUTAGE_REPORT", "").endswith(("outage-report.md", "outage-selftest-report.md")) or "OUTAGE_SEED_BIN" not in env:
+        problems.append("collector self-test overwrites another protocol or has no seed")
+    if env.get("COLLECTOR_IMAGE") != "reticora-collector:outage":
+        problems.append("collector self-test without COLLECTOR_IMAGE")
 if upload != -1:
     paths = str(steps[upload].get("with", {}).get("path", ""))
-    for p in ("outage-report.md", "outage-selftest-report.md"):
+    for p in ("outage-report.md", "outage-selftest-report.md", "outage-collector-selftest-report.md"):
         if p not in paths:
             problems.append("upload without " + p)
 ci = yaml.safe_load(open(".github/workflows/ci.yml"))
@@ -180,7 +221,7 @@ if not any("./tests/outage/config.test.sh" in (s.get("run") or "") for s in ci["
 print("\n".join(problems))
 PY
 )" && [ -z "$out" ]; then
-    ok "outage_workflow: overlay before the source installation, seed, suite, self-test expecting exactly the dropped record lost, both protocols uploaded; gate runs this file"
+    ok "outage_workflow: overlay before the source installation, seed, collector image, suite, self-test expecting exactly the dropped record lost, collector self-test expecting the records lost and the loss counter, all three protocols uploaded; gate runs this file"
 else
     fail "outage_workflow: outage.yml and the ci.yml job gate" "$out"
 fi
@@ -263,6 +304,74 @@ stub_run() {
         OUTAGE_REPORT="$S/report.md" OUTAGE_SEED_BIN="$S/seed"
         OUTAGE_SECONDS=0 RECOVERY_TIMEOUT=1 SMTP_SENT_TIMEOUT=2 SMTP_ATTEMPT_TIMEOUT=1 SMTP_HOLD_AFTER_FAILURE=0
         LOAD_API_WRITES="${FAKE_LOAD:-50}" LOAD_INGEST_RECORDS="${FAKE_LOAD:-50}"
+        COLLECTOR_INTERVAL_SECONDS=0 COLLECTOR_OUTAGE_SECONDS=0 COLLECTOR_PASS_TIMEOUT=1 COLLECTOR_START_TIMEOUT=1
+        # The collector model (collector.sh): a pass of 30 records is a spool
+        # message of 46460 bytes; it fits a spool limit of at least that and
+        # saturates it from 90 %. Online a spooled pass is delivered after
+        # the next heartbeat; during the outage of server and nats-edge it
+        # stays in the spool until the restart. A pass that does not fit is
+        # lost and counted. Every heartbeat with losses or backpressure is a
+        # line collector.spool.degraded in the server log.
+        printf 0 > "$S/col-spool"; printf 0 > "$S/col-ingested"; printf 0 > "$S/col-heartbeat"; printf 0 > "$S/col-dropped"
+        : > "$S/server.log"; : > "$S/removed"; : > "$S/stopped"
+        col_report() { # <spool messages> <backpressure> <dropped>
+            printf '{"time":"t","level":"WARN","msg":"collector reported spool data loss or backpressure","event":"collector.spool.degraded","collector_id":"col-1","spool_messages":%s,"backpressure":%s,"dropped_messages":%s,"dropped_samples":0}\n' \
+                "$1" "$2" "$3" >> "$S/server.log"
+        }
+        col_saturated() { [ 46460 -ge $(($(cat "$S/col-limit") * 9 / 10)) ]; }
+        col_pass() { # <online|outage>
+            printf '{"level":"INFO","msg":"discovery completed","total_records":30}\n' >> "$S/col.log"
+            if [ 46460 -gt "$(cat "$S/col-limit")" ]; then
+                printf '{"level":"ERROR","msg":"spool data lost","event":"collector.spool.data_lost","reason":"spool_full","messages":1,"bytes":46460}\n' >> "$S/col.log"
+                printf '%s' $(($(cat "$S/col-dropped") + 1)) > "$S/col-dropped"
+                [ "$1" = online ] && col_heartbeat
+                return 0
+            fi
+            printf '%s' $(($(cat "$S/col-spool") + 1)) > "$S/col-spool"
+            [ "$1" = online ] && col_heartbeat
+            return 0
+        }
+        col_heartbeat() { # the first accepted heartbeat, then the flush
+            local spool dropped bp=false
+            spool="$(cat "$S/col-spool")" dropped="$(cat "$S/col-dropped")"
+            [ "$spool" -gt 0 ] && col_saturated && [ -z "${FAKE_NO_BACKPRESSURE:-}" ] && bp=true
+            { [ "$dropped" -gt 0 ] || [ "$bp" = true ]; } && col_report "$spool" "$bp" "$dropped"
+            printf 0 > "$S/col-dropped"
+            printf '%s' $(($(cat "$S/col-ingested") + 30 * spool)) > "$S/col-ingested"
+            printf 0 > "$S/col-spool"
+        }
+        collector_docker() {
+            local cmdline=" $* " name="" limit="" a prev=""
+            for a in "$@"; do
+                [ "$prev" = --name ] && name="$a"
+                case "$a" in RETICORA_SPOOL_MAX_BYTES=*) limit="${a#*=}" ;; esac
+                prev="$a"
+            done
+            case "$1" in
+                image) [ -z "${FAKE_NO_IMAGE:-}" ] ;;
+                inspect) printf 'outage_default \n' ;;
+                run)
+                    case "$cmdline" in
+                        *" --network none "*)
+                            printf '{"msg":"spool stats","spool_messages":1,"spool_bytes":46460}\n{"msg":"discovery completed","total_records":30}\n' > "$S/col-calibration.log"
+                            return 0 ;;
+                    esac
+                    # The enrollment code reaches docker through the
+                    # environment only.
+                    case "$cmdline" in *code-1*) echo "enrollment code on the command line" >&2; return 1 ;; esac
+                    case "${RETICORA_ENROLL_TOKEN:-}:$cmdline" in
+                        "code-1:"*" -e RETICORA_ENROLL_TOKEN "*) ;;
+                        *) echo "RETICORA_ENROLL_TOKEN not passed from the environment" >&2; return 1 ;;
+                    esac
+                    case "$cmdline" in *" --network outage_default "*) ;; *) echo "not on the stack network" >&2; return 1 ;; esac
+                    printf '%s' "$limit" > "$S/col-limit"
+                    : > "$S/col.log"
+                    col_pass online ;;
+                logs) case "$2" in *-calibration) cat "$S/col-calibration.log" ;; *) cat "$S/col.log" ;; esac ;;
+                exec) cat "$S/col-spool"; echo ;;
+                rm) printf '%s\n' "${*: -1}" >> "$S/removed" ;;
+            esac
+        }
         sleep() { command sleep 0.05; }
         db_admin_url() { printf 'postgres://stub'; }
         server_restarts() { printf 0; }
@@ -270,15 +379,22 @@ stub_run() {
         check_name() { case "$1" in postgres) echo database ;; minio) echo object_storage ;; mailpit) echo smtp ;; *) echo "$1" ;; esac; }
         compose() {
             case "$1" in
-                stop) printf '%s\n' "$2" > "$S/down" ;;
-                start) : > "$S/down" ;;
+                stop) printf '%s\n' "$2" > "$S/down"; printf '%s\n' "${*:2}" >> "$S/stopped"
+                    [ "$2" = server ] && col_pass outage ;;
+                start) : > "$S/down"
+                    [ "$2" = nats-edge ] && { printf 1 > "$S/col-heartbeat"; col_heartbeat; } ;;
+                ps) printf 'server-ctr\n' ;;
+                logs) cat "$S/server.log" ;;
             esac
+            return 0
         }
         readyz() {
             local checks='{"database":"ok","nats":"ok","redis":"ok","object_storage":"ok","smtp":"ok"}' down
             [ -n "${FAKE_NO_SMTP_CHECK:-}" ] && checks='{"database":"ok","nats":"ok","redis":"ok","object_storage":"ok"}'
             down="$(cat "$S/down")"
-            if [ -n "$down" ]; then
+            if [ "$down" = server ]; then
+                printf '000 '
+            elif [ -n "$down" ]; then
                 printf '503 {"status":"not_ready","checks":%s}' "$(printf '%s' "$checks" | jq -c --arg c "$(check_name "$down")" '.[$c] = "unavailable"')"
             else
                 printf '200 {"status":"ready","checks":%s}' "$checks"
@@ -293,6 +409,9 @@ stub_run() {
                 *"FROM ci_type"*) echo type-1 ;;
                 *"FROM role "*) echo role-1 ;;
                 *"FROM outage_marker"*) echo 1 ;;
+                *"last_heartbeat_at"*) cat "$S/col-heartbeat" ;;
+                *"FROM collector WHERE organization_id"*) echo col-1 ;;
+                *"FROM ingest_record"*) printf '%s\n' $(($(cat "$S/col-ingested") - ${FAKE_FLUSH_LOSE:-0})) ;;
                 *"FROM event_outbox"*) cat "$S/outbox" ;;
                 *"SELECT serial_number FROM ci "*)
                     prefix="$(printf '%s' "$sql" | sed -nE "s/.*LIKE '([^']*)-%'.*/\1/p")"
@@ -337,6 +456,7 @@ stub_run() {
                 "GET /notification-channels") echo '{"data":[]}' > "$API_OUT"; printf 200 ;;
                 "POST /notification-channels") echo '{"id":"ch-1"}' > "$API_OUT"; printf 201 ;;
                 "POST /invitations") printf '%s' "$body" | jq -r .email > "$S/invited"; echo '{"id":"inv-1"}' > "$API_OUT"; printf 201 ;;
+                "POST /collectors/enrollment-codes") echo '{"id":"ec-1","code":"code-1"}' > "$API_OUT"; printf 201 ;;
                 "GET /notification-deliveries"*) stub_deliveries ;;
                 *) printf 404 ;;
             esac
@@ -435,6 +555,48 @@ else
     rc="$(FAKE_LOAD=2 FAKE_NO_SMTP_CHECK=1 stub_run "$d" smtp)"
     expect_case "smtp_scenario_no_smtp_check: /readyz without smtp (no RETICORA_SMTP_HOST) → FAIL" 1 "$d" "$rc" \
         '^\| smtp outage \| FAIL \| /readyz has no smtp check'
+
+    # WP-587: the collector scenario against the collector model.
+    d="$TMP_ROOT/collector-ok"
+    rc="$(stub_run "$d" collector)"
+    expect_case "collector_scenario_ok: spool 0 → 1 while server and nats-edge are down, backpressure in the heartbeat after the restart, 60 sent = 60 ingested, loss counter 0 → PASS" 0 "$d" "$rc" \
+        '^\| collector outage \| PASS \| server and nats-edge down [0-9]+s; spool 0 → 1, backpressure reported by the heartbeat after the restart; 60 records sent in 2 passes = 60 ingested; loss counter 0 \|$' \
+        '^- Spool limit: 30 record\(s\) = 48783 bytes \(calibration: one spooled pass of 30 records = 46460 bytes, plus 5 %\)$' \
+        '^- Before the outage: 1 pass\(es\), 30 records sent, 30 ingested$' \
+        '^- Outage: server and nats-edge stopped for [0-9]+s; spool counter 0 → 1 message\(s\); 1 pass\(es\) during the outage$' \
+        '^- Heartbeat after the restart: spool report `\{"spool_messages":1,"backpressure":true,"dropped_messages":0,"dropped_samples":0\}`$' \
+        '^- After the recovery: 60 records sent in 2 passes, 60 ingested; loss counter: 0 reported by the heartbeats, 0 logged by the collector$' \
+        '^## Collector: server and nats-edge unreachable$'
+    if [ "$(cat "$d/stopped" 2>/dev/null)" = "server nats-edge" ] && grep -q -- '-calibration$' "$d/removed" &&
+        grep -qE '^outage-collector-[0-9]+$' "$d/removed"; then
+        ok "collector_scenario_stack: docker compose stop server nats-edge together; calibration and collector containers removed"
+    else
+        fail "collector_scenario_stack: docker compose stop server nats-edge together; calibration and collector containers removed" \
+            "stopped: $(cat "$d/stopped" 2>/dev/null); removed: $(cat "$d/removed" 2>/dev/null)"
+    fi
+
+    d="$TMP_ROOT/collector-selftest"
+    rc="$(COLLECTOR_SPOOL_RECORDS=1 stub_run "$d" collector)"
+    expect_case "collector_selftest_spool_one_record: COLLECTOR_SPOOL_RECORDS=1 → FAIL with the records lost and the loss counter above 0 (the line outage.yml expects)" 1 "$d" "$rc" \
+        "$COLLECTOR_SELFTEST_LINE" \
+        '^\| collector outage \| FAIL \| records: sent 60 in 2 passes != ingested 0 \(lost 60\); loss counter: 2 reported by the heartbeats, 2 logged by the collector; before the outage: 0 of 30 records ingested' \
+        '^- Spool limit: 1 record\(s\) = 1627 bytes' \
+        'Collector spool limit COLLECTOR_SPOOL_RECORDS=1'
+
+    d="$TMP_ROOT/collector-nobp"
+    rc="$(FAKE_NO_BACKPRESSURE=1 stub_run "$d" collector)"
+    expect_case "collector_scenario_no_backpressure: no heartbeat after the restart reports backpressure → FAIL" 1 "$d" "$rc" \
+        '^\| collector outage \| FAIL \| no heartbeat after the restart reported backpressure \|$'
+
+    d="$TMP_ROOT/collector-lost"
+    rc="$(FAKE_FLUSH_LOSE=3 stub_run "$d" collector)"
+    expect_case "collector_scenario_lost: three records of the spool not ingested after the restart → FAIL lost" 1 "$d" "$rc" \
+        '^\| collector outage \| FAIL \| records: sent 60 in 2 passes != ingested 57 \(lost 3\); before the outage: 27 of 30 records ingested'
+
+    d="$TMP_ROOT/collector-noimage"
+    rc="$(FAKE_NO_IMAGE=1 stub_run "$d" collector)"
+    expect_case "collector_scenario_no_image: collector image missing → FAIL" 1 "$d" "$rc" \
+        '^\| collector outage \| FAIL \| collector image reticora-collector:outage not found'
 
     # load_setup with the real db_admin_url and env_value: the seed runs in
     # backend/, the default COMPOSE_DIR is relative to the repository root,

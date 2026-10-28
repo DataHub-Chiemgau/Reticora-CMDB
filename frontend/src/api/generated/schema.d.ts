@@ -3529,13 +3529,13 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * The signed-in user's quiet hours, muted categories and digest
-     * @description Without stored preferences the defaults (Europe/Berlin, nothing muted, digest `{"review":"hourly"}`).
+     * The signed-in user's quiet hours, category subscriptions and digest
+     * @description Without stored preferences the defaults (Europe/Berlin, nothing muted, every category subscribed, digest `{"review":"hourly"}`). `subscriptions` lists every notification category as subscribed or muted (NTF-03, E-91 option 2). Notifications are written in the user's language (`locale`, else the organization's locale, else de-DE; de-DE and en-US); `locale` is always returned, empty when the user has chosen no language.
      */
     get: operations['getNotificationPreferences'];
     /**
-     * Set quiet hours, muted categories and digest
-     * @description Critical notifications ignore quiet hours and muted categories and are never bundled (NTF-04). A digest naming an unknown or critical category or a window other than hourly or daily is refused with 400.
+     * Set quiet hours, category subscriptions and digest
+     * @description Critical notifications ignore quiet hours and muted categories and are never bundled (NTF-04). A digest naming an unknown or critical category or a window other than hourly or daily is refused with 400. A category named in `subscriptions` is muted or subscribed as stated there, whatever `muted_categories` says (NTF-03, E-91 option 2); an unknown category or a state other than subscribed or muted is refused with 400. `locale` sets the language of the user's notifications (de-DE, en-US, or empty for the organization's locale); omitted, the stored language stays; any other value is refused with 400 (F-383).
      */
     put: operations['setNotificationPreferences'];
     post?: never;
@@ -6535,7 +6535,10 @@ export interface paths {
     /** List the relationship types (system catalogue and the organization's) */
     get: operations['listRelationshipTypes'];
     put?: never;
-    /** Create a relationship type of the organization */
+    /**
+     * Create a relationship type of the organization
+     * @description allowed_source_types and allowed_target_types name CI type keys the organization sees (system types and its own); an unknown key is refused with 400 and `field` allowed_source_types or allowed_target_types, nothing is stored (REL-01, E-95, F-313).
+     */
     post: operations['createRelationshipTypes'];
     delete?: never;
     options?: never;
@@ -6560,7 +6563,10 @@ export interface paths {
     delete: operations['deleteRelationshipTypesKey'];
     options?: never;
     head?: never;
-    /** Update a relationship type of the organization (system types are read-only) */
+    /**
+     * Update a relationship type of the organization (system types are read-only)
+     * @description A given allowed_source_types or allowed_target_types with a key that names no CI type the organization sees is refused with 400 and `field` allowed_source_types or allowed_target_types; the type stays unchanged (REL-01, E-95, F-313).
+     */
     patch: operations['updateRelationshipTypesKey'];
     trace?: never;
   };
@@ -6767,9 +6773,7 @@ export interface components {
        */
       unique_scope: 'org' | 'client';
       inheritable: boolean;
-      validation?: {
-        [key: string]: unknown;
-      };
+      validation?: components['schemas']['AttributeValidation'];
       conditional?: {
         [key: string]: unknown;
       };
@@ -6782,6 +6786,21 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /** @description The validation of an attribute definition (MET-10): a rule AST of MET-45 or the legacy structure. Requests may send either; the server checks the rule with backend/internal/rules (an invalid rule is 400 on the field validation), stores it as the AST and answers the AST, also for definitions stored in the legacy structure. A required rule makes the definition required. CI writes are validated against it (422). */
+    AttributeValidation:
+      components['schemas']['rule'] | components['schemas']['AttributeValidationLegacy'];
+    /** @description A rule of the JSON rule language of the metamodel (MET-45, phase 1: required, pattern, range and enum, combined with all), defined by api/rules.schema.json. */
+    RuleAST: components['schemas']['rule'];
+    /** @description The former validation structure, translated into the AST: options → enum, pattern and patterns → pattern, min/max → range, min_length/max_length → range of length; several rules are combined with all. {} is no rule. */
+    AttributeValidationLegacy: {
+      min?: number;
+      max?: number;
+      min_length?: number;
+      max_length?: number;
+      pattern?: string;
+      patterns?: string[];
+      options?: (string | number | boolean)[];
     };
     AttributeDefinitionListResponse: {
       /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
@@ -6810,9 +6829,7 @@ export interface components {
       /** @enum {string} */
       unique_scope?: 'org' | 'client';
       inheritable?: boolean;
-      validation?: {
-        [key: string]: unknown;
-      };
+      validation?: components['schemas']['AttributeValidation'];
       conditional?: {
         [key: string]: unknown;
       };
@@ -6836,9 +6853,8 @@ export interface components {
       /** @enum {string} */
       unique_scope?: 'org' | 'client';
       inheritable?: boolean;
-      validation?: {
-        [key: string]: unknown;
-      };
+      /** @description The new rules; null or {} removes them. */
+      validation?: components['schemas']['AttributeValidation'] | null;
       conditional?: {
         [key: string]: unknown;
       };
@@ -6882,7 +6898,18 @@ export interface components {
       quiet_end?: string;
       /** @example Europe/Berlin */
       time_zone: string;
+      /** @description Categories the user unsubscribed; critical notifications reach the user anyway. */
       muted_categories: string[];
+      /**
+       * @description Category subscriptions (NTF-03, E-91 option 2): every notification category → subscribed or muted, the view of `muted_categories`. Every category is subscribed by default; a muted one reaches the user only with a critical notification (collector, invitation, certificate, apikey and expired licences are critical). In a PUT the named categories win over `muted_categories`; the response lists every category.
+       * @example {
+       *       "review": "muted",
+       *       "export": "subscribed"
+       *     }
+       */
+      subscriptions?: {
+        [key: string]: 'subscribed' | 'muted';
+      };
       /**
        * @description Categories whose e-mails are bundled into one digest per window (NTF-04): category → hourly (ends at the full hour) or daily (ends at midnight in time_zone). Allowed are the categories with a non-critical event (entitlement, export, job, review, webhook); critical notifications, the in-app center and webhooks are never bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every e-mail on its own.
        * @example {
@@ -6892,6 +6919,12 @@ export interface components {
       digest?: {
         [key: string]: 'hourly' | 'daily';
       };
+      /**
+       * @description Language of the user's notifications (NTF-03, F-383): de-DE or en-US; empty: the organization's locale (LOC-01), else de-DE. As long as the user has chosen no language, a login takes the language of the IdP's `locale` claim (de* → de-DE, en* → en-US; Keycloak sends it with internationalization enabled); a choice made here, including the empty one after a language, is never replaced by a login. The language of the user interface follows the browser (E-99).
+       * @example en-US
+       * @enum {string}
+       */
+      locale?: '' | 'de-DE' | 'en-US';
     };
     NotificationChannel: {
       id: string;
@@ -7246,7 +7279,8 @@ export interface components {
     };
     RackLayout: {
       rack: components['schemas']['Rack'];
-      mounts: components['schemas']['RackMount'][];
+      /** @description The mounts by position; an empty rack has an empty list (F-253). */
+      mounts: components['schemas']['RackLayoutMount'][];
       /** @description Free units per face (front, rear). */
       free: {
         [key: string]: number[];
@@ -7977,8 +8011,11 @@ export interface components {
       impact_direction: components['schemas']['RelationshipImpactDirection'];
       /** @description Edges of the type are redundant feeds (powered_by, member_of_cluster); impact needs all of them to fail. */
       redundant: boolean;
+      /** @description CI type keys an edge of the type may start at; POST /relationships refuses a source CI of another type (422, source_ci_id). Empty allows every type (REL-01, E-95). */
       allowed_source_types: string[];
+      /** @description CI type keys an edge of the type may end at; POST /relationships refuses a target CI of another type (422, target_ci_id). Empty allows every type (REL-01, E-95). */
       allowed_target_types: string[];
+      /** @description Informative until REL-06 [P2]; not enforced (E-95). */
       cardinality: string;
       readonly is_system: boolean;
       description?: string;
@@ -7996,8 +8033,11 @@ export interface components {
       category?: components['schemas']['RelationshipTypeCategory'];
       impact_direction?: components['schemas']['RelationshipImpactDirection'];
       redundant?: boolean;
+      /** @description CI type keys the organization sees (system types and its own); an unknown key is 400. Empty allows every type. */
       allowed_source_types?: string[];
+      /** @description CI type keys the organization sees (system types and its own); an unknown key is 400. Empty allows every type. */
       allowed_target_types?: string[];
+      /** @description Informative until REL-06 [P2]; not enforced (E-95). */
       cardinality?: string;
       description?: string;
     };
@@ -8452,7 +8492,10 @@ export interface components {
       /** Format: int64 */
       file_size_bytes?: number;
       error_message?: string;
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description Start of the current run; while the job runs, the worker renews it as heartbeat (every 5 minutes). A running job without heartbeat for 15 minutes is queued again (TEC-14, F-315).
+       */
       started_at?: string;
       /** Format: date-time */
       completed_at?: string;
@@ -10337,6 +10380,14 @@ export interface components {
       name: string;
       slug: string;
       plan: string;
+      /**
+       * @description Free settings of the organization. `branding.sender_name` is the sender name and subject prefix of its notification e-mails (NTF-03); without it the organization's name. An e-mail channel's own sender name, and the display name of an own SMTP server's sender address, take precedence.
+       * @example {
+       *       "branding": {
+       *         "sender_name": "ACME Service Desk"
+       *       }
+       *     }
+       */
       settings: {
         [key: string]: unknown;
       };
@@ -10351,7 +10402,7 @@ export interface components {
        */
       currency: string;
       /**
-       * @description BCP 47 language tag.
+       * @description BCP 47 language tag. Notifications to users who kept the account default locale and to addresses without an account are written in it (de-DE or en-US; another language gets de-DE, NTF-03).
        * @example de-DE
        */
       locale: string;
@@ -10364,6 +10415,7 @@ export interface components {
     };
     UpdateOrganizationRequest: {
       name?: string;
+      /** @description Free settings; `branding.sender_name` brands the notification e-mails (see Organization.settings). */
       settings?: {
         [key: string]: unknown;
       };
@@ -10573,6 +10625,15 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+      /** @description Name of the mounted CI. Set in the layout and the mount lists of a rack, absent in the answer of a single mount (RCK-02). */
+      ci_name?: string;
+      /** @description Name of the CI type of the mounted CI; set like ci_name. */
+      ci_type?: string;
+    };
+    /** @description A mount of the rack layout with the names of the CI and its type, so the layout is shown without reading each CI (RCK-02, F-252). */
+    RackLayoutMount: components['schemas']['RackMount'] & {
+      ci_name: string;
+      ci_type: string;
     };
     CreateRackMountRequest: {
       ci_id: string;
@@ -11242,13 +11303,23 @@ export interface components {
       id: string;
       organization_id: string;
       /** @enum {string} */
-      entity_type: 'ci' | 'asset' | 'document' | 'ticket' | 'contact' | 'compliance';
+      entity_type:
+        | 'ci'
+        | 'asset'
+        | 'document'
+        | 'ticket'
+        | 'contact'
+        | 'compliance'
+        | 'location'
+        | 'reservation';
       entity_id: string;
       title: string;
       summary?: string;
+      /** @description Page of the entity in the SPA (SRC-01). A location links to its node in the location tree (/locations?node=<id>); a contact has no page and an empty url, its hit carries the details for the contact card of the command palette instead (F-334). */
       url: string;
       score: number;
       highlights?: string[];
+      /** @description For a contact hit: email, phone and role of the contact (each only when set), read at query time from the PII vault and the contact under the caller's scope, like GET /contacts/{id}; the name is the title. The search index itself stores no personal data. */
       metadata?: {
         [key: string]: string;
       };
@@ -11297,6 +11368,50 @@ export interface components {
       citations: components['schemas']['AICitation'][];
       prompt_tokens: number;
       completion_tokens: number;
+    };
+    rule:
+      | components['schemas']['all']
+      | components['schemas']['required']
+      | components['schemas']['pattern']
+      | components['schemas']['range']
+      | components['schemas']['enum'];
+    /** @description Every rule must hold; violations are reported in order. */
+    all: {
+      /** @constant */
+      op: 'all';
+      rules: components['schemas']['rule'][];
+    };
+    /** @description The value must not be empty (code required). */
+    required: {
+      /** @constant */
+      op: 'required';
+    };
+    /** @description A string value must match the regular expression (code pattern; a non-string value: pattern.type). */
+    pattern: {
+      /** @constant */
+      op: 'pattern';
+      pattern: string;
+    };
+    /** @description The number (of: value) or the length of a string (of: length) lies within min and max, inclusive (codes range.min, range.max; a value of another kind: range.type). */
+    range:
+      | {
+          /** @constant */
+          op: 'range';
+          /**
+           * @default value
+           * @enum {unknown}
+           */
+          of: 'value' | 'length';
+          min?: number;
+          max?: number;
+        }
+      | unknown
+      | unknown;
+    /** @description The value is one of the values; strings, numbers and booleans compare by type and value (code enum). */
+    enum: {
+      /** @constant */
+      op: 'enum';
+      values: (string | number | boolean)[];
     };
   };
   responses: {
@@ -12997,7 +13112,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, or an unknown ID. `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). A source reserved to the system (discovery, agent) names `source`: those edges come only from the discovery and agent paths, nothing is stored (F-271). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
+      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, or an unknown ID. `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). A source reserved to the system (discovery, agent) names `source`: those edges come only from the discovery and agent paths, nothing is stored (F-271). A visible source or target CI whose type is not in allowed_source_types or allowed_target_types of the relationship type names source_ci_id, target_ci_id or both ("the type of the source CI is not in allowed_source_types of the relationship type"); an empty list allows every type, nothing is stored (REL-01, E-95, F-313). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -18886,7 +19001,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides with another on an overlapping face, exceeds the rack height or mounts a child CI of a composition (RCK-01, RCK-02). */
+      /** @description The mount collides with another on an overlapping face, exceeds the rack height or mounts a child CI of a composition (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -18929,6 +19044,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
+      /** @description The unmount would change the location of the CI's asset or of another CI of the asset outside the scoped principal's scope (F-379, F-380); the mount stays. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listRackMounts: {
@@ -19002,7 +19126,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -19089,7 +19213,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides or is not allowed (RCK-01, RCK-02). */
+      /** @description The mount collides or is not allowed (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -19157,6 +19281,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
+      /** @description The unmount would change the location of the CI's asset or of another CI of the asset outside the scoped principal's scope (F-379, F-380); the mount stays. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateRackMountLegacy: {
@@ -19188,7 +19321,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -19247,6 +19380,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
+      /** @description The unmount would change the location of the CI's asset or of another CI of the asset outside the scoped principal's scope (F-379, F-380); the mount stays. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateRackMount: {
@@ -19278,7 +19420,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
         headers: {
           [name: string]: unknown;

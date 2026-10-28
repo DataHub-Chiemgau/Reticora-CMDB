@@ -144,8 +144,9 @@ type RecordUpdateResult struct {
 // RecordUpdater is the transaction variant of the update for the ingest
 // (AUD-03, CI-11): the field update and the reclassification of a record in
 // one transaction, one change set with the record's collector, source,
-// observation time and correlation id, and one event ci.changed. A failure
-// after the field update also rolls back the type change.
+// observation time and correlation id, and one event ci.changed, followed
+// by ci.online when the record brings an unknown CI back to active (REC-09).
+// A failure after the field update also rolls back the type change.
 type RecordUpdater interface {
 	UpdateRecord(ctx context.Context, orgID, id string, rec *RecordUpdate) (*RecordUpdateResult, error)
 }

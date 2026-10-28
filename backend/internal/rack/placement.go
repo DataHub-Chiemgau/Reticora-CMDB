@@ -3,13 +3,21 @@ package rack
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// placementOutsideScope is the fixed detail of a placement refused because
+// its location change would have to update a row outside the principal's
+// scope (409; F-379, F-380).
+const placementOutsideScope = "the asset of the CI or another CI of the asset is outside your scope; " +
+	"the location cannot follow the placement"
 
 // placementOf is a rack placement as ci_change and the audit record it.
 func placementOf(m *RackMount) map[string]any {
@@ -35,7 +43,14 @@ type placedCI struct {
 //   - every CI whose location changed, the placed CI and the other CIs of
 //     its asset, gets ci.version + 1, a location_change row in ci_change
 //     with that version and an audit entry (F-240, F-241);
-//   - the placed CI gets a movement row and its audit entry in any case.
+//   - the placed CI gets a movement row and its audit entry in any case;
+//   - a scoped principal changes no row outside its scope: when the asset,
+//     another CI of the asset or the CI itself may not be updated under its
+//     row level security, the placement is refused with ErrConflict (409)
+//     and the transaction stores nothing (F-379, F-380); the asset update
+//     reports a CI it could not move (asset_location_ci_scope, 000181).
+//     A placement that changes no location (repositioning, colocation) is
+//     not refused.
 func recordPlacement(ctx context.Context, tx pgx.Tx, orgID, ciID, action string, before, after *RackMount) error {
 	var location string
 	if after != nil {
@@ -59,15 +74,25 @@ func recordPlacement(ctx context.Context, tx pgx.Tx, orgID, ciID, action string,
 	// raised holds the new version of every CI whose location changed.
 	raised := map[string]int64{}
 	if cis[0].oldLocation != location {
+		var tag pgconn.CommandTag
 		if assetID != "" {
-			_, err = tx.Exec(ctx, `UPDATE asset SET location_id = $3, updated_at = now()
+			tag, err = tx.Exec(ctx, `UPDATE asset SET location_id = $3, updated_at = now()
 				WHERE organization_id = $1 AND id = $2`, orgID, assetID, location)
 		} else {
-			_, err = tx.Exec(ctx, `UPDATE ci SET location_id = $3, updated_at = now()
+			tag, err = tx.Exec(ctx, `UPDATE ci SET location_id = $3, updated_at = now()
 				WHERE organization_id = $1 AND id = $2`, orgID, ciID, location)
 		}
-		if err != nil {
+		var pgErr *pgconn.PgError
+		switch {
+		case errors.As(err, &pgErr) && pgErr.ConstraintName == "asset_location_ci_scope":
+			// Another CI of the asset is invisible or may not be updated.
+			return ruleError(ErrConflict, placementOutsideScope)
+		case err != nil:
 			return fmt.Errorf("set location from rack placement: %w", err)
+		case tag.RowsAffected() == 0:
+			// The update policies (asset_scoped_update, ci_scoped_update)
+			// hide the row: no client, or a client or site outside the scope.
+			return ruleError(ErrConflict, placementOutsideScope)
 		}
 		if raised, err = raiseMovedVersions(ctx, tx, orgID, cis); err != nil {
 			return err

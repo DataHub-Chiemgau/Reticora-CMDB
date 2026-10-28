@@ -106,7 +106,14 @@ func TestNotificationAPI(t *testing.T) {
 		"digest with an unknown window":   {http.MethodPut, "/api/v1/notifications/preferences", `{"digest":{"review":"weekly"}}`, http.StatusBadRequest},
 		"digest that is not a map":        {http.MethodPut, "/api/v1/notifications/preferences", `{"digest":["review"]}`, http.StatusBadRequest},
 		"digest window that is no string": {http.MethodPut, "/api/v1/notifications/preferences", `{"digest":{"review":1}}`, http.StatusBadRequest},
-		"unknown read mark":               {http.MethodPost, "/api/v1/notifications/nope/read", "", http.StatusNotFound},
+		// Category subscriptions (NTF-03, E-91 option 2).
+		"subscription of an unknown category": {http.MethodPut, "/api/v1/notifications/preferences", `{"subscriptions":{"newsletter":"muted"}}`, http.StatusBadRequest},
+		"subscription in an unknown state":    {http.MethodPut, "/api/v1/notifications/preferences", `{"subscriptions":{"review":"maybe"}}`, http.StatusBadRequest},
+		// The notification language (NTF-03, WP-653): de-DE, en-US or empty.
+		"language without templates":    {http.MethodPut, "/api/v1/notifications/preferences", `{"locale":"fr-FR"}`, http.StatusBadRequest},
+		"language without region":       {http.MethodPut, "/api/v1/notifications/preferences", `{"locale":"en"}`, http.StatusBadRequest},
+		"language that is not a string": {http.MethodPut, "/api/v1/notifications/preferences", `{"locale":1}`, http.StatusBadRequest},
+		"unknown read mark":             {http.MethodPost, "/api/v1/notifications/nope/read", "", http.StatusNotFound},
 	} {
 		if w = call("u-1", tc.method, tc.path, tc.body); w.Code != tc.status {
 			t.Errorf("%s: %d %s, want %d", name, w.Code, w.Body.String(), tc.status)
@@ -156,6 +163,29 @@ func TestNotificationAPI(t *testing.T) {
 	}
 	if body = decode(call("u-2", http.MethodGet, "/api/v1/notifications/preferences", "")); body["time_zone"] != "Europe/Berlin" || body["quiet_start"] != nil {
 		t.Errorf("default preference: %v", body)
+	}
+	// The category subscriptions show the muted categories; every category
+	// is subscribed by default; a PUT of subscriptions changes the muted
+	// categories.
+	subscriptions := func(user string) map[string]any {
+		t.Helper()
+		subs, _ := decode(call(user, http.MethodGet, "/api/v1/notifications/preferences", ""))["subscriptions"].(map[string]any)
+		return subs
+	}
+	if subs := subscriptions("u-1"); len(subs) != len(Categories()) || subs["review"] != "muted" || subs["export"] != "subscribed" {
+		t.Errorf("subscriptions of u-1: %v, want review muted, the others subscribed", subs)
+	}
+	if subs := subscriptions("u-2"); len(subs) != len(Categories()) || subs["review"] != "subscribed" {
+		t.Errorf("default subscriptions: %v, want every category subscribed", subs)
+	}
+	if w = call("u-2", http.MethodPut, "/api/v1/notifications/preferences", `{"subscriptions":{"job":"muted"}}`); w.Code != http.StatusOK {
+		t.Fatalf("set subscriptions: %d %s", w.Code, w.Body.String())
+	}
+	if p, _ := center.Preferences.Preference(context.Background(), "org-1", "u-2"); p == nil || strings.Join(p.MutedCategories, ",") != "job" {
+		t.Errorf("stored after subscriptions: %+v, want job muted", p)
+	}
+	if subs := subscriptions("u-2"); subs["job"] != "muted" || subs["review"] != "subscribed" {
+		t.Errorf("subscriptions of u-2 after the PUT: %v", subs)
 	}
 	// The digest: reviews hourly by default, also after a PUT without it;
 	// a given digest is stored, an empty one bundles nothing; a refused
@@ -423,5 +453,56 @@ func TestDeliveryListShowsNoContent(t *testing.T) {
 	}
 	if failed["last_error"] != `webhook: Post "https://hooks.example.org/`+secretPlaceholder+`": EOF` {
 		t.Errorf("older last_error = %v", failed["last_error"])
+	}
+}
+
+// TestNotificationLanguagePreference covers NTF-03 (WP-653, F-383): the
+// signed-in user reads and sets the language of their notifications in the
+// preferences. GET always names it (empty: the organization's locale);
+// PUT sets de-DE, en-US or empty, an omitted locale keeps the stored one,
+// a refused language keeps it, and each user's language is their own
+// (memory store; the stored column values: TestNotificationLanguageSelfService).
+func TestNotificationLanguagePreference(t *testing.T) {
+	center := NewMemoryCenter()
+	mux := chi.NewRouter()
+	NewHandler(center).RegisterRoutes(mux)
+	call := func(user, method, body string) (int, map[string]any) {
+		t.Helper()
+		req := httptest.NewRequest(method, "/api/v1/notifications/preferences", strings.NewReader(body))
+		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: user}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		var out map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+	expect := func(step, user, want string) {
+		t.Helper()
+		code, got := call(user, http.MethodGet, "")
+		if locale, ok := got["locale"].(string); code != http.StatusOK || !ok || locale != want {
+			t.Errorf("%s: GET of %s: %d locale %#v, want 200 %q", step, user, code, got["locale"], want)
+		}
+	}
+
+	expect("without a choice", "u-1", "")
+	if code, got := call("u-1", http.MethodPut, `{"locale":"en-US"}`); code != http.StatusOK || got["locale"] != "en-US" {
+		t.Fatalf("PUT en-US: %d %v", code, got)
+	}
+	expect("after choosing en-US", "u-1", "en-US")
+	expect("another user", "u-2", "")
+	if code, got := call("u-1", http.MethodPut, `{"time_zone":"Europe/Berlin","quiet_start":"22:00","quiet_end":"06:00"}`); code != http.StatusOK || got["locale"] != "en-US" {
+		t.Errorf("PUT without locale: %d %v, want the stored en-US", code, got)
+	}
+	expect("after a PUT without locale", "u-1", "en-US")
+	if code, _ := call("u-1", http.MethodPut, `{"locale":"de"}`); code != http.StatusBadRequest {
+		t.Errorf("PUT de: %d, want 400", code)
+	}
+	expect("after a refused language", "u-1", "en-US")
+	if code, got := call("u-1", http.MethodPut, `{"locale":""}`); code != http.StatusOK || got["locale"] != "" {
+		t.Errorf("PUT empty: %d %v", code, got)
+	}
+	expect("after choosing the organization's locale", "u-1", "")
+	if code, got := call("u-2", http.MethodPut, `{"locale":""}`); code != http.StatusOK || got["locale"] != "" {
+		t.Errorf("PUT empty without a choice: %d %v", code, got)
 	}
 }

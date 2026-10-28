@@ -327,9 +327,9 @@ export function useRackLayout(rackId: string) {
 }
 
 /**
- * Resolves the CIs referenced by rack mounts by id. A rack holds at most a few
- * dozen mounts, so the CIs are fetched individually instead of relying on a
- * single CI page, which would leave every CI beyond the page limit unnamed.
+ * Resolves a few CIs by id (the candidates of a review item), one request per
+ * CI. The rack page does not use it: its layout names the mounted CIs
+ * (RCK-02, F-252).
  */
 export function useMountedCIs(ciIds: string[]) {
   const uniqueIds = Array.from(new Set(ciIds));

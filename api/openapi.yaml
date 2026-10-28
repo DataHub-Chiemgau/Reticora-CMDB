@@ -1653,6 +1653,12 @@ paths:
             A source reserved to the system (discovery, agent) names
             `source`: those edges come only from the discovery and agent
             paths, nothing is stored (F-271).
+            A visible source or target CI whose type is not in
+            allowed_source_types or allowed_target_types of the relationship
+            type names source_ci_id, target_ci_id or both ("the type of the
+            source CI is not in allowed_source_types of the relationship
+            type"); an empty list allows every type, nothing is stored
+            (REL-01, E-95, F-313).
             Without violations: a structural relationship type, which is
             projected and cannot be stored, or an interface of another CI.
           content:
@@ -6579,7 +6585,9 @@ paths:
           description: >-
             The mount collides with another on an overlapping face, exceeds
             the rack height or mounts a child CI of a composition (RCK-01,
-            RCK-02).
+            RCK-02), or is a scoped principal's placement that would change the location of
+            the CI's asset or of another CI of the asset outside its scope
+            (F-379, F-380); nothing is stored.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -6604,6 +6612,14 @@ paths:
           $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The unmount would change the location of the CI's asset or of
+            another CI of the asset outside the scoped principal's scope
+            (F-379, F-380); the mount stays.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/racks/{id}/mounts:
     parameters:
@@ -6669,7 +6685,10 @@ paths:
           description: >-
             The mount collides with another on an overlapping face (front,
             rear, both), exceeds the rack height, mounts a CI that is
-            mounted already or a child CI of a composition (RCK-01, RCK-02).
+            mounted already or a child CI of a composition (RCK-01, RCK-02),
+            or is a scoped principal's placement that would change the location of
+            the CI's asset or of another CI of the asset outside its scope
+            (F-379, F-380); nothing is stored.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -6739,7 +6758,11 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The mount collides or is not allowed (RCK-01, RCK-02).
+          description: >-
+            The mount collides or is not allowed (RCK-01, RCK-02), or is
+            a scoped principal's placement that would change the location of
+            the CI's asset or of another CI of the asset outside its scope
+            (F-379, F-380); nothing is stored.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -6813,7 +6836,10 @@ paths:
           description: >-
             The mount collides with another on an overlapping face (front,
             rear, both), exceeds the rack height, mounts a CI that is
-            mounted already or a child CI of a composition (RCK-01, RCK-02).
+            mounted already or a child CI of a composition (RCK-01, RCK-02),
+            or is a scoped principal's placement that would change the location of
+            the CI's asset or of another CI of the asset outside its scope
+            (F-379, F-380); nothing is stored.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -6837,6 +6863,14 @@ paths:
           $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The unmount would change the location of the CI's asset or of
+            another CI of the asset outside the scoped principal's scope
+            (F-379, F-380); the mount stays.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/mounts/{id}:
     parameters:
@@ -6891,7 +6925,10 @@ paths:
           description: >-
             The mount collides with another on an overlapping face (front,
             rear, both), exceeds the rack height, mounts a CI that is
-            mounted already or a child CI of a composition (RCK-01, RCK-02).
+            mounted already or a child CI of a composition (RCK-01, RCK-02),
+            or is a scoped principal's placement that would change the location of
+            the CI's asset or of another CI of the asset outside its scope
+            (F-379, F-380); nothing is stored.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -6911,6 +6948,14 @@ paths:
           $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The unmount would change the location of the CI's asset or of
+            another CI of the asset outside the scoped principal's scope
+            (F-379, F-380); the mount stays.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/cables:
     get:
@@ -7226,8 +7271,15 @@ paths:
     get:
       operationId: getNotificationPreferences
       tags: [Notifications]
-      summary: The signed-in user's quiet hours, muted categories and digest
-      description: Without stored preferences the defaults (Europe/Berlin, nothing muted, digest `{"review":"hourly"}`).
+      summary: The signed-in user's quiet hours, category subscriptions and digest
+      description: >-
+        Without stored preferences the defaults (Europe/Berlin, nothing muted,
+        every category subscribed, digest `{"review":"hourly"}`).
+        `subscriptions` lists every notification category as subscribed or
+        muted (NTF-03, E-91 option 2). Notifications are written in the
+        user's language (`locale`, else the organization's locale, else
+        de-DE; de-DE and en-US); `locale` is always returned, empty when the
+        user has chosen no language.
       responses:
         '200':
           description: Preferences
@@ -7240,11 +7292,17 @@ paths:
     put:
       operationId: setNotificationPreferences
       tags: [Notifications]
-      summary: Set quiet hours, muted categories and digest
+      summary: Set quiet hours, category subscriptions and digest
       description: >-
         Critical notifications ignore quiet hours and muted categories and are
         never bundled (NTF-04). A digest naming an unknown or critical category
-        or a window other than hourly or daily is refused with 400.
+        or a window other than hourly or daily is refused with 400. A category
+        named in `subscriptions` is muted or subscribed as stated there,
+        whatever `muted_categories` says (NTF-03, E-91 option 2); an unknown
+        category or a state other than subscribed or muted is refused with
+        400. `locale` sets the language of the user's notifications (de-DE,
+        en-US, or empty for the organization's locale); omitted, the stored
+        language stays; any other value is refused with 400 (F-383).
       requestBody:
         required: true
         content:
@@ -12653,6 +12711,11 @@ paths:
     post:
       operationId: createRelationshipTypes
       summary: Create a relationship type of the organization
+      description: >-
+        allowed_source_types and allowed_target_types name CI type keys the
+        organization sees (system types and its own); an unknown key is
+        refused with 400 and `field` allowed_source_types or
+        allowed_target_types, nothing is stored (REL-01, E-95, F-313).
       requestBody:
         required: true
         content:
@@ -12693,6 +12756,11 @@ paths:
     patch:
       operationId: updateRelationshipTypesKey
       summary: Update a relationship type of the organization (system types are read-only)
+      description: >-
+        A given allowed_source_types or allowed_target_types with a key that
+        names no CI type the organization sees is refused with 400 and
+        `field` allowed_source_types or allowed_target_types; the type stays
+        unchanged (REL-01, E-95, F-313).
       requestBody:
         required: true
         content:
@@ -13422,7 +13490,8 @@ components:
           enum: [org, client]
           description: Unique per organization or per client (CIs without a client count as one client).
         inheritable: { type: boolean }
-        validation: { type: object, additionalProperties: true }
+        validation:
+          $ref: '#/components/schemas/AttributeValidation'
         conditional: { type: object, additionalProperties: true }
         reference_target: { type: string }
         group: { type: string }
@@ -13431,6 +13500,44 @@ components:
         is_system: { type: boolean }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AttributeValidation:
+      description: >-
+        The validation of an attribute definition (MET-10): a rule AST of
+        MET-45 or the legacy structure. Requests may send either; the server
+        checks the rule with backend/internal/rules (an invalid rule is 400
+        on the field validation), stores it as the AST and answers the AST,
+        also for definitions stored in the legacy structure. A required rule
+        makes the definition required. CI writes are validated against it
+        (422).
+      oneOf:
+        - $ref: '#/components/schemas/RuleAST'
+        - $ref: '#/components/schemas/AttributeValidationLegacy'
+    RuleAST:
+      description: >-
+        A rule of the JSON rule language of the metamodel (MET-45, phase 1:
+        required, pattern, range and enum, combined with all), defined by
+        api/rules.schema.json.
+      $ref: './rules.schema.json'
+    AttributeValidationLegacy:
+      type: object
+      additionalProperties: false
+      description: >-
+        The former validation structure, translated into the AST: options
+        → enum, pattern and patterns → pattern, min/max → range,
+        min_length/max_length → range of length; several rules are combined
+        with all. {} is no rule.
+      properties:
+        min: { type: number }
+        max: { type: number }
+        min_length: { type: integer }
+        max_length: { type: integer }
+        pattern: { type: string }
+        patterns:
+          type: array
+          items: { type: string }
+        options:
+          type: array
+          items: { type: [string, number, boolean] }
     AttributeDefinitionListResponse:
       type: object
       required: [data]
@@ -13469,7 +13576,8 @@ components:
         unique: { type: boolean }
         unique_scope: { type: string, enum: [org, client] }
         inheritable: { type: boolean }
-        validation: { type: object, additionalProperties: true }
+        validation:
+          $ref: '#/components/schemas/AttributeValidation'
         conditional: { type: object, additionalProperties: true }
         reference_target: { type: string }
         group: { type: string }
@@ -13495,7 +13603,11 @@ components:
         unique: { type: boolean }
         unique_scope: { type: string, enum: [org, client] }
         inheritable: { type: boolean }
-        validation: { type: object, additionalProperties: true }
+        validation:
+          oneOf:
+            - $ref: '#/components/schemas/AttributeValidation'
+            - type: 'null'
+          description: The new rules; null or {} removes them.
         conditional: { type: object, additionalProperties: true }
         reference_target: { type: string }
         group: { type: string }
@@ -13552,7 +13664,24 @@ components:
         time_zone: {type: string, example: Europe/Berlin}
         muted_categories:
           type: array
+          description: Categories the user unsubscribed; critical notifications reach the user anyway.
           items: {type: string}
+        subscriptions:
+          type: object
+          description: >-
+            Category subscriptions (NTF-03, E-91 option 2): every notification
+            category → subscribed or muted, the view of `muted_categories`.
+            Every category is subscribed by default; a muted one reaches the
+            user only with a critical notification (collector, invitation,
+            certificate, apikey and expired licences are critical). In a PUT
+            the named categories win over `muted_categories`; the response
+            lists every category.
+          propertyNames:
+            enum: [apikey, certificate, collector, entitlement, export, invitation, job, review, webhook]
+          additionalProperties:
+            type: string
+            enum: [subscribed, muted]
+          example: {review: muted, export: subscribed}
         digest:
           type: object
           description: >-
@@ -13569,6 +13698,19 @@ components:
             type: string
             enum: [hourly, daily]
           example: {review: hourly}
+        locale:
+          type: string
+          enum: ['', de-DE, en-US]
+          description: >-
+            Language of the user's notifications (NTF-03, F-383): de-DE or
+            en-US; empty: the organization's locale (LOC-01), else de-DE. As
+            long as the user has chosen no language, a login takes the
+            language of the IdP's `locale` claim (de* → de-DE, en* → en-US;
+            Keycloak sends it with internationalization enabled); a choice
+            made here, including the empty one after a language, is never
+            replaced by a login. The language of the user interface follows
+            the browser (E-99).
+          example: en-US
 
     NotificationChannel:
       type: object
@@ -14017,7 +14159,10 @@ components:
         rack: { $ref: '#/components/schemas/Rack' }
         mounts:
           type: array
-          items: { $ref: '#/components/schemas/RackMount' }
+          description: >-
+            The mounts by position; an empty rack has an empty list
+            (F-253).
+          items: { $ref: '#/components/schemas/RackLayoutMount' }
         free:
           type: object
           description: Free units per face (front, rear).
@@ -15263,9 +15408,23 @@ components:
         redundant:
           type: boolean
           description: Edges of the type are redundant feeds (powered_by, member_of_cluster); impact needs all of them to fail.
-        allowed_source_types: { type: array, items: { type: string } }
-        allowed_target_types: { type: array, items: { type: string } }
-        cardinality: { type: string }
+        allowed_source_types:
+          type: array
+          items: { type: string }
+          description: >-
+            CI type keys an edge of the type may start at; POST
+            /relationships refuses a source CI of another type (422,
+            source_ci_id). Empty allows every type (REL-01, E-95).
+        allowed_target_types:
+          type: array
+          items: { type: string }
+          description: >-
+            CI type keys an edge of the type may end at; POST
+            /relationships refuses a target CI of another type (422,
+            target_ci_id). Empty allows every type (REL-01, E-95).
+        cardinality:
+          type: string
+          description: Informative until REL-06 [P2]; not enforced (E-95).
         is_system: { type: boolean, readOnly: true }
         description: { type: string }
         created_at: { type: string, format: date-time }
@@ -15285,9 +15444,17 @@ components:
         category: { $ref: '#/components/schemas/RelationshipTypeCategory' }
         impact_direction: { $ref: '#/components/schemas/RelationshipImpactDirection' }
         redundant: { type: boolean }
-        allowed_source_types: { type: array, items: { type: string } }
-        allowed_target_types: { type: array, items: { type: string } }
-        cardinality: { type: string }
+        allowed_source_types:
+          type: array
+          items: { type: string }
+          description: CI type keys the organization sees (system types and its own); an unknown key is 400. Empty allows every type.
+        allowed_target_types:
+          type: array
+          items: { type: string }
+          description: CI type keys the organization sees (system types and its own); an unknown key is 400. Empty allows every type.
+        cardinality:
+          type: string
+          description: Informative until REL-06 [P2]; not enforced (E-95).
         description: { type: string }
 
     RelationshipType:
@@ -16073,6 +16240,10 @@ components:
         started_at:
           type: string
           format: date-time
+          description: >-
+            Start of the current run; while the job runs, the worker renews
+            it as heartbeat (every 5 minutes). A running job without heartbeat
+            for 15 minutes is queued again (TEC-14, F-315).
         completed_at:
           type: string
           format: date-time
@@ -19041,7 +19212,14 @@ components:
           type: string
         settings:
           type: object
+          description: >-
+            Free settings of the organization. `branding.sender_name` is the
+            sender name and subject prefix of its notification e-mails
+            (NTF-03); without it the organization's name. An e-mail channel's
+            own sender name, and the display name of an own SMTP server's
+            sender address, take precedence.
           additionalProperties: true
+          example: {branding: {sender_name: ACME Service Desk}}
         timezone:
           type: string
           description: IANA time zone name.
@@ -19052,7 +19230,10 @@ components:
           example: EUR
         locale:
           type: string
-          description: BCP 47 language tag.
+          description: >-
+            BCP 47 language tag. Notifications to users who kept the account
+            default locale and to addresses without an account are written in
+            it (de-DE or en-US; another language gets de-DE, NTF-03).
           example: de-DE
         ai_opt_in:
           type: boolean
@@ -19075,6 +19256,7 @@ components:
           minLength: 1
         settings:
           type: object
+          description: Free settings; `branding.sender_name` brands the notification e-mails (see Organization.settings).
           additionalProperties: true
         timezone:
           type: string
@@ -19482,6 +19664,27 @@ components:
         updated_at:
           type: string
           format: date-time
+        ci_name:
+          type: string
+          description: >-
+            Name of the mounted CI. Set in the layout and the mount lists of
+            a rack, absent in the answer of a single mount (RCK-02).
+        ci_type:
+          type: string
+          description: >-
+            Name of the CI type of the mounted CI; set like ci_name.
+
+    RackLayoutMount:
+      description: >-
+        A mount of the rack layout with the names of the CI and its type, so
+        the layout is shown without reading each CI (RCK-02, F-252).
+      allOf:
+        - $ref: '#/components/schemas/RackMount'
+        - type: object
+          required: [ci_name, ci_type]
+          properties:
+            ci_name: { type: string }
+            ci_type: { type: string }
 
     CreateRackMountRequest:
       type: object
@@ -20798,11 +21001,19 @@ components:
       properties:
         id: { type: string }
         organization_id: { type: string }
-        entity_type: { type: string, enum: [ci, asset, document, ticket, contact, compliance] }
+        entity_type:
+          type: string
+          enum: [ci, asset, document, ticket, contact, compliance, location, reservation]
         entity_id: { type: string }
         title: { type: string }
         summary: { type: string }
-        url: { type: string }
+        url:
+          type: string
+          description: >-
+            Page of the entity in the SPA (SRC-01). A location links to its
+            node in the location tree (/locations?node=<id>); a contact has
+            no page and an empty url, its hit carries the details for the
+            contact card of the command palette instead (F-334).
         score: { type: number }
         highlights:
           type: array
@@ -20810,6 +21021,12 @@ components:
         metadata:
           type: object
           additionalProperties: { type: string }
+          description: >-
+            For a contact hit: email, phone and role of the contact (each
+            only when set), read at query time from the PII vault and the
+            contact under the caller's scope, like GET /contacts/{id}; the
+            name is the title. The search index itself stores no personal
+            data.
         updated_at: { type: string, format: date-time }
 
     SearchResponse:

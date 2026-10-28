@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -70,6 +71,47 @@ type Resolver interface {
 	Resolve(ctx context.Context, orgID string, a *Audience) ([]Recipient, error)
 }
 
+// BrandingSource reads an organization's branding (NTF-03). A Resolver
+// that is one brands the notifications of the EventConsumer; without one
+// they are German for recipients without a locale and unbranded.
+type BrandingSource interface {
+	Branding(ctx context.Context, orgID string) (*Branding, error)
+}
+
+// loadBranding reads the branding of orgID in tx (a transaction in the
+// organization's scope): name, locale and settings.branding.sender_name.
+// An organization the scope does not show has none.
+func loadBranding(ctx context.Context, tx pgx.Tx, orgID string) (*Branding, error) {
+	var name, locale, sender string
+	err := tx.QueryRow(ctx, `SELECT name, locale, COALESCE(settings->'branding'->>'sender_name', '')
+		FROM organization WHERE id::text = $1`, orgID).Scan(&name, &locale, &sender)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read branding: %w", err)
+	}
+	return newBranding(name, locale, sender), nil
+}
+
+// userLocales reads the locale of the users ids of orgID in tx.
+func userLocales(ctx context.Context, tx pgx.Tx, orgID string, ids []string) (map[string]string, error) {
+	rows, err := tx.Query(ctx, `SELECT id::text, locale FROM app_user WHERE organization_id = $1 AND id::text = ANY($2)`, orgID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("read user locales: %w", err)
+	}
+	out := map[string]string{}
+	var id, locale string
+	_, err = pgx.ForEachRow(rows, []any{&id, &locale}, func() error {
+		out[id] = locale
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read user locales: %w", err)
+	}
+	return out, nil
+}
+
 // PGResolver resolves audiences against PostgreSQL.
 type PGResolver struct {
 	pool   *pgxpool.Pool
@@ -81,8 +123,20 @@ func NewPGResolver(pool *pgxpool.Pool, grants GrantSource) *PGResolver {
 	return &PGResolver{pool: pool, grants: grants}
 }
 
+// Branding implements BrandingSource.
+func (r *PGResolver) Branding(ctx context.Context, orgID string) (*Branding, error) {
+	var out *Branding
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		out, err = loadBranding(ctx, tx, orgID)
+		return err
+	})
+	return out, err
+}
+
 type candidate struct {
-	id, email, name string
+	id, email, name, locale string
 }
 
 // Resolve implements Resolver: active users among the candidates who hold
@@ -98,7 +152,7 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		if len(a.Roles) > 0 || len(a.TeamIDs) > 0 || len(a.UserIDs) > 0 || a.AllWithPermission {
 			rows, err := tx.Query(ctx, `
-				SELECT u.id::text, COALESCE(u.email, ''), COALESCE(u.display_name, '')
+				SELECT u.id::text, COALESCE(u.email, ''), COALESCE(u.display_name, ''), u.locale
 				FROM app_user u
 				WHERE u.organization_id = $1 AND u.is_active AND (
 					$5
@@ -113,7 +167,7 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 			}
 			users, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
 				var c candidate
-				scanErr := row.Scan(&c.id, &c.email, &c.name)
+				scanErr := row.Scan(&c.id, &c.email, &c.name, &c.locale)
 				return c, scanErr
 			})
 			if err != nil {
@@ -121,14 +175,14 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 			}
 		}
 		if len(a.DirectUserIDs) > 0 {
-			rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(email, ''), COALESCE(display_name, '') FROM app_user
+			rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(email, ''), COALESCE(display_name, ''), locale FROM app_user
 				WHERE organization_id = $1 AND is_active AND id::text = ANY($2) ORDER BY display_name, id`, orgID, a.DirectUserIDs)
 			if err != nil {
 				return fmt.Errorf("resolve direct users: %w", err)
 			}
 			direct, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
 				var c candidate
-				scanErr := row.Scan(&c.id, &c.email, &c.name)
+				scanErr := row.Scan(&c.id, &c.email, &c.name, &c.locale)
 				return c, scanErr
 			})
 			if err != nil {
@@ -202,7 +256,7 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 		out = append(out, r)
 	}
 	for _, u := range direct {
-		add(Recipient{UserID: u.id, Email: u.email, Name: u.name})
+		add(Recipient{UserID: u.id, Email: u.email, Name: u.name, Locale: u.locale})
 	}
 	for _, u := range users {
 		grants, err := r.grants.AccessGrants(ctx, orgID, u.id)
@@ -212,7 +266,7 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 		if !permission.Covers(grants, a.Permission, a.ClientID, a.SiteID) {
 			continue
 		}
-		add(Recipient{UserID: u.id, Email: u.email, Name: u.name})
+		add(Recipient{UserID: u.id, Email: u.email, Name: u.name, Locale: u.locale})
 	}
 	for _, c := range contacts {
 		add(c)
