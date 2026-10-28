@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import type { TFunction } from 'i18next';
 import {
   useClients,
@@ -23,6 +24,7 @@ import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
+import { cn } from '../components/ui/utils';
 
 const KIND_ICONS: Record<LocationKind, string> = {
   site: '🏢',
@@ -58,13 +60,30 @@ function parentOptions(roots: TreeNode[], node: TreeNode): { value: string; labe
 }
 
 /**
+ * ancestorsOf returns the ids of the nodes above the node `id`, from its
+ * root down, or undefined when the tree has no such node.
+ */
+function ancestorsOf(roots: TreeNode[], id: string): string[] | undefined {
+  const walk = (list: TreeNode[], trail: string[]): string[] | undefined => {
+    for (const candidate of list) {
+      if (candidate.id === id) return trail;
+      const found = walk(candidate.children, [...trail, candidate.id]);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  return walk(roots, []);
+}
+
+/**
  * LocationTreePage shows and edits the canonical location tree (LOC-10):
  * sites are the roots, and each node offers only the child kinds the parent
  * matrix allows. Every node can be renamed and, except a site, moved below
  * another allowed parent (LOC-07); deleting asks first, and a refusal names
  * the kinds of the objects that still reference the node (LOC-11). Field
  * violations of the API are shown on the inputs, a missing permission (403)
- * as a visible message.
+ * as a visible message. `?node=<id>` (the link of a search hit, SRC-01,
+ * F-334) opens the path to that node, marks it and moves focus to it.
  */
 export function LocationTreePage() {
   const { t } = useTranslation();
@@ -73,6 +92,15 @@ export function LocationTreePage() {
   const update = useUpdateLocation();
   const remove = useDeleteLocation();
   const roots = useMemo(() => data?.data ?? [], [data]);
+
+  const [searchParams] = useSearchParams();
+  const targetId = searchParams.get('node') ?? '';
+  const targetPath = useMemo(
+    () => (targetId ? ancestorsOf(roots, targetId) : undefined),
+    [roots, targetId],
+  );
+  const expanded = useMemo(() => new Set(targetPath ?? []), [targetPath]);
+  const selectedId = targetPath ? targetId : undefined;
 
   const [showCreate, setShowCreate] = useState(false);
   const [parent, setParent] = useState<TreeNode | undefined>();
@@ -174,6 +202,14 @@ export function LocationTreePage() {
           {t('locations.deleteFailed', 'Löschen nicht möglich')}: {deleteError}
         </p>
       ) : null}
+      {targetId && data && !targetPath ? (
+        <p role="status" className="text-sm text-muted">
+          {t(
+            'locations.nodeNotFound',
+            'Der verlinkte Knoten ist nicht vorhanden oder für Sie nicht sichtbar.',
+          )}
+        </p>
+      ) : null}
 
       <Card>
         {roots.length === 0 && !isLoading ? (
@@ -187,6 +223,8 @@ export function LocationTreePage() {
                 key={node.id}
                 node={node}
                 depth={0}
+                expanded={expanded}
+                selectedId={selectedId}
                 onAddChild={openCreate}
                 onEdit={openEdit}
                 onDelete={openDelete}
@@ -368,6 +406,8 @@ export function LocationTreePage() {
 function LocationTreeItem({
   node,
   depth,
+  expanded,
+  selectedId,
   onAddChild,
   onEdit,
   onDelete,
@@ -376,19 +416,41 @@ function LocationTreeItem({
 }: {
   node: TreeNode;
   depth: number;
+  /** The nodes on the path to the linked node: they are opened. */
+  expanded: ReadonlySet<string>;
+  /** The linked node (`?node=`): marked and focused. */
+  selectedId: string | undefined;
   onAddChild: (parent: TreeNode) => void;
   onEdit: (node: TreeNode) => void;
   onDelete: (node: TreeNode) => void;
   kindLabel: (kind: LocationKind) => string;
   t: TFunction;
 }) {
-  const [open, setOpen] = useState(depth < 2);
+  const onPath = expanded.has(node.id);
+  const [open, setOpen] = useState(depth < 2 || onPath);
+  useEffect(() => {
+    if (onPath) setOpen(true);
+  }, [onPath]);
+  const selected = node.id === selectedId;
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!selected) return;
+    rowRef.current?.focus({ preventScroll: true });
+    rowRef.current?.scrollIntoView?.({ block: 'center' });
+  }, [selected]);
   const children = node.children;
   const canHaveChildren = LOCATION_CHILD_KINDS[node.kind].length > 0;
   return (
     <li>
       <div
-        className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800"
+        ref={rowRef}
+        tabIndex={selected ? -1 : undefined}
+        aria-current={selected ? 'true' : undefined}
+        className={cn(
+          'flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800',
+          selected &&
+            'bg-primary/10 outline-none ring-2 ring-inset ring-primary hover:bg-primary/10 dark:bg-primary/20 dark:hover:bg-primary/20',
+        )}
         style={{ paddingLeft: `${depth * 1.25 + 0.5}rem` }}
       >
         {children.length > 0 ? (
@@ -432,6 +494,8 @@ function LocationTreeItem({
               key={child.id}
               node={child}
               depth={depth + 1}
+              expanded={expanded}
+              selectedId={selectedId}
               onAddChild={onAddChild}
               onEdit={onEdit}
               onDelete={onDelete}

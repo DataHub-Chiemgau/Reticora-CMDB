@@ -11287,13 +11287,23 @@ export interface components {
       id: string;
       organization_id: string;
       /** @enum {string} */
-      entity_type: 'ci' | 'asset' | 'document' | 'ticket' | 'contact' | 'compliance';
+      entity_type:
+        | 'ci'
+        | 'asset'
+        | 'document'
+        | 'ticket'
+        | 'contact'
+        | 'compliance'
+        | 'location'
+        | 'reservation';
       entity_id: string;
       title: string;
       summary?: string;
+      /** @description Page of the entity in the SPA (SRC-01). A location links to its node in the location tree (/locations?node=<id>); a contact has no page and an empty url, its hit carries the details for the contact card of the command palette instead (F-334). */
       url: string;
       score: number;
       highlights?: string[];
+      /** @description For a contact hit: email, phone and role of the contact (each only when set), read at query time from the PII vault and the contact under the caller's scope, like GET /contacts/{id}; the name is the title. The search index itself stores no personal data. */
       metadata?: {
         [key: string]: string;
       };
