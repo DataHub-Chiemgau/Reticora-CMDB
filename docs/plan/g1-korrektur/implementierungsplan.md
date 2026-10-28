@@ -40,9 +40,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
-| [K6-Nachträge](#k6-nachträge) | WP-648 – WP-649 | 2 | 1,0 | Funde aus der Umsetzung von K6 behoben (F-377, F-378): eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`. |
+| [K6-Nachträge](#k6-nachträge) | WP-648 – WP-650 | 3 | 1,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-380): eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **297** | **398,5** | |
+| **Summe** | | **298** | **399,0** | |
 
 ```mermaid
 flowchart LR
@@ -57,7 +57,7 @@ flowchart LR
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
-    K6N["K6-Nachträge<br/>2 WPs · 1,0 PT"]
+    K6N["K6-Nachträge<br/>3 WPs · 1,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -407,6 +407,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-594](#wp-594--such-treffer-für-locations-und-kontakte-führen-zur-entität) | `t7-search-deeplinks` | Such-Treffer für Locations und Kontakte führen zur Entität | K6 | 1,0 | F-334 | WP-338, WP-519 |
 | [WP-648](#wp-648--eigenes-konto-nicht-deaktivierbar-oder-löschbar-api) | `k6n-user-self-lockout` | Eigenes Konto nicht deaktivierbar oder löschbar (API) | K6N | 0,5 | F-377 | WP-571 |
 | [WP-649](#wp-649--upgrade-von-datenbanken-ohne-migration_quarantine-000089) | `k6n-quarantine-upgrade` | Upgrade von Datenbanken ohne migration_quarantine (000089) | K6N | 0,5 | F-378 | WP-574 |
+| [WP-650](#wp-650--rack-platzierung-ablehnung-statt-stiller-standortabweichung-außerhalb-des-scopes) | `k6n-rack-scope-location` | Rack-Platzierung: Ablehnung statt stiller Standortabweichung außerhalb des Scopes | K6N | 0,5 | F-379, F-380 | WP-578 |
 | [WP-595](#wp-595--nachweisläufe-auf-dem-g1-release-kandidaten-endgültige-statuspflege-und-finaler-gate-check) | `t5-rc-evidence` | Nachweisläufe auf dem G1-Release-Kandidaten, endgültige Statuspflege und finaler Gate-Check | K7 | 1,5 | F-122 | 253 WPs (siehe Block) |
 | [WP-596](#wp-596--wiederholungsprüfung-mandantentrennung-authentisierung-und-autorisierung) | `k-reaudit-1` | Wiederholungsprüfung Mandantentrennung, Authentisierung und Autorisierung | K7 | 2,0 | – | 80 WPs (siehe Block) |
 | [WP-597](#wp-597--wiederholungsprüfung-datenmodell-ingest-collector-und-last) | `k-reaudit-2` | Wiederholungsprüfung Datenmodell, Ingest, Collector und Last | K7 | 2,0 | – | 86 WPs (siehe Block) |
@@ -17753,6 +17754,61 @@ DB-02;nicht geliefert;B;backend/internal/database/migration_000089_prequarantine
 **Entscheidungsbedarf:** [E-100](entscheidungen.md#e-100) Upgrade von Datenbanken mit 000056 vor E-26 (offen, Empfehlung Option 1 als Übergangsregel); Präzedenz [E-26](../entscheidungen.md#e-26), [E-94](entscheidungen.md#e-94)
 
 **Nicht Bestandteil:** Vorprüfung in Installer oder Kubernetes-Job (E-100 Option 2); Rollback über 000056 auf Altinstallationen (WP-574, F-224).
+
+### WP-650 – Rack-Platzierung: Ablehnung statt stiller Standortabweichung außerhalb des Scopes
+
+**Schlüssel:** `k6n-rack-scope-location` · **Meilenstein:** K6-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-578 (`t3-rack-placement-history`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-379](../../../audit/g1-reaudit/FINDINGS.md#f-379) | P3 | Rack-Platzierung durch einen client-beschränkten Principal: das Asset ohne Client erhält den Standort stumm nicht, der Mount wird trotzdem gespeichert | schließt | WP-578 |
+| [F-380](../../../audit/g1-reaudit/FINDINGS.md#f-380) | P3 | Rack-Platzierung durch einen client-beschränkten Principal: CIs des Assets außerhalb des Scopes behalten ihren Standort, `asset.location_id` und `ci.location_id` weichen ab | schließt | WP-578 |
+
+**Problem:** `recordPlacement` (`rack/placement.go`) setzt den Standort unter der RLS des Principals. Bei einem Asset ohne Client trifft das Update wegen `asset_scoped_update` keine Zeile; die Platzierung speichert Mount, Bewegung und Audit trotzdem (F-379). `trg_asset_propagate_location` (000088) überspringt CIs des Assets, die der Principal nicht sieht (anderer Client) oder nicht schreiben darf (ohne Client); Asset und platziertes CI stehen im Rack, das andere CI am alten Ort (F-380). Priorität P3: Datenabweichung in seltenen Konstellationen (Asset ohne Client oder mit CIs mehrerer Clients, Platzierung durch einen Principal mit eingeschränktem Scope), keine Offenlegung, kein Verlust, durch eine org-weite Platzierung behebbar.
+
+**Akzeptanzkriterien:**
+
+- [ ] Ursache durch PG-Tests als `reticora_app` mit einem auf Client 1 beschränkten Principal belegt, die auf dem alten Code rot sind: Mount eines CIs, dessen Asset keinen Client hat (F-379); Mount eines CIs, dessen Asset ein CI von Client 2 (unsichtbar) oder ein CI ohne Client (sichtbar, nicht schreibbar) trägt (F-380).
+- [ ] Ein Principal mit eingeschränktem Scope ändert keine Zeile außerhalb seines Scopes (E-09). Würde Mount, Verschieben oder Unmount den Standort ändern und kann das Asset, ein anderes CI des Assets oder das CI selbst dem nicht folgen, wird die Platzierung mit 409 problem+json und festem Text abgelehnt (Repository: `RuleError` mit `ErrConflict`); Mount, Standort, Version, ci_change und Audit bleiben unverändert. Umpositionieren im selben Rack und Colocation (WP-578) bleiben erlaubt; ein Principal, der alle CIs sieht (Clients 1 und 2), erhält für ein Rack von Client 1 die Colocation-Behandlung.
+- [ ] `asset_propagate_location` (Migration 000181) aktualisiert die CIs weiter unter der RLS des Schreibenden und lehnt danach mit 42501 (`asset_location_ci_scope`) ab, wenn ein CI des Assets – geprüft mit erweitertem Client- und Site-Scope (`app_scope_widen`) – einen anderen Standort behält; kein SECURITY DEFINER, `search_path` fest. Org-weite Schreiber sind nicht betroffen; ein direktes `UPDATE asset` eines eingeschränkten Principals wird ebenso abgelehnt.
+- [ ] Spec-first: 409 für Mount (PUT, beide POST), Verschieben (beide PATCH) und Unmount (DELETE über CI und beide DELETE über die Mount-ID) in `api/openapi.yaml`, `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression grün: rack (TestRackPlacement*, TestMountSetsLocationWithHistory, TestRackRepositoryClientScope, TestRackTenantIsolation), tenant/rls, ci, locations, asset, movement, server; `TestMigrationsRoundtrip`, `TestSchemaBaselineMatchesMigratedSchema`.
+
+**Dateien (11 Einträge, Migration = 2):**
+
+- backend/internal/rack/placement.go
+- backend/internal/rack/placement_scope_integration_test.go (neu)
+- backend/migrations/000181_asset_location_ci_scope.up.sql (neu)
+- backend/migrations/000181_asset_location_ci_scope.down.sql (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/schema-baseline.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** Migration 000181 ersetzt nur die Funktion `asset_propagate_location` (Trigger, Policies und Rechte unverändert; down stellt die Fassung von 000088 her). Die erweiterte Prüfung liest nur, ob ein CI des Assets abweicht, und gibt dem Aufrufer keine Zeile und keinen Wert zurück (Präzedenz 000139, 000141, 000151). Offengelegt wird allein, dass ein Asset, das der Principal schreiben darf, ein CI außerhalb seines Scopes trägt (wie bei Dokumenten mit Links außerhalb des Scopes, WP-341).
+
+**Tests:**
+
+- `TestRackPlacementRefusesAssetOutsideScope` (PG): Mount über Repository und `PUT /api/v1/racks/{id}/mounts/{ci_id}` → 409, nichts gespeichert; org-weiter Mount setzt den Standort; Umpositionieren erlaubt, Verschieben und Unmount → 409, Mount und Standort bleiben.
+- `TestRackPlacementRefusesAssetWithCIsOutsideScope` (PG): CI von Client 2 und CI ohne Client am Asset → 409, nichts gespeichert, Asset und CIs mit einem Standort; direktes Asset-Update → 42501 `asset_location_ci_scope`; Principal der Clients 1 und 2 → Colocation.
+- `TestRackPlacement*`, `TestMountSetsLocationWithHistory`, `TestRackRepositoryClientScope`, `TestRackTenantIsolation`, `TestMigrationsRoundtrip`, `TestSchemaBaselineMatchesMigratedSchema`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RCK-03;[B];B;backend/internal/rack/placement_scope_integration_test.go;WP-650
+```
+
+**Entscheidungsbedarf:** keiner; Grundlage [E-09](../entscheidungen.md#e-09) (entschieden: Zeilen ohne Client schreiben nur org-weite Principals).
+
+**Nicht Bestandteil:** Weitergabe des Standorts an CIs außerhalb des Scopes (Schreiben fremder Zeilen); Platzierung im Namen eines org-weiten Principals; Bereinigung bereits abweichender Standorte aus der Zeit vor WP-650 (ein org-weiter Schreibzugriff auf den Standort des Assets gleicht sie an).
 
 ## K7 Wiederholungsprüfung und Gate G1
 

@@ -14,6 +14,8 @@ Der Befund F-377 ist bei der Umsetzung von K6 gefunden worden (Konvention 16, WP
 
 Der Befund F-378 ist bei der Umsetzung von K6 gefunden worden (Konvention 16, WP-574): Beim Nachstellen des Rollbacks über 000056 auf einer Altinstallation ohne `migration_quarantine` scheiterte auch das Upgrade, bei 000089. Er ist mit `backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go` kodiert (auf `ea3dd6d` rot) und wird von WP-649 im Abschnitt K6-Nachträge geschlossen.
 
+Die Befunde F-379 und F-380 sind bei der Umsetzung von K6 gefunden worden (Konvention 16, WP-578): Eine Probe mit einem auf Client 1 beschränkten Principal zeigte vor und nach WP-578, dass die Rack-Platzierung den Standort eines Assets ohne Client nicht setzt und dass `trg_asset_propagate_location` CIs des Assets außerhalb des Scopes überspringt, während der Mount gespeichert wird. Beide sind mit `backend/internal/rack/placement_scope_integration_test.go` kodiert (auf `af7e2ab` rot) und werden von WP-650 im Abschnitt K6-Nachträge geschlossen.
+
 Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `tests/audit/expected-failures.txt` (Ratchet, `tests/audit/run-auditdefect.sh`). Die a11y-Befunde sind in `frontend/e2e/a11y.spec.ts` (gemockter Playwright-Lauf, CI-Job `e2e`) mit `test.fail` und der Befund-ID markiert: Der markierte Fall muss scheitern, ein markierter Fall, der besteht, macht den Lauf rot. Diese Marken sind ihr eigener Ratchet; der Ratchet von WP-337 vergleicht nur die Arten `go`, `sh`, `vitest` und `e2e-real`, daher erhalten sie keine Zeile in `expected-failures.txt`. Shell-Defekttests (`tests/audit/*.test.sh`, Art `sh`) und Real-Stack-Fälle (`frontend/e2e-real/`, Art `e2e-real`, je Browserprojekt eine Zeile, nur in CI ausführbar) stehen ebenfalls in `expected-failures.txt` (F-369, F-370, F-375).
 
 ## Zählung
@@ -23,8 +25,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 3 |
 | P2 | 16 |
-| P3 | 4 |
-| **Summe** | **24** |
+| P3 | 6 |
+| **Summe** | **26** |
 
 ## Übersicht
 
@@ -54,6 +56,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-376](#f-376) | P1 | Die signierte Download-URL eines Exports nennt den internen Objektspeicher `http://minio:9000`: im Browser einer Installation nicht auflösbar, über einen HTTPS-Origin zusätzlich gemischter Inhalt; der Export lässt sich im Browser nicht laden | WP-646 (CI von PR #103) | belegt (URL), wahrscheinlich (Mixed Content in WebKit) | frontend/e2e-real/bulk-jobs-export.spec.ts E01, ci-lifecycle.spec.ts L10b, client-scope.spec.ts CS03 (Projekte webkit, mobile-safari) | WP-647 |
 | [F-377](#f-377) | P2 | Eigenes Konto per API deaktivierbar und löschbar: der letzte Administrator kann die Organisation aussperren | WP-571 (K6) | belegt | backend/internal/user/self_lockout_integration_test.go | WP-648 |
 | [F-378](#f-378) | P3 | Upgrade von Datenbanken mit 000056 vor E-26 scheitert bei 000089: `migration_quarantine` fehlt, Version 89 bleibt dirty | WP-574 (K6) | belegt | backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go TestUpgradeFromPreQuarantine56 | WP-649 |
+| [F-379](#f-379) | P3 | Rack-Platzierung durch einen client-beschränkten Principal: das Asset ohne Client erhält den Standort stumm nicht, der Mount wird trotzdem gespeichert | WP-578 (K6) | belegt | backend/internal/rack/placement_scope_integration_test.go TestRackPlacementRefusesAssetOutsideScope | WP-650 |
+| [F-380](#f-380) | P3 | Rack-Platzierung durch einen client-beschränkten Principal: CIs des Assets außerhalb des Scopes behalten ihren Standort, `asset.location_id` und `ci.location_id` weichen ab | WP-578 (K6) | belegt | backend/internal/rack/placement_scope_integration_test.go TestRackPlacementRefusesAssetWithCIsOutsideScope | WP-650 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -367,6 +371,32 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 - **Empfehlung:** E-100 Option 1 (analog E-26/E-94): 000089 legt die Tabelle an, wenn `to_regclass('public.migration_quarantine')` leer ist, mit genau der DDL von 000056; auf jeder anderen Datenbank ohne Wirkung. Release-Hinweis mit dem Weg aus 89 dirty (`force 88`, `up`).
 - **Retest (verbindlich):** `go test -count=1 -run 'TestUpgradeFromPreQuarantine56' ./internal/database/` grün; `TestMigrationsRoundtrip` und `TestSchemaBaselineMatchesMigratedSchema` grün.
 - **Kodierender Test:** backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go (`TestUpgradeFromPreQuarantine56`); auf `ea3dd6d` rot (`apply 000089_ci_parent_projection.up.sql: ERROR: relation "migration_quarantine" does not exist (SQLSTATE 42P01) (database left dirty at version 89)`).
+
+<a id="f-379"></a>
+### F-379 (P3) – Rack-Platzierung durch einen client-beschränkten Principal: das Asset ohne Client erhält den Standort stumm nicht, der Mount wird trotzdem gespeichert
+
+- **Gefunden in:** WP-578 (`t3-rack-placement-history`, K6) · **Betroffene Anforderungen:** RCK-03, TEN-02 · **Komponente:** backend/internal/rack/placement.go (`recordPlacement`); Policy `asset_scoped_update` (000151) · **Quelle:** Probe mit einem auf Client 1 beschränkten Principal bei der Umsetzung von WP-578 (vor und nach WP-578 gleiches Verhalten), bestätigt durch einen ausgeführten Test
+- **Reproduktion:** als `reticora_app` mit `app.client_scope` = Client 1: CI Z (Client 1) ist mit einem Asset ohne Client verknüpft; `CreateMount` bzw. `PUT /api/v1/racks/{Rack von Client 1}/mounts/{Z}` → Erfolg (201/200), `rack_mount`-Zeile, `ci_change` movement und Audit `ci.rack_mounted` gespeichert; Standort von Asset und Z bleibt leer.
+- **Soll:** Ein Principal mit eingeschränktem Scope ändert keine Zeile außerhalb seines Scopes (E-09: Zeilen ohne Client schreiben nur org-weite Principals). Kann der Standort der Platzierung nicht folgen, wird die Platzierung mit einer klaren Antwort abgelehnt und nichts gespeichert; Mount und Standort stimmen danach immer überein (RCK-03).
+- **Ist:** `UPDATE asset SET location_id …` trifft wegen `asset_scoped_update` 0 Zeilen; `recordPlacement` prüft die Zeilenzahl nicht und schreibt Mount, Bewegung und Audit, als wäre der Standort gesetzt.
+- **Nutzerwirkung:** Mount und Standort widersprechen sich ohne Hinweis; Standortsuche, Raumbelegung und Ableitungen aus dem Standort (Site, Raum) zeigen das CI nicht im Rack. Keine Offenlegung fremder Daten, kein Datenverlust; ein org-weiter Principal kann die Platzierung wiederholen.
+- **Ursache (belegt):** Die Platzierung wertet das Ergebnis der Standortänderung unter RLS nicht aus; die restriktive UPDATE-Policy blendet die Zeile ohne Fehler aus.
+- **Empfehlung:** Ändert die Platzierung den Standort und trifft das Update von Asset oder CI keine Zeile, die Platzierung mit 409 und festem Text ablehnen (Transaktion zurückrollen); Umpositionieren ohne Standortänderung und Colocation bleiben erlaubt. Spec-first für Mount, Verschieben und Unmount.
+- **Retest (verbindlich):** `go test -count=1 -run 'TestRackPlacement|TestMountSetsLocationWithHistory|TestRackRepositoryClientScope' ./internal/rack/` grün.
+- **Kodierender Test:** backend/internal/rack/placement_scope_integration_test.go (`TestRackPlacementRefusesAssetOutsideScope`); auf `af7e2ab` rot (`scoped mount: got <nil>, want the 409 scope refusal`, danach Mount, `movement` und `ci.rack_mounted` gespeichert; PUT 200 statt 409).
+
+<a id="f-380"></a>
+### F-380 (P3) – Rack-Platzierung durch einen client-beschränkten Principal: CIs des Assets außerhalb des Scopes behalten ihren Standort, `asset.location_id` und `ci.location_id` weichen ab
+
+- **Gefunden in:** WP-578 (`t3-rack-placement-history`, K6) · **Betroffene Anforderungen:** RCK-03, TEN-02 · **Komponente:** backend/migrations/000088_ci_asset_canonical.up.sql (`asset_propagate_location`, `trg_asset_propagate_location`); backend/internal/rack/placement.go · **Quelle:** Probe mit einem auf Client 1 beschränkten Principal bei der Umsetzung von WP-578 (vor und nach WP-578 gleiches Verhalten), bestätigt durch einen ausgeführten Test
+- **Reproduktion:** als `reticora_app` mit `app.client_scope` = Client 1: Asset (Client 1) trägt CI Z (Client 1) und CI Y (Client 2, unsichtbar) bzw. CI W ohne Client (sichtbar, nur org-weit schreibbar); Mount von Z in ein Rack von Client 1 → Erfolg; Asset und Z stehen im Rack (Z Version + 1, `location_change`), Y bzw. W behält den alten Standort. Ein direktes `UPDATE asset SET location_id` desselben Principals verhält sich ebenso.
+- **Soll:** Keine stille Abweichung zwischen dem Standort eines Assets und dem seiner CIs (000088: der Standort eines verknüpften CIs ist der des Assets). Ein Principal mit eingeschränktem Scope ändert keine Zeile außerhalb seines Scopes; muss eine solche Zeile dem Standort folgen, wird die Änderung abgelehnt und nichts gespeichert. Colocation (WP-578) bleibt: Ist das Rack einem CI des Assets fremd, das der Principal sieht, bleibt der Standort und das Audit nennt den Grund.
+- **Ist:** `asset_propagate_location` läuft unter der RLS des Schreibenden und überspringt Y (unsichtbar) und W (`ci_scoped_update`) ohne Fehler; die Colocation-Prüfung von `placedCIs` sieht Y nicht.
+- **Nutzerwirkung:** `asset.location_id` und `ci.location_id` widersprechen sich dauerhaft; das andere CI erscheint am alten Ort. Keine Offenlegung fremder Daten (Y bleibt unsichtbar und unverändert), kein Datenverlust.
+- **Ursache (belegt):** Weitergabe des Asset-Standorts unter RLS ohne Prüfung, ob alle CIs des Assets gefolgt sind.
+- **Empfehlung:** `asset_propagate_location` aktualisiert die CIs weiter unter der RLS des Schreibenden und prüft danach mit erweitertem Client- und Site-Scope (`app_scope_widen`, wie 000139/000151; kein SECURITY DEFINER, `search_path` fest), ob ein CI des Assets einen anderen Standort behält; dann 42501 (`asset_location_ci_scope`), die Transaktion scheitert. Die Platzierung bildet das auf 409 mit demselben festen Text wie F-379 ab. Org-weite Principals sind nicht betroffen.
+- **Retest (verbindlich):** `go test -count=1 -run 'TestRackPlacement|TestMountSetsLocationWithHistory|TestRackRepositoryClientScope' ./internal/rack/` grün; `TestMigrationsRoundtrip` und `TestSchemaBaselineMatchesMigratedSchema` grün.
+- **Kodierender Test:** backend/internal/rack/placement_scope_integration_test.go (`TestRackPlacementRefusesAssetWithCIsOutsideScope`); auf `af7e2ab` rot (`invisible CI of client 2: … asset "<Rack>", Z "<Rack>", other CI "" disagree`, ebenso `visible CI without client`; direktes Asset-Update ohne 42501).
 
 ## Geprüfte Kandidaten ohne neuen Befund
 

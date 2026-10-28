@@ -18896,7 +18896,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides with another on an overlapping face, exceeds the rack height or mounts a child CI of a composition (RCK-01, RCK-02). */
+      /** @description The mount collides with another on an overlapping face, exceeds the rack height or mounts a child CI of a composition (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -18939,6 +18939,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
+      /** @description The unmount would change the location of the CI's asset or of another CI of the asset outside the scoped principal's scope (F-379, F-380); the mount stays. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listRackMounts: {
@@ -19012,7 +19021,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -19099,7 +19108,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides or is not allowed (RCK-01, RCK-02). */
+      /** @description The mount collides or is not allowed (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -19167,6 +19176,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
+      /** @description The unmount would change the location of the CI's asset or of another CI of the asset outside the scoped principal's scope (F-379, F-380); the mount stays. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateRackMountLegacy: {
@@ -19198,7 +19216,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -19257,6 +19275,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
+      /** @description The unmount would change the location of the CI's asset or of another CI of the asset outside the scoped principal's scope (F-379, F-380); the mount stays. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateRackMount: {
@@ -19288,7 +19315,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
         headers: {
           [name: string]: unknown;

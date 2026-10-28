@@ -1007,3 +1007,4 @@ EXP-01;[B], DATEV [P2];C;backend/internal/export/export_test.go;WP-593
 RCK-02;[B];C;backend/internal/rack/layout_integration_test.go;WP-579
 REC-09;[B];D;backend/internal/discovery/ci_online_integration_test.go;WP-585
 LCY-05;[B];D;backend/cmd/server/main_test.go;WP-585
+RCK-03;[B];B;backend/internal/rack/placement_scope_integration_test.go;WP-650

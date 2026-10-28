@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000180_discovery_serial_interface_origin
+Stand: Migration 000181_asset_location_ci_scope
 
 ## Prüfung
 
@@ -233,6 +233,13 @@ Standort (Verschieben, Umhängen), leitet `location_refresh_asset_site` die
 Zeilen an ihr neu ab. Die Policies prüfen `app.site_scope` wie bei `ci`
 (Migration 000063): Zeilen ohne Standort bleiben lesbar, schreiben dürfen
 sie nur org-weite Prinzipale (E-09).
+
+Ein neuer `location_id` eines Assets geht über `asset_propagate_location`
+unter der RLS des Schreibenden an seine CIs. Behält danach ein CI des Assets
+– geprüft mit erweitertem Client- und Site-Scope – einen anderen Standort,
+weil der Schreibende es nicht sieht oder nicht ändern darf, lehnt der
+Trigger die Änderung mit 42501 (`asset_location_ci_scope`) ab (Migration
+000181, F-380); Asset und CIs weichen nicht still voneinander ab.
 
 ### Standort von Räumen und Racks (WP-393)
 

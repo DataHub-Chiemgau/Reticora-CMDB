@@ -6579,7 +6579,9 @@ paths:
           description: >-
             The mount collides with another on an overlapping face, exceeds
             the rack height or mounts a child CI of a composition (RCK-01,
-            RCK-02).
+            RCK-02), or is a scoped principal's placement that would change the location of
+            the CI's asset or of another CI of the asset outside its scope
+            (F-379, F-380); nothing is stored.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -6604,6 +6606,14 @@ paths:
           $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The unmount would change the location of the CI's asset or of
+            another CI of the asset outside the scoped principal's scope
+            (F-379, F-380); the mount stays.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/racks/{id}/mounts:
     parameters:
@@ -6669,7 +6679,10 @@ paths:
           description: >-
             The mount collides with another on an overlapping face (front,
             rear, both), exceeds the rack height, mounts a CI that is
-            mounted already or a child CI of a composition (RCK-01, RCK-02).
+            mounted already or a child CI of a composition (RCK-01, RCK-02),
+            or is a scoped principal's placement that would change the location of
+            the CI's asset or of another CI of the asset outside its scope
+            (F-379, F-380); nothing is stored.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -6739,7 +6752,11 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The mount collides or is not allowed (RCK-01, RCK-02).
+          description: >-
+            The mount collides or is not allowed (RCK-01, RCK-02), or is
+            a scoped principal's placement that would change the location of
+            the CI's asset or of another CI of the asset outside its scope
+            (F-379, F-380); nothing is stored.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -6813,7 +6830,10 @@ paths:
           description: >-
             The mount collides with another on an overlapping face (front,
             rear, both), exceeds the rack height, mounts a CI that is
-            mounted already or a child CI of a composition (RCK-01, RCK-02).
+            mounted already or a child CI of a composition (RCK-01, RCK-02),
+            or is a scoped principal's placement that would change the location of
+            the CI's asset or of another CI of the asset outside its scope
+            (F-379, F-380); nothing is stored.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -6837,6 +6857,14 @@ paths:
           $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The unmount would change the location of the CI's asset or of
+            another CI of the asset outside the scoped principal's scope
+            (F-379, F-380); the mount stays.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/mounts/{id}:
     parameters:
@@ -6891,7 +6919,10 @@ paths:
           description: >-
             The mount collides with another on an overlapping face (front,
             rear, both), exceeds the rack height, mounts a CI that is
-            mounted already or a child CI of a composition (RCK-01, RCK-02).
+            mounted already or a child CI of a composition (RCK-01, RCK-02),
+            or is a scoped principal's placement that would change the location of
+            the CI's asset or of another CI of the asset outside its scope
+            (F-379, F-380); nothing is stored.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -6911,6 +6942,14 @@ paths:
           $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The unmount would change the location of the CI's asset or of
+            another CI of the asset outside the scoped principal's scope
+            (F-379, F-380); the mount stays.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/cables:
     get:
