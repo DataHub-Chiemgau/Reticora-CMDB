@@ -15,8 +15,9 @@ integrierten Stands (`58863fa`, `dea65b7`) und die Nachträge zu seinen nicht
 blockierenden Befunden vom 2026-10-15 (`3f2bfd5`, `458a96d`, `111bdc4`,
 `f354c5a`, `0f165cc`; Abschnitt „G1-Nachbesserung“).
 Die Erstfassung prüfte `main` nach dem Lasttest (PR #60) zuzüglich WP-208
-(Kanalmatrix, Migration 000136). Der Stand ist lokal geprüft; der CI-Lauf auf
-dem Release-Kandidaten steht aus. Am 2026-10-15 hat der Auftraggeber E-17,
+(Kanalmatrix, Migration 000136). Der Stand ist lokal geprüft; den CI-Lauf auf
+dem Release-Kandidaten führt der Abschnitt „Läufe auf dem
+Release-Kandidaten“ (WP-595). Am 2026-10-15 hat der Auftraggeber E-17,
 E-56, E-57 und E-58 entschieden und G1 freigegeben (Abschnitt „Ergebnis“).
 
 Fortschreibung vom 2026-10-25 (WP-452, `t5-review-g1`) auf dem Stand
@@ -82,7 +83,8 @@ endgültige Statuspflege übernimmt WP-595 (`t5-rc-evidence`).
   der vorbestehende SR-11, behoben mit WP-418 (`t5-sr11-decorator`).
 - **Scans:** govulncheck, npm audit und Trivy sind ohne blockierende Funde, und
   es gibt keine Ausnahmen. Die G1-Nachbesserung ändert keine Abhängigkeiten;
-  der Scan-Lauf auf dem Release-Kandidaten steht aus. In den
+  den Scan-Lauf auf dem Release-Kandidaten führt der Abschnitt „Läufe auf
+  dem Release-Kandidaten“ (WP-595). In den
   Entwicklungsabhängigkeiten meldet npm audit am 2026-10-25 2 Critical
   (tinypool, vitest) und 6 High. Sie sind nicht ausgeliefert, aber als
   Lieferkettenrisiko (T19) offen, bis die Aktualisierung gemergt ist; die
@@ -147,7 +149,8 @@ Artefakte des Laufs vor (30 Tage).
 
 Die G1-Nachbesserung (WP-332 bis WP-335) ändert weder `go.mod`/`go.sum` noch
 `package.json`/`package-lock.json` noch die Dockerfiles. Die Scan-Jobs laufen
-im CI-Lauf des Release-Kandidaten erneut; dieser Lauf steht aus.
+im CI-Lauf des Release-Kandidaten erneut (Abschnitt „Läufe auf dem
+Release-Kandidaten“, WP-595).
 
 ### Entwicklungsabhängigkeiten (F-297, T19)
 
@@ -207,6 +210,28 @@ Für die sechs High-Pakete meldet npm audit einen Fix ohne Major-Sprung. Die
 Moderate-Funde (u. a. `tailwindcss` über `postcss-selector-parser`, mit Fix
 nur über einen Major-Sprung) folgen der nächsten Aktualisierung; SEC-11
 setzt für sie keine Frist.
+
+## Läufe auf dem Release-Kandidaten
+
+WP-595 (`t5-rc-evidence`): Release-Kandidat ist der Stand von `main` nach
+dem Merge aller Korrektur-WPs mit dem Tag `v1.0.0-rc.<n>`. Die Läufe führt
+nur WP-595 aus; WP-600 übernimmt ihre Lauf-IDs und wiederholt Läufe nur bei
+Commits nach dem Tag. Ein roter Lauf steht hier mit Ursache und Folge-WP.
+Die übrigen Läufe stehen in `docs/acceptance/g1-gate.md` (Abschnitt „Läufe
+auf dem Release-Kandidaten“) und `docs/acceptance/g1-installation.md`.
+
+| Punkt | Wert |
+|---|---|
+| Tag | `v1.0.0-rc.<n>`: RC-Lauf ausstehend (WP-595) |
+| Commit | RC-Lauf ausstehend (WP-595) |
+
+| Workflow | Jobs | Lauf | Ergebnis |
+|---|---|---|---|
+| `ci.yml` | `govulncheck` (backend, collector, edgecore) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `ci.yml` | `npm-audit` | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `ci.yml` | `image-scan` (vier Images) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `ci.yml` | `traceability`, `gate` und alle übrigen Jobs (Regression) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `release.yml` | Pre-Release mit SBOMs, Sigstore-Bundles, Image-Signaturen, SBOM-Attestierungen und dem `cosign_real`-Test | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
 
 ## ASVS Level 2 – Abgleich je Kapitel
 
@@ -467,8 +492,9 @@ nachgetragen:
   ist grün, alle k6-Schwellen eingehalten; damit ist die Auflage von E-58
   für diesen Commit erfüllt. Nach dem Merge wiederholt der nächtliche Lauf
   ihn auf dem Release-Kandidaten.
-- Ausstehend: CI-Lauf auf dem Release-Kandidaten (mit den Scan-Jobs und
-  `TestMigrationsRoundtrip`).
+- CI-Lauf auf dem Release-Kandidaten (mit den Scan-Jobs und
+  `TestMigrationsRoundtrip`): Abschnitt „Läufe auf dem Release-Kandidaten“
+  (WP-595).
 
 ## Externer Pentest
 

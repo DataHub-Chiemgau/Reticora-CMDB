@@ -1024,3 +1024,5 @@ API-05;[B];B;backend/internal/citype/attrdef_integration_test.go;WP-589
 MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/citype/attrdef_integration_test.go;WP-589
 OPS-06;[Q];A;tests/outage/collector.sh;WP-587
 NTF-03;[B];B;backend/internal/notify/locale_integration_test.go;WP-653
+GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-595
+INS-01;[Q];G1;tests/rep01-structure.test.sh;WP-595

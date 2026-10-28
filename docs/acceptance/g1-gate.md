@@ -21,16 +21,39 @@ Prüfungen:
 - Beide laufen in jedem PR (CI-Jobs `traceability` und `gate`).
 - `tests/rep01-structure.test.sh --final` prüft die Gate-Entscheidung
   (WP-595, WP-600): zusätzlich kein offenes Critical in Review und Pentest,
-  kein offenes High/Critical im Pentest, jede GATE-Zeile PASS und keine
-  Ausnahme der Art `erklaerung` oder `luecke`.
+  kein offenes High/Critical im Pentest, die dokumentierten Läufe auf dem
+  Release-Kandidaten (kein Platzhalter eines RC-Laufs und kein Vermerk, dass
+  ein Lauf aussteht, in dieser Checkliste, im Sicherheitsreview, im
+  Installationsnachweis und in `docs/README.md`) und den
+  Installationsnachweis auf der letzten Produktänderung
+  (`install_evidence_current`, F-122). Beim Ergebnis „offen“ oder
+  „bestanden“ verlangt es außerdem jede GATE-Zeile PASS und keine Ausnahme
+  der Art `erklaerung` oder `luecke`, beim Ergebnis „bedingt bestanden“
+  stattdessen dessen Bedingungen (1) bis (5) (unten).
+- Der Workflow `gate-final.yml` führt `--final` und `TestTraceabilityFile`
+  auf jedem Tag `v*` und von Hand aus (WP-595); sein Lauf auf dem
+  Release-Kandidaten steht im Abschnitt „Läufe auf dem Release-Kandidaten“.
 
 Konsistenzprüfung (WP-451, Normalmodus):
 
-- Das Ergebnis steht als erste Zeile „**Ergebnis: offen**“ oder
-  „**Ergebnis: bestanden**“ im Abschnitt „Ergebnis“. Das Ergebnis „bedingt
-  bestanden“ nach E-76 Option 2 (Abschnitt „Freigabe nach E-76“) nimmt die
-  Prüfung ab WP-595 an, mit seinen Bedingungen. Der Status einer ID ist
-  die Statusspalte des Anhangs; PASS heißt, die Zelle beginnt mit PASS.
+- Das Ergebnis steht als erste Zeile „**Ergebnis: offen**“,
+  „**Ergebnis: bestanden**“ oder „**Ergebnis: bedingt bestanden**“ im
+  Abschnitt „Ergebnis“. Der Status einer ID ist die Statusspalte des
+  Anhangs; PASS heißt, die Zelle beginnt mit PASS.
+- „bedingt bestanden“ (E-76 Option 2, WP-595) ist nur zulässig, wenn
+  (1) der Abschnitt „Freigabe nach E-76“ die Erklärung des Auftraggebers
+  wiedergibt, jede ID der Art `erklaerung` nennt und in seiner Tabelle
+  (Spalten „Lieferung“ und „Frist“) für jede Lieferung (A-02, A-07, A-11)
+  dieser IDs eine Frist führt, (2) jede ID, die nicht PASS ist, in
+  `docs/acceptance/g1-ausnahmen.csv` mit der Art `erklaerung` oder `np`
+  steht und keine Ausnahme die Art `luecke` hat, (3) jede Zeile der Art
+  `erklaerung` in der Spalte `lieferung` eine Frist nennt („Frist …“),
+  (4) jede GATE-Zeile (Anhang, Statuszeile des Abschnitts, Bedingung von
+  GATE-03) PASS ist oder selbst eine Ausnahme der Art `erklaerung`; von
+  GATE-03 darf nur die Bedingung „Pentest ohne offene High/Critical“ offen
+  sein, und (5) kein Critical in Review und Pentest und kein High oder
+  Critical im Pentest offen ist. „bestanden“ verlangt weiter jede GATE-Zeile
+  PASS und mit `--final` keine Ausnahme der Art `erklaerung`.
 - Befundzeile ist jede Tabellenzeile mit einer Severity-Zelle in
   `docs/security/review-g1.md` (auch im Anhang) und
   `docs/security/pentest-g1.md`. Fettdruck und Groß-/Kleinschreibung zählen
@@ -72,7 +95,8 @@ Befunden (`3f2bfd5`, `458a96d`, `111bdc4`, `f354c5a`, `0f165cc`; Bewertung in
 (Kontrollmessungen in `docs/acceptance/lasttest-g1.md`). Der Workflow
 `load.yml` ist auf Commit `918a832`, dem Code-Stand mit allen Nachträgen,
 grün (Run 38665599979); nach dem Merge wiederholt ihn der nächtliche Lauf auf
-dem Release-Kandidaten. Der CI-Lauf auf dem Release-Kandidaten steht aus.
+dem Release-Kandidaten. Die Läufe auf dem Release-Kandidaten führt der
+Abschnitt „Läufe auf dem Release-Kandidaten“ (WP-595).
 
 Nachtrag 2026-10-15: Der Auftraggeber hat E-17, E-56, E-57 und E-58 nach den
 Empfehlungen entschieden, B3, B4 und B6 für erledigt erklärt und G1
@@ -154,8 +178,9 @@ für AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01 (a)/(b), GATE-03
 - G1 darf „bedingt bestanden“ lauten, wenn außer diesen Ausnahmen jede
   Bedingung von „bestanden“ erfüllt ist: kein offenes Critical, kein offenes
   High/Critical im Pentest, keine Ausnahme der Art `luecke`, jede GATE-Zeile
-  PASS oder selbst eine Ausnahme dieser Freigabe. Die Prüfung dafür ergänzt
-  WP-595 in `tests/rep01-structure.test.sh`; die Entscheidung trifft WP-600.
+  PASS oder selbst eine Ausnahme dieser Freigabe. `tests/rep01-structure.test.sh`
+  prüft diese Bedingungen (1) bis (5) im Normalmodus und mit `--final`
+  (WP-595, Konsistenzprüfung oben); die Entscheidung trifft WP-600.
 - Die Lieferungen bleiben geschuldet. Mit jeder Lieferung entfernt ihr WP die
   Zeilen aus der Ausnahmeliste und setzt die IDs nach dem Nachweis auf PASS.
 
@@ -168,6 +193,44 @@ für AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01 (a)/(b), GATE-03
 Das Ergebnis lautet derzeit „offen“, weil weitere Bedingungen fehlen: GATE-01
 und die offenen Befunde zu CI-13, MET-15 und TEN-09 sowie die Läufe auf dem
 Release-Kandidaten (WP-595).
+
+### Bekannte Einschränkungen nach E-60
+
+**E-60** (entschieden: Option 1, Auftraggeber 2026-10-28): Diese P3-Befunde
+stellt der Korrekturplan begründet zurück
+(`docs/plan/g1-korrektur/implementierungsplan.md`, Abschnitt „Zurückgestellte
+Befunde“). Sie verletzen kein Akzeptanzkriterium eines Phase-1-WPs und
+bleiben bei der Gate-Entscheidung G1 als bekannte Einschränkungen offen; ein
+Defekttest, falls vorhanden, bleibt in `tests/audit/expected-failures.txt`.
+
+| Befund | Titel | Begründung | Ziel |
+|---|---|---|---|
+| F-212 | Datenkorrektur 000086 behält implizit provisionierte Add-on-Zeilen (WP-075) | Betrifft nur die Add-on-Features `iga` und `ai` ([A], CH14), deren Module im G1-Release nach E-03 durch WP-214 abgeschaltet sind; implizit provisionierte Add-on-Zeilen sind dort wirkungslos (Phase-2+-Funktion). Die Bereinigung muss implizite von echten Operator-Grants unterscheiden (Abgleich mit `operator_audit`) und gehört zur Aktivierung der Add-on-Module. | Aktivierungs-WP der Add-on-Module IGA und KI (Phase-2-Plan, Modulfreigabe nach E-03); bis dahin Release-Hinweis in `docs/acceptance/g1-installation.md`, Abschnitt „Release-Kandidat“. |
+| F-287 | Roundtrip-Test scheitert auf geteilten PostgreSQL-Clustern, die clusterweite Rolle `reticora_app` wird gelöscht (WP-006) | Auf einem Cluster mit weiteren migrierten Datenbanken bricht `000056_rls_enforcement.down.sql` (DROP ROLE `reticora_app`) mit SQLSTATE 2BP01 ab. Der Retest bräuchte eine Änderung der ausgelieferten Migration 000056 oder eine eigene Cluster-Testinfrastruktur. Keine AK-Wirkung: WP-006 ist bestanden, CI nutzt einen dedizierten PostgreSQL-Service; bewusst akzeptierte Einschränkung eines Entwicklerwerkzeugs. Nachtrag des Plans vom 2026-10-26: E-72 ist mit Option 1 entschieden, WP-427 (`t1-mig56-down`) behebt die Ursache mit; ob F-287 damit aus der Zurückstellung fällt, bewertet WP-600. | Phase-2-Werkzeug-WP (Testinfrastruktur mit temporärem dediziertem Cluster für den Roundtrip, pg_shdepend-Prüfung mit klarer Fehlermeldung). |
+| F-316 | Audit-Kette synchron unter Org-Lock bis COMMIT statt asynchroner Outbox mit Single-Runner (AUD-04, WP-132) | Bewusst akzeptierte Abweichung ohne AK-Wirkung: E-56 (2026-10-15, Abschnitt „Audit-Kette und Outbox“) erkennt die synchrone Kette als verbleibende Grenze mit Folge-WP an. Kein WP-132-Kriterium ist verletzt (Kette je Org mit Sequenz, audit-verify meldet die Bruchstelle, keine Gabelung); kein Funktionsverlust, nur eine Durchsatzgrenze je Org. | Folge-WP Outbox-Nummerierung nach E-56 vor GA (asynchroner Audit-Runner nach AUD-04/JOB-02); Regressionsschutz bis dahin `TestAuditChainPerOrganizationPG`. |
+| F-349 | Override-Autor wird im Provenienz-Tooltip als rohe User-ID gezeigt (WP-198) | Kosmetische Abweichung ohne AK-Wirkung: das REC-10-Kriterium von WP-198 (Quelle, Zeit, Rang/Override-Grund) ist erfüllt; die User-ID ist korrekt und eindeutig. Die Auflösung zu Anzeigenamen ist kein Phase-1-AK. | Folge-WP im Phase-2-Plan (Anzeigename des Override-Autors in Provenienz-Tooltip und Historie, z. B. `override_author_name` serverseitig). |
+
+Der Ratchet-Vergleich der Real-Stack-Suite auf dem Release-Kandidaten
+(`install-smoke.yml`, Job `e2e-real-ratchet`) lässt nur Zeilen dieser
+Befunde zu (WP-595).
+
+### Läufe auf dem Release-Kandidaten
+
+Release-Kandidat ist der Stand von `main` nach dem Merge aller Korrektur-WPs
+mit dem Tag `v1.0.0-rc.<n>` (WP-595). Die Läufe führt nur WP-595 aus;
+WP-600 übernimmt ihre Lauf-IDs und wiederholt Läufe nur bei Commits nach dem
+Tag. Ein roter Lauf steht hier mit Ursache und Folge-WP. CI und Release
+stehen in `docs/security/review-g1.md`, Install-Smoke in
+`docs/acceptance/g1-installation.md`.
+
+| Workflow | Gegenstand | Commit | Lauf | Ergebnis |
+|---|---|---|---|---|
+| `gate-final.yml` | `tests/rep01-structure.test.sh --final`, `TestTraceabilityFile`; bei Rot die offenen Lieferungen und IDs | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `install-smoke.yml`, Jobs `e2e-real` und `e2e-real-ratchet` | Real-Stack-Suite in allen sechs Browserprojekten und Modul-Lauf `maintenance.spec.ts`; Ratchet nur mit Zeilen der nach E-60 zurückgestellten Befunde | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `outage.yml` | Ausfallsuite | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `restore-test.yml` | Restore, PITR, RPO/RTO | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `k8s-smoke.yml` | Kubernetes-Smoke (kind) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `load.yml` (nächtlich) | Lasttest NFR-10 nach E-58 | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
 
 Geschlossen mit der G1-Nachbesserung:
 
@@ -430,7 +493,8 @@ wiederholt den Lasttest (NFR-10).
 
 ## Anhang: Status je [B]/[Q]-ID
 
-Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den genannten Tests bzw. Dokumenten, und die CI ist auf dem Release-Kandidaten grün. „offen“ heißt: Der Nachweis fehlt oder ein Befund ist offen; die Begründung steht im Abschnitt GATE-02. Eine ID der Ausnahmeliste `docs/acceptance/g1-ausnahmen.csv` steht nie auf PASS (E-76). Für NFR-02, NFR-03 und NFR-10 sind die Nachweise der lokale Lastlauf auf Commit `dbbfded` und der grüne `load.yml`-Lauf 38665599979 auf Commit `918a832`, als G1-Nachweis anerkannt (E-58 entschieden); der CI-Lauf auf dem Release-Kandidaten (PR #64) steht aus. Bis 2026-10-25 standen acht IDs auf „PASS (Erklärung des Auftraggebers)“; nach E-76 stehen sie auf „offen“ (WP-451).
+Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den genannten Tests bzw. Dokumenten, und die CI ist auf dem Release-Kandidaten grün. „offen“ heißt: Der Nachweis fehlt oder ein Befund ist offen; die Begründung steht im Abschnitt GATE-02. Eine ID der Ausnahmeliste `docs/acceptance/g1-ausnahmen.csv` steht nie auf PASS (E-76). Für NFR-02, NFR-03 und NFR-10 sind die Nachweise der lokale Lastlauf auf Commit `dbbfded` und der grüne `load.yml`-Lauf 38665599979 auf Commit `918a832`, als G1-Nachweis anerkannt (E-58 entschieden); den CI-Lauf auf dem Release-Kandidaten führt
+`docs/security/review-g1.md`, Abschnitt „Läufe auf dem Release-Kandidaten“ (WP-595). Bis 2026-10-25 standen acht IDs auf „PASS (Erklärung des Auftraggebers)“; nach E-76 stehen sie auf „offen“ (WP-451).
 
 | ID | Tag | Status | Nachweis | WP |
 |---|---|---|---|---|

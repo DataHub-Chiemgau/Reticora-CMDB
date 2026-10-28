@@ -1,0 +1,73 @@
+name: Gate final
+
+# WP-595 (GATE-01 to GATE-03, INS-01): the gate decision check of G1 on a
+# release candidate. It runs on every tag v* (v1.0.0-rc.<n>) and by hand on
+# the commit to be decided (WP-600, k-gate):
+#   - gate-final: tests/rep01-structure.test.sh --final — the gate
+#     consistency of WP-451, no open Critical in review and pentest, no open
+#     High/Critical in the pentest, every GATE row PASS and no exception of
+#     kind erklaerung or luecke (or, for the result "bedingt bestanden" after
+#     E-76 option 2, its conditions (1) to (5)), the documented runs on the
+#     release candidate and install_evidence_current: the install smoke
+#     evidence in docs/acceptance/g1-installation.md names the last commit
+#     that changed the product or a later one (needs the full history);
+#   - traceability: TestTraceabilityFile, every [B]/[Q] ID with a row or an
+#     entry in docs/acceptance/g1-ausnahmen.csv (E-30, E-76).
+# A red gate-final lists the open deliveries and IDs; its run ID goes into
+# docs/acceptance/g1-gate.md. A green gate-final is the entry condition of
+# WP-600, not of WP-595.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate-final:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # install_evidence_current compares commits of the history.
+          fetch-depth: 0
+
+      - name: PyYAML for the workflow check
+        run: python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+
+      - name: Gate decision check (GATE-01/02/03, INS-01, --final)
+        run: ./tests/rep01-structure.test.sh --final 2>&1 | tee "$RUNNER_TEMP/gate-final.txt"
+        shell: bash -o pipefail {0}
+
+      # The open deliveries and IDs of a red run, for the checklist.
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## Gate final'
+            echo
+            if [ -s "$RUNNER_TEMP/gate-final.txt" ]; then
+              echo '```text'
+              grep -E '^FAIL ' "$RUNNER_TEMP/gate-final.txt" || echo 'no failed check'
+              tail -n 1 "$RUNNER_TEMP/gate-final.txt"
+              echo '```'
+            else
+              echo 'the check produced no output'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  traceability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+
+      - name: Check docs/traceability.csv (TestTraceabilityFile)
+        working-directory: backend
+        run: go test -count=1 -v -run 'TestTraceabilityFile' ./internal/traceability/

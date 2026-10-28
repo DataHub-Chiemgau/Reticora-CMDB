@@ -12,52 +12,12 @@ name: Install Smoke Test
 # (WP-388, TEC-15).
 
 on:
+  # WP-595 (F-122): every push to main runs the full workflow without a path
+  # filter, so the installation evidence always covers the current state of
+  # main; release tags (the release candidate v1.0.0-rc.<n>) run it as well.
   push:
     branches: [main]
-    # Release tags run the full matrix regardless of the changed paths
-    # (GitHub does not apply path filters to tag pushes).
     tags: ['v*']
-    paths:
-      - 'install*.sh'
-      - 'deploy/docker-compose/**'
-      - 'deploy/keycloak/**'
-      - 'backend/Dockerfile'
-      - 'frontend/Dockerfile'
-      # WP-440: entrypoint hooks (TLS, certificate reload) and nginx
-      # configuration baked into the frontend image.
-      - 'frontend/docker-entrypoint.d/**'
-      - 'frontend/nginx.conf'
-      - 'frontend/keycloak-proxy.conf'
-      - 'tests/install-*.sh'
-      # WP-420: Pebble and challtestsrv of tests/install-acme-pebble.test.sh.
-      - 'tests/fixtures/pebble/**'
-      - 'tests/backup-*.sh'
-      - 'tests/nats-mtls.test.sh'
-      - 'tests/keycloak-realm-upgrade.test.sh'
-      - 'tests/keycloak/**'
-      - 'frontend/e2e/onboarding.spec.ts'
-      - 'frontend/e2e/fixtures/**'
-      - '.github/workflows/install-smoke.yml'
-      # WP-338: the real-stack suite runs against the installation, so every
-      # change it can observe starts the workflow.
-      - 'backend/**'
-      - 'frontend/src/**'
-      - 'frontend/e2e-real/**'
-      # WP-646: shell harness of the TLS origin of the WebKit projects.
-      - 'tests/e2e-real-tls-origin.test.sh'
-      # WP-532: playwright.real.config.ts takes its browser projects from here.
-      - 'frontend/playwright.config.ts'
-      - 'frontend/e2e/support/**'
-      - 'frontend/package.json'
-      - 'frontend/package-lock.json'
-      - 'deploy/**'
-      - 'collector/**'
-      - 'edgecore/**'
-      - 'tests/audit/**'
-      # WP-546: the collector self-update with two builds (COL-06).
-      - 'tests/collector-selfupdate.test.sh'
-      # WP-387: the installers verify what the release workflow publishes.
-      - '.github/workflows/release.yml'
   pull_request:
     branches: [main]
     paths:
