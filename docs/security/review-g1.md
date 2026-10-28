@@ -37,6 +37,12 @@ Fortschreibung vom 2026-10-25 (WP-452, `t5-review-g1`) auf dem Stand
 Die Testläufe dazu sind lokal. Die Läufe auf dem Release-Kandidaten und die
 endgültige Statuspflege übernimmt WP-595 (`t5-rc-evidence`).
 
+Fortschreibung vom 2026-10-28 (WP-654, `k6n-vitest-update`): Die Critical-
+und High-Advisories der Entwicklungsabhängigkeiten sind durch die
+Aktualisierung behoben (`vitest` 4.1.12 ohne `tinypool`, `vite` 6.4.5 und
+Patch-Stände der transitiven Pakete). npm audit meldet über alle
+Abhängigkeiten kein High und kein Critical (Abschnitt „Scanergebnisse“).
+
 ## Ergebnis
 
 - **Audit-Befunde:** Von 225 Critical/High-Befunden sind alle G1-Anteile
@@ -85,10 +91,12 @@ endgültige Statuspflege übernimmt WP-595 (`t5-rc-evidence`).
   es gibt keine Ausnahmen. Die G1-Nachbesserung ändert keine Abhängigkeiten;
   den Scan-Lauf auf dem Release-Kandidaten führt der Abschnitt „Läufe auf
   dem Release-Kandidaten“ (WP-595). In den
-  Entwicklungsabhängigkeiten meldet npm audit am 2026-10-25 2 Critical
-  (tinypool, vitest) und 6 High. Sie sind nicht ausgeliefert, aber als
-  Lieferkettenrisiko (T19) offen, bis die Aktualisierung gemergt ist; die
-  Frist für Critical endet am 2026-10-25 (Abschnitt „Scanergebnisse“).
+  Entwicklungsabhängigkeiten meldete npm audit am 2026-10-25 2 Critical
+  (tinypool, vitest) und 6 High. Sie sind nicht ausgeliefert; als
+  Lieferkettenrisiko (T19) behebt sie die Aktualisierung mit WP-654 am
+  2026-10-28. Für die zwei Critical liegt das drei Tage nach der Frist
+  (2026-10-25), für die High innerhalb der Frist (Abschnitt
+  „Scanergebnisse“).
 - **Pentest:** Der externe Pentest (WP-210, E-28, B3) ist laut Erklärung des
   Auftraggebers vom 2026-10-15 erledigt. Bericht, Befunde und Nachtest
   liegen im Repository nicht vor; Zusammenfassung und Befundliste sind in
@@ -100,8 +108,9 @@ war am 2026-10-15 kein High und kein Critical als offen geführt; SR-02 ist
 mit WP-332 bis WP-334 behoben. SR-11 stand dabei entgegen dem
 Bewertungsschema auf Low (F-119), und SR-12 und SR-13 fehlten (F-040); beides
 korrigiert die Fortschreibung vom 2026-10-25. Seitdem ist unter SR-01 bis
-SR-26 kein High und kein Critical offen; offen sind die Critical-Advisories
-der Entwicklungsabhängigkeiten (Abschnitt „Scanergebnisse“). Das
+SR-26 kein High und kein Critical offen; die Critical-Advisories der
+Entwicklungsabhängigkeiten sind mit WP-654 behoben (Abschnitt
+„Scanergebnisse“). Das
 Ausstiegskriterium „keine offenen High/Critical“ verlangt zusätzlich den
 Pentest-Nachweis (WP-210, B3). Die Erklärung des Auftraggebers vom
 2026-10-15, B3 sei erledigt, ersetzt ihn nach der Übergangsregel von E-76
@@ -188,28 +197,63 @@ Bewertung als Lieferkettenrisiko (Threat T19, `docs/security/threat-model.md`):
 - Maßnahme ist die Aktualisierung. Eine Ausnahme in
   `security/scan-exceptions.txt` verlängert die Frist nicht, und der Job
   wertet sie für Entwicklungsabhängigkeiten nicht aus.
-- WP-452 ändert keine Abhängigkeiten. Für die Aktualisierung von `vitest`
-  sieht der Korrekturplan noch kein WP vor; es ist anzulegen.
-- Die Critical-Zeilen bleiben offen, bis die Aktualisierung gemergt ist. Bis
-  dahin verbieten sie das Gate-Ergebnis „bestanden“
-  (`tests/rep01-structure.test.sh --final`). Wird die Frist verfehlt, ist
-  SEC-11 für diese Funde nicht eingehalten.
+- WP-452 änderte keine Abhängigkeiten. Die Aktualisierung führt WP-654
+  (`k6n-vitest-update`, K6-Nachträge) aus.
+- Die Critical-Zeilen blieben offen, bis die Aktualisierung gemergt war. Bis
+  dahin verboten sie das Gate-Ergebnis „bestanden“
+  (`tests/rep01-structure.test.sh --final`). WP-654 behebt sie am
+  2026-10-28, drei Tage nach der Frist; SEC-11 ist für diese zwei Funde
+  nicht eingehalten. Die High sind innerhalb ihrer Frist behoben.
+
+Aktualisierung (WP-654, 2026-10-28), mit npm erzeugt (`package.json`,
+`package-lock.json`):
+
+- `vitest` 3.2.7 → 4.1.12 (`devDependencies`: `^4.1.12`), damit alle
+  `@vitest/*`-Pakete 4.1.12. Vitest 4 bringt seinen Worker-Pool selbst mit:
+  `tinypool` und `vite-node` sind nicht mehr installiert. 4.1.12 ist die
+  kleinste Version außerhalb aller Advisory-Bereiche (`vitest` bis 4.1.10,
+  `@vitest/mocker` bis 4.1.11, `tinypool` bis 2.1.1). Die von npm audit
+  vorgeschlagene 5.0.5 verlangt Node `^22.12.0`; die CI-Jobs und die
+  Build-Stufe des Images (`frontend/Dockerfile`) laufen auf Node 20.
+- Ohne Major-Sprung, innerhalb der Bereiche von `package.json`: `vite`
+  6.4.3 → 6.4.5, `@redocly/openapi-core` 1.34.18 → 1.34.22, `js-yaml`
+  4.3.1 → 4.3.2, `brace-expansion` 1.1.18/2.1.4/5.0.9 → 1.1.21/2.1.7/5.0.12,
+  `browserslist` 4.28.4 → 4.29.5, `source-map-js` 1.2.1 → 1.2.2, dazu die
+  Moderate `postcss-selector-parser` 6.1.4 → 6.1.5 und
+  `baseline-browser-mapping` 2.10.41 → 2.11.34.
+- Die Produktionsabhängigkeiten bleiben unverändert. Konfiguration und Tests
+  brauchen keine Anpassung: Vitest 4.1.12 führt dieselben 74 Testdateien mit
+  592 Tests grün aus wie 3.2.7; Lint, Typprüfung, Build,
+  `generate:api:check` und die gemockte E2E-Suite (Chromium, mobiles
+  Chrome) sind grün.
+
+Lauf: lokal am 2026-10-28, `frontend/package-lock.json`, Schritte des Jobs
+`npm-audit` (`npm audit --omit=dev --json`, `npm audit --json`) mit npm
+10.8.2 (Node 20 wie CI) und npm 10.9.4 (Node 22), dazu
+`npm audit --omit=optional`:
+
+- Vorher (Basis `92f109f`): Produktionsabhängigkeiten 0 Critical, 0 High,
+  2 Moderate; alle Abhängigkeiten 2 Critical, 6 High, 5 Moderate.
+- Nachher: Produktionsabhängigkeiten 0 Critical, 0 High, 2 Moderate; alle
+  Abhängigkeiten 0 Critical, 0 High, 2 Moderate. Der Job `npm-audit` bleibt
+  grün.
 
 | Paket | Schweregrad | Status | Advisories (npm audit) | Herkunft | Maßnahme | Frist (SEC-11) |
 |---|---|---|---|---|---|---|
-| `tinypool` 1.1.1 | Critical | offen | GHSA-5gmw-xhrv-c9v3, GHSA-85c8-ppgw-ccpr: Prototype-Pollution-Gadget in den Worker- bzw. `run()`-Optionen führt zu Codeausführung | transitiv über `vitest` | Aktualisierung von `vitest` (tinypool ab 2.1.2) | 2026-10-25 |
-| `vitest` 3.2.7 | Critical | offen | über `tinypool`; dazu GHSA-82fw-gwwq-j7x9 und über `@vitest/mocker` 3.2.7 GHSA-qxg6-89mg-rqv8 (je Moderate) | direkt (`devDependencies`) | Aktualisierung; npm audit nennt `vitest` 5.0.5, einen Major-Sprung von `^3.2.7` | 2026-10-25 |
-| `vite` 6.4.3 | High | offen | GHSA-587h-7wmj-h5pm (`launch-editor`); dazu drei Moderate und ein Low | direkt (`devDependencies`) | Aktualisierung ohne Major-Sprung (`npm audit fix`) | 2026-11-17 |
-| `js-yaml` 4.3.1 | High | offen | GHSA-2883-xcg3-v3hh | transitiv (`@redocly/openapi-core`, `@eslint/eslintrc`) | wie `vite` | 2026-11-17 |
-| `@redocly/openapi-core` 1.34.18 | High | offen | über `js-yaml` | transitiv über `openapi-typescript` (`npm run generate:api`) | wie `vite` | 2026-11-17 |
-| `brace-expansion` 1.1.18, 2.1.4, 5.0.9 | High | offen | GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p; dazu GHSA-q2hr-2g5m-vwhr (Moderate) | transitiv (u. a. Lint und Codegenerierung) | wie `vite` | 2026-11-17 |
-| `browserslist` 4.28.4 | High | offen | GHSA-c83g-rgw3-j3cx, GHSA-73wf-gq98-2v4g | transitiv (Build) | wie `vite` | 2026-11-17 |
-| `source-map-js` 1.2.1 | High | offen | GHSA-68fv-2mgg-jv7q | transitiv über `postcss` (Build) | wie `vite` | 2026-11-17 |
+| `tinypool` 1.1.1 | Critical | behoben (WP-654, 2026-10-28) | GHSA-5gmw-xhrv-c9v3, GHSA-85c8-ppgw-ccpr: Prototype-Pollution-Gadget in den Worker- bzw. `run()`-Optionen führt zu Codeausführung | transitiv über `vitest` | Aktualisierung von `vitest` auf 4.1.12; `tinypool` ist nicht mehr installiert | 2026-10-25 (überschritten) |
+| `vitest` 3.2.7 | Critical | behoben (WP-654, 2026-10-28) | über `tinypool`; dazu GHSA-82fw-gwwq-j7x9 und über `@vitest/mocker` 3.2.7 GHSA-qxg6-89mg-rqv8 (je Moderate) | direkt (`devDependencies`) | Aktualisierung auf 4.1.12 (`@vitest/mocker` 4.1.12); 5.0.5 verlangt Node 22 | 2026-10-25 (überschritten) |
+| `vite` 6.4.3 | High | behoben (WP-654, 2026-10-28) | GHSA-587h-7wmj-h5pm (`launch-editor`); dazu drei Moderate und ein Low | direkt (`devDependencies`) | Aktualisierung auf 6.4.5 | 2026-11-17 |
+| `js-yaml` 4.3.1 | High | behoben (WP-654, 2026-10-28) | GHSA-2883-xcg3-v3hh | transitiv (`@redocly/openapi-core`, `@eslint/eslintrc`) | Aktualisierung auf 4.3.2 | 2026-11-17 |
+| `@redocly/openapi-core` 1.34.18 | High | behoben (WP-654, 2026-10-28) | über `js-yaml` | transitiv über `openapi-typescript` (`npm run generate:api`) | Aktualisierung auf 1.34.22 | 2026-11-17 |
+| `brace-expansion` 1.1.18, 2.1.4, 5.0.9 | High | behoben (WP-654, 2026-10-28) | GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p; dazu GHSA-q2hr-2g5m-vwhr (Moderate) | transitiv (u. a. Lint und Codegenerierung) | Aktualisierung auf 1.1.21, 2.1.7, 5.0.12 | 2026-11-17 |
+| `browserslist` 4.28.4 | High | behoben (WP-654, 2026-10-28) | GHSA-c83g-rgw3-j3cx, GHSA-73wf-gq98-2v4g | transitiv (Build) | Aktualisierung auf 4.29.5 | 2026-11-17 |
+| `source-map-js` 1.2.1 | High | behoben (WP-654, 2026-10-28) | GHSA-68fv-2mgg-jv7q | transitiv über `postcss` (Build) | Aktualisierung auf 1.2.2 | 2026-11-17 |
 
-Für die sechs High-Pakete meldet npm audit einen Fix ohne Major-Sprung. Die
-Moderate-Funde (u. a. `tailwindcss` über `postcss-selector-parser`, mit Fix
-nur über einen Major-Sprung) folgen der nächsten Aktualisierung; SEC-11
-setzt für sie keine Frist.
+Offen sind nur die zwei Moderate der Produktionsabhängigkeiten
+`react-router` und `react-router-dom` 6.30.4 (GHSA-wrjc-x8rr-h8h6,
+GHSA-337j-9hxr-rhxg; npm audit meldet den Fix 6.30.6 ohne Major-Sprung).
+WP-654 ändert die ausgelieferten Pakete nicht; sie folgen der nächsten
+Aktualisierung, SEC-11 setzt für Moderate keine Frist.
 
 ## Läufe auf dem Release-Kandidaten
 
