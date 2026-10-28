@@ -161,8 +161,8 @@ Down-Migration nimmt die Reparatur nicht zurück. Prüfung und Nacharbeit:
 
 ## Release-Hinweis: Upgrade von Datenbanken ohne `migration_quarantine` (F-378, E-100)
 
-Stand: 2026-10-28. Umsetzung: WP-649. Entscheidung: E-100 (Empfehlung
-Option 1 als Übergangsregel, nach dem Präzedenzfall E-26 und E-94).
+Stand: 2026-10-28. Umsetzung: WP-649. Entscheidung: E-100 (Option 1,
+entschieden 2026-10-28, nach dem Präzedenzfall E-26 und E-94).
 
 Datenbanken, die 000056 vor E-26 angewendet haben (zwischen 2026-09-02 und
 2026-10-01), besitzen keine Tabelle `migration_quarantine`. Frühere Builds

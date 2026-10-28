@@ -36,6 +36,8 @@ Stand: 2026-10-26. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Nachtrag vom 2026-10-27 (WP-554, Übergangsregel zu E-89):** [E-89](g1-korrektur/entscheidungen.md#e-89) (Review-Merge bei ambiguous_identity, JOB-04) ist offen; es gilt ihre Empfehlung als Übergangsregel (Option 1: synchroner Effekt mit gespiegeltem Job `review.merge`; bei probable_duplicate übernimmt der Spiegel den Status des `ci.merge`-Jobs aus WP-479). Die Regel und die Korrektur des Retry-Status (F-330) stehen als Nachtrag bei [E-25](#e-25). Kein Status einer Entscheidung dieses Dokuments ändert sich; die Zählung bleibt.
 
+**Nachtrag vom 2026-10-28 (alle offenen Entscheidungen des Korrekturplans):** Der Auftraggeber hat alle bis dahin offenen Entscheidungen in [`g1-korrektur/entscheidungen.md`](g1-korrektur/entscheidungen.md) nach der Empfehlung entschieden, darunter E-86, E-87, E-88 und E-89 aus den Nachträgen oben. Die dort genannten Übergangsregeln gelten als Festlegung.
+
 | Nr. | Thema | Status | Sperrt / betrifft | WPs mit Verweis |
 |---|---|---|---|---:|
 | [E-01](#e-01) | Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 | entschieden | Keine Sperre mehr; WPs mit Verweis prüfen ihre Kriterien gegen den Text. | 130 |

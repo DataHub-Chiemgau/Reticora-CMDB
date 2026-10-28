@@ -365,7 +365,7 @@ lässt sie unverändert; ein direktes Schreiben von `schema_version` wird
 ignoriert.
 
 Org-globale Attributdefinitionen (`organization_id` gesetzt, `ci_type_id`
-`NULL`, MET-13) sind nach Entscheidung E-93 (Übergangsregel Option 2) eine
+`NULL`, MET-13) sind nach Entscheidung E-93 (entschieden: Option 2) eine
 validierte, nicht materialisierte **Laufzeitschicht**: Der CI-Service
 komponiert sie bei jedem Schreibvorgang der Organisation zwischen System-Basis
 und Typ (`citype.ResolveFields`) und erzwingt sie (Pflichtdefinition ohne Wert
@@ -377,8 +377,8 @@ deshalb keine Schicht einer einzelnen Organisation. Eine Org-Schemarevision je
 
 ## Attributdefinitionen (DB-03, MET-10, MET-16, WP-589)
 
-Nach Entscheidung E-92 (`docs/plan/g1-korrektur/entscheidungen.md`, offen;
-Übergangsregel Option 2) ist `attribute_definition` die einzige Quelle der
+Nach Entscheidung E-92 (`docs/plan/g1-korrektur/entscheidungen.md`,
+entschieden: Option 2) ist `attribute_definition` die einzige Quelle der
 System-, Organisations- und Typdefinitionen (DB-03); `ci_type.attribute_schema`
 wird daraus erzeugt. Die Definitionen der Instanzattribute bleiben in
 `ci_instance_field_definition` (MET-14 [P2], WP-256), der letzten Schicht der

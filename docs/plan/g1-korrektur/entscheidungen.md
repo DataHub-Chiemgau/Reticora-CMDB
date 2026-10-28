@@ -2,58 +2,60 @@
 
 Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../entscheidungen.md) (E-01 bis E-36, E-56 bis E-58) und [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md) (E-37 bis E-55). Jede Entscheidung nennt Status, Frage, Optionen, Empfehlung, Übergangsregel sowie betroffene IDs und WPs. Alle Entscheidungen sind offen; ihre Empfehlung gilt als Übergangsregel, damit die WPs starten können. Widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst. Ausnahme war WP-388 (`t5-install-default`), das erst nach der Entscheidung von E-69 für Option 1 beginnen durfte; E-69 ist am 2026-10-21 mit Option 1 entschieden, WP-388 ist umgesetzt. E-72 ist am 2026-10-26 mit Option 1 entschieden, E-76 am 2026-10-26 mit Option 2. Unabhängig von Entscheidungen warten WP-457 (`t5-abn01-ab`), WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-455 (`t5-v2-ids`) auf die externen Lieferungen A-02, A-07 und A-11.
 
+**Nachtrag vom 2026-10-28:** Der Auftraggeber hat alle bis dahin offenen Entscheidungen (31: E-59, E-60, E-61, E-65, E-66, E-67, E-68, E-70, E-73, E-74, E-75, E-77, E-78, E-79, E-80, E-81, E-82, E-83, E-84, E-85, E-86, E-87, E-88, E-89, E-90, E-91, E-92, E-93, E-94, E-95, E-100) nach der jeweiligen Empfehlung entschieden („Setze alle Entscheidungen wie empfohlen um“). Die Übergangsregeln, nach denen die betroffenen WPs bereits umgesetzt sind, gelten damit als Festlegung; Folge-WPs für andere Optionen entfallen.
+
 ## Übersicht
 
 | Nr. | Thema | Status | Betroffene WPs |
 |---|---|---|---|
-| [E-59](#e-59) | Einordnung des Korrekturplans vor Phase 2 und Freigabe des Phase-2-Starts | offen (Empfehlung als Übergangsregel) | WP-596, WP-597, WP-598, WP-599, WP-600 |
-| [E-60](#e-60) | Zurückgestellte P3-Befunde und Risikoakzeptanz für G1 | offen (Empfehlung als Übergangsregel) | WP-600 |
-| [E-61](#e-61) | Anlage von Dokumenten durch client- oder site-gescopte Principals | offen (Empfehlung als Übergangsregel) | WP-341 |
+| [E-59](#e-59) | Einordnung des Korrekturplans vor Phase 2 und Freigabe des Phase-2-Starts | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-596, WP-597, WP-598, WP-599, WP-600 |
+| [E-60](#e-60) | Zurückgestellte P3-Befunde und Risikoakzeptanz für G1 | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-600 |
+| [E-61](#e-61) | Anlage von Dokumenten durch client- oder site-gescopte Principals | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-341 |
 | [E-62](#e-62) | Beziehungen zwischen eigenem CI und org-weitem CI | entschieden: Option 2 (Auftraggeber, 2026-10-20) | WP-345 |
 | [E-63](#e-63) | Client-/Site-Scope für Metriken (WP-025 AK1 gegenüber ADR 0001 Punkt 4) | entschieden: Option 1 (Auftraggeber, 2026-10-20) | WP-350 |
 | [E-64](#e-64) | Widerruf von Service-Account-Keys bei Deaktivierung des anlegenden Benutzers | entschieden: Option 2 (Auftraggeber, 2026-10-20) | WP-359 |
-| [E-65](#e-65) | MFA-Pflicht im Login-Pfad ohne Keycloak-Admin-Client (AUT-09) | offen (Empfehlung als Übergangsregel) | WP-367 |
-| [E-66](#e-66) | API-07/API-08: Bulk-Statusänderung bei erzwungenem If-Match | offen (Empfehlung als Übergangsregel) | WP-368 |
-| [E-67](#e-67) | Credentials eines Discovery-Scopes ohne credential_ids | offen (Empfehlung als Übergangsregel) | WP-376, WP-378, WP-384, WP-496 |
-| [E-68](#e-68) | Credential-Art für das NAS-Plugin (Synology DSM) | offen (Empfehlung als Übergangsregel) | WP-379 |
+| [E-65](#e-65) | MFA-Pflicht im Login-Pfad ohne Keycloak-Admin-Client (AUT-09) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-367 |
+| [E-66](#e-66) | API-07/API-08: Bulk-Statusänderung bei erzwungenem If-Match | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-368 |
+| [E-67](#e-67) | Credentials eines Discovery-Scopes ohne credential_ids | entschieden: Option A (Auftraggeber, 2026-10-28) | WP-376, WP-378, WP-384, WP-496 |
+| [E-68](#e-68) | Credential-Art für das NAS-Plugin (Synology DSM) | entschieden: Option A (Auftraggeber, 2026-10-28) | WP-379 |
 | [E-69](#e-69) | TEC-15: Installationsquelle für die Signaturprüfung vor der Installation | entschieden: Option 1 (Auftraggeber, 2026-10-21) | WP-387, WP-388, WP-595 |
-| [E-70](#e-70) | Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03) | offen (Empfehlung als Übergangsregel) | WP-391 |
+| [E-70](#e-70) | Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-391 |
 | [E-71](#e-71) | LOC-11: Löschen einer Site mit Netz- und Discovery-Objekten | entschieden: Option 1 (Auftraggeber, 2026-10-25) | WP-411 |
 | [E-72](#e-72) | Änderung ausgelieferter Migrationen 000056 (down) und 000066 (up) | entschieden: Option 1 (Auftraggeber, 2026-10-26) | WP-427, WP-560, WP-574 |
-| [E-73](#e-73) | Indizierte Attributfilter unter Row-Level-Security | offen (Empfehlung als Übergangsregel); Ergänzung entschieden (Auftraggeber, 2026-10-26) | WP-435, WP-607 |
-| [E-74](#e-74) | OPS-04 in Kubernetes: Datenbankseite der WAL-Archivierung | offen (Empfehlung als Übergangsregel) | WP-444 |
-| [E-75](#e-75) | OPS-05: Alarmierung des Betriebs über NTF-Kanäle | offen (Empfehlung als Übergangsregel) | WP-448 |
+| [E-73](#e-73) | Indizierte Attributfilter unter Row-Level-Security | entschieden: Option A (Auftraggeber, 2026-10-28); Ergänzung entschieden (Auftraggeber, 2026-10-26) | WP-435, WP-607 |
+| [E-74](#e-74) | OPS-04 in Kubernetes: Datenbankseite der WAL-Archivierung | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-444 |
+| [E-75](#e-75) | OPS-05: Alarmierung des Betriebs über NTF-Kanäle | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-448 |
 | [E-76](#e-76) | GATE-02: Abnahme durch Erklärung des Auftraggebers statt Nachweis | entschieden: Option 2 (Auftraggeber, 2026-10-26) | WP-450, WP-451, WP-453, WP-454, WP-455, WP-457, WP-595, WP-600 |
-| [E-77](#e-77) | NFR-06 „Logs 30 Tage“ in den Auslieferungen | offen (Empfehlung als Übergangsregel) | WP-458 |
-| [E-78](#e-78) | CI-06: Berechtigung der einheitlichen CI-Historie | offen (Empfehlung als Übergangsregel) | WP-475 |
-| [E-79](#e-79) | NFR-04: Verlust von Metrik-Samples und Traps bei Upload-Fehlern | offen (Empfehlung als Übergangsregel) | WP-483 |
-| [E-80](#e-80) | CI-12: Unmerge nach späteren Änderungen am Survivor | offen (Empfehlung als Übergangsregel) | WP-485 |
-| [E-81](#e-81) | DB-05: Verknüpfung eines CI mit einem Asset ohne Standort | offen (Empfehlung als Übergangsregel) | WP-486 |
-| [E-82](#e-82) | AUD-03: Datenmodell der ci_change-Zeilen | offen (Empfehlung als Übergangsregel) | WP-487, WP-488, WP-489 |
-| [E-83](#e-83) | IMP-02: Traversierung per Ebenen-BFS statt rekursivem CTE | offen (Empfehlung als Übergangsregel) | WP-490 |
-| [E-84](#e-84) | DIS-10: Poll-Intervalle je Scope und Zeitzone von Cron-Zeitplänen | offen (Empfehlung als Übergangsregel) | WP-495, WP-496 |
-| [E-85](#e-85) | IMP-09: ausgeschaltete Outlets in der Redundanzkennung | offen (Empfehlung als Übergangsregel) | WP-498 |
-| [E-86](#e-86) | Bearbeitungs- und Löschrechte org-weit geteilter Sichten (VIE-01) | offen (Empfehlung als Übergangsregel) | WP-518, WP-555 |
-| [E-87](#e-87) | CI-Detail unter gewähltem Client-/Site-Scope (WP-191) | offen (Empfehlung als Übergangsregel) | WP-524 |
-| [E-88](#e-88) | Nachweis der Browser-Vorversionen (UI-18, NFR-07) | offen (Empfehlung als Übergangsregel) | WP-531 |
-| [E-89](#e-89) | Review-Merge bei ambiguous_identity: synchroner Effekt mit gespiegeltem Job (JOB-04, Folge zu E-25) | offen (Empfehlung als Übergangsregel) | WP-554 |
-| [E-90](#e-90) | REC-07: Entfernen manuell gepflegter IPs und Interfaces | offen (Empfehlung als Übergangsregel) | WP-580 |
-| [E-91](#e-91) | NTF-03: Ausprägung von Abonnements und Org-Branding in Phase 1 | offen (Empfehlung als Übergangsregel) | WP-588 |
-| [E-92](#e-92) | Instanzattributdefinitionen und DB-03 („attribute_definition einzige Quelle“) | offen (Empfehlung als Übergangsregel) | WP-589 |
-| [E-93](#e-93) | Materialisierung org-globaler Attributdefinitionen (MET-16) | offen (Empfehlung als Übergangsregel) | WP-590 |
-| [E-94](#e-94) | Korrektur der Migration 000110 (Duplikat-Suffixe der Interfaces) | offen (Empfehlung als Übergangsregel) | WP-592 |
-| [E-95](#e-95) | Durchsetzung von allowed_source_types, allowed_target_types und cardinality (REL-01) | offen (Empfehlung als Übergangsregel) | WP-592 |
+| [E-77](#e-77) | NFR-06 „Logs 30 Tage“ in den Auslieferungen | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-458 |
+| [E-78](#e-78) | CI-06: Berechtigung der einheitlichen CI-Historie | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-475 |
+| [E-79](#e-79) | NFR-04: Verlust von Metrik-Samples und Traps bei Upload-Fehlern | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-483 |
+| [E-80](#e-80) | CI-12: Unmerge nach späteren Änderungen am Survivor | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-485 |
+| [E-81](#e-81) | DB-05: Verknüpfung eines CI mit einem Asset ohne Standort | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-486 |
+| [E-82](#e-82) | AUD-03: Datenmodell der ci_change-Zeilen | entschieden: Option 2 (Auftraggeber, 2026-10-28) | WP-487, WP-488, WP-489 |
+| [E-83](#e-83) | IMP-02: Traversierung per Ebenen-BFS statt rekursivem CTE | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-490 |
+| [E-84](#e-84) | DIS-10: Poll-Intervalle je Scope und Zeitzone von Cron-Zeitplänen | entschieden: Option A (Auftraggeber, 2026-10-28) | WP-495, WP-496 |
+| [E-85](#e-85) | IMP-09: ausgeschaltete Outlets in der Redundanzkennung | entschieden: Option A (Auftraggeber, 2026-10-28) | WP-498 |
+| [E-86](#e-86) | Bearbeitungs- und Löschrechte org-weit geteilter Sichten (VIE-01) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-518, WP-555 |
+| [E-87](#e-87) | CI-Detail unter gewähltem Client-/Site-Scope (WP-191) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-524 |
+| [E-88](#e-88) | Nachweis der Browser-Vorversionen (UI-18, NFR-07) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-531 |
+| [E-89](#e-89) | Review-Merge bei ambiguous_identity: synchroner Effekt mit gespiegeltem Job (JOB-04, Folge zu E-25) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-554 |
+| [E-90](#e-90) | REC-07: Entfernen manuell gepflegter IPs und Interfaces | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-580 |
+| [E-91](#e-91) | NTF-03: Ausprägung von Abonnements und Org-Branding in Phase 1 | entschieden: Option 2 (Auftraggeber, 2026-10-28) | WP-588 |
+| [E-92](#e-92) | Instanzattributdefinitionen und DB-03 („attribute_definition einzige Quelle“) | entschieden: Option 2 (Auftraggeber, 2026-10-28) | WP-589 |
+| [E-93](#e-93) | Materialisierung org-globaler Attributdefinitionen (MET-16) | entschieden: Option 2 (Auftraggeber, 2026-10-28) | WP-590 |
+| [E-94](#e-94) | Korrektur der Migration 000110 (Duplikat-Suffixe der Interfaces) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-592 |
+| [E-95](#e-95) | Durchsetzung von allowed_source_types, allowed_target_types und cardinality (REL-01) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-592 |
 | [E-96](#e-96) | TimescaleDB-Version des Datenbank-Images und Funde seines Basisimages | entschieden: Option 2 (Auftraggeber, 2026-10-21) | WP-389 |
 | [E-97](#e-97) | Obergrenze der Dauer von Alarmregeln (MON-01) | entschieden: 9600 h (Auftraggeber, 2026-10-25) | WP-406 |
 | [E-98](#e-98) | Webhook-Abos und der Scope ihres Erzeugers (TEN-09) | entschieden: Option B (Auftraggeber, 2026-10-25) | WP-601 |
 | [E-99](#e-99) | Auswahl der Oberflächensprache (GLO-10, UI-18) | entschieden (Auftraggeber 2026-10-27): Option 1 | WP-523 |
-| [E-100](#e-100) | Upgrade von Datenbanken mit 000056 vor E-26 (fehlende `migration_quarantine`, Migration 000089) | offen (Empfehlung als Übergangsregel) | WP-649 |
+| [E-100](#e-100) | Upgrade von Datenbanken mit 000056 vor E-26 (fehlende `migration_quarantine`, Migration 000089) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-649 |
 
 ## E-59
 
 **Thema:** Einordnung des Korrekturplans vor Phase 2 und Freigabe des Phase-2-Starts
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Darf Phase 2 (WP-243 ff.) beginnen, bevor die Wiederholungsprüfung und die erneute Gate-Entscheidung G1 (WP-600 (`k-gate`)) vorliegen?
 
@@ -65,7 +67,9 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1. Die Phase-2-Pakete bauen auf Scope-, Rechte-, Metamodell- und Discovery-Pfaden auf, die dieser Plan ändert; ein früher Start verdoppelt Korrekturen und widerspricht GATE-02.
 
-**Übergangsregel:** Bis zur Entscheidung startet kein Phase-2-WP. WP-243 (`p2-trace`) liest bei seiner Umsetzung alle drei Pläne.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** Bis zur Entscheidung startet kein Phase-2-WP. WP-243 (`p2-trace`) liest bei seiner Umsetzung alle drei Pläne.
 
 **Betroffene IDs:** GATE-01, GATE-02, SEQ-01
 
@@ -75,7 +79,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** Zurückgestellte P3-Befunde und Risikoakzeptanz für G1
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Dürfen P3-Befunde, die dieser Plan begründet zurückstellt, bei der erneuten Gate-Entscheidung G1 offen bleiben?
 
@@ -86,7 +90,9 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1. GATE-01 verlangt kein offenes Critical; P3-Befunde sind geringfügig. Zurückgestellt werden nur Befunde mit Begründung (Abschnitt „Zurückgestellte Befunde“).
 
-**Übergangsregel:** Die Zurückstellung gilt vorläufig; widerspricht der Auftraggeber, entsteht je Befund ein K6-WP.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** Die Zurückstellung gilt vorläufig; widerspricht der Auftraggeber, entsteht je Befund ein K6-WP.
 
 **Betroffene IDs:** GATE-01
 
@@ -96,7 +102,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** Anlage von Dokumenten durch client- oder site-gescopte Principals
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** E-09 verbietet gescopten Principals das Anlegen org-weiter Zeilen; ein Dokument ohne Link ist org-weit, und `POST /api/v1/documents` kennt heute keine Links (Links folgen über `POST /documents/{id}/links`). Wie legen gescopte Principals Dokumente an?
 
@@ -108,7 +114,9 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: hält MGT-01 für Client-Techniker nutzbar, bleibt E-09-konform und braucht keine Modelländerung.
 
-**Übergangsregel:** Option 2 (403 für gescopte Principals ohne Link) gilt bis zur Entscheidung und wird von WP-341 (`t1-doc-window-writes`) umgesetzt; Option 1 folgt nach Freigabe als eigenes Folge-WP (K4: `links` im POST /api/v1/documents mit Spec, schema.d.ts und Modell).
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** Option 2 (403 für gescopte Principals ohne Link) gilt bis zur Entscheidung und wird von WP-341 (`t1-doc-window-writes`) umgesetzt; Option 1 folgt nach Freigabe als eigenes Folge-WP (K4: `links` im POST /api/v1/documents mit Spec, schema.d.ts und Modell).
 
 **Betroffene IDs:** MGT-01, TEN-05
 
@@ -189,7 +197,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** MFA-Pflicht im Login-Pfad ohne Keycloak-Admin-Client (AUT-09)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Der Login-Pfad (WP-367 (`t2-mfa-login-path`)) weist einem org_admin aus IdP-Gruppe oder Default-Rolle `mfa_required` über die Keycloak-Admin-API zu. Ohne `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` ist der Enforcer außerhalb von `development` fail-closed (WP-358 (`t2-mfa-role-sync`)). Das Standard-Compose läuft mit `RETICORA_ENVIRONMENT: production` (`deploy/docker-compose/docker-compose.yml:304`) und ohne Admin-Client (gesetzt nur in `frontend/e2e/fixtures/docker-compose.e2e.yml:21`); der Installer nimmt den Admin in die Gruppe `reticora-admin` auf (`install-cloud.sh:1543-1546`). Ein Aufruf für diese Gruppe beendete jeden Login des Installer-Admins mit 503 und bräche Onboarding- und install-smoke-Suite. Wie verhält sich der Login-Pfad, wenn kein Admin-Client konfiguriert ist?
 
@@ -201,7 +209,9 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1: Die Gruppe `reticora-admin` ist nach WP-357 (`t2-mfa-accounts`) bereits über den Realm abgesichert (der Installer-Admin trägt zusätzlich die Realm-Rolle org_admin mit dem Komposit `mfa_required`, `install-cloud.sh:1541`); ein Aufruf brächte dort keinen Schutzgewinn, sperrte aber den Admin jeder Standardinstallation aus. Die übrigen Wege bleiben fail-closed. Option 3 lässt im Fehlerfall einen org_admin ohne MFA zu (AUT-09 [B]); Option 2 erweitert Installer und Compose um ein weiteres Admin-Credential.
 
-**Übergangsregel:** WP-367 (`t2-mfa-login-path`) setzt Option 1 um. Bei Option 2 oder 3 wird WP-367 (`t2-mfa-login-path`) vor Beginn angepasst (Option 2: Installer- und Compose-Änderung als eigenes WP vor WP-367 (`t2-mfa-login-path`), Ausnahme für `reticora-admin` und Startfehler entfallen).
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-367 (`t2-mfa-login-path`) setzt Option 1 um. Bei Option 2 oder 3 wird WP-367 (`t2-mfa-login-path`) vor Beginn angepasst (Option 2: Installer- und Compose-Änderung als eigenes WP vor WP-367 (`t2-mfa-login-path`), Ausnahme für `reticora-admin` und Startfehler entfallen).
 
 **Betroffene IDs:** AUT-09
 
@@ -211,7 +221,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** API-07/API-08: Bulk-Statusänderung bei erzwungenem If-Match
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Nach der Korrektur ist die Bulk-Statusänderung ein manueller Schreibvorgang (Override, Versionserhöhung). Bei aktivem Org-Setting require_if_match verlangt checkPrecondition ein If-Match je CI; die Bulk-API (API-08) hat kein Versionsfeld je ID. Was gilt?
 
@@ -223,7 +233,9 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1 für Phase 1 (API-07: If-Match optional und per Org-Setting erzwingbar für Einzeländerungen; API-08 ohne Versionsliste); Option 2 als spätere Erweiterung.
 
-**Übergangsregel:** WP-368 (`t3-bulk-manual`) setzt Option 1 um.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-368 (`t3-bulk-manual`) setzt Option 1 um.
 
 **Betroffene IDs:** API-07, API-08, OVR-03
 
@@ -233,7 +245,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** Credentials eines Discovery-Scopes ohne credential_ids
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option A (Auftraggeber, 2026-10-28)
 
 **Frage:** Welche Credentials erhält der Collector für einen aktiven Scope mit leerem credential_ids (Scope aus dem UI-Formular ohne Auswahl, angenommener scope_suggested-Vorschlag), und was erhält ein Collector ohne aktive Scopes? DIS-09 nennt credential_ids als Scope-Feld, COL-02 verlangt „nur Scope-relevante Credentials“; den leeren Fall legen beide nicht fest.
 
@@ -245,7 +257,9 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option A: entspricht dem bisherigen Verhalten ohne Scopes, hält das Zero-Config-Onboarding nach INS-06 (Vorschlag bestätigen, Infrastruktur erscheint) funktionsfähig und begrenzt die Geheimnisse auf den Client des Scopes; der Defekttest TestAuditBundleCredentialSelection kodiert sie.
 
-**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-376 (`t4-bundle-select`) und WP-378 (`t4-cred-scope`) setzen sie um. Bei Option B oder C ändert ein Folge-WP nur die Auswahlregel in VerifyBundleTarget/CollectorScopes und den Testfall „Scope ohne credential_ids“.
+**Entscheidung:** Option A nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** Bis zur Entscheidung gilt Option A; WP-376 (`t4-bundle-select`) und WP-378 (`t4-cred-scope`) setzen sie um. Bei Option B oder C ändert ein Folge-WP nur die Auswahlregel in VerifyBundleTarget/CollectorScopes und den Testfall „Scope ohne credential_ids“.
 
 **Betroffene IDs:** DIS-09, COL-02, INS-06
 
@@ -255,7 +269,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** Credential-Art für das NAS-Plugin (Synology DSM)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option A (Auftraggeber, 2026-10-28)
 
 **Frage:** Mit welcher Credential-Art meldet sich das NAS-Plugin an, nachdem der Alias nas→ssh entfällt (F-028)? COL-02 verweist auf „Typen wie v2“; die v2-Texte fehlen im Repository (E-02 offen), die Arten in credential.go kennen kein NAS.
 
@@ -267,7 +281,9 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option A: trennt NAS-Konten von SSH-Root-Konten (Least Privilege, COL-02), passt zur Namespace-Regel des Collectors und lässt sich mit den v2-Texten nachträglich abgleichen.
 
-**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-379 (`t4-nas-tls`) setzt sie um. Zwischen dem Merge von WP-378 (`t4-cred-scope`) und WP-379 (`t4-nas-tls`) erhält das NAS-Plugin keine Credentials (fail-closed).
+**Entscheidung:** Option A nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** Bis zur Entscheidung gilt Option A; WP-379 (`t4-nas-tls`) setzt sie um. Zwischen dem Merge von WP-378 (`t4-cred-scope`) und WP-379 (`t4-nas-tls`) erhält das NAS-Plugin keine Credentials (fail-closed).
 
 **Betroffene IDs:** COL-02, DIS-04
 
@@ -301,7 +317,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** Kombination von Client- und Site-Zuweisungen eines Nutzers (RBA-03)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** RBA-03 nennt „Rechte = Vereinigung aller Rollen“ und „Scopes = Vereinigung der Scope-Mengen je Ebene“. Mit per AND verknüpften RLS-Dimensionen schneidet eine zusätzliche Site-Rolle den Client-Zugriff (Client-Rolle C1 + Site-Rolle S1 → nur C1 ∩ (S1 oder NULL)). Welche Sichtbarkeit gilt? Zu berücksichtigen ist F-014 (T6 WP-390 (`t6-site-grant-scope`)): Ein Site-Grant setzt künftig den Client des Standorts als Client-Dimension, sodass gemischte Grants die Client-Menge erweitern.
 
@@ -313,7 +329,9 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1 mit Dokumentation; Option 2 nur als Phase-2-Thema, weil sie TEN-04 ändert.
 
-**Übergangsregel:** Option 1 gilt; WP-391 (`t1-team-scope`) fixiert sie per Integrationstest und dokumentiert sie.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** Option 1 gilt; WP-391 (`t1-team-scope`) fixiert sie per Integrationstest und dokumentiert sie.
 
 **Betroffene IDs:** RBA-03, TEN-04, TEN-05
 
@@ -374,7 +392,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** Indizierte Attributfilter unter Row-Level-Security
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option A (Auftraggeber, 2026-10-28)
 
 **Frage:** Die Ausdrucksindizes idx_attr_<id> greifen für die App-Rolle nicht, weil jsonb_object_field_text (->>) nicht leakproof ist. Wie wird der Attributfilter indexfähig: über eine als LEAKPROOF markierte, nicht inlinebare Wrapper-Funktion (verlangt Superuser bei der Migration), über eine trigger-gepflegte Seitentabelle, über gespeicherte generierte Spalten je Attribut oder gar nicht (dokumentierte Ausnahme)?
 
@@ -387,7 +405,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option A, solange Migrationen mit der Installer-Rolle (Superuser) laufen (Compose, VM, K8s mit eigenem PostgreSQL): kleinster Eingriff ohne Mehrkosten im Ingest-Pfad (NFR-03). Option D scheidet trotz fehlender Superuser-Pflicht aus: Attributdefinitionen gelten je Organisation (citype.IndexStatement), jede durchsuchbare Definition legte eine Spalte der gemeinsamen Tabelle ci an (PostgreSQL-Grenze 1.600 Spalten einschließlich gelöschter, bei 500 Organisationen nach NFR-01 absehbar erreicht), und jeder Neuaufbau schreibt ci mit ACCESS-EXCLUSIVE-Sperre um und blockiert den Ingest. Option B nur, wenn für G1 ein Betrieb ohne Superuser (Managed PostgreSQL) zugesagt wird.
 
-**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-435 (`t4-attr-filter-index`) setzt sie um, die Migration bricht ohne Superuser mit Hinweis auf Option B ab.
+**Entscheidung:** Option A nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** Bis zur Entscheidung gilt Option A; WP-435 (`t4-attr-filter-index`) setzt sie um, die Migration bricht ohne Superuser mit Hinweis auf Option B ab.
 
 **Ergänzung vom 2026-10-26 (Index je Schlüssel):** Der Auftraggeber hat am 2026-10-26 mit der Freigabe der K3-Nachträge entschieden, die Indexe nach Option A je Attribut-Schlüssel statt je Definition und Organisation anzulegen.
 - **Anlass:** Die Lastläufe von WP-439 auf den NFR-01-Volumina: Mit 500 Organisationen, die denselben Schlüssel durchsuchbar machen, trägt `ci` 528 statt 28 Indexe. Planung und Schreibpfad jeder Abfrage auf `ci` werden dadurch etwa zehn- bzw. dreimal teurer, generische Pläne nutzen die Indexe nie (Ursache U1, `docs/acceptance/lasttest-g1.md`, Punkt 11).
@@ -403,7 +423,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** OPS-04 in Kubernetes: Datenbankseite der WAL-Archivierung
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Liefert das Produkt für Kubernetes die PostgreSQL-Instanz mit WAL-Archivierung selbst aus, oder setzt es eine vom Betreiber bereitgestellte Datenbank (extern oder Managed) mit PITR voraus?
 
@@ -415,7 +435,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1: entspricht E-29 ('Compose und Kubernetes'), nutzt das bereits gebaute und signierte Image und ist per kind-Smoke prüfbar.
 
-**Übergangsregel:** WP-444 (`t5-k8s-wal`) setzt Option 1 als optionale Komponente um, die das prod-Overlay einbindet; eine spätere Entscheidung für Option 2 oder 3 ersetzt nur die Komponente, die Render-Assertion und den kind-Fall.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-444 (`t5-k8s-wal`) setzt Option 1 als optionale Komponente um, die das prod-Overlay einbindet; eine spätere Entscheidung für Option 2 oder 3 ersetzt nur die Komponente, die Render-Assertion und den kind-Fall.
 
 **Betroffene IDs:** OPS-04, NFR-05, OPS-03
 
@@ -425,7 +447,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** OPS-05: Alarmierung des Betriebs über NTF-Kanäle
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Über welchen Endpunkt und welche Organisation erreichen Betriebsalarme aus Alertmanager die NTF-Kanäle des Betreibers, nachdem WP-137 geliefert ist?
 
@@ -437,7 +459,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1.
 
-**Übergangsregel:** WP-448 (`t5-ntf-bridge`) setzt Option 1 um; ohne konfigurierte Betreiber-Organisation antwortet die Brücke 404 und Alertmanager nutzt den E-Mail-Receiver aus WP-446 (`t5-alerting-config`).
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-448 (`t5-ntf-bridge`) setzt Option 1 um; ohne konfigurierte Betreiber-Organisation antwortet die Brücke 404 und Alertmanager nutzt den E-Mail-Receiver aus WP-446 (`t5-alerting-config`).
 
 **Betroffene IDs:** OPS-05
 
@@ -475,7 +499,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** NFR-06 „Logs 30 Tage“ in den Auslieferungen
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Mit welchem Mechanismus gewährleisten Compose- und K8s-Auslieferung die zeitbasierte 30-Tage-Grenze für Container-Logs? Docker-Größenrotation (json-file max-size/max-file) begrenzt nur das Volumen, nicht das Alter; ein Log-Store ist bisher nicht Teil der Auslieferung.
 
@@ -487,7 +511,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1: zeitbasiert ohne zusätzlichen Dienst. Der Drop-in wirkt allerdings hostweit auf das gesamte Journal (auch Nicht-Reticora-Dienste); der Installer weist beim Anlegen darauf hin, docs/ops/workers.md beschreibt die Wirkung. Option 3 erfüllt die Zeitgrenze nicht, Option 2 erhöht Betriebsaufwand und Ressourcenbedarf des Mindest-Sizings (INS-07).
 
-**Übergangsregel:** WP-458 (`t6-log-retention`) startet mit der für alle Optionen nötigen Logging-Begrenzung jedes Compose-Dienstes und der Dokumentation und setzt Option 1 um; wird Option 2 gewählt, folgt der Log-Store als eigenes WP.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-458 (`t6-log-retention`) startet mit der für alle Optionen nötigen Logging-Begrenzung jedes Compose-Dienstes und der Dokumentation und setzt Option 1 um; wird Option 2 gewählt, folgt der Log-Store als eigenes WP.
 
 **Betroffene IDs:** NFR-06
 
@@ -497,7 +523,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** CI-06: Berechtigung der einheitlichen CI-Historie
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Die vereinte Historie (GET /history/{entityType}/{id}) verlangt audit:read, das nach RBA-02 (Migration 000073) nur org_admin hat; CI-06 verlangt Historie und Audit als Teil des CI-Lesens. Welche Berechtigung gilt für welchen Anteil der Historie?
 
@@ -509,7 +535,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1: erfüllt CI-06 für alle Leserollen, erweitert keine Rolle (E-13) und lässt AUD-05 (audit:read für das Audit-Log) unberührt.
 
-**Übergangsregel:** WP-475 (`t3-history-access`) setzt Option 1 um; bis zur Bestätigung gilt sie vorläufig wie E-13.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-475 (`t3-history-access`) setzt Option 1 um; bis zur Bestätigung gilt sie vorläufig wie E-13.
 
 **Betroffene IDs:** CI-06, AUD-05, RBA-02
 
@@ -519,7 +547,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** NFR-04: Verlust von Metrik-Samples und Traps bei Upload-Fehlern
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** NFR-04 verlangt, dass der Collector Ausfälle bis 24 h ohne Verlust puffert. Heute verwirft der Collector Metrik-Samples und Traps bei Upload-Fehlern ungezählt (F-234: Umfang für Samples unklar). Gilt „ohne Verlust“ auch für Metrik-Samples und Traps?
 
@@ -530,7 +558,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1: COL-05 bindet den Spool an die Reconciliation nach observed_at (GLO-12), also an Discovery-Ergebnisse; der Verlust von Samples und Traps wird sichtbar statt still.
 
-**Übergangsregel:** WP-483 (`t3-spool-poison`) setzt Option 1 um; Option 2 als eigenes WP.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-483 (`t3-spool-poison`) setzt Option 1 um; Option 2 als eigenes WP.
 
 **Betroffene IDs:** NFR-04, COL-05
 
@@ -540,7 +570,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** CI-12: Unmerge nach späteren Änderungen am Survivor
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Unmerge stellt Survivor und Victim aus dem Snapshot wieder her und überschreibt dabei Änderungen, die nach dem Merge am Survivor vorgenommen wurden (F-097). Welcher Vertrag gilt?
 
@@ -552,7 +582,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1: kein stiller Verlust, eindeutiger Vertrag, geringe Komplexität; entspricht der Empfehlung des Befunds.
 
-**Übergangsregel:** WP-485 (`t3-unmerge-conflict`) setzt Option 1 um.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-485 (`t3-unmerge-conflict`) setzt Option 1 um.
 
 **Betroffene IDs:** CI-12
 
@@ -562,7 +594,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** DB-05: Verknüpfung eines CI mit einem Asset ohne Standort
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Der Spiegel-Trigger (000088) übernimmt beim Verknüpfen den Asset-Standort; hat das Asset keinen, verliert das CI still Standort, Site und Raum und damit seine Scope-Sichtbarkeit (F-239). Was gilt?
 
@@ -574,7 +606,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1: kein Datenverlust, das Asset bleibt kanonisch (DB-05), keine zusätzliche Bedienhürde.
 
-**Übergangsregel:** WP-486 (`t3-asset-link-location`) setzt Option 1 um; ein Wechsel auf Option 2 betrifft nur `ci/pg_repository.go`, `ci/service.go` und den zugehörigen Test.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-486 (`t3-asset-link-location`) setzt Option 1 um; ein Wechsel auf Option 2 betrifft nur `ci/pg_repository.go`, `ci/service.go` und den zugehörigen Test.
 
 **Betroffene IDs:** DB-05, AST-04
 
@@ -584,7 +618,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** AUD-03: Datenmodell der ci_change-Zeilen
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 2 (Auftraggeber, 2026-10-28)
 
 **Frage:** AUD-03 beschreibt eine ci_change je Änderung mit change_kind, field_changes [{field, old, new}], Akteur, Collector, Quelle, request_id, correlation_id und observed_at sowie genau eine ci_change je Ingest-Record. Heute ist ci_change feldgranular (eine Zeile je Feld); darauf beruhen die feldgranulare 409-Prüfung (API-07, checkPrecondition), die Historie und der Merge. Wie wird AUD-03 umgesetzt?
 
@@ -596,7 +630,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 2: erfüllt AUD-03 in Lesesicht und Ingest (eine Änderung je Record), ohne API-07 und den Merge umzubauen.
 
-**Übergangsregel:** WP-487 (`t3-aud03-schema`), WP-488 (`t3-aud03-history`) und WP-489 (`t3-aud03-ingest`) setzen Option 2 um; die Migration ist additiv, eine spätere Wahl von Option 1 baut darauf auf.
+**Entscheidung:** Option 2 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-487 (`t3-aud03-schema`), WP-488 (`t3-aud03-history`) und WP-489 (`t3-aud03-ingest`) setzen Option 2 um; die Migration ist additiv, eine spätere Wahl von Option 1 baut darauf auf.
 
 **Betroffene IDs:** AUD-03, CI-11, API-07
 
@@ -606,7 +642,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** IMP-02: Traversierung per Ebenen-BFS statt rekursivem CTE
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** IMP-02 nennt einen rekursiven CTE; implementiert ist eine ebenenweise Breitensuche mit einer SQL-Abfrage je Ebene (Performance-Korrektur aus WP-206, docs/acceptance/lasttest-g1.md:526). Das Verhalten (Tiefe 20, Pfade mit Typfolge, Kürzestpfad, Kategorien) ist erfüllt. Ist die Abweichung zulässig?
 
@@ -617,7 +653,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1: NFR-02 ist mit der BFS belegt; ein Rückbau gefährdet den Lastnachweis ohne fachlichen Gewinn.
 
-**Übergangsregel:** WP-490 (`t3-impact-heuristic`) lässt die BFS unverändert und validiert nur den depth-Parameter.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-490 (`t3-impact-heuristic`) lässt die BFS unverändert und validiert nur den depth-Parameter.
 
 **Betroffene IDs:** IMP-02, NFR-02
 
@@ -627,7 +665,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** DIS-10: Poll-Intervalle je Scope und Zeitzone von Cron-Zeitplänen
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option A (Auftraggeber, 2026-10-28)
 
 **Frage:** DIS-10 sagt „pro Scope und Org konfigurierbar“, das Scope-Modell nach DIS-09 hat aber nur ein Feld schedule. Sollen Poll-Intervalle (SNMP/Redfish) zusätzlich je Scope einstellbar sein, und in welcher Zeitzone wird ein Cron-Zeitplan ausgewertet (heute UTC)?
 
@@ -639,7 +677,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option A: deckt sich mit dem Datenmodell aus DIS-09 (ein schedule je Scope) und den Mindestwerten aus DIS-10; Cron in Ortszeit vermeidet die Verschiebung der Scan-Fenster um 1–2 h für deutsche Organisationen.
 
-**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-495 (`t4-scope-schedule`) wertet Cron in der Zeitzone der Org aus, WP-496 (`t4-scope-form-ui`) zeigt den Hinweis. Option B erfordert ein Folge-WP mit Migration.
+**Entscheidung:** Option A nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** Bis zur Entscheidung gilt Option A; WP-495 (`t4-scope-schedule`) wertet Cron in der Zeitzone der Org aus, WP-496 (`t4-scope-form-ui`) zeigt den Hinweis. Option B erfordert ein Folge-WP mit Migration.
 
 **Betroffene IDs:** DIS-10, DIS-09
 
@@ -649,7 +689,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** IMP-09: ausgeschaltete Outlets in der Redundanzkennung
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option A (Auftraggeber, 2026-10-28)
 
 **Frage:** Zählt ein Outlet mit outlet_state=off als Einspeisung für attributes.redundant der powered_by-Kante? IMP-09 nennt redundante Einspeisungen, schweigt aber zum Outlet-Zustand.
 
@@ -661,7 +701,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option A: die Verkabelung bleibt für Impact und Planung sichtbar, die Redundanzaussage entspricht der tatsächlichen Versorgung.
 
-**Übergangsregel:** Bis zur Entscheidung gilt Option A; WP-498 (`t4-power-redundancy`) setzt sie um.
+**Entscheidung:** Option A nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** Bis zur Entscheidung gilt Option A; WP-498 (`t4-power-redundancy`) setzt sie um.
 
 **Betroffene IDs:** IMP-09
 
@@ -671,7 +713,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** Bearbeitungs- und Löschrechte org-weit geteilter Sichten (VIE-01)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Wer darf eine org-weit geteilte gespeicherte Sicht umbenennen, entsperren oder löschen? Heute jeder Inhaber von `saved_view:write` (in `api/openapi.yaml` dokumentiert), rollengeteilte Sichten nur der Owner.
 
@@ -683,7 +725,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1: eine Regel für alle geteilten Sichten, keine stille Änderung fremder Sichten; die Übernahme verwaister Sichten gehört zu VIE-02 [P2].
 
-**Übergangsregel:** WP-518 (`t7-saved-views-api`) setzt Option 1 um; bei Option 2 oder 3 werden nur das Prädikat in `savedview/pg_repository.go`, die OpenAPI-Beschreibung und `TestAuditT7SavedViewEditDeleteRights` angepasst.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-518 (`t7-saved-views-api`) setzt Option 1 um; bei Option 2 oder 3 werden nur das Prädikat in `savedview/pg_repository.go`, die OpenAPI-Beschreibung und `TestAuditT7SavedViewEditDeleteRights` angepasst.
 
 **Umsetzung (2026-10-26):** WP-518 setzt Option 1 um: PATCH und DELETE nur durch den Owner (Prädikat `owner_id` in `savedview/pg_repository.go`, Owner-Prüfung vor der Validierung in `savedview/handler.go`), sonst 404 bei unveränderter Zeile; `SavedViewsPage` bietet „Löschen“ nur für eigene Sichten an. Eingetragen in [`../entscheidungen.md`](../entscheidungen.md) (Nachtrag vom 2026-10-26).
 
@@ -695,7 +739,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** CI-Detail unter gewähltem Client-/Site-Scope (WP-191)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Wie berücksichtigt die CI-Detailseite einen im Umschalter gewählten Client/Standort, wenn das CI außerhalb liegt? Der Umschalter ist ein Bedienfilter, die Berechtigung entscheidet die RLS.
 
@@ -707,7 +751,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1: Deep-Links und Suche bleiben nutzbar, der Widerspruch zum gewählten Bereich ist sichtbar, und es entsteht keine Scheinsicherheit, weil die Rechte serverseitig bleiben.
 
-**Übergangsregel:** WP-524 (`t7-ui-scope-detail`) setzt Option 1 um; entscheidet der Auftraggeber anders, werden nur `ScopeBanner`, `CIRelationshipsCard` und ihre Tests angepasst.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-524 (`t7-ui-scope-detail`) setzt Option 1 um; entscheidet der Auftraggeber anders, werden nur `ScopeBanner`, `CIRelationshipsCard` und ihre Tests angepasst.
 
 **Betroffene IDs:** UI-01, UI-02, UI-03, UI-04, UI-05, UI-07, UI-08, UI-09, UI-10
 
@@ -717,7 +763,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** Nachweis der Browser-Vorversionen (UI-18, NFR-07)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** UI-18 verlangt die aktuelle und die Vorversion von Chrome, Edge, Firefox und Safari; Playwright bündelt je Version genau einen Build je Engine. Wie wird die Vorversion nachgewiesen?
 
@@ -729,7 +775,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1: ohne externen Dienst, reproduzierbar in CI, deckt alle Engines ab; Edge/Safari n-1 bleiben bis GA eine bekannte Einschränkung.
 
-**Übergangsregel:** WP-531 (`t7-browser-matrix`) setzt Option 1 um; bei Option 2 wird nur der Vorversions-Job ersetzt, bei Option 3 durch eine Checkliste in `docs/README.md`.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-531 (`t7-browser-matrix`) setzt Option 1 um; bei Option 2 wird nur der Vorversions-Job ersetzt, bei Option 3 durch eine Checkliste in `docs/README.md`.
 
 **Betroffene IDs:** UI-18, NFR-07
 
@@ -739,7 +787,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** Review-Merge bei ambiguous_identity: synchroner Effekt mit gespiegeltem Job (JOB-04, Folge zu E-25)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Genügt für die Review-Auflösung „merge“ bei ambiguous_identity ein im Request ausgeführter Effekt mit gespiegeltem Jobdatensatz (`review.merge`), oder muss der Merge eingereiht werden (202 mit Job-Location)? Merge bei probable_duplicate läuft nach WP-479 (`t3-review-merge`) über den Job `ci.merge`.
 
@@ -750,7 +798,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1: ein Review-Merge betrifft ein Item und zwei CIs und bleibt im Request-Budget (NFR-02); JOB-04 fordert Jobs für große Operationen; der gespiegelte Job macht den Vorgang nachvollziehbar.
 
-**Übergangsregel:** Option 1 gilt für merge bei ambiguous_identity (review.merge); merge bei probable_duplicate läuft über den ci.merge-Job aus WP-479 (`t3-review-merge`), der review.merge-Spiegel übernimmt dessen Status. WP-554 (`t7-review-merge-job`) dokumentiert das als Nachtrag zu E-25 und korrigiert den Retry-Status. Bei Option 2 folgt ein eigenes WP (Queue-Art review.merge, 202-Vertrag, UI-Polling).
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** Option 1 gilt für merge bei ambiguous_identity (review.merge); merge bei probable_duplicate läuft über den ci.merge-Job aus WP-479 (`t3-review-merge`), der review.merge-Spiegel übernimmt dessen Status. WP-554 (`t7-review-merge-job`) dokumentiert das als Nachtrag zu E-25 und korrigiert den Retry-Status. Bei Option 2 folgt ein eigenes WP (Queue-Art review.merge, 202-Vertrag, UI-Polling).
 
 **Betroffene IDs:** JOB-04, UI-16
 
@@ -760,7 +810,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** REC-07: Entfernen manuell gepflegter IPs und Interfaces
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** REC-07 entfernt Interfaces und IPs nach drei Fehlläufen; heute zählt das auch manuell gepflegte Adressen (type reserved/static) und manuell angelegte Interfaces an entdeckten CIs, die damit gelöscht werden (F-249). REC-03 und OVR-02 schützen manuelle Daten. Was gilt?
 
@@ -771,7 +821,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1: vereinbar mit REC-03 und OVR-02 (Automation löscht keine manuellen Daten).
 
-**Übergangsregel:** WP-580 (`t3-discovery-p3`) setzt Option 1 um; Interfaces erhalten dafür eine Herkunftsspalte origin: Bestand origin = 'manual', der Discovery-Abgleich setzt 'discovered' für jedes gemeldete Interface; nur origin = 'discovered' zählt Fehlläufe.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-580 (`t3-discovery-p3`) setzt Option 1 um; Interfaces erhalten dafür eine Herkunftsspalte origin: Bestand origin = 'manual', der Discovery-Abgleich setzt 'discovered' für jedes gemeldete Interface; nur origin = 'discovered' zählt Fehlläufe.
 
 **Betroffene IDs:** REC-07, REC-03, OVR-02
 
@@ -781,7 +833,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** NTF-03: Ausprägung von Abonnements und Org-Branding in Phase 1
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 2 (Auftraggeber, 2026-10-28)
 
 **Frage:** NTF-03 und das WP-138-Kriterium nennen Abonnements, Vorlagen je Ereignistyp, i18n und Org-Branding ohne nähere Festlegung. Welche Ausprägung gilt für Phase 1?
 
@@ -793,7 +845,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 2: erfüllt NTF-03 mit dem vorhandenen Präferenzmodell ohne neue Tabelle; i18n wird in jedem Fall umgesetzt. Client-Kontakte werden ohne konfiguriertes Abonnement nicht adressiert.
 
-**Übergangsregel:** WP-588 (`t6-ntf-templates`) setzt Empfänger-i18n und Option 2 sofort um; bei Option 1 folgt ein WP mit Migration und REST-Ressource (einschließlich Abonnements für Client-Kontakte).
+**Entscheidung:** Option 2 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-588 (`t6-ntf-templates`) setzt Empfänger-i18n und Option 2 sofort um; bei Option 1 folgt ein WP mit Migration und REST-Ressource (einschließlich Abonnements für Client-Kontakte).
 
 **Betroffene IDs:** NTF-03
 
@@ -803,7 +857,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** Instanzattributdefinitionen und DB-03 („attribute_definition einzige Quelle“)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 2 (Auftraggeber, 2026-10-28)
 
 **Frage:** Müssen die Definitionen der Instanzattribute (ci_instance_field_definition) in attribute_definition übernommen werden (WP-116-Kriterium „Übernahme aus … Instanzdefinitionen“, DB-03), obwohl Instanzattribute MET-14 [P2] sind und der Phase-2-Plan (WP-256) die Tabelle ausdrücklich beibehält?
 
@@ -815,7 +869,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 2: deckt sich mit dem Phase-2-Plan (WP-256) und MET-16; Option 1 erzwingt eine RLS-sensible Datenmigration für eine Phase-2-Funktion.
 
-**Übergangsregel:** WP-589 (`t6-attrdef-ast`) liefert Resolver- und Schematest nach Option 2 und den AST-Teil unabhängig davon; bei Option 1 entsteht ein Folge-WP zusammen mit WP-256.
+**Entscheidung:** Option 2 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-589 (`t6-attrdef-ast`) liefert Resolver- und Schematest nach Option 2 und den AST-Teil unabhängig davon; bei Option 1 entsteht ein Folge-WP zusammen mit WP-256.
 
 **Betroffene IDs:** DB-03, MET-10, MET-14, MET-16
 
@@ -825,7 +881,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** Materialisierung org-globaler Attributdefinitionen (MET-16)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 2 (Auftraggeber, 2026-10-28)
 
 **Frage:** Werden org-globale Definitionen (organization_id gesetzt, ci_type_id NULL) in das materialisierte und versionierte Schema aufgenommen, obwohl System-Typen org-übergreifend materialisiert sind und MET-16 für Phase 1 „Basis + Typkette“ nennt?
 
@@ -837,7 +893,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 2: entspricht dem Phase-1-Umfang von MET-16 und dem heutigen Verhalten; Option 1 verdoppelt die Schemaversionen je Org ohne Phase-1-Anforderung.
 
-**Übergangsregel:** WP-590 (`t6-schema-version`) setzt den schema_version-Fix und den Laufzeittest nach Option 2 um; Option 1 folgt als eigenes WP mit Migration.
+**Entscheidung:** Option 2 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-590 (`t6-schema-version`) setzt den schema_version-Fix und den Laufzeittest nach Option 2 um; Option 1 folgt als eigenes WP mit Migration.
 
 **Betroffene IDs:** MET-16, MET-10
 
@@ -847,7 +905,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** Korrektur der Migration 000110 (Duplikat-Suffixe der Interfaces)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** Darf die bestehende Migration 000110 angepasst werden, obwohl die Konvention Änderungen bestehender Migrationen ausschließt (Präzedenz E-26)? Es gibt noch kein ausgeliefertes Release (keine Release-Tags); betroffen sind nur Datenbanken mit Stand vor 000110 und bereits vorhandenen Suffixnamen.
 
@@ -859,7 +917,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1 analog E-26: ohne ausgeliefertes Release wirkt die Änderung auf alle künftigen Upgrades und kostet keine Daten.
 
-**Übergangsregel:** WP-592 (`t6-p3-sammel`) beginnt mit dem Migrationsdatentest (Probe net01-dup.sql) und setzt Option 1 um; bei Option 2 ersetzt die Vorprüfung die Änderung, der Test bleibt.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-592 (`t6-p3-sammel`) beginnt mit dem Migrationsdatentest (Probe net01-dup.sql) und setzt Option 1 um; bei Option 2 ersetzt die Vorprüfung die Änderung, der Test bleibt.
 
 **Betroffene IDs:** NET-01
 
@@ -869,7 +929,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** Durchsetzung von allowed_source_types, allowed_target_types und cardinality (REL-01)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** REL-01 nennt die Felder ohne Semantik; sollen sie bei der Typanlage und bei POST /relationships durchgesetzt werden oder nur informativ sein?
 
@@ -881,7 +941,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1: Admins verlassen sich auf die gespeicherten Einschränkungen; cardinality braucht eine Semantik, die erst mit REL-06 kommt.
 
-**Übergangsregel:** WP-592 (`t6-p3-sammel`) setzt Option 1 um; bei Option 2 beschränkt sich der Teil auf die OpenAPI-Beschreibung und einen Test, dass keine Prüfung erfolgt.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-592 (`t6-p3-sammel`) setzt Option 1 um; bei Option 2 beschränkt sich der Teil auf die OpenAPI-Beschreibung und einen Test, dass keine Prüfung erfolgt.
 
 **Betroffene IDs:** REL-01
 
@@ -978,7 +1040,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** Upgrade von Datenbanken mit 000056 vor E-26 (fehlende `migration_quarantine`, Migration 000089)
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-10-28)
 
 **Frage:** E-26 hat die Migration 000056 am 2026-10-01 so geändert, dass sie die Tabelle `migration_quarantine` anlegt. Datenbanken, die 000056 zwischen 2026-09-02 und 2026-10-01 in der früheren Fassung angewendet haben, besitzen die Tabelle nicht. Ihr Upgrade bricht bei 000089 ab, der ersten Migration, die in die Tabelle schreibt (000090, 000091 und 000166 schreiben ebenfalls hinein), mit `relation "migration_quarantine" does not exist`; `schema_migrations` steht danach auf 89 dirty (F-378). Darf die bestehende Migration 000089 angepasst werden, obwohl die Konvention Änderungen bestehender Migrationen ausschließt (Präzedenz E-26, E-94)? Es gibt noch kein ausgeliefertes Release (keine Release-Tags).
 
@@ -990,7 +1052,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1 analog E-26 und E-94: ohne ausgeliefertes Release wirkt die Änderung auf alle künftigen Upgrades, gilt für jeden Weg zu `migrate up` (Installer, Kubernetes, golang-migrate von Hand) und lässt das Schema frischer Installationen unverändert. Option 2 deckt manuelle Upgrades nicht ab, Option 3 hängt an der Sorgfalt des Betreibers.
 
-**Übergangsregel:** WP-649 (`k6n-quarantine-upgrade`) setzt Option 1 um, mit Release-Hinweis in `docs/betrieb/upgrade-hinweise.md`. Bei Option 2 oder 3 ersetzt die Vorprüfung bzw. die Anleitung die Änderung an 000089; der Test `TestUpgradeFromPreQuarantine56` bleibt.
+**Entscheidung:** Option 1 nach der Empfehlung (Auftraggeber, 2026-10-28: „Setze alle Entscheidungen wie empfohlen um“). Die bisherige Übergangsregel ist damit die Festlegung; ein Folge-WP für eine andere Option entfällt.
+
+**Umsetzung (bisher Übergangsregel):** WP-649 (`k6n-quarantine-upgrade`) setzt Option 1 um, mit Release-Hinweis in `docs/betrieb/upgrade-hinweise.md`. Bei Option 2 oder 3 ersetzt die Vorprüfung bzw. die Anleitung die Änderung an 000089; der Test `TestUpgradeFromPreQuarantine56` bleibt.
 
 **Betroffene IDs:** DB-02
 
