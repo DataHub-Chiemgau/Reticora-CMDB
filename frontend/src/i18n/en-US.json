@@ -649,6 +649,27 @@
       "active": "Active",
       "inactive": "Inactive",
       "anonymized": "Anonymized"
+    },
+    "deactivate": "Deactivate",
+    "reactivate": "Reactivate",
+    "delete": "Delete",
+    "ownAccount": "Your account",
+    "confirm": {
+      "deactivateTitle": "Deactivate user?",
+      "deactivateText": "{{name}} ({{email}}) can no longer sign in. Running sessions and the user's own API keys are revoked at once.",
+      "reactivateTitle": "Reactivate user?",
+      "reactivateText": "{{name}} ({{email}}) can sign in again.",
+      "deleteTitle": "Delete user?",
+      "deleteText": "{{name}} ({{email}}) is deleted permanently. Open objects of the user must be handed over to another user first.",
+      "deleteConfirm": "Delete permanently"
+    },
+    "errors": {
+      "ownsOpenObjects": "{{name}} cannot be deleted: the user owns open objects (open tickets, active assignments, keys not returned). Hand them over to another user first, or deactivate the user instead.",
+      "referenced": "{{name}} cannot be deleted: existing records refer to the user. Deactivate or anonymize the user instead.",
+      "notFound": "{{name}} no longer exists. Reload the page.",
+      "forbidden": "You are not allowed to change {{name}}.",
+      "unavailable": "{{name}} was not changed: the user's sessions could not be revoked. Try again later.",
+      "failed": "The action for {{name}} failed (HTTP {{status}})."
     }
   },
   "invitations": {

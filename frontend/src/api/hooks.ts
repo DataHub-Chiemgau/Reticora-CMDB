@@ -56,6 +56,9 @@ import type {
   TicketUpdateRequest,
   TicketListParams,
   UserListParams,
+  UserStatus,
+  AppUser,
+  PaginatedResponse,
   InvitationRequest,
   InvitationAcceptance,
   TopologyParams,
@@ -581,6 +584,34 @@ export function useUserList(params: UserListParams) {
   return useQuery({
     queryKey: ['users', params],
     queryFn: () => userApi.list(params),
+  });
+}
+
+/**
+ * useSetUserStatus deactivates or reactivates a user (TLC-04). The answer
+ * replaces the user in every cached list at once, so the status badge
+ * follows the server's answer; the lists are refetched afterwards.
+ */
+export function useSetUserStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: UserStatus }) =>
+      userApi.update(id, { status }),
+    onSuccess: (user) => {
+      queryClient.setQueriesData<PaginatedResponse<AppUser>>({ queryKey: ['users'] }, (list) =>
+        list ? { ...list, data: list.data.map((u) => (u.id === user.id ? user : u)) } : list,
+      );
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    },
+  });
+}
+
+/** useDeleteUser deletes a user; a 409 (open objects, references) leaves the lists as they are. */
+export function useDeleteUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => userApi.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
   });
 }
 

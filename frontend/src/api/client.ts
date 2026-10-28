@@ -1405,6 +1405,12 @@ export interface CustomRole {
   updated_at: string;
 }
 
+/**
+ * UserStatus is the status PATCH /users/{id} sets: inactive deactivates the
+ * user and revokes the sessions, active reactivates it (TLC-04).
+ */
+export type UserStatus = 'active' | 'inactive';
+
 export interface UserListParams {
   limit?: number;
   offset?: number;
@@ -1424,10 +1430,14 @@ export const userApi = {
   },
   update(
     id: string,
-    data: { display_name?: string; status?: string; avatar_url?: string },
+    data: { display_name?: string; status?: UserStatus; avatar_url?: string },
   ): Promise<AppUser> {
     return fetchAPI(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
+  /**
+   * delete removes the user (TLC-04); a user owning open objects or still
+   * referenced by records answers 409 and stays.
+   */
   delete(id: string): Promise<void> {
     return fetchAPI(`/users/${id}`, { method: 'DELETE' });
   },

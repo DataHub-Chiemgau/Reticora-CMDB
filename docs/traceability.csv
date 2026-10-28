@@ -965,3 +965,5 @@ TEN-06;[B];B;backend/internal/webhook/webhook_scope_integration_test.go;WP-562
 OPS-05;[B];B;backend/internal/webhook/delivery_claim_integration_test.go;WP-562
 TEN-06;[B];B;backend/internal/database/tenantguard_test.go;WP-561
 API-02;[B];C;backend/internal/identity/apikey_integration_test.go;WP-565
+TLC-04;[B];B;frontend/e2e-real/user-lifecycle.spec.ts;WP-571
+RBA-02;[B];B;frontend/src/pages/UserManagementPage.lifecycle.test.tsx;WP-571
