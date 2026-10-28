@@ -274,12 +274,14 @@ jobs:
       # of the script; the job provides PostgreSQL, Redis, NATS, the
       # nats-server binary and kustomize. This replaces the grep for
       # "TEST_DATABASE_URL not set" and the natsedge-specific skip check of
-      # WP-374 (COL-08/PRI-07). Synthetic cases: tests/ci-db-summary.test.sh
-      # in the job gate.
-      - name: Summarize PostgreSQL test run, fail on skipped tests
+      # WP-374 (COL-08/PRI-07). F-194/TST-02 (WP-559): every target test of
+      # the TST-02 scenarios (tests/tst02-targets.txt) must have run with
+      # result pass; a missing or skipped one fails the job with its name.
+      # Synthetic cases: tests/ci-db-summary.test.sh in the job gate.
+      - name: Summarize PostgreSQL test run, fail on skipped tests and TST-02 targets not passed
         if: always()
         working-directory: backend
-        run: ../scripts/ci/db-test-summary.sh test-db.json
+        run: ../scripts/ci/db-test-summary.sh --require-pass ../tests/tst02-targets.txt test-db.json
 
       - name: Assert every tenant policy uses app.org_id
         run: |
