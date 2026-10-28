@@ -18,14 +18,21 @@
 #   smtp: Mailpit stopped, an e-mail notification stays pending with its
 #       error and is sent once Mailpit is back, plus the same load
 #       (smtp.sh);
-#   server unreachable for the collector, webhook target down, spool
-#       limits: the component tests of the collector spool, the edge
+#   collector: an enrolled collector container with the simulated fleet;
+#       server and nats-edge stopped for COLLECTOR_OUTAGE_SECONDS (60 s):
+#       its spool counter rises, the heartbeat after the restart reports
+#       backpressure, every record it sent is ingested and the loss counter
+#       is 0 (collector.sh, WP-587);
+#   component: server unreachable for the collector, webhook target down,
+#       spool limits: the component tests of the collector spool, the edge
 #       buffer and the webhook retry/dead-letter path.
 #
 # Writes the protocol to OUTAGE_REPORT (default outage-report.md) with every
 # count and exits non-zero when a scenario fails. OUTAGE_SELFTEST_DROP=1
 # drops one ingest record of every load on purpose (load.sh): the run must
-# then FAIL with that record lost.
+# then FAIL with that record lost. COLLECTOR_SPOOL_RECORDS=1 limits the
+# collector's spool to one record (collector.sh): the collector scenario
+# must then FAIL with the records lost and the loss counter above 0.
 #
 # Usage: ./tests/outage/run.sh [scenario …]   (default: all)
 # Sourced, it only defines the scenarios (tests/outage/config.test.sh).
@@ -37,8 +44,12 @@ OUTAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$OUTAGE_DIR/load.sh"
 # shellcheck source=tests/outage/smtp.sh
 . "$OUTAGE_DIR/smtp.sh"
+# shellcheck source=tests/outage/collector.sh
+. "$OUTAGE_DIR/collector.sh"
 
-ALL_SCENARIOS="postgres nats redis minio component smtp"
+# collector restarts the server: last, so the other scenarios check a server
+# that ran without a restart.
+ALL_SCENARIOS="postgres nats redis minio component smtp collector"
 
 # dependency_outage <compose service> <readiness check name>
 dependency_outage() {
@@ -150,6 +161,10 @@ write_protocol_tail() {
         printf '\n## SMTP outage: delivery status\n\n'
         cat "$OUTAGE_DETAILS.smtp"
     fi
+    if [ -s "$OUTAGE_DETAILS.collector" ]; then
+        printf '\n## Collector: server and nats-edge unreachable\n\n'
+        cat "$OUTAGE_DETAILS.collector"
+    fi
 }
 
 outage_main() {
@@ -169,6 +184,9 @@ outage_main() {
         if [ "${OUTAGE_SELFTEST_DROP:-0}" = 1 ]; then
             printf -- '- **Negative self-test OUTAGE_SELFTEST_DROP=1:** one ingest record of every load is dropped on purpose; the run must FAIL\n'
         fi
+        if [ "$COLLECTOR_SPOOL_RECORDS" != 30 ]; then
+            printf -- '- **Collector spool limit COLLECTOR_SPOOL_RECORDS=%s** (one pass: 30): with fewer than 30 records a pass does not fit, the collector scenario must FAIL with the records lost\n' "$COLLECTOR_SPOOL_RECORDS"
+        fi
         printf '\n| Scenario | Result | Details |\n|---|---|---|\n'
     } > "$OUTAGE_REPORT"
 
@@ -180,6 +198,7 @@ outage_main() {
             minio) load_scenario minio && dependency_outage minio object_storage ;;
             component) component_scenarios ;;
             smtp) load_scenario smtp && smtp_outage ;;
+            collector) load_scenario collector && collector_outage ;;
             *) report FAIL "$scenario" "unknown scenario" ;;
         esac
     done
