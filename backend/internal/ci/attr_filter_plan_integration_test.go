@@ -398,7 +398,9 @@ func TestAttributeFilterUsesKeyIndex(t *testing.T) {
 // transaction, org-wide and restricted to a client: an index scan of the
 // definition's index with the attribute value in the index condition, no
 // sequential scan of ci, for equality on a type definition (with its type
-// filter: the index is partial on the type) and on a global unique
+// filter: the index is partial on the type; and without one, WP-566: the
+// list restricts the hits to the types that make the key searchable) and
+// on a global unique
 // definition, and for an in list of five values. The hits equal those of
 // the former predicate (->>) within the principal's scope (client 1 does
 // not see the hits of client 2); CIs of organization B with the same
@@ -516,6 +518,11 @@ func TestAttributeFilterUsesIndexUnderRLS(t *testing.T) {
 			url.Values{"filter[attributes.wp435_tag]": {"T4242"}}},
 		{"global unique definition, in", tagIndex, tag.Key, "", []string{"T17", "T18", "T4243", "T9999", "T10001"},
 			url.Values{"filter[attributes.wp435_tag][in]": {"T17,T18,T4243,T9999,T10001"}}},
+		// WP-566: without a type filter the list restricts the hits to the
+		// types that make the key searchable, here the one of the
+		// definition, and its index serves that restriction.
+		{"type definition without a type filter", rackIndex, rack.Key, typ.ID, []string{"R7"},
+			url.Values{"filter[attributes.wp435_rack]": {"R7"}}},
 	}
 	var rackStmt loggedStatement
 	for _, c := range cases {
@@ -530,7 +537,7 @@ func TestAttributeFilterUsesIndexUnderRLS(t *testing.T) {
 					c.name, p.name, problem, stmt.sql)
 			}
 			t.Logf("%s, %s: %d hits, %s", c.name, p.name, len(ids), describePlan(planNodes(t, plan)))
-			if c.index == rackIndex && p.scope == &orgWide {
+			if c.name == cases[0].name && p.scope == &orgWide {
 				rackStmt = stmt
 			}
 		}
