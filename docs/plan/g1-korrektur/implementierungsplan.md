@@ -40,8 +40,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
+| [K6-Nachträge](#k6-nachträge) | WP-648 | 1 | 0,5 | Funde aus der Umsetzung von K6 behoben (F-377): eigenes Konto per API nicht deaktivierbar oder löschbar. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **295** | **397,5** | |
+| **Summe** | | **296** | **398,0** | |
 
 ```mermaid
 flowchart LR
@@ -56,6 +57,7 @@ flowchart LR
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
+    K6N["K6-Nachträge<br/>1 WP · 0,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -73,6 +75,8 @@ flowchart LR
     K4N --> K7
     K5 --> K5N
     K5N --> K7
+    K6 --> K6N
+    K6N --> K7
     K6 --> K7
 ```
 
@@ -401,6 +405,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-592](#wp-592--sammel-wp-migration-000110-beziehungstyp-einschränkungen-lease-des-export-workers) | `t6-p3-sammel` | Sammel-WP: Migration 000110, Beziehungstyp-Einschränkungen, Lease des Export-Workers | K6 | 1,5 | F-310, F-313, F-315 | WP-401, WP-550 |
 | [WP-593](#wp-593--sammel-wp-backend-bff-topologiekomplexität-bff-als-api-only-dokumentiert-csv-formelschutz) | `t7-p3-backend` | Sammel-WP Backend: BFF-Topologiekomplexität, BFF als API-only dokumentiert, CSV-Formelschutz | K6 | 1,0 | F-333, F-332, F-338 | – |
 | [WP-594](#wp-594--such-treffer-für-locations-und-kontakte-führen-zur-entität) | `t7-search-deeplinks` | Such-Treffer für Locations und Kontakte führen zur Entität | K6 | 1,0 | F-334 | WP-338, WP-519 |
+| [WP-648](#wp-648--eigenes-konto-nicht-deaktivierbar-oder-löschbar-api) | `k6n-user-self-lockout` | Eigenes Konto nicht deaktivierbar oder löschbar (API) | K6N | 0,5 | F-377 | WP-571 |
 | [WP-595](#wp-595--nachweisläufe-auf-dem-g1-release-kandidaten-endgültige-statuspflege-und-finaler-gate-check) | `t5-rc-evidence` | Nachweisläufe auf dem G1-Release-Kandidaten, endgültige Statuspflege und finaler Gate-Check | K7 | 1,5 | F-122 | 253 WPs (siehe Block) |
 | [WP-596](#wp-596--wiederholungsprüfung-mandantentrennung-authentisierung-und-autorisierung) | `k-reaudit-1` | Wiederholungsprüfung Mandantentrennung, Authentisierung und Autorisierung | K7 | 2,0 | – | 80 WPs (siehe Block) |
 | [WP-597](#wp-597--wiederholungsprüfung-datenmodell-ingest-collector-und-last) | `k-reaudit-2` | Wiederholungsprüfung Datenmodell, Ingest, Collector und Last | K7 | 2,0 | – | 86 WPs (siehe Block) |
@@ -17648,6 +17653,56 @@ SRC-01;[B];C;frontend/e2e-real/search-palette.spec.ts;WP-594
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** Eigene Kontaktseite (UI-14/UI-15, Folgephase).
+
+## K6-Nachträge
+
+Funde aus der Umsetzung von K6, die kein K6-WP abdeckt (Konvention 16). Die Befunde stehen in [`audit/g1-reaudit/FINDINGS.md`](../../../audit/g1-reaudit/FINDINGS.md) mit Reproduktion, Soll, Ist, Ursache, Empfehlung und Retest; jeder ist mit einem Defekttest kodiert, der auf dem genannten Stand rot ausgeführt wurde.
+
+### WP-648 – Eigenes Konto nicht deaktivierbar oder löschbar (API)
+
+**Schlüssel:** `k6n-user-self-lockout` · **Meilenstein:** K6-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-571 (`t2-user-admin-ui`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-377](../../../audit/g1-reaudit/FINDINGS.md#f-377) | P2 | Eigenes Konto per API deaktivierbar und löschbar: der letzte Administrator kann die Organisation aussperren | schließt | WP-571 |
+
+**Problem:** `UpdateUser` und `DeleteUser` (`backend/internal/user/handler.go`) vergleichen die Ziel-ID nicht mit der des Aufrufers. Ein org_admin kann sein eigenes Konto deaktivieren (Sitzungen werden widerrufen) oder löschen; der letzte Administrator sperrt so die Organisation aus. WP-571 blendet die Aktionen nur in der UI aus.
+
+**Akzeptanzkriterien:**
+
+- [ ] Ursache durch einen Test belegt, der auf dem alten Code rot ist (eigenes PATCH `status: inactive` → 200, eigenes DELETE → 204).
+- [ ] Spec-first: PATCH mit Deaktivierung und DELETE des eigenen Kontos → 400 problem+json mit festem Text; die Prüfung liegt vor jedem Schreibzugriff, Sitzungswiderruf und Audit-Eintrag; andere Felder des eigenen Kontos und die Reaktivierung bleiben erlaubt.
+- [ ] Vergleich über die Benutzer-ID des Aufrufers unabhängig von der Schreibweise der UUID; Principals ohne Benutzer-ID und andere Benutzer unverändert (409-Übergabe, 503-Widerruf).
+- [ ] Tests in `backend/internal/user/self_lockout_integration_test.go`, auch als Nicht-root-Benutzer; Regression user, identity, server und die Vitest-Fälle der Benutzerverwaltung grün.
+
+**Anmerkung vom 2026-10-28 (Umsetzung):** `isOwnAccount` vergleicht kanonisierte UUIDs (Groß-/Kleinschreibung, Klammern, Bindestriche), weil PostgreSQL diese Schreibweisen als dieselbe ID annimmt; `Anonymize` nutzt dieselbe Prüfung. Ein Schutz des letzten aktiven org_admin gegen Deaktivierung durch einen anderen Administrator ist nicht Bestandteil.
+
+**Dateien (4 Einträge):**
+
+- api/openapi.yaml
+- backend/internal/user/handler.go
+- backend/internal/user/self_lockout_integration_test.go (neu)
+- frontend/src/api/generated/schema.d.ts
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `TestOwnAccountDeactivationRefused`, `TestOwnAccountDeletionRefused` (PG, Redis).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TLC-04;[B];B;backend/internal/user/self_lockout_integration_test.go;WP-648
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Schutz des letzten aktiven org_admin gegen Deaktivierung durch andere Administratoren.
 
 ## K7 Wiederholungsprüfung und Gate G1
 
