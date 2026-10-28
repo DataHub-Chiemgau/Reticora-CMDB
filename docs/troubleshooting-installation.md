@@ -281,15 +281,18 @@ expired bootstrap certificates and regenerates them with
 `subjectAltName=DNS:<domain>`; `validate_tls_material` verifies the
 certificate parses, carries the SAN, is unexpired and matches the private key.
 
-### `x509: certificate signed by unknown authority` in server logs during login
+### `x509: certificate signed by unknown authority` in server logs during login or signup
 
 **Cause:** While only the self-signed bootstrap certificate is installed
-(Let's Encrypt not issued yet), the backend rejects the token exchange with
-Keycloak.
+(Let's Encrypt not issued yet), or with a certificate of a private CA, the
+backend rejects the token exchange with Keycloak (`login`), or the admin
+token of the Keycloak admin client (`signup failed`, accepted invitations,
+MFA binding of org_admins).
 
 **Fix:** Already handled: the installer sets `RETICORA_OIDC_CA_CERT_FILE` in
 `.env` to the served fullchain, which the server trusts in addition to the
-system store. Re-run the installer if the variable is missing.
+system store, for the OIDC provider and the Keycloak admin client alike.
+Re-run the installer if the variable is missing.
 
 ### How the Let's Encrypt certificate is issued
 

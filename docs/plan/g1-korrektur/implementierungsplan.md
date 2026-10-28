@@ -15457,6 +15457,8 @@ TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-645
 - [ ] actionlint für `install-smoke.yml`; Shell-Hilfsskripte mit shellcheck und dem Shell-Harness geprüft, der Installer nicht ausgeführt.
 - [ ] Retest F-375: CI-Lauf von `install-smoke.yml`, Jobs `e2e-real (webkit)` und `e2e-real (mobile-safari)` → die sechs Fälle grün, `e2e-real-ratchet` 0 Fehler.
 
+**Anmerkung vom 2026-10-28 (CI-Lauf 40623470172, Head 1f316fc):** Die TLS-Prüfung brach in beiden WebKit-Jobs beim Signup ab (`signup failed … keycloak: token: Post "https://<Name>/realms/reticora/protocol/openid-connect/token": … x509: certificate signed by unknown authority`). WebKit vertraute dem Origin (Seiten und Formulare geladen); der Defekt lag im Server: der Keycloak-Admin-Client (Signup, Einladungen, MFA-Bindung) nutzte nur den System-Trust-Store und nicht `RETICORA_OIDC_CA_CERT_FILE` wie der OIDC-Provider. Behoben in `backend/cmd/server/main.go` (`keycloakAccounts`) mit Test `TestKeycloakAccountsTrustTheOIDCCABundle`; kein Abschwächen der Prüfung.
+
 **Dateien (6 Einträge):**
 
 - .github/workflows/install-smoke.yml (TLS-Origin für webkit und mobile-safari)

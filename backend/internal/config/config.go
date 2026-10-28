@@ -64,7 +64,8 @@ type Config struct {
 	OIDCRedirectURL  string
 	// OIDCCACertFile optionally points at a PEM bundle that is trusted in
 	// addition to the system roots when the server talks to the OIDC issuer
-	// (discovery, JWKS and token exchange). Deployments that terminate TLS
+	// (discovery, JWKS and token exchange, and the Keycloak admin client of
+	// signup, invitations and MFA binding). Deployments that terminate TLS
 	// with a private or not-yet-issued certificate would otherwise fail the
 	// token exchange with an x509 verification error.
 	OIDCCACertFile string
