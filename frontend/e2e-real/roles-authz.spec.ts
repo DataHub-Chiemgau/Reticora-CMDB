@@ -1237,7 +1237,11 @@ async function changeOwnOrganization(
       accountUrl = `${url.origin}${accountPath}`;
     }
   });
-  await page.goto(`${realm}/account/`);
+  // The console redirects to the authorization endpoint by script; Firefox
+  // reports the replaced navigation as NS_BINDING_ABORTED to a load wait, so
+  // the redirect is awaited by polling the URL before the login form is used.
+  await page.goto(`${realm}/account/`, { waitUntil: 'commit' });
+  await expect(page).toHaveURL(/\/protocol\/openid-connect\/auth/, { timeout: 30_000 });
   await keycloakLogin(page, account, /\/realms\/[^/]+\/account\/?(?:[#?]|$)/);
   await expect
     .poll(() => token, { message: 'access token of the account console', timeout: 30_000 })
