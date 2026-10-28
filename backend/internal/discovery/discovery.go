@@ -1096,6 +1096,8 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	if h.ciRepo == nil {
 		return resp, nil
 	}
+	// The CI stores the catalog key of the profile's system template.
+	mapSystemTemplates(ctx, orgID, items)
 	// Whether the transactions take the ingest locks (WP-334): records
 	// consumed from the queue and parallel lanes do.
 	locking := h.locking(ctx)
