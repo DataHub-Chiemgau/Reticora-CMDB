@@ -1027,3 +1027,4 @@ NTF-03;[B];B;backend/internal/notify/locale_integration_test.go;WP-653
 GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-595
 INS-01;[Q];G1;tests/rep01-structure.test.sh;WP-595
 SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-654
+DIS-01;[B];D;collector/plugins/sweep/sweep_test.go;WP-655

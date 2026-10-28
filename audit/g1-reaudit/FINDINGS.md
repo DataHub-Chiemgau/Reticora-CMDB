@@ -22,6 +22,8 @@ Der Befund F-382 ist bei der Umsetzung von K6 gefunden worden (Konvention 16, WP
 
 Der Befund F-383 ist bei der Umsetzung von K6 gefunden worden (Konvention 16, WP-588): WP-588 schreibt Benachrichtigungen in der Sprache des Empfängers (`app_user.locale`), doch nichts setzt diese Spalte; die Sprache je Empfänger (NTF-03) ist für keinen Benutzer erreichbar. Er ist mit `backend/internal/identity/login_locale_integration_test.go` und `backend/internal/notify/locale_integration_test.go` kodiert (auf `eb5a51e` rot) und wird von WP-653 im Abschnitt K6-Nachträge geschlossen.
 
+Die Befunde ab F-384 stammen aus der Wiederholungsprüfung (K7, WP-596 bis WP-599) auf dem Release-Kandidaten `e5c2d86`: aus dem Basislauf der Suiten und aus den Prüfungen der unabhängigen Auditoren, jeweils von einer zweiten, adversarialen Prüfung bestätigt. Sie werden von den WPs im Abschnitt [K7-Nachträge](../../docs/plan/g1-korrektur/implementierungsplan.md#k7-nachträge) vor der Gate-Entscheidung (WP-600) geschlossen. F-384 (Sweep) ist mit `TestSweepGoroutinePeakBounded` kodiert, der auf `e5c2d86` zeitweise rot ist.
+
 Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `tests/audit/expected-failures.txt` (Ratchet, `tests/audit/run-auditdefect.sh`). Die a11y-Befunde sind in `frontend/e2e/a11y.spec.ts` (gemockter Playwright-Lauf, CI-Job `e2e`) mit `test.fail` und der Befund-ID markiert: Der markierte Fall muss scheitern, ein markierter Fall, der besteht, macht den Lauf rot. Diese Marken sind ihr eigener Ratchet; der Ratchet von WP-337 vergleicht nur die Arten `go`, `sh`, `vitest` und `e2e-real`, daher erhalten sie keine Zeile in `expected-failures.txt`. Shell-Defekttests (`tests/audit/*.test.sh`, Art `sh`) und Real-Stack-Fälle (`frontend/e2e-real/`, Art `e2e-real`, je Browserprojekt eine Zeile, nur in CI ausführbar) stehen ebenfalls in `expected-failures.txt` (F-369, F-370, F-375).
 
 ## Zählung
@@ -31,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 3 |
 | P2 | 16 |
-| P3 | 9 |
-| **Summe** | **29** |
+| P3 | 10 |
+| **Summe** | **30** |
 
 ## Übersicht
 
@@ -67,6 +69,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-381](#f-381) | P3 | Rack-Seite: ein Einbau auf beiden Seiten (`face` = `both`) erscheint auf keiner Rackseite, weder in der Zeichnung noch in der Liste | WP-579 (K6) | belegt | frontend/src/pages/RackPage.test.tsx (zwei Fälle „both faces“) | WP-651 |
 | [F-382](#f-382) | P3 | `unknown_relationship`: nach accept öffnet der nächste Ingest desselben unbekannten Schlüssels ein neues Review für dasselbe Paar, obwohl die angenommene Kante besteht | WP-582 (K6) | belegt | backend/internal/discovery/topology_integration_test.go TestUnknownRelationshipReviewLifecycle, TestUnknownRelationshipReviewAfterAcceptedEdgeDeleted | WP-652 |
 | [F-383](#f-383) | P3 | Benachrichtigungssprache je Empfänger nicht erreichbar: nichts setzt `app_user.locale` (kein API-Weg; OIDC-Login, Einladung und Signup behalten den Spaltenstandard `de`) | WP-588 (K6) | belegt | backend/internal/identity/login_locale_integration_test.go TestLoginTakesLocaleClaim; backend/internal/notify/locale_integration_test.go TestNotificationLanguageSelfService | WP-653 |
+| [F-384](#f-384) | P3 | Sweep: Goroutinen-Spitze unter CPU-Last über MaxConcurrency + 50 (`TestSweepGoroutinePeakBounded` schlägt zeitweise fehl) | Basislauf K7 | belegt | collector/plugins/sweep/sweep_test.go TestSweepGoroutinePeakBounded | WP-655 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -445,6 +448,19 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 - **Empfehlung:** Der Login übernimmt einen gültigen `locale`-Claim des ID-Tokens (de* → de-DE, en* → en-US), solange `app_user.locale` den Spaltenstandard `de` hat; Selbstbedienung über die bestehende NTF-04-Präferenz (`locale`: de-DE, en-US oder leer für die Org-Locale), spec-first.
 - **Retest (verbindlich):** `go test -count=1 -run 'TestLoginTakesLocaleClaim|TestLoginStoresLocaleClaim' ./internal/identity/` und `go test -count=1 -run 'TestNotificationLanguage|TestNotificationAPI|TestTemplates' ./internal/notify/` grün (PG-Tests mit `TEST_DATABASE_URL`).
 - **Kodierender Test:** backend/internal/identity/login_locale_integration_test.go (`TestLoginTakesLocaleClaim`), backend/internal/identity/handler_test.go (`TestLoginStoresLocaleClaim`), backend/internal/notify/locale_integration_test.go (`TestNotificationLanguageSelfService`), backend/internal/notify/handler_test.go (`TestNotificationLanguagePreference`, drei Fälle in `TestNotificationAPI`); auf `eb5a51e` rot (`user created by the login (invitation): app_user.locale "de" after the login with locale claim en, want "en-US" (F-383)`; `locale claim "en": stored "", want "…/app-user-1/en-US" (F-383)`; `app_user.locale after PUT en-US: "de", want en-US (F-383)`; `in-app review of en: "Neues Review-Item: probable_duplicate", want "New review item: probable_duplicate" (F-383)`; `language without templates: 200 …, want 400`).
+
+<a id="f-384"></a>
+### F-384 (P3) – Sweep: Goroutinen-Spitze unter CPU-Last über MaxConcurrency + 50 (`TestSweepGoroutinePeakBounded` schlägt zeitweise fehl)
+
+- **Gefunden in:** Basislauf der Wiederholungsprüfung (K7) auf dem RC-Commit `e5c2d86` · **Betroffene Anforderungen:** DIS-01 · **Komponente:** collector/plugins/sweep/sweep.go (`Probe`) · **Quelle:** Basislauf `go test -p 1 -count=1 -v ./...` im Collector auf `e5c2d86`, danach gezielt wiederholt
+- **Reproduktion:** `cd collector && go test -count=10 -v -run TestSweepGoroutinePeakBounded ./plugins/sweep/` auf `e5c2d86` bei paralleler Last auf der Maschine (4 CPUs, weitere Testläufe) → 2 von 10 Läufen rot, in einer zweiten Serie 1 von 30 (`goroutine peak = 322 above the 2 before the sweep, want at most MaxConcurrency+50 = 306`); im Basislauf Spitze 321.
+- **Soll:** Retest von F-262 (WP-494): Ein Sweep über 65.536 Ziele hält die Goroutinen der Proben bei höchstens MaxConcurrency + 50, auch unter Last; höchstens 256 parallele Proben (DIS-01).
+- **Ist:** Eine Probe belegt ihren Platz in der Semaphore vor `go` und gibt ihn per `defer` frei, bevor ihre Goroutine endet. Unter CPU-Last laufen neben 256 aktiven Proben weitere Goroutinen aus, die ihren Platz schon abgegeben haben; die Spitze liegt dann bis zu rund 70 über der Schranke. Die Zahl paralleler Proben bleibt bei 256.
+- **Nutzerwirkung:** keine im Betrieb (der Collector startet keine Goroutine je Ziel, die Parallelität bleibt begrenzt); der Regressionstest des Befunds F-262 schlägt zeitweise fehl und kann CI-Läufe rot färben.
+- **Ursache (belegt):** Die Semaphore begrenzt die belegten Plätze, nicht die lebenden Goroutinen; zwischen Freigabe und Ende einer Goroutine startet bereits die nächste.
+- **Empfehlung:** Fester Worker-Pool mit höchstens `min(Concurrency, Anzahl Ziele)` Goroutinen, die die Ziele aus einem Kanal nehmen (im Plan von WP-494 als Alternative genannt); die Schranke des Tests bleibt unverändert.
+- **Retest (verbindlich):** `cd collector && go test -count=1 -race ./plugins/sweep/` grün und `go test -count=30 -run TestSweepGoroutinePeakBounded ./plugins/sweep/` 30 von 30 grün bei paralleler Last.
+- **Kodierender Test:** collector/plugins/sweep/sweep_test.go (`TestSweepGoroutinePeakBounded`, unverändert bis auf den Kommentar); auf `e5c2d86` zeitweise rot (Basislauf: Spitze 321; 2 von 10 und 1 von 30 Läufen rot mit Spitze 322).
 
 ## Geprüfte Kandidaten ohne neuen Befund
 

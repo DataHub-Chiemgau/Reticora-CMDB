@@ -288,7 +288,9 @@ func (g *goroutinePinger) Ping(_ context.Context, _ string, _ time.Duration) (ti
 
 // TestSweepGoroutinePeakBounded: a /16-sized sweep (65,536 targets) starts
 // no goroutine per target ahead of the semaphore; the goroutines of the
-// probes stay at MaxConcurrency plus a small margin (F-262, DIS-01).
+// probes stay at MaxConcurrency plus a small margin (F-262, DIS-01). Probe
+// goroutines that already gave back their slot must not count either: a
+// fixed worker pool keeps the bound under CPU contention (F-384).
 func TestSweepGoroutinePeakBounded(t *testing.T) {
 	targets := make([]string, 65536)
 	for i := range targets {

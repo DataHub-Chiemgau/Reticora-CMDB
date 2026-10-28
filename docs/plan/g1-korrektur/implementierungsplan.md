@@ -41,8 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 | 1 | 0,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **302** | **401,0** | |
+| **Summe** | | **303** | **401,5** | |
 
 ```mermaid
 flowchart LR
@@ -58,6 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
+    K7N["K7-Nachträge<br/>1 WP · 0,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -78,6 +80,7 @@ flowchart LR
     K6 --> K6N
     K6N --> K7
     K6 --> K7
+    K7N --> K7
 ```
 
 Die Kanten zeigen die Priorität, keine harte Sperre: Ein WP darf beginnen, sobald seine eigenen Voraussetzungen gemergt sind. Harte Sperren sind nur WP-336 und WP-337 (vor allen anderen WPs, Konvention 11) und WP-600 (nach allen anderen WPs). WP-338 sperrt nur die WPs, die es als Voraussetzung nennen. WP-595 (`t5-rc-evidence`) wartet nicht auf die Lieferungs-WPs WP-457, WP-453, WP-454, WP-455 (externe Lieferungen A-02, A-07, A-11); die Wiederholungsprüfung WP-598 und das Gate WP-600 dagegen schon.
@@ -418,6 +421,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-598](#wp-598--wiederholungsprüfung-installation-betrieb-fundament-epic-b-und-oberfläche) | `k-reaudit-3` | Wiederholungsprüfung Installation, Betrieb, Fundament (Epic B) und Oberfläche | K7 | 2,0 | – | 112 WPs (siehe Block) |
 | [WP-599](#wp-599--abnahmeprüfung-der-nicht-auditierten-g1-pflicht-wps-wp-214-wp-240--wp-242-wp-332--wp-335) | `k-audit-ext` | Abnahmeprüfung der nicht auditierten G1-Pflicht-WPs (WP-214, WP-240 – WP-242, WP-332 – WP-335) | K7 | 2,0 | – | WP-338, WP-595 |
 | [WP-600](#wp-600--gate-g1-nach-der-korrektur-checkliste-sicherheitsreview-und-freigabeentscheidung) | `k-gate` | Gate G1 nach der Korrektur: Checkliste, Sicherheitsreview und Freigabeentscheidung | K7 | 1,5 | – | WP-532, WP-595, WP-596, WP-597, WP-598, WP-599 |
+| [WP-655](#wp-655--sweep-fester-worker-pool-statt-goroutine-je-ziel-goroutinen-spitze-auch-unter-last-begrenzt) | `k7n-sweep-pool` | Sweep: fester Worker-Pool statt Goroutine je Ziel; Goroutinen-Spitze auch unter Last begrenzt | K7N | 0,5 | F-384 | WP-494 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -18346,6 +18350,55 @@ SEQ-01;[Q];G1;tests/rep01-structure.test.sh;WP-600
 **Entscheidungsbedarf:** [E-59](entscheidungen.md#e-59) Einordnung des Korrekturplans vor Phase 2 und Freigabe des Phase-2-Starts; [E-60](entscheidungen.md#e-60) Zurückgestellte P3-Befunde und Risikoakzeptanz für G1
 
 **Nicht Bestandteil:** Phase-2-Umfang; RC-Läufe und endgültige Statuspflege in `docs/acceptance/g1-gate.md`, `docs/security/review-g1.md` und `docs/acceptance/g1-installation.md` (WP-595 (`t5-rc-evidence`); bei `v1.0.0-rc.<n+1>` trägt dieses WP dort nur Commit und Lauf-IDs nach).
+
+## K7-Nachträge
+
+Funde der Wiederholungsprüfung (WP-596 bis WP-599) und des Basislaufs auf dem Release-Kandidaten, die kein Korrektur-WP abdeckt (Konvention 16). Die Befunde stehen ab F-384 in [`audit/g1-reaudit/FINDINGS.md`](../../../audit/g1-reaudit/FINDINGS.md) mit Reproduktion, Soll, Ist, Ursache, Empfehlung und Retest; jeder ist auf dem RC-Commit `e5c2d86` ausgeführt belegt. Die WPs werden vor WP-600 (`k-gate`) gemergt; ein Code-Commit nach dem RC-Tag führt nach WP-600 AK 7 zu `v1.0.0-rc.<n+1>`.
+
+### WP-655 – Sweep: fester Worker-Pool statt Goroutine je Ziel; Goroutinen-Spitze auch unter Last begrenzt
+
+**Schlüssel:** `k7n-sweep-pool` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-494 (`t4-scope-expansion`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-384](../../../audit/g1-reaudit/FINDINGS.md#f-384) | P3 | Sweep: Goroutinen-Spitze unter CPU-Last über MaxConcurrency + 50 (`TestSweepGoroutinePeakBounded` schlägt zeitweise fehl) | schließt | Basislauf K7 auf `e5c2d86` |
+
+**Problem:** WP-494 hat die Semaphore vor `go` gelegt (F-262): Eine Probe belegt ihren Platz, bevor ihre Goroutine startet. Die Goroutine gibt den Platz per `defer` frei und endet erst danach; unter CPU-Last laufen so neben 256 aktiven Proben weitere Goroutinen aus, die ihren Platz schon abgegeben haben. Der Retest von F-262 (`TestSweepGoroutinePeakBounded`, Spitze ≤ MaxConcurrency + 50 bei 65.536 Zielen) scheitert dadurch zeitweise (Basislauf auf `e5c2d86`: Spitze 321; allein 2 von 10 und 1 von 30 Läufen rot, Spitze 322). Die Zahl paralleler Proben (≤ 256, DIS-01) ist nicht betroffen.
+
+**Akzeptanzkriterien:**
+
+- [ ] Der Sweep arbeitet mit einem festen Pool von höchstens `min(Concurrency, Anzahl Ziele)` Workern, die die Ziele nacheinander aus einem Kanal nehmen; ein Abbruch über den Kontext beendet die Zuteilung. Verhalten, Ergebnisse und die Obergrenze von 256 parallelen Proben bleiben unverändert (`go test ./plugins/sweep/` grün, auch mit `-race`).
+- [ ] `TestSweepGoroutinePeakBounded` mit unveränderter Schranke (MaxConcurrency + 50) besteht 30 von 30 Läufen bei paralleler Last auf derselben Maschine (`go test -count=30 -run TestSweepGoroutinePeakBounded ./plugins/sweep/`); auf `e5c2d86` ist mindestens ein roter Lauf belegt.
+- [ ] golangci-lint mit der Repo-Konfiguration ohne neue Befunde.
+
+**Dateien (6 Einträge):**
+
+- collector/plugins/sweep/sweep.go
+- collector/plugins/sweep/sweep_test.go
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `cd collector && go test -count=1 -race ./plugins/sweep/` und `go test -count=30 -run TestSweepGoroutinePeakBounded ./plugins/sweep/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+DIS-01;[B];D;collector/plugins/sweep/sweep_test.go;WP-655
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** weitere Befunde der Wiederholungsprüfung (eigene WPs ab WP-656).
 
 ## Zurückgestellte Befunde
 
