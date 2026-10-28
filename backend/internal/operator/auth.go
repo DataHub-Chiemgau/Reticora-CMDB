@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -175,6 +176,9 @@ func (h *Handler) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		op, ok := h.authenticate(r)
 		if !ok {
+			// A failed attempt counts against the pre-auth budget of the
+			// IP (AUT-10) even when its entry fails and it is answered 500.
+			middleware.SpendPreAuthSlot(r.Context())
 			if h.record(w, r, &AuditEntry{OperatorID: "anonymous", OperatorKind: KindOIDC,
 				Action: actionFor(r.Method, r.URL.Path), Status: http.StatusUnauthorized,
 				Details: map[string]any{"remote": r.RemoteAddr}}) {

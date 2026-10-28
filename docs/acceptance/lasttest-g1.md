@@ -28,6 +28,15 @@ verbraucht haben. Lokal (Server von WP-658, `load.yml`-Einstellungen, Seed
 429 (vorher auf demselben Bestand 32 fehlgeschlagene Checks, 26 × 429). Der
 Wiederholungslauf von `load.yml` auf GitHub **steht aus**.
 
+Nachtrag 2026-10-28 (WP-658, Review-Nachtrag): Die Warteschlange ist jetzt
+begrenzt (je Server-Instanz 40 wartende Anfragen einer IP, 256 aller IPs,
+höchstens 2,5 s), und eine zurückgegebene Einheit weckt nur eine wartende
+Anfrage ihrer IP. `api.js` hat 38 VUs und erreicht die Grenze nicht. Lokal
+erneut gemessen (Server des Review-Nachtrags, `load.yml`-Einstellungen, Seed
+10.000 Objekte): 60, 60 und 100 gleichzeitige Anfragen mit gültigem Key einer
+IP jeweils ohne 429; `api.js` 60 s: 0 von 6.938 Anfragen fehlgeschlagen,
+Checks 8.069 von 8.069, kein 429; 60 ungültige Keys: 20 × 401, 40 × 429.
+
 **Quelle der Werte:** Die Werte der Läufe 1 bis 3 stammen aus den
 k6-Zusammenfassungen und Protokollzeilen in den Job-Logs der Läufe
 40269518264, 40270929166 und 40271818796 (Abschnitt „Läufe“). Das Archiv je

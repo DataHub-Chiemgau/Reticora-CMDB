@@ -70,6 +70,36 @@ func (r *RedisStore) Decrement(ctx context.Context, key string) (int64, error) {
 	return n, nil
 }
 
+// incrementBelow increments KEYS[1] when its value is below ARGV[1] and
+// renews its TTL (ARGV[2] milliseconds, 0: none) as Increment does; it
+// returns {incremented, value of KEYS[1], value of KEYS[2]}, missing
+// counters being 0.
+var incrementBelow = redis.NewScript(`
+local limit, ttl = tonumber(ARGV[1]), tonumber(ARGV[2])
+local count = tonumber(redis.call('GET', KEYS[1]) or '0') or 0
+local added = 0
+if count < limit then
+  count = redis.call('INCR', KEYS[1])
+  if ttl > 0 then
+    redis.call('PEXPIRE', KEYS[1], ttl)
+  end
+  added = 1
+end
+local other = tonumber(redis.call('GET', KEYS[2]) or '0') or 0
+return {added, count, other}
+`)
+
+func (r *RedisStore) IncrementBelow(ctx context.Context, key string, limit int64, ttl time.Duration, other string) (BoundedCount, error) {
+	res, err := incrementBelow.Run(ctx, r.client, []string{key, other}, limit, ttl.Milliseconds()).Int64Slice()
+	if err != nil {
+		return BoundedCount{}, fmt.Errorf("cache: redis increment below: %w", err)
+	}
+	if len(res) != 3 {
+		return BoundedCount{}, fmt.Errorf("cache: redis increment below: unexpected reply %v", res)
+	}
+	return BoundedCount{Added: res[0] == 1, Count: res[1], Other: res[2]}, nil
+}
+
 func (r *RedisStore) Delete(ctx context.Context, key string) error {
 	if err := r.client.Del(ctx, key).Err(); err != nil {
 		return fmt.Errorf("cache: redis del: %w", err)

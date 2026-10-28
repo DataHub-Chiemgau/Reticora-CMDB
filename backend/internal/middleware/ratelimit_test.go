@@ -779,12 +779,16 @@ func fireConcurrently(replicas []http.Handler, ip string, calls []preAuthCall) (
 
 // TestValidCredentialsNeverHit429UnderConcurrency covers WP-658 (F-387;
 // AUT-10, API-04): the pre-auth limit counts failed attempts, not
-// concurrency. 60 concurrent requests with a valid API key, 60 with a valid
-// bearer token and 30 successful refreshes of one IP (many users behind one
-// NAT or proxy address, or one integration with parallel workers), spread
-// over two replicas, while every credential check takes 25 ms: none of them
-// gets 429, all reach the handler. Afterwards the IP still has its whole
-// budget for failed attempts: 20 invalid keys get 401, the 21st 429.
+// concurrency. While every credential check takes 25 ms, no request with
+// valid credentials of one IP gets 429 as long as the IP stays within the
+// bound of waiting requests (twice the budget per replica): 30 concurrent
+// requests with a valid API key, 30 with a valid bearer token and 20
+// successful refreshes (many users behind one NAT or proxy address, or
+// one integration with parallel workers) spread over two replicas, and 60
+// concurrent requests with a valid API key on one replica (the
+// reproduction of F-387). All reach the handler. Afterwards the IP still
+// has its whole budget for failed attempts: 20 invalid keys get 401, the
+// 21st 429.
 //
 // Retest:
 //
@@ -794,25 +798,37 @@ func TestValidCredentialsNeverHit429UnderConcurrency(t *testing.T) {
 		awaitFreshWindow()
 		replicas, mint, reached := preAuthReplicas(t, store, &atomic.Int64{})
 		var calls []preAuthCall
-		for i := range 60 {
+		for i := range 30 {
 			calls = append(calls,
 				preAuthCall{path: "/api/v1/cis", apiKey: "valid"},
 				preAuthCall{path: "/api/v1/cis", bearer: mint("sid-" + strconv.Itoa(i%3))})
 		}
-		for range 30 {
+		for range 20 {
 			calls = append(calls, preAuthCall{path: "/api/v1/auth/refresh"})
 		}
+		single := slices.Repeat([]preAuthCall{{path: "/api/v1/cis", apiKey: "valid"}}, 60)
 		ip := preAuthTestIP("6580")
-		codes, refused := fireConcurrently(replicas, ip, calls)
-		if want := map[int]int{http.StatusOK: len(calls)}; !maps.Equal(codes, want) {
-			detail := ""
-			if refused != nil {
-				detail = fmt.Sprintf("; a refused one: X-RateLimit-Limit %s, %s", refused.Header().Get("X-RateLimit-Limit"), strings.TrimSpace(refused.Body.String()))
+		for _, tc := range []struct {
+			name     string
+			replicas []http.Handler
+			ip       string
+			calls    []preAuthCall
+		}{
+			{"two replicas", replicas, ip, calls},
+			{"one replica", replicas[:1], preAuthTestIP("6584"), single},
+		} {
+			reached.Store(0)
+			codes, refused := fireConcurrently(tc.replicas, tc.ip, tc.calls)
+			if want := map[int]int{http.StatusOK: len(tc.calls)}; !maps.Equal(codes, want) {
+				detail := ""
+				if refused != nil {
+					detail = fmt.Sprintf("; a refused one: X-RateLimit-Limit %s, %s", refused.Header().Get("X-RateLimit-Limit"), strings.TrimSpace(refused.Body.String()))
+				}
+				t.Errorf("%s: %d concurrent requests with valid credentials from one IP: %v, want %v (no failed attempt, so no 429)%s", tc.name, len(tc.calls), codes, want, detail)
 			}
-			t.Errorf("%d concurrent requests with valid credentials from one IP: %v, want %v (no failed attempt, so no 429)%s", len(calls), codes, want, detail)
-		}
-		if n := reached.Load(); n != int64(len(calls)) {
-			t.Errorf("%d of %d requests with valid credentials reached the handler", n, len(calls))
+			if n := reached.Load(); n != int64(len(tc.calls)) {
+				t.Errorf("%s: %d of %d requests with valid credentials reached the handler", tc.name, n, len(tc.calls))
+			}
 		}
 
 		// The valid requests left no units behind.
@@ -872,8 +888,8 @@ func TestPreAuthBruteForceStillTripsUnderConcurrency(t *testing.T) {
 				t.Errorf("pre-auth 429 without the documented headers: %v", h)
 			}
 		}
-		if elapsed > 5*time.Second {
-			t.Errorf("the refused guesses took %s: once failures have spent the budget they must be refused at once", elapsed)
+		if elapsed >= preAuthMaxWait {
+			t.Errorf("the refused guesses took %s: once failures have spent the budget they must be refused at once, not after the wait bound %s", elapsed, preAuthMaxWait)
 		}
 
 		valid := []preAuthCall{{path: "/api/v1/cis", apiKey: "valid"}}
@@ -948,5 +964,357 @@ func TestPreAuthWaitIsBounded(t *testing.T) {
 			t.Errorf("waiting refresh after the held ones finished: %d, want 200", code)
 		}
 		wg.Wait()
+	})
+}
+
+// holdPreAuthUnits takes every unit of ip's pre-auth budget with refreshes
+// whose handlers block until the test releases them; it returns once all
+// of them run, with a wait group for their end.
+func holdPreAuthUnits(t *testing.T, h http.Handler, ip string, entered <-chan struct{}) *sync.WaitGroup {
+	t.Helper()
+	var wg sync.WaitGroup
+	for range DefaultPreAuthPerMinute {
+		wg.Go(func() {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+			req.RemoteAddr = ip + ":40000"
+			req.Header.Set("X-Test-Hold", "1")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Errorf("held refresh: %d, want 200", w.Code)
+			}
+		})
+	}
+	for range DefaultPreAuthPerMinute {
+		select {
+		case <-entered:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the held refreshes did not reach their handlers")
+		}
+	}
+	return &wg
+}
+
+// timedAnswer is the answer to one request and how long it took.
+type timedAnswer struct {
+	code       int
+	retryAfter string
+	took       time.Duration
+}
+
+// refreshFrom sends a refresh of ip.
+func refreshFrom(h http.Handler, ip string) timedAnswer {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+	req.RemoteAddr = ip + ":40000"
+	w := httptest.NewRecorder()
+	began := time.Now()
+	h.ServeHTTP(w, req)
+	return timedAnswer{code: w.Code, retryAfter: w.Header().Get("Retry-After"), took: time.Since(began)}
+}
+
+// TestPreAuthWaitingRequestsAreBounded covers the review of WP-658 (F-387;
+// AUT-10, defect D1): only twice the budget of requests of one IP and
+// preAuthMaxWaiting requests of all IPs wait for a unit on a replica. While
+// 20 refreshes of IP A hold every unit, 40 more of A wait; the 41st gets
+// 429 with Retry-After at once. With the bound of the replica set to 41,
+// one request of IP B (whose units are held as well) still waits and a
+// second gets 429 at once. Once the units are given back, every waiting
+// request is served.
+//
+// Retest:
+//
+//	cd backend && go test -count=1 -v -run '^TestPreAuthWaitingRequestsAreBounded$' ./internal/middleware/
+func TestPreAuthWaitingRequestsAreBounded(t *testing.T) {
+	forEachBudgetStore(t, func(t *testing.T, store cache.Store) {
+		defer func(wait time.Duration, waiting int) { preAuthMaxWait, preAuthMaxWaiting = wait, waiting }(preAuthMaxWait, preAuthMaxWaiting)
+		preAuthMaxWait, preAuthMaxWaiting = 10*time.Second, 2*DefaultPreAuthPerMinute+1
+		awaitFreshWindow()
+		entered, release := make(chan struct{}, 2*DefaultPreAuthPerMinute), make(chan struct{})
+		h := PreAuthRateLimiter(DefaultPreAuthPerMinute, store)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Test-Hold") != "" {
+				entered <- struct{}{}
+				<-release
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		ipA, ipB := preAuthTestIP("6585"), preAuthTestIP("6586")
+		holdersA := holdPreAuthUnits(t, h, ipA, entered)
+		holdersB := holdPreAuthUnits(t, h, ipB, entered)
+
+		var mu sync.Mutex
+		var waited []timedAnswer
+		var wg sync.WaitGroup
+		wait := func(ip string) {
+			wg.Go(func() {
+				r := refreshFrom(h, ip)
+				mu.Lock()
+				waited = append(waited, r)
+				mu.Unlock()
+			})
+		}
+		for range 2 * DefaultPreAuthPerMinute {
+			wait(ipA)
+		}
+		wait(ipB)
+		time.Sleep(300 * time.Millisecond) // all 41 wait now
+
+		for _, tc := range []struct{ what, ip string }{
+			{"41st waiting request of IP A (bound of the IP)", ipA},
+			{"2nd waiting request of IP B (bound of the replica)", ipB},
+		} {
+			if r := refreshFrom(h, tc.ip); r.code != http.StatusTooManyRequests || r.retryAfter == "" || r.took >= time.Second {
+				t.Errorf("%s: %d (Retry-After %q) after %s, want 429 with Retry-After at once", tc.what, r.code, r.retryAfter, r.took)
+			}
+		}
+		close(release)
+		wg.Wait()
+		holdersA.Wait()
+		holdersB.Wait()
+		codes := map[int]int{}
+		for _, r := range waited {
+			codes[r.code]++
+		}
+		if want := map[int]int{http.StatusOK: 2*DefaultPreAuthPerMinute + 1}; !maps.Equal(codes, want) {
+			t.Errorf("waiting requests within the bounds after the units were given back: %v, want %v", codes, want)
+		}
+	})
+}
+
+// countingPreAuthStore counts the store round trips on the keys that
+// contain watch.
+type countingPreAuthStore struct {
+	cache.Store
+	watch string
+	ops   atomic.Int64
+}
+
+func (c *countingPreAuthStore) note(key string) {
+	if strings.Contains(key, c.watch) {
+		c.ops.Add(1)
+	}
+}
+
+func (c *countingPreAuthStore) Get(ctx context.Context, key string) (string, bool, error) {
+	c.note(key)
+	return c.Store.Get(ctx, key)
+}
+
+func (c *countingPreAuthStore) Increment(ctx context.Context, key string, ttl time.Duration) (int64, error) {
+	c.note(key)
+	return c.Store.Increment(ctx, key, ttl)
+}
+
+func (c *countingPreAuthStore) Decrement(ctx context.Context, key string) (int64, error) {
+	c.note(key)
+	return c.Store.Decrement(ctx, key)
+}
+
+func (c *countingPreAuthStore) IncrementBelow(ctx context.Context, key string, limit int64, ttl time.Duration, other string) (cache.BoundedCount, error) {
+	c.note(key)
+	return c.Store.IncrementBelow(ctx, key, limit, ttl, other)
+}
+
+// TestPreAuthWaitersCostBoundedStoreOps covers the review of WP-658 (F-387;
+// AUT-10, API-04, defect D1): requests that wait for a unit of their IP
+// cost a bounded number of store round trips, and units given back by
+// other IPs do not wake them. 20 refreshes of IP A hold every unit; 300
+// more refreshes of A arrive at once while 8 other IPs send requests with
+// a valid API key (each gives its unit back) and a probe from IP C
+// measures their latency. Wanted: the 260 requests beyond the bound of the
+// IP get 429 at once; the store round trips on A's keys stay within
+// 300 + 40 · (2 · wait / poll maximum + 6), however many units the other
+// IPs give back; the other IPs keep at least half of their throughput and
+// their median latency at most triples (plus 1 ms for the scheduler of a
+// shared machine) against a phase without waiting requests in the same
+// run. With d7aec4b every unit given back woke every waiting request of
+// the replica.
+//
+// Retest:
+//
+//	cd backend && go test -count=1 -v -run '^TestPreAuthWaitersCostBoundedStoreOps$' ./internal/middleware/
+func TestPreAuthWaitersCostBoundedStoreOps(t *testing.T) {
+	forEachBudgetStore(t, func(t *testing.T, store cache.Store) {
+		const (
+			waiters = 300
+			others  = 8
+		)
+		phase := 1500 * time.Millisecond
+		defer func(old time.Duration) { preAuthMaxWait = old }(preAuthMaxWait)
+		preAuthMaxWait = phase
+		// Both phases run in one window.
+		if left := 60 - time.Now().UTC().Unix()%60; left < 8 {
+			time.Sleep(time.Duration(left)*time.Second + 100*time.Millisecond)
+		}
+		ipA := preAuthTestIP("6587")
+		cs := &countingPreAuthStore{Store: store, watch: strings.Trim(ipA, "[]")}
+		keys := fakeAPIKeys{keys: map[string]*identity.APIKeyInfo{
+			"valid": {ID: "key-1", OrganizationID: "org-1", Scopes: []identity.Permission{identity.PermCIRead}},
+		}}
+		entered, release := make(chan struct{}, DefaultPreAuthPerMinute), make(chan struct{})
+		h := Chain(PreAuthRateLimiter(DefaultPreAuthPerMinute, cs), AuthMiddlewareWithAPIKeys(nil, keys))(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("X-Test-Hold") != "" {
+					entered <- struct{}{}
+					<-release
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+		valid := func(ip string) int {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/cis", nil)
+			req.RemoteAddr = ip + ":40000"
+			req.Header.Set("X-API-Key", "valid")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			return w.Code
+		}
+		// traffic sends the other IPs' requests for one phase and returns
+		// their number and the probe's median latency.
+		traffic := func(tag string) (int64, time.Duration) {
+			stop := time.Now().Add(phase)
+			var served atomic.Int64
+			var wg sync.WaitGroup
+			for i := range others {
+				ip := preAuthTestIP(tag + strconv.Itoa(i))
+				wg.Go(func() {
+					for time.Now().Before(stop) {
+						if code := valid(ip); code != http.StatusOK {
+							t.Errorf("valid key of another IP: %d, want 200", code)
+							return
+						}
+						served.Add(1)
+					}
+				})
+			}
+			var latencies []time.Duration
+			probe := preAuthTestIP(tag + "c")
+			for time.Now().Before(stop) {
+				began := time.Now()
+				valid(probe)
+				latencies = append(latencies, time.Since(began))
+				time.Sleep(5 * time.Millisecond)
+			}
+			wg.Wait()
+			slices.Sort(latencies)
+			return served.Load(), latencies[len(latencies)/2]
+		}
+
+		baseServed, baseP50 := traffic("b")
+		holders := holdPreAuthUnits(t, h, ipA, entered)
+		cs.ops.Store(0)
+		var mu sync.Mutex
+		var answers []timedAnswer
+		var wg sync.WaitGroup
+		for range waiters {
+			wg.Go(func() {
+				r := refreshFrom(h, ipA)
+				mu.Lock()
+				answers = append(answers, r)
+				mu.Unlock()
+			})
+		}
+		served, p50 := traffic("o")
+		wg.Wait()
+		ops := cs.ops.Load()
+		close(release)
+		holders.Wait()
+
+		perIP := 2 * DefaultPreAuthPerMinute
+		var refused, atOnce int
+		for _, r := range answers {
+			if r.code == http.StatusTooManyRequests {
+				refused++
+				if r.took < preAuthMaxWait/2 {
+					atOnce++
+				}
+			}
+		}
+		bound := int64(waiters + perIP*(int(2*preAuthMaxWait/preAuthPollMax)+6))
+		t.Logf("%d refreshes of IP A while its units are held: %d x 429, %d of them at once; %d store round trips on A's keys (bound %d) while other IPs gave back %d units; other IPs: %d requests in %s (%d without waiting requests), probe p50 %s (%s without)",
+			waiters, refused, atOnce, ops, bound, served, served, phase, baseServed, p50, baseP50)
+		if refused != waiters || atOnce < waiters-perIP {
+			t.Errorf("%d refreshes while every unit is held: %d x 429, %d at once; want %d x 429, at least %d at once (beyond the bound of the IP)", waiters, refused, atOnce, waiters, waiters-perIP)
+		}
+		if ops > bound {
+			t.Errorf("%d store round trips on the keys of the waiting IP, want at most %d (independent of the %d units other IPs gave back)", ops, bound, served)
+		}
+		if 2*served < baseServed {
+			t.Errorf("other IPs served %d requests while IP A waited, %d without: less than half", served, baseServed)
+		}
+		if p50 > 3*baseP50+time.Millisecond {
+			t.Errorf("probe median latency %s while IP A waited, %s without: more than three times", p50, baseP50)
+		}
+	})
+}
+
+// TestPreAuthPanicSpendsHeldUnit covers the review of WP-658 (F-387;
+// AUT-10, defect D2): a handler that panics while its request holds a unit
+// (a refresh; Recovery sits outside the pre-auth stage) spends the unit
+// instead of leaving it taken until the window ends. After 20 panicking
+// refreshes of one IP the next refresh gets 429 at once, not after the
+// wait bound. A request whose API key was valid gave its unit back before
+// its handler ran: its panic spends nothing.
+//
+// Retest:
+//
+//	cd backend && go test -count=1 -v -run '^TestPreAuthPanicSpendsHeldUnit$' ./internal/middleware/
+func TestPreAuthPanicSpendsHeldUnit(t *testing.T) {
+	forEachBudgetStore(t, func(t *testing.T, store cache.Store) {
+		defer func(old time.Duration) { preAuthMaxWait = old }(preAuthMaxWait)
+		preAuthMaxWait = 2 * time.Second
+		awaitFreshWindow()
+		keys := fakeAPIKeys{keys: map[string]*identity.APIKeyInfo{
+			"valid": {ID: "key-1", OrganizationID: "org-1", Scopes: []identity.Permission{identity.PermCIRead}},
+		}}
+		h := Chain(Recovery, PreAuthRateLimiter(DefaultPreAuthPerMinute, store), AuthMiddlewareWithAPIKeys(nil, keys))(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("X-Test-Panic") != "" {
+					panic("handler failed")
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+		serve := func(ip, path, key string, panics bool) timedAnswer {
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			req.RemoteAddr = ip + ":40000"
+			if key != "" {
+				req.Header.Set("X-API-Key", key)
+			}
+			if panics {
+				req.Header.Set("X-Test-Panic", "1")
+			}
+			w := httptest.NewRecorder()
+			began := time.Now()
+			h.ServeHTTP(w, req)
+			return timedAnswer{code: w.Code, retryAfter: w.Header().Get("Retry-After"), took: time.Since(began)}
+		}
+		ip := preAuthTestIP("6588")
+		for i := range DefaultPreAuthPerMinute {
+			if r := serve(ip, "/api/v1/auth/refresh", "", true); r.code != http.StatusInternalServerError {
+				t.Fatalf("panicking refresh %d: %d, want 500", i+1, r.code)
+			}
+		}
+		win := newPreAuthWindow(strings.Trim(ip, "[]"), time.Now())
+		spent, _, err := store.Get(context.Background(), win.spent)
+		if err != nil || spent != strconv.Itoa(DefaultPreAuthPerMinute) {
+			t.Errorf("spent units after %d panicking refreshes: %q (%v), want %d", DefaultPreAuthPerMinute, spent, err, DefaultPreAuthPerMinute)
+		}
+		if r := serve(ip, "/api/v1/auth/refresh", "", false); r.code != http.StatusTooManyRequests || r.retryAfter == "" || r.took >= preAuthMaxWait/2 {
+			t.Errorf("refresh after %d panicking refreshes: %d (Retry-After %q) after %s, want 429 with Retry-After at once (wait bound %s)", DefaultPreAuthPerMinute, r.code, r.retryAfter, r.took, preAuthMaxWait)
+		}
+
+		other := preAuthTestIP("6589")
+		for i := range DefaultPreAuthPerMinute + 5 {
+			if r := serve(other, "/api/v1/cis", "valid", true); r.code != http.StatusInternalServerError {
+				t.Fatalf("panicking request %d with a valid key: %d, want 500", i+1, r.code)
+			}
+		}
+		for i := 1; i <= DefaultPreAuthPerMinute+1; i++ {
+			want := http.StatusUnauthorized
+			if i > DefaultPreAuthPerMinute {
+				want = http.StatusTooManyRequests
+			}
+			if r := serve(other, "/api/v1/cis", "guess-"+strconv.Itoa(i), false); r.code != want {
+				t.Errorf("invalid key %d after panicking requests with a valid key: %d, want %d", i, r.code, want)
+			}
+		}
 	})
 }

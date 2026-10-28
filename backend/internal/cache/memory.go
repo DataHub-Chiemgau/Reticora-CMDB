@@ -107,6 +107,32 @@ func (m *MemoryStore) Decrement(_ context.Context, key string) (int64, error) {
 	return count, nil
 }
 
+func (m *MemoryStore) IncrementBelow(_ context.Context, key string, limit int64, ttl time.Duration, other string) (BoundedCount, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	value := func(k string) (memEntry, int64, bool) {
+		entry, exists := m.entries[k]
+		if !exists || (!entry.expiresAt.IsZero() && now.After(entry.expiresAt)) {
+			return memEntry{}, 0, false
+		}
+		// A corrupted (non-numeric) entry counts as 0, as in Increment.
+		n, _ := strconv.ParseInt(entry.value, 10, 64)
+		return entry, n, true
+	}
+	entry, count, exists := value(key)
+	res := BoundedCount{Count: count}
+	if count < limit {
+		if !exists && ttl > 0 {
+			entry.expiresAt = now.Add(ttl)
+		}
+		res.Added, res.Count = true, count+1
+		m.entries[key] = memEntry{value: strconv.FormatInt(res.Count, 10), expiresAt: entry.expiresAt}
+	}
+	_, res.Other, _ = value(other)
+	return res, nil
+}
+
 func (m *MemoryStore) Delete(_ context.Context, key string) error {
 	m.mu.Lock()
 	delete(m.entries, key)
