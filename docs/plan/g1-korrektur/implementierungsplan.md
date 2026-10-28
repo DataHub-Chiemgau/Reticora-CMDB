@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-657 | 4 | 3,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen). |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-661 | 6 | 5,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **306** | **404,0** | |
+| **Summe** | | **308** | **406,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>4 WPs · 3,0 PT"]
+    K7N["K7-Nachträge<br/>6 WPs · 5,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -425,6 +425,8 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-656](#wp-656--unterzeichner-von-zuweisungen-als-pii-surrogat-bestandsnamen-über-den-backfill-in-den-vault) | `k7n-assignment-signature-surrogate` | Unterzeichner von Zuweisungen als PII-Surrogat; Bestandsnamen über den Backfill in den Vault | K7N | 1,0 | F-385 | WP-241, WP-242 |
 | [WP-658](#wp-658--pre-auth-limit-gleichzeitige-anfragen-mit-gültigen-anmeldedaten-warten-statt-429-fehlversuche-bleiben-begrenzt) | `k7n-preauth-concurrency` | Pre-Auth-Limit: gleichzeitige Anfragen mit gültigen Anmeldedaten warten statt 429; Fehlversuche bleiben begrenzt | K7N | 1,0 | F-387 | WP-462 |
 | [WP-657](#wp-657--ingest-rahmen-und-ledger-eines-batches-wp-332-ak-3-mit-dem-gebauten-entwurf-abgleichen) | `k7n-ingest-frame-ledger-tx` | Ingest: Rahmen und Ledger eines Batches (WP-332 AK 3) mit dem gebauten Entwurf abgleichen | K7N | 0,5 | F-386 | WP-332, WP-333, WP-334, WP-481 |
+| [WP-660](#wp-660--audit-liste-scope-regel-für-jeden-typ-der-auditoren-domänentypen-und-routensegmente-unbekannte-typen-fail-closed) | `k7n-audit-log-scope` | Audit-Liste: Scope-Regel für jeden Typ der Auditoren (Domänentypen und Routensegmente), unbekannte Typen fail-closed | K7N | 1,5 | F-389 | WP-504, WP-505 |
+| [WP-661](#wp-661--credentials-ungültige-id-wie-unbekannte-404-repository-fehler-über-den-fehlervertrag-api-03) | `k7n-credential-invalid-id` | Credentials: ungültige ID wie unbekannte (404), Repository-Fehler über den Fehlervertrag API-03 | K7N | 0,5 | F-390 | WP-343 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -18552,6 +18554,112 @@ NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/ingest_budget_integrat
 **Entscheidungsbedarf:** [E-101](entscheidungen.md#e-101) „WP-332 AK 3: Rahmen und Ledger eines Batches in einer oder in zwei Transaktionen“. Option 1 (empfohlen): Plantext an den Entwurf angleichen, zwei Transaktionen je Batch, keine Codeänderung. Option 2: Zusammenlegung mit eigener Verbindungsbegrenzung, sodass ein Batch nur eine Verbindung belegt; Aufwand rund 2 PT, Gewinn 2 Statements je Batch. Option 3: Savepoints statt Record-Transaktionen; widerspricht WP-332 AK 2 und AK 4 sowie WP-334 und wird nicht empfohlen.
 
 **Nicht Bestandteil:** Änderungen an Ledger-Semantik, Dedupe-Fenster (REC-01), Spuren und Sperren (WP-334) oder Poison-Record-Isolierung (WP-481); weitere Befunde der Wiederholungsprüfung.
+
+### WP-660 – Audit-Liste: Scope-Regel für jeden Typ der Auditoren (Domänentypen und Routensegmente), unbekannte Typen fail-closed
+
+**Schlüssel:** `k7n-audit-log-scope` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-504 (`t6-route-audit-gapless`), WP-505 (`t6-route-audit-values`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-389](../../../audit/g1-reaudit/FINDINGS.md#f-389) | P2 | Audit-Liste zeigt client- und site-beschränkten Principals die Einträge des Routen-Audits über Objekte fremder Clients und Sites (Namen, alte und neue Werte) | schließt | Wiederholungsprüfung von WP-016 und WP-020 (K7) auf `e5c2d86` |
+
+**Problem:** `GET /api/v1/audit-log` (und der Alias `/api/v1/audit`) filtert für Principals mit eingeschränktem Client-, Site- oder Team-Scope über `restrictedResource` (backend/internal/audit/audit.go). Die Bedingung kennt nur die Domänentypen `ci`, `asset`, `contact`, `credential`, `document`, `ticket` und lässt jeden anderen `resource_type` mit `ELSE true` durch. Der Routen-Audit schreibt seit WP-133/WP-504/WP-505 das erste Routensegment (`racks`, `relationships`, `assets`, `tickets`, `slas` …) mit den alten und neuen Werten der Zeile. Ein Client-1-Principal mit `audit:read` liest so Namen, Kennungen und Werte von Racks, Beziehungen, Assets und Modulobjekten von Client 2, ein Site-1-Principal die Racks anderer Sites; dieselben Objekte antworten direkt mit 404 (F-389). `audit_log` hat keine Client- oder Site-Spalte; die Einträge im Log tragen beide Typformen und bleiben hash-verkettet.
+
+**Akzeptanzkriterien:**
+
+- [ ] Scope-Register `backend/internal/audit/scope.go`: Jeder Typ, den ein Auditor schreibt, hat eine Regel – die Domänentypen im Singular (auch die nur noch in Bestandseinträgen vorkommenden `contact`, `credential`, `document`, `ticket`) und die Routensegmente einschließlich SCIM (`Users`, `Groups`). Ein Eintrag ist für einen eingeschränkten Principal sichtbar, wenn die Zeile, die `resource_id` nennt, in einer der Tabellen des Typs unter seinem Scope existiert (RLS der Tabelle; bei Tabellen ohne eigene Client- oder Site-Policy zusätzlich die referenzierten Zeilen von Asset, CI, Site, Netzwerkschnittstelle, Bestand, Ticket, Bestellung, Dokument, die Client-/Site-Grants von Rollen und Einladungen bzw. der Scope-Schnappschuss eines Exportauftrags). Einträge über die Organisation selbst (Organisation, Schlüsselrotation, Aufbewahrung, Kettenprüfung, Metamodell nach Schlüssel, Suchindex, Quellpolitik) sieht jeder Principal der Organisation. Unbekannte Typen, Typen ohne zuordenbare Zeile (Benachrichtigungspräferenzen, Datenschutz) und Einträge über gelöschte Objekte sind für eingeschränkte Principals verborgen; org-weite Principals sehen das ganze Log. `total` zählt nur die sichtbaren Einträge; der Filter `resource_type` schränkt nur innerhalb der sichtbaren ein.
+- [ ] Keine Normalisierung von `resource_type` beim Schreiben und keine Migration: Bestandseinträge mit Pluraltypen werden über dieselbe Regel gefiltert, der Filter `resource_type=racks` und die Hash-Kette bleiben unverändert.
+- [ ] `TestAuditLogHidesForeignClientRouteEntries` (Produktionsrouter, PostgreSQL-Routen-Auditor, Module eingeschaltet) über `/api/v1/audit-log` und `/api/v1/audit`: Der Client-1-Principal sieht keine Einträge über Rack, Beziehung, Asset, CI, Ticket (auch Kommentar), Dokument, Wartungsfenster, SLA, Schreibtisch, Schlüssel, Bestellung, Formular, Verbrauchsmaterial, Inventarposten und Lagerbewegung von Client 2 und keinen Eintrag eines unbekannten Typs, wohl aber die über Racks, Asset, SLA und Schlüssel von Client 1; der Client-1/Site-1-Principal zusätzlich nicht das Rack von Client 1 in einer anderen Site; der org-weite Principal sieht alle (Kontrolle). Auf `e5c2d86` rot, mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] Architekturtests: `TestEveryAuditedRouteHasAScopeRule` (jede auditierte Schreibroute der Routentabelle hat für ihren Typ eine Regel; ein neues Segment fällt auf) und `TestEveryRecordedResourceTypeHasAScopeRule` (jeder Typ, den ein Domänen-Recorder im Backend schreibt, hat eine Regel), `TestRestrictedResourceRule` (Aufbau der Bedingung, unbekannter Typ verborgen).
+- [ ] `api/openapi.yaml` beschreibt die Sichtbarkeit für beide Listen-Endpunkte (spec-first), `frontend/src/api/generated/schema.d.ts` neu erzeugt; `docs/security/review-g1.md` nennt den HTTP-Lauf je Scope-Art für das Audit-Log.
+- [ ] Regression: `go test -p 1 ./internal/audit/ ./internal/server/ ./internal/history/ ./internal/middleware/ ./internal/pii/ ./internal/tenant/rls/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (10 Einträge):**
+
+- backend/internal/audit/audit.go
+- backend/internal/audit/scope.go (neu)
+- backend/internal/audit/scope_test.go (neu)
+- backend/internal/server/audit_coverage_test.go
+- backend/internal/server/audit_log_scope_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/security/review-g1.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Bedingung läuft in der Tenant-Transaktion des Principals (`database.WithRequestTenant`) als `reticora_app`; die Unterabfragen sehen nur, was die RLS der jeweiligen Tabelle dem Principal zeigt. Kosten (gemessen mit 20.000 Einträgen einer Organisation, `jit=off` wie in den Anwendungspools): Ausführung rund 30 ms je Abfrage gegenüber 7 ms vorher; Planung 75–110 ms bei den ersten Ausführungen, mit dem Anweisungscache von pgx ab der sechsten Ausführung generischer Plan (0,15 ms). Org-weite Principals sind nicht betroffen.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestAuditLogHidesForeignClientRouteEntries$|^TestEveryAuditedRouteHasAScopeRule$' ./internal/server/` gegen PostgreSQL, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 ./internal/audit/` (`TestEveryRecordedResourceTypeHasAScopeRule`, `TestRestrictedResourceRule`, `TestAuditScope`, `TestAuditListWithoutScope`).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TEN-06;[B];B;backend/internal/server/audit_log_scope_integration_test.go;WP-660
+TEN-09;[Q];B;backend/internal/server/audit_log_scope_integration_test.go;WP-660
+AUD-05;[B];B;backend/internal/server/audit_log_scope_integration_test.go;WP-660
+AUD-05;[B];B;backend/internal/audit/scope_test.go;WP-660
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** die Vollständigkeit der CI-Historie (`/history/ci/{id}` liest nur Audit-Einträge vom Typ `ci`, nicht die Routeneinträge `cis`; kein Leck, eigener Kandidat); Sichtbarkeit nach Personen statt nach Scope (Einträge über Gespräche des KI-Assistenten und private gespeicherte Sichten anderer Benutzer bleiben für Principals mit `audit:read` sichtbar, solange die Zeile besteht, da sie keinem Client zugeordnet sind); eine Client-/Site-Spalte in `audit_log`; F-390 (WP-661, `k7n-credential-invalid-id`); weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-661 – Credentials: ungültige ID wie unbekannte (404), Repository-Fehler über den Fehlervertrag API-03
+
+**Schlüssel:** `k7n-credential-invalid-id` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-343 (`t1-err-core`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-390](../../../audit/g1-reaudit/FINDINGS.md#f-390) | P3 | Credentials: `GET`/`DELETE /api/v1/credentials/{id}` mit einer ID, die keine UUID ist, antworten 500; Datenbankfehler beim Anlegen ebenso | schließt | Wiederholungsprüfung von WP-011 (K7) auf `e5c2d86` |
+
+**Problem:** Der Credential-Handler (backend/internal/credential/handler.go) nutzt nach F-047 weiter seinen eigenen `writeError`: `get` und `delete` bilden nur `ErrNotFound` auf 404 ab und antworten für jeden anderen Fehler 500, `create`, `list` und `rotateKeys` ebenso. `PGRepository.Get`/`Delete` geben eine ID, die keine UUID ist, an PostgreSQL weiter (SQLSTATE 22P02). `GET` und `DELETE /api/v1/credentials/not-a-uuid` antworten deshalb 500 („failed to get/delete credential“), das Anlegen mit NUL-Byte, ungültiger, unbekannter oder fremder `client_id` ebenfalls 500 (F-390).
+
+**Akzeptanzkriterien:**
+
+- [ ] `PGRepository.Get` und `Delete` liefern für eine ID, die keine UUID ist, `ErrNotFound` ohne Datenbankabfrage; `GET` und `DELETE /api/v1/credentials/not-a-uuid` antworten 404 „credential not found“ wie für eine unbekannte UUID.
+- [ ] Alle übrigen Repository-Fehler der Handler `create`, `list`, `get`, `delete` und `rotateKeys` laufen über `api.WriteRepoError` (bereinigter RFC-7807-Vertrag): Name mit NUL-Byte oder `client_id`, die keine UUID ist → 400, unbekannte `client_id` → 422, `client_id` außerhalb des Client-Scopes → 403, sonst 500 ohne Datenbanktext; `ErrNotFound` und `ErrInvalidKind` werden per `errors.Is` erkannt. Die 422 für eine unbekannte `kind` und die 404 der Schlüsselrotation ohne Schlüsselmaterial bleiben.
+- [ ] Spec-first: `api/openapi.yaml` nennt für `GET`/`DELETE /credentials/{id}` die 404 bei einer ID, die keine UUID ist, und für `POST /credentials/` die 403 und die Abbildung der Datenbankfehler; `frontend/src/api/generated/schema.d.ts` neu erzeugt; `TestRoutesAndSpecificationAreInParity` grün.
+- [ ] `TestRepositoryErrorsAreSanitized` mit den Fällen „WP-011 credential …“ (ungültige ID für GET und DELETE, NUL-Byte, unbekannte, ungültige und fremde `client_id`; Kontrolle: unbekannte UUID 404) ist auf `e5c2d86` rot (500) und mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] Regression: `go test -p 1 ./internal/credential/... ./internal/tenant/rls/ ./internal/server/ ./internal/middleware/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (7 Einträge):**
+
+- backend/internal/credential/handler.go
+- backend/internal/credential/pg_repository.go
+- backend/internal/tenant/rls/error_sanitization_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Die Scope-Prüfung beim Anlegen bleibt die Policy `credential_isolation` (WITH CHECK); neu ist nur ihre Abbildung auf 403 statt 500.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestRepositoryErrorsAreSanitized$' ./internal/tenant/rls/` gegen PostgreSQL, außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/credential/... ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-03;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-661
+TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-661
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** die übrigen 5xx des ID-Sweeps (`/api/v1/admin/orgs/{id}/entitlements` ohne konfiguriertes Operator-Audit, `/api/v1/documents/{id}/content` 503 ohne Blob-Speicher – Testaufbau ohne diese Dienste, kein Befund dieses WPs); die 503 von `api.WriteRepoError` bei nicht erreichbarer Datenbank (allgemeiner Vertrag, nicht je Route in der Spezifikation); F-389 (WP-660, `k7n-audit-log-scope`); weitere Befunde der Wiederholungsprüfung (eigene WPs).
 
 ## Zurückgestellte Befunde
 

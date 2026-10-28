@@ -8810,6 +8810,10 @@ paths:
         `organization_id` in the request body is ignored. A missing or
         unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the
         account of the NAS plugin (Synology DSM: username and password).
+        Database refusals use the sanitized error contract (API-03): a value
+        the store refuses (e.g. a `client_id` that is no UUID, a NUL byte)
+        400, an unknown `client_id` 422, a `client_id` outside the caller's
+        client scope 403.
       requestBody:
         required: true
         content:
@@ -8825,6 +8829,8 @@ paths:
                 $ref: '#/components/schemas/Credential'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -8841,7 +8847,8 @@ paths:
       summary: Get credential metadata
       description: >-
         Returns credential metadata (never the secret material) for the
-        authenticated tenant.
+        authenticated tenant. An id that is no UUID is answered like an
+        unknown one (404, API-03).
       responses:
         '200':
           description: Credential metadata
@@ -8859,6 +8866,8 @@ paths:
       operationId: deleteCredential
       tags: [Credentials]
       summary: Delete a credential
+      description: >-
+        An id that is no UUID is answered like an unknown one (404, API-03).
       responses:
         '204':
           description: Credential deleted

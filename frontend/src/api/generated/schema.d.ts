@@ -4195,7 +4195,7 @@ export interface paths {
     put?: never;
     /**
      * Create an encrypted credential
-     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored. A missing or unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the account of the NAS plugin (Synology DSM: username and password).
+     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored. A missing or unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the account of the NAS plugin (Synology DSM: username and password). Database refusals use the sanitized error contract (API-03): a value the store refuses (e.g. a `client_id` that is no UUID, a NUL byte) 400, an unknown `client_id` 422, a `client_id` outside the caller's client scope 403.
      */
     post: operations['createCredential'];
     delete?: never;
@@ -4216,12 +4216,15 @@ export interface paths {
     };
     /**
      * Get credential metadata
-     * @description Returns credential metadata (never the secret material) for the authenticated tenant.
+     * @description Returns credential metadata (never the secret material) for the authenticated tenant. An id that is no UUID is answered like an unknown one (404, API-03).
      */
     get: operations['getCredential'];
     put?: never;
     post?: never;
-    /** Delete a credential */
+    /**
+     * Delete a credential
+     * @description An id that is no UUID is answered like an unknown one (404, API-03).
+     */
     delete: operations['deleteCredential'];
     options?: never;
     head?: never;
@@ -21673,6 +21676,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };

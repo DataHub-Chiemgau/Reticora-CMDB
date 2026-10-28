@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
@@ -116,7 +117,12 @@ func (r *PGRepository) Create(ctx context.Context, cred *StoredCredential) error
 	})
 }
 
+// Get returns the credential; an id that is no UUID names none
+// (ErrNotFound, like an unknown one; API-03, F-390).
 func (r *PGRepository) Get(ctx context.Context, orgID, id string) (*StoredCredential, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrNotFound
+	}
 	var cred *StoredCredential
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM credential WHERE id = $1 AND organization_id = $2", credentialSelectColumns)
@@ -195,7 +201,11 @@ func (r *PGRepository) Update(ctx context.Context, cred *StoredCredential) error
 	})
 }
 
+// Delete removes the credential; an id that is no UUID names none.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
+	if !api.IsUUID(id) {
+		return ErrNotFound
+	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM credential WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
