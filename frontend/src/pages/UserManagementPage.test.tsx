@@ -36,11 +36,12 @@ const ROLE_CUSTOM = '33333333-3333-4333-8333-333333333333';
 const CLIENT_ID = '44444444-4444-4444-8444-444444444444';
 
 const roles = paginated([
-  { id: ROLE_VIEWER, name: 'viewer', is_system: false, is_builtin: true, permissions: [] },
+  // The seeded standard roles are system roles (F-201), as GET /roles answers.
+  { id: ROLE_VIEWER, name: 'viewer', is_system: true, is_builtin: true, permissions: [] },
   {
     id: ROLE_TECH,
     name: 'client_technician',
-    is_system: false,
+    is_system: true,
     is_builtin: true,
     permissions: [],
   },
@@ -138,6 +139,21 @@ async function fillInvite(email: string, roleId: string) {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe('UserManagementPage roles', () => {
+  it('marks the standard roles as System and custom roles as Custom (F-201)', async () => {
+    stubUserApi(managePermissions.permissions);
+    renderWithProviders(<UserManagementPage />, { route: '/users' });
+    fireEvent.click(await screen.findByRole('button', { name: /^(Rollen|Roles)$/ }));
+
+    const viewer = (await screen.findByText('viewer')).closest('tr')!;
+    expect(within(viewer).getByText('System')).toBeInTheDocument();
+    const technician = screen.getByText('client_technician').closest('tr')!;
+    expect(within(technician).getByText('System')).toBeInTheDocument();
+    const custom = screen.getByText('custom-auditor').closest('tr')!;
+    expect(within(custom).getByText('Custom')).toBeInTheDocument();
+  });
 });
 
 describe('UserManagementPage invitations', () => {

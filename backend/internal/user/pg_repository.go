@@ -739,8 +739,10 @@ func (r *PGRepository) ListRoles(ctx context.Context, orgID string, page api.Pag
 			SELECT id::text, organization_id::text, name, COALESCE(description,''),
 				   is_system, is_builtin, permissions, created_at, updated_at
 			FROM (
+				-- The seeded standard roles of RBA-02 are system roles
+				-- (F-201): the UI marks them "System", not "Custom".
 				SELECT id, organization_id, name, description,
-					   false AS is_system, is_builtin, permissions, created_at, updated_at
+					   is_builtin AS is_system, is_builtin, permissions, created_at, updated_at
 				FROM role WHERE organization_id = $1
 				UNION ALL
 				SELECT id, organization_id, name, description,

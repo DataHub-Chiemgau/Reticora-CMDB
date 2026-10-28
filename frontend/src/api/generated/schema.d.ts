@@ -11054,6 +11054,7 @@ export interface components {
       organization_id: string;
       name: string;
       description?: string;
+      /** @description True for system roles: the seeded standard roles (also is_builtin) and system custom roles. The UI marks them "System". */
       is_system: boolean;
       /** @description True for the seeded standard roles stored in `role`. */
       is_builtin?: boolean;

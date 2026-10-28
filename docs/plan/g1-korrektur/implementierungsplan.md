@@ -16283,6 +16283,8 @@ AUT-09;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-570
 
 **Problem:** `frontend/src/pages/UserManagementPage.tsx:72-83` zeigt nur ein Status-Badge; Deaktivieren, Reaktivieren und Löschen (TLC-04) sind nur per API möglich (F-196). Der Rollen-Tab zeigt die vier RBA-02-Systemrollen als „Custom“, weil `ListRoles` für die Tabelle `role` `false AS is_system` liefert (`backend/internal/user/pg_repository.go:594-596`) und die UI nur `is_system` auswertet (`UserManagementPage.tsx:175-176`; F-201, roles-authz 09b FAIL). Die lokalisierte Login-Ablehnung deaktivierter Benutzer liefert WP-570 (`t2-first-login`) (CallbackPage).
 
+**Anmerkung vom 2026-10-28 (vorgezogen in PR #103):** F-201 ist auf Wunsch des Auftraggebers vor K6 behoben: `ListRoles` liefert für die Seed-Rollen der Tabelle `role` `is_system = is_builtin` (`backend/internal/user/pg_repository.go`), die UI zeigt „System“. Tests: `TestListRolesMarksStandardRolesAsSystem` (`backend/internal/user/role_system_integration_test.go`, vor der Änderung rot: `is_builtin=true is_system=false` für alle vier Rollen) und der Vitest-Fall „marks the standard roles as System“ in `UserManagementPage.test.tsx`; die sechs e2e-real-Zeilen von 09b sind entfernt. Offen für dieses WP bleiben F-196 (Deaktivieren, Reaktivieren, Löschen in der UI) und der Real-Stack-Fall `user-lifecycle.spec.ts`.
+
 **Akzeptanzkriterien:**
 
 - [ ] Jede Benutzerzeile bietet nur mit `user:manage` Deaktivieren/Reaktivieren (PATCH status) und Löschen (DELETE) mit Bestätigungsdialog; 409 (Owner offener Objekte, Referenzen) zeigt lokalisiert die Übergabepflicht; der eigene Benutzer ist nicht deaktivierbar.
@@ -16739,6 +16741,8 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/rack/mount_location_integr
 **Schließt Audit-WPs:** [WP-175](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-175) (TEILWEISE BESTANDEN, schließt)
 
 **Problem:** GET /racks/{id}/layout (`rack/handler.go:243-249`) serialisiert für ein leeres Rack mounts als null (OpenAPI `api/openapi.yaml:12252-12259`: Pflicht-Array; auch GET /racks/{id}/mounts data:null; Real-Stack L08 rot). RackPage (`RackPage.tsx:62`, `hooks.ts:254-266`) lädt jedes montierte CI einzeln (1+N); `putMount` (`client.ts:751`) ist ungenutzt. Die neuen Routen sind nur per Memory-Test, die Deprecation-Header nur generisch geprüft.
+
+**Anmerkung vom 2026-10-28 (vorgezogen in PR #103):** F-253 ist auf Wunsch des Auftraggebers vor K6 behoben: `GET /racks/{id}/layout` liefert für ein leeres Rack `"mounts": []` (`backend/internal/rack/handler.go`). Test `TestLayoutOfAnEmptyRackHasAnEmptyMountList` (`backend/internal/rack/handler_test.go`, vor der Änderung rot: `mounts = null`); die sechs e2e-real-Zeilen von L08 sind entfernt. Offen für dieses WP bleiben die Anzeigefelder im Layout und der Verzicht auf 1+N-Abrufe im Frontend.
 
 **Akzeptanzkriterien:**
 

@@ -20293,6 +20293,9 @@ components:
           type: string
         is_system:
           type: boolean
+          description: >-
+            True for system roles: the seeded standard roles (also
+            is_builtin) and system custom roles. The UI marks them "System".
         is_builtin:
           type: boolean
           description: True for the seeded standard roles stored in `role`.
