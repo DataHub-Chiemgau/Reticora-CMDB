@@ -13,8 +13,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -396,6 +398,124 @@ func TestSavedViewSortAndColumnsAgainstPostgres(t *testing.T) {
 	} {
 		if code, out := call(http.MethodPost, tc.path, tc.body); code != http.StatusUnprocessableEntity || out["field"] != tc.field {
 			t.Errorf("%s %s: %d %v, want 422 on %s", tc.path, tc.body, code, out, tc.field)
+		}
+	}
+}
+
+// TestSavedViewRelationshipFilterSeesProjection is the binding retest of
+// F-244 (WP-573, DB-05): contains, mounted_in and located_in are not
+// stored but projected by ci_structure_edge (parent_ci_id, rack_mount,
+// location_id). has_relationship finds a CI at either end of a projected
+// edge and lacks_relationship leaves it out, under the RLS of the caller:
+// a CI of another client never appears, and an edge whose other CI the
+// caller cannot see does not count, as in the relationship API. A stored
+// type still reads ci_relationship.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestSavedViewRelationshipFilterSeesProjection(t *testing.T) {
+	f := scopetest.Seed(t, "bd")
+	bg := context.Background()
+	seed := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	// Client 1: chassis contains blade; plain has no structure. Client 2:
+	// chassis-c2 contains blade-c2. mixed (client 1) contains blade-x of
+	// client 2: each end is invisible to the other client.
+	chassis := f.CI(t, f.OrgA, f.Client1, "rel-chassis")
+	blade := f.CI(t, f.OrgA, f.Client1, "rel-blade")
+	plain := f.CI(t, f.OrgA, f.Client1, "rel-plain")
+	chassis2 := f.CI(t, f.OrgA, f.Client2, "rel-chassis-c2")
+	blade2 := f.CI(t, f.OrgA, f.Client2, "rel-blade-c2")
+	mixed := f.CI(t, f.OrgA, f.Client1, "rel-mixed")
+	bladeX := f.CI(t, f.OrgA, f.Client2, "rel-blade-x")
+	for child, parent := range map[string]string{blade: chassis, blade2: chassis2, bladeX: mixed} {
+		seed(`UPDATE ci SET parent_ci_id = $2 WHERE id = $1`, child, parent)
+	}
+	// mounted is mounted in a rack of client 1, located stands in its room.
+	tree := locations.NewPGRepository(f.App)
+	node := func(req locations.CreateRequest) string {
+		t.Helper()
+		loc, err := tree.Create(f.OrgCtx(f.OrgA), f.OrgA, req)
+		if err != nil {
+			t.Fatalf("create %s: %v", req.Kind, err)
+		}
+		return loc.ID
+	}
+	site := node(locations.CreateRequest{Kind: locations.KindSite, ClientID: f.Client1, Name: "rel-s1"})
+	building := node(locations.CreateRequest{Kind: locations.KindBuilding, ParentID: site, Name: "rel-b1"})
+	room := node(locations.CreateRequest{Kind: locations.KindRoom, ParentID: building, Name: "rel-r1"})
+	rack := node(locations.CreateRequest{Kind: locations.KindRack, ParentID: room, Name: "rel-k1"})
+	mounted := f.CI(t, f.OrgA, f.Client1, "rel-mounted")
+	located := f.CI(t, f.OrgA, f.Client1, "rel-located")
+	seed(`INSERT INTO rack_mount (organization_id, rack_id, ci_id, position_u, height_u) VALUES ($1, $2, $3, 1, 1)`, f.OrgA, rack, mounted)
+	seed(`UPDATE ci SET location_id = $2 WHERE id = $1`, located, room)
+	// A stored edge plain → chassis-c2 (depends_on) crosses the clients.
+	seed(`INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type) VALUES ($1, $2, $3, 'depends_on')`,
+		f.OrgA, plain, chassis2)
+	var projected int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci_structure_edge WHERE organization_id = $1`, f.OrgA).Scan(&projected); err != nil || projected != 5 {
+		t.Fatalf("projected edges: %d (%v), want 5 (3 contains, mounted_in, located_in)", projected, err)
+	}
+
+	engine := savedview.NewPGQueryEngine(f.App)
+	run := func(ctx context.Context, spec savedview.FilterSpec) []string {
+		t.Helper()
+		spec.EntityKind = "ci"
+		spec.Search = "rel-"
+		results, total, err := engine.Query(ctx, f.OrgA, spec, api.PaginationParams{Limit: 100})
+		if err != nil {
+			t.Fatalf("%+v: %v", spec, err)
+		}
+		names := make([]string, 0, len(results))
+		for _, r := range results {
+			names = append(names, r.Name)
+		}
+		slices.Sort(names)
+		if total != len(names) {
+			t.Errorf("%+v: total %d for %v", spec, total, names)
+		}
+		return names
+	}
+	client1, client2, orgWide := f.ClientCtx(f.Client1), f.ClientCtx(f.Client2), f.OrgCtx(f.OrgA)
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		spec savedview.FilterSpec
+		want []string
+	}{
+		{"client 1 has contains", client1, savedview.FilterSpec{HasRelationship: "contains"},
+			[]string{"rel-blade", "rel-chassis"}},
+		{"client 1 lacks contains", client1, savedview.FilterSpec{LacksRelationship: "contains"},
+			[]string{"rel-located", "rel-mixed", "rel-mounted", "rel-plain"}},
+		{"client 2 has contains", client2, savedview.FilterSpec{HasRelationship: "contains"},
+			[]string{"rel-blade-c2", "rel-chassis-c2"}},
+		{"client 2 lacks contains", client2, savedview.FilterSpec{LacksRelationship: "contains"},
+			[]string{"rel-blade-x"}},
+		{"org-wide has contains", orgWide, savedview.FilterSpec{HasRelationship: "contains"},
+			[]string{"rel-blade", "rel-blade-c2", "rel-blade-x", "rel-chassis", "rel-chassis-c2", "rel-mixed"}},
+		{"org-wide lacks contains", orgWide, savedview.FilterSpec{LacksRelationship: "contains"},
+			[]string{"rel-located", "rel-mounted", "rel-plain"}},
+		{"client 1 has mounted_in", client1, savedview.FilterSpec{HasRelationship: "mounted_in"},
+			[]string{"rel-mounted"}},
+		{"client 1 lacks mounted_in", client1, savedview.FilterSpec{LacksRelationship: "mounted_in"},
+			[]string{"rel-blade", "rel-chassis", "rel-located", "rel-mixed", "rel-plain"}},
+		{"client 2 has mounted_in", client2, savedview.FilterSpec{HasRelationship: "mounted_in"}, []string{}},
+		{"client 1 has located_in", client1, savedview.FilterSpec{HasRelationship: "located_in"},
+			[]string{"rel-located"}},
+		{"client 1 lacks located_in", client1, savedview.FilterSpec{LacksRelationship: "located_in"},
+			[]string{"rel-blade", "rel-chassis", "rel-mixed", "rel-mounted", "rel-plain"}},
+		{"client 2 has located_in", client2, savedview.FilterSpec{HasRelationship: "located_in"}, []string{}},
+		{"org-wide has depends_on", orgWide, savedview.FilterSpec{HasRelationship: "depends_on"},
+			[]string{"rel-chassis-c2", "rel-plain"}},
+		{"client 1 has depends_on", client1, savedview.FilterSpec{HasRelationship: "depends_on"}, []string{}},
+		{"has contains and lacks mounted_in", orgWide, savedview.FilterSpec{HasRelationship: "contains", LacksRelationship: "mounted_in"},
+			[]string{"rel-blade", "rel-blade-c2", "rel-blade-x", "rel-chassis", "rel-chassis-c2", "rel-mixed"}},
+	} {
+		if got := run(c.ctx, c.spec); !slices.Equal(got, c.want) {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
 	}
 }

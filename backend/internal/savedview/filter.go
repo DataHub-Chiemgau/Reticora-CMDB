@@ -124,11 +124,11 @@ func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (stri
 	}
 	if f.HasRelationship != "" && table == "ci" {
 		p := next()
-		add(fmt.Sprintf(`EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = %s AND (r.source_ci_id = ci.id OR r.target_ci_id = ci.id))`, p), f.HasRelationship)
+		add(relationshipExists(f.HasRelationship, p), f.HasRelationship)
 	}
 	if f.LacksRelationship != "" && table == "ci" {
 		p := next()
-		add(fmt.Sprintf(`NOT EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = %s AND (r.source_ci_id = ci.id OR r.target_ci_id = ci.id))`, p), f.LacksRelationship)
+		add("NOT "+relationshipExists(f.LacksRelationship, p), f.LacksRelationship)
 	}
 	if f.UpstreamOf != "" && table == "ci" {
 		// CIs upstream of X: sources of edges pointing (transitively) into X,
@@ -223,6 +223,34 @@ func (f *FilterSpec) Validate(entityKind string) error {
 
 // MaxRelationshipDepth bounds upstream_of and downstream_of (SRC-04).
 const MaxRelationshipDepth = 5
+
+// projectedRelTypes are the structural relationship types of the view
+// ci_structure_edge (DB-05, CH27): contains from ci.parent_ci_id,
+// mounted_in from rack_mount and located_in from ci.location_id. They are
+// never stored in ci_relationship (F-244).
+var projectedRelTypes = map[string]bool{"contains": true, "mounted_in": true, "located_in": true}
+
+// relationshipExists is the predicate of has_relationship (and, negated,
+// of lacks_relationship): the CI is an end of a relationship of type p, a
+// stored one or, for a type of projectedRelTypes, a projected one (F-244).
+// Both read under the caller's RLS: ci_relationship carries the scope of
+// both ends, the view ci_structure_edge runs as the invoker and is
+// joined with the visible CI of the other end, as the relationship API
+// lists projected edges (internal/relationship); the target of mounted_in and
+// located_in is a location. The projection is read with one arm per end
+// of the edge, each an equality on the CI, as the relationship API lists
+// the edges of a CI (WP-609).
+func relationshipExists(relType, p string) string {
+	stored := fmt.Sprintf(`EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = %s AND (r.source_ci_id = ci.id OR r.target_ci_id = ci.id))`, p)
+	if !projectedRelTypes[relType] {
+		return stored
+	}
+	return fmt.Sprintf(`(%s
+		OR EXISTS (SELECT 1 FROM ci_structure_edge e WHERE e.rel_type = %s AND e.source_ci_id = ci.id
+			AND (e.target_ci_id IS NULL OR EXISTS (SELECT 1 FROM ci t WHERE t.id = e.target_ci_id)))
+		OR EXISTS (SELECT 1 FROM ci_structure_edge e WHERE e.rel_type = %s AND e.target_ci_id = ci.id
+			AND EXISTS (SELECT 1 FROM ci s WHERE s.id = e.source_ci_id)))`, stored, p, p)
+}
 
 // QueryResult is one row of a filter execution.
 type QueryResult struct {
