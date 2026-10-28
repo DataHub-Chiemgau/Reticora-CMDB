@@ -294,14 +294,16 @@ func TestCIChildEdgeToOrgWideCI(t *testing.T) {
 		}
 		apiEdges = append(apiEdges, out.ID)
 	}
-	code, resp := w.do(scoped1, http.MethodPost, "/api/v1/relationships", map[string]any{"source_ci_id": own, "target_ci_id": orgWideCI, "rel_type": "runs_on", "source": "discovery"})
-	var discovered struct {
-		ID string `json:"id"`
+	// A user POST cannot claim the discovery source (F-271, WP-583); the
+	// discovery edge is written as the discovery path writes it.
+	if code, resp := w.do(scoped1, http.MethodPost, "/api/v1/relationships", map[string]any{"source_ci_id": own, "target_ci_id": orgWideCI, "rel_type": "runs_on", "source": "discovery"}); code != http.StatusUnprocessableEntity ||
+		!strings.Contains(resp, `"field":"source"`) {
+		t.Errorf("user POST of a discovery edge own -> org-wide as client1: %d %s, want 422 on source", code, trim(resp))
 	}
-	_ = json.Unmarshal([]byte(resp), &discovered)
-	if code != http.StatusCreated || discovered.ID == "" {
-		t.Errorf("POST discovery edge own -> org-wide as client1: %d %s, want 201", code, trim(resp))
-	} else if code, resp := w.do(scoped1, http.MethodDelete, "/api/v1/relationships/"+discovered.ID+"?force=true", nil); code != http.StatusNoContent {
+	if discovered, err := insert(client1, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type, source)
+		VALUES ($1, $2, $3, 'runs_on', 'discovery')`, f.OrgA, own, orgWideCI); err != nil {
+		t.Errorf("discovery edge own -> org-wide as client1: %v", err)
+	} else if code, resp := w.do(scoped1, http.MethodDelete, "/api/v1/relationships/"+discovered+"?force=true", nil); code != http.StatusNoContent {
 		t.Errorf("forced DELETE of the discovery edge as client1: %d %s, want 204", code, trim(resp))
 	} else if got := w.scalar(`SELECT count(*)::text FROM relationship_suppression s JOIN relationship_type rt ON rt.id = s.relationship_type_id
 		WHERE s.source_ci_id = $1 AND s.target_ci_id = $2 AND rt.key = 'runs_on' AND s.source_client_id = $3 AND s.target_client_id IS NULL`, own, orgWideCI, f.Client1); got != "1" {

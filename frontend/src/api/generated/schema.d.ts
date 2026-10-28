@@ -784,14 +784,14 @@ export interface paths {
     post?: never;
     /**
      * Delete a relationship
-     * @description Manual and other edges are deleted as asked. A discovery edge is deleted only with force=true (409 otherwise) and is then recorded as suppression for its CIs and type, so discovery does not recreate it (REL-03, REL-04). Discovery never changes or removes manual edges (REL-05).
+     * @description Manual and other edges are deleted as asked. A discovery edge is deleted only with force=true (409 otherwise) and is then recorded as suppression for its CIs and type, so discovery does not recreate it (REL-03, REL-04). Discovery never changes or removes manual edges (REL-05). 404 only for an edge the caller does not find (unknown, another organization, outside the scope, malformed id); other failures are not reported as 404 (F-272).
      */
     delete: operations['deleteRelationship'];
     options?: never;
     head?: never;
     /**
      * Edit or verify a relationship
-     * @description Updates the provenance and verification metadata of an existing relationship. The edge endpoints and rel_type are immutable; rewiring is expressed by deleting and recreating the relationship so the graph history stays truthful.
+     * @description Updates the provenance and verification metadata of an existing relationship. The edge endpoints and rel_type are immutable; rewiring is expressed by deleting and recreating the relationship so the graph history stays truthful. attributes.provenance (actor, actor type, source and time of the edge) is recorded by the system and cannot be changed (422, REL-08, F-270).
      */
     patch: operations['updateRelationship'];
     trace?: never;
@@ -7988,7 +7988,10 @@ export interface components {
       attributes?: {
         [key: string]: unknown;
       };
-      /** @default manual */
+      /**
+       * @description manual, api, import, integration or workflow ("rule" is accepted as workflow). discovery and agent are reserved to the discovery and agent paths (422 on source, REL-08, F-271).
+       * @default manual
+       */
       source: string;
       confidence?: number;
       /** @description An interface of the source CI; the edge is unique per (source, target, type, interfaces), a taken one is 409. */
@@ -7998,7 +8001,7 @@ export interface components {
     };
     /** @description All properties are optional; only the supplied ones are changed. */
     UpdateRelationshipRequest: {
-      /** @description Merged into the existing attributes. */
+      /** @description Merged into the existing attributes. The key provenance is reserved to the system (422, F-270). */
       attributes?: {
         [key: string]: unknown;
       };
@@ -12807,7 +12810,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, or an unknown ID. `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
+      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, or an unknown ID. `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). A source reserved to the system (discovery, agent) names `source`: those edges come only from the discovery and agent paths, nothing is stored (F-271). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12845,6 +12848,16 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      /** @description The suppression of a discovery edge is refused because its type has no relationship type entry; without the suppression discovery would recreate the edge, so it is not deleted. `violations` names rel_type (F-272). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
     };
   };
   updateRelationship: {
@@ -12875,6 +12888,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description attributes carries the reserved key provenance; `violations` names attributes.provenance and nothing is changed (F-270). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
     };
   };
   listWebhooks: {

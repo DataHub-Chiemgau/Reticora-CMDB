@@ -1599,6 +1599,9 @@ paths:
             an unknown ID. `violations` names source_ci_id, target_ci_id or
             both ("source CI not found", "target CI not found"), the same
             answer for a foreign and an unknown CI; nothing is stored (F-145).
+            A source reserved to the system (discovery, agent) names
+            `source`: those edges come only from the discovery and agent
+            paths, nothing is stored (F-271).
             Without violations: a structural relationship type, which is
             projected and cannot be stored, or an interface of another CI.
           content:
@@ -1621,7 +1624,9 @@ paths:
         Updates the provenance and verification metadata of an existing
         relationship. The edge endpoints and rel_type are immutable; rewiring is
         expressed by deleting and recreating the relationship so the graph
-        history stays truthful.
+        history stays truthful. attributes.provenance (actor, actor type,
+        source and time of the edge) is recorded by the system and cannot be
+        changed (422, REL-08, F-270).
       requestBody:
         required: true
         content:
@@ -1641,6 +1646,13 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: >-
+            attributes carries the reserved key provenance; `violations`
+            names attributes.provenance and nothing is changed (F-270).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
     delete:
       operationId: deleteRelationship
       tags: [Relationships]
@@ -1650,7 +1662,9 @@ paths:
         deleted only with force=true (409 otherwise) and is then recorded as
         suppression for its CIs and type, so discovery does not recreate it
         (REL-03, REL-04). Discovery never changes or removes manual edges
-        (REL-05).
+        (REL-05). 404 only for an edge the caller does not find (unknown,
+        another organization, outside the scope, malformed id); other
+        failures are not reported as 404 (F-272).
       parameters:
         - name: force
           in: query
@@ -1666,6 +1680,17 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          description: >-
+            The suppression of a discovery edge is refused because its type
+            has no relationship type entry; without the suppression
+            discovery would recreate the edge, so it is not deleted.
+            `violations` names rel_type (F-272).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /api/v1/webhooks:
     get:
@@ -15125,6 +15150,10 @@ components:
         source:
           type: string
           default: manual
+          description: >-
+            manual, api, import, integration or workflow ("rule" is accepted
+            as workflow). discovery and agent are reserved to the discovery
+            and agent paths (422 on source, REL-08, F-271).
         confidence:
           type: number
           minimum: 0
@@ -15144,7 +15173,9 @@ components:
         attributes:
           type: object
           additionalProperties: true
-          description: Merged into the existing attributes.
+          description: >-
+            Merged into the existing attributes. The key provenance is
+            reserved to the system (422, F-270).
         confidence:
           type: number
           format: double

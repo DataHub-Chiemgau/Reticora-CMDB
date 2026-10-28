@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -174,9 +176,12 @@ func TestHandler_UpdateVerifiesAndEdits(t *testing.T) {
 	mux := chi.NewRouter()
 	NewHandler(repo).RegisterRoutes(mux)
 
-	rel := createRel(t, mux, `{"source_ci_id":"ci-1","target_ci_id":"ci-2","rel_type":"depends_on","source":"discovery"}`)
-	if rel.VerificationState != "unverified" {
-		t.Fatalf("discovered relationship should start unverified, got %q", rel.VerificationState)
+	// A discovery edge comes from the discovery path, not from a user POST
+	// (F-271): it is stored through the repository.
+	rel := Relationship{OrganizationID: "org-1", SourceCIID: "ci-1", TargetCIID: "ci-2", RelType: "depends_on",
+		Source: "discovery", VerificationState: "unverified", Attributes: map[string]any{}}
+	if err := repo.Create(context.Background(), &rel); err != nil {
+		t.Fatal(err)
 	}
 
 	conf := 0.9
@@ -383,5 +388,148 @@ func TestMemoryTraversalVisibility(t *testing.T) {
 	})
 	if _, err := repo.TraverseFrom(ctx, "org-1", "a", 5, MaxTraversalNodes); err == nil {
 		t.Error("a failed visibility check returned a walk")
+	}
+}
+
+// violationFields decodes the fields of a 422 ViolationProblem.
+func violationFields(t *testing.T, w *httptest.ResponseRecorder) []string {
+	t.Helper()
+	var problem struct {
+		Violations []violation `json:"violations"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil {
+		t.Fatalf("decode problem %s: %v", w.Body.String(), err)
+	}
+	fields := make([]string, 0, len(problem.Violations))
+	for _, v := range problem.Violations {
+		fields = append(fields, v.Field)
+	}
+	return fields
+}
+
+// TestHandler_CreateRefusesSystemSources covers F-271 (REL-04, REL-08): a
+// user POST with source discovery or agent is 422 on source and stores
+// nothing; the other sources stay 201.
+func TestHandler_CreateRefusesSystemSources(t *testing.T) {
+	repo := NewMemoryRepository()
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+
+	for _, source := range []string{"discovery", "agent", "Discovery", " AGENT "} {
+		body, _ := json.Marshal(map[string]any{"source_ci_id": "ci-1", "target_ci_id": "ci-2", "rel_type": "depends_on", "source": source})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantCtx(httptest.NewRequest(http.MethodPost, "/api/v1/relationships", bytes.NewReader(body))))
+		if w.Code != http.StatusUnprocessableEntity || !slices.Equal(violationFields(t, w), []string{"source"}) {
+			t.Errorf("POST source %q: %d %s, want 422 on source", source, w.Code, w.Body.String())
+		}
+	}
+	if _, total, _ := repo.List(context.Background(), "org-1", "", api.PaginationParams{Limit: 10}); total != 0 {
+		t.Fatalf("refused POSTs stored %d edges", total)
+	}
+	for _, source := range []string{"manual", "api", "import", "integration", "workflow", "rule", ""} {
+		rel := createRel(t, mux, `{"source_ci_id":"ci-1","target_ci_id":"ci-2","rel_type":"depends_on","source":"`+source+`"}`)
+		want := source
+		switch source {
+		case "":
+			want = "manual"
+		case "rule":
+			want = "workflow"
+		}
+		if rel.Source != want || rel.Attributes[ProvenanceAttribute] == nil {
+			t.Errorf("POST source %q: stored %q with attributes %v", source, rel.Source, rel.Attributes)
+		}
+	}
+}
+
+// TestHandler_UpdateRefusesProvenance covers F-270 (REL-08): PATCH with
+// attributes.provenance is 422 on attributes.provenance, also next to other
+// attributes or as null, and changes nothing; the repository keeps the
+// stored provenance even when asked directly.
+func TestHandler_UpdateRefusesProvenance(t *testing.T) {
+	repo := NewMemoryRepository()
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+	rel := createRel(t, mux, `{"source_ci_id":"ci-1","target_ci_id":"ci-2","rel_type":"depends_on","attributes":{"port":"eth0"}}`)
+	stored := rel.Attributes[ProvenanceAttribute]
+
+	for _, body := range []string{
+		`{"attributes":{"provenance":{"actor":"forged","at":"1999-01-01T00:00:00Z"}}}`,
+		`{"attributes":{"port":"eth1","provenance":"forged"},"notes":"x"}`,
+		`{"attributes":{"provenance":null}}`,
+	} {
+		w := patchRel(t, mux, rel.ID, body)
+		if w.Code != http.StatusUnprocessableEntity || !slices.Equal(violationFields(t, w), []string{"attributes.provenance"}) {
+			t.Errorf("PATCH %s: %d %s, want 422 on attributes.provenance", body, w.Code, w.Body.String())
+		}
+	}
+	rels, _, _ := repo.List(context.Background(), "org-1", "", api.PaginationParams{Limit: 10})
+	if len(rels) != 1 || !reflect.DeepEqual(rels[0].Attributes[ProvenanceAttribute], stored) || rels[0].Attributes["port"] != "eth0" || rels[0].Notes != "" {
+		t.Fatalf("refused PATCHes changed the edge: %+v", rels)
+	}
+	// Other attributes are still merged.
+	if w := patchRel(t, mux, rel.ID, `{"attributes":{"port":"eth1"}}`); w.Code != http.StatusOK {
+		t.Fatalf("PATCH port: %d %s", w.Code, w.Body.String())
+	}
+	updated, err := repo.Update(context.Background(), "org-1", rel.ID, UpdateRequest{Attributes: map[string]any{ProvenanceAttribute: "forged"}})
+	if err != nil || !reflect.DeepEqual(updated.Attributes[ProvenanceAttribute], stored) || updated.Attributes["port"] != "eth1" {
+		t.Fatalf("repository update with provenance: %+v %v", updated, err)
+	}
+}
+
+// deleteFailing answers DeleteWithPolicy with err.
+type deleteFailing struct {
+	*MemoryRepository
+	err error
+}
+
+func (d deleteFailing) DeleteWithPolicy(context.Context, string, string, bool) error { return d.err }
+
+// TestHandler_DeleteMapsErrors covers F-272 (REL-03, REL-04): only an
+// unknown, foreign or malformed id is 404; a refused suppression is 422 on
+// rel_type, a discovery edge without force 409, any other failure goes
+// through api.WriteRepoError (500, 503) instead of 404.
+func TestHandler_DeleteMapsErrors(t *testing.T) {
+	const id = "00000000-0000-0000-0000-0000000005a3"
+	del := func(repo Repository, path string) *httptest.ResponseRecorder {
+		mux := chi.NewRouter()
+		NewHandler(repo).RegisterRoutes(mux)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantCtx(httptest.NewRequest(http.MethodDelete, path, nil)))
+		return w
+	}
+
+	memory := NewMemoryRepository()
+	other := &Relationship{OrganizationID: "org-2", SourceCIID: "x", TargetCIID: "y", RelType: "depends_on"}
+	if err := memory.Create(context.Background(), other); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/v1/relationships/" + id, "/api/v1/relationships/" + other.ID, "/api/v1/relationships/not-a-uuid"} {
+		if w := del(memory, path); w.Code != http.StatusNotFound {
+			t.Errorf("DELETE %s: %d %s, want 404", path, w.Code, w.Body.String())
+		}
+	}
+
+	for _, tc := range []struct {
+		err    error
+		status int
+		field  string
+	}{
+		{fmt.Errorf("suppress relationship %q: %w", "x", ErrSuppressionType), http.StatusUnprocessableEntity, "rel_type"},
+		{ErrForceRequired, http.StatusConflict, ""},
+		{fmt.Errorf("delete relationship: %w", api.ErrNotFound), http.StatusNotFound, ""},
+		{errors.New("delete relationship: connection reset by peer"), http.StatusInternalServerError, ""},
+		{fmt.Errorf("delete relationship: %w", api.ErrUnavailable), http.StatusServiceUnavailable, ""},
+	} {
+		w := del(deleteFailing{NewMemoryRepository(), tc.err}, "/api/v1/relationships/"+id+"?force=true")
+		if w.Code != tc.status {
+			t.Errorf("DELETE failing with %v: %d %s, want %d", tc.err, w.Code, w.Body.String(), tc.status)
+			continue
+		}
+		if tc.field != "" && !slices.Equal(violationFields(t, w), []string{tc.field}) {
+			t.Errorf("DELETE failing with %v: %s, want a violation on %s", tc.err, w.Body.String(), tc.field)
+		}
+		if strings.Contains(w.Body.String(), "connection reset") {
+			t.Errorf("DELETE leaks the internal error: %s", w.Body.String())
+		}
 	}
 }

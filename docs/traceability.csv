@@ -959,3 +959,5 @@ EXP-01;[B], DATEV [P2];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-647
 SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-563
 AUT-01;[B];B;backend/internal/identity/first_login_integration_test.go;WP-570
 AUT-09;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-570
+REL-08;[B];D;backend/internal/relationship/provenance_integration_test.go;WP-583
+REL-04;[B];D;backend/internal/relationship/provenance_integration_test.go;WP-583

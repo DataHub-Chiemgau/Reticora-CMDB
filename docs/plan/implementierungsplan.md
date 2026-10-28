@@ -7730,7 +7730,7 @@ REL-08;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-159
 
 **Akzeptanzkriterien:**
 
-- [ ] DELETE einer Discovery-Kante erzeugt Suppression (mit Typ); manuelle Kanten nur mit force.
+- [ ] DELETE einer Discovery-Kante nur mit force, danach Suppression (mit Typ); manuelle Kanten werden ohne force gelöscht (REL-04; nach E-01 an den Anforderungstext angepasst, F-274, WP-583).
 - [ ] Ladefehler → Abgleich bricht ab (fail-closed).
 - [ ] Regressionstest: Discovery verändert/löscht manuelle Kanten nicht.
 

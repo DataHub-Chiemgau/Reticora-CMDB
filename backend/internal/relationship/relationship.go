@@ -138,10 +138,34 @@ var ValidSources = map[string]bool{
 	"api": true, "integration": true, "workflow": true, "rule": true,
 }
 
+// SystemSources are the sources reserved to their system paths (REL-08,
+// F-271): discovery edges come from the discovery ingest, agent edges from
+// the agent path. POST /relationships refuses them with 422 on source; a
+// user edge stored as discovery would need force to be deleted and would be
+// removed by the cleanup of unconfirmed discovery edges.
+var SystemSources = map[string]bool{"discovery": true, "agent": true}
+
+// ErrSystemSource refuses a system source on POST /relationships (F-271).
+var ErrSystemSource = errors.New("discovery and agent are reserved to the discovery and agent paths")
+
+// ProvenanceAttribute is the attribute that records actor, actor type,
+// source and time of an edge (REL-08). Create sets it; PATCH refuses it
+// (ErrProvenanceReserved, F-270) and the repositories keep the stored one.
+const ProvenanceAttribute = "provenance"
+
+// ErrProvenanceReserved refuses attributes.provenance on PATCH (F-270).
+var ErrProvenanceReserved = errors.New("provenance is recorded by the system and cannot be changed")
+
 // ErrForceRequired refuses deleting a discovery edge without force=true
 // (REL-04): discovery would find it again, so the deletion also records a
 // suppression.
 var ErrForceRequired = errors.New("a discovery edge is deleted only with force=true; discovery then no longer recreates it")
+
+// ErrSuppressionType refuses the forced deletion of a discovery edge whose
+// type has no relationship_type row (REL-03, F-272): without the row no
+// suppression can be stored and discovery would recreate the edge, so it
+// stays. Delete answers 422 on rel_type.
+var ErrSuppressionType = errors.New("the relationship type has no catalogue entry, so the deletion cannot be recorded as suppression")
 
 // ErrSourceCINotFound and ErrTargetCINotFound refuse an edge whose source or
 // target CI the caller cannot see: a CI of another organization, of a client
@@ -456,7 +480,10 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 			rel.Attributes = make(map[string]any)
 		}
 		for k, v := range req.Attributes {
-			rel.Attributes[k] = v
+			// The stored provenance stays (F-270).
+			if k != ProvenanceAttribute {
+				rel.Attributes[k] = v
+			}
 		}
 	}
 	if req.Confidence != nil {
@@ -486,7 +513,7 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 
 	rel, ok := r.items[id]
 	if !ok || rel.OrganizationID != orgID {
-		return fmt.Errorf("not found")
+		return api.ErrNotFound
 	}
 	delete(r.items, id)
 	return nil
@@ -759,6 +786,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid source")
 		return
 	}
+	if SystemSources[source] {
+		// Discovery and agent edges come only from their paths (F-271).
+		writeViolations(w, violation{Field: "source", Detail: ErrSystemSource.Error()})
+		return
+	}
 	req.Source = source
 	if req.Confidence != nil && (*req.Confidence < 0 || *req.Confidence > 1) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "confidence must be between 0 and 1")
@@ -833,18 +865,26 @@ type violation struct {
 // such endpoint (F-145). It reports whether err was one.
 func writeEndpointError(w http.ResponseWriter, err error) bool {
 	var violations []violation
-	var details []string
 	for _, end := range []struct {
 		field string
 		err   error
 	}{{"source_ci_id", ErrSourceCINotFound}, {"target_ci_id", ErrTargetCINotFound}} {
 		if errors.Is(err, end.err) {
 			violations = append(violations, violation{Field: end.field, Detail: end.err.Error()})
-			details = append(details, end.field+": "+end.err.Error())
 		}
 	}
 	if len(violations) == 0 {
 		return false
+	}
+	writeViolations(w, violations...)
+	return true
+}
+
+// writeViolations answers 422 with the rejected fields (ViolationProblem).
+func writeViolations(w http.ResponseWriter, violations ...violation) {
+	details := make([]string, 0, len(violations))
+	for _, v := range violations {
+		details = append(details, v.Field+": "+v.Detail)
 	}
 	api.WriteProblemBody(w, http.StatusUnprocessableEntity, struct {
 		api.ProblemDetail
@@ -854,7 +894,6 @@ func writeEndpointError(w http.ResponseWriter, err error) bool {
 			Status: http.StatusUnprocessableEntity, Detail: strings.Join(details, "; ")},
 		Violations: violations,
 	})
-	return true
 }
 
 // validRelType resolves the rel_type against the metadata catalogue when
@@ -891,6 +930,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid verification_state")
 		return
 	}
+	if _, reserved := req.Attributes[ProvenanceAttribute]; reserved {
+		// Actor and time of the edge are recorded by the system (F-270).
+		writeViolations(w, violation{Field: "attributes." + ProvenanceAttribute, Detail: ErrProvenanceReserved.Error()})
+		return
+	}
 
 	req.ActorID = t.UserID
 	rel, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
@@ -917,7 +961,11 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	// A malformed id names no edge (404) and never reaches SQL.
+	id, ok := api.ParseUUIDParam(w, r, "id", "relationship not found")
+	if !ok {
+		return
+	}
 	var err error
 	if deleter, ok := h.repo.(PolicyDeleter); ok {
 		// A discovery edge goes only with force and is then suppressed
@@ -926,14 +974,18 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	} else {
 		err = h.repo.Delete(r.Context(), t.OrganizationID, id)
 	}
-	if errors.Is(err, ErrForceRequired) {
+	// Only an unknown or invisible edge is 404; a refused suppression names
+	// the type, other failures go through WriteRepoError (F-272).
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrForceRequired):
 		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
-		return
-	}
-	if err != nil {
+	case errors.Is(err, ErrSuppressionType):
+		writeViolations(w, violation{Field: "rel_type", Detail: ErrSuppressionType.Error()})
+	case errors.Is(err, api.ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", "relationship not found")
-		return
+	default:
+		api.WriteRepoError(w, err)
 	}
-
-	w.WriteHeader(http.StatusNoContent)
 }

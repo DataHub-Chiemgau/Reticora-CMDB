@@ -325,7 +325,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		args := []any{id, orgID}
 		pos := 3
 		if req.Attributes != nil {
-			sets = append(sets, fmt.Sprintf("attributes = COALESCE(attributes, '{}'::jsonb) || $%d", pos))
+			// The stored provenance stays: actor and time of the edge are
+			// recorded by the system (REL-08, F-270).
+			sets = append(sets, fmt.Sprintf("attributes = COALESCE(attributes, '{}'::jsonb) || ($%d::jsonb - '%s')", pos, ProvenanceAttribute))
 			args = append(args, req.Attributes)
 			pos++
 		}
@@ -379,7 +381,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		deleted, err := scanRelationship(tx.QueryRow(ctx, "DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2 AND "+
 			visibleEndpoints+" RETURNING "+relationshipSelectColumns, id, orgID))
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("not found")
+			return api.ErrNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("delete relationship: %w", err)
@@ -397,7 +399,7 @@ func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, f
 		edge, err := scanRelationship(tx.QueryRow(ctx, `SELECT `+relationshipSelectColumns+` FROM ci_relationship
 			WHERE id = $1 AND organization_id = $2 AND `+visibleEndpoints+` FOR UPDATE`, id, orgID))
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("not found")
+			return api.ErrNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("delete relationship: %w", err)
@@ -423,14 +425,14 @@ func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, f
 		if tag.RowsAffected() == 0 {
 			// The type has no relationship_type row, or the edge was
 			// suppressed already; without a row the deletion would not
-			// stick, so it is refused.
+			// stick, so it is refused (ErrSuppressionType, 422).
 			var exists bool
 			if qerr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM relationship_suppression s JOIN relationship_type rt ON rt.id = s.relationship_type_id
 				WHERE s.organization_id = $1 AND s.source_ci_id = $2 AND s.target_ci_id = $3 AND rt.key = $4)`, orgID, src, dst, relType).Scan(&exists); qerr != nil {
-				return qerr
+				return fmt.Errorf("suppress relationship: %w", qerr)
 			}
 			if !exists {
-				return fmt.Errorf("suppress relationship: unknown relationship type %q", relType)
+				return fmt.Errorf("suppress relationship %q: %w", relType, ErrSuppressionType)
 			}
 		}
 		return r.recordEvent(ctx, tx, events.RelationshipRemoved, edge)
