@@ -969,3 +969,6 @@ TLC-04;[B];B;frontend/e2e-real/user-lifecycle.spec.ts;WP-571
 RBA-02;[B];B;frontend/src/pages/UserManagementPage.lifecycle.test.tsx;WP-571
 TLC-04;[B];B;backend/internal/user/self_lockout_integration_test.go;WP-648
 API-02;[B];C;backend/internal/ci/listquery_integration_test.go;WP-566
+SEC-07;[B];B;backend/internal/operator/audit_integration_test.go;WP-564
+ENT-04;[B];B;backend/internal/operator/entitlements_test.go;WP-564
+ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-564

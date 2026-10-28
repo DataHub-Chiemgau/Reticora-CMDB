@@ -472,6 +472,26 @@ func WithOrganizationSetup(ctx context.Context, pool *pgxpool.Pool, orgID string
 	return tx.Commit(ctx)
 }
 
+// WithOperatorTenant runs fn in a new transaction of the context's tenant
+// scope (WithRequestTenant, orgID its organization) in which the operator
+// flag is set as well: an operator's change to the organization and its
+// operator_audit entry commit or roll back together (SEC-07, WP-564). The
+// repositories fn calls with its context join the transaction
+// (ContextWithTx). Like WithOrganizationSetup it reaches the operator tables
+// and this one organization, no other. A transaction in ctx is never
+// joined: the flag is set only in a transaction opened here.
+func WithOperatorTenant(ctx context.Context, pool *pgxpool.Pool, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	if ctx.Value(txKey{}) != nil {
+		return ErrTxNotJoinable
+	}
+	return WithRequestTenant(ctx, pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('`+OperatorGUC+`', 'on', true)`); err != nil {
+			return fmt.Errorf("set operator context: %w", err)
+		}
+		return fn(ContextWithTx(ctx, tx), tx)
+	})
+}
+
 // OrganizationIDs lists the ids of all organizations for workers that iterate
 // tenants. It is a system read (WithSystem).
 func OrganizationIDs(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {

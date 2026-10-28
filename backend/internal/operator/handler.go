@@ -23,7 +23,7 @@ type Handler struct {
 	cfg      Config
 	oidc     *identity.OIDCProvider
 	sessions *identity.SessionIssuer
-	audit    *Auditor
+	audit    auditLog
 	pool     *pgxpool.Pool
 	// entitlements is written here only (ENT-04).
 	entitlements *entitlement.Service
@@ -54,7 +54,8 @@ var errNotOperator = errors.New("operator: login is not an operator with MFA")
 
 // Callback exchanges an OIDC authorization code (PKCE) for an operator
 // session. Only members of the operator group who logged in with a second
-// factor get one (SEC-07, CH26); every attempt is audited.
+// factor get one (SEC-07, CH26); every attempt is audited, and an attempt
+// whose entry cannot be written is answered 500 without a session.
 func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Code         string `json:"code"`
@@ -91,13 +92,18 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		}
 		// The audit names the failed condition and the acr of the login;
 		// the response stays generic.
-		h.record(r.Context(), &AuditEntry{OperatorID: id.Subject, OperatorKind: KindOIDC, Action: "login",
-			Status: status, Details: map[string]any{"reason": err.Error(), "acr": id.ACR, "remote": r.RemoteAddr}})
+		if !h.record(w, r, &AuditEntry{OperatorID: id.Subject, OperatorKind: KindOIDC, Action: "login",
+			Status: status, Details: map[string]any{"reason": err.Error(), "acr": id.ACR, "remote": r.RemoteAddr}}) {
+			return
+		}
 		api.WriteError(w, status, http.StatusText(status), detail)
 		return
 	}
-	h.record(r.Context(), &AuditEntry{OperatorID: id.Subject, OperatorKind: KindOIDC, Action: "login",
-		Status: http.StatusOK, Details: map[string]any{"remote": r.RemoteAddr, "email": id.Email, "acr": id.ACR}})
+	// No session without its audit entry (F-208).
+	if !h.record(w, r, &AuditEntry{OperatorID: id.Subject, OperatorKind: KindOIDC, Action: "login",
+		Status: http.StatusOK, Details: map[string]any{"remote": r.RemoteAddr, "email": id.Email, "acr": id.ACR}}) {
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{
 		"token":      token,
 		"expires_at": expires.Format(time.RFC3339),

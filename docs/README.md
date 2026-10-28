@@ -380,7 +380,11 @@ no data: only new CIs are blocked (REST) or held (ingest). Repository errors
 deny access (fail-closed). The tenant API is read-only (`GET
 /api/v1/entitlements`); entitlements are written by the operator only,
 `POST /api/v1/admin/orgs/{id}/entitlements`, and every change is recorded
-in `operator_audit` with the previous and the new state (ENT-04, E-12).
+in `operator_audit` with the previous and the new state, in the same
+transaction: without its entry the change is rolled back (500) (ENT-04,
+E-12). Only the feature keys of ENT-02, the module keys and the add-ons and
+the quotas `max_cis`, `max_collectors`, `max_users`, `max_api_keys` are
+accepted; any other key is 422 with the field.
 Attribute rules use the JSON rule AST of `api/rules.schema.json` (MET-45,
 phase 1: required, pattern, range, enum, combined with all).
 `backend/internal/rules` evaluates them bindingly, `frontend/src/rules` for

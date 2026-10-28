@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 
@@ -35,7 +36,8 @@ func (f *fakeCreator) CreateOrganization(_ context.Context, op Identity, req *Ne
 // errors answer RFC 7807 with the field.
 func TestOperatorCreatesOrganizations(t *testing.T) {
 	creator := &fakeCreator{}
-	mux := testRouter(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, testIssuer(t), nil, nil).WithOrgCreator(creator))
+	audit := &memoryAudit{}
+	mux := testRouter(withAudit(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, testIssuer(t), nil, nil).WithOrgCreator(creator), audit))
 	auth := map[string]string{BreakGlassHeader: testBreakGlass}
 	body := `{"name":"Acme","plan":"pro","limits":{"max_cis":5000},"admin_email":"admin@acme.example"}`
 
@@ -56,6 +58,11 @@ func TestOperatorCreatesOrganizations(t *testing.T) {
 	}
 	if creator.op.Kind != KindBreakGlass || creator.req.Limits["max_cis"] != 5000 || creator.req.AdminEmail != "admin@acme.example" {
 		t.Errorf("creation got operator %+v request %+v", creator.op, creator.req)
+	}
+	// The creation writes its org.create entry in its own transaction; the
+	// request adds none (only the refused anonymous one is recorded).
+	if got := audit.actions(); !slices.Equal(got, []string{"POST /orgs"}) {
+		t.Errorf("audit entries %v, want only the refused anonymous request", got)
 	}
 
 	if w := post(mux, "/api/v1/admin/orgs", `{"name":"Acme","unknown":1}`, auth); w.Code != http.StatusBadRequest {
@@ -84,7 +91,7 @@ func TestOperatorCreatesOrganizations(t *testing.T) {
 		}
 	}
 
-	unconfigured := testRouter(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, testIssuer(t), nil, nil))
+	unconfigured := testRouter(withAudit(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, testIssuer(t), nil, nil), &memoryAudit{}))
 	if w := post(unconfigured, "/api/v1/admin/orgs", body, auth); w.Code != http.StatusServiceUnavailable {
 		t.Errorf("without creator: %d, want 503", w.Code)
 	}

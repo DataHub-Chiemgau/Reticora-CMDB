@@ -251,7 +251,7 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 		"disabled core": {OrganizationID: "org-1", FeatureKey: FeatureCMDBCore, Enabled: false},
 		"expiring core": {OrganizationID: "org-1", FeatureKey: FeatureCMDBCore, Enabled: true, ValidUntil: &expired},
 		"bad source":    {OrganizationID: "org-1", FeatureKey: FeatureWebhooks, Enabled: true, Source: "gift"},
-		"negative":      {OrganizationID: "org-1", FeatureKey: FeatureWebhooks, Enabled: true, Limits: map[string]int64{"limit": -1}},
+		"negative":      {OrganizationID: "org-1", FeatureKey: FeatureCMDBCore, Enabled: true, Limits: map[string]int64{LimitMaxCIs: -1}},
 	} {
 		var validation *ValidationError
 		if _, err := svc.Grant(ctx, ent); !errors.As(err, &validation) {
@@ -260,6 +260,70 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 	}
 	if !svc.IsEnabled(ctx, "org-1", FeatureCMDBCore) {
 		t.Error("cmdb_core not active")
+	}
+}
+
+// TestGrantAcceptsOnlyENT02Keys covers WP-564 (ENT-02, F-209): Grant stores
+// only the feature keys of ENT-02, the module keys and the add-ons, and only
+// the quotas max_cis, max_collectors, max_users and max_api_keys; any other
+// key is a ValidationError naming the field, and nothing is stored.
+func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(NewMemoryRepository(), Options{Enforce: true})
+
+	keys := FeatureKeys()
+	for _, f := range slices.Concat(Phase1Features, Addons, []string{"inventory", "documents", "stocktake", "ticketing",
+		"monitoring", "endpoint_agent", "workflow_forms", "compliance"}) {
+		if !slices.Contains(keys, f) {
+			t.Errorf("FeatureKeys lacks %s", f)
+		}
+	}
+	if len(keys) != 18 {
+		t.Errorf("FeatureKeys %v, want the 8 keys of ENT-02, 8 module keys and 2 add-ons", keys)
+	}
+	for _, plan := range []Plan{PlanEssential, PlanStandard, PlanPro, PlanEnterprise} {
+		for _, f := range PlanFeatures(plan) {
+			if !slices.Contains(keys, f) {
+				t.Errorf("plan %s includes %s, which is no known feature key", plan, f)
+			}
+		}
+	}
+
+	for name, tc := range map[string]struct {
+		ent   Entitlement
+		field string
+	}{
+		"feature key with a hyphen": {Entitlement{FeatureKey: "rack-view", Enabled: true}, "feature_key"},
+		"feature key of phase 2":    {Entitlement{FeatureKey: "export_datev", Enabled: true}, "feature_key"},
+		"feature key in upper case": {Entitlement{FeatureKey: "Discovery", Enabled: true}, "feature_key"},
+		"feature key with a space":  {Entitlement{FeatureKey: "discovery ", Enabled: true}, "feature_key"},
+		"empty feature key":         {Entitlement{FeatureKey: " ", Enabled: true}, "feature_key"},
+		"quota typo":                {Entitlement{FeatureKey: FeatureRackView, Enabled: true, Limits: map[string]int64{"max_cis_typo": 5}}, "limits"},
+		"quota in upper case":       {Entitlement{FeatureKey: FeatureCMDBCore, Enabled: true, Limits: map[string]int64{"MAX_CIS": 5}}, "limits"},
+		"negative quota":            {Entitlement{FeatureKey: FeatureCMDBCore, Enabled: true, Limits: map[string]int64{LimitMaxCIs: -1}}, "limits"},
+		"disabled cmdb_core":        {Entitlement{FeatureKey: FeatureCMDBCore}, "enabled"},
+		"bad source":                {Entitlement{FeatureKey: FeatureWebhooks, Enabled: true, Source: "gift"}, "source"},
+	} {
+		tc.ent.OrganizationID = "org-1"
+		var validation *ValidationError
+		if _, err := svc.Grant(ctx, tc.ent); !errors.As(err, &validation) || validation.Field != tc.field {
+			t.Errorf("%s: %v, want a validation error of %s", name, err, tc.field)
+		}
+	}
+	if list, err := svc.List(ctx, "org-1"); err != nil || len(list) != 1 || list[0].FeatureKey != FeatureCMDBCore {
+		t.Errorf("refused grants stored rows: %+v, %v", list, err)
+	}
+
+	for _, f := range keys {
+		if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: f, Enabled: true}); err != nil {
+			t.Errorf("grant %s: %v", f, err)
+		}
+	}
+	for _, quota := range Quotas {
+		if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: QuotaFeature[quota], Enabled: true,
+			Limits: map[string]int64{quota: 3}}); err != nil {
+			t.Errorf("quota %s: %v", quota, err)
+		}
 	}
 }
 

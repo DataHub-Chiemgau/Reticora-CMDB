@@ -74,7 +74,9 @@ func (h *Handler) ListEntitlements(w http.ResponseWriter, r *http.Request) {
 
 // GrantEntitlement stores (or updates) an entitlement of an organization.
 // The change, with the previous and the new state, is recorded in
-// operator_audit (ENT-04).
+// operator_audit in the same transaction (ENT-04, F-208): when the entry
+// cannot be written the change is rolled back and the answer is 500. An
+// unknown feature or quota key is 422 with the field (F-209).
 func (h *Handler) GrantEntitlement(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := h.targetOrganization(w, r)
 	if !ok {
@@ -85,34 +87,46 @@ func (h *Handler) GrantEntitlement(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	ent, err := req.Entitlement(orgID)
-	ctx := orgContext(r.Context(), orgID)
-	var before []entitlement.Entitlement
-	if err == nil {
-		before, err = h.entitlements.List(ctx, orgID)
-	}
+	op, _ := FromContext(r.Context())
 	var granted entitlement.Entitlement
+	var entry *AuditEntry
+	ent, err := req.Entitlement(orgID)
 	if err == nil {
-		granted, err = h.entitlements.Grant(ctx, ent)
+		err = h.audit.RecordChange(orgContext(r.Context(), orgID), orgID, func(ctx context.Context) (*AuditEntry, error) {
+			before, listErr := h.entitlements.List(ctx, orgID)
+			if listErr != nil {
+				return nil, listErr
+			}
+			stored, grantErr := h.entitlements.Grant(ctx, ent)
+			if grantErr != nil {
+				return nil, grantErr
+			}
+			granted = stored
+			details := map[string]any{"remote": r.RemoteAddr, "feature_key": stored.FeatureKey, "after": stored}
+			for i := range before {
+				if before[i].FeatureKey == stored.FeatureKey {
+					details["before"] = before[i]
+				}
+			}
+			entry = &AuditEntry{OperatorID: op.ID, OperatorKind: op.Kind, Action: "entitlement.grant",
+				TargetOrg: orgID, Status: http.StatusOK, Details: details}
+			return entry, nil
+		})
 	}
 	var validation *entitlement.ValidationError
-	if errors.As(err, &validation) {
-		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", validation.Error())
-		return
-	}
-	if err != nil {
-		api.WriteRepoError(w, err)
-		return
-	}
-
-	op, _ := FromContext(r.Context())
-	details := map[string]any{"remote": r.RemoteAddr, "feature_key": granted.FeatureKey, "after": granted}
-	for i := range before {
-		if before[i].FeatureKey == granted.FeatureKey {
-			details["before"] = before[i]
+	switch {
+	case errors.As(err, &validation):
+		api.WriteFieldError(w, &api.FieldError{Field: validation.Field, Message: validation.Error(),
+			Status: http.StatusUnprocessableEntity})
+	case errors.Is(err, ErrAuditFailed):
+		if entry == nil {
+			entry = &AuditEntry{OperatorID: op.ID, Action: "entitlement.grant"}
 		}
+		writeAuditFailure(w, entry, err)
+	case err != nil:
+		api.WriteRepoError(w, err)
+	default:
+		markAudited(r.Context())
+		api.WriteJSON(w, http.StatusOK, granted)
 	}
-	h.record(r.Context(), &AuditEntry{OperatorID: op.ID, OperatorKind: op.Kind, Action: "entitlement.grant",
-		TargetOrg: orgID, Status: http.StatusOK, Details: details})
-	api.WriteJSON(w, http.StatusOK, granted)
 }

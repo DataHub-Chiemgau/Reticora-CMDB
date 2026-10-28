@@ -66,6 +66,13 @@ const (
 	FeatureCompliance    = "compliance"
 )
 
+// ModuleFeatures are the module feature keys of later phases; each gates a
+// module present in the code.
+var ModuleFeatures = []string{
+	FeatureInventory, FeatureDocuments, FeatureStocktake, FeatureTicketing,
+	FeatureMonitoring, FeatureEndpointAgent, FeatureWorkflowForms, FeatureCompliance,
+}
+
 // Add-ons (CH14, ENT-06): IGA and AI are no part of any plan; they are
 // unlocked only by their own entitlement row.
 const (
@@ -75,6 +82,12 @@ const (
 
 // Addons are the add-on feature keys of CH14.
 var Addons = []string{FeatureIGA, FeatureAI}
+
+// FeatureKeys are the feature keys an entitlement row may carry (F-209):
+// the phase-1 keys of ENT-02, the module keys and the add-ons.
+func FeatureKeys() []string {
+	return slices.Concat(Phase1Features, ModuleFeatures, Addons)
+}
 
 // Quotas of ENT-02, stored in limits.
 const (
@@ -190,31 +203,48 @@ func (e *Entitlement) status(now time.Time) Status {
 var ErrCoreNotDeactivatable = errors.New("cmdb_core is always active and cannot be disabled or expire")
 
 // ValidationError is an entitlement that cannot be stored as given.
-type ValidationError struct{ err error }
+type ValidationError struct {
+	// Field is the request field the error refers to (feature_key, enabled,
+	// valid_until, source or limits).
+	Field string
+	err   error
+}
 
 // validation: the fixed texts of Entitlement.Validate (invalid).
 func (e *ValidationError) Error() string { return e.err.Error() }
 func (e *ValidationError) Unwrap() error { return e.err }
 
-func invalid(err error) error { return &ValidationError{err: err} }
+func invalid(field string, err error) error { return &ValidationError{Field: field, err: err} }
 
-// Validate checks an entitlement before it is stored.
+// Validate checks an entitlement before it is stored: the feature key is
+// one of FeatureKeys and every quota one of Quotas (ENT-02, F-209), so a
+// typo is refused instead of being stored without effect.
 func (e *Entitlement) Validate() error {
 	if strings.TrimSpace(e.FeatureKey) == "" {
-		return invalid(errors.New("feature_key is required"))
+		return invalid("feature_key", errors.New("feature_key is required"))
 	}
-	if e.FeatureKey == FeatureCMDBCore && (!e.Enabled || e.ValidUntil != nil) {
-		return invalid(ErrCoreNotDeactivatable)
+	if !slices.Contains(FeatureKeys(), e.FeatureKey) {
+		return invalid("feature_key", fmt.Errorf("unknown feature_key %q (allowed: %s)",
+			e.FeatureKey, strings.Join(FeatureKeys(), ", ")))
+	}
+	if e.FeatureKey == FeatureCMDBCore && !e.Enabled {
+		return invalid("enabled", ErrCoreNotDeactivatable)
+	}
+	if e.FeatureKey == FeatureCMDBCore && e.ValidUntil != nil {
+		return invalid("valid_until", ErrCoreNotDeactivatable)
 	}
 	if e.Source == "" {
 		e.Source = "manual"
 	}
 	if !slices.Contains(Sources, e.Source) {
-		return invalid(fmt.Errorf("source must be one of %s", strings.Join(Sources, ", ")))
+		return invalid("source", fmt.Errorf("source must be one of %s", strings.Join(Sources, ", ")))
 	}
 	for k, v := range e.Limits {
+		if !slices.Contains(Quotas, k) {
+			return invalid("limits", fmt.Errorf("unknown limit %q (allowed: %s)", k, strings.Join(Quotas, ", ")))
+		}
 		if v < 0 {
-			return invalid(fmt.Errorf("limit %s must not be negative", k))
+			return invalid("limits", fmt.Errorf("limit %s must not be negative", k))
 		}
 	}
 	return nil
@@ -474,7 +504,8 @@ func (s *Service) AllowCreate(ctx context.Context, orgID, quota string, current 
 	return nil
 }
 
-// Grant stores (or updates) an entitlement for the organization.
+// Grant stores (or updates) an entitlement for the organization. It joins
+// the transaction of ctx (database.ContextWithTx).
 func (s *Service) Grant(ctx context.Context, ent Entitlement) (Entitlement, error) {
 	if ent.OrganizationID == "" {
 		return Entitlement{}, fmt.Errorf("organization is required")
@@ -493,8 +524,13 @@ func (s *Service) Grant(ctx context.Context, ent Entitlement) (Entitlement, erro
 		return Entitlement{}, err
 	}
 
-	s.invalidate(ctx, ent.OrganizationID)
-	s.adoptAfterGrant(ctx, &stored)
+	// In a context transaction (the operator's grant with its audit entry,
+	// WP-564) the cache is dropped only after the commit: a reader in
+	// between would otherwise cache the old rows again.
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		s.invalidate(ctx, ent.OrganizationID)
+		s.adoptAfterGrant(ctx, &stored)
+	})
 	return stored, nil
 }
 

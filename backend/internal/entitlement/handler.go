@@ -64,7 +64,7 @@ type GrantRequest struct {
 // Entitlement returns the entitlement the request stores for orgID.
 func (req *GrantRequest) Entitlement(orgID string) (Entitlement, error) {
 	if req.FeatureKey == "" {
-		return Entitlement{}, invalid(errors.New("feature_key is required"))
+		return Entitlement{}, invalid("feature_key", errors.New("feature_key is required"))
 	}
 	plan := req.Plan
 	if plan == "" {

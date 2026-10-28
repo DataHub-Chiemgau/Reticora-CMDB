@@ -56,7 +56,9 @@ export interface paths {
      *     session. Only members of the operator group (RETICORA_OPERATOR_GROUP,
      *     default "operators") who logged in with a second factor (amr, or acr
      *     in RETICORA_OPERATOR_MFA_ACR) get one. Every attempt is recorded in
-     *     operator_audit. Operator sessions are refused by the tenant API.
+     *     operator_audit; when the entry cannot be written the answer is 500
+     *     and no session is issued (F-208). Operator sessions are refused by
+     *     the tenant API.
      */
     post: operations['operatorLogin'];
     delete?: never;
@@ -72,7 +74,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The authenticated operator */
+    /**
+     * The authenticated operator
+     * @description Like every request under /api/v1/admin, refused ones included, it is recorded in operator_audit; when the entry cannot be written the answer is 500 instead of the response (F-208).
+     */
     get: operations['getOperator'];
     put?: never;
     post?: never;
@@ -121,7 +126,7 @@ export interface paths {
     put?: never;
     /**
      * Grant or update an entitlement of an organization
-     * @description The only path that writes entitlements (ENT-04, E-12). The change is recorded in operator_audit with the previous and the new state.
+     * @description The only path that writes entitlements (ENT-04, E-12). The change is recorded in operator_audit with the previous and the new state, in the same transaction: when the entry cannot be written the change is rolled back and the answer is 500 (F-208).
      */
     post: operations['grantEntitlementAsOperator'];
     delete?: never;
@@ -8419,11 +8424,33 @@ export interface components {
       };
     };
     GrantEntitlementRequest: {
-      feature_key: string;
+      /**
+       * @description A feature key of ENT-02, a module key or an add-on; any other key is 422 with `field` feature_key (F-209).
+       * @enum {string}
+       */
+      feature_key:
+        | 'cmdb_core'
+        | 'discovery'
+        | 'topology'
+        | 'rack_view'
+        | 'export_csv'
+        | 'webhooks'
+        | 'api_access'
+        | 'notifications_email'
+        | 'inventory'
+        | 'documents'
+        | 'stocktake'
+        | 'ticketing'
+        | 'monitoring'
+        | 'endpoint_agent'
+        | 'workflow_forms'
+        | 'compliance'
+        | 'iga'
+        | 'ai';
       plan?: components['schemas']['EntitlementPlan'];
       /** @description cmdb_core cannot be disabled (422). */
       enabled?: boolean;
-      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. A missing quota uses the plan default. */
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys; any other key is 422 with `field` limits (F-209). A missing quota is unlimited (E-34). */
       limits?: {
         [key: string]: number;
       };
@@ -11481,6 +11508,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      500: components['responses']['InternalServerError'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -11503,6 +11531,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
     };
   };
   listOrganizationsAsOperator: {
@@ -11627,7 +11656,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description cmdb_core disabled or limited in time, unknown source or negative limit */
+      /** @description Unknown feature key (`field` feature_key), unknown quota key or negative limit (`field` limits), cmdb_core disabled (`field` enabled) or limited in time (`field` valid_until), unknown source (`field` source); nothing is stored. */
       422: {
         headers: {
           [name: string]: unknown;
