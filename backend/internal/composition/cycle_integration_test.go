@@ -57,8 +57,8 @@ func setupCompositionDB(t *testing.T) *PGRepository {
 		// CASCADE removes the default VRF and the standard roles its insert
 		// triggers created; in replica mode they stayed behind and the next
 		// run's seed failed on vrf_organization_id_name_key.
-		if _, err := admin.Exec(ctx, `DELETE FROM organization WHERE id = $1`, cycOrg); err != nil {
-			t.Logf("cleanup organization: %v", err)
+		if _, delErr := admin.Exec(ctx, `DELETE FROM organization WHERE id = $1`, cycOrg); delErr != nil {
+			t.Logf("cleanup organization: %v", delErr)
 		}
 	}
 	cleanup()
