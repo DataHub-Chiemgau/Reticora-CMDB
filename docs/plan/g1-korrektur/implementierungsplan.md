@@ -40,9 +40,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
-| [K6-Nachträge](#k6-nachträge) | WP-648 – WP-651 | 4 | 2,0 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-381): eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt. |
+| [K6-Nachträge](#k6-nachträge) | WP-648 – WP-652 | 5 | 2,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-382): eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **299** | **399,5** | |
+| **Summe** | | **300** | **400,0** | |
 
 ```mermaid
 flowchart LR
@@ -57,7 +57,7 @@ flowchart LR
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
-    K6N["K6-Nachträge<br/>4 WPs · 2,0 PT"]
+    K6N["K6-Nachträge<br/>5 WPs · 2,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -409,6 +409,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-649](#wp-649--upgrade-von-datenbanken-ohne-migration_quarantine-000089) | `k6n-quarantine-upgrade` | Upgrade von Datenbanken ohne migration_quarantine (000089) | K6N | 0,5 | F-378 | WP-574 |
 | [WP-650](#wp-650--rack-platzierung-ablehnung-statt-stiller-standortabweichung-außerhalb-des-scopes) | `k6n-rack-scope-location` | Rack-Platzierung: Ablehnung statt stiller Standortabweichung außerhalb des Scopes | K6N | 0,5 | F-379, F-380 | WP-578 |
 | [WP-651](#wp-651--rack-seite-einbau-auf-beiden-seiten-vorn-und-hinten-anzeigen) | `k6n-rack-face-both` | Rack-Seite: Einbau auf beiden Seiten vorn und hinten anzeigen | K6N | 0,5 | F-381 | WP-579 |
+| [WP-652](#wp-652--unknown_relationship-kein-neues-review-für-ein-angenommenes-paar) | `k6n-unknown-rel-review-accepted` | unknown_relationship: kein neues Review für ein angenommenes Paar | K6N | 0,5 | F-382 | WP-582 |
 | [WP-595](#wp-595--nachweisläufe-auf-dem-g1-release-kandidaten-endgültige-statuspflege-und-finaler-gate-check) | `t5-rc-evidence` | Nachweisläufe auf dem G1-Release-Kandidaten, endgültige Statuspflege und finaler Gate-Check | K7 | 1,5 | F-122 | 253 WPs (siehe Block) |
 | [WP-596](#wp-596--wiederholungsprüfung-mandantentrennung-authentisierung-und-autorisierung) | `k-reaudit-1` | Wiederholungsprüfung Mandantentrennung, Authentisierung und Autorisierung | K7 | 2,0 | – | 80 WPs (siehe Block) |
 | [WP-597](#wp-597--wiederholungsprüfung-datenmodell-ingest-collector-und-last) | `k-reaudit-2` | Wiederholungsprüfung Datenmodell, Ingest, Collector und Last | K7 | 2,0 | – | 86 WPs (siehe Block) |
@@ -17862,6 +17863,57 @@ RCK-01;[B];B;frontend/src/pages/RackPage.test.tsx;WP-651
 **Entscheidungsbedarf:** keiner.
 
 **Nicht Bestandteil:** Montieren und Verschieben über die Rack-Seite (Mount-UI); Anzeige der freien Höheneinheiten (`free`); Übersetzung der Rohwerte `front` und `rear` in der Liste (der Real-Stack-Fall L08 prüft sie).
+
+### WP-652 – unknown_relationship: kein neues Review für ein angenommenes Paar
+
+**Schlüssel:** `k6n-unknown-rel-review-accepted` · **Meilenstein:** K6-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-582 (`t4-topo-confidence`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-382](../../../audit/g1-reaudit/FINDINGS.md#f-382) | P3 | `unknown_relationship`: nach accept öffnet der nächste Ingest desselben unbekannten Schlüssels ein neues Review für dasselbe Paar, obwohl die angenommene Kante besteht | schließt | WP-582 |
+
+**Problem:** `reviewUnknownRelationship` (`discovery/topology.go`) öffnet das Review eines unbekannten Nachbarschlüssels über `OpenUnlessDismissed` (`reviews/service.go`). Diese Regel unterdrückt nur nach einem verworfenen Review mit demselben `type_key`; die Deduplizierung offener Reviews (REC-08) endet mit der Auflösung. Nach einem accept (Kante `connected_to`, Quelle `discovery`) öffnet deshalb der nächste Ingest desselben Schlüssels ein neues Review für dasselbe Paar, nach jedem weiteren accept wieder (F-382). Priorität P3: Rauschen in der Review-Inbox mit Benachrichtigung, keine Datenabweichung; Umgehung durch Verwerfen des neuen Reviews.
+
+**Regel (in diesem WP festgelegt):** Ein angenommenes Paar öffnet kein neues Review, solange die Frage beantwortet bleibt: Die Kante `connected_to` Quelle → Ziel besteht (jeder Quelle; dieselbe Kante, die accept über `upsertRelationship` bestätigen würde), oder sie ist für das Paar unterdrückt. Eine Unterdrückung entsteht, wenn ein Benutzer die Discovery-Kante mit force löscht (REL-03); die Löschung beantwortet die Frage wie ein dismiss, ein neues Review würde sie erneut stellen und ein accept die unterdrückte Kante wieder anlegen. Wird die Unterdrückung aufgehoben, hat das Paar weder Kante noch Unterdrückung: Die Frage ist wieder offen, der nächste Bericht öffnet ein neues Review. Ohne angenommenes Review und nach einem dismiss gilt `OpenUnlessDismissed` unverändert; `OpenOverrideConflict` (WP-576) und `scope_suggested` bleiben unberührt. Die Gegenrichtung (der Nachbar meldet das Gerät unter einem unbekannten Schlüssel) ist ein eigenes Objekt (`rel:<Ziel>:<Quelle>`) mit eigener Kante, wie bei LLDP-Kanten je meldendem Gerät.
+
+**Akzeptanzkriterien:**
+
+- [ ] PG-Tests als `reticora_app`, auf dem alten Code rot: `TestUnknownRelationshipReviewLifecycle` erweitert (nach accept öffnet der nächste Ingest kein neues Review); `TestUnknownRelationshipReviewAfterAcceptedEdgeDeleted` (neu): kein neues Review, solange die angenommene Kante besteht (zwei Ingests); nach Löschen der Kante durch einen Benutzer (force, Unterdrückung) weder Review noch Kante; nach Aufheben der Unterdrückung genau ein neues offenes Review ohne Kante.
+- [ ] `reviews.Service.OpenUnlessSettled(ctx, item, valueKey, holds)`: liest das zuletzt aufgelöste Review desselben Objekts und Typs; ist es mit accept aufgelöst und meldet `holds` true, wird kein Review geöffnet; ein Fehler von `holds` öffnet keines und wird gemeldet; sonst `OpenUnlessDismissed`. Unit-Test `TestOpenUnlessSettled` (Memory-Repository).
+- [ ] `discovery.Handler.acceptedEdgeHolds`: Kante über `DiscoveryEdge` (PostgreSQL) bzw. die Kantenliste der Quelle (andere Repositories), Unterdrückung über `suppressionChecker`; alles unter der RLS des Aufrufers, dem Aufrufer wird nichts zurückgegeben.
+- [ ] Regression grün: `internal/discovery` (u. a. `TestTopologyConfidence`, `TestTopologyConfidenceIndependentOfOrder`, `TestAuditDiscoveryResightingThroughIngest`), `internal/reviews`, Review-, Topologie- und Unterdrückungstests von `internal/server` und `internal/relationship`.
+
+**Dateien (8 Einträge):**
+
+- backend/internal/reviews/service.go
+- backend/internal/reviews/service_test.go
+- backend/internal/discovery/topology.go
+- backend/internal/discovery/topology_integration_test.go
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration, keine API-Änderung. Die zusätzlichen Lesezugriffe (aufgelöstes Review, Kante, Unterdrückungen) laufen unter der RLS des Ingest-Principals; sieht er das angenommene Review nicht, gilt die bisherige Regel.
+
+**Tests:**
+
+- `TestUnknownRelationshipReviewLifecycle` (PG, erweitert), `TestUnknownRelationshipReviewAfterAcceptedEdgeDeleted` (PG, neu).
+- `TestOpenUnlessSettled` (Unit, `reviews/service_test.go`).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-652
+```
+
+**Entscheidungsbedarf:** keiner (Regel oben).
+
+**Nicht Bestandteil:** Reviews unbekannter Schlüssel für Paare, die ohne Review bereits eine Kante `connected_to` haben (z. B. aus LLDP); Zusammenführen der Gegenrichtung; Bereinigung bereits offener Wiederholungs-Reviews aus der Zeit vor WP-652 (sie werden wie bisher aufgelöst).
 
 ## K7 Wiederholungsprüfung und Gate G1
 

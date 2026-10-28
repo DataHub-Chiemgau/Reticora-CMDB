@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
@@ -240,7 +241,9 @@ func TestTopologyConfidenceIndependentOfOrder(t *testing.T) {
 // review API: a neighbor reported with an unknown relationship key opens
 // an unknown_relationship review and gives no edge; accept records the
 // neighbor as connected_to edge of source discovery; dismiss keeps the edge
-// away, and the next ingest of the same key opens no new review.
+// away, and the next ingest of the same key opens no new review. WP-652
+// (F-382): neither does it after accept while the accepted edge exists
+// (before the fix every ingest opened a new review of the accepted pair).
 func TestUnknownRelationshipReviewLifecycle(t *testing.T) {
 	f := scopetest.Seed(t, "a9")
 	bg := context.Background()
@@ -361,6 +364,169 @@ func TestUnknownRelationshipReviewLifecycle(t *testing.T) {
 	}
 	if e := edges("accepted"); !slices.Equal(e, []string{"discovery connected_to"}) {
 		t.Errorf("accepted: edges after the next ingest = %v, want the one connected_to of source discovery", e)
+	}
+	// F-382: the accepted pair opens no new review while its edge exists.
+	ingest()
+	if r := reviews("accepted"); len(r["resolved"]) != 1 || len(r) != 1 {
+		t.Errorf("accepted: reviews after two more ingests = %v, want only the resolved one (F-382)", r)
+	}
+}
+
+// TestUnknownRelationshipReviewAfterAcceptedEdgeDeleted covers WP-652
+// (TOP-01, REC-08, REL-03; F-382) against PostgreSQL through the legacy
+// ingest, the review API and the relationship repository as the
+// application role: once an unknown_relationship review of a pair is
+// accepted, the next reports of the unknown key open no new review
+//   - while the accepted connected_to edge exists;
+//   - after a user deleted that edge (force, REL-03): the deletion records
+//     a suppression, which answers the question as a dismissal would; no
+//     review and no edge;
+//   - once the suppression is lifted the pair has neither edge nor
+//     suppression and the question is open again: the next report opens
+//     one new review, still without an edge.
+//
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=... go test -count=1 -v \
+//	  -run 'TestUnknownRelationshipReview' ./internal/discovery/
+func TestUnknownRelationshipReviewAfterAcceptedEdgeDeleted(t *testing.T) {
+	f := scopetest.Seed(t, "a9")
+	bg := context.Background()
+	const peerMAC = "00:1b:21:65:20:02"
+	peer := f.CI(t, f.OrgA, "", "wp652-peer")
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET primary_mac = $2 WHERE id = $1`, peer, peerMAC); err != nil {
+		t.Fatal(err)
+	}
+	rels := relationship.NewPGRepository(f.App)
+	mux := chi.NewRouter()
+	discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App), rels).RegisterRoutes(mux)
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	do := func(path string, body []byte) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body)).WithContext(ctx))
+		return w
+	}
+	// ingest reports the leaf with the peer under an unknown key.
+	ingest := func() {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{"collector_id": "c", "items": []map[string]any{{"ci_type_name": "switch",
+			"name": "wp652-leaf", "serial_number": "WP652LEAF", "management_ip": "192.0.2.152",
+			"relationships": []map[string]any{{"target_mac": peerMAC, "type_key": "vxlan_peer"}}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w := do("/api/v1/ingest/bulk", body); w.Code != http.StatusAccepted {
+			t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+		}
+	}
+	// reviews returns the statuses of the unknown_relationship reviews of
+	// the peer in the order they were opened.
+	reviews := func() []string {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT status FROM review_item WHERE organization_id = $1
+			AND kind = 'unknown_relationship' AND payload->>'target_ci_id' = $2 ORDER BY created_at, id`, f.OrgA, peer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, s)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	// edge returns the id of the edge between the leaf and the peer, in
+	// either direction, empty without one; it fails on a second edge or an
+	// edge other than the connected_to leaf -> peer of source discovery.
+	edge := func() string {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT r.id::text, r.source || ' ' || r.rel_type || CASE WHEN r.target_ci_id = $2 THEN '' ELSE ' (reverse)' END
+			FROM ci_relationship r JOIN ci l ON l.id IN (r.source_ci_id, r.target_ci_id) AND l.name = 'wp652-leaf'
+			WHERE r.organization_id = $1 AND $2 IN (r.source_ci_id, r.target_ci_id)`, f.OrgA, peer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var ids, kinds []string
+		for rows.Next() {
+			var id, kind string
+			if err := rows.Scan(&id, &kind); err != nil {
+				t.Fatal(err)
+			}
+			ids, kinds = append(ids, id), append(kinds, kind)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if len(ids) == 0 {
+			return ""
+		}
+		if !slices.Equal(kinds, []string{"discovery connected_to"}) {
+			t.Errorf("edges between leaf and peer = %v, want one connected_to leaf -> peer of source discovery", kinds)
+		}
+		return ids[0]
+	}
+
+	ingest()
+	if r := reviews(); !slices.Equal(r, []string{"open"}) {
+		t.Fatalf("reviews after the first ingest = %v, want one open", r)
+	}
+	var open string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM review_item WHERE organization_id = $1 AND kind = 'unknown_relationship'
+		AND status = 'open' AND payload->>'target_ci_id' = $2`, f.OrgA, peer).Scan(&open); err != nil {
+		t.Fatal(err)
+	}
+	if w := do("/api/v1/review-items/"+open+"/resolve", []byte(`{"action":"accept"}`)); w.Code != http.StatusOK {
+		t.Fatalf("accept: %d %s", w.Code, w.Body.String())
+	}
+	accepted := edge()
+	if accepted == "" {
+		t.Fatal("accept recorded no connected_to edge leaf -> peer")
+	}
+
+	// While the accepted edge exists: no new review.
+	ingest()
+	ingest()
+	if r := reviews(); !slices.Equal(r, []string{"resolved"}) {
+		t.Errorf("reviews while the accepted edge exists = %v, want only the resolved one (F-382)", r)
+	}
+
+	// A user deletes the accepted edge (force, REL-03): its suppression
+	// keeps the pair settled, no review, no edge.
+	if err := rels.DeleteWithPolicy(ctx, f.OrgA, accepted, relationship.DeleteOptions{Force: true, Reason: "wp652",
+		Actor: relationship.Actor{ID: f.User, Type: "user"}}); err != nil {
+		t.Fatalf("delete the accepted edge: %v", err)
+	}
+	ingest()
+	if r := reviews(); !slices.Equal(r, []string{"resolved"}) {
+		t.Errorf("reviews after the user deleted the accepted edge = %v, want only the resolved one", r)
+	}
+	if id := edge(); id != "" {
+		t.Errorf("edge %s after the user deleted the accepted edge, want none", id)
+	}
+
+	// The suppression is lifted: the question is open again, one new review.
+	sups, _, err := rels.ListSuppressions(ctx, f.OrgA, peer, api.PaginationParams{Limit: 10})
+	if err != nil || len(sups) != 1 {
+		t.Fatalf("suppressions of the pair = %v (%v), want the one of the deletion", sups, err)
+	}
+	if err := rels.LiftSuppression(ctx, f.OrgA, sups[0].ID, relationship.Actor{ID: f.User, Type: "user"}); err != nil {
+		t.Fatalf("lift the suppression: %v", err)
+	}
+	ingest()
+	ingest()
+	if r := reviews(); !slices.Equal(r, []string{"resolved", "open"}) {
+		t.Errorf("reviews after the suppression was lifted = %v, want the resolved one and one new open", r)
+	}
+	if id := edge(); id != "" {
+		t.Errorf("edge %s before the new review is resolved, want none", id)
 	}
 }
 

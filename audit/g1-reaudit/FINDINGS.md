@@ -18,6 +18,8 @@ Die Befunde F-379 und F-380 sind bei der Umsetzung von K6 gefunden worden (Konve
 
 Der Befund F-381 ist bei der Umsetzung von K6 gefunden worden (Konvention 16, WP-579): Ein Einbau mit der Seite `both`, den die API annimmt (RCK-01), erscheint auf der Rack-Seite weder auf der Vorder- noch auf der Rückseite. Er ist mit `frontend/src/pages/RackPage.test.tsx` kodiert (auf `f0781b6` rot) und wird von WP-651 im Abschnitt K6-Nachträge geschlossen.
 
+Der Befund F-382 ist bei der Umsetzung von K6 gefunden worden (Konvention 16, WP-582): Nach dem Annehmen eines `unknown_relationship`-Reviews öffnet der nächste Ingest desselben unbekannten Schlüssels ein neues Review für dasselbe Paar, obwohl die angenommene Kante besteht. Er ist mit `backend/internal/discovery/topology_integration_test.go` kodiert (auf `f0781b6` rot) und wird von WP-652 im Abschnitt K6-Nachträge geschlossen.
+
 Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `tests/audit/expected-failures.txt` (Ratchet, `tests/audit/run-auditdefect.sh`). Die a11y-Befunde sind in `frontend/e2e/a11y.spec.ts` (gemockter Playwright-Lauf, CI-Job `e2e`) mit `test.fail` und der Befund-ID markiert: Der markierte Fall muss scheitern, ein markierter Fall, der besteht, macht den Lauf rot. Diese Marken sind ihr eigener Ratchet; der Ratchet von WP-337 vergleicht nur die Arten `go`, `sh`, `vitest` und `e2e-real`, daher erhalten sie keine Zeile in `expected-failures.txt`. Shell-Defekttests (`tests/audit/*.test.sh`, Art `sh`) und Real-Stack-Fälle (`frontend/e2e-real/`, Art `e2e-real`, je Browserprojekt eine Zeile, nur in CI ausführbar) stehen ebenfalls in `expected-failures.txt` (F-369, F-370, F-375).
 
 ## Zählung
@@ -27,8 +29,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 3 |
 | P2 | 16 |
-| P3 | 7 |
-| **Summe** | **27** |
+| P3 | 8 |
+| **Summe** | **28** |
 
 ## Übersicht
 
@@ -61,6 +63,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-379](#f-379) | P3 | Rack-Platzierung durch einen client-beschränkten Principal: das Asset ohne Client erhält den Standort stumm nicht, der Mount wird trotzdem gespeichert | WP-578 (K6) | belegt | backend/internal/rack/placement_scope_integration_test.go TestRackPlacementRefusesAssetOutsideScope | WP-650 |
 | [F-380](#f-380) | P3 | Rack-Platzierung durch einen client-beschränkten Principal: CIs des Assets außerhalb des Scopes behalten ihren Standort, `asset.location_id` und `ci.location_id` weichen ab | WP-578 (K6) | belegt | backend/internal/rack/placement_scope_integration_test.go TestRackPlacementRefusesAssetWithCIsOutsideScope | WP-650 |
 | [F-381](#f-381) | P3 | Rack-Seite: ein Einbau auf beiden Seiten (`face` = `both`) erscheint auf keiner Rackseite, weder in der Zeichnung noch in der Liste | WP-579 (K6) | belegt | frontend/src/pages/RackPage.test.tsx (zwei Fälle „both faces“) | WP-651 |
+| [F-382](#f-382) | P3 | `unknown_relationship`: nach accept öffnet der nächste Ingest desselben unbekannten Schlüssels ein neues Review für dasselbe Paar, obwohl die angenommene Kante besteht | WP-582 (K6) | belegt | backend/internal/discovery/topology_integration_test.go TestUnknownRelationshipReviewLifecycle, TestUnknownRelationshipReviewAfterAcceptedEdgeDeleted | WP-652 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -413,6 +416,19 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 - **Empfehlung:** Ein Einbau mit `both` gilt auf beiden Seiten. Die Zeichnung trägt den SVG-Titel „<Name> · Vorder- und Rückseite“, die Liste nennt „Vorder- und Rückseite“ (i18n `rack.faceBoth`) statt des Rohwerts `both`.
 - **Retest (verbindlich):** `npx vitest run src/pages/RackPage.test.tsx` grün; gemockter Playwright-Lauf `e2e/mobile-actions.spec.ts` (Fall „racks: a mount on both faces …“, kein Seitwärtsscrollen), `e2e/a11y.spec.ts` (/racks) und `e2e/rack-drag.spec.ts` grün.
 - **Kodierender Test:** frontend/src/pages/RackPage.test.tsx (`draws a mount on both faces on the front and on the rear`, `shows a mount on both faces on the front and on the rear (F-381)`); auf `f0781b6` rot (`expected [] to deeply equal [ { id: 'mount-3', … } ]`; `Unable to find role="button" and name "pdu-01"`).
+
+<a id="f-382"></a>
+### F-382 (P3) – `unknown_relationship`: nach accept öffnet der nächste Ingest desselben unbekannten Schlüssels ein neues Review für dasselbe Paar, obwohl die angenommene Kante besteht
+
+- **Gefunden in:** WP-582 (`t4-topo-confidence`, K6) · **Betroffene Anforderungen:** TOP-01, REC-08 · **Komponente:** backend/internal/reviews/service.go (`OpenUnlessDismissed`); backend/internal/discovery/topology.go (`reviewUnknownRelationship`) · **Quelle:** Probe bei der Umsetzung von WP-582 (Lebenszyklustest), bestätigt durch einen ausgeführten Test
+- **Reproduktion:** Ingest (`POST /api/v1/ingest/bulk`) eines Geräts mit einem Nachbarn unter unbekanntem Schlüssel (`type_key` `vxlan_peer`) → offenes `unknown_relationship`-Review; `POST /api/v1/review-items/{id}/resolve` mit `{"action":"accept"}` → Kante `connected_to` mit Quelle `discovery`; der nächste Ingest desselben Schlüssels → ein neues offenes Review für dasselbe Paar (`object_key` `rel:<Quelle>:<Ziel>`). Nach jedem weiteren accept wiederholt sich das im nächsten Zyklus.
+- **Soll:** Ein angenommenes Paar öffnet kein neues Review, solange die angenommene Kante besteht (die Frage des Reviews ist beantwortet). Löscht ein Benutzer die Kante (force, REL-03), hält die dabei angelegte Unterdrückung das Paar ebenso fern wie ein dismiss; erst wenn die Unterdrückung aufgehoben ist, ist die Frage wieder offen und der nächste Bericht öffnet ein neues Review. Die Unterdrückungsregel von `override_conflict` (WP-576) bleibt unverändert.
+- **Ist:** `OpenUnlessDismissed` unterdrückt nur nach einem verworfenen Review mit demselben Wert; die Deduplizierung offener Reviews (REC-08) greift nach der Auflösung nicht mehr.
+- **Nutzerwirkung:** Die Review-Inbox erhält nach jedem accept im nächsten Zyklus dasselbe Paar erneut (mit `review.created` und Benachrichtigung); ein erneutes accept bestätigt nur die Kante. Keine Datenabweichung, keine Offenlegung; Umgehung: das neue Review verwerfen (die Kante bleibt).
+- **Ursache (belegt):** Die Öffnungsregel kennt nur den Ausgang „verworfen“, nicht „angenommen“.
+- **Empfehlung:** `reviews.Service.OpenUnlessSettled`: kein neues Review, solange das zuletzt angenommene Review desselben Objekts und Typs noch gilt; für `unknown_relationship` gilt es, solange die Kante `connected_to` Quelle → Ziel (jeder Quelle) besteht oder für das Paar unterdrückt ist. Sonst entscheidet die Verwerfungsregel wie bisher.
+- **Retest (verbindlich):** `go test -count=1 -run 'TestUnknownRelationshipReview|TestTopology' ./internal/discovery/` und `go test -count=1 ./internal/reviews/` grün.
+- **Kodierender Test:** backend/internal/discovery/topology_integration_test.go (`TestUnknownRelationshipReviewLifecycle`, erweitert; `TestUnknownRelationshipReviewAfterAcceptedEdgeDeleted`); auf `f0781b6` rot (`accepted: reviews after two more ingests = map[open:[…] resolved:[…]], want only the resolved one (F-382)`; `reviews while the accepted edge exists = [resolved open]`; `reviews after the user deleted the accepted edge = [resolved open]`).
 
 ## Geprüfte Kandidaten ohne neuen Befund
 

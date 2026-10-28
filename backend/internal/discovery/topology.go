@@ -654,9 +654,11 @@ func (h *Handler) reconfirm(ctx context.Context, orgID, id string, confidence *f
 const ReviewKindUnknownRelationship = reviews.KindUnknownRelationship
 
 // reviewUnknownRelationship opens the review of an unknown key; a
-// dismissed key of the pair stays dismissed.
+// dismissed key of the pair stays dismissed, and an accepted pair opens no
+// new review while its edge exists or its suppression keeps it away
+// (acceptedEdgeHolds, F-382).
 func (h *Handler) reviewUnknownRelationship(ctx context.Context, orgID string, u *UnknownRelationship) {
-	_, err := h.ReviewService().OpenUnlessDismissed(ctx, &ReviewItem{
+	_, err := h.ReviewService().OpenUnlessSettled(ctx, &ReviewItem{
 		OrganizationID: orgID,
 		Kind:           ReviewKindUnknownRelationship,
 		Status:         ReviewStatusOpen,
@@ -671,10 +673,45 @@ func (h *Handler) reviewUnknownRelationship(ctx context.Context, orgID string, u
 			"target_ip":       u.Neighbor.TargetIP,
 			"target_mac":      u.Neighbor.TargetMAC,
 		},
-	}, "type_key")
+	}, "type_key", h.acceptedEdgeHolds)
 	if err != nil {
 		slog.Error("open unknown_relationship review", "organization_id", orgID, "error", err)
 	}
+}
+
+// acceptedEdgeHolds reports whether an accepted unknown_relationship review
+// still holds (F-382): the pair has the connected_to edge accept records
+// (source -> target, of any source, as upsertRelationship finds it), or
+// that edge is suppressed: a user deleted it (force, REL-03), which answers
+// the question as a dismissal would. Once the suppression is lifted the
+// pair has neither and the next report opens a new review.
+func (h *Handler) acceptedEdgeHolds(ctx context.Context, item *ReviewItem) (bool, error) {
+	sourceID, targetID := payloadString(item.Payload, "source_ci_id"), payloadString(item.Payload, "target_ci_id")
+	if sourceID == "" || targetID == "" || h.relRepo == nil {
+		return false, nil
+	}
+	const relType = "connected_to"
+	if finder, ok := h.repo.(edgeFinder); ok {
+		_, _, found, err := finder.DiscoveryEdge(ctx, item.OrganizationID, sourceID, targetID, relType)
+		if err != nil || found {
+			return found, err
+		}
+	} else {
+		existing, _, err := h.relRepo.List(ctx, item.OrganizationID, sourceID, api.PaginationParams{Limit: 10000, Offset: 0})
+		if err != nil {
+			return false, err
+		}
+		for i := range existing {
+			if existing[i].SourceCIID == sourceID && existing[i].TargetCIID == targetID && existing[i].RelType == relType {
+				return true, nil
+			}
+		}
+	}
+	suppressed, err := h.suppressionChecker(ctx, item.OrganizationID)
+	if err != nil {
+		return false, err
+	}
+	return suppressed != nil && suppressed(sourceID, targetID, relType), nil
 }
 
 // resolveUnknownRelationship: accept records the neighbor as connected_to

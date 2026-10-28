@@ -1016,3 +1016,4 @@ TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-582
 NTF-03;[B];B;backend/internal/notify/templates_test.go;WP-588
 SRC-01;[B];C;frontend/e2e-real/search-palette.spec.ts;WP-594
 RCK-01;[B];B;frontend/src/pages/RackPage.test.tsx;WP-651
+TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-652

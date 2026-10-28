@@ -174,3 +174,65 @@ func isStatus(err error, status int) bool {
 	var e *Error
 	return errors.As(err, &e) && e.Status == status
 }
+
+// TestOpenUnlessSettled covers WP-652 (REC-08, TOP-01; F-382): an accepted
+// item of an object suppresses a new item of the same object and type while
+// its outcome holds (holds is asked with the accepted item); once it no
+// longer holds, a new item opens, and a dismissal still suppresses its
+// value (OpenUnlessDismissed). An error of holds opens nothing.
+func TestOpenUnlessSettled(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewService(repo).WithEffect(KindUnknownRelationship, func(context.Context, *Item, *Resolution) (bool, error) {
+		return false, nil
+	})
+	ctx := context.Background()
+	item := func() *Item {
+		return &Item{OrganizationID: "org", Kind: KindUnknownRelationship, ObjectKey: "rel:a:b",
+			Payload: map[string]any{"source_ci_id": "a", "target_ci_id": "b", "type_key": "vxlan_peer"}}
+	}
+	held, asked := true, []string{}
+	holds := func(_ context.Context, accepted *Item) (bool, error) {
+		asked = append(asked, accepted.ID)
+		return held, nil
+	}
+	open := func(stage string) (string, bool) {
+		t.Helper()
+		it := item()
+		opened, err := svc.OpenUnlessSettled(ctx, it, "type_key", holds)
+		if err != nil {
+			t.Fatalf("%s: %v", stage, err)
+		}
+		return it.ID, opened
+	}
+
+	first, opened := open("first report")
+	if !opened || len(asked) != 0 {
+		t.Fatalf("first report: opened %v, holds asked %v; want a new item without asking", opened, asked)
+	}
+	if _, err := svc.Resolve(ctx, "org", first, &Resolution{Action: ActionAccept}); err != nil {
+		t.Fatal(err)
+	}
+	if _, reopened := open("accepted, holds"); reopened || len(asked) != 1 || asked[0] != first {
+		t.Errorf("accepted item holds: opened %v, holds asked %v; want no item, asked with %s", reopened, asked, first)
+	}
+	if _, err := svc.OpenUnlessSettled(ctx, item(), "type_key", func(context.Context, *Item) (bool, error) {
+		return false, errors.New("lookup failed")
+	}); err == nil {
+		t.Error("an error of holds: want the error")
+	}
+	if items, _, _ := repo.ListReviewItems(ctx, "org", Filter{Status: StatusOpen}, api.PaginationParams{Limit: 10}); len(items) != 0 {
+		t.Errorf("open items after a held acceptance and a failed holds = %d, want 0", len(items))
+	}
+
+	held = false
+	second, opened := open("accepted, no longer holds")
+	if !opened {
+		t.Fatal("accepted item no longer holds: want a new item")
+	}
+	if _, err := svc.Resolve(ctx, "org", second, &Resolution{Action: ActionDismiss}); err != nil {
+		t.Fatal(err)
+	}
+	if _, reopened := open("dismissed with the same value"); reopened {
+		t.Error("dismissed with the same value: want no item (dismissal rule)")
+	}
+}
