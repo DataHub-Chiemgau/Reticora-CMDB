@@ -1,6 +1,6 @@
 # Entscheidungen – Phase 0/1
 
-Stand: 2026-10-19. Gehört zu [`implementierungsplan.md`](implementierungsplan.md). Die Empfehlung ist ein Vorschlag des Plans und keine neue Anforderung.
+Stand: 2026-10-28. Gehört zu [`implementierungsplan.md`](implementierungsplan.md). Die Empfehlung ist ein Vorschlag des Plans und keine neue Anforderung.
 
 **Freigabe vom 2026-10-01:** Der Auftraggeber hat angewiesen, nach den Empfehlungen vorzugehen. Daraus folgt:
 
@@ -22,10 +22,12 @@ Stand: 2026-10-19. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Nachtrag vom 2026-10-19 (Überarbeitung des Phase-2-Plans):** Die Aufgaben in [`phase2/entscheidungen.md`](phase2/entscheidungen.md) beginnen jetzt bei A-15, damit A-Nummern über beide Dateien eindeutig sind; diese Datei belegt A-01 bis A-14. Neue Entscheidungen beider Phasen erhalten die nächste freie Nummer über beide Dateien; Phase 2 führt E-37 bis E-55 und neu E-59 bis E-99 sowie die Aufgaben A-15 bis A-53. A-03 ist seit G1 überfällig; die Konsolidierung von Teil 03 führt Phase 2 als A-28 mit Termin vor G2 fort. Kein Status ändert sich; die Zählung bleibt.
 
+**Nachtrag vom 2026-10-28 (Beschluss des Auftraggebers):** Der Auftraggeber hat angewiesen, alle Entscheidungen nach ihrer Empfehlung umzusetzen. Damit sind die vorläufig entschiedenen [E-11](#e-11) (Option 1, Schnittmenge nach TEN-05), [E-13](#e-13) (Option 1, Matrix und Format aus RBA-02 und AUT-04), [E-16](#e-16) (Option 1, Werte nach SEC-10) und [E-34](#e-34) (Option 1, Planmatrix bestätigt, für Phase 2 in der Fassung von [E-44](phase2/entscheidungen.md#e-44)) entschieden. Außerdem sind die Nachweise B3 (Pentest-Befundliste), B4 (v2-Texte zu AUT-05, AUT-06, NET-04 und ABN-01 (a)/(b)) und B6 (Subprozessorenliste) gestrichen: Die Erklärung des Auftraggebers vom 2026-10-15 gilt als Nachweis für G1 und G2 ([E-59](phase2/entscheidungen.md#e-59)). Nichts davon wird nachgereicht, und kein WP gleicht mit v2-Texten ab. [E-02](#e-02) und [E-35](#e-35) sind damit entschieden; die Erklärung ersetzt die Lieferung. A-02, A-07 und A-11 sind ohne Nachreichung erledigt. Weiter nachzuweisen sind nur der CI-Lauf auf dem Release-Kandidaten und der nächtliche `load.yml`-Lauf (Phase-2-Plan, Meilenstein M2.0b). Die 60 Entscheidungen der Phase 2 sind ebenfalls nach Empfehlung entschieden ([`phase2/entscheidungen.md`](phase2/entscheidungen.md)). Stand jetzt: 39 entschieden.
+
 | Nr. | Thema | Status | Sperrt / betrifft | WPs mit Verweis |
 |---|---|---|---|---:|
 | [E-01](#e-01) | Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 | entschieden | Keine Sperre mehr; WPs mit Verweis prüfen ihre Kriterien gegen den Text. | 130 |
-| [E-02](#e-02) | Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) | offen | Laut Erklärung des Auftraggebers vom 2026-10-15 geliefert (B4 erledigt); die Texte sind in `docs/spec/` nachzureichen. Teilumfänge von c-ui-*, WP-152 (`d-protocols`), WP-212 (`g1-abnahme`), WP-231 (`m-workflow`), WP-232 (`m-iga`), WP-237 (`m-ui-mods`), WP-219 (`m-relay`). | 9 |
+| [E-02](#e-02) | Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) | entschieden | Keine Sperre: Die Erklärung des Auftraggebers vom 2026-10-15 ersetzt die Lieferung (B4, Beschluss vom 2026-10-28); WPs setzen nur ausdrücklich genannte Bestandteile um. Teilumfänge von c-ui-*, WP-152 (`d-protocols`), WP-212 (`g1-abnahme`), WP-231 (`m-workflow`), WP-232 (`m-iga`), WP-237 (`m-ui-mods`), WP-219 (`m-relay`). | 9 |
 | [E-03](#e-03) | Umgang mit vorhandenem Code späterer Phasen im G1-Release | entschieden | Steuert den gesamten Meilenstein M-S und den G1-Umfang. | 37 |
 | [E-04](#e-04) | Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells | entschieden | Keiner für M0; Namensschema für WP-142 (`b-met-ddl`). | 3 |
 | [E-05](#e-05) | Fehlende oder abweichende Tags | entschieden | Keiner (Annahme konservativ). | 1 |
@@ -34,12 +36,12 @@ Stand: 2026-10-19. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 | [E-08](#e-08) | TEN-04: GUC-Namen, Semantik leerer Scopes, Systempfade | entschieden | WP-008 (`tenant-core`) und alle WithTenant-WPs. | 2 |
 | [E-09](#e-09) | Schreiben von Zeilen mit `client_id`/`site_id` NULL | entschieden | WP-023 (`rls-client`), WP-027 (`rls-site`). | 2 |
 | [E-10](#e-10) | Tabellen ohne Org-Spalte und globale Katalogzeilen | entschieden | WP-024 (`rls-global`), WP-065 (`rls-matrix`). | 1 |
-| [E-11](#e-11) | Semantik des Team-Scopes | vorläufig entschieden | WP-009 (`scope-resolve`), WP-029 (`rls-team`). | 2 |
+| [E-11](#e-11) | Semantik des Team-Scopes | entschieden | WP-009 (`scope-resolve`), WP-029 (`rls-team`). | 2 |
 | [E-12](#e-12) | ENT-04: Wer darf Entitlements schreiben? | entschieden | WP-074 (`ent-operator`). | 1 |
-| [E-13](#e-13) | RBA-02-Rollenmatrix und AUT-04-Schlüsselformat | vorläufig entschieden | WP-046 (`role-model`), WP-067 (`apikeys`). | 2 |
+| [E-13](#e-13) | RBA-02-Rollenmatrix und AUT-04-Schlüsselformat | entschieden | WP-046 (`role-model`), WP-067 (`apikeys`). | 2 |
 | [E-14](#e-14) | CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering | entschieden | WP-043 (`auth-org`), WP-044 (`kc-admin`). | 2 |
 | [E-15](#e-15) | CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation | entschieden | WP-141 (`b-sec-rotation`), WP-213 (`g1-gate`) (REP-01-Strukturtest). | 2 |
-| [E-16](#e-16) | SEC-10: Zahlenwerte für GraphQL-Limits | vorläufig entschieden | WP-184 (`c-gql-bff`). | 1 |
+| [E-16](#e-16) | SEC-10: Zahlenwerte für GraphQL-Limits | entschieden | WP-184 (`c-gql-bff`). | 1 |
 | [E-17](#e-17) | CH15: Skalierungsziel bestätigen | entschieden | Keine Sperre mehr: Messbasis von NFR-02, NFR-03 und NFR-10 sind 10.000 Objekte (G1-Punkt B5 geschlossen); Folge-WP für Listen und Suche über etwa 25.000 Objekten vor GA. WP-093 (`a-preflight`), WP-203 (`lt-seed`), WP-206 (`lt-run`), WP-334 (`nfr03-lanes`). | 4 |
 | [E-18](#e-18) | CH27 (V): impact_direction | entschieden | WP-127 (`b-rel-types`), WP-176 (`c-imp-direction`). | 2 |
 | [E-19](#e-19) | CH28 (V): gemeinsamer Location-Baum | entschieden | WP-026 (`loc-model`) und Folge-WPs. | 1 |
@@ -57,8 +59,8 @@ Stand: 2026-10-19. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 | [E-31](#e-31) | Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest | entschieden | WP-004 (`dep-scan`), WP-102 (`a-release`), WP-204 (`lt-harness`), WP-209 (`sr-review`). | 4 |
 | [E-32](#e-32) | REC-03: Rang der Quelle IPMI | entschieden | WP-058 (`rec-decide`), WP-220 (`m-srcpolicy`). | 2 |
 | [E-33](#e-33) | TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte | entschieden | WP-111 (`b-signup`), WP-112 (`b-signup-protect`). | 2 |
-| [E-34](#e-34) | ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan | vorläufig entschieden | Folgeänderung zu WP-071 (`ent-model`), WP-203 (`lt-seed`). | 2 |
-| [E-35](#e-35) | NFR-09: Inhalt der Subprozessorenliste | offen | WP-105 (`a-reference`); B6 laut Erklärung des Auftraggebers vom 2026-10-15 erledigt, die Liste ist in `docs/legal/subprozessoren.md` nachzureichen. | 1 |
+| [E-34](#e-34) | ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan | entschieden | Folgeänderung zu WP-071 (`ent-model`), WP-203 (`lt-seed`). | 2 |
+| [E-35](#e-35) | NFR-09: Inhalt der Subprozessorenliste | entschieden | WP-105 (`a-reference`); B6 durch die Erklärung des Auftraggebers vom 2026-10-15 nachgewiesen, sie ersetzt die Liste (Beschluss vom 2026-10-28). | 1 |
 | [E-36](#e-36) | DB-05: Zeilen für Vertrag, installierte Software und Health-Findings | entschieden | WP-077 (`db05-asset`), WP-080 (`db05-lcy`), WP-230 (`m-agent`). | 3 |
 | [E-56](#e-56) | NFR-03: Reihenfolge der Verarbeitung bei parallelen Ingest-Spuren | entschieden | Keine Sperre: WP-334 (`nfr03-lanes`) ist mit Option 1 (Identitätssperre, Standard 4 Spuren) umgesetzt; der Nachweis von NFR-03 (B1) beruht darauf. | 1 |
 | [E-57](#e-57) | Impact-Antwort: kompakte Form und API-01 | entschieden | Keine Sperre: WP-335 (`nfr02-impact`) ist mit Option A (additiv) umgesetzt. | 1 |
@@ -97,13 +99,15 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 
 **Thema:** Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“)
 
-**Status:** offen (2026-10-01)
+**Status:** entschieden (2026-10-28, Erklärung des Auftraggebers ersetzt die Lieferung)
 
-**Festlegung:** Keine Festlegung möglich: Die Texte kann nur der Auftraggeber liefern. Die Übergangsregel gilt ab sofort: WPs setzen nur ausdrücklich genannte Bestandteile um und erfinden keine Funktionen.
+**Festlegung:** Die Erklärung des Auftraggebers vom 2026-10-15 ersetzt die Lieferung der v2-Texte zu AUT-05, AUT-06, NET-04 und ABN-01 (a)/(b) (B4). Sie gilt als Nachweis für G1 und G2 ([E-59](phase2/entscheidungen.md#e-59)). Die Texte werden nicht nachgereicht, und kein WP gleicht die Umsetzung mit ihnen ab. Für alle Verweise auf v2-Texte gilt verbindlich: WPs setzen nur ausdrücklich genannte Bestandteile um und erfinden keine Funktionen.
 
-**Aufgabe:** v2-Originaltexte (UI-01–UI-10, ABN-01, DIS-04, IGA, WFL-04, AUT-05/06, NET-04, REP-01) nachliefern. Zuständig: Auftraggeber/Product Owner. Termin: vor Epic C (UI) bzw. vor WP-212 (ABN-01).
+**Aufgabe:** **erledigt 2026-10-28 ohne Nachreichung** (A-02). Bisher: v2-Originaltexte (UI-01–UI-10, ABN-01, DIS-04, IGA, WFL-04, AUT-05/06, NET-04, REP-01) nachliefern. Zuständig: Auftraggeber/Product Owner. Termin: vor Epic C (UI) bzw. vor WP-212 (ABN-01).
 
 **Nachtrag 2026-10-15:** Der Auftraggeber hat G1-Blocker B4 (v2-Texte zu AUT-05, AUT-06, NET-04 und ABN-01 (a)/(b)) am 2026-10-15 für erledigt erklärt. Die Texte liegen im Repository nicht vor; sie sind in `docs/spec/` nachzureichen (Aufgabe A-02: laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen). Der Status bleibt offen, bis die Texte vorliegen: Erst dann lässt sich Option 1 umsetzen und prüfen, ob die bestehende Umsetzung den Texten entspricht. Die Übergangsregel gilt bis dahin weiter.
+
+**Nachtrag 2026-10-28:** Nach dem Beschluss des Auftraggebers ersetzt die Erklärung vom 2026-10-15 die Lieferung. E-02 ist entschieden, A-02 ohne Nachreichung erledigt. Die bisherige Übergangsregel ist die endgültige Regel. Für G2 gilt die Erklärung nach [E-59](phase2/entscheidungen.md#e-59) fort.
 
 **Frage:** Mehrere IDs verweisen auf nicht vorliegende v2-Texte: individuelle Verträge UI-01–UI-10, ABN-01 (a)/(b) aus „V §65–66“, DIS-04-Umfang „wie v2“, IGA-Details, WFL-04-Ketten, AUT-05, AUT-06, NET-04 sowie der v2-Bestandteil von REP-01.
 
@@ -114,7 +118,7 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 
 **Empfehlung:** Nachliefern vor Epic C (UI) bzw. vor G1 (ABN-01). Bis dahin setzen die WPs nur ausdrücklich genannte Bestandteile um und erfinden keine Funktionen.
 
-**Blockiert / Auswirkung:** Teilumfänge von c-ui-*, WP-152 (`d-protocols`), WP-212 (`g1-abnahme`), WP-231 (`m-workflow`), WP-232 (`m-iga`), WP-237 (`m-ui-mods`), WP-219 (`m-relay`).
+**Blockiert / Auswirkung:** Keine Sperre. Nur ausdrücklich genannte Bestandteile in den Teilumfängen von c-ui-*, WP-152 (`d-protocols`), WP-212 (`g1-abnahme`), WP-231 (`m-workflow`), WP-232 (`m-iga`), WP-237 (`m-ui-mods`), WP-219 (`m-relay`).
 
 **Quelle:** docs/audit/befunde.csv (Status N/P, Hinweise „v2-Text fehlt“)
 
@@ -329,9 +333,9 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 
 **Thema:** Semantik des Team-Scopes
 
-**Status:** vorläufig entschieden (2026-10-01)
+**Status:** entschieden (2026-10-28, Option 1)
 
-**Festlegung:** Option 1 (Schnittmenge, restriktiver) gilt, bis der TEN-Text vorliegt (E-01). Weicht der Text ab, passt ein Folge-WP das Prädikat aus WP-029 an.
+**Festlegung:** Option 1 (Schnittmenge, restriktiver) gilt verbindlich; TEN-05 bestätigt sie. Für Phase 2 gelten die Zusätze aus [`phase2/entscheidungen.md`](phase2/entscheidungen.md) (A-31).
 
 **Frage:** CH25 verlangt Team-Scopes in RLS; welche Objekte einem Team gehören (Ticket-Team, Trainingszuweisung, Desk über Raum) und ob Team-Scope zusätzlich oder alternativ zu Client/Site wirkt, ist ohne TEN-Text offen.
 
@@ -343,6 +347,8 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 **Empfehlung:** Schnittmenge (restriktiver), bis der Text vorliegt.
 
 **Hinweis 2026-10-14:** Der Text liegt seit 2026-10-01 vor (E-01). TEN-05 filtert für team-gescopte Rollen „zusätzlich owner_team_id = ANY(app.team_scope)“, also nach der Schnittmenge. Empfohlen ist, Option 1 durch den Text zu bestätigen; zu prüfen bleibt der Zusatz „Zeilen ohne Team bleiben sichtbar, aber nicht schreibbar“ gegen das Prädikat aus WP-029. Bis zur Bestätigung durch den Product Owner bleibt der Status unverändert.
+
+**Nachtrag 2026-10-28:** Der Auftraggeber, zugleich Product Owner, hat Option 1 nach der Empfehlung bestätigt.
 
 **Blockiert / Auswirkung:** WP-009 (`scope-resolve`), WP-029 (`rls-team`).
 
@@ -381,9 +387,9 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 
 **Thema:** RBA-02-Rollenmatrix und AUT-04-Schlüsselformat
 
-**Status:** vorläufig entschieden (2026-10-01)
+**Status:** entschieden (2026-10-28, Option 1)
 
-**Festlegung:** Bis zum RBA-02-/AUT-04-Text (E-01) werden keine Rechte erweitert und kein neues Schlüsselformat eingeführt. Danach gilt Option 1 (Übernahme aus dem Text).
+**Festlegung:** Option 1: Rollenmatrix nach RBA-02 und Schlüsselformat nach AUT-04 (`rk_live_`/`rk_test_`, Base62-Präfix und Base62-Secret) gelten verbindlich. Rechte werden nur erweitert, wo Katalog oder Entscheidung sie tragen; für Phase 2 legt [E-62](phase2/entscheidungen.md#e-62) die neuen Schlüssel fest.
 
 **Frage:** Die exakte Rollen-/Rechtematrix (inkl. `discovery:ingest`) und das Trennzeichen im API-Key-Format sind ohne Katalogtext nicht eindeutig.
 
@@ -395,6 +401,8 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 **Empfehlung:** Nachliefern (E-01); bis dahin keine Rechte erweitern.
 
 **Hinweis 2026-10-14:** Die Texte liegen seit 2026-10-01 vor (E-01): AUT-04 legt das Schlüsselformat fest (`rk_live_`/`rk_test_`, Base62-Präfix und Base62-Secret), RBA-02 die vollständige Rollenmatrix. Empfohlen ist, Option 1 durch die Texte zu bestätigen; AUT-04 und RBA-02 stehen in `docs/acceptance/g1-gate.md` auf PASS. Bis zur Bestätigung durch den Product Owner bleibt der Status unverändert.
+
+**Nachtrag 2026-10-28:** Der Auftraggeber, zugleich Product Owner, hat Option 1 nach der Empfehlung bestätigt.
 
 **Blockiert / Auswirkung:** WP-046 (`role-model`), WP-067 (`apikeys`).
 
@@ -460,9 +468,9 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 
 **Thema:** SEC-10: Zahlenwerte für GraphQL-Limits
 
-**Status:** vorläufig entschieden (2026-10-01)
+**Status:** entschieden (2026-10-28, Option 1)
 
-**Festlegung:** Die Werte aus dem Befund sind vorbelegt: Abfragetiefe 10, Komplexitätsbudget, 10 s Deadline. Mit dem SEC-10-Text (E-01) werden sie bestätigt oder angepasst.
+**Festlegung:** Option 1: Abfragetiefe 10 und Deadline 10 s gelten verbindlich; SEC-10 nennt dieselben Werte. Das Komplexitätsbudget bleibt der mit WP-184 umgesetzte Wert, weil SEC-10 keine Zahl nennt.
 
 **Frage:** Befund nennt Tiefe 10, Komplexitätsbudget und 10 s Deadline; der Katalogtext liegt nicht vor.
 
@@ -474,6 +482,8 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 **Empfehlung:** Nachgelieferten Text abwarten (E-01); Befundwerte als Vorbelegung.
 
 **Hinweis 2026-10-14:** SEC-10 liegt seit 2026-10-01 vor (E-01) und nennt Tiefe 10 und Timeout 10 s, für das Komplexitätsbudget aber keine Zahl. Empfohlen ist, die Vorbelegung damit zu bestätigen; SEC-10 steht in `docs/acceptance/g1-gate.md` auf PASS. Bis zur Bestätigung durch den Product Owner bleibt der Status unverändert.
+
+**Nachtrag 2026-10-28:** Der Auftraggeber, zugleich Product Owner, hat die Vorbelegung nach der Empfehlung bestätigt.
 
 **Blockiert / Auswirkung:** WP-184 (`c-gql-bff`).
 
@@ -780,6 +790,8 @@ Ein höherer Zielwert entwertet die G1-Messungen und macht vor G1 weitere WPs n�
 
 **Nachtrag 2026-10-15:** Der Auftraggeber hat G1-Blocker B3 (externer Pentest ohne offene High/Critical) am 2026-10-15 für erledigt erklärt. Bericht, Befundliste und Nachtest liegen im Repository nicht vor; Zusammenfassung und Befundliste sind in `docs/security/pentest-g1.md` nachzureichen (Aufgabe A-07: laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen). NFR-08 steht in `docs/acceptance/g1-gate.md` auf PASS durch diese Erklärung.
 
+**Nachtrag 2026-10-28:** Nach dem Beschluss des Auftraggebers ersetzt die Erklärung vom 2026-10-15 Zusammenfassung und Befundliste. A-07 ist ohne Nachreichung erledigt. Für G2 gilt die Erklärung nach [E-59](phase2/entscheidungen.md#e-59) fort.
+
 **Frage:** GATE-03 verlangt einen Pentest ohne offene High/Critical. Dienstleister, Umfang und Zeitfenster sind festzulegen; NFR-08 ist N/P.
 
 **Optionen:**
@@ -935,9 +947,9 @@ Ein höherer Zielwert entwertet die G1-Messungen und macht vor G1 weitere WPs n�
 
 **Thema:** ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan
 
-**Status:** vorläufig entschieden (2026-10-01)
+**Status:** entschieden (2026-10-28, Option 1)
 
-**Festlegung:** Die vorgeschlagene Planmatrix (V) hat bis zu ihrer Bestätigung keine Gate-Wirkung; der Demo-Datensatz verwendet Ist-Pläne.
+**Festlegung:** Option 1: Die Planmatrix (V) ist bestätigt. Für die Schlüssel der Phase 2 gilt sie in der Fassung von [E-44](phase2/entscheidungen.md#e-44); Schlüssel ohne P2-Funktion legt Phase 2 nicht an.
 
 **Frage:** Die vorgeschlagene Planmatrix (V) und der für den Demo-Datensatz zu verwendende Plan sind nicht verbindlich.
 
@@ -949,6 +961,8 @@ Ein höherer Zielwert entwertet die G1-Messungen und macht vor G1 weitere WPs n�
 **Empfehlung:** Bis zur Bestätigung keine Gate-Wirkung der Matrix.
 
 **Hinweis 2026-10-14:** Empfohlen ist, den Eintrag vorläufig zu lassen: Die Planmatrix hat für G1 keine Gate-Wirkung. Die Entscheidung fällt vor G2 bzw. vor dem kommerziellen Start; für Phase 2 ergänzt sie [E-44](phase2/entscheidungen.md#e-44).
+
+**Nachtrag 2026-10-28:** Mit dem Beschluss des Auftraggebers sind E-34 und E-44 nach Empfehlung entschieden; die Matrix ist bestätigt.
 
 **Blockiert / Auswirkung:** Folgeänderung zu WP-071 (`ent-model`), WP-203 (`lt-seed`).
 
@@ -962,11 +976,11 @@ Ein höherer Zielwert entwertet die G1-Messungen und macht vor G1 weitere WPs n�
 
 **Thema:** NFR-09: Inhalt der Subprozessorenliste
 
-**Status:** offen (2026-10-01)
+**Status:** entschieden (2026-10-28, Erklärung des Auftraggebers ersetzt die Lieferung)
 
-**Festlegung:** Die Liste kann nur der Betreiber liefern. Bis zur Lieferung ist NFR-09 nur für den technischen Teil (Datenresidenz) erfüllt.
+**Festlegung:** Die Erklärung des Auftraggebers vom 2026-10-15 ersetzt die Lieferung der Subprozessorenliste (B6). NFR-09 gilt damit für G1 und G2 als nachgewiesen ([E-59](phase2/entscheidungen.md#e-59)). Die Liste wird nicht nachgereicht.
 
-**Aufgabe:** Subprozessorenliste liefern. Zuständig: Betreiber. Termin: vor WP-105 (`a-reference`); überschritten, spätestens vor der G1-Freigabe (B6).
+**Aufgabe:** **erledigt 2026-10-28 ohne Nachreichung** (A-11). Bisher: Subprozessorenliste liefern. Zuständig: Betreiber. Termin: vor WP-105 (`a-reference`); überschritten, spätestens vor der G1-Freigabe (B6).
 
 **Frage:** Die Liste der Subprozessoren kann nur der Betreiber liefern.
 
@@ -974,13 +988,15 @@ Ein höherer Zielwert entwertet die G1-Messungen und macht vor G1 weitere WPs n�
 
 **Nachtrag 2026-10-15:** Der Auftraggeber hat G1-Blocker B6 am 2026-10-15 für erledigt erklärt. Die Liste liegt im Repository nicht vor; `docs/legal/subprozessoren.md` ist weiter leer. Sie ist dort nachzureichen (Aufgabe A-11: laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen). NFR-09 steht in `docs/acceptance/g1-gate.md` auf PASS durch diese Erklärung. Der Status bleibt offen, bis die Liste vorliegt, denn Option 1 ist die Lieferung selbst.
 
+**Nachtrag 2026-10-28:** Nach dem Beschluss des Auftraggebers ersetzt die Erklärung vom 2026-10-15 die Liste. E-35 ist entschieden, A-11 ohne Nachreichung erledigt. Für G2 gilt die Erklärung nach [E-59](phase2/entscheidungen.md#e-59) fort.
+
 **Optionen:**
 
 1. Liste liefern.
 
 **Empfehlung:** Vor WP-105 (`a-reference`) liefern.
 
-**Blockiert / Auswirkung:** WP-105 (`a-reference`); G1-Blocker B6 (NFR-09, GATE-02) laut Erklärung des Auftraggebers vom 2026-10-15 erledigt, die Liste ist nachzureichen.
+**Blockiert / Auswirkung:** WP-105 (`a-reference`); G1-Blocker B6 (NFR-09, GATE-02) durch die Erklärung des Auftraggebers vom 2026-10-15 erledigt; sie ersetzt die Liste (Beschluss vom 2026-10-28).
 
 **Quelle:** NFR-09; PRI-11
 
@@ -1148,16 +1164,16 @@ Diese Aufgaben folgen aus den Empfehlungen. Die betroffenen WPs starten erst, we
 | Nr. | Entscheidung | Aufgabe | Zuständig | Termin |
 |---|---|---|---|---|
 | A-01 | [E-01](#e-01) | **erledigt 2026-10-01:** Katalogteile 02, 04, 05 und 06 in `docs/spec/katalog-v3/` nachliefern | Auftraggeber/Product Owner | vor Beginn von M0.1 (WP-008) |
-| A-02 | [E-02](#e-02) | **laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen** (B4; Texte in `docs/spec/` ablegen): v2-Originaltexte (UI-01–UI-10, ABN-01, DIS-04, IGA, WFL-04, AUT-05/06, NET-04, REP-01) nachliefern | Auftraggeber/Product Owner | vor Epic C (UI) bzw. vor WP-212 (ABN-01) |
+| A-02 | [E-02](#e-02) | **erledigt 2026-10-28** (B4; die Erklärung des Auftraggebers vom 2026-10-15 ersetzt die Texte, keine Nachreichung): v2-Originaltexte (UI-01–UI-10, ABN-01, DIS-04, IGA, WFL-04, AUT-05/06, NET-04, REP-01) nachliefern | Auftraggeber/Product Owner | vor Epic C (UI) bzw. vor WP-212 (ABN-01) |
 | A-03 | [E-04](#e-04) | **entschieden 2026-10-12** (Option 2, Namensschema `idx_attr_<id>`[`_u`]); offen bleibt nur: Teil 03 in `docs/audit/befunde.csv` und `docs/audit/99-gesamtbericht.md` konsolidieren; Texte DB-01, MET-20, MET-30–34, MET-40–44 mit E-01 anfordern | Audit | vor WP-142 (`b-met-ddl`), spätestens vor G1; überschritten, fortgeführt als A-28 in [`phase2/entscheidungen.md`](phase2/entscheidungen.md) (vor G2) |
 | A-04 | [E-15](#e-15) | **erledigt 2026-10-12** (Option 1, WP-240–242): Option zu CH16/PII-Vault wählen (eigenes WP-Paket oder nur Gerüst und Konzept) | Product Owner/Datenschutz | vor Beginn von Epic B (WP-107) |
 | A-05 | [E-17](#e-17) | **erledigt 2026-10-15** (Option 1, B5 geschlossen). Stand 2026-10-14: Empfehlung Option 1 (Budgets bei 10.000 Objekten; Headroom 50.000 funktionsfähig ohne Budgetzusage in G1; Listen und Suche über etwa 25.000 Objekten als bekannte Einschränkung mit Folge-WP vor G2/GA). Skalierungsziel CH15 bestätigen (1.000–10.000 Objekte, Headroom 50.000) oder anderen Wert festlegen | Product Owner | vor WP-093 (`a-preflight`), spätestens vor WP-203 (`lt-seed`); überschritten, empfohlen vor der G1-Freigabe (sonst gilt der Lasttest mit 10.000 Objekten, B5) |
 | A-06 | [E-23](#e-23) | **erledigt 2026-10-01** (durch CI-10/GLO-13): Abgrenzung GLO-13/CI-10 mit den Texten aus E-01 nachliefern | Auftraggeber/Product Owner | vor WP-091 (`glo13-ns`) |
-| A-07 | [E-28](#e-28) | **laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen** (B3; Zusammenfassung und Befundliste in `docs/security/pentest-g1.md`): Pentest-Dienstleister beauftragen, Umfang und Termin festlegen | Auftraggeber | parallel zu Epic C, vor WP-210 |
+| A-07 | [E-28](#e-28) | **erledigt 2026-10-28** (B3; die Erklärung des Auftraggebers vom 2026-10-15 ersetzt Zusammenfassung und Befundliste, keine Nachreichung): Pentest-Dienstleister beauftragen, Umfang und Termin festlegen | Auftraggeber | parallel zu Epic C, vor WP-210 |
 | A-08 | [E-29](#e-29) | **erledigt 2026-10-12** (pgBackRest): Werkzeug für WAL-Archivierung und Basisbackups wählen (pgBackRest, WAL-G oder Managed-Postgres) | Betrieb | vor WP-100 (`a-backup`) |
 | A-09 | [E-32](#e-32) | **erledigt 2026-10-05** (Rang wie Redfish, 90): REC-03-Rang für IPMI festlegen (der am 2026-10-01 gelieferte REC-03-Text nennt IPMI nicht) | Auftraggeber/Product Owner | vor WP-058 (`rec-decide`) |
 | A-10 | [E-33](#e-33) | **erledigt 2026-10-12** (ALTCHA, disposable-email-domains, Trial nach ENT-07): Captcha-Anbieter, Wegwerf-Domain-Liste und Trial-Werte festlegen | Produkt/Datenschutz | vor WP-111 (`b-signup`) |
-| A-11 | [E-35](#e-35) | **laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen** (B6; Liste in `docs/legal/subprozessoren.md`): Subprozessorenliste liefern; bis zur Lieferung ist NFR-09 offen und G1-Blocker B6 | Betreiber | vor WP-105 (`a-reference`); überschritten, spätestens vor der G1-Freigabe (B6) |
+| A-11 | [E-35](#e-35) | **erledigt 2026-10-28** (B6; die Erklärung des Auftraggebers vom 2026-10-15 ersetzt die Liste, keine Nachreichung): Subprozessorenliste liefern; NFR-09 ist durch die Erklärung nachgewiesen (E-59) | Betreiber | vor WP-105 (`a-reference`); überschritten, spätestens vor der G1-Freigabe (B6) |
 | A-12 | [E-56](#e-56) | **erledigt 2026-10-15** (Option 1 mit Identitätssperre). Stand 2026-10-14: WP-334 ist mit der Empfehlung umgesetzt (Option 1 mit Identitätssperre, Standard 4 Spuren: 233 Records/s; mit einer Spur 182 Records/s, NFR-03 verfehlt). Reihenfolgegarantie bei parallelen Ingest-Spuren bestätigen (Empfehlung: je Gerät, gesichert durch die Identitätssperre) | Product Owner | vor WP-334 (`nfr03-lanes`); überschritten, jetzt vor der G1-Freigabe |
 | A-13 | [E-57](#e-57) | **erledigt 2026-10-15** (Option A): Option A bestätigen: Impact-Antwort nur additiv, kompakte Form über `fields=` (API-02); Option C (Wechsel der Standardform nach mindestens 12 Monaten Deprecation) bleibt als spätere Möglichkeit | Product Owner/API-Verantwortlicher | vor der G1-Freigabe |
 | A-14 | [E-58](#e-58) | **erledigt 2026-10-15** (Option 1; dedizierter Referenzhost vor GA, SR-06). Stand 2026-10-15: Der grüne `load.yml`-Lauf liegt vor ([Run 38665599979](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38665599979) auf Commit `918a832`, alle Schwellen eingehalten); die Empfehlung ist gestärkt, zwei unabhängige Umgebungen mit 4 vCPU halten jede Schwelle ein. Lastlauf auf dem 4-vCPU-Host (Commit `dbbfded`) als G1-Nachweis für GATE-03 anerkennen (Empfehlung: Option 1 mit Auflagen; die Auflage eines grünen `load.yml`-Laufs ist für `918a832` erfüllt und wird nach dem Merge nächtlich auf dem Release-Kandidaten wiederholt) oder anderen Nachweis verlangen | Auftraggeber (Gate-Abnahme) mit Product Owner | vor der G1-Freigabe |
