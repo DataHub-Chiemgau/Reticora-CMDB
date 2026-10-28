@@ -116,6 +116,12 @@
       "text": "Verbinden Sie einen Collector, damit die ersten CIs in Ihre CMDB kommen.",
       "continue": "Einrichtung fortsetzen"
     },
+    "reviewEscalation": {
+      "hint": "Offen seit mehr als 14 Tagen.",
+      "none": "Keine offenen Reviews älter als 14 Tage.",
+      "open": "Eskalierte Reviews anzeigen",
+      "loadError": "Die eskalierten Reviews konnten nicht geladen werden"
+    },
     "roleLabel": "Dashboard-Rolle",
     "roleHint": "Die Widget-Auswahl richtet sich nach der gewählten Rolle.",
     "roles": {
@@ -126,6 +132,7 @@
     "widgets": {
       "ciSummary": "CI-Übersicht",
       "collectors": "Collector-Status",
+      "reviewEscalation": "Eskalierte Reviews",
       "slaBreaches": "SLA-Verletzungen",
       "compliance": "Compliance-Score",
       "assets": "Inventar",

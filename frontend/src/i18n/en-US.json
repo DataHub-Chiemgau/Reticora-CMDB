@@ -116,6 +116,12 @@
       "text": "Connect a collector so that the first CIs arrive in your CMDB.",
       "continue": "Continue setup"
     },
+    "reviewEscalation": {
+      "hint": "Open for more than 14 days.",
+      "none": "No open reviews older than 14 days.",
+      "open": "Show escalated reviews",
+      "loadError": "The escalated reviews could not be loaded"
+    },
     "roleLabel": "Dashboard role",
     "roleHint": "The widget selection follows the chosen role.",
     "roles": {
@@ -126,6 +132,7 @@
     "widgets": {
       "ciSummary": "CI overview",
       "collectors": "Collector status",
+      "reviewEscalation": "Escalated reviews",
       "slaBreaches": "SLA breaches",
       "compliance": "Compliance score",
       "assets": "Assets",

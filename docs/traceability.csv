@@ -990,3 +990,4 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/relationship/projection_in
 CI-06;[B];B;frontend/src/pages/CIDetailPage.test.tsx;WP-577
 DB-05;nicht geliefert, CH12/PRI-10;B;frontend/src/pages/CIDetailPage.test.tsx;WP-577
 AST-04;[P2];B;frontend/src/pages/CIFormModal.test.tsx;WP-577
+REC-08;[B];D;frontend/src/pages/DashboardPage.test.tsx;WP-575
