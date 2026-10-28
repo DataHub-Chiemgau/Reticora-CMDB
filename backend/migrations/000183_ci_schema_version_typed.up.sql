@@ -1,4 +1,4 @@
--- Migration 000184: a CI records the schema version of every write of its
+-- Migration 000183: a CI records the schema version of every write of its
 -- typed columns (WP-590, MET-16; F-309).
 --
 -- ci_schema_version (000107) set ci.schema_version only on INSERT, on a

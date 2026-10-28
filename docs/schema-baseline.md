@@ -353,7 +353,7 @@ Policies und `ENABLE` + `FORCE ROW LEVEL SECURITY` sind unverändert.
 den Definitionen des Typs; jede Änderung ergibt eine neue
 `ci_type.schema_version` (000105, 000107). `ci.schema_version` nennt die
 Version, gegen die ein CI zuletzt geschrieben wurde. Der Trigger
-`ci_schema_version` (`BEFORE INSERT OR UPDATE`, Fassung 000184) setzt sie
+`ci_schema_version` (`BEFORE INSERT OR UPDATE`, Fassung 000183) setzt sie
 bei jedem `INSERT` und bei jedem `UPDATE`, das `ci_type_id`, `attributes`
 oder eine typisierte Spalte nach CI-01 ändert (`name`, `manufacturer`,
 `model`, `serial_number`, `hardware_uuid`, `management_ip`, `primary_mac`,
