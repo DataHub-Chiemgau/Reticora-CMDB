@@ -154,7 +154,8 @@ func TestKeyRotationAgainstPostgres(t *testing.T) {
 	if err = hooks.Create(ctx, sub); err != nil {
 		t.Fatal(err)
 	}
-	rotated, err := hooks.RotateSecret(bg, f.OrgA, sub.ID, "second-secret-456", time.Now().Add(-time.Minute))
+	// Rotation is a request path: it runs in the principal's scope (WP-562).
+	rotated, err := hooks.RotateSecret(ctx, f.OrgA, sub.ID, "second-secret-456", time.Now().Add(-time.Minute))
 	if err != nil || rotated.Secret != "second-secret-456" || rotated.PreviousSecret != "first-secret-123" {
 		t.Fatalf("rotate secret: %+v %v", rotated, err)
 	}
@@ -164,7 +165,7 @@ func TestKeyRotationAgainstPostgres(t *testing.T) {
 	if got, _ := hooks.GetByID(ctx, f.OrgA, sub.ID); got.PreviousSecret != "" || got.PreviousSecretExpiresAt != nil || got.Secret != "second-secret-456" {
 		t.Errorf("after the overlap: %+v", got)
 	}
-	if _, err = hooks.RotateSecret(bg, f.OrgA, sub.ID, "third-secret-789", time.Now().Add(webhook.SecretOverlap)); err != nil {
+	if _, err = hooks.RotateSecret(ctx, f.OrgA, sub.ID, "third-secret-789", time.Now().Add(webhook.SecretOverlap)); err != nil {
 		t.Fatal(err)
 	}
 	if cleared, _ := hooks.ClearExpiredSecrets(bg, time.Now()); cleared != 0 {

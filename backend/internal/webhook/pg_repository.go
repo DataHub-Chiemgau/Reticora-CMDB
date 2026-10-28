@@ -318,22 +318,32 @@ func scanWebhook(scanner webhookScanner) (*Subscription, error) {
 	return sub, nil
 }
 
-// RotateSecret implements SecretRotator.
+// RotateSecret implements SecretRotator. It is a request path and runs with
+// the principal's complete scope (database.WithRequestTenant, F-183):
+// without a scope it fails closed (ErrNoTenantScope), another organization
+// is refused (ErrTenantMismatch), row level security limits it to the
+// subscriptions the principal sees and app.user_id names the actor. The
+// org-wide bookkeeping scope (orgScope) is left to the dispatcher.
 func (r *PGRepository) RotateSecret(ctx context.Context, orgID, id, secret string, validUntil time.Time) (*Subscription, error) {
 	var sub *Subscription
-	scope := database.OrgWideScope(orgID, "")
-	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		sub, err = scanWebhook(tx.QueryRow(ctx, `UPDATE webhook_subscription
 			SET previous_secret = secret, previous_secret_expires_at = $4, secret = $3, updated_at = now()
 			WHERE organization_id = $1 AND id::text = $2
 			RETURNING `+webhookSelectColumns, orgID, id, secret, validUntil.UTC()))
 		if err != nil {
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("not found")
+			}
 			return fmt.Errorf("rotate webhook secret: %w", err)
 		}
 		return nil
 	})
-	return sub, err
+	if err != nil {
+		return nil, err
+	}
+	return sub, nil
 }
 
 // ClearExpiredSecrets removes the previous secrets whose overlap has ended

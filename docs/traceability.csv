@@ -961,3 +961,5 @@ AUT-01;[B];B;backend/internal/identity/first_login_integration_test.go;WP-570
 AUT-09;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-570
 REL-08;[B];D;backend/internal/relationship/provenance_integration_test.go;WP-583
 REL-04;[B];D;backend/internal/relationship/provenance_integration_test.go;WP-583
+TEN-06;[B];B;backend/internal/webhook/webhook_scope_integration_test.go;WP-562
+OPS-05;[B];B;backend/internal/webhook/delivery_claim_integration_test.go;WP-562

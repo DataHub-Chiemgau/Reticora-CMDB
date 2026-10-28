@@ -88,6 +88,8 @@ type DeliveryStore interface {
 	Update(ctx context.Context, rec DeliveryRecord) error
 	// ClaimDue atomically leases deliveries whose retry time has come. The
 	// implementation must be safe to run from multiple server replicas.
+	// With an error it may still return leased deliveries, which the
+	// caller processes (F-184).
 	ClaimDue(ctx context.Context, now time.Time, limit int, lease time.Duration) ([]DeliveryRecord, error)
 	// ListBySubscription returns the delivery history of one subscription.
 	ListBySubscription(ctx context.Context, orgID, subscriptionID string, page api.PaginationParams) ([]DeliveryRecord, int, error)

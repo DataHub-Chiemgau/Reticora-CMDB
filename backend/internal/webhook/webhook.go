@@ -520,8 +520,8 @@ func (h *Handler) RotateSecret(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "secret must have at least 16 characters")
 		return
 	}
-	// The repository rotates organization-wide (WP-562 moves it to the
-	// request scope): the subscription must be visible to the caller first.
+	// The repository rotates in the caller's scope (WP-562); the lookup
+	// answers a subscription outside it with 404 first.
 	current, found := h.subscription(w, r, &scope)
 	if !found {
 		return
