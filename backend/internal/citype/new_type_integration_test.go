@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -170,6 +171,136 @@ func TestNewTypeWithoutReleaseAgainstPostgres(t *testing.T) {
 	var stored int
 	if err := f.Admin.QueryRow(bg, `SELECT schema_version FROM ci WHERE id = $1`, item.ID).Scan(&stored); err != nil || stored != 3 {
 		t.Errorf("schema_version written directly: %d (%v), want it kept at 3", stored, err)
+	}
+}
+
+// TestOrgGlobalDefinitionsAreRuntimeLayer covers MET-16 (WP-590, F-308)
+// by decision E-93 (transitional rule, option 2) against PostgreSQL: an
+// organization-global attribute definition (organization_id set, no CI
+// type) is a validated runtime layer. The CI service enforces it on every
+// write of the organization — a required one answers 422 on the attribute
+// without a value and 201 with one, on an own and on a system type — but
+// it is not materialized into a type's schema and does not enter
+// schema_version: neither the organization's type nor the system type,
+// materialized for every organization, gets the property or a new version,
+// and the CI references the version of base and type. Another
+// organization's CIs of the same system type are not bound by it.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestOrgGlobalDefinitionsAreRuntimeLayer(t *testing.T) {
+	f := scopetest.Seed(t, "8c")
+	bg := context.Background()
+	repo := citype.NewPGRepository(f.App)
+	mux := chi.NewRouter()
+	citype.NewHandler(repo).RegisterRoutes(mux)
+	ci.NewHandler(ci.NewService(ci.NewPGRepository(f.App)).WithFieldResolver(repo)).RegisterRoutes(mux)
+	ctxA := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	ctxB := tenant.WithTenant(f.OrgCtx(f.OrgB), tenant.TenantInfo{OrganizationID: f.OrgB, UserID: f.User})
+	call := func(ctx context.Context, method, path, body string) (int, map[string]any) {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		var out map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+	schemaOf := func(id string) (version int, props map[string]any, required []string) {
+		t.Helper()
+		typ, err := repo.GetByID(ctxA, f.OrgA, id)
+		if err != nil {
+			t.Fatalf("get type: %v", err)
+		}
+		props, _ = typ.AttributeSchema["properties"].(map[string]any)
+		return typ.SchemaVersion, props, typ.RequiredFields
+	}
+	violationFields := func(out map[string]any) []string {
+		var fields []string
+		violations, _ := out["violations"].([]any)
+		for _, v := range violations {
+			if m, ok := v.(map[string]any); ok {
+				field, _ := m["field"].(string)
+				fields = append(fields, field)
+			}
+		}
+		return fields
+	}
+
+	code, out := call(ctxA, http.MethodPost, "/api/v1/ci-types", `{"key": "wp590-probe", "name": "WP-590 Probe"}`)
+	own, _ := out["id"].(string)
+	if code != http.StatusCreated || own == "" {
+		t.Fatalf("create type: %d %v", code, out)
+	}
+	var system string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&system); err != nil {
+		t.Fatalf("system type: %v", err)
+	}
+	ownBefore, _, _ := schemaOf(own)
+	systemBefore, _, _ := schemaOf(system)
+
+	// A required organization-global definition of organization A.
+	code, out = call(ctxA, http.MethodPost, "/api/v1/attribute-definitions",
+		`{"key": "wp590_cost_center", "data_type": "text", "required": true}`)
+	defID, _ := out["id"].(string)
+	if code != http.StatusCreated || defID == "" || out["ci_type_id"] != nil {
+		t.Fatalf("org-global definition: %d %v", code, out)
+	}
+
+	// Not materialized, not versioned.
+	types := []struct {
+		name, id string
+		before   int
+	}{{"own-type", own, ownBefore}, {"system-type", system, systemBefore}}
+	for _, tc := range types {
+		version, props, required := schemaOf(tc.id)
+		if _, ok := props["wp590_cost_center"]; ok || version != tc.before || slices.Contains(required, "wp590_cost_center") {
+			t.Errorf("%s: v%d (was v%d), property present %v, required %v; want the runtime layer outside the schema",
+				tc.name, version, tc.before, ok, required)
+		}
+	}
+
+	// Enforced on every CI write of organization A: 422 without a value,
+	// 201 with one; the CI references the version of base and type.
+	var ciID string
+	for _, tc := range types {
+		code, out = call(ctxA, http.MethodPost, "/api/v1/cis", `{"name": "wp590-`+tc.name+`", "ci_type_id": "`+tc.id+`"}`)
+		if code != http.StatusUnprocessableEntity || !slices.Contains(violationFields(out), "wp590_cost_center") {
+			t.Errorf("%s without the value: %d %v, want 422 on wp590_cost_center", tc.name, code, out)
+		}
+		code, out = call(ctxA, http.MethodPost, "/api/v1/cis", `{"name": "wp590-`+tc.name+`", "ci_type_id": "`+tc.id+`",
+			"attributes": {"wp590_cost_center": "CC-590"}}`)
+		if code != http.StatusCreated || out["schema_version"] != float64(tc.before) {
+			t.Errorf("%s with the value: %d %v, want 201 with schema_version %d", tc.name, code, out, tc.before)
+		}
+		ciID, _ = out["id"].(string)
+	}
+
+	// A write that drops the value is refused as well.
+	code, out = call(ctxA, http.MethodPatch, "/api/v1/cis/"+ciID, `{"attributes": {"wp590_cost_center": null}}`)
+	if code != http.StatusUnprocessableEntity || !slices.Contains(violationFields(out), "wp590_cost_center") {
+		t.Errorf("PATCH removing the value: %d %v, want 422 on wp590_cost_center", code, out)
+	}
+
+	// A change of the organization-global definition leaves the versions
+	// alone; the type's own definitions version the type.
+	if code, out = call(ctxA, http.MethodPatch, "/api/v1/attribute-definitions/"+defID, `{"description": "WP-590"}`); code != http.StatusOK {
+		t.Fatalf("patch org-global definition: %d %v", code, out)
+	}
+	if version, _, _ := schemaOf(own); version != ownBefore {
+		t.Errorf("own type after the org-global change: v%d, want v%d", version, ownBefore)
+	}
+	if code, out = call(ctxA, http.MethodPost, "/api/v1/attribute-definitions",
+		`{"ci_type_id": "`+own+`", "key": "wp590_rack", "data_type": "text"}`); code != http.StatusCreated {
+		t.Fatalf("type definition: %d %v", code, out)
+	}
+	if version, _, _ := schemaOf(own); version != ownBefore+1 {
+		t.Errorf("own type after its own definition: v%d, want v%d", version, ownBefore+1)
+	}
+
+	// Organization B's CIs of the same system type are not bound by it.
+	if code, out = call(ctxB, http.MethodPost, "/api/v1/cis", `{"name": "wp590-other-org", "ci_type_id": "`+system+`"}`); code != http.StatusCreated {
+		t.Errorf("organization B without the value: %d %v, want 201", code, out)
 	}
 }
 

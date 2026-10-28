@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000182_search_deeplinks
+Stand: Migration 000183_ci_schema_version_typed
 
 ## Prüfung
 
@@ -344,6 +344,36 @@ OR UPDATE`) setzt `change_kind` für Schreiber, die es nicht setzen (ipam,
 rack, override), und speichert `type_change` als `type_changed`, auch wenn
 der Unmerge Zeilen aus einem älteren Merge-Snapshot zurückschreibt. Die
 Policies und `ENABLE` + `FORCE ROW LEVEL SECURITY` sind unverändert.
+
+## Schemaversion und Laufzeitschicht der Attribute (MET-16, WP-590)
+
+`ci_type.attribute_schema` ist das materialisierte Schema eines Typs:
+`generate_attribute_schema` komponiert die System-Basis
+(`attribute_definition` mit `organization_id` und `ci_type_id` `NULL`) mit
+den Definitionen des Typs; jede Änderung ergibt eine neue
+`ci_type.schema_version` (000105, 000107). `ci.schema_version` nennt die
+Version, gegen die ein CI zuletzt geschrieben wurde. Der Trigger
+`ci_schema_version` (`BEFORE INSERT OR UPDATE`, Fassung 000184) setzt sie
+bei jedem `INSERT` und bei jedem `UPDATE`, das `ci_type_id`, `attributes`
+oder eine typisierte Spalte nach CI-01 ändert (`name`, `manufacturer`,
+`model`, `serial_number`, `hardware_uuid`, `management_ip`, `primary_mac`,
+`hostname`, `fqdn`, `os_name`, `os_version`, `firmware_version`,
+`sys_object_id`), auf die aktuelle Version des Typs. Ein `UPDATE`, das nur
+andere Felder ändert (Systemfelder wie `last_seen_at`, `first_seen_at`,
+`health`, `version`, `updated_at`, `deleted_at`; Zuordnung und Status),
+lässt sie unverändert; ein direktes Schreiben von `schema_version` wird
+ignoriert.
+
+Org-globale Attributdefinitionen (`organization_id` gesetzt, `ci_type_id`
+`NULL`, MET-13) sind nach Entscheidung E-93 (Übergangsregel Option 2) eine
+validierte, nicht materialisierte **Laufzeitschicht**: Der CI-Service
+komponiert sie bei jedem Schreibvorgang der Organisation zwischen System-Basis
+und Typ (`citype.ResolveFields`) und erzwingt sie (Pflichtdefinition ohne Wert
+→ 422). `generate_attribute_schema` nimmt sie nicht auf, ihre Änderung erzeugt
+keine neue Typversion, und `ci.schema_version` referenziert nur System-Basis
+und Typ. Systemtypen sind organisationsübergreifend materialisiert und tragen
+deshalb keine Schicht einer einzelnen Organisation. Eine Org-Schemarevision je
+(Organisation, Typ) (Option 1) wäre ein eigenes WP mit Migration.
 
 ## Tabellen, RLS und Policies
 
