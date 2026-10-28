@@ -96,7 +96,9 @@ func (p *Plugin) baseURL(target string) string {
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "redfish" }
 
-// Probe identifies Redfish endpoints from a set of candidate targets.
+// Probe identifies Redfish endpoints from a set of candidate targets. A
+// target whose certificate is not trusted is returned in *ProbeErrors
+// (plugins.ErrTLSUntrusted); no request reached it.
 func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	concurrency := p.Concurrency
 	if concurrency <= 0 {
@@ -106,6 +108,7 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 	sem := make(chan struct{}, concurrency)
 	var mu sync.Mutex
 	var results []plugins.Result
+	var failed []plugins.TargetError
 	var wg sync.WaitGroup
 
 	for _, target := range targets {
@@ -132,6 +135,16 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 			// after the certificate check of the handshake succeeded.
 			resp, err := p.clientFor(t).Do(req)
 			if err != nil {
+				// A refused certificate is a target that answered but is not
+				// trusted: the run reports it (DIS-08). A target that does
+				// not answer is no error of a probe.
+				if plugins.UntrustedCertificate(err) {
+					mu.Lock()
+					failed = append(failed, plugins.TargetError{Target: t, Err: fmt.Errorf(
+						"redfish: %w: certificate of %s not trusted by the system roots or RETICORA_REDFISH_TLS_SCOPES, no credentials sent: %v",
+						plugins.ErrTLSUntrusted, t, err)})
+					mu.Unlock()
+				}
 				return
 			}
 			defer resp.Body.Close()
@@ -159,7 +172,13 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 	if results == nil {
 		results = []plugins.Result{}
 	}
-	return results, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return results, err
+	}
+	if len(failed) > 0 {
+		return results, &plugins.ProbeErrors{Targets: failed}
+	}
+	return results, nil
 }
 
 // serviceRoot represents the Redfish ServiceRoot response.

@@ -91,6 +91,10 @@ type UserRoleAssignment struct {
 // assignment (DELETE /role-assignments/{id}, AUT-02, API-05).
 const ActionRoleAssignmentRevoked = "role_assignment.revoked"
 
+// ActionLoginRefused is the audit action of a login refused because the
+// user holds no role (F-364): no session, no role assigned.
+const ActionLoginRefused = "user.login_refused"
+
 // CreateUserRequest is the payload for creating a user.
 type CreateUserRequest struct {
 	Email       string `json:"email"`

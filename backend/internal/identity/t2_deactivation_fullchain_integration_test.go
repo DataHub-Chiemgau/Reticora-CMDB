@@ -59,7 +59,7 @@ func TestT2DeactivationFullChain(t *testing.T) {
 	store := cache.NewRedisStore(client.Unwrap())
 
 	users := user.NewPGRepository(f.App)
-	target, err := users.EnsureUser(bg, f.OrgA, "t2-fullchain-subject-ee", "t2-fullchain@example.invalid", "T2 Fullchain")
+	target, _, err := users.EnsureUser(bg, f.OrgA, "t2-fullchain-subject-ee", "t2-fullchain@example.invalid", "T2 Fullchain", "")
 	if err != nil {
 		t.Fatalf("first login: %v", err)
 	}

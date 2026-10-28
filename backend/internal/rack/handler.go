@@ -258,6 +258,10 @@ func (h *Handler) GetLayout(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err, "rack not found")
 		return
 	}
+	if mounts == nil {
+		// An empty rack has an empty mount list, not null (F-253).
+		mounts = []RackMount{}
+	}
 	sort.Slice(mounts, func(i, j int) bool { return mounts[i].PositionU < mounts[j].PositionU })
 	api.WriteJSON(w, http.StatusOK, Layout{Rack: rk, Mounts: mounts, Free: FreeUnits(rk.HeightUnits, mounts)})
 }

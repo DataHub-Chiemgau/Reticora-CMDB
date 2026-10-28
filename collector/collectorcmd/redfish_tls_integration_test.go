@@ -4,6 +4,10 @@
 // scopes of RETICORA_REDFISH_TLS_SCOPES and the Redfish plugin run together
 // against a Redfish emulator with a self-signed certificate on loopback.
 //
+// A refused certificate is a run error of the target with cause tls (DIS-08;
+// WP-641, F-368): TestAuditRedfishUntrustedCertificateReported moved here
+// from redfish_tls_auditdefect_test.go.
+//
 // The fixtures in testdata/redfish-tls are self-signed P-256 certificates for
 // IP 127.0.0.1, valid for 100 years:
 //
@@ -403,6 +407,44 @@ func TestRedfishTLSScopeIntegration(t *testing.T) {
 			if v := rec.Validate(); len(v) != 0 {
 				t.Errorf("the record breaks the DeviceRecord contract: %v", v)
 			}
+		})
+	}
+}
+
+// TestAuditRedfishUntrustedCertificateReported: a pass against a Redfish
+// target without a trusting TLS scope (none, or a wrong pin) reports a run
+// error of protocol redfish for the target that names the certificate error
+// (tls_untrusted) with cause tls, while still sending nothing to the target.
+func TestAuditRedfishUntrustedCertificateReported(t *testing.T) {
+	bmc := startRedfishEmulator(t)
+	scope := collectorScope{ID: "6f0b6f0e-0000-4000-8000-000000000539", Kind: "host", Target: "127.0.0.1", Schedule: "24h",
+		CredentialIDs: []string{"cred-ssh", "cred-redfish"}, Plugins: []string{"redfish"}}
+	for name, tlsScopes := range map[string]string{
+		"no TLS scope": "",
+		"wrong pin":    "127.0.0.1/32=pin:" + spkiPin(t, filepath.Join(redfishTLSDir, "other.pem")),
+	} {
+		t.Run(name, func(t *testing.T) {
+			bmc.reset()
+			t.Setenv("RETICORA_REDFISH_TLS_SCOPES", tlsScopes)
+			auditUsePlugins(t, redfish.New(redfish.WithTLSScopes(tlsScopesFromEnv("RETICORA_REDFISH_TLS_SCOPES")...), redfish.WithPort(bmc.port)))
+			installRedfishTLSBundle(t)
+			collectorScopes.set([]collectorScope{scope}, nil)
+			passes := discoveryPasses(&collectorConfig{})
+			_, errs := runPass(context.Background(), &collectorConfig{}, nil, &passes[0], []string{"redfish"}, &hostCache{})
+			if n := len(bmc.received()); n != 0 {
+				t.Fatalf("%d requests reached the untrusted target", n)
+			}
+			for _, e := range errs {
+				if e.Protocol == "redfish" && e.Target == "127.0.0.1" &&
+					(strings.Contains(e.Message, "certificate") || strings.Contains(e.Message, "tls_untrusted")) {
+					// The cause is one of DiscoveryErrorState (api/openapi.yaml).
+					if e.Cause != "tls" {
+						t.Errorf("cause = %q of %+v, want tls", e.Cause, e)
+					}
+					return
+				}
+			}
+			t.Errorf("run errors = %+v, want a redfish error for 127.0.0.1 that names the certificate error (DIS-08)", errs)
 		})
 	}
 }

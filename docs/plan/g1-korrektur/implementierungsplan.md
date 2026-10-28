@@ -38,10 +38,10 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K4 Funktions-, Validierungs- und Bedienmängel](#k4-funktions--validierungs--und-bedienmängel) | WP-460 – WP-531 | 72 | 99,0 | Alle übrigen P2 behoben. |
 | [K4-Nachträge](#k4-nachträge) | WP-630 – WP-635 | 6 | 7,0 | Funde aus der Umsetzung von K4 behoben (F-355 bis F-362): Kontrast im dunklen Thema, Kartenmarker und Scrollbereiche per Tastatur (a11y-Prüfung in de-DE und en-US), Ausführung ad-hoc angelegter Discovery-Jobs, `PATCH /org` nur org-weit, Rackhöhe gegen alle Mounts, vollständige Listen statt Seitengrößen über 200. |
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
-| [K5-Nachträge](#k5-nachträge) | WP-636 – WP-646 | 11 | 10,5 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-375): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin. |
+| [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **294** | **396,0** | |
+| **Summe** | | **295** | **397,5** | |
 
 ```mermaid
 flowchart LR
@@ -54,7 +54,7 @@ flowchart LR
     K4["K4 Funktions-, Validierungs- und Bedienmängel<br/>72 WPs · 99,0 PT"]
     K4N["K4-Nachträge<br/>6 WPs · 7,0 PT"]
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
-    K5N["K5-Nachträge<br/>11 WPs · 10,5 PT"]
+    K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
@@ -436,6 +436,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-644](#wp-644--clientliste-für-client-gescopte-rollen-ohne-userread) | `k5n-clients-read` | Clientliste für client-gescopte Rollen ohne user:read | K5N | 0,5 | F-373 | WP-556 |
 | [WP-645](#wp-645--lldp-kanten-des-ersten-zyklus-unabhängig-von-der-reihenfolge-der-ingest-lanes) | `k5n-lldp-lane-order` | LLDP-Kanten des ersten Zyklus unabhängig von der Reihenfolge der Ingest-Lanes | K5N | 1,0 | F-374 | WP-498, WP-543 |
 | [WP-646](#wp-646--real-stack-e2e-für-webkit-und-mobile-safari-über-einen-tls-origin) | `k5n-e2e-webkit-tls` | Real-Stack-E2E für WebKit und Mobile Safari über einen TLS-Origin | K5N | 1,0 | F-375 | WP-532, WP-558 |
+| [WP-647](#wp-647--exportdateien-über-den-öffentlichen-origin-herunterladen) | `k5n-export-public-url` | Exportdateien über den öffentlichen Origin herunterladen | K5N | 1,5 | F-376 | WP-646 |
 
 ## Konventionen für alle WPs
 
@@ -14926,6 +14927,8 @@ Geprüft und nicht ohne Befund geschlossen: Alle fünf Kandidaten waren Defekte.
 
 Nachtrag aus der CI von PR #102 (K5, Konvention 16): F-374 (Real-Stack-Fall R01 von `relationships-suppression.spec.ts`, WP-543) ist mit dem Go-Defekttest `TestAuditLLDPEdgesOfFirstCycleIndependentOfLaneOrder` kodiert, der auf `c883c19` rot ausgeführt wurde; WP-645 überführt ihn (Konvention 13). F-375 (Browsermatrix von WP-532) ist geprüft: Der Verdacht, eine Plain-HTTP-Installation auf einem anderen Host verliere die Sitzung, weil das Refresh-Cookie immer `Secure` ist, trifft nicht zu, denn auf einem unsicheren Origin beginnt keine Anmeldung (SPA `InsecureContextError`, INS-04) und SEC-01 verlangt TLS. Es bleibt ein Artefakt der Testumgebung (P3): WebKit speichert das Secure-Cookie über `http://localhost` nicht. F-375 ist mit zwölf e2e-real-Zeilen kodiert (Fälle 07, 11, 14, 14a, 14b, 15 von `roles-authz.spec.ts`, Projekte webkit und mobile-safari); WP-646 löscht sie erst nach einem grünen CI-Lauf von `install-smoke.yml` und nennt dessen Lauf-ID.
 
+Nachtrag aus der CI von PR #103 (K5-Nachträge, Konvention 16, 2026-10-28): F-376 (P1) ist mit den e2e-real-Zeilen der Fälle E01 (`bulk-jobs-export.spec.ts`), L10b (`ci-lifecycle.spec.ts`) und CS03 (`client-scope.spec.ts`) in den Projekten webkit und mobile-safari kodiert, rot im Lauf 40627970461 auf `541c3c2`: Erst der TLS-Origin von WP-646 macht sichtbar, dass die signierte Download-URL den internen Objektspeicher `http://minio:9000` nennt, den nur `/etc/hosts` des CI-Runners auflöst. Korrektur-WP ist WP-647.
+
 ### WP-636 – Nicht zugeordnete Discovery-Ergebnisse folgen der Client-Bindung ihres Collectors
 
 **Schlüssel:** `k5n-collector-result-scope` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
@@ -14942,7 +14945,7 @@ Nachtrag aus der CI von PR #102 (K5, Konvention 16): F-374 (Real-Stack-Fall R01 
 
 **Akzeptanzkriterien:**
 
-- [ ] Ändert sich `collector.client_id` (Bindung an eine Site, Lösen, jeder andere Weg), werden die nicht zugeordneten Ergebnisse seiner Jobs im selben Statement neu abgeleitet (Trigger auf `collector` als SECURITY DEFINER mit festem `search_path` wie Migration 000141, oder Fortschreibung in `UpdateCollector`); zugeordnete Ergebnisse behalten den Scope ihres CI.
+- [ ] Ändert sich `collector.client_id` (Bindung an eine Site, Lösen, jeder andere Weg), werden die nicht zugeordneten Ergebnisse seiner Jobs im selben Statement neu abgeleitet (Trigger auf `collector` als SECURITY DEFINER mit festem `search_path` wie Migration 000141, oder Fortschreibung in `UpdateCollector`); zugeordnete Ergebnisse behalten den Scope ihres CI. (Korrektur vom 2026-10-27, WP-636: Die Funktionen aus 000141 sind nicht SECURITY DEFINER, sondern erweitern den Scope über `app_scope_widen`/`app_scope_restore` mit festem `search_path`; der Trigger folgt diesem Muster mit weniger Rechten. Beim Lösen der Bindung behält der Collector seinen Client (000127), seine Ergebnisse damit auch.)
 - [ ] Backfill in der Migration: bestehende nicht zugeordnete Ergebnisse tragen den Client ihres Collectors.
 - [ ] Defekttest `TestAuditCollectorBindingMovesUnmatchedResults` grün und aus `tenant/rls/k5_collector_binding_auditdefect_test.go` nach `tenant/rls/audit_t1_child_derivation_integration_test.go` überführt (Datei gelöscht), Zeile aus `tests/audit/expected-failures.txt` entfernt; ergänzt um das Lösen der Bindung (`site_id` NULL) gemäß der festgelegten Regel.
 - [ ] Prüfung als `reticora_app` mit Tenant-GUCs; Migration mit up/down, Roundtrip, `docs/schema-baseline.md` mit dem Generator; RLS-Katalogtests grün.
@@ -14995,6 +14998,8 @@ TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_t
 - [ ] Defekttest `TestAuditCallbackWithoutAssignmentIssuesNoSession` grün und aus `identity/callback_scope_auditdefect_test.go` nach `identity/callback_scope_integration_test.go` überführt (Datei gelöscht), Zeile aus `tests/audit/expected-failures.txt` entfernt; ergänzt um den Erstlogin eines neuen Nutzers (Standardrolle vergeben, Session) und einen Nutzer nur mit Custom-Rolle (Session, keine Standardrolle).
 - [ ] Bestehende Tests, die `EnsureRole` bei jedem Login voraussetzen (`identity`, `user`, MFA-Tests von WP-367), sind umgeschrieben (Konvention 13), nicht abgeschwächt.
 - [ ] Retest F-364: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditCallbackWithoutAssignmentIssuesNoSession|TestCallback' ./internal/identity/` → PASS.
+
+**Anmerkung 2026-10-27 (WP-637):** Die `EnsureRole`-Tests lagen in `user/role_assignment_mfa_test.go` und `user/user_scope_integration_test.go` und sind dort umgeschrieben; eine `pg_repository_integration_test.go` gibt es nicht. Umgesetzt ist die 403-Variante (problem+json, Audit-Eintrag `user.login_refused`), nicht die Umleitung. Eine angenommene Einladung erhält nur die eingeladene Rolle; IdP-Gruppenrollen zählen als Rolle.
 
 **Dateien (8 Einträge):**
 
@@ -15450,10 +15455,16 @@ TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-645
 
 - [ ] Die Projekte webkit und mobile-safari des Jobs `e2e-real` laufen gegen einen TLS-Origin `https://<Name>`, der nicht localhost ist: eine Installation mit `RETICORA_TLS_DOMAIN` und Zertifikat einer Test-CA (Pebble wie in `tls-domain-pebble`, sslip.io-Name des Runners), `BASE_URL` und Issuer auf diesem Origin. Die Test-CA ist im Trust-Store von Runner und Browser eingetragen; kein `ignoreHTTPSErrors`. Chromium, Edge, Firefox und mobile-chrome bleiben auf der Loopback-Installation (INS-04 `@plain-http` unverändert).
 - [ ] Der Job prüft vor der Suite, dass `BASE_URL` mit `https://` beginnt und nicht localhost nennt, und dass die Anmeldung in WebKit das Cookie `reticora_refresh` setzt (Abbruch mit klarer Meldung sonst).
-- [ ] Lauf von `install-smoke.yml` mit allen sechs Projekten grün gegen `tests/audit/expected-failures.txt` (Ratchet `e2e-real-ratchet`); `roles-authz.spec.ts` 07, 11, 14, 14a, 14b und 15 grün in webkit und mobile-safari (Lauf-ID im PR); danach die zwölf e2e-real-Zeilen von F-375 entfernt.
+- [ ] Lauf von `install-smoke.yml` mit allen sechs Projekten grün gegen `tests/audit/expected-failures.txt` (Ratchet `e2e-real-ratchet`); `roles-authz.spec.ts` 07, 11, 14, 14a, 14b und 15 grün in webkit und mobile-safari (Lauf-ID im PR); danach die zwölf e2e-real-Zeilen von F-375 entfernt. (Anmerkung vom 2026-10-28, WP-646: Solange die zwölf Zeilen stehen, meldet der Ratchet grüne Fälle als „überführen“ und der Lauf ist rot; die Zeilen werden deshalb im Commit der Umsetzung entfernt, wie bei F-369/F-370, und der folgende grüne Lauf ist der Nachweis. Die Traceability-Zeile trägt Epic C wie das WP, nicht B.)
 - [ ] deploy/README.md (Abschnitt HTTPS) und docs/troubleshooting-installation.md: Plain HTTP erlaubt eine Anmeldung nur auf Loopback (sicherer Kontext); Safari erneuert dort keine Sitzung (Secure-Cookie); für den Betrieb HTTPS (SEC-01).
 - [ ] actionlint für `install-smoke.yml`; Shell-Hilfsskripte mit shellcheck und dem Shell-Harness geprüft, der Installer nicht ausgeführt.
 - [ ] Retest F-375: CI-Lauf von `install-smoke.yml`, Jobs `e2e-real (webkit)` und `e2e-real (mobile-safari)` → die sechs Fälle grün, `e2e-real-ratchet` 0 Fehler.
+
+**Anmerkung vom 2026-10-28 (CI-Lauf 40623470172, Head 1f316fc):** Die TLS-Prüfung brach in beiden WebKit-Jobs beim Signup ab (`signup failed … keycloak: token: Post "https://<Name>/realms/reticora/protocol/openid-connect/token": … x509: certificate signed by unknown authority`). WebKit vertraute dem Origin (Seiten und Formulare geladen); der Defekt lag im Server: der Keycloak-Admin-Client (Signup, Einladungen, MFA-Bindung) nutzte nur den System-Trust-Store und nicht `RETICORA_OIDC_CA_CERT_FILE` wie der OIDC-Provider. Behoben in `backend/cmd/server/main.go` (`keycloakAccounts`) mit Test `TestKeycloakAccountsTrustTheOIDCCABundle`; kein Abschwächen der Prüfung.
+
+**Anmerkung vom 2026-10-28 (CI-Lauf 40625054870, Head 5b28d52):** Nach dem CA-Fix erreichte der Admin-Token-Abruf Keycloak; `POST /admin/realms/reticora/users` beantwortete das Frontend-nginx aber mit 405, weil es `/admin/` absichtlich nicht weiterleitet (COL-08). Der Admin-Client geht deshalb mit `RETICORA_KEYCLOAK_INTERNAL_URL` (Compose-Standard `http://keycloak:8080`) direkt zu Keycloak und setzt `Host`/`X-Forwarded-*` des öffentlichen Issuers, damit Token-Issuer und Mail-Links unverändert bleiben (`backend/internal/signup/keycloak_route.go`, Tests `TestRouteThroughInternalURL*`). Derselbe Defekt betraf jede Compose-Installation mit TLS-Domäne; kein Abschwächen der Prüfung.
+
+**Anmerkung vom 2026-10-28 (CI-Lauf 40623470172, Job `e2e-real (mobile-chrome)`, Head 1f316fc):** D02, D03, D07 und D09 aus `discovery-override.spec.ts` liefen in mobile-chrome in den Timeout: Klicks und Hover auf die Aktionen in „Herkunft & Overrides“ landeten auf Nachbarzeilen. Ursache: Die drei Wertspalten einer Herkunftszeile brechen einen JSON-Wert ohne Umbruchstelle (Identitätsfeld `{"mac_addresses":[…]}`) nicht um; die Seite war auf dem Telefon 688 px statt 412 px breit. Behoben in `frontend/src/components/cmdb/CIDetailSections.tsx` (Spalten unter `sm` gestapelt, Werte umbrechen überall); Defekttest `CI detail: the provenance actions are clickable next to long values` in `frontend/e2e/mobile-actions.spec.ts` (vorher rot mit „page width 688 > viewport 412“).
 
 **Dateien (6 Einträge):**
 
@@ -15473,13 +15484,65 @@ TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-645
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUT-02;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-646
+AUT-02;[B];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
 TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
 ```
 
 **Entscheidungsbedarf:** keiner (SEC-01 gilt; das Refresh-Cookie bleibt `Secure`)
 
 **Nicht Bestandteil:** `Secure` des Refresh-Cookies nach Schema der Anfrage oder der öffentlichen URL (von den Anforderungen nicht verlangt); Plain-HTTP-Betrieb auf anderen Hosts als Loopback; die übrigen in WebKit roten Fälle anderer Befunde.
+
+
+### WP-647 – Exportdateien über den öffentlichen Origin herunterladen
+
+**Schlüssel:** `k5n-export-public-url` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-646 (`k5n-e2e-webkit-tls`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-376](../../../audit/g1-reaudit/FINDINGS.md#f-376) | P1 | Die signierte Download-URL eines Exports nennt den internen Objektspeicher `http://minio:9000`: im Browser einer Installation nicht auflösbar, über einen HTTPS-Origin zusätzlich gemischter Inhalt | schließt | WP-646 |
+
+**Problem:** `GET /api/v1/exports/{id}` liefert für einen abgeschlossenen Auftrag `download_url` = `http://minio:9000/<bucket>/<key>?X-Amz-…`, signiert für den Endpunkt, den der Server nutzt (`RETICORA_S3_ENDPOINT`). Den Namen `minio` kennt nur das Compose-Netz; MinIO ist nur auf `127.0.0.1:9000` veröffentlicht, das Frontend-nginx leitet keinen Pfad dorthin. Die Real-Stack-Suite lädt Exporte nur, weil ihre Fixtures `127.0.0.1 minio` in `/etc/hosts` des Runners eintragen; über den TLS-Origin von WP-646 scheitern E01, L10b und CS03 in WebKit (kein Download, gemischter Inhalt).
+
+**Akzeptanzkriterien:**
+
+- [ ] Ein Browser lädt die Exportdatei eines abgeschlossenen Auftrags über den öffentlichen Origin der Installation (HTTPS bei `RETICORA_TLS_DOMAIN`), ohne Namensauflösung des internen Objektspeichers; die URL bleibt zeitlich begrenzt (15 Minuten, `X-Amz-Expires=900` oder gleichwertig) und ist ohne Bearer-Token nutzbar oder wird von der SPA mit dem Token geladen.
+- [ ] Der öffentliche Weg erlaubt nur das Lesen der signierten Exportobjekte (kein Listen, kein Schreiben, keine anderen Buckets); ein Test belegt die Abweisung eines unsignierten oder abgelaufenen Zugriffs.
+- [ ] Compose (Standard), Kubernetes (Ingress) und die Doku (deploy/README.md, docs/README.md) beschreiben die Einstellung.
+- [ ] Die `/etc/hosts`-Einträge für `minio` in `frontend/e2e-real/fixtures/setup-real-stack.sh` und `install-smoke.yml` entfallen (Änderung des eingefrorenen ABN-01-Ablaufs nur mit Anmerkung in `docs/acceptance/abn-01.md`).
+- [ ] Retest F-376: Lauf von `install-smoke.yml`, E01, L10b und CS03 grün in allen sechs Projekten; die e2e-real-Zeilen von F-376 entfernt.
+
+**Dateien (6 Einträge):**
+
+- backend/internal/platform/blob/blob.go oder backend/internal/export/job_handler.go
+- frontend/nginx.conf, deploy/docker-compose/nginx-tls.conf.template (falls ein Weiterleitungspfad gewählt wird)
+- deploy/docker-compose/docker-compose.yml, deploy/k8s/
+- frontend/e2e-real/fixtures/setup-real-stack.sh, .github/workflows/install-smoke.yml
+- deploy/README.md, docs/README.md
+- tests/audit/expected-failures.txt
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- Go-Test der öffentlichen URL (Host, Schema, Signatur, Ablauf).
+- Real-Stack E01, L10b und CS03 in allen Projekten (CI).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+EXP-01;[B], DATEV [P2];B;backend/internal/platform/blob/public_url_test.go;WP-647
+EXP-01;[B], DATEV [P2];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-647
+```
+
+**Entscheidungsbedarf:** keiner mehr. Anmerkung vom 2026-10-28, WP-647: gewählt ist der öffentliche Basis-URL mit nur-lesender Weiterleitung im Frontend-nginx. Der Vertrag von `download_url` bleibt unverändert (signierte URL, `X-Amz-Expires=900`, ohne Bearer-Token nutzbar; `onboarding.spec.ts` und E01 prüfen das). Ein Download-Endpunkt der API hätte den Vertrag geändert.
+
+**Umsetzung (2026-10-28):** `blob.S3Store.SetPublicURL` (`RETICORA_S3_PUBLIC_URL`) setzt Schema, Host und Pfadpräfix der signierten GET-URL; die Signatur bleibt die über den internen Endpunkt (`minio:9000`). Compose setzt `<RETICORA_PUBLIC_BASE_URL>/objects`. `frontend/objects-proxy.conf` (in `nginx.conf` und `nginx-tls.conf.template` eingebunden) leitet nur GET/HEAD auf `/objects/(exports|reticora-documents)/` mit `Host: minio:9000` und ohne Cookie und Authorization an MinIO weiter. Lokal gegen MinIO (Image aus `docker-compose.yml`) und `nginx:alpine` mit `frontend/nginx.conf` geprüft: signierter GET über `/objects` 200 mit identischem Inhalt; manipulierte Signatur, unsignierter GET, PUT, DELETE und Bucket-Listing 403; andere Buckets und `/objects/minio/…` erreichen MinIO nicht (SPA); App-Cookie und -Authorization stören nicht; `nginx -t` auch mit der TLS-Vorlage. Die `/etc/hosts`-Einträge für `minio` sind aus `setup-real-stack.sh` und `install-smoke.yml` entfernt (Anmerkung in `docs/acceptance/abn-01.md`); `setup-real-stack.sh` prüft stattdessen, dass `/objects/exports/` mit 403 antwortet. Die sechs e2e-real-Zeilen von F-376 sind entfernt; der folgende CI-Lauf ist der Nachweis.
+
+**Nicht Bestandteil:** Wechsel des Objektspeichers; Kubernetes (die Basis enthält keinen Objektspeicher, `RETICORA_S3_PUBLIC_URL` ist dort mit dem eigenen Ingress zu setzen). Dokumentanhänge nutzen dieselbe signierte URL und sind mit abgedeckt.
 
 ## K6 Geringfügige Mängel
 
@@ -16220,6 +16283,8 @@ AUT-09;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-570
 
 **Problem:** `frontend/src/pages/UserManagementPage.tsx:72-83` zeigt nur ein Status-Badge; Deaktivieren, Reaktivieren und Löschen (TLC-04) sind nur per API möglich (F-196). Der Rollen-Tab zeigt die vier RBA-02-Systemrollen als „Custom“, weil `ListRoles` für die Tabelle `role` `false AS is_system` liefert (`backend/internal/user/pg_repository.go:594-596`) und die UI nur `is_system` auswertet (`UserManagementPage.tsx:175-176`; F-201, roles-authz 09b FAIL). Die lokalisierte Login-Ablehnung deaktivierter Benutzer liefert WP-570 (`t2-first-login`) (CallbackPage).
 
+**Anmerkung vom 2026-10-28 (vorgezogen in PR #103):** F-201 ist auf Wunsch des Auftraggebers vor K6 behoben: `ListRoles` liefert für die Seed-Rollen der Tabelle `role` `is_system = is_builtin` (`backend/internal/user/pg_repository.go`), die UI zeigt „System“. Tests: `TestListRolesMarksStandardRolesAsSystem` (`backend/internal/user/role_system_integration_test.go`, vor der Änderung rot: `is_builtin=true is_system=false` für alle vier Rollen) und der Vitest-Fall „marks the standard roles as System“ in `UserManagementPage.test.tsx`; die sechs e2e-real-Zeilen von 09b sind entfernt. Offen für dieses WP bleiben F-196 (Deaktivieren, Reaktivieren, Löschen in der UI) und der Real-Stack-Fall `user-lifecycle.spec.ts`.
+
 **Akzeptanzkriterien:**
 
 - [ ] Jede Benutzerzeile bietet nur mit `user:manage` Deaktivieren/Reaktivieren (PATCH status) und Löschen (DELETE) mit Bestätigungsdialog; 409 (Owner offener Objekte, Referenzen) zeigt lokalisiert die Übergabepflicht; der eigene Benutzer ist nicht deaktivierbar.
@@ -16676,6 +16741,8 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/rack/mount_location_integr
 **Schließt Audit-WPs:** [WP-175](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-175) (TEILWEISE BESTANDEN, schließt)
 
 **Problem:** GET /racks/{id}/layout (`rack/handler.go:243-249`) serialisiert für ein leeres Rack mounts als null (OpenAPI `api/openapi.yaml:12252-12259`: Pflicht-Array; auch GET /racks/{id}/mounts data:null; Real-Stack L08 rot). RackPage (`RackPage.tsx:62`, `hooks.ts:254-266`) lädt jedes montierte CI einzeln (1+N); `putMount` (`client.ts:751`) ist ungenutzt. Die neuen Routen sind nur per Memory-Test, die Deprecation-Header nur generisch geprüft.
+
+**Anmerkung vom 2026-10-28 (vorgezogen in PR #103):** F-253 ist auf Wunsch des Auftraggebers vor K6 behoben: `GET /racks/{id}/layout` liefert für ein leeres Rack `"mounts": []` (`backend/internal/rack/handler.go`). Test `TestLayoutOfAnEmptyRackHasAnEmptyMountList` (`backend/internal/rack/handler_test.go`, vor der Änderung rot: `mounts = null`); die sechs e2e-real-Zeilen von L08 sind entfernt. Offen für dieses WP bleiben die Anzeigefelder im Layout und der Verzicht auf 1+N-Abrufe im Frontend.
 
 **Akzeptanzkriterien:**
 

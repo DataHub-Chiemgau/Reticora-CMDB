@@ -708,6 +708,23 @@ test_runtime_login_upgrade() {
     runtime_login_sql "$RETICORA_DB_APP_PASSWORD" | grep -qxF "\\set pw '$pw'"
 }
 
+# Master key rotation (SEC-06, WP-642, F-370): a re-run during a rotation
+# keeps the new key and the previous key(s) of .env unchanged, once each, so
+# the server still opens the data keys sealed with the old one.
+test_rerun_keeps_previous_master_key() {
+    local prev="b2xkLW1hc3Rlci1rZXktb25lLTMyLWJ5dGVzLWxvbmch,b2xkZXItbWFzdGVyLWtleS0zMi1ieXRlcy1sb25nISE="
+    write_legacy_env master-key-previous
+    printf 'RETICORA_MASTER_KEY_PREVIOUS=%s\n' "$prev" >> "$ENV_FILE"
+    for _ in 1 2; do
+        collect_config >/dev/null
+        write_env
+        [ "$(env_get RETICORA_MASTER_KEY_PREVIOUS)" = "$prev" ] || return 1
+        [ "$(grep -c '^RETICORA_MASTER_KEY_PREVIOUS=' "$ENV_FILE")" -eq 1 ] || return 1
+        [ "$(env_get RETICORA_MASTER_KEY)" = "bGVnYWN5LW1hc3Rlci1rZXktMzItYnl0ZXMtbG9uZyE=" ] || return 1
+        [ "$(grep -c '^RETICORA_MASTER_KEY=' "$ENV_FILE")" -eq 1 ] || return 1
+    done
+}
+
 # Rotation: a changed value in .env is applied by the next run.
 # shellcheck disable=SC2317 # the stubs are called by the installer functions
 test_runtime_login_rotation() {
@@ -776,6 +793,7 @@ expect_fail "runtime login: a failing role script aborts the installation"      
 run_test    "runtime login: created after the migrations, before the server"     test_runtime_login_order
 run_test    "runtime login: upgrade generates the password, keeps all data"      test_runtime_login_upgrade
 run_test    "runtime login: a changed password in .env is rotated"               test_runtime_login_rotation
+run_test    "re-run: the previous master key of a rotation stays in .env"         test_rerun_keeps_previous_master_key
 expect_fail "runtime login: an unsafe password in .env is refused"               test_runtime_login_rejects_unsafe_password
 run_test    "runtime login: password validation"                                 test_runtime_password_validation
 run_test    "runtime login: the compose server uses reticora_runtime"            test_runtime_login_compose

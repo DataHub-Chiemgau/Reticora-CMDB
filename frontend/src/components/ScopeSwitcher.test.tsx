@@ -261,6 +261,29 @@ describe('ScopeSwitcher', () => {
     expect(screen.getAllByRole('option', { name: 'Standort 201' })).toHaveLength(1);
   });
 
+  // F-373 (WP-644): GET /clients required user:read, which the standard role
+  // client_technician does not hold (RBA-02); the list answered 403 and the
+  // client select stayed disabled. The route now requires location:read,
+  // which the role holds; the server side is covered with the role's
+  // permissions by backend/internal/server/clients_read_integration_test.go.
+  // The switcher itself reads no permissions: it offers what the list returns.
+  it('lets a client technician choose among its clients (F-373)', async () => {
+    // As for a client technician of client A: the list answers 200 with the
+    // own client only (row-level security).
+    const fetchMock = stubServer({ clients: [DEFAULT_CLIENTS[0]!] });
+    renderWithProviders(<ScopeSwitcher />);
+
+    const clientSelect = screen.getByRole('combobox', { name: /kunde|client/i });
+    expect(await screen.findByRole('option', { name: 'Kunde A' })).toBeTruthy();
+    expect(requested(fetchMock, '/api/v1/clients?limit=200')).toBe(true);
+    await waitFor(() => expect((clientSelect as HTMLSelectElement).disabled).toBe(false));
+    expect(screen.queryByRole('option', { name: 'Kunde B' })).toBeNull();
+
+    fireEvent.change(clientSelect, { target: { value: CLIENT_A } });
+    expect(useScopeStore.getState().clientId).toBe(CLIENT_A);
+    expect((clientSelect as HTMLSelectElement).value).toBe(CLIENT_A);
+  });
+
   it('changing the client resets the site', () => {
     useScopeStore.setState({ clientId: CLIENT_A, siteId: SITE_A1 });
     useScopeStore.getState().setClient(CLIENT_B);

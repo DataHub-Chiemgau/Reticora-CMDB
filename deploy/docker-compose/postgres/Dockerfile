@@ -47,11 +47,13 @@ RUN curl -fsSL -o /tmp/pgbackrest.tar.gz \
     && /usr/local/bin/pgbackrest version
 
 FROM ${TIMESCALE_IMAGE}
-# libexpat of the base image has a fixable High finding (E-96). curl: the
-# signed GET ?versioning of `reticora-backup.sh verify-repo` (NFR-05).
+# libexpat and Python 3 of the base image have fixable findings (E-96;
+# python3 CVE-2026-115557, fixed in 3.12.16-r0). curl: the signed GET
+# ?versioning of `reticora-backup.sh verify-repo` (NFR-05).
 RUN apk add --no-cache libpq openssl libxml2 lz4-libs zstd-libs libbz2 zlib libssh2 curl \
-    && apk upgrade --no-cache libexpat \
-    && curl --version
+    && apk upgrade --no-cache libexpat python3 python3-pyc python3-pycache-pyc0 pyc \
+    && curl --version \
+    && python3 --version
 # Rebuilt Go helpers (stage go-tools). timescaledb-parallel-copy is used by
 # neither the entrypoint, the init scripts nor Reticora and is removed.
 COPY --from=go-tools /go/bin/timescaledb-tune /usr/local/bin/timescaledb-tune

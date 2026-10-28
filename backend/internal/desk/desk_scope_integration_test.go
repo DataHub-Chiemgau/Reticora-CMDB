@@ -110,9 +110,8 @@ var dbLeak = regexp.MustCompile(`(?i)sqlstate|constraint|policy|violat|row-level
 // (as an org-wide principal) 422 and an invalid id 400 or 404, never with an
 // SQLSTATE, constraint or policy text; a new desk outside the client-1 scope
 // is refused with 403. The client-2 rows stay unchanged; the own desk
-// answers 2xx. A booking for a user of another organization is accepted
-// today: TestAuditDeskBookingStaysInOrganization
-// (desk_cross_org_auditdefect_test.go).
+// answers 2xx. A booking for a user of another organization is refused like
+// one for an unknown user: TestAuditDeskBookingStaysInOrganization.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestDeskHandlerErrorsAreSanitized(t *testing.T) {
@@ -246,4 +245,126 @@ func TestDeskHandlerErrorsAreSanitized(t *testing.T) {
 	if w = call(http.MethodPost, "/api/v1/desks", `{"name":"desk-h-c1-new","room_id":"`+ownRoom+`"}`); w.Code != http.StatusCreated {
 		t.Errorf("create desk in the own room: %d %s", w.Code, w.Body.String())
 	}
+}
+
+// TestAuditDeskBookingStaysInOrganization was found by WP-538
+// (t1-ev-module-isolation, MGT-03, TEN-06, TEN-09; F-366): POST
+// /desks/{id}/bookings accepted a user_id of another organization, because
+// the foreign key desk_booking.user_id → app_user(id) did not include the
+// organization and the repository did not check it; an organization-A
+// principal booked an organization-A desk for an organization-B user (201)
+// and told an existing user of another organization apart from an unknown id
+// (201 versus 404). Since migration 000177 (WP-639) the references of the
+// desk tables include the organization: the booking for an organization-B
+// user answers exactly like the booking for an unknown user (status and
+// body, without database internals), for a client-1 and an org-wide
+// principal, and no row is written. A desk in a room of organization B, new
+// or moved there, is refused like one in an unknown room.
+//
+// Retest (F-366):
+//
+//	cd backend && go test -count=1 -v -run 'StaysInOrganization' ./internal/desk/
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAuditDeskBookingStaysInOrganization(t *testing.T) {
+	f := scopetest.Seed(t, "35")
+	room := f.Room(t, f.Client1, "desk-x-room-c1")
+	user := f.AppUser(t, f.OrgA, "desk-x-booker")
+	userB := f.AppUser(t, f.OrgB, "desk-x-booker-b")
+	const unknown = "c0de35a0-0000-4000-8000-00000000dead"
+	clientB := f.ID()
+	if _, err := f.Admin.Exec(context.Background(), `INSERT INTO client (id, organization_id, name, slug) VALUES ($1, $2, 'Client B', 'scopetest-35-cb')`, clientB, f.OrgB); err != nil {
+		t.Fatalf("organization-B client: %v", err)
+	}
+	var roomB string
+	if err := f.Admin.QueryRow(context.Background(), `
+		WITH s AS (INSERT INTO site (organization_id, client_id, name) VALUES ($1, $2, $3) RETURNING id),
+		     b AS (INSERT INTO building (organization_id, site_id, name) SELECT $1, id, $3 FROM s RETURNING id)
+		INSERT INTO room (organization_id, building_id, name) SELECT $1, id, $3 FROM b RETURNING id::text`,
+		f.OrgB, clientB, "desk-x-room-b").Scan(&roomB); err != nil {
+		t.Fatalf("organization-B room: %v", err)
+	}
+	repo := desk.NewPGRepository(f.App)
+	d := &desk.Desk{OrganizationID: f.OrgA, RoomID: room, Name: "desk-x-c1", Status: "available", Attributes: map[string]any{}}
+	if err := repo.Create(f.OrgCtx(f.OrgA), d); err != nil {
+		t.Fatalf("desk: %v", err)
+	}
+
+	mux := chi.NewRouter()
+	desk.NewHandler(repo).RegisterRoutes(mux)
+	client1 := database.OrgWideScope(f.OrgA, user)
+	client1.Clients = database.ScopeIDs(f.Client1)
+	orgWide := database.OrgWideScope(f.OrgA, user)
+	callAs := func(scope *database.TenantScope, method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: user})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req.WithContext(database.ContextWithTenantScope(ctx, scope)))
+		return w
+	}
+	// sameAsUnknown requires the answer to the organization-B reference to
+	// equal the one to the unknown id: same status, same body, no internals.
+	sameAsUnknown := func(name string, foreign, unknownID *httptest.ResponseRecorder, want int) {
+		t.Helper()
+		if foreign.Code != want {
+			t.Errorf("%s: status %d, want %d: %s", name, foreign.Code, want, foreign.Body.String())
+		}
+		if foreign.Code != unknownID.Code || problemWithoutTrace(t, foreign) != problemWithoutTrace(t, unknownID) {
+			t.Errorf("%s: answer %d %s differs from the answer to an unknown id %d %s", name, foreign.Code, foreign.Body.String(), unknownID.Code, unknownID.Body.String())
+		}
+		if dbLeak.MatchString(foreign.Body.String()) {
+			t.Errorf("%s: body discloses database internals: %s", name, foreign.Body.String())
+		}
+	}
+	start := time.Now().UTC().Add(72 * time.Hour).Truncate(time.Second)
+	booking := func(userID string, h int) string {
+		s := start.Add(time.Duration(h) * time.Hour)
+		return `{"user_id":"` + userID + `","starts_at":"` + s.Format(time.RFC3339) + `","ends_at":"` + s.Add(time.Hour).Format(time.RFC3339) + `"}`
+	}
+	for i, c := range []struct {
+		name  string
+		scope *database.TenantScope
+	}{{"client 1", &client1}, {"org-wide", &orgWide}} {
+		path := "/api/v1/desks/" + d.ID + "/bookings"
+		sameAsUnknown(c.name+": booking for a user of organization B",
+			callAs(c.scope, http.MethodPost, path, booking(userB, 4*i)),
+			callAs(c.scope, http.MethodPost, path, booking(unknown, 4*i+2)), http.StatusNotFound)
+	}
+	sameAsUnknown("org-wide: desk in a room of organization B",
+		callAs(&orgWide, http.MethodPost, "/api/v1/desks", `{"name":"ghost","room_id":"`+roomB+`"}`),
+		callAs(&orgWide, http.MethodPost, "/api/v1/desks", `{"name":"ghost","room_id":"`+unknown+`"}`), http.StatusUnprocessableEntity)
+	sameAsUnknown("org-wide: desk moved into a room of organization B",
+		callAs(&orgWide, http.MethodPatch, "/api/v1/desks/"+d.ID, `{"room_id":"`+roomB+`"}`),
+		callAs(&orgWide, http.MethodPatch, "/api/v1/desks/"+d.ID, `{"room_id":"`+unknown+`"}`), http.StatusNotFound)
+
+	var n int
+	if err := f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM desk_booking WHERE user_id = $1`, userB).Scan(&n); err != nil || n != 0 {
+		t.Errorf("organization-A bookings for the organization-B user: %d err=%v, want none", n, err)
+	}
+	if err := f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM desk WHERE room_id = $1 OR (organization_id = $2 AND name = 'ghost')`, roomB, f.OrgA).Scan(&n); err != nil || n != 0 {
+		t.Errorf("organization-A desks in the organization-B room: %d err=%v, want none", n, err)
+	}
+
+	// Positive control: a booking for a user of the own organization.
+	if w := callAs(&client1, http.MethodPost, "/api/v1/desks/"+d.ID+"/bookings", booking(user, 10)); w.Code != http.StatusCreated {
+		t.Errorf("booking for a user of the own organization: %d %s, want 201", w.Code, w.Body.String())
+	}
+}
+
+// problemWithoutTrace returns the problem body of w without its trace_id,
+// which differs per request, so that two refusals can be compared.
+func problemWithoutTrace(t *testing.T, w *httptest.ResponseRecorder) string {
+	t.Helper()
+	var p map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+		t.Fatalf("decode problem %q: %v", w.Body.String(), err)
+	}
+	delete(p, "trace_id")
+	out, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("encode problem: %v", err)
+	}
+	return string(out)
 }

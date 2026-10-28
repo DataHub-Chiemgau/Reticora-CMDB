@@ -191,7 +191,9 @@ func (s *Service) runEffect(ctx context.Context, effect Effect, item *Item, res 
 	_ = s.jobs.Mirror(ctx, item.OrganizationID, "review_item", item.ID, jobs.StatusRunning, "")
 	resolved, err := effect(ctx, item, res)
 	if err != nil {
-		_ = s.jobs.Mirror(ctx, item.OrganizationID, "review_item", item.ID, jobs.StatusFailed, err.Error())
+		// The job shows a refusal as it is, any other error sanitized; the
+		// raw error goes to the log (F-372).
+		_ = jobs.MirrorFailed(ctx, s.jobs, item.OrganizationID, "review_item", item.ID, err)
 		return false, err
 	}
 	_ = s.jobs.Mirror(ctx, item.OrganizationID, "review_item", item.ID, jobs.StatusSucceeded, "")

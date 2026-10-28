@@ -23,15 +23,13 @@ func TestUserRepositoryScope(t *testing.T) {
 	f := scopetest.Seed(t, "1a")
 	repo := user.NewPGRepository(f.App)
 
-	// Login provisioning: no scope in the context.
-	idA, err := repo.EnsureUser(context.Background(), f.OrgA, "scopetest-1a-a", "a@scopetest.invalid", "User A")
+	// Login provisioning: no scope in the context; the first login assigns
+	// the default role in the same transaction.
+	idA, _, err := repo.EnsureUser(context.Background(), f.OrgA, "scopetest-1a-a", "a@scopetest.invalid", "User A", "viewer")
 	if err != nil {
 		t.Fatalf("provision org A user: %v", err)
 	}
-	if _, err = repo.EnsureRole(context.Background(), f.OrgA, idA, "viewer"); err != nil {
-		t.Fatalf("provision org A role: %v", err)
-	}
-	idB, err := repo.EnsureUser(context.Background(), f.OrgB, "scopetest-1a-b", "b@scopetest.invalid", "User B")
+	idB, _, err := repo.EnsureUser(context.Background(), f.OrgB, "scopetest-1a-b", "b@scopetest.invalid", "User B", "")
 	if err != nil {
 		t.Fatalf("provision org B user: %v", err)
 	}

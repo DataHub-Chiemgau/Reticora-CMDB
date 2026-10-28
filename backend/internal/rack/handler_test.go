@@ -303,3 +303,23 @@ func TestLayoutAndPutMount(t *testing.T) {
 		t.Errorf("second unmount: %d", w.Code)
 	}
 }
+
+// TestLayoutOfAnEmptyRackHasAnEmptyMountList: the layout of a rack without
+// mounts answers "mounts": [] as api/openapi.yaml requires (F-253). Before
+// the fix it answered "mounts": null (locations-racks L08).
+func TestLayoutOfAnEmptyRackHasAnEmptyMountList(t *testing.T) {
+	_, mux := newMux()
+	w := do(mux, "POST", "/api/v1/racks", `{"room_id":"room-1","name":"E1","height_units":2}`, "org-1")
+	var rk Rack
+	if err := json.Unmarshal(w.Body.Bytes(), &rk); err != nil || w.Code != http.StatusCreated {
+		t.Fatalf("create rack: %d %s", w.Code, w.Body.String())
+	}
+	w = do(mux, "GET", "/api/v1/racks/"+rk.ID+"/layout", "", "org-1")
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("layout: %d %s", w.Code, w.Body.String())
+	}
+	if got := string(raw["mounts"]); got != "[]" {
+		t.Errorf("mounts = %s, want []", got)
+	}
+}

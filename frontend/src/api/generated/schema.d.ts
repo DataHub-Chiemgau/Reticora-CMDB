@@ -299,6 +299,12 @@ export interface paths {
      *     max_users (active users, ENT-03); at the limit it answers 403
      *     entitlement-limit, creates no user and leaves the invitation open.
      *     A deactivated user, and a first login without an admission, get 403.
+     *     Only the first login (an account an administrator created, or the
+     *     first user of the organization) assigns the configured default role,
+     *     when the user holds no role yet; a later login assigns none. A login
+     *     that resolves no role (no role assignment, no custom role, no IdP
+     *     role) gets 403 without session and refresh cookie, and the refusal
+     *     is audited (user.login_refused, TEN-04, RBA-03).
      */
     post: operations['authCallback'];
     delete?: never;
@@ -2922,7 +2928,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List clients */
+    /**
+     * List clients
+     * @description Requires location:read, which every standard role with a client reference holds (RBA-02); the list contains only the clients of the caller's scope (RLS). Creating, updating and deleting a client requires user:manage.
+     */
     get: operations['listClients'];
     put?: never;
     /** Create a client */
@@ -2943,7 +2952,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get a client */
+    /**
+     * Get a client
+     * @description Requires location:read; a client outside the caller's scope answers 404 (RLS).
+     */
     get: operations['getClient'];
     put?: never;
     post?: never;
@@ -11042,6 +11054,7 @@ export interface components {
       organization_id: string;
       name: string;
       description?: string;
+      /** @description True for system roles: the seeded standard roles (also is_builtin) and system custom roles. The UI marks them "System". */
       is_system: boolean;
       /** @description True for the seeded standard roles stored in `role`. */
       is_builtin?: boolean;
@@ -14645,6 +14658,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listDisposalRecords: {
@@ -16245,6 +16259,15 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may delete it (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
     };
   };
@@ -16275,6 +16298,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may change it (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
     };
   };
@@ -16416,6 +16448,15 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may complete it (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description Stocktake is already completed or cancelled */
       409: {

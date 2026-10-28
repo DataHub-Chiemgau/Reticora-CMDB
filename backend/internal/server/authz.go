@@ -57,7 +57,10 @@ var readPermissionFor = map[string]identity.Permission{
 	// user:manage (TLC-03).
 	"invitations": identity.PermUserManage,
 	"teams":       identity.PermUserRead,
-	"clients":     identity.PermUserRead,
+	// Every standard role with a client reference holds location:read
+	// (RBA-02); RLS limits the list to the clients of the scope, and the
+	// scope switcher offers them (UI-01, F-373). Writes stay user:manage.
+	"clients": identity.PermLocationRead,
 	// The organization is the root of the location hierarchy (LOC-01).
 	"org":          identity.PermLocationRead,
 	"roles":        identity.PermRoleRead,

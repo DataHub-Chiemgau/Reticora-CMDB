@@ -185,6 +185,19 @@ installation from before this login switches the server over without touching
 any data; changing `RETICORA_DB_APP_PASSWORD` in `.env` and re-running rotates
 the password.
 
+### Master key rotation (SEC-06)
+
+`RETICORA_MASTER_KEY` in `.env` encrypts the stored credentials (envelope
+encryption, OPS-03). To rotate it, set the new key as `RETICORA_MASTER_KEY`,
+the old one as `RETICORA_MASTER_KEY_PREVIOUS` (comma-separated for several),
+restart the server (`docker compose up -d --no-deps server`) and let the rewrap run
+`rotation.master_key` finish; then remove `RETICORA_MASTER_KEY_PREVIOUS` (or
+leave it empty) and restart the server again. The compose file passes
+`RETICORA_MASTER_KEY_PREVIOUS` to the server, empty when `.env` does not set
+it, and a re-run of the installer keeps it in `.env`. With the new key alone
+the server does not start. Procedure and checks:
+[docs/ops/workers.md](../docs/ops/workers.md#key-rotation-sec-06).
+
 ### HTTPS with Let's Encrypt (nginx + Certbot)
 
 To serve the web UI over HTTPS with a free, auto-renewing Let's Encrypt
@@ -232,6 +245,28 @@ localhost only.
 Also set the **public URLs** to the HTTPS address during installation:
 `RETICORA_PUBLIC_BASE_URL=https://cmdb.example.com` (the installer suggests
 the domain accordingly) and the matching OIDC issuer/redirect URLs.
+
+**Limits of plain HTTP (no domain entered).** Operation requires HTTPS
+(SEC-01); plain HTTP is meant for a first look on the server itself:
+
+- A sign-in only starts in a *secure context*: over HTTPS or on loopback
+  (`http://localhost:<port>`, a browser on the server or an SSH port
+  forward to `localhost`). Over a LAN address or host name
+  (`http://192.168.x.x:3000`, `http://cmdb.lan:3000`) the login page refuses
+  the sign-in with "Die Anmeldung erfordert eine sichere Verbindung" (PKCE
+  needs the Web Crypto API; INS-04), see
+  [docs/troubleshooting-installation.md](../docs/troubleshooting-installation.md#5-web-crypto--insecure-origin).
+- The refresh cookie `reticora_refresh` is always `Secure` (SEC-01, AUT-02).
+  Chromium, Edge and Firefox keep it on `http://localhost`; **Safari (WebKit)
+  does not**, so on a plain-HTTP loopback installation Safari does not renew
+  the session and signs the user out when the access token expires
+  (15 minutes). Use HTTPS for Safari users.
+
+The real-stack E2E suite follows the same rule: its WebKit projects
+(webkit, mobile-safari) run against an installation on a TLS origin with the
+certificate of a test CA (`frontend/e2e-real/fixtures/setup-tls-origin.sh`,
+job `e2e-real` of `install-smoke.yml`), the other browser projects against
+`http://localhost:3000`.
 
 ### Troubleshooting: `container docker-compose-server-1 is unhealthy`
 
@@ -471,14 +506,16 @@ the accept page: without `RETICORA_INVITATION_ACCEPT_URL`, `POST /invitations`
 and `POST /invitations/{id}/renew` answer 503. The base provides all of them,
 `staging` and `prod` inherit them (staging only patches
 `RETICORA_ENVIRONMENT=staging`, replicas and resources and drops the HPA). Every
-reference is mandatory (`optional: false`): a missing secret, ConfigMap or key
-keeps the pod in `CreateContainerConfigError`.
+reference of these is mandatory (`optional: false`): a missing secret, ConfigMap
+or key keeps the pod in `CreateContainerConfigError`. Only the previous master
+key of a rotation (`RETICORA_MASTER_KEY_PREVIOUS`) is optional.
 
 | Variable | Source (base, inherited by `staging` and `prod`) |
 |---|---|
 | `RETICORA_DATABASE_URL` | secret `reticora-db-runtime`, key `database-url` (runtime login, see below) |
 | `RETICORA_REDIS_URL` | literal `redis://redis:6379` in `base/deployment.yaml` |
 | `RETICORA_MASTER_KEY` | secret `reticora-secrets`, key `master-key` |
+| `RETICORA_MASTER_KEY_PREVIOUS` | secret `reticora-secrets`, key `master-key-previous`, optional (`optional: true`; only during a master key rotation) |
 | `RETICORA_OIDC_ISSUER_URL` | ConfigMap `reticora-config`, key `oidc-issuer-url` (Keycloak realm, reachable from the users' browsers) |
 | `RETICORA_OIDC_CLIENT_ID` | ConfigMap `reticora-config`, key `oidc-client-id` |
 | `RETICORA_OIDC_CLIENT_SECRET` | secret `reticora-secrets`, key `oidc-client-secret` |
@@ -602,6 +639,15 @@ mandatory: the deployment references `reticora-secrets/master-key` without
 and the server's start check refuses an empty key. Keep the master key in a
 backup outside the cluster; without it, stored credentials cannot be
 decrypted.
+
+A master key rotation (SEC-06) puts the new key into `master-key` and the old
+one(s), comma-separated, into the key `master-key-previous` of
+`reticora-secrets`, restarts the server
+(`kubectl rollout restart deployment/reticora-server`) and lets
+`rotation.master_key` rewrap the data keys; afterwards it removes
+`master-key-previous` and restarts the server again. This one reference is
+optional (`optional: true`), so the pod starts with or without the key (see
+[docs/ops/workers.md](../docs/ops/workers.md#key-rotation-sec-06)).
 
 **Container logs (NFR-06).** The manifests do not configure log retention:
 the container runtime writes the pod logs to the nodes, where the kubelet

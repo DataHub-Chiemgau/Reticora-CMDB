@@ -608,6 +608,12 @@ paths:
         max_users (active users, ENT-03); at the limit it answers 403
         entitlement-limit, creates no user and leaves the invitation open.
         A deactivated user, and a first login without an admission, get 403.
+        Only the first login (an account an administrator created, or the
+        first user of the organization) assigns the configured default role,
+        when the user holds no role yet; a later login assigns none. A login
+        that resolves no role (no role assignment, no custom role, no IdP
+        role) gets 403 without session and refresh cookie, and the refusal
+        is audited (user.login_refused, TEN-04, RBA-03).
       requestBody:
         required: true
         content:
@@ -3150,6 +3156,8 @@ paths:
           description: Notifications
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/disposal-records:
     x-phase: P4
@@ -4321,6 +4329,15 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            The principal is restricted in the client or site scope: a
+            stocktake belongs to the whole organization, so only a principal
+            with an organization-wide scope may change it (E-09).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
@@ -4332,6 +4349,15 @@ paths:
           description: Stocktake deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            The principal is restricted in the client or site scope: a
+            stocktake belongs to the whole organization, so only a principal
+            with an organization-wide scope may delete it (E-09).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -4437,6 +4463,15 @@ paths:
                 $ref: '#/components/schemas/StocktakeCompletion'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            The principal is restricted in the client or site scope: a
+            stocktake belongs to the whole organization, so only a principal
+            with an organization-wide scope may complete it (E-09).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -5671,6 +5706,11 @@ paths:
       operationId: listClients
       tags: [Clients]
       summary: List clients
+      description: >-
+        Requires location:read, which every standard role with a client
+        reference holds (RBA-02); the list contains only the clients of the
+        caller's scope (RLS). Creating, updating and deleting a client
+        requires user:manage.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -5719,6 +5759,9 @@ paths:
       operationId: getClient
       tags: [Clients]
       summary: Get a client
+      description: >-
+        Requires location:read; a client outside the caller's scope answers
+        404 (RLS).
       responses:
         '200':
           description: Client details
@@ -20250,6 +20293,9 @@ components:
           type: string
         is_system:
           type: boolean
+          description: >-
+            True for system roles: the seeded standard roles (also
+            is_builtin) and system custom roles. The UI marks them "System".
         is_builtin:
           type: boolean
           description: True for the seeded standard roles stored in `role`.

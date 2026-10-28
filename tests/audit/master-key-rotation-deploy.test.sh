@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
 #
-# master-key-rotation-deploy.test.sh — DEFECT test (F-370, found by WP-547):
-# the shipped deployments cannot carry the previous master key, so the
-# documented master key rotation (SEC-06, docs/ops/workers.md "Key rotation")
-# cannot be done on Compose or Kubernetes.
+# master-key-rotation-deploy.test.sh — the shipped deployments carry the
+# previous master key, so the documented master key rotation (SEC-06,
+# docs/ops/workers.md "Key rotation") can be done on Compose and Kubernetes.
+# Runs in the CI job k8s-manifests (.github/workflows/ci.yml).
 #
 # docs/ops/workers.md: "set the new key as RETICORA_MASTER_KEY and the old
 # one in RETICORA_MASTER_KEY_PREVIOUS (comma-separated for several), restart,
 # and let rotation.master_key run". The server reads
-# RETICORA_MASTER_KEY_PREVIOUS (backend/internal/config/config.go), but
-# deploy/docker-compose/docker-compose.yml passes only RETICORA_MASTER_KEY to
+# RETICORA_MASTER_KEY_PREVIOUS (backend/internal/config/config.go); with the
+# new key alone it cannot open the derivation root and the data keys sealed
+# with the old key and does not start ("failed to open the derivation root of
+# the derived secrets").
+#
+# Phase-1 re-audit, found by WP-547 (F-370, fixed by WP-642):
+# deploy/docker-compose/docker-compose.yml passed only RETICORA_MASTER_KEY to
 # the server container and deploy/k8s/base/deployment.yaml only the secret
-# key master-key. With the new key alone the server cannot open the
-# derivation root and the data keys sealed with the old key and does not
-# start ("failed to open the derivation root of the derived secrets").
-# The real-stack case K01 of frontend/e2e-real/key-rotation.spec.ts shows the
-# same on the installed stack.
+# key master-key. Compose now passes RETICORA_MASTER_KEY_PREVIOUS from .env
+# (empty when unset), the base reads it from reticora-secrets, key
+# master-key-previous, with optional: true. The real-stack case K01 of
+# frontend/e2e-real/key-rotation.spec.ts runs the rotation on the installed
+# stack.
 #
 # Cases (fix-agnostic: the value must reach the server's environment):
 #   compose_master_key_previous   RETICORA_MASTER_KEY_PREVIOUS of the .env
@@ -24,11 +29,12 @@
 #   compose_without_previous      control: without the variable the stack
 #                                 still renders (it is optional)
 #   k8s_master_key_previous       the container reticora-server of the
-#                                 rendered base (kustomize build) takes
-#                                 RETICORA_MASTER_KEY_PREVIOUS from a secret
-#                                 key reference marked optional, so the pod
-#                                 starts without it after the old key is
-#                                 retired
+#                                 rendered base and of the overlays staging
+#                                 and prod (kustomize build) takes
+#                                 RETICORA_MASTER_KEY_PREVIOUS from
+#                                 reticora-secrets/master-key-previous, a
+#                                 reference marked optional, so the pod starts
+#                                 without it after the old key is retired
 #
 # Needs docker compose (only `docker compose config`, no daemon), jq,
 # kustomize (KUSTOMIZE or on PATH) and python3 with PyYAML.
@@ -105,12 +111,17 @@ else
     fi
 fi
 
+# The base and the overlays that inherit it (staging, prod).
 if ! command -v "$KUSTOMIZE" >/dev/null 2>&1 || ! python3 -I -c 'import yaml' 2>/dev/null; then
     fail "k8s_master_key_previous: kustomize (set KUSTOMIZE) and python3 with PyYAML are required"
-elif ! "$KUSTOMIZE" build "$ROOT/deploy/k8s/base" > "$TMP/base.yaml" 2> "$TMP/kustomize.err"; then
-    fail "k8s_master_key_previous: kustomize build deploy/k8s/base failed" "$(cat "$TMP/kustomize.err")"
 else
-    verdict="$(python3 -I - "$TMP/base.yaml" <<'PY'
+    for build in base overlays/staging overlays/prod; do
+        out="$TMP/k8s-${build//\//-}.yaml"
+        if ! "$KUSTOMIZE" build "$ROOT/deploy/k8s/$build" > "$out" 2> "$TMP/kustomize.err"; then
+            fail "k8s_master_key_previous: kustomize build deploy/k8s/$build failed" "$(cat "$TMP/kustomize.err")"
+            continue
+        fi
+        verdict="$(python3 -I - "$out" <<'PY'
 import sys, yaml
 docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
 for d in docs:
@@ -128,17 +139,20 @@ for d in docs:
             print("not a secret: RETICORA_MASTER_KEY_PREVIOUS is not read from a secret key")
         elif ref.get("optional") is not True:
             print(f"mandatory: secretKeyRef {ref} is not optional, the pod does not start after the old key is retired")
+        elif (ref.get("name"), ref.get("key")) != ("reticora-secrets", "master-key-previous"):
+            print(f"undocumented: secretKeyRef {ref} is not reticora-secrets/master-key-previous (deploy/README.md)")
         else:
             print("ok")
         sys.exit()
-print("missing: no Deployment reticora-server in the rendered base")
+print("missing: no Deployment reticora-server in the rendered build")
 PY
 )"
-    if [ "$verdict" = "ok" ]; then
-        ok "k8s_master_key_previous: reticora-server reads RETICORA_MASTER_KEY_PREVIOUS from an optional secret key"
-    else
-        fail "k8s_master_key_previous: $verdict; the rotation of docs/ops/workers.md is impossible on Kubernetes"
-    fi
+        if [ "$verdict" = "ok" ]; then
+            ok "k8s_master_key_previous: reticora-server of deploy/k8s/$build reads RETICORA_MASTER_KEY_PREVIOUS from the optional secret key reticora-secrets/master-key-previous"
+        else
+            fail "k8s_master_key_previous: deploy/k8s/$build: $verdict; the rotation of docs/ops/workers.md is impossible on Kubernetes"
+        fi
+    done
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

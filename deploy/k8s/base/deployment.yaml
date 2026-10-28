@@ -61,6 +61,16 @@ spec:
                   name: reticora-secrets
                   key: master-key
                   optional: false
+            # Master key rotation (SEC-06, docs/ops/workers.md "Key
+            # rotation"): the old key(s), comma-separated, while
+            # rotation.master_key rewraps the data keys. Optional, so the pod
+            # starts once the key master-key-previous is removed again.
+            - name: RETICORA_MASTER_KEY_PREVIOUS
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-secrets
+                  key: master-key-previous
+                  optional: true
             # OIDC login. The issuer is mandatory outside development (start
             # check, requiredOutsideDevelopment, F-036); issuer, client ID and
             # redirect URL come from the operator's ConfigMap reticora-config,

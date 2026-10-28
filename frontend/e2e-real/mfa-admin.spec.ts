@@ -53,9 +53,13 @@ async function passwordStep(browser: Browser, account: Credentials) {
 }
 
 async function noSession(page: Page) {
-  expect(new URL(page.url()).origin, 'still on Keycloak, not in the app').not.toBe(
-    new URL(BASE).origin,
-  );
+  // Behind a TLS origin Keycloak shares the origin of the app under /realms/
+  // (WP-646), so the origin alone does not tell Keycloak from the app.
+  const url = new URL(page.url());
+  expect(
+    url.origin !== new URL(BASE).origin || url.pathname.startsWith('/realms/'),
+    `still on Keycloak, not in the app: ${url.origin}${url.pathname}`,
+  ).toBe(true);
 }
 
 /**

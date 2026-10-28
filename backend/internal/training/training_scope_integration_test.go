@@ -66,8 +66,8 @@ var dbLeak = regexp.MustCompile(`(?i)sqlstate|constraint|policy|violat|row-level
 // user, unknown course) 404 and an invalid id 400 or 404, never with an
 // SQLSTATE, constraint or policy text; the organization-B rows stay
 // unchanged. The own course answers 2xx. Assigning to a course or a user of
-// organization B is accepted today: TestAuditTrainingAssignmentStaysInOrganization
-// (training_cross_org_auditdefect_test.go).
+// organization B is refused like an unknown course or user:
+// TestAuditTrainingAssignmentStaysInOrganization.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestTrainingHandlerErrorsAreSanitized(t *testing.T) {
@@ -166,4 +166,109 @@ func TestTrainingHandlerErrorsAreSanitized(t *testing.T) {
 	if w = call(http.MethodPost, "/api/v1/training-assignments/"+own.ID+"/complete", `{}`); w.Code != http.StatusOK {
 		t.Errorf("complete own assignment: %d %s", w.Code, w.Body.String())
 	}
+}
+
+// TestAuditTrainingAssignmentStaysInOrganization was found by WP-538
+// (t1-ev-module-isolation, MGT-03, TEN-06, TEN-09; F-366): POST
+// /trainings/{id}/assignments accepted a course and a user of another
+// organization, because the foreign keys training_assignment.training_id →
+// training(id) and user_id → app_user(id) did not include the organization
+// and the repository did not check them; an organization-A principal created
+// an organization-A assignment to an organization-B course, or for an
+// organization-B user (201 each), told existing ids of another organization
+// apart from unknown ones (201 versus 404), and organization B's deletion of
+// its course deleted the assignment of organization A (ON DELETE CASCADE).
+// Since migration 000177 (WP-639) both references include the organization:
+// each answers exactly like an unknown course or user (status and body,
+// without database internals), for a client-1 and an org-wide principal, no
+// row is written, and the deletion of the organization-B course leaves the
+// assignments of organization A alone.
+//
+// Retest (F-366):
+//
+//	cd backend && go test -count=1 -v -run 'StaysInOrganization' ./internal/training/
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAuditTrainingAssignmentStaysInOrganization(t *testing.T) {
+	f := scopetest.Seed(t, "37")
+	userA := f.AppUser(t, f.OrgA, "training-x-a")
+	userB := f.AppUser(t, f.OrgB, "training-x-b")
+	const unknown = "c0de37a0-0000-4000-8000-00000000dead"
+	repo := training.NewPGRepository(f.App)
+	courseA := &training.Course{OrganizationID: f.OrgA, Title: "A"}
+	if err := repo.Create(f.OrgCtx(f.OrgA), courseA); err != nil {
+		t.Fatalf("organization A course: %v", err)
+	}
+	courseB := &training.Course{OrganizationID: f.OrgB, Title: "B"}
+	if err := repo.Create(f.OrgCtx(f.OrgB), courseB); err != nil {
+		t.Fatalf("organization B course: %v", err)
+	}
+
+	mux := chi.NewRouter()
+	training.NewHandler(repo).RegisterRoutes(mux)
+	client1 := database.OrgWideScope(f.OrgA, userA)
+	client1.Clients = database.ScopeIDs(f.Client1)
+	orgWide := database.OrgWideScope(f.OrgA, userA)
+	assign := func(scope *database.TenantScope, course, user string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/trainings/"+course+"/assignments", strings.NewReader(`{"user_id":"`+user+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: userA})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req.WithContext(database.ContextWithTenantScope(ctx, scope)))
+		return w
+	}
+	for scopeName, scope := range map[string]*database.TenantScope{"client 1": &client1, "org-wide": &orgWide} {
+		for _, c := range []struct{ name, course, user, unknownCourse, unknownUser string }{
+			{"assignment to the organization-B course", courseB.ID, userA, unknown, userA},
+			{"assignment of the organization-B user", courseA.ID, userB, courseA.ID, unknown},
+		} {
+			foreign := assign(scope, c.course, c.user)
+			unknownRef := assign(scope, c.unknownCourse, c.unknownUser)
+			if foreign.Code != http.StatusNotFound {
+				t.Errorf("%s: %s: status %d, want 404: %s", scopeName, c.name, foreign.Code, foreign.Body.String())
+			}
+			if foreign.Code != unknownRef.Code || problemWithoutTrace(t, foreign) != problemWithoutTrace(t, unknownRef) {
+				t.Errorf("%s: %s answers %d %s, the unknown id %d %s; want the same", scopeName, c.name, foreign.Code, foreign.Body.String(), unknownRef.Code, unknownRef.Body.String())
+			}
+			if dbLeak.MatchString(foreign.Body.String()) {
+				t.Errorf("%s: %s: body discloses database internals: %s", scopeName, c.name, foreign.Body.String())
+			}
+		}
+	}
+	bg := context.Background()
+	var n int
+	if err := f.Admin.QueryRow(bg,
+		`SELECT count(*) FROM training_assignment WHERE organization_id = $1 AND (training_id = $2 OR user_id = $3)`,
+		f.OrgA, courseB.ID, userB).Scan(&n); err != nil || n != 0 {
+		t.Errorf("organization-A assignments referencing organization B: %d err=%v, want none", n, err)
+	}
+
+	// Positive control: the own course and user; the assignment survives the
+	// deletion of the organization-B course.
+	if w := assign(&orgWide, courseA.ID, userA); w.Code != http.StatusCreated {
+		t.Fatalf("assignment of the own course and user: %d %s, want 201", w.Code, w.Body.String())
+	}
+	if err := repo.Delete(f.OrgCtx(f.OrgB), f.OrgB, courseB.ID); err != nil {
+		t.Fatalf("organization B deletes its course: %v", err)
+	}
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM training_assignment WHERE organization_id = $1`, f.OrgA).Scan(&n); err != nil || n != 1 {
+		t.Errorf("organization-A assignments after the deletion of the organization-B course: %d err=%v, want 1", n, err)
+	}
+}
+
+// problemWithoutTrace returns the problem body of w without its trace_id,
+// which differs per request, so that two refusals can be compared.
+func problemWithoutTrace(t *testing.T, w *httptest.ResponseRecorder) string {
+	t.Helper()
+	var p map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+		t.Fatalf("decode problem %q: %v", w.Body.String(), err)
+	}
+	delete(p, "trace_id")
+	out, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("encode problem: %v", err)
+	}
+	return string(out)
 }

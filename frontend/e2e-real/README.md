@@ -111,9 +111,10 @@ browser from `npx playwright install --with-deps`) and its own installation. `fr
 collector; `fixtures/setup-real-stack.sh` then applies `fixtures/docker-compose.e2e-real.yml` (an nginx.conf that
 passes a client `X-Real-IP` through, so that each tenant of a spec signs up from its own address; raised rate
 limits like the local audit stack), exports `E2E_DATABASE_URL` and the Keycloak administrator and lets the SNMP fake
-bind UDP 161 (above). Presigned export URLs name the endpoint the server uses (`minio:9000`), so the host must resolve
-`minio` to the published port `127.0.0.1:9000`; the script adds that `/etc/hosts` entry on GitHub Actions and fails
-locally without it. The Playwright JSON report is compared with the `e2e-real` lines of
+bind UDP 161 (above). Presigned export and document URLs name the public origin
+(`<base URL>/objects/…`, `RETICORA_S3_PUBLIC_URL`, F-376); the frontend nginx forwards that path read-only to the
+object store, so no host entry for `minio` is needed; the script checks that the path answers 403 without a
+signature. The Playwright JSON report is compared with the `e2e-real` lines of
 `tests/audit/expected-failures.txt` (`tests/audit/run-auditdefect.sh`, see `tests/audit/README.md`): a listed test
 that turned green, an unlisted red test and a skipped or missing test fail the job. The lines name the project
 (`<project>:frontend/e2e-real/<spec file>`, from `projectName` of the report), and each job compares only the lines of
@@ -126,6 +127,23 @@ project lists the same tests (`--list`), no spec or support file decides by brow
 `projectName`, …; no test is skipped per browser), and the results of all projects together are compared with every
 `e2e-real` line, so a line for a project that did not run is `verwaist`. A deviation that only one browser shows is
 fixed or listed as a finding of its own with the project in `ort`.
+
+### WebKit over a TLS origin (WP-646, F-375)
+
+WebKit does not store the `Secure` refresh cookie `reticora_refresh` over `http://localhost` (Chromium and Firefox
+do), so the jobs of the projects `webkit` and `mobile-safari` (matrix `origin: tls`) do not use the loopback
+installation. `fixtures/setup-tls-origin.sh` installs with `RETICORA_TLS_DOMAIN` on `https://cmdb.<runner IP with
+dashes>.sslip.io` with a certificate of Pebble (the helpers of `tests/install-acme-pebble.test.sh`, as in the job
+`tls-domain-pebble`), puts the Pebble root into the system trust store of the runner (`update-ca-certificates`;
+Playwright's WebKit on Linux reads `/etc/ssl/certs/ca-certificates.crt`) and sets `NODE_EXTRA_CA_CERTS` for the
+request contexts; no `ignoreHTTPSErrors`. `setup-onboarding.sh` then sets `BASE_URL` and the issuer to that origin,
+and `setup-real-stack.sh` also rewrites the TLS template of the installation (server block on 443) with the
+`X-Real-IP` passthrough (`fixtures/docker-compose.e2e-real-tls.yml`). Before the suite the job checks that `BASE_URL`
+starts with `https://` without localhost (`setup-tls-origin.sh --check-base-url`) and runs
+`fixtures/tls-origin.check.ts` (`fixtures/playwright.tls-origin.config.ts`): the sign-in in the project must set the
+`Secure`, `HttpOnly` cookie `reticora_refresh`, else the job stops there. The other four projects stay on
+`http://localhost:3000`. `tests/e2e-real-tls-origin.test.sh` tests the scripts with stubs (job
+`installer-script-tests`).
 
 Locally, after the two setup scripts (or against a hand-built stack with the variables above):
 

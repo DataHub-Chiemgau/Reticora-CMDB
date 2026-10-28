@@ -281,15 +281,44 @@ expired bootstrap certificates and regenerates them with
 `subjectAltName=DNS:<domain>`; `validate_tls_material` verifies the
 certificate parses, carries the SAN, is unexpired and matches the private key.
 
-### `x509: certificate signed by unknown authority` in server logs during login
+### `x509: certificate signed by unknown authority` in server logs during login or signup
 
 **Cause:** While only the self-signed bootstrap certificate is installed
-(Let's Encrypt not issued yet), the backend rejects the token exchange with
-Keycloak.
+(Let's Encrypt not issued yet), or with a certificate of a private CA, the
+backend rejects the token exchange with Keycloak (`login`), or the admin
+token of the Keycloak admin client (`signup failed`, accepted invitations,
+MFA binding of org_admins).
 
 **Fix:** Already handled: the installer sets `RETICORA_OIDC_CA_CERT_FILE` in
 `.env` to the served fullchain, which the server trusts in addition to the
-system store. Re-run the installer if the variable is missing.
+system store, for the OIDC provider and the Keycloak admin client alike.
+Re-run the installer if the variable is missing.
+
+### `signup failed … keycloak: create user: status 405` in server logs
+
+**Cause:** The Keycloak admin client (signup, accepted invitations, MFA
+binding of org_admins) sent the admin REST API (`/admin/realms/…`) to the
+public issuer host. The frontend proxies only `/realms/` and `/resources/`;
+`/admin/` is deliberately not exposed (COL-08), so nginx answers 405.
+
+**Fix:** Already handled in the compose stack: `RETICORA_KEYCLOAK_INTERNAL_URL`
+defaults to `http://keycloak:8080`, and the admin client sends its requests
+there with the public host in `Host` and `X-Forwarded-*`, so Keycloak keeps
+issuing tokens and mail links for the public issuer. Other deployments set
+the variable to an address under which the server reaches Keycloak directly.
+
+### Export download does nothing or fails (`download_url` names `minio:9000`)
+
+**Cause:** The signed download URL named the internal object store
+(`http://minio:9000/…`): a browser on another machine cannot resolve `minio`,
+and from an HTTPS page the `http://` URL is blocked as mixed content (F-376).
+
+**Fix:** Already handled in the compose stack: `RETICORA_S3_PUBLIC_URL`
+defaults to `<RETICORA_PUBLIC_BASE_URL>/objects`, and the frontend nginx
+forwards `/objects/exports/…` and `/objects/reticora-documents/…` read-only to
+MinIO. Check that `RETICORA_PUBLIC_BASE_URL` in `.env` is the address users
+open; `curl -s -o /dev/null -w '%{http_code}' <base URL>/objects/exports/`
+answers 403 (object store, no signature), not 200 (web UI).
 
 ### How the Let's Encrypt certificate is issued
 
@@ -545,6 +574,24 @@ plain-HTTP LAN IP (e.g. `http://192.168.x.x:3000`) breaks this.
 
 **Fix:** Access the UI via `localhost`, or enable HTTPS (enter a public domain
 in the installer). The UI now shows a readable error instead of crashing.
+
+Plain HTTP allows a sign-in only on loopback (`http://localhost:<port>`, a
+browser on the server or an SSH port forward); for operation use HTTPS
+(SEC-01). See [deploy/README.md](../deploy/README.md#https-with-lets-encrypt-nginx--certbot),
+"Limits of plain HTTP".
+
+### Safari signs out after 15 minutes on `http://localhost`
+
+**Cause:** The refresh cookie `reticora_refresh` is always `Secure` (SEC-01).
+Chromium, Edge and Firefox store it on `http://localhost`; Safari (WebKit)
+drops a `Secure` cookie on a plain-HTTP origin, so the SPA cannot renew the
+session and sends the user to the login once the access token expires
+(15 minutes). `POST /api/v1/auth/refresh` answers `401 refresh cookie is
+required`.
+
+**Fix:** Serve the UI over HTTPS (enter a public domain in the installer,
+"HTTPS with Let's Encrypt" in deploy/README.md), or use another browser for
+a plain-HTTP loopback installation.
 
 ---
 

@@ -51,6 +51,10 @@ func (e *ValidationError) Error() string {
 	return strings.Join(parts, "; ")
 }
 
+// PublicMessage implements jobs.PublicError: a failed job shows the
+// violations (F-372).
+func (e *ValidationError) PublicMessage() string { return e.Error() }
+
 // AsValidationError reports whether err is (or wraps) a *ValidationError.
 // validation: see ValidationError.Error.
 func AsValidationError(err error) (*ValidationError, bool) {

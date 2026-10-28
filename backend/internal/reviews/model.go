@@ -198,5 +198,9 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Message }
 
+// PublicMessage implements jobs.PublicError: a failed review.merge job
+// shows the refusal (F-372).
+func (e *Error) PublicMessage() string { return e.Message }
+
 // ProblemType implements api.TypedProblem when Problem is set.
 func (e *Error) ProblemType() string { return e.Problem }

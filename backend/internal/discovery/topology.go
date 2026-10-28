@@ -1,9 +1,11 @@
 package discovery
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/wire"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 )
 
 // RelationshipSource marks derived topology edges as originating from discovery.
@@ -264,28 +267,35 @@ func (h *Handler) deriveTopology(ctx context.Context, orgID string, items []Inge
 
 	derived := make([][]DerivedRelationship, len(items))
 	unknown := make([][]UnknownRelationship, len(items))
-	var keys []EdgeKey
 	for i, item := range items {
 		srcID := resolvedCIID[i]
 		if srcID == "" || len(item.Relationships) == 0 {
 			continue
 		}
 		derived[i], unknown[i] = DeriveTopology(srcID, item.Relationships, index.Resolve, suppressed)
+	}
+	return h.writeTopology(ctx, orgID, derived, unknown, true)
+}
+
+// writeTopology writes the derived edges and opens the reviews of the
+// unknown keys, device by device, and returns the number of new edges.
+// The edges seen again are read with one statement and, with confirm,
+// re-confirmed with one (WP-608, NFR-03); every other edge takes the path
+// of one edge, which also finds an edge created earlier in the batch.
+func (h *Handler) writeTopology(ctx context.Context, orgID string, derived [][]DerivedRelationship, unknown [][]UnknownRelationship, confirm bool) int {
+	var keys []EdgeKey
+	for i := range derived {
 		for _, d := range derived[i] {
 			keys = append(keys, d.key())
 		}
 	}
-	// The edges the batch sees again are read with one statement and
-	// re-confirmed with one (WP-608, NFR-03); every other edge takes the
-	// path of one edge, which also finds an edge created earlier in the
-	// batch.
 	known := h.discoveryEdges(ctx, orgID, keys)
 	var confirmations []relationship.Confirmation
 	created := 0
-	for i := range items {
+	for i := range derived {
 		for _, d := range derived[i] {
 			if e, ok := known[d.key()]; ok {
-				if relationship.MayChange(RelationshipSource, e.Source) {
+				if confirm && relationship.MayChange(RelationshipSource, e.Source) {
 					confidence := d.Confidence
 					confirmations = append(confirmations, relationship.Confirmation{ID: e.ID, Confidence: &confidence})
 				}
@@ -295,12 +305,171 @@ func (h *Handler) deriveTopology(ctx context.Context, orgID string, items []Inge
 				created++
 			}
 		}
+	}
+	for i := range unknown {
 		for j := range unknown[i] {
 			h.reviewUnknownRelationship(ctx, orgID, &unknown[i][j])
 		}
 	}
 	h.confirmEdges(ctx, orgID, confirmations)
 	return created
+}
+
+// StoredNeighbor is an LLDP/CDP neighbor a device reported, stored with its
+// CI (raw_data.neighbors, F-374).
+type StoredNeighbor struct {
+	Protocol       string `json:"protocol"`
+	LocalInterface string `json:"local_interface,omitempty"`
+	RemoteIP       string `json:"remote_ip,omitempty"`
+	RemoteMAC      string `json:"remote_mac,omitempty"`
+	RemoteHostname string `json:"remote_hostname,omitempty"`
+}
+
+// storedNeighbors returns the LLDP/CDP neighbors of a record as they are
+// stored: trimmed, without duplicates and sorted, so that an unchanged
+// report leaves raw_data unchanged whatever order the collector lists them
+// in (AUD-03). FDB and ARP entries are not stored.
+func storedNeighbors(neighbors []plugins.DeviceNeighbor) []StoredNeighbor {
+	var out []StoredNeighbor
+	seen := map[StoredNeighbor]bool{}
+	for i := range neighbors {
+		n := StoredNeighbor{
+			Protocol:       strings.ToLower(strings.TrimSpace(neighbors[i].Protocol)),
+			LocalInterface: strings.TrimSpace(neighbors[i].LocalInterface),
+			RemoteIP:       strings.TrimSpace(neighbors[i].RemoteIP),
+			RemoteMAC:      strings.TrimSpace(neighbors[i].RemoteMAC),
+			RemoteHostname: strings.TrimSpace(neighbors[i].RemoteHostname),
+		}
+		if (n.Protocol != "lldp" && n.Protocol != "cdp") || (n.RemoteIP == "" && n.RemoteMAC == "" && n.RemoteHostname == "") || seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	slices.SortFunc(out, func(a, b StoredNeighbor) int {
+		return cmp.Or(cmp.Compare(a.LocalInterface, b.LocalInterface), cmp.Compare(a.Protocol, b.Protocol),
+			cmp.Compare(a.RemoteIP, b.RemoteIP), cmp.Compare(a.RemoteMAC, b.RemoteMAC), cmp.Compare(a.RemoteHostname, b.RemoteHostname))
+	})
+	return out
+}
+
+// NeighborKeys are the normalized identifiers of new CIs a stored
+// neighbor may name: management IPs, MACs (normalizeMAC) and hostnames
+// or FQDNs, as BuildNeighborIndex indexes them.
+type NeighborKeys struct {
+	IPs, MACs, Hostnames []string
+}
+
+// NeighborReporter is a CI with the neighbors stored from its last report.
+type NeighborReporter struct {
+	ID        string
+	Neighbors []StoredNeighbor
+}
+
+// NeighborReporterFinder lists the CIs of an organization whose stored
+// neighbors name one of the keys (PostgreSQL, F-374).
+type NeighborReporterFinder interface {
+	NeighborReporters(ctx context.Context, orgID string, keys *NeighborKeys) ([]NeighborReporter, error)
+}
+
+// deriveNeighborsOf writes the LLDP/CDP edges other devices reported to the
+// CIs a batch created (created, with their ids createdCIID), from the
+// neighbors stored on the reporting CIs. A reporting device processed
+// before its neighbor's CI existed (another lane, an earlier batch) found
+// no CI to connect to (relationships-suppression.spec.ts R01: 4 of 7 edges
+// of sim-access-01 after the first cycle). Each side derives after its own
+// commit, so whichever of the two derives last sees the other and every
+// edge is written in the cycle that reports both, as derivePowerFeedsOf
+// does for powered_by (WP-498). The neighbors resolve as in deriveTopology
+// (TOP-01 confidence, REL-03 suppressions fail-closed); only the edges to
+// the new CIs are written, edges that exist are left as they are (the
+// reporter's own report re-confirms them), and the CIs processed in this
+// batch were derived with their own report.
+func (h *Handler) deriveNeighborsOf(ctx context.Context, orgID string, created []IngestItem, createdCIID, processedCIID []string) int {
+	if h.relRepo == nil || len(createdCIID) == 0 {
+		return 0
+	}
+	finder, ok := h.repo.(NeighborReporterFinder)
+	if !ok {
+		return 0
+	}
+	newIDs := map[string]bool{}
+	for _, id := range createdCIID {
+		newIDs[id] = true
+	}
+	ips, macs, hosts := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	var keys NeighborKeys
+	add := func(set map[string]bool, list *[]string, key string) {
+		if key != "" && !set[key] {
+			set[key] = true
+			*list = append(*list, key)
+		}
+	}
+	for i := range created {
+		add(ips, &keys.IPs, normalizeKey(created[i].ManagementIP))
+		add(macs, &keys.MACs, normalizeMAC(created[i].PrimaryMAC))
+		add(hosts, &keys.Hostnames, normalizeKey(created[i].Hostname))
+		add(hosts, &keys.Hostnames, normalizeKey(created[i].FQDN))
+	}
+	if len(keys.IPs)+len(keys.MACs)+len(keys.Hostnames) == 0 {
+		return 0
+	}
+	reporters, err := finder.NeighborReporters(ctx, orgID, &keys)
+	if err != nil {
+		slog.Warn("topology of new CIs not derived: stored neighbors not loaded", "event", "discovery.topology.neighbors_failed",
+			"organization_id", orgID, "error", err)
+		return 0
+	}
+	processed := map[string]bool{}
+	for _, id := range processedCIID {
+		processed[id] = true
+	}
+	var sources []string
+	var items []IngestItem
+	for _, r := range reporters {
+		if processed[r.ID] {
+			continue
+		}
+		var rels []wire.IngestRelationship
+		for _, n := range r.Neighbors {
+			if !ips[normalizeKey(n.RemoteIP)] && !macs[normalizeMAC(n.RemoteMAC)] && !hosts[normalizeKey(n.RemoteHostname)] {
+				continue
+			}
+			rels = append(rels, wire.IngestRelationship{TargetIP: n.RemoteIP, TargetMAC: n.RemoteMAC, TargetHostname: n.RemoteHostname,
+				TypeKey: "connected_to", Protocol: n.Protocol, LocalInterface: n.LocalInterface})
+		}
+		if len(rels) > 0 {
+			sources = append(sources, r.ID)
+			items = append(items, IngestItem{Relationships: rels})
+		}
+	}
+	if len(items) == 0 {
+		return 0
+	}
+	suppressed, err := h.suppressionChecker(ctx, orgID)
+	if err != nil {
+		slog.Error("topology of new CIs skipped: suppressions not loaded", "event", "discovery.topology.failed", "organization_id", orgID, "error", err)
+		return 0
+	}
+	// The neighbors resolve against every CI they name, not only the new
+	// ones: a neighbor whose IP names an older CI stays that CI's edge.
+	index := BuildNeighborIndex(h.neighborCandidates(ctx, orgID, items))
+	derived := make([][]DerivedRelationship, len(items))
+	unknown := make([][]UnknownRelationship, len(items))
+	for i := range items {
+		all, odd := DeriveTopology(sources[i], items[i].Relationships, index.Resolve, suppressed)
+		for _, d := range all {
+			if newIDs[d.TargetCIID] {
+				derived[i] = append(derived[i], d)
+			}
+		}
+		for j := range odd {
+			if newIDs[odd[j].TargetCIID] {
+				unknown[i] = append(unknown[i], odd[j])
+			}
+		}
+	}
+	return h.writeTopology(ctx, orgID, derived, unknown, false)
 }
 
 // EdgeKey is the source, target and type of a discovery edge.

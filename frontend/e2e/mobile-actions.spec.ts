@@ -318,3 +318,76 @@ test('review inbox: "Zusammenführen" below the comparison is clickable', async 
     { action: 'merge', ci_id: CHOSEN },
   ]);
 });
+
+test('CI detail: the provenance actions are clickable next to long values', async ({ page }) => {
+  // The values of the real stack (e2e-real D02/D03/D07 in mobile-chrome): an
+  // identity field holds a JSON object without a break opportunity, so the
+  // three value columns of a provenance row were wider than the phone and
+  // every click on "Override setzen" landed on the neighbouring row.
+  const CI = 'c1000000-0000-4000-8000-0000000000b1';
+  const identity = {
+    mac_addresses: ['00:1b:21:5e:00:02', '00:1b:21:5e:00:03'],
+    serial_numbers: [`SN-${RUN}-PRIMARY`],
+  };
+  const calls = await mockBackend(page, [
+    {
+      path: `/cis/${CI}`,
+      reply: () => ({
+        body: {
+          id: CI,
+          name: `sim-access-${RUN}`,
+          model: `Catalyst-9300-48P-${RUN}`,
+          status: 'active',
+          ci_type_id: 'c7000000-0000-4000-8000-0000000000b1',
+          attributes: {},
+          is_manual: false,
+          version: 1,
+          organization_id: ORG_ID,
+          created_at: AT,
+          updated_at: AT,
+        },
+      }),
+    },
+    {
+      path: `/cis/${CI}/provenance`,
+      reply: () => ({
+        body: {
+          data: [
+            {
+              field: 'identifiers',
+              value: identity,
+              source: 'snmp',
+              rank: 60,
+              reason: 'source_rank',
+              diverged: false,
+            },
+            {
+              field: 'model',
+              value: `Catalyst-9300-48P-${RUN}`,
+              source: 'snmp',
+              rank: 60,
+              reason: 'source_rank',
+              diverged: false,
+            },
+          ],
+        },
+      }),
+    },
+    {
+      path: /^\/topology\/cis\/[^/]+\/neighbors$/,
+      reply: () => ({ body: { nodes: [], edges: [] } }),
+    },
+  ]);
+  await signIn(page);
+  await page.goto(`/cmdb/${CI}`);
+  await page.getByText('Herkunft & Overrides').click();
+  await expect(page.getByText('"mac_addresses"', { exact: false }).first()).toBeVisible();
+  await expectNoSidewaysScroll(page);
+
+  const row = page
+    .locator('li')
+    .filter({ has: page.getByRole('button', { name: 'Herkunft von model', exact: true }) });
+  await row.getByRole('button', { name: 'Override setzen' }).click({ timeout: 5_000 });
+  await expect(page.getByRole('dialog')).toBeVisible();
+  expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
+});

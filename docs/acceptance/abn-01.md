@@ -102,6 +102,16 @@ gleich. Die URL nennt den Objektspeicher `minio:9000`; der Workflow
 bleiben unverändert; die Prüfsumme der Datei in `artefakte/SHA256SUMS` ist
 neu.
 
+Änderung nach dem Einfrieren, 2026-10-28: WP-647 (`k5n-export-public-url`,
+EXP-01, F-376). Die signierte `download_url` nennt jetzt den öffentlichen
+Origin der Installation (`<Basis-URL>/objects/<Bucket>/<Schlüssel>?X-Amz-…`,
+`RETICORA_S3_PUBLIC_URL`); das Frontend-nginx leitet diesen Pfad nur lesend
+an den Objektspeicher weiter. Der Eintrag `127.0.0.1 minio` in `/etc/hosts`,
+den `install-smoke.yml` vor dem Onboarding-Lauf setzte, entfällt.
+`frontend/e2e/onboarding.spec.ts` und `setup-onboarding.sh` bleiben
+unverändert (gleiche Prüfsummen): Die Seite lädt die Datei jetzt vom eigenen
+Origin, die Prüfung mit manipulierter Signatur (403) bleibt.
+
 Änderung nach dem Einfrieren, 2026-10-27: WP-529 (`t7-onboarding-suite`,
 UI-17, F-177, F-351, F-353). Grund: Schritt 4 „Scope bestätigen“ wurde nur
 geklickt, wenn ein Vorschlag sichtbar war, und nicht geprüft; ein defekter
@@ -170,9 +180,10 @@ Dateien in `artefakte/SHA256SUMS` sind neu. Der Job `tls-domain-pebble` in
 dort die INS-04-Tests (`--grep @ins-04 --grep-invert @plain-http`) über
 `https://<Domain>`. Die Suite vertraut der Pebble-Wurzel über
 `playwright.install.config.ts` (NSS-Datenbank, `NODE_EXTRA_CA_CERTS`) statt
-über `ignoreHTTPSErrors`. Lauf-ID des Jobs `tls-domain-pebble`: ausstehend.
-Der Lauf hat noch nicht stattgefunden und wird nach dem ersten CI-Lauf mit
-dieser Fassung nachgetragen. Bis dahin ist der Retest von F-352 offen.
+über `ignoreHTTPSErrors`. Lauf-ID des Jobs `tls-domain-pebble`:
+[Install Smoke Test 40613604691](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40613604691)
+(Job 122571465336, Stand `372d442`, PR #102), grün; Nachtrag vom 2026-10-28.
+Damit ist der Retest von F-352 bestanden.
 
 | # | Schritt | Erwartung | Ergebnis |
 |---|---|---|---|

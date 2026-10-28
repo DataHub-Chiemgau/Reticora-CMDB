@@ -8,6 +8,8 @@ Die Befunde F-363 bis F-373 sind bei der Umsetzung von K5 (Nachweislücken) gefu
 
 Die Befunde F-374 und F-375 sind beim Grünziehen von PR #102 (Meilenstein K5) in dessen CI gefunden worden (Konvention 16): F-374 im Real-Stack-Fall R01 von `relationships-suppression.spec.ts` (WP-543), F-375 in der Browsermatrix von `e2e-real` (WP-532, Projekte webkit und mobile-safari). F-374 ist mit einem Go-Defekttest kodiert, der auf dem Stand `c883c19` rot ausgeführt wurde. F-375 ist nach Prüfung der Anforderungen kein Defekt des unterstützten Betriebs, sondern ein Artefakt der Testumgebung (P3) und mit den zwölf e2e-real-Zeilen seiner Fälle kodiert. Beide erhalten ein Korrektur-WP im Abschnitt [K5-Nachträge](../../docs/plan/g1-korrektur/implementierungsplan.md#k5-nachträge) (WP-645, WP-646).
 
+Der Befund F-376 ist beim Grünziehen von PR #103 (K5-Nachträge) gefunden worden (Konvention 16): Erst WP-646 führt die Real-Stack-Suite in WebKit über einen TLS-Origin aus, und dort scheitern die drei Fälle, die eine Exportdatei im Browser laden. Er ist mit den e2e-real-Zeilen dieser Fälle kodiert (rot im CI-Lauf auf `541c3c2`) und erhält das Korrektur-WP WP-647 im Abschnitt K5-Nachträge.
+
 Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `tests/audit/expected-failures.txt` (Ratchet, `tests/audit/run-auditdefect.sh`). Die a11y-Befunde sind in `frontend/e2e/a11y.spec.ts` (gemockter Playwright-Lauf, CI-Job `e2e`) mit `test.fail` und der Befund-ID markiert: Der markierte Fall muss scheitern, ein markierter Fall, der besteht, macht den Lauf rot. Diese Marken sind ihr eigener Ratchet; der Ratchet von WP-337 vergleicht nur die Arten `go`, `sh`, `vitest` und `e2e-real`, daher erhalten sie keine Zeile in `expected-failures.txt`. Shell-Defekttests (`tests/audit/*.test.sh`, Art `sh`) und Real-Stack-Fälle (`frontend/e2e-real/`, Art `e2e-real`, je Browserprojekt eine Zeile, nur in CI ausführbar) stehen ebenfalls in `expected-failures.txt` (F-369, F-370, F-375).
 
 ## Zählung
@@ -15,10 +17,10 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | Priorität | Anzahl |
 |---|---:|
 | P0 | 1 |
-| P1 | 2 |
+| P1 | 3 |
 | P2 | 15 |
 | P3 | 3 |
-| **Summe** | **21** |
+| **Summe** | **22** |
 
 ## Übersicht
 
@@ -45,6 +47,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-373](#f-373) | P2 | Die Standardrolle `client_technician` kann ihre Clients nicht auflisten: `GET /clients` 403, Client-Auswahl des Scope-Umschalters gesperrt | WP-556 | belegt | backend/internal/server/k5_client_technician_clients_auditdefect_test.go TestAuditClientTechnicianListsOwnClients | WP-644 |
 | [F-374](#f-374) | P2 | LLDP-Kanten des ersten Discovery-Zyklus hängen von der Reihenfolge der Ingest-Lanes ab: Kanten zu Nachbarn aus einer späteren Lane fehlen bis zum nächsten Bericht | WP-543 (CI von PR #102) | belegt | backend/internal/discovery/k5_lldp_lane_order_auditdefect_test.go TestAuditLLDPEdgesOfFirstCycleIndependentOfLaneOrder | WP-645 |
 | [F-375](#f-375) | P3 | Real-Stack-E2E in WebKit und Mobile Safari über den Plain-HTTP-Origin `http://localhost`: der Browser verwirft das Secure-Refresh-Cookie, die Refresh-Fälle von `roles-authz` scheitern (Testumgebung) | WP-532 (CI von PR #102) | belegt | frontend/e2e-real/roles-authz.spec.ts 07, 11, 14, 14a, 14b, 15 (Projekte webkit, mobile-safari) | WP-646 |
+| [F-376](#f-376) | P1 | Die signierte Download-URL eines Exports nennt den internen Objektspeicher `http://minio:9000`: im Browser einer Installation nicht auflösbar, über einen HTTPS-Origin zusätzlich gemischter Inhalt; der Export lässt sich im Browser nicht laden | WP-646 (CI von PR #103) | belegt (URL), wahrscheinlich (Mixed Content in WebKit) | frontend/e2e-real/bulk-jobs-export.spec.ts E01, ci-lifecycle.spec.ts L10b, client-scope.spec.ts CS03 (Projekte webkit, mobile-safari) | WP-647 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -319,6 +322,19 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 - **Empfehlung:** Die Projekte webkit und mobile-safari von `e2e-real` gegen einen TLS-Origin ausführen (z. B. eine Installation mit `RETICORA_TLS_DOMAIN` gegen Pebble wie im Job `tls-domain-pebble`, die Test-CA im Trust-Store von Runner und Browser statt `ignoreHTTPSErrors`); Produktcode unverändert. In deploy/README.md festhalten, dass Plain HTTP nur auf Loopback eine Anmeldung erlaubt und Safari dort keine Sitzung erneuert.
 - **Retest (verbindlich):** Lauf von `install-smoke.yml`, Job `e2e-real`, Projekte webkit und mobile-safari über den TLS-Origin: `roles-authz.spec.ts` 07, 11, 14, 14a, 14b und 15 grün (Lauf-ID im PR); danach die zwölf Zeilen von F-375 aus `tests/audit/expected-failures.txt` entfernt.
 - **Kodierender Test:** frontend/e2e-real/roles-authz.spec.ts, Fälle 07, 11, 14, 14a, 14b und 15 in den Projekten webkit und mobile-safari (zwölf e2e-real-Zeilen in `tests/audit/expected-failures.txt`, nur in CI ausführbar; rot im CI-Lauf von PR #102 auf `a15017a`: `POST /auth/refresh: {"detail":"refresh cookie is required","status":401,…}`, `the sign-in sets the HttpOnly refresh cookie … Received: undefined`, `the SPA renews the expired session with the refresh cookie (POST /auth/refresh → 200)`).
+
+<a id="f-376"></a>
+### F-376 (P1) – Die signierte Download-URL eines Exports nennt den internen Objektspeicher `http://minio:9000`: im Browser einer Installation nicht auflösbar, über einen HTTPS-Origin zusätzlich gemischter Inhalt
+
+- **Gefunden in:** WP-646 (`k5n-e2e-webkit-tls`), CI von PR #103 (Job `e2e-real (mobile-safari, webkit, tls)`, Lauf 40627970461, Stand `541c3c2`) · **Betroffene Anforderungen:** EXP-01 (Download über signierte URL), SEC-01 (TLS überall), TEC-09 · **Komponente:** backend/internal/platform/blob/blob.go (`S3Store.PresignedGetURL` signiert für den Endpunkt `RETICORA_S3_ENDPOINT`), deploy/docker-compose/docker-compose.yml (`RETICORA_S3_ENDPOINT: "minio:9000"`, MinIO nur auf `127.0.0.1:9000`), backend/internal/export/job_handler.go (`download_url`), frontend/src/lib/exportDownload.ts · **Quelle:** CI-Lauf; Code und Testfixtures
+- **Reproduktion:** Job `e2e-real` über den TLS-Origin `https://cmdb.<IP>.sslip.io` (WP-646): In webkit und mobile-safari scheitern E01 (`bulk-jobs-export.spec.ts`), L10b (`ci-lifecycle.spec.ts`) und CS03 (`client-scope.spec.ts`) mit `page.waitForEvent: Timeout 30000ms exceeded while waiting for event "download"` bzw. `the export button downloads a file … Received: null`; der Auftrag ist abgeschlossen, Zeile und Zeilenzahl stimmen. Über den Loopback-Origin `http://localhost:3000` sind dieselben Fälle in allen Projekten grün, weil `frontend/e2e-real/fixtures/setup-real-stack.sh` und `install-smoke.yml` `127.0.0.1 minio` in `/etc/hosts` des Runners eintragen („presigned export URLs name the endpoint the server uses (minio:9000)“).
+- **Soll:** EXP-01: Der Nutzer lädt einen abgeschlossenen Export im Browser über eine zeitlich begrenzte signierte URL. SEC-01: TLS überall.
+- **Ist:** `download_url` lautet `http://minio:9000/<bucket>/<key>?X-Amz-…`. Der Name `minio` existiert nur im Compose-Netz und in `/etc/hosts` des CI-Runners; Port 9000 ist nur auf `127.0.0.1` veröffentlicht, und das Frontend-nginx leitet keinen Pfad an MinIO weiter. Über einen HTTPS-Origin ist die URL zudem gemischter Inhalt (HTTP), den WebKit nicht lädt.
+- **Nutzerwirkung:** Auf einer Compose-Installation lädt ein Browser auf einem anderen Rechner die Exportdatei nicht (Name nicht auflösbar); über HTTPS scheitert der Download auch dort, wo `minio` auflösbar wäre. Der Export ist im Browser nur über die API mit eigenem Netzzugang zu MinIO nutzbar.
+- **Ursache:** belegt: die URL nennt den internen Endpunkt (Code, Fixtures, CI). Wahrscheinlich: WebKit verwirft den HTTP-Download von der HTTPS-Seite als gemischten Inhalt (kein `download`-Ereignis, keine Fehlermeldung im Test).
+- **Empfehlung:** Exportdateien über den öffentlichen Origin ausliefern: entweder ein öffentlicher Basis-URL für signierte URLs (`RETICORA_S3_PUBLIC_URL`, z. B. `https://<Domain>/objects`) mit einer nur-GET-Weiterleitung im Frontend-nginx an MinIO (Signatur über den internen Host), oder ein Download-Endpunkt der API, der die Datei aus dem Objektspeicher streamt. Danach die `/etc/hosts`-Einträge der Testfixtures entfernen.
+- **Retest (verbindlich):** Lauf von `install-smoke.yml`: E01, L10b und CS03 grün in allen sechs Projekten, ohne `minio`-Eintrag in `/etc/hosts`; die e2e-real-Zeilen von F-376 entfernt.
+- **Kodierender Test:** frontend/e2e-real/bulk-jobs-export.spec.ts E01, ci-lifecycle.spec.ts L10b, client-scope.spec.ts CS03 in den Projekten webkit und mobile-safari (e2e-real-Zeilen in `tests/audit/expected-failures.txt`, nur in CI ausführbar; rot im CI-Lauf 40627970461 auf `541c3c2`, Jobs `e2e-real (webkit, webkit, tls)` und `e2e-real (mobile-safari, webkit, tls)`).
 
 ## Geprüfte Kandidaten ohne neuen Befund
 

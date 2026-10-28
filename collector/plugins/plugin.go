@@ -51,7 +51,10 @@ type Plugin interface {
 	// Name is the protocol the plugin speaks ("snmp", "redfish" …).
 	Name() string
 	// Probe checks cheaply which targets answer the protocol; each hit
-	// carries what probing learned.
+	// carries what probing learned. A target that answered but could not
+	// be probed for a reason the operator must see (e.g. a certificate the
+	// plugin refused) is returned as a *ProbeErrors next to the hits; any
+	// other error fails the probe of all targets.
 	Probe(ctx context.Context, targets []string, creds map[string]string) ([]Result, error)
 	// Collect gathers the DeviceRecord of one target (DIS-05).
 	Collect(ctx context.Context, target string, creds map[string]string) (*DeviceRecord, error)
@@ -68,16 +71,39 @@ var ErrAuthFailed = errors.New("auth_failed")
 var ErrUnreachable = errors.New("unreachable")
 
 // ErrorCause is the cause of a collection error the plugin marked
-// (auth_failed, unreachable); empty otherwise, then the server derives the
-// cause from the message (DIS-08).
+// (auth_failed, unreachable, tls); empty otherwise, then the server derives
+// the cause from the message (DIS-08).
 func ErrorCause(err error) string {
 	switch {
 	case errors.Is(err, ErrAuthFailed):
 		return "auth_failed"
 	case errors.Is(err, ErrUnreachable):
 		return "unreachable"
+	case errors.Is(err, ErrTLSUntrusted):
+		return "tls"
 	}
 	return ""
+}
+
+// TargetError is the failure of one target in a probe.
+type TargetError struct {
+	Target string
+	Err    error
+}
+
+// ProbeErrors are the targets a probe could not check (DIS-08); Probe
+// returns them next to its hits, and the scope run reports each with
+// protocol, target and cause (ErrorCause).
+type ProbeErrors struct {
+	Targets []TargetError
+}
+
+func (e *ProbeErrors) Error() string {
+	msgs := make([]string, len(e.Targets))
+	for i, t := range e.Targets {
+		msgs[i] = t.Target + ": " + t.Err.Error()
+	}
+	return strings.Join(msgs, "; ")
 }
 
 // CollectRecord turns the result of a plugin's collection into the

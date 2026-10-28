@@ -260,12 +260,16 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
             key={fv.field}
             className="rounded-md border border-gray-100 px-3 py-2 dark:border-gray-800"
           >
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1 font-medium">
+            {/* Values without a break opportunity (an identity field as JSON)
+                wrap anywhere, and the three columns stack on a phone: before,
+                a row was wider than the 412 px of mobile-chrome and every
+                click on its actions landed on the neighbouring row (WP-646). */}
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+              <span className="flex min-w-0 items-center gap-1 font-medium [overflow-wrap:anywhere]">
                 {fv.field}
                 <ProvenanceTooltip provenance={fv} />
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {fv.diverged ? (
                   <Badge variant="warning">{t('ci.diverged', 'abweichend')}</Badge>
                 ) : null}
@@ -292,7 +296,7 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
                 )}
               </div>
             </div>
-            <dl className="mt-1 grid grid-cols-3 gap-2 text-xs">
+            <dl className="mt-1 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3 [&>div]:min-w-0 [&_dd]:[overflow-wrap:anywhere]">
               <div>
                 <dt className="text-gray-500 dark:text-gray-400">
                   {t('ci.discovered', 'Discovery')}

@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -123,6 +124,174 @@ func TestCallbackScopeFromRoleAssignments(t *testing.T) {
 		}
 		if users != 0 {
 			t.Errorf("callback without assignment created %d app_user rows, want 0", users)
+		}
+	})
+}
+
+// TestAuditCallbackWithoutAssignmentIssuesNoSession covers TEN-04 and RBA-03
+// (WP-637, F-364, found by WP-536): a user of the organization without any
+// role assignment logs in through the OIDC callback with the production
+// wiring (user.PGRepository with the default provisioning role, the
+// configuration default viewer; permission.NewPGRepository). The user held
+// engineer in client 1 and an administrator removed it. The login assigns
+// no role (the default role belongs to the first login only) and issues no
+// session: 403 problem+json with the fixed text, no access token, no
+// refresh cookie, and the refusal is audited as user.login_refused without
+// an entry of a role grant.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAuditCallbackWithoutAssignmentIssuesNoSession(t *testing.T) {
+	f := scopetest.Seed(t, "61")
+	bg := context.Background()
+	idp := newScopeIdP(t, f.OrgA)
+	f.AppUser(t, f.OrgA, "cb-admin")
+	member := f.AppUser(t, f.OrgA, "cb-revoked")
+	// The user held engineer in client 1; an administrator removed it.
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id)
+		SELECT $1, $2, id, $3 FROM role WHERE organization_id = $1 AND name = 'engineer'`, f.OrgA, member, f.Client1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Admin.Exec(bg, `DELETE FROM role_assignment WHERE user_id = $1`, member); err != nil {
+		t.Fatal(err)
+	}
+	issuer := newIssuer(t)
+	handler := identity.NewHandler(idp.provider(), issuer).
+		WithProvisioning(user.NewPGRepository(f.App), "viewer").
+		WithAccessResolver(permission.NewPGRepository(f.App))
+
+	rec := idp.login(handler, "scopetest-61-cb-revoked", "cb-revoked@scopetest.invalid")
+	if rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), `"token"`) || hasRefreshCookie(rec) {
+		body := rec.Body.String()
+		if i := strings.Index(body, `"token":"`); i >= 0 {
+			wire := tokenPayload(t, strings.SplitN(body[i+9:], `"`, 2)[0])
+			t.Errorf("token cls=%s sts=%s scopes=%s", wire["cls"], wire["sts"], wire["scopes"])
+		}
+		t.Errorf("callback of a user without role assignment: %d, want no session", rec.Code)
+	}
+	if rec.Code != http.StatusForbidden || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/problem+json") ||
+		!strings.Contains(rec.Body.String(), identity.ErrNoRoleAssignment.Error()) {
+		t.Errorf("callback of a user without role assignment: %d %s %s, want 403 problem+json with %q",
+			rec.Code, rec.Header().Get("Content-Type"), rec.Body.String(), identity.ErrNoRoleAssignment.Error())
+	}
+	var granted int
+	if err := f.Admin.QueryRow(bg, `SELECT COUNT(*) FROM role_assignment WHERE user_id = $1`, member).Scan(&granted); err != nil {
+		t.Fatal(err)
+	}
+	if granted != 0 {
+		t.Errorf("the login assigned %d role(s) to a user without assignment, want 0", granted)
+	}
+	var refused, roleEntries int
+	if err := f.Admin.QueryRow(bg, `SELECT
+			count(*) FILTER (WHERE action = $2 AND resource_type = 'user' AND actor_id::text = $1 AND changes->>'reason' = 'no_role_assignment'),
+			count(*) FILTER (WHERE action LIKE 'role_assignment.%')
+		FROM audit_log WHERE organization_id = $3 AND (resource_id::text = $1 OR actor_id::text = $1 OR changes::text LIKE '%' || $1 || '%')`,
+		member, user.ActionLoginRefused, f.OrgA).Scan(&refused, &roleEntries); err != nil {
+		t.Fatalf("read audit entries: %v", err)
+	}
+	if refused != 1 || roleEntries != 0 {
+		t.Errorf("audit: %d user.login_refused entries, %d role assignment entries; want 1 and 0", refused, roleEntries)
+	}
+}
+
+// TestCallbackDefaultRoleOnlyAtFirstLogin covers TEN-04 and RBA-03 (WP-637,
+// F-364) with the production wiring: the first login of a new user (an
+// account an administrator created by e-mail, linked by the login) assigns
+// the default role viewer org-wide and gets a session with its rights; a
+// later login keeps exactly that assignment, and after an administrator
+// revoked it the next login gets no session and no role. A user holding
+// only a custom role gets a session with the custom role's rights and no
+// default role.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestCallbackDefaultRoleOnlyAtFirstLogin(t *testing.T) {
+	f := scopetest.Seed(t, "62")
+	bg := context.Background()
+	idp := newScopeIdP(t, f.OrgA)
+	f.AppUser(t, f.OrgA, "cb-admin")
+	issuer := newIssuer(t)
+	handler := identity.NewHandler(idp.provider(), issuer).
+		WithProvisioning(user.NewPGRepository(f.App), "viewer").
+		WithAccessResolver(permission.NewPGRepository(f.App))
+	assignments := func(userID string) string {
+		t.Helper()
+		var got string
+		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(string_agg(ro.name || ':' || COALESCE(ra.scope_client_id::text, 'org'), ',' ORDER BY ro.name), '')
+			FROM role_assignment ra JOIN role ro ON ro.id = ra.role_id WHERE ra.user_id = $1`, userID).Scan(&got); err != nil {
+			t.Fatalf("read role assignments: %v", err)
+		}
+		return got
+	}
+	session := func(rec *httptest.ResponseRecorder) *identity.SessionClaims {
+		t.Helper()
+		var out struct {
+			Token string `json:"token"`
+		}
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || out.Token == "" || !hasRefreshCookie(rec) {
+			t.Fatalf("callback: %d %s, want 200 with token and refresh cookie", rec.Code, rec.Body.String())
+		}
+		claims, err := issuer.Validate(out.Token)
+		if err != nil {
+			t.Fatalf("validate session token: %v", err)
+		}
+		return claims
+	}
+
+	t.Run("first login of a new user", func(t *testing.T) {
+		var fresh string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO app_user (organization_id, email, display_name)
+			VALUES ($1, 'cb-fresh@scopetest.invalid', 'Fresh') RETURNING id::text`, f.OrgA).Scan(&fresh); err != nil {
+			t.Fatalf("seed account: %v", err)
+		}
+		claims := session(idp.login(handler, "scopetest-62-cb-fresh", "cb-fresh@scopetest.invalid"))
+		if claims.Subject != fresh {
+			t.Errorf("session subject %s, want %s", claims.Subject, fresh)
+		}
+		if got := assignments(fresh); got != "viewer:org" {
+			t.Errorf("role assignments after the first login %q, want viewer:org", got)
+		}
+		if claims.Scope == nil || !claims.Scope.Clients.All || !slices.Contains(claims.Permissions, identity.PermCIRead) || slices.Contains(claims.Permissions, identity.PermCIWrite) {
+			t.Errorf("first login session: scope %+v permissions %v, want the org-wide viewer rights", claims.Scope, claims.Permissions)
+		}
+		// A later login keeps exactly the assignment.
+		session(idp.login(handler, "scopetest-62-cb-fresh", "cb-fresh@scopetest.invalid"))
+		if got := assignments(fresh); got != "viewer:org" {
+			t.Errorf("role assignments after the second login %q, want viewer:org", got)
+		}
+		// An administrator revokes it: the next login gets no session and
+		// no role back.
+		if _, err := f.Admin.Exec(bg, `DELETE FROM role_assignment WHERE user_id = $1`, fresh); err != nil {
+			t.Fatal(err)
+		}
+		rec := idp.login(handler, "scopetest-62-cb-fresh", "cb-fresh@scopetest.invalid")
+		if rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), `"token"`) || hasRefreshCookie(rec) {
+			t.Errorf("login after the revocation: %d %s, want 403 without session", rec.Code, rec.Body.String())
+		}
+		if got := assignments(fresh); got != "" {
+			t.Errorf("login after the revocation assigned %q, want nothing", got)
+		}
+	})
+
+	t.Run("only a custom role", func(t *testing.T) {
+		member := f.AppUser(t, f.OrgA, "cb-custom")
+		var customRole string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO custom_role (organization_id, name, permissions)
+			VALUES ($1, 'cb-62-custom', '["ticket:read"]') RETURNING id::text`, f.OrgA).Scan(&customRole); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			// custom_role has no ON DELETE CASCADE to organization.
+			_, _ = f.Admin.Exec(context.Background(), `DELETE FROM user_custom_role WHERE custom_role_id = $1`, customRole)
+			_, _ = f.Admin.Exec(context.Background(), `DELETE FROM custom_role WHERE id = $1`, customRole)
+		})
+		if _, err := f.Admin.Exec(bg, `INSERT INTO user_custom_role (user_id, custom_role_id) VALUES ($1, $2)`, member, customRole); err != nil {
+			t.Fatal(err)
+		}
+		claims := session(idp.login(handler, "scopetest-62-cb-custom", "cb-custom@scopetest.invalid"))
+		if !slices.Contains(claims.Permissions, identity.PermTicketRead) || slices.Contains(claims.Permissions, identity.PermCIRead) {
+			t.Errorf("custom role session permissions %v, want ticket:read without the viewer rights", claims.Permissions)
+		}
+		if got := assignments(member); got != "" {
+			t.Errorf("login of a custom role user assigned %q, want no default role", got)
 		}
 	})
 }

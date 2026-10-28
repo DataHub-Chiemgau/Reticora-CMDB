@@ -54,6 +54,11 @@ type Config struct {
 	S3AccessKey string
 	S3SecretKey string
 	S3UseSSL    bool
+	// S3PublicURL is the base URL under which browsers reach the object
+	// store for signed downloads (exports, documents), e.g.
+	// https://cmdb.example.com/objects behind the frontend nginx. Empty
+	// keeps the internal endpoint in the URLs (F-376).
+	S3PublicURL string
 	// BlobDir backs export storage in --no-db development mode.
 	BlobDir string
 
@@ -64,7 +69,8 @@ type Config struct {
 	OIDCRedirectURL  string
 	// OIDCCACertFile optionally points at a PEM bundle that is trusted in
 	// addition to the system roots when the server talks to the OIDC issuer
-	// (discovery, JWKS and token exchange). Deployments that terminate TLS
+	// (discovery, JWKS and token exchange, and the Keycloak admin client of
+	// signup, invitations and MFA binding). Deployments that terminate TLS
 	// with a private or not-yet-issued certificate would otherwise fail the
 	// token exchange with an x509 verification error.
 	OIDCCACertFile string
@@ -142,6 +148,12 @@ type Config struct {
 	SignupVerifyURL           string
 	KeycloakAdminClientID     string
 	KeycloakAdminClientSecret string
+	// KeycloakInternalURL optionally is the base URL (http(s)://host[:port])
+	// under which the server reaches Keycloak directly, e.g.
+	// http://keycloak:8080 in the compose network. The Keycloak admin client
+	// then sends its requests there instead of to the public issuer host,
+	// whose reverse proxy does not expose /admin/ (WP-646).
+	KeycloakInternalURL string
 	// SignupCaptchaKey signs the ALTCHA challenges (at least 32 bytes, the
 	// same on every instance); SignupBlockedDomains/SignupAllowedDomains
 	// extend the disposable-domain lists (E-33).
@@ -243,6 +255,7 @@ func Load() *Config {
 		S3AccessKey: l.str("RETICORA_S3_ACCESS_KEY", "reticora"),
 		S3SecretKey: l.str("RETICORA_S3_SECRET_KEY", "reticora_dev"),
 		S3UseSSL:    l.str("RETICORA_S3_USE_SSL", "false") == "true",
+		S3PublicURL: l.str("RETICORA_S3_PUBLIC_URL", ""),
 		// BlobDir backs export storage in --no-db development mode; in
 		// database mode the S3 settings above are used instead.
 		BlobDir: l.str("RETICORA_BLOB_DIR", ""),
@@ -266,6 +279,7 @@ func Load() *Config {
 		SignupVerifyURL:           l.str("RETICORA_SIGNUP_VERIFY_URL", ""),
 		KeycloakAdminClientID:     l.str("RETICORA_KEYCLOAK_ADMIN_CLIENT_ID", ""),
 		KeycloakAdminClientSecret: l.str("RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
+		KeycloakInternalURL:       l.str("RETICORA_KEYCLOAK_INTERNAL_URL", ""),
 		SignupCaptchaKey:          l.str("RETICORA_SIGNUP_CAPTCHA_KEY", ""),
 		SignupBlockedDomains:      l.str("RETICORA_SIGNUP_BLOCKED_DOMAINS", ""),
 		SignupAllowedDomains:      l.str("RETICORA_SIGNUP_ALLOWED_DOMAINS", ""),

@@ -77,6 +77,8 @@ export const UNUSED: Record<string, Unused[]> = {
   'keyboard.spec.ts': CI_DETAIL_PANELS,
   // The provenance panel is the subject of conflict.spec.ts; it has a handler.
   'conflict.spec.ts': CI_DETAIL_PANELS.filter((u) => !String(u.path).includes('provenance')),
+  // The provenance panel on a phone is the subject of one test there (WP-646).
+  'mobile-actions.spec.ts': CI_DETAIL_PANELS.filter((u) => !String(u.path).includes('provenance')),
 };
 
 /** A known contract deviation of a page: the violation message it starts with, and why. */

@@ -755,6 +755,10 @@ func setupObjectStorage(cfg *config.Config) (*blob.S3Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Signed download URLs name the public origin, not minio:9000 (F-376).
+	if err := store.SetPublicURL(cfg.S3PublicURL); err != nil {
+		return nil, err
+	}
 	for _, bucket := range []string{export.ExportBucket, "reticora-documents", cfg.S3Bucket} {
 		if bucket == "" {
 			continue
@@ -855,12 +859,28 @@ func signupService(cfg *config.Config, pool *pgxpool.Pool, smtpSender *notify.SM
 
 // keycloakAccounts is the Keycloak admin client that creates the accounts
 // of signups, operator-created organizations and accepted invitations; nil
-// without RETICORA_KEYCLOAK_ADMIN_CLIENT_ID.
+// without RETICORA_KEYCLOAK_ADMIN_CLIENT_ID. Its calls go to the issuer URL
+// like those of the OIDC provider and therefore trust the same PEM bundle
+// (RETICORA_OIDC_CA_CERT_FILE): with a private CA, or with a certificate the
+// server image does not know, the admin token request otherwise fails with
+// an x509 error while the sign-in works (WP-646). With
+// RETICORA_KEYCLOAK_INTERNAL_URL the calls go to Keycloak directly, since the
+// public reverse proxy does not expose the admin REST API.
 func keycloakAccounts(cfg *config.Config) *signup.KeycloakAccounts {
 	if cfg.KeycloakAdminClientID == "" {
 		return nil
 	}
-	kc, err := signup.NewKeycloakAccounts(cfg.OIDCIssuerURL, cfg.KeycloakAdminClientID, cfg.KeycloakAdminClientSecret, nil)
+	client, err := identity.NewHTTPClientWithCA(cfg.OIDCCACertFile)
+	if err != nil {
+		slog.Error("Keycloak admin client disabled", "path", cfg.OIDCCACertFile, "error", err)
+		return nil
+	}
+	client, err = signup.RouteThroughInternalURL(client, cfg.OIDCIssuerURL, cfg.KeycloakInternalURL)
+	if err != nil {
+		slog.Error("Keycloak admin client disabled", "error", err)
+		return nil
+	}
+	kc, err := signup.NewKeycloakAccounts(cfg.OIDCIssuerURL, cfg.KeycloakAdminClientID, cfg.KeycloakAdminClientSecret, client)
 	if err != nil {
 		slog.Error("Keycloak admin client disabled", "error", err)
 		return nil

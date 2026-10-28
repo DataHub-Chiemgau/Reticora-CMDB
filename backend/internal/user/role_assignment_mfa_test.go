@@ -282,14 +282,14 @@ func TestRoleAssignmentOrgAdminRequiresMFA(t *testing.T) {
 	}
 	// The first login fails while the binding fails, and links nothing.
 	m.mfa.fail = []string{"*"}
-	if _, err := m.repo.EnsureUser(ctx, m.OrgA, "kc-later", "later-7a@mfa.example", "Later"); !errors.Is(err, identity.ErrMFAUnavailable) {
+	if _, _, err := m.repo.EnsureUser(ctx, m.OrgA, "kc-later", "later-7a@mfa.example", "Later", ""); !errors.Is(err, identity.ErrMFAUnavailable) {
 		t.Fatalf("first login with failing binding: %v, want identity.ErrMFAUnavailable", err)
 	}
 	if s := m.subject(later); s != "" {
 		t.Errorf("failed first login linked the subject %q", s)
 	}
 	m.mfa.fail = nil
-	id, err := m.repo.EnsureUser(ctx, m.OrgA, "kc-later", "later-7a@mfa.example", "Later")
+	id, _, err := m.repo.EnsureUser(ctx, m.OrgA, "kc-later", "later-7a@mfa.example", "Later", "")
 	if err != nil || id != later {
 		t.Fatalf("first login: %q, %v; want %s", id, err, later)
 	}
@@ -297,7 +297,7 @@ func TestRoleAssignmentOrgAdminRequiresMFA(t *testing.T) {
 		t.Errorf("first login of the org_admin: bound %v, want [kc-later]", got)
 	}
 	// Later logins of the returning user bind nothing more.
-	if _, err = m.repo.EnsureUser(ctx, m.OrgA, "kc-later", "later-7a@mfa.example", "Later"); err != nil {
+	if _, _, err = m.repo.EnsureUser(ctx, m.OrgA, "kc-later", "later-7a@mfa.example", "Later", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := m.mfa.bound(); len(got) != 1 {
@@ -307,7 +307,7 @@ func TestRoleAssignmentOrgAdminRequiresMFA(t *testing.T) {
 	// A linked account without org_admin binds nothing at its first login.
 	m.mfa.reset()
 	m.userWithoutSubject(m.OrgA, "plain-7a@mfa.example")
-	if _, err = m.repo.EnsureUser(ctx, m.OrgA, "kc-plain", "plain-7a@mfa.example", "Plain"); err != nil {
+	if _, _, err = m.repo.EnsureUser(ctx, m.OrgA, "kc-plain", "plain-7a@mfa.example", "Plain", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := m.mfa.bound(); len(got) != 0 {
@@ -383,7 +383,7 @@ func TestFirstLoginWithOrgAdminInvitationRequiresMFA(t *testing.T) {
 
 	inv := m.invite("admin-7b@mfa.example", orgAdmin)
 	m.mfa.fail = []string{"kc-admin-7b"}
-	if _, err := m.repo.EnsureUser(ctx, m.OrgA, "kc-admin-7b", "admin-7b@mfa.example", "Admin"); !errors.Is(err, identity.ErrMFAUnavailable) {
+	if _, _, err := m.repo.EnsureUser(ctx, m.OrgA, "kc-admin-7b", "admin-7b@mfa.example", "Admin", ""); !errors.Is(err, identity.ErrMFAUnavailable) {
 		t.Fatalf("first login with failing binding: %v, want identity.ErrMFAUnavailable", err)
 	}
 	if !m.invitationOpen(inv) || m.userOfEmail(m.OrgA, "admin-7b@mfa.example") {
@@ -392,7 +392,7 @@ func TestFirstLoginWithOrgAdminInvitationRequiresMFA(t *testing.T) {
 	}
 
 	m.mfa.reset()
-	id, err := m.repo.EnsureUser(ctx, m.OrgA, "kc-admin-7b", "admin-7b@mfa.example", "Admin")
+	id, _, err := m.repo.EnsureUser(ctx, m.OrgA, "kc-admin-7b", "admin-7b@mfa.example", "Admin", "")
 	if err != nil {
 		t.Fatalf("first login: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestFirstLoginWithOrgAdminInvitationRequiresMFA(t *testing.T) {
 
 	m.mfa.reset()
 	m.invite("viewer-7b@mfa.example", viewer)
-	if _, err = m.repo.EnsureUser(ctx, m.OrgA, "kc-viewer-7b", "viewer-7b@mfa.example", "Viewer"); err != nil {
+	if _, _, err = m.repo.EnsureUser(ctx, m.OrgA, "kc-viewer-7b", "viewer-7b@mfa.example", "Viewer", ""); err != nil {
 		t.Fatalf("viewer first login: %v", err)
 	}
 	if got := m.mfa.bound(); len(got) != 0 {
@@ -562,60 +562,100 @@ func TestReconcileMFABindsExistingOrgAdmins(t *testing.T) {
 	}
 }
 
-// TestEnsureRoleReportsHeldDefaultRole (WP-367): EnsureRole reports whether
-// the user holds the default role afterwards, so the login binds a default
-// role org_admin to MFA: assigned now or at an earlier login is held, a
-// user with another role keeps it and does not hold org_admin, an unknown
-// role is never held. Assigning org_admin binds the subject exactly once
-// before the commit; a failing binding assigns nothing (a session of the
-// user that refreshes meanwhile gets no org_admin) and wraps
-// ErrMFAUnavailable. Another default role binds nothing.
-func TestEnsureRoleReportsHeldDefaultRole(t *testing.T) {
+// TestFirstLoginAssignsDefaultRoleOnce (WP-367, WP-637, F-364): only the
+// first login, which links an account an administrator created (or creates
+// the first user of the organization), assigns the default role, in the
+// login transaction, and reports it; the login binds a default role
+// org_admin to MFA. Assigning org_admin binds the subject exactly once
+// before the commit; a failing binding assigns nothing and links nothing
+// (a session of the user never holds org_admin without the binding) and
+// wraps ErrMFAUnavailable. A later login of the subject assigns nothing,
+// also when an administrator revoked every role meanwhile: the revocation
+// stays (RBA-03). A user with another role, or only a custom role, keeps
+// exactly that; an unknown default role is never assigned; another default
+// role binds nothing.
+func TestFirstLoginAssignsDefaultRoleOnce(t *testing.T) {
 	m := newMFAFixture(t, "7f")
 	ctx := context.Background()
 	orgAdmin, viewer := m.role(m.OrgA, "org_admin"), m.role(m.OrgA, "viewer")
+	roles := func(userID string) int {
+		t.Helper()
+		var n int
+		if err := m.Admin.QueryRow(ctx, `SELECT count(*) FROM role_assignment WHERE user_id = $1`, userID).Scan(&n); err != nil {
+			t.Fatalf("count assignments: %v", err)
+		}
+		return n
+	}
 
-	fresh := m.AppUser(t, m.OrgA, "fresh")
+	fresh := m.userWithoutSubject(m.OrgA, "fresh-7f@mfa.example")
 	m.mfa.fail = []string{"*"}
-	if held, err := m.repo.EnsureRole(ctx, m.OrgA, fresh, "org_admin"); !errors.Is(err, identity.ErrMFAUnavailable) || held {
-		t.Fatalf("failing binding: held %v, err %v; want ErrMFAUnavailable", held, err)
+	if _, assigned, err := m.repo.EnsureUser(ctx, m.OrgA, "kc-fresh-7f", "fresh-7f@mfa.example", "Fresh", "org_admin"); !errors.Is(err, identity.ErrMFAUnavailable) || assigned {
+		t.Fatalf("failing binding: assigned %v, err %v; want ErrMFAUnavailable", assigned, err)
 	}
 	if n := m.assignments(fresh, orgAdmin); n != 0 {
 		t.Fatalf("failing binding assigned org_admin (%d)", n)
 	}
+	if s := m.subject(fresh); s != "" {
+		t.Errorf("failing binding linked the subject %q", s)
+	}
 	m.mfa.reset()
-	for _, login := range []string{"first", "second"} {
-		held, err := m.repo.EnsureRole(ctx, m.OrgA, fresh, "org_admin")
-		if err != nil || !held {
-			t.Fatalf("%s login: held %v, err %v; want the default role held", login, held, err)
-		}
+	id, assigned, err := m.repo.EnsureUser(ctx, m.OrgA, "kc-fresh-7f", "fresh-7f@mfa.example", "Fresh", "org_admin")
+	if err != nil || id != fresh || !assigned {
+		t.Fatalf("first login: %s, assigned %v, err %v; want %s with the default role assigned", id, assigned, err, fresh)
 	}
 	if n := m.assignments(fresh, orgAdmin); n != 1 {
 		t.Errorf("default role assigned %d times, want once", n)
 	}
-	if got := m.mfa.bound(); !slices.Equal(got, []string{"scopetest-7f-fresh"}) {
-		t.Errorf("assigning org_admin bound %v, want exactly [scopetest-7f-fresh]", got)
+	if got := m.mfa.bound(); !slices.Equal(got, []string{"kc-fresh-7f"}) {
+		t.Errorf("assigning org_admin bound %v, want exactly [kc-fresh-7f]", got)
+	}
+	// A later login assigns nothing and binds nothing more.
+	if _, assigned, err = m.repo.EnsureUser(ctx, m.OrgA, "kc-fresh-7f", "fresh-7f@mfa.example", "Fresh", "org_admin"); err != nil || assigned {
+		t.Errorf("second login: assigned %v, err %v; want nothing assigned", assigned, err)
+	}
+	if n := m.assignments(fresh, orgAdmin); n != 1 {
+		t.Errorf("after the second login: %d org_admin assignments, want 1", n)
+	}
+	if got := m.mfa.bound(); len(got) != 1 {
+		t.Errorf("second login: bound %v, want no new binding", got)
 	}
 
+	// An administrator revokes every role of a user: the next login assigns
+	// no default role back (F-364).
 	m.mfa.reset()
-	other := m.AppUser(t, m.OrgA, "viewer")
+	revoked := m.AppUser(t, m.OrgA, "revoked")
+	m.grant(m.OrgA, revoked, viewer)
+	if _, err = m.Admin.Exec(ctx, `DELETE FROM role_assignment WHERE user_id = $1`, revoked); err != nil {
+		t.Fatal(err)
+	}
+	if id, assigned, err = m.repo.EnsureUser(ctx, m.OrgA, "scopetest-7f-revoked", "", "", "viewer"); err != nil || id != revoked || assigned {
+		t.Errorf("login after revocation: %s, assigned %v, err %v; want %s without assignment", id, assigned, err, revoked)
+	}
+	if n := roles(revoked); n != 0 {
+		t.Errorf("login after revocation assigned %d role(s), want 0", n)
+	}
+
+	other := m.userWithoutSubject(m.OrgA, "viewer-7f@mfa.example")
 	m.grant(m.OrgA, other, viewer)
-	if held, err := m.repo.EnsureRole(ctx, m.OrgA, other, "org_admin"); err != nil || held {
-		t.Errorf("user with another role: held %v, err %v; want not held", held, err)
+	if _, assigned, err = m.repo.EnsureUser(ctx, m.OrgA, "kc-viewer-7f", "viewer-7f@mfa.example", "Viewer", "org_admin"); err != nil || assigned {
+		t.Errorf("user with another role: assigned %v, err %v; want not assigned", assigned, err)
 	}
 	if n := m.assignments(other, orgAdmin); n != 0 {
 		t.Errorf("user with another role got org_admin (%d)", n)
 	}
-	plain := m.AppUser(t, m.OrgA, "plain")
-	if held, err := m.repo.EnsureRole(ctx, m.OrgA, plain, "viewer"); err != nil || !held {
-		t.Errorf("default role viewer: held %v, err %v; want held", held, err)
+	plain := m.userWithoutSubject(m.OrgA, "plain-7f@mfa.example")
+	if _, assigned, err = m.repo.EnsureUser(ctx, m.OrgA, "kc-plain-7f", "plain-7f@mfa.example", "Plain", "viewer"); err != nil || !assigned {
+		t.Errorf("default role viewer: assigned %v, err %v; want assigned", assigned, err)
+	}
+	if n := m.assignments(plain, viewer); n != 1 {
+		t.Errorf("default role viewer assigned %d times, want once", n)
 	}
 	// A user an administrator gave only a custom role keeps exactly that
-	// role: the login adds no default role back (the custom role carries no
-	// asset:read, the default role viewer would).
-	custom := m.AppUser(t, m.OrgA, "custom")
+	// role: the first login adds no default role (the custom role carries
+	// no asset:read, the default role viewer would).
+	custom := m.userWithoutSubject(m.OrgA, "custom-7f@mfa.example")
 	var customRole string
-	if err := m.Admin.QueryRow(ctx, `INSERT INTO custom_role (organization_id, name, permissions)
+	if err = m.Admin.QueryRow(ctx, `INSERT INTO custom_role (organization_id, name, permissions)
 		VALUES ($1, 'ensure-role-custom', '["ci:read"]') RETURNING id::text`, m.OrgA).Scan(&customRole); err != nil {
 		t.Fatal(err)
 	}
@@ -624,18 +664,21 @@ func TestEnsureRoleReportsHeldDefaultRole(t *testing.T) {
 		_, _ = m.Admin.Exec(context.Background(), `DELETE FROM user_custom_role WHERE custom_role_id = $1`, customRole)
 		_, _ = m.Admin.Exec(context.Background(), `DELETE FROM custom_role WHERE id = $1`, customRole)
 	})
-	if _, err := m.Admin.Exec(ctx, `INSERT INTO user_custom_role (user_id, custom_role_id) VALUES ($1, $2)`, custom, customRole); err != nil {
+	if _, err = m.Admin.Exec(ctx, `INSERT INTO user_custom_role (user_id, custom_role_id) VALUES ($1, $2)`, custom, customRole); err != nil {
 		t.Fatal(err)
 	}
-	if held, err := m.repo.EnsureRole(ctx, m.OrgA, custom, "viewer"); err != nil || held {
-		t.Errorf("user with only a custom role: held %v, err %v; want the default role not held", held, err)
+	if _, assigned, err = m.repo.EnsureUser(ctx, m.OrgA, "kc-custom-7f", "custom-7f@mfa.example", "Custom", "viewer"); err != nil || assigned {
+		t.Errorf("user with only a custom role: assigned %v, err %v; want the default role not assigned", assigned, err)
 	}
-	if n := m.assignments(custom, viewer); n != 0 {
-		t.Errorf("user with only a custom role got the default role viewer (%d)", n)
+	if n := roles(custom); n != 0 {
+		t.Errorf("user with only a custom role got %d role assignment(s), want 0", n)
 	}
-	none := m.AppUser(t, m.OrgA, "none")
-	if held, err := m.repo.EnsureRole(ctx, m.OrgA, none, "no-such-role"); err != nil || held {
-		t.Errorf("unknown default role: held %v, err %v; want not held", held, err)
+	none := m.userWithoutSubject(m.OrgA, "none-7f@mfa.example")
+	if _, assigned, err = m.repo.EnsureUser(ctx, m.OrgA, "kc-none-7f", "none-7f@mfa.example", "None", "no-such-role"); err != nil || assigned {
+		t.Errorf("unknown default role: assigned %v, err %v; want not assigned", assigned, err)
+	}
+	if n := roles(none); n != 0 {
+		t.Errorf("unknown default role: %d assignment(s), want 0", n)
 	}
 	if got := m.mfa.bound(); len(got) != 0 {
 		t.Errorf("other roles bound %v", got)
