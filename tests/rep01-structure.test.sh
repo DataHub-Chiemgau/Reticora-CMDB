@@ -33,13 +33,22 @@
 #            WP-456);
 #   GLO-11   the traceability check is a blocking CI job and blocks missing
 #            [B]/[Q] IDs (E-30);
+#   INS-01   install-smoke.yml runs on every push to main without a path
+#            filter, on tags v* and by hand; gate-final.yml runs the --final
+#            mode and TestTraceabilityFile on tags v* and by hand (WP-595);
 #   and every workflow under .github/workflows is valid YAML.
 #
 # The normal mode checks consistency: open findings may stand in review and
-# pentest as long as the checklist does not claim PASS against them. --final
-# (gate decision, WP-595/WP-600) additionally demands no open Critical in
-# review and pentest, no open High/Critical in the pentest, every GATE row
-# PASS and no exception of kind erklaerung or luecke.
+# pentest as long as the checklist does not claim PASS against them. The
+# result is "offen", "bestanden" or, after E-76 option 2, "bedingt
+# bestanden" under conditions (1) to (5) (WP-595, rules conditional_*).
+# --final (gate decision, WP-595/WP-600) additionally demands no open
+# Critical in review and pentest, no open High/Critical in the pentest, the
+# documented release-candidate runs (no placeholder, no "steht aus") and the
+# install smoke evidence on the last product change (install_evidence_current,
+# moved from tests/audit/g1-gate-evidence.test.sh, F-122); for "offen" and
+# "bestanden" also every GATE row PASS and no exception of kind erklaerung or
+# luecke, for "bedingt bestanden" conditions (1) to (5) instead.
 #
 # The fixture self-tests (rep01_*, tests/fixtures/rep01/) prove that the gate
 # checks catch every format variant of an open finding and each consistency
@@ -150,6 +159,42 @@ check "GLO-11 the CI job traceability is not allowed to fail" \
 check "GLO-11 missing [B]/[Q] IDs block the traceability check" \
     "grep -q 'MissingForGate(entries, catalog)' backend/internal/traceability/traceability_test.go"
 
+# --- INS-01, gate decision (WP-595) -----------------------------------------
+# workflow_on WORKFLOW prints its triggers as "<event> <key> <value>" lines
+# (value "-" for a trigger without settings; PyYAML reads the key on as True).
+workflow_on() {
+    python3 - "$1" <<'PY'
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+on = d.get("on", d.get(True)) or {}
+if isinstance(on, (str, list)):
+    on = {e: None for e in ([on] if isinstance(on, str) else on)}
+for event, cfg in on.items():
+    if not cfg:
+        print(event, "-", "-")
+        continue
+    for key, val in cfg.items():
+        for v in (val if isinstance(val, list) else [val]):
+            print(event, key, v)
+PY
+}
+# shellcheck disable=SC2034 # read by check through eval
+smoke_on="$(workflow_on .github/workflows/install-smoke.yml 2>/dev/null)"
+check "INS-01 install-smoke.yml runs on every push to main without a path filter" \
+    "grep -qx 'push branches main' <<< \"\$smoke_on\" && ! grep -qE '^push (paths|paths-ignore|branches-ignore) ' <<< \"\$smoke_on\""
+check "INS-01 install-smoke.yml runs on tags v* and by workflow_dispatch" \
+    "grep -qx 'push tags v\\*' <<< \"\$smoke_on\" && grep -qE '^workflow_dispatch ' <<< \"\$smoke_on\""
+check "INS-01 install-smoke.yml keeps the path filter of pull requests" \
+    "grep -qx 'pull_request paths backend/\\*\\*' <<< \"\$smoke_on\" && grep -qx 'pull_request paths install\\*.sh' <<< \"\$smoke_on\""
+# shellcheck disable=SC2034 # read by check through eval
+final_on="$(workflow_on .github/workflows/gate-final.yml 2>/dev/null)"
+check "GATE-03 gate-final.yml runs on tags v* and by workflow_dispatch only" \
+    "[ \"\$(cut -d' ' -f1 <<< \"\$final_on\" | sort -u | tr '\n' ' ')\" = 'push workflow_dispatch ' ] && grep -qx 'push tags v\\*' <<< \"\$final_on\" && ! grep -qE '^push (branches|paths) ' <<< \"\$final_on\""
+check "GATE-03 gate-final.yml runs tests/rep01-structure.test.sh --final on the full history" \
+    "grep -qE '^ +run: \\./tests/rep01-structure\\.test\\.sh --final' .github/workflows/gate-final.yml && grep -qE '^ +fetch-depth: 0\$' .github/workflows/gate-final.yml"
+check "GATE-03 gate-final.yml runs TestTraceabilityFile" \
+    "grep -q \"run 'TestTraceabilityFile'\" .github/workflows/gate-final.yml"
+
 # --- Workflows --------------------------------------------------------------
 for wf in .github/workflows/*.yml; do
     check "workflow $(basename "$wf") is valid YAML with triggers" \
@@ -164,8 +209,26 @@ done
 # Conventions read here (documented in docs/acceptance/g1-gate.md):
 # - Annex "## Anhang …" of the checklist: | ID | Tag | Status | Nachweis | WP |;
 #   the status of an ID is PASS when the cell starts with PASS.
-# - Result: the first line "**Ergebnis: offen**" or "**Ergebnis: bestanden**"
-#   of section "## Ergebnis"; a section status is its line "**Status:** …".
+# - Result: the first line "**Ergebnis: offen**", "**Ergebnis: bestanden**"
+#   or "**Ergebnis: bedingt bestanden**" of section "## Ergebnis"; a section
+#   status is its line "**Status:** …".
+# - "bedingt bestanden" (E-76 option 2, WP-595) needs:
+#   (1) a section "Freigabe nach E-76" that quotes the declaration of the
+#       Auftraggeber ("Erklärung des Auftraggebers"), names every ID of kind
+#       erklaerung and has a table | Lieferung | … | Frist | with a deadline
+#       for every delivery (A-nn) named in column lieferung of those IDs;
+#   (2) every ID that is not PASS is an exception of kind erklaerung or np,
+#       no exception is of kind luecke;
+#   (3) every exception of kind erklaerung names "Frist …" in column
+#       lieferung;
+#   (4) every GATE row (annex, section status, GATE-03 condition) is PASS or
+#       itself an exception of kind erklaerung; of GATE-03 only the condition
+#       "Pentest …" may be open, its other conditions are PASS;
+#   (5) no open Critical in review and pentest, no open High/Critical in the
+#       pentest.
+# - Release-candidate runs (--final): the checklist, review, installation
+#   evidence and docs/README.md carry no placeholder "RC-Lauf ausstehend" /
+#   "RC run pending" and no note "steht aus".
 # - A finding row is any table row of review or pentest with a severity cell
 #   (Critical/Kritisch, High/Hoch, Medium/Mittel, Low/Niedrig, Info; bold and
 #   case ignored); the next cell is its status. "behoben", "geschlossen" and
@@ -248,8 +311,8 @@ gate_check() {
     local RV="$root/docs/security/review-g1.md" PT="$root/docs/security/pentest-g1.md"
     local SUB="$root/docs/legal/subprozessoren.md" SUMS="$root/docs/acceptance/artefakte/SHA256SUMS"
     local V2="$root/docs/spec/v2/aut-05-aut-06-net-04.md"
-    local annex findings g03 body xs res crit pthc pentest ten09
-    local id s n fid sev open row cid xid xart f p d line field tf rack notpass rows
+    local annex findings g03 body xs xd res crit pthc pentest ten09 rel
+    local id s n fid sev open row cid xid xart xdl f p d line field tf rack notpass rows
     # STATUS: annex status per ID (first row), XART: kind of exception,
     # SEC: "**Status:**" of the GATE sections, REASON: words of the reason in
     # the first row of an ID in the GATE-02 tables, RECON: words of the reason
@@ -301,8 +364,11 @@ gate_check() {
     done < <( [ -f "$G" ] && awk '
         /^## / { sec = ""; if ($0 ~ /^## GATE-0[0-9]/) sec = substr($0, 4, 7); next }
         sec != "" && /^\*\*Status:\*\*/ { s = $0; sub(/^\*\*Status:\*\* */, "", s); print sec "\t" s; sec = "" }' "$G")
-    res="$(section "$G" '^## Ergebnis' | grep -m1 -E '^\*\*Ergebnis: ' | sed -E 's/^\*\*Ergebnis: *([[:alpha:]]+).*/\1/')"
+    res="$(section "$G" '^## Ergebnis' | grep -m1 -E '^\*\*Ergebnis: ' |
+        sed -E 's/^\*\*Ergebnis: *(bedingt +bestanden|[[:alpha:]]+).*/\1/I; s/ +/ /g')"
     res="${res,,}"
+    # Exceptions with their delivery: ID <TAB> kind <TAB> lieferung.
+    xd="$( { [ -f "$X" ] && tail -n +2 "$X"; } | awk -F';' 'NF >= 5 { print $1 "\t" $2 "\t" $5 }')"
     findings="$(finding_rows R "$RV"; finding_rows P "$PT")"
     crit="$(awk -F'\t' '$3 == "critical" && $4 == 1 { print $2 }' <<< "$findings" | sort -u | tr '\n' ' ')"
     pthc="$(awk -F'\t' '$1 == "P" && ($3 == "critical" || $3 == "high") && $4 == 1 { print $2 }' <<< "$findings" | sort -u | tr '\n' ' ')"
@@ -329,8 +395,8 @@ gate_check() {
 
     # The result is stated.
     case "$res" in
-        offen|bestanden) ;;
-        *) v result "section Ergebnis has no line '**Ergebnis: offen**' or '**Ergebnis: bestanden**'" ;;
+        offen|bestanden|"bedingt bestanden") ;;
+        *) v result "section Ergebnis has no line '**Ergebnis: offen**', '**Ergebnis: bestanden**' or '**Ergebnis: bedingt bestanden**'" ;;
     esac
 
     # GATE-01: an open Critical keeps GATE-01 and the result from PASS.
@@ -410,6 +476,77 @@ gate_check() {
     if [ "$res" = bestanden ]; then
         rows="$(gate_rows_not_pass)"
         [ -n "$rows" ] && v result_rows "the result is 'bestanden', not PASS: $rows"
+    fi
+
+    # E-76 option 2: 'bedingt bestanden' only under conditions (1) to (5).
+    if [ "$res" = "bedingt bestanden" ]; then
+        # (1) Release of the Auftraggeber with a deadline per open delivery.
+        rel="$(section "$G" '^#+ Freigabe nach E-76')"
+        if [ -z "$rel" ]; then
+            v conditional_release "the checklist has no section 'Freigabe nach E-76'"
+        else
+            grep -q 'Erklärung des Auftraggebers' <<< "$rel" ||
+                v conditional_release "section 'Freigabe nach E-76' does not quote the declaration of the Auftraggeber"
+            while IFS=$'\t' read -r xid xart xdl; do
+                [ "$xart" = erklaerung ] || continue
+                grep -qE "(^|[^A-Z0-9-])${xid}([^0-9]|\$)" <<< "$rel" ||
+                    v conditional_release "section 'Freigabe nach E-76' does not name $xid (erklaerung)"
+                while IFS= read -r d; do
+                    [ -n "$d" ] || continue
+                    awk -F'|' -v d="$d" '
+                        function trim(s) { gsub(/\*/, "", s); gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+                        /^\|/ {
+                            if (!fc) { for (i = 2; i < NF; i++) if (trim($i) == "Frist") fc = i; next }
+                            if ($0 ~ /^\|[-|: ]+$/) next
+                            if (trim($2) == d) { f = trim($fc); if (f != "" && f != "–" && f != "-") found = 1 }
+                        }
+                        END { exit !found }' <<< "$rel" ||
+                        v conditional_release "section 'Freigabe nach E-76' has no deadline (Frist) for delivery $d of $xid"
+                done < <(grep -oE '\bA-[0-9]{2}\b' <<< "$xdl" | sort -u)
+            done <<< "$xd"
+        fi
+        # (2) Every ID that is not PASS is an exception of kind erklaerung or
+        # np; no exception is of kind luecke.
+        for id in "${!STATUS[@]}"; do
+            s="${STATUS[$id]}"
+            [[ "$s" == PASS* ]] && continue
+            case "${XART[$id]-}" in
+                erklaerung|np) ;;
+                *) v conditional_ids "$id is '$s' without an exception of kind erklaerung or np" ;;
+            esac
+        done
+        while IFS=$'\t' read -r xid xart; do
+            [ "$xart" = luecke ] && v conditional_ids "$xid is an exception of kind luecke"
+        done <<< "$xs"
+        # (3) Every exception of kind erklaerung names its deadline.
+        while IFS=$'\t' read -r xid xart xdl; do
+            [ "$xart" = erklaerung ] || continue
+            grep -qE 'Frist[[:space:]]+[^[:space:]]' <<< "$xdl" ||
+                v conditional_deadlines "$xid (erklaerung) names no deadline (Frist) in column lieferung: $xdl"
+        done <<< "$xd"
+        # (4) Every GATE row is PASS or itself an exception of kind
+        # erklaerung; of GATE-03 only the pentest condition may be open.
+        for id in "${!STATUS[@]}"; do
+            [[ "$id" == GATE-* ]] || continue
+            s="${STATUS[$id]}"
+            [[ "$s" == PASS* ]] && continue
+            [[ "$s" == N/P* ]] && np_exception "$id" && continue
+            [ "${XART[$id]-}" = erklaerung ] || v conditional_gate_rows "$id is '$s' and no exception of kind erklaerung"
+        done
+        for id in GATE-01 GATE-02 GATE-03 GATE-05; do
+            s="${SEC[$id]-}"
+            [ -z "$s" ] || [ "$(word "$s")" = pass ] || [ "${XART[$id]-}" = erklaerung ] ||
+                v conditional_gate_rows "section $id is '$s' and $id no exception of kind erklaerung"
+        done
+        while IFS=$'\t' read -r id s; do
+            [ -n "$id" ] || continue
+            [ "$(word "$s")" = pass ] && continue
+            [[ "$id" == *Pentest* ]] && [ "${XART[GATE-03]-}" = erklaerung ] && continue
+            v conditional_gate_rows "GATE-03 condition '$id' is '$s'"
+        done <<< "$g03"
+        # (5) No open Critical, no open High/Critical in the pentest.
+        [ -n "$crit" ] && v conditional_findings "open Critical findings in review or pentest: $crit"
+        [ -n "$pthc" ] && v conditional_findings "open High/Critical pentest findings: $pthc"
     fi
 
     # Every ID that is not PASS has a reason in section GATE-02.
@@ -497,20 +634,31 @@ gate_check() {
     [ "$mode" = final ] || return 0
     [ -n "$crit" ] && v final_critical "open Critical findings in review or pentest: $crit"
     [ -n "$pthc" ] && v final_pentest "open High/Critical pentest findings: $pthc"
-    rows="$(gate_rows_not_pass)"
-    [ -n "$rows" ] && v final_gate_rows "not PASS: $rows"
-    rows="$(awk -F'\t' '$2 == "erklaerung" || $2 == "luecke" { printf "%s (%s) ", $1, $2 }' <<< "$xs")"
-    [ -n "$rows" ] && v final_exceptions "exceptions of kind erklaerung or luecke: $rows"
+    # 'bedingt bestanden' replaces these two by conditions (1) to (5) above.
+    if [ "$res" != "bedingt bestanden" ]; then
+        rows="$(gate_rows_not_pass)"
+        [ -n "$rows" ] && v final_gate_rows "not PASS: $rows"
+        rows="$(awk -F'\t' '$2 == "erklaerung" || $2 == "luecke" { printf "%s (%s) ", $1, $2 }' <<< "$xs")"
+        [ -n "$rows" ] && v final_exceptions "exceptions of kind erklaerung or luecke: $rows"
+    fi
+    # The runs on the release candidate are documented (WP-595).
+    for f in "$G" "$RV" "$root/docs/acceptance/g1-installation.md" "$root/docs/README.md"; do
+        [ -f "$f" ] || continue
+        while IFS= read -r line; do
+            [ -n "$line" ] && v final_rc_runs "${f#"$root/"}:${line%%:*}: ${line#*:}"
+        done < <(grep -nE 'RC-Lauf ausstehend|RC run pending|steht aus' "$f" | cut -c1-160)
+    done
     return 0
 }
 
 GATE_RULES=(result gate01_critical sr11_severity gate03_pentest gate03_rows finding_ids exceptions declaration
-    gate02_all result_rows reasons agree rack_site_scope delivery_pentest delivery_subprocessors delivery_abn01
+    gate02_all result_rows conditional_release conditional_ids conditional_deadlines conditional_gate_rows
+    conditional_findings reasons agree rack_site_scope delivery_pentest delivery_subprocessors delivery_abn01
     delivery_v2)
-FINAL_RULES=(final_critical final_pentest final_gate_rows final_exceptions)
+FINAL_RULES=(final_critical final_pentest final_gate_rows final_exceptions final_rc_runs)
 describe() {
     case "$1" in
-        result) echo "the checklist states the gate result (offen or bestanden)" ;;
+        result) echo "the checklist states the gate result (offen, bestanden or bedingt bestanden)" ;;
         gate01_critical) echo "GATE-01 an open Critical finding (review, pentest, annex) keeps GATE-01 and the result from PASS" ;;
         sr11_severity) echo "GATE-01 SR-11 (CI-13 [B] unusable in the production wiring) is recorded and rated at least High (F-119)" ;;
         gate03_pentest) echo "GATE-03 an open High/Critical pentest finding keeps GATE-03 from PASS" ;;
@@ -520,6 +668,11 @@ describe() {
         declaration) echo "GATE-02 no ID is PASS by declaration, no annex status names one (E-76)" ;;
         gate02_all) echo "GATE-02 is PASS only when every [B]/[Q] ID is" ;;
         result_rows) echo "the result is 'bestanden' only when every GATE row is PASS" ;;
+        conditional_release) echo "E-76 'bedingt bestanden' (1): section 'Freigabe nach E-76' quotes the declaration, names every ID of kind erklaerung and gives a deadline per open delivery" ;;
+        conditional_ids) echo "E-76 'bedingt bestanden' (2): every ID that is not PASS is an exception of kind erklaerung or np, none of kind luecke" ;;
+        conditional_deadlines) echo "E-76 'bedingt bestanden' (3): every exception of kind erklaerung names its deadline (Frist)" ;;
+        conditional_gate_rows) echo "E-76 'bedingt bestanden' (4): every GATE row is PASS or itself an exception of kind erklaerung whose other conditions are PASS" ;;
+        conditional_findings) echo "E-76 'bedingt bestanden' (5): no open Critical, no open High/Critical in the pentest" ;;
         reasons) echo "GATE-02 every ID that is not PASS has a reason" ;;
         agree) echo "the section statuses agree with the annex" ;;
         rack_site_scope) echo "GATE-03 TEN-09 is PASS only once the rack site-scope bypass is a recorded finding (F-040)" ;;
@@ -529,8 +682,9 @@ describe() {
         delivery_v2) echo "GATE-02 PASS of AUT-05/AUT-06/NET-04 needs the v2 texts and their comparison (A-02)" ;;
         final_critical) echo "--final no open Critical finding in review and pentest" ;;
         final_pentest) echo "--final no open High/Critical pentest finding" ;;
-        final_gate_rows) echo "--final every GATE row is PASS" ;;
-        final_exceptions) echo "--final no exception of kind erklaerung or luecke" ;;
+        final_gate_rows) echo "--final every GATE row is PASS (result offen or bestanden)" ;;
+        final_exceptions) echo "--final no exception of kind erklaerung or luecke (result offen or bestanden)" ;;
+        final_rc_runs) echo "--final the runs on the release candidate are documented (no placeholder, no 'steht aus')" ;;
     esac
 }
 
@@ -564,6 +718,50 @@ for n in $(seq 1 15); do
 done
 check "GATE-01 the security review records the P0 findings F-001 to F-015 of the Phase-1 audit as Critical SR findings${p0_missing:+ (missing: ${p0_missing% })}" \
     "[ -z '${p0_missing}' ]"
+
+# --- Installation evidence on the release candidate (WP-595, F-122) ---------
+# install_evidence ROOT prints nothing when the install smoke evidence in
+# section "## Release-Kandidat" of ROOT/docs/acceptance/g1-installation.md
+# names a commit at or after the last commit that changed the product (code,
+# deploy, installer; test-only and audit paths excluded), otherwise the
+# reason. Moved from tests/audit/g1-gate-evidence.test.sh (WP-211 P2).
+product_paths=(backend frontend deploy install.sh install-cloud.sh install-vm.sh install-preflight.sh
+    ':(exclude)frontend/e2e' ':(exclude)frontend/e2e-real' ':(exclude)frontend/vitest.auditdefect.config.ts'
+    ':(glob,exclude)**/*_test.go' ':(glob,exclude)**/*.test.ts' ':(glob,exclude)**/*.test.tsx'
+    ':(glob,exclude)**/*.auditdefect.ts' ':(glob,exclude)**/*.auditdefect.tsx')
+install_evidence() {
+    local root="$1" last_change last named c
+    if ! git -C "$root" rev-parse --git-dir >/dev/null 2>&1; then
+        echo "not a git checkout"
+        return
+    fi
+    if [ "$(git -C "$root" rev-parse --is-shallow-repository)" = true ]; then
+        echo "shallow clone: the check needs the full history (actions/checkout with fetch-depth: 0)"
+        return
+    fi
+    last_change="$(git -C "$root" log -1 --format='%h %s' -- "${product_paths[@]}")"
+    last="${last_change%% *}"
+    if [ -z "$last" ]; then
+        echo "no commit changed the product"
+        return
+    fi
+    # shellcheck disable=SC2016 # literal backticks of markdown code spans
+    named="$(sed -n '/^## Release-Kandidat/,/^## Ergebnisse/p' "$root/docs/acceptance/g1-installation.md" 2>/dev/null |
+        grep -oE '`[0-9a-f]{7,40}`' | tr -d '`' | sort -u)"
+    for c in $named; do
+        git -C "$root" cat-file -e "$c^{commit}" 2>/dev/null || continue
+        git -C "$root" merge-base --is-ancestor "$last" "$c" && return
+    done
+    echo "last product change: ${last_change}; commits named in g1-installation.md: $(tr '\n' ' ' <<< "$named")"
+}
+if [ "$MODE" = final ]; then
+    ie="$(install_evidence .)"
+    if [ -z "$ie" ]; then
+        ok "install_evidence_current: the install smoke evidence covers the last product change"
+    else
+        fail "install_evidence_current: the install smoke evidence covers the last product change: $ie"
+    fi
+fi
 
 # --- Fixture self-tests (WP-451) --------------------------------------------
 # Each case copies a fixture of tests/fixtures/rep01, changes it and runs the
@@ -693,6 +891,82 @@ selftest delivery_v2_section final delivery_v2 - drop docs/spec/v2/aut-05-aut-06
 selftest delivery_v2_test final delivery_v2 - subst "$C" 's#^\| AUT-06 \| (.*)`tests/v2-abgleich\.test\.sh`#| AUT-06 | \1`tests/fehlt.test.sh`#'
 # --final: exceptions of kind erklaerung or luecke and open GATE rows fail.
 selftest final_gate_rows open pass final_gate_rows
+# --final: a placeholder or a note 'steht aus' of the release-candidate runs
+# fails (WP-595).
+selftest rc_runs_placeholder final pass final_rc_runs append "$C" '| install-smoke | RC-Lauf ausstehend (WP-595) |'
+selftest rc_runs_pending final pass final_rc_runs append docs/acceptance/g1-installation.md 'Der Lauf auf dem Release-Kandidaten steht aus.'
+
+# E-76 option 2 (WP-595): fixture "conditional" is the result "bedingt
+# bestanden" with the declared IDs as exceptions of kind erklaerung, each
+# with a deadline, and every other condition of "bestanden" met. One counter
+# case per condition (1) to (5).
+X=docs/acceptance/g1-ausnahmen.csv
+selftest conditional conditional pass pass
+selftest conditional_no_release conditional conditional_release conditional_release \
+    subst "$C" 's/^### Freigabe nach E-76$/### Hinweise/'
+selftest conditional_release_no_declaration conditional conditional_release conditional_release \
+    subst "$C" 's/^Erklärung des Auftraggebers vom/Mitteilung vom/'
+selftest conditional_release_no_deadline conditional conditional_release conditional_release \
+    subst "$C" 's/^\| A-07 \| (.*) \| vor GA \|$/| A-07 | \1 | – |/'
+selftest conditional_luecke conditional conditional_ids conditional_ids \
+    subst "$X" 's/^NFR-09;erklaerung;/NFR-09;luecke;/'
+conditional_id_open() {
+    subst "$C" 's/^\| CI-13 \| \[B\] \| PASS/| CI-13 | [B] | offen/'
+    subst "$C" 's/^\| NFR-09 \| offen \| (.*)/| NFR-09 | offen | \1\n| CI-13 | offen | Befund SR-11 ist wieder offen (Fixture). |/'
+}
+selftest conditional_id_without_exception conditional conditional_ids conditional_ids conditional_id_open
+selftest conditional_no_deadline conditional conditional_deadlines conditional_deadlines \
+    subst "$X" 's/^(NFR-08;erklaerung;.*), Frist vor GA$/\1/'
+conditional_gate01_open() {
+    subst "$C" 's/^\| GATE-01 \| \[Q\] \| PASS/| GATE-01 | [Q] | offen/'
+    subst "$C" '/^## GATE-01/,/^## /{s/^\*\*Status:\*\* PASS\./**Status:** offen./}'
+    subst "$C" 's/^\| NFR-09 \| offen \| (.*)/| NFR-09 | offen | \1\n| GATE-01 | offen | Befundliste des Pentests fehlt (Fixture). |/'
+}
+selftest conditional_gate01_open conditional conditional_gate_rows conditional_gate_rows conditional_gate01_open
+selftest conditional_gate03_rows conditional conditional_gate_rows conditional_gate_rows \
+    subst "$C" 's/^\| Install-Smoke auf beiden Plattformen \| PASS/| Install-Smoke auf beiden Plattformen | offen/'
+selftest conditional_critical conditional conditional_findings conditional_findings \
+    append "$R" '| SR-90 | Critical | offen | probe | WP-999 |'
+selftest conditional_pentest_high conditional conditional_findings conditional_findings \
+    append "$P" '| PT-95 | High | offen | probe | WP-999 |'
+# "bestanden" still needs every GATE row PASS and, with --final, no
+# exception of kind erklaerung.
+selftest conditional_as_bestanden conditional result_rows final_exceptions \
+    subst "$C" 's/^\*\*Ergebnis: bedingt bestanden/**Ergebnis: bestanden/'
+
+# install_evidence_current (F-122): the evidence names the last product
+# change or a later commit; a later test-only change keeps it current.
+ie_case() {
+    local name="$1" want="$2" got
+    CASES=$((CASES + 1))
+    got="$(install_evidence "$IE")"
+    if { [ "$want" = pass ] && [ -z "$got" ]; } || { [ "$want" = fail ] && [ -n "$got" ]; }; then
+        ok "rep01_install_evidence_${name}: the check reports ${want}"
+    else
+        fail "rep01_install_evidence_${name}: want ${want}, got: ${got:-pass}"
+    fi
+}
+IE="$TMP_ROOT/install-evidence"
+ie_git() { git -C "$IE" -c user.name=rep01 -c user.email=rep01@example.invalid -c commit.gpgsign=false "$@" >/dev/null; }
+ie_doc() { printf '# Fixture\n\n## Release-Kandidat\n\n| Commit | %s |\n\n## Ergebnisse je Plattform\n' "$1" > "$IE/docs/acceptance/g1-installation.md"; }
+if git init -q "$IE" 2>/dev/null; then
+    mkdir -p "$IE/backend" "$IE/docs/acceptance"
+    echo 'package a' > "$IE/backend/a.go"
+    ie_git add -A && ie_git commit -q -m product
+    rc="$(git -C "$IE" rev-parse HEAD)"
+    ie_doc '`'"$rc"'`'; ie_git add -A && ie_git commit -q -m evidence
+    ie_case rc_named pass
+    echo 'package a' > "$IE/backend/a_test.go"; ie_git add -A && ie_git commit -q -m test-only
+    ie_case test_only_change pass
+    ie_doc '`'"${rc:0:7}"'`'; ie_git add -A && ie_git commit -q -m short-hash
+    ie_case short_hash pass
+    echo '// changed' >> "$IE/backend/a.go"; ie_git add -A && ie_git commit -q -m product-change
+    ie_case product_change_after fail
+    ie_doc '<RC-Commit>'; ie_git add -A && ie_git commit -q -m placeholder
+    ie_case placeholder fail
+else
+    fail "rep01_install_evidence: git init of a temporary repository"
+fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

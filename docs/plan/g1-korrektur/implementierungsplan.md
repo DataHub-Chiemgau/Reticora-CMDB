@@ -40,9 +40,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
-| [K6-Nachträge](#k6-nachträge) | WP-648 – WP-653 | 6 | 3,0 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383): eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar. |
+| [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **301** | **400,5** | |
+| **Summe** | | **302** | **401,0** | |
 
 ```mermaid
 flowchart LR
@@ -57,7 +57,7 @@ flowchart LR
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
-    K6N["K6-Nachträge<br/>6 WPs · 3,0 PT"]
+    K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -411,6 +411,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-651](#wp-651--rack-seite-einbau-auf-beiden-seiten-vorn-und-hinten-anzeigen) | `k6n-rack-face-both` | Rack-Seite: Einbau auf beiden Seiten vorn und hinten anzeigen | K6N | 0,5 | F-381 | WP-579 |
 | [WP-652](#wp-652--unknown_relationship-kein-neues-review-für-ein-angenommenes-paar) | `k6n-unknown-rel-review-accepted` | unknown_relationship: kein neues Review für ein angenommenes Paar | K6N | 0,5 | F-382 | WP-582 |
 | [WP-653](#wp-653--benachrichtigungssprache-je-empfänger-login-claim-und-eigene-präferenz) | `k6n-user-locale` | Benachrichtigungssprache je Empfänger: Login-Claim und eigene Präferenz | K6N | 0,5 | F-383 | WP-588 |
+| [WP-654](#wp-654--vitest-aktualisierung-critical--und-high-advisories-der-entwicklungsabhängigkeiten-beheben) | `k6n-vitest-update` | Vitest-Aktualisierung: Critical- und High-Advisories der Entwicklungsabhängigkeiten beheben | K6N | 0,5 | F-297 | WP-452 |
 | [WP-595](#wp-595--nachweisläufe-auf-dem-g1-release-kandidaten-endgültige-statuspflege-und-finaler-gate-check) | `t5-rc-evidence` | Nachweisläufe auf dem G1-Release-Kandidaten, endgültige Statuspflege und finaler Gate-Check | K7 | 1,5 | F-122 | 253 WPs (siehe Block) |
 | [WP-596](#wp-596--wiederholungsprüfung-mandantentrennung-authentisierung-und-autorisierung) | `k-reaudit-1` | Wiederholungsprüfung Mandantentrennung, Authentisierung und Autorisierung | K7 | 2,0 | – | 80 WPs (siehe Block) |
 | [WP-597](#wp-597--wiederholungsprüfung-datenmodell-ingest-collector-und-last) | `k-reaudit-2` | Wiederholungsprüfung Datenmodell, Ingest, Collector und Last | K7 | 2,0 | – | 86 WPs (siehe Block) |
@@ -17661,7 +17662,7 @@ SRC-01;[B];C;frontend/e2e-real/search-palette.spec.ts;WP-594
 
 ## K6-Nachträge
 
-Funde aus der Umsetzung von K6, die kein K6-WP abdeckt (Konvention 16). Die Befunde stehen in [`audit/g1-reaudit/FINDINGS.md`](../../../audit/g1-reaudit/FINDINGS.md) mit Reproduktion, Soll, Ist, Ursache, Empfehlung und Retest; jeder ist mit einem Defekttest kodiert, der auf dem genannten Stand rot ausgeführt wurde.
+Funde aus der Umsetzung von K6, die kein K6-WP abdeckt (Konvention 16). Die Befunde stehen in [`audit/g1-reaudit/FINDINGS.md`](../../../audit/g1-reaudit/FINDINGS.md) mit Reproduktion, Soll, Ist, Ursache, Empfehlung und Retest; jeder ist mit einem Defekttest kodiert, der auf dem genannten Stand rot ausgeführt wurde. WP-654 schließt zusätzlich den Rest des Phase-1-Befunds F-297, den WP-452 nur bewertet hat (Aktualisierung der Entwicklungsabhängigkeiten).
 
 ### WP-648 – Eigenes Konto nicht deaktivierbar oder löschbar (API)
 
@@ -17977,6 +17978,54 @@ NTF-03;[B];B;backend/internal/notify/locale_integration_test.go;WP-653
 **Entscheidungsbedarf:** keiner (Regel oben; E-99 bleibt unberührt).
 
 **Nicht Bestandteil:** Präferenz-Oberfläche (es gibt keine Seite für die Benachrichtigungspräferenzen; nur Backend und API); Sprache eines Benutzers durch einen Org-Administrator; Übernahme aus dem Access-Token oder dem Userinfo-Endpunkt; Aktivieren der Internationalisierung in den mitgelieferten Keycloak-Realms; Nachführen einer späteren Sprachänderung im IdP-Konto nach einer übernommenen Sprache; SCIM-Attribut `preferredLanguage`.
+
+### WP-654 – Vitest-Aktualisierung: Critical- und High-Advisories der Entwicklungsabhängigkeiten beheben
+
+**Schlüssel:** `k6n-vitest-update` · **Meilenstein:** K6-Nachträge · **Epic (Traceability):** SR · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-452 (`t5-review-g1`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-297](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-297) | P3 | Internes Review bewertet die Critical/High-Advisories der Dev-Abhängigkeiten nicht | schließt (Rest: Aktualisierung) | WP-209 (Phase-1-Audit) |
+
+**Problem:** WP-452 hat die Advisories der Entwicklungsabhängigkeiten in `docs/security/review-g1.md` (Abschnitt „Scanergebnisse“) als Lieferkettenrisiko T19 bewertet, die Abhängigkeiten aber nicht geändert. Offen blieben zwei Critical (`tinypool` 1.1.1, GHSA-5gmw-xhrv-c9v3 und GHSA-85c8-ppgw-ccpr, transitiv über `vitest`; `vitest` 3.2.7 über `tinypool`, dazu GHSA-82fw-gwwq-j7x9 und `@vitest/mocker` GHSA-qxg6-89mg-rqv8) mit Frist 2026-10-25 und sechs High (`vite`, `js-yaml`, `@redocly/openapi-core`, `brace-expansion`, `browserslist`, `source-map-js`) mit Frist 2026-11-17 (SEC-11). Kein WP führte die Aktualisierung aus. Jedes offene Critical im Review lässt `tests/rep01-structure.test.sh --final` mit `final_critical` scheitern und verbietet das Gate-Ergebnis „bestanden“, auch „bedingt bestanden“ (E-76, Bedingung 5). npm audit nennt `vitest` 5.0.5 als Fix; diese Version verlangt Node `^22.12.0`, die CI-Jobs und die Build-Stufe des Frontend-Images laufen auf Node 20.
+
+**Akzeptanzkriterien:**
+
+- [ ] `vitest` auf die kleinste Version außerhalb aller Advisory-Bereiche aktualisiert (4.1.12: `vitest` bis 4.1.10, `@vitest/mocker` bis 4.1.11, `tinypool` bis 2.1.1 betroffen), `@vitest/*` gleichziehend; Vitest 4 hängt nicht mehr von `tinypool` ab. Die High-Pakete auf Patch-Stände innerhalb der Bereiche von `package.json`. `package.json` und `package-lock.json` von npm erzeugt; `npm ci` mit Node 20 (npm 10.8.2) und `npm install --package-lock-only` ändern die Sperrdatei nicht. Produktionsabhängigkeiten unverändert.
+- [ ] npm audit über alle Abhängigkeiten (`npm audit --json`, `npm audit --omit=optional`): 0 Critical, 0 High; die Schritte des Jobs `npm-audit` grün. Verbleibende Moderate mit Begründung im Review.
+- [ ] Vitest-Suite mit derselben Zahl von Testdateien und Tests grün; Konfiguration (`vitest.config.ts`, `vitest.auditdefect.config.ts`, `src/test/setup.ts`) und Tests ohne Änderung oder mit begründeter Migration. Schritte des CI-Jobs `frontend` (`format:check`, `lint`, `generate:api:check`, `typecheck`, `test`, `build`) mit Node 20 grün; gemockte Playwright-Suite in `chromium` und `mobile-chrome` grün; Ratchet `--kinds vitest` ohne Fehler. Die eingefrorenen ABN-01-Artefakte (`docs/acceptance/artefakte/SHA256SUMS`) bleiben unverändert.
+- [ ] `docs/security/review-g1.md`: die Zeilen `tinypool`, `vitest` und die sechs High „behoben“ mit neuer Version, Lauf vorher/nachher und Fristbewertung (Critical drei Tage nach der Frist). `tests/rep01-structure.test.sh` grün; `--final` meldet `final_critical` nicht mehr.
+
+**Dateien (6 Einträge):**
+
+- frontend/package.json
+- frontend/package-lock.json
+- docs/security/review-g1.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- Vitest-Suite (`npm test`, 74 Dateien, 592 Tests) vor und nach der Aktualisierung; Schritte der CI-Jobs `frontend` und `npm-audit` mit Node 20.
+- Gemockte Playwright-Suite (`chromium`, `mobile-chrome`) gegen den Vite-Dev-Server.
+- `tests/rep01-structure.test.sh` im Normalmodus und mit `--final` (`final_critical`); `tests/audit/run-auditdefect.sh --kinds vitest`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-654
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Moderate der Produktionsabhängigkeiten `react-router` und `react-router-dom` (Fix 6.30.6 ohne Major-Sprung; ändert das ausgelieferte Bundle, nächste Aktualisierung); `vitest` 5 und der Wechsel der CI- und Image-Stufe auf Node 22; Läufe auf dem Release-Kandidaten (WP-595).
 
 ## K7 Wiederholungsprüfung und Gate G1
 

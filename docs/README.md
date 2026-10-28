@@ -1060,6 +1060,8 @@ A version tag `v*` starts the release workflow. Tools follow E-31.
    - Every bundle passes `cosign verify-blob`; every image passes `cosign verify` and `cosign verify-attestation --type spdxjson`. The release is published only after all four images passed.
    - It then publishes the files on the GitHub release, together with `SHA256SUMS` and one updater manifest per binary (`<binary>.release.json`, holding `downloadUrl`, `signatureBundleUrl` and `checksums.sha256`).
 
+Release candidate of gate G1 (WP-595, `docs/security/review-g1.md`, section „Läufe auf dem Release-Kandidaten“): tag `v1.0.0-rc.<n>`, release run RC run pending (WP-595): pre-release with SBOMs, Sigstore bundles, image signatures, SBOM attestations and the `cosign_real` test.
+
 Mandatory signature check in the updater (`edgecore/update`):
 
 - `Checker.Apply` installs an artifact only after its signature has been verified.

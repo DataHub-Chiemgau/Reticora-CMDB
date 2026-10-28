@@ -33,8 +33,6 @@
 #                                                            -> case abn01_texts
 #   WP-105 P2 "Subprocessor list empty; NFR-09 gate PASS rests only on a
 #          declaration"                                      -> case subprocessors
-#   WP-211 P2 "G1-Installationsnachweis gilt für 1b6671f/37752e1, nicht für den
-#          aktuellen Release-Kandidaten"                     -> case install_evidence_current
 #
 # Moved into tests/rep01-structure.test.sh (WP-451): rep01_* (fixture
 # self-tests on tests/fixtures/rep01/), rack_site_scope, pass_by_declaration
@@ -44,13 +42,16 @@
 # for a fixed SR-11. The production defects behind them are fixed: SR-11 by
 # WP-418 (TestAuditT5CIReactivationThroughProductionDecoratorChain), the rack
 # site-scope bypass (SR-12) by WP-340 (TestRackChannelSiteScope).
+# Case install_evidence_current (WP-211 P2, F-122) moved there with WP-595
+# into the --final mode: the install smoke evidence in
+# docs/acceptance/g1-installation.md names the last product change or a
+# later commit (release candidate v1.0.0-rc.<n>).
 #
 # Retest:
 #   ./tests/audit/g1-gate-evidence.test.sh
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
-REPO_ROOT="$(pwd)"
 
 PASS=0
 FAIL=0
@@ -128,33 +129,6 @@ if [ -n "$subs" ] && ! grep -q 'vom Betreiber zu liefern' docs/legal/subprozesso
 else
     fail "subprocessors: docs/legal/subprozessoren.md lists subprocessors with region and AVV" \
         "$(grep -E '^\| *–' docs/legal/subprozessoren.md | head -n 2)"
-fi
-
-# ─── WP-211 P2: installation evidence belongs to the release candidate ──────
-# The install smoke run documented in g1-installation.md must be on the last
-# commit that changed the product (code, deploy, installer; test-only and
-# audit paths excluded) or on a later one.
-product_paths=(backend frontend deploy install.sh install-cloud.sh install-vm.sh install-preflight.sh
-    ':(exclude)frontend/e2e' ':(exclude)frontend/e2e-real' ':(exclude)frontend/vitest.auditdefect.config.ts'
-    ':(glob,exclude)**/*_test.go' ':(glob,exclude)**/*.test.ts' ':(glob,exclude)**/*.test.tsx'
-    ':(glob,exclude)**/*.auditdefect.ts' ':(glob,exclude)**/*.auditdefect.tsx')
-if ! git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
-    fail "install_evidence_current: git history available" "not a git checkout"
-else
-    last_change="$(git -C "$REPO_ROOT" log -1 --format='%h %s' -- "${product_paths[@]}")"
-    last="${last_change%% *}"
-    named="$(sed -n '/^## Release-Kandidat/,/^## Ergebnisse/p' docs/acceptance/g1-installation.md | grep -oE '`[0-9a-f]{7,40}`' | tr -d '`' | sort -u)"
-    covered=""
-    for c in $named; do
-        git -C "$REPO_ROOT" cat-file -e "$c^{commit}" 2>/dev/null || continue
-        if git -C "$REPO_ROOT" merge-base --is-ancestor "$last" "$c"; then covered="$c"; fi
-    done
-    if [ -n "$covered" ]; then
-        ok "install_evidence_current: the install smoke evidence (${covered}) covers the last product change ${last}"
-    else
-        fail "install_evidence_current: the install smoke evidence covers the last product change" \
-            "last product change: ${last_change}; commits named in g1-installation.md: $(echo $named)"
-    fi
 fi
 
 echo

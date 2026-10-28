@@ -295,7 +295,7 @@ F-293;P3;K8s-Overlays referenzieren Images, die das Release nie veröffentlicht;
 F-294;P3;Release-Doku nennt drei Images, der Workflow baut und signiert vier;WP-102;WP-389(mit);;WP-389;K1 Sicherheit und Mandantentrennung;geplant;
 F-295;P3;ReticoraWorkerNoSuccess kann für einen seit Prozessstart nie erfolgreichen Worker nicht feuern;WP-103;WP-446(mit);;WP-446;K3 Installation, Betrieb und Gate-Nachweise;geplant;
 F-296;P3;Collector-Szenario 'Server unerreichbar' ist nur komponentenbasiert, nicht Compose-basiert;WP-104;WP-587(schließt);WP-587;WP-587;K6 Geringfügige Mängel;geplant;
-F-297;P3;Internes Review bewertet die Critical/High-Advisories der Dev-Abhängigkeiten nicht;WP-209;WP-452(mit);;WP-452;K3 Installation, Betrieb und Gate-Nachweise;geplant;
+F-297;P3;Internes Review bewertet die Critical/High-Advisories der Dev-Abhängigkeiten nicht;WP-209;WP-452(mit) WP-654(schließt);WP-654;WP-654;K6-Nachträge;geplant;WP-452 bewertet die Advisories im Review, WP-654 aktualisiert die Entwicklungsabhängigkeiten (vitest 4.1.12)
 F-298;P3;"ABN-01 (e)-Abnahmeprotokoll stützt sich auf gemockten Lauf; Real-Stack-Nachweis nicht referenziert";WP-212;WP-456(schließt);WP-456;WP-456;K3 Installation, Betrieb und Gate-Nachweise;geplant;
 F-299;P3;Onboarding-Impact-Schritt prüft keine betroffenen CIs;WP-212;WP-456(schließt);WP-456;WP-456;K3 Installation, Betrieb und Gate-Nachweise;geplant;
 F-300;P3;rep01-GATE-01-Prüfung erkennt Formatvarianten, Anhangzeilen und offene High-Befunde nicht;WP-210 WP-213;WP-451(mit);;WP-451;K3 Installation, Betrieb und Gate-Nachweise;geplant;
