@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { screen } from '@testing-library/react';
-import type { CI, RackMount } from '../api/client';
+import type { RackLayoutMount } from '../api/client';
 import { RackPage, buildRackUnits } from './RackPage';
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
 
-const mounts: RackMount[] = [
+const mounts: RackLayoutMount[] = [
   {
     id: 'mount-1',
     organization_id: 'org-1',
@@ -13,6 +13,8 @@ const mounts: RackMount[] = [
     position_u: 10,
     height_u: 2,
     face: 'front',
+    ci_name: 'srv-01',
+    ci_type: 'server',
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
   },
@@ -24,21 +26,12 @@ const mounts: RackMount[] = [
     position_u: 1,
     height_u: 0,
     face: 'rear',
+    ci_name: '',
+    ci_type: '',
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
   },
 ];
-
-const ci = {
-  id: 'ci-1',
-  organization_id: 'org-1',
-  ci_type_id: 'server',
-  name: 'srv-01',
-  status: 'active',
-  attributes: {},
-  created_at: '2026-01-01T00:00:00Z',
-  updated_at: '2026-01-01T00:00:00Z',
-} as CI;
 
 const rack = {
   id: 'rack-1',
@@ -62,15 +55,15 @@ afterEach(() => {
 });
 
 describe('buildRackUnits', () => {
-  it('labels mounts with the CI name and falls back to the CI id', () => {
-    const units = buildRackUnits(mounts, new Map([[ci.id, ci]]));
+  it('labels mounts with the CI name of the layout and falls back to the CI id', () => {
+    const units = buildRackUnits(mounts);
 
     // default face is "front", so the rear-mounted unit is filtered out
     expect(units).toEqual([{ id: 'mount-1', position: 10, height: 2, label: 'srv-01' }]);
   });
 
   it('renders rear mounts when the rear face is selected', () => {
-    const units = buildRackUnits(mounts, new Map([[ci.id, ci]]), 'rear');
+    const units = buildRackUnits(mounts, 'rear');
 
     expect(units).toEqual([{ id: 'mount-2', position: 1, height: 1, label: 'ci-unknown' }]);
   });
@@ -81,7 +74,6 @@ describe('RackPage', () => {
     stubFetchRoutes({
       '/racks/rack-1/layout': { rack, mounts, free: { front: [], rear: [] } },
       '/racks': paginated([rack]),
-      '/cis/ci-1': ci,
     });
 
     renderWithProviders(<RackPage />, { route: '/racks' });
@@ -97,7 +89,6 @@ describe('RackPage', () => {
     stubFetchRoutes({
       '/racks/rack-1/layout': { rack, mounts, free: { front: [], rear: [] } },
       '/racks': paginated([rack]),
-      '/cis/ci-1': ci,
     });
 
     renderWithProviders(<RackPage />, { route: '/racks' });
@@ -107,6 +98,36 @@ describe('RackPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'Rack A1 · Rückseite' })).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'ci-unknown' })).toBeInTheDocument();
+  });
+
+  it('renders a rack with five mounts from the layout with at most two requests (F-252)', async () => {
+    const five: RackLayoutMount[] = [1, 5, 9, 13, 17].map((position, index) => ({
+      id: `mount-${index}`,
+      organization_id: 'org-1',
+      rack_id: 'rack-1',
+      ci_id: `ci-${index}`,
+      position_u: position,
+      height_u: 2,
+      face: 'front',
+      ci_name: `srv-${index}`,
+      ci_type: 'server',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    }));
+    const fetchMock = stubFetchRoutes({
+      '/racks/rack-1/layout': { rack, mounts: five, free: { front: [], rear: [] } },
+      '/racks': paginated([rack]),
+    });
+
+    renderWithProviders(<RackPage />, { route: '/racks' });
+
+    for (const mount of five) {
+      expect(await screen.findByRole('button', { name: mount.ci_name })).toBeInTheDocument();
+    }
+    expect(screen.getAllByText('server')).toHaveLength(5);
+    const urls = fetchMock.mock.calls.map(([input]) => String(input));
+    expect(urls.filter((url) => url.includes('/cis/'))).toEqual([]);
+    expect(urls.length).toBeLessThanOrEqual(2);
   });
 
   it('shows an empty state when no racks exist', async () => {

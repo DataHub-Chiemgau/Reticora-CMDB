@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import type { CI, RackMount } from '../api/client';
-import { useMountedCIs, useRackLayout, useRackList } from '../api/hooks';
+import type { RackLayoutMount } from '../api/client';
+import { useRackLayout, useRackList } from '../api/hooks';
 import { RackSVG } from '../components/rack/RackSVG';
 import type { RackUnit } from '../components/rack/RackSVG';
 import { Card } from '../components/ui/Card';
@@ -14,23 +14,26 @@ import { SkeletonList } from '../components/ui/Skeleton';
 export type RackFace = 'front' | 'rear';
 
 /**
- * Maps rack mounts onto the units drawn by `RackSVG`. Mounts are labelled with
- * the CI name when the CI is known and fall back to the raw identifier, so a CI
- * that is not part of the loaded page is still visible in its slot. Mounts
- * without an explicit face are treated as front-mounted (the backend default).
+ * mountLabel is the CI name the layout carries with each mount (RCK-02); the
+ * page reads no CI of its own (F-252). A mount without a name shows the CI id.
  */
-export function buildRackUnits(
-  mounts: RackMount[],
-  cisById: Map<string, CI>,
-  face: RackFace = 'front',
-): RackUnit[] {
+function mountLabel(mount: RackLayoutMount): string {
+  return mount.ci_name || mount.ci_id;
+}
+
+/**
+ * Maps rack mounts onto the units drawn by `RackSVG`, labelled with the CI
+ * name of the layout. Mounts without an explicit face are treated as
+ * front-mounted (the backend default).
+ */
+export function buildRackUnits(mounts: RackLayoutMount[], face: RackFace = 'front'): RackUnit[] {
   return mounts
     .filter((mount) => (mount.face || 'front') === face)
     .map((mount) => ({
       id: mount.id,
       position: mount.position_u,
       height: Math.max(1, mount.height_u),
-      label: cisById.get(mount.ci_id)?.name ?? mount.ci_id,
+      label: mountLabel(mount),
     }));
 }
 
@@ -59,8 +62,7 @@ export function RackPage() {
     () => mounts.filter((mount) => (mount.face || 'front') === face),
     [mounts, face],
   );
-  const cisById = useMountedCIs(mounts.map((mount) => mount.ci_id));
-  const units = useMemo(() => buildRackUnits(mounts, cisById, face), [mounts, cisById, face]);
+  const units = useMemo(() => buildRackUnits(mounts, face), [mounts, face]);
 
   return (
     <div className="space-y-4">
@@ -157,13 +159,18 @@ export function RackPage() {
                     key={mount.id}
                     className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
                   >
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/cmdb/${mount.ci_id}`)}
-                      className="font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                    >
-                      {cisById.get(mount.ci_id)?.name ?? mount.ci_id}
-                    </button>
+                    <span className="flex min-w-0 flex-wrap items-baseline gap-2">
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/cmdb/${mount.ci_id}`)}
+                        className="min-w-0 break-words text-left font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                      >
+                        {mountLabel(mount)}
+                      </button>
+                      <span className="text-xs text-gray-600 dark:text-gray-300">
+                        {mount.ci_type}
+                      </span>
+                    </span>
                     <span className="text-xs text-gray-500 dark:text-gray-400">
                       {t('rack.position')} {mount.position_u} · {mount.height_u} HE · {mount.face}
                     </span>

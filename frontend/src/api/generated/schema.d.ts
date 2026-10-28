@@ -7246,7 +7246,8 @@ export interface components {
     };
     RackLayout: {
       rack: components['schemas']['Rack'];
-      mounts: components['schemas']['RackMount'][];
+      /** @description The mounts by position; an empty rack has an empty list (F-253). */
+      mounts: components['schemas']['RackLayoutMount'][];
       /** @description Free units per face (front, rear). */
       free: {
         [key: string]: number[];
@@ -10573,6 +10574,15 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+      /** @description Name of the mounted CI. Set in the layout and the mount lists of a rack, absent in the answer of a single mount (RCK-02). */
+      ci_name?: string;
+      /** @description Name of the CI type of the mounted CI; set like ci_name. */
+      ci_type?: string;
+    };
+    /** @description A mount of the rack layout with the names of the CI and its type, so the layout is shown without reading each CI (RCK-02, F-252). */
+    RackLayoutMount: components['schemas']['RackMount'] & {
+      ci_name: string;
+      ci_type: string;
     };
     CreateRackMountRequest: {
       ci_id: string;

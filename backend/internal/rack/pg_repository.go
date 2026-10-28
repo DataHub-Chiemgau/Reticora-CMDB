@@ -262,6 +262,12 @@ func (r *PGRepository) DeleteRack(ctx context.Context, orgID, id string) error {
 
 const mountCols = `id::text, organization_id::text, rack_id::text, ci_id::text, position_u, height_u, face, created_at, updated_at`
 
+// listedMountCols are the mountCols of ListMounts, qualified because of the
+// joins, followed by the names of the CI (mci) and its type (mct).
+const listedMountCols = `rack_mount.id::text, rack_mount.organization_id::text, rack_mount.rack_id::text, rack_mount.ci_id::text,
+	rack_mount.position_u, rack_mount.height_u, rack_mount.face, rack_mount.created_at, rack_mount.updated_at,
+	mci.name, COALESCE(mct.name, '')`
+
 func scanMount(s scanner) (*RackMount, error) {
 	m := &RackMount{}
 	if err := s.Scan(&m.ID, &m.OrganizationID, &m.RackID, &m.CIID, &m.PositionU, &m.HeightU, &m.Face, &m.CreatedAt, &m.UpdatedAt); err != nil {
@@ -307,17 +313,27 @@ func (r *PGRepository) ListMounts(ctx context.Context, orgID, rackID string, pag
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM rack_mount WHERE organization_id = $1 AND rack_id = $2 AND "+mountVisible, orgID, rackID).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, "SELECT "+mountCols+" FROM rack_mount WHERE organization_id = $1 AND rack_id = $2 AND "+mountVisible+" ORDER BY position_u LIMIT $3 OFFSET $4", orgID, rackID, page.Limit, page.Offset)
+		// The names of the CI and its type come with the mount (F-252); the
+		// joins run under the same policies as mountVisible, so they name
+		// only CIs the scope sees.
+		rows, err := tx.Query(ctx, "SELECT "+listedMountCols+` FROM rack_mount
+			JOIN ci mci ON mci.id = rack_mount.ci_id
+			LEFT JOIN ci_type mct ON mct.id = mci.ci_type_id
+			WHERE rack_mount.organization_id = $1 AND rack_mount.rack_id = $2 AND `+mountVisible+`
+			ORDER BY rack_mount.position_u LIMIT $3 OFFSET $4`, orgID, rackID, page.Limit, page.Offset)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			m, err := scanMount(rows)
-			if err != nil {
+			m := RackMount{}
+			if err := rows.Scan(&m.ID, &m.OrganizationID, &m.RackID, &m.CIID, &m.PositionU, &m.HeightU, &m.Face,
+				&m.CreatedAt, &m.UpdatedAt, &m.CIName, &m.CIType); err != nil {
 				return err
 			}
-			out = append(out, *m)
+			m.CreatedAt = m.CreatedAt.UTC()
+			m.UpdatedAt = m.UpdatedAt.UTC()
+			out = append(out, m)
 		}
 		return rows.Err()
 	})

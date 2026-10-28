@@ -306,7 +306,8 @@ func TestLayoutAndPutMount(t *testing.T) {
 
 // TestLayoutOfAnEmptyRackHasAnEmptyMountList: the layout of a rack without
 // mounts answers "mounts": [] as api/openapi.yaml requires (F-253). Before
-// the fix it answered "mounts": null (locations-racks L08).
+// the fix it answered "mounts": null (locations-racks L08). The mount lists
+// of the rack answer "data": [] (WP-579).
 func TestLayoutOfAnEmptyRackHasAnEmptyMountList(t *testing.T) {
 	_, mux := newMux()
 	w := do(mux, "POST", "/api/v1/racks", `{"room_id":"room-1","name":"E1","height_units":2}`, "org-1")
@@ -321,5 +322,15 @@ func TestLayoutOfAnEmptyRackHasAnEmptyMountList(t *testing.T) {
 	}
 	if got := string(raw["mounts"]); got != "[]" {
 		t.Errorf("mounts = %s, want []", got)
+	}
+	for _, path := range []string{"/api/v1/racks/" + rk.ID + "/mounts", "/api/v1/mounts?rack_id=" + rk.ID} {
+		w = do(mux, "GET", path, "", "org-1")
+		var list map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d %s", path, w.Code, w.Body.String())
+		}
+		if got := string(list["data"]); got != "[]" {
+			t.Errorf("GET %s: data = %s, want []", path, got)
+		}
 	}
 }

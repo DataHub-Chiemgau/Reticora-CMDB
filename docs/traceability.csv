@@ -1004,3 +1004,4 @@ TLC-01;[B];B;backend/internal/signup/signup_integration_test.go;WP-591
 SEC-10;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-593
 GQL-01;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-593
 EXP-01;[B], DATEV [P2];C;backend/internal/export/export_test.go;WP-593
+RCK-02;[B];C;backend/internal/rack/layout_integration_test.go;WP-579

@@ -876,17 +876,8 @@ export interface Rack {
   updated_at: string;
 }
 
-export interface RackMount {
-  id: string;
-  organization_id: string;
-  rack_id: string;
-  ci_id: string;
-  position_u: number;
-  height_u: number;
-  face: string;
-  created_at: string;
-  updated_at: string;
-}
+/** A mount of the rack layout: it always names the CI and its type (F-252). */
+export type RackLayoutMount = components['schemas']['RackLayoutMount'];
 
 export interface RackListParams {
   limit?: number;
@@ -905,22 +896,11 @@ export const rackApi = {
   layout(rackId: string): Promise<RackLayout> {
     return fetchAPI(`/racks/${rackId}/layout`);
   },
-  /** Mounts a CI at a position or moves its mount (RCK-02); 409 on a collision. */
-  putMount(
-    rackId: string,
-    ciId: string,
-    body: { position_u: number; height_u?: number; face?: string },
-  ): Promise<RackMount> {
-    return fetchAPI(`/racks/${rackId}/mounts/${ciId}`, {
-      method: 'PUT',
-      body: JSON.stringify(body),
-    });
-  },
 };
 
 export interface RackLayout {
   rack: Rack;
-  mounts: RackMount[];
+  mounts: RackLayoutMount[];
   free: Record<string, number[]>;
 }
 

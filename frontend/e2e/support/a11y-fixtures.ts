@@ -521,6 +521,8 @@ export const A11Y_HANDLERS: Handler[] = [
           position_u: 10,
           height_u: 2,
           face: 'front',
+          ci_name: M.ci,
+          ci_type: 'server',
           created_at: AT,
           updated_at: AT,
         },

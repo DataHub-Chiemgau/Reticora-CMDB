@@ -14017,7 +14017,10 @@ components:
         rack: { $ref: '#/components/schemas/Rack' }
         mounts:
           type: array
-          items: { $ref: '#/components/schemas/RackMount' }
+          description: >-
+            The mounts by position; an empty rack has an empty list
+            (F-253).
+          items: { $ref: '#/components/schemas/RackLayoutMount' }
         free:
           type: object
           description: Free units per face (front, rear).
@@ -19482,6 +19485,27 @@ components:
         updated_at:
           type: string
           format: date-time
+        ci_name:
+          type: string
+          description: >-
+            Name of the mounted CI. Set in the layout and the mount lists of
+            a rack, absent in the answer of a single mount (RCK-02).
+        ci_type:
+          type: string
+          description: >-
+            Name of the CI type of the mounted CI; set like ci_name.
+
+    RackLayoutMount:
+      description: >-
+        A mount of the rack layout with the names of the CI and its type, so
+        the layout is shown without reading each CI (RCK-02, F-252).
+      allOf:
+        - $ref: '#/components/schemas/RackMount'
+        - type: object
+          required: [ci_name, ci_type]
+          properties:
+            ci_name: { type: string }
+            ci_type: { type: string }
 
     CreateRackMountRequest:
       type: object
