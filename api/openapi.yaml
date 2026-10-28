@@ -1706,18 +1706,34 @@ paths:
         (REL-03, REL-04). Discovery never changes or removes manual edges
         (REL-05). 404 only for an edge the caller does not find (unknown,
         another organization, outside the scope, malformed id); other
-        failures are not reported as 404 (F-272).
+        failures are not reported as 404 (F-272). The suppression records
+        the acting user (created_by) and the reason; it is audited as
+        relationship.suppression_created with actor and reason, listed by
+        GET /api/v1/relationship-suppressions and lifted by DELETE
+        /api/v1/relationship-suppressions/{id} (F-273).
       parameters:
         - name: force
           in: query
           description: Required to delete a discovery edge; creates its suppression.
           schema:
             type: boolean
+        - name: reason
+          in: query
+          description: >-
+            Why the discovery edge is removed, stored with its suppression
+            (trimmed, at most 1000 characters). The UI asks for it in the
+            confirmation of "Entfernen und unterdrücken"; other edges
+            ignore it.
+          schema:
+            type: string
+            maxLength: 1000
       responses:
         '204':
           description: Relationship deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1727,10 +1743,76 @@ paths:
             The suppression of a discovery edge is refused because its type
             has no relationship type entry; without the suppression
             discovery would recreate the edge, so it is not deleted.
-            `violations` names rel_type (F-272).
+            `violations` names rel_type (F-272). A reason longer than 1000
+            characters or with a NUL character names reason; nothing is
+            deleted.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ViolationProblem' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/relationship-suppressions:
+    get:
+      operationId: listRelationshipSuppressions
+      tags: [Relationships]
+      summary: List suppressions of removed discovery edges
+      description: >-
+        The suppressions of the organization whose source and target CI the
+        caller sees (organization, client and site scope), newest first:
+        each names the CIs and type of a discovery edge removed with
+        force, who removed it, why and when (REL-03, F-273). Discovery does
+        not create these edges again until the suppression is lifted.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+        - name: ci_id
+          in: query
+          description: Only the suppressions whose source or target is this CI.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Paginated list of suppressions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelationshipSuppressionListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/relationship-suppressions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    delete:
+      operationId: liftRelationshipSuppression
+      tags: [Relationships]
+      summary: Lift a suppression
+      description: >-
+        Deletes the suppression, so the next discovery cycle that reports
+        the edge creates it again (REL-03, F-273). Needs relationship:write,
+        the permission of the forced DELETE /api/v1/relationships/{id} that
+        created it. Audited as relationship.suppression_lifted with the
+        actor and the reason and creator of the suppression. 404 for a
+        suppression the caller does not find (unknown, another
+        organization, a CI outside the scope, malformed id).
+      responses:
+        '204':
+          description: Suppression lifted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -15315,6 +15397,52 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/Relationship'
+
+    RelationshipSuppression:
+      type: object
+      description: >-
+        A discovery edge removed with force that discovery does not create
+        again (REL-03, F-273).
+      required: [id, organization_id, source_ci_id, target_ci_id, rel_type, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        source_ci_id:
+          type: string
+          format: uuid
+        target_ci_id:
+          type: string
+          format: uuid
+        rel_type:
+          type: string
+          description: Key of the relationship type; empty when the type no longer exists.
+        reason:
+          type: string
+          description: Reason given when the edge was removed; absent when none was given.
+        created_by:
+          type: string
+          format: uuid
+          description: >-
+            The user who removed the edge; absent for a principal without
+            user or after the user was deleted.
+        created_at:
+          type: string
+          format: date-time
+
+    RelationshipSuppressionListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/RelationshipSuppression'
 
     WebhookEvent:
       type: string

@@ -792,7 +792,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a relationship
-     * @description Manual and other edges are deleted as asked. A discovery edge is deleted only with force=true (409 otherwise) and is then recorded as suppression for its CIs and type, so discovery does not recreate it (REL-03, REL-04). Discovery never changes or removes manual edges (REL-05). 404 only for an edge the caller does not find (unknown, another organization, outside the scope, malformed id); other failures are not reported as 404 (F-272).
+     * @description Manual and other edges are deleted as asked. A discovery edge is deleted only with force=true (409 otherwise) and is then recorded as suppression for its CIs and type, so discovery does not recreate it (REL-03, REL-04). Discovery never changes or removes manual edges (REL-05). 404 only for an edge the caller does not find (unknown, another organization, outside the scope, malformed id); other failures are not reported as 404 (F-272). The suppression records the acting user (created_by) and the reason; it is audited as relationship.suppression_created with actor and reason, listed by GET /api/v1/relationship-suppressions and lifted by DELETE /api/v1/relationship-suppressions/{id} (F-273).
      */
     delete: operations['deleteRelationship'];
     options?: never;
@@ -802,6 +802,49 @@ export interface paths {
      * @description Updates the provenance and verification metadata of an existing relationship. The edge endpoints and rel_type are immutable; rewiring is expressed by deleting and recreating the relationship so the graph history stays truthful. attributes.provenance (actor, actor type, source and time of the edge) is recorded by the system and cannot be changed (422, REL-08, F-270).
      */
     patch: operations['updateRelationship'];
+    trace?: never;
+  };
+  '/api/v1/relationship-suppressions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List suppressions of removed discovery edges
+     * @description The suppressions of the organization whose source and target CI the caller sees (organization, client and site scope), newest first: each names the CIs and type of a discovery edge removed with force, who removed it, why and when (REL-03, F-273). Discovery does not create these edges again until the suppression is lifted.
+     */
+    get: operations['listRelationshipSuppressions'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/relationship-suppressions/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Lift a suppression
+     * @description Deletes the suppression, so the next discovery cycle that reports the edge creates it again (REL-03, F-273). Needs relationship:write, the permission of the forced DELETE /api/v1/relationships/{id} that created it. Audited as relationship.suppression_lifted with the actor and the reason and creator of the suppression. 404 for a suppression the caller does not find (unknown, another organization, a CI outside the scope, malformed id).
+     */
+    delete: operations['liftRelationshipSuppression'];
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/v1/webhooks': {
@@ -8040,6 +8083,31 @@ export interface components {
     RelationshipListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Relationship'][];
     };
+    /** @description A discovery edge removed with force that discovery does not create again (REL-03, F-273). */
+    RelationshipSuppression: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      source_ci_id: string;
+      /** Format: uuid */
+      target_ci_id: string;
+      /** @description Key of the relationship type; empty when the type no longer exists. */
+      rel_type: string;
+      /** @description Reason given when the edge was removed; absent when none was given. */
+      reason?: string;
+      /**
+       * Format: uuid
+       * @description The user who removed the edge; absent for a principal without user or after the user was deleted.
+       */
+      created_by?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    RelationshipSuppressionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['RelationshipSuppression'][];
+    };
     /** @enum {string} */
     WebhookEvent:
       | 'ci.created'
@@ -12903,6 +12971,8 @@ export interface operations {
       query?: {
         /** @description Required to delete a discovery edge; creates its suppression. */
         force?: boolean;
+        /** @description Why the discovery edge is removed, stored with its suppression (trimmed, at most 1000 characters). The UI asks for it in the confirmation of "Entfernen und unterdrücken"; other edges ignore it. */
+        reason?: string;
       };
       header?: never;
       path: {
@@ -12921,9 +12991,10 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      /** @description The suppression of a discovery edge is refused because its type has no relationship type entry; without the suppression discovery would recreate the edge, so it is not deleted. `violations` names rel_type (F-272). */
+      /** @description The suppression of a discovery edge is refused because its type has no relationship type entry; without the suppression discovery would recreate the edge, so it is not deleted. `violations` names rel_type (F-272). A reason longer than 1000 characters or with a NUL character names reason; nothing is deleted. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12972,6 +13043,73 @@ export interface operations {
           'application/problem+json': components['schemas']['ViolationProblem'];
         };
       };
+    };
+  };
+  listRelationshipSuppressions: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Only the suppressions whose source or target is this CI. */
+        ci_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of suppressions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelationshipSuppressionListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  liftRelationshipSuppression: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Suppression lifted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
     };
   };
   listWebhooks: {

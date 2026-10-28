@@ -1570,7 +1570,22 @@
     "hiddenOutside": "{{count}} hidden (outside the scope)",
     "showAll": "Show all",
     "showInScope": "Show scope only",
-    "outsideScope": "Outside the scope"
+    "outsideScope": "Outside the scope",
+    "suppressTitle": "Remove and suppress relationship",
+    "suppressConfirm": "The discovery edge {{relType}} to {{other}} is removed. Discovery does not create it again until the suppression is lifted.",
+    "suppressReason": "Reason",
+    "suppressReasonInvalid": "The reason has at most 1000 characters.",
+    "suppressions": "Suppressed relationships",
+    "showSuppressions": "Show suppressed relationships",
+    "hideSuppressions": "Hide suppressed relationships",
+    "noSuppressions": "No suppressed relationships.",
+    "suppressionsLoadError": "The suppressed relationships could not be loaded.",
+    "suppressedBy": "Suppressed by {{actor}} on {{date}}",
+    "unknownActor": "unknown",
+    "suppressionReason": "Reason: {{reason}}",
+    "noReason": "No reason given",
+    "lift": "Lift",
+    "liftHint": "Discovery creates the edge again in its next cycle."
   },
   "scope": {
     "label": "Scope",

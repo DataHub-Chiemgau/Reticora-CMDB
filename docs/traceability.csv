@@ -974,3 +974,5 @@ ENT-04;[B];B;backend/internal/operator/entitlements_test.go;WP-564
 ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-564
 CI-05;[B];C;backend/internal/ci/restore_integration_test.go;WP-567
 API-05;[B];C;backend/internal/server/t2_ci_include_integration_test.go;WP-567
+REL-03;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-584
+REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-584

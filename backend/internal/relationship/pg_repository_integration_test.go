@@ -481,7 +481,7 @@ func TestRelationshipEventsCommitWithTheEdge(t *testing.T) {
 	if err := repo.Delete(f.ClientCtx(f.Client2), f.OrgA, committed.ID); err == nil {
 		t.Error("a principal of client 2 deleted an edge of client 1")
 	}
-	if err := repo.DeleteWithPolicy(f.OrgCtx(f.OrgB), f.OrgB, committed.ID, true); err == nil {
+	if err := repo.DeleteWithPolicy(f.OrgCtx(f.OrgB), f.OrgB, committed.ID, relationship.DeleteOptions{Force: true}); err == nil {
 		t.Error("organization B deleted A's edge by policy")
 	}
 	var discovered relationship.Relationship
@@ -490,7 +490,7 @@ func TestRelationshipEventsCommitWithTheEdge(t *testing.T) {
 		f.OrgA, c1a, c1b).Scan(&discovered.ID, &discovered.SourceCIID, &discovered.TargetCIID); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.DeleteWithPolicy(ctx, f.OrgA, discovered.ID, false); !errors.Is(err, relationship.ErrForceRequired) {
+	if err := repo.DeleteWithPolicy(ctx, f.OrgA, discovered.ID, relationship.DeleteOptions{}); !errors.Is(err, relationship.ErrForceRequired) {
 		t.Errorf("discovery edge without force: %v", err)
 	}
 	// A delete in a rolled back context transaction keeps edge and silence.
@@ -510,11 +510,11 @@ func TestRelationshipEventsCommitWithTheEdge(t *testing.T) {
 	// Deletes: the discovery edge with force (and its suppression), the
 	// manual edges by policy and directly; the removal is the second event
 	// of an edge created through the repository.
-	if err := repo.DeleteWithPolicy(ctx, f.OrgA, discovered.ID, true); err != nil {
+	if err := repo.DeleteWithPolicy(ctx, f.OrgA, discovered.ID, relationship.DeleteOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
 	want = append(want, event(events.RelationshipRemoved, &discovered, 1))
-	if err := repo.DeleteWithPolicy(ctx, f.OrgA, joined.ID, false); err != nil {
+	if err := repo.DeleteWithPolicy(ctx, f.OrgA, joined.ID, relationship.DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	want = append(want, event(events.RelationshipRemoved, joined, 2))

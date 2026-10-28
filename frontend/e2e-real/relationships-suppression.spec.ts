@@ -46,15 +46,26 @@ import {
  *      cycle (positive control: the cycle did derive the topology of sim-access-01), and the
  *      suppression is still there .................................... WP-160, WP-543 (REL-03, REL-04)
  *      precondition: the seven LLDP edges of the CI after the first cycle ........ WP-645 (TOP-01)
+ *      "Entfernen und unterdrücken" deletes only after the confirmation dialog with a reason
+ *      (no DELETE before, the confirmation is disabled without a reason); the DELETE carries
+ *      the reason, relationship_suppression stores it with the acting user (created_by) and
+ *      the audit log holds relationship.suppression_created with actor and reason; GET
+ *      /relationship-suppressions?ci_id= and the CI detail ("Unterdrückte Beziehungen
+ *      anzeigen") list the suppression with reason and actor. "Aufheben" lifts it (DELETE
+ *      /relationship-suppressions/{id} → 204, relationship.suppression_lifted audited, the
+ *      row is gone), and the following discovery cycle creates the edge again (a new
+ *      discovery edge, shown in the CI detail) ............................ WP-584 (REL-03, REL-04)
  *
- * The confirmation dialog, the reason and lifting a suppression are not part of this spec
- * (WP-584). A failing test is a product finding: the assertions encode REL-03/REL-04 of
- * docs/spec/katalog-v3 and the acceptance criteria of WP-543, not the observed behaviour.
+ * A failing test is a product finding: the assertions encode REL-03/REL-04 of
+ * docs/spec/katalog-v3 and the acceptance criteria of WP-543 and WP-584, not the observed
+ * behaviour.
  */
 
 const SIMULATED_DEVICES = 30;
 const CI_NAME = 'sim-access-01';
 const REMOVED_PEER = 'sim-core-01';
+/** The reason entered in the confirmation (WP-584). */
+const REASON = 'E2E: alter LLDP-Nachbar & Umbau';
 /** The LLDP edges of sim-access-01 the simulator reports, as source → target names. */
 const LLDP_EDGES: [string, string][] = [
   [CI_NAME, 'sim-core-01'],
@@ -92,6 +103,29 @@ interface Suppression {
   source_ci_id: string;
   target_ci_id: string;
   rel_type: string;
+}
+
+/** A row of relationship_suppression with its actor and reason (WP-584). */
+interface SuppressionRow extends Suppression {
+  id: string;
+  reason: string | null;
+  created_by: string | null;
+}
+
+/** An item of GET /relationship-suppressions (WP-584). */
+interface ListedSuppression {
+  id: string;
+  source_ci_id: string;
+  target_ci_id: string;
+  rel_type: string;
+  reason?: string;
+  created_by?: string;
+  created_at: string;
+}
+
+interface AuditRow {
+  actor_id: string | null;
+  reason: string | null;
 }
 
 let t: Tenant;
@@ -203,9 +237,38 @@ function suppressions(sourceId: string, targetId: string): Suppression[] {
     WHERE s.source_ci_id = '${uuid(sourceId)}' AND s.target_ci_id = '${uuid(targetId)}'`);
 }
 
-/** relationshipRow is the line of the relationships card that links the other CI. */
+/** suppressionRows are the rows of relationship_suppression between two CIs with actor and reason. */
+function suppressionRows(sourceId: string, targetId: string): SuppressionRow[] {
+  return dbRows<SuppressionRow>(`SELECT s.id::text, s.organization_id::text, s.source_ci_id::text,
+      s.target_ci_id::text, rt.key AS rel_type, s.reason, s.created_by::text
+    FROM relationship_suppression s JOIN relationship_type rt ON rt.id = s.relationship_type_id
+    WHERE s.source_ci_id = '${uuid(sourceId)}' AND s.target_ci_id = '${uuid(targetId)}'`);
+}
+
+/** auditOf are the audit entries of an action on a suppression (database probe). */
+function auditOf(action: string, suppressionId: string): AuditRow[] {
+  return dbRows<AuditRow>(`SELECT actor_id::text, changes->>'reason' AS reason FROM audit_log
+    WHERE action = '${action}' AND resource_type = 'relationship_suppression'
+      AND resource_id = '${uuid(suppressionId)}'`);
+}
+
+/**
+ * relationshipRow is the line of the relationships list of the card that links the other CI;
+ * the list of suppressions (WP-584) is a list of its own.
+ */
 function relationshipRow(page: Page, otherId: string) {
-  return page.locator('li').filter({ has: page.getByRole('link', { name: otherId, exact: true }) });
+  return page
+    .getByRole('list', { name: 'Beziehungen', exact: true })
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('link', { name: otherId, exact: true }) });
+}
+
+/** suppressionRow is the line of the shown suppressions of the CI that links the other CI. */
+function suppressionRow(page: Page, otherId: string) {
+  return page
+    .getByRole('list', { name: 'Unterdrückte Beziehungen', exact: true })
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('link', { name: otherId, exact: true }) });
 }
 
 async function openCI(page: Page, ci: CI) {
@@ -260,7 +323,7 @@ test.describe('Relationships: remove and suppress a discovery edge (REL-03, REL-
   });
 
   test('R01 an LLDP edge removed with "Entfernen und unterdrücken" is suppressed and not recreated by the next discovery cycle', async () => {
-    test.setTimeout(8 * 60_000);
+    test.setTimeout(12 * 60_000);
     const { page } = t;
     const all = await fleet();
     const names = new Map([...all.values()].map((ci) => [ci.id, ci.name]));
@@ -287,24 +350,51 @@ test.describe('Relationships: remove and suppress a discovery edge (REL-03, REL-
     const kept = before.filter((r) => r.id !== removed!.id);
     expect(suppressions(access.id, core.id), 'no suppression before the removal').toEqual([]);
 
-    await test.step('REL-04: "Entfernen und unterdrücken" in the CI detail deletes the edge with force', async () => {
+    await test.step('REL-04: "Entfernen und unterdrücken" in the CI detail deletes the edge with force after the confirmation with a reason', async () => {
       await openCI(page, access);
       const row = relationshipRow(page, core.id);
       await expect(row, `relationship line of ${REMOVED_PEER}`).toHaveCount(1);
       await expect(row.getByText('connected_to', { exact: true })).toBeVisible();
       const button = row.getByRole('button', { name: 'Entfernen und unterdrücken', exact: true });
       await expect(button).toBeVisible();
+      // WP-584: no DELETE leaves the page before the confirmation.
+      const deletes: string[] = [];
+      const track = (request: { method(): string; url(): string }) => {
+        if (request.method() === 'DELETE') deletes.push(request.url());
+      };
+      page.on('request', track);
+      await button.click();
+      const dialog = page.getByRole('dialog');
+      await expect(dialog, 'confirmation dialog').toBeVisible();
+      await expect(dialog).toContainText(core.id);
+      const confirm = dialog.getByRole('button', { name: 'Entfernen und unterdrücken' });
+      await expect(confirm, 'confirmation without a reason').toBeDisabled();
+      // Cancelling deletes nothing.
+      await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+      await expect(dialog).toBeHidden();
+      await expect(relationshipRow(page, core.id)).toHaveCount(1);
+      expect(deletes, 'no DELETE before the confirmation').toEqual([]);
+
+      await button.click();
+      await expect(dialog).toBeVisible();
+      await dialog.getByLabel('Grund').fill(REASON);
+      await expect(confirm).toBeEnabled();
       const deleted = page.waitForResponse(
         (r) =>
           r.request().method() === 'DELETE' &&
           new URL(r.url()).pathname === `/api/v1/relationships/${removed!.id}`,
       );
-      await button.click();
+      await confirm.click();
       const response = await deleted;
+      page.off('request', track);
       expect(new URL(response.url()).searchParams.get('force'), 'DELETE with force=true').toBe(
         'true',
       );
+      expect(new URL(response.url()).searchParams.get('reason'), 'DELETE with the reason').toBe(
+        REASON,
+      );
       expect(response.status(), 'DELETE /relationships/{id}?force=true').toBe(204);
+      await expect(dialog).toBeHidden();
       // The card drops the line; the other edges stay listed.
       await expect(relationshipRow(page, core.id)).toHaveCount(0);
       for (const r of kept) {
@@ -340,6 +430,52 @@ test.describe('Relationships: remove and suppress a discovery edge (REL-03, REL-
           rel_type: 'connected_to',
         },
       ]);
+    });
+
+    let suppressionId = '';
+    await test.step('WP-584: the suppression holds the reason and the actor, is audited and listed (API, UI)', async () => {
+      const [row] = suppressionRows(access.id, core.id);
+      expect(row, 'relationship_suppression row').toBeTruthy();
+      expect({ reason: row!.reason, created_by: row!.created_by }, 'reason and actor').toEqual({
+        reason: REASON,
+        created_by: t.userId,
+      });
+      suppressionId = row!.id;
+      expect(
+        auditOf('relationship.suppression_created', suppressionId),
+        'audit relationship.suppression_created',
+      ).toEqual([{ actor_id: t.userId, reason: REASON }]);
+
+      const listed = rows(
+        await get<List<ListedSuppression>>(`/relationship-suppressions?ci_id=${access.id}`),
+      );
+      expect(
+        listed.map((s) => ({
+          id: s.id,
+          source_ci_id: s.source_ci_id,
+          target_ci_id: s.target_ci_id,
+          rel_type: s.rel_type,
+          reason: s.reason,
+          created_by: s.created_by,
+        })),
+        'GET /relationship-suppressions?ci_id=',
+      ).toEqual([
+        {
+          id: suppressionId,
+          source_ci_id: access.id,
+          target_ci_id: core.id,
+          rel_type: 'connected_to',
+          reason: REASON,
+          created_by: t.userId,
+        },
+      ]);
+
+      await page.getByRole('button', { name: 'Unterdrückte Beziehungen anzeigen' }).click();
+      const line = suppressionRow(page, core.id);
+      await expect(line, `suppression line of ${REMOVED_PEER}`).toHaveCount(1);
+      await expect(line.getByText('connected_to', { exact: true })).toBeVisible();
+      await expect(line).toContainText(`Grund: ${REASON}`);
+      await expect(line).toContainText(`Unterdrückt von ${t.userId}`);
     });
 
     await test.step('REL-03: the next discovery cycle does not create the edge again', async () => {
@@ -426,6 +562,63 @@ test.describe('Relationships: remove and suppress a discovery edge (REL-03, REL-
         await expect(relationshipRow(page, other), `line of ${names.get(other)}`).toHaveCount(1);
       }
       await expect(relationshipRow(page, core.id)).toHaveCount(0);
+    });
+
+    await test.step('WP-584: "Aufheben" lifts the suppression; the following discovery cycle creates the edge again', async () => {
+      await openCI(page, access);
+      await page.getByRole('button', { name: 'Unterdrückte Beziehungen anzeigen' }).click();
+      const line = suppressionRow(page, core.id);
+      await expect(line, `suppression line of ${REMOVED_PEER}`).toHaveCount(1);
+      const lifted = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'DELETE' &&
+          new URL(r.url()).pathname === `/api/v1/relationship-suppressions/${suppressionId}`,
+      );
+      await line.getByRole('button', { name: 'Aufheben', exact: true }).click();
+      expect((await lifted).status(), 'DELETE /relationship-suppressions/{id}').toBe(204);
+      await expect(page.getByText('Keine unterdrückten Beziehungen.')).toBeVisible();
+      expect(suppressions(access.id, core.id), 'relationship_suppression after lifting').toEqual(
+        [],
+      );
+      expect(
+        rows(await get<List<ListedSuppression>>(`/relationship-suppressions?ci_id=${access.id}`)),
+        'GET /relationship-suppressions?ci_id= after lifting',
+      ).toEqual([]);
+      expect(
+        auditOf('relationship.suppression_lifted', suppressionId),
+        'audit relationship.suppression_lifted',
+      ).toEqual([{ actor_id: t.userId, reason: REASON }]);
+
+      const cycle = await nextCycle();
+      await expect
+        .poll(
+          async () =>
+            (await lldpEdges(access.id))
+              .filter(
+                (r) =>
+                  r.source_ci_id === access.id &&
+                  r.target_ci_id === core.id &&
+                  (Date.parse(r.last_confirmed_at ?? '') || 0) >= cycle,
+              )
+              .map((r) => r.id !== removed!.id),
+          {
+            message: `edge ${CI_NAME} → ${REMOVED_PEER} created again by the cycle after lifting`,
+            timeout: 120_000,
+            intervals: [2_000],
+          },
+        )
+        .toEqual([true]);
+      await expect
+        .poll(async () => edgeKeys(await lldpEdges(access.id), names), {
+          message: `LLDP edges of ${CI_NAME} after lifting`,
+          timeout: 60_000,
+          intervals: [2_000],
+        })
+        .toEqual(expected);
+
+      // The CI detail lists the edge again after a reload.
+      await openCI(page, access);
+      await expect(relationshipRow(page, core.id), `line of ${REMOVED_PEER}`).toHaveCount(1);
     });
   });
 });

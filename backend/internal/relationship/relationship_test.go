@@ -482,7 +482,9 @@ type deleteFailing struct {
 	err error
 }
 
-func (d deleteFailing) DeleteWithPolicy(context.Context, string, string, bool) error { return d.err }
+func (d deleteFailing) DeleteWithPolicy(context.Context, string, string, DeleteOptions) error {
+	return d.err
+}
 
 // TestHandler_DeleteMapsErrors covers F-272 (REL-03, REL-04): only an
 // unknown, foreign or malformed id is 404; a refused suppression is 422 on

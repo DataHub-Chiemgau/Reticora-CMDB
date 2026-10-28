@@ -1570,7 +1570,22 @@
     "hiddenOutside": "{{count}} außerhalb des Bereichs ausgeblendet",
     "showAll": "Alle anzeigen",
     "showInScope": "Nur Bereich anzeigen",
-    "outsideScope": "Außerhalb des Bereichs"
+    "outsideScope": "Außerhalb des Bereichs",
+    "suppressTitle": "Beziehung entfernen und unterdrücken",
+    "suppressConfirm": "Die Discovery-Kante {{relType}} zu {{other}} wird entfernt. Die Discovery legt sie nicht wieder an, bis die Unterdrückung aufgehoben wird.",
+    "suppressReason": "Grund",
+    "suppressReasonInvalid": "Der Grund hat höchstens 1000 Zeichen.",
+    "suppressions": "Unterdrückte Beziehungen",
+    "showSuppressions": "Unterdrückte Beziehungen anzeigen",
+    "hideSuppressions": "Unterdrückte Beziehungen ausblenden",
+    "noSuppressions": "Keine unterdrückten Beziehungen.",
+    "suppressionsLoadError": "Die unterdrückten Beziehungen konnten nicht geladen werden.",
+    "suppressedBy": "Unterdrückt von {{actor}} am {{date}}",
+    "unknownActor": "unbekannt",
+    "suppressionReason": "Grund: {{reason}}",
+    "noReason": "Kein Grund angegeben",
+    "lift": "Aufheben",
+    "liftHint": "Die Discovery legt die Kante im nächsten Zyklus wieder an."
   },
   "scope": {
     "label": "Arbeitsbereich",

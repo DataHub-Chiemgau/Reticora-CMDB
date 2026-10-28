@@ -13,17 +13,24 @@
  * lists only the edges whose other CI lies in that scope and names how many
  * it hides; a toggle shows them all. The scope is a view filter: the server
  * decides which edges and CIs the user may see.
+ *
+ * "Entfernen und unterdrücken" of a discovery edge asks for confirmation and
+ * a reason first; the suppressions of the CI, with reason, actor and time,
+ * are listed on demand and can be lifted, so discovery creates the edge
+ * again (F-273).
  */
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueries } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { ApiError, ciApi, verificationStates } from '../../api/client';
-import type { Relationship } from '../../api/client';
+import type { Relationship, RelationshipSuppression } from '../../api/client';
 import {
   useCIRelationships,
   useCreateRelationship,
   useDeleteRelationship,
+  useLiftSuppression,
+  useRelationshipSuppressions,
   useUpdateRelationship,
 } from '../../api/hooks';
 import { useScopeStore } from '../../stores/scope';
@@ -77,6 +84,9 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
   const { t } = useTranslation();
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<Relationship | null>(null);
+  // The discovery edge whose removal awaits confirmation (F-273).
+  const [suppressing, setSuppressing] = useState<Relationship | null>(null);
+  const [showSuppressions, setShowSuppressions] = useState(false);
 
   const relationshipsQuery = useCIRelationships(ciId);
   const createRelationship = useCreateRelationship(ciId, {
@@ -84,6 +94,8 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
   });
   const updateRelationship = useUpdateRelationship(ciId);
   const deleteRelationship = useDeleteRelationship(ciId);
+  // The confirmed removal of a discovery edge; its error shows in the dialog.
+  const suppressRelationship = useDeleteRelationship(ciId);
   // One create at a time (F-314): a submit while a create is pending is
   // dropped. The ref holds before the pending state has rendered and
   // disabled the button, e.g. for two clicks in one task.
@@ -174,7 +186,7 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
       ) : relationships.length === 0 ? (
         <EmptyState title={t('ci.noRelationships')} />
       ) : (
-        <ul className="space-y-2 text-sm">
+        <ul className="space-y-2 text-sm" aria-label={t('ci.relationships')}>
           {relationships.map((relationship) => {
             const isOutgoing = relationship.source_ci_id === ciId;
             const otherId = isOutgoing ? relationship.target_ci_id : relationship.source_ci_id;
@@ -241,12 +253,15 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
                             ? t('relationshipCard.suppressHint')
                             : undefined
                         }
-                        onClick={() =>
-                          deleteRelationship.mutate({
-                            id: relationship.id,
-                            force: relationship.source === 'discovery',
-                          })
-                        }
+                        onClick={() => {
+                          if (relationship.source === 'discovery') {
+                            // A suppression lasts: confirm with a reason first.
+                            suppressRelationship.reset();
+                            setSuppressing(relationship);
+                            return;
+                          }
+                          deleteRelationship.mutate({ id: relationship.id });
+                        }}
                       >
                         {relationship.source === 'discovery'
                           ? t('relationshipCard.suppress')
@@ -260,6 +275,34 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
           })}
         </ul>
       )}
+
+      <div className="mt-4 border-t border-gray-100 pt-3 dark:border-gray-800">
+        <button
+          type="button"
+          className="text-xs text-primary hover:underline"
+          aria-expanded={showSuppressions}
+          onClick={() => setShowSuppressions((v) => !v)}
+        >
+          {showSuppressions
+            ? t('relationshipCard.hideSuppressions')
+            : t('relationshipCard.showSuppressions')}
+        </button>
+        {showSuppressions ? <SuppressionList ciId={ciId} /> : null}
+      </div>
+
+      <SuppressRelationshipModal
+        relationship={suppressing}
+        ciId={ciId}
+        onClose={() => setSuppressing(null)}
+        pending={suppressRelationship.isPending}
+        error={suppressRelationship.error as Error | null}
+        onSubmit={(id, reason) =>
+          suppressRelationship.mutate(
+            { id, force: true, reason },
+            { onSuccess: () => setSuppressing(null) },
+          )
+        }
+      />
 
       <CreateRelationshipModal
         open={showCreate}
@@ -286,6 +329,176 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
         onSubmit={(id, data, done) => updateRelationship.mutate({ id, data }, { onSuccess: done })}
       />
     </Card>
+  );
+}
+
+/**
+ * SuppressionList shows the suppressions of the CI's removed discovery
+ * edges with reason, actor and time; "Aufheben" lifts one, so discovery
+ * creates the edge again in its next cycle (F-273).
+ */
+function SuppressionList({ ciId }: { ciId: string }) {
+  const { t, i18n } = useTranslation();
+  const suppressionsQuery = useRelationshipSuppressions(ciId);
+  const liftSuppression = useLiftSuppression(ciId);
+  const suppressions: RelationshipSuppression[] = suppressionsQuery.data?.data ?? [];
+
+  if (suppressionsQuery.isLoading) {
+    return <SkeletonList rows={2} label={t('app.loading')} />;
+  }
+  if (suppressionsQuery.error) {
+    return (
+      <ErrorState
+        title={t('relationshipCard.suppressionsLoadError')}
+        retryLabel={t('common.retry')}
+        onRetry={() => void suppressionsQuery.refetch()}
+      />
+    );
+  }
+  return (
+    <div className="mt-2">
+      {liftSuppression.error ? (
+        <p role="alert" className="mb-2 text-sm text-red-600 dark:text-red-400">
+          {(liftSuppression.error as Error).message}
+        </p>
+      ) : null}
+      {suppressions.length === 0 ? (
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {t('relationshipCard.noSuppressions')}
+        </p>
+      ) : (
+        <ul className="space-y-2 text-sm" aria-label={t('relationshipCard.suppressions')}>
+          {suppressions.map((suppression) => {
+            const isOutgoing = suppression.source_ci_id === ciId;
+            const otherId = isOutgoing ? suppression.target_ci_id : suppression.source_ci_id;
+            return (
+              <li
+                key={suppression.id}
+                className="flex flex-wrap items-start justify-between gap-2 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
+              >
+                <span className="flex flex-col gap-1">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <Badge variant="neutral">{suppression.rel_type}</Badge>
+                    <span aria-hidden="true">{isOutgoing ? '→' : '←'}</span>
+                    <Link
+                      to={`/cmdb/${otherId}`}
+                      className="font-mono text-xs text-primary underline-offset-2 hover:underline"
+                    >
+                      {otherId}
+                    </Link>
+                  </span>
+                  <span className="text-xs text-gray-700 dark:text-gray-200">
+                    {suppression.reason
+                      ? t('relationshipCard.suppressionReason', { reason: suppression.reason })
+                      : t('relationshipCard.noReason')}
+                  </span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('relationshipCard.suppressedBy', {
+                      actor: suppression.created_by ?? t('relationshipCard.unknownActor'),
+                      date: new Date(suppression.created_at).toLocaleString(i18n.language),
+                    })}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="text-xs text-primary hover:underline"
+                  title={t('relationshipCard.liftHint')}
+                  disabled={liftSuppression.isPending}
+                  onClick={() => liftSuppression.mutate(suppression.id)}
+                >
+                  {t('relationshipCard.lift')}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+interface SuppressModalProps {
+  relationship: Relationship | null;
+  ciId: string;
+  onClose: () => void;
+  pending: boolean;
+  error: Error | null;
+  onSubmit: (id: string, reason: string) => void;
+}
+
+/**
+ * SuppressRelationshipModal confirms "Entfernen und unterdrücken" of a
+ * discovery edge with a mandatory reason; nothing is deleted before the
+ * confirmation (F-273).
+ */
+function SuppressRelationshipModal({
+  relationship,
+  ciId,
+  onClose,
+  pending,
+  error,
+  onSubmit,
+}: SuppressModalProps) {
+  const { t } = useTranslation();
+  const [reason, setReason] = useState('');
+  // The reason starts empty for every edge the dialog opens for.
+  const [shownId, setShownId] = useState<string | null>(null);
+  const currentId = relationship?.id ?? null;
+  if (currentId !== shownId) {
+    setShownId(currentId);
+    setReason('');
+  }
+
+  const violations = error instanceof ApiError ? error.violationsByField() : {};
+  const trimmed = reason.trim();
+  const other = relationship
+    ? relationship.source_ci_id === ciId
+      ? relationship.target_ci_id
+      : relationship.source_ci_id
+    : '';
+
+  return (
+    <Modal
+      open={!!relationship}
+      onOpenChange={(o) => !o && onClose()}
+      title={t('relationshipCard.suppressTitle')}
+      description={
+        relationship
+          ? t('relationshipCard.suppressConfirm', { relType: relationship.rel_type, other })
+          : undefined
+      }
+    >
+      <form
+        className="space-y-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!relationship || !trimmed || pending) return;
+          onSubmit(relationship.id, trimmed);
+        }}
+      >
+        <Input
+          label={t('relationshipCard.suppressReason')}
+          value={reason}
+          required
+          maxLength={1000}
+          onChange={(e) => setReason(e.target.value)}
+          error={violations.reason ? t('relationshipCard.suppressReasonInvalid') : undefined}
+        />
+        {error && Object.keys(violations).length === 0 ? (
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            {error.message}
+          </p>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('common.cancel', 'Abbrechen')}
+          </Button>
+          <Button type="submit" variant="danger" loading={pending} disabled={!trimmed}>
+            {t('relationshipCard.suppress')}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

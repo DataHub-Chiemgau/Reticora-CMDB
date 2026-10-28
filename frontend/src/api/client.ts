@@ -124,6 +124,12 @@ export interface Relationship {
   target_location_id?: string;
 }
 
+/**
+ * A discovery edge removed with force that discovery does not create again
+ * (REL-03): who removed it, why and when (F-273).
+ */
+export type RelationshipSuppression = components['schemas']['RelationshipSuppression'];
+
 /** Verification vocabulary accepted by the relationships API. */
 export const verificationStates = ['unverified', 'verified', 'disputed', 'stale'] as const;
 
@@ -668,8 +674,27 @@ export const relationshipApi = {
     });
   },
 
-  delete(id: string, force = false): Promise<void> {
-    return fetchAPI(`/relationships/${id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
+  /**
+   * A discovery edge is deleted with force and then suppressed (REL-04);
+   * reason is stored with the suppression (F-273).
+   */
+  delete(id: string, force = false, reason?: string): Promise<void> {
+    const query = new URLSearchParams();
+    if (force) query.set('force', 'true');
+    if (reason) query.set('reason', reason);
+    const search = query.toString();
+    return fetchAPI(`/relationships/${id}${search ? `?${search}` : ''}`, { method: 'DELETE' });
+  },
+};
+
+/** Suppressions of removed discovery edges: listed per CI and lifted (F-273). */
+export const relationshipSuppressionApi = {
+  list(ciId: string): Promise<PaginatedResponse<RelationshipSuppression>> {
+    return fetchAPI(`/relationship-suppressions?ci_id=${encodeURIComponent(ciId)}&limit=100`);
+  },
+
+  lift(id: string): Promise<void> {
+    return fetchAPI(`/relationship-suppressions/${id}`, { method: 'DELETE' });
   },
 };
 
